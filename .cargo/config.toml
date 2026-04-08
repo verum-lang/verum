@@ -1,0 +1,12 @@
+# Use LLD as the linker for building the Verum toolchain on Windows MSVC.
+#
+# MSVC's link.exe resolves static libraries in a single pass, which causes
+# LLVM symbols referenced by verum_llvm (lto_*, LLVMConst*) to be discarded
+# before they're needed. LLD performs two-pass resolution, matching Unix
+# linker behavior.
+#
+# Note: This is only for building the Verum compiler itself.
+# Verum AOT uses LLD programmatically (via lld C++ API) for user binaries.
+[target.x86_64-pc-windows-msvc]
+linker = "lld-link"
+rustflags = ["-C", "link-arg=/libpath:llvm/install/lib"]

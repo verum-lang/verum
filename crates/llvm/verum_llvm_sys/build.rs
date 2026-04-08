@@ -242,6 +242,14 @@ fn link_llvm_libraries(llvm_dir: &Path, llvm_config: &Path) {
         println!("cargo:rustc-link-lib=static={}", lib_name);
     }
 
+    // LTO C API library (separate from LLVM component libraries).
+    // Contains lto_codegen_*, thinlto_* functions used by verum_llvm::lto.
+    // Not included in llvm-config --libnames.
+    let lto_lib = lib_dir.join(if cfg!(windows) { "LTO.lib" } else { "libLTO.a" });
+    if lto_lib.exists() {
+        println!("cargo:rustc-link-lib=static=LTO");
+    }
+
     // Link LLD libraries if feature enabled
     #[cfg(feature = "lld")]
     {

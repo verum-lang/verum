@@ -808,13 +808,8 @@ impl PreparedLink {
               self.config.inputs.len(),
               self.config.output.display());
 
-        #[cfg(not(target_env = "msvc"))]
         if self.config.lto.is_some() {
             return self.link_with_lto();
-        }
-        #[cfg(target_env = "msvc")]
-        if self.config.lto.is_some() {
-            warn!("LTO not available on MSVC target — falling back to standard linking");
         }
 
         self.link_with_lld()
@@ -944,8 +939,7 @@ impl PreparedLink {
         }
     }
 
-    /// Link with LTO (not available on MSVC due to static library symbol resolution)
-    #[cfg(not(target_env = "msvc"))]
+    /// Link with LTO
     fn link_with_lto(self) -> LinkResult<LinkOutput> {
         use verum_llvm::lto::lto_compile;
 

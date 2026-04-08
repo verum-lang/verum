@@ -334,7 +334,6 @@ impl LlvmBackend {
 }
 
 /// Compile multiple bitcode files with LTO.
-#[cfg(not(target_env = "msvc"))]
 #[cfg(feature = "aot-llvm")]
 pub fn lto_compile(
     bitcode_paths: &[&Path],

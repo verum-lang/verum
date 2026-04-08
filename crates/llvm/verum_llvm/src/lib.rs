@@ -31,38 +31,8 @@ pub mod debug_info;
 pub mod error;
 pub mod execution_engine;
 pub mod intrinsics;
-// LTO disabled on MSVC: LLVMLTO.lib symbols are discarded by the single-pass
-// linker before cross-crate references can resolve them.
-#[cfg(all(feature = "lto", not(target_env = "msvc")))]
+#[cfg(feature = "lto")]
 pub mod lto;
-// Stub module on MSVC — provides type definitions but no LLVM LTO calls.
-#[cfg(all(feature = "lto", target_env = "msvc"))]
-pub mod lto {
-    //! LTO stub for MSVC — type definitions only, no LLVM calls.
-
-    /// LTO compilation mode.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-    pub enum LtoMode { #[default] Thin, Full }
-
-    /// LTO configuration.
-    #[derive(Debug, Clone, Default)]
-    pub struct LtoConfig {
-        pub mode: LtoMode,
-        pub cache_dir: Option<std::path::PathBuf>,
-    }
-    impl LtoConfig {
-        pub fn new(mode: LtoMode) -> Self { Self { mode, cache_dir: None } }
-        pub fn thin_with_cache(dir: impl AsRef<std::path::Path>) -> Self {
-            Self { mode: LtoMode::Thin, cache_dir: Some(dir.as_ref().to_path_buf()) }
-        }
-    }
-
-    /// ThinLTO cache configuration.
-    #[derive(Debug, Clone, Default)]
-    pub struct ThinLtoCache {
-        pub dir: Option<std::path::PathBuf>,
-    }
-}
 pub mod memory_buffer;
 pub mod memory_manager;
 #[deny(missing_docs)]
