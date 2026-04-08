@@ -1,0 +1,297 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, closures, capture
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: closure variable capture, factory pattern,
+// closures capturing loop variables, counter closures, composition
+
+// =============================================================================
+// Closure factories — make_adder, make_multiplier, make_power
+// =============================================================================
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+fn make_subtractor(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x - n }
+}
+
+fn test_adder_factory() {
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    let add0 = make_adder(0);
+    let add_neg = make_adder(-3);
+
+    assert_eq(add5(3), 8);
+    assert_eq(add5(0), 5);
+    assert_eq(add5(-5), 0);
+    assert_eq(add10(90), 100);
+    assert_eq(add10(-10), 0);
+    assert_eq(add0(42), 42);
+    assert_eq(add_neg(10), 7);
+}
+
+fn test_multiplier_factory() {
+    let times2 = make_multiplier(2);
+    let times7 = make_multiplier(7);
+    let times0 = make_multiplier(0);
+    let times_neg = make_multiplier(-1);
+
+    assert_eq(times2(5), 10);
+    assert_eq(times2(0), 0);
+    assert_eq(times7(3), 21);
+    assert_eq(times0(999), 0);
+    assert_eq(times_neg(42), -42);
+}
+
+fn test_subtractor_factory() {
+    let sub3 = make_subtractor(3);
+    let sub10 = make_subtractor(10);
+    assert_eq(sub3(10), 7);
+    assert_eq(sub3(3), 0);
+    assert_eq(sub10(15), 5);
+    assert_eq(sub10(5), -5);
+}
+
+// =============================================================================
+// Closures capturing multiple variables
+// =============================================================================
+
+fn test_capture_many_variables() {
+    let a = 1;
+    let b = 10;
+    let c = 100;
+    let d = 1000;
+    let combined = |x: Int| -> Int { x + a + b + c + d };
+    assert_eq(combined(0), 1111);
+    assert_eq(combined(1), 1112);
+    assert_eq(combined(-1111), 0);
+}
+
+fn test_capture_with_arithmetic() {
+    let base = 100;
+    let scale = 3;
+    let offset = 7;
+    let transform = |x: Int| -> Int { (x * scale) + base + offset };
+    // (0 * 3) + 100 + 7 = 107
+    assert_eq(transform(0), 107);
+    // (10 * 3) + 100 + 7 = 137
+    assert_eq(transform(10), 137);
+    // (-10 * 3) + 100 + 7 = 77
+    assert_eq(transform(-10), 77);
+}
+
+// =============================================================================
+// Closures capturing mutable variables (snapshot semantics)
+// =============================================================================
+
+fn test_capture_mutable_in_loop() {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let val = i;
+        let add_val = |x: Int| -> Int { x + val };
+        total = total + add_val(100);
+        i = i + 1;
+    }
+    // 100+0 + 100+1 + 100+2 + 100+3 + 100+4 = 500 + 10 = 510
+    assert_eq(total, 510);
+}
+
+fn test_closures_capture_current_value() {
+    let mut x = 10;
+    let c1 = |n: Int| -> Int { n + x };
+    assert_eq(c1(5), 15);
+    x = 20;
+    // After reassignment, captured value may be snapshot or live reference.
+    // In Verum interpreter, closures capture by value snapshot.
+    // The new closure captures the new x.
+    let c2 = |n: Int| -> Int { n + x };
+    assert_eq(c2(5), 25);
+}
+
+// =============================================================================
+// Closure chaining with factories
+// =============================================================================
+
+fn test_multiple_factories_combined() {
+    let add3 = make_adder(3);
+    let times2 = make_multiplier(2);
+    // Chain: times2(add3(4)) = times2(7) = 14
+    assert_eq(times2(add3(4)), 14);
+    // Chain: add3(times2(4)) = add3(8) = 11
+    assert_eq(add3(times2(4)), 11);
+}
+
+fn test_factory_results_in_loop() {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let adder = make_adder(i * 10);
+        sum = sum + adder(0);
+        i = i + 1;
+    }
+    // 10 + 20 + 30 + 40 + 50 = 150
+    assert_eq(sum, 150);
+}
+
+// =============================================================================
+// Closures returning closures
+// =============================================================================
+
+fn make_offset_scaler(offset: Int) -> fn(Int) -> fn(Int) -> Int {
+    |scale: Int| -> fn(Int) -> Int {
+        |x: Int| -> Int { x * scale + offset }
+    }
+}
+
+fn test_nested_closure_factory() {
+    let with_offset_100 = make_offset_scaler(100);
+    let scale_by_3 = with_offset_100(3);
+    // 5 * 3 + 100 = 115
+    assert_eq(scale_by_3(5), 115);
+    // 0 * 3 + 100 = 100
+    assert_eq(scale_by_3(0), 100);
+
+    let scale_by_10 = with_offset_100(10);
+    // 5 * 10 + 100 = 150
+    assert_eq(scale_by_10(5), 150);
+
+    let with_offset_0 = make_offset_scaler(0);
+    let pure_scale = with_offset_0(7);
+    assert_eq(pure_scale(3), 21);
+}
+
+// =============================================================================
+// Closure composition
+// =============================================================================
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn test_closure_composition() {
+    let add1 = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+
+    let double_then_add1 = compose(add1, double);
+    // double(3)=6, then add1(6)=7
+    assert_eq(double_then_add1(3), 7);
+
+    let add1_then_double = compose(double, add1);
+    // add1(3)=4, then double(4)=8
+    assert_eq(add1_then_double(3), 8);
+}
+
+fn test_triple_composition() {
+    let add1 = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+    let square = |x: Int| -> Int { x * x };
+
+    let composed = compose(square, compose(double, add1));
+    // add1(2)=3, double(3)=6, square(6)=36
+    assert_eq(composed(2), 36);
+}
+
+// =============================================================================
+// Counter closures with accumulation
+// =============================================================================
+
+fn test_accumulator_via_loop() {
+    let mut acc = 0;
+    let mut step = 0;
+    while step < 10 {
+        let current = step;
+        let adder = |x: Int| -> Int { x + current };
+        acc = adder(acc);
+        step = step + 1;
+    }
+    // 0+1+2+...+9 = 45
+    assert_eq(acc, 45);
+}
+
+fn test_factorial_via_closures() {
+    let mut result = 1;
+    let mut i = 1;
+    while i <= 6 {
+        let factor = i;
+        let mul = |x: Int| -> Int { x * factor };
+        result = mul(result);
+        i = i + 1;
+    }
+    assert_eq(result, 720);
+}
+
+// =============================================================================
+// Closures in conditional branches
+// =============================================================================
+
+fn choose_op(op: Int) -> fn(Int, Int) -> Int {
+    if op == 0 {
+        |a: Int, b: Int| -> Int { a + b }
+    } else if op == 1 {
+        |a: Int, b: Int| -> Int { a - b }
+    } else if op == 2 {
+        |a: Int, b: Int| -> Int { a * b }
+    } else {
+        |a: Int, b: Int| -> Int { a / b }
+    }
+}
+
+fn test_conditional_closure_selection() {
+    let add_op = choose_op(0);
+    let sub_op = choose_op(1);
+    let mul_op = choose_op(2);
+    let div_op = choose_op(3);
+
+    assert_eq(add_op(10, 3), 13);
+    assert_eq(sub_op(10, 3), 7);
+    assert_eq(mul_op(10, 3), 30);
+    assert_eq(div_op(10, 3), 3);
+}
+
+// =============================================================================
+// Closure capturing closure
+// =============================================================================
+
+fn test_closure_capturing_closure() {
+    let base_fn = |x: Int| -> Int { x * 2 };
+    let wrapper = |y: Int| -> Int { base_fn(y) + 1 };
+    // wrapper(5) = base_fn(5) + 1 = 10 + 1 = 11
+    assert_eq(wrapper(5), 11);
+    assert_eq(wrapper(0), 1);
+    assert_eq(wrapper(10), 21);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_adder_factory();
+    test_multiplier_factory();
+    test_subtractor_factory();
+    test_capture_many_variables();
+    test_capture_with_arithmetic();
+    test_capture_mutable_in_loop();
+    test_closures_capture_current_value();
+    test_multiple_factories_combined();
+    test_factory_results_in_loop();
+    test_nested_closure_factory();
+    test_closure_composition();
+    test_triple_composition();
+    test_accumulator_via_loop();
+    test_factorial_via_closures();
+    test_conditional_closure_selection();
+    test_closure_capturing_closure();
+    print("[OK] 261_interp_closures_capture");
+    0
+}

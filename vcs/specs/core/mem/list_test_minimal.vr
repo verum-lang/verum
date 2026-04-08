@@ -1,0 +1,22 @@
+// @test: typecheck-pass
+// @level: L1
+// @description: Minimal test for List.new() type inference with unsafe pointers
+
+mount core.collections.list.List;
+
+@test
+fn test_list_new_with_simple_type() {
+    // Should work: simple Int type
+    let list1: List<Int> = List.new();
+    list1.push(42);
+}
+
+@test
+fn test_list_new_with_reference() {
+    // Should work: unsafe Byte reference
+    let list2: List<&unsafe Byte> = List.new();
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

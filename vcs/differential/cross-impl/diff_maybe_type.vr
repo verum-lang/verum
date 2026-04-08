@@ -1,0 +1,70 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: differential, maybe, option, pattern
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Maybe type: Some, None, pattern matching, chaining
+
+fn find_first_above(items: List<Int>, threshold: Int) -> Maybe<Int> {
+    let mut i = 0;
+    while i < items.len() {
+        if items[i] > threshold {
+            return Some(items[i]);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn maybe_double(m: Maybe<Int>) -> Maybe<Int> {
+    match m {
+        Some(v) => Some(v * 2),
+        None => None
+    }
+}
+
+fn maybe_add(a: Maybe<Int>, b: Maybe<Int>) -> Maybe<Int> {
+    match a {
+        Some(x) => match b {
+            Some(y) => Some(x + y),
+            None => None
+        },
+        None => None
+    }
+}
+
+fn main() -> Int {
+    // Basic Some/None
+    let s = Some(42);
+    let n: Maybe<Int> = None;
+
+    assert_eq(match s { Some(v) => v, None => 0 }, 42);
+    assert_eq(match n { Some(v) => v, None => 0 }, 0);
+
+    // Find
+    let mut nums = List.new();
+    nums.push(1);
+    nums.push(5);
+    nums.push(12);
+    nums.push(3);
+    nums.push(20);
+
+    let found = find_first_above(nums, 10);
+    assert_eq(match found { Some(v) => v, None => -1 }, 12);
+
+    let not_found = find_first_above(nums, 100);
+    assert_eq(match not_found { Some(v) => v, None => -1 }, -1);
+
+    // Map-like operation
+    assert_eq(match maybe_double(Some(21)) { Some(v) => v, None => 0 }, 42);
+    assert_eq(match maybe_double(None) { Some(v) => v, None => 0 }, 0);
+
+    // Combine
+    assert_eq(match maybe_add(Some(10), Some(20)) { Some(v) => v, None => -1 }, 30);
+    assert_eq(match maybe_add(Some(10), None) { Some(v) => v, None => -1 }, -1);
+    assert_eq(match maybe_add(None, Some(20)) { Some(v) => v, None => -1 }, -1);
+
+    print("diff_maybe_type: ok");
+    0
+}

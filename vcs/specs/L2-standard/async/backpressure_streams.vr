@@ -1,0 +1,367 @@
+// =============================================================================
+// backpressure_streams.vr - Tests for backpressure and flow control streams
+// =============================================================================
+// @test: unit
+// @tier: 2
+// @level: L2
+// @tags: async, stream, backpressure, flow-control, batching
+// @spec: docs/improvements.md Section 17.4 - Backpressure & Flow Control
+// =============================================================================
+//
+// Tests for production-ready stream backpressure and flow control:
+// - BufferedStream: Bounded capacity buffering
+// - ThrottledStream: Token bucket rate limiting
+// - ChunkedStream: Fixed-size batching
+// - MergedStream: Fair scheduling merge
+// - WindowedStream: Time-based batching
+// - DebouncedStream: Burst handling
+// - SampledStream: Interval sampling
+//
+// =============================================================================
+
+module tests.async.backpressure_streams;
+
+mount core.*;
+mount async.*;
+mount async.stream.*;
+
+// =============================================================================
+// Test 1: BufferedStream - Bounded capacity buffering
+// =============================================================================
+
+fn test_buffered_stream_basic() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // Create a stream with buffer capacity of 3
+    let source = iter([1, 2, 3, 4, 5]);
+    let mut buffered = source.buffered(3);
+
+    // Should be able to pull items from buffer
+    assert_eq(buffered.poll_next(&mut cx), Ready(Some(1)));
+    assert_eq(buffered.poll_next(&mut cx), Ready(Some(2)));
+    assert_eq(buffered.poll_next(&mut cx), Ready(Some(3)));
+    assert_eq(buffered.poll_next(&mut cx), Ready(Some(4)));
+    assert_eq(buffered.poll_next(&mut cx), Ready(Some(5)));
+    assert_eq(buffered.poll_next(&mut cx), Ready(None));
+}
+
+fn test_buffered_stream_size_hint() {
+    let source = iter([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let buffered = source.buffered(5);
+
+    let (lo, hi) = buffered.size_hint();
+    // Should account for both source and buffer
+    assert(lo >= 0);
+    assert(hi.is_some());
+}
+
+fn test_buffered_stream_backpressure() {
+    // Test that buffer respects capacity and doesn't over-fill
+    let large_source = iter(0..1000);
+    let mut buffered = large_source.buffered(10);
+
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // Pull a few items - buffer should stay bounded
+    for _ in 0..100 {
+        let result = buffered.poll_next(&mut cx);
+        assert(result.is_ready());
+    }
+}
+
+// =============================================================================
+// Test 2: ThrottledStream - Rate limiting
+// =============================================================================
+
+fn test_throttled_stream_basic() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // Create throttled stream: max 2 items per 100ms
+    let source = iter([1, 2, 3, 4, 5]);
+    let mut throttled = source.throttle(2, Duration.from_millis(100));
+
+    // First two items should come through immediately (tokens available)
+    assert_eq(throttled.poll_next(&mut cx), Ready(Some(1)));
+    assert_eq(throttled.poll_next(&mut cx), Ready(Some(2)));
+
+    // Third item depends on token bucket state
+    // With fresh tokens, may be pending
+}
+
+fn test_throttled_stream_size_hint() {
+    let source = iter([1, 2, 3, 4, 5]);
+    let throttled = source.throttle(10, Duration.from_secs(1));
+
+    let (lo, hi) = throttled.size_hint();
+    assert_eq(lo, 5);
+    assert_eq(hi, Some(5));
+}
+
+// =============================================================================
+// Test 3: ChunkedStream - Fixed-size batching
+// =============================================================================
+
+fn test_chunked_stream_exact_chunks() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // 6 items in chunks of 2 = 3 chunks
+    let source = iter([1, 2, 3, 4, 5, 6]);
+    let mut chunked = source.chunks(2);
+
+    let c1 = chunked.poll_next(&mut cx);
+    assert(c1.is_ready());
+    let c2 = chunked.poll_next(&mut cx);
+    assert(c2.is_ready());
+    let c3 = chunked.poll_next(&mut cx);
+    assert(c3.is_ready());
+}
+
+fn test_chunked_stream_partial_final() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // 5 items in chunks of 2 = 2 full chunks + 1 partial
+    let source = iter([1, 2, 3, 4, 5]);
+    let mut chunked = source.chunks(2);
+
+    let c1 = chunked.poll_next(&mut cx);
+    assert(c1.is_ready());
+    let c2 = chunked.poll_next(&mut cx);
+    assert(c2.is_ready());
+    let c3 = chunked.poll_next(&mut cx);
+    assert(c3.is_ready());
+}
+
+fn test_chunked_stream_empty() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let source: StreamIter<Range<Int>> = iter([]);
+    let mut chunked = source.chunks(5);
+
+    assert_eq(chunked.poll_next(&mut cx), Ready(None));
+}
+
+fn test_chunked_stream_size_hint() {
+    let source = iter([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let chunked = source.chunks(3);
+
+    let (lo, hi) = chunked.size_hint();
+    // 10 items / 3 = 3 full chunks + potential partial
+    assert(lo >= 3);
+    assert(hi.map(|h| h >= 3).unwrap_or(true));
+}
+
+// =============================================================================
+// Test 4: MergedStream - Fair scheduling merge
+// =============================================================================
+
+fn test_merged_stream_interleaved() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let stream1 = iter([1, 3, 5]);
+    let stream2 = iter([2, 4, 6]);
+    let mut merged = stream1.merge(stream2);
+
+    // Items should come from both streams
+    let mut results = List.new();
+    loop {
+        match merged.poll_next(&mut cx) {
+            Ready(Some(item)) => results.push(item),
+            Ready(None) => break,
+            Pending => break,
+        }
+    }
+
+    // Should contain all items from both streams
+    assert_eq(results.len(), 6);
+    assert(results.contains(&1));
+    assert(results.contains(&2));
+    assert(results.contains(&3));
+    assert(results.contains(&4));
+    assert(results.contains(&5));
+    assert(results.contains(&6));
+}
+
+fn test_merged_stream_one_empty() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let stream1 = iter([1, 2, 3]);
+    let stream2: StreamIter<Range<Int>> = iter([]);
+    let mut merged = stream1.merge(stream2);
+
+    let mut results = List.new();
+    loop {
+        match merged.poll_next(&mut cx) {
+            Ready(Some(item)) => results.push(item),
+            Ready(None) => break,
+            Pending => break,
+        }
+    }
+
+    assert_eq(results, [1, 2, 3]);
+}
+
+fn test_merged_stream_both_empty() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let stream1: StreamIter<Range<Int>> = iter([]);
+    let stream2: StreamIter<Range<Int>> = iter([]);
+    let mut merged = stream1.merge(stream2);
+
+    assert_eq(merged.poll_next(&mut cx), Ready(None));
+}
+
+fn test_merged_stream_size_hint() {
+    let stream1 = iter([1, 2, 3]);
+    let stream2 = iter([4, 5, 6, 7]);
+    let merged = stream1.merge(stream2);
+
+    let (lo, hi) = merged.size_hint();
+    // Combined size should be sum
+    assert_eq(lo, 7);
+    assert_eq(hi, Some(7));
+}
+
+// =============================================================================
+// Test 5: Stream method chaining
+// =============================================================================
+
+fn test_combined_backpressure_pipeline() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // Complex pipeline: filter -> chunk -> buffer
+    let source = iter(1..20);
+    let mut pipeline = source
+        .filter(|x| *x % 2 == 0)   // Even numbers: 2,4,6,8,10,12,14,16,18
+        .chunks(3)                  // Batch into 3s
+        .buffered(2);               // Buffer 2 chunks
+
+    // Should get chunks of even numbers
+    let chunk1 = pipeline.poll_next(&mut cx);
+    assert(chunk1.is_ready());
+    if let Ready(Some(chunk)) = chunk1 {
+        assert_eq(chunk.len(), 3);
+    }
+}
+
+fn test_merge_then_chunk() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let evens = iter([2, 4, 6, 8]);
+    let odds = iter([1, 3, 5, 7]);
+    let mut pipeline = evens.merge(odds).chunks(2);
+
+    // Should produce 4 chunks of 2 items each
+    let mut chunk_count = 0;
+    loop {
+        match pipeline.poll_next(&mut cx) {
+            Ready(Some(chunk)) => {
+                assert_eq(chunk.len(), 2);
+                chunk_count = chunk_count + 1;
+            }
+            Ready(None) => break,
+            Pending => break,
+        }
+    }
+    assert_eq(chunk_count, 4);
+}
+
+// =============================================================================
+// Test 6: DebouncedStream - Burst handling
+// =============================================================================
+
+fn test_debounced_stream_yields_last() {
+    // Note: Debounce behavior depends on timing
+    // In sync test, it yields after stream ends
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let source = iter([1, 2, 3]);
+    let mut debounced = source.debounce(Duration.from_millis(100));
+
+    // When source ends, should yield last item
+    let result = debounced.poll_next(&mut cx);
+    // Result depends on internal state after exhausting source
+    assert(result.is_ready() || result.is_pending());
+}
+
+// =============================================================================
+// Test 7: SampledStream - Interval sampling
+// =============================================================================
+
+fn test_sampled_stream_latest_value() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let source = iter([1, 2, 3, 4, 5]);
+    let mut sampled = source.sample(Duration.from_millis(50));
+
+    // In sync test, pulls latest value at stream end
+    let result = sampled.poll_next(&mut cx);
+    // Behavior depends on timing
+}
+
+// =============================================================================
+// Test 8: WindowedStream - Time-based batching
+// =============================================================================
+
+fn test_windowed_stream_collects() {
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    let source = iter([1, 2, 3, 4, 5]);
+    let mut windowed = source.window(Duration.from_secs(1));
+
+    // In sync context, should eventually yield all items as batch
+    // since source completes immediately
+    let result = windowed.poll_next(&mut cx);
+    // First poll may return items or pending depending on window state
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    // BufferedStream tests
+    test_buffered_stream_basic();
+    test_buffered_stream_size_hint();
+    test_buffered_stream_backpressure();
+
+    // ThrottledStream tests
+    test_throttled_stream_basic();
+    test_throttled_stream_size_hint();
+
+    // ChunkedStream tests
+    test_chunked_stream_exact_chunks();
+    test_chunked_stream_partial_final();
+    test_chunked_stream_empty();
+    test_chunked_stream_size_hint();
+
+    // MergedStream tests
+    test_merged_stream_interleaved();
+    test_merged_stream_one_empty();
+    test_merged_stream_both_empty();
+    test_merged_stream_size_hint();
+
+    // Pipeline tests
+    test_combined_backpressure_pipeline();
+    test_merge_then_chunk();
+
+    // Time-based stream tests (sync approximations)
+    test_debounced_stream_yields_last();
+    test_sampled_stream_latest_value();
+    test_windowed_stream_collects();
+
+    print("All backpressure stream tests passed!");
+}

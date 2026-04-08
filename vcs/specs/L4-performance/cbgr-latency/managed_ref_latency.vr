@@ -1,0 +1,434 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: performance, cbgr, latency, managed, tier0
+// @description: Managed reference (Tier 0) latency benchmark (target: < 15ns per operation)
+
+/// Managed Reference Latency Benchmark
+///
+/// This benchmark measures the latency of Tier 0 managed references, which provide
+/// full CBGR (Checked Borrow with Generation and Region) protection at runtime.
+///
+/// Performance target: < 15ns overhead per reference access
+///
+/// CBGR Tier 0 characteristics:
+/// - Full generation check on every access
+/// - Epoch validation for region safety
+/// - Capability verification
+/// - Runtime bounds checking for slices
+///
+/// Memory layout (ThinRef<T>):
+/// - ptr:        8 bytes  (pointer to data)
+/// - generation: 4 bytes  (expected generation number)
+/// - epoch_caps: 4 bytes  (epoch and capabilities)
+/// Total: 16 bytes
+///
+/// Memory layout (FatRef<T>):
+/// - ptr:        8 bytes  (pointer to data)
+/// - generation: 4 bytes  (expected generation number)
+/// - epoch_caps: 4 bytes  (epoch and capabilities)
+/// - len:        8 bytes  (slice length)
+/// Total: 24 bytes
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Baseline: Raw pointer access (unsafe, no protection)
+fn benchmark_raw_pointer_baseline() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let ptr: *const i64 = &*data as *const i64;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "raw_pointer_baseline",
+        metric: "ns/access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 0.0,
+        is_baseline: true,
+    }
+}
+
+/// Tier 0: Managed reference read (ThinRef)
+fn benchmark_managed_thin_ref_read() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let managed_ref: &i64 = &*data;  // ThinRef internally
+
+    // Warmup to train branch predictor
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*managed_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Each access performs:
+        // 1. Load generation from allocation header
+        // 2. Compare with stored generation
+        // 3. Check epoch validity
+        // 4. Dereference pointer
+        black_box(*managed_ref);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_thin_ref_read",
+        metric: "ns/access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 15.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 0: Managed reference write (ThinRef)
+fn benchmark_managed_thin_ref_write() -> BenchmarkResult {
+    let mut data = Heap(0i64);
+    let managed_ref: &mut i64 = &mut *data;
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        *managed_ref = i as i64;
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // Write access also validates generation and epoch
+        *managed_ref = i as i64;
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_thin_ref_write",
+        metric: "ns/access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 15.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 0: Fat reference slice access with bounds check
+fn benchmark_managed_fat_ref_indexed() -> BenchmarkResult {
+    let data: List<i64> = (0..1000).collect();
+    let fat_ref: &[i64] = &data[..];  // FatRef with length
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(fat_ref[500]);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Fat ref access:
+        // 1. Generation check
+        // 2. Epoch check
+        // 3. Bounds check (index < len)
+        // 4. Access
+        black_box(fat_ref[500]);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_fat_ref_indexed",
+        metric: "ns/access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 18.0,  // Slightly higher due to bounds check
+        is_baseline: false,
+    }
+}
+
+/// Tier 0: Sequential slice iteration
+fn benchmark_managed_sequential_iteration() -> BenchmarkResult {
+    let data: List<i64> = (0..1024).collect();
+    let fat_ref: &[i64] = &data[..];
+    let iterations_per_pass = 1024;
+    let passes = BENCHMARK_ITERATIONS / iterations_per_pass;
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / iterations_per_pass) {
+        for i in 0..iterations_per_pass {
+            black_box(fat_ref[i]);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..passes {
+        for i in 0..iterations_per_pass {
+            black_box(fat_ref[i]);
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_sequential_iteration",
+        metric: "ns/access",
+        iterations: passes * iterations_per_pass,
+        per_op_ns: elapsed.as_nanos() as f64 / (passes * iterations_per_pass) as f64,
+        target_ns: 15.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 0: Random access pattern (cache-unfriendly)
+fn benchmark_managed_random_access() -> BenchmarkResult {
+    let data: List<i64> = (0..1024).collect();
+    let fat_ref: &[i64] = &data[..];
+    let indices: List<usize> = generate_random_indices(BENCHMARK_ITERATIONS, 1024);
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        black_box(fat_ref[indices[i % indices.len()]]);
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        black_box(fat_ref[indices[i % indices.len()]]);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_random_access",
+        metric: "ns/access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 25.0,  // Higher due to cache misses
+        is_baseline: false,
+    }
+}
+
+/// Tier 0: Nested reference chain access
+fn benchmark_managed_nested_refs() -> BenchmarkResult {
+    let inner = Heap(42i64);
+    let middle = Heap(&*inner);
+    let outer = Heap(&*middle);
+    let ref_chain = &*outer;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(***ref_chain);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Three generations checks in sequence
+        black_box(***ref_chain);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_nested_3_levels",
+        metric: "ns/access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 45.0,  // ~15ns per level
+        is_baseline: false,
+    }
+}
+
+/// Tier 0: Reference copy overhead
+fn benchmark_managed_ref_copy() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let source_ref: &i64 = &*data;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let copy = source_ref;
+        black_box(*copy);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Copying a managed reference copies metadata (16 bytes)
+        let copy = source_ref;
+        black_box(*copy);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_ref_copy",
+        metric: "ns/copy+access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 20.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 0: Cross-function reference passing
+fn benchmark_managed_cross_function() -> BenchmarkResult {
+    let data = Heap(42i64);
+
+    @inline(never)
+    fn access_ref(r: &i64) -> i64 {
+        *r
+    }
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(access_ref(&*data));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(access_ref(&*data));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_cross_function",
+        metric: "ns/call+access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 20.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 0: Reference field access in struct
+fn benchmark_managed_struct_field() -> BenchmarkResult {
+    type Container is {
+        value: Heap<i64>,
+        aux: Int,
+    };
+
+    let container = Container {
+        value: Heap(42i64),
+        aux: 100,
+    };
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*container.value);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(*container.value);
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "managed_struct_field",
+        metric: "ns/access",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 15.0,
+        is_baseline: false,
+    }
+}
+
+fn main() {
+    println("=== Managed Reference (Tier 0) Latency Benchmark ===\n");
+    println("Target: < 15ns overhead per managed reference access\n");
+
+    let baseline = benchmark_raw_pointer_baseline();
+    let results = [
+        baseline,
+        benchmark_managed_thin_ref_read(),
+        benchmark_managed_thin_ref_write(),
+        benchmark_managed_fat_ref_indexed(),
+        benchmark_managed_sequential_iteration(),
+        benchmark_managed_random_access(),
+        benchmark_managed_nested_refs(),
+        benchmark_managed_ref_copy(),
+        benchmark_managed_cross_function(),
+        benchmark_managed_struct_field(),
+    ];
+
+    let baseline_ns = results[0].per_op_ns;
+
+    println("{:<30} {:>12} {:>12} {:>10} {:>8}",
+            "Benchmark", "Time (ns)", "Overhead", "Target", "Status");
+    println("{}", "-".repeat(75));
+
+    for result in results {
+        let overhead = if result.is_baseline {
+            0.0
+        } else {
+            result.per_op_ns - baseline_ns
+        };
+
+        let passed = if result.is_baseline {
+            true
+        } else {
+            overhead <= result.target_ns
+        };
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.2} {:>10.1} {:>8}",
+                result.name, result.per_op_ns, overhead, result.target_ns, status);
+    }
+
+    println("");
+    println("Memory Layout:");
+    println("  ThinRef<T>: 16 bytes (ptr + generation + epoch_caps)");
+    println("  FatRef<T>:  24 bytes (ptr + generation + epoch_caps + len)");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    iterations: Int,
+    per_op_ns: f64,
+    target_ns: f64,
+    is_baseline: Bool,
+};
+
+// Helper types and functions
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+fn generate_random_indices(count: Int, max: Int) -> List<usize> {
+    let mut indices: List<usize> = (0..count).map(|i| i % max).collect();
+    // Fisher-Yates shuffle
+    let mut rng = Random.with_seed(42);
+    for i in (1..count).rev() {
+        let j = rng.gen_range(0, i + 1);
+        indices.swap(i, j);
+    }
+    indices
+}

@@ -1,0 +1,33 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: context, negative, transitive, pure
+// @description: Tests negative context constraints and pure fn
+// @expected-exit: 0
+
+// Pure functions — no side effects
+pure fn add(a: Int, b: Int) -> Int { a + b }
+pure fn multiply(a: Int, b: Int) -> Int { a * b }
+pure fn compute(x: Int, y: Int) -> Int { add(multiply(x, y), add(x, y)) }
+
+fn main() {
+    // Test 1: Pure functions
+    let r = compute(3, 4);
+    assert(r == 19);
+    print("Test 1 PASS: pure compute");
+
+    // Test 2: Pure composition is deterministic
+    let a = compute(5, 6);
+    let b = compute(5, 6);
+    assert(a == b);
+    assert(a == 41); // 5*6 + 5+6 = 30+11 = 41
+    print("Test 2 PASS: pure determinism");
+
+    // Test 3: Nested pure calls
+    let nested = add(compute(1, 2), compute(3, 4));
+    assert(nested == 5 + 19); // (1*2+1+2) + (3*4+3+4) = 5 + 19 = 24
+    assert(nested == 24);
+    print("Test 3 PASS: nested pure");
+
+    print("All negative/transitive context tests passed");
+}

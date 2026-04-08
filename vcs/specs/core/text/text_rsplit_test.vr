@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: text, rsplit, string
+// @description: Tests for Text.rsplit() method
+
+@test
+fn test_rsplit_basic() {
+    let s = "a.b.c";
+    let parts = s.rsplit(".");
+    assert_eq(parts.len(), 3);
+    // rsplit returns parts in left-to-right order
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c");
+}
+
+@test
+fn test_rsplit_no_match() {
+    let s = "hello";
+    let parts = s.rsplit(".");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "hello");
+}
+
+@test
+fn test_rsplit_empty_separator() {
+    let s = "abc";
+    let parts = s.rsplit("");
+    // Empty separator splits between each character (implementation-dependent)
+    assert(parts.len() >= 1);
+}
+
+@test
+fn test_rsplit_at_start() {
+    let s = ".hello";
+    let parts = s.rsplit(".");
+    assert_eq(parts.len(), 2);
+}
+
+@test
+fn test_rsplit_at_end() {
+    let s = "hello.";
+    let parts = s.rsplit(".");
+    assert_eq(parts.len(), 2);
+}
+
+@test
+fn test_rsplit_multiple() {
+    let s = "one::two::three";
+    let parts = s.rsplit("::");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "one");
+    assert_eq(parts[1], "two");
+    assert_eq(parts[2], "three");
+}
+
+@test
+fn test_rsplit_single_char() {
+    let s = "a/b/c/d";
+    let parts = s.rsplit("/");
+    assert_eq(parts.len(), 4);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[3], "d");
+}
+
+@test
+fn test_rsplit_same_as_split_for_simple_cases() {
+    let s = "hello world test";
+    let forward = s.split(" ");
+    let reverse = s.rsplit(" ");
+    // For non-overlapping patterns, rsplit and split should give the same result
+    assert_eq(forward.len(), reverse.len());
+    assert_eq(forward[0], reverse[0]);
+    assert_eq(forward[1], reverse[1]);
+    assert_eq(forward[2], reverse[2]);
+}

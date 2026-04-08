@@ -1,0 +1,301 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, platform, conditional-compilation
+
+/// Platform-specific FFI code
+/// Demonstrates conditional compilation for different operating systems
+
+type IOError is
+    | PermissionDenied
+    | NotFound
+    | Failed(Text);
+
+implement IOError {
+    fn from_errno() -> IOError { IOError.Failed(f"errno") }
+    fn from_win_error() -> IOError { IOError.Failed(f"win error") }
+}
+
+/// Linux-specific system calls
+@cfg(target_os = "linux")
+module linux {
+    ffi LinuxSyscalls {
+        @extern("C")
+        fn epoll_create(size: i32) -> i32;
+
+        @extern("C")
+        fn epoll_create1(flags: i32) -> i32;
+
+        @extern("C")
+        fn epoll_ctl(epfd: i32, op: i32, fd: i32, event: *mut EpollEvent) -> i32;
+
+        @extern("C")
+        fn epoll_wait(epfd: i32, events: *mut EpollEvent, maxevents: i32, timeout: i32) -> i32;
+
+        @extern("C")
+        fn inotify_init() -> i32;
+
+        @extern("C")
+        fn inotify_add_watch(fd: i32, pathname: *const i8, mask: u32) -> i32;
+
+        @extern("C")
+        fn inotify_rm_watch(fd: i32, wd: i32) -> i32;
+
+        @extern("C")
+        fn eventfd(initval: u32, flags: i32) -> i32;
+
+        @extern("C")
+        fn timerfd_create(clockid: i32, flags: i32) -> i32;
+
+        @extern("C")
+        fn signalfd(fd: i32, mask: *const SigsetT, flags: i32) -> i32;
+    }
+
+    @repr(C)
+    type EpollEvent is {
+        events: u32,
+        data: EpollData,
+    };
+
+    @repr(C)
+    type EpollData is { fd: i32 };
+}
+
+const EPOLLIN: u32 = 0x001;
+const EPOLLOUT: u32 = 0x004;
+const EPOLLERR: u32 = 0x008;
+const EPOLLHUP: u32 = 0x010;
+const EPOLLET: u32 = 0x80000000;
+
+/// macOS-specific system calls
+@cfg(target_os = "macos")
+module macos {
+    ffi MacOSSyscalls {
+        @extern("C")
+        fn kqueue() -> i32;
+
+        @extern("C")
+        fn kevent(
+            kq: i32,
+            changelist: *const Kevent,
+            nchanges: i32,
+            eventlist: *mut Kevent,
+            nevents: i32,
+            timeout: *const Timespec
+        ) -> i32;
+
+        @extern("C")
+        fn mach_absolute_time() -> u64;
+
+        @extern("C")
+        fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
+
+        @extern("C")
+        fn dispatch_async(queue: *mut DispatchQueue, block: DispatchBlock);
+
+        @extern("C")
+        fn dispatch_get_main_queue() -> *mut DispatchQueue;
+    }
+
+    @repr(C)
+    type Kevent is {
+        ident: usize,
+        filter: i16,
+        flags: u16,
+        fflags: u32,
+        data: isize,
+        udata: *mut u8,
+    };
+
+    @repr(C)
+    type MachTimebaseInfo is {
+        numer: u32,
+        denom: u32,
+    };
+
+    @opaque
+    type DispatchQueue is ();
+
+    type DispatchBlock is extern "C" fn();
+
+    const EVFILT_READ: i16 = -1;
+    const EVFILT_WRITE: i16 = -2;
+    const EVFILT_TIMER: i16 = -7;
+    const EV_ADD: u16 = 0x0001;
+    const EV_DELETE: u16 = 0x0002;
+    const EV_ENABLE: u16 = 0x0004;
+    const EV_ONESHOT: u16 = 0x0010;
+}
+
+/// Windows-specific API calls
+@cfg(target_os = "windows")
+module windows {
+    ffi Win32 {
+        @extern("system")  // Windows uses stdcall convention
+        fn CreateFileW(
+            lpFileName: *const u16,
+            dwDesiredAccess: u32,
+            dwShareMode: u32,
+            lpSecurityAttributes: *mut SecurityAttributes,
+            dwCreationDisposition: u32,
+            dwFlagsAndAttributes: u32,
+            hTemplateFile: Handle
+        ) -> Handle;
+
+        @extern("system")
+        fn ReadFile(
+            hFile: Handle,
+            lpBuffer: *mut u8,
+            nNumberOfBytesToRead: u32,
+            lpNumberOfBytesRead: *mut u32,
+            lpOverlapped: *mut Overlapped
+        ) -> Bool;
+
+        @extern("system")
+        fn WriteFile(
+            hFile: Handle,
+            lpBuffer: *const u8,
+            nNumberOfBytesToWrite: u32,
+            lpNumberOfBytesWritten: *mut u32,
+            lpOverlapped: *mut Overlapped
+        ) -> Bool;
+
+        @extern("system")
+        fn CloseHandle(hObject: Handle) -> Bool;
+
+        @extern("system")
+        fn GetLastError() -> u32;
+
+        @extern("system")
+        fn CreateIoCompletionPort(
+            FileHandle: Handle,
+            ExistingCompletionPort: Handle,
+            CompletionKey: usize,
+            NumberOfConcurrentThreads: u32
+        ) -> Handle;
+
+        @extern("system")
+        fn GetQueuedCompletionStatus(
+            CompletionPort: Handle,
+            lpNumberOfBytesTransferred: *mut u32,
+            lpCompletionKey: *mut usize,
+            lpOverlapped: *mut *mut Overlapped,
+            dwMilliseconds: u32
+        ) -> Bool;
+    }
+
+    type Handle is *mut u8;
+
+    @repr(C)
+    type SecurityAttributes is {
+        nLength: u32,
+        lpSecurityDescriptor: *mut u8,
+        bInheritHandle: Bool,
+    };
+
+    @repr(C)
+    type Overlapped is {
+        Internal: usize,
+        InternalHigh: usize,
+        Offset: u32,
+        OffsetHigh: u32,
+        hEvent: Handle,
+    };
+
+    const INVALID_HANDLE_VALUE: Handle = -1 as Handle;
+    const GENERIC_READ: u32 = 0x80000000;
+    const GENERIC_WRITE: u32 = 0x40000000;
+    const FILE_SHARE_READ: u32 = 0x00000001;
+}
+
+/// Cross-platform abstraction
+type EventLoop is {
+    @cfg(target_os = "linux")
+    epoll_fd: i32,
+
+    @cfg(target_os = "macos")
+    kqueue_fd: i32,
+
+    @cfg(target_os = "windows")
+    iocp_handle: windows.Handle,
+};
+
+implement EventLoop {
+    fn new() -> Result<EventLoop, IOError> {
+        @cfg(target_os = "linux")
+        {
+            let fd = unsafe { LinuxSyscalls.epoll_create1(0) };
+            if fd < 0 {
+                return Err(IOError.from_errno());
+            }
+            Ok(EventLoop { epoll_fd: fd })
+        }
+
+        @cfg(target_os = "macos")
+        {
+            let fd = unsafe { MacOSSyscalls.kqueue() };
+            if fd < 0 {
+                return Err(IOError.from_errno());
+            }
+            Ok(EventLoop { kqueue_fd: fd })
+        }
+
+        // Platform-specific event loop creation
+        Err(IOError.Failed(f"unsupported platform"))
+    }
+}
+
+/// Architecture-specific code
+@cfg(target_arch = "x86_64")
+module x86_64 {
+    /// SIMD intrinsics for x86_64
+    ffi X86Intrinsics {
+        @extern("C")
+        fn _mm_add_ps(a: __m128, b: __m128) -> __m128;
+
+        @extern("C")
+        fn _mm_mul_ps(a: __m128, b: __m128) -> __m128;
+
+        @extern("C")
+        fn _mm256_add_pd(a: __m256d, b: __m256d) -> __m256d;
+    }
+
+    @repr(C, align(16))
+    type __m128 is { data: [f32; 4] };
+
+    @repr(C, align(32))
+    type __m256d is { data: [f64; 4] };
+}
+
+@cfg(target_arch = "aarch64")
+module aarch64 {
+    /// NEON intrinsics for ARM64
+    ffi NeonIntrinsics {
+        @extern("C")
+        fn vaddq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t;
+
+        @extern("C")
+        fn vmulq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t;
+    }
+
+    @repr(C, align(16))
+    type float32x4_t is { data: [f32; 4] };
+}
+
+/// Pointer size-specific code
+@cfg(target_pointer_width = "64")
+type NativeInt is i64;
+
+@cfg(target_pointer_width = "32")
+type NativeInt is i32;
+
+/// Endianness-specific code
+@cfg(target_endian = "little")
+fn native_to_be32(x: u32) -> u32 {
+    x.swap_bytes()
+}
+
+@cfg(target_endian = "big")
+fn native_to_be32(x: u32) -> u32 {
+    x
+}

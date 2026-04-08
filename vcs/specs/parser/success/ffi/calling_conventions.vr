@@ -1,0 +1,541 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+// @tags: parser, ffi, calling_convention, calling_convention_attr, abi
+// @description: Comprehensive test for calling_convention_attr grammar production
+
+// ============================================================
+// GRAMMAR: calling_convention_attr = 'calling_convention' , '=' , string_lit ;
+// GRAMMAR: ffi_function_decl = '@extern' , '(' , string_lit , [ ',' , calling_convention_attr ] , ')' ,
+//                              'fn' , identifier , [ generics ] , '(' , param_list , ')' , [ '->' , type_expr ] , ';' ;
+// ============================================================
+
+// C type definitions for calling convention tests
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type c_float is f32;
+type c_double is f64;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+type HWND is *mut c_void;
+type WPARAM is usize;
+type LPARAM is isize;
+type LRESULT is isize;
+type DWORD is u32;
+type HANDLE is *mut c_void;
+type BOOL is c_int;
+
+// ------------------------------------------------------------
+// C Calling Convention - Default for C
+// ------------------------------------------------------------
+
+// C calling convention (default)
+ffi CFunctions {
+    @extern("C")
+    fn c_no_args() -> c_int;
+
+    @extern("C")
+    fn c_one_arg(x: c_int) -> c_int;
+
+    @extern("C")
+    fn c_many_args(
+        a: c_int,
+        b: c_int,
+        c: c_int,
+        d: c_int,
+        e: c_int
+    ) -> c_int;
+
+    @extern("C")
+    fn c_with_floats(x: c_float, y: c_double) -> c_double;
+
+    @extern("C")
+    fn c_with_pointers(
+        data: *const u8,
+        len: size_t,
+        out: *mut u8
+    ) -> c_int;
+
+    @extern("C")
+    fn c_variadic(format: *const c_char, ...) -> c_int;
+}
+
+// Extern block with C ABI
+extern "C" {
+    fn extern_c_func(x: c_int) -> c_int;
+    fn extern_c_with_callback(cb: fn(c_int) -> c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Standard Call Convention (stdcall) - Windows API
+// ------------------------------------------------------------
+
+ffi StdcallFunctions {
+    @extern("C", calling_convention = "stdcall")
+    fn stdcall_no_args() -> c_int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn stdcall_one_arg(x: c_int) -> c_int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn stdcall_many_args(
+        a: c_int,
+        b: c_int,
+        c: c_int,
+        d: c_int
+    ) -> c_int;
+
+    // Windows API style functions
+    @extern("C", calling_convention = "stdcall")
+    fn MessageBoxA(
+        hwnd: HWND,
+        text: *const c_char,
+        caption: *const c_char,
+        uType: c_uint
+    ) -> c_int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn GetLastError() -> DWORD;
+
+    @extern("C", calling_convention = "stdcall")
+    fn SetLastError(dwErrCode: DWORD);
+
+    @extern("C", calling_convention = "stdcall")
+    fn CloseHandle(hObject: HANDLE) -> BOOL;
+
+    @extern("C", calling_convention = "stdcall")
+    fn CreateThread(
+        lpThreadAttributes: *mut c_void,
+        dwStackSize: size_t,
+        lpStartAddress: fn(*mut c_void) -> DWORD,
+        lpParameter: *mut c_void,
+        dwCreationFlags: DWORD,
+        lpThreadId: *mut DWORD
+    ) -> HANDLE;
+}
+
+extern "stdcall" {
+    fn extern_stdcall_func(a: c_int, b: c_int) -> c_int;
+    fn extern_stdcall_void();
+}
+
+// ------------------------------------------------------------
+// Fast Call Convention (fastcall)
+// ------------------------------------------------------------
+
+ffi FastcallFunctions {
+    @extern("C", calling_convention = "fastcall")
+    fn fastcall_no_args() -> c_int;
+
+    @extern("C", calling_convention = "fastcall")
+    fn fastcall_one_arg(x: c_int) -> c_int;
+
+    @extern("C", calling_convention = "fastcall")
+    fn fastcall_two_args(a: c_int, b: c_int) -> c_int;
+
+    @extern("C", calling_convention = "fastcall")
+    fn fastcall_three_args(a: c_int, b: c_int, c: c_int) -> c_int;
+
+    @extern("C", calling_convention = "fastcall")
+    fn fastcall_with_pointers(
+        data: *const u8,
+        len: size_t
+    ) -> c_int;
+}
+
+extern "fastcall" {
+    fn extern_fastcall_add(a: c_int, b: c_int) -> c_int;
+    fn extern_fastcall_process(x: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// C Functions with SIMD-style parameters
+// Note: vectorcall is not a supported calling convention in Verum
+// Use C calling convention for SIMD functions
+// ------------------------------------------------------------
+
+ffi SimdFunctions {
+    @extern("C")
+    fn simd_scalar(x: c_float) -> c_float;
+
+    @extern("C")
+    fn simd_two_scalars(x: c_float, y: c_float) -> c_float;
+
+    @extern("C")
+    fn simd_vector4(v: [c_float; 4]) -> c_float;
+
+    @extern("C")
+    fn simd_dot_product(
+        a: [c_float; 4],
+        b: [c_float; 4]
+    ) -> c_float;
+
+    @extern("C")
+    fn simd_cross_product(
+        a: [c_float; 3],
+        b: [c_float; 3],
+        result: *mut [c_float; 3]
+    );
+
+    @extern("C")
+    fn simd_matrix_multiply(
+        a: *const [c_float; 16],
+        b: *const [c_float; 16],
+        result: *mut [c_float; 16]
+    );
+}
+
+extern "C" {
+    fn extern_simd_add(a: [f32; 4], b: [f32; 4]) -> [f32; 4];
+}
+
+// ------------------------------------------------------------
+// C++ method calls via C ABI
+// Note: thiscall is not a supported calling convention in Verum
+// Use extern "C" wrappers for C++ methods
+// ------------------------------------------------------------
+
+@opaque
+type CppClass is ();
+
+ffi CppMethodFunctions {
+    @extern("C")
+    fn cpp_method(this: *mut CppClass, arg: c_int) -> c_int;
+
+    @extern("C")
+    fn cpp_getter(this: *const CppClass) -> c_int;
+
+    @extern("C")
+    fn cpp_setter(this: *mut CppClass, value: c_int);
+
+    @extern("C")
+    fn cpp_no_args(this: *mut CppClass) -> c_int;
+
+    @extern("C")
+    fn cpp_many_args(
+        this: *mut CppClass,
+        a: c_int,
+        b: c_int,
+        c: c_int
+    ) -> c_int;
+}
+
+extern "C" {
+    fn extern_cpp_method(this: *mut CppClass, x: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// System/Platform API Functions
+// Note: "system" is not a supported calling convention in Verum
+// Use stdcall for Windows or C for Unix
+// ------------------------------------------------------------
+
+ffi SystemFunctions {
+    @extern("C", calling_convention = "stdcall")
+    fn system_call_no_args() -> c_int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn system_call_one_arg(x: c_int) -> c_int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn system_call_with_handle(h: *mut c_void) -> c_int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn system_api_function(
+        handle: HANDLE,
+        buffer: *mut c_void,
+        size: size_t
+    ) -> c_int;
+}
+
+extern "stdcall" {
+    fn extern_system_func(arg: c_int) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Windows x64 Functions
+// Note: "win64" is not a supported calling convention in Verum
+// Use stdcall for Windows API or C for general use
+// ------------------------------------------------------------
+
+ffi Win64Functions {
+    @extern("C", calling_convention = "stdcall")
+    fn win64_one_arg(a: c_long) -> c_long;
+
+    @extern("C", calling_convention = "stdcall")
+    fn win64_four_args(
+        a: c_long,    // RCX
+        b: c_long,    // RDX
+        c: c_long,    // R8
+        d: c_long     // R9
+    ) -> c_long;
+
+    @extern("C", calling_convention = "stdcall")
+    fn win64_with_floats(
+        a: c_double,  // XMM0
+        b: c_double,  // XMM1
+        c: c_double,  // XMM2
+        d: c_double   // XMM3
+    ) -> c_double;
+
+    @extern("C", calling_convention = "stdcall")
+    fn win64_mixed(
+        handle: HANDLE,     // RCX
+        offset: c_long,     // RDX
+        data: *mut u8,      // R8
+        size: size_t        // R9
+    ) -> c_long;
+}
+
+extern "stdcall" {
+    fn extern_win64_func(a: i64, b: i64) -> i64;
+}
+
+// ------------------------------------------------------------
+// SysV64 Calling Convention (Linux/macOS/BSD)
+// ------------------------------------------------------------
+
+ffi SysV64Functions {
+    @extern("C", calling_convention = "sysv64")
+    fn sysv64_one_arg(a: c_long) -> c_long;
+
+    @extern("C", calling_convention = "sysv64")
+    fn sysv64_six_args(
+        a: c_long,    // RDI
+        b: c_long,    // RSI
+        c: c_long,    // RDX
+        d: c_long,    // RCX
+        e: c_long,    // R8
+        f: c_long     // R9
+    ) -> c_long;
+
+    @extern("C", calling_convention = "sysv64")
+    fn sysv64_with_floats(
+        x: c_double,   // XMM0
+        y: c_double,   // XMM1
+        z: c_double    // XMM2
+    ) -> c_double;
+
+    @extern("C", calling_convention = "sysv64")
+    fn sysv64_many_floats(
+        a: c_double,   // XMM0
+        b: c_double,   // XMM1
+        c: c_double,   // XMM2
+        d: c_double,   // XMM3
+        e: c_double,   // XMM4
+        f: c_double,   // XMM5
+        g: c_double,   // XMM6
+        h: c_double    // XMM7
+    ) -> c_double;
+}
+
+extern "sysv64" {
+    fn extern_sysv64_func(a: i64, b: i64, c: i64) -> i64;
+}
+
+// ------------------------------------------------------------
+// ARM Functions
+// Note: "aapcs" is not a supported calling convention in Verum
+// Use C calling convention for ARM platforms
+// ------------------------------------------------------------
+
+ffi ArmFunctions {
+    @extern("C")
+    fn arm_one_arg(a: c_int) -> c_int;
+
+    @extern("C")
+    fn arm_four_args(
+        a: c_int,     // R0
+        b: c_int,     // R1
+        c: c_int,     // R2
+        d: c_int      // R3
+    ) -> c_int;
+
+    @extern("C")
+    fn arm_with_floats(
+        x: c_float,
+        y: c_float
+    ) -> c_float;
+}
+
+extern "C" {
+    fn extern_arm_func(a: i32, b: i32) -> i32;
+}
+
+// ------------------------------------------------------------
+// ARM64 Functions
+// Note: "aapcs64" is not a supported calling convention in Verum
+// Use C calling convention for ARM64 platforms
+// ------------------------------------------------------------
+
+ffi Arm64Functions {
+    @extern("C")
+    fn arm64_one_arg(a: c_long) -> c_long;
+
+    @extern("C")
+    fn arm64_eight_args(
+        a: c_long,    // X0
+        b: c_long,    // X1
+        c: c_long,    // X2
+        d: c_long,    // X3
+        e: c_long,    // X4
+        f: c_long,    // X5
+        g: c_long,    // X6
+        h: c_long     // X7
+    ) -> c_long;
+
+    @extern("C")
+    fn arm64_with_floats(
+        a: c_double,  // D0
+        b: c_double,  // D1
+        c: c_double,  // D2
+        d: c_double   // D3
+    ) -> c_double;
+}
+
+// ------------------------------------------------------------
+// EFI API Functions
+// Note: "efiapi" is not a supported calling convention in Verum
+// Use C calling convention for EFI
+// ------------------------------------------------------------
+
+@opaque
+type EfiHandle is ();
+
+@opaque
+type EfiSystemTable is ();
+
+ffi EfiApiFunctions {
+    @extern("C")
+    fn efi_entry(
+        image_handle: *mut EfiHandle,
+        system_table: *mut EfiSystemTable
+    ) -> usize;
+
+    @extern("C")
+    fn efi_allocate_pages(
+        type_: c_int,
+        memory_type: c_int,
+        pages: usize,
+        memory: *mut u64
+    ) -> usize;
+
+    @extern("C")
+    fn efi_free_pages(memory: u64, pages: usize) -> usize;
+}
+
+extern "C" {
+    fn extern_efi_func(handle: *mut (), table: *mut ()) -> usize;
+}
+
+// ------------------------------------------------------------
+// Interrupt Handler Functions
+// Note: "interrupt" is not a supported calling convention in Verum
+// Use C calling convention for interrupt handlers
+// ------------------------------------------------------------
+
+@repr(C)
+type InterruptStackFrame is {
+    instruction_pointer: u64,
+    code_segment: u64,
+    cpu_flags: u64,
+    stack_pointer: u64,
+    stack_segment: u64,
+};
+
+ffi InterruptFunctions {
+    @extern("C")
+    fn interrupt_handler(frame: *const InterruptStackFrame);
+
+    @extern("C")
+    fn interrupt_handler_with_error(
+        frame: *const InterruptStackFrame,
+        error_code: u64
+    );
+}
+
+// ------------------------------------------------------------
+// Function pointer types with calling conventions
+// Note: Only "C", "stdcall", "fastcall", "sysv64" are supported
+// ------------------------------------------------------------
+
+type CCallback is extern "C" fn(c_int) -> c_int;
+type StdcallCallback is extern "stdcall" fn(HWND, c_uint, WPARAM, LPARAM) -> LRESULT;
+type FastcallCallback is extern "fastcall" fn(c_int, c_int) -> c_int;
+type SysV64Callback is extern "sysv64" fn(i64, i64, i64) -> i64;
+
+// FFI using callback types
+ffi CallbackConventions {
+    @extern("C")
+    fn with_c_callback(cb: CCallback) -> c_int;
+
+    @extern("C")
+    fn with_stdcall_callback(cb: StdcallCallback) -> LRESULT;
+
+    @extern("C")
+    fn with_fastcall_callback(cb: FastcallCallback) -> c_int;
+
+    @extern("C")
+    fn with_sysv64_callback(cb: SysV64Callback) -> i64;
+}
+
+// ------------------------------------------------------------
+// Mixed calling conventions in one FFI block
+// Note: Only "C", "stdcall", "fastcall", "sysv64" are supported
+// ------------------------------------------------------------
+
+ffi MixedConventions {
+    @extern("C")
+    fn mixed_c() -> c_int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn mixed_stdcall() -> c_int;
+
+    @extern("C", calling_convention = "fastcall")
+    fn mixed_fastcall() -> c_int;
+
+    @extern("C", calling_convention = "sysv64")
+    fn mixed_sysv64() -> c_int;
+}
+
+// ------------------------------------------------------------
+// Platform-conditional calling conventions
+// Note: Only "C", "stdcall", "fastcall", "sysv64" are supported
+// ------------------------------------------------------------
+
+@cfg(target_os = "windows")
+ffi WindowsPlatformConventions {
+    @extern("C", calling_convention = "stdcall")
+    fn windows_api_func() -> c_int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn windows_x64_func() -> c_int;
+}
+
+@cfg(target_os = "linux")
+ffi LinuxPlatformConventions {
+    @extern("C", calling_convention = "sysv64")
+    fn linux_x64_func() -> c_int;
+}
+
+@cfg(target_os = "macos")
+ffi MacOSPlatformConventions {
+    @extern("C", calling_convention = "sysv64")
+    fn macos_x64_func() -> c_int;
+}
+
+@cfg(target_arch = "arm")
+ffi ArmPlatformConventions {
+    @extern("C")
+    fn arm_platform_func() -> c_int;
+}
+
+@cfg(target_arch = "aarch64")
+ffi Arm64PlatformConventions {
+    @extern("C")
+    fn arm64_platform_func() -> c_int;
+}

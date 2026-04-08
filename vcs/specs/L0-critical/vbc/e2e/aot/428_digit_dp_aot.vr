@@ -1,0 +1,133 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, digit, dp, math
+// @timeout: 30000
+
+// Digit-based problems
+
+fn digit_count(n: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut count = 0;
+    let mut v = n;
+    while v > 0 {
+        count = count + 1;
+        v = v / 10;
+    }
+    count
+}
+
+fn digit_sum(n: Int) -> Int {
+    let mut s = 0;
+    let mut v = n;
+    while v > 0 {
+        s = s + v % 10;
+        v = v / 10;
+    }
+    s
+}
+
+fn digit_product(n: Int) -> Int {
+    let mut p = 1;
+    let mut v = n;
+    while v > 0 {
+        p = p * (v % 10);
+        v = v / 10;
+    }
+    p
+}
+
+fn reverse_number(n: Int) -> Int {
+    let mut rev = 0;
+    let mut v = n;
+    while v > 0 {
+        rev = rev * 10 + v % 10;
+        v = v / 10;
+    }
+    rev
+}
+
+fn is_palindrome_num(n: Int) -> Int {
+    if n == reverse_number(n) { 1 } else { 0 }
+}
+
+// Count numbers from 1 to n with digit sum == target
+fn count_digit_sum(n: Int, target: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if digit_sum(i) == target { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Count palindromic numbers from 1 to n
+fn count_palindromes(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if is_palindrome_num(i) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Armstrong (narcissistic) number check for 3-digit numbers
+fn is_armstrong_3(n: Int) -> Int {
+    let d0 = n % 10;
+    let d1 = (n / 10) % 10;
+    let d2 = n / 100;
+    if d0 * d0 * d0 + d1 * d1 * d1 + d2 * d2 * d2 == n { 1 } else { 0 }
+}
+
+fn test_digit_ops() -> Int {
+    assert_eq(digit_count(12345), 5);
+    assert_eq(digit_count(0), 1);
+    assert_eq(digit_count(100), 3);
+    assert_eq(digit_sum(12345), 15);
+    assert_eq(digit_product(234), 24);
+    1
+}
+
+fn test_reverse() -> Int {
+    assert_eq(reverse_number(12345), 54321);
+    assert_eq(reverse_number(100), 1);
+    assert_eq(reverse_number(1221), 1221);
+    1
+}
+
+fn test_palindrome() -> Int {
+    assert_eq(is_palindrome_num(121), 1);
+    assert_eq(is_palindrome_num(123), 0);
+    assert_eq(is_palindrome_num(1), 1);
+    assert_eq(is_palindrome_num(1001), 1);
+    // Palindromes up to 100: 1-9 (9) + 11,22,33,44,55,66,77,88,99 (9) = 18
+    assert_eq(count_palindromes(100), 18);
+    1
+}
+
+fn test_digit_sum_count() -> Int {
+    // Numbers from 1-100 with digit sum = 5:
+    // 5, 14, 23, 32, 41, 50 = 6
+    assert_eq(count_digit_sum(100, 5), 6);
+    1
+}
+
+fn test_armstrong() -> Int {
+    assert_eq(is_armstrong_3(153), 1);  // 1+125+27=153
+    assert_eq(is_armstrong_3(370), 1);  // 27+343+0=370
+    assert_eq(is_armstrong_3(371), 1);  // 27+343+1=371
+    assert_eq(is_armstrong_3(407), 1);  // 64+0+343=407
+    assert_eq(is_armstrong_3(100), 0);
+    1
+}
+
+fn main() -> Int {
+    test_digit_ops();
+    test_reverse();
+    test_palindrome();
+    test_digit_sum_count();
+    test_armstrong();
+    print("[OK] 428_digit_dp_aot");
+    0
+}

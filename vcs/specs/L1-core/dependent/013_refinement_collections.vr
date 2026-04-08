@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, collections
+
+/// Refined element types in collections -- List, Map, Set with
+/// elements that carry refinement constraints.
+
+type Positive is Int{> 0};
+type Natural is Int{>= 0};
+type NonEmpty is Text{len(it) > 0};
+type Byte is Int{>= 0, < 256};
+
+// List of positive integers
+type PositiveList is List<Positive>;
+
+// List of bytes
+type ByteArray is List<Byte>;
+
+// Map with refined keys and values
+type IdMap is Map<Positive, NonEmpty>;
+
+// Set of natural numbers
+type NatSet is Set<Natural>;
+
+// Nested: list of non-empty lists
+type Matrix<T> is List<List<T>{len(it) > 0}>{len(it) > 0};
+
+// Functions operating on refined collections
+
+fn sum_positives(xs: PositiveList) -> Positive
+    where ensures result > 0
+{
+    let mut total = 0;
+    for x in xs {
+        total = total + x;  // x: Positive, so x > 0
+    }
+    total
+}
+
+fn max_byte(bs: ByteArray) -> Maybe<Byte> {
+    if bs.len() == 0 {
+        None
+    } else {
+        let mut mx = bs[0];
+        for b in bs {
+            if b > mx { mx = b; }
+        }
+        Some(mx)
+    }
+}
+
+fn lookup_name(ids: IdMap, id: Positive) -> Maybe<NonEmpty> {
+    ids.get(id)
+}
+
+// Creating refined collections
+fn range_positive(start: Positive, count: Natural) -> PositiveList {
+    let mut result: PositiveList = [];
+    let mut i = 0;
+    while i < count {
+        result.push(start + i);
+        i = i + 1;
+    }
+    result
+}
+
+fn ascii_bytes(s: Text) -> ByteArray {
+    let mut result: ByteArray = [];
+    for ch in s.chars() {
+        let code = ch as Int;
+        if code >= 0 && code < 256 {
+            result.push(code);
+        }
+    }
+    result
+}
+
+// Filter preserving refinement
+fn filter_large(xs: PositiveList, threshold: Positive) -> PositiveList {
+    let mut result: PositiveList = [];
+    for x in xs {
+        if x > threshold {
+            result.push(x);  // x is still Positive
+        }
+    }
+    result
+}
+
+fn main() {
+    let ps: PositiveList = [1, 2, 3, 4, 5];
+    let total = sum_positives(ps);
+    assert(total == 15);
+
+    let bytes: ByteArray = [0, 127, 255];
+    let mx = max_byte(bytes);
+    assert(mx == Some(255));
+
+    let mut ids: IdMap = Map.new();
+    ids.insert(1, "Alice");
+    ids.insert(2, "Bob");
+    assert(lookup_name(ids, 1) == Some("Alice"));
+
+    let rng = range_positive(10, 5);
+    assert(rng.len() == 5);
+    assert(rng[0] == 10);
+
+    let filtered = filter_large([1, 5, 10, 15, 20], 10);
+    assert(filtered.len() == 2);
+}

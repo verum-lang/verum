@@ -1,0 +1,401 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: protocols, associated-types, defaults, type-system
+// @description: Tests default associated types in protocol definitions
+//
+// Default associated types allow protocols to specify a default type
+// that implementations can override. This aligns with the EBNF grammar:
+//   default_type = '=' , type_expr ;
+//   protocol_type = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ]
+//                 , [ where_clause ] , [ default_type ] , ';' ;
+//
+// Spec: docs/detailed/18-advanced-protocols.md Section 2.18.8
+
+// ============================================================================
+// Basic default associated type
+// ============================================================================
+
+type Container is protocol {
+    // Associated type with default - implementations can override
+    type Item is Int;
+
+    fn get(&self, index: Int) -> Maybe<Self.Item>;
+    fn len(&self) -> Int;
+};
+
+// Implementation using the default Item = Int
+type IntContainer is {
+    items: List<Int>,
+};
+
+implement Container for IntContainer {
+    // Item defaults to Int, no need to specify
+
+    fn get(&self, index: Int) -> Maybe<Int> {
+        self.items.get(index)
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+}
+
+// Implementation overriding the default
+type TextContainer is {
+    items: List<Text>,
+};
+
+implement Container for TextContainer {
+    type Item is Text;  // Override the default
+
+    fn get(&self, index: Int) -> Maybe<Text> {
+        self.items.get(index)
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+}
+
+// ============================================================================
+// Default associated type with bounds
+// ============================================================================
+
+type Processor is protocol {
+    // Default type with a bound
+    type Input: Clone = Text;
+    type Output: Display = Text;
+
+    fn process(&self, input: Self.Input) -> Self.Output;
+};
+
+// Using defaults (Text for both)
+type EchoProcessor is ();
+
+implement Processor for EchoProcessor {
+    // Uses default Input = Text and Output = Text
+
+    fn process(&self, input: Text) -> Text {
+        input  // Just echo back
+    }
+}
+
+// Override with different types that satisfy bounds
+type IntToTextProcessor is ();
+
+implement Processor for IntToTextProcessor {
+    type Input is Int;  // Int: Clone
+    type Output is Text;  // Text: Display (default)
+
+    fn process(&self, input: Int) -> Text {
+        f"{input}"
+    }
+}
+
+// ============================================================================
+// Multiple default associated types
+// ============================================================================
+
+type DataStore is protocol {
+    type Key is Text;
+    type Value is Text;
+    type Error is StoreError;
+
+    fn get(&self, key: Self.Key) -> Result<Self.Value, Self.Error>;
+    fn set(&mut self, key: Self.Key, value: Self.Value) -> Result<Bool, Self.Error>;
+    fn delete(&mut self, key: Self.Key) -> Result<Bool, Self.Error>;
+};
+
+type StoreError is Failed(Text);
+
+// Use all defaults
+type SimpleStore is {
+    data: Map<Text, Text>,
+};
+
+implement DataStore for SimpleStore {
+    // Uses defaults: Key = Text, Value = Text, Error = StoreError
+
+    fn get(&self, key: Text) -> Result<Text, StoreError> {
+        // Simplified: return error for now (Map.get pattern matching is separate issue)
+        Err(Failed("Key not found"))
+    }
+
+    fn set(&mut self, key: Text, value: Text) -> Result<Bool, StoreError> {
+        self.data.insert(key, value);
+        Ok(true)
+    }
+
+    fn delete(&mut self, key: Text) -> Result<Bool, StoreError> {
+        self.data.remove(key);
+        Ok(true)
+    }
+}
+
+// Override some defaults
+type TypedStore<V> is {
+    data: Map<Text, V>,
+};
+
+implement<V: Clone> DataStore for TypedStore<V> {
+    type Value is V;  // Override Value
+    // Key and Error use defaults
+
+    fn get(&self, key: Text) -> Result<V, StoreError> {
+        Err(Failed("Key not found"))
+    }
+
+    fn set(&mut self, key: Text, value: V) -> Result<Bool, StoreError> {
+        self.data.insert(key, value);
+        Ok(true)
+    }
+
+    fn delete(&mut self, key: Text) -> Result<Bool, StoreError> {
+        self.data.remove(key);
+        Ok(true)
+    }
+}
+
+// ============================================================================
+// Default associated type referencing Self
+// ============================================================================
+
+type Buildable is protocol {
+    // Default builder type references Self
+    type Builder is DefaultBuilder<Self>;
+
+    fn builder() -> Self.Builder;
+    fn from_builder(builder: Self.Builder) -> Self;
+};
+
+type DefaultBuilder<T> is {
+    partial: Maybe<T>,
+};
+
+// ============================================================================
+// Default associated type with complex default expression
+// ============================================================================
+
+type Serializable is protocol {
+    // Default to a common serialization format
+    type Format is JsonFormat;
+    type Error is SerializeError;
+
+    fn serialize(&self) -> Result<Self.Format, Self.Error>;
+    fn deserialize(data: Self.Format) -> Result<Self, Self.Error>;
+};
+
+type JsonFormat is Text;
+type SerializeError is Failed(Text);
+
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+implement Serializable for Point {
+    // Uses defaults: Format = JsonFormat (= Text), Error = SerializeError
+
+    fn serialize(&self) -> Result<Text, SerializeError> {
+        Ok(f"{{\"x\": {self.x}, \"y\": {self.y}}}")
+    }
+
+    fn deserialize(data: Text) -> Result<Point, SerializeError> {
+        // Simplified parsing
+        Ok(Point { x: 0.0, y: 0.0 })
+    }
+}
+
+// ============================================================================
+// Default associated types in protocol extension
+// ============================================================================
+
+type Reader is protocol {
+    type Item is Byte;
+    type Error is IoError;
+
+    fn read(&mut self) -> Result<Self.Item, Self.Error>;
+};
+
+type IoError is Failed(Text);
+type Byte is Int;
+
+type BufferedReader is protocol extends Reader {
+    // Inherits defaults from Reader
+    type Buffer is List<Self.Item>;
+
+    fn fill_buffer(&mut self) -> Result<Self.Buffer, Self.Error>;
+    fn buffer(&self) -> &Self.Buffer;
+};
+
+// ============================================================================
+// Default associated types with GATs (Generic Associated Types)
+// ============================================================================
+
+// TODO: Lifetime syntax not yet supported by parser
+// type StreamingIterator is protocol {
+//     type Item<'a> is &'a Int;
+//     fn next<'a>(&'a mut self) -> Maybe<Self.Item<'a>>;
+// };
+
+type Functor is protocol {
+    // Higher-kinded default
+    type Wrapped<T> is List<T>;
+
+    fn map<A, B>(self: Self.Wrapped<A>, f: fn(A) -> B) -> Self.Wrapped<B>;
+};
+
+// ============================================================================
+// Default associated types with conditional defaults (specialization)
+// ============================================================================
+
+type Allocator is protocol {
+    // Default allocator for most types
+    type Alloc is GlobalAllocator;
+
+    fn allocate(size: Int) -> *mut Byte;
+    fn deallocate(ptr: *mut Byte, size: Int);
+};
+
+type GlobalAllocator is ();
+
+// Specialized default for arena-allocated types would use:
+// @specialize
+// implement Allocator for ArenaType {
+//     type Alloc = ArenaAllocator;
+//     ...
+// }
+
+// ============================================================================
+// Default associated types in const context
+// ============================================================================
+
+type Bounded is protocol {
+    type Bound is Int;
+
+    const MIN: Self.Bound;
+    const MAX: Self.Bound;
+
+    fn clamp(&self, min: Self.Bound, max: Self.Bound) -> Self;
+};
+
+// ============================================================================
+// Using functions with default associated types
+// ============================================================================
+
+fn process_container<C: Container>(c: &C) -> Int {
+    // C.Item defaults to Int if not overridden
+    c.len()
+}
+
+fn store_value<S: DataStore>(store: &mut S, key: S.Key, value: S.Value) -> Result<Bool, S.Error> {
+    store.set(key, value)
+}
+
+// Function that relies on the default
+fn store_text(store: &mut impl DataStore, key: Text, value: Text) -> Result<Bool, StoreError> {
+    // Works because defaults are Key = Text, Value = Text, Error = StoreError
+    store.set(key, value)
+}
+
+// ============================================================================
+// Default associated types with where clauses
+// ============================================================================
+
+type Comparable is protocol {
+    type Ordering is StandardOrdering where Self.Ordering: Eq;
+
+    fn compare(&self, other: &Self) -> Self.Ordering;
+};
+
+type StandardOrdering is Less | Equal | Greater;
+
+implement Eq for StandardOrdering {
+    fn eq(&self, other: &StandardOrdering) -> Bool {
+        match (self, other) {
+            (Less, Less) => true,
+            (Equal, Equal) => true,
+            (Greater, Greater) => true,
+            _ => false,
+        }
+    }
+}
+
+// ============================================================================
+// Overriding defaults in generic implementations
+// ============================================================================
+
+type Wrapper<T> is {
+    inner: T,
+};
+
+implement<T: Clone> Container for Wrapper<T> {
+    type Item is T;  // Override default Int with generic T
+
+    fn get(&self, index: Int) -> Maybe<T> {
+        if index == 0 {
+            Some(self.inner.clone())
+        } else {
+            None
+        }
+    }
+
+    fn len(&self) -> Int {
+        1
+    }
+}
+
+// ============================================================================
+// Test cases
+// ============================================================================
+
+fn main() {
+    // Test Container with default Item = Int
+    let int_container = IntContainer { items: [1, 2, 3] };
+    assert_eq(int_container.len(), 3);
+    assert_eq(int_container.get(0), Some(1));
+    assert_eq(int_container.get(5), None);
+
+    // Test Container with overridden Item = Text
+    let text_container = TextContainer { items: ["hello", "world"] };
+    assert_eq(text_container.len(), 2);
+    assert_eq(text_container.get(0), Some("hello"));
+
+    // Test Processor with defaults
+    let echo = EchoProcessor;
+    let result = echo.process("test");
+    assert_eq(result, "test");
+
+    // Test Processor with overrides
+    let converter = IntToTextProcessor;
+    let result = converter.process(42);
+    assert_eq(result, "42");
+
+    // Test DataStore with defaults
+    let mut simple_store = SimpleStore { data: Map.new() };
+    assert(simple_store.set("key", "value").is_ok());
+    assert_eq(simple_store.get("key"), Ok("value"));
+
+    // Test Wrapper<T> overriding default
+    let wrapper: Wrapper<Text> = Wrapper { inner: "wrapped" };
+    assert_eq(wrapper.get(0), Some("wrapped"));
+    assert_eq(wrapper.len(), 1);
+
+    // Test Serializable with defaults
+    let point = Point { x: 1.0, y: 2.0 };
+    let json = point.serialize();
+    assert(json.is_ok());
+
+    // Test generic functions using defaults
+    assert_eq(process_container(&int_container), 3);
+    assert_eq(process_container(&text_container), 2);
+
+    // Test StandardOrdering
+    let less = Less;
+    let equal = Equal;
+    assert(less.eq(&Less));
+    assert(!less.eq(&equal));
+
+    print("All default associated type tests passed!");
+}

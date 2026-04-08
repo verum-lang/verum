@@ -1,0 +1,146 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, exhaustiveness, unreachable, warnings
+//
+// Tests unreachable pattern detection where earlier patterns subsume later ones.
+// Unreachable patterns are usually mistakes and should be warned about.
+// The valid patterns section exercises correct pattern ordering.
+
+//------------------------------------------------------------------------------
+// Type Definitions
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+//------------------------------------------------------------------------------
+// Valid Patterns (For Contrast)
+//------------------------------------------------------------------------------
+
+/// VALID: More specific patterns come first.
+fn valid_order(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1..=10 => "small",
+        11..=100 => "medium",
+        _ => "large or negative",
+    }
+}
+
+/// VALID: Nested specificity correct.
+fn valid_nested_order(mm: Maybe<Maybe<Int>>) -> Text {
+    match mm {
+        Some(Some(0)) => "nested zero",
+        Some(Some(_)) => "nested something",
+        Some(None) => "outer some, inner none",
+        None => "outer none",
+    }
+}
+
+/// VALID: Guards make patterns refutable.
+fn valid_guards(n: Int) -> Text {
+    match n {
+        x if x > 100 => "large",
+        x if x > 0 => "positive",  // Different condition
+        0 => "zero",
+        _ => "negative",
+    }
+}
+
+/// VALID: All enum variants covered in order.
+fn valid_color(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+    }
+}
+
+/// VALID: Specific before general in nested.
+fn valid_maybe_specific_first(m: Maybe<Int>) -> Text {
+    match m {
+        Some(0) => "zero",
+        Some(x) if x > 0 => "positive",
+        Some(_) => "negative",
+        None => "none",
+    }
+}
+
+/// VALID: Or-patterns without overlap.
+fn valid_or_patterns(n: Int) -> Text {
+    match n {
+        1 | 2 | 3 => "small",
+        4 | 5 | 6 => "medium",
+        _ => "other",
+    }
+}
+
+/// VALID: List patterns specific to general.
+fn valid_list_patterns<T>(list: ConsList<T>) -> Text {
+    match list {
+        Nil => "empty",
+        Cons(_, Nil) => "single",
+        Cons(_, Cons(_, _)) => "multiple",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests for Valid Patterns
+//------------------------------------------------------------------------------
+
+@test
+fn main() {
+    // Valid order
+    assert(valid_order(0) == "zero");
+    assert(valid_order(5) == "small");
+    assert(valid_order(50) == "medium");
+    assert(valid_order(500) == "large or negative");
+
+    // Valid nested
+    assert(valid_nested_order(Some(Some(0))) == "nested zero");
+    assert(valid_nested_order(Some(Some(42))) == "nested something");
+    assert(valid_nested_order(Some(None)) == "outer some, inner none");
+    assert(valid_nested_order(None) == "outer none");
+
+    // Valid guards
+    assert(valid_guards(200) == "large");
+    assert(valid_guards(50) == "positive");
+    assert(valid_guards(0) == "zero");
+    assert(valid_guards(-5) == "negative");
+
+    // Valid color
+    assert(valid_color(Red) == "red");
+    assert(valid_color(Green) == "green");
+    assert(valid_color(Blue) == "blue");
+
+    // Valid maybe specific first
+    assert(valid_maybe_specific_first(Some(0)) == "zero");
+    assert(valid_maybe_specific_first(Some(5)) == "positive");
+    assert(valid_maybe_specific_first(Some(-1)) == "negative");
+    assert(valid_maybe_specific_first(None) == "none");
+
+    // Valid or patterns
+    assert(valid_or_patterns(1) == "small");
+    assert(valid_or_patterns(5) == "medium");
+    assert(valid_or_patterns(10) == "other");
+
+    // Valid list patterns
+    assert(valid_list_patterns(Nil) == "empty");
+    assert(valid_list_patterns(Cons(1, Nil)) == "single");
+    assert(valid_list_patterns(Cons(1, Cons(2, Nil))) == "multiple");
+}

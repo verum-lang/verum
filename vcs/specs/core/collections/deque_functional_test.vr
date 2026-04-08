@@ -1,0 +1,396 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, deque, filter, map, partition, count_where, filter_map, fold, for_each
+// @description: Tests for Deque functional utility methods
+
+mount core.collections.deque.{Deque};
+
+// =============================================================================
+// filter tests
+// =============================================================================
+
+@test
+fn test_deque_filter_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    let evens = d.filter(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert_eq(*evens.get(0).unwrap(), 2);
+    assert_eq(*evens.get(1).unwrap(), 4);
+}
+
+@test
+fn test_deque_filter_empty() {
+    let d: Deque<Int> = Deque.new();
+    let result = d.filter(|_v| true);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_deque_filter_none_match() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(5);
+
+    let result = d.filter(|v| *v % 2 == 0);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_deque_filter_preserves_order() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.push_back(40);
+    d.push_back(50);
+
+    let result = d.filter(|v| *v >= 30);
+    assert_eq(result.len(), 3);
+    assert_eq(*result.get(0).unwrap(), 30);
+    assert_eq(*result.get(1).unwrap(), 40);
+    assert_eq(*result.get(2).unwrap(), 50);
+}
+
+@test
+fn test_deque_filter_preserves_original() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let _filtered = d.filter(|v| *v > 1);
+    assert_eq(d.len(), 3);  // Original unchanged
+}
+
+// =============================================================================
+// map tests
+// =============================================================================
+
+@test
+fn test_deque_map_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let doubled = d.map(|v| *v * 2);
+    assert_eq(doubled.len(), 3);
+    assert_eq(*doubled.get(0).unwrap(), 2);
+    assert_eq(*doubled.get(1).unwrap(), 4);
+    assert_eq(*doubled.get(2).unwrap(), 6);
+}
+
+@test
+fn test_deque_map_empty() {
+    let d: Deque<Int> = Deque.new();
+    let result = d.map(|v| *v * 2);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_deque_map_preserves_order() {
+    let mut d = Deque.new();
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(2);
+
+    let result = d.map(|v| *v * 10);
+    assert_eq(*result.get(0).unwrap(), 30);
+    assert_eq(*result.get(1).unwrap(), 10);
+    assert_eq(*result.get(2).unwrap(), 20);
+}
+
+@test
+fn test_deque_map_preserves_original() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    let _mapped = d.map(|v| *v * 100);
+    assert_eq(d.len(), 2);
+    assert_eq(*d.get(0).unwrap(), 1);
+}
+
+// =============================================================================
+// partition tests
+// =============================================================================
+
+@test
+fn test_deque_partition_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    let (evens, odds) = d.partition(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert_eq(odds.len(), 3);
+    assert_eq(*evens.get(0).unwrap(), 2);
+    assert_eq(*evens.get(1).unwrap(), 4);
+}
+
+@test
+fn test_deque_partition_all_match() {
+    let mut d = Deque.new();
+    d.push_back(2);
+    d.push_back(4);
+
+    let (matching, rest) = d.partition(|v| *v % 2 == 0);
+    assert_eq(matching.len(), 2);
+    assert_eq(rest.len(), 0);
+}
+
+@test
+fn test_deque_partition_none_match() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+
+    let (matching, rest) = d.partition(|v| *v % 2 == 0);
+    assert_eq(matching.len(), 0);
+    assert_eq(rest.len(), 2);
+}
+
+@test
+fn test_deque_partition_empty() {
+    let d: Deque<Int> = Deque.new();
+    let (a, b) = d.partition(|_v| true);
+    assert_eq(a.len(), 0);
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn test_deque_partition_preserves_total() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    let (a, b) = d.partition(|v| *v > 3);
+    assert_eq(a.len() + b.len(), d.len());
+}
+
+// =============================================================================
+// count_where tests
+// =============================================================================
+
+@test
+fn test_deque_count_where_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    assert_eq(d.count_where(|v| *v > 3), 2);
+    assert_eq(d.count_where(|v| *v > 0), 5);
+    assert_eq(d.count_where(|v| *v > 10), 0);
+}
+
+@test
+fn test_deque_count_where_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert_eq(d.count_where(|_v| true), 0);
+}
+
+@test
+fn test_deque_count_where_all() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    assert_eq(d.count_where(|_v| true), 2);
+}
+
+@test
+fn test_deque_count_where_none() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    assert_eq(d.count_where(|_v| false), 0);
+}
+
+// =============================================================================
+// filter_map tests
+// =============================================================================
+
+@test
+fn test_deque_filter_map_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    let result = d.filter_map(|v| {
+        if *v % 2 == 0 {
+            Some(*v * 10)
+        } else {
+            None
+        }
+    });
+    assert_eq(result.len(), 2);
+    assert_eq(*result.get(0).unwrap(), 20);
+    assert_eq(*result.get(1).unwrap(), 40);
+}
+
+@test
+fn test_deque_filter_map_all_none() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    let result: Deque<Int> = d.filter_map(|_v| None);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_deque_filter_map_all_some() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let result = d.filter_map(|v| Some(*v + 10));
+    assert_eq(result.len(), 3);
+    assert_eq(*result.get(0).unwrap(), 11);
+    assert_eq(*result.get(1).unwrap(), 12);
+    assert_eq(*result.get(2).unwrap(), 13);
+}
+
+@test
+fn test_deque_filter_map_empty() {
+    let d: Deque<Int> = Deque.new();
+    let result: Deque<Int> = d.filter_map(|v| Some(*v));
+    assert_eq(result.len(), 0);
+}
+
+// =============================================================================
+// fold tests
+// =============================================================================
+
+@test
+fn test_deque_fold_sum() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    let sum = d.fold(0, |acc, v| acc + *v);
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_deque_fold_product() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    let product = d.fold(1, |acc, v| acc * *v);
+    assert_eq(product, 24);
+}
+
+@test
+fn test_deque_fold_empty() {
+    let d: Deque<Int> = Deque.new();
+    let result = d.fold(42, |acc, v| acc + *v);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_deque_fold_count() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let count = d.fold(0, |acc, _v| acc + 1);
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// for_each tests
+// =============================================================================
+
+@test
+fn test_deque_for_each_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let mut sum = 0;
+    d.for_each(|v| { sum = sum + *v; });
+    assert_eq(sum, 6);
+}
+
+@test
+fn test_deque_for_each_empty() {
+    let d: Deque<Int> = Deque.new();
+    let mut count = 0;
+    d.for_each(|_v| { count = count + 1; });
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Integration tests
+// =============================================================================
+
+@test
+fn test_filter_then_map_deque() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    let result = d.filter(|v| *v >= 3).map(|v| *v * 100);
+    assert_eq(result.len(), 3);
+    assert_eq(*result.get(0).unwrap(), 300);
+    assert_eq(*result.get(1).unwrap(), 400);
+    assert_eq(*result.get(2).unwrap(), 500);
+}
+
+@test
+fn test_partition_preserves_total_deque() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    let (a, b) = d.partition(|v| *v > 3);
+    assert_eq(a.len() + b.len(), d.len());
+}
+
+@test
+fn test_fold_with_filter() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    // Sum of even values
+    let even_sum = d.filter(|v| *v % 2 == 0).fold(0, |acc, v| acc + *v);
+    assert_eq(even_sum, 6);
+}

@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, modifiers, error
+// @description: Test duplicate function modifier detection
+// @expected-error: E034
+
+pub pub fn double_pub() {}
+
+async async fn double_async() {}
+
+pure pure fn double_pure() {}
+
+unsafe unsafe fn double_unsafe() {}

@@ -1,0 +1,203 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, cast, type
+
+// Type cast expressions
+
+// Helper types
+type UserId is (Int);
+type Dimensions is { width: Float, height: Float };
+type T is ();
+
+// Helper functions
+fn process() { }
+fn takes_float(x: Float) -> Float { x * 2.0 }
+
+fn test_numeric_casts() {
+    // Numeric casts
+    let int_to_float = 42 as Float;
+    let float_to_int = 3.14 as Int;
+    let x = 10;
+    let i32_to_i64 = x as i64;
+    let byte: u8 = 255;
+    let u8_to_u32 = byte as u32;
+}
+
+fn test_integer_size_casts() {
+    // Integer size casts
+    let small: i8 = 42;
+    let medium = small as i16;
+    let large = medium as i32;
+    let huge = large as i64;
+}
+
+fn test_signed_unsigned_casts() {
+    // Unsigned to signed and vice versa
+    let unsigned: u32 = 100;
+    let signed = unsigned as i32;
+    let back = signed as u32;
+}
+
+fn test_float_precision_casts() {
+    // Float precision casts
+    let f32_val: f32 = 3.14;
+    let f64_val = f32_val as f64;
+    let back_f32 = f64_val as f32;
+}
+
+fn test_character_casts() {
+    // Character casts
+    let char_to_int = 'A' as Int;    // 65
+    let int_to_char = 65 as Char;    // 'A'
+}
+
+fn test_boolean_casts() {
+    // Boolean casts (if supported)
+    let bool_to_int = true as Int;   // 1
+    let zero_to_bool = 0 as Bool;    // false
+    let one_to_bool = 1 as Bool;     // true
+}
+
+fn test_pointer_casts() {
+    let value = 42;
+    // Pointer casts (unsafe)
+    unsafe {
+        let ptr = &value as *const Int;
+        let raw = ptr as usize;
+        let back = raw as *const Int;
+    }
+}
+
+fn test_cast_in_expressions() {
+    let a = 10;
+    let b = 20;
+    // Cast in expressions
+    let result = (a as Float) / (b as Float);
+    let x = 5;
+    let y = 7;
+    let sum = (x as i64) + (y as i64);
+}
+
+fn test_cast_with_precedence() {
+    let a = 10;
+    let b = 20;
+    // Cast with precedence - using explicit let bindings
+    let a_float: Float = a as Float;
+    let b_float: Float = b as Float;
+    let calculated = a_float + b;
+    let other = a + b_float;
+}
+
+fn test_cast_chain() {
+    let x = 10;
+    // Cast chain
+    let multi = x as i16 as i32 as i64;
+}
+
+fn test_cast_with_method_call() {
+    let text = "hello";
+    let container = [1, 2, 3];
+    // Cast with method call
+    let len = text.len() as i64;
+    let size = container.len() as Float;
+}
+
+fn test_cast_in_function_call() {
+    // Cast in function call
+    let result = takes_float(42 as Float);
+}
+
+fn test_cast_in_array_index() {
+    let arr = [1, 2, 3, 4, 5];
+    let offset = 2;
+    let base = 0;
+    let size: usize = 3;
+    // Cast in array index
+    let index = (offset as Int) + base;
+    let value = arr[size as Int];
+}
+
+fn test_cast_in_comparison() {
+    let a = 100;
+    let b = 200;
+    // Cast in comparison
+    if (a as i64) > (b as i64) {
+        process()
+    }
+}
+
+fn test_cast_in_match() {
+    let value = 3.14;
+    // Cast in match - use parentheses to ensure proper parsing
+    let int_value = value as Int;
+    match int_value {
+        0 => (),
+        1 => (),
+        n => (),
+    }
+}
+
+fn test_newtype_cast() {
+    // Cast from/to newtype
+    let id = UserId(42);
+    let raw = id as Int;
+    let back = 100 as UserId;
+}
+
+fn test_generic_cast() {
+    // Cast with generics
+    fn cast_and_process<T, U>(value: T) -> U
+    where type T: Into<U>
+    {
+        value as U
+    }
+}
+
+fn test_protocol_object_cast() {
+    // Protocol object cast (dynamic dispatch)
+    // let trait_obj = value as &Protocol;
+}
+
+fn test_pointer_width_cast() {
+    let value = 42;
+    // Cast for pointer width
+    let as_usize = value as usize;
+}
+
+fn test_safe_cast_methods() {
+    let value = 1000;
+    let large: i64 = 1000000;
+    // Safe cast methods (preferred over raw 'as')
+    // Note: Turbofish syntax <T> is used via method syntax
+    let safe_i32: Result<i32, Text> = value.try_into();
+    let saturating: u8 = large.saturating_cast();
+    let wrapping: u16 = value.wrapping_cast();
+}
+
+fn test_cast_in_struct_init() {
+    let w = 100;
+    let h = 200;
+    // Cast in struct initialization
+    let dims = Dimensions {
+        width: w as Float,
+        height: h as Float,
+    };
+}
+
+fn test_ffi_cast() {
+    let value = 42;
+    let len = 100;
+    let data = [1, 2, 3];
+    // Cast for FFI
+    let c_int_val = value as c_int;
+    let c_size_val = len as size_t;
+    let c_ptr = data.as_ptr() as *const c_void;
+}
+
+fn test_numeric_literal_casts() {
+    // Numeric literal casts
+    let explicit_f32 = 3.14f32;
+    let explicit_i64 = 42i64;
+    let explicit_u8 = 255u8;
+}

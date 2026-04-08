@@ -1,0 +1,273 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 1ms per function (JIT)
+// @tags: jit, compilation, performance
+
+/// Benchmark for JIT (Just-In-Time) compilation
+///
+/// JIT compilation trades compile-time for runtime optimization.
+/// Tests JIT performance for various scenarios.
+
+module benchmarks.micro.jit_compile
+
+using [Benchmark, Jit]
+
+/// Simple function JIT
+fn benchmark_jit_simple_fn() {
+    let jit = JitCompiler.new();
+
+    for _ in 0..10_000 {
+        let code = "fn add(a: Int, b: Int) -> Int { a + b }";
+        let compiled = jit.compile(code);
+        let result = compiled.call<Int>(3, 4);
+        assert(result == 7);
+    }
+}
+
+/// JIT with optimization level 0 (no optimization)
+fn benchmark_jit_opt0() {
+    let jit = JitCompiler.new().with_opt_level(0);
+
+    for _ in 0..10_000 {
+        let code = "fn factorial(n: Int) -> Int { if n <= 1 { 1 } else { n * factorial(n - 1) } }";
+        let compiled = jit.compile(code);
+        let _ = compiled.call<Int>(10);
+    }
+}
+
+/// JIT with optimization level 2
+fn benchmark_jit_opt2() {
+    let jit = JitCompiler.new().with_opt_level(2);
+
+    for _ in 0..5_000 {
+        let code = "fn factorial(n: Int) -> Int { if n <= 1 { 1 } else { n * factorial(n - 1) } }";
+        let compiled = jit.compile(code);
+        let _ = compiled.call<Int>(10);
+    }
+}
+
+/// JIT with optimization level 3 (aggressive)
+fn benchmark_jit_opt3() {
+    let jit = JitCompiler.new().with_opt_level(3);
+
+    for _ in 0..2_000 {
+        let code = "fn factorial(n: Int) -> Int { if n <= 1 { 1 } else { n * factorial(n - 1) } }";
+        let compiled = jit.compile(code);
+        let _ = compiled.call<Int>(10);
+    }
+}
+
+/// JIT generic function instantiation
+fn benchmark_jit_generic() {
+    let jit = JitCompiler.new();
+
+    for _ in 0..5_000 {
+        let code = "fn identity<T>(x: T) -> T { x }";
+        let compiled = jit.compile(code);
+        // Instantiate for different types
+        let _ = compiled.instantiate<Int>().call(42);
+        let _ = compiled.instantiate<Float>().call(3.14);
+    }
+}
+
+/// JIT with closure
+fn benchmark_jit_closure() {
+    let jit = JitCompiler.new();
+
+    for _ in 0..5_000 {
+        let code = "
+            fn make_adder(n: Int) -> fn(Int) -> Int {
+                |x| x + n
+            }
+        ";
+        let compiled = jit.compile(code);
+        let adder = compiled.call<fn(Int) -> Int>(10);
+        let _ = adder(5);
+    }
+}
+
+/// JIT multiple functions
+fn benchmark_jit_multi_fn() {
+    let jit = JitCompiler.new();
+
+    for _ in 0..2_000 {
+        let code = "
+            fn add(a: Int, b: Int) -> Int { a + b }
+            fn sub(a: Int, b: Int) -> Int { a - b }
+            fn mul(a: Int, b: Int) -> Int { a * b }
+            fn div(a: Int, b: Int) -> Int { a / b }
+        ";
+        let module = jit.compile_module(code);
+        let _ = module.get_fn("add").call<Int>(1, 2);
+        let _ = module.get_fn("mul").call<Int>(3, 4);
+    }
+}
+
+/// JIT with CBGR (memory safety overhead)
+fn benchmark_jit_with_cbgr() {
+    let jit = JitCompiler.new();
+
+    for _ in 0..5_000 {
+        let code = "
+            fn sum_list(list: &List<Int>) -> Int {
+                let mut total = 0;
+                for item in list {
+                    total += item;
+                }
+                total
+            }
+        ";
+        let compiled = jit.compile(code);
+        let list = list![1, 2, 3, 4, 5];
+        let _ = compiled.call<Int>(&list);
+    }
+}
+
+/// JIT incremental compilation
+fn benchmark_jit_incremental() {
+    let jit = JitCompiler.new();
+
+    let base_code = "fn base() -> Int { 42 }";
+    let mut module = jit.compile_module(base_code);
+
+    for i in 0..1_000 {
+        // Incrementally add functions
+        let new_fn = text("fn fn{}() -> Int {{ {} }}", i, i);
+        module = module.add_function(&new_fn);
+    }
+}
+
+/// JIT hot code replacement
+fn benchmark_jit_hot_replace() {
+    let jit = JitCompiler.new();
+
+    let mut module = jit.compile_module("fn hot() -> Int { 1 }");
+
+    for i in 0..5_000 {
+        // Replace hot function
+        let new_code = text("fn hot() -> Int {{ {} }}", i);
+        module = module.replace_function("hot", &new_code);
+        let _ = module.get_fn("hot").call<Int>();
+    }
+}
+
+/// JIT async function
+fn benchmark_jit_async() {
+    let jit = JitCompiler.new();
+
+    for _ in 0..5_000 {
+        let code = "
+            async fn fetch_value() -> Int {
+                yield_now().await;
+                42
+            }
+        ";
+        let compiled = jit.compile(code);
+        // Note: Can't actually run async in benchmark, just compile
+    }
+}
+
+/// JIT with inline assembly
+fn benchmark_jit_inline_asm() {
+    let jit = JitCompiler.new();
+
+    for _ in 0..5_000 {
+        let code = "
+            fn rdtsc() -> Int64 {
+                @inline_asm
+                {
+                    \"rdtsc\"
+                    \"shl rdx, 32\"
+                    \"or rax, rdx\"
+                }
+            }
+        ";
+        let compiled = jit.compile(code);
+    }
+}
+
+/// JIT code cache hit
+fn benchmark_jit_cache_hit() {
+    let jit = JitCompiler.new().with_cache(true);
+
+    let code = "fn cached(x: Int) -> Int { x * 2 }";
+
+    // First compile (cache miss)
+    let _ = jit.compile(code);
+
+    // Subsequent compiles should hit cache
+    for _ in 0..100_000 {
+        let compiled = jit.compile(code);  // Cache hit
+        let _ = compiled.call<Int>(21);
+    }
+}
+
+/// JIT SIMD vectorization
+fn benchmark_jit_simd() {
+    let jit = JitCompiler.new().with_opt_level(3);  // Enable auto-vectorization
+
+    for _ in 0..2_000 {
+        let code = "
+            fn dot_product(a: &[Float; 1024], b: &[Float; 1024]) -> Float {
+                let mut sum = 0.0;
+                for i in 0..1024 {
+                    sum += a[i] * b[i];
+                }
+                sum
+            }
+        ";
+        let compiled = jit.compile(code);
+    }
+}
+
+/// JIT type specialization
+fn benchmark_jit_specialization() {
+    let jit = JitCompiler.new();
+
+    let code = "
+        fn process<T: Numeric>(items: List<T>) -> T {
+            items.iter().sum()
+        }
+    ";
+
+    for _ in 0..3_000 {
+        // Specialize for different types
+        let int_version = jit.compile_specialized<Int>(code);
+        let float_version = jit.compile_specialized<Float>(code);
+        let f32_version = jit.compile_specialized<Float32>(code);
+    }
+}
+
+/// JIT deoptimization
+fn benchmark_jit_deopt() {
+    let jit = JitCompiler.new();
+
+    let optimistic_code = "
+        fn guess_type(x: Any) -> Int {
+            // Optimistically assume Int
+            x as Int
+        }
+    ";
+
+    for _ in 0..1_000 {
+        let compiled = jit.compile_optimistic(optimistic_code);
+        // Deopt when assumption violated
+        let _ = compiled.call_with_deopt<Int, fn() -> Int>(42, || 0);
+    }
+}
+
+/// JIT memory usage
+fn benchmark_jit_memory() {
+    let jit = JitCompiler.new();
+
+    // Compile many functions, measure memory
+    for i in 0..100 {
+        let code = text("fn fn{}(x: Int) -> Int {{ x + {} }}", i, i);
+        let _ = jit.compile(&code);
+    }
+
+    // Get JIT memory stats
+    let stats = jit.memory_stats();
+    assert(stats.code_size > 0);
+}

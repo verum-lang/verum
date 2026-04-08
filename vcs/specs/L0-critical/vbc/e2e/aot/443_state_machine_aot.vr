@@ -1,0 +1,131 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, state-machine, fsm, automaton
+// @timeout: 30000
+
+// Finite state machine simulator
+// States: 0=START, 1=READING, 2=COMMENT, 3=ERROR, 4=DONE
+// Transitions encoded as lookup table
+
+// Transition function: (state, input) -> new_state
+// Input alphabet: 0=letter, 1=digit, 2=slash, 3=newline, 4=eof
+fn transition(state: Int, input: Int) -> Int {
+    if state == 0 {
+        // START
+        if input == 0 { 1 }       // letter -> READING
+        else if input == 2 { 2 }  // slash -> COMMENT
+        else if input == 4 { 4 }  // eof -> DONE
+        else { 3 }                // anything else -> ERROR
+    } else if state == 1 {
+        // READING
+        if input == 0 { 1 }       // letter -> stay READING
+        else if input == 1 { 1 }  // digit -> stay READING
+        else if input == 3 { 0 }  // newline -> back to START
+        else if input == 4 { 4 }  // eof -> DONE
+        else { 3 }                // else -> ERROR
+    } else if state == 2 {
+        // COMMENT (skip until newline)
+        if input == 3 { 0 }       // newline -> START
+        else if input == 4 { 4 }  // eof -> DONE
+        else { 2 }                // else -> stay in COMMENT
+    } else {
+        state // ERROR and DONE are absorbing
+    }
+}
+
+// Is state accepting?
+fn is_accepting(state: Int) -> Int {
+    if state == 4 { 1 } else { 0 }
+}
+
+fn is_error(state: Int) -> Int {
+    if state == 3 { 1 } else { 0 }
+}
+
+// Run FSM on input sequence (max 8 elements)
+type Seq8 is { s0: Int, s1: Int, s2: Int, s3: Int, s4: Int, s5: Int, s6: Int, s7: Int };
+
+fn get_seq(s: Seq8, i: Int) -> Int {
+    if i == 0 { s.s0 } else if i == 1 { s.s1 } else if i == 2 { s.s2 }
+    else if i == 3 { s.s3 } else if i == 4 { s.s4 } else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 } else { s.s7 }
+}
+
+fn run_fsm(input: Seq8, n: Int) -> Int {
+    let mut state = 0;
+    let mut i = 0;
+    while i < n {
+        state = transition(state, get_seq(input, i));
+        i = i + 1;
+    }
+    state
+}
+
+// Count how many times we visit each state
+fn count_state_visits(input: Seq8, n: Int, target: Int) -> Int {
+    let mut state = 0;
+    let mut count = 0;
+    if state == target { count = 1; }
+    let mut i = 0;
+    while i < n {
+        state = transition(state, get_seq(input, i));
+        if state == target { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_basic_fsm() -> Int {
+    // letter, letter, digit, newline, eof → should end at DONE
+    let input = Seq8 { s0: 0, s1: 0, s2: 1, s3: 3, s4: 4, s5: 0, s6: 0, s7: 0 };
+    let final_state = run_fsm(input, 5);
+    assert_eq(final_state, 4); // DONE
+    assert_eq(is_accepting(final_state), 1);
+    1
+}
+
+fn test_comment() -> Int {
+    // slash, letter, digit, newline, letter, eof
+    let input = Seq8 { s0: 2, s1: 0, s2: 1, s3: 3, s4: 0, s5: 4, s6: 0, s7: 0 };
+    let final_state = run_fsm(input, 6);
+    assert_eq(final_state, 4); // DONE
+    1
+}
+
+fn test_error() -> Int {
+    // digit at START → ERROR
+    let input = Seq8 { s0: 1, s1: 0, s2: 0, s3: 4, s4: 0, s5: 0, s6: 0, s7: 0 };
+    let final_state = run_fsm(input, 1);
+    assert_eq(final_state, 3); // ERROR
+    assert_eq(is_error(final_state), 1);
+    1
+}
+
+fn test_state_visits() -> Int {
+    // letter, newline, letter, newline, eof
+    let input = Seq8 { s0: 0, s1: 3, s2: 0, s3: 3, s4: 4, s5: 0, s6: 0, s7: 0 };
+    // States: START(0) -> READING(1) -> START(0) -> READING(1) -> START(0) -> DONE(4)
+    assert_eq(count_state_visits(input, 5, 0), 3); // START visited 3 times (initial + 2 returns)
+    assert_eq(count_state_visits(input, 5, 1), 2); // READING visited twice
+    assert_eq(count_state_visits(input, 5, 4), 1); // DONE once
+    1
+}
+
+fn test_long_reading() -> Int {
+    // 7 letters then eof
+    let input = Seq8 { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 4 };
+    let final_state = run_fsm(input, 8);
+    assert_eq(final_state, 4);
+    assert_eq(count_state_visits(input, 8, 1), 7); // READING 7 times
+    1
+}
+
+fn main() -> Int {
+    test_basic_fsm();
+    test_comment();
+    test_error();
+    test_state_visits();
+    test_long_reading();
+    print("[OK] 443_state_machine_aot");
+    0
+}

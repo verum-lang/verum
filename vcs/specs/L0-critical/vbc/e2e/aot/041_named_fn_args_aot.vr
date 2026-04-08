@@ -1,0 +1,113 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, functions, higher-order, named-functions, trampoline
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT passing named functions as closure arguments (trampoline test)
+
+fn inc(x: Int) -> Int { x + 1 }
+fn double(x: Int) -> Int { x * 2 }
+fn square(x: Int) -> Int { x * x }
+fn negate(x: Int) -> Int { 0 - x }
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn apply_n(f: fn(Int) -> Int, n: Int, x: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn map_sum(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    while i < end {
+        sum = sum + f(i);
+        i = i + 1;
+    }
+    sum
+}
+
+// Two-argument function as closure
+fn add_pair(a: Int, b: Int) -> Int { a + b }
+fn mul_pair(a: Int, b: Int) -> Int { a * b }
+
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+// Predicate function
+fn is_even(x: Int) -> Bool { x % 2 == 0 }
+fn is_positive(x: Int) -> Bool { x > 0 }
+
+fn count_if(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Basic: named fn as argument
+    assert_eq(apply(inc, 5), 6);
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(square, 5), 25);
+    assert_eq(apply(negate, 5), -5);
+
+    // Apply twice
+    assert_eq(apply_twice(inc, 5), 7);
+    assert_eq(apply_twice(double, 3), 12);  // 3->6->12
+    assert_eq(apply_twice(square, 2), 16);  // 2->4->16
+
+    // Apply N times
+    assert_eq(apply_n(inc, 10, 0), 10);
+    assert_eq(apply_n(double, 5, 1), 32);   // 1->2->4->8->16->32
+    assert_eq(apply_n(square, 3, 2), 256);  // 2->4->16->256
+
+    // Map+sum with named functions
+    assert_eq(map_sum(1, 6, square), 55);   // 1+4+9+16+25
+    assert_eq(map_sum(1, 6, double), 30);   // 2+4+6+8+10
+    assert_eq(map_sum(0, 5, inc), 15);      // 1+2+3+4+5
+
+    // Fold with named binary functions
+    assert_eq(fold_range(1, 6, 0, add_pair), 15);   // 0+1+2+3+4+5
+    assert_eq(fold_range(1, 6, 1, mul_pair), 120);  // 1*1*2*3*4*5 = 120
+
+    // Named predicate functions
+    assert_eq(count_if(0, 10, is_even), 5);
+    assert_eq(count_if(-3, 4, is_positive), 3);  // 1,2,3
+
+    // Mix named and inline closures
+    let r1 = apply(inc, apply(double, 5));  // double(5)=10, inc(10)=11
+    assert_eq(r1, 11);
+
+    let r2 = apply(|x| x + 100, apply(square, 3));  // square(3)=9, +100=109
+    assert_eq(r2, 109);
+
+    // Named fn passed to higher-order that returns closure
+    // (function composition using named functions)
+    let result = apply(double, apply(inc, apply(square, 3)));  // 3->9->10->20
+    assert_eq(result, 20);
+
+    0
+}

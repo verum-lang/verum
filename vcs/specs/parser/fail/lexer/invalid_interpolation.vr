@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, strings, interpolation, error
+// @description: Test invalid interpolation syntax
+// @expected-error: E005
+
+fn test_invalid_interpolation() {
+    let s = f"hello {";
+    let t = f"world }";
+    let u = f"nested {{x}";
+}

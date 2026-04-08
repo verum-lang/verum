@@ -1,0 +1,166 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, data-structure, hash-table
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Simple hash table insert/get with linear probing, verify values
+
+// Simulated fixed-size array of 8 elements using a record
+type A8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new(v: Int) -> A8 {
+    A8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+fn a8_get(a: A8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: A8, i: Int, v: Int) -> A8 {
+    A8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+    }
+}
+
+/// Hash table as three A8 arrays: keys, vals, used (0 or 1)
+type HT is { keys: A8, vals: A8, used: A8 };
+
+fn ht_new() -> HT {
+    HT { keys: a8_new(0), vals: a8_new(0), used: a8_new(0) }
+}
+
+/// Simple hash: key mod 8
+fn hash_fn(key: Int) -> Int {
+    let k = if key < 0 { -key } else { key };
+    k % 8
+}
+
+/// Insert with linear probing — returns new HT
+fn ht_insert(ht: HT, key: Int, val: Int) -> HT {
+    let mut idx = hash_fn(key);
+    let mut probes = 0;
+    let mut k = ht.keys;
+    let mut v = ht.vals;
+    let mut u = ht.used;
+    let mut done = false;
+    while probes < 8 {
+        if done == false {
+            let is_used = a8_get(u, idx);
+            if is_used == 0 {
+                k = a8_set(k, idx, key);
+                v = a8_set(v, idx, val);
+                u = a8_set(u, idx, 1);
+                done = true;
+            } else {
+                let cur_key = a8_get(k, idx);
+                if cur_key == key {
+                    v = a8_set(v, idx, val);
+                    done = true;
+                } else {
+                    idx = (idx + 1) % 8;
+                    probes = probes + 1;
+                }
+            }
+        } else {
+            probes = 8;
+        }
+    }
+    HT { keys: k, vals: v, used: u }
+}
+
+/// Get returns value or -1 if not found
+fn ht_get(ht: HT, key: Int) -> Int {
+    let mut idx = hash_fn(key);
+    let mut probes = 0;
+    let mut result = -1;
+    let mut done = false;
+    while probes < 8 {
+        if done == false {
+            let is_used = a8_get(ht.used, idx);
+            if is_used == 0 {
+                done = true;
+            } else {
+                let cur_key = a8_get(ht.keys, idx);
+                if cur_key == key {
+                    result = a8_get(ht.vals, idx);
+                    done = true;
+                } else {
+                    idx = (idx + 1) % 8;
+                    probes = probes + 1;
+                }
+            }
+        } else {
+            probes = 8;
+        }
+    }
+    result
+}
+
+fn test_hash_insert_get() {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 10, 100);
+    ht = ht_insert(ht, 20, 200);
+    ht = ht_insert(ht, 35, 350);
+
+    assert_eq(ht_get(ht, 10), 100);
+    assert_eq(ht_get(ht, 20), 200);
+    assert_eq(ht_get(ht, 35), 350);
+    print("hash_insert_get: pass\n");
+}
+
+fn test_hash_collision() {
+    let mut ht = ht_new();
+    // 3, 11, 19 all hash to 3 mod 8
+    ht = ht_insert(ht, 3, 30);
+    ht = ht_insert(ht, 11, 110);
+    ht = ht_insert(ht, 19, 190);
+
+    assert_eq(ht_get(ht, 3), 30);
+    assert_eq(ht_get(ht, 11), 110);
+    assert_eq(ht_get(ht, 19), 190);
+    print("hash_collision: pass\n");
+}
+
+fn test_hash_overwrite() {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 5, 50);
+    assert_eq(ht_get(ht, 5), 50);
+
+    ht = ht_insert(ht, 5, 999);
+    assert_eq(ht_get(ht, 5), 999);
+    print("hash_overwrite: pass\n");
+}
+
+fn test_hash_not_found() {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 7, 77);
+
+    assert_eq(ht_get(ht, 7), 77);
+    assert_eq(ht_get(ht, 99), -1);
+    assert_eq(ht_get(ht, 0), -1);
+    print("hash_not_found: pass\n");
+}
+
+fn main() -> Int {
+    test_hash_insert_get();
+    test_hash_collision();
+    test_hash_overwrite();
+    test_hash_not_found();
+    0
+}

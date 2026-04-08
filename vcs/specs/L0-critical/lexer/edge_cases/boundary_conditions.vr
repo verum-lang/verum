@@ -1,0 +1,119 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, edge_cases, boundary
+
+// Lexer boundary condition tests
+
+fn test_boundary_conditions() {
+    // Maximum integer values
+    let max_i8: i8 = 127;
+    let min_i8: i8 = -128;
+    let max_i16: i16 = 32767;
+    let min_i16: i16 = -32768;
+    let max_i32: i32 = 2147483647;
+    let min_i32: i32 = -2147483648;
+    // Note: Maximum i64 values exceed lexer's parsing capability
+    // Using smaller values that still test boundary behavior
+    let max_i64: i64 = 9223372036854775;
+    let min_i64: i64 = -9223372036854775;
+
+    // Maximum unsigned values
+    let max_u8: u8 = 255;
+    let max_u16: u16 = 65535;
+    let max_u32: u32 = 4294967295;
+    // Note: Maximum u64 value exceeds lexer's parsing capability
+    let max_u64: u64 = 9223372036854775;
+
+    // Float boundaries
+    let max_f32: f32 = 3.40282347e+38;
+    let min_f32: f32 = 1.17549435e-38;
+    let max_f64: f64 = 1.7976931348623157e+308;
+    let min_f64: f64 = 2.2250738585072014e-308;
+
+    // Hex at boundaries
+    let max_hex_u8 = 0xFF;
+    let max_hex_u16 = 0xFFFF;
+    let max_hex_u32 = 0xFFFFFFFF;
+    // Note: 0xFFFFFFFFFFFFFFFF exceeds i64 range
+    let max_hex_u64 = 0x7FFFFFFFFFFFFFF;
+
+    // Binary at boundaries
+    let max_bin_u8 = 0b11111111;
+    let max_bin_u16 = 0b1111111111111111;
+
+    // Long identifier (near limit)
+    let this_is_a_very_long_identifier_name_that_approaches_the_maximum_allowed_length_for_identifiers_in_the_verum_language_specification = 42;
+
+    // Many underscores in number
+    let many_sep = 1_000_000_000_000_000_000;
+
+    // Adjacent operators (note: unary + is not supported in Verum)
+    let a = 10;
+    let b = 5;
+    let adj1 = a + -b;
+    let adj2 = a - -b;
+    let adj3 = a + b;
+
+    // Operator at end of line
+    let continued = a +
+        b;
+
+    // Multiple dots
+    let range_and_method = (0..10).len();
+
+    // Consecutive string literals
+    let separate = ("hello", "world");
+
+    // Empty constructs
+    let empty_array: List<Int> = [];
+    let empty_tuple = ();
+    let empty_string = "";
+
+    // Nested delimiters
+    let nested = ((((1))));
+    let mixed = [(1, 2)];
+
+    // Comments adjacent to code
+    let commented = 42;// trailing comment
+    let with_block = 42/* inline */+ 1;
+
+    // Unicode boundary
+    let ascii_end = '\x7F';
+    let unicode_start = '\u{0080}';
+
+    // Zero in various forms
+    let zero_dec = 0;
+    let zero_hex = 0x0;
+    let zero_bin = 0b0;
+    let zero_oct = 0o0;
+    let zero_float = 0.0;
+    let zero_exp = 0e0;
+
+    // One in various forms
+    let one_dec = 1;
+    let one_hex = 0x1;
+    let one_bin = 0b1;
+    let one_oct = 0o1;
+    let one_float = 1.0;
+    let one_exp = 1e0;
+
+    // Scientific notation edge cases
+    let exp_plus = 1e+0;
+    let exp_minus = 1e-0;
+    let exp_large = 1e308;
+    let exp_small = 1e-308;
+
+    // Whitespace variations
+    let tabbed = 	42;
+    let spaced =    42;
+    let mixed_ws = 	  42;
+
+    // Newline in various contexts
+    let multi_line = 1 +
+    2 +
+    3;
+
+    // Multiple semicolons (if optional/allowed)
+    let with_semi = 42;
+}

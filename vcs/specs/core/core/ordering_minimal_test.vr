@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: ordering, debug
+// @description: Minimal test to diagnose ordering method resolution
+
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// Direct call - should work
+@test
+fn test_direct_reverse() {
+    let result = Less.reverse();
+    assert_eq(result, Greater);
+}
+
+// Direct call on variable
+@test
+fn test_variable_reverse() {
+    let ord: Ordering = Less;
+    let result = ord.reverse();
+    assert_eq(result, Greater);
+}
+
+// Call on reference - WORKS (auto-deref for explicit reference types)
+@test
+fn test_reference_reverse() {
+    let ord: Ordering = Less;
+    let ord_ref: &Ordering = &ord;
+    // This auto-derefs because ord_ref has known type &Ordering
+    let result = ord_ref.reverse();
+    assert_eq(result, Greater);
+}
+
+// Call through function taking &Ordering - WORKS
+@test
+fn test_ref_param_reverse() {
+    fn do_reverse(ord: &Ordering) -> Ordering {
+        ord.reverse()
+    }
+
+    let result = do_reverse(&Less);
+    assert_eq(result, Greater);
+}
+
+// Test with explicit dereference - WORKS
+// This is the workaround for iterator items
+@test
+fn test_iterator_deref_reverse() {
+    let orderings: List<Ordering> = [Less, Equal, Greater];
+    for ord in orderings.iter() {
+        // Explicitly dereference since auto-deref doesn't work for iterator items
+        let reversed = (*ord).reverse();
+        let back = reversed.reverse();
+        assert_eq(*ord, back);
+    }
+}
+
+// Test: bind iterator item to explicitly typed variable
+@test
+fn test_iterator_rebind_reverse() {
+    let orderings: List<Ordering> = [Less, Equal, Greater];
+    for ord in orderings.iter() {
+        // Rebind to explicitly typed variable
+        let o: &Ordering = ord;
+        let reversed = o.reverse();
+        assert(reversed is Less || reversed is Equal || reversed is Greater);
+    }
+}
+
+// NOTE: The following pattern FAILS:
+// for ord in orderings.iter() { ord.reverse(); }
+// The type of 'ord' is inferred but not resolved early enough for method lookup.
+// This is a known type inference ordering issue.
+// Workaround: Use explicit dereference (*ord).reverse()
+
+fn main() {
+    // Tests run via @test annotations
+}

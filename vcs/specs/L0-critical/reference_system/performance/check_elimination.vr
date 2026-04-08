@@ -1,0 +1,229 @@
+// @test: compile-only
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, performance, optimization, check-elimination
+
+/// Test CBGR check elimination optimizations.
+/// Redundant checks are removed when provably unnecessary.
+/// This reduces runtime overhead while maintaining safety.
+
+fn main() {
+    demonstrate_redundant_check_elimination();
+    demonstrate_loop_hoisting();
+    demonstrate_common_subexpression();
+    demonstrate_null_check_propagation();
+}
+
+/// Redundant check elimination
+/// When same reference is accessed multiple times, only first check needed
+fn demonstrate_redundant_check_elimination() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Without optimization:
+    // check(ref_val); let a = *ref_val;  // Check + load
+    // check(ref_val); let b = *ref_val;  // Check + load
+    // check(ref_val); let c = *ref_val;  // Check + load
+    // = 3 checks, 3 loads
+
+    // With optimization:
+    // check(ref_val); let a = *ref_val;  // Check + load
+    // let b = *ref_val;                  // Load only (check eliminated)
+    // let c = *ref_val;                  // Load only (check eliminated)
+    // = 1 check, 3 loads
+
+    let a = *ref_val;
+    let b = *ref_val;
+    let c = *ref_val;
+
+    // Compiler proves: if first access succeeds, subsequent accesses safe
+    // (assuming no intervening operations that could invalidate)
+
+    assert(a + b + c == 126);
+}
+
+/// Loop check hoisting
+/// Move invariant checks out of loops
+fn demonstrate_loop_hoisting() {
+    let value = Heap.new(100);
+    let ref_val: &Int = &*value;
+
+    // Without optimization:
+    // for i in 0..1000 {
+    //     check(ref_val);  // Check inside loop
+    //     sum += *ref_val;
+    // }
+    // = 1000 checks
+
+    // With optimization:
+    // check(ref_val);      // Check once before loop
+    // for i in 0..1000 {
+    //     sum += *ref_val; // No check in loop
+    // }
+    // = 1 check
+
+    let mut sum = 0;
+    for _ in 0..1000 {
+        sum += *ref_val;  // Check hoisted out of loop
+    }
+
+    assert(sum == 100_000);
+
+    // More complex: multiple refs in loop
+    let a = Heap.new(10);
+    let b = Heap.new(20);
+
+    let ref_a: &Int = &*a;
+    let ref_b: &Int = &*b;
+
+    // Both checks hoisted before loop
+    let mut total = 0;
+    for _ in 0..100 {
+        total += *ref_a + *ref_b;
+    }
+
+    assert(total == 3000);
+}
+
+/// Common subexpression elimination for checks
+fn demonstrate_common_subexpression() {
+    let values = Heap.new([1, 2, 3, 4, 5]);
+
+    // Without optimization:
+    // check(values); let a = values[0];
+    // check(values); let b = values[1];
+    // check(values); let c = values[2];
+    // = 3 checks for same allocation
+
+    // With optimization:
+    // check(values);
+    // let a = values[0]; let b = values[1]; let c = values[2];
+    // = 1 check
+
+    let a = (*values)[0];
+    let b = (*values)[1];
+    let c = (*values)[2];
+
+    assert(a + b + c == 6);
+}
+
+/// Null check propagation eliminates redundant checks
+fn demonstrate_null_check_propagation() {
+    let maybe_value: Maybe<Heap<Int>> = Maybe.Some(Heap.new(42));
+
+    match maybe_value {
+        Maybe.Some(ref value) => {
+            // After pattern match, we know value is valid
+            // No need for null checks in this branch
+
+            let ref_val: &Int = &**value;
+
+            // Multiple accesses, all known valid
+            let a = *ref_val;
+            let b = *ref_val * 2;
+            let c = *ref_val + 10;
+
+            assert(a == 42);
+            assert(b == 84);
+            assert(c == 52);
+        },
+        Maybe.None => {
+            // This branch handles null case
+        },
+    }
+}
+
+/// Check sinking - delay check until actually needed
+fn demonstrate_check_sinking() {
+    let value = Heap.new(42);
+    let ref_val: &Int = &*value;
+
+    // Compute without needing the value
+    let x = 10 + 20;
+    let y = x * 2;
+
+    // Only check when actually dereferencing
+    // (Check sunk to point of use)
+    let z = y + *ref_val;
+
+    assert(z == 102);
+}
+
+/// Check combining - merge multiple checks
+fn demonstrate_check_combining() {
+    let a = Heap.new(10);
+    let b = Heap.new(20);
+    let c = Heap.new(30);
+
+    // Without optimization:
+    // check(a); check(b); check(c);  // 3 separate checks
+
+    // With combining:
+    // combined_check(a, b, c);  // 1 batch check
+
+    // When refs are used together, checks can be batched
+    let sum = *a + *b + *c;
+
+    assert(sum == 60);
+}
+
+/// Interprocedural check elimination
+fn demonstrate_interprocedural() {
+    @inline(always)
+    fn inner(x: &Int) -> Int {
+        // If caller already checked, no need to check here
+        *x * 2
+    }
+
+    let value = Heap.new(21);
+    let ref_val: &Int = &*value;
+
+    // Check happens once at call site
+    // inner() inlined, its check eliminated
+    let result = inner(ref_val);
+
+    assert(result == 42);
+}
+
+/// Alias analysis aids check elimination
+fn demonstrate_alias_analysis() {
+    let value = Heap.new(42);
+
+    // Create two references to same allocation
+    let ref1: &Int = &*value;
+    let ref2: &Int = &*value;
+
+    // Alias analysis determines ref1 and ref2 are same allocation
+    // Only one check needed for both
+
+    let sum = *ref1 + *ref2;
+
+    assert(sum == 84);
+}
+
+/// Document optimization passes
+module optimization_passes {
+    // 1. Escape Analysis
+    //    - Promote non-escaping refs to checked tier
+    //    - Eliminates all checks for promoted refs
+
+    // 2. Redundant Check Elimination
+    //    - Remove repeated checks of same ref
+    //    - Track validity through basic blocks
+
+    // 3. Loop Invariant Code Motion
+    //    - Hoist invariant checks out of loops
+    //    - Requires proving no invalidation in loop
+
+    // 4. Common Subexpression Elimination
+    //    - Share checks for aliased references
+    //    - Requires alias analysis
+
+    // 5. Check Sinking
+    //    - Delay checks to point of use
+    //    - Reduces checks on cold paths
+
+    // 6. Check Combining
+    //    - Batch multiple checks together
+    //    - Improves cache utilization
+}

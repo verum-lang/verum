@@ -1,0 +1,754 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 3ns single capture, < 10ns multi capture
+// @tags: closure, capture, performance, micro
+
+/// Closure Capture Performance Benchmark
+///
+/// Measures the overhead of closure capture patterns in Verum:
+/// - No capture (pure function-like closures)
+/// - Single value capture
+/// - Multiple value capture
+/// - Reference capture
+/// - Mutable capture
+/// - Move capture
+/// - Nested closures
+///
+/// Targets:
+/// - No capture: < 2ns
+/// - Single capture: < 3ns
+/// - Multi capture: < 10ns (varies by size)
+/// - Reference capture: < 4ns
+/// - Mutable capture: < 5ns
+
+module vcs.benchmarks.micro.closure_capture
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Large struct for testing capture overhead
+type LargeStruct is {
+    a: Int, b: Int, c: Int, d: Int,
+    e: Int, f: Int, g: Int, h: Int,
+};
+
+implement LargeStruct {
+    fn new() -> Self {
+        LargeStruct {
+            a: 1, b: 2, c: 3, d: 4,
+            e: 5, f: 6, g: 7, h: 8,
+        }
+    }
+
+    fn sum(&self) -> Int {
+        self.a + self.b + self.c + self.d + self.e + self.f + self.g + self.h
+    }
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Closure Capture Performance");
+
+    // No capture benchmarks
+    results.add(benchmark_no_capture());
+    results.add(benchmark_no_capture_multiline());
+
+    // Single capture benchmarks
+    results.add(benchmark_capture_single_int());
+    results.add(benchmark_capture_single_float());
+    results.add(benchmark_capture_single_text());
+
+    // Multiple capture benchmarks
+    results.add(benchmark_capture_two_ints());
+    results.add(benchmark_capture_four_ints());
+    results.add(benchmark_capture_eight_ints());
+
+    // Reference capture benchmarks
+    results.add(benchmark_capture_ref());
+    results.add(benchmark_capture_ref_large());
+
+    // Mutable capture benchmarks
+    results.add(benchmark_capture_mut_single());
+    results.add(benchmark_capture_mut_multiple());
+
+    // Move capture benchmarks
+    results.add(benchmark_move_capture_small());
+    results.add(benchmark_move_capture_large());
+
+    // Nested closure benchmarks
+    results.add(benchmark_nested_closure());
+    results.add(benchmark_deeply_nested_closure());
+
+    // Closure in loop benchmarks
+    results.add(benchmark_closure_in_loop());
+    results.add(benchmark_closure_reuse());
+
+    // Higher-order function benchmarks
+    results.add(benchmark_map_closure());
+    results.add(benchmark_filter_closure());
+    results.add(benchmark_fold_closure());
+
+    results.report();
+    assert(results.all_pass(), "Closure capture performance below target");
+}
+
+/// Benchmark closure with no capture
+fn benchmark_no_capture() -> BenchmarkResult {
+    let closure = |x: Int| -> Int { x + 1 };
+    let mut sum: Int = 0;
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "no_capture",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 2.0,
+        passed: per_call_ns < 2.0,
+    }
+}
+
+/// Benchmark multiline closure with no capture
+fn benchmark_no_capture_multiline() -> BenchmarkResult {
+    let closure = |x: Int| -> Int {
+        let a = x + 1;
+        let b = a * 2;
+        let c = b - 1;
+        c
+    };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "no_capture_multiline",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 3.0,
+        passed: per_call_ns < 3.0,
+    }
+}
+
+/// Benchmark single Int capture
+fn benchmark_capture_single_int() -> BenchmarkResult {
+    let captured = 42;
+    let closure = |x: Int| -> Int { x + captured };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_single_int",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 3.0,
+        passed: per_call_ns < 3.0,
+    }
+}
+
+/// Benchmark single Float capture
+fn benchmark_capture_single_float() -> BenchmarkResult {
+    let captured = 3.14159;
+    let closure = |x: Int| -> Float { x as Float + captured };
+    let mut sum: Float = 0.0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_single_float",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 3.0,
+        passed: per_call_ns < 3.0,
+    }
+}
+
+/// Benchmark single Text capture
+fn benchmark_capture_single_text() -> BenchmarkResult {
+    let captured = "hello".to_text();
+    let closure = |_: Int| -> Int { captured.len() };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_single_text",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Benchmark capturing two Ints
+fn benchmark_capture_two_ints() -> BenchmarkResult {
+    let a = 10;
+    let b = 20;
+    let closure = |x: Int| -> Int { x + a + b };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_two_ints",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 4.0,
+        passed: per_call_ns < 4.0,
+    }
+}
+
+/// Benchmark capturing four Ints
+fn benchmark_capture_four_ints() -> BenchmarkResult {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let d = 40;
+    let closure = |x: Int| -> Int { x + a + b + c + d };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_four_ints",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 6.0,
+        passed: per_call_ns < 6.0,
+    }
+}
+
+/// Benchmark capturing eight Ints
+fn benchmark_capture_eight_ints() -> BenchmarkResult {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+    let h = 8;
+    let closure = |x: Int| -> Int { x + a + b + c + d + e + f + g + h };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_eight_ints",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 10.0,
+        passed: per_call_ns < 10.0,
+    }
+}
+
+/// Benchmark reference capture
+fn benchmark_capture_ref() -> BenchmarkResult {
+    let value = 42;
+    let closure = |x: Int| -> Int { x + *(&value) };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_ref",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 4.0,
+        passed: per_call_ns < 4.0,
+    }
+}
+
+/// Benchmark reference capture of large struct
+fn benchmark_capture_ref_large() -> BenchmarkResult {
+    let large = LargeStruct.new();
+    let closure = |x: Int| -> Int { x + (&large).sum() };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 10) {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / (BENCHMARK_ITERATIONS / 10) as Float;
+
+    BenchmarkResult {
+        name: "capture_ref_large",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 15.0,
+        passed: per_call_ns < 15.0,
+    }
+}
+
+/// Benchmark mutable single capture
+fn benchmark_capture_mut_single() -> BenchmarkResult {
+    let mut counter = 0;
+    let mut closure = || { counter += 1; counter };
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let _ = closure();
+    }
+    black_box(counter);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_mut_single",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Benchmark mutable multiple capture
+fn benchmark_capture_mut_multiple() -> BenchmarkResult {
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    let mut closure = |x: Int| {
+        a += x;
+        b += x * 2;
+        c += x * 3;
+        a + b + c
+    };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i % 100);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "capture_mut_multiple",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 8.0,
+        passed: per_call_ns < 8.0,
+    }
+}
+
+/// Benchmark move capture of small type
+fn benchmark_move_capture_small() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 1000;
+    let mut total_sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let value = 42;
+        let closure = move || { value };
+        total_sum += closure();
+    }
+    black_box(total_sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / iterations as Float;
+
+    BenchmarkResult {
+        name: "move_capture_small",
+        metric: "ns/create+call",
+        value: per_call_ns,
+        target: 20.0,
+        passed: per_call_ns < 20.0,
+    }
+}
+
+/// Benchmark move capture of large type
+fn benchmark_move_capture_large() -> BenchmarkResult {
+    let iterations = BENCHMARK_ITERATIONS / 10000;
+    let mut total_sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let large = LargeStruct.new();
+        let closure = move || { large.sum() };
+        total_sum += closure();
+    }
+    black_box(total_sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / iterations as Float;
+
+    BenchmarkResult {
+        name: "move_capture_large",
+        metric: "ns/create+call",
+        value: per_call_ns,
+        target: 100.0,
+        passed: per_call_ns < 100.0,
+    }
+}
+
+/// Benchmark nested closure
+fn benchmark_nested_closure() -> BenchmarkResult {
+    let outer_val = 10;
+    let outer = |x: Int| -> Int {
+        let inner_val = 20;
+        let inner = |y: Int| -> Int { y + outer_val + inner_val };
+        inner(x)
+    };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += outer(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "nested_closure",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 8.0,
+        passed: per_call_ns < 8.0,
+    }
+}
+
+/// Benchmark deeply nested closures
+fn benchmark_deeply_nested_closure() -> BenchmarkResult {
+    let v1 = 1;
+    let level1 = |x: Int| -> Int {
+        let v2 = 2;
+        let level2 = |y: Int| -> Int {
+            let v3 = 3;
+            let level3 = |z: Int| -> Int {
+                z + v1 + v2 + v3
+            };
+            level3(y)
+        };
+        level2(x)
+    };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 2) {
+        sum += level1(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / (BENCHMARK_ITERATIONS / 2) as Float;
+
+    BenchmarkResult {
+        name: "deeply_nested_closure",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 15.0,
+        passed: per_call_ns < 15.0,
+    }
+}
+
+/// Benchmark closure creation in loop
+fn benchmark_closure_in_loop() -> BenchmarkResult {
+    let mut sum: Int = 0;
+    let captured = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 100) {
+        let closure = |x: Int| -> Int { x + captured };
+        for j in 0..100 {
+            sum += closure(j);
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_in_loop",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 4.0,
+        passed: per_call_ns < 4.0,
+    }
+}
+
+/// Benchmark reusing same closure
+fn benchmark_closure_reuse() -> BenchmarkResult {
+    let captured = 100;
+    let closure = |x: Int| -> Int { x + captured };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += closure(i);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "closure_reuse",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 3.0,
+        passed: per_call_ns < 3.0,
+    }
+}
+
+/// Benchmark map with closure
+fn benchmark_map_closure() -> BenchmarkResult {
+    let data: List<Int> = (0..1000).collect();
+    let multiplier = 2;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        let mapped: List<Int> = data.iter().map(|x| x * multiplier).collect();
+        sum += mapped.len();
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_elem_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "map_closure",
+        metric: "ns/element",
+        value: per_elem_ns,
+        target: 5.0,
+        passed: per_elem_ns < 5.0,
+    }
+}
+
+/// Benchmark filter with closure
+fn benchmark_filter_closure() -> BenchmarkResult {
+    let data: List<Int> = (0..1000).collect();
+    let threshold = 500;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        let filtered: List<Int> = data.iter().filter(|x| *x > threshold).cloned().collect();
+        sum += filtered.len();
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_elem_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "filter_closure",
+        metric: "ns/element",
+        value: per_elem_ns,
+        target: 5.0,
+        passed: per_elem_ns < 5.0,
+    }
+}
+
+/// Benchmark fold with closure
+fn benchmark_fold_closure() -> BenchmarkResult {
+    let data: List<Int> = (0..1000).collect();
+    let initial = 0;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        let result = data.iter().fold(initial, |acc, x| acc + x);
+        sum += result;
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_elem_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "fold_closure",
+        metric: "ns/element",
+        value: per_elem_ns,
+        target: 4.0,
+        passed: per_elem_ns < 4.0,
+    }
+}
+
+// Benchmark infrastructure types
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

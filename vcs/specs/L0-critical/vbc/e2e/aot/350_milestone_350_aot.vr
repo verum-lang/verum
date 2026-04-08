@@ -1,0 +1,392 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, integration, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Milestone 350 integration test: combines multiple algorithms.
+// 1. Sieve of Eratosthenes for primes
+// 2. Binary search on sorted array
+// 3. Insertion sort
+// 4. GCD / LCM computation
+// 5. Simple hash table (open addressing)
+// All operating on fixed-size arrays, cross-verifying results.
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+fn a16_fill(v: Int) -> Arr16 {
+    Arr16 { a0: v, a1: v, a2: v, a3: v, a4: v, a5: v, a6: v, a7: v,
+            a8: v, a9: v, a10: v, a11: v, a12: v, a13: v, a14: v, a15: v }
+}
+
+// --- Part 1: Sieve of Eratosthenes (primes up to 15) ---
+// is_prime[i] = 1 if i is prime, 0 otherwise. Indices 0-15.
+fn sieve_16() -> Arr16 {
+    let mut s = a16_fill(1);
+    s = a16_set(s, 0, 0); // 0 not prime
+    s = a16_set(s, 1, 0); // 1 not prime
+    // Mark multiples of 2
+    let mut i = 4;
+    while i <= 15 {
+        s = a16_set(s, i, 0);
+        i = i + 2;
+    }
+    // Mark multiples of 3
+    i = 9;
+    while i <= 15 {
+        s = a16_set(s, i, 0);
+        i = i + 3;
+    }
+    s
+}
+
+// Collect primes into array, return (arr, count)
+type ArrCount is { arr: Arr16, len: Int };
+
+fn collect_primes(sieve: Arr16) -> ArrCount {
+    let mut arr = a16_zero();
+    let mut cnt = 0;
+    let mut i = 0;
+    while i <= 15 {
+        if a16_get(sieve, i) == 1 {
+            arr = a16_set(arr, cnt, i);
+            cnt = cnt + 1;
+        }
+        i = i + 1;
+    }
+    ArrCount { arr: arr, len: cnt }
+}
+
+// --- Part 2: Binary search ---
+fn binary_search(arr: Arr16, len: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = len - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let val = a16_get(arr, mid);
+        if val == target { return mid; }
+        if val < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    -1
+}
+
+// --- Part 3: Insertion sort ---
+fn insertion_sort(arr: Arr16, len: Int) -> Arr16 {
+    let mut a = arr;
+    let mut i = 1;
+    while i < len {
+        let key = a16_get(a, i);
+        let mut j = i - 1;
+        let mut done = 0;
+        while done == 0 {
+            if j < 0 {
+                done = 1;
+            } else if a16_get(a, j) <= key {
+                done = 1;
+            } else {
+                a = a16_set(a, j + 1, a16_get(a, j));
+                j = j - 1;
+            }
+        }
+        a = a16_set(a, j + 1, key);
+        i = i + 1;
+    }
+    a
+}
+
+fn is_sorted(arr: Arr16, len: Int) -> Int {
+    let mut i = 1;
+    while i < len {
+        if a16_get(arr, i) < a16_get(arr, i - 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// --- Part 4: GCD / LCM ---
+fn gcd_val(a: Int, bv: Int) -> Int {
+    let mut x = a;
+    let mut y = bv;
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+fn lcm_val(a: Int, bv: Int) -> Int {
+    if a == 0 { return 0; }
+    if bv == 0 { return 0; }
+    (a / gcd_val(a, bv)) * bv
+}
+
+// --- Part 5: Simple hash table (open addressing, size 16) ---
+// Keys stored in one array, values in another. 0 = empty slot.
+type HashTable is { ht_keys: Arr16, ht_vals: Arr16 };
+
+fn ht_new() -> HashTable {
+    HashTable { ht_keys: a16_zero(), ht_vals: a16_zero() }
+}
+
+fn hash_fn(key: Int) -> Int {
+    let h = ((key * 2654435761) / 65536) % 16;
+    if h < 0 { 0 - h } else { h }
+}
+
+fn ht_insert(ht: HashTable, key: Int, val: Int) -> HashTable {
+    let mut slot = hash_fn(key);
+    let mut tries = 0;
+    let mut k = ht.ht_keys;
+    let mut v = ht.ht_vals;
+    while tries < 16 {
+        let cur = a16_get(k, slot);
+        if cur == 0 {
+            k = a16_set(k, slot, key);
+            v = a16_set(v, slot, val);
+            return HashTable { ht_keys: k, ht_vals: v };
+        }
+        if cur == key {
+            v = a16_set(v, slot, val);
+            return HashTable { ht_keys: k, ht_vals: v };
+        }
+        slot = (slot + 1) % 16;
+        tries = tries + 1;
+    }
+    HashTable { ht_keys: k, ht_vals: v }
+}
+
+fn ht_get(ht: HashTable, key: Int) -> Int {
+    let mut slot = hash_fn(key);
+    let mut tries = 0;
+    while tries < 16 {
+        let cur = a16_get(ht.ht_keys, slot);
+        if cur == 0 { return -1; }
+        if cur == key { return a16_get(ht.ht_vals, slot); }
+        slot = (slot + 1) % 16;
+        tries = tries + 1;
+    }
+    -1
+}
+
+// === Tests ===
+
+fn test_sieve() {
+    let s = sieve_16();
+    // Primes up to 15: 2, 3, 5, 7, 11, 13
+    assert_eq(a16_get(s, 0), 0);
+    assert_eq(a16_get(s, 1), 0);
+    assert_eq(a16_get(s, 2), 1);
+    assert_eq(a16_get(s, 3), 1);
+    assert_eq(a16_get(s, 4), 0);
+    assert_eq(a16_get(s, 5), 1);
+    assert_eq(a16_get(s, 6), 0);
+    assert_eq(a16_get(s, 7), 1);
+    assert_eq(a16_get(s, 8), 0);
+    assert_eq(a16_get(s, 9), 0);
+    assert_eq(a16_get(s, 10), 0);
+    assert_eq(a16_get(s, 11), 1);
+    assert_eq(a16_get(s, 12), 0);
+    assert_eq(a16_get(s, 13), 1);
+    assert_eq(a16_get(s, 14), 0);
+    assert_eq(a16_get(s, 15), 0);
+    let pc = collect_primes(s);
+    assert_eq(pc.len, 6);
+}
+
+fn test_bsearch_on_primes() {
+    let s = sieve_16();
+    let pc = collect_primes(s);
+    // primes = [2, 3, 5, 7, 11, 13]
+    assert_eq(a16_get(pc.arr, 0), 2);
+    assert_eq(a16_get(pc.arr, 5), 13);
+    // Search for each prime
+    assert_eq(binary_search(pc.arr, pc.len, 2), 0);
+    assert_eq(binary_search(pc.arr, pc.len, 5), 2);
+    assert_eq(binary_search(pc.arr, pc.len, 13), 5);
+    // Search for non-primes
+    assert_eq(binary_search(pc.arr, pc.len, 4), -1);
+    assert_eq(binary_search(pc.arr, pc.len, 9), -1);
+    assert_eq(binary_search(pc.arr, pc.len, 1), -1);
+}
+
+fn test_sort_and_search() {
+    // Unsorted array
+    let unsorted = Arr16 {
+        a0: 42, a1: 17, a2: 8, a3: 99, a4: 3, a5: 55, a6: 23, a7: 71,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let sorted = insertion_sort(unsorted, 8);
+    assert_eq(is_sorted(sorted, 8), 1);
+    // Expected: 3, 8, 17, 23, 42, 55, 71, 99
+    assert_eq(a16_get(sorted, 0), 3);
+    assert_eq(a16_get(sorted, 1), 8);
+    assert_eq(a16_get(sorted, 7), 99);
+    // Binary search on sorted
+    assert_eq(binary_search(sorted, 8, 42), 4);
+    assert_eq(binary_search(sorted, 8, 3), 0);
+    assert_eq(binary_search(sorted, 8, 99), 7);
+    assert_eq(binary_search(sorted, 8, 50), -1);
+}
+
+fn test_gcd_lcm() {
+    assert_eq(gcd_val(12, 8), 4);
+    assert_eq(gcd_val(15, 10), 5);
+    assert_eq(gcd_val(7, 13), 1);
+    assert_eq(gcd_val(100, 75), 25);
+    assert_eq(lcm_val(4, 6), 12);
+    assert_eq(lcm_val(3, 5), 15);
+    assert_eq(lcm_val(12, 8), 24);
+    assert_eq(lcm_val(7, 13), 91);
+}
+
+fn test_gcd_of_primes() {
+    // GCD of any two distinct primes is 1
+    let s = sieve_16();
+    let pc = collect_primes(s);
+    // primes: 2, 3, 5, 7, 11, 13
+    let p0 = a16_get(pc.arr, 0); // 2
+    let p1 = a16_get(pc.arr, 1); // 3
+    let p2 = a16_get(pc.arr, 2); // 5
+    let p3 = a16_get(pc.arr, 3); // 7
+    assert_eq(gcd_val(p0, p1), 1);
+    assert_eq(gcd_val(p1, p2), 1);
+    assert_eq(gcd_val(p2, p3), 1);
+    assert_eq(gcd_val(p0, p3), 1);
+    // LCM of two primes = product
+    assert_eq(lcm_val(p0, p1), 6);
+    assert_eq(lcm_val(p1, p2), 15);
+    assert_eq(lcm_val(p2, p3), 35);
+}
+
+fn test_hash_table() {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 10, 100);
+    ht = ht_insert(ht, 20, 200);
+    ht = ht_insert(ht, 30, 300);
+    assert_eq(ht_get(ht, 10), 100);
+    assert_eq(ht_get(ht, 20), 200);
+    assert_eq(ht_get(ht, 30), 300);
+    assert_eq(ht_get(ht, 40), -1);
+    // Update
+    ht = ht_insert(ht, 20, 999);
+    assert_eq(ht_get(ht, 20), 999);
+}
+
+fn test_hash_primes() {
+    // Insert all primes with value = prime^2
+    let s = sieve_16();
+    let pc = collect_primes(s);
+    let mut ht = ht_new();
+    let mut i = 0;
+    while i < pc.len {
+        let p = a16_get(pc.arr, i);
+        ht = ht_insert(ht, p, p * p);
+        i = i + 1;
+    }
+    // Verify
+    assert_eq(ht_get(ht, 2), 4);
+    assert_eq(ht_get(ht, 3), 9);
+    assert_eq(ht_get(ht, 5), 25);
+    assert_eq(ht_get(ht, 7), 49);
+    assert_eq(ht_get(ht, 11), 121);
+    assert_eq(ht_get(ht, 13), 169);
+    assert_eq(ht_get(ht, 4), -1);
+}
+
+fn test_sort_stability() {
+    // Already sorted
+    let sorted = Arr16 {
+        a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let result = insertion_sort(sorted, 8);
+    assert_eq(is_sorted(result, 8), 1);
+    assert_eq(a16_get(result, 0), 1);
+    assert_eq(a16_get(result, 7), 8);
+    // Reverse sorted
+    let rev = Arr16 {
+        a0: 8, a1: 7, a2: 6, a3: 5, a4: 4, a5: 3, a6: 2, a7: 1,
+        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0
+    };
+    let result2 = insertion_sort(rev, 8);
+    assert_eq(is_sorted(result2, 8), 1);
+    assert_eq(a16_get(result2, 0), 1);
+    assert_eq(a16_get(result2, 7), 8);
+}
+
+fn test_integration_lcm_chain() {
+    // LCM(2,3) = 6, LCM(6,5) = 30, LCM(30,7) = 210
+    let s = sieve_16();
+    let pc = collect_primes(s);
+    let mut result = 1;
+    let mut i = 0;
+    // LCM of first 4 primes: 2*3*5*7 = 210
+    while i < 4 {
+        let p = a16_get(pc.arr, i);
+        result = lcm_val(result, p);
+        i = i + 1;
+    }
+    assert_eq(result, 210);
+}
+
+fn main() -> Int {
+    test_sieve();
+    test_bsearch_on_primes();
+    test_sort_and_search();
+    test_gcd_lcm();
+    test_gcd_of_primes();
+    test_hash_table();
+    test_hash_primes();
+    test_sort_stability();
+    test_integration_lcm_chain();
+    print("[OK] 350_milestone_350_aot");
+    0
+}

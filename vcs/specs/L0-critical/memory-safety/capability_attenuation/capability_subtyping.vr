@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: capability, subtyping, types
+// @timeout: 5000
+// @expect: pass
+//
+// Capability Subtyping Tests
+// ==========================
+// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+//
+// Tests subtyping rules for capability-restricted types:
+// - T with [A, B, C] <: T with [A, B] (more capabilities is subtype)
+// - T with [Caps] <: T (forgetful upcast)
+
+// ============================================================================
+// SUBTYPING: MORE CAPABILITIES IS SUBTYPE OF FEWER
+// ============================================================================
+
+// Test 1: [Read, Write] <: [Read]
+fn test_readwrite_to_read() -> () {
+    let full: Database with [Read, Write] = get_full_db();
+    let readonly: Database with [Read] = full;  // Should work: [Read, Write] ⊇ [Read]
+}
+
+// Test 2: [Read, Write, Admin] <: [Read, Write]
+fn test_admin_to_readwrite() -> () {
+    let admin: Database with [Read, Write, Admin] = get_admin_db();
+    let rw: Database with [Read, Write] = admin;  // Should work
+}
+
+// Test 3: [Read, Write, Admin] <: [Read]
+fn test_admin_to_readonly() -> () {
+    let admin: Database with [Read, Write, Admin] = get_admin_db();
+    let readonly: Database with [Read] = admin;  // Should work
+}
+
+// ============================================================================
+// SUBTYPING: FORGETFUL UPCAST
+// ============================================================================
+
+// Test 4: T with [Caps] <: T (forget capabilities)
+fn test_forget_capabilities() -> () {
+    let restricted: Database with [Read] = get_readonly_db();
+    let unrestricted: Database = restricted;  // Should work: forget capabilities
+}
+
+// Test 5: Pass capability-restricted to unrestricted function
+fn accept_any_db(db: Database) -> () {
+    // Function doesn't care about capabilities
+}
+
+fn test_pass_restricted_to_unrestricted() -> () {
+    let readonly: Database with [Read] = get_readonly_db();
+    accept_any_db(readonly);  // Should work
+}
+
+// ============================================================================
+// AUTOMATIC CAPABILITY ATTENUATION AT CALL SITES
+// ============================================================================
+
+// Test 6: Function accepts fewer capabilities - automatic attenuation
+fn analyze(db: Database with [Read]) -> Int {
+    0
+}
+
+fn test_attenuation_at_call() -> () {
+    let full_db: Database with [Read, Write] = get_full_db();
+    let result = analyze(full_db);  // Should work: automatic attenuation
+}
+
+// Test 7: Chain of attenuation
+fn readonly_op(db: Database with [Read]) -> Database with [Read] {
+    db
+}
+
+fn test_chain_attenuation() -> () {
+    let admin: Database with [Read, Write, Admin] = get_admin_db();
+    let readonly = readonly_op(admin);  // Attenuate to [Read]
+    let result = analyze(readonly);     // Already [Read], no attenuation needed
+}
+
+// ============================================================================
+// NEGATIVE TESTS - COMPILE-TIME ERRORS EXPECTED
+// ============================================================================
+
+// Test 8: Cannot add capabilities (should fail at compile time)
+// EXPECTED ERROR: capability violation
+// @expect: error
+// fn test_cannot_add_capabilities() -> () {
+//     let readonly: Database with [Read] = get_readonly_db();
+//     let full: Database with [Read, Write] = readonly;  // ERROR: cannot add Write
+// }
+
+// Test 9: Cannot call method requiring more capabilities
+// EXPECTED ERROR: capability violation
+// @expect: error
+// fn test_cannot_call_write_on_readonly() -> () {
+//     let readonly: Database with [Read] = get_readonly_db();
+//     readonly.delete_all();  // ERROR: delete requires Write, only Read available
+// }
+
+// ============================================================================
+// HELPER TYPES AND FUNCTIONS (MOCK)
+// ============================================================================
+
+type Database is { _marker: Int };
+
+fn get_readonly_db() -> Database with [Read] { Database { _marker: 0 } }
+fn get_full_db() -> Database with [Read, Write] { Database { _marker: 0 } }
+fn get_admin_db() -> Database with [Read, Write, Admin] { Database { _marker: 0 } }
+
+fn main() {
+    test_readwrite_to_read();
+    test_admin_to_readwrite();
+    test_admin_to_readonly();
+    test_forget_capabilities();
+    test_pass_restricted_to_unrestricted();
+    test_attenuation_at_call();
+    test_chain_attenuation();
+    print("Capability subtyping tests passed");
+}

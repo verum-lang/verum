@@ -1,0 +1,13 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let mut entered = false;
+
+    while false {
+        entered = true;  // Should never execute
+    }
+
+    assert(!entered);
+}

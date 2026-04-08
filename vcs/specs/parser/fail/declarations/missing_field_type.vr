@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, record, error
+// @description: Test missing field type detection
+// @expected-error: E047
+
+type Point is { x, y };
+
+type User is { name, age };
+
+type Mixed is { x: Int, y, z: Float };

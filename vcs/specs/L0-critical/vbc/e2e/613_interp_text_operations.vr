@@ -1,0 +1,179 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, text, string, format
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Text literals, concatenation, f-strings, comparison
+
+// =============================================================================
+// Basic text literals
+// =============================================================================
+
+fn test_text_literals() {
+    let s1 = "hello";
+    let s2 = "world";
+    assert_eq(s1, "hello");
+    assert_eq(s2, "world");
+
+    let empty = "";
+    assert_eq(empty, "");
+    print("  test_text_literals: ok");
+}
+
+// =============================================================================
+// Text concatenation
+// =============================================================================
+
+fn test_text_concat() {
+    let a = "hello";
+    let b = " ";
+    let c = "world";
+    let result = a + b + c;
+    assert_eq(result, "hello world");
+
+    let repeated = "abc" + "def" + "ghi";
+    assert_eq(repeated, "abcdefghi");
+    print("  test_text_concat: ok");
+}
+
+// =============================================================================
+// F-string interpolation
+// =============================================================================
+
+fn test_fstring_basic() {
+    let x = 42;
+    let msg = f"value is {x}";
+    assert_eq(msg, "value is 42");
+
+    let a = 3;
+    let b = 4;
+    let msg2 = f"{a} + {b} = {a + b}";
+    assert_eq(msg2, "3 + 4 = 7");
+    print("  test_fstring_basic: ok");
+}
+
+fn test_fstring_text() {
+    let name = "Alice";
+    let greeting = f"Hello, {name}!";
+    assert_eq(greeting, "Hello, Alice!");
+    print("  test_fstring_text: ok");
+}
+
+// =============================================================================
+// Text comparison
+// =============================================================================
+
+fn test_text_comparison() {
+    assert_eq("abc" == "abc", true);
+    assert_eq("abc" == "def", false);
+    assert_eq("abc" != "def", true);
+    assert_eq("abc" != "abc", false);
+    print("  test_text_comparison: ok");
+}
+
+// =============================================================================
+// Text in conditionals
+// =============================================================================
+
+fn classify_greeting(text: Text) -> Int {
+    if text == "hello" {
+        1
+    } else if text == "hi" {
+        2
+    } else if text == "hey" {
+        3
+    } else {
+        0
+    }
+}
+
+fn test_text_conditionals() {
+    assert_eq(classify_greeting("hello"), 1);
+    assert_eq(classify_greeting("hi"), 2);
+    assert_eq(classify_greeting("hey"), 3);
+    assert_eq(classify_greeting("yo"), 0);
+    print("  test_text_conditionals: ok");
+}
+
+// =============================================================================
+// Text in records
+// =============================================================================
+
+type Person is { name: Text, age: Int };
+
+implement Person {
+    fn new(name: Text, age: Int) -> Person {
+        Person { name: name, age: age }
+    }
+
+    fn greeting(self) -> Text {
+        f"Hi, I'm {self.name} and I'm {self.age}"
+    }
+}
+
+fn test_text_in_records() {
+    let p = Person.new("Bob", 30);
+    assert_eq(p.name, "Bob");
+    assert_eq(p.age, 30);
+
+    let g = p.greeting();
+    assert_eq(g, "Hi, I'm Bob and I'm 30");
+    print("  test_text_in_records: ok");
+}
+
+// =============================================================================
+// Text building in loops
+// =============================================================================
+
+fn test_text_in_loops() {
+    let mut count = 0;
+    let words: List<Text> = ["the", "quick", "brown", "fox"];
+    let mut i = 0;
+    while i < words.len() {
+        count = count + 1;
+        i = i + 1;
+    }
+    assert_eq(count, 4);
+    print("  test_text_in_loops: ok");
+}
+
+// =============================================================================
+// Text as function return
+// =============================================================================
+
+fn describe_number(n: Int) -> Text {
+    if n > 0 {
+        "positive"
+    } else if n < 0 {
+        "negative"
+    } else {
+        "zero"
+    }
+}
+
+fn test_text_return() {
+    assert_eq(describe_number(5), "positive");
+    assert_eq(describe_number(-3), "negative");
+    assert_eq(describe_number(0), "zero");
+    print("  test_text_return: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_text_literals();
+    test_text_concat();
+    test_fstring_basic();
+    test_fstring_text();
+    test_text_comparison();
+    test_text_conditionals();
+    test_text_in_records();
+    test_text_in_loops();
+    test_text_return();
+    print("[OK] 613_interp_text_operations");
+    0
+}

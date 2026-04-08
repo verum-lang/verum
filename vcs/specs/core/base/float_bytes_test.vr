@@ -1,0 +1,541 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, base, float, bytes, conversion
+// @description: Tests byte conversion methods for Float, Float32, Float64:
+//               to_le_bytes, to_be_bytes, from_le_bytes, from_be_bytes,
+//               to_ne_bytes, from_ne_bytes
+
+mount core.*;
+
+// =============================================================================
+// Section 1: Float — to_le_bytes / from_le_bytes roundtrip
+// =============================================================================
+
+@test
+fn test_float_le_bytes_roundtrip_zero() {
+    let val = 0.0;
+    let bytes = val.to_le_bytes();
+    let restored = Float.from_le_bytes(bytes);
+    assert_eq(restored, 0.0);
+}
+
+@test
+fn test_float_le_bytes_roundtrip_one() {
+    let val = 1.0;
+    let bytes = val.to_le_bytes();
+    let restored = Float.from_le_bytes(bytes);
+    assert_eq(restored, 1.0);
+}
+
+@test
+fn test_float_le_bytes_roundtrip_negative() {
+    let val = -42.5;
+    let bytes = val.to_le_bytes();
+    let restored = Float.from_le_bytes(bytes);
+    assert_eq(restored, -42.5);
+}
+
+@test
+fn test_float_le_bytes_roundtrip_pi() {
+    let val = 3.141592653589793;
+    let bytes = val.to_le_bytes();
+    let restored = Float.from_le_bytes(bytes);
+    assert_eq(restored, 3.141592653589793);
+}
+
+@test
+fn test_float_le_bytes_roundtrip_small() {
+    let val = 0.001;
+    let bytes = val.to_le_bytes();
+    let restored = Float.from_le_bytes(bytes);
+    assert_eq(restored, 0.001);
+}
+
+// =============================================================================
+// Section 2: Float — to_be_bytes / from_be_bytes roundtrip
+// =============================================================================
+
+@test
+fn test_float_be_bytes_roundtrip_zero() {
+    let val = 0.0;
+    let bytes = val.to_be_bytes();
+    let restored = Float.from_be_bytes(bytes);
+    assert_eq(restored, 0.0);
+}
+
+@test
+fn test_float_be_bytes_roundtrip_one() {
+    let val = 1.0;
+    let bytes = val.to_be_bytes();
+    let restored = Float.from_be_bytes(bytes);
+    assert_eq(restored, 1.0);
+}
+
+@test
+fn test_float_be_bytes_roundtrip_negative() {
+    let val = -100.25;
+    let bytes = val.to_be_bytes();
+    let restored = Float.from_be_bytes(bytes);
+    assert_eq(restored, -100.25);
+}
+
+@test
+fn test_float_be_bytes_roundtrip_large() {
+    let val = 1000000.5;
+    let bytes = val.to_be_bytes();
+    let restored = Float.from_be_bytes(bytes);
+    assert_eq(restored, 1000000.5);
+}
+
+// =============================================================================
+// Section 3: Float — to_ne_bytes / from_ne_bytes roundtrip
+// =============================================================================
+
+@test
+fn test_float_ne_bytes_roundtrip_one() {
+    let val = 1.0;
+    let bytes = val.to_ne_bytes();
+    let restored = Float.from_ne_bytes(bytes);
+    assert_eq(restored, 1.0);
+}
+
+@test
+fn test_float_ne_bytes_roundtrip_negative() {
+    let val = -99.99;
+    let bytes = val.to_ne_bytes();
+    let restored = Float.from_ne_bytes(bytes);
+    assert_eq(restored, -99.99);
+}
+
+// =============================================================================
+// Section 4: Float — endianness consistency
+// =============================================================================
+
+@test
+fn test_float_le_be_produce_8_bytes() {
+    let val = 42.0;
+    let le = val.to_le_bytes();
+    let be = val.to_be_bytes();
+    // Both should be 8 bytes for 64-bit float
+    assert_eq(le.len(), 8);
+    assert_eq(be.len(), 8);
+}
+
+@test
+fn test_float_le_be_bytes_are_reversed() {
+    let val = 1.0;
+    let le = val.to_le_bytes();
+    let be = val.to_be_bytes();
+    // LE and BE should be byte-reversed of each other
+    assert_eq(le[0], be[7]);
+    assert_eq(le[1], be[6]);
+    assert_eq(le[2], be[5]);
+    assert_eq(le[3], be[4]);
+    assert_eq(le[4], be[3]);
+    assert_eq(le[5], be[2]);
+    assert_eq(le[6], be[1]);
+    assert_eq(le[7], be[0]);
+}
+
+@test
+fn test_float_ne_equals_le_on_little_endian() {
+    // On little-endian systems (x86/ARM), ne == le
+    let val = 42.5;
+    let ne = val.to_ne_bytes();
+    let le = val.to_le_bytes();
+    assert_eq(ne[0], le[0]);
+    assert_eq(ne[1], le[1]);
+    assert_eq(ne[2], le[2]);
+    assert_eq(ne[3], le[3]);
+    assert_eq(ne[4], le[4]);
+    assert_eq(ne[5], le[5]);
+    assert_eq(ne[6], le[6]);
+    assert_eq(ne[7], le[7]);
+}
+
+// =============================================================================
+// Section 5: Float — bits consistency
+// =============================================================================
+
+@test
+fn test_float_bytes_bits_consistency() {
+    let val = 1.0;
+    let bits = val.to_bits();
+    let le_bytes = val.to_le_bytes();
+    // Verify the byte representation matches the bit pattern
+    let restored_bits = Float.from_le_bytes(le_bytes).to_bits();
+    assert_eq(bits, restored_bits);
+}
+
+@test
+fn test_float_zero_bytes() {
+    let val = 0.0;
+    let le = val.to_le_bytes();
+    // IEEE 754: +0.0 is all zeros
+    assert_eq(le[0], 0 as Byte);
+    assert_eq(le[1], 0 as Byte);
+    assert_eq(le[2], 0 as Byte);
+    assert_eq(le[3], 0 as Byte);
+    assert_eq(le[4], 0 as Byte);
+    assert_eq(le[5], 0 as Byte);
+    assert_eq(le[6], 0 as Byte);
+    assert_eq(le[7], 0 as Byte);
+}
+
+// =============================================================================
+// Section 6: Float32 — to_le_bytes / from_le_bytes roundtrip
+// =============================================================================
+
+@test
+fn test_float32_le_bytes_roundtrip_zero() {
+    let val = 0.0 as Float32;
+    let bytes = val.to_le_bytes();
+    let restored = Float32.from_le_bytes(bytes);
+    assert_eq(restored, 0.0 as Float32);
+}
+
+@test
+fn test_float32_le_bytes_roundtrip_one() {
+    let val = 1.0 as Float32;
+    let bytes = val.to_le_bytes();
+    let restored = Float32.from_le_bytes(bytes);
+    assert_eq(restored, 1.0 as Float32);
+}
+
+@test
+fn test_float32_le_bytes_roundtrip_negative() {
+    let val = -42.5 as Float32;
+    let bytes = val.to_le_bytes();
+    let restored = Float32.from_le_bytes(bytes);
+    assert_eq(restored, -42.5 as Float32);
+}
+
+@test
+fn test_float32_le_bytes_roundtrip_large() {
+    let val = 1000.0 as Float32;
+    let bytes = val.to_le_bytes();
+    let restored = Float32.from_le_bytes(bytes);
+    assert_eq(restored, 1000.0 as Float32);
+}
+
+// =============================================================================
+// Section 7: Float32 — to_be_bytes / from_be_bytes roundtrip
+// =============================================================================
+
+@test
+fn test_float32_be_bytes_roundtrip_zero() {
+    let val = 0.0 as Float32;
+    let bytes = val.to_be_bytes();
+    let restored = Float32.from_be_bytes(bytes);
+    assert_eq(restored, 0.0 as Float32);
+}
+
+@test
+fn test_float32_be_bytes_roundtrip_one() {
+    let val = 1.0 as Float32;
+    let bytes = val.to_be_bytes();
+    let restored = Float32.from_be_bytes(bytes);
+    assert_eq(restored, 1.0 as Float32);
+}
+
+@test
+fn test_float32_be_bytes_roundtrip_negative() {
+    let val = -99.5 as Float32;
+    let bytes = val.to_be_bytes();
+    let restored = Float32.from_be_bytes(bytes);
+    assert_eq(restored, -99.5 as Float32);
+}
+
+// =============================================================================
+// Section 8: Float32 — ne_bytes and endianness
+// =============================================================================
+
+@test
+fn test_float32_ne_bytes_roundtrip() {
+    let val = 42.0 as Float32;
+    let bytes = val.to_ne_bytes();
+    let restored = Float32.from_ne_bytes(bytes);
+    assert_eq(restored, 42.0 as Float32);
+}
+
+@test
+fn test_float32_produces_4_bytes() {
+    let val = 1.0 as Float32;
+    let le = val.to_le_bytes();
+    let be = val.to_be_bytes();
+    assert_eq(le.len(), 4);
+    assert_eq(be.len(), 4);
+}
+
+@test
+fn test_float32_le_be_reversed() {
+    let val = 1.0 as Float32;
+    let le = val.to_le_bytes();
+    let be = val.to_be_bytes();
+    assert_eq(le[0], be[3]);
+    assert_eq(le[1], be[2]);
+    assert_eq(le[2], be[1]);
+    assert_eq(le[3], be[0]);
+}
+
+@test
+fn test_float32_zero_bytes() {
+    let val = 0.0 as Float32;
+    let le = val.to_le_bytes();
+    assert_eq(le[0], 0 as Byte);
+    assert_eq(le[1], 0 as Byte);
+    assert_eq(le[2], 0 as Byte);
+    assert_eq(le[3], 0 as Byte);
+}
+
+@test
+fn test_float32_bits_consistency() {
+    let val = 1.0 as Float32;
+    let bits = val.to_bits();
+    let restored_bits = Float32.from_le_bytes(val.to_le_bytes()).to_bits();
+    assert_eq(bits, restored_bits);
+}
+
+// =============================================================================
+// Section 9: Float64 — to_le_bytes / from_le_bytes roundtrip
+// =============================================================================
+
+@test
+fn test_float64_le_bytes_roundtrip_zero() {
+    let val = 0.0 as Float64;
+    let bytes = val.to_le_bytes();
+    let restored = Float64.from_le_bytes(bytes);
+    assert_eq(restored, 0.0 as Float64);
+}
+
+@test
+fn test_float64_le_bytes_roundtrip_one() {
+    let val = 1.0 as Float64;
+    let bytes = val.to_le_bytes();
+    let restored = Float64.from_le_bytes(bytes);
+    assert_eq(restored, 1.0 as Float64);
+}
+
+@test
+fn test_float64_le_bytes_roundtrip_negative() {
+    let val = -42.5 as Float64;
+    let bytes = val.to_le_bytes();
+    let restored = Float64.from_le_bytes(bytes);
+    assert_eq(restored, -42.5 as Float64);
+}
+
+@test
+fn test_float64_le_bytes_roundtrip_pi() {
+    let val = 3.141592653589793 as Float64;
+    let bytes = val.to_le_bytes();
+    let restored = Float64.from_le_bytes(bytes);
+    assert_eq(restored, 3.141592653589793 as Float64);
+}
+
+// =============================================================================
+// Section 10: Float64 — to_be_bytes / from_be_bytes roundtrip
+// =============================================================================
+
+@test
+fn test_float64_be_bytes_roundtrip_zero() {
+    let val = 0.0 as Float64;
+    let bytes = val.to_be_bytes();
+    let restored = Float64.from_be_bytes(bytes);
+    assert_eq(restored, 0.0 as Float64);
+}
+
+@test
+fn test_float64_be_bytes_roundtrip_one() {
+    let val = 1.0 as Float64;
+    let bytes = val.to_be_bytes();
+    let restored = Float64.from_be_bytes(bytes);
+    assert_eq(restored, 1.0 as Float64);
+}
+
+@test
+fn test_float64_be_bytes_roundtrip_negative() {
+    let val = -100.25 as Float64;
+    let bytes = val.to_be_bytes();
+    let restored = Float64.from_be_bytes(bytes);
+    assert_eq(restored, -100.25 as Float64);
+}
+
+// =============================================================================
+// Section 11: Float64 — ne_bytes and endianness
+// =============================================================================
+
+@test
+fn test_float64_ne_bytes_roundtrip() {
+    let val = 42.5 as Float64;
+    let bytes = val.to_ne_bytes();
+    let restored = Float64.from_ne_bytes(bytes);
+    assert_eq(restored, 42.5 as Float64);
+}
+
+@test
+fn test_float64_produces_8_bytes() {
+    let val = 1.0 as Float64;
+    let le = val.to_le_bytes();
+    let be = val.to_be_bytes();
+    assert_eq(le.len(), 8);
+    assert_eq(be.len(), 8);
+}
+
+@test
+fn test_float64_le_be_reversed() {
+    let val = 1.0 as Float64;
+    let le = val.to_le_bytes();
+    let be = val.to_be_bytes();
+    assert_eq(le[0], be[7]);
+    assert_eq(le[1], be[6]);
+    assert_eq(le[2], be[5]);
+    assert_eq(le[3], be[4]);
+    assert_eq(le[4], be[3]);
+    assert_eq(le[5], be[2]);
+    assert_eq(le[6], be[1]);
+    assert_eq(le[7], be[0]);
+}
+
+@test
+fn test_float64_zero_bytes() {
+    let val = 0.0 as Float64;
+    let le = val.to_le_bytes();
+    assert_eq(le[0], 0 as Byte);
+    assert_eq(le[1], 0 as Byte);
+    assert_eq(le[2], 0 as Byte);
+    assert_eq(le[3], 0 as Byte);
+    assert_eq(le[4], 0 as Byte);
+    assert_eq(le[5], 0 as Byte);
+    assert_eq(le[6], 0 as Byte);
+    assert_eq(le[7], 0 as Byte);
+}
+
+@test
+fn test_float64_bits_consistency() {
+    let val = 1.0 as Float64;
+    let bits = val.to_bits();
+    let restored_bits = Float64.from_le_bytes(val.to_le_bytes()).to_bits();
+    assert_eq(bits, restored_bits);
+}
+
+// =============================================================================
+// Section 12: Cross-type consistency
+// =============================================================================
+
+@test
+fn test_float_float64_same_bytes() {
+    // Float and Float64 are both 64-bit, their byte representations should match
+    let f = 42.5;
+    let f64_val = 42.5 as Float64;
+    let f_le = f.to_le_bytes();
+    let f64_le = f64_val.to_le_bytes();
+    assert_eq(f_le[0], f64_le[0]);
+    assert_eq(f_le[1], f64_le[1]);
+    assert_eq(f_le[2], f64_le[2]);
+    assert_eq(f_le[3], f64_le[3]);
+    assert_eq(f_le[4], f64_le[4]);
+    assert_eq(f_le[5], f64_le[5]);
+    assert_eq(f_le[6], f64_le[6]);
+    assert_eq(f_le[7], f64_le[7]);
+}
+
+@test
+fn test_float_float64_same_be_bytes() {
+    let f = 1.0;
+    let f64_val = 1.0 as Float64;
+    let f_be = f.to_be_bytes();
+    let f64_be = f64_val.to_be_bytes();
+    assert_eq(f_be[0], f64_be[0]);
+    assert_eq(f_be[1], f64_be[1]);
+    assert_eq(f_be[2], f64_be[2]);
+    assert_eq(f_be[3], f64_be[3]);
+    assert_eq(f_be[4], f64_be[4]);
+    assert_eq(f_be[5], f64_be[5]);
+    assert_eq(f_be[6], f64_be[6]);
+    assert_eq(f_be[7], f64_be[7]);
+}
+
+@test
+fn test_cross_type_from_le_bytes() {
+    // Same LE bytes should produce same value across Float and Float64
+    let val = 99.99;
+    let le = val.to_le_bytes();
+    let from_float = Float.from_le_bytes(le);
+    let from_float64 = Float64.from_le_bytes(le);
+    assert_eq(from_float, 99.99);
+    assert_eq(from_float64, 99.99 as Float64);
+}
+
+@test
+fn test_float32_smaller_than_float64() {
+    // Float32 uses 4 bytes, Float/Float64 use 8 bytes
+    let f32_val = 1.0 as Float32;
+    let f64_val = 1.0;
+    let f32_bytes = f32_val.to_le_bytes();
+    let f64_bytes = f64_val.to_le_bytes();
+    assert_eq(f32_bytes.len(), 4);
+    assert_eq(f64_bytes.len(), 8);
+}
+
+// =============================================================================
+// Section 13: Special values
+// =============================================================================
+
+@test
+fn test_float_infinity_bytes_roundtrip() {
+    let val = Float.infinity();
+    let bytes = val.to_le_bytes();
+    let restored = Float.from_le_bytes(bytes);
+    assert(restored.is_infinite());
+    assert(restored > 0.0);
+}
+
+@test
+fn test_float_neg_infinity_bytes_roundtrip() {
+    let val = Float.neg_infinity();
+    let bytes = val.to_be_bytes();
+    let restored = Float.from_be_bytes(bytes);
+    assert(restored.is_infinite());
+    assert(restored < 0.0);
+}
+
+@test
+fn test_float_nan_bytes_roundtrip() {
+    let val = Float.nan();
+    let bytes = val.to_le_bytes();
+    let restored = Float.from_le_bytes(bytes);
+    assert(restored.is_nan());
+}
+
+@test
+fn test_float32_infinity_bytes_roundtrip() {
+    let val = Float32.infinity();
+    let bytes = val.to_le_bytes();
+    let restored = Float32.from_le_bytes(bytes);
+    assert(restored.is_infinite());
+}
+
+@test
+fn test_float32_nan_bytes_roundtrip() {
+    let val = Float32.nan();
+    let bytes = val.to_be_bytes();
+    let restored = Float32.from_be_bytes(bytes);
+    assert(restored.is_nan());
+}
+
+@test
+fn test_float64_infinity_bytes_roundtrip() {
+    let val = Float64.infinity();
+    let bytes = val.to_le_bytes();
+    let restored = Float64.from_le_bytes(bytes);
+    assert(restored.is_infinite());
+}
+
+@test
+fn test_float64_nan_bytes_roundtrip() {
+    let val = Float64.nan();
+    let bytes = val.to_ne_bytes();
+    let restored = Float64.from_ne_bytes(bytes);
+    assert(restored.is_nan());
+}

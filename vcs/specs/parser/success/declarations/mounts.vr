@@ -1,0 +1,178 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, mounts, modules, import
+// @description: Test mount statement parsing (module imports)
+
+// Simple mount
+mount core.io;
+
+mount core.collections;
+
+mount core.fs;
+
+// Mount with alias
+mount core.io as io;
+
+mount core.collections as col;
+
+mount verum.runtime.async as async_runtime;
+
+// Multiple items from same path
+mount core.collections.{List, Map, Set};
+
+mount core.io.{read, write, flush};
+
+// Many items
+mount core.collections.{
+    List,
+    Map,
+    Set,
+    Deque,
+    BinaryHeap,
+    LinkedList,
+    BTreeMap,
+    BTreeSet
+};
+
+// Nested braces
+mount core.{
+    io.{read, write},
+    collections.{List, Map}
+};
+
+// Deeply nested
+mount core.{
+    io.{
+        read,
+        write,
+        fs.{File, Directory}
+    },
+    collections.{
+        List,
+        Map,
+        hash.{HashMap, HashSet}
+    }
+};
+
+// Item with alias in braces
+mount core.collections.{List as L, Map as M, Set as S};
+
+// Mixed aliases and plain
+mount core.io.{
+    read as r,
+    write as w,
+    flush
+};
+
+// Glob import (import all)
+mount core.prelude.*;
+
+mount core.collections.*;
+
+// Self reference
+mount self.submodule;
+
+mount self.utils.helpers;
+
+// Super reference
+mount super.sibling;
+
+mount super.parent.child;
+
+// Crate reference
+mount crate.root_module;
+
+mount crate.config;
+
+mount crate.utils.common;
+
+// Combined self/super/crate with items
+mount self.{module_a, module_b};
+
+mount super.{sibling_a, sibling_b.{Item1, Item2}};
+
+mount crate.{
+    config,
+    utils.{helpers, formatters}
+};
+
+// Relative paths
+mount .local_module;
+
+mount .sibling_module.Item;
+
+// Long path
+mount very.long.path.to.deeply.nested.module;
+
+mount org.company.project.module.submodule.item;
+
+// Mount to specific items in nested module
+mount core.collections.hash.HashMap;
+
+mount core.io.buffered.BufReader;
+
+// Multiple mount statements in sequence
+mount core.fmt;
+mount core.mem;
+mount core.ptr;
+mount core.ops;
+
+// Mount with visibility (re-export)
+pub mount core.collections.List;
+
+pub mount core.io.{read, write};
+
+internal mount crate.internal_utils;
+
+// Complex re-export pattern
+pub mount core.{
+    collections.{List, Map, Set},
+    io.{read, write}
+};
+
+// Mount from external crate
+mount external_crate.module;
+
+mount another_crate.{TypeA, TypeB};
+
+// Mount with path containing numbers
+mount module_v2.api;
+
+mount api_v3.{Client, Server};
+
+// Mount type and function with same name from different modules
+mount types.User;
+mount models.User as UserModel;
+
+// Underscore in path
+mount my_module.sub_module;
+
+mount _private_module.public_item;
+
+// Unicode identifiers in path (if supported)
+mount unicode_module;
+
+// Full complex example
+mount core.{
+    collections.{
+        List as Vec,
+        Map as HashMap,
+        Set as HashSet,
+        Deque
+    },
+    io.{
+        read,
+        write,
+        fs.{
+            File,
+            Directory as Dir,
+            Path
+        }
+    },
+    fmt.{
+        Display,
+        Debug,
+        format as fmt_fn
+    },
+    mem.*
+};

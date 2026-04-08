@@ -1,0 +1,725 @@
+// =============================================================================
+// semaphore_test.vr - Tests for Semaphore and SemaphoreGuard
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, semaphore, concurrency, core
+// @description: Comprehensive tests for Semaphore, SemaphoreGuard, and permit operations
+// =============================================================================
+
+// Import from sync module's re-exports
+mount core.sync.Semaphore;
+mount core.sync.SemaphoreGuard;
+
+// =============================================================================
+// Section 1: Semaphore Construction Tests
+// =============================================================================
+
+@test
+fn test_semaphore_new() {
+    let sem = Semaphore.new(3);
+    assert_eq(sem.available_permits(), 3);
+}
+
+@test
+fn test_semaphore_new_zero() {
+    let sem = Semaphore.new(0);
+    assert_eq(sem.available_permits(), 0);
+}
+
+@test
+fn test_semaphore_new_one() {
+    let sem = Semaphore.new(1);
+    assert_eq(sem.available_permits(), 1);
+}
+
+@test
+fn test_semaphore_new_large() {
+    let sem = Semaphore.new(100);
+    assert_eq(sem.available_permits(), 100);
+}
+
+@test
+fn test_semaphore_binary() {
+    let sem = Semaphore.binary();
+    assert_eq(sem.available_permits(), 1);
+}
+
+@test
+fn test_semaphore_default() {
+    let sem: Semaphore = Semaphore.default();
+    assert_eq(sem.available_permits(), 1);  // Default is binary semaphore
+}
+
+@test
+fn test_semaphore_max_permits_initial() {
+    let sem = Semaphore.new(5);
+    assert_eq(sem.max_permits(), 5);
+}
+
+@test
+fn test_semaphore_max_permits_binary() {
+    let sem = Semaphore.binary();
+    assert_eq(sem.max_permits(), 1);
+}
+
+// =============================================================================
+// Section 2: try_acquire Tests (Non-blocking)
+// =============================================================================
+
+@test
+fn test_semaphore_try_acquire_success() {
+    let sem = Semaphore.new(2);
+
+    assert(sem.try_acquire());
+    assert_eq(sem.available_permits(), 1);
+}
+
+@test
+fn test_semaphore_try_acquire_multiple() {
+    let sem = Semaphore.new(3);
+
+    assert(sem.try_acquire());
+    assert_eq(sem.available_permits(), 2);
+
+    assert(sem.try_acquire());
+    assert_eq(sem.available_permits(), 1);
+
+    assert(sem.try_acquire());
+    assert_eq(sem.available_permits(), 0);
+}
+
+@test
+fn test_semaphore_try_acquire_exhausted() {
+    let sem = Semaphore.new(1);
+
+    assert(sem.try_acquire());
+    assert_eq(sem.available_permits(), 0);
+
+    // Should fail - no permits available
+    assert(!sem.try_acquire());
+    assert_eq(sem.available_permits(), 0);
+}
+
+@test
+fn test_semaphore_try_acquire_zero_permits() {
+    let sem = Semaphore.new(0);
+
+    // Should fail immediately - no permits
+    assert(!sem.try_acquire());
+    assert_eq(sem.available_permits(), 0);
+}
+
+@test
+fn test_semaphore_try_acquire_many_success() {
+    let sem = Semaphore.new(5);
+
+    assert(sem.try_acquire_many(3));
+    assert_eq(sem.available_permits(), 2);
+}
+
+@test
+fn test_semaphore_try_acquire_many_exact() {
+    let sem = Semaphore.new(3);
+
+    assert(sem.try_acquire_many(3));
+    assert_eq(sem.available_permits(), 0);
+}
+
+@test
+fn test_semaphore_try_acquire_many_insufficient() {
+    let sem = Semaphore.new(2);
+
+    // Should fail - not enough permits
+    assert(!sem.try_acquire_many(3));
+    assert_eq(sem.available_permits(), 2);  // Unchanged
+}
+
+@test
+fn test_semaphore_try_acquire_many_one() {
+    let sem = Semaphore.new(5);
+
+    assert(sem.try_acquire_many(1));
+    assert_eq(sem.available_permits(), 4);
+}
+
+// =============================================================================
+// Section 3: release Tests
+// =============================================================================
+
+@test
+fn test_semaphore_release() {
+    let sem = Semaphore.new(2);
+
+    sem.try_acquire();
+    assert_eq(sem.available_permits(), 1);
+
+    sem.release();
+    assert_eq(sem.available_permits(), 2);
+}
+
+@test
+fn test_semaphore_release_many() {
+    let sem = Semaphore.new(5);
+
+    sem.try_acquire_many(3);
+    assert_eq(sem.available_permits(), 2);
+
+    sem.release_many(3);
+    assert_eq(sem.available_permits(), 5);
+}
+
+@test
+fn test_semaphore_release_incremental() {
+    let sem = Semaphore.new(3);
+
+    sem.try_acquire_many(3);
+    assert_eq(sem.available_permits(), 0);
+
+    sem.release();
+    assert_eq(sem.available_permits(), 1);
+
+    sem.release();
+    assert_eq(sem.available_permits(), 2);
+
+    sem.release();
+    assert_eq(sem.available_permits(), 3);
+}
+
+// =============================================================================
+// Section 4: acquire Tests (Blocking - tested via try_acquire first)
+// =============================================================================
+
+@test
+fn test_semaphore_acquire_when_available() {
+    let sem = Semaphore.new(2);
+
+    // acquire should succeed immediately when permits available
+    sem.acquire();
+    assert_eq(sem.available_permits(), 1);
+
+    sem.acquire();
+    assert_eq(sem.available_permits(), 0);
+}
+
+@test
+fn test_semaphore_acquire_many_when_available() {
+    let sem = Semaphore.new(5);
+
+    sem.acquire_many(3);
+    assert_eq(sem.available_permits(), 2);
+}
+
+@test
+fn test_semaphore_acquire_release_cycle() {
+    let sem = Semaphore.new(1);
+
+    sem.acquire();
+    assert_eq(sem.available_permits(), 0);
+
+    sem.release();
+    assert_eq(sem.available_permits(), 1);
+
+    sem.acquire();
+    assert_eq(sem.available_permits(), 0);
+
+    sem.release();
+    assert_eq(sem.available_permits(), 1);
+}
+
+// =============================================================================
+// Section 5: available_permits and add_permits Tests
+// =============================================================================
+
+@test
+fn test_semaphore_available_permits_initial() {
+    let sem = Semaphore.new(10);
+    assert_eq(sem.available_permits(), 10);
+}
+
+@test
+fn test_semaphore_available_permits_after_acquire() {
+    let sem = Semaphore.new(5);
+
+    sem.try_acquire();
+    assert_eq(sem.available_permits(), 4);
+
+    sem.try_acquire_many(2);
+    assert_eq(sem.available_permits(), 2);
+}
+
+@test
+fn test_semaphore_add_permits() {
+    let sem = Semaphore.new(2);
+    assert_eq(sem.available_permits(), 2);
+    assert_eq(sem.max_permits(), 2);
+
+    sem.add_permits(3);
+    assert_eq(sem.available_permits(), 5);
+    assert_eq(sem.max_permits(), 5);
+}
+
+@test
+fn test_semaphore_add_permits_zero() {
+    let sem = Semaphore.new(2);
+
+    sem.add_permits(0);
+    assert_eq(sem.available_permits(), 2);
+    assert_eq(sem.max_permits(), 2);
+}
+
+@test
+fn test_semaphore_add_permits_to_exhausted() {
+    let sem = Semaphore.new(1);
+
+    sem.try_acquire();
+    assert_eq(sem.available_permits(), 0);
+
+    sem.add_permits(2);
+    assert_eq(sem.available_permits(), 2);
+    assert_eq(sem.max_permits(), 3);
+}
+
+@test
+fn test_semaphore_add_permits_then_acquire_release() {
+    // This test catches the bug where add_permits didn't update max_permits,
+    // causing release assertions to fail after dynamically adding capacity.
+    let sem = Semaphore.new(2);
+
+    sem.add_permits(3);
+    assert_eq(sem.available_permits(), 5);
+    assert_eq(sem.max_permits(), 5);
+
+    // Acquire all dynamically-added permits
+    sem.acquire_many(5);
+    assert_eq(sem.available_permits(), 0);
+
+    // Release all - this would have failed before the fix
+    sem.release_many(5);
+    assert_eq(sem.available_permits(), 5);
+}
+
+@test
+fn test_semaphore_add_permits_single_acquire_release_cycle() {
+    let sem = Semaphore.new(1);
+
+    sem.add_permits(2);
+    assert_eq(sem.max_permits(), 3);
+
+    // Acquire and release one at a time
+    sem.acquire();
+    sem.acquire();
+    sem.acquire();
+    assert_eq(sem.available_permits(), 0);
+
+    sem.release();
+    sem.release();
+    sem.release();
+    assert_eq(sem.available_permits(), 3);
+}
+
+// =============================================================================
+// Section 6: SemaphoreGuard Tests (RAII)
+// =============================================================================
+
+@test
+fn test_semaphore_guard_creation() {
+    let sem = Semaphore.new(3);
+
+    {
+        let guard = sem.acquire_guard();
+        assert_eq(sem.available_permits(), 2);
+        // Guard will release on drop
+    }
+
+    assert_eq(sem.available_permits(), 3);
+}
+
+@test
+fn test_semaphore_guard_many() {
+    let sem = Semaphore.new(5);
+
+    {
+        let guard = sem.acquire_many_guard(3);
+        assert_eq(sem.available_permits(), 2);
+    }
+
+    assert_eq(sem.available_permits(), 5);
+}
+
+@test
+fn test_semaphore_guard_nested() {
+    let sem = Semaphore.new(3);
+
+    {
+        let guard1 = sem.acquire_guard();
+        assert_eq(sem.available_permits(), 2);
+
+        {
+            let guard2 = sem.acquire_guard();
+            assert_eq(sem.available_permits(), 1);
+        }
+
+        assert_eq(sem.available_permits(), 2);
+    }
+
+    assert_eq(sem.available_permits(), 3);
+}
+
+@test
+fn test_semaphore_guard_forget() {
+    let sem = Semaphore.new(2);
+
+    {
+        let guard = sem.acquire_guard();
+        assert_eq(sem.available_permits(), 1);
+        guard.forget();
+        // Permit intentionally not released
+    }
+
+    // Permit was forgotten, so still only 1 available
+    assert_eq(sem.available_permits(), 1);
+}
+
+@test
+fn test_semaphore_guard_many_forget() {
+    let sem = Semaphore.new(5);
+
+    {
+        let guard = sem.acquire_many_guard(3);
+        assert_eq(sem.available_permits(), 2);
+        guard.forget();
+    }
+
+    // 3 permits were forgotten
+    assert_eq(sem.available_permits(), 2);
+}
+
+// =============================================================================
+// Section 6b: forget_permit Tests (Capacity reduction)
+// =============================================================================
+
+@test
+fn test_semaphore_forget_permit_reduces_capacity() {
+    let sem = Semaphore.new(3);
+    assert_eq(sem.max_permits(), 3);
+
+    // Acquire a permit, then forget it (permanently reduce capacity)
+    sem.acquire();
+    sem.forget_permit();
+    assert_eq(sem.max_permits(), 2);
+    assert_eq(sem.available_permits(), 2);
+
+    // Can still use remaining capacity normally
+    sem.acquire();
+    sem.release();
+    assert_eq(sem.available_permits(), 2);
+}
+
+@test
+fn test_semaphore_forget_permit_multiple() {
+    let sem = Semaphore.new(5);
+
+    sem.acquire();
+    sem.forget_permit();
+    sem.acquire();
+    sem.forget_permit();
+    assert_eq(sem.max_permits(), 3);
+    assert_eq(sem.available_permits(), 3);
+}
+
+@test
+fn test_semaphore_guard_forget_reduces_capacity() {
+    // SemaphoreGuard.forget() should also reduce capacity
+    let sem = Semaphore.new(3);
+
+    {
+        let guard = sem.acquire_guard();
+        guard.forget();
+    }
+
+    // One permit permanently consumed
+    assert_eq(sem.available_permits(), 2);
+    assert_eq(sem.max_permits(), 3);  // Guard.forget doesn't change max
+}
+
+// =============================================================================
+// Section 7: Binary Semaphore Tests (Mutex-like behavior)
+// =============================================================================
+
+@test
+fn test_binary_semaphore_single_permit() {
+    let sem = Semaphore.binary();
+
+    assert(sem.try_acquire());
+    assert_eq(sem.available_permits(), 0);
+
+    assert(!sem.try_acquire());
+
+    sem.release();
+    assert_eq(sem.available_permits(), 1);
+}
+
+@test
+fn test_binary_semaphore_acquire_release() {
+    let sem = Semaphore.binary();
+
+    sem.acquire();
+    assert_eq(sem.available_permits(), 0);
+
+    sem.release();
+    assert_eq(sem.available_permits(), 1);
+}
+
+@test
+fn test_binary_semaphore_guard() {
+    let sem = Semaphore.binary();
+
+    {
+        let guard = sem.acquire_guard();
+        assert_eq(sem.available_permits(), 0);
+    }
+
+    assert_eq(sem.available_permits(), 1);
+}
+
+// =============================================================================
+// Section 8: Multiple Cycles Tests
+// =============================================================================
+
+@test
+fn test_semaphore_multiple_acquire_release_cycles() {
+    let sem = Semaphore.new(2);
+
+    for i in 0..5 {
+        sem.acquire();
+        sem.acquire();
+        assert_eq(sem.available_permits(), 0);
+        sem.release();
+        sem.release();
+        assert_eq(sem.available_permits(), 2);
+    }
+}
+
+@test
+fn test_semaphore_alternating_acquire_release() {
+    let sem = Semaphore.new(3);
+
+    sem.acquire();
+    assert_eq(sem.available_permits(), 2);
+
+    sem.acquire();
+    assert_eq(sem.available_permits(), 1);
+
+    sem.release();
+    assert_eq(sem.available_permits(), 2);
+
+    sem.acquire();
+    assert_eq(sem.available_permits(), 1);
+
+    sem.acquire();
+    assert_eq(sem.available_permits(), 0);
+
+    sem.release();
+    sem.release();
+    assert_eq(sem.available_permits(), 2);
+}
+
+// =============================================================================
+// Section 9: Edge Cases
+// =============================================================================
+
+@test
+fn test_semaphore_single_permit_cycles() {
+    let sem = Semaphore.new(1);
+
+    for i in 0..10 {
+        assert(sem.try_acquire());
+        assert(!sem.try_acquire());
+        sem.release();
+    }
+}
+
+@test
+fn test_semaphore_acquire_all_then_release_all() {
+    let sem = Semaphore.new(5);
+
+    // Acquire all permits one by one
+    for i in 0..5 {
+        sem.acquire();
+    }
+    assert_eq(sem.available_permits(), 0);
+
+    // Release all permits one by one
+    for i in 0..5 {
+        sem.release();
+    }
+    assert_eq(sem.available_permits(), 5);
+}
+
+@test
+fn test_semaphore_mixed_single_many() {
+    let sem = Semaphore.new(10);
+
+    sem.try_acquire();         // 9 remaining
+    sem.try_acquire_many(3);   // 6 remaining
+    sem.try_acquire();         // 5 remaining
+    sem.try_acquire_many(2);   // 3 remaining
+    assert_eq(sem.available_permits(), 3);
+
+    sem.release_many(2);       // 5 remaining
+    sem.release();             // 6 remaining
+    assert_eq(sem.available_permits(), 6);
+}
+
+@test
+fn test_semaphore_guard_in_loop() {
+    let sem = Semaphore.new(1);
+
+    for i in 0..5 {
+        let guard = sem.acquire_guard();
+        assert_eq(sem.available_permits(), 0);
+        // Guard drops here, releasing permit
+    }
+
+    assert_eq(sem.available_permits(), 1);
+}
+
+// =============================================================================
+// Section 10: Capacity Tracking Tests
+// =============================================================================
+
+@test
+fn test_semaphore_max_permits_tracked() {
+    let sem = Semaphore.new(5);
+
+    // Acquire all
+    sem.try_acquire_many(5);
+    assert_eq(sem.available_permits(), 0);
+
+    // Release all
+    sem.release_many(5);
+    assert_eq(sem.available_permits(), 5);
+}
+
+@test
+fn test_semaphore_try_acquire_many_boundary() {
+    let sem = Semaphore.new(5);
+
+    // Try to acquire exactly max
+    assert(sem.try_acquire_many(5));
+    assert_eq(sem.available_permits(), 0);
+
+    // Release and try again
+    sem.release_many(5);
+
+    // Try to acquire one more than available (should fail)
+    assert(!sem.try_acquire_many(6));
+    assert_eq(sem.available_permits(), 5);  // Unchanged
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+// =============================================================================
+// Section 11: Additional Semaphore Tests
+// =============================================================================
+
+@test
+fn test_semaphore_add_permits_then_acquire_all() {
+    let sem = Semaphore.new(2);
+    sem.add_permits(3);
+    assert_eq(sem.available_permits(), 5);
+    assert(sem.try_acquire_many(5));
+    assert_eq(sem.available_permits(), 0);
+    sem.release_many(5);
+    assert_eq(sem.available_permits(), 5);
+}
+
+@test
+fn test_semaphore_try_acquire_many_zero() {
+    let sem = Semaphore.new(3);
+    assert(sem.try_acquire_many(0));
+    assert_eq(sem.available_permits(), 3);
+}
+
+@test
+fn test_semaphore_release_then_try_acquire_cycle() {
+    let sem = Semaphore.new(1);
+    for _ in 0..10 {
+        sem.acquire();
+        assert_eq(sem.available_permits(), 0);
+        sem.release();
+        assert_eq(sem.available_permits(), 1);
+    }
+}
+
+@test
+fn test_semaphore_guard_nested_three_levels() {
+    let sem = Semaphore.new(5);
+    {
+        let g1 = sem.acquire_guard();
+        assert_eq(sem.available_permits(), 4);
+        {
+            let g2 = sem.acquire_guard();
+            assert_eq(sem.available_permits(), 3);
+            {
+                let g3 = sem.acquire_guard();
+                assert_eq(sem.available_permits(), 2);
+            }
+            assert_eq(sem.available_permits(), 3);
+        }
+        assert_eq(sem.available_permits(), 4);
+    }
+    assert_eq(sem.available_permits(), 5);
+}
+
+@test
+fn test_binary_semaphore_guard_cycle() {
+    let sem = Semaphore.binary();
+    for _ in 0..5 {
+        {
+            let guard = sem.acquire_guard();
+            assert_eq(sem.available_permits(), 0);
+        }
+        assert_eq(sem.available_permits(), 1);
+    }
+}
+
+@test
+fn test_semaphore_max_permits_after_dynamic_add() {
+    let sem = Semaphore.new(1);
+    sem.acquire();
+    sem.add_permits(4);
+    // max_permits should now be 5
+    assert_eq(sem.max_permits(), 5);
+    // available should be 4 (1 acquired, 4 added)
+    assert_eq(sem.available_permits(), 4);
+    sem.release();
+    assert_eq(sem.available_permits(), 5);
+}
+
+@test
+fn test_semaphore_try_acquire_after_full_cycle() {
+    let sem = Semaphore.new(3);
+    sem.try_acquire_many(3);
+    assert(!sem.try_acquire());
+    sem.release_many(3);
+    assert(sem.try_acquire());
+    assert_eq(sem.available_permits(), 2);
+}
+
+@test
+fn test_semaphore_release_many_at_once() {
+    let sem = Semaphore.new(10);
+    sem.acquire_many(10);
+    assert_eq(sem.available_permits(), 0);
+    sem.release_many(10);
+    assert_eq(sem.available_permits(), 10);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, references, syntax, error
+// @description: Test detection of invalid double ampersand in reference type
+// @expected-error: E086
+
+// Double ampersand is not valid reference syntax
+fn test(x: & &T) {}

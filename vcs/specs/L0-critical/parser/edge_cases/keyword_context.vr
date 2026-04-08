@@ -1,0 +1,241 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, keywords, context, disambiguation
+
+// Helper types
+type Processor is { value: Int };
+type Item is { data: Int };
+type TypeInfo is { name: Text };
+type MyType is { value: Int };
+type Default is protocol {
+    fn default() -> Self;
+};
+type Protocol is protocol {
+    fn optional_method(&self);
+};
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type Token is If | Else | For | While | Match | Return | Break | Continue | Loop | Async | Await | Type | Fn | Let | Is;
+
+// Helper functions
+fn unused() -> Int { 0 }
+fn default_value() -> Int { 0 }
+fn handle_if() { }
+fn handle_else() { }
+fn handle_for() { }
+fn handle_while() { }
+fn handle_other() { }
+
+// Keywords as struct field names (contextual)
+type Config is {
+    type_name: Text,      // 'type' as field prefix
+    fn_count: Int,        // 'fn' as field prefix
+    let_binding: Bool,    // 'let' as field prefix
+    is_valid: Bool,       // 'is' as field prefix
+    if_enabled: Bool,     // 'if' as field prefix
+    else_value: Int,      // 'else' as field prefix
+    for_each: Int,        // 'for' as field prefix
+    while_active: Bool,   // 'while' as field prefix
+    match_result: Text,   // 'match' as field prefix
+    return_value: Int,    // 'return' as field prefix
+    break_count: Int,     // 'break' as field prefix
+    continue_flag: Bool,  // 'continue' as field prefix
+    loop_count: Int,      // 'loop' as field prefix
+    async_mode: Bool,     // 'async' as field prefix
+    await_result: Text,   // 'await' as field prefix
+    try_count: Int,       // 'try' as field prefix
+    pub_field: Int,       // 'pub' as field prefix
+    mut_flag: Bool,       // 'mut' as field prefix
+    const_value: Int,     // 'const' as field prefix
+    unsafe_ptr: Int,      // 'unsafe' as field prefix
+};
+
+fn test_keywords_as_part_of_identifiers() {
+    // Keywords as part of identifiers
+    let type_checker = 1;
+    let fn_pointer = 2;
+    let let_count = 3;
+    let is_valid = true;
+    let if_condition = false;
+    let else_branch = 4;
+    let for_loop = 5;
+    let while_condition = 6;
+    let match_arm = 7;
+    let return_type = 8;
+    let break_label = 9;
+    let continue_next = 10;
+    let loop_forever = 11;
+    let async_function = 12;
+    let await_promise = 13;
+    let try_block = 14;
+    let using_context = 15;
+    let implement_trait = 16;
+    let protocol_method = 17;
+    let module_path = 18;
+    let import_statement = 19;
+    let spawn_task = 20;
+    let defer_action = 21;
+    let provide_context = 22;
+    let context_value = 23;
+}
+
+// Keywords as method names (if allowed)
+implement Processor {
+    fn match_pattern(&self, pattern: Text) -> Bool {
+        true
+    }
+
+    fn for_each(&self, f: fn(Item)) {
+        // 'for' as method prefix
+    }
+
+    fn if_present(&self) -> Bool {
+        true
+    }
+
+    fn type_of(&self) -> TypeInfo {
+        TypeInfo { name: "Processor" }
+    }
+}
+
+fn test_keywords_in_path_segments() {
+    let module_obj = Processor { value: 0 };
+    let settings = Processor { value: 0 };
+
+    // Keywords in path segments
+    let result = module_obj.value;
+    let config = settings.value;
+}
+
+// 'Self' vs 'self'
+implement MyType {
+    fn compare(&self, other: &Self) -> Bool {
+        self.value == other.value
+    }
+
+    fn create() -> Self {
+        Self { value: 0 }
+    }
+}
+
+fn test_underscore_identifiers() {
+    // Underscore identifiers
+    let _ = unused();
+    let _unused = 1;
+    let __double = 2;
+    let ___triple = 3;
+    let _0 = 4;
+    let _a = 5;
+}
+
+fn test_numeric_suffixes() {
+    // Numeric suffixes that look like keywords
+    let type1 = 1;
+    let fn2 = 2;
+    let let3 = 3;
+    let is4 = 4;
+}
+
+fn test_keywords_at_different_positions() {
+    let condition = true;
+    let value = 42;
+    let items: List<Int> = Nil;
+    let running = false;
+
+    // Keywords at different positions
+    let result = if true {
+        match value {
+            _ => loop {
+                if condition {
+                    break;
+                }
+                continue;
+            }
+        }
+    } else {
+        for item in items {
+            while running {
+                return;
+            }
+        }
+        0
+    };
+}
+
+// Contextual 'default' keyword
+implement Default for MyType {
+    fn default() -> Self {
+        MyType { value: default_value() }
+    }
+}
+
+implement Protocol for MyType {
+    fn optional_method(&self) { }
+}
+
+fn test_contextual_keywords() {
+    let x = 5;
+    let items: List<Int> = Nil;
+
+    // Contextual 'in' keyword
+    for item in items { }
+    let value = x;
+
+    // Contextual 'as' keyword
+    let casted = value as Int;
+}
+
+// Keywords in type positions
+type IfResult is { value: Int };  // type name starting with keyword
+type ForIterator is { items: List<Int> };
+
+// Keywords in generic parameters
+fn process<Match, Return>(m: Match, r: Return) { }
+
+fn test_keyword_like_identifiers() {
+    // Edge case: keyword-like identifiers
+    let r_type = 1;  // raw identifier (if supported)
+    let r_fn = 2;
+    let r_let = 3;
+}
+
+fn test_using_keywords_in_pattern() {
+    let token = Token.If;
+
+    // Using keywords in pattern
+    match token {
+        Token.If => handle_if(),
+        Token.Else => handle_else(),
+        Token.For => handle_for(),
+        Token.While => handle_while(),
+        _ => handle_other(),
+    };
+}
+
+fn test_keywords_as_labels() {
+    // Keywords as label (if labeled with quote)
+    'for_loop: for i in 0..10 {
+        break 'for_loop;
+    }
+
+    'while_loop: while true {
+        break 'while_loop;
+    }
+}
+
+fn test_keywords_followed_by_operators() {
+    let type_info = TypeInfo { name: "test" };
+    let fn_ptr = Processor { value: 0 };
+
+    // Keywords followed by operators
+    let typechecker = type_info.name;
+    let fnpointer = fn_ptr.value;
+}
+
+fn test_keywords_in_string_interpolation() {
+    let type_name = "MyType";
+    let fn_name = "process";
+
+    // Keywords in string interpolation (not actual keywords)
+    let message = type_name + fn_name;
+}

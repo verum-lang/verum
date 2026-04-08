@@ -1,0 +1,109 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 15ns per check
+// @tags: cbgr, performance, memory-safety
+
+/// Benchmark for CBGR (Checked Borrow with Generation and Region) check latency
+///
+/// This measures the overhead of Verum's three-tier reference model:
+/// - Tier 0: `&T` - Full CBGR protection (~15ns overhead)
+/// - Tier 1: `&checked T` - Compiler-proven safe (0ns)
+/// - Tier 2: `&unsafe T` - Manual safety proof (0ns)
+
+module benchmarks.micro.cbgr_check
+
+using [Benchmark]
+
+/// Baseline CBGR check through Tier 0 reference
+fn benchmark_cbgr_tier0_check() {
+    let data = list![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let ref_data: &List<Int> = &data;
+
+    for _ in 0..1_000_000 {
+        // Each access triggers CBGR validation:
+        // 1. Generation check (8 bytes)
+        // 2. Epoch capability check (4 bytes)
+        // 3. Pointer dereference
+        let _ = ref_data[0];
+    }
+}
+
+/// CBGR check with nested references
+fn benchmark_cbgr_nested_check() {
+    let outer = list![list![1, 2], list![3, 4], list![5, 6]];
+    let ref_outer: &List<List<Int>> = &outer;
+
+    for _ in 0..500_000 {
+        // Double CBGR check: outer list + inner list
+        let _ = ref_outer[0][0];
+    }
+}
+
+/// CBGR check with ThinRef (16 bytes: ptr + generation + epoch_caps)
+fn benchmark_cbgr_thin_ref() {
+    let value: Int = 42;
+    let thin_ref: &Int = &value;
+
+    for _ in 0..2_000_000 {
+        let _ = *thin_ref;
+    }
+}
+
+/// CBGR check with FatRef (24 bytes: ptr + generation + epoch_caps + len)
+fn benchmark_cbgr_fat_ref() {
+    let data = list![1, 2, 3, 4, 5];
+    let fat_ref: &[Int] = &data[..];
+
+    for _ in 0..1_000_000 {
+        // FatRef includes bounds checking
+        let _ = fat_ref[2];
+    }
+}
+
+/// Tier 1: Compiler-proven safe references (should be 0ns overhead)
+fn benchmark_cbgr_tier1_checked() {
+    let data = list![1, 2, 3, 4, 5];
+
+    // Escape analysis proves this reference never escapes
+    let ref_data: &checked List<Int> = &checked data;
+
+    for _ in 0..2_000_000 {
+        // No runtime check - compiler proved safety
+        let _ = ref_data[0];
+    }
+}
+
+/// Tier 2: Unsafe references (0ns overhead, manual proof required)
+fn benchmark_cbgr_tier2_unsafe() {
+    let data = list![1, 2, 3, 4, 5];
+
+    // SAFETY: data is stack-allocated and never moved
+    let ref_data: &unsafe List<Int> = &unsafe data;
+
+    for _ in 0..2_000_000 {
+        // No runtime check - programmer guarantees safety
+        let _ = ref_data[0];
+    }
+}
+
+/// Compare all three tiers
+fn benchmark_cbgr_tier_comparison() -> BenchmarkResult {
+    let iterations = 1_000_000;
+
+    let tier0_time = measure(|| benchmark_cbgr_tier0_check());
+    let tier1_time = measure(|| benchmark_cbgr_tier1_checked());
+    let tier2_time = measure(|| benchmark_cbgr_tier2_unsafe());
+
+    BenchmarkResult {
+        name: "cbgr_tier_comparison",
+        measurements: map!{
+            "tier0_managed" => tier0_time,
+            "tier1_checked" => tier1_time,
+            "tier2_unsafe" => tier2_time,
+        },
+        expected_tier0: Duration.from_nanos(15),
+        expected_tier1: Duration.from_nanos(0),
+        expected_tier2: Duration.from_nanos(0),
+    }
+}

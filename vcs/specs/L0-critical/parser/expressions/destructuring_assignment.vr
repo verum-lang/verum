@@ -1,0 +1,514 @@
+// @test: parse-pass
+// @level: L0
+// @tier: all
+// @tags: parser, expressions, destructuring, assignment, L0-critical
+// @description: Destructuring assignment expressions - core language feature
+// Spec: docs/architecture/new-features.md - Cluster 1: Unified Destructuring System
+// Grammar: grammar/verum.ebnf lines 1113-1131
+
+// =============================================================================
+// Type Definitions for Testing
+// =============================================================================
+
+type Point is { x: Int, y: Int };
+type Point3D is { x: Int, y: Int, z: Int };
+type Config is { host: Text, port: Int, timeout: Int, retries: Int };
+type Person is { name: Text, age: Int, address: Address };
+type Address is { street: Text, city: Text };
+type Container<T> is { value: T, metadata: Int };
+type Pair<A, B> is { first: A, second: B };
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+
+// =============================================================================
+// Section 1: Tuple Destructuring Assignment
+// =============================================================================
+
+fn test_tuple_swap() {
+    let mut a = 1;
+    let mut b = 2;
+
+    // Classic swap pattern - zero temporary variable
+    (a, b) = (b, a);
+
+    assert(a == 2);
+    assert(b == 1);
+}
+
+fn test_tuple_multiple_values() {
+    let mut x = 0;
+    let mut y = 0;
+    let mut z = 0;
+
+    // Assign multiple values from function return
+    (x, y, z) = get_coords();
+}
+
+fn test_tuple_nested() {
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    let mut d = 0;
+
+    // Nested tuple destructuring
+    ((a, b), (c, d)) = ((1, 2), (3, 4));
+
+    assert(a == 1);
+    assert(b == 2);
+    assert(c == 3);
+    assert(d == 4);
+}
+
+fn test_tuple_with_wildcard() {
+    let mut first = 0;
+    let mut last = 0;
+
+    // Ignore middle elements
+    (first, _, _, last) = (1, 2, 3, 4);
+
+    assert(first == 1);
+    assert(last == 4);
+}
+
+fn test_tuple_single_element() {
+    let mut x = 0;
+
+    // Single-element tuple (trailing comma distinguishes from grouping)
+    (x,) = (42,);
+
+    assert(x == 42);
+}
+
+fn test_tuple_empty() {
+    // Empty tuple assignment (unit type)
+    () = ();
+}
+
+// =============================================================================
+// Section 2: Array Destructuring Assignment
+// =============================================================================
+
+fn test_array_simple() {
+    let mut first = 0;
+    let mut second = 0;
+    let mut third = 0;
+
+    [first, second, third] = [1, 2, 3];
+
+    assert(first == 1);
+    assert(second == 2);
+    assert(third == 3);
+}
+
+fn test_array_with_rest_at_end() {
+    let mut head = 0;
+    let mut tail: List<Int> = [];
+
+    // Rest pattern at the end
+    [head, ..tail] = [1, 2, 3, 4, 5];
+
+    assert(head == 1);
+}
+
+fn test_array_with_rest_at_start() {
+    let mut init: List<Int> = [];
+    let mut last = 0;
+
+    // Rest pattern at the start
+    [..init, last] = [1, 2, 3, 4, 5];
+
+    assert(last == 5);
+}
+
+fn test_array_with_rest_in_middle() {
+    let mut first = 0;
+    let mut middle: List<Int> = [];
+    let mut last = 0;
+
+    // Rest pattern in the middle
+    [first, ..middle, last] = [1, 2, 3, 4, 5];
+
+    assert(first == 1);
+    assert(last == 5);
+}
+
+fn test_array_ignore_rest() {
+    let mut first = 0;
+    let mut second = 0;
+
+    // Ignore remaining elements with bare ..
+    [first, second, ..] = [1, 2, 3, 4, 5];
+
+    assert(first == 1);
+    assert(second == 2);
+}
+
+// =============================================================================
+// Section 3: Record Destructuring Assignment
+// =============================================================================
+
+fn test_record_simple() {
+    let mut x = 0;
+    let mut y = 0;
+
+    // Extract fields to existing variables
+    Point { x, y } = Point { x: 10, y: 20 };
+
+    assert(x == 10);
+    assert(y == 20);
+}
+
+fn test_record_with_rename() {
+    let mut px = 0;
+    let mut py = 0;
+
+    // Rename fields during extraction
+    Point { x: px, y: py } = Point { x: 10, y: 20 };
+
+    assert(px == 10);
+    assert(py == 20);
+}
+
+fn test_record_partial_with_rest() {
+    let mut timeout = 0;
+
+    // Extract only some fields, ignore rest
+    Config { timeout, .. } = Config { host: "localhost", port: 8080, timeout: 30, retries: 3 };
+
+    assert(timeout == 30);
+}
+
+fn test_record_multiple_fields_with_rest() {
+    let mut host = "";
+    let mut port = 0;
+
+    // Multiple fields with rest
+    Config { host, port, .. } = Config { host: "example.com", port: 443, timeout: 60, retries: 5 };
+
+    assert(port == 443);
+}
+
+fn test_record_nested() {
+    let mut name = "";
+    let mut city = "";
+
+    // Nested record destructuring
+    Person { name, address: Address { city, .. }, .. } = Person {
+        name: "Alice",
+        age: 30,
+        address: Address { street: "Main St", city: "Boston" }
+    };
+
+    assert(city == "Boston");
+}
+
+fn test_record_qualified_path() {
+    let mut x = 0;
+    let mut y = 0;
+
+    // Qualified type path
+    geometry.Point { x, y } = create_point();
+}
+
+// =============================================================================
+// Section 4: Compound Destructuring Assignment
+// =============================================================================
+
+fn test_compound_add_assign() {
+    let mut x = 10;
+    let mut y = 20;
+
+    // Parallel addition
+    (x, y) += (1, 2);
+
+    assert(x == 11);
+    assert(y == 22);
+}
+
+fn test_compound_sub_assign() {
+    let mut a = 100;
+    let mut b = 200;
+
+    // Parallel subtraction
+    (a, b) -= (10, 20);
+
+    assert(a == 90);
+    assert(b == 180);
+}
+
+fn test_compound_mul_assign() {
+    let mut x = 2;
+    let mut y = 3;
+    let mut z = 4;
+
+    // Parallel multiplication
+    (x, y, z) *= (10, 10, 10);
+
+    assert(x == 20);
+    assert(y == 30);
+    assert(z == 40);
+}
+
+fn test_compound_div_assign() {
+    let mut a = 100;
+    let mut b = 200;
+
+    // Parallel division
+    (a, b) /= (10, 20);
+
+    assert(a == 10);
+    assert(b == 10);
+}
+
+fn test_compound_bitwise_or() {
+    let mut flags_a = 0b0001;
+    let mut flags_b = 0b0010;
+
+    // Parallel bitwise OR
+    (flags_a, flags_b) |= (0b0100, 0b1000);
+
+    assert(flags_a == 0b0101);
+    assert(flags_b == 0b1010);
+}
+
+fn test_compound_bitwise_and() {
+    let mut a = 0b1111;
+    let mut b = 0b1010;
+
+    // Parallel bitwise AND
+    (a, b) &= (0b0011, 0b1100);
+
+    assert(a == 0b0011);
+    assert(b == 0b1000);
+}
+
+fn test_array_compound_assign() {
+    let mut x = 1;
+    let mut y = 2;
+    let mut z = 3;
+
+    // Compound assignment with array destructuring
+    [x, y, z] *= [10, 10, 10];
+
+    assert(x == 10);
+    assert(y == 20);
+    assert(z == 30);
+}
+
+// =============================================================================
+// Section 5: Complex/Nested Destructuring
+// =============================================================================
+
+fn test_mixed_tuple_array() {
+    let mut header = 0;
+    let mut first = 0;
+    let mut second = 0;
+
+    // Tuple containing array
+    (header, [first, second, ..]) = (42, [1, 2, 3, 4, 5]);
+
+    assert(header == 42);
+    assert(first == 1);
+    assert(second == 2);
+}
+
+fn test_mixed_tuple_record() {
+    let mut status = 0;
+    let mut x = 0;
+    let mut y = 0;
+
+    // Tuple containing record
+    (status, Point { x, y }) = (200, Point { x: 10, y: 20 });
+
+    assert(status == 200);
+    assert(x == 10);
+    assert(y == 20);
+}
+
+fn test_deeply_nested() {
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+
+    // Three levels of nesting
+    (((a,), b), c) = (((1,), 2), 3);
+
+    assert(a == 1);
+    assert(b == 2);
+    assert(c == 3);
+}
+
+fn test_generic_container() {
+    let mut value = 0;
+    let mut metadata = 0;
+
+    // Generic type destructuring
+    Container { value, metadata } = Container { value: 42, metadata: 1 };
+
+    assert(value == 42);
+    assert(metadata == 1);
+}
+
+fn test_generic_pair() {
+    let mut first = 0;
+    let mut second = "";
+
+    // Generic pair destructuring
+    Pair { first, second } = Pair { first: 42, second: "hello" };
+
+    assert(first == 42);
+}
+
+// =============================================================================
+// Section 6: Destructuring with Function Calls
+// =============================================================================
+
+fn test_destructure_function_return() {
+    let mut min = 0;
+    let mut max = 0;
+
+    // Destructure function return value
+    (min, max) = compute_bounds([1, 5, 3, 9, 2]);
+
+    assert(min <= max);
+}
+
+fn test_destructure_method_return() {
+    let mut x = 0;
+    let mut y = 0;
+
+    // Destructure method call result
+    (x, y) = point.to_tuple();
+}
+
+fn test_destructure_chained_call() {
+    let mut result = 0;
+    let mut status = 0;
+
+    // Destructure result of chained method calls
+    (result, status) = data.transform().finalize();
+}
+
+// =============================================================================
+// Section 7: Edge Cases
+// =============================================================================
+
+fn test_parenthesized_single() {
+    let mut x = 0;
+
+    // Parenthesized single identifier (grouping, not tuple)
+    (x) = 42;
+
+    assert(x == 42);
+}
+
+fn test_all_wildcards() {
+    // Discard all values
+    (_, _, _) = (1, 2, 3);
+    [_, _, _] = [4, 5, 6];
+}
+
+fn test_partial_wildcards() {
+    let mut keep = 0;
+
+    // Keep only some values
+    (_, keep, _) = (1, 42, 3);
+
+    assert(keep == 42);
+}
+
+fn test_assignment_chain() {
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    let mut d = 0;
+
+    // Multiple assignments (right-associative)
+    (a, b) = (c, d) = (1, 2);
+
+    assert(a == 1);
+    assert(b == 2);
+    assert(c == 1);
+    assert(d == 2);
+}
+
+fn test_in_expression_context() {
+    let mut x = 0;
+    let mut y = 0;
+
+    // Destructuring as part of larger expression
+    let result = {
+        (x, y) = (10, 20);
+        x + y
+    };
+
+    assert(result == 30);
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+fn get_coords() -> (Int, Int, Int) {
+    (1, 2, 3)
+}
+
+fn compute_bounds(items: List<Int>) -> (Int, Int) {
+    (0, 100)  // Simplified
+}
+
+fn create_point() -> geometry.Point {
+    geometry.Point { x: 0, y: 0 }
+}
+
+// Main function to run all tests
+fn main() {
+    // Section 1: Tuple Destructuring
+    test_tuple_swap();
+    test_tuple_multiple_values();
+    test_tuple_nested();
+    test_tuple_with_wildcard();
+    test_tuple_single_element();
+    test_tuple_empty();
+
+    // Section 2: Array Destructuring
+    test_array_simple();
+    test_array_with_rest_at_end();
+    test_array_with_rest_at_start();
+    test_array_with_rest_in_middle();
+    test_array_ignore_rest();
+
+    // Section 3: Record Destructuring
+    test_record_simple();
+    test_record_with_rename();
+    test_record_partial_with_rest();
+    test_record_multiple_fields_with_rest();
+    test_record_nested();
+
+    // Section 4: Compound Destructuring
+    test_compound_add_assign();
+    test_compound_sub_assign();
+    test_compound_mul_assign();
+    test_compound_div_assign();
+    test_compound_bitwise_or();
+    test_compound_bitwise_and();
+    test_array_compound_assign();
+
+    // Section 5: Complex Destructuring
+    test_mixed_tuple_array();
+    test_mixed_tuple_record();
+    test_deeply_nested();
+    test_generic_container();
+    test_generic_pair();
+
+    // Section 6: Function Returns
+    test_destructure_function_return();
+
+    // Section 7: Edge Cases
+    test_parenthesized_single();
+    test_all_wildcards();
+    test_partial_wildcards();
+    test_in_expression_context();
+
+    print("All L0-critical destructuring assignment tests passed!");
+}

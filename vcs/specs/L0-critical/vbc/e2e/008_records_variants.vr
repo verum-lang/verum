@@ -1,0 +1,232 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, records, variants, types, pipeline
+// @timeout: 5000
+// @expect: pass
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies record types, sum types, and type construction through the full pipeline
+
+// =============================================================================
+// Record type definitions
+// =============================================================================
+
+type Point2D is { x: Float, y: Float };
+type Point3D is { x: Float, y: Float, z: Float };
+type Person is { name: Text, age: Int };
+type Rectangle is { origin: Point2D, width: Float, height: Float };
+
+// =============================================================================
+// Basic record construction and field access
+// =============================================================================
+
+@test
+fn test_record_construction() {
+    let p = Point2D { x: 1.0, y: 2.0 };
+    assert_eq(p.x, 1.0);
+    assert_eq(p.y, 2.0);
+}
+
+@test
+fn test_record_3d() {
+    let p = Point3D { x: 1.0, y: 2.0, z: 3.0 };
+    assert_eq(p.x, 1.0);
+    assert_eq(p.y, 2.0);
+    assert_eq(p.z, 3.0);
+}
+
+@test
+fn test_record_with_text() {
+    let person = Person { name: "Alice", age: 30 };
+    assert_eq(person.name, "Alice");
+    assert_eq(person.age, 30);
+}
+
+// =============================================================================
+// Nested records
+// =============================================================================
+
+@test
+fn test_nested_record() {
+    let rect = Rectangle {
+        origin: Point2D { x: 0.0, y: 0.0 },
+        width: 10.0,
+        height: 5.0
+    };
+    assert_eq(rect.origin.x, 0.0);
+    assert_eq(rect.origin.y, 0.0);
+    assert_eq(rect.width, 10.0);
+    assert_eq(rect.height, 5.0);
+}
+
+@test
+fn test_nested_record_area() {
+    let rect = Rectangle {
+        origin: Point2D { x: 5.0, y: 10.0 },
+        width: 3.0,
+        height: 4.0
+    };
+    let area = rect.width * rect.height;
+    assert_eq(area, 12.0);
+}
+
+// =============================================================================
+// Record methods via implement
+// =============================================================================
+
+implement Point2D {
+    fn new(x: Float, y: Float) -> Point2D {
+        Point2D { x: x, y: y }
+    }
+
+    fn distance_squared(&self) -> Float {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn translate(&self, dx: Float, dy: Float) -> Point2D {
+        Point2D { x: self.x + dx, y: self.y + dy }
+    }
+}
+
+@test
+fn test_record_static_method() {
+    let p = Point2D.new(3.0, 4.0);
+    assert_eq(p.x, 3.0);
+    assert_eq(p.y, 4.0);
+}
+
+@test
+fn test_record_instance_method() {
+    let p = Point2D.new(3.0, 4.0);
+    assert_eq(p.distance_squared(), 25.0);
+}
+
+@test
+fn test_record_method_returns_record() {
+    let p = Point2D.new(1.0, 2.0);
+    let q = p.translate(3.0, 4.0);
+    assert_eq(q.x, 4.0);
+    assert_eq(q.y, 6.0);
+}
+
+// =============================================================================
+// Sum type (variant) definitions
+// =============================================================================
+
+type Color is Red | Green | Blue;
+type Direction is North | South | East | West;
+type Token is Number(Int) | Word(Text) | Punctuation(Text);
+
+// =============================================================================
+// Variant construction and matching
+// =============================================================================
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue"
+    }
+}
+
+@test
+fn test_variant_construction() {
+    assert_eq(color_name(Red), "red");
+    assert_eq(color_name(Green), "green");
+    assert_eq(color_name(Blue), "blue");
+}
+
+fn direction_opposite(d: Direction) -> Direction {
+    match d {
+        North => South,
+        South => North,
+        East => West,
+        West => East
+    }
+}
+
+@test
+fn test_variant_returns_variant() {
+    let opp = direction_opposite(North);
+    assert(opp is South);
+
+    let opp2 = direction_opposite(East);
+    assert(opp2 is West);
+}
+
+// =============================================================================
+// Variants with payloads
+// =============================================================================
+
+fn token_value(t: Token) -> Text {
+    match t {
+        Number(n) => "number",
+        Word(w) => w,
+        Punctuation(p) => p
+    }
+}
+
+@test
+fn test_variant_with_payload() {
+    assert_eq(token_value(Number(42)), "number");
+    assert_eq(token_value(Word("hello")), "hello");
+    assert_eq(token_value(Punctuation(";")), ";");
+}
+
+@test
+fn test_variant_is_check() {
+    let t = Number(42);
+    assert(t is Number(_));
+    assert(!(t is Word(_)));
+    assert(!(t is Punctuation(_)));
+}
+
+// =============================================================================
+// Variants with record payloads
+// =============================================================================
+
+type Animal is
+    Dog { name: Text, breed: Text }
+    | Cat { name: Text, indoor: Bool }
+    | Fish;
+
+fn animal_name(a: Animal) -> Text {
+    match a {
+        Dog { name, breed: _ } => name,
+        Cat { name, indoor: _ } => name,
+        Fish => "Nemo"
+    }
+}
+
+@test
+fn test_variant_record_payload() {
+    let d = Dog { name: "Rex", breed: "Labrador" };
+    assert_eq(animal_name(d), "Rex");
+
+    let c = Cat { name: "Whiskers", indoor: true };
+    assert_eq(animal_name(c), "Whiskers");
+
+    assert_eq(animal_name(Fish), "Nemo");
+}
+
+// =============================================================================
+// Mutable records
+// =============================================================================
+
+@test
+fn test_mutable_record() {
+    let mut p = Point2D { x: 0.0, y: 0.0 };
+    p.x = 5.0;
+    p.y = 10.0;
+    assert_eq(p.x, 5.0);
+    assert_eq(p.y, 10.0);
+}
+
+@test
+fn test_mutable_person() {
+    let mut person = Person { name: "Bob", age: 25 };
+    person.age = 26;
+    assert_eq(person.age, 26);
+    assert_eq(person.name, "Bob");
+}

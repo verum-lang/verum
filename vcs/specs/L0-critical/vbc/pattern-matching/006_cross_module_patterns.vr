@@ -1,0 +1,132 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @was-skip: FIXED
+// @tags: vbc, pattern-matching, cross-module
+// @timeout: 5000
+// @expect: pass
+// @expected-exit: 0
+//
+// Test: Cross-module-style pattern matching at VBC interpreter level
+// Tests pattern matching with complex variant types, nested patterns,
+// and multi-variant destructuring that mirrors cross-module use.
+
+type Result2<T, E> is Ok2(T) | Err2(E);
+type Maybe2<T> is None2 | Some2(T);
+
+type Status is
+    Pending
+    | Running { progress: Int }
+    | Completed { result: Text }
+    | Failed { error: Text, code: Int };
+
+fn unwrap_or2(opt: Maybe2<Int>, default: Int) -> Int {
+    match opt {
+        None2 => default,
+        Some2(v) => v,
+    }
+}
+
+fn is_some2(opt: Maybe2<Int>) -> Bool {
+    match opt {
+        None2 => false,
+        Some2(_) => true,
+    }
+}
+
+fn is_ok2(res: Result2<Int, Text>) -> Bool {
+    match res {
+        Ok2(_) => true,
+        Err2(_) => false,
+    }
+}
+
+fn status_message(s: Status) -> Text {
+    match s {
+        Pending => "waiting to start",
+        Running { progress } => {
+            if progress < 50 {
+                "early stage"
+            } else {
+                "late stage"
+            }
+        },
+        Completed { result } => "done",
+        Failed { error, code } => "failed",
+    }
+}
+
+fn analyze_result(r: Result2<Int, Text>) -> Text {
+    match r {
+        Ok2(_) => "success",
+        Err2(msg) => {
+            if msg == "" {
+                "empty error"
+            } else {
+                "error"
+            }
+        },
+    }
+}
+
+fn main() {
+    // Test 1: Core types pattern matching
+    let some_val: Maybe2<Int> = Some2(42);
+    let none_val: Maybe2<Int> = None2;
+
+    assert_eq(unwrap_or2(some_val, 0), 42);
+    assert_eq(unwrap_or2(none_val, -1), -1);
+    assert(is_some2(some_val));
+    assert(!is_some2(none_val));
+
+    let ok_res: Result2<Int, Text> = Ok2(100);
+    let err_res: Result2<Int, Text> = Err2("oops");
+
+    assert(is_ok2(ok_res));
+    assert(!is_ok2(err_res));
+
+    let msg = match ok_res {
+        Ok2(n) => "got value",
+        Err2(e) => "error",
+    };
+    assert_eq(msg, "got value");
+
+    // Test 2: Status enum matching with guards
+    assert_eq(status_message(Pending), "waiting to start");
+    assert_eq(status_message(Running { progress: 25 }), "early stage");
+    assert_eq(status_message(Running { progress: 75 }), "late stage");
+    assert_eq(status_message(Completed { result: "success" }), "done");
+    assert_eq(status_message(Failed { error: "timeout", code: 408 }), "failed");
+
+    // Test 3: Nested pattern matching (Maybe wrapping Status)
+    let wrapped_status: Maybe2<Status> = Some2(Running { progress: 50 });
+
+    let nested_msg = match wrapped_status {
+        None2 => "no status",
+        Some2(Pending) => "pending",
+        Some2(Running { progress }) => "running",
+        Some2(Completed { result }) => "completed",
+        Some2(Failed { error, .. }) => "failed",
+    };
+    assert_eq(nested_msg, "running");
+
+    // Test 4: Result analysis
+    let res1: Result2<Int, Text> = Ok2(42);
+    let res2: Result2<Int, Text> = Err2("error");
+    let res3: Result2<Int, Text> = Err2("");
+
+    assert_eq(analyze_result(res1), "success");
+    assert_eq(analyze_result(res2), "error");
+    assert_eq(analyze_result(res3), "empty error");
+
+    // Test 5: Nested Result in Maybe
+    let nested: Maybe2<Result2<Int, Text>> = Some2(Ok2(99));
+    let nested_msg2 = match nested {
+        None2 => "nothing",
+        Some2(Ok2(n)) => "got ok",
+        Some2(Err2(e)) => "got err",
+    };
+    assert_eq(nested_msg2, "got ok");
+
+    print("All cross-module pattern tests passed!");
+}

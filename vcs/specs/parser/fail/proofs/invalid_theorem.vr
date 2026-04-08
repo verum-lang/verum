@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, theorem, error
+// @description: Test invalid theorem declaration without name or body
+// @expected-error: E020
+
+theorem;

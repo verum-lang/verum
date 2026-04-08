@@ -1,0 +1,63 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, factory
+// @expected-exit: 0
+
+// Tests tensor factory operations through AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
+fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let zeros = tensor_fill(5, 0, 1);
+    errors = errors + check_val(zeros, 0, 0);
+    errors = errors + check_val(zeros, 4, 0);
+
+    let ones = tensor_fill(5, 1, 1);
+    errors = errors + check_val(ones, 0, 1);
+    errors = errors + check_val(ones, 4, 1);
+
+    let big = tensor_fill(2, 1000000, 1);
+    errors = errors + check_val(big, 0, 1000000);
+
+    let base = tensor_fill(4, 10, 1);
+    let modified = tensor_set_scalar(base, 2, 99);
+    // tensor_set_scalar modifies in-place, so base and modified share the tensor
+    errors = errors + check_val(modified, 0, 10);
+    errors = errors + check_val(modified, 2, 99);
+
+    let prod = tensor_binop(ones, ones, 2);
+    errors = errors + check_val(prod, 0, 1);
+
+    let sum = tensor_binop(zeros, ones, 0);
+    errors = errors + check_val(sum, 0, 1);
+
+    let t = tensor_new(5, 1);
+    let t = tensor_set_scalar(t, 0, 0);
+    let t = tensor_set_scalar(t, 1, 1);
+    let t = tensor_set_scalar(t, 2, 4);
+    let t = tensor_set_scalar(t, 3, 9);
+    let t = tensor_set_scalar(t, 4, 16);
+    errors = errors + check_val(t, 2, 4);
+    errors = errors + check_val(t, 4, 16);
+
+    let sum_sq = tensor_reduce(t, 0, 0);
+    errors = errors + check_val(sum_sq, 0, 30);
+
+    errors
+}

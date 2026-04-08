@@ -1,0 +1,54 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, struct, list, field-access, text-fields
+// @expected-exit: 0
+// Tests storing structs in lists and accessing Text/Int fields.
+// Previously showed raw pointer values for Text fields due to missing
+// field type inference in interpolated strings.
+
+mount core.*;
+
+type Item is {
+    name: Text,
+    value: Int,
+    tag: Text,
+};
+
+implement Item {
+    fn create(n: Text, v: Int, t: Text) -> Item {
+        Item { name: n, value: v, tag: t }
+    }
+}
+
+fn main() -> Int {
+    let mut items: List<Item> = [];
+
+    items.push(Item.create("alpha", 10, "first"));
+    items.push(Item.create("beta", 20, "second"));
+    items.push(Item.create("gamma", 30, "third"));
+
+    assert_eq(items.len(), 3);
+
+    // Access struct fields from list elements
+    let a: Item = items[0];
+    assert_eq(a.name, "alpha");
+    assert_eq(a.value, 10);
+    assert_eq(a.tag, "first");
+
+    let b: Item = items[1];
+    assert_eq(b.name, "beta");
+    assert_eq(b.value, 20);
+
+    let c: Item = items[2];
+    assert_eq(c.value, 30);
+    assert_eq(c.tag, "third");
+
+    // Verify method return types are tracked for impl blocks
+    // (impl methods previously had return_type: None in FunctionInfo)
+    let fresh = Item.create("delta", 40, "fourth");
+    assert_eq(fresh.name, "delta");
+    assert_eq(fresh.value, 40);
+
+    0
+}

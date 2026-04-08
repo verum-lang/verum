@@ -1,0 +1,156 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, heap, priority-queue, data-structures
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for min-heap (priority queue) using flat record array
+
+type Heap8 is {
+    h0: Int, h1: Int, h2: Int, h3: Int,
+    h4: Int, h5: Int, h6: Int, h7: Int,
+    size: Int
+};
+
+fn heap_new() -> Heap8 {
+    Heap8 { h0: 0, h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0, h7: 0, size: 0 }
+}
+
+fn heap_get(h: Heap8, i: Int) -> Int {
+    if i == 0 { h.h0 } else if i == 1 { h.h1 }
+    else if i == 2 { h.h2 } else if i == 3 { h.h3 }
+    else if i == 4 { h.h4 } else if i == 5 { h.h5 }
+    else if i == 6 { h.h6 } else { h.h7 }
+}
+
+fn heap_set(h: Heap8, i: Int, val: Int) -> Heap8 {
+    Heap8 {
+        h0: if i == 0 { val } else { h.h0 },
+        h1: if i == 1 { val } else { h.h1 },
+        h2: if i == 2 { val } else { h.h2 },
+        h3: if i == 3 { val } else { h.h3 },
+        h4: if i == 4 { val } else { h.h4 },
+        h5: if i == 5 { val } else { h.h5 },
+        h6: if i == 6 { val } else { h.h6 },
+        h7: if i == 7 { val } else { h.h7 },
+        size: h.size
+    }
+}
+
+fn heap_swap(h: Heap8, i: Int, j: Int) -> Heap8 {
+    let vi = heap_get(h, i);
+    let vj = heap_get(h, j);
+    let h1 = heap_set(h, i, vj);
+    heap_set(h1, j, vi)
+}
+
+fn heap_parent(i: Int) -> Int { (i - 1) / 2 }
+fn heap_left(i: Int) -> Int { 2 * i + 1 }
+fn heap_right(i: Int) -> Int { 2 * i + 2 }
+
+fn heap_sift_up(h: Heap8, idx: Int) -> Heap8 {
+    let mut hp = h;
+    let mut i = idx;
+    while i > 0 {
+        let p = heap_parent(i);
+        if heap_get(hp, i) < heap_get(hp, p) {
+            hp = heap_swap(hp, i, p);
+            i = p;
+        } else {
+            return hp;
+        }
+    }
+    hp
+}
+
+fn heap_sift_down(h: Heap8, idx: Int) -> Heap8 {
+    let mut hp = h;
+    let mut i = idx;
+    while heap_left(i) < hp.size {
+        let l = heap_left(i);
+        let r = heap_right(i);
+        let mut smallest = i;
+        if l < hp.size && heap_get(hp, l) < heap_get(hp, smallest) {
+            smallest = l;
+        }
+        if r < hp.size && heap_get(hp, r) < heap_get(hp, smallest) {
+            smallest = r;
+        }
+        if smallest == i { return hp; }
+        hp = heap_swap(hp, i, smallest);
+        i = smallest;
+    }
+    hp
+}
+
+fn heap_push(h: Heap8, val: Int) -> Heap8 {
+    let mut hp = heap_set(h, h.size, val);
+    hp = Heap8 {
+        h0: hp.h0, h1: hp.h1, h2: hp.h2, h3: hp.h3,
+        h4: hp.h4, h5: hp.h5, h6: hp.h6, h7: hp.h7,
+        size: h.size + 1
+    };
+    heap_sift_up(hp, h.size)
+}
+
+fn heap_peek(h: Heap8) -> Int {
+    heap_get(h, 0)
+}
+
+fn heap_pop(h: Heap8) -> Heap8 {
+    let last_idx = h.size - 1;
+    let mut hp = heap_swap(h, 0, last_idx);
+    hp = Heap8 {
+        h0: hp.h0, h1: hp.h1, h2: hp.h2, h3: hp.h3,
+        h4: hp.h4, h5: hp.h5, h6: hp.h6, h7: hp.h7,
+        size: h.size - 1
+    };
+    heap_sift_down(hp, 0)
+}
+
+fn test_heap_basic() {
+    let mut h = heap_new();
+    h = heap_push(h, 5);
+    assert_eq(heap_peek(h), 5);
+    assert_eq(h.size, 1);
+
+    h = heap_push(h, 3);
+    assert_eq(heap_peek(h), 3);
+    assert_eq(h.size, 2);
+
+    h = heap_push(h, 7);
+    assert_eq(heap_peek(h), 3);
+    assert_eq(h.size, 3);
+
+    h = heap_push(h, 1);
+    assert_eq(heap_peek(h), 1);
+    assert_eq(h.size, 4);
+}
+
+fn test_heap_sort() {
+    // Push 5, 2, 8, 1, 9, 3
+    let mut h = heap_new();
+    h = heap_push(h, 5);
+    h = heap_push(h, 2);
+    h = heap_push(h, 8);
+    h = heap_push(h, 1);
+    h = heap_push(h, 9);
+    h = heap_push(h, 3);
+
+    // Pop should give sorted order: 1, 2, 3, 5, 8, 9
+    assert_eq(heap_peek(h), 1); h = heap_pop(h);
+    assert_eq(heap_peek(h), 2); h = heap_pop(h);
+    assert_eq(heap_peek(h), 3); h = heap_pop(h);
+    assert_eq(heap_peek(h), 5); h = heap_pop(h);
+    assert_eq(heap_peek(h), 8); h = heap_pop(h);
+    assert_eq(heap_peek(h), 9); h = heap_pop(h);
+    assert_eq(h.size, 0);
+}
+
+fn main() -> Int {
+    test_heap_basic();
+    test_heap_sort();
+    print("[OK] 201_heap_simulation_aot");
+    0
+}

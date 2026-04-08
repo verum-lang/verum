@@ -1,0 +1,154 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: type checker limitations (various type errors)
+// @tags: reference_system, cbgr, reference-tiers, mixing, interop
+
+/// Test mixing different reference tiers in the same code.
+/// Different tiers can coexist with proper conversions.
+/// Spec: 26-cbgr-implementation.md#tier-interoperability
+
+fn main() {
+    test_tier_coexistence();
+    test_tier_in_struct();
+    test_tier_in_function_boundary();
+    test_tier_propagation();
+}
+
+/// Test that different tiers can coexist
+fn test_tier_coexistence() {
+    let heap_val = Heap.new(100);
+    let stack_val = 200;
+
+    // Tier 0: managed reference to heap
+    let managed: &Int = &*heap_val;
+
+    // Tier 1: checked reference to stack
+    let checked_ref: &checked Int = &checked stack_val;
+
+    // Tier 2: unsafe reference (in unsafe block)
+    unsafe {
+        let unsafe_ptr: &unsafe Int = &unsafe stack_val;
+
+        // All three can be read
+        let sum = *managed + *checked_ref + *unsafe_ptr;
+        assert(sum == 500);
+    }
+}
+
+/// Test tiers in struct fields
+type MixedRefs<'a> is {
+    managed: &'a Int,
+    // Note: checked and unsafe refs typically don't appear in structs
+    // because they have special validity requirements
+};
+
+fn test_tier_in_struct() {
+    let value = Heap.new(42);
+    let mixed = MixedRefs {
+        managed: &*value,
+    };
+
+    assert(*mixed.managed == 42);
+}
+
+/// Test tier at function boundaries
+fn accepts_managed(r: &Int) -> Int {
+    *r
+}
+
+fn accepts_checked(r: &checked Int) -> Int {
+    *r
+}
+
+fn test_tier_in_function_boundary() {
+    let heap_val = Heap.new(100);
+    let stack_val = 200;
+
+    // Managed ref to managed-expecting function
+    let r1 = accepts_managed(&*heap_val);
+    assert(r1 == 100);
+
+    // Checked ref to checked-expecting function
+    let r2 = accepts_checked(&checked stack_val);
+    assert(r2 == 200);
+
+    // Checked can be converted to managed (safe widening)
+    let checked_ref: &checked Int = &checked stack_val;
+    let r3 = accepts_managed(checked_ref.as_managed());
+    assert(r3 == 200);
+}
+
+/// Test tier propagation through code
+fn test_tier_propagation() {
+    let data = Heap.new([1, 2, 3, 4, 5]);
+
+    // Start with managed ref
+    let managed: &List<Int> = &*data;
+
+    // Operations preserve tier (managed in, managed out)
+    let first: &Int = &managed[0];
+
+    // Iteration preserves tier
+    let mut sum = 0;
+    for item in managed {
+        sum += *item;
+    }
+
+    assert(sum == 15);
+}
+
+/// Test explicit tier control
+fn test_explicit_tier_control() {
+    let value = 42;
+
+    // Explicitly request managed tier for stack value
+    // (adds CBGR tracking even though stack is provably safe)
+    let managed: &Int = &value;  // Implicit managed
+
+    // Explicitly request checked tier
+    let checked_ref: &checked Int = &checked value;
+
+    // Checked is more restrictive but faster
+    // Managed is more flexible but has overhead
+
+    assert(*managed == 42);
+    assert(*checked_ref == 42);
+}
+
+/// Test tier conversion chain
+fn test_tier_conversion_chain() {
+    let value = Heap.new(100);
+
+    // Start with managed
+    let managed: &Int = &*value;
+
+    // Cannot directly convert managed to checked
+    // (managed might escape, can't prove safety)
+
+    // But checked can become managed
+    let stack = 200;
+    let checked_ref: &checked Int = &checked stack;
+    let as_managed: &Int = checked_ref.as_managed();
+
+    assert(*as_managed == 200);
+}
+
+// Intrinsic for tier conversion: checked -> managed
+// Adds CBGR tracking overhead to a checked reference
+@intrinsic("checked_to_managed")
+fn checked_to_managed<T>(r: &checked T) -> &T;
+
+// Helper methods for tier conversion
+implement<T> &checked T {
+    fn as_managed(&self) -> &T {
+        // Safe conversion: checked -> managed
+        checked_to_managed(*self)
+    }
+}
+
+implement<T> &T {
+    fn as_managed(&self) -> &T {
+        *self  // Already managed
+    }
+}

@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, map, comprehension, error
+// @description: Map-like comprehension with invalid key-value syntax
+// @expected-error: E018
+
+fn test() {
+    let m = {k: for (k, v) in items};  // Invalid map comprehension
+}

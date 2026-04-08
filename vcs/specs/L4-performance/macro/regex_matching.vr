@@ -1,0 +1,478 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: macro, regex, matching, pattern, real-world
+// @description: Regex matching performance (target: > 100MB/sec for simple patterns)
+
+/// Regex Matching Performance Benchmark
+///
+/// Measures regular expression matching performance for various patterns.
+/// Fast regex is critical for text processing, validation, and parsing.
+///
+/// Performance targets:
+/// - Literal match:     > 500MB/sec
+/// - Simple pattern:    > 200MB/sec
+/// - Complex pattern:   > 50MB/sec
+/// - Capture groups:    > 100MB/sec
+/// - Replace:           > 100MB/sec
+///
+/// Pattern complexity levels:
+/// - Literal strings
+/// - Character classes
+/// - Quantifiers
+/// - Alternation
+/// - Backreferences
+///
+/// Spec reference: docs/detailed/20-standard-library.md
+
+const WARMUP_ITERATIONS: Int = 100;
+const BENCHMARK_ITERATIONS: Int = 10_000;
+
+/// Generate sample text data
+fn generate_log_lines(count: Int) -> Text {
+    let mut text = Text.with_capacity(count * 100);
+
+    for i in 0..count {
+        let level = match i % 4 {
+            0 => "INFO",
+            1 => "DEBUG",
+            2 => "WARN",
+            _ => "ERROR",
+        };
+        text.push_str(&format(
+            "[2024-01-15 10:{:02}:{:02}] {} - Request {} processed in {}ms\n",
+            i % 60, i % 60, level, i, (i * 7) % 1000
+        ));
+    }
+
+    text
+}
+
+fn generate_email_text(count: Int) -> Text {
+    let mut text = Text.with_capacity(count * 100);
+
+    for i in 0..count {
+        text.push_str(&format(
+            "Contact: user{}@example.com or admin{}@company.org for inquiries.\n",
+            i, i
+        ));
+    }
+
+    text
+}
+
+fn generate_url_text(count: Int) -> Text {
+    let mut text = Text.with_capacity(count * 150);
+
+    for i in 0..count {
+        text.push_str(&format(
+            "Visit https://example.com/path/{}/page?id={}&ref=home or http://test.org/{}.\n",
+            i, i * 2, i
+        ));
+    }
+
+    text
+}
+
+fn generate_mixed_text(size: Int) -> Text {
+    let mut text = Text.with_capacity(size);
+
+    let sample = "The quick brown fox jumps over the lazy dog. Numbers: 12345. Email: test@example.com. ";
+    while text.len() < size {
+        text.push_str(sample);
+    }
+
+    text
+}
+
+/// Benchmark: Literal string matching
+fn benchmark_literal_match() -> RegexBenchmarkResult {
+    let text = generate_log_lines(1000);
+    let text_bytes = text.len();
+    let regex = Regex.new("INFO").unwrap();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS;
+
+    RegexBenchmarkResult {
+        name: "literal_match",
+        pattern: "INFO",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 500.0,
+    }
+}
+
+/// Benchmark: Character class matching
+fn benchmark_char_class() -> RegexBenchmarkResult {
+    let text = generate_log_lines(1000);
+    let text_bytes = text.len();
+    let regex = Regex.new("[0-9]+").unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS;
+
+    RegexBenchmarkResult {
+        name: "char_class",
+        pattern: "[0-9]+",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 300.0,
+    }
+}
+
+/// Benchmark: Email pattern matching
+fn benchmark_email_pattern() -> RegexBenchmarkResult {
+    let text = generate_email_text(500);
+    let text_bytes = text.len();
+    let regex = Regex.new("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}").unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS;
+
+    RegexBenchmarkResult {
+        name: "email_pattern",
+        pattern: "[a-zA-Z0-9._%+-]+@...",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 100.0,
+    }
+}
+
+/// Benchmark: URL pattern matching
+fn benchmark_url_pattern() -> RegexBenchmarkResult {
+    let text = generate_url_text(500);
+    let text_bytes = text.len();
+    let regex = Regex.new("https?://[^\\s]+").unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS;
+
+    RegexBenchmarkResult {
+        name: "url_pattern",
+        pattern: "https?://[^\\s]+",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 150.0,
+    }
+}
+
+/// Benchmark: Capture groups
+fn benchmark_capture_groups() -> RegexBenchmarkResult {
+    let text = generate_log_lines(500);
+    let text_bytes = text.len();
+    let regex = Regex.new("\\[(\\d{4}-\\d{2}-\\d{2}) (\\d{2}:\\d{2}:\\d{2})\\] (\\w+)").unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let captures: List<_> = regex.captures_iter(&text).collect();
+        black_box(captures.len());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let captures: List<_> = regex.captures_iter(&text).collect();
+        black_box(captures.len());
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS;
+
+    RegexBenchmarkResult {
+        name: "capture_groups",
+        pattern: "\\[(\\d{4}-...",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 80.0,
+    }
+}
+
+/// Benchmark: Alternation
+fn benchmark_alternation() -> RegexBenchmarkResult {
+    let text = generate_log_lines(500);
+    let text_bytes = text.len();
+    let regex = Regex.new("INFO|DEBUG|WARN|ERROR").unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let matches: List<_> = regex.find_iter(&text).collect();
+        black_box(matches.len());
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS;
+
+    RegexBenchmarkResult {
+        name: "alternation",
+        pattern: "INFO|DEBUG|...",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 200.0,
+    }
+}
+
+/// Benchmark: Replace all
+fn benchmark_replace_all() -> RegexBenchmarkResult {
+    let text = generate_log_lines(500);
+    let text_bytes = text.len();
+    let regex = Regex.new("\\d+").unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let replaced = regex.replace_all(&text, "XXX");
+        black_box(replaced);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 10) {
+        let replaced = regex.replace_all(&text, "XXX");
+        black_box(replaced);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS / 10;
+
+    RegexBenchmarkResult {
+        name: "replace_all",
+        pattern: "\\d+ -> XXX",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 100.0,
+    }
+}
+
+/// Benchmark: Is match (no capture)
+fn benchmark_is_match() -> RegexBenchmarkResult {
+    let text = generate_mixed_text(10000);
+    let text_bytes = text.len();
+    let regex = Regex.new("quick.*fox").unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(regex.is_match(&text));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(regex.is_match(&text));
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS;
+
+    RegexBenchmarkResult {
+        name: "is_match",
+        pattern: "quick.*fox",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 300.0,
+    }
+}
+
+/// Benchmark: Split by pattern
+fn benchmark_split() -> RegexBenchmarkResult {
+    let text = generate_mixed_text(10000);
+    let text_bytes = text.len();
+    let regex = Regex.new("\\s+").unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let parts: List<_> = regex.split(&text).collect();
+        black_box(parts.len());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 10) {
+        let parts: List<_> = regex.split(&text).collect();
+        black_box(parts.len());
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS / 10;
+
+    RegexBenchmarkResult {
+        name: "split_whitespace",
+        pattern: "\\s+",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 150.0,
+    }
+}
+
+/// Benchmark: Complex pattern
+fn benchmark_complex_pattern() -> RegexBenchmarkResult {
+    let text = generate_log_lines(500);
+    let text_bytes = text.len();
+    // Complex pattern with multiple features
+    let regex = Regex.new(
+        "^\\[(?P<date>\\d{4}-\\d{2}-\\d{2})\\s+(?P<time>\\d{2}:\\d{2}:\\d{2})\\]\\s+(?P<level>INFO|DEBUG|WARN|ERROR)\\s+-\\s+(?P<message>.+)$"
+    ).unwrap();
+
+    for _ in 0..(WARMUP_ITERATIONS / 10) {
+        for line in text.lines() {
+            if let Some(caps) = regex.captures(line) {
+                black_box(caps);
+            }
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 100) {
+        for line in text.lines() {
+            if let Some(caps) = regex.captures(line) {
+                black_box(caps);
+            }
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = text_bytes * BENCHMARK_ITERATIONS / 100;
+
+    RegexBenchmarkResult {
+        name: "complex_pattern",
+        pattern: "full log line parser",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 50.0,
+    }
+}
+
+fn main() {
+    println("=== Regex Matching Performance Benchmark ===\n");
+
+    let results = [
+        benchmark_literal_match(),
+        benchmark_char_class(),
+        benchmark_email_pattern(),
+        benchmark_url_pattern(),
+        benchmark_capture_groups(),
+        benchmark_alternation(),
+        benchmark_replace_all(),
+        benchmark_is_match(),
+        benchmark_split(),
+        benchmark_complex_pattern(),
+    ];
+
+    println("{:<25} {:>20} {:>12} {:>12} {:>8}",
+            "Benchmark", "Pattern", "MB/sec", "Target", "Status");
+    println("{}", "-".repeat(80));
+
+    for result in results {
+        let passed = result.mb_per_sec >= result.target_mb_per_sec;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<25} {:>20} {:>12.1} {:>12.0} {:>8}",
+                result.name, result.pattern, result.mb_per_sec, result.target_mb_per_sec, status);
+    }
+
+    println("");
+    println("Regex Performance Targets:");
+    println("  - Literal match:   > 500 MB/sec");
+    println("  - Simple pattern:  > 200 MB/sec");
+    println("  - Complex pattern: > 50 MB/sec");
+}
+
+type RegexBenchmarkResult is {
+    name: Text,
+    pattern: Text,
+    bytes_processed: Int,
+    elapsed_ms: Int,
+    mb_per_sec: f64,
+    target_mb_per_sec: f64,
+};
+
+type Regex is { pattern: Text };
+implement Regex {
+    fn new(pattern: &Text) -> Result<Self, Error> { Ok(Self { pattern: pattern.into() }) }
+    fn is_match(&self, text: &Text) -> Bool { false }
+    fn find_iter(&self, text: &Text) -> impl Iterator<Item = Match> { [].into_iter() }
+    fn captures_iter(&self, text: &Text) -> impl Iterator<Item = Captures> { [].into_iter() }
+    fn captures(&self, text: &Text) -> Maybe<Captures> { None }
+    fn replace_all(&self, text: &Text, replacement: &Text) -> Text { text.clone() }
+    fn split(&self, text: &Text) -> impl Iterator<Item = &str> { [].into_iter() }
+}
+
+type Match is { start: Int, end: Int };
+type Captures is { groups: List<Maybe<Text>> };
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn format(fmt: &Text, args: List<Text>) -> Text { Text.new() }

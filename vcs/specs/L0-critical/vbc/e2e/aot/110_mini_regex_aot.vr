@@ -1,0 +1,355 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, regex, nfa, pattern-matching, automata
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT minimal regex engine on integer sequences using NFA simulation
+
+// Regex pattern nodes
+// RLit(c)      - match literal integer c
+// RAny         - match any single element (like '.')
+// RSeq(a,b)    - match a then b
+// RStar(inner) - match inner zero or more times (like '*')
+// RPlus(inner) - match inner one or more times (like '+')
+// RAlt(a,b)    - match a or b (like '|')
+type Regex is
+    RLit(Int)
+  | RAny
+  | RSeq { first: Regex, second: Regex }
+  | RStar(Regex)
+  | RPlus(Regex)
+  | RAlt { left: Regex, right: Regex };
+
+// Input sequence stored as flat array of up to 16 elements
+type Seq16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int,
+    len: Int
+};
+
+fn seq_new(n: Int) -> Seq16 {
+    Seq16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0,
+        len: n
+    }
+}
+
+fn seq_get(s: Seq16, i: Int) -> Int {
+    if i == 0 { s.a0 } else if i == 1 { s.a1 }
+    else if i == 2 { s.a2 } else if i == 3 { s.a3 }
+    else if i == 4 { s.a4 } else if i == 5 { s.a5 }
+    else if i == 6 { s.a6 } else if i == 7 { s.a7 }
+    else if i == 8 { s.a8 } else if i == 9 { s.a9 }
+    else if i == 10 { s.a10 } else if i == 11 { s.a11 }
+    else if i == 12 { s.a12 } else if i == 13 { s.a13 }
+    else if i == 14 { s.a14 } else { s.a15 }
+}
+
+fn seq_set(s: Seq16, i: Int, v: Int) -> Seq16 {
+    Seq16 {
+        a0: if i == 0 { v } else { s.a0 },
+        a1: if i == 1 { v } else { s.a1 },
+        a2: if i == 2 { v } else { s.a2 },
+        a3: if i == 3 { v } else { s.a3 },
+        a4: if i == 4 { v } else { s.a4 },
+        a5: if i == 5 { v } else { s.a5 },
+        a6: if i == 6 { v } else { s.a6 },
+        a7: if i == 7 { v } else { s.a7 },
+        a8: if i == 8 { v } else { s.a8 },
+        a9: if i == 9 { v } else { s.a9 },
+        a10: if i == 10 { v } else { s.a10 },
+        a11: if i == 11 { v } else { s.a11 },
+        a12: if i == 12 { v } else { s.a12 },
+        a13: if i == 13 { v } else { s.a13 },
+        a14: if i == 14 { v } else { s.a14 },
+        a15: if i == 15 { v } else { s.a15 },
+        len: s.len
+    }
+}
+
+// match_from: try to match regex starting at position pos in the sequence.
+// Returns the number of elements consumed on success, or -1 on failure.
+// For patterns that can match varying lengths, returns the LONGEST match.
+@allow(unbounded_recursion)
+fn match_from(re: Regex, seq: Seq16, pos: Int) -> Int {
+    match re {
+        RLit(expected) => {
+            if pos >= seq.len { -1 }
+            else if seq_get(seq, pos) == expected { 1 }
+            else { -1 }
+        },
+        RAny => {
+            if pos >= seq.len { -1 }
+            else { 1 }
+        },
+        RSeq { first, second } => {
+            let m1 = match_from(first, seq, pos);
+            if m1 < 0 { -1 }
+            else {
+                let m2 = match_from(second, seq, pos + m1);
+                if m2 < 0 { -1 }
+                else { m1 + m2 }
+            }
+        },
+        RStar(inner) => {
+            // Greedy: match as many as possible
+            let mut total = 0;
+            let mut keep_going = 1;
+            while keep_going == 1 {
+                let m = match_from(inner, seq, pos + total);
+                if m > 0 {
+                    total = total + m;
+                } else {
+                    keep_going = 0;
+                }
+            }
+            total  // RStar always succeeds (can match 0 times)
+        },
+        RPlus(inner) => {
+            // Must match at least once
+            let first_m = match_from(inner, seq, pos);
+            if first_m < 0 { -1 }
+            else {
+                let mut total = first_m;
+                let mut keep_going = 1;
+                while keep_going == 1 {
+                    let m = match_from(inner, seq, pos + total);
+                    if m > 0 {
+                        total = total + m;
+                    } else {
+                        keep_going = 0;
+                    }
+                }
+                total
+            }
+        },
+        RAlt { left, right } => {
+            // Try left first; if it matches longer or both match same, prefer left
+            let ml = match_from(left, seq, pos);
+            let mr = match_from(right, seq, pos);
+            if ml >= mr { ml } else { mr }
+        },
+    }
+}
+
+// Full match: regex must consume entire sequence
+fn full_match(re: Regex, seq: Seq16) -> Bool {
+    let m = match_from(re, seq, 0);
+    m == seq.len
+}
+
+// Partial match: regex matches a prefix
+fn prefix_match(re: Regex, seq: Seq16) -> Bool {
+    match_from(re, seq, 0) >= 0
+}
+
+// Helper to build sequences
+fn make_seq1(a: Int) -> Seq16 {
+    let mut s = seq_new(1);
+    s = seq_set(s, 0, a);
+    s
+}
+
+fn make_seq2(a: Int, b: Int) -> Seq16 {
+    let mut s = seq_new(2);
+    s = seq_set(s, 0, a);
+    s = seq_set(s, 1, b);
+    s
+}
+
+fn make_seq3(a: Int, b: Int, c: Int) -> Seq16 {
+    let mut s = seq_new(3);
+    s = seq_set(s, 0, a);
+    s = seq_set(s, 1, b);
+    s = seq_set(s, 2, c);
+    s
+}
+
+fn make_seq4(a: Int, b: Int, c: Int, d: Int) -> Seq16 {
+    let mut s = seq_new(4);
+    s = seq_set(s, 0, a);
+    s = seq_set(s, 1, b);
+    s = seq_set(s, 2, c);
+    s = seq_set(s, 3, d);
+    s
+}
+
+fn make_seq5(a: Int, b: Int, c: Int, d: Int, e: Int) -> Seq16 {
+    let mut s = seq_new(5);
+    s = seq_set(s, 0, a);
+    s = seq_set(s, 1, b);
+    s = seq_set(s, 2, c);
+    s = seq_set(s, 3, d);
+    s = seq_set(s, 4, e);
+    s
+}
+
+fn make_seq6(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Seq16 {
+    let mut s = seq_new(6);
+    s = seq_set(s, 0, a);
+    s = seq_set(s, 1, b);
+    s = seq_set(s, 2, c);
+    s = seq_set(s, 3, d);
+    s = seq_set(s, 4, e);
+    s = seq_set(s, 5, f);
+    s
+}
+
+// Helper constructors
+fn lit(c: Int) -> Regex { RLit(c) }
+fn any() -> Regex { RAny }
+fn seq(a: Regex, b: Regex) -> Regex { RSeq { first: a, second: b } }
+fn star(r: Regex) -> Regex { RStar(r) }
+fn plus(r: Regex) -> Regex { RPlus(r) }
+fn alt(a: Regex, b: Regex) -> Regex { RAlt { left: a, right: b } }
+
+fn main() -> Int {
+    let empty = seq_new(0);
+
+    // === Test 1: Literal match ===
+    assert(full_match(lit(42), make_seq1(42)));
+    assert(!full_match(lit(42), make_seq1(99)));
+    assert(!full_match(lit(42), empty));
+
+    // === Test 2: Any match ===
+    assert(full_match(any(), make_seq1(0)));
+    assert(full_match(any(), make_seq1(999)));
+    assert(!full_match(any(), empty));
+    assert(!full_match(any(), make_seq2(1, 2)));  // too long
+
+    // === Test 3: Sequence match ===
+    // Pattern: 1 then 2
+    let pat_12 = seq(lit(1), lit(2));
+    assert(full_match(pat_12, make_seq2(1, 2)));
+    assert(!full_match(pat_12, make_seq2(2, 1)));
+    assert(!full_match(pat_12, make_seq1(1)));
+    assert(!full_match(pat_12, make_seq3(1, 2, 3)));
+
+    // === Test 4: Longer sequence ===
+    // Pattern: 1 then 2 then 3
+    let pat_123 = seq(lit(1), seq(lit(2), lit(3)));
+    assert(full_match(pat_123, make_seq3(1, 2, 3)));
+    assert(!full_match(pat_123, make_seq3(1, 2, 4)));
+    assert(!full_match(pat_123, make_seq2(1, 2)));
+
+    // === Test 5: Star - zero matches ===
+    let pat_star_1 = star(lit(1));
+    assert(full_match(pat_star_1, empty));  // zero matches is OK
+    assert(full_match(pat_star_1, make_seq1(1)));
+    assert(full_match(pat_star_1, make_seq2(1, 1)));
+    assert(full_match(pat_star_1, make_seq3(1, 1, 1)));
+
+    // === Test 6: Star - non-matching elements ===
+    assert(!full_match(pat_star_1, make_seq1(2)));
+    assert(!full_match(pat_star_1, make_seq2(1, 2)));
+
+    // === Test 7: Plus - one or more ===
+    let pat_plus_1 = plus(lit(1));
+    assert(!full_match(pat_plus_1, empty));  // must match at least once
+    assert(full_match(pat_plus_1, make_seq1(1)));
+    assert(full_match(pat_plus_1, make_seq2(1, 1)));
+    assert(full_match(pat_plus_1, make_seq3(1, 1, 1)));
+    assert(!full_match(pat_plus_1, make_seq1(2)));
+
+    // === Test 8: Alt - either branch ===
+    let pat_alt = alt(lit(1), lit(2));
+    assert(full_match(pat_alt, make_seq1(1)));
+    assert(full_match(pat_alt, make_seq1(2)));
+    assert(!full_match(pat_alt, make_seq1(3)));
+    assert(!full_match(pat_alt, empty));
+
+    // === Test 9: Star of any = match everything ===
+    let pat_any_star = star(any());
+    assert(full_match(pat_any_star, empty));
+    assert(full_match(pat_any_star, make_seq1(42)));
+    assert(full_match(pat_any_star, make_seq3(1, 2, 3)));
+    assert(full_match(pat_any_star, make_seq5(10, 20, 30, 40, 50)));
+
+    // === Test 10: Complex pattern: 1 . 3 (literal-any-literal) ===
+    let pat_1a3 = seq(lit(1), seq(any(), lit(3)));
+    assert(full_match(pat_1a3, make_seq3(1, 99, 3)));
+    assert(full_match(pat_1a3, make_seq3(1, 0, 3)));
+    assert(!full_match(pat_1a3, make_seq3(1, 99, 4)));
+    assert(!full_match(pat_1a3, make_seq2(1, 3)));
+
+    // === Test 11: Pattern: 1+ 2 (one or more 1s followed by 2) ===
+    let pat_1p2 = seq(plus(lit(1)), lit(2));
+    assert(full_match(pat_1p2, make_seq2(1, 2)));
+    assert(full_match(pat_1p2, make_seq3(1, 1, 2)));
+    assert(full_match(pat_1p2, make_seq4(1, 1, 1, 2)));
+    assert(!full_match(pat_1p2, make_seq1(2)));  // no 1s
+    assert(!full_match(pat_1p2, make_seq1(1)));  // no 2
+
+    // === Test 12: Pattern: (1|2)* matches sequences of 1s and 2s ===
+    let pat_12star = star(alt(lit(1), lit(2)));
+    assert(full_match(pat_12star, empty));
+    assert(full_match(pat_12star, make_seq1(1)));
+    assert(full_match(pat_12star, make_seq1(2)));
+    assert(full_match(pat_12star, make_seq3(1, 2, 1)));
+    assert(full_match(pat_12star, make_seq4(2, 1, 2, 1)));
+    assert(!full_match(pat_12star, make_seq2(1, 3)));
+
+    // === Test 13: Prefix matching ===
+    assert(prefix_match(lit(1), make_seq3(1, 2, 3)));
+    assert(!prefix_match(lit(2), make_seq3(1, 2, 3)));
+
+    // Star always has a prefix match (empty match)
+    assert(prefix_match(star(lit(9)), make_seq3(1, 2, 3)));
+
+    // === Test 14: match_from returns correct lengths ===
+    assert_eq(match_from(lit(1), make_seq3(1, 2, 3), 0), 1);
+    assert_eq(match_from(any(), make_seq3(1, 2, 3), 0), 1);
+    assert_eq(match_from(star(lit(1)), make_seq3(1, 1, 2), 0), 2);
+    assert_eq(match_from(star(lit(1)), make_seq3(2, 2, 2), 0), 0);  // zero matches
+
+    // === Test 15: match_from with offset ===
+    let s_123 = make_seq3(1, 2, 3);
+    assert_eq(match_from(lit(2), s_123, 1), 1);
+    assert_eq(match_from(lit(3), s_123, 2), 1);
+    assert_eq(match_from(lit(1), s_123, 1), -1);
+
+    // === Test 16: Nested star: (.*)* still matches everything ===
+    let nested_star = star(star(any()));
+    assert(full_match(nested_star, empty));
+    assert(full_match(nested_star, make_seq3(1, 2, 3)));
+
+    // === Test 17: Alt with sequences ===
+    // (1 2) | (3 4)
+    let pat_alt_seq = alt(seq(lit(1), lit(2)), seq(lit(3), lit(4)));
+    assert(full_match(pat_alt_seq, make_seq2(1, 2)));
+    assert(full_match(pat_alt_seq, make_seq2(3, 4)));
+    assert(!full_match(pat_alt_seq, make_seq2(1, 4)));
+    assert(!full_match(pat_alt_seq, make_seq2(3, 2)));
+
+    // === Test 18: Complex: 1 (2|3)+ 4 ===
+    let pat_complex = seq(lit(1), seq(plus(alt(lit(2), lit(3))), lit(4)));
+    assert(full_match(pat_complex, make_seq3(1, 2, 4)));
+    assert(full_match(pat_complex, make_seq3(1, 3, 4)));
+    assert(full_match(pat_complex, make_seq4(1, 2, 3, 4)));
+    assert(full_match(pat_complex, make_seq5(1, 3, 2, 3, 4)));
+    assert(!full_match(pat_complex, make_seq2(1, 4)));  // no (2|3)
+
+    // === Test 19: Star followed by specific literal (greedy, no backtracking) ===
+    // 1* 2 - greedy star stops when it can't match more 1s, then matches 2
+    let pat_1s2 = seq(star(lit(1)), lit(2));
+    assert(full_match(pat_1s2, make_seq1(2)));
+    assert(full_match(pat_1s2, make_seq2(1, 2)));
+    assert(full_match(pat_1s2, make_seq3(1, 1, 2)));
+    assert(!full_match(pat_1s2, make_seq1(1)));
+    assert(!full_match(pat_1s2, make_seq3(1, 2, 1)));
+    // match_from returns consumed count
+    assert_eq(match_from(pat_1s2, make_seq3(1, 1, 2), 0), 3);
+
+    // === Test 20: Pattern that doesn't match anything ===
+    // Plus on literal that's not in input
+    assert(!full_match(plus(lit(99)), make_seq3(1, 2, 3)));
+    assert(!full_match(seq(lit(1), lit(1)), make_seq2(1, 2)));
+
+    0
+}

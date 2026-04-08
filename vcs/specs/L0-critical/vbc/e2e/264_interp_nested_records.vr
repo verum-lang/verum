@@ -1,0 +1,365 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, records, nested
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: deeply nested record access and construction,
+// records containing records, updating nested fields by rebuilding
+
+// =============================================================================
+// Basic record types
+// =============================================================================
+
+type Vec2 is { x: Int, y: Int };
+type Vec3 is { x: Int, y: Int, z: Int };
+type Segment is { start: Vec2, end: Vec2 };
+type Triangle is { a: Vec2, b: Vec2, c: Vec2 };
+
+// =============================================================================
+// Three-level nesting
+// =============================================================================
+
+type Address is { street_num: Int, zip: Int };
+type Person is { age: Int, home: Address };
+type Company is { size: Int, ceo: Person };
+
+// =============================================================================
+// Basic record construction and access
+// =============================================================================
+
+fn test_basic_record() {
+    let v = Vec2 { x: 10, y: 20 };
+    assert_eq(v.x, 10);
+    assert_eq(v.y, 20);
+}
+
+fn test_vec3() {
+    let v = Vec3 { x: 1, y: 2, z: 3 };
+    assert_eq(v.x, 1);
+    assert_eq(v.y, 2);
+    assert_eq(v.z, 3);
+    assert_eq(v.x + v.y + v.z, 6);
+}
+
+// =============================================================================
+// Two-level nested records
+// =============================================================================
+
+fn test_segment() {
+    let s = Segment {
+        start: Vec2 { x: 0, y: 0 },
+        end: Vec2 { x: 10, y: 10 }
+    };
+    assert_eq(s.start.x, 0);
+    assert_eq(s.start.y, 0);
+    assert_eq(s.end.x, 10);
+    assert_eq(s.end.y, 10);
+}
+
+fn test_triangle() {
+    let t = Triangle {
+        a: Vec2 { x: 0, y: 0 },
+        b: Vec2 { x: 10, y: 0 },
+        c: Vec2 { x: 5, y: 8 }
+    };
+    assert_eq(t.a.x, 0);
+    assert_eq(t.a.y, 0);
+    assert_eq(t.b.x, 10);
+    assert_eq(t.b.y, 0);
+    assert_eq(t.c.x, 5);
+    assert_eq(t.c.y, 8);
+}
+
+// =============================================================================
+// Three-level nested records
+// =============================================================================
+
+fn test_three_level_nesting() {
+    let company = Company {
+        size: 500,
+        ceo: Person {
+            age: 45,
+            home: Address {
+                street_num: 123,
+                zip: 90210
+            }
+        }
+    };
+    assert_eq(company.size, 500);
+    assert_eq(company.ceo.age, 45);
+    assert_eq(company.ceo.home.street_num, 123);
+    assert_eq(company.ceo.home.zip, 90210);
+}
+
+// =============================================================================
+// Records as function parameters
+// =============================================================================
+
+fn distance_squared(s: Segment) -> Int {
+    let dx = s.end.x - s.start.x;
+    let dy = s.end.y - s.start.y;
+    dx * dx + dy * dy
+}
+
+fn test_record_as_param() {
+    let s = Segment {
+        start: Vec2 { x: 0, y: 0 },
+        end: Vec2 { x: 3, y: 4 }
+    };
+    assert_eq(distance_squared(s), 25);
+}
+
+fn test_record_as_param_2() {
+    let s = Segment {
+        start: Vec2 { x: 1, y: 1 },
+        end: Vec2 { x: 4, y: 5 }
+    };
+    // dx=3, dy=4 -> 9+16 = 25
+    assert_eq(distance_squared(s), 25);
+}
+
+// =============================================================================
+// Records returned from functions
+// =============================================================================
+
+fn make_vec2(x: Int, y: Int) -> Vec2 {
+    Vec2 { x: x, y: y }
+}
+
+fn make_segment(x1: Int, y1: Int, x2: Int, y2: Int) -> Segment {
+    Segment {
+        start: make_vec2(x1, y1),
+        end: make_vec2(x2, y2)
+    }
+}
+
+fn test_record_returned() {
+    let v = make_vec2(7, 8);
+    assert_eq(v.x, 7);
+    assert_eq(v.y, 8);
+}
+
+fn test_nested_record_returned() {
+    let s = make_segment(1, 2, 3, 4);
+    assert_eq(s.start.x, 1);
+    assert_eq(s.start.y, 2);
+    assert_eq(s.end.x, 3);
+    assert_eq(s.end.y, 4);
+}
+
+// =============================================================================
+// Mutable nested records
+// =============================================================================
+
+fn test_mutable_record() {
+    let mut v = Vec2 { x: 0, y: 0 };
+    v.x = 10;
+    v.y = 20;
+    assert_eq(v.x, 10);
+    assert_eq(v.y, 20);
+}
+
+fn test_mutable_nested() {
+    let mut s = Segment {
+        start: Vec2 { x: 0, y: 0 },
+        end: Vec2 { x: 1, y: 1 }
+    };
+    s.start.x = 100;
+    s.end.y = 200;
+    assert_eq(s.start.x, 100);
+    assert_eq(s.start.y, 0);
+    assert_eq(s.end.x, 1);
+    assert_eq(s.end.y, 200);
+}
+
+// =============================================================================
+// Rebuilding records (functional update pattern)
+// =============================================================================
+
+fn translate_vec2(v: Vec2, dx: Int, dy: Int) -> Vec2 {
+    Vec2 { x: v.x + dx, y: v.y + dy }
+}
+
+fn scale_vec2(v: Vec2, factor: Int) -> Vec2 {
+    Vec2 { x: v.x * factor, y: v.y * factor }
+}
+
+fn test_functional_update() {
+    let orig = Vec2 { x: 5, y: 10 };
+    let moved = translate_vec2(orig, 3, -2);
+    assert_eq(moved.x, 8);
+    assert_eq(moved.y, 8);
+    // Original unchanged (value semantics)
+    assert_eq(orig.x, 5);
+    assert_eq(orig.y, 10);
+}
+
+fn test_scale() {
+    let v = Vec2 { x: 3, y: 4 };
+    let scaled = scale_vec2(v, 2);
+    assert_eq(scaled.x, 6);
+    assert_eq(scaled.y, 8);
+}
+
+fn translate_segment(s: Segment, dx: Int, dy: Int) -> Segment {
+    Segment {
+        start: translate_vec2(s.start, dx, dy),
+        end: translate_vec2(s.end, dx, dy)
+    }
+}
+
+fn test_translate_segment() {
+    let s = make_segment(0, 0, 10, 10);
+    let moved = translate_segment(s, 5, -3);
+    assert_eq(moved.start.x, 5);
+    assert_eq(moved.start.y, -3);
+    assert_eq(moved.end.x, 15);
+    assert_eq(moved.end.y, 7);
+}
+
+// =============================================================================
+// Records with computed fields
+// =============================================================================
+
+fn midpoint(s: Segment) -> Vec2 {
+    Vec2 {
+        x: (s.start.x + s.end.x) / 2,
+        y: (s.start.y + s.end.y) / 2
+    }
+}
+
+fn test_midpoint() {
+    let s = make_segment(0, 0, 10, 20);
+    let mid = midpoint(s);
+    assert_eq(mid.x, 5);
+    assert_eq(mid.y, 10);
+}
+
+// =============================================================================
+// Records in loops
+// =============================================================================
+
+fn test_records_in_loop() {
+    let mut sum_x = 0;
+    let mut sum_y = 0;
+    let mut i = 0;
+    while i < 5 {
+        let v = make_vec2(i, i * 2);
+        sum_x = sum_x + v.x;
+        sum_y = sum_y + v.y;
+        i = i + 1;
+    }
+    // sum_x = 0+1+2+3+4 = 10
+    assert_eq(sum_x, 10);
+    // sum_y = 0+2+4+6+8 = 20
+    assert_eq(sum_y, 20);
+}
+
+// =============================================================================
+// Record equality by fields
+// =============================================================================
+
+fn vec2_eq(a: Vec2, b: Vec2) -> Int {
+    if a.x == b.x && a.y == b.y { 1 } else { 0 }
+}
+
+fn test_record_equality() {
+    let a = Vec2 { x: 5, y: 10 };
+    let b = Vec2 { x: 5, y: 10 };
+    let c = Vec2 { x: 5, y: 11 };
+    assert_eq(vec2_eq(a, b), 1);
+    assert_eq(vec2_eq(a, c), 0);
+}
+
+// =============================================================================
+// Four-level nesting
+// =============================================================================
+
+type Inner is { val: Int };
+type Mid is { inner: Inner };
+type Outer is { mid: Mid };
+type Top is { outer: Outer };
+
+fn test_four_level_nesting() {
+    let t = Top {
+        outer: Outer {
+            mid: Mid {
+                inner: Inner { val: 42 }
+            }
+        }
+    };
+    assert_eq(t.outer.mid.inner.val, 42);
+}
+
+fn test_four_level_construction() {
+    let i = Inner { val: 99 };
+    let m = Mid { inner: i };
+    let o = Outer { mid: m };
+    let t = Top { outer: o };
+    assert_eq(t.outer.mid.inner.val, 99);
+}
+
+// =============================================================================
+// Array-like record pattern (proven pattern)
+// =============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_get(arr: Arr4, idx: Int) -> Int {
+    if idx == 0 { arr.e0 }
+    else if idx == 1 { arr.e1 }
+    else if idx == 2 { arr.e2 }
+    else { arr.e3 }
+}
+
+fn arr4_set(arr: Arr4, idx: Int, val: Int) -> Arr4 {
+    if idx == 0 { Arr4 { e0: val, e1: arr.e1, e2: arr.e2, e3: arr.e3 } }
+    else if idx == 1 { Arr4 { e0: arr.e0, e1: val, e2: arr.e2, e3: arr.e3 } }
+    else if idx == 2 { Arr4 { e0: arr.e0, e1: arr.e1, e2: val, e3: arr.e3 } }
+    else { Arr4 { e0: arr.e0, e1: arr.e1, e2: arr.e2, e3: val } }
+}
+
+fn test_arr4_pattern() {
+    let mut arr = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+    assert_eq(arr4_get(arr, 0), 10);
+    assert_eq(arr4_get(arr, 1), 20);
+    assert_eq(arr4_get(arr, 2), 30);
+    assert_eq(arr4_get(arr, 3), 40);
+
+    arr = arr4_set(arr, 1, 99);
+    assert_eq(arr4_get(arr, 0), 10);
+    assert_eq(arr4_get(arr, 1), 99);
+    assert_eq(arr4_get(arr, 2), 30);
+    assert_eq(arr4_get(arr, 3), 40);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_basic_record();
+    test_vec3();
+    test_segment();
+    test_triangle();
+    test_three_level_nesting();
+    test_record_as_param();
+    test_record_as_param_2();
+    test_record_returned();
+    test_nested_record_returned();
+    test_mutable_record();
+    test_mutable_nested();
+    test_functional_update();
+    test_scale();
+    test_translate_segment();
+    test_midpoint();
+    test_records_in_loop();
+    test_record_equality();
+    test_four_level_nesting();
+    test_four_level_construction();
+    test_arr4_pattern();
+    print("[OK] 264_interp_nested_records");
+    0
+}

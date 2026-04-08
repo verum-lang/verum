@@ -1,0 +1,92 @@
+// @test: parse-pass
+// @tier: 0
+// @category: comprehensions
+// @description: Test list comprehension with filter clauses
+
+fn test_list_comprehension_filters() {
+    // Basic filter
+    let positives = [x for x in numbers if x > 0];
+
+    // Filter with equality
+    let matches = [x for x in items if x == target];
+
+    // Filter with inequality
+    let non_empty = [s for s in strings if s != ""];
+
+    // Filter with method call
+    let evens = [x for x in numbers if x.is_even()];
+
+    // Filter with function call
+    let valid = [x for x in items if is_valid(x)];
+
+    // Filter with negation
+    let non_null = [x for x in items if !x.is_null()];
+
+    // Filter with boolean field
+    let active = [user for user in users if user.active];
+
+    // Filter with compound condition AND
+    let in_range = [x for x in numbers if x >= min && x <= max];
+
+    // Filter with compound condition OR
+    let special = [x for x in items if x.is_first() || x.is_last()];
+
+    // Filter with complex boolean
+    let filtered = [x for x in items if (x > 0 && x < 100) || x == -1];
+
+    // Filter with pattern test using is operator
+    let some_values = [x for x in options if x is Some(_)];
+
+    // Filter with is not pattern
+    let non_none = [x for x in options if x is not None];
+
+    // Filter with type check
+    let numbers_only = [x for x in mixed if x is Int];
+
+    // Filter with range check
+    let in_bounds = [x for x in values if x >= 0 && x < 100];
+
+    // Multiple sequential filters (should be equivalent to AND)
+    let both = [x for x in items if x > 0 if x < 100];
+}
+
+fn test_filter_with_expressions() {
+    // Filter comparing to expression result
+    let above_avg = [x for x in numbers if x > average(numbers)];
+
+    // Filter with computed bound
+    let above_threshold = [x for x in values if x > threshold * 2];
+
+    // Filter with method result comparison
+    let long_strings = [s for s in strings if s.len() > 10];
+
+    // Filter with field comparison
+    let adults = [person for person in people if person.age >= 18];
+
+    // Filter with tuple element
+    let positive_pairs = [(x, y) for (x, y) in coords if x > 0 && y > 0];
+
+    // Filter with match in condition
+    let some_positives = [x for x in options if match x { Some(n) => n > 0, None => false }];
+
+    // Filter with if-else in condition
+    let conditional = [x for x in items if if flag { x > 0 } else { x < 0 }];
+}
+
+fn test_filter_with_let_bindings() {
+    // Filter using let-bound value
+    let filtered = [y for x in items let y = transform(x) if y > 0];
+
+    // Multiple lets with filter
+    let complex = [z for x in items
+                   let y = x * 2
+                   let z = y + 1
+                   if z < 100];
+
+    // Filter between lets
+    let interleaved = [z for x in items
+                       if x > 0
+                       let y = x * 2
+                       if y < 100
+                       let z = y + 1];
+}

@@ -1,0 +1,323 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, text, string, format
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Text operations — concatenation, format strings,
+// comparison, text in records, passing text to functions
+
+// =============================================================================
+// Basic text operations
+// =============================================================================
+
+fn test_text_literals() {
+    let a = "hello";
+    let b = "world";
+    assert_eq(a, "hello");
+    assert_eq(b, "world");
+    assert(a != b);
+}
+
+fn test_empty_text() {
+    let s = "";
+    assert_eq(s, "");
+    assert(s != "x");
+    assert("" == "");
+}
+
+fn test_text_with_spaces() {
+    let s = "hello world";
+    assert_eq(s, "hello world");
+    assert(s != "helloworld");
+}
+
+// =============================================================================
+// Text concatenation
+// =============================================================================
+
+fn test_basic_concat() {
+    let result = "hello" + " " + "world";
+    assert_eq(result, "hello world");
+}
+
+fn test_concat_with_vars() {
+    let first = "foo";
+    let second = "bar";
+    let combined = first + second;
+    assert_eq(combined, "foobar");
+}
+
+fn test_concat_empty() {
+    let a = "test";
+    assert_eq(a + "", "test");
+    assert_eq("" + a, "test");
+    assert_eq("" + "", "");
+}
+
+fn test_concat_chain() {
+    let s = "a" + "b" + "c" + "d" + "e" + "f";
+    assert_eq(s, "abcdef");
+}
+
+fn test_concat_in_loop() {
+    let mut result = "";
+    let mut i = 0;
+    while i < 5 {
+        result = result + "x";
+        i = i + 1;
+    }
+    assert_eq(result, "xxxxx");
+}
+
+fn test_concat_numbers_as_text() {
+    let a = "num=";
+    let n = 42;
+    let s = f"{a}{n}";
+    assert_eq(s, "num=42");
+}
+
+// =============================================================================
+// Format strings
+// =============================================================================
+
+fn test_fstring_basic() {
+    let x = 10;
+    let s = f"x={x}";
+    assert_eq(s, "x=10");
+}
+
+fn test_fstring_multiple_vars() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let s = f"a={a}, b={b}, c={c}";
+    assert_eq(s, "a=1, b=2, c=3");
+}
+
+fn test_fstring_expression() {
+    let x = 5;
+    let s = f"double={x * 2}";
+    assert_eq(s, "double=10");
+}
+
+fn test_fstring_with_text_var() {
+    let name = "Alice";
+    let s = f"Hello, {name}!";
+    assert_eq(s, "Hello, Alice!");
+}
+
+fn test_fstring_zero_negative() {
+    let z = 0;
+    let neg = -42;
+    assert_eq(f"z={z}", "z=0");
+    assert_eq(f"neg={neg}", "neg=-42");
+}
+
+fn test_fstring_adjacent_interps() {
+    let a = 1;
+    let b = 2;
+    let s = f"{a}{b}";
+    assert_eq(s, "12");
+}
+
+fn test_fstring_only_interp() {
+    let val = 99;
+    let s = f"{val}";
+    assert_eq(s, "99");
+}
+
+// =============================================================================
+// Text comparison
+// =============================================================================
+
+fn test_text_eq() {
+    assert("abc" == "abc");
+    assert("" == "");
+    assert_eq("hello" == "hello", true);
+    assert_eq("hello" == "world", false);
+}
+
+fn test_text_ne() {
+    assert("abc" != "def");
+    assert("a" != "A");
+    assert("abc" != "abcd");
+    assert("xyz" != "xy");
+    assert_eq("same" != "same", false);
+}
+
+fn test_text_case_sensitive() {
+    assert("abc" != "ABC");
+    assert("Hello" != "HELLO");
+    assert("Test" != "test");
+}
+
+// =============================================================================
+// Text in functions
+// =============================================================================
+
+fn greet(name: Text) -> Text {
+    "Hello, " + name + "!"
+}
+
+fn test_text_function_return() {
+    assert_eq(greet("World"), "Hello, World!");
+    assert_eq(greet("Verum"), "Hello, Verum!");
+    assert_eq(greet(""), "Hello, !");
+}
+
+fn repeat_text(s: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < n {
+        result = result + s;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_repeat() {
+    assert_eq(repeat_text("ab", 3), "ababab");
+    assert_eq(repeat_text("x", 5), "xxxxx");
+    assert_eq(repeat_text("hi", 0), "");
+    assert_eq(repeat_text("", 10), "");
+}
+
+fn join_texts(a: Text, sep: Text, b: Text) -> Text {
+    a + sep + b
+}
+
+fn test_join() {
+    assert_eq(join_texts("hello", " ", "world"), "hello world");
+    assert_eq(join_texts("foo", "-", "bar"), "foo-bar");
+    assert_eq(join_texts("a", "", "b"), "ab");
+}
+
+// =============================================================================
+// Text in records
+// =============================================================================
+
+type NamedValue is { name: Text, value: Int };
+type PersonInfo is { first_name: Text, last_name: Text, age: Int };
+
+fn test_text_in_record() {
+    let nv = NamedValue { name: "count", value: 42 };
+    assert_eq(nv.name, "count");
+    assert_eq(nv.value, 42);
+}
+
+fn test_text_record_format() {
+    let nv = NamedValue { name: "score", value: 100 };
+    let s = f"{nv.name}={nv.value}";
+    assert_eq(s, "score=100");
+}
+
+fn test_person_record() {
+    let p = PersonInfo { first_name: "John", last_name: "Doe", age: 30 };
+    assert_eq(p.first_name, "John");
+    assert_eq(p.last_name, "Doe");
+    assert_eq(p.age, 30);
+
+    let full = p.first_name + " " + p.last_name;
+    assert_eq(full, "John Doe");
+}
+
+fn format_person(p: PersonInfo) -> Text {
+    f"{p.first_name} {p.last_name} (age {p.age})"
+}
+
+fn test_format_person() {
+    let p = PersonInfo { first_name: "Jane", last_name: "Smith", age: 25 };
+    assert_eq(format_person(p), "Jane Smith (age 25)");
+}
+
+// =============================================================================
+// Text building patterns
+// =============================================================================
+
+fn build_csv_row(a: Int, b: Int, c: Int) -> Text {
+    f"{a},{b},{c}"
+}
+
+fn test_csv_row() {
+    assert_eq(build_csv_row(1, 2, 3), "1,2,3");
+    assert_eq(build_csv_row(10, 20, 30), "10,20,30");
+    assert_eq(build_csv_row(0, 0, 0), "0,0,0");
+}
+
+fn test_build_text_in_loop() {
+    let mut result = "";
+    let mut i = 1;
+    while i <= 5 {
+        if i > 1 {
+            result = result + ",";
+        }
+        let part = f"{i}";
+        result = result + part;
+        i = i + 1;
+    }
+    assert_eq(result, "1,2,3,4,5");
+}
+
+// =============================================================================
+// Text comparison in conditions
+// =============================================================================
+
+fn categorize(label: Text) -> Int {
+    if label == "high" {
+        3
+    } else if label == "medium" {
+        2
+    } else if label == "low" {
+        1
+    } else {
+        0
+    }
+}
+
+fn test_text_in_conditions() {
+    assert_eq(categorize("high"), 3);
+    assert_eq(categorize("medium"), 2);
+    assert_eq(categorize("low"), 1);
+    assert_eq(categorize("unknown"), 0);
+    assert_eq(categorize(""), 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_text_literals();
+    test_empty_text();
+    test_text_with_spaces();
+    test_basic_concat();
+    test_concat_with_vars();
+    test_concat_empty();
+    test_concat_chain();
+    test_concat_in_loop();
+    test_concat_numbers_as_text();
+    test_fstring_basic();
+    test_fstring_multiple_vars();
+    test_fstring_expression();
+    test_fstring_with_text_var();
+    test_fstring_zero_negative();
+    test_fstring_adjacent_interps();
+    test_fstring_only_interp();
+    test_text_eq();
+    test_text_ne();
+    test_text_case_sensitive();
+    test_text_function_return();
+    test_repeat();
+    test_join();
+    test_text_in_record();
+    test_text_record_format();
+    test_person_record();
+    test_format_person();
+    test_csv_row();
+    test_build_text_in_loop();
+    test_text_in_conditions();
+    print("[OK] 266_interp_text_ops");
+    0
+}

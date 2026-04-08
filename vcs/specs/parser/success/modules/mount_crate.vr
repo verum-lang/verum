@@ -1,0 +1,93 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Import from crate root
+mount crate.types;
+
+// Import specific item from crate
+mount crate.core.Engine;
+
+// Import from nested crate path
+mount crate.utils.helpers.format;
+
+// Crate with group import
+mount crate.{types, utils, core};
+
+// Crate with nested group
+mount crate.core.{Engine, Config, Runtime};
+
+// Crate with glob
+mount crate.prelude.*;
+
+// Crate with alias
+mount crate.long_module_name as short;
+
+// Multiple crate imports
+mount crate.models;
+mount crate.services;
+mount crate.controllers;
+mount crate.views;
+
+// Crate in nested module context
+module deeply_nested {
+    module inner {
+        module innermost {
+            // crate always refers to crate root
+            mount crate.root_types;
+            mount crate.root_utils;
+        }
+    }
+}
+
+// Crate combined with other imports
+module combined {
+    // From crate root
+    mount crate.common.Error;
+
+    // From super
+    mount super.sibling.Helper;
+
+    // From std
+    mount core.collections.List;
+}
+
+// Complex crate patterns
+mount crate.{
+    models.{User, Product, Order},
+    services.{UserService, ProductService},
+    utils.{format, validate}
+};
+
+// Crate with very long path
+mount crate.core.engine.runtime.scheduler.TaskQueue;
+
+// Crate to access re-exported items
+mount crate.prelude.{Result, Maybe, List, Map};
+
+// Using crate for internal modules
+module internal {
+    module helpers {
+        type InternalHelper is { data: Int };
+    }
+}
+
+module api {
+    // Access internal via crate path
+    mount crate.internal.helpers.InternalHelper;
+
+    pub fn use_helper() -> InternalHelper {
+        InternalHelper { data: 42 }
+    }
+}
+
+// Crate with mixed visibility items
+module visibility_test {
+    mount crate.public_module.PublicItem;
+    mount crate.internal_module.InternalItem;
+}
+
+// Cog alias for crate (from CLAUDE.md - cog is the Verum term)
+mount cog.helpers;
+mount cog.utils.format;
+mount cog.{core, lib, ext};

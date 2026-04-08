@@ -1,0 +1,555 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+// @tags: parser, ffi, ownership, ffi_ownership_spec
+// @description: Comprehensive test for ffi_ownership_spec grammar production
+
+// ============================================================
+// GRAMMAR: ffi_ownership_spec = '@ownership' , '(' , ownership_mode , ')' ;
+// GRAMMAR: ownership_mode    = 'transfer_to' , '=' , string_lit
+//                            | 'transfer_from' , '=' , string_lit
+//                            | 'borrow'
+//                            | 'shared' ;
+// ============================================================
+
+// Type definitions for ownership tests
+type c_int is i32;
+type c_void is ();
+type size_t is usize;
+
+// ------------------------------------------------------------
+// Transfer ownership TO callee (callee takes ownership)
+// ------------------------------------------------------------
+
+ffi TransferToCallee {
+    // Basic transfer to callee
+    @extern("C")
+    @ownership(transfer_to = "callee")
+    fn consume_buffer(buf: *mut u8);
+
+    // Transfer with size parameter
+    @extern("C")
+    @ownership(transfer_to = "callee")
+    fn take_ownership(ptr: *mut c_void, size: size_t);
+
+    // Transfer with return value
+    @extern("C")
+    @ownership(transfer_to = "callee")
+    fn consume_and_process(data: *mut Data) -> c_int;
+
+    // Transfer to specific named entity
+    @extern("C")
+    @ownership(transfer_to = "library")
+    fn register_callback(cb: *mut Callback);
+
+    // Transfer to pool
+    @extern("C")
+    @ownership(transfer_to = "pool")
+    fn return_to_pool(item: *mut PoolItem);
+}
+
+@repr(C)
+type Data is {
+    ptr: *mut u8,
+    len: size_t,
+};
+
+@opaque
+type Callback is ();
+
+@opaque
+type PoolItem is ();
+
+// More transfer_to examples
+ffi TransferToVariants {
+    // Transfer to system
+    @extern("C")
+    @ownership(transfer_to = "system")
+    fn close_handle(handle: *mut Handle);
+
+    // Transfer to OS
+    @extern("C")
+    @ownership(transfer_to = "os")
+    fn release_resource(resource: *mut Resource);
+
+    // Transfer to runtime
+    @extern("C")
+    @ownership(transfer_to = "runtime")
+    fn schedule_task(task: *mut Task);
+
+    // Transfer to gc (garbage collector)
+    @extern("C")
+    @ownership(transfer_to = "gc")
+    fn mark_for_collection(obj: *mut GcObject);
+
+    // Transfer to cache
+    @extern("C")
+    @ownership(transfer_to = "cache")
+    fn cache_object(obj: *mut CacheEntry);
+}
+
+@opaque
+type Handle is ();
+
+@opaque
+type Resource is ();
+
+@opaque
+type Task is ();
+
+@opaque
+type GcObject is ();
+
+@opaque
+type CacheEntry is ();
+
+// ------------------------------------------------------------
+// Transfer ownership FROM callee (callee returns ownership)
+// ------------------------------------------------------------
+
+ffi TransferFromCallee {
+    // Basic transfer from callee
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn create_buffer(size: size_t) -> *mut u8;
+
+    // Transfer from with params
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn allocate_data(len: size_t, alignment: size_t) -> *mut Data;
+
+    // Transfer from specific named entity
+    @extern("C")
+    @ownership(transfer_from = "library")
+    fn get_singleton() -> *mut Singleton;
+
+    // Transfer from pool
+    @extern("C")
+    @ownership(transfer_from = "pool")
+    fn borrow_from_pool() -> *mut PoolItem;
+}
+
+@opaque
+type Singleton is ();
+
+// More transfer_from examples
+ffi TransferFromVariants {
+    // Transfer from system
+    @extern("C")
+    @ownership(transfer_from = "system")
+    fn open_file(path: *const i8) -> *mut FileHandle;
+
+    // Transfer from os
+    @extern("C")
+    @ownership(transfer_from = "os")
+    fn create_window(title: *const i8) -> *mut WindowHandle;
+
+    // Transfer from runtime
+    @extern("C")
+    @ownership(transfer_from = "runtime")
+    fn spawn_thread(entry: fn(*mut c_void) -> c_int) -> *mut ThreadHandle;
+
+    // Transfer from allocator
+    @extern("C")
+    @ownership(transfer_from = "allocator")
+    fn custom_alloc(size: size_t) -> *mut c_void;
+
+    // Transfer from factory
+    @extern("C")
+    @ownership(transfer_from = "factory")
+    fn create_widget() -> *mut Widget;
+}
+
+@opaque
+type FileHandle is ();
+
+@opaque
+type WindowHandle is ();
+
+@opaque
+type ThreadHandle is ();
+
+@opaque
+type Widget is ();
+
+// ------------------------------------------------------------
+// Borrow ownership (temporary access, no transfer)
+// ------------------------------------------------------------
+
+ffi BorrowOwnership {
+    // Basic borrow
+    @extern("C")
+    @ownership(borrow)
+    fn read_buffer(buf: *const u8, len: size_t) -> c_int;
+
+    // Borrow for inspection
+    @extern("C")
+    @ownership(borrow)
+    fn inspect_data(data: *const Data) -> c_int;
+
+    // Borrow for computation
+    @extern("C")
+    @ownership(borrow)
+    fn compute_hash(data: *const u8, len: size_t) -> u64;
+
+    // Borrow struct
+    @extern("C")
+    @ownership(borrow)
+    fn get_field(obj: *const MyStruct) -> c_int;
+
+    // Borrow for comparison
+    @extern("C")
+    @ownership(borrow)
+    fn compare_buffers(a: *const u8, b: *const u8, len: size_t) -> c_int;
+}
+
+@repr(C)
+type MyStruct is {
+    value: c_int,
+};
+
+// More borrow examples
+ffi BorrowVariants {
+    // Borrow for validation
+    @extern("C")
+    @ownership(borrow)
+    fn validate(data: *const ValidationData) -> bool;
+
+    // Borrow for logging
+    @extern("C")
+    @ownership(borrow)
+    fn log_message(msg: *const i8);
+
+    // Borrow for metrics
+    @extern("C")
+    @ownership(borrow)
+    fn collect_metrics(state: *const MetricsState) -> Metrics;
+
+    // Borrow for serialization
+    @extern("C")
+    @ownership(borrow)
+    fn serialize(obj: *const Serializable, buf: *mut u8, len: size_t) -> size_t;
+
+    // Borrow for iteration
+    @extern("C")
+    @ownership(borrow)
+    fn iterate(collection: *const Collection, callback: fn(*const Item));
+}
+
+@opaque
+type ValidationData is ();
+
+@opaque
+type MetricsState is ();
+
+@repr(C)
+type Metrics is {
+    count: u64,
+    total: u64,
+};
+
+@opaque
+type Serializable is ();
+
+@opaque
+type Collection is ();
+
+@opaque
+type Item is ();
+
+// ------------------------------------------------------------
+// Shared ownership (reference counted or similar)
+// ------------------------------------------------------------
+
+ffi SharedOwnership {
+    // Basic shared
+    @extern("C")
+    @ownership(shared)
+    fn share_buffer(buf: *mut SharedBuffer) -> *mut SharedBuffer;
+
+    // Shared increment reference
+    @extern("C")
+    @ownership(shared)
+    fn add_ref(obj: *mut RefCounted) -> *mut RefCounted;
+
+    // Shared clone
+    @extern("C")
+    @ownership(shared)
+    fn clone_shared(ptr: *mut SharedPtr) -> *mut SharedPtr;
+
+    // Shared retain
+    @extern("C")
+    @ownership(shared)
+    fn retain(obj: *mut ArcObject);
+
+    // Shared weak reference
+    @extern("C")
+    @ownership(shared)
+    fn weak_ref(obj: *mut WeakRef) -> *mut WeakRef;
+}
+
+@opaque
+type SharedBuffer is ();
+
+@opaque
+type RefCounted is ();
+
+@opaque
+type SharedPtr is ();
+
+@opaque
+type ArcObject is ();
+
+@opaque
+type WeakRef is ();
+
+// More shared examples
+ffi SharedVariants {
+    // Shared for caching
+    @extern("C")
+    @ownership(shared)
+    fn get_cached(key: *const i8) -> *mut CachedObject;
+
+    // Shared for interning
+    @extern("C")
+    @ownership(shared)
+    fn intern_string(s: *const i8) -> *mut InternedString;
+
+    // Shared for flyweight
+    @extern("C")
+    @ownership(shared)
+    fn get_flyweight(id: c_int) -> *mut Flyweight;
+
+    // Shared observer
+    @extern("C")
+    @ownership(shared)
+    fn subscribe(topic: *const i8, callback: fn(*const Event)) -> *mut Subscription;
+}
+
+@opaque
+type CachedObject is ();
+
+@opaque
+type InternedString is ();
+
+@opaque
+type Flyweight is ();
+
+@opaque
+type Event is ();
+
+@opaque
+type Subscription is ();
+
+// ------------------------------------------------------------
+// Mixed ownership specifications in one FFI block
+// ------------------------------------------------------------
+
+ffi MixedOwnership {
+    // Transfer to
+    @extern("C")
+    @ownership(transfer_to = "callee")
+    fn give_ownership(ptr: *mut c_void);
+
+    // Transfer from
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn take_ownership() -> *mut c_void;
+
+    // Borrow
+    @extern("C")
+    @ownership(borrow)
+    fn use_temporarily(ptr: *const c_void) -> c_int;
+
+    // Shared
+    @extern("C")
+    @ownership(shared)
+    fn share_resource(ptr: *mut c_void) -> *mut c_void;
+}
+
+// ------------------------------------------------------------
+// Ownership with other FFI annotations
+// ------------------------------------------------------------
+
+ffi OwnershipWithContracts {
+    @extern("C")
+    @ownership(transfer_to = "callee")
+    fn consume_with_contract(ptr: *mut u8);
+
+    requires ptr != null;
+
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn produce_with_contract(size: size_t) -> *mut u8;
+
+    ensures result != null;
+}
+
+ffi OwnershipWithMemoryEffects {
+    @extern("C")
+    @ownership(transfer_to = "callee")
+    fn free_buffer(buf: *mut u8);
+
+    memory_effects = Deallocates(buf);
+
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn alloc_buffer(size: size_t) -> *mut u8;
+
+    memory_effects = Allocates;
+}
+
+ffi OwnershipWithThreadSafety {
+    @extern("C")
+    @ownership(shared)
+    fn thread_safe_clone(obj: *mut ThreadSafeObj) -> *mut ThreadSafeObj;
+
+    thread_safe = true;
+}
+
+@opaque
+type ThreadSafeObj is ();
+
+// ------------------------------------------------------------
+// Ownership in extended FFI blocks
+// ------------------------------------------------------------
+
+ffi BaseOwnershipFfi {
+    @extern("C")
+    @ownership(borrow)
+    fn base_borrow(data: *const c_void) -> c_int;
+}
+
+ffi ExtendedOwnershipFfi extends BaseOwnershipFfi {
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn extended_create() -> *mut c_void;
+}
+
+// ------------------------------------------------------------
+// Ownership with visibility
+// ------------------------------------------------------------
+
+pub ffi PublicOwnershipFfi {
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn public_create() -> *mut c_void;
+}
+
+internal ffi InternalOwnershipFfi {
+    @extern("C")
+    @ownership(transfer_to = "callee")
+    fn internal_destroy(ptr: *mut c_void);
+}
+
+// ------------------------------------------------------------
+// Complex ownership scenarios
+// ------------------------------------------------------------
+
+ffi ComplexOwnership {
+    // Factory pattern - transfers ownership out
+    @extern("C")
+    @ownership(transfer_from = "factory")
+    fn create_instance(config: *const Config) -> *mut Instance;
+
+    // Dispose pattern - transfers ownership in
+    @extern("C")
+    @ownership(transfer_to = "disposer")
+    fn dispose_instance(instance: *mut Instance);
+
+    // Borrow for transformation (in-place)
+    @extern("C")
+    @ownership(borrow)
+    fn transform_in_place(data: *mut Data);
+
+    // Shared reference counting
+    @extern("C")
+    @ownership(shared)
+    fn ref_counted_clone(rc: *mut RcData) -> *mut RcData;
+}
+
+@repr(C)
+type Config is {
+    flags: u32,
+};
+
+@opaque
+type Instance is ();
+
+@opaque
+type RcData is ();
+
+// Resource acquisition patterns
+ffi ResourceAcquisition {
+    // RAII-style acquire
+    @extern("C")
+    @ownership(transfer_from = "system")
+    fn acquire_lock(mutex: *mut Mutex) -> *mut LockGuard;
+
+    // RAII-style release
+    @extern("C")
+    @ownership(transfer_to = "system")
+    fn release_lock(guard: *mut LockGuard);
+
+    // Connection pool checkout
+    @extern("C")
+    @ownership(transfer_from = "pool")
+    fn checkout_connection() -> *mut Connection;
+
+    // Connection pool checkin
+    @extern("C")
+    @ownership(transfer_to = "pool")
+    fn checkin_connection(conn: *mut Connection);
+}
+
+@opaque
+type Mutex is ();
+
+@opaque
+type LockGuard is ();
+
+@opaque
+type Connection is ();
+
+// Memory management patterns
+ffi MemoryManagement {
+    // Allocator takes ownership of old buffer during resize
+    @extern("C")
+    @ownership(transfer_to = "allocator")
+    fn submit_for_resize(old_buf: *mut u8);
+
+    // Allocator returns ownership of new buffer
+    @extern("C")
+    @ownership(transfer_from = "allocator")
+    fn complete_resize(size: size_t) -> *mut u8;
+
+    // Memory mapped file - shared with OS
+    @extern("C")
+    @ownership(shared)
+    fn mmap_file(path: *const i8, size: size_t) -> *mut u8;
+}
+
+// Callback ownership
+ffi CallbackOwnership {
+    // Register callback - library takes ownership
+    @extern("C")
+    @ownership(transfer_to = "library")
+    fn register_callback(cb: *mut CallbackData);
+
+    // Unregister callback - library returns ownership
+    @extern("C")
+    @ownership(transfer_from = "library")
+    fn unregister_callback(id: c_int) -> *mut CallbackData;
+
+    // Invoke callback - borrow only
+    @extern("C")
+    @ownership(borrow)
+    fn invoke_callback(cb: *const CallbackData, arg: c_int) -> c_int;
+}
+
+@repr(C)
+type CallbackData is {
+    fn_ptr: fn(c_int) -> c_int,
+    user_data: *mut c_void,
+};

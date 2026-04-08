@@ -1,0 +1,210 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, division
+// @timeout: 5000
+
+/// Доказательство безопасности деления на ненулевое значение.
+
+type NonZero is Int{!= 0};
+type Positive is Int{> 0};
+type NonNegative is Int{>= 0};
+type NonZeroFloat is Float{!= 0.0};
+
+// ============================================================================
+// Basic safe division
+// ============================================================================
+
+@verify(proof)
+fn safe_divide(x: Float, y: Float{!= 0.0}) -> Float {
+    x / y  // Статически доказано безопасно
+}
+
+@verify(proof)
+fn safe_int_divide(x: Int, y: NonZero) -> Int {
+    x / y  // Division by non-zero is safe
+}
+
+@verify(proof)
+fn safe_modulo(x: Int, y: NonZero) -> Int {
+    x % y  // Modulo by non-zero is safe
+}
+
+// ============================================================================
+// Division with positive divisor
+// ============================================================================
+
+@verify(proof)
+fn divide_by_positive(x: Int, y: Positive) -> Int {
+    x / y  // Positive implies non-zero
+}
+
+@verify(proof)
+fn positive_quotient(x: Positive, y: Positive) -> NonNegative {
+    x / y  // pos / pos >= 0
+}
+
+// ============================================================================
+// Conditional division safety
+// ============================================================================
+
+@verify(proof)
+fn conditional_divide(x: Int, y: Int) -> Maybe<Int> {
+    if y != 0 {
+        Some(x / y)  // Safe: y != 0 in this branch
+    } else {
+        None
+    }
+}
+
+@verify(proof)
+fn guarded_divide(x: Int, y: Int, default: Int) -> Int {
+    if y == 0 {
+        default
+    } else {
+        x / y  // Safe: y != 0 in else branch
+    }
+}
+
+// ============================================================================
+// Division with computed divisor
+// ============================================================================
+
+@verify(proof)
+fn divide_by_length(sum: Int, count: Int{> 0}) -> Int {
+    sum / count  // Safe: count > 0 means divisor != 0
+}
+
+@verify(proof)
+fn average_of_two(a: Int, b: Int) -> Int {
+    (a + b) / 2  // Safe: divisor is constant 2
+}
+
+// ============================================================================
+// Division with expression divisor
+// ============================================================================
+
+@verify(proof)
+fn divide_by_square(x: Int, y: NonZero) -> Int {
+    x / (y * y)  // y != 0 implies y*y != 0
+}
+
+@verify(proof)
+fn divide_by_abs(x: Int, y: NonZero) -> Int {
+    let abs_y = if y > 0 { y } else { -y };
+    x / abs_y  // |y| != 0 when y != 0
+}
+
+@verify(proof)
+fn divide_by_increment(x: Int, y: NonNegative) -> Int {
+    x / (y + 1)  // y >= 0 implies y + 1 > 0
+}
+
+// ============================================================================
+// Floating point division safety
+// ============================================================================
+
+@verify(proof)
+fn float_divide(x: Float, y: NonZeroFloat) -> Float {
+    x / y
+}
+
+@verify(proof)
+fn normalize(x: Float, y: Float, z: Float) -> Maybe<(Float, Float, Float)>
+    requires x != 0.0 || y != 0.0 || z != 0.0
+{
+    let magnitude = (x * x + y * y + z * z).sqrt();
+    // magnitude > 0 because at least one component is non-zero
+    if magnitude > 0.0 {
+        Some((x / magnitude, y / magnitude, z / magnitude))
+    } else {
+        None  // Unreachable given precondition
+    }
+}
+
+// ============================================================================
+// Division in data structures
+// ============================================================================
+
+type Fraction is {
+    numerator: Int,
+    denominator: NonZero,
+};
+
+@verify(proof)
+fn fraction_value(f: Fraction) -> Float {
+    f.numerator as Float / f.denominator as Float
+}
+
+@verify(proof)
+fn add_fractions(a: Fraction, b: Fraction) -> Fraction {
+    Fraction {
+        numerator: a.numerator * b.denominator + b.numerator * a.denominator,
+        denominator: a.denominator * b.denominator,  // nz * nz = nz
+    }
+}
+
+// ============================================================================
+// Percentage and ratio calculations
+// ============================================================================
+
+type Percentage is Float{>= 0.0 && <= 100.0};
+type NonZeroPercentage is Float{> 0.0 && <= 100.0};
+
+@verify(proof)
+fn percentage_of(value: Float, pct: Percentage) -> Float {
+    value * pct / 100.0  // Division by constant 100.0 is safe
+}
+
+@verify(proof)
+fn inverse_percentage(pct: NonZeroPercentage) -> Float{> 0.0} {
+    100.0 / pct  // pct > 0 guarantees safe division
+}
+
+// ============================================================================
+// Loop-based division safety
+// ============================================================================
+
+@verify(proof)
+fn harmonic_sum(n: Positive) -> Float {
+    let mut sum: Float = 0.0;
+    let mut i: Positive = 1;
+
+    while i <= n {
+        sum += 1.0 / (i as Float);  // Safe: i > 0
+        i += 1;
+    }
+
+    sum
+}
+
+@verify(proof)
+// weighted_average simplified: indexing refined lists not yet supported
+fn weighted_average_simple(a: Int, w_a: Positive, b: Int, w_b: Positive) -> Float {
+    let sum = (a * w_a + b * w_b) as Float;
+    let weight_sum = (w_a + w_b) as Float;
+    sum / weight_sum  // Safe: weight_sum > 0 since both weights positive
+}
+
+fn main() {
+    // Basic division
+    let result = safe_divide(10.0, 2.0);
+    assert(result == 5.0);
+
+    // Integer division
+    let int_result = safe_int_divide(17, 5);
+    assert(int_result == 3);
+
+    // Conditional
+    let maybe_result = conditional_divide(10, 0);
+    assert(maybe_result == None);
+
+    // Fraction
+    let half = Fraction { numerator: 1, denominator: 2 };
+    let val = fraction_value(half);
+    assert(val == 0.5);
+
+    // Harmonic
+    let h = harmonic_sum(3);
+    // h = 1 + 0.5 + 0.333... ≈ 1.833
+}

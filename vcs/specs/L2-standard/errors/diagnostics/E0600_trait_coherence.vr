@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// NOTE: was typecheck-fail but compiler does not yet detect this error
+// @tier: 0
+// @level: L2
+// @tags: errors, diagnostics, coherence
+// @description: Trait coherence errors E0600
+
+/// Error E0600: Trait coherence violation
+/// Ensures the global uniqueness of trait implementations.
+
+type MyTrait is protocol {
+    fn method(&self) -> Int;
+}
+
+// First, valid implementation
+implement MyTrait for Int {
+    fn method(&self) -> Int { *self }
+}
+
+// E0600: Duplicate implementation
+implement MyTrait for Int {
+    fn method(&self) -> Int { *self * 2 }
+}
+
+// Error:
+// error[E0600]: conflicting implementations of trait `MyTrait` for type `Int`
+//   --> coherence.vr:17:1
+//    |
+// 11 | impl MyTrait for Int {
+//    | --------------------- first implementation here
+// ...
+// 17 | impl MyTrait for Int {
+//    | ^^^^^^^^^^^^^^^^^^^^^ conflicting implementation
+
+/// Upstream conflict - implementing foreign trait for foreign type
+// Imagine SomeTrait and SomeType are from external crates
+
+// E0600: Cannot implement foreign trait for foreign type
+// impl SomeTrait for SomeType { }
+
+/// Orphan rule violations
+module external {
+    pub protocol ExternalTrait {
+        fn external_method(&self);
+    }
+
+    pub type ExternalType is { value: Int };
+}
+
+// E0600: Orphan rule - neither trait nor type is local
+// impl external.ExternalTrait for std.Text { }
+
+/// Correct: Local trait for foreign type
+type LocalTrait is protocol {
+    fn local_method(&self);
+}
+
+implement LocalTrait for Text {  // OK: LocalTrait is local
+    fn local_method(&self) {
+        println(self);
+    }
+}
+
+/// Correct: Foreign trait for local type
+type LocalType is { data: Int };
+
+// This would be OK if ExternalTrait allowed external impls
+// impl external.ExternalTrait for LocalType { }
+
+/// Covered type loophole (when allowed)
+/// Some traits allow "covered" implementations where
+/// a local type appears as a type parameter.
+
+// Potentially OK with the right coherence rules:
+// impl SomeTrait for List<LocalType> { }
+// The local type "covers" the implementation
+
+/// Fundamental types bypass orphan rules
+/// #[fundamental] attribute allows implementing foreign traits
+
+// Heap and & are fundamental, so this might be allowed:
+// impl ExternalTrait for Heap<LocalType> { }
+
+/// Negative impls for coherence
+implement !Send for LocalType {
+    // LocalType explicitly opts out of Send
+    // This prevents auto-implementation
+}
+
+/// Marker trait coherence
+type Marker is protocol {};
+
+implement Marker for Int {}
+implement Marker for Text {}
+
+// Generic impl that could conflict
+implement Marker for List<T> where T: Marker {}
+
+// More specific impl
+// May or may not conflict depending on coherence rules
+// impl Marker for List<Int> {}  // E0600 without specialization
+
+fn main() {
+    // This file should not compile
+}

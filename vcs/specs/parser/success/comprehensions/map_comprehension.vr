@@ -1,0 +1,131 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @category: comprehensions
+// @tags: parser, comprehensions, map
+// @description: Map comprehension syntax: {key: value for pattern in iter clause*}
+
+// ============================================================================
+// BASIC MAP COMPREHENSION SYNTAX
+// Grammar: map_comprehension = '{' , expression , ':' , expression , 'for' ,
+//          pattern , 'in' , expression , { comprehension_clause } , '}' ;
+// ============================================================================
+
+fn test_basic_map_comprehension() {
+    // Simple key-value mapping
+    let squares = {x: x * x for x in 1..10};
+
+    // From pairs iterator
+    let map = {k: v for (k, v) in pairs};
+
+    // Swapping keys and values
+    let inverted = {v: k for (k, v) in original};
+
+    // Field extraction as key
+    let by_id = {item.id: item for item in items};
+
+    // Computed key and value
+    let computed = {k.to_string(): v.process() for (k, v) in entries};
+
+    // Using enumerate for indexed map
+    let indexed = {i: item for (i, item) in items.enumerate()};
+}
+
+fn test_map_comprehension_with_filter() {
+    // Basic filter
+    let positive = {k: v for (k, v) in pairs if v > 0};
+
+    // Filter on key
+    let prefixed = {k: v for (k, v) in pairs if k.starts_with("prefix")};
+
+    // Compound filter
+    let valid = {k: v for (k, v) in pairs if k.len() > 0 && v > 0};
+
+    // Filter with method call
+    let active = {k: v for (k, v) in entries if v.is_valid()};
+
+    // Multiple if clauses
+    let multi_filter = {k: v for (k, v) in data if k.len() > 0 if v != 0};
+}
+
+fn test_map_comprehension_with_let() {
+    // Let binding for computed value
+    let with_computed = {k: result for (k, v) in pairs let result = expensive(v)};
+
+    // Let binding with type annotation
+    let typed_let = {k: computed for x in items let computed: Int = x * 2 let k = f"key_{x}"};
+
+    // Multiple let bindings
+    let multi_let = {key: value for x in source
+                                let key = compute_key(x)
+                                let value = compute_value(x)};
+}
+
+fn test_map_comprehension_nested_for() {
+    // Cartesian product mapping
+    let cross = {(x, y): x * y for x in xs for y in ys};
+
+    // Flattening nested structure
+    let flattened = {item.id: item for group in groups for item in group.items};
+
+    // Dependent iteration
+    let triangular = {(i, j): i + j for i in 0..n for j in 0..i};
+
+    // Nested with filters
+    let filtered = {(x, y): x + y for x in xs if x > 0 for y in ys if y > 0};
+}
+
+fn test_map_comprehension_complex_expressions() {
+    // Conditional value
+    let clamped = {k: if v > max { max } else { v } for (k, v) in pairs};
+
+    // Match expression in value
+    let matched = {k: match v { Some(x) => x, None => default } for (k, v) in options};
+
+    // Pipeline in value
+    let piped = {k: v |> f |> g for (k, v) in data};
+
+    // String interpolation as key
+    let prefixed = {f"prefix_{k}": v for (k, v) in pairs};
+
+    // Nested comprehension in value
+    let nested = {outer_k: [inner_v for inner_v in outer_v] for (outer_k, outer_v) in nested_data};
+}
+
+fn test_map_comprehension_with_method_chains() {
+    // Method chain in source
+    let from_method = {item.key(): item.value() for item in collection.entries()};
+
+    // Method chain in key
+    let trimmed_keys = {k.trim().to_lower(): v for (k, v) in raw_pairs};
+
+    // Method chain in value
+    let processed_values = {k: v.validate().unwrap() for (k, v) in pairs if v.is_valid()};
+}
+
+fn test_map_comprehension_practical() {
+    // Create lookup table
+    let user_by_id = {user.id: user for user in users};
+
+    // Group first items by category
+    let by_category = {item.category: item for item in items};
+
+    // Word frequency placeholder
+    let word_map = {word: word.len() for word in words};
+
+    // Configuration mapping
+    let config = {entry.key: entry.value for entry in config_entries if entry.enabled};
+}
+
+// ============================================================================
+// ALTERNATIVE: Map.from() for list comprehension results
+// (Still supported for compatibility with existing code patterns)
+// ============================================================================
+
+fn test_map_from_list_comprehension() {
+    // Using Map.from with tuple list comprehension
+    let from_pairs = Map.from([(k, v) for (k, v) in pairs]);
+
+    // This is equivalent to the native syntax but more verbose
+    let from_range = Map.from([(i, i * i) for i in 1..10]);
+}

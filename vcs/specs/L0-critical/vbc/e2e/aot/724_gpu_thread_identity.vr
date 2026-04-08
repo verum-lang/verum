@@ -1,0 +1,67 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, gpu, thread-identity
+// @expected-exit: 0
+
+// GPU thread identity computation test.
+// Verifies the threadIdx/blockIdx/blockDim/gridDim relationships
+// that are fundamental to GPU kernel programming.
+
+fn linear_thread_id(tid_x: Int, tid_y: Int, tid_z: Int,
+                     bdim_x: Int, bdim_y: Int, _bdim_z: Int) -> Int {
+    tid_z * bdim_y * bdim_x + tid_y * bdim_x + tid_x
+}
+
+fn global_thread_id(bid_x: Int, bdim_x: Int, tid_x: Int) -> Int {
+    bid_x * bdim_x + tid_x
+}
+
+fn total_threads(gdim_x: Int, gdim_y: Int, gdim_z: Int,
+                  bdim_x: Int, bdim_y: Int, bdim_z: Int) -> Int {
+    gdim_x * gdim_y * gdim_z * bdim_x * bdim_y * bdim_z
+}
+
+fn main() -> Int {
+    // 1D grid: 4 blocks x 8 threads
+    let grid_x = 4;
+    let block_x = 8;
+    let total = grid_x * block_x;
+    assert_eq(total, 32);
+
+    // Verify global thread IDs are unique and contiguous
+    let mut i = 0;
+    while (i < grid_x) {
+        let mut j = 0;
+        while (j < block_x) {
+            let gid = global_thread_id(i, block_x, j);
+            assert_eq(gid, i * block_x + j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    // 2D block: 4x4 threads
+    let bdim_x = 4;
+    let bdim_y = 4;
+    let bdim_z = 1;
+    let lid = linear_thread_id(3, 2, 0, bdim_x, bdim_y, bdim_z);
+    // linear = 0 * 4 * 4 + 2 * 4 + 3 = 11
+    assert_eq(lid, 11);
+
+    // 3D block: 2x2x2
+    let lid_3d = linear_thread_id(1, 1, 1, 2, 2, 2);
+    // linear = 1 * 2 * 2 + 1 * 2 + 1 = 7
+    assert_eq(lid_3d, 7);
+
+    // Total threads: 2x1x1 grid, 4x4x1 block = 32
+    let tot = total_threads(2, 1, 1, 4, 4, 1);
+    assert_eq(tot, 32);
+
+    // Total threads: 2x2x2 grid, 8x8x4 block = 2048
+    let tot2 = total_threads(2, 2, 2, 8, 8, 4);
+    assert_eq(tot2, 2048);
+
+    print("GPU thread identity: PASS");
+    0
+}

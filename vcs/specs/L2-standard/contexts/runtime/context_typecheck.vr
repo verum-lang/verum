@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, using, typecheck, vbc
+// @description: Tests type checking for context method calls with using clause
+
+// Logger context - simple context with only sync methods
+context Logger {
+    fn log(&self, level: Int, message: Text);
+    fn info(&self, message: Text);
+    fn warn(&self, message: Text);
+    fn error(&self, message: Text);
+}
+
+// Counter context - context with mutation
+context Counter {
+    fn get(&self) -> Int;
+    fn increment(&mut self);
+    fn reset(&mut self);
+}
+
+// Config context - context returning optional values
+context Config {
+    fn get(&self, key: Text) -> Text;
+    fn get_or_default(&self, key: Text, default: Text) -> Text;
+}
+
+// Single context function
+fn log_message(msg: Text) using [Logger] {
+    Logger.info(msg);
+}
+
+// Function using mutable context
+fn increment_counter() using [Counter] {
+    Counter.increment();
+}
+
+fn get_count() -> Int using [Counter] {
+    Counter.get()
+}
+
+// Multiple context function
+fn log_count() using [Logger, Counter] {
+    let count = Counter.get();
+    Logger.info("Current count: " + count.to_text());
+}
+
+// Calling function must have all required contexts
+fn orchestrate() using [Logger, Counter, Config] {
+    log_message("Starting orchestration");  // Requires [Logger]
+
+    // Direct context method calls
+    Logger.info("Incrementing counter");
+    Counter.increment();
+
+    log_count();  // Requires [Logger, Counter]
+
+    // Config access
+    let timeout = Config.get_or_default("timeout", "30");
+    Logger.info("Timeout: " + timeout);
+}
+
+// Nested function calls
+fn inner_work() using [Logger] {
+    Logger.info("Inner work");
+}
+
+fn middle_work() using [Logger] {
+    Logger.info("Middle work start");
+    inner_work();
+    Logger.info("Middle work end");
+}
+
+fn outer_work() using [Logger] {
+    Logger.info("Outer work start");
+    middle_work();
+    Logger.info("Outer work end");
+}
+
+fn main() {
+    // Type checking only - no runtime execution
+}

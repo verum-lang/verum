@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let, type, invalid, error
+// @description: Test let statement with invalid type (number literal)
+// @expected-error: E043
+
+fn test() {
+    let x: 123 = 5;
+}

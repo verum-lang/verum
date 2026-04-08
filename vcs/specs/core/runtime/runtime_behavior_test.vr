@@ -1,0 +1,853 @@
+// =============================================================================
+// runtime_behavior_test.vr - Tests for runtime behavior and lifecycle
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: runtime, recovery, circuit-breaker, retry, backoff, supervisor, spawn,
+//        behavior, lifecycle, config
+// @description: Extended tests for runtime behavior: CircuitBreaker lifecycle,
+//               BackoffStrategy edge cases, RetryConfig, RecoveryStrategy,
+//               JitterConfig, Supervisor, SpawnConfig, TaskQueue.
+// =============================================================================
+
+module specs.core.runtime.runtime_behavior_test;
+
+mount core.runtime.recovery.{
+    BackoffStrategy, CircuitState, JitterConfig,
+    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats,
+    CircuitBreakerError, ErrorPredicate,
+    RetryConfig, RetryPredicate,
+    RecoveryStrategy, InlineRetryPolicy,
+};
+mount core.runtime.spawn.{
+    PriorityLevel, SpawnConfig, SpawnConfigBuilder,
+    InlineContextStorage,
+};
+mount core.runtime.supervisor.{
+    SupervisorId, ChildId, SupervisionStrategy,
+    RestartStrategy, FailureReason, ChildStatus,
+    ChildSpec, RestartIntensity, ShutdownStrategy,
+    SupervisorConfig, EscalationPolicy, EscalationReason,
+};
+mount core.runtime.env.{ExecutionTier, IsolationLevel, CpuAffinity, TaskId, RestartPolicy};
+mount core.runtime.task_queue.{StealResult, WorkDeque, Stealer, WorkStealingPool, BoundedQueue};
+mount core.runtime.stack_alloc.{
+    StackAllocator, ArenaAllocator, PoolAllocator,
+    StackSavepoint, ArenaSavepoint,
+};
+mount core.runtime.config.{InitError, RuntimeIoError, IoOp};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.protocols.TypeId;
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: CircuitBreakerConfig
+// =============================================================================
+
+@test
+fn test_circuit_breaker_config_default() {
+    let config = CircuitBreakerConfig {
+        failure_threshold: 5 as UInt16,
+        required_successes: 3 as UInt16,
+        timeout_ms: 30000 as UInt32,
+        error_predicate: ErrorPredicate.AllErrors,
+    };
+    assert_eq(config.failure_threshold as Int, 5);
+    assert_eq(config.required_successes as Int, 3);
+}
+
+@test
+fn test_circuit_breaker_config_aggressive() {
+    let config = CircuitBreakerConfig {
+        failure_threshold: 1 as UInt16,
+        required_successes: 1 as UInt16,
+        timeout_ms: 1000 as UInt32,
+        error_predicate: ErrorPredicate.AllErrors,
+    };
+    assert_eq(config.failure_threshold as Int, 1);
+}
+
+@test
+fn test_circuit_breaker_config_conservative() {
+    let config = CircuitBreakerConfig {
+        failure_threshold: 100 as UInt16,
+        required_successes: 50 as UInt16,
+        timeout_ms: 600000 as UInt32,
+        error_predicate: ErrorPredicate.AllErrors,
+    };
+    assert_eq(config.failure_threshold as Int, 100);
+}
+
+@test
+fn test_circuit_breaker_stats_initial() {
+    let stats = CircuitBreakerStats {
+        state: CircuitState.Closed,
+        failure_count: 0 as UInt16,
+        success_count: 0 as UInt16,
+        total_calls: 0 as UInt64,
+        total_failures: 0 as UInt64,
+        state_changes: 0 as UInt64,
+    };
+    assert(stats.state is CircuitState.Closed);
+    assert_eq(stats.failure_count as Int, 0);
+}
+
+@test
+fn test_circuit_breaker_stats_after_activity() {
+    let stats = CircuitBreakerStats {
+        state: CircuitState.Closed,
+        failure_count: 2 as UInt16,
+        success_count: 100 as UInt16,
+        total_calls: 105 as UInt64,
+        total_failures: 5 as UInt64,
+        state_changes: 3 as UInt64,
+    };
+    assert(stats.state is CircuitState.Closed);
+}
+
+@test
+fn test_circuit_breaker_error_open() {
+    let err: CircuitBreakerError<Text> = CircuitBreakerError.Open;
+    assert(err is CircuitBreakerError.Open);
+}
+
+@test
+fn test_circuit_breaker_error_failed() {
+    let err: CircuitBreakerError<Text> = CircuitBreakerError.Failed("some error");
+    assert(err is CircuitBreakerError.Failed);
+}
+
+// =============================================================================
+// Section 2: BackoffStrategy Edge Cases
+// =============================================================================
+
+@test
+fn test_backoff_exponential_zero_attempt() {
+    let backoff = BackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 };
+    assert_eq(backoff.calculate_delay_ms(0), 100);
+}
+
+@test
+fn test_backoff_exponential_high_attempt() {
+    let backoff = BackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 };
+    let delay = backoff.calculate_delay_ms(10);
+    assert_eq(delay, 10000);
+}
+
+@test
+fn test_backoff_linear_zero_increment() {
+    let backoff = BackoffStrategy.Linear { base_ms: 500, increment_ms: 0, max_ms: 5000 };
+    assert_eq(backoff.calculate_delay_ms(0), 500);
+    assert_eq(backoff.calculate_delay_ms(5), 500);
+}
+
+@test
+fn test_backoff_linear_large_increment() {
+    let backoff = BackoffStrategy.Linear { base_ms: 100, increment_ms: 1000, max_ms: 2000 };
+    assert_eq(backoff.calculate_delay_ms(0), 100);
+    assert_eq(backoff.calculate_delay_ms(1), 1100);
+    assert_eq(backoff.calculate_delay_ms(2), 2000);
+}
+
+@test
+fn test_backoff_none_always_zero() {
+    let backoff = BackoffStrategy.None;
+    assert_eq(backoff.calculate_delay_ms(0), 0);
+    assert_eq(backoff.calculate_delay_ms(100), 0);
+}
+
+@test
+fn test_backoff_fixed_consistent() {
+    let backoff = BackoffStrategy.Fixed { delay_ms: 250 };
+    for i in range(0, 10) {
+        assert_eq(backoff.calculate_delay_ms(i), 250);
+    }
+}
+
+@test
+fn test_backoff_exponential_convenience() {
+    let backoff = BackoffStrategy.exponential(100, 10000);
+    assert(backoff is BackoffStrategy.Exponential);
+    assert_eq(backoff.calculate_delay_ms(0), 100);
+}
+
+@test
+fn test_backoff_exponential_multiplier_3() {
+    let backoff = BackoffStrategy.Exponential { base_ms: 10, max_ms: 100000, multiplier: 3 };
+    assert_eq(backoff.calculate_delay_ms(0), 10);
+    assert_eq(backoff.calculate_delay_ms(1), 30);
+    assert_eq(backoff.calculate_delay_ms(2), 90);
+}
+
+// =============================================================================
+// Section 3: CircuitState
+// =============================================================================
+
+@test
+fn test_circuit_state_closed() {
+    let s = CircuitState.Closed;
+    assert(s is CircuitState.Closed);
+    assert_eq(s.to_u8(), 0);
+}
+
+@test
+fn test_circuit_state_open() {
+    let s = CircuitState.Open;
+    assert_eq(s.to_u8(), 1);
+}
+
+@test
+fn test_circuit_state_half_open() {
+    let s = CircuitState.HalfOpen;
+    assert_eq(s.to_u8(), 2);
+}
+
+@test
+fn test_circuit_state_from_u8() {
+    assert(CircuitState.from_u8(0) is CircuitState.Closed);
+    assert(CircuitState.from_u8(1) is CircuitState.Open);
+    assert(CircuitState.from_u8(2) is CircuitState.HalfOpen);
+}
+
+@test
+fn test_circuit_state_round_trip() {
+    let states = [CircuitState.Closed, CircuitState.Open, CircuitState.HalfOpen];
+    for i in range(0, 3) {
+        let s = states[i];
+        let n = s.to_u8();
+        let recovered = CircuitState.from_u8(n);
+        assert_eq(recovered.to_u8(), n);
+    }
+}
+
+// =============================================================================
+// Section 4: JitterConfig
+// =============================================================================
+
+@test
+fn test_jitter_none() {
+    let j = JitterConfig.None;
+    assert_eq(j.apply(1000), 1000);
+}
+
+@test
+fn test_jitter_proportional() {
+    let j = JitterConfig.Proportional(10);
+    let result = j.apply(1000);
+    assert(result >= 900);
+    assert(result <= 1100);
+}
+
+@test
+fn test_jitter_fixed() {
+    let j = JitterConfig.Fixed(50);
+    let result = j.apply(1000);
+    assert(result >= 950);
+    assert(result <= 1050);
+}
+
+@test
+fn test_jitter_full() {
+    let j = JitterConfig.Full;
+    let result = j.apply(1000);
+    assert(result >= 0);
+    assert(result <= 1000);
+}
+
+@test
+fn test_jitter_none_zero_delay() {
+    let j = JitterConfig.None;
+    assert_eq(j.apply(0), 0);
+}
+
+// =============================================================================
+// Section 5: RetryConfig
+// =============================================================================
+
+@test
+fn test_retry_config_basic() {
+    let config = RetryConfig {
+        max_attempts: 3,
+        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    assert_eq(config.max_attempts, 3);
+}
+
+@test
+fn test_retry_config_with_exponential() {
+    let config = RetryConfig {
+        max_attempts: 5,
+        backoff: BackoffStrategy.Exponential { base_ms: 100, max_ms: 10000, multiplier: 2 },
+        jitter: JitterConfig.Proportional(10),
+        retry_on: RetryPredicate.TransientOnly,
+    };
+    assert_eq(config.max_attempts, 5);
+}
+
+@test
+fn test_retry_config_no_retries() {
+    let config = RetryConfig {
+        max_attempts: 0,
+        backoff: BackoffStrategy.None,
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    assert_eq(config.max_attempts, 0);
+}
+
+// =============================================================================
+// Section 6: RecoveryStrategy
+// =============================================================================
+
+@test
+fn test_recovery_strategy_none() {
+    let s = RecoveryStrategy.None;
+    assert(s is RecoveryStrategy.None);
+}
+
+@test
+fn test_recovery_strategy_retry() {
+    let config = RetryConfig {
+        max_attempts: 3,
+        backoff: BackoffStrategy.Fixed { delay_ms: 100 },
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    let s = RecoveryStrategy.Retry(config);
+    assert(s is RecoveryStrategy.Retry);
+}
+
+@test
+fn test_recovery_strategy_use_breaker() {
+    let config = CircuitBreakerConfig {
+        failure_threshold: 5 as UInt16,
+        required_successes: 3 as UInt16,
+        timeout_ms: 30000 as UInt32,
+        error_predicate: ErrorPredicate.AllErrors,
+    };
+    let s = RecoveryStrategy.UseBreaker(config);
+    assert(s is RecoveryStrategy.UseBreaker);
+}
+
+@test
+fn test_recovery_strategy_supervision() {
+    let s = RecoveryStrategy.Supervision;
+    assert(s is RecoveryStrategy.Supervision);
+}
+
+@test
+fn test_recovery_strategy_convenience_retry() {
+    let s = RecoveryStrategy.retry(3);
+    assert(s is RecoveryStrategy.Retry);
+}
+
+@test
+fn test_recovery_strategy_convenience_cb() {
+    let s = RecoveryStrategy.circuit_breaker(5);
+    assert(s is RecoveryStrategy.UseBreaker);
+}
+
+// =============================================================================
+// Section 7: Supervision Strategy
+// =============================================================================
+
+@test
+fn test_supervision_one_for_one_desc() {
+    let s = SupervisionStrategy.OneForOne;
+    let desc = s.description();
+    assert(desc.len() > 0);
+}
+
+@test
+fn test_supervision_one_for_all_desc() {
+    let s = SupervisionStrategy.OneForAll;
+    let desc = s.description();
+    assert(desc.len() > 0);
+}
+
+@test
+fn test_supervision_rest_for_one_desc() {
+    let s = SupervisionStrategy.RestForOne;
+    let desc = s.description();
+    assert(desc.len() > 0);
+}
+
+// =============================================================================
+// Section 8: RestartStrategy behavior
+// =============================================================================
+
+@test
+fn test_restart_permanent_on_error() {
+    let s = RestartStrategy.Permanent;
+    let reason = FailureReason.ErrorExit("something failed");
+    assert(s.should_restart(&reason));
+}
+
+@test
+fn test_restart_permanent_on_normal() {
+    let s = RestartStrategy.Permanent;
+    let reason = FailureReason.NormalExit;
+    assert(s.should_restart(&reason));
+}
+
+@test
+fn test_restart_transient_on_panic() {
+    let s = RestartStrategy.Transient;
+    let reason = FailureReason.Panic("error");
+    assert(s.should_restart(&reason));
+}
+
+@test
+fn test_restart_transient_on_normal() {
+    let s = RestartStrategy.Transient;
+    let reason = FailureReason.NormalExit;
+    assert(!s.should_restart(&reason));
+}
+
+@test
+fn test_restart_temporary_on_panic() {
+    let s = RestartStrategy.Temporary;
+    let reason = FailureReason.Panic("error");
+    assert(!s.should_restart(&reason));
+}
+
+@test
+fn test_restart_temporary_on_normal() {
+    let s = RestartStrategy.Temporary;
+    let reason = FailureReason.NormalExit;
+    assert(!s.should_restart(&reason));
+}
+
+// =============================================================================
+// Section 9: FailureReason classification
+// =============================================================================
+
+@test
+fn test_failure_normal_not_abnormal() {
+    let r = FailureReason.NormalExit;
+    assert(!r.is_abnormal());
+}
+
+@test
+fn test_failure_error_exit_is_abnormal() {
+    let r = FailureReason.ErrorExit("oops");
+    assert(r.is_abnormal());
+}
+
+@test
+fn test_failure_panic_is_abnormal() {
+    let r = FailureReason.Panic("panic");
+    assert(r.is_abnormal());
+}
+
+@test
+fn test_failure_timeout_is_abnormal() {
+    let r = FailureReason.Timeout;
+    assert(r.is_abnormal());
+}
+
+@test
+fn test_failure_cancelled_is_abnormal() {
+    let r = FailureReason.Cancelled;
+    assert(r.is_abnormal());
+}
+
+@test
+fn test_failure_supervisor_shutdown() {
+    let r = FailureReason.SupervisorShutdown;
+    assert(!r.is_abnormal());
+}
+
+@test
+fn test_failure_reason_descriptions() {
+    let reasons = [
+        FailureReason.NormalExit,
+        FailureReason.Timeout,
+        FailureReason.Cancelled,
+        FailureReason.Manual,
+    ];
+    for i in range(0, 4) {
+        let desc = reasons[i].description();
+        assert(desc.len() > 0);
+    }
+}
+
+// =============================================================================
+// Section 10: ChildSpec Builder
+// =============================================================================
+
+@test
+fn test_child_spec_new() {
+    let spec = ChildSpec.new("worker");
+    let _: ChildSpec = spec;
+}
+
+@test
+fn test_child_spec_permanent() {
+    let spec = ChildSpec.permanent("permanent-worker");
+    let _: ChildSpec = spec;
+}
+
+@test
+fn test_child_spec_temporary() {
+    let spec = ChildSpec.temporary("temp-worker");
+    let _: ChildSpec = spec;
+}
+
+@test
+fn test_child_spec_with_restart() {
+    let spec = ChildSpec.new("worker").with_restart(RestartStrategy.Transient);
+    let _: ChildSpec = spec;
+}
+
+@test
+fn test_child_spec_with_shutdown_timeout() {
+    let spec = ChildSpec.new("worker").with_shutdown_timeout_ms(5000 as UInt32);
+    let _: ChildSpec = spec;
+}
+
+@test
+fn test_child_spec_with_restart_limits() {
+    let spec = ChildSpec.new("worker").with_restart_limits(3 as UInt16, 60 as UInt32);
+    let _: ChildSpec = spec;
+}
+
+@test
+fn test_child_spec_with_priority() {
+    let spec = ChildSpec.new("worker").with_priority(192);
+    let _: ChildSpec = spec;
+}
+
+@test
+fn test_child_spec_chained_builder() {
+    let spec = ChildSpec.new("worker")
+        .with_restart(RestartStrategy.Permanent)
+        .with_shutdown_timeout_ms(10000 as UInt32)
+        .with_restart_limits(5 as UInt16, 120 as UInt32)
+        .with_priority(255);
+    let _: ChildSpec = spec;
+}
+
+// =============================================================================
+// Section 11: RestartIntensity
+// =============================================================================
+
+@test
+fn test_restart_intensity_new() {
+    let ri = RestartIntensity.new(5 as UInt16, 60 as UInt32);
+    assert_eq(ri.current_count(), 0);
+}
+
+@test
+fn test_restart_intensity_record() {
+    let mut ri = RestartIntensity.new(3 as UInt16, 60 as UInt32);
+    assert(ri.record_restart());
+    assert(ri.record_restart());
+    assert(ri.record_restart());
+    assert_eq(ri.current_count(), 3);
+}
+
+@test
+fn test_restart_intensity_would_allow() {
+    let ri = RestartIntensity.new(3 as UInt16, 60 as UInt32);
+    assert(ri.would_allow_restart());
+}
+
+@test
+fn test_restart_intensity_reset() {
+    let mut ri = RestartIntensity.new(3 as UInt16, 60 as UInt32);
+    ri.record_restart();
+    ri.record_restart();
+    ri.reset();
+    assert_eq(ri.current_count(), 0);
+}
+
+// =============================================================================
+// Section 12: ShutdownStrategy
+// =============================================================================
+
+@test
+fn test_shutdown_graceful() {
+    let s = ShutdownStrategy.graceful();
+    assert_eq(s.timeout_ms() as Int, 5000);
+}
+
+@test
+fn test_shutdown_brutal() {
+    let s = ShutdownStrategy.brutal();
+    assert_eq(s.timeout_ms() as Int, 100);
+}
+
+@test
+fn test_shutdown_custom_timeout() {
+    let s = ShutdownStrategy.Graceful { timeout_ms: 10000 };
+    assert_eq(s.timeout_ms() as Int, 10000);
+}
+
+// =============================================================================
+// Section 13: EscalationPolicy and EscalationReason
+// =============================================================================
+
+@test
+fn test_escalation_policy_all_variants() {
+    let policies = [
+        EscalationPolicy.EscalateToParent,
+        EscalationPolicy.RestartSubtree,
+        EscalationPolicy.Terminate,
+        EscalationPolicy.LogAndIgnore,
+    ];
+    assert(policies[0] is EscalationPolicy.EscalateToParent);
+    assert(policies[1] is EscalationPolicy.RestartSubtree);
+    assert(policies[2] is EscalationPolicy.Terminate);
+    assert(policies[3] is EscalationPolicy.LogAndIgnore);
+}
+
+@test
+fn test_escalation_reason_all_strategies_exhausted() {
+    let reason = EscalationReason.AllStrategiesExhausted;
+    assert(reason is EscalationReason.AllStrategiesExhausted);
+    let desc = reason.description();
+    assert(desc.len() > 0);
+}
+
+// =============================================================================
+// Section 14: SupervisorConfig
+// =============================================================================
+
+@test
+fn test_supervisor_config_one_for_one() {
+    let config = SupervisorConfig.one_for_one("sup");
+    let _: SupervisorConfig = config;
+}
+
+@test
+fn test_supervisor_config_one_for_all() {
+    let config = SupervisorConfig.one_for_all("sup");
+    let _: SupervisorConfig = config;
+}
+
+@test
+fn test_supervisor_config_rest_for_one() {
+    let config = SupervisorConfig.rest_for_one("sup");
+    let _: SupervisorConfig = config;
+}
+
+@test
+fn test_supervisor_config_default() {
+    let config = SupervisorConfig.default();
+    let _: SupervisorConfig = config;
+}
+
+@test
+fn test_supervisor_config_with_restart_limits() {
+    let config = SupervisorConfig.one_for_one("sup").with_restart_limits(10 as UInt16, 120 as UInt32);
+    let _: SupervisorConfig = config;
+}
+
+@test
+fn test_supervisor_config_with_escalation() {
+    let config = SupervisorConfig.one_for_all("sup")
+        .with_escalation(EscalationPolicy.EscalateToParent);
+    let _: SupervisorConfig = config;
+}
+
+// =============================================================================
+// Section 15: SpawnConfig Advanced Patterns
+// =============================================================================
+
+@test
+fn test_spawn_config_with_simple_retry() {
+    let config = SpawnConfig.new().with_simple_retry(3 as UInt16, 100 as UInt32);
+    let _: SpawnConfig = config;
+}
+
+@test
+fn test_spawn_config_with_exponential_retry() {
+    let config = SpawnConfig.new().with_exponential_retry(5 as UInt16, 100 as UInt32, 10000 as UInt32, 0.1 as Float32);
+    let _: SpawnConfig = config;
+}
+
+@test
+fn test_spawn_config_with_restart_limits() {
+    let config = SpawnConfig.new().with_restart_limits(3, 60 as UInt64);
+    let _: SpawnConfig = config;
+}
+
+@test
+fn test_spawn_config_full_setup() {
+    let config = SpawnConfig.new()
+        .with_name("worker-1")
+        .with_priority(PriorityLevel.High)
+        .with_isolation(IsolationLevel.SendOnly)
+        .with_timeout_ms(30000 as UInt64)
+        .with_stack_size(65536)
+        .with_exponential_retry(3 as UInt16, 100 as UInt32, 5000 as UInt32, 0.1 as Float32)
+        .with_restart_limits(5, 120 as UInt64);
+    let _: SpawnConfig = config;
+}
+
+@test
+fn test_spawn_config_builder_permanent() {
+    let builder = SpawnConfigBuilder.new().permanent();
+    let _: SpawnConfigBuilder = builder;
+}
+
+@test
+fn test_spawn_config_builder_transient() {
+    let builder = SpawnConfigBuilder.new().transient();
+    let _: SpawnConfigBuilder = builder;
+}
+
+@test
+fn test_spawn_config_builder_temporary() {
+    let builder = SpawnConfigBuilder.new().temporary();
+    let _: SpawnConfigBuilder = builder;
+}
+
+@test
+fn test_spawn_config_builder_shortcuts() {
+    let builder = SpawnConfigBuilder.new()
+        .name("task")
+        .background()
+        .isolated();
+    let _: SpawnConfigBuilder = builder;
+}
+
+// =============================================================================
+// Section 16: TaskQueue Types
+// =============================================================================
+
+@test
+fn test_steal_result_success() {
+    let r: StealResult<Int> = StealResult.Success(42);
+    assert(r is StealResult.Success);
+}
+
+@test
+fn test_steal_result_empty() {
+    let r: StealResult<Int> = StealResult.Empty;
+    assert(r is StealResult.Empty);
+}
+
+@test
+fn test_steal_result_retry() {
+    let r: StealResult<Int> = StealResult.Retry;
+    assert(r is StealResult.Retry);
+}
+
+// =============================================================================
+// Section 17: Stack Allocator Types
+// =============================================================================
+
+@test
+fn test_stack_allocator_construction() {
+    let alloc = StackAllocator<4096>.new();
+    assert_eq(alloc.capacity(), 4096);
+    assert_eq(alloc.used(), 0);
+    assert_eq(alloc.remaining(), 4096);
+}
+
+@test
+fn test_stack_allocator_watermark() {
+    let alloc = StackAllocator<4096>.new();
+    assert_eq(alloc.watermark(), 0);
+}
+
+@test
+fn test_arena_allocator_construction() {
+    let alloc = ArenaAllocator<4096, 4>.new();
+    assert_eq(alloc.used(), 0);
+}
+
+@test
+fn test_pool_allocator_construction() {
+    let alloc = PoolAllocator<64, 100>.new();
+    assert_eq(alloc.block_size(), 64);
+    assert_eq(alloc.block_count(), 100);
+    assert_eq(alloc.allocated(), 0);
+    assert_eq(alloc.available(), 100);
+}
+
+@test
+fn test_allocator_invariants() {
+    let alloc = StackAllocator<8192>.new();
+    assert_eq(alloc.used() + alloc.remaining(), alloc.capacity());
+}
+
+@test
+fn test_pool_allocator_invariants() {
+    let alloc = PoolAllocator<32, 50>.new();
+    assert_eq(alloc.allocated() + alloc.available(), alloc.block_count());
+}
+
+// =============================================================================
+// Section 18: Execution Environment Types
+// =============================================================================
+
+@test
+fn test_execution_tier_all() {
+    assert(ExecutionTier.Tier0_Full is ExecutionTier.Tier0_Full);
+    assert(ExecutionTier.Tier1_Epoch is ExecutionTier.Tier1_Epoch);
+    assert(ExecutionTier.Tier2_Gen is ExecutionTier.Tier2_Gen);
+    assert(ExecutionTier.Tier3_Unchecked is ExecutionTier.Tier3_Unchecked);
+}
+
+@test
+fn test_isolation_levels() {
+    assert(IsolationLevel.Shared is IsolationLevel.Shared);
+    assert(IsolationLevel.SendOnly is IsolationLevel.SendOnly);
+    assert(IsolationLevel.Full is IsolationLevel.Full);
+}
+
+@test
+fn test_task_id_main() {
+    let id = TaskId.main();
+    let _: TaskId = id;
+}
+
+@test
+fn test_task_id_new() {
+    let id = TaskId.new(None);
+    let _: TaskId = id;
+}
+
+// =============================================================================
+// Section 19: ErrorPredicate and RetryPredicate
+// =============================================================================
+
+@test
+fn test_error_predicate_all() {
+    let p = ErrorPredicate.AllErrors;
+    assert(p is ErrorPredicate.AllErrors);
+}
+
+@test
+fn test_error_predicate_specific() {
+    let mut types: List<TypeId> = List.new();
+    let p = ErrorPredicate.Specific(types);
+    assert(p is ErrorPredicate.Specific);
+}
+
+@test
+fn test_retry_predicate_all() {
+    let p = RetryPredicate.AllErrors;
+    assert(p is RetryPredicate.AllErrors);
+}
+
+@test
+fn test_retry_predicate_transient() {
+    let p = RetryPredicate.TransientOnly;
+    assert(p is RetryPredicate.TransientOnly);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, references, unsafe, error
+// @description: Test detection of double unsafe in reference type
+// @expected-error: E088
+
+// Double unsafe is not valid
+fn test(x: &unsafe unsafe T) {}

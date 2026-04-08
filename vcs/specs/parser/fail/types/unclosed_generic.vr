@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, generics, brackets, error
+// @description: Test detection of unclosed generic type arguments (missing '>')
+// @expected-error: E081
+
+// Generic type missing closing angle bracket
+fn test(x: List<Int) {}

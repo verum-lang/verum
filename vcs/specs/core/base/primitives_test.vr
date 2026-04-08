@@ -1,0 +1,2715 @@
+// =============================================================================
+// primitives_test.vr - Comprehensive tests for primitive type methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @description: Tests for Int, Float, Bool, Byte, Char, and sized integer types
+
+module test.primitives;
+
+// =============================================================================
+// Int Tests
+// =============================================================================
+
+@test
+fn test_int_constants() {
+    // Test MIN/MAX constants
+    assert(Int.MIN == -9223372036854775808);
+    assert(Int.MAX == 9223372036854775807);
+    assert(Int.BITS == 64);
+
+    // Deprecated methods still work
+    assert(Int.min_value() == Int.MIN);
+    assert(Int.max_value() == Int.MAX);
+}
+
+@test
+fn test_int_abs() {
+    assert((-5).abs() == 5);
+    assert((5).abs() == 5);
+    assert((0).abs() == 0);
+    assert((-1).abs() == 1);
+    assert((Int.MAX).abs() == Int.MAX);
+}
+
+@test
+fn test_int_signum() {
+    assert((-100).signum() == -1);
+    assert((100).signum() == 1);
+    assert((0).signum() == 0);
+    assert((-1).signum() == -1);
+    assert((1).signum() == 1);
+}
+
+@test
+fn test_int_predicates() {
+    assert((5).is_positive());
+    assert(!(-5).is_positive());
+    assert(!(0).is_positive());
+
+    assert((-5).is_negative());
+    assert(!(5).is_negative());
+    assert(!(0).is_negative());
+
+    assert((0).is_zero());
+    assert(!(1).is_zero());
+    assert(!(-1).is_zero());
+}
+
+@test
+fn test_int_conversion() {
+    let i: Int = 42;
+    let f: Float = i.to_float();
+    assert(f == 42.0);
+
+    let negative: Int = -100;
+    assert(negative.to_float() == -100.0);
+}
+
+@test
+fn test_int_min_max() {
+    assert((5).min(10) == 5);
+    assert((10).min(5) == 5);
+    assert((-5).min(5) == -5);
+
+    assert((5).max(10) == 10);
+    assert((10).max(5) == 10);
+    assert((-5).max(5) == 5);
+}
+
+@test
+fn test_int_clamp() {
+    assert((5).clamp(0, 10) == 5);
+    assert((-5).clamp(0, 10) == 0);
+    assert((15).clamp(0, 10) == 10);
+    assert((0).clamp(0, 10) == 0);
+    assert((10).clamp(0, 10) == 10);
+}
+
+@test
+fn test_int_in_range() {
+    assert((5).in_range(0, 10));
+    assert((0).in_range(0, 10));
+    assert(!(10).in_range(0, 10));  // end is exclusive
+    assert(!(-1).in_range(0, 10));
+    assert(!(15).in_range(0, 10));
+}
+
+@test
+fn test_int_pow() {
+    assert((2).pow(0) == 1);
+    assert((2).pow(1) == 2);
+    assert((2).pow(10) == 1024);
+    assert((3).pow(4) == 81);
+    assert((10).pow(3) == 1000);
+    assert((-2).pow(3) == -8);
+    assert((-2).pow(4) == 16);
+}
+
+@test
+fn test_int_checked_ops() {
+    // checked_add
+    match (5).checked_add(10) {
+        Some(v) => assert(v == 15),
+        None => assert(false),
+    }
+
+    // checked_sub
+    match (10).checked_sub(5) {
+        Some(v) => assert(v == 5),
+        None => assert(false),
+    }
+
+    // checked_mul
+    match (5).checked_mul(10) {
+        Some(v) => assert(v == 50),
+        None => assert(false),
+    }
+
+    // checked_div
+    match (10).checked_div(2) {
+        Some(v) => assert(v == 5),
+        None => assert(false),
+    }
+
+    // Division by zero returns None
+    assert((10).checked_div(0).is_none());
+}
+
+@test
+fn test_int_wrapping_ops() {
+    assert((5).wrapping_add(10) == 15);
+    assert((10).wrapping_sub(5) == 5);
+    assert((5).wrapping_mul(10) == 50);
+
+    // Wrapping on overflow
+    assert(Int.MAX.wrapping_add(1) == Int.MIN);
+    assert(Int.MIN.wrapping_sub(1) == Int.MAX);
+}
+
+@test
+fn test_int_saturating_ops() {
+    assert((5).saturating_add(10) == 15);
+    assert((10).saturating_sub(5) == 5);
+    assert((5).saturating_mul(10) == 50);
+
+    // Saturates at bounds
+    assert(Int.MAX.saturating_add(1) == Int.MAX);
+    assert(Int.MIN.saturating_sub(1) == Int.MIN);
+}
+
+@test
+fn test_int_bit_counting() {
+    // count_ones
+    assert((0b1010101).count_ones() == 4);
+    assert((0).count_ones() == 0);
+    assert((-1).count_ones() == 64);  // All bits set for -1
+
+    // count_zeros
+    assert((0).count_zeros() == 64);
+    assert((-1).count_zeros() == 0);
+
+    // leading_zeros
+    assert((1).leading_zeros() == 63);
+    assert((0).leading_zeros() == 64);
+
+    // trailing_zeros
+    assert((8).trailing_zeros() == 3);  // 8 = 0b1000
+    assert((1).trailing_zeros() == 0);
+}
+
+@test
+fn test_int_rotate() {
+    let x: Int = 0b10110001;
+    // Note: rotate_left and rotate_right are 64-bit operations
+    let rotated = x.rotate_left(4);
+    // Verify rotation happened (exact value depends on bit width)
+    assert(rotated != x);
+}
+
+@test
+fn test_int_byte_conversion() {
+    let x: Int = 0x0102030405060708;
+    let le_bytes = x.to_le_bytes();
+    let be_bytes = x.to_be_bytes();
+
+    // Little-endian: least significant byte first
+    assert(le_bytes[0] == 0x08);
+    assert(le_bytes[7] == 0x01);
+
+    // Big-endian: most significant byte first
+    assert(be_bytes[0] == 0x01);
+    assert(be_bytes[7] == 0x08);
+
+    // Round-trip
+    assert(Int.from_le_bytes(le_bytes) == x);
+    assert(Int.from_be_bytes(be_bytes) == x);
+}
+
+@test
+fn test_int_swap_bytes() {
+    let x: Int = 0x0102030405060708;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0807060504030201);
+    // Double swap returns original
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_int_reverse_bits() {
+    let x: Int = 1;  // Bit 0 set
+    let reversed = x.reverse_bits();
+    // Bit 63 should be set now (sign bit for signed)
+    assert(reversed != 0);
+    // Double reverse returns original
+    assert(reversed.reverse_bits() == x);
+}
+
+@test
+fn test_int_rotate_right() {
+    let x: Int = 0b10110001;
+    let rotated = x.rotate_right(4);
+    assert(rotated != x);
+    // Rotate left then right should give original
+    let y: Int = 12345;
+    assert(y.rotate_left(17).rotate_right(17) == y);
+}
+
+// =============================================================================
+// Int Radix Conversion Tests
+// =============================================================================
+
+@test
+fn test_int_to_binary() {
+    assert_eq((42).to_binary(), "101010");
+    assert_eq((0).to_binary(), "0");
+    assert_eq((1).to_binary(), "1");
+    assert_eq((255).to_binary(), "11111111");
+}
+
+@test
+fn test_int_to_hex() {
+    assert_eq((255).to_hex(), "ff");
+    assert_eq((0).to_hex(), "0");
+    assert_eq((16).to_hex(), "10");
+    assert_eq((256).to_hex(), "100");
+}
+
+@test
+fn test_int_to_octal() {
+    assert_eq((8).to_octal(), "10");
+    assert_eq((0).to_octal(), "0");
+    assert_eq((7).to_octal(), "7");
+    assert_eq((64).to_octal(), "100");
+}
+
+// =============================================================================
+// Float Tests
+// =============================================================================
+
+@test
+fn test_float_constants() {
+    assert(Float.BITS == 64);
+    assert(Float.PI > 3.14 && Float.PI < 3.15);
+    assert(Float.E > 2.71 && Float.E < 2.72);
+
+    // Deprecated methods
+    assert(Float.pi() == Float.PI);
+    assert(Float.e() == Float.E);
+}
+
+@test
+fn test_float_special_values() {
+    let inf = Float.infinity();
+    let neg_inf = Float.neg_infinity();
+    let nan = Float.nan();
+
+    assert(inf.is_infinite());
+    assert(neg_inf.is_infinite());
+    assert(!nan.is_infinite());
+
+    assert(nan.is_nan());
+    assert(!inf.is_nan());
+    assert(!neg_inf.is_nan());
+
+    assert(!inf.is_finite());
+    assert(!neg_inf.is_finite());
+    assert(!nan.is_finite());
+    assert((1.0).is_finite());
+}
+
+@test
+fn test_float_predicates() {
+    assert((1.0).is_positive());
+    assert(!(-1.0).is_positive());
+    assert(!(0.0).is_positive());
+
+    assert((-1.0).is_negative());
+    assert(!(1.0).is_negative());
+    assert(!(0.0).is_negative());
+
+    assert((0.0).is_zero());
+    assert((-0.0).is_zero());
+    assert(!(1.0).is_zero());
+}
+
+@test
+fn test_float_signum() {
+    assert((5.0).signum() == 1.0);
+    assert((-5.0).signum() == -1.0);
+    assert((0.0).signum() == 0.0);
+
+    // NaN signum returns NaN
+    let nan_signum = Float.nan().signum();
+    assert(nan_signum.is_nan());
+}
+
+@test
+fn test_float_abs() {
+    assert((-5.0).abs() == 5.0);
+    assert((5.0).abs() == 5.0);
+    assert((0.0).abs() == 0.0);
+}
+
+@test
+fn test_float_conversion() {
+    assert((42.7).to_int() == 42);
+    assert((-42.7).to_int() == -42);
+    assert((0.9).to_int() == 0);
+}
+
+@test
+fn test_float_sqrt() {
+    assert((4.0).sqrt() == 2.0);
+    assert((9.0).sqrt() == 3.0);
+    assert((1.0).sqrt() == 1.0);
+    assert((0.0).sqrt() == 0.0);
+}
+
+@test
+fn test_float_cbrt() {
+    assert((8.0).cbrt() == 2.0);
+    assert((27.0).cbrt() == 3.0);
+    assert((-8.0).cbrt() == -2.0);
+}
+
+@test
+fn test_float_exp_log() {
+    // exp
+    let e_1 = (1.0).exp();
+    assert(e_1 > 2.71 && e_1 < 2.72);
+    assert((0.0).exp() == 1.0);
+
+    // ln (natural log)
+    assert((1.0).ln() == 0.0);
+    let ln_e = Float.E.ln();
+    assert(ln_e > 0.99 && ln_e < 1.01);
+
+    // log10
+    assert((10.0).log10() == 1.0);
+    assert((100.0).log10() == 2.0);
+
+    // log2
+    assert((2.0).log2() == 1.0);
+    assert((8.0).log2() == 3.0);
+}
+
+@test
+fn test_float_pow() {
+    assert((2.0).pow(3.0) == 8.0);
+    assert((2.0).pow(0.5) == (2.0).sqrt());
+    assert((10.0).pow(2.0) == 100.0);
+
+    // powi (integer power)
+    assert((2.0).powi(3) == 8.0);
+    assert((2.0).powi(10) == 1024.0);
+}
+
+@test
+fn test_float_rounding() {
+    // floor
+    assert((2.7).floor() == 2.0);
+    assert((-2.7).floor() == -3.0);
+
+    // ceil
+    assert((2.3).ceil() == 3.0);
+    assert((-2.3).ceil() == -2.0);
+
+    // round
+    assert((2.5).round() == 3.0);
+    assert((2.4).round() == 2.0);
+
+    // trunc
+    assert((2.7).trunc() == 2.0);
+    assert((-2.7).trunc() == -2.0);
+
+    // fract
+    let fract_val = (2.75).fract();
+    assert(fract_val > 0.74 && fract_val < 0.76);
+}
+
+@test
+fn test_float_min_max_clamp() {
+    assert((5.0).min(10.0) == 5.0);
+    assert((10.0).min(5.0) == 5.0);
+
+    assert((5.0).max(10.0) == 10.0);
+    assert((10.0).max(5.0) == 10.0);
+
+    assert((5.0).clamp(0.0, 10.0) == 5.0);
+    assert((-5.0).clamp(0.0, 10.0) == 0.0);
+    assert((15.0).clamp(0.0, 10.0) == 10.0);
+}
+
+@test
+fn test_float_fma() {
+    // fma(a, b, c) = a * b + c with single rounding
+    let result = (2.0).mul_add(3.0, 4.0);
+    assert(result == 10.0);
+}
+
+@test
+fn test_float_hypot() {
+    // hypot(3, 4) = 5 (Pythagorean triple)
+    assert((3.0).hypot(4.0) == 5.0);
+}
+
+@test
+fn test_float_trig() {
+    let pi = Float.PI;
+
+    // sin
+    assert((0.0).sin() == 0.0);
+    let sin_half_pi = (pi / 2.0).sin();
+    assert(sin_half_pi > 0.99 && sin_half_pi < 1.01);
+
+    // cos
+    assert((0.0).cos() == 1.0);
+    let cos_pi = pi.cos();
+    assert(cos_pi > -1.01 && cos_pi < -0.99);
+
+    // tan
+    assert((0.0).tan() == 0.0);
+
+    // sin_cos
+    let (s, c) = (0.0).sin_cos();
+    assert(s == 0.0);
+    assert(c == 1.0);
+}
+
+@test
+fn test_float_inverse_trig() {
+    assert((0.0).asin() == 0.0);
+    assert((1.0).acos() == 0.0);
+    assert((0.0).atan() == 0.0);
+
+    // atan2
+    let pi = Float.PI;
+    let atan2_result = (1.0).atan2(1.0);
+    assert(atan2_result > pi/4.0 - 0.01 && atan2_result < pi/4.0 + 0.01);
+}
+
+@test
+fn test_float_hyperbolic() {
+    assert((0.0).sinh() == 0.0);
+    assert((0.0).cosh() == 1.0);
+    assert((0.0).tanh() == 0.0);
+
+    // Inverse hyperbolic
+    assert((0.0).asinh() == 0.0);
+    assert((1.0).acosh() == 0.0);
+    assert((0.0).atanh() == 0.0);
+}
+
+@test
+fn test_float_angle_conversion() {
+    let pi = Float.PI;
+
+    assert(pi.to_degrees() == 180.0);
+    assert((180.0).to_radians() == pi);
+}
+
+@test
+fn test_float_bits() {
+    let x: Float = 1.0;
+    let bits = x.to_bits();
+    let reconstructed = Float.from_bits(bits);
+    assert(reconstructed == x);
+}
+
+@test
+fn test_float_special_constants() {
+    let eps = Float.epsilon();
+    assert(eps > 0.0);
+    assert(eps < 1e-15);
+
+    let min_pos = Float.min_positive();
+    assert(min_pos > 0.0);
+    assert(min_pos.is_finite());
+
+    let max_val = Float.max_value();
+    assert(max_val > 0.0);
+    assert(max_val.is_finite());
+}
+
+@test
+fn test_float_is_normal() {
+    assert((1.0).is_normal());
+    assert((-1.0).is_normal());
+    assert(!(0.0).is_normal());
+    assert(!Float.infinity().is_normal());
+    assert(!Float.nan().is_normal());
+}
+
+@test
+fn test_float_exp2() {
+    assert((0.0).exp2() == 1.0);
+    assert((1.0).exp2() == 2.0);
+    assert((3.0).exp2() == 8.0);
+    assert((10.0).exp2() == 1024.0);
+}
+
+@test
+fn test_float_exp_m1_ln_1p() {
+    // exp_m1(x) = e^x - 1, more precise near zero
+    assert((0.0).exp_m1() == 0.0);
+    let val = (1.0).exp_m1();
+    assert(val > 1.71 && val < 1.72);
+
+    // ln_1p(x) = ln(1 + x), more precise near zero
+    assert((0.0).ln_1p() == 0.0);
+    let ln_val = (1.0).ln_1p();  // ln(2)
+    assert(ln_val > 0.69 && ln_val < 0.70);
+}
+
+@test
+fn test_float_log_base() {
+    assert((8.0).log_base(2.0) == 3.0);
+    assert((1000.0).log_base(10.0) == 3.0);
+    assert((1.0).log_base(10.0) == 0.0);
+}
+
+@test
+fn test_float_copysign() {
+    assert((1.0).copysign(-1.0) == -1.0);
+    assert((-1.0).copysign(1.0) == 1.0);
+    assert((5.0).copysign(1.0) == 5.0);
+    assert((5.0).copysign(-1.0) == -5.0);
+}
+
+// =============================================================================
+// Bool Tests
+// =============================================================================
+
+@test
+fn test_bool_logic() {
+    assert(true.and_then(true));
+    assert(!true.and_then(false));
+    assert(!false.and_then(true));
+    assert(!false.and_then(false));
+
+    assert(true.or_else(true));
+    assert(true.or_else(false));
+    assert(false.or_else(true));
+    assert(!false.or_else(false));
+
+    assert(!true.xor(true));
+    assert(true.xor(false));
+    assert(false.xor(true));
+    assert(!false.xor(false));
+}
+
+@test
+fn test_bool_to_int() {
+    assert(true.to_int() == 1);
+    assert(false.to_int() == 0);
+}
+
+@test
+fn test_bool_select() {
+    assert(true.select(10, 20) == 10);
+    assert(false.select(10, 20) == 20);
+}
+
+// =============================================================================
+// Byte Tests
+// =============================================================================
+
+@test
+fn test_byte_bounds() {
+    assert(Byte.min_value() == 0);
+    assert(Byte.max_value() == 255);
+}
+
+@test
+fn test_byte_ascii() {
+    let upper_a: Byte = 65;  // 'A'
+    let lower_a: Byte = 97;  // 'a'
+    let digit: Byte = 48;    // '0'
+    let space: Byte = 32;    // ' '
+
+    assert(upper_a.is_ascii_alphabetic());
+    assert(lower_a.is_ascii_alphabetic());
+    assert(!digit.is_ascii_alphabetic());
+
+    assert(digit.is_ascii_digit());
+    assert(!upper_a.is_ascii_digit());
+
+    assert(upper_a.is_ascii_alphanumeric());
+    assert(digit.is_ascii_alphanumeric());
+    assert(!space.is_ascii_alphanumeric());
+
+    assert(space.is_ascii_whitespace());
+    assert(!upper_a.is_ascii_whitespace());
+}
+
+@test
+fn test_byte_case() {
+    let upper_a: Byte = 65;
+    let lower_a: Byte = 97;
+
+    assert(lower_a.to_ascii_uppercase() == upper_a);
+    assert(upper_a.to_ascii_lowercase() == lower_a);
+}
+
+@test
+fn test_byte_conversion() {
+    let b: Byte = 42;
+    assert(b.to_int() == 42);
+}
+
+@test
+fn test_byte_checked_ops() {
+    let a: Byte = 200;
+    let b: Byte = 100;
+
+    // Overflow case
+    assert(a.checked_add(b).is_none());
+
+    // No overflow
+    let c: Byte = 50;
+    match c.checked_add(b) {
+        Some(v) => assert(v == 150),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_byte_saturating() {
+    let a: Byte = 200;
+    let b: Byte = 100;
+    assert(a.saturating_add(b) == 255);  // Saturates at max
+
+    let c: Byte = 50;
+    assert(c.saturating_add(b) == 150);
+}
+
+@test
+fn test_byte_wrapping() {
+    let a: Byte = 200;
+    let b: Byte = 100;
+    assert(a.wrapping_add(b) == 44);  // (200 + 100) % 256 = 44
+}
+
+// =============================================================================
+// Char Tests
+// =============================================================================
+
+@test
+fn test_char_constants() {
+    assert(Char.replacement() == '\u{FFFD}');
+}
+
+@test
+fn test_char_ascii() {
+    assert('a'.is_ascii());
+    assert('Z'.is_ascii());
+    assert('0'.is_ascii());
+    // Unicode beyond ASCII
+    // assert(!'é'.is_ascii());  // Skip for now if unicode literals not supported
+}
+
+@test
+fn test_char_categories() {
+    assert('a'.is_alphabetic());
+    assert('Z'.is_alphabetic());
+    assert(!'5'.is_alphabetic());
+
+    assert('5'.is_numeric());
+    assert(!'a'.is_numeric());
+
+    assert('a'.is_alphanumeric());
+    assert('5'.is_alphanumeric());
+    assert(!' '.is_alphanumeric());
+
+    assert(' '.is_whitespace());
+    assert('\t'.is_whitespace());
+    assert('\n'.is_whitespace());
+    assert(!'a'.is_whitespace());
+}
+
+@test
+fn test_char_case() {
+    assert('a'.is_lowercase());
+    assert(!'A'.is_lowercase());
+
+    assert('A'.is_uppercase());
+    assert(!'a'.is_uppercase());
+
+    assert('a'.to_uppercase() == 'A');
+    assert('A'.to_lowercase() == 'a');
+}
+
+@test
+fn test_char_digit() {
+    // to_digit
+    match '5'.to_digit(10) {
+        Some(v) => assert(v == 5),
+        None => assert(false),
+    }
+
+    match 'a'.to_digit(16) {
+        Some(v) => assert(v == 10),
+        None => assert(false),
+    }
+
+    assert('z'.to_digit(10).is_none());
+
+    // from_digit
+    match Char.from_digit(5, 10) {
+        Some(c) => assert(c == '5'),
+        None => assert(false),
+    }
+
+    // is_digit
+    assert('5'.is_digit(10));
+    assert('a'.is_digit(16));
+    assert(!'g'.is_digit(16));
+}
+
+@test
+fn test_char_utf8_len() {
+    assert('a'.len_utf8() == 1);      // ASCII
+    // Note: Testing multi-byte chars requires unicode literal support
+}
+
+@test
+fn test_char_utf16_len() {
+    assert('a'.len_utf16() == 1);
+}
+
+@test
+fn test_char_max_value() {
+    let max = Char.max_value();
+    assert(max == '\u{10FFFF}');
+}
+
+@test
+fn test_char_is_control() {
+    assert('\0'.is_control());
+    assert('\n'.is_control());
+    assert('\t'.is_control());
+    assert(!'a'.is_control());
+    assert(!' '.is_control());
+}
+
+// Note: encode_utf8() return type needs runtime verification
+// Skipping encode_utf8 test - requires runtime byte buffer
+
+// =============================================================================
+// Unit Type Tests
+// =============================================================================
+
+@test
+fn test_unit_eq() {
+    let a: () = ();
+    let b: () = ();
+    assert(a == b);
+}
+
+@test
+fn test_unit_default() {
+    let u: () = ().default();
+    assert(u == ());
+}
+
+// =============================================================================
+// UInt64 Tests
+// =============================================================================
+
+@test
+fn test_uint64_constants() {
+    assert(UInt64.MIN == 0);
+    assert(UInt64.BITS == 64);
+}
+
+@test
+fn test_uint64_min_max() {
+    let a: UInt64 = 100;
+    let b: UInt64 = 200;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+}
+
+@test
+fn test_uint64_clamp() {
+    let x: UInt64 = 150;
+    let lo: UInt64 = 100;
+    let hi: UInt64 = 200;
+    assert(x.clamp(lo, hi) == x);
+}
+
+@test
+fn test_uint64_bytes() {
+    let x: UInt64 = 0x0102030405060708;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x08);
+    assert(be[0] == 0x01);
+
+    assert(UInt64.from_le_bytes(le) == x);
+    assert(UInt64.from_be_bytes(be) == x);
+}
+
+@test
+fn test_uint64_checked_ops() {
+    let a: UInt64 = 100;
+    let b: UInt64 = 50;
+
+    match a.checked_add(b) {
+        Some(v) => assert(v == 150),
+        None => assert(false),
+    }
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 50),
+        None => assert(false),
+    }
+
+    match a.checked_mul(b) {
+        Some(v) => assert(v == 5000),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_uint64_bit_ops() {
+    let x: UInt64 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+}
+
+// =============================================================================
+// Int32 Tests
+// =============================================================================
+
+@test
+fn test_int32_constants() {
+    assert(Int32.MIN == -2147483648);
+    assert(Int32.MAX == 2147483647);
+    assert(Int32.BITS == 32);
+}
+
+@test
+fn test_int32_abs_signum() {
+    let x: Int32 = -42;
+    assert(x.abs() == 42);
+    assert(x.signum() == -1);
+
+    let y: Int32 = 42;
+    assert(y.signum() == 1);
+}
+
+@test
+fn test_int32_bytes() {
+    let x: Int32 = 0x01020304;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x04);
+    assert(be[0] == 0x01);
+
+    assert(Int32.from_le_bytes(le) == x);
+    assert(Int32.from_be_bytes(be) == x);
+}
+
+// =============================================================================
+// USize Tests
+// =============================================================================
+
+@test
+fn test_usize_constants() {
+    assert(USize.MIN == 0);
+    assert(USize.BITS == 64);
+}
+
+@test
+fn test_usize_operations() {
+    let x: USize = 42;
+    let y: USize = x + 1;
+    assert(y == 43);
+
+    let z: USize = x * 2;
+    assert(z == 84);
+
+    let w: USize = x - 10;
+    assert(w == 32);
+}
+
+// =============================================================================
+// ISize Tests
+// =============================================================================
+
+@test
+fn test_isize_constants() {
+    assert(ISize.BITS == 64);
+}
+
+@test
+fn test_isize_operations() {
+    let x: ISize = -42;
+    assert(x.to_int() == -42);
+}
+
+// =============================================================================
+// Float32 Tests
+// =============================================================================
+
+@test
+fn test_float32_constants() {
+    assert(Float32.BITS == 32);
+}
+
+@test
+fn test_float32_special() {
+    let inf = Float32.infinity();
+    let neg_inf = Float32.neg_infinity();
+    let nan = Float32.nan();
+
+    assert(inf.is_infinite());
+    assert(neg_inf.is_infinite());
+    assert(nan.is_nan());
+    assert(!inf.is_nan());
+}
+
+@test
+fn test_float32_math() {
+    let x: Float32 = 4.0;
+    assert(x.sqrt() == 2.0);
+    assert(x.abs() == 4.0);
+
+    let y: Float32 = -4.0;
+    assert(y.abs() == 4.0);
+}
+
+@test
+fn test_float32_bits() {
+    let x: Float32 = 1.0;
+    let bits = x.to_bits();
+    let reconstructed = Float32.from_bits(bits);
+    assert(reconstructed == x);
+}
+
+// =============================================================================
+// Float64 Tests
+// =============================================================================
+
+@test
+fn test_float64_constants() {
+    assert(Float64.BITS == 64);
+}
+
+@test
+fn test_float64_special() {
+    let inf = Float64.infinity();
+    let neg_inf = Float64.neg_infinity();
+    let nan = Float64.nan();
+
+    assert(inf.is_infinite());
+    assert(neg_inf.is_infinite());
+    assert(nan.is_nan());
+}
+
+@test
+fn test_float64_math() {
+    let x: Float64 = 9.0;
+    assert(x.sqrt() == 3.0);
+
+    let y: Float64 = 8.0;
+    assert(y.cbrt() == 2.0);
+}
+
+@test
+fn test_float64_bits() {
+    let x: Float64 = 1.0;
+    let bits = x.to_bits();
+    let reconstructed = Float64.from_bits(bits);
+    assert(reconstructed == x);
+}
+
+// =============================================================================
+// Protocol Implementations Tests
+// =============================================================================
+
+@test
+fn test_int_eq() {
+    let a: Int = 42;
+    let b: Int = 42;
+    let c: Int = 43;
+
+    assert(a == b);
+    assert(a != c);
+}
+
+@test
+fn test_int_ord() {
+    let a: Int = 10;
+    let b: Int = 20;
+
+    assert(a < b);
+    assert(b > a);
+    assert(a <= a);
+    assert(a >= a);
+}
+
+@test
+fn test_float_eq() {
+    let a: Float = 3.14;
+    let b: Float = 3.14;
+
+    assert(a == b);
+
+    // NaN != NaN
+    let nan = Float.nan();
+    assert(nan != nan);
+}
+
+@test
+fn test_bool_eq_ord() {
+    assert(true == true);
+    assert(false == false);
+    assert(true != false);
+
+    assert(false < true);
+    assert(true > false);
+}
+
+@test
+fn test_char_eq_ord() {
+    assert('a' == 'a');
+    assert('a' != 'b');
+    assert('a' < 'b');
+    assert('z' > 'a');
+}
+
+@test
+fn test_default_values() {
+    assert(Int.default() == 0);
+    assert(Float.default() == 0.0);
+    assert(Bool.default() == false);
+    assert(Byte.default() == 0);
+    assert(Char.default() == '\0');
+}
+
+@test
+fn test_clone_copy() {
+    let i: Int = 42;
+    let i_clone = i.clone();
+    assert(i == i_clone);
+
+    let f: Float = 3.14;
+    let f_clone = f.clone();
+    assert(f == f_clone);
+
+    let b: Bool = true;
+    let b_clone = b.clone();
+    assert(b == b_clone);
+}
+
+// =============================================================================
+// Sized Integer Conversion Tests
+// =============================================================================
+
+@test
+fn test_int8_bounds_and_ops() {
+    let x: Int8 = 127;
+    let y: Int8 = -128;
+    assert(x == Int8.MAX);
+    assert(y == Int8.MIN);
+    assert(x.abs() == 127);
+    assert((-1 as Int8).abs() == 1);
+}
+
+@test
+fn test_int16_bounds() {
+    assert(Int16.MIN == -32768);
+    assert(Int16.MAX == 32767);
+    assert(Int16.BITS == 16);
+}
+
+@test
+fn test_uint8_bounds() {
+    assert(UInt8.MIN == 0);
+    assert(UInt8.MAX == 255);
+    assert(UInt8.BITS == 8);
+}
+
+@test
+fn test_uint16_bounds() {
+    assert(UInt16.MIN == 0);
+    assert(UInt16.MAX == 65535);
+    assert(UInt16.BITS == 16);
+}
+
+@test
+fn test_uint32_bounds() {
+    assert(UInt32.MIN == 0);
+    assert(UInt32.BITS == 32);
+}
+
+@test
+fn test_int8_checked_arithmetic() {
+    let x: Int8 = 100;
+    // 100 + 100 overflows Int8
+    assert(x.checked_add(100).is_none());
+    // 100 + 27 = 127 (max) — OK
+    match x.checked_add(27) {
+        Some(v) => assert(v == 127),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_int16_wrapping() {
+    assert(Int16.MAX.wrapping_add(1) == Int16.MIN);
+    assert(Int16.MIN.wrapping_sub(1) == Int16.MAX);
+}
+
+@test
+fn test_uint8_saturating() {
+    let x: UInt8 = 250;
+    assert(x.saturating_add(10) == 255);
+    let y: UInt8 = 5;
+    assert(y.saturating_sub(10) == 0);
+}
+
+@test
+fn test_int_to_sized_conversion() {
+    let x: Int = 42;
+    let as_i32: Int32 = x as Int32;
+    assert(as_i32 == 42);
+    let as_i16: Int16 = x as Int16;
+    assert(as_i16 == 42);
+    let as_i8: Int8 = x as Int8;
+    assert(as_i8 == 42);
+}
+
+@test
+fn test_uint_cross_size_conversion() {
+    let x: UInt8 = 200;
+    let as_u16: UInt16 = x as UInt16;
+    assert(as_u16 == 200);
+    let as_u32: UInt32 = x as UInt32;
+    assert(as_u32 == 200);
+    let as_u64: UInt64 = x as UInt64;
+    assert(as_u64 == 200);
+}
+
+@test
+fn test_signed_unsigned_conversion() {
+    let x: Int32 = 100;
+    let as_u32: UInt32 = x as UInt32;
+    assert(as_u32 == 100);
+    let back: Int32 = as_u32 as Int32;
+    assert(back == 100);
+}
+
+// =============================================================================
+// Float Special Value Arithmetic
+// =============================================================================
+
+@test
+fn test_float_infinity_arithmetic() {
+    let inf = Float.infinity();
+    let neg_inf = Float.neg_infinity();
+
+    // inf + inf = inf
+    assert((inf + inf).is_infinite());
+    assert((inf + inf).is_positive());
+
+    // inf + neg_inf = NaN
+    assert((inf + neg_inf).is_nan());
+
+    // inf * 2 = inf
+    assert((inf * 2.0).is_infinite());
+
+    // inf * -1 = neg_inf
+    let neg = inf * -1.0;
+    assert(neg.is_infinite());
+    assert(neg.is_negative());
+}
+
+@test
+fn test_float_nan_arithmetic() {
+    let nan = Float.nan();
+
+    // NaN propagates through all operations
+    assert((nan + 1.0).is_nan());
+    assert((nan - 1.0).is_nan());
+    assert((nan * 2.0).is_nan());
+    assert((nan / 2.0).is_nan());
+
+    // NaN * 0 = NaN (not 0)
+    assert((nan * 0.0).is_nan());
+
+    // NaN comparisons are always false
+    assert(!(nan == nan));
+    assert(!(nan < nan));
+    assert(!(nan > nan));
+    assert(!(nan <= nan));
+    assert(!(nan >= nan));
+    assert(nan != nan);
+}
+
+@test
+fn test_float_negative_zero() {
+    let pos_zero = 0.0;
+    let neg_zero = -0.0;
+
+    // -0 == +0
+    assert(pos_zero == neg_zero);
+
+    // But they have different bit representations
+    assert(pos_zero.to_bits() != neg_zero.to_bits());
+
+    // is_zero for both
+    assert(pos_zero.is_zero());
+    assert(neg_zero.is_zero());
+}
+
+@test
+fn test_float_division_special() {
+    // 1 / 0 = inf
+    let inf = 1.0 / 0.0;
+    assert(inf.is_infinite());
+    assert(inf.is_positive());
+
+    // -1 / 0 = -inf
+    let neg_inf = -1.0 / 0.0;
+    assert(neg_inf.is_infinite());
+    assert(neg_inf.is_negative());
+
+    // 0 / 0 = NaN
+    let nan = 0.0 / 0.0;
+    assert(nan.is_nan());
+}
+
+@test
+fn test_float_infinity_comparison() {
+    let inf = Float.infinity();
+    let neg_inf = Float.neg_infinity();
+    let x = 1e308;
+
+    assert(inf > x);
+    assert(neg_inf < x);
+    assert(neg_inf < inf);
+    assert(inf == inf);
+}
+
+// =============================================================================
+// Bit Rotation Edge Cases
+// =============================================================================
+
+@test
+fn test_int_rotate_by_zero() {
+    let x: Int = 0b10110001;
+    assert(x.rotate_left(0) == x);
+    assert(x.rotate_right(0) == x);
+}
+
+@test
+fn test_int_rotate_full_width() {
+    let x: Int = 12345;
+    // Rotating by full bit width should return original
+    assert(x.rotate_left(64) == x);
+    assert(x.rotate_right(64) == x);
+}
+
+@test
+fn test_int_rotate_left_right_inverse() {
+    let x: Int = 0xDEADBEEF;
+    // Rotate left then right by same amount = identity
+    assert(x.rotate_left(13).rotate_right(13) == x);
+    assert(x.rotate_left(37).rotate_right(37) == x);
+    assert(x.rotate_left(1).rotate_right(1) == x);
+}
+
+@test
+fn test_int_rotate_equivalences() {
+    let x: Int = 0xCAFEBABE;
+    // rotate_left(n) == rotate_right(64 - n) for n < 64
+    assert(x.rotate_left(17) == x.rotate_right(47));
+    assert(x.rotate_left(32) == x.rotate_right(32));
+}
+
+// =============================================================================
+// Byte Combined Operations
+// =============================================================================
+
+@test
+fn test_byte_bit_operations() {
+    let a: Byte = 0b11001100;
+    let b: Byte = 0b10101010;
+
+    // Bitwise operations
+    assert((a & b) == 0b10001000);
+    assert((a | b) == 0b11101110);
+    assert((a ^ b) == 0b01100110);
+}
+
+@test
+fn test_byte_range() {
+    // Test all boundary values
+    let min: Byte = 0;
+    let max: Byte = 255;
+    let mid: Byte = 128;
+
+    assert(min == Byte.min_value());
+    assert(max == Byte.max_value());
+    assert(mid.to_int() == 128);
+}
+
+@test
+fn test_byte_ascii_classification_comprehensive() {
+    // Test all ASCII control chars
+    let null_byte: Byte = 0;
+    let tab: Byte = 9;
+    let newline: Byte = 10;
+
+    assert(!null_byte.is_ascii_alphabetic());
+    assert(!tab.is_ascii_alphabetic());
+    assert(!newline.is_ascii_alphabetic());
+
+    // Test digits 0-9
+    let zero: Byte = 48;
+    let nine: Byte = 57;
+    assert(zero.is_ascii_digit());
+    assert(nine.is_ascii_digit());
+
+    // Just outside digit range
+    let before_zero: Byte = 47;
+    let after_nine: Byte = 58;
+    assert(!before_zero.is_ascii_digit());
+    assert(!after_nine.is_ascii_digit());
+}
+
+// =============================================================================
+// Char Unicode Edge Cases
+// =============================================================================
+
+@test
+fn test_char_boundary_values() {
+    // Null character
+    assert('\0'.is_control());
+    assert(!'\0'.is_alphabetic());
+
+    // Space — not control, is whitespace
+    assert(' '.is_whitespace());
+    assert(!' '.is_control());
+
+    // DEL (127) is control
+    let del = '\u{7F}';
+    assert(del.is_control());
+    assert(!del.is_alphabetic());
+}
+
+@test
+fn test_char_unicode_categories() {
+    // Basic Latin
+    assert('A'.is_alphabetic());
+    assert('z'.is_alphabetic());
+    assert('0'.is_numeric());
+    assert('9'.is_numeric());
+
+    // Ensure digits are not alpha and vice versa
+    assert(!'0'.is_alphabetic());
+    assert(!'A'.is_numeric());
+}
+
+@test
+fn test_char_case_conversion_edge() {
+    // Non-letter characters should be unchanged
+    assert('5'.to_uppercase() == '5');
+    assert('5'.to_lowercase() == '5');
+    assert(' '.to_uppercase() == ' ');
+    assert('@'.to_lowercase() == '@');
+}
+
+@test
+fn test_char_digit_radix() {
+    // Decimal digits
+    assert('0'.is_digit(10));
+    assert('9'.is_digit(10));
+    assert(!'a'.is_digit(10));
+
+    // Hexadecimal digits
+    assert('0'.is_digit(16));
+    assert('9'.is_digit(16));
+    assert('a'.is_digit(16));
+    assert('f'.is_digit(16));
+    assert(!'g'.is_digit(16));
+
+    // Binary digits
+    assert('0'.is_digit(2));
+    assert('1'.is_digit(2));
+    assert(!'2'.is_digit(2));
+
+    // Octal digits
+    assert('7'.is_digit(8));
+    assert(!'8'.is_digit(8));
+}
+
+@test
+fn test_char_to_digit_all_hex() {
+    // Verify to_digit for all hex digits
+    assert_eq('0'.to_digit(16), Some(0));
+    assert_eq('1'.to_digit(16), Some(1));
+    assert_eq('9'.to_digit(16), Some(9));
+    assert_eq('a'.to_digit(16), Some(10));
+    assert_eq('b'.to_digit(16), Some(11));
+    assert_eq('f'.to_digit(16), Some(15));
+}
+
+@test
+fn test_char_from_digit_roundtrip() {
+    // Verify from_digit -> to_digit roundtrip for decimal
+    let mut i = 0;
+    while i < 10 {
+        let ch = Char.from_digit(i, 10);
+        assert(ch.is_some());
+        let d = ch.unwrap().to_digit(10);
+        assert(d.is_some());
+        assert_eq(d.unwrap(), i);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Int Advanced Operations
+// =============================================================================
+
+@test
+fn test_int_overflowing_add() {
+    // Normal case
+    let (val, overflow) = (5).overflowing_add(10);
+    assert_eq(val, 15);
+    assert(!overflow);
+
+    // Overflow case
+    let (val2, overflow2) = Int.MAX.overflowing_add(1);
+    assert_eq(val2, Int.MIN);
+    assert(overflow2);
+}
+
+@test
+fn test_int_overflowing_mul() {
+    let (val, overflow) = (5).overflowing_mul(10);
+    assert_eq(val, 50);
+    assert(!overflow);
+}
+
+@test
+fn test_int_pow_edge_cases() {
+    // Any number to power 0 is 1
+    assert((0).pow(0) == 1);
+    assert((100).pow(0) == 1);
+    assert((-5).pow(0) == 1);
+
+    // 0 to any positive power is 0
+    assert((0).pow(1) == 0);
+    assert((0).pow(10) == 0);
+
+    // 1 to any power is 1
+    assert((1).pow(100) == 1);
+    assert((1).pow(0) == 1);
+
+    // -1 to even/odd powers
+    assert((-1).pow(2) == 1);
+    assert((-1).pow(3) == -1);
+    assert((-1).pow(100) == 1);
+    assert((-1).pow(101) == -1);
+}
+
+@test
+fn test_int_count_ones_patterns() {
+    assert((0).count_ones() == 0);
+    assert((1).count_ones() == 1);
+    assert((3).count_ones() == 2);     // 0b11
+    assert((7).count_ones() == 3);     // 0b111
+    assert((15).count_ones() == 4);    // 0b1111
+    assert((255).count_ones() == 8);   // 0b11111111
+}
+
+@test
+fn test_float_classify() {
+    // Normal numbers
+    assert((1.0).is_normal());
+    assert((-42.5).is_normal());
+
+    // Subnormal — very small but not zero
+    let tiny = Float.min_positive() / 2.0;
+    assert(!tiny.is_normal());
+    assert(tiny.is_finite());
+
+    // Zero
+    assert(!(0.0).is_normal());
+
+    // Infinity
+    assert(!Float.infinity().is_normal());
+
+    // NaN
+    assert(!Float.nan().is_normal());
+}
+
+@test
+fn test_float_total_cmp_with_nan() {
+    // NaN should not equal itself
+    let nan1 = Float.nan();
+    let nan2 = Float.nan();
+    assert(nan1 != nan2);
+
+    // Regular comparison still works
+    assert(1.0 < 2.0);
+    assert(-1.0 < 1.0);
+    assert(0.0 == 0.0);
+}
+
+// =============================================================================
+// Int.overflowing_sub (gap)
+// =============================================================================
+
+@test
+fn test_int_overflowing_sub() {
+    // Normal case
+    let (val, overflow) = (10).overflowing_sub(5);
+    assert_eq(val, 5);
+    assert(!overflow);
+
+    // Overflow case (underflow)
+    let (val2, overflow2) = Int.MIN.overflowing_sub(1);
+    assert_eq(val2, Int.MAX);
+    assert(overflow2);
+
+    // Zero difference
+    let (val3, overflow3) = (42).overflowing_sub(42);
+    assert_eq(val3, 0);
+    assert(!overflow3);
+}
+
+// =============================================================================
+// Byte.wrapping_sub (gap)
+// =============================================================================
+
+@test
+fn test_byte_wrapping_sub() {
+    let a: Byte = 100;
+    let b: Byte = 50;
+    assert(a.wrapping_sub(b) == 50);
+
+    // Underflow wraps
+    let c: Byte = 10;
+    let d: Byte = 20;
+    assert(c.wrapping_sub(d) == 246);  // (10 - 20) mod 256 = 246
+
+    // Zero wrapping
+    let zero: Byte = 0;
+    let one: Byte = 1;
+    assert(zero.wrapping_sub(one) == 255);
+}
+
+@test
+fn test_byte_saturating_sub() {
+    let a: Byte = 100;
+    let b: Byte = 50;
+    assert(a.saturating_sub(b) == 50);
+
+    // Saturates at 0 (not underflow)
+    let c: Byte = 10;
+    let d: Byte = 20;
+    assert(c.saturating_sub(d) == 0);
+}
+
+@test
+fn test_byte_checked_sub() {
+    let a: Byte = 100;
+    let b: Byte = 50;
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 50),
+        None => assert(false),
+    }
+
+    // Underflow returns None
+    let c: Byte = 10;
+    let d: Byte = 20;
+    assert(c.checked_sub(d).is_none());
+}
+
+
+// =============================================================================
+// UInt64 Extended Tests (gap: wrapping, saturating, rotate, swap, to_int)
+// =============================================================================
+
+@test
+fn test_uint64_wrapping_add_sub() {
+    let a: UInt64 = 100;
+    let b: UInt64 = 50;
+    assert(a.wrapping_add(b) == 150);
+    assert(a.wrapping_sub(b) == 50);
+
+    // Wrapping on overflow
+    assert(UInt64.MAX.wrapping_add(1) == 0);
+
+    // Wrapping on underflow
+    let zero: UInt64 = 0;
+    assert(zero.wrapping_sub(1) == UInt64.MAX);
+}
+
+@test
+fn test_uint64_saturating_add_sub() {
+    let a: UInt64 = 100;
+    let b: UInt64 = 50;
+    assert(a.saturating_add(b) == 150);
+    assert(a.saturating_sub(b) == 50);
+
+    // Saturates at max
+    assert(UInt64.MAX.saturating_add(1) == UInt64.MAX);
+
+    // Saturates at 0
+    let zero: UInt64 = 0;
+    assert(zero.saturating_sub(1) == 0);
+}
+
+@test
+fn test_uint64_leading_trailing_zeros() {
+    let x: UInt64 = 1;
+    assert(x.leading_zeros() == 63);
+    assert(x.trailing_zeros() == 0);
+
+    let y: UInt64 = 8;  // 0b1000
+    assert(y.trailing_zeros() == 3);
+}
+
+@test
+fn test_uint64_rotate() {
+    let x: UInt64 = 0xDEADBEEF;
+    // Rotate left then right by same amount = identity
+    assert(x.rotate_left(13).rotate_right(13) == x);
+    assert(x.rotate_left(32).rotate_right(32) == x);
+    assert(x.rotate_left(1).rotate_right(1) == x);
+
+    // Rotate by 0 = identity
+    assert(x.rotate_left(0) == x);
+    assert(x.rotate_right(0) == x);
+}
+
+@test
+fn test_uint64_swap_bytes() {
+    let x: UInt64 = 0x0102030405060708;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0807060504030201);
+    // Double swap returns original
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_uint64_to_int() {
+    let x: UInt64 = 42;
+    assert(x.to_int() == 42);
+
+    let zero: UInt64 = 0;
+    assert(zero.to_int() == 0);
+}
+
+// =============================================================================
+// UInt32 Comprehensive Tests (gap: almost all methods untested)
+// =============================================================================
+
+@test
+fn test_uint32_constants() {
+    assert(UInt32.MIN == 0);
+    assert(UInt32.MAX == 4294967295);
+    assert(UInt32.BITS == 32);
+}
+
+@test
+fn test_uint32_min_max_clamp() {
+    let a: UInt32 = 100;
+    let b: UInt32 = 200;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt32 = 150;
+    assert(x.clamp(100, 200) == 150);
+    assert(x.clamp(200, 300) == 200);
+    assert(x.clamp(0, 100) == 100);
+}
+
+@test
+fn test_uint32_bytes() {
+    let x: UInt32 = 0x01020304;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x04);
+    assert(le[3] == 0x01);
+    assert(be[0] == 0x01);
+    assert(be[3] == 0x04);
+
+    assert(UInt32.from_le_bytes(le) == x);
+    assert(UInt32.from_be_bytes(be) == x);
+}
+
+@test
+fn test_uint32_checked_ops() {
+    let a: UInt32 = 100;
+    let b: UInt32 = 50;
+
+    match a.checked_add(b) {
+        Some(v) => assert(v == 150),
+        None => assert(false),
+    }
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 50),
+        None => assert(false),
+    }
+
+    match a.checked_mul(b) {
+        Some(v) => assert(v == 5000),
+        None => assert(false),
+    }
+
+    // Overflow returns None
+    assert(UInt32.MAX.checked_add(1).is_none());
+
+    // Underflow returns None
+    let zero: UInt32 = 0;
+    assert(zero.checked_sub(1).is_none());
+}
+
+@test
+fn test_uint32_wrapping_ops() {
+    let a: UInt32 = 100;
+    let b: UInt32 = 50;
+    assert(a.wrapping_add(b) == 150);
+    assert(a.wrapping_sub(b) == 50);
+
+    // Wrapping overflow
+    assert(UInt32.MAX.wrapping_add(1) == 0);
+    let zero: UInt32 = 0;
+    assert(zero.wrapping_sub(1) == UInt32.MAX);
+}
+
+@test
+fn test_uint32_saturating_ops() {
+    let a: UInt32 = 100;
+    let b: UInt32 = 50;
+    assert(a.saturating_add(b) == 150);
+    assert(a.saturating_sub(b) == 50);
+
+    assert(UInt32.MAX.saturating_add(1) == UInt32.MAX);
+    let zero: UInt32 = 0;
+    assert(zero.saturating_sub(1) == 0);
+}
+
+@test
+fn test_uint32_bit_ops() {
+    let x: UInt32 = 0b10100101;
+    assert(x.count_ones() == 4);
+    assert(x.trailing_zeros() == 0);
+
+    let y: UInt32 = 16;  // 0b10000
+    assert(y.trailing_zeros() == 4);
+    assert(y.leading_zeros() == 27);  // 32 - 5 = 27
+}
+
+@test
+fn test_uint32_rotate() {
+    let x: UInt32 = 0xDEADBEEF;
+    assert(x.rotate_left(16).rotate_right(16) == x);
+    assert(x.rotate_left(0) == x);
+}
+
+@test
+fn test_uint32_swap_bytes() {
+    let x: UInt32 = 0x01020304;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x04030201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_uint32_to_int() {
+    let x: UInt32 = 42;
+    assert(x.to_int() == 42);
+    assert(UInt32.MAX.to_int() == 4294967295);
+}
+
+// =============================================================================
+// UInt16 Comprehensive Tests (gap: almost all methods untested)
+// =============================================================================
+
+@test
+fn test_uint16_min_max_clamp() {
+    let a: UInt16 = 100;
+    let b: UInt16 = 200;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt16 = 150;
+    assert(x.clamp(100, 200) == 150);
+}
+
+@test
+fn test_uint16_bytes() {
+    let x: UInt16 = 0x0102;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x02);
+    assert(le[1] == 0x01);
+    assert(be[0] == 0x01);
+    assert(be[1] == 0x02);
+
+    assert(UInt16.from_le_bytes(le) == x);
+    assert(UInt16.from_be_bytes(be) == x);
+}
+
+@test
+fn test_uint16_checked_ops() {
+    let a: UInt16 = 100;
+    let b: UInt16 = 50;
+
+    match a.checked_add(b) {
+        Some(v) => assert(v == 150),
+        None => assert(false),
+    }
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 50),
+        None => assert(false),
+    }
+
+    // Overflow
+    assert(UInt16.MAX.checked_add(1).is_none());
+}
+
+@test
+fn test_uint16_wrapping_saturating() {
+    assert(UInt16.MAX.wrapping_add(1) == 0);
+    assert(UInt16.MAX.saturating_add(1) == UInt16.MAX);
+}
+
+@test
+fn test_uint16_swap_bytes() {
+    let x: UInt16 = 0x0102;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_uint16_to_int() {
+    let x: UInt16 = 42;
+    assert(x.to_int() == 42);
+    assert(UInt16.MAX.to_int() == 65535);
+}
+
+// =============================================================================
+// UInt8 Comprehensive Tests (gap: only constants tested)
+// =============================================================================
+
+@test
+fn test_uint8_min_max_clamp() {
+    let a: UInt8 = 50;
+    let b: UInt8 = 200;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt8 = 150;
+    assert(x.clamp(100, 200) == 150);
+    assert(x.clamp(200, 250) == 200);
+    assert(x.clamp(0, 100) == 100);
+}
+
+@test
+fn test_uint8_to_int() {
+    let x: UInt8 = 42;
+    assert(x.to_int() == 42);
+    assert(UInt8.MAX.to_int() == 255);
+    assert(UInt8.MIN.to_int() == 0);
+}
+
+// =============================================================================
+// UInt128 Comprehensive Tests (gap: completely untested)
+// =============================================================================
+
+@test
+fn test_uint128_constants() {
+    assert(UInt128.MIN == 0);
+    assert(UInt128.BITS == 128);
+    // MAX is 2^128 - 1
+    assert(UInt128.MAX > 0);
+}
+
+@test
+fn test_uint128_min_max_clamp() {
+    let a: UInt128 = 100;
+    let b: UInt128 = 200;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: UInt128 = 150;
+    assert(x.clamp(100, 200) == 150);
+}
+
+@test
+fn test_uint128_checked_ops() {
+    let a: UInt128 = 1000;
+    let b: UInt128 = 500;
+
+    match a.checked_add(b) {
+        Some(v) => assert(v == 1500),
+        None => assert(false),
+    }
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 500),
+        None => assert(false),
+    }
+
+    match a.checked_mul(b) {
+        Some(v) => assert(v == 500000),
+        None => assert(false),
+    }
+
+    // Underflow returns None
+    let zero: UInt128 = 0;
+    assert(zero.checked_sub(1).is_none());
+}
+
+@test
+fn test_uint128_wrapping_ops() {
+    let a: UInt128 = 100;
+    let b: UInt128 = 50;
+    assert(a.wrapping_add(b) == 150);
+    assert(a.wrapping_sub(b) == 50);
+
+    // Wrapping on overflow
+    assert(UInt128.MAX.wrapping_add(1) == 0);
+}
+
+@test
+fn test_uint128_saturating_ops() {
+    assert(UInt128.MAX.saturating_add(1) == UInt128.MAX);
+    let zero: UInt128 = 0;
+    assert(zero.saturating_sub(1) == 0);
+}
+
+@test
+fn test_uint128_bit_ops() {
+    let x: UInt128 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+
+    let one: UInt128 = 1;
+    assert(one.leading_zeros() == 127);
+}
+
+@test
+fn test_uint128_swap_bytes() {
+    // Simple test: swap and double-swap returns original
+    let x: UInt128 = 0x01020304;
+    assert(x.swap_bytes().swap_bytes() == x);
+}
+
+@test
+fn test_uint128_to_int() {
+    let x: UInt128 = 42;
+    assert(x.to_int() == 42);
+}
+
+// =============================================================================
+// Int64 Comprehensive Tests (gap: completely untested)
+// =============================================================================
+
+@test
+fn test_int64_constants() {
+    assert(Int64.MIN == -9223372036854775808);
+    assert(Int64.MAX == 9223372036854775807);
+    assert(Int64.BITS == 64);
+}
+
+@test
+fn test_int64_abs_signum() {
+    let x: Int64 = -42;
+    assert(x.abs() == 42);
+    assert(x.signum() == -1);
+
+    let y: Int64 = 42;
+    assert(y.signum() == 1);
+
+    let z: Int64 = 0;
+    assert(z.signum() == 0);
+}
+
+@test
+fn test_int64_min_max_clamp() {
+    let a: Int64 = -50;
+    let b: Int64 = 50;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int64 = 15;
+    assert(x.clamp(0, 100) == 15);
+    assert(x.clamp(20, 100) == 20);
+    assert(x.clamp(0, 10) == 10);
+}
+
+@test
+fn test_int64_bytes() {
+    let x: Int64 = 0x0102030405060708;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x08);
+    assert(be[0] == 0x01);
+
+    assert(Int64.from_le_bytes(le) == x);
+    assert(Int64.from_be_bytes(be) == x);
+}
+
+@test
+fn test_int64_checked_ops() {
+    let a: Int64 = 100;
+    let b: Int64 = 50;
+
+    match a.checked_add(b) {
+        Some(v) => assert(v == 150),
+        None => assert(false),
+    }
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 50),
+        None => assert(false),
+    }
+
+    match a.checked_mul(b) {
+        Some(v) => assert(v == 5000),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_int64_wrapping_ops() {
+    assert(Int64.MAX.wrapping_add(1) == Int64.MIN);
+    assert(Int64.MIN.wrapping_sub(1) == Int64.MAX);
+}
+
+@test
+fn test_int64_saturating_ops() {
+    assert(Int64.MAX.saturating_add(1) == Int64.MAX);
+    assert(Int64.MIN.saturating_sub(1) == Int64.MIN);
+}
+
+@test
+fn test_int64_bit_ops() {
+    let x: Int64 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+    assert(x.leading_zeros() == 60);  // 64 - 4 = 60
+}
+
+@test
+fn test_int64_rotate() {
+    let x: Int64 = 0xDEADBEEF;
+    assert(x.rotate_left(13).rotate_right(13) == x);
+    assert(x.rotate_left(0) == x);
+}
+
+@test
+fn test_int64_swap_bytes() {
+    let x: Int64 = 0x0102030405060708;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0807060504030201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_int64_to_int() {
+    let x: Int64 = -42;
+    assert(x.to_int() == -42);
+}
+
+// =============================================================================
+// Int128 Comprehensive Tests (gap: completely untested)
+// =============================================================================
+
+@test
+fn test_int128_constants() {
+    assert(Int128.BITS == 128);
+    // Verify MIN < 0 and MAX > 0
+    assert(Int128.MIN < 0);
+    assert(Int128.MAX > 0);
+}
+
+@test
+fn test_int128_abs_signum() {
+    let x: Int128 = -42;
+    assert(x.abs() == 42);
+    assert(x.signum() == -1);
+
+    let y: Int128 = 42;
+    assert(y.signum() == 1);
+
+    let z: Int128 = 0;
+    assert(z.signum() == 0);
+}
+
+@test
+fn test_int128_min_max_clamp() {
+    let a: Int128 = -50;
+    let b: Int128 = 50;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int128 = 15;
+    assert(x.clamp(0, 100) == 15);
+}
+
+@test
+fn test_int128_checked_ops() {
+    let a: Int128 = 1000;
+    let b: Int128 = 500;
+
+    match a.checked_add(b) {
+        Some(v) => assert(v == 1500),
+        None => assert(false),
+    }
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 500),
+        None => assert(false),
+    }
+
+    match a.checked_mul(b) {
+        Some(v) => assert(v == 500000),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_int128_wrapping_ops() {
+    assert(Int128.MAX.wrapping_add(1) == Int128.MIN);
+    assert(Int128.MIN.wrapping_sub(1) == Int128.MAX);
+}
+
+@test
+fn test_int128_saturating_ops() {
+    assert(Int128.MAX.saturating_add(1) == Int128.MAX);
+    assert(Int128.MIN.saturating_sub(1) == Int128.MIN);
+}
+
+@test
+fn test_int128_bit_ops() {
+    let x: Int128 = 0b1010;
+    assert(x.count_ones() == 2);
+    assert(x.trailing_zeros() == 1);
+    assert(x.leading_zeros() == 124);  // 128 - 4 = 124
+}
+
+@test
+fn test_int128_swap_bytes() {
+    let x: Int128 = 0x01020304;
+    assert(x.swap_bytes().swap_bytes() == x);
+}
+
+@test
+fn test_int128_to_int() {
+    let x: Int128 = -42;
+    assert(x.to_int() == -42);
+}
+
+// =============================================================================
+// Int32 Extended Tests (gap: rotate, bit ops, wrapping/saturating)
+// =============================================================================
+
+@test
+fn test_int32_checked_ops() {
+    let a: Int32 = 100;
+    let b: Int32 = 50;
+
+    match a.checked_add(b) {
+        Some(v) => assert(v == 150),
+        None => assert(false),
+    }
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 50),
+        None => assert(false),
+    }
+
+    match a.checked_mul(b) {
+        Some(v) => assert(v == 5000),
+        None => assert(false),
+    }
+
+    // Overflow
+    assert(Int32.MAX.checked_add(1).is_none());
+}
+
+@test
+fn test_int32_wrapping_ops() {
+    assert(Int32.MAX.wrapping_add(1) == Int32.MIN);
+    assert(Int32.MIN.wrapping_sub(1) == Int32.MAX);
+}
+
+@test
+fn test_int32_saturating_ops() {
+    assert(Int32.MAX.saturating_add(1) == Int32.MAX);
+    assert(Int32.MIN.saturating_sub(1) == Int32.MIN);
+}
+
+@test
+fn test_int32_bit_ops() {
+    let x: Int32 = 0b10100101;
+    assert(x.count_ones() == 4);
+    assert(x.trailing_zeros() == 0);
+
+    let y: Int32 = 16;
+    assert(y.trailing_zeros() == 4);
+    assert(y.leading_zeros() == 27);
+}
+
+@test
+fn test_int32_rotate() {
+    let x: Int32 = 0x0EADBEEF;
+    assert(x.rotate_left(8).rotate_right(8) == x);
+    assert(x.rotate_left(0) == x);
+}
+
+@test
+fn test_int32_swap_bytes() {
+    let x: Int32 = 0x01020304;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x04030201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_int32_to_int() {
+    let x: Int32 = -42;
+    assert(x.to_int() == -42);
+    assert(Int32.MAX.to_int() == 2147483647);
+}
+
+// =============================================================================
+// Int16 Extended Tests (gap: wrapping_mul, swap_bytes, to_int)
+// =============================================================================
+
+@test
+fn test_int16_abs_signum() {
+    let x: Int16 = -42;
+    assert(x.abs() == 42);
+    assert(x.signum() == -1);
+
+    let y: Int16 = 42;
+    assert(y.signum() == 1);
+}
+
+@test
+fn test_int16_min_max_clamp() {
+    let a: Int16 = -50;
+    let b: Int16 = 50;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int16 = 15;
+    assert(x.clamp(0, 100) == 15);
+}
+
+@test
+fn test_int16_bytes() {
+    let x: Int16 = 0x0102;
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+
+    assert(le[0] == 0x02);
+    assert(be[0] == 0x01);
+
+    assert(Int16.from_le_bytes(le) == x);
+    assert(Int16.from_be_bytes(be) == x);
+}
+
+@test
+fn test_int16_checked_ops() {
+    let a: Int16 = 100;
+    let b: Int16 = 50;
+
+    match a.checked_add(b) {
+        Some(v) => assert(v == 150),
+        None => assert(false),
+    }
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 50),
+        None => assert(false),
+    }
+
+    // Overflow
+    assert(Int16.MAX.checked_add(1).is_none());
+}
+
+@test
+fn test_int16_wrapping_mul() {
+    let a: Int16 = 100;
+    let b: Int16 = 50;
+    assert(a.wrapping_mul(b) == 5000);
+}
+
+@test
+fn test_int16_saturating_ops() {
+    assert(Int16.MAX.saturating_add(1) == Int16.MAX);
+    assert(Int16.MIN.saturating_sub(1) == Int16.MIN);
+}
+
+@test
+fn test_int16_swap_bytes() {
+    let x: Int16 = 0x0102;
+    let swapped = x.swap_bytes();
+    assert(swapped == 0x0201);
+    assert(swapped.swap_bytes() == x);
+}
+
+@test
+fn test_int16_to_int() {
+    let x: Int16 = -42;
+    assert(x.to_int() == -42);
+    assert(Int16.MAX.to_int() == 32767);
+}
+
+// =============================================================================
+// Int8 Extended Tests (gap: wrapping_add, saturating_add, checked_sub)
+// =============================================================================
+
+@test
+fn test_int8_min_max_clamp() {
+    let a: Int8 = -50;
+    let b: Int8 = 50;
+    assert(a.min(b) == a);
+    assert(a.max(b) == b);
+
+    let x: Int8 = 15;
+    assert(x.clamp(0, 100) == 15);
+}
+
+@test
+fn test_int8_wrapping_add() {
+    assert(Int8.MAX.wrapping_add(1) == Int8.MIN);
+
+    let a: Int8 = 50;
+    let b: Int8 = 30;
+    assert(a.wrapping_add(b) == 80);
+}
+
+@test
+fn test_int8_saturating_add() {
+    assert(Int8.MAX.saturating_add(1) == Int8.MAX);
+
+    let a: Int8 = 50;
+    let b: Int8 = 30;
+    assert(a.saturating_add(b) == 80);
+}
+
+@test
+fn test_int8_checked_sub() {
+    let a: Int8 = 50;
+    let b: Int8 = 30;
+
+    match a.checked_sub(b) {
+        Some(v) => assert(v == 20),
+        None => assert(false),
+    }
+
+    // Underflow
+    assert(Int8.MIN.checked_sub(1).is_none());
+}
+
+@test
+fn test_int8_to_int() {
+    let x: Int8 = -42;
+    assert(x.to_int() == -42);
+    assert(Int8.MAX.to_int() == 127);
+    assert(Int8.MIN.to_int() == -128);
+}
+
+// =============================================================================
+// Float32 Extended Tests (gap: trig, exp, ln, pow, rounding)
+// =============================================================================
+
+@test
+fn test_float32_rounding() {
+    let x: Float32 = 2.7;
+    assert(x.floor() == 2.0);
+    assert(x.ceil() == 3.0);
+    assert(x.round() == 3.0);
+    assert(x.trunc() == 2.0);
+
+    let y: Float32 = -2.7;
+    assert(y.floor() == -3.0);
+    assert(y.ceil() == -2.0);
+    assert(y.trunc() == -2.0);
+}
+
+@test
+fn test_float32_cbrt() {
+    let x: Float32 = 8.0;
+    assert(x.cbrt() == 2.0);
+
+    let y: Float32 = 27.0;
+    assert(y.cbrt() == 3.0);
+}
+
+@test
+fn test_float32_exp_ln() {
+    let zero: Float32 = 0.0;
+    assert(zero.exp() == 1.0);
+
+    let one: Float32 = 1.0;
+    assert(one.ln() == 0.0);
+}
+
+@test
+fn test_float32_exp2_log2() {
+    let zero: Float32 = 0.0;
+    assert(zero.exp2() == 1.0);
+
+    let one: Float32 = 1.0;
+    assert(one.exp2() == 2.0);
+
+    let two: Float32 = 2.0;
+    assert(two.log2() == 1.0);
+
+    let eight: Float32 = 8.0;
+    assert(eight.log2() == 3.0);
+}
+
+@test
+fn test_float32_log10() {
+    let ten: Float32 = 10.0;
+    assert(ten.log10() == 1.0);
+
+    let hundred: Float32 = 100.0;
+    assert(hundred.log10() == 2.0);
+}
+
+@test
+fn test_float32_pow() {
+    let two: Float32 = 2.0;
+    let three: Float32 = 3.0;
+    assert(two.pow(three) == 8.0);
+
+    let ten: Float32 = 10.0;
+    let two_f: Float32 = 2.0;
+    assert(ten.pow(two_f) == 100.0);
+}
+
+@test
+fn test_float32_trig() {
+    let zero: Float32 = 0.0;
+    assert(zero.sin() == 0.0);
+    assert(zero.cos() == 1.0);
+    assert(zero.tan() == 0.0);
+}
+
+@test
+fn test_float32_inverse_trig() {
+    let zero: Float32 = 0.0;
+    assert(zero.asin() == 0.0);
+    assert(zero.atan() == 0.0);
+
+    let one: Float32 = 1.0;
+    assert(one.acos() == 0.0);
+}
+
+@test
+fn test_float32_hyperbolic() {
+    let zero: Float32 = 0.0;
+    assert(zero.sinh() == 0.0);
+    assert(zero.cosh() == 1.0);
+    assert(zero.tanh() == 0.0);
+}
+
+@test
+fn test_float32_atan2() {
+    let zero: Float32 = 0.0;
+    let one: Float32 = 1.0;
+    assert(zero.atan2(one) == 0.0);
+}
+
+@test
+fn test_float32_min_max() {
+    let a: Float32 = 5.0;
+    let b: Float32 = 10.0;
+    assert(a.min(b) == 5.0);
+    assert(a.max(b) == 10.0);
+}
+
+@test
+fn test_float32_mul_add() {
+    let two: Float32 = 2.0;
+    let three: Float32 = 3.0;
+    let four: Float32 = 4.0;
+    // 2 * 3 + 4 = 10
+    assert(two.mul_add(three, four) == 10.0);
+}
+
+@test
+fn test_float32_hypot() {
+    let three: Float32 = 3.0;
+    let four: Float32 = 4.0;
+    assert(three.hypot(four) == 5.0);
+}
+
+@test
+fn test_float32_to_float() {
+    let x: Float32 = 3.14;
+    let f: Float = x.to_float();
+    // Should be approximately equal (Float32 has less precision)
+    assert(f > 3.13 && f < 3.15);
+}
+
+@test
+fn test_float32_is_finite() {
+    let x: Float32 = 1.0;
+    assert(x.is_finite());
+    assert(!Float32.infinity().is_finite());
+    assert(!Float32.nan().is_finite());
+}
+
+// =============================================================================
+// Float64 Extended Tests (gap: advanced math, trig)
+// =============================================================================
+
+@test
+fn test_float64_rounding() {
+    let x: Float64 = 2.7;
+    assert(x.floor() == 2.0);
+    assert(x.ceil() == 3.0);
+    assert(x.round() == 3.0);
+    assert(x.trunc() == 2.0);
+}
+
+@test
+fn test_float64_exp_ln() {
+    let zero: Float64 = 0.0;
+    assert(zero.exp() == 1.0);
+
+    let one: Float64 = 1.0;
+    assert(one.ln() == 0.0);
+}
+
+@test
+fn test_float64_pow() {
+    let two: Float64 = 2.0;
+    let three: Float64 = 3.0;
+    assert(two.pow(three) == 8.0);
+}
+
+@test
+fn test_float64_trig() {
+    let zero: Float64 = 0.0;
+    assert(zero.sin() == 0.0);
+    assert(zero.cos() == 1.0);
+    assert(zero.tan() == 0.0);
+}
+
+@test
+fn test_float64_hyperbolic() {
+    let zero: Float64 = 0.0;
+    assert(zero.sinh() == 0.0);
+    assert(zero.cosh() == 1.0);
+    assert(zero.tanh() == 0.0);
+
+    assert(zero.asinh() == 0.0);
+    let one: Float64 = 1.0;
+    assert(one.acosh() == 0.0);
+    assert(zero.atanh() == 0.0);
+}
+
+@test
+fn test_float64_min_max() {
+    let a: Float64 = 5.0;
+    let b: Float64 = 10.0;
+    assert(a.min(b) == 5.0);
+    assert(a.max(b) == 10.0);
+}
+
+@test
+fn test_float64_mul_add_hypot() {
+    let two: Float64 = 2.0;
+    let three: Float64 = 3.0;
+    let four: Float64 = 4.0;
+    assert(two.mul_add(three, four) == 10.0);
+    assert(three.hypot(four) == 5.0);
+}
+
+@test
+fn test_float64_copysign() {
+    let one: Float64 = 1.0;
+    let neg_one: Float64 = -1.0;
+    assert(one.copysign(neg_one) == -1.0);
+    assert(neg_one.copysign(one) == 1.0);
+}
+
+@test
+fn test_float64_inverse_trig() {
+    let zero: Float64 = 0.0;
+    assert(zero.asin() == 0.0);
+    assert(zero.atan() == 0.0);
+
+    let one: Float64 = 1.0;
+    assert(one.acos() == 0.0);
+}
+
+@test
+fn test_float64_atan2() {
+    let zero: Float64 = 0.0;
+    let one: Float64 = 1.0;
+    assert(zero.atan2(one) == 0.0);
+}
+
+@test
+fn test_float64_exp2_log2_log10() {
+    let zero: Float64 = 0.0;
+    assert(zero.exp2() == 1.0);
+
+    let two: Float64 = 2.0;
+    assert(two.log2() == 1.0);
+
+    let ten: Float64 = 10.0;
+    assert(ten.log10() == 1.0);
+}
+
+@test
+fn test_float64_abs() {
+    let neg: Float64 = -5.0;
+    assert(neg.abs() == 5.0);
+
+    let pos: Float64 = 5.0;
+    assert(pos.abs() == 5.0);
+}
+
+@test
+fn test_float64_is_finite_normal() {
+    let one: Float64 = 1.0;
+    assert(one.is_finite());
+    assert(!Float64.infinity().is_finite());
+    assert(!Float64.nan().is_finite());
+}
+
+// =============================================================================
+// ISize/USize Extended Tests
+// =============================================================================
+
+@test
+fn test_isize_to_int() {
+    let pos: ISize = 42;
+    assert(pos.to_int() == 42);
+    let neg: ISize = -42;
+    assert(neg.to_int() == -42);
+}
+
+@test
+fn test_usize_to_int() {
+    let x: USize = 42;
+    assert(x.to_int() == 42);
+    let zero: USize = 0;
+    assert(zero.to_int() == 0);
+}
+
+@test
+fn test_usize_max() {
+    assert(USize.MAX > 0);
+    assert(USize.BITS == 64);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

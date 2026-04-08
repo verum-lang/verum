@@ -1,0 +1,34 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, format-string, float, interpolation
+// @expected-exit: 0
+
+fn main() -> Int {
+    // 1: Basic float interpolation
+    let pi = 3.14;
+    let msg1 = f"pi={pi}";
+    print(msg1);
+
+    // 2: Float from arithmetic
+    let sum = 2.5 + 1.5;
+    let msg2 = f"sum={sum}";
+    print(msg2);
+
+    // 3: Mixed float and int in same f-string
+    let temp = 98.6;
+    let count = 3;
+    let msg3 = f"temp={temp} count={count}";
+    print(msg3);
+
+    // 4: Float and text in same f-string
+    let name = "pi";
+    let val = 3.14159;
+    let msg4 = f"{name}={val}";
+    print(msg4);
+
+    // 5: Verify int still works after float operations
+    print(100);
+
+    0
+}

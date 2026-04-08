@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, chars, error
+// @description: Test invalid character literal detection (multiple chars)
+// @expected-error: E004
+
+fn test_invalid_char() {
+    let c = 'abc';
+}

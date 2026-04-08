@@ -1,0 +1,195 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, generics, pipeline
+// @timeout: 5000
+// @expect: pass
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies generic functions and types through the full pipeline
+
+// =============================================================================
+// Generic type definitions
+// =============================================================================
+
+type Pair<A, B> is { first: A, second: B };
+type Wrapper<T> is { value: T };
+type Triple<A, B, C> is { a: A, b: B, c: C };
+
+// =============================================================================
+// Basic generic functions
+// =============================================================================
+
+fn identity<T>(x: T) -> T { x }
+
+@test
+fn test_identity_int() {
+    assert_eq(identity(42), 42);
+    assert_eq(identity(0), 0);
+    assert_eq(identity(-100), -100);
+}
+
+@test
+fn test_identity_float() {
+    assert_eq(identity(3.14), 3.14);
+    assert_eq(identity(0.0), 0.0);
+}
+
+@test
+fn test_identity_bool() {
+    assert_eq(identity(true), true);
+    assert_eq(identity(false), false);
+}
+
+@test
+fn test_identity_text() {
+    assert_eq(identity("hello"), "hello");
+    assert_eq(identity(""), "");
+}
+
+// =============================================================================
+// Multiple type parameters
+// =============================================================================
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn swap_pair<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+@test
+fn test_make_pair() {
+    let p = make_pair(1, "one");
+    assert_eq(p.first, 1);
+    assert_eq(p.second, "one");
+}
+
+@test
+fn test_swap_pair() {
+    let p = make_pair(1, "hello");
+    let swapped = swap_pair(p);
+    assert_eq(swapped.first, "hello");
+    assert_eq(swapped.second, 1);
+}
+
+@test
+fn test_pair_same_type() {
+    let p = make_pair(10, 20);
+    assert_eq(p.first + p.second, 30);
+}
+
+// =============================================================================
+// Generic with protocol constraints
+// =============================================================================
+
+fn max_of<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+fn min_of<T: Ord>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+@test
+fn test_max_int() {
+    assert_eq(max_of(3, 7), 7);
+    assert_eq(max_of(10, 2), 10);
+    assert_eq(max_of(5, 5), 5);
+}
+
+@test
+fn test_min_int() {
+    assert_eq(min_of(3, 7), 3);
+    assert_eq(min_of(10, 2), 2);
+    assert_eq(min_of(5, 5), 5);
+}
+
+@test
+fn test_max_float() {
+    assert_eq(max_of(3.14, 2.71), 3.14);
+    assert_eq(max_of(1.0, 1.0), 1.0);
+}
+
+// =============================================================================
+// Generic wrapper type with methods
+// =============================================================================
+
+implement<T> Wrapper<T> {
+    fn new(val: T) -> Wrapper<T> {
+        Wrapper { value: val }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+@test
+fn test_wrapper_int() {
+    let w = Wrapper.new(42);
+    assert_eq(w.into_inner(), 42);
+}
+
+@test
+fn test_wrapper_text() {
+    let w = Wrapper.new("hello");
+    assert_eq(w.into_inner(), "hello");
+}
+
+// =============================================================================
+// Generic functions calling generic functions
+// =============================================================================
+
+fn clamp<T: Ord>(val: T, low: T, high: T) -> T {
+    max_of(low, min_of(val, high))
+}
+
+@test
+fn test_clamp() {
+    assert_eq(clamp(5, 1, 10), 5);
+    assert_eq(clamp(-5, 1, 10), 1);
+    assert_eq(clamp(50, 1, 10), 10);
+    assert_eq(clamp(1, 1, 10), 1);
+    assert_eq(clamp(10, 1, 10), 10);
+}
+
+// =============================================================================
+// Generic triple
+// =============================================================================
+
+fn make_triple<A, B, C>(a: A, b: B, c: C) -> Triple<A, B, C> {
+    Triple { a: a, b: b, c: c }
+}
+
+@test
+fn test_triple() {
+    let t = make_triple(1, "two", 3.0);
+    assert_eq(t.a, 1);
+    assert_eq(t.b, "two");
+    assert_eq(t.c, 3.0);
+}
+
+// =============================================================================
+// Generic with maybe
+// =============================================================================
+
+fn unwrap_or<T>(opt: Maybe<T>, default: T) -> T {
+    match opt {
+        Some(v) => v,
+        None => default
+    }
+}
+
+@test
+fn test_unwrap_or() {
+    assert_eq(unwrap_or(Some(42), 0), 42);
+    assert_eq(unwrap_or(None, 0), 0);
+    assert_eq(unwrap_or(Some("hello"), "default"), "hello");
+    assert_eq(unwrap_or(None, "default"), "default");
+}

@@ -1,0 +1,126 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, error-handling, result, maybe, try-operator
+// @expected-exit: 0
+
+// Test: Result/Maybe error handling, ? operator, match on variants.
+
+type Outcome<T> is Ok(T) | Err(Int);
+
+fn safe_divide(a: Int, b: Int) -> Outcome<Int> {
+    if (b == 0) {
+        Err(0 - 1)
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn try_divide(a: Int, b: Int) -> Int {
+    match safe_divide(a, b) {
+        Ok(v) => v,
+        Err(code) => code,
+    }
+}
+
+type Opt<T> is None | Some(T);
+
+fn find_first_positive(a: Int, b: Int, c: Int) -> Opt<Int> {
+    if (a > 0) { return Some(a); }
+    if (b > 0) { return Some(b); }
+    if (c > 0) { return Some(c); }
+    None
+}
+
+fn unwrap_or(opt: Opt<Int>, default: Int) -> Int {
+    match opt {
+        Some(v) => v,
+        None => default,
+    }
+}
+
+fn chain_operations(x: Int) -> Outcome<Int> {
+    // Chain of operations that can each fail
+    let step1 = safe_divide(x, 2);
+    match step1 {
+        Err(e) => Err(e),
+        Ok(v1) => {
+            let step2 = safe_divide(v1 + 10, 3);
+            match step2 {
+                Err(e) => Err(e),
+                Ok(v2) => Ok(v2 * 2),
+            }
+        }
+    }
+}
+
+fn main() -> Int {
+    // Test 1: basic Result
+    let r1 = try_divide(100, 4);
+    if (r1 != 25) {
+        print(f"FAIL test1a: divide(100,4)={r1}");
+        return 1;
+    }
+    let r1b = try_divide(100, 0);
+    if (r1b != 0 - 1) {
+        print(f"FAIL test1b: divide(100,0)={r1b}");
+        return 1;
+    }
+
+    // Test 2: Option/Maybe
+    let o1 = find_first_positive(0 - 1, 0 - 2, 5);
+    let v1 = unwrap_or(o1, 0);
+    if (v1 != 5) {
+        print(f"FAIL test2a: find_positive={v1}");
+        return 1;
+    }
+
+    let o2 = find_first_positive(0 - 1, 0 - 2, 0 - 3);
+    let v2 = unwrap_or(o2, 99);
+    if (v2 != 99) {
+        print(f"FAIL test2b: none default={v2}");
+        return 1;
+    }
+
+    let o3 = find_first_positive(7, 0 - 1, 0 - 1);
+    let v3 = unwrap_or(o3, 0);
+    if (v3 != 7) {
+        print(f"FAIL test2c: first positive={v3}");
+        return 1;
+    }
+
+    // Test 3: chained operations
+    let c1 = chain_operations(100);
+    match c1 {
+        Ok(v) => {
+            // 100/2=50, (50+10)/3=20, 20*2=40
+            if (v != 40) {
+                print(f"FAIL test3a: chain(100)={v}");
+                return 1;
+            }
+        }
+        Err(e) => {
+            print(f"FAIL test3a: unexpected error {e}");
+            return 1;
+        }
+    }
+
+    // Test 4: chained with zero divisor
+    let c2 = chain_operations(0);
+    match c2 {
+        Ok(v) => {
+            // 0/2=0, (0+10)/3=3, 3*2=6
+            if (v != 6) {
+                print(f"FAIL test4: chain(0)={v}");
+                return 1;
+            }
+        }
+        Err(e) => {
+            print(f"FAIL test4: unexpected error {e}");
+            return 1;
+        }
+    }
+
+    print("892_error_handling: PASS");
+    0
+}

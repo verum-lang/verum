@@ -1,0 +1,497 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: macro, json, parsing, serialization, real-world
+// @description: JSON parsing and serialization performance (target: > 100MB/sec)
+
+/// JSON Parsing Performance Benchmark
+///
+/// Measures real-world JSON parsing and serialization performance.
+/// JSON is ubiquitous in web services and configuration.
+///
+/// Performance targets:
+/// - Parse simple:    > 200MB/sec
+/// - Parse complex:   > 100MB/sec
+/// - Serialize:       > 300MB/sec
+/// - Pretty print:    > 200MB/sec
+/// - Stream parse:    > 150MB/sec
+///
+/// Test data characteristics:
+/// - Small objects (config-like)
+/// - Large arrays (data payloads)
+/// - Deeply nested structures
+/// - Unicode content
+///
+/// Spec reference: docs/detailed/20-standard-library.md
+
+const WARMUP_ITERATIONS: Int = 10;
+const BENCHMARK_ITERATIONS: Int = 100;
+
+/// Generate sample JSON data
+fn generate_simple_json(entries: Int) -> Text {
+    let mut json = Text.from("{");
+
+    for i in 0..entries {
+        if i > 0 { json.push_str(","); }
+        json.push_str(&format(
+            r#""key_{}": {}"#,
+            i, i * 42
+        ));
+    }
+
+    json.push_str("}");
+    json
+}
+
+fn generate_array_json(elements: Int) -> Text {
+    let mut json = Text.from("[");
+
+    for i in 0..elements {
+        if i > 0 { json.push_str(","); }
+        json.push_str(&format(
+            r#"{{"id": {}, "name": "item_{}", "value": {}.{}}}"#,
+            i, i, i * 10, i % 100
+        ));
+    }
+
+    json.push_str("]");
+    json
+}
+
+fn generate_nested_json(depth: Int) -> Text {
+    let mut json = Text.new();
+
+    for _ in 0..depth {
+        json.push_str(r#"{"nested": "#);
+    }
+
+    json.push_str(r#"{"value": 42}"#);
+
+    for _ in 0..depth {
+        json.push_str("}");
+    }
+
+    json
+}
+
+fn generate_string_heavy_json(entries: Int) -> Text {
+    let mut json = Text.from("{");
+
+    for i in 0..entries {
+        if i > 0 { json.push_str(","); }
+        json.push_str(&format(
+            r#""key_{}": "This is a longer string value with some content for entry number {}""#,
+            i, i
+        ));
+    }
+
+    json.push_str("}");
+    json
+}
+
+fn generate_mixed_json(size: Int) -> Text {
+    let mut json = Text.from(r#"{"metadata": {"version": 1, "name": "test"}, "data": ["#);
+
+    for i in 0..size {
+        if i > 0 { json.push_str(","); }
+        json.push_str(&format(
+            r#"{{"id": {}, "active": {}, "tags": ["tag1", "tag2"], "nested": {{"a": {}, "b": "value"}}}}"#,
+            i, i % 2 == 0, i * 3
+        ));
+    }
+
+    json.push_str("]}");
+    json
+}
+
+/// Benchmark: Parse simple object
+fn benchmark_parse_simple() -> JsonBenchmarkResult {
+    let json = generate_simple_json(100);
+    let json_bytes = json.len();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = json_bytes * BENCHMARK_ITERATIONS;
+
+    JsonBenchmarkResult {
+        name: "parse_simple_100_keys",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 200.0,
+    }
+}
+
+/// Benchmark: Parse large array
+fn benchmark_parse_array() -> JsonBenchmarkResult {
+    let json = generate_array_json(1000);
+    let json_bytes = json.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = json_bytes * BENCHMARK_ITERATIONS;
+
+    JsonBenchmarkResult {
+        name: "parse_array_1000_elements",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 150.0,
+    }
+}
+
+/// Benchmark: Parse deeply nested
+fn benchmark_parse_nested() -> JsonBenchmarkResult {
+    let json = generate_nested_json(50);
+    let json_bytes = json.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS * 10) {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = json_bytes * BENCHMARK_ITERATIONS * 10;
+
+    JsonBenchmarkResult {
+        name: "parse_nested_50_levels",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 100.0,
+    }
+}
+
+/// Benchmark: Parse string-heavy
+fn benchmark_parse_strings() -> JsonBenchmarkResult {
+    let json = generate_string_heavy_json(500);
+    let json_bytes = json.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = json_bytes * BENCHMARK_ITERATIONS;
+
+    JsonBenchmarkResult {
+        name: "parse_string_heavy",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 150.0,
+    }
+}
+
+/// Benchmark: Parse mixed content
+fn benchmark_parse_mixed() -> JsonBenchmarkResult {
+    let json = generate_mixed_json(500);
+    let json_bytes = json.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let parsed = Json.parse(&json);
+        black_box(parsed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = json_bytes * BENCHMARK_ITERATIONS;
+
+    JsonBenchmarkResult {
+        name: "parse_mixed_content",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 100.0,
+    }
+}
+
+/// Benchmark: Serialize to string
+fn benchmark_serialize() -> JsonBenchmarkResult {
+    let json = generate_mixed_json(500);
+    let parsed = Json.parse(&json).unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let output = parsed.to_string();
+        black_box(output);
+    }
+
+    let start = Instant.now();
+    let mut total_bytes = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let output = parsed.to_string();
+        total_bytes += output.len();
+        black_box(output);
+    }
+
+    let elapsed = start.elapsed();
+
+    JsonBenchmarkResult {
+        name: "serialize_compact",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 300.0,
+    }
+}
+
+/// Benchmark: Serialize pretty-printed
+fn benchmark_serialize_pretty() -> JsonBenchmarkResult {
+    let json = generate_mixed_json(500);
+    let parsed = Json.parse(&json).unwrap();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let output = parsed.to_string_pretty();
+        black_box(output);
+    }
+
+    let start = Instant.now();
+    let mut total_bytes = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let output = parsed.to_string_pretty();
+        total_bytes += output.len();
+        black_box(output);
+    }
+
+    let elapsed = start.elapsed();
+
+    JsonBenchmarkResult {
+        name: "serialize_pretty",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 200.0,
+    }
+}
+
+/// Benchmark: Typed deserialization
+fn benchmark_typed_deserialize() -> JsonBenchmarkResult {
+    type Item is {
+        id: Int,
+        name: Text,
+        value: Float,
+    };
+
+    let json = generate_array_json(1000);
+    let json_bytes = json.len();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let items: List<Item> = Json.from_str(&json).unwrap();
+        black_box(items);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let items: List<Item> = Json.from_str(&json).unwrap();
+        black_box(items);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = json_bytes * BENCHMARK_ITERATIONS;
+
+    JsonBenchmarkResult {
+        name: "typed_deserialize",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 120.0,
+    }
+}
+
+/// Benchmark: Typed serialization
+fn benchmark_typed_serialize() -> JsonBenchmarkResult {
+    type Item is {
+        id: Int,
+        name: Text,
+        value: Float,
+    };
+
+    let items: List<Item> = (0..1000)
+        .map(|i| Item {
+            id: i,
+            name: format("item_{}", i),
+            value: i as f64 * 1.5,
+        })
+        .collect();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let output = Json.to_string(&items);
+        black_box(output);
+    }
+
+    let start = Instant.now();
+    let mut total_bytes = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let output = Json.to_string(&items);
+        total_bytes += output.len();
+        black_box(output);
+    }
+
+    let elapsed = start.elapsed();
+
+    JsonBenchmarkResult {
+        name: "typed_serialize",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 250.0,
+    }
+}
+
+/// Benchmark: Streaming parse
+fn benchmark_stream_parse() -> JsonBenchmarkResult {
+    let json = generate_array_json(10000);
+    let json_bytes = json.len();
+
+    for _ in 0..WARMUP_ITERATIONS / 5 {
+        let mut count = 0;
+        for event in Json.stream_parse(&json) {
+            count += 1;
+            black_box(event);
+        }
+        black_box(count);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 5) {
+        for event in Json.stream_parse(&json) {
+            black_box(event);
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = json_bytes * BENCHMARK_ITERATIONS / 5;
+
+    JsonBenchmarkResult {
+        name: "stream_parse",
+        bytes_processed: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        target_mb_per_sec: 150.0,
+    }
+}
+
+fn main() {
+    println("=== JSON Parsing Performance Benchmark ===\n");
+
+    let results = [
+        benchmark_parse_simple(),
+        benchmark_parse_array(),
+        benchmark_parse_nested(),
+        benchmark_parse_strings(),
+        benchmark_parse_mixed(),
+        benchmark_serialize(),
+        benchmark_serialize_pretty(),
+        benchmark_typed_deserialize(),
+        benchmark_typed_serialize(),
+        benchmark_stream_parse(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}",
+            "Benchmark", "MB/sec", "Target", "Status");
+    println("{}", "-".repeat(65));
+
+    for result in results {
+        let passed = result.mb_per_sec >= result.target_mb_per_sec;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.1} {:>12.0} {:>8}",
+                result.name, result.mb_per_sec, result.target_mb_per_sec, status);
+    }
+
+    println("");
+    println("JSON Performance Targets:");
+    println("  - Simple parse:   > 200 MB/sec");
+    println("  - Complex parse:  > 100 MB/sec");
+    println("  - Serialize:      > 300 MB/sec");
+    println("  - Stream parse:   > 150 MB/sec");
+}
+
+type JsonBenchmarkResult is {
+    name: Text,
+    bytes_processed: Int,
+    elapsed_ms: Int,
+    mb_per_sec: f64,
+    target_mb_per_sec: f64,
+};
+
+module Json {
+    pub fn parse(s: &Text) -> Result<JsonValue, Error> { Ok(JsonValue.Null) }
+    pub fn from_str<T>(s: &Text) -> Result<T, Error> { todo() }
+    pub fn to_string<T>(v: &T) -> Text { Text.new() }
+    pub fn stream_parse(s: &Text) -> impl Iterator<Item = JsonEvent> { [].into_iter() }
+}
+
+type JsonValue is Null | Bool(Bool) | Number(f64) | String(Text) | Array(List<JsonValue>) | Object(Map<Text, JsonValue>);
+
+implement JsonValue {
+    fn to_string(&self) -> Text { Text.new() }
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+type JsonEvent is StartObject | EndObject | StartArray | EndArray | Key(Text) | Value(JsonValue);
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn format(fmt: &Text, args: List<Text>) -> Text { Text.new() }

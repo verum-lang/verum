@@ -1,0 +1,101 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M402
+// @tags: meta, quote, hygiene, transparent, capture, violation
+// @description: Tests M402 detection for bare identifiers in transparent macros
+
+// =============================================================================
+// BARE IDENTIFIERS IN TRANSPARENT MACROS
+// =============================================================================
+//
+// When a meta function is marked @transparent, the compiler checks for bare
+// identifiers that could accidentally capture from the expansion site.
+//
+// M402 "accidental variable capture" is emitted when:
+// - The macro is @transparent
+// - An identifier appears bare (not spliced with $ or lift())
+// - The identifier is not defined locally within the quote
+// - The identifier is not a built-in (true, false, null)
+// - The identifier is not a function call
+//
+
+// =============================================================================
+// CASE 1: Single bare identifier
+// =============================================================================
+
+@transparent
+meta fn capture_x() -> TokenStream {
+    quote {
+        x + 1  // ERROR M402: 'x' is a bare identifier that could capture
+    }
+}
+
+// =============================================================================
+// CASE 2: Multiple bare identifiers
+// =============================================================================
+
+@transparent
+meta fn capture_multiple() -> TokenStream {
+    quote {
+        let result = y * z;  // ERROR M402: 'y' and 'z' are bare identifiers
+        result
+    }
+}
+
+// =============================================================================
+// CASE 3: Mixed - one bare, one spliced
+// =============================================================================
+
+@transparent
+meta fn mixed_capture(good: Ident) -> TokenStream {
+    quote {
+        $good + bad  // ERROR M402: 'bad' is bare, 'good' is properly spliced
+    }
+}
+
+// =============================================================================
+// CONTRAST: Non-transparent macro (no error)
+// =============================================================================
+
+// This is fine because in hygienic mode, 'x' gets gensym'd
+meta fn hygienic_x() -> TokenStream {
+    quote {
+        x + 1  // OK: In hygienic mode, this becomes x__gensym_N
+    }
+}
+
+// =============================================================================
+// CONTRAST: Transparent with proper splice (no error)
+// =============================================================================
+
+@transparent
+meta fn proper_splice(x_ref: Ident) -> TokenStream {
+    quote {
+        $x_ref + 1  // OK: properly spliced
+    }
+}
+
+// =============================================================================
+// CONTRAST: Transparent with lift (no error)
+// =============================================================================
+
+@transparent
+meta fn proper_lift(value: Int) -> TokenStream {
+    quote {
+        $(lift(value)) + 1  // OK: properly lifted
+    }
+}
+
+fn main() {
+    // This would trigger the errors at compile time
+    let x = 10;
+    let y = 20;
+    let z = 30;
+    let bad = 40;
+
+    // These macros have M402 errors
+    @capture_x();
+    @capture_multiple();
+    @mixed_capture(ident("good"));
+}

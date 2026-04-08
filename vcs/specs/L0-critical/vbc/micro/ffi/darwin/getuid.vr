@@ -1,0 +1,27 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, libsystem
+// @description: Test getuid() and geteuid() FFI calls
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn getuid() -> Int;
+    fn geteuid() -> Int;
+}
+
+fn main() {
+    // getuid() returns real user ID
+    // geteuid() returns effective user ID
+    // Both are >= 0 (root is 0, regular users are >= 500)
+    let uid = getuid();
+    let euid = geteuid();
+
+    assert(uid >= 0);
+    assert(euid >= 0);
+
+    // For most processes, uid == euid unless setuid
+    // This is not always true but uid and euid should be defined
+}

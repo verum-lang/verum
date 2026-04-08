@@ -1,0 +1,326 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for basic let statement parsing
+
+// =============================================================================
+// Grammar Reference: let_stmt = 'let' , pattern , [ ':' , type_expr ] , [ '=' , expression ] , ';' ;
+// =============================================================================
+
+fn test_simple_let_bindings() {
+    // Basic let with initializer
+    let x = 42;
+    let y = 0;
+    let z = -1;
+
+    // Let with type annotation
+    let a: Int = 10;
+    let b: Float = 3.14;
+    let c: Bool = true;
+    let d: Text = "hello";
+    let e: Char = 'x';
+
+    // Let with type annotation, no initializer (declaration only)
+    let f: Int;
+    let g: Float;
+    let h: Text;
+
+    // Mutable bindings
+    let mut i = 0;
+    let mut j: Int = 100;
+    let mut k: Float = 0.0;
+    let mut m: Text = "";
+
+    // Mutable declaration without initializer
+    let mut n: Int;
+}
+
+fn test_let_with_complex_types() {
+    // Generic types
+    let list: List<Int> = List.new();
+    let map: Map<Text, Int> = Map.new();
+    let set: Set<Text> = Set.new();
+    let maybe: Maybe<Int> = None;
+    let res: Result<Int, Text> = Ok(42);
+
+    // Nested generic types
+    let nested: List<List<Int>> = List.new();
+    let complex: Map<Text, List<Maybe<Int>>> = Map.new();
+
+    // Tuple types
+    let pair: (Int, Int) = (1, 2);
+    let triple: (Int, Text, Bool) = (1, "two", true);
+    let nested_tuple: ((Int, Int), (Text, Text)) = ((1, 2), ("a", "b"));
+
+    // Array types
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+    let arr2d: [[Int; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
+
+    // Slice types
+    let slice: &[Int] = &arr;
+    let mut_slice: &mut [Int] = &mut arr;
+
+    // Reference types
+    let ref_val: &Int = &x;
+    let mut_ref: &mut Int = &mut y;
+    let checked_ref: &checked Int = &checked z;
+    let unsafe_ref: &unsafe Int = &unsafe w;
+
+    // Function types
+    let func: fn(Int) -> Int = identity;
+    let closure_type: fn(Int, Int) -> Int = add;
+
+    // Smart pointer types
+    let boxed: Heap<Int> = Heap(42);
+    let shared: Shared<Int> = Shared(42);
+}
+
+fn test_let_with_expressions() {
+    // Arithmetic expressions
+    let sum = 1 + 2 + 3;
+    let diff = 10 - 5;
+    let product = 3 * 4;
+    let quotient = 20 / 4;
+    let remainder = 17 % 5;
+    let power = 2 ** 8;
+
+    // Logical expressions
+    let and_result = true && false;
+    let or_result = true || false;
+    let not_result = !true;
+
+    // Comparison expressions
+    let eq = x == y;
+    let ne = x != y;
+    let lt = x < y;
+    let le = x <= y;
+    let gt = x > y;
+    let ge = x >= y;
+
+    // Bitwise expressions
+    let bit_and = a & b;
+    let bit_or = a | b;
+    let bit_xor = a ^ b;
+    let bit_not = ~a;
+    let shift_left = a << 2;
+    let shift_right = a >> 2;
+
+    // Range expressions
+    let range = 0..10;
+    let inclusive_range = 0..=10;
+
+    // Null coalescing
+    let value = maybe ?? default_value;
+
+    // Pipeline expressions
+    let piped = data |> transform |> format;
+
+    // Complex compound expressions
+    let complex = (a + b) * (c - d) / e;
+}
+
+fn test_let_with_literals() {
+    // Integer literals
+    let decimal = 42;
+    let hex = 0xFF;
+    let octal = 0o77;
+    let binary = 0b1010;
+    let with_underscores = 1_000_000;
+    let typed_int: i32 = 42i32;
+    let typed_uint: u64 = 100u64;
+
+    // Float literals
+    let float1 = 3.14;
+    let float2 = 1.0e10;
+    let float3 = 2.5e-3;
+    let typed_float: f64 = 3.14f64;
+
+    // String literals
+    let str1 = "hello world";
+    let str_escape = "hello\nworld";
+    let str_unicode = "hello \u{1F600}";
+
+    // Interpolated strings
+    let name = "Alice";
+    let greeting = f"Hello, {name}!";
+    let computed = f"Sum: {1 + 2}";
+
+    // Raw strings
+    let raw = r#"no escape \n here"#;
+    let raw_multi = r##"can contain # here"##;
+
+    // Character literals
+    let char1 = 'a';
+    let char_escape = '\n';
+    let char_unicode = '\u{03B1}';
+
+    // Boolean literals
+    let t = true;
+    let f = false;
+
+    // Tagged literals
+    let url_val = url#"https://example.com";
+    let json_val = json#"{ \"key\": \"value\" }";
+    let regex_val = rx#"[a-z]+";
+}
+
+fn test_let_with_constructors() {
+    // Record construction
+    let point = Point { x: 10, y: 20 };
+    let person = Person { name: "Alice", age: 30 };
+    let with_spread = Point { x: 0, ..other_point };
+
+    // Tuple construction
+    let pair = (1, 2);
+    let single = (42,);
+    let nested = ((1, 2), (3, 4));
+
+    // Array construction
+    let arr = [1, 2, 3, 4, 5];
+    let empty_arr: [Int; 0] = [];
+    let repeated = [0; 100];
+
+    // Variant construction
+    let some_val = Some(42);
+    let none_val: Maybe<Int> = None;
+    let ok_val = Ok(42);
+    let err_val = Err("error");
+
+    // Nested construction
+    let nested_option = Some(Some(42));
+    let list_of_options = [Some(1), None, Some(3)];
+}
+
+fn test_let_with_calls() {
+    // Function calls
+    let result = compute();
+    let with_args = add(1, 2);
+    let with_generics = identity<Int>(42);
+
+    // Method calls
+    let len = text.len();
+    let upper = text.to_uppercase();
+    let chained = text.trim().to_lowercase().len();
+
+    // Constructor calls
+    let list = List.new();
+    let list_with_type = List<Int>.new();
+    let from_iter = List.from_iter(0..10);
+}
+
+fn test_let_with_blocks() {
+    // Block expression
+    let computed = {
+        let temp = expensive_computation();
+        process(temp)
+    };
+
+    // Nested blocks
+    let nested = {
+        let a = {
+            let b = 1;
+            b + 1
+        };
+        a * 2
+    };
+
+    // Block with multiple statements
+    let multi = {
+        let x = 1;
+        let y = 2;
+        let z = 3;
+        x + y + z
+    };
+}
+
+fn test_let_with_control_flow_expressions() {
+    // If expression
+    let if_result = if condition { 1 } else { 2 };
+
+    // Match expression
+    let match_result = match value {
+        0 => "zero",
+        1 => "one",
+        _ => "other"
+    };
+
+    // Loop with break value
+    let loop_result = loop {
+        if found {
+            break 42;
+        }
+    };
+}
+
+fn test_let_with_closures() {
+    // Simple closure
+    let add_one = |x| x + 1;
+
+    // Closure with type
+    let typed = |x: Int| -> Int { x * 2 };
+
+    // Multi-param closure
+    let add = |a, b| a + b;
+
+    // Closure with block body
+    let complex = |x| {
+        let temp = x * 2;
+        temp + 1
+    };
+
+    // Async closure
+    let async_fn = async |x| {
+        fetch(x).await
+    };
+}
+
+fn test_shadowing() {
+    // Basic shadowing
+    let x = 1;
+    let x = 2;
+    let x = 3;
+
+    // Shadowing with type change
+    let y = 42;
+    let y: Text = y.to_text();
+
+    // Shadowing in nested scope
+    let z = 1;
+    {
+        let z = 2;
+        {
+            let z = 3;
+        }
+    }
+}
+
+fn test_let_placement() {
+    // Let at block start
+    {
+        let first = 1;
+        use_value(first);
+    }
+
+    // Let after other statements
+    {
+        do_something();
+        let after = 2;
+    }
+
+    // Multiple sequential lets
+    {
+        let a = 1;
+        let b = 2;
+        let c = 3;
+        let d = 4;
+    }
+
+    // Let interleaved with other statements
+    {
+        let a = 1;
+        use_a(a);
+        let b = 2;
+        use_b(b);
+        let c = a + b;
+    }
+}

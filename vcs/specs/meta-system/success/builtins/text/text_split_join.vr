@@ -1,0 +1,198 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, text, split, join
+// @description: Test text split and join operations
+
+// =============================================================================
+// TEXT_SPLIT TESTS
+// =============================================================================
+
+// Test text_split basic
+meta fn test_text_split_basic() -> Int {
+    let parts = text_split("a,b,c", ",");
+    list_len(parts)  // Should be 3
+}
+
+// Test text_split get parts
+meta fn test_text_split_parts() -> Maybe<Text> {
+    let parts = text_split("hello world", " ");
+    list_get(parts, 1)  // Should be Some("world")
+}
+
+// Test text_split no separator
+meta fn test_text_split_no_sep() -> Int {
+    let parts = text_split("hello", ",");
+    list_len(parts)  // Should be 1
+}
+
+// Test text_split empty string
+meta fn test_text_split_empty() -> Int {
+    let parts = text_split("", ",");
+    list_len(parts)  // Should be 1 (empty element)
+}
+
+// Test text_split multiple adjacent separators
+meta fn test_text_split_adjacent() -> Int {
+    let parts = text_split("a,,b", ",");
+    list_len(parts)  // Should be 3 (including empty middle)
+}
+
+// Test text_split longer separator
+meta fn test_text_split_long_sep() -> Int {
+    let parts = text_split("a.b::c", "::");
+    list_len(parts)  // Should be 3
+}
+
+// =============================================================================
+// TEXT_JOIN TESTS
+// =============================================================================
+
+// Test text_join basic
+meta fn test_text_join_basic() -> Text {
+    text_join(["a", "b", "c"], ",")  // Should be "a,b,c"
+}
+
+// Test text_join empty list
+meta fn test_text_join_empty_list() -> Text {
+    text_join([], ",")  // Should be ""
+}
+
+// Test text_join single element
+meta fn test_text_join_single() -> Text {
+    text_join(["hello"], ",")  // Should be "hello"
+}
+
+// Test text_join empty separator
+meta fn test_text_join_empty_sep() -> Text {
+    text_join(["a", "b", "c"], "")  // Should be "abc"
+}
+
+// Test text_join longer separator
+meta fn test_text_join_long_sep() -> Text {
+    text_join(["a", "b", "c"], " -> ")  // Should be "a -> b -> c"
+}
+
+// Test text_join with newlines
+meta fn test_text_join_newlines() -> Text {
+    text_join(["line1", "line2", "line3"], "\n")  // Should be "line1\nline2\nline3"
+}
+
+// =============================================================================
+// TEXT_STARTS_WITH / TEXT_ENDS_WITH TESTS
+// =============================================================================
+
+// Test text_starts_with true
+meta fn test_text_starts_with_true() -> Bool {
+    text_starts_with("hello world", "hello")  // Should be true
+}
+
+// Test text_starts_with false
+meta fn test_text_starts_with_false() -> Bool {
+    text_starts_with("hello world", "world")  // Should be false
+}
+
+// Test text_starts_with empty prefix
+meta fn test_text_starts_with_empty() -> Bool {
+    text_starts_with("hello", "")  // Should be true
+}
+
+// Test text_starts_with full string
+meta fn test_text_starts_with_full() -> Bool {
+    text_starts_with("hello", "hello")  // Should be true
+}
+
+// Test text_ends_with true
+meta fn test_text_ends_with_true() -> Bool {
+    text_ends_with("hello world", "world")  // Should be true
+}
+
+// Test text_ends_with false
+meta fn test_text_ends_with_false() -> Bool {
+    text_ends_with("hello world", "hello")  // Should be false
+}
+
+// Test text_ends_with empty suffix
+meta fn test_text_ends_with_empty() -> Bool {
+    text_ends_with("hello", "")  // Should be true
+}
+
+// =============================================================================
+// TEXT_CONTAINS TESTS
+// =============================================================================
+
+// Test text_contains true
+meta fn test_text_contains_true() -> Bool {
+    text_contains("hello world", "lo wo")  // Should be true
+}
+
+// Test text_contains false
+meta fn test_text_contains_false() -> Bool {
+    text_contains("hello world", "xyz")  // Should be false
+}
+
+// Test text_contains at start
+meta fn test_text_contains_start() -> Bool {
+    text_contains("hello world", "hello")  // Should be true
+}
+
+// Test text_contains at end
+meta fn test_text_contains_end() -> Bool {
+    text_contains("hello world", "world")  // Should be true
+}
+
+// =============================================================================
+// ROUNDTRIP TESTS
+// =============================================================================
+
+// Test split then join (roundtrip)
+meta fn test_split_join_roundtrip() -> Text {
+    let parts = text_split("a,b,c", ",");
+    text_join(parts, ",")  // Should be "a,b,c"
+}
+
+// Test join then split (roundtrip)
+meta fn test_join_split_roundtrip() -> Int {
+    let joined = text_join(["x", "y", "z"], "-");
+    let parts = text_split(joined, "-");
+    list_len(parts)  // Should be 3
+}
+
+// Main test function
+fn main() {
+    // split tests
+    assert_eq(@const(test_text_split_basic()), 3);
+    assert_eq(@const(test_text_split_parts()), Some("world"));
+    assert_eq(@const(test_text_split_no_sep()), 1);
+    assert_eq(@const(test_text_split_adjacent()), 3);
+    assert_eq(@const(test_text_split_long_sep()), 3);
+
+    // join tests
+    assert_eq(@const(test_text_join_basic()), "a,b,c");
+    assert_eq(@const(test_text_join_empty_list()), "");
+    assert_eq(@const(test_text_join_single()), "hello");
+    assert_eq(@const(test_text_join_empty_sep()), "abc");
+    assert_eq(@const(test_text_join_long_sep()), "a -> b -> c");
+    assert_eq(@const(test_text_join_newlines()), "line1\nline2\nline3");
+
+    // starts_with tests
+    assert(@const(test_text_starts_with_true()));
+    assert(!@const(test_text_starts_with_false()));
+    assert(@const(test_text_starts_with_empty()));
+    assert(@const(test_text_starts_with_full()));
+
+    // ends_with tests
+    assert(@const(test_text_ends_with_true()));
+    assert(!@const(test_text_ends_with_false()));
+    assert(@const(test_text_ends_with_empty()));
+
+    // contains tests
+    assert(@const(test_text_contains_true()));
+    assert(!@const(test_text_contains_false()));
+    assert(@const(test_text_contains_start()));
+    assert(@const(test_text_contains_end()));
+
+    // roundtrip tests
+    assert_eq(@const(test_split_join_roundtrip()), "a,b,c");
+    assert_eq(@const(test_join_split_roundtrip()), 3);
+}

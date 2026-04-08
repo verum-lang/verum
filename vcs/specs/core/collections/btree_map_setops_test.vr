@@ -1,0 +1,381 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, btree, difference, intersection, symmetric_difference, invert, update, fold, for_each
+// @description: Tests for BTreeMap set-like operations and additional utilities
+
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// difference tests
+// =============================================================================
+
+@test
+fn test_btreemap_difference_basic() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    m1.insert(3, 30);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 200);
+    m2.insert(4, 400);
+
+    let diff = m1.difference(&m2);
+    assert_eq(diff.len(), 2);
+    assert(diff.contains_key(&1));
+    assert(diff.contains_key(&3));
+    assert(!diff.contains_key(&2));
+}
+
+@test
+fn test_btreemap_difference_no_overlap() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(3, 30);
+
+    let diff = m1.difference(&m2);
+    assert_eq(diff.len(), 2);
+}
+
+@test
+fn test_btreemap_difference_complete_overlap() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(1, 100);
+    m2.insert(2, 200);
+
+    let diff = m1.difference(&m2);
+    assert_eq(diff.len(), 0);
+}
+
+@test
+fn test_btreemap_difference_empty() {
+    let m1: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut m2 = BTreeMap.new();
+    m2.insert(1, 10);
+
+    let diff = m1.difference(&m2);
+    assert_eq(diff.len(), 0);
+}
+
+@test
+fn test_btreemap_difference_preserves_values() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 200);
+
+    let diff = m1.difference(&m2);
+    assert_eq(*diff.get(&1).unwrap(), 10);  // Value from m1
+}
+
+// =============================================================================
+// intersection tests
+// =============================================================================
+
+@test
+fn test_btreemap_intersection_basic() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    m1.insert(3, 30);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 200);
+    m2.insert(3, 300);
+    m2.insert(4, 400);
+
+    let inter = m1.intersection(&m2);
+    assert_eq(inter.len(), 2);
+    assert(inter.contains_key(&2));
+    assert(inter.contains_key(&3));
+}
+
+@test
+fn test_btreemap_intersection_no_overlap() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 20);
+
+    let inter = m1.intersection(&m2);
+    assert_eq(inter.len(), 0);
+}
+
+@test
+fn test_btreemap_intersection_preserves_self_values() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(1, 100);
+    m2.insert(2, 200);
+
+    let inter = m1.intersection(&m2);
+    assert_eq(*inter.get(&1).unwrap(), 10);  // Values from m1
+    assert_eq(*inter.get(&2).unwrap(), 20);
+}
+
+@test
+fn test_btreemap_intersection_empty() {
+    let m1: BTreeMap<Int, Int> = BTreeMap.new();
+    let m2: BTreeMap<Int, Int> = BTreeMap.new();
+
+    let inter = m1.intersection(&m2);
+    assert_eq(inter.len(), 0);
+}
+
+// =============================================================================
+// symmetric_difference tests
+// =============================================================================
+
+@test
+fn test_btreemap_symmetric_difference_basic() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 200);
+    m2.insert(3, 300);
+
+    let sym = m1.symmetric_difference(&m2);
+    assert_eq(sym.len(), 2);
+    assert(sym.contains_key(&1));
+    assert(sym.contains_key(&3));
+    assert(!sym.contains_key(&2));
+}
+
+@test
+fn test_btreemap_symmetric_difference_no_overlap() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 20);
+
+    let sym = m1.symmetric_difference(&m2);
+    assert_eq(sym.len(), 2);
+}
+
+@test
+fn test_btreemap_symmetric_difference_complete_overlap() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(1, 100);
+    m2.insert(2, 200);
+
+    let sym = m1.symmetric_difference(&m2);
+    assert_eq(sym.len(), 0);
+}
+
+@test
+fn test_btreemap_symmetric_difference_preserves_correct_values() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(3, 300);
+
+    let sym = m1.symmetric_difference(&m2);
+    assert_eq(*sym.get(&1).unwrap(), 10);   // From m1
+    assert_eq(*sym.get(&3).unwrap(), 300);  // From m2
+}
+
+// =============================================================================
+// invert tests
+// =============================================================================
+
+@test
+fn test_btreemap_invert_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let inv = m.invert();
+    assert_eq(inv.len(), 3);
+    assert_eq(*inv.get(&10).unwrap(), 1);
+    assert_eq(*inv.get(&20).unwrap(), 2);
+    assert_eq(*inv.get(&30).unwrap(), 3);
+}
+
+@test
+fn test_btreemap_invert_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let inv = m.invert();
+    assert_eq(inv.len(), 0);
+}
+
+@test
+fn test_btreemap_invert_duplicate_values() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 10);  // Same value
+    m.insert(3, 30);
+
+    let inv = m.invert();
+    // One of 1 or 2 is kept for key 10
+    assert(inv.contains_key(&10));
+    assert(inv.contains_key(&30));
+}
+
+// =============================================================================
+// update tests
+// =============================================================================
+
+@test
+fn test_btreemap_update_basic() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 200);
+    m2.insert(3, 300);
+
+    m1.update(&m2);
+    assert_eq(m1.len(), 3);
+    assert_eq(*m1.get(&1).unwrap(), 10);
+    assert_eq(*m1.get(&2).unwrap(), 200);  // Overwritten
+    assert_eq(*m1.get(&3).unwrap(), 300);  // Added
+}
+
+@test
+fn test_btreemap_update_empty_source() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+
+    let m2: BTreeMap<Int, Int> = BTreeMap.new();
+    m1.update(&m2);
+    assert_eq(m1.len(), 1);
+}
+
+@test
+fn test_btreemap_update_into_empty() {
+    let mut m1: BTreeMap<Int, Int> = BTreeMap.new();
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(1, 10);
+    m2.insert(2, 20);
+
+    m1.update(&m2);
+    assert_eq(m1.len(), 2);
+}
+
+// =============================================================================
+// fold tests
+// =============================================================================
+
+@test
+fn test_btreemap_fold_sum_values() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let total = m.fold(0, |acc, _k, v| acc + *v);
+    assert_eq(total, 60);
+}
+
+@test
+fn test_btreemap_fold_sum_keys() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let key_sum = m.fold(0, |acc, k, _v| acc + *k);
+    assert_eq(key_sum, 6);
+}
+
+@test
+fn test_btreemap_fold_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let result = m.fold(42, |acc, _k, v| acc + *v);
+    assert_eq(result, 42);
+}
+
+@test
+fn test_btreemap_fold_count() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let count = m.fold(0, |acc, _k, _v| acc + 1);
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// for_each tests
+// =============================================================================
+
+@test
+fn test_btreemap_for_each_basic() {
+    let mut m = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let mut sum = 0;
+    m.for_each(|_k, v| { sum = sum + *v; });
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_btreemap_for_each_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut count = 0;
+    m.for_each(|_k, _v| { count = count + 1; });
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Integration tests
+// =============================================================================
+
+@test
+fn test_difference_then_fold() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(1, 10);
+    m1.insert(2, 20);
+    m1.insert(3, 30);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(2, 200);
+
+    let diff_sum = m1.difference(&m2).fold(0, |acc, _k, v| acc + *v);
+    assert_eq(diff_sum, 40);  // 10 + 30
+}
+
+@test
+fn test_intersection_preserves_order() {
+    let mut m1 = BTreeMap.new();
+    m1.insert(5, 50);
+    m1.insert(1, 10);
+    m1.insert(3, 30);
+
+    let mut m2 = BTreeMap.new();
+    m2.insert(1, 100);
+    m2.insert(3, 300);
+    m2.insert(7, 700);
+
+    let inter = m1.intersection(&m2);
+    let keys = inter.keys_list();
+    assert_eq(keys[0], 1);
+    assert_eq(keys[1], 3);
+}

@@ -1,0 +1,223 @@
+// Complex: Concurrent programming patterns
+// Tests async/await, channels, and synchronization
+
+use verum_core.base.{List, Maybe, Result}
+use verum_std.async.{spawn, sleep, join_all, select, timeout}
+use verum_std.sync.{Mutex, RwLock, Channel, Semaphore, Barrier}
+
+// Shared state with mutex
+type Counter is {
+    mutex: Mutex<Int>,
+};
+
+implement Counter {
+    fn new() -> Self {
+        Counter { mutex: Mutex.new(0) }
+    }
+
+    async fn increment(self: &Self) {
+        let mut guard = self.mutex.lock().await;
+        *guard = *guard + 1;
+    }
+
+    async fn get(self: &Self) -> Int {
+        *self.mutex.lock().await
+    }
+}
+
+// Producer-consumer pattern
+async fn producer(tx: Channel<Int>, count: Int) {
+    for i in 0..count {
+        tx.send(i).await;
+        sleep(10).await;
+    }
+    tx.close();
+}
+
+async fn consumer(rx: Channel<Int>) -> Int {
+    let mut sum = 0;
+    while let Some(value) = rx.recv().await {
+        sum = sum + value;
+    }
+    sum
+}
+
+// Worker pool pattern
+async fn worker(id: Int, rx: Channel<Task>, results: Channel<TaskResult>) {
+    while let Some(task) = rx.recv().await {
+        let result = process_task(task).await;
+        results.send(TaskResult { worker_id: id, result }).await;
+    }
+}
+
+type Task is {
+    id: Int,
+    data: Int,
+};
+
+type TaskResult is {
+    worker_id: Int,
+    result: Int,
+};
+
+async fn process_task(task: Task) -> Int {
+    sleep(task.data * 10).await;
+    task.data * 2
+}
+
+async fn run_worker_pool(tasks: List<Task>, num_workers: Int) -> List<TaskResult> {
+    let (task_tx, task_rx) = Channel.new();
+    let (result_tx, result_rx) = Channel.new();
+
+    // Spawn workers
+    let workers = [];
+    for i in 0..num_workers {
+        workers.push(spawn { worker(i, task_rx.clone(), result_tx.clone()) });
+    }
+
+    // Send tasks
+    spawn {
+        for task in tasks {
+            task_tx.send(task).await;
+        }
+        task_tx.close();
+    };
+
+    // Collect results
+    let mut results = [];
+    for _ in 0..tasks.len() {
+        if let Some(result) = result_rx.recv().await {
+            results.push(result);
+        }
+    }
+
+    // Wait for workers to finish
+    join_all(workers).await;
+
+    results
+}
+
+// Rate limiting with semaphore
+type RateLimiter is {
+    semaphore: Semaphore,
+};
+
+implement RateLimiter {
+    fn new(max_concurrent: Int) -> Self {
+        RateLimiter { semaphore: Semaphore.new(max_concurrent) }
+    }
+
+    async fn acquire(self: &Self) {
+        self.semaphore.acquire().await;
+    }
+
+    fn release(self: &Self) {
+        self.semaphore.release();
+    }
+}
+
+async fn rate_limited_request(limiter: &RateLimiter, url: Text) -> Result<Text, Error> {
+    limiter.acquire().await;
+    let result = http_get(url).await;
+    limiter.release();
+    result
+}
+
+// Barrier synchronization
+async fn parallel_phase(barrier: &Barrier, id: Int, num_phases: Int) {
+    for phase in 0..num_phases {
+        // Do work for this phase
+        println(format("Worker {} starting phase {}", id, phase));
+        sleep(100).await;
+
+        // Wait for all workers to complete this phase
+        barrier.wait().await;
+
+        println(format("Worker {} completed phase {}", id, phase));
+    }
+}
+
+// Read-write lock pattern
+type Cache<K, V> is {
+    data: RwLock<Map<K, V>>,
+};
+
+implement<K: Hash + Eq, V: Clone> Cache<K, V> {
+    fn new() -> Self {
+        Cache { data: RwLock.new(Map.new()) }
+    }
+
+    async fn get(self: &Self, key: &K) -> Maybe<V> {
+        let guard = self.data.read().await;
+        guard.get(key).map(|v| v.clone())
+    }
+
+    async fn set(self: &Self, key: K, value: V) {
+        let mut guard = self.data.write().await;
+        guard.insert(key, value);
+    }
+}
+
+// Timeout and cancellation
+async fn with_retry<T, E>(
+    operation: async function() -> Result<T, E>,
+    max_retries: Int,
+    delay_ms: Int,
+) -> Result<T, E> {
+    let mut last_error = None;
+
+    for attempt in 0..max_retries {
+        match timeout(5000, operation()).await {
+            Ok(Ok(result)) => return Ok(result),
+            Ok(Err(e)) => {
+                last_error = Some(e);
+                sleep(delay_ms * (attempt + 1)).await;
+            }
+            Err(_timeout) => {
+                sleep(delay_ms).await;
+            }
+        }
+    }
+
+    Err(last_error.unwrap())
+}
+
+// Select pattern for racing futures
+async fn race_requests(urls: List<Text>) -> Result<Text, Error> {
+    let mut futures = [];
+    for url in urls {
+        futures.push(http_get(url));
+    }
+
+    select {
+        result = futures[0] => result,
+        result = futures[1] => result,
+        result = futures[2] => result,
+        _ = sleep(10000) => Err(Error.Timeout),
+    }
+}
+
+fn main() {
+    // Counter test
+    let counter = Counter.new();
+    let tasks = [];
+    for _ in 0..100 {
+        tasks.push(spawn { counter.increment() });
+    }
+    join_all(tasks).await;
+    assert counter.get().await == 100;
+
+    // Producer-consumer test
+    let (tx, rx) = Channel.new();
+    spawn { producer(tx, 10) };
+    let sum = consumer(rx).await;
+    assert sum == 45;
+
+    // Worker pool test
+    let tasks = [];
+    for i in 0..10 {
+        tasks.push(Task { id: i, data: i });
+    }
+    let results = run_worker_pool(tasks, 3).await;
+    assert results.len() == 10;
+}

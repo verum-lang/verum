@@ -1,0 +1,191 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, verification, bounds
+// @timeout: 5000
+
+/// Bounds checking verification: static elimination of runtime bounds checks.
+/// Demonstrates how refinement types enable zero-cost array safety.
+
+// ============================================================================
+// Basic array access with proven bounds
+// ============================================================================
+
+@verify(proof)
+fn safe_get<T>(arr: List<T>, idx: Int{>= 0}) -> Maybe<T>
+    requires idx < len(arr)
+{
+    Some(arr[idx])  // Bounds check statically eliminated
+}
+
+@verify(proof)
+fn first<T>(arr: List<T>) -> Maybe<T>
+    requires len(arr) > 0
+{
+    Some(arr[0])  // Safe: len > 0 implies 0 is valid index
+}
+
+@verify(proof)
+fn last<T>(arr: List<T>) -> Maybe<T>
+    requires len(arr) > 0
+{
+    Some(arr[len(arr) - 1])  // Safe: len > 0 implies len-1 is valid
+}
+
+// ============================================================================
+// Index arithmetic with bounds preservation
+// ============================================================================
+
+@verify(proof)
+fn middle_index<T>(arr: List<T>) -> Int{>= 0}
+    requires len(arr) >= 3
+    ensures result < len(arr)
+{
+    len(arr) / 2  // Proven: 0 <= len/2 < len when len >= 3
+}
+
+@verify(proof)
+fn next_index<T>(arr: List<T>, idx: Int{>= 0}) -> Maybe<Int{>= 0}>
+    requires idx < len(arr)
+{
+    if idx + 1 < len(arr) {
+        Some(idx + 1)
+    } else {
+        None
+    }
+}
+
+@verify(proof)
+fn prev_index(idx: Int{> 0}) -> Int{>= 0} {
+    idx - 1  // Proven: idx > 0 implies idx - 1 >= 0
+}
+
+// ============================================================================
+// Slice operations with bounds
+// ============================================================================
+
+@verify(proof)
+fn take_n<T>(arr: List<T>, n: Int{>= 0}) -> List<T>
+    requires n <= len(arr)
+    ensures len(result) == n
+{
+    arr[0..n]
+}
+
+@verify(proof)
+fn drop_n<T>(arr: List<T>, n: Int{>= 0}) -> List<T>
+    requires n <= len(arr)
+    ensures len(result) == len(arr) - n
+{
+    arr[n..]
+}
+
+@verify(proof)
+fn slice<T>(arr: List<T>, start: Int{>= 0}, end: Int{>= 0}) -> List<T>
+    requires start <= end && end <= len(arr)
+    ensures len(result) == end - start
+{
+    arr[start..end]
+}
+
+// ============================================================================
+// Loop bounds verification
+// ============================================================================
+
+@verify(proof)
+fn sum_array(arr: List<Int>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+
+    while i < len(arr) {
+        invariant i >= 0 && i <= len(arr);
+
+        total += arr[i];  // Bounds check eliminated by invariant
+        i += 1;
+    }
+
+    total
+}
+
+@verify(proof)
+fn find_index<T: Eq>(arr: List<T>, target: T) -> Maybe<Int{>= 0}>
+    ensures match result {
+        Some(idx) => idx < len(arr) && arr[idx] == target,
+        None => true,
+    }
+{
+    let mut i = 0;
+
+    while i < len(arr) {
+        invariant i >= 0 && i <= len(arr);
+
+        if arr[i] == target {
+            return Some(i);
+        }
+        i += 1;
+    }
+
+    None
+}
+
+// ============================================================================
+// Binary search with bounds
+// ============================================================================
+
+@verify(proof)
+fn binary_search(arr: List<Int>, target: Int) -> Maybe<Int{>= 0}>
+    requires forall i in 0..(len(arr) - 1) => arr[i] <= arr[i + 1]  // sorted
+    ensures match result {
+        Some(idx) => idx < len(arr) && arr[idx] == target,
+        None => true,
+    }
+{
+    if len(arr) == 0 {
+        return None;
+    }
+
+    let mut lo: Int{>= 0} = 0;
+    let mut hi: Int{>= 0} = len(arr) - 1;
+
+    while lo <= hi {
+        invariant lo >= 0 && hi < len(arr);
+        invariant lo <= hi + 1;
+
+        let mid = lo + (hi - lo) / 2;  // Avoids overflow, proven in bounds
+
+        if arr[mid] == target {
+            return Some(mid);
+        } else if arr[mid] < target {
+            lo = mid + 1;
+        } else {
+            if mid == 0 {
+                break;
+            }
+            hi = mid - 1;
+        }
+    }
+
+    None
+}
+
+fn main() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Basic access
+    let f = first(arr);
+    let l = last(arr);
+    assert(f == Some(1));
+    assert(l == Some(5));
+
+    // Index operations
+    let mid = middle_index(arr);
+    assert(mid == 2);
+
+    // Sum
+    let total = sum_array(arr);
+    assert(total == 15);
+
+    // Binary search
+    let found = binary_search(arr, 3);
+    assert(found == Some(2));
+}

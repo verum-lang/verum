@@ -1,0 +1,146 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, algorithm, sorting
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Bubble sort and selection sort on small arrays, verify sorted order
+
+fn main() -> Int {
+    test_bubble_sort();
+    test_selection_sort();
+    test_already_sorted();
+    test_reverse_sorted();
+    0
+}
+
+/// Bubble sort on a 6-element array
+fn test_bubble_sort() {
+    let mut arr = [0, 0, 0, 0, 0, 0];
+    arr[0] = 5;
+    arr[1] = 3;
+    arr[2] = 8;
+    arr[3] = 1;
+    arr[4] = 9;
+    arr[5] = 2;
+    let n = 6;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if arr[j] > arr[j + 1] {
+                let tmp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 5);
+    assert_eq(arr[4], 8);
+    assert_eq(arr[5], 9);
+    print("bubble_sort: pass\n");
+}
+
+/// Selection sort on a 5-element array
+fn test_selection_sort() {
+    let mut arr = [0, 0, 0, 0, 0];
+    arr[0] = 42;
+    arr[1] = 17;
+    arr[2] = 3;
+    arr[3] = 99;
+    arr[4] = 8;
+    let n = 5;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if arr[j] < arr[min_idx] {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            let tmp = arr[i];
+            arr[i] = arr[min_idx];
+            arr[min_idx] = tmp;
+        }
+        i = i + 1;
+    }
+    assert_eq(arr[0], 3);
+    assert_eq(arr[1], 8);
+    assert_eq(arr[2], 17);
+    assert_eq(arr[3], 42);
+    assert_eq(arr[4], 99);
+    print("selection_sort: pass\n");
+}
+
+/// Sorting an already sorted array should be identity
+fn test_already_sorted() {
+    let mut arr = [0, 0, 0, 0, 0];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    let n = 5;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if arr[j] > arr[j + 1] {
+                let tmp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(arr[0], 1);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[4], 5);
+    print("already_sorted: pass\n");
+}
+
+/// Sorting a reverse-sorted array
+fn test_reverse_sorted() {
+    let mut arr = [0, 0, 0, 0, 0, 0];
+    arr[0] = 10;
+    arr[1] = 8;
+    arr[2] = 6;
+    arr[3] = 4;
+    arr[4] = 2;
+    arr[5] = 0;
+    let n = 6;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if arr[j] < arr[min_idx] {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            let tmp = arr[i];
+            arr[i] = arr[min_idx];
+            arr[min_idx] = tmp;
+        }
+        i = i + 1;
+    }
+    assert_eq(arr[0], 0);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 4);
+    assert_eq(arr[3], 6);
+    assert_eq(arr[4], 8);
+    assert_eq(arr[5], 10);
+    print("reverse_sorted: pass\n");
+}

@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, static
+
+/// @verify(static) - compile-time verification through type checking
+/// Contracts are verified statically by the type checker without SMT solving
+
+@verify(static)
+fn non_empty_head<T>(list: List<T>{len > 0}) -> T {
+    contract#"
+        requires list.len() > 0;
+    ";
+    list[0]
+}
+
+@verify(static)
+fn positive_only(x: Int{> 0}) -> Int{> 0} {
+    contract#"
+        requires x > 0;
+        ensures result > 0;
+    ";
+    x
+}
+
+@verify(static)
+fn bounded_value(x: Int{>= 0, <= 100}) -> Int{>= 0, <= 100} {
+    contract#"
+        requires x >= 0 && x <= 100;
+        ensures result >= 0 && result <= 100;
+    ";
+    x
+}
+
+/// Static verification leverages refinement types
+/// The type system proves contracts without runtime overhead
+type PositiveInt is Int{> 0};
+type NonEmptyText is Text{len > 0};
+type NonEmptyList<T> is List<T>{len > 0};
+type BoundedFloat is Float{>= 0.0, <= 1.0};
+
+@verify(static)
+fn non_null_string(s: NonEmptyText) -> NonEmptyText {
+    contract#"
+        requires s.len() > 0;
+        ensures result.len() > 0;
+    ";
+    s
+}
+
+@verify(static)
+fn multiply_positive(a: PositiveInt, b: PositiveInt) -> PositiveInt {
+    contract#"
+        requires a > 0 && b > 0;
+        ensures result > 0;
+    ";
+    a * b
+}
+
+@verify(static)
+fn normalize(value: Float, max: Float{> 0.0}) -> BoundedFloat {
+    contract#"
+        requires max > 0.0;
+        requires value >= 0.0 && value <= max;
+        ensures result >= 0.0 && result <= 1.0;
+    ";
+    value / max
+}
+
+/// Type aliases for common patterns
+type Percentage is Float{>= 0.0, <= 100.0};
+type Index is Int{>= 0};
+
+@verify(static)
+fn to_fraction(percent: Percentage) -> BoundedFloat {
+    contract#"
+        requires percent >= 0.0 && percent <= 100.0;
+        ensures result >= 0.0 && result <= 1.0;
+    ";
+    percent / 100.0
+}

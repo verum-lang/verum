@@ -1,0 +1,109 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, structs, debug
+// @description: Debug FFI struct operations
+
+@repr(C)
+type Point2D is {
+    x: Int32,
+    y: Int32,
+};
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_make_point2d(x: Int32, y: Int32) -> Point2D;
+    fn ffi_add_point2d(a: Point2D, b: Point2D) -> Point2D;
+    fn ffi_point2d_magnitude(p: Point2D) -> Float;
+    fn ffi_point2d_get_x(p: &Point2D) -> Int32;
+    fn ffi_point2d_scale(p: &mut Point2D, factor: Int32);
+}
+
+fn main() {
+    // Test 1: Struct return (this worked before)
+    print("Test 1: Creating p1 = (3, 4)\n");
+    let p1 = ffi_make_point2d(3, 4);
+    let x1: Int = p1.x as Int;
+    let y1: Int = p1.y as Int;
+    print("p1.x = ");
+    print(x1);
+    print("\n");
+    print("p1.y = ");
+    print(y1);
+    print("\n");
+    assert_eq(x1, 3);
+    assert_eq(y1, 4);
+    print("Test 1 passed!\n");
+
+    // Test 2: Struct return with different values
+    print("\nTest 2: Creating p2 = (10, 20)\n");
+    let p2 = ffi_make_point2d(10, 20);
+    let x2: Int = p2.x as Int;
+    let y2: Int = p2.y as Int;
+    print("p2.x = ");
+    print(x2);
+    print("\n");
+    print("p2.y = ");
+    print(y2);
+    print("\n");
+    assert_eq(x2, 10);
+    assert_eq(y2, 20);
+    print("Test 2 passed!\n");
+
+    // Test 3: Struct-by-value argument passing
+    print("\nTest 3: Adding p1 + p2\n");
+    let p3 = ffi_add_point2d(p1, p2);
+    let x3: Int = p3.x as Int;
+    let y3: Int = p3.y as Int;
+    print("p3.x = ");
+    print(x3);
+    print("\n");
+    print("p3.y = ");
+    print(y3);
+    print("\n");
+    assert_eq(x3, 13);
+    assert_eq(y3, 24);
+    print("Test 3 passed!\n");
+
+    // Test 4: Struct-by-value with Float return
+    print("\nTest 4: Magnitude of (3, 4)\n");
+    let mag = ffi_point2d_magnitude(p1);
+    print("magnitude = ");
+    print(mag);
+    print("\n");
+    // Should be 5.0 (3-4-5 triangle)
+    assert(mag > 4.99 && mag < 5.01);
+    print("Test 4 passed!\n");
+
+    // Test 5: Get x via pointer
+    print("\nTest 5: Get x via pointer\n");
+    let x_val: Int = ffi_point2d_get_x(&p1) as Int;
+    print("x_val = ");
+    print(x_val);
+    print("\n");
+    assert_eq(x_val, 3);
+    print("Test 5 passed!\n");
+
+    // Test 6: Scale in place
+    print("\nTest 6: Scale in place\n");
+    let mut p4 = ffi_make_point2d(5, 10);
+    print("Before scale: p4.x = ");
+    print(p4.x as Int);
+    print(", p4.y = ");
+    print(p4.y as Int);
+    print("\n");
+    ffi_point2d_scale(&mut p4, 3);
+    let x4: Int = p4.x as Int;
+    let y4: Int = p4.y as Int;
+    print("After scale: p4.x = ");
+    print(x4);
+    print(", p4.y = ");
+    print(y4);
+    print("\n");
+    assert_eq(x4, 15);
+    assert_eq(y4, 30);
+    print("Test 6 passed!\n");
+
+    print("\nAll tests passed!\n");
+}

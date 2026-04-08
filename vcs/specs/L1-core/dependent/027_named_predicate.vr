@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, named-predicate
+
+/// Named predicate refinements -- using predicate function names
+/// as refinement constraints.
+/// Grammar: refinement_method = ... | predicate_name | ... ;
+
+// Define predicate functions
+fn is_positive(n: Int) -> Bool { n > 0 }
+fn is_even(n: Int) -> Bool { n % 2 == 0 }
+fn is_ascii(s: Text) -> Bool {
+    for ch in s.chars() {
+        if (ch as Int) > 127 { return false; }
+    }
+    true
+}
+fn is_sorted(xs: List<Int>) -> Bool {
+    let mut i = 0;
+    while i < xs.len() - 1 {
+        if xs[i] > xs[i + 1] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Use named predicates in type refinements
+type Positive is Int where is_positive;
+type EvenNum is Int where is_even;
+type AsciiText is Text where is_ascii;
+type SortedList is List<Int> where is_sorted;
+
+// Combine named predicate with other constraints
+type EvenPositive is Int where |n| is_positive(n) && is_even(n);
+
+// Named predicate in function signature
+fn double_positive(x: Int where is_positive) -> Int where is_positive {
+    x * 2
+}
+
+fn binary_search(xs: List<Int>, target: Int) -> Maybe<Int> {
+    let mut lo = 0;
+    let mut hi = xs.len() - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if xs[mid] == target {
+            return Some(mid);
+        } else if xs[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    None
+}
+
+// Custom domain predicates
+fn is_valid_email(s: Text) -> Bool {
+    s.contains("@") && s.len() >= 3
+}
+
+fn is_hex_color(s: Text) -> Bool {
+    s.len() == 7 && s.starts_with("#")
+}
+
+type Email is Text where is_valid_email;
+type HexColor is Text where is_hex_color;
+
+fn main() {
+    let p: Positive = 5;
+    assert(is_positive(p));
+
+    let e: EvenNum = 8;
+    assert(is_even(e));
+
+    let ascii: AsciiText = "hello world";
+    assert(is_ascii(ascii));
+
+    let sorted: SortedList = [1, 3, 5, 7, 9];
+    assert(is_sorted(sorted));
+
+    let found = binary_search(sorted, 5);
+    assert(found == Some(2));
+
+    let d = double_positive(7);
+    assert(d == 14);
+
+    let email: Email = "user@example.com";
+    assert(is_valid_email(email));
+
+    let color: HexColor = "#ff00ff";
+    assert(is_hex_color(color));
+}

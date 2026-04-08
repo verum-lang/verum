@@ -1,0 +1,571 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, pointers
+// @description: Tests raw pointer handling for FFI interoperability
+
+/// ============================================================
+/// RAW POINTER HANDLING FOR FFI
+/// ============================================================
+///
+/// Raw pointers are necessary for FFI but bypass Verumps safety
+/// guarantees. This file demonstrates safe patterns for working
+/// with raw pointers at FFI boundaries.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_int is i32;
+type c_size is usize;
+
+type AllocError is
+    | OutOfMemory
+    | ZeroSize;
+
+type Error is
+    | NullHandle
+    | InvalidPointer;
+
+type PhantomData<T> is {};
+
+// ------------------------------------------------------------
+// Pointer Type Aliases
+// ------------------------------------------------------------
+
+/// Immutable raw pointer
+type ConstPtr<T> is *const T;
+
+/// Mutable raw pointer
+type MutPtr<T> is *mut T;
+
+/// Void pointers for type-erased data
+type VoidPtr is *mut c_void;
+type ConstVoidPtr is *const c_void;
+
+// ------------------------------------------------------------
+// Pointer Creation
+// ------------------------------------------------------------
+
+/// Get pointer from reference
+fn as_ptr<T>(r: &T) -> ConstPtr<T> {
+    r as *const T
+}
+
+fn as_mut_ptr<T>(r: &mut T) -> MutPtr<T> {
+    r as *mut T
+}
+
+/// Get pointer from slice
+fn slice_ptr<T>(slice: &[T]) -> ConstPtr<T> {
+    slice.as_ptr()
+}
+
+fn slice_mut_ptr<T>(slice: &mut [T]) -> MutPtr<T> {
+    slice.as_mut_ptr()
+}
+
+/// Create null pointer of specific type
+fn null_ptr<T>() -> ConstPtr<T> {
+    null as *const T
+}
+
+fn null_mut_ptr<T>() -> MutPtr<T> {
+    null as *mut T
+}
+
+/// Create pointer from address (extremely unsafe)
+unsafe fn from_addr<T>(addr: usize) -> MutPtr<T> {
+    // SAFETY: Converting integer address to pointer
+    null as *mut T  // placeholder - real impl uses intrinsic
+}
+
+// ------------------------------------------------------------
+// Pointer Validation
+// ------------------------------------------------------------
+
+/// Null pointer check wrapper
+type NonNull<T> is {
+    ptr: MutPtr<T>,
+};
+
+implement<T> NonNull<T> {
+    /// Create from raw pointer (fails if null)
+    fn new(ptr: MutPtr<T>) -> Maybe<NonNull<T>> {
+        if ptr == null {
+            None
+        } else {
+            Some(NonNull { ptr })
+        }
+    }
+
+    /// Create without null check (unsafe)
+    unsafe fn new_unchecked(ptr: MutPtr<T>) -> NonNull<T> {
+        assert(ptr != null);
+        NonNull { ptr }
+    }
+
+    /// Get the raw pointer
+    fn as_ptr(&self) -> MutPtr<T> {
+        self.ptr
+    }
+
+    /// Get as const pointer
+    fn as_const_ptr(&self) -> ConstPtr<T> {
+        self.ptr as *const T
+    }
+
+    /// Dereference (still unsafe, but null-safe)
+    unsafe fn as_ref(&self) -> &T {
+        &*self.ptr
+    }
+
+    unsafe fn as_mut(&mut self) -> &mut T {
+        &mut *self.ptr
+    }
+
+    /// Cast to different type
+    fn cast<U>(&self) -> NonNull<U> {
+        NonNull { ptr: self.ptr as MutPtr<U> }
+    }
+}
+
+/// Pointer with ownership semantics
+type Unique<T> is {
+    ptr: NonNull<T>,
+    _marker: PhantomData<T>,
+};
+
+implement<T> Unique<T> {
+    unsafe fn new_unchecked(ptr: MutPtr<T>) -> Unique<T> {
+        Unique {
+            ptr: NonNull.new_unchecked(ptr),
+            _marker: PhantomData {},
+        }
+    }
+
+    fn as_ptr(&self) -> MutPtr<T> {
+        self.ptr.as_ptr()
+    }
+}
+
+// ------------------------------------------------------------
+// Pointer Arithmetic
+// ------------------------------------------------------------
+
+/// Offset pointer by count of elements
+unsafe fn offset<T>(ptr: ConstPtr<T>, count: isize) -> ConstPtr<T> {
+    ptr.offset(count)
+}
+
+unsafe fn offset_mut<T>(ptr: MutPtr<T>, count: isize) -> MutPtr<T> {
+    ptr.offset(count)
+}
+
+/// Add to pointer (wrapping semantics)
+unsafe fn add<T>(ptr: ConstPtr<T>, count: usize) -> ConstPtr<T> {
+    ptr.add(count)
+}
+
+unsafe fn add_mut<T>(ptr: MutPtr<T>, count: usize) -> MutPtr<T> {
+    ptr.add(count)
+}
+
+/// Subtract from pointer
+unsafe fn sub<T>(ptr: ConstPtr<T>, count: usize) -> ConstPtr<T> {
+    ptr.sub(count)
+}
+
+/// Byte offset
+unsafe fn byte_offset<T>(ptr: ConstPtr<T>, bytes: isize) -> ConstPtr<T> {
+    (ptr as *const u8).offset(bytes) as *const T
+}
+
+/// Distance between pointers (in elements)
+unsafe fn offset_from<T>(end: ConstPtr<T>, start: ConstPtr<T>) -> isize {
+    // Placeholder: real implementation would use intrinsic
+    0
+}
+
+/// Alignment helpers
+fn is_aligned<T>(ptr: ConstPtr<T>) -> Bool {
+    // Placeholder: real implementation uses intrinsic for ptr-to-int conversion
+    true
+}
+
+fn is_aligned_to<T>(ptr: ConstPtr<T>, align: usize) -> Bool {
+    // Placeholder: real implementation uses intrinsic for ptr-to-int conversion
+    true
+}
+
+// ------------------------------------------------------------
+// Pointer Read/Write Operations
+// ------------------------------------------------------------
+
+/// Read through pointer
+unsafe fn read<T: Copy>(ptr: ConstPtr<T>) -> T {
+    *ptr
+}
+
+/// Write through pointer
+unsafe fn write<T>(ptr: MutPtr<T>, value: T) {
+    *ptr = value;
+}
+
+/// Read without assuming initialization
+unsafe fn read_raw<T>(ptr: ConstPtr<T>) -> T {
+    ptr.read()
+}
+
+/// Write without dropping old value
+unsafe fn write_raw<T>(ptr: MutPtr<T>, value: T) {
+    ptr.write(value)
+}
+
+/// Unaligned read
+unsafe fn read_unaligned<T>(ptr: ConstPtr<T>) -> T {
+    // Placeholder: real implementation uses intrinsic
+    *ptr
+}
+
+/// Unaligned write
+unsafe fn write_unaligned<T>(ptr: MutPtr<T>, value: T) {
+    // Placeholder: real implementation uses intrinsic
+    *ptr = value;
+}
+
+/// Volatile read (prevents optimization)
+unsafe fn read_volatile<T>(ptr: ConstPtr<T>) -> T {
+    // Placeholder: real implementation uses intrinsic
+    *ptr
+}
+
+/// Volatile write
+unsafe fn write_volatile<T>(ptr: MutPtr<T>, value: T) {
+    // Placeholder: real implementation uses intrinsic
+    *ptr = value;
+}
+
+// ------------------------------------------------------------
+// Memory Operations
+// ------------------------------------------------------------
+
+/// Copy count elements (non-overlapping)
+unsafe fn copy_nonoverlapping<T>(src: ConstPtr<T>, dst: MutPtr<T>, count: usize) {
+    ptr_copy_nonoverlapping(src, dst, count)
+}
+
+/// Copy count elements (may overlap)
+unsafe fn copy<T>(src: ConstPtr<T>, dst: MutPtr<T>, count: usize) {
+    ptr_copy(src, dst, count)
+}
+
+/// Fill with bytes
+unsafe fn write_bytes<T>(dst: MutPtr<T>, val: u8, count: usize) {
+    ptr_write_bytes(dst, val, count)
+}
+
+/// Zero memory
+unsafe fn zero<T>(dst: MutPtr<T>, count: usize) {
+    write_bytes(dst, 0, count)
+}
+
+/// Swap two values through pointers
+unsafe fn swap<T>(a: MutPtr<T>, b: MutPtr<T>) {
+    ptr_swap(a, b)
+}
+
+/// Replace value and return old
+unsafe fn replace<T>(dst: MutPtr<T>, value: T) -> T {
+    ptr_replace(dst, value)
+}
+
+// ------------------------------------------------------------
+// Pointer Casting
+// ------------------------------------------------------------
+
+/// Cast between pointer types
+fn cast<T, U>(ptr: ConstPtr<T>) -> ConstPtr<U> {
+    ptr as *const U
+}
+
+fn cast_mut<T, U>(ptr: MutPtr<T>) -> MutPtr<U> {
+    ptr as *mut U
+}
+
+/// Convert to/from void pointer
+fn to_void<T>(ptr: ConstPtr<T>) -> ConstVoidPtr {
+    ptr as *const c_void
+}
+
+fn from_void<T>(ptr: ConstVoidPtr) -> ConstPtr<T> {
+    ptr as *const T
+}
+
+fn to_void_mut<T>(ptr: MutPtr<T>) -> VoidPtr {
+    ptr as *mut c_void
+}
+
+fn from_void_mut<T>(ptr: VoidPtr) -> MutPtr<T> {
+    ptr as *mut T
+}
+
+/// Convert to/from usize
+fn to_addr<T>(ptr: ConstPtr<T>) -> usize {
+    // Placeholder: ptr-to-int conversion handled by intrinsic
+    0
+}
+
+fn from_usize<T>(addr: usize) -> ConstPtr<T> {
+    // Placeholder: int-to-ptr conversion handled by intrinsic
+    null as *const T
+}
+
+// ------------------------------------------------------------
+// FFI Pointer Patterns
+// ------------------------------------------------------------
+
+/// Out parameter pattern
+fn with_out_param<T: Default, F, R>(f: F) -> Result<(R, T), Error>
+where F: FnOnce(MutPtr<T>) -> R
+{
+    let mut value = T.default();
+    let result = f(&mut value as *mut T);
+    Ok((result, value))
+}
+
+/// Buffer pattern with length
+@repr(C)
+type Buffer is {
+    data: MutPtr<u8>,
+    len: c_size,
+    capacity: c_size,
+};
+
+implement Buffer {
+    fn new(capacity: usize) -> Result<Buffer, AllocError> {
+        // Placeholder: real impl calls C malloc
+        Ok(Buffer {
+            data: null as *mut u8,
+            len: 0,
+            capacity,
+        })
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        // SAFETY: data is valid for len bytes
+        unsafe { slice_from_raw_parts(self.data, self.len) }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        // SAFETY: data is valid for len bytes
+        unsafe { slice_from_raw_parts_mut(self.data, self.len) }
+    }
+}
+
+implement Drop for Buffer {
+    fn drop(&mut self) {
+        // SAFETY: data was allocated by malloc
+        // Real impl calls C free
+    }
+}
+
+/// Handle pattern for opaque C objects
+type Handle<T> is {
+    ptr: NonNull<T>,
+    destructor: fn(MutPtr<T>),
+};
+
+implement<T> Handle<T> {
+    fn new(ptr: MutPtr<T>, destructor: fn(MutPtr<T>)) -> Result<Handle<T>, Error> {
+        let nonnull = NonNull.new(ptr);
+        match nonnull {
+            Some(p) => Ok(Handle { ptr: p, destructor }),
+            None => Err(NullHandle),
+        }
+    }
+
+    fn as_ptr(&self) -> MutPtr<T> {
+        self.ptr.as_ptr()
+    }
+}
+
+implement<T> Drop for Handle<T> {
+    fn drop(&mut self) {
+        (self.destructor)(self.ptr.as_ptr())
+    }
+}
+
+/// Slice view for FFI arrays
+type FfiSlice<T> is {
+    ptr: ConstPtr<T>,
+    len: c_size,
+};
+
+implement<T> FfiSlice<T> {
+    fn from_slice(slice: &[T]) -> FfiSlice<T> {
+        FfiSlice {
+            ptr: slice.as_ptr(),
+            len: slice.len(),
+        }
+    }
+
+    unsafe fn as_slice(&self) -> &[T] {
+        slice_from_raw_parts(self.ptr, self.len)
+    }
+}
+
+/// Mutable slice view
+type FfiSliceMut<T> is {
+    ptr: MutPtr<T>,
+    len: c_size,
+};
+
+implement<T> FfiSliceMut<T> {
+    fn from_slice(slice: &mut [T]) -> FfiSliceMut<T> {
+        FfiSliceMut {
+            ptr: slice.as_mut_ptr(),
+            len: slice.len(),
+        }
+    }
+
+    unsafe fn as_slice(&self) -> &[T] {
+        slice_from_raw_parts(self.ptr, self.len)
+    }
+
+    unsafe fn as_mut_slice(&mut self) -> &mut [T] {
+        slice_from_raw_parts_mut(self.ptr, self.len)
+    }
+}
+
+// ------------------------------------------------------------
+// C Library Declarations
+// ------------------------------------------------------------
+
+ffi libc_mem {
+    @extern("C")
+    fn malloc(size: c_size) -> VoidPtr;
+
+    @extern("C")
+    fn free(ptr: VoidPtr);
+}
+
+ffi libc_memcpy {
+    @extern("C")
+    fn memcpy(dest: VoidPtr, src: ConstVoidPtr, n: c_size) -> VoidPtr;
+}
+
+ffi libc_memmove {
+    @extern("C")
+    fn memmove(dest: VoidPtr, src: ConstVoidPtr, n: c_size) -> VoidPtr;
+}
+
+ffi libc_memset {
+    @extern("C")
+    fn memset(s: VoidPtr, c: c_int, n: c_size) -> VoidPtr;
+}
+
+// ------------------------------------------------------------
+// Type Properties
+// ------------------------------------------------------------
+
+// Type Properties: use T.size and T.alignment instead of deprecated size_of<T>() and align_of<T>() functions
+// Example: T.size returns the size in bytes, T.alignment returns the alignment requirement
+
+unsafe fn ptr_copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
+    // Placeholder - would be intrinsic
+}
+
+unsafe fn ptr_copy<T>(src: *const T, dst: *mut T, count: usize) {
+    // Placeholder - would be intrinsic
+}
+
+unsafe fn ptr_write_bytes<T>(dst: *mut T, val: u8, count: usize) {
+    // Placeholder - would be intrinsic
+}
+
+unsafe fn ptr_swap<T>(a: *mut T, b: *mut T) {
+    // Placeholder - would be intrinsic
+}
+
+unsafe fn ptr_replace<T>(dst: *mut T, value: T) -> T {
+    // Placeholder - would be intrinsic
+    value
+}
+
+unsafe fn slice_from_raw_parts<T>(ptr: *const T, len: usize) -> &[T] {
+    // Placeholder - would be intrinsic
+    &[]
+}
+
+unsafe fn slice_from_raw_parts_mut<T>(ptr: *mut T, len: usize) -> &mut [T] {
+    // Placeholder - would be intrinsic
+    &mut []
+}
+
+// ------------------------------------------------------------
+// Tests
+// ------------------------------------------------------------
+
+fn test_null_ptr() {
+    let ptr: ConstPtr<c_int> = null_ptr();
+    assert(ptr == null);
+}
+
+fn test_non_null() {
+    let value: c_int = 42;
+    let ptr = as_mut_ptr(&mut value);
+    let nn = NonNull.new(ptr);
+    assert(nn.is_some());
+
+    let null_ptr: MutPtr<c_int> = null as *mut c_int;
+    let nn = NonNull.new(null_ptr);
+    assert(nn.is_none());
+}
+
+fn test_pointer_arithmetic() {
+    let arr: [c_int; 4] = [1, 2, 3, 4];
+    let ptr = arr.as_ptr();
+
+    unsafe {
+        let ptr2 = add(ptr, 2);
+        assert(*ptr2 == 3);
+    }
+}
+
+fn test_buffer() {
+    let buf = Buffer.new(1024);
+    assert(buf.is_ok());
+
+    let buf = buf.unwrap();
+    assert(buf.capacity == 1024);
+    assert(buf.len == 0);
+}
+
+fn test_ffi_slice() {
+    let data: [c_int; 3] = [10, 20, 30];
+    let slice = FfiSlice.from_slice(&data);
+    assert(slice.len == 3);
+    assert(slice.ptr != null);
+}
+
+fn test_handle() {
+    fn dummy_destructor<T>(ptr: *mut T) {
+        // No-op for test
+    }
+
+    let ptr: *mut c_int = null as *mut c_int;
+    let handle = Handle.new(ptr, dummy_destructor);
+    assert(handle.is_ok());
+}
+
+fn main() {
+    test_null_ptr();
+    test_non_null();
+    test_pointer_arithmetic();
+    test_buffer();
+    test_ffi_slice();
+    test_handle();
+    print("C pointer tests passed");
+}

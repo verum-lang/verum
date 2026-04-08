@@ -1,0 +1,63 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, theorems, lemmas
+// @timeout: 15000
+
+/// Lemma usage in theorem proofs
+
+/// Basic lemmas
+lemma add_zero(n: Nat): n + 0 == n { proof by definition }
+lemma add_succ(n: Nat, m: Nat): n + succ(m) == succ(n + m) { proof by definition }
+lemma mul_zero(n: Nat): n * 0 == 0 { proof by definition }
+
+/// Using lemma in proof
+theorem add_comm_thm(a: Nat, b: Nat): a + b == b + a {
+    proof by induction on a {
+        case 0 => { trivial }
+        case succ(k) => { have ih: k + b == b + k; conclude by auto }
+    }
+}
+
+/// Conditional lemma
+lemma div_bound(n: Int, d: Int) requires d > 0 ensures n / d * d <= n { proof by arithmetic }
+
+theorem use_conditional(x: Int, y: Int) requires y > 0 ensures x / y * y <= x {
+    proof { have: y > 0 by precondition; conclude by div_bound }
+}
+
+/// Lemma chain
+lemma step1(n: Nat): n + 0 == n { proof by definition }
+lemma step2(n: Nat): n * 1 == n { proof by auto }
+
+theorem chain_example(n: Nat): n + 0 + n * 0 == n {
+    proof by simp
+}
+
+/// Generic lemma
+lemma list_len_ge_zero<T>(xs: List<T>): len(xs) >= 0 { proof by induction on xs }
+
+theorem use_generic_lemma(xs: List<Int>): len(xs) >= 0 {
+    proof by list_len_ge_zero
+}
+
+/// Simp lemma
+@simp lemma simp_add_zero(n: Nat): n + 0 == n { proof by definition }
+
+theorem use_simp_lemma(n: Nat): n + 0 == n { proof by simp }
+
+/// Lemma with induction
+lemma append_assoc_lem<T>(xs: List<T>, ys: List<T>, zs: List<T>):
+    (xs ++ ys) ++ zs == xs ++ (ys ++ zs)
+{ proof by induction on xs }
+
+theorem use_assoc<T>(a: List<T>, b: List<T>, c: List<T>, d: List<T>):
+    ((a ++ b) ++ c) ++ d == a ++ (b ++ (c ++ d))
+{ proof by auto }
+
+/// Private helper
+lemma helper(x: Int) requires x >= 0 ensures x * x >= 0 { proof by smt }
+
+theorem square_nonneg_thm(x: Int): x * x >= 0 { proof by smt }
+
+fn main() {}

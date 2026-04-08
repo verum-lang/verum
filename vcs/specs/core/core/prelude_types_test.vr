@@ -1,0 +1,97 @@
+// =============================================================================
+// prelude_types_test.vr - Test that core prelude types are available
+// =============================================================================
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: core, prelude, types, basic, regression
+// @description: Verifies core types are available without explicit imports
+// =============================================================================
+
+// This test verifies that fundamental types like Int, Float, Bool, Text, Char
+// are available without explicit imports (they should be in the prelude).
+
+// Test 1: Primitive types are in scope
+@test
+fn test_primitive_types() {
+    let i: Int = 42;
+    let f: Float = 3.14;
+    let b: Bool = true;
+    let t: Text = "hello";
+    let c: Char = 'a';
+
+    assert_eq(i, 42);
+    assert(f > 3.0);
+    assert(b);
+    assert_eq(t, "hello");
+    assert_eq(c, 'a');
+}
+
+// Test 2: Unit type
+@test
+fn test_unit_type() {
+    let u: () = ();
+    let _ = u;
+}
+
+// Test 3: Tuple types
+@test
+fn test_tuple_types() {
+    let pair: (Int, Text) = (1, "one");
+    let triple: (Int, Float, Bool) = (42, 3.14, true);
+
+    assert_eq(pair.0, 1);
+    assert_eq(pair.1, "one");
+    assert_eq(triple.0, 42);
+}
+
+// Test 4: Array literals
+@test
+fn test_array_literals() {
+    let arr: [Int; 3] = [1, 2, 3];
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+}
+
+// Test 5: Primitive methods should be available
+@test
+fn test_primitive_methods() {
+    let i: Int = -42;
+    assert_eq(i.abs(), 42);
+
+    let f: Float = 3.14;
+    assert(f.floor() == 3.0);
+
+    let t: Text = "hello";
+    assert_eq(t.len(), 5);
+}
+
+// Test 6: Basic operators
+@test
+fn test_operators() {
+    assert_eq(2 + 3, 5);
+    assert_eq(10 - 4, 6);
+    assert_eq(3 * 4, 12);
+    assert_eq(15 / 3, 5);
+    assert_eq(17 % 5, 2);
+
+    assert(1 < 2);
+    assert(3 > 2);
+    assert(5 <= 5);
+    assert(5 >= 5);
+    assert(1 == 1);
+    assert(1 != 2);
+}
+
+// Test 7: Boolean operators
+@test
+fn test_boolean_operators() {
+    assert(true && true);
+    assert(true || false);
+    assert(!false);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

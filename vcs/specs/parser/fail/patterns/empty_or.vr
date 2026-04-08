@@ -1,0 +1,58 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, or, empty, error
+// @description: Test empty alternatives in or-pattern (consecutive pipes)
+// @expected-error: E089
+
+type Color is Red | Green | Blue;
+type Option<T> is None | Some(T);
+
+fn test_consecutive_pipes() {
+    let color = Red;
+
+    // Invalid: empty alternative between pipes
+    match color {
+        Red | | Blue => print("not green"),
+        Green => print("green"),
+    }
+}
+
+fn test_multiple_empty_alternatives() {
+    let color = Red;
+
+    // Invalid: multiple empty alternatives
+    match color {
+        Red | | | Blue => print("edges"),
+        _ => print("other"),
+    }
+}
+
+fn test_empty_in_nested() {
+    let opt: Option<Color> = Some(Red);
+
+    // Invalid: empty alternative in nested pattern
+    match opt {
+        Some(Red | | Green) => print("not blue"),
+        _ => print("other"),
+    }
+}
+
+fn test_pipe_with_whitespace() {
+    let value = 42;
+
+    // Invalid: pipe followed by pipe (even with whitespace between)
+    match value {
+        1 |   | 3 => print("not two"),
+        _ => print("other"),
+    }
+}
+
+fn test_pipe_comma_confusion() {
+    let value = 42;
+
+    // Invalid: confusing pipe with comma in tuple context
+    match (value, value) {
+        (1 | | 2, x) => print("confusion"),
+        _ => print("other"),
+    }
+}

@@ -1,0 +1,206 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, constraints
+// @description: Constrained type inference with protocol bounds and where clauses
+
+/// Test for constrained type inference.
+/// Type inference with protocol bounds and constraints.
+
+// ============================================================================
+// Protocol-constrained inference
+// ============================================================================
+
+type Displayable is protocol {
+    fn display(&self) -> Text;
+};
+
+type CloneP is protocol {
+    fn clone(&self) -> Self;
+};
+
+type EqP is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+type OrdP is protocol {
+    fn cmp_val(&self, other: &Self) -> Int;  // negative/zero/positive
+};
+
+/// Infer T with Displayable bound
+fn print_value<T: Displayable>(x: T) {
+    print(x.display());
+}
+
+// ============================================================================
+// Multiple bound inference
+// ============================================================================
+
+fn clone_and_display<T: CloneP + Displayable>(x: T) -> T {
+    print(x.display());
+    x.clone()
+}
+
+// ============================================================================
+// Inference with generic containers
+// ============================================================================
+
+fn first_element<T>(list: List<T>) -> Maybe<T> {
+    if list.is_empty() {
+        None
+    } else {
+        Some(list[0])
+    }
+}
+
+// ============================================================================
+// Inference through function composition
+// ============================================================================
+
+type MyMaybe<T> is Some(T) | None;
+
+fn map_maybe<A, B>(opt: MyMaybe<A>, f: fn(A) -> B) -> MyMaybe<B> {
+    match opt {
+        Some(a) => Some(f(a)),
+        None => None,
+    }
+}
+
+fn and_then_maybe<A, B>(opt: MyMaybe<A>, f: fn(A) -> MyMaybe<B>) -> MyMaybe<B> {
+    match opt {
+        Some(a) => f(a),
+        None => None,
+    }
+}
+
+// ============================================================================
+// Inference with where clauses
+// ============================================================================
+
+fn sort_and_get_max<T: Clone>(mut items: List<T>) -> Maybe<T> {
+    if items.is_empty() {
+        return None;
+    }
+    // Return the last item (simplified - no sorting needed for typecheck)
+    match items.last() {
+        Some(last) => Some(last.clone()),
+        None => None,
+    }
+}
+
+// ============================================================================
+// Inference with generic implementations
+// ============================================================================
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+implement<A: Clone, B: Clone> CloneP for Pair<A, B> {
+    fn clone(&self) -> Self {
+        Pair {
+            first: self.first.clone(),
+            second: self.second.clone(),
+        }
+    }
+}
+
+// ============================================================================
+// Constrained inference in closures
+// ============================================================================
+
+fn map_with_bound<T, U: Displayable>(items: List<T>, f: fn(T) -> U) -> List<U> {
+    let mut result: List<U> = [];
+    for item in items {
+        let mapped = f(item);
+        print(mapped.display());
+        result.push(mapped);
+    }
+    result
+}
+
+// ============================================================================
+// Inference with recursive constraints
+// ============================================================================
+
+fn flatten<T>(nested: List<List<T>>) -> List<T> {
+    let mut result: List<T> = [];
+    for inner in nested {
+        for item in inner {
+            result.push(item);
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Sample types with protocol implementations
+// ============================================================================
+
+type Score is { value: Int };
+
+implement Displayable for Score {
+    fn display(&self) -> Text {
+        f"Score({self.value})"
+    }
+}
+
+implement CloneP for Score {
+    fn clone(&self) -> Score {
+        Score { value: self.value }
+    }
+}
+
+implement EqP for Score {
+    fn eq(&self, other: &Score) -> Bool {
+        self.value == other.value
+    }
+}
+
+// ============================================================================
+// Main demonstration
+// ============================================================================
+
+fn main() {
+    // Protocol-constrained inference
+    let s = Score { value: 42 };
+    print_value(s);
+
+    // Multiple bounds
+    let s2 = Score { value: 100 };
+    let cloned = clone_and_display(s2);
+    assert(cloned.value == 100);
+
+    // Container inference: T inferred as Int
+    let nums = [1, 2, 3];
+    let first = first_element(nums);
+    assert(first == Some(1));
+
+    // Container inference: T inferred as Text
+    let texts = ["a", "b", "c"];
+    let first_text = first_element(texts);
+    assert(first_text == Some("a"));
+
+    // Composition inference
+    let value: MyMaybe<Int> = Some(42);
+    let doubled = map_maybe(value, |x| x * 2);
+    match doubled {
+        Some(n) => assert(n == 84),
+        None => unreachable(),
+    }
+
+    // where clause inference
+    let max = sort_and_get_max([3, 1, 4, 1, 5]);
+    assert(max == Some(5));
+
+    // Generic impl inference: A=Int, B=Text
+    let pair = Pair { first: 1, second: "hello" };
+    // CloneP works because Int and Text both have clone
+    // (Int and Text have built-in clone, our protocol wraps it)
+
+    // Flatten: T inferred as Int
+    let nested = [[1, 2], [3, 4]];
+    let flat = flatten(nested);
+    assert(flat == [1, 2, 3, 4]);
+}

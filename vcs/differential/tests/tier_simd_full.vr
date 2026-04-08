@@ -1,0 +1,288 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, simd
+// @timeout: 10000
+
+/// Tests SIMD-style vector creation, lane arithmetic, horizontal reduction,
+/// shuffle/permute patterns, and masked operations for cross-tier consistency.
+/// All operations simulated via arrays (pure integer/float arithmetic).
+
+fn main() {
+    test_vector_create_and_splat();
+    test_lane_arithmetic();
+    test_horizontal_reduction();
+    test_shuffle_permute();
+    test_masked_operations();
+}
+
+/// SIMD vector creation: load, splat, sequence patterns
+fn test_vector_create_and_splat() {
+    println("=== Vector Create & Splat ===");
+
+    // Splat: all lanes have the same value (4-wide)
+    let splat_val = 42;
+    println(f"splat({splat_val}): [{splat_val}, {splat_val}, {splat_val}, {splat_val}]");
+
+    // Load from memory (array)
+    let data = [10, 20, 30, 40, 50, 60, 70, 80];
+    println(f"load @0: [{data[0]}, {data[1]}, {data[2]}, {data[3]}]");
+    println(f"load @4: [{data[4]}, {data[5]}, {data[6]}, {data[7]}]");
+
+    // Sequence: [base, base+step, base+2*step, ...]
+    let base = 5;
+    let step = 3;
+    println(f"seq({base}, {step}): [{base}, {base + step}, {base + 2 * step}, {base + 3 * step}]");
+
+    // Iota: [0, 1, 2, 3] (identity sequence)
+    println(f"iota: [0, 1, 2, 3]");
+
+    // Float splat
+    let f_splat = 3.14;
+    println(f"f_splat({f_splat}): [{f_splat}, {f_splat}, {f_splat}, {f_splat}]");
+
+    // Zero vector
+    println(f"zero: [0, 0, 0, 0]");
+
+    // All-ones
+    println(f"ones: [1, 1, 1, 1]");
+}
+
+/// Lane-wise arithmetic: add, sub, mul, and/or/xor
+fn test_lane_arithmetic() {
+    println("\n=== Lane Arithmetic ===");
+
+    // 4-wide integer vectors
+    let a = [10, 20, 30, 40];
+    let b = [1, 2, 3, 4];
+
+    // Addition
+    println(f"add: [{a[0] + b[0]}, {a[1] + b[1]}, {a[2] + b[2]}, {a[3] + b[3]}]");
+
+    // Subtraction
+    println(f"sub: [{a[0] - b[0]}, {a[1] - b[1]}, {a[2] - b[2]}, {a[3] - b[3]}]");
+
+    // Multiplication
+    println(f"mul: [{a[0] * b[0]}, {a[1] * b[1]}, {a[2] * b[2]}, {a[3] * b[3]}]");
+
+    // Division
+    println(f"div: [{a[0] / b[0]}, {a[1] / b[1]}, {a[2] / b[2]}, {a[3] / b[3]}]");
+
+    // Bitwise AND
+    let x = [0xFF, 0x0F, 0xF0, 0xAA];
+    let y = [0x0F, 0x0F, 0x0F, 0x55];
+    let and0 = x[0] & y[0];
+    let and1 = x[1] & y[1];
+    let and2 = x[2] & y[2];
+    let and3 = x[3] & y[3];
+    println(f"and: [{and0}, {and1}, {and2}, {and3}]");
+
+    // Bitwise OR
+    let or0 = x[0] | y[0];
+    let or1 = x[1] | y[1];
+    let or2 = x[2] | y[2];
+    let or3 = x[3] | y[3];
+    println(f"or: [{or0}, {or1}, {or2}, {or3}]");
+
+    // Bitwise XOR
+    let xor0 = x[0] ^ y[0];
+    let xor1 = x[1] ^ y[1];
+    let xor2 = x[2] ^ y[2];
+    let xor3 = x[3] ^ y[3];
+    println(f"xor: [{xor0}, {xor1}, {xor2}, {xor3}]");
+
+    // Min/Max (lane-wise)
+    let c = [5, 25, 15, 35];
+    let d = [10, 20, 30, 40];
+    let min0 = if c[0] < d[0] { c[0] } else { d[0] };
+    let min1 = if c[1] < d[1] { c[1] } else { d[1] };
+    let min2 = if c[2] < d[2] { c[2] } else { d[2] };
+    let min3 = if c[3] < d[3] { c[3] } else { d[3] };
+    println(f"min: [{min0}, {min1}, {min2}, {min3}]");
+
+    let max0 = if c[0] > d[0] { c[0] } else { d[0] };
+    let max1 = if c[1] > d[1] { c[1] } else { d[1] };
+    let max2 = if c[2] > d[2] { c[2] } else { d[2] };
+    let max3 = if c[3] > d[3] { c[3] } else { d[3] };
+    println(f"max: [{max0}, {max1}, {max2}, {max3}]");
+
+    // Float FMA: a*b + c
+    let fa = [1.5, 2.5, 3.5, 4.5];
+    let fb = [2.0, 2.0, 2.0, 2.0];
+    let fc = [0.1, 0.2, 0.3, 0.4];
+    println(f"fma: [{fa[0] * fb[0] + fc[0]}, {fa[1] * fb[1] + fc[1]}, {fa[2] * fb[2] + fc[2]}, {fa[3] * fb[3] + fc[3]}]");
+}
+
+/// Horizontal reduction: sum, product, min, max across all lanes
+fn test_horizontal_reduction() {
+    println("\n=== Horizontal Reduction ===");
+
+    let v = [10, 20, 30, 40];
+
+    // Sum reduction
+    let sum = v[0] + v[1] + v[2] + v[3];
+    println(f"hsum([10,20,30,40]): {sum}");
+
+    // Product reduction
+    let prod = v[0] * v[1] * v[2] * v[3];
+    println(f"hprod([10,20,30,40]): {prod}");
+
+    // Min reduction
+    let mut hmin = v[0];
+    if v[1] < hmin { hmin = v[1]; }
+    if v[2] < hmin { hmin = v[2]; }
+    if v[3] < hmin { hmin = v[3]; }
+    println(f"hmin([10,20,30,40]): {hmin}");
+
+    // Max reduction
+    let mut hmax = v[0];
+    if v[1] > hmax { hmax = v[1]; }
+    if v[2] > hmax { hmax = v[2]; }
+    if v[3] > hmax { hmax = v[3]; }
+    println(f"hmax([10,20,30,40]): {hmax}");
+
+    // Wider vector (8-wide)
+    let w = [1, 3, 5, 7, 2, 4, 6, 8];
+    let wsum = w[0] + w[1] + w[2] + w[3] + w[4] + w[5] + w[6] + w[7];
+    println(f"hsum_8([1,3,5,7,2,4,6,8]): {wsum}");
+
+    let mut wmin = w[0];
+    let mut wi = 1;
+    while wi < 8 {
+        if w[wi] < wmin { wmin = w[wi]; }
+        wi = wi + 1;
+    }
+    println(f"hmin_8: {wmin}");
+
+    let mut wmax = w[0];
+    let mut wj = 1;
+    while wj < 8 {
+        if w[wj] > wmax { wmax = w[wj]; }
+        wj = wj + 1;
+    }
+    println(f"hmax_8: {wmax}");
+
+    // Float dot product via FMA reduction
+    let a = [1.0, 2.0, 3.0, 4.0];
+    let b = [5.0, 6.0, 7.0, 8.0];
+    let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    println(f"dot([1,2,3,4],[5,6,7,8]): {dot}");
+
+    // Any-true / all-true for boolean lanes
+    let bools = [true, false, true, true];
+    let any_true = bools[0] || bools[1] || bools[2] || bools[3];
+    let all_true = bools[0] && bools[1] && bools[2] && bools[3];
+    println(f"any_true([T,F,T,T]): {any_true}");
+    println(f"all_true([T,F,T,T]): {all_true}");
+}
+
+/// Shuffle and permute patterns
+fn test_shuffle_permute() {
+    println("\n=== Shuffle & Permute ===");
+
+    let v = [10, 20, 30, 40];
+
+    // Reverse
+    println(f"reverse: [{v[3]}, {v[2]}, {v[1]}, {v[0]}]");
+
+    // Rotate left by 1
+    println(f"rotl_1: [{v[1]}, {v[2]}, {v[3]}, {v[0]}]");
+
+    // Rotate right by 1
+    println(f"rotr_1: [{v[3]}, {v[0]}, {v[1]}, {v[2]}]");
+
+    // Broadcast lane 2 to all
+    println(f"broadcast[2]: [{v[2]}, {v[2]}, {v[2]}, {v[2]}]");
+
+    // Zip interleave: a=[1,2,3,4], b=[5,6,7,8] -> lo=[1,5,2,6], hi=[3,7,4,8]
+    let a = [1, 2, 3, 4];
+    let b = [5, 6, 7, 8];
+    println(f"zip_lo: [{a[0]}, {b[0]}, {a[1]}, {b[1]}]");
+    println(f"zip_hi: [{a[2]}, {b[2]}, {a[3]}, {b[3]}]");
+
+    // Unzip (deinterleave): [1,5,2,6] -> evens=[1,2], odds=[5,6]
+    let interleaved = [1, 5, 2, 6];
+    println(f"unzip_even: [{interleaved[0]}, {interleaved[2]}]");
+    println(f"unzip_odd: [{interleaved[1]}, {interleaved[3]}]");
+
+    // Custom shuffle with index vector
+    let data = [100, 200, 300, 400];
+    let indices = [3, 0, 2, 1];
+    println(f"shuffle([100,200,300,400], [3,0,2,1]): [{data[indices[0]]}, {data[indices[1]]}, {data[indices[2]]}, {data[indices[3]]}]");
+
+    // Two-source shuffle: select from two vectors based on index
+    let src0 = [10, 20, 30, 40];
+    let src1 = [50, 60, 70, 80];
+    // Indices: 0-3 from src0, 4-7 from src1
+    let sel = [0, 5, 2, 7]; // src0[0], src1[1], src0[2], src1[3]
+    let r0 = if sel[0] < 4 { src0[sel[0]] } else { src1[sel[0] - 4] };
+    let r1 = if sel[1] < 4 { src0[sel[1]] } else { src1[sel[1] - 4] };
+    let r2 = if sel[2] < 4 { src0[sel[2]] } else { src1[sel[2] - 4] };
+    let r3 = if sel[3] < 4 { src0[sel[3]] } else { src1[sel[3] - 4] };
+    println(f"two_source_shuffle: [{r0}, {r1}, {r2}, {r3}]");
+}
+
+/// Masked operations: blend and conditional store
+fn test_masked_operations() {
+    println("\n=== Masked Operations ===");
+
+    let a = [10, 20, 30, 40];
+    let b = [50, 60, 70, 80];
+
+    // Blend: select a[i] if mask[i] is true, else b[i]
+    let mask = [true, false, true, false];
+    let blend0 = if mask[0] { a[0] } else { b[0] };
+    let blend1 = if mask[1] { a[1] } else { b[1] };
+    let blend2 = if mask[2] { a[2] } else { b[2] };
+    let blend3 = if mask[3] { a[3] } else { b[3] };
+    println(f"blend(mask=[T,F,T,F]): [{blend0}, {blend1}, {blend2}, {blend3}]");
+
+    // All-true mask
+    let all_a0 = a[0]; let all_a1 = a[1]; let all_a2 = a[2]; let all_a3 = a[3];
+    println(f"blend(mask=[T,T,T,T]): [{all_a0}, {all_a1}, {all_a2}, {all_a3}]");
+
+    // All-false mask
+    let all_b0 = b[0]; let all_b1 = b[1]; let all_b2 = b[2]; let all_b3 = b[3];
+    println(f"blend(mask=[F,F,F,F]): [{all_b0}, {all_b1}, {all_b2}, {all_b3}]");
+
+    // Masked addition: only add where mask is true, keep original otherwise
+    let vals = [100, 200, 300, 400];
+    let addend = [5, 10, 15, 20];
+    let add_mask = [true, true, false, true];
+    let ma0 = if add_mask[0] { vals[0] + addend[0] } else { vals[0] };
+    let ma1 = if add_mask[1] { vals[1] + addend[1] } else { vals[1] };
+    let ma2 = if add_mask[2] { vals[2] + addend[2] } else { vals[2] };
+    let ma3 = if add_mask[3] { vals[3] + addend[3] } else { vals[3] };
+    println(f"masked_add: [{ma0}, {ma1}, {ma2}, {ma3}]");
+
+    // Compress: gather non-masked elements
+    let data = [10, 20, 30, 40, 50, 60, 70, 80];
+    let cmask = [true, false, true, false, true, true, false, true];
+    let mut compressed = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut count = 0;
+    let mut ci = 0;
+    while ci < 8 {
+        if cmask[ci] {
+            compressed[count] = data[ci];
+            count = count + 1;
+        }
+        ci = ci + 1;
+    }
+    println(f"compress count: {count}");
+    let mut pi = 0;
+    while pi < count {
+        println(f"  compressed[{pi}]: {compressed[pi]}");
+        pi = pi + 1;
+    }
+
+    // Popcount of mask (number of true lanes)
+    let mut popcount = 0;
+    let mut mi = 0;
+    while mi < 8 {
+        if cmask[mi] {
+            popcount = popcount + 1;
+        }
+        mi = mi + 1;
+    }
+    println(f"mask popcount: {popcount}");
+}

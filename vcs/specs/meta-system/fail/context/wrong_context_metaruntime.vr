@@ -1,0 +1,39 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, context, wrong, error
+// @description: Test that MetaTypes context doesn't satisfy MetaRuntime requirement
+// @expected-error: requires
+
+// =============================================================================
+// WRONG CONTEXT TESTS - MetaTypes doesn't provide MetaRuntime
+// =============================================================================
+
+// target_os requires MetaRuntime, not MetaTypes
+meta fn test_target_os_wrong_context() -> Text using [MetaTypes] {
+    target_os()  // ERROR: requires MetaRuntime, have MetaTypes
+}
+
+// target_arch requires MetaRuntime, not MetaTypes
+meta fn test_target_arch_wrong_context() -> Text using [MetaTypes] {
+    target_arch()  // ERROR: requires MetaRuntime, have MetaTypes
+}
+
+// is_debug requires MetaRuntime, not MetaTypes
+meta fn test_is_debug_wrong_context() -> Bool using [MetaTypes] {
+    is_debug()  // ERROR: requires MetaRuntime, have MetaTypes
+}
+
+// crate_name requires MetaRuntime, not MetaTypes
+meta fn test_crate_name_wrong_context() -> Text using [MetaTypes] {
+    crate_name()  // ERROR: requires MetaRuntime, have MetaTypes
+}
+
+// recursion_limit requires MetaRuntime, not MetaTypes
+meta fn test_recursion_limit_wrong_context() -> Int using [MetaTypes] {
+    recursion_limit()  // ERROR: requires MetaRuntime, have MetaTypes
+}
+
+fn main() {
+    @const assert(text_len(test_target_os_wrong_context()) > 0);
+}

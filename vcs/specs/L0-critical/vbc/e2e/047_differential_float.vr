@@ -1,0 +1,360 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, float, arithmetic, precision
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential float test: verifies interpreter and AOT produce identical results
+// for float arithmetic, comparisons, integer truncation, and Taylor series
+// approximations. All float output is rounded to integers for comparison.
+
+// ============================================================================
+// Float-to-integer truncation helpers
+// ============================================================================
+
+// Truncate float to integer (toward zero) by casting
+fn float_to_int(x: Float) -> Int {
+    x as Int
+}
+
+// Round float*1000 to integer (3 decimal places of precision as integer)
+fn round_milli(x: Float) -> Int {
+    let scaled = x * 1000.0;
+    if scaled >= 0.0 {
+        (scaled + 0.5) as Int
+    } else {
+        (scaled - 0.5) as Int
+    }
+}
+
+// ============================================================================
+// Test: basic float arithmetic
+// ============================================================================
+
+fn test_float_add() {
+    let a = 3.5;
+    let b = 2.25;
+    let sum = a + b;
+    assert_eq(round_milli(sum), 5750);  // 5.75 * 1000
+
+    let c = 0.1 + 0.2;
+    // 0.1 + 0.2 ~ 0.3 (may have floating point imprecision)
+    // round_milli(0.3) = 300, but 0.1+0.2 = 0.30000000000000004
+    // round_milli gives 300 either way
+    assert_eq(round_milli(c), 300);
+
+    let d = 100.0 + 0.001;
+    assert_eq(round_milli(d), 100001);
+
+    // Negative addition
+    let e = 0.0 - 3.5 + 1.5;
+    assert_eq(round_milli(e), 0 - 2000);
+
+    print("float_add: ok");
+}
+
+fn test_float_sub() {
+    let a = 10.5 - 3.25;
+    assert_eq(round_milli(a), 7250);
+
+    let b = 1.0 - 1.0;
+    assert_eq(round_milli(b), 0);
+
+    let c = 0.0 - 5.0 - 3.0;
+    assert_eq(round_milli(c), 0 - 8000);
+
+    let d = 1000.0 - 0.001;
+    assert_eq(round_milli(d), 999999);
+
+    print("float_sub: ok");
+}
+
+fn test_float_mul() {
+    let a = 3.0 * 4.0;
+    assert_eq(round_milli(a), 12000);
+
+    let b = 2.5 * 2.5;
+    assert_eq(round_milli(b), 6250);
+
+    let c = 0.0 - 3.0 * 5.0;
+    assert_eq(round_milli(c), 0 - 15000);
+
+    let d = 0.001 * 1000.0;
+    assert_eq(round_milli(d), 1000);
+
+    // Multiplication by zero
+    let e = 12345.678 * 0.0;
+    assert_eq(round_milli(e), 0);
+
+    // Multiplication by one
+    let f = 42.5 * 1.0;
+    assert_eq(round_milli(f), 42500);
+
+    print("float_mul: ok");
+}
+
+fn test_float_div() {
+    let a = 10.0 / 3.0;
+    assert_eq(round_milli(a), 3333);  // 3.333...
+
+    let b = 1.0 / 4.0;
+    assert_eq(round_milli(b), 250);
+
+    let c = 22.0 / 7.0;
+    assert_eq(round_milli(c), 3143);  // ~3.142857
+
+    let d = 100.0 / 100.0;
+    assert_eq(round_milli(d), 1000);
+
+    let e = 0.0 / 5.0;
+    assert_eq(round_milli(e), 0);
+
+    // Negative division
+    let f = 0.0 - 10.0 / 4.0;
+    assert_eq(round_milli(f), 0 - 2500);
+
+    print("float_div: ok");
+}
+
+// ============================================================================
+// Test: float comparisons
+// ============================================================================
+
+fn test_float_comparison() {
+    assert(3.14 > 3.13);
+    assert(3.14 < 3.15);
+    assert(3.14 >= 3.14);
+    assert(3.14 <= 3.14);
+    assert(0.0 - 1.0 < 0.0);
+    assert(0.0 - 1.0 < 1.0);
+
+    // Approximate equality check
+    let a = 1.0 / 3.0;
+    let b = 2.0 / 6.0;
+    let diff = a - b;
+    let diff_abs = if diff < 0.0 { 0.0 - diff } else { diff };
+    assert(diff_abs < 0.0001);
+
+    print("float_comparison: ok");
+}
+
+// ============================================================================
+// Test: integer truncation of floats
+// ============================================================================
+
+fn test_float_truncation() {
+    assert_eq(float_to_int(3.7), 3);
+    assert_eq(float_to_int(3.0), 3);
+    assert_eq(float_to_int(0.0 - 3.7), 0 - 3);
+    assert_eq(float_to_int(0.0 - 3.0), 0 - 3);
+    assert_eq(float_to_int(0.999), 0);
+    assert_eq(float_to_int(0.0 - 0.999), 0);
+    assert_eq(float_to_int(100.1), 100);
+    assert_eq(float_to_int(0.0), 0);
+
+    print("float_truncation: ok");
+}
+
+// ============================================================================
+// Taylor series: e^x approximation (first 10 terms)
+// ============================================================================
+
+fn taylor_exp(x: Float) -> Float {
+    // e^x = 1 + x + x^2/2! + x^3/3! + ...
+    let mut result = 1.0;
+    let mut term = 1.0;
+    let mut i = 1;
+    while i < 10 {
+        term = term * x / (i as Float);
+        result = result + term;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_taylor_exp() {
+    // e^0 = 1
+    assert_eq(round_milli(taylor_exp(0.0)), 1000);
+
+    // e^1 ~ 2.71828
+    assert_eq(round_milli(taylor_exp(1.0)), 2718);
+
+    // e^(-1) ~ 0.36788
+    assert_eq(round_milli(taylor_exp(0.0 - 1.0)), 368);
+
+    // e^2 ~ 7.389
+    assert_eq(round_milli(taylor_exp(2.0)), 7389);
+
+    // e^0.5 ~ 1.6487
+    assert_eq(round_milli(taylor_exp(0.5)), 1649);
+
+    print("taylor_exp: ok");
+}
+
+// ============================================================================
+// Taylor series: sin(x) approximation (first 7 terms)
+// ============================================================================
+
+fn taylor_sin(x: Float) -> Float {
+    // sin(x) = x - x^3/3! + x^5/5! - x^7/7! + ...
+    let mut result = 0.0;
+    let mut term = x;
+    let mut sign = 1.0;
+    let mut i = 1;
+    while i <= 13 {
+        result = result + sign * term;
+        // Next term: multiply by x^2 / ((i+1)*(i+2))
+        let next_i = i + 1;
+        let next_next_i = i + 2;
+        term = term * x * x / ((next_i as Float) * (next_next_i as Float));
+        sign = 0.0 - sign;
+        i = i + 2;
+    }
+    result
+}
+
+fn test_taylor_sin() {
+    // sin(0) = 0
+    assert_eq(round_milli(taylor_sin(0.0)), 0);
+
+    // sin(1) ~ 0.8415
+    assert_eq(round_milli(taylor_sin(1.0)), 841);
+
+    // sin(-1) ~ -0.8415
+    assert_eq(round_milli(taylor_sin(0.0 - 1.0)), 0 - 841);
+
+    // sin(0.5) ~ 0.4794
+    assert_eq(round_milli(taylor_sin(0.5)), 479);
+
+    // sin(pi/6) ~ 0.5  (pi/6 ~ 0.5236)
+    let pi_over_6 = 0.5236;
+    let sin_30 = round_milli(taylor_sin(pi_over_6));
+    // Should be close to 500
+    assert(sin_30 >= 499);
+    assert(sin_30 <= 501);
+
+    print("taylor_sin: ok");
+}
+
+// ============================================================================
+// Taylor series: cos(x) approximation
+// ============================================================================
+
+fn taylor_cos(x: Float) -> Float {
+    // cos(x) = 1 - x^2/2! + x^4/4! - x^6/6! + ...
+    let mut result = 0.0;
+    let mut term = 1.0;
+    let mut sign = 1.0;
+    let mut i = 0;
+    while i <= 12 {
+        result = result + sign * term;
+        let next_i = i + 1;
+        let next_next_i = i + 2;
+        term = term * x * x / ((next_i as Float) * (next_next_i as Float));
+        sign = 0.0 - sign;
+        i = i + 2;
+    }
+    result
+}
+
+fn test_taylor_cos_basic() {
+    assert_eq(round_milli(taylor_cos(0.0)), 1000);
+    assert_eq(round_milli(taylor_cos(1.0)), 540);
+    assert_eq(round_milli(taylor_cos(0.0 - 1.0)), 540);
+    print("taylor_cos: ok");
+}
+
+// ============================================================================
+// Test: computing pi via Leibniz series
+// ============================================================================
+
+fn leibniz_pi(terms: Int) -> Float {
+    // pi/4 = 1 - 1/3 + 1/5 - 1/7 + ...
+    let mut result = 0.0;
+    let mut sign = 1.0;
+    let mut i = 0;
+    while i < terms {
+        let denom = (2 * i + 1) as Float;
+        result = result + sign / denom;
+        sign = 0.0 - sign;
+        i = i + 1;
+    }
+    result * 4.0
+}
+
+fn test_leibniz_pi() {
+    // With 1000 terms, should get ~3.14059 (close to pi)
+    let pi_approx = leibniz_pi(1000);
+    let pi_int = round_milli(pi_approx);
+    // pi ~ 3141.59... as millis
+    // Leibniz converges slowly, 1000 terms gives ~3140-3142
+    assert(pi_int >= 3139);
+    assert(pi_int <= 3143);
+
+    // With 10000 terms, more precise
+    let pi_better = leibniz_pi(10000);
+    let pi_int2 = round_milli(pi_better);
+    assert(pi_int2 >= 3141);
+    assert(pi_int2 <= 3142);
+
+    print("leibniz_pi: ok");
+}
+
+// ============================================================================
+// Test: Newton's method for sqrt
+// ============================================================================
+
+fn newton_sqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut guess = x / 2.0;
+        let mut i = 0;
+        while i < 20 {
+            guess = (guess + x / guess) / 2.0;
+            i = i + 1;
+        }
+        guess
+    }
+}
+
+fn test_newton_sqrt() {
+    // sqrt(4) = 2.0
+    assert_eq(round_milli(newton_sqrt(4.0)), 2000);
+
+    // sqrt(9) = 3.0
+    assert_eq(round_milli(newton_sqrt(9.0)), 3000);
+
+    // sqrt(2) ~ 1.414
+    assert_eq(round_milli(newton_sqrt(2.0)), 1414);
+
+    // sqrt(100) = 10
+    assert_eq(round_milli(newton_sqrt(100.0)), 10000);
+
+    // sqrt(0.25) = 0.5
+    assert_eq(round_milli(newton_sqrt(0.25)), 500);
+
+    // sqrt(1) = 1
+    assert_eq(round_milli(newton_sqrt(1.0)), 1000);
+
+    // sqrt(0) = 0
+    assert_eq(round_milli(newton_sqrt(0.0)), 0);
+
+    print("newton_sqrt: ok");
+}
+
+fn main() -> Int {
+    test_float_add();
+    test_float_sub();
+    test_float_mul();
+    test_float_div();
+    test_float_comparison();
+    test_float_truncation();
+    test_taylor_exp();
+    test_taylor_sin();
+    test_taylor_cos_basic();
+    test_leibniz_pi();
+    test_newton_sqrt();
+    print("[OK] 047_differential_float");
+    0
+}

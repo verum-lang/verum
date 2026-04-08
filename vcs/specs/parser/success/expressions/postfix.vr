@@ -1,0 +1,65 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, postfix
+// @description: Test postfix expression parsing
+
+fn test_postfix_expressions() {
+    // Field access
+    let a = obj.field;
+    let b = obj.nested.field;
+    let c = obj.a.b.c.d;
+
+    // Method calls
+    let d = obj.method();
+    let e = obj.method(arg);
+    let f = obj.method(a, b, c);
+    let g = obj.method().chained();
+
+    // Generic method calls (Verum uses .method<T>() not .method<T>())
+    let h = obj.method<Int>();
+    let i = obj.method<A, B>(arg);
+    let j = container.get<Text>();
+
+    // Optional chaining
+    let k = obj?.field;
+    let l = obj?.method();
+    let m = obj?.field?.nested;
+    let n = obj?.method()?.result;
+
+    // Tuple indexing
+    let o = tuple.0;
+    let p = tuple.1;
+    // Note: pair.0.1 doesn't work because lexer sees 0.1 as float
+    let q = (pair.0).1;
+
+    // Index access
+    let r = array[0];
+    let s = array[i];
+    let t = matrix[i][j];
+    let u = map["key"];
+    let v = nested[a][b][c];
+
+    // Function calls
+    let w = func();
+    let x = func(arg);
+    let y = func(a, b, c);
+    let z = outer(inner(x));
+
+    // Try operator
+    let aa = result?;
+    let ab = parse(input)?;
+    let ac = obj.method()?.field?;
+
+    // As cast
+    let ad = x as Int;
+    let ae = value as Float;
+    let af = (a + b) as Text;
+
+    // Await
+    let ah = future.await;
+    let ai = fetch().await;
+    let aj = obj.async_method().await;
+
+    // Combined postfix operations
+    let ak = obj.method()?.field[0].await;
+}

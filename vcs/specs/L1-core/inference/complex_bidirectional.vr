@@ -1,0 +1,324 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, bidirectional, complex, advanced
+// @description: Complex bidirectional type inference
+
+/// Complex bidirectional type inference test cases.
+/// Tests advanced scenarios where type information flows both
+/// from expression to context (synthesis) and from context to
+/// expression (checking) through complex program structures.
+
+// ============================================================================
+// Helper functions for type propagation
+// ============================================================================
+
+fn outer<T>(x: T) -> T { x }
+fn middle<T>(f: fn(T) -> T, x: T) -> T { f(x) }
+fn inner<T>(x: T) -> T { x }
+
+fn wrap<T>(x: T) -> Maybe<T> { Some(x) }
+fn unwrap_val<T>(x: Maybe<T>, default: T) -> T {
+    match x {
+        Some(v) => v,
+        None => default,
+    }
+}
+fn transform<T, U>(x: T, f: fn(T) -> U) -> U { f(x) }
+
+fn multi_param<A, B, C>(a: A, b: B, f: fn(A, B) -> C) -> C {
+    f(a, b)
+}
+
+fn nested_generics<T, U, V>(x: T, f: fn(T) -> U, g: fn(U) -> V) -> V {
+    g(f(x))
+}
+
+fn apply_twice<A, B, C>(x: A, f: fn(A) -> B, g: fn(B) -> C) -> C {
+    g(f(x))
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| x + n
+}
+
+fn text_len_int(s: Text) -> Int { s.len() }
+
+fn process<T, E, U>(r: Result<T, E>, on_ok: fn(T) -> U, on_err: fn(E) -> U) -> U {
+    match r {
+        Ok(v) => on_ok(v),
+        Err(e) => on_err(e),
+    }
+}
+
+fn pair<A, B>(a: A, b: B) -> (A, B) { (a, b) }
+fn first<A, B>(p: (A, B)) -> A { p.0 }
+fn second<A, B>(p: (A, B)) -> B { p.1 }
+
+fn map_list<A, B>(items: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result: List<B> = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn filter_list<T: Clone>(items: List<T>, pred: fn(T) -> Bool) -> List<T> {
+    let mut result: List<T> = [];
+    for item in items {
+        if pred(item.clone()) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+fn fold_list<T, A>(items: List<T>, init: A, f: fn(A, T) -> A) -> A {
+    let mut acc = init;
+    for item in items {
+        acc = f(acc, item);
+    }
+    acc
+}
+
+fn zip_with<A, B, C>(a: List<A>, b: List<B>, f: fn(A, B) -> C) -> List<C> {
+    let mut result: List<C> = [];
+    let min_len = if a.len() < b.len() { a.len() } else { b.len() };
+    let mut i = 0;
+    while i < min_len {
+        result.push(f(a[i], b[i]));
+        i += 1;
+    }
+    result
+}
+
+// ============================================================================
+// Recursive data structures
+// ============================================================================
+
+type Tree<T> is
+    | Leaf(T)
+    | Node { left: Heap<Tree<T>>, value: T, right: Heap<Tree<T>> };
+
+@allow(unbounded_recursion)
+fn sum_tree(t: Tree<Int>) -> Int {
+    match t {
+        Leaf(v) => v,
+        Node { left, value, right } => sum_tree(*left) + value + sum_tree(*right),
+    }
+}
+
+@allow(unbounded_recursion)
+fn map_tree<T, U>(t: Tree<T>, f: fn(T) -> U) -> Tree<U> {
+    match t {
+        Leaf(v) => Leaf(f(v)),
+        Node { left, value, right } => Node {
+            left: Heap(map_tree(*left, f)),
+            value: f(value),
+            right: Heap(map_tree(*right, f)),
+        },
+    }
+}
+
+// ============================================================================
+// Expression evaluator
+// ============================================================================
+
+type Expr is
+    | Literal(Int)
+    | Add { left: Heap<Expr>, right: Heap<Expr> }
+    | Mul { left: Heap<Expr>, right: Heap<Expr> }
+    | Neg(Heap<Expr>);
+
+@allow(unbounded_recursion)
+fn eval(e: Expr) -> Int {
+    match e {
+        Literal(n) => n,
+        Add { left, right } => eval(*left) + eval(*right),
+        Mul { left, right } => eval(*left) * eval(*right),
+        Neg(e) => -eval(*e),
+    }
+}
+
+// ============================================================================
+// Main - testing complex bidirectional scenarios
+// ============================================================================
+
+fn main() {
+    // Section 1: Nested function calls with type propagation
+    let result: Int = outer(middle(inner, 42));
+    assert(result == 42);
+
+    let nested: Int = unwrap_val(transform(42, |x: Int| wrap(x)), 0);
+    assert(nested == 42);
+
+    // Section 2: Multi-parameter bidirectional
+    // A = Int, B = Text, C = Text all resolved bidirectionally
+    let combined: Text = multi_param(42, "!", |n: Int, s: Text| f"{n}{s}");
+    assert(combined == "42!");
+
+    // T = Int, U = Text, V = Int all inferred
+    let through: Int = nested_generics(
+        42,
+        |n: Int| f"{n}",
+        text_len_int,
+    );
+    assert(through == 2);
+
+    // Section 3: Complex closure inference
+    let multiplier: Int = 3;
+    let captured_closure = |x: Int| x * multiplier;
+    let applied: Int = captured_closure(7);
+    assert(applied == 21);
+
+    // Nested closures
+    let nested_closure: Text = apply_twice(
+        10,
+        |x: Int| x * 2,
+        |y: Int| f"Result: {y}",
+    );
+    assert(nested_closure == "Result: 20");
+
+    // make_adder closure
+    let add_five: fn(Int) -> Int = make_adder(5);
+    assert(add_five(10) == 15);
+    assert(add_five(0) == 5);
+
+    // Section 4: Match expression inference
+    let processed: Text = process(
+        Ok(42),
+        |n: Int| f"Success: {n}",
+        |e: Text| f"Error: {e}",
+    );
+    assert(processed == "Success: 42");
+
+    let processed_err: Text = process(
+        Err("fail"),
+        |n: Int| f"Success: {n}",
+        |e: Text| f"Error: {e}",
+    );
+    assert(processed_err == "Error: fail");
+
+    // Section 5: Recursive data structure with bidirectional type flow
+    let tree: Tree<Int> = Node {
+        left: Heap(Node {
+            left: Heap(Leaf(1)),
+            value: 2,
+            right: Heap(Leaf(3)),
+        }),
+        value: 4,
+        right: Heap(Leaf(5)),
+    };
+
+    assert(sum_tree(tree) == 15);
+
+    // map_tree: T = Int, U = Text
+    let text_tree: Tree<Text> = map_tree(
+        Node {
+            left: Heap(Leaf(1)),
+            value: 2,
+            right: Heap(Leaf(3)),
+        },
+        |n: Int| f"n{n}",
+    );
+    match text_tree {
+        Node { value, .. } => assert(value == "n2"),
+        _ => assert(false),
+    }
+
+    // Section 6: Expression evaluator
+    // 2 + (3 * 4) = 14
+    let expr: Expr = Add {
+        left: Heap(Literal(2)),
+        right: Heap(Mul {
+            left: Heap(Literal(3)),
+            right: Heap(Literal(4)),
+        }),
+    };
+    assert(eval(expr) == 14);
+
+    // -(5 + 3) = -8
+    let neg_expr: Expr = Neg(Heap(Add {
+        left: Heap(Literal(5)),
+        right: Heap(Literal(3)),
+    }));
+    assert(eval(neg_expr) == -8);
+
+    // Section 7: Tuple and collection inference
+    let p: (Int, Text) = pair(1, "hello");
+    let a: Int = first(p);
+    let b: Text = second(pair(2, "world"));
+    assert(a == 1);
+    assert(b == "world");
+
+    let nested_tuple: ((Int, Text), (Float, Bool)) = (
+        (1, "a"),
+        (2.0, true),
+    );
+    let nt0 = nested_tuple.0;
+    let nt1 = nested_tuple.1;
+    assert(nt0.0 == 1);
+    assert(nt1.1 == true);
+
+    // Section 8: Complex list operations with bidirectional inference
+    // Pipeline: square all, then filter > 5, then sum
+    let nums = [1, 2, 3, 4, 5];
+    let squared: List<Int> = map_list(nums, |x: Int| x * x);
+    let large: List<Int> = filter_list(squared, |x: Int| x > 5);
+    let total: Int = fold_list(large, 0, |acc: Int, x: Int| acc + x);
+    // 9 + 16 + 25 = 50
+    assert(total == 50);
+
+    // zip_with: types A=Int, B=Text, C=Text inferred
+    let combined_list: List<Text> = zip_with(
+        [1, 2, 3],
+        ["a", "b", "c"],
+        |n: Int, s: Text| f"{n}:{s}",
+    );
+    assert(combined_list == ["1:a", "2:b", "3:c"]);
+
+    // Section 9: Chained generic inference
+    let double_wrapped: Maybe<Maybe<Int>> = wrap(wrap(42));
+    match double_wrapped {
+        Some(Some(n)) => assert(n == 42),
+        _ => assert(false),
+    }
+
+    // Section 10: Closure returning closure
+    fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+        |x: A| g(f(x))
+    }
+
+    let add1 = |x: Int| x + 1;
+    let double = |x: Int| x * 2;
+    let add1_then_double = compose(add1, double);
+    assert(add1_then_double(5) == 12);  // (5+1)*2 = 12
+
+    // Section 11: Maybe chain inference
+    fn maybe_map<T, U>(opt: Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+        match opt {
+            Some(v) => Some(f(v)),
+            None => None,
+        }
+    }
+
+    fn maybe_and_then<T, U>(opt: Maybe<T>, f: fn(T) -> Maybe<U>) -> Maybe<U> {
+        match opt {
+            Some(v) => f(v),
+            None => None,
+        }
+    }
+
+    // T = Int, U = Text
+    let mapped: Maybe<Text> = maybe_map(Some(42), |n: Int| f"val: {n}");
+    assert(mapped == Some("val: 42"));
+
+    // Chain: Int -> Int -> Text
+    let chained: Maybe<Text> = maybe_and_then(
+        Some(10),
+        |x: Int| maybe_map(Some(x * 2), |n: Int| f"n={n}"),
+    );
+    assert(chained == Some("n=20"));
+
+    print("Complex bidirectional inference tests passed!");
+}

@@ -1,0 +1,150 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, statistics, mean, variance, median, running-average
+// @expected-exit: 0
+
+// Tests mean, variance, median, min/max, range, and running average.
+// Uses integer arithmetic; some values scaled by 100 or 1000 for precision.
+
+fn min_val(a: Int, b_val: Int) -> Int {
+    if (a < b_val) { a } else { b_val }
+}
+
+fn max_val(a: Int, b_val: Int) -> Int {
+    if (a > b_val) { a } else { b_val }
+}
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn main() -> Int {
+    // Dataset: [4, 7, 2, 9, 1, 5, 8, 3, 6, 10]
+    let data = [4, 7, 2, 9, 1, 5, 8, 3, 6, 10, 0, 0, 0, 0, 0, 0];
+    let n = 10;
+
+    // Test 1: Sum
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < n) {
+        sum = sum + data[i];
+        i = i + 1;
+    }
+    // 4+7+2+9+1+5+8+3+6+10 = 55
+    assert_eq(sum, 55);
+
+    // Test 2: Mean (integer division)
+    // mean = 55 / 10 = 5
+    let mean = sum / n;
+    assert_eq(mean, 5);
+
+    // Test 3: Variance (scaled by n to avoid fractions)
+    // variance * n = sum((xi - mean)^2)
+    // Deviations from mean (5): -1, 2, -3, 4, -4, 0, 3, -2, 1, 5
+    // Squared: 1, 4, 9, 16, 16, 0, 9, 4, 1, 25
+    // Sum of squared deviations = 85
+    let mut var_sum = 0;
+    i = 0;
+    while (i < n) {
+        let diff = data[i] - mean;
+        var_sum = var_sum + diff * diff;
+        i = i + 1;
+    }
+    assert_eq(var_sum, 85);
+
+    // Test 4: Variance * 10 (for integer precision)
+    // variance = 85/10 = 8.5 -> *10 = 85
+    let var_x10 = var_sum * 10 / n;
+    assert_eq(var_x10, 85);
+
+    // Test 5: Min and Max
+    let mut min_v = data[0];
+    let mut max_v = data[0];
+    i = 1;
+    while (i < n) {
+        min_v = min_val(min_v, data[i]);
+        max_v = max_val(max_v, data[i]);
+        i = i + 1;
+    }
+    assert_eq(min_v, 1);
+    assert_eq(max_v, 10);
+
+    // Test 6: Range = max - min
+    let range_v = max_v - min_v;
+    assert_eq(range_v, 9);
+
+    // Test 7: Median (sort first, then pick middle two and average)
+    // Sorting in-place using selection sort on a copy
+    let mut sorted = [4, 7, 2, 9, 1, 5, 8, 3, 6, 10, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < n) {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while (j < n) {
+            if (sorted[j] < sorted[min_idx]) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        let tmp = sorted[i];
+        sorted[i] = sorted[min_idx];
+        sorted[min_idx] = tmp;
+        i = i + 1;
+    }
+    // Sorted: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert_eq(sorted[0], 1);
+    assert_eq(sorted[9], 10);
+    // Median of even count: average of sorted[4] and sorted[5]
+    // (5 + 6) / 2 = 5 (integer division)
+    let median = (sorted[4] + sorted[5]) / 2;
+    assert_eq(median, 5);
+
+    // Test 8: Running average
+    // Running avg after k elements = sum(first k) / k
+    // After 1: 4/1 = 4
+    // After 2: 11/2 = 5
+    // After 3: 13/3 = 4
+    // After 5: (4+7+2+9+1)/5 = 23/5 = 4
+    let mut running_sum = 0;
+    let mut running_avgs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < n) {
+        running_sum = running_sum + data[i];
+        running_avgs[i] = running_sum / (i + 1);
+        i = i + 1;
+    }
+    assert_eq(running_avgs[0], 4);    // 4/1
+    assert_eq(running_avgs[4], 4);    // 23/5
+    assert_eq(running_avgs[9], 5);    // 55/10
+
+    // Test 9: Mean absolute deviation (MAD)
+    // MAD = sum(|xi - mean|) / n
+    // |deviations|: 1, 2, 3, 4, 4, 0, 3, 2, 1, 5 = 25
+    // MAD = 25/10 = 2
+    let mut mad_sum = 0;
+    i = 0;
+    while (i < n) {
+        mad_sum = mad_sum + abs_val(data[i] - mean);
+        i = i + 1;
+    }
+    assert_eq(mad_sum, 25);
+    let mad = mad_sum / n;
+    assert_eq(mad, 2);
+
+    // Test 10: Sum of squares identity
+    // sum((xi - m)^2) = sum(xi^2) - 2*m*sum(xi) + n*m^2 for any m
+    // With integer mean m=5: 385 - 2*5*55 + 10*25 = 385 - 550 + 250 = 85
+    let mut sum_sq = 0;
+    i = 0;
+    while (i < n) {
+        sum_sq = sum_sq + data[i] * data[i];
+        i = i + 1;
+    }
+    // 16+49+4+81+1+25+64+9+36+100 = 385
+    assert_eq(sum_sq, 385);
+    assert_eq(sum_sq - 2 * mean * sum + n * mean * mean, var_sum);
+
+    print("Statistics: PASS");
+    0
+}

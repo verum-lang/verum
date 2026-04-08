@@ -1,0 +1,307 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, references
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Basic CBGR reference creation and dereference.
+// Tests Tier 0 managed references (&x) and dereference (*ref).
+// Verifies generation-tracked references correctly read original values.
+
+// =============================================================================
+// Type definitions
+// =============================================================================
+
+type Vec2 is { x: Int, y: Int };
+type Vec3 is { x: Int, y: Int, z: Int };
+type Pair is { first: Int, second: Int };
+
+// =============================================================================
+// Helper functions taking references
+// =============================================================================
+
+fn read_int_ref(r: &Int) -> Int {
+    *r
+}
+
+fn add_refs(a: &Int, b: &Int) -> Int {
+    *a + *b
+}
+
+fn sum_three_refs(a: &Int, b: &Int, c: &Int) -> Int {
+    *a + *b + *c
+}
+
+fn double_ref(r: &Int) -> Int {
+    *r + *r
+}
+
+fn square_via_ref(r: &Int) -> Int {
+    *r * *r
+}
+
+// =============================================================================
+// Test: Basic reference creation and dereference
+// =============================================================================
+
+fn test_basic_ref_int() {
+    let x = 42;
+    let r = &x;
+    assert_eq(*r, 42);
+}
+
+fn test_basic_ref_zero() {
+    let x = 0;
+    let r = &x;
+    assert_eq(*r, 0);
+}
+
+fn test_basic_ref_negative() {
+    let x = -100;
+    let r = &x;
+    assert_eq(*r, -100);
+}
+
+fn test_basic_ref_large() {
+    let x = 999999;
+    let r = &x;
+    assert_eq(*r, 999999);
+}
+
+// =============================================================================
+// Test: Deref preserves original value
+// =============================================================================
+
+fn test_deref_matches_original() {
+    let val = 77;
+    let r = &val;
+    let derefed = *r;
+    assert_eq(derefed, val);
+    assert_eq(derefed, 77);
+}
+
+fn test_deref_does_not_mutate() {
+    let x = 50;
+    let r = &x;
+    let a = *r;
+    let b = *r;
+    let c = *r;
+    assert_eq(a, 50);
+    assert_eq(b, 50);
+    assert_eq(c, 50);
+    assert_eq(x, 50);
+}
+
+// =============================================================================
+// Test: Multiple references to the same variable
+// =============================================================================
+
+fn test_multiple_refs_same_var() {
+    let x = 33;
+    let r1 = &x;
+    let r2 = &x;
+    let r3 = &x;
+    assert_eq(*r1, 33);
+    assert_eq(*r2, 33);
+    assert_eq(*r3, 33);
+}
+
+fn test_refs_to_different_vars() {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let ra = &a;
+    let rb = &b;
+    let rc = &c;
+    assert_eq(*ra, 10);
+    assert_eq(*rb, 20);
+    assert_eq(*rc, 30);
+    assert_eq(*ra + *rb + *rc, 60);
+}
+
+// =============================================================================
+// Test: Passing references to functions
+// =============================================================================
+
+fn test_ref_to_function() {
+    let x = 42;
+    assert_eq(read_int_ref(&x), 42);
+}
+
+fn test_two_refs_to_function() {
+    let a = 15;
+    let b = 27;
+    assert_eq(add_refs(&a, &b), 42);
+}
+
+fn test_three_refs_to_function() {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    assert_eq(sum_three_refs(&a, &b, &c), 60);
+}
+
+fn test_ref_double() {
+    let x = 21;
+    assert_eq(double_ref(&x), 42);
+}
+
+fn test_ref_square() {
+    let x = 7;
+    assert_eq(square_via_ref(&x), 49);
+}
+
+// =============================================================================
+// Test: Arithmetic with dereferenced values
+// =============================================================================
+
+fn test_deref_arithmetic() {
+    let a = 100;
+    let b = 37;
+    let ra = &a;
+    let rb = &b;
+    assert_eq(*ra + *rb, 137);
+    assert_eq(*ra - *rb, 63);
+    assert_eq(*ra * *rb, 3700);
+    assert_eq(*ra / *rb, 2);
+    assert_eq(*ra % *rb, 26);
+}
+
+fn test_deref_comparisons() {
+    let a = 10;
+    let b = 20;
+    let ra = &a;
+    let rb = &b;
+    assert(*ra < *rb);
+    assert(*rb > *ra);
+    assert(*ra != *rb);
+    assert(*ra == 10);
+    assert(*rb == 20);
+}
+
+// =============================================================================
+// Test: References in conditional expressions
+// =============================================================================
+
+fn test_ref_in_conditional() {
+    let x = 42;
+    let r = &x;
+    let result = if *r > 40 { 1 } else { 0 };
+    assert_eq(result, 1);
+}
+
+fn test_ref_in_while_loop() {
+    let limit = 5;
+    let rlimit = &limit;
+    let mut sum = 0;
+    let mut i = 0;
+    while i < *rlimit {
+        sum = sum + i;
+        i = i + 1;
+    }
+    assert_eq(sum, 10);
+}
+
+// =============================================================================
+// Test: References to record fields (via whole record access)
+// =============================================================================
+
+fn test_ref_record_access() {
+    let p = Vec2 { x: 3, y: 4 };
+    let px = p.x;
+    let py = p.y;
+    let rpx = &px;
+    let rpy = &py;
+    assert_eq(*rpx, 3);
+    assert_eq(*rpy, 4);
+    assert_eq(*rpx + *rpy, 7);
+}
+
+fn test_ref_record_vec3() {
+    let v = Vec3 { x: 1, y: 2, z: 3 };
+    let vx = v.x;
+    let vy = v.y;
+    let vz = v.z;
+    let rx = &vx;
+    let ry = &vy;
+    let rz = &vz;
+    assert_eq(*rx + *ry + *rz, 6);
+}
+
+fn test_ref_to_computed_field() {
+    let p = Pair { first: 100, second: 200 };
+    let total = p.first + p.second;
+    let r = &total;
+    assert_eq(*r, 300);
+}
+
+// =============================================================================
+// Test: Bool references
+// =============================================================================
+
+fn test_ref_bool_true() {
+    let flag = true;
+    let r = &flag;
+    assert(*r);
+}
+
+fn test_ref_bool_false() {
+    let flag = false;
+    let r = &flag;
+    assert(!(*r));
+}
+
+// =============================================================================
+// Test: Chained operations through references
+// =============================================================================
+
+fn test_chained_ref_operations() {
+    let a = 5;
+    let b = 10;
+    let ra = &a;
+    let rb = &b;
+    let sum = *ra + *rb;
+    let rsum = &sum;
+    assert_eq(*rsum, 15);
+    let doubled = *rsum * 2;
+    let rdoubled = &doubled;
+    assert_eq(*rdoubled, 30);
+}
+
+fn test_ref_to_function_result() {
+    let a = 7;
+    let b = 8;
+    let product = a * b;
+    let r = &product;
+    assert_eq(*r, 56);
+}
+
+fn main() -> Int {
+    test_basic_ref_int();
+    test_basic_ref_zero();
+    test_basic_ref_negative();
+    test_basic_ref_large();
+    test_deref_matches_original();
+    test_deref_does_not_mutate();
+    test_multiple_refs_same_var();
+    test_refs_to_different_vars();
+    test_ref_to_function();
+    test_two_refs_to_function();
+    test_three_refs_to_function();
+    test_ref_double();
+    test_ref_square();
+    test_deref_arithmetic();
+    test_deref_comparisons();
+    test_ref_in_conditional();
+    test_ref_in_while_loop();
+    test_ref_record_access();
+    test_ref_record_vec3();
+    test_ref_to_computed_field();
+    test_ref_bool_true();
+    test_ref_bool_false();
+    test_chained_ref_operations();
+    test_ref_to_function_result();
+    print("[OK] 351_interp_cbgr_ref_basic");
+    0
+}

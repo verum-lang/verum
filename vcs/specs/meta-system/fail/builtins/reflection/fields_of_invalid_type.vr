@@ -1,0 +1,43 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, reflection, type, error
+// @description: Test that fields_of fails for non-struct types
+// @expected-error: E101
+
+// =============================================================================
+// FIELDS_OF INVALID TYPE TESTS
+// =============================================================================
+
+type Color is Red | Green | Blue;
+
+// fields_of on enum type should fail
+meta fn test_fields_of_enum() -> List<FieldInfo> using [MetaTypes] {
+    fields_of(Color)  // ERROR: Color is an enum, not a struct
+}
+
+// fields_of on primitive type should fail
+meta fn test_fields_of_primitive() -> List<FieldInfo> using [MetaTypes] {
+    fields_of(Int)  // ERROR: Int is a primitive, not a struct
+}
+
+// fields_of on tuple type should fail
+meta fn test_fields_of_tuple() -> List<FieldInfo> using [MetaTypes] {
+    fields_of((Int, Bool))  // ERROR: tuple is not a struct
+}
+
+// variants_of on struct type should fail
+type Point is { x: Int, y: Int };
+
+meta fn test_variants_of_struct() -> List<VariantInfo> using [MetaTypes] {
+    variants_of(Point)  // ERROR: Point is a struct, not an enum
+}
+
+// variants_of on primitive type should fail
+meta fn test_variants_of_primitive() -> List<VariantInfo> using [MetaTypes] {
+    variants_of(Bool)  // ERROR: Bool is a primitive (not enum despite true/false)
+}
+
+fn main() {
+    @const assert(list_len(test_fields_of_enum()) > 0);
+}

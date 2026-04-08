@@ -1,0 +1,24 @@
+// @test: run-interpreter-panic
+// @expected-panic: CBGR use-after-free detected
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, dangling, runtime, negative-test
+
+/// Test RUNTIME detection of dangling references via CBGR.
+/// Verum does NOT have a compile-time borrow checker.
+/// CBGR (Capability-Based Generational References) catches this at runtime.
+/// When 'local' goes out of scope, its generation is bumped.
+/// Dereferencing 'dangling' checks generation and panics on mismatch.
+/// Spec: 26-cbgr-implementation.md#dangling-prevention
+
+fn main() {
+    let dangling: &Int;
+    {
+        let local = 42;
+        dangling = &local;  // Reference stored - CBGR tracks generation
+    }
+    // local is dropped, generation bumped
+
+    // CBGR detects generation mismatch at runtime
+    print(*dangling);  // PANIC: generation mismatch (local no longer exists)
+}

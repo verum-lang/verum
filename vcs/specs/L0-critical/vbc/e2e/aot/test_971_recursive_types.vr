@@ -1,0 +1,216 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: recursive, types, tree, heap, generics
+// @description: Recursive data types with Heap allocation
+
+type Tree is
+    Leaf(Int)
+    | Node { value: Int, left: Heap<Tree>, right: Heap<Tree> };
+
+@allow(unbounded_recursion)
+fn tree_sum(t: &Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Node { value, left, right } => {
+            value + tree_sum(left) + tree_sum(right)
+        }
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_depth(t: &Tree) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node { value: _, left, right } => {
+            let ld = tree_depth(left);
+            let rd = tree_depth(right);
+            if ld > rd { 1 + ld } else { 1 + rd }
+        }
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_count(t: &Tree) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Node { value: _, left, right } => {
+            1 + tree_count(left) + tree_count(right)
+        }
+    }
+}
+
+// Test 1: Single leaf
+fn test_leaf() -> Int {
+    let t = Leaf(42);
+    let s = tree_sum(&t);
+    if s != 42 {
+        print(f"FAIL leaf: expected 42, got {s}");
+        return 1;
+    }
+    print("  leaf: OK");
+    0
+}
+
+// Test 2: Simple tree
+fn test_simple_tree() -> Int {
+    let t = Node {
+        value: 10,
+        left: Heap(Leaf(5)),
+        right: Heap(Leaf(15)),
+    };
+    let s = tree_sum(&t);
+    if s != 30 {
+        print(f"FAIL simple_tree sum: expected 30, got {s}");
+        return 1;
+    }
+    let d = tree_depth(&t);
+    if d != 2 {
+        print(f"FAIL simple_tree depth: expected 2, got {d}");
+        return 1;
+    }
+    print("  simple_tree: OK");
+    0
+}
+
+// Test 3: Deeper tree
+fn test_deep_tree() -> Int {
+    let t = Node {
+        value: 1,
+        left: Heap(Node {
+            value: 2,
+            left: Heap(Leaf(3)),
+            right: Heap(Leaf(4)),
+        }),
+        right: Heap(Node {
+            value: 5,
+            left: Heap(Leaf(6)),
+            right: Heap(Leaf(7)),
+        }),
+    };
+    // 1 + 2 + 3 + 4 + 5 + 6 + 7 = 28
+    let s = tree_sum(&t);
+    if s != 28 {
+        print(f"FAIL deep_tree sum: expected 28, got {s}");
+        return 1;
+    }
+    let d = tree_depth(&t);
+    if d != 3 {
+        print(f"FAIL deep_tree depth: expected 3, got {d}");
+        return 1;
+    }
+    let c = tree_count(&t);
+    if c != 7 {
+        print(f"FAIL deep_tree count: expected 7, got {c}");
+        return 1;
+    }
+    print("  deep_tree: OK");
+    0
+}
+
+// Linked list type
+type IntList is Nil | Cons(Int, Heap<IntList>);
+
+@allow(unbounded_recursion)
+fn list_sum(l: &IntList) -> Int {
+    match l {
+        Nil => 0,
+        Cons(val, rest) => val + list_sum(rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_len(l: &IntList) -> Int {
+    match l {
+        Nil => 0,
+        Cons(_, rest) => 1 + list_len(rest),
+    }
+}
+
+// Test 4: Linked list
+fn test_linked_list() -> Int {
+    let l = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil))))))));
+    let s = list_sum(&l);
+    if s != 10 {
+        print(f"FAIL linked_list sum: expected 10, got {s}");
+        return 1;
+    }
+    let n = list_len(&l);
+    if n != 4 {
+        print(f"FAIL linked_list len: expected 4, got {n}");
+        return 1;
+    }
+    print("  linked_list: OK");
+    0
+}
+
+// Test 5: Build linked list iteratively
+fn build_list(n: Int) -> IntList {
+    let mut result = Nil;
+    let mut i = n;
+    while i > 0 {
+        result = Cons(i, Heap(result));
+        i = i - 1;
+    }
+    result
+}
+
+fn test_build_list() -> Int {
+    let l = build_list(5);
+    let s = list_sum(&l);
+    // 1 + 2 + 3 + 4 + 5 = 15
+    if s != 15 {
+        print(f"FAIL build_list: expected 15, got {s}");
+        return 1;
+    }
+    print("  build_list: OK");
+    0
+}
+
+// Test 6: Asymmetric tree
+fn test_asymmetric() -> Int {
+    let t = Node {
+        value: 100,
+        left: Heap(Node {
+            value: 50,
+            left: Heap(Node {
+                value: 25,
+                left: Heap(Leaf(10)),
+                right: Heap(Leaf(15)),
+            }),
+            right: Heap(Leaf(75)),
+        }),
+        right: Heap(Leaf(200)),
+    };
+    let s = tree_sum(&t);
+    // 100 + 50 + 25 + 10 + 15 + 75 + 200 = 475
+    if s != 475 {
+        print(f"FAIL asymmetric: expected 475, got {s}");
+        return 1;
+    }
+    let d = tree_depth(&t);
+    if d != 4 {
+        print(f"FAIL asymmetric depth: expected 4, got {d}");
+        return 1;
+    }
+    print("  asymmetric: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Recursive Type Tests:");
+    let mut failures = 0;
+    failures = failures + test_leaf();
+    failures = failures + test_simple_tree();
+    failures = failures + test_deep_tree();
+    failures = failures + test_linked_list();
+    failures = failures + test_build_list();
+    failures = failures + test_asymmetric();
+
+    if failures == 0 {
+        print("All recursive type tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

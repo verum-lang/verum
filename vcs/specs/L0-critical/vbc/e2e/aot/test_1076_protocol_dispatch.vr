@@ -1,0 +1,214 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: protocol, implement, dispatch, polymorphism
+// @description: Test protocol-like patterns using sum types with implement blocks
+
+// Sum type with methods
+type Shape is Circle(Int) | Rect(Int, Int);
+
+implement Shape {
+    fn area(&self) -> Int {
+        match self {
+            Circle(r) => r * r * 3,
+            Rect(w, h) => w * h,
+        }
+    }
+
+    fn name(&self) -> Text {
+        match self {
+            Circle(_) => "circle",
+            Rect(_, _) => "rect",
+        }
+    }
+}
+
+fn test_shape() -> Int {
+    let c = Circle(5);
+    let r = Rect(3, 4);
+
+    let ca = c.area();
+    let ra = r.area();
+
+    if ca != 75 {
+        print(f"FAIL shape: circle area={ca}, expected 75");
+        return 1;
+    }
+    if ra != 12 {
+        print(f"FAIL shape: rect area={ra}, expected 12");
+        return 1;
+    }
+    if c.name() != "circle" {
+        print("FAIL shape: circle name wrong");
+        return 1;
+    }
+    if r.name() != "rect" {
+        print("FAIL shape: rect name wrong");
+        return 1;
+    }
+
+    print("  shape: OK");
+    0
+}
+
+// Builder pattern with static methods
+type Config is {
+    width: Int,
+    height: Int,
+    title: Text,
+};
+
+implement Config {
+    fn new() -> Config {
+        Config { width: 800, height: 600, title: "Default" }
+    }
+
+    fn with_size(w: Int, h: Int) -> Config {
+        Config { width: w, height: h, title: "Custom" }
+    }
+}
+
+fn test_builder() -> Int {
+    let c1 = Config.new();
+    if c1.width != 800 || c1.height != 600 {
+        print(f"FAIL builder: default size {c1.width}x{c1.height}");
+        return 1;
+    }
+
+    let c2 = Config.with_size(1920, 1080);
+    if c2.width != 1920 || c2.height != 1080 {
+        print(f"FAIL builder: custom size {c2.width}x{c2.height}");
+        return 1;
+    }
+    if c2.title != "Custom" {
+        print("FAIL builder: title wrong");
+        return 1;
+    }
+
+    print("  builder: OK");
+    0
+}
+
+// State machine pattern
+type State is Idle | Running(Int) | Done(Int);
+
+implement State {
+    fn start(&self) -> State {
+        match self {
+            Idle => Running(0),
+            Running(n) => Running(n),
+            Done(n) => Done(n),
+        }
+    }
+
+    fn tick(&self) -> State {
+        match self {
+            Idle => Idle,
+            Running(n) => {
+                if n >= 10 {
+                    Done(n)
+                } else {
+                    Running(n + 1)
+                }
+            }
+            Done(n) => Done(n),
+        }
+    }
+
+    fn value(&self) -> Int {
+        match self {
+            Idle => -1,
+            Running(n) => n,
+            Done(n) => n,
+        }
+    }
+
+    fn is_done(&self) -> Bool {
+        match self {
+            Done(_) => true,
+            Idle => false,
+            Running(_) => false,
+        }
+    }
+}
+
+fn test_state_machine() -> Int {
+    let mut s = Idle;
+    s = s.start();
+
+    // Run 5 ticks
+    let mut i = 0;
+    while i < 5 {
+        s = s.tick();
+        i = i + 1;
+    }
+
+    if s.value() != 5 {
+        print(f"FAIL state: value={s.value()}, expected 5");
+        return 1;
+    }
+
+    // Run to completion
+    while !s.is_done() {
+        s = s.tick();
+    }
+
+    if s.value() != 10 {
+        print(f"FAIL state: final={s.value()}, expected 10");
+        return 1;
+    }
+
+    print("  state_machine: OK");
+    0
+}
+
+// Multiple types with independent implement blocks
+type Counter is { count: Int, max_val: Int };
+
+implement Counter {
+    fn new(max: Int) -> Counter {
+        Counter { count: 0, max_val: max }
+    }
+
+    fn increment(&mut self) -> Bool {
+        if self.count < self.max_val {
+            self.count = self.count + 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn value(&self) -> Int {
+        self.count
+    }
+}
+
+fn test_counter() -> Int {
+    let mut c = Counter.new(5);
+    c.increment();
+    c.increment();
+    c.increment();
+    if c.value() != 3 {
+        print(f"FAIL counter: value={c.value()}, expected 3");
+        return 1;
+    }
+    print("  counter: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Protocol Dispatch Tests:");
+    let mut failures = 0;
+    failures = failures + test_shape();
+    failures = failures + test_builder();
+    failures = failures + test_state_machine();
+    failures = failures + test_counter();
+
+    if failures == 0 {
+        print("All protocol dispatch tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,117 @@
+// @test: run
+// @expected-stdout: UserService created with logger
+// [INFO] Creating user: Alice
+// [INFO] User created with id: 1
+// [INFO] Fetching user: 1
+// User found: Alice
+// @tier: 0
+// @level: L2
+// @tags: di, contexts, composition
+// @description: Tests combination of DI (@injectable) and dynamic contexts (using)
+//
+// This demonstrates how injectable services can also depend on contexts,
+// combining compile-time DI resolution with runtime context provision.
+
+// Dynamic context for logging
+context Logger {
+    fn info(message: Text);
+    fn error(message: Text);
+}
+
+// Implementation of Logger context
+type ConsoleLogger is {
+    prefix: Text,
+};
+
+implement ConsoleLogger {
+    fn new(prefix: Text) -> Self {
+        Self { prefix }
+    }
+}
+
+implement Logger for ConsoleLogger {
+    fn info(message: Text) {
+        println("[INFO] " + message);
+    }
+
+    fn error(message: Text) {
+        println("[ERROR] " + message);
+    }
+}
+
+// Injectable service that uses a context
+@injectable(Scope.Singleton)
+type UserService is {
+    users: Map<Int, User>,
+    next_id: Int,
+};
+
+implement UserService {
+    @inject
+    fn new() -> Self using [Logger] {
+        Logger.info("UserService initialized");
+        println("UserService created with logger");
+        Self {
+            users: Map.new(),
+            next_id: 1,
+        }
+    }
+
+    fn create_user(&mut self, name: Text) -> User using [Logger] {
+        Logger.info("Creating user: " + name);
+        let user = User {
+            id: self.next_id,
+            name,
+        };
+        self.users.insert(self.next_id, user);
+        self.next_id += 1;
+        Logger.info("User created with id: " + user.id.to_text());
+        user
+    }
+
+    fn get_user(&self, id: Int) -> Maybe<User> using [Logger] {
+        Logger.info("Fetching user: " + id.to_text());
+        self.users.get(id)
+    }
+}
+
+type User is {
+    id: Int,
+    name: Text,
+};
+
+// Another injectable that depends on UserService
+@injectable(Scope.Singleton)
+type AuthService is {
+    user_service: UserService,
+};
+
+implement AuthService {
+    @inject
+    fn new(user_service: UserService) -> Self using [Logger] {
+        Logger.info("AuthService initialized with UserService");
+        Self { user_service }
+    }
+
+    fn authenticate(&self, user_id: Int) -> Bool using [Logger] {
+        Logger.info("Authenticating user: " + user_id.to_text());
+        self.user_service.get_user(user_id).is_some()
+    }
+}
+
+fn main() {
+    // First, provide the context
+    provide Logger = ConsoleLogger.new("app");
+
+    // Now inject services - they can use the provided context
+    let mut user_service = inject UserService;
+
+    // Create a user (method uses Logger context)
+    let user = user_service.create_user("Alice");
+
+    // Retrieve the user
+    match user_service.get_user(1) {
+        Some(u) => println("User found: " + u.name),
+        None => println("User not found"),
+    }
+}

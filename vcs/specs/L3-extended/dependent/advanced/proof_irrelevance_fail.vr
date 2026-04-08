@@ -1,0 +1,42 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, proof-irrelevance, advanced, error
+// @expected-error: E400 "Type mismatch"
+
+/// Proof irrelevance - failure cases
+
+/// Proof witness type
+type ProofWit<T> is | PW;
+
+/// Conjunction
+type And<A, B> is { left: A, right: B };
+
+/// ERROR: Wrong field types in conjunction
+fn and_wrong() -> And<Int, Text> {
+    And { left: "wrong", right: 42 }  // ERROR: Text != Int, Int != Text
+}
+
+/// ERROR: Wrong return type from proof
+fn proof_wrong() -> ProofWit<Int> {
+    42  // ERROR: Int != ProofWit<Int>
+}
+
+/// ERROR: Use proof as concrete type
+fn proof_as_int(p: ProofWit<Int>) -> Int {
+    p  // ERROR: ProofWit<Int> != Int
+}
+
+/// Certified value
+type Certified<T> is { value: T, certified: Bool };
+
+/// ERROR: Wrong value type
+fn cert_wrong() -> Certified<Int> {
+    Certified { value: "hello", certified: true }  // ERROR: Text != Int
+}
+
+fn main() {
+    let _ = and_wrong();
+    let _ = proof_wrong();
+    let _ = cert_wrong();
+}

@@ -1,0 +1,201 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, tuple, destructuring
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Point is { x: Int, y: Int };
+type Map<K, V> is { entries: List<(K, V)> };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+
+// Helper functions
+fn get_pair() -> (Int, Int) { (0, 0) }
+fn get_person_info() -> (Text, Int) { ("Alice", 30) }
+fn combine<A, B>(a: A, b: B) { }
+fn process<A, B>(a: A, b: B) { }
+fn origin<T>(p: T) { }
+fn other(x: Int, y: Int) { }
+fn handle_error<E>(e: E) { }
+fn unreachable() { }
+
+fn test_simple_tuple_destructuring() {
+    let pair = (1, 2);
+    let triple = (10, 20, 30);
+
+    // Simple tuple destructuring
+    let (a, b) = pair;
+    let (x, y, z) = triple;
+}
+
+fn test_tuple_in_match() {
+    let pair = (5, 10);
+
+    // Tuple in match
+    match pair {
+        (0, 0) => "origin",
+        (x, 0) => "on x-axis",
+        (0, y) => "on y-axis",
+        (x, y) => "elsewhere",
+    };
+}
+
+fn test_tuple_with_types() {
+    // Tuple with types
+    let (a, b): (Int, Int) = get_pair();
+    let (name, age): (Text, Int) = get_person_info();
+}
+
+fn test_tuple_with_wildcards() {
+    let pair = (1, 2);
+    let triple = (10, 20, 30);
+
+    // Tuple with wildcards
+    let (a, _) = pair;
+    let (_, _, c) = triple;
+    let (_, b, _) = triple;
+}
+
+fn test_nested_tuples() {
+    let nested = ((1, 2), 3);
+    let right_nested = (1, (2, 3));
+    let double_nested = ((1, 2), (3, 4));
+
+    // Nested tuples
+    let ((a, b), c) = nested;
+    let (a2, (b2, c2)) = right_nested;
+    let ((a3, b3), (c3, d3)) = double_nested;
+}
+
+// Tuple in function return
+fn split(pair: (Int, Int)) -> (Int, Int) {
+    let (a, b) = pair;
+    (b, a)
+}
+
+fn test_tuple_pattern_in_closure() {
+    // Tuple pattern in closure
+    let sum = |(a, b)| a + b;
+    let swap = |(x, y)| (y, x);
+}
+
+fn test_tuple_pattern_in_for_loop() {
+    let map: List<(Int, Int)> = Nil;
+
+    // Tuple pattern in for loop
+    for (key, value) in map {
+        process(key, value);
+    }
+}
+
+fn test_tuple_pattern_in_if_let() {
+    let opt_a: Maybe<Int> = Some(1);
+    let opt_b: Maybe<Int> = Some(2);
+
+    // Tuple pattern in if-let
+    if let (Some(a), Some(b)) = (opt_a, opt_b) {
+        combine(a, b)
+    }
+}
+
+fn test_single_element_tuple() {
+    let one_tuple = (42,);
+
+    // Single-element tuple (if distinct from parentheses)
+    let (single,) = one_tuple;
+}
+
+fn test_empty_tuple() {
+    let unit_value = ();
+
+    // Empty tuple (unit)
+    let () = unit_value;
+}
+
+fn test_large_tuple() {
+    let six_tuple = (1, 2, 3, 4, 5, 6);
+
+    // Large tuple
+    let (a, b, c, d, e, f) = six_tuple;
+}
+
+fn test_tuple_with_complex_inner_patterns() {
+    let option: Maybe<Int> = Some(1);
+    let result: Result<Int, Text> = Ok(2);
+    let point = Point { x: 10, y: 20 };
+    let value = 42;
+
+    // Tuple with complex inner patterns
+    let (Some(a), Ok(b)) = (option, result);
+    let (Point { x, y }, z) = (point, value);
+}
+
+fn test_tuple_pattern_with_at_binding() {
+    let pair = (0, 0);
+
+    // Tuple pattern with @ binding
+    match pair {
+        p @ (0, 0) => origin(p),
+        (x, y) => other(x, y),
+    };
+}
+
+fn test_tuple_with_reference_patterns() {
+    let ref_pair = (&1, &2);
+    let pair = (1, 2);
+
+    // Tuple with reference patterns
+    let (&a, &b) = ref_pair;
+    let (ref a2, ref b2) = pair;
+}
+
+fn test_tuple_with_mutable_binding() {
+    let pair = (1, 2);
+
+    // Tuple with mutable binding
+    let (mut a, b) = pair;
+    let (a2, mut b2) = pair;
+    let (mut a3, mut b3) = pair;
+}
+
+fn test_tuple_in_while_let() {
+    let iter_a: Maybe<Int> = Some(1);
+    let iter_b: Maybe<Int> = Some(2);
+
+    // Tuple in while-let
+    while let (Some(a), Some(b)) = (iter_a, iter_b) {
+        process(a, b);
+    }
+}
+
+fn test_tuple_with_rest_pattern() {
+    let many_tuple = (1, 2, 3, 4, 5);
+    let tuple = (1, 2, 3, 4, 5);
+
+    // Tuple with rest pattern (if supported)
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let (first, rest @ ..) = many_tuple;
+    let (first2, .., last) = tuple;
+}
+
+fn test_nested_tuple_in_match() {
+    let nested = ((0, 0), (0, 0));
+
+    // Nested tuple in match
+    match nested {
+        ((0, 0), (0, 0)) => "both at origin",
+        ((a, b), (c, d)) => "general case",
+    };
+}
+
+fn test_tuple_with_enum_patterns() {
+    let result: (Result<Int, Text>, Result<Int, Text>) = (Ok(1), Ok(2));
+
+    // Tuple with enum patterns
+    match result {
+        (Ok(a), Ok(b)) => combine(a, b),
+        (Err(e), _) | (_, Err(e)) => handle_error(e),
+        _ => unreachable(),
+    };
+}

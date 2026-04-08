@@ -1,0 +1,371 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for await expressions (.await postfix)
+
+// ============================================================================
+// Basic Await Expressions
+// ============================================================================
+
+async fn test_basic_await() {
+    // Simple await on function call
+    let result = fetch().await;
+
+    // Await on variable
+    let future = create_future();
+    let value = future.await;
+
+    // Await on method call
+    let data = client.fetch().await;
+
+    // Await returning unit
+    notify().await;
+}
+
+// ============================================================================
+// Chained Await Expressions
+// ============================================================================
+
+async fn test_chained_await() {
+    // Method chain with single await at end
+    let processed = fetch()
+        .await
+        .process()
+        .finalize();
+
+    // Multiple awaits in chain
+    let result = fetch()
+        .await
+        .process()
+        .await
+        .finalize()
+        .await;
+
+    // Await with method call after
+    let formatted = fetch().await.to_string();
+
+    // Complex chain
+    let data = client
+        .connect().await
+        .authenticate(credentials).await
+        .query(sql).await
+        .fetch_all().await
+        .into_vec();
+}
+
+// ============================================================================
+// Await with Field Access
+// ============================================================================
+
+async fn test_await_field_access() {
+    // Await then field access
+    let name = fetch_user().await.name;
+
+    // Await then nested field access
+    let street = fetch_user().await.address.street;
+
+    // Multiple awaits with field access
+    let a = fetch_a().await.field;
+    let b = fetch_b().await.nested.field;
+
+    // Complex expression
+    let value = fetch_container().await.items[0].value;
+}
+
+// ============================================================================
+// Await with Index Access
+// ============================================================================
+
+async fn test_await_index() {
+    // Await then index
+    let item = fetch_list().await[0];
+
+    // Await then complex index
+    let element = fetch_matrix().await[row][col];
+
+    // Index with expression
+    let value = fetch_array().await[get_index()];
+
+    // Combined field and index
+    let data = fetch_container().await.items[idx].data;
+}
+
+// ============================================================================
+// Await in Expressions
+// ============================================================================
+
+async fn test_await_in_expressions() {
+    // Arithmetic
+    let sum = fetch_a().await + fetch_b().await;
+    let product = fetch_x().await * fetch_y().await;
+    let complex = (a().await + b().await) * c().await;
+
+    // Comparison
+    let equal = fetch_left().await == fetch_right().await;
+    let greater = fetch_value().await > threshold;
+
+    // Logical
+    let both = check_a().await && check_b().await;
+    let either = check_a().await || check_b().await;
+
+    // Conditional expression
+    let result = if fetch_condition().await { a } else { b };
+
+    // Range
+    let items = fetch_start().await..fetch_end().await;
+}
+
+// ============================================================================
+// Await with Optional Chaining
+// ============================================================================
+
+async fn test_await_optional() {
+    // Await with question mark (error propagation)
+    let value = fetch().await?;
+
+    // Chained with question marks
+    let data = fetch()
+        .await?
+        .process()
+        .await?
+        .finalize()
+        .await?;
+
+    // Optional access after await
+    let maybe = fetch_maybe().await?.value;
+
+    // Null coalescing after await
+    let defaulted = fetch_optional().await ?? default_value;
+}
+
+// ============================================================================
+// Await in Match Expressions
+// ============================================================================
+
+async fn test_await_in_match() {
+    // Match on awaited value
+    match fetch_result().await {
+        Ok(value) => process(value),
+        Err(e) => handle_error(e)
+    };
+
+    // Await in match arms
+    let result = match mode {
+        Fast => fast_fetch().await,
+        Slow => slow_fetch().await,
+        Cached => cached_fetch().await
+    };
+
+    // Complex match with await
+    match fetch_option().await {
+        Some(data) if data.is_valid() => use_data(data).await,
+        Some(data) => transform(data).await,
+        None => default().await
+    };
+}
+
+// ============================================================================
+// Await in If Expressions
+// ============================================================================
+
+async fn test_await_in_if() {
+    // Await in condition
+    if check_condition().await {
+        do_something();
+    }
+
+    // Await in both branches
+    let result = if condition {
+        fetch_a().await
+    } else {
+        fetch_b().await
+    };
+
+    // If let with await
+    if let Some(value) = fetch_optional().await {
+        use_value(value);
+    }
+
+    // Complex if with await
+    if let Ok(data) = try_fetch().await && data.is_valid() {
+        process(data).await;
+    }
+}
+
+// ============================================================================
+// Await in Loops
+// ============================================================================
+
+async fn test_await_in_loops() {
+    // While with await condition
+    while should_continue().await {
+        step().await;
+    }
+
+    // For loop with await body
+    for item in items {
+        process(item).await;
+    }
+
+    // Loop with await
+    loop {
+        if check().await {
+            break;
+        }
+        work().await;
+    }
+
+    // While let with await
+    while let Some(item) = fetch_next().await {
+        handle(item);
+    }
+}
+
+// ============================================================================
+// Await with Closures
+// ============================================================================
+
+async fn test_await_with_closures() {
+    // Await closure result
+    let closure = async || fetch().await;
+    let result = closure().await;
+
+    // Await in map
+    let mapped = items
+        .iter()
+        .map(async |x| transform(x).await)
+        .collect();
+
+    // Await with captured closure
+    let captured = async move || {
+        external_fetch().await
+    };
+    captured().await;
+}
+
+// ============================================================================
+// Await with Generic Functions
+// ============================================================================
+
+async fn test_await_generic() {
+    // Await on generic function call
+    let result = fetch_generic<Data>().await;
+
+    // Await with turbofish
+    let parsed = parse<Int>(input).await;
+
+    // Complex generic await
+    let transformed = transform<Input, Output>(data).await;
+}
+
+// ============================================================================
+// Await Precedence and Grouping
+// ============================================================================
+
+async fn test_await_precedence() {
+    // Parenthesized await
+    let result = (create_future()).await;
+
+    // Await on expression result
+    let value = (if condition { a } else { b }).await;
+
+    // Complex grouping
+    let data = (fetch().await).process();
+
+    // Binary with clear grouping
+    let sum = (a().await) + (b().await);
+
+    // Nested parentheses
+    let nested = ((fetch_outer().await).inner()).await;
+}
+
+// ============================================================================
+// Await on Complex Expressions
+// ============================================================================
+
+async fn test_complex_await() {
+    // Await on struct field that is a future
+    let value = container.future_field.await;
+
+    // Await on tuple element
+    let first = (future1, future2).0.await;
+
+    // Await on array element
+    let selected = futures[index].await;
+
+    // Await on function returning future
+    let factory_result = create_future_factory()().await;
+
+    // Pipeline with await
+    let piped = data
+        |> transform
+        |> async_step().await
+        |> finalize;
+}
+
+// ============================================================================
+// Await in Argument Positions
+// ============================================================================
+
+async fn test_await_as_argument() {
+    // Await as function argument
+    process(fetch().await);
+
+    // Multiple awaited arguments
+    combine(fetch_a().await, fetch_b().await, fetch_c().await);
+
+    // Await in method argument
+    obj.method(get_data().await);
+
+    // Await in constructor
+    let instance = MyType.new(fetch_config().await);
+
+    // Await in generic call
+    container.set<Data>(fetch_data().await);
+}
+
+// ============================================================================
+// Multiple Awaits in Single Expression
+// ============================================================================
+
+async fn test_multiple_awaits() {
+    // Tuple of awaits
+    let (a, b, c) = (fetch_a().await, fetch_b().await, fetch_c().await);
+
+    // Struct with awaited fields
+    let record = Record {
+        name: fetch_name().await,
+        value: fetch_value().await,
+        timestamp: fetch_time().await
+    };
+
+    // Array of awaits
+    let results = [
+        op1().await,
+        op2().await,
+        op3().await
+    ];
+
+    // Nested structure
+    let nested = Outer {
+        inner: Inner {
+            data: fetch_inner_data().await
+        },
+        metadata: fetch_metadata().await
+    };
+}
+
+// ============================================================================
+// Await with Type Ascription
+// ============================================================================
+
+async fn test_await_with_types() {
+    // Explicit type on await result
+    let value: Int = fetch().await;
+
+    // Complex type
+    let data: List<Record> = fetch_records().await;
+
+    // Result type
+    let result: Result<Data, Error> = try_fetch().await;
+}

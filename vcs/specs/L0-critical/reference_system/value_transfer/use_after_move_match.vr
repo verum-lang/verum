@@ -1,0 +1,37 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, match, negative-test
+
+// Affine contagion is now implemented - this test should produce use-after-move error
+
+/// Test use after move through pattern matching with affine types at compile time.
+/// When an affine value is moved out via pattern match, it cannot be used again.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-types
+
+// Affine resource type
+type affine Resource is {
+    id: Int,
+};
+
+// Maybe type containing affine value
+type MaybeResource is Some(Resource) | None;
+
+fn main() {
+    let opt = MaybeResource.Some(Resource { id: 42 });
+
+    match opt {
+        MaybeResource.Some(inner) => {
+            print(inner.id);  // inner moved out of opt (Resource is affine)
+        },
+        MaybeResource.None => {},
+    }
+
+    // Try to use opt again after match moved its contents
+    match opt {  // COMPILE ERROR: type not found: opt
+        MaybeResource.Some(r) => print(r.id),
+        MaybeResource.None => {},
+    }
+}

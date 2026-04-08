@@ -1,0 +1,208 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, partial-annotation, mixed
+// @description: Mixing explicit type annotations with type inference
+
+/// Test for mixing explicit type annotations with type inference.
+/// Partial annotations allow developers to:
+/// - Guide inference where needed
+/// - Document important types
+/// - Let inference handle the rest
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+fn map_list<A, B>(items: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result: List<B> = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn filter_list<T: Clone>(items: List<T>, pred: fn(T) -> Bool) -> List<T> {
+    let mut result: List<T> = [];
+    for item in items {
+        if pred(item.clone()) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Type definitions
+// ============================================================================
+
+type IntList is List<Int>;
+type TextList is List<Text>;
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Named is {
+    name: Text,
+    value: Int,
+};
+
+// ============================================================================
+// Partially annotated generic functions
+// ============================================================================
+
+fn id<T>(x: T) -> T { x }
+
+fn pair_up<A, B>(a: A, b: B) -> (A, B) { (a, b) }
+
+fn first<A, B>(p: (A, B)) -> A { p.0 }
+fn second<A, B>(p: (A, B)) -> B { p.1 }
+
+fn wrap<T>(x: T) -> Maybe<T> { Some(x) }
+
+fn unwrap_or<T>(opt: Maybe<T>, default: T) -> T {
+    match opt {
+        Some(x) => x,
+        None => default,
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // === Annotated list inference ===
+
+    let int_list: List<Int> = [1, 2, 3, 4, 5];
+    assert(int_list.len() == 5);
+    assert(int_list[0] == 1);
+
+    // Type alias annotation
+    let from_alias: List<Int> = [10, 20, 30];
+    assert(from_alias.len() == 3);
+    assert(from_alias[0] == 10);
+
+    let text_alias: List<Text> = ["a", "b", "c"];
+    assert(text_alias[1] == "b");
+
+    // Empty list requires annotation
+    let empty: List<Int> = [];
+    assert(empty.is_empty());
+
+    // === Annotated tuple inference ===
+
+    let t1: (Int, Text) = (42, "hello");
+    assert(t1.0 == 42);
+    assert(t1.1 == "hello");
+
+    let t2: (Bool, Float, Int) = (true, 3.14, 100);
+    assert(t2.0 == true);
+    assert(t2.2 == 100);
+
+    // === Partial annotation on return ===
+
+    // Return type fully annotated, arg inferred
+    let result: Int = id(42);
+    assert(result == 42);
+
+    let s: Text = id("hello");
+    assert(s == "hello");
+
+    // Return type annotation for generic pair
+    let p: (Int, Text) = pair_up(1, "two");
+    assert(p.0 == 1);
+    assert(p.1 == "two");
+
+    // Extract with annotation on extracted value
+    let fst: Int = first(pair_up(10, "x"));
+    assert(fst == 10);
+
+    let snd: Text = second(pair_up(99, "world"));
+    assert(snd == "world");
+
+    // === Maybe with annotation ===
+
+    let maybe_int: Maybe<Int> = wrap(42);
+    assert(maybe_int == Some(42));
+
+    let maybe_text: Maybe<Text> = wrap("verum");
+    assert(maybe_text == Some("verum"));
+
+    let opt: Maybe<Int> = Some(100);
+    let val: Int = unwrap_or(opt, 0);
+    assert(val == 100);
+
+    let none_opt: Maybe<Int> = None;
+    assert(unwrap_or(none_opt, -1) == -1);
+
+    // === Annotation flows into closures ===
+
+    let add: fn(Int, Int) -> Int = |a: Int, b: Int| a + b;
+    assert(add(3, 7) == 10);
+
+    let double: fn(Int) -> Int = |x: Int| x * 2;
+    assert(double(21) == 42);
+
+    // === Annotation on collection operations ===
+
+    // Annotation on result drives type inference
+    let doubled: List<Int> = map_list([1, 2, 3], |x: Int| x * 2);
+    assert(doubled == [2, 4, 6]);
+
+    let text_nums: List<Text> = map_list([1, 2, 3], |x: Int| f"n{x}");
+    assert(text_nums[0] == "n1");
+
+    let evens: List<Int> = filter_list([1, 2, 3, 4, 5, 6], |x: Int| x % 2 == 0);
+    assert(evens == [2, 4, 6]);
+
+    // === Annotated struct fields ===
+
+    let pt: Point = Point { x: 10, y: 20 };
+    assert(pt.x == 10);
+    assert(pt.y == 20);
+
+    let named: Named = Named { name: "test", value: 42 };
+    assert(named.name == "test");
+    assert(named.value == 42);
+
+    // === List of structs with annotation ===
+
+    let points: List<Point> = [
+        Point { x: 0, y: 0 },
+        Point { x: 1, y: 2 },
+        Point { x: 3, y: 4 },
+    ];
+    assert(points.len() == 3);
+    assert(points[1].x == 1);
+
+    let names: List<Text> = map_list(points, |p: Point| f"({p.x},{p.y})");
+    assert(names[0] == "(0,0)");
+    assert(names[2] == "(3,4)");
+
+    // === Nested annotations ===
+
+    let nested: List<(Int, Text)> = [(1, "a"), (2, "b"), (3, "c")];
+    assert(nested[0].0 == 1);
+    assert(nested[0].1 == "a");
+
+    let nested_maybe: Maybe<List<Int>> = Some([1, 2, 3]);
+    match nested_maybe {
+        Some(lst) => assert(lst.len() == 3),
+        None => assert(false),
+    }
+
+    // === Match expression with annotation ===
+
+    let maybe_val: Maybe<Int> = Some(42);
+    let description: Text = match maybe_val {
+        Some(n) if n > 0 => f"positive: {n}",
+        Some(n) => f"non-positive: {n}",
+        None => "none",
+    };
+    assert(description == "positive: 42");
+
+    print("Partial annotation tests passed!");
+}

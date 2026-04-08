@@ -1,0 +1,349 @@
+// =============================================================================
+// vcs/specs/core/sys/bitfield_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, sys, bitfield, hardware, systems-programming
+// @description: Tests for bitfield support including BitfieldElement protocol,
+//               Endianness, GpioMode/GpioSpeed/GpioConfig example types,
+//               and bitfield verification functions.
+//
+// Coverage:
+// - BitfieldElement protocol: BIT_WIDTH constants, from_bits, to_bits
+// - Endianness: Little, Big, Native variants
+// - GpioMode: Input, OutputPushPull, OutputOpenDrain, AlternateFunction, Analog
+// - GpioSpeed: Low, Medium, High, VeryHigh
+// - GpioConfig: field construction and access
+//
+// Test Strategy:
+// - Protocol constant verification
+// - Roundtrip conversion (from_bits -> to_bits)
+// - Enum variant matching and value verification
+// - Bitfield struct construction
+// =============================================================================
+
+module specs.core.sys.bitfield_test;
+
+mount core.sys.bitfield.{
+    BitfieldElement,
+    Endianness,
+    GpioMode, GpioSpeed, GpioConfig,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// BitfieldElement Protocol - Bool
+// =============================================================================
+
+@test
+fn test_bool_bit_width() {
+    assert_eq(Bool.BIT_WIDTH, 1);
+}
+
+@test
+fn test_bool_from_bits_true() {
+    let b = Bool.from_bits(1);
+    assert(b, "from_bits(1) should be true");
+}
+
+@test
+fn test_bool_from_bits_false() {
+    let b = Bool.from_bits(0);
+    assert(!b, "from_bits(0) should be false");
+}
+
+@test
+fn test_bool_to_bits_true() {
+    let bits = true.to_bits();
+    assert_eq(bits, 1);
+}
+
+@test
+fn test_bool_to_bits_false() {
+    let bits = false.to_bits();
+    assert_eq(bits, 0);
+}
+
+@test
+fn test_bool_roundtrip_true() {
+    let original = true;
+    let result = Bool.from_bits(original.to_bits());
+    assert_eq(result, original);
+}
+
+@test
+fn test_bool_roundtrip_false() {
+    let original = false;
+    let result = Bool.from_bits(original.to_bits());
+    assert_eq(result, original);
+}
+
+// =============================================================================
+// BitfieldElement Protocol - UInt8
+// =============================================================================
+
+@test
+fn test_uint8_bit_width() {
+    assert_eq(UInt8.BIT_WIDTH, 8);
+}
+
+@test
+fn test_uint8_from_bits() {
+    let v: UInt8 = UInt8.from_bits(42);
+    assert_eq(v, 42 as UInt8);
+}
+
+@test
+fn test_uint8_to_bits() {
+    let v: UInt8 = 255 as UInt8;
+    assert_eq(v.to_bits(), 255);
+}
+
+@test
+fn test_uint8_roundtrip() {
+    let original: UInt8 = 128 as UInt8;
+    let result = UInt8.from_bits(original.to_bits());
+    assert_eq(result, original);
+}
+
+// =============================================================================
+// BitfieldElement Protocol - UInt16
+// =============================================================================
+
+@test
+fn test_uint16_bit_width() {
+    assert_eq(UInt16.BIT_WIDTH, 16);
+}
+
+@test
+fn test_uint16_roundtrip() {
+    let original: UInt16 = 1024 as UInt16;
+    let result = UInt16.from_bits(original.to_bits());
+    assert_eq(result, original);
+}
+
+// =============================================================================
+// BitfieldElement Protocol - UInt32
+// =============================================================================
+
+@test
+fn test_uint32_bit_width() {
+    assert_eq(UInt32.BIT_WIDTH, 32);
+}
+
+@test
+fn test_uint32_roundtrip() {
+    let original: UInt32 = 0xDEADBEEF as UInt32;
+    let result = UInt32.from_bits(original.to_bits());
+    assert_eq(result, original);
+}
+
+// =============================================================================
+// BitfieldElement Protocol - UInt64
+// =============================================================================
+
+@test
+fn test_uint64_bit_width() {
+    assert_eq(UInt64.BIT_WIDTH, 64);
+}
+
+@test
+fn test_uint64_roundtrip() {
+    let original: UInt64 = 0xCAFEBABE as UInt64;
+    let result = UInt64.from_bits(original.to_bits());
+    assert_eq(result, original);
+}
+
+// =============================================================================
+// Bit Width Ordering
+// =============================================================================
+
+@test
+fn test_bit_widths_increasing() {
+    assert(Bool.BIT_WIDTH < UInt8.BIT_WIDTH, "Bool < UInt8");
+    assert(UInt8.BIT_WIDTH < UInt16.BIT_WIDTH, "UInt8 < UInt16");
+    assert(UInt16.BIT_WIDTH < UInt32.BIT_WIDTH, "UInt16 < UInt32");
+    assert(UInt32.BIT_WIDTH < UInt64.BIT_WIDTH, "UInt32 < UInt64");
+}
+
+// =============================================================================
+// Endianness Tests
+// =============================================================================
+
+@test
+fn test_endianness_little() {
+    let e = Endianness.Little;
+    match e {
+        Endianness.Little => { /* expected */ }
+        _ => assert(false, "Should be Little"),
+    }
+}
+
+@test
+fn test_endianness_big() {
+    let e = Endianness.Big;
+    match e {
+        Endianness.Big => { /* expected */ }
+        _ => assert(false, "Should be Big"),
+    }
+}
+
+@test
+fn test_endianness_native() {
+    let e = Endianness.Native;
+    match e {
+        Endianness.Native => { /* expected */ }
+        _ => assert(false, "Should be Native"),
+    }
+}
+
+// =============================================================================
+// GpioMode Tests
+// =============================================================================
+
+@test
+fn test_gpio_mode_input() {
+    let mode = GpioMode.Input;
+    match mode {
+        GpioMode.Input => { /* expected */ }
+        _ => assert(false, "Should be Input"),
+    }
+}
+
+@test
+fn test_gpio_mode_output_push_pull() {
+    let mode = GpioMode.OutputPushPull;
+    match mode {
+        GpioMode.OutputPushPull => { /* expected */ }
+        _ => assert(false, "Should be OutputPushPull"),
+    }
+}
+
+@test
+fn test_gpio_mode_output_open_drain() {
+    let mode = GpioMode.OutputOpenDrain;
+    match mode {
+        GpioMode.OutputOpenDrain => { /* expected */ }
+        _ => assert(false, "Should be OutputOpenDrain"),
+    }
+}
+
+@test
+fn test_gpio_mode_alternate_function() {
+    let mode = GpioMode.AlternateFunction;
+    match mode {
+        GpioMode.AlternateFunction => { /* expected */ }
+        _ => assert(false, "Should be AlternateFunction"),
+    }
+}
+
+@test
+fn test_gpio_mode_analog() {
+    let mode = GpioMode.Analog;
+    match mode {
+        GpioMode.Analog => { /* expected */ }
+        _ => assert(false, "Should be Analog"),
+    }
+}
+
+// =============================================================================
+// GpioSpeed Tests
+// =============================================================================
+
+@test
+fn test_gpio_speed_low() {
+    let speed = GpioSpeed.Low;
+    match speed {
+        GpioSpeed.Low => { /* expected */ }
+        _ => assert(false, "Should be Low"),
+    }
+}
+
+@test
+fn test_gpio_speed_medium() {
+    let speed = GpioSpeed.Medium;
+    match speed {
+        GpioSpeed.Medium => { /* expected */ }
+        _ => assert(false, "Should be Medium"),
+    }
+}
+
+@test
+fn test_gpio_speed_high() {
+    let speed = GpioSpeed.High;
+    match speed {
+        GpioSpeed.High => { /* expected */ }
+        _ => assert(false, "Should be High"),
+    }
+}
+
+@test
+fn test_gpio_speed_very_high() {
+    let speed = GpioSpeed.VeryHigh;
+    match speed {
+        GpioSpeed.VeryHigh => { /* expected */ }
+        _ => assert(false, "Should be VeryHigh"),
+    }
+}
+
+// =============================================================================
+// GpioConfig Tests
+// =============================================================================
+
+@test
+fn test_gpio_config_construction() {
+    let config = GpioConfig {
+        mode: GpioMode.Input,
+        speed: GpioSpeed.Low,
+        pull_up: false,
+        pull_down: false,
+        alternate_function: 0 as UInt8,
+        reserved: 0 as UInt8,
+    };
+    match config.mode {
+        GpioMode.Input => { /* expected */ }
+        _ => assert(false, "Should be Input mode"),
+    }
+}
+
+@test
+fn test_gpio_config_output_mode() {
+    let config = GpioConfig {
+        mode: GpioMode.OutputPushPull,
+        speed: GpioSpeed.High,
+        pull_up: true,
+        pull_down: false,
+        alternate_function: 0 as UInt8,
+        reserved: 0 as UInt8,
+    };
+    assert(config.pull_up, "pull_up should be true");
+    assert(!config.pull_down, "pull_down should be false");
+}
+
+@test
+fn test_gpio_config_alternate_function() {
+    let config = GpioConfig {
+        mode: GpioMode.AlternateFunction,
+        speed: GpioSpeed.VeryHigh,
+        pull_up: false,
+        pull_down: false,
+        alternate_function: 7 as UInt8,
+        reserved: 0 as UInt8,
+    };
+    assert_eq(config.alternate_function, 7 as UInt8);
+}
+
+@test
+fn test_gpio_config_size() {
+    // GpioConfig should be 16 bits = 2 bytes
+    assert_eq(GpioConfig.SIZE_BYTES, 2);
+    assert_eq(GpioConfig.SIZE_BITS, 16);
+}

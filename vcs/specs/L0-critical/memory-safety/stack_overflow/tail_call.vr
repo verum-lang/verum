@@ -1,0 +1,40 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, stack-overflow, tail-call, recursion
+// @description: Tests that tail call optimization prevents stack overflow
+
+// Tail-recursive function - should be optimized to not grow the stack
+fn factorial_tail(n: Int, acc: Int) -> Int {
+    if n <= 1 {
+        acc
+    } else {
+        // Tail call - can be optimized to a loop
+        factorial_tail(n - 1, n * acc)
+    }
+}
+
+fn factorial(n: Int) -> Int {
+    factorial_tail(n, 1)
+}
+
+// Tail-recursive sum
+fn sum_tail(n: Int, acc: Int) -> Int {
+    if n == 0 {
+        acc
+    } else {
+        sum_tail(n - 1, acc + n)
+    }
+}
+
+fn main() {
+    // These would overflow the stack without tail call optimization
+    let large_factorial = factorial(20);
+    assert(large_factorial == 2432902008176640000);
+
+    // Sum from 1 to 500 - within interpreter recursion limit
+    let sum = sum_tail(500, 0);
+    assert(sum == 125250);  // 500 * 501 / 2
+
+    print("Tail call optimization test passed");
+}

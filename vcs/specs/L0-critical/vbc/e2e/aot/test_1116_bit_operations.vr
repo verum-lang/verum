@@ -1,0 +1,158 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: bitwise, operations, and, or, xor, shift
+// @description: Test bitwise operations
+
+fn test_bitwise_and() -> Int {
+    let a = 0xFF;
+    let b = 0x0F;
+    let result = a & b;
+    if result != 0x0F {
+        print(f"FAIL bitwise_and: {result}, expected 15");
+        return 1;
+    }
+    // Test masking
+    let val = 0xABCD;
+    let low_byte = val & 0xFF;
+    if low_byte != 0xCD {
+        print(f"FAIL bitwise_and mask: {low_byte}, expected 205");
+        return 1;
+    }
+    print("  bitwise_and: OK");
+    0
+}
+
+fn test_bitwise_or() -> Int {
+    let a = 0xF0;
+    let b = 0x0F;
+    let result = a | b;
+    if result != 0xFF {
+        print(f"FAIL bitwise_or: {result}, expected 255");
+        return 1;
+    }
+    print("  bitwise_or: OK");
+    0
+}
+
+fn test_bitwise_xor() -> Int {
+    let a = 0xFF;
+    let b = 0x0F;
+    let result = a ^ b;
+    if result != 0xF0 {
+        print(f"FAIL bitwise_xor: {result}, expected 240");
+        return 1;
+    }
+    // XOR self = 0
+    let c = 42;
+    let zero = c ^ c;
+    if zero != 0 {
+        print(f"FAIL xor_self: {zero}, expected 0");
+        return 1;
+    }
+    print("  bitwise_xor: OK");
+    0
+}
+
+fn test_shift_left() -> Int {
+    let a = 1;
+    let result = a << 3;
+    if result != 8 {
+        print(f"FAIL shift_left: {result}, expected 8");
+        return 1;
+    }
+    let b = 5;
+    let result2 = b << 4;
+    if result2 != 80 {
+        print(f"FAIL shift_left2: {result2}, expected 80");
+        return 1;
+    }
+    print("  shift_left: OK");
+    0
+}
+
+fn test_shift_right() -> Int {
+    let a = 256;
+    let result = a >> 4;
+    if result != 16 {
+        print(f"FAIL shift_right: {result}, expected 16");
+        return 1;
+    }
+    print("  shift_right: OK");
+    0
+}
+
+fn count_bits(n: Int) -> Int {
+    let mut count = 0;
+    let mut val = n;
+    while val > 0 {
+        count = count + (val & 1);
+        val = val >> 1;
+    }
+    count
+}
+
+fn test_count_bits() -> Int {
+    if count_bits(0) != 0 {
+        print("FAIL count_bits(0)");
+        return 1;
+    }
+    if count_bits(7) != 3 {
+        print(f"FAIL count_bits(7)={count_bits(7)}");
+        return 1;
+    }
+    if count_bits(255) != 8 {
+        print(f"FAIL count_bits(255)={count_bits(255)}");
+        return 1;
+    }
+    print("  count_bits: OK");
+    0
+}
+
+fn is_power_of_two(n: Int) -> Bool {
+    n > 0 && (n & (n - 1)) == 0
+}
+
+fn test_power_of_two() -> Int {
+    if !is_power_of_two(1) {
+        print("FAIL: 1 is power of 2");
+        return 1;
+    }
+    if !is_power_of_two(16) {
+        print("FAIL: 16 is power of 2");
+        return 1;
+    }
+    if !is_power_of_two(1024) {
+        print("FAIL: 1024 is power of 2");
+        return 1;
+    }
+    if is_power_of_two(6) {
+        print("FAIL: 6 is not power of 2");
+        return 1;
+    }
+    if is_power_of_two(0) {
+        print("FAIL: 0 is not power of 2");
+        return 1;
+    }
+    print("  power_of_two: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Bitwise Operation Tests:");
+    let mut failures = 0;
+    failures = failures + test_bitwise_and();
+    failures = failures + test_bitwise_or();
+    failures = failures + test_bitwise_xor();
+    failures = failures + test_shift_left();
+    failures = failures + test_shift_right();
+    failures = failures + test_count_bits();
+    failures = failures + test_power_of_two();
+
+    if failures == 0 {
+        print("All bitwise tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

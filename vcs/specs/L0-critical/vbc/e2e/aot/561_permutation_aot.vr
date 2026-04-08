@@ -1,0 +1,175 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, permutation, combinatorics, algorithms
+// @timeout: 30000
+
+// Permutation algorithms
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Check if array is a valid permutation of 0..n-1
+fn is_permutation(arr: Arr8, n: Int) -> Int {
+    let mut seen = zeros();
+    let mut i = 0;
+    while i < n {
+        let v = get8(arr, i);
+        if v < 0 { return 0; }
+        if v >= n { return 0; }
+        if get8(seen, v) == 1 { return 0; } // duplicate
+        seen = set8(seen, v, 1);
+        i = i + 1;
+    }
+    1
+}
+
+// Count inversions (bubble sort count)
+fn count_inversions(arr: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if get8(arr, i) > get8(arr, j) { count = count + 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Check if permutation is even (even number of inversions)
+fn is_even_permutation(arr: Arr8, n: Int) -> Int {
+    if count_inversions(arr, n) % 2 == 0 { 1 } else { 0 }
+}
+
+// Apply permutation: result[i] = arr[perm[i]]
+fn apply_permutation(arr: Arr8, perm: Arr8, n: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        result = set8(result, i, get8(arr, get8(perm, i)));
+        i = i + 1;
+    }
+    result
+}
+
+// Compose two permutations
+fn compose_permutations(p: Arr8, q: Arr8, n: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        result = set8(result, i, get8(p, get8(q, i)));
+        i = i + 1;
+    }
+    result
+}
+
+// Compute inverse permutation
+fn inverse_permutation(perm: Arr8, n: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        result = set8(result, get8(perm, i), i);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_is_permutation() -> Int {
+    let valid = Arr8 { v0: 2, v1: 0, v2: 3, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_permutation(valid, 4), 1);
+
+    // Duplicate
+    let dup = Arr8 { v0: 1, v1: 1, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_permutation(dup, 3), 0);
+
+    // Out of range
+    let oor = Arr8 { v0: 0, v1: 5, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(is_permutation(oor, 3), 0);
+    1
+}
+
+fn test_inversions() -> Int {
+    // Identity: 0 inversions
+    let id = Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_inversions(id, 4), 0);
+    assert_eq(is_even_permutation(id, 4), 1);
+
+    // Reverse: n*(n-1)/2 inversions
+    let rev = Arr8 { v0: 3, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_inversions(rev, 4), 6); // 4*3/2
+    assert_eq(is_even_permutation(rev, 4), 1); // 6 is even
+
+    // Single swap: 1 inversion
+    let swap = Arr8 { v0: 1, v1: 0, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_inversions(swap, 3), 1);
+    assert_eq(is_even_permutation(swap, 3), 0);
+    1
+}
+
+fn test_apply() -> Int {
+    let data = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let perm = Arr8 { v0: 2, v1: 0, v2: 3, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let result = apply_permutation(data, perm, 4);
+    // result[0] = data[perm[0]] = data[2] = 30
+    assert_eq(get8(result, 0), 30);
+    assert_eq(get8(result, 1), 10);
+    assert_eq(get8(result, 2), 40);
+    assert_eq(get8(result, 3), 20);
+    1
+}
+
+fn test_inverse() -> Int {
+    let perm = Arr8 { v0: 2, v1: 0, v2: 3, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let inv = inverse_permutation(perm, 4);
+    // Composing perm with its inverse should give identity
+    let comp = compose_permutations(perm, inv, 4);
+    assert_eq(get8(comp, 0), 0);
+    assert_eq(get8(comp, 1), 1);
+    assert_eq(get8(comp, 2), 2);
+    assert_eq(get8(comp, 3), 3);
+    1
+}
+
+fn test_compose() -> Int {
+    // Compose two permutations
+    let p = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }; // cycle (0 1 2)
+    let q = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }; // same cycle
+    let pq = compose_permutations(p, q, 3);
+    // (0 1 2) composed with (0 1 2) = (0 2 1)
+    assert_eq(get8(pq, 0), 2);
+    assert_eq(get8(pq, 1), 0);
+    assert_eq(get8(pq, 2), 1);
+    1
+}
+
+fn main() -> Int {
+    test_is_permutation();
+    test_inversions();
+    test_apply();
+    test_inverse();
+    test_compose();
+    print("[OK] 561_permutation_aot");
+    0
+}

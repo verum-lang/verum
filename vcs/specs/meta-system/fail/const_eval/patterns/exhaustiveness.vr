@@ -1,0 +1,24 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, const_eval, patterns
+// @description: Tests pattern match failure at compile time - no matching arm
+// @expected-error: match
+
+// Non-exhaustive match - provides Blue but no arm for it
+type Color is Red | Green | Blue;
+
+meta fn color_value_for_blue() -> Int {
+    let c = Blue;
+    match c {
+        Red => 1,
+        Green => 2,
+        // Blue not handled - runtime match failure
+    }
+}
+
+fn main() {
+    @const {
+        let _ = color_value_for_blue();
+    };
+}

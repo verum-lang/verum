@@ -1,0 +1,267 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, graph, algorithms, dijkstra, bfs, adjacency
+// @timeout: 15000
+// @expected-exit: 0
+//
+// End-to-end: graph algorithms through VBC interpreter using adjacency matrix
+
+// ============================================================================
+// 6-node graph represented as adjacency matrix (6x6 = 36 fields)
+// Edge weight 0 means no edge, positive means edge weight
+// ============================================================================
+
+type Graph6 is {
+    // Row 0
+    e00: Int, e01: Int, e02: Int, e03: Int, e04: Int, e05: Int,
+    // Row 1
+    e10: Int, e11: Int, e12: Int, e13: Int, e14: Int, e15: Int,
+    // Row 2
+    e20: Int, e21: Int, e22: Int, e23: Int, e24: Int, e25: Int,
+    // Row 3
+    e30: Int, e31: Int, e32: Int, e33: Int, e34: Int, e35: Int,
+    // Row 4
+    e40: Int, e41: Int, e42: Int, e43: Int, e44: Int, e45: Int,
+    // Row 5
+    e50: Int, e51: Int, e52: Int, e53: Int, e54: Int, e55: Int
+};
+
+fn graph6_edge(g: Graph6, from: Int, to: Int) -> Int {
+    let idx = from * 6 + to;
+    if idx == 0 { g.e00 } else if idx == 1 { g.e01 } else if idx == 2 { g.e02 }
+    else if idx == 3 { g.e03 } else if idx == 4 { g.e04 } else if idx == 5 { g.e05 }
+    else if idx == 6 { g.e10 } else if idx == 7 { g.e11 } else if idx == 8 { g.e12 }
+    else if idx == 9 { g.e13 } else if idx == 10 { g.e14 } else if idx == 11 { g.e15 }
+    else if idx == 12 { g.e20 } else if idx == 13 { g.e21 } else if idx == 14 { g.e22 }
+    else if idx == 15 { g.e23 } else if idx == 16 { g.e24 } else if idx == 17 { g.e25 }
+    else if idx == 18 { g.e30 } else if idx == 19 { g.e31 } else if idx == 20 { g.e32 }
+    else if idx == 21 { g.e33 } else if idx == 22 { g.e34 } else if idx == 23 { g.e35 }
+    else if idx == 24 { g.e40 } else if idx == 25 { g.e41 } else if idx == 26 { g.e42 }
+    else if idx == 27 { g.e43 } else if idx == 28 { g.e44 } else if idx == 29 { g.e45 }
+    else if idx == 30 { g.e50 } else if idx == 31 { g.e51 } else if idx == 32 { g.e52 }
+    else if idx == 33 { g.e53 } else if idx == 34 { g.e54 } else { g.e55 }
+}
+
+// ============================================================================
+// 6-element array helper (for distances, visited flags)
+// ============================================================================
+
+type Arr6 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int };
+
+fn arr6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else { a.e5 }
+}
+
+fn arr6_set(a: Arr6, i: Int, v: Int) -> Arr6 {
+    Arr6 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 }
+    }
+}
+
+// ============================================================================
+// Dijkstra's shortest path (simplified for 6 nodes)
+// ============================================================================
+
+fn dijkstra(g: Graph6, src: Int) -> Arr6 {
+    let inf = 999999;
+    let mut dist = Arr6 { e0: inf, e1: inf, e2: inf, e3: inf, e4: inf, e5: inf };
+    let mut visited = Arr6 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0 };
+
+    dist = arr6_set(dist, src, 0);
+
+    let mut iter = 0;
+    while iter < 6 {
+        // Find unvisited node with minimum distance
+        let mut min_dist = inf + 1;
+        let mut u = -1;
+        let mut i = 0;
+        while i < 6 {
+            if arr6_get(visited, i) == 0 {
+                if arr6_get(dist, i) < min_dist {
+                    min_dist = arr6_get(dist, i);
+                    u = i;
+                }
+            }
+            i = i + 1;
+        }
+
+        if u == -1 {
+            iter = 6; // break
+        } else {
+            visited = arr6_set(visited, u, 1);
+
+            // Relax neighbors
+            let mut v = 0;
+            while v < 6 {
+                let w = graph6_edge(g, u, v);
+                if w > 0 {
+                    let new_dist = arr6_get(dist, u) + w;
+                    if new_dist < arr6_get(dist, v) {
+                        dist = arr6_set(dist, v, new_dist);
+                    }
+                }
+                v = v + 1;
+            }
+            iter = iter + 1;
+        }
+    }
+    dist
+}
+
+fn test_dijkstra() {
+    // Graph:
+    //   0 --7-- 1 --15-- 2
+    //   |       |        |
+    //   9       10       11
+    //   |       |        |
+    //   3 --2-- 4 --6--- 5
+    let g = Graph6 {
+        e00: 0, e01: 7, e02: 0, e03: 9, e04: 0, e05: 0,
+        e10: 7, e11: 0, e12: 15, e13: 0, e14: 10, e15: 0,
+        e20: 0, e21: 15, e22: 0, e23: 0, e24: 0, e25: 11,
+        e30: 9, e31: 0, e32: 0, e33: 0, e34: 2, e35: 0,
+        e40: 0, e41: 10, e42: 0, e43: 2, e44: 0, e45: 6,
+        e50: 0, e51: 0, e52: 11, e53: 0, e54: 6, e55: 0
+    };
+
+    let d = dijkstra(g, 0);
+    assert_eq(arr6_get(d, 0), 0);
+    assert_eq(arr6_get(d, 1), 7);
+    // 0→3→4→5→2 = 9+2+6+11 = 28 vs 0→1→2 = 7+15 = 22
+    assert_eq(arr6_get(d, 2), 22);
+    assert_eq(arr6_get(d, 3), 9);
+    // 0→3→4 = 9+2 = 11 vs 0→1→4 = 7+10 = 17
+    assert_eq(arr6_get(d, 4), 11);
+    // 0→3→4→5 = 9+2+6 = 17
+    assert_eq(arr6_get(d, 5), 17);
+}
+
+// ============================================================================
+// BFS-like reachability
+// ============================================================================
+
+fn count_reachable(g: Graph6, src: Int) -> Int {
+    // BFS simulation with visited array
+    let mut visited = Arr6 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0 };
+    // Simple: iterate and propagate (fixed-point iteration)
+    visited = arr6_set(visited, src, 1);
+
+    let mut changed = true;
+    let mut iters = 0;
+    while iters < 6 {
+        let mut u = 0;
+        while u < 6 {
+            if arr6_get(visited, u) == 1 {
+                let mut v = 0;
+                while v < 6 {
+                    if graph6_edge(g, u, v) > 0 {
+                        if arr6_get(visited, v) == 0 {
+                            visited = arr6_set(visited, v, 1);
+                        }
+                    }
+                    v = v + 1;
+                }
+            }
+            u = u + 1;
+        }
+        iters = iters + 1;
+    }
+
+    let mut count = 0;
+    let mut i = 0;
+    while i < 6 {
+        if arr6_get(visited, i) == 1 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_reachability() {
+    // Fully connected graph (all reachable)
+    let connected = Graph6 {
+        e00: 0, e01: 1, e02: 0, e03: 1, e04: 0, e05: 0,
+        e10: 1, e11: 0, e12: 1, e13: 0, e14: 1, e15: 0,
+        e20: 0, e21: 1, e22: 0, e23: 0, e24: 0, e25: 1,
+        e30: 1, e31: 0, e32: 0, e33: 0, e34: 1, e35: 0,
+        e40: 0, e41: 1, e42: 0, e43: 1, e44: 0, e45: 1,
+        e50: 0, e51: 0, e52: 1, e53: 0, e54: 1, e55: 0
+    };
+    assert_eq(count_reachable(connected, 0), 6);
+
+    // Disconnected: nodes 0-2 connected, nodes 3-5 isolated
+    let disconnected = Graph6 {
+        e00: 0, e01: 1, e02: 0, e03: 0, e04: 0, e05: 0,
+        e10: 1, e11: 0, e12: 1, e13: 0, e14: 0, e15: 0,
+        e20: 0, e21: 1, e22: 0, e23: 0, e24: 0, e25: 0,
+        e30: 0, e31: 0, e32: 0, e33: 0, e34: 0, e35: 0,
+        e40: 0, e41: 0, e42: 0, e43: 0, e44: 0, e45: 0,
+        e50: 0, e51: 0, e52: 0, e53: 0, e54: 0, e55: 0
+    };
+    assert_eq(count_reachable(disconnected, 0), 3);
+    assert_eq(count_reachable(disconnected, 3), 1);
+}
+
+// ============================================================================
+// Degree counting
+// ============================================================================
+
+fn node_degree(g: Graph6, node: Int) -> Int {
+    let mut deg = 0;
+    let mut i = 0;
+    while i < 6 {
+        if graph6_edge(g, node, i) > 0 {
+            deg = deg + 1;
+        }
+        i = i + 1;
+    }
+    deg
+}
+
+fn total_edges(g: Graph6) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 6 {
+        let mut j = i + 1;
+        while j < 6 {
+            if graph6_edge(g, i, j) > 0 {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_graph_properties() {
+    let g = Graph6 {
+        e00: 0, e01: 7, e02: 0, e03: 9, e04: 0, e05: 0,
+        e10: 7, e11: 0, e12: 15, e13: 0, e14: 10, e15: 0,
+        e20: 0, e21: 15, e22: 0, e23: 0, e24: 0, e25: 11,
+        e30: 9, e31: 0, e32: 0, e33: 0, e34: 2, e35: 0,
+        e40: 0, e41: 10, e42: 0, e43: 2, e44: 0, e45: 6,
+        e50: 0, e51: 0, e52: 11, e53: 0, e54: 6, e55: 0
+    };
+
+    assert_eq(node_degree(g, 0), 2); // connects to 1, 3
+    assert_eq(node_degree(g, 1), 3); // connects to 0, 2, 4
+    assert_eq(node_degree(g, 4), 3); // connects to 1, 3, 5
+    assert_eq(total_edges(g), 7);
+}
+
+fn main() -> Int {
+    test_dijkstra();
+    test_reachability();
+    test_graph_properties();
+    print("[OK] 020_graph_algorithms");
+    0
+}

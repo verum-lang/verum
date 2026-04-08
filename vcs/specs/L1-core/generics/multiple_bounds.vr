@@ -1,0 +1,164 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, bounds, multiple-bounds, traits
+//
+// Tests generic functions with multiple trait bounds combined with +.
+
+// =============================================================================
+// SECTION 0: Helper
+// =============================================================================
+
+/// Prepend an element to a list (helper to avoid spread-in-expression)
+fn cons<T>(head: T, tail: List<T>) -> List<T> {
+    let mut result: List<T> = [];
+    result.push(head);
+    let mut t = tail;
+    result.append(&mut t);
+    result
+}
+
+// =============================================================================
+// SECTION 1: Two Bounds Combined
+// =============================================================================
+
+/// Sort two values using Ord + Clone
+fn sorted_pair<T: Ord + Clone>(a: T, b: T) -> (T, T) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Max with clone
+fn max_cloned<T: Ord + Clone>(a: T, b: T) -> T {
+    if a >= b { a } else { b }
+}
+
+/// Clone and double check equality
+fn check_clone_eq<T: Clone + Eq>(x: T) -> Bool {
+    let y = x.clone();
+    x == y
+}
+
+// =============================================================================
+// SECTION 2: Three or More Bounds
+// =============================================================================
+
+/// Sort list using Ord + Clone + Eq
+@allow(unbounded_recursion)
+fn insert_sorted<T: Ord + Clone>(sorted: List<T>, item: T) -> List<T> {
+    match sorted {
+        [] => [item],
+        [head, ..rest] => {
+            if item <= head {
+                cons(item, cons(head, rest))
+            } else {
+                cons(head, insert_sorted(rest, item))
+            }
+        }
+    }
+}
+
+@allow(unbounded_recursion)
+fn insertion_sort<T: Ord + Clone>(items: List<T>) -> List<T> {
+    match items {
+        [] => [],
+        [head, ..tail] => insert_sorted(insertion_sort(tail), head),
+    }
+}
+
+// =============================================================================
+// SECTION 3: Multiple Type Parameters with Bounds
+// =============================================================================
+
+/// Apply transform and check order
+@allow(unbounded_recursion)
+fn transform_and_sort<A: Clone, B: Ord + Clone>(
+    items: List<A>,
+    f: fn(A) -> B,
+) -> List<B> {
+    let mapped: List<B> = match items {
+        [] => [],
+        [head, ..tail] => cons(f(head), transform_and_sort(tail, f)),
+    };
+    insertion_sort(mapped)
+}
+
+// =============================================================================
+// SECTION 4: Struct with Bounds
+// =============================================================================
+
+type SortedList<T: Ord> is {
+    items: List<T>,
+};
+
+implement<T: Ord + Clone> SortedList<T> {
+    fn new() -> SortedList<T> {
+        SortedList { items: [] }
+    }
+
+    fn insert(self, item: T) -> SortedList<T> {
+        SortedList { items: insert_sorted(self.items, item) }
+    }
+
+    fn min(&self) -> Maybe<T> {
+        match self.items {
+            [first, ..] => Some(first.clone()),
+            [] => None,
+        }
+    }
+
+    fn max(&self) -> Maybe<T> {
+        match self.items {
+            [.., last] => Some(last.clone()),
+            [] => None,
+        }
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+}
+
+// =============================================================================
+// SECTION 5: Main Test Cases
+// =============================================================================
+
+fn main() {
+    // Test two bounds
+    let (lo, hi) = sorted_pair(30, 10);
+    assert(lo == 10 && hi == 30);
+
+    let (lo2, hi2) = sorted_pair("apple", "banana");
+    assert(lo2 == "apple" && hi2 == "banana");
+
+    assert(max_cloned(10, 20) == 20);
+    assert(max_cloned("apple", "banana") == "banana");
+
+    assert(check_clone_eq(42));
+    assert(check_clone_eq("hello"));
+
+    // Test three bounds - insertion sort
+    let sorted = insertion_sort([3, 1, 4, 1, 5, 9, 2, 6]);
+    assert(sorted == [1, 1, 2, 3, 4, 5, 6, 9]);
+
+    let sorted_text = insertion_sort(["banana", "apple", "cherry"]);
+    assert(sorted_text == ["apple", "banana", "cherry"]);
+
+    // Test transform and sort
+    let lengths = transform_and_sort(["banana", "apple", "kiwi"], |s| s.len());
+    assert(lengths == [4, 5, 6]);
+
+    // Test SortedList struct
+    let sl = SortedList.new()
+        .insert(30)
+        .insert(10)
+        .insert(20);
+
+    assert(sl.len() == 3);
+    assert(sl.min() == Some(10));
+    assert(sl.max() == Some(30));
+    assert(sl.items == [10, 20, 30]);
+}

@@ -1,0 +1,292 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, ml, distributed
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT ML distributed stubs — allreduce, broadcast, gather, barrier (single process)
+
+// ============================================================================
+// 4-element array type for simulating distributed data
+// ============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+
+fn arr4_new(a: Int, b: Int, c: Int, d: Int) -> Arr4 {
+    Arr4 { e0: a, e1: b, e2: c, e3: d }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+fn arr4_sum(a: Arr4) -> Int {
+    a.e0 + a.e1 + a.e2 + a.e3
+}
+
+fn arr4_add(a: Arr4, b: Arr4) -> Arr4 {
+    Arr4 {
+        e0: a.e0 + b.e0,
+        e1: a.e1 + b.e1,
+        e2: a.e2 + b.e2,
+        e3: a.e3 + b.e3
+    }
+}
+
+fn arr4_max_elem(a: Arr4, b: Arr4) -> Arr4 {
+    Arr4 {
+        e0: if a.e0 > b.e0 { a.e0 } else { b.e0 },
+        e1: if a.e1 > b.e1 { a.e1 } else { b.e1 },
+        e2: if a.e2 > b.e2 { a.e2 } else { b.e2 },
+        e3: if a.e3 > b.e3 { a.e3 } else { b.e3 }
+    }
+}
+
+fn arr4_eq(a: Arr4, b: Arr4) -> Int {
+    if a.e0 == b.e0 && a.e1 == b.e1 && a.e2 == b.e2 && a.e3 == b.e3 { 1 } else { 0 }
+}
+
+// ============================================================================
+// Simulated process group for single-process distributed computing
+// ============================================================================
+
+type ProcessGroup is { world_size: Int, rank: Int, group_id: Int };
+
+fn default_group() -> ProcessGroup {
+    ProcessGroup { world_size: 1, rank: 0, group_id: 0 }
+}
+
+// ============================================================================
+// Allreduce: in single-process mode, result = input (identity)
+// In multi-process, this would sum/max across all ranks
+// ============================================================================
+
+fn allreduce_sum(data: Arr4, pg: ProcessGroup) -> Arr4 {
+    // Single process: identity — sum across 1 rank is just itself
+    if pg.world_size == 1 { data }
+    else { data }
+}
+
+fn allreduce_max(data: Arr4, pg: ProcessGroup) -> Arr4 {
+    // Single process: identity — max across 1 rank is just itself
+    if pg.world_size == 1 { data }
+    else { data }
+}
+
+// ============================================================================
+// Broadcast: root sends data to all ranks
+// Single process: identity
+// ============================================================================
+
+fn broadcast(data: Arr4, root: Int, pg: ProcessGroup) -> Arr4 {
+    // If we are root or only one process, return data as-is
+    if pg.rank == root { data }
+    else if pg.world_size == 1 { data }
+    else { data }
+}
+
+// ============================================================================
+// All-gather: collect data from all ranks
+// Single process: result is just the local data
+// Returns: array of gathered data (simplified as just the input for 1 rank)
+// ============================================================================
+
+type GatherOutput is { data: Arr4, num_ranks: Int };
+
+fn all_gather(local_data: Arr4, pg: ProcessGroup) -> GatherOutput {
+    GatherOutput { data: local_data, num_ranks: pg.world_size }
+}
+
+// ============================================================================
+// Barrier: synchronize all ranks (no-op for single process)
+// Returns 1 on success
+// ============================================================================
+
+fn barrier(pg: ProcessGroup) -> Int {
+    // In single process, barrier always succeeds instantly
+    1
+}
+
+// ============================================================================
+// Test 1: allreduce sum (single process)
+// ============================================================================
+
+fn test_allreduce_sum() {
+    let pg = default_group();
+    assert_eq(pg.world_size, 1);
+    assert_eq(pg.rank, 0);
+
+    let data = arr4_new(10, 20, 30, 40);
+    let reduced = allreduce_sum(data, pg);
+    // Single process: output = input
+    assert_eq(reduced.e0, 10);
+    assert_eq(reduced.e1, 20);
+    assert_eq(reduced.e2, 30);
+    assert_eq(reduced.e3, 40);
+    assert_eq(arr4_eq(data, reduced), 1);
+
+    // Allreduce of zeros = zeros
+    let z = arr4_zeros();
+    let rz = allreduce_sum(z, pg);
+    assert_eq(arr4_sum(rz), 0);
+
+    // Simulate what multi-process allreduce_sum would do:
+    // rank0 = [1,2,3,4], rank1 = [5,6,7,8]
+    // allreduce_sum result = [6,8,10,12] (element-wise sum)
+    let rank0_data = arr4_new(1, 2, 3, 4);
+    let rank1_data = arr4_new(5, 6, 7, 8);
+    let simulated_result = arr4_add(rank0_data, rank1_data);
+    assert_eq(simulated_result.e0, 6);
+    assert_eq(simulated_result.e1, 8);
+    assert_eq(simulated_result.e2, 10);
+    assert_eq(simulated_result.e3, 12);
+
+    print("test_allreduce_sum passed");
+}
+
+// ============================================================================
+// Test 2: broadcast (single process)
+// ============================================================================
+
+fn test_broadcast() {
+    let pg = default_group();
+    let data = arr4_new(100, 200, 300, 400);
+
+    // Broadcast from rank 0 (we are rank 0)
+    let received = broadcast(data, 0, pg);
+    assert_eq(received.e0, 100);
+    assert_eq(received.e1, 200);
+    assert_eq(received.e2, 300);
+    assert_eq(received.e3, 400);
+    assert_eq(arr4_eq(data, received), 1);
+
+    // Simulate multi-process broadcast:
+    // root has [42, 43, 44, 45], after broadcast all ranks have same
+    let root_data = arr4_new(42, 43, 44, 45);
+    let rank0_received = broadcast(root_data, 0, pg);
+    // In real multi-process, rank1 would also get this same data
+    assert_eq(arr4_eq(root_data, rank0_received), 1);
+
+    // Broadcast negative values
+    let neg_data = arr4_new(-5, -10, -15, -20);
+    let neg_recv = broadcast(neg_data, 0, pg);
+    assert_eq(neg_recv.e0, -5);
+    assert_eq(neg_recv.e1, -10);
+    assert_eq(neg_recv.e2, -15);
+    assert_eq(neg_recv.e3, -20);
+
+    print("test_broadcast passed");
+}
+
+// ============================================================================
+// Test 3: all-gather (single process)
+// ============================================================================
+
+fn test_gather() {
+    let pg = default_group();
+    let local = arr4_new(7, 14, 21, 28);
+
+    let gathered = all_gather(local, pg);
+    assert_eq(gathered.num_ranks, 1);
+    assert_eq(gathered.data.e0, 7);
+    assert_eq(gathered.data.e1, 14);
+    assert_eq(gathered.data.e2, 21);
+    assert_eq(gathered.data.e3, 28);
+
+    // Simulate multi-process all-gather with 2 ranks:
+    // rank0=[1,2,3,4], rank1=[5,6,7,8]
+    // gather result on each rank would be both concatenated
+    // We simulate by just verifying the concatenation logic
+    let r0 = arr4_new(1, 2, 3, 4);
+    let r1 = arr4_new(5, 6, 7, 8);
+    // Total gathered sum should be sum of all ranks
+    let total = arr4_sum(r0) + arr4_sum(r1);
+    assert_eq(total, 36);  // 1+2+3+4+5+6+7+8
+
+    // Allreduce_max simulation
+    let max_result = arr4_max_elem(r0, r1);
+    assert_eq(max_result.e0, 5);
+    assert_eq(max_result.e1, 6);
+    assert_eq(max_result.e2, 7);
+    assert_eq(max_result.e3, 8);
+
+    print("test_gather passed");
+}
+
+// ============================================================================
+// Test 4: barrier and distributed workflow simulation
+// ============================================================================
+
+fn test_barrier_workflow() {
+    let pg = default_group();
+
+    // Barrier succeeds
+    let sync_ok = barrier(pg);
+    assert_eq(sync_ok, 1);
+
+    // Simulate a distributed training step workflow:
+    // 1. Each rank computes local gradient
+    let local_grad = arr4_new(10, -5, 8, -3);
+
+    // 2. Allreduce to average gradients (single rank: identity)
+    let global_grad = allreduce_sum(local_grad, pg);
+    // In single-rank, global = local
+    assert_eq(arr4_eq(local_grad, global_grad), 1);
+
+    // 3. Apply gradient update: params = params - lr * grad
+    // Using scaled integer: lr = 1 (learning rate 0.01 * 100 scale)
+    let params = arr4_new(1000, 2000, 3000, 4000);
+    let lr = 1;
+    let updated = Arr4 {
+        e0: params.e0 - lr * global_grad.e0,
+        e1: params.e1 - lr * global_grad.e1,
+        e2: params.e2 - lr * global_grad.e2,
+        e3: params.e3 - lr * global_grad.e3
+    };
+    assert_eq(updated.e0, 990);
+    assert_eq(updated.e1, 2005);
+    assert_eq(updated.e2, 2992);
+    assert_eq(updated.e3, 4003);
+
+    // 4. Barrier after update
+    let sync_ok2 = barrier(pg);
+    assert_eq(sync_ok2, 1);
+
+    // 5. Broadcast updated model from rank 0
+    let synced_params = broadcast(updated, 0, pg);
+    assert_eq(arr4_eq(updated, synced_params), 1);
+
+    // Simulate gradient averaging with 4 ranks
+    let g0 = arr4_new(12, -3, 7, -1);
+    let g1 = arr4_new(10, -5, 9, -2);
+    let g2 = arr4_new(8, -4, 11, 0);
+    let g3 = arr4_new(14, -2, 5, -3);
+    let sum_grad = arr4_add(arr4_add(g0, g1), arr4_add(g2, g3));
+    // Average: divide by 4
+    let avg_grad = Arr4 {
+        e0: sum_grad.e0 / 4,
+        e1: sum_grad.e1 / 4,
+        e2: sum_grad.e2 / 4,
+        e3: sum_grad.e3 / 4
+    };
+    // sum = [44, -14, 32, -6], avg = [11, -3, 8, -1]
+    assert_eq(avg_grad.e0, 11);
+    assert_eq(avg_grad.e1, -3);
+    assert_eq(avg_grad.e2, 8);
+    assert_eq(avg_grad.e3, -1);
+
+    print("test_barrier_workflow passed");
+}
+
+fn main() -> Int {
+    test_allreduce_sum();
+    test_broadcast();
+    test_gather();
+    test_barrier_workflow();
+    print("ALL PASSED");
+    0
+}

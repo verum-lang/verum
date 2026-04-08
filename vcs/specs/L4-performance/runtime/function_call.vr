@@ -1,0 +1,543 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: performance, runtime, function-call, dispatch
+// @description: Function call overhead (target: < 5ns direct, < 15ns virtual)
+
+/// Function Call Overhead Benchmark
+///
+/// This benchmark measures the overhead of different function call patterns
+/// in Verum, comparing against native C/Rust function call costs.
+///
+/// Performance targets:
+/// - Direct call:     < 5ns (comparable to C)
+/// - Virtual call:    < 15ns (vtable lookup + indirect call)
+/// - Closure call:    < 10ns (function pointer + environment)
+/// - Generic call:    < 5ns (monomorphized)
+/// - Context call:    < 30ns (context lookup + call)
+///
+/// Call mechanisms:
+/// - Direct: Static dispatch, inlinable
+/// - Virtual: Dynamic dispatch via vtable
+/// - Closure: Function pointer + captured environment
+/// - Generic: Monomorphized at compile time
+/// - Context: Runtime context lookup + dispatch
+///
+/// Spec reference: docs/detailed/07-functions.md
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+type Computable is protocol {
+    fn compute(&self) -> Int64;
+};
+
+
+/// Simple functions for benchmarking
+@inline(never)
+fn direct_add(a: Int64, b: Int64) -> Int64 {
+    a + b
+}
+
+@inline(never)
+fn direct_complex(a: Int64, b: Int64, c: Int64) -> Int64 {
+    let x = a * b;
+    let y = b * c;
+    let z = c * a;
+    x + y + z
+}
+
+/// Baseline: Inline operation (no function call)
+fn benchmark_inline_baseline() -> BenchmarkResult {
+    let mut sum: Int64 = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum = black_box(sum + 1);
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum = black_box(sum + 1);  // Direct arithmetic, no call
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "inline_baseline",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 1.0,
+        is_baseline: true,
+    }
+}
+
+/// Direct function call (static dispatch)
+fn benchmark_direct_call() -> BenchmarkResult {
+    let mut sum: Int64 = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum = direct_add(sum, 1);
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum = direct_add(sum, 1);
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "direct_call",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,
+        is_baseline: false,
+    }
+}
+
+/// Direct call with more complex function
+fn benchmark_direct_call_complex() -> BenchmarkResult {
+    let mut result: Int64 = 0;
+
+    for i in 0..WARMUP_ITERATIONS as Int64 {
+        result = direct_complex(result, i, i + 1);
+    }
+
+    result = 0;
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS as Int64 {
+        result = direct_complex(result, i, i + 1);
+    }
+
+    black_box(result);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "direct_call_complex",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 8.0,
+        is_baseline: false,
+    }
+}
+
+/// Virtual function call (dynamic dispatch)
+fn benchmark_virtual_call() -> BenchmarkResult {
+    // Protocol defined inline for benchmark
+    // type Addable is protocol { fn add(&self, other: Int64) -> Int64; };
+    type AddableImpl is { value: Int64 };
+
+    implement Addable for AddableImpl {
+        @inline(never)
+        fn add(&self, other: Int64) -> Int64 {
+            self.value + other
+        }
+    }
+
+    let obj: &Addable = &AddableImpl { value: 0 };
+    let mut sum: Int64 = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum = obj.add(1);
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Virtual call: vtable lookup + indirect call
+        sum = obj.add(1);
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "virtual_call",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 15.0,
+        is_baseline: false,
+    }
+}
+
+/// Virtual call with type confusion avoidance
+fn benchmark_virtual_call_monomorphic() -> BenchmarkResult {
+
+    type Impl1 is  { value: Int64 };
+    implement Computable for Impl1 {
+        fn compute(&self) -> Int64 { self.value * 2 }
+    }
+
+    // Monomorphic call site - always same type
+    let obj = Impl1 { value: 42 };
+    let proto_obj: &Computable = &obj;
+    let mut sum: Int64 = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum += proto_obj.compute();
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum += proto_obj.compute();
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "virtual_call_monomorphic",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 12.0,  // Slightly faster due to inline cache
+        is_baseline: false,
+    }
+}
+
+/// Virtual call with polymorphic dispatch
+fn benchmark_virtual_call_polymorphic() -> BenchmarkResult {
+
+    type Impl1 is  { value: Int64 };
+    type Impl2 is  { value: Int64 };
+    type Impl3 is  { value: Int64 };
+
+    implement Computable for Impl1 { fn compute(&self) -> Int64 { self.value * 2 } }
+    implement Computable for Impl2 { fn compute(&self) -> Int64 { self.value * 3 } }
+    implement Computable for Impl3 { fn compute(&self) -> Int64 { self.value * 4 } }
+
+    let objs: [&Computable; 3] = [
+        &Impl1 { value: 1 },
+        &Impl2 { value: 2 },
+        &Impl3 { value: 3 },
+    ];
+
+    let mut sum: Int64 = 0;
+
+    for i in 0..WARMUP_ITERATIONS {
+        sum += objs[i % 3].compute();
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // Polymorphic: different types at call site
+        sum += objs[i % 3].compute();
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "virtual_call_polymorphic",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 18.0,  // Higher due to vtable misses
+        is_baseline: false,
+    }
+}
+
+/// Closure call (no captures)
+fn benchmark_closure_no_capture() -> BenchmarkResult {
+    let closure = |a: Int64, b: Int64| -> Int64 { a + b };
+    let mut sum: Int64 = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum = closure(sum, 1);
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum = closure(sum, 1);
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "closure_no_capture",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,  // Should inline to direct call
+        is_baseline: false,
+    }
+}
+
+/// Closure call with captures
+fn benchmark_closure_with_capture() -> BenchmarkResult {
+    let multiplier: Int64 = 2;
+    let offset: Int64 = 10;
+    let closure = |a: Int64| -> Int64 { a * multiplier + offset };
+    let mut sum: Int64 = 0;
+
+    for i in 0..WARMUP_ITERATIONS as Int64 {
+        sum = closure(i);
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS as Int64 {
+        sum = closure(i);
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "closure_with_capture",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 8.0,
+        is_baseline: false,
+    }
+}
+
+/// Closure call via protocol object (Fn)
+fn benchmark_closure_dyn_fn() -> BenchmarkResult {
+    let closure: &Fn(Int64, Int64) -> Int64 = &|a, b| a + b;
+    let mut sum: Int64 = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum = closure(sum, 1);
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Dynamic function call via trait object
+        sum = closure(sum, 1);
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "closure_dyn_fn",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 12.0,
+        is_baseline: false,
+    }
+}
+
+/// Generic function call (monomorphized)
+fn benchmark_generic_call() -> BenchmarkResult {
+    @inline(never)
+    fn generic_add<T: std.ops.Add<Output = T>>(a: T, b: T) -> T {
+        a + b
+    }
+
+    let mut sum: Int64 = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum = generic_add(sum, 1);
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Monomorphized to Int64 version
+        sum = generic_add(sum, 1);
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "generic_call",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 5.0,  // Same as direct after monomorphization
+        is_baseline: false,
+    }
+}
+
+/// Function call with context (DI system)
+fn benchmark_context_call() -> BenchmarkResult {
+    // Simulate context system overhead
+    context Calculator {
+        fn compute(&self, a: Int64, b: Int64) -> Int64;
+    }
+
+    type DefaultCalculator is ();
+    implement Calculator for DefaultCalculator {
+        fn compute(&self, a: Int64, b: Int64) -> Int64 { a + b }
+    }
+
+    fn compute_with_context(a: Int64, b: Int64) -> Int64 using [Calculator] {
+        Calculator.compute(a, b)
+    }
+
+    provide Calculator = DefaultCalculator;
+
+    let mut sum: Int64 = 0;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        sum = compute_with_context(sum, 1);
+    }
+
+    sum = 0;
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Context lookup + virtual call
+        sum = compute_with_context(sum, 1);
+    }
+
+    black_box(sum);
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "context_call",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        target_ns: 30.0,
+        is_baseline: false,
+    }
+}
+
+/// Recursive function call
+fn benchmark_recursive_call() -> BenchmarkResult {
+    @inline(never)
+    fn recursive_sum(n: Int64) -> Int64 {
+        if n <= 0 { 0 } else { n + recursive_sum(n - 1) }
+    }
+
+    let depth = 10;
+    let iterations = BENCHMARK_ITERATIONS / depth;
+
+    for _ in 0..(WARMUP_ITERATIONS / depth) {
+        black_box(recursive_sum(depth as Int64));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        black_box(recursive_sum(depth as Int64));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "recursive_call_depth_10",
+        iterations: iterations * depth,
+        per_op_ns: elapsed.as_nanos() as f64 / (iterations * depth) as f64,
+        target_ns: 8.0,  // Stack frame overhead
+        is_baseline: false,
+    }
+}
+
+/// Tail-recursive function call (optimized)
+fn benchmark_tail_recursive_call() -> BenchmarkResult {
+    @inline(never)
+    fn tail_sum(n: Int64, acc: Int64) -> Int64 {
+        if n <= 0 { acc } else { tail_sum(n - 1, acc + n) }
+    }
+
+    let depth = 100;
+    let iterations = BENCHMARK_ITERATIONS / depth;
+
+    for _ in 0..(WARMUP_ITERATIONS / depth) {
+        black_box(tail_sum(depth as Int64, 0));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        black_box(tail_sum(depth as Int64, 0));
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "tail_recursive_depth_100",
+        iterations: iterations * depth,
+        per_op_ns: elapsed.as_nanos() as f64 / (iterations * depth) as f64,
+        target_ns: 3.0,  // Optimized to loop
+        is_baseline: false,
+    }
+}
+
+fn main() {
+    println("=== Function Call Overhead Benchmark ===\n");
+
+    let results = [
+        benchmark_inline_baseline(),
+        benchmark_direct_call(),
+        benchmark_direct_call_complex(),
+        benchmark_virtual_call(),
+        benchmark_virtual_call_monomorphic(),
+        benchmark_virtual_call_polymorphic(),
+        benchmark_closure_no_capture(),
+        benchmark_closure_with_capture(),
+        benchmark_closure_dyn_fn(),
+        benchmark_generic_call(),
+        benchmark_context_call(),
+        benchmark_recursive_call(),
+        benchmark_tail_recursive_call(),
+    ];
+
+    let baseline_ns = results[0].per_op_ns;
+
+    println("{:<30} {:>12} {:>12} {:>10} {:>8}",
+            "Benchmark", "Time (ns)", "Overhead", "Target", "Status");
+    println("{}", "-".repeat(75));
+
+    for result in results {
+        let overhead = if result.is_baseline {
+            0.0
+        } else {
+            result.per_op_ns - baseline_ns
+        };
+
+        let passed = result.per_op_ns <= result.target_ns;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.2} {:>10.1} {:>8}",
+                result.name, result.per_op_ns, overhead, result.target_ns, status);
+    }
+
+    println("");
+    println("Call Types:");
+    println("  Direct:   Static dispatch, potentially inlined");
+    println("  Virtual:  vtable lookup + indirect call");
+    println("  Closure:  Function pointer + environment");
+    println("  Generic:  Monomorphized at compile time");
+    println("  Context:  Runtime context lookup + dispatch");
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    per_op_ns: f64,
+    target_ns: f64,
+    is_baseline: Bool,
+};
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }

@@ -1,0 +1,298 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, fractions, rational, arithmetic, gcd
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT rational number arithmetic with GCD normalization
+
+type Frac is { num: Int, den: Int };
+
+fn abs_val(n: Int) -> Int {
+    if n < 0 { 0 - n } else { n }
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// Normalize fraction: reduce and ensure denominator is positive
+fn frac_norm(f: Frac) -> Frac {
+    if f.num == 0 {
+        Frac { num: 0, den: 1 }
+    } else {
+        let g = gcd(abs_val(f.num), abs_val(f.den));
+        let mut n = f.num / g;
+        let mut d = f.den / g;
+        // Ensure denominator is positive
+        if d < 0 {
+            n = 0 - n;
+            d = 0 - d;
+        }
+        Frac { num: n, den: d }
+    }
+}
+
+fn frac_new(n: Int, d: Int) -> Frac {
+    frac_norm(Frac { num: n, den: d })
+}
+
+// Addition: a/b + c/d = (a*d + c*b) / (b*d)
+fn frac_add(a: Frac, b: Frac) -> Frac {
+    frac_norm(Frac {
+        num: a.num * b.den + b.num * a.den,
+        den: a.den * b.den
+    })
+}
+
+// Subtraction: a/b - c/d = (a*d - c*b) / (b*d)
+fn frac_sub(a: Frac, b: Frac) -> Frac {
+    frac_norm(Frac {
+        num: a.num * b.den - b.num * a.den,
+        den: a.den * b.den
+    })
+}
+
+// Multiplication: (a/b) * (c/d) = (a*c) / (b*d)
+fn frac_mul(a: Frac, b: Frac) -> Frac {
+    frac_norm(Frac {
+        num: a.num * b.num,
+        den: a.den * b.den
+    })
+}
+
+// Division: (a/b) / (c/d) = (a*d) / (b*c)
+fn frac_div(a: Frac, b: Frac) -> Frac {
+    frac_norm(Frac {
+        num: a.num * b.den,
+        den: a.den * b.num
+    })
+}
+
+// Compare: a/b vs c/d => a*d vs c*b (assuming positive denominators)
+fn frac_eq(a: Frac, b: Frac) -> Bool {
+    a.num * b.den == b.num * a.den
+}
+
+fn frac_lt(a: Frac, b: Frac) -> Bool {
+    a.num * b.den < b.num * a.den
+}
+
+fn frac_le(a: Frac, b: Frac) -> Bool {
+    a.num * b.den <= b.num * a.den
+}
+
+// Negate
+fn frac_neg(a: Frac) -> Frac {
+    Frac { num: 0 - a.num, den: a.den }
+}
+
+// Reciprocal
+fn frac_recip(a: Frac) -> Frac {
+    frac_norm(Frac { num: a.den, den: a.num })
+}
+
+// Absolute value
+fn frac_abs(a: Frac) -> Frac {
+    Frac { num: abs_val(a.num), den: a.den }
+}
+
+// Integer to fraction
+fn frac_from_int(n: Int) -> Frac {
+    Frac { num: n, den: 1 }
+}
+
+// Mediant of two fractions: (a+c)/(b+d)
+fn frac_mediant(a: Frac, b: Frac) -> Frac {
+    frac_norm(Frac { num: a.num + b.num, den: a.den + b.den })
+}
+
+fn main() -> Int {
+    // === Basic construction and normalization ===
+    let half = frac_new(1, 2);
+    assert_eq(half.num, 1);
+    assert_eq(half.den, 2);
+
+    let two_four = frac_new(2, 4);
+    assert_eq(two_four.num, 1);
+    assert_eq(two_four.den, 2);
+
+    let six_nine = frac_new(6, 9);
+    assert_eq(six_nine.num, 2);
+    assert_eq(six_nine.den, 3);
+
+    // Negative normalization
+    let neg = frac_new(-3, 4);
+    assert_eq(neg.num, -3);
+    assert_eq(neg.den, 4);
+
+    let neg2 = frac_new(3, -4);
+    assert_eq(neg2.num, -3);
+    assert_eq(neg2.den, 4);
+
+    let neg3 = frac_new(-3, -4);
+    assert_eq(neg3.num, 3);
+    assert_eq(neg3.den, 4);
+
+    // Zero
+    let zero = frac_new(0, 5);
+    assert_eq(zero.num, 0);
+    assert_eq(zero.den, 1);
+
+    // === Addition ===
+    // 1/2 + 1/3 = 5/6
+    let sum1 = frac_add(frac_new(1, 2), frac_new(1, 3));
+    assert_eq(sum1.num, 5);
+    assert_eq(sum1.den, 6);
+
+    // 1/4 + 1/4 = 1/2
+    let sum2 = frac_add(frac_new(1, 4), frac_new(1, 4));
+    assert_eq(sum2.num, 1);
+    assert_eq(sum2.den, 2);
+
+    // 2/3 + 4/6 = 2/3 + 2/3 = 4/3
+    let sum3 = frac_add(frac_new(2, 3), frac_new(4, 6));
+    assert_eq(sum3.num, 4);
+    assert_eq(sum3.den, 3);
+
+    // Adding zero
+    let sum4 = frac_add(frac_new(3, 7), frac_new(0, 1));
+    assert_eq(sum4.num, 3);
+    assert_eq(sum4.den, 7);
+
+    // === Subtraction ===
+    // 3/4 - 1/4 = 1/2
+    let diff1 = frac_sub(frac_new(3, 4), frac_new(1, 4));
+    assert_eq(diff1.num, 1);
+    assert_eq(diff1.den, 2);
+
+    // 1/2 - 1/3 = 1/6
+    let diff2 = frac_sub(frac_new(1, 2), frac_new(1, 3));
+    assert_eq(diff2.num, 1);
+    assert_eq(diff2.den, 6);
+
+    // Result is negative: 1/3 - 1/2 = -1/6
+    let diff3 = frac_sub(frac_new(1, 3), frac_new(1, 2));
+    assert_eq(diff3.num, -1);
+    assert_eq(diff3.den, 6);
+
+    // === Multiplication ===
+    // 2/3 * 3/4 = 6/12 = 1/2
+    let prod1 = frac_mul(frac_new(2, 3), frac_new(3, 4));
+    assert_eq(prod1.num, 1);
+    assert_eq(prod1.den, 2);
+
+    // 5/7 * 7/5 = 1
+    let prod2 = frac_mul(frac_new(5, 7), frac_new(7, 5));
+    assert_eq(prod2.num, 1);
+    assert_eq(prod2.den, 1);
+
+    // Multiply by zero
+    let prod3 = frac_mul(frac_new(99, 100), frac_new(0, 1));
+    assert_eq(prod3.num, 0);
+    assert_eq(prod3.den, 1);
+
+    // Negative * negative = positive
+    let prod4 = frac_mul(frac_new(-2, 3), frac_new(-3, 5));
+    assert_eq(prod4.num, 2);
+    assert_eq(prod4.den, 5);
+
+    // === Division ===
+    // (1/2) / (3/4) = (1/2) * (4/3) = 4/6 = 2/3
+    let quot1 = frac_div(frac_new(1, 2), frac_new(3, 4));
+    assert_eq(quot1.num, 2);
+    assert_eq(quot1.den, 3);
+
+    // 3 / (1/3) = 9
+    let quot2 = frac_div(frac_from_int(3), frac_new(1, 3));
+    assert_eq(quot2.num, 9);
+    assert_eq(quot2.den, 1);
+
+    // === Comparison ===
+    assert(frac_eq(frac_new(1, 2), frac_new(2, 4)));
+    assert(frac_eq(frac_new(3, 9), frac_new(1, 3)));
+    assert(!frac_eq(frac_new(1, 2), frac_new(1, 3)));
+
+    assert(frac_lt(frac_new(1, 3), frac_new(1, 2)));
+    assert(!frac_lt(frac_new(1, 2), frac_new(1, 3)));
+    assert(!frac_lt(frac_new(1, 2), frac_new(1, 2)));
+
+    assert(frac_le(frac_new(1, 3), frac_new(1, 2)));
+    assert(frac_le(frac_new(1, 2), frac_new(1, 2)));
+
+    // === Negation ===
+    let n1 = frac_neg(frac_new(3, 4));
+    assert_eq(n1.num, -3);
+    assert_eq(n1.den, 4);
+    // Double negation
+    let n2 = frac_neg(frac_neg(frac_new(5, 7)));
+    assert_eq(n2.num, 5);
+    assert_eq(n2.den, 7);
+
+    // === Reciprocal ===
+    let r1 = frac_recip(frac_new(3, 7));
+    assert_eq(r1.num, 7);
+    assert_eq(r1.den, 3);
+
+    // === Absolute value ===
+    let ab1 = frac_abs(frac_new(-3, 4));
+    assert_eq(ab1.num, 3);
+    assert_eq(ab1.den, 4);
+
+    // === Additive inverse: a + (-a) = 0 ===
+    let f = frac_new(5, 13);
+    let inv_sum = frac_add(f, frac_neg(f));
+    assert_eq(inv_sum.num, 0);
+
+    // === Multiplicative inverse: a * (1/a) = 1 ===
+    let f2 = frac_new(7, 11);
+    let inv_prod = frac_mul(f2, frac_recip(f2));
+    assert_eq(inv_prod.num, 1);
+    assert_eq(inv_prod.den, 1);
+
+    // === Sum of unit fractions: 1/1 + 1/2 + 1/3 + 1/4 + 1/5 + 1/6 ===
+    // = 60/60 + 30/60 + 20/60 + 15/60 + 12/60 + 10/60 = 147/60 = 49/20
+    let mut usum = frac_from_int(0);
+    let mut i = 1;
+    while i <= 6 {
+        usum = frac_add(usum, frac_new(1, i));
+        i = i + 1;
+    }
+    assert_eq(usum.num, 49);
+    assert_eq(usum.den, 20);
+
+    // === Farey mediant: mediant(1/3, 1/2) = 2/5 ===
+    let med = frac_mediant(frac_new(1, 3), frac_new(1, 2));
+    assert_eq(med.num, 2);
+    assert_eq(med.den, 5);
+
+    // Mediant property: a/b < mediant < c/d
+    assert(frac_lt(frac_new(1, 3), med));
+    assert(frac_lt(med, frac_new(1, 2)));
+
+    // === Egyptian fraction: 5/6 = 1/2 + 1/3 ===
+    let ef = frac_add(frac_new(1, 2), frac_new(1, 3));
+    assert(frac_eq(ef, frac_new(5, 6)));
+
+    // === Continued fraction convergents for sqrt(2) ~ 1, 3/2, 7/5, 17/12, 41/29 ===
+    // Each: p(n) = 2*p(n-1) + p(n-2), same for q
+    // Check: 1/1, 3/2, 7/5, 17/12, 41/29
+    // 41/29 ~ 1.4137... close to sqrt(2) ~ 1.4142
+    // Verify: (41/29)^2 = 1681/841, and 2 = 1682/841
+    let approx = frac_new(41, 29);
+    let sq = frac_mul(approx, approx);
+    let two = frac_from_int(2);
+    // |sq - 2| = |1681/841 - 1682/841| = 1/841
+    let err = frac_sub(two, sq);
+    assert_eq(err.num, 1);
+    assert_eq(err.den, 841);
+
+    0
+}

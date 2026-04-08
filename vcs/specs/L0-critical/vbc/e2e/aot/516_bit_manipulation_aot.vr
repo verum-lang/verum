@@ -1,0 +1,272 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, bit-manipulation, bitwise
+// @timeout: 30000
+
+// Advanced bit manipulation techniques
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Power of 2
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// Get bit at position k
+fn get_bit(x: Int, k: Int) -> Int {
+    (x / pow2(k)) % 2
+}
+
+// Set bit at position k
+fn set_bit(x: Int, k: Int) -> Int {
+    x + pow2(k) * (1 - get_bit(x, k))
+}
+
+// Clear bit at position k
+fn clear_bit(x: Int, k: Int) -> Int {
+    x - pow2(k) * get_bit(x, k)
+}
+
+// Toggle bit at position k
+fn toggle_bit(x: Int, k: Int) -> Int {
+    if get_bit(x, k) == 1 { clear_bit(x, k) } else { set_bit(x, k) }
+}
+
+// Population count (number of 1 bits)
+fn popcount(x: Int) -> Int {
+    let mut count = 0;
+    let mut v = x;
+    while v > 0 {
+        count = count + v % 2;
+        v = v / 2;
+    }
+    count
+}
+
+// Number of trailing zeros
+fn ctz(x: Int) -> Int {
+    if x == 0 { return -1; }
+    let mut count = 0;
+    let mut v = x;
+    while v % 2 == 0 {
+        count = count + 1;
+        v = v / 2;
+    }
+    count
+}
+
+// Number of leading zeros (for 8-bit number)
+fn clz8(x: Int) -> Int {
+    if x == 0 { return 8; }
+    let mut count = 0;
+    let mut mask = 128; // 2^7
+    while mask > 0 {
+        if x / mask % 2 == 1 { return count; }
+        count = count + 1;
+        mask = mask / 2;
+    }
+    8
+}
+
+// Highest set bit position
+fn highest_bit(x: Int) -> Int {
+    if x == 0 { return -1; }
+    let mut pos = 0;
+    let mut v = x;
+    while v > 1 {
+        v = v / 2;
+        pos = pos + 1;
+    }
+    pos
+}
+
+// Is power of 2? (positive only)
+fn is_pow2(x: Int) -> Int {
+    if x <= 0 { return 0; }
+    // Power of 2 has exactly 1 bit set
+    if popcount(x) == 1 { 1 } else { 0 }
+}
+
+// Next power of 2 >= x
+fn next_pow2(x: Int) -> Int {
+    if x <= 1 { return 1; }
+    let mut p = 1;
+    while p < x { p = p * 2; }
+    p
+}
+
+// Reverse bits of an 8-bit number
+fn reverse_bits8(x: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 8 {
+        result = result * 2 + get_bit(x, i);
+        i = i + 1;
+    }
+    result
+}
+
+// Gray code encode/decode
+fn gray_encode(n: Int) -> Int {
+    // gray = n XOR (n >> 1)
+    // For positive integers, simulate XOR via addition/subtraction
+    let half = n / 2;
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        let bit_n = get_bit(n, i);
+        let bit_h = get_bit(half, i);
+        // XOR: 0^0=0, 0^1=1, 1^0=1, 1^1=0
+        let xor_bit = if bit_n == bit_h { 0 } else { 1 };
+        if xor_bit == 1 {
+            result = result + pow2(i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_get_set_bit() -> Int {
+    // 13 = 1101 in binary
+    assert_eq(get_bit(13, 0), 1);
+    assert_eq(get_bit(13, 1), 0);
+    assert_eq(get_bit(13, 2), 1);
+    assert_eq(get_bit(13, 3), 1);
+    assert_eq(get_bit(13, 4), 0);
+
+    // Set bit 1 of 13 (1101 → 1111 = 15)
+    assert_eq(set_bit(13, 1), 15);
+    // Set bit 0 of 13 (already set, no change)
+    assert_eq(set_bit(13, 0), 13);
+    1
+}
+
+fn test_clear_toggle() -> Int {
+    // Clear bit 2 of 13 (1101 → 1001 = 9)
+    assert_eq(clear_bit(13, 2), 9);
+    // Toggle bit 1 of 13 (1101 → 1111 = 15)
+    assert_eq(toggle_bit(13, 1), 15);
+    // Toggle bit 0 of 13 (1101 → 1100 = 12)
+    assert_eq(toggle_bit(13, 0), 12);
+    1
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);   // 111
+    assert_eq(popcount(255), 8); // 11111111
+    assert_eq(popcount(170), 4); // 10101010
+    1
+}
+
+fn test_ctz_clz() -> Int {
+    assert_eq(ctz(8), 3);    // 1000: 3 trailing zeros
+    assert_eq(ctz(12), 2);   // 1100: 2 trailing zeros
+    assert_eq(ctz(1), 0);    // no trailing zeros
+    assert_eq(clz8(128), 0); // 10000000: no leading zeros
+    assert_eq(clz8(1), 7);   // 00000001: 7 leading zeros
+    assert_eq(clz8(15), 4);  // 00001111: 4 leading zeros
+    1
+}
+
+fn test_highest_bit() -> Int {
+    assert_eq(highest_bit(1), 0);
+    assert_eq(highest_bit(8), 3);
+    assert_eq(highest_bit(255), 7);
+    assert_eq(highest_bit(100), 6); // 1100100
+    1
+}
+
+fn test_pow2_ops() -> Int {
+    assert_eq(is_pow2(1), 1);
+    assert_eq(is_pow2(2), 1);
+    assert_eq(is_pow2(4), 1);
+    assert_eq(is_pow2(3), 0);
+    assert_eq(is_pow2(6), 0);
+
+    assert_eq(next_pow2(1), 1);
+    assert_eq(next_pow2(3), 4);
+    assert_eq(next_pow2(5), 8);
+    assert_eq(next_pow2(8), 8);
+    assert_eq(next_pow2(9), 16);
+    1
+}
+
+fn test_reverse_bits() -> Int {
+    // 1 = 00000001 → 10000000 = 128
+    assert_eq(reverse_bits8(1), 128);
+    // 255 = 11111111 → 11111111 = 255
+    assert_eq(reverse_bits8(255), 255);
+    // 170 = 10101010 → 01010101 = 85
+    assert_eq(reverse_bits8(170), 85);
+    1
+}
+
+fn test_gray_code() -> Int {
+    // Gray code: 0→0, 1→1, 2→3, 3→2, 4→6, 5→7, 6→5, 7→4
+    assert_eq(gray_encode(0), 0);
+    assert_eq(gray_encode(1), 1);
+    assert_eq(gray_encode(2), 3);
+    assert_eq(gray_encode(3), 2);
+    assert_eq(gray_encode(4), 6);
+    assert_eq(gray_encode(5), 7);
+    assert_eq(gray_encode(6), 5);
+    assert_eq(gray_encode(7), 4);
+
+    // Adjacent Gray codes differ by exactly 1 bit
+    let mut i = 0;
+    while i < 7 {
+        let g1 = gray_encode(i);
+        let g2 = gray_encode(i + 1);
+        // XOR of adjacent should have popcount 1
+        let mut xor_val = 0;
+        let mut k = 0;
+        while k < 8 {
+            let b1 = get_bit(g1, k);
+            let b2 = get_bit(g2, k);
+            if b1 != b2 { xor_val = xor_val + pow2(k); }
+            k = k + 1;
+        }
+        assert_eq(popcount(xor_val), 1);
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    test_get_set_bit();
+    test_clear_toggle();
+    test_popcount();
+    test_ctz_clz();
+    test_highest_bit();
+    test_pow2_ops();
+    test_reverse_bits();
+    test_gray_code();
+    print("[OK] 516_bit_manipulation_aot");
+    0
+}

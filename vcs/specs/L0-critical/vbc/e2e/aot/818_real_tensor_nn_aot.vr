@@ -1,0 +1,75 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, nn
+// @expected-exit: 0
+
+// Tests tensor neural network operations through AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
+fn tensor_unop(t: Int, op: Int) -> Int { @intrinsic("TENSOR_UNOP", t, op) }
+fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let x = tensor_new(5, 1);
+    let x = tensor_set_scalar(x, 0, -3);
+    let x = tensor_set_scalar(x, 1, -1);
+    let x = tensor_set_scalar(x, 2, 0);
+    let x = tensor_set_scalar(x, 3, 1);
+    let x = tensor_set_scalar(x, 4, 3);
+
+    let relu = tensor_unop(x, 10);
+    errors = errors + check_val(relu, 0, 0);
+    errors = errors + check_val(relu, 1, 0);
+    errors = errors + check_val(relu, 2, 0);
+    errors = errors + check_val(relu, 3, 1);
+    errors = errors + check_val(relu, 4, 3);
+
+    let w = tensor_new(3, 1);
+    let w = tensor_set_scalar(w, 0, 2);
+    let w = tensor_set_scalar(w, 1, -1);
+    let w = tensor_set_scalar(w, 2, 3);
+
+    let inp = tensor_new(3, 1);
+    let inp = tensor_set_scalar(inp, 0, 1);
+    let inp = tensor_set_scalar(inp, 1, 2);
+    let inp = tensor_set_scalar(inp, 2, 3);
+
+    let bias = tensor_new(3, 1);
+    let bias = tensor_set_scalar(bias, 0, -1);
+    let bias = tensor_set_scalar(bias, 1, 1);
+    let bias = tensor_set_scalar(bias, 2, -1);
+
+    let wx = tensor_binop(w, inp, 2);
+    let pre_act = tensor_binop(wx, bias, 0);
+    let output = tensor_unop(pre_act, 10);
+
+    errors = errors + check_val(output, 0, 1);
+    errors = errors + check_val(output, 1, 0);
+    errors = errors + check_val(output, 2, 8);
+
+    let target = tensor_new(3, 1);
+    let target = tensor_set_scalar(target, 0, 1);
+    let target = tensor_set_scalar(target, 1, 1);
+    let target = tensor_set_scalar(target, 2, 10);
+    let diff = tensor_binop(output, target, 1);
+    let sq = tensor_binop(diff, diff, 2);
+    let sum_sq = tensor_reduce(sq, 0, 0);
+    errors = errors + check_val(sum_sq, 0, 5);
+
+    errors
+}

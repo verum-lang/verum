@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, attributes, unclosed, error
+// @description: Test unclosed attribute parenthesis detection
+// @expected-error: E011
+
+@derive(
+fn test() {}

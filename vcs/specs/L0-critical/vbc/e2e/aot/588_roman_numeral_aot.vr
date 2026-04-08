@@ -1,0 +1,232 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, roman-numerals, encoding, conversion
+// @timeout: 30000
+
+// Roman numeral encoding/decoding using integer representation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Encode roman numerals as arrays of symbol IDs:
+// 0=I(1), 1=V(5), 2=X(10), 3=L(50), 4=C(100), 5=D(500), 6=M(1000)
+
+fn roman_sym_val(sym: Int) -> Int {
+    if sym == 0 { 1 }
+    else if sym == 1 { 5 }
+    else if sym == 2 { 10 }
+    else if sym == 3 { 50 }
+    else if sym == 4 { 100 }
+    else if sym == 5 { 500 }
+    else { 1000 }
+}
+
+// Decode roman numeral from symbol array
+fn roman_decode(syms: Arr8, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let cur = roman_sym_val(get8(syms, i));
+        if i + 1 < n {
+            let next = roman_sym_val(get8(syms, i + 1));
+            if cur < next {
+                total = total + next - cur;
+                i = i + 2;
+            } else {
+                total = total + cur;
+                i = i + 1;
+            }
+        } else {
+            total = total + cur;
+            i = i + 1;
+        }
+    }
+    total
+}
+
+// Encode integer to roman numeral (returns array and count)
+// Uses greedy approach with subtractive notation
+// Values: 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1
+// Encode directly to decimal value of each digit place
+
+// Simpler: encode just the count of each symbol
+// Return the decimal value (for verification via roundtrip)
+fn encode_roman_count(val: Int) -> Int {
+    // Count how many of each roman digit we need
+    let mut v = val;
+    let mut count = 0; // total symbols
+    // Process from largest to smallest
+    // M = 1000
+    while v >= 1000 { v = v - 1000; count = count + 1; }
+    // CM = 900
+    if v >= 900 { v = v - 900; count = count + 2; }
+    // D = 500
+    if v >= 500 { v = v - 500; count = count + 1; }
+    // CD = 400
+    if v >= 400 { v = v - 400; count = count + 2; }
+    // C = 100
+    while v >= 100 { v = v - 100; count = count + 1; }
+    // XC = 90
+    if v >= 90 { v = v - 90; count = count + 2; }
+    // L = 50
+    if v >= 50 { v = v - 50; count = count + 1; }
+    // XL = 40
+    if v >= 40 { v = v - 40; count = count + 2; }
+    // X = 10
+    while v >= 10 { v = v - 10; count = count + 1; }
+    // IX = 9
+    if v >= 9 { v = v - 9; count = count + 2; }
+    // V = 5
+    if v >= 5 { v = v - 5; count = count + 1; }
+    // IV = 4
+    if v >= 4 { v = v - 4; count = count + 2; }
+    // I = 1
+    while v >= 1 { v = v - 1; count = count + 1; }
+    count
+}
+
+// Encode to actual symbol array (limited to 8 symbols)
+fn encode_roman(val: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut v = val;
+    let mut idx = 0;
+    while v >= 1000 { result = set8(result, idx, 6); idx = idx + 1; v = v - 1000; }
+    if v >= 900 { result = set8(result, idx, 4); idx = idx + 1; result = set8(result, idx, 6); idx = idx + 1; v = v - 900; }
+    if v >= 500 { result = set8(result, idx, 5); idx = idx + 1; v = v - 500; }
+    if v >= 400 { result = set8(result, idx, 4); idx = idx + 1; result = set8(result, idx, 5); idx = idx + 1; v = v - 400; }
+    while v >= 100 { result = set8(result, idx, 4); idx = idx + 1; v = v - 100; }
+    if v >= 90 { result = set8(result, idx, 2); idx = idx + 1; result = set8(result, idx, 4); idx = idx + 1; v = v - 90; }
+    if v >= 50 { result = set8(result, idx, 3); idx = idx + 1; v = v - 50; }
+    if v >= 40 { result = set8(result, idx, 2); idx = idx + 1; result = set8(result, idx, 3); idx = idx + 1; v = v - 40; }
+    while v >= 10 { result = set8(result, idx, 2); idx = idx + 1; v = v - 10; }
+    if v >= 9 { result = set8(result, idx, 0); idx = idx + 1; result = set8(result, idx, 2); idx = idx + 1; v = v - 9; }
+    if v >= 5 { result = set8(result, idx, 1); idx = idx + 1; v = v - 5; }
+    if v >= 4 { result = set8(result, idx, 0); idx = idx + 1; result = set8(result, idx, 1); idx = idx + 1; v = v - 4; }
+    while v >= 1 { result = set8(result, idx, 0); idx = idx + 1; v = v - 1; }
+    result
+}
+
+fn test_decode() -> Int {
+    // III = 3
+    let iii = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_decode(iii, 3), 3);
+
+    // IV = 4
+    let iv = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_decode(iv, 2), 4);
+
+    // IX = 9
+    let ix = Arr8 { v0: 0, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_decode(ix, 2), 9);
+
+    // XL = 40
+    let xl = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_decode(xl, 2), 40);
+
+    // XLII = 42
+    let xlii = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_decode(xlii, 4), 42); // XL + II
+    1
+}
+
+fn test_decode_fix() -> Int {
+    // Fix: XLII = X(10) L(50) I(1) I(1) = actually XL(40) + I + I = 42
+    // syms: [2, 3, 0, 0] with n=4
+    let xlii = Arr8 { v0: 2, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_decode(xlii, 4), 42);
+
+    // MCMXC = M(1000) CM(900) XC(90) = 1990
+    // syms: [6, 4, 6, 2, 4] with n=5
+    let mcmxc = Arr8 { v0: 6, v1: 4, v2: 6, v3: 2, v4: 4, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_decode(mcmxc, 5), 1990);
+
+    // VIII = V(5) + III(3) = 8
+    let viii = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(roman_decode(viii, 4), 8);
+    1
+}
+
+fn test_encode_count() -> Int {
+    // I = 1 symbol
+    assert_eq(encode_roman_count(1), 1);
+    // III = 3 symbols
+    assert_eq(encode_roman_count(3), 3);
+    // IV = 2 symbols
+    assert_eq(encode_roman_count(4), 2);
+    // VIII = 4 symbols
+    assert_eq(encode_roman_count(8), 4);
+    1
+}
+
+fn test_roundtrip() -> Int {
+    // Encode then decode should give original value
+    // Test small values that fit in 8 symbols
+    let enc3 = encode_roman(3);
+    assert_eq(roman_decode(enc3, encode_roman_count(3)), 3);
+
+    let enc4 = encode_roman(4);
+    assert_eq(roman_decode(enc4, encode_roman_count(4)), 4);
+
+    let enc9 = encode_roman(9);
+    assert_eq(roman_decode(enc9, encode_roman_count(9)), 9);
+
+    let enc14 = encode_roman(14);
+    assert_eq(roman_decode(enc14, encode_roman_count(14)), 14);
+
+    let enc42 = encode_roman(42);
+    assert_eq(roman_decode(enc42, encode_roman_count(42)), 42);
+    1
+}
+
+fn test_properties() -> Int {
+    // Roman numeral symbol count is always > 0 for positive numbers
+    let ok1 = if encode_roman_count(1) > 0 { 1 } else { 0 };
+    assert_eq(ok1, 1);
+
+    // Larger numbers generally need more symbols (not always, but 1 < 3999)
+    let c1 = encode_roman_count(1);
+    let c100 = encode_roman_count(100);
+    // C (100) = 1 symbol, I (1) = 1 symbol, so this particular pair equal
+    // But 1000 (M=1) vs 8 (VIII=4)...
+    // Test: decode(encode(n)) == n for several values
+    let mut i = 1;
+    let mut all_ok = 1;
+    while i <= 8 {
+        let enc = encode_roman(i);
+        let cnt = encode_roman_count(i);
+        if roman_decode(enc, cnt) != i { all_ok = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_ok, 1);
+    1
+}
+
+fn main() -> Int {
+    test_decode();
+    test_decode_fix();
+    test_encode_count();
+    test_roundtrip();
+    test_properties();
+    print("[OK] 588_roman_numeral_aot");
+    0
+}

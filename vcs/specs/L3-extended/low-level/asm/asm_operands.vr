@@ -1,0 +1,92 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, inline-assembly, asm-operands
+// @description: Test inline assembly operand types
+
+/// Test input operand (in)
+fn test_in_operand(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(volatile));
+    res
+}
+
+/// Test output operand (out)
+fn test_out_operand() -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, #42", options(volatile));
+    res
+}
+
+/// Test late output operand (lateout)
+fn test_lateout_operand(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("add {res}, {x}, #1", options(volatile));
+    res
+}
+
+/// Test inout operand - same register for input and output
+fn test_inout_operand(x: &mut Int) {
+    @asm("add {x}, {x}, #1", options(volatile));
+}
+
+/// Test inlateout operand - input read first, output written late
+fn test_inlateout_operand(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("add {res}, {x}, {x}", options(volatile));
+    res
+}
+
+/// Test const operand - compile-time constant
+fn test_const_operand() -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, #42", options(volatile));
+    res
+}
+
+/// Test clobber operand - register is clobbered
+fn test_clobber_operand(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(volatile));
+    res
+}
+
+/// Test memory constraint
+fn test_memory_operand(ptr: &mut Int, val: Int) {
+    @asm("str {val}, [{ptr}]", options(volatile));
+}
+
+/// Test named operand reference
+fn test_named_operand(a: Int, b: Int) -> Int {
+    let res: Int = 0;
+    @asm("add {res}, {a}, {b}", options(nomem));
+    res
+}
+
+/// Test register constraint variations
+fn test_register_constraints(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(volatile));
+    res
+}
+
+fn main() {
+    let a = test_in_operand(42);
+    assert(a == 42);
+
+    let b = test_out_operand();
+    assert(b == 42);
+
+    let c = test_lateout_operand(10);
+    assert(c == 11);
+
+    let mut d = 5;
+    test_inout_operand(&mut d);
+    assert(d == 6);
+
+    let e = test_const_operand();
+    assert(e == 42);
+
+    let f = test_named_operand(10, 20);
+    assert(f == 30);
+}

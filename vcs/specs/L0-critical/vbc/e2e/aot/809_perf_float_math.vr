@@ -1,0 +1,77 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, float_math
+// @expected-exit: 0
+
+// Performance: Taylor series sin/cos computation using pure float arithmetic
+
+fn taylor_sin(x: Float, terms: Int) -> Float {
+    // sin(x) = x - x^3/3! + x^5/5! - x^7/7! + ...
+    let mut result = 0.0;
+    let mut term = x;
+    let mut fi = 0.0;
+    let mut i = 0;
+    while (i < terms) {
+        result = result + term;
+        // divisor = (2*fi+2) * (2*fi+3)
+        let d1 = 2.0 * fi + 2.0;
+        let d2 = 2.0 * fi + 3.0;
+        term = term * (0.0 - x * x) / (d1 * d2);
+        fi = fi + 1.0;
+        i = i + 1;
+    }
+    result
+}
+
+fn taylor_cos(x: Float, terms: Int) -> Float {
+    // cos(x) = 1 - x^2/2! + x^4/4! - x^6/6! + ...
+    let mut result = 0.0;
+    let mut term = 1.0;
+    let mut fi = 0.0;
+    let mut i = 0;
+    while (i < terms) {
+        result = result + term;
+        let d1 = 2.0 * fi + 1.0;
+        let d2 = 2.0 * fi + 2.0;
+        term = term * (0.0 - x * x) / (d1 * d2);
+        fi = fi + 1.0;
+        i = i + 1;
+    }
+    result
+}
+
+fn abs_float(x: Float) -> Float {
+    if (x < 0.0) { return 0.0 - x; }
+    x
+}
+
+fn main() -> Int {
+    // Compute sin^2 + cos^2 for many values, should always = 1.0
+    let terms = 15;
+    let n = 10000;
+    let nf = 10000.0;
+    let mut max_error = 0.0;
+    let mut fi = 0.0;
+    let mut i = 0;
+    while (i < n) {
+        // x ranges from 0 to ~3.14
+        let xf = fi * 3.14159 / nf;
+        let s = taylor_sin(xf, terms);
+        let c = taylor_cos(xf, terms);
+        let identity = s * s + c * c;
+        let err = abs_float(identity - 1.0);
+        if (err > max_error) {
+            max_error = err;
+        }
+        fi = fi + 1.0;
+        i = i + 1;
+    }
+    // Max error should be very small for 15-term Taylor series
+    if (max_error > 0.001) {
+        print(f"FAIL: max_error={max_error}");
+        return 1;
+    }
+    print(f"OK: taylor_sin_cos_10K max_error={max_error}");
+    0
+}

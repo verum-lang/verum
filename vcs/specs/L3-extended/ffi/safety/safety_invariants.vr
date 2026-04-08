@@ -1,0 +1,93 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, safety, invariants
+// @description: Tests safety invariant documentation and verification
+
+type c_int is i32;
+type c_void is ();
+type size_t is usize;
+
+/// Non-null pointer invariant
+type NonNull<T> is { ptr: *mut T };
+
+/// Bounded buffer with safety invariant
+type BoundedBuffer is {
+    data: *mut u8,
+    len: size_t,
+    cap: size_t,
+};
+
+implement BoundedBuffer {
+    fn new(cap: size_t) -> BoundedBuffer {
+        BoundedBuffer { data: 0 as *mut u8, len: 0, cap }
+    }
+
+    fn is_valid(&self) -> Bool {
+        self.len <= self.cap
+    }
+}
+
+/// Thread-safe counter with invariant
+type AtomicCounter is {
+    value: c_int,
+};
+
+implement AtomicCounter {
+    fn new(initial: c_int) -> AtomicCounter {
+        AtomicCounter { value: initial }
+    }
+
+    fn increment(&mut self) -> c_int {
+        self.value += 1;
+        self.value
+    }
+}
+
+/// FFI string with null-termination invariant
+type FfiString is {
+    ptr: *const u8,
+    len: size_t,
+};
+
+implement FfiString {
+    fn is_valid(&self) -> Bool {
+        !self.ptr.is_null()
+    }
+}
+
+/// Sorted array invariant
+type SortedArray<T> is {
+    data: List<T>,
+};
+
+/// Ownership transfer marker
+type OwnedByC<T> is { ptr: *mut T };
+type OwnedByVerum<T> is { data: T };
+
+/// Safety documentation protocol
+type SafetyDoc is protocol {
+    fn safety_requirements(&self) -> Text;
+};
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+    @extern("C")
+    fn free(ptr: *mut c_void);
+}
+
+/// Safe allocation with invariant
+fn safe_alloc(size: size_t) -> Maybe<BoundedBuffer> {
+    let ptr = unsafe { libc.malloc(size) } as *mut u8;
+    if ptr.is_null() {
+        None
+    } else {
+        Some(BoundedBuffer { data: ptr, len: 0, cap: size })
+    }
+}
+
+fn main() {
+    let buf = safe_alloc(1024);
+    let counter = AtomicCounter.new(0);
+}

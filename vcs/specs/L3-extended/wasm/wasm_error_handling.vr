@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @level: L3
+// @tier: 0
+// @tags: wasm, error-handling, result, maybe, cross-compilation
+// @description: Error handling (Result, Maybe, try/recover) type checking for WASM target
+
+type MathError is
+    | DivisionByZero
+    | Overflow
+    | InvalidInput(Text);
+
+fn safe_divide(a: Int, b: Int) -> Result<Int, MathError> {
+    if b == 0 {
+        Err(DivisionByZero)
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn test_result_ok() {
+    let result = safe_divide(10, 2);
+    match result {
+        Ok(val) => assert(val == 5),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+fn test_result_err() {
+    let result = safe_divide(10, 0);
+    match result {
+        Ok(_) => panic("Expected Err"),
+        Err(e) => {
+            match e {
+                DivisionByZero => { /* expected */ },
+                _ => panic("Expected DivisionByZero"),
+            }
+        },
+    }
+}
+
+fn test_maybe_some() {
+    let x: Maybe<Int> = Some(42);
+    match x {
+        Some(val) => assert(val == 42),
+        None => panic("Expected Some"),
+    }
+}
+
+fn test_maybe_none() {
+    let x: Maybe<Int> = None;
+    match x {
+        Some(_) => panic("Expected None"),
+        None => { /* expected */ },
+    }
+}
+
+fn find_first_positive(items: List<Int>) -> Maybe<Int> {
+    for item in items {
+        if item > 0 {
+            return Some(item);
+        }
+    }
+    None
+}
+
+fn test_find_positive() {
+    let result = find_first_positive([-3, -1, 0, 5, 10]);
+    assert(result == Some(5));
+
+    let none_result = find_first_positive([-3, -1, 0]);
+    assert(none_result == None);
+}
+
+fn chained_operations(x: Int) -> Result<Int, MathError> {
+    let a = safe_divide(x, 2)?;
+    let b = safe_divide(a, 3)?;
+    Ok(b)
+}
+
+fn test_question_mark() {
+    let result = chained_operations(60);
+    assert(result.is_ok());
+
+    let err_result = chained_operations(0);
+    // 0/2 = 0, 0/3 = 0, should be Ok(0)
+    assert(err_result.is_ok());
+}
+
+fn main() {
+    test_result_ok();
+    test_result_err();
+    test_maybe_some();
+    test_maybe_none();
+    test_find_positive();
+    test_question_mark();
+    print("WASM error handling tests: all passed");
+}

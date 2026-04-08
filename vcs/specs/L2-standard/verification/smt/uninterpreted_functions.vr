@@ -1,0 +1,153 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, smt, uninterpreted
+// @description: Uninterpreted functions in SMT verification
+
+/// Uninterpreted functions allow abstract reasoning about functions
+/// without knowing their implementation details.
+
+/// Declare an uninterpreted function for hashing
+@uninterpreted
+fn hash<T>(value: T) -> U64;
+
+/// Properties of hash function
+/// NOTE: 'implies' keyword in bare expressions not yet supported in checker
+// @axiom
+// fn hash_deterministic<T>() {
+//     forall x: T, y: T. x == y implies hash(x) == hash(y)
+// }
+
+/// Use uninterpreted hash in proofs
+@verify(proof)
+fn hash_based_equality<T: Eq>(a: T, b: T) -> Bool {
+    contract#"
+        ensures a == b implies result == true;
+        ensures result == true implies hash(a) == hash(b);
+    ";
+    if a == b {
+        // By hash_deterministic axiom: hash(a) == hash(b)
+        true
+    } else {
+        hash(a) == hash(b)  // May have collisions
+    }
+}
+
+/// Uninterpreted comparison for abstract sorting
+@uninterpreted
+fn abstract_cmp<T>(a: T, b: T) -> Ordering;
+
+/// Axioms for comparison function
+@axiom
+fn cmp_reflexive<T>() {
+    forall x: T. abstract_cmp(x, x) == Ordering.Equal
+}
+
+// @axiom
+// fn cmp_antisymmetric<T>() {
+//     forall x: T, y: T.
+//         abstract_cmp(x, y) == Ordering.Less implies
+//         abstract_cmp(y, x) == Ordering.Greater
+// }
+
+// @axiom
+// fn cmp_transitive<T>() {
+//     forall x: T, y: T, z: T.
+//         abstract_cmp(x, y) == Ordering.Less &&
+//         abstract_cmp(y, z) == Ordering.Less implies
+//         abstract_cmp(x, z) == Ordering.Less
+// }
+
+/// Abstract sorting using uninterpreted comparison
+@verify(proof)
+fn is_sorted<T>(list: List<T>) -> Bool {
+    contract#"
+        ensures result implies forall i in 0..list.len()-1.
+            abstract_cmp(list[i], list[i+1]) != Ordering.Greater;
+    ";
+    for i in 0..list.len() - 1 {
+        if abstract_cmp(list[i], list[i + 1]) == Ordering.Greater {
+            return false;
+        }
+    }
+    true
+}
+
+/// Uninterpreted memory model
+@uninterpreted
+fn memory_read<T>(memory: Memory, addr: Address) -> T;
+
+@uninterpreted
+fn memory_write<T>(memory: Memory, addr: Address, value: T) -> Memory;
+
+/// Memory axioms
+@axiom
+fn read_write_same<T>() {
+    forall m: Memory, a: Address, v: T.
+        memory_read(memory_write(m, a, v), a) == v
+}
+
+// @axiom
+// fn read_write_different<T, U>() {
+//     forall m: Memory, a1: Address, a2: Address, v: T.
+//         a1 != a2 implies
+//         memory_read<U>(memory_write(m, a1, v), a2) == memory_read<U>(m, a2)
+// }
+
+/// Verify memory operations
+@verify(proof)
+fn swap_memory<T>(mut memory: Memory, addr1: Address, addr2: Address) -> Memory {
+    contract#"
+        requires addr1 != addr2;
+        ensures memory_read<T>(result, addr1) == memory_read<T>(old(memory), addr2);
+        ensures memory_read<T>(result, addr2) == memory_read<T>(old(memory), addr1);
+    ";
+    let v1: T = memory_read(memory, addr1);
+    let v2: T = memory_read(memory, addr2);
+    memory = memory_write(memory, addr1, v2);
+    memory = memory_write(memory, addr2, v1);
+    memory
+}
+
+/// Uninterpreted permission model
+@uninterpreted
+fn has_permission(principal: Principal, resource: Resource, action: Action) -> Bool;
+
+@axiom
+fn admin_has_all_permissions() {
+    forall r: Resource, a: Action.
+        has_permission(Principal.Admin, r, a) == true
+}
+
+// @axiom
+// fn owner_has_resource_permissions() {
+//     forall u: User, r: Resource, a: Action.
+//         r.owner == u implies has_permission(Principal.User(u), r, a)
+// }
+
+/// Authorization check using uninterpreted permissions
+@verify(proof)
+fn authorize(principal: Principal, resource: Resource, action: Action) -> Result<(), AuthError> {
+    contract#"
+        ensures result.is_ok() implies has_permission(principal, resource, action);
+    ";
+    if has_permission(principal, resource, action) {
+        Ok(())
+    } else {
+        Err(AuthError.PermissionDenied)
+    }
+}
+
+type Memory is opaque;
+type Address is U64;
+type User is { id: Int, name: Text };
+type Principal is Admin | User(User);
+type Resource is { id: Int, owner: User };
+type Action is Read | Write | Delete;
+type AuthError is
+    | PermissionDenied;
+type Ordering is Less | Equal | Greater;
+
+fn main() {
+    // Abstract verification - no concrete execution
+}

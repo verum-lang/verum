@@ -1,0 +1,316 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, identifiers, binding, basic
+//
+// Tests identifier patterns for binding values in pattern matching.
+// Identifier patterns are fundamental for extracting and naming matched values.
+
+//------------------------------------------------------------------------------
+// Basic Identifier Binding
+//------------------------------------------------------------------------------
+
+/// Simple identifier pattern binds the entire value.
+fn bind_simple(n: Int) -> Int {
+    match n {
+        x => x + 1,
+    }
+}
+
+/// Multiple arms with different bindings.
+fn bind_in_arm(n: Int) -> Int {
+    match n {
+        0 => 0,
+        x => x * 2,
+    }
+}
+
+/// Identifier binding with type inference.
+fn bind_inferred<T>(value: T) -> T {
+    match value {
+        v => v,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Mutable Identifier Patterns
+//------------------------------------------------------------------------------
+
+/// Mutable binding pattern allows modification within the arm.
+fn bind_mut(n: Int) -> Int {
+    match n {
+        mut x => {
+            x = x + 10;
+            x
+        }
+    }
+}
+
+/// Mutable binding in tuple pattern.
+fn bind_mut_tuple(pair: (Int, Int)) -> Int {
+    match pair {
+        (mut a, mut b) => {
+            a = a * 2;
+            b = b * 3;
+            a + b
+        }
+    }
+}
+
+/// Mutable vs immutable bindings together.
+fn bind_mixed_mutability(triple: (Int, Int, Int)) -> Int {
+    match triple {
+        (a, mut b, c) => {
+            b = b + a + c;
+            b
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// Wildcard Pattern (_)
+//------------------------------------------------------------------------------
+
+/// Wildcard ignores the value.
+fn ignore_value(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        _ => "non-zero",
+    }
+}
+
+/// Multiple wildcards in same pattern.
+fn ignore_multiple(triple: (Int, Int, Int)) -> Int {
+    match triple {
+        (_, x, _) => x,
+    }
+}
+
+/// Wildcard in nested pattern.
+fn ignore_nested(data: ((Int, Int), Int)) -> Int {
+    match data {
+        ((_, y), _) => y,
+    }
+}
+
+/// All wildcards (discard entirely).
+fn ignore_all(pair: (Int, Int)) -> Text {
+    match pair {
+        (_, _) => "ignored both",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Identifier Pattern in Different Contexts
+//------------------------------------------------------------------------------
+
+/// Identifier in let binding.
+fn let_binding() -> Int {
+    let x = 42;
+    let y: Int = 100;
+    x + y
+}
+
+/// Identifier in function parameter.
+fn param_binding(x: Int, y: Int) -> Int {
+    x + y
+}
+
+/// Identifier in for loop.
+fn for_binding(items: List<Int>) -> Int {
+    let mut sum = 0;
+    for item in items {
+        sum = sum + item;
+    }
+    sum
+}
+
+/// Identifier in if-let.
+fn if_let_binding(maybe: Maybe<Int>) -> Int {
+    if let Some(x) = maybe {
+        x
+    } else {
+        0
+    }
+}
+
+/// Identifier in while-let.
+fn while_let_binding(items: List<Int>) -> Int {
+    let mut sum = 0;
+    let mut iter = items.iter();
+    while let Some(x) = iter.next() {
+        sum = sum + x;
+    }
+    sum
+}
+
+//------------------------------------------------------------------------------
+// Pattern Binding with Enum Variants
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+/// Bind value from enum variant.
+fn bind_from_maybe(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        None => 0,
+    }
+}
+
+/// Bind from Result variants.
+fn bind_from_result(r: Result<Int, Text>) -> Int {
+    match r {
+        Ok(value) => value,
+        Err(msg) => msg.len(),
+    }
+}
+
+/// Multiple bindings from nested enums.
+fn bind_nested_enum(m: Maybe<Maybe<Int>>) -> Int {
+    match m {
+        Some(Some(x)) => x,
+        Some(None) => -1,
+        None => -2,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Pattern Binding with Structs
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+/// Bind fields from struct with shorthand.
+fn bind_struct_shorthand(p: Point) -> Int {
+    match p {
+        Point { x, y } => x + y,
+    }
+}
+
+/// Bind fields from struct with rename.
+fn bind_struct_renamed(p: Point) -> Int {
+    match p {
+        Point { x: px, y: py } => px * py,
+    }
+}
+
+/// Bind some fields, ignore others.
+fn bind_struct_partial(person: Person) -> Int {
+    match person {
+        Person { age, .. } => age,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Shadowing in Patterns
+//------------------------------------------------------------------------------
+
+/// Binding can shadow outer variables.
+fn bind_shadowing() -> Int {
+    let x = 10;
+    let result = match 42 {
+        x => x + 1,  // shadows outer x
+    };
+    // x is still 10 here
+    result + x
+}
+
+/// Nested shadowing.
+fn bind_nested_shadowing() -> Int {
+    let x = 1;
+    let y = match (2, 3) {
+        (x, y) => x + y,  // x shadows, new y
+    };
+    x + y  // x is 1, y is result of match
+}
+
+//------------------------------------------------------------------------------
+// Binding Mode Inference
+//------------------------------------------------------------------------------
+
+/// Binding by reference from shared reference.
+fn bind_from_ref(r: &Int) -> Int {
+    match r {
+        x => *x + 1,  // x is &Int
+    }
+}
+
+/// Binding by mutable reference.
+fn bind_from_mut_ref(r: &mut Int) -> Int {
+    match r {
+        x => {
+            *x = *x + 1;
+            *x
+        }
+    }
+}
+
+/// Binding mode in option.
+fn bind_mode_option(m: &Maybe<Int>) -> Int {
+    match m {
+        Some(x) => *x,  // x is &Int due to binding mode
+        None => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Simple binding
+    assert(bind_simple(5) == 6);
+    assert(bind_simple(0) == 1);
+
+    // Arm binding
+    assert(bind_in_arm(0) == 0);
+    assert(bind_in_arm(5) == 10);
+
+    // Mutable binding
+    assert(bind_mut(5) == 15);
+    assert(bind_mut_tuple((2, 3)) == 13);  // 2*2 + 3*3 = 4 + 9 = 13
+
+    // Wildcard
+    assert(ignore_value(0) == "zero");
+    assert(ignore_value(42) == "non-zero");
+    assert(ignore_multiple((1, 42, 3)) == 42);
+    assert(ignore_nested(((1, 42), 3)) == 42);
+
+    // Let binding
+    assert(let_binding() == 142);
+
+    // Enum binding
+    assert(bind_from_maybe(Some(42)) == 42);
+    assert(bind_from_maybe(None) == 0);
+    assert(bind_from_result(Ok(42)) == 42);
+    assert(bind_from_result(Err("error")) == 5);
+
+    // Nested enum binding
+    assert(bind_nested_enum(Some(Some(42))) == 42);
+    assert(bind_nested_enum(Some(None)) == -1);
+    assert(bind_nested_enum(None) == -2);
+
+    // Struct binding
+    assert(bind_struct_shorthand(Point { x: 3, y: 4 }) == 7);
+    assert(bind_struct_renamed(Point { x: 3, y: 4 }) == 12);
+    assert(bind_struct_partial(Person { name: "Alice", age: 30 }) == 30);
+
+    // Shadowing
+    assert(bind_shadowing() == 53);  // 43 + 10
+    assert(bind_nested_shadowing() == 6);  // 1 + 5
+}

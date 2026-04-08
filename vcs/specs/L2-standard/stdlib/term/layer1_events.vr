@@ -1,0 +1,92 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, events, layer1
+// @description: Verify core.term.event types parse correctly
+
+
+/// Layer 1: Event System — Event, KeyEvent, KeyCode, Modifiers,
+/// MouseEvent, MouseButton, ResizeEvent, InputParser, EventStream.
+
+mount core.term.event.*;
+
+fn test_event_variants() {
+    // All 6 Event variants
+    let e1 = Event.Key(KeyEvent {
+        code: KeyCode.Char('a'),
+        modifiers: Modifiers.NONE,
+        kind: KeyEventKind.Press,
+    });
+    let e2 = Event.Mouse(MouseEvent {
+        kind: MouseEventKind.Down(MouseButton.Left),
+        column: 10,
+        row: 5,
+        modifiers: Modifiers.NONE,
+    });
+    let e3 = Event.Resize(ResizeEvent { columns: 80, rows: 24 });
+    let e4 = Event.Paste("clipboard text");
+    let e5 = Event.FocusGained;
+    let e6 = Event.FocusLost;
+}
+
+fn test_key_codes() {
+    let codes = [
+        KeyCode.Char('a'),
+        KeyCode.Fn(1),
+        KeyCode.Backspace,
+        KeyCode.Enter,
+        KeyCode.Tab,
+        KeyCode.BackTab,
+        KeyCode.Escape,
+        KeyCode.Left,
+        KeyCode.Right,
+        KeyCode.Up,
+        KeyCode.Down,
+        KeyCode.Home,
+        KeyCode.End,
+        KeyCode.PageUp,
+        KeyCode.PageDown,
+        KeyCode.Insert,
+        KeyCode.Delete,
+        KeyCode.Null,
+    ];
+    assert(codes.len() >= 18);
+}
+
+fn test_modifiers() {
+    let ctrl_alt = Modifiers.CTRL.union(Modifiers.ALT);
+    assert(ctrl_alt.contains(Modifiers.CTRL));
+    assert(ctrl_alt.contains(Modifiers.ALT));
+    assert(!ctrl_alt.contains(Modifiers.SHIFT));
+}
+
+fn test_mouse_events() {
+    let buttons = [MouseButton.Left, MouseButton.Right, MouseButton.Middle];
+    let kinds = [
+        MouseEventKind.Down(MouseButton.Left),
+        MouseEventKind.Up(MouseButton.Left),
+        MouseEventKind.Drag(MouseButton.Left),
+        MouseEventKind.Moved,
+        MouseEventKind.ScrollUp,
+        MouseEventKind.ScrollDown,
+    ];
+    assert(buttons.len() == 3);
+    assert(kinds.len() >= 6);
+}
+
+fn test_parser() {
+    let mut parser = InputParser.new();
+    // Feed ESC [ A (Up arrow)
+    parser.feed(&[0x1B, 0x5B, 0x41]);
+    let event = parser.next_event();
+    // Should produce a Key event
+    assert(event.is_some());
+}
+
+fn main() {
+    test_event_variants();
+    test_key_codes();
+    test_modifiers();
+    test_mouse_events();
+    test_parser();
+}

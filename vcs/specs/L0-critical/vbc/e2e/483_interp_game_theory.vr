@@ -1,0 +1,213 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, game_theory, minimax, tic_tac_toe, game_tree
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Minimax algorithm for simple game trees.
+// Tic-tac-toe board is encoded as a 9-element array (0=empty, 1=X, 2=O).
+// Indices: 0 1 2
+//          3 4 5
+//          6 7 8
+// Score: +1 = X wins, -1 = O wins, 0 = draw.
+// Player 1 (X) maximises, player 2 (O) minimises.
+
+fn ttt_check_winner(board: [Int; 9]) -> Int {
+    // Returns 1 if X wins, 2 if O wins, 0 otherwise
+    // Rows
+    let mut winner = 0;
+    let mut i = 0;
+    while i < 3 {
+        let r = i * 3;
+        if board[r] != 0 && board[r] == board[r+1] && board[r+1] == board[r+2] {
+            winner = board[r];
+        }
+        i = i + 1;
+    }
+    // Columns
+    i = 0;
+    while i < 3 {
+        if board[i] != 0 && board[i] == board[i+3] && board[i+3] == board[i+6] {
+            winner = board[i];
+        }
+        i = i + 1;
+    }
+    // Diagonals
+    if board[0] != 0 && board[0] == board[4] && board[4] == board[8] {
+        winner = board[0];
+    }
+    if board[2] != 0 && board[2] == board[4] && board[4] == board[6] {
+        winner = board[2];
+    }
+    winner
+}
+
+fn ttt_is_full(board: [Int; 9]) -> Int {
+    let mut full = 1;
+    let mut i = 0;
+    while i < 9 {
+        if board[i] == 0 { full = 0; }
+        i = i + 1;
+    }
+    full
+}
+
+// Minimax with alpha-beta pruning.
+// Returns score: +1 X wins, -1 O wins, 0 draw.
+// is_max=1 means it is X's turn (maximiser).
+// alpha = best score maximiser can guarantee, beta = best score minimiser can guarantee.
+@allow(unbounded_recursion)
+fn minimax_ab(board: [Int; 9], is_max: Int, alpha: Int, beta: Int) -> Int {
+    let w = ttt_check_winner(board);
+    if w == 1 { return 1; }
+    if w == 2 { return 0 - 1; }
+    if ttt_is_full(board) == 1 { return 0; }
+
+    if is_max == 1 {
+        // X's turn: maximise
+        let mut best = 0 - 10;
+        let mut a = alpha;
+        let mut i = 0;
+        while i < 9 {
+            if board[i] == 0 {
+                board[i] = 1;
+                let score = minimax_ab(board, 0, a, beta);
+                board[i] = 0;
+                if score > best { best = score; }
+                if best > a { a = best; }
+                if beta <= a { i = 9; }
+            }
+            i = i + 1;
+        }
+        best
+    } else {
+        // O's turn: minimise
+        let mut best = 10;
+        let mut b = beta;
+        let mut i = 0;
+        while i < 9 {
+            if board[i] == 0 {
+                board[i] = 2;
+                let score = minimax_ab(board, 1, alpha, b);
+                board[i] = 0;
+                if score < best { best = score; }
+                if best < b { b = best; }
+                if b <= alpha { i = 9; }
+            }
+            i = i + 1;
+        }
+        best
+    }
+}
+
+// Convenience wrapper matching original signature.
+fn minimax(board: [Int; 9], is_max: Int) -> Int {
+    minimax_ab(board, is_max, 0 - 10, 10)
+}
+
+// Find the best move for the maximiser (X, player=1).
+// Returns index of best move (0-8).
+fn best_move_x(board: [Int; 9]) -> Int {
+    let mut best_score = 0 - 10;
+    let mut best_idx   = 0 - 1;
+    let mut alpha = 0 - 10;
+    let mut i = 0;
+    while i < 9 {
+        if board[i] == 0 {
+            board[i] = 1;
+            let score = minimax_ab(board, 0, alpha, 10);
+            board[i] = 0;
+            if score > best_score {
+                best_score = score;
+                best_idx   = i;
+            }
+            if best_score > alpha { alpha = best_score; }
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn test_ttt_winner_detection() {
+    // X wins on row 0
+    let mut b1 = [1, 1, 1, 2, 2, 0, 0, 0, 0];
+    assert_eq(ttt_check_winner(b1), 1);
+
+    // O wins on column 1
+    let mut b2 = [1, 2, 1, 0, 2, 0, 0, 2, 0];
+    assert_eq(ttt_check_winner(b2), 2);
+
+    // X wins on main diagonal
+    let mut b3 = [1, 2, 2, 0, 1, 2, 0, 0, 1];
+    assert_eq(ttt_check_winner(b3), 1);
+
+    // No winner yet
+    let mut b4 = [1, 2, 1, 2, 1, 0, 0, 0, 0];
+    assert_eq(ttt_check_winner(b4), 0);
+
+    print("ttt_winner_detection: ok");
+}
+
+fn test_ttt_minimax_terminal() {
+    // Terminal state where X already won: score = 1
+    let mut b_xwin = [1, 1, 1, 2, 2, 0, 0, 0, 0];
+    assert_eq(minimax(b_xwin, 0), 1);
+
+    // Terminal state where O already won: score = -1
+    let mut b_owin = [1, 0, 1, 2, 2, 2, 1, 0, 0];
+    assert_eq(minimax(b_owin, 1), 0 - 1);
+
+    // Draw board
+    // X O X
+    // X X O
+    // O X O  -> no winner and full -> 0
+    let mut b_draw = [1, 2, 1, 1, 1, 2, 2, 1, 2];
+    assert_eq(ttt_check_winner(b_draw), 0);
+    assert_eq(ttt_is_full(b_draw), 1);
+    assert_eq(minimax(b_draw, 1), 0);
+
+    print("ttt_minimax_terminal: ok");
+}
+
+fn test_ttt_best_move() {
+    // X must block: O has two in a row, X must play center if possible to block
+    // Board: X . .
+    //        . O .
+    //        . . X
+    // X's turn. Optimal play: X can win or force draw.
+    // With minimax X plays optimally.
+    let mut b1 = [1, 0, 0, 0, 2, 0, 0, 0, 1];
+    let mv1 = best_move_x(b1);
+    // After X plays mv1, apply it and verify X can at least draw (score >= 0)
+    b1[mv1] = 1;
+    let score1 = minimax(b1, 0);
+    assert(score1 >= 0);
+
+    // Near-win: X has two in row 0, should complete it at position 2
+    // Board: X X .
+    //        . O .
+    //        . . O
+    let mut b2 = [1, 1, 0, 0, 2, 0, 0, 0, 2];
+    let mv2 = best_move_x(b2);
+    assert_eq(mv2, 2); // Only winning move is position 2
+
+    print("ttt_best_move: ok");
+}
+
+fn test_ttt_game_value() {
+    // Empty board: optimal play by both leads to draw (score = 0)
+    let mut empty = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let val = minimax(empty, 1);
+    assert_eq(val, 0);
+    print(f"ttt_game_value: empty_board_value={val} (draw) ok");
+}
+
+fn main() -> Int {
+    test_ttt_winner_detection();
+    test_ttt_minimax_terminal();
+    test_ttt_best_move();
+    test_ttt_game_value();
+    print("[OK] 483_interp_game_theory");
+    0
+}

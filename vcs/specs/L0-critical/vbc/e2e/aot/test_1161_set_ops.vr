@@ -1,0 +1,89 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: set, collections, insert, contains
+// @description: Test Set collection operations
+
+fn test_set_basic() -> Int {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(2); // duplicate
+
+    if s.len() != 3 {
+        print(f"FAIL set_len: {s.len()}, expected 3");
+        return 1;
+    }
+    if !s.contains(1) {
+        print("FAIL set_contains 1");
+        return 1;
+    }
+    if !s.contains(3) {
+        print("FAIL set_contains 3");
+        return 1;
+    }
+    if s.contains(99) {
+        print("FAIL set_contains 99");
+        return 1;
+    }
+    print("  set_basic: OK");
+    0
+}
+
+fn test_set_remove() -> Int {
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    s.remove(20);
+
+    if s.len() != 2 {
+        print(f"FAIL set_remove_len: {s.len()}");
+        return 1;
+    }
+    if s.contains(20) {
+        print("FAIL set_remove: still contains 20");
+        return 1;
+    }
+    if !s.contains(10) || !s.contains(30) {
+        print("FAIL set_remove: lost other elements");
+        return 1;
+    }
+    print("  set_remove: OK");
+    0
+}
+
+fn test_set_string() -> Int {
+    let mut s = Set.new();
+    s.insert("apple");
+    s.insert("banana");
+    s.insert("cherry");
+    s.insert("apple"); // duplicate
+
+    if s.len() != 3 {
+        print(f"FAIL set_str_len: {s.len()}");
+        return 1;
+    }
+    if !s.contains("banana") {
+        print("FAIL set_str_contains");
+        return 1;
+    }
+    print("  set_string: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Set Operations Tests:");
+    let mut failures = 0;
+    failures = failures + test_set_basic();
+    failures = failures + test_set_remove();
+    failures = failures + test_set_string();
+
+    if failures == 0 {
+        print("All set tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

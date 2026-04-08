@@ -1,0 +1,15 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Test that type information is consistent
+    // Int is 64-bit on most platforms
+    let x: Int = 42;
+    let y: Float = 3.14;
+
+    // Basic value assertions
+    assert_eq(x, 42);
+    assert(y > 3.0);
+    assert(y < 4.0);
+}

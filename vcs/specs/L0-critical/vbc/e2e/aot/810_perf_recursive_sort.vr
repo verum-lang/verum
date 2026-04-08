@@ -1,0 +1,94 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, recursive_sort
+// @expected-exit: 0
+
+// Performance: Merge sort 1000 integers
+
+fn merge(left: List<Int>, right: List<Int>) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut li = 0;
+    let mut ri = 0;
+    let ll = left.len();
+    let rl = right.len();
+
+    while (li < ll) {
+        if (ri < rl) {
+            if (left[li] <= right[ri]) {
+                result.push(left[li]);
+                li = li + 1;
+            } else {
+                result.push(right[ri]);
+                ri = ri + 1;
+            }
+        } else {
+            result.push(left[li]);
+            li = li + 1;
+        }
+    }
+    while (ri < rl) {
+        result.push(right[ri]);
+        ri = ri + 1;
+    }
+    result
+}
+
+@allow(unbounded_recursion)
+fn merge_sort(arr: List<Int>) -> List<Int> {
+    let n = arr.len();
+    if (n <= 1) { return arr; }
+
+    let mid = n / 2;
+    let mut left: List<Int> = [];
+    let mut right: List<Int> = [];
+
+    let mut i = 0;
+    while (i < mid) {
+        left.push(arr[i]);
+        i = i + 1;
+    }
+    while (i < n) {
+        right.push(arr[i]);
+        i = i + 1;
+    }
+
+    let sorted_left = merge_sort(left);
+    let sorted_right = merge_sort(right);
+    merge(sorted_left, sorted_right)
+}
+
+fn main() -> Int {
+    let n = 1000;
+    let mut arr: List<Int> = [];
+
+    // Fill with pseudo-random values
+    let mut i = 0;
+    let mut val = 12345;
+    while (i < n) {
+        val = (val * 1103515245 + 12345) % 2147483648;
+        arr.push(val % 10000);
+        i = i + 1;
+    }
+
+    let sorted = merge_sort(arr);
+
+    // Verify sorted order
+    let mut j = 1;
+    while (j < n) {
+        if (sorted[j] < sorted[j - 1]) {
+            print(f"FAIL: not sorted at index {j}");
+            return 1;
+        }
+        j = j + 1;
+    }
+
+    // Verify length preserved
+    if (sorted.len() != n) {
+        print(f"FAIL: length {sorted.len()} != {n}");
+        return 1;
+    }
+
+    print(f"OK: merge_sort_1000 first={sorted[0]} last={sorted[n-1]}");
+    0
+}

@@ -1,0 +1,250 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, higher-order, closures, callbacks, functional
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: higher-order function patterns through VBC interpreter
+
+// ============================================================================
+// Function composition via closure calling
+// ============================================================================
+
+fn apply_twice(x: Int, f: fn(Int) -> Int) -> Int {
+    f(f(x))
+}
+
+fn double(x: Int) -> Int { x * 2 }
+fn add_one(x: Int) -> Int { x + 1 }
+fn square(x: Int) -> Int { x * x }
+fn negate(x: Int) -> Int { -x }
+
+fn test_apply_twice() {
+    assert_eq(apply_twice(3, double), 12);    // 3 → 6 → 12
+    assert_eq(apply_twice(5, add_one), 7);    // 5 → 6 → 7
+    assert_eq(apply_twice(2, square), 16);    // 2 → 4 → 16
+    assert_eq(apply_twice(3, negate), 3);     // 3 → -3 → 3
+}
+
+// ============================================================================
+// Map-like operation on flat array
+// ============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_map(a: Arr4, f: fn(Int) -> Int) -> Arr4 {
+    Arr4 {
+        e0: f(a.e0),
+        e1: f(a.e1),
+        e2: f(a.e2),
+        e3: f(a.e3)
+    }
+}
+
+fn arr4_sum(a: Arr4) -> Int {
+    a.e0 + a.e1 + a.e2 + a.e3
+}
+
+fn arr4_fold(a: Arr4, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let r0 = f(init, a.e0);
+    let r1 = f(r0, a.e1);
+    let r2 = f(r1, a.e2);
+    f(r2, a.e3)
+}
+
+fn add_ints(a: Int, b: Int) -> Int { a + b }
+fn mul_ints(a: Int, b: Int) -> Int { a * b }
+fn max_ints(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_ints(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+fn test_arr_map() {
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    let doubled = arr4_map(a, double);
+    assert_eq(doubled.e0, 2);
+    assert_eq(doubled.e1, 4);
+    assert_eq(doubled.e2, 6);
+    assert_eq(doubled.e3, 8);
+
+    let squared = arr4_map(a, square);
+    assert_eq(arr4_sum(squared), 30); // 1+4+9+16
+}
+
+fn test_arr_fold() {
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    assert_eq(arr4_fold(a, 0, add_ints), 10);
+    assert_eq(arr4_fold(a, 1, mul_ints), 24);
+    assert_eq(arr4_fold(a, 0, max_ints), 4);
+    assert_eq(arr4_fold(a, 999, min_ints), 1);
+}
+
+// ============================================================================
+// Filter simulation (count matching)
+// ============================================================================
+
+fn arr4_count_where(a: Arr4, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    if pred(a.e0) { count = count + 1; }
+    if pred(a.e1) { count = count + 1; }
+    if pred(a.e2) { count = count + 1; }
+    if pred(a.e3) { count = count + 1; }
+    count
+}
+
+fn is_even(x: Int) -> Bool { x % 2 == 0 }
+fn is_positive(x: Int) -> Bool { x > 0 }
+fn is_greater_than_two(x: Int) -> Bool { x > 2 }
+
+fn test_arr_count_where() {
+    let a = Arr4 { e0: 1, e1: 2, e2: 3, e3: 4 };
+    assert_eq(arr4_count_where(a, is_even), 2);
+    assert_eq(arr4_count_where(a, is_positive), 4);
+    assert_eq(arr4_count_where(a, is_greater_than_two), 2);
+
+    let b = Arr4 { e0: -1, e1: 0, e2: 5, e3: -3 };
+    assert_eq(arr4_count_where(b, is_positive), 1);
+    assert_eq(arr4_count_where(b, is_even), 1);
+}
+
+// ============================================================================
+// Closure patterns
+// ============================================================================
+
+fn test_closures_capture() {
+    let factor = 10;
+    let multiply = |x: Int| -> Int { x * factor };
+    assert_eq(multiply(5), 50);
+    assert_eq(multiply(0), 0);
+    assert_eq(multiply(-3), -30);
+}
+
+fn test_closure_composition() {
+    let add5 = |x: Int| -> Int { x + 5 };
+    let mul3 = |x: Int| -> Int { x * 3 };
+
+    // Manual composition: mul3(add5(x))
+    let x = 10;
+    assert_eq(mul3(add5(x)), 45);  // (10 + 5) * 3
+    assert_eq(add5(mul3(x)), 35);  // 10 * 3 + 5
+}
+
+fn test_closure_as_callback() {
+    let values = Arr4 { e0: 10, e1: 20, e2: 30, e3: 40 };
+
+    // Use closure to add offset
+    let offset = 5;
+    let add_offset = |x: Int| -> Int { x + offset };
+    let result = arr4_map(values, add_offset);
+    assert_eq(result.e0, 15);
+    assert_eq(result.e3, 45);
+}
+
+// ============================================================================
+// Predicate combinators
+// ============================================================================
+
+fn apply_n_times(x: Int, n: Int, f: fn(Int) -> Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_apply_n_times() {
+    assert_eq(apply_n_times(1, 10, double), 1024);  // 1 * 2^10
+    assert_eq(apply_n_times(0, 5, add_one), 5);     // 0 + 5
+    assert_eq(apply_n_times(2, 3, square), 256);     // 2^8
+    assert_eq(apply_n_times(100, 0, double), 100);   // 0 applications
+}
+
+// ============================================================================
+// Accumulator pattern with callbacks
+// ============================================================================
+
+fn reduce_range(lo: Int, hi: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = lo;
+    while i <= hi {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_reduce_range() {
+    // Sum 1..10
+    assert_eq(reduce_range(1, 10, 0, add_ints), 55);
+
+    // Product 1..6 (factorial of 6)
+    assert_eq(reduce_range(1, 6, 1, mul_ints), 720);
+
+    // Max in range
+    assert_eq(reduce_range(1, 10, 0, max_ints), 10);
+
+    // Count even numbers in 1..20 using fold
+    let mut even_count = 0;
+    let mut i = 1;
+    while i <= 20 {
+        if is_even(i) { even_count = even_count + 1; }
+        i = i + 1;
+    }
+    assert_eq(even_count, 10);
+}
+
+// ============================================================================
+// Function dispatch (simulating virtual dispatch)
+// ============================================================================
+
+fn dispatch_op(op: Int, a: Int, b: Int) -> Int {
+    if op == 0 { a + b }
+    else if op == 1 { a - b }
+    else if op == 2 { a * b }
+    else if op == 3 {
+        if b == 0 { 0 } else { a / b }
+    }
+    else { 0 }
+}
+
+fn test_dispatch() {
+    assert_eq(dispatch_op(0, 10, 5), 15);
+    assert_eq(dispatch_op(1, 10, 5), 5);
+    assert_eq(dispatch_op(2, 10, 5), 50);
+    assert_eq(dispatch_op(3, 10, 5), 2);
+    assert_eq(dispatch_op(3, 10, 0), 0);
+    assert_eq(dispatch_op(99, 10, 5), 0);
+}
+
+// ============================================================================
+// Pipeline pattern
+// ============================================================================
+
+fn pipeline3(x: Int, f1: fn(Int) -> Int, f2: fn(Int) -> Int, f3: fn(Int) -> Int) -> Int {
+    f3(f2(f1(x)))
+}
+
+fn test_pipeline() {
+    // double → add_one → square: 5 → 10 → 11 → 121
+    assert_eq(pipeline3(5, double, add_one, square), 121);
+
+    // add_one → double → negate: 5 → 6 → 12 → -12
+    assert_eq(pipeline3(5, add_one, double, negate), -12);
+}
+
+fn main() -> Int {
+    test_apply_twice();
+    test_arr_map();
+    test_arr_fold();
+    test_arr_count_where();
+    test_closures_capture();
+    test_closure_composition();
+    test_closure_as_callback();
+    test_apply_n_times();
+    test_reduce_range();
+    test_dispatch();
+    test_pipeline();
+    print("[OK] 019_higher_order");
+    0
+}

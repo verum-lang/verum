@@ -1,0 +1,12 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn half(x: Float) -> Float {
+    x / 2.0
+}
+
+fn main() {
+    assert_eq(half(10.0), 5.0);
+    assert_eq(half(3.0), 1.5);
+}

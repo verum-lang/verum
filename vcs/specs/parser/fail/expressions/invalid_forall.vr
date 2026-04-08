@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, forall, quantifier, error
+// @description: forall expression missing dot before body
+// @expected-error: E018
+
+fn test() {
+    let valid = forall x: Int x > 0;  // Missing . before body
+}

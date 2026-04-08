@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: parser, types, local-declarations, scope
+//
+// Tests local type declarations inside functions.
+// Grammar: statement = ... | item | ... ; item = type_def | ...
+// Spec: grammar/verum.ebnf - Local type definitions are valid inside functions
+
+fn main() {
+    test_basic_local_record();
+    test_local_variant_type();
+    test_local_generic_type();
+    test_local_type_shadowing();
+    test_local_type_in_blocks();
+    test_local_affine_type();
+}
+
+/// Basic local record type
+fn test_basic_local_record() {
+    type LocalPoint is {
+        x: Int,
+        y: Int,
+    };
+
+    let p = LocalPoint { x: 10, y: 20 };
+    assert(p.x == 10);
+    assert(p.y == 20);
+
+    // Modify through copy
+    let mut q = p;
+    q.x = 100;
+    assert(q.x == 100);
+    assert(p.x == 10);  // Original unchanged (Copy semantics)
+}
+
+/// Local variant (sum) type
+fn test_local_variant_type() {
+    type LocalResult is Success(Int) | Failure(Text);
+
+    let ok = LocalResult.Success(42);
+    let err = LocalResult.Failure(Text.from("error"));
+
+    match ok {
+        LocalResult.Success(n) => assert(n == 42),
+        LocalResult.Failure(_) => panic("Expected success"),
+    }
+
+    match err {
+        LocalResult.Success(_) => panic("Expected failure"),
+        LocalResult.Failure(msg) => assert(msg == "error"),
+    }
+}
+
+/// Local generic type
+fn test_local_generic_type() {
+    type LocalBox<T> is {
+        value: T,
+    };
+
+    let int_box = LocalBox { value: 42 };
+    let text_box = LocalBox { value: Text.from("hello") };
+
+    assert(int_box.value == 42);
+    assert(text_box.value == "hello");
+}
+
+/// Local type shadowing global type
+fn test_local_type_shadowing() {
+    // Define a local Point that shadows any global Point
+    type Point is {
+        x: Float,
+        y: Float,
+        z: Float,  // 3D point locally
+    };
+
+    let p = Point { x: 1.0, y: 2.0, z: 3.0 };
+    assert(p.z == 3.0);  // This field only exists in local version
+}
+
+/// Local types in nested blocks
+fn test_local_type_in_blocks() {
+    let result = {
+        type BlockLocal is {
+            data: Int,
+        };
+
+        let bl = BlockLocal { data: 42 };
+        bl.data
+    };
+
+    assert(result == 42);
+}
+
+/// Local affine type (move semantics)
+fn test_local_affine_type() {
+    type affine LocalHandle is {
+        fd: Int,
+    };
+
+    let handle = LocalHandle { fd: 999 };
+
+    // Move to another variable (affine semantics)
+    let handle2 = handle;
+    // handle is no longer accessible after this
+
+    assert(handle2.fd == 999);
+}
+

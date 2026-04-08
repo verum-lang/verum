@@ -1,0 +1,492 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: performance, runtime, simd, vectorization, throughput
+// @description: SIMD throughput benchmark (target: > 80% theoretical peak)
+
+/// SIMD Throughput Benchmark
+///
+/// This benchmark measures SIMD (Single Instruction, Multiple Data) performance
+/// and the effectiveness of auto-vectorization in Verum's codegen.
+///
+/// Performance targets:
+/// - Achieve > 80% of theoretical SIMD peak
+/// - Auto-vectorization success rate > 70%
+/// - SIMD overhead < 5ns per operation
+///
+/// SIMD features:
+/// - Auto-vectorization via LLVM
+/// - Explicit SIMD intrinsics (simd module)
+/// - Portable SIMD types (f32x4, f32x8, i32x8, etc.)
+/// - Target-specific optimizations (AVX2, AVX-512, NEON)
+///
+/// Spec reference: docs/detailed/28-implementation-roadmap.md
+
+const WARMUP_ITERATIONS: Int = 1000;
+const BENCHMARK_ITERATIONS: Int = 10_000;
+const ARRAY_SIZE: usize = 1024 * 1024;  // 1M elements
+
+/// Baseline: Scalar addition
+fn benchmark_scalar_add() -> SIMDBenchmarkResult {
+    let mut a: List<f32> = (0..ARRAY_SIZE).map(|i| i as f32).collect();
+    let b: List<f32> = (0..ARRAY_SIZE).map(|i| (i * 2) as f32).collect();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        for i in 0..ARRAY_SIZE {
+            a[i] = a[i] + b[i];
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        for i in 0..ARRAY_SIZE {
+            a[i] = a[i] + b[i];
+        }
+    }
+
+    black_box(&a);
+    let elapsed = start.elapsed();
+    let ops = BENCHMARK_ITERATIONS * ARRAY_SIZE;
+
+    SIMDBenchmarkResult {
+        name: "scalar_add_f32",
+        elements: ARRAY_SIZE,
+        ops_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        gflops: (ops as f64 / elapsed.as_secs_f64()) / 1e9,
+        peak_percentage: 0.0,  // Will be calculated
+        is_baseline: true,
+    }
+}
+
+/// Auto-vectorized addition (compiler should vectorize)
+fn benchmark_autovectorized_add() -> SIMDBenchmarkResult {
+    let mut a: List<f32> = (0..ARRAY_SIZE).map(|i| i as f32).collect();
+    let b: List<f32> = (0..ARRAY_SIZE).map(|i| (i * 2) as f32).collect();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        // Simple loop - should auto-vectorize
+        for i in 0..ARRAY_SIZE {
+            a[i] += b[i];
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        for i in 0..ARRAY_SIZE {
+            a[i] += b[i];
+        }
+    }
+
+    black_box(&a);
+    let elapsed = start.elapsed();
+    let ops = BENCHMARK_ITERATIONS * ARRAY_SIZE;
+
+    // Assuming AVX2: 8 floats per SIMD register, ~8x speedup possible
+    let theoretical_peak = 8.0;
+
+    SIMDBenchmarkResult {
+        name: "autovec_add_f32",
+        elements: ARRAY_SIZE,
+        ops_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        gflops: (ops as f64 / elapsed.as_secs_f64()) / 1e9,
+        peak_percentage: 0.0,  // Calculated below
+        is_baseline: false,
+    }
+}
+
+/// Explicit SIMD: f32x8 addition (AVX2)
+fn benchmark_explicit_simd_add() -> SIMDBenchmarkResult {
+    mount simd.f32x8;
+
+    let mut a: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat((i * 8) as f32))
+        .collect();
+    let b: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat((i * 16) as f32))
+        .collect();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        for i in 0..(ARRAY_SIZE / 8) {
+            a[i] = a[i] + b[i];
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        for i in 0..(ARRAY_SIZE / 8) {
+            a[i] = a[i] + b[i];
+        }
+    }
+
+    black_box(&a);
+    let elapsed = start.elapsed();
+    let ops = BENCHMARK_ITERATIONS * ARRAY_SIZE;  // Total scalar ops
+
+    SIMDBenchmarkResult {
+        name: "simd_f32x8_add",
+        elements: ARRAY_SIZE,
+        ops_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        gflops: (ops as f64 / elapsed.as_secs_f64()) / 1e9,
+        peak_percentage: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// SIMD multiply-add (FMA)
+fn benchmark_simd_fma() -> SIMDBenchmarkResult {
+    mount simd.f32x8;
+
+    let mut a: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat((i * 8) as f32))
+        .collect();
+    let b: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat(2.0))
+        .collect();
+    let c: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat(1.0))
+        .collect();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        for i in 0..(ARRAY_SIZE / 8) {
+            a[i] = a[i].mul_add(b[i], c[i]);  // a = a * b + c
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        for i in 0..(ARRAY_SIZE / 8) {
+            a[i] = a[i].mul_add(b[i], c[i]);
+        }
+    }
+
+    black_box(&a);
+    let elapsed = start.elapsed();
+    let ops = BENCHMARK_ITERATIONS * ARRAY_SIZE * 2;  // FMA counts as 2 ops
+
+    SIMDBenchmarkResult {
+        name: "simd_f32x8_fma",
+        elements: ARRAY_SIZE,
+        ops_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        gflops: (ops as f64 / elapsed.as_secs_f64()) / 1e9,
+        peak_percentage: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// SIMD dot product
+fn benchmark_simd_dot_product() -> SIMDBenchmarkResult {
+    mount simd.f32x8;
+
+    let a: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat((i % 100) as f32 * 0.01))
+        .collect();
+    let b: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat((i % 100) as f32 * 0.02))
+        .collect();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let mut sum = f32x8.splat(0.0);
+        for i in 0..(ARRAY_SIZE / 8) {
+            sum = sum + a[i] * b[i];
+        }
+        black_box(sum.reduce_sum());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let mut sum = f32x8.splat(0.0);
+        for i in 0..(ARRAY_SIZE / 8) {
+            sum = sum + a[i] * b[i];
+        }
+        black_box(sum.reduce_sum());
+    }
+
+    let elapsed = start.elapsed();
+    let ops = BENCHMARK_ITERATIONS * ARRAY_SIZE * 2;  // mul + add per element
+
+    SIMDBenchmarkResult {
+        name: "simd_dot_product",
+        elements: ARRAY_SIZE,
+        ops_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        gflops: (ops as f64 / elapsed.as_secs_f64()) / 1e9,
+        peak_percentage: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// SIMD matrix multiply (4x4)
+fn benchmark_simd_matrix_4x4() -> SIMDBenchmarkResult {
+    mount simd.f32x4;
+
+    type Mat4 = [f32x4; 4];
+
+    fn mat4_mul(a: &Mat4, b: &Mat4) -> Mat4 {
+        let mut result: Mat4 = [f32x4.splat(0.0); 4];
+        for i in 0..4 {
+            for j in 0..4 {
+                let col = f32x4.from_array([b[0][j], b[1][j], b[2][j], b[3][j]]);
+                result[i] = result[i] + a[i] * col;
+            }
+        }
+        result
+    }
+
+    let a: Mat4 = [
+        f32x4.from_array([1.0, 2.0, 3.0, 4.0]),
+        f32x4.from_array([5.0, 6.0, 7.0, 8.0]),
+        f32x4.from_array([9.0, 10.0, 11.0, 12.0]),
+        f32x4.from_array([13.0, 14.0, 15.0, 16.0]),
+    ];
+    let b = a;
+
+    let iterations = BENCHMARK_ITERATIONS * 1000;
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS * 100) {
+        black_box(mat4_mul(&a, &b));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..iterations {
+        black_box(mat4_mul(&a, &b));
+    }
+
+    let elapsed = start.elapsed();
+    let ops = iterations * 64 * 2;  // 4x4 matrix has 64 multiply-adds
+
+    SIMDBenchmarkResult {
+        name: "simd_mat4x4_mul",
+        elements: 16,
+        ops_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        gflops: (ops as f64 / elapsed.as_secs_f64()) / 1e9,
+        peak_percentage: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Integer SIMD operations (i32x8)
+fn benchmark_simd_integer() -> SIMDBenchmarkResult {
+    mount simd.i32x8;
+
+    let mut a: List<i32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| i32x8.splat((i * 8) as i32))
+        .collect();
+    let b: List<i32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| i32x8.splat(7))
+        .collect();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        for i in 0..(ARRAY_SIZE / 8) {
+            a[i] = a[i] + b[i];
+            a[i] = a[i] & i32x8.splat(0xFF);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        for i in 0..(ARRAY_SIZE / 8) {
+            a[i] = a[i] + b[i];
+            a[i] = a[i] & i32x8.splat(0xFF);
+        }
+    }
+
+    black_box(&a);
+    let elapsed = start.elapsed();
+    let ops = BENCHMARK_ITERATIONS * ARRAY_SIZE * 2;  // add + and
+
+    SIMDBenchmarkResult {
+        name: "simd_i32x8_ops",
+        elements: ARRAY_SIZE,
+        ops_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        gflops: 0.0,  // Integer ops, not GFLOPS
+        peak_percentage: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// SIMD horizontal reduction
+fn benchmark_simd_reduce() -> SIMDBenchmarkResult {
+    mount simd.f32x8;
+
+    let data: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat((i % 1000) as f32 * 0.001))
+        .collect();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let mut sum = f32x8.splat(0.0);
+        for chunk in data.iter() {
+            sum = sum + *chunk;
+        }
+        black_box(sum.reduce_sum());
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let mut sum = f32x8.splat(0.0);
+        for chunk in data.iter() {
+            sum = sum + *chunk;
+        }
+        black_box(sum.reduce_sum());
+    }
+
+    let elapsed = start.elapsed();
+    let ops = BENCHMARK_ITERATIONS * ARRAY_SIZE;
+
+    SIMDBenchmarkResult {
+        name: "simd_reduce_sum",
+        elements: ARRAY_SIZE,
+        ops_per_sec: ops as f64 / elapsed.as_secs_f64(),
+        gflops: (ops as f64 / elapsed.as_secs_f64()) / 1e9,
+        peak_percentage: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Memory bandwidth test (SIMD load/store)
+fn benchmark_simd_memory_bandwidth() -> SIMDBenchmarkResult {
+    mount simd.f32x8;
+
+    let src: List<f32x8> = (0..(ARRAY_SIZE / 8))
+        .map(|i| f32x8.splat(i as f32))
+        .collect();
+    let mut dst: List<f32x8> = [f32x8.splat(0.0); ARRAY_SIZE / 8];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        for i in 0..(ARRAY_SIZE / 8) {
+            dst[i] = src[i];
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        for i in 0..(ARRAY_SIZE / 8) {
+            dst[i] = src[i];  // SIMD load + store
+        }
+    }
+
+    black_box(&dst);
+    let elapsed = start.elapsed();
+    let bytes = BENCHMARK_ITERATIONS * ARRAY_SIZE * 4 * 2;  // read + write
+
+    SIMDBenchmarkResult {
+        name: "simd_memory_bandwidth",
+        elements: ARRAY_SIZE,
+        ops_per_sec: (BENCHMARK_ITERATIONS * ARRAY_SIZE) as f64 / elapsed.as_secs_f64(),
+        gflops: 0.0,  // Memory bound, not compute bound
+        peak_percentage: (bytes as f64 / elapsed.as_secs_f64()) / 50e9 * 100.0,  // Assume 50GB/s peak
+        is_baseline: false,
+    }
+}
+
+fn main() {
+    println("=== SIMD Throughput Benchmark ===\n");
+    println("Target: > 80% of theoretical SIMD peak\n");
+
+    let results = [
+        benchmark_scalar_add(),
+        benchmark_autovectorized_add(),
+        benchmark_explicit_simd_add(),
+        benchmark_simd_fma(),
+        benchmark_simd_dot_product(),
+        benchmark_simd_matrix_4x4(),
+        benchmark_simd_integer(),
+        benchmark_simd_reduce(),
+        benchmark_simd_memory_bandwidth(),
+    ];
+
+    // Calculate speedup relative to scalar baseline
+    let scalar_ops = results[0].ops_per_sec;
+
+    println("{:<25} {:>12} {:>10} {:>12} {:>8}",
+            "Benchmark", "Gops/sec", "GFLOPS", "Speedup", "Status");
+    println("{}", "-".repeat(70));
+
+    for result in results {
+        let speedup = if result.is_baseline { 1.0 } else { result.ops_per_sec / scalar_ops };
+        let target_speedup = 6.0;  // Expect ~6x with AVX2 (accounting for memory)
+
+        let passed = result.is_baseline || speedup >= target_speedup * 0.8;
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        let gflops_str = if result.gflops > 0.0 {
+            format("{:.2}", result.gflops)
+        } else {
+            "N/A".to_string()
+        };
+
+        println("{:<25} {:>12.2} {:>10} {:>12.2}x {:>8}",
+                result.name,
+                result.ops_per_sec / 1e9,
+                gflops_str,
+                speedup,
+                status);
+    }
+
+    println("");
+    println("SIMD Features:");
+    println("  - f32x4/f32x8: SSE/AVX float vectors");
+    println("  - i32x8: AVX2 integer vectors");
+    println("  - FMA: Fused multiply-add (2 ops/cycle)");
+    println("  - Auto-vectorization via LLVM");
+}
+
+type SIMDBenchmarkResult is {
+    name: Text,
+    elements: usize,
+    ops_per_sec: f64,
+    gflops: f64,
+    peak_percentage: f64,
+    is_baseline: Bool,
+};
+
+// Mock SIMD types
+module simd {
+    pub type f32x4 is { data: [f32; 4] };
+    implement f32x4 {
+        pub fn splat(v: f32) -> Self { Self { data: [v; 4] } }
+        pub fn from_array(arr: [f32; 4]) -> Self { Self { data: arr } }
+    }
+
+    pub type f32x8 is { data: [f32; 8] };
+    implement f32x8 {
+        pub fn splat(v: f32) -> Self { Self { data: [v; 8] } }
+        pub fn mul_add(&self, b: Self, c: Self) -> Self { self.clone() }
+        pub fn reduce_sum(&self) -> f32 { self.data.iter().sum() }
+    }
+
+    pub type i32x8 is { data: [i32; 8] };
+    implement i32x8 {
+        pub fn splat(v: i32) -> Self { Self { data: [v; 8] } }
+    }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+fn black_box<T>(x: T) -> T { x }

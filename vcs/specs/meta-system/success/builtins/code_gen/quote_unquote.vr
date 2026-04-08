@@ -1,0 +1,142 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, code_gen, quote, unquote, macro
+// @description: Test quote and unquote builtins for code generation
+
+// =============================================================================
+// BASIC QUOTE TESTS
+// =============================================================================
+
+// Test basic quote expression
+meta fn test_quote_literal() -> TokenStream {
+    quote { 42 }
+}
+
+// Test quote with identifier
+meta fn test_quote_ident() -> TokenStream {
+    quote { x }
+}
+
+// Test quote with expression
+meta fn test_quote_expr() -> TokenStream {
+    quote { x + y }
+}
+
+// Test quote with block
+meta fn test_quote_block() -> TokenStream {
+    quote {
+        {
+            let a = 1;
+            let b = 2;
+            a + b
+        }
+    }
+}
+
+// Test quote with function
+meta fn test_quote_function() -> TokenStream {
+    quote {
+        fn add(x: Int, y: Int) -> Int {
+            x + y
+        }
+    }
+}
+
+// =============================================================================
+// UNQUOTE TESTS
+// =============================================================================
+
+// Test unquote single value
+meta fn test_unquote_value(x: Int) -> TokenStream {
+    quote { $x }
+}
+
+// Test unquote in expression
+meta fn test_unquote_expr(name: Text) -> TokenStream {
+    quote { $name }
+}
+
+// Test unquote multiple values
+meta fn test_unquote_multiple(a: Int, b: Int) -> TokenStream {
+    quote { $a + $b }
+}
+
+// Test unquote with nested expression
+meta fn test_unquote_nested(expr: TokenStream) -> TokenStream {
+    quote { if condition { $expr } }
+}
+
+// =============================================================================
+// CONCAT_IDENTS TESTS
+// =============================================================================
+
+// Test concat_idents basic
+meta fn test_concat_idents_basic() -> Text {
+    let prefix = "get";
+    let fname = "name";
+    concat_idents(prefix, "_", fname)
+}
+
+// Test concat_idents for method generation
+meta fn generate_getter_name(fname: Text) -> Text {
+    concat_idents("get_", fname)
+}
+
+// Test concat_idents for type names
+meta fn generate_type_name(base: Text, suffix: Text) -> Text {
+    concat_idents(base, suffix)
+}
+
+// =============================================================================
+// FORMAT_IDENT TESTS
+// =============================================================================
+
+// Test format_ident basic
+meta fn test_format_ident_basic() -> Text {
+    let n = 5;
+    format_ident("field_{}", n)
+}
+
+// Test format_ident with multiple args
+meta fn test_format_ident_multi() -> Text {
+    let prefix = "test";
+    let index = 42;
+    format_ident("{}_{}", prefix, index)
+}
+
+// =============================================================================
+// SIMPLE CODE GENERATION
+// =============================================================================
+
+// Generate a simple function
+meta fn generate_add_fn() -> TokenStream {
+    let fn_name = "my_add";
+    quote {
+        fn $fn_name(a: Int, b: Int) -> Int {
+            a + b
+        }
+    }
+}
+
+// Generate a type alias
+meta fn generate_alias(new_name: Text, base: Text) -> TokenStream {
+    quote {
+        type $new_name is ($base);
+    }
+}
+
+// Main test function
+fn main() {
+    // Basic quote tests just need to not fail
+    @const assert(true);  // quote tests compile means they pass
+
+    // Concat tests
+    @const assert_eq(test_concat_idents_basic(), "get_name");
+    @const assert_eq(generate_getter_name("value"), "get_value");
+    @const assert_eq(generate_type_name("My", "Type"), "MyType");
+
+    // Format ident tests
+    @const assert_eq(test_format_ident_basic(), "field_5");
+    @const assert_eq(test_format_ident_multi(), "test_42");
+}

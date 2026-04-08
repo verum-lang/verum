@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, arrays, debug
+// @description: Debug test for assert_eq with FFI
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_sum_array_i32(arr: &Int, len: Int) -> Int;
+}
+
+fn main() {
+    // Test 1: sum_array_i32
+    let arr1 = [1, 2, 3, 4, 5];
+    let sum = ffi_sum_array_i32(&arr1[0], 5);
+    print("sum = "); print(sum); print("\n");
+    assert_eq(sum, 15);
+
+    print("Test passed!\n");
+}

@@ -1,0 +1,95 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, let, binding
+
+// Helper function for testing
+fn compute() -> Int { 42 }
+fn outer(x: Int) -> Int { x }
+fn inner(x: Int) -> Int { x }
+fn transform(x: Int) -> Int { x }
+fn filter(x: Int) -> Int { x }
+
+type Point is { x: Int, y: Int };
+type Config is { port: Int, host: Text };
+
+// Simple let binding without type annotation
+fn test_simple_binding() {
+    let x = 5;
+}
+
+// Multiple simple bindings
+fn test_multiple_bindings() {
+    let y = 10;
+    let z = 42;
+}
+
+// Simple binding with expression
+fn test_expression_binding() {
+    let sum = 1 + 2;
+}
+
+// Simple binding with function call result
+fn test_function_result_binding() {
+    let result = compute();
+}
+
+// Simple binding with literal values
+fn test_literal_bindings() {
+    let pi = 3.14;
+    let name = "hello";
+    let flag = true;
+    let nothing = None;
+}
+
+// Simple binding with complex expressions
+fn test_complex_expressions() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let x = 5;
+    let computed = a + b * c;
+    let nested_call = outer(inner(x));
+    let conditional = if x > 0 { x } else { -x };
+}
+
+// Simple binding with method chaining
+fn test_method_chaining() {
+    let data = 42;
+    let pipeline = data |> transform |> filter;
+}
+
+// Simple binding with array/list construction
+fn test_array_construction() {
+    let array = [1, 2, 3, 4, 5];
+    let empty_list: List<Int> = [];
+}
+
+// Simple binding with struct literal
+fn test_struct_literals() {
+    let point = Point { x: 10, y: 20 };
+    let config = Config { port: 8080, host: "localhost" };
+}
+
+// Simple binding with closure
+fn test_closure_bindings() {
+    let adder = |a, b| a + b;
+    let identity = |x| x;
+}
+
+// Simple binding with block expression
+fn test_block_expression() {
+    let from_block = {
+        let temp = compute();
+        temp * 2
+    };
+}
+
+// Simple binding with match expression
+fn test_match_binding() {
+    let value: Maybe<Int> = Some(42);
+    let matched = match value {
+        Some(x) => x,
+        None => 0,
+    };
+}

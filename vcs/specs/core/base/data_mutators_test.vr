@@ -1,0 +1,211 @@
+// =============================================================================
+// data_mutators_test.vr - Tests for Data mutable accessor methods
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, base, data, mutable, accessors
+// @description: Tests for Data.as_array_mut, as_object_mut, get_mut, at_mut.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.data.{Data};
+
+// =============================================================================
+// SECTION 1: as_array_mut
+// =============================================================================
+
+@test
+fn test_as_array_mut_on_array() {
+    let mut data = Data.from_array([Data.from_int(1), Data.from_int(2), Data.from_int(3)]);
+    let arr = data.as_array_mut();
+    assert(arr.is_some());
+}
+
+@test
+fn test_as_array_mut_on_non_array() {
+    let mut data = Data.from_int(42);
+    let arr = data.as_array_mut();
+    assert(arr is None);
+}
+
+@test
+fn test_as_array_mut_on_object() {
+    let mut data = Data.empty_object();
+    let arr = data.as_array_mut();
+    assert(arr is None);
+}
+
+@test
+fn test_as_array_mut_on_null() {
+    let mut data = Data.null();
+    assert(data.as_array_mut() is None);
+}
+
+@test
+fn test_as_array_mut_modify() {
+    let mut data = Data.from_array([Data.from_int(1), Data.from_int(2)]);
+    match data.as_array_mut() {
+        Some(arr) => {
+            arr.push(Data.from_int(3));
+        },
+        None => assert(false),
+    }
+    // Verify modification persisted
+    assert_eq(data.len(), 3);
+}
+
+// =============================================================================
+// SECTION 2: as_object_mut
+// =============================================================================
+
+@test
+fn test_as_object_mut_on_object() {
+    let mut data = Data.empty_object();
+    data.set("key", Data.from_int(42));
+    let obj = data.as_object_mut();
+    assert(obj.is_some());
+}
+
+@test
+fn test_as_object_mut_on_non_object() {
+    let mut data = Data.from_int(42);
+    assert(data.as_object_mut() is None);
+}
+
+@test
+fn test_as_object_mut_on_array() {
+    let mut data = Data.empty_array();
+    assert(data.as_object_mut() is None);
+}
+
+@test
+fn test_as_object_mut_on_null() {
+    let mut data = Data.null();
+    assert(data.as_object_mut() is None);
+}
+
+@test
+fn test_as_object_mut_modify() {
+    let mut data = Data.empty_object();
+    data.set("x", Data.from_int(1));
+    match data.as_object_mut() {
+        Some(obj) => {
+            obj.insert("y", Data.from_int(2));
+        },
+        None => assert(false),
+    }
+    assert(data.contains_key("y"));
+}
+
+// =============================================================================
+// SECTION 3: get_mut
+// =============================================================================
+
+@test
+fn test_get_mut_existing_key() {
+    let mut data = Data.empty_object();
+    data.set("name", Data.from_text("Alice"));
+    let val = data.get_mut("name");
+    assert(val.is_some());
+}
+
+@test
+fn test_get_mut_missing_key() {
+    let mut data = Data.empty_object();
+    data.set("name", Data.from_text("Alice"));
+    let val = data.get_mut("age");
+    assert(val is None);
+}
+
+@test
+fn test_get_mut_on_non_object() {
+    let mut data = Data.from_int(42);
+    assert(data.get_mut("key") is None);
+}
+
+@test
+fn test_get_mut_on_empty_object() {
+    let mut data = Data.empty_object();
+    assert(data.get_mut("key") is None);
+}
+
+@test
+fn test_get_mut_modify_value() {
+    let mut data = Data.empty_object();
+    data.set("count", Data.from_int(0));
+    match data.get_mut("count") {
+        Some(val) => {
+            *val = Data.from_int(42);
+        },
+        None => assert(false),
+    }
+    // Verify modification
+    let count = data.get("count");
+    assert(count.is_some());
+}
+
+// =============================================================================
+// SECTION 4: at_mut
+// =============================================================================
+
+@test
+fn test_at_mut_valid_index() {
+    let mut data = Data.from_array([Data.from_int(10), Data.from_int(20), Data.from_int(30)]);
+    let val = data.at_mut(1);
+    assert(val.is_some());
+}
+
+@test
+fn test_at_mut_out_of_bounds() {
+    let mut data = Data.from_array([Data.from_int(1)]);
+    assert(data.at_mut(5) is None);
+}
+
+@test
+fn test_at_mut_negative_index() {
+    let mut data = Data.from_array([Data.from_int(1), Data.from_int(2)]);
+    assert(data.at_mut(-1) is None);
+}
+
+@test
+fn test_at_mut_on_non_array() {
+    let mut data = Data.from_int(42);
+    assert(data.at_mut(0) is None);
+}
+
+@test
+fn test_at_mut_on_empty_array() {
+    let mut data = Data.empty_array();
+    assert(data.at_mut(0) is None);
+}
+
+@test
+fn test_at_mut_modify_element() {
+    let mut data = Data.from_array([Data.from_int(10), Data.from_int(20)]);
+    match data.at_mut(0) {
+        Some(elem) => {
+            *elem = Data.from_int(99);
+        },
+        None => assert(false),
+    }
+    // Verify the modification
+    let first = data.at(0);
+    assert(first.is_some());
+}
+
+@test
+fn test_at_mut_first_element() {
+    let mut data = Data.from_array([Data.from_text("hello"), Data.from_text("world")]);
+    let val = data.at_mut(0);
+    assert(val.is_some());
+}
+
+@test
+fn test_at_mut_last_element() {
+    let mut data = Data.from_array([Data.from_int(1), Data.from_int(2), Data.from_int(3)]);
+    let val = data.at_mut(2);
+    assert(val.is_some());
+    // Index 3 should be out of bounds
+    assert(data.at_mut(3) is None);
+}

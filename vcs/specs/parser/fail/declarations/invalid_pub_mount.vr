@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, module, reexport, error
+// @description: Test invalid public re-export syntax detection
+// @expected-error: E064
+
+public mount;
+
+public mount 123;
+
+public mount core. as alias;
+
+public mount {unclosed;

@@ -1,0 +1,649 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, intrinsic
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: tensor intrinsic operations through VBC interpreter.
+// Simulates the tensor runtime opcodes (TENSOR_NEW, TENSOR_FILL,
+// TENSOR_BINOP, TENSOR_UNOP, TENSOR_RESHAPE, TENSOR_TRANSPOSE,
+// TENSOR_CLONE, TENSOR_GET_SCALAR) using flat struct arrays with
+// element-wise scalar arithmetic -- the same approach the interpreter's
+// tensor.rs runtime uses internally for CPU fallback execution.
+//
+// Opcode mapping:
+//   TENSOR_NEW (0xF0)       -> tensor_zeros / tensor_new
+//   TENSOR_FILL (0xFE)      -> tensor_fill
+//   TENSOR_BINOP (0xF1)     -> tensor_add/sub/mul/div (op: 0/1/2/3)
+//   TENSOR_UNOP (0xF2)      -> tensor_neg/abs (op: 0/1)
+//   TENSOR_RESHAPE (0xF5)   -> tensor_reshape
+//   TENSOR_TRANSPOSE (0xF6) -> tensor_transpose
+//   TENSOR_CLONE (0xFC+sub) -> tensor_clone
+//   TENSOR_GET_SCALAR       -> tensor_get
+
+// ============================================================================
+// Tensor representation: 1D/2D flat array with shape metadata
+// Max 16 elements (4x4 or 1x16)
+// ============================================================================
+
+type Tensor16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int,
+    rows: Int,
+    cols: Int
+};
+
+// ============================================================================
+// TENSOR_GET_SCALAR: element access by flat index
+// ============================================================================
+
+fn tensor_get(t: Tensor16, i: Int) -> Int {
+    if i == 0 { t.e0 } else if i == 1 { t.e1 } else if i == 2 { t.e2 }
+    else if i == 3 { t.e3 } else if i == 4 { t.e4 } else if i == 5 { t.e5 }
+    else if i == 6 { t.e6 } else if i == 7 { t.e7 } else if i == 8 { t.e8 }
+    else if i == 9 { t.e9 } else if i == 10 { t.e10 } else if i == 11 { t.e11 }
+    else if i == 12 { t.e12 } else if i == 13 { t.e13 } else if i == 14 { t.e14 }
+    else { t.e15 }
+}
+
+// 2D element access: row, col -> flat index
+fn tensor_get2d(t: Tensor16, row: Int, col: Int) -> Int {
+    tensor_get(t, row * t.cols + col)
+}
+
+fn tensor_set(t: Tensor16, i: Int, v: Int) -> Tensor16 {
+    Tensor16 {
+        e0: if i == 0 { v } else { t.e0 },
+        e1: if i == 1 { v } else { t.e1 },
+        e2: if i == 2 { v } else { t.e2 },
+        e3: if i == 3 { v } else { t.e3 },
+        e4: if i == 4 { v } else { t.e4 },
+        e5: if i == 5 { v } else { t.e5 },
+        e6: if i == 6 { v } else { t.e6 },
+        e7: if i == 7 { v } else { t.e7 },
+        e8: if i == 8 { v } else { t.e8 },
+        e9: if i == 9 { v } else { t.e9 },
+        e10: if i == 10 { v } else { t.e10 },
+        e11: if i == 11 { v } else { t.e11 },
+        e12: if i == 12 { v } else { t.e12 },
+        e13: if i == 13 { v } else { t.e13 },
+        e14: if i == 14 { v } else { t.e14 },
+        e15: if i == 15 { v } else { t.e15 },
+        rows: t.rows,
+        cols: t.cols
+    }
+}
+
+fn tensor_numel(t: Tensor16) -> Int {
+    t.rows * t.cols
+}
+
+// ============================================================================
+// TENSOR_NEW (0xF0): create zero-initialized tensor
+// ============================================================================
+
+fn tensor_zeros(rows: Int, cols: Int) -> Tensor16 {
+    Tensor16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0,
+        rows: rows, cols: cols
+    }
+}
+
+// ============================================================================
+// TENSOR_FILL (0xFE): create tensor filled with scalar value
+// ============================================================================
+
+fn tensor_fill(rows: Int, cols: Int, val: Int) -> Tensor16 {
+    let n = rows * cols;
+    let mut t = tensor_zeros(rows, cols);
+    let mut i = 0;
+    while i < n {
+        t = tensor_set(t, i, val);
+        i = i + 1;
+    }
+    t
+}
+
+// ============================================================================
+// TENSOR_BINOP (0xF1): element-wise binary operations
+// op: 0=add, 1=sub, 2=mul, 3=div
+// ============================================================================
+
+fn tensor_add(a: Tensor16, b: Tensor16) -> Tensor16 {
+    let n = tensor_numel(a);
+    let mut out = tensor_zeros(a.rows, a.cols);
+    let mut i = 0;
+    while i < n {
+        out = tensor_set(out, i, tensor_get(a, i) + tensor_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn tensor_sub(a: Tensor16, b: Tensor16) -> Tensor16 {
+    let n = tensor_numel(a);
+    let mut out = tensor_zeros(a.rows, a.cols);
+    let mut i = 0;
+    while i < n {
+        out = tensor_set(out, i, tensor_get(a, i) - tensor_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn tensor_mul(a: Tensor16, b: Tensor16) -> Tensor16 {
+    let n = tensor_numel(a);
+    let mut out = tensor_zeros(a.rows, a.cols);
+    let mut i = 0;
+    while i < n {
+        out = tensor_set(out, i, tensor_get(a, i) * tensor_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn tensor_div(a: Tensor16, b: Tensor16) -> Tensor16 {
+    let n = tensor_numel(a);
+    let mut out = tensor_zeros(a.rows, a.cols);
+    let mut i = 0;
+    while i < n {
+        out = tensor_set(out, i, tensor_get(a, i) / tensor_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// TENSOR_UNOP (0xF2): element-wise unary operations
+// op: 0=neg, 1=abs
+// ============================================================================
+
+fn int_abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn tensor_neg(t: Tensor16) -> Tensor16 {
+    let n = tensor_numel(t);
+    let mut out = tensor_zeros(t.rows, t.cols);
+    let mut i = 0;
+    while i < n {
+        out = tensor_set(out, i, -tensor_get(t, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn tensor_abs(t: Tensor16) -> Tensor16 {
+    let n = tensor_numel(t);
+    let mut out = tensor_zeros(t.rows, t.cols);
+    let mut i = 0;
+    while i < n {
+        out = tensor_set(out, i, int_abs(tensor_get(t, i)));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// TENSOR_RESHAPE (0xF5): reshape tensor preserving data order
+// ============================================================================
+
+fn tensor_reshape(t: Tensor16, new_rows: Int, new_cols: Int) -> Tensor16 {
+    // Data stays the same, only shape metadata changes
+    Tensor16 {
+        e0: t.e0, e1: t.e1, e2: t.e2, e3: t.e3,
+        e4: t.e4, e5: t.e5, e6: t.e6, e7: t.e7,
+        e8: t.e8, e9: t.e9, e10: t.e10, e11: t.e11,
+        e12: t.e12, e13: t.e13, e14: t.e14, e15: t.e15,
+        rows: new_rows, cols: new_cols
+    }
+}
+
+// ============================================================================
+// TENSOR_TRANSPOSE (0xF6): transpose 2D tensor
+// ============================================================================
+
+fn tensor_transpose(t: Tensor16) -> Tensor16 {
+    let mut out = tensor_zeros(t.cols, t.rows);
+    let mut r = 0;
+    while r < t.rows {
+        let mut c = 0;
+        while c < t.cols {
+            let val = tensor_get(t, r * t.cols + c);
+            out = tensor_set(out, c * t.rows + r, val);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    out
+}
+
+// ============================================================================
+// TENSOR_CLONE (0xFC + Clone sub-opcode): deep copy tensor
+// ============================================================================
+
+fn tensor_clone(t: Tensor16) -> Tensor16 {
+    Tensor16 {
+        e0: t.e0, e1: t.e1, e2: t.e2, e3: t.e3,
+        e4: t.e4, e5: t.e5, e6: t.e6, e7: t.e7,
+        e8: t.e8, e9: t.e9, e10: t.e10, e11: t.e11,
+        e12: t.e12, e13: t.e13, e14: t.e14, e15: t.e15,
+        rows: t.rows, cols: t.cols
+    }
+}
+
+// ============================================================================
+// Test 1: TENSOR_NEW and TENSOR_FILL, verify with GET_SCALAR
+// ============================================================================
+
+fn test_tensor_create() {
+    // TENSOR_NEW: create zero-initialized 2x3 tensor
+    let z = tensor_zeros(2, 3);
+    assert_eq(z.rows, 2);
+    assert_eq(z.cols, 3);
+    assert_eq(tensor_numel(z), 6);
+    assert_eq(tensor_get(z, 0), 0);
+    assert_eq(tensor_get(z, 5), 0);
+
+    // TENSOR_FILL: create 1x4 tensor filled with 7
+    let f = tensor_fill(1, 4, 7);
+    assert_eq(f.rows, 1);
+    assert_eq(f.cols, 4);
+    assert_eq(tensor_get(f, 0), 7);
+    assert_eq(tensor_get(f, 1), 7);
+    assert_eq(tensor_get(f, 2), 7);
+    assert_eq(tensor_get(f, 3), 7);
+
+    // TENSOR_FILL: 2x2 tensor filled with -3
+    let g = tensor_fill(2, 2, -3);
+    assert_eq(tensor_get2d(g, 0, 0), -3);
+    assert_eq(tensor_get2d(g, 0, 1), -3);
+    assert_eq(tensor_get2d(g, 1, 0), -3);
+    assert_eq(tensor_get2d(g, 1, 1), -3);
+
+    // TENSOR_NEW + manual SET_SCALAR: build [10, 20, 30, 40]
+    let mut t = tensor_zeros(1, 4);
+    t = tensor_set(t, 0, 10);
+    t = tensor_set(t, 1, 20);
+    t = tensor_set(t, 2, 30);
+    t = tensor_set(t, 3, 40);
+    assert_eq(tensor_get(t, 0), 10);
+    assert_eq(tensor_get(t, 1), 20);
+    assert_eq(tensor_get(t, 2), 30);
+    assert_eq(tensor_get(t, 3), 40);
+
+    print("  [PASS] test_tensor_create");
+}
+
+// ============================================================================
+// Test 2: TENSOR_BINOP — add, subtract, multiply, divide
+// ============================================================================
+
+fn test_tensor_binops() {
+    // Build tensors: a = [1, 2, 3, 4, 5, 6], b = [10, 20, 30, 40, 50, 60]
+    let mut a = tensor_zeros(1, 6);
+    let mut b = tensor_zeros(1, 6);
+    let mut i = 0;
+    while i < 6 {
+        a = tensor_set(a, i, i + 1);
+        b = tensor_set(b, i, (i + 1) * 10);
+        i = i + 1;
+    }
+
+    // TENSOR_BINOP op=0 (Add): [11, 22, 33, 44, 55, 66]
+    let s = tensor_add(a, b);
+    assert_eq(tensor_get(s, 0), 11);
+    assert_eq(tensor_get(s, 2), 33);
+    assert_eq(tensor_get(s, 5), 66);
+
+    // TENSOR_BINOP op=1 (Sub): [-9, -18, -27, -36, -45, -54]
+    let d = tensor_sub(a, b);
+    assert_eq(tensor_get(d, 0), -9);
+    assert_eq(tensor_get(d, 3), -36);
+    assert_eq(tensor_get(d, 5), -54);
+
+    // TENSOR_BINOP op=2 (Mul): [10, 40, 90, 160, 250, 360]
+    let p = tensor_mul(a, b);
+    assert_eq(tensor_get(p, 0), 10);
+    assert_eq(tensor_get(p, 1), 40);
+    assert_eq(tensor_get(p, 4), 250);
+
+    // TENSOR_BINOP op=3 (Div): [10/1, 20/2, 30/3, 40/4, 50/5, 60/6]
+    //                         = [10, 10, 10, 10, 10, 10]
+    let q = tensor_div(b, a);
+    assert_eq(tensor_get(q, 0), 10);
+    assert_eq(tensor_get(q, 2), 10);
+    assert_eq(tensor_get(q, 5), 10);
+
+    // Verify commutativity of add: a + b == b + a
+    let s2 = tensor_add(b, a);
+    i = 0;
+    while i < 6 {
+        assert_eq(tensor_get(s, i), tensor_get(s2, i));
+        i = i + 1;
+    }
+
+    print("  [PASS] test_tensor_binops");
+}
+
+// ============================================================================
+// Test 3: TENSOR_UNOP — neg and abs
+// ============================================================================
+
+fn test_tensor_unops() {
+    // Build tensor: [-5, 3, -1, 0, 7, -10, 2, -3]
+    let mut t = tensor_zeros(1, 8);
+    t = tensor_set(t, 0, -5);
+    t = tensor_set(t, 1, 3);
+    t = tensor_set(t, 2, -1);
+    t = tensor_set(t, 3, 0);
+    t = tensor_set(t, 4, 7);
+    t = tensor_set(t, 5, -10);
+    t = tensor_set(t, 6, 2);
+    t = tensor_set(t, 7, -3);
+
+    // TENSOR_UNOP op=0 (Neg): [5, -3, 1, 0, -7, 10, -2, 3]
+    let n = tensor_neg(t);
+    assert_eq(tensor_get(n, 0), 5);
+    assert_eq(tensor_get(n, 1), -3);
+    assert_eq(tensor_get(n, 2), 1);
+    assert_eq(tensor_get(n, 3), 0);
+    assert_eq(tensor_get(n, 4), -7);
+    assert_eq(tensor_get(n, 5), 10);
+
+    // TENSOR_UNOP op=1 (Abs): [5, 3, 1, 0, 7, 10, 2, 3]
+    let ab = tensor_abs(t);
+    assert_eq(tensor_get(ab, 0), 5);
+    assert_eq(tensor_get(ab, 1), 3);
+    assert_eq(tensor_get(ab, 2), 1);
+    assert_eq(tensor_get(ab, 3), 0);
+    assert_eq(tensor_get(ab, 4), 7);
+    assert_eq(tensor_get(ab, 5), 10);
+
+    // Double negation: neg(neg(t)) == t
+    let nn = tensor_neg(n);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(tensor_get(nn, i), tensor_get(t, i));
+        i = i + 1;
+    }
+
+    // abs of abs: abs(abs(t)) == abs(t)
+    let aa = tensor_abs(ab);
+    i = 0;
+    while i < 8 {
+        assert_eq(tensor_get(aa, i), tensor_get(ab, i));
+        i = i + 1;
+    }
+
+    print("  [PASS] test_tensor_unops");
+}
+
+// ============================================================================
+// Test 4: TENSOR_RESHAPE — reshape preserving elements
+// ============================================================================
+
+fn test_tensor_reshape() {
+    // Create 2x4 tensor: [[1,2,3,4],[5,6,7,8]]
+    let mut t = tensor_zeros(2, 4);
+    let mut i = 0;
+    while i < 8 {
+        t = tensor_set(t, i, i + 1);
+        i = i + 1;
+    }
+    assert_eq(t.rows, 2);
+    assert_eq(t.cols, 4);
+    assert_eq(tensor_get2d(t, 0, 2), 3);
+    assert_eq(tensor_get2d(t, 1, 0), 5);
+
+    // Reshape to 4x2
+    let r = tensor_reshape(t, 4, 2);
+    assert_eq(r.rows, 4);
+    assert_eq(r.cols, 2);
+    // Data order preserved: flat [1,2,3,4,5,6,7,8]
+    assert_eq(tensor_get(r, 0), 1);
+    assert_eq(tensor_get(r, 7), 8);
+    // 2D access changes: row 1, col 0 -> flat index 2 -> value 3
+    assert_eq(tensor_get2d(r, 1, 0), 3);
+    // row 3, col 1 -> flat index 7 -> value 8
+    assert_eq(tensor_get2d(r, 3, 1), 8);
+
+    // Reshape to 1x8 (flatten)
+    let flat = tensor_reshape(t, 1, 8);
+    assert_eq(flat.rows, 1);
+    assert_eq(flat.cols, 8);
+    i = 0;
+    while i < 8 {
+        assert_eq(tensor_get(flat, i), i + 1);
+        i = i + 1;
+    }
+
+    // Reshape to 8x1 (column vector)
+    let col = tensor_reshape(t, 8, 1);
+    assert_eq(col.rows, 8);
+    assert_eq(col.cols, 1);
+    assert_eq(tensor_get2d(col, 4, 0), 5);
+
+    print("  [PASS] test_tensor_reshape");
+}
+
+// ============================================================================
+// Test 5: TENSOR_TRANSPOSE — swap rows and columns
+// ============================================================================
+
+fn test_tensor_transpose() {
+    // Create 2x3 tensor: [[1,2,3],[4,5,6]]
+    let mut t = tensor_zeros(2, 3);
+    t = tensor_set(t, 0, 1);
+    t = tensor_set(t, 1, 2);
+    t = tensor_set(t, 2, 3);
+    t = tensor_set(t, 3, 4);
+    t = tensor_set(t, 4, 5);
+    t = tensor_set(t, 5, 6);
+
+    // Transpose -> 3x2: [[1,4],[2,5],[3,6]]
+    let tr = tensor_transpose(t);
+    assert_eq(tr.rows, 3);
+    assert_eq(tr.cols, 2);
+    assert_eq(tensor_get2d(tr, 0, 0), 1);
+    assert_eq(tensor_get2d(tr, 0, 1), 4);
+    assert_eq(tensor_get2d(tr, 1, 0), 2);
+    assert_eq(tensor_get2d(tr, 1, 1), 5);
+    assert_eq(tensor_get2d(tr, 2, 0), 3);
+    assert_eq(tensor_get2d(tr, 2, 1), 6);
+
+    // Double transpose: transpose(transpose(t)) == t
+    let tt = tensor_transpose(tr);
+    assert_eq(tt.rows, 2);
+    assert_eq(tt.cols, 3);
+    let mut i = 0;
+    while i < 6 {
+        assert_eq(tensor_get(tt, i), tensor_get(t, i));
+        i = i + 1;
+    }
+
+    // Transpose of 3x3: verify diagonal unchanged
+    let mut sq = tensor_zeros(3, 3);
+    sq = tensor_set(sq, 0, 1);  // (0,0)
+    sq = tensor_set(sq, 1, 2);  // (0,1)
+    sq = tensor_set(sq, 2, 3);  // (0,2)
+    sq = tensor_set(sq, 3, 4);  // (1,0)
+    sq = tensor_set(sq, 4, 5);  // (1,1)
+    sq = tensor_set(sq, 5, 6);  // (1,2)
+    sq = tensor_set(sq, 6, 7);  // (2,0)
+    sq = tensor_set(sq, 7, 8);  // (2,1)
+    sq = tensor_set(sq, 8, 9);  // (2,2)
+    let sqt = tensor_transpose(sq);
+    // Diagonal: (0,0)=1, (1,1)=5, (2,2)=9 unchanged
+    assert_eq(tensor_get2d(sqt, 0, 0), 1);
+    assert_eq(tensor_get2d(sqt, 1, 1), 5);
+    assert_eq(tensor_get2d(sqt, 2, 2), 9);
+    // Off-diagonal swapped: (0,1) and (1,0)
+    assert_eq(tensor_get2d(sqt, 0, 1), 4);
+    assert_eq(tensor_get2d(sqt, 1, 0), 2);
+
+    print("  [PASS] test_tensor_transpose");
+}
+
+// ============================================================================
+// Test 6: TENSOR_CLONE — deep copy and independence
+// ============================================================================
+
+fn test_tensor_clone() {
+    // Create tensor [10, 20, 30, 40]
+    let mut orig = tensor_zeros(1, 4);
+    orig = tensor_set(orig, 0, 10);
+    orig = tensor_set(orig, 1, 20);
+    orig = tensor_set(orig, 2, 30);
+    orig = tensor_set(orig, 3, 40);
+
+    // Clone it
+    let cloned = tensor_clone(orig);
+
+    // Verify clone has same values
+    assert_eq(tensor_get(cloned, 0), 10);
+    assert_eq(tensor_get(cloned, 1), 20);
+    assert_eq(tensor_get(cloned, 2), 30);
+    assert_eq(tensor_get(cloned, 3), 40);
+    assert_eq(cloned.rows, 1);
+    assert_eq(cloned.cols, 4);
+
+    // Modify original, clone should be unchanged
+    // (In struct-based representation, each is independent by value semantics)
+    orig = tensor_set(orig, 0, 999);
+    assert_eq(tensor_get(orig, 0), 999);
+    assert_eq(tensor_get(cloned, 0), 10);
+
+    // Clone a 2x2, verify shape preserved
+    let mut m = tensor_zeros(2, 2);
+    m = tensor_set(m, 0, 1);
+    m = tensor_set(m, 1, 2);
+    m = tensor_set(m, 2, 3);
+    m = tensor_set(m, 3, 4);
+    let mc = tensor_clone(m);
+    assert_eq(mc.rows, 2);
+    assert_eq(mc.cols, 2);
+    assert_eq(tensor_get2d(mc, 0, 0), 1);
+    assert_eq(tensor_get2d(mc, 1, 1), 4);
+
+    print("  [PASS] test_tensor_clone");
+}
+
+// ============================================================================
+// Test 7: Combined operations pipeline
+// ============================================================================
+
+fn test_tensor_pipeline() {
+    // Create 2x3 tensor a = [[1,2,3],[4,5,6]]
+    let mut a = tensor_zeros(2, 3);
+    let mut i = 0;
+    while i < 6 {
+        a = tensor_set(a, i, i + 1);
+        i = i + 1;
+    }
+
+    // Create b = fill(2,3,10) = [[10,10,10],[10,10,10]]
+    let b = tensor_fill(2, 3, 10);
+
+    // Pipeline: add -> neg -> abs -> reshape
+    // Step 1: add: [[11,12,13],[14,15,16]]
+    let step1 = tensor_add(a, b);
+    assert_eq(tensor_get(step1, 0), 11);
+    assert_eq(tensor_get(step1, 5), 16);
+
+    // Step 2: neg: [[-11,-12,-13],[-14,-15,-16]]
+    let step2 = tensor_neg(step1);
+    assert_eq(tensor_get(step2, 0), -11);
+    assert_eq(tensor_get(step2, 5), -16);
+
+    // Step 3: abs: [[11,12,13],[14,15,16]]
+    let step3 = tensor_abs(step2);
+    assert_eq(tensor_get(step3, 0), 11);
+    assert_eq(tensor_get(step3, 5), 16);
+
+    // Step 4: reshape to 3x2
+    let step4 = tensor_reshape(step3, 3, 2);
+    assert_eq(step4.rows, 3);
+    assert_eq(step4.cols, 2);
+    // Same flat data: [11,12,13,14,15,16]
+    assert_eq(tensor_get2d(step4, 0, 0), 11);
+    assert_eq(tensor_get2d(step4, 0, 1), 12);
+    assert_eq(tensor_get2d(step4, 2, 1), 16);
+
+    // Verify element sum preserved through pipeline
+    let mut sum_orig = 0;
+    let mut sum_final = 0;
+    i = 0;
+    while i < 6 {
+        sum_orig = sum_orig + tensor_get(step1, i);
+        sum_final = sum_final + tensor_get(step4, i);
+        i = i + 1;
+    }
+    assert_eq(sum_orig, sum_final);
+
+    print("  [PASS] test_tensor_pipeline");
+}
+
+// ============================================================================
+// Test 8: Transpose then binop interactions
+// ============================================================================
+
+fn test_transpose_binop() {
+    // a = [[1,2],[3,4],[5,6]] (3x2)
+    let mut a = tensor_zeros(3, 2);
+    a = tensor_set(a, 0, 1);
+    a = tensor_set(a, 1, 2);
+    a = tensor_set(a, 2, 3);
+    a = tensor_set(a, 3, 4);
+    a = tensor_set(a, 4, 5);
+    a = tensor_set(a, 5, 6);
+
+    // Transpose: at = [[1,3,5],[2,4,6]] (2x3)
+    let at = tensor_transpose(a);
+
+    // b = fill(2,3,1) = [[1,1,1],[1,1,1]]
+    let b = tensor_fill(2, 3, 1);
+
+    // Add transposed with b: [[2,4,6],[3,5,7]]
+    let result = tensor_add(at, b);
+    assert_eq(tensor_get2d(result, 0, 0), 2);
+    assert_eq(tensor_get2d(result, 0, 1), 4);
+    assert_eq(tensor_get2d(result, 0, 2), 6);
+    assert_eq(tensor_get2d(result, 1, 0), 3);
+    assert_eq(tensor_get2d(result, 1, 1), 5);
+    assert_eq(tensor_get2d(result, 1, 2), 7);
+
+    // Mul with itself: element-wise square
+    let sq = tensor_mul(at, at);
+    assert_eq(tensor_get2d(sq, 0, 0), 1);  // 1*1
+    assert_eq(tensor_get2d(sq, 0, 1), 9);  // 3*3
+    assert_eq(tensor_get2d(sq, 0, 2), 25); // 5*5
+    assert_eq(tensor_get2d(sq, 1, 0), 4);  // 2*2
+    assert_eq(tensor_get2d(sq, 1, 1), 16); // 4*4
+    assert_eq(tensor_get2d(sq, 1, 2), 36); // 6*6
+
+    print("  [PASS] test_transpose_binop");
+}
+
+// ============================================================================
+// Main: call all test functions
+// ============================================================================
+
+fn main() -> Int {
+    test_tensor_create();
+    test_tensor_binops();
+    test_tensor_unops();
+    test_tensor_reshape();
+    test_tensor_transpose();
+    test_tensor_clone();
+    test_tensor_pipeline();
+    test_transpose_binop();
+    print("[OK] 035_tensor_intrinsic_basic");
+    0
+}

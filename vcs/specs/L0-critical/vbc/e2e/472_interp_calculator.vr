@@ -1,0 +1,208 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, calculator, rpn, stack, postfix
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Reverse Polish Notation (RPN) calculator using a stack-based evaluator.
+// Tokens are encoded as integers:
+//   Positive integers >= 100: operand (value - 100)
+//   0: end of expression
+//   1: ADD (+)
+//   2: SUB (-)
+//   3: MUL (*)
+//   4: DIV (/)
+//   5: NEG (negate top)
+//   6: DUP (duplicate top)
+//   7: MOD (%)
+//
+// Stack is a flat array with top-of-stack pointer.
+// Tokens array is [Int;32], stack is [Int;16].
+
+// Push value onto stack; returns new sp.
+fn stk_push(stk: [Int; 16], sp: Int, v: Int) -> Int {
+    stk[sp] = v;
+    sp + 1
+}
+
+// Pop top from stack; stores popped value in out array at index 0; returns new sp.
+fn stk_pop(stk: [Int; 16], sp: Int) -> Int {
+    sp - 1
+}
+
+// Peek top of stack (sp-1).
+fn stk_peek(stk: [Int; 16], sp: Int) -> Int {
+    stk[sp - 1]
+}
+
+// Evaluate an RPN expression encoded in tokens[0..n-1].
+// Returns the final result (top of stack after evaluation).
+fn rpn_eval(tokens: [Int; 32], n: Int) -> Int {
+    let mut stk = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sp = 0;
+    let mut i = 0;
+    while i < n {
+        let tok = tokens[i];
+        if tok >= 100 {
+            // Operand
+            sp = stk_push(stk, sp, tok - 100);
+        } else if tok == 1 {
+            // ADD
+            let b = stk[sp - 1]; sp = sp - 1;
+            let a = stk[sp - 1]; sp = sp - 1;
+            sp = stk_push(stk, sp, a + b);
+        } else if tok == 2 {
+            // SUB
+            let b = stk[sp - 1]; sp = sp - 1;
+            let a = stk[sp - 1]; sp = sp - 1;
+            sp = stk_push(stk, sp, a - b);
+        } else if tok == 3 {
+            // MUL
+            let b = stk[sp - 1]; sp = sp - 1;
+            let a = stk[sp - 1]; sp = sp - 1;
+            sp = stk_push(stk, sp, a * b);
+        } else if tok == 4 {
+            // DIV
+            let b = stk[sp - 1]; sp = sp - 1;
+            let a = stk[sp - 1]; sp = sp - 1;
+            sp = stk_push(stk, sp, a / b);
+        } else if tok == 5 {
+            // NEG
+            let a = stk[sp - 1]; sp = sp - 1;
+            sp = stk_push(stk, sp, 0 - a);
+        } else if tok == 6 {
+            // DUP
+            let a = stk[sp - 1];
+            sp = stk_push(stk, sp, a);
+        } else if tok == 7 {
+            // MOD
+            let b = stk[sp - 1]; sp = sp - 1;
+            let a = stk[sp - 1]; sp = sp - 1;
+            sp = stk_push(stk, sp, a % b);
+        }
+        i = i + 1;
+    }
+    stk[sp - 1]
+}
+
+fn test_rpn_basic_arithmetic() {
+    // 3 + 4 = 7  -> tokens: [103, 104, 1]
+    let t1 = [103, 104, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t1, 3), 7);
+
+    // 10 - 4 = 6 -> tokens: [110, 104, 2]
+    let t2 = [110, 104, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t2, 3), 6);
+
+    // 5 * 6 = 30 -> tokens: [105, 106, 3]
+    let t3 = [105, 106, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t3, 3), 30);
+
+    // 20 / 4 = 5 -> tokens: [120, 104, 4]
+    let t4 = [120, 104, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t4, 3), 5);
+
+    // 17 % 5 = 2 -> tokens: [117, 105, 7]
+    let t5 = [117, 105, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t5, 3), 2);
+
+    print("rpn_basic_arithmetic: ok");
+}
+
+fn test_rpn_compound_expressions() {
+    // (3 + 4) * 2 = 14 -> [103, 104, 1, 102, 3]
+    let t1 = [103, 104, 1, 102, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t1, 5), 14);
+
+    // (10 - 3) * (2 + 5) = 7 * 7 = 49
+    // tokens: [110, 103, 2, 102, 105, 1, 3]
+    let t2 = [110, 103, 2, 102, 105, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t2, 7), 49);
+
+    // 2^10 via repeated squaring using DUP and MUL:
+    // 2 DUP MUL = 4; DUP MUL = 16; DUP MUL = 256; DUP MUL = 65536
+    // But let's do a simpler one: 3 DUP MUL DUP MUL = (3*3)*(3*3) = 81
+    // tokens: [103, 6, 3, 6, 3]  -> 3, dup->3,3, mul->9, dup->9,9, mul->81
+    let t3 = [103, 6, 3, 6, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t3, 5), 81);
+
+    // NEG test: -(5 + 3) = -8 -> [105, 103, 1, 5]
+    let t4 = [105, 103, 1, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t4, 4), -8);
+
+    print("rpn_compound_expressions: ok");
+}
+
+fn test_rpn_multi_step() {
+    // Compute: (1+2+3+4+5) = 15
+    // RPN: 1 2 + 3 + 4 + 5 +  -> [101, 102, 1, 103, 1, 104, 1, 105, 1]
+    let t1 = [101, 102, 1, 103, 1, 104, 1, 105, 1, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t1, 9), 15);
+
+    // Compute factorial(5) = 120 as: 1*2*3*4*5
+    // RPN: 1 2 * 3 * 4 * 5 * -> [101, 102, 3, 103, 3, 104, 3, 105, 3]
+    let t2 = [101, 102, 3, 103, 3, 104, 3, 105, 3, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t2, 9), 120);
+
+    // Compute (100 - 17*5) = 100 - 85 = 15
+    // RPN: 100 17 5 * - (offset by 100: operand(100)=200, operand(17)=117, operand(5)=105)
+    // tokens: [200, 117, 105, 3, 2]
+    let t3 = [200, 117, 105, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t3, 5), 15);
+
+    // Stack: push 7, dup, mul, push 2, sub -> 7^2 - 2 = 47
+    // tokens: [107, 6, 3, 102, 2]
+    let t4 = [107, 6, 3, 102, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t4, 5), 47);
+
+    print("rpn_multi_step: ok");
+}
+
+fn test_rpn_edge_cases() {
+    // Single operand: just push 42 -> result is 42
+    let t1 = [142, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t1, 1), 42);
+
+    // Zero arithmetic: 5 + 0 = 5
+    let t2 = [105, 100, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t2, 3), 5);
+
+    // Negate then negate (double negation = identity): --7 = 7
+    // tokens: [107, 5, 5]
+    let t3 = [107, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t3, 3), 7);
+
+    // Large computation: 99 * 99 = 9801
+    // tokens: [199, 199, 3] (operand 99 = tok 199)
+    let t4 = [199, 199, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(rpn_eval(t4, 3), 9801);
+
+    print("rpn_edge_cases: ok");
+}
+
+fn main() -> Int {
+    test_rpn_basic_arithmetic();
+    test_rpn_compound_expressions();
+    test_rpn_multi_step();
+    test_rpn_edge_cases();
+    print("[OK] 472_interp_calculator");
+    0
+}

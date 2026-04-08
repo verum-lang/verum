@@ -1,0 +1,104 @@
+// @test: run
+// @expected-stdout: Safe division: 5
+// @tier: 0
+// @level: L2
+// @tags: verification, runtime
+
+/// @verify(runtime) - runtime verification checks
+/// Contracts are evaluated at runtime with appropriate error handling
+///
+/// Runtime verification inserts runtime checks for requires/ensures clauses.
+/// This provides safety guarantees with ~15ns overhead per check.
+
+@verify(runtime)
+fn checked_divide(x: Float, y: Float) -> Float {
+    contract#"
+        requires y != 0.0;
+        ensures result == x / y;
+    ";
+    x / y
+}
+
+@verify(runtime)
+fn safe_sqrt(x: Float) -> Float {
+    contract#"
+        requires x >= 0.0;
+        ensures result >= 0.0;
+    ";
+    x.sqrt()
+}
+
+@verify(runtime)
+fn bounded_access<T>(list: &List<T>, index: Int) -> &T {
+    contract#"
+        requires index >= 0;
+        requires index < list.len();
+    ";
+    list[index]
+}
+
+/// Runtime verification with invariants
+@verify(runtime)
+fn sum_positive(arr: &List<Int>) -> Int {
+    contract#"
+        requires forall i: Int. 0 <= i < arr.len() implies arr[i] > 0;
+        ensures result > 0 || arr.len() == 0;
+    ";
+    let mut sum = 0;
+    for i in 0..arr.len() {
+        contract#"invariant 
+            sum >= 0;
+        ";
+        sum += arr[i];
+    }
+    sum
+}
+
+/// Runtime contract with old() expression
+@verify(runtime)
+fn increment_counter(counter: &mut Int) {
+    contract#"
+        ensures *counter == old(*counter) + 1;
+    ";
+    *counter += 1;
+}
+
+/// Runtime verification preserves stack trace on failure
+@verify(runtime)
+fn validate_range(value: Int, min: Int, max: Int) -> Int {
+    contract#"
+        requires min <= max;
+        requires value >= min && value <= max;
+        ensures result == value;
+    ";
+    value
+}
+
+fn main() {
+    // Test checked_divide
+    let result = checked_divide(10.0, 2.0);
+    println(f"Safe division: {result}");
+
+    // Test safe_sqrt
+    let sqrt_result = safe_sqrt(16.0);
+    assert(sqrt_result == 4.0);
+
+    // Test bounded_access
+    let numbers = [1, 2, 3, 4, 5];
+    let third = bounded_access(&numbers, 2);
+    assert(*third == 3);
+
+    // Test sum_positive
+    let positives = [1, 2, 3, 4, 5];
+    let sum = sum_positive(&positives);
+    assert(sum == 15);
+
+    // Test increment_counter
+    let mut counter = 10;
+    increment_counter(&mut counter);
+    assert(counter == 11);
+
+    // Test validate_range
+    let validated = validate_range(50, 0, 100);
+    assert(validated == 50);
+}

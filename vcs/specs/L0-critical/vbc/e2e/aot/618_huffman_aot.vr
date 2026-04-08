@@ -1,0 +1,386 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, huffman, encoding, compression
+// @timeout: 30000
+
+// Simplified Huffman-style encoding for 4 symbols (A=0, B=1, C=2, D=3).
+// Given frequencies, compute code lengths using a greedy approach.
+// Encode/decode short sequences using packed integer codes.
+// Codes are canonical Huffman codes assigned by length.
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// For 4 symbols, the Huffman tree has specific shapes depending on frequencies.
+// With 4 symbols there are only 3 possible code-length configurations:
+// (a) All equal: lengths [2,2,2,2] (balanced tree)
+// (b) One frequent: lengths [1,2,3,3] (or permutation)
+// (c) Two frequent: lengths [1,2,2,3]... but actually for 4 symbols:
+//
+// General algorithm: build bottom-up by repeatedly merging two smallest.
+// We simulate this for exactly 4 symbols.
+//
+// Step 1: Find two smallest freqs, merge them into a new "node" with combined freq
+// Step 2: Now have 3 nodes, find two smallest, merge
+// Step 3: Now have 2 nodes, merge (root)
+// Track depth for each original symbol.
+
+// Find index of minimum in freq array (among indices with active[i]==1)
+fn find_min(freq: Arr8, active: Arr8, n: Int) -> Int {
+    let mut min_idx = 0 - 1;
+    let mut min_val = 999999;
+    let mut i = 0;
+    while i < n {
+        if get8(active, i) == 1 {
+            if get8(freq, i) < min_val {
+                min_val = get8(freq, i);
+                min_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    min_idx
+}
+
+// Compute code lengths for 4 symbols with given frequencies.
+// Returns Arr8 where first 4 elements are code lengths for symbols 0-3.
+// Uses a simplified Huffman build for exactly 4 symbols.
+// We use indices 0-3 for original symbols, 4-6 for merged nodes (6=root).
+fn huffman_lengths(f0: Int, f1: Int, f2: Int, f3: Int) -> Arr8 {
+    // Frequencies stored in indices 0..6 (up to 7 nodes: 4 original + 3 internal)
+    let mut freq = Arr8 { v0: f0, v1: f1, v2: f2, v3: f3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let mut active = Arr8 { v0: 1, v1: 1, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // parent[i] = parent node index, depth computed after
+    let mut parent = Arr8 { v0: 0-1, v1: 0-1, v2: 0-1, v3: 0-1, v4: 0-1, v5: 0-1, v6: 0-1, v7: 0-1 };
+
+    // Merge #1: combine two smallest into node 4
+    let m1a = find_min(freq, active, 4);
+    active = set8(active, m1a, 0);
+    let m1b = find_min(freq, active, 4);
+    active = set8(active, m1b, 0);
+    freq = set8(freq, 4, get8(freq, m1a) + get8(freq, m1b));
+    active = set8(active, 4, 1);
+    parent = set8(parent, m1a, 4);
+    parent = set8(parent, m1b, 4);
+
+    // Merge #2: combine two smallest among active nodes (up to index 5) -> node 5
+    let m2a = find_min(freq, active, 5);
+    active = set8(active, m2a, 0);
+    let m2b = find_min(freq, active, 5);
+    active = set8(active, m2b, 0);
+    freq = set8(freq, 5, get8(freq, m2a) + get8(freq, m2b));
+    active = set8(active, 5, 1);
+    parent = set8(parent, m2a, 5);
+    parent = set8(parent, m2b, 5);
+
+    // Merge #3: combine last two active into root (node 6)
+    let m3a = find_min(freq, active, 6);
+    active = set8(active, m3a, 0);
+    let m3b = find_min(freq, active, 6);
+    active = set8(active, m3b, 0);
+    parent = set8(parent, m3a, 6);
+    parent = set8(parent, m3b, 6);
+    // node 6 is root (parent stays -1 since we don't set parent[6], it defaults to index 6 in arr which is 0-1)
+
+    // Compute depth for each original symbol (0-3)
+    // depth = number of hops to root (node 6). Root is at depth 0.
+    let mut lengths = zeros();
+    let mut sym = 0;
+    while sym < 4 {
+        let mut depth = 0;
+        let mut cur = sym;
+        while cur != 6 {
+            let p = get8(parent, cur);
+            depth = depth + 1;
+            cur = p;
+        }
+        lengths = set8(lengths, sym, depth);
+        sym = sym + 1;
+    }
+    lengths
+}
+
+// Compute total encoded bits: sum(freq[i] * length[i])
+fn total_bits(f0: Int, f1: Int, f2: Int, f3: Int) -> Int {
+    let lens = huffman_lengths(f0, f1, f2, f3);
+    f0 * get8(lens, 0) + f1 * get8(lens, 1) + f2 * get8(lens, 2) + f3 * get8(lens, 3)
+}
+
+// Assign canonical codes given lengths (for 4 symbols).
+// Sort by (length, symbol), assign codes starting from 0.
+// Returns packed codes: code[i] at position i of Arr8.
+// Packed as: code_value * 10 + code_length (max length 3)
+fn assign_codes(lens: Arr8) -> Arr8 {
+    // For 4 symbols, use selection sort (simple, no break needed)
+    // Pack (length, symbol) as length*10+symbol for easy comparison
+    let mut keys = zeros();
+    keys = set8(keys, 0, get8(lens, 0) * 10 + 0);
+    keys = set8(keys, 1, get8(lens, 1) * 10 + 1);
+    keys = set8(keys, 2, get8(lens, 2) * 10 + 2);
+    keys = set8(keys, 3, get8(lens, 3) * 10 + 3);
+
+    // Selection sort on 4 elements
+    let mut i = 0;
+    while i < 3 {
+        let mut min_j = i;
+        let mut j = i + 1;
+        while j < 4 {
+            if get8(keys, j) < get8(keys, min_j) { min_j = j; }
+            j = j + 1;
+        }
+        if min_j != i {
+            let tmp = get8(keys, i);
+            keys = set8(keys, i, get8(keys, min_j));
+            keys = set8(keys, min_j, tmp);
+        }
+        i = i + 1;
+    }
+
+    // Now keys[0..3] are sorted by (length, symbol)
+    // Extract sorted symbols and lengths
+    let s0 = get8(keys, 0) % 10;
+    let l0 = get8(keys, 0) / 10;
+    let s1 = get8(keys, 1) % 10;
+    let l1 = get8(keys, 1) / 10;
+    let s2 = get8(keys, 2) % 10;
+    let l2 = get8(keys, 2) / 10;
+    let s3 = get8(keys, 3) % 10;
+    let l3 = get8(keys, 3) / 10;
+
+    // Assign canonical codes
+    let mut codes = zeros();
+    let mut code = 0;
+    let mut prev_len = l0;
+    codes = set8(codes, s0, code * 10 + l0);
+
+    // Symbol 1
+    code = code + 1;
+    let mut shift = 0;
+    while shift < l1 - prev_len { code = code * 2; shift = shift + 1; }
+    codes = set8(codes, s1, code * 10 + l1);
+    prev_len = l1;
+
+    // Symbol 2
+    code = code + 1;
+    shift = 0;
+    while shift < l2 - prev_len { code = code * 2; shift = shift + 1; }
+    codes = set8(codes, s2, code * 10 + l2);
+    prev_len = l2;
+
+    // Symbol 3
+    code = code + 1;
+    shift = 0;
+    while shift < l3 - prev_len { code = code * 2; shift = shift + 1; }
+    codes = set8(codes, s3, code * 10 + l3);
+
+    codes
+}
+
+// Encode a sequence of symbols using given codes.
+// Returns total bit count.
+fn encode_bitcount(seq: Arr8, seq_len: Int, codes: Arr8) -> Int {
+    let mut bits = 0;
+    let mut i = 0;
+    while i < seq_len {
+        let sym = get8(seq, i);
+        let packed = get8(codes, sym);
+        let code_len = packed % 10;
+        bits = bits + code_len;
+        i = i + 1;
+    }
+    bits
+}
+
+fn test_balanced() -> Int {
+    // Equal frequencies: all lengths should be 2
+    let lens = huffman_lengths(10, 10, 10, 10);
+    assert_eq(get8(lens, 0), 2);
+    assert_eq(get8(lens, 1), 2);
+    assert_eq(get8(lens, 2), 2);
+    assert_eq(get8(lens, 3), 2);
+    // Total bits: 4 * (10 * 2) = 80
+    assert_eq(total_bits(10, 10, 10, 10), 80);
+    1
+}
+
+fn test_skewed() -> Int {
+    // One very frequent symbol: A=100, B=1, C=1, D=1
+    // Tree building:
+    // Merge two smallest: B(1) + C(1) = node4(2), or C(1)+D(1)=node4(2)
+    // Active: A(100), D(1), node4(2) — or similar
+    // Merge: D(1) + node4(2) = node5(3)
+    // Final merge: A(100) + node5(3) — but this is implicit
+    // A gets length 1, the rest get 2 or 3
+    let lens = huffman_lengths(100, 1, 1, 1);
+    // A should have shortest code (length 1)
+    assert_eq(get8(lens, 0), 1);
+    // Sum of all lengths should reflect the tree shape
+    // With one length-1 and three symbols at various depths:
+    // The two merged first get depth 3, the third gets depth 2
+    // Total bits: 100*1 + 1*3 + 1*3 + 1*2 = 108 (or variant)
+    let tb = total_bits(100, 1, 1, 1);
+    // Regardless of which two are merged first, total is 100*1 + sum_of_rest
+    // Most frequent at depth 1 -> 100 bits. Others at depths 2 and 3.
+    assert_eq(get8(lens, 0), 1);
+    // The other three: two at depth 3, one at depth 2
+    let len_sum = get8(lens, 1) + get8(lens, 2) + get8(lens, 3);
+    assert_eq(len_sum, 8); // 2+3+3 = 8
+    assert_eq(tb, 108); // 100*1 + 1*2 + 1*3 + 1*3 = 108
+    1
+}
+
+fn test_two_heavy() -> Int {
+    // A=50, B=50, C=1, D=1
+    // Merge: C(1)+D(1) = node4(2)
+    // Active: A(50), B(50), node4(2)
+    // Merge: node4(2)+A(50) or node4(2)+B(50) (node4 is smallest)
+    // Let's trace: find_min among {A=50, B=50, node4=2} -> node4(idx=4)
+    //   deactivate 4, find_min among {A=50, B=50} -> A(idx=0) [first min]
+    //   merge: node5 = node4+A = 52, parent[4]=5, parent[0]=5
+    // Final implicit merge: B(50) + node5(52)
+    // Depths:
+    //   B: parent=-1 -> effectively depth 1 from root (merged at top)
+    //   Wait - B is NOT merged into node5. After step2: active = {B(50), node5(52)}
+    //   These two get merged at step3 (implicit root). So B depth=1, node5 depth=1.
+    //   From node5: A has parent=5, so depth=2. node4 has parent=5, so depth from root: node4 at depth 2.
+    //   From node4: C and D have parent=4, depth from root: depth(node4)+1 = 3.
+    let lens = huffman_lengths(50, 50, 1, 1);
+    // B should be depth 1
+    assert_eq(get8(lens, 1), 1);
+    // A should be depth 2
+    assert_eq(get8(lens, 0), 2);
+    // C and D should be depth 3
+    assert_eq(get8(lens, 2), 3);
+    assert_eq(get8(lens, 3), 3);
+    // Total bits: 50*2 + 50*1 + 1*3 + 1*3 = 100+50+3+3 = 156
+    assert_eq(total_bits(50, 50, 1, 1), 156);
+    1
+}
+
+fn test_canonical_codes() -> Int {
+    // For lengths [2,2,2,2] (balanced), canonical codes: 00,01,10,11
+    let lens_bal = huffman_lengths(10, 10, 10, 10);
+    let codes_bal = assign_codes(lens_bal);
+    // All length 2: codes are 0,1,2,3 (canonical ordering by symbol)
+    // Packed: code*10 + length
+    assert_eq(get8(codes_bal, 0), 0 * 10 + 2);  // symbol 0: code=00, packed=2
+    assert_eq(get8(codes_bal, 1), 1 * 10 + 2);  // symbol 1: code=01, packed=12
+    assert_eq(get8(codes_bal, 2), 2 * 10 + 2);  // symbol 2: code=10, packed=22
+    assert_eq(get8(codes_bal, 3), 3 * 10 + 2);  // symbol 3: code=11, packed=32
+    1
+}
+
+fn test_encode_bitcount() -> Int {
+    // Using balanced codes (all length 2)
+    let lens = huffman_lengths(10, 10, 10, 10);
+    let codes = assign_codes(lens);
+    // Encode sequence [0,1,2,3,0,1] of length 6 -> 6*2 = 12 bits
+    let seq = Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 0, v5: 1, v6: 0, v7: 0 };
+    assert_eq(encode_bitcount(seq, 6, codes), 12);
+    1
+}
+
+fn test_skewed_encode() -> Int {
+    // Skewed: A=100, B=1, C=1, D=1
+    let lens = huffman_lengths(100, 1, 1, 1);
+    let codes = assign_codes(lens);
+    // Sequence of all A's: [0,0,0,0,0] -> 5 * 1 = 5 bits
+    let all_a = zeros(); // all 0s = all symbol A
+    assert_eq(encode_bitcount(all_a, 5, codes), 5);
+    // Mixed sequence [0,1,0,2,0,3] -> 1+len(B)+1+len(C)+1+len(D)
+    // A=len 1, B+C+D have various lengths summing to 8
+    let mixed = Arr8 { v0: 0, v1: 1, v2: 0, v3: 2, v4: 0, v5: 3, v6: 0, v7: 0 };
+    let expected = 3 * 1 + get8(lens, 1) + get8(lens, 2) + get8(lens, 3);
+    assert_eq(encode_bitcount(mixed, 6, codes), expected);
+    1
+}
+
+fn test_compression_ratio() -> Int {
+    // Fixed 2-bit encoding: always 2 bits per symbol
+    // Huffman with A=100, B=1, C=1, D=1:
+    // Fixed: (100+1+1+1)*2 = 206 bits
+    // Huffman: 100*1 + 1*2 + 1*3 + 1*3 = 108 bits
+    // Savings: 206 - 108 = 98 bits
+    let fixed_bits = (100 + 1 + 1 + 1) * 2;
+    let huff_bits = total_bits(100, 1, 1, 1);
+    let savings = fixed_bits - huff_bits;
+    assert_eq(fixed_bits, 206);
+    assert_eq(huff_bits, 108);
+    assert_eq(savings, 98);
+    // Balanced: no savings (both use 2 bits)
+    let fixed_bal = (10 + 10 + 10 + 10) * 2;
+    let huff_bal = total_bits(10, 10, 10, 10);
+    assert_eq(fixed_bal, huff_bal); // 80 == 80
+    1
+}
+
+fn test_kraft_inequality() -> Int {
+    // Kraft's inequality: sum(2^(-len_i)) <= 1
+    // For integer check: sum(2^(max_len - len_i)) <= 2^max_len
+    // Balanced [2,2,2,2]: sum = 4*2^0 = 4 = 2^2 = 4. OK (equality).
+    // Skewed: find max length
+    let lens = huffman_lengths(100, 1, 1, 1);
+    let l0 = get8(lens, 0);
+    let l1 = get8(lens, 1);
+    let l2 = get8(lens, 2);
+    let l3 = get8(lens, 3);
+    // max length among them
+    let mut max_l = l0;
+    if l1 > max_l { max_l = l1; }
+    if l2 > max_l { max_l = l2; }
+    if l3 > max_l { max_l = l3; }
+    // pow2 helper
+    let mut p0 = 1;
+    let mut k = 0;
+    while k < max_l - l0 { p0 = p0 * 2; k = k + 1; }
+    let mut p1 = 1;
+    k = 0;
+    while k < max_l - l1 { p1 = p1 * 2; k = k + 1; }
+    let mut p2 = 1;
+    k = 0;
+    while k < max_l - l2 { p2 = p2 * 2; k = k + 1; }
+    let mut p3 = 1;
+    k = 0;
+    while k < max_l - l3 { p3 = p3 * 2; k = k + 1; }
+    let kraft_sum = p0 + p1 + p2 + p3;
+    let mut max_pow = 1;
+    k = 0;
+    while k < max_l { max_pow = max_pow * 2; k = k + 1; }
+    // kraft_sum should be <= max_pow (and == max_pow for complete code)
+    // For Huffman it's exactly equal (complete prefix code)
+    assert_eq(kraft_sum, max_pow);
+    1
+}
+
+fn main() -> Int {
+    test_balanced();
+    test_skewed();
+    test_two_heavy();
+    test_canonical_codes();
+    test_encode_bitcount();
+    test_skewed_encode();
+    test_compression_ratio();
+    test_kraft_inequality();
+    print("[OK] 618_huffman_aot");
+    0
+}

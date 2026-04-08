@@ -1,0 +1,215 @@
+// @test: run
+// @expected-stdout: Process completed successfully: ProcessedData { raw_size: 100, processed_size: 50 }
+// @tier: 0
+// @level: L2
+// @tags: errors, propagation, result
+
+/// Error propagation - passing errors up the call stack.
+/// Verum supports explicit error propagation patterns.
+
+type FileError is
+    | NotFound(Text)
+    | PermissionDenied(Text)
+    | IoError(Text)
+    | InvalidFormat(Text);
+
+type ParseError is
+    | SyntaxError { line: Int, column: Int, message: Text }
+    | UnexpectedEof
+    | InvalidToken(Text);
+
+type ProcessError is
+    | File(FileError)
+    | Parse(ParseError)
+    | Validation(Text);
+
+/// Simulated file operations
+fn read_file(path: &Text) -> Result<Text, FileError> {
+    if path == "valid.txt" {
+        Ok("file content here")
+    } else if path == "forbidden.txt" {
+        Err(FileError.PermissionDenied(path.clone()))
+    } else {
+        Err(FileError.NotFound(path.clone()))
+    }
+}
+
+/// Simulated parsing
+fn parse_content(content: &Text) -> Result<ParsedData, ParseError> {
+    if content.len() > 0 {
+        Ok(ParsedData { data: content.clone(), line_count: 1 })
+    } else {
+        Err(ParseError.UnexpectedEof)
+    }
+}
+
+type ParsedData is {
+    data: Text,
+    line_count: Int
+};
+
+type ProcessedData is {
+    raw_size: Int,
+    processed_size: Int
+};
+
+/// Manual error propagation - explicit matching and returning
+fn process_file_manual(path: &Text) -> Result<ProcessedData, ProcessError> {
+    // Read file with explicit error handling
+    let content = match read_file(path) {
+        Ok(c) => c,
+        Err(e) => return Err(ProcessError.File(e))
+    };
+
+    // Parse content with explicit error handling
+    let parsed = match parse_content(&content) {
+        Ok(p) => p,
+        Err(e) => return Err(ProcessError.Parse(e))
+    };
+
+    // Validate and process
+    if parsed.line_count < 0 {
+        return Err(ProcessError.Validation("Invalid line count"));
+    }
+
+    Ok(ProcessedData {
+        raw_size: content.len() as Int,
+        processed_size: parsed.data.len() as Int
+    })
+}
+
+/// Error conversion helper implementations
+implement From<FileError> for ProcessError {
+    fn from(e: FileError) -> ProcessError {
+        ProcessError.File(e)
+    }
+}
+
+implement From<ParseError> for ProcessError {
+    fn from(e: ParseError) -> ProcessError {
+        ProcessError.Parse(e)
+    }
+}
+
+/// Propagation with map_err - transform errors during propagation
+fn process_file_map_err(path: &Text) -> Result<ProcessedData, Text> {
+    let content = read_file(path)
+        .map_err(|e| match e {
+            FileError.NotFound(p) => format("File not found: {}", p),
+            FileError.PermissionDenied(p) => format("Access denied: {}", p),
+            FileError.IoError(msg) => format("I/O error: {}", msg),
+            FileError.InvalidFormat(msg) => format("Invalid format: {}", msg)
+        })?;
+
+    let parsed = parse_content(&content)
+        .map_err(|e| match e {
+            ParseError.SyntaxError { line, column, message } =>
+                format("Syntax error at {}:{}: {}", line, column, message),
+            ParseError.UnexpectedEof => "Unexpected end of file".to_text(),
+            ParseError.InvalidToken(t) => format("Invalid token: {}", t)
+        })?;
+
+    Ok(ProcessedData {
+        raw_size: content.len() as Int,
+        processed_size: parsed.data.len() as Int
+    })
+}
+
+/// Propagation through multiple layers
+fn layer_one(input: Int) -> Result<Int, Text> {
+    if input < 0 {
+        Err("Negative input not allowed")
+    } else {
+        Ok(input * 2)
+    }
+}
+
+fn layer_two(input: Int) -> Result<Int, Text> {
+    let result = layer_one(input)?;  // Propagates error
+    if result > 100 {
+        Err("Result too large")
+    } else {
+        Ok(result + 10)
+    }
+}
+
+fn layer_three(input: Int) -> Result<Int, Text> {
+    let result = layer_two(input)?;  // Propagates error from layer_two or layer_one
+    Ok(result * 3)
+}
+
+/// Demonstrates error context enrichment
+type ContextualError is {
+    source: Text,
+    context: Text,
+    details: Maybe<Text>
+};
+
+fn with_context<T, E>(
+    result: Result<T, E>,
+    context: Text
+) -> Result<T, ContextualError>
+where E: Display {
+    result.map_err(|e| ContextualError {
+        source: e.to_text(),
+        context: context,
+        details: None
+    })
+}
+
+fn process_with_context(path: &Text) -> Result<ProcessedData, ContextualError> {
+    let content = with_context(
+        read_file(path),
+        format("Failed to read file: {}", path)
+    )?;
+
+    let parsed = with_context(
+        parse_content(&content),
+        "Failed to parse file content"
+    )?;
+
+    Ok(ProcessedData {
+        raw_size: content.len() as Int,
+        processed_size: parsed.data.len() as Int
+    })
+}
+
+/// Collecting errors vs failing fast
+fn collect_all_errors(paths: List<&Text>) -> Result<List<Text>, List<FileError>> {
+    let mut successes: List<Text> = List.new();
+    let mut errors: List<FileError> = List.new();
+
+    for path in paths {
+        match read_file(path) {
+            Ok(content) => successes.push(content),
+            Err(e) => errors.push(e)
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(successes)
+    } else {
+        Err(errors)
+    }
+}
+
+fn main() {
+    // Test manual propagation
+    let result = process_file_manual("valid.txt");
+    match result {
+        Ok(data) => println(format("Process completed successfully: {:?}", data)),
+        Err(e) => println(format("Process failed: {:?}", e))
+    }
+
+    // Test layer propagation
+    match layer_three(10) {
+        Ok(v) => println(format("Layer result: {}", v)),
+        Err(e) => println(format("Layer error: {}", e))
+    }
+
+    // Test error propagation with invalid input
+    match layer_three(-5) {
+        Ok(v) => println(format("Unexpected success: {}", v)),
+        Err(e) => println(format("Expected error: {}", e))
+    }
+}

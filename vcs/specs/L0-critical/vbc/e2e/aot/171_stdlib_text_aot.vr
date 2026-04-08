@@ -1,0 +1,305 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stdlib, text
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT text processing operations — char classification, case conversion, string ops
+
+// ============================================================================
+// Character classification (ASCII subset)
+// ============================================================================
+
+fn is_alpha(c: Int) -> Int {
+    // A-Z: 65-90, a-z: 97-122
+    if c >= 65 && c <= 90 { 1 }
+    else if c >= 97 && c <= 122 { 1 }
+    else { 0 }
+}
+
+fn is_digit(c: Int) -> Int {
+    // 0-9: 48-57
+    if c >= 48 && c <= 57 { 1 } else { 0 }
+}
+
+fn is_upper(c: Int) -> Int {
+    if c >= 65 && c <= 90 { 1 } else { 0 }
+}
+
+fn is_lower(c: Int) -> Int {
+    if c >= 97 && c <= 122 { 1 } else { 0 }
+}
+
+fn is_space(c: Int) -> Int {
+    if c == 32 { 1 }       // space
+    else if c == 9 { 1 }   // tab
+    else if c == 10 { 1 }  // newline
+    else if c == 13 { 1 }  // carriage return
+    else { 0 }
+}
+
+fn to_upper(c: Int) -> Int {
+    if c >= 97 && c <= 122 { c - 32 } else { c }
+}
+
+fn to_lower(c: Int) -> Int {
+    if c >= 65 && c <= 90 { c + 32 } else { c }
+}
+
+// ============================================================================
+// Test 1: Character classification
+// ============================================================================
+
+fn test_char_classify() {
+    // Alpha
+    assert_eq(is_alpha(65), 1);   // 'A'
+    assert_eq(is_alpha(90), 1);   // 'Z'
+    assert_eq(is_alpha(97), 1);   // 'a'
+    assert_eq(is_alpha(122), 1);  // 'z'
+    assert_eq(is_alpha(48), 0);   // '0'
+    assert_eq(is_alpha(32), 0);   // space
+    assert_eq(is_alpha(64), 0);   // '@'
+
+    // Digits
+    assert_eq(is_digit(48), 1);   // '0'
+    assert_eq(is_digit(57), 1);   // '9'
+    assert_eq(is_digit(65), 0);   // 'A'
+    assert_eq(is_digit(32), 0);   // space
+
+    // Upper/Lower
+    assert_eq(is_upper(65), 1);
+    assert_eq(is_upper(97), 0);
+    assert_eq(is_lower(97), 1);
+    assert_eq(is_lower(65), 0);
+
+    // Whitespace
+    assert_eq(is_space(32), 1);
+    assert_eq(is_space(9), 1);
+    assert_eq(is_space(10), 1);
+    assert_eq(is_space(65), 0);
+
+    print("test_char_classify passed");
+}
+
+// ============================================================================
+// Test 2: Case conversion
+// ============================================================================
+
+fn test_case_convert() {
+    // to_upper
+    assert_eq(to_upper(97), 65);   // 'a' -> 'A'
+    assert_eq(to_upper(122), 90);  // 'z' -> 'Z'
+    assert_eq(to_upper(65), 65);   // 'A' -> 'A' (already upper)
+    assert_eq(to_upper(48), 48);   // '0' -> '0' (not alpha)
+
+    // to_lower
+    assert_eq(to_lower(65), 97);   // 'A' -> 'a'
+    assert_eq(to_lower(90), 122);  // 'Z' -> 'z'
+    assert_eq(to_lower(97), 97);   // 'a' -> 'a' (already lower)
+    assert_eq(to_lower(48), 48);   // '0' -> '0' (not alpha)
+
+    // Round-trip: to_lower(to_upper(c)) == to_lower(c) for alpha
+    assert_eq(to_lower(to_upper(104)), to_lower(104));  // 'h'
+    assert_eq(to_upper(to_lower(72)), to_upper(72));     // 'H'
+
+    print("test_case_convert passed");
+}
+
+// ============================================================================
+// Test 3: String length and word counting
+// Simulate "Hello World" as char code array
+// ============================================================================
+
+type Str16 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    c12: Int, c13: Int, c14: Int, c15: Int,
+    len: Int
+};
+
+fn str_get(s: Str16, i: Int) -> Int {
+    if i == 0 { s.c0 } else if i == 1 { s.c1 } else if i == 2 { s.c2 }
+    else if i == 3 { s.c3 } else if i == 4 { s.c4 } else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 } else if i == 7 { s.c7 } else if i == 8 { s.c8 }
+    else if i == 9 { s.c9 } else if i == 10 { s.c10 } else if i == 11 { s.c11 }
+    else if i == 12 { s.c12 } else if i == 13 { s.c13 } else if i == 14 { s.c14 }
+    else { s.c15 }
+}
+
+fn str_count_words(s: Str16) -> Int {
+    let mut words = 0;
+    let mut in_word = 0;
+    let mut i = 0;
+    while i < s.len {
+        let c = str_get(s, i);
+        if is_space(c) == 1 {
+            in_word = 0;
+        } else {
+            if in_word == 0 {
+                words = words + 1;
+                in_word = 1;
+            }
+        }
+        i = i + 1;
+    }
+    words
+}
+
+fn str_count_alpha(s: Str16) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len {
+        if is_alpha(str_get(s, i)) == 1 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_string_ops() {
+    // "Hello World" = [72,101,108,108,111,32,87,111,114,108,100]
+    let hello = Str16 {
+        c0: 72, c1: 101, c2: 108, c3: 108, c4: 111,
+        c5: 32, c6: 87, c7: 111, c8: 114, c9: 108,
+        c10: 100, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 11
+    };
+
+    assert_eq(hello.len, 11);
+    assert_eq(str_get(hello, 0), 72);   // 'H'
+    assert_eq(str_get(hello, 5), 32);   // space
+
+    // Word count
+    assert_eq(str_count_words(hello), 2);
+
+    // Alpha count (10 letters, 1 space)
+    assert_eq(str_count_alpha(hello), 10);
+
+    // "a b c" = [97, 32, 98, 32, 99]
+    let abc = Str16 {
+        c0: 97, c1: 32, c2: 98, c3: 32, c4: 99,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 5
+    };
+    assert_eq(str_count_words(abc), 3);
+
+    // Empty string
+    let empty = Str16 {
+        c0: 0, c1: 0, c2: 0, c3: 0, c4: 0,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 0
+    };
+    assert_eq(str_count_words(empty), 0);
+
+    print("test_string_ops passed");
+}
+
+// ============================================================================
+// Test 4: Palindrome check
+// ============================================================================
+
+fn test_palindrome() {
+    // "abcba" = [97, 98, 99, 98, 97]
+    let pal = Str16 {
+        c0: 97, c1: 98, c2: 99, c3: 98, c4: 97,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 5
+    };
+
+    let mut is_pal = 1;
+    let mut left = 0;
+    let mut right = pal.len - 1;
+    while left < right {
+        if str_get(pal, left) == str_get(pal, right) {
+            left = left + 1;
+            right = right - 1;
+        } else {
+            is_pal = 0;
+            left = right;  // break
+        }
+    }
+    assert_eq(is_pal, 1);
+
+    // "abcd" is not a palindrome
+    let not_pal = Str16 {
+        c0: 97, c1: 98, c2: 99, c3: 100, c4: 0,
+        c5: 0, c6: 0, c7: 0, c8: 0, c9: 0,
+        c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 4
+    };
+    let mut is_pal2 = 1;
+    left = 0;
+    right = not_pal.len - 1;
+    while left < right {
+        if str_get(not_pal, left) == str_get(not_pal, right) {
+            left = left + 1;
+            right = right - 1;
+        } else {
+            is_pal2 = 0;
+            left = right;
+        }
+    }
+    assert_eq(is_pal2, 0);
+
+    print("test_palindrome passed");
+}
+
+// ============================================================================
+// Test 5: Caesar cipher encode/decode
+// ============================================================================
+
+fn caesar_encode_char(c: Int, shift: Int) -> Int {
+    if is_upper(c) == 1 {
+        let offset = c - 65;
+        let shifted = offset + shift;
+        let wrapped = shifted - (shifted / 26) * 26;
+        65 + wrapped
+    } else if is_lower(c) == 1 {
+        let offset = c - 97;
+        let shifted = offset + shift;
+        let wrapped = shifted - (shifted / 26) * 26;
+        97 + wrapped
+    } else {
+        c
+    }
+}
+
+fn test_caesar_cipher() {
+    // Encode 'A' (65) with shift 3 -> 'D' (68)
+    assert_eq(caesar_encode_char(65, 3), 68);
+
+    // Encode 'Z' (90) with shift 1 -> 'A' (65)
+    assert_eq(caesar_encode_char(90, 1), 65);
+
+    // Encode 'a' (97) with shift 13 -> 'n' (110)  (ROT13)
+    assert_eq(caesar_encode_char(97, 13), 110);
+
+    // Non-alpha unchanged
+    assert_eq(caesar_encode_char(32, 5), 32);
+
+    // ROT13 is self-inverse: encode twice returns original
+    let c = 72;  // 'H'
+    let encoded = caesar_encode_char(c, 13);
+    let decoded = caesar_encode_char(encoded, 13);
+    assert_eq(decoded, c);
+
+    // Encode 'm' (109) with shift 13 -> 'z' (122)
+    assert_eq(caesar_encode_char(109, 13), 122);
+
+    print("test_caesar_cipher passed");
+}
+
+fn main() -> Int {
+    test_char_classify();
+    test_case_convert();
+    test_string_ops();
+    test_palindrome();
+    test_caesar_cipher();
+    print("ALL PASSED");
+    0
+}

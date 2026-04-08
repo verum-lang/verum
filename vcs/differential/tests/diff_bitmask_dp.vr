@@ -1,0 +1,145 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, bitmask-dp, tsp, assignment
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+fn bit(mask: Int, i: Int) -> Int {
+    let mut m = mask;
+    let mut j = 0;
+    while j < i { m = m / 2; j = j + 1; }
+    m % 2
+}
+
+fn popcount(mask: Int) -> Int {
+    let mut count = 0;
+    let mut m = mask;
+    while m > 0 { count = count + m % 2; m = m / 2; }
+    count
+}
+
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// 4x4 cost matrix stored as 4 Arr8s
+type Cost4 is { r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8 };
+
+fn cost_get(c: Cost4, i: Int, j: Int) -> Int {
+    let row = if i == 0 { c.r0 } else if i == 1 { c.r1 } else if i == 2 { c.r2 } else { c.r3 };
+    get(row, j)
+}
+
+// Assignment problem: assign n workers to n jobs minimizing total cost
+// Bitmask DP: dp[mask] = min cost to assign first popcount(mask) workers
+// to the set of jobs indicated by mask
+fn min_assignment(cost: Cost4, n: Int) -> Int {
+    let total = 1;
+    let mut power = 1;
+    let mut i = 0;
+    while i < n { power = power * 2; i = i + 1; }
+
+    // dp[mask] = min cost when jobs in mask have been assigned
+    // We use two Arr8s to store up to 16 dp values
+    let inf = 99999;
+    let mut dp_lo = Arr8 { d0: inf, d1: inf, d2: inf, d3: inf, d4: inf, d5: inf, d6: inf, d7: inf };
+    let mut dp_hi = Arr8 { d0: inf, d1: inf, d2: inf, d3: inf, d4: inf, d5: inf, d6: inf, d7: inf };
+
+    // dp[0] = 0
+    dp_lo = set(dp_lo, 0, 0);
+
+    let mut mask = 0;
+    while mask < power {
+        let worker = popcount(mask);
+        if worker < n {
+            let dp_mask = if mask < 8 { get(dp_lo, mask) } else { get(dp_hi, mask - 8) };
+            if dp_mask < inf {
+                let mut j = 0;
+                while j < n {
+                    if bit(mask, j) == 0 {
+                        // Assign worker to job j
+                        let mut new_mask_val = mask;
+                        let mut bit_j = 1;
+                        let mut k = 0;
+                        while k < j { bit_j = bit_j * 2; k = k + 1; }
+                        new_mask_val = mask + bit_j;
+
+                        let new_cost = dp_mask + cost_get(cost, worker, j);
+                        let old = if new_mask_val < 8 { get(dp_lo, new_mask_val) } else { get(dp_hi, new_mask_val - 8) };
+                        if new_cost < old {
+                            if new_mask_val < 8 { dp_lo = set(dp_lo, new_mask_val, new_cost); }
+                            else { dp_hi = set(dp_hi, new_mask_val - 8, new_cost); }
+                        }
+                    }
+                    j = j + 1;
+                }
+            }
+        }
+        mask = mask + 1;
+    }
+
+    let full_mask = power - 1;
+    if full_mask < 8 { get(dp_lo, full_mask) } else { get(dp_hi, full_mask - 8) }
+}
+
+fn main() -> Int {
+    // Cost matrix:
+    // Worker 0: [9, 2, 7, 8]
+    // Worker 1: [6, 4, 3, 7]
+    // Worker 2: [5, 8, 1, 8]
+    // Worker 3: [7, 6, 9, 4]
+    // Optimal: W0→J1(2), W1→J0(6), W2→J2(1), W3→J3(4) = 13
+    let cost = Cost4 {
+        r0: Arr8 { d0: 9, d1: 2, d2: 7, d3: 8, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 6, d1: 4, d2: 3, d3: 7, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 5, d1: 8, d2: 1, d3: 8, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 7, d1: 6, d2: 9, d3: 4, d4: 0, d5: 0, d6: 0, d7: 0 }
+    };
+    assert_eq(min_assignment(cost, 4), 13);
+
+    // Identity cost matrix (diagonal = 0, others = 1)
+    let id_cost = Cost4 {
+        r0: Arr8 { d0: 0, d1: 1, d2: 1, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 1, d1: 0, d2: 1, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 1, d1: 1, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 1, d1: 1, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 }
+    };
+    assert_eq(min_assignment(id_cost, 4), 0);
+
+    // All same cost
+    let same_cost = Cost4 {
+        r0: Arr8 { d0: 5, d1: 5, d2: 5, d3: 5, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 5, d1: 5, d2: 5, d3: 5, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 5, d1: 5, d2: 5, d3: 5, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 5, d1: 5, d2: 5, d3: 5, d4: 0, d5: 0, d6: 0, d7: 0 }
+    };
+    assert_eq(min_assignment(same_cost, 4), 20);
+
+    // 2x2 simple
+    let cost2 = Cost4 {
+        r0: Arr8 { d0: 1, d1: 3, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 4, d1: 2, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: zeros(), r3: zeros()
+    };
+    assert_eq(min_assignment(cost2, 2), 3); // W0→J0(1) + W1→J1(2) = 3
+
+    print("DIFF_OK: bitmask_dp");
+    0
+}

@@ -1,0 +1,1477 @@
+// =============================================================================
+// gpu_test.vr - Tests for GPU/accelerator compute module
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, gpu, device, compute, memory, kernel, stream
+// @description: Tests for GPUBackend, Vendor, DeviceId, ComputeCapability,
+//               CpuInfo, MemorySpace, Dim3, LaunchConfig, TransferDirection,
+//               DeviceSelection, DeviceSelector, DeviceInfo, and MemoryInfo.
+// =============================================================================
+
+mount core.math.gpu.{
+    GPUBackend, Vendor, DeviceId, ComputeCapability,
+    CpuInfo, GpuInfo, DeviceInfo, DeviceSelection, DeviceSelector,
+    MemorySpace, Dim3, LaunchConfig, TransferDirection,
+    StreamHandle, EventHandle, MemoryInfo,
+    GPUDevice, CPUDevice,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: GPUBackend Variants
+// =============================================================================
+
+@test
+fn test_gpu_backend_cuda() {
+    let b = GPUBackend.CUDA;
+    assert(b is GPUBackend.CUDA);
+}
+
+@test
+fn test_gpu_backend_rocm() {
+    let b = GPUBackend.ROCm;
+    assert(b is GPUBackend.ROCm);
+}
+
+@test
+fn test_gpu_backend_metal() {
+    let b = GPUBackend.Metal;
+    assert(b is GPUBackend.Metal);
+}
+
+@test
+fn test_gpu_backend_vulkan() {
+    let b = GPUBackend.Vulkan;
+    assert(b is GPUBackend.Vulkan);
+}
+
+@test
+fn test_gpu_backend_sycl() {
+    let b = GPUBackend.SYCL;
+    assert(b is GPUBackend.SYCL);
+}
+
+@test
+fn test_gpu_backend_none() {
+    let b = GPUBackend.None;
+    assert(b is GPUBackend.None);
+}
+
+@test
+fn test_gpu_backend_eq() {
+    assert_eq(GPUBackend.CUDA, GPUBackend.CUDA);
+    assert_eq(GPUBackend.Metal, GPUBackend.Metal);
+    assert_eq(GPUBackend.None, GPUBackend.None);
+}
+
+@test
+fn test_gpu_backend_neq() {
+    assert(GPUBackend.CUDA != GPUBackend.ROCm);
+    assert(GPUBackend.Metal != GPUBackend.Vulkan);
+    assert(GPUBackend.SYCL != GPUBackend.None);
+}
+
+// =============================================================================
+// Section 2: Vendor Variants
+// =============================================================================
+
+@test
+fn test_vendor_nvidia() {
+    let v = Vendor.Nvidia;
+    assert(v is Vendor.Nvidia);
+}
+
+@test
+fn test_vendor_amd() {
+    let v = Vendor.Amd;
+    assert(v is Vendor.Amd);
+}
+
+@test
+fn test_vendor_intel() {
+    let v = Vendor.Intel;
+    assert(v is Vendor.Intel);
+}
+
+@test
+fn test_vendor_apple() {
+    let v = Vendor.Apple;
+    assert(v is Vendor.Apple);
+}
+
+@test
+fn test_vendor_google() {
+    let v = Vendor.Google;
+    assert(v is Vendor.Google);
+}
+
+@test
+fn test_vendor_qualcomm() {
+    let v = Vendor.Qualcomm;
+    assert(v is Vendor.Qualcomm);
+}
+
+@test
+fn test_vendor_unknown() {
+    let v = Vendor.Unknown;
+    assert(v is Vendor.Unknown);
+}
+
+@test
+fn test_vendor_eq() {
+    assert_eq(Vendor.Nvidia, Vendor.Nvidia);
+    assert_eq(Vendor.Apple, Vendor.Apple);
+}
+
+@test
+fn test_vendor_neq() {
+    assert(Vendor.Nvidia != Vendor.Amd);
+    assert(Vendor.Apple != Vendor.Intel);
+}
+
+// =============================================================================
+// Section 3: DeviceId Construction and Methods
+// =============================================================================
+
+@test
+fn test_device_id_cpu() {
+    let id = DeviceId.cpu();
+    assert(id.is_cpu());
+    assert(!id.is_gpu());
+    assert(!id.is_tpu());
+}
+
+@test
+fn test_device_id_gpu() {
+    let id = DeviceId.gpu(0 as U16);
+    assert(id.is_gpu());
+    assert(!id.is_cpu());
+    assert(!id.is_tpu());
+}
+
+@test
+fn test_device_id_gpu_index() {
+    let id = DeviceId.gpu(3 as U16);
+    assert(id.is_gpu());
+    assert_eq(id.device_index(), 3 as U16);
+}
+
+@test
+fn test_device_id_tpu() {
+    let id = DeviceId.tpu(0 as U16);
+    assert(id.is_tpu());
+    assert(!id.is_cpu());
+    assert(!id.is_gpu());
+}
+
+@test
+fn test_device_id_tpu_index() {
+    let id = DeviceId.tpu(5 as U16);
+    assert_eq(id.device_index(), 5 as U16);
+}
+
+@test
+fn test_device_id_cpu_index() {
+    let id = DeviceId.cpu();
+    assert_eq(id.device_index(), 0 as U16);
+}
+
+@test
+fn test_device_id_eq() {
+    assert_eq(DeviceId.cpu(), DeviceId.cpu());
+    assert_eq(DeviceId.gpu(0 as U16), DeviceId.gpu(0 as U16));
+    assert_eq(DeviceId.gpu(1 as U16), DeviceId.gpu(1 as U16));
+}
+
+@test
+fn test_device_id_neq() {
+    assert(DeviceId.cpu() != DeviceId.gpu(0 as U16));
+    assert(DeviceId.gpu(0 as U16) != DeviceId.gpu(1 as U16));
+    assert(DeviceId.gpu(0 as U16) != DeviceId.tpu(0 as U16));
+}
+
+@test
+fn test_device_id_raw() {
+    let cpu = DeviceId.cpu();
+    let _raw: U16 = cpu.raw();
+    assert(cpu.raw() == (0 as U16));
+}
+
+// =============================================================================
+// Section 4: ComputeCapability
+// =============================================================================
+
+@test
+fn test_compute_capability_default() {
+    let cc = ComputeCapability.default();
+    assert_eq(cc.major, 0 as U32);
+    assert_eq(cc.minor, 0 as U32);
+    assert(!cc.tensor_cores);
+    assert(!cc.fp16);
+    assert(!cc.bf16);
+}
+
+@test
+fn test_compute_capability_volta() {
+    let cc = ComputeCapability.volta();
+    assert_eq(cc.major, 7 as U32);
+    assert_eq(cc.minor, 0 as U32);
+    assert(cc.tensor_cores);
+    assert(cc.fp16);
+    assert(!cc.bf16);
+}
+
+@test
+fn test_compute_capability_ampere() {
+    let cc = ComputeCapability.ampere();
+    assert_eq(cc.major, 8 as U32);
+    assert_eq(cc.minor, 0 as U32);
+    assert(cc.tensor_cores);
+    assert(cc.fp16);
+    assert(cc.bf16);
+    assert(cc.async_copy);
+    assert(!cc.tma);
+}
+
+@test
+fn test_compute_capability_hopper() {
+    let cc = ComputeCapability.hopper();
+    assert_eq(cc.major, 9 as U32);
+    assert_eq(cc.minor, 0 as U32);
+    assert(cc.tensor_cores);
+    assert(cc.fp16);
+    assert(cc.bf16);
+    assert(cc.async_copy);
+    assert(cc.tma);
+}
+
+@test
+fn test_compute_capability_sm_version() {
+    let volta = ComputeCapability.volta();
+    assert_eq(volta.sm_version(), 70 as U32);
+
+    let ampere = ComputeCapability.ampere();
+    assert_eq(ampere.sm_version(), 80 as U32);
+
+    let hopper = ComputeCapability.hopper();
+    assert_eq(hopper.sm_version(), 90 as U32);
+}
+
+@test
+fn test_compute_capability_at_least() {
+    let hopper = ComputeCapability.hopper();
+    assert(hopper.at_least(7 as U32, 0 as U32));  // >= Volta
+    assert(hopper.at_least(8 as U32, 0 as U32));  // >= Ampere
+    assert(hopper.at_least(9 as U32, 0 as U32));  // >= Hopper
+    assert(!hopper.at_least(10 as U32, 0 as U32)); // < future
+}
+
+@test
+fn test_compute_capability_at_least_minor() {
+    let cc = ComputeCapability {
+        major: 8 as U32,
+        minor: 6 as U32,
+        ..ComputeCapability.default()
+    };
+    assert(cc.at_least(8 as U32, 0 as U32));
+    assert(cc.at_least(8 as U32, 6 as U32));
+    assert(!cc.at_least(8 as U32, 7 as U32));
+    assert(!cc.at_least(9 as U32, 0 as U32));
+}
+
+// =============================================================================
+// Section 5: CpuInfo
+// =============================================================================
+
+@test
+fn test_cpu_info_default() {
+    let info = CpuInfo.default();
+    assert_eq(info.cores, 1 as USize);
+    assert_eq(info.threads, 1 as USize);
+    assert(!info.has_avx2);
+    assert(!info.has_neon);
+}
+
+@test
+fn test_cpu_info_simd_width_no_simd() {
+    let info = CpuInfo.default();
+    assert_eq(info.simd_width(), 8 as USize);
+}
+
+@test
+fn test_cpu_info_simd_width_sse42() {
+    let mut info = CpuInfo.default();
+    info.has_sse42 = true;
+    assert_eq(info.simd_width(), 16 as USize);
+}
+
+@test
+fn test_cpu_info_simd_width_avx2() {
+    let mut info = CpuInfo.default();
+    info.has_avx2 = true;
+    assert_eq(info.simd_width(), 32 as USize);
+}
+
+@test
+fn test_cpu_info_simd_width_avx512() {
+    let mut info = CpuInfo.default();
+    info.has_avx512f = true;
+    assert_eq(info.simd_width(), 64 as USize);
+}
+
+@test
+fn test_cpu_info_simd_width_neon() {
+    let mut info = CpuInfo.default();
+    info.has_neon = true;
+    assert_eq(info.simd_width(), 16 as USize);
+}
+
+// =============================================================================
+// Section 6: MemorySpace Variants and Methods
+// =============================================================================
+
+@test
+fn test_memory_space_host() {
+    let ms = MemorySpace.Host;
+    assert(ms.is_host());
+    assert(!ms.is_device());
+    assert(!ms.is_unified());
+}
+
+@test
+fn test_memory_space_host_pinned() {
+    let ms = MemorySpace.HostPinned;
+    assert(ms.is_host());
+    assert(!ms.is_device());
+}
+
+@test
+fn test_memory_space_global() {
+    let ms = MemorySpace.Global;
+    assert(ms.is_device());
+    assert(!ms.is_host());
+}
+
+@test
+fn test_memory_space_shared() {
+    let ms = MemorySpace.Shared;
+    assert(ms.is_device());
+}
+
+@test
+fn test_memory_space_local() {
+    let ms = MemorySpace.Local;
+    assert(ms.is_device());
+}
+
+@test
+fn test_memory_space_constant() {
+    let ms = MemorySpace.Constant;
+    assert(ms.is_device());
+}
+
+@test
+fn test_memory_space_texture() {
+    let ms = MemorySpace.Texture;
+    assert(ms.is_device());
+}
+
+@test
+fn test_memory_space_unified() {
+    let ms = MemorySpace.Unified;
+    assert(ms.is_unified());
+    assert(!ms.is_host());
+    assert(!ms.is_device());
+}
+
+// =============================================================================
+// Section 7: Dim3 Construction and Methods
+// =============================================================================
+
+@test
+fn test_dim3_new() {
+    let d = Dim3.new(4 as U32, 8 as U32, 2 as U32);
+    assert_eq(d.x, 4 as U32);
+    assert_eq(d.y, 8 as U32);
+    assert_eq(d.z, 2 as U32);
+}
+
+@test
+fn test_dim3_d1() {
+    let d = Dim3.d1(256 as U32);
+    assert_eq(d.x, 256 as U32);
+    assert_eq(d.y, 1 as U32);
+    assert_eq(d.z, 1 as U32);
+}
+
+@test
+fn test_dim3_d2() {
+    let d = Dim3.d2(16 as U32, 16 as U32);
+    assert_eq(d.x, 16 as U32);
+    assert_eq(d.y, 16 as U32);
+    assert_eq(d.z, 1 as U32);
+}
+
+@test
+fn test_dim3_total() {
+    let d = Dim3.new(4 as U32, 8 as U32, 2 as U32);
+    assert_eq(d.total(), 64 as USize);
+}
+
+@test
+fn test_dim3_d1_total() {
+    let d = Dim3.d1(1024 as U32);
+    assert_eq(d.total(), 1024 as USize);
+}
+
+@test
+fn test_dim3_d2_total() {
+    let d = Dim3.d2(32 as U32, 32 as U32);
+    assert_eq(d.total(), 1024 as USize);
+}
+
+// =============================================================================
+// Section 8: LaunchConfig
+// =============================================================================
+
+@test
+fn test_launch_config_default() {
+    let config = LaunchConfig.default();
+    assert_eq(config.grid.x, 1 as U32);
+    assert_eq(config.block.x, 256 as U32);
+    assert_eq(config.shared_mem, 0 as USize);
+}
+
+@test
+fn test_launch_config_for_elements() {
+    let config = LaunchConfig.for_elements(1024 as USize, 256 as U32);
+    assert_eq(config.block.x, 256 as U32);
+    assert_eq(config.grid.x, 4 as U32);  // 1024 / 256
+}
+
+@test
+fn test_launch_config_for_elements_non_divisible() {
+    let config = LaunchConfig.for_elements(1000 as USize, 256 as U32);
+    assert_eq(config.grid.x, 4 as U32);  // ceil(1000/256) = 4
+}
+
+@test
+fn test_launch_config_for_matrix() {
+    let config = LaunchConfig.for_matrix(512 as USize, 512 as USize, 16 as U32, 16 as U32);
+    assert_eq(config.block.x, 16 as U32);
+    assert_eq(config.block.y, 16 as U32);
+    assert_eq(config.grid.x, 32 as U32);  // 512/16
+    assert_eq(config.grid.y, 32 as U32);
+}
+
+@test
+fn test_launch_config_total_threads() {
+    let config = LaunchConfig.for_elements(1024 as USize, 256 as U32);
+    assert_eq(config.total_threads(), 1024 as USize);
+}
+
+@test
+fn test_launch_config_total_threads_matrix() {
+    let config = LaunchConfig.for_matrix(64 as USize, 64 as USize, 16 as U32, 16 as U32);
+    let grid_total = config.grid.total();
+    let block_total = config.block.total();
+    assert_eq(config.total_threads(), grid_total * block_total);
+}
+
+// =============================================================================
+// Section 9: TransferDirection Variants
+// =============================================================================
+
+@test
+fn test_transfer_direction_h2d() {
+    let dir = TransferDirection.HostToDevice;
+    assert(dir is TransferDirection.HostToDevice);
+}
+
+@test
+fn test_transfer_direction_d2h() {
+    let dir = TransferDirection.DeviceToHost;
+    assert(dir is TransferDirection.DeviceToHost);
+}
+
+@test
+fn test_transfer_direction_d2d() {
+    let dir = TransferDirection.DeviceToDevice;
+    assert(dir is TransferDirection.DeviceToDevice);
+}
+
+// =============================================================================
+// Section 10: DeviceSelection Variants
+// =============================================================================
+
+@test
+fn test_device_selection_first_gpu() {
+    let sel = DeviceSelection.FirstGpu;
+    assert(sel is DeviceSelection.FirstGpu);
+}
+
+@test
+fn test_device_selection_max_memory() {
+    let sel = DeviceSelection.MaxMemoryGpu;
+    assert(sel is DeviceSelection.MaxMemoryGpu);
+}
+
+@test
+fn test_device_selection_max_compute() {
+    let sel = DeviceSelection.MaxComputeGpu;
+    assert(sel is DeviceSelection.MaxComputeGpu);
+}
+
+@test
+fn test_device_selection_cpu_only() {
+    let sel = DeviceSelection.CpuOnly;
+    assert(sel is DeviceSelection.CpuOnly);
+}
+
+@test
+fn test_device_selection_by_index() {
+    let sel = DeviceSelection.ByIndex(2 as USize);
+    assert(sel is DeviceSelection.ByIndex);
+}
+
+// =============================================================================
+// Section 11: DeviceInfo
+// =============================================================================
+
+@test
+fn test_device_info_cpu() {
+    let info = DeviceInfo.Cpu(CpuInfo.default());
+    assert(info.is_cpu());
+    assert(!info.is_gpu());
+}
+
+@test
+fn test_device_info_cpu_name() {
+    let info = DeviceInfo.Cpu(CpuInfo.default());
+    let name = info.name();
+    assert_eq(name, "Unknown");
+}
+
+// =============================================================================
+// Section 12: MemoryInfo
+// =============================================================================
+
+@test
+fn test_memory_info_construction() {
+    let four_gb = (4 * 1024 * 1024 * 1024) as USize;
+    let eight_gb = (8 * 1024 * 1024 * 1024) as USize;
+    let info = MemoryInfo {
+        free: four_gb,
+        total: eight_gb,
+    };
+    assert(info.free <= info.total);
+}
+
+// =============================================================================
+// Section 13: Handle Types
+// =============================================================================
+
+@test
+fn test_stream_handle_type() {
+    let handle: StreamHandle = StreamHandle(0 as U64);
+    let _: StreamHandle = handle;
+}
+
+@test
+fn test_event_handle_type() {
+    let handle: EventHandle = EventHandle(0 as U64);
+    let _: EventHandle = handle;
+}
+
+// =============================================================================
+// Section 14: GPUBackend Exhaustive Match & Cross-Checks
+// =============================================================================
+
+@test
+fn test_gpu_backend_match_exhaustive() {
+    let mut count = 0;
+    let b1 = GPUBackend.CUDA;
+    match b1 { GPUBackend.CUDA => { count = count + 1; }, _ => {} }
+    let b2 = GPUBackend.ROCm;
+    match b2 { GPUBackend.ROCm => { count = count + 1; }, _ => {} }
+    let b3 = GPUBackend.Metal;
+    match b3 { GPUBackend.Metal => { count = count + 1; }, _ => {} }
+    let b4 = GPUBackend.Vulkan;
+    match b4 { GPUBackend.Vulkan => { count = count + 1; }, _ => {} }
+    let b5 = GPUBackend.SYCL;
+    match b5 { GPUBackend.SYCL => { count = count + 1; }, _ => {} }
+    let b6 = GPUBackend.None;
+    match b6 { GPUBackend.None => { count = count + 1; }, _ => {} }
+    assert_eq(count, 6);
+}
+
+@test
+fn test_gpu_backend_all_distinct() {
+    assert(GPUBackend.CUDA != GPUBackend.ROCm);
+    assert(GPUBackend.CUDA != GPUBackend.Metal);
+    assert(GPUBackend.CUDA != GPUBackend.Vulkan);
+    assert(GPUBackend.CUDA != GPUBackend.SYCL);
+    assert(GPUBackend.CUDA != GPUBackend.None);
+    assert(GPUBackend.ROCm != GPUBackend.Metal);
+    assert(GPUBackend.ROCm != GPUBackend.Vulkan);
+    assert(GPUBackend.ROCm != GPUBackend.SYCL);
+    assert(GPUBackend.ROCm != GPUBackend.None);
+    assert(GPUBackend.Metal != GPUBackend.Vulkan);
+    assert(GPUBackend.Metal != GPUBackend.SYCL);
+    assert(GPUBackend.Metal != GPUBackend.None);
+    assert(GPUBackend.Vulkan != GPUBackend.SYCL);
+    assert(GPUBackend.Vulkan != GPUBackend.None);
+    assert(GPUBackend.SYCL != GPUBackend.None);
+}
+
+// =============================================================================
+// Section 15: Vendor Exhaustive Match & Cross-Checks
+// =============================================================================
+
+@test
+fn test_vendor_match_exhaustive() {
+    let mut count = 0;
+    let v1 = Vendor.Nvidia;
+    match v1 { Vendor.Nvidia => { count = count + 1; }, _ => {} }
+    let v2 = Vendor.Amd;
+    match v2 { Vendor.Amd => { count = count + 1; }, _ => {} }
+    let v3 = Vendor.Intel;
+    match v3 { Vendor.Intel => { count = count + 1; }, _ => {} }
+    let v4 = Vendor.Apple;
+    match v4 { Vendor.Apple => { count = count + 1; }, _ => {} }
+    let v5 = Vendor.Google;
+    match v5 { Vendor.Google => { count = count + 1; }, _ => {} }
+    let v6 = Vendor.Qualcomm;
+    match v6 { Vendor.Qualcomm => { count = count + 1; }, _ => {} }
+    let v7 = Vendor.Unknown;
+    match v7 { Vendor.Unknown => { count = count + 1; }, _ => {} }
+    assert_eq(count, 7);
+}
+
+@test
+fn test_vendor_all_distinct() {
+    assert(Vendor.Nvidia != Vendor.Amd);
+    assert(Vendor.Nvidia != Vendor.Intel);
+    assert(Vendor.Nvidia != Vendor.Apple);
+    assert(Vendor.Nvidia != Vendor.Google);
+    assert(Vendor.Nvidia != Vendor.Qualcomm);
+    assert(Vendor.Nvidia != Vendor.Unknown);
+    assert(Vendor.Amd != Vendor.Intel);
+    assert(Vendor.Amd != Vendor.Apple);
+    assert(Vendor.Amd != Vendor.Google);
+    assert(Vendor.Amd != Vendor.Qualcomm);
+    assert(Vendor.Amd != Vendor.Unknown);
+    assert(Vendor.Intel != Vendor.Apple);
+    assert(Vendor.Intel != Vendor.Google);
+    assert(Vendor.Intel != Vendor.Qualcomm);
+    assert(Vendor.Intel != Vendor.Unknown);
+    assert(Vendor.Apple != Vendor.Google);
+    assert(Vendor.Apple != Vendor.Qualcomm);
+    assert(Vendor.Apple != Vendor.Unknown);
+    assert(Vendor.Google != Vendor.Qualcomm);
+    assert(Vendor.Google != Vendor.Unknown);
+    assert(Vendor.Qualcomm != Vendor.Unknown);
+}
+
+// =============================================================================
+// Section 16: DeviceId Extended Tests
+// =============================================================================
+
+@test
+fn test_device_id_gpu_multi_0() {
+    let id0 = DeviceId.gpu(0 as U16);
+    assert(id0.is_gpu());
+    assert_eq(id0.device_index(), 0 as U16);
+}
+
+@test
+fn test_device_id_gpu_multi_1() {
+    let id1 = DeviceId.gpu(1 as U16);
+    assert(id1.is_gpu());
+    assert_eq(id1.device_index(), 1 as U16);
+}
+
+@test
+fn test_device_id_gpu_multi_7() {
+    let id7 = DeviceId.gpu(7 as U16);
+    assert(id7.is_gpu());
+    assert_eq(id7.device_index(), 7 as U16);
+}
+
+@test
+fn test_device_id_gpu_max_index() {
+    // INDEX_MASK is 0x0FFF = 4095, so max 12-bit index
+    let id_max = DeviceId.gpu(4095 as U16);
+    assert(id_max.is_gpu());
+    assert_eq(id_max.device_index(), 4095 as U16);
+}
+
+@test
+fn test_device_id_tpu_multi() {
+    let t0 = DeviceId.tpu(0 as U16);
+    let t1 = DeviceId.tpu(1 as U16);
+    assert(t0.is_tpu());
+    assert(t1.is_tpu());
+    assert(t0 != t1);
+    assert_eq(t0.device_index(), 0 as U16);
+    assert_eq(t1.device_index(), 1 as U16);
+}
+
+@test
+fn test_device_id_raw_gpu() {
+    let gpu0 = DeviceId.gpu(0 as U16);
+    // GPU_BASE is 0x1000
+    assert_eq(gpu0.raw(), 0x1000 as U16);
+}
+
+@test
+fn test_device_id_raw_tpu() {
+    let tpu0 = DeviceId.tpu(0 as U16);
+    // TPU_BASE is 0x2000
+    assert_eq(tpu0.raw(), 0x2000 as U16);
+}
+
+@test
+fn test_device_id_different_types_different_raw() {
+    let cpu = DeviceId.cpu();
+    let gpu = DeviceId.gpu(0 as U16);
+    let tpu = DeviceId.tpu(0 as U16);
+    assert(cpu.raw() != gpu.raw());
+    assert(cpu.raw() != tpu.raw());
+    assert(gpu.raw() != tpu.raw());
+}
+
+// =============================================================================
+// Section 17: ComputeCapability Extended Tests
+// =============================================================================
+
+@test
+fn test_compute_capability_custom_construction() {
+    let cc = ComputeCapability {
+        major: 7 as U32,
+        minor: 5 as U32,
+        tensor_cores: true,
+        fp16: true,
+        bf16: false,
+        int8_dp4a: true,
+        async_copy: false,
+        tma: false,
+    };
+    assert_eq(cc.major, 7 as U32);
+    assert_eq(cc.minor, 5 as U32);
+    assert(cc.tensor_cores);
+    assert(cc.fp16);
+    assert(!cc.bf16);
+    assert(cc.int8_dp4a);
+    assert(!cc.async_copy);
+    assert(!cc.tma);
+}
+
+@test
+fn test_compute_capability_sm_version_custom() {
+    let cc = ComputeCapability {
+        major: 7 as U32,
+        minor: 5 as U32,
+        ..ComputeCapability.default()
+    };
+    assert_eq(cc.sm_version(), 75 as U32);
+}
+
+@test
+fn test_compute_capability_at_least_same_major_higher_minor() {
+    let cc = ComputeCapability {
+        major: 8 as U32,
+        minor: 0 as U32,
+        ..ComputeCapability.default()
+    };
+    // Same major, higher minor should fail
+    assert(!cc.at_least(8 as U32, 1 as U32));
+}
+
+@test
+fn test_compute_capability_at_least_higher_major_lower_minor() {
+    let cc = ComputeCapability {
+        major: 9 as U32,
+        minor: 0 as U32,
+        ..ComputeCapability.default()
+    };
+    // Higher major satisfies even with lower minor
+    assert(cc.at_least(8 as U32, 9 as U32));
+}
+
+@test
+fn test_compute_capability_at_least_exact_match() {
+    let cc = ComputeCapability {
+        major: 7 as U32,
+        minor: 5 as U32,
+        ..ComputeCapability.default()
+    };
+    assert(cc.at_least(7 as U32, 5 as U32));
+}
+
+@test
+fn test_compute_capability_default_sm_version() {
+    let cc = ComputeCapability.default();
+    assert_eq(cc.sm_version(), 0 as U32);
+}
+
+@test
+fn test_compute_capability_volta_int8() {
+    let cc = ComputeCapability.volta();
+    assert(cc.int8_dp4a);
+}
+
+@test
+fn test_compute_capability_ampere_int8() {
+    let cc = ComputeCapability.ampere();
+    assert(cc.int8_dp4a);
+}
+
+@test
+fn test_compute_capability_hopper_int8() {
+    let cc = ComputeCapability.hopper();
+    assert(cc.int8_dp4a);
+}
+
+// =============================================================================
+// Section 18: CpuInfo Extended Tests
+// =============================================================================
+
+@test
+fn test_cpu_info_custom_construction() {
+    let info = CpuInfo {
+        vendor: "Intel",
+        cores: 8 as USize,
+        threads: 16 as USize,
+        l1_cache: (64 * 1024) as USize,
+        l2_cache: (512 * 1024) as USize,
+        l3_cache: (16 * 1024 * 1024) as USize,
+        has_sse42: true,
+        has_avx: true,
+        has_avx2: true,
+        has_fma: true,
+        has_avx512f: false,
+        has_neon: false,
+    };
+    assert_eq(info.vendor, "Intel");
+    assert_eq(info.cores, 8 as USize);
+    assert_eq(info.threads, 16 as USize);
+    assert(info.has_sse42);
+    assert(info.has_avx);
+    assert(info.has_avx2);
+    assert(info.has_fma);
+    assert(!info.has_avx512f);
+    assert(!info.has_neon);
+}
+
+@test
+fn test_cpu_info_simd_width_avx_only() {
+    let mut info = CpuInfo.default();
+    info.has_avx = true;
+    // has_avx2 is false but has_avx is true => 32 (avx branch)
+    assert_eq(info.simd_width(), 32 as USize);
+}
+
+@test
+fn test_cpu_info_default_vendor() {
+    let info = CpuInfo.default();
+    assert_eq(info.vendor, "Unknown");
+}
+
+@test
+fn test_cpu_info_default_cache_values() {
+    let info = CpuInfo.default();
+    assert_eq(info.l1_cache, (32 * 1024) as USize);
+    assert_eq(info.l2_cache, (256 * 1024) as USize);
+    assert_eq(info.l3_cache, (8 * 1024 * 1024) as USize);
+}
+
+@test
+fn test_cpu_info_simd_priority_avx512_over_avx2() {
+    let mut info = CpuInfo.default();
+    info.has_avx512f = true;
+    info.has_avx2 = true;
+    // AVX-512 takes priority
+    assert_eq(info.simd_width(), 64 as USize);
+}
+
+// =============================================================================
+// Section 19: GpuInfo Type and Methods
+// =============================================================================
+
+@test
+fn test_gpu_info_type_accept() {
+    fn accept_gpu_info(g: &GpuInfo) -> Bool {
+        true
+    }
+    let _ = accept_gpu_info;
+}
+
+@test
+fn test_gpu_info_construction() {
+    let gpu = GpuInfo {
+        name: "Test GPU",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (8 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.ampere(),
+        multiprocessors: 108 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 1555.0 as F64,
+    };
+    assert_eq(gpu.name, "Test GPU");
+    assert_eq(gpu.vendor, Vendor.Nvidia);
+    assert_eq(gpu.backend, GPUBackend.CUDA);
+    assert_eq(gpu.multiprocessors, 108 as U32);
+    assert_eq(gpu.warp_size, 32 as U32);
+}
+
+@test
+fn test_gpu_info_has_tensor_cores() {
+    let gpu = GpuInfo {
+        name: "A100",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (40 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.ampere(),
+        multiprocessors: 108 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 1555.0 as F64,
+    };
+    assert(gpu.has_tensor_cores());
+}
+
+@test
+fn test_gpu_info_has_bf16() {
+    let gpu = GpuInfo {
+        name: "A100",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (40 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.ampere(),
+        multiprocessors: 108 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 1555.0 as F64,
+    };
+    assert(gpu.has_bf16());
+}
+
+@test
+fn test_gpu_info_no_bf16_volta() {
+    let gpu = GpuInfo {
+        name: "V100",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (32 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.volta(),
+        multiprocessors: 80 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 900.0 as F64,
+    };
+    assert(!gpu.has_bf16());
+    assert(gpu.has_tensor_cores());
+}
+
+@test
+fn test_gpu_info_max_threads() {
+    let gpu = GpuInfo {
+        name: "Test",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (8 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.default(),
+        multiprocessors: 10 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 500.0 as F64,
+    };
+    assert_eq(gpu.max_threads(), 10240 as USize);
+}
+
+// =============================================================================
+// Section 20: DeviceInfo Extended Tests
+// =============================================================================
+
+@test
+fn test_device_info_gpu_construction() {
+    let gpu = GpuInfo {
+        name: "RTX 4090",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (24 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.hopper(),
+        multiprocessors: 128 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 1000.0 as F64,
+    };
+    let info = DeviceInfo.Gpu(gpu);
+    assert(info.is_gpu());
+    assert(!info.is_cpu());
+}
+
+@test
+fn test_device_info_gpu_name() {
+    let gpu = GpuInfo {
+        name: "RTX 4090",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (24 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.hopper(),
+        multiprocessors: 128 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 1000.0 as F64,
+    };
+    let info = DeviceInfo.Gpu(gpu);
+    assert_eq(info.name(), "RTX 4090");
+}
+
+@test
+fn test_device_info_cpu_memory_bytes() {
+    let info = DeviceInfo.Cpu(CpuInfo.default());
+    // Default CPU memory is 8GB
+    let eight_gb = (8 * 1024 * 1024 * 1024) as USize;
+    assert_eq(info.memory_bytes(), eight_gb);
+}
+
+@test
+fn test_device_info_gpu_memory_bytes() {
+    let mem = (16 * 1024 * 1024 * 1024) as USize;
+    let gpu = GpuInfo {
+        name: "Test",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: mem,
+        compute_capability: ComputeCapability.default(),
+        multiprocessors: 1 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 500.0 as F64,
+    };
+    let info = DeviceInfo.Gpu(gpu);
+    assert_eq(info.memory_bytes(), mem);
+}
+
+@test
+fn test_device_info_as_gpu_on_cpu() {
+    let info = DeviceInfo.Cpu(CpuInfo.default());
+    let result = info.as_gpu();
+    assert(result is None);
+}
+
+@test
+fn test_device_info_as_cpu_on_gpu() {
+    let gpu = GpuInfo {
+        name: "Test",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (8 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.default(),
+        multiprocessors: 1 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 500.0 as F64,
+    };
+    let info = DeviceInfo.Gpu(gpu);
+    let result = info.as_cpu();
+    assert(result is None);
+}
+
+@test
+fn test_device_info_as_cpu_on_cpu() {
+    let info = DeviceInfo.Cpu(CpuInfo.default());
+    let result = info.as_cpu();
+    assert(result is Some);
+}
+
+@test
+fn test_device_info_as_gpu_on_gpu() {
+    let gpu = GpuInfo {
+        name: "Test",
+        vendor: Vendor.Nvidia,
+        backend: GPUBackend.CUDA,
+        memory_bytes: (8 * 1024 * 1024 * 1024) as USize,
+        compute_capability: ComputeCapability.default(),
+        multiprocessors: 1 as U32,
+        max_threads_per_block: 1024 as U32,
+        warp_size: 32 as U32,
+        shared_memory_per_block: (48 * 1024) as USize,
+        memory_bandwidth_gbps: 500.0 as F64,
+    };
+    let info = DeviceInfo.Gpu(gpu);
+    let result = info.as_gpu();
+    assert(result is Some);
+}
+
+// =============================================================================
+// Section 21: DeviceSelection Exhaustive Match
+// =============================================================================
+
+@test
+fn test_device_selection_match_exhaustive() {
+    let mut count = 0;
+    let s1 = DeviceSelection.FirstGpu;
+    match s1 { DeviceSelection.FirstGpu => { count = count + 1; }, _ => {} }
+    let s2 = DeviceSelection.MaxMemoryGpu;
+    match s2 { DeviceSelection.MaxMemoryGpu => { count = count + 1; }, _ => {} }
+    let s3 = DeviceSelection.MaxComputeGpu;
+    match s3 { DeviceSelection.MaxComputeGpu => { count = count + 1; }, _ => {} }
+    let s4 = DeviceSelection.CpuOnly;
+    match s4 { DeviceSelection.CpuOnly => { count = count + 1; }, _ => {} }
+    let s5 = DeviceSelection.ByIndex(0 as USize);
+    match s5 { DeviceSelection.ByIndex(_) => { count = count + 1; }, _ => {} }
+    assert_eq(count, 5);
+}
+
+@test
+fn test_device_selection_by_index_values() {
+    let s0 = DeviceSelection.ByIndex(0 as USize);
+    let s1 = DeviceSelection.ByIndex(1 as USize);
+    let s99 = DeviceSelection.ByIndex(99 as USize);
+    assert(s0 is DeviceSelection.ByIndex);
+    assert(s1 is DeviceSelection.ByIndex);
+    assert(s99 is DeviceSelection.ByIndex);
+}
+
+// =============================================================================
+// Section 22: DeviceSelector Type Existence
+// =============================================================================
+
+@test
+fn test_device_selector_best() {
+    let sel = DeviceSelector.Best;
+    assert(sel is DeviceSelector.Best);
+}
+
+@test
+fn test_device_selector_by_index() {
+    let sel = DeviceSelector.ByIndex(0 as USize);
+    assert(sel is DeviceSelector.ByIndex);
+}
+
+@test
+fn test_device_selector_by_name() {
+    let sel = DeviceSelector.ByName("A100");
+    assert(sel is DeviceSelector.ByName);
+}
+
+@test
+fn test_device_selector_by_memory() {
+    let sel = DeviceSelector.ByMemory((8 * 1024 * 1024 * 1024) as USize);
+    assert(sel is DeviceSelector.ByMemory);
+}
+
+@test
+fn test_device_selector_by_backend() {
+    let sel = DeviceSelector.ByBackend(GPUBackend.CUDA);
+    assert(sel is DeviceSelector.ByBackend);
+}
+
+// =============================================================================
+// Section 23: MemorySpace Exhaustive & Distinctness
+// =============================================================================
+
+@test
+fn test_memory_space_match_exhaustive() {
+    let mut count = 0;
+    let m1 = MemorySpace.Host;
+    match m1 { MemorySpace.Host => { count = count + 1; }, _ => {} }
+    let m2 = MemorySpace.HostPinned;
+    match m2 { MemorySpace.HostPinned => { count = count + 1; }, _ => {} }
+    let m3 = MemorySpace.Global;
+    match m3 { MemorySpace.Global => { count = count + 1; }, _ => {} }
+    let m4 = MemorySpace.Shared;
+    match m4 { MemorySpace.Shared => { count = count + 1; }, _ => {} }
+    let m5 = MemorySpace.Local;
+    match m5 { MemorySpace.Local => { count = count + 1; }, _ => {} }
+    let m6 = MemorySpace.Constant;
+    match m6 { MemorySpace.Constant => { count = count + 1; }, _ => {} }
+    let m7 = MemorySpace.Texture;
+    match m7 { MemorySpace.Texture => { count = count + 1; }, _ => {} }
+    let m8 = MemorySpace.Unified;
+    match m8 { MemorySpace.Unified => { count = count + 1; }, _ => {} }
+    assert_eq(count, 8);
+}
+
+@test
+fn test_memory_space_host_not_unified() {
+    let ms = MemorySpace.Host;
+    assert(!ms.is_unified());
+}
+
+@test
+fn test_memory_space_host_pinned_not_unified() {
+    let ms = MemorySpace.HostPinned;
+    assert(!ms.is_unified());
+}
+
+@test
+fn test_memory_space_global_not_host_or_unified() {
+    let ms = MemorySpace.Global;
+    assert(!ms.is_host());
+    assert(!ms.is_unified());
+    assert(ms.is_device());
+}
+
+@test
+fn test_memory_space_shared_not_host_or_unified() {
+    let ms = MemorySpace.Shared;
+    assert(!ms.is_host());
+    assert(!ms.is_unified());
+}
+
+@test
+fn test_memory_space_local_not_host_or_unified() {
+    let ms = MemorySpace.Local;
+    assert(!ms.is_host());
+    assert(!ms.is_unified());
+}
+
+@test
+fn test_memory_space_constant_not_host_or_unified() {
+    let ms = MemorySpace.Constant;
+    assert(!ms.is_host());
+    assert(!ms.is_unified());
+}
+
+@test
+fn test_memory_space_texture_not_host_or_unified() {
+    let ms = MemorySpace.Texture;
+    assert(!ms.is_host());
+    assert(!ms.is_unified());
+}
+
+// =============================================================================
+// Section 24: Dim3 Extended Tests
+// =============================================================================
+
+@test
+fn test_dim3_3d_total() {
+    let d = Dim3.new(4 as U32, 8 as U32, 16 as U32);
+    assert_eq(d.total(), 512 as USize);
+}
+
+@test
+fn test_dim3_unit() {
+    let d = Dim3.new(1 as U32, 1 as U32, 1 as U32);
+    assert_eq(d.total(), 1 as USize);
+}
+
+@test
+fn test_dim3_d1_y_z_defaults() {
+    let d = Dim3.d1(128 as U32);
+    assert_eq(d.y, 1 as U32);
+    assert_eq(d.z, 1 as U32);
+}
+
+@test
+fn test_dim3_d2_z_default() {
+    let d = Dim3.d2(8 as U32, 4 as U32);
+    assert_eq(d.z, 1 as U32);
+    assert_eq(d.total(), 32 as USize);
+}
+
+// =============================================================================
+// Section 25: LaunchConfig Extended Tests
+// =============================================================================
+
+@test
+fn test_launch_config_for_volume() {
+    let config = LaunchConfig.for_volume(
+        64 as USize, 64 as USize, 64 as USize,
+        8 as U32, 8 as U32, 8 as U32,
+    );
+    assert_eq(config.grid.x, 8 as U32);   // 64/8
+    assert_eq(config.grid.y, 8 as U32);   // 64/8
+    assert_eq(config.grid.z, 8 as U32);   // 64/8
+    assert_eq(config.block.x, 8 as U32);
+    assert_eq(config.block.y, 8 as U32);
+    assert_eq(config.block.z, 8 as U32);
+}
+
+@test
+fn test_launch_config_for_volume_total_threads() {
+    let config = LaunchConfig.for_volume(
+        64 as USize, 64 as USize, 64 as USize,
+        8 as U32, 8 as U32, 8 as U32,
+    );
+    // grid: 8*8*8 = 512 blocks, block: 8*8*8 = 512 threads each
+    assert_eq(config.total_threads(), (512 * 512) as USize);
+}
+
+@test
+fn test_launch_config_with_shared_mem() {
+    let config = LaunchConfig.default().with_shared_mem(4096 as USize);
+    assert_eq(config.shared_mem, 4096 as USize);
+    // Other fields preserved
+    assert_eq(config.grid.x, 1 as U32);
+    assert_eq(config.block.x, 256 as U32);
+}
+
+@test
+fn test_launch_config_for_matrix_non_divisible() {
+    // rows=100, cols=100, block=16x16 => grid = ceil(100/16) = 7
+    let config = LaunchConfig.for_matrix(100 as USize, 100 as USize, 16 as U32, 16 as U32);
+    assert_eq(config.grid.x, 7 as U32);
+    assert_eq(config.grid.y, 7 as U32);
+}
+
+@test
+fn test_launch_config_for_elements_single_block() {
+    let config = LaunchConfig.for_elements(128 as USize, 256 as U32);
+    assert_eq(config.grid.x, 1 as U32);
+    assert_eq(config.block.x, 256 as U32);
+}
+
+@test
+fn test_launch_config_default_stream_none() {
+    let config = LaunchConfig.default();
+    assert(config.stream is None);
+}
+
+@test
+fn test_launch_config_for_elements_large() {
+    let config = LaunchConfig.for_elements(1000000 as USize, 256 as U32);
+    // ceil(1000000/256) = 3907
+    assert_eq(config.grid.x, 3907 as U32);
+}
+
+// =============================================================================
+// Section 26: TransferDirection Distinctness
+// =============================================================================
+
+@test
+fn test_transfer_direction_h2d_not_d2h() {
+    let h2d = TransferDirection.HostToDevice;
+    let d2h = TransferDirection.DeviceToHost;
+    assert(!(h2d is TransferDirection.DeviceToHost));
+    assert(!(d2h is TransferDirection.HostToDevice));
+}
+
+@test
+fn test_transfer_direction_h2d_not_d2d() {
+    let h2d = TransferDirection.HostToDevice;
+    assert(!(h2d is TransferDirection.DeviceToDevice));
+}
+
+@test
+fn test_transfer_direction_d2h_not_d2d() {
+    let d2h = TransferDirection.DeviceToHost;
+    assert(!(d2h is TransferDirection.DeviceToDevice));
+}
+
+// =============================================================================
+// Section 27: MemoryInfo Extended
+// =============================================================================
+
+@test
+fn test_memory_info_used_calculation() {
+    let four_gb = (4 * 1024 * 1024 * 1024) as USize;
+    let eight_gb = (8 * 1024 * 1024 * 1024) as USize;
+    let info = MemoryInfo {
+        free: four_gb,
+        total: eight_gb,
+    };
+    let used = info.total - info.free;
+    assert_eq(used, four_gb);
+}
+
+@test
+fn test_memory_info_all_free() {
+    let sixteen_gb = (16 * 1024 * 1024 * 1024) as USize;
+    let info = MemoryInfo {
+        free: sixteen_gb,
+        total: sixteen_gb,
+    };
+    assert_eq(info.free, info.total);
+}
+
+@test
+fn test_memory_info_zero_free() {
+    let eight_gb = (8 * 1024 * 1024 * 1024) as USize;
+    let info = MemoryInfo {
+        free: 0 as USize,
+        total: eight_gb,
+    };
+    assert_eq(info.free, 0 as USize);
+    assert_eq(info.total, eight_gb);
+}
+
+// =============================================================================
+// Section 28: Handle Types Extended
+// =============================================================================
+
+@test
+fn test_stream_handle_different_values() {
+    let h1 = StreamHandle(1 as U64);
+    let h2 = StreamHandle(2 as U64);
+    let h3 = StreamHandle(42 as U64);
+    let _: StreamHandle = h1;
+    let _: StreamHandle = h2;
+    let _: StreamHandle = h3;
+}
+
+@test
+fn test_event_handle_different_values() {
+    let h1 = EventHandle(1 as U64);
+    let h2 = EventHandle(100 as U64);
+    let h3 = EventHandle(999 as U64);
+    let _: EventHandle = h1;
+    let _: EventHandle = h2;
+    let _: EventHandle = h3;
+}
+
+// =============================================================================
+// Section 29: GPUDevice and CPUDevice Type Existence
+// =============================================================================
+
+@test
+fn test_gpu_device_type_accept() {
+    fn accept_gpu_device(d: &GPUDevice) -> Bool {
+        true
+    }
+    let _ = accept_gpu_device;
+}
+
+@test
+fn test_cpu_device_type_accept() {
+    fn accept_cpu_device(d: &CPUDevice) -> Bool {
+        true
+    }
+    let _ = accept_cpu_device;
+}
+
+@test
+fn test_cpu_device_unit_type() {
+    let dev = CPUDevice;
+    let _: CPUDevice = dev;
+}
+
+@test
+fn test_gpu_device_field_access() {
+    // GPUDevice has a device_id field
+    fn check_device_id(d: &GPUDevice) -> DeviceId {
+        d.device_id
+    }
+    let _ = check_device_id;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

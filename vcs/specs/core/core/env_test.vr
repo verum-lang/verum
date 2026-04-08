@@ -1,0 +1,922 @@
+// =============================================================================
+// env_test.vr - Comprehensive tests for core/env.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: env, process, arguments, environment, system
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for environment and process operations:
+// - Command line arguments
+// - Environment variables
+// - Process control
+// - Standard environment helpers
+//
+// =============================================================================
+
+module env_test;
+
+// Import env functions from core.base where they are re-exported
+mount core.base.{
+    args, arg, args_count, args_os, Args,
+    var, var_opt, set_var, remove_var, VarError,
+    exit, exit_success, exit_failure,
+    home_dir, user, path, temp_dir, shell, locale,
+};
+mount core.{Maybe, Result, List, Text, Byte};
+
+// =============================================================================
+// Section 1: VarError Type Tests
+// =============================================================================
+
+@test
+fn test_var_error_not_present() {
+    let error: VarError = VarError.NotPresent;
+
+    match error {
+        VarError.NotPresent => {}, // Expected
+        VarError.NotUnicode(_) => panic("expected NotPresent"),
+    }
+}
+
+@test
+fn test_var_error_not_unicode() {
+    let bad_bytes: List<Byte> = [0xFF, 0xFE, 0x00];
+    let error: VarError = VarError.NotUnicode(bad_bytes);
+
+    match error {
+        VarError.NotPresent => panic("expected NotUnicode"),
+        VarError.NotUnicode(bytes) => {
+            assert_eq(bytes.len(), 3);
+        }
+    }
+}
+
+// =============================================================================
+// Section 2: Command Line Arguments Count Tests
+// =============================================================================
+
+@test
+fn test_args_count_minimum() {
+    // Process always has at least the program name as argument
+    let count = args_count();
+    assert(count >= 1, "should have at least one argument (program name)");
+}
+
+@test
+fn test_args_count_consistency() {
+    // Multiple calls should return same value
+    let count1 = args_count();
+    let count2 = args_count();
+    assert_eq(count1, count2);
+}
+
+// =============================================================================
+// Section 3: Single Argument Access Tests
+// =============================================================================
+
+@test
+fn test_arg_first() {
+    // First argument should be program name
+    let first = arg(0);
+    assert(first.is_some(), "first argument should exist");
+}
+
+@test
+fn test_arg_negative_index() {
+    // Negative index should return None
+    let result = arg(-1);
+    assert(result.is_none(), "negative index should return None");
+}
+
+@test
+fn test_arg_large_index() {
+    // Index beyond args count should return None
+    let count = args_count();
+    let result = arg(count + 100);
+    assert(result.is_none(), "index beyond count should return None");
+}
+
+@test
+fn test_arg_exact_boundary() {
+    // Index exactly at count should return None
+    let count = args_count();
+    let result = arg(count);
+    assert(result.is_none(), "index at exact count should return None");
+}
+
+@test
+fn test_arg_last_valid() {
+    // Last valid index should return Some
+    let count = args_count();
+    if count > 0 {
+        let result = arg(count - 1);
+        assert(result.is_some(), "last valid index should return Some");
+    }
+}
+
+// =============================================================================
+// Section 4: Full Arguments List Tests
+// =============================================================================
+
+@test
+fn test_args_returns_list() {
+    let all_args = args();
+    assert(all_args.len() >= 1, "args should return at least program name");
+}
+
+@test
+fn test_args_matches_count() {
+    let all_args = args();
+    let count = args_count();
+    assert_eq(all_args.len() as Int, count);
+}
+
+@test
+fn test_args_first_matches_arg_zero() {
+    let all_args = args();
+    let first_arg = arg(0);
+
+    match first_arg {
+        Some(expected) => {
+            assert_eq(all_args[0], expected);
+        }
+        None => panic("arg(0) should return Some"),
+    }
+}
+
+// =============================================================================
+// Section 5: Args Iterator Tests
+// =============================================================================
+
+@test
+fn test_args_os_iterator() {
+    let iter = args_os();
+    // Iterator should be created without panic
+}
+
+@test
+fn test_args_os_size_hint() {
+    let iter = args_os();
+    let (lower, upper) = iter.size_hint();
+
+    assert(lower >= 0, "lower bound should be non-negative");
+    assert(upper.is_some(), "upper bound should be known");
+
+    match upper {
+        Some(u) => assert_eq(lower, u, "exact size should be known"),
+        None => panic("upper bound should be Some"),
+    }
+}
+
+@test
+fn test_args_os_matches_args() {
+    let iter = args_os();
+    let direct = args();
+
+    let mut collected = List.new();
+    for a in iter {
+        collected.push(a);
+    }
+
+    assert_eq(collected.len(), direct.len());
+    let mut idx = 0;
+    while idx < collected.len() {
+        assert_eq(collected[idx], direct[idx]);
+        idx = idx + 1;
+    }
+}
+
+@test
+fn test_args_iterator_next() {
+    let mut iter = args_os();
+
+    // First call should return program name
+    let first = iter.next();
+    assert(first.is_some(), "first next() should return Some");
+}
+
+@test
+fn test_args_iterator_exhaustion() {
+    let mut iter = args_os();
+    let count = args_count();
+
+    // Consume all arguments
+    for _ in 0..count {
+        let _ = iter.next();
+    }
+
+    // Next call should return None
+    let extra = iter.next();
+    assert(extra.is_none(), "exhausted iterator should return None");
+}
+
+// =============================================================================
+// Section 6: Environment Variable Retrieval Tests
+// =============================================================================
+
+@test
+fn test_var_not_present() {
+    // Non-existent variable should return NotPresent error
+    let result = var(&"__VERUM_TEST_DEFINITELY_NOT_SET_12345__");
+
+    match result {
+        Ok(_) => panic("should return Err for non-existent var"),
+        Err(VarError.NotPresent) => {}, // Expected
+        Err(_) => panic("expected NotPresent error"),
+    }
+}
+
+@test
+fn test_var_opt_not_present() {
+    // Non-existent variable should return None
+    let result = var_opt(&"__VERUM_TEST_DEFINITELY_NOT_SET_54321__");
+    assert(result.is_none(), "non-existent var should return None");
+}
+
+@test
+fn test_var_empty_key() {
+    // Empty key should return NotPresent (or error depending on OS)
+    let result = var(&"");
+    // Either Ok or Err is acceptable, just don't panic
+}
+
+// =============================================================================
+// Section 7: Standard Environment Variables Tests
+// =============================================================================
+
+@test
+fn test_home_dir_function() {
+    // home_dir should return Some or None, not panic
+    let home = home_dir();
+    // We can't assert it exists on all systems, just that it doesn't panic
+
+    match home {
+        Some(dir) => {
+            assert(dir.len() > 0, "home dir should not be empty");
+        }
+        None => {
+            // Acceptable on some systems
+        }
+    }
+}
+
+@test
+fn test_user_function() {
+    // user() should return username or None
+    let username = user();
+    // Can't assert on all systems, just verify no panic
+
+    match username {
+        Some(name) => {
+            assert(name.len() > 0, "username should not be empty");
+        }
+        None => {
+            // Acceptable
+        }
+    }
+}
+
+@test
+fn test_path_function() {
+    // PATH should generally exist on all systems
+    let path_var = path();
+    // Most systems have PATH, but we can't strictly require it
+}
+
+@test
+fn test_temp_dir_always_returns() {
+    // temp_dir should always return something
+    let tmp = temp_dir();
+    assert(tmp.len() > 0, "temp_dir should return non-empty path");
+}
+
+@test
+fn test_temp_dir_fallback() {
+    // Even if TMPDIR/TMP/TEMP not set, should return "/tmp"
+    let tmp = temp_dir();
+    // Should at least be some valid path
+    assert(tmp.len() > 0, "temp_dir fallback should work");
+}
+
+@test
+fn test_shell_function() {
+    // shell() should return shell path or None
+    let sh = shell();
+
+    match sh {
+        Some(s) => {
+            assert(s.len() > 0, "shell path should not be empty");
+        }
+        None => {
+            // Acceptable on some systems
+        }
+    }
+}
+
+@test
+fn test_locale_function() {
+    // locale() should return locale or None
+    let loc = locale();
+
+    match loc {
+        Some(l) => {
+            assert(l.len() > 0, "locale should not be empty");
+        }
+        None => {
+            // Acceptable on some systems
+        }
+    }
+}
+
+// =============================================================================
+// Section 8: Environment Variable Modification Tests
+// =============================================================================
+
+@test
+fn test_set_var_basic() {
+    let key = "__VERUM_TEST_VAR_SET_1__";
+    let value = "test_value_123";
+
+    // Set the variable
+    set_var(&key, &value);
+
+    // This may not work on all platforms (esp. Linux without libc)
+    // So we just verify no panic
+}
+
+@test
+fn test_remove_var_basic() {
+    let key = "__VERUM_TEST_VAR_REMOVE_1__";
+
+    // Remove the variable (may or may not exist)
+    remove_var(&key);
+
+    // Just verify no panic
+}
+
+@test
+fn test_set_then_get() {
+    let key = "__VERUM_TEST_SET_GET__";
+    let value = "hello_world";
+
+    set_var(&key, &value);
+
+    // On platforms that support setenv, this should work
+    let result = var_opt(&key);
+
+    // Result depends on platform support
+    // Don't assert, just verify operation doesn't panic
+}
+
+@test
+fn test_set_overwrite() {
+    let key = "__VERUM_TEST_OVERWRITE__";
+
+    set_var(&key, &"first_value");
+    set_var(&key, &"second_value");
+
+    // If supported, second value should overwrite
+}
+
+@test
+fn test_set_empty_value() {
+    let key = "__VERUM_TEST_EMPTY_VAL__";
+
+    set_var(&key, &"");
+
+    // Empty value is valid
+}
+
+@test
+fn test_remove_nonexistent() {
+    let key = "__VERUM_TEST_REMOVE_NONEXISTENT__";
+
+    // Removing non-existent var should not panic
+    remove_var(&key);
+}
+
+// =============================================================================
+// Section 9: Environment Variable Edge Cases
+// =============================================================================
+
+@test
+fn test_var_with_equals_in_value() {
+    // Variables can have '=' in their value
+    // This is parsed correctly from the environ array
+    // Can't easily test setting this, but we can test retrieval logic
+}
+
+@test
+fn test_var_unicode_key() {
+    let key = "__VERUM_TEST_UNICODE_KEY__";
+
+    // Unicode in var names might not work on all systems
+    // Just verify no panic
+    let result = var_opt(&key);
+}
+
+@test
+fn test_var_special_characters() {
+    let key = "__VERUM_TEST_SPECIAL__";
+    let value = "value with spaces and!@#$%^&*()";
+
+    set_var(&key, &value);
+    // Verify no panic with special characters
+}
+
+// =============================================================================
+// Section 10: Process Exit Function Existence Tests
+// =============================================================================
+// Note: We can't actually test exit functions as they terminate the process
+
+@test
+fn test_exit_function_exists() {
+    // Verify exit function is callable (but don't call it)
+    let _f: fn(Int) -> ! = exit;
+}
+
+@test
+fn test_exit_success_function_exists() {
+    // Verify exit_success function is callable
+    let _f: fn() -> ! = exit_success;
+}
+
+@test
+fn test_exit_failure_function_exists() {
+    // Verify exit_failure function is callable
+    let _f: fn() -> ! = exit_failure;
+}
+
+// =============================================================================
+// Section 11: Args Iterator Edge Cases
+// =============================================================================
+
+@test
+fn test_args_iterator_clone() {
+    let iter1 = args_os();
+    // Args should be clonable if iterator is
+}
+
+@test
+fn test_args_iterator_multiple_iterations() {
+    // Each call to args_os creates fresh iterator
+    let iter1 = args_os();
+    let iter2 = args_os();
+
+    let (lower1, _) = iter1.size_hint();
+    let (lower2, _) = iter2.size_hint();
+
+    assert_eq(lower1, lower2, "multiple iterators should have same count");
+}
+
+@test
+fn test_args_iterator_partial_consumption() {
+    let mut iter = args_os();
+
+    // Consume one
+    let first = iter.next();
+
+    // Size hint should reflect remaining
+    let (lower, upper) = iter.size_hint();
+    let original_count = args_count();
+
+    assert_eq(lower, original_count - 1);
+    assert_eq(upper, Some(original_count - 1));
+}
+
+// =============================================================================
+// Section 12: Argument String Content Tests
+// =============================================================================
+
+@test
+fn test_arg_program_name_not_empty() {
+    let program = arg(0);
+
+    match program {
+        Some(name) => {
+            assert(name.len() > 0, "program name should not be empty");
+        }
+        None => panic("program name should exist"),
+    }
+}
+
+@test
+fn test_args_all_non_null() {
+    let all_args = args();
+
+    for a in all_args {
+        // Each argument should be a valid Text
+        // Just accessing it verifies it's not null
+        let _ = a.len();
+    }
+}
+
+// =============================================================================
+// Section 13: Concurrent Environment Access Tests
+// =============================================================================
+
+@test
+fn test_concurrent_var_reads() {
+    // Multiple reads should be safe
+    let _ = var_opt(&"PATH");
+    let _ = var_opt(&"HOME");
+    let _ = var_opt(&"USER");
+
+    // All reads should succeed without data races
+}
+
+@test
+fn test_repeated_args_calls() {
+    // Calling args() multiple times should be consistent
+    let a1 = args();
+    let a2 = args();
+
+    assert_eq(a1.len(), a2.len());
+
+    let mut i = 0;
+    while i < a1.len() {
+        assert_eq(a1[i], a2[i]);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 14: VarError Pattern Matching Tests
+// =============================================================================
+
+@test
+fn test_var_error_exhaustive_match() {
+    fn handle_error(e: VarError) -> Text {
+        match e {
+            VarError.NotPresent => "not present",
+            VarError.NotUnicode(bytes) => f"not unicode: {bytes.len()} bytes",
+        }
+    }
+
+    let e1 = VarError.NotPresent;
+    assert_eq(handle_error(e1), "not present");
+
+    let e2 = VarError.NotUnicode([0xFF]);
+    assert(handle_error(e2).starts_with("not unicode"));
+}
+
+// =============================================================================
+// Section 15: Environment Lookup Chain Tests
+// =============================================================================
+
+@test
+fn test_home_dir_checks_both() {
+    // home_dir checks HOME then USERPROFILE
+    // Can't easily test fallback, but verify function works
+    let _ = home_dir();
+}
+
+@test
+fn test_user_checks_both() {
+    // user checks USER then USERNAME
+    let _ = user();
+}
+
+@test
+fn test_shell_checks_both() {
+    // shell checks SHELL then COMSPEC
+    let _ = shell();
+}
+
+@test
+fn test_locale_checks_all_three() {
+    // locale checks LANG, LC_ALL, LC_CTYPE
+    let _ = locale();
+}
+
+@test
+fn test_temp_dir_checks_all_with_fallback() {
+    // temp_dir checks TMPDIR, TMP, TEMP, falls back to /tmp
+    let tmp = temp_dir();
+
+    // Should always return something
+    assert(tmp.len() > 0);
+}
+
+// =============================================================================
+// Section 16: Argument Iteration Patterns
+// =============================================================================
+
+@test
+fn test_skip_program_name() {
+    // Common pattern: skip first argument
+    let all = args();
+
+    if all.len() > 1 {
+        let user_args = all[1..];
+        // Verify slice works
+    }
+}
+
+@test
+fn test_iterate_with_index() {
+    let all = args();
+
+    for (i, a) in all.iter().enumerate() {
+        // Index should match position
+        let direct = arg(i as Int);
+        match direct {
+            Some(d) => assert_eq(a, d),
+            None => panic("mismatch in iteration"),
+        }
+    }
+}
+
+// =============================================================================
+// Section 17: Result/Maybe Integration Tests
+// =============================================================================
+
+@test
+fn test_var_result_ok_path() {
+    // When var exists, Result is Ok
+    // We can't guarantee any var exists, so just test the type
+    let result: Result<Text, VarError> = var(&"PATH");
+
+    // Either Ok or Err is valid
+    match result {
+        Ok(value) => {
+            // Value should be usable
+            let _ = value.len();
+        }
+        Err(_) => {
+            // PATH not set is unusual but valid
+        }
+    }
+}
+
+@test
+fn test_var_opt_maybe_some_path() {
+    let maybe: Maybe<Text> = var_opt(&"PATH");
+
+    match maybe {
+        Some(value) => {
+            let _ = value.len();
+        }
+        None => {
+            // Valid
+        }
+    }
+}
+
+@test
+fn test_chained_var_opt() {
+    // Pattern: try multiple vars
+    let value = var_opt(&"HOME")
+        .or_else(|| var_opt(&"USERPROFILE"))
+        .or_else(|| var_opt(&"HOMEPATH"));
+
+    // Chain should work without panic
+}
+
+// =============================================================================
+// Section 18: Empty and Whitespace Arguments
+// =============================================================================
+
+@test
+fn test_whitespace_handling() {
+    // Arguments might contain whitespace
+    // The system preserves them
+    let all = args();
+
+    // Each arg is returned as-is
+    for a in all {
+        // Just verify we can access
+        let _ = a.clone();
+    }
+}
+
+// =============================================================================
+// Section 19: Type Annotations and Inference
+// =============================================================================
+
+@test
+fn test_args_type_inference() {
+    let all = args();
+
+    // Should infer List<Text>
+    let first: Text = all[0].clone();
+    let _: List<Text> = all;
+}
+
+@test
+fn test_var_type_inference() {
+    let result = var(&"TEST");
+
+    // Should infer Result<Text, VarError>
+    let _: Result<Text, VarError> = result;
+}
+
+@test
+fn test_var_opt_type_inference() {
+    let maybe = var_opt(&"TEST");
+
+    // Should infer Maybe<Text>
+    let _: Maybe<Text> = maybe;
+}
+
+// =============================================================================
+// Section 20: Cross-Platform Behavior Tests
+// =============================================================================
+
+@test
+fn test_path_separator_agnostic() {
+    // temp_dir returns path appropriate for platform
+    let tmp = temp_dir();
+
+    // On Unix: starts with /
+    // On Windows: has drive letter
+    // Just verify it's non-empty
+    assert(tmp.len() > 0);
+}
+
+@test
+fn test_environ_iteration_safe() {
+    // Even if environ is modified externally, we should handle it safely
+    // This is tested implicitly through other tests
+}
+
+// =============================================================================
+// Section 21: Error Message Quality Tests
+// =============================================================================
+
+@test
+fn test_var_error_debuggable() {
+    let error = VarError.NotPresent;
+
+    // Error should be usable in error messages
+    // (Full Debug impl would be in protocols)
+}
+
+@test
+fn test_var_error_not_unicode_preserves_bytes() {
+    let bad_bytes: List<Byte> = [0x80, 0x81, 0x82];
+    let error = VarError.NotUnicode(bad_bytes.clone());
+
+    match error {
+        VarError.NotUnicode(bytes) => {
+            assert_eq(bytes.len(), 3);
+            assert_eq(bytes[0], 0x80);
+            assert_eq(bytes[1], 0x81);
+            assert_eq(bytes[2], 0x82);
+        }
+        _ => panic("expected NotUnicode"),
+    }
+}
+
+// =============================================================================
+// Section 22: Functional Composition Tests
+// =============================================================================
+
+@test
+fn test_args_map_transform() {
+    let all = args();
+
+    // Transform arguments
+    let lengths: List<Int> = all.iter()
+        .map(|a: &Text| a.len() as Int)
+        .collect();
+
+    assert_eq(lengths.len(), all.len());
+}
+
+@test
+fn test_args_filter() {
+    let all = args();
+
+    // Filter arguments manually without complex chaining
+    let mut non_empty: List<Text> = List.new();
+    for a in all.iter() {
+        if a.len() > 0 {
+            non_empty.push(a.clone());
+        }
+    }
+
+    // All args should be non-empty
+    assert_eq(non_empty.len(), all.len());
+}
+
+@test
+fn test_var_opt_map() {
+    let transformed = var_opt(&"PATH").map(|p: Text| p.len());
+
+    // Result is Maybe<Int> (len() returns Int)
+    let _: Maybe<Int> = transformed;
+}
+
+// =============================================================================
+// Section 23: Memory Safety Tests
+// =============================================================================
+
+@test
+fn test_arg_string_ownership() {
+    let a1 = arg(0);
+    let a2 = arg(0);
+
+    // Each call returns owned Text
+    match (a1, a2) {
+        (Some(s1), Some(s2)) => {
+            assert_eq(s1, s2);
+            // Modifying one shouldn't affect the other
+        }
+        _ => panic("arg(0) should return Some"),
+    }
+}
+
+@test
+fn test_args_list_ownership() {
+    let list1 = args();
+    let list2 = args();
+
+    // Each call returns new owned list
+    assert_eq(list1.len(), list2.len());
+}
+
+@test
+fn test_var_string_ownership() {
+    let v1 = var_opt(&"PATH");
+    let v2 = var_opt(&"PATH");
+
+    // Each call returns owned Text
+    match (v1, v2) {
+        (Some(s1), Some(s2)) => {
+            assert_eq(s1, s2);
+        }
+        _ => {
+            // PATH not set is fine for this test
+        }
+    }
+}
+
+// =============================================================================
+// Section 24: Integration Patterns
+// =============================================================================
+
+@test
+fn test_typical_arg_parsing_pattern() {
+    let all = args();
+
+    // Typical pattern: program name + subcommand + flags
+    if all.len() >= 1 {
+        let _program = &all[0];
+    }
+    if all.len() >= 2 {
+        let _subcommand = &all[1];
+    }
+}
+
+@test
+fn test_typical_config_pattern() {
+    // Common pattern: check env var with default
+    let debug_mode = var_opt(&"DEBUG").is_some();
+    let log_level = var_opt(&"LOG_LEVEL").unwrap_or("info");
+
+    // Both should work
+    let _: Bool = debug_mode;
+    let _: Text = log_level;
+}
+
+// =============================================================================
+// Section 25: Stress and Boundary Tests
+// =============================================================================
+
+@test
+fn test_many_var_lookups() {
+    // Many lookups should be efficient
+    let mut i = 0;
+    while i < 100 {
+        let key = f"__VERUM_STRESS_TEST_{i}__";
+        let _ = var_opt(&key);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_repeated_temp_dir() {
+    // Should return same value
+    let t1 = temp_dir();
+    let t2 = temp_dir();
+    assert_eq(t1, t2);
+}
+
+@test
+fn test_arg_boundary_values() {
+    let count = args_count();
+
+    // Test around boundaries
+    assert(arg(-1).is_none());
+    assert(arg(0).is_some());
+    if count > 0 {
+        assert(arg(count - 1).is_some());
+    }
+    assert(arg(count).is_none());
+    assert(arg(count + 1).is_none());
+    assert(arg(Int.MAX).is_none());
+}

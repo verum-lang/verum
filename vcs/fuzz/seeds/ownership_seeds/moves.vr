@@ -1,0 +1,205 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: ownership, moves, memory-safety
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Move Semantics - Ownership Move Test Seed
+// Tests move semantics and ownership transfer
+// =============================================================================
+
+// Basic move
+fn basic_move() {
+    let a = Heap(42);
+    let b = a;  // a is moved to b
+    // a is no longer valid here
+    use(b);
+}
+
+// Move into function
+fn move_into_function() {
+    let resource = create_resource();
+    consume_resource(resource);  // resource is moved
+    // resource is no longer valid here
+}
+
+fn consume_resource(r: Resource) {
+    // r is owned here
+    drop(r);
+}
+
+// Move out of function
+fn move_out_of_function() -> Resource {
+    let r = create_resource();
+    r  // ownership transferred to caller
+}
+
+// Move in struct construction
+fn move_into_struct() {
+    let data = List.new();
+    let container = Container { data };  // data is moved
+    // data is no longer valid here
+}
+
+// Move in tuple construction
+fn move_into_tuple() {
+    let a = create_a();
+    let b = create_b();
+    let pair = (a, b);  // both moved into tuple
+    // a, b no longer valid
+}
+
+// Move in match
+fn move_in_match() {
+    let maybe = Some(Resource.new());
+
+    match maybe {
+        Some(r) => consume(r),  // r is moved out of maybe
+        None => (),
+    }
+    // maybe is partially moved / consumed
+}
+
+// Move in if-let
+fn move_in_if_let() {
+    let option = Some(Resource.new());
+
+    if let Some(resource) = option {
+        use(resource);  // resource moved out
+    }
+    // option consumed
+}
+
+// Move in for loop
+fn move_in_for_loop() {
+    let items = list![create_a(), create_b(), create_c()];
+
+    for item in items {  // items is moved, item takes each element
+        consume(item);
+    }
+    // items no longer valid
+}
+
+// Partial moves
+type Pair is {
+    first: Resource,
+    second: Resource,
+};
+
+fn partial_move() {
+    let pair = Pair {
+        first: Resource.new(),
+        second: Resource.new(),
+    };
+
+    let first = pair.first;  // first is moved
+    // pair.second still valid
+    // pair is partially moved - cannot use pair as whole
+
+    let second = pair.second;  // now pair fully moved
+}
+
+// Move and replace
+fn move_and_replace() {
+    let mut slot = Some(Resource.new());
+
+    // Take value out and replace with None
+    let resource = slot.take();
+
+    // slot is now None, resource has the value
+    use(resource.unwrap());
+}
+
+// Swap moves
+fn swap_moves() {
+    let mut a = Resource.new();
+    let mut b = Resource.new();
+
+    // Both values moved during swap
+    swap(&mut a, &mut b);
+}
+
+// Move in closures
+fn move_in_closure() {
+    let resource = Resource.new();
+
+    let closure = move || {
+        // resource is moved into closure
+        use(resource);
+    };
+
+    closure();
+    // resource no longer valid outside closure
+}
+
+// Move from container
+fn move_from_container() {
+    let mut list = List.new();
+    list.push(Resource.new());
+    list.push(Resource.new());
+
+    // Move element out of list
+    let first = list.pop().unwrap();
+    use(first);
+
+    // Take ownership of remaining elements
+    let remaining = list.into_iter().collect();
+}
+
+// Move optimization: elision
+fn move_elision() {
+    // Direct return - move elided
+    let resource = create_and_return();
+
+    // Guaranteed copy elision pattern
+    let container = Container {
+        data: create_data(),  // No intermediate moves
+    };
+}
+
+fn create_and_return() -> Resource {
+    Resource.new()  // Return value optimization
+}
+
+// Linear/affine type moves
+fn linear_moves() {
+    let file: affine FileHandle = open("test.txt");
+
+    // Must be used exactly once
+    close(file);
+
+    // Error: file already consumed
+    // close(file);
+}
+
+// Move guards in patterns
+fn move_guards() {
+    let data = create_data();
+
+    match data {
+        d if d.is_valid() => process(d),  // d moved if guard succeeds
+        d => recover(d),                   // otherwise moved here
+    }
+}
+
+// Conditional moves
+fn conditional_moves(condition: Bool) {
+    let resource = Resource.new();
+
+    if condition {
+        consume(resource);
+    } else {
+        store(resource);
+    }
+    // Either way, resource is consumed
+}
+
+// Move through multiple branches
+fn branching_moves(opt: Maybe<Resource>) -> Resource {
+    match opt {
+        Some(r) => r,        // moved out
+        None => Resource.new(),  // new one created
+    }
+}

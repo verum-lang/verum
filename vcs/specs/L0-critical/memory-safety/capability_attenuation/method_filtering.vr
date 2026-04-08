@@ -1,0 +1,180 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: capability, method-filtering, types
+// @timeout: 5000
+// @expect: pass
+//
+// Capability-Based Method Filtering Tests
+// =======================================
+// Spec: docs/improvements.md Section 12 - Capability Attenuation as Types
+//
+// Tests that methods are filtered based on available capabilities.
+// Method capability requirements are inferred from naming conventions:
+// - read*, get*, query*, fetch*, find* -> Read
+// - write*, set*, update*, insert*, delete*, remove* -> Write
+// - execute*, run*, call* -> Execute
+// - *admin*, grant*, revoke* -> Admin
+
+// ============================================================================
+// READ CAPABILITY METHODS (should work with [Read])
+// ============================================================================
+
+type Database is {
+    name: Text,
+};
+
+implement Database {
+    // Read methods - require Read capability
+    fn get_name(&self) -> Text { self.name.clone() }
+    fn query(&self, sql: Text) -> List<Text> { List.new() }
+    fn read_config(&self) -> Text { "config".to_text() }
+    fn find_by_id(&self, id: Int) -> Maybe<Text> { Maybe.None }
+    fn fetch_all(&self) -> List<Text> { List.new() }
+    fn list_tables(&self) -> List<Text> { List.new() }
+    fn count_rows(&self) -> Int { 0 }
+    fn exists(&self, key: Text) -> Bool { false }
+    fn contains(&self, item: Text) -> Bool { false }
+    fn lookup(&self, key: Text) -> Maybe<Text> { Maybe.None }
+    fn search(&self, pattern: Text) -> List<Text> { List.new() }
+    fn select(&self, columns: List<Text>) -> List<Text> { List.new() }
+
+    // Write methods - require Write capability
+    fn write(&mut self, data: Text) -> () {}
+    fn set_name(&mut self, name: Text) -> () { self.name = name; }
+    fn update(&mut self, data: Text) -> () {}
+    fn insert(&mut self, data: Text) -> () {}
+    fn delete(&mut self, id: Int) -> () {}
+    fn remove(&mut self, key: Text) -> () {}
+    fn clear(&mut self) -> () {}
+    fn add(&mut self, item: Text) -> () {}
+    fn push(&mut self, item: Text) -> () {}
+    fn pop(&mut self) -> Maybe<Text> { Maybe.None }
+    fn put(&mut self, key: Text, value: Text) -> () {}
+    fn create(&mut self, name: Text) -> () {}
+    fn modify(&mut self, data: Text) -> () {}
+    fn drop_table(&mut self, name: Text) -> () {}
+    fn truncate(&mut self) -> () {}
+
+    // Execute methods - require Execute capability
+    fn execute(&self, cmd: Text) -> Int { 0 }
+    fn run(&self, script: Text) -> Int { 0 }
+    fn call(&self, proc: Text) -> Int { 0 }
+    fn invoke(&self, method: Text) -> Int { 0 }
+    fn perform(&self, action: Text) -> Int { 0 }
+
+    // Admin methods - require Admin capability
+    fn admin_reset(&mut self) -> () {}
+    fn grant(&mut self, user: Text, perm: Text) -> () {}
+    fn revoke(&mut self, user: Text, perm: Text) -> () {}
+    fn authorize(&mut self, action: Text) -> () {}
+    fn configure(&mut self, setting: Text) -> () {}
+
+    // Transaction methods - require Transaction capability
+    fn begin_transaction(&mut self) -> () {}
+    fn commit(&mut self) -> () {}
+    fn rollback(&mut self) -> () {}
+}
+
+// Test 1: Read-only database can call read methods
+fn test_read_methods_allowed(db: Database with [Read]) -> () {
+    let _ = db.get_name();
+    let _ = db.query("SELECT * FROM users".to_text());
+    let _ = db.read_config();
+    let _ = db.find_by_id(1);
+    let _ = db.fetch_all();
+    let _ = db.list_tables();
+    let _ = db.count_rows();
+    let _ = db.exists("key".to_text());
+    let _ = db.contains("item".to_text());
+    let _ = db.lookup("key".to_text());
+    let _ = db.search("pattern".to_text());
+    let _ = db.select(List.new());
+}
+
+// Test 2: Read-Write database can call both read and write methods
+fn test_readwrite_methods_allowed(db: &mut Database with [Read, Write]) -> () {
+    // Read methods
+    let _ = db.get_name();
+    let _ = db.query("SELECT * FROM users".to_text());
+
+    // Write methods
+    db.write("data".to_text());
+    db.set_name("new_name".to_text());
+    db.update("updated".to_text());
+    db.insert("new_item".to_text());
+    db.delete(1);
+    db.remove("key".to_text());
+    db.clear();
+}
+
+// Test 3: Execute capability allows execute methods
+fn test_execute_methods_allowed(db: Database with [Execute]) -> () {
+    let _ = db.execute("cmd".to_text());
+    let _ = db.run("script".to_text());
+    let _ = db.call("proc".to_text());
+    let _ = db.invoke("method".to_text());
+    let _ = db.perform("action".to_text());
+}
+
+// Test 4: Admin capability allows admin methods
+fn test_admin_methods_allowed(db: &mut Database with [Admin]) -> () {
+    db.admin_reset();
+    db.grant("user".to_text(), "read".to_text());
+    db.revoke("user".to_text(), "write".to_text());
+    db.authorize("action".to_text());
+    db.configure("setting".to_text());
+}
+
+// Test 5: Transaction capability allows transaction methods
+fn test_transaction_methods_allowed(db: &mut Database with [Transaction]) -> () {
+    db.begin_transaction();
+    db.commit();
+    db.rollback();
+}
+
+// Test 6: Full capabilities allow all methods
+fn test_all_methods_allowed(db: &mut Database with [Read, Write, Execute, Admin, Transaction]) -> () {
+    // Read
+    let _ = db.get_name();
+    // Write
+    db.write("data".to_text());
+    // Execute
+    let _ = db.execute("cmd".to_text());
+    // Admin
+    db.admin_reset();
+    // Transaction
+    db.begin_transaction();
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+fn database() -> Database {
+    Database { name: "test".to_text() }
+}
+
+fn main() {
+    let mut db = database();
+
+    // Test read methods with read capability
+    test_read_methods_allowed(db);
+
+    // Test read-write methods with read-write capability
+    test_readwrite_methods_allowed(&mut db);
+
+    // Test execute methods with execute capability
+    test_execute_methods_allowed(db);
+
+    // Test admin methods with admin capability
+    test_admin_methods_allowed(&mut db);
+
+    // Test transaction methods with transaction capability
+    test_transaction_methods_allowed(&mut db);
+
+    // Test all methods with full capabilities
+    test_all_methods_allowed(&mut db);
+
+    print("Method filtering tests passed");
+}

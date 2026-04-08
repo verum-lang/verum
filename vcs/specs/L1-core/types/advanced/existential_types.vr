@@ -1,0 +1,84 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: existential, types, opaque, advanced-type-syntax
+// @expect: pass
+// @description: Existential type syntax tests
+// @spec: 03-type-system.md Section 13. 3.7
+
+// Stub protocol and type definitions for testing
+type Processor is protocol { fn process(&self); };
+type Send is protocol {};
+type Sync is protocol {};
+type State is protocol {};
+type Logger is protocol {};
+type PluginInterface is protocol { fn init(&self); };
+type Display is protocol { fn display(&self) -> Text; };
+
+type DefaultProcessor is {};
+implement Processor for DefaultProcessor { fn process(&self) {} }
+implement Send for DefaultProcessor {}
+implement Sync for DefaultProcessor {}
+implement DefaultProcessor {
+    fn new() -> DefaultProcessor { DefaultProcessor {} }
+}
+
+type DefaultPlugin is {};
+implement PluginInterface for DefaultPlugin { fn init(&self) {} }
+implement DefaultPlugin {
+    fn new() -> DefaultPlugin { DefaultPlugin {} }
+}
+
+type LoadError is { message: Text };
+
+// Test 1: Basic existential return type
+fn make_iterator(n: Int) -> some I: Iterator<Item = Int> {
+    (0..n).iter()
+}
+
+// Test 2: Named existential type
+type AnyDisplay is some T: Display;
+
+fn get_displayable(flag: Bool) -> AnyDisplay {
+    if flag {
+        42
+    } else {
+        "hello"
+    }
+}
+
+// Test 3: Existential with multiple bounds
+fn create_processor() -> some P: Processor + Send + Sync {
+    DefaultProcessor.new()
+}
+
+// Test 4: Existential in struct field (hidden implementation)
+type Service is {
+    state: some S: State,
+    logger: some L: Logger,
+};
+
+// Test 5: Existential associated type in protocol
+type Container is protocol {
+    type Iter: some I: Iterator;
+
+    fn iter(&self) -> Self.Iter;
+};
+
+// Test 6: Plugin pattern with existential
+type Plugin is some P: PluginInterface;
+
+fn load_plugin(path: Text) -> Result<Plugin, LoadError> {
+    // Returns opaque plugin type
+    Ok(DefaultPlugin.new())
+}
+
+fn main() {
+    let iter = make_iterator(10);
+    // iter has type: some I: Iterator<Item = Int>
+
+    let display = get_displayable(true);
+    // display has type: AnyDisplay (opaque)
+
+    assert(true);
+}

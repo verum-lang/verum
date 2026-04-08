@@ -1,0 +1,62 @@
+// Complexity: CBGR stress test
+type Node<T> is {
+    value: T,
+    next: Maybe<Heap<Node<T>>>,
+};
+
+fn create_chain(n: Int) -> Maybe<Heap<Node<Int>>> {
+    if n <= 0 {
+        None
+    } else {
+        Some(Heap(Node {
+            value: n,
+            next: create_chain(n - 1),
+        }))
+    }
+}
+
+fn traverse<T>(node: &Node<T>) -> Int {
+    match &node.next {
+        None => 1,
+        Some(next) => 1 + traverse(&**next),
+    }
+}
+
+fn multiple_refs(a: &Int, b: &Int, c: &Int) -> Int {
+    *a + *b + *c
+}
+
+fn ref_tiers(
+    managed: &Int,
+    checked: &checked Int,
+) -> Int {
+    *managed + *checked
+}
+
+fn mutable_refs(
+    a: &mut Int,
+    b: &mut Int
+) {
+    *a = *a + 1;
+    *b = *b + 1;
+}
+
+fn heap_stress() -> Int {
+    let a = Heap(1);
+    let b = Heap(2);
+    let c = Heap(3);
+    let d = Heap(Heap(Heap(42)));
+
+    *a + *b + *c + ***d
+}
+
+fn main() {
+    let chain = create_chain(5);
+
+    let x = 1;
+    let y = 2;
+    let z = 3;
+    let sum = multiple_refs(&x, &y, &z);
+
+    let result = heap_stress();
+}

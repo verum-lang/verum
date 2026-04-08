@@ -1,0 +1,161 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, closures, accumulator, higher-order
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT accumulator patterns using closures and records
+
+type Acc is { total: Int, count: Int, min_val: Int, max_val: Int };
+
+fn acc_new() -> Acc {
+    Acc { total: 0, count: 0, min_val: 999999, max_val: -999999 }
+}
+
+fn acc_add(a: Acc, v: Int) -> Acc {
+    Acc {
+        total: a.total + v,
+        count: a.count + 1,
+        min_val: if v < a.min_val { v } else { a.min_val },
+        max_val: if v > a.max_val { v } else { a.max_val },
+    }
+}
+
+fn acc_mean_x10(a: Acc) -> Int {
+    if a.count == 0 { 0 }
+    else { a.total * 10 / a.count }
+}
+
+fn acc_range(a: Acc) -> Int {
+    if a.count == 0 { 0 }
+    else { a.max_val - a.min_val }
+}
+
+fn acc_merge(a: Acc, b: Acc) -> Acc {
+    let new_min = if a.min_val < b.min_val { a.min_val } else { b.min_val };
+    let new_max = if a.max_val > b.max_val { a.max_val } else { b.max_val };
+    Acc {
+        total: a.total + b.total,
+        count: a.count + b.count,
+        min_val: new_min,
+        max_val: new_max,
+    }
+}
+
+// Fold over range [start, end) using accumulator
+fn fold_range(start: Int, end_val: Int, init: Acc, f: fn(Acc, Int) -> Acc) -> Acc {
+    let mut a = init;
+    let mut i = start;
+    while i < end_val {
+        a = f(a, i);
+        i = i + 1;
+    }
+    a
+}
+
+// Running average tracker
+type RunAvg is { sum: Int, count: Int };
+
+fn ravg_new() -> RunAvg { RunAvg { sum: 0, count: 0 } }
+
+fn ravg_add(r: RunAvg, v: Int) -> RunAvg {
+    RunAvg { sum: r.sum + v, count: r.count + 1 }
+}
+
+fn ravg_mean_x100(r: RunAvg) -> Int {
+    if r.count == 0 { 0 }
+    else { r.sum * 100 / r.count }
+}
+
+// Exponential moving average (integer approximation, alpha = 1/4)
+fn ema_step(prev: Int, new_val: Int) -> Int {
+    prev * 3 / 4 + new_val / 4
+}
+
+fn main() -> Int {
+    // === Basic accumulator ===
+    let a0 = acc_new();
+    assert_eq(a0.total, 0);
+    assert_eq(a0.count, 0);
+
+    let a1 = acc_add(a0, 10);
+    assert_eq(a1.total, 10);
+    assert_eq(a1.count, 1);
+    assert_eq(a1.min_val, 10);
+    assert_eq(a1.max_val, 10);
+
+    let a2 = acc_add(acc_add(a1, 20), 5);
+    assert_eq(a2.total, 35);
+    assert_eq(a2.count, 3);
+    assert_eq(a2.min_val, 5);
+    assert_eq(a2.max_val, 20);
+    assert_eq(acc_range(a2), 15);
+    // mean*10 = 350/3 = 116
+    assert_eq(acc_mean_x10(a2), 116);
+
+    // === Fold range [1,11) into accumulator ===
+    let a3 = fold_range(1, 11, acc_new(), |a, v| acc_add(a, v));
+    assert_eq(a3.total, 55);  // 1+2+...+10
+    assert_eq(a3.count, 10);
+    assert_eq(a3.min_val, 1);
+    assert_eq(a3.max_val, 10);
+    assert_eq(acc_range(a3), 9);
+
+    // === Fold with transformation ===
+    let sq_acc = fold_range(1, 6, acc_new(), |a, v| acc_add(a, v * v));
+    assert_eq(sq_acc.total, 55);  // 1+4+9+16+25
+    assert_eq(sq_acc.count, 5);
+    assert_eq(sq_acc.min_val, 1);
+    assert_eq(sq_acc.max_val, 25);
+
+    // === Merge accumulators ===
+    let left = fold_range(1, 6, acc_new(), |a, v| acc_add(a, v));   // 1..5, sum=15
+    let right = fold_range(6, 11, acc_new(), |a, v| acc_add(a, v)); // 6..10, sum=40
+    let merged = acc_merge(left, right);
+    assert_eq(merged.total, 55);
+    assert_eq(merged.count, 10);
+    assert_eq(merged.min_val, 1);
+    assert_eq(merged.max_val, 10);
+
+    // === Running average ===
+    let mut r = ravg_new();
+    r = ravg_add(r, 100);
+    assert_eq(ravg_mean_x100(r), 10000);  // 100.00
+    r = ravg_add(r, 200);
+    assert_eq(ravg_mean_x100(r), 15000);  // 150.00
+    r = ravg_add(r, 300);
+    assert_eq(ravg_mean_x100(r), 20000);  // 200.00
+    r = ravg_add(r, 0);
+    assert_eq(ravg_mean_x100(r), 15000);  // 150.00
+
+    // === EMA simulation ===
+    let mut ema = 100;
+    ema = ema_step(ema, 200);  // 75 + 50 = 125
+    assert_eq(ema, 125);
+    ema = ema_step(ema, 200);  // 93 + 50 = 143
+    assert_eq(ema, 143);
+    ema = ema_step(ema, 0);    // 107 + 0 = 107
+    assert_eq(ema, 107);
+
+    // === Complex: fold with filter ===
+    // Sum of even numbers in [1,21)
+    let even_sum = fold_range(1, 21, acc_new(), |a, v| {
+        if v % 2 == 0 { acc_add(a, v) } else { a }
+    });
+    assert_eq(even_sum.total, 110);  // 2+4+6+8+10+12+14+16+18+20
+    assert_eq(even_sum.count, 10);
+
+    // === Compute variance numerator (sum of squared deviations from mean) ===
+    // For [1..5]: mean=3, deviations: -2,-1,0,1,2, sum of squares = 10
+    let data = fold_range(1, 6, acc_new(), |a, v| acc_add(a, v));
+    let mean = data.total / data.count;  // 15/5 = 3
+    let mut var_sum = 0;
+    let mut vi = 1;
+    while vi <= 5 {
+        var_sum = var_sum + (vi - mean) * (vi - mean);
+        vi = vi + 1;
+    }
+    assert_eq(var_sum, 10);
+
+    0
+}

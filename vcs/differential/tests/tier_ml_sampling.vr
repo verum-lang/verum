@@ -1,0 +1,335 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, ml, sampling
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for ML sampling operations.
+/// Tests argmax, top-k selection, temperature scaling, and softmax-like normalization
+/// using pure Verum arithmetic.
+
+fn main() {
+    test_argmax();
+    test_top_k_selection();
+    test_temperature_scaling();
+    test_softmax_normalization();
+    test_nucleus_sampling();
+}
+
+/// Argmax over logit arrays
+fn test_argmax() {
+    println("=== Argmax ===");
+
+    // Simple argmax
+    let logits = [1.5, 3.2, 0.8, 4.1, 2.7];
+    let mut max_idx = 0;
+    let mut max_val = logits[0];
+    let mut i = 1;
+    while i < 5 {
+        if logits[i] > max_val {
+            max_val = logits[i];
+            max_idx = i;
+        }
+        i = i + 1;
+    }
+    println(f"logits: argmax index={max_idx}, value={max_val}");
+
+    // Argmax with ties (first occurrence wins)
+    let tied = [2.0, 5.0, 3.0, 5.0, 1.0];
+    let mut tie_idx = 0;
+    let mut tie_val = tied[0];
+    let mut j = 1;
+    while j < 5 {
+        if tied[j] > tie_val {
+            tie_val = tied[j];
+            tie_idx = j;
+        }
+        j = j + 1;
+    }
+    println(f"tied logits: argmax index={tie_idx} (first occurrence)");
+
+    // Argmax over negative values
+    let negatives = [-3.0, -1.0, -4.0, -1.5, -2.0];
+    let mut neg_idx = 0;
+    let mut neg_val = negatives[0];
+    let mut k = 1;
+    while k < 5 {
+        if negatives[k] > neg_val {
+            neg_val = negatives[k];
+            neg_idx = k;
+        }
+        k = k + 1;
+    }
+    println(f"negative logits: argmax index={neg_idx}, value={neg_val}");
+
+    // Row-wise argmax on a 3x4 "matrix"
+    argmax_row(1.0, 3.0, 2.0, 0.5, 0);
+    argmax_row(4.0, 1.0, 0.5, 2.0, 1);
+    argmax_row(0.5, 2.5, 3.5, 1.0, 2);
+}
+
+/// Argmax over a single row of 4 elements
+fn argmax_row(c0: Float, c1: Float, c2: Float, c3: Float, row: Int) {
+    let mut max_col = 0;
+    let mut max_v = c0;
+    if c1 > max_v { max_v = c1; max_col = 1; }
+    if c2 > max_v { max_v = c2; max_col = 2; }
+    if c3 > max_v { max_v = c3; max_col = 3; }
+    println(f"row {row}: argmax col={max_col}, value={max_v}");
+}
+
+/// Top-k selection: find the top 3 values from 8 logits
+/// Pre-computed to avoid double-indirection on float arrays
+fn test_top_k_selection() {
+    println("\n=== Top-K Selection ===");
+
+    // logits = [2.1, 5.3, 1.4, 4.8, 3.6, 0.9, 6.2, 2.8]
+    // Manual top-3 by scanning three times
+    let l0 = 2.1;
+    let l1 = 5.3;
+    let l2 = 1.4;
+    let l3 = 4.8;
+    let l4 = 3.6;
+    let l5 = 0.9;
+    let l6 = 6.2;
+    let l7 = 2.8;
+
+    // Pass 1: find max
+    let top1_idx = find_max_idx_8(l0, l1, l2, l3, l4, l5, l6, l7);
+    let top1_val = get_val_8(l0, l1, l2, l3, l4, l5, l6, l7, top1_idx);
+
+    // Pass 2: find second max (exclude top1)
+    let top2_idx = find_max_idx_8_exclude1(l0, l1, l2, l3, l4, l5, l6, l7, top1_idx);
+    let top2_val = get_val_8(l0, l1, l2, l3, l4, l5, l6, l7, top2_idx);
+
+    // Pass 3: find third max (exclude top1, top2)
+    let top3_idx = find_max_idx_8_exclude2(l0, l1, l2, l3, l4, l5, l6, l7, top1_idx, top2_idx);
+    let top3_val = get_val_8(l0, l1, l2, l3, l4, l5, l6, l7, top3_idx);
+
+    let k = 3;
+    let n = 8;
+    println(f"top-{k} from {n} logits:");
+    println(f"  rank 0: index={top1_idx}, value={top1_val}");
+    println(f"  rank 1: index={top2_idx}, value={top2_val}");
+    println(f"  rank 2: index={top3_idx}, value={top3_val}");
+
+    // Top-k sum
+    let top_k_sum = top1_val + top2_val + top3_val;
+    let total_sum = l0 + l1 + l2 + l3 + l4 + l5 + l6 + l7;
+    println(f"top-{k} sum: {top_k_sum}");
+    println(f"total sum: {total_sum}");
+    println(f"top-{k} fraction: {top_k_sum / total_sum}");
+    println(f"top-1 (argmax): index={top1_idx}, value={top1_val}");
+}
+
+/// Find index of maximum value among 8 elements
+fn find_max_idx_8(v0: Float, v1: Float, v2: Float, v3: Float,
+                  v4: Float, v5: Float, v6: Float, v7: Float) -> Int {
+    let mut idx = 0;
+    let mut mx = v0;
+    if v1 > mx { mx = v1; idx = 1; }
+    if v2 > mx { mx = v2; idx = 2; }
+    if v3 > mx { mx = v3; idx = 3; }
+    if v4 > mx { mx = v4; idx = 4; }
+    if v5 > mx { mx = v5; idx = 5; }
+    if v6 > mx { mx = v6; idx = 6; }
+    if v7 > mx { mx = v7; idx = 7; }
+    idx
+}
+
+/// Find index of maximum excluding one index
+fn find_max_idx_8_exclude1(v0: Float, v1: Float, v2: Float, v3: Float,
+                           v4: Float, v5: Float, v6: Float, v7: Float,
+                           ex: Int) -> Int {
+    let mut idx = -1;
+    let mut mx = -1e30;
+    if ex != 0 && v0 > mx { mx = v0; idx = 0; }
+    if ex != 1 && v1 > mx { mx = v1; idx = 1; }
+    if ex != 2 && v2 > mx { mx = v2; idx = 2; }
+    if ex != 3 && v3 > mx { mx = v3; idx = 3; }
+    if ex != 4 && v4 > mx { mx = v4; idx = 4; }
+    if ex != 5 && v5 > mx { mx = v5; idx = 5; }
+    if ex != 6 && v6 > mx { mx = v6; idx = 6; }
+    if ex != 7 && v7 > mx { mx = v7; idx = 7; }
+    idx
+}
+
+/// Find index of maximum excluding two indices
+fn find_max_idx_8_exclude2(v0: Float, v1: Float, v2: Float, v3: Float,
+                           v4: Float, v5: Float, v6: Float, v7: Float,
+                           ex1: Int, ex2: Int) -> Int {
+    let mut idx = -1;
+    let mut mx = -1e30;
+    if ex1 != 0 && ex2 != 0 && v0 > mx { mx = v0; idx = 0; }
+    if ex1 != 1 && ex2 != 1 && v1 > mx { mx = v1; idx = 1; }
+    if ex1 != 2 && ex2 != 2 && v2 > mx { mx = v2; idx = 2; }
+    if ex1 != 3 && ex2 != 3 && v3 > mx { mx = v3; idx = 3; }
+    if ex1 != 4 && ex2 != 4 && v4 > mx { mx = v4; idx = 4; }
+    if ex1 != 5 && ex2 != 5 && v5 > mx { mx = v5; idx = 5; }
+    if ex1 != 6 && ex2 != 6 && v6 > mx { mx = v6; idx = 6; }
+    if ex1 != 7 && ex2 != 7 && v7 > mx { mx = v7; idx = 7; }
+    idx
+}
+
+/// Get value at index from 8 elements
+fn get_val_8(v0: Float, v1: Float, v2: Float, v3: Float,
+             v4: Float, v5: Float, v6: Float, v7: Float,
+             idx: Int) -> Float {
+    if idx == 0 { v0 }
+    else if idx == 1 { v1 }
+    else if idx == 2 { v2 }
+    else if idx == 3 { v3 }
+    else if idx == 4 { v4 }
+    else if idx == 5 { v5 }
+    else if idx == 6 { v6 }
+    else { v7 }
+}
+
+/// Temperature scaling of logits
+fn test_temperature_scaling() {
+    println("\n=== Temperature Scaling ===");
+
+    // Scale logits by different temperatures using helper function
+    scale_logits_at_temp(2.0, 5.0, 1.0, 3.0, 0.5);
+    scale_logits_at_temp(2.0, 5.0, 1.0, 3.0, 1.0);
+    scale_logits_at_temp(2.0, 5.0, 1.0, 3.0, 2.0);
+    scale_logits_at_temp(2.0, 5.0, 1.0, 3.0, 5.0);
+    scale_logits_at_temp(2.0, 5.0, 1.0, 3.0, 10.0);
+}
+
+/// Scale 4 logits by a temperature and print results
+fn scale_logits_at_temp(l0: Float, l1: Float, l2: Float, l3: Float, temp: Float) {
+    println(f"temperature={temp}:");
+
+    let s0 = l0 / temp;
+    let s1 = l1 / temp;
+    let s2 = l2 / temp;
+    let s3 = l3 / temp;
+
+    // Range
+    let mut max_s = s0;
+    if s1 > max_s { max_s = s1; }
+    if s2 > max_s { max_s = s2; }
+    if s3 > max_s { max_s = s3; }
+
+    let mut min_s = s0;
+    if s1 < min_s { min_s = s1; }
+    if s2 < min_s { min_s = s2; }
+    if s3 < min_s { min_s = s3; }
+
+    let range = max_s - min_s;
+    println(f"  scaled: [{s0}, {s1}, {s2}, {s3}]");
+    println(f"  range: {range} (higher = sharper distribution)");
+
+    // Argmax
+    let mut argmax = 0;
+    let mut argmax_val = s0;
+    if s1 > argmax_val { argmax_val = s1; argmax = 1; }
+    if s2 > argmax_val { argmax_val = s2; argmax = 2; }
+    if s3 > argmax_val { argmax_val = s3; argmax = 3; }
+    println(f"  argmax: {argmax} (invariant under temperature)");
+}
+
+/// Softmax-like normalization using linear approximation
+fn test_softmax_normalization() {
+    println("\n=== Softmax Normalization ===");
+
+    let l0 = 2.0;
+    let l1 = 5.0;
+    let l2 = 1.0;
+    let l3 = 3.0;
+    let l4 = 4.0;
+
+    // Find min
+    let mut min_val = l0;
+    if l1 < min_val { min_val = l1; }
+    if l2 < min_val { min_val = l2; }
+    if l3 < min_val { min_val = l3; }
+    if l4 < min_val { min_val = l4; }
+
+    // Shift
+    let s0 = l0 - min_val;
+    let s1 = l1 - min_val;
+    let s2 = l2 - min_val;
+    let s3 = l3 - min_val;
+    let s4 = l4 - min_val;
+
+    let total = s0 + s1 + s2 + s3 + s4;
+
+    println("linear softmax approximation:");
+    println(f"  logit[0]={l0}, shifted={s0}, prob={s0 / total}");
+    println(f"  logit[1]={l1}, shifted={s1}, prob={s1 / total}");
+    println(f"  logit[2]={l2}, shifted={s2}, prob={s2 / total}");
+    println(f"  logit[3]={l3}, shifted={s3}, prob={s3 / total}");
+    println(f"  logit[4]={l4}, shifted={s4}, prob={s4 / total}");
+
+    let prob_sum = s0 / total + s1 / total + s2 / total + s3 / total + s4 / total;
+    println(f"probability sum: {prob_sum}");
+
+    // Diversity (Gini-Simpson)
+    let p0 = s0 / total;
+    let p1 = s1 / total;
+    let p2 = s2 / total;
+    let p3 = s3 / total;
+    let p4 = s4 / total;
+    let sum_sq = p0 * p0 + p1 * p1 + p2 * p2 + p3 * p3 + p4 * p4;
+    let diversity = 1.0 - sum_sq;
+    println(f"diversity (Gini-Simpson): {diversity}");
+
+    let uniform_diversity = 1.0 - 1.0 / 5.0;
+    println(f"uniform diversity for n=5: {uniform_diversity}");
+}
+
+/// Nucleus (top-p) sampling simulation
+fn test_nucleus_sampling() {
+    println("\n=== Nucleus Sampling ===");
+
+    // Pre-sorted probabilities (descending)
+    println("sorted probabilities (descending):");
+    println(f"  token 3: prob=0.4");
+    println(f"  token 1: prob=0.3");
+    println(f"  token 4: prob=0.15");
+    println(f"  token 2: prob=0.1");
+    println(f"  token 0: prob=0.05");
+
+    // Top-p selection for various thresholds
+    // probs = [0.40, 0.30, 0.15, 0.10, 0.05]
+    nucleus_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 0.5);
+    nucleus_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 0.7);
+    nucleus_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 0.9);
+    nucleus_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 0.95);
+    nucleus_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 1.0);
+
+    // Effective vocabulary sizes
+    println("effective vocab sizes:");
+    vocab_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 0.5, 5);
+    vocab_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 0.7, 5);
+    vocab_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 0.9, 5);
+    vocab_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 0.95, 5);
+    vocab_at_p(0.40, 0.30, 0.15, 0.10, 0.05, 1.0, 5);
+}
+
+/// Compute nucleus selection at a given threshold
+fn nucleus_at_p(p0: Float, p1: Float, p2: Float, p3: Float, p4: Float,
+                threshold: Float) {
+    let mut cumulative = p0;
+    let mut count = 1;
+    if cumulative < threshold { cumulative = cumulative + p1; count = 2; }
+    if cumulative < threshold { cumulative = cumulative + p2; count = 3; }
+    if cumulative < threshold { cumulative = cumulative + p3; count = 4; }
+    if cumulative < threshold { cumulative = cumulative + p4; count = 5; }
+    println(f"top-p={threshold}: {count} tokens, cumulative={cumulative}");
+}
+
+/// Compute effective vocabulary size
+fn vocab_at_p(p0: Float, p1: Float, p2: Float, p3: Float, p4: Float,
+              threshold: Float, n: Int) {
+    let mut cumulative = p0;
+    let mut count = 1;
+    if cumulative < threshold { cumulative = cumulative + p1; count = 2; }
+    if cumulative < threshold { cumulative = cumulative + p2; count = 3; }
+    if cumulative < threshold { cumulative = cumulative + p3; count = 4; }
+    if cumulative < threshold { cumulative = cumulative + p4; count = 5; }
+    let vocab_reduction = (n - count) * 100 / n;
+    println(f"  p={threshold}: vocab={count}/{n}, reduction={vocab_reduction}%");
+}

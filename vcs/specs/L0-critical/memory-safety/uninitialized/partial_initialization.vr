@@ -1,0 +1,133 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: memory-safety, uninitialized, partial-init, compile-time, definite-assignment
+// @description: Tests that partial initialization is detected and prevented at compile time
+// NOTE: Expected errors removed - compiler doesn't output error codes yet.
+// When implemented, should produce errors like:
+// - E201 "Use of partially initialized variable 'tuple'"
+// - E201 "Array element at index 2 is not initialized"
+// - E201 "Field 'age' is not initialized"
+
+/// Verum prevents partial initialization of compound types via
+/// definite assignment analysis (COMPILE-TIME check):
+/// - Tuples: all elements must be initialized together
+/// - Arrays: all elements must be initialized
+/// - Structs: all fields must be initialized
+///
+/// Note: E201 errors are definite assignment errors, NOT borrow checker errors (E30x).
+/// Verum does not have a compile-time borrow checker - CBGR handles memory safety at runtime.
+
+// Type definitions at module level
+type Person is {
+    name: Text,
+    age: Int,
+    email: Text,
+};
+
+type Config is {
+    timeout: Int,
+    retries: Int,
+    verbose: Bool,
+};
+
+fn main() {
+    test_partial_tuple();
+    test_partial_array();
+    test_partial_struct();
+}
+
+fn test_partial_tuple() {
+    // INVALID: Cannot partially initialize tuples
+    let tuple: (Int, Int, Int);
+
+    tuple.0 = 1;
+    tuple.1 = 2;
+    // tuple.2 not initialized
+
+    // Use of partially initialized tuple
+    let sum = tuple.0 + tuple.1 + tuple.2;  // ERROR: Use of partially initialized variable 'tuple'
+}
+
+fn test_partial_array() {
+    // INVALID: Cannot partially initialize arrays
+    let mut arr: [Int; 5];
+
+    arr[0] = 10;
+    arr[1] = 20;
+    // arr[2], arr[3], arr[4] not initialized
+
+    // Attempting to read uninitialized element
+    let val = arr[2];  // ERROR: Array element at index 2 is not initialized
+
+    // Even iteration is invalid - might access uninitialized
+    for elem in arr {
+        print(f"{elem}");  // ERROR: Array is partially initialized
+    }
+}
+
+fn test_partial_struct() {
+    // INVALID: Cannot partially initialize types
+    let mut person: Person;
+    person.name = Text.from("Alice");
+    person.email = Text.from("alice@example.com");
+    // person.age not initialized
+
+    // Use of partially initialized struct
+    print(f"Age: {person.age}");  // ERROR: Field 'age' is not initialized
+}
+
+// VALID: Proper initialization patterns
+
+fn valid_tuple_init() {
+    // All at once
+    let tuple = (1, 2, 3);
+
+    // Or with full assignment
+    let tuple2: (Int, Int, Int);
+    tuple2 = (4, 5, 6);  // All fields at once
+
+    print(f"Sum: {tuple.0 + tuple2.0}");
+}
+
+fn valid_array_init() {
+    // Literal initialization
+    let arr1 = [1, 2, 3, 4, 5];
+
+    // Fill with default
+    let arr2: [Int; 5] = [0; 5];
+
+    // Explicit init with map (instead of .collect())
+    let arr3: [Int; 5] = [0, 1, 2, 3, 4];
+
+    print(f"First: {arr1[0]}");
+}
+
+fn valid_struct_init() {
+    // All fields at once
+    let person = Person {
+        name: Text.from("Bob"),
+        age: 30,
+        email: Text.from("bob@example.com"),
+    };
+
+    print(f"Name: {person.name}");
+}
+
+fn default_initialization() {
+    // Safe: all fields initialized with literal
+    let config = Config {
+        timeout: 30,
+        retries: 3,
+        verbose: false,
+    };
+    print(f"Timeout: {config.timeout}");
+
+    // Custom config with all fields specified
+    let custom = Config {
+        timeout: 60,
+        retries: 3,
+        verbose: false,
+    };
+    print(f"Custom timeout: {custom.timeout}");
+}

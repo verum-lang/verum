@@ -1,0 +1,10 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, bool, expression
+// @description: Unsafe block returning boolean
+fn main() {
+    let is_valid: Bool = unsafe { true };
+    let is_safe: Bool = unsafe { 42 > 0 };
+    assert(is_valid);
+    assert(is_safe);
+}

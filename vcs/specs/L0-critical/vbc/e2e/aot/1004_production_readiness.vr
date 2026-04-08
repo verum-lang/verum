@@ -1,0 +1,222 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: production, integration, comprehensive
+// @description: Production readiness: all critical language features working together
+
+// === Custom types ===
+type Color is Red | Green | Blue | Custom(Int, Int, Int);
+type Shape is Circle(Int) | Rect(Int, Int);
+type AppError is NotFound(Text) | Validation(Text) | Internal;
+type Outcome<T> is Success(T) | Failure(AppError);
+
+// === Record types ===
+type Config is { name: Text, max_retries: Int, timeout: Int, verbose: Bool };
+type Stats is { total: Int, passed: Int, failed: Int };
+
+implement Stats {
+    fn new() -> Stats {
+        Stats { total: 0, passed: 0, failed: 0 }
+    }
+    fn record_pass(&mut self) {
+        self.total = self.total + 1;
+        self.passed = self.passed + 1;
+    }
+    fn record_fail(&mut self) {
+        self.total = self.total + 1;
+        self.failed = self.failed + 1;
+    }
+    fn pass_rate(&self) -> Int {
+        if (self.total == 0) { 0 } else { (self.passed * 100) / self.total }
+    }
+}
+
+// === Recursive data structure via Heap ===
+type IntList is Nil | Cons(Int, Heap<IntList>);
+
+@allow(unbounded_recursion)
+fn list_sum(lst: Heap<IntList>) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(v, rest) => v + list_sum(rest),
+    }
+}
+
+// === Higher-order functions ===
+fn transform(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn filter(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = [];
+    for item in items {
+        if (pred(item)) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+fn reduce(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    for item in items {
+        acc = f(acc, item);
+    }
+    acc
+}
+
+// === Error handling ===
+fn parse_score(s: Text) -> Outcome<Int> {
+    if (s == "A") { Success(100) }
+    else if (s == "B") { Success(85) }
+    else if (s == "C") { Success(70) }
+    else if (s == "F") { Success(0) }
+    else { Failure(Validation(f"Unknown grade: {s}")) }
+}
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rect(w, h) => w * h,
+    }
+}
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+        Custom(r, g, b) => f"rgb({r},{g},{b})",
+    }
+}
+
+fn main() -> Int {
+    let mut stats = Stats.new();
+
+    // === Test 1: Variant types + pattern matching ===
+    let shapes = [Circle(5), Rect(3, 4), Circle(2), Rect(6, 7)];
+    let mut total_area = 0;
+    for s in shapes {
+        total_area = total_area + area(s);
+    }
+    // 75 + 12 + 12 + 42 = 141
+    if (total_area == 141) { stats.record_pass(); }
+    else {
+        print(f"FAIL test1: area={total_area}");
+        stats.record_fail();
+    }
+
+    // === Test 2: Functional pipeline ===
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evens = filter(data, |x: Int| -> Bool { x % 2 == 0 });
+    let doubled = transform(evens, |x: Int| -> Int { x * 2 });
+    let sum = reduce(doubled, 0, |a: Int, b: Int| -> Int { a + b });
+    // evens: 2,4,6,8,10 → doubled: 4,8,12,16,20 → sum: 60
+    if (sum == 60) { stats.record_pass(); }
+    else {
+        print(f"FAIL test2: sum={sum}");
+        stats.record_fail();
+    }
+
+    // === Test 3: Error handling ===
+    let grades = ["A", "B", "X", "C", "F", "Z"];
+    let mut score_sum = 0;
+    let mut errors = 0;
+    for g in grades {
+        match parse_score(g) {
+            Success(score) => { score_sum = score_sum + score; }
+            Failure(_) => { errors = errors + 1; }
+        }
+    }
+    // A=100 + B=85 + C=70 + F=0 = 255, errors=2
+    if (score_sum == 255 && errors == 2) { stats.record_pass(); }
+    else {
+        print(f"FAIL test3: sum={score_sum} err={errors}");
+        stats.record_fail();
+    }
+
+    // === Test 4: Recursive data structure ===
+    let linked = Heap(Cons(10, Heap(Cons(20, Heap(Cons(30, Heap(Nil)))))));
+    let ls = list_sum(linked);
+    if (ls == 60) { stats.record_pass(); }
+    else {
+        print(f"FAIL test4: list_sum={ls}");
+        stats.record_fail();
+    }
+
+    // === Test 5: String operations ===
+    let csv = "alice,30,portland;bob,25,seattle;carol,35,denver";
+    let rows = csv.split(";");
+    if (rows.len() == 3) { stats.record_pass(); }
+    else {
+        print(f"FAIL test5: rows={rows.len()}");
+        stats.record_fail();
+    }
+
+    // === Test 6: Map operations ===
+    let mut scores = Map.new();
+    scores.insert("math", 95);
+    scores.insert("science", 88);
+    scores.insert("english", 92);
+    let mut map_total = 0;
+    for (subject, score) in scores {
+        map_total = map_total + score;
+    }
+    if (map_total == 275) { stats.record_pass(); }
+    else {
+        print(f"FAIL test6: map_total={map_total}");
+        stats.record_fail();
+    }
+
+    // === Test 7: Custom color type ===
+    let colors = [Red, Green, Custom(255, 128, 0)];
+    let last_name = color_name(colors[2]);
+    if (last_name == "rgb(255,128,0)") { stats.record_pass(); }
+    else {
+        print(f"FAIL test7: name={last_name}");
+        stats.record_fail();
+    }
+
+    // === Test 8: Config struct + bool formatting ===
+    let cfg = Config { name: "test", max_retries: 3, timeout: 5000, verbose: true };
+    let cfg_str = f"name={cfg.name} verbose={cfg.verbose}";
+    if (cfg_str == "name=test verbose=true") { stats.record_pass(); }
+    else {
+        print(f"FAIL test8: cfg_str={cfg_str}");
+        stats.record_fail();
+    }
+
+    // === Test 9: try/recover ===
+    let r = try {
+        if (true) { throw Internal; }
+        42
+    } recover |e| {
+        -1
+    };
+    if (r == -1) { stats.record_pass(); }
+    else {
+        print(f"FAIL test9: r={r}");
+        stats.record_fail();
+    }
+
+    // === Test 10: is pattern test ===
+    let outcome = parse_score("A");
+    if (outcome is Success && !(outcome is Failure)) { stats.record_pass(); }
+    else {
+        print("FAIL test10");
+        stats.record_fail();
+    }
+
+    // Report
+    let rate = stats.pass_rate();
+    if (stats.failed > 0) {
+        print(f"1004_production_readiness: {stats.passed}/{stats.total} passed ({rate}%)");
+        return 1;
+    }
+    print(f"1004_production_readiness: PASS ({stats.total}/{stats.total} tests, {rate}%)");
+    0
+}

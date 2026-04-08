@@ -1,0 +1,225 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: patterns, advanced, nested-match, closures, recursion
+// @description: Advanced language pattern tests
+
+// Recursive function with accumulator
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    n * factorial(n - 1)
+}
+
+// Tail-recursive version
+@allow(unbounded_recursion)
+fn fact_iter(n: Int, acc: Int) -> Int {
+    if n <= 1 { return acc; }
+    fact_iter(n - 1, n * acc)
+}
+
+fn test_recursion() -> Int {
+    let f5 = factorial(5);
+    if f5 != 120 {
+        print(f"FAIL recursion: factorial(5)={f5}");
+        return 1;
+    }
+    let f10 = fact_iter(10, 1);
+    if f10 != 3628800 {
+        print(f"FAIL recursion: fact_iter(10)={f10}");
+        return 1;
+    }
+    print("  recursion: OK");
+    0
+}
+
+// HOF: apply function N times
+fn apply_n(f: fn(Int) -> Int, x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_higher_order() -> Int {
+    let double = |x: Int| -> Int { x * 2 };
+    let result = apply_n(double, 1, 10);
+    // 1 * 2^10 = 1024
+    if result != 1024 {
+        print(f"FAIL higher_order: apply_n(double, 1, 10)={result}");
+        return 1;
+    }
+
+    let inc = |x: Int| -> Int { x + 1 };
+    let r2 = apply_n(inc, 0, 100);
+    if r2 != 100 {
+        print(f"FAIL higher_order: apply_n(inc, 0, 100)={r2}");
+        return 1;
+    }
+    print("  higher_order: OK");
+    0
+}
+
+// Sum type with methods
+type Shape is Circle(Int) | Rectangle(Int, Int) | Triangle(Int, Int, Int);
+
+implement Shape {
+    fn perimeter(&self) -> Int {
+        match self {
+            Circle(r) => 6 * r,  // approximate 2*pi*r ≈ 6*r
+            Rectangle(w, h) => 2 * (w + h),
+            Triangle(a, b, c) => a + b + c,
+        }
+    }
+
+    fn is_circle(&self) -> Bool {
+        match self {
+            Circle(_) => true,
+            _ => false,
+        }
+    }
+}
+
+fn test_sum_type_methods() -> Int {
+    let c = Circle(10);
+    let r = Rectangle(3, 4);
+    let t = Triangle(3, 4, 5);
+
+    if c.perimeter() != 60 {
+        print(f"FAIL sum_type: circle perimeter={c.perimeter()}");
+        return 1;
+    }
+    if r.perimeter() != 14 {
+        print(f"FAIL sum_type: rect perimeter={r.perimeter()}");
+        return 1;
+    }
+    if t.perimeter() != 12 {
+        print(f"FAIL sum_type: tri perimeter={t.perimeter()}");
+        return 1;
+    }
+    if !c.is_circle() {
+        print("FAIL sum_type: is_circle false for circle");
+        return 1;
+    }
+    if r.is_circle() {
+        print("FAIL sum_type: is_circle true for rect");
+        return 1;
+    }
+    print("  sum_type_methods: OK");
+    0
+}
+
+// Nested match on tuples/variants
+type Result is Ok(Int) | Err(Int);
+
+fn combine_results(a: Result, b: Result) -> Int {
+    match a {
+        Ok(va) => match b {
+            Ok(vb) => va + vb,
+            Err(_) => -1,
+        },
+        Err(_) => -2,
+    }
+}
+
+fn test_nested_match() -> Int {
+    let r1 = combine_results(Ok(10), Ok(20));
+    if r1 != 30 {
+        print(f"FAIL nested_match: Ok+Ok={r1}, expected 30");
+        return 1;
+    }
+    let r2 = combine_results(Ok(10), Err(1));
+    if r2 != -1 {
+        print(f"FAIL nested_match: Ok+Err={r2}, expected -1");
+        return 1;
+    }
+    let r3 = combine_results(Err(1), Ok(20));
+    if r3 != -2 {
+        print(f"FAIL nested_match: Err+Ok={r3}, expected -2");
+        return 1;
+    }
+    print("  nested_match: OK");
+    0
+}
+
+// Closure capturing and mutation
+fn test_closure_state() -> Int {
+    let mut counter = 0;
+    let mut inc = || { counter = counter + 1; };
+    inc();
+    inc();
+    inc();
+    if counter != 3 {
+        print(f"FAIL closure_state: counter={counter}, expected 3");
+        return 1;
+    }
+
+    // Closure over loop variable
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        let val = i * i;
+        sum = sum + val;
+        i = i + 1;
+    }
+    // 0+1+4+9+16 = 30
+    if sum != 30 {
+        print(f"FAIL closure_state: sum={sum}, expected 30");
+        return 1;
+    }
+    print("  closure_state: OK");
+    0
+}
+
+// Multiple return values via tuple-like patterns
+type Pair is { first: Int, second: Int };
+
+implement Pair {
+    fn new(a: Int, b: Int) -> Pair {
+        Pair { first: a, second: b }
+    }
+
+    fn swap(&self) -> Pair {
+        Pair { first: self.second, second: self.first }
+    }
+
+    fn sum(&self) -> Int {
+        self.first + self.second
+    }
+}
+
+fn test_struct_methods() -> Int {
+    let p = Pair.new(3, 7);
+    if p.sum() != 10 {
+        print(f"FAIL struct_methods: sum={p.sum()}, expected 10");
+        return 1;
+    }
+    let swapped = p.swap();
+    if swapped.first != 7 || swapped.second != 3 {
+        print(f"FAIL struct_methods: swap=({swapped.first},{swapped.second})");
+        return 1;
+    }
+    print("  struct_methods: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Advanced Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_recursion();
+    failures = failures + test_higher_order();
+    failures = failures + test_sum_type_methods();
+    failures = failures + test_nested_match();
+    failures = failures + test_closure_state();
+    failures = failures + test_struct_methods();
+
+    if failures == 0 {
+        print("All advanced pattern tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

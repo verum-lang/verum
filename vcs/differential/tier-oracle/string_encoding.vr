@@ -1,0 +1,327 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @category: string
+// @description: String encoding and Unicode handling tests
+// @tags: string, unicode, utf8, encoding, normalization
+
+/// String encoding must be handled consistently across execution tiers.
+/// Tests UTF-8 encoding, Unicode normalization, and special characters.
+
+module StringEncoding;
+
+/// Test basic ASCII strings
+fn test_ascii() {
+    let hello = "Hello, World!";
+
+    // Length should be byte count for ASCII
+    // @expect-output: 13
+    print(hello.len());
+
+    // Char count equals byte count for ASCII
+    // @expect-output: 13
+    print(hello.chars().count());
+
+    // @expect-output: Hello, World!
+    print(hello);
+}
+
+/// Test multi-byte UTF-8 characters
+fn test_multibyte_utf8() {
+    // 2-byte characters (Latin extended, Greek, etc.)
+    let cafe = "cafe\u{0301}";  // cafe + combining acute
+    // @expect-output: 6 (c, a, f, e, combining accent = 5 codepoints, but may render as 4)
+    print(cafe.chars().count());
+
+    // 3-byte characters (CJK)
+    let chinese = "\u{4E2D}\u{6587}";  // Chinese characters
+    // @expect-output: 2
+    print(chinese.chars().count());
+    // @expect-output: 6
+    print(chinese.len());  // 3 bytes each
+
+    // 4-byte characters (emoji, rare scripts)
+    let emoji = "\u{1F600}";  // Grinning face
+    // @expect-output: 1
+    print(emoji.chars().count());
+    // @expect-output: 4
+    print(emoji.len());
+}
+
+/// Test Unicode normalization
+fn test_normalization() {
+    // NFC: Composed form
+    let composed = "\u{00E9}";  // e with acute (single codepoint)
+    // NFD: Decomposed form
+    let decomposed = "e\u{0301}";  // e + combining acute (two codepoints)
+
+    // Visual equality
+    // @expect-output: true
+    print(composed.nfc() == decomposed.nfc());
+
+    // Codepoint inequality without normalization
+    // @expect-output: false
+    print(composed == decomposed);
+
+    // Length difference
+    // @expect-output: 1
+    print(composed.chars().count());
+    // @expect-output: 2
+    print(decomposed.chars().count());
+}
+
+/// Test zero-width and invisible characters
+fn test_invisible_characters() {
+    // Zero-width joiner
+    let zwj = "a\u{200D}b";
+    // @expect-output: 3
+    print(zwj.chars().count());
+
+    // Zero-width non-joiner
+    let zwnj = "a\u{200C}b";
+    // @expect-output: 3
+    print(zwnj.chars().count());
+
+    // Zero-width space
+    let zwsp = "a\u{200B}b";
+    // @expect-output: 3
+    print(zwsp.chars().count());
+
+    // Byte-order mark
+    let bom = "\u{FEFF}hello";
+    // @expect-output: 6
+    print(bom.chars().count());
+
+    // Trimming should handle BOM
+    let trimmed = bom.trim_start_matches("\u{FEFF}");
+    // @expect-output: hello
+    print(trimmed);
+}
+
+/// Test bidirectional text
+fn test_bidirectional() {
+    // RTL override
+    let rtl = "\u{202E}abc\u{202C}";  // RLO + abc + PDF
+    // @expect-output: 5
+    print(rtl.chars().count());
+
+    // Hebrew text
+    let hebrew = "\u{05E9}\u{05DC}\u{05D5}\u{05DD}";  // Shalom
+    // @expect-output: 4
+    print(hebrew.chars().count());
+
+    // Mixed LTR and RTL
+    let mixed = "Hello \u{05E9}\u{05DC}\u{05D5}\u{05DD}!";
+    // @expect-output: 12
+    print(mixed.chars().count());
+}
+
+/// Test emoji sequences
+fn test_emoji_sequences() {
+    // Single emoji
+    let smile = "\u{1F600}";
+    // @expect-output: 1
+    print(smile.chars().count());
+
+    // Emoji with skin tone modifier
+    let wave = "\u{1F44B}\u{1F3FD}";  // Waving hand + medium skin tone
+    // @expect-output: 2
+    print(wave.chars().count());  // Two codepoints
+
+    // Emoji ZWJ sequence (family)
+    let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+    // @expect-output: 5
+    print(family.chars().count());  // 5 codepoints, 1 grapheme
+
+    // Flag emoji (regional indicators)
+    let flag = "\u{1F1FA}\u{1F1F8}";  // US flag
+    // @expect-output: 2
+    print(flag.chars().count());  // 2 codepoints, 1 grapheme
+}
+
+/// Test grapheme clusters
+fn test_grapheme_clusters() {
+    // Korean composed syllable
+    let hangul = "\u{D55C}";  // "Han" as precomposed
+    // @expect-output: 1
+    print(hangul.graphemes().count());
+
+    // Korean decomposed jamo
+    let jamo = "\u{1112}\u{1161}\u{11AB}";  // H + a + n
+    // @expect-output: 1
+    print(jamo.graphemes().count());  // Still 1 grapheme
+
+    // Combining diacritics
+    let zalgo = "a\u{0300}\u{0301}\u{0302}";  // a + 3 combining marks
+    // @expect-output: 1
+    print(zalgo.graphemes().count());
+    // @expect-output: 4
+    print(zalgo.chars().count());
+}
+
+/// Test string boundaries and slicing
+fn test_string_slicing() {
+    let hello = "Hello";
+
+    // Valid ASCII slicing
+    // @expect-output: Hel
+    print(&hello[0..3]);
+
+    // UTF-8 string
+    let cjk = "\u{4E2D}\u{6587}\u{6D4B}\u{8BD5}";  // Chinese text
+
+    // Slice on character boundary
+    // @expect-output: 3
+    print(cjk[0..6].len());  // First 2 chars = 6 bytes
+
+    // Slice in middle of character - should error or panic
+    // @expect-error: Invalid UTF-8 boundary
+    // let bad = &cjk[0..2];
+}
+
+/// Test escape sequences
+fn test_escape_sequences() {
+    // Standard escapes
+    // @expect-output: (newline here)
+    print("line1\nline2");
+
+    // @expect-output: (tab here)
+    print("col1\tcol2");
+
+    // Carriage return
+    let cr = "before\rafter";
+    // @expect-output: 12
+    print(cr.len());
+
+    // Null character
+    let null_str = "before\0after";
+    // @expect-output: 12
+    print(null_str.len());
+
+    // Unicode escapes
+    // @expect-output: A
+    print("\u{0041}");
+
+    // @expect-output: 4
+    print("\u{1F600}".len());
+}
+
+/// Test case conversion
+fn test_case_conversion() {
+    // Simple ASCII
+    // @expect-output: HELLO
+    print("hello".to_uppercase());
+
+    // @expect-output: hello
+    print("HELLO".to_lowercase());
+
+    // German sharp S (special case)
+    let ss = "\u{00DF}";  // sharp s
+    // @expect-output: SS
+    print(ss.to_uppercase());
+
+    // Turkish I (locale-dependent)
+    let turkish_i = "I";
+    // @expect-output: i (or dotless i in Turkish locale)
+    print(turkish_i.to_lowercase());
+
+    // Greek sigma (context-dependent)
+    let sigma = "\u{03A3}";  // capital sigma
+    // Final sigma vs regular sigma
+    let word = "\u{03C3}\u{03BF}\u{03C2}";  // sos with final sigma
+    // @expect-output: 3
+    print(word.chars().count());
+}
+
+/// Test string comparison
+fn test_string_comparison() {
+    // Case-insensitive comparison
+    // @expect-output: true
+    print("Hello".eq_ignore_ascii_case("HELLO"));
+
+    // Unicode comparison (codepoint order)
+    // @expect-output: true
+    print("a" < "b");
+
+    // @expect-output: true
+    print("\u{00E0}" < "\u{00E1}");  // a-grave < a-acute
+
+    // Collation-aware comparison (locale-dependent)
+    // German: a-umlaut = ae
+    // Swedish: a-umlaut after z
+}
+
+/// Test replacement character
+fn test_replacement_character() {
+    // Replacement character for invalid sequences
+    let replacement = "\u{FFFD}";
+    // @expect-output: 1
+    print(replacement.chars().count());
+    // @expect-output: 3
+    print(replacement.len());
+
+    // Lossy conversion should use replacement
+    // (Example: invalid UTF-8 bytes converted to string)
+}
+
+/// Test empty and whitespace strings
+fn test_empty_and_whitespace() {
+    let empty = "";
+    // @expect-output: 0
+    print(empty.len());
+    // @expect-output: true
+    print(empty.is_empty());
+
+    // Various whitespace
+    let spaces = "   ";
+    // @expect-output: true
+    print(spaces.trim().is_empty());
+
+    // Unicode whitespace
+    let unicode_space = "\u{2003}";  // Em space
+    // @expect-output: 1
+    print(unicode_space.chars().count());
+
+    // No-break space
+    let nbsp = "\u{00A0}";
+    // @expect-output: false
+    print(nbsp.is_empty());
+}
+
+/// Test very long strings
+fn test_long_strings() {
+    // Create a long string
+    let long = "a".repeat(100000);
+    // @expect-output: 100000
+    print(long.len());
+
+    // Concatenation
+    let concat = long.clone() + &long;
+    // @expect-output: 200000
+    print(concat.len());
+
+    // Search in long string
+    // @expect-output: true
+    print(long.contains("aaa"));
+}
+
+fn main() {
+    print("Testing string encoding and Unicode handling...");
+
+    test_ascii();
+    test_multibyte_utf8();
+    test_normalization();
+    test_invisible_characters();
+    test_bidirectional();
+    test_emoji_sequences();
+    test_grapheme_clusters();
+    test_string_slicing();
+    test_escape_sequences();
+    test_case_conversion();
+    test_string_comparison();
+    test_replacement_character();
+    test_empty_and_whitespace();
+    test_long_strings();
+
+    print("String encoding tests complete.");
+}

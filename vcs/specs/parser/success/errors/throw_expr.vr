@@ -1,0 +1,186 @@
+// @test: parse-pass
+// @tier: 0
+// @category: errors
+// @description: Test throw expression parsing
+
+fn test_basic_throw() {
+    // Simple throw
+    throw Error.new("Something went wrong");
+
+    // Throw enum variant
+    throw ValidationError.Empty;
+
+    // Throw with data
+    throw ParseError.InvalidToken(token, position);
+
+    // Throw struct
+    throw Error { code: 500, message: "Internal error" };
+}
+
+fn test_throw_in_conditions() {
+    // Throw in if statement
+    if !is_valid(input) {
+        throw ValidationError.Invalid;
+    }
+
+    // Throw in else branch
+    if condition {
+        process();
+    } else {
+        throw Error.NotMet;
+    }
+
+    // Throw in match arm
+    match result {
+        Ok(value) => value,
+        Err(e) => throw e
+    }
+
+    // Throw in guard failure
+    match value {
+        x if x > 0 => x,
+        _ => throw Error.MustBePositive
+    }
+}
+
+fn test_throw_expressions() {
+    // Throw as expression in if-else
+    let result = if valid { value } else { throw Error.Invalid };
+
+    // Throw in match expression
+    let processed = match input {
+        Some(x) => process(x),
+        None => throw Error.MissingInput
+    };
+
+    // Throw in null coalesce
+    let value = maybe_value ?? throw Error.ValueRequired;
+
+    // Throw in logical expressions
+    let result = validate() || throw Error.ValidationFailed;
+}
+
+fn test_throw_with_construction() {
+    // Throw with constructor
+    throw HttpError.new(404, "Not Found");
+
+    // Throw with builder pattern
+    throw ErrorBuilder.new()
+        .code(500)
+        .message("Server Error")
+        .cause(inner_error)
+        .build();
+
+    // Throw with method chain
+    throw Error.from(source).with_context("During processing");
+
+    // Throw with format string
+    throw Error.new(f"Invalid value: {value}");
+}
+
+fn test_throw_in_functions() {
+    // Function that throws
+    fn validate(x: Int) throws(ValidationError) {
+        if x < 0 {
+            throw ValidationError.Negative;
+        }
+        if x > 100 {
+            throw ValidationError.TooLarge;
+        }
+    }
+
+    // Multiple throw points
+    fn process(input: Text) throws(ProcessError) -> Output {
+        if input.is_empty() {
+            throw ProcessError.EmptyInput;
+        }
+
+        let parsed = parse(input) ?? throw ProcessError.ParseFailed;
+
+        if !validate(parsed) {
+            throw ProcessError.Invalid;
+        }
+
+        transform(parsed)
+    }
+}
+
+fn test_throw_in_closures() {
+    // Closure that throws
+    let validator = |x| {
+        if x < 0 {
+            throw Error.Negative;
+        }
+        x
+    };
+
+    // Throw in closure body
+    items.map(|item| {
+        if item.is_invalid() {
+            throw ItemError.Invalid(item.id);
+        }
+        item.process()
+    });
+}
+
+fn test_throw_error_types() {
+    // Standard error types
+    throw std.io.Error.NotFound(path);
+    throw std.net.Error.ConnectionRefused(host, port);
+    throw std.json.ParseError.UnexpectedToken(token);
+
+    // Domain error
+    throw UserError.NotFound(user_id);
+    throw OrderError.AlreadyProcessed(order_id);
+
+    // Composite error
+    throw Error.Multiple([error1, error2, error3]);
+
+    // Wrapped error
+    throw Error.Wrap(inner, "Additional context");
+}
+
+fn test_throw_control_flow() {
+    // Throw terminates current execution path
+    fn early_throw(items: List<Item>) throws(ProcessError) -> List<Result> {
+        let mut results = List.new();
+        for item in items {
+            if item.is_fatal() {
+                throw ProcessError.Fatal(item);
+                // Code below is unreachable
+            }
+            results.push(process(item));
+        }
+        results
+    }
+
+    // Throw in try block
+    try {
+        if should_fail {
+            throw Error.Forced;
+        }
+        normal_operation();
+    } recover {
+        Error.Forced => handle_forced(),
+        e => handle_other(e)
+    }
+}
+
+fn test_throw_with_union_types() {
+    // Function with union error type
+    fn complex_op() throws(IoError | ParseError | ValidationError) {
+        throw IoError.NotFound;
+        // or
+        throw ParseError.Syntax;
+        // or
+        throw ValidationError.Empty;
+    }
+
+    // Conditional throw of different types
+    fn conditional_throw(kind: ErrorKind) throws(IoError | NetworkError) {
+        match kind {
+            ErrorKind.Io => throw IoError.Generic,
+            ErrorKind.Network => throw NetworkError.Timeout
+        }
+    }
+}

@@ -1,0 +1,108 @@
+// =============================================================================
+// iterator_by_ref_test.vr - Iterator.by_ref() adapter
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: iterator, by_ref, borrowing, adapter
+// @description: Tests for Iterator.by_ref() which allows partial consumption
+//               of an iterator through a borrowed wrapper.
+// =============================================================================
+
+mount core.base.iterator.{ByRef};
+
+// =============================================================================
+// Section 1: Basic by_ref usage
+// =============================================================================
+
+@test
+fn test_by_ref_type_exists() {
+    // Verify ByRef type is accessible
+    let mut iter = [1, 2, 3].iter();
+    let mut borrowed = iter.by_ref();
+    let _ = borrowed.next();
+}
+
+@test
+fn test_by_ref_returns_elements() {
+    let mut iter = [10, 20, 30].iter();
+    let mut borrowed = iter.by_ref();
+    let first = borrowed.next();
+    assert(first is Some);
+}
+
+@test
+fn test_by_ref_exhaustion() {
+    let mut iter = [1].iter();
+    let mut borrowed = iter.by_ref();
+    let _ = borrowed.next();
+    let second = borrowed.next();
+    assert(second is None);
+}
+
+// =============================================================================
+// Section 2: Partial consumption
+// =============================================================================
+
+@test
+fn test_by_ref_partial_consume() {
+    // After consuming some elements via by_ref,
+    // the original iterator should continue from where we left off
+    let mut iter = [1, 2, 3, 4, 5].iter();
+    let mut borrowed = iter.by_ref();
+    let _ = borrowed.next(); // consume 1
+    let _ = borrowed.next(); // consume 2
+    // Now iter should yield 3 next
+    let third = iter.next();
+    assert(third is Some);
+}
+
+// =============================================================================
+// Section 3: Empty iterator
+// =============================================================================
+
+@test
+fn test_by_ref_empty_iterator() {
+    let empty: List<Int> = [];
+    let mut iter = empty.iter();
+    let mut borrowed = iter.by_ref();
+    let val = borrowed.next();
+    assert(val is None);
+}
+
+// =============================================================================
+// Section 4: by_ref with count
+// =============================================================================
+
+@test
+fn test_by_ref_count() {
+    let mut iter = [1, 2, 3, 4, 5].iter();
+    let mut borrowed = iter.by_ref();
+    let count = borrowed.count();
+    assert_eq(count, 5);
+}
+
+// =============================================================================
+// Section 5: by_ref with size_hint
+// =============================================================================
+
+@test
+fn test_by_ref_size_hint() {
+    let mut iter = [1, 2, 3].iter();
+    let mut borrowed = iter.by_ref();
+    let hint = borrowed.size_hint();
+    assert_eq(hint.0, 3);
+}
+
+@test
+fn test_by_ref_size_hint_after_consume() {
+    let mut iter = [1, 2, 3].iter();
+    let mut borrowed = iter.by_ref();
+    let _ = borrowed.next();
+    let hint = borrowed.size_hint();
+    assert_eq(hint.0, 2);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

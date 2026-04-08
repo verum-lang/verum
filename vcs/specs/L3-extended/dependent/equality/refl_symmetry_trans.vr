@@ -1,0 +1,134 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, axioms, refl, symmetry, transitivity
+
+/// Reflexivity, symmetry, transitivity - core equality axioms
+///
+/// The three fundamental properties of equality that make it
+/// an equivalence relation.
+
+/// Equality witness
+type EqWitness<T> is | EqRefl;
+
+/// Reflexivity: a = a
+fn eq_refl<T>() -> EqWitness<T> { EqRefl }
+
+/// Symmetry: if a = b then b = a
+fn eq_symm<T>(p: EqWitness<T>) -> EqWitness<T> {
+    match p { EqRefl => EqRefl }
+}
+
+/// Transitivity: if a = b and b = c then a = c
+fn eq_trans<T>(p: EqWitness<T>, q: EqWitness<T>) -> EqWitness<T> {
+    match (p, q) { (EqRefl, EqRefl) => EqRefl }
+}
+
+/// Congruence: f(a) = f(b) when a = b
+fn eq_cong<A, B>(f: fn(A) -> B, p: EqWitness<A>) -> EqWitness<B> {
+    match p { EqRefl => EqRefl }
+}
+
+/// Double symmetry is identity: symm(symm(p)) = p
+fn symm_symm<T>(p: EqWitness<T>) -> EqWitness<T> {
+    eq_symm(eq_symm(p))
+}
+
+/// Left identity: refl . p = p
+fn trans_refl_left<T>(p: EqWitness<T>) -> EqWitness<T> {
+    eq_trans(eq_refl(), p)
+}
+
+/// Right identity: p . refl = p
+fn trans_refl_right<T>(p: EqWitness<T>) -> EqWitness<T> {
+    eq_trans(p, eq_refl())
+}
+
+/// Left inverse: symm(p) . p = refl
+fn trans_symm_left<T>(p: EqWitness<T>) -> EqWitness<T> {
+    eq_trans(eq_symm(p), p)
+}
+
+/// Right inverse: p . symm(p) = refl
+fn trans_symm_right<T>(p: EqWitness<T>) -> EqWitness<T> {
+    eq_trans(p, eq_symm(p))
+}
+
+/// Associativity of transitivity
+fn trans_assoc<T>(
+    p: EqWitness<T>,
+    q: EqWitness<T>,
+    r: EqWitness<T>
+) -> EqWitness<T> {
+    // (p . q) . r = p . (q . r)
+    let left = eq_trans(eq_trans(p, q), r);
+    let right = eq_trans(p, eq_trans(q, r));
+    left  // Both paths equal
+}
+
+/// Composition of congruences
+fn cong_compose<A, B, C>(
+    f: fn(A) -> B,
+    g: fn(B) -> C,
+    p: EqWitness<A>
+) -> EqWitness<C> {
+    let pb = eq_cong(f, p);    // f(a) = f(b)
+    let pc = eq_cong(g, pb);   // g(f(a)) = g(f(b))
+    pc
+}
+
+/// Congruence for binary functions
+fn cong2<A, B, C>(
+    f: fn(A, B) -> C,
+    pa: EqWitness<A>,
+    pb: EqWitness<B>
+) -> EqWitness<C> {
+    match (pa, pb) { (EqRefl, EqRefl) => EqRefl }
+}
+
+/// Chain multiple equalities
+fn chain3<T>(p: EqWitness<T>, q: EqWitness<T>, r: EqWitness<T>) -> EqWitness<T> {
+    eq_trans(eq_trans(p, q), r)
+}
+
+fn chain4<T>(
+    p: EqWitness<T>,
+    q: EqWitness<T>,
+    r: EqWitness<T>,
+    s: EqWitness<T>
+) -> EqWitness<T> {
+    eq_trans(eq_trans(eq_trans(p, q), r), s)
+}
+
+/// Equality respects function application
+fn ap_id<T>(p: EqWitness<T>) -> EqWitness<T> {
+    eq_cong(|x: T| x, p)
+}
+
+fn main() {
+    // Basic operations
+    let r: EqWitness<Int> = eq_refl();
+    let s = eq_symm(r);
+    let t = eq_trans(r, s);
+
+    // Double symmetry
+    let ds = symm_symm(r);
+
+    // Identity laws
+    let left = trans_refl_left(r);
+    let right = trans_refl_right(r);
+
+    // Inverse laws
+    let il = trans_symm_left(r);
+    let ir = trans_symm_right(r);
+
+    // Chains
+    let c3 = chain3(r, r, r);
+    let c4 = chain4(r, r, r, r);
+
+    // Congruence
+    let doubled = eq_cong(|x: Int| x * 2, r);
+
+    // Binary congruence
+    let bin = cong2(|a: Int, b: Int| a + b, r, r);
+}

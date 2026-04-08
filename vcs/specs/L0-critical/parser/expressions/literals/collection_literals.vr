@@ -1,0 +1,249 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, collection
+
+// Collection literal expressions
+
+// ============================================================================
+// SECTION 1: List/Array Literals
+// ============================================================================
+
+fn test_basic_list_literals() {
+    // Empty list
+    let empty_list: List<Int> = [];
+
+    // List with elements
+    let numbers = [1, 2, 3, 4, 5];
+    let strings = ["a", "b", "c"];
+    let bools = [true, false, true];
+}
+
+fn test_list_with_trailing_comma() {
+    // List with trailing comma
+    let trailing = [
+        1,
+        2,
+        3,
+    ];
+}
+
+fn test_nested_lists() {
+    // Nested lists
+    let matrix = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ];
+}
+
+fn test_list_repeat_syntax() {
+    // List repeat syntax
+    let zeros = [0; 10];
+    let empty_strings = [""; 5];
+}
+
+// ============================================================================
+// SECTION 2: Map/Dictionary Literals
+// ============================================================================
+
+fn test_basic_map_literals() {
+    // Empty map
+    let empty_map: Map<Text, Int> = {};
+
+    // Map with string keys
+    let ages = {"Alice": 30, "Bob": 25, "Charlie": 35};
+
+    // Map with trailing comma
+    let config = {
+        "host": "localhost",
+        "port": "8080",
+    };
+}
+
+fn test_map_with_expressions() {
+    fn compute_value() -> Int { 42 }
+    fn get_key() -> Text { "key" }
+    fn dynamic_value() -> Int { 100 }
+
+    let key1 = "foo";
+    let value1 = 10;
+    let key2 = "bar";
+
+    // Map with computed keys and values
+    let computed_map = {
+        key1: value1,
+        key2: compute_value(),
+        get_key(): dynamic_value(),
+    };
+}
+
+// ============================================================================
+// SECTION 3: Set Literals
+// ============================================================================
+
+fn test_set_literals() {
+    // Set literals with type annotation (same syntax as braces)
+    let numbers_set: Set<Int> = {1, 2, 3, 4, 5};
+    let strings_set: Set<Text> = {"a", "b", "c"};
+
+    // Set using macro-style
+    let via_macro = {1, 2, 3, 4, 5};
+
+    // Empty set
+    let empty_set: Set<Int> = {};
+}
+
+// ============================================================================
+// SECTION 4: Tuple Literals
+// ============================================================================
+
+fn test_tuple_literals() {
+    // Tuple literals
+    let pair = (1, 2);
+    let triple = (1, "two", 3.0);
+    let unit = ();
+    let single = (42,);
+}
+
+// ============================================================================
+// SECTION 5: Struct Literals
+// ============================================================================
+
+type Point is { x: Int, y: Int };
+
+fn test_basic_struct_literals() {
+    // Basic struct initialization
+    let point = Point { x: 10, y: 20 };
+    let origin = Point { x: 0, y: 0 };
+}
+
+fn test_struct_shorthand() {
+    // Struct with field shorthand
+    let x = 5;
+    let y = 10;
+    let p = Point { x, y };
+}
+
+fn test_struct_update_syntax() {
+    let p = Point { x: 5, y: 10 };
+
+    // Struct update syntax
+    let p2 = Point { x: 100, ..p };
+}
+
+// ============================================================================
+// SECTION 6: Variant/Sum Type Constructors
+// ============================================================================
+
+type Color is Red | Green | Blue | Rgb(Int, Int, Int);
+
+fn test_variant_constructors() {
+    // Variant constructors
+    let red = Color.Red;
+    let custom = Color.Rgb(255, 128, 0);
+}
+
+// ============================================================================
+// SECTION 7: Option/Maybe and Result Literals
+// ============================================================================
+
+fn test_maybe_literals() {
+    // Option/Maybe literals
+    let some_value = Some(42);
+    let no_value: Maybe<Int> = None;
+}
+
+fn test_result_literals() {
+    // Result literals
+    let ok_result: Result<Int, Text> = Ok(42);
+    let err_result: Result<Int, Text> = Err("failed");
+}
+
+// ============================================================================
+// SECTION 8: Range Literals
+// ============================================================================
+
+fn test_range_literals() {
+    // Range literals
+    let exclusive = 0..10;
+    let inclusive = 0..=10;
+    let from = 5..;
+    let to = ..10;
+}
+
+// ============================================================================
+// SECTION 9: Heap and Shared Literals
+// ============================================================================
+
+fn test_heap_literals() {
+    // Heap/Box literals
+    let boxed = Heap.new(42);
+    let boxed_struct = Heap.new(Point { x: 1, y: 2 });
+}
+
+fn test_shared_literals() {
+    let data = 42;
+    // Shared/Arc literals
+    let shared = Shared.new(data);
+}
+
+// ============================================================================
+// SECTION 10: Collection Conversions
+// ============================================================================
+
+fn test_string_collection_conversions() {
+    // String collection conversions
+    let chars: List<Char> = "hello".chars().collect();
+    let bytes: List<u8> = "hello".bytes().collect();
+}
+
+fn test_collection_from_iterator() {
+    type K is Int;
+    type V is Text;
+
+    // Collection from iterator
+    let from_range: List<Int> = (0..10).collect();
+
+    fn get_map() -> Map<K, V> { {} }
+    let map = get_map();
+    let from_map: List<(K, V)> = map.entries().collect();
+}
+
+// ============================================================================
+// SECTION 11: Comprehension-style Literals
+// ============================================================================
+
+fn test_list_comprehensions() {
+    // Comprehension-style (if supported)
+    let squares = [x * x for x in 0..10];
+
+    let items = [1, -2, 3, -4, 5];
+    let filtered = [x for x in items if x > 0];
+}
+
+// ============================================================================
+// SECTION 12: Mixed Type Collections
+// ============================================================================
+
+type Value is Int(Int) | Text(Text) | Bool(Bool);
+
+fn test_mixed_type_collections() {
+    // Mixed type collections via enum wrapper
+    let mixed: List<Value> = [Value.Int(1), Value.Text("two"), Value.Bool(true)];
+}
+
+// ============================================================================
+// SECTION 13: Nested Collection Literals
+// ============================================================================
+
+fn test_nested_collection_literals() {
+    // Nested collection literals
+    let complex = {
+        "users": [
+            { "name": "Alice", "age": 30 },
+            { "name": "Bob", "age": 25 },
+        ],
+        "count": 2,
+    };
+}

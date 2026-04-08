@@ -1,0 +1,20 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, dangling-reference, closure, cbgr
+// @description: Tests that closures escaping with references to local variables are detected at runtime via CBGR
+
+fn create_adder() -> fn(Int) -> Int {
+    let base = 10;
+    let base_ref = &base;
+
+    // Closure captures reference - CBGR tracks the generation
+    |x| *base_ref + x
+}
+// When function returns, 'base' is deallocated and generation is bumped
+
+fn main() {
+    let add = create_adder();
+    // Invoking closure dereferences base_ref, triggering CBGR check
+    print(add(5));  // PANIC: generation mismatch (base no longer exists)
+}

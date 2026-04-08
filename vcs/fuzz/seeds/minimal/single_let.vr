@@ -1,0 +1,4 @@
+// Minimal: Single let binding
+fn main() {
+    let x = 42;
+}

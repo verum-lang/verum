@@ -1,0 +1,93 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, basic-types
+// @description: Test basic integer and float operations through FFI
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_add_i32(a: Int, b: Int) -> Int;
+    fn ffi_add_i64(a: Int, b: Int) -> Int;
+    fn ffi_add_f64(a: Float, b: Float) -> Float;
+    fn ffi_mul_i32(a: Int, b: Int) -> Int;
+    fn ffi_div_i32(a: Int, b: Int) -> Int;
+    fn ffi_max_i64(a: Int, b: Int) -> Int;
+    fn ffi_min_i64(a: Int, b: Int) -> Int;
+    fn ffi_abs_i64(a: Int) -> Int;
+    fn ffi_clamp_i64(value: Int, min: Int, max: Int) -> Int;
+    fn ffi_get_magic() -> Int;
+    fn ffi_get_version() -> Int;
+    fn ffi_identity_i64(x: Int) -> Int;
+}
+
+fn main() {
+    // Test integer addition
+    let r1 = ffi_add_i32(10, 32);
+    print("add_i32(10,32)="); print(r1); print("\n");
+    assert(r1 == 42);
+
+    let r2 = ffi_add_i32(-10, 10);
+    print("add_i32(-10,10)="); print(r2); print("\n");
+    assert(r2 == 0);
+
+    let r3 = ffi_add_i32(100, -50);
+    print("add_i32(100,-50)="); print(r3); print("\n");
+    assert(r3 == 50);
+
+    // Test 64-bit addition
+    let r4 = ffi_add_i64(1000000000, 2000000000);
+    print("add_i64="); print(r4); print("\n");
+    assert(r4 == 3000000000);
+
+    // Test float addition
+    let sum = ffi_add_f64(3.14, 2.86);
+    print("add_f64="); print(sum); print("\n");
+    assert(sum > 5.99 && sum < 6.01);
+
+    // Test multiplication
+    let r5 = ffi_mul_i32(6, 7);
+    print("mul_i32(6,7)="); print(r5); print("\n");
+    assert(r5 == 42);
+
+    // Test division
+    let r6 = ffi_div_i32(100, 10);
+    print("div_i32(100,10)="); print(r6); print("\n");
+    assert(r6 == 10);
+
+    // Test max/min
+    let r7 = ffi_max_i64(10, 20);
+    print("max_i64(10,20)="); print(r7); print("\n");
+    assert(r7 == 20);
+
+    let r8 = ffi_min_i64(10, 20);
+    print("min_i64(10,20)="); print(r8); print("\n");
+    assert(r8 == 10);
+
+    // Test absolute value
+    let r9 = ffi_abs_i64(-42);
+    print("abs_i64(-42)="); print(r9); print("\n");
+    assert(r9 == 42);
+
+    // Test clamp
+    let r10 = ffi_clamp_i64(50, 0, 100);
+    print("clamp_i64(50,0,100)="); print(r10); print("\n");
+    assert(r10 == 50);
+
+    // Test constants
+    let v = ffi_get_version();
+    print("version="); print(v); print("\n");
+    assert(v == 0x010000);
+
+    let m = ffi_get_magic();
+    print("magic="); print(m); print("\n");
+    assert(m == 0xDEADBEEFCAFEBABE);
+
+    // Test identity
+    let r11 = ffi_identity_i64(12345);
+    print("identity(12345)="); print(r11); print("\n");
+    assert(r11 == 12345);
+
+    print("All tests passed!\n");
+}

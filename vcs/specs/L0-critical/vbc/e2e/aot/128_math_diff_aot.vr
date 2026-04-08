@@ -1,0 +1,187 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, differential, math, primes, numerical
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT math algorithms — mirror of interpreter test for differential comparison
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { false }
+    else if n < 4 { true }
+    else if n % 2 == 0 { false }
+    else {
+        let mut i = 3;
+        let mut prime = true;
+        while i * i <= n {
+            if n % i == 0 { prime = false; }
+            i = i + 2;
+        }
+        prime
+    }
+}
+
+fn count_primes(limit: Int) -> Int {
+    let mut count = 0;
+    let mut n = 2;
+    while n <= limit {
+        if is_prime(n) { count = count + 1; }
+        n = n + 1;
+    }
+    count
+}
+
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else {
+        let mut x = n;
+        let mut y = (x + 1) / 2;
+        while y < x {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        x
+    }
+}
+
+fn mod_pow_iter(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % modulus; }
+        e = e / 2;
+        b = (b * b) % modulus;
+    }
+    result
+}
+
+fn sum_squares(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + i * i;
+        i = i + 1;
+    }
+    total
+}
+
+fn sum_squares_formula(n: Int) -> Int {
+    n * (n + 1) * (2 * n + 1) / 6
+}
+
+fn sum_cubes(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= n {
+        total = total + i * i * i;
+        i = i + 1;
+    }
+    total
+}
+
+fn tribonacci(n: Int) -> Int {
+    if n == 0 { 0 }
+    else if n <= 2 { 1 }
+    else {
+        let mut a = 0;
+        let mut b = 1;
+        let mut c = 1;
+        let mut i = 3;
+        while i <= n {
+            let next = a + b + c;
+            a = b;
+            b = c;
+            c = next;
+            i = i + 1;
+        }
+        c
+    }
+}
+
+@allow(unbounded_recursion)
+fn euler_totient(n: Int) -> Int {
+    let mut result = n;
+    let mut p = 2;
+    let mut m = n;
+    while p * p <= m {
+        if m % p == 0 {
+            while m % p == 0 { m = m / p; }
+            result = result - result / p;
+        }
+        p = p + 1;
+    }
+    if m > 1 { result = result - result / m; }
+    result
+}
+
+fn count_digits(n: Int) -> Int {
+    if n == 0 { 1 }
+    else {
+        let mut count = 0;
+        let mut m = if n < 0 { -n } else { n };
+        while m > 0 { count = count + 1; m = m / 10; }
+        count
+    }
+}
+
+fn reverse_number(n: Int) -> Int {
+    let mut result = 0;
+    let mut m = if n < 0 { -n } else { n };
+    while m > 0 { result = result * 10 + m % 10; m = m / 10; }
+    if n < 0 { -result } else { result }
+}
+
+fn main() -> Int {
+    // Primes
+    assert_eq(count_primes(10), 4);
+    assert_eq(count_primes(100), 25);
+    assert_eq(count_primes(200), 46);
+    assert(is_prime(97));
+    assert(!is_prime(100));
+    assert(is_prime(101));
+
+    // Integer square root
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(10000), 100);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(15), 3);
+
+    // Modular exponentiation
+    assert_eq(mod_pow_iter(2, 10, 1000), 24);
+    assert_eq(mod_pow_iter(3, 5, 100), 43);
+    assert_eq(mod_pow_iter(7, 3, 13), 5);
+
+    // Sum formulas
+    assert_eq(sum_squares(10), 385);
+    assert_eq(sum_squares(100), 338350);
+    let mut k = 1;
+    while k <= 50 {
+        assert_eq(sum_squares(k), sum_squares_formula(k));
+        k = k + 1;
+    }
+
+    // Sum of cubes
+    assert_eq(sum_cubes(5), 225);
+    assert_eq(sum_cubes(10), 3025);
+
+    // Tribonacci
+    assert_eq(tribonacci(0), 0);
+    assert_eq(tribonacci(5), 7);
+    assert_eq(tribonacci(10), 149);
+
+    // Euler totient
+    assert_eq(euler_totient(7), 6);
+    assert_eq(euler_totient(12), 4);
+    assert_eq(euler_totient(100), 40);
+
+    // Digit operations
+    assert_eq(count_digits(12345), 5);
+    assert_eq(reverse_number(123), 321);
+    assert_eq(reverse_number(12321), 12321);
+
+    print("[OK] 128_math_diff_aot");
+    0
+}

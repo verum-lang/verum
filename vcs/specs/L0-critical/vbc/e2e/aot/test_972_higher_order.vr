@@ -1,0 +1,192 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: higher-order, closures, functional
+// @description: Higher-order functions with closures
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x + n }
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { x * n }
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn apply_n(f: fn(Int) -> Int, x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_closures() -> Int {
+    let add5 = make_adder(5);
+    let mul3 = make_multiplier(3);
+    let r1 = add5(10);
+    let r2 = mul3(10);
+    if r1 != 15 {
+        print(f"FAIL closure add5: expected 15, got {r1}");
+        return 1;
+    }
+    if r2 != 30 {
+        print(f"FAIL closure mul3: expected 30, got {r2}");
+        return 1;
+    }
+    print("  closures: OK");
+    0
+}
+
+fn test_compose() -> Int {
+    let add5 = make_adder(5);
+    let mul3 = make_multiplier(3);
+    let add_then_mul = compose(mul3, add5);
+    let result = add_then_mul(10);
+    if result != 45 {
+        print(f"FAIL compose: expected 45, got {result}");
+        return 1;
+    }
+    print("  compose: OK");
+    0
+}
+
+fn test_apply_n() -> Int {
+    let double = make_multiplier(2);
+    let result = apply_n(double, 1, 10);
+    if result != 1024 {
+        print(f"FAIL apply_n: expected 1024, got {result}");
+        return 1;
+    }
+    print("  apply_n: OK");
+    0
+}
+
+fn list_map(items: &List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn list_filter(items: &List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn list_fold(items: &List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_map() -> Int {
+    let mut items = List.new();
+    items.push(1);
+    items.push(2);
+    items.push(3);
+    items.push(4);
+    items.push(5);
+
+    let squared = list_map(&items, |x: Int| -> Int { x * x });
+    let sum = list_fold(&squared, 0, |a: Int, b: Int| -> Int { a + b });
+    if sum != 55 {
+        print(f"FAIL map: expected 55, got {sum}");
+        return 1;
+    }
+    print("  map: OK");
+    0
+}
+
+fn test_filter() -> Int {
+    let mut items = List.new();
+    let mut i = 1;
+    while i <= 10 {
+        items.push(i);
+        i = i + 1;
+    }
+
+    let evens = list_filter(&items, |x: Int| -> Bool { x % 2 == 0 });
+    if evens.len() != 5 {
+        print(f"FAIL filter len: expected 5, got {evens.len()}");
+        return 1;
+    }
+    let sum = list_fold(&evens, 0, |a: Int, b: Int| -> Int { a + b });
+    if sum != 30 {
+        print(f"FAIL filter sum: expected 30, got {sum}");
+        return 1;
+    }
+    print("  filter: OK");
+    0
+}
+
+fn test_chain() -> Int {
+    let mut items = List.new();
+    let mut i = 1;
+    while i <= 10 {
+        items.push(i);
+        i = i + 1;
+    }
+
+    let squared = list_map(&items, |x: Int| -> Int { x * x });
+    let big = list_filter(&squared, |x: Int| -> Bool { x > 20 });
+    let sum = list_fold(&big, 0, |a: Int, b: Int| -> Int { a + b });
+    if sum != 355 {
+        print(f"FAIL chain: expected 355, got {sum}");
+        return 1;
+    }
+    print("  chain: OK");
+    0
+}
+
+fn test_nested_closures() -> Int {
+    let base = 10;
+    let f = |x: Int| -> Int {
+        x + base
+    };
+    let result = f(5) * 2;
+    if result != 30 {
+        print(f"FAIL nested_closures: expected 30, got {result}");
+        return 1;
+    }
+    print("  nested_closures: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Higher-Order Function Tests:");
+    let mut failures = 0;
+    failures = failures + test_closures();
+    failures = failures + test_compose();
+    failures = failures + test_apply_n();
+    failures = failures + test_map();
+    failures = failures + test_filter();
+    failures = failures + test_chain();
+    failures = failures + test_nested_closures();
+
+    if failures == 0 {
+        print("All higher-order function tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

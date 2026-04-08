@@ -1,0 +1,141 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, run-length, compression, encoding
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// Count number of runs in array
+fn count_runs(a: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut runs = 1;
+    let mut i = 1;
+    while i < n {
+        if get(a, i) != get(a, i - 1) { runs = runs + 1; }
+        i = i + 1;
+    }
+    runs
+}
+
+// Get the value and length of the k-th run (0-indexed)
+// Returns value*100 + length (packed)
+fn get_run(a: Arr8, n: Int, k: Int) -> Int {
+    let mut run_idx = 0;
+    let mut i = 0;
+    while i < n {
+        let val = get(a, i);
+        let mut len = 1;
+        while i + len < n {
+            if get(a, i + len) == val { len = len + 1; }
+            else { i = i + len; len = 0; i = i - 1; len = 1; i = i + 1 - 1; // break
+                let mut dummy = 0; dummy = n; // force break
+                i = i + len - 1; // will be incremented
+                len = 0;
+                i = n; // break out
+            }
+        }
+        // Recount properly
+        i = n; // exit outer
+    }
+    // Simpler approach: just iterate
+    let mut ri = 0;
+    let mut j = 0;
+    while j < n {
+        let val = get(a, j);
+        let mut len = 1;
+        while j + len < n {
+            if get(a, j + len) == val { len = len + 1; }
+            else { j = j + len; len = 0; j = n; } // break trick
+        }
+        if len > 0 {
+            if ri == k { return val * 100 + len; }
+            ri = ri + 1;
+            j = j + len;
+        }
+    }
+    -1
+}
+
+// Longest run length
+fn longest_run(a: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut best = 1;
+    let mut cur = 1;
+    let mut i = 1;
+    while i < n {
+        if get(a, i) == get(a, i - 1) {
+            cur = cur + 1;
+            if cur > best { best = cur; }
+        } else {
+            cur = 1;
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// Most frequent value
+fn most_frequent(a: Arr8, n: Int) -> Int {
+    let mut best_val = get(a, 0);
+    let mut best_count = 0;
+    let mut i = 0;
+    while i < n {
+        let v = get(a, i);
+        let mut count = 0;
+        let mut j = 0;
+        while j < n {
+            if get(a, j) == v { count = count + 1; }
+            j = j + 1;
+        }
+        if count > best_count {
+            best_count = count;
+            best_val = v;
+        }
+        i = i + 1;
+    }
+    best_val
+}
+
+fn test_count_runs() -> Int {
+    let a = Arr8 { d0: 1, d1: 1, d2: 2, d3: 2, d4: 2, d5: 3, d6: 1, d7: 0 };
+    assert_eq(count_runs(a, 7), 4);  // [1,1], [2,2,2], [3], [1]
+    let b = Arr8 { d0: 5, d1: 5, d2: 5, d3: 5, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(count_runs(b, 4), 1);
+    let c = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(count_runs(c, 4), 4);
+    1
+}
+
+fn test_longest_run() -> Int {
+    let a = Arr8 { d0: 1, d1: 1, d2: 2, d3: 2, d4: 2, d5: 3, d6: 1, d7: 0 };
+    assert_eq(longest_run(a, 7), 3);
+    let b = Arr8 { d0: 5, d1: 5, d2: 5, d3: 5, d4: 5, d5: 5, d6: 0, d7: 0 };
+    assert_eq(longest_run(b, 6), 6);
+    let c = Arr8 { d0: 1, d1: 2, d2: 1, d3: 2, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(longest_run(c, 4), 1);
+    1
+}
+
+fn test_frequent() -> Int {
+    let a = Arr8 { d0: 1, d1: 2, d2: 2, d3: 3, d4: 2, d5: 0, d6: 0, d7: 0 };
+    assert_eq(most_frequent(a, 5), 2);
+    let b = Arr8 { d0: 7, d1: 7, d2: 7, d3: 7, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(most_frequent(b, 4), 7);
+    1
+}
+
+fn main() -> Int {
+    test_count_runs();
+    test_longest_run();
+    test_frequent();
+    print("DIFF_OK: run_length");
+    0
+}

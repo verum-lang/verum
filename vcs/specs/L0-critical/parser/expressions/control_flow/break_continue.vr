@@ -1,0 +1,190 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, break, continue, loop
+
+fn test_simple_break() {
+    // Simple break
+    for i in items {
+        if done {
+            break;
+        }
+    }
+}
+
+fn test_simple_continue() {
+    // Simple continue
+    for i in items {
+        if skip {
+            continue;
+        }
+        process(i);
+    }
+}
+
+fn test_break_with_value() {
+    // Break with value
+    let found = loop {
+        if condition {
+            break value;
+        }
+    };
+}
+
+fn test_break_expression_value() {
+    // Break with expression value
+    let result = loop {
+        let computed = compute();
+        if computed.valid {
+            break computed.value * 2;
+        }
+    };
+}
+
+fn test_labeled_break() {
+    // Labeled break
+    'outer: for i in 0..10 {
+        for j in 0..10 {
+            if i * j > 50 {
+                break 'outer;
+            }
+        }
+    }
+}
+
+fn test_labeled_continue() {
+    // Labeled continue
+    'outer: for i in 0..10 {
+        for j in 0..10 {
+            if skip_condition(i, j) {
+                continue 'outer;
+            }
+            process(i, j);
+        }
+    }
+}
+
+fn test_labeled_break_value() {
+    // Labeled break with value
+    let result = 'search: loop {
+        for item in collection {
+            if item.matches() {
+                break 'search Some(item);
+            }
+        }
+        break 'search None;
+    };
+}
+
+fn test_break_in_while() {
+    // Break in while loop
+    while true {
+        if termination_condition {
+            break;
+        }
+        work();
+    }
+}
+
+fn test_continue_in_while() {
+    // Continue in while loop
+    while has_more {
+        let item = next();
+        if item.invalid {
+            continue;
+        }
+        process(item);
+    }
+}
+
+fn test_break_in_nested_match() {
+    // Break in nested match
+    for item in items {
+        match item {
+            Item.Stop => break,
+            Item.Skip => continue,
+            Item.Process(data) => handle(data),
+        }
+    }
+}
+
+fn test_multiple_break_points() {
+    // Multiple break points
+    loop {
+        if condition_a {
+            break result_a;
+        }
+        work();
+        if condition_b {
+            break result_b;
+        }
+    }
+}
+
+fn test_continue_with_side_effect() {
+    // Continue with side effect
+    for i in 0..n {
+        if condition {
+            log("skipping");
+            continue;
+        }
+        process(i);
+    }
+}
+
+fn test_break_from_nested_if() {
+    // Break from if inside loop
+    for item in items {
+        if check(item) {
+            if special_condition {
+                break;
+            }
+            normal_process(item);
+        }
+    }
+}
+
+fn test_deeply_nested_break() {
+    // Deeply nested break
+    'outer: for a in items_a {
+        'middle: for b in items_b {
+            'inner: for c in items_c {
+                if cond1 { break 'inner; }
+                if cond2 { break 'middle; }
+                if cond3 { break 'outer; }
+            }
+        }
+    }
+}
+
+fn test_break_in_try_block() {
+    // Break in try block
+    for item in items {
+        try {
+            process(item)?;
+        } recover {
+            e if e.is_fatal() => break,
+            _ => {}
+        }
+    }
+}
+
+fn test_continue_pattern_match() {
+    // Continue based on pattern match
+    for item in items {
+        let Some(value) = item.get_value() else {
+            continue;
+        };
+        use_value(value);
+    }
+}
+
+fn test_break_complex_expression() {
+    // Break with complex expression
+    let final_result = loop {
+        let intermediate = compute();
+        if intermediate.done {
+            break transform(intermediate.data).finalize();
+        }
+    };
+}

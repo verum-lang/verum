@@ -1,0 +1,112 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: string, text, methods, advanced
+// @description: Test advanced Text methods - contains, starts_with, split, etc.
+
+fn test_text_contains() -> Int {
+    let s = "Hello World";
+    if !s.contains("World") {
+        print("FAIL contains World");
+        return 1;
+    }
+    if !s.contains("Hello") {
+        print("FAIL contains Hello");
+        return 1;
+    }
+    if s.contains("xyz") {
+        print("FAIL contains xyz");
+        return 1;
+    }
+    print("  text_contains: OK");
+    0
+}
+
+fn test_text_starts_ends() -> Int {
+    let s = "Hello World";
+    if !s.starts_with("Hello") {
+        print("FAIL starts_with Hello");
+        return 1;
+    }
+    if s.starts_with("World") {
+        print("FAIL starts_with World");
+        return 1;
+    }
+    if !s.ends_with("World") {
+        print("FAIL ends_with World");
+        return 1;
+    }
+    if s.ends_with("Hello") {
+        print("FAIL ends_with Hello");
+        return 1;
+    }
+    print("  text_starts_ends: OK");
+    0
+}
+
+fn test_text_to_upper_lower() -> Int {
+    let s = "Hello";
+    let upper = s.to_uppercase();
+    let lower = s.to_lowercase();
+    if upper != "HELLO" {
+        print(f"FAIL uppercase: {upper}");
+        return 1;
+    }
+    if lower != "hello" {
+        print(f"FAIL lowercase: {lower}");
+        return 1;
+    }
+    print("  text_upper_lower: OK");
+    0
+}
+
+fn test_text_trim() -> Int {
+    let s = "  hello  ";
+    let trimmed = s.trim();
+    if trimmed != "hello" {
+        print(f"FAIL trim: '{trimmed}'");
+        return 1;
+    }
+    print("  text_trim: OK");
+    0
+}
+
+fn test_text_replace() -> Int {
+    let s = "hello world hello";
+    let replaced = s.replace("hello", "hi");
+    if replaced != "hi world hi" {
+        print(f"FAIL replace: {replaced}");
+        return 1;
+    }
+    print("  text_replace: OK");
+    0
+}
+
+fn test_text_repeat() -> Int {
+    let s = "ab";
+    let repeated = s.repeat(3);
+    if repeated != "ababab" {
+        print(f"FAIL repeat: {repeated}");
+        return 1;
+    }
+    print("  text_repeat: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Advanced String Tests:");
+    let mut failures = 0;
+    failures = failures + test_text_contains();
+    failures = failures + test_text_starts_ends();
+    failures = failures + test_text_to_upper_lower();
+    failures = failures + test_text_trim();
+    failures = failures + test_text_replace();
+    failures = failures + test_text_repeat();
+
+    if failures == 0 {
+        print("All advanced string tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,86 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, expressions, literal
+// @description: Test literal expression evaluation in meta functions
+
+// =============================================================================
+// INTEGER LITERALS
+// =============================================================================
+
+meta fn test_int_literal() -> Int {
+    42
+}
+
+meta fn test_negative_int() -> Int {
+    -17
+}
+
+meta fn test_zero() -> Int {
+    0
+}
+
+meta fn test_large_int() -> Int {
+    1000000
+}
+
+// =============================================================================
+// BOOLEAN LITERALS
+// =============================================================================
+
+meta fn test_true() -> Bool {
+    true
+}
+
+meta fn test_false() -> Bool {
+    false
+}
+
+// =============================================================================
+// TEXT LITERALS
+// =============================================================================
+
+meta fn test_text_literal() -> Text {
+    "hello world"
+}
+
+meta fn test_empty_text() -> Text {
+    ""
+}
+
+meta fn test_text_with_escapes() -> Text {
+    "line1\nline2"
+}
+
+// =============================================================================
+// FLOAT LITERALS
+// =============================================================================
+
+meta fn test_float_literal() -> Float {
+    3.14159
+}
+
+meta fn test_negative_float() -> Float {
+    -2.5
+}
+
+// Main test function
+fn main() {
+    // Integer tests
+    @const assert_eq(test_int_literal(), 42);
+    @const assert_eq(test_negative_int(), -17);
+    @const assert_eq(test_zero(), 0);
+    @const assert_eq(test_large_int(), 1000000);
+
+    // Boolean tests
+    @const assert(test_true());
+    @const assert(!test_false());
+
+    // Text tests
+    @const assert_eq(test_text_literal(), "hello world");
+    @const assert_eq(test_empty_text(), "");
+
+    // Float tests (approximate comparison)
+    @const assert(test_float_literal() > 3.14);
+    @const assert(test_negative_float() < 0.0);
+}

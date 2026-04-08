@@ -1,0 +1,237 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, fenwick-tree, binary-indexed-tree, prefix-sums
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Binary Indexed Tree (Fenwick tree).
+// Supports point updates and prefix sum queries in O(log n).
+// Uses 1-indexed array of size 8.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Fenwick tree: 1-indexed, size 8.
+// tree[0] unused. tree[1..8] store the BIT values.
+// We use indices 0-7 in the array, mapping BIT index i to array index i-1.
+//
+// lowbit(x) = x & (-x). We compute it via loop since bitwise AND is tricky in AOT.
+// For small values we can use a lookup approach.
+
+// Compute lowest set bit of x (assumes x > 0, x <= 8)
+fn lowbit(x: Int) -> Int {
+    // x & (-x): lowest set bit
+    // For x in 1..8:
+    // 1(001)->1, 2(010)->2, 3(011)->1, 4(100)->4, 5(101)->1, 6(110)->2, 7(111)->1, 8(1000)->8
+    if x == 1 { 1 }
+    else if x == 2 { 2 }
+    else if x == 3 { 1 }
+    else if x == 4 { 4 }
+    else if x == 5 { 1 }
+    else if x == 6 { 2 }
+    else if x == 7 { 1 }
+    else { 8 } // x == 8
+}
+
+// Point update: add delta to position idx (1-indexed, 1 <= idx <= 8)
+fn bit_update(tree: Arr8, idx: Int, delta: Int) -> Arr8 {
+    let mut t = tree;
+    let mut i = idx;
+    while i <= 8 {
+        let cur = a8_get(t, i - 1);
+        t = a8_set(t, i - 1, cur + delta);
+        i = i + lowbit(i);
+    }
+    t
+}
+
+// Prefix sum: sum of elements from index 1 to idx (1-indexed)
+fn bit_query(tree: Arr8, idx: Int) -> Int {
+    let mut sum = 0;
+    let mut i = idx;
+    while i > 0 {
+        sum = sum + a8_get(tree, i - 1);
+        i = i - lowbit(i);
+    }
+    sum
+}
+
+// Range sum: sum of elements from lo to hi (inclusive, 1-indexed)
+fn bit_range_query(tree: Arr8, lo: Int, hi: Int) -> Int {
+    if lo <= 1 { bit_query(tree, hi) }
+    else { bit_query(tree, hi) - bit_query(tree, lo - 1) }
+}
+
+// Build BIT from an array of values (1-indexed, vals[0..7] -> positions 1..8)
+fn bit_build(vals: Arr8) -> Arr8 {
+    let mut tree = a8_zero();
+    let mut i = 1;
+    while i <= 8 {
+        tree = bit_update(tree, i, a8_get(vals, i - 1));
+        i = i + 1;
+    }
+    tree
+}
+
+// Brute-force prefix sum for verification
+fn naive_prefix_sum(vals: Arr8, idx: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < idx {
+        sum = sum + a8_get(vals, i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_lowbit() {
+    assert_eq(lowbit(1), 1);
+    assert_eq(lowbit(2), 2);
+    assert_eq(lowbit(3), 1);
+    assert_eq(lowbit(4), 4);
+    assert_eq(lowbit(5), 1);
+    assert_eq(lowbit(6), 2);
+    assert_eq(lowbit(7), 1);
+    assert_eq(lowbit(8), 8);
+}
+
+fn test_single_update_query() {
+    let mut tree = a8_zero();
+    tree = bit_update(tree, 3, 5);
+    // prefix_sum(1) = 0, prefix_sum(2) = 0, prefix_sum(3) = 5
+    assert_eq(bit_query(tree, 1), 0);
+    assert_eq(bit_query(tree, 2), 0);
+    assert_eq(bit_query(tree, 3), 5);
+    assert_eq(bit_query(tree, 4), 5);
+    assert_eq(bit_query(tree, 8), 5);
+}
+
+fn test_build_and_query() {
+    // Values: [3, 1, 4, 1, 5, 9, 2, 6]
+    let vals = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 9, a6: 2, a7: 6 };
+    let tree = bit_build(vals);
+    // Verify prefix sums match naive computation
+    let mut i = 1;
+    while i <= 8 {
+        assert_eq(bit_query(tree, i), naive_prefix_sum(vals, i));
+        i = i + 1;
+    }
+    // prefix_sum(1) = 3
+    assert_eq(bit_query(tree, 1), 3);
+    // prefix_sum(4) = 3+1+4+1 = 9
+    assert_eq(bit_query(tree, 4), 9);
+    // prefix_sum(8) = 3+1+4+1+5+9+2+6 = 31
+    assert_eq(bit_query(tree, 8), 31);
+}
+
+fn test_range_queries() {
+    let vals = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 9, a6: 2, a7: 6 };
+    let tree = bit_build(vals);
+    // range [3, 5] = 4 + 1 + 5 = 10
+    assert_eq(bit_range_query(tree, 3, 5), 10);
+    // range [1, 1] = 3
+    assert_eq(bit_range_query(tree, 1, 1), 3);
+    // range [6, 8] = 9 + 2 + 6 = 17
+    assert_eq(bit_range_query(tree, 6, 8), 17);
+    // range [1, 8] = 31
+    assert_eq(bit_range_query(tree, 1, 8), 31);
+    // range [4, 4] = 1
+    assert_eq(bit_range_query(tree, 4, 4), 1);
+}
+
+fn test_update_after_build() {
+    let vals = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let mut tree = bit_build(vals);
+    // Total sum = 36
+    assert_eq(bit_query(tree, 8), 36);
+    // Add 10 to position 4
+    tree = bit_update(tree, 4, 10);
+    // New total = 46
+    assert_eq(bit_query(tree, 8), 46);
+    // prefix_sum(4) was 1+2+3+4=10, now 20
+    assert_eq(bit_query(tree, 4), 20);
+    // prefix_sum(3) unchanged = 6
+    assert_eq(bit_query(tree, 3), 6);
+}
+
+fn test_negative_values() {
+    let mut tree = a8_zero();
+    tree = bit_update(tree, 1, 10);
+    tree = bit_update(tree, 2, -3);
+    tree = bit_update(tree, 3, 5);
+    // prefix_sum(1) = 10
+    assert_eq(bit_query(tree, 1), 10);
+    // prefix_sum(2) = 10 + (-3) = 7
+    assert_eq(bit_query(tree, 2), 7);
+    // prefix_sum(3) = 10 + (-3) + 5 = 12
+    assert_eq(bit_query(tree, 3), 12);
+}
+
+fn test_subtract_update() {
+    // Set position 5 to value 100, then "subtract" 30
+    let mut tree = a8_zero();
+    tree = bit_update(tree, 5, 100);
+    assert_eq(bit_query(tree, 5), 100);
+    tree = bit_update(tree, 5, -30);
+    assert_eq(bit_query(tree, 5), 70);
+    assert_eq(bit_query(tree, 8), 70);
+}
+
+fn test_all_same_values() {
+    // All positions have value 7
+    let vals = Arr8 { a0: 7, a1: 7, a2: 7, a3: 7, a4: 7, a5: 7, a6: 7, a7: 7 };
+    let tree = bit_build(vals);
+    let mut i = 1;
+    while i <= 8 {
+        assert_eq(bit_query(tree, i), 7 * i);
+        i = i + 1;
+    }
+}
+
+fn test_point_query() {
+    // Point query at position i = range_query(i, i) = prefix(i) - prefix(i-1)
+    let vals = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 9, a6: 2, a7: 6 };
+    let tree = bit_build(vals);
+    // Point query at 1
+    assert_eq(bit_range_query(tree, 1, 1), 3);
+    // Point query at 5
+    assert_eq(bit_range_query(tree, 5, 5), 5);
+    // Point query at 6
+    assert_eq(bit_range_query(tree, 6, 6), 9);
+    // Point query at 8
+    assert_eq(bit_range_query(tree, 8, 8), 6);
+}
+
+fn main() -> Int {
+    test_lowbit();
+    test_single_update_query();
+    test_build_and_query();
+    test_range_queries();
+    test_update_after_build();
+    test_negative_values();
+    test_subtract_update();
+    test_all_same_values();
+    test_point_query();
+    print("[OK] 335_fenwick_tree_aot");
+    0
+}

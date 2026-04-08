@@ -1,0 +1,22 @@
+// @test: parse-pass
+// @tier: 0
+// @category: generics
+
+// Generic type definitions
+type Container<T> is { value: T };
+
+type Pair<A, B> is { first: A, second: B };
+
+type Triple<A, B, C> is { a: A, b: B, c: C };
+
+// Generic variant types
+type Maybe<T> is None | Some(T);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Either<L, R> is Left(L) | Right(R);
+
+// Generic with constraints
+type Bounded<T: Ord> is { min: T, max: T };
+
+type Hashable<K: Hash + Eq, V> is { key: K, value: V };

@@ -1,0 +1,242 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, enums
+//
+// Tests enum pattern matching with unit, tuple, and struct variants.
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb(Int, Int, Int)
+    | Rgba { r: Int, g: Int, b: Int, a: Int };
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+type Tree<T> is
+    | Leaf(T)
+    | Node(Tree<T>, Tree<T>);
+
+type Expr is
+    | Literal(Int)
+    | Add(Expr, Expr)
+    | Mul(Expr, Expr)
+    | Neg(Expr);
+
+// Basic Maybe pattern matching
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(value) => value,
+        None => default,
+    }
+}
+
+fn is_some<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(x) => Some(f(x)),
+        None => None,
+    }
+}
+
+// Result pattern matching
+fn unwrap_result<T, E>(r: Result<T, E>) -> T {
+    match r {
+        Ok(value) => value,
+        Err(_) => panic("unwrap called on Err"),
+    }
+}
+
+fn map_result<A, B, E>(r: Result<A, E>, f: fn(A) -> B) -> Result<B, E> {
+    match r {
+        Ok(x) => Ok(f(x)),
+        Err(e) => Err(e),
+    }
+}
+
+fn and_then<A, B, E>(r: Result<A, E>, f: fn(A) -> Result<B, E>) -> Result<B, E> {
+    match r {
+        Ok(x) => f(x),
+        Err(e) => Err(e),
+    }
+}
+
+// Unit variants
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+        Rgb(r, g, b) => "rgb",
+        Rgba { r, g, b, a } => "rgba",
+    }
+}
+
+fn color_channel_count(c: Color) -> Int {
+    match c {
+        Red | Green | Blue => 0,
+        Rgb(_, _, _) => 3,
+        Rgba { .. } => 4,
+    }
+}
+
+// Recursive enum pattern matching
+fn list_length<T>(list: ConsList<T>) -> Int {
+    match list {
+        Nil => 0,
+        Cons(_, tail) => 1 + list_length(tail),
+    }
+}
+
+fn list_sum(list: ConsList<Int>) -> Int {
+    match list {
+        Nil => 0,
+        Cons(head, tail) => head + list_sum(tail),
+    }
+}
+
+fn list_map<A, B>(list: ConsList<A>, f: fn(A) -> B) -> ConsList<B> {
+    match list {
+        Nil => Nil,
+        Cons(head, tail) => Cons(f(head), list_map(tail, f)),
+    }
+}
+
+// Tree traversal
+fn tree_sum(tree: Tree<Int>) -> Int {
+    match tree {
+        Leaf(value) => value,
+        Node(left, right) => tree_sum(left) + tree_sum(right),
+    }
+}
+
+fn max_int(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn tree_depth<T>(tree: Tree<T>) -> Int {
+    match tree {
+        Leaf(_) => 1,
+        Node(left, right) => 1 + max_int(tree_depth(left), tree_depth(right)),
+    }
+}
+
+// Expression evaluation
+fn eval(expr: Expr) -> Int {
+    match expr {
+        Literal(n) => n,
+        Add(left, right) => eval(left) + eval(right),
+        Mul(left, right) => eval(left) * eval(right),
+        Neg(inner) => -eval(inner),
+    }
+}
+
+// Nested enum patterns
+fn flatten_maybe_result<T, E>(m: Maybe<Result<T, E>>) -> Result<Maybe<T>, E> {
+    match m {
+        None => Ok(None),
+        Some(Ok(x)) => Ok(Some(x)),
+        Some(Err(e)) => Err(e),
+    }
+}
+
+// Generic enum with phantom type
+type Tagged<T, Tag> is
+    | Value(T);
+
+fn get_tagged<T, Tag>(t: Tagged<T, Tag>) -> T {
+    match t {
+        Value(x) => x,
+    }
+}
+
+// Unit-only enum
+type Direction is
+    | North
+    | East
+    | South
+    | West;
+
+fn opposite(d: Direction) -> Direction {
+    match d {
+        North => South,
+        South => North,
+        East => West,
+        West => East,
+    }
+}
+
+fn is_horizontal(d: Direction) -> Bool {
+    match d {
+        East | West => true,
+        North | South => false,
+    }
+}
+
+fn main() {
+    // Maybe tests
+    assert(unwrap_or(Some(42), 0) == 42);
+    assert(unwrap_or(None, 0) == 0);
+    assert(is_some(Some(1)) == true);
+    assert(is_some(None) == false);
+
+    // Result tests
+    assert(unwrap_result(Ok(42)) == 42);
+    let mapped: Result<Int, Text> = map_result(Ok(21), |x| x * 2);
+    assert(unwrap_result(mapped) == 42);
+
+    // Color tests
+    assert(color_name(Red) == "red");
+    assert(color_name(Green) == "green");
+    assert(color_name(Blue) == "blue");
+    assert(color_name(Rgb(255, 0, 0)) == "rgb");
+    assert(color_name(Rgba { r: 255, g: 0, b: 0, a: 128 }) == "rgba");
+    assert(color_channel_count(Red) == 0);
+    assert(color_channel_count(Rgb(1, 2, 3)) == 3);
+    assert(color_channel_count(Rgba { r: 1, g: 2, b: 3, a: 4 }) == 4);
+
+    // ConsList tests
+    let list = Cons(1, Cons(2, Cons(3, Nil)));
+    assert(list_length(list) == 3);
+    assert(list_sum(list) == 6);
+
+    // Tree tests
+    let tree = Node(
+        Node(Leaf(1), Leaf(2)),
+        Leaf(3)
+    );
+    assert(tree_sum(tree) == 6);
+    assert(tree_depth(tree) == 3);
+
+    // Expression tests
+    let expr = Add(Mul(Literal(2), Literal(3)), Neg(Literal(1)));
+    assert(eval(expr) == 5);  // (2 * 3) + (-1) = 5
+
+    // Nested enum
+    let nested: Maybe<Result<Int, Text>> = Some(Ok(42));
+    let flattened = flatten_maybe_result(nested);
+    assert(unwrap_result(flattened) == Some(42));
+
+    // Direction
+    assert(opposite(North) == South);
+    assert(opposite(East) == West);
+    assert(is_horizontal(East) == true);
+    assert(is_horizontal(North) == false);
+}

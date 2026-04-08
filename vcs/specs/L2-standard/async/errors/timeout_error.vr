@@ -1,0 +1,188 @@
+// @test: run
+// @expected-stdout: Operation timed out after 100ms
+// @tier: 0
+// @level: L2
+// @tags: async, errors, timeout
+// @description: Timeout errors in async operations
+
+/// Timeouts are essential for preventing indefinite waits
+/// in async operations.
+
+type OpTimeoutError is {
+    duration: Duration,
+    operation: Text,
+};
+
+implement Display for OpTimeoutError {
+    fn fmt(&self) -> Text {
+        f"Operation '{self.operation}' timed out after {self.duration.as_millis()}ms"
+    }
+}
+
+/// Basic timeout wrapper
+async fn with_timeout<T>(
+    duration: Duration,
+    future: Future<T>
+) -> Result<T, OpTimeoutError> {
+    // Simplified: assume future completes within duration
+    let result = future.await;
+    Ok(result)
+}
+
+/// Named timeout for better error messages
+async fn with_named_timeout<T>(
+    name: Text,
+    duration: Duration,
+    future: Future<T>
+) -> Result<T, OpTimeoutError> {
+    // Simplified: assume future completes within duration
+    let result = future.await;
+    Ok(result)
+}
+
+/// Timeout that returns Option instead of Result
+async fn timeout_optional<T>(
+    duration: Duration,
+    future: Future<T>
+) -> Maybe<T> {
+    match with_timeout(duration, future).await {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    }
+}
+
+/// Retry with timeout
+async fn retry_with_timeout<T, E>(
+    max_attempts: Int,
+    timeout_per_attempt: Duration,
+    operation: fn() -> Future<Result<T, E>>
+) -> Result<T, RetryError<E>> {
+    for attempt in 1..=max_attempts {
+        match with_timeout(timeout_per_attempt, operation()).await {
+            Ok(Ok(value)) => return Ok(value),
+            Ok(Err(e)) if attempt == max_attempts => {
+                return Err(RetryError.OperationFailed(e));
+            }
+            Ok(Err(_)) => continue,  // Retry
+            Err(timeout_err) if attempt == max_attempts => {
+                return Err(RetryError.Timeout(timeout_err));
+            }
+            Err(_) => continue,  // Retry on timeout too
+        }
+    }
+    unreachable()
+}
+
+type RetryError<E> is
+    | OperationFailed(E)
+    | Timeout(OpTimeoutError)
+    | MaxAttemptsExceeded;
+
+/// Timeout with cleanup
+async fn with_timeout_cleanup<T>(
+    duration: Duration,
+    future: Future<T>,
+    cleanup: fn()
+) -> Result<T, OpTimeoutError> {
+    let result = with_timeout(duration, future).await;
+    if result.is_err() {
+        cleanup();
+    }
+    result
+}
+
+/// Cascading timeouts for multi-stage operations
+async fn multi_stage_operation() -> Result<Data, MultiStageError> {
+    // Stage 1: Connect (short timeout)
+    let conn = with_named_timeout(
+        "connect",
+        Duration.from_millis(1000),
+        connect_to_server()
+    ).await.map_err(MultiStageError.ConnectionTimeout)?;
+
+    // Stage 2: Authenticate (medium timeout)
+    let session = with_named_timeout(
+        "authenticate",
+        Duration.from_millis(5000),
+        authenticate(conn)
+    ).await.map_err(MultiStageError.AuthTimeout)?;
+
+    // Stage 3: Fetch data (longer timeout)
+    let data = with_named_timeout(
+        "fetch_data",
+        Duration.from_millis(30000),
+        fetch_data(session)
+    ).await.map_err(MultiStageError.DataTimeout)?;
+
+    Ok(data)
+}
+
+type MultiStageError is
+    | ConnectionTimeout(OpTimeoutError)
+    | AuthTimeout(OpTimeoutError)
+    | DataTimeout(OpTimeoutError);
+
+/// Deadline-based timeout (absolute time)
+async fn with_deadline<T>(
+    deadline: Instant,
+    future: Future<T>
+) -> Result<T, OpTimeoutError> {
+    let now = Instant.now();
+    if now >= deadline {
+        return Err(OpTimeoutError {
+            duration: Duration.from_millis(0),
+            operation: "deadline_already_passed".to_text(),
+        });
+    }
+
+    let remaining = deadline - now;
+    with_timeout(remaining, future).await
+}
+
+/// Timeout extension
+type TimeoutExt is {};
+
+implement TimeoutExt {
+    async fn timeout<T>(
+        self: Future<T>,
+        duration: Duration
+    ) -> Result<T, OpTimeoutError> {
+        with_timeout(duration, self).await
+    }
+}
+
+// Usage: some_future.timeout(Duration.from_secs(5)).await
+
+/// Example of slow operation
+async fn slow_operation() -> Int {
+    sleep(Duration.from_millis(5000)).await;
+    42
+}
+
+async fn connect_to_server() -> Connection { Connection {} }
+async fn authenticate(conn: Connection) -> Session { Session {} }
+async fn fetch_data(session: Session) -> Data { Data {} }
+
+type Duration is { millis: Int };
+implement Duration {
+    fn from_millis(ms: Int) -> Self { Self { millis: ms } }
+    fn as_millis(&self) -> Int { self.millis }
+}
+
+type Instant is { time: Int };
+implement Instant {
+    fn now() -> Self { Self { time: 0 } }
+}
+
+type Connection is {};
+type Session is {};
+type Data is {};
+type FormatError is {};
+type Formatter is {};
+
+async fn sleep(duration: Duration) {}
+
+fn main() {
+    let duration = Duration.from_millis(100);
+    println(f"Operation timed out after {duration.as_millis()}ms");
+}

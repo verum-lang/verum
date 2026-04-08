@@ -1,0 +1,179 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, cellular-automaton, rule110, 1d
+// @timeout: 30000
+
+// 1D cellular automaton (like Rule 110, Rule 30, etc.)
+// 8-cell tape stored as bits in a single Int
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(tape: Int, pos: Int) -> Int {
+    (tape / pow2(pos)) % 2
+}
+
+fn set_bit(tape: Int, pos: Int, val: Int) -> Int {
+    let cur = get_bit(tape, pos);
+    if cur == val { tape }
+    else if val == 1 { tape + pow2(pos) }
+    else { tape - pow2(pos) }
+}
+
+// Apply 1D CA rule to 8-cell tape (wrapping boundaries)
+// Rule is encoded as 8-bit number: bit i = output for neighborhood pattern i
+// Neighborhood: left*4 + center*2 + right
+fn ca_step(tape: Int, rule: Int, size: Int) -> Int {
+    let mut next = 0;
+    let mut i = 0;
+    while i < size {
+        let left = get_bit(tape, (i + size - 1) % size);
+        let center = get_bit(tape, i);
+        let right = get_bit(tape, (i + 1) % size);
+        let pattern = left * 4 + center * 2 + right;
+        let output = get_bit(rule, pattern);
+        if output == 1 {
+            next = next + pow2(i);
+        }
+        i = i + 1;
+    }
+    next
+}
+
+// Run CA for n steps
+fn ca_run(tape: Int, rule: Int, size: Int, steps: Int) -> Int {
+    let mut t = tape;
+    let mut s = 0;
+    while s < steps { t = ca_step(t, rule, size); s = s + 1; }
+    t
+}
+
+// Count live cells
+fn popcount(tape: Int, size: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < size { count = count + get_bit(tape, i); i = i + 1; }
+    count
+}
+
+// Check if tape is all zeros
+fn is_dead(tape: Int) -> Int {
+    if tape == 0 { 1 } else { 0 }
+}
+
+fn test_rule_0() -> Int {
+    // Rule 0: all neighborhoods produce 0
+    let tape = 255; // all 1s
+    let result = ca_step(tape, 0, 8);
+    assert_eq(result, 0);
+    1
+}
+
+fn test_rule_255() -> Int {
+    // Rule 255: all neighborhoods produce 1
+    let tape = 0;
+    let result = ca_step(tape, 255, 8);
+    assert_eq(result, 255); // all 1s
+    1
+}
+
+fn test_rule_90() -> Int {
+    // Rule 90 (XOR rule): output = left XOR right
+    // Rule 90 = 01011010 binary
+    // Pattern 0(000)->0, 1(001)->1, 2(010)->0, 3(011)->1
+    // Pattern 4(100)->1, 5(101)->0, 6(110)->1, 7(111)->0
+    let rule90 = 90;
+    // Start with single cell in middle: bit 4 = 1 (value = 16)
+    let tape = pow2(4); // ...00010000
+    let step1 = ca_step(tape, rule90, 8);
+    // Cell 4 had neighbors 0,1,0 -> pattern 010 -> bit 2 of rule = 0
+    // Cell 3 had neighbors 0,0,1 -> pattern 001 -> bit 1 of rule = 1
+    // Cell 5 had neighbors 1,0,0 -> pattern 100 -> bit 4 of rule = 1
+    // So step1 should have bits 3 and 5 set = 8 + 32 = 40
+    assert_eq(get_bit(step1, 3), 1);
+    assert_eq(get_bit(step1, 5), 1);
+    assert_eq(get_bit(step1, 4), 0);
+    assert_eq(popcount(step1, 8), 2);
+    1
+}
+
+fn test_rule_110() -> Int {
+    // Rule 110: known to be Turing-complete
+    // Rule 110 = 01101110 binary
+    let rule110 = 110;
+    // Start with rightmost cell: bit 0 = 1
+    let tape = 1;
+    let step1 = ca_step(tape, rule110, 8);
+    // Cell 0: left=bit7, center=1, right=bit1=0 -> pattern depends on bit 7
+    // With wrapping, bit 7 = 0, so pattern = 0*4 + 1*2 + 0 = 2
+    // Rule 110 bit 2 = 1 (110 = ...01101110, bit 2 = 1)
+    assert_eq(get_bit(step1, 0), 1);
+    // Cell 7: left=bit6=0, center=0, right=bit0=1 -> pattern 001 -> bit 1 = 1
+    assert_eq(get_bit(step1, 7), 1);
+    // Cell 1: left=bit0=1, center=0, right=bit2=0 -> pattern 100 -> bit 4 = 0
+    // 110 in binary: 01101110. bit 4 = 0
+    assert_eq(get_bit(step1, 1), 0);
+    1
+}
+
+fn test_stable_pattern() -> Int {
+    // Rule 204 (identity rule): output = center
+    // Rule 204 = 11001100
+    let rule204 = 204;
+    let tape = 42; // arbitrary
+    let result = ca_step(tape, rule204, 8);
+    assert_eq(result, tape); // Identity: tape unchanged
+    // Run multiple steps — should stay same
+    assert_eq(ca_run(tape, rule204, 8, 10), tape);
+    1
+}
+
+fn test_multi_step() -> Int {
+    // Rule 30 with single cell, check after 3 steps
+    let rule30 = 30; // 00011110 binary
+    let tape = pow2(4); // single cell at position 4
+    let r1 = ca_run(tape, rule30, 8, 1);
+    let r2 = ca_run(tape, rule30, 8, 2);
+    let r3 = ca_run(tape, rule30, 8, 3);
+    // Each step should produce a different tape (Rule 30 is chaotic)
+    let diff_12 = if r1 == r2 { 0 } else { 1 };
+    let diff_23 = if r2 == r3 { 0 } else { 1 };
+    assert_eq(diff_12, 1);
+    assert_eq(diff_23, 1);
+    1
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0, 8), 0);
+    assert_eq(popcount(255, 8), 8);
+    assert_eq(popcount(1, 8), 1);
+    assert_eq(popcount(170, 8), 4); // 10101010
+    assert_eq(popcount(85, 8), 4);  // 01010101
+    1
+}
+
+fn test_dead_check() -> Int {
+    assert_eq(is_dead(0), 1);
+    assert_eq(is_dead(1), 0);
+    assert_eq(is_dead(255), 0);
+    // Rule 0 kills everything
+    assert_eq(is_dead(ca_run(42, 0, 8, 1)), 1);
+    1
+}
+
+fn main() -> Int {
+    test_rule_0();
+    test_rule_255();
+    test_rule_90();
+    test_rule_110();
+    test_stable_pattern();
+    test_multi_step();
+    test_popcount();
+    test_dead_check();
+    print("[OK] 631_cellular_automaton_aot");
+    0
+}

@@ -1,0 +1,172 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: tuple, return, destructure, multiple-values
+// @description: Test tuple-like patterns for returning multiple values from functions
+
+// Verum doesn't have first-class tuples, but we can use structs for multi-return
+type Pair is { first: Int, second: Int };
+type Triple is { a: Int, b: Int, c: Int };
+
+fn divmod(a: Int, b: Int) -> Pair {
+    Pair { first: a / b, second: a % b }
+}
+
+fn test_divmod() -> Int {
+    let r = divmod(17, 5);
+    if r.first != 3 {
+        print(f"FAIL divmod: quotient={r.first}, expected 3");
+        return 1;
+    }
+    if r.second != 2 {
+        print(f"FAIL divmod: remainder={r.second}, expected 2");
+        return 1;
+    }
+    print("  divmod: OK");
+    0
+}
+
+fn min_max(items: List<Int>) -> Pair {
+    let mut mn = items[0];
+    let mut mx = items[0];
+    let mut i = 1;
+    while i < items.len() {
+        if items[i] < mn { mn = items[i]; }
+        if items[i] > mx { mx = items[i]; }
+        i = i + 1;
+    }
+    Pair { first: mn, second: mx }
+}
+
+fn test_min_max() -> Int {
+    let nums = [7, 2, 9, 1, 5, 8, 3];
+    let result = min_max(nums);
+    if result.first != 1 {
+        print(f"FAIL min_max: min={result.first}, expected 1");
+        return 1;
+    }
+    if result.second != 9 {
+        print(f"FAIL min_max: max={result.second}, expected 9");
+        return 1;
+    }
+    print("  min_max: OK");
+    0
+}
+
+@allow(unbounded_recursion)
+fn extended_gcd(a: Int, b: Int) -> Triple {
+    if b == 0 {
+        return Triple { a: a, b: 1, c: 0 };
+    }
+    let r = extended_gcd(b, a % b);
+    Triple { a: r.a, b: r.c, c: r.b - (a / b) * r.c }
+}
+
+fn test_extended_gcd() -> Int {
+    let r = extended_gcd(35, 15);
+    // gcd(35, 15) = 5
+    if r.a != 5 {
+        print(f"FAIL egcd: gcd={r.a}, expected 5");
+        return 1;
+    }
+    // Verify: 35*b + 15*c = 5
+    let check = 35 * r.b + 15 * r.c;
+    if check != 5 {
+        print(f"FAIL egcd: 35*{r.b}+15*{r.c}={check}, expected 5");
+        return 1;
+    }
+    print("  extended_gcd: OK");
+    0
+}
+
+// Struct with computed fields
+type Stats is { mean: Int, variance: Int, count: Int };
+
+fn compute_stats(data: List<Int>) -> Stats {
+    let n = data.len();
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + data[i];
+        i = i + 1;
+    }
+    let mean = sum / n;
+
+    let mut var_sum = 0;
+    i = 0;
+    while i < n {
+        let diff = data[i] - mean;
+        var_sum = var_sum + diff * diff;
+        i = i + 1;
+    }
+    let variance = var_sum / n;
+
+    Stats { mean: mean, variance: variance, count: n }
+}
+
+fn test_stats() -> Int {
+    let data = [10, 20, 30, 40, 50];
+    let s = compute_stats(data);
+    if s.count != 5 {
+        print(f"FAIL stats: count={s.count}");
+        return 1;
+    }
+    if s.mean != 30 {
+        print(f"FAIL stats: mean={s.mean}, expected 30");
+        return 1;
+    }
+    // variance = ((10-30)^2 + (20-30)^2 + (30-30)^2 + (40-30)^2 + (50-30)^2) / 5
+    // = (400 + 100 + 0 + 100 + 400) / 5 = 200
+    if s.variance != 200 {
+        print(f"FAIL stats: variance={s.variance}, expected 200");
+        return 1;
+    }
+    print("  stats: OK");
+    0
+}
+
+// Chained struct returns
+fn fibonacci_pair(n: Int) -> Pair {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        let tmp = b;
+        b = a + b;
+        a = tmp;
+        i = i + 1;
+    }
+    Pair { first: a, second: b }
+}
+
+fn test_fib_pair() -> Int {
+    let r = fibonacci_pair(10);
+    // fib(10) = 55, fib(11) = 89
+    if r.first != 55 {
+        print(f"FAIL fib_pair: first={r.first}, expected 55");
+        return 1;
+    }
+    if r.second != 89 {
+        print(f"FAIL fib_pair: second={r.second}, expected 89");
+        return 1;
+    }
+    print("  fib_pair: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Tuple/Multi-Return Tests:");
+    let mut failures = 0;
+    failures = failures + test_divmod();
+    failures = failures + test_min_max();
+    failures = failures + test_extended_gcd();
+    failures = failures + test_stats();
+    failures = failures + test_fib_pair();
+
+    if failures == 0 {
+        print("All tuple/multi-return tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

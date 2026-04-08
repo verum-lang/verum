@@ -1,0 +1,11 @@
+// Crash seed: Various escape sequences in strings
+fn main() {
+    let newline = "line1\nline2";
+    let tab = "col1\tcol2";
+    let carriage = "before\rafter";
+    let null = "null\0char";
+    let quote = "she said \"hello\"";
+    let backslash = "path\\to\\file";
+    let hex = "\x00\x7F\xFF";
+    let unicode = "\u{0000}\u{FFFF}";
+}

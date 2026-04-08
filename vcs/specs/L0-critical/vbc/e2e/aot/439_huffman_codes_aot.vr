@@ -1,0 +1,129 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, huffman, coding, compression
+// @timeout: 30000
+
+// Huffman-like coding: prefix code length computation
+
+// Given 4 symbol frequencies, compute optimal prefix code lengths
+// Using simple Shannon-Fano approximation
+
+fn total_freq(f0: Int, f1: Int, f2: Int, f3: Int) -> Int {
+    f0 + f1 + f2 + f3
+}
+
+// Shannon entropy: H = sum(-p_i * log2(p_i))
+// We approximate: code_len(symbol) ≈ ceil(log2(total/freq))
+fn log2_floor(n: Int) -> Int {
+    if n <= 1 { return 0; }
+    let mut result = 0;
+    let mut v = n;
+    while v > 1 {
+        v = v / 2;
+        result = result + 1;
+    }
+    result
+}
+
+fn log2_ceil(n: Int) -> Int {
+    if n <= 1 { return 0; }
+    let fl = log2_floor(n);
+    // Check if n is power of 2
+    let mut p = 1;
+    let mut i = 0;
+    while i < fl {
+        p = p * 2;
+        i = i + 1;
+    }
+    if p == n { fl } else { fl + 1 }
+}
+
+// Approximate code length for a symbol with given frequency out of total
+fn code_length(freq: Int, total: Int) -> Int {
+    if freq == 0 { return 0; }
+    let ratio = total / freq;
+    let len = log2_ceil(ratio);
+    if len < 1 { 1 } else { len }
+}
+
+// Total encoded size = sum(freq_i * code_length_i)
+fn encoded_size(f0: Int, f1: Int, f2: Int, f3: Int) -> Int {
+    let total = total_freq(f0, f1, f2, f3);
+    f0 * code_length(f0, total) +
+    f1 * code_length(f1, total) +
+    f2 * code_length(f2, total) +
+    f3 * code_length(f3, total)
+}
+
+// Compression ratio (percentage of original)
+fn compression_ratio(f0: Int, f1: Int, f2: Int, f3: Int) -> Int {
+    let total = total_freq(f0, f1, f2, f3);
+    let original = total * 2; // 2 bits per symbol (4 symbols)
+    let compressed = encoded_size(f0, f1, f2, f3);
+    compressed * 100 / original
+}
+
+// Sort 4 values descending (using bubble sort of 4)
+fn max4(a: Int, b: Int, c: Int, d: Int) -> Int {
+    let mut best = a;
+    if b > best { best = b; }
+    if c > best { best = c; }
+    if d > best { best = d; }
+    best
+}
+
+fn test_log2() -> Int {
+    assert_eq(log2_floor(1), 0);
+    assert_eq(log2_floor(2), 1);
+    assert_eq(log2_floor(4), 2);
+    assert_eq(log2_floor(7), 2);
+    assert_eq(log2_floor(8), 3);
+    assert_eq(log2_ceil(1), 0);
+    assert_eq(log2_ceil(2), 1);
+    assert_eq(log2_ceil(3), 2);
+    assert_eq(log2_ceil(4), 2);
+    assert_eq(log2_ceil(5), 3);
+    1
+}
+
+fn test_code_length() -> Int {
+    // Equal frequencies: each 25/100 -> log2(4) = 2
+    assert_eq(code_length(25, 100), 2);
+    // Dominant symbol: 80/100 -> log2(100/80)=log2(1.25) -> ceil=1
+    assert_eq(code_length(80, 100), 1);
+    // Rare symbol: 5/100 -> log2(20) -> ceil(4.32) = 5
+    assert_eq(code_length(5, 100), 5);
+    1
+}
+
+fn test_encoded_size() -> Int {
+    // Equal frequencies [25,25,25,25]: each gets 2-bit code, total = 200
+    assert_eq(encoded_size(25, 25, 25, 25), 200);
+    1
+}
+
+fn test_compression() -> Int {
+    // Equal = no compression (100%)
+    assert_eq(compression_ratio(25, 25, 25, 25), 100);
+    // Skewed frequencies should compress better
+    let r = compression_ratio(80, 10, 5, 5);
+    assert(r < 100); // should be compressed
+    1
+}
+
+fn test_max4() -> Int {
+    assert_eq(max4(1, 5, 3, 2), 5);
+    assert_eq(max4(10, 10, 10, 10), 10);
+    assert_eq(max4(1, 2, 3, 100), 100);
+    1
+}
+
+fn main() -> Int {
+    test_log2();
+    test_code_length();
+    test_encoded_size();
+    test_compression();
+    test_max4();
+    print("[OK] 439_huffman_codes_aot");
+    0
+}

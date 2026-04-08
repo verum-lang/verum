@@ -1,0 +1,223 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, cbgr, tier-promotion, optimization
+// @description: CBGR tier analysis promotes safe references to higher tiers
+
+/// Tier Promotion Analysis Tests
+///
+/// These tests validate that CBGR tier analysis correctly identifies
+/// references that can be safely promoted to higher tiers:
+///
+/// - Tier 0: Full CBGR checks (~15ns overhead)
+/// - Tier 1: Compiler-proven safe (0ns overhead)
+/// - Tier 2: Manual safety proof (0ns overhead)
+///
+/// Spec: docs/detailed/26-cbgr-implementation.md#tier-promotion
+
+// ============================================================================
+// TEST 1: Local stack reference (Tier 1 candidate)
+// ============================================================================
+
+fn test_stack_local_tier1() {
+    // Stack-allocated, non-escaping reference -> Tier 1
+    let x = 42;
+    let r = &x;
+
+    // Simple local use, no escape
+    let val = *r;
+    assert(val == 42);
+}
+
+// ============================================================================
+// TEST 2: Loop-confined reference (Tier 1 candidate)
+// ============================================================================
+
+fn test_loop_local_tier1() {
+    let mut sum = 0;
+
+    for i in 0..10 {
+        // Reference created and used only within loop iteration
+        let temp = i * 2;
+        let r = &temp;
+        sum += *r;
+    }
+
+    assert(sum == 90);  // 0+2+4+6+8+10+12+14+16+18
+}
+
+// ============================================================================
+// TEST 3: Function-local reference (Tier 1 candidate)
+// ============================================================================
+
+fn calculate(x: Int, y: Int) -> Int {
+    // All references are function-local
+    let a = x + y;
+    let b = x * y;
+
+    let ra = &a;
+    let rb = &b;
+
+    *ra + *rb
+}
+
+fn test_function_local_tier1() {
+    let result = calculate(3, 4);
+    assert(result == 19);  // (3+4) + (3*4) = 7 + 12
+}
+
+// ============================================================================
+// TEST 4: Reference through safe getter (Tier 1 candidate)
+// ============================================================================
+
+type SafeArray is {
+    data: [Int; 5],
+};
+
+implement SafeArray {
+    fn get(&self, idx: Int) -> Int {
+        self.data[idx]
+    }
+}
+
+fn test_safe_getter_tier1() {
+    let arr = SafeArray { data: [10, 20, 30, 40, 50] };
+
+    // Method call with temporary borrow -> Tier 1
+    let val = arr.get(2);
+    assert(val == 30);
+}
+
+// ============================================================================
+// TEST 5: Struct field reference (Tier 1 candidate)
+// ============================================================================
+
+type Point3D is {
+    x: Float,
+    y: Float,
+    z: Float,
+};
+
+fn test_field_ref_tier1() {
+    let point = Point3D { x: 1.0, y: 2.0, z: 3.0 };
+
+    // Field references that don't escape
+    let rx = &point.x;
+    let ry = &point.y;
+    let rz = &point.z;
+
+    let sum = *rx + *ry + *rz;
+    assert(sum == 6.0);
+}
+
+// ============================================================================
+// TEST 6: Conditional local reference (Tier 1 candidate)
+// ============================================================================
+
+fn test_conditional_local_tier1() {
+    let x = 100;
+    let y = 200;
+
+    let result = if true {
+        let r = &x;
+        *r
+    } else {
+        let r = &y;
+        *r
+    };
+
+    assert(result == 100);
+}
+
+// ============================================================================
+// TEST 7: Nested scope reference (Tier 1 candidate)
+// ============================================================================
+
+fn test_nested_scope_tier1() {
+    let outer = 42;
+
+    let result = {
+        let r = &outer;  // Reference in inner scope
+        let inner = *r + 8;
+        inner
+    };
+
+    assert(result == 50);
+}
+
+// ============================================================================
+// TEST 8: Array element reference (Tier 1 candidate)
+// ============================================================================
+
+fn test_array_element_tier1() {
+    let data = [1, 2, 3, 4, 5];
+
+    let mut sum = 0;
+    for i in 0..5 {
+        let r = &data[i];  // Reference to array element
+        sum += *r;
+    }
+
+    assert(sum == 15);
+}
+
+// ============================================================================
+// TEST 9: Multiple sequential borrows (Tier 1 candidate)
+// ============================================================================
+
+fn test_sequential_borrows_tier1() {
+    let mut x = 0;
+
+    // Each borrow is short-lived, non-overlapping -> all Tier 1
+    {
+        let r = &mut x;
+        *r = 10;
+    }
+
+    {
+        let r = &mut x;
+        *r += 5;
+    }
+
+    {
+        let r = &x;
+        assert(*r == 15);
+    }
+}
+
+// ============================================================================
+// TEST 10: Closure capture by reference (may need Tier 0)
+// ============================================================================
+
+fn test_closure_capture() {
+    let data = [1, 2, 3];
+
+    // Closure captures by reference - may need Tier 0 analysis
+    let sum_closure = || {
+        let mut s = 0;
+        for i in 0..3 {
+            s += data[i];
+        }
+        s
+    };
+
+    let result = sum_closure();
+    assert(result == 6);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    test_stack_local_tier1();
+    test_loop_local_tier1();
+    test_function_local_tier1();
+    test_safe_getter_tier1();
+    test_field_ref_tier1();
+    test_conditional_local_tier1();
+    test_nested_scope_tier1();
+    test_array_element_tier1();
+    test_sequential_borrows_tier1();
+    test_closure_capture();
+}

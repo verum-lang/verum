@@ -1,0 +1,40 @@
+// @test: parse
+// @level: L1
+// @tags: meta, inject, injectable, attributes, di
+// @timeout: 5000
+
+/// @injectable and @inject attributes for dependency injection.
+/// Grammar: injectable_attribute = 'injectable' '(' injection_scope ')'
+///          injection_scope = 'Scope' '.' ('Singleton' | 'Request' | 'Transient')
+///          inject_attribute = 'inject'
+
+// Singleton-scoped service
+@injectable(Scope.Singleton)
+type DatabasePool is {
+    url: Text,
+    max_connections: Int,
+};
+
+// Request-scoped service
+@injectable(Scope.Request)
+type RequestContext is {
+    request_id: Text,
+    user_id: Maybe<Int>,
+};
+
+// Transient-scoped (new instance each time)
+@injectable(Scope.Transient)
+type Logger is {
+    prefix: Text,
+};
+
+// Using inject expression to resolve dependency
+fn handle_request() using [DatabasePool, Logger] {
+    let db = inject DatabasePool;
+    let logger = inject Logger;
+    print("Request handled");
+}
+
+fn main() {
+    print("Inject attribute tests parsed");
+}

@@ -1,0 +1,108 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: closure, spawn, capture, channel, concurrency
+// @description: Closures capturing variables in spawn blocks with channels
+
+fn recv_val(ch: &Channel<Int>) -> Int {
+    match ch.recv() { Some(x) => x, None => -1 }
+}
+
+fn test_capture_immutable() -> Int {
+    let x = 42;
+    let ch = Channel.new(4);
+    let h = spawn {
+        ch.send(x);
+        0
+    };
+    h.await;
+    let result = recv_val(&ch);
+    if result != 42 {
+        print(f"FAIL capture_immutable: expected 42, got {result}");
+        return 1;
+    }
+    print("  capture_immutable: OK");
+    0
+}
+
+fn test_capture_multiple() -> Int {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let ch = Channel.new(4);
+    let h = spawn {
+        ch.send(a + b + c);
+        0
+    };
+    h.await;
+    let result = recv_val(&ch);
+    if result != 60 {
+        print(f"FAIL capture_multiple: expected 60, got {result}");
+        return 1;
+    }
+    print("  capture_multiple: OK");
+    0
+}
+
+fn test_capture_computed() -> Int {
+    let base = 100;
+    let multiplier = 3;
+    let ch = Channel.new(4);
+    let h = spawn {
+        let local_result = base * multiplier + 7;
+        ch.send(local_result);
+        0
+    };
+    h.await;
+    let result = recv_val(&ch);
+    if result != 307 {
+        print(f"FAIL capture_computed: expected 307, got {result}");
+        return 1;
+    }
+    print("  capture_computed: OK");
+    0
+}
+
+fn test_spawn_with_loop() -> Int {
+    let ch = Channel.new(16);
+    let count = 5;
+    let h = spawn {
+        let mut i = 0;
+        while i < count {
+            ch.send(i * 10);
+            i = i + 1;
+        }
+        0
+    };
+    h.await;
+
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        sum = sum + recv_val(&ch);
+        i = i + 1;
+    }
+    // 0+10+20+30+40 = 100
+    if sum != 100 {
+        print(f"FAIL spawn_with_loop: expected 100, got {sum}");
+        return 1;
+    }
+    print("  spawn_with_loop: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Closure Spawn Capture Tests:");
+    let mut failures = 0;
+    failures = failures + test_capture_immutable();
+    failures = failures + test_capture_multiple();
+    failures = failures + test_capture_computed();
+    failures = failures + test_spawn_with_loop();
+
+    if failures == 0 {
+        print("All closure spawn capture tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,730 @@
+// =============================================================================
+// layout_minimal_test.vr - Comprehensive tests for Layout type and alignment utils
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: mem, layout, alignment, allocator
+// @description: Tests for Layout construction, methods (size, align, repeat,
+//               extend, pad_to_align, from_size), align_up, align_down,
+//               and size_class_index utilities.
+// =============================================================================
+
+mount core.mem.allocator.{
+    Layout, align_up, align_down, size_class_index, size_class_to_size,
+    SIZE_CLASSES, SIZE_CLASS_COUNT, PAGE_SIZE, CHUNK_SIZE, LARGE_THRESHOLD,
+    MAX_SLOTS_PER_PAGE, GUARD_PAGE_SIZE,
+    AllocError,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Layout.from_size_align
+// =============================================================================
+
+@test
+fn test_layout_from_size_align_basic() {
+    let layout = Layout.from_size_align(64, 8);
+    assert_eq(layout.size(), 64);
+    assert_eq(layout.align(), 8);
+}
+
+@test
+fn test_layout_from_size_align_one() {
+    let layout = Layout.from_size_align(1, 1);
+    assert_eq(layout.size(), 1);
+    assert_eq(layout.align(), 1);
+}
+
+@test
+fn test_layout_from_size_align_power_of_two() {
+    let layout = Layout.from_size_align(256, 16);
+    assert_eq(layout.size(), 256);
+    assert_eq(layout.align(), 16);
+}
+
+@test
+fn test_layout_from_size_align_large() {
+    let layout = Layout.from_size_align(4096, 4096);
+    assert_eq(layout.size(), 4096);
+    assert_eq(layout.align(), 4096);
+}
+
+@test
+fn test_layout_from_size_align_zero_size() {
+    let layout = Layout.from_size_align(0, 1);
+    assert_eq(layout.size(), 0);
+    assert_eq(layout.align(), 1);
+}
+
+@test
+fn test_layout_from_size_align_align_2() {
+    let layout = Layout.from_size_align(10, 2);
+    assert_eq(layout.size(), 10);
+    assert_eq(layout.align(), 2);
+}
+
+@test
+fn test_layout_from_size_align_align_4() {
+    let layout = Layout.from_size_align(100, 4);
+    assert_eq(layout.size(), 100);
+    assert_eq(layout.align(), 4);
+}
+
+@test
+fn test_layout_from_size_align_align_32() {
+    let layout = Layout.from_size_align(128, 32);
+    assert_eq(layout.size(), 128);
+    assert_eq(layout.align(), 32);
+}
+
+@test
+fn test_layout_from_size_align_align_64() {
+    let layout = Layout.from_size_align(512, 64);
+    assert_eq(layout.size(), 512);
+    assert_eq(layout.align(), 64);
+}
+
+// =============================================================================
+// Section 2: Layout.from_size
+// =============================================================================
+
+@test
+fn test_layout_from_size_basic() {
+    let layout = Layout.from_size(64);
+    assert_eq(layout.size(), 64);
+    // Natural alignment for 64 is 16 (max)
+    assert(layout.align() >= 1);
+    assert(layout.align() <= 16);
+}
+
+@test
+fn test_layout_from_size_one() {
+    let layout = Layout.from_size(1);
+    assert_eq(layout.size(), 1);
+    assert_eq(layout.align(), 1);
+}
+
+@test
+fn test_layout_from_size_two() {
+    let layout = Layout.from_size(2);
+    assert_eq(layout.size(), 2);
+    assert_eq(layout.align(), 2);
+}
+
+@test
+fn test_layout_from_size_three() {
+    let layout = Layout.from_size(3);
+    assert_eq(layout.size(), 3);
+    assert_eq(layout.align(), 1);
+}
+
+@test
+fn test_layout_from_size_four() {
+    let layout = Layout.from_size(4);
+    assert_eq(layout.size(), 4);
+    assert_eq(layout.align(), 4);
+}
+
+@test
+fn test_layout_from_size_eight() {
+    let layout = Layout.from_size(8);
+    assert_eq(layout.size(), 8);
+    assert_eq(layout.align(), 8);
+}
+
+@test
+fn test_layout_from_size_sixteen() {
+    let layout = Layout.from_size(16);
+    assert_eq(layout.size(), 16);
+    assert_eq(layout.align(), 16);
+}
+
+@test
+fn test_layout_from_size_large() {
+    let layout = Layout.from_size(1024);
+    assert_eq(layout.size(), 1024);
+    // Align capped at 16
+    assert(layout.align() <= 16);
+}
+
+// =============================================================================
+// Section 3: Layout.repeat
+// =============================================================================
+
+@test
+fn test_layout_repeat_one() {
+    let base = Layout.from_size_align(8, 4);
+    let repeated = base.repeat(1);
+    assert_eq(repeated.size(), 8);
+    assert_eq(repeated.align(), 4);
+}
+
+@test
+fn test_layout_repeat_zero() {
+    let base = Layout.from_size_align(8, 4);
+    let repeated = base.repeat(0);
+    assert_eq(repeated.size(), 0);
+    assert_eq(repeated.align(), 4);
+}
+
+@test
+fn test_layout_repeat_five() {
+    let base = Layout.from_size_align(16, 8);
+    let repeated = base.repeat(5);
+    assert_eq(repeated.size(), 80);
+    assert_eq(repeated.align(), 8);
+}
+
+@test
+fn test_layout_repeat_large() {
+    let base = Layout.from_size_align(32, 16);
+    let repeated = base.repeat(100);
+    assert_eq(repeated.size(), 3200);
+    assert_eq(repeated.align(), 16);
+}
+
+@test
+fn test_layout_repeat_preserves_alignment() {
+    let base = Layout.from_size_align(12, 4);
+    let repeated = base.repeat(10);
+    assert_eq(repeated.align(), 4);
+}
+
+// =============================================================================
+// Section 4: Layout.extend
+// =============================================================================
+
+@test
+fn test_layout_extend_same_align() {
+    let a = Layout.from_size_align(8, 4);
+    let b = Layout.from_size_align(8, 4);
+    let combined = a.extend(b);
+    assert_eq(combined.size(), 16);
+    assert_eq(combined.align(), 4);
+}
+
+@test
+fn test_layout_extend_different_align() {
+    let a = Layout.from_size_align(4, 4);
+    let b = Layout.from_size_align(8, 8);
+    let combined = a.extend(b);
+    // a.size=4 aligned up to b.align=8 = 8, plus b.size=8 = 16
+    assert_eq(combined.size(), 16);
+    assert_eq(combined.align(), 8);
+}
+
+@test
+fn test_layout_extend_small_then_large() {
+    let a = Layout.from_size_align(1, 1);
+    let b = Layout.from_size_align(16, 16);
+    let combined = a.extend(b);
+    // a.size=1 aligned to 16 = 16, plus 16 = 32
+    assert_eq(combined.size(), 32);
+    assert_eq(combined.align(), 16);
+}
+
+@test
+fn test_layout_extend_large_then_small() {
+    let a = Layout.from_size_align(64, 16);
+    let b = Layout.from_size_align(4, 4);
+    let combined = a.extend(b);
+    // a.size=64 aligned to 4 = 64, plus 4 = 68
+    assert_eq(combined.size(), 68);
+    assert_eq(combined.align(), 16);
+}
+
+@test
+fn test_layout_extend_zero_size() {
+    let a = Layout.from_size_align(0, 1);
+    let b = Layout.from_size_align(8, 4);
+    let combined = a.extend(b);
+    // 0 aligned to 4 = 0, plus 8 = 8
+    assert_eq(combined.size(), 8);
+    assert_eq(combined.align(), 4);
+}
+
+// =============================================================================
+// Section 5: Layout.pad_to_align
+// =============================================================================
+
+@test
+fn test_layout_pad_to_align_already_aligned() {
+    let layout = Layout.from_size_align(16, 8);
+    let padded = layout.pad_to_align();
+    assert_eq(padded.size(), 16);
+    assert_eq(padded.align(), 8);
+}
+
+@test
+fn test_layout_pad_to_align_needs_padding() {
+    let layout = Layout.from_size_align(10, 8);
+    let padded = layout.pad_to_align();
+    assert_eq(padded.size(), 16);
+    assert_eq(padded.align(), 8);
+}
+
+@test
+fn test_layout_pad_to_align_one_byte() {
+    let layout = Layout.from_size_align(1, 4);
+    let padded = layout.pad_to_align();
+    assert_eq(padded.size(), 4);
+    assert_eq(padded.align(), 4);
+}
+
+@test
+fn test_layout_pad_to_align_large() {
+    let layout = Layout.from_size_align(100, 64);
+    let padded = layout.pad_to_align();
+    assert_eq(padded.size(), 128);
+    assert_eq(padded.align(), 64);
+}
+
+@test
+fn test_layout_pad_to_align_zero_size() {
+    let layout = Layout.from_size_align(0, 8);
+    let padded = layout.pad_to_align();
+    assert_eq(padded.size(), 0);
+    assert_eq(padded.align(), 8);
+}
+
+// =============================================================================
+// Section 6: align_up / align_down utilities
+// =============================================================================
+
+@test
+fn test_align_up_basic() {
+    assert_eq(align_up(10, 8), 16);
+}
+
+@test
+fn test_align_up_already_aligned() {
+    assert_eq(align_up(16, 8), 16);
+}
+
+@test
+fn test_align_up_zero() {
+    assert_eq(align_up(0, 8), 0);
+}
+
+@test
+fn test_align_up_one_to_four() {
+    assert_eq(align_up(1, 4), 4);
+}
+
+@test
+fn test_align_up_five_to_eight() {
+    assert_eq(align_up(5, 8), 8);
+}
+
+@test
+fn test_align_up_nine_to_sixteen() {
+    assert_eq(align_up(9, 16), 16);
+}
+
+@test
+fn test_align_up_large() {
+    assert_eq(align_up(4097, 4096), 8192);
+}
+
+@test
+fn test_align_down_basic() {
+    assert_eq(align_down(10, 8), 8);
+}
+
+@test
+fn test_align_down_already_aligned() {
+    assert_eq(align_down(16, 8), 16);
+}
+
+@test
+fn test_align_down_zero() {
+    assert_eq(align_down(0, 8), 0);
+}
+
+@test
+fn test_align_down_one() {
+    assert_eq(align_down(1, 4), 0);
+}
+
+@test
+fn test_align_down_seven() {
+    assert_eq(align_down(7, 4), 4);
+}
+
+@test
+fn test_align_down_large() {
+    assert_eq(align_down(5000, 4096), 4096);
+}
+
+// =============================================================================
+// Section 7: size_class_index
+// =============================================================================
+
+@test
+fn test_size_class_index_smallest() {
+    let idx = size_class_index(1);
+    match idx {
+        Some(i) => assert_eq(i, 0),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_16() {
+    let idx = size_class_index(16);
+    match idx {
+        Some(i) => assert_eq(i, 0),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_17() {
+    let idx = size_class_index(17);
+    match idx {
+        Some(i) => assert_eq(i, 1),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_32() {
+    let idx = size_class_index(32);
+    match idx {
+        Some(i) => assert_eq(i, 1),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_64() {
+    let idx = size_class_index(64);
+    match idx {
+        Some(i) => assert_eq(i, 3),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_128() {
+    let idx = size_class_index(128);
+    match idx {
+        Some(i) => assert_eq(i, 6),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_256() {
+    let idx = size_class_index(256);
+    match idx {
+        Some(i) => assert_eq(i, 7),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_512() {
+    let idx = size_class_index(512);
+    match idx {
+        Some(i) => assert_eq(i, 8),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_1024() {
+    let idx = size_class_index(1024);
+    match idx {
+        Some(i) => assert_eq(i, 9),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_2048() {
+    let idx = size_class_index(2048);
+    match idx {
+        Some(i) => assert_eq(i, 10),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_size_class_index_too_large() {
+    let idx = size_class_index(2049);
+    assert(idx.is_none());
+}
+
+@test
+fn test_size_class_index_very_large() {
+    let idx = size_class_index(65536);
+    assert(idx.is_none());
+}
+
+// =============================================================================
+// Section 8: size_class_to_size
+// =============================================================================
+
+@test
+fn test_size_class_to_size_0() {
+    assert_eq(size_class_to_size(0), 16);
+}
+
+@test
+fn test_size_class_to_size_1() {
+    assert_eq(size_class_to_size(1), 32);
+}
+
+@test
+fn test_size_class_to_size_2() {
+    assert_eq(size_class_to_size(2), 48);
+}
+
+@test
+fn test_size_class_to_size_3() {
+    assert_eq(size_class_to_size(3), 64);
+}
+
+@test
+fn test_size_class_to_size_10() {
+    assert_eq(size_class_to_size(10), 2048);
+}
+
+// =============================================================================
+// Section 9: Constants
+// =============================================================================
+
+@test
+fn test_size_class_count() {
+    assert_eq(SIZE_CLASS_COUNT, 11);
+}
+
+@test
+fn test_page_size() {
+    assert_eq(PAGE_SIZE, 65536);
+}
+
+@test
+fn test_chunk_size() {
+    assert_eq(CHUNK_SIZE, 2097152);
+}
+
+@test
+fn test_large_threshold() {
+    assert_eq(LARGE_THRESHOLD, 2048);
+}
+
+@test
+fn test_max_slots_per_page() {
+    assert_eq(MAX_SLOTS_PER_PAGE, 512);
+}
+
+@test
+fn test_guard_page_size() {
+    assert_eq(GUARD_PAGE_SIZE, 4096);
+}
+
+@test
+fn test_size_classes_array() {
+    assert_eq(SIZE_CLASSES[0], 16);
+    assert_eq(SIZE_CLASSES[1], 32);
+    assert_eq(SIZE_CLASSES[2], 48);
+    assert_eq(SIZE_CLASSES[3], 64);
+    assert_eq(SIZE_CLASSES[4], 80);
+    assert_eq(SIZE_CLASSES[5], 96);
+    assert_eq(SIZE_CLASSES[6], 128);
+    assert_eq(SIZE_CLASSES[7], 256);
+    assert_eq(SIZE_CLASSES[8], 512);
+    assert_eq(SIZE_CLASSES[9], 1024);
+    assert_eq(SIZE_CLASSES[10], 2048);
+}
+
+// =============================================================================
+// Section 10: AllocError Variants
+// =============================================================================
+
+@test
+fn test_alloc_error_out_of_memory() {
+    let err = AllocError.OutOfMemory { requested: 1024 };
+    assert(err is AllocError.OutOfMemory);
+    assert(!(err is AllocError.InvalidSize));
+}
+
+@test
+fn test_alloc_error_invalid_size() {
+    let err = AllocError.InvalidSize { size: -1 };
+    assert(err is AllocError.InvalidSize);
+}
+
+@test
+fn test_alloc_error_invalid_alignment() {
+    let err = AllocError.InvalidAlignment { alignment: 3 };
+    assert(err is AllocError.InvalidAlignment);
+}
+
+@test
+fn test_alloc_error_mmap_failed() {
+    let err = AllocError.MmapFailed { code: 12 };
+    assert(err is AllocError.MmapFailed);
+}
+
+@test
+fn test_alloc_error_munmap_failed() {
+    let err = AllocError.MunmapFailed { code: 22 };
+    assert(err is AllocError.MunmapFailed);
+}
+
+@test
+fn test_alloc_error_page_exhausted() {
+    let err = AllocError.PageExhausted;
+    assert(err is AllocError.PageExhausted);
+}
+
+@test
+fn test_alloc_error_invalid_pointer() {
+    let err = AllocError.InvalidPointer;
+    assert(err is AllocError.InvalidPointer);
+}
+
+@test
+fn test_alloc_error_message_out_of_memory() {
+    let err = AllocError.OutOfMemory { requested: 4096 };
+    let msg = err.message();
+    assert(msg.contains("out of memory"));
+    assert(msg.contains("4096"));
+}
+
+@test
+fn test_alloc_error_message_invalid_size() {
+    let err = AllocError.InvalidSize { size: 0 };
+    let msg = err.message();
+    assert(msg.contains("invalid"));
+    assert(msg.contains("size"));
+}
+
+@test
+fn test_alloc_error_message_invalid_alignment() {
+    let err = AllocError.InvalidAlignment { alignment: 5 };
+    let msg = err.message();
+    assert(msg.contains("alignment"));
+}
+
+@test
+fn test_alloc_error_all_variants_distinct() {
+    let oom = AllocError.OutOfMemory { requested: 0 };
+    let isz = AllocError.InvalidSize { size: 0 };
+    let ial = AllocError.InvalidAlignment { alignment: 0 };
+    let mmf = AllocError.MmapFailed { code: 0 };
+    let muf = AllocError.MunmapFailed { code: 0 };
+    let pex = AllocError.PageExhausted;
+    let inv = AllocError.InvalidPointer;
+
+    assert(oom is AllocError.OutOfMemory);
+    assert(!(oom is AllocError.InvalidSize));
+    assert(isz is AllocError.InvalidSize);
+    assert(!(isz is AllocError.OutOfMemory));
+    assert(ial is AllocError.InvalidAlignment);
+    assert(mmf is AllocError.MmapFailed);
+    assert(muf is AllocError.MunmapFailed);
+    assert(pex is AllocError.PageExhausted);
+    assert(inv is AllocError.InvalidPointer);
+}
+
+// =============================================================================
+// Section 11: Layout Composition Patterns
+// =============================================================================
+
+@test
+fn test_layout_struct_simulation() {
+    // Simulate: type Foo is { a: Int (8, align 8), b: Float (8, align 8) };
+    let field_a = Layout.from_size_align(8, 8);
+    let field_b = Layout.from_size_align(8, 8);
+    let combined = field_a.extend(field_b);
+    assert_eq(combined.size(), 16);
+    assert_eq(combined.align(), 8);
+}
+
+@test
+fn test_layout_struct_with_padding() {
+    // Simulate: type Bar is { a: Byte (1, align 1), b: Int (8, align 8) };
+    let field_a = Layout.from_size_align(1, 1);
+    let field_b = Layout.from_size_align(8, 8);
+    let combined = field_a.extend(field_b);
+    // 1 aligned up to 8 = 8, plus 8 = 16
+    assert_eq(combined.size(), 16);
+    assert_eq(combined.align(), 8);
+}
+
+@test
+fn test_layout_array_of_structs() {
+    let elem = Layout.from_size_align(24, 8);
+    let padded = elem.pad_to_align();
+    let array = padded.repeat(10);
+    assert_eq(array.size(), 240);
+    assert_eq(array.align(), 8);
+}
+
+@test
+fn test_layout_nested_extend() {
+    let a = Layout.from_size_align(4, 4);
+    let b = Layout.from_size_align(8, 8);
+    let c = Layout.from_size_align(4, 4);
+    let ab = a.extend(b);
+    let abc = ab.extend(c);
+    // a=4 aligned to 8 = 8, +8 = 16, aligned to 4 = 16, +4 = 20
+    assert_eq(abc.size(), 20);
+    assert_eq(abc.align(), 8);
+}
+
+// =============================================================================
+// Section 12: align_up/align_down Edge Cases
+// =============================================================================
+
+@test
+fn test_align_up_power_of_two_inputs() {
+    assert_eq(align_up(8, 8), 8);
+    assert_eq(align_up(16, 16), 16);
+    assert_eq(align_up(32, 32), 32);
+    assert_eq(align_up(64, 64), 64);
+}
+
+@test
+fn test_align_up_just_over() {
+    assert_eq(align_up(17, 16), 32);
+    assert_eq(align_up(33, 32), 64);
+    assert_eq(align_up(65, 64), 128);
+}
+
+@test
+fn test_align_down_power_of_two_inputs() {
+    assert_eq(align_down(8, 8), 8);
+    assert_eq(align_down(16, 16), 16);
+    assert_eq(align_down(32, 32), 32);
+}
+
+@test
+fn test_align_down_just_under() {
+    assert_eq(align_down(15, 16), 0);
+    assert_eq(align_down(31, 32), 0);
+    assert_eq(align_down(63, 64), 0);
+}
+
+@test
+fn test_align_up_align_one() {
+    assert_eq(align_up(7, 1), 7);
+    assert_eq(align_up(0, 1), 0);
+    assert_eq(align_up(100, 1), 100);
+}
+
+@test
+fn test_align_down_align_one() {
+    assert_eq(align_down(7, 1), 7);
+    assert_eq(align_down(0, 1), 0);
+    assert_eq(align_down(100, 1), 100);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

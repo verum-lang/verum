@@ -1,0 +1,553 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, collections, list
+// @timeout: 20000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for List operations.
+/// Tests creation, access, mutation, iteration, and functional transformations.
+
+fn main() {
+    test_list_creation();
+    test_list_access();
+    test_list_mutation();
+    test_list_slicing();
+    test_list_iteration();
+    test_list_transformations();
+    test_list_aggregations();
+    test_list_searching();
+    test_list_sorting();
+    test_list_combining();
+}
+
+/// List creation patterns
+fn test_list_creation() {
+    println("=== List Creation ===");
+
+    // Empty list
+    let empty: List<Int> = [];
+    println(f"empty: {empty}");
+    println(f"empty.len(): {empty.len()}");
+    println(f"empty.is_empty(): {empty.is_empty()}");
+
+    // Literal initialization
+    let ints = [1, 2, 3, 4, 5];
+    println(f"ints: {ints}");
+
+    let floats = [1.1, 2.2, 3.3];
+    println(f"floats: {floats}");
+
+    let chars = ['a', 'b', 'c'];
+    println(f"chars: {chars}");
+
+    let texts = ["hello", "world"];
+    println(f"texts: {texts}");
+
+    let bools = [true, false, true];
+    println(f"bools: {bools}");
+
+    // Repeat constructor
+    let zeros = List.repeat(0, 5);
+    println(f"zeros: {zeros}");
+
+    let ones = List.repeat(1, 10);
+    println(f"ones: {ones}");
+
+    let texts_repeat = List.repeat("x", 3);
+    println(f"texts_repeat: {texts_repeat}");
+
+    // From range
+    let from_range = (0..10).collect();
+    println(f"from_range: {from_range}");
+
+    let inclusive_range = (1..=5).collect();
+    println(f"inclusive_range: {inclusive_range}");
+
+    // Single element
+    let single = [42];
+    println(f"single: {single}");
+
+    // With type inference
+    let inferred = [1, 2, 3];
+    println(f"inferred: {inferred}");
+}
+
+/// List access patterns
+fn test_list_access() {
+    println("\n=== List Access ===");
+
+    let list = [10, 20, 30, 40, 50];
+
+    // Index access
+    println(f"list[0]: {list[0]}");
+    println(f"list[2]: {list[2]}");
+    println(f"list[4]: {list[4]}");
+
+    // Negative indexing (from end)
+    println(f"list[-1]: {list[-1]}");
+    println(f"list[-2]: {list[-2]}");
+
+    // First and last
+    println(f"list.first(): {list.first()}");
+    println(f"list.last(): {list.last()}");
+
+    // Get with Maybe result
+    println(f"list.get(2): {list.get(2)}");
+    println(f"list.get(10): {list.get(10)}");
+    println(f"list.get(-1): {list.get(-1)}");
+
+    // Length operations
+    println(f"list.len(): {list.len()}");
+    println(f"list.is_empty(): {list.is_empty()}");
+
+    // Empty list access
+    let empty: List<Int> = [];
+    println(f"empty.first(): {empty.first()}");
+    println(f"empty.last(): {empty.last()}");
+    println(f"empty.get(0): {empty.get(0)}");
+
+    // Nested list access
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    println(f"matrix[1][1]: {matrix[1][1]}");
+    println(f"matrix[0][2]: {matrix[0][2]}");
+    println(f"matrix[2][0]: {matrix[2][0]}");
+}
+
+/// List mutation operations
+fn test_list_mutation() {
+    println("\n=== List Mutation ===");
+
+    // Push and pop
+    let mut list: List<Int> = [];
+    list.push(10);
+    list.push(20);
+    list.push(30);
+    println(f"after pushes: {list}");
+
+    let popped = list.pop();
+    println(f"popped: {popped}");
+    println(f"after pop: {list}");
+
+    // Insert
+    let mut list2 = [1, 2, 4, 5];
+    list2.insert(2, 3);
+    println(f"after insert at 2: {list2}");
+
+    list2.insert(0, 0);
+    println(f"after insert at 0: {list2}");
+
+    // Remove
+    let mut list3 = [10, 20, 30, 40, 50];
+    let removed = list3.remove(2);
+    println(f"removed at 2: {removed}");
+    println(f"after remove: {list3}");
+
+    // Clear
+    let mut list4 = [1, 2, 3];
+    list4.clear();
+    println(f"after clear: {list4}");
+    println(f"cleared is_empty: {list4.is_empty()}");
+
+    // Swap
+    let mut list5 = [1, 2, 3, 4, 5];
+    list5.swap(1, 3);
+    println(f"after swap(1, 3): {list5}");
+
+    // Index assignment
+    let mut list6 = [10, 20, 30];
+    list6[1] = 200;
+    println(f"after index assignment: {list6}");
+
+    // Extend
+    let mut list7 = [1, 2, 3];
+    list7.extend([4, 5, 6]);
+    println(f"after extend: {list7}");
+
+    // Append (move)
+    let mut list8 = [1, 2];
+    let mut list9 = [3, 4];
+    list8.append(&mut list9);
+    println(f"after append: {list8}");
+
+    // Truncate
+    let mut list10 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    list10.truncate(5);
+    println(f"after truncate(5): {list10}");
+
+    // Resize
+    let mut list11 = [1, 2, 3];
+    list11.resize(6, 0);
+    println(f"after resize(6, 0): {list11}");
+
+    list11.resize(2, 0);
+    println(f"after resize(2, 0): {list11}");
+}
+
+/// List slicing operations
+fn test_list_slicing() {
+    println("\n=== List Slicing ===");
+
+    let list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // Basic slices
+    println(f"list[2..5]: {list[2..5]}");
+    println(f"list[..3]: {list[..3]}");
+    println(f"list[7..]: {list[7..]}");
+    println(f"list[..]: {list[..]}");
+
+    // Inclusive range slice
+    println(f"list[2..=5]: {list[2..=5]}");
+
+    // Negative indices in slices
+    println(f"list[-3..]: {list[-3..]}");
+    println(f"list[..-3]: {list[..-3]}");
+
+    // Empty slices
+    println(f"list[5..5]: {list[5..5]}");
+
+    // Single element slices
+    println(f"list[3..4]: {list[3..4]}");
+
+    // Nested list slicing
+    let matrix = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]];
+    println(f"matrix[1][1..3]: {matrix[1][1..3]}");
+
+    // Slice to new list
+    let slice = list[3..7].to_list();
+    println(f"slice to list: {slice}");
+
+    // Step slicing
+    let stepped = list.step_by(2).collect();
+    println(f"step by 2: {stepped}");
+
+    // Reverse slice
+    let reversed = list.rev().collect();
+    println(f"reversed: {reversed}");
+}
+
+/// List iteration patterns
+fn test_list_iteration() {
+    println("\n=== List Iteration ===");
+
+    let list = [10, 20, 30, 40, 50];
+
+    // Basic iteration
+    println("basic iteration:");
+    for item in list {
+        println(f"  {item}");
+    }
+
+    // With index
+    println("enumerated:");
+    for (i, item) in list.enumerate() {
+        println(f"  [{i}]: {item}");
+    }
+
+    // Reverse iteration
+    println("reverse:");
+    for item in list.rev() {
+        println(f"  {item}");
+    }
+
+    // Iteration with early exit
+    println("early exit at 30:");
+    for item in list {
+        println(f"  {item}");
+        if item == 30 {
+            break;
+        }
+    }
+
+    // Skip/take
+    println("skip 2, take 2:");
+    for item in list.skip(2).take(2) {
+        println(f"  {item}");
+    }
+
+    // Windows
+    println("windows of 2:");
+    for window in list.windows(2) {
+        println(f"  {window}");
+    }
+
+    // Chunks
+    println("chunks of 2:");
+    for chunk in list.chunks(2) {
+        println(f"  {chunk}");
+    }
+
+    // Zip iteration
+    let letters = ['a', 'b', 'c', 'd', 'e'];
+    println("zipped:");
+    for (num, letter) in list.zip(letters) {
+        println(f"  ({num}, '{letter}')");
+    }
+}
+
+/// List transformation operations
+fn test_list_transformations() {
+    println("\n=== List Transformations ===");
+
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Map
+    let doubled = nums.map(|n| n * 2).collect();
+    println(f"doubled: {doubled}");
+
+    let squared = nums.map(|n| n * n).collect();
+    println(f"squared: {squared}");
+
+    let to_string = nums.map(|n| f"num_{n}").collect();
+    println(f"to_string: {to_string}");
+
+    // Filter
+    let evens = nums.filter(|n| n % 2 == 0).collect();
+    println(f"evens: {evens}");
+
+    let odds = nums.filter(|n| n % 2 != 0).collect();
+    println(f"odds: {odds}");
+
+    let greater_than_5 = nums.filter(|n| n > 5).collect();
+    println(f"greater_than_5: {greater_than_5}");
+
+    // Filter map
+    let even_doubled = nums
+        .filter(|n| n % 2 == 0)
+        .map(|n| n * 2)
+        .collect();
+    println(f"even_doubled: {even_doubled}");
+
+    // Flat map
+    let nested = [[1, 2], [3, 4], [5, 6]];
+    let flattened = nested.flat_map(|inner| inner).collect();
+    println(f"flattened: {flattened}");
+
+    // Flatten
+    let deeply_nested = [[[1, 2]], [[3, 4]], [[5, 6]]];
+    let flat_once = deeply_nested.flatten().collect();
+    println(f"flatten once: {flat_once}");
+
+    // Take while / skip while
+    let take_while = nums.take_while(|n| n < 5).collect();
+    println(f"take_while < 5: {take_while}");
+
+    let skip_while = nums.skip_while(|n| n < 5).collect();
+    println(f"skip_while < 5: {skip_while}");
+
+    // Partition
+    let (small, large) = nums.partition(|n| n <= 5);
+    println(f"partition <= 5: small={small}, large={large}");
+
+    // Dedup
+    let with_dups = [1, 1, 2, 2, 2, 3, 1, 1];
+    let deduped = with_dups.dedup().collect();
+    println(f"deduped: {deduped}");
+
+    // Unique (all duplicates removed)
+    let unique = with_dups.unique().collect();
+    println(f"unique: {unique}");
+}
+
+/// List aggregation operations
+fn test_list_aggregations() {
+    println("\n=== List Aggregations ===");
+
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Sum
+    let sum = nums.sum();
+    println(f"sum: {sum}");
+
+    // Product
+    let product = [1, 2, 3, 4, 5].product();
+    println(f"product 1-5: {product}");
+
+    // Min / Max
+    println(f"min: {nums.min()}");
+    println(f"max: {nums.max()}");
+
+    // Min/Max by
+    let words = ["apple", "banana", "cherry", "date"];
+    let shortest = words.min_by_key(|s| s.len());
+    let longest = words.max_by_key(|s| s.len());
+    println(f"shortest: {shortest}");
+    println(f"longest: {longest}");
+
+    // Fold
+    let sum_fold = nums.fold(0, |acc, n| acc + n);
+    println(f"sum via fold: {sum_fold}");
+
+    let product_fold = [1, 2, 3, 4, 5].fold(1, |acc, n| acc * n);
+    println(f"product via fold: {product_fold}");
+
+    let concat = ["a", "b", "c"].fold("", |acc, s| acc + s);
+    println(f"concat via fold: {concat}");
+
+    // Reduce
+    let sum_reduce = nums.reduce(|a, b| a + b);
+    println(f"sum via reduce: {sum_reduce}");
+
+    // Count
+    println(f"count: {nums.count()}");
+    println(f"count evens: {nums.filter(|n| n % 2 == 0).count()}");
+
+    // Any / All
+    println(f"any > 5: {nums.any(|n| n > 5)}");
+    println(f"any > 20: {nums.any(|n| n > 20)}");
+    println(f"all > 0: {nums.all(|n| n > 0)}");
+    println(f"all > 5: {nums.all(|n| n > 5)}");
+
+    // Average
+    let avg = nums.sum() as Float / nums.len() as Float;
+    println(f"average: {avg}");
+}
+
+/// List searching operations
+fn test_list_searching() {
+    println("\n=== List Searching ===");
+
+    let nums = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+
+    // Find
+    println(f"find > 5: {nums.find(|n| n > 5)}");
+    println(f"find > 20: {nums.find(|n| n > 20)}");
+
+    // Find first and last
+    println(f"find first 5: {nums.find(|n| n == 5)}");
+    println(f"rfind last 5: {nums.rfind(|n| n == 5)}");
+
+    // Position (index)
+    println(f"position of first > 5: {nums.position(|n| n > 5)}");
+    println(f"position of first 5: {nums.position(|n| n == 5)}");
+    println(f"rposition of last 5: {nums.rposition(|n| n == 5)}");
+
+    // Contains
+    println(f"contains 5: {nums.contains(5)}");
+    println(f"contains 10: {nums.contains(10)}");
+
+    // Binary search (on sorted)
+    let sorted = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    println(f"binary_search 5: {sorted.binary_search(5)}");
+    println(f"binary_search 11: {sorted.binary_search(11)}");
+    println(f"binary_search 0: {sorted.binary_search(0)}");
+
+    // Index of
+    println(f"index_of 5: {nums.index_of(5)}");
+    println(f"index_of 100: {nums.index_of(100)}");
+
+    // Starts with / ends with
+    let list = [1, 2, 3, 4, 5];
+    println(f"starts_with [1, 2]: {list.starts_with([1, 2])}");
+    println(f"starts_with [2, 3]: {list.starts_with([2, 3])}");
+    println(f"ends_with [4, 5]: {list.ends_with([4, 5])}");
+    println(f"ends_with [3, 4]: {list.ends_with([3, 4])}");
+}
+
+/// List sorting operations
+fn test_list_sorting() {
+    println("\n=== List Sorting ===");
+
+    let unsorted = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+
+    // Basic sort
+    let sorted = unsorted.sorted().collect();
+    println(f"sorted: {sorted}");
+
+    // Reverse sort
+    let reversed = unsorted.sorted().rev().collect();
+    println(f"sorted reversed: {reversed}");
+
+    // Sort by key
+    let words = ["banana", "apple", "cherry", "date", "elderberry"];
+    let by_length = words.sorted_by_key(|s| s.len()).collect();
+    println(f"sorted by length: {by_length}");
+
+    // Sort by descending
+    let desc_length = words.sorted_by_key(|s| -(s.len() as Int)).collect();
+    println(f"sorted by length desc: {desc_length}");
+
+    // Sort with comparator
+    let by_last_char = words.sorted_by(|a, b| {
+        a.chars().last().cmp(b.chars().last())
+    }).collect();
+    println(f"sorted by last char: {by_last_char}");
+
+    // Stable sort
+    type Item is { key: Int, value: Text };
+    let items = [
+        Item { key: 1, value: "a" },
+        Item { key: 2, value: "b" },
+        Item { key: 1, value: "c" },
+        Item { key: 2, value: "d" },
+    ];
+    let stable_sorted = items.sorted_by_key(|item| item.key).collect();
+    println("stable sorted by key:");
+    for item in stable_sorted {
+        println(f"  key={item.key}, value={item.value}");
+    }
+
+    // In-place sort
+    let mut mutable = [5, 2, 8, 1, 9, 3];
+    mutable.sort();
+    println(f"in-place sorted: {mutable}");
+
+    // Reverse in place
+    let mut to_reverse = [1, 2, 3, 4, 5];
+    to_reverse.reverse();
+    println(f"in-place reversed: {to_reverse}");
+}
+
+/// List combining operations
+fn test_list_combining() {
+    println("\n=== List Combining ===");
+
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let c = [7, 8, 9];
+
+    // Concatenation
+    let concat = a + b;
+    println(f"a + b: {concat}");
+
+    let triple_concat = a + b + c;
+    println(f"a + b + c: {triple_concat}");
+
+    // Zip
+    let zipped = a.zip(b).collect();
+    println(f"zip(a, b): {zipped}");
+
+    // Zip with
+    let sum_pairs = a.zip(b).map(|(x, y)| x + y).collect();
+    println(f"zip and sum: {sum_pairs}");
+
+    // Chain
+    let chained = a.chain(b).chain(c).collect();
+    println(f"chained: {chained}");
+
+    // Interleave
+    let interleaved = a.interleave(b).collect();
+    println(f"interleaved: {interleaved}");
+
+    // Repeat list
+    let repeated = a.cycle().take(9).collect();
+    println(f"cycled a (9 elements): {repeated}");
+
+    // Cartesian product
+    let product = a.cartesian_product(b).collect();
+    println(f"cartesian product:");
+    for (x, y) in product {
+        println(f"  ({x}, {y})");
+    }
+
+    // Join with separator
+    let strings = ["a", "b", "c", "d"];
+    let joined = strings.join(", ");
+    println(f"joined: {joined}");
+
+    let with_pipes = strings.join(" | ");
+    println(f"with pipes: {with_pipes}");
+
+    // Intersperse
+    let interspersed = a.intersperse(0).collect();
+    println(f"interspersed with 0: {interspersed}");
+}

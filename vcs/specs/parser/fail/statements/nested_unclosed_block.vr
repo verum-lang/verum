@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, block, nested, unclosed, error
+// @description: Test nested unclosed block - missing inner close brace
+// @expected-error: E011
+
+fn test() {
+    {
+        {
+            let x = 5;
+    }
+}

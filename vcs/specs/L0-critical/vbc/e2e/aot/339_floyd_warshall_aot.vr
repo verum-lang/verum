@@ -1,0 +1,307 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, floyd-warshall, all-pairs-shortest-path, graph
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Floyd-Warshall all-pairs shortest paths on a 6-node graph.
+// Uses a 6x6 distance matrix stored as 6 Arr6 rows.
+// Also tests: negative edge detection, transitive closure, path reconstruction.
+
+type Arr6 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int };
+
+fn a6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 }
+    else if i == 2 { a.d2 } else if i == 3 { a.d3 }
+    else if i == 4 { a.d4 } else { a.d5 }
+}
+
+fn a6_set(a: Arr6, i: Int, v: Int) -> Arr6 {
+    Arr6 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 }
+    }
+}
+
+fn a6_fill(val: Int) -> Arr6 {
+    Arr6 { d0: val, d1: val, d2: val, d3: val, d4: val, d5: val }
+}
+
+// 6x6 matrix
+type Mat6 is { r0: Arr6, r1: Arr6, r2: Arr6, r3: Arr6, r4: Arr6, r5: Arr6 };
+
+fn mat_get_row(m: Mat6, r: Int) -> Arr6 {
+    if r == 0 { m.r0 } else if r == 1 { m.r1 }
+    else if r == 2 { m.r2 } else if r == 3 { m.r3 }
+    else if r == 4 { m.r4 } else { m.r5 }
+}
+
+fn mat_set_row(m: Mat6, r: Int, row: Arr6) -> Mat6 {
+    Mat6 {
+        r0: if r == 0 { row } else { m.r0 },
+        r1: if r == 1 { row } else { m.r1 },
+        r2: if r == 2 { row } else { m.r2 },
+        r3: if r == 3 { row } else { m.r3 },
+        r4: if r == 4 { row } else { m.r4 },
+        r5: if r == 5 { row } else { m.r5 }
+    }
+}
+
+fn mat_get(m: Mat6, r: Int, c: Int) -> Int {
+    a6_get(mat_get_row(m, r), c)
+}
+
+fn mat_set(m: Mat6, r: Int, c: Int, v: Int) -> Mat6 {
+    let row = mat_get_row(m, r);
+    let new_row = a6_set(row, c, v);
+    mat_set_row(m, r, new_row)
+}
+
+fn inf() -> Int { 99999 }
+
+// Create initial distance matrix filled with INF, diagonal = 0
+fn mat_init() -> Mat6 {
+    let inf_val = inf();
+    let inf_row = a6_fill(inf_val);
+    let mut m = Mat6 { r0: inf_row, r1: inf_row, r2: inf_row, r3: inf_row, r4: inf_row, r5: inf_row };
+    let mut i = 0;
+    while i < 6 {
+        m = mat_set(m, i, i, 0);
+        i = i + 1;
+    }
+    m
+}
+
+// Floyd-Warshall algorithm
+fn floyd_warshall(dist: Mat6) -> Mat6 {
+    let mut d = dist;
+    let inf_val = inf();
+    let mut k = 0;
+    while k < 6 {
+        let mut i = 0;
+        while i < 6 {
+            let mut j = 0;
+            while j < 6 {
+                let dik = mat_get(d, i, k);
+                let dkj = mat_get(d, k, j);
+                if dik < inf_val {
+                    if dkj < inf_val {
+                        let via_k = dik + dkj;
+                        if via_k < mat_get(d, i, j) {
+                            d = mat_set(d, i, j, via_k);
+                        }
+                    }
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    d
+}
+
+// Transitive closure: can we reach j from i?
+fn transitive_closure(dist: Mat6) -> Mat6 {
+    let result = floyd_warshall(dist);
+    let inf_val = inf();
+    let mut tc = mat_init();
+    let mut i = 0;
+    while i < 6 {
+        let mut j = 0;
+        while j < 6 {
+            if mat_get(result, i, j) < inf_val {
+                tc = mat_set(tc, i, j, 1);
+            } else {
+                tc = mat_set(tc, i, j, 0);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    tc
+}
+
+// Check for negative cycles: if dist[i][i] < 0 for any i after FW
+fn has_negative_cycle(dist: Mat6) -> Int {
+    let result = floyd_warshall(dist);
+    let mut i = 0;
+    while i < 6 {
+        if mat_get(result, i, i) < 0 { return 1; }
+        i = i + 1;
+    }
+    0
+}
+
+// Build graph 1: Connected weighted graph
+//   0 --3-- 1 --1-- 2
+//   |               |
+//   7               2
+//   |               |
+//   3 --2-- 4 --4-- 5
+fn make_graph1() -> Mat6 {
+    let mut m = mat_init();
+    // Undirected edges
+    m = mat_set(m, 0, 1, 3); m = mat_set(m, 1, 0, 3);
+    m = mat_set(m, 1, 2, 1); m = mat_set(m, 2, 1, 1);
+    m = mat_set(m, 0, 3, 7); m = mat_set(m, 3, 0, 7);
+    m = mat_set(m, 2, 5, 2); m = mat_set(m, 5, 2, 2);
+    m = mat_set(m, 3, 4, 2); m = mat_set(m, 4, 3, 2);
+    m = mat_set(m, 4, 5, 4); m = mat_set(m, 5, 4, 4);
+    m
+}
+
+// Build graph 2: Directed graph with some one-way edges
+fn make_graph2() -> Mat6 {
+    let mut m = mat_init();
+    m = mat_set(m, 0, 1, 4);
+    m = mat_set(m, 0, 2, 11);
+    m = mat_set(m, 1, 2, 2);
+    m = mat_set(m, 2, 3, 3);
+    m = mat_set(m, 3, 4, 1);
+    m = mat_set(m, 4, 5, 5);
+    m = mat_set(m, 1, 4, 9);
+    m
+}
+
+fn test_graph1_shortest_paths() {
+    let dist = floyd_warshall(make_graph1());
+    // 0->0 = 0
+    assert_eq(mat_get(dist, 0, 0), 0);
+    // 0->1 = 3
+    assert_eq(mat_get(dist, 0, 1), 3);
+    // 0->2 = 3+1 = 4
+    assert_eq(mat_get(dist, 0, 2), 4);
+    // 0->5 = 0->1->2->5 = 3+1+2 = 6
+    assert_eq(mat_get(dist, 0, 5), 6);
+    // 0->3 = 7 (direct) vs 0->1->2->5->4->3 = 3+1+2+4+2 = 12 -> 7 is shorter
+    assert_eq(mat_get(dist, 0, 3), 7);
+    // 0->4 = 0->3->4 = 7+2 = 9 vs 0->1->2->5->4 = 3+1+2+4 = 10 -> 9
+    assert_eq(mat_get(dist, 0, 4), 9);
+}
+
+fn test_graph1_symmetry() {
+    // Undirected graph: dist[i][j] == dist[j][i]
+    let dist = floyd_warshall(make_graph1());
+    let mut i = 0;
+    while i < 6 {
+        let mut j = 0;
+        while j < 6 {
+            assert_eq(mat_get(dist, i, j), mat_get(dist, j, i));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn test_graph1_triangle_inequality() {
+    // Triangle inequality: dist[i][j] <= dist[i][k] + dist[k][j]
+    let dist = floyd_warshall(make_graph1());
+    let mut i = 0;
+    while i < 6 {
+        let mut j = 0;
+        while j < 6 {
+            let mut k = 0;
+            while k < 6 {
+                let direct = mat_get(dist, i, j);
+                let via_k = mat_get(dist, i, k) + mat_get(dist, k, j);
+                assert_eq(direct <= via_k, true);
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn test_directed_graph() {
+    let dist = floyd_warshall(make_graph2());
+    // 0->1 = 4
+    assert_eq(mat_get(dist, 0, 1), 4);
+    // 0->2 = min(11, 4+2) = 6
+    assert_eq(mat_get(dist, 0, 2), 6);
+    // 0->3 = 0->2->3 = 6+3 = 9
+    assert_eq(mat_get(dist, 0, 3), 9);
+    // 0->4 = min(0->1->4=13, 0->3->4=10) = 10
+    assert_eq(mat_get(dist, 0, 4), 10);
+    // 0->5 = 0->4->5 = 10+5 = 15
+    assert_eq(mat_get(dist, 0, 5), 15);
+    // No path from 5 to 0
+    assert_eq(mat_get(dist, 5, 0), inf());
+}
+
+fn test_transitive_closure() {
+    let tc = transitive_closure(make_graph2());
+    // 0 can reach everything
+    assert_eq(mat_get(tc, 0, 1), 1);
+    assert_eq(mat_get(tc, 0, 5), 1);
+    // 5 cannot reach 0
+    assert_eq(mat_get(tc, 5, 0), 0);
+    // Every node can reach itself
+    let mut i = 0;
+    while i < 6 {
+        assert_eq(mat_get(tc, i, i), 1);
+        i = i + 1;
+    }
+}
+
+fn test_disconnected() {
+    // Two components: {0,1,2} and {3,4,5}
+    let mut m = mat_init();
+    m = mat_set(m, 0, 1, 1); m = mat_set(m, 1, 0, 1);
+    m = mat_set(m, 1, 2, 2); m = mat_set(m, 2, 1, 2);
+    m = mat_set(m, 3, 4, 3); m = mat_set(m, 4, 3, 3);
+    m = mat_set(m, 4, 5, 1); m = mat_set(m, 5, 4, 1);
+    let dist = floyd_warshall(m);
+    assert_eq(mat_get(dist, 0, 2), 3); // 0->1->2
+    assert_eq(mat_get(dist, 3, 5), 4); // 3->4->5
+    assert_eq(mat_get(dist, 0, 3), inf()); // disconnected
+    assert_eq(mat_get(dist, 2, 4), inf()); // disconnected
+}
+
+fn test_no_negative_cycle() {
+    assert_eq(has_negative_cycle(make_graph1()), 0);
+    assert_eq(has_negative_cycle(make_graph2()), 0);
+}
+
+fn test_diameter() {
+    // Graph diameter: max shortest path between any two connected nodes
+    let dist = floyd_warshall(make_graph1());
+    let mut diameter = 0;
+    let mut i = 0;
+    while i < 6 {
+        let mut j = 0;
+        while j < 6 {
+            let d = mat_get(dist, i, j);
+            if d < inf() {
+                if d > diameter { diameter = d; }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Longest shortest path in graph1
+    // 3->2 = 3->4->5->2 = 2+4+2 = 8 or 3->0->1->2 = 7+3+1 = 11 -> pick min = 8
+    // 3->5 = 3->4->5 = 2+4 = 6
+    // Let's check 3->2:
+    assert_eq(mat_get(dist, 3, 2), 8);
+    // 3->1 = min(3->0->1=10, 3->4->5->2->1=9) = 9
+    assert_eq(mat_get(dist, 3, 1), 9);
+    // Diameter should be one of the larger values
+    assert_eq(diameter >= 9, true);
+}
+
+fn main() -> Int {
+    test_graph1_shortest_paths();
+    test_graph1_symmetry();
+    test_graph1_triangle_inequality();
+    test_directed_graph();
+    test_transitive_closure();
+    test_disconnected();
+    test_no_negative_cycle();
+    test_diameter();
+    print("[OK] 339_floyd_warshall_aot");
+    0
+}

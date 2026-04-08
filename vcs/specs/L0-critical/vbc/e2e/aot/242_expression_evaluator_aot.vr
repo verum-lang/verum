@@ -1,0 +1,156 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, expression, evaluator, interpreter
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for a simple expression evaluator using tokenized integer expressions
+
+// Token types: 0=NUM, 1=PLUS, 2=MINUS, 3=MUL, 4=DIV, 5=END
+type Token is { kind: Int, value: Int };
+
+// Expression as a sequence of tokens (postfix / RPN)
+type Expr8 is {
+    t0: Token, t1: Token, t2: Token, t3: Token,
+    t4: Token, t5: Token, t6: Token, t7: Token,
+    len: Int
+};
+
+fn tok_num(v: Int) -> Token { Token { kind: 0, value: v } }
+fn tok_plus() -> Token { Token { kind: 1, value: 0 } }
+fn tok_minus() -> Token { Token { kind: 2, value: 0 } }
+fn tok_mul() -> Token { Token { kind: 3, value: 0 } }
+fn tok_div() -> Token { Token { kind: 4, value: 0 } }
+fn tok_end() -> Token { Token { kind: 5, value: 0 } }
+
+fn expr8_get(e: Expr8, i: Int) -> Token {
+    if i == 0 { e.t0 } else if i == 1 { e.t1 }
+    else if i == 2 { e.t2 } else if i == 3 { e.t3 }
+    else if i == 4 { e.t4 } else if i == 5 { e.t5 }
+    else if i == 6 { e.t6 } else if i == 7 { e.t7 }
+    else { tok_end() }
+}
+
+// Evaluate RPN expression using a 4-deep stack
+type EvalStack is { s0: Int, s1: Int, s2: Int, s3: Int, top: Int };
+
+fn es_new() -> EvalStack { EvalStack { s0: 0, s1: 0, s2: 0, s3: 0, top: 0 } }
+
+fn es_push(s: EvalStack, v: Int) -> EvalStack {
+    let i = s.top;
+    EvalStack {
+        s0: if i == 0 { v } else { s.s0 },
+        s1: if i == 1 { v } else { s.s1 },
+        s2: if i == 2 { v } else { s.s2 },
+        s3: if i == 3 { v } else { s.s3 },
+        top: s.top + 1
+    }
+}
+
+fn es_peek(s: EvalStack) -> Int {
+    let i = s.top - 1;
+    if i == 0 { s.s0 } else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 } else if i == 3 { s.s3 }
+    else { 0 }
+}
+
+fn es_pop(s: EvalStack) -> EvalStack {
+    EvalStack { s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3, top: s.top - 1 }
+}
+
+fn eval_rpn(expr: Expr8) -> Int {
+    let mut stack = es_new();
+    let mut i = 0;
+    while i < expr.len {
+        let tok = expr8_get(expr, i);
+        if tok.kind == 0 {
+            // Number
+            stack = es_push(stack, tok.value);
+        } else {
+            // Binary op
+            let b = es_peek(stack);
+            stack = es_pop(stack);
+            let a = es_peek(stack);
+            stack = es_pop(stack);
+            if tok.kind == 1 {
+                stack = es_push(stack, a + b);
+            } else if tok.kind == 2 {
+                stack = es_push(stack, a - b);
+            } else if tok.kind == 3 {
+                stack = es_push(stack, a * b);
+            } else if tok.kind == 4 {
+                if b == 0 {
+                    stack = es_push(stack, 0);
+                } else {
+                    stack = es_push(stack, a / b);
+                }
+            }
+        }
+        i = i + 1;
+    }
+    es_peek(stack)
+}
+
+fn test_simple_add() {
+    // 3 + 4 = 7 -> RPN: 3 4 +
+    let e = Expr8 {
+        t0: tok_num(3), t1: tok_num(4), t2: tok_plus(),
+        t3: tok_end(), t4: tok_end(), t5: tok_end(), t6: tok_end(), t7: tok_end(),
+        len: 3
+    };
+    assert_eq(eval_rpn(e), 7);
+}
+
+fn test_complex() {
+    // (2 + 3) * 4 = 20 -> RPN: 2 3 + 4 *
+    let e = Expr8 {
+        t0: tok_num(2), t1: tok_num(3), t2: tok_plus(),
+        t3: tok_num(4), t4: tok_mul(),
+        t5: tok_end(), t6: tok_end(), t7: tok_end(),
+        len: 5
+    };
+    assert_eq(eval_rpn(e), 20);
+}
+
+fn test_sub_and_div() {
+    // (10 - 4) / 2 = 3 -> RPN: 10 4 - 2 /
+    let e = Expr8 {
+        t0: tok_num(10), t1: tok_num(4), t2: tok_minus(),
+        t3: tok_num(2), t4: tok_div(),
+        t5: tok_end(), t6: tok_end(), t7: tok_end(),
+        len: 5
+    };
+    assert_eq(eval_rpn(e), 3);
+}
+
+fn test_nested() {
+    // (1 + 2) * (3 + 4) = 21 -> RPN: 1 2 + 3 4 + *
+    let e = Expr8 {
+        t0: tok_num(1), t1: tok_num(2), t2: tok_plus(),
+        t3: tok_num(3), t4: tok_num(4), t5: tok_plus(),
+        t6: tok_mul(), t7: tok_end(),
+        len: 7
+    };
+    assert_eq(eval_rpn(e), 21);
+}
+
+fn test_single_number() {
+    let e = Expr8 {
+        t0: tok_num(42),
+        t1: tok_end(), t2: tok_end(), t3: tok_end(),
+        t4: tok_end(), t5: tok_end(), t6: tok_end(), t7: tok_end(),
+        len: 1
+    };
+    assert_eq(eval_rpn(e), 42);
+}
+
+fn main() -> Int {
+    test_simple_add();
+    test_complex();
+    test_sub_and_div();
+    test_nested();
+    test_single_number();
+    print("[OK] 242_expression_evaluator_aot");
+    0
+}

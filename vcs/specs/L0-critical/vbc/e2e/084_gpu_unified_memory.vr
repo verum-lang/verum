@@ -1,0 +1,277 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, gpu, unified_memory, managed_memory
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU unified memory — managed alloc, advise hints, prefetch tracking, migration counting
+
+// ============================================================================
+// Managed memory allocation
+// ============================================================================
+
+type ManagedAlloc is {
+    alloc_id: Int,
+    addr: Int,
+    size: Int,
+    advise_hint: Int,   // 0=none, 1=read_mostly, 2=preferred_location, 3=accessed_by
+    prefetch_target: Int, // -1=none, 0=host, 1+=device_id
+    access_count: Int
+};
+
+fn managed_new(alloc_id: Int, addr: Int, size: Int) -> ManagedAlloc {
+    ManagedAlloc {
+        alloc_id: alloc_id, addr: addr, size: size,
+        advise_hint: 0, prefetch_target: -1, access_count: 0
+    }
+}
+
+fn managed_advise(m: ManagedAlloc, hint: Int) -> ManagedAlloc {
+    ManagedAlloc {
+        alloc_id: m.alloc_id, addr: m.addr, size: m.size,
+        advise_hint: hint, prefetch_target: m.prefetch_target, access_count: m.access_count
+    }
+}
+
+fn managed_prefetch(m: ManagedAlloc, target: Int) -> ManagedAlloc {
+    ManagedAlloc {
+        alloc_id: m.alloc_id, addr: m.addr, size: m.size,
+        advise_hint: m.advise_hint, prefetch_target: target, access_count: m.access_count
+    }
+}
+
+fn managed_access(m: ManagedAlloc) -> ManagedAlloc {
+    ManagedAlloc {
+        alloc_id: m.alloc_id, addr: m.addr, size: m.size,
+        advise_hint: m.advise_hint, prefetch_target: m.prefetch_target, access_count: m.access_count + 1
+    }
+}
+
+// ============================================================================
+// 4-alloc array
+// ============================================================================
+
+type AllocArr4 is { a0: ManagedAlloc, a1: ManagedAlloc, a2: ManagedAlloc, a3: ManagedAlloc };
+
+fn allocarr_get(arr: AllocArr4, i: Int) -> ManagedAlloc {
+    if i == 0 { arr.a0 } else if i == 1 { arr.a1 }
+    else if i == 2 { arr.a2 } else { arr.a3 }
+}
+
+fn allocarr_set(arr: AllocArr4, i: Int, val: ManagedAlloc) -> AllocArr4 {
+    AllocArr4 {
+        a0: if i == 0 { val } else { arr.a0 },
+        a1: if i == 1 { val } else { arr.a1 },
+        a2: if i == 2 { val } else { arr.a2 },
+        a3: if i == 3 { val } else { arr.a3 }
+    }
+}
+
+// ============================================================================
+// Unified memory manager
+// ============================================================================
+
+type UnifiedMemManager is {
+    allocs: AllocArr4,
+    count: Int,
+    next_addr: Int,
+    total_bytes: Int,
+    migration_count: Int
+};
+
+fn umm_new() -> UnifiedMemManager {
+    let empty = managed_new(0, 0, 0);
+    let allocs = AllocArr4 { a0: empty, a1: empty, a2: empty, a3: empty };
+    UnifiedMemManager { allocs: allocs, count: 0, next_addr: 0, total_bytes: 0, migration_count: 0 }
+}
+
+fn umm_alloc(mgr: UnifiedMemManager, size: Int) -> UnifiedMemManager {
+    let alloc = managed_new(mgr.count, mgr.next_addr, size);
+    let new_allocs = allocarr_set(mgr.allocs, mgr.count, alloc);
+    UnifiedMemManager {
+        allocs: new_allocs, count: mgr.count + 1,
+        next_addr: mgr.next_addr + size, total_bytes: mgr.total_bytes + size,
+        migration_count: mgr.migration_count
+    }
+}
+
+fn umm_advise(mgr: UnifiedMemManager, idx: Int, hint: Int) -> UnifiedMemManager {
+    let alloc = allocarr_get(mgr.allocs, idx);
+    let advised = managed_advise(alloc, hint);
+    UnifiedMemManager {
+        allocs: allocarr_set(mgr.allocs, idx, advised), count: mgr.count,
+        next_addr: mgr.next_addr, total_bytes: mgr.total_bytes,
+        migration_count: mgr.migration_count
+    }
+}
+
+fn umm_prefetch(mgr: UnifiedMemManager, idx: Int, target: Int) -> UnifiedMemManager {
+    let alloc = allocarr_get(mgr.allocs, idx);
+    let old_target = alloc.prefetch_target;
+    let prefetched = managed_prefetch(alloc, target);
+    // Count migration if target changed
+    let extra = if old_target == target { 0 } else { 1 };
+    UnifiedMemManager {
+        allocs: allocarr_set(mgr.allocs, idx, prefetched), count: mgr.count,
+        next_addr: mgr.next_addr, total_bytes: mgr.total_bytes,
+        migration_count: mgr.migration_count + extra
+    }
+}
+
+// ============================================================================
+// Test 1: Basic managed allocation
+// ============================================================================
+
+@test
+fn test_managed_alloc() {
+    let mut mgr = umm_new();
+    assert_eq(mgr.count, 0);
+    assert_eq(mgr.total_bytes, 0);
+
+    mgr = umm_alloc(mgr, 1024);
+    mgr = umm_alloc(mgr, 2048);
+    mgr = umm_alloc(mgr, 4096);
+
+    assert_eq(mgr.count, 3);
+    assert_eq(mgr.total_bytes, 1024 + 2048 + 4096);
+
+    // Check addresses are sequential
+    let a0 = allocarr_get(mgr.allocs, 0);
+    let a1 = allocarr_get(mgr.allocs, 1);
+    let a2 = allocarr_get(mgr.allocs, 2);
+    assert_eq(a0.addr, 0);
+    assert_eq(a0.size, 1024);
+    assert_eq(a1.addr, 1024);
+    assert_eq(a1.size, 2048);
+    assert_eq(a2.addr, 3072);
+    assert_eq(a2.size, 4096);
+
+    print("  test_managed_alloc: ok");
+}
+
+// ============================================================================
+// Test 2: Memory advise hints
+// ============================================================================
+
+@test
+fn test_advise_hints() {
+    let mut mgr = umm_new();
+    mgr = umm_alloc(mgr, 1024);
+    mgr = umm_alloc(mgr, 2048);
+
+    // No hints initially
+    let a0 = allocarr_get(mgr.allocs, 0);
+    assert_eq(a0.advise_hint, 0);
+
+    // Set read_mostly on alloc 0
+    mgr = umm_advise(mgr, 0, 1);
+    let a0_advised = allocarr_get(mgr.allocs, 0);
+    assert_eq(a0_advised.advise_hint, 1);
+
+    // Set preferred_location on alloc 1
+    mgr = umm_advise(mgr, 1, 2);
+    let a1_advised = allocarr_get(mgr.allocs, 1);
+    assert_eq(a1_advised.advise_hint, 2);
+
+    // Override hint on alloc 0
+    mgr = umm_advise(mgr, 0, 3);
+    let a0_new = allocarr_get(mgr.allocs, 0);
+    assert_eq(a0_new.advise_hint, 3);
+
+    // Alloc 1 unchanged
+    let a1_check = allocarr_get(mgr.allocs, 1);
+    assert_eq(a1_check.advise_hint, 2);
+
+    print("  test_advise_hints: ok");
+}
+
+// ============================================================================
+// Test 3: Prefetch tracking
+// ============================================================================
+
+@test
+fn test_prefetch() {
+    let mut mgr = umm_new();
+    mgr = umm_alloc(mgr, 4096);
+    mgr = umm_alloc(mgr, 4096);
+
+    assert_eq(mgr.migration_count, 0);
+
+    // Prefetch alloc 0 to device 1
+    mgr = umm_prefetch(mgr, 0, 1);
+    assert_eq(mgr.migration_count, 1);
+    let a0 = allocarr_get(mgr.allocs, 0);
+    assert_eq(a0.prefetch_target, 1);
+
+    // Prefetch same alloc to same device — no migration
+    mgr = umm_prefetch(mgr, 0, 1);
+    assert_eq(mgr.migration_count, 1);
+
+    // Prefetch to different device — migration
+    mgr = umm_prefetch(mgr, 0, 0);
+    assert_eq(mgr.migration_count, 2);
+
+    // Prefetch alloc 1 to device 2
+    mgr = umm_prefetch(mgr, 1, 2);
+    assert_eq(mgr.migration_count, 3);
+
+    print("  test_prefetch: ok");
+}
+
+// ============================================================================
+// Test 4: Full lifecycle — alloc, advise, prefetch, access, free
+// ============================================================================
+
+@test
+fn test_full_lifecycle() {
+    let mut mgr = umm_new();
+
+    // Phase 1: Allocate training data and model weights
+    mgr = umm_alloc(mgr, 8192);   // training data
+    mgr = umm_alloc(mgr, 4096);   // model weights
+
+    // Phase 2: Advise — training data read_mostly, weights preferred on device
+    mgr = umm_advise(mgr, 0, 1);  // read_mostly
+    mgr = umm_advise(mgr, 1, 2);  // preferred_location
+
+    // Phase 3: Prefetch both to GPU (device 1) before training
+    mgr = umm_prefetch(mgr, 0, 1);
+    mgr = umm_prefetch(mgr, 1, 1);
+    assert_eq(mgr.migration_count, 2);
+
+    // Phase 4: Training loop — GPU accesses
+    let data = allocarr_get(mgr.allocs, 0);
+    let mut accessed_data = data;
+    let mut step = 0;
+    while step < 10 {
+        accessed_data = managed_access(accessed_data);
+        step = step + 1;
+    }
+    assert_eq(accessed_data.access_count, 10);
+
+    // Phase 5: Prefetch results back to host
+    mgr = umm_prefetch(mgr, 1, 0);
+    assert_eq(mgr.migration_count, 3);
+
+    // Verify final state
+    assert_eq(mgr.count, 2);
+    assert_eq(mgr.total_bytes, 12288);
+    let w = allocarr_get(mgr.allocs, 1);
+    assert_eq(w.prefetch_target, 0);
+    assert_eq(w.advise_hint, 2);
+
+    print("  test_full_lifecycle: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_managed_alloc();
+    test_advise_hints();
+    test_prefetch();
+    test_full_lifecycle();
+    print("[OK] 084_gpu_unified_memory");
+    0
+}

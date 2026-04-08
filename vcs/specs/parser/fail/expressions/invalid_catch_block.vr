@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, try, recover, block, error
+// @description: Recover clause without body
+// @expected-error: E018
+
+fn test() {
+    try {
+        fallible();
+    } recover
+}

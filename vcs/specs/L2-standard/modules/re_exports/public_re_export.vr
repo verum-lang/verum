@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, re-exports, public
+
+/// Public re-export - making internal items available through public interface.
+/// Re-exports allow creating clean public APIs while keeping implementation
+/// details in separate internal modules.
+
+module library {
+    // Internal implementation modules
+    pub module core {
+        pub type Engine is {
+            state: EngineState,
+            config: Config
+        };
+
+        pub type EngineState is
+    | Uninitialized
+    | Running
+    | Paused
+    | Stopped;
+
+        pub type Config is {
+            threads: Int,
+            memory_limit: Int
+        };
+
+        implement Engine {
+            pub fn new(config: Config) -> Engine {
+                Engine { state: Uninitialized, config }
+            }
+
+            pub fn start(&mut self) {
+                self.state = Running;
+            }
+
+            pub fn stop(&mut self) {
+                self.state = Stopped;
+            }
+        }
+    }
+
+    pub module utils {
+        pub fn validate_config(config: &super.core.Config) -> Bool {
+            config.threads > 0 && config.memory_limit > 0
+        }
+
+        pub fn default_config() -> super.core.Config {
+            super.core.Config { threads: 4, memory_limit: 1024 * 1024 * 1024 }
+        }
+    }
+
+    pub module handlers {
+        pub type Request is {
+            path: Text,
+            method: Text,
+            body: Maybe<Bytes>
+        };
+
+        pub type Response is {
+            status: Int,
+            body: Bytes
+        };
+    }
+
+    // Public API convenience functions
+    pub module api {
+        mount super.core.{Engine, Config};
+        mount super.utils.{validate_config, default_config};
+
+        pub fn create_engine() -> Engine {
+            let config = default_config();
+            Engine.new(config)
+        }
+
+        pub fn create_engine_with_config(threads: Int, memory: Int) -> Engine {
+            let config = Config { threads, memory_limit: memory };
+            Engine.new(config)
+        }
+    }
+}
+
+// Application using the library
+module application {
+    mount library.core.{Engine, Config};
+    mount library.handlers.{Request, Response};
+    mount library.utils.{validate_config, default_config};
+    mount library.api.{create_engine, create_engine_with_config};
+
+    pub fn run() {
+        let config = default_config();
+
+        if validate_config(&config) {
+            let mut engine = create_engine();
+
+            let request = Request {
+                path: "/api/data",
+                method: "GET",
+                body: None
+            };
+        }
+    }
+}
+
+fn main() {
+    mount library.core.{Engine, Config};
+    mount library.api.{create_engine, create_engine_with_config};
+
+    // Simple usage
+    let mut engine = create_engine();
+    engine.start();
+
+    // Custom configuration
+    let mut custom_engine = create_engine_with_config(8, 2 * 1024 * 1024 * 1024);
+    custom_engine.start();
+
+    // Direct type usage
+    let config = Config { threads: 16, memory_limit: 4 * 1024 * 1024 * 1024 };
+    let mut high_perf_engine = Engine.new(config);
+    high_perf_engine.start();
+}

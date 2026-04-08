@@ -1,0 +1,108 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, recursion, mutual-recursion
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT recursion: direct, mutual, and tail-call patterns
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn fib(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+
+// Mutual recursion
+fn is_even(n: Int) -> Bool {
+    if n == 0 {
+        true
+    } else {
+        is_odd(n - 1)
+    }
+}
+
+fn is_odd(n: Int) -> Bool {
+    if n == 0 {
+        false
+    } else {
+        is_even(n - 1)
+    }
+}
+
+// Accumulator-style (tail-call pattern)
+fn sum_to(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        sum_to(n - 1, acc + n)
+    }
+}
+
+fn power(base: Int, exp: Int, acc: Int) -> Int {
+    if exp <= 0 {
+        acc
+    } else {
+        power(base, exp - 1, acc * base)
+    }
+}
+
+fn gcd(a_in: Int, b_in: Int) -> Int {
+    let mut a = a_in;
+    let mut b = b_in;
+    while b > 0 {
+        let t = b;
+        b = a - (a / b) * b;
+        a = t;
+    }
+    a
+}
+
+fn main() -> Int {
+    // Direct recursion
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+
+    // Fibonacci
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(15), 610);
+
+    // Mutual recursion
+    assert(is_even(0));
+    assert(!is_odd(0));
+    assert(!is_even(1));
+    assert(is_odd(1));
+    assert(is_even(10));
+    assert(is_odd(11));
+    assert(!is_even(7));
+    assert(!is_odd(8));
+
+    // Accumulator-style
+    assert_eq(sum_to(10, 0), 55);
+    assert_eq(sum_to(100, 0), 5050);
+
+    // Power
+    assert_eq(power(2, 0, 1), 1);
+    assert_eq(power(2, 10, 1), 1024);
+    assert_eq(power(3, 5, 1), 243);
+
+    // GCD
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(100, 75), 25);
+
+    0
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, rank2, function, error
+// @description: Test invalid rank-2 polymorphic function type
+// @expected-error: E018
+
+// Rank-2 types need fn<R> not fn<>
+type Broken is fn<>(Reducer<Int, R>) -> Reducer<Text, R>;

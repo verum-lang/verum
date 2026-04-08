@@ -1,0 +1,128 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, ring-buffer, circular, fifo
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Ring buffer with capacity 8
+type RingBuf is { data: Arr8, head: Int, count: Int };
+
+fn rb_new() -> RingBuf { RingBuf { data: zeros(), head: 0, count: 0 } }
+
+fn rb_push(rb: RingBuf, val: Int) -> RingBuf {
+    let idx = (rb.head + rb.count) % 8;
+    let new_data = set(rb.data, idx, val);
+    if rb.count < 8 {
+        RingBuf { data: new_data, head: rb.head, count: rb.count + 1 }
+    } else {
+        // Overwrite oldest
+        RingBuf { data: new_data, head: (rb.head + 1) % 8, count: 8 }
+    }
+}
+
+fn rb_pop(rb: RingBuf) -> RingBuf {
+    RingBuf { data: rb.data, head: (rb.head + 1) % 8, count: rb.count - 1 }
+}
+
+fn rb_front(rb: RingBuf) -> Int { get(rb.data, rb.head) }
+
+fn rb_back(rb: RingBuf) -> Int { get(rb.data, (rb.head + rb.count - 1) % 8) }
+
+fn rb_at(rb: RingBuf, i: Int) -> Int { get(rb.data, (rb.head + i) % 8) }
+
+fn rb_sum(rb: RingBuf) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < rb.count {
+        sum = sum + rb_at(rb, i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    let mut rb = rb_new();
+    assert_eq(rb.count, 0);
+
+    // Push 1,2,3
+    rb = rb_push(rb, 1);
+    rb = rb_push(rb, 2);
+    rb = rb_push(rb, 3);
+    assert_eq(rb.count, 3);
+    assert_eq(rb_front(rb), 1);
+    assert_eq(rb_back(rb), 3);
+    assert_eq(rb_at(rb, 1), 2);
+
+    // Pop front
+    rb = rb_pop(rb);
+    assert_eq(rb.count, 2);
+    assert_eq(rb_front(rb), 2);
+
+    // Fill to capacity
+    rb = rb_push(rb, 4);
+    rb = rb_push(rb, 5);
+    rb = rb_push(rb, 6);
+    rb = rb_push(rb, 7);
+    rb = rb_push(rb, 8);
+    rb = rb_push(rb, 9);
+    assert_eq(rb.count, 8);
+    assert_eq(rb_front(rb), 2);
+    assert_eq(rb_back(rb), 9);
+
+    // Overflow: push overwrites oldest
+    rb = rb_push(rb, 10);
+    assert_eq(rb.count, 8);
+    assert_eq(rb_front(rb), 3); // 2 was overwritten
+    assert_eq(rb_back(rb), 10);
+
+    // Sum
+    // Contains: 3,4,5,6,7,8,9,10 → sum = 52
+    assert_eq(rb_sum(rb), 52);
+
+    // Pop all and verify FIFO order
+    let mut prev = 0;
+    let mut fifo_ok = 1;
+    while rb.count > 0 {
+        let val = rb_front(rb);
+        if prev > 0 {
+            if val <= prev { fifo_ok = 0; }
+        }
+        prev = val;
+        rb = rb_pop(rb);
+    }
+    assert_eq(fifo_ok, 1);
+    assert_eq(rb.count, 0);
+
+    // Moving average use case: push 5 values, compute average*count
+    let mut mavg = rb_new();
+    mavg = rb_push(mavg, 10);
+    mavg = rb_push(mavg, 20);
+    mavg = rb_push(mavg, 30);
+    assert_eq(rb_sum(mavg), 60); // avg = 20
+
+    mavg = rb_push(mavg, 40);
+    mavg = rb_push(mavg, 50);
+    assert_eq(rb_sum(mavg), 150); // avg = 30
+
+    print("DIFF_OK: ring_buffer");
+    0
+}

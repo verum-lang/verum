@@ -1,0 +1,320 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, graph
+// @expected-exit: 0
+
+// Graph algorithms using adjacency matrix (small graphs, 16-element arrays)
+// Graph 1: 6 nodes, directed
+// Adjacency matrix row i: adj_i[j] = weight if edge i->j, 0 otherwise
+// Node indices: 0..5
+
+// Helper: get adjacency value for a given node row
+fn get_adj_for_node(adj0: List<Int>, adj1: List<Int>, adj2: List<Int>,
+                    adj3: List<Int>, adj4: List<Int>, adj5: List<Int>,
+                    node: Int, col: Int) -> Int {
+    if node == 0 { adj0[col] }
+    else if node == 1 { adj1[col] }
+    else if node == 2 { adj2[col] }
+    else if node == 3 { adj3[col] }
+    else if node == 4 { adj4[col] }
+    else { adj5[col] }
+}
+
+// --- BFS Traversal ---
+fn bfs_order(adj0: List<Int>, adj1: List<Int>, adj2: List<Int>,
+             adj3: List<Int>, adj4: List<Int>, adj5: List<Int>) -> Int {
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut queue = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut order = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut front = 0;
+    let mut back_ptr = 0;
+    let mut ord_idx = 0;
+
+    queue[back_ptr] = 0;
+    back_ptr = back_ptr + 1;
+    visited[0] = 1;
+
+    while front < back_ptr {
+        let node = queue[front];
+        front = front + 1;
+        order[ord_idx] = node;
+        ord_idx = ord_idx + 1;
+
+        let mut nb = 0;
+        while nb < 6 {
+            let has_edge = get_adj_for_node(adj0, adj1, adj2, adj3, adj4, adj5, node, nb);
+            if has_edge > 0 {
+                if visited[nb] == 0 {
+                    visited[nb] = 1;
+                    queue[back_ptr] = nb;
+                    back_ptr = back_ptr + 1;
+                }
+            }
+            nb = nb + 1;
+        }
+    }
+
+    // Encode order as: order[0]*100000 + order[1]*10000 + ...
+    let result = order[0] * 100000 + order[1] * 10000 + order[2] * 1000 +
+                 order[3] * 100 + order[4] * 10 + order[5];
+    result
+}
+
+// --- Shortest path (Dijkstra-like with integer weights) ---
+fn shortest_path(adj0: List<Int>, adj1: List<Int>, adj2: List<Int>,
+                 adj3: List<Int>, adj4: List<Int>, adj5: List<Int>,
+                 source: Int, target: Int) -> Int {
+    let inf = 999999;
+    let mut dist = [999999, 999999, 999999, 999999, 999999, 999999, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut done = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dist[source] = 0;
+
+    let mut iteration = 0;
+    while iteration < 6 {
+        let mut min_dist = inf;
+        let mut min_node = -1;
+        let mut i = 0;
+        while i < 6 {
+            if done[i] == 0 {
+                if dist[i] < min_dist {
+                    min_dist = dist[i];
+                    min_node = i;
+                }
+            }
+            i = i + 1;
+        }
+
+        if min_node == -1 {
+            iteration = 6;
+        } else {
+            done[min_node] = 1;
+            let mut j = 0;
+            while j < 6 {
+                let w = get_adj_for_node(adj0, adj1, adj2, adj3, adj4, adj5, min_node, j);
+                if w > 0 {
+                    let new_dist = dist[min_node] + w;
+                    if new_dist < dist[j] {
+                        dist[j] = new_dist;
+                    }
+                }
+                j = j + 1;
+            }
+            iteration = iteration + 1;
+        }
+    }
+
+    dist[target]
+}
+
+// --- Connected components (undirected graph) ---
+fn count_components(adj0: List<Int>, adj1: List<Int>, adj2: List<Int>,
+                    adj3: List<Int>, adj4: List<Int>, adj5: List<Int>) -> Int {
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut components = 0;
+
+    let mut i = 0;
+    while i < 6 {
+        if visited[i] == 0 {
+            components = components + 1;
+            let mut queue = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+            let mut front = 0;
+            let mut back_ptr = 0;
+            queue[back_ptr] = i;
+            back_ptr = back_ptr + 1;
+            visited[i] = 1;
+
+            while front < back_ptr {
+                let node = queue[front];
+                front = front + 1;
+                let mut j = 0;
+                while j < 6 {
+                    let has_edge = get_adj_for_node(adj0, adj1, adj2, adj3, adj4, adj5, node, j);
+                    if has_edge > 0 {
+                        if visited[j] == 0 {
+                            visited[j] = 1;
+                            queue[back_ptr] = j;
+                            back_ptr = back_ptr + 1;
+                        }
+                    }
+                    j = j + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    components
+}
+
+// --- Cycle detection (directed graph) ---
+// Simple: try to find a back-edge via DFS coloring
+fn has_cycle_dfs(adj0: List<Int>, adj1: List<Int>, adj2: List<Int>,
+                 adj3: List<Int>, adj4: List<Int>, adj5: List<Int>) -> Int {
+    // Use iterative approach with explicit color tracking
+    // 0=white, 1=gray, 2=black
+    let mut color = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut found_cycle = 0;
+
+    let mut start = 0;
+    while start < 6 {
+        if color[start] == 0 {
+            // DFS from start using stack
+            let mut stack = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+            let mut top = 0;
+            stack[top] = start;
+            top = top + 1;
+            color[start] = 1;
+
+            while top > 0 {
+                top = top - 1;
+                let node = stack[top];
+                let mut all_done = 1;
+
+                let mut j = 0;
+                while j < 6 {
+                    let has_edge = get_adj_for_node(adj0, adj1, adj2, adj3, adj4, adj5, node, j);
+                    if has_edge > 0 {
+                        if color[j] == 1 {
+                            found_cycle = 1;
+                        } else if color[j] == 0 {
+                            color[j] = 1;
+                            // Push current node back, then new node
+                            stack[top] = node;
+                            top = top + 1;
+                            stack[top] = j;
+                            top = top + 1;
+                            all_done = 0;
+                            j = 6; // break to process new node first
+                        }
+                    }
+                    j = j + 1;
+                }
+
+                if all_done == 1 {
+                    color[node] = 2;
+                }
+            }
+        }
+        start = start + 1;
+    }
+    found_cycle
+}
+
+// --- Topological sort (Kahn's algorithm) ---
+fn topological_sort_count(adj0: List<Int>, adj1: List<Int>, adj2: List<Int>,
+                          adj3: List<Int>, adj4: List<Int>, adj5: List<Int>) -> Int {
+    let mut indeg = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 6 {
+        let mut j = 0;
+        while j < 6 {
+            let has_edge = get_adj_for_node(adj0, adj1, adj2, adj3, adj4, adj5, i, j);
+            if has_edge > 0 {
+                indeg[j] = indeg[j] + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    let mut queue = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut front = 0;
+    let mut back_ptr = 0;
+    let mut ord_idx = 0;
+
+    let mut k = 0;
+    while k < 6 {
+        if indeg[k] == 0 {
+            queue[back_ptr] = k;
+            back_ptr = back_ptr + 1;
+        }
+        k = k + 1;
+    }
+
+    while front < back_ptr {
+        let node = queue[front];
+        front = front + 1;
+        ord_idx = ord_idx + 1;
+
+        let mut j = 0;
+        while j < 6 {
+            let has_edge = get_adj_for_node(adj0, adj1, adj2, adj3, adj4, adj5, node, j);
+            if has_edge > 0 {
+                indeg[j] = indeg[j] - 1;
+                if indeg[j] == 0 {
+                    queue[back_ptr] = j;
+                    back_ptr = back_ptr + 1;
+                }
+            }
+            j = j + 1;
+        }
+    }
+
+    ord_idx
+}
+
+fn main() -> Int {
+    // Directed graph: 0->1(1), 0->2(4), 1->2(2), 1->3(5), 2->3(1), 2->4(3), 3->5(2), 4->5(1)
+    let adj0 = [0, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let adj1 = [0, 0, 2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let adj2 = [0, 0, 0, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let adj3 = [0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let adj4 = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let adj5 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Test 1: BFS from node 0 -> order 0,1,2,3,4,5
+    let bfs_result = bfs_order(adj0, adj1, adj2, adj3, adj4, adj5);
+    assert_eq(bfs_result, 12345);
+
+    // Test 2: Shortest path 0->5 = 0->1(1)->2(2)->3(1)->5(2) = 6
+    let sp1 = shortest_path(adj0, adj1, adj2, adj3, adj4, adj5, 0, 5);
+    assert_eq(sp1, 6);
+
+    // Test 3: Shortest path 0->4 = 0->1(1)->2(2)->4(3) = 6
+    let sp2 = shortest_path(adj0, adj1, adj2, adj3, adj4, adj5, 0, 4);
+    assert_eq(sp2, 6);
+
+    // Test 4: Shortest path 0->3 = 0->1(1)->2(2)->3(1) = 4
+    let sp3 = shortest_path(adj0, adj1, adj2, adj3, adj4, adj5, 0, 3);
+    assert_eq(sp3, 4);
+
+    // Test 5: Connected components (undirected version, all connected) = 1
+    let uadj0 = [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let uadj1 = [1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let uadj2 = [1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let uadj3 = [0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let uadj4 = [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let uadj5 = [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let comp1 = count_components(uadj0, uadj1, uadj2, uadj3, uadj4, uadj5);
+    assert_eq(comp1, 1);
+
+    // Test 6: Connected components with 2 components (nodes 0-3 and 4-5 separate)
+    let dadj0 = [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dadj1 = [1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dadj2 = [1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dadj3 = [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dadj4 = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let dadj5 = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let comp2 = count_components(dadj0, dadj1, dadj2, dadj3, dadj4, dadj5);
+    assert_eq(comp2, 2);
+
+    // Test 7: Cycle detection on DAG (no cycle)
+    let cyc1 = has_cycle_dfs(adj0, adj1, adj2, adj3, adj4, adj5);
+    assert_eq(cyc1, 0);
+
+    // Test 8: Cycle detection on graph with cycle (add edge 3->1)
+    let cadj3 = [0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cyc2 = has_cycle_dfs(adj0, adj1, adj2, cadj3, adj4, adj5);
+    assert_eq(cyc2, 1);
+
+    // Test 9: Topological sort on DAG produces all 6 nodes
+    let topo_count = topological_sort_count(adj0, adj1, adj2, adj3, adj4, adj5);
+    assert_eq(topo_count, 6);
+
+    // Test 10: Shortest path 1->5 = 1->2(2)->3(1)->5(2) = 5
+    let sp4 = shortest_path(adj0, adj1, adj2, adj3, adj4, adj5, 1, 5);
+    assert_eq(sp4, 5);
+
+    print("773_graph_algorithms: PASS");
+    0
+}

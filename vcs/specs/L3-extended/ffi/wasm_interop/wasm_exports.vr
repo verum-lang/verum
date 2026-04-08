@@ -1,0 +1,218 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, wasm, exports
+// @description: WebAssembly function exports
+
+/// Exporting Verum functions to WebAssembly for use in browsers
+/// or other WASM runtimes.
+
+@extern("C")
+fn wasm_call_indirect(idx: i32, arg: i32) -> i32;
+@extern("C")
+fn wasm_memory_read_i32(ptr: i32) -> i32;
+@extern("C")
+fn wasm_strlen(ptr: i32) -> i32;
+@extern("C")
+fn wasm_malloc(size: i32) -> i32;
+@extern("C")
+fn wasm_free(ptr: i32, size: i32);
+
+/// Simple exported function
+@wasm_export
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+/// Exported function with f64
+@wasm_export
+fn multiply_f64(a: f64, b: f64) -> f64 {
+    a * b
+}
+
+/// Exported function that modifies memory
+@wasm_export
+fn sum_array(ptr: i32, len: i32) -> i32 {
+    // Read from linear memory and sum
+    let mut sum: i32 = 0;
+    for i in 0..len {
+        sum += unsafe { wasm_memory_read_i32(ptr + i * 4) };
+    }
+    sum
+}
+
+/// Text handling with WASM
+@wasm_export
+fn string_length(ptr: i32) -> i32 {
+    // Strings are passed as pointers to null-terminated UTF-8
+    unsafe { wasm_strlen(ptr) }
+}
+
+/// Allocate memory for JS to write into
+@wasm_export
+fn wasm_alloc(size: i32) -> i32 {
+    unsafe { wasm_malloc(size) }
+}
+
+/// Free previously allocated memory
+@wasm_export
+fn wasm_dealloc(ptr: i32, size: i32) {
+    unsafe { wasm_free(ptr, size); }
+}
+
+/// Complex data structure processing
+@wasm_export
+fn process_json(ptr: i32, len: i32) -> i32 {
+    // Read bytes, process, write result
+    ptr
+}
+
+/// Callback pattern - JS provides function pointer
+@wasm_export
+fn with_callback(callback: i32, value: i32) -> i32 {
+    // callback is a table index for an imported function
+    let result: i32 = unsafe { wasm_call_indirect(callback, value) };
+    result
+}
+
+/// Async-friendly: process chunk and yield
+@wasm_export
+fn process_chunk(data_ptr: i32, data_len: i32, chunk_idx: i32) -> i32 {
+    let data = wasm.memory_slice<u8>(data_ptr as usize, data_len as usize);
+    let chunk_size = 1024;
+    let start = chunk_idx as usize * chunk_size;
+    let end = min(start + chunk_size, data_len as usize);
+
+    if start >= data_len as usize {
+        return -1;  // Done
+    }
+
+    let chunk = &data[start..end];
+    process_chunk_impl(chunk);
+
+    (end < data_len as usize) as i32  // 1 if more chunks, 0 if done
+}
+
+/// State machine for streaming processing
+type StreamState is {
+    buffer: List<u8>,
+    position: usize,
+    state: ProcessState,
+};
+
+type ProcessState is
+    | Header
+    | Body
+    | Complete;
+
+static mut STREAM_STATE: Maybe<StreamState> = None;
+
+@wasm_export
+fn stream_init() {
+    unsafe {
+        STREAM_STATE = Some(StreamState {
+            buffer: List.new(),
+            position: 0,
+            state: ProcessState.Header,
+        });
+    }
+}
+
+@wasm_export
+fn stream_push(ptr: i32, len: i32) -> i32 {
+    let bytes = wasm.memory_slice<u8>(ptr as usize, len as usize);
+
+    unsafe {
+        if let Some(ref mut state) = STREAM_STATE {
+            state.buffer.extend(bytes);
+            process_stream(state) as i32
+        } else {
+            -1  // Not initialized
+        }
+    }
+}
+
+@wasm_export
+fn stream_finish() -> i32 {
+    unsafe {
+        if let Some(ref mut state) = STREAM_STATE {
+            let result = finalize_stream(state);
+            STREAM_STATE = None;
+            result as i32
+        } else {
+            -1
+        }
+    }
+}
+
+/// Export memory for JS access (WASM linear memory)
+type WasmMemory is { pages: i32 };
+static memory: WasmMemory = WasmMemory { pages: 256 };
+
+/// Export table for indirect calls (WASM function table)
+type WasmTable is { size: i32 };
+static __indirect_function_table: WasmTable = WasmTable { size: 1024 };
+
+/// Module-level exports with custom names
+@wasm_export(name = "init")
+fn initialize() {
+    // Module initialization
+}
+
+@wasm_export(name = "v")
+fn version() -> i32 {
+    1  // Version 1
+}
+
+/// Bulk memory operations
+@wasm_export
+fn memory_copy(dest: i32, src: i32, len: i32) {
+    wasm.memory_copy(dest as usize, src as usize, len as usize);
+}
+
+@wasm_export
+fn memory_fill(dest: i32, value: i32, len: i32) {
+    wasm.memory_fill(dest as usize, value as u8, len as usize);
+}
+
+/// SIMD exports (if WASM SIMD enabled)
+@cfg(feature = "wasm_simd")
+@wasm_export
+fn simd_add(a_ptr: i32, b_ptr: i32, out_ptr: i32, len: i32) {
+    let a = wasm.memory_slice<f32>(a_ptr as usize, len as usize);
+    let b = wasm.memory_slice<f32>(b_ptr as usize, len as usize);
+    let out = wasm.memory_slice_mut<f32>(out_ptr as usize, len as usize);
+
+    for i in (0..len as usize).step_by(4) {
+        let va = v128.load(&a[i..]);
+        let vb = v128.load(&b[i..]);
+        let sum = v128.f32x4_add(va, vb);
+        v128.store(&mut out[i..], sum);
+    }
+}
+
+type JsonValue is | Null | Bool(Bool) | Number(f64) | Text(Text) | Array(List<JsonValue>) | Object(Map<Text, JsonValue>);
+
+fn process_data(data: JsonValue) -> JsonValue { data }
+fn process_chunk_impl(chunk: &[u8]) {}
+fn process_stream(state: &mut StreamState) -> Bool { false }
+fn finalize_stream(state: &mut StreamState) -> Bool { true }
+fn min(a: usize, b: usize) -> usize { if a < b { a } else { b } }
+
+module wasm {
+    pub fn memory_slice<T>(ptr: usize, len: usize) -> &[T] { unimplemented() }
+    pub fn memory_slice_mut<T>(ptr: usize, len: usize) -> &mut [T] { unimplemented() }
+    pub fn read_cstring(ptr: usize) -> Text { unimplemented() }
+    pub fn alloc(size: usize) -> usize { unimplemented() }
+    pub fn dealloc(ptr: usize, size: usize) {}
+    pub fn write_bytes(ptr: usize, bytes: &[u8]) {}
+    pub fn call_indirect<F>(idx: i32, arg: i32) -> i32 { unimplemented() }
+    pub fn memory_copy(dest: usize, src: usize, len: usize) {}
+    pub fn memory_fill(dest: usize, value: u8, len: usize) {}
+    pub type Memory = ();
+    pub type Table = ();
+}
+
+fn main() {
+    // WASM compilation only
+}

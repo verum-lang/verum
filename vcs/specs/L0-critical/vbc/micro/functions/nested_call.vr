@@ -1,0 +1,6 @@
+// @test: typecheck-pass
+// @level: L0
+// @expect: pass
+fn a() -> Int { 1 }
+fn b() -> Int { a() + 1 }
+fn main() { assert_eq(b(), 2); }

@@ -1,0 +1,177 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, permutations, combinatorics
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for permutation operations on small arrays
+
+type Perm4 is { p0: Int, p1: Int, p2: Int, p3: Int };
+
+fn perm4_id() -> Perm4 { Perm4 { p0: 0, p1: 1, p2: 2, p3: 3 } }
+
+fn perm4_get(p: Perm4, i: Int) -> Int {
+    if i == 0 { p.p0 } else if i == 1 { p.p1 }
+    else if i == 2 { p.p2 } else { p.p3 }
+}
+
+fn perm4_set(p: Perm4, i: Int, v: Int) -> Perm4 {
+    Perm4 {
+        p0: if i == 0 { v } else { p.p0 },
+        p1: if i == 1 { v } else { p.p1 },
+        p2: if i == 2 { v } else { p.p2 },
+        p3: if i == 3 { v } else { p.p3 }
+    }
+}
+
+// Compose: apply p then q -> result[i] = q[p[i]]
+fn perm4_compose(p: Perm4, q: Perm4) -> Perm4 {
+    Perm4 {
+        p0: perm4_get(q, p.p0),
+        p1: perm4_get(q, p.p1),
+        p2: perm4_get(q, p.p2),
+        p3: perm4_get(q, p.p3)
+    }
+}
+
+// Inverse permutation
+fn perm4_inverse(p: Perm4) -> Perm4 {
+    let mut inv = perm4_id();
+    inv = perm4_set(inv, p.p0, 0);
+    inv = perm4_set(inv, p.p1, 1);
+    inv = perm4_set(inv, p.p2, 2);
+    inv = perm4_set(inv, p.p3, 3);
+    inv
+}
+
+fn perm4_eq(a: Perm4, b: Perm4) -> Bool {
+    a.p0 == b.p0 && a.p1 == b.p1 && a.p2 == b.p2 && a.p3 == b.p3
+}
+
+// Count inversions (measure of disorder)
+fn perm4_inversions(p: Perm4) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 4 {
+        let mut j = i + 1;
+        while j < 4 {
+            if perm4_get(p, i) > perm4_get(p, j) {
+                count = count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Is even permutation (even number of inversions)
+fn perm4_is_even(p: Perm4) -> Bool {
+    perm4_inversions(p) % 2 == 0
+}
+
+// Number of fixed points
+fn perm4_fixed_points(p: Perm4) -> Int {
+    let mut count = 0;
+    if p.p0 == 0 { count = count + 1; }
+    if p.p1 == 1 { count = count + 1; }
+    if p.p2 == 2 { count = count + 1; }
+    if p.p3 == 3 { count = count + 1; }
+    count
+}
+
+// Apply permutation to a data array
+type Data4 is { d0: Int, d1: Int, d2: Int, d3: Int };
+
+fn data4_get(d: Data4, i: Int) -> Int {
+    if i == 0 { d.d0 } else if i == 1 { d.d1 }
+    else if i == 2 { d.d2 } else { d.d3 }
+}
+
+fn apply_perm(d: Data4, p: Perm4) -> Data4 {
+    Data4 {
+        d0: data4_get(d, p.p0),
+        d1: data4_get(d, p.p1),
+        d2: data4_get(d, p.p2),
+        d3: data4_get(d, p.p3)
+    }
+}
+
+fn data4_eq(a: Data4, b: Data4) -> Bool {
+    a.d0 == b.d0 && a.d1 == b.d1 && a.d2 == b.d2 && a.d3 == b.d3
+}
+
+fn test_identity() {
+    let id = perm4_id();
+    assert_eq(perm4_inversions(id), 0);
+    assert_eq(perm4_is_even(id), true);
+    assert_eq(perm4_fixed_points(id), 4);
+
+    // id composed with anything = same thing
+    let p = Perm4 { p0: 2, p1: 0, p2: 3, p3: 1 };
+    assert_eq(perm4_eq(perm4_compose(id, p), p), true);
+    assert_eq(perm4_eq(perm4_compose(p, id), p), true);
+}
+
+fn test_inverse() {
+    let p = Perm4 { p0: 1, p1: 3, p2: 0, p3: 2 };
+    let inv = perm4_inverse(p);
+    let id = perm4_id();
+
+    // p * p^-1 = id
+    assert_eq(perm4_eq(perm4_compose(p, inv), id), true);
+    // p^-1 * p = id
+    assert_eq(perm4_eq(perm4_compose(inv, p), id), true);
+}
+
+fn test_inversions() {
+    // (1,0,2,3) - one swap of 0,1 -> 1 inversion
+    let swap01 = Perm4 { p0: 1, p1: 0, p2: 2, p3: 3 };
+    assert_eq(perm4_inversions(swap01), 1);
+    assert_eq(perm4_is_even(swap01), false);
+
+    // Reverse: (3,2,1,0) -> 6 inversions
+    let rev = Perm4 { p0: 3, p1: 2, p2: 1, p3: 0 };
+    assert_eq(perm4_inversions(rev), 6);
+    assert_eq(perm4_is_even(rev), true);
+}
+
+fn test_apply() {
+    let data = Data4 { d0: 10, d1: 20, d2: 30, d3: 40 };
+    let p = Perm4 { p0: 2, p1: 0, p2: 3, p3: 1 };
+    let result = apply_perm(data, p);
+    // result[0] = data[p[0]] = data[2] = 30
+    assert_eq(result.d0, 30);
+    assert_eq(result.d1, 10);
+    assert_eq(result.d2, 40);
+    assert_eq(result.d3, 20);
+
+    // Applying inverse restores original
+    let inv = perm4_inverse(p);
+    let restored = apply_perm(result, inv);
+    assert_eq(data4_eq(restored, data), true);
+}
+
+fn test_cycle() {
+    // Cyclic permutation (0 1 2 3) -> (1 2 3 0)
+    let cycle = Perm4 { p0: 1, p1: 2, p2: 3, p3: 0 };
+    assert_eq(perm4_fixed_points(cycle), 0);
+
+    // Apply 4 times to get identity
+    let mut p = cycle;
+    p = perm4_compose(p, cycle);
+    p = perm4_compose(p, cycle);
+    p = perm4_compose(p, cycle);
+    assert_eq(perm4_eq(p, perm4_id()), true);
+}
+
+fn main() -> Int {
+    test_identity();
+    test_inverse();
+    test_inversions();
+    test_apply();
+    test_cycle();
+    print("[OK] 245_permutations_aot");
+    0
+}

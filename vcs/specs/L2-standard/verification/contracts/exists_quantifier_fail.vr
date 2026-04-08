@@ -1,0 +1,148 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, exists, quantifiers, error
+// @timeout: 5000
+// @expected-error: E606 "Existential quantifier not satisfied"
+
+/// Tests for exists quantifier verification failures
+/// Postconditions with existential quantification that don't hold
+
+/// Exists claim without witness
+@verify(proof)
+fn find_nonexistent(arr: &List<Int>, target: Int) -> Bool {
+    contract#"
+        ensures result implies exists i: Int. 0 <= i < arr.len() && arr[i] == target;
+    ";
+    // ERROR: Returns true without finding witness
+    true
+}
+
+/// Exists with wrong witness property
+@verify(proof)
+fn find_positive_wrong(arr: &List<Int>) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < arr.len() && arr[idx] > 0,
+            None => !exists i: Int. 0 <= i < arr.len() && arr[i] > 0
+        };
+    ";
+    // ERROR: Returns index of first element, not first positive
+    if arr.len() > 0 {
+        Some(0)  // arr[0] might not be positive!
+    } else {
+        None
+    }
+}
+
+/// Exists uniqueness (exists!) when multiple exist
+@verify(proof)
+fn find_unique_max_wrong(arr: &List<Int>) -> Maybe<Int> {
+    contract#"
+        requires arr.len() > 0;
+        ensures match result {
+            Some(idx) => exists! i. 0 <= i < arr.len() &&
+                forall j: Int. 0 <= j < arr.len() implies arr[i] >= arr[j],
+            None => false
+        };
+    ";
+    // ERROR: Returns first max, but there might be multiple equal maxes
+    let mut max_idx = 0;
+    for i in 1..arr.len() {
+        if arr[i] > arr[max_idx] {
+            max_idx = i;
+        }
+    }
+    Some(max_idx)
+}
+
+/// Exists with compound condition - only partial match
+@verify(proof)
+fn find_in_range_wrong(arr: &List<Int>, min: Int, max: Int) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < arr.len() &&
+                         arr[idx] >= min && arr[idx] <= max,
+            None => !exists i: Int. 0 <= i < arr.len() && arr[idx] >= min && arr[idx] <= max
+        };
+    ";
+    // ERROR: Only checks min bound, not max
+    for i in 0..arr.len() {
+        if arr[i] >= min {
+            return Some(i);  // Doesn't check arr[i] <= max
+        }
+    }
+    None
+}
+
+/// Negated exists doesn't hold
+@verify(proof)
+fn all_zero_wrong(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == !exists i: Int. 0 <= i < arr.len() && arr[i] != 0;
+    ";
+    // ERROR: Checks first element only
+    if arr.len() > 0 {
+        arr[0] == 0
+    } else {
+        true
+    }
+}
+
+/// Exists over two arrays - wrong correspondence
+@verify(proof)
+fn has_common_wrong(a: &List<Int>, b: &List<Int>) -> Bool {
+    contract#"
+        ensures result == exists i, j.
+            0 <= i < a.len() && 0 <= j < b.len() && a[i] == b[j];
+    ";
+    // ERROR: Only checks if same index has same value
+    for i in 0..min(a.len(), b.len()) {
+        if a[i] == b[i] {
+            return true;
+        }
+    }
+    false
+}
+
+/// Exists in postcondition - implementation creates no witness
+@verify(proof)
+fn insert_sorted_wrong(arr: &List<Int>, value: Int) -> List<Int> {
+    contract#"
+        requires forall i: Int, j: Int. 0 <= i < j < arr.len() implies arr[i] <= arr[j];
+        ensures exists i: Int. 0 <= i < result.len() && result[i] == value;
+    ";
+    // ERROR: Returns original array without inserting
+    arr.clone()
+}
+
+/// Exists with nested property
+@verify(proof)
+fn has_subarray_sum_wrong(arr: &List<Int>, target: Int) -> Bool {
+    contract#"
+        ensures result == exists i, j.
+            0 <= i <= j < arr.len() &&
+            arr[i..j].iter().sum() == target;
+    ";
+    // ERROR: Only checks single elements, not subarrays
+    for x in arr {
+        if *x == target {
+            return true;
+        }
+    }
+    false
+}
+
+/// Exists preservation through transformation
+@verify(proof)
+fn preserve_maximum(arr: &mut List<Int>) {
+    contract#"
+        requires arr.len() > 0;
+        ensures exists i: Int. 0 <= i < arr.len() &&
+            arr[i] == old(arr).iter().max().unwrap();
+    ";
+    // ERROR: Modifies all elements, destroying maximum
+    for i in 0..arr.len() {
+        arr[i] = 0;
+    }
+}

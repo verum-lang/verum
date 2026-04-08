@@ -1,0 +1,103 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, embedding, runtime
+// @description: Tests embedding the Verum runtime in host applications
+
+type c_int is i32;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+
+/// Runtime handle for embedded Verum
+type VerumRuntime is { handle: *mut c_void };
+
+/// Runtime configuration
+type RuntimeConfig is {
+    heap_size: size_t,
+    stack_size: size_t,
+    gc_enabled: Bool,
+};
+
+/// Module handle
+type ModuleHandle is { handle: *mut c_void };
+
+/// Runtime API - exported for host embedding
+ffi verum_runtime_api {
+    @extern("C")
+    fn verum_runtime_create(config: *const RuntimeConfig) -> *mut c_void;
+    @extern("C")
+    fn verum_runtime_destroy(runtime: *mut c_void);
+    @extern("C")
+    fn verum_runtime_load_module(runtime: *mut c_void, path: *const c_char) -> *mut c_void;
+    @extern("C")
+    fn verum_runtime_call(runtime: *mut c_void, func_name: *const c_char) -> c_int;
+    @extern("C")
+    fn verum_runtime_gc(runtime: *mut c_void);
+}
+
+/// Safe wrapper for embedded runtime
+implement VerumRuntime {
+    fn create(config: &RuntimeConfig) -> Maybe<VerumRuntime> {
+        let handle = unsafe {
+            verum_runtime_api.verum_runtime_create(config as *const RuntimeConfig)
+        };
+        if handle.is_null() {
+            None
+        } else {
+            Some(VerumRuntime { handle })
+        }
+    }
+
+    fn load_module(&self, path: &Text) -> Maybe<ModuleHandle> {
+        let c_path = path.to_cstring();
+        let handle = unsafe {
+            verum_runtime_api.verum_runtime_load_module(self.handle, c_path.as_ptr())
+        };
+        if handle.is_null() {
+            None
+        } else {
+            Some(ModuleHandle { handle })
+        }
+    }
+
+    fn gc(&self) {
+        unsafe { verum_runtime_api.verum_runtime_gc(self.handle); }
+    }
+}
+
+implement Drop for VerumRuntime {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { verum_runtime_api.verum_runtime_destroy(self.handle); }
+        }
+    }
+}
+
+/// Plugin interface for host integration
+type PluginInterface is protocol {
+    fn name(&self) -> Text;
+    fn version(&self) -> (c_int, c_int, c_int);
+    fn init(&mut self) -> Result<(), Text>;
+    fn shutdown(&mut self);
+};
+
+/// Value type for cross-language data exchange
+type FfiValue is
+    | Null
+    | Integer(i64)
+    | Float(f64)
+    | Boolean(Bool)
+    | StringVal(Text);
+
+/// Host callback for runtime events
+type RuntimeCallback is extern "C" fn(event_type: c_int, data: *const c_void);
+
+fn main() {
+    // Embedding runtime test
+    let config = RuntimeConfig {
+        heap_size: 1024 * 1024,
+        stack_size: 64 * 1024,
+        gc_enabled: true,
+    };
+}

@@ -1,0 +1,201 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, collections, list, map
+// @description: Type inference with collection literals and operations
+
+/// Test for type inference with collection literals and operations.
+/// Collection element types are inferred from element literals and annotations.
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+fn sum_list(items: List<Int>) -> Int {
+    let mut total = 0;
+    for item in items {
+        total += item;
+    }
+    total
+}
+
+fn map_list<A, B>(items: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result: List<B> = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn filter_list<T: Clone>(items: List<T>, pred: fn(T) -> Bool) -> List<T> {
+    let mut result: List<T> = [];
+    for item in items {
+        if pred(item.clone()) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // === List Literal Inference ===
+
+    // Element type inferred from literals
+    let int_list = [1, 2, 3, 4, 5];
+    assert(int_list.len() == 5);
+    assert(int_list[0] == 1);
+
+    let float_list = [1.0, 2.0, 3.0];
+    assert(float_list.len() == 3);
+
+    let text_list = ["hello", "world", "verum"];
+    assert(text_list.len() == 3);
+    assert(text_list[0] == "hello");
+
+    let bool_list = [true, false, true];
+    assert(bool_list.len() == 3);
+    assert(bool_list[0] == true);
+
+    // === List with Annotation ===
+
+    let annotated: List<Int> = [1, 2, 3];
+    assert(annotated.len() == 3);
+
+    let empty: List<Text> = [];
+    assert(empty.is_empty());
+
+    // === Nested List Inference ===
+
+    let matrix: List<List<Int>> = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ];
+    assert(matrix.len() == 3);
+    assert(matrix[0][0] == 1);
+    assert(matrix[2][2] == 9);
+
+    let nested_texts: List<List<Text>> = [
+        ["a", "b"],
+        ["c", "d"],
+    ];
+    assert(nested_texts[0][0] == "a");
+    assert(nested_texts[1][1] == "d");
+
+    // === Map with Explicit Construction ===
+
+    let mut int_to_text: Map<Int, Text> = {};
+    int_to_text.insert(1, "one");
+    int_to_text.insert(2, "two");
+    int_to_text.insert(3, "three");
+    assert(int_to_text.len() == 3);
+
+    let mut text_to_int: Map<Text, Int> = {};
+    text_to_int.insert("one", 1);
+    text_to_int.insert("two", 2);
+    text_to_int.insert("three", 3);
+    assert(text_to_int.len() == 3);
+
+    let mut text_to_float: Map<Text, Float> = {};
+    text_to_float.insert("pi", 3.14);
+    text_to_float.insert("e", 2.718);
+    assert(text_to_float.len() == 2);
+
+    // Empty map with annotation
+    let empty_map: Map<Int, Text> = {};
+    assert(empty_map.is_empty());
+
+    // === Tuple Inference ===
+
+    let t1 = (1, "hello", true, 3.14);
+    assert(t1.0 == 1);
+    assert(t1.1 == "hello");
+    assert(t1.2 == true);
+
+    let nested_tuple = ((1, 2), ("a", "b"));
+    let nt0 = nested_tuple.0;
+    let nt1 = nested_tuple.1;
+    assert(nt0.0 == 1);
+    assert(nt1.0 == "a");
+
+    // Tuple destructuring preserves types
+    let (x, y, z) = (42, 3.14, "test");
+    assert(x == 42);
+    assert(z == "test");
+
+    // === Collection of Tuples ===
+
+    let pairs: List<(Int, Text)> = [(1, "one"), (2, "two"), (3, "three")];
+    assert(pairs.len() == 3);
+    assert(pairs[0].0 == 1);
+    assert(pairs[0].1 == "one");
+
+    // === Collection of Optionals ===
+
+    let maybes: List<Maybe<Int>> = [Some(1), None, Some(3)];
+    assert(maybes.len() == 3);
+    match maybes[0] {
+        Some(n) => assert(n == 1),
+        None => assert(false),
+    }
+    assert(maybes[1] == None);
+
+    // === Collection via helper functions ===
+
+    // map_list: A=Int, B=Int
+    let doubled: List<Int> = map_list([1, 2, 3, 4, 5], |x: Int| x * 2);
+    assert(doubled == [2, 4, 6, 8, 10]);
+
+    // map_list: A=Int, B=Text
+    let as_text: List<Text> = map_list([1, 2, 3], |x: Int| f"n{x}");
+    assert(as_text[0] == "n1");
+    assert(as_text[2] == "n3");
+
+    // filter_list: T=Int
+    let evens: List<Int> = filter_list([1, 2, 3, 4, 5, 6], |x: Int| x % 2 == 0);
+    assert(evens == [2, 4, 6]);
+
+    // sum_list
+    let total = sum_list([1, 2, 3, 4, 5]);
+    assert(total == 15);
+
+    // === List push + inference ===
+
+    let mut growing: List<Int> = [1, 2, 3];
+    growing.push(4);
+    growing.push(5);
+    assert(growing.len() == 5);
+    assert(growing[4] == 5);
+
+    // === Collection with Struct Elements ===
+
+    type Point is { x: Int, y: Int };
+
+    let points: List<Point> = [
+        Point { x: 0, y: 0 },
+        Point { x: 1, y: 1 },
+        Point { x: 2, y: 4 },
+    ];
+    assert(points.len() == 3);
+    assert(points[1].x == 1);
+    assert(points[2].y == 4);
+
+    let point_names: List<Text> = map_list(points, |p: Point| f"({p.x},{p.y})");
+    assert(point_names[0] == "(0,0)");
+    assert(point_names[2] == "(2,4)");
+
+    // === Nested Map Inference ===
+
+    let mut outer: Map<Text, Map<Text, Int>> = {};
+    let mut inner_a: Map<Text, Int> = {};
+    inner_a.insert("alice", 30);
+    inner_a.insert("bob", 25);
+    outer.insert("users", inner_a);
+    assert(outer.len() == 1);
+
+    print("Collection inference tests passed!");
+}

@@ -1,0 +1,234 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: data-structures, stack, queue, priority
+// @description: Test manual data structure implementations
+
+// Stack using List
+type Stack is { items: List<Int> };
+
+implement Stack {
+    fn create() -> Stack {
+        Stack { items: List.new() }
+    }
+
+    fn push_val(&mut self, val: Int) {
+        self.items.push(val);
+    }
+
+    fn pop_val(&mut self) -> Int {
+        match self.items.pop() {
+            Some(v) => v,
+            None => -1,
+        }
+    }
+
+    fn peek(&self) -> Int {
+        if self.items.len() == 0 {
+            return -1;
+        }
+        self.items[self.items.len() - 1]
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.len() == 0
+    }
+
+    fn depth(&self) -> Int {
+        self.items.len()
+    }
+}
+
+fn test_stack() -> Int {
+    let mut s = Stack.create();
+    if !s.is_empty() {
+        print("FAIL: stack should be empty");
+        return 1;
+    }
+    s.push_val(10);
+    s.push_val(20);
+    s.push_val(30);
+    if s.depth() != 3 {
+        print(f"FAIL stack depth: {s.depth()}");
+        return 1;
+    }
+    if s.peek() != 30 {
+        print(f"FAIL peek: {s.peek()}");
+        return 1;
+    }
+    let v = s.pop_val();
+    if v != 30 {
+        print(f"FAIL pop: {v}");
+        return 1;
+    }
+    if s.depth() != 2 {
+        print(f"FAIL after pop: depth={s.depth()}");
+        return 1;
+    }
+    print("  stack: OK");
+    0
+}
+
+// Queue using two lists (amortized O(1))
+type Queue is { inbox: List<Int>, outbox: List<Int> };
+
+implement Queue {
+    fn create() -> Queue {
+        Queue { inbox: List.new(), outbox: List.new() }
+    }
+
+    fn enqueue(&mut self, val: Int) {
+        self.inbox.push(val);
+    }
+
+    fn transfer(&mut self) {
+        while self.inbox.len() > 0 {
+            match self.inbox.pop() {
+                Some(v) => self.outbox.push(v),
+                None => {},
+            }
+        }
+    }
+
+    fn dequeue(&mut self) -> Int {
+        if self.outbox.len() == 0 {
+            self.transfer();
+        }
+        match self.outbox.pop() {
+            Some(v) => v,
+            None => -1,
+        }
+    }
+
+    fn queue_size(&self) -> Int {
+        self.inbox.len() + self.outbox.len()
+    }
+}
+
+fn test_queue() -> Int {
+    let mut q = Queue.create();
+    q.enqueue(1);
+    q.enqueue(2);
+    q.enqueue(3);
+
+    if q.queue_size() != 3 {
+        print(f"FAIL queue size: {q.queue_size()}");
+        return 1;
+    }
+
+    let v1 = q.dequeue();
+    if v1 != 1 {
+        print(f"FAIL dequeue first: {v1}, expected 1");
+        return 1;
+    }
+
+    q.enqueue(4);
+    let v2 = q.dequeue();
+    if v2 != 2 {
+        print(f"FAIL dequeue second: {v2}, expected 2");
+        return 1;
+    }
+
+    let v3 = q.dequeue();
+    if v3 != 3 {
+        print(f"FAIL dequeue third: {v3}, expected 3");
+        return 1;
+    }
+
+    let v4 = q.dequeue();
+    if v4 != 4 {
+        print(f"FAIL dequeue fourth: {v4}, expected 4");
+        return 1;
+    }
+
+    if q.queue_size() != 0 {
+        print(f"FAIL empty queue: size={q.queue_size()}");
+        return 1;
+    }
+    print("  queue: OK");
+    0
+}
+
+// Simple ring buffer
+type RingBuf is { data: List<Int>, capacity: Int, head_pos: Int, count: Int };
+
+implement RingBuf {
+    fn create(cap: Int) -> RingBuf {
+        let mut data = List.new();
+        let mut i = 0;
+        while i < cap {
+            data.push(0);
+            i = i + 1;
+        }
+        RingBuf { data: data, capacity: cap, head_pos: 0, count: 0 }
+    }
+
+    fn write(&mut self, val: Int) -> Bool {
+        if self.count >= self.capacity {
+            return false;
+        }
+        let idx = (self.head_pos + self.count) % self.capacity;
+        self.data[idx] = val;
+        self.count = self.count + 1;
+        true
+    }
+
+    fn read_front(&mut self) -> Int {
+        if self.count == 0 {
+            return -1;
+        }
+        let val = self.data[self.head_pos];
+        self.head_pos = (self.head_pos + 1) % self.capacity;
+        self.count = self.count - 1;
+        val
+    }
+
+    fn used(&self) -> Int {
+        self.count
+    }
+}
+
+fn test_ring_buffer() -> Int {
+    let mut rb = RingBuf.create(3);
+
+    if !rb.write(10) { print("FAIL rb write 1"); return 1; }
+    if !rb.write(20) { print("FAIL rb write 2"); return 1; }
+    if !rb.write(30) { print("FAIL rb write 3"); return 1; }
+    // Buffer full
+    if rb.write(40) { print("FAIL: should be full"); return 1; }
+
+    let v1 = rb.read_front();
+    if v1 != 10 { print(f"FAIL rb read: {v1}"); return 1; }
+
+    // Now there's space for one more
+    if !rb.write(40) { print("FAIL rb write after read"); return 1; }
+
+    let v2 = rb.read_front();
+    if v2 != 20 { print(f"FAIL rb read2: {v2}"); return 1; }
+    let v3 = rb.read_front();
+    if v3 != 30 { print(f"FAIL rb read3: {v3}"); return 1; }
+    let v4 = rb.read_front();
+    if v4 != 40 { print(f"FAIL rb read4: {v4}"); return 1; }
+
+    if rb.used() != 0 {
+        print(f"FAIL rb empty: used={rb.used()}");
+        return 1;
+    }
+    print("  ring_buffer: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Data Structure Tests:");
+    let mut failures = 0;
+    failures = failures + test_stack();
+    failures = failures + test_queue();
+    failures = failures + test_ring_buffer();
+
+    if failures == 0 {
+        print("All data structure tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

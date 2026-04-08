@@ -1,0 +1,277 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, matrix, determinant, sarrus, linear-algebra
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for matrix determinant calculations.
+// 1. 2x2 determinant: ad - bc
+// 2. 3x3 determinant via Sarrus' rule
+// 3. Properties: det(I) = 1, det(transpose) = det, scaling rows
+// 4. Singular matrix detection (det = 0)
+// Uses flat record arrays to represent matrices.
+
+// 2x2 matrix stored as 4 elements: [a b; c d] = {m00, m01, m10, m11}
+type Mat2 is { m00: Int, m01: Int, m10: Int, m11: Int };
+
+// 3x3 matrix stored as 9 elements (row-major)
+type Mat3 is {
+    e00: Int, e01: Int, e02: Int,
+    e10: Int, e11: Int, e12: Int,
+    e20: Int, e21: Int, e22: Int
+};
+
+// 2x2 determinant: ad - bc
+fn det2(m: Mat2) -> Int {
+    m.m00 * m.m11 - m.m01 * m.m10
+}
+
+// 3x3 determinant using Sarrus' rule (cofactor expansion along first row)
+fn det3(m: Mat3) -> Int {
+    let a = m.e00;
+    let bv = m.e01;
+    let c = m.e02;
+    // Cofactor of a = e11*e22 - e12*e21
+    let cof_a = m.e11 * m.e22 - m.e12 * m.e21;
+    // Cofactor of b = -(e10*e22 - e12*e20)
+    let cof_b = m.e10 * m.e22 - m.e12 * m.e20;
+    // Cofactor of c = e10*e21 - e11*e20
+    let cof_c = m.e10 * m.e21 - m.e11 * m.e20;
+    a * cof_a - bv * cof_b + c * cof_c
+}
+
+// Transpose 2x2
+fn transpose2(m: Mat2) -> Mat2 {
+    Mat2 { m00: m.m00, m01: m.m10, m10: m.m01, m11: m.m11 }
+}
+
+// Transpose 3x3
+fn transpose3(m: Mat3) -> Mat3 {
+    Mat3 {
+        e00: m.e00, e01: m.e10, e02: m.e20,
+        e10: m.e01, e11: m.e11, e12: m.e21,
+        e20: m.e02, e21: m.e12, e22: m.e22
+    }
+}
+
+// Multiply 2x2 matrices
+fn mul2(a: Mat2, bm: Mat2) -> Mat2 {
+    Mat2 {
+        m00: a.m00 * bm.m00 + a.m01 * bm.m10,
+        m01: a.m00 * bm.m01 + a.m01 * bm.m11,
+        m10: a.m10 * bm.m00 + a.m11 * bm.m10,
+        m11: a.m10 * bm.m01 + a.m11 * bm.m11
+    }
+}
+
+// Scale row 0 of 3x3 matrix
+fn scale_row0(m: Mat3, k: Int) -> Mat3 {
+    Mat3 {
+        e00: m.e00 * k, e01: m.e01 * k, e02: m.e02 * k,
+        e10: m.e10, e11: m.e11, e12: m.e12,
+        e20: m.e20, e21: m.e21, e22: m.e22
+    }
+}
+
+// Add row1 scaled by k to row0 of 3x3 (row operation)
+fn add_row1_to_row0(m: Mat3, k: Int) -> Mat3 {
+    Mat3 {
+        e00: m.e00 + k * m.e10, e01: m.e01 + k * m.e11, e02: m.e02 + k * m.e12,
+        e10: m.e10, e11: m.e11, e12: m.e12,
+        e20: m.e20, e21: m.e21, e22: m.e22
+    }
+}
+
+// Swap rows 0 and 1 of 3x3
+fn swap_rows_01(m: Mat3) -> Mat3 {
+    Mat3 {
+        e00: m.e10, e01: m.e11, e02: m.e12,
+        e10: m.e00, e11: m.e01, e12: m.e02,
+        e20: m.e20, e21: m.e21, e22: m.e22
+    }
+}
+
+// === Tests ===
+
+fn test_det2_identity() {
+    let id = Mat2 { m00: 1, m01: 0, m10: 0, m11: 1 };
+    assert_eq(det2(id), 1);
+}
+
+fn test_det2_basic() {
+    // [3 8; 4 6] -> det = 3*6 - 8*4 = 18 - 32 = -14
+    let m = Mat2 { m00: 3, m01: 8, m10: 4, m11: 6 };
+    assert_eq(det2(m), -14);
+}
+
+fn test_det2_singular() {
+    // [2 4; 1 2] -> det = 4 - 4 = 0
+    let m = Mat2 { m00: 2, m01: 4, m10: 1, m11: 2 };
+    assert_eq(det2(m), 0);
+}
+
+fn test_det2_negative() {
+    // [1 -2; 3 4] -> det = 4 - (-6) = 10
+    let m = Mat2 { m00: 1, m01: -2, m10: 3, m11: 4 };
+    assert_eq(det2(m), 10);
+}
+
+fn test_det2_transpose() {
+    // det(A) = det(A^T)
+    let m = Mat2 { m00: 5, m01: 7, m10: 2, m11: 3 };
+    let mt = transpose2(m);
+    assert_eq(det2(m), det2(mt));
+}
+
+fn test_det2_product() {
+    // det(AB) = det(A) * det(B)
+    let a = Mat2 { m00: 2, m01: 1, m10: 3, m11: 4 };
+    let bm = Mat2 { m00: 5, m01: 6, m10: 7, m11: 8 };
+    let ab = mul2(a, bm);
+    assert_eq(det2(ab), det2(a) * det2(bm));
+}
+
+fn test_det3_identity() {
+    let id = Mat3 {
+        e00: 1, e01: 0, e02: 0,
+        e10: 0, e11: 1, e12: 0,
+        e20: 0, e21: 0, e22: 1
+    };
+    assert_eq(det3(id), 1);
+}
+
+fn test_det3_basic() {
+    // [6 1 1; 4 -2 5; 2 8 7]
+    // det = 6(-14-40) - 1(28-10) + 1(32+4) = 6(-54) - 18 + 36 = -324 - 18 + 36 = -306
+    let m = Mat3 {
+        e00: 6, e01: 1, e02: 1,
+        e10: 4, e11: -2, e12: 5,
+        e20: 2, e21: 8, e22: 7
+    };
+    assert_eq(det3(m), -306);
+}
+
+fn test_det3_diagonal() {
+    // Diagonal matrix: det = product of diagonal
+    let m = Mat3 {
+        e00: 2, e01: 0, e02: 0,
+        e10: 0, e11: 3, e12: 0,
+        e20: 0, e21: 0, e22: 5
+    };
+    assert_eq(det3(m), 30);
+}
+
+fn test_det3_singular() {
+    // Row 2 = Row 0 + Row 1 -> singular
+    // [1 2 3; 4 5 6; 5 7 9]
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 5, e21: 7, e22: 9
+    };
+    assert_eq(det3(m), 0);
+}
+
+fn test_det3_transpose() {
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 0, e11: 4, e12: 5,
+        e20: 1, e21: 0, e22: 6
+    };
+    let mt = transpose3(m);
+    assert_eq(det3(m), det3(mt));
+}
+
+fn test_det3_row_scale() {
+    // Scaling a row by k multiplies determinant by k
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 10
+    };
+    let d = det3(m);
+    let scaled = scale_row0(m, 3);
+    assert_eq(det3(scaled), 3 * d);
+}
+
+fn test_det3_row_add() {
+    // Adding a multiple of one row to another doesn't change det
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 10
+    };
+    let d = det3(m);
+    let m2 = add_row1_to_row0(m, 5);
+    assert_eq(det3(m2), d);
+}
+
+fn test_det3_row_swap() {
+    // Swapping two rows negates determinant
+    let m = Mat3 {
+        e00: 1, e01: 2, e02: 3,
+        e10: 4, e11: 5, e12: 6,
+        e20: 7, e21: 8, e22: 10
+    };
+    let d = det3(m);
+    let swapped = swap_rows_01(m);
+    assert_eq(det3(swapped), 0 - d);
+}
+
+fn test_det3_upper_triangular() {
+    // Upper triangular: det = product of diagonal
+    let m = Mat3 {
+        e00: 3, e01: 7, e02: 2,
+        e10: 0, e11: 4, e12: 9,
+        e20: 0, e21: 0, e22: 5
+    };
+    assert_eq(det3(m), 60);
+}
+
+fn test_det3_lower_triangular() {
+    let m = Mat3 {
+        e00: 2, e01: 0, e02: 0,
+        e10: 5, e11: 3, e12: 0,
+        e20: 1, e21: 8, e22: 7
+    };
+    assert_eq(det3(m), 42);
+}
+
+fn test_det2_zero_matrix() {
+    let z = Mat2 { m00: 0, m01: 0, m10: 0, m11: 0 };
+    assert_eq(det2(z), 0);
+}
+
+fn test_det3_all_ones_row() {
+    // Two identical rows -> singular
+    let m = Mat3 {
+        e00: 1, e01: 1, e02: 1,
+        e10: 1, e11: 1, e12: 1,
+        e20: 2, e21: 3, e22: 4
+    };
+    assert_eq(det3(m), 0);
+}
+
+fn main() -> Int {
+    test_det2_identity();
+    test_det2_basic();
+    test_det2_singular();
+    test_det2_negative();
+    test_det2_transpose();
+    test_det2_product();
+    test_det3_identity();
+    test_det3_basic();
+    test_det3_diagonal();
+    test_det3_singular();
+    test_det3_transpose();
+    test_det3_row_scale();
+    test_det3_row_add();
+    test_det3_row_swap();
+    test_det3_upper_triangular();
+    test_det3_lower_triangular();
+    test_det2_zero_matrix();
+    test_det3_all_ones_row();
+    print("[OK] 351_matrix_det_aot");
+    0
+}

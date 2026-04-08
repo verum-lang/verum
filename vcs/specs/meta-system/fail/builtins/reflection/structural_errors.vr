@@ -1,0 +1,20 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: expected Type
+// @description: Tests error handling for structural reflection builtins
+// @tags: meta-system, builtins, reflection, errors
+// @contexts: MetaTypes
+
+type Simple is {
+    value: Int,
+};
+
+// Test simple_name_of with invalid type
+meta fn test_invalid_type() -> Text using [MetaTypes] {
+    // Using non-type expression - should fail
+    simple_name_of(42)  // ERROR: expected Type, got Int
+}
+
+fn main() {
+    @const test_invalid_type();
+}

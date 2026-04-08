@@ -1,0 +1,191 @@
+// @test: typecheck-fail
+// @expected-error: E1004
+// @tier: 3
+// @level: L3
+// @tags: meta, staged, stage-checking, cyclic, error
+
+/// Cyclic Stage Dependency Error Tests (E1004)
+///
+/// Validates that the stage checker correctly detects cyclic
+/// dependencies between staged functions.
+/// Spec: 17-meta-system.md Section 2.4 - Stage Coherence Rule
+///
+/// ERROR E1004: Cyclic stage dependency detected - functions cannot
+/// form dependency cycles across stages.
+
+// ============================================================
+// ERROR: SIMPLE CYCLIC DEPENDENCY
+// ============================================================
+
+/// meta_a calls meta_b, meta_b calls meta_a
+meta fn cyclic_a(x: Int) -> Int {
+    // ERROR E1004: cyclic stage dependency: cyclic_a -> cyclic_b -> cyclic_a
+    cyclic_b(x) + 1
+}
+
+meta fn cyclic_b(x: Int) -> Int {
+    // This completes the cycle
+    cyclic_a(x) - 1
+}
+
+// ============================================================
+// ERROR: THREE-WAY CYCLE
+// ============================================================
+
+meta fn cycle_1(x: Int) -> Int {
+    // ERROR E1004: cycle_1 -> cycle_2 -> cycle_3 -> cycle_1
+    cycle_2(x) * 2
+}
+
+meta fn cycle_2(x: Int) -> Int {
+    cycle_3(x) + 1
+}
+
+meta fn cycle_3(x: Int) -> Int {
+    // Completes the three-way cycle
+    cycle_1(x) - 1
+}
+
+// ============================================================
+// ERROR: INDIRECT CYCLE THROUGH HELPER
+// ============================================================
+
+meta fn indirect_a(x: Int) -> Int {
+    helper(x)
+}
+
+meta fn helper(x: Int) -> Int {
+    indirect_b(x)
+}
+
+meta fn indirect_b(x: Int) -> Int {
+    // ERROR E1004: indirect cycle through helper
+    indirect_a(x)
+}
+
+// ============================================================
+// ERROR: CYCLE ACROSS DIFFERENT STAGE LEVELS
+// ============================================================
+
+/// Stage 1 depends on stage 2 which depends on stage 1
+/// (This shouldn't be possible with proper stage checking,
+/// but validates the cyclic dependency detector)
+
+meta fn stage_1_cyclic() -> @Expr {
+    // This generates stage 1 code (weird, but for test)
+    stage_2_generates_stage_1()
+}
+
+meta(2) fn stage_2_generates_stage_1() -> @Expr {
+    quote(1) {
+        meta fn generated() -> @Expr {
+            // ERROR E1004: Creates dependency cycle back to stage_1_cyclic
+            stage_1_cyclic()
+        }
+    }
+}
+
+// ============================================================
+// ERROR: SELF-REFERENTIAL WITHOUT @allow(unbounded_recursion)
+// ============================================================
+
+// Note: This tests self-cycles which might be allowed with @allow
+// but without the annotation should be caught
+
+meta fn self_cycle(x: Int) -> Int {
+    // ERROR E1004: self-referential cycle detected
+    // (without @allow(unbounded_recursion))
+    if x > 0 {
+        self_cycle(x - 1)
+    } else {
+        0
+    }
+}
+
+// ============================================================
+// ERROR: MUTUAL RECURSION CYCLE
+// ============================================================
+
+meta fn even(n: Int) -> Bool {
+    // ERROR E1004: mutual recursion cycle: even <-> odd
+    if n == 0 { true }
+    else { odd(n - 1) }
+}
+
+meta fn odd(n: Int) -> Bool {
+    if n == 0 { false }
+    else { even(n - 1) }
+}
+
+// ============================================================
+// ERROR: CYCLE THROUGH GENERIC INSTANTIATION
+// ============================================================
+
+meta fn generic_cycle_a<T>(x: T) -> T {
+    // ERROR E1004: cycle through generic instantiation
+    generic_cycle_b(x)
+}
+
+meta fn generic_cycle_b<T>(x: T) -> T {
+    generic_cycle_a(x)
+}
+
+// ============================================================
+// ERROR: CYCLE THROUGH CLOSURE
+// ============================================================
+
+meta fn cycle_via_closure_a(x: Int) -> Int {
+    let f = |n: Int| -> Int { cycle_via_closure_b(n) };
+    f(x)
+}
+
+meta fn cycle_via_closure_b(x: Int) -> Int {
+    // ERROR E1004: cycle through closure
+    cycle_via_closure_a(x)
+}
+
+// ============================================================
+// ERROR: CYCLE IN CONST EVALUATION
+// ============================================================
+
+meta fn const_cycle_a() -> Int {
+    // ERROR E1004: cyclic constant dependency
+    const_cycle_b()
+}
+
+meta fn const_cycle_b() -> Int {
+    const_cycle_a()
+}
+
+// Trying to use in const creates evaluation cycle
+// const CYCLIC_CONST: Int = const_cycle_a();
+
+// ============================================================
+// ERROR: LONG CHAIN CYCLE
+// ============================================================
+
+meta fn chain_1(x: Int) -> Int { chain_2(x) }
+meta fn chain_2(x: Int) -> Int { chain_3(x) }
+meta fn chain_3(x: Int) -> Int { chain_4(x) }
+meta fn chain_4(x: Int) -> Int { chain_5(x) }
+meta fn chain_5(x: Int) -> Int {
+    // ERROR E1004: Long chain cycle back to chain_1
+    chain_1(x)
+}
+
+// ============================================================
+// ERROR: CYCLE THROUGH TYPE-LEVEL COMPUTATION
+// ============================================================
+
+meta fn type_cycle_a<T>() -> Int {
+    // ERROR E1004: cycle at type level
+    type_cycle_b<T>()
+}
+
+meta fn type_cycle_b<T>() -> Int {
+    type_cycle_a<T>()
+}
+
+fn main() {
+    // All patterns above should detect E1004 cyclic dependency errors
+}

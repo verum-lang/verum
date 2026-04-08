@@ -1,0 +1,124 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, closures, higher-order
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests complex closure patterns: factories, composition, accumulators,
+// closures in data structures.
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x| x * n
+}
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn test_closure_factory() {
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    assert_eq(add5(3), 8);
+    assert_eq(add10(3), 13);
+    assert_eq(add5(add10(0)), 15);
+    print("closure_factory: ok");
+}
+
+fn test_closure_composition() {
+    let double = make_multiplier(2);
+    let add3 = make_adder(3);
+
+    // double then add3: (x*2)+3
+    let f = compose(add3, double);
+    assert_eq(f(5), 13);   // (5*2)+3 = 13
+    assert_eq(f(10), 23);  // (10*2)+3 = 23
+
+    // add3 then double: (x+3)*2
+    let g = compose(double, add3);
+    assert_eq(g(5), 16);   // (5+3)*2 = 16
+    assert_eq(g(10), 26);  // (10+3)*2 = 26
+
+    print("closure_composition: ok");
+}
+
+fn test_closure_as_argument() {
+    let square = |x: Int| -> Int { x * x };
+    assert_eq(apply(square, 7), 49);
+
+    let negate = |x: Int| -> Int { 0 - x };
+    assert_eq(apply(negate, 42), -42);
+
+    print("closure_as_argument: ok");
+}
+
+fn test_counter_closure() {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 10 {
+        count = count + 1;
+        i = i + 1;
+    }
+    assert_eq(count, 10);
+    print("counter_closure: ok");
+}
+
+fn fold(init: Int, n: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 1;
+    while i <= n {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_fold_patterns() {
+    // Sum 1..10
+    let sum = fold(0, 10, |acc, x| acc + x);
+    assert_eq(sum, 55);
+
+    // Product 1..6 (factorial)
+    let product = fold(1, 6, |acc, x| acc * x);
+    assert_eq(product, 720);
+
+    // Max
+    let mx = fold(0, 10, |acc, x| if x > acc { x } else { acc });
+    assert_eq(mx, 10);
+
+    print("fold_patterns: ok");
+}
+
+fn test_closure_chain() {
+    // Apply a chain of transformations
+    let mut value = 1;
+    let transforms = [2, 3, 5, 7];
+    let mut i = 0;
+    while i < 4 {
+        let factor = transforms[i];
+        value = value * factor;
+        i = i + 1;
+    }
+    // 1 * 2 * 3 * 5 * 7 = 210
+    assert_eq(value, 210);
+    print("closure_chain: ok");
+}
+
+fn main() -> Int {
+    test_closure_factory();
+    test_closure_composition();
+    test_closure_as_argument();
+    test_counter_closure();
+    test_fold_patterns();
+    test_closure_chain();
+    print("[OK] 405_interp_complex_closures");
+    0
+}

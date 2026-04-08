@@ -1,0 +1,482 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: lexer, literals, semantic
+// @description: Semantic literal tests for all 10 semantic tags defined in grammar/verum.ebnf
+// Reference: semantic_tag = 'gql' | 'rx' | 'sql' | 'url' | 'email' | 'json' | 'xml' | 'yaml' | 'contract' | 'sh';
+
+fn main() {
+    test_gql_literals();
+    test_rx_literals();
+    test_sql_literals();
+    test_url_literals();
+    test_email_literals();
+    test_json_literals();
+    test_xml_literals();
+    test_yaml_literals();
+    test_contract_literals();
+    test_sh_literals();
+}
+
+// =============================================================================
+// 1. GraphQL Literals (gql#)
+// =============================================================================
+
+fn test_gql_literals() {
+    // Basic query
+    let simple_query = gql#"query { user { name } }";
+
+    // Query with field selection
+    let field_query = gql#"query { user { id name email createdAt } }";
+
+    // Query with arguments
+    let arg_query = gql#"query { user(id: 123) { name email } }";
+
+    // Query with variables
+    let var_query = gql#"query GetUser($id: ID!) { user(id: $id) { name } }";
+
+    // Mutation
+    let mutation = gql#"mutation { createUser(name: \"Alice\") { id name } }";
+
+    // Subscription
+    let subscription = gql#"subscription { messageAdded { id content } }";
+
+    // Fragment definition
+    let fragment = gql#"fragment UserFields on User { id name email }";
+
+    // Nested query
+    let nested = gql#"query { users { id posts { title comments { body } } } }";
+
+    // Query with aliases
+    let aliased = gql#"query { admin: user(role: ADMIN) { name } member: user(role: MEMBER) { name } }";
+
+    // Query with directives
+    let directive = gql#"query { user { name email @include(if: $showEmail) } }";
+}
+
+// =============================================================================
+// 2. Regex Literals (rx#)
+// =============================================================================
+
+fn test_rx_literals() {
+    // Basic pattern
+    let simple = rx#"[a-z]+";
+
+    // Digit pattern
+    let digits = rx#"\d+";
+
+    // Word boundary
+    let word = rx#"\bword\b";
+
+    // Email pattern
+    let email_pattern = rx#"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
+
+    // Phone pattern
+    let phone = rx#"^\+?[1-9]\d{1,14}$";
+
+    // URL pattern
+    let url_pattern = rx#"https?://[^\s/$.?#].[^\s]*";
+
+    // IPv4 pattern
+    let ipv4 = rx#"\b(?:\d{1,3}\.){3}\d{1,3}\b";
+
+    // Whitespace
+    let whitespace = rx#"\s+";
+
+    // Character class with ranges
+    let ranges = rx#"[A-Za-z0-9_-]+";
+
+    // Lookahead
+    let lookahead = rx#"foo(?=bar)";
+
+    // Non-capturing group
+    let non_capture = rx#"(?:abc)+";
+
+    // Quantifiers
+    let quant = rx#"a{2,5}";
+}
+
+// =============================================================================
+// 3. SQL Literals (sql#)
+// =============================================================================
+
+fn test_sql_literals() {
+    // Basic SELECT
+    let simple_select = sql#"SELECT * FROM users";
+
+    // SELECT with columns
+    let select_cols = sql#"SELECT id, name, email FROM users";
+
+    // SELECT with WHERE
+    let select_where = sql#"SELECT * FROM users WHERE active = true";
+
+    // SELECT with JOIN
+    let select_join = sql#"SELECT u.name, p.title FROM users u JOIN posts p ON u.id = p.user_id";
+
+    // SELECT with ORDER BY
+    let select_order = sql#"SELECT * FROM users ORDER BY created_at DESC";
+
+    // SELECT with LIMIT
+    let select_limit = sql#"SELECT * FROM users LIMIT 10 OFFSET 20";
+
+    // INSERT statement
+    let insert = sql#"INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')";
+
+    // UPDATE statement
+    let update = sql#"UPDATE users SET name = 'Bob' WHERE id = 1";
+
+    // DELETE statement
+    let delete = sql#"DELETE FROM users WHERE id = 1";
+
+    // CREATE TABLE
+    let create = sql#"CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR(255), body TEXT)";
+
+    // Aggregate functions
+    let aggregate = sql#"SELECT COUNT(*), AVG(age) FROM users GROUP BY department";
+
+    // Subquery
+    let subquery = sql#"SELECT * FROM users WHERE id IN (SELECT user_id FROM admins)";
+}
+
+// =============================================================================
+// 4. URL Literals (url#)
+// =============================================================================
+
+fn test_url_literals() {
+    // Basic HTTPS
+    let https = url#"https://example.com";
+
+    // HTTP
+    let http = url#"http://example.com";
+
+    // With path
+    let with_path = url#"https://example.com/api/v1/users";
+
+    // With query string
+    let with_query = url#"https://example.com/search?q=hello&page=1";
+
+    // With fragment
+    let with_fragment = url#"https://example.com/docs#section-1";
+
+    // With port
+    let with_port = url#"https://example.com:8080/api";
+
+    // With authentication
+    let with_auth = url#"https://user:pass@example.com/api";
+
+    // Localhost
+    let localhost = url#"http://localhost:3000/";
+
+    // IP address URL
+    let ip_url = url#"http://192.168.1.1:8080/admin";
+
+    // FTP URL
+    let ftp = url#"ftp://files.example.com/downloads/file.zip";
+
+    // File URL
+    let file = url#"file:///home/user/documents/file.txt";
+
+    // Data URL
+    let data = url#"data:text/plain;base64,SGVsbG8gV29ybGQ=";
+}
+
+// =============================================================================
+// 5. Email Literals (email#)
+// =============================================================================
+
+fn test_email_literals() {
+    // Basic email
+    let basic = email#"user@example.com";
+
+    // With subdomain
+    let subdomain = email#"user@mail.example.com";
+
+    // With plus addressing
+    let plus = email#"user+tag@example.com";
+
+    // With dots in local part
+    let dots = email#"first.last@example.com";
+
+    // With hyphen in domain
+    let hyphen = email#"user@my-company.com";
+
+    // Long TLD
+    let long_tld = email#"user@example.technology";
+
+    // Numeric local part
+    let numeric = email#"12345@example.com";
+
+    // Mixed case (valid)
+    let mixed_case = email#"User.Name@Example.COM";
+
+    // With underscores
+    let underscore = email#"user_name@example.com";
+
+    // Multiple subdomains
+    let multi_sub = email#"user@dept.division.company.com";
+}
+
+// =============================================================================
+// 6. JSON Literals (json#)
+// =============================================================================
+
+fn test_json_literals() {
+    // Simple object
+    let simple_obj = json#"{ \"key\": \"value\" }";
+
+    // Object with number
+    let with_number = json#"{ \"count\": 42 }";
+
+    // Object with boolean
+    let with_bool = json#"{ \"active\": true }";
+
+    // Object with null
+    let with_null = json#"{ \"data\": null }";
+
+    // Nested object
+    let nested = json#"{ \"user\": { \"name\": \"Alice\", \"age\": 30 } }";
+
+    // Array
+    let array = json#"[1, 2, 3, 4, 5]";
+
+    // Array of objects
+    let array_obj = json#"[{ \"id\": 1 }, { \"id\": 2 }]";
+
+    // Complex nested structure
+    let complex = json#"{ \"users\": [{ \"name\": \"Alice\", \"roles\": [\"admin\", \"user\"] }] }";
+
+    // With special characters (escaped)
+    let special = json#"{ \"text\": \"line1\\nline2\" }";
+
+    // Empty structures
+    let empty_obj = json#"{}";
+    let empty_arr = json#"[]";
+
+    // Float values
+    let floats = json#"{ \"pi\": 3.14159, \"neg\": -273.15 }";
+}
+
+// =============================================================================
+// 7. XML Literals (xml#)
+// =============================================================================
+
+fn test_xml_literals() {
+    // Simple element
+    let simple = xml#"<tag>content</tag>";
+
+    // With attributes
+    let with_attr = xml#"<user id=\"123\" active=\"true\">Alice</user>";
+
+    // Self-closing tag
+    let self_close = xml#"<br/>";
+
+    // Nested elements
+    let nested = xml#"<parent><child>value</child></parent>";
+
+    // With namespace
+    let namespace = xml#"<ns:element xmlns:ns=\"http://example.com\">content</ns:element>";
+
+    // CDATA section
+    let cdata = xml#"<script><![CDATA[function() { return x < y; }]]></script>";
+
+    // Comment
+    let comment = xml#"<root><!-- This is a comment --><item/></root>";
+
+    // Declaration
+    let declaration = xml#"<?xml version=\"1.0\" encoding=\"UTF-8\"?><root/>";
+
+    // Mixed content
+    let mixed = xml#"<p>Hello <b>World</b>!</p>";
+
+    // Multiple attributes
+    let multi_attr = xml#"<input type=\"text\" name=\"field\" value=\"default\" required=\"true\"/>";
+}
+
+// =============================================================================
+// 8. YAML Literals (yaml#)
+// =============================================================================
+
+fn test_yaml_literals() {
+    // Simple key-value
+    let simple = yaml#"key: value";
+
+    // Multiple keys
+    let multiple = yaml#"name: Alice\nage: 30\nactive: true";
+
+    // Nested structure
+    let nested = yaml#"user:\n  name: Alice\n  email: alice@example.com";
+
+    // List
+    let list = yaml#"items:\n  - apple\n  - banana\n  - cherry";
+
+    // Inline list
+    let inline_list = yaml#"colors: [red, green, blue]";
+
+    // Inline object
+    let inline_obj = yaml#"point: {x: 10, y: 20}";
+
+    // Boolean values
+    let booleans = yaml#"enabled: yes\ndisabled: no\nflag: true";
+
+    // Null value
+    let null_val = yaml#"data: null";
+
+    // Multiline string
+    let multiline = yaml#"description: |\n  This is a long\n  multiline description.";
+
+    // Number values
+    let numbers = yaml#"int: 42\nfloat: 3.14\nhex: 0xFF";
+}
+
+// =============================================================================
+// 9. Contract Literals (contract#)
+// =============================================================================
+
+fn test_contract_literals() {
+    // Invariant
+    let invariant = contract#"invariant: x > 0";
+
+    // Precondition (requires)
+    let requires = contract#"requires x >= 0 && y > 0";
+
+    // Postcondition (ensures)
+    let ensures = contract#"ensures result >= 0";
+
+    // Multiple constraints
+    let multiple = contract#"requires x > 0; ensures result < x";
+
+    // With quantifiers
+    let forall = contract#"forall i in 0..len: arr[i] >= 0";
+
+    // Exists
+    let exists = contract#"exists i in 0..len: arr[i] == target";
+
+    // Implies
+    let implies = contract#"x > 0 implies result > 0";
+
+    // Equivalence
+    let equiv = contract#"result == 0 iff input == 0";
+
+    // Old value reference
+    let old_ref = contract#"ensures result == old(x) + 1";
+
+    // Complex invariant
+    let complex = contract#"invariant: balance >= 0 && total_supply == sum(balances)";
+}
+
+// =============================================================================
+// 10. Shell Literals (sh#)
+// =============================================================================
+
+fn test_sh_literals() {
+    // Simple command
+    let simple = sh#"echo hello";
+
+    // With arguments
+    let with_args = sh#"ls -la /home";
+
+    // Pipe
+    let pipe = sh#"cat file.txt | grep pattern";
+
+    // Redirect
+    let redirect = sh#"echo output > file.txt";
+
+    // Append
+    let append = sh#"echo more >> file.txt";
+
+    // Variable
+    let variable = sh#"echo $HOME";
+
+    // Command substitution
+    let cmd_sub = sh#"echo $(date +%Y-%m-%d)";
+
+    // Conditional
+    let conditional = sh#"test -f file.txt && echo exists";
+
+    // Background
+    let background = sh#"long_running_command &";
+
+    // Complex pipeline
+    let complex = sh#"find . -name '*.txt' | xargs grep -l pattern | sort -u";
+
+    // With quotes
+    let quoted = sh#"echo 'single quotes' \"double quotes\"";
+
+    // Here string
+    let here = sh#"cat <<< 'here string'";
+}
+
+// =============================================================================
+// Using semantic literals in functions
+// =============================================================================
+
+fn query_users(db: Database) -> List<User> using [Database] {
+    let query = sql#"SELECT id, name, email FROM users WHERE active = true";
+    db.execute(query)
+}
+
+fn validate_email(input: Text) -> Bool {
+    let pattern = rx#"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
+    pattern.is_match(input)
+}
+
+fn fetch_user(api: HttpClient, id: Int) -> Result<User, Error> using [Http] {
+    let endpoint = url#"https://api.example.com/users";
+    api.get(f"{endpoint}/{id}")
+}
+
+fn parse_config(content: Text) -> Config {
+    let data = yaml#"default:\n  timeout: 30\n  retries: 3";
+    Config.from_yaml(data)
+}
+
+// =============================================================================
+// Semantic literals in match expressions
+// =============================================================================
+
+fn classify_url(input: Text) -> Text {
+    let https_pattern = rx#"^https://";
+    let http_pattern = rx#"^http://";
+    let ftp_pattern = rx#"^ftp://";
+
+    match input {
+        _ if https_pattern.is_match(input) => "secure"
+        _ if http_pattern.is_match(input) => "insecure"
+        _ if ftp_pattern.is_match(input) => "ftp"
+        _ => "unknown"
+    }
+}
+
+// =============================================================================
+// Semantic literals in arrays and collections
+// =============================================================================
+
+fn test_semantic_in_collections() {
+    // Array of SQL queries
+    let queries = [
+        sql#"SELECT * FROM users",
+        sql#"SELECT * FROM posts",
+        sql#"SELECT * FROM comments",
+    ];
+
+    // Array of regex patterns
+    let patterns = [
+        rx#"\d+",
+        rx#"[a-z]+",
+        rx#"\s+",
+    ];
+
+    // Array of URLs
+    let endpoints = [
+        url#"https://api.example.com/v1",
+        url#"https://api.example.com/v2",
+        url#"https://api.example.com/v3",
+    ];
+
+    // Array of email addresses
+    let contacts = [
+        email#"admin@example.com",
+        email#"support@example.com",
+        email#"sales@example.com",
+    ];
+}

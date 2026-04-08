@@ -1,0 +1,20 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, contracts, ffi
+// @timeout: 5000
+
+/// FFI contracts with requires and ensures.
+
+// FFI function declarations with contracts
+extern "C" fn malloc(size: Int) -> Int
+    requires size > 0;
+
+extern "C" fn free(ptr: Int)
+    requires ptr != 0;
+
+extern "C" fn strlen(s: Int) -> Int
+    requires s != 0;
+
+fn main() {
+    print("FFI contract tests parsed");
+}

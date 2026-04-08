@@ -1,0 +1,174 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, arith, checked
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Checked arithmetic — add, sub, mul with overflow/underflow detection
+// NOTE: Cannot use checked_add/checked_sub/checked_mul as function names —
+//       they collide with ArithExtended intrinsic opcodes.
+
+// ============================================================================
+// CheckedResult: value + overflow flag
+// ============================================================================
+
+type CheckedResult is { value: Int, overflowed: Int };
+
+// Checked add: overflow if result > max_val
+fn chk_add(a: Int, b: Int, max_val: Int) -> CheckedResult {
+    let sum = a + b;
+    if sum > max_val {
+        CheckedResult { value: sum - max_val - 1, overflowed: 1 }
+    } else {
+        CheckedResult { value: sum, overflowed: 0 }
+    }
+}
+
+// Checked sub: underflow if result < min_val
+fn chk_sub(a: Int, b: Int, min_val: Int) -> CheckedResult {
+    let diff = a - b;
+    if diff < min_val {
+        CheckedResult { value: diff, overflowed: 1 }
+    } else {
+        CheckedResult { value: diff, overflowed: 0 }
+    }
+}
+
+// Checked mul: overflow if result > max_val
+fn chk_mul(a: Int, b: Int, max_val: Int) -> CheckedResult {
+    let prod = a * b;
+    if prod > max_val {
+        CheckedResult { value: prod, overflowed: 1 }
+    } else {
+        CheckedResult { value: prod, overflowed: 0 }
+    }
+}
+
+// ============================================================================
+// Test 1: Normal addition (no overflow)
+// ============================================================================
+
+@test
+fn test_chk_add_normal() {
+    let max_val = 255;
+    let r1 = chk_add(10, 20, max_val);
+    assert_eq(r1.value, 30);
+    assert_eq(r1.overflowed, 0);
+
+    let r2 = chk_add(100, 100, max_val);
+    assert_eq(r2.value, 200);
+    assert_eq(r2.overflowed, 0);
+
+    // Exact boundary
+    let r3 = chk_add(200, 55, max_val);
+    assert_eq(r3.value, 255);
+    assert_eq(r3.overflowed, 0);
+    print("  test_chk_add_normal: ok");
+}
+
+// ============================================================================
+// Test 2: Addition overflow
+// ============================================================================
+
+@test
+fn test_chk_add_overflow() {
+    let max_val = 255;
+    let r1 = chk_add(200, 100, max_val);
+    assert_eq(r1.overflowed, 1);
+    // Wrapped: 300 - 255 - 1 = 44
+    assert_eq(r1.value, 44);
+
+    let r2 = chk_add(255, 1, max_val);
+    assert_eq(r2.overflowed, 1);
+    assert_eq(r2.value, 0);
+
+    let r3 = chk_add(255, 255, max_val);
+    assert_eq(r3.overflowed, 1);
+    // 510 - 255 - 1 = 254
+    assert_eq(r3.value, 254);
+    print("  test_chk_add_overflow: ok");
+}
+
+// ============================================================================
+// Test 3: Subtraction underflow
+// ============================================================================
+
+@test
+fn test_chk_sub() {
+    let min_val = 0;
+    let r1 = chk_sub(50, 30, min_val);
+    assert_eq(r1.value, 20);
+    assert_eq(r1.overflowed, 0);
+
+    let r2 = chk_sub(10, 10, min_val);
+    assert_eq(r2.value, 0);
+    assert_eq(r2.overflowed, 0);
+
+    // Underflow
+    let r3 = chk_sub(5, 20, min_val);
+    assert_eq(r3.value, -15);
+    assert_eq(r3.overflowed, 1);
+    print("  test_chk_sub: ok");
+}
+
+// ============================================================================
+// Test 4: Multiplication overflow
+// ============================================================================
+
+@test
+fn test_chk_mul() {
+    let max_val = 1000;
+    let r1 = chk_mul(10, 10, max_val);
+    assert_eq(r1.value, 100);
+    assert_eq(r1.overflowed, 0);
+
+    let r2 = chk_mul(50, 20, max_val);
+    assert_eq(r2.value, 1000);
+    assert_eq(r2.overflowed, 0);
+
+    // Overflow
+    let r3 = chk_mul(50, 21, max_val);
+    assert_eq(r3.value, 1050);
+    assert_eq(r3.overflowed, 1);
+
+    let r4 = chk_mul(100, 100, max_val);
+    assert_eq(r4.value, 10000);
+    assert_eq(r4.overflowed, 1);
+    print("  test_chk_mul: ok");
+}
+
+// ============================================================================
+// Test 5: Checked with different bounds
+// ============================================================================
+
+@test
+fn test_different_bounds() {
+    // 8-bit unsigned: max 255
+    let r8 = chk_add(200, 100, 255);
+    assert_eq(r8.overflowed, 1);
+
+    // 16-bit unsigned: max 65535
+    let r16 = chk_add(200, 100, 65535);
+    assert_eq(r16.overflowed, 0);
+    assert_eq(r16.value, 300);
+
+    // Small bound: max 10
+    let r_small = chk_add(5, 8, 10);
+    assert_eq(r_small.overflowed, 1);
+    assert_eq(r_small.value, 2);  // 13 - 10 - 1 = 2
+    print("  test_different_bounds: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_chk_add_normal();
+    test_chk_add_overflow();
+    test_chk_sub();
+    test_chk_mul();
+    test_different_bounds();
+    print("[OK] 142_arith_ext_checked");
+    0
+}

@@ -1,0 +1,505 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: try, block, type-inference, result, error-handling
+// @description: Comprehensive tests for try block type inference
+//               Documents current behavior and expected improvements
+
+module specs.stdlib.core.try_block_test;
+
+mount core.primitives.*;
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// TRY BLOCK TYPE INFERENCE TEST SUITE
+// =============================================================================
+//
+// Issue Reference: docs/audit.md Section 3.5
+//
+// Current Limitation: Plain `try { }` blocks (without recover/finally)
+// require explicit Ok() wrapping because the parser discards the `try` keyword.
+//
+// Expected Behavior (future fix):
+// - try { expr } should have type Result<T, E> where T is type of expr
+// - The final value should auto-wrap in Ok(value)
+// - Error type E is inferred from ? operators in the block
+//
+// Current Workaround:
+// - Explicitly return Ok(value) from try blocks
+
+// -----------------------------------------------------------------------------
+// Section 1: Try Block with Explicit Ok() - Current Workaround
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_block_with_explicit_ok() {
+    // Current behavior: Must explicitly wrap in Ok()
+    let result: Result<Int, Text> = try {
+        let a = 10;
+        let b = 20;
+        Ok(a + b)  // Explicit Ok() required
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 30),
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_block_with_question_mark_explicit_ok() {
+    fn fallible_op() -> Result<Int, Text> {
+        Ok(42)
+    }
+
+    // Using ? operator, still need explicit Ok()
+    let result: Result<Int, Text> = try {
+        let x = fallible_op()?;
+        Ok(x * 2)  // Explicit Ok() required
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 84),
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_block_error_propagation() {
+    fn always_fails() -> Result<Int, Text> {
+        Err("operation failed")
+    }
+
+    let result: Result<Int, Text> = try {
+        let x = always_fails()?;  // This should propagate the error
+        Ok(x + 1)
+    };
+
+    match result {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "operation failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 2: Try Block Chain - Multiple ? Operations
+// -----------------------------------------------------------------------------
+
+fn step1() -> Result<Int, Text> {
+    Ok(10)
+}
+
+fn step2(x: Int) -> Result<Int, Text> {
+    if x > 0 {
+        Ok(x * 2)
+    } else {
+        Err("step2 failed: non-positive input")
+    }
+}
+
+fn step3(x: Int) -> Result<Int, Text> {
+    Ok(x + 5)
+}
+
+@test
+fn test_try_block_chain_success() {
+    let result: Result<Int, Text> = try {
+        let a = step1()?;
+        let b = step2(a)?;
+        let c = step3(b)?;
+        Ok(c)
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 25),  // 10 * 2 + 5 = 25
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_block_chain_early_failure() {
+    fn failing_step1() -> Result<Int, Text> {
+        Err("step1 failed")
+    }
+
+    let result: Result<Int, Text> = try {
+        let a = failing_step1()?;
+        let b = step2(a)?;
+        Ok(b)
+    };
+
+    match result {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "step1 failed"),
+    }
+}
+
+@test
+fn test_try_block_chain_middle_failure() {
+    fn failing_step2(x: Int) -> Result<Int, Text> {
+        Err("step2 failed")
+    }
+
+    let result: Result<Int, Text> = try {
+        let a = step1()?;
+        let b = failing_step2(a)?;
+        let c = step3(b)?;
+        Ok(c)
+    };
+
+    match result {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "step2 failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 3: Try Block with Maybe Type
+// -----------------------------------------------------------------------------
+
+fn get_maybe_value(present: Bool) -> Maybe<Int> {
+    if present { Some(42) } else { None }
+}
+
+// Note: Try blocks with Maybe require the function to return Maybe
+// or have proper FromResidual implementation
+
+fn try_with_maybe_helper(present: Bool) -> Maybe<Int> {
+    let x = get_maybe_value(present)?;
+    Some(x * 2)
+}
+
+@test
+fn test_try_with_maybe_success() {
+    let result = try_with_maybe_helper(true);
+    match result {
+        Some(v) => assert_eq(v, 84),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_try_with_maybe_none_propagation() {
+    let result = try_with_maybe_helper(false);
+    assert(result is None);
+}
+
+// -----------------------------------------------------------------------------
+// Section 4: Nested Try Blocks
+// -----------------------------------------------------------------------------
+
+@test
+fn test_nested_try_blocks() {
+    fn inner_op(x: Int) -> Result<Int, Text> {
+        if x > 0 { Ok(x * 2) } else { Err("non-positive") }
+    }
+
+    let outer_result: Result<Int, Text> = try {
+        let inner_result: Result<Int, Text> = try {
+            let a = inner_op(5)?;
+            Ok(a)
+        };
+
+        let inner_value = inner_result?;
+        Ok(inner_value + 10)
+    };
+
+    match outer_result {
+        Ok(v) => assert_eq(v, 20),  // (5 * 2) + 10 = 20
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 5: Try Block in Expressions
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_block_in_match() {
+    fn may_fail(success: Bool) -> Result<Int, Text> {
+        if success { Ok(100) } else { Err("failed") }
+    }
+
+    let result = match true {
+        true => {
+            let r: Result<Int, Text> = try {
+                let x = may_fail(true)?;
+                Ok(x)
+            };
+            r
+        },
+        false => Err("not executed"),
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 100),
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 6: Try Block with Complex Error Types
+// -----------------------------------------------------------------------------
+
+type CustomError is
+    | NotFound(Text)
+    | InvalidInput(Int)
+    | Unknown;
+
+fn complex_op(x: Int) -> Result<Int, CustomError> {
+    if x < 0 {
+        Err(InvalidInput(x))
+    } else if x == 0 {
+        Err(NotFound("zero not allowed"))
+    } else {
+        Ok(x * 10)
+    }
+}
+
+@test
+fn test_try_block_with_custom_error() {
+    let result: Result<Int, CustomError> = try {
+        let a = complex_op(5)?;
+        let b = complex_op(3)?;
+        Ok(a + b)
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 80),  // (5*10) + (3*10) = 80
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_block_custom_error_propagation() {
+    let result: Result<Int, CustomError> = try {
+        let a = complex_op(5)?;
+        let b = complex_op(-1)?;  // Should fail
+        Ok(a + b)
+    };
+
+    match result {
+        Ok(_) => assert(false),
+        Err(InvalidInput(n)) => assert_eq(n, -1),
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 7: Try Block Variable Scoping
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_block_variable_scoping() {
+    let outer = 100;
+
+    let result: Result<Int, Text> = try {
+        let inner = 50;
+        // Can access outer scope
+        let sum = outer + inner;
+        Ok(sum)
+    };
+
+    // outer is still accessible
+    assert_eq(outer, 100);
+
+    match result {
+        Ok(v) => assert_eq(v, 150),
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 8: Try Block with Mutable State
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_block_mutable_state() {
+    fn may_fail_increment(counter: &mut Int, success: Bool) -> Result<Int, Text> {
+        *counter = *counter + 1;
+        if success { Ok(*counter) } else { Err("failed") }
+    }
+
+    let mut counter = 0;
+
+    let result: Result<Int, Text> = try {
+        let a = may_fail_increment(&mut counter, true)?;
+        let b = may_fail_increment(&mut counter, true)?;
+        Ok(a + b)
+    };
+
+    // Counter was incremented twice
+    assert_eq(counter, 2);
+
+    match result {
+        Ok(v) => assert_eq(v, 3),  // 1 + 2 = 3
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_block_mutable_state_on_error() {
+    fn may_fail_increment(counter: &mut Int, success: Bool) -> Result<Int, Text> {
+        *counter = *counter + 1;
+        if success { Ok(*counter) } else { Err("failed") }
+    }
+
+    let mut counter = 0;
+
+    let result: Result<Int, Text> = try {
+        let a = may_fail_increment(&mut counter, true)?;
+        let b = may_fail_increment(&mut counter, false)?;  // Fails here
+        Ok(a + b)
+    };
+
+    // Counter was incremented twice before failure
+    assert_eq(counter, 2);
+
+    match result {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 9: Try Block Return Types
+// -----------------------------------------------------------------------------
+
+// Function that uses try block internally
+fn compute_with_try(a: Int, b: Int) -> Result<Int, Text> {
+    try {
+        if a < 0 {
+            return Err("a is negative");
+        }
+        if b < 0 {
+            return Err("b is negative");
+        }
+        Ok(a * b)
+    }
+}
+
+@test
+fn test_try_block_as_function_body() {
+    let result1 = compute_with_try(5, 10);
+    match result1 {
+        Ok(v) => assert_eq(v, 50),
+        Err(_) => assert(false),
+    }
+
+    let result2 = compute_with_try(-1, 10);
+    match result2 {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "a is negative"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 10: Try Block with Generic Types
+// -----------------------------------------------------------------------------
+
+fn generic_op<T: Default>(value: Maybe<T>) -> Result<T, Text> {
+    match value {
+        Some(v) => Ok(v),
+        None => Err("no value"),
+    }
+}
+
+@test
+fn test_try_block_generic_types() {
+    let result: Result<Int, Text> = try {
+        let x = generic_op(Some(42))?;
+        Ok(x)
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 11: Documentation Tests - Expected Future Behavior
+// -----------------------------------------------------------------------------
+
+// NOTE: The following tests document the EXPECTED future behavior
+// after the try block AST fix is implemented. Currently, these patterns
+// require explicit Ok() wrapping.
+//
+// FUTURE (after fix):
+// let result: Result<Int, Text> = try {
+//     let x = fallible_op()?;
+//     x + 1  // Auto-wrapped in Ok()
+// };
+//
+// CURRENT (workaround):
+// let result: Result<Int, Text> = try {
+//     let x = fallible_op()?;
+//     Ok(x + 1)  // Must explicitly wrap
+// };
+
+@test
+fn test_try_block_current_workaround_documented() {
+    fn fallible() -> Result<Int, Text> { Ok(10) }
+
+    // This is the CURRENT required pattern
+    let result: Result<Int, Text> = try {
+        let x = fallible()?;
+        Ok(x + 1)  // Explicit Ok() is required with current implementation
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 11),
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 12: Edge Cases
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_block_empty_success() {
+    let result: Result<(), Text> = try {
+        Ok(())
+    };
+
+    assert(result is Ok);
+}
+
+@test
+fn test_try_block_immediate_error() {
+    fn instant_fail() -> Result<Int, Text> {
+        Err("immediate failure")
+    }
+
+    let result: Result<Int, Text> = try {
+        instant_fail()?
+    };
+
+    match result {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "immediate failure"),
+    }
+}
+
+@test
+fn test_try_block_with_conditionals() {
+    fn conditional_op(flag: Bool) -> Result<Int, Text> {
+        if flag { Ok(100) } else { Err("flag was false") }
+    }
+
+    let result: Result<Int, Text> = try {
+        let x = if true {
+            conditional_op(true)?
+        } else {
+            conditional_op(false)?
+        };
+        Ok(x)
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 100),
+        Err(_) => assert(false),
+    }
+}

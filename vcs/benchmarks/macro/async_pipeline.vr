@@ -1,0 +1,346 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: > 100K ops/sec with low latency
+// @tags: async, pipeline, streams, performance
+
+/// Async Pipeline Benchmark
+///
+/// Tests async streaming and pipeline patterns:
+/// - Data transformation pipelines
+/// - Backpressure handling
+/// - Concurrent stream processing
+/// - Buffering strategies
+
+module benchmarks.macro.async_pipeline
+
+using [Benchmark, Async, Streams]
+
+/// Simple linear pipeline
+fn benchmark_pipeline_linear() async {
+    let source = Stream.iter(0..100_000);
+
+    let result: Int = source
+        .map(|x| x * 2)
+        .filter(|x| x % 4 == 0)
+        .map(|x| x + 1)
+        .sum()
+        .await;
+
+    let _ = result;
+}
+
+/// Pipeline with async stages
+fn benchmark_pipeline_async_stages() async {
+    let source = Stream.iter(0..10_000);
+
+    let result: List<Int> = source
+        .map(|x| async move {
+            // Simulate async work
+            yield_now().await;
+            x * 2
+        })
+        .buffered(100)  // Process 100 concurrently
+        .filter(|x| x % 4 == 0)
+        .collect()
+        .await;
+
+    let _ = result.len();
+}
+
+/// Pipeline with concurrent branches
+fn benchmark_pipeline_concurrent_branches() async {
+    let source = Stream.iter(0..10_000);
+
+    // Split stream into two branches
+    let (branch1, branch2) = source.fork();
+
+    let sum_task = spawn async {
+        branch1.sum().await
+    };
+
+    let count_task = spawn async {
+        branch2.filter(|x| x % 2 == 0).count().await
+    };
+
+    let (sum, count) = join(sum_task, count_task);
+    let _ = (sum, count);
+}
+
+/// Pipeline with backpressure
+fn benchmark_pipeline_backpressure() async {
+    let source = Stream.iter(0..100_000);
+
+    // Slow consumer should apply backpressure
+    let result = source
+        .map(|x| x * 2)
+        .buffer(100)  // Buffer up to 100 items
+        .for_each(|x| async move {
+            // Simulate slow processing
+            if x % 1000 == 0 {
+                yield_now().await;
+            }
+        })
+        .await;
+}
+
+/// Pipeline with rate limiting
+fn benchmark_pipeline_rate_limited() async {
+    let source = Stream.iter(0..10_000);
+
+    let result: Int = source
+        .rate_limit(10_000)  // Max 10K items/sec
+        .map(|x| x * 2)
+        .sum()
+        .await;
+
+    let _ = result;
+}
+
+/// Pipeline with chunking/batching
+fn benchmark_pipeline_batched() async {
+    let source = Stream.iter(0..100_000);
+
+    let result = source
+        .chunks(100)  // Process in batches of 100
+        .map(|chunk| async move {
+            // Batch processing
+            chunk.iter().sum<Int>()
+        })
+        .buffered(10)
+        .sum()
+        .await;
+
+    let _ = result;
+}
+
+/// Pipeline with timeout handling
+fn benchmark_pipeline_timeout() async {
+    let source = Stream.iter(0..10_000);
+
+    let result = source
+        .map(|x| async move {
+            yield_now().await;
+            x * 2
+        })
+        .buffered(100)
+        .timeout_each(Duration.from_millis(100))
+        .filter_map(|r| r.ok())
+        .sum()
+        .await;
+
+    let _ = result;
+}
+
+/// Pipeline with error recovery
+fn benchmark_pipeline_error_recovery() async {
+    let source = Stream.iter(0..10_000);
+
+    let result = source
+        .map(|x| -> Result<Int, Error> {
+            if x % 1000 == 0 {
+                Err(Error.new("periodic error"))
+            } else {
+                Ok(x * 2)
+            }
+        })
+        .filter_map(|r| r.ok())  // Skip errors
+        .sum()
+        .await;
+
+    let _ = result;
+}
+
+/// Pipeline with windowing (time-based)
+fn benchmark_pipeline_time_window() async {
+    let source = Stream.iter(0..10_000);
+
+    let windows: List<List<Int>> = source
+        .time_window(Duration.from_millis(10))
+        .map(|window| window.collect<List<_>>())
+        .collect()
+        .await;
+
+    let _ = windows.len();
+}
+
+/// Pipeline with windowing (count-based)
+fn benchmark_pipeline_count_window() async {
+    let source = Stream.iter(0..100_000);
+
+    let windows: Int = source
+        .window(100)  // Windows of 100 items
+        .map(|window| window.sum<Int>())
+        .sum()
+        .await;
+
+    let _ = windows;
+}
+
+/// Pipeline with sliding window
+fn benchmark_pipeline_sliding_window() async {
+    let source = Stream.iter(0..10_000);
+
+    let moving_avg: List<Float> = source
+        .sliding_window(10)  // 10-element sliding window
+        .map(|window| {
+            let sum: Int = window.iter().sum();
+            sum as Float / window.len() as Float
+        })
+        .collect()
+        .await;
+
+    let _ = moving_avg.len();
+}
+
+/// Pipeline with merge (multiple sources)
+fn benchmark_pipeline_merge() async {
+    let source1 = Stream.iter(0..50_000).map(|x| x * 2);
+    let source2 = Stream.iter(0..50_000).map(|x| x * 2 + 1);
+
+    let merged: Int = Stream.merge([source1, source2])
+        .sum()
+        .await;
+
+    let _ = merged;
+}
+
+/// Pipeline with zip
+fn benchmark_pipeline_zip() async {
+    let source1 = Stream.iter(0..50_000);
+    let source2 = Stream.iter(0..50_000);
+
+    let zipped: Int = source1
+        .zip(source2)
+        .map(|(a, b)| a + b)
+        .sum()
+        .await;
+
+    let _ = zipped;
+}
+
+/// Pipeline with flatten
+fn benchmark_pipeline_flatten() async {
+    let source = Stream.iter(0..1_000);
+
+    let flattened: Int = source
+        .map(|x| Stream.iter(x..x+100))
+        .flatten()
+        .sum()
+        .await;
+
+    let _ = flattened;
+}
+
+/// Pipeline with fold/reduce
+fn benchmark_pipeline_fold() async {
+    let source = Stream.iter(0..100_000);
+
+    let result = source
+        .fold(0, |acc, x| acc + x)
+        .await;
+
+    let _ = result;
+}
+
+/// Pipeline with scan (running total)
+fn benchmark_pipeline_scan() async {
+    let source = Stream.iter(0..100_000);
+
+    let running_totals: List<Int> = source
+        .scan(0, |acc, x| {
+            *acc += x;
+            Some(*acc)
+        })
+        .collect()
+        .await;
+
+    let _ = running_totals.len();
+}
+
+/// Pipeline with distinct
+fn benchmark_pipeline_distinct() async {
+    let source = Stream.iter((0..100_000).map(|x| x % 1000));
+
+    let unique_count = source
+        .distinct()
+        .count()
+        .await;
+
+    assert(unique_count == 1000);
+}
+
+/// Pipeline with group_by
+fn benchmark_pipeline_group_by() async {
+    let source = Stream.iter(0..10_000);
+
+    let groups: Map<Int, List<Int>> = source
+        .group_by(|x| x % 10)
+        .collect()
+        .await;
+
+    assert(groups.len() == 10);
+}
+
+/// Complex multi-stage pipeline
+fn benchmark_pipeline_complex() async {
+    let source = Stream.iter(0..100_000);
+
+    let result = source
+        // Stage 1: Initial transformation
+        .map(|x| x * 2)
+        .filter(|x| x % 4 == 0)
+        // Stage 2: Batch processing
+        .chunks(100)
+        .map(|chunk| async move {
+            yield_now().await;
+            chunk.iter().sum<Int>()
+        })
+        .buffered(10)
+        // Stage 3: Aggregation
+        .scan(0, |acc, x| {
+            *acc += x;
+            Some(*acc)
+        })
+        // Final
+        .last()
+        .await
+        .unwrap();
+
+    let _ = result;
+}
+
+/// Pipeline with parallel processing
+fn benchmark_pipeline_parallel() async {
+    let source = Stream.iter(0..100_000);
+
+    let result: Int = source
+        .par_map(4, |x| async move {
+            // Process on 4 parallel workers
+            yield_now().await;
+            x * 2
+        })
+        .sum()
+        .await;
+
+    let _ = result;
+}
+
+/// Pipeline with ordered parallel processing
+fn benchmark_pipeline_parallel_ordered() async {
+    let source = Stream.iter(0..100_000);
+
+    let result: List<Int> = source
+        .par_map_ordered(4, |x| async move {
+            yield_now().await;
+            x * 2
+        })
+        .take(1000)
+        .collect()
+        .await;
+
+    // Verify order preserved
+    for i in 0..1000 {
+        assert(result[i] == i * 2);
+    }
+}

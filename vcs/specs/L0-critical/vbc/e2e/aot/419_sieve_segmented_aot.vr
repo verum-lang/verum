@@ -1,0 +1,158 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, sieve, primes, segmented
+// @timeout: 30000
+
+// Segmented sieve of Eratosthenes for small ranges
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    if n % 3 == 0 { return 0; }
+    let mut i = 5;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        if n % (i + 2) == 0 { return 0; }
+        i = i + 6;
+    }
+    1
+}
+
+// Count primes in range [lo, hi]
+fn count_primes_range(lo: Int, hi: Int) -> Int {
+    let mut count = 0;
+    let mut n = lo;
+    while n <= hi {
+        count = count + is_prime(n);
+        n = n + 1;
+    }
+    count
+}
+
+// Sum of first k primes
+fn sum_first_primes(k: Int) -> Int {
+    let mut sum_val = 0;
+    let mut count = 0;
+    let mut n = 2;
+    while count < k {
+        if is_prime(n) == 1 {
+            sum_val = sum_val + n;
+            count = count + 1;
+        }
+        n = n + 1;
+    }
+    sum_val
+}
+
+// Product of first k primes (primorial)
+fn primorial(k: Int) -> Int {
+    let mut prod = 1;
+    let mut count = 0;
+    let mut n = 2;
+    while count < k {
+        if is_prime(n) == 1 {
+            prod = prod * n;
+            count = count + 1;
+        }
+        n = n + 1;
+    }
+    prod
+}
+
+// Goldbach: express even n as sum of two primes, return smaller prime
+fn goldbach(n: Int) -> Int {
+    let mut i = 2;
+    while i <= n / 2 {
+        if is_prime(i) == 1 {
+            if is_prime(n - i) == 1 {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn test_primes() -> Int {
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(17), 1);
+    assert_eq(is_prime(18), 0);
+    assert_eq(is_prime(97), 1);
+    1
+}
+
+fn test_count() -> Int {
+    // Primes up to 30: 2,3,5,7,11,13,17,19,23,29 = 10
+    assert_eq(count_primes_range(2, 30), 10);
+    // Primes in [10,20]: 11,13,17,19 = 4
+    assert_eq(count_primes_range(10, 20), 4);
+    1
+}
+
+fn test_sum_primes() -> Int {
+    // Sum of first 5 primes: 2+3+5+7+11 = 28
+    assert_eq(sum_first_primes(5), 28);
+    // Sum of first 10: 2+3+5+7+11+13+17+19+23+29 = 129
+    assert_eq(sum_first_primes(10), 129);
+    1
+}
+
+fn test_primorial() -> Int {
+    // 2# = 2, 3# = 6, 5# = 30, 7# = 210
+    assert_eq(primorial(1), 2);
+    assert_eq(primorial(2), 6);
+    assert_eq(primorial(3), 30);
+    assert_eq(primorial(4), 210);
+    1
+}
+
+fn test_goldbach() -> Int {
+    assert_eq(goldbach(4), 2);    // 4 = 2+2
+    assert_eq(goldbach(10), 3);   // 10 = 3+7
+    assert_eq(goldbach(20), 3);   // 20 = 3+17
+    assert_eq(goldbach(100), 3);  // 100 = 3+97
+    1
+}
+
+fn main() -> Int {
+    test_primes();
+    test_count();
+    test_sum_primes();
+    test_primorial();
+    test_goldbach();
+    print("[OK] 419_sieve_segmented_aot");
+    0
+}

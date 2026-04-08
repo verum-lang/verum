@@ -1,0 +1,224 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, quantifiers, binding, domain, where, error
+// @description: Test invalid quantifier binding syntax
+// @expected-error: E018
+
+// ============================================================================
+// Invalid: Missing both type annotation and domain
+// ============================================================================
+
+fn test_missing_type_and_domain() {
+    // Invalid: binding without type or domain - cannot infer type
+    let invalid = forall x . x > 0;
+}
+
+fn test_missing_type_and_domain_exists() {
+    // Invalid: exists binding without type or domain
+    let invalid = exists y . y == 42;
+}
+
+// ============================================================================
+// Invalid: 'in' without expression
+// ============================================================================
+
+fn test_in_missing_expression() {
+    // Invalid: 'in' keyword without domain expression
+    let invalid = forall x: Int in . x > 0;
+}
+
+fn test_in_without_dot() {
+    // Invalid: 'in' without following expression
+    let invalid = forall n in;
+}
+
+// ============================================================================
+// Invalid: 'where' without expression
+// ============================================================================
+
+fn test_where_missing_expression() {
+    // Invalid: 'where' keyword without guard expression
+    let invalid = forall x: Int where . x > 0;
+}
+
+fn test_where_empty() {
+    // Invalid: 'where' followed directly by dot
+    let invalid = forall n: Int where. n >= 0;
+}
+
+// ============================================================================
+// Invalid: Wrong keyword order
+// ============================================================================
+
+fn test_where_before_in() {
+    let items = [1, 2, 3];
+    // Invalid: 'where' must come after 'in', not before
+    let invalid = forall x: Int where x > 0 in items . x >= 0;
+}
+
+fn test_in_after_dot() {
+    // Invalid: 'in' cannot appear after the dot
+    let invalid = forall x: Int . in [1,2,3] x > 0;
+}
+
+// ============================================================================
+// Invalid: Multiple 'in' clauses
+// ============================================================================
+
+fn test_double_in() {
+    let a = [1, 2];
+    let b = [3, 4];
+    // Invalid: single binding cannot have multiple 'in' clauses
+    let invalid = forall x in a in b . x > 0;
+}
+
+// ============================================================================
+// Invalid: Multiple 'where' clauses
+// ============================================================================
+
+fn test_double_where() {
+    // Invalid: single binding cannot have multiple 'where' clauses
+    let invalid = forall x: Int where x > 0 where x < 100 . x >= 0;
+}
+
+// ============================================================================
+// Invalid: Type after domain
+// ============================================================================
+
+fn test_type_after_domain() {
+    let items = [1, 2, 3];
+    // Invalid: type annotation must come before 'in' domain
+    let invalid = forall x in items: Int . x > 0;
+}
+
+// ============================================================================
+// Invalid: Missing dot before body
+// ============================================================================
+
+fn test_missing_dot() {
+    // Invalid: missing '.' separator before body
+    let invalid = forall x: Int x > 0;
+}
+
+fn test_missing_dot_with_in() {
+    let items = [1, 2, 3];
+    // Invalid: missing '.' after domain
+    let invalid = forall x in items x > 0;
+}
+
+fn test_missing_dot_with_where() {
+    // Invalid: missing '.' after guard
+    let invalid = forall n: Int where n > 0 n < 100;
+}
+
+// ============================================================================
+// Invalid: Empty binding list
+// ============================================================================
+
+fn test_empty_binding() {
+    // Invalid: no binding at all
+    let invalid = forall . true;
+}
+
+fn test_exists_empty_binding() {
+    // Invalid: exists without binding
+    let invalid = exists . false;
+}
+
+// ============================================================================
+// Invalid: Multiple bindings without separator
+// ============================================================================
+
+fn test_bindings_no_comma() {
+    // Invalid: multiple bindings without comma separator
+    let invalid = forall x: Int y: Int . x + y > 0;
+}
+
+fn test_bindings_semicolon() {
+    // Invalid: semicolon instead of comma between bindings
+    let invalid = forall a: Int; b: Int . a == b;
+}
+
+// ============================================================================
+// Invalid: Trailing comma in bindings
+// ============================================================================
+
+fn test_trailing_comma() {
+    // Invalid: trailing comma after last binding
+    let invalid = forall x: Int, y: Int, . x + y > 0;
+}
+
+fn test_leading_comma() {
+    // Invalid: leading comma before first binding
+    let invalid = forall , x: Int . x > 0;
+}
+
+// ============================================================================
+// Invalid: Domain expression errors
+// ============================================================================
+
+fn test_domain_missing_collection() {
+    // Invalid: 'in' keyword without collection
+    let invalid = forall x: Int in  where x > 0 . x >= 0;
+}
+
+fn test_domain_invalid_expression() {
+    // Invalid: non-iterable in domain position
+    let invalid = forall x in + . x > 0;
+}
+
+// ============================================================================
+// Invalid: Guard expression errors
+// ============================================================================
+
+fn test_guard_missing_predicate() {
+    // Invalid: 'where' without boolean expression
+    let invalid = forall x: Int where in [1,2,3] . x > 0;
+}
+
+// ============================================================================
+// Invalid: Quantifier keyword confusion
+// ============================================================================
+
+fn test_for_instead_of_forall() {
+    // Invalid: 'for' is not a quantifier (it's a loop)
+    let invalid = for x: Int . x > 0;
+}
+
+fn test_all_instead_of_forall() {
+    // Invalid: 'all' is not a quantifier keyword
+    let invalid = all x: Int . x > 0;
+}
+
+fn test_any_instead_of_exists() {
+    // Invalid: 'any' is not a quantifier keyword
+    let invalid = any x: Int . x > 0;
+}
+
+fn test_some_instead_of_exists() {
+    // Invalid: 'some' is not a quantifier keyword
+    let invalid = some x: Int . x > 0;
+}
+
+// ============================================================================
+// Invalid: Body expression errors
+// ============================================================================
+
+fn test_missing_body() {
+    // Invalid: no body expression after dot
+    let invalid = forall x: Int .;
+}
+
+fn test_empty_body_block() {
+    // Invalid: empty block as body
+    let invalid = forall x: Int . {};
+}
+
+// ============================================================================
+// Invalid: Nested quantifier errors
+// ============================================================================
+
+fn test_nested_missing_outer_body() {
+    // Invalid: outer quantifier has no body, just inner quantifier start
+    let invalid = forall x: Int . forall y: Int;
+}

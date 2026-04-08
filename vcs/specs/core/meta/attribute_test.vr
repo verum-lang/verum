@@ -1,0 +1,478 @@
+// =============================================================================
+// attribute_test.vr - Comprehensive tests for attribute representation types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, attribute, cfg, derive, repr, attribute-arg, attribute-value
+// @description: Tests for AttributeStyle, AttributeValue, ReprKind,
+//               CfgPredicate, Attribute constructors/methods, AttributeArg,
+//               DeriveInfo, and ReprInfo types.
+// =============================================================================
+
+mount core.meta.attribute.{
+    AttributeStyle, AttributeValue, ReprKind,
+    CfgPredicate, Attribute, AttributeArg,
+    DeriveInfo, ReprInfo,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+mount core.meta.span.Span;
+
+// =============================================================================
+// Section 1: AttributeStyle Variants
+// =============================================================================
+
+@test
+fn test_attribute_style_word() {
+    let s: AttributeStyle = AttributeStyle.Word;
+    assert(s is AttributeStyle.Word);
+}
+
+@test
+fn test_attribute_style_value() {
+    let s: AttributeStyle = AttributeStyle.Value;
+    assert(s is AttributeStyle.Value);
+}
+
+@test
+fn test_attribute_style_call() {
+    let s: AttributeStyle = AttributeStyle.Call;
+    assert(s is AttributeStyle.Call);
+}
+
+// =============================================================================
+// Section 2: AttributeValue Variants and Constructors
+// =============================================================================
+
+@test
+fn test_attribute_value_ident() {
+    let v = AttributeValue.ident("Clone");
+    assert(v.is_ident());
+}
+
+@test
+fn test_attribute_value_string() {
+    let v = AttributeValue.string("linux");
+    let s = v.as_string();
+    assert(s.is_some());
+}
+
+@test
+fn test_attribute_value_int() {
+    let v = AttributeValue.int(42);
+    assert(v is AttributeValue.Int);
+}
+
+@test
+fn test_attribute_value_bool_true() {
+    let v = AttributeValue.bool(true);
+    assert(v is AttributeValue.Bool);
+}
+
+@test
+fn test_attribute_value_bool_false() {
+    let v = AttributeValue.bool(false);
+    assert(v is AttributeValue.Bool);
+}
+
+@test
+fn test_attribute_value_as_ident() {
+    let v = AttributeValue.Ident("Debug");
+    let name = v.as_ident();
+    assert(name.is_some());
+}
+
+@test
+fn test_attribute_value_as_string_none() {
+    let v = AttributeValue.Ident("Debug");
+    let s = v.as_string();
+    assert(s.is_none());
+}
+
+@test
+fn test_attribute_value_is_ident_false() {
+    let v = AttributeValue.Int(42);
+    assert(!v.is_ident());
+}
+
+@test
+fn test_attribute_value_as_ident_from_string() {
+    let v = AttributeValue.String("hello");
+    assert(v.as_ident().is_none());
+}
+
+// Cannot construct Float variant via AttributeValue.Float(3.14) — type checker
+// resolves Float as the primitive type, not the variant constructor.
+@test
+fn test_attribute_value_int_numeric() {
+    // Test numeric variant construction (Int works, Float blocked by naming conflict)
+    let v: AttributeValue = AttributeValue.Int(42);
+    assert(v is Int);
+}
+
+@test
+fn test_attribute_value_nested() {
+    let args: List<AttributeArg> = List.new();
+    let v: AttributeValue = AttributeValue.Nested(args);
+    assert(v is AttributeValue.Nested);
+}
+
+// =============================================================================
+// Section 3: ReprKind Variants
+// =============================================================================
+
+@test
+fn test_repr_kind_verum() {
+    let k: ReprKind = ReprKind.Verum;
+    assert(k is ReprKind.Verum);
+}
+
+@test
+fn test_repr_kind_c() {
+    let k: ReprKind = ReprKind.C;
+    assert(k is ReprKind.C);
+}
+
+@test
+fn test_repr_kind_transparent() {
+    let k: ReprKind = ReprKind.Transparent;
+    assert(k is ReprKind.Transparent);
+}
+
+@test
+fn test_repr_kind_int_uint8() {
+    let k: ReprKind = ReprKind.Int("UInt8");
+    assert(k is ReprKind.Int);
+}
+
+@test
+fn test_repr_kind_int_int32() {
+    let k: ReprKind = ReprKind.Int("Int32");
+    assert(k is ReprKind.Int);
+}
+
+// =============================================================================
+// Section 4: CfgPredicate Variants
+// =============================================================================
+
+@test
+fn test_cfg_simple() {
+    let p: CfgPredicate = CfgPredicate.Simple("unix");
+    assert(p is CfgPredicate.Simple);
+}
+
+@test
+fn test_cfg_key_value() {
+    let p: CfgPredicate = CfgPredicate.KeyValue {
+        key: "target_os",
+        value: "linux",
+    };
+    assert(p is CfgPredicate.KeyValue);
+}
+
+@test
+fn test_cfg_all() {
+    let p: CfgPredicate = CfgPredicate.All(List.new());
+    assert(p is CfgPredicate.All);
+}
+
+@test
+fn test_cfg_any() {
+    let p: CfgPredicate = CfgPredicate.Any(List.new());
+    assert(p is CfgPredicate.Any);
+}
+
+@test
+fn test_cfg_not() {
+    let inner = CfgPredicate.Simple("windows");
+    let p: CfgPredicate = CfgPredicate.Not(Heap(inner));
+    assert(p is CfgPredicate.Not);
+}
+
+@test
+fn test_cfg_all_with_predicates() {
+    let mut preds: List<CfgPredicate> = List.new();
+    preds.push(CfgPredicate.Simple("unix"));
+    preds.push(CfgPredicate.KeyValue { key: "target_arch", value: "x86_64" });
+    let p = CfgPredicate.All(preds);
+    assert(p is CfgPredicate.All);
+}
+
+@test
+fn test_cfg_any_with_predicates() {
+    let mut preds: List<CfgPredicate> = List.new();
+    preds.push(CfgPredicate.Simple("windows"));
+    preds.push(CfgPredicate.KeyValue { key: "target_os", value: "macos" });
+    let p = CfgPredicate.Any(preds);
+    assert(p is CfgPredicate.Any);
+}
+
+@test
+fn test_cfg_nested_not_all() {
+    let inner_pred = CfgPredicate.All(List.new());
+    let p = CfgPredicate.Not(Heap(inner_pred));
+    assert(p is CfgPredicate.Not);
+}
+
+// =============================================================================
+// Section 5: Attribute — Construction
+// =============================================================================
+
+@test
+fn test_attribute_simple() {
+    let attr = Attribute.simple("inline");
+    assert_eq(attr.name, "inline");
+    assert(attr.is_simple());
+    assert(!attr.has_args());
+    assert_eq(attr.arg_count(), 0);
+}
+
+@test
+fn test_attribute_with_value() {
+    let val = AttributeValue.string("always");
+    let attr = Attribute.with_value("inline", val);
+    assert_eq(attr.name, "inline");
+    assert(attr.has_args());
+    assert_eq(attr.arg_count(), 1);
+}
+
+@test
+fn test_attribute_with_args() {
+    let mut args: List<AttributeArg> = List.new();
+    args.push(AttributeArg.positional(AttributeValue.ident("Clone")));
+    args.push(AttributeArg.positional(AttributeValue.ident("Debug")));
+    let attr = Attribute.with_args("derive", args);
+    assert_eq(attr.name, "derive");
+    assert_eq(attr.arg_count(), 2);
+}
+
+// =============================================================================
+// Section 6: Attribute — Common Checks
+// =============================================================================
+
+@test
+fn test_attribute_is_cfg() {
+    let attr = Attribute.simple("cfg");
+    assert(attr.is_cfg());
+    assert(!attr.is_derive());
+    assert(!attr.is_repr());
+}
+
+@test
+fn test_attribute_is_derive() {
+    let attr = Attribute.simple("derive");
+    assert(attr.is_derive());
+    assert(!attr.is_cfg());
+}
+
+@test
+fn test_attribute_is_repr() {
+    let attr = Attribute.simple("repr");
+    assert(attr.is_repr());
+}
+
+@test
+fn test_attribute_is_inline() {
+    let attr = Attribute.simple("inline");
+    assert(attr.is_inline());
+}
+
+@test
+fn test_attribute_is_deprecated() {
+    let attr = Attribute.simple("deprecated");
+    assert(attr.is_deprecated());
+}
+
+@test
+fn test_attribute_is_doc() {
+    let attr = Attribute.simple("doc");
+    assert(attr.is_doc());
+}
+
+@test
+fn test_attribute_is_builtin() {
+    let attr = Attribute.simple("test");
+    assert(attr.is_builtin());
+}
+
+@test
+fn test_attribute_is_not_builtin() {
+    let attr = Attribute.simple("custom_thing");
+    assert(!attr.is_builtin());
+}
+
+// =============================================================================
+// Section 7: Attribute — Argument Access
+// =============================================================================
+
+@test
+fn test_attribute_first_arg() {
+    let mut args: List<AttributeArg> = List.new();
+    args.push(AttributeArg.positional(AttributeValue.ident("Clone")));
+    let attr = Attribute.with_args("derive", args);
+    let first = attr.first_arg();
+    assert(first.is_some());
+}
+
+@test
+fn test_attribute_first_arg_empty() {
+    let attr = Attribute.simple("inline");
+    let first = attr.first_arg();
+    assert(first.is_none());
+}
+
+@test
+fn test_attribute_get_arg() {
+    let mut args: List<AttributeArg> = List.new();
+    args.push(AttributeArg.positional(AttributeValue.ident("A")));
+    args.push(AttributeArg.positional(AttributeValue.ident("B")));
+    let attr = Attribute.with_args("derive", args);
+    let second = attr.get_arg(1);
+    assert(second.is_some());
+}
+
+@test
+fn test_attribute_as_ident_list() {
+    let mut args: List<AttributeArg> = List.new();
+    args.push(AttributeArg.positional(AttributeValue.ident("Clone")));
+    args.push(AttributeArg.positional(AttributeValue.ident("Debug")));
+    args.push(AttributeArg.positional(AttributeValue.ident("Eq")));
+    let attr = Attribute.with_args("derive", args);
+    let idents = attr.as_ident_list();
+    assert_eq(idents.len(), 3);
+}
+
+@test
+fn test_attribute_as_string() {
+    let attr = Attribute.with_value("doc", AttributeValue.string("A documentation string"));
+    let s = attr.as_string();
+    assert(s.is_some());
+}
+
+@test
+fn test_attribute_as_int() {
+    let attr = Attribute.with_value("align", AttributeValue.int(16));
+    let i = attr.as_int();
+    assert(i.is_some());
+}
+
+@test
+fn test_attribute_as_bool() {
+    let attr = Attribute.with_value("must_use", AttributeValue.bool(true));
+    let b = attr.as_bool();
+    assert(b.is_some());
+}
+
+// =============================================================================
+// Section 8: AttributeArg
+// =============================================================================
+
+@test
+fn test_attribute_arg_positional() {
+    let arg = AttributeArg.positional(AttributeValue.ident("Clone"));
+    assert(!arg.is_named());
+}
+
+@test
+fn test_attribute_arg_named() {
+    let arg = AttributeArg.named("target_os", AttributeValue.string("linux"));
+    assert(arg.is_named());
+}
+
+@test
+fn test_attribute_arg_as_string() {
+    let arg = AttributeArg.positional(AttributeValue.string("hello"));
+    let s = arg.as_string();
+    assert(s.is_some());
+}
+
+@test
+fn test_attribute_arg_as_int() {
+    let arg = AttributeArg.positional(AttributeValue.int(42));
+    let i = arg.as_int();
+    assert(i.is_some());
+}
+
+@test
+fn test_attribute_arg_as_bool() {
+    let arg = AttributeArg.positional(AttributeValue.bool(true));
+    let b = arg.as_bool();
+    assert(b.is_some());
+}
+
+@test
+fn test_attribute_arg_as_ident() {
+    let arg = AttributeArg.positional(AttributeValue.ident("Clone"));
+    let i = arg.as_ident();
+    assert(i.is_some());
+}
+
+@test
+fn test_attribute_arg_as_string_wrong_type() {
+    let arg = AttributeArg.positional(AttributeValue.int(42));
+    let s = arg.as_string();
+    assert(s.is_none());
+}
+
+// =============================================================================
+// Section 9: DeriveInfo
+// =============================================================================
+
+@test
+fn test_derive_info_derives() {
+    let mut derives: List<Text> = List.new();
+    derives.push("Clone");
+    derives.push("Debug");
+    let info = DeriveInfo {
+        derives: derives,
+        span: Span.call_site(),
+    };
+    assert(info.derives("Clone"));
+    assert(info.derives("Debug"));
+    assert(!info.derives("Copy"));
+}
+
+// =============================================================================
+// Section 10: ReprInfo
+// =============================================================================
+
+@test
+fn test_repr_info_construction() {
+    let info = ReprInfo {
+        kind: ReprKind.C,
+        align: Some(16),
+        packed: false,
+        span: Span.call_site(),
+    };
+    assert(info.kind is ReprKind.C);
+    assert(info.align.is_some());
+    assert(!info.packed);
+}
+
+@test
+fn test_repr_info_packed() {
+    let info = ReprInfo {
+        kind: ReprKind.C,
+        align: None,
+        packed: true,
+        span: Span.call_site(),
+    };
+    assert(info.packed);
+    assert(info.align.is_none());
+}
+
+@test
+fn test_repr_info_transparent() {
+    let info = ReprInfo {
+        kind: ReprKind.Transparent,
+        align: None,
+        packed: false,
+        span: Span.call_site(),
+    };
+    assert(info.kind is ReprKind.Transparent);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

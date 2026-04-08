@@ -1,0 +1,332 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, memory, cow, copy-on-write, cbgr
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Copy-on-write simulation.
+// Shared data with reference counts. When a write is attempted on data
+// with refcount > 1, a copy is made before writing.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// CoW Buffer System
+// Up to 4 buffers, each containing up to 4 data slots.
+// buf_data[buf_id]: stored as buf_id*4+slot -> a8 index
+// buf_refcount[buf_id]: number of handles sharing this buffer
+// buf_size[buf_id]: how many slots are used in this buffer
+// =============================================================================
+
+type CowSystem is {
+    data_lo: Arr8,
+    data_hi: Arr8,
+    refcounts: Arr8,
+    buf_sizes: Arr8,
+    num_buffers: Int,
+    total_copies: Int
+};
+
+fn cow_new() -> CowSystem {
+    CowSystem {
+        data_lo: a8_new(),
+        data_hi: a8_new(),
+        refcounts: a8_new(),
+        buf_sizes: a8_new(),
+        num_buffers: 0,
+        total_copies: 0
+    }
+}
+
+// Read data from buffer at slot
+fn cow_data_get(sys: CowSystem, buf_id: Int, slot: Int) -> Int {
+    let idx = buf_id * 4 + slot;
+    if idx < 8 { a8_get(sys.data_lo, idx) }
+    else { a8_get(sys.data_hi, idx - 8) }
+}
+
+// Write data to buffer at slot (internal, no CoW check)
+fn cow_data_set(sys: CowSystem, buf_id: Int, slot: Int, val: Int) -> CowSystem {
+    let idx = buf_id * 4 + slot;
+    if idx < 8 {
+        CowSystem {
+            data_lo: a8_set(sys.data_lo, idx, val),
+            data_hi: sys.data_hi,
+            refcounts: sys.refcounts,
+            buf_sizes: sys.buf_sizes,
+            num_buffers: sys.num_buffers,
+            total_copies: sys.total_copies
+        }
+    } else {
+        CowSystem {
+            data_lo: sys.data_lo,
+            data_hi: a8_set(sys.data_hi, idx - 8, val),
+            refcounts: sys.refcounts,
+            buf_sizes: sys.buf_sizes,
+            num_buffers: sys.num_buffers,
+            total_copies: sys.total_copies
+        }
+    }
+}
+
+// Create a new buffer with given size, return (system, buf_id)
+type CowAllocPair is { sys: CowSystem, buf_id: Int };
+
+fn cow_create(sys: CowSystem, sz: Int) -> CowAllocPair {
+    let id = sys.num_buffers;
+    CowAllocPair {
+        sys: CowSystem {
+            data_lo: sys.data_lo,
+            data_hi: sys.data_hi,
+            refcounts: a8_set(sys.refcounts, id, 1),
+            buf_sizes: a8_set(sys.buf_sizes, id, sz),
+            num_buffers: id + 1,
+            total_copies: sys.total_copies
+        },
+        buf_id: id
+    }
+}
+
+// Share a buffer (increment refcount), returns new handle_id (same buffer)
+fn cow_share(sys: CowSystem, buf_id: Int) -> CowSystem {
+    let rc = a8_get(sys.refcounts, buf_id);
+    CowSystem {
+        data_lo: sys.data_lo,
+        data_hi: sys.data_hi,
+        refcounts: a8_set(sys.refcounts, buf_id, rc + 1),
+        buf_sizes: sys.buf_sizes,
+        num_buffers: sys.num_buffers,
+        total_copies: sys.total_copies
+    }
+}
+
+// Release a handle (decrement refcount)
+fn cow_release(sys: CowSystem, buf_id: Int) -> CowSystem {
+    let rc = a8_get(sys.refcounts, buf_id);
+    let new_rc = if rc > 0 { rc - 1 } else { 0 };
+    CowSystem {
+        data_lo: sys.data_lo,
+        data_hi: sys.data_hi,
+        refcounts: a8_set(sys.refcounts, buf_id, new_rc),
+        buf_sizes: sys.buf_sizes,
+        num_buffers: sys.num_buffers,
+        total_copies: sys.total_copies
+    }
+}
+
+// CoW write: if refcount > 1, copy buffer to a new one first, then write
+// Returns (system, buf_id_used) — buf_id_used may be a new copy
+type CowWritePair is { sys: CowSystem, buf_id: Int };
+
+fn cow_write(sys: CowSystem, buf_id: Int, slot: Int, val: Int) -> CowWritePair {
+    let rc = a8_get(sys.refcounts, buf_id);
+    if rc <= 1 {
+        // No sharing, write in place
+        let s2 = cow_data_set(sys, buf_id, slot, val);
+        return CowWritePair { sys: s2, buf_id: buf_id };
+    }
+
+    // Shared: must copy
+    let sz = a8_get(sys.buf_sizes, buf_id);
+    let cp = cow_create(sys, sz);
+    let new_id = cp.buf_id;
+    let mut s2 = cp.sys;
+
+    // Copy data from old buffer to new
+    let mut i = 0;
+    while i < sz {
+        let v = cow_data_get(s2, buf_id, i);
+        s2 = cow_data_set(s2, new_id, i, v);
+        i = i + 1;
+    }
+
+    // Decrement old buffer refcount
+    let old_rc = a8_get(s2.refcounts, buf_id);
+    s2 = CowSystem {
+        data_lo: s2.data_lo,
+        data_hi: s2.data_hi,
+        refcounts: a8_set(s2.refcounts, buf_id, old_rc - 1),
+        buf_sizes: s2.buf_sizes,
+        num_buffers: s2.num_buffers,
+        total_copies: s2.total_copies + 1
+    };
+
+    // Write to the new buffer
+    s2 = cow_data_set(s2, new_id, slot, val);
+    CowWritePair { sys: s2, buf_id: new_id }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_no_sharing_no_copy() {
+    let s0 = cow_new();
+    let p = cow_create(s0, 3);
+    let s1 = cow_data_set(cow_data_set(cow_data_set(p.sys, p.buf_id, 0, 10), p.buf_id, 1, 20), p.buf_id, 2, 30);
+
+    // Write with refcount=1, no copy needed
+    let w = cow_write(s1, p.buf_id, 1, 99);
+    assert_eq(w.buf_id, p.buf_id);  // Same buffer
+    assert_eq(cow_data_get(w.sys, w.buf_id, 0), 10);
+    assert_eq(cow_data_get(w.sys, w.buf_id, 1), 99);
+    assert_eq(cow_data_get(w.sys, w.buf_id, 2), 30);
+    assert_eq(w.sys.total_copies, 0);
+}
+
+fn test_shared_triggers_copy() {
+    let s0 = cow_new();
+    let p = cow_create(s0, 3);
+    let s1 = cow_data_set(cow_data_set(cow_data_set(p.sys, p.buf_id, 0, 10), p.buf_id, 1, 20), p.buf_id, 2, 30);
+
+    // Share the buffer
+    let s2 = cow_share(s1, p.buf_id);
+    assert_eq(a8_get(s2.refcounts, p.buf_id), 2);
+
+    // Write through one handle -> should trigger copy
+    let w = cow_write(s2, p.buf_id, 1, 99);
+    assert_eq(w.sys.total_copies, 1);
+
+    // New buffer has modified data
+    assert_eq(cow_data_get(w.sys, w.buf_id, 0), 10);
+    assert_eq(cow_data_get(w.sys, w.buf_id, 1), 99);
+    assert_eq(cow_data_get(w.sys, w.buf_id, 2), 30);
+
+    // Original buffer is unchanged
+    assert_eq(cow_data_get(w.sys, p.buf_id, 0), 10);
+    assert_eq(cow_data_get(w.sys, p.buf_id, 1), 20);
+    assert_eq(cow_data_get(w.sys, p.buf_id, 2), 30);
+
+    // Refcount of original decreased
+    assert_eq(a8_get(w.sys.refcounts, p.buf_id), 1);
+}
+
+fn test_multiple_shares() {
+    let s0 = cow_new();
+    let p = cow_create(s0, 2);
+    let s1 = cow_data_set(cow_data_set(p.sys, p.buf_id, 0, 5), p.buf_id, 1, 10);
+
+    // Share 3 times (total refcount = 4)
+    let s2 = cow_share(cow_share(cow_share(s1, p.buf_id), p.buf_id), p.buf_id);
+    assert_eq(a8_get(s2.refcounts, p.buf_id), 4);
+
+    // Write -> copy, original refcount decremented
+    let w = cow_write(s2, p.buf_id, 0, 999);
+    assert_eq(a8_get(w.sys.refcounts, p.buf_id), 3);
+    assert_eq(a8_get(w.sys.refcounts, w.buf_id), 1);
+    assert_eq(cow_data_get(w.sys, w.buf_id, 0), 999);
+    assert_eq(cow_data_get(w.sys, p.buf_id, 0), 5);  // Original unchanged
+}
+
+fn test_write_after_copy_no_recopy() {
+    let s0 = cow_new();
+    let p = cow_create(s0, 2);
+    let s1 = cow_data_set(cow_data_set(p.sys, p.buf_id, 0, 1), p.buf_id, 1, 2);
+
+    // Share and write -> triggers copy
+    let s2 = cow_share(s1, p.buf_id);
+    let w1 = cow_write(s2, p.buf_id, 0, 100);
+    assert_eq(w1.sys.total_copies, 1);
+
+    // Write again to the copy (refcount=1 now) -> no additional copy
+    let w2 = cow_write(w1.sys, w1.buf_id, 1, 200);
+    assert_eq(w2.sys.total_copies, 1);  // Still 1 total
+    assert_eq(w2.buf_id, w1.buf_id);   // Same buffer
+
+    assert_eq(cow_data_get(w2.sys, w2.buf_id, 0), 100);
+    assert_eq(cow_data_get(w2.sys, w2.buf_id, 1), 200);
+}
+
+fn test_read_shared_no_copy() {
+    let s0 = cow_new();
+    let p = cow_create(s0, 3);
+    let s1 = cow_data_set(cow_data_set(cow_data_set(p.sys, p.buf_id, 0, 7), p.buf_id, 1, 8), p.buf_id, 2, 9);
+
+    // Share
+    let s2 = cow_share(s1, p.buf_id);
+
+    // Reading shared data should never trigger copy
+    assert_eq(cow_data_get(s2, p.buf_id, 0), 7);
+    assert_eq(cow_data_get(s2, p.buf_id, 1), 8);
+    assert_eq(cow_data_get(s2, p.buf_id, 2), 9);
+    assert_eq(s2.total_copies, 0);
+}
+
+fn test_release_then_write() {
+    let s0 = cow_new();
+    let p = cow_create(s0, 2);
+    let s1 = cow_data_set(cow_data_set(p.sys, p.buf_id, 0, 50), p.buf_id, 1, 60);
+
+    // Share, then release the sharing
+    let s2 = cow_share(s1, p.buf_id);
+    assert_eq(a8_get(s2.refcounts, p.buf_id), 2);
+
+    let s3 = cow_release(s2, p.buf_id);
+    assert_eq(a8_get(s3.refcounts, p.buf_id), 1);
+
+    // Write now — refcount is 1, no copy needed
+    let w = cow_write(s3, p.buf_id, 0, 999);
+    assert_eq(w.sys.total_copies, 0);
+    assert_eq(w.buf_id, p.buf_id);
+    assert_eq(cow_data_get(w.sys, w.buf_id, 0), 999);
+}
+
+fn test_independent_buffers() {
+    let s0 = cow_new();
+    let p1 = cow_create(s0, 2);
+    let s1 = cow_data_set(cow_data_set(p1.sys, p1.buf_id, 0, 1), p1.buf_id, 1, 2);
+
+    let p2 = cow_create(s1, 2);
+    let s2 = cow_data_set(cow_data_set(p2.sys, p2.buf_id, 0, 10), p2.buf_id, 1, 20);
+
+    // Writing to one doesn't affect the other
+    let w = cow_write(s2, p1.buf_id, 0, 999);
+    assert_eq(cow_data_get(w.sys, p1.buf_id, 0), 999);
+    assert_eq(cow_data_get(w.sys, p2.buf_id, 0), 10);
+    assert_eq(cow_data_get(w.sys, p2.buf_id, 1), 20);
+}
+
+fn main() -> Int {
+    test_no_sharing_no_copy();
+    test_shared_triggers_copy();
+    test_multiple_shares();
+    test_write_after_copy_no_recopy();
+    test_read_shared_no_copy();
+    test_release_then_write();
+    test_independent_buffers();
+    print("[OK] 335_interp_copy_on_write");
+    0
+}

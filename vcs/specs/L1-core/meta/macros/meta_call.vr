@@ -1,0 +1,49 @@
+// @test: parse
+// @level: L1
+// @tags: meta, macros, meta-call, invocation
+// @timeout: 5000
+
+/// User-defined macro invocation with @ prefix.
+/// Grammar: meta_call = '@' path meta_call_args
+///          meta_call_args = '(' [argument_list] ')' | '[' token_tree ']'
+
+// Invocation with parenthesized args
+fn test_paren_call() {
+    let result = @max(10, 20);
+    assert_eq(result, 20);
+}
+
+// Invocation with bracket args (token tree)
+fn test_bracket_call() {
+    let items = @vec[1, 2, 3, 4, 5];
+}
+
+// Macro on item (attribute position)
+@derive_debug
+type MyType is {
+    value: Int,
+};
+
+// Chained macro usage
+fn test_chained() {
+    let x = @clamp(@abs(-5), 0, 10);
+}
+
+// SQL query macro (from grammar examples)
+fn test_sql_macro() {
+    let query = @sql_query("SELECT * FROM users WHERE active = true");
+}
+
+// Assert macro (built-in but uses same syntax)
+fn test_assert_macros() {
+    assert(true);
+    assert_eq(1 + 1, 2);
+    assert_ne(1, 2);
+    debug_assert(true);
+}
+
+fn main() {
+    test_paren_call();
+    test_assert_macros();
+    print("Meta call tests parsed");
+}

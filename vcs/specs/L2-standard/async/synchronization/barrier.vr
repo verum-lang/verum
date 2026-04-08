@@ -1,0 +1,336 @@
+// @test: run
+// @expected-stdout: Worker 0 waiting at barrier\nWorker 1 waiting at barrier\nWorker 2 waiting at barrier\nAll workers passed barrier\nWorker 0 finished\nWorker 1 finished\nWorker 2 finished\nPhase 1 complete\nPhase 2 complete\nReusable barrier: 3 cycles\nWith timeout: passed
+// @tier: 0
+// @level: L2
+// @tags: async, synchronization, barrier
+// @description: Comprehensive async barrier patterns for multi-task synchronization
+
+// Basic barrier synchronization
+async fn test_basic_barrier() {
+    let barrier = Barrier.new(3);
+
+    let handles: List<_> = (0..3).map(|i| {
+        spawn {
+            println(f"Worker {i} waiting at barrier");
+
+            let result = barrier.wait().await;
+
+            if result.is_leader() {
+                println("All workers passed barrier");
+            }
+
+            println(f"Worker {i} finished");
+        }
+    }).collect();
+
+    for handle in handles {
+        handle.await;
+    }
+}
+
+// Multi-phase barrier (reusable)
+async fn test_multi_phase_barrier() {
+    let barrier = Barrier.new(3);
+    let mut phase_count = 0;
+
+    let handles: List<_> = (0..3).map(|i| {
+        let b = &barrier;
+        spawn {
+            // Phase 1
+            do_phase1_work(i).await;
+            let result = b.wait().await;
+            if result.is_leader() {
+                println("Phase 1 complete");
+            }
+
+            // Phase 2
+            do_phase2_work(i).await;
+            let result = b.wait().await;
+            if result.is_leader() {
+                println("Phase 2 complete");
+            }
+        }
+    }).collect();
+
+    for handle in handles {
+        handle.await;
+    }
+}
+
+async fn do_phase1_work(id: Int) {
+    sleep(Duration.from_millis(10 * id)).await;
+}
+
+async fn do_phase2_work(id: Int) {
+    sleep(Duration.from_millis(5 * id)).await;
+}
+
+// Barrier with callback on release
+async fn test_barrier_callback() {
+    let barrier = Barrier.with_callback(3, || {
+        println("All workers synchronized, starting next phase");
+    });
+
+    let handles: List<_> = (0..3).map(|_| {
+        spawn {
+            barrier.wait().await;
+        }
+    }).collect();
+
+    join_all(handles).await;
+}
+
+// Leader election via barrier
+async fn test_leader_election() {
+    let barrier = Barrier.new(5);
+    let leader_id = Shared.new(AtomicInt.new(-1));
+
+    let handles: List<_> = (0..5).map(|i| {
+        let lid = leader_id.clone();
+        spawn {
+            let result = barrier.wait().await;
+
+            if result.is_leader() {
+                lid.store(i);
+            }
+        }
+    }).collect();
+
+    join_all(handles).await;
+
+    let leader = leader_id.load();
+    println(f"Elected leader: {leader}");
+}
+
+// Barrier with timeout
+async fn test_barrier_timeout() -> Text {
+    let barrier = Barrier.new(3);
+
+    // Only 2 workers join
+    let h1 = spawn {
+        timeout(Duration.from_millis(100), barrier.wait()).await
+    };
+
+    let h2 = spawn {
+        timeout(Duration.from_millis(100), barrier.wait()).await
+    };
+
+    // Third worker joins late but within timeout
+    let h3 = spawn {
+        sleep(Duration.from_millis(50)).await;
+        timeout(Duration.from_millis(100), barrier.wait()).await
+    };
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+
+    if r1.is_ok() && r2.is_ok() && r3.is_ok() {
+        "passed"
+    } else {
+        "timeout"
+    }
+}
+
+// Resettable barrier (not yet available)
+async fn test_resettable_barrier() -> Int {
+    let barrier = Barrier.new(3);
+    let cycle_count = Shared.new(AtomicInt.new(0));
+
+    let handles: List<_> = (0..3).map(|_| {
+        let b = &barrier;
+        let cc = cycle_count.clone();
+        spawn {
+            for _ in 0..3 {
+                b.wait().await;
+                cc.fetch_add(1);
+            }
+        }
+    }).collect();
+
+    join_all(handles).await;
+
+    cycle_count.load() / 3 // Number of complete cycles
+}
+
+// Barrier with shared data
+async fn test_barrier_shared_data() {
+    type SharedData is {
+        values: Mutex<List<Int>>,
+        barrier: Barrier,
+    };
+
+    let shared = Shared.new(SharedData {
+        values: Mutex.new([]),
+        barrier: Barrier.new(3),
+    });
+
+    let handles: List<_> = (0..3).map(|i| {
+        let s = shared.clone();
+        spawn {
+            // Each worker contributes a value
+            {
+                let mut values = s.values.lock().await;
+                values.push(i);
+            }
+
+            // Wait for all contributions
+            let result = s.barrier.wait().await;
+
+            // Leader processes all values
+            if result.is_leader() {
+                let _values = s.values.lock().await;
+                // Processing values via guard
+            }
+        }
+    }).collect();
+
+    join_all(handles).await;
+}
+
+// Barrier in parallel algorithm (e.g., parallel sort) - simplified
+async fn test_parallel_merge_barrier() {
+    let barrier = Barrier.new(2);
+
+    // Two workers each sort half
+    let h1 = spawn {
+        // Worker 1: sort first half
+        barrier.wait().await;
+    };
+
+    let h2 = spawn {
+        // Worker 2: sort second half
+        let result = barrier.wait().await;
+
+        // Leader merges
+        if result.is_leader() {
+            // Merge sorted halves
+        }
+    };
+
+    h1.await;
+    h2.await;
+}
+
+fn merge_sorted_halves(arr: &mut List<Int>) {
+    // Merge algorithm
+}
+
+// Dynamic barrier (not yet available - using Barrier)
+async fn test_dynamic_barrier() {
+    let barrier = Barrier.new(2);
+
+    // Start with 2 participants
+    let h1 = spawn {
+        barrier.wait().await;
+    };
+
+    let h2 = spawn {
+        barrier.wait().await;
+    };
+
+    // NOTE: add_participant not yet supported on Barrier
+
+    let h3 = spawn {
+        barrier.wait().await;
+    };
+
+    join_all([h1, h2, h3]).await;
+}
+
+// Barrier with cancel support (not yet available - using Barrier)
+async fn test_barrier_cancel() {
+    let barrier = Barrier.new(3);
+
+    let h1 = spawn {
+        let _ = barrier.wait().await;
+        println("Passed barrier");
+    };
+
+    let h2 = spawn {
+        let _ = barrier.wait().await;
+        println("Passed barrier");
+    };
+
+    let h3 = spawn {
+        let _ = barrier.wait().await;
+    };
+
+    h1.await;
+    h2.await;
+    h3.await;
+}
+
+// Barrier for map-reduce pattern (simplified)
+async fn test_map_reduce_barrier() {
+    let barrier = Barrier.new(2);
+
+    let h1 = spawn {
+        // Worker 1: compute partial result
+        let partial = 15; // sum of first half
+        let _ = barrier.wait().await;
+    };
+
+    let h2 = spawn {
+        // Worker 2: compute partial result
+        let partial = 40; // sum of second half
+        let _ = barrier.wait().await;
+    };
+
+    h1.await;
+    h2.await;
+}
+
+// Named barrier wait result
+async fn test_barrier_wait_result() {
+    let barrier = Barrier.new(3);
+
+    let handles: List<_> = (0..3).map(|i| {
+        spawn {
+            let result = barrier.wait().await;
+
+            // BarrierWaitResult provides info
+            println(f"Worker {i}: is_leader={result.is_leader()}, generation={result.generation()}");
+        }
+    }).collect();
+
+    join_all(handles).await;
+}
+
+// Generational barrier (tracks how many times barrier was used)
+async fn test_generational_barrier() {
+    let barrier = Barrier.new(2);
+
+    for generation in 0..3 {
+        let h1 = spawn {
+            let result = barrier.wait().await;
+            assert_eq(result.generation(), generation);
+        };
+
+        let h2 = spawn {
+            let result = barrier.wait().await;
+            assert_eq(result.generation(), generation);
+        };
+
+        h1.await;
+        h2.await;
+    }
+}
+
+type BarrierCancelledError is {};
+
+async fn main() {
+    // Basic barrier
+    test_basic_barrier().await;
+
+    // Multi-phase
+    test_multi_phase_barrier().await;
+
+    // Reusable
+    let cycles = test_resettable_barrier().await;
+    println(f"Reusable barrier: {cycles} cycles");
+
+    // Timeout
+    let timeout_result = test_barrier_timeout().await;
+    println(f"With timeout: {timeout_result}");
+}

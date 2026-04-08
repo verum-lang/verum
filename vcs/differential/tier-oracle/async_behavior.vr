@@ -1,0 +1,613 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, async, concurrency, tier-oracle
+// @timeout: 30000
+
+/// Comprehensive async behavior tests for Tier 0 vs Tier 3 equivalence.
+/// Tests async execution, await semantics, concurrent operations,
+/// and synchronization to ensure identical behavior across execution tiers.
+
+fn main() {
+    run_async(async_main());
+}
+
+async fn async_main() {
+    test_basic_async().await;
+    test_await_semantics().await;
+    test_sequential_async().await;
+    test_concurrent_join().await;
+    test_select_racing().await;
+    test_async_closures().await;
+    test_async_collections().await;
+    test_timeout_behavior().await;
+    test_channel_communication().await;
+    test_shared_state().await;
+    test_error_handling_async().await;
+    test_cancellation().await;
+}
+
+/// Basic async function behavior
+async fn test_basic_async() {
+    println("=== Basic Async ===");
+
+    // Simple async function
+    async fn simple() -> Int {
+        42
+    }
+    let result = simple().await;
+    println(f"simple() = {result}");
+
+    // Async with computation
+    async fn compute(n: Int) -> Int {
+        let mut sum = 0;
+        for i in 0..n {
+            sum = sum + i;
+        }
+        sum
+    }
+    let computed = compute(10).await;
+    println(f"compute(10) = {computed}");
+
+    // Async block
+    let block_result = async {
+        let a = 10;
+        let b = 20;
+        a + b
+    }.await;
+    println(f"async block = {block_result}");
+
+    // Nested async calls
+    async fn outer() -> Int {
+        let a = simple().await;
+        let b = compute(5).await;
+        a + b
+    }
+    println(f"outer() = {outer().await}");
+}
+
+/// Await suspension semantics
+async fn test_await_semantics() {
+    println("\n=== Await Semantics ===");
+
+    // Track execution order
+    let mut order = [];
+
+    async fn step(order: &mut List<Int>, n: Int) -> Int {
+        order.push(n);
+        n
+    }
+
+    // Sequential awaits maintain order
+    let a = step(&mut order, 1).await;
+    let b = step(&mut order, 2).await;
+    let c = step(&mut order, 3).await;
+    println(f"values: {a}, {b}, {c}");
+    println(f"order: {order}");
+
+    // Await in expression
+    order.clear();
+    let sum = step(&mut order, 10).await + step(&mut order, 20).await;
+    println(f"sum: {sum}");
+    println(f"expression order: {order}");
+
+    // Await with delay to verify suspension
+    async fn delayed(ms: Int, value: Int) -> Int {
+        sleep(Duration.from_millis(ms)).await;
+        value
+    }
+
+    let start = Instant.now();
+    let v1 = delayed(10, 1).await;
+    let v2 = delayed(10, 2).await;
+    let elapsed = start.elapsed().as_millis();
+    println(f"sequential delayed: {v1}, {v2} in ~{elapsed}ms");
+}
+
+/// Sequential async operations
+async fn test_sequential_async() {
+    println("\n=== Sequential Async ===");
+
+    // Chain of async calls
+    async fn step1() -> Int {
+        println("step1 start");
+        sleep(Duration.from_millis(5)).await;
+        println("step1 end");
+        1
+    }
+
+    async fn step2(prev: Int) -> Int {
+        println("step2 start");
+        sleep(Duration.from_millis(5)).await;
+        println("step2 end");
+        prev + 2
+    }
+
+    async fn step3(prev: Int) -> Int {
+        println("step3 start");
+        sleep(Duration.from_millis(5)).await;
+        println("step3 end");
+        prev + 3
+    }
+
+    let result = step3(step2(step1().await).await).await;
+    println(f"chain result: {result}");
+
+    // Async for loop
+    async fn fetch(id: Int) -> Text {
+        sleep(Duration.from_millis(5)).await;
+        f"data_{id}"
+    }
+
+    let mut results = [];
+    for id in 0..5 {
+        let data = fetch(id).await;
+        results.push(data);
+    }
+    println(f"sequential fetch: {results}");
+
+    // Async while loop
+    async fn check(n: Int) -> Bool {
+        sleep(Duration.from_millis(1)).await;
+        n < 5
+    }
+
+    let mut count = 0;
+    while check(count).await {
+        count = count + 1;
+    }
+    println(f"while count: {count}");
+}
+
+/// Concurrent execution with join
+async fn test_concurrent_join() {
+    println("\n=== Concurrent Join ===");
+
+    async fn task(id: Int, delay_ms: Int) -> Int {
+        println(f"task {id} starting");
+        sleep(Duration.from_millis(delay_ms)).await;
+        println(f"task {id} done");
+        id * 10
+    }
+
+    // Join two tasks
+    let (a, b) = join(
+        task(1, 20),
+        task(2, 10),
+    ).await;
+    println(f"join2: {a}, {b}");
+
+    // Join multiple tasks
+    let (r1, r2, r3, r4, r5) = join(
+        task(10, 10),
+        task(20, 20),
+        task(30, 15),
+        task(40, 5),
+        task(50, 25),
+    ).await;
+    println(f"join5: {r1}, {r2}, {r3}, {r4}, {r5}");
+
+    // Join with different return types
+    async fn text_task() -> Text { "hello".to_text() }
+    async fn int_task() -> Int { 42 }
+    async fn bool_task() -> Bool { true }
+
+    let (t, i, b) = join(text_task(), int_task(), bool_task()).await;
+    println(f"mixed join: {t}, {i}, {b}");
+
+    // Join_all for dynamic number of tasks
+    let tasks = (0..5).map(|i| task(i, 10 - i)).collect<List<_>>();
+    let results = join_all(tasks).await;
+    println(f"join_all: {results}");
+}
+
+/// Race/select between tasks
+async fn test_select_racing() {
+    println("\n=== Select/Racing ===");
+
+    async fn fast() -> Text {
+        sleep(Duration.from_millis(5)).await;
+        "fast".to_text()
+    }
+
+    async fn medium() -> Text {
+        sleep(Duration.from_millis(15)).await;
+        "medium".to_text()
+    }
+
+    async fn slow() -> Text {
+        sleep(Duration.from_millis(30)).await;
+        "slow".to_text()
+    }
+
+    // Select first to complete
+    let winner = select {
+        f = fast() => f"winner: {f}",
+        m = medium() => f"winner: {m}",
+        s = slow() => f"winner: {s}",
+    }.await;
+    println(f"select result: {winner}");
+
+    // Select with biased order
+    let biased = select {
+        biased;  // Check in order, pick first ready
+        a = fast() => "a",
+        b = fast() => "b",  // Same timing, biased picks first
+    }.await;
+    println(f"biased select: {biased}");
+
+    // Race helper function
+    async fn race2<T>(a: impl Future<Output=T>, b: impl Future<Output=T>) -> T {
+        select {
+            result = a => result,
+            result = b => result,
+        }
+    }
+
+    let raced = race2(fast(), medium()).await;
+    println(f"race2 result: {raced}");
+
+    // Select with else (immediate)
+    let immediate = select {
+        _ = sleep(Duration.from_millis(1000)) => "timeout",
+        else => "immediate",
+    }.await;
+    println(f"immediate select: {immediate}");
+}
+
+/// Async closures
+async fn test_async_closures() {
+    println("\n=== Async Closures ===");
+
+    // Basic async closure
+    let async_add = async |a, b| {
+        sleep(Duration.from_millis(1)).await;
+        a + b
+    };
+    let sum = async_add(5, 3).await;
+    println(f"async closure: {sum}");
+
+    // Async closure with capture
+    let multiplier = 10;
+    let async_multiply = async |x| {
+        sleep(Duration.from_millis(1)).await;
+        x * multiplier
+    };
+    println(f"captured multiply: {async_multiply(7).await}");
+
+    // Async closure in higher-order function
+    async fn apply_async<F, T>(f: F) -> T
+    where
+        F: async Fn() -> T
+    {
+        f().await
+    }
+
+    let result = apply_async(async || 42).await;
+    println(f"apply_async: {result}");
+
+    // Async map
+    let items = [1, 2, 3, 4, 5];
+    let mapped = items.map_async(async |x| {
+        sleep(Duration.from_millis(1)).await;
+        x * 2
+    }).await;
+    println(f"async map: {mapped}");
+
+    // Async filter
+    let filtered = items.filter_async(async |x| {
+        sleep(Duration.from_millis(1)).await;
+        x % 2 == 0
+    }).await;
+    println(f"async filter: {filtered}");
+}
+
+/// Async operations on collections
+async fn test_async_collections() {
+    println("\n=== Async Collections ===");
+
+    // Async iteration
+    let items = [1, 2, 3, 4, 5];
+    let mut results = [];
+    for item in items.iter() {
+        let processed = async {
+            sleep(Duration.from_millis(1)).await;
+            item * 10
+        }.await;
+        results.push(processed);
+    }
+    println(f"async iteration: {results}");
+
+    // Parallel processing with join_all
+    async fn process(n: Int) -> Int {
+        sleep(Duration.from_millis(5)).await;
+        n * n
+    }
+
+    let tasks: List<_> = items.iter().map(|&n| process(n)).collect();
+    let parallel = join_all(tasks).await;
+    println(f"parallel process: {parallel}");
+
+    // Buffered concurrency (process N at a time)
+    async fn buffered_process(items: &[Int], concurrency: Int) -> List<Int> {
+        let mut results = [];
+        for chunk in items.chunks(concurrency) {
+            let tasks: List<_> = chunk.iter().map(|&n| process(n)).collect();
+            let chunk_results = join_all(tasks).await;
+            results.extend(chunk_results);
+        }
+        results
+    }
+
+    let large_items: List<Int> = (0..10).collect();
+    let buffered = buffered_process(&large_items, 3).await;
+    println(f"buffered (3 at a time): {buffered}");
+
+    // Async reduce
+    async fn async_sum(items: &[Int]) -> Int {
+        let mut sum = 0;
+        for &item in items {
+            sum = async {
+                sleep(Duration.from_millis(1)).await;
+                sum + item
+            }.await;
+        }
+        sum
+    }
+    println(f"async sum: {async_sum(&items).await}");
+}
+
+/// Timeout behavior
+async fn test_timeout_behavior() {
+    println("\n=== Timeout Behavior ===");
+
+    async fn slow_task() -> Int {
+        sleep(Duration.from_millis(100)).await;
+        42
+    }
+
+    async fn fast_task() -> Int {
+        sleep(Duration.from_millis(5)).await;
+        42
+    }
+
+    // Timeout that succeeds
+    match timeout(Duration.from_millis(50), fast_task()).await {
+        Ok(value) => println(f"fast completed: {value}"),
+        Err(_) => println("fast timed out"),
+    }
+
+    // Timeout that fails
+    match timeout(Duration.from_millis(50), slow_task()).await {
+        Ok(value) => println(f"slow completed: {value}"),
+        Err(_) => println("slow timed out"),
+    }
+
+    // Timeout with default value
+    let result = timeout(Duration.from_millis(50), slow_task()).await
+        .unwrap_or(0);
+    println(f"timeout with default: {result}");
+
+    // Custom timeout wrapper
+    async fn with_timeout<T: Default>(
+        duration: Duration,
+        future: impl Future<Output=T>
+    ) -> T {
+        timeout(duration, future).await.unwrap_or_default()
+    }
+
+    let guarded = with_timeout(Duration.from_millis(10), slow_task()).await;
+    println(f"guarded result: {guarded}");
+}
+
+/// Channel-based communication
+async fn test_channel_communication() {
+    println("\n=== Channel Communication ===");
+
+    // Simple send/receive
+    let (tx, rx) = channel<Int>();
+
+    spawn(async move {
+        for i in 1..=5 {
+            tx.send(i).await;
+            sleep(Duration.from_millis(5)).await;
+        }
+        tx.close();
+    });
+
+    let mut received = [];
+    while let Some(value) = rx.recv().await {
+        received.push(value);
+    }
+    println(f"received: {received}");
+
+    // Multiple producers
+    let (tx, rx) = channel<Text>();
+    let tx1 = tx.clone();
+    let tx2 = tx.clone();
+
+    spawn(async move {
+        for i in 0..3 {
+            tx1.send(f"producer1: {i}").await;
+            sleep(Duration.from_millis(10)).await;
+        }
+    });
+
+    spawn(async move {
+        for i in 0..3 {
+            tx2.send(f"producer2: {i}").await;
+            sleep(Duration.from_millis(10)).await;
+        }
+    });
+
+    drop(tx);  // Close original sender
+
+    let mut messages = [];
+    while let Some(msg) = rx.recv().await {
+        messages.push(msg);
+    }
+    println(f"multi-producer messages: {messages.len()}");
+
+    // Buffered channel
+    let (tx, rx) = channel_bounded<Int>(3);
+
+    for i in 0..3 {
+        tx.send(i).await;  // Won't block, buffer has room
+    }
+    println("buffered: 3 items sent without blocking");
+
+    // Receive all
+    let values: List<Int> = rx.try_recv_all().collect();
+    println(f"buffered received: {values}");
+}
+
+/// Shared state with async Mutex
+async fn test_shared_state() {
+    println("\n=== Shared State ===");
+
+    // Async Mutex
+    let counter = Arc.new(AsyncMutex.new(0));
+
+    let mut handles = [];
+    for i in 0..5 {
+        let counter = counter.clone();
+        let handle = spawn(async move {
+            for _ in 0..10 {
+                let mut guard = counter.lock().await;
+                *guard = *guard + 1;
+                // Lock released when guard goes out of scope
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.await;
+    }
+
+    let final_value = *counter.lock().await;
+    println(f"counter final value: {final_value}");
+
+    // RwLock for readers/writers
+    let data = Arc.new(AsyncRwLock.new(List.from([1, 2, 3])));
+
+    let reader_data = data.clone();
+    let reader = spawn(async move {
+        let guard = reader_data.read().await;
+        println(f"reader sees: {*guard}");
+    });
+
+    let writer_data = data.clone();
+    let writer = spawn(async move {
+        let mut guard = writer_data.write().await;
+        guard.push(4);
+        println("writer added 4");
+    });
+
+    join(reader, writer).await;
+
+    let final_data = data.read().await;
+    println(f"final data: {*final_data}");
+}
+
+/// Error handling in async
+async fn test_error_handling_async() {
+    println("\n=== Error Handling Async ===");
+
+    // Async function returning Result
+    async fn fallible(succeed: Bool) -> Result<Int, Text> {
+        sleep(Duration.from_millis(5)).await;
+        if succeed {
+            Ok(42)
+        } else {
+            Err("async operation failed".to_text())
+        }
+    }
+
+    println(f"fallible(true) = {fallible(true).await}");
+    println(f"fallible(false) = {fallible(false).await}");
+
+    // ? operator in async
+    async fn chain_fallible() -> Result<Int, Text> {
+        let a = fallible(true).await?;
+        let b = fallible(true).await?;
+        Ok(a + b)
+    }
+    println(f"chain success = {chain_fallible().await}");
+
+    // try_join for concurrent fallible operations
+    let result = try_join(
+        fallible(true),
+        fallible(true),
+        fallible(true),
+    ).await;
+    println(f"try_join all success = {result}");
+
+    let result = try_join(
+        fallible(true),
+        fallible(false),  // This fails
+        fallible(true),
+    ).await;
+    println(f"try_join with failure = {result}");
+
+    // Recovery
+    async fn with_retry(attempts: Int) -> Result<Int, Text> {
+        for i in 0..attempts {
+            match fallible(i == attempts - 1).await {
+                Ok(v) => return Ok(v),
+                Err(_) => continue,
+            }
+        }
+        Err("all attempts failed".to_text())
+    }
+    println(f"retry(3) = {with_retry(3).await}");
+}
+
+/// Cancellation behavior
+async fn test_cancellation() {
+    println("\n=== Cancellation ===");
+
+    // Cancellable task
+    async fn long_running(cancel_token: CancellationToken) -> Result<Int, Text> {
+        for i in 0..10 {
+            if cancel_token.is_cancelled() {
+                return Err("cancelled".to_text());
+            }
+            sleep(Duration.from_millis(10)).await;
+        }
+        Ok(100)
+    }
+
+    // Complete without cancellation
+    let token = CancellationToken.new();
+    let result = long_running(token).await;
+    println(f"without cancel: {result}");
+
+    // Cancel mid-execution
+    let token = CancellationToken.new();
+    let token_clone = token.clone();
+
+    let task = spawn(async move {
+        long_running(token_clone).await
+    });
+
+    sleep(Duration.from_millis(30)).await;
+    token.cancel();
+
+    let result = task.await;
+    println(f"with cancel: {result}");
+
+    // AbortHandle for spawned tasks
+    let handle = spawn(async {
+        sleep(Duration.from_millis(1000)).await;
+        "completed"
+    });
+
+    sleep(Duration.from_millis(10)).await;
+    handle.abort();
+
+    match handle.await {
+        Ok(v) => println(f"completed: {v}"),
+        Err(_) => println("task was aborted"),
+    }
+}

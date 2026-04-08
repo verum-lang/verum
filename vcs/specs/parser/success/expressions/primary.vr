@@ -1,0 +1,48 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, primary
+// @description: Test primary expression parsing
+
+fn test_primary_expressions() {
+    // Literals
+    let a = 42;
+    let b = 3.14;
+    let c = "hello";
+    // Note: 'x' is parsed as lifetime, use escape sequences for char literals
+    let d = '\n';
+    let e = true;
+
+    // Path expressions
+    let f = foo;
+    let g = module_name.function;
+    let h = std.collections.List;
+    let i = self.field;
+    let j = super.parent;
+
+    // Parenthesized
+    let l = (42);
+    let m = (1 + 2);
+    let n = ((a + b) * c);
+
+    // Tuple expressions
+    let o = (1, 2);
+    let p = (a, b, c);
+    let q = (1, "two", 3.0, true);
+
+    // Array expressions
+    let r = [];
+    let s = [1, 2, 3];
+    let t = [a, b, c];
+    let u = [0; 10];
+    let v = [default(); n];
+
+    // Map expressions (key: value with colon)
+    let w = {"key": "value"};
+    let x = {"name": name, "age": age};
+
+    // Record expressions (field: value syntax)
+    let ab = Point { x: 1.0, y: 2.0 };
+    let ac = Person { name: "Alice", age: 30 };
+    let ad = Point { x, y };
+    let ae = Point { x: 1.0, ..other };
+}

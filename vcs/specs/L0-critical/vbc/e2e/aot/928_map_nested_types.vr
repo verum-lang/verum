@@ -1,0 +1,39 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @expected-exit: 0
+
+// Test Map with nested value types (List<Int>)
+fn main() -> Int {
+    let mut m = Map.new();
+    m.insert("nums", [1, 2, 3]);
+    m.insert("more", [10, 20, 30]);
+
+    // Map.get should return List<Int>, and .len() should work
+    let nums = m.get("nums");
+    let n = nums.len();
+    if (n != 3) {
+        print(f"FAIL nums.len: {n}");
+        return 1;
+    }
+
+    let more = m.get("more");
+    let n2 = more.len();
+    if (n2 != 3) {
+        print(f"FAIL more.len: {n2}");
+        return 1;
+    }
+
+    // Verify values
+    if (nums[0] != 1) {
+        print(f"FAIL nums[0]: {nums[0]}");
+        return 1;
+    }
+    if (more[1] != 20) {
+        print(f"FAIL more[1]: {more[1]}");
+        return 1;
+    }
+
+    print("map_nested: PASS");
+    0
+}

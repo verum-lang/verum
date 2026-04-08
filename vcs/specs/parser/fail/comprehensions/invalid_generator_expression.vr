@@ -1,0 +1,141 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @category: comprehensions
+// @tags: parser, comprehensions, generator, errors
+// @description: Invalid generator expression syntax that should fail to parse
+
+// ============================================================================
+// MISSING REQUIRED ELEMENTS
+// ============================================================================
+
+fn test_gen_missing_opening_brace() {
+    // ERROR: Missing opening brace after 'gen'
+    let bad = gen x for x in items};
+}
+
+fn test_gen_missing_closing_brace() {
+    // ERROR: Missing closing brace
+    let bad = gen{x for x in items;
+}
+
+fn test_gen_missing_for_keyword() {
+    // ERROR: Missing 'for' keyword
+    let bad = gen{x x in items};
+}
+
+fn test_gen_missing_in_keyword() {
+    // ERROR: Missing 'in' keyword
+    let bad = gen{x for x items};
+}
+
+fn test_gen_missing_expression() {
+    // ERROR: Missing element expression
+    let bad = gen{for x in items};
+}
+
+fn test_gen_missing_iterator() {
+    // ERROR: Missing iterator expression
+    let bad = gen{x for x in};
+}
+
+fn test_gen_missing_pattern() {
+    // ERROR: Missing pattern after 'for'
+    let bad = gen{x for in items};
+}
+
+// ============================================================================
+// INVALID CLAUSE SYNTAX
+// ============================================================================
+
+fn test_gen_invalid_if_clause() {
+    // ERROR: 'if' without condition
+    let bad = gen{x for x in items if};
+}
+
+fn test_gen_invalid_let_clause_no_equals() {
+    // ERROR: 'let' without '='
+    let bad = gen{y for x in items let y x * 2};
+}
+
+fn test_gen_invalid_let_clause_no_value() {
+    // ERROR: 'let' without value
+    let bad = gen{y for x in items let y =};
+}
+
+fn test_gen_invalid_let_clause_no_pattern() {
+    // ERROR: 'let' without pattern
+    let bad = gen{y for x in items let = x * 2};
+}
+
+fn test_gen_invalid_nested_for() {
+    // ERROR: Nested 'for' without 'in'
+    let bad = gen{x for x in xs for y ys};
+}
+
+// ============================================================================
+// SYNTAX CONFUSION
+// ============================================================================
+
+fn test_gen_using_where_instead_of_if() {
+    // ERROR: Using 'where' instead of 'if'
+    let bad = gen{x for x in items where x > 0};
+}
+
+fn test_gen_using_colon_like_map() {
+    // ERROR: Using key:value syntax (that's map syntax)
+    let bad = gen{k: v for (k, v) in pairs};
+}
+
+fn test_gen_using_yield() {
+    // ERROR: Using 'yield' instead of expression
+    let bad = gen{yield x for x in items};
+}
+
+// ============================================================================
+// STRUCTURAL ERRORS
+// ============================================================================
+
+fn test_gen_extra_closing_brace() {
+    // ERROR: Extra closing brace
+    let bad = gen{x for x in items}};
+}
+
+fn test_gen_mismatched_braces() {
+    // ERROR: Using bracket instead of brace
+    let bad = gen{x for x in items];
+}
+
+fn test_gen_using_brackets() {
+    // ERROR: Using brackets instead of braces
+    let bad = gen[x for x in items];
+}
+
+fn test_gen_using_parens() {
+    // ERROR: Using parentheses instead of braces (Python-style)
+    let bad = gen(x for x in items);
+}
+
+fn test_gen_empty_braces() {
+    // ERROR: Empty generator expression
+    let bad = gen{};
+}
+
+// ============================================================================
+// INCORRECT KEYWORD USAGE
+// ============================================================================
+
+fn test_gen_typo_keyword() {
+    // ERROR: Typo in 'gen' keyword
+    let bad = gne{x for x in items};
+}
+
+fn test_gen_uppercase_keyword() {
+    // ERROR: Uppercase 'GEN' is not the keyword
+    let bad = GEN{x for x in items};
+}
+
+fn test_gen_generator_keyword() {
+    // ERROR: 'generator' is not the keyword, 'gen' is
+    let bad = generator{x for x in items};
+}

@@ -1,0 +1,185 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: data-structures, tree, stack, queue
+// @description: Test complex data structures
+
+// Stack using list (uses implement block)
+type Stack is { data: List<Int>, size: Int };
+
+implement Stack {
+    fn new() -> Stack {
+        Stack { data: List.new(), size: 0 }
+    }
+
+    fn push(&mut self, val: Int) {
+        self.data.push(val);
+        self.size = self.size + 1;
+    }
+
+    fn pop(&mut self) -> Int {
+        if self.size == 0 { return -1; }
+        self.size = self.size - 1;
+        self.data[self.size]
+    }
+
+    fn peek(&self) -> Int {
+        if self.size == 0 { return -1; }
+        self.data[self.size - 1]
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.size == 0
+    }
+}
+
+fn test_stack_basic() -> Int {
+    let mut stack = Stack.new();
+    stack.push(10);
+    stack.push(20);
+    stack.push(30);
+
+    if stack.peek() != 30 {
+        print(f"FAIL stack: peek={stack.peek()}, expected 30");
+        return 1;
+    }
+
+    let p1 = stack.pop();
+    if p1 != 30 {
+        print(f"FAIL stack: pop1={p1}, expected 30");
+        return 1;
+    }
+
+    let p2 = stack.pop();
+    if p2 != 20 {
+        print(f"FAIL stack: pop2={p2}, expected 20");
+        return 1;
+    }
+
+    if stack.is_empty() {
+        print("FAIL stack: should not be empty");
+        return 1;
+    }
+
+    let p3 = stack.pop();
+    if p3 != 10 {
+        print(f"FAIL stack: pop3={p3}, expected 10");
+        return 1;
+    }
+
+    if !stack.is_empty() {
+        print("FAIL stack: should be empty");
+        return 1;
+    }
+
+    print("  stack_basic: OK");
+    0
+}
+
+fn test_queue_from_stacks() -> Int {
+    let mut in_stack = Stack.new();
+    let mut out_stack = Stack.new();
+
+    in_stack.push(10);
+    in_stack.push(20);
+    in_stack.push(30);
+
+    while !in_stack.is_empty() {
+        let val = in_stack.pop();
+        out_stack.push(val);
+    }
+
+    let first = out_stack.pop();
+    let second = out_stack.pop();
+
+    if first != 10 {
+        print(f"FAIL queue: first={first}, expected 10");
+        return 1;
+    }
+    if second != 20 {
+        print(f"FAIL queue: second={second}, expected 20");
+        return 1;
+    }
+
+    let third = out_stack.pop();
+    if third != 30 {
+        print(f"FAIL queue: third={third}, expected 30");
+        return 1;
+    }
+
+    print("  queue_from_stacks: OK");
+    0
+}
+
+// Simple list-based sorting
+fn insertion_sort(items: List<Int>) -> List<Int> {
+    let mut sorted = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        let val = items[i];
+        // Find insertion position
+        let mut j = 0;
+        while j < sorted.len() {
+            if val < sorted[j] {
+                break;
+            }
+            j = j + 1;
+        }
+        // Insert at position j by rebuilding
+        let mut new_list = List.new();
+        let mut k = 0;
+        while k < sorted.len() + 1 {
+            if k == j {
+                new_list.push(val);
+            }
+            if k < sorted.len() {
+                new_list.push(sorted[k]);
+            }
+            k = k + 1;
+        }
+        sorted = new_list;
+        i = i + 1;
+    }
+    sorted
+}
+
+fn test_insertion_sort() -> Int {
+    let nums = [5, 3, 8, 1, 9, 2, 7];
+    let sorted = insertion_sort(nums);
+
+    if sorted.len() != 7 {
+        print(f"FAIL sort: len={sorted.len()}, expected 7");
+        return 1;
+    }
+    if sorted[0] != 1 || sorted[6] != 9 {
+        print(f"FAIL sort: [{sorted[0]}..{sorted[6]}], expected [1..9]");
+        return 1;
+    }
+    // Verify sorted order
+    let mut i = 1;
+    while i < sorted.len() {
+        if sorted[i] < sorted[i - 1] {
+            print(f"FAIL sort: not sorted at {i}");
+            return 1;
+        }
+        i = i + 1;
+    }
+
+    print("  insertion_sort: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Data Structure Tests:");
+    let mut failures = 0;
+    failures = failures + test_stack_basic();
+    failures = failures + test_queue_from_stacks();
+    failures = failures + test_insertion_sort();
+
+    if failures == 0 {
+        print("All data structure tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

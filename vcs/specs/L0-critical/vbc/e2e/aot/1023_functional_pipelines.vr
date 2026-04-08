@@ -1,0 +1,113 @@
+// @test: run
+// Functional programming — higher-order functions, closures
+
+fn square(x: Int) -> Int { x * x }
+fn is_even(x: Int) -> Bool { x % 2 == 0 }
+fn add(a: Int, b: Int) -> Int { a + b }
+
+fn map_list(xs: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let result = List.new();
+    let mut i = 0;
+    while i < xs.len() {
+        result.push(f(xs[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(xs: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let result = List.new();
+    let mut i = 0;
+    while i < xs.len() {
+        if (pred(xs[i])) {
+            result.push(xs[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn reduce_list(xs: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < xs.len() {
+        acc = f(acc, xs[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn sum(xs: List<Int>) -> Int {
+    reduce_list(xs, 0, add)
+}
+
+fn main() -> Int {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Test 1: map — square each element
+    let squared = map_list(data, square);
+    if (squared.len() != 10) {
+        print(f"FAIL test1: len={squared.len()}");
+        return 1;
+    }
+    if (squared[0] != 1 || squared[1] != 4 || squared[9] != 100) {
+        print("FAIL test1: values wrong");
+        return 1;
+    }
+    print("test1 map: OK");
+
+    // Test 2: filter — even numbers only
+    let evens = filter_list(data, is_even);
+    if (evens.len() != 5) {
+        print(f"FAIL test2: len={evens.len()}");
+        return 1;
+    }
+    if (evens[0] != 2 || evens[4] != 10) {
+        print("FAIL test2: values wrong");
+        return 1;
+    }
+    print("test2 filter: OK");
+
+    // Test 3: reduce — sum
+    let total = sum(data);
+    if (total != 55) {
+        print(f"FAIL test3: sum={total}");
+        return 1;
+    }
+    print("test3 reduce: OK");
+
+    // Test 4: pipeline — sum of squares of even numbers
+    let result = sum(map_list(filter_list(data, is_even), square));
+    // evens: [2,4,6,8,10], squares: [4,16,36,64,100], sum: 220
+    if (result != 220) {
+        print(f"FAIL test4: pipeline result={result}");
+        return 1;
+    }
+    print("test4 pipeline: OK");
+
+    // Test 5: empty list handling
+    let empty = List.new();
+    let empty_mapped = map_list(empty, square);
+    let empty_sum = sum(empty);
+    if (empty_mapped.len() != 0 || empty_sum != 0) {
+        print("FAIL test5: empty list");
+        return 1;
+    }
+    print("test5 empty: OK");
+
+    // Test 6: Compose operations
+    fn double(x: Int) -> Int { x * 2 }
+    fn add_one(x: Int) -> Int { x + 1 }
+    // double then add_one
+    let xs = [1, 2, 3];
+    let result2 = map_list(map_list(xs, double), add_one);
+    // [1,2,3] -> [2,4,6] -> [3,5,7]
+    if (result2[0] != 3 || result2[1] != 5 || result2[2] != 7) {
+        print("FAIL test6: compose");
+        return 1;
+    }
+    print("test6 compose: OK");
+
+    print("1023_functional_pipelines: PASS");
+    0
+}

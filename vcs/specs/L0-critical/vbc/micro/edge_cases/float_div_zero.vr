@@ -1,0 +1,25 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, division, float, infinity
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    let x: Float = 1.0;
+    let y: Float = 0.0;
+    let z = x / y;
+    // z should be positive infinity
+    assert(z > 1e308);  // Very large number (infinity)
+
+    // Negative divided by zero should be negative infinity
+    let neg_x: Float = -1.0;
+    let neg_z = neg_x / y;
+    assert(neg_z < -1e308);  // Very large negative number (negative infinity)
+
+    // Zero divided by zero should be NaN
+    let zero: Float = 0.0;
+    let nan_result = zero / y;
+    // NaN is not equal to itself
+    assert(!(nan_result == nan_result));
+}

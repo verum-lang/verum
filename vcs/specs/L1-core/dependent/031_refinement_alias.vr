@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, refinement, type-alias
+
+/// Refinement type aliases -- building complex refinement types
+/// from simpler ones through type aliasing and composition.
+
+// Base refined types
+type Positive is Int{> 0};
+type Natural is Int{>= 0};
+type NonZero is Int{!= 0};
+type UnitFloat is Float{>= 0.0, <= 1.0};
+
+// Aliases that narrow further
+type SmallNat is Natural{<= 255};
+type TinyPositive is Positive{<= 10};
+
+// Domain-specific aliases
+type Age is Natural{<= 150};
+type Year is Positive{>= 1, <= 9999};
+type Month is Positive{>= 1, <= 12};
+type Day is Positive{>= 1, <= 31};
+
+type Port is Int{>= 1, <= 65535};
+type EphemeralPort is Port{>= 49152};
+type WellKnownPort is Port{<= 1023};
+
+// Alias for common patterns
+type Rgb is (Byte, Byte, Byte);
+type Byte is Int{>= 0, < 256};
+
+type Rgba is (Byte, Byte, Byte, UnitFloat);
+
+// Parameterized alias with refinement
+type BoundedInt<Lo: meta Int, Hi: meta Int> is Int{>= Lo, <= Hi};
+type Percentage is BoundedInt<0, 100>;
+type Celsius is BoundedInt<-273, 1000>;
+
+// Functions using aliases
+fn make_date(y: Year, m: Month, d: Day) -> Text {
+    f"{y}-{m}-{d}"
+}
+
+fn rgb_to_hex(color: Rgb) -> Text {
+    let (r, g, b) = color;
+    f"#{r:02x}{g:02x}{b:02x}"
+}
+
+fn blend_alpha(a: Rgba, b: Rgba, t: UnitFloat) -> Rgba {
+    let (ar, ag, ab, aa) = a;
+    let (br, bg, bb, ba) = b;
+    (
+        ((ar as Float) * (1.0 - t) + (br as Float) * t) as Byte,
+        ((ag as Float) * (1.0 - t) + (bg as Float) * t) as Byte,
+        ((ab as Float) * (1.0 - t) + (bb as Float) * t) as Byte,
+        aa * (1.0 - t) + ba * t,
+    )
+}
+
+fn is_system_port(p: Port) -> Bool {
+    p <= 1023
+}
+
+fn main() {
+    let date = make_date(2026, 3, 20);
+    assert(date == "2026-3-20");
+
+    let red: Rgb = (255, 0, 0);
+    let hex = rgb_to_hex(red);
+
+    let port: Port = 8080;
+    assert(!is_system_port(port));
+
+    let ssh: WellKnownPort = 22;
+    assert(ssh <= 1023);
+
+    let age: Age = 25;
+    assert(age >= 0 && age <= 150);
+
+    let pct: Percentage = 75;
+    assert(pct >= 0 && pct <= 100);
+}

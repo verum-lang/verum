@@ -1,0 +1,234 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, state, monad, functional, records
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT stateful computation simulation with explicit state passing and transformation chaining
+
+// State carries a value, a counter tracking operations, and a history accumulator
+type State is { val: Int, counter: Int, history: Int };
+
+fn state_new(v: Int) -> State {
+    State { val: v, counter: 0, history: 0 }
+}
+
+// Increment counter by 1
+fn inc_counter(s: State) -> State {
+    State { val: s.val, counter: s.counter + 1, history: s.history + s.val }
+}
+
+// Add n to the value
+fn add_to_val(s: State, n: Int) -> State {
+    let s2 = inc_counter(s);
+    State { val: s2.val + n, counter: s2.counter, history: s2.history }
+}
+
+// Multiply the value by n
+fn multiply_val(s: State, n: Int) -> State {
+    let s2 = inc_counter(s);
+    State { val: s2.val * n, counter: s2.counter, history: s2.history }
+}
+
+// Reset value to 0
+fn reset_val(s: State) -> State {
+    let s2 = inc_counter(s);
+    State { val: 0, counter: s2.counter, history: s2.history }
+}
+
+// Set value to a specific number
+fn set_val(s: State, v: Int) -> State {
+    let s2 = inc_counter(s);
+    State { val: v, counter: s2.counter, history: s2.history }
+}
+
+// Negate the value
+fn negate_val(s: State) -> State {
+    let s2 = inc_counter(s);
+    State { val: 0 - s2.val, counter: s2.counter, history: s2.history }
+}
+
+// Apply a function to the value
+fn map_val(s: State, f: fn(Int) -> Int) -> State {
+    let s2 = inc_counter(s);
+    State { val: f(s2.val), counter: s2.counter, history: s2.history }
+}
+
+// Conditionally apply one of two functions
+fn branch_val(s: State, cond: fn(Int) -> Bool, on_true: fn(Int) -> Int, on_false: fn(Int) -> Int) -> State {
+    let s2 = inc_counter(s);
+    if cond(s2.val) {
+        State { val: on_true(s2.val), counter: s2.counter, history: s2.history }
+    } else {
+        State { val: on_false(s2.val), counter: s2.counter, history: s2.history }
+    }
+}
+
+// Repeat a state transformation n times
+fn repeat_transform(s: State, n: Int, f: fn(State) -> State) -> State {
+    let mut current = s;
+    let mut i = 0;
+    while i < n {
+        current = f(current);
+        i = i + 1;
+    }
+    current
+}
+
+// Absolute value of state val
+fn abs_val(s: State) -> State {
+    if s.val < 0 { negate_val(s) }
+    else { inc_counter(s) }
+}
+
+// Clamp value between lo and hi
+fn clamp_val(s: State, lo: Int, hi: Int) -> State {
+    let s2 = inc_counter(s);
+    let clamped = if s2.val < lo { lo }
+                  else if s2.val > hi { hi }
+                  else { s2.val };
+    State { val: clamped, counter: s2.counter, history: s2.history }
+}
+
+fn main() -> Int {
+    // === Basic state creation ===
+    let s0 = state_new(10);
+    assert_eq(s0.val, 10);
+    assert_eq(s0.counter, 0);
+    assert_eq(s0.history, 0);
+
+    // === Single operations ===
+    let s1 = add_to_val(s0, 5);
+    assert_eq(s1.val, 15);
+    assert_eq(s1.counter, 1);
+    assert_eq(s1.history, 10);  // recorded old val=10
+
+    let s2 = multiply_val(s1, 3);
+    assert_eq(s2.val, 45);
+    assert_eq(s2.counter, 2);
+    assert_eq(s2.history, 25);  // 10 + 15
+
+    let s3 = add_to_val(s2, 5);
+    assert_eq(s3.val, 50);
+    assert_eq(s3.counter, 3);
+    assert_eq(s3.history, 70);  // 25 + 45
+
+    // === Reset ===
+    let s4 = reset_val(s3);
+    assert_eq(s4.val, 0);
+    assert_eq(s4.counter, 4);
+    assert_eq(s4.history, 120);  // 70 + 50
+
+    // === Negate ===
+    let sn = negate_val(state_new(42));
+    assert_eq(sn.val, 0 - 42);
+    assert_eq(sn.counter, 1);
+
+    let sn2 = negate_val(sn);
+    assert_eq(sn2.val, 42);
+    assert_eq(sn2.counter, 2);
+
+    // === Set ===
+    let ss = set_val(state_new(0), 100);
+    assert_eq(ss.val, 100);
+    assert_eq(ss.counter, 1);
+
+    // === Map val ===
+    let sm = map_val(state_new(7), |x| x * x);
+    assert_eq(sm.val, 49);
+    assert_eq(sm.counter, 1);
+
+    let sm2 = map_val(sm, |x| x + 1);
+    assert_eq(sm2.val, 50);
+    assert_eq(sm2.counter, 2);
+
+    // === Branch ===
+    let sb1 = branch_val(state_new(10), |x| x > 5, |x| x * 2, |x| x + 100);
+    assert_eq(sb1.val, 20);  // 10 > 5, so double
+
+    let sb2 = branch_val(state_new(3), |x| x > 5, |x| x * 2, |x| x + 100);
+    assert_eq(sb2.val, 103);  // 3 <= 5, so add 100
+
+    // === Chained pipeline ===
+    // Start with 1, add 9 -> 10, multiply by 5 -> 50, add 25 -> 75, multiply by 2 -> 150
+    let chain = multiply_val(add_to_val(multiply_val(add_to_val(state_new(1), 9), 5), 25), 2);
+    assert_eq(chain.val, 150);
+    assert_eq(chain.counter, 4);
+    // history: 0 + 1 + 10 + 50 + 75 = 136
+    assert_eq(chain.history, 136);
+
+    // === Repeat transform ===
+    // Start at 1, double 5 times -> 32
+    let r1 = repeat_transform(state_new(1), 5, |s| multiply_val(s, 2));
+    assert_eq(r1.val, 32);
+    assert_eq(r1.counter, 5);
+
+    // Start at 0, add 3 each time for 10 times -> 30
+    let r2 = repeat_transform(state_new(0), 10, |s| add_to_val(s, 3));
+    assert_eq(r2.val, 30);
+    assert_eq(r2.counter, 10);
+
+    // === Repeat with conditional ===
+    // Start at 100, subtract 7 each time for 8 steps -> 100 - 56 = 44
+    let r3 = repeat_transform(state_new(100), 8, |s| add_to_val(s, 0 - 7));
+    assert_eq(r3.val, 44);
+
+    // === Absolute value ===
+    let sa1 = abs_val(state_new(0 - 15));
+    assert_eq(sa1.val, 15);
+
+    let sa2 = abs_val(state_new(20));
+    assert_eq(sa2.val, 20);
+
+    // === Clamp ===
+    let sc1 = clamp_val(state_new(50), 0, 100);
+    assert_eq(sc1.val, 50);  // within range
+
+    let sc2 = clamp_val(state_new(150), 0, 100);
+    assert_eq(sc2.val, 100);  // clamped to hi
+
+    let sc3 = clamp_val(state_new(0 - 10), 0, 100);
+    assert_eq(sc3.val, 0);  // clamped to lo
+
+    // === Complex scenario: simulate simple counter with overflow detection ===
+    // Count from 0 by 17, clamping at 100, for 10 steps
+    let mut cs = state_new(0);
+    let mut ci = 0;
+    while ci < 10 {
+        cs = add_to_val(cs, 17);
+        cs = clamp_val(cs, 0, 100);
+        ci = ci + 1;
+    }
+    // Steps: 17, 34, 51, 68, 85, 100(clamped from 102), 100, 100, 100, 100
+    assert_eq(cs.val, 100);
+    assert_eq(cs.counter, 20);  // 10 adds + 10 clamps
+
+    // === History tracking: compute Fibonacci-like via state ===
+    // Use val as current fib, history accumulates sum of all intermediate vals
+    let mut fs = state_new(1);
+    fs = set_val(fs, 1);  // f(1)=1
+    let mut prev = 1;
+    let mut fi = 0;
+    while fi < 8 {
+        let old_val = fs.val;
+        fs = add_to_val(fs, prev);
+        prev = old_val;
+        fi = fi + 1;
+    }
+    // Fibonacci sequence: 1, 1, 2, 3, 5, 8, 13, 21, 34, 55
+    // After 8 adds from initial (1,1): val should be 55
+    assert_eq(fs.val, 55);
+
+    // === Verify state is pure (no hidden mutation) ===
+    let pure_s = state_new(5);
+    let branch_a = add_to_val(pure_s, 10);
+    let branch_b = multiply_val(pure_s, 10);
+    // Both branches start from same state
+    assert_eq(branch_a.val, 15);
+    assert_eq(branch_b.val, 50);
+    // Original unchanged
+    assert_eq(pure_s.val, 5);
+    assert_eq(pure_s.counter, 0);
+
+    0
+}

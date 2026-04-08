@@ -1,0 +1,75 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, patterns
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT variant types, pattern matching, and sum type operations
+
+type Shape is Circle(Int) | Rectangle(Int, Int) | Point;
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,  // approximate pi as 3
+        Rectangle(w, h) => w * h,
+        Point => 0,
+    }
+}
+
+fn is_circle(s: Shape) -> Bool {
+    s is Circle
+}
+
+fn is_point(s: Shape) -> Bool {
+    s is Point
+}
+
+type Maybe is Nothing | Just(Int);
+
+fn unwrap_or(m: Maybe, default: Int) -> Int {
+    match m {
+        Just(v) => v,
+        Nothing => default,
+    }
+}
+
+fn map_maybe(m: Maybe, f: fn(Int) -> Int) -> Maybe {
+    match m {
+        Just(v) => Just(f(v)),
+        Nothing => Nothing,
+    }
+}
+
+fn main() -> Int {
+    // Basic variant construction and matching
+    let c = Circle(5);
+    let r = Rectangle(3, 4);
+    let p = Point;
+
+    assert_eq(area(c), 75);   // 5*5*3
+    assert_eq(area(r), 12);   // 3*4
+    assert_eq(area(p), 0);
+
+    // is-variant checks
+    assert(is_circle(c));
+    assert(!is_circle(r));
+    assert(!is_circle(p));
+    assert(is_point(p));
+    assert(!is_point(c));
+
+    // Maybe type
+    let some_val = Just(42);
+    let no_val = Nothing;
+
+    assert_eq(unwrap_or(some_val, 0), 42);
+    assert_eq(unwrap_or(no_val, -1), -1);
+
+    // Map over Maybe
+    let doubled = map_maybe(some_val, |x| x * 2);
+    assert_eq(unwrap_or(doubled, 0), 84);
+
+    let nothing_doubled = map_maybe(no_val, |x| x * 2);
+    assert_eq(unwrap_or(nothing_doubled, -1), -1);
+
+    0
+}

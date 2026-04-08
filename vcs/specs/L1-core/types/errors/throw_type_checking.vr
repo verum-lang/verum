@@ -1,0 +1,299 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, throw, throws-clause, error-type-checking
+// @description: Test throw expression type checking and throws clause validation errors
+
+/// Tests for throw expression type checking failures.
+/// throw expression must match the function's throws clause.
+/// throw in non-throws function is an error.
+/// Spec: grammar/verum.ebnf Section 2.4 - throws_clause
+
+// === Type Definitions ===
+
+type ParseError is
+    | SyntaxError { line: Int, message: Text }
+    | UnexpectedToken(Text)
+    | UnexpectedEof;
+
+type ValidationError is
+    | InvalidFormat(Text)
+    | OutOfRange { min: Int, max: Int, actual: Int }
+    | MissingField(Text);
+
+type IoError is
+    | FileNotFound(Text)
+    | PermissionDenied(Text)
+    | NetworkError(Text);
+
+type DatabaseError is
+    | ConnectionFailed(Text)
+    | QueryError(Text);
+
+// === throw in non-throws function is error ===
+
+// @expected-error: E360 "throw in non-throwing function"
+/// ERROR: Cannot throw in function without throws clause
+fn no_throws_clause(input: &Text) -> Int {
+    if input.is_empty() {
+        throw ParseError.UnexpectedEof;  // ERROR: Function doesn't have throws clause
+    }
+    42
+}
+
+// @expected-error: E360 "throw in non-throwing function"
+/// ERROR: Multiple throws in non-throwing function
+fn multiple_throws_no_clause(a: Int, b: Int) -> Int {
+    if a < 0 {
+        throw ValidationError.OutOfRange { min: 0, max: 100, actual: a };
+    }
+    if b < 0 {
+        throw ValidationError.OutOfRange { min: 0, max: 100, actual: b };
+    }
+    a + b
+}
+
+// === throw must match throws clause ===
+
+// @expected-error: E361 "throw type mismatch"
+/// ERROR: Throwing wrong error type
+fn wrong_throw_type(input: &Text) throws(ParseError) -> Int {
+    if input.is_empty() {
+        throw ValidationError.MissingField("input");  // ERROR: Throws ValidationError, not ParseError
+    }
+    42
+}
+
+// @expected-error: E361 "throw type mismatch"
+/// ERROR: Throwing type not in union
+fn throw_not_in_union(input: &Text) throws(ParseError | IoError) -> Int {
+    throw ValidationError.InvalidFormat("bad");  // ERROR: ValidationError not in throws clause
+}
+
+// @expected-error: E362 "throw variant mismatch"
+/// ERROR: Throwing wrong variant of correct type
+fn wrong_variant_type(input: &Text) throws(ParseError) -> Int {
+    throw DatabaseError.QueryError("failed");  // ERROR: DatabaseError not ParseError
+}
+
+// === throw expression type is Never ===
+
+// @expected-error: E363 "unreachable code after throw"
+/// WARNING: Code after throw is unreachable
+fn code_after_throw(input: &Text) throws(ParseError) -> Int {
+    throw ParseError.UnexpectedEof;
+    42  // WARNING: Unreachable code
+}
+
+// @expected-error: E364 "throw in expression position requires Never-compatible context"
+/// ERROR: Using throw result as value
+fn throw_as_value(input: &Text) throws(ParseError) -> Int {
+    let x: Int = throw ParseError.UnexpectedEof;  // ERROR: Cannot assign Never to Int
+    x
+}
+
+// === Propagating errors from inner functions ===
+
+fn inner_throws_parse(input: &Text) throws(ParseError) -> Int {
+    if input.is_empty() {
+        throw ParseError.UnexpectedEof;
+    }
+    42
+}
+
+fn inner_throws_validation(value: Int) throws(ValidationError) -> Int {
+    if value < 0 {
+        throw ValidationError.OutOfRange { min: 0, max: 100, actual: value };
+    }
+    value
+}
+
+// @expected-error: E365 "called function throws type not in caller's throws"
+/// ERROR: Calling throws function without handling or declaring
+fn missing_throws_propagation(input: &Text) -> Int {
+    inner_throws_parse(input)?  // ERROR: Function doesn't declare throws(ParseError)
+}
+
+// @expected-error: E365 "called function throws type not in caller's throws"
+/// ERROR: Throws clause doesn't cover called function's throws
+fn incomplete_throws_clause(input: &Text) throws(IoError) -> Int {
+    inner_throws_parse(input)?  // ERROR: ParseError not in throws(IoError)
+}
+
+// @expected-error: E366 "union throws clause incomplete"
+/// ERROR: Union throws doesn't include all propagated errors
+fn partial_union_throws(input: &Text, value: Int) throws(ParseError) -> Int {
+    let parsed = inner_throws_parse(input)?;
+    let validated = inner_throws_validation(value)?;  // ERROR: ValidationError not declared
+    parsed + validated
+}
+
+// === throw with wrong expression type ===
+
+// @expected-error: E367 "throw requires error expression"
+/// ERROR: Throwing non-error value
+fn throw_non_error(input: &Text) throws(ParseError) -> Int {
+    throw 42;  // ERROR: 42 is Int, not ParseError
+}
+
+// @expected-error: E367 "throw requires error expression"
+/// ERROR: Throwing wrong type entirely
+fn throw_string(input: &Text) throws(ParseError) -> Int {
+    throw "error occurred";  // ERROR: Text is not ParseError
+}
+
+// === throws in closures ===
+
+// @expected-error: E368 "closure throws not declared"
+/// ERROR: Closure throws but type doesn't include throws
+fn closure_throws_not_declared() throws(ParseError) -> Int {
+    let f: fn(&Text) -> Int = |s| {
+        throw ParseError.UnexpectedEof;  // ERROR: Closure type doesn't have throws
+        42
+    };
+    f("")
+}
+
+// @expected-error: E369 "closure throws type mismatch"
+/// ERROR: Closure throws wrong type
+fn closure_throws_wrong_type() throws(ParseError) -> Int {
+    let f: fn(&Text) throws(ValidationError) -> Int = |s| {
+        throw ParseError.UnexpectedEof;  // ERROR: Throws ParseError, declared ValidationError
+        42
+    };
+    f("")?
+}
+
+// === throws with generic error types ===
+
+// @expected-error: E370 "generic throws constraint not satisfied"
+/// ERROR: Generic error type doesn't match constraint
+fn generic_throws_mismatch<E: Error>(input: &Text) throws(E) -> Int {
+    throw ParseError.UnexpectedEof;  // ERROR: ParseError may not satisfy E
+}
+
+// === throws in async functions ===
+
+// @expected-error: E360 "throw in non-throwing function"
+/// ERROR: throw in async without throws clause
+async fn async_no_throws(input: &Text) -> Int {
+    if input.is_empty() {
+        throw ParseError.UnexpectedEof;  // ERROR: No throws clause
+    }
+    42
+}
+
+// @expected-error: E361 "throw type mismatch"
+/// ERROR: throw wrong type in async
+async fn async_wrong_throw(input: &Text) throws(ParseError) -> Int {
+    throw IoError.NetworkError("timeout");  // ERROR: IoError not ParseError
+}
+
+// === throws clause interaction with try/recover ===
+
+// @expected-error: E371 "unhandled error type in recover"
+/// ERROR: recover doesn't cover all thrown types
+fn incomplete_recover(input: &Text) -> Int {
+    try {
+        inner_throws_parse(input)?;
+        inner_throws_validation(42)?;
+        0
+    } recover {
+        ParseError.UnexpectedEof => -1,
+        // ERROR: Missing ValidationError handlers
+    }
+}
+
+// @expected-error: E372 "recover pattern for undeclared error"
+/// ERROR: recover arm for error not in throws
+fn recover_wrong_error(input: &Text) -> Int {
+    try {
+        inner_throws_parse(input)?;
+        0
+    } recover {
+        ParseError.UnexpectedEof => -1,
+        IoError.FileNotFound(_) => -2,  // ERROR: IoError cannot be thrown here
+    }
+}
+
+// === throws with rethrow ===
+
+// @expected-error: E373 "rethrow outside recover block"
+/// ERROR: rethrow used outside of recover
+fn rethrow_outside_recover(input: &Text) throws(ParseError) -> Int {
+    let x = inner_throws_parse(input)?;
+    rethrow;  // ERROR: rethrow only valid inside recover
+    x
+}
+
+// @expected-error: E374 "rethrow type mismatch"
+/// ERROR: rethrow error type not in function's throws
+fn rethrow_wrong_type(input: &Text) throws(IoError) -> Int {
+    try {
+        inner_throws_parse(input)?;
+        0
+    } recover |e| {
+        rethrow e;  // ERROR: ParseError not in throws(IoError)
+    }
+}
+
+// === throws subtyping issues ===
+
+// @expected-error: E375 "incompatible throws in function type"
+/// ERROR: Assigning function with narrower throws to wider
+fn throws_subtyping_error() {
+    let f: fn(&Text) throws(ParseError | ValidationError) -> Int =
+        |s| throws(ParseError) {  // ERROR: Cannot widen throws
+            throw ParseError.UnexpectedEof;
+            42
+        };
+}
+
+// === throws with ? operator ===
+
+// @expected-error: E376 "? on non-throws expression in throws function"
+/// ERROR: Using ? on Result in throws context
+fn question_mark_wrong_type(input: &Text) throws(ParseError) -> Int {
+    let result: Result<Int, Text> = Ok(42);
+    result?  // ERROR: Result<Int, Text> error type Text doesn't convert to ParseError
+}
+
+// === Multiple throw paths with incompatible types ===
+
+// @expected-error: E377 "inconsistent throw types in function"
+/// ERROR: Different code paths throw incompatible types
+fn inconsistent_throws(input: &Text, flag: Bool) throws(ParseError | ValidationError) -> Int {
+    if flag {
+        throw ParseError.UnexpectedEof;
+    } else {
+        throw IoError.FileNotFound("missing");  // ERROR: IoError not in throws clause
+    }
+}
+
+// === throw expression type in conditionals ===
+
+// @expected-error: E378 "conditional branch type mismatch with throw"
+/// ERROR: throw in one branch, value in other with wrong type
+fn conditional_throw_mismatch(input: &Text) throws(ParseError) -> Text {
+    if input.is_empty() {
+        throw ParseError.UnexpectedEof  // Evaluates to Never
+    } else {
+        42  // ERROR: Expected Text, got Int (Never unifies with anything)
+    }
+}
+
+// === Empty throws clause ===
+
+// @expected-error: E379 "empty throws clause"
+/// ERROR: throws clause with no error types
+fn empty_throws() throws() -> Int {  // ERROR: throws() requires at least one type
+    42
+}
+
+// === Reserved error type names ===
+
+// @expected-error: E380 "reserved error type in throws"
+/// ERROR: Using Never in throws (it's the absence of throwing)
+fn never_in_throws() throws(Never) -> Int {  // ERROR: Never means no throw
+    42
+}

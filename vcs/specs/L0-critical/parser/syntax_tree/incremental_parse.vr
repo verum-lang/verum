@@ -1,0 +1,196 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, syntax-tree, incremental, lossless, events, green-tree
+// @description: Test incremental parsing - small edits should not require full reparse, event-based updates
+
+// ============================================================================
+// SECTION 1: Basic Incremental Updates
+// ============================================================================
+
+// Original function - first parse
+fn original_function() {
+    let x = 1;
+    let y = 2;
+    let z = x + y;
+}
+
+// After edit: changed function name (incremental update)
+fn renamed_function() {
+    let x = 1;
+    let y = 2;
+    let z = x + y;
+}
+
+// After edit: added a statement (incremental update)
+fn with_extra_statement() {
+    let x = 1;
+    let y = 2;
+    let w = 3;  // Added line
+    let z = x + y + w;
+}
+
+// ============================================================================
+// SECTION 2: Complex Structure Preservation
+// ============================================================================
+
+// Complex function - test that structure is preserved
+fn complex_structure(a: Int, b: Int, c: Int) -> Int {
+    if a > 0 {
+        if b > 0 {
+            if c > 0 {
+                a + b + c
+            } else {
+                a + b
+            }
+        } else {
+            a
+        }
+    } else {
+        0
+    }
+}
+
+// Test incremental with match expressions
+fn match_incremental(x: Maybe<Int>) -> Int {
+    match x {
+        Some(n) => n,
+        None => 0,
+    }
+}
+
+// ============================================================================
+// SECTION 3: Event-Based Incremental Reparsing
+// ============================================================================
+
+// Test that events can be replayed for unchanged regions
+fn event_unchanged_region() {
+    let unchanged1 = 1;  // These events can be reused
+    let unchanged2 = 2;
+    let unchanged3 = 3;
+}
+
+// Test that only changed region generates new events
+fn event_partial_reparse() {
+    let before = 1;  // Reuse events
+    let changed = 2;  // New events for this
+    let after = 3;    // Reuse events
+}
+
+// ============================================================================
+// SECTION 4: Green Tree Node Reuse
+// ============================================================================
+
+// Test that unchanged green nodes are reused
+fn green_node_reuse() {
+    {
+        let inner = 1;  // Unchanged block can be reused
+    }
+}
+
+// Test that sibling nodes can be reused independently
+fn green_sibling_reuse() {
+    let sibling1 = 1;  // Unchanged
+    let sibling2 = 2;  // Changed
+    let sibling3 = 3;  // Unchanged
+}
+
+// ============================================================================
+// SECTION 5: Trivia-Only Changes
+// ============================================================================
+
+// Test that comment-only changes are efficient
+fn trivia_only_change() {
+    // Adding or modifying this comment
+    let x = 1;
+}
+
+// Test whitespace-only changes
+fn whitespace_only_change() {
+    let  x  =  1;  // Spacing changes
+}
+
+// ============================================================================
+// SECTION 6: Edit Fingerprinting
+// ============================================================================
+
+// Test that edit fingerprints identify reusable regions
+fn fingerprint_before_edit() {
+    let a = 1;
+    let b = 2;
+}
+
+fn fingerprint_after_edit() {
+    let a = 1;
+    let c = 3;  // b -> c, 2 -> 3
+}
+
+// ============================================================================
+// SECTION 7: Marker Stability Across Edits
+// ============================================================================
+
+// Test that markers remain valid for unchanged regions
+fn marker_stability() {
+    let stable1 = 1;
+    let stable2 = 2;
+    let stable3 = 3;
+}
+
+// ============================================================================
+// SECTION 8: Deep Structure Edits
+// ============================================================================
+
+// Test incremental with deeply nested changes
+fn deep_nested_edit() {
+    {
+        {
+            {
+                let deep = 1;  // Edit deep inside
+            }
+        }
+    }
+}
+
+// Test that parent nodes are rebuilt but siblings are reused
+fn parent_rebuild() {
+    {
+        let sibling1 = 1;  // Reused
+    }
+    {
+        let sibling2 = 2;  // Changed
+    }
+    {
+        let sibling3 = 3;  // Reused
+    }
+}
+
+// ============================================================================
+// SECTION 9: Type Definition Edits
+// ============================================================================
+
+// Test incremental for type definition changes
+type IncrementalRecord is {
+    field1: Int,
+    field2: Text,  // Edit this field
+    field3: Bool,
+};
+
+// Test sum type incremental
+type IncrementalSum is
+    | First
+    | Second(Int)  // Add or modify variant
+    | Third;
+
+// ============================================================================
+// SECTION 10: Expression Edits
+// ============================================================================
+
+// Test incremental for expression changes
+fn expression_edit() {
+    let x = 1 + 2 * 3;  // Change operator or operand
+}
+
+// Test chained expression edits
+fn chained_edit() {
+    let x = a.b.c.d.e();  // Edit middle of chain
+}

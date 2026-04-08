@@ -1,0 +1,419 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for generic type productions
+// Grammar: generic_type = path , type_args ;
+//          type_args = '<' , type_arg , { ',' , type_arg } , '>' ;
+//          type_arg = extended_type_arg ;
+//          extended_type_arg = type_expr | expression | type_level_literal | meta_type_expr ;
+
+// =============================================================================
+// Section 1: Single Type Parameter Generics
+// =============================================================================
+
+fn test_single_param_generics() {
+    // Standard library generic types with single parameter
+    let list: List<Int> = List.new();
+    let maybe: Maybe<Text> = None;
+    let set: Set<Int> = Set.new();
+    let heap: Heap<Node> = Heap.new(Node.default());
+    let shared: Shared<Data> = Shared.new(Data.default());
+    let future: Future<Int> = async_task();
+    let stream: Stream<Byte> = byte_stream();
+}
+
+fn async_task() -> Future<Int> { Future.ready(42) }
+fn byte_stream() -> Stream<Byte> { Stream.empty() }
+
+type Node is { value: Int };
+type Data is { content: Text };
+
+// =============================================================================
+// Section 2: Multiple Type Parameter Generics
+// =============================================================================
+
+fn test_multi_param_generics() {
+    // Two type parameters
+    let map: Map<Text, Int> = Map.new();
+    let result: Result<Int, Error> = Ok(42);
+    let pair: Pair<Int, Text> = Pair(42, "hello");
+    let either: Either<Int, Text> = Left(42);
+
+    // Three type parameters
+    let triple: Triple<Int, Text, Bool> = Triple(1, "a", true);
+
+    // Many type parameters
+    let tuple: Tuple5<Int, Text, Bool, Float, Char> = make_tuple();
+}
+
+type Error is { message: Text };
+fn make_tuple() -> Tuple5<Int, Text, Bool, Float, Char> {
+    Tuple5(1, "a", true, 3.14, 'x')
+}
+
+// =============================================================================
+// Section 3: Nested Generic Types
+// =============================================================================
+
+fn test_nested_generics() {
+    // List of lists
+    let nested_list: List<List<Int>> = List.new();
+
+    // Map with complex value type
+    let map_to_list: Map<Text, List<Int>> = Map.new();
+
+    // Result with nested Maybe
+    let result_maybe: Result<Maybe<Int>, Error> = Ok(Some(42));
+
+    // Deeply nested
+    let deep: List<Map<Text, List<Set<Int>>>> = List.new();
+
+    // Triple nesting
+    let triple_nest: Maybe<Maybe<Maybe<Int>>> = Some(Some(Some(42)));
+
+    // Mixed nesting
+    let mixed: Result<List<Pair<Int, Text>>, List<Error>> = Ok(List.new());
+}
+
+// =============================================================================
+// Section 4: Type-Level Literals in Generic Arguments
+// =============================================================================
+
+// Grammar: type_level_literal = integer_lit | bool_lit | char_lit ;
+
+fn test_type_level_literals() {
+    // Integer literals in type position
+    let fixed_vec: FixedVec<Int, 10> = FixedVec.new();
+    let matrix: Matrix<3, 4> = Matrix.zeros();
+    let buffer: Buffer<256> = Buffer.new();
+
+    // Note: Boolean literals in const generics need parser support
+    // Using integer-based feature flags instead
+    let enabled: Feature<1> = Feature.enabled();
+    let disabled: Feature<0> = Feature.disabled();
+
+    // Multiple const generics
+    let tensor_val: TensorType<Float, 3, 224, 224> = TensorType.zeros();
+
+    // Zero as const generic
+    let empty: FixedVec<Int, 0> = FixedVec.new();
+}
+
+type FixedVec<T, const N: Int> is { data: [T; N] };
+type Matrix<const M: Int, const N: Int> is { data: [[Float; N]; M] };
+type Buffer<const SIZE: Int> is { data: [Byte; SIZE] };
+type Feature<const ENABLED: Int> is ();  // Using Int instead of Bool for const flag
+type TensorType<T, const C: Int, const H: Int, const W: Int> is { data: [T] };
+
+// =============================================================================
+// Section 5: Meta Type Expressions in Generic Arguments
+// =============================================================================
+
+// Grammar: meta_type_expr = meta_arith_expr ;
+//          meta_arith_expr = meta_term , { ( '+' | '-' ) , meta_term } ;
+
+fn test_meta_type_expressions() {
+    // Arithmetic in type position
+    let computed: [Int; N + 1] = make_extended();
+    let sum_size: [Int; M + N] = combine_arrays();
+    let diff_size: [Int; N - 1] = shrink_array();
+
+    // Multiplication
+    let product: [Int; N * 2] = double_array();
+
+    // Complex expressions
+    let complex: [Int; (N + M) * 2] = complex_array();
+    let formula: [Int; N * N + 1] = formula_array();
+}
+
+const N: Int = 10;
+const M: Int = 5;
+
+fn make_extended<const N: Int>() -> [Int; N + 1] { [0; N + 1] }
+fn combine_arrays<const M: Int, const N: Int>() -> [Int; M + N] { [0; M + N] }
+fn shrink_array<const N: Int>() -> [Int; N - 1] { [0; N - 1] }
+fn double_array<const N: Int>() -> [Int; N * 2] { [0; N * 2] }
+fn complex_array<const M: Int, const N: Int>() -> [Int; (N + M) * 2] { [0; (N + M) * 2] }
+fn formula_array<const N: Int>() -> [Int; N * N + 1] { [0; N * N + 1] }
+
+// =============================================================================
+// Section 6: Path Types in Generic Arguments
+// =============================================================================
+
+fn test_path_type_generics() {
+    // Qualified path as type argument
+    let result: Result<mymodule.Type, Error> = Ok(mymodule.Type.default());
+
+    // Nested module paths
+    let container: Container<collections.list.Node<Int>> = Container.new();
+
+    // Self type in generic position
+    let recursive: Tree<Self.Item> = Tree.leaf();
+}
+
+module mymodule {
+    type Type is { value: Int };
+}
+
+module collections {
+    module list {
+        type Node<T> is { value: T, next: Maybe<Heap<Node<T>>> };
+    }
+}
+
+type Container<T> is { item: T };
+type Tree<T> is Leaf(T) | Branch { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+// =============================================================================
+// Section 7: Dynamic Types (dyn) in Generic Arguments
+// =============================================================================
+
+// Grammar: dynamic_type = 'dyn' , protocol_bounds , [ associated_type_bindings ] ;
+
+fn test_dynamic_type_generics() {
+    // Single protocol bound
+    let boxed_display: Heap<dyn Display> = Heap.new(42);
+
+    // Multiple protocol bounds
+    let boxed_multi: Heap<dyn Clone + Debug> = Heap.new("test");
+
+    // With associated type binding
+    let boxed_iter: Heap<dyn Iterator<Item = Int>> = Heap.new(make_iter());
+
+    // Nested in other generics
+    let list_dyn: List<Heap<dyn Display>> = List.new();
+}
+
+fn make_iter() -> dyn Iterator<Item = Int> {
+    [1, 2, 3].iter()
+}
+
+type Display is protocol {
+    fn fmt(&self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// =============================================================================
+// Section 8: Existential Types (some) in Generic Arguments
+// =============================================================================
+
+// Grammar: existential_type = 'some' , identifier , ':' , existential_bounds ;
+
+fn test_existential_type_generics() {
+    // Existential as generic argument
+    let iter: some I: Iterator<Item = Int> = make_iterator();
+
+    // Multiple bounds
+    let combo: some T: Clone + Display = make_combo();
+
+    // Existential in return position
+    fn returns_existential() -> some I: Iterator<Item = Int> {
+        [1, 2, 3].iter()
+    }
+}
+
+fn make_iterator() -> some I: Iterator<Item = Int> {
+    [1, 2, 3].iter()
+}
+
+fn make_combo() -> some T: Clone + Display {
+    "hello"
+}
+
+// =============================================================================
+// Section 9: Inferred Type (_) in Generic Arguments
+// =============================================================================
+
+// Grammar: inferred_type = '_' ;
+
+fn test_inferred_type_generics() {
+    // Partial type inference
+    let result: Result<_, Error> = Ok(42);  // Int inferred
+
+    // Multiple inferred
+    let map: Map<_, _> = Map.from([(1, "a"), (2, "b")]);
+
+    // Mixed explicit and inferred
+    let list: List<_> = List.of(1, 2, 3);  // Int inferred
+
+    // Nested inference
+    let nested: List<Result<_, Error>> = List.of(Ok(1), Ok(2));
+}
+
+// =============================================================================
+// Section 10: Higher-Kinded Types in Generic Arguments
+// =============================================================================
+
+// Grammar: higher_kinded_type = path , '<' , '_' , '>' ;
+
+fn test_higher_kinded_generics() {
+    // Type constructor as argument
+    let functor_list: Functor<List<_>> = make_functor();
+
+    // Monad type constructor
+    let monad_maybe: Monad<Maybe<_>> = make_monad();
+
+    // Multiple HKT parameters
+    let transform: Transform<List<_>, Maybe<_>> = make_transform();
+}
+
+type Functor<F<_>> is protocol {
+    fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+type Monad<M<_>> is protocol extends Functor<M<_>> {
+    fn pure<A>(a: A) -> M<A>;
+    fn flat_map<A, B>(ma: M<A>, f: fn(A) -> M<B>) -> M<B>;
+};
+
+type Transform<F<_>, G<_>> is protocol {
+    fn transform<A>(fa: F<A>) -> G<A>;
+};
+
+fn make_functor() -> Functor<List<_>> { ListFunctor }
+fn make_monad() -> Monad<Maybe<_>> { MaybeMonad }
+fn make_transform() -> Transform<List<_>, Maybe<_>> { ListToMaybeTransform }
+
+type ListFunctor is ();
+type MaybeMonad is ();
+type ListToMaybeTransform is ();
+
+// =============================================================================
+// Section 11: Generic Type Definitions
+// =============================================================================
+
+// Type definitions with generic parameters
+type Optional<T> is None | Some(T);
+
+type LinkedList<T> is Nil | Cons { head: T, tail: Heap<LinkedList<T>> };
+
+type BinaryTree<T> is
+    Leaf(T)
+  | Node { value: T, left: Heap<BinaryTree<T>>, right: Heap<BinaryTree<T>> };
+
+type KeyValue<K, V> is { key: K, value: V };
+
+// Multiple const generics
+type FixedMatrix<T, const ROWS: Int, const COLS: Int> is {
+    data: [[T; COLS]; ROWS]
+};
+
+// Mixed type and const generics
+type SizedBuffer<T, const N: Int> is { items: [T; N], len: Int };
+
+// =============================================================================
+// Section 12: Generic Functions
+// =============================================================================
+
+fn identity<T>(x: T) -> T { x }
+
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
+    let (a, b) = pair;
+    (b, a)
+}
+
+fn map_option<A, B>(opt: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match opt {
+        None => None,
+        Some(a) => Some(f(a))
+    }
+}
+
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |a| g(f(a))
+}
+
+// Const generic function
+fn make_array<T, const N: Int>(value: T) -> [T; N] {
+    [value; N]
+}
+
+// =============================================================================
+// Section 13: Generic Implementations
+// =============================================================================
+
+type Wrapper<T> is { inner: T };
+
+implement<T> Wrapper<T> {
+    fn new(value: T) -> Wrapper<T> {
+        Wrapper { inner: value }
+    }
+
+    fn unwrap(self) -> T {
+        self.inner
+    }
+}
+
+implement<T: Clone> Clone for Wrapper<T> {
+    fn clone(&self) -> Self {
+        Wrapper { inner: self.inner.clone() }
+    }
+}
+
+implement<T: Display> Display for Wrapper<T> {
+    fn fmt(&self) -> Text {
+        f"Wrapper({self.inner.fmt()})"
+    }
+}
+
+// =============================================================================
+// Section 14: Complex Generic Combinations
+// =============================================================================
+
+fn test_complex_generics() {
+    // Function types as generic arguments
+    let callbacks: List<fn(Int) -> Bool> = List.new();
+
+    // References as generic arguments
+    let refs: List<&Int> = List.new();
+    let mut_refs: List<&mut Int> = List.new();
+
+    // Arrays as generic arguments
+    let array_list: List<[Int; 5]> = List.new();
+
+    // Tuples as generic arguments
+    let tuple_list: List<(Int, Text)> = List.new();
+
+    // Function returning generic function
+    fn make_mapper<A, B>() -> fn(List<A>, fn(A) -> B) -> List<B> {
+        |list, f| list.map(f)
+    }
+}
+
+// =============================================================================
+// Section 15: Generic Protocol Bounds
+// =============================================================================
+
+type Comparable<T> is protocol {
+    fn compare(&self, other: &T) -> Ordering;
+};
+
+type Hashable is protocol {
+    fn hash(&self) -> u64;
+};
+
+fn sort<T: Comparable<T>>(list: &mut List<T>) {
+    // Sort implementation
+}
+
+fn dedup<T: Comparable<T> + Hashable>(list: &mut List<T>) {
+    // Dedup implementation
+}
+
+fn find_max<T: Comparable<T>>(list: &List<T>) -> Maybe<&T> {
+    list.iter().max()
+}
+
+type Ordering is Less | Equal | Greater;

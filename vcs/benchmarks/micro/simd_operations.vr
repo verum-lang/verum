@@ -1,0 +1,315 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: Near-peak SIMD throughput
+// @tags: simd, vectorization, performance
+
+/// Benchmark for SIMD (Single Instruction Multiple Data) operations
+///
+/// Tests various SIMD operations:
+/// - Arithmetic (add, mul, fma)
+/// - Comparisons
+/// - Shuffles
+/// - Reductions
+/// - Various SIMD widths (SSE, AVX, AVX-512)
+
+module benchmarks.micro.simd_operations
+
+using [Benchmark, Simd]
+
+/// SIMD f32x4 addition (SSE)
+fn benchmark_simd_f32x4_add() {
+    let a = f32x4.splat(1.0);
+    let b = f32x4.splat(2.0);
+
+    for _ in 0..10_000_000 {
+        let _ = a + b;
+    }
+}
+
+/// SIMD f32x8 addition (AVX)
+fn benchmark_simd_f32x8_add() {
+    let a = f32x8.splat(1.0);
+    let b = f32x8.splat(2.0);
+
+    for _ in 0..10_000_000 {
+        let _ = a + b;
+    }
+}
+
+/// SIMD f32x16 addition (AVX-512)
+fn benchmark_simd_f32x16_add() {
+    let a = f32x16.splat(1.0);
+    let b = f32x16.splat(2.0);
+
+    for _ in 0..10_000_000 {
+        let _ = a + b;
+    }
+}
+
+/// SIMD f64x2 addition (SSE2)
+fn benchmark_simd_f64x2_add() {
+    let a = f64x2.splat(1.0);
+    let b = f64x2.splat(2.0);
+
+    for _ in 0..10_000_000 {
+        let _ = a + b;
+    }
+}
+
+/// SIMD f64x4 addition (AVX)
+fn benchmark_simd_f64x4_add() {
+    let a = f64x4.splat(1.0);
+    let b = f64x4.splat(2.0);
+
+    for _ in 0..10_000_000 {
+        let _ = a + b;
+    }
+}
+
+/// SIMD multiplication
+fn benchmark_simd_f32x8_mul() {
+    let a = f32x8.splat(1.5);
+    let b = f32x8.splat(2.0);
+
+    for _ in 0..10_000_000 {
+        let _ = a * b;
+    }
+}
+
+/// SIMD FMA (Fused Multiply-Add)
+fn benchmark_simd_f32x8_fma() {
+    let a = f32x8.splat(1.0);
+    let b = f32x8.splat(2.0);
+    let c = f32x8.splat(3.0);
+
+    for _ in 0..10_000_000 {
+        let _ = a.mul_add(b, c);  // a * b + c
+    }
+}
+
+/// SIMD integer operations
+fn benchmark_simd_i32x8_add() {
+    let a = i32x8.splat(1);
+    let b = i32x8.splat(2);
+
+    for _ in 0..10_000_000 {
+        let _ = a + b;
+    }
+}
+
+/// SIMD comparison
+fn benchmark_simd_f32x8_cmp() {
+    let a = f32x8.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let b = f32x8.splat(4.0);
+
+    for _ in 0..10_000_000 {
+        let mask = a.simd_gt(b);  // Greater than comparison
+        let _ = mask;
+    }
+}
+
+/// SIMD select (blend)
+fn benchmark_simd_f32x8_select() {
+    let a = f32x8.splat(1.0);
+    let b = f32x8.splat(2.0);
+    let mask = mask32x8.from_array([true, false, true, false, true, false, true, false]);
+
+    for _ in 0..10_000_000 {
+        let _ = mask.select(a, b);
+    }
+}
+
+/// SIMD horizontal sum (reduction)
+fn benchmark_simd_f32x8_reduce_sum() {
+    let a = f32x8.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+
+    for _ in 0..5_000_000 {
+        let _ = a.reduce_sum();
+    }
+}
+
+/// SIMD horizontal max (reduction)
+fn benchmark_simd_f32x8_reduce_max() {
+    let a = f32x8.from_array([1.0, 8.0, 3.0, 6.0, 5.0, 2.0, 7.0, 4.0]);
+
+    for _ in 0..5_000_000 {
+        let _ = a.reduce_max();
+    }
+}
+
+/// SIMD shuffle/permute
+fn benchmark_simd_f32x8_shuffle() {
+    let a = f32x8.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let idx = u32x8.from_array([7, 6, 5, 4, 3, 2, 1, 0]);  // Reverse
+
+    for _ in 0..5_000_000 {
+        let _ = a.shuffle(idx);
+    }
+}
+
+/// SIMD gather
+fn benchmark_simd_gather() {
+    let data: [Float32; 1024] = [0.0; 1024];
+    for i in 0..1024 {
+        data[i] = i as Float32;
+    }
+
+    let indices = u32x8.from_array([0, 10, 20, 30, 40, 50, 60, 70]);
+
+    for _ in 0..1_000_000 {
+        let _ = f32x8.gather(&data, indices);
+    }
+}
+
+/// SIMD scatter
+fn benchmark_simd_scatter() {
+    let mut data: [Float32; 1024] = [0.0; 1024];
+    let values = f32x8.splat(1.0);
+    let indices = u32x8.from_array([0, 10, 20, 30, 40, 50, 60, 70]);
+
+    for _ in 0..1_000_000 {
+        values.scatter(&mut data, indices);
+    }
+}
+
+/// SIMD load aligned
+fn benchmark_simd_load_aligned() {
+    let data: [Float32; 1024] align(32) = [1.0; 1024];
+
+    for _ in 0..10_000_000 {
+        let _ = f32x8.load_aligned(&data[0]);
+    }
+}
+
+/// SIMD load unaligned
+fn benchmark_simd_load_unaligned() {
+    let data: [Float32; 1024] = [1.0; 1024];
+
+    for _ in 0..10_000_000 {
+        let _ = f32x8.load(&data[1]);  // Unaligned
+    }
+}
+
+/// SIMD store aligned
+fn benchmark_simd_store_aligned() {
+    let mut data: [Float32; 1024] align(32) = [0.0; 1024];
+    let v = f32x8.splat(1.0);
+
+    for _ in 0..10_000_000 {
+        v.store_aligned(&mut data[0]);
+    }
+}
+
+/// SIMD dot product
+fn benchmark_simd_dot_product() {
+    let a = f32x8.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    let b = f32x8.from_array([8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0]);
+
+    for _ in 0..5_000_000 {
+        let prod = a * b;
+        let _ = prod.reduce_sum();
+    }
+}
+
+/// SIMD polynomial evaluation (Horner's method)
+fn benchmark_simd_polynomial() {
+    let x = f32x8.splat(0.5);
+    let c0 = f32x8.splat(1.0);
+    let c1 = f32x8.splat(2.0);
+    let c2 = f32x8.splat(3.0);
+    let c3 = f32x8.splat(4.0);
+
+    for _ in 0..5_000_000 {
+        // c0 + x * (c1 + x * (c2 + x * c3))
+        let _ = c3.mul_add(x, c2).mul_add(x, c1).mul_add(x, c0);
+    }
+}
+
+/// SIMD abs
+fn benchmark_simd_abs() {
+    let a = f32x8.from_array([-1.0, 2.0, -3.0, 4.0, -5.0, 6.0, -7.0, 8.0]);
+
+    for _ in 0..10_000_000 {
+        let _ = a.abs();
+    }
+}
+
+/// SIMD sqrt
+fn benchmark_simd_sqrt() {
+    let a = f32x8.splat(2.0);
+
+    for _ in 0..5_000_000 {
+        let _ = a.sqrt();
+    }
+}
+
+/// SIMD reciprocal sqrt (fast)
+fn benchmark_simd_rsqrt() {
+    let a = f32x8.splat(2.0);
+
+    for _ in 0..10_000_000 {
+        let _ = a.rsqrt();  // 1 / sqrt(x), approximate
+    }
+}
+
+/// SIMD min/max
+fn benchmark_simd_minmax() {
+    let a = f32x8.from_array([1.0, 5.0, 3.0, 7.0, 2.0, 6.0, 4.0, 8.0]);
+    let b = f32x8.from_array([4.0, 2.0, 6.0, 3.0, 7.0, 1.0, 8.0, 5.0]);
+
+    for _ in 0..10_000_000 {
+        let min_val = a.simd_min(b);
+        let max_val = a.simd_max(b);
+    }
+}
+
+/// SIMD clamp
+fn benchmark_simd_clamp() {
+    let a = f32x8.from_array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]);
+    let lo = f32x8.splat(0.5);
+    let hi = f32x8.splat(2.5);
+
+    for _ in 0..10_000_000 {
+        let _ = a.simd_clamp(lo, hi);
+    }
+}
+
+/// SIMD bitwise operations
+fn benchmark_simd_bitwise() {
+    let a = i32x8.splat(0xFF00FF00u32 as i32);
+    let b = i32x8.splat(0x0F0F0F0F_u32 as i32);
+
+    for _ in 0..10_000_000 {
+        let _ = a & b;
+        let _ = a | b;
+        let _ = a ^ b;
+    }
+}
+
+/// SIMD conversion i32 -> f32
+fn benchmark_simd_convert_int_float() {
+    let a = i32x8.from_array([1, 2, 3, 4, 5, 6, 7, 8]);
+
+    for _ in 0..10_000_000 {
+        let _ = a.cast<f32x8>();
+    }
+}
+
+/// Large array SIMD processing
+fn benchmark_simd_array_processing() {
+    let size = 1_000_000;
+    let a: List<Float32> = list![1.0; size];
+    let b: List<Float32> = list![2.0; size];
+    let mut c: List<Float32> = list![0.0; size];
+
+    for _ in 0..100 {
+        // Process in SIMD chunks
+        for i in (0..size).step_by(8) {
+            let va = f32x8.load(&a[i]);
+            let vb = f32x8.load(&b[i]);
+            let vc = va + vb;
+            vc.store(&mut c[i]);
+        }
+    }
+}

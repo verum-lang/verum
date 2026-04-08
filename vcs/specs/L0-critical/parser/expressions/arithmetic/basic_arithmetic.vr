@@ -1,0 +1,115 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arithmetic, operators
+
+fn test_basic_arithmetic() {
+    // Basic addition
+    let sum = 1 + 2;
+    let x = 10;
+    let y = 20;
+    let z = 30;
+    let a = x + y;
+    let b = 10 + 20 + 30;
+
+    // Basic subtraction
+    let diff = 5 - 3;
+    let c = a - b;
+    let d = 100 - 50 - 25;
+
+    // Basic multiplication
+    let product = 2 * 3;
+    let e = x * y;
+    let f = 2 * 3 * 4;
+
+    // Basic division
+    let quotient = 10 / 2;
+    let g = a / b;
+    let h = 100 / 10 / 2;
+
+    // Modulo/remainder
+    let remainder = 10 % 3;
+    let i = a % b;
+    let j = 17 % 5 % 2;
+
+    // Mixed operations (precedence: * / % before + -)
+    let mixed = 1 + 2 * 3;
+    let k = a - b / c;
+    let l = x * y + z;
+    let m = a / b - c * d;
+}
+
+fn test_power_operations() {
+    // Power/exponentiation
+    let power = 2 ** 3;
+    let base = 2;
+    let exponent = 10;
+    let n = base ** exponent;
+
+    // Right-associativity for exponentiation
+    let right_exp = 2 ** 3 ** 2;  // 2 ** (3 ** 2) = 512
+}
+
+fn test_float_arithmetic() {
+    // Floating point arithmetic
+    let float_sum = 1.5 + 2.5;
+    let float_product = 3.14 * 2.0;
+    let float_div = 10.0 / 3.0;
+
+    // Scientific notation
+    let sci = 1e10 + 2e5;
+    let sci2 = 1.5e-3 * 2.0e6;
+}
+
+fn test_unary_operations() {
+    let a = 5;
+    let b = 10;
+
+    // Negative numbers in expressions
+    let neg = -5 + 3;
+    let neg2 = 10 + -5;
+    let neg3 = -a + -b;
+}
+
+fn test_complex_expressions() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+
+    // Large expressions
+    let complex = a + b * c - d / e + f % g;
+    let very_complex = (a + b) * (c - d) / (e + f);
+}
+
+fn test_bitwise_operations() {
+    let a = 0b1010;
+    let b = 0b1100;
+
+    // Bitwise operations
+    let bit_and = a & b;
+    let bit_or = a | b;
+    let bit_xor = a ^ b;
+    let bit_not = ~a;
+    let left_shift = a << 2;
+    let right_shift = a >> 2;
+}
+
+fn test_associativity() {
+    // Left-to-right for same precedence
+    let left_assoc = 10 - 5 - 2;  // (10 - 5) - 2 = 3
+    let left_div = 100 / 10 / 2;  // (100 / 10) / 2 = 5
+}
+
+fn test_comparison_chains() {
+    let x = 50;
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    // Chained comparisons require logical operators
+    let in_range = 0 < x && x < 100;
+}

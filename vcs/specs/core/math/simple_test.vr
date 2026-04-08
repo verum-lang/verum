@@ -1,0 +1,504 @@
+// =============================================================================
+// simple_test.vr - Tests for simple math API types and function signatures
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, simple, tensor, alias, prototyping, module, dataloader, batch
+// @description: Tests for Tensor/Tensor32 type aliases, Batch record, DataLoader
+//               protocol, Module protocol, Sequential type, and function import
+//               existence from the simple math module.
+// =============================================================================
+
+mount core.math.simple.{
+    Tensor, Tensor32, Batch, Sequential,
+};
+
+// =============================================================================
+// Section 1: Type Alias Existence
+// =============================================================================
+
+@test
+fn test_tensor_type_exists() {
+    let _: fn() -> Tensor = || panic("type check only");
+
+}
+
+@test
+fn test_tensor32_type_exists() {
+    let _: fn() -> Tensor32 = || panic("type check only");
+
+}
+
+@test
+fn test_tensor_as_parameter_type() {
+    fn accept_tensor(t: &Tensor) -> Bool { true }
+    let _ = accept_tensor;
+
+}
+
+@test
+fn test_tensor32_as_parameter_type() {
+    fn accept_tensor32(t: &Tensor32) -> Bool { true }
+    let _ = accept_tensor32;
+
+}
+
+@test
+fn test_tensor_as_return_type() {
+    fn return_tensor() -> Tensor { panic("type check only") }
+    let _ = return_tensor;
+
+}
+
+@test
+fn test_tensor32_as_return_type() {
+    fn return_tensor32() -> Tensor32 { panic("type check only") }
+    let _ = return_tensor32;
+
+}
+
+@test
+fn test_tensor_in_collection() {
+    // Tensor should work as List element type
+    fn make_list() -> List<Tensor> { panic("type check only") }
+    let _ = make_list;
+
+}
+
+@test
+fn test_tensor32_in_collection() {
+    fn make_list() -> List<Tensor32> { panic("type check only") }
+    let _ = make_list;
+
+}
+
+// =============================================================================
+// Section 2: Batch Type
+// =============================================================================
+
+@test
+fn test_batch_type_exists() {
+    fn accept_batch(b: &Batch) -> Bool { true }
+    let _ = accept_batch;
+
+}
+
+@test
+fn test_batch_has_input_field() {
+    // Batch has input: Tensor
+    fn get_input(b: &Batch) -> &Tensor { &b.input }
+    let _ = get_input;
+
+}
+
+@test
+fn test_batch_has_target_field() {
+    // Batch has target: Tensor
+    fn get_target(b: &Batch) -> &Tensor { &b.target }
+    let _ = get_target;
+
+}
+
+@test
+fn test_batch_field_types_clone() {
+    // Verify both fields are Tensor type through function signatures
+    fn get_input(b: &Batch) -> &Tensor { &b.input }
+    fn get_target(b: &Batch) -> &Tensor { &b.target }
+    let _ = get_input;
+    let _ = get_target;
+}
+
+// =============================================================================
+// Section 3: Sequential Type
+// =============================================================================
+
+@test
+fn test_sequential_type_exists() {
+    fn accept_sequential(s: &Sequential) -> Bool { true }
+    let _ = accept_sequential;
+
+}
+
+@test
+fn test_sequential_as_return_type() {
+    fn make_sequential() -> Sequential { panic("type check only") }
+    let _ = make_sequential;
+
+}
+
+// =============================================================================
+// Section 4: Function Import Existence — Tensor Creation
+// =============================================================================
+
+mount core.math.simple.{
+    zeros, ones, full, arange, linspace, eye,
+};
+
+@test
+fn test_zeros_fn_exists() {
+    let _ = zeros;
+
+}
+
+@test
+fn test_ones_fn_exists() {
+    let _ = ones;
+
+}
+
+@test
+fn test_full_fn_exists() {
+    let _ = full;
+
+}
+
+@test
+fn test_arange_fn_exists() {
+    let _ = arange;
+
+}
+
+@test
+fn test_linspace_fn_exists() {
+    let _ = linspace;
+
+}
+
+@test
+fn test_eye_fn_exists() {
+    let _ = eye;
+
+}
+
+// =============================================================================
+// Section 5: Function Import Existence — Shape Operations
+// =============================================================================
+
+mount core.math.simple.{
+    matmul, transpose, reshape, squeeze, unsqueeze, cat, stack,
+};
+
+@test
+fn test_matmul_fn_exists() {
+    let _ = matmul;
+
+}
+
+@test
+fn test_transpose_fn_exists() {
+    let _ = transpose;
+
+}
+
+@test
+fn test_reshape_fn_exists() {
+    let _ = reshape;
+
+}
+
+@test
+fn test_squeeze_fn_exists() {
+    let _ = squeeze;
+
+}
+
+@test
+fn test_unsqueeze_fn_exists() {
+    let _ = unsqueeze;
+
+}
+
+@test
+fn test_cat_fn_exists() {
+    let _ = cat;
+
+}
+
+@test
+fn test_stack_fn_exists() {
+    let _ = stack;
+
+}
+
+// =============================================================================
+// Section 6: Function Import Existence — Reductions
+// =============================================================================
+
+mount core.math.simple.{sum, mean, max, min};
+
+@test
+fn test_sum_fn_exists() {
+    let _ = sum;
+
+}
+
+@test
+fn test_mean_fn_exists() {
+    let _ = mean;
+
+}
+
+@test
+fn test_max_fn_exists() {
+    let _ = max;
+
+}
+
+@test
+fn test_min_fn_exists() {
+    let _ = min;
+
+}
+
+// =============================================================================
+// Section 7: Function Import Existence — Activations & Layers
+// =============================================================================
+
+mount core.math.simple.{softmax, dropout, layer_norm, rms_norm};
+
+@test
+fn test_softmax_fn_exists() {
+    let _ = softmax;
+
+}
+
+@test
+fn test_dropout_fn_exists() {
+    let _ = dropout;
+
+}
+
+@test
+fn test_layer_norm_fn_exists() {
+    let _ = layer_norm;
+
+}
+
+@test
+fn test_rms_norm_fn_exists() {
+    let _ = rms_norm;
+
+}
+
+// =============================================================================
+// Section 8: Function Import Existence — Device Helpers
+// =============================================================================
+
+mount core.math.simple.{gpu_available, device, to_device};
+
+@test
+fn test_gpu_available_fn_exists() {
+    let _ = gpu_available;
+
+}
+
+@test
+fn test_device_fn_exists() {
+    let _ = device;
+
+}
+
+@test
+fn test_to_device_fn_exists() {
+    let _ = to_device;
+
+}
+
+// =============================================================================
+// Section 9: Function Import Existence — Print & Training Helpers
+// =============================================================================
+
+mount core.math.simple.{info, train, evaluate};
+
+@test
+fn test_info_fn_exists() {
+    let _ = info;
+
+}
+
+@test
+fn test_train_fn_exists() {
+    let _ = train;
+
+}
+
+@test
+fn test_evaluate_fn_exists() {
+    let _ = evaluate;
+
+}
+
+// =============================================================================
+// Section 10: Function Signature Type Checking
+// =============================================================================
+
+@test
+fn test_zeros_returns_tensor() {
+    fn check() -> Tensor { zeros(&[2 as USize, 3 as USize]) }
+    let _ = check;
+
+}
+
+@test
+fn test_ones_returns_tensor() {
+    fn check() -> Tensor { ones(&[4 as USize]) }
+    let _ = check;
+
+}
+
+@test
+fn test_full_returns_tensor() {
+    fn check() -> Tensor { full(&[2 as USize], 3.14) }
+    let _ = check;
+
+}
+
+@test
+fn test_eye_returns_tensor() {
+    fn check() -> Tensor { eye(4 as USize) }
+    let _ = check;
+
+}
+
+@test
+fn test_arange_returns_tensor() {
+    fn check() -> Tensor { arange(0.0, 10.0, 1.0) }
+    let _ = check;
+
+}
+
+@test
+fn test_linspace_returns_tensor() {
+    fn check() -> Tensor { linspace(0.0, 1.0, 11 as USize) }
+    let _ = check;
+
+}
+
+// =============================================================================
+// Section 11: Additional Type Usage Tests
+// =============================================================================
+
+@test
+fn test_tensor_in_tuple() {
+    fn make_pair() -> (Tensor, Tensor) { panic("type check only") }
+    let _ = make_pair;
+
+}
+
+@test
+fn test_batch_as_return_type() {
+    fn make_batch() -> Batch { panic("type check only") }
+    let _ = make_batch;
+
+}
+
+@test
+fn test_sequential_in_list() {
+    fn make_seq_list() -> List<Sequential> { panic("type check only") }
+    let _ = make_seq_list;
+
+}
+
+@test
+fn test_matmul_returns_tensor_signature() {
+    fn check(a: &Tensor, b: &Tensor) -> Tensor { matmul(a, b) }
+    let _ = check;
+
+}
+
+@test
+fn test_softmax_returns_tensor_signature() {
+    fn check(t: &Tensor) -> Tensor { softmax(t) }
+    let _ = check;
+
+}
+
+@test
+fn test_reshape_returns_tensor_signature() {
+    fn check(t: &Tensor, shape: &[ISize]) -> Tensor { reshape(t, shape) }
+    let _ = check;
+
+}
+
+@test
+fn test_squeeze_returns_tensor_signature() {
+    fn check(t: &Tensor) -> Tensor { squeeze(t) }
+    let _ = check;
+
+}
+
+@test
+fn test_sum_returns_float_signature() {
+    fn check(t: &Tensor) -> Float { sum(t) }
+    let _ = check;
+
+}
+
+// =============================================================================
+// Section 12: Additional Function Signature Tests
+// =============================================================================
+
+mount core.math.simple.{sum_dim, mean_dim, softmax_dim};
+
+@test
+fn test_sum_dim_returns_tensor_signature() {
+    fn check(t: &Tensor, dim: ISize) -> Tensor { sum_dim(t, dim) }
+    let _ = check;
+
+}
+
+@test
+fn test_mean_dim_returns_tensor_signature() {
+    fn check(t: &Tensor, dim: ISize) -> Tensor { mean_dim(t, dim) }
+    let _ = check;
+
+}
+
+@test
+fn test_softmax_dim_returns_tensor_signature() {
+    fn check(t: &Tensor, dim: ISize) -> Tensor { softmax_dim(t, dim) }
+    let _ = check;
+
+}
+
+@test
+fn test_tensor32_type_alias() {
+    fn accept_tensor32(t: &Tensor32) -> Bool { true }
+    let _ = accept_tensor32;
+
+}
+
+@test
+fn test_unsqueeze_returns_tensor_signature() {
+    fn check(t: &Tensor, dim: ISize) -> Tensor { unsqueeze(t, dim) }
+    let _ = check;
+
+}
+
+@test
+fn test_transpose_returns_tensor_signature() {
+    fn check(t: &Tensor) -> Tensor { transpose(t) }
+    let _ = check;
+
+}
+
+@test
+fn test_batch_field_types() {
+    fn accept_batch(b: &Batch) -> (Tensor, Tensor) {
+        panic("type check only")
+    }
+    let _ = accept_batch;
+
+}
+
+@test
+fn test_sequential_layers_field_type() {
+    fn accept_seq(s: &Sequential) -> Bool { true }
+    let _ = accept_seq;
+
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

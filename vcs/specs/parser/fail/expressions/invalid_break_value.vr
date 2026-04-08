@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, break, value, error
+// @description: Break with invalid expression (comma creates parse ambiguity)
+// @expected-error: E010
+
+fn test() {
+    loop {
+        break 1, 2;  // Ambiguous - break takes single expression
+    }
+}

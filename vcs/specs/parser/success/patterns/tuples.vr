@@ -1,0 +1,367 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for tuple patterns
+
+// Grammar Reference:
+// tuple_pattern = '(' , pattern_list , ')' ;
+// pattern_list  = [ pattern , { ',' , pattern } , [ ',' ] ] ;
+
+// ============================================================================
+// SECTION 1: Basic Tuple Patterns
+// ============================================================================
+
+fn test_basic_tuples() {
+    // Empty tuple (unit)
+    let () = unit_value;
+
+    // Single element tuple (with trailing comma)
+    let (x,) = single;
+
+    // Two element tuple (pair)
+    let (a, b) = pair;
+    let (first, second) = get_pair();
+
+    // Three element tuple
+    let (x, y, z) = triple;
+    let (a, b, c) = get_triple();
+
+    // Four or more elements
+    let (a, b, c, d) = quad;
+    let (a, b, c, d, e) = quint;
+    let (v1, v2, v3, v4, v5, v6) = sextuple;
+}
+
+// ============================================================================
+// SECTION 2: Tuple Patterns with Trailing Commas
+// ============================================================================
+
+fn test_trailing_commas() {
+    // All with trailing commas (valid)
+    let (x,) = single;
+    let (a, b,) = pair;
+    let (x, y, z,) = triple;
+    let (a, b, c, d,) = quad;
+
+    // Consistency in different contexts
+    match tuple {
+        (0, 0,) => origin(),
+        (x, y,) => point(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 3: Tuple Patterns with Wildcards
+// ============================================================================
+
+fn test_wildcards_in_tuples() {
+    // Single wildcard
+    let (_, b) = pair;
+    let (a, _) = pair;
+    let (_, _, c) = triple;
+
+    // Multiple wildcards
+    let (_, _) = pair;
+    let (_, b, _) = triple;
+    let (_, _, _) = triple;
+    let (a, _, _, d) = quad;
+
+    // All wildcards
+    let (_, _, _, _) = quad;
+}
+
+// ============================================================================
+// SECTION 4: Nested Tuple Patterns
+// ============================================================================
+
+fn test_nested_tuples() {
+    // Simple nesting
+    let ((a, b), c) = nested;
+    let (a, (b, c)) = nested;
+
+    // Both elements are tuples
+    let ((a, b), (c, d)) = double_nested;
+
+    // Deeper nesting
+    let (((a, b), c), d) = deep;
+    let (a, (b, (c, d))) = deep;
+    let ((a, (b, c)), (d, e)) = complex;
+
+    // Very deep nesting
+    let ((((a, b), c), d), e) = very_deep;
+    let (a, (b, (c, (d, e)))) = very_deep;
+
+    // Mixed with wildcards
+    let ((_, b), (c, _)) = nested;
+    let (_, (_, (_, x))) = deep;
+}
+
+// ============================================================================
+// SECTION 5: Tuple Patterns with Literals
+// ============================================================================
+
+fn test_tuples_with_literals() {
+    // Integer literals
+    let (0, y) = pair;
+    let (x, 0) = pair;
+    let (0, 0) = origin;
+
+    // Boolean literals
+    let (true, value) = flagged;
+    let (flag, false) = pair;
+    let (true, true) = both_true;
+
+    // Character literals
+    let ('a', rest) = char_pair;
+    let (first, 'z') = char_pair;
+
+    // String literals
+    let ("key", value) = entry;
+    let (key, "default") = entry;
+
+    // Mixed literals
+    let (0, "zero", true) = mixed;
+    let ("name", 42, 'x') = complex;
+}
+
+// ============================================================================
+// SECTION 6: Tuple Patterns with Mutable Bindings
+// ============================================================================
+
+fn test_mutable_in_tuples() {
+    // Single mutable
+    let (mut a, b) = pair;
+    let (a, mut b) = pair;
+
+    // Multiple mutables
+    let (mut a, mut b) = pair;
+    let (mut x, mut y, mut z) = triple;
+
+    // Mixed mutable and immutable
+    let (a, mut b, c) = triple;
+    let (mut a, b, mut c) = triple;
+}
+
+// ============================================================================
+// SECTION 7: Tuple Patterns with Ref Bindings
+// ============================================================================
+
+fn test_ref_in_tuples() {
+    // Ref bindings
+    let (ref a, ref b) = pair;
+    let (ref x, y) = pair;
+    let (x, ref y) = pair;
+
+    // Ref mut bindings
+    let (ref mut a, ref mut b) = pair;
+    let (ref mut x, y) = pair;
+    let (x, ref mut y) = pair;
+
+    // Mixed ref and ref mut
+    let (ref a, ref mut b) = pair;
+    let (ref mut a, ref b, c) = triple;
+}
+
+// ============================================================================
+// SECTION 8: Tuple Patterns with @ Bindings
+// ============================================================================
+
+fn test_at_in_tuples() {
+    // @ on individual elements
+    let (a @ 0, b) = pair;
+    let (a, b @ Some(_)) = pair;
+
+    // @ on the whole tuple
+    let whole @ (a, b) = pair;
+    let all @ (x, y, z) = triple;
+
+    // Nested @ bindings
+    let outer @ (inner @ (a, b), c) = nested;
+    let whole @ ((a, b), (c, d)) = double;
+
+    // @ with other modifiers
+    let whole @ (mut a, ref b) = pair;
+}
+
+// ============================================================================
+// SECTION 9: Tuple Patterns with Variants
+// ============================================================================
+
+fn test_tuples_with_variants() {
+    // Variants in tuples
+    let (Some(x), y) = pair;
+    let (x, Some(y)) = pair;
+    let (Some(a), Some(b)) = pair;
+
+    // Result in tuples
+    let (Ok(value), status) = pair;
+    let (result, Err(error)) = pair;
+
+    // Mixed variants
+    let (Some(x), Ok(y), None) = triple;
+}
+
+// ============================================================================
+// SECTION 10: Tuple Patterns with Records
+// ============================================================================
+
+fn test_tuples_with_records() {
+    // Records in tuples
+    let (Point { x, y }, z) = pair;
+    let (name, Person { age, .. }) = pair;
+
+    // Multiple records
+    let (Point { x: x1, y: y1 }, Point { x: x2, y: y2 }) = line;
+
+    // Nested records and tuples
+    let (Point { x, y }, (a, b)) = complex;
+}
+
+// ============================================================================
+// SECTION 11: Tuple Patterns with Arrays
+// ============================================================================
+
+fn test_tuples_with_arrays() {
+    // Arrays in tuples
+    let ([a, b], c) = pair;
+    let (x, [y, z]) = pair;
+    let ([a, b], [c, d]) = pair;
+
+    // With rest patterns
+    let ([first, ..], rest) = pair;
+    let (head, [.., last]) = pair;
+}
+
+// ============================================================================
+// SECTION 12: Tuple Patterns in Match Arms
+// ============================================================================
+
+fn test_tuples_in_match() {
+    // Basic tuple matching
+    match pair {
+        (0, 0) => origin(),
+        (x, 0) => on_x_axis(x),
+        (0, y) => on_y_axis(y),
+        (x, y) => general(x, y)
+    }
+
+    // Nested in match
+    match nested {
+        ((0, 0), _) => first_origin(),
+        (_, (0, 0)) => second_origin(),
+        ((a, b), (c, d)) => general(a, b, c, d)
+    }
+
+    // With guards
+    match pair {
+        (x, y) if x == y => diagonal(x),
+        (x, y) if x > y => upper(x, y),
+        (x, y) => lower(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 13: Tuple Patterns in Function Parameters
+// ============================================================================
+
+fn process_pair((a, b): (Int, Int)) -> Int {
+    a + b
+}
+
+fn process_nested(((x, y), z): ((Int, Int), Int)) -> Int {
+    x + y + z
+}
+
+fn process_with_wildcard((a, _): (Int, Text)) -> Int {
+    a
+}
+
+fn process_mutable((mut a, b): (Int, Int)) -> Int {
+    a = a + 1;
+    a + b
+}
+
+// ============================================================================
+// SECTION 14: Tuple Patterns in For Loops
+// ============================================================================
+
+fn test_tuples_in_loops() {
+    // Pair destructuring
+    for (index, value) in enumerated {
+        process(index, value)
+    }
+
+    // Nested tuple in loop
+    for ((a, b), c) in nested_items {
+        process(a, b, c)
+    }
+
+    // With wildcards
+    for (_, value) in indexed {
+        process(value)
+    }
+
+    for (index, _) in indexed {
+        process(index)
+    }
+}
+
+// ============================================================================
+// SECTION 15: Tuple Patterns in If-Let and While-Let
+// ============================================================================
+
+fn test_tuples_in_conditionals() {
+    // If-let with tuple
+    if let (Some(x), Some(y)) = get_pair() {
+        use(x, y)
+    }
+
+    if let (0, y) = pair {
+        on_y_axis(y)
+    }
+
+    // While-let with tuple
+    while let (Some(a), Some(b)) = get_next() {
+        process(a, b)
+    }
+}
+
+// ============================================================================
+// SECTION 16: Complex Tuple Patterns
+// ============================================================================
+
+fn test_complex_tuples() {
+    // All features combined
+    let whole @ (
+        ref mut a,
+        (Some(inner @ 42), _),
+        Point { x: 0, y },
+        [first, ..],
+    ) = complex_value;
+
+    // Deeply nested with various patterns
+    match data {
+        ((a @ 0, _), (_, b @ 1)) => special(a, b),
+        ((ref x, mut y), (ref mut z, w)) => mixed(x, y, z, w),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 17: Or Patterns in Tuples
+// ============================================================================
+
+fn test_or_in_tuples() {
+    // Or pattern in tuple element
+    let (0 | 1, y) = pair;
+    let (x, 0 | 1) = pair;
+
+    // Multiple or patterns
+    let (0 | 1, 0 | 1) = pair;
+
+    // In match
+    match pair {
+        (0 | 1, 0 | 1) => small(),
+        (x, y) => other(x, y)
+    }
+}

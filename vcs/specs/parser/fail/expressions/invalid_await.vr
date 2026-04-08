@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, await, error
+// @description: Await without expression to await
+// @expected-error: E018
+
+fn test() {
+    let x = .await;  // Await without preceding expression
+}

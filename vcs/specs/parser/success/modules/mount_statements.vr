@@ -1,0 +1,24 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Basic mount statement
+mount core.collections;
+
+// Mount with alias
+mount core.io as io;
+
+// Mount specific item
+mount core.collections.List;
+
+// Mount with item alias
+mount core.collections.HashMap as Map;
+
+// Multiple mounts
+mount core.fs;
+mount core.net;
+mount core.sync;
+
+// Mount from relative path
+mount super.utils;
+mount cog.helpers;

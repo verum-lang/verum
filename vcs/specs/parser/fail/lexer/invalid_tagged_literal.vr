@@ -1,0 +1,18 @@
+// @test: parse-fail
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, tagged, error
+// @description: Test invalid tagged literal syntax
+//
+// Per simplified literal architecture v6.0:
+//   - Tagged literals use: tag#"content" or tag#"""content"""
+//   - The tag must be a valid identifier
+//   - The # must be immediately followed by " or """
+//
+// @expected-error: E010
+
+fn test_invalid_tagged_literal_missing_quote() {
+    // Tag followed by # but no string
+    let s = tag#;
+}

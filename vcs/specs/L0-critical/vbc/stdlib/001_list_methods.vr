@@ -1,0 +1,240 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, list
+
+@test
+fn test_list_len() {
+    let xs = [1, 2, 3, 4, 5];
+    assert_eq(xs.len(), 5);
+    let empty: List<Int> = [];
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_list_is_empty() {
+    let xs = [1, 2, 3];
+    assert(!xs.is_empty());
+    let empty: List<Int> = [];
+    assert(empty.is_empty());
+}
+
+@test
+fn test_list_get() {
+    let xs = [10, 20, 30];
+    assert_eq(xs.get(0) is Some, true);
+    assert_eq(xs.get(5) is None, true);
+}
+
+@test
+fn test_list_first_last() {
+    let xs = [10, 20, 30];
+    assert(xs.first() is Some);
+    assert(xs.last() is Some);
+    let empty: List<Int> = [];
+    assert(empty.first() is None);
+}
+
+@test
+fn test_list_contains() {
+    let xs = [1, 2, 3, 4, 5];
+    assert(xs.contains(3));
+    assert(!xs.contains(99));
+}
+
+@test
+fn test_list_push() {
+    let mut xs = [1, 2, 3];
+    xs.push(4);
+    assert_eq(xs.len(), 4);
+}
+
+@test
+fn test_list_pop() {
+    let mut xs = [1, 2, 3];
+    let last = xs.pop();
+    assert(last is Some);
+    assert_eq(xs.len(), 2);
+}
+
+@test
+fn test_list_clear() {
+    let mut xs = [1, 2, 3];
+    xs.clear();
+    assert(xs.is_empty());
+}
+
+@test
+fn test_list_reverse() {
+    let mut xs = [1, 2, 3];
+    xs.reverse();
+    assert_eq(xs.get(0) is Some, true);
+}
+
+@test
+fn test_list_map() {
+    let xs = [1, 2, 3];
+    let doubled = xs.map(|x| x * 2);
+    assert_eq(doubled.len(), 3);
+}
+
+@test
+fn test_list_filter() {
+    let xs = [1, 2, 3, 4, 5, 6];
+    let evens = xs.filter(|x| x % 2 == 0);
+    assert_eq(evens.len(), 3);
+}
+
+@test
+fn test_list_fold() {
+    let xs = [1, 2, 3, 4];
+    let sum = xs.fold(0, |acc, x| acc + x);
+    assert_eq(sum, 10);
+}
+
+@test
+fn test_list_for_each() {
+    let xs = [1, 2, 3];
+    let mut count = 0;
+    xs.for_each(|_x| { count = count + 1; });
+    assert_eq(count, 3);
+}
+
+@test
+fn test_list_any_all() {
+    let xs = [1, 2, 3, 4, 5];
+    assert(xs.any(|x| x > 3));
+    assert(!xs.all(|x| x > 3));
+    assert(xs.all(|x| x > 0));
+}
+
+@test
+fn test_list_find() {
+    let xs = [1, 2, 3, 4, 5];
+    let found = xs.find(|x| x > 3);
+    assert(found is Some);
+}
+
+@test
+fn test_list_position() {
+    let xs = [10, 20, 30, 40];
+    let pos = xs.position(|x| x == 30);
+    assert(pos is Some);
+}
+
+@test
+fn test_list_skip_take() {
+    let xs = [1, 2, 3, 4, 5];
+    let skipped = xs.skip(2);
+    assert_eq(skipped.len(), 3);
+    let taken = xs.take(3);
+    assert_eq(taken.len(), 3);
+}
+
+@test
+fn test_list_sum() {
+    let xs = [1, 2, 3, 4, 5];
+    assert_eq(xs.sum(), 15);
+}
+
+@test
+fn test_list_min_max() {
+    let xs = [3, 1, 4, 1, 5, 9];
+    assert(xs.min() is Some);
+    assert(xs.max() is Some);
+    let empty: List<Int> = [];
+    assert(empty.min() is None);
+}
+
+@test
+fn test_list_extend() {
+    let mut xs = [1, 2];
+    let ys = [3, 4];
+    xs.extend(ys);
+    assert_eq(xs.len(), 4);
+}
+
+@test
+fn test_list_dedup() {
+    let mut xs = [1, 1, 2, 2, 3, 3];
+    xs.dedup();
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_list_slice() {
+    let xs = [1, 2, 3, 4, 5];
+    let s = xs.slice(1, 4);
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_list_sort() {
+    let mut xs = [3, 1, 4, 1, 5];
+    xs.sort();
+    assert_eq(xs.len(), 5);
+}
+
+@test
+fn test_list_enumerate() {
+    let xs = [10, 20, 30];
+    let pairs = xs.enumerate();
+    assert_eq(pairs.len(), 3);
+}
+
+@test
+fn test_list_zip() {
+    let xs = [1, 2, 3];
+    let ys = [4, 5, 6];
+    let zipped = xs.zip(ys);
+    assert_eq(zipped.len(), 3);
+}
+
+@test
+fn test_list_flatten() {
+    let nested = [[1, 2], [3, 4]];
+    let flat = nested.flatten();
+    assert_eq(flat.len(), 4);
+}
+
+@test
+fn test_list_flat_map() {
+    let xs = [1, 2, 3];
+    let result = xs.flat_map(|x| [x, x * 10]);
+    assert_eq(result.len(), 6);
+}
+
+@test
+fn test_list_retain() {
+    let mut xs = [1, 2, 3, 4, 5];
+    xs.retain(|x| x % 2 == 0);
+    assert_eq(xs.len(), 2);
+}
+
+@test
+fn test_list_swap() {
+    let mut xs = [1, 2, 3];
+    xs.swap(0, 2);
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_list_insert() {
+    let mut xs = [1, 3, 4];
+    xs.insert(1, 2);
+    assert_eq(xs.len(), 4);
+}
+
+@test
+fn test_list_remove() {
+    let mut xs = [1, 2, 3, 4];
+    let removed = xs.remove(1);
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_list_join() {
+    let xs = [1, 2, 3];
+    let s = xs.join(", ");
+    assert(!s.is_empty());
+}

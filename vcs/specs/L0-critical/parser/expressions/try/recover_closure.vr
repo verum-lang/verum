@@ -1,0 +1,325 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, error-handling, try, recover, closure, v2.8
+
+// ============================================================================
+// Verum v2.8 - Recover Closure Syntax
+// Grammar: recover_body = recover_match_arms | recover_closure ;
+// Grammar: recover_closure = closure_params , recover_closure_body ;
+// Grammar: recover_closure_body = block_expr | expression ;
+//
+// The closure syntax provides ergonomic error recovery for simple cases:
+//   recover |e| handle(e)         - expression form
+//   recover |e| { ... }           - block form
+//   recover |_| fallback          - ignored error
+// ============================================================================
+
+// Simple recover closure with expression
+fn simple_closure() -> Int {
+    try {
+        risky()
+    } recover |e| handle(e)
+}
+
+// Recover closure with block body
+fn closure_with_block() -> Int {
+    try {
+        risky()
+    } recover |e| {
+        log(e);
+        default
+    }
+}
+
+// Recover closure ignoring error (wildcard)
+fn ignore_error() -> Int {
+    try {
+        op()
+    } recover |_| fallback
+}
+
+// Recover closure with complex expression
+fn complex_expression() -> Data {
+    try {
+        fetch_data()
+    } recover |e| if e.is_recoverable() { recovery_data() } else { panic(e) }
+}
+
+// Recover closure as expression value
+fn test_recover_as_expr() {
+    let result = try {
+        parse(input)
+    } recover |e| {
+        log_error(e);
+        default_value
+    };
+}
+
+// Recover closure with async
+async fn async_recover() -> Data {
+    try {
+        fetch().await
+    } recover |e| recover_async(e).await
+}
+
+// Recover closure with type annotation on result
+fn test_typed_result() {
+    let typed_result: Int = try {
+        compute()
+    } recover |_| 0;
+}
+
+// Multiple statements in recover closure block
+fn multi_statement_recover() -> Result<Int, Error> {
+    try {
+        risky_computation()
+    } recover |e| {
+        let wrapped = wrap_error(e);
+        log_wrapped(wrapped);
+        let fallback = compute_fallback();
+        fallback
+    }
+}
+
+// Recover closure with early return
+fn early_return_recover() -> Result<Int, Error> {
+    try {
+        risky()
+    } recover |e| {
+        if e.is_fatal() {
+            return Err(e);
+        }
+        fallback_value()
+    }
+}
+
+// Recover closure capturing outer scope
+fn capturing_recover() -> Int {
+    let default_value = 42;
+    let logger = get_logger();
+
+    try {
+        operation()
+    } recover |e| {
+        logger.log(e);
+        default_value
+    }
+}
+
+// Recover closure with pattern in parameter (destructuring)
+fn destructuring_recover() -> Text {
+    try {
+        parse_config()
+    } recover |Error { message, .. }| {
+        log(message);
+        Text.from("default config")
+    }
+}
+
+// Nested try with recover closures
+fn nested_recover() -> Int {
+    try {
+        try {
+            inner_risky()
+        } recover |e| partial_recovery(e)
+    } recover |e| full_recovery(e)
+}
+
+// Recover closure with finally
+fn closure_with_finally() -> Int {
+    try {
+        operation()
+    } recover |e| {
+        handle_error(e);
+        default_value
+    } finally {
+        cleanup();
+    }
+}
+
+// Recover closure in loop
+fn recover_in_loop() -> List<Int> {
+    let mut results = [];
+
+    for item in items {
+        let value = try {
+            process(item)
+        } recover |_| 0;
+
+        results.push(value);
+    }
+
+    results
+}
+
+// Recover closure with chained operations
+fn chained_recover() -> Data {
+    try {
+        step1()
+    } recover |e1| {
+        log("Step 1 failed");
+        try {
+            fallback_step1()
+        } recover |e2| {
+            log("Fallback also failed");
+            ultimate_fallback()
+        }
+    }
+}
+
+// Recover closure with conditional expression
+fn conditional_recover() -> Int {
+    try {
+        compute()
+    } recover |e| match e.kind() {
+        ErrorKind.Timeout => retry_value(),
+        ErrorKind.NotFound => default_value(),
+        _ => panic_value(),
+    }
+}
+
+// Recover closure with spawn
+fn spawn_in_recover() -> Int {
+    try {
+        operation()
+    } recover |e| {
+        spawn async_log(e);
+        fallback
+    }
+}
+
+// Recover closure with method chaining in body
+fn method_chain_recover() -> Text {
+    try {
+        fetch_text()
+    } recover |e| e
+        .message()
+        .unwrap_or("unknown error")
+        .to_uppercase()
+}
+
+// Recover closure returning Option/Maybe
+fn maybe_recover() -> Maybe<Int> {
+    try {
+        Some(risky()?)
+    } recover |_| None
+}
+
+// Recover closure with tuple return
+fn tuple_recover() -> (Int, Text) {
+    try {
+        get_tuple()
+    } recover |e| (0, e.to_text())
+}
+
+// Recover closure with record construction
+fn record_recover() -> Response {
+    try {
+        success_response()
+    } recover |e| Response {
+        status: 500,
+        body: e.message(),
+        headers: {},
+    }
+}
+
+// Compare: recover closure vs recover match arms
+fn closure_vs_match() {
+    // Closure syntax - for simple single-handler cases
+    let result1 = try { op() } recover |e| handle(e);
+
+    // Match arms syntax - for pattern matching multiple error types
+    let result2 = try { op() } recover {
+        Error.TypeA(a) => handle_a(a),
+        Error.TypeB(b) => handle_b(b),
+        e => handle_other(e),
+    };
+}
+
+// Recover closure with context
+fn context_recover() -> Data using [Logger, Metrics] {
+    try {
+        fetch_data()
+    } recover |e| {
+        Logger.error(f"Fetch failed: {e}");
+        Metrics.increment("fetch_failures");
+        cached_data()
+    }
+}
+
+// Recover closure with question mark propagation
+fn propagating_recover() -> Result<Int, Error> {
+    try {
+        inner_op()
+    } recover |e| {
+        if e.is_retriable() {
+            retry()?
+        } else {
+            return Err(e);
+        }
+    }
+}
+
+// Recover closure with break/continue in loop context
+fn loop_control_recover() {
+    for item in items {
+        try {
+            process(item)
+        } recover |e| {
+            if e.is_skip() {
+                continue;
+            }
+            if e.is_stop() {
+                break;
+            }
+            log(e);
+        }
+    }
+}
+
+// Async recover closure with await
+async fn async_recover_await() -> Data {
+    try {
+        primary_fetch().await
+    } recover |e| {
+        log_error(e).await;
+        fallback_fetch().await
+    }
+}
+
+// Recover closure with pipe operator in body
+fn pipe_recover() -> Int {
+    try {
+        get_value()
+    } recover |e| e
+        |> extract_code
+        |> default_for_code
+}
+
+// Complex recover closure demonstrating all features
+fn comprehensive_recover() -> Result<Data, FatalError> using [Logger] {
+    let config = get_config();
+
+    try {
+        let raw = fetch_raw()?;
+        let parsed = parse(raw)?;
+        let validated = validate(parsed)?;
+        validated
+    } recover |e| {
+        Logger.warn(f"Operation failed: {e}");
+
+        if e.is_fatal() {
+            return Err(FatalError.from(e));
+        }
+
+        let fallback = match e.kind() {
+            ErrorKind.Parse => config.parse_fallback,
+            ErrorKind.Validate => config.validate_fallback,
+            _ => config.default_fallback,
+        };
+
+        Logger.info(f"Using fallback: {fallback}");
+        fallback
+    }
+}

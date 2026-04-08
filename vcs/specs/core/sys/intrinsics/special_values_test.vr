@@ -1,0 +1,44 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test special values
+
+module test.stdlib.sys.intrinsics.special_values_test;
+
+mount core.intrinsics.{
+    exp_f64, log_f64, sqrt_f64, asin_f64,
+    f64_infinity, f64_neg_infinity, f64_nan,
+    f32_infinity, f32_nan,
+};
+
+fn is_nan_f64(x: Float64) -> Bool {
+    x != x
+}
+
+fn main() {
+    print("Testing infinity...");
+    let inf = f64_infinity();
+    print(f"inf = {inf}");
+    let neg_inf = f64_neg_infinity();
+    print(f"neg_inf = {neg_inf}");
+
+    assert(inf > 0.0);
+    assert(neg_inf < 0.0);
+    print("Infinity tests passed!");
+
+    print("Testing NaN...");
+    let nan = f64_nan();
+    assert(is_nan_f64(nan));
+    print("NaN basic test passed!");
+
+    print("Testing NaN propagation...");
+    assert(is_nan_f64(nan + 1.0));
+    print("NaN + 1 passed!");
+    assert(is_nan_f64(nan * 2.0));
+    print("NaN * 2 passed!");
+    assert(is_nan_f64(sqrt_f64(-1.0)));
+    print("sqrt(-1) passed!");
+
+    print("All special values tests passed!");
+}

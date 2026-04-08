@@ -1,0 +1,22 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // false → 0
+    let b1: Bool = false;
+    let i1: Int = b1 as Int;
+    assert_eq(i1, 0);
+
+    // true → 1
+    let b2: Bool = true;
+    let i2: Int = b2 as Int;
+    assert_eq(i2, 1);
+
+    // Expression context
+    let x = (true as Int) + (false as Int);
+    assert_eq(x, 1);
+
+    let y = (true as Int) * 10;
+    assert_eq(y, 10);
+}

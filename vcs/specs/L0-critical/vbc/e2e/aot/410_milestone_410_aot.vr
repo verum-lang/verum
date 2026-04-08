@@ -1,0 +1,310 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, milestone, josephus, binary-search, running-median
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Milestone 410 integration test combining:
+// (a) Josephus problem (N people in circle, every K-th eliminated)
+// (b) Binary search variations (lower_bound, upper_bound)
+// (c) Running median using two sorted arrays (simulated heaps)
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+// ========== Part 1: Josephus Problem ==========
+// N people numbered 0..N-1 in a circle. Every K-th person eliminated.
+// Returns the survivor's original number (0-indexed).
+// Uses the recurrence: J(1,k)=0, J(n,k) = (J(n-1,k) + k) % n
+
+fn josephus(n: Int, k: Int) -> Int {
+    let mut pos = 0;
+    let mut i = 2;
+    while i <= n {
+        pos = (pos + k) % i;
+        i = i + 1;
+    }
+    pos
+}
+
+// Simulation approach: track alive status in Arr16, return survivor
+fn josephus_sim(n: Int, k: Int) -> Int {
+    let mut alive = a16_zero();
+    let mut i = 0;
+    while i < n {
+        alive = a16_set(alive, i, 1);
+        i = i + 1;
+    }
+    let mut remaining = n;
+    let mut cur = 0;
+    let mut last = 0;
+    while remaining > 1 {
+        let mut count = 0;
+        while count < k {
+            if a16_get(alive, cur) == 1 {
+                count = count + 1;
+                if count == k {
+                    alive = a16_set(alive, cur, 0);
+                    last = cur;
+                    remaining = remaining - 1;
+                }
+            }
+            cur = (cur + 1) % n;
+        }
+    }
+    // Find the last one alive
+    let mut j = 0;
+    while j < n {
+        if a16_get(alive, j) == 1 { return j; }
+        j = j + 1;
+    }
+    0
+}
+
+fn test_josephus_small() -> Int {
+    // J(1, 2) = 0
+    assert_eq(josephus(1, 2), 0);
+    // J(2, 2) = (0+2)%2 = 0
+    assert_eq(josephus(2, 2), 0);
+    // J(3, 2) = 2 (well known: 0,1,2 => eliminate 1, then 0, survivor is 2)
+    // Actually: J(2,2)=0, J(3,2)=(0+2)%3=2
+    assert_eq(josephus(3, 2), 2);
+    0
+}
+
+fn test_josephus_classic() -> Int {
+    // J(7, 3): classic problem, survivor is person 3
+    // J(2,3)=1, J(3,3)=1, J(4,3)=0, J(5,3)=3, J(6,3)=0, J(7,3)=3
+    assert_eq(josephus(7, 3), 3);
+    // Verify with simulation
+    assert_eq(josephus_sim(7, 3), 3);
+    0
+}
+
+fn test_josephus_sim_match() -> Int {
+    // Verify formula matches simulation for several values
+    assert_eq(josephus(5, 2), josephus_sim(5, 2));
+    assert_eq(josephus(6, 3), josephus_sim(6, 3));
+    assert_eq(josephus(8, 2), josephus_sim(8, 2));
+    assert_eq(josephus(10, 3), josephus_sim(10, 3));
+    0
+}
+
+// ========== Part 2: Binary Search Variations ==========
+// Sorted array in Arr16. lower_bound returns first index >= target.
+// upper_bound returns first index > target.
+
+fn lower_bound(a: Arr16, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if a16_get(a, mid) < target {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+fn upper_bound(a: Arr16, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if a16_get(a, mid) <= target {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+// Count occurrences of target in sorted array
+fn count_occurrences(a: Arr16, n: Int, target: Int) -> Int {
+    upper_bound(a, n, target) - lower_bound(a, n, target)
+}
+
+fn test_lower_bound() -> Int {
+    // [1, 2, 2, 3, 5, 5, 5, 8]
+    let mut a = a16_zero();
+    a = a16_set(a, 0, 1); a = a16_set(a, 1, 2); a = a16_set(a, 2, 2);
+    a = a16_set(a, 3, 3); a = a16_set(a, 4, 5); a = a16_set(a, 5, 5);
+    a = a16_set(a, 6, 5); a = a16_set(a, 7, 8);
+    assert_eq(lower_bound(a, 8, 2), 1);
+    assert_eq(lower_bound(a, 8, 5), 4);
+    assert_eq(lower_bound(a, 8, 1), 0);
+    assert_eq(lower_bound(a, 8, 4), 4); // not present, first >= 4 is at index 4 (val 5)
+    0
+}
+
+fn test_upper_bound() -> Int {
+    let mut a = a16_zero();
+    a = a16_set(a, 0, 1); a = a16_set(a, 1, 2); a = a16_set(a, 2, 2);
+    a = a16_set(a, 3, 3); a = a16_set(a, 4, 5); a = a16_set(a, 5, 5);
+    a = a16_set(a, 6, 5); a = a16_set(a, 7, 8);
+    assert_eq(upper_bound(a, 8, 2), 3);
+    assert_eq(upper_bound(a, 8, 5), 7);
+    assert_eq(upper_bound(a, 8, 8), 8);
+    assert_eq(upper_bound(a, 8, 0), 0); // all > 0
+    0
+}
+
+fn test_count_occurrences() -> Int {
+    let mut a = a16_zero();
+    a = a16_set(a, 0, 1); a = a16_set(a, 1, 2); a = a16_set(a, 2, 2);
+    a = a16_set(a, 3, 3); a = a16_set(a, 4, 5); a = a16_set(a, 5, 5);
+    a = a16_set(a, 6, 5); a = a16_set(a, 7, 8);
+    assert_eq(count_occurrences(a, 8, 2), 2);
+    assert_eq(count_occurrences(a, 8, 5), 3);
+    assert_eq(count_occurrences(a, 8, 1), 1);
+    assert_eq(count_occurrences(a, 8, 4), 0); // not present
+    0
+}
+
+// ========== Part 3: Running Median ==========
+// Maintain a sorted array. Insert element, get median.
+// sorted_insert into Arr8 (max 8 elements).
+
+fn sorted_insert(a: Arr8, n: Int, val: Int) -> Arr8 {
+    // Find insertion position
+    let mut pos = n;
+    let mut i = 0;
+    while i < n {
+        if a8_get(a, i) >= val {
+            pos = i;
+            i = n; // break
+        } else {
+            i = i + 1;
+        }
+    }
+    // Shift elements right from pos
+    let mut j = n;
+    let mut arr = a;
+    while j > pos {
+        arr = a8_set(arr, j, a8_get(arr, j - 1));
+        j = j - 1;
+    }
+    a8_set(arr, pos, val)
+}
+
+// Median of sorted array with n elements.
+// Returns median * 2 to avoid fractions (e.g. median of [1,2] = 3 meaning 1.5)
+fn median_x2(a: Arr8, n: Int) -> Int {
+    if n % 2 == 1 {
+        a8_get(a, n / 2) * 2
+    } else {
+        a8_get(a, n / 2 - 1) + a8_get(a, n / 2)
+    }
+}
+
+fn test_running_median() -> Int {
+    // Stream: 5, 3, 8, 1, 7
+    let mut sorted = a8_zero();
+    // Insert 5
+    sorted = sorted_insert(sorted, 0, 5);
+    assert_eq(median_x2(sorted, 1), 10); // median=5, *2=10
+    // Insert 3 -> [3, 5]
+    sorted = sorted_insert(sorted, 1, 3);
+    assert_eq(median_x2(sorted, 2), 8);  // median=4, *2=8
+    // Insert 8 -> [3, 5, 8]
+    sorted = sorted_insert(sorted, 2, 8);
+    assert_eq(median_x2(sorted, 3), 10); // median=5, *2=10
+    0
+}
+
+fn test_running_median_more() -> Int {
+    let mut sorted = a8_zero();
+    sorted = sorted_insert(sorted, 0, 5);
+    sorted = sorted_insert(sorted, 1, 3);
+    sorted = sorted_insert(sorted, 2, 8);
+    // Insert 1 -> [1, 3, 5, 8]
+    sorted = sorted_insert(sorted, 3, 1);
+    assert_eq(median_x2(sorted, 4), 8);  // median=(3+5)/2=4, *2=8
+    // Insert 7 -> [1, 3, 5, 7, 8]
+    sorted = sorted_insert(sorted, 4, 7);
+    assert_eq(median_x2(sorted, 5), 10); // median=5, *2=10
+    0
+}
+
+fn test_running_median_duplicates() -> Int {
+    // Stream: 4, 4, 4, 4
+    let mut sorted = a8_zero();
+    sorted = sorted_insert(sorted, 0, 4);
+    assert_eq(median_x2(sorted, 1), 8);
+    sorted = sorted_insert(sorted, 1, 4);
+    assert_eq(median_x2(sorted, 2), 8);
+    sorted = sorted_insert(sorted, 2, 4);
+    assert_eq(median_x2(sorted, 3), 8);
+    sorted = sorted_insert(sorted, 3, 4);
+    assert_eq(median_x2(sorted, 4), 8);
+    0
+}
+
+fn main() -> Int {
+    test_josephus_small();
+    test_josephus_classic();
+    test_josephus_sim_match();
+    test_lower_bound();
+    test_upper_bound();
+    test_count_occurrences();
+    test_running_median();
+    test_running_median_more();
+    test_running_median_duplicates();
+    print("Milestone 410 - All integration tests passed!");
+    0
+}

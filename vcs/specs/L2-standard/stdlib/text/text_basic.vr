@@ -1,0 +1,487 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, text, string, basic
+
+/// Comprehensive test suite for basic Text operations.
+/// Text is the semantic string type (equivalent to String).
+/// Tests creation, concatenation, and fundamental string operations.
+
+fn main() {
+    test_text_creation();
+    test_text_concatenation();
+    test_text_length();
+    test_text_comparison();
+    test_text_case_conversion();
+    test_text_trimming();
+    test_text_padding();
+    test_text_repetition();
+    test_text_conversion();
+    test_text_clone_and_copy();
+}
+
+/// Test various ways to create Text values
+fn test_text_creation() {
+    // Empty text
+    let empty: Text = Text.new();
+    assert(empty.is_empty());
+    assert(empty.len() == 0);
+
+    // From literal
+    let from_literal: Text = "Hello, World!";
+    assert(from_literal.len() == 13);
+
+    // With capacity
+    let with_capacity: Text = Text.with_capacity(100);
+    assert(with_capacity.is_empty());
+    assert(with_capacity.capacity() >= 100);
+
+    // From characters
+    let from_chars: Text = ['H', 'e', 'l', 'l', 'o'].iter().collect();
+    assert(from_chars == "Hello");
+
+    // From bytes (UTF-8)
+    let bytes: [u8; 5] = [72, 101, 108, 108, 111];  // "Hello"
+    let from_bytes: Text = Text.from_utf8(bytes.to_vec()).unwrap();
+    assert(from_bytes == "Hello");
+
+    // From bytes lossy (replaces invalid UTF-8)
+    let invalid_bytes: [u8; 4] = [72, 101, 0xFF, 111];
+    let from_lossy: Text = Text.from_utf8_lossy(&invalid_bytes);
+    assert(from_lossy.len() > 0);
+
+    // From code point
+    let from_char: Text = Text.from('A');
+    assert(from_char == "A");
+
+    // From format string
+    let name: Text = "Alice";
+    let age: Int = 30;
+    let formatted: Text = f"Name: {name}, Age: {age}";
+    assert(formatted == "Name: Alice, Age: 30");
+
+    // Raw string (no escape processing)
+    let raw: Text = """Line1\nLine2""";
+    assert(raw.contains("\\n"));
+
+    // Multi-line string
+    let multi: Text = "Line 1
+Line 2
+Line 3";
+    assert(multi.lines().count() == 3);
+}
+
+/// Test text concatenation
+fn test_text_concatenation() {
+    // Using + operator
+    let a: Text = "Hello";
+    let b: Text = ", World!";
+    let combined: Text = a + &b;
+    assert(combined == "Hello, World!");
+
+    // Using push_str
+    let mut mutable: Text = "Hello".to_text();
+    mutable.push_str(", World!");
+    assert(mutable == "Hello, World!");
+
+    // Using push (single char)
+    let mut with_char: Text = "Hello".to_text();
+    with_char.push('!');
+    assert(with_char == "Hello!");
+
+    // Concatenate strings manually
+    let joined: Text = "a" + "b" + "c";
+    assert(joined == "abc");
+
+    // Join with separator using format string
+    let with_sep: Text = "Hello" + " " + "World" + " " + "!";
+    assert(with_sep == "Hello World !");
+
+    // Format macro for complex concatenation
+    let x: Int = 10;
+    let y: Int = 20;
+    let result: Text = f"{x} + {y} = {x + y}";
+    assert(result == "10 + 20 = 30");
+
+    // Chained concatenation
+    let chained: Text = "a".to_text() + "b" + "c" + "d";
+    assert(chained == "abcd");
+
+    // extend with iterator
+    let mut extended: Text = "Hello".to_text();
+    extended.extend([' ', 'W', 'o', 'r', 'l', 'd']);
+    assert(extended == "Hello World");
+
+    // insert_str at position
+    let mut with_insert: Text = "Hello!".to_text();
+    with_insert.insert_str(5, ", World");
+    assert(with_insert == "Hello, World!");
+}
+
+/// Test text length operations
+fn test_text_length() {
+    let text: Text = "Hello, World!";
+
+    // len() - byte length
+    assert(text.len() == 13);
+
+    // chars().count() - character count
+    assert(text.chars().count() == 13);
+
+    // Unicode string (character count differs from byte length)
+    let unicode: Text = "Hello, \u{4E16}\u{754C}!";  // "Hello, World!" in Chinese chars
+    assert(unicode.chars().count() == 10);
+    assert(unicode.len() > 10);  // UTF-8 bytes > char count
+
+    // Empty string
+    let empty: Text = "";
+    assert(empty.len() == 0);
+    assert(empty.is_empty());
+
+    // Whitespace-only string
+    let whitespace: Text = "   ";
+    assert(!whitespace.is_empty());
+    assert(whitespace.len() == 3);
+
+    // capacity
+    let mut with_cap: Text = Text.with_capacity(100);
+    assert(with_cap.capacity() >= 100);
+    with_cap.push_str("Hello");
+    assert(with_cap.len() == 5);
+    assert(with_cap.capacity() >= 100);
+
+    // Emoji character
+    let emoji: Text = "\u{1F600}";  // Grinning face
+    assert(emoji.chars().count() == 1);
+    assert(emoji.len() == 4);  // 4 UTF-8 bytes
+}
+
+/// Test text comparison
+fn test_text_comparison() {
+    let a: Text = "apple";
+    let b: Text = "apple";
+    let c: Text = "Apple";
+    let d: Text = "banana";
+
+    // Equality
+    assert(a == b);
+    assert(a != c);
+    assert(a != d);
+
+    // Ordering (lexicographic)
+    assert(a < d);  // "apple" < "banana"
+    assert(a > c);  // "apple" > "Apple" (lowercase > uppercase)
+
+    // Case-insensitive comparison
+    assert(a.to_lowercase() == c.to_lowercase());
+
+    // Partial equality
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+
+    // Compare with str
+    assert(a == "apple");
+    assert(a != "Apple");
+
+    // starts_with / ends_with
+    let text: Text = "Hello, World!";
+    assert(text.starts_with("Hello"));
+    assert(text.starts_with(""));
+    assert(!text.starts_with("World"));
+    assert(text.ends_with("!"));
+    assert(text.ends_with("World!"));
+    assert(!text.ends_with("Hello"));
+
+    // contains
+    assert(text.contains("World"));
+    assert(text.contains(""));
+    assert(!text.contains("world"));  // Case sensitive
+
+    // Empty string comparisons
+    let empty: Text = "";
+    assert(empty == "");
+    assert(empty < a);
+}
+
+/// Test case conversion
+fn test_text_case_conversion() {
+    let mixed: Text = "Hello, World!";
+
+    // to_lowercase
+    let lower: Text = mixed.to_lowercase();
+    assert(lower == "hello, world!");
+
+    // to_uppercase
+    let upper: Text = mixed.to_uppercase();
+    assert(upper == "HELLO, WORLD!");
+
+    // Unicode case conversion
+    let german: Text = "\u{00DF}";  // German sharp S
+    let upper_german: Text = german.to_uppercase();
+    assert(upper_german == "SS");
+
+    // Turkish dotless i
+    let turkish: Text = "I\u{0131}";  // I + dotless i
+    // Standard lowercasing
+    assert(turkish.to_lowercase() == "i\u{0131}");
+
+    // Already lowercase
+    let lower_only: Text = "already lowercase";
+    assert(lower_only.to_lowercase() == lower_only);
+
+    // Already uppercase
+    let upper_only: Text = "ALREADY UPPERCASE";
+    assert(upper_only.to_uppercase() == upper_only);
+
+    // Numbers and symbols unchanged
+    let with_nums: Text = "Hello123!@#";
+    assert(with_nums.to_lowercase() == "hello123!@#");
+    assert(with_nums.to_uppercase() == "HELLO123!@#");
+
+    // make_ascii_lowercase / make_ascii_uppercase (in-place, ASCII only)
+    let mut ascii: Text = "Hello".to_text();
+    ascii.make_ascii_lowercase();
+    assert(ascii == "hello");
+    ascii.make_ascii_uppercase();
+    assert(ascii == "HELLO");
+}
+
+/// Test trimming operations
+fn test_text_trimming() {
+    let padded: Text = "   Hello, World!   ";
+
+    // trim - both ends
+    assert(padded.trim() == "Hello, World!");
+
+    // trim_start / trim_end
+    assert(padded.trim_start() == "Hello, World!   ");
+    assert(padded.trim_end() == "   Hello, World!");
+
+    // Already trimmed
+    let clean: Text = "Hello";
+    assert(clean.trim() == "Hello");
+
+    // Only whitespace
+    let whitespace: Text = "   \t\n  ";
+    assert(whitespace.trim() == "");
+    assert(whitespace.trim().is_empty());
+
+    // Various whitespace characters
+    let various: Text = " \t\n\r Hello \t\n\r ";
+    assert(various.trim() == "Hello");
+
+    // trim_matches - trim specific pattern (Text-based)
+    let with_chars: Text = "###Hello###";
+    assert(with_chars.trim_matches(&"#") == "Hello");
+
+    // trim_start_matches / trim_end_matches
+    let prefixed: Text = "---Hello---";
+    assert(prefixed.trim_start_matches(&"-") == "Hello---");
+    assert(prefixed.trim_end_matches(&"-") == "---Hello");
+
+    // strip_prefix / strip_suffix
+    let with_prefix: Text = "Hello, World!";
+    let stripped: Maybe<Text> = with_prefix.strip_prefix("Hello, ");
+    assert(stripped == Some("World!".to_text()));
+
+    let suffix_stripped: Maybe<Text> = with_prefix.strip_suffix("!");
+    assert(suffix_stripped == Some("Hello, World".to_text()));
+
+    // Non-matching strip returns None
+    assert(with_prefix.strip_prefix("Goodbye").is_none());
+}
+
+/// Test padding operations
+fn test_text_padding() {
+    let short: Text = "Hi";
+
+    // Pad to length with spaces (custom implementation)
+    fn pad_left(s: &Text, width: usize) -> Text {
+        if s.len() >= width {
+            s.clone()
+        } else {
+            let padding: Text = " ".repeat(width - s.len());
+            padding + s
+        }
+    }
+
+    fn pad_right(s: &Text, width: usize) -> Text {
+        if s.len() >= width {
+            s.clone()
+        } else {
+            let padding: Text = " ".repeat(width - s.len());
+            s.clone() + &padding
+        }
+    }
+
+    fn pad_center(s: &Text, width: usize) -> Text {
+        if s.len() >= width {
+            s.clone()
+        } else {
+            let total_padding = width - s.len();
+            let left_pad = total_padding / 2;
+            let right_pad = total_padding - left_pad;
+            " ".repeat(left_pad) + s + &" ".repeat(right_pad)
+        }
+    }
+
+    // Left padding
+    let left_padded = pad_left(&short, 5);
+    assert(left_padded == "   Hi");
+    assert(left_padded.len() == 5);
+
+    // Right padding
+    let right_padded = pad_right(&short, 5);
+    assert(right_padded == "Hi   ");
+    assert(right_padded.len() == 5);
+
+    // Center padding
+    let centered = pad_center(&short, 6);
+    assert(centered == "  Hi  ");
+
+    // No padding needed
+    let long: Text = "Hello";
+    assert(pad_left(&long, 3) == "Hello");
+
+    // Pad with custom character
+    fn pad_left_with(s: &Text, width: usize, pad_char: char) -> Text {
+        if s.len() >= width {
+            s.clone()
+        } else {
+            let padding: Text = pad_char.to_text().repeat(width - s.len());
+            padding + s
+        }
+    }
+
+    let zero_padded = pad_left_with(&"42".to_text(), 5, '0');
+    assert(zero_padded == "00042");
+}
+
+/// Test repetition operations
+fn test_text_repetition() {
+    let base: Text = "ab";
+
+    // repeat
+    let repeated: Text = base.repeat(3);
+    assert(repeated == "ababab");
+
+    // repeat zero times
+    let zero: Text = base.repeat(0);
+    assert(zero == "");
+    assert(zero.is_empty());
+
+    // repeat once
+    let once: Text = base.repeat(1);
+    assert(once == "ab");
+
+    // Empty string repeated
+    let empty: Text = "";
+    assert(empty.repeat(100) == "");
+
+    // Single character repeated
+    let single: Text = "x";
+    assert(single.repeat(5) == "xxxxx");
+
+    // Large repetition
+    let large: Text = "a".repeat(1000);
+    assert(large.len() == 1000);
+    assert(large.chars().all(|c| c == 'a'));
+
+    // Unicode character repeated
+    let unicode: Text = "\u{2764}";  // Heart
+    let hearts: Text = unicode.repeat(3);
+    assert(hearts.chars().count() == 3);
+}
+
+/// Test type conversion
+fn test_text_conversion() {
+    // To bytes
+    let text: Text = "Hello";
+    let bytes: &[u8] = text.as_bytes();
+    assert(bytes.len() == 5);
+    assert(bytes[0] == 72);  // 'H'
+
+    // Into bytes (consuming)
+    let owned: Text = "World".to_text();
+    let byte_vec: List<u8> = owned.into_bytes();
+    assert(byte_vec.len() == 5);
+
+    // To chars
+    let chars: List<char> = "abc".chars().collect();
+    assert(chars == ['a', 'b', 'c']);
+
+    // To char indices
+    let indices: List<(usize, char)> = "abc".char_indices().collect();
+    assert(indices == [(0, 'a'), (1, 'b'), (2, 'c')]);
+
+    // As str slice
+    let text2: Text = "Hello".to_text();
+    let slice: &str = text2.as_str();
+    assert(slice == "Hello");
+
+    // Parse to numbers
+    let num_text: Text = "42";
+    let num: Int = num_text.parse_int().unwrap();
+    assert(num == 42);
+
+    let float_text: Text = "3.14";
+    let float: Float = float_text.parse_float().unwrap();
+    assert((float - 3.14).abs() < 0.001);
+
+    // Parse errors
+    let invalid: Text = "not_a_number";
+    let parse_res = invalid.parse_int();
+    assert(parse_res.is_err());
+
+    // Number to string
+    let from_int: Text = 42.to_text();
+    assert(from_int == "42");
+
+    let from_float: Text = 3.14.to_text();
+    assert(from_float.starts_with("3.14"));
+
+    // Boolean to string
+    let from_bool: Text = true.to_text();
+    assert(from_bool == "true");
+
+    // Debug representation (format specifiers not yet supported in f-strings)
+    // let debug: Text = f"{:?}";  // Debug format
+}
+
+/// Test clone and copy semantics
+fn test_text_clone_and_copy() {
+    // Clone
+    let original: Text = "Hello, World!";
+    let cloned: Text = original.clone();
+    assert(cloned == original);
+
+    // Modification of clone doesn't affect original
+    let mut modified: Text = original.clone();
+    modified.push_str(" Goodbye!");
+    assert(original == "Hello, World!");
+    assert(modified == "Hello, World! Goodbye!");
+
+    // clone_from (reuse allocation)
+    let mut target: Text = Text.with_capacity(100);
+    target.clone_from(&original);
+    assert(target == original);
+
+    // Into owned
+    let borrowed: &str = "borrowed";
+    let owned: Text = borrowed.to_text();
+    assert(owned == "borrowed");
+
+    // Cow (Copy on Write)
+    mount std.borrow.Cow;
+
+    let cow_borrowed: Cow<str> = Cow.Borrowed("hello");
+    let cow_owned: Cow<str> = Cow.Owned("world".to_text());
+
+    assert(cow_borrowed == "hello");
+    assert(cow_owned == "world");
+
+    // Clone preserves equality
+    let text: Text = "Hello".to_text();
+    let cloned_text: Text = text.clone();
+    assert(cloned_text == "Hello");
+}

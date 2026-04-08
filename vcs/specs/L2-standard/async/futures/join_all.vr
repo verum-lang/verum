@@ -1,0 +1,286 @@
+// @test: run
+// @expected-stdout: All completed\nResults: [10, 20, 30, 40, 50]\nPairs: [(1, a), (2, b), (3, c)]\nTriple: (100, hello, true)\nTry join: Ok([1, 2, 3])\nSettled: 5 results
+// @tier: 0
+// @level: L2
+// @tags: async, futures, join, parallel
+// @description: Comprehensive parallel execution with join variants
+
+// Basic async task
+async fn task(id: Int) -> Int {
+    id * 10
+}
+
+async fn fetch_number(id: Int) -> Int {
+    id
+}
+
+async fn fetch_letter(id: Int) -> Text {
+    match id {
+        1 => "a",
+        2 => "b",
+        3 => "c",
+        _ => "?",
+    }
+}
+
+async fn fallible_task(id: Int, should_fail: Bool) -> Result<Int, Error> {
+    if should_fail {
+        Err(Error.new(f"Task {id} failed"))
+    } else {
+        Ok(id)
+    }
+}
+
+// join_all - wait for all futures in collection
+async fn test_join_all() -> List<Int> {
+    let futures = [
+        task(1),
+        task(2),
+        task(3),
+        task(4),
+        task(5),
+    ];
+
+    join_all(futures).await
+}
+
+// join_all with dynamic number of futures
+async fn test_join_all_dynamic(count: Int) -> List<Int> {
+    let futures: List<_> = (1..=count)
+        .map(|i| task(i))
+        .collect();
+
+    join_all(futures).await
+}
+
+// join_all with map operation
+async fn test_join_all_mapped() -> List<Int> {
+    let items = [1, 2, 3, 4, 5];
+
+    join_all(items.map(|i| async {
+        i * i
+    })).await
+}
+
+// join - wait for 2 futures
+async fn test_join2() -> (Int, Text) {
+    join(
+        fetch_number(42),
+        fetch_letter(1),
+    ).await
+}
+
+// join3 - wait for 3 futures
+async fn test_join3() -> (Int, Text, Bool) {
+    join3(
+        async { 100 },
+        async { "hello" },
+        async { true },
+    ).await
+}
+
+// join4 - wait for 4 futures
+async fn test_join4() -> (Int, Int, Int, Int) {
+    join4(
+        task(1),
+        task(2),
+        task(3),
+        task(4),
+    ).await
+}
+
+// join5 - wait for 5 futures
+async fn test_join5() -> (Int, Int, Int, Int, Int) {
+    join5(
+        task(1),
+        task(2),
+        task(3),
+        task(4),
+        task(5),
+    ).await
+}
+
+// Nested join operations
+async fn test_nested_join() -> ((Int, Int), (Text, Text)) {
+    join(
+        join(fetch_number(1), fetch_number(2)),
+        join(fetch_letter(1), fetch_letter(2)),
+    ).await
+}
+
+// join_all with pairs
+async fn test_join_pairs() -> List<(Int, Text)> {
+    join_all([1, 2, 3].map(|id| async {
+        let (num, letter) = join(
+            fetch_number(id),
+            fetch_letter(id),
+        ).await;
+        (num, letter)
+    })).await
+}
+
+// try_join_all - fail fast on first error
+async fn test_try_join_all_success() -> Result<List<Int>, Error> {
+    let futures = [
+        fallible_task(1, false),
+        fallible_task(2, false),
+        fallible_task(3, false),
+    ];
+
+    try_join_all(futures).await
+}
+
+// try_join_all with failure
+async fn test_try_join_all_failure() -> Result<List<Int>, Error> {
+    let futures = [
+        fallible_task(1, false),
+        fallible_task(2, true),  // This will fail
+        fallible_task(3, false),
+    ];
+
+    try_join_all(futures).await
+}
+
+// try_join - join 2 fallible futures
+async fn test_try_join2() -> Result<(Int, Int), Error> {
+    try_join(
+        fallible_task(1, false),
+        fallible_task(2, false),
+    ).await
+}
+
+// try_join3 - join 3 fallible futures
+async fn test_try_join3() -> Result<(Int, Int, Int), Error> {
+    try_join3(
+        fallible_task(1, false),
+        fallible_task(2, false),
+        fallible_task(3, false),
+    ).await
+}
+
+// join_all_settled - wait for all, regardless of success/failure
+async fn test_join_all_settled() -> List<Result<Int, Error>> {
+    let futures = [
+        fallible_task(1, false),
+        fallible_task(2, true),
+        fallible_task(3, false),
+        fallible_task(4, true),
+        fallible_task(5, false),
+    ];
+
+    join_all_settled(futures).await
+}
+
+// join with timeout
+async fn test_join_with_timeout() -> Result<(Int, Int), TimeoutError> {
+    // Simplified: directly join without timeout wrapper
+    let result = join(task(1), task(2)).await;
+    Ok(result)
+}
+
+// join_all with concurrency limit
+async fn test_join_all_limited(limit: Int) -> List<Int> {
+    let futures: List<_> = (1..=10).map(|i| task(i)).collect();
+
+    // Simplified: use regular join_all (no limit variant available)
+    join_all(futures).await
+}
+
+// Joining futures of different types using tuple
+async fn test_heterogeneous_join() -> (Int, Text, Bool, List<Int>) {
+    join4(
+        async { 42 },
+        async { "hello" },
+        async { true },
+        async { [1, 2, 3] },
+    ).await
+}
+
+// Join with cancellation on first completion
+async fn test_join_race() -> Int {
+    // Different from select - all must complete, but order doesn't matter
+    let (a, b, c) = join3(
+        async { 1 },
+        async { 2 },
+        async { 3 },
+    ).await;
+
+    a + b + c
+}
+
+// Using join! macro for cleaner syntax
+async fn test_join_macro() -> (Int, Text, Bool) {
+    join! {
+        num = async { 42 },
+        text = async { "hello" },
+        flag = async { true },
+    }
+}
+
+// FuturesUnordered - join without preserving order
+async fn test_futures_unordered() -> List<Int> {
+    let mut unordered = FuturesUnordered.new();
+
+    unordered.push(task(1));
+    unordered.push(task(2));
+    unordered.push(task(3));
+
+    let mut results = [];
+    while let Some(result) = unordered.next().await {
+        results.push(result);
+    }
+
+    results
+}
+
+// Join with progress tracking
+async fn test_join_with_progress() -> List<Int> {
+    let futures = (1..=5).map(|i| task(i)).collect<List<_>>();
+    let total = futures.len();
+
+    let mut completed = 0;
+    // Simplified: use regular join_all (no progress variant available)
+    let results = join_all(futures).await;
+
+    results
+}
+
+// Buffered join - process in batches
+async fn test_buffered_join(batch_size: Int) -> List<Int> {
+    let items: List<_> = (1..=20).collect();
+    let mut results = [];
+
+    for batch in items.chunks(batch_size) {
+        let mut batch_futures = [];
+        for &i in batch.iter() {
+            batch_futures.push(task(i));
+        }
+        let batch_results = join_all(batch_futures).await;
+        results.extend(batch_results);
+    }
+
+    results
+}
+
+async fn main() {
+    // Basic join_all
+    let results = test_join_all().await;
+    println("All completed");
+    println(f"Results: {results}");
+
+    // Join pairs
+    let pairs = test_join_pairs().await;
+    println(f"Pairs: {pairs}");
+
+    // Triple join
+    let triple = test_join3().await;
+    println(f"Triple: {triple}");
+
+    // Try join all
+    let try_result = test_try_join_all_success().await;
+    println(f"Try join: {try_result}");
+
+    // Settled join
+    let settled = test_join_all_settled().await;
+    println(f"Settled: {settled.len()} results");
+}

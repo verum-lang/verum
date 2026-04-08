@@ -1,0 +1,137 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, lambda
+
+// Test simple identity and arithmetic closures
+fn test_simple_closures() {
+    // Simplest closure - identity
+    let id = |x| x;
+
+    // Closure with arithmetic
+    let double = |x| x * 2;
+    let square = |x| x * x;
+    let increment = |x| x + 1;
+
+    // Closure with boolean expression
+    let is_positive = |x| x > 0;
+    let is_even = |x| x % 2 == 0;
+
+    // Closure used immediately
+    let result = (|x| x * 2)(5);
+}
+
+// Test closures passed to functions
+fn test_closures_in_methods() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Closure passed to function
+    list.map(|x| x * 2);
+    list.filter(|x| x > 0);
+    list.fold(0, |acc, x| acc + x);
+
+    // Closure with method call
+    let get_name = |p| p.name;
+    let get_length = |s| s.len();
+
+    // Closure calling function
+    let apply_f = |x| f(x);
+    let compute = |x| process(x);
+}
+
+// Test closures with field and index access
+fn test_closures_with_access() {
+    // Closure with field access
+    let get_x = |point| point.x;
+    let get_first = |tuple| tuple.0;
+
+    // Closure with indexing
+    let arr = [1, 2, 3];
+    let first = |arr| arr[0];
+    let at_index = |i| arr[i];
+
+    // Closure with comparison
+    let less_than_10 = |x| x < 10;
+    let equals = |a, b| a == b;
+}
+
+// Test nested and curried closures
+fn test_nested_closures() {
+    // Closure returning closure
+    let add = |a| |b| a + b;
+    let multiply = |a| |b| a * b;
+
+    // Closure with unary operators
+    let negate = |x| -x;
+    let logical_not = |b| !b;
+
+    // Nested closures
+    let nested = |x| |y| |z| x + y + z;
+    let curried_add = |a| |b| a + b;
+}
+
+// Closure as return value
+fn create_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+// Test closures with patterns and blocks
+fn test_closure_with_patterns() {
+    // Closure with pattern (if supported)
+    let extract = |(a, b)| a + b;
+    let get_some = |Some(x)| x;
+
+    // Closure with block body
+    let complex_closure = |x| {
+        let y = x * 2;
+        let z = y + 1;
+        z * z
+    };
+
+    // Closure with early return (if supported)
+    let early_return = |x| {
+        if x < 0 {
+            return -1;
+        }
+        x * 2
+    };
+}
+
+// Test closures capturing environment
+fn test_capturing_closures() {
+    // Closure capturing environment
+    let multiplier = 2;
+    let times_two = |x| x * multiplier;
+
+    // Closure in control flow
+    let condition = true;
+    let result = if condition { |x| x + 1 } else { |x| x - 1 };
+
+    // Closure with break/continue in loop context
+    let break_closure = || {
+        for i in 0..10 {
+            if i > 5 { break; }
+        }
+    };
+}
+
+// Test closures with match and empty params
+fn test_closure_match_and_empty() {
+    // Closure with match expression
+    let matcher = |opt| match opt {
+        Some(x) => x,
+        None => 0,
+    };
+
+    // Empty parameter closure
+    let no_params = || 42;
+    let void_closure = || {};
+
+    // Closure as struct field
+    let obj = Struct {
+        callback: |x| x * 2,
+    };
+
+    // Closure in array/list
+    let closures = [|x| x, |x| x * 2, |x| x * 3];
+}

@@ -1,0 +1,145 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: impl, methods, self, constructor, chaining
+// @description: Comprehensive impl blocks with methods, constructors, and self
+
+type Vec2 is { x: Int, y: Int };
+
+implement Vec2 {
+    fn new(x: Int, y: Int) -> Vec2 {
+        Vec2 { x: x, y: y }
+    }
+
+    fn zero() -> Vec2 {
+        Vec2 { x: 0, y: 0 }
+    }
+
+    fn magnitude_squared(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn add(&self, other: Vec2) -> Vec2 {
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+
+    fn scale(&self, factor: Int) -> Vec2 {
+        Vec2 { x: self.x * factor, y: self.y * factor }
+    }
+
+    fn dot(&self, other: Vec2) -> Int {
+        self.x * other.x + self.y * other.y
+    }
+
+    fn equals(&self, other: Vec2) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+type Counter is { value: Int, step: Int };
+
+implement Counter {
+    fn new(start: Int, step: Int) -> Counter {
+        Counter { value: start, step: step }
+    }
+
+    fn current(&self) -> Int {
+        self.value
+    }
+
+    fn advance(&mut self) {
+        self.value = self.value + self.step;
+    }
+
+    fn advance_n(&mut self, n: Int) {
+        let mut i = 0;
+        while (i < n) {
+            self.value = self.value + self.step;
+            i = i + 1;
+        }
+    }
+
+    fn reset(&mut self) {
+        self.value = 0;
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Vec2 constructor and methods
+    let v1 = Vec2.new(3, 4);
+    let mag = v1.magnitude_squared();
+    if (mag != 25) {
+        print(f"FAIL test1a: mag_sq={mag}");
+        return 1;
+    }
+
+    // Test 2: Vec2 operations
+    let v2 = Vec2.new(1, 2);
+    let v3 = v1.add(v2);
+    if (v3.x != 4 || v3.y != 6) {
+        print(f"FAIL test2: v3=({v3.x},{v3.y})");
+        return 1;
+    }
+
+    // Test 3: Vec2 scale
+    let v4 = v2.scale(3);
+    if (v4.x != 3 || v4.y != 6) {
+        print(f"FAIL test3: v4=({v4.x},{v4.y})");
+        return 1;
+    }
+
+    // Test 4: Vec2 dot product
+    let d = v1.dot(v2);
+    // 3*1 + 4*2 = 11
+    if (d != 11) {
+        print(f"FAIL test4: dot={d}");
+        return 1;
+    }
+
+    // Test 5: Vec2 equality
+    let v5 = Vec2.new(3, 4);
+    if (!v1.equals(v5)) {
+        print("FAIL test5a");
+        return 1;
+    }
+    if (v1.equals(v2)) {
+        print("FAIL test5b");
+        return 1;
+    }
+
+    // Test 6: Vec2 zero
+    let z = Vec2.zero();
+    if (z.x != 0 || z.y != 0) {
+        print("FAIL test6");
+        return 1;
+    }
+
+    // Test 7: Counter with &mut self
+    let mut c = Counter.new(0, 5);
+    if (c.current() != 0) {
+        print(f"FAIL test7a: {c.current()}");
+        return 1;
+    }
+    c.advance();
+    if (c.current() != 5) {
+        print(f"FAIL test7b: {c.current()}");
+        return 1;
+    }
+    c.advance();
+    c.advance();
+    if (c.current() != 15) {
+        print(f"FAIL test7c: {c.current()}");
+        return 1;
+    }
+
+    // Test 8: Counter advance_n
+    c.reset();
+    c.advance_n(10);
+    if (c.current() != 50) {
+        print(f"FAIL test8: {c.current()}");
+        return 1;
+    }
+
+    print("995_impl_methods_comprehensive: PASS");
+    0
+}

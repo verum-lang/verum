@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, where, constraint, error
+// @description: Test detection of where clause with empty constraint list
+// @expected-error: E018
+
+// Where clause must have at least one constraint
+fn test<T>(x: T) where type {}

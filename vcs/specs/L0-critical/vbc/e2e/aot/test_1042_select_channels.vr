@@ -1,0 +1,197 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: channel, spawn, pipeline, fan-in
+// @description: Channel fan-in pattern - multiple producers, single consumer
+
+fn recv_val(ch: &Channel<Int>) -> Int {
+    match ch.recv() { Some(x) => x, None => 0 }
+}
+
+fn test_fan_in_two_producers() -> Int {
+    let ch = Channel.new(16);
+
+    let p1 = spawn {
+        ch.send(10);
+        ch.send(20);
+        ch.send(30);
+        0
+    };
+    let p2 = spawn {
+        ch.send(100);
+        ch.send(200);
+        ch.send(300);
+        0
+    };
+
+    p1.await;
+    p2.await;
+
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 6 {
+        sum = sum + recv_val(&ch);
+        i = i + 1;
+    }
+
+    if sum != 660 {
+        print(f"FAIL fan_in_two: expected 660, got {sum}");
+        return 1;
+    }
+    print("  fan_in_two: OK");
+    0
+}
+
+fn test_pipeline_stages() -> Int {
+    let stage1_out = Channel.new(8);
+    let stage2_out = Channel.new(8);
+
+    // Stage 1: produce values
+    let s1 = spawn {
+        stage1_out.send(1);
+        stage1_out.send(2);
+        stage1_out.send(3);
+        0
+    };
+
+    // Stage 2: double each value
+    let s2 = spawn {
+        let mut i = 0;
+        while i < 3 {
+            let v = match stage1_out.recv() { Some(x) => x, None => 0 };
+            stage2_out.send(v * 2);
+            i = i + 1;
+        }
+        0
+    };
+
+    s1.await;
+    s2.await;
+
+    let r1 = recv_val(&stage2_out);
+    let r2 = recv_val(&stage2_out);
+    let r3 = recv_val(&stage2_out);
+    let sum = r1 + r2 + r3;
+    // 2+4+6 = 12
+    if sum != 12 {
+        print(f"FAIL pipeline_stages: expected 12, got {sum}");
+        return 1;
+    }
+    print("  pipeline_stages: OK");
+    0
+}
+
+fn test_worker_pool() -> Int {
+    let work_ch = Channel.new(16);
+    let result_ch = Channel.new(16);
+
+    // Submit 6 work items
+    work_ch.send(5);
+    work_ch.send(10);
+    work_ch.send(15);
+    work_ch.send(20);
+    work_ch.send(25);
+    work_ch.send(30);
+
+    // 3 workers each process 2 items
+    let w1 = spawn {
+        let mut i = 0;
+        while i < 2 {
+            let v = match work_ch.recv() { Some(x) => x, None => 0 };
+            result_ch.send(v * v);
+            i = i + 1;
+        }
+        0
+    };
+    let w2 = spawn {
+        let mut i = 0;
+        while i < 2 {
+            let v = match work_ch.recv() { Some(x) => x, None => 0 };
+            result_ch.send(v * v);
+            i = i + 1;
+        }
+        0
+    };
+    let w3 = spawn {
+        let mut i = 0;
+        while i < 2 {
+            let v = match work_ch.recv() { Some(x) => x, None => 0 };
+            result_ch.send(v * v);
+            i = i + 1;
+        }
+        0
+    };
+
+    w1.await;
+    w2.await;
+    w3.await;
+
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 6 {
+        sum = sum + recv_val(&result_ch);
+        i = i + 1;
+    }
+    // 25+100+225+400+625+900 = 2275
+    if sum != 2275 {
+        print(f"FAIL worker_pool: expected 2275, got {sum}");
+        return 1;
+    }
+    print("  worker_pool: OK");
+    0
+}
+
+fn test_roundtrip() -> Int {
+    let req = Channel.new(4);
+    let resp = Channel.new(4);
+
+    let server = spawn {
+        let mut i = 0;
+        while i < 3 {
+            let v = match req.recv() { Some(x) => x, None => 0 };
+            resp.send(v + 1000);
+            i = i + 1;
+        }
+        0
+    };
+
+    req.send(1);
+    let r1 = recv_val(&resp);
+    req.send(2);
+    let r2 = recv_val(&resp);
+    req.send(3);
+    let r3 = recv_val(&resp);
+
+    server.await;
+
+    if r1 != 1001 {
+        print(f"FAIL roundtrip r1: expected 1001, got {r1}");
+        return 1;
+    }
+    if r2 != 1002 {
+        print(f"FAIL roundtrip r2: expected 1002, got {r2}");
+        return 1;
+    }
+    if r3 != 1003 {
+        print(f"FAIL roundtrip r3: expected 1003, got {r3}");
+        return 1;
+    }
+    print("  roundtrip: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Channel Fan-In Tests:");
+    let mut failures = 0;
+    failures = failures + test_fan_in_two_producers();
+    failures = failures + test_pipeline_stages();
+    failures = failures + test_worker_pool();
+    failures = failures + test_roundtrip();
+
+    if failures == 0 {
+        print("All channel fan-in tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,264 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/float_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, math, trigonometry, classification
+// @description: Comprehensive tests for floating-point intrinsics.
+//
+// Coverage:
+// - Basic math: sqrt, pow, exp, log
+// - Rounding: floor, ceil, round, trunc
+// - Sign/comparison: fabs, minnum, maxnum
+// - Trigonometric: sin, cos, tan
+// - Classification: is_nan, is_inf, is_finite
+// - Special values: infinity, nan
+//
+// Test Strategy:
+// - Test with known mathematical values using Float64-specific functions
+// - Test edge cases: zero, infinity, NaN
+// =============================================================================
+
+module test.stdlib.intrinsics.float_test;
+
+mount core.intrinsics.float.{
+    // Basic math - Float64 specific
+    sqrt_f64, pow_f64, exp_f64, exp2_f64, log_f64, log2_f64, log10_f64,
+    // Rounding - Float64 specific
+    floor_f64, ceil_f64, round_f64, trunc_f64,
+    // Sign/comparison - Float64 specific
+    abs_f64, minnum_f64, maxnum_f64,
+    // Trigonometric - Float64 specific
+    sin_f64, cos_f64, tan_f64,
+    // Classification
+    is_nan, is_inf, is_finite,
+    is_nan_f64, is_inf_f64, is_finite_f64,
+    // Special values
+    f64_infinity, f64_neg_infinity, f64_nan,
+    // Bit conversion
+    f32_to_bits, f32_from_bits, f64_to_bits, f64_from_bits,
+};
+
+// Mathematical constants
+const EPSILON: Float64 = 1e-10;
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Helper: Approximate equality for floats
+// =============================================================================
+
+fn approx_eq(a: Float64, b: Float64, eps: Float64) -> Bool {
+    let diff = abs_f64(a - b);
+    diff < eps
+}
+
+// =============================================================================
+// Basic Math Tests
+// =============================================================================
+
+@test
+fn test_basic_math() {
+    // sqrt_f64
+    assert(approx_eq(sqrt_f64(4.0), 2.0, EPSILON));
+    assert(approx_eq(sqrt_f64(9.0), 3.0, EPSILON));
+    assert(sqrt_f64(0.0) == 0.0);
+    assert(sqrt_f64(1.0) == 1.0);
+    assert(approx_eq(sqrt_f64(16.0), 4.0, EPSILON));
+    assert(approx_eq(sqrt_f64(25.0), 5.0, EPSILON));
+
+    // pow_f64
+    assert(approx_eq(pow_f64(2.0, 3.0), 8.0, EPSILON));
+    assert(approx_eq(pow_f64(3.0, 2.0), 9.0, EPSILON));
+    assert(pow_f64(2.0, 0.0) == 1.0);
+    assert(pow_f64(5.0, 1.0) == 5.0);
+
+    // exp_f64
+    assert(approx_eq(exp_f64(0.0), 1.0, EPSILON));
+
+    // exp2_f64
+    assert(approx_eq(exp2_f64(3.0), 8.0, EPSILON));
+    assert(exp2_f64(0.0) == 1.0);
+
+    // log_f64
+    assert(log_f64(1.0) == 0.0);
+
+    // log2_f64
+    assert(approx_eq(log2_f64(8.0), 3.0, EPSILON));
+    assert(log2_f64(1.0) == 0.0);
+
+    // log10_f64
+    assert(approx_eq(log10_f64(100.0), 2.0, EPSILON));
+    assert(log10_f64(1.0) == 0.0);
+
+    print("Basic math tests passed");
+}
+
+// =============================================================================
+// Rounding Tests
+// =============================================================================
+
+@test
+fn test_rounding() {
+    // floor_f64
+    assert(floor_f64(3.7) == 3.0);
+    assert(floor_f64(3.2) == 3.0);
+    assert(floor_f64(-3.2) == -4.0);
+    assert(floor_f64(-3.7) == -4.0);
+    assert(floor_f64(0.0) == 0.0);
+
+    // ceil_f64
+    assert(ceil_f64(3.2) == 4.0);
+    assert(ceil_f64(3.7) == 4.0);
+    assert(ceil_f64(-3.7) == -3.0);
+    assert(ceil_f64(-3.2) == -3.0);
+    assert(ceil_f64(0.0) == 0.0);
+
+    // round_f64
+    assert(round_f64(3.2) == 3.0);
+    assert(round_f64(3.7) == 4.0);
+    assert(round_f64(-3.2) == -3.0);
+    assert(round_f64(-3.7) == -4.0);
+
+    // trunc_f64 (toward zero)
+    assert(trunc_f64(3.7) == 3.0);
+    assert(trunc_f64(-3.7) == -3.0);
+    assert(trunc_f64(3.2) == 3.0);
+    assert(trunc_f64(-3.2) == -3.0);
+
+    print("Rounding tests passed");
+}
+
+// =============================================================================
+// Sign and Comparison Tests
+// =============================================================================
+
+@test
+fn test_sign_comparison() {
+    // abs_f64 (absolute value)
+    assert(abs_f64(3.0) == 3.0);
+    assert(abs_f64(-3.0) == 3.0);
+    assert(abs_f64(0.0) == 0.0);
+
+    // minnum_f64/maxnum_f64
+    assert(minnum_f64(3.0, 5.0) == 3.0);
+    assert(minnum_f64(5.0, 3.0) == 3.0);
+    assert(maxnum_f64(3.0, 5.0) == 5.0);
+    assert(maxnum_f64(5.0, 3.0) == 5.0);
+
+    // Negative values
+    assert(minnum_f64(-5.0, -3.0) == -5.0);
+    assert(maxnum_f64(-5.0, -3.0) == -3.0);
+
+    print("Sign and comparison tests passed");
+}
+
+// =============================================================================
+// Trigonometric Tests
+// =============================================================================
+
+@test
+fn test_trigonometric() {
+    let pi: Float64 = 3.14159265358979;
+    let half_pi: Float64 = pi / 2.0;
+
+    // sin_f64
+    assert(approx_eq(sin_f64(0.0), 0.0, EPSILON));
+    assert(approx_eq(sin_f64(half_pi), 1.0, EPSILON));
+    assert(approx_eq(sin_f64(pi), 0.0, EPSILON));
+
+    // cos_f64
+    assert(approx_eq(cos_f64(0.0), 1.0, EPSILON));
+    assert(approx_eq(cos_f64(half_pi), 0.0, EPSILON));
+    assert(approx_eq(cos_f64(pi), -1.0, EPSILON));
+
+    // tan_f64
+    assert(approx_eq(tan_f64(0.0), 0.0, EPSILON));
+    assert(approx_eq(tan_f64(pi / 4.0), 1.0, EPSILON));
+
+    // Pythagorean identity: sin^2 + cos^2 = 1
+    let angle: Float64 = 0.7;
+    let s = sin_f64(angle);
+    let c = cos_f64(angle);
+    assert(approx_eq(s * s + c * c, 1.0, EPSILON));
+
+    print("Trigonometric tests passed");
+}
+
+// =============================================================================
+// Classification Tests
+// =============================================================================
+
+@test
+fn test_classification() {
+    // Regular numbers
+    assert(!is_nan_f64(1.0));
+    assert(!is_inf_f64(1.0));
+    assert(is_finite_f64(1.0));
+
+    // Zero
+    assert(!is_nan_f64(0.0));
+    assert(!is_inf_f64(0.0));
+    assert(is_finite_f64(0.0));
+
+    // Infinity
+    let inf = f64_infinity();
+    let neg_inf = f64_neg_infinity();
+
+    assert(!is_nan_f64(inf));
+    assert(is_inf_f64(inf));
+    assert(!is_finite_f64(inf));
+
+    assert(!is_nan_f64(neg_inf));
+    assert(is_inf_f64(neg_inf));
+    assert(!is_finite_f64(neg_inf));
+
+    // NaN
+    let nan_val = f64_nan();
+
+    assert(is_nan_f64(nan_val));
+    assert(!is_inf_f64(nan_val));
+    assert(!is_finite_f64(nan_val));
+
+    // NaN comparisons always return false
+    assert(!(nan_val == nan_val));
+    assert(!(nan_val < 0.0));
+    assert(!(nan_val > 0.0));
+
+    print("Classification tests passed");
+}
+
+// =============================================================================
+// Special Values Tests
+// =============================================================================
+
+@test
+fn test_special_values() {
+    // Float64 special values
+    let inf64 = f64_infinity();
+    let neg_inf64 = f64_neg_infinity();
+    let nan64 = f64_nan();
+
+    assert(is_inf_f64(inf64));
+    assert(is_inf_f64(neg_inf64));
+    assert(is_nan_f64(nan64));
+    assert(inf64 > 0.0);
+    assert(neg_inf64 < 0.0);
+
+    // Infinity arithmetic
+    assert(inf64 + 1.0 == inf64);
+    assert(inf64 * 2.0 == inf64);
+
+    // Bit conversion roundtrip for Float64
+    let val: Float64 = 3.14159;
+    assert(f64_from_bits(f64_to_bits(val)) == val);
+
+    print("Special values tests passed");
+}

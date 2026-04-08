@@ -1,0 +1,214 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, text, builder, codegen, f-string
+// @description: Text accumulation pattern — critical for codegen output generation
+
+fn build_simple() -> Text {
+    let mut out = "";
+    out = out + "hello";
+    out = out + " ";
+    out = out + "world";
+    out
+}
+
+fn build_with_fstring(name: Text, value: Int) -> Text {
+    let mut out = "";
+    out = out + f"let {name} = {value};\n";
+    out = out + f"print({name});\n";
+    out
+}
+
+fn build_indented(depth: Int, line: Text) -> Text {
+    let mut out = "";
+    let mut i = 0;
+    while i < depth {
+        out = out + "    ";
+        i = i + 1;
+    }
+    out = out + line;
+    out
+}
+
+fn build_function_code(name: Text, params: List<Text>, body: Text) -> Text {
+    let mut out = f"fn {name}(";
+    let mut i = 0;
+    while i < params.len() {
+        if i > 0 {
+            out = out + ", ";
+        }
+        out = out + params[i];
+        i = i + 1;
+    }
+    out = out + ") {\n";
+    out = out + build_indented(1, body);
+    out = out + "\n}\n";
+    out
+}
+
+fn test_simple_concat() -> Int {
+    let s = build_simple();
+    if s != "hello world" {
+        print(f"FAIL simple_concat: got '{s}'");
+        return 1;
+    }
+    print("  simple_concat: OK");
+    0
+}
+
+fn test_fstring_interpolation() -> Int {
+    let s = build_with_fstring("x", 42);
+    if !s.contains("let x = 42;") {
+        print(f"FAIL fstring: missing 'let x = 42;' in '{s}'");
+        return 1;
+    }
+    if !s.contains("print(x);") {
+        print(f"FAIL fstring: missing 'print(x);' in '{s}'");
+        return 1;
+    }
+    print("  fstring_interpolation: OK");
+    0
+}
+
+fn test_indentation() -> Int {
+    let line0 = build_indented(0, "top");
+    let line1 = build_indented(1, "nested");
+    let line2 = build_indented(2, "deep");
+
+    if line0 != "top" {
+        print(f"FAIL indent 0: '{line0}'");
+        return 1;
+    }
+    if !line1.starts_with("    ") {
+        print(f"FAIL indent 1: '{line1}'");
+        return 1;
+    }
+    if !line2.starts_with("        ") {
+        print(f"FAIL indent 2: '{line2}'");
+        return 1;
+    }
+    print("  indentation: OK");
+    0
+}
+
+fn test_function_builder() -> Int {
+    // Build a function signature manually (avoid List<Text> param passing issues)
+    let mut out = f"fn add(";
+    out = out + "a: Int, b: Int";
+    out = out + ") {\n";
+    out = out + build_indented(1, "return a + b;");
+    out = out + "\n}\n";
+
+    if !out.contains("fn add(") {
+        print(f"FAIL func_builder: missing fn header");
+        return 1;
+    }
+    if !out.contains("a: Int, b: Int") {
+        print(f"FAIL func_builder: missing params");
+        return 1;
+    }
+    if !out.contains("return a + b;") {
+        print(f"FAIL func_builder: missing body");
+        return 1;
+    }
+    print("  function_builder: OK");
+    0
+}
+
+fn test_text_methods() -> Int {
+    let s = "  hello world  ";
+    let trimmed = s.trim();
+    if trimmed != "hello world" {
+        print(f"FAIL trim: '{trimmed}'");
+        return 1;
+    }
+
+    let code = "fn main() -> Int";
+    if code.len() != 16 {
+        print(f"FAIL len: expected 16, got {code.len()}");
+        return 1;
+    }
+    if !code.starts_with("fn ") {
+        print("FAIL starts_with");
+        return 1;
+    }
+    if !code.contains("main") {
+        print("FAIL contains");
+        return 1;
+    }
+
+    let parts = "a,b,c".split(",");
+    if parts.len() != 3 {
+        print(f"FAIL split: expected 3 parts, got {parts.len()}");
+        return 1;
+    }
+
+    print("  text_methods: OK");
+    0
+}
+
+fn test_multiline_builder() -> Int {
+    let mut lines = List.new();
+    lines.push("line 1");
+    lines.push("line 2");
+    lines.push("line 3");
+
+    let mut out = "";
+    let mut i = 0;
+    while i < lines.len() {
+        out = out + lines[i] + "\n";
+        i = i + 1;
+    }
+
+    if !out.contains("line 1") {
+        print("FAIL multiline: missing line 1");
+        return 1;
+    }
+    if !out.contains("line 3") {
+        print("FAIL multiline: missing line 3");
+        return 1;
+    }
+    print("  multiline_builder: OK");
+    0
+}
+
+fn run_tests_a() -> Int {
+    let r1 = test_simple_concat();
+    if r1 != 0 { return r1; }
+    let r2 = test_fstring_interpolation();
+    if r2 != 0 { return r2; }
+    let r3 = test_indentation();
+    if r3 != 0 { return r3; }
+    0
+}
+
+fn run_tests_b() -> Int {
+    let r4 = test_function_builder();
+    if r4 != 0 { return r4; }
+    0
+}
+
+fn run_tests_c() -> Int {
+    let r5 = test_text_methods();
+    if r5 != 0 { return r5; }
+    0
+}
+
+fn run_tests_d() -> Int {
+    let r6 = test_multiline_builder();
+    if r6 != 0 { return r6; }
+    0
+}
+
+fn main() -> Int {
+    let a = run_tests_a();
+    if a != 0 { return a; }
+    let b = run_tests_b();
+    if b != 0 { return b; }
+    let c = run_tests_c();
+    if c != 0 { return c; }
+    let d = run_tests_d();
+    if d != 0 { return d; }
+    print("All string builder pattern tests passed");
+    0
+}

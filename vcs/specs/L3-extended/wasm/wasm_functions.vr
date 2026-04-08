@@ -1,0 +1,83 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, functions, cross-compilation
+// @expected-exit: 0
+// @description: Function calls, recursion, and higher-order functions under WASM
+
+fn identity(x: Int) -> Int {
+    x
+}
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn square(x: Int) -> Int {
+    x * x
+}
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+fn fibonacci(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn abs(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn main() -> Int {
+    // Basic function calls
+    assert_eq(identity(42), 42);
+    assert_eq(double(21), 42);
+    assert_eq(square(7), 49);
+
+    // Recursion
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+    assert_eq(fibonacci(10), 55);
+    assert_eq(fibonacci(15), 610);
+
+    // Higher-order functions
+    assert_eq(apply(double, 21), 42);
+    assert_eq(apply(square, 6), 36);
+    assert_eq(compose(double, square, 3), 18);
+    assert_eq(compose(square, double, 3), 36);
+
+    // Utility functions
+    assert_eq(max(10, 20), 20);
+    assert_eq(min(10, 20), 10);
+    assert_eq(abs(-42), 42);
+    assert_eq(abs(42), 42);
+
+    0
+}

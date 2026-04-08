@@ -1,0 +1,215 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, comprehensive
+// @timeout: 30000
+
+// Milestone 545: Simple interpreter for a register machine
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Register machine with 4 registers (r0-r3)
+// Instructions encoded as: opcode*10000 + arg1*100 + arg2
+// Opcodes:
+//   1: LOAD  reg, imm   → reg = imm
+//   2: ADD   dst, src   → dst = dst + src
+//   3: SUB   dst, src   → dst = dst - src
+//   4: MUL   dst, src   → dst = dst * src
+//   5: JNZ   reg, target → if reg != 0, goto target
+//   6: DEC   reg, _     → reg = reg - 1
+//   7: MOV   dst, src   → dst = src
+//   0: HALT
+
+fn op_code(instr: Int) -> Int { instr / 10000 }
+fn op_arg1(instr: Int) -> Int { (instr / 100) % 100 }
+fn op_arg2(instr: Int) -> Int { instr % 100 }
+fn encode(op: Int, a1: Int, a2: Int) -> Int { op * 10000 + a1 * 100 + a2 }
+
+type Machine is { regs: Arr8, pc: Int, halted: Int };
+
+fn new_machine() -> Machine {
+    Machine { regs: zeros(), pc: 0, halted: 0 }
+}
+
+fn step(m: Machine, program: Arr8) -> Machine {
+    if m.halted == 1 { return m; }
+    let instr = get8(program, m.pc);
+    let op = op_code(instr);
+    let a1 = op_arg1(instr);
+    let a2 = op_arg2(instr);
+
+    if op == 0 {
+        // HALT
+        return Machine { regs: m.regs, pc: m.pc, halted: 1 };
+    }
+    if op == 1 {
+        // LOAD reg, imm
+        let regs = set8(m.regs, a1, a2);
+        return Machine { regs: regs, pc: m.pc + 1, halted: 0 };
+    }
+    if op == 2 {
+        // ADD dst, src
+        let val = get8(m.regs, a1) + get8(m.regs, a2);
+        let regs = set8(m.regs, a1, val);
+        return Machine { regs: regs, pc: m.pc + 1, halted: 0 };
+    }
+    if op == 3 {
+        // SUB dst, src
+        let val = get8(m.regs, a1) - get8(m.regs, a2);
+        let regs = set8(m.regs, a1, val);
+        return Machine { regs: regs, pc: m.pc + 1, halted: 0 };
+    }
+    if op == 4 {
+        // MUL dst, src
+        let val = get8(m.regs, a1) * get8(m.regs, a2);
+        let regs = set8(m.regs, a1, val);
+        return Machine { regs: regs, pc: m.pc + 1, halted: 0 };
+    }
+    if op == 5 {
+        // JNZ reg, target
+        if get8(m.regs, a1) != 0 {
+            return Machine { regs: m.regs, pc: a2, halted: 0 };
+        }
+        return Machine { regs: m.regs, pc: m.pc + 1, halted: 0 };
+    }
+    if op == 6 {
+        // DEC reg
+        let val = get8(m.regs, a1) - 1;
+        let regs = set8(m.regs, a1, val);
+        return Machine { regs: regs, pc: m.pc + 1, halted: 0 };
+    }
+    if op == 7 {
+        // MOV dst, src
+        let val = get8(m.regs, a2);
+        let regs = set8(m.regs, a1, val);
+        return Machine { regs: regs, pc: m.pc + 1, halted: 0 };
+    }
+    // Unknown → halt
+    Machine { regs: m.regs, pc: m.pc, halted: 1 }
+}
+
+fn run_program(program: Arr8) -> Machine {
+    let mut m = new_machine();
+    let mut safety = 0;
+    while m.halted == 0 {
+        m = step(m, program);
+        safety = safety + 1;
+        if safety > 200 { m = Machine { regs: m.regs, pc: m.pc, halted: 1 }; }
+    }
+    m
+}
+
+fn test_simple_load() -> Int {
+    // LOAD r0, 42; HALT
+    let prog = Arr8 {
+        v0: encode(1, 0, 42), v1: encode(0, 0, 0),
+        v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    let m = run_program(prog);
+    assert_eq(get8(m.regs, 0), 42);
+    1
+}
+
+fn test_add() -> Int {
+    // LOAD r0, 10; LOAD r1, 20; ADD r0, r1; HALT
+    let prog = Arr8 {
+        v0: encode(1, 0, 10), v1: encode(1, 1, 20),
+        v2: encode(2, 0, 1), v3: encode(0, 0, 0),
+        v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    let m = run_program(prog);
+    assert_eq(get8(m.regs, 0), 30);
+    1
+}
+
+fn test_multiply() -> Int {
+    // LOAD r0, 6; LOAD r1, 7; MUL r0, r1; HALT
+    let prog = Arr8 {
+        v0: encode(1, 0, 6), v1: encode(1, 1, 7),
+        v2: encode(4, 0, 1), v3: encode(0, 0, 0),
+        v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    let m = run_program(prog);
+    assert_eq(get8(m.regs, 0), 42);
+    1
+}
+
+fn test_loop_countdown() -> Int {
+    // r0 = 5, r1 = 0
+    // loop: ADD r1, r0; DEC r0; JNZ r0, 2; HALT
+    // This computes 5+4+3+2+1 = 15
+    let prog = Arr8 {
+        v0: encode(1, 0, 5),  // LOAD r0, 5
+        v1: encode(1, 1, 0),  // LOAD r1, 0
+        v2: encode(2, 1, 0),  // ADD r1, r0  (r1 += r0)
+        v3: encode(6, 0, 0),  // DEC r0
+        v4: encode(5, 0, 2),  // JNZ r0, 2
+        v5: encode(0, 0, 0),  // HALT
+        v6: 0, v7: 0
+    };
+    let m = run_program(prog);
+    assert_eq(get8(m.regs, 0), 0);
+    assert_eq(get8(m.regs, 1), 15);
+    1
+}
+
+fn test_factorial() -> Int {
+    // Compute 5! = 120
+    // r0 = 5 (counter), r1 = 1 (accumulator)
+    // loop: MUL r1, r0; DEC r0; JNZ r0, 2; HALT
+    let prog = Arr8 {
+        v0: encode(1, 0, 5),  // LOAD r0, 5
+        v1: encode(1, 1, 1),  // LOAD r1, 1
+        v2: encode(4, 1, 0),  // MUL r1, r0
+        v3: encode(6, 0, 0),  // DEC r0
+        v4: encode(5, 0, 2),  // JNZ r0, 2
+        v5: encode(0, 0, 0),  // HALT
+        v6: 0, v7: 0
+    };
+    let m = run_program(prog);
+    assert_eq(get8(m.regs, 1), 120);
+    1
+}
+
+fn test_mov() -> Int {
+    // LOAD r0, 99; MOV r2, r0; HALT
+    let prog = Arr8 {
+        v0: encode(1, 0, 99), v1: encode(7, 2, 0),
+        v2: encode(0, 0, 0), v3: 0, v4: 0, v5: 0, v6: 0, v7: 0
+    };
+    let m = run_program(prog);
+    assert_eq(get8(m.regs, 0), 99);
+    assert_eq(get8(m.regs, 2), 99);
+    1
+}
+
+fn main() -> Int {
+    test_simple_load();
+    test_add();
+    test_multiply();
+    test_loop_countdown();
+    test_factorial();
+    test_mov();
+    print("[OK] 545_milestone_aot");
+    0
+}

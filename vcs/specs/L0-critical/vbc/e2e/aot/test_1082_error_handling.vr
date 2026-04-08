@@ -1,0 +1,150 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: error-handling, try, recover, throw, cross-function
+// @description: Test error handling with try/recover and cross-function throw
+
+fn validate_age(age: Int) -> Int {
+    if age < 0 {
+        throw -1;
+    }
+    if age > 150 {
+        throw -2;
+    }
+    age
+}
+
+fn test_basic_try() -> Int {
+    let result = try {
+        validate_age(25)
+    } recover |e| {
+        e
+    };
+    if result != 25 {
+        print(f"FAIL basic_try: result={result}, expected 25");
+        return 1;
+    }
+    print("  basic_try: OK");
+    0
+}
+
+fn test_try_with_throw() -> Int {
+    let result = try {
+        validate_age(-5)
+    } recover |e| {
+        e
+    };
+    if result != -1 {
+        print(f"FAIL try_throw: result={result}, expected -1");
+        return 1;
+    }
+    print("  try_throw: OK");
+    0
+}
+
+fn test_try_overflow() -> Int {
+    let result = try {
+        validate_age(200)
+    } recover |e| {
+        e
+    };
+    if result != -2 {
+        print(f"FAIL try_overflow: result={result}, expected -2");
+        return 1;
+    }
+    print("  try_overflow: OK");
+    0
+}
+
+fn safe_divide(a: Int, b: Int) -> Int {
+    if b == 0 {
+        throw -99;
+    }
+    a / b
+}
+
+fn test_chain_throw() -> Int {
+    let result = try {
+        let x = safe_divide(100, 5);   // 20
+        let y = safe_divide(x, 4);     // 5
+        let z = safe_divide(y, 0);     // throws -99
+        z
+    } recover |e| {
+        e
+    };
+    if result != -99 {
+        print(f"FAIL chain: result={result}, expected -99");
+        return 1;
+    }
+    print("  chain_throw: OK");
+    0
+}
+
+fn test_no_throw_path() -> Int {
+    let result = try {
+        let x = safe_divide(100, 5);   // 20
+        let y = safe_divide(x, 4);     // 5
+        y
+    } recover |e| {
+        e
+    };
+    if result != 5 {
+        print(f"FAIL no_throw: result={result}, expected 5");
+        return 1;
+    }
+    print("  no_throw: OK");
+    0
+}
+
+fn test_nested_try() -> Int {
+    let outer = try {
+        let inner = try {
+            safe_divide(10, 0)
+        } recover |e| {
+            42
+        };
+        inner + 8
+    } recover |e| {
+        e
+    };
+    if outer != 50 {
+        print(f"FAIL nested: result={outer}, expected 50");
+        return 1;
+    }
+    print("  nested_try: OK");
+    0
+}
+
+fn test_recover_computation() -> Int {
+    let result = try {
+        throw 30;
+        0
+    } recover |e| {
+        e * 3
+    };
+    if result != 90 {
+        print(f"FAIL recover_comp: expected 90, got {result}");
+        return 1;
+    }
+    print("  recover_computation: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Error Handling Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_try();
+    failures = failures + test_try_with_throw();
+    failures = failures + test_try_overflow();
+    failures = failures + test_chain_throw();
+    failures = failures + test_no_throw_path();
+    failures = failures + test_nested_try();
+    failures = failures + test_recover_computation();
+
+    if failures == 0 {
+        print("All error handling tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

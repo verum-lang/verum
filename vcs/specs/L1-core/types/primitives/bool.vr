@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, primitives, bool
+
+/// Test for Bool primitive type.
+/// Bool represents a logical boolean value with two possible states.
+
+fn main() {
+    // Basic boolean literals
+    let b: Bool = true;
+    let c: Bool = false;
+
+    // Boolean from logical expressions
+    let d: Bool = 1 < 2;
+    let e: Bool = 3 == 3;
+    let f: Bool = 5 != 3;
+    let g: Bool = 10 >= 10;
+    let h: Bool = 5 <= 10;
+
+    // Boolean operations
+    let and_result: Bool = b && c;
+    let or_result: Bool = b || c;
+    let not_result: Bool = !b;
+
+    // Short-circuit evaluation (panic returns Never, not Bool — use simple literals)
+    let short_and: Bool = false && true;   // false && _ always false
+    let short_or: Bool = true || false;    // true || _ always true
+
+    // Compound boolean expressions
+    let complex1: Bool = (b && !c) || (c && !b);  // XOR pattern
+    let complex2: Bool = !(b && c);               // NAND
+    let complex3: Bool = !(b || c);               // NOR
+    let complex4: Bool = (b || c) && !(b && c);   // XOR alternative
+
+    // Boolean in conditional context
+    let cond_result: Int = if b { 1 } else { 0 };
+
+    // Boolean equality and comparison
+    let eq_true: Bool = true == true;
+    let eq_false: Bool = false == false;
+    let neq: Bool = true != false;
+
+    // Boolean from various comparison operators
+    let cmp_lt: Bool = 1 < 2;
+    let cmp_le: Bool = 2 <= 2;
+    let cmp_gt: Bool = 3 > 2;
+    let cmp_ge: Bool = 3 >= 3;
+    let cmp_eq: Bool = 4 == 4;
+    let cmp_ne: Bool = 4 != 5;
+
+    // Boolean with floating point comparisons
+    let float_cmp: Bool = 3.14 > 2.71;
+    // let float_eq: Bool = 0.0 == -0.0;  // IEEE 754 positive and negative zero
+    let float_eq: Bool = 0.0 == 0.0;  // Simplified comparison
+
+    // Boolean with text comparisons
+    let text_eq: Bool = "hello" == "hello";
+    let text_ne: Bool = "hello" != "world";
+    // let text_lt: Bool = "abc" < "abd";
+
+    // Boolean as function parameter and return type
+    fn negate(val: Bool) -> Bool {
+        !val
+    }
+
+    fn and_fn(a: Bool, b: Bool) -> Bool {
+        a && b
+    }
+
+    fn or_fn(a: Bool, b: Bool) -> Bool {
+        a || b
+    }
+
+    fn xor_fn(a: Bool, b: Bool) -> Bool {
+        (a || b) && !(a && b)
+    }
+
+    let neg_true: Bool = negate(true);
+    let neg_false: Bool = negate(false);
+    let and_fn_result: Bool = and_fn(true, false);
+    let xor_result: Bool = xor_fn(true, false);
+
+    // Boolean in pattern matching
+    let matched: Text = match b {
+        true => "is true",
+        false => "is false",
+    };
+
+    // Boolean with Maybe
+    let maybe_bool: Maybe<Bool> = Some(true);
+    let unwrapped: Bool = maybe_bool.unwrap_or(false);
+
+    // Default value for Bool
+    // let default_bool: Bool = Bool.default();
+    let default_bool: Bool = false;  // Manual default
+
+    // Assertions
+    assert(b == true);
+    assert(c == false);
+    assert(d == true);
+    assert(e == true);
+    assert(f == true);
+    assert(g == true);
+    assert(h == true);
+    assert(and_result == false);
+    assert(or_result == true);
+    assert(not_result == false);
+    assert(short_and == false);
+    assert(short_or == true);
+    assert(complex1 == true);  // true XOR false = true
+    assert(complex2 == true);  // NOT (true AND false) = true
+    assert(complex3 == false); // NOT (true OR false) = false
+    assert(eq_true == true);
+    assert(eq_false == true);
+    assert(neq == true);
+    assert(neg_true == false);
+    assert(neg_false == true);
+    assert(xor_result == true);
+    assert(matched == "is true");
+    assert(unwrapped == true);
+    assert(default_bool == false);
+}

@@ -1,0 +1,228 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, fenwick, bit, 2d, range-query
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for 2D Fenwick (Binary Indexed Tree) for rectangle sum queries
+// on a small 4x4 grid. Supports point update and prefix rectangle sum.
+
+// We use a 4x4 grid => BIT is 5x5 (1-indexed), flatten to Arr16 (indices 0..24)
+// BIT index (r, c) maps to flat index r * 5 + c
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+// 5x5 = 25 slots. We need a flat array of 25 elements.
+// Use 4 Arr8 blocks = 32 slots (enough for 25).
+type Grid25 is { b0: Arr8, b1: Arr8, b2: Arr8, b3: Arr8 };
+
+fn g25_zero() -> Grid25 {
+    let z = Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    Grid25 { b0: z, b1: z, b2: z, b3: z }
+}
+
+fn g25_get(g: Grid25, i: Int) -> Int {
+    if i < 8 { a8_get(g.b0, i) }
+    else if i < 16 { a8_get(g.b1, i - 8) }
+    else if i < 24 { a8_get(g.b2, i - 16) }
+    else { a8_get(g.b3, i - 24) }
+}
+
+fn g25_set(g: Grid25, i: Int, v: Int) -> Grid25 {
+    if i < 8 {
+        Grid25 { b0: a8_set(g.b0, i, v), b1: g.b1, b2: g.b2, b3: g.b3 }
+    } else if i < 16 {
+        Grid25 { b0: g.b0, b1: a8_set(g.b1, i - 8, v), b2: g.b2, b3: g.b3 }
+    } else if i < 24 {
+        Grid25 { b0: g.b0, b1: g.b1, b2: a8_set(g.b2, i - 16, v), b3: g.b3 }
+    } else {
+        Grid25 { b0: g.b0, b1: g.b1, b2: g.b2, b3: a8_set(g.b3, i - 24, v) }
+    }
+}
+
+// Lowbit: x & (-x) via arithmetic
+fn lowbit(x: Int) -> Int {
+    // x & (-x) extracts lowest set bit
+    // Simulate: find smallest power of 2 that divides x
+    if x <= 0 { return 0; }
+    let mut p = 1;
+    while p <= x {
+        if x % p == 0 {
+            let next = x / p;
+            if next % 2 != 0 {
+                return p;
+            }
+        }
+        p = p * 2;
+    }
+    p
+}
+
+// 2D BIT: 1-indexed, size N=4 => indices 1..4 in each dimension
+// Flat index: r * 5 + c (row-major, stride=5)
+
+fn bit2d_update(tree: Grid25, row: Int, col: Int, delta: Int, n: Int) -> Grid25 {
+    let mut t = tree;
+    let mut r = row;
+    while r <= n {
+        let mut c = col;
+        while c <= n {
+            let idx = r * (n + 1) + c;
+            let cur = g25_get(t, idx);
+            t = g25_set(t, idx, cur + delta);
+            c = c + lowbit(c);
+        }
+        r = r + lowbit(r);
+    }
+    t
+}
+
+// Query prefix sum (1,1) to (row, col)
+fn bit2d_query(tree: Grid25, row: Int, col: Int, n: Int) -> Int {
+    let mut sum = 0;
+    let mut r = row;
+    while r > 0 {
+        let mut c = col;
+        while c > 0 {
+            let idx = r * (n + 1) + c;
+            sum = sum + g25_get(tree, idx);
+            c = c - lowbit(c);
+        }
+        r = r - lowbit(r);
+    }
+    sum
+}
+
+// Rectangle sum query: sum of elements in (r1,c1) to (r2,c2) inclusive (1-indexed)
+fn bit2d_rect_sum(tree: Grid25, r1: Int, c1: Int, r2: Int, c2: Int, n: Int) -> Int {
+    let total = bit2d_query(tree, r2, c2, n);
+    let sub_top = if r1 > 1 { bit2d_query(tree, r1 - 1, c2, n) } else { 0 };
+    let sub_left = if c1 > 1 { bit2d_query(tree, r2, c1 - 1, n) } else { 0 };
+    let add_back = if r1 > 1 {
+        if c1 > 1 { bit2d_query(tree, r1 - 1, c1 - 1, n) } else { 0 }
+    } else { 0 };
+    total - sub_top - sub_left + add_back
+}
+
+fn test_lowbit() -> Int {
+    assert_eq(lowbit(1), 1);
+    assert_eq(lowbit(2), 2);
+    assert_eq(lowbit(3), 1);
+    assert_eq(lowbit(4), 4);
+    assert_eq(lowbit(6), 2);
+    0
+}
+
+fn test_single_update_query() -> Int {
+    let n = 4;
+    let mut t = g25_zero();
+    // Set (1,1) = 5
+    t = bit2d_update(t, 1, 1, 5, n);
+    assert_eq(bit2d_query(t, 1, 1, n), 5);
+    assert_eq(bit2d_query(t, 2, 2, n), 5);
+    assert_eq(bit2d_query(t, 4, 4, n), 5);
+    0
+}
+
+fn test_multiple_updates() -> Int {
+    let n = 4;
+    let mut t = g25_zero();
+    // Build a small grid:
+    // (1,1)=1  (1,2)=2  (1,3)=3  (1,4)=4
+    t = bit2d_update(t, 1, 1, 1, n);
+    t = bit2d_update(t, 1, 2, 2, n);
+    t = bit2d_update(t, 1, 3, 3, n);
+    t = bit2d_update(t, 1, 4, 4, n);
+    // Prefix sum (1,1..4)
+    assert_eq(bit2d_query(t, 1, 1, n), 1);
+    assert_eq(bit2d_query(t, 1, 2, n), 3);
+    assert_eq(bit2d_query(t, 1, 4, n), 10);
+    0
+}
+
+fn test_two_rows() -> Int {
+    let n = 4;
+    let mut t = g25_zero();
+    // Row 1: 1,2,3,4
+    t = bit2d_update(t, 1, 1, 1, n);
+    t = bit2d_update(t, 1, 2, 2, n);
+    t = bit2d_update(t, 1, 3, 3, n);
+    t = bit2d_update(t, 1, 4, 4, n);
+    // Row 2: 5,6,7,8
+    t = bit2d_update(t, 2, 1, 5, n);
+    t = bit2d_update(t, 2, 2, 6, n);
+    t = bit2d_update(t, 2, 3, 7, n);
+    t = bit2d_update(t, 2, 4, 8, n);
+    // Prefix sum (2, 4) = 1+2+3+4 + 5+6+7+8 = 36
+    assert_eq(bit2d_query(t, 2, 4, n), 36);
+    // Prefix sum (2, 2) = 1+2+5+6 = 14
+    assert_eq(bit2d_query(t, 2, 2, n), 14);
+    0
+}
+
+fn test_rect_sum() -> Int {
+    let n = 4;
+    let mut t = g25_zero();
+    // Row 1: 1,2,3,4  Row 2: 5,6,7,8  Row 3: 9,10,11,12
+    t = bit2d_update(t, 1, 1, 1, n);
+    t = bit2d_update(t, 1, 2, 2, n);
+    t = bit2d_update(t, 1, 3, 3, n);
+    t = bit2d_update(t, 1, 4, 4, n);
+    t = bit2d_update(t, 2, 1, 5, n);
+    t = bit2d_update(t, 2, 2, 6, n);
+    t = bit2d_update(t, 2, 3, 7, n);
+    t = bit2d_update(t, 2, 4, 8, n);
+    t = bit2d_update(t, 3, 1, 9, n);
+    t = bit2d_update(t, 3, 2, 10, n);
+    t = bit2d_update(t, 3, 3, 11, n);
+    t = bit2d_update(t, 3, 4, 12, n);
+    // Rect (2,2) to (3,3) = 6+7+10+11 = 34
+    assert_eq(bit2d_rect_sum(t, 2, 2, 3, 3, n), 34);
+    // Rect (1,1) to (3,4) = sum 1..12 = 78
+    assert_eq(bit2d_rect_sum(t, 1, 1, 3, 4, n), 78);
+    // Single cell (2,3) = 7
+    assert_eq(bit2d_rect_sum(t, 2, 3, 2, 3, n), 7);
+    0
+}
+
+fn test_incremental_update() -> Int {
+    let n = 4;
+    let mut t = g25_zero();
+    t = bit2d_update(t, 2, 2, 10, n);
+    assert_eq(bit2d_rect_sum(t, 2, 2, 2, 2, n), 10);
+    // Add 5 more to (2,2)
+    t = bit2d_update(t, 2, 2, 5, n);
+    assert_eq(bit2d_rect_sum(t, 2, 2, 2, 2, n), 15);
+    // Add value to (3,3)
+    t = bit2d_update(t, 3, 3, 20, n);
+    assert_eq(bit2d_rect_sum(t, 2, 2, 3, 3, n), 35);
+    0
+}
+
+fn main() -> Int {
+    test_lowbit();
+    test_single_update_query();
+    test_multiple_updates();
+    test_two_rows();
+    test_rect_sum();
+    test_incremental_update();
+    print("All 2D Fenwick tree tests passed!");
+    0
+}

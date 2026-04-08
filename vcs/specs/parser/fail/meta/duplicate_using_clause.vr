@@ -1,0 +1,20 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, using, duplicate, error
+// @expected-error: M205
+// @description: Functions cannot have multiple using clauses
+
+// =============================================================================
+// Grammar Reference:
+// function_def = ... , [ using_clause ] , ... ;
+// Only one using clause is allowed per function
+// =============================================================================
+
+// ERROR: Two using clauses - second using not expected after first
+fn duplicate_using()
+    using [Logger]
+    using [Database]
+{
+}

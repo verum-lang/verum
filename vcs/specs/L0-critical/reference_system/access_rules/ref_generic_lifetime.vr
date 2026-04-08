@@ -1,0 +1,84 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, generic
+
+/// Test borrowing with CBGR (Compiler-Based Generational References).
+/// Verum uses CBGR instead of explicit lifetime parameters.
+/// References are automatically tracked by the compiler.
+/// Spec: 04-memory-model.md#cbgr
+
+fn main() {
+    test_reference_return();
+    test_container_with_reference();
+}
+
+/// Test returning reference from function
+/// CBGR automatically ensures returned reference is valid
+fn longest(x: &Int, y: &Int) -> &Int {
+    if *x > *y {
+        x
+    } else {
+        y
+    }
+}
+
+fn test_reference_return() {
+    let a = 10;
+    let b = 20;
+
+    let result = longest(&a, &b);
+    assert(*result == 20);
+}
+
+/// Container holding a reference
+/// CBGR ensures data outlives the container
+type Container<T> is {
+    data: &T,
+};
+
+implement<T> Container<T> {
+    fn new(data: &T) -> Self {
+        Container { data: data }
+    }
+
+    fn get(&self) -> &T {
+        self.data
+    }
+}
+
+fn test_container_with_reference() {
+    let value = 42;
+    let container = Container.new(&value);
+
+    let retrieved = container.get();
+    assert(*retrieved == 42);
+}
+
+/// Window into array data
+type Window<T> is {
+    data: &[T],
+    start: Int,
+    end: Int,
+};
+
+implement<T> Window<T> {
+    fn new(data: &[T], start: Int, end: Int) -> Self {
+        Window { data: data, start: start, end: end }
+    }
+
+    fn get(&self, index: Int) -> &T {
+        &self.data[self.start + index]
+    }
+
+    fn len(&self) -> Int {
+        self.end - self.start
+    }
+}
+
+fn test_window() {
+    let array = [1, 2, 3, 4, 5];
+    let window = Window.new(&array, 1, 4);
+
+    assert(window.len() == 3);
+}

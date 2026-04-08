@@ -1,0 +1,125 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, patterns, qualified-names, namespacing
+// @description: Pattern matching with qualified variant names
+
+// Module with graphics-related types
+module graphics {
+    pub type Color is Red | Green | Blue | Alpha(Float);
+
+    pub type Blend is Normal | Multiply | Screen | Overlay;
+}
+
+// Module with traffic-related types (no name conflicts with consumer)
+module traffic {
+    pub type Signal is Stop | Caution | Go;
+
+    pub type State is
+        | Waiting(Signal)
+        | Transitioning { from: Signal, to: Signal }
+        | Emergency;
+}
+
+// Module with custom data types
+module data {
+    pub type Option<T> is Nothing | Just(T);
+
+    pub type LinkedList<T> is Empty | Cons(T, Heap<LinkedList<T>>);
+}
+
+// Consumer using variant names from imported types
+module consumer {
+    mount super.graphics.Color;
+    mount super.traffic.{Signal, State};
+    mount super.data.{Option, LinkedList};
+
+    // Using imported variant names
+    pub fn color_to_hex(c: Color) -> Int =
+        match c {
+            Red => 0xFF0000,
+            Green => 0x00FF00,
+            Blue => 0x0000FF,
+            Alpha(a) => {
+                let alpha_byte = (a * 255.0).trunc() as Int;
+                alpha_byte << 24
+            }
+        }
+
+    pub fn signal_name(s: Signal) -> Text =
+        match s {
+            Stop => "stop",
+            Caution => "caution",
+            Go => "go"
+        }
+
+    // Exhaustive match with variant names
+    pub fn describe_state(s: State) -> Text =
+        match s {
+            Waiting(sig) => f"waiting at {signal_name(sig)}",
+            Transitioning { from, to } =>
+                f"changing from {signal_name(from)} to {signal_name(to)}",
+            Emergency => "emergency mode"
+        }
+
+    // Using data module's types
+    pub fn head_option<T>(list: &LinkedList<T>) -> Option<&T> =
+        match list {
+            &Empty => Nothing,
+            &Cons(ref x, _) => Just(x)
+        }
+
+    pub fn map_option<T, U>(m: Option<T>, f: fn(T) -> U) -> Option<U> =
+        match m {
+            Nothing => Nothing,
+            Just(x) => Just(f(x))
+        }
+
+    // Mixing imported and local definitions
+    type LocalColor is Black | White | Custom(Color);
+
+    pub fn local_to_alpha(c: LocalColor) -> Float =
+        match c {
+            Black => 0.0,
+            White => 1.0,
+            Custom(gc) => match gc {
+                Alpha(a) => a,
+                _ => 1.0
+            }
+        }
+
+    // Nested pattern matching across types
+    pub fn signal_to_color(s: Signal) -> Color =
+        match s {
+            Stop => Red,
+            Caution => Alpha(0.5),
+            Go => Green
+        }
+}
+
+fn main() {
+    mount consumer.{color_to_hex, signal_name, describe_state, map_option, signal_to_color};
+    mount graphics.Color;
+    mount traffic.{Signal, State};
+    mount data.Option;
+
+    // Test color matching
+    assert(color_to_hex(Red) == 0xFF0000);
+    assert(color_to_hex(Blue) == 0x0000FF);
+
+    // Test signal matching
+    assert(signal_name(Stop) == "stop");
+    assert(signal_name(Go) == "go");
+
+    // Test state description
+    let state = Waiting(Stop);
+    assert(describe_state(state) == "waiting at stop");
+
+    // Test signal to color conversion
+    let c = signal_to_color(Stop);
+    assert(color_to_hex(c) == 0xFF0000);
+
+    // Test option operations
+    let some_val: Option<Int> = Just(42);
+    let doubled = map_option(some_val, |x| x * 2);
+}

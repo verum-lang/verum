@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, bounds, grammar, error
+// @description: Test detection of trailing '+' in type bounds
+// @expected-error: E0D0
+
+// GRAMMAR: bounds = bound , { '+' , bound } ;
+// After '+', another bound is REQUIRED. Trailing '+' is invalid.
+
+fn test_trailing_plus<T: Clone +>() {}

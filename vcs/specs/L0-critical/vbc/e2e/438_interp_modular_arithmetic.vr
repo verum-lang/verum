@@ -1,0 +1,121 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, modular, arithmetic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests modular arithmetic: modular add, mul, pow, inverse.
+
+fn mod_add(a: Int, b: Int, m: Int) -> Int {
+    ((a % m) + (b % m)) % m
+}
+
+fn mod_mul(a: Int, b: Int, m: Int) -> Int {
+    ((a % m) * (b % m)) % m
+}
+
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % m;
+        }
+        e = e / 2;
+        b = (b * b) % m;
+    }
+    result
+}
+
+fn mod_inv(a: Int, m: Int) -> Int {
+    // Brute force modular inverse
+    let mut i = 1;
+    while i < m {
+        if (a * i) % m == 1 {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1 // No inverse
+}
+
+fn test_mod_add() {
+    assert_eq(mod_add(7, 8, 10), 5);    // 15 % 10
+    assert_eq(mod_add(999, 1, 1000), 0); // 1000 % 1000
+    assert_eq(mod_add(5, 3, 7), 1);      // 8 % 7
+    print("mod_add: ok");
+}
+
+fn test_mod_mul() {
+    assert_eq(mod_mul(7, 8, 10), 6);     // 56 % 10
+    assert_eq(mod_mul(12, 13, 7), 2);    // 156 % 7
+    assert_eq(mod_mul(99, 99, 100), 1);  // 9801 % 100
+    print("mod_mul: ok");
+}
+
+fn test_mod_pow() {
+    assert_eq(mod_pow(2, 10, 1024), 0);   // 1024 % 1024
+    assert_eq(mod_pow(2, 10, 1000), 24);  // 1024 % 1000
+    assert_eq(mod_pow(3, 4, 7), 4);       // 81 % 7
+    assert_eq(mod_pow(5, 0, 13), 1);      // Any^0 = 1
+    print("mod_pow: ok");
+}
+
+fn test_mod_inv() {
+    // 3 * 5 = 15 ≡ 1 (mod 7)
+    assert_eq(mod_inv(3, 7), 5);
+    // 2 * 4 = 8 ≡ 1 (mod 7)
+    assert_eq(mod_inv(2, 7), 4);
+    // 5 * 9 = 45 ≡ 1 (mod 11)
+    assert_eq(mod_inv(5, 11), 9);
+    // 6 has no inverse mod 4 (gcd(6,4) != 1)
+    assert_eq(mod_inv(6, 4), -1);
+    print("mod_inv: ok");
+}
+
+fn test_chinese_remainder() {
+    // Find x such that x ≡ 2 (mod 3), x ≡ 3 (mod 5), x ≡ 2 (mod 7)
+    // Brute force
+    let mut x = 0;
+    let mut found = 0;
+    while x < 105 {
+        if x % 3 == 2 && x % 5 == 3 && x % 7 == 2 {
+            found = x;
+            x = 105; // break
+        }
+        x = x + 1;
+    }
+    assert_eq(found, 23); // 23 ≡ 2 (mod 3), 23 ≡ 3 (mod 5), 23 ≡ 2 (mod 7)
+    print("chinese_remainder: ok");
+}
+
+fn test_fermat_primality() {
+    // Fermat test: if a^(n-1) ≡ 1 (mod n) for several a, n is probably prime
+    let n = 97;
+    let t1 = mod_pow(2, n - 1, n);
+    let t2 = mod_pow(3, n - 1, n);
+    let t3 = mod_pow(5, n - 1, n);
+    assert_eq(t1, 1);
+    assert_eq(t2, 1);
+    assert_eq(t3, 1);
+
+    // Non-prime: 15
+    let m = 15;
+    let t4 = mod_pow(2, m - 1, m);
+    // 2^14 mod 15 = 16384 mod 15 = 4 ≠ 1
+    assert(t4 != 1);
+    print("fermat_primality: ok");
+}
+
+fn main() -> Int {
+    test_mod_add();
+    test_mod_mul();
+    test_mod_pow();
+    test_mod_inv();
+    test_chinese_remainder();
+    test_fermat_primality();
+    print("[OK] 438_interp_modular_arithmetic");
+    0
+}

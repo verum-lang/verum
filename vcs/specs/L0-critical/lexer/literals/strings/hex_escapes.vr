@@ -1,0 +1,170 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, escapes, hexadecimal
+
+// String literals with hexadecimal escape sequences
+
+fn test_basic_hex_escapes() {
+    // Basic hex escapes (ASCII range)
+    let null = "\x00";
+    let tab = "\x09";
+    let newline = "\x0A";
+    let carriage_return = "\x0D";
+    let space = "\x20";
+    let exclaim = "\x21";
+}
+
+fn test_printable_ascii_hex() {
+    // Printable ASCII via hex
+    let a_lower = "\x61";
+    let z_lower = "\x7A";
+    let A_upper = "\x41";
+    let Z_upper = "\x5A";
+    let digit_0 = "\x30";
+    let digit_9 = "\x39";
+}
+
+fn test_special_chars_hex() {
+    // Special characters via hex
+    let double_quote = "\x22";
+    let single_quote = "\x27";
+    let backslash = "\x5C";
+    let tilde = "\x7E";
+    let at_sign = "\x40";
+    let hash = "\x23";
+}
+
+fn test_all_hex_digits() {
+    // All hex digits used
+    let hex_all_lower = "\x0a\x0b\x0c\x0d\x0e\x0f";
+    let hex_all_upper = "\x0A\x0B\x0C\x0D\x0E\x0F";
+    let hex_digits = "\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99";
+}
+
+fn test_control_chars_hex() {
+    // Control characters via hex
+    let bell = "\x07";
+    let backspace = "\x08";
+    let form_feed = "\x0C";
+    let vertical_tab = "\x0B";
+    let escape_char = "\x1B";
+}
+
+fn test_max_byte_hex() {
+    // Maximum single-byte value
+    let max_byte = "\xFF";
+    let near_max = "\xFE";
+    let half_max = "\x80";
+}
+
+fn test_mixed_case_hex() {
+    // Mixed case in hex escapes
+    let mixed_1 = "\xAa";
+    let mixed_2 = "\xaA";
+    let mixed_3 = "\xaB";
+    let mixed_4 = "\xBa";
+}
+
+fn test_hex_with_text() {
+    // Combined with regular text
+    let hex_in_text = "Hello\x20World";
+    let hex_tabs = "Col1\x09Col2\x09Col3";
+    let hex_newlines = "Line1\x0ALine2\x0ALine3";
+}
+
+fn test_consecutive_hex() {
+    // Multiple hex escapes in sequence
+    let consecutive = "\x41\x42\x43";  // ABC
+    let pattern = "\xAA\x55\xAA\x55";
+    let bytes = "\x00\x01\x02\x03\x04";
+}
+
+fn test_hex_paths() {
+    // Hex in paths
+    let windows_sep = "C:\x5CUsers\x5CDocuments";
+    let quoted_path = "\x22/home/user\x22";
+}
+
+fn test_nonprintable_hex() {
+    // Hex for non-printable boundaries
+    let del = "\x7F";
+    let extended_start = "\x80";
+}
+
+fn test_hex_expressions() {
+    // In expressions
+    let combined = "\x48\x69" + " " + "\x54\x68\x65\x72\x65";  // "Hi" + " " + "There"
+}
+
+fn test_hex_arrays() {
+    // In arrays
+    let hex_array = ["\x00", "\x01", "\x02", "\xFF"];
+    let ascii_bytes = ["\x41", "\x42", "\x43", "\x44", "\x45"];
+}
+
+// In function parameters
+fn process_byte_string(s: Text) -> Text {
+    s + "\x00"  // null terminate
+}
+
+fn test_hex_context() {
+    // Hex escape with text context
+    let proto_text = "\x02STX content \x03ETX";
+    let framed = "\x7EDATA\x7E";
+}
+
+fn test_common_byte_patterns() {
+    // Common byte patterns
+    let crlf_hex = "\x0D\x0A";
+    let lfcr_hex = "\x0A\x0D";
+    let null_term = "string\x00";
+}
+
+fn test_binary_patterns() {
+    // Binary-looking data in strings
+    let binary_pattern = "\x00\xFF\x00\xFF";
+    let header_bytes = "\x89PNG\x0D\x0A\x1A\x0A";
+}
+
+// Escape sequence variations in struct
+type ByteData is {
+    header: Text,
+    terminator: Text,
+};
+
+fn test_hex_in_struct() {
+    let data = ByteData {
+        header: "\xFF\xFE",
+        terminator: "\x00\x00",
+    };
+}
+
+fn test_hex_edge_cases() {
+    // Edge cases
+    let just_hex = "\xFF";
+    let two_hex = "\xAB\xCD";
+    let hex_at_start = "\x00Hello";
+    let hex_at_end = "Hello\x00";
+    let hex_in_middle = "Hel\x6Co";  // Hello
+}
+
+fn test_c0_control_codes() {
+    // All control characters (C0 control codes)
+    let c0_nul = "\x00";
+    let c0_soh = "\x01";
+    let c0_stx = "\x02";
+    let c0_etx = "\x03";
+    let c0_eot = "\x04";
+    let c0_enq = "\x05";
+    let c0_ack = "\x06";
+    let c0_bel = "\x07";
+    let c0_bs = "\x08";
+    let c0_ht = "\x09";
+    let c0_lf = "\x0A";
+    let c0_vt = "\x0B";
+    let c0_ff = "\x0C";
+    let c0_cr = "\x0D";
+    let c0_so = "\x0E";
+    let c0_si = "\x0F";
+}

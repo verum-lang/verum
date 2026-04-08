@@ -1,0 +1,168 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, floyd-warshall, shortest-path, graph
+// @timeout: 30000
+
+// Floyd-Warshall all-pairs shortest path using flat matrix
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Use 4x4 matrix: 16 elements need two Arr8s (rows 0-1 in first, 2-3 in second)
+type Mat4 is { lo: Arr8, hi: Arr8 };
+
+fn mat4_get(m: Mat4, r: Int, c: Int) -> Int {
+    let idx = r * 4 + c;
+    if idx < 8 { get8(m.lo, idx) } else { get8(m.hi, idx - 8) }
+}
+
+fn mat4_set(m: Mat4, r: Int, c: Int, v: Int) -> Mat4 {
+    let idx = r * 4 + c;
+    if idx < 8 { Mat4 { lo: set8(m.lo, idx, v), hi: m.hi } }
+    else { Mat4 { lo: m.lo, hi: set8(m.hi, idx - 8, v) } }
+}
+
+fn zeros8() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// INF value (large number, not too large to overflow when added)
+fn inf() -> Int { 99999 }
+
+// Floyd-Warshall on 4-node graph
+fn floyd_warshall(dist: Mat4, n: Int) -> Mat4 {
+    let mut d = dist;
+    let mut k = 0;
+    while k < n {
+        let mut i = 0;
+        while i < n {
+            let mut j = 0;
+            while j < n {
+                let via_k = mat4_get(d, i, k) + mat4_get(d, k, j);
+                if via_k < mat4_get(d, i, j) {
+                    d = mat4_set(d, i, j, via_k);
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    d
+}
+
+fn test_simple_graph() -> Int {
+    // Graph: 0→1(3), 1→2(1), 0→2(6), 2→3(2), 1→3(5)
+    let big = inf();
+    let mut d = Mat4 { lo: zeros8(), hi: zeros8() };
+    // Initialize all to INF
+    let mut i = 0;
+    while i < 4 {
+        let mut j = 0;
+        while j < 4 {
+            if i == j { d = mat4_set(d, i, j, 0); }
+            else { d = mat4_set(d, i, j, big); }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Set edges
+    d = mat4_set(d, 0, 1, 3);
+    d = mat4_set(d, 1, 2, 1);
+    d = mat4_set(d, 0, 2, 6);
+    d = mat4_set(d, 2, 3, 2);
+    d = mat4_set(d, 1, 3, 5);
+
+    let result = floyd_warshall(d, 4);
+
+    // 0→1: 3 (direct)
+    assert_eq(mat4_get(result, 0, 1), 3);
+    // 0→2: min(6, 3+1) = 4 (via 1)
+    assert_eq(mat4_get(result, 0, 2), 4);
+    // 0→3: min(INF, 3+5, 4+2) = 6 (via 1→2→3)
+    assert_eq(mat4_get(result, 0, 3), 6);
+    // 1→3: min(5, 1+2) = 3 (via 2)
+    assert_eq(mat4_get(result, 1, 3), 3);
+    // Self distances
+    assert_eq(mat4_get(result, 0, 0), 0);
+    assert_eq(mat4_get(result, 3, 3), 0);
+    1
+}
+
+fn test_complete_graph() -> Int {
+    let big = inf();
+    let mut d = Mat4 { lo: zeros8(), hi: zeros8() };
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
+            if i == j { d = mat4_set(d, i, j, 0); }
+            else { d = mat4_set(d, i, j, big); }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // K3 with weights: 0↔1(2), 1↔2(3), 0↔2(7)
+    d = mat4_set(d, 0, 1, 2);
+    d = mat4_set(d, 1, 0, 2);
+    d = mat4_set(d, 1, 2, 3);
+    d = mat4_set(d, 2, 1, 3);
+    d = mat4_set(d, 0, 2, 7);
+    d = mat4_set(d, 2, 0, 7);
+
+    let result = floyd_warshall(d, 3);
+
+    // 0→2: min(7, 2+3) = 5 (via 1)
+    assert_eq(mat4_get(result, 0, 2), 5);
+    assert_eq(mat4_get(result, 2, 0), 5);
+    1
+}
+
+fn test_no_path() -> Int {
+    let big = inf();
+    let mut d = Mat4 { lo: zeros8(), hi: zeros8() };
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
+            if i == j { d = mat4_set(d, i, j, 0); }
+            else { d = mat4_set(d, i, j, big); }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Only 0→1
+    d = mat4_set(d, 0, 1, 5);
+
+    let result = floyd_warshall(d, 3);
+    assert_eq(mat4_get(result, 0, 1), 5);
+    assert_eq(mat4_get(result, 0, 2), big); // no path
+    assert_eq(mat4_get(result, 1, 0), big); // directed, no reverse
+    1
+}
+
+fn main() -> Int {
+    test_simple_graph();
+    test_complete_graph();
+    test_no_path();
+    print("[OK] 501_floyd_warshall_aot");
+    0
+}

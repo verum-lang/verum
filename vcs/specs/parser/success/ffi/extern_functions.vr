@@ -1,0 +1,455 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+// @tags: parser, ffi, extern, ffi_function_decl, ffi_declaration
+// @description: Comprehensive test for ffi_function_decl grammar production within ffi blocks
+
+// ============================================================
+// GRAMMAR: ffi_declaration = visibility , 'ffi' , identifier , [ 'extends' , identifier ] ,
+//                            '{' , ffi_items , '}' ;
+// GRAMMAR: ffi_function_decl = '@extern' , '(' , string_lit , [ ',' , calling_convention_attr ] , ')' ,
+//                              'fn' , identifier , [ generics ] , '(' , param_list , ')' , [ '->' , type_expr ] , ';' ;
+// ============================================================
+
+// ------------------------------------------------------------
+// Basic FFI function declarations
+// ------------------------------------------------------------
+
+ffi BasicFunctions {
+    @extern("C")
+    fn simple_function() -> Int;
+
+    @extern("C")
+    fn function_with_param(x: Int) -> Int;
+
+    @extern("C")
+    fn function_with_params(a: Int, b: Float, c: Bool) -> Float;
+
+    @extern("C")
+    fn void_function();
+}
+
+// ------------------------------------------------------------
+// FFI with explicit calling conventions
+// ------------------------------------------------------------
+
+// Verum supports: C, stdcall, fastcall, sysv64
+ffi CallingConventions {
+    // cdecl is equivalent to C
+    @extern("C")
+    fn cdecl_func(a: Int) -> Int;
+
+    @extern("C", calling_convention = "stdcall")
+    fn stdcall_func(a: Int, b: Int) -> Int;
+
+    @extern("C", calling_convention = "fastcall")
+    fn fastcall_func(x: Int) -> Int;
+
+    // vectorcall uses C as fallback
+    @extern("C")
+    fn vectorcall_func(v: [f32; 4]) -> f32;
+
+    // thiscall uses C as fallback
+    @extern("C")
+    fn thiscall_func(this: *mut (), arg: Int) -> Int;
+
+    // system is platform-dependent; use stdcall for Windows, C for others
+    @extern("C", calling_convention = "stdcall")
+    fn system_func() -> Int;
+
+    // win64 uses stdcall
+    @extern("C", calling_convention = "stdcall")
+    fn win64_func(a: i64) -> i64;
+
+    @extern("C", calling_convention = "sysv64")
+    fn sysv64_func(a: i64, b: i64) -> i64;
+
+    // aapcs uses C
+    @extern("C")
+    fn arm_func(a: i32) -> i32;
+}
+
+// ------------------------------------------------------------
+// FFI functions with concrete types
+// Note: Generic parameters are not currently supported in FFI function declarations
+// Use concrete types instead
+// ------------------------------------------------------------
+
+ffi ConcreteFunctions {
+    @extern("C")
+    fn ptr_func(ptr: *const u8) -> u8;
+
+    @extern("C")
+    fn dual_ptr_func(a: *const i32, b: *const f64) -> (i32, f64);
+
+    @extern("C")
+    fn triple_ptr_func(x: i32, y: f32, z: u64) -> i32;
+
+    @extern("C")
+    fn copy_func(value: i32) -> i32;
+
+    @extern("C")
+    fn multi_param_func(value: Text) -> Text;
+}
+
+// ------------------------------------------------------------
+// FFI with pointer types
+// ------------------------------------------------------------
+
+ffi PointerFunctions {
+    @extern("C")
+    fn const_ptr(data: *const u8) -> Int;
+
+    @extern("C")
+    fn mut_ptr(data: *mut u8) -> Int;
+
+    @extern("C")
+    fn double_ptr(data: *mut *mut u8) -> Int;
+
+    @extern("C")
+    fn void_ptr(data: *mut ()) -> Int;
+
+    @extern("C")
+    fn const_void_ptr(data: *const ()) -> Int;
+
+    @extern("C")
+    fn ptr_to_fn(callback: *const fn(Int) -> Int) -> Int;
+
+    @extern("C")
+    fn returning_ptr() -> *mut u8;
+
+    @extern("C")
+    fn returning_const_ptr() -> *const u8;
+}
+
+// ------------------------------------------------------------
+// FFI with array types
+// ------------------------------------------------------------
+
+ffi ArrayFunctions {
+    @extern("C")
+    fn with_fixed_array(arr: [Int; 10]) -> Int;
+
+    @extern("C")
+    fn with_ptr_to_array(arr: *const [Int; 10]) -> Int;
+
+    @extern("C")
+    fn with_mut_array_ptr(arr: *mut [Int; 10]);
+
+    @extern("C")
+    fn with_multidim_array(arr: [[Int; 3]; 3]) -> Int;
+
+    @extern("C")
+    fn returning_array() -> [Int; 4];
+}
+
+// ------------------------------------------------------------
+// FFI with function pointer parameters
+// ------------------------------------------------------------
+
+ffi CallbackFunctions {
+    @extern("C")
+    fn with_callback(cb: fn(Int) -> Int, value: Int) -> Int;
+
+    @extern("C")
+    fn with_void_callback(cb: fn());
+
+    @extern("C")
+    fn with_multi_param_callback(
+        cb: fn(Int, Float, Bool) -> Int,
+        a: Int,
+        b: Float,
+        c: Bool
+    ) -> Int;
+
+    @extern("C")
+    fn with_nested_callback(
+        cb: fn(fn(Int) -> Int) -> Int,
+        inner: fn(Int) -> Int
+    ) -> Int;
+
+    @extern("C")
+    fn returning_callback() -> fn(Int) -> Int;
+}
+
+// ------------------------------------------------------------
+// FFI with reference types
+// ------------------------------------------------------------
+
+ffi ReferenceFunctions {
+    @extern("C")
+    fn with_unsafe_ref(data: &unsafe u8) -> Int;
+
+    @extern("C")
+    fn with_mut_unsafe_ref(data: &unsafe mut u8);
+
+    @extern("C")
+    fn with_checked_ref(data: &checked u8) -> Int;
+
+    @extern("C")
+    fn with_mut_checked_ref(data: &checked mut u8);
+
+    @extern("C")
+    fn with_standard_ref(data: &u8) -> Int;
+
+    @extern("C")
+    fn with_mut_ref(data: &mut u8);
+}
+
+// ------------------------------------------------------------
+// FFI with tuple types
+// ------------------------------------------------------------
+
+ffi TupleFunctions {
+    @extern("C")
+    fn returning_pair() -> (Int, Int);
+
+    @extern("C")
+    fn returning_triple() -> (Int, Float, Bool);
+
+    @extern("C")
+    fn with_tuple_param(pair: (Int, Int)) -> Int;
+
+    @extern("C")
+    fn with_nested_tuple(data: (Int, (Float, Bool))) -> Int;
+
+    @extern("C")
+    fn tuple_with_ptr(data: (*const u8, usize)) -> Int;
+}
+
+// ------------------------------------------------------------
+// FFI with optional/maybe types
+// ------------------------------------------------------------
+
+ffi OptionalFunctions {
+    @extern("C")
+    fn maybe_int() -> Maybe<Int>;
+
+    @extern("C")
+    fn maybe_ptr() -> Maybe<*mut u8>;
+
+    @extern("C")
+    fn with_maybe_param(opt: Maybe<Int>) -> Int;
+
+    @extern("C")
+    fn nested_maybe() -> Maybe<Maybe<Int>>;
+}
+
+// ------------------------------------------------------------
+// FFI with result types
+// ------------------------------------------------------------
+
+ffi ResultFunctions {
+    @extern("C")
+    fn result_int() -> Result<Int, Error>;
+
+    @extern("C")
+    fn result_ptr() -> Result<*mut u8, Error>;
+
+    @extern("C")
+    fn with_result_param(res: Result<Int, Error>) -> Int;
+}
+
+type Error is {
+    code: i32,
+    message: Text,
+};
+
+// ------------------------------------------------------------
+// FFI with complex return types
+// ------------------------------------------------------------
+
+ffi ComplexReturnFunctions {
+    @extern("C")
+    fn returning_struct() -> CStruct;
+
+    @extern("C")
+    fn returning_list() -> List<Int>;
+
+    @extern("C")
+    fn returning_map() -> Map<Text, Int>;
+
+    @extern("C")
+    fn returning_set() -> Set<Int>;
+
+    // Note: Generic FFI functions are not supported; use concrete types
+    @extern("C")
+    fn returning_int_list() -> List<Int>;
+}
+
+type CStruct is {
+    x: i32,
+    y: i32,
+    data: *mut u8,
+};
+
+// ------------------------------------------------------------
+// FFI with variadic functions
+// ------------------------------------------------------------
+
+ffi VariadicFunctions {
+    @extern("C")
+    fn printf(format: *const i8, ...) -> Int;
+
+    @extern("C")
+    fn sprintf(buf: *mut i8, format: *const i8, ...) -> Int;
+
+    @extern("C")
+    fn snprintf(buf: *mut i8, size: usize, format: *const i8, ...) -> Int;
+
+    @extern("C")
+    fn variadic_no_return(format: *const i8, ...);
+
+    @extern("C")
+    fn variadic_with_callback(cb: fn(Int), format: *const i8, ...);
+}
+
+// ------------------------------------------------------------
+// FFI with never type
+// ------------------------------------------------------------
+
+ffi NeverFunctions {
+    @extern("C")
+    fn abort() -> !;
+
+    @extern("C")
+    fn exit(code: Int) -> !;
+
+    @extern("C")
+    fn longjmp(env: *mut [i64; 8], val: Int) -> !;
+
+    @extern("C")
+    fn panic_handler(msg: *const i8) -> !;
+}
+
+// ------------------------------------------------------------
+// FFI with numeric types
+// Note: Generic FFI functions with where clauses are not supported
+// Use concrete types instead
+// ------------------------------------------------------------
+
+ffi NumericFunctions {
+    @extern("C")
+    fn with_i8(x: i8) -> i8;
+
+    @extern("C")
+    fn with_i16(x: i16) -> i16;
+
+    @extern("C")
+    fn with_i32(x: i32) -> i32;
+
+    @extern("C")
+    fn with_i64(x: i64) -> i64;
+
+    @extern("C")
+    fn with_i128(x: i128) -> i128;
+
+    @extern("C")
+    fn with_u8(x: u8) -> u8;
+
+    @extern("C")
+    fn with_u16(x: u16) -> u16;
+
+    @extern("C")
+    fn with_u32(x: u32) -> u32;
+
+    @extern("C")
+    fn with_u64(x: u64) -> u64;
+
+    @extern("C")
+    fn with_u128(x: u128) -> u128;
+
+    @extern("C")
+    fn with_f32(x: f32) -> f32;
+
+    @extern("C")
+    fn with_f64(x: f64) -> f64;
+
+    @extern("C")
+    fn with_isize(x: isize) -> isize;
+
+    @extern("C")
+    fn with_usize(x: usize) -> usize;
+}
+
+// ------------------------------------------------------------
+// FFI with many parameters
+// ------------------------------------------------------------
+
+ffi ManyParamsFunctions {
+    @extern("C")
+    fn ten_params(
+        a1: Int, a2: Int, a3: Int, a4: Int, a5: Int,
+        a6: Int, a7: Int, a8: Int, a9: Int, a10: Int
+    ) -> Int;
+
+    @extern("C")
+    fn mixed_many_params(
+        i1: Int,
+        f1: Float,
+        b1: Bool,
+        s1: *const i8,
+        p1: *mut u8,
+        cb: fn(Int) -> Int,
+        opt: Maybe<Int>,
+        arr: [Int; 4]
+    ) -> Int;
+}
+
+// ------------------------------------------------------------
+// FFI extending another FFI
+// ------------------------------------------------------------
+
+ffi BaseFfi {
+    @extern("C")
+    fn base_function() -> Int;
+}
+
+ffi ExtendedFfi extends BaseFfi {
+    @extern("C")
+    fn extended_function() -> Int;
+
+    @extern("C")
+    fn another_extended() -> Float;
+}
+
+ffi DeeplyExtendedFfi extends ExtendedFfi {
+    @extern("C")
+    fn deeply_extended_function() -> Bool;
+}
+
+// ------------------------------------------------------------
+// Public and visibility-modified FFI blocks
+// ------------------------------------------------------------
+
+pub ffi PublicFfi {
+    @extern("C")
+    fn public_ffi_function() -> Int;
+}
+
+internal ffi InternalFfi {
+    @extern("C")
+    fn internal_ffi_function() -> Int;
+}
+
+protected ffi ProtectedFfi {
+    @extern("C")
+    fn protected_ffi_function() -> Int;
+}
+
+// ------------------------------------------------------------
+// Empty FFI block
+// ------------------------------------------------------------
+
+ffi EmptyFfi {
+}
+
+// ------------------------------------------------------------
+// Single function FFI
+// ------------------------------------------------------------
+
+ffi SingleFunctionFfi {
+    @extern("C")
+    fn single() -> Int;
+}

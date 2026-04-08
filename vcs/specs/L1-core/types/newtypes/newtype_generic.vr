@@ -1,0 +1,183 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, newtypes, generics, parameterized
+// @description: Generic newtypes with type parameters
+
+/// Test for generic newtypes.
+/// Newtypes can be parameterized with type parameters.
+
+// ============================================================================
+// Generic newtype definitions
+// ============================================================================
+
+// Generic newtype wrapping any type
+type Wrapper<T> is (T);
+
+// Generic newtype for identifiers (phantom type)
+type Id<T> is (Int);
+
+// Generic newtype for tagged values
+type Tagged<Tag, Value> is (Value);
+
+// ============================================================================
+// Methods on generic newtype
+// ============================================================================
+
+implement<T> Wrapper<T> {
+    fn new(value: T) -> Wrapper<T> {
+        Wrapper(value)
+    }
+
+    fn unwrap(self) -> T {
+        self.0
+    }
+
+    fn get(&self) -> &T {
+        &self.0
+    }
+}
+
+implement<T> Id<T> {
+    fn new(value: Int) -> Id<T> {
+        Id(value)
+    }
+
+    fn value(&self) -> Int {
+        self.0
+    }
+}
+
+implement<Tag, Value> Tagged<Tag, Value> {
+    fn new(value: Value) -> Tagged<Tag, Value> {
+        Tagged(value)
+    }
+
+    fn get_val(&self) -> &Value {
+        &self.0
+    }
+}
+
+// ============================================================================
+// Protocol for generic newtype
+// ============================================================================
+
+type Mappable is protocol {
+    fn apply(&self) -> Int;
+};
+
+type Score is (Int);
+
+implement Score {
+    fn new(val: Int) -> Score {
+        Score(val)
+    }
+
+    fn doubled(&self) -> Score {
+        Score(self.0 * 2)
+    }
+}
+
+// ============================================================================
+// Wrapper with map operation
+// ============================================================================
+
+fn map_wrapper<T, U>(w: Wrapper<T>, f: fn(T) -> U) -> Wrapper<U> {
+    Wrapper(f(w.0))
+}
+
+// ============================================================================
+// Phantom types for type-safe IDs
+// ============================================================================
+
+type User is ();
+type Order is ();
+type Product is ();
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Basic generic wrapper - use .new() to avoid bidirectional inference limitation
+    let int_wrapper = Wrapper.new(42);
+    let text_wrapper = Wrapper.new("hello");
+
+    // Getting values
+    let unwrapped_int: Int = int_wrapper.unwrap();
+    assert(unwrapped_int == 42);
+
+    assert(*text_wrapper.get() == "hello");
+
+    // map_wrapper: T=Int, U=Int
+    let w21 = Wrapper.new(21);
+    let doubled = map_wrapper(w21, |x: Int| x * 2);
+    assert(doubled.unwrap() == 42);
+
+    // map_wrapper: T=Int, U=Text
+    let w99 = Wrapper.new(99);
+    let as_text = map_wrapper(w99, |x: Int| f"n{x}");
+    assert(as_text.unwrap() == "n99");
+
+    // map_wrapper: T=Text, U=Int
+    let w_hello = Wrapper.new("hello");
+    let len_wrap = map_wrapper(w_hello, |s: Text| s.len());
+    assert(len_wrap.unwrap() == 5);
+
+    // Type-safe IDs with phantom types - use .new() to infer from argument
+    let user_id = Id.new(1001);
+    let order_id = Id.new(2001);
+    let product_id = Id.new(3001);
+
+    assert(user_id.value() == 1001);
+    assert(order_id.value() == 2001);
+    assert(product_id.value() == 3001);
+
+    // Tagged values - use .new() to infer from argument
+    type Important is ();
+    type Normal is ();
+
+    let important_msg = Tagged.new("Critical update!");
+    let normal_msg = Tagged.new("FYI");
+
+    assert(*important_msg.get_val() == "Critical update!");
+    assert(*normal_msg.get_val() == "FYI");
+
+    // Tagged with Int
+    let tagged_int = Tagged.new(42);
+    assert(*tagged_int.get_val() == 42);
+
+    // Nested generic wrappers
+    let inner_wrap = Wrapper.new(99);
+    let nested = Wrapper.new(inner_wrap);
+    let unwrapped_inner = nested.unwrap();
+    assert(unwrapped_inner.unwrap() == 99);
+
+    // Generic wrapper with tuple
+    let pair_wrapper = Wrapper.new((42, "answer"));
+    let (num, txt) = pair_wrapper.unwrap();
+    assert(num == 42);
+    assert(txt == "answer");
+
+    // Generic wrapper with list
+    let list_wrapper = Wrapper.new([1, 2, 3]);
+    let list_val = list_wrapper.unwrap();
+    assert(list_val.len() == 3);
+    assert(list_val[0] == 1);
+
+    // Score newtype - direct constructor
+    let s = Score(10);
+    assert(s.0 == 10);
+    let ds = s.doubled();
+    assert(ds.0 == 20);
+
+    // Chain map_wrapper
+    let w3 = Wrapper.new(3);
+    let chained: Wrapper<Int> = map_wrapper(
+        map_wrapper(w3, |x: Int| x * 2),
+        |x: Int| x + 1,
+    );
+    assert(chained.unwrap() == 7);  // 3*2+1
+
+    print("Generic newtype tests passed!");
+}

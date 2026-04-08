@@ -1,0 +1,188 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @category: memory
+// @description: Memory ordering and consistency tests
+// @tags: memory, ordering, concurrency, relaxed, acquire, release
+
+/// Memory ordering semantics must be consistent across tiers.
+/// Tests atomic operations, memory barriers, and synchronization primitives.
+
+module MemoryOrdering;
+
+/// Test acquire-release semantics
+/// The release store must be visible to acquire loads
+fn test_acquire_release() {
+    let data = AtomicInt.new(0);
+    let flag = AtomicBool.new(false);
+
+    // Writer (simulated - in reality would be another thread)
+    data.store(42, Ordering.Relaxed);
+    flag.store(true, Ordering.Release);
+
+    // Reader - acquire should see the released store
+    while !flag.load(Ordering.Acquire) {
+        // spin
+    }
+    let value = data.load(Ordering.Relaxed);
+
+    // @expect-output: 42
+    print(value);
+}
+
+/// Test sequential consistency
+/// All threads must observe operations in a total order
+fn test_sequentially_consistent() {
+    let x = AtomicInt.new(0);
+    let y = AtomicInt.new(0);
+
+    // Store with sequential consistency
+    x.store(1, Ordering.SeqCst);
+    y.store(1, Ordering.SeqCst);
+
+    // Load with sequential consistency
+    let a = x.load(Ordering.SeqCst);
+    let b = y.load(Ordering.SeqCst);
+
+    // With SeqCst, if we see x=1, we must see y=1
+    // @expect-output: (1, 1)
+    print((a, b));
+}
+
+/// Test relaxed ordering
+/// No synchronization guarantees, but atomicity is preserved
+fn test_relaxed_atomicity() {
+    let counter = AtomicInt.new(0);
+
+    // Multiple relaxed increments
+    for _ in 0..100 {
+        counter.fetch_add(1, Ordering.Relaxed);
+    }
+
+    // Atomicity guarantees exactly 100
+    // @expect-output: 100
+    print(counter.load(Ordering.Relaxed));
+}
+
+/// Test compare-and-swap operation
+/// Must be atomic even with relaxed ordering
+fn test_compare_and_swap() {
+    let value = AtomicInt.new(10);
+
+    // Successful CAS
+    let old = value.compare_and_swap(10, 20, Ordering.Relaxed);
+    // @expect-output: 10
+    print(old);
+
+    // Failed CAS (value is now 20, not 10)
+    let old = value.compare_and_swap(10, 30, Ordering.Relaxed);
+    // @expect-output: 20
+    print(old);
+
+    // Value should remain 20
+    // @expect-output: 20
+    print(value.load(Ordering.Relaxed));
+}
+
+/// Test memory barrier with fence
+fn test_fence() {
+    let a = AtomicInt.new(0);
+    let b = AtomicInt.new(0);
+
+    a.store(1, Ordering.Relaxed);
+    fence(Ordering.Release);  // Release fence
+
+    fence(Ordering.Acquire);  // Acquire fence
+    b.store(a.load(Ordering.Relaxed), Ordering.Relaxed);
+
+    // @expect-output: 1
+    print(b.load(Ordering.Relaxed));
+}
+
+/// Test load-linked/store-conditional pattern (LL/SC)
+fn test_ll_sc_pattern() {
+    let value = AtomicInt.new(0);
+
+    // LL/SC loop for atomic increment
+    loop {
+        let old = value.load(Ordering.Acquire);
+        let new = old + 1;
+        if value.compare_and_swap(old, new, Ordering.Release) == old {
+            break;
+        }
+    }
+
+    // @expect-output: 1
+    print(value.load(Ordering.SeqCst));
+}
+
+/// Test volatile-like semantics (no reordering around access)
+fn test_volatile_semantics() {
+    let flag = AtomicBool.new(false);
+    let mut data = 0;
+
+    data = 42;
+    flag.store(true, Ordering.SeqCst);  // Prevents reordering
+
+    if flag.load(Ordering.SeqCst) {
+        // data must be 42 here
+        // @expect-output: 42
+        print(data);
+    }
+}
+
+/// Test atomic minimum/maximum operations
+fn test_atomic_min_max() {
+    let val = AtomicInt.new(50);
+
+    // Atomic min
+    val.fetch_min(30, Ordering.SeqCst);
+    // @expect-output: 30
+    print(val.load(Ordering.SeqCst));
+
+    // Atomic max
+    val.fetch_max(100, Ordering.SeqCst);
+    // @expect-output: 100
+    print(val.load(Ordering.SeqCst));
+
+    // Min that doesn't change value
+    val.fetch_min(150, Ordering.SeqCst);
+    // @expect-output: 100
+    print(val.load(Ordering.SeqCst));
+}
+
+/// Test atomic bitwise operations
+fn test_atomic_bitwise() {
+    let bits = AtomicInt.new(0b1010);
+
+    // Atomic AND
+    bits.fetch_and(0b1100, Ordering.SeqCst);
+    // @expect-output: 8 (0b1000)
+    print(bits.load(Ordering.SeqCst));
+
+    // Atomic OR
+    bits.fetch_or(0b0011, Ordering.SeqCst);
+    // @expect-output: 11 (0b1011)
+    print(bits.load(Ordering.SeqCst));
+
+    // Atomic XOR
+    bits.fetch_xor(0b1111, Ordering.SeqCst);
+    // @expect-output: 4 (0b0100)
+    print(bits.load(Ordering.SeqCst));
+}
+
+fn main() {
+    print("Testing memory ordering consistency...");
+
+    test_acquire_release();
+    test_sequentially_consistent();
+    test_relaxed_atomicity();
+    test_compare_and_swap();
+    test_fence();
+    test_ll_sc_pattern();
+    test_volatile_semantics();
+    test_atomic_min_max();
+    test_atomic_bitwise();
+
+    print("Memory ordering tests complete.");
+}

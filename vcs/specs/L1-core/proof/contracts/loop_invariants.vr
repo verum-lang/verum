@@ -1,0 +1,76 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, invariant, loop
+// @timeout: 5000
+
+/// Loop invariants and decreases clauses.
+/// Grammar: loop_annotation = 'invariant' expression | 'decreases' expression
+
+// While loop with invariant
+fn sum_to_n(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n
+        invariant total >= 0
+        invariant i >= 0
+        invariant i <= n
+    {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+// While loop with decreases clause (termination)
+fn countdown(n: Int) -> Int {
+    let mut x = n;
+    while x > 0
+        invariant x >= 0
+        decreases x
+    {
+        x = x - 1;
+    }
+    x
+}
+
+// For loop with invariant
+fn find_max(arr: List<Int>) -> Int {
+    let mut max_val = arr[0];
+    for i in 1..arr.len()
+        invariant max_val >= arr[0]
+    {
+        if arr[i] > max_val {
+            max_val = arr[i];
+        }
+    }
+    max_val
+}
+
+// Nested loop with invariants
+fn matrix_sum(rows: Int, cols: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < rows
+        invariant i >= 0
+        invariant i <= rows
+        decreases rows - i
+    {
+        let mut j = 0;
+        while j < cols
+            invariant j >= 0
+            invariant j <= cols
+            decreases cols - j
+        {
+            total = total + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    total
+}
+
+fn main() {
+    let s = sum_to_n(5);
+    assert_eq(s, 10);
+    print("Loop invariant tests passed");
+}

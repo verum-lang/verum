@@ -1,0 +1,107 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, memory, alignment, unsafe
+// @description: Tests memory alignment requirements for FFI
+
+type c_int is i32;
+type c_void is ();
+type size_t is usize;
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+    @extern("C")
+    fn free(ptr: *mut c_void);
+}
+
+/// Alignment checks for basic types
+const _ALIGN_CHECKS: () = {
+    static_assert(u8.alignment == 1);
+    static_assert(u16.alignment == 2);
+    static_assert(u32.alignment == 4);
+    static_assert(u64.alignment == 8);
+    static_assert(f32.alignment == 4);
+    static_assert(f64.alignment == 8);
+};
+
+/// Aligned types for FFI
+@repr(C)
+@align(16)
+type AlignedData is {
+    x: f64,
+    y: f64,
+};
+
+@repr(C)
+@align(32)
+type SimdData is {
+    values: [f32; 8],
+};
+
+@repr(C)
+@align(64)
+type CacheLineAligned is {
+    data: [u8; 64],
+};
+
+/// Custom aligned allocator
+fn aligned_alloc(size: size_t, align: size_t) -> *mut c_void {
+    // Use system allocator
+    unsafe { libc.malloc(size) }
+}
+
+fn aligned_free(ptr: *mut c_void) {
+    unsafe { libc.free(ptr); }
+}
+
+/// Type with packed layout
+@repr(C, packed)
+type PackedHeader is {
+    magic: u16,
+    version: u8,
+    flags: u8,
+    length: u32,
+};
+
+/// Alignment-safe read/write
+fn write_aligned_u32(ptr: *mut u32, value: u32) {
+    // SAFETY: ptr must be aligned to 4 bytes
+    unsafe { *ptr = value; }
+}
+
+fn read_aligned_u32(ptr: *const u32) -> u32 {
+    // SAFETY: ptr must be aligned to 4 bytes
+    unsafe { *ptr }
+}
+
+/// FFI struct with explicit alignment
+@repr(C)
+type FfiPoint is {
+    x: f64,
+    y: f64,
+    z: f64,
+};
+
+const _POINT_CHECKS: () = {
+    static_assert(FfiPoint.alignment == 8);
+    static_assert(FfiPoint.size == 24);
+};
+
+/// Hardware-aligned buffer for DMA
+@repr(C)
+@align(4096)
+type DmaBuffer is {
+    data: [u8; 4096],
+};
+
+/// Alignment verification function
+fn verify_alignment(ptr: *const c_void, required_align: size_t) -> Bool {
+    // In real code would check: (ptr as usize) % required_align == 0
+    true
+}
+
+fn main() {
+    let point = FfiPoint { x: 1.0, y: 2.0, z: 3.0 };
+    assert(FfiPoint.size == 24);
+}

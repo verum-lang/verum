@@ -1,0 +1,25 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Int64 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test Int64.MIN (-2^63)
+    assert_eq(Int64.MIN(), -9223372036854775808);
+
+    // Test Int64.MAX (2^63 - 1)
+    assert_eq(Int64.MAX(), 9223372036854775807);
+
+    // Test Int64.BITS
+    assert_eq(Int64.BITS(), 64);
+
+    // Test i64 alias (FFI compatibility)
+    assert_eq(i64.MIN(), -9223372036854775808);
+    assert_eq(i64.MAX(), 9223372036854775807);
+    assert_eq(i64.BITS(), 64);
+
+    // Test Int (which is semantically Int64)
+    assert_eq(Int.min_value(), -9223372036854775808);
+    assert_eq(Int.max_value(), 9223372036854775807);
+}

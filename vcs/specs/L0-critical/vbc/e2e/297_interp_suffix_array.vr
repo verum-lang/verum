@@ -1,0 +1,317 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, suffix-array, lcp, string
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Suffix array construction (naive O(n^2 log n) via bubble sort)
+// and LCP (Longest Common Prefix) computation. "Strings" are arrays of small ints.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Compare two suffixes of a string
+// Returns -1 if suffix starting at i < suffix starting at j, 0 if equal, 1 if >
+// =============================================================================
+
+fn suffix_cmp(text: Arr8, tlen: Int, i: Int, j: Int) -> Int {
+    let mut a = i;
+    let mut b = j;
+    while a < tlen && b < tlen {
+        let ca = arr8_get(text, a);
+        let cb = arr8_get(text, b);
+        if ca < cb { return -1; }
+        if ca > cb { return 1; }
+        a = a + 1;
+        b = b + 1;
+    }
+    // Shorter suffix is "less"
+    let rem_a = tlen - i;
+    let rem_b = tlen - j;
+    if rem_a < rem_b { -1 }
+    else if rem_a > rem_b { 1 }
+    else { 0 }
+}
+
+// =============================================================================
+// Build suffix array using bubble sort (simple, O(n^2 * n) worst case)
+// =============================================================================
+
+fn build_suffix_array(text: Arr8, tlen: Int) -> Arr8 {
+    // Initialize SA = [0, 1, 2, ..., tlen-1]
+    let mut sa = arr8_zeros();
+    let mut i = 0;
+    while i < tlen {
+        sa = arr8_set(sa, i, i);
+        i = i + 1;
+    }
+
+    // Bubble sort
+    let mut changed = 1;
+    let mut passes = 0;
+    while changed == 1 && passes < tlen {
+        changed = 0;
+        let mut j = 0;
+        while j < tlen - 1 {
+            let si = arr8_get(sa, j);
+            let sj = arr8_get(sa, j + 1);
+            if suffix_cmp(text, tlen, si, sj) > 0 {
+                sa = arr8_set(sa, j, sj);
+                sa = arr8_set(sa, j + 1, si);
+                changed = 1;
+            }
+            j = j + 1;
+        }
+        passes = passes + 1;
+    }
+    sa
+}
+
+// =============================================================================
+// Compute LCP array from suffix array
+// lcp[i] = length of longest common prefix between sa[i] and sa[i-1]
+// lcp[0] = 0 (no previous suffix)
+// =============================================================================
+
+fn compute_lcp(text: Arr8, tlen: Int, sa: Arr8) -> Arr8 {
+    let mut lcp = arr8_zeros();
+    let mut i = 1;
+    while i < tlen {
+        let si = arr8_get(sa, i);
+        let sj = arr8_get(sa, i - 1);
+        let mut len = 0;
+        while si + len < tlen && sj + len < tlen {
+            if arr8_get(text, si + len) == arr8_get(text, sj + len) {
+                len = len + 1;
+            } else {
+                // break
+                let done = tlen + tlen;
+                let mut dummy = done;
+                // we can't use break, so set loop condition to exit
+                // just exit the while via a helper
+                len = len;
+                // Use a flag to break out
+                let si2 = tlen;  // force exit
+                let sj2 = tlen;
+                // Actually we need to just stop here
+                // Trick: set si+len or sj+len past tlen by setting len to max
+                // We can't reassign si, so just exit by returning what we have
+                lcp = arr8_set(lcp, i, len);
+                i = i + 1;
+                // Skip rest of outer iteration
+                // This is messy. Let me restructure.
+                return compute_lcp_fixed(text, tlen, sa);
+            }
+        }
+        lcp = arr8_set(lcp, i, len);
+        i = i + 1;
+    }
+    lcp
+}
+
+// Cleaner LCP computation using helper function
+fn lcp_of_pair(text: Arr8, tlen: Int, i: Int, j: Int) -> Int {
+    let mut len = 0;
+    let mut a = i;
+    let mut b = j;
+    while a < tlen && b < tlen && arr8_get(text, a) == arr8_get(text, b) {
+        len = len + 1;
+        a = a + 1;
+        b = b + 1;
+    }
+    len
+}
+
+fn compute_lcp_fixed(text: Arr8, tlen: Int, sa: Arr8) -> Arr8 {
+    let mut lcp = arr8_zeros();
+    let mut i = 1;
+    while i < tlen {
+        let si = arr8_get(sa, i);
+        let sj = arr8_get(sa, i - 1);
+        lcp = arr8_set(lcp, i, lcp_of_pair(text, tlen, si, sj));
+        i = i + 1;
+    }
+    lcp
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_simple_string() {
+    // Text: "banana" encoded as [1, 0, 2, 0, 2, 0]
+    // b=1, a=0, n=2
+    let text = Arr8 { e0: 1, e1: 0, e2: 2, e3: 0, e4: 2, e5: 0, e6: 0, e7: 0 };
+    let sa = build_suffix_array(text, 6);
+
+    // Suffixes in sorted order:
+    // sa[0] = 5: "a"       (just [0])
+    // sa[1] = 3: "ana"     ([0, 2, 0])
+    // sa[2] = 1: "anana"   ([0, 2, 0, 2, 0])
+    // sa[3] = 0: "banana"  ([1, 0, 2, 0, 2, 0])
+    // sa[4] = 4: "na"      ([2, 0])
+    // sa[5] = 2: "nana"    ([2, 0, 2, 0])
+    assert_eq(arr8_get(sa, 0), 5);
+    assert_eq(arr8_get(sa, 1), 3);
+    assert_eq(arr8_get(sa, 2), 1);
+    assert_eq(arr8_get(sa, 3), 0);
+    assert_eq(arr8_get(sa, 4), 4);
+    assert_eq(arr8_get(sa, 5), 2);
+}
+
+fn test_lcp_banana() {
+    let text = Arr8 { e0: 1, e1: 0, e2: 2, e3: 0, e4: 2, e5: 0, e6: 0, e7: 0 };
+    let sa = build_suffix_array(text, 6);
+    let lcp = compute_lcp_fixed(text, 6, sa);
+
+    // LCP values:
+    // lcp[0] = 0 (no previous)
+    // lcp[1] = 1 ("a" vs "ana" -> "a")
+    // lcp[2] = 3 ("ana" vs "anana" -> "ana")
+    // lcp[3] = 0 ("anana" vs "banana" -> nothing)
+    // lcp[4] = 0 ("banana" vs "na" -> nothing)
+    // lcp[5] = 2 ("na" vs "nana" -> "na")
+    assert_eq(arr8_get(lcp, 0), 0);
+    assert_eq(arr8_get(lcp, 1), 1);
+    assert_eq(arr8_get(lcp, 2), 3);
+    assert_eq(arr8_get(lcp, 3), 0);
+    assert_eq(arr8_get(lcp, 4), 0);
+    assert_eq(arr8_get(lcp, 5), 2);
+}
+
+fn test_all_same_chars() {
+    // "aaaa" = [0, 0, 0, 0]
+    let text = Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sa = build_suffix_array(text, 4);
+    // Sorted suffixes by length (all start with 'a'):
+    // sa[0] = 3: "a"
+    // sa[1] = 2: "aa"
+    // sa[2] = 1: "aaa"
+    // sa[3] = 0: "aaaa"
+    assert_eq(arr8_get(sa, 0), 3);
+    assert_eq(arr8_get(sa, 1), 2);
+    assert_eq(arr8_get(sa, 2), 1);
+    assert_eq(arr8_get(sa, 3), 0);
+
+    let lcp = compute_lcp_fixed(text, 4, sa);
+    assert_eq(arr8_get(lcp, 1), 1);
+    assert_eq(arr8_get(lcp, 2), 2);
+    assert_eq(arr8_get(lcp, 3), 3);
+}
+
+fn test_distinct_chars() {
+    // "abcd" = [0, 1, 2, 3]
+    let text = Arr8 { e0: 0, e1: 1, e2: 2, e3: 3, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sa = build_suffix_array(text, 4);
+    // Sorted: "abcd"(0), "bcd"(1), "cd"(2), "d"(3)
+    assert_eq(arr8_get(sa, 0), 0);
+    assert_eq(arr8_get(sa, 1), 1);
+    assert_eq(arr8_get(sa, 2), 2);
+    assert_eq(arr8_get(sa, 3), 3);
+
+    let lcp = compute_lcp_fixed(text, 4, sa);
+    // All LCPs are 0 (no shared prefixes)
+    assert_eq(arr8_get(lcp, 1), 0);
+    assert_eq(arr8_get(lcp, 2), 0);
+    assert_eq(arr8_get(lcp, 3), 0);
+}
+
+fn test_reversed_string() {
+    // "dcba" = [3, 2, 1, 0]
+    let text = Arr8 { e0: 3, e1: 2, e2: 1, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sa = build_suffix_array(text, 4);
+    // Sorted suffixes:
+    // "a"(3), "ba"(2), "cba"(1), "dcba"(0)
+    assert_eq(arr8_get(sa, 0), 3);
+    assert_eq(arr8_get(sa, 1), 2);
+    assert_eq(arr8_get(sa, 2), 1);
+    assert_eq(arr8_get(sa, 3), 0);
+}
+
+fn test_two_chars() {
+    // "ab" = [0, 1]
+    let text = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sa = build_suffix_array(text, 2);
+    // "ab"(0) < "b"(1)
+    assert_eq(arr8_get(sa, 0), 0);
+    assert_eq(arr8_get(sa, 1), 1);
+}
+
+fn test_suffix_comparison() {
+    let text = Arr8 { e0: 1, e1: 0, e2: 2, e3: 0, e4: 2, e5: 0, e6: 0, e7: 0 };
+    // "banana"(0) vs "anana"(1): b(1) > a(0), so banana > anana
+    assert_eq(suffix_cmp(text, 6, 0, 1), 1);
+    // "ana"(3) vs "anana"(1): a=a, n=n, a=a, then 3+3=6>=6 (done) vs 1+3=4<6
+    // rem_a = 6-3 = 3, rem_b = 6-1 = 5, 3 < 5
+    assert_eq(suffix_cmp(text, 6, 3, 1), -1);
+}
+
+fn test_repeated_pattern() {
+    // "abab" = [0, 1, 0, 1]
+    let text = Arr8 { e0: 0, e1: 1, e2: 0, e3: 1, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sa = build_suffix_array(text, 4);
+    // Suffixes: "abab"(0), "bab"(1), "ab"(2), "b"(3)
+    // Sorted: "ab"(2), "abab"(0), "b"(3), "bab"(1)
+    assert_eq(arr8_get(sa, 0), 2);
+    assert_eq(arr8_get(sa, 1), 0);
+    assert_eq(arr8_get(sa, 2), 3);
+    assert_eq(arr8_get(sa, 3), 1);
+
+    let lcp = compute_lcp_fixed(text, 4, sa);
+    // lcp[1]: "ab" vs "abab" -> 2
+    assert_eq(arr8_get(lcp, 1), 2);
+    // lcp[2]: "abab" vs "b" -> 0
+    assert_eq(arr8_get(lcp, 2), 0);
+    // lcp[3]: "b" vs "bab" -> 1
+    assert_eq(arr8_get(lcp, 3), 1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_simple_string();
+    test_lcp_banana();
+    test_all_same_chars();
+    test_distinct_chars();
+    test_reversed_string();
+    test_two_chars();
+    test_suffix_comparison();
+    test_repeated_pattern();
+    print("[OK] 297_interp_suffix_array");
+    0
+}

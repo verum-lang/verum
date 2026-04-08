@@ -1,0 +1,254 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge_cases, operators
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Item is { data: Int };
+type T is Int;
+type Output is Int;
+type Add is protocol {
+    type Output;
+    fn add(self, other: Self) -> Self.Output;
+};
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+
+// Helper functions
+fn process(x: Int) -> Int { x }
+fn handle<T>(x: T) { }
+fn default() -> Int { 0 }
+fn condition() -> Bool { true }
+fn compute() -> Int { 42 }
+fn to_string(x: Int) -> Text { "" }
+fn transform(x: Int) -> Int { x }
+fn finalize(x: Int) -> Int { x }
+fn data() -> Int { 42 }
+fn a() -> Int { 1 }
+fn b() -> Int { 2 }
+fn c() -> Int { 3 }
+fn d() -> Int { 4 }
+fn e() -> Int { 5 }
+fn f() -> Int { 6 }
+fn g() -> Int { 7 }
+fn obj_method() -> Int { 0 }
+fn other() -> Int { 0 }
+
+fn test_consecutive_unary_operators() {
+    let a = 5;
+    let flag = true;
+    let value = 42;
+    let ptr = &42;
+
+    // Consecutive unary operators
+    let neg_neg = -(-a);        // Double negative
+    let not_not = !!flag;       // Double not
+    let ref_deref = *(&value);  // Deref of ref
+    let deref_ref = &(*ptr);    // Ref of deref
+}
+
+fn test_unary_before_binary() {
+    let a = 5;
+    let b = 10;
+
+    // Unary before binary
+    let neg_add = -a + b;
+    let not_and = !true && false;
+    let ref_eq = &a == &b;
+}
+
+fn test_binary_with_unary_on_right() {
+    let a = 5;
+    let b = 10;
+
+    // Binary with unary on right
+    let add_neg = a + (-b);
+    let mul_not = a * (if !true { 1 } else { 0 });
+    let cmp_ref = a > 0;
+}
+
+fn test_multiple_same_precedence() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+
+    // Multiple same precedence
+    let left_assoc = a - b - c - d;
+    let chain = a + b + c + d + e + f;
+}
+
+fn test_mixed_precedence() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+
+    // Mixed precedence without parens
+    let precedence = a + b * c - d / e + f % g;
+}
+
+fn test_shift_and_comparison() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+
+    // Shift and comparison
+    let shift_cmp = (a << b) > (c >> d);
+}
+
+fn test_bitwise_chain() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+
+    // Bitwise chain
+    let bitwise = a & b | c ^ d & e;
+}
+
+fn test_logical_chain() {
+    let a = true;
+    let b = false;
+    let c = true;
+    let d = false;
+    let e = true;
+
+    // Logical chain
+    let logical = a && b || c && d || e;
+}
+
+fn test_range_with_arithmetic() {
+    let a = 1;
+    let b = 10;
+    let start = 0;
+    let end = 10;
+
+    // Range with arithmetic
+    let range_expr = (a + 1)..(b - 1);
+    let inclusive_range = start..=(end - 1);
+}
+
+fn test_pipeline_with_method() {
+    let data_val = 42;
+
+    // Pipeline with method
+    let pipe_method = data_val |> process |> transform;
+}
+
+fn test_assignment_in_if() {
+    let condition = true;
+    let value = 0;
+    let other = 10;
+
+    // Assignment in larger expression (if expression)
+    let result = if condition {
+        let new_value = compute();
+        new_value
+    } else {
+        other
+    };
+}
+
+fn test_operators_in_closure_body() {
+    // Operator in closure body
+    let ops_closure = |a: Int, b: Int| {
+        let sum = a + b;
+        let diff = a - b;
+        let prod = a * b;
+        (sum, diff, prod)
+    };
+}
+
+fn test_operators_with_type_ascription() {
+    let a = 5;
+    let b = 10;
+
+    // Operators with type ascription
+    let typed_op: Int = a + b;
+    let cast_op = (a as Float) + (b as Float);
+}
+
+fn test_method_with_operator_result() {
+    let a = 5;
+    let b = 10;
+    let c = 15;
+
+    // Method with operator result
+    let method_op = to_string(a + b);
+    let op_method = a + b + c;
+}
+
+fn test_array_index_with_operators() {
+    let arr = [1, 2, 3, 4, 5];
+    let a = 1;
+    let b = 2;
+    let i = 0;
+    let j = 1;
+    let factor = 2;
+
+    // Array/index with operators
+    let index_op = arr[a + b];
+    let op_index = (arr[i] + arr[j]) * factor;
+}
+
+fn test_struct_field_with_operators() {
+    type Point is { x: Int, y: Int };
+    let point = Point { x: 10, y: 20 };
+    let a = 5;
+    let b = 10;
+
+    // Struct field with operators
+    let field_op = point.x + point.y;
+    let op_field = a + b;
+}
+
+fn test_optional_chain_with_operators() {
+    let maybe: Maybe<Int> = Some(42);
+    let offset = 10;
+
+    // Optional chain with operators
+    let opt_op = (match maybe { Some(v) => v, None => 0 }) + offset;
+}
+
+fn test_lambda_with_operators() {
+    let items = [1, 2, 3];
+
+    // Lambda with operators
+    let lambda_op = |x: Int| x * 2 + 1;
+}
+
+fn test_pattern_guard_with_operators() {
+    let value = 50;
+    let threshold = 10;
+    let limit = 100;
+
+    // Pattern guard with operators
+    match value {
+        x if x + 1 > threshold => handle(x),
+        x if x * 2 < limit => process(x),
+        _ => default(),
+    };
+}
+
+// Generic with operator constraints
+fn add_values<T>(a: T, b: T) -> T {
+    a
+}
+
+fn test_operator_method_calls() {
+    let a = 5;
+    let b = 10;
+
+    // Operator method calls
+    let plus = a + b;
+    let minus = a - b;
+    let times = a * b;
+}

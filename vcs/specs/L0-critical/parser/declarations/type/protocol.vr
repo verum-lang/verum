@@ -1,0 +1,100 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, protocol, trait, interface
+
+// Simple protocol with single method
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+// Protocol with multiple methods
+type Debug is protocol {
+    fn debug(&self) -> Text;
+    fn debug_pretty(&self, indent: Int) -> Text;
+};
+
+// Protocol with associated type
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// Protocol with multiple associated types
+type Mapping is protocol {
+    type Key;
+    type Value;
+    fn get(&self, key: Self.Key) -> Maybe<Self.Value>;
+    fn set(&mut self, key: Self.Key, value: Self.Value);
+};
+
+// Protocol with default implementation
+type Stringify is protocol {
+    fn to_string(&self) -> Text {
+        self.display()
+    }
+    fn display(&self) -> Text;
+};
+
+// Protocol with generic method
+type Container is protocol {
+    fn map<U>(&self, f: fn(Self.Item) -> U) -> Container<U>;
+};
+
+// Protocol extending another protocol - uses 'extends' keyword
+type Ordered is protocol extends Eq {
+    fn compare(&self, other: &Self) -> Ordering;
+};
+
+// Protocol with multiple supertraits
+type Hashable is protocol extends Eq + Clone {
+    fn hash(&self) -> Int;
+};
+
+// Protocol with associated constant
+type Bounded is protocol {
+    const MIN: Self;
+    const MAX: Self;
+};
+
+// Protocol with where clause
+type Serializable is protocol
+where type Self: Clone
+{
+    fn serialize(&self) -> Bytes;
+    fn deserialize(bytes: Bytes) -> Result<Self, Error>;
+};
+
+// Protocol with async methods
+type AsyncRead is protocol {
+    async fn read(&mut self, buf: &mut Bytes) -> Result<Int, IoError>;
+};
+
+// Protocol with generic type parameter (context clauses not yet in protocol grammar)
+type Repository<T> is protocol {
+    fn save(&self, item: T);
+    fn find(&self, id: Int) -> Maybe<T>;
+};
+
+// Protocol for operators (note: default type params require separate syntax)
+type Add<Rhs> is protocol {
+    type Output;
+    fn add(self, rhs: Rhs) -> Self.Output;
+};
+
+// Protocol with static method
+type Default is protocol {
+    fn default() -> Self;
+};
+
+// Protocol with both instance and static methods
+type Factory is protocol {
+    fn create() -> Self;
+    fn from_config(config: Config) -> Self;
+    fn validate(&self) -> Bool;
+};
+
+// Empty protocol (marker trait)
+type Send is protocol { };
+type Sync is protocol { };
+type Copy is protocol extends Clone { };

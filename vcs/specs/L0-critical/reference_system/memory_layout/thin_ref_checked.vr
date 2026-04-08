@@ -1,0 +1,60 @@
+// @test: compile-only
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, thin-ref, checked
+
+/// Test memory layout of checked ThinRef: 8 bytes.
+/// Checked references (&checked T) are just pointers without CBGR metadata.
+/// They provide zero-overhead access when compiler can prove safety.
+/// Spec: 26-cbgr-implementation.md#reference-tiers
+
+fn main() {
+    verify_checked_sizes();
+    compare_tier_sizes();
+}
+
+/// Verify checked ThinRef is exactly 8 bytes (just pointer)
+fn verify_checked_sizes() {
+    // Checked references to primitive types
+    assert((&checked Int).size == 8);
+    assert((&checked Bool).size == 8);
+    assert((&checked Float).size == 8);
+
+    // Checked references to struct types
+    assert((&checked Point).size == 8);
+    assert((&checked LargeStruct).size == 8);
+
+    // Mutable checked references same size
+    assert((&checked mut Int).size == 8);
+    assert((&checked mut Point).size == 8);
+}
+
+// Type alias for raw pointer (8 bytes on 64-bit)
+type RawPtr is Int;
+
+/// Compare sizes across tiers
+fn compare_tier_sizes() {
+    // Tier 0 (Managed): 16 bytes - has generation + epoch
+    assert((&Int).size == 16);
+
+    // Tier 1 (Checked): 8 bytes - just pointer
+    assert((&checked Int).size == 8);
+
+    // Tier 2 (Unsafe): 8 bytes - just pointer
+    assert((&unsafe Int).size == 8);
+
+    // Raw pointer: 8 bytes (use type alias since *const T syntax has parsing issues)
+    assert(RawPtr.size == 8);
+
+    // Managed is 2x size of checked/unsafe
+    // Trade-off: safety metadata for runtime checks
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type LargeStruct is {
+    data: [u8; 1000],
+};

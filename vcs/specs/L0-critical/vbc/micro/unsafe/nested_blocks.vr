@@ -1,0 +1,15 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, nested, block
+// @description: Nested unsafe blocks with proper context management
+fn main() {
+    let outer: Int = unsafe {
+        let a: Int = 10;
+        let inner: Int = unsafe {
+            let b: Int = 20;
+            a + b
+        };
+        inner + 5
+    };
+    assert_eq(outer, 35);
+}

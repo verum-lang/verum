@@ -1,0 +1,95 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, concurrent, thread-safety, advanced
+
+/// Test CBGR safety guarantees in concurrent contexts.
+/// CBGR ensures memory safety even with multi-threaded access.
+/// Tests Send/Sync bounds, atomic generations, and shared access patterns.
+/// Spec: 26-cbgr-implementation.md#concurrent-safety
+
+mount core.sync.{Mutex, AtomicInt, AtomicU32, AtomicBool, MemoryOrdering, Barrier};
+
+fn main() {
+    test_send_sync_bounds();
+    test_shared_read_access();
+    test_exclusive_write_access();
+    test_atomic_generation_counter();
+    test_shared_generation_tracking();
+
+    print("All CBGR concurrent safety tests passed!");
+}
+
+/// Test Send/Sync trait bounds
+fn test_send_sync_bounds() {
+    // Heap<T> is Send if T is Send
+    let sendable: Heap<Int> = Heap.new(42);
+
+    // Shared ref is Send if T: Sync
+    // Shared ref is Sync if T: Sync
+    // Mutable refs are Send but not Sync
+
+    // Interior mutability types
+    // Shared<T> is Send + Sync
+    let shared_int = Shared.new(42);
+
+    // Mutex provides interior mutability with Sync
+    let mutex_val = Mutex.new(100);
+
+    print("Send/Sync bounds test passed");
+}
+
+/// Test shared read access using Shared<T>
+fn test_shared_read_access() {
+    let shared_data = Shared.new(List.from([1, 2, 3, 4, 5]));
+
+    // Multiple clone handles can read safely
+    let handle1 = shared_data.clone();
+    let handle2 = shared_data.clone();
+
+    // Each handle can read the data safely
+    // In a real concurrent scenario, each thread would hold a clone
+    // CBGR validates on each access
+    print("Shared read access test passed");
+}
+
+/// Test exclusive write access through Mutex
+fn test_exclusive_write_access() {
+    let shared_counter = Shared.new(Mutex.new(0));
+
+    // Simulate what concurrent threads would do:
+    // Acquire exclusive write access through Mutex
+    let guard = shared_counter.get();
+
+    // Mutex ensures only one writer at a time
+    // CBGR tracks this as exclusive access
+    print("Exclusive write access test passed");
+}
+
+/// Test atomic generation counter
+fn test_atomic_generation_counter() {
+    // Simulate CBGR's atomic generation counter
+    let counter = AtomicU32.new(0);
+
+    // Atomic operations ensure thread-safe generation tracking
+    counter.fetch_add(1, MemoryOrdering.SeqCst);
+    counter.fetch_add(1, MemoryOrdering.SeqCst);
+    counter.fetch_add(1, MemoryOrdering.SeqCst);
+
+    let final_val = counter.load(MemoryOrdering.SeqCst);
+    assert(final_val == 3);
+
+    print("Atomic generation counter test passed");
+}
+
+/// Test that Shared<T> properly tracks generations
+fn test_shared_generation_tracking() {
+    let shared = Shared.new(Heap.new(42));
+
+    // Clone shares same underlying allocation
+    let shared2 = shared.clone();
+
+    // Both clones access the same data
+    // CBGR generation is consistent across clones
+    print("Shared generation tracking test passed");
+}

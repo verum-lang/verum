@@ -1,0 +1,41 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: module, multi_file, types, mount
+// @expect: pass
+
+// Multi-file project: import types and functions from helper module.
+
+mount module_math_types.{Vec2, vec2_add, vec2_dot, vec2_len_sq};
+
+fn main() -> Int {
+    let a = Vec2 { x: 3, y: 4 };
+    let b = Vec2 { x: 1, y: 2 };
+
+    let c = vec2_add(a, b);
+    if c.x != 4 {
+        print(f"FAIL: c.x = {c.x}, expected 4");
+        return 1;
+    }
+    if c.y != 6 {
+        print(f"FAIL: c.y = {c.y}, expected 6");
+        return 1;
+    }
+
+    let dot = vec2_dot(a, b);
+    // 3*1 + 4*2 = 11
+    if dot != 11 {
+        print(f"FAIL: dot = {dot}, expected 11");
+        return 1;
+    }
+
+    let len_sq = vec2_len_sq(a);
+    // 3*3 + 4*4 = 25
+    if len_sq != 25 {
+        print(f"FAIL: len_sq = {len_sq}, expected 25");
+        return 1;
+    }
+
+    print("PASS: multi-file types and functions work");
+    0
+}

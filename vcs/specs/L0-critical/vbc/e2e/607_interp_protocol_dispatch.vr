@@ -1,0 +1,328 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, protocol, dispatch, methods
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Interpreter e2e test: protocol definitions, implement blocks, method dispatch
+
+// =============================================================================
+// Basic record types with implement blocks
+// =============================================================================
+
+type Point is { x: Int, y: Int };
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn distance_sq(self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn translate(self, dx: Int, dy: Int) -> Point {
+        Point { x: self.x + dx, y: self.y + dy }
+    }
+
+    fn scale(self, factor: Int) -> Point {
+        Point { x: self.x * factor, y: self.y * factor }
+    }
+
+    fn eq(self, other: Point) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+fn test_basic_methods() {
+    let p = Point.new(3, 4);
+    assert_eq(p.x, 3);
+    assert_eq(p.y, 4);
+    assert_eq(p.distance_sq(), 25);
+
+    let p2 = p.translate(1, 2);
+    assert_eq(p2.x, 4);
+    assert_eq(p2.y, 6);
+
+    let p3 = p.scale(2);
+    assert_eq(p3.x, 6);
+    assert_eq(p3.y, 8);
+
+    assert_eq(p.eq(Point.new(3, 4)), true);
+    assert_eq(p.eq(Point.new(1, 2)), false);
+    print("  test_basic_methods: ok");
+}
+
+// =============================================================================
+// Method chaining
+// =============================================================================
+
+fn test_method_chaining() {
+    let result = Point.new(1, 1).translate(2, 3).scale(2);
+    assert_eq(result.x, 6);
+    assert_eq(result.y, 8);
+
+    let result2 = Point.new(0, 0).translate(5, 5).translate(-2, -2);
+    assert_eq(result2.x, 3);
+    assert_eq(result2.y, 3);
+    print("  test_method_chaining: ok");
+}
+
+// =============================================================================
+// Multiple types with implement blocks
+// =============================================================================
+
+type Rect is { width: Int, height: Int };
+
+implement Rect {
+    fn new(w: Int, h: Int) -> Rect {
+        Rect { width: w, height: h }
+    }
+
+    fn area(self) -> Int {
+        self.width * self.height
+    }
+
+    fn perimeter(self) -> Int {
+        2 * (self.width + self.height)
+    }
+
+    fn is_square(self) -> Bool {
+        self.width == self.height
+    }
+
+    fn grow(self, amount: Int) -> Rect {
+        Rect { width: self.width + amount, height: self.height + amount }
+    }
+}
+
+fn test_rect_methods() {
+    let r = Rect.new(4, 5);
+    assert_eq(r.area(), 20);
+    assert_eq(r.perimeter(), 18);
+    assert_eq(r.is_square(), false);
+
+    let sq = Rect.new(3, 3);
+    assert_eq(sq.is_square(), true);
+    assert_eq(sq.area(), 9);
+
+    let bigger = r.grow(2);
+    assert_eq(bigger.area(), 42);
+    print("  test_rect_methods: ok");
+}
+
+// =============================================================================
+// Generic implement blocks
+// =============================================================================
+
+type Container<T> is { value: T, count: Int };
+
+implement<T> Container<T> {
+    fn new(val: T) -> Container<T> {
+        Container { value: val, count: 1 }
+    }
+
+    fn get(self) -> T {
+        self.value
+    }
+
+    fn get_count(self) -> Int {
+        self.count
+    }
+}
+
+fn test_generic_implement() {
+    let ci = Container.new(42);
+    assert_eq(ci.get(), 42);
+    assert_eq(ci.get_count(), 1);
+
+    let cs = Container.new("hello");
+    assert_eq(cs.get(), "hello");
+    assert_eq(cs.get_count(), 1);
+
+    let cb = Container.new(true);
+    assert_eq(cb.get(), true);
+    print("  test_generic_implement: ok");
+}
+
+// =============================================================================
+// Methods that call other methods on self
+// =============================================================================
+
+type Counter is { value: Int, step: Int };
+
+implement Counter {
+    fn new(step: Int) -> Counter {
+        Counter { value: 0, step: step }
+    }
+
+    fn current(self) -> Int {
+        self.value
+    }
+
+    fn increment(self) -> Counter {
+        Counter { value: self.value + self.step, step: self.step }
+    }
+
+    fn increment_n(self, n: Int) -> Counter {
+        let mut result = self;
+        let mut i = 0;
+        while i < n {
+            result = result.increment();
+            i = i + 1;
+        }
+        result
+    }
+
+    fn reset(self) -> Counter {
+        Counter { value: 0, step: self.step }
+    }
+}
+
+fn test_methods_calling_methods() {
+    let c = Counter.new(3);
+    assert_eq(c.current(), 0);
+
+    let c1 = c.increment();
+    assert_eq(c1.current(), 3);
+
+    let c2 = c1.increment();
+    assert_eq(c2.current(), 6);
+
+    let c5 = c.increment_n(5);
+    assert_eq(c5.current(), 15);
+
+    let c_reset = c5.reset();
+    assert_eq(c_reset.current(), 0);
+    print("  test_methods_calling_methods: ok");
+}
+
+// =============================================================================
+// Methods with record fields
+// =============================================================================
+
+type Stats is { sum: Int, count: Int };
+
+implement Stats {
+    fn empty() -> Stats {
+        Stats { sum: 0, count: 0 }
+    }
+
+    fn add(self, val: Int) -> Stats {
+        Stats { sum: self.sum + val, count: self.count + 1 }
+    }
+
+    fn average(self) -> Int {
+        if self.count == 0 { 0 } else { self.sum / self.count }
+    }
+
+    fn total(self) -> Int {
+        self.sum
+    }
+}
+
+fn test_stats_accumulation() {
+    let s = Stats.empty().add(10).add(20).add(30);
+    assert_eq(s.total(), 60);
+    assert_eq(s.count, 3);
+    assert_eq(s.average(), 20);
+
+    let s2 = Stats.empty().add(5).add(15);
+    assert_eq(s2.average(), 10);
+    print("  test_stats_accumulation: ok");
+}
+
+// =============================================================================
+// Generic function using methods
+// =============================================================================
+
+fn sum_distances(points: List<Int>, px: Int, py: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < points.len() {
+        total = total + points[i] * points[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn test_methods_in_loop() {
+    let mut counters: List<Int> = [];
+    let mut i = 0;
+    while i < 5 {
+        let c = Counter.new(i + 1);
+        let c3 = c.increment_n(3);
+        counters.push(c3.current());
+        i = i + 1;
+    }
+    // Counter step=1, increment 3 times = 3
+    // Counter step=2, increment 3 times = 6
+    // Counter step=3, increment 3 times = 9
+    // Counter step=4, increment 3 times = 12
+    // Counter step=5, increment 3 times = 15
+    assert_eq(counters[0], 3);
+    assert_eq(counters[1], 6);
+    assert_eq(counters[2], 9);
+    assert_eq(counters[3], 12);
+    assert_eq(counters[4], 15);
+    print("  test_methods_in_loop: ok");
+}
+
+// =============================================================================
+// Methods returning Bool
+// =============================================================================
+
+type Span is { low: Int, high: Int };
+
+implement Span {
+    fn new(low: Int, high: Int) -> Span {
+        Span { low: low, high: high }
+    }
+
+    fn contains(self, val: Int) -> Bool {
+        val >= self.low && val <= self.high
+    }
+
+    fn overlaps(self, other: Span) -> Bool {
+        self.low <= other.high && other.low <= self.high
+    }
+
+    fn size(self) -> Int {
+        if self.high >= self.low { self.high - self.low + 1 } else { 0 }
+    }
+}
+
+fn test_range_methods() {
+    let r = Span.new(5, 10);
+    assert_eq(r.contains(7), true);
+    assert_eq(r.contains(5), true);
+    assert_eq(r.contains(10), true);
+    assert_eq(r.contains(4), false);
+    assert_eq(r.contains(11), false);
+    assert_eq(r.size(), 6);
+
+    let r2 = Span.new(8, 15);
+    assert_eq(r.overlaps(r2), true);
+
+    let r3 = Span.new(20, 30);
+    assert_eq(r.overlaps(r3), false);
+    print("  test_range_methods: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_basic_methods();
+    test_method_chaining();
+    test_rect_methods();
+    test_generic_implement();
+    test_methods_calling_methods();
+    test_stats_accumulation();
+    test_methods_in_loop();
+    test_range_methods();
+    print("[OK] 607_interp_protocol_dispatch");
+    0
+}

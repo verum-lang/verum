@@ -1,0 +1,126 @@
+// @test: parse-pass
+// @tier: 0
+// @category: comprehensions
+// @description: Test stream comprehension parsing (lazy evaluation)
+
+fn test_basic_stream_comprehensions() {
+    // Basic stream comprehension
+    let doubled = stream[x * 2 for x in source];
+
+    // With function application
+    let transformed = stream[process(x) for x in items];
+
+    // With method call
+    let mapped = stream[item.value() for item in collection];
+
+    // Binary operation
+    let sums = stream[x + y for (x, y) in pairs];
+
+    // Field access
+    let names = stream[user.name for user in users];
+
+    // Index access
+    let firsts = stream[arr[0] for arr in arrays];
+
+    // From range
+    let squares = stream[i * i for i in source];
+
+    // From finite range
+    let finite_squares = stream[i * i for i in 0..100];
+
+    // With complex expression
+    let complex = stream[(x * x + y * y).sqrt() for (x, y) in coords];
+}
+
+fn test_stream_with_filter() {
+    // Basic filter
+    let positives = stream[x for x in numbers if x > 0];
+
+    // Filter with method
+    let evens = stream[x for x in numbers if x.is_even()];
+
+    // Compound filter
+    let in_range = stream[x for x in values if x >= min && x <= max];
+
+    // Pattern filter
+    let some_values = stream[v for opt in options if opt is Some(v)];
+
+    // Multiple filters
+    let filtered = stream[x for x in items if x > 0 if x < 100];
+}
+
+fn test_stream_nested() {
+    // Multiple generators
+    let product = stream[(x, y) for x in xs for y in ys];
+
+    // Dependent generators
+    let triangular = stream[(i, j) for i in source for j in 0..i];
+
+    // Nested with filter
+    let filtered = stream[(x, y) for x in xs if x > 0 for y in ys if y > 0];
+
+    // Flatten nested structure
+    let flat = stream[item for group in groups for item in group.items];
+
+    // Three-way nesting
+    let deep = stream[x for a in items_a for b in a.bs for c in b.cs];
+}
+
+fn test_stream_with_let() {
+    // Basic let binding
+    let with_let = stream[y for x in items let y = transform(x)];
+
+    // Multiple lets
+    let multi_let = stream[z for x in items
+                           let y = x * 2
+                           let z = y + 1];
+
+    // Let with filter
+    let filtered = stream[y for x in items let y = transform(x) if y > 0];
+
+    // Let in nested
+    let nested_let = stream[sum for x in xs for y in ys let sum = x + y];
+
+    // Complex combination
+    let complex = stream[result for x in inputs
+                         let processed = process(x)
+                         if is_valid(processed)
+                         for y in expand(processed)
+                         let combined = combine(processed, y)
+                         if combined.score > threshold
+                         let result = finalize(combined)];
+}
+
+fn test_stream_expressions() {
+    // Conditional in body
+    let clamped = stream[if x > max { max } else { x } for x in values];
+
+    // Match in body
+    let unwrapped = stream[match opt { Some(v) => v, None => 0 } for opt in options];
+
+    // Block in body
+    let computed = stream[{
+        let temp = x * 2;
+        temp + 1
+    } for x in items];
+
+    // Tuple construction
+    let tuples = stream[(i, i * 2) for i in source];
+
+    // Record construction
+    let records = stream[Point { x: i, y: j } for (i, j) in coords];
+
+    // Pipeline
+    let piped = stream[x |> f |> g for x in source];
+}
+
+fn test_stream_from_stream() {
+    // Stream of streams
+    let nested_streams = stream[stream[j for j in 0..i] for i in source];
+
+    // Flattening (conceptually)
+    let flattened = stream[item for s in streams for item in s];
+
+    // Transform stream of streams
+    let transformed = stream[inner.map(double) for inner in nested];
+}

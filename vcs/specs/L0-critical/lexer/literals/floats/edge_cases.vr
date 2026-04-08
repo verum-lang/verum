@@ -1,0 +1,205 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, floats, edge-cases, boundaries
+
+// Edge cases and boundary conditions for floating-point literals
+
+fn test_zero_representations() {
+    // Zero representations
+    let zero_basic = 0.0;
+    let zero_exp = 0.0e0;
+    let zero_exp_pos = 0.0e+0;
+    let zero_exp_neg = 0.0e-0;
+    let zero_leading = 0.00000;
+    let zero_trailing = 0.0;
+    let zero_scientific = 0e0;
+}
+
+fn test_one_representations() {
+    // One representations
+    let one_basic = 1.0;
+    let one_exp = 1.0e0;
+    let one_exp_pos = 1.0e+0;
+    let one_fractional = 1.00000;
+}
+
+fn test_negative_zero() {
+    // Negative zero
+    let neg_zero = -0.0;
+    let neg_zero_exp = -0.0e0;
+}
+
+fn test_normalized_limits() {
+    // Smallest positive values (normalized)
+    let min_f32_norm = 1.17549435e-38;
+    let min_f64_norm = 2.2250738585072014e-308;
+}
+
+fn test_largest_values() {
+    // Largest positive values
+    let max_f32 = 3.40282347e+38;
+    let max_f64 = 1.7976931348623157e+308;
+}
+
+fn test_subnormal() {
+    // Subnormal/denormalized values
+    let subnormal_1 = 1e-310;
+    let subnormal_2 = 5e-324;
+    let subnormal_3 = 1.0e-323;
+}
+
+fn test_near_zero() {
+    // Near-zero values
+    let near_zero_1 = 0.0000001;
+    let near_zero_2 = 0.000000000001;
+    let near_zero_3 = 1e-15;
+    let near_zero_4 = 1e-100;
+    let near_zero_5 = 1e-200;
+}
+
+fn test_near_one() {
+    // Values close to 1
+    let near_one_above = 1.0000001;
+    let near_one_below = 0.9999999;
+    let epsilon = 2.2204460492503131e-16;
+}
+
+fn test_exponent_boundaries() {
+    // Exponent boundary values
+    let exp_max_pos = 1e308;
+    let exp_max_neg = 1e-308;
+    let exp_limit = 1e307;
+}
+
+fn test_precision_limits() {
+    // Precision limits
+    let full_precision_f64 = 1.2345678901234567;
+    let beyond_precision = 1.23456789012345678901234567890;
+}
+
+fn test_trailing_zeros() {
+    // Trailing zeros in different positions
+    let trailing_1 = 1.0;
+    let trailing_2 = 1.00;
+    let trailing_3 = 1.000;
+    let trailing_4 = 10.0;
+    let trailing_5 = 100.0;
+}
+
+fn test_leading_frac_zeros() {
+    // Leading zeros in fraction
+    let leading_frac_1 = 0.1;
+    let leading_frac_2 = 0.01;
+    let leading_frac_3 = 0.001;
+    let leading_frac_4 = 0.0001;
+}
+
+fn test_repeating() {
+    // Repeating digit patterns
+    let repeat_1 = 1.1111111;
+    let repeat_3 = 3.3333333;
+    let repeat_9 = 9.9999999;
+    let repeat_mixed = 1.234567890123456789;
+}
+
+fn test_scientific_edge() {
+    // Scientific notation edge cases
+    let sci_zero_exp = 1.0e0;
+    let sci_one_exp = 1.0e1;
+    let sci_neg_one_exp = 1.0e-1;
+    let sci_large_mantissa = 9.999999e5;
+    let sci_small_mantissa = 1.000001e-5;
+}
+
+fn test_exponent_signs() {
+    // Exponent sign variations
+    let exp_no_sign = 1.5e10;
+    let exp_plus_sign = 1.5e+10;
+    let exp_minus_sign = 1.5e-10;
+}
+
+fn test_exponent_case() {
+    // Case variations in exponent
+    let exp_lower_e = 1.5e10;
+    let exp_upper_E = 1.5E10;
+}
+
+fn test_integer_like() {
+    // Integer-like floats
+    let int_like_1 = 1.0;
+    let int_like_10 = 10.0;
+    let int_like_100 = 100.0;
+    let int_like_1000 = 1000.0;
+    let int_like_large = 1000000000000.0;
+}
+
+fn test_inexact_fractions() {
+    // Fractions that can't be exactly represented
+    let one_third = 0.3333333333333333;
+    let one_seventh = 0.14285714285714285;
+    let one_tenth = 0.1;
+}
+
+fn test_powers_of_two() {
+    // Powers of two (exactly representable)
+    let pow2_1 = 2.0;
+    let pow2_2 = 4.0;
+    let pow2_3 = 8.0;
+    let pow2_10 = 1024.0;
+    let pow2_20 = 1048576.0;
+    let pow2_neg_1 = 0.5;
+    let pow2_neg_2 = 0.25;
+    let pow2_neg_3 = 0.125;
+}
+
+fn test_math_constants() {
+    // Mathematical constants with full precision
+    let pi = 3.141592653589793;
+    let e = 2.718281828459045;
+    let sqrt2 = 1.4142135623730951;
+    let phi = 1.618033988749895;
+    let ln2 = 0.6931471805599453;
+    let log10e = 0.4342944819032518;
+}
+
+// In match expressions with floats
+fn classify_float(x: Float) -> Text {
+    match x {
+        0.0 => "zero"
+        1.0 => "one"
+        _ if x < 0.0 => "negative"
+        _ if x < 1.0 => "fraction"
+        _ if x < 1000.0 => "small"
+        _ => "large"
+    }
+}
+
+fn test_near_boundaries() {
+    let max_f64 = 1.7976931348623157e+308;
+    let min_f64_norm = 2.2250738585072014e-308;
+
+    // Float comparisons near boundaries
+    let near_max = max_f64 * 0.999999;
+    let near_min = min_f64_norm * 1.000001;
+}
+
+// In struct fields
+type FloatBounds is {
+    min_val: Float,
+    max_val: Float,
+    epsilon: Float,
+};
+
+fn test_struct_fields() {
+    let bounds = FloatBounds {
+        min_val: 1e-308,
+        max_val: 1e308,
+        epsilon: 2.2204460492503131e-16,
+    };
+}
+
+// Constants at precision limits
+const MACHINE_EPSILON: f64 = 2.2204460492503131e-16;
+const MIN_POSITIVE: f64 = 2.2250738585072014e-308;
+const MAX_FINITE: f64 = 1.7976931348623157e+308;

@@ -1,0 +1,30 @@
+fn main() -> Int {
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+
+    let len = s.len();
+    print(f"len={len}");
+    if (len != 3) {
+        print(f"FAIL: len={len}");
+        return 1;
+    }
+
+    let has10 = s.contains(10);
+    print(f"contains(10)={has10}");
+    if (has10 != true) {
+        print("FAIL: should contain 10");
+        return 1;
+    }
+
+    let has99 = s.contains(99);
+    print(f"contains(99)={has99}");
+    if (has99 != false) {
+        print("FAIL: should not contain 99");
+        return 1;
+    }
+
+    print("970_set_contains: PASS");
+    0
+}

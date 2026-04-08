@@ -1,0 +1,39 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, global-init, static, constructor
+// @expected-exit: 0
+
+// Test: static variable initializers run as global constructors.
+// Verifies that static variables with non-trivial initializers
+// are properly initialized before main() runs.
+
+// Static variables are compiled as zero-arg functions.
+// The global constructor mechanism ensures they execute before main.
+static MAGIC: Int = 42;
+static COMPUTED: Int = 7 * 8;
+
+fn get_magic() -> Int {
+    MAGIC
+}
+
+fn get_computed() -> Int {
+    COMPUTED
+}
+
+fn main() -> Int {
+    // Test static variable access
+    assert_eq(get_magic(), 42);
+    assert_eq(get_computed(), 56);
+
+    // Test direct access
+    assert_eq(MAGIC, 42);
+    assert_eq(COMPUTED, 56);
+
+    // Test use in computation
+    let sum = MAGIC + COMPUTED;
+    assert_eq(sum, 98);
+
+    print("874_global_init: PASS");
+    0
+}

@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, for, body, error
+// @description: For loop missing body block
+// @expected-error: E018
+
+fn test() {
+    for x in items
+    let y = 1;
+}

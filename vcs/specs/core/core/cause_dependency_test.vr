@@ -1,0 +1,75 @@
+// =============================================================================
+// cause_dependency_test.vr - Test Cause type dependency resolution
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, cause, heap, dependencies, regression
+// @description: Verifies Cause<E> type with its Heap<T> and DefectInfo dependencies
+// =============================================================================
+
+// Cause type depends on:
+// - Heap<T> for recursive structure
+// - DefectInfo for defect information
+// This test verifies these dependencies are resolved when importing Cause
+
+mount core.base.result.{Cause, Exit, Success, Failure, Defect, DefectInfo};
+mount core.base.memory.Heap;
+
+// Test 1: Basic Cause construction
+@test
+fn test_cause_basic() {
+    // Fail variant just needs E
+    let fail: Cause<Text> = Cause.fail("error message");
+
+    // Check if it's empty
+    assert(!fail.is_empty());
+}
+
+// Test 2: Cause with DefectInfo
+@test
+fn test_cause_with_defect() {
+    let defect: Cause<Text> = Cause.die("unexpected error");
+
+    // Get defects from the cause
+    let defects = defect.defects();
+    // defects should be List<DefectInfo>
+}
+
+// Test 3: Cause combining (uses Heap internally)
+@test
+fn test_cause_combining() {
+    let c1: Cause<Text> = Cause.fail("error 1");
+    let c2: Cause<Text> = Cause.fail("error 2");
+
+    // then() creates a Then variant which uses Heap
+    let combined = c1.then(c2);
+    assert(!combined.is_empty());
+}
+
+// Test 4: Cause.both for parallel errors
+@test
+fn test_cause_both() {
+    let c1: Cause<Text> = Cause.fail("parallel error 1");
+    let c2: Cause<Text> = Cause.fail("parallel error 2");
+
+    // both() creates a Both variant which uses Heap
+    let parallel = c1.both(c2);
+    assert(!parallel.is_empty());
+}
+
+// Test 5: Exit type uses Cause indirectly via Defect variant
+@test
+fn test_exit_with_defect() {
+    let success: Exit<Text, Int> = Exit.succeed(42);
+    let failure: Exit<Text, Int> = Exit.fail("expected error");
+    let defect: Exit<Text, Int> = Exit.die("unexpected bug");
+
+    assert(success.is_success());
+    assert(failure.is_failure());
+    assert(defect.is_defect());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

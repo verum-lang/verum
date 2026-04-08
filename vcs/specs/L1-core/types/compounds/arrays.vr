@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, compounds, arrays
+
+/// Test for fixed-size array types.
+/// Arrays have a compile-time known size and are stack-allocated.
+
+fn main() {
+    // === Basic Array Declaration ===
+
+    // Basic array declaration with explicit size
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    // Array with explicit type annotation
+    let zeros: [Float; 3] = [0.0, 0.0, 0.0];
+
+    // Single element array
+    let single: [Int; 1] = [42];
+
+    // Empty array (zero-sized)
+    let empty: [Int; 0] = [];
+
+    // === Array Initialization ===
+
+    // Array initialization with repeat value
+    let filled: [Bool; 10] = [true; 10];
+    let zeros_repeat: [Int; 100] = [0; 100];
+    let text_repeat: [Text; 3] = ["hello"; 3];
+
+    // === Nested Arrays ===
+
+    // Nested arrays (2D array)
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ];
+
+    // 3D array
+    let cube: [[[Int; 2]; 2]; 2] = [
+        [[1, 2], [3, 4]],
+        [[5, 6], [7, 8]],
+    ];
+
+    // Array of tuples
+    let pairs: [(Int, Text); 3] = [
+        (1, "one"),
+        (2, "two"),
+        (3, "three"),
+    ];
+
+    // === Element Access ===
+
+    // Array element access
+    let first: Int = arr[0];
+    let last: Int = arr[4];
+    let cell: Int = matrix[1][2];
+    let cube_elem: Int = cube[1][0][1];
+
+    // === Array Properties ===
+
+    // Array length
+    let len: Int = 5;  // arr.len() - compile-time constant
+    let empty_len: Int = 0;
+
+    // Check if empty
+    let is_empty: Bool = empty_len == 0;
+    let not_empty: Bool = len > 0;
+
+    // === Mutable Operations ===
+
+    // Mutable array
+    let mut mutable_arr: [Int; 3] = [1, 2, 3];
+    mutable_arr[0] = 10;
+    mutable_arr[1] = 20;
+    mutable_arr[2] = 30;
+
+    // === Iteration ===
+
+    // Iteration over arrays
+    let mut sum: Int = 0;
+    for elem in arr {
+        sum = sum + elem;
+    }
+
+    // === Comparison ===
+
+    // Array comparison (element-wise)
+    let cmp_a: [Int; 3] = [1, 2, 3];
+    let cmp_b: [Int; 3] = [1, 2, 3];
+    let cmp_c: [Int; 3] = [1, 2, 4];
+
+    // === Copying ===
+
+    // Arrays are Copy if element type is Copy
+    let original: [Int; 3] = [1, 2, 3];
+    let copied: [Int; 3] = original;  // Copy
+
+    // === Assertions ===
+    assert(first == 1);
+    assert(last == 5);
+    assert(cell == 6);
+    assert(cube_elem == 6);
+    assert(len == 5);
+    assert(empty_len == 0);
+    assert(mutable_arr[0] == 10);
+    assert(sum == 15);
+    assert(cmp_a == cmp_b);
+    assert(cmp_a != cmp_c);
+    assert(is_empty == true);
+    assert(not_empty == true);
+    assert(original == copied);
+}
+

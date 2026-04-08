@@ -1,0 +1,43 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, real-opcode, unified
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL GPU unified memory intrinsics through VBC interpreter.
+// Exercises gpu_malloc_managed, gpu_prefetch.
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Test 1: Allocate managed (unified) memory
+    let ptr = gpu_malloc_managed(4096);
+    if ptr == 0 { errors = errors + 1; }
+
+    // Test 2: Prefetch to device 0
+    let pf = gpu_prefetch(ptr, 4096, 0);
+    if pf != 0 { errors = errors + 1; }
+
+    // Test 3: Memset on managed memory
+    let ms = gpu_memset(ptr, 0, 4096);
+    if ms != 0 { errors = errors + 1; }
+
+    // Test 4: Free managed memory
+    let f = gpu_free(ptr);
+    if f != 0 { errors = errors + 1; }
+
+    // Test 5: Multiple managed allocations
+    let p1 = gpu_malloc_managed(1024);
+    let p2 = gpu_malloc_managed(2048);
+    if p1 == 0 { errors = errors + 1; }
+    if p2 == 0 { errors = errors + 1; }
+    if p1 == p2 { errors = errors + 1; }
+
+    let f1 = gpu_free(p1);
+    let f2 = gpu_free(p2);
+    if f1 != 0 { errors = errors + 1; }
+    if f2 != 0 { errors = errors + 1; }
+
+    errors
+}

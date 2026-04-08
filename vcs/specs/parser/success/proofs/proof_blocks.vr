@@ -1,0 +1,475 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, proof_body, proof_step, have, show, obtain
+// @description: Comprehensive test for proof block syntax
+
+// ============================================================================
+// Proof Body Variations (proof_body)
+// ============================================================================
+
+// Proof by tactic (proof_by_tactic)
+theorem proof_by_tactic_simple(x: Int): x == x {
+    proof by trivial
+}
+
+// Proof by term (proof_by_term)
+theorem proof_by_term_simple(x: Int): x == x {
+    proof = refl(x)
+}
+
+// Proof structured (proof_structured)
+theorem proof_structured_simple(x: Int): x == x {
+    proof {
+        show x == x by trivial;
+    }
+}
+
+// ============================================================================
+// Proof by Tactic (proof_by_tactic = 'by' tactic_expr)
+// ============================================================================
+
+// Simple tactic
+theorem by_simple_tactic(a: Int, b: Int): a + b == b + a {
+    proof by ring
+}
+
+// Tactic with arguments
+theorem by_tactic_with_args(a: Int, b: Int)
+    requires a == b
+: b == a {
+    proof by apply(eq_sym)
+}
+
+// Chained tactics
+theorem by_chained_tactics(x: Int): x * 1 + 0 == x {
+    proof by simp; ring; auto
+}
+
+// Grouped tactics
+theorem by_grouped_tactics(a: Int): (a + 1) - 1 == a {
+    proof by (simp; ring)
+}
+
+// Nested tactic groups
+theorem by_nested_tactics(x: Int, y: Int): x + y == y + x {
+    proof by ((simp); (ring; auto))
+}
+
+// ============================================================================
+// Proof by Term (proof_by_term = '=' expression)
+// ============================================================================
+
+// Direct term proof
+theorem term_direct(x: Int): x == x {
+    proof = refl(x)
+}
+
+// Term with function application
+theorem term_with_app(a: Int, b: Int)
+    requires a == b
+: b == a {
+    proof = sym(eq_refl(a, b))
+}
+
+// Term with complex expression
+theorem term_complex(x: Int, y: Int)
+    requires x == y
+: x + 1 == y + 1 {
+    proof = cong(|z| z + 1, assumption)
+}
+
+// Term referencing hypothesis
+theorem term_with_hypothesis(p: Bool)
+    requires p
+: p {
+    proof = assumption
+}
+
+// Term with constructor
+theorem term_constructor(x: Int): Some(x) is Some {
+    proof = is_some_intro(x)
+}
+
+// ============================================================================
+// Proof Structured (proof_structured = '{' { proof_step } '}')
+// ============================================================================
+
+// Empty structured proof
+theorem structured_empty(x: Int): x == x {
+    proof {
+    }
+}
+
+// Single step structured proof
+theorem structured_single(x: Int): x == x {
+    proof {
+        show x == x by trivial;
+    }
+}
+
+// Multiple steps
+theorem structured_multiple(a: Int, b: Int)
+    requires a > 0, b > 0
+: a + b > 0 {
+    proof {
+        have h1: a > 0 by assumption;
+        have h2: b > 0 by assumption;
+        show a + b > 0 by omega;
+    }
+}
+
+// ============================================================================
+// Have Step (have_step = 'have' identifier ':' expression proof_justification)
+// ============================================================================
+
+// Basic have step
+theorem have_basic(x: Int)
+    requires x > 0
+: x >= 1 {
+    proof {
+        have h: x > 0 by assumption;
+        show x >= 1 by omega;
+    }
+}
+
+// Have with complex expression
+theorem have_complex_expr(a: Int, b: Int, c: Int)
+    requires a + b == c
+: c - b == a {
+    proof {
+        have h: a + b == c by assumption;
+        show c - b == a by ring;
+    }
+}
+
+// Multiple have steps
+theorem have_multiple(x: Int, y: Int, z: Int)
+    requires x < y, y < z
+: x < z {
+    proof {
+        have h1: x < y by assumption;
+        have h2: y < z by assumption;
+        have h3: x < z by omega;
+        show x < z by exact h3;
+    }
+}
+
+// Have with quantified expression
+theorem have_quantified(list: List<Int>)
+    requires forall i: Int . 0 <= i && i < list.len() => list[i] >= 0
+: list.all(|x| x >= 0) {
+    proof {
+        have h: forall i: Int . 0 <= i && i < list.len() => list[i] >= 0 by assumption;
+        show list.all(|x| x >= 0) by auto;
+    }
+}
+
+// Have with justification by identifier
+theorem have_by_ident(x: Int): x + 0 == x {
+    proof {
+        have h: x + 0 == x by add_zero_lemma;
+        show x + 0 == x by exact h;
+    }
+}
+
+// Have with justification by tactic
+theorem have_by_tactic(a: Int, b: Int): a * b == b * a {
+    proof {
+        have h: a * b == b * a by ring;
+        show a * b == b * a by exact h;
+    }
+}
+
+// Have chaining intermediate results
+theorem have_chain(n: Int)
+    requires n >= 0
+: n * (n + 1) >= 0 {
+    proof {
+        have h1: n >= 0 by assumption;
+        have h2: n + 1 >= 1 by omega;
+        have h3: n + 1 > 0 by omega;
+        have h4: n * (n + 1) >= 0 by omega;
+        show n * (n + 1) >= 0 by exact h4;
+    }
+}
+
+// ============================================================================
+// Show Step (show_step = 'show' expression proof_justification)
+// ============================================================================
+
+// Basic show step
+theorem show_basic(x: Int): x == x {
+    proof {
+        show x == x by trivial;
+    }
+}
+
+// Show with tactic justification
+theorem show_with_tactic(a: Int, b: Int): a + b == b + a {
+    proof {
+        show a + b == b + a by ring;
+    }
+}
+
+// Show with identifier justification
+theorem show_with_ident(x: Int): x * 1 == x {
+    proof {
+        show x * 1 == x by mul_one;
+    }
+}
+
+// Show complex expression
+theorem show_complex(a: Int, b: Int, c: Int): (a + b) * c == a * c + b * c {
+    proof {
+        show (a + b) * c == a * c + b * c by ring;
+    }
+}
+
+// Show with chained tactic
+theorem show_chained_tactic(x: Int): (x + 1) - 1 == x {
+    proof {
+        show (x + 1) - 1 == x by simp; ring;
+    }
+}
+
+// Show after multiple have steps
+theorem show_after_haves(a: Int, b: Int)
+    requires a >= 0, b >= 0
+: a + b >= 0 {
+    proof {
+        have h1: a >= 0 by assumption;
+        have h2: b >= 0 by assumption;
+        show a + b >= 0 by omega;
+    }
+}
+
+// ============================================================================
+// Obtain Step (obtain_step = 'obtain' pattern 'from' expression)
+// ============================================================================
+
+// Basic obtain
+theorem obtain_basic()
+    requires exists x: Int . x > 0
+: true {
+    proof {
+        obtain x from (exists x: Int . x > 0);
+        show true by trivial;
+    }
+}
+
+// Obtain with tuple pattern
+theorem obtain_tuple()
+    requires exists p: (Int, Int) . p.0 + p.1 > 0
+: true {
+    proof {
+        obtain (a, b) from (exists p: (Int, Int) . p.0 + p.1 > 0);
+        show true by trivial;
+    }
+}
+
+// Obtain from named hypothesis
+// Note: Parentheses required to disambiguate `>` in expression from closing angle bracket
+theorem obtain_named(h: Proof<(exists x: Int . x > 10)>): true {
+    proof {
+        obtain x from h;
+        show true by trivial;
+    }
+}
+
+// Obtain with use of witness
+theorem obtain_use_witness()
+    requires exists n: Int . n > 0 && n < 10
+: exists m: Int . m < 20 {
+    proof {
+        obtain n from (exists n: Int . n > 0 && n < 10);
+        have h: n < 10 by auto;
+        show exists m: Int . m < 20 by auto;
+    }
+}
+
+// Multiple obtains
+theorem obtain_multiple()
+    requires exists x: Int . x > 0
+    requires exists y: Int . y < 0
+: exists z: Int . true {
+    proof {
+        obtain x from (exists x: Int . x > 0);
+        obtain y from (exists y: Int . y < 0);
+        show exists z: Int . true by trivial;
+    }
+}
+
+// Obtain with struct pattern
+theorem obtain_struct()
+    requires exists p: Point . p.x > 0 && p.y > 0
+: true {
+    proof {
+        obtain Point { x, y } from (exists p: Point . p.x > 0 && p.y > 0);
+        have h: x > 0 by auto;
+        show true by trivial;
+    }
+}
+
+// ============================================================================
+// Tactic Application Step (tactic_application = tactic_expr ';')
+// ============================================================================
+
+// Single tactic application in structured proof
+theorem tactic_app_single(x: Int): x == x {
+    proof {
+        trivial;
+    }
+}
+
+// Multiple tactic applications
+theorem tactic_app_multiple(a: Int, b: Int): a + b == b + a {
+    proof {
+        simp;
+        ring;
+    }
+}
+
+// Tactic with arguments in structured proof
+theorem tactic_app_with_args(x: Int)
+    requires x > 0
+: x >= 1 {
+    proof {
+        apply(gt_implies_ge);
+        assumption;
+    }
+}
+
+// Mixed steps and tactic applications
+theorem tactic_app_mixed(a: Int, b: Int)
+    requires a > 0
+: a + b > b {
+    proof {
+        have h: a > 0 by assumption;
+        simp;
+        show a + b > b by omega;
+    }
+}
+
+// ============================================================================
+// Proof Justification (proof_justification = 'by' (tactic_expr | identifier))
+// ============================================================================
+
+// Justification by tactic name
+theorem justif_by_tactic_name(x: Int): x + 0 == x {
+    proof {
+        show x + 0 == x by simp;
+    }
+}
+
+// Justification by identifier
+theorem justif_by_ident(a: Int, b: Int): a + b == b + a {
+    proof {
+        show a + b == b + a by add_comm;
+    }
+}
+
+// Justification by tactic with args
+theorem justif_by_tactic_args(x: Int, y: Int)
+    requires x == y
+: y == x {
+    proof {
+        show y == x by apply(eq_sym);
+    }
+}
+
+// Justification by chained tactics
+theorem justif_by_chain(a: Int): a * 1 + 0 == a {
+    proof {
+        show a * 1 + 0 == a by simp; ring;
+    }
+}
+
+// Justification by grouped tactics
+theorem justif_by_grouped(x: Int): (x + 1) - 1 == x {
+    proof {
+        show (x + 1) - 1 == x by (simp; ring);
+    }
+}
+
+// ============================================================================
+// Complex Structured Proofs
+// ============================================================================
+
+// Proof with all step types
+theorem all_step_types(n: Int)
+    requires n >= 0
+    requires exists k: Int . k > n
+: n + 1 > n {
+    proof {
+        have h1: n >= 0 by assumption;
+        obtain k from (exists k: Int . k > n);
+        simp;
+        show n + 1 > n by omega;
+    }
+}
+
+// Nested structure (using calc within)
+theorem nested_structure(a: Int, b: Int, c: Int)
+    requires a == b, b == c
+: a == c {
+    proof {
+        have h1: a == b by assumption;
+        have h2: b == c by assumption;
+        calc {
+            a
+            == { by h1 } b
+            == { by h2 } c
+        }
+    }
+}
+
+// Proof with intermediate goals
+theorem intermediate_goals(list: List<Int>)
+    requires list.len() > 0
+    requires forall i: Int . 0 <= i && i < list.len() => list[i] >= 0
+: list.sum() >= 0 {
+    proof {
+        have h1: list.len() > 0 by assumption;
+        have h2: list.head() is Some by auto;
+        have h3: forall i: Int . 0 <= i && i < list.len() => list[i] >= 0 by assumption;
+        show list.sum() >= 0 by induction list;
+    }
+}
+
+// Proof with case analysis embedded
+theorem case_analysis_embedded(x: Int): abs(x) >= 0 {
+    proof {
+        have h: x >= 0 || x < 0 by omega;
+        cases h;
+        show abs(x) >= 0 by simp;
+        show abs(x) >= 0 by simp;
+    }
+}
+
+// Long structured proof
+theorem long_structured(a: Int, b: Int, c: Int, d: Int)
+    requires a < b, b < c, c < d
+: a < d {
+    proof {
+        have h1: a < b by assumption;
+        have h2: b < c by assumption;
+        have h3: c < d by assumption;
+        have h4: a < c by omega;
+        have h5: a < d by omega;
+        show a < d by exact h5;
+    }
+}
+
+// Proof using lemmas
+theorem using_lemmas(x: Int, y: Int)
+    requires x >= 0, y >= 0
+: x * y >= 0 {
+    proof {
+        have h1: x >= 0 by assumption;
+        have h2: y >= 0 by assumption;
+        have h3: x * y >= 0 by apply(mul_non_neg);
+        show x * y >= 0 by exact h3;
+    }
+}

@@ -1,0 +1,167 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, stage, multi-stage
+// @description: Test stage boundary enforcement in multi-stage metaprogramming
+
+// =============================================================================
+// STAGE 0: RUNTIME CODE
+// =============================================================================
+// Stage 0 is the final runtime code that executes at program runtime
+
+fn runtime_function() -> Int {
+    42
+}
+
+// =============================================================================
+// STAGE 1: META FUNCTIONS (Generate Runtime Code)
+// =============================================================================
+// Meta functions execute at compile-time and generate stage 0 code
+
+meta fn generate_runtime_code() -> TokenStream {
+    // This runs at compile time (stage 1)
+    let compile_time_value = 100;
+
+    quote {
+        // This code will run at runtime (stage 0)
+        fn generated_fn() -> Int {
+            ${compile_time_value}  // Splice compile-time value
+        }
+    }
+}
+
+meta fn stage1_computation() -> Int {
+    // Pure stage 1 computation
+    let x = 10;
+    let y = 20;
+    x + y
+}
+
+// =============================================================================
+// STAGE 2: META OF META (Generate Meta Code)
+// =============================================================================
+// Stage 2 functions generate stage 1 meta code
+
+meta(2) fn generate_meta_code() -> TokenStream {
+    let stage2_value = 50;
+
+    quote(1) {
+        // This is stage 1 meta code
+        meta fn generated_meta() -> TokenStream {
+            let inner_value = ${stage2_value};
+
+            quote {
+                // This is stage 0 runtime code
+                fn final_fn() -> Int {
+                    ${inner_value}
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// EXPLICIT STAGE TARGETING
+// =============================================================================
+
+meta fn explicit_stage_target() -> TokenStream {
+    quote(0) {
+        // Explicitly targeting stage 0 (runtime)
+        fn runtime_only() -> Int {
+            0
+        }
+    }
+}
+
+meta(2) fn stage2_explicit_targets() -> TokenStream {
+    quote(1) {
+        // Explicitly targeting stage 1 (meta)
+        meta fn meta_level() -> TokenStream {
+            quote(0) {
+                // Explicitly targeting stage 0
+                fn deep_runtime() -> Int { 1 }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// STAGE ISOLATION: BINDINGS DON'T CROSS STAGES DIRECTLY
+// =============================================================================
+
+meta fn stage_isolation_demo() -> TokenStream {
+    let meta_only = 999;  // Only accessible at stage 1
+
+    quote {
+        // Cannot directly access meta_only here
+        // Must use lift or splice
+        let runtime_value = lift(meta_only);  // OK: lift brings value
+        let spliced_value = ${meta_only};     // OK: splice evaluates
+    }
+}
+
+// =============================================================================
+// LIFT: BRINGING VALUES ACROSS STAGES
+// =============================================================================
+
+meta fn lift_examples() -> TokenStream {
+    let x = 42;
+    let name = "hello";
+    let flag = true;
+
+    quote {
+        let lifted_int = lift(x);        // Int from stage 1
+        let lifted_text = lift(name);    // Text from stage 1
+        let lifted_bool = lift(flag);    // Bool from stage 1
+    }
+}
+
+meta fn lift_computed() -> TokenStream {
+    let base = 10;
+
+    quote {
+        // Lift can include computation
+        let computed = lift(base * base);  // 100
+    }
+}
+
+// =============================================================================
+// STAGE ESCAPE: $(stage N){...}
+// =============================================================================
+
+meta fn stage_escape_example() -> TokenStream {
+    let computed = 5 * 2;  // Compute at meta level
+    quote {
+        // This value is computed at stage 1 and spliced to stage 0
+        let value = ${computed};  // value = 10 at runtime
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_generate_runtime() {
+    @generate_runtime_code();
+    assert(generated_fn() == 100);
+}
+
+fn test_stage1_computation() {
+    @const assert_eq(stage1_computation(), 30);
+}
+
+fn test_lift_examples() {
+    @lift_examples();
+    assert(lifted_int == 42);
+    assert(lifted_text == "hello");
+    assert(lifted_bool == true);
+}
+
+fn main() {
+    test_generate_runtime();
+    test_stage1_computation();
+    test_lift_examples();
+
+    // Basic stage 0 function
+    assert(runtime_function() == 42);
+}

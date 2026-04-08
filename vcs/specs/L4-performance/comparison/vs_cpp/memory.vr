@@ -1,0 +1,612 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @baseline-comparison: cpp
+// @tags: comparison, cpp, c++, memory, allocation, baseline, performance
+// @description: Memory allocation vs C++ benchmark (target: 0.70-0.90x C++ performance)
+
+/// Verum vs C++: Memory Benchmark
+///
+/// This benchmark compares Verum's memory operations against C++.
+/// Memory allocation and access are critical performance factors, and
+/// this is where Verum's CBGR safety system adds measurable overhead.
+///
+/// Target: 0.70-0.90x C++ performance (CBGR overhead expected)
+///
+/// Test cases:
+/// - Raw allocation (malloc/free equivalent)
+/// - Stack allocation
+/// - Memory copy (memcpy equivalent)
+/// - Memory set (memset equivalent)
+/// - Pointer/reference access
+/// - Arena allocation
+///
+/// Why the gap:
+/// - CBGR adds ~15ns per reference access for safety
+/// - Generation tracking on allocation
+/// - Epoch management overhead
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const ITERATIONS: Int = 1_000_000;
+const LARGE_SIZE: Int = 100 * 1024 * 1024; // 100MB
+const SMALL_ALLOC: Int = 64;
+
+/// C++ baseline measurements (with -O3)
+module cpp_baselines {
+    /// C++ malloc/free 1M times in milliseconds
+    pub const MALLOC_FREE_1M_MS: Float = 40.0;
+
+    /// C++ new/delete 1M times in milliseconds
+    pub const NEW_DELETE_1M_MS: Float = 45.0;
+
+    /// C++ stack allocation 1M times in milliseconds
+    pub const STACK_ALLOC_1M_MS: Float = 2.0;
+
+    /// C++ memcpy 100MB in milliseconds
+    pub const MEMCPY_100MB_MS: Float = 8.0;
+
+    /// C++ memset 100MB in milliseconds
+    pub const MEMSET_100MB_MS: Float = 6.0;
+
+    /// C++ pointer dereference 10M times in milliseconds
+    pub const PTR_DEREF_10M_MS: Float = 10.0;
+
+    /// C++ pointer arithmetic 10M times in milliseconds
+    pub const PTR_ARITH_10M_MS: Float = 5.0;
+
+    /// C++ arena allocator 1M allocs in milliseconds
+    pub const ARENA_ALLOC_1M_MS: Float = 15.0;
+
+    /// C++ pool allocator 1M allocs in milliseconds
+    pub const POOL_ALLOC_1M_MS: Float = 20.0;
+
+    /// C++ smart pointer 10M access in milliseconds
+    pub const SMART_PTR_10M_MS: Float = 15.0;
+
+    /// C++ unique_ptr create/destroy 1M times in milliseconds
+    pub const UNIQUE_PTR_1M_MS: Float = 50.0;
+
+    /// C++ shared_ptr create/destroy 1M times in milliseconds
+    pub const SHARED_PTR_1M_MS: Float = 100.0;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs C++: Memory");
+
+    // Basic allocation
+    results.add(benchmark_heap_alloc());
+    results.add(benchmark_stack_alloc());
+
+    // Memory operations
+    results.add(benchmark_memcpy());
+    results.add(benchmark_memset());
+
+    // Pointer operations (CBGR overhead)
+    results.add(benchmark_pointer_deref());
+    results.add(benchmark_pointer_arithmetic());
+
+    // Smart pointers
+    results.add(benchmark_unique_ptr());
+    results.add(benchmark_shared_ptr());
+
+    // Arena allocation
+    results.add(benchmark_arena_alloc());
+    results.add(benchmark_pool_alloc());
+
+    // Bulk operations
+    results.add(benchmark_bulk_alloc());
+    results.add(benchmark_realloc());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_cpp_memory.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.ratio >= r.min_target);
+    assert(all_meet_target, "Verum memory performance below target vs C++");
+}
+
+/// Benchmark: Heap allocation (malloc/free equivalent)
+fn benchmark_heap_alloc() -> ComparisonResult {
+    // Warmup
+    for _ in 0..10_000 {
+        let x = Heap(42i64);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        let x = Heap(42i64);
+        black_box(&*x);
+        // Drop/free happens here
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.MALLOC_FREE_1M_MS;
+
+    ComparisonResult {
+        name: "heap_alloc_free_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.70, // CBGR generation tracking overhead
+        category: "allocation",
+    }
+}
+
+/// Benchmark: Stack allocation
+fn benchmark_stack_alloc() -> ComparisonResult {
+    // Warmup
+    for i in 0..10_000 {
+        let x: [u8; 64] = [i as u8; 64];
+        black_box(&x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..ITERATIONS {
+        let x: [u8; 64] = [i as u8; 64];
+        black_box(&x);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.STACK_ALLOC_1M_MS;
+
+    ComparisonResult {
+        name: "stack_alloc_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.90, // Stack should be nearly identical
+        category: "allocation",
+    }
+}
+
+/// Benchmark: Memory copy
+fn benchmark_memcpy() -> ComparisonResult {
+    let src: List<u8> = (0..LARGE_SIZE).map(|i| (i % 256) as u8).collect();
+    let mut dst: List<u8> = List.with_capacity(LARGE_SIZE);
+    dst.resize(LARGE_SIZE, 0);
+
+    // Warmup
+    for _ in 0..3 {
+        dst[0..1024*1024].copy_from_slice(&src[0..1024*1024]);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    dst.copy_from_slice(&src);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.MEMCPY_100MB_MS;
+
+    black_box(&dst);
+
+    ComparisonResult {
+        name: "memcpy_100mb",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.95, // Should use same intrinsics
+        category: "memop",
+    }
+}
+
+/// Benchmark: Memory set
+fn benchmark_memset() -> ComparisonResult {
+    let mut data: List<u8> = List.with_capacity(LARGE_SIZE);
+    data.resize(LARGE_SIZE, 0);
+
+    // Warmup
+    for _ in 0..3 {
+        data[0..1024*1024].fill(42);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.fill(42);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.MEMSET_100MB_MS;
+
+    black_box(&data);
+
+    ComparisonResult {
+        name: "memset_100mb",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.95, // Should use same intrinsics
+        category: "memop",
+    }
+}
+
+/// Benchmark: Pointer/reference dereference (CBGR overhead)
+fn benchmark_pointer_deref() -> ComparisonResult {
+    let data = Heap(42i64);
+    let ref_data = &*data;
+
+    // Warmup
+    for _ in 0..100_000 {
+        black_box(*ref_data);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: i64 = 0;
+    for _ in 0..10_000_000 {
+        // CBGR check happens on each dereference
+        sum += *ref_data;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.PTR_DEREF_10M_MS;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "pointer_deref_10m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.40, // CBGR adds ~15ns per access
+        category: "access",
+    }
+}
+
+/// Benchmark: Pointer arithmetic
+fn benchmark_pointer_arithmetic() -> ComparisonResult {
+    let data: List<i64> = (0..1000).collect();
+    let slice = data.as_slice();
+
+    // Warmup
+    for _ in 0..100_000 {
+        for i in 0..slice.len() {
+            black_box(slice[i]);
+        }
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut sum: i64 = 0;
+    for _ in 0..10_000 {
+        for i in 0..slice.len() {
+            sum += slice[i];
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.PTR_ARITH_10M_MS;
+
+    black_box(sum);
+
+    ComparisonResult {
+        name: "ptr_arithmetic_10m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.50, // Bounds checking overhead
+        category: "access",
+    }
+}
+
+/// Benchmark: Unique pointer (Heap) create/destroy
+fn benchmark_unique_ptr() -> ComparisonResult {
+    // Warmup
+    for _ in 0..10_000 {
+        let x = Heap([0u8; 64]);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        let x = Heap([0u8; 64]);
+        black_box(&*x);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.UNIQUE_PTR_1M_MS;
+
+    ComparisonResult {
+        name: "unique_ptr_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.70,
+        category: "smart_ptr",
+    }
+}
+
+/// Benchmark: Shared pointer create/destroy
+fn benchmark_shared_ptr() -> ComparisonResult {
+    // Warmup
+    for _ in 0..10_000 {
+        let x = Shared.new([0u8; 64]);
+        let y = x.clone();
+        black_box(&*x);
+        black_box(&*y);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        let x = Shared.new([0u8; 64]);
+        let y = x.clone();
+        black_box(&*x);
+        black_box(&*y);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.SHARED_PTR_1M_MS;
+
+    ComparisonResult {
+        name: "shared_ptr_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.70, // Atomic refcount + CBGR
+        category: "smart_ptr",
+    }
+}
+
+/// Benchmark: Arena allocation
+fn benchmark_arena_alloc() -> ComparisonResult {
+    // Warmup
+    for _ in 0..10 {
+        let arena = Arena.new(1024 * 1024);
+        for _ in 0..10_000 {
+            let ptr = arena.alloc_typed();
+            black_box(ptr);
+        }
+    }
+
+    let arena = Arena.new(100 * 1024 * 1024);
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        let ptr = arena.alloc_typed();
+        black_box(ptr);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.ARENA_ALLOC_1M_MS;
+
+    ComparisonResult {
+        name: "arena_alloc_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.80, // Arena reduces CBGR overhead
+        category: "arena",
+    }
+}
+
+/// Benchmark: Pool allocation
+fn benchmark_pool_alloc() -> ComparisonResult {
+    type Block is { data: [u8; 64] };
+
+    // Warmup
+    for _ in 0..10 {
+        let pool: Pool<Block> = Pool.new(10_000);
+        for _ in 0..1_000 {
+            let ptr = pool.alloc();
+            pool.free(ptr);
+        }
+    }
+
+    let pool: Pool<Block> = Pool.new(ITERATIONS);
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        let ptr = pool.alloc();
+        black_box(ptr);
+        pool.free(ptr);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.POOL_ALLOC_1M_MS;
+
+    ComparisonResult {
+        name: "pool_alloc_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.75,
+        category: "pool",
+    }
+}
+
+/// Benchmark: Bulk allocation
+fn benchmark_bulk_alloc() -> ComparisonResult {
+    // Warmup
+    for _ in 0..10 {
+        let data: List<i64> = List.with_capacity(100_000);
+        black_box(data);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..1000 {
+        let data: List<i64> = List.with_capacity(ITERATIONS);
+        black_box(data);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    // C++ vector reserve 1000 times
+    let cpp_ms = 50.0;
+
+    ComparisonResult {
+        name: "bulk_alloc_1000x1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "bulk",
+    }
+}
+
+/// Benchmark: Reallocation
+fn benchmark_realloc() -> ComparisonResult {
+    // Warmup
+    for _ in 0..10 {
+        let mut data: List<i64> = List.new();
+        for i in 0..10_000 {
+            data.push(i);
+        }
+        black_box(data);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut data: List<i64> = List.new();
+    for i in 0..ITERATIONS {
+        data.push(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    // C++ vector push with reallocs
+    let cpp_ms = 15.0;
+
+    black_box(data);
+
+    ComparisonResult {
+        name: "realloc_growth_1m",
+        verum_ms,
+        baseline_ms: cpp_ms,
+        ratio: cpp_ms / verum_ms,
+        min_target: 0.85,
+        category: "realloc",
+    }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    baseline_ms: Float,
+    ratio: Float,
+    min_target: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<30} {:>12} {:>12} {:>10} {:>8} {:>8}",
+                "Benchmark", "Verum (ms)", "C++ (ms)", "Ratio", "Target", "Status");
+        println("{}", "-".repeat(85));
+
+        for result in &self.results {
+            let passed = result.ratio >= result.min_target;
+            let status = if passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.ratio * 100.0;
+
+            println("{:<30} {:>12.2} {:>12.2} {:>9.1}% {:>7.0}% {:>8}",
+                    result.name, result.verum_ms, result.baseline_ms,
+                    ratio_pct, result.min_target * 100.0, status);
+        }
+
+        println("");
+        println("Note: CBGR adds ~15ns overhead per reference access for safety.");
+        println("Pointer dereference targets are lower due to this design choice.");
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("baseline", "cpp");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("baseline_ms", result.baseline_ms);
+            r.set("ratio", result.ratio);
+            r.set("min_target", result.min_target);
+            r.set("category", &result.category);
+            r.set("passed", result.ratio >= result.min_target);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+// Memory types stubs
+type Arena is { capacity: Int };
+implement Arena {
+    fn new(capacity: Int) -> Self { Self { capacity } }
+    fn alloc<T>(&self) -> &mut T { panic("stub") }
+}
+
+type Pool<T> is { capacity: Int };
+implement<T> Pool<T> {
+    fn new(capacity: Int) -> Self { Self { capacity } }
+    fn alloc(&self) -> &mut T { panic("stub") }
+    fn free(&self, ptr: &mut T) {}
+}
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

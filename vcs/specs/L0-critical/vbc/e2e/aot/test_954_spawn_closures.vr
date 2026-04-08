@@ -1,0 +1,117 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: spawn, closures, captures, concurrency
+// @description: Test spawn with captured variables - closures across thread boundaries
+
+fn worker_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn test_named_function_spawn() -> Int {
+    // Baseline: named function spawn (known working)
+    let h = spawn { worker_add(10, 32) };
+    let result = h.await;
+    if result != 42 {
+        print(f"FAIL named_spawn: expected 42, got {result}");
+        return 1;
+    }
+    print("  named_function_spawn: OK");
+    0
+}
+
+fn test_expression_spawn_simple() -> Int {
+    // Spawn an expression that captures a local variable
+    let x = 100;
+    let h = spawn { x + 23 };
+    let result = h.await;
+    if result != 123 {
+        print(f"FAIL expr_spawn: expected 123, got {result}");
+        return 1;
+    }
+    print("  expression_spawn_simple: OK");
+    0
+}
+
+fn test_multi_capture() -> Int {
+    // Spawn capturing multiple variables
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let h = spawn { a + b + c };
+    let result = h.await;
+    if result != 60 {
+        print(f"FAIL multi_capture: expected 60, got {result}");
+        return 1;
+    }
+    print("  multi_capture: OK");
+    0
+}
+
+fn test_capture_with_computation() -> Int {
+    // Capture variable used in more complex expression
+    let base = 7;
+    let multiplier = 6;
+    let h = spawn { base * multiplier };
+    let result = h.await;
+    if result != 42 {
+        print(f"FAIL capture_computation: expected 42, got {result}");
+        return 1;
+    }
+    print("  capture_with_computation: OK");
+    0
+}
+
+fn test_multiple_spawns() -> Int {
+    // Multiple concurrent spawns with different captures
+    let x = 10;
+    let y = 20;
+    let h1 = spawn { x * 2 };
+    let h2 = spawn { y * 3 };
+    let r1 = h1.await;
+    let r2 = h2.await;
+    if r1 != 20 {
+        print(f"FAIL multi_spawn r1: expected 20, got {r1}");
+        return 1;
+    }
+    if r2 != 60 {
+        print(f"FAIL multi_spawn r2: expected 60, got {r2}");
+        return 1;
+    }
+    print("  multiple_spawns: OK");
+    0
+}
+
+fn test_nested_spawn_capture() -> Int {
+    // Capture a computed value
+    let a = 5;
+    let b = a * 2;  // b = 10
+    let h = spawn { b + 7 };
+    let result = h.await;
+    if result != 17 {
+        print(f"FAIL nested_capture: expected 17, got {result}");
+        return 1;
+    }
+    print("  nested_spawn_capture: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Spawn Closure Capture Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_named_function_spawn();
+    failures = failures + test_expression_spawn_simple();
+    failures = failures + test_multi_capture();
+    failures = failures + test_capture_with_computation();
+    failures = failures + test_multiple_spawns();
+    failures = failures + test_nested_spawn_capture();
+
+    if failures == 0 {
+        print("All spawn closure capture tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+
+    failures
+}

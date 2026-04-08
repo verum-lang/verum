@@ -1,0 +1,1013 @@
+// =============================================================================
+// ordering_test.vr - Comprehensive tests for Ordering type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: ordering, comparison, protocols, core
+// @description: Tests for Ordering type, methods, and protocol implementations
+// =============================================================================
+
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Ordering Type Construction
+// =============================================================================
+
+/// Test Less variant construction
+@test
+fn test_ordering_less_construction() {
+    let ord: Ordering = Less;
+    assert(ord is Less);
+}
+
+/// Test Equal variant construction
+@test
+fn test_ordering_equal_construction() {
+    let ord: Ordering = Equal;
+    assert(ord is Equal);
+}
+
+/// Test Greater variant construction
+@test
+fn test_ordering_greater_construction() {
+    let ord: Ordering = Greater;
+    assert(ord is Greater);
+}
+
+/// Test all three variants are distinct
+@test
+fn test_ordering_variants_distinct() {
+    let less: Ordering = Less;
+    let equal: Ordering = Equal;
+    let greater: Ordering = Greater;
+
+    assert(!(less is Equal));
+    assert(!(less is Greater));
+    assert(!(equal is Less));
+    assert(!(equal is Greater));
+    assert(!(greater is Less));
+    assert(!(greater is Equal));
+}
+
+// =============================================================================
+// Section 2: Predicate - is_less
+// =============================================================================
+
+/// Test is_less returns true for Less
+@test
+fn test_is_less_true() {
+    assert(Less.is_less());
+}
+
+/// Test is_less returns false for Equal
+@test
+fn test_is_less_false_equal() {
+    assert(!Equal.is_less());
+}
+
+/// Test is_less returns false for Greater
+@test
+fn test_is_less_false_greater() {
+    assert(!Greater.is_less());
+}
+
+// =============================================================================
+// Section 3: Predicate - is_equal
+// =============================================================================
+
+/// Test is_equal returns true for Equal
+@test
+fn test_is_equal_true() {
+    assert(Equal.is_equal());
+}
+
+/// Test is_equal returns false for Less
+@test
+fn test_is_equal_false_less() {
+    assert(!Less.is_equal());
+}
+
+/// Test is_equal returns false for Greater
+@test
+fn test_is_equal_false_greater() {
+    assert(!Greater.is_equal());
+}
+
+// =============================================================================
+// Section 4: Predicate - is_greater
+// =============================================================================
+
+/// Test is_greater returns true for Greater
+@test
+fn test_is_greater_true() {
+    assert(Greater.is_greater());
+}
+
+/// Test is_greater returns false for Less
+@test
+fn test_is_greater_false_less() {
+    assert(!Less.is_greater());
+}
+
+/// Test is_greater returns false for Equal
+@test
+fn test_is_greater_false_equal() {
+    assert(!Equal.is_greater());
+}
+
+// =============================================================================
+// Section 5: Predicate - is_le (less than or equal)
+// =============================================================================
+
+/// Test is_le returns true for Less
+@test
+fn test_is_le_less() {
+    assert(Less.is_le());
+}
+
+/// Test is_le returns true for Equal
+@test
+fn test_is_le_equal() {
+    assert(Equal.is_le());
+}
+
+/// Test is_le returns false for Greater
+@test
+fn test_is_le_greater() {
+    assert(!Greater.is_le());
+}
+
+// =============================================================================
+// Section 6: Predicate - is_ge (greater than or equal)
+// =============================================================================
+
+/// Test is_ge returns true for Greater
+@test
+fn test_is_ge_greater() {
+    assert(Greater.is_ge());
+}
+
+/// Test is_ge returns true for Equal
+@test
+fn test_is_ge_equal() {
+    assert(Equal.is_ge());
+}
+
+/// Test is_ge returns false for Less
+@test
+fn test_is_ge_less() {
+    assert(!Less.is_ge());
+}
+
+// =============================================================================
+// Section 7: Predicate Relationships
+// =============================================================================
+
+/// Test is_le and is_ge overlap only at Equal
+@test
+fn test_le_ge_overlap_at_equal() {
+    // For Less: is_le=true, is_ge=false
+    assert(Less.is_le() && !Less.is_ge());
+
+    // For Equal: is_le=true, is_ge=true (overlap)
+    assert(Equal.is_le() && Equal.is_ge());
+
+    // For Greater: is_le=false, is_ge=true
+    assert(!Greater.is_le() && Greater.is_ge());
+}
+
+/// Test exclusive predicates
+@test
+fn test_exclusive_predicates() {
+    // Exactly one of is_less, is_equal, is_greater is true for each variant
+
+    fn count_true(ord: Ordering) -> Int {
+        let mut count = 0;
+        if ord.is_less() { count = count + 1; }
+        if ord.is_equal() { count = count + 1; }
+        if ord.is_greater() { count = count + 1; }
+        count
+    }
+
+    assert_eq(count_true(Less), 1);
+    assert_eq(count_true(Equal), 1);
+    assert_eq(count_true(Greater), 1);
+}
+
+// =============================================================================
+// Section 8: reverse()
+// =============================================================================
+
+/// Test reverse Less becomes Greater
+@test
+fn test_reverse_less() {
+    assert_eq(Less.reverse(), Greater);
+}
+
+/// Test reverse Equal stays Equal
+@test
+fn test_reverse_equal() {
+    assert_eq(Equal.reverse(), Equal);
+}
+
+/// Test reverse Greater becomes Less
+@test
+fn test_reverse_greater() {
+    assert_eq(Greater.reverse(), Less);
+}
+
+/// Test reverse is self-inverse (reverse(reverse(x)) == x)
+@test
+fn test_reverse_self_inverse() {
+    assert_eq(Less.reverse().reverse(), Less);
+    assert_eq(Equal.reverse().reverse(), Equal);
+    assert_eq(Greater.reverse().reverse(), Greater);
+}
+
+/// Test reverse maintains symmetry
+@test
+fn test_reverse_symmetry() {
+    // If a.cmp(b) = ord, then b.cmp(a) = ord.reverse()
+    // Simulated with values
+    assert_eq(Less.reverse(), Greater);
+    assert_eq(Greater.reverse(), Less);
+}
+
+// =============================================================================
+// Section 9: then() - Lexicographic Chaining
+// =============================================================================
+
+/// Test then with Less returns Less (ignores second)
+@test
+fn test_then_less_first() {
+    assert_eq(Less.then(Less), Less);
+    assert_eq(Less.then(Equal), Less);
+    assert_eq(Less.then(Greater), Less);
+}
+
+/// Test then with Greater returns Greater (ignores second)
+@test
+fn test_then_greater_first() {
+    assert_eq(Greater.then(Less), Greater);
+    assert_eq(Greater.then(Equal), Greater);
+    assert_eq(Greater.then(Greater), Greater);
+}
+
+/// Test then with Equal returns second ordering
+@test
+fn test_then_equal_defers() {
+    assert_eq(Equal.then(Less), Less);
+    assert_eq(Equal.then(Equal), Equal);
+    assert_eq(Equal.then(Greater), Greater);
+}
+
+/// Test then for lexicographic comparison simulation
+@test
+fn test_then_lexicographic() {
+    // Simulating comparison of (1, 2) vs (1, 3)
+    // First components equal, second decides
+
+    fn compare_pairs(a: (Int, Int), b: (Int, Int)) -> Ordering {
+        compare_int(a.0, b.0).then(compare_int(a.1, b.1))
+    }
+
+    fn compare_int(a: Int, b: Int) -> Ordering {
+        if a < b { Less }
+        else if a > b { Greater }
+        else { Equal }
+    }
+
+    assert_eq(compare_pairs((1, 2), (1, 3)), Less);
+    assert_eq(compare_pairs((1, 3), (1, 2)), Greater);
+    assert_eq(compare_pairs((1, 2), (1, 2)), Equal);
+    assert_eq(compare_pairs((0, 5), (1, 0)), Less);  // First component decides
+    assert_eq(compare_pairs((2, 0), (1, 9)), Greater);  // First component decides
+}
+
+/// Test then chaining multiple times
+@test
+fn test_then_multiple_chain() {
+    // Simulating (a, b, c) comparison
+
+    fn compare_triple(x: (Int, Int, Int), y: (Int, Int, Int)) -> Ordering {
+        compare_int(x.0, y.0)
+            .then(compare_int(x.1, y.1))
+            .then(compare_int(x.2, y.2))
+    }
+
+    fn compare_int(a: Int, b: Int) -> Ordering {
+        if a < b { Less }
+        else if a > b { Greater }
+        else { Equal }
+    }
+
+    assert_eq(compare_triple((1, 2, 3), (1, 2, 3)), Equal);
+    assert_eq(compare_triple((1, 2, 3), (1, 2, 4)), Less);
+    assert_eq(compare_triple((1, 2, 3), (1, 3, 0)), Less);
+    assert_eq(compare_triple((2, 0, 0), (1, 9, 9)), Greater);
+}
+
+// =============================================================================
+// Section 10: then_with() - Lazy Lexicographic Chaining
+// =============================================================================
+
+/// Test then_with with Less doesn't evaluate function
+@test
+fn test_then_with_less_short_circuits() {
+    let mut called = false;
+    let result = Less.then_with(|| {
+        called = true;
+        Greater
+    });
+
+    assert_eq(result, Less);
+    assert(!called);  // Function was NOT called
+}
+
+/// Test then_with with Greater doesn't evaluate function
+@test
+fn test_then_with_greater_short_circuits() {
+    let mut called = false;
+    let result = Greater.then_with(|| {
+        called = true;
+        Less
+    });
+
+    assert_eq(result, Greater);
+    assert(!called);  // Function was NOT called
+}
+
+/// Test then_with with Equal evaluates function
+@test
+fn test_then_with_equal_evaluates() {
+    let mut called = false;
+    let result = Equal.then_with(|| {
+        called = true;
+        Less
+    });
+
+    assert_eq(result, Less);
+    assert(called);  // Function WAS called
+}
+
+/// Test then_with for lazy comparison
+@test
+fn test_then_with_lazy_comparison() {
+    type ExpensiveData is { id: Int, expensive_field: List<Int> };
+
+    fn cheap_compare(a: &ExpensiveData, b: &ExpensiveData) -> Ordering {
+        if a.id < b.id { Less }
+        else if a.id > b.id { Greater }
+        else { Equal }
+    }
+
+    fn expensive_compare(a: &ExpensiveData, b: &ExpensiveData) -> Ordering {
+        // This would be expensive - only called if needed
+        // Use manual sum to avoid .sum() method resolution issue
+        let mut a_sum: Int = 0;
+        for x in a.expensive_field.iter() { a_sum = a_sum + *x; }
+        let mut b_sum: Int = 0;
+        for x in b.expensive_field.iter() { b_sum = b_sum + *x; }
+        if a_sum < b_sum { Less }
+        else if a_sum > b_sum { Greater }
+        else { Equal }
+    }
+
+    let a = ExpensiveData { id: 1, expensive_field: [1, 2, 3] };
+    let b = ExpensiveData { id: 2, expensive_field: [4, 5, 6] };
+
+    // Different ids - expensive compare not needed
+    let result = cheap_compare(&a, &b).then_with(|| expensive_compare(&a, &b));
+    assert_eq(result, Less);  // Decided by cheap compare
+
+    // Same ids - expensive compare needed
+    let c = ExpensiveData { id: 1, expensive_field: [1, 1, 1] };  // sum = 3
+    let d = ExpensiveData { id: 1, expensive_field: [2, 2, 2] };  // sum = 6
+
+    let result2 = cheap_compare(&c, &d).then_with(|| expensive_compare(&c, &d));
+    assert_eq(result2, Less);  // Decided by expensive compare
+}
+
+// =============================================================================
+// Section 11: to_int()
+// =============================================================================
+
+/// Test to_int for Less
+@test
+fn test_to_int_less() {
+    assert_eq(Less.to_int(), -1);
+}
+
+/// Test to_int for Equal
+@test
+fn test_to_int_equal() {
+    assert_eq(Equal.to_int(), 0);
+}
+
+/// Test to_int for Greater
+@test
+fn test_to_int_greater() {
+    assert_eq(Greater.to_int(), 1);
+}
+
+/// Test to_int values are ordered correctly
+@test
+fn test_to_int_ordering() {
+    assert(Less.to_int() < Equal.to_int());
+    assert(Equal.to_int() < Greater.to_int());
+}
+
+// =============================================================================
+// Section 12: from_int()
+// =============================================================================
+
+/// Test from_int negative returns Less
+@test
+fn test_from_int_negative() {
+    assert_eq(Ordering.from_int(-1), Less);
+    assert_eq(Ordering.from_int(-100), Less);
+    assert_eq(Ordering.from_int(-999999), Less);
+}
+
+/// Test from_int zero returns Equal
+@test
+fn test_from_int_zero() {
+    assert_eq(Ordering.from_int(0), Equal);
+}
+
+/// Test from_int positive returns Greater
+@test
+fn test_from_int_positive() {
+    assert_eq(Ordering.from_int(1), Greater);
+    assert_eq(Ordering.from_int(100), Greater);
+    assert_eq(Ordering.from_int(999999), Greater);
+}
+
+/// Test from_int and to_int are compatible
+@test
+fn test_from_int_to_int_compatible() {
+    // from_int(to_int(x)) == x for all x
+    assert_eq(Ordering.from_int(Less.to_int()), Less);
+    assert_eq(Ordering.from_int(Equal.to_int()), Equal);
+    assert_eq(Ordering.from_int(Greater.to_int()), Greater);
+}
+
+/// Test from_int for typical subtraction comparison
+@test
+fn test_from_int_subtraction_pattern() {
+    // Common pattern: from_int(a - b) for comparing a and b
+    fn compare_via_subtraction(a: Int, b: Int) -> Ordering {
+        Ordering.from_int(a - b)
+    }
+
+    assert_eq(compare_via_subtraction(1, 2), Less);
+    assert_eq(compare_via_subtraction(2, 2), Equal);
+    assert_eq(compare_via_subtraction(3, 2), Greater);
+}
+
+// =============================================================================
+// Section 13: Eq Protocol Implementation
+// =============================================================================
+
+/// Test equality of same variants
+@test
+fn test_eq_same_variants() {
+    assert(Less == Less);
+    assert(Equal == Equal);
+    assert(Greater == Greater);
+}
+
+/// Test inequality of different variants
+@test
+fn test_eq_different_variants() {
+    assert(Less != Equal);
+    assert(Less != Greater);
+    assert(Equal != Less);
+    assert(Equal != Greater);
+    assert(Greater != Less);
+    assert(Greater != Equal);
+}
+
+/// Test Eq reflexivity
+@test
+fn test_eq_reflexivity() {
+    let ord = Less;
+    assert(ord == ord);
+}
+
+/// Test Eq symmetry
+@test
+fn test_eq_symmetry() {
+    let a = Less;
+    let b = Less;
+    assert(a == b);
+    assert(b == a);
+
+    let c = Less;
+    let d = Greater;
+    assert(!(c == d));
+    assert(!(d == c));
+}
+
+/// Test Eq transitivity
+@test
+fn test_eq_transitivity() {
+    let a = Equal;
+    let b = Equal;
+    let c = Equal;
+    assert(a == b);
+    assert(b == c);
+    assert(a == c);  // Transitivity
+}
+
+// =============================================================================
+// Section 14: Clone Protocol Implementation
+// =============================================================================
+
+/// Test clone produces equal value
+@test
+fn test_clone_produces_equal() {
+    let original = Less;
+    let cloned = original.clone();
+    assert_eq(original, cloned);
+
+    let original2 = Equal;
+    let cloned2 = original2.clone();
+    assert_eq(original2, cloned2);
+
+    let original3 = Greater;
+    let cloned3 = original3.clone();
+    assert_eq(original3, cloned3);
+}
+
+/// Test clone is independent
+@test
+fn test_clone_is_independent() {
+    let mut original = Less;
+    let cloned = original.clone();
+
+    // Changing original doesn't affect clone
+    original = Greater;
+    assert_eq(cloned, Less);
+}
+
+// =============================================================================
+// Section 15: Copy Marker
+// =============================================================================
+
+/// Test Copy semantics (implicit copy)
+@test
+fn test_copy_semantics() {
+    fn take_ordering(ord: Ordering) -> Ordering {
+        ord
+    }
+
+    let original = Less;
+    let copied = take_ordering(original);
+
+    // Original is still valid (not moved, but copied)
+    assert_eq(original, Less);
+    assert_eq(copied, Less);
+}
+
+/// Test Copy in assignment
+@test
+fn test_copy_assignment() {
+    let a = Greater;
+    let b = a;  // Copy, not move
+
+    assert_eq(a, Greater);
+    assert_eq(b, Greater);
+}
+
+// =============================================================================
+// Section 16: Default Protocol Implementation
+// =============================================================================
+
+/// Test default returns Equal
+@test
+fn test_default_is_equal() {
+    let default_ord = Ordering.default();
+    assert_eq(default_ord, Equal);
+}
+
+/// Test default in generic context
+@test
+fn test_default_generic_context() {
+    fn get_default<T: Default>() -> T {
+        T.default()
+    }
+
+    let ord: Ordering = get_default();
+    assert_eq(ord, Equal);
+}
+
+// =============================================================================
+// Section 17: Debug Protocol Implementation
+// =============================================================================
+
+/// Test Debug format for Less
+@test
+fn test_debug_less() {
+    let ord = Less;
+    let debug_str = f"{ord:?}";
+    assert_eq(debug_str, "Less");
+}
+
+/// Test Debug format for Equal
+@test
+fn test_debug_equal() {
+    let ord = Equal;
+    let debug_str = f"{ord:?}";
+    assert_eq(debug_str, "Equal");
+}
+
+/// Test Debug format for Greater
+@test
+fn test_debug_greater() {
+    let ord = Greater;
+    let debug_str = f"{ord:?}";
+    assert_eq(debug_str, "Greater");
+}
+
+// =============================================================================
+// Section 18: Display Protocol Implementation
+// =============================================================================
+
+/// Test Display format for Less
+@test
+fn test_display_less() {
+    let ord = Less;
+    let display_str = f"{ord}";
+    assert_eq(display_str, "<");
+}
+
+/// Test Display format for Equal
+@test
+fn test_display_equal() {
+    let ord = Equal;
+    let display_str = f"{ord}";
+    assert_eq(display_str, "=");
+}
+
+/// Test Display format for Greater
+@test
+fn test_display_greater() {
+    let ord = Greater;
+    let display_str = f"{ord}";
+    assert_eq(display_str, ">");
+}
+
+/// Test Display is valid comparison operator symbols
+@test
+fn test_display_operator_symbols() {
+    // The Display output matches common comparison operators
+    assert_eq(f"{Less}", "<");
+    assert_eq(f"{Equal}", "=");
+    assert_eq(f"{Greater}", ">");
+}
+
+// =============================================================================
+// Section 19: Pattern Matching
+// =============================================================================
+
+/// Test exhaustive pattern matching
+@test
+fn test_pattern_matching_exhaustive() {
+    fn describe(ord: Ordering) -> Text {
+        match ord {
+            Less => "less than",
+            Equal => "equal to",
+            Greater => "greater than",
+        }
+    }
+
+    assert_eq(describe(Less), "less than");
+    assert_eq(describe(Equal), "equal to");
+    assert_eq(describe(Greater), "greater than");
+}
+
+/// Test is pattern
+@test
+fn test_is_pattern() {
+    let ord = Less;
+    assert(ord is Less);
+    assert(!(ord is Equal));
+    assert(!(ord is Greater));
+}
+
+/// Test match in conditional context
+@test
+fn test_match_in_if() {
+    fn is_not_equal(ord: Ordering) -> Bool {
+        if ord is Less || ord is Greater {
+            true
+        } else {
+            false
+        }
+    }
+
+    assert(is_not_equal(Less));
+    assert(is_not_equal(Greater));
+    assert(!is_not_equal(Equal));
+}
+
+// =============================================================================
+// Section 20: Integration - Sorting Use Case
+// =============================================================================
+
+/// Test Ordering used in sorting comparisons
+@test
+fn test_sorting_with_ordering() {
+    fn compare_int(a: Int, b: Int) -> Ordering {
+        if a < b { Less }
+        else if a > b { Greater }
+        else { Equal }
+    }
+
+    // Simulate sorting logic
+    fn should_swap(ord: Ordering) -> Bool {
+        ord.is_greater()
+    }
+
+    // For ascending sort
+    assert(should_swap(compare_int(5, 3)));  // 5 > 3, swap for ascending
+    assert(!should_swap(compare_int(3, 5))); // 3 < 5, no swap
+    assert(!should_swap(compare_int(3, 3))); // equal, no swap
+}
+
+/// Test Ordering for custom sort order
+@test
+fn test_custom_sort_order() {
+    type Person is { name: Text, age: Int };
+
+    // Sort by age descending, then name ascending
+    fn compare_person(a: &Person, b: &Person) -> Ordering {
+        // Age descending: reverse the comparison
+        let age_cmp = if a.age < b.age { Greater }
+                     else if a.age > b.age { Less }
+                     else { Equal };
+
+        // Name ascending
+        let name_cmp = if a.name < b.name { Less }
+                      else if a.name > b.name { Greater }
+                      else { Equal };
+
+        age_cmp.then(name_cmp)
+    }
+
+    let alice = Person { name: "Alice", age: 30 };
+    let bob = Person { name: "Bob", age: 25 };
+    let charlie = Person { name: "Charlie", age: 30 };
+
+    // Alice vs Bob: Alice older -> Less (comes first in descending age)
+    assert_eq(compare_person(&alice, &bob), Less);
+
+    // Alice vs Charlie: Same age, Alice < Charlie alphabetically
+    assert_eq(compare_person(&alice, &charlie), Less);
+
+    // Charlie vs Alice: Same age, Charlie > Alice alphabetically
+    assert_eq(compare_person(&charlie, &alice), Greater);
+}
+
+// =============================================================================
+// Section 21: Integration - Binary Search
+// =============================================================================
+
+/// Test Ordering in binary search
+@test
+fn test_binary_search_with_ordering() {
+    fn binary_search(arr: &List<Int>, target: Int) -> Maybe<Int> {
+        let mut low = 0;
+        let mut high = arr.len() - 1;
+
+        while low <= high {
+            let mid = (low + high) / 2;
+            let cmp = compare_int(arr[mid], target);
+
+            match cmp {
+                Less => low = mid + 1,
+                Greater => high = mid - 1,
+                Equal => return Some(mid),
+            }
+        }
+        None
+    }
+
+    fn compare_int(a: Int, b: Int) -> Ordering {
+        if a < b { Less }
+        else if a > b { Greater }
+        else { Equal }
+    }
+
+    let arr = [1, 3, 5, 7, 9, 11, 13];
+
+    assert_eq(binary_search(&arr, 7), Some(3));
+    assert_eq(binary_search(&arr, 1), Some(0));
+    assert_eq(binary_search(&arr, 13), Some(6));
+    assert_eq(binary_search(&arr, 6), None);
+    assert_eq(binary_search(&arr, 0), None);
+}
+
+// =============================================================================
+// Section 22: Integration - Three-Way Comparison Utility
+// =============================================================================
+
+/// Test three-way comparison for various types
+@test
+fn test_three_way_compare() {
+    fn cmp_int(a: Int, b: Int) -> Ordering {
+        Ordering.from_int(a - b)
+    }
+
+    fn cmp_text(a: &Text, b: &Text) -> Ordering {
+        if *a < *b { Less }
+        else if *a > *b { Greater }
+        else { Equal }
+    }
+
+    // Integers
+    assert_eq(cmp_int(1, 2), Less);
+    assert_eq(cmp_int(2, 2), Equal);
+    assert_eq(cmp_int(3, 2), Greater);
+
+    // Text
+    assert_eq(cmp_text(&"apple", &"banana"), Less);
+    assert_eq(cmp_text(&"apple", &"apple"), Equal);
+    assert_eq(cmp_text(&"banana", &"apple"), Greater);
+}
+
+// =============================================================================
+// Section 23: Edge Cases
+// =============================================================================
+
+/// Test reverse on all variants preserves round-trip through reverse
+@test
+fn test_reverse_roundtrip_all() {
+    let orderings: List<Ordering> = [Less, Equal, Greater];
+    for ord in orderings.iter() {
+        // Explicit dereference needed for methods taking self by value on iterator items
+        let reversed_twice = (*ord).reverse().reverse();
+        assert_eq(*ord, reversed_twice);
+    }
+}
+
+/// Test then is associative
+@test
+fn test_then_associative() {
+    let orderings: List<Ordering> = [Less, Equal, Greater];
+    for a in orderings.iter() {
+        for b in orderings.iter() {
+            for c in orderings.iter() {
+                // (a.then(b)).then(c) == a.then(b.then(c))
+                // Explicit dereference needed for methods taking self by value
+                let left = (*a).then(*b).then(*c);
+                let right = (*a).then((*b).then(*c));
+                assert_eq(left, right);
+            }
+        }
+    }
+}
+
+/// Test from_int edge cases
+@test
+fn test_from_int_edge_cases() {
+    assert_eq(Ordering.from_int(Int.min_value()), Less);
+    assert_eq(Ordering.from_int(Int.max_value()), Greater);
+}
+
+/// Test Default in collection context
+@test
+fn test_default_in_collection() {
+    let mut orderings: List<Ordering> = [];
+    orderings.push(Ordering.default());
+    orderings.push(Ordering.default());
+
+    assert_eq(orderings[0], Equal);
+    assert_eq(orderings[1], Equal);
+}
+
+// =============================================================================
+// Section 24: Ordering in Functional Patterns
+// =============================================================================
+
+/// Test mapping over Ordering
+@test
+fn test_ordering_in_map() {
+    let orderings: List<Ordering> = [Less, Equal, Greater];
+    // Use explicit for-loop instead of iterator adapter due to closure type inference
+    let mut ints: List<Int> = [];
+    for o in orderings.iter() {
+        ints.push((*o).to_int());
+    }
+    assert_eq(ints, [-1, 0, 1]);
+}
+
+/// Test filtering by Ordering
+@test
+fn test_ordering_in_filter() {
+    let orderings: List<Ordering> = [Less, Equal, Greater, Less, Equal];
+    // Use explicit for-loop instead of iterator adapter due to closure type inference
+    let mut non_equal: List<Ordering> = [];
+    for o in orderings.iter() {
+        if !(*o).is_equal() {
+            non_equal.push(*o);
+        }
+    }
+    assert_eq(non_equal, [Less, Greater, Less]);
+}
+
+/// Test fold with Ordering
+@test
+fn test_ordering_fold() {
+    // Simulate finding the "minimum" ordering in a sequence
+    // (where Less < Equal < Greater)
+    let orderings: List<Ordering> = [Greater, Equal, Less, Greater];
+
+    // Use explicit for-loop instead of fold due to closure type inference
+    let mut min_ord: Ordering = Greater;
+    for ord in orderings.iter() {
+        if (*ord).to_int() < min_ord.to_int() {
+            min_ord = *ord;
+        }
+    }
+
+    assert_eq(min_ord, Less);
+}
+
+// =============================================================================
+// Section 25: Stress Tests and Property Verification
+// =============================================================================
+
+/// Test all combinations of then
+@test
+fn test_then_all_combinations() {
+    let test_cases: List<(Ordering, Ordering, Ordering)> = [
+        (Less, Less, Less),
+        (Less, Equal, Less),
+        (Less, Greater, Less),
+        (Equal, Less, Less),
+        (Equal, Equal, Equal),
+        (Equal, Greater, Greater),
+        (Greater, Less, Greater),
+        (Greater, Equal, Greater),
+        (Greater, Greater, Greater),
+    ];
+
+    for (a, b, expected) in test_cases.iter() {
+        // Explicit dereference for method taking self by value
+        assert_eq((*a).then(*b), *expected);
+    }
+}
+
+/// Test reverse truth table
+@test
+fn test_reverse_truth_table() {
+    let test_cases: List<(Ordering, Ordering)> = [
+        (Less, Greater),
+        (Equal, Equal),
+        (Greater, Less),
+    ];
+
+    for (input, expected) in test_cases.iter() {
+        // Explicit dereference for method taking self by value
+        assert_eq((*input).reverse(), *expected);
+    }
+}
+
+/// Test to_int/from_int roundtrip
+@test
+fn test_to_from_int_roundtrip() {
+    let orderings: List<Ordering> = [Less, Equal, Greater];
+    for ord in orderings.iter() {
+        // Explicit dereference for method taking self by value
+        let int_val = (*ord).to_int();
+        let back = Ordering.from_int(int_val);
+        assert_eq(*ord, back);
+    }
+}
+
+/// Test comparison operators form total order
+@test
+fn test_total_order_properties() {
+    // Reflexivity: a == a
+    assert_eq(Less, Less);
+    assert_eq(Equal, Equal);
+    assert_eq(Greater, Greater);
+
+    // Antisymmetry: if a == b and b == a then a and b are the same variant
+    // (trivially satisfied for an enum)
+
+    // Transitivity is verified by Eq tests above
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

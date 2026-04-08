@@ -1,0 +1,25 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: debug, method_chain
+
+module test.debug.chain;
+
+fn return_uint64() -> UInt64 {
+    0xFFFFFFFFFFFFFFFF
+}
+
+fn main() {
+    // Test chained method call on function return value
+    let result = return_uint64().checked_add(1);
+    match result {
+        Some(v) => {
+            print(f"Got Some({v as Int}) - UNEXPECTED, should overflow!");
+            assert(false);
+        }
+        None => {
+            print("Got None - CORRECT, overflow detected!");
+        }
+    }
+    print("Chain test passed!");
+}

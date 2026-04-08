@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @expected-error: E312
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, escaping, negative-test
+
+/// Test that escaping references are caught at compile-time via lifetime analysis.
+/// A reference cannot outlive the data it points to.
+/// This prevents dangling references and use-after-free.
+/// Spec: 04-memory-model.md#lifetime-rules
+
+fn main() {
+    let escaped = create_escaping_reference();
+    print(*escaped);  // PANIC: generation mismatch (local no longer exists)
+}
+
+fn create_escaping_reference() -> &Int {
+    let local = 42;
+    &local  // Reference returned - CBGR tracks generation
+}
+// When function returns, local is dropped, generation bumped

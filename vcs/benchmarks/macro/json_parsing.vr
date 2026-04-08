@@ -1,0 +1,362 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: > 500 MB/s parsing, > 300 MB/s serialization
+// @tags: json, parsing, serialization, performance
+
+/// JSON Parsing and Serialization Benchmark
+///
+/// Tests JSON processing with various payloads:
+/// - Simple objects
+/// - Nested structures
+/// - Arrays
+/// - Large documents
+/// - Streaming parsing
+
+module benchmarks.macro.json_parsing
+
+using [Benchmark, Json]
+
+/// Parse simple JSON object
+fn benchmark_json_parse_simple() {
+    let json = r#"{"name": "John", "age": 30, "active": true}"#;
+
+    for _ in 0..500_000 {
+        let value: JsonValue = Json.parse(json)?;
+        let _ = value["name"].as_str();
+    }
+}
+
+/// Parse into typed struct
+fn benchmark_json_parse_typed() {
+    @derive(Deserialize)
+    type User is {
+        name: Text,
+        age: Int,
+        active: Bool,
+    };
+
+    let json = r#"{"name": "John", "age": 30, "active": true}"#;
+
+    for _ in 0..500_000 {
+        let user: User = Json.parse(json)?;
+        let _ = user.name;
+    }
+}
+
+/// Parse nested structure
+fn benchmark_json_parse_nested() {
+    @derive(Deserialize)
+    type Address is {
+        street: Text,
+        city: Text,
+        zip: Text,
+    };
+
+    @derive(Deserialize)
+    type Company is {
+        name: Text,
+        address: Address,
+    };
+
+    @derive(Deserialize)
+    type Employee is {
+        name: Text,
+        company: Company,
+        skills: List<Text>,
+    };
+
+    let json = r#"{
+        "name": "John Doe",
+        "company": {
+            "name": "Acme Corp",
+            "address": {
+                "street": "123 Main St",
+                "city": "Springfield",
+                "zip": "12345"
+            }
+        },
+        "skills": ["rust", "python", "javascript"]
+    }"#;
+
+    for _ in 0..200_000 {
+        let employee: Employee = Json.parse(json)?;
+        let _ = employee.company.address.city;
+    }
+}
+
+/// Parse array of objects
+fn benchmark_json_parse_array() {
+    @derive(Deserialize)
+    type Item is {
+        id: Int,
+        name: Text,
+        price: Float,
+    };
+
+    let json = r#"[
+        {"id": 1, "name": "Apple", "price": 1.50},
+        {"id": 2, "name": "Banana", "price": 0.75},
+        {"id": 3, "name": "Cherry", "price": 2.00},
+        {"id": 4, "name": "Date", "price": 3.50},
+        {"id": 5, "name": "Elderberry", "price": 4.00}
+    ]"#;
+
+    for _ in 0..200_000 {
+        let items: List<Item> = Json.parse(json)?;
+        let _ = items.len();
+    }
+}
+
+/// Parse large document (100KB)
+fn benchmark_json_parse_large() {
+    // Generate large JSON
+    let mut items = list![];
+    for i in 0..1000 {
+        items.push(map!{
+            "id" => i,
+            "name" => text("Item {}", i),
+            "description" => "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+            "price" => (i as Float) * 0.99,
+            "in_stock" => i % 2 == 0,
+        });
+    }
+    let json = Json.stringify(&items);
+
+    for _ in 0..1_000 {
+        let parsed: List<JsonValue> = Json.parse(&json)?;
+        let _ = parsed.len();
+    }
+}
+
+/// Parse very large document (1MB)
+fn benchmark_json_parse_xlarge() {
+    let mut data = map!{};
+    for i in 0..10000 {
+        data.insert(text("key{}", i), text("value{}", i));
+    }
+    let json = Json.stringify(&data);
+
+    for _ in 0..100 {
+        let parsed: Map<Text, Text> = Json.parse(&json)?;
+        let _ = parsed.len();
+    }
+}
+
+/// Serialize simple object
+fn benchmark_json_serialize_simple() {
+    let user = map!{
+        "name" => "John",
+        "age" => 30,
+        "active" => true,
+    };
+
+    for _ in 0..500_000 {
+        let json = Json.stringify(&user);
+        let _ = json.len();
+    }
+}
+
+/// Serialize typed struct
+fn benchmark_json_serialize_typed() {
+    @derive(Serialize)
+    type User is {
+        name: Text,
+        age: Int,
+        active: Bool,
+    };
+
+    let user = User {
+        name: "John".to_text(),
+        age: 30,
+        active: true,
+    };
+
+    for _ in 0..500_000 {
+        let json = Json.stringify(&user);
+        let _ = json.len();
+    }
+}
+
+/// Serialize nested structure
+fn benchmark_json_serialize_nested() {
+    @derive(Serialize)
+    type NestedData is {
+        level1: Level1,
+    };
+
+    @derive(Serialize)
+    type Level1 is {
+        level2: Level2,
+        items: List<Text>,
+    };
+
+    @derive(Serialize)
+    type Level2 is {
+        value: Int,
+        flag: Bool,
+    };
+
+    let data = NestedData {
+        level1: Level1 {
+            level2: Level2 { value: 42, flag: true },
+            items: list!["a".to_text(), "b".to_text(), "c".to_text()],
+        },
+    };
+
+    for _ in 0..300_000 {
+        let json = Json.stringify(&data);
+        let _ = json.len();
+    }
+}
+
+/// Serialize large array
+fn benchmark_json_serialize_large_array() {
+    let items: List<_> = (0..1000).map(|i| map!{
+        "id" => i,
+        "name" => text("Item {}", i),
+    }).collect();
+
+    for _ in 0..1_000 {
+        let json = Json.stringify(&items);
+        let _ = json.len();
+    }
+}
+
+/// Streaming parser (SAX-style)
+fn benchmark_json_streaming_parse() {
+    let json = generate_large_json_array(10000);
+
+    for _ in 0..100 {
+        let parser = JsonStreamParser.new(&json);
+        let mut count = 0;
+
+        while let Some(event) = parser.next() {
+            match event {
+                JsonEvent.ObjectStart => count += 1,
+                _ => {},
+            }
+        }
+
+        assert(count == 10000);
+    }
+}
+
+/// JSON path query
+fn benchmark_json_path_query() {
+    let json = r#"{
+        "store": {
+            "books": [
+                {"title": "Book 1", "price": 10.0},
+                {"title": "Book 2", "price": 15.0},
+                {"title": "Book 3", "price": 20.0}
+            ]
+        }
+    }"#;
+
+    let parsed: JsonValue = Json.parse(json)?;
+
+    for _ in 0..100_000 {
+        let results = parsed.query("$.store.books[*].title");
+        let _ = results.len();
+    }
+}
+
+/// Pretty print vs compact
+fn benchmark_json_formatting() {
+    let data = map!{
+        "name" => "John",
+        "items" => list![1, 2, 3, 4, 5],
+        "nested" => map!{
+            "a" => 1,
+            "b" => 2,
+        },
+    };
+
+    // Compact
+    for _ in 0..100_000 {
+        let json = Json.stringify(&data);
+        let _ = json.len();
+    }
+
+    // Pretty
+    for _ in 0..100_000 {
+        let json = Json.stringify_pretty(&data);
+        let _ = json.len();
+    }
+}
+
+/// Unicode handling
+fn benchmark_json_unicode() {
+    let data = map!{
+        "emoji" => "Hello World!",
+        "chinese" => "Chinese characters",
+        "arabic" => "Arabic text",
+        "mixed" => "Mix: ABC",
+    };
+
+    for _ in 0..200_000 {
+        let json = Json.stringify(&data);
+        let parsed: Map<Text, Text> = Json.parse(&json)?;
+        let _ = parsed["emoji"];
+    }
+}
+
+/// Escape handling
+fn benchmark_json_escapes() {
+    let data = map!{
+        "quotes" => "He said \"Hello\"",
+        "newlines" => "Line1\nLine2\nLine3",
+        "tabs" => "Col1\tCol2\tCol3",
+        "backslash" => "C:\\Users\\Name",
+    };
+
+    for _ in 0..200_000 {
+        let json = Json.stringify(&data);
+        let parsed: Map<Text, Text> = Json.parse(&json)?;
+        let _ = parsed.len();
+    }
+}
+
+/// Number precision
+fn benchmark_json_numbers() {
+    let data = map!{
+        "integer" => 9007199254740993,  // Beyond JS safe integer
+        "float" => 3.141592653589793,
+        "scientific" => 1.23e-10,
+        "negative" => -999999999999,
+    };
+
+    for _ in 0..200_000 {
+        let json = Json.stringify(&data);
+        let parsed: Map<Text, Float> = Json.parse(&json)?;
+        let _ = parsed["float"];
+    }
+}
+
+/// Null handling
+fn benchmark_json_nulls() {
+    @derive(Serialize, Deserialize)
+    type WithOptional is {
+        required: Text,
+        optional: Maybe<Text>,
+    };
+
+    let with_null = r#"{"required": "value", "optional": null}"#;
+    let without_null = r#"{"required": "value", "optional": "present"}"#;
+
+    for _ in 0..200_000 {
+        let v1: WithOptional = Json.parse(with_null)?;
+        let v2: WithOptional = Json.parse(without_null)?;
+        assert(v1.optional.is_none());
+        assert(v2.optional.is_some());
+    }
+}
+
+fn generate_large_json_array(n: Int) -> Text {
+    let items: List<_> = (0..n).map(|i| map!{
+        "id" => i,
+        "name" => text("Item {}", i),
+    }).collect();
+    Json.stringify(&items)
+}

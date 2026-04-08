@@ -1,0 +1,289 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, math, primes, sieve
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Sieve of Eratosthenes up to 50 using fixed-size array, prime counting and checking
+
+// ============================================================================
+// Sieve array: 50 boolean flags (0 = prime candidate, 1 = composite)
+// We use a record with 50 fields since we cannot use dynamic arrays
+// ============================================================================
+
+type Sieve50 is {
+    f0: Int, f1: Int, f2: Int, f3: Int, f4: Int,
+    f5: Int, f6: Int, f7: Int, f8: Int, f9: Int,
+    f10: Int, f11: Int, f12: Int, f13: Int, f14: Int,
+    f15: Int, f16: Int, f17: Int, f18: Int, f19: Int,
+    f20: Int, f21: Int, f22: Int, f23: Int, f24: Int,
+    f25: Int, f26: Int, f27: Int, f28: Int, f29: Int,
+    f30: Int, f31: Int, f32: Int, f33: Int, f34: Int,
+    f35: Int, f36: Int, f37: Int, f38: Int, f39: Int,
+    f40: Int, f41: Int, f42: Int, f43: Int, f44: Int,
+    f45: Int, f46: Int, f47: Int, f48: Int, f49: Int
+};
+
+fn sieve_new() -> Sieve50 {
+    Sieve50 {
+        f0: 0, f1: 0, f2: 0, f3: 0, f4: 0,
+        f5: 0, f6: 0, f7: 0, f8: 0, f9: 0,
+        f10: 0, f11: 0, f12: 0, f13: 0, f14: 0,
+        f15: 0, f16: 0, f17: 0, f18: 0, f19: 0,
+        f20: 0, f21: 0, f22: 0, f23: 0, f24: 0,
+        f25: 0, f26: 0, f27: 0, f28: 0, f29: 0,
+        f30: 0, f31: 0, f32: 0, f33: 0, f34: 0,
+        f35: 0, f36: 0, f37: 0, f38: 0, f39: 0,
+        f40: 0, f41: 0, f42: 0, f43: 0, f44: 0,
+        f45: 0, f46: 0, f47: 0, f48: 0, f49: 0
+    }
+}
+
+fn sieve_get(s: Sieve50, i: Int) -> Int {
+    if i == 0 { s.f0 } else if i == 1 { s.f1 } else if i == 2 { s.f2 }
+    else if i == 3 { s.f3 } else if i == 4 { s.f4 } else if i == 5 { s.f5 }
+    else if i == 6 { s.f6 } else if i == 7 { s.f7 } else if i == 8 { s.f8 }
+    else if i == 9 { s.f9 } else if i == 10 { s.f10 } else if i == 11 { s.f11 }
+    else if i == 12 { s.f12 } else if i == 13 { s.f13 } else if i == 14 { s.f14 }
+    else if i == 15 { s.f15 } else if i == 16 { s.f16 } else if i == 17 { s.f17 }
+    else if i == 18 { s.f18 } else if i == 19 { s.f19 } else if i == 20 { s.f20 }
+    else if i == 21 { s.f21 } else if i == 22 { s.f22 } else if i == 23 { s.f23 }
+    else if i == 24 { s.f24 } else if i == 25 { s.f25 } else if i == 26 { s.f26 }
+    else if i == 27 { s.f27 } else if i == 28 { s.f28 } else if i == 29 { s.f29 }
+    else if i == 30 { s.f30 } else if i == 31 { s.f31 } else if i == 32 { s.f32 }
+    else if i == 33 { s.f33 } else if i == 34 { s.f34 } else if i == 35 { s.f35 }
+    else if i == 36 { s.f36 } else if i == 37 { s.f37 } else if i == 38 { s.f38 }
+    else if i == 39 { s.f39 } else if i == 40 { s.f40 } else if i == 41 { s.f41 }
+    else if i == 42 { s.f42 } else if i == 43 { s.f43 } else if i == 44 { s.f44 }
+    else if i == 45 { s.f45 } else if i == 46 { s.f46 } else if i == 47 { s.f47 }
+    else if i == 48 { s.f48 } else { s.f49 }
+}
+
+fn sieve_set(s: Sieve50, i: Int, val: Int) -> Sieve50 {
+    Sieve50 {
+        f0: if i == 0 { val } else { s.f0 },
+        f1: if i == 1 { val } else { s.f1 },
+        f2: if i == 2 { val } else { s.f2 },
+        f3: if i == 3 { val } else { s.f3 },
+        f4: if i == 4 { val } else { s.f4 },
+        f5: if i == 5 { val } else { s.f5 },
+        f6: if i == 6 { val } else { s.f6 },
+        f7: if i == 7 { val } else { s.f7 },
+        f8: if i == 8 { val } else { s.f8 },
+        f9: if i == 9 { val } else { s.f9 },
+        f10: if i == 10 { val } else { s.f10 },
+        f11: if i == 11 { val } else { s.f11 },
+        f12: if i == 12 { val } else { s.f12 },
+        f13: if i == 13 { val } else { s.f13 },
+        f14: if i == 14 { val } else { s.f14 },
+        f15: if i == 15 { val } else { s.f15 },
+        f16: if i == 16 { val } else { s.f16 },
+        f17: if i == 17 { val } else { s.f17 },
+        f18: if i == 18 { val } else { s.f18 },
+        f19: if i == 19 { val } else { s.f19 },
+        f20: if i == 20 { val } else { s.f20 },
+        f21: if i == 21 { val } else { s.f21 },
+        f22: if i == 22 { val } else { s.f22 },
+        f23: if i == 23 { val } else { s.f23 },
+        f24: if i == 24 { val } else { s.f24 },
+        f25: if i == 25 { val } else { s.f25 },
+        f26: if i == 26 { val } else { s.f26 },
+        f27: if i == 27 { val } else { s.f27 },
+        f28: if i == 28 { val } else { s.f28 },
+        f29: if i == 29 { val } else { s.f29 },
+        f30: if i == 30 { val } else { s.f30 },
+        f31: if i == 31 { val } else { s.f31 },
+        f32: if i == 32 { val } else { s.f32 },
+        f33: if i == 33 { val } else { s.f33 },
+        f34: if i == 34 { val } else { s.f34 },
+        f35: if i == 35 { val } else { s.f35 },
+        f36: if i == 36 { val } else { s.f36 },
+        f37: if i == 37 { val } else { s.f37 },
+        f38: if i == 38 { val } else { s.f38 },
+        f39: if i == 39 { val } else { s.f39 },
+        f40: if i == 40 { val } else { s.f40 },
+        f41: if i == 41 { val } else { s.f41 },
+        f42: if i == 42 { val } else { s.f42 },
+        f43: if i == 43 { val } else { s.f43 },
+        f44: if i == 44 { val } else { s.f44 },
+        f45: if i == 45 { val } else { s.f45 },
+        f46: if i == 46 { val } else { s.f46 },
+        f47: if i == 47 { val } else { s.f47 },
+        f48: if i == 48 { val } else { s.f48 },
+        f49: if i == 49 { val } else { s.f49 }
+    }
+}
+
+// ============================================================================
+// Sieve of Eratosthenes: mark composites in [2..limit)
+// Returns sieve where sieve_get(s, i)==0 means i is prime (for i>=2)
+// ============================================================================
+
+fn run_sieve(limit: Int) -> Sieve50 {
+    let mut s = sieve_new();
+    // Mark 0 and 1 as not prime
+    s = sieve_set(s, 0, 1);
+    s = sieve_set(s, 1, 1);
+
+    let mut i = 2;
+    while i * i < limit {
+        if sieve_get(s, i) == 0 {
+            // i is prime; mark multiples as composite
+            let mut j = i * i;
+            while j < limit {
+                s = sieve_set(s, j, 1);
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+    s
+}
+
+// ============================================================================
+// Count primes in [2..limit)
+// ============================================================================
+
+fn count_primes(s: Sieve50, limit: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i < limit {
+        if sieve_get(s, i) == 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// ============================================================================
+// Check if n is prime using the sieve
+// ============================================================================
+
+fn is_prime(s: Sieve50, n: Int) -> Int {
+    if n < 2 { 0 }
+    else if sieve_get(s, n) == 0 { 1 }
+    else { 0 }
+}
+
+// ============================================================================
+// Test 1: Primes up to 50
+// ============================================================================
+
+@test
+fn test_primes_up_to_50() {
+    let s = run_sieve(50);
+    // Primes up to 50: 2,3,5,7,11,13,17,19,23,29,31,37,41,43,47 = 15 primes
+    assert_eq(count_primes(s, 50), 15);
+
+    // Verify specific primes
+    assert_eq(is_prime(s, 2), 1);
+    assert_eq(is_prime(s, 3), 1);
+    assert_eq(is_prime(s, 5), 1);
+    assert_eq(is_prime(s, 7), 1);
+    assert_eq(is_prime(s, 11), 1);
+    assert_eq(is_prime(s, 13), 1);
+    assert_eq(is_prime(s, 47), 1);
+
+    print("  test_primes_up_to_50: ok");
+}
+
+// ============================================================================
+// Test 2: Non-primes are correctly marked
+// ============================================================================
+
+@test
+fn test_composites() {
+    let s = run_sieve(50);
+    assert_eq(is_prime(s, 0), 0);
+    assert_eq(is_prime(s, 1), 0);
+    assert_eq(is_prime(s, 4), 0);
+    assert_eq(is_prime(s, 6), 0);
+    assert_eq(is_prime(s, 8), 0);
+    assert_eq(is_prime(s, 9), 0);
+    assert_eq(is_prime(s, 10), 0);
+    assert_eq(is_prime(s, 15), 0);
+    assert_eq(is_prime(s, 25), 0);   // 5*5
+    assert_eq(is_prime(s, 49), 0);   // 7*7
+
+    print("  test_composites: ok");
+}
+
+// ============================================================================
+// Test 3: Prime counts at various limits
+// ============================================================================
+
+@test
+fn test_prime_counts() {
+    let s = run_sieve(50);
+    // pi(10) = 4  (2,3,5,7)
+    assert_eq(count_primes(s, 10), 4);
+    // pi(20) = 8  (2,3,5,7,11,13,17,19)
+    assert_eq(count_primes(s, 20), 8);
+    // pi(30) = 10 (add 23,29)
+    assert_eq(count_primes(s, 30), 10);
+    // pi(2) = 0 (no primes below 2)
+    assert_eq(count_primes(s, 2), 0);
+    // pi(3) = 1 (just 2)
+    assert_eq(count_primes(s, 3), 1);
+
+    print("  test_prime_counts: ok");
+}
+
+// ============================================================================
+// Test 4: Twin primes (primes differing by 2)
+// ============================================================================
+
+@test
+fn test_twin_primes() {
+    let s = run_sieve(50);
+    // Twin primes up to 50: (3,5), (5,7), (11,13), (17,19), (29,31), (41,43)
+    let mut count = 0;
+    let mut i = 2;
+    while i < 48 {
+        if is_prime(s, i) == 1 {
+            if is_prime(s, i + 2) == 1 {
+                count = count + 1;
+            }
+        }
+        i = i + 1;
+    }
+    assert_eq(count, 6);
+
+    print("  test_twin_primes: ok");
+}
+
+// ============================================================================
+// Test 5: Sum of primes up to 50
+// ============================================================================
+
+@test
+fn test_sum_of_primes() {
+    let s = run_sieve(50);
+    // Sum: 2+3+5+7+11+13+17+19+23+29+31+37+41+43+47 = 328
+    let mut total = 0;
+    let mut i = 2;
+    while i < 50 {
+        if is_prime(s, i) == 1 {
+            total = total + i;
+        }
+        i = i + 1;
+    }
+    assert_eq(total, 328);
+
+    print("  test_sum_of_primes: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_primes_up_to_50();
+    test_composites();
+    test_prime_counts();
+    test_twin_primes();
+    test_sum_of_primes();
+    print("[OK] 109_primes_sieve");
+    0
+}

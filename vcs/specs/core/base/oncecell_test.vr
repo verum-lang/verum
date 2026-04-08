@@ -1,0 +1,443 @@
+// =============================================================================
+// oncecell_test.vr - Tests for OnceCell<T> and LazyCell<T>
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, cell, oncecell, lazycell, lazy-initialization
+// @description: Tests for OnceCell<T> single-assignment cell and LazyCell<T>
+//               lazy initialization, including construction, get/set/get_or_init,
+//               protocol implementations, and edge cases.
+// =============================================================================
+
+mount core.base.cell.{OnceCell, LazyCell};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: OnceCell<T> Construction
+// =============================================================================
+
+@test
+fn test_oncecell_new_is_empty() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    assert(!cell.is_initialized());
+}
+
+@test
+fn test_oncecell_new_with_value() {
+    let cell = OnceCell.new_with(42);
+    assert(cell.is_initialized());
+}
+
+@test
+fn test_oncecell_new_with_text() {
+    let cell = OnceCell.new_with("hello");
+    assert(cell.is_initialized());
+}
+
+@test
+fn test_oncecell_new_with_bool() {
+    let cell = OnceCell.new_with(true);
+    assert(cell.is_initialized());
+}
+
+// =============================================================================
+// Section 2: OnceCell<T> get
+// =============================================================================
+
+@test
+fn test_oncecell_get_empty() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    let val = cell.get();
+    assert(val.is_none());
+}
+
+@test
+fn test_oncecell_get_initialized() {
+    let cell = OnceCell.new_with(42);
+    let val = cell.get();
+    assert(val.is_some());
+    assert_eq(val.unwrap(), 42);
+}
+
+@test
+fn test_oncecell_get_text() {
+    let cell = OnceCell.new_with("hello");
+    let val = cell.get();
+    assert(val.is_some());
+    assert_eq(val.unwrap(), "hello");
+}
+
+@test
+fn test_oncecell_get_multiple_times() {
+    let cell = OnceCell.new_with(42);
+    assert_eq(cell.get().unwrap(), 42);
+    assert_eq(cell.get().unwrap(), 42);
+    assert_eq(cell.get().unwrap(), 42);
+}
+
+// =============================================================================
+// Section 3: OnceCell<T> set
+// =============================================================================
+
+@test
+fn test_oncecell_set_empty() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    let result = cell.set(42);
+    assert(result.is_ok());
+    assert(cell.is_initialized());
+    assert_eq(cell.get().unwrap(), 42);
+}
+
+@test
+fn test_oncecell_set_already_initialized() {
+    let cell = OnceCell.new_with(42);
+    let result = cell.set(100);
+    assert(result.is_err());
+    // Original value unchanged
+    assert_eq(cell.get().unwrap(), 42);
+}
+
+@test
+fn test_oncecell_set_returns_value_on_error() {
+    let cell = OnceCell.new_with(42);
+    let result = cell.set(100);
+    // On failure, the rejected value is returned
+    assert_eq(result.unwrap_err(), 100);
+}
+
+@test
+fn test_oncecell_set_text() {
+    let cell: OnceCell<Text> = OnceCell.new();
+    let result = cell.set("world");
+    assert(result.is_ok());
+    assert_eq(cell.get().unwrap(), "world");
+}
+
+// =============================================================================
+// Section 4: OnceCell<T> get_or_init
+// =============================================================================
+
+@test
+fn test_oncecell_get_or_init_empty() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    let val = cell.get_or_init(|| 42);
+    assert_eq(val, 42);
+    assert(cell.is_initialized());
+}
+
+@test
+fn test_oncecell_get_or_init_already_set() {
+    let cell = OnceCell.new_with(42);
+    let val = cell.get_or_init(|| 100);
+    // Should return existing value, not call init
+    assert_eq(val, 42);
+}
+
+@test
+fn test_oncecell_get_or_init_idempotent() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    let val1 = cell.get_or_init(|| 42);
+    let val2 = cell.get_or_init(|| 100); // Should NOT overwrite
+    assert_eq(val1, 42);
+    assert_eq(val2, 42);
+}
+
+@test
+fn test_oncecell_get_or_init_text() {
+    let cell: OnceCell<Text> = OnceCell.new();
+    let val = cell.get_or_init(|| "initialized");
+    assert_eq(val, "initialized");
+}
+
+// =============================================================================
+// Section 5: OnceCell<T> take
+// =============================================================================
+
+@test
+fn test_oncecell_take_initialized() {
+    let cell = OnceCell.new_with(42);
+    let val = cell.take();
+    assert(val.is_some());
+    assert_eq(val.unwrap(), 42);
+    assert(!cell.is_initialized());
+}
+
+@test
+fn test_oncecell_take_empty() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    let val = cell.take();
+    assert(val.is_none());
+}
+
+@test
+fn test_oncecell_take_then_set() {
+    let cell = OnceCell.new_with(42);
+    let _ = cell.take();
+    // After take, cell can be set again
+    let result = cell.set(100);
+    assert(result.is_ok());
+    assert_eq(cell.get().unwrap(), 100);
+}
+
+// =============================================================================
+// Section 6: OnceCell<T> into_inner
+// =============================================================================
+
+@test
+fn test_oncecell_into_inner_initialized() {
+    let cell = OnceCell.new_with(42);
+    let val = cell.into_inner();
+    assert(val.is_some());
+    assert_eq(val.unwrap(), 42);
+}
+
+@test
+fn test_oncecell_into_inner_empty() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    let val = cell.into_inner();
+    assert(val.is_none());
+}
+
+// =============================================================================
+// Section 7: OnceCell<T> Protocols
+// =============================================================================
+
+@test
+fn test_oncecell_eq_both_empty() {
+    let a: OnceCell<Int> = OnceCell.new();
+    let b: OnceCell<Int> = OnceCell.new();
+    assert(a == b);
+}
+
+@test
+fn test_oncecell_eq_both_same_value() {
+    let a = OnceCell.new_with(42);
+    let b = OnceCell.new_with(42);
+    assert(a == b);
+}
+
+@test
+fn test_oncecell_ne_different_values() {
+    let a = OnceCell.new_with(42);
+    let b = OnceCell.new_with(99);
+    assert(a != b);
+}
+
+@test
+fn test_oncecell_ne_one_empty() {
+    let a = OnceCell.new_with(42);
+    let b: OnceCell<Int> = OnceCell.new();
+    assert(a != b);
+}
+
+@test
+fn test_oncecell_clone_initialized() {
+    let a = OnceCell.new_with(42);
+    let b = a.clone();
+    assert_eq(b.get().unwrap(), 42);
+}
+
+@test
+fn test_oncecell_clone_empty() {
+    let a: OnceCell<Int> = OnceCell.new();
+    let b = a.clone();
+    assert(!b.is_initialized());
+}
+
+@test
+fn test_oncecell_clone_independence() {
+    let a = OnceCell.new_with(42);
+    let b = a.clone();
+    // Modifying clone doesn't affect original
+    let _ = b.take();
+    assert(a.is_initialized());
+    assert(!b.is_initialized());
+}
+
+@test
+fn test_oncecell_default_is_empty() {
+    let cell: OnceCell<Int> = OnceCell.default();
+    assert(!cell.is_initialized());
+}
+
+// =============================================================================
+// Section 8: OnceCell<T> with complex types
+// =============================================================================
+
+@test
+fn test_oncecell_with_maybe() {
+    let cell: OnceCell<Maybe<Int>> = OnceCell.new();
+    let result = cell.set(Some(42));
+    assert(result.is_ok());
+    let val = cell.get().unwrap();
+    assert(val.is_some());
+    assert_eq(val.unwrap(), 42);
+}
+
+@test
+fn test_oncecell_with_list() {
+    let cell: OnceCell<List<Int>> = OnceCell.new();
+    let result = cell.set([1, 2, 3]);
+    assert(result.is_ok());
+    assert_eq(cell.get().unwrap().len(), 3);
+}
+
+@test
+fn test_oncecell_with_result() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    let ok_val: Result<Int, Text> = Ok(42);
+    if ok_val.is_ok() {
+        let _ = cell.set(ok_val.unwrap());
+    }
+    assert_eq(cell.get().unwrap(), 42);
+}
+
+// =============================================================================
+// Section 9: LazyCell<T> Construction
+// =============================================================================
+
+@test
+fn test_lazycell_new() {
+    let cell: LazyCell<Int> = LazyCell.new(|| 42);
+    // Not yet initialized until forced
+    assert(!cell.is_initialized());
+}
+
+@test
+fn test_lazycell_force() {
+    let cell: LazyCell<Int> = LazyCell.new(|| 42);
+    let val = cell.force();
+    assert_eq(val, 42);
+    assert(cell.is_initialized());
+}
+
+@test
+fn test_lazycell_force_idempotent() {
+    let cell: LazyCell<Int> = LazyCell.new(|| 42);
+    let val1 = cell.force();
+    let val2 = cell.force();
+    assert_eq(val1, 42);
+    assert_eq(val2, 42);
+}
+
+@test
+fn test_lazycell_force_text() {
+    let cell: LazyCell<Text> = LazyCell.new(|| "hello world");
+    assert_eq(cell.force(), "hello world");
+}
+
+@test
+fn test_lazycell_get_before_force() {
+    let cell: LazyCell<Int> = LazyCell.new(|| 42);
+    let val = cell.get();
+    assert(val.is_none());
+}
+
+@test
+fn test_lazycell_get_after_force() {
+    let cell: LazyCell<Int> = LazyCell.new(|| 42);
+    let _ = cell.force();
+    let val = cell.get();
+    assert(val.is_some());
+    assert_eq(val.unwrap(), 42);
+}
+
+// =============================================================================
+// Section 10: LazyCell<T> with closures
+// =============================================================================
+
+@test
+fn test_lazycell_closure_with_capture() {
+    let base = 10;
+    let cell: LazyCell<Int> = LazyCell.new(|| base * 2);
+    assert_eq(cell.force(), 20);
+}
+
+@test
+fn test_lazycell_closure_complex() {
+    let cell: LazyCell<Int> = LazyCell.new(|| {
+        let mut sum = 0;
+        let mut i = 1;
+        while i <= 10 {
+            let v = i;
+            sum = sum + v;
+            i = i + 1;
+        }
+        sum
+    });
+    assert_eq(cell.force(), 55);
+}
+
+// =============================================================================
+// Section 11: LazyCell<T> Protocols
+// =============================================================================
+
+@test
+fn test_lazycell_is_initialized_before() {
+    let cell: LazyCell<Int> = LazyCell.new(|| 42);
+    assert(!cell.is_initialized());
+}
+
+@test
+fn test_lazycell_is_initialized_after() {
+    let cell: LazyCell<Int> = LazyCell.new(|| 42);
+    let _ = cell.force();
+    assert(cell.is_initialized());
+}
+
+// =============================================================================
+// Section 12: Edge Cases
+// =============================================================================
+
+@test
+fn test_oncecell_set_zero() {
+    let cell: OnceCell<Int> = OnceCell.new();
+    let result = cell.set(0);
+    assert(result.is_ok());
+    assert_eq(cell.get().unwrap(), 0);
+    assert(cell.is_initialized());
+}
+
+@test
+fn test_oncecell_set_false() {
+    let cell: OnceCell<Bool> = OnceCell.new();
+    let result = cell.set(false);
+    assert(result.is_ok());
+    assert_eq(cell.get().unwrap(), false);
+    assert(cell.is_initialized());
+}
+
+@test
+fn test_oncecell_set_empty_text() {
+    let cell: OnceCell<Text> = OnceCell.new();
+    let result = cell.set("");
+    assert(result.is_ok());
+    assert_eq(cell.get().unwrap(), "");
+}
+
+@test
+fn test_oncecell_double_take() {
+    let cell = OnceCell.new_with(42);
+    let first = cell.take();
+    let second = cell.take();
+    assert(first.is_some());
+    assert(second.is_none());
+}
+
+@test
+fn test_lazycell_force_bool() {
+    let cell: LazyCell<Bool> = LazyCell.new(|| true);
+    assert_eq(cell.force(), true);
+}
+
+@test
+fn test_lazycell_force_zero() {
+    let cell: LazyCell<Int> = LazyCell.new(|| 0);
+    assert_eq(cell.force(), 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

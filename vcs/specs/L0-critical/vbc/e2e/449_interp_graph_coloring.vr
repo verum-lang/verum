@@ -1,0 +1,336 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, graph_coloring, greedy, bipartite
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests graph coloring algorithms: greedy coloring, chromatic number bounds,
+// and bipartite detection.
+
+// Graph represented as adjacency matrix (flat array)
+// adj[u * n + v] = 1 if edge (u,v) exists
+
+fn test_greedy_coloring_triangle() {
+    // Triangle graph K3: 3 vertices, all connected
+    // Requires 3 colors
+    let n = 3;
+    // adj[u*3+v]
+    let adj = [
+        0, 1, 1,  // vertex 0: connects to 1, 2
+        1, 0, 1,  // vertex 1: connects to 0, 2
+        1, 1, 0   // vertex 2: connects to 0, 1
+    ];
+
+    let mut color = [-1, -1, -1]; // -1 = uncolored
+
+    // Greedy: for each vertex, assign smallest color not used by neighbors
+    let mut v = 0;
+    while v < n {
+        // Find colors used by neighbors
+        let mut used = [0, 0, 0, 0]; // up to 4 colors
+        let mut u = 0;
+        while u < n {
+            if adj[v * n + u] == 1 && color[u] >= 0 {
+                used[color[u]] = 1;
+            }
+            u = u + 1;
+        }
+        // Assign smallest unused color
+        let mut c = 0;
+        while used[c] == 1 { c = c + 1; }
+        color[v] = c;
+        v = v + 1;
+    }
+
+    // Verify all adjacent vertices have different colors
+    let mut valid = 1;
+    v = 0;
+    while v < n {
+        let mut u = 0;
+        while u < n {
+            if adj[v * n + u] == 1 && color[v] == color[u] {
+                valid = 0;
+            }
+            u = u + 1;
+        }
+        v = v + 1;
+    }
+    assert_eq(valid, 1);
+
+    // K3 needs exactly 3 colors
+    let num_colors = color[0] + 1; // max color used + 1 (colors are 0, 1, 2)
+    let max_c = if color[1] > color[0] { color[1] } else { color[0] };
+    let max_c2 = if color[2] > max_c { color[2] } else { max_c };
+    assert_eq(max_c2 + 1, 3); // chromatic number = 3
+
+    print("greedy_coloring_triangle: ok");
+}
+
+fn test_greedy_coloring_cycle() {
+    // Cycle C6 (6 vertices in a ring): bipartite, needs 2 colors
+    // Edges: 0-1, 1-2, 2-3, 3-4, 4-5, 5-0
+    let n = 6;
+    let mut adj = [0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0];
+
+    // Set edges for cycle C6
+    adj[0 * n + 1] = 1; adj[1 * n + 0] = 1;
+    adj[1 * n + 2] = 1; adj[2 * n + 1] = 1;
+    adj[2 * n + 3] = 1; adj[3 * n + 2] = 1;
+    adj[3 * n + 4] = 1; adj[4 * n + 3] = 1;
+    adj[4 * n + 5] = 1; adj[5 * n + 4] = 1;
+    adj[5 * n + 0] = 1; adj[0 * n + 5] = 1;
+
+    let mut color = [-1, -1, -1, -1, -1, -1];
+
+    let mut v = 0;
+    while v < n {
+        let mut used = [0, 0, 0, 0];
+        let mut u = 0;
+        while u < n {
+            if adj[v * n + u] == 1 && color[u] >= 0 {
+                used[color[u]] = 1;
+            }
+            u = u + 1;
+        }
+        let mut c = 0;
+        while used[c] == 1 { c = c + 1; }
+        color[v] = c;
+        v = v + 1;
+    }
+
+    // C6 is bipartite: vertices 0,2,4 get color 0, vertices 1,3,5 get color 1
+    assert_eq(color[0], 0);
+    assert_eq(color[1], 1);
+    assert_eq(color[2], 0);
+    assert_eq(color[3], 1);
+    assert_eq(color[4], 0);
+    assert_eq(color[5], 1);
+
+    // Verify coloring validity
+    let mut valid = 1;
+    v = 0;
+    while v < n {
+        let mut u = 0;
+        while u < n {
+            if adj[v * n + u] == 1 && color[v] == color[u] { valid = 0; }
+            u = u + 1;
+        }
+        v = v + 1;
+    }
+    assert_eq(valid, 1);
+
+    print("greedy_coloring_cycle: ok");
+}
+
+fn test_bipartite_detection() {
+    // BFS-based bipartite detection (2-colorability check)
+    // Graph: 4 vertices, edges 0-1, 1-2, 2-3, 3-0 (C4, bipartite)
+    let n = 4;
+    let adj = [
+        0, 1, 0, 1,  // 0 connects to 1, 3
+        1, 0, 1, 0,  // 1 connects to 0, 2
+        0, 1, 0, 1,  // 2 connects to 1, 3
+        1, 0, 1, 0   // 3 connects to 0, 2
+    ];
+
+    let mut side = [-1, -1, -1, -1]; // -1 = unvisited
+    let mut is_bipartite = 1;
+
+    // BFS from vertex 0
+    let mut queue = [0, 0, 0, 0];
+    let mut head = 0;
+    let mut tail = 0;
+    side[0] = 0;
+    queue[tail] = 0; tail = tail + 1;
+
+    while head < tail {
+        let cur = queue[head]; head = head + 1;
+        let mut u = 0;
+        while u < n {
+            if adj[cur * n + u] == 1 {
+                if side[u] == -1 {
+                    side[u] = 1 - side[cur]; // alternate side
+                    queue[tail] = u; tail = tail + 1;
+                } else if side[u] == side[cur] {
+                    is_bipartite = 0;
+                }
+            }
+            u = u + 1;
+        }
+    }
+
+    assert_eq(is_bipartite, 1); // C4 is bipartite
+    assert_eq(side[0], 0);
+    assert_eq(side[1], 1);
+    assert_eq(side[2], 0);
+    assert_eq(side[3], 1);
+
+    // Non-bipartite: triangle K3 (odd cycle)
+    let adj2 = [0, 1, 1, 1, 0, 1, 1, 1, 0];
+    let n2 = 3;
+    let mut side2 = [-1, -1, -1];
+    let mut is_bip2 = 1;
+
+    side2[0] = 0;
+    let mut queue2 = [0, 0, 0];
+    let mut h2 = 0; let mut t2 = 0;
+    queue2[t2] = 0; t2 = t2 + 1;
+
+    while h2 < t2 {
+        let cur = queue2[h2]; h2 = h2 + 1;
+        let mut u = 0;
+        while u < n2 {
+            if adj2[cur * n2 + u] == 1 {
+                if side2[u] == -1 {
+                    side2[u] = 1 - side2[cur];
+                    queue2[t2] = u; t2 = t2 + 1;
+                } else if side2[u] == side2[cur] {
+                    is_bip2 = 0;
+                }
+            }
+            u = u + 1;
+        }
+    }
+    assert_eq(is_bip2, 0); // K3 is NOT bipartite
+
+    print("bipartite_detection: ok");
+}
+
+fn test_chromatic_number_bounds() {
+    // Lower bound: clique number (max complete subgraph)
+    // Upper bound: greedy coloring result
+    // For a 5-cycle C5 (odd cycle): chromatic number = 3
+    // C5: 0-1-2-3-4-0
+    let n = 5;
+    let mut adj = [0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0];
+
+    adj[0 * n + 1] = 1; adj[1 * n + 0] = 1;
+    adj[1 * n + 2] = 1; adj[2 * n + 1] = 1;
+    adj[2 * n + 3] = 1; adj[3 * n + 2] = 1;
+    adj[3 * n + 4] = 1; adj[4 * n + 3] = 1;
+    adj[4 * n + 0] = 1; adj[0 * n + 4] = 1;
+
+    // Greedy coloring
+    let mut color = [-1, -1, -1, -1, -1];
+    let mut v = 0;
+    while v < n {
+        let mut used = [0, 0, 0, 0];
+        let mut u = 0;
+        while u < n {
+            if adj[v * n + u] == 1 && color[u] >= 0 {
+                used[color[u]] = 1;
+            }
+            u = u + 1;
+        }
+        let mut c = 0;
+        while used[c] == 1 { c = c + 1; }
+        color[v] = c;
+        v = v + 1;
+    }
+
+    // Find max color used
+    let mut max_col = 0;
+    v = 0;
+    while v < n {
+        if color[v] > max_col { max_col = color[v]; }
+        v = v + 1;
+    }
+    let num_colors = max_col + 1;
+    assert_eq(num_colors, 3); // C5 needs 3 colors
+
+    // Verify valid coloring
+    let mut valid = 1;
+    v = 0;
+    while v < n {
+        let mut u = 0;
+        while u < n {
+            if adj[v * n + u] == 1 && color[v] == color[u] { valid = 0; }
+            u = u + 1;
+        }
+        v = v + 1;
+    }
+    assert_eq(valid, 1);
+
+    // Degree bound: max_degree + 1 colors suffice (Brooks' theorem approx)
+    // Max degree of C5 = 2. Brooks gives <= 2 for bipartite, but C5 odd cycle -> 3
+    let max_deg = 2; // each vertex in C5 has degree 2
+    assert(num_colors <= max_deg + 1); // 3 <= 3
+
+    print("chromatic_number_bounds: ok");
+}
+
+fn test_coloring_independence_number() {
+    // Independence number: max set of vertices with no edges between them
+    // For C6 (6-cycle): independence number = 3 (alternate vertices)
+    // Vertices {0,2,4} form an independent set of size 3
+    let n = 6;
+    let adj = [
+        0, 1, 0, 0, 0, 1,
+        1, 0, 1, 0, 0, 0,
+        0, 1, 0, 1, 0, 0,
+        0, 0, 1, 0, 1, 0,
+        0, 0, 0, 1, 0, 1,
+        1, 0, 0, 0, 1, 0
+    ];
+
+    // Check if {0, 2, 4} is independent
+    let set_a = [0, 2, 4];
+    let mut is_indep_a = 1;
+    let mut i = 0;
+    while i < 3 {
+        let mut j = i + 1;
+        while j < 3 {
+            if adj[set_a[i] * n + set_a[j]] == 1 { is_indep_a = 0; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(is_indep_a, 1); // {0,2,4} is independent in C6
+
+    // Check if {1, 3, 5} is independent
+    let set_b = [1, 3, 5];
+    let mut is_indep_b = 1;
+    i = 0;
+    while i < 3 {
+        let mut j = i + 1;
+        while j < 3 {
+            if adj[set_b[i] * n + set_b[j]] == 1 { is_indep_b = 0; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(is_indep_b, 1); // {1,3,5} is also independent
+
+    // {0, 1} is NOT independent (they are adjacent)
+    let edge_pair = [0, 1];
+    let is_indep_edge = if adj[edge_pair[0] * n + edge_pair[1]] == 0 { 1 } else { 0 };
+    assert_eq(is_indep_edge, 0);
+
+    // Chromatic number >= ceil(n / independence_number)
+    // C6: n=6, independence_number=3 -> lower_bound = ceil(6/3) = 2
+    let indep_num = 3;
+    let lower_bound = n / indep_num; // 6/3 = 2 (exact)
+    assert_eq(lower_bound, 2);
+
+    print("coloring_independence_number: ok");
+}
+
+fn main() -> Int {
+    test_greedy_coloring_triangle();
+    test_greedy_coloring_cycle();
+    test_bipartite_detection();
+    test_chromatic_number_bounds();
+    test_coloring_independence_number();
+    print("[OK] 449_interp_graph_coloring");
+    0
+}

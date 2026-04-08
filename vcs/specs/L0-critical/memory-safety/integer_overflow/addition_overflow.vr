@@ -1,0 +1,12 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, arithmetic
+// @description: Tests that integer overflow panics in debug mode
+
+fn main() {
+    let max_int = 9223372036854775807;  // Int.MAX
+
+    // In debug mode, overflow causes panic
+    let _ = max_int + 1;  // Panic: Integer overflow
+}

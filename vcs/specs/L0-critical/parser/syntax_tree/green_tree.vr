@@ -1,0 +1,131 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, syntax-tree, green-tree, events, lossless
+// @description: Test green tree construction, properties, and event-based building
+
+// ============================================================================
+// SECTION 1: Basic Node Structure
+// ============================================================================
+
+// Simple function - tests basic node structure
+fn simple() { }
+
+// Nested blocks - tests tree depth
+fn nested() {
+    {
+        {
+            {
+                let deep = 1;
+            }
+        }
+    }
+}
+
+// Multiple children - tests sibling handling
+fn many_children(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
+    a + b + c + d + e
+}
+
+// Complex expression tree
+fn expressions() {
+    let x = 1 + 2 * 3 - 4 / 5;
+    let y = (a + b) * (c + d);
+    let z = a.b.c.d.e();
+}
+
+// ============================================================================
+// SECTION 2: Green Tree from Event Processing
+// ============================================================================
+
+// Test GreenTreeSink receives Start events correctly
+fn green_tree_start_events() {
+    let x = 1;  // Start(LET_STMT) should be processed
+}
+
+// Test GreenTreeSink receives Finish events correctly
+fn green_tree_finish_events() {
+    {
+        let inner = 1;
+    }  // Finish should match Start for BLOCK
+}
+
+// Test GreenTreeSink receives Token events correctly
+fn green_tree_token_events() {
+    let identifier = 42;  // Token events for each lexeme
+}
+
+// Test GreenTreeSink handles Error events
+fn green_tree_error_events() {
+    let valid = 1;  // Errors should be collected but not affect tree
+}
+
+// ============================================================================
+// SECTION 3: Green Node Properties
+// ============================================================================
+
+// Test green node text() method
+fn green_node_text_method() {
+    let exactly_this_text = 42;
+}
+
+// Test green node kind() method
+fn green_node_kind_method() {
+    let x = 1;  // Node should report LET_STMT kind
+}
+
+// Test green node children iteration
+fn green_node_children(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// ============================================================================
+// SECTION 4: Green Tree Interning and Sharing
+// ============================================================================
+
+// Test identical nodes can be shared
+fn green_tree_sharing() {
+    let x = 1;
+    let y = 1;  // Same literal '1' could be shared
+    let z = 1;
+}
+
+// Test similar structures
+fn green_tree_similar_a() {
+    let x = 1 + 2;
+}
+
+fn green_tree_similar_b() {
+    let y = 1 + 2;  // Similar structure to above
+}
+
+// ============================================================================
+// SECTION 5: Green Tree Immutability
+// ============================================================================
+
+// Test that green trees are immutable
+fn green_tree_immutable() {
+    let x = 1;
+    let y = 2;
+    // Green tree should not change after construction
+}
+
+// ============================================================================
+// SECTION 6: Event-to-Tree Pipeline Integration
+// ============================================================================
+
+// Test complete pipeline: Lexer -> Events -> GreenTree
+fn pipeline_integration() {
+    // Leading comment
+    let x = 1;  // Trailing comment
+    let y = x + 2;
+}
+
+// Test pipeline with complex constructs
+fn pipeline_complex(input: Maybe<Int>) -> Int {
+    match input {
+        Some(n) if n > 0 => n * 2,
+        Some(n) => -n,
+        None => 0,
+    }
+}

@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, select, unclosed, error
+// @description: Test unclosed select expression block
+// @expected-error: E011
+
+async fn test() {
+    select {
+        result = task.await => result,
+}

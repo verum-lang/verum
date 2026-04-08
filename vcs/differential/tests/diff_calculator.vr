@@ -1,0 +1,237 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, calculator, rpn, stack, simulation
+// @timeout: 10000
+
+// RPN calculator simulation with memory register, modular operations,
+// and multi-step expression evaluation.
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Calculator state: stack + memory register + stack pointer
+type CalcState is { stack: Arr8, sp: Int, mem: Int };
+
+fn calc_new() -> CalcState {
+    CalcState { stack: zeros(), sp: 0, mem: 0 }
+}
+
+fn calc_push(cs: CalcState, val: Int) -> CalcState {
+    CalcState { stack: set(cs.stack, cs.sp, val), sp: cs.sp + 1, mem: cs.mem }
+}
+
+fn calc_top(cs: CalcState) -> Int {
+    get(cs.stack, cs.sp - 1)
+}
+
+fn calc_pop(cs: CalcState) -> CalcState {
+    CalcState { stack: cs.stack, sp: cs.sp - 1, mem: cs.mem }
+}
+
+// Opcodes:
+//   0  = PUSH (next value is operand)
+//   1  = ADD
+//   2  = SUB
+//   3  = MUL
+//   4  = DIV
+//   5  = MOD (remainder)
+//   6  = NEG (negate top)
+//   7  = DUP (duplicate top)
+//   8  = STO (store top to memory)
+//   9  = RCL (recall memory to stack)
+//  10  = SQR (square top of stack)
+//  11  = ABS_VAL (absolute value of top)
+//  99  = HALT
+
+fn abs_val(n: Int) -> Int {
+    if n < 0 { 0 - n } else { n }
+}
+
+fn calc_exec(prog: Arr8, n: Int) -> CalcState {
+    let mut cs = calc_new();
+    let mut pc = 0;
+    while pc < n {
+        let op = get(prog, pc);
+        if op == 0 {
+            // PUSH
+            pc = pc + 1;
+            cs = calc_push(cs, get(prog, pc));
+        } else if op == 1 {
+            // ADD
+            let b_val = calc_top(cs);
+            cs = calc_pop(cs);
+            let a_val = calc_top(cs);
+            cs = calc_pop(cs);
+            cs = calc_push(cs, a_val + b_val);
+        } else if op == 2 {
+            // SUB
+            let b_val = calc_top(cs);
+            cs = calc_pop(cs);
+            let a_val = calc_top(cs);
+            cs = calc_pop(cs);
+            cs = calc_push(cs, a_val - b_val);
+        } else if op == 3 {
+            // MUL
+            let b_val = calc_top(cs);
+            cs = calc_pop(cs);
+            let a_val = calc_top(cs);
+            cs = calc_pop(cs);
+            cs = calc_push(cs, a_val * b_val);
+        } else if op == 4 {
+            // DIV
+            let b_val = calc_top(cs);
+            cs = calc_pop(cs);
+            let a_val = calc_top(cs);
+            cs = calc_pop(cs);
+            cs = calc_push(cs, a_val / b_val);
+        } else if op == 5 {
+            // MOD
+            let b_val = calc_top(cs);
+            cs = calc_pop(cs);
+            let a_val = calc_top(cs);
+            cs = calc_pop(cs);
+            cs = calc_push(cs, a_val % b_val);
+        } else if op == 6 {
+            // NEG
+            let v = calc_top(cs);
+            cs = calc_pop(cs);
+            cs = calc_push(cs, 0 - v);
+        } else if op == 7 {
+            // DUP
+            let v = calc_top(cs);
+            cs = calc_push(cs, v);
+        } else if op == 8 {
+            // STO: store top to memory (do not pop)
+            cs = CalcState { stack: cs.stack, sp: cs.sp, mem: calc_top(cs) };
+        } else if op == 9 {
+            // RCL: recall memory to stack
+            cs = calc_push(cs, cs.mem);
+        } else if op == 10 {
+            // SQR: square top
+            let v = calc_top(cs);
+            cs = calc_pop(cs);
+            cs = calc_push(cs, v * v);
+        } else if op == 11 {
+            // ABS_VAL
+            let v = calc_top(cs);
+            cs = calc_pop(cs);
+            cs = calc_push(cs, abs_val(v));
+        } else {
+            // HALT or unknown
+            pc = n;
+        }
+        pc = pc + 1;
+    }
+    cs
+}
+
+fn test_basic_ops() -> Int {
+    // PUSH 3, PUSH 4, ADD => 7
+    let p1 = Arr8 { d0: 0, d1: 3, d2: 0, d3: 4, d4: 1, d5: 0, d6: 0, d7: 0 };
+    let r1 = calc_exec(p1, 5);
+    assert_eq(calc_top(r1), 7);
+    assert_eq(r1.sp, 1);
+
+    // PUSH 10, PUSH 3, SUB => 7
+    let p2 = Arr8 { d0: 0, d1: 10, d2: 0, d3: 3, d4: 2, d5: 0, d6: 0, d7: 0 };
+    let r2 = calc_exec(p2, 5);
+    assert_eq(calc_top(r2), 7);
+
+    // PUSH 6, PUSH 7, MUL => 42
+    let p3 = Arr8 { d0: 0, d1: 6, d2: 0, d3: 7, d4: 3, d5: 0, d6: 0, d7: 0 };
+    let r3 = calc_exec(p3, 5);
+    assert_eq(calc_top(r3), 42);
+    1
+}
+
+fn test_div_mod() -> Int {
+    // PUSH 20, PUSH 4, DIV => 5
+    let p1 = Arr8 { d0: 0, d1: 20, d2: 0, d3: 4, d4: 4, d5: 0, d6: 0, d7: 0 };
+    let r1 = calc_exec(p1, 5);
+    assert_eq(calc_top(r1), 5);
+
+    // PUSH 17, PUSH 5, MOD => 2
+    let p2 = Arr8 { d0: 0, d1: 17, d2: 0, d3: 5, d4: 5, d5: 0, d6: 0, d7: 0 };
+    let r2 = calc_exec(p2, 5);
+    assert_eq(calc_top(r2), 2);
+
+    // PUSH 100, PUSH 7, DIV => 14
+    let p3 = Arr8 { d0: 0, d1: 100, d2: 0, d3: 7, d4: 4, d5: 0, d6: 0, d7: 0 };
+    let r3 = calc_exec(p3, 5);
+    assert_eq(calc_top(r3), 14);
+    1
+}
+
+fn test_unary_ops() -> Int {
+    // PUSH 5, NEG => -5
+    let p1 = Arr8 { d0: 0, d1: 5, d2: 6, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let r1 = calc_exec(p1, 3);
+    assert_eq(calc_top(r1), -5);
+
+    // PUSH -8, ABS_VAL => 8
+    let p2 = Arr8 { d0: 0, d1: -8, d2: 11, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let r2 = calc_exec(p2, 3);
+    assert_eq(calc_top(r2), 8);
+
+    // PUSH 7, DUP, MUL => 49 (squaring via DUP+MUL)
+    let p3 = Arr8 { d0: 0, d1: 7, d2: 7, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let r3 = calc_exec(p3, 4);
+    assert_eq(calc_top(r3), 49);
+
+    // PUSH 9, SQR => 81
+    let p4 = Arr8 { d0: 0, d1: 9, d2: 10, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let r4 = calc_exec(p4, 3);
+    assert_eq(calc_top(r4), 81);
+    1
+}
+
+fn test_memory() -> Int {
+    // PUSH 42, STO, PUSH 10, RCL, ADD => 10 + 42 = 52
+    let p1 = Arr8 { d0: 0, d1: 42, d2: 8, d3: 0, d4: 10, d5: 9, d6: 1, d7: 0 };
+    let r1 = calc_exec(p1, 7);
+    assert_eq(calc_top(r1), 52);
+    assert_eq(r1.mem, 42);
+    // sp: push42=1, sto=1, push10=2, rcl=3, add=2
+    assert_eq(r1.sp, 2);
+    1
+}
+
+fn test_compound() -> Int {
+    // (3 + 4) * 2 = 14: PUSH 3, PUSH 4, ADD, PUSH 2, MUL
+    let p1 = Arr8 { d0: 0, d1: 3, d2: 0, d3: 4, d4: 1, d5: 0, d6: 2, d7: 3 };
+    let r1 = calc_exec(p1, 8);
+    assert_eq(calc_top(r1), 14);
+
+    // 100 - (5 * 5) = 75: PUSH 100, PUSH 5, SQR, SUB
+    let p2 = Arr8 { d0: 0, d1: 100, d2: 0, d3: 5, d4: 10, d5: 2, d6: 0, d7: 0 };
+    let r2 = calc_exec(p2, 6);
+    assert_eq(calc_top(r2), 75);
+    1
+}
+
+fn main() -> Int {
+    test_basic_ops();
+    test_div_mod();
+    test_unary_ops();
+    test_memory();
+    test_compound();
+    print("DIFF_OK: calculator");
+    0
+}

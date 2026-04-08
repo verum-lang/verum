@@ -1,0 +1,31 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, cofix, coinductive, productivity
+// @description: Test parsing of cofix modifier on functions (after async)
+
+// Simple coinductive stream type
+type Stream<T> is coinductive {
+    fn head(&self) -> T;
+    fn tail(&self) -> Stream<T>;
+};
+
+// async cofix function: productive coinductive definition
+async cofix fn ones() -> Stream<Int> {
+    Stream {
+        head: 1,
+        tail: ones(),
+    }
+}
+
+// async cofix with parameter
+async cofix fn repeat_val<T>(x: T) -> Stream<T> {
+    Stream {
+        head: x,
+        tail: repeat_val(x),
+    }
+}
+
+fn main() -> Int {
+    0
+}

@@ -1,0 +1,25 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, context, propagation, error
+// @description: Test that context is not automatically propagated to inner functions
+// @expected-error: M201
+
+// =============================================================================
+// CONTEXT NOT PROPAGATED TESTS
+// =============================================================================
+
+// Inner function without context declaration
+meta fn inner_no_context() -> Int {
+    size_of(Int)  // ERROR: requires MetaTypes context, none declared
+}
+
+// Outer function with context cannot pass it to inner without declaration
+meta fn outer_with_context() -> Int using [MetaTypes] {
+    // This should fail because inner_no_context doesn't have the context
+    inner_no_context()  // ERROR: inner function lacks required context
+}
+
+fn main() {
+    @const assert(outer_with_context() > 0);
+}

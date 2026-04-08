@@ -1,0 +1,89 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: generics, recursive, heap, stack, e2e
+// @description: Generic stack using recursive sum types with Heap allocation
+
+type Stack<T> is Empty | Cons(T, Heap<Stack<T>>);
+
+@allow(unbounded_recursion)
+fn push<T>(stack: Stack<T>, val: T) -> Stack<T> {
+    Stack.Cons(val, Heap(stack))
+}
+
+@allow(unbounded_recursion)
+fn size<T>(stack: Stack<T>) -> Int {
+    match stack {
+        Stack.Empty => 0,
+        Stack.Cons(_, rest) => 1 + size(*rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn peek<T>(stack: Stack<T>) -> Maybe<T> {
+    match stack {
+        Stack.Empty => None,
+        Stack.Cons(val, _) => Some(val),
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Empty stack
+    let s0 = Stack.Empty;
+    if size(s0) != 0 {
+        print("FAIL 1: empty size");
+        f = f + 1;
+    }
+
+    // Test 2: Push elements
+    let s1 = push(Stack.Empty, 10);
+    let s2 = push(s1, 20);
+    let s3 = push(s2, 30);
+    if size(s3) != 3 {
+        print(f"FAIL 2: size = {size(s3)}");
+        f = f + 1;
+    }
+
+    // Test 3: Peek top
+    match s3 {
+        Stack.Empty => {
+            print("FAIL 3: should not be empty");
+            f = f + 1;
+        },
+        Stack.Cons(top, _) => {
+            if top != 30 {
+                print(f"FAIL 3: top = {top}");
+                f = f + 1;
+            }
+        },
+    }
+
+    // Test 4: Pop and check next
+    match s3 {
+        Stack.Empty => {
+            print("FAIL 4");
+            f = f + 1;
+        },
+        Stack.Cons(_, rest) => {
+            match *rest {
+                Stack.Empty => {
+                    print("FAIL 4: should have more");
+                    f = f + 1;
+                },
+                Stack.Cons(second, _) => {
+                    if second != 20 {
+                        print(f"FAIL 4: second = {second}");
+                        f = f + 1;
+                    }
+                },
+            }
+        },
+    }
+
+    if f == 0 {
+        print("All generic stack tests passed");
+    }
+    f
+}

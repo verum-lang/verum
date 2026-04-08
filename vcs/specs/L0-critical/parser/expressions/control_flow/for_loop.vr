@@ -1,0 +1,159 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, for, loop, iteration
+
+fn test_simple_for_range() {
+    // Simple for loop over range
+    for i in 0..10 {
+        print(i);
+    }
+}
+
+fn test_for_inclusive_range() {
+    // For loop over inclusive range
+    for i in 0..=10 {
+        print(i);
+    }
+}
+
+fn test_for_over_collection() {
+    // For loop over collection
+    for item in list {
+        process(item);
+    }
+}
+
+fn test_for_with_binding() {
+    // For loop with binding
+    for x in items {
+        let doubled = x * 2;
+        result.push(doubled);
+    }
+}
+
+fn test_for_over_iterator() {
+    // For loop over iterator
+    for element in collection.iter() {
+        handle(element);
+    }
+}
+
+fn test_for_mutable_iteration() {
+    // For loop with mutable iteration
+    for item in items.iter_mut() {
+        item.update();
+    }
+}
+
+fn test_for_with_ownership() {
+    // For loop with ownership
+    for item in items.into_iter() {
+        consume(item);
+    }
+}
+
+fn test_for_tuple_destructuring() {
+    // For loop with tuple destructuring
+    for (key, value) in map {
+        print(key, value);
+    }
+}
+
+fn test_for_struct_destructuring() {
+    // For loop with struct destructuring
+    for Point { x, y } in points {
+        plot(x, y);
+    }
+}
+
+fn test_for_enumerated() {
+    // For loop with enumerated index
+    for (index, item) in list.enumerate() {
+        print(index, item);
+    }
+}
+
+fn test_for_with_filter() {
+    // For loop with filter
+    for x in list.filter(|x| x > 0) {
+        positive_handler(x);
+    }
+}
+
+fn test_nested_for_loops() {
+    // Nested for loops
+    for i in 0..rows {
+        for j in 0..cols {
+            matrix[i][j] = compute(i, j);
+        }
+    }
+}
+
+fn test_for_labeled_break() {
+    // For loop with labeled break
+    'outer: for i in 0..10 {
+        for j in 0..10 {
+            if condition(i, j) {
+                break 'outer;
+            }
+        }
+    }
+}
+
+fn test_for_with_continue() {
+    // For loop with continue
+    for item in items {
+        if item.skip() {
+            continue;
+        }
+        process(item);
+    }
+}
+
+fn test_for_early_break() {
+    // For loop with early break
+    for item in items {
+        if item.is_target() {
+            found = Some(item);
+            break;
+        }
+    }
+}
+
+fn test_for_as_expression() {
+    // For loop as expression (collecting)
+    let doubled = for x in list {
+        x * 2
+    };
+}
+
+fn test_for_reference_pattern() {
+    // For loop with reference pattern
+    for &x in &numbers {
+        sum += x;
+    }
+}
+
+fn test_for_complex_range() {
+    // For loop with complex range expression
+    for i in start..end.min(max_limit) {
+        process(i);
+    }
+}
+
+fn test_for_string_chars() {
+    // For loop over string characters
+    for char in text.chars() {
+        if char.is_alphabetic() {
+            count += 1;
+        }
+    }
+}
+
+fn test_for_over_lines() {
+    // For loop over lines
+    for line in file.lines() {
+        parse_line(line);
+    }
+}

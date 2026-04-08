@@ -1,0 +1,228 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, cbgr, references
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT CBGR reference operations — ownership, borrowing, move semantics simulation
+
+// ============================================================================
+// Simulated reference counting / ownership tracking
+// ============================================================================
+
+type RefCounted is { value: Int, ref_count: Int };
+
+fn rc_new(val: Int) -> RefCounted {
+    RefCounted { value: val, ref_count: 1 }
+}
+
+fn rc_clone(r: RefCounted) -> RefCounted {
+    RefCounted { value: r.value, ref_count: r.ref_count + 1 }
+}
+
+fn rc_drop(r: RefCounted) -> RefCounted {
+    RefCounted { value: r.value, ref_count: r.ref_count - 1 }
+}
+
+fn rc_is_unique(r: RefCounted) -> Int {
+    if r.ref_count == 1 { 1 } else { 0 }
+}
+
+fn rc_is_dead(r: RefCounted) -> Int {
+    if r.ref_count <= 0 { 1 } else { 0 }
+}
+
+// ============================================================================
+// Test 1: Basic ownership — create, use, drop
+// ============================================================================
+
+fn test_basic_ownership() {
+    let r = rc_new(42);
+    assert_eq(r.value, 42);
+    assert_eq(r.ref_count, 1);
+    assert_eq(rc_is_unique(r), 1);
+
+    // Drop: refcount goes to 0
+    let dropped = rc_drop(r);
+    assert_eq(dropped.ref_count, 0);
+    assert_eq(rc_is_dead(dropped), 1);
+
+    // Value is still there but logically dead
+    assert_eq(dropped.value, 42);
+
+    print("test_basic_ownership passed");
+}
+
+// ============================================================================
+// Test 2: Shared references via clone
+// ============================================================================
+
+fn test_shared_refs() {
+    let r1 = rc_new(100);
+    assert_eq(r1.ref_count, 1);
+
+    // Clone creates shared reference
+    let r2 = rc_clone(r1);
+    assert_eq(r2.ref_count, 2);
+    assert_eq(r2.value, 100);
+    assert_eq(rc_is_unique(r2), 0);
+
+    // Clone again
+    let r3 = rc_clone(r2);
+    assert_eq(r3.ref_count, 3);
+
+    // Drop one
+    let r4 = rc_drop(r3);
+    assert_eq(r4.ref_count, 2);
+    assert_eq(rc_is_dead(r4), 0);
+
+    // Drop another
+    let r5 = rc_drop(r4);
+    assert_eq(r5.ref_count, 1);
+    assert_eq(rc_is_unique(r5), 1);
+
+    // Drop last
+    let r6 = rc_drop(r5);
+    assert_eq(r6.ref_count, 0);
+    assert_eq(rc_is_dead(r6), 1);
+
+    print("test_shared_refs passed");
+}
+
+// ============================================================================
+// Test 3: Move semantics simulation
+// ============================================================================
+
+type MoveBox is { value: Int, moved: Int };
+
+fn box_new(v: Int) -> MoveBox {
+    MoveBox { value: v, moved: 0 }
+}
+
+fn box_move(b: MoveBox) -> MoveBox {
+    // After move, original is invalidated (moved=1)
+    MoveBox { value: b.value, moved: 1 }
+}
+
+fn box_is_valid(b: MoveBox) -> Int {
+    if b.moved == 0 { 1 } else { 0 }
+}
+
+fn test_move_semantics() {
+    let b1 = box_new(77);
+    assert_eq(box_is_valid(b1), 1);
+    assert_eq(b1.value, 77);
+
+    // Move ownership
+    let b2 = box_move(b1);
+    // b1 is now "moved" — simulated as moved=1 in b2's source
+    assert_eq(b2.moved, 1);
+
+    // Create fresh from moved value
+    let b3 = box_new(b2.value);
+    assert_eq(box_is_valid(b3), 1);
+    assert_eq(b3.value, 77);
+
+    print("test_move_semantics passed");
+}
+
+// ============================================================================
+// Test 4: Generation-based reference validation
+// ============================================================================
+
+type GRef is { ptr_id: Int, generation: Int };
+type Slot is { value: Int, generation: Int, occupied: Int };
+
+fn slot_new(val: Int, gen: Int) -> Slot {
+    Slot { value: val, generation: gen, occupied: 1 }
+}
+
+fn slot_free(s: Slot) -> Slot {
+    Slot { value: 0, generation: s.generation + 1, occupied: 0 }
+}
+
+fn make_gref(slot: Slot, ptr_id: Int) -> GRef {
+    GRef { ptr_id: ptr_id, generation: slot.generation }
+}
+
+fn ref_is_valid(r: GRef, slot: Slot) -> Int {
+    if slot.occupied == 1 {
+        if slot.generation == r.generation { 1 } else { 0 }
+    } else { 0 }
+}
+
+fn test_generation_refs() {
+    // Create a slot with generation 0
+    let s1 = slot_new(42, 0);
+    let r1 = make_gref(s1, 1);
+
+    // Reference is valid
+    assert_eq(ref_is_valid(r1, s1), 1);
+
+    // Free the slot — generation bumps to 1
+    let s2 = slot_free(s1);
+    assert_eq(s2.generation, 1);
+    assert_eq(s2.occupied, 0);
+
+    // Old reference is now invalid (generation mismatch)
+    assert_eq(ref_is_valid(r1, s2), 0);
+
+    // Reuse slot with new value
+    let s3 = slot_new(99, s2.generation);
+    let r2 = make_gref(s3, 1);
+
+    // New reference is valid
+    assert_eq(ref_is_valid(r2, s3), 1);
+
+    // Old reference to same slot is invalid (wrong generation)
+    assert_eq(ref_is_valid(r1, s3), 0);
+
+    print("test_generation_refs passed");
+}
+
+// ============================================================================
+// Test 5: Epoch-based reclamation simulation
+// ============================================================================
+
+fn test_epoch_reclaim() {
+    // Simulate 3 epochs: objects allocated in epoch N are safe to free
+    // only when all threads have moved past epoch N
+
+    let mut current_epoch = 0;
+    let mut alloc_epoch_a = current_epoch;  // Object A allocated at epoch 0
+    let mut alloc_epoch_b = current_epoch;  // Object B allocated at epoch 0
+
+    // Advance epoch
+    current_epoch = current_epoch + 1;  // epoch 1
+    let alloc_epoch_c = current_epoch;  // Object C allocated at epoch 1
+
+    // At epoch 1: objects from epoch 0 might still be accessed
+    let can_free_a = if current_epoch - alloc_epoch_a >= 2 { 1 } else { 0 };
+    assert_eq(can_free_a, 0);  // Not safe yet
+
+    // Advance to epoch 2
+    current_epoch = current_epoch + 1;  // epoch 2
+
+    let can_free_a2 = if current_epoch - alloc_epoch_a >= 2 { 1 } else { 0 };
+    assert_eq(can_free_a2, 1);  // Now safe (2 epochs have passed)
+
+    let can_free_c = if current_epoch - alloc_epoch_c >= 2 { 1 } else { 0 };
+    assert_eq(can_free_c, 0);  // C was allocated at epoch 1, not safe yet
+
+    // Advance to epoch 3
+    current_epoch = current_epoch + 1;
+    let can_free_c2 = if current_epoch - alloc_epoch_c >= 2 { 1 } else { 0 };
+    assert_eq(can_free_c2, 1);  // Now safe
+
+    print("test_epoch_reclaim passed");
+}
+
+fn main() -> Int {
+    test_basic_ownership();
+    test_shared_refs();
+    test_move_semantics();
+    test_generation_refs();
+    test_epoch_reclaim();
+    print("ALL PASSED");
+    0
+}

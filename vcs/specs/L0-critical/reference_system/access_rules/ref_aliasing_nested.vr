@@ -1,0 +1,29 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, aliasing, nested, negative-test
+
+/// Test aliasing violation with nested borrows.
+/// Borrowing parent while child borrow exists violates aliasing rules.
+/// Verum should detect this at COMPILE-TIME via borrow checking.
+/// Spec: 04-memory-model.md#aliasing-rules
+
+type Container is {
+    value: Text,
+    count: Int,
+};
+
+fn main() {
+    let mut container = Container {
+        value: Text.from("nested"),
+        count: 0,
+    };
+
+    let value_ref = &container.value;    // Borrow nested field - read epoch on container.value
+    let container_ref = &mut container;  // Mutable borrow of parent - requires exclusive epoch
+    // CBGR detects epoch violation at runtime
+
+    print(*value_ref);
+    container_ref.count += 1;  // PANIC: epoch violation (value_ref still holds read capability)
+}

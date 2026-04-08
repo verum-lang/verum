@@ -1,0 +1,166 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, interval, arithmetic, math
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for interval arithmetic
+
+type Interval is { lo: Int, hi: Int };
+
+fn iv_new(lo: Int, hi: Int) -> Interval {
+    Interval { lo: lo, hi: hi }
+}
+
+fn iv_point(x: Int) -> Interval {
+    Interval { lo: x, hi: x }
+}
+
+fn iv_width(a: Interval) -> Int {
+    a.hi - a.lo
+}
+
+fn iv_midpoint(a: Interval) -> Int {
+    (a.lo + a.hi) / 2
+}
+
+fn iv_contains(a: Interval, x: Int) -> Bool {
+    x >= a.lo && x <= a.hi
+}
+
+fn iv_overlaps(a: Interval, b: Interval) -> Bool {
+    a.lo <= b.hi && b.lo <= a.hi
+}
+
+fn iv_subset(a: Interval, b: Interval) -> Bool {
+    a.lo >= b.lo && a.hi <= b.hi
+}
+
+fn min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+fn iv_add(a: Interval, b: Interval) -> Interval {
+    Interval { lo: a.lo + b.lo, hi: a.hi + b.hi }
+}
+
+fn iv_sub(a: Interval, b: Interval) -> Interval {
+    Interval { lo: a.lo - b.hi, hi: a.hi - b.lo }
+}
+
+fn iv_mul(a: Interval, b: Interval) -> Interval {
+    let p1 = a.lo * b.lo;
+    let p2 = a.lo * b.hi;
+    let p3 = a.hi * b.lo;
+    let p4 = a.hi * b.hi;
+    let lo = min(min(p1, p2), min(p3, p4));
+    let hi = max(max(p1, p2), max(p3, p4));
+    Interval { lo: lo, hi: hi }
+}
+
+fn iv_union(a: Interval, b: Interval) -> Interval {
+    Interval { lo: min(a.lo, b.lo), hi: max(a.hi, b.hi) }
+}
+
+fn iv_intersect(a: Interval, b: Interval) -> Interval {
+    Interval { lo: max(a.lo, b.lo), hi: min(a.hi, b.hi) }
+}
+
+fn test_basic() {
+    let a = iv_new(1, 5);
+    assert_eq(iv_width(a), 4);
+    assert_eq(iv_midpoint(a), 3);
+    assert_eq(iv_contains(a, 3), true);
+    assert_eq(iv_contains(a, 1), true);
+    assert_eq(iv_contains(a, 5), true);
+    assert_eq(iv_contains(a, 0), false);
+    assert_eq(iv_contains(a, 6), false);
+}
+
+fn test_overlap() {
+    let a = iv_new(1, 5);
+    let b = iv_new(3, 8);
+    let c = iv_new(6, 10);
+
+    assert_eq(iv_overlaps(a, b), true);
+    assert_eq(iv_overlaps(a, c), false);
+    assert_eq(iv_overlaps(b, c), true);
+}
+
+fn test_subset() {
+    let outer = iv_new(0, 10);
+    let inner = iv_new(2, 8);
+    let partial = iv_new(5, 15);
+
+    assert_eq(iv_subset(inner, outer), true);
+    assert_eq(iv_subset(outer, inner), false);
+    assert_eq(iv_subset(partial, outer), false);
+}
+
+fn test_arithmetic() {
+    let a = iv_new(2, 4);
+    let b = iv_new(1, 3);
+
+    // Addition: [2,4] + [1,3] = [3,7]
+    let sum = iv_add(a, b);
+    assert_eq(sum.lo, 3);
+    assert_eq(sum.hi, 7);
+
+    // Subtraction: [2,4] - [1,3] = [-1, 3]
+    let diff = iv_sub(a, b);
+    assert_eq(diff.lo, -1);
+    assert_eq(diff.hi, 3);
+
+    // Multiplication: [2,4] * [1,3] = [2, 12]
+    let prod = iv_mul(a, b);
+    assert_eq(prod.lo, 2);
+    assert_eq(prod.hi, 12);
+}
+
+fn test_negative_mul() {
+    // [-2, 3] * [-1, 4]
+    let a = iv_new(-2, 3);
+    let b = iv_new(-1, 4);
+    let prod = iv_mul(a, b);
+    // Products: 2, -8, -3, 12 => min=-8, max=12
+    assert_eq(prod.lo, -8);
+    assert_eq(prod.hi, 12);
+}
+
+fn test_set_ops() {
+    let a = iv_new(1, 5);
+    let b = iv_new(3, 8);
+
+    let u = iv_union(a, b);
+    assert_eq(u.lo, 1);
+    assert_eq(u.hi, 8);
+
+    let inter = iv_intersect(a, b);
+    assert_eq(inter.lo, 3);
+    assert_eq(inter.hi, 5);
+}
+
+fn test_point_interval() {
+    let p = iv_point(7);
+    assert_eq(iv_width(p), 0);
+    assert_eq(iv_contains(p, 7), true);
+    assert_eq(iv_contains(p, 6), false);
+
+    // Point + interval
+    let a = iv_new(1, 3);
+    let sum = iv_add(p, a);
+    assert_eq(sum.lo, 8);
+    assert_eq(sum.hi, 10);
+}
+
+fn main() -> Int {
+    test_basic();
+    test_overlap();
+    test_subset();
+    test_arithmetic();
+    test_negative_mul();
+    test_set_ops();
+    test_point_interval();
+    print("[OK] 203_interval_arithmetic_aot");
+    0
+}

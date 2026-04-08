@@ -1,0 +1,14 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Verify various escape sequences in byte strings
+fn main() {
+    let bs = b"\n\r\t\0\\\"";
+    assert_eq(bs[0], 10);   // \n
+    assert_eq(bs[1], 13);   // \r
+    assert_eq(bs[2], 9);    // \t
+    assert_eq(bs[3], 0);    // \0
+    assert_eq(bs[4], 92);   // \\
+    assert_eq(bs[5], 34);   // \"
+}

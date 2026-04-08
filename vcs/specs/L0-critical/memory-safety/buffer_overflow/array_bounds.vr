@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: all
+// @level: L0
+// @tags: memory-safety, bounds-check
+// @description: Tests that array access beyond bounds is caught at compile time
+
+/// When the compiler can determine that an array index is out of bounds
+/// at compile time (constant index on a fixed-size array), it produces
+/// a static error E310 rather than deferring to runtime.
+
+fn main() {
+    let arr = [1, 2, 3, 4, 5];
+    let _ = arr[10];  // ERROR: Array index out of bounds (static check)
+}

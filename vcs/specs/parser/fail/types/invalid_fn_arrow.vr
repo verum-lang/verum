@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, arrow, error
+// @description: Test detection of wrong arrow operator in function type (=> instead of ->)
+// @expected-error: E093
+
+// Function type must use -> not =>
+type Callback is fn(Int) => Int;

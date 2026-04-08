@@ -1,0 +1,149 @@
+// @test: run
+// @expected-stdout: Sent: 1\nSent: 2\nSent: 3\nReceived: 1\nReceived: 2\nReceived: 3\nChannel closed
+// @tier: 0
+// @level: L2
+// @tags: async, channels, mpsc
+// @description: Multi-producer single-consumer async channels
+
+// MPSC channel types
+type Sender<T> is {
+    tx: Any
+};
+
+type Receiver<T> is {
+    rx: Any
+};
+
+// Create unbounded channel
+fn channel<T>() -> (Sender<T>, Receiver<T>) {
+    // Implementation by runtime
+    let (tx, rx) = runtime.create_channel();
+    (Sender { tx }, Receiver { rx })
+}
+
+// Create bounded channel with capacity
+fn bounded_channel<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
+    let (tx, rx) = runtime.create_bounded_channel(capacity);
+    (Sender { tx }, Receiver { rx })
+}
+
+// Channel errors
+type SendError<T> is Disconnected(T);
+type RecvError is Disconnected;
+type TryRecvError is Empty | Disconnected;
+type TrySendError<T> is Full(T) | Disconnected(T);
+
+implement<T> Sender<T> {
+    // Send a value (blocking if bounded and full)
+    async fn send(&self, value: T) -> Result<(), SendError<T>> {
+        // Implementation by runtime
+    }
+
+    // Try to send without waiting
+    fn try_send(&self, value: T) -> Result<(), TrySendError<T>> {
+        // Implementation by runtime
+    }
+
+    // Check if receiver is still connected
+    fn is_connected(&self) -> Bool {
+        // Implementation by runtime
+    }
+
+    // Clone to create another sender (multi-producer)
+    fn clone(&self) -> Self {
+        // Implementation by runtime
+    }
+}
+
+implement<T> Receiver<T> {
+    // Receive a value (blocking)
+    async fn recv(&self) -> Result<T, RecvError> {
+        // Implementation by runtime
+    }
+
+    // Try to receive without waiting
+    fn try_recv(&self) -> Result<T, TryRecvError> {
+        // Implementation by runtime
+    }
+
+    // Receive with timeout
+    // NOTE: select expression is not part of Verum grammar
+    // This would use a timeout-aware receive implementation instead
+    async fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvError> {
+        // Implementation uses runtime-provided timeout mechanism
+        runtime.recv_with_timeout(self, timeout).await
+    }
+
+    // Iterate over received values
+    async fn iter(&self) -> impl AsyncIterator<Item = T> {
+        AsyncRecvIter { rx: self }
+    }
+}
+
+type AsyncRecvIter<T> is { rx: &Receiver<T> };
+
+implement<T> AsyncIterator for AsyncRecvIter<T> {
+    type Item = T;
+
+    async fn next(&mut self) -> Maybe<T> {
+        match self.rx.recv().await {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        }
+    }
+}
+
+// Channel with buffer for backpressure
+type BufferedSender<T> is {
+    inner: Sender<T>,
+    buffer: List<T>,
+    max_buffer: Int,
+};
+
+implement<T> BufferedSender<T> {
+    fn new(sender: Sender<T>, max_buffer: Int) -> Self {
+        Self { inner: sender, buffer: [], max_buffer }
+    }
+
+    fn push(&mut self, value: T) {
+        self.buffer.push(value);
+    }
+
+    async fn flush(&mut self) -> Result<(), SendError<T>> {
+        while let Some(value) = self.buffer.pop() {
+            self.inner.send(value).await?;
+        }
+        Ok(())
+    }
+
+    async fn flush_if_full(&mut self) -> Result<(), SendError<T>> {
+        if self.buffer.len() >= self.max_buffer {
+            self.flush().await?;
+        }
+        Ok(())
+    }
+}
+
+async fn main() {
+    let (tx, rx) = channel<Int>();
+
+    // Spawn sender
+    let sender_handle = spawn {
+        for i in 1..=3 {
+            tx.send(i).await.unwrap();
+            println(f"Sent: {i}");
+        }
+        drop(tx);  // Close channel
+    };
+
+    // Spawn receiver
+    let receiver_handle = spawn {
+        for await value in rx.iter().await {
+            println(f"Received: {value}");
+        }
+        println("Channel closed");
+    };
+
+    sender_handle.await;
+    receiver_handle.await;
+}

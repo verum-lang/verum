@@ -1,0 +1,59 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, binop
+// @expected-exit: 0
+
+// Tests REAL tensor binary operations through AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let a = tensor_new(4, 1);
+    let a = tensor_set_scalar(a, 0, 10);
+    let a = tensor_set_scalar(a, 1, 20);
+    let a = tensor_set_scalar(a, 2, 30);
+    let a = tensor_set_scalar(a, 3, 40);
+
+    let b = tensor_new(4, 1);
+    let b = tensor_set_scalar(b, 0, 2);
+    let b = tensor_set_scalar(b, 1, 5);
+    let b = tensor_set_scalar(b, 2, 3);
+    let b = tensor_set_scalar(b, 3, 4);
+
+    let sum = tensor_binop(a, b, 0);
+    errors = errors + check_val(sum, 0, 12);
+    errors = errors + check_val(sum, 1, 25);
+
+    let diff = tensor_binop(a, b, 1);
+    errors = errors + check_val(diff, 0, 8);
+    errors = errors + check_val(diff, 1, 15);
+
+    let prod = tensor_binop(a, b, 2);
+    errors = errors + check_val(prod, 0, 20);
+    errors = errors + check_val(prod, 1, 100);
+
+    let quot = tensor_binop(a, b, 3);
+    errors = errors + check_val(quot, 0, 5);
+    errors = errors + check_val(quot, 1, 4);
+
+    let zero = tensor_binop(a, a, 1);
+    errors = errors + check_val(zero, 0, 0);
+    errors = errors + check_val(zero, 3, 0);
+
+    errors
+}

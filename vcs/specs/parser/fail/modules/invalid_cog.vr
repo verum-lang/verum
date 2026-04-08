@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, modules, cog, error
+// @description: Test invalid cog keyword usage without proper context
+// @expected-error: E018
+
+cog;

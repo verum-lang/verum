@@ -1,0 +1,421 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, latency, aot, native, micro
+// @description: Tier 3 AOT native CBGR latency benchmark (target: < 15ns per check)
+
+/// Tier 3 (AOT Native) CBGR Latency Benchmark
+///
+/// This benchmark measures CBGR overhead with ahead-of-time native compilation.
+/// Tier 3 produces fully optimized native code with:
+///
+/// - Full LLVM optimization pipeline (O3)
+/// - Link-time optimization (LTO)
+/// - Profile-guided optimization (PGO) support
+/// - Architecture-specific optimizations (AVX, SSE, etc.)
+/// - Static dispatch where possible
+///
+/// Target: < 15ns per check (typically 2-5ns in practice)
+///
+/// The AOT compilation eliminates:
+/// - JIT compilation overhead
+/// - Deoptimization guards
+/// - Runtime type checks for monomorphized code
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 100_000_000;
+const EXPECTED_LATENCY_NS: Float = 15.0;
+
+fn main() {
+    let results = BenchmarkResults.new("Tier 3 AOT Native CBGR Latency");
+
+    // AOT-optimized CBGR benchmarks
+    results.add(benchmark_native_thin_ref());
+    results.add(benchmark_native_fat_ref());
+    results.add(benchmark_vectorized_access());
+    results.add(benchmark_cache_aligned_access());
+    results.add(benchmark_prefetched_access());
+    results.add(benchmark_branchless_check());
+    results.add(benchmark_simd_batch_check());
+
+    results.report();
+    results.export_json("/tmp/cbgr_aot_results.json");
+
+    assert(results.all_pass(), "Tier 3 CBGR latency exceeds 15ns target");
+}
+
+/// Benchmark: Native thin reference access (minimal overhead)
+fn benchmark_native_thin_ref() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let thin_ref: &Int = &*data;
+
+    // Warmup for cache priming
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*thin_ref);
+    }
+
+    let timer = Timer.high_precision();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(*thin_ref);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "native_thin_ref",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+        percentiles: measure_percentiles(|| { black_box(*thin_ref); }),
+    }
+}
+
+/// Benchmark: Native fat reference with bounds checking
+fn benchmark_native_fat_ref() -> BenchmarkResult {
+    let data = [0; 10_000];
+    let fat_ref: &[Int] = &data[..];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(fat_ref[5000]);
+    }
+
+    let timer = Timer.high_precision();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let idx = (i % 10_000) as Int;
+        black_box(fat_ref[idx]);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "native_fat_ref",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+        percentiles: None,
+    }
+}
+
+/// Benchmark: Vectorized batch access with SIMD
+fn benchmark_vectorized_access() -> BenchmarkResult {
+    let data = [0i64; 1024];  // Aligned for SIMD
+    let ref_data = &data[..];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let mut sum = 0i64;
+        for i in 0..1024 {
+            sum += ref_data[i];
+        }
+        black_box(sum);
+    }
+
+    let timer = Timer.high_precision();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1024) {
+        let mut sum = 0i64;
+        // Should be auto-vectorized with SIMD
+        for i in 0..1024 {
+            sum += ref_data[i];
+        }
+        black_box(sum);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Vectorized access amortizes CBGR check cost
+    let vectorized_target = EXPECTED_LATENCY_NS * 0.3;
+
+    BenchmarkResult {
+        name: "vectorized_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: vectorized_target,
+        passed: per_op_ns < vectorized_target,
+        percentiles: None,
+    }
+}
+
+/// Benchmark: Cache-line aligned access pattern
+fn benchmark_cache_aligned_access() -> BenchmarkResult {
+    // Allocate cache-line aligned data (64 bytes)
+    let data = Heap.aligned_new(64, [0; 8]);
+    let ref_data = &*data;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(ref_data[0]);
+    }
+
+    let timer = Timer.high_precision();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Access aligned data - should be cache-optimal
+        black_box(ref_data[0]);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Cache-aligned should be slightly faster
+    let aligned_target = EXPECTED_LATENCY_NS * 0.8;
+
+    BenchmarkResult {
+        name: "cache_aligned_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: aligned_target,
+        passed: per_op_ns < aligned_target,
+        percentiles: None,
+    }
+}
+
+/// Benchmark: Prefetched sequential access
+fn benchmark_prefetched_access() -> BenchmarkResult {
+    let data = [0; 100_000];
+    let ref_data = &data[..];
+
+    for _ in 0..(WARMUP_ITERATIONS / 100) {
+        for i in 0..100 {
+            black_box(ref_data[i]);
+        }
+    }
+
+    let timer = Timer.high_precision();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        for i in 0..1000 {
+            // Prefetch next cache line
+            if i + 64 < 1000 {
+                prefetch(&ref_data[i + 64]);
+            }
+            black_box(ref_data[i]);
+        }
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "prefetched_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+        percentiles: None,
+    }
+}
+
+/// Benchmark: Branchless CBGR check implementation
+fn benchmark_branchless_check() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let thin_ref = &*data;
+
+    // Get generation values for branchless comparison
+    let stored_gen = thin_ref.stored_generation();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // Branchless: use conditional move instead of branch
+        let valid = (data.generation() == stored_gen) as Int;
+        black_box(valid * *thin_ref);
+    }
+
+    let timer = Timer.high_precision();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Branchless check eliminates branch misprediction
+        let valid = (data.generation() == stored_gen) as Int;
+        black_box(valid * *thin_ref);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "branchless_check",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+        percentiles: None,
+    }
+}
+
+/// Benchmark: SIMD batch generation checking
+fn benchmark_simd_batch_check() -> BenchmarkResult {
+    // Allocate multiple heap values for batch checking
+    let values: List<Heap<Int>> = (0..8).map(|i| Heap.new(i)).collect();
+    let refs: List<&Int> = values.iter().map(|v| &**v).collect();
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // Batch check all 8 generations at once using SIMD
+        let valid = batch_generation_check(&refs);
+        black_box(valid);
+    }
+
+    let timer = Timer.high_precision();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 8) {
+        // SIMD allows checking 8 generations in parallel
+        let valid = batch_generation_check(&refs);
+        black_box(valid);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Batch checking should be very efficient
+    let simd_target = EXPECTED_LATENCY_NS * 0.5;
+
+    BenchmarkResult {
+        name: "simd_batch_check",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: simd_target,
+        passed: per_op_ns < simd_target,
+        percentiles: None,
+    }
+}
+
+/// SIMD batch generation check using 256-bit vectors
+@inline
+fn batch_generation_check(refs: &List<&Int>) -> Bool {
+    // Pack 8 generations into a SIMD vector
+    let stored = simd.i32x8.from_array([
+        refs[0].stored_generation() as i32,
+        refs[1].stored_generation() as i32,
+        refs[2].stored_generation() as i32,
+        refs[3].stored_generation() as i32,
+        refs[4].stored_generation() as i32,
+        refs[5].stored_generation() as i32,
+        refs[6].stored_generation() as i32,
+        refs[7].stored_generation() as i32,
+    ]);
+
+    // Get current generations (would need runtime support)
+    let current = simd.i32x8.splat(0);  // Placeholder
+
+    // SIMD comparison - all must match
+    (stored == current).all()
+}
+
+/// Measure latency percentiles for detailed analysis
+fn measure_percentiles<F: Fn()>(op: F) -> Maybe<Percentiles> {
+    let samples = 10_000;
+    let mut latencies: List<Int> = List.with_capacity(samples);
+
+    for _ in 0..samples {
+        let timer = Timer.high_precision();
+        timer.start();
+        op();
+        latencies.push(timer.elapsed_ns());
+    }
+
+    latencies.sort();
+
+    Some(Percentiles {
+        p50: latencies[samples / 2],
+        p90: latencies[(samples * 90) / 100],
+        p99: latencies[(samples * 99) / 100],
+        p999: latencies[(samples * 999) / 1000],
+        max: latencies[samples - 1],
+    })
+}
+
+type Percentiles is {
+    p50: Int,
+    p90: Int,
+    p99: Int,
+    p999: Int,
+    max: Int,
+};
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    total_ns: Int,
+    per_op_ns: Float,
+    target_ns: Float,
+    passed: Bool,
+    percentiles: Maybe<Percentiles>,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2}ns (target: {:.2}ns)",
+                    status, result.name, result.per_op_ns, result.target_ns);
+
+            if let Some(p) = result.percentiles {
+                println("      p50={}, p90={}, p99={}, p999={}, max={}",
+                        p.p50, p.p90, p.p99, p.p999, p.max);
+            }
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+
+    fn export_json(self, path: Text) {
+        let json = Json.object();
+        json.set("suite", self.suite_name);
+
+        let results_json = Json.array();
+        for result in self.results {
+            let r = Json.object();
+            r.set("name", result.name);
+            r.set("iterations", result.iterations);
+            r.set("per_op_ns", result.per_op_ns);
+            r.set("target_ns", result.target_ns);
+            r.set("passed", result.passed);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string());
+    }
+}

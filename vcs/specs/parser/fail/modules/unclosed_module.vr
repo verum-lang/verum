@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, modules, unclosed, error
+// @description: Test unclosed module block
+// @expected-error: E018
+
+module foo {
+    fn bar() {}

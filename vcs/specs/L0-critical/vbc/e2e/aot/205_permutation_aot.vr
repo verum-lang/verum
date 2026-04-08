@@ -1,0 +1,150 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, permutation, combinatorics
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for permutation and combinatorics algorithms
+
+fn factorial(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 2;
+    while i <= n {
+        r = r * i;
+        i = i + 1;
+    }
+    r
+}
+
+fn binomial(n: Int, k: Int) -> Int {
+    if k > n { return 0; }
+    if k == 0 { return 1; }
+    if k == n { return 1; }
+    // Use symmetry
+    let mut kk = k;
+    if kk > n - kk { kk = n - kk; }
+    let mut result = 1;
+    let mut i = 0;
+    while i < kk {
+        result = result * (n - i);
+        result = result / (i + 1);
+        i = i + 1;
+    }
+    result
+}
+
+fn permutations(n: Int, r: Int) -> Int {
+    // P(n, r) = n! / (n-r)!
+    let mut result = 1;
+    let mut i = 0;
+    while i < r {
+        result = result * (n - i);
+        i = i + 1;
+    }
+    result
+}
+
+fn derangements(n: Int) -> Int {
+    // D(n) = (n-1) * (D(n-1) + D(n-2))
+    // D(0) = 1, D(1) = 0
+    if n == 0 { return 1; }
+    if n == 1 { return 0; }
+    let mut a = 1;  // D(0)
+    let mut b = 0;  // D(1)
+    let mut i = 2;
+    while i <= n {
+        let t = (i - 1) * (a + b);
+        a = b;
+        b = t;
+        i = i + 1;
+    }
+    b
+}
+
+// Lehmer code: convert permutation index to permutation
+// For 3 elements: 0=[0,1,2], 1=[0,2,1], 2=[1,0,2], 3=[1,2,0], 4=[2,0,1], 5=[2,1,0]
+fn perm3_first(index: Int) -> Int {
+    // First element of permutation at given index
+    index / 2
+}
+
+fn perm3_element(index: Int, pos: Int) -> Int {
+    // For n=3, manually compute element at position
+    let first = index / 2;
+    let sub_idx = index % 2;
+    if pos == 0 { return first; }
+    // Remaining elements
+    let mut rem0 = 0;
+    let mut rem1 = 0;
+    if first == 0 { rem0 = 1; rem1 = 2; }
+    else if first == 1 { rem0 = 0; rem1 = 2; }
+    else { rem0 = 0; rem1 = 1; }
+    if pos == 1 {
+        if sub_idx == 0 { rem0 } else { rem1 }
+    } else {
+        if sub_idx == 0 { rem1 } else { rem0 }
+    }
+}
+
+fn test_factorial() {
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(1), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+}
+
+fn test_binomial() {
+    assert_eq(binomial(5, 0), 1);
+    assert_eq(binomial(5, 1), 5);
+    assert_eq(binomial(5, 2), 10);
+    assert_eq(binomial(5, 3), 10);
+    assert_eq(binomial(5, 5), 1);
+    assert_eq(binomial(10, 3), 120);
+    assert_eq(binomial(10, 5), 252);
+    // Pascal's rule: C(n,k) = C(n-1,k-1) + C(n-1,k)
+    assert_eq(binomial(6, 3), binomial(5, 2) + binomial(5, 3));
+}
+
+fn test_permutations() {
+    assert_eq(permutations(5, 0), 1);
+    assert_eq(permutations(5, 1), 5);
+    assert_eq(permutations(5, 2), 20);
+    assert_eq(permutations(5, 5), 120);
+    assert_eq(permutations(10, 3), 720);
+}
+
+fn test_derangements() {
+    assert_eq(derangements(0), 1);
+    assert_eq(derangements(1), 0);
+    assert_eq(derangements(2), 1);
+    assert_eq(derangements(3), 2);
+    assert_eq(derangements(4), 9);
+    assert_eq(derangements(5), 44);
+    assert_eq(derangements(6), 265);
+}
+
+fn test_perm3() {
+    // Permutation 0: [0, 1, 2]
+    assert_eq(perm3_element(0, 0), 0);
+    assert_eq(perm3_element(0, 1), 1);
+    assert_eq(perm3_element(0, 2), 2);
+
+    // Permutation 5: [2, 1, 0]
+    assert_eq(perm3_element(5, 0), 2);
+    assert_eq(perm3_element(5, 1), 1);
+    assert_eq(perm3_element(5, 2), 0);
+
+    // Total permutations of 3 elements = 6
+    assert_eq(factorial(3), 6);
+}
+
+fn main() -> Int {
+    test_factorial();
+    test_binomial();
+    test_permutations();
+    test_derangements();
+    test_perm3();
+    print("[OK] 205_permutation_aot");
+    0
+}

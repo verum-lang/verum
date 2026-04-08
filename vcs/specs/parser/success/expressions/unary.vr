@@ -1,0 +1,52 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, unary
+// @description: Test unary expression parsing
+
+fn test_unary_expressions() {
+    // Negation
+    let a = -x;
+    let b = -42;
+    let c = --x;
+    let d = -(a + b);
+
+    // Logical not
+    let e = !flag;
+    let f = !true;
+    let g = !!flag;
+    let h = !(a && b);
+
+    // Bitwise not
+    let i = ~bits;
+    let j = ~0xFF;
+    let k = ~~bits;
+    let l = ~(a | b);
+
+    // Reference operators
+    let m = &value;
+    let n = &mut value;
+    let o = &&value;
+
+    // Three-tier references
+    let p = &checked value;
+    let q = &checked mut value;
+    let r = &unsafe value;
+    let s = &unsafe mut value;
+
+    // Dereference
+    let t = *ptr;
+    let u = **ptr;
+    let v = *(&value);
+
+    // Combined
+    let w = -&x;
+    let x = !*flag_ptr;
+    let y = &-value;
+    let z = *&*ptr;
+
+    // With postfix
+    let aa = -obj.field;
+    let ab = !obj.method();
+    let ac = &array[0];
+    let ad = *ptr.field;
+}

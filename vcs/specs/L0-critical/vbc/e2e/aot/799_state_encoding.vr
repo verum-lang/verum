@@ -1,0 +1,154 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, state_encoding
+// @expected-exit: 0
+
+// State encoding techniques
+
+// One-hot encoding: state N (0-indexed) is represented as 2^N
+fn one_hot_encode(state_idx: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while (i < state_idx) {
+        result = result * 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Decode one-hot: find which bit is set (returns state index)
+fn one_hot_decode(encoded: Int) -> Int {
+    let mut val = encoded;
+    let mut idx = 0;
+    while (val > 1) {
+        val = val / 2;
+        idx = idx + 1;
+    }
+    idx
+}
+
+// Validate one-hot: exactly one bit set
+fn is_valid_one_hot(encoded: Int) -> Int {
+    if (encoded <= 0) { return 0; }
+    // Check power of 2: n & (n-1) == 0
+    // We simulate: count set bits
+    let mut val = encoded;
+    let mut count = 0;
+    while (val > 0) {
+        count = count + (val % 2);
+        val = val / 2;
+    }
+    if (count == 1) { return 1; }
+    0
+}
+
+// Binary encoding: state N is just N
+fn binary_encode(state_idx: Int) -> Int {
+    state_idx
+}
+
+fn binary_decode(encoded: Int) -> Int {
+    encoded
+}
+
+// Thermometer encoding: state N (0-indexed out of max states) has N+1 lowest bits set
+// E.g., state 0 = 0b0001, state 1 = 0b0011, state 2 = 0b0111, state 3 = 0b1111
+fn thermometer_encode(state_idx: Int) -> Int {
+    // (2^(state_idx+1)) - 1
+    let mut result = 1;
+    let mut i = 0;
+    while (i <= state_idx) {
+        result = result * 2;
+        i = i + 1;
+    }
+    result - 1
+}
+
+// Decode thermometer: count number of set bits minus 1
+fn thermometer_decode(encoded: Int) -> Int {
+    let mut val = encoded;
+    let mut count = 0;
+    while (val > 0) {
+        count = count + (val % 2);
+        val = val / 2;
+    }
+    count - 1
+}
+
+// Validate thermometer: all set bits must be contiguous from LSB
+fn is_valid_thermometer(encoded: Int) -> Int {
+    if (encoded <= 0) { return 0; }
+    // Valid if encoded + 1 is power of 2
+    let next_val = encoded + 1;
+    is_valid_one_hot(next_val)
+}
+
+// State transition table lookup
+// Table stored as flat list: [from_state * num_inputs + input] = to_state
+// Example: 4-state FSM with 2 inputs
+fn transition_lookup(table: List<Int>, from_state: Int, input_val: Int, num_inputs: Int) -> Int {
+    let idx = from_state * num_inputs + input_val;
+    table[idx]
+}
+
+// Run FSM for a sequence of inputs
+fn run_fsm(table: List<Int>, num_inputs: Int, initial_state: Int, inputs: List<Int>, num_steps: Int) -> Int {
+    let mut current = initial_state;
+    let mut i = 0;
+    while (i < num_steps) {
+        current = transition_lookup(table, current, inputs[i], num_inputs);
+        i = i + 1;
+    }
+    current
+}
+
+fn main() -> Int {
+    // Test 1: One-hot encode state 3 = 2^3 = 8
+    assert_eq(one_hot_encode(3), 8);
+
+    // Test 2: One-hot decode 8 = state 3
+    assert_eq(one_hot_decode(8), 3);
+
+    // Test 3: One-hot roundtrip for state 5
+    let enc5 = one_hot_encode(5);
+    assert_eq(one_hot_decode(enc5), 5);
+
+    // Test 4: Validate one-hot: 8 is valid (one bit), 6 is not (two bits)
+    assert_eq(is_valid_one_hot(8), 1);
+
+    // Test 5: 6 = 0b110 is NOT valid one-hot
+    assert_eq(is_valid_one_hot(6), 0);
+
+    // Test 6: Thermometer encode state 2 = 0b0111 = 7
+    assert_eq(thermometer_encode(2), 7);
+
+    // Test 7: Thermometer decode 7 = state 2 (3 bits set, minus 1)
+    assert_eq(thermometer_decode(7), 2);
+
+    // Test 8: Thermometer roundtrip for state 4
+    let therm4 = thermometer_encode(4);
+    // state 4 = 2^5 - 1 = 31 = 0b11111
+    assert_eq(thermometer_decode(therm4), 4);
+
+    // Test 9: FSM transition table test
+    // Simple 3-state FSM (states 0,1,2) with 2 inputs (0,1)
+    // Table layout (state * 2 + input):
+    // State 0, input 0 -> 1
+    // State 0, input 1 -> 0
+    // State 1, input 0 -> 2
+    // State 1, input 1 -> 0
+    // State 2, input 0 -> 2
+    // State 2, input 1 -> 1
+    let fsm_table = [1, 0, 2, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // From state 0, input 0 -> state 1
+    assert_eq(transition_lookup(fsm_table, 0, 0, 2), 1);
+
+    // Test 10: Run FSM sequence: start=0, inputs=[0, 0, 1, 0]
+    // State 0 --0--> 1 --0--> 2 --1--> 1 --0--> 2
+    let inputs = [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(run_fsm(fsm_table, 2, 0, inputs, 4), 2);
+
+    print("799_state_encoding: PASS");
+    0
+}

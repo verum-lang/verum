@@ -1,0 +1,122 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, try, question-mark, propagation, error
+
+// Simple question mark on Result
+fn example() -> Result<Int, Error> {
+    let value = fallible_operation()?;
+    Ok(value)
+}
+
+// Question mark on Option/Maybe
+fn find_value() -> Maybe<Int> {
+    let item = list.find(predicate)?;
+    Some(item.value)
+}
+
+// Chained question marks
+fn pipeline() -> Result<Output, Error> {
+    let a = step_one()?;
+    let b = step_two(a)?;
+    let c = step_three(b)?;
+    Ok(c)
+}
+
+// Question mark on method call
+fn process() -> Result<Data, Error> {
+    let data = resource.fetch()?.parse()?.validate()?;
+    Ok(data)
+}
+
+// Question mark on function call
+fn compute() -> Result<Int, Error> {
+    Ok(calculate(get_input()?)?)
+}
+
+// Question mark in expression
+fn combine() -> Result<Int, Error> {
+    let sum = get_a()? + get_b()? + get_c()?;
+    Ok(sum)
+}
+
+// Question mark with map
+fn transform() -> Result<List<Int>, Error> {
+    let items = fetch_items()?;
+    let transformed = items.map(|x| x * 2);
+    Ok(transformed)
+}
+
+// Question mark in match arm
+fn handle(category: Category) -> Result<Int, Error> {
+    match category {
+        a if a == CategoryA => process_a()?,
+        b if b == CategoryB => process_b()?,
+        _ => Err(create_error()),
+    }
+}
+
+// Question mark in if expression
+fn conditional() -> Result<Int, Error> {
+    if condition {
+        Ok(risky_a()?)
+    } else {
+        Ok(risky_b()?)
+    }
+}
+
+// Question mark with type conversion
+fn with_conversion() -> Result<Int, MyError> {
+    let value = external_call()?;
+    Ok(value)
+}
+
+// Question mark on nested Result
+fn nested() -> Result<Int, Error> {
+    let outer = get_outer()?;
+    let inner = outer.get_inner()?;
+    Ok(inner.value)
+}
+
+// Question mark in async context
+async fn async_fetch() -> Result<Data, Error> {
+    let response = http_get(url).await?;
+    let data = response.json().await?;
+    Ok(data)
+}
+
+// Question mark on field access result
+fn access() -> Result<Int, Error> {
+    let obj = get_object()?;
+    Ok(obj.field)
+}
+
+// Multiple question marks in one line
+fn compact() -> Result<Int, Error> {
+    Ok(a()? + b()? * c()?)
+}
+
+// Question mark in loop
+fn process_all() -> Result<List<Int>, Error> {
+    let mut results = [];
+    for item in items {
+        results.push(process_item(item)?);
+    }
+    Ok(results)
+}
+
+// Question mark on index operation
+fn get_element() -> Result<Int, Error> {
+    let list = get_list()?;
+    let index = get_index()?;
+    Ok(list[index])
+}
+
+// Early return pattern with question mark
+fn early_return() -> Result<Int, Error> {
+    let value = operation()?;
+    if value < 0 {
+        return Err(create_negative_error());
+    }
+    Ok(value * 2)
+}

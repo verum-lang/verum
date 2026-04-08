@@ -1,0 +1,87 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, create
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL tensor creation intrinsics through VBC interpreter pipeline.
+// Exercises: tensor_new, tensor_fill, tensor_get_scalar, tensor_set_scalar,
+// tensor_from_slice via actual TensorExtended sub-opcodes (NewFromArgs,
+// FillFromArgs, FromSliceArgs, GetElementFromArgs, SetElementFromArgs).
+
+// Helper: compare two tensor scalars at given indices.
+// Returns 0 if equal (same f64 bit pattern), 1 if different.
+fn check_eq(a: Int, a_idx: Int, b: Int, b_idx: Int) -> Int {
+    let va = tensor_get_scalar(a, a_idx);
+    let vb = tensor_get_scalar(b, b_idx);
+    if va != vb { 1 } else { 0 }
+}
+
+// Helper: check a tensor element equals an expected integer value.
+// Creates a 1-element tensor filled with expected_val, then compares.
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    check_eq(t, idx, e, 0)
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // --- Test 1: tensor_new creates zero-filled tensor ---
+    let t1 = tensor_new(4, 1);
+    errors = errors + check_val(t1, 0, 0);
+    errors = errors + check_val(t1, 1, 0);
+    errors = errors + check_val(t1, 2, 0);
+    errors = errors + check_val(t1, 3, 0);
+
+    // --- Test 2: tensor_fill creates value-filled tensor ---
+    let t2 = tensor_fill(4, 42, 1);
+    errors = errors + check_val(t2, 0, 42);
+    errors = errors + check_val(t2, 1, 42);
+    errors = errors + check_val(t2, 2, 42);
+    errors = errors + check_val(t2, 3, 42);
+
+    // --- Test 3: tensor_fill with different values ---
+    let t3 = tensor_fill(3, 100, 1);
+    errors = errors + check_val(t3, 0, 100);
+    errors = errors + check_val(t3, 1, 100);
+    errors = errors + check_val(t3, 2, 100);
+
+    // --- Test 4: tensor_set_scalar modifies element ---
+    let t4 = tensor_fill(3, 10, 1);
+    let t4b = tensor_set_scalar(t4, 1, 99);
+    errors = errors + check_val(t4b, 0, 10);
+    errors = errors + check_val(t4b, 1, 99);
+    errors = errors + check_val(t4b, 2, 10);
+
+    // --- Test 5: tensor_from_slice with single element ---
+    let t5 = tensor_from_slice(7, 1, 1);
+    errors = errors + check_val(t5, 0, 7);
+
+    // --- Test 6: tensor_new with different sizes ---
+    let t6 = tensor_new(1, 1);
+    errors = errors + check_val(t6, 0, 0);
+
+    let t7 = tensor_new(8, 1);
+    errors = errors + check_val(t7, 7, 0);
+
+    // --- Test 7: Multiple tensors coexist ---
+    let a = tensor_fill(2, 10, 1);
+    let b = tensor_fill(2, 20, 1);
+    let c = tensor_fill(2, 30, 1);
+    errors = errors + check_val(a, 0, 10);
+    errors = errors + check_val(b, 0, 20);
+    errors = errors + check_val(c, 0, 30);
+
+    // --- Test 8: Overwrite with set_scalar chain ---
+    let t8 = tensor_new(3, 1);
+    let t8 = tensor_set_scalar(t8, 0, 1);
+    let t8 = tensor_set_scalar(t8, 1, 2);
+    let t8 = tensor_set_scalar(t8, 2, 3);
+    errors = errors + check_val(t8, 0, 1);
+    errors = errors + check_val(t8, 1, 2);
+    errors = errors + check_val(t8, 2, 3);
+
+    errors
+}

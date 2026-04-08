@@ -1,0 +1,188 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: parser, patterns, and-patterns, pattern-combination
+// @timeout: 10000
+// @expect: pass
+//
+// And Pattern Tests - Section 11 of docs/improvements.md
+//
+// The & operator combines multiple patterns that must ALL match.
+// This is useful for testing multiple conditions on the same value.
+//
+// Grammar (from verum.ebnf):
+//   and_pattern = primary_pattern , { '&' , primary_pattern } ;
+
+// =============================================================================
+// Basic And Patterns with Identifiers
+// =============================================================================
+
+fn test_basic_and_binding(value: Int) -> Int {
+    // Both patterns bind to the same value
+    match value {
+        x & y => x + y, // Both x and y are bound to value
+    }
+}
+
+// =============================================================================
+// And Patterns with Type Refinement
+// =============================================================================
+
+type Status is
+    | Active { since: Int }
+    | Inactive
+    | Pending { priority: Int };
+
+fn test_and_with_variant(status: Status) -> Text {
+    match status {
+        // Combine variant match with field access
+        Active { since } & s => f"Active since {since}",
+        Pending { priority } & p if priority > 5 => "High priority pending",
+        Pending { priority } => f"Low priority: {priority}",
+        Inactive => "Inactive",
+    }
+}
+
+// =============================================================================
+// And Patterns with Guards
+// =============================================================================
+
+fn test_and_with_guard(n: Int) -> Text {
+    match n {
+        x & y if x > 0 && y < 100 => "in range (0, 100)",
+        x & _ if x <= 0 => "non-positive",
+        _ => "too large",
+    }
+}
+
+// =============================================================================
+// Triple And Patterns
+// =============================================================================
+
+fn test_triple_and(n: Int) -> (Int, Int, Int) {
+    match n {
+        a & b & c => (a, b, c), // All three bound to same value
+    }
+}
+
+// =============================================================================
+// And Patterns with Literal Checks
+// =============================================================================
+
+fn test_and_with_literal(n: Int) -> Text {
+    match n {
+        0 & x => f"zero bound as {x}", // 0 matches literal AND binds x
+        x & y if x == y => f"equal bindings: {x}",
+        _ => "other",
+    }
+}
+
+// =============================================================================
+// Precedence: AND binds tighter than OR
+// =============================================================================
+
+fn test_and_or_precedence(n: Int) -> Text {
+    // And-pattern with guard: both x and y bind to the value
+    match n {
+        x & y if x > 0 => "positive",
+        x & y if x < 0 => "negative",
+        _ => "zero",
+    }
+}
+
+fn test_explicit_or_of_ands(n: Int) -> Text {
+    // Or-patterns require each alternative to bind the same variables.
+    // Use and-patterns within each alternative with consistent naming.
+    match n {
+        x & y if x > 0 => f"positive: {x}",
+        x & y if x <= 0 => f"non-positive: {x}",
+        _ => "no match",
+    }
+}
+
+// =============================================================================
+// And Patterns with Nested Patterns
+// =============================================================================
+
+type Pair is { first: Int, second: Int };
+
+fn test_and_with_record(pair: Pair) -> Int {
+    match pair {
+        Pair { first: a, second: b } & whole => a + b,
+    }
+}
+
+type Maybe<T> is None | Some(T);
+
+fn test_and_with_variant_data(opt: Maybe<Int>) -> Text {
+    match opt {
+        Maybe.Some(x) & full => f"has value {x}",
+        Maybe.None & empty => "empty",
+    }
+}
+
+// =============================================================================
+// And Patterns in Let Bindings
+// =============================================================================
+
+fn test_and_in_let(n: Int) -> Int {
+    let x & y = n;  // Both x and y are bound to n
+    x + y
+}
+
+// =============================================================================
+// And Patterns with Reference Patterns
+// =============================================================================
+
+fn test_and_with_ref(data: &Int) -> Int {
+    match data {
+        &x & y => x,  // Reference pattern on reference type
+    }
+}
+
+// =============================================================================
+// Complex And Pattern Chains
+// =============================================================================
+
+fn test_complex_chain(values: (Int, Int, Int)) -> Text {
+    match values {
+        (a, b, c) & tuple & all if a + b == c => "sum pattern",
+        (x, y, z) & t => f"triple: {x}, {y}, {z}",
+    }
+}
+
+// =============================================================================
+// Main Test Function
+// =============================================================================
+
+fn main() {
+    // Test basic and binding
+    assert_eq(test_basic_and_binding(5), 10);
+
+    // Test triple and
+    assert_eq(test_triple_and(42), (42, 42, 42));
+
+    // Test and with guard
+    assert_eq(test_and_with_guard(50), "in range (0, 100)");
+    assert_eq(test_and_with_guard(-10), "non-positive");
+    assert_eq(test_and_with_guard(200), "too large");
+
+    // Test and in let binding
+    assert_eq(test_and_in_let(10), 20);
+
+    // Test with variants
+    let status = Status.Active { since: 2024 };
+    assert_eq(test_and_with_variant(status), "Active since 2024");
+
+    // Test with Maybe
+    let some_val = Maybe.Some(42);
+    assert_eq(test_and_with_variant_data(some_val), "has value 42");
+    let none_val = Maybe.None;
+    assert_eq(test_and_with_variant_data(none_val), "empty");
+
+    // Test with record
+    let pair = Pair { first: 10, second: 20 };
+    assert_eq(test_and_with_record(pair), 30);
+
+    print("All and pattern tests passed!");
+}

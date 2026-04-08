@@ -1,0 +1,256 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, hkt, higher-kinded, kind
+// @expected-error: E400
+
+/// Test for Higher-Kinded Type (HKT) kind mismatch errors.
+/// These examples should fail with E411 when type constructors have incompatible kinds.
+///
+/// Kind system in Verum:
+///   * (Type): Concrete types like Int, Text, Bool
+///   * -> *: Type constructors with one parameter like List<_>, Maybe<_>
+///   * -> -> *: Type constructors with two parameters like Map<_, _>, Result<_, _>
+///   (* -> *) -> *: Higher-kinded types that take type constructors
+
+// === Basic Kind Definitions ===
+
+// * kind: concrete types
+type Unit is ();
+type MyInt is Int;
+
+// * -> * kind: single parameter type constructors
+type Maybe<T> is None | Some(T);
+type List<T> is Nil | Cons { head: T, tail: Heap<List<T>> };
+
+// * -> * -> * kind: two parameter type constructors
+type Either<L, R> is Left(L) | Right(R);
+type Pair<A, B> is { first: A, second: B };
+
+// (* -> *) -> * kind: takes a type constructor
+type Fix<F<_>> is { unfix: F<Fix<F>> };
+
+fn main() {
+    // === Basic Kind Mismatches ===
+
+    // E411: Expected * -> * kind, got * kind
+    fn wrong_kind_concrete() {
+        type Wrapper<F<_>> is { inner: F<Int> };
+
+        // Int has kind *, not * -> *
+        type Bad is Wrapper<Int>;  // ERROR: Int has kind *, expected * -> *
+    }
+
+    // E411: Expected * kind, got * -> * kind
+    fn wrong_kind_constructor() {
+        type Container<T> is { value: T };
+
+        // List has kind * -> *, not *
+        type Bad is Container<List>;  // ERROR: List has kind * -> *, expected *
+    }
+
+    // E411: Expected * -> * -> * kind, got * -> * kind
+    fn wrong_arity_constructor() {
+        type BinaryOp<F<_, _>> is protocol {
+            fn combine<A, B>(a: F<A, B>) -> A;
+        };
+
+        // Maybe has kind * -> *, not * -> * -> *
+        type Bad is BinaryOp<Maybe>;  // ERROR: Maybe has kind * -> *, expected * -> * -> *
+    }
+
+    // === Higher-Kinded Protocol Errors ===
+
+    // E411: Kind mismatch in protocol implementation
+    type Functor is protocol {
+        type F<_>;
+        fn map<A, B>(fa: Self.F<A>, f: fn(A) -> B) -> Self.F<B>;
+    };
+
+    type Applicative is protocol extends Functor {
+        fn pure<A>(a: A) -> Self.F<A>;
+        fn ap<A, B>(ff: Self.F<fn(A) -> B>, fa: Self.F<A>) -> Self.F<B>;
+    };
+
+    // E411: Implementing Functor with wrong kind type
+    type IntFunctor is ();
+    implement Functor for IntFunctor {
+        type F<_> is Int;  // ERROR: Int has kind *, F expects * -> *
+        fn map<A, B>(fa: Self.F<A>, f: fn(A) -> B) -> Self.F<B> {
+            f(fa)  // This wouldn't even work
+        }
+    }
+
+    // E411: Associated type kind mismatch
+    type Container is protocol {
+        type Item;
+        type Wrapped<_>;
+    };
+
+    type BadContainer is ();
+    implement Container for BadContainer {
+        type Item is List;  // ERROR: List has kind * -> *, Item expects *
+        type Wrapped<_> is Int;  // ERROR: Int has kind *, Wrapped expects * -> *
+    }
+
+    // === Generic Function Kind Errors ===
+
+    // E411: Kind mismatch in generic function
+    fn traverse<F<_>: Applicative, A, B>(
+        list: List<A>,
+        f: fn(A) -> F<B>
+    ) -> F<List<B>> {
+        // Implementation...
+        unimplemented()
+    }
+
+    fn bad_traverse() {
+        // Int is not a type constructor
+        traverse<Int, Text, Int>([].iter(), |x| 42);  // ERROR: Int has kind *, expected * -> *
+    }
+
+    // E411: Wrong kind in type application
+    fn apply_type<F<_>, A>(x: F<A>) -> F<A> {
+        x
+    }
+
+    fn bad_apply() {
+        let x: Int = 42;
+        apply_type<Int, Text>(x);  // ERROR: Int has kind *, expected * -> *
+    }
+
+    // === Complex Kind Expressions ===
+
+    // E411: Nested kind mismatch
+    type Compose<F<_>, G<_>, A> is { value: F<G<A>> };
+
+    fn bad_compose() {
+        // Both F and G must be * -> *
+        type Bad1 is Compose<Int, List, Text>;  // ERROR: Int has kind *
+        type Bad2 is Compose<List, Int, Text>;  // ERROR: Int has kind *
+        type Bad3 is Compose<Either, List, Text>;  // ERROR: Either has kind * -> * -> *
+    }
+
+    // E411: Kind mismatch in Fix point
+    fn bad_fix() {
+        // Fix requires F to have kind * -> *
+        type Bad is Fix<Int>;  // ERROR: Int has kind *, Fix expects * -> *
+        type Bad2 is Fix<Either>;  // ERROR: Either has kind * -> * -> *, Fix expects * -> *
+    }
+
+    // === Kind Polymorphism Errors ===
+
+    // E411: Kind variable mismatch
+    type Proxy<T> is ();  // T has kind *
+
+    type KindedProxy<F<_>> is ();  // F has kind * -> *
+
+    fn proxy_mismatch() {
+        type P1 is Proxy<Int>;  // OK: Int has kind *
+        type P2 is Proxy<List>;  // ERROR: List has kind * -> *, Proxy expects *
+        type K1 is KindedProxy<List>;  // OK: List has kind * -> *
+        type K2 is KindedProxy<Int>;  // ERROR: Int has kind *, KindedProxy expects * -> *
+    }
+
+    // === Recursive Kind Errors ===
+
+    // E411: Kind mismatch in recursive type
+    type Tree<T> is Leaf(T) | Branch { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+    type BadTree is Tree<List>;  // ERROR: Tree expects *, List has kind * -> *
+
+    // E411: Kind mismatch in mutually recursive types
+    type Even<F<_>> is Zero | Succ(Odd<F>);
+    type Odd<F<_>> is Succ(Even<F>);
+
+    fn bad_even_odd() {
+        type Bad is Even<Int>;  // ERROR: Int has kind *, Even expects * -> *
+    }
+
+    // === GAT Kind Errors ===
+
+    // E411: Kind mismatch in Generic Associated Types
+    type Streaming is protocol {
+        type Stream<A>;
+        fn next<A>(&mut self) -> Maybe<Self.Stream<A>>;
+    };
+
+    type BadStream is ();
+    implement Streaming for BadStream {
+        type Stream<A> is A;  // OK: * -> * (identity)
+        fn next<A>(&mut self) -> Maybe<Self.Stream<A>> {
+            None
+        }
+    }
+
+    type WrongKindStream is ();
+    implement Streaming for WrongKindStream {
+        type Stream<A> is Int;  // This defines Stream as constant, but that's a degenerate * -> *
+        // The real error would be if we tried:
+        // type Stream = Int;  // ERROR: Expected * -> *, got *
+        fn next<A>(&mut self) -> Maybe<Self.Stream<A>> {
+            None
+        }
+    }
+
+    // === Natural Transformation Kind Errors ===
+
+    // Natural transformation: forall A. F<A> -> G<A>
+    type Nat<F<_>, G<_>> is protocol {
+        fn transform<A>(fa: F<A>) -> G<A>;
+    };
+
+    // E411: Wrong kind in natural transformation
+    implement Nat<Int, List> for () {  // ERROR: Int has kind *, expected * -> *
+        fn transform<A>(fa: Int) -> List<A> {
+            []
+        }
+    }
+
+    implement Nat<Maybe, Int> for () {  // ERROR: Int has kind *, expected * -> *
+        fn transform<A>(fa: Maybe<A>) -> Int {
+            0
+        }
+    }
+
+    // === Bifunctor Kind Errors ===
+
+    type Bifunctor is protocol {
+        type B<_, _>;
+        fn bimap<A, B, C, D>(
+            bab: Self.B<A, B>,
+            f: fn(A) -> C,
+            g: fn(B) -> D
+        ) -> Self.B<C, D>;
+    };
+
+    type BadBifunctor is ();
+    implement Bifunctor for BadBifunctor {
+        type B<_, _> is List;  // ERROR: List has kind * -> *, B expects * -> * -> *
+        fn bimap<A, B, C, D>(
+            bab: Self.B<A, B>,
+            f: fn(A) -> C,
+            g: fn(B) -> D
+        ) -> Self.B<C, D> {
+            unimplemented()
+        }
+    }
+
+    // === Kind Inference Failures ===
+
+    // E411: Cannot infer consistent kind
+    fn ambiguous_kind<F>(x: F) {
+        // F used as both * and * -> * would be an error
+        let y: F = x;  // F has kind *
+        let z: F<Int> = x;  // ERROR: F has kind *, cannot apply to Int
+    }
+
+    // E411: Conflicting kind constraints
+    fn conflicting_kinds<F<_>>(x: F<Int>, y: F) {
+        // F<Int> implies F has kind * -> *
+        // F alone implies F has kind *
+        // ERROR: F cannot have both kind * and * -> *
+    }
+}
+
+// All examples above should produce E411 "Kind mismatch" error

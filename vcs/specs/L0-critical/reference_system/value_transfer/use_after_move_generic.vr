@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, generics, negative-test
+
+/// Test that generic types correctly track moves for affine types at compile time.
+/// Use after move is caught even when affine types go through generics.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-types
+
+// Affine resource type
+type affine Handle is {
+    fd: Int,
+};
+
+// Generic wrapper
+type Wrapper<T> is {
+    value: T,
+};
+
+fn consume<T>(value: T) {}
+
+fn main() {
+    let wrapper = Wrapper { value: Handle { fd: 42 } };
+    consume(wrapper);  // wrapper moved (contains affine Handle)
+    print(wrapper.value.fd);  // COMPILE ERROR: type not found: wrapper
+}

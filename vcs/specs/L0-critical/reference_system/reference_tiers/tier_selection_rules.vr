@@ -1,0 +1,134 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: fixed by adding collection methods and indexing
+// @tags: reference_system, cbgr, reference-tiers, selection, rules
+// @description: Tests tier selection rules including static variables and unsafe references
+
+/// Test the rules for selecting reference tiers.
+/// Compiler should select appropriate tier based on context.
+/// Spec: 26-cbgr-implementation.md#tier-selection
+
+fn main() {
+    test_default_tier_selection();
+    test_checked_tier_promotion();
+    test_unsafe_tier_explicit();
+    test_tier_in_generics();
+}
+
+/// Default: Tier 0 (managed) for heap allocations
+fn test_default_tier_selection() {
+    // Heap allocation defaults to managed reference
+    let heap_val = Heap.new(42);
+    let ref_val: &Int = &*heap_val;
+
+    // This is equivalent to:
+    // let ref_val: &managed Int = &*heap_val;
+
+    assert(*ref_val == 42);
+}
+
+/// Compiler promotes to Tier 1 when provably safe
+fn test_checked_tier_promotion() {
+    // Local variable with no escaping - can be checked
+    let local = 100;
+
+    // Compiler can prove this is safe (escape analysis)
+    let ref_local: &checked Int = &checked local;
+
+    // No runtime overhead for this access
+    assert(*ref_local == 100);
+
+    // Also works for simple scopes
+    {
+        let inner = 200;
+        let ref_inner: &checked Int = &checked inner;
+        assert(*ref_inner == 200);
+    }
+}
+
+/// Tier 2 requires explicit unsafe
+fn test_unsafe_tier_explicit() {
+    let value = 42;
+
+    // Must be in unsafe block
+    unsafe {
+        // Explicit unsafe reference
+        let ref_val: &unsafe Int = &unsafe value;
+
+        // User takes responsibility for validity
+        assert(*ref_val == 42);
+    }
+}
+
+/// Test tier selection with generics
+fn read_value<T>(value: &T) -> T
+where type T: Clone {
+    value.clone()
+}
+
+fn read_checked<T>(value: &checked T) -> T
+where type T: Clone {
+    value.clone()
+}
+
+fn test_tier_in_generics() {
+    // Managed reference with generic function
+    let heap_val = Heap.new(Text.from("generic"));
+    let result1 = read_value(&*heap_val);
+    assert(result1 == "generic");
+
+    // Checked reference with generic function
+    let local = Text.from("checked generic");
+    let result2 = read_checked(&checked local);
+    assert(result2 == "checked generic");
+}
+
+/// Test tier selection based on source
+fn test_tier_by_source() {
+    // Source: Heap allocation -> Tier 0 by default
+    let from_heap = Heap.new(1);
+    let _: &Int = &*from_heap;
+
+    // Source: Stack local, no escape -> Tier 1 eligible
+    let from_stack = 2;
+    let _: &checked Int = &checked from_stack;
+
+    // Source: External/FFI -> Tier 2 may be required
+    unsafe {
+        let from_ffi = get_external_pointer();
+        let _: &unsafe Int = from_ffi;
+    }
+}
+
+fn get_external_pointer() -> &unsafe Int {
+    unsafe {
+        // Simulating FFI return
+        static VALUE: Int = 42;
+        &unsafe VALUE
+    }
+}
+
+/// Test tier inference in complex expressions
+fn test_complex_tier_inference() {
+    let data = DataHolder {
+        value: Heap.new(100),
+    };
+
+    // Accessing through struct - tier depends on source
+    let ref_inner: &Int = &*data.value;
+    assert(*ref_inner == 100);
+
+    // Field of local struct - could be checked
+    let local_holder = LocalHolder { value: 200 };
+    let ref_field: &checked Int = &checked local_holder.value;
+    assert(*ref_field == 200);
+}
+
+type DataHolder is {
+    value: Heap<Int>,
+};
+
+type LocalHolder is {
+    value: Int,
+};

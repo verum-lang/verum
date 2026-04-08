@@ -1,0 +1,55 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, strings, text, format, concat
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for string operations: concat, format, comparison
+
+fn main() -> Int {
+    // Basic literal concat
+    let s1 = "Hello" + " " + "World";
+    assert_eq(s1, "Hello World");
+
+    let ab = "AB" + "CD";
+    assert_eq(ab, "ABCD");
+
+    // Format strings with integers
+    let x = 42;
+    let msg = f"value={x}";
+    assert_eq(msg, "value=42");
+
+    let neg = -7;
+    assert_eq(f"neg={neg}", "neg=-7");
+
+    let big = 1000000;
+    assert_eq(f"big={big}", "big=1000000");
+
+    // Loop concat
+    let mut built: Text = "";
+    let mut k = 0;
+    while k < 5 {
+        built = built + f"{k}";
+        k = k + 1;
+    }
+    assert_eq(built, "01234");
+
+    // Empty string
+    let empty: Text = "";
+    assert_eq(empty, "");
+
+    let with_empty = "abc" + "" + "def";
+    assert_eq(with_empty, "abcdef");
+
+    // Complex format
+    let p = 3;
+    let q = 4;
+    let sum = p + q;
+    let product = p * q;
+    let result = f"{p}+{q}={sum}, {p}*{q}={product}";
+    assert_eq(result, "3+4=7, 3*4=12");
+
+    print("[OK] 180_string_ops_aot");
+    0
+}

@@ -1,0 +1,128 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Protected function
+protected fn protected_function() -> Int {
+    42
+}
+
+// Protected type definitions
+protected type ProtectedRecord is { data: Int };
+protected type ProtectedEnum is State1 | State2 | State3;
+
+// Protected protocol
+protected type ProtectedProtocol is protocol {
+    fn protected_method(&self);
+};
+
+// Protected constants
+protected const PROTECTED_CONST: Int = 50;
+
+// Protected statics
+protected static PROTECTED_STATIC: Int = 100;
+protected static mut PROTECTED_MUT_STATIC: Int = 150;
+
+// Protected module
+protected module protected_module {
+    fn helper() -> Int { 1 }
+
+    protected fn also_protected() -> Int { 2 }
+}
+
+// Protected in parent-child context
+pub module parent {
+    protected type ParentProtected is { value: Int };
+
+    protected fn parent_protected_fn() -> Int { 42 }
+
+    pub module child {
+        // Child can access parent's protected items
+        fn use_parent() -> super.ParentProtected {
+            super.ParentProtected { value: 1 }
+        }
+    }
+}
+
+// Protected implementation methods
+protected type ProtectedType is { secret: Text };
+
+implement ProtectedType {
+    protected fn new(s: Text) -> Self {
+        ProtectedType { secret: s }
+    }
+
+    protected fn get_secret(&self) -> Text {
+        self.secret.clone()
+    }
+
+    // Mix of visibility in impl
+    pub fn public_accessor(&self) -> Int {
+        self.secret.len()
+    }
+}
+
+// Protected generic types
+protected type ProtectedContainer<T> is { item: T };
+
+// Protected generic functions
+protected fn protected_identity<T>(x: T) -> T { x }
+
+// Protected async functions
+protected async fn protected_async() -> Int {
+    fetch_protected_data().await
+}
+
+// Protected context functions
+protected fn protected_contextual() using [SecurityContext] {
+    SecurityContext.check("permission")
+}
+
+// Protected mount
+protected mount internal.security_utils;
+
+// Inheritance-like pattern with protected
+pub type BaseType is { id: Int };
+
+implement BaseType {
+    pub fn new(id: Int) -> Self {
+        BaseType { id: id }
+    }
+
+    // Protected for use by "derived" types
+    protected fn validate_id(&self) -> Bool {
+        self.id > 0
+    }
+
+    protected fn generate_hash(&self) -> Int {
+        self.id * 31
+    }
+}
+
+// Nested protected visibility
+protected module outer_protected {
+    protected module inner_protected {
+        protected fn deeply_protected() -> Int { 0 }
+    }
+}
+
+// Module showing protected inheritance pattern
+pub module framework {
+    pub type Component is { name: Text };
+
+    implement Component {
+        pub fn new(name: Text) -> Self {
+            Component { name: name }
+        }
+
+        // Lifecycle hooks - protected for subclasses
+        protected fn on_init(&self) {}
+        protected fn on_update(&self) {}
+        protected fn on_destroy(&self) {}
+
+        // Internal implementation
+        fn do_init(&self) {
+            self.on_init();
+        }
+    }
+}

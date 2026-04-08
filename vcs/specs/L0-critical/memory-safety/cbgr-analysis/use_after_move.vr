@@ -1,0 +1,40 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, use-after-move, ownership, cbgr, error-detection
+// @expected-error: E302
+// @active: testing ownership analysis
+// @description: CBGR detects use-after-move at compile time
+
+/// Use-After-Move Detection Test
+///
+/// This test verifies that the CBGR ownership analyzer correctly
+/// rejects code that attempts to use a value after it has been moved.
+///
+/// Note: Arrays of Copy types like [Int; 3] are Copy themselves.
+/// To test use-after-move, we need a type marked as 'affine' (non-Copy).
+///
+/// Spec: docs/detailed/26-cbgr-implementation.md#use-after-move
+
+// Define an affine (move-only) type using the 'affine' keyword
+type affine Resource is {
+    id: Int,
+    data: [Int; 3],
+};
+
+fn consume_resource(r: Resource) -> Int {
+    r.id + r.data[0]
+}
+
+fn main() {
+    let resource = Resource {
+        id: 42,
+        data: [1, 2, 3],
+    };
+
+    // First use: moves ownership (Resource is affine)
+    let result = consume_resource(resource);
+
+    // ERROR: use after move - resource was moved to consume_resource
+    let id = resource.id;  // E310: Use of moved value
+}

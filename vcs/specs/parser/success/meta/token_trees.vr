@@ -1,0 +1,213 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, token-tree, macros
+// @description: Test token tree syntax in quote expressions - grammar: token_tree, token_tree_item
+
+// ============================================================================
+// TOKEN TREE IN QUOTE EXPRESSIONS
+// Grammar: token_tree = { token_tree_item }
+// Grammar: token_tree_item = token_except_delim | '(' token_tree ')' | '[' token_tree ']' | '{' token_tree '}'
+// ============================================================================
+
+// Empty token tree in quote
+fn empty_tt_in_quote() {
+    let code = quote {};
+}
+
+// Single token in quote
+fn single_token_in_quote() {
+    let x = quote { identifier };
+    let num = quote { 42 };
+    let str = quote { "hello" };
+}
+
+// Multiple tokens in quote
+fn multi_tokens_in_quote() {
+    let code = quote { a b c };
+    let nums = quote { 1 2 3 };
+}
+
+// ============================================================================
+// TOKEN TREE DELIMITERS IN QUOTE
+// ============================================================================
+
+// Parentheses in token tree
+fn parens_in_quote() {
+    let code = quote { (a) };
+    let multi = quote { (a b c) };
+    let nested = quote { (()) };
+}
+
+// Brackets in token tree
+fn brackets_in_quote() {
+    let code = quote { [a] };
+    let multi = quote { [a, b, c] };
+    let nested = quote { [[]] };
+}
+
+// Braces in token tree
+fn braces_in_quote() {
+    let code = quote { {a} };
+    let multi = quote { {a; b; c} };
+    let nested = quote { {{}} };
+}
+
+// Mixed delimiters
+fn mixed_delims_in_quote() {
+    let code = quote { (a [b {c}]) };
+    let complex = quote { {x: [1, 2, (3, 4)]} };
+}
+
+// ============================================================================
+// TOKEN TYPES IN TOKEN TREES
+// Grammar: token_except_delim = ident_token | literal_token | operator_token | keyword_token
+// ============================================================================
+
+// Identifier tokens
+fn ident_tokens_in_quote() {
+    let code = quote { foo foo_bar FooBar _underscore };
+}
+
+// Literal tokens
+fn literal_tokens_in_quote() {
+    let code = quote { 42 3.14 "string" 'c' true false };
+}
+
+// Operator tokens
+fn operator_tokens_in_quote() {
+    let code = quote { + - * / % & | ^ ! ~ < > = . , : ; @ # };
+}
+
+// Keyword tokens
+fn keyword_tokens_in_quote() {
+    let code = quote { let fn type if else match for while loop return break continue };
+    let more = quote { in is as public module mount meta async await unsafe pure };
+    let even_more = quote { try recover finally lift };
+}
+
+// ============================================================================
+// NESTED TOKEN TREES IN QUOTE
+// ============================================================================
+
+// Deeply nested
+fn deep_nested_in_quote() {
+    let parens = quote { (((a))) };
+    let brackets = quote { [[[b]]] };
+    let braces = quote { {{{c}}} };
+    let mixed = quote { ({[d]}) };
+}
+
+// Complex nesting patterns
+fn complex_nesting_in_quote() {
+    let func = quote { fn foo(x: Int) { x } };
+    let typ = quote { type T is { a: [Int; 10] } };
+    let mat = quote { match x { A => 1, B(y) => y } };
+}
+
+// ============================================================================
+// TOKEN TREE WITH INTERPOLATION IN QUOTE
+// ============================================================================
+
+// Interpolation in token trees (within quote)
+fn tt_interpolation() {
+    let name = "x";
+    let value = 42;
+
+    let code = quote {
+        let $name = $value;
+    };
+}
+
+// Multiple interpolations
+fn tt_multi_interpolation() {
+    let a = "first";
+    let b = "second";
+    let c = "third";
+
+    let code = quote {
+        ($a, $b, $c)
+    };
+}
+
+// Interpolation with expressions
+fn tt_expr_interpolation() {
+    let x = 10;
+    let code = quote {
+        let result = ${x * 2} + ${x / 2};
+    };
+}
+
+// ============================================================================
+// TOKEN TREE REPETITION IN QUOTE
+// ============================================================================
+
+// Repetition patterns
+fn tt_repetition() {
+    let items = [1, 2, 3];
+
+    let code = quote {
+        $[for item in items {
+            process($item);
+        }]
+    };
+}
+
+// Repetition with simple pattern
+fn tt_simple_repetition() {
+    let fields = ["x", "y", "z"];
+
+    let code = quote {
+        type Point is {
+            $[for f in fields {
+                $f: Int,
+            }]
+        };
+    };
+}
+
+// ============================================================================
+// PRACTICAL TOKEN TREE EXAMPLES - using meta fn
+// ============================================================================
+
+// Generate code using quote with full token tree
+meta fn generate_struct(name: Text, flds: List<Text>) -> TokenStream {
+    quote {
+        type $name is {
+            $[for f in flds {
+                $f: Int,
+            }]
+        };
+    }
+}
+
+// ============================================================================
+// EDGE CASES
+// ============================================================================
+
+// Empty delimiters in quote
+fn empty_delims() {
+    let p = quote { () };
+    let b = quote { [] };
+    let c = quote { {} };
+}
+
+// Operator sequences in quote
+fn op_sequences() {
+    let arrows = quote { -> => };
+    let dots = quote { . .. ..= };
+    let logic = quote { && || };
+    let cmp = quote { == != <= >= };
+    let shift = quote { << >> };
+}
+
+// Raw strings in token trees
+fn raw_strings_in_quote() {
+    let raw = quote { r"raw string" };
+}
+
+// Unicode identifiers in quote
+fn unicode_in_quote() {
+    let alpha = quote { alpha beta gamma };
+}

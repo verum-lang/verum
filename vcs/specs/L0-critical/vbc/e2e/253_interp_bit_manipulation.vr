@@ -1,0 +1,421 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, bitwise, bit-manipulation
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: bit manipulation algorithms using bitwise operators
+
+// =============================================================================
+// Count set bits (popcount) — iterative
+// =============================================================================
+
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x != 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+// =============================================================================
+// Count set bits — Brian Kernighan's algorithm
+// Clears the lowest set bit in each iteration: x & (x-1)
+// =============================================================================
+
+fn popcount_kernighan(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x != 0 {
+        x = x & (x - 1);
+        count = count + 1;
+    }
+    count
+}
+
+// =============================================================================
+// Check if power of 2
+// =============================================================================
+
+fn is_power_of_2(n: Int) -> Bool {
+    n > 0 && (n & (n - 1)) == 0
+}
+
+// =============================================================================
+// Swap two integers without a temporary using XOR
+// Returns (new_a, new_b) as a record
+// =============================================================================
+
+type Pair is { first: Int, second: Int };
+
+fn xor_swap(a: Int, b: Int) -> Pair {
+    let mut x = a;
+    let mut y = b;
+    x = x ^ y;
+    y = x ^ y;
+    x = x ^ y;
+    Pair { first: x, second: y }
+}
+
+// =============================================================================
+// Get bit at position (0-indexed from LSB)
+// =============================================================================
+
+fn get_bit(n: Int, pos: Int) -> Int {
+    (n >> pos) & 1
+}
+
+// =============================================================================
+// Set bit at position to 1
+// =============================================================================
+
+fn set_bit(n: Int, pos: Int) -> Int {
+    n | (1 << pos)
+}
+
+// =============================================================================
+// Clear bit at position to 0
+// =============================================================================
+
+fn clear_bit(n: Int, pos: Int) -> Int {
+    // Create mask with all 1s except at pos
+    // For a 64-bit int, ~(1 << pos). Use XOR trick: mask all bits.
+    // We use: n & ~(1 << pos). Since ~ is not available, use XOR approach:
+    // If bit is set, flip it with XOR; if not set, leave it.
+    let bit = (n >> pos) & 1;
+    if bit == 1 {
+        n ^ (1 << pos)
+    } else {
+        n
+    }
+}
+
+// =============================================================================
+// Toggle bit at position
+// =============================================================================
+
+fn toggle_bit(n: Int, pos: Int) -> Int {
+    n ^ (1 << pos)
+}
+
+// =============================================================================
+// Parity check (1 if odd number of set bits, 0 if even)
+// =============================================================================
+
+fn parity(n: Int) -> Int {
+    popcount(n) % 2
+}
+
+// =============================================================================
+// Lowest set bit (returns the bit value, not position)
+// e.g., lowest_set_bit(12) = 4 since 12 = 0b1100, lowest set bit is 0b100 = 4
+// =============================================================================
+
+fn lowest_set_bit(n: Int) -> Int {
+    if n == 0 { 0 }
+    else { n & (-n) }
+}
+
+// =============================================================================
+// Position of lowest set bit (0-indexed)
+// =============================================================================
+
+fn lowest_set_bit_pos(n: Int) -> Int {
+    if n == 0 {
+        return -1;
+    }
+    let mut x = n;
+    let mut pos = 0;
+    while (x & 1) == 0 {
+        x = x >> 1;
+        pos = pos + 1;
+    }
+    pos
+}
+
+// =============================================================================
+// Highest set bit position (0-indexed)
+// =============================================================================
+
+fn highest_bit_pos(n: Int) -> Int {
+    if n == 0 {
+        return -1;
+    }
+    let mut x = n;
+    let mut pos = 0;
+    while x > 1 {
+        x = x >> 1;
+        pos = pos + 1;
+    }
+    pos
+}
+
+// =============================================================================
+// Extract k bits from position p
+// =============================================================================
+
+fn extract_bits(n: Int, pos: Int, k: Int) -> Int {
+    (n >> pos) & ((1 << k) - 1)
+}
+
+// =============================================================================
+// Next power of 2 >= n
+// =============================================================================
+
+fn next_pow2(n: Int) -> Int {
+    if n <= 1 {
+        return 1;
+    }
+    let mut p = 1;
+    while p < n {
+        p = p << 1;
+    }
+    p
+}
+
+// =============================================================================
+// Reverse bits of an 8-bit value
+// =============================================================================
+
+fn reverse_bits8(n: Int) -> Int {
+    let mut result = 0;
+    let mut x = n;
+    let mut i = 0;
+    while i < 8 {
+        result = (result << 1) | (x & 1);
+        x = x >> 1;
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Tests — Popcount
+// =============================================================================
+
+fn test_popcount() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(2), 1);
+    assert_eq(popcount(3), 2);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(15), 4);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(256), 1);
+    assert_eq(popcount(1023), 10);
+    // Kernighan agrees
+    assert_eq(popcount_kernighan(0), 0);
+    assert_eq(popcount_kernighan(255), 8);
+    assert_eq(popcount_kernighan(1023), 10);
+    // Cross-check
+    let mut i = 0;
+    while i < 64 {
+        assert_eq(popcount(i), popcount_kernighan(i));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Tests — Power of 2
+// =============================================================================
+
+fn test_power_of_2() {
+    assert(!is_power_of_2(0));
+    assert(is_power_of_2(1));
+    assert(is_power_of_2(2));
+    assert(!is_power_of_2(3));
+    assert(is_power_of_2(4));
+    assert(!is_power_of_2(5));
+    assert(!is_power_of_2(6));
+    assert(!is_power_of_2(7));
+    assert(is_power_of_2(8));
+    assert(is_power_of_2(16));
+    assert(is_power_of_2(32));
+    assert(is_power_of_2(64));
+    assert(is_power_of_2(128));
+    assert(is_power_of_2(256));
+    assert(is_power_of_2(1024));
+    assert(!is_power_of_2(100));
+    assert(!is_power_of_2(255));
+}
+
+// =============================================================================
+// Tests — XOR swap
+// =============================================================================
+
+fn test_xor_swap() {
+    let r1 = xor_swap(5, 10);
+    assert_eq(r1.first, 10);
+    assert_eq(r1.second, 5);
+
+    let r2 = xor_swap(0, 42);
+    assert_eq(r2.first, 42);
+    assert_eq(r2.second, 0);
+
+    let r3 = xor_swap(100, 200);
+    assert_eq(r3.first, 200);
+    assert_eq(r3.second, 100);
+
+    // Swap same value
+    let r4 = xor_swap(7, 7);
+    assert_eq(r4.first, 7);
+    assert_eq(r4.second, 7);
+}
+
+// =============================================================================
+// Tests — Get/Set/Clear/Toggle bits
+// =============================================================================
+
+fn test_get_bit() {
+    // 13 = 0b1101
+    assert_eq(get_bit(13, 0), 1);
+    assert_eq(get_bit(13, 1), 0);
+    assert_eq(get_bit(13, 2), 1);
+    assert_eq(get_bit(13, 3), 1);
+    assert_eq(get_bit(13, 4), 0);
+}
+
+fn test_set_bit() {
+    // 8 = 0b1000, set bit 1 => 0b1010 = 10
+    assert_eq(set_bit(8, 1), 10);
+    // Set bit already set
+    assert_eq(set_bit(8, 3), 8);
+    // Set bit 0 of 0
+    assert_eq(set_bit(0, 0), 1);
+    assert_eq(set_bit(0, 3), 8);
+}
+
+fn test_clear_bit() {
+    // 15 = 0b1111, clear bit 2 => 0b1011 = 11
+    assert_eq(clear_bit(15, 2), 11);
+    // Clear bit 0 of 15 => 14
+    assert_eq(clear_bit(15, 0), 14);
+    // Clear bit already clear
+    assert_eq(clear_bit(8, 0), 8);
+}
+
+fn test_toggle_bit() {
+    // 10 = 0b1010, toggle bit 0 => 0b1011 = 11
+    assert_eq(toggle_bit(10, 0), 11);
+    // Toggle bit 1 of 10 => 0b1000 = 8
+    assert_eq(toggle_bit(10, 1), 8);
+    // Toggle twice = original
+    assert_eq(toggle_bit(toggle_bit(42, 3), 3), 42);
+}
+
+// =============================================================================
+// Tests — Parity
+// =============================================================================
+
+fn test_parity() {
+    assert_eq(parity(0), 0);    // 0 set bits = even
+    assert_eq(parity(1), 1);    // 1 set bit = odd
+    assert_eq(parity(3), 0);    // 2 set bits = even
+    assert_eq(parity(7), 1);    // 3 set bits = odd
+    assert_eq(parity(15), 0);   // 4 set bits = even
+    assert_eq(parity(255), 0);  // 8 set bits = even
+    assert_eq(parity(127), 1);  // 7 set bits = odd
+}
+
+// =============================================================================
+// Tests — Lowest/Highest set bit
+// =============================================================================
+
+fn test_lowest_set_bit() {
+    assert_eq(lowest_set_bit(0), 0);
+    assert_eq(lowest_set_bit(1), 1);
+    assert_eq(lowest_set_bit(12), 4);   // 0b1100 => lowest = 0b100 = 4
+    assert_eq(lowest_set_bit(8), 8);
+    assert_eq(lowest_set_bit(6), 2);    // 0b110 => 0b10 = 2
+
+    assert_eq(lowest_set_bit_pos(0), -1);
+    assert_eq(lowest_set_bit_pos(1), 0);
+    assert_eq(lowest_set_bit_pos(12), 2);
+    assert_eq(lowest_set_bit_pos(8), 3);
+    assert_eq(lowest_set_bit_pos(6), 1);
+}
+
+fn test_highest_bit_pos() {
+    assert_eq(highest_bit_pos(0), -1);
+    assert_eq(highest_bit_pos(1), 0);
+    assert_eq(highest_bit_pos(2), 1);
+    assert_eq(highest_bit_pos(4), 2);
+    assert_eq(highest_bit_pos(8), 3);
+    assert_eq(highest_bit_pos(15), 3);
+    assert_eq(highest_bit_pos(16), 4);
+    assert_eq(highest_bit_pos(255), 7);
+}
+
+// =============================================================================
+// Tests — Extract bits
+// =============================================================================
+
+fn test_extract_bits() {
+    // 0b11010110 = 214, extract 3 bits from position 2 => 0b101 = 5
+    assert_eq(extract_bits(214, 2, 3), 5);
+    // Extract 4 bits from position 0 of 255 => 0b1111 = 15
+    assert_eq(extract_bits(255, 0, 4), 15);
+    // Extract 1 bit from position 3 of 8 (0b1000) => 1
+    assert_eq(extract_bits(8, 3, 1), 1);
+}
+
+// =============================================================================
+// Tests — Next power of 2
+// =============================================================================
+
+fn test_next_pow2() {
+    assert_eq(next_pow2(0), 1);
+    assert_eq(next_pow2(1), 1);
+    assert_eq(next_pow2(2), 2);
+    assert_eq(next_pow2(3), 4);
+    assert_eq(next_pow2(4), 4);
+    assert_eq(next_pow2(5), 8);
+    assert_eq(next_pow2(7), 8);
+    assert_eq(next_pow2(9), 16);
+    assert_eq(next_pow2(17), 32);
+    assert_eq(next_pow2(100), 128);
+}
+
+// =============================================================================
+// Tests — Reverse bits
+// =============================================================================
+
+fn test_reverse_bits() {
+    // 0b00000001 = 1 => 0b10000000 = 128
+    assert_eq(reverse_bits8(1), 128);
+    // 0b10000000 = 128 => 0b00000001 = 1
+    assert_eq(reverse_bits8(128), 1);
+    // 0b10101010 = 170 => 0b01010101 = 85
+    assert_eq(reverse_bits8(170), 85);
+    // 0b11111111 = 255 => 0b11111111 = 255
+    assert_eq(reverse_bits8(255), 255);
+    // 0b00000000 = 0 => 0
+    assert_eq(reverse_bits8(0), 0);
+    // Double reverse = original
+    let mut i = 0;
+    while i < 256 {
+        assert_eq(reverse_bits8(reverse_bits8(i)), i);
+        i = i + 16; // check every 16th to keep test fast
+    }
+}
+
+fn main() -> Int {
+    test_popcount();
+    test_power_of_2();
+    test_xor_swap();
+    test_get_bit();
+    test_set_bit();
+    test_clear_bit();
+    test_toggle_bit();
+    test_parity();
+    test_lowest_set_bit();
+    test_highest_bit_pos();
+    test_extract_bits();
+    test_next_pow2();
+    test_reverse_bits();
+    print("[OK] 253_interp_bit_manipulation");
+    0
+}

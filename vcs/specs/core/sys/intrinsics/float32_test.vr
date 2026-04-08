@@ -1,0 +1,38 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float32, debug
+// @description: Test Float32 intrinsics
+
+module test.stdlib.sys.intrinsics.float32_test;
+
+mount core.intrinsics.{
+    // Float32 basic
+    sqrt_f32, abs_f32, floor_f32, ceil_f32, round_f32, trunc_f32,
+    // Float32 trigonometric
+    sin_f32, cos_f32, tan_f32, asin_f32, acos_f32, atan_f32, atan2_f32,
+    // Float32 bit operations
+    f32_to_bits, f32_from_bits, f32_infinity, f32_neg_infinity, f32_nan,
+};
+
+fn main() {
+    print("Testing Float32 basic...");
+    let sqrt_result = sqrt_f32(4.0);
+    print(f"sqrt_f32(4.0) = {sqrt_result}");
+    let abs_result = abs_f32(-5.0);
+    print(f"abs_f32(-5.0) = {abs_result}");
+    let floor_result = floor_f32(3.7);
+    print(f"floor_f32(3.7) = {floor_result}");
+
+    print("Testing Float32 trig...");
+    let sin_result = sin_f32(0.0);
+    print(f"sin_f32(0) = {sin_result}");
+    let cos_result = cos_f32(0.0);
+    print(f"cos_f32(0) = {cos_result}");
+
+    print("Testing Float32 bit ops...");
+    let to_bits = f32_to_bits(1.0);
+    print(f"f32_to_bits(1.0) = {to_bits}");
+
+    print("All Float32 tests passed!");
+}

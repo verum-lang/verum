@@ -1,0 +1,110 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tuples, edge-cases, expressions
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Tuples with complex expressions that stress register allocation
+
+fn main() {
+    // === Test 1: Tuple with function calls as elements ===
+    fn double(x: Int) -> Int {
+        return x * 2;
+    }
+    fn triple(x: Int) -> Int {
+        return x * 3;
+    }
+    let t1 = (double(5), triple(5), double(10));
+    let (a1, a2, a3) = t1;
+    assert_eq(a1, 10);
+    assert_eq(a2, 15);
+    assert_eq(a3, 20);
+
+    // === Test 2: Chained function calls in tuple ===
+    let t2 = (double(double(2)), triple(double(3)), double(triple(4)));
+    let (b1, b2, b3) = t2;
+    assert_eq(b1, 8);   // 2 * 2 * 2 = 8
+    assert_eq(b2, 18);  // 3 * 2 * 3 = 18
+    assert_eq(b3, 24);  // 4 * 3 * 2 = 24
+
+    // === Test 3: Complex arithmetic expressions ===
+    let x = 10;
+    let y = 3;
+    let t3 = (x + y * 2, (x + y) * 2, x * y + 1);
+    let (c1, c2, c3) = t3;
+    assert_eq(c1, 16);  // 10 + 3 * 2 = 16
+    assert_eq(c2, 26);  // (10 + 3) * 2 = 26
+    assert_eq(c3, 31);  // 10 * 3 + 1 = 31
+
+    // === Test 4: Expressions with same variable (register reuse stress test) ===
+    let n = 5;
+    let t4 = (n + n, n * n, n - n + n);
+    let (d1, d2, d3) = t4;
+    assert_eq(d1, 10);  // 5 + 5 = 10
+    assert_eq(d2, 25);  // 5 * 5 = 25
+    assert_eq(d3, 5);   // 5 - 5 + 5 = 5
+
+    // === Test 5: Multiple binary operations per element ===
+    let a = 2;
+    let b = 3;
+    let c = 4;
+    let t5 = (a + b + c, a * b * c, a + b * c);
+    let (e1, e2, e3) = t5;
+    assert_eq(e1, 9);   // 2 + 3 + 4 = 9
+    assert_eq(e2, 24);  // 2 * 3 * 4 = 24
+    assert_eq(e3, 14);  // 2 + 3 * 4 = 14
+
+    // === Test 6: Tuple from tuple elements (unpack and repack) ===
+    let orig = (100, 200, 300);
+    let (p, q, r) = orig;
+    let repacked = (r, p, q);  // Rotate elements
+    let (f1, f2, f3) = repacked;
+    assert_eq(f1, 300);
+    assert_eq(f2, 100);
+    assert_eq(f3, 200);
+
+    // === Test 7: Multiple tuple unpacks before creating new tuple ===
+    let t_a = (1, 2);
+    let t_b = (3, 4);
+    let (xa, ya) = t_a;
+    let (xb, yb) = t_b;
+    let combined = (xa + xb, ya + yb, xa * xb, ya * yb);
+    let (g1, g2, g3, g4) = combined;
+    assert_eq(g1, 4);   // 1 + 3
+    assert_eq(g2, 6);   // 2 + 4
+    assert_eq(g3, 3);   // 1 * 3
+    assert_eq(g4, 8);   // 2 * 4
+
+    // === Test 8: Nested function returning computed tuple ===
+    fn outer(base: Int) -> (Int, Int, Int) {
+        fn compute_elem(i: Int, b: Int) -> Int {
+            return b * i + i;
+        }
+        return (compute_elem(1, base), compute_elem(2, base), compute_elem(3, base));
+    }
+    let (h1, h2, h3) = outer(10);
+    assert_eq(h1, 11);  // 10 * 1 + 1 = 11
+    assert_eq(h2, 22);  // 10 * 2 + 2 = 22
+    assert_eq(h3, 33);  // 10 * 3 + 3 = 33
+
+    // === Test 9: Recursive tuple computation ===
+    fn fib_pair(n: Int) -> (Int, Int) {
+        if n <= 1 {
+            return (0, 1);
+        }
+        let (a, b) = fib_pair(n - 1);
+        return (b, a + b);
+    }
+    let (fib5a, fib5b) = fib_pair(5);
+    // fib_pair(5) returns (fib(4), fib(5)) = (3, 5)
+    assert_eq(fib5a, 3);
+    assert_eq(fib5b, 5);
+
+    // === Test 10: Complex expression with subtraction (test sign handling) ===
+    let m = 50;
+    let t10 = (100 - m, m - 100, m - m);
+    let (i1, i2, i3) = t10;
+    assert_eq(i1, 50);
+    assert_eq(i2, -50);
+    assert_eq(i3, 0);
+}

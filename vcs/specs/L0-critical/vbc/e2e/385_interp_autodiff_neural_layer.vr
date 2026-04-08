@@ -1,0 +1,258 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, neural-network, backprop, relu
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Single neural network layer simulation
+// Forward: output = relu(w*x + b)
+// Backward: manual gradient computation + weight update
+// Uses integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// ReLU activation and its derivative
+fn relu(x: Int) -> Int {
+    if x > 0 { x } else { 0 }
+}
+
+fn relu_deriv(x: Int) -> Int {
+    if x > 0 { scale() } else { 0 }
+}
+
+// =============================================================================
+// Single neuron: y = relu(w*x + b)
+// =============================================================================
+
+type Neuron is { w: Int, b: Int };
+
+fn neuron_forward(n: Neuron, x: Int) -> Int {
+    relu(smul(n.w, x) + n.b)
+}
+
+// Pre-activation value (before relu)
+fn neuron_pre_act(n: Neuron, x: Int) -> Int {
+    smul(n.w, x) + n.b
+}
+
+// Backward pass for MSE loss: L = (pred - target)^2
+// dL/dpred = 2*(pred - target)
+// dpred/dpre_act = relu'(pre_act)
+// dpre_act/dw = x
+// dpre_act/db = 1
+// dL/dw = dL/dpred * dpred/dpre_act * dpre_act/dw
+// dL/db = dL/dpred * dpred/dpre_act * dpre_act/db
+
+type NeuronGrad is { dw: Int, db: Int };
+
+fn neuron_backward(n: Neuron, x: Int, target: Int) -> NeuronGrad {
+    let pre_act = neuron_pre_act(n, x);
+    let pred = relu(pre_act);
+    let dl_dpred = 2 * (pred - target);
+    let dpred_dpre = relu_deriv(pre_act);
+    let chain = smul(dl_dpred, dpred_dpre);
+    NeuronGrad {
+        dw: smul(chain, x),
+        db: chain
+    }
+}
+
+fn neuron_update(n: Neuron, g: NeuronGrad, lr: Int) -> Neuron {
+    Neuron {
+        w: n.w - smul(lr, g.dw),
+        b: n.b - smul(lr, g.db)
+    }
+}
+
+// =============================================================================
+// Two-neuron layer: two neurons with separate weights
+// =============================================================================
+
+type Layer2 is { n0: Neuron, n1: Neuron };
+
+fn layer2_forward(l: Layer2, x: Int) -> Int {
+    // Output = n0(x) + n1(x) (simple aggregation)
+    neuron_forward(l.n0, x) + neuron_forward(l.n1, x)
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_relu() {
+    assert_eq(relu(5 * scale()), 5 * scale());
+    assert_eq(relu(0), 0);
+    assert_eq(relu(-3 * scale()), 0);
+    assert_eq(relu_deriv(5 * scale()), scale());
+    assert_eq(relu_deriv(-5 * scale()), 0);
+    assert_eq(relu_deriv(0), 0);
+}
+
+fn test_neuron_forward() {
+    let n = Neuron { w: 2 * scale(), b: scale() }; // y = relu(2x + 1)
+
+    // x=3: relu(7) = 7
+    assert_eq(neuron_forward(n, 3 * scale()), 7 * scale());
+
+    // x=-1: relu(2*(-1)+1) = relu(-1) = 0
+    assert_eq(neuron_forward(n, -1 * scale()), 0);
+
+    // x=0: relu(1) = 1
+    assert_eq(neuron_forward(n, 0), scale());
+}
+
+fn test_neuron_backward() {
+    let n = Neuron { w: scale(), b: 0 }; // y = relu(x)
+    let x = 2 * scale(); // x=2
+    let target = 3 * scale(); // target=3
+
+    // pred = relu(1*2+0) = 2, pre_act = 2
+    // dl_dpred = 2*(2-3) = -2
+    // dpred_dpre = 1 (pre_act=2 > 0)
+    // chain = -2 * 1 = -2
+    // dw = -2 * x = -2 * 2 = -4
+    // db = -2
+    let g = neuron_backward(n, x, target);
+    assert_eq(g.dw, -4 * scale());
+    assert_eq(g.db, -2 * scale());
+}
+
+fn test_neuron_backward_inactive() {
+    // When pre_act < 0, relu gradient is 0 => no update
+    let n = Neuron { w: -1 * scale(), b: 0 }; // y = relu(-x)
+    let x = 5 * scale(); // pre_act = -5 < 0
+
+    let g = neuron_backward(n, x, 3 * scale());
+    assert_eq(g.dw, 0); // ReLU blocks gradient
+    assert_eq(g.db, 0);
+}
+
+fn test_single_neuron_training() {
+    // Train a single neuron to learn y = 2x for positive x
+    // Start with w=0.5, b=0
+    let mut n = Neuron { w: 500, b: 0 }; // w=0.5
+    let lr = 50; // 0.05
+
+    // Training data: (1,2), (2,4), (3,6), (4,8)
+    let mut epoch = 0;
+    while epoch < 100 {
+        // SGD: one sample at a time
+        let g1 = neuron_backward(n, scale(), 2 * scale());
+        n = neuron_update(n, g1, lr);
+        let g2 = neuron_backward(n, 2 * scale(), 4 * scale());
+        n = neuron_update(n, g2, lr);
+        let g3 = neuron_backward(n, 3 * scale(), 6 * scale());
+        n = neuron_update(n, g3, lr);
+        let g4 = neuron_backward(n, 4 * scale(), 8 * scale());
+        n = neuron_update(n, g4, lr);
+        epoch = epoch + 1;
+    }
+
+    // Should converge towards w≈2, b≈0
+    assert_eq(within_tol(n.w, 2 * scale(), 300), 1);
+}
+
+fn test_loss_tracking() {
+    let mut n = Neuron { w: 500, b: 0 };
+    let lr = 50;
+    let x = 2 * scale();
+    let target = 4 * scale();
+
+    // Compute initial loss
+    let p0 = neuron_forward(n, x);
+    let loss0 = smul(p0 - target, p0 - target);
+
+    // Train for a few steps
+    let mut i = 0;
+    while i < 20 {
+        let g = neuron_backward(n, x, target);
+        n = neuron_update(n, g, lr);
+        i = i + 1;
+    }
+
+    let p1 = neuron_forward(n, x);
+    let loss1 = smul(p1 - target, p1 - target);
+
+    // Loss should decrease
+    assert(loss1 < loss0);
+}
+
+fn test_two_neuron_layer() {
+    // Two neurons: n0 with w=1, n1 with w=1
+    // Output = relu(x) + relu(x) = 2*relu(x)
+    let l = Layer2 {
+        n0: Neuron { w: scale(), b: 0 },
+        n1: Neuron { w: scale(), b: 0 }
+    };
+
+    assert_eq(layer2_forward(l, 3 * scale()), 6 * scale());
+    assert_eq(layer2_forward(l, -1 * scale()), 0);
+}
+
+fn test_two_neuron_different_weights() {
+    // n0: y=relu(2x+1), n1: y=relu(-x+5)
+    let l = Layer2 {
+        n0: Neuron { w: 2 * scale(), b: scale() },
+        n1: Neuron { w: -1 * scale(), b: 5 * scale() }
+    };
+
+    // x=1: relu(3) + relu(4) = 3 + 4 = 7
+    assert_eq(layer2_forward(l, scale()), 7 * scale());
+
+    // x=6: relu(13) + relu(-1) = 13 + 0 = 13
+    assert_eq(layer2_forward(l, 6 * scale()), 13 * scale());
+
+    // x=-2: relu(-3) + relu(7) = 0 + 7 = 7
+    assert_eq(layer2_forward(l, -2 * scale()), 7 * scale());
+}
+
+fn test_batch_gradient() {
+    // Average gradient over multiple samples
+    let n = Neuron { w: scale(), b: 0 };
+    let lr = 50;
+
+    // Compute gradients for 3 samples and average
+    let g1 = neuron_backward(n, scale(), 2 * scale());
+    let g2 = neuron_backward(n, 2 * scale(), 4 * scale());
+    let g3 = neuron_backward(n, 3 * scale(), 6 * scale());
+
+    // Average gradient
+    let avg_dw = (g1.dw + g2.dw + g3.dw) / 3;
+    let avg_db = (g1.db + g2.db + g3.db) / 3;
+    let avg_g = NeuronGrad { dw: avg_dw, db: avg_db };
+
+    let updated = neuron_update(n, avg_g, lr);
+    // Weight should increase (all targets > predictions)
+    assert(updated.w > n.w);
+}
+
+fn main() -> Int {
+    test_relu();
+    test_neuron_forward();
+    test_neuron_backward();
+    test_neuron_backward_inactive();
+    test_single_neuron_training();
+    test_loss_tracking();
+    test_two_neuron_layer();
+    test_two_neuron_different_weights();
+    test_batch_gradient();
+    print("[OK] 385_interp_autodiff_neural_layer");
+    0
+}

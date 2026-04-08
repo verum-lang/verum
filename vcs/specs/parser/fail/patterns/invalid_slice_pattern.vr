@@ -1,0 +1,65 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, slice, error
+// @description: Test invalid slice pattern syntax
+// @expected-error: E086
+
+fn test_slice_double_rest() {
+    let slice: &[Int] = &[1, 2, 3, 4, 5];
+
+    // Invalid: double rest pattern
+    match slice {
+        [.., x, ..] => print("double rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_slice_unclosed() {
+    let slice: &[Int] = &[1, 2, 3];
+
+    // Invalid: unclosed slice pattern
+    match slice {
+        [first, .. => print("unclosed"),
+        _ => print("other"),
+    }
+}
+
+fn test_slice_triple_dots() {
+    let slice: &[Int] = &[1, 2, 3];
+
+    // Invalid: using ... instead of ..
+    match slice {
+        [first, ...] => print("triple dots"),
+        _ => print("other"),
+    }
+}
+
+fn test_slice_invalid_rest_binding() {
+    let slice: &[Int] = &[1, 2, 3, 4, 5];
+
+    // Invalid: rest pattern with invalid binding syntax
+    match slice {
+        [first, ..@ middle, last] => print("invalid binding"),
+        _ => print("other"),
+    }
+}
+
+fn test_slice_comma_before_rest() {
+    let slice: &[Int] = &[1, 2, 3];
+
+    // Invalid: double comma before rest
+    match slice {
+        [first,, ..] => print("double comma"),
+        _ => print("other"),
+    }
+}
+
+fn test_slice_rest_in_middle_binding() {
+    let slice: &[Int] = &[1, 2, 3, 4, 5];
+
+    // Invalid: trying to bind rest with pattern
+    match slice {
+        [first, ..[a, b], last] => print("rest with pattern"),
+        _ => print("other"),
+    }
+}

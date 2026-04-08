@@ -1,0 +1,96 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, closures, mutable-capture
+// @expected-exit: 0
+
+// Test: Mutable closure captures — closures that mutate captured variables
+// should reflect changes in the outer scope.
+
+fn test_basic_counter() -> Int {
+    let mut count = 0;
+    let inc = |x: Int| -> Int {
+        count = count + x;
+        count
+    };
+    let r1 = inc(5);
+    if (r1 != 5) {
+        print(f"FAIL test1a: inc(5) returned {r1}, expected 5");
+        return 1;
+    }
+    let r2 = inc(3);
+    if (r2 != 8) {
+        print(f"FAIL test1b: inc(3) returned {r2}, expected 8");
+        return 1;
+    }
+    // The outer `count` should also see the mutation
+    if (count != 8) {
+        print(f"FAIL test1c: outer count={count}, expected 8");
+        return 1;
+    }
+    print("test1 basic_counter: OK");
+    0
+}
+
+fn test_accumulator() -> Int {
+    let mut total = 0;
+    let add = |n: Int| -> Int {
+        total = total + n;
+        total
+    };
+    let mut i = 1;
+    while (i <= 5) {
+        add(i);
+        i = i + 1;
+    }
+    // total should be 1+2+3+4+5 = 15
+    if (total != 15) {
+        print(f"FAIL test2: total={total}, expected 15");
+        return 1;
+    }
+    print("test2 accumulator: OK");
+    0
+}
+
+fn test_shared_capture() -> Int {
+    let mut val = 10;
+    let getter = || -> Int { val };
+    let setter = |x: Int| -> Int {
+        val = x;
+        val
+    };
+
+    let g1 = getter();
+    if (g1 != 10) {
+        print(f"FAIL test3a: getter()={g1}, expected 10");
+        return 1;
+    }
+
+    setter(42);
+    // After setter, both getter and outer val should see 42
+    let g2 = getter();
+    if (g2 != 42) {
+        print(f"FAIL test3b: getter() after setter(42)={g2}, expected 42");
+        return 1;
+    }
+    if (val != 42) {
+        print(f"FAIL test3c: outer val={val}, expected 42");
+        return 1;
+    }
+    print("test3 shared_capture: OK");
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_basic_counter();
+    if (r1 != 0) { return r1; }
+
+    let r2 = test_accumulator();
+    if (r2 != 0) { return r2; }
+
+    let r3 = test_shared_capture();
+    if (r3 != 0) { return r3; }
+
+    print("945_mutable_closures: PASS");
+    0
+}

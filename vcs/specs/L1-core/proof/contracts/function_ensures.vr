@@ -1,0 +1,48 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, contracts, ensures
+// @timeout: 5000
+
+/// Function contracts with ensures clauses.
+/// Grammar: ensures_clause = 'where' ensures_item { ',' ensures_item }
+///          ensures_item = 'ensures' expression
+
+// Ensures result is positive
+fn increment(x: Int) -> Int where ensures result > x {
+    x + 1
+}
+
+// Ensures result is bounded
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+    where ensures result >= lo, ensures result <= hi
+{
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+// Ensures result is non-empty for non-empty input
+fn reverse_list(lst: List<Int>) -> List<Int>
+    where ensures result.len() == lst.len()
+{
+    let mut out = List.new();
+    let mut i = lst.len() - 1;
+    while i >= 0 {
+        out.push(lst[i]);
+        i = i - 1;
+    }
+    out
+}
+
+// Ensures idempotency
+fn sort(lst: List<Int>) -> List<Int>
+    where ensures result.len() == lst.len()
+{
+    lst
+}
+
+fn main() {
+    let r = increment(5);
+    assert(r > 5);
+    print("Function ensures tests passed");
+}

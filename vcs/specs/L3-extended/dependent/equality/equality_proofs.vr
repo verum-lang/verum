@@ -1,0 +1,131 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, smt, verification
+
+/// Equality proofs via SMT solver
+///
+/// Demonstrates verified functions with SMT-checked postconditions.
+
+/// Arithmetic equality proofs
+module ArithmeticEquality {
+    @verify
+    pub fn add_zero(n: Int) -> Int
+    ensures result == n {
+        n + 0
+    }
+
+    @verify
+    pub fn mul_one(n: Int) -> Int
+    ensures result == n {
+        n * 1
+    }
+
+    @verify
+    pub fn add_comm(a: Int, b: Int) -> Bool
+    ensures result == true {
+        a + b == b + a
+    }
+
+    @verify
+    pub fn mul_comm(a: Int, b: Int) -> Bool
+    ensures result == true {
+        a * b == b * a
+    }
+
+    @verify
+    pub fn add_assoc(a: Int, b: Int, c: Int) -> Bool
+    ensures result == true {
+        (a + b) + c == a + (b + c)
+    }
+
+    @verify
+    pub fn mul_assoc(a: Int, b: Int, c: Int) -> Bool
+    ensures result == true {
+        (a * b) * c == a * (b * c)
+    }
+
+    @verify
+    pub fn distributive(a: Int, b: Int, c: Int) -> Bool
+    ensures result == true {
+        a * (b + c) == a * b + a * c
+    }
+
+    @verify
+    pub fn mul_zero(n: Int) -> Int
+    ensures result == 0 {
+        n * 0
+    }
+}
+
+/// Integer equality proofs
+module IntegerEquality {
+    @verify
+    pub fn sub_self(n: Int) -> Int
+    ensures result == 0 {
+        n - n
+    }
+
+    @verify
+    pub fn add_sub(a: Int, b: Int) -> Int
+    ensures result == a {
+        (a + b) - b
+    }
+
+    @verify
+    pub fn double(n: Int) -> Bool
+    ensures result == true {
+        n + n == 2 * n
+    }
+}
+
+/// Concrete numeric proofs
+module ConcreteEquality {
+    @verify
+    pub fn pythagorean() -> Bool
+    ensures result == true {
+        3 * 3 + 4 * 4 == 5 * 5
+    }
+
+    @verify
+    pub fn factorial_5() -> Bool
+    ensures result == true {
+        1 * 2 * 3 * 4 * 5 == 120
+    }
+
+    @verify
+    pub fn power_of_two() -> Bool
+    ensures result == true {
+        2 * 2 * 2 * 2 * 2 == 32
+    }
+
+    @verify
+    pub fn square_diff() -> Bool
+    ensures result == true {
+        (5 + 3) * (5 - 3) == 5 * 5 - 3 * 3
+    }
+}
+
+/// Modular arithmetic proofs
+module ModularEquality {
+    @verify
+    pub fn mod_self() -> Bool
+    ensures result == true {
+        7 % 7 == 0
+    }
+
+    @verify
+    pub fn zero_mod() -> Bool
+    ensures result == true {
+        0 % 5 == 0
+    }
+}
+
+fn main() {
+    let _ = ArithmeticEquality.add_zero(42);
+    assert(ArithmeticEquality.add_comm(3, 5));
+    assert(ArithmeticEquality.distributive(3, 4, 5));
+    assert(IntegerEquality.sub_self(100) == 0);
+    assert(ConcreteEquality.pythagorean());
+    assert(ModularEquality.mod_self());
+}

@@ -1,0 +1,195 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, scope, variables
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: variable scoping — block scopes, function scopes,
+// shadowing across scopes
+
+// =============================================================================
+// Block scopes
+// =============================================================================
+
+fn test_basic_block_scope() {
+    let x = 10;
+    let result = {
+        let y = 20;
+        x + y
+    };
+    assert_eq(result, 30);
+    // y is not accessible here — x still is
+    assert_eq(x, 10);
+}
+
+fn test_nested_blocks() {
+    let a = 1;
+    let r1 = {
+        let b = 2;
+        let r2 = {
+            let c = 3;
+            a + b + c
+        };
+        r2
+    };
+    assert_eq(r1, 6);
+    assert_eq(a, 1);
+}
+
+fn test_block_expression_value() {
+    let val = {
+        let x = 5;
+        let y = 10;
+        x * y
+    };
+    assert_eq(val, 50);
+}
+
+// =============================================================================
+// Function scopes
+// =============================================================================
+
+fn scope_fn_a() -> Int {
+    let x = 100;
+    x
+}
+
+fn scope_fn_b() -> Int {
+    let x = 200;
+    x
+}
+
+fn test_function_scope_isolation() {
+    // Each function has its own scope
+    assert_eq(scope_fn_a(), 100);
+    assert_eq(scope_fn_b(), 200);
+    // They don't interfere
+    assert_eq(scope_fn_a(), 100);
+}
+
+fn test_function_params_as_scope() {
+    fn add_and_double(a: Int, b: Int) -> Int {
+        let sum = a + b;
+        sum * 2
+    }
+    assert_eq(add_and_double(3, 4), 14);
+    assert_eq(add_and_double(0, 0), 0);
+}
+
+// =============================================================================
+// Shadowing across scopes
+// =============================================================================
+
+fn test_shadow_in_block() {
+    let x = 10;
+    let val = {
+        let x = 20;
+        x
+    };
+    assert_eq(val, 20);
+    assert_eq(x, 10);
+}
+
+fn test_shadow_chain() {
+    let x = 1;
+    let a = {
+        let x = 2;
+        let b = {
+            let x = 3;
+            x
+        };
+        assert_eq(b, 3);
+        x
+    };
+    assert_eq(a, 2);
+    assert_eq(x, 1);
+}
+
+fn test_shadow_in_if_else() {
+    let x = 42;
+    let result = if true {
+        let x = 100;
+        x
+    } else {
+        let x = 200;
+        x
+    };
+    assert_eq(result, 100);
+    assert_eq(x, 42);
+}
+
+// =============================================================================
+// Loop scopes
+// =============================================================================
+
+fn test_loop_scope() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        let local_val = i * 10;
+        sum = sum + local_val;
+        i = i + 1;
+    }
+    // 0+10+20+30+40 = 100
+    assert_eq(sum, 100);
+}
+
+fn test_loop_counter_scope() {
+    let mut outer = 0;
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
+            outer = outer + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(outer, 9);
+}
+
+// =============================================================================
+// Scope with mutation
+// =============================================================================
+
+fn test_mut_across_scopes() {
+    let mut x = 0;
+    x = x + 1;
+    {
+        x = x + 10;
+    }
+    assert_eq(x, 11);
+    {
+        x = x * 2;
+    }
+    assert_eq(x, 22);
+}
+
+fn test_mut_in_loop_scope() {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 10 {
+        let contribution = i;
+        total = total + contribution;
+        i = i + 1;
+    }
+    assert_eq(total, 55);
+}
+
+fn main() -> Int {
+    test_basic_block_scope();
+    test_nested_blocks();
+    test_block_expression_value();
+    test_function_scope_isolation();
+    test_function_params_as_scope();
+    test_shadow_in_block();
+    test_shadow_chain();
+    test_shadow_in_if_else();
+    test_loop_scope();
+    test_loop_counter_scope();
+    test_mut_across_scopes();
+    test_mut_in_loop_scope();
+    print("[OK] 226_interp_scope_rules");
+    0
+}

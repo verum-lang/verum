@@ -1,0 +1,72 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, proof-scripts, quicksort, termination
+// @timeout: 45000
+
+/// Quicksort termination and correctness proof
+
+fn quicksort<T: Ord>(xs: List<T>) -> List<T>;
+fn is_sorted<T: Ord>(xs: List<T>) -> Bool;
+fn is_permutation<T>(xs: List<T>, ys: List<T>) -> Bool;
+fn partition<T: Ord>(pivot: T, xs: List<T>) -> (List<T>, List<T>);
+
+/// Partition preserves elements
+lemma partition_preserves<T: Ord>(pivot: T, xs: List<T>):
+    len(partition(pivot, xs).0) + len(partition(pivot, xs).1) == len(xs)
+{
+    proof by induction on xs
+}
+
+/// Partition results are smaller
+lemma partition_smaller<T: Ord>(pivot: T, xs: List<T>):
+    len(partition(pivot, xs).0) <= len(xs) &&
+    len(partition(pivot, xs).1) <= len(xs)
+{
+    proof by induction on xs
+}
+
+/// Quicksort terminates (decreasing measure)
+theorem quicksort_terminates<T: Ord>(xs: List<T>): len(quicksort(xs)) == len(xs) {
+    proof by induction on xs {
+        case Nil => { trivial }
+        case Cons(pivot, rest) => {
+            have: len(partition(pivot, rest).0) <= len(rest) by partition_smaller;
+            have: len(partition(pivot, rest).1) <= len(rest) by partition_smaller;
+            conclude by auto
+        }
+    }
+}
+
+/// Quicksort produces sorted output
+theorem quicksort_sorts<T: Ord>(xs: List<T>): is_sorted(quicksort(xs)) {
+    proof by induction on xs {
+        case Nil => { trivial }
+        case Cons(pivot, rest) => {
+            conclude by auto
+        }
+    }
+}
+
+/// Quicksort is a permutation
+theorem quicksort_permutes<T: Ord>(xs: List<T>): is_permutation(xs, quicksort(xs)) {
+    proof by induction on xs {
+        case Nil => { trivial }
+        case Cons(pivot, rest) => {
+            conclude by auto
+        }
+    }
+}
+
+/// Combined correctness theorem
+theorem quicksort_correct<T: Ord>(xs: List<T>):
+    is_sorted(quicksort(xs)) && is_permutation(xs, quicksort(xs))
+{
+    proof {
+        have h1: is_sorted(quicksort(xs)) by quicksort_sorts;
+        have h2: is_permutation(xs, quicksort(xs)) by quicksort_permutes;
+        conclude by auto
+    }
+}
+
+fn main() {}

@@ -1,0 +1,187 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, nim, game-theory, strategy
+// @timeout: 30000
+
+// Nim game analysis and optimal strategy
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn get_bit(val: Int, pos: Int) -> Int { (val / pow2(pos)) % 2 }
+
+// XOR (nim-sum)
+fn xor_val(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 16 {
+        if get_bit(a, i) != get_bit(b, i) {
+            result = result + pow2(i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Nim value of a position (XOR of all pile sizes)
+fn nim_value_2(a: Int, b: Int) -> Int { xor_val(a, b) }
+
+fn nim_value_3(a: Int, b: Int, c: Int) -> Int {
+    xor_val(xor_val(a, b), c)
+}
+
+// Is winning position? (nim-value != 0 means current player wins)
+fn is_winning_2(a: Int, b: Int) -> Int {
+    if nim_value_2(a, b) != 0 { 1 } else { 0 }
+}
+
+fn is_winning_3(a: Int, b: Int, c: Int) -> Int {
+    if nim_value_3(a, b, c) != 0 { 1 } else { 0 }
+}
+
+// Single pile game: take 1-3 stones, avoid taking last
+// Position value: n mod 4 (0 = losing, else winning)
+fn single_pile_value(n: Int) -> Int { n % 4 }
+
+// Sprague-Grundy for single pile, take 1-3
+fn sg_take_1_to_3(n: Int) -> Int {
+    n % 4
+}
+
+// Subtraction game: can take elements from set {s1, s2, s3}
+// Returns Grundy value for pile of size n
+@allow(unbounded_recursion)
+fn sg_subtraction(n: Int, s1: Int, s2: Int, s3: Int) -> Int {
+    if n == 0 { 0 }
+    else {
+        // Compute mex of reachable positions
+        let mut reachable = 0; // bit set of Grundy values reachable
+        if n >= s1 {
+            let g = sg_subtraction(n - s1, s1, s2, s3);
+            reachable = reachable + pow2(g);
+        }
+        if n >= s2 {
+            let g = sg_subtraction(n - s2, s1, s2, s3);
+            let bit = pow2(g);
+            if get_bit(reachable, g) == 0 { reachable = reachable + bit; }
+        }
+        if n >= s3 {
+            let g = sg_subtraction(n - s3, s1, s2, s3);
+            let bit = pow2(g);
+            if get_bit(reachable, g) == 0 { reachable = reachable + bit; }
+        }
+        // mex: minimum excludant
+        let mut mex = 0;
+        while get_bit(reachable, mex) == 1 { mex = mex + 1; }
+        mex
+    }
+}
+
+// Wythoff's game: two piles, can take any amount from one pile OR
+// equal amount from both. Losing positions are (floor(k*phi), floor(k*phi^2))
+// Simplified check for small values
+fn is_wythoff_cold(a: Int, b: Int) -> Int {
+    // Cold positions (P-positions) for Wythoff:
+    // (0,0), (1,2), (3,5), (4,7), (6,10)...
+    let lo = if a < b { a } else { b };
+    let hi = if a > b { a } else { b };
+    if lo == 0 {
+        if hi == 0 { 1 } else { 0 }
+    } else if lo == 1 {
+        if hi == 2 { 1 } else { 0 }
+    } else if lo == 3 {
+        if hi == 5 { 1 } else { 0 }
+    } else if lo == 4 {
+        if hi == 7 { 1 } else { 0 }
+    } else if lo == 6 {
+        if hi == 10 { 1 } else { 0 }
+    } else { 0 } // not exhaustive
+}
+
+fn test_nim_basic() -> Int {
+    // Equal piles: nim-value = 0 (losing for current player)
+    assert_eq(nim_value_2(3, 3), 0);
+    assert_eq(is_winning_2(3, 3), 0);
+    // Unequal piles: winning
+    assert_eq(is_winning_2(3, 5), 1);
+    // (0, n): winning (take all from non-empty pile)
+    assert_eq(is_winning_2(0, 5), 1);
+    // (0, 0): losing (no moves)
+    assert_eq(is_winning_2(0, 0), 0);
+    1
+}
+
+fn test_nim_3_piles() -> Int {
+    // (1, 2, 3): nim-value = 1 XOR 2 XOR 3 = 0
+    assert_eq(nim_value_3(1, 2, 3), 0);
+    assert_eq(is_winning_3(1, 2, 3), 0);
+    // (1, 1, 1): nim-value = 1 XOR 1 XOR 1 = 1
+    assert_eq(nim_value_3(1, 1, 1), 1);
+    assert_eq(is_winning_3(1, 1, 1), 1);
+    // (3, 5, 7): 3 XOR 5 = 6, 6 XOR 7 = 1 (winning)
+    assert_eq(is_winning_3(3, 5, 7), 1);
+    1
+}
+
+fn test_single_pile() -> Int {
+    // Take 1-3, avoid last
+    assert_eq(sg_take_1_to_3(0), 0);  // losing
+    assert_eq(sg_take_1_to_3(1), 1);  // winning (take 1)
+    assert_eq(sg_take_1_to_3(2), 2);  // winning (take 2)
+    assert_eq(sg_take_1_to_3(3), 3);  // winning (take 3)
+    assert_eq(sg_take_1_to_3(4), 0);  // losing
+    assert_eq(sg_take_1_to_3(8), 0);  // losing
+    assert_eq(sg_take_1_to_3(9), 1);  // winning
+    1
+}
+
+fn test_subtraction_game() -> Int {
+    // Subtraction set {1, 2, 3} should match take-1-to-3
+    assert_eq(sg_subtraction(0, 1, 2, 3), 0);
+    assert_eq(sg_subtraction(1, 1, 2, 3), 1);
+    assert_eq(sg_subtraction(4, 1, 2, 3), 0);
+    // Subtraction set {1, 3, 4}
+    // n=0: G=0, n=1: G=mex{G(0)}=mex{0}=1
+    assert_eq(sg_subtraction(0, 1, 3, 4), 0);
+    assert_eq(sg_subtraction(1, 1, 3, 4), 1);
+    // n=2: can reach n=1 (G=1), so G=mex{1}=0
+    assert_eq(sg_subtraction(2, 1, 3, 4), 0);
+    1
+}
+
+fn test_wythoff() -> Int {
+    assert_eq(is_wythoff_cold(0, 0), 1);
+    assert_eq(is_wythoff_cold(1, 2), 1);
+    assert_eq(is_wythoff_cold(2, 1), 1); // symmetric
+    assert_eq(is_wythoff_cold(3, 5), 1);
+    assert_eq(is_wythoff_cold(1, 1), 0); // not a cold position
+    assert_eq(is_wythoff_cold(2, 3), 0);
+    1
+}
+
+fn test_xor_properties() -> Int {
+    // XOR is commutative
+    assert_eq(xor_val(3, 5), xor_val(5, 3));
+    // XOR is associative
+    assert_eq(xor_val(xor_val(3, 5), 7), xor_val(3, xor_val(5, 7)));
+    // XOR with self = 0
+    assert_eq(xor_val(42, 42), 0);
+    // XOR with 0 = identity
+    assert_eq(xor_val(42, 0), 42);
+    1
+}
+
+fn main() -> Int {
+    test_nim_basic();
+    test_nim_3_piles();
+    test_single_pile();
+    test_subtraction_game();
+    test_wythoff();
+    test_xor_properties();
+    print("[OK] 648_nim_game_aot");
+    0
+}

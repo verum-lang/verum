@@ -1,0 +1,227 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, automaton, dfa, product_construction, state_machines
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Product construction of two DFAs (state pairs, combined transitions).
+//
+// A DFA over alphabet {0,1} is represented as:
+//   - n states (0..n-1)
+//   - trans[s * 2 + sym] = next state from s on symbol sym
+//   - accept[s] = 1 if s is an accepting state
+//
+// Product DFA A x B:
+//   - States = pairs (a, b) where a in A, b in B
+//   - Encoded as: state = a * n_b + b
+//   - trans_prod[(a*n_b+b)*2 + sym] = trans_a[a*2+sym]*n_b + trans_b[b*2+sym]
+//   - accept_prod[a*n_b+b] = accept_a[a] AND accept_b[b]  (intersection)
+//   - accept_union[a*n_b+b] = accept_a[a] OR  accept_b[b]  (union)
+//
+// We simulate running strings on the product DFA and verify acceptance.
+
+// Run a DFA on string sym[0..len-1], return final state.
+fn dfa_run(trans: [Int; 64], start: Int, sym: [Int; 16], len: Int) -> Int {
+    let mut s = start;
+    let mut i = 0;
+    while i < len {
+        s = trans[s * 2 + sym[i]];
+        i = i + 1;
+    }
+    s
+}
+
+// Build product DFA transitions into prod_trans[0..n_a*n_b*2-1].
+// Returns n_a * n_b (number of product states).
+fn build_product(
+    trans_a:    [Int; 64],
+    n_a:        Int,
+    trans_b:    [Int; 64],
+    n_b:        Int,
+    prod_trans: [Int; 64]
+) -> Int {
+    let n_prod = n_a * n_b;
+    let mut a = 0;
+    while a < n_a {
+        let mut b = 0;
+        while b < n_b {
+            let s = a * n_b + b;
+            let mut sym = 0;
+            while sym < 2 {
+                let na = trans_a[a * 2 + sym];
+                let nb = trans_b[b * 2 + sym];
+                prod_trans[s * 2 + sym] = na * n_b + nb;
+                sym = sym + 1;
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    n_prod
+}
+
+fn test_intersection() {
+    // DFA A: accepts strings ending in 0 (even last symbol)
+    // States: 0=saw_other/start, 1=saw_0
+    // On 0: go to state 1. On 1: go to state 0.
+    // Accept: state 1.
+    // trans_a: [state0_on0, state0_on1, state1_on0, state1_on1]
+    let trans_a = [1, 0, 1, 0,   // s0: on0->s1, on1->s0; s1: on0->s1, on1->s0
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let accept_a = [0, 1]; // state 1 accepts
+
+    // DFA B: accepts strings with even length (including 0).
+    // States: 0=even_length, 1=odd_length
+    // On any symbol: toggle state.
+    // Accept: state 0.
+    let trans_b = [1, 1, 0, 0,   // s0: on0->s1, on1->s1; s1: on0->s0, on1->s0
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let accept_b = [1, 0]; // state 0 accepts (even length)
+
+    // Product: 2*2 = 4 states.
+    let mut prod_trans = [0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0];
+    let n_prod = build_product(trans_a, 2, trans_b, 2, prod_trans);
+    assert_eq(n_prod, 4);
+
+    // Product accept (intersection): accept_a[a] AND accept_b[b]
+    // State encoding: a*2+b. a in {0,1}, b in {0,1}
+    // State (0,0)=0: a=0->no, b=0->yes => 0
+    // State (0,1)=1: a=0->no, b=1->no  => 0
+    // State (1,0)=2: a=1->yes, b=0->yes => 1  (ends in 0 AND even length)
+    // State (1,1)=3: a=1->yes, b=1->no  => 0
+
+    // "10" (len=2): even length AND ends in 0 -> accepted
+    let s10 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let final10 = dfa_run(prod_trans, 0, s10, 2);
+    // a starts 0: 1->s0, 0->s1. a=1
+    // b starts 0: 1->s1, 0->s0. b=0
+    // product final = 1*2+0 = 2 -> accept (intersection)
+    let acc_a = accept_a[final10 / 2];
+    let acc_b = accept_b[final10 % 2];
+    assert_eq(acc_a * acc_b, 1); // intersection: both accept
+
+    // "1" (len=1): odd length and ends in 1 -> not in either A or B
+    let s1 = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let final1 = dfa_run(prod_trans, 0, s1, 1);
+    // a: 1->s0. a=0
+    // b: 1->s1. b=1
+    // product = 0*2+1 = 1
+    let acc_a1 = accept_a[final1 / 2];
+    let acc_b1 = accept_b[final1 % 2];
+    assert_eq(acc_a1 * acc_b1, 0); // intersection: neither accepts
+
+    print("automaton_intersection: ok");
+}
+
+fn test_union() {
+    // DFA A: accepts strings containing at least one '1' (has_one)
+    // States: 0=no_one_yet, 1=has_one
+    // s0: on0->s0, on1->s1; s1: on0->s1, on1->s1
+    let trans_a = [0, 1, 1, 1,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let accept_a = [0, 1];
+
+    // DFA B: accepts strings of length >= 3
+    // States: 0,1,2 = seen < 3 symbols; 3 = seen >= 3
+    // s0->s1, s1->s2, s2->s3, s3->s3 (on any symbol)
+    let trans_b = [1, 1, 2, 2, 3, 3, 3, 3,
+                   0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let accept_b = [0, 0, 0, 1];
+
+    let mut prod_trans = [0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0];
+    let n_prod = build_product(trans_a, 2, trans_b, 4, prod_trans);
+    assert_eq(n_prod, 8);
+
+    // "000" (len=3, no ones): A rejects (no 1), B accepts (len>=3)
+    // Union: accepted (B says yes)
+    let s000 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let f000 = dfa_run(prod_trans, 0, s000, 3);
+    // a: 0->0->0->0, a=0
+    // b: 0->1->2->3, b=3
+    // product = 0*4+3 = 3
+    assert_eq(f000, 3);
+    let ua = accept_a[f000 / 4];
+    let ub = accept_b[f000 % 4];
+    assert_eq(ua + ub, 1); // union = A rejects (0) + B accepts (1) = at least 1
+
+    // "1" (len=1): A accepts, B rejects
+    let s1x = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let f1 = dfa_run(prod_trans, 0, s1x, 1);
+    // a: 1->1, a=1; b: 1->1, b=1. product=1*4+1=5
+    assert_eq(f1, 5);
+    let ua1 = accept_a[f1 / 4];
+    let ub1 = accept_b[f1 % 4];
+    assert_eq(ua1, 1); // A accepts
+    assert_eq(ub1, 0); // B rejects
+
+    print("automaton_union: ok");
+}
+
+fn test_product_state_count() {
+    // DFA with 3 states x DFA with 4 states -> 12 product states
+    let trans_a = [1, 2, 0, 2, 0, 1, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let trans_b = [1, 1, 2, 2, 3, 3, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut prod_trans = [0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0];
+    let n_prod = build_product(trans_a, 3, trans_b, 4, prod_trans);
+    assert_eq(n_prod, 12);
+
+    // Spot-check: state (0,0)=0. On sym=0: a goes to trans_a[0]=1, b goes to trans_b[0]=1
+    // product next = 1*4+1 = 5
+    assert_eq(prod_trans[0 * 2 + 0], 5);
+
+    // state (2,3)=11. On sym=1: a goes to trans_a[2*2+1]=1, b goes to trans_b[3*2+1]=0
+    // product next = 1*4+0 = 4
+    assert_eq(prod_trans[11 * 2 + 1], 4);
+
+    print("automaton_product_state_count: ok");
+}
+
+fn main() -> Int {
+    test_intersection();
+    test_union();
+    test_product_state_count();
+    print("[OK] 503_interp_automaton_product");
+    0
+}

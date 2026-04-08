@@ -1,0 +1,106 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, simd, dispatch
+// @timeout: 50000
+// @expected-exit: 0
+// @description: SIMD dispatch operations — extract, insert, shuffle, reverse, chain
+
+type SimdVec4 is { x0: Float, x1: Float, x2: Float, x3: Float };
+
+fn splat4(v: Float) -> SimdVec4 {
+    SimdVec4 { x0: v, x1: v, x2: v, x3: v }
+}
+
+fn simd_extract(v: SimdVec4, idx: Int) -> Float {
+    if idx == 0 { v.x0 }
+    else if idx == 1 { v.x1 }
+    else if idx == 2 { v.x2 }
+    else { v.x3 }
+}
+
+fn simd_insert(v: SimdVec4, idx: Int, val: Float) -> SimdVec4 {
+    SimdVec4 {
+        x0: if idx == 0 { val } else { v.x0 },
+        x1: if idx == 1 { val } else { v.x1 },
+        x2: if idx == 2 { val } else { v.x2 },
+        x3: if idx == 3 { val } else { v.x3 },
+    }
+}
+
+fn simd_shuffle(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    // Interleave: take a[0], b[0], a[1], b[1]
+    SimdVec4 { x0: a.x0, x1: b.x0, x2: a.x1, x3: b.x1 }
+}
+
+fn simd_reverse(v: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: v.x3, x1: v.x2, x2: v.x1, x3: v.x0 }
+}
+
+fn simd_add(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: a.x0 + b.x0, x1: a.x1 + b.x1, x2: a.x2 + b.x2, x3: a.x3 + b.x3 }
+}
+
+fn simd_mul(a: SimdVec4, b: SimdVec4) -> SimdVec4 {
+    SimdVec4 { x0: a.x0 * b.x0, x1: a.x1 * b.x1, x2: a.x2 * b.x2, x3: a.x3 * b.x3 }
+}
+
+fn reduce_add(v: SimdVec4) -> Float { v.x0 + v.x1 + v.x2 + v.x3 }
+
+@test
+fn test_simd_splat_extract() {
+    let v = splat4(42.0);
+    let val = simd_extract(v, 0);
+    assert(val == 42.0);
+}
+
+@test
+fn test_simd_insert() {
+    let v = splat4(0.0);
+    let v2 = simd_insert(v, 0, 99.0);
+    assert(simd_extract(v2, 0) == 99.0);
+}
+
+@test
+fn test_simd_shuffle() {
+    let a = splat4(1.0);
+    let b = splat4(2.0);
+    let result = simd_shuffle(a, b);
+    assert(result.x0 == 1.0);
+    assert(result.x1 == 2.0);
+}
+
+@test
+fn test_simd_reverse() {
+    let v = simd_insert(simd_insert(splat4(0.0), 0, 1.0), 3, 4.0);
+    let rev = simd_reverse(v);
+    assert(rev.x0 == 4.0);
+    assert(rev.x3 == 1.0);
+}
+
+@test
+fn test_simd_cast() {
+    // Cast simulation: float to int-like truncation
+    let v = splat4(3.14);
+    // Just verify the value exists (cast is identity in simulation)
+    assert(v.x0 > 3.0);
+}
+
+@test
+fn test_simd_chain_operations() {
+    let a = splat4(2.0);
+    let b = splat4(3.0);
+    let sum = simd_add(a, b);
+    let prod = simd_mul(sum, a);
+    let result = reduce_add(prod);
+    assert(result == 40.0);
+}
+
+fn main() {
+    test_simd_splat_extract();
+    test_simd_insert();
+    test_simd_shuffle();
+    test_simd_reverse();
+    test_simd_cast();
+    test_simd_chain_operations();
+}

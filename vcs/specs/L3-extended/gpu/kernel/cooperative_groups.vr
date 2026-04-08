@@ -1,0 +1,201 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: gpu, kernel, cooperative-groups
+// @description: Cooperative groups for flexible thread synchronization
+
+/// Cooperative groups provide a flexible abstraction for grouping
+/// and synchronizing GPU threads at various granularities.
+
+mount gpu.cooperative_groups as cg;
+
+/// Thread block group - all threads in a block
+@kernel
+fn block_group_example(data: &mut Tensor<f32, [N]>) {
+    let block = cg.this_thread_block();
+
+    // Synchronize all threads in block
+    block.sync();
+
+    // Get thread properties
+    let rank = block.thread_rank();
+    let size = block.size();
+
+    // Perform block-wide reduction
+    let local_sum = data[threadIdx.x];
+    let block_sum = block_reduce_sum(block, local_sum);
+
+    if rank == 0 {
+        // Leader thread stores result
+        data[0] = block_sum;
+    }
+}
+
+/// Tiled partition - divide block into smaller groups
+@kernel
+fn tiled_partition_example(data: &mut Tensor<f32, [N]>) {
+    let block = cg.this_thread_block();
+
+    // Create tiles of 32 threads (warp-sized)
+    let tile = cg.tiled_partition<32>(block);
+
+    let tile_rank = tile.thread_rank();
+    let tile_size = tile.size();
+
+    // Each tile can synchronize independently
+    tile.sync();
+
+    // Tile-wide shuffle
+    let value = data[threadIdx.x];
+    let shuffled = tile.shfl(value, (tile_rank + 1) % tile_size);
+
+    data[threadIdx.x] = shuffled;
+}
+
+/// Coalesced group - dynamically formed from active threads
+@kernel
+fn coalesced_group_example(data: &Tensor<f32, [N]>) -> f32 {
+    let tid = threadIdx.x;
+
+    // Only some threads participate based on condition
+    if data[tid] > 0.0 {
+        // Get group of currently active threads
+        let active = cg.coalesced_threads();
+
+        let rank = active.thread_rank();
+        let size = active.size();
+
+        // Reduce only among active threads
+        let value = data[tid];
+        let sum = active.reduce(value, cg.plus<f32>());
+
+        if rank == 0 {
+            return sum;
+        }
+    }
+
+    0.0
+}
+
+/// Grid group - all threads across all blocks
+@kernel
+@cooperative
+fn grid_group_example(
+    data: &mut Tensor<f32, [N]>,
+    partial_sums: &mut Tensor<f32, [NUM_BLOCKS]>
+) {
+    let grid = cg.this_grid();
+    let block = cg.this_thread_block();
+
+    // Phase 1: Block-level reduction
+    let local = data[blockIdx.x * blockDim.x + threadIdx.x];
+    let block_sum = block_reduce_sum(block, local);
+
+    if block.thread_rank() == 0 {
+        partial_sums[blockIdx.x] = block_sum;
+    }
+
+    // Grid-wide synchronization
+    grid.sync();
+
+    // Phase 2: Final reduction by first block
+    if blockIdx.x == 0 {
+        let partial = if threadIdx.x < NUM_BLOCKS {
+            partial_sums[threadIdx.x]
+        } else {
+            0.0
+        };
+
+        let total = block_reduce_sum(block, partial);
+
+        if threadIdx.x == 0 {
+            data[0] = total;
+        }
+    }
+}
+
+/// Multi-grid group - threads across multiple GPUs
+@kernel
+@multi_grid
+fn multi_grid_example(
+    local_data: &Tensor<f32, [N]>,
+    global_result: &mut Tensor<f32, [1]>
+) {
+    let multi_grid = cg.this_multi_grid();
+    let grid = cg.this_grid();
+    let block = cg.this_thread_block();
+
+    // Local reduction
+    let local = local_data[blockIdx.x * blockDim.x + threadIdx.x];
+    let block_sum = block_reduce_sum(block, local);
+
+    // ... aggregate across grids ...
+
+    // Multi-grid synchronization
+    multi_grid.sync();
+}
+
+/// Custom partition by label
+@kernel
+fn labeled_partition_example(data: &Tensor<i32, [N]>) {
+    let block = cg.this_thread_block();
+
+    // Partition threads by their data value
+    let label = data[threadIdx.x] % 4;  // 4 groups
+    let group = cg.labeled_partition(block, label);
+
+    // Each group has threads with same label
+    let group_sum = group.reduce(1, cg.plus<i32>());
+
+    if group.thread_rank() == 0 {
+        // Leader of each group
+        printf("Group %d has %d threads\n", label, group_sum);
+    }
+}
+
+/// Binary partition
+@kernel
+fn binary_partition_example(data: &Tensor<f32, [N]>) {
+    let block = cg.this_thread_block();
+
+    // Partition into two groups based on predicate
+    let is_positive = data[threadIdx.x] > 0.0;
+    let group = cg.binary_partition(block, is_positive);
+
+    // Each group can work independently
+    let count = group.size();
+    let sum = group.reduce(data[threadIdx.x], cg.plus<f32>());
+}
+
+/// Block-level reduce implementation
+@kernel
+fn block_reduce_sum<Group: cg.ThreadGroup>(
+    group: Group,
+    value: f32
+) -> f32 {
+    // Use shared memory for block reduction
+    @shared let mut sdata: [f32; 1024];
+
+    let tid = group.thread_rank();
+    sdata[tid] = value;
+    group.sync();
+
+    // Parallel reduction
+    let mut s = group.size() / 2;
+    while s > 0 {
+        if tid < s {
+            sdata[tid] += sdata[tid + s];
+        }
+        group.sync();
+        s /= 2;
+    }
+
+    sdata[0]
+}
+
+const NUM_BLOCKS: Int = 256;
+
+fn main() {
+    // GPU kernel compilation only
+}

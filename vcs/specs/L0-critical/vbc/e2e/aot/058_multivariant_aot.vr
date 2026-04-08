@@ -1,0 +1,129 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, expression-tree
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT expression tree with all 4 arithmetic operations
+
+type Expr is
+    ENum(Int)
+  | EAdd { left: Expr, right: Expr }
+  | ESub { left: Expr, right: Expr }
+  | EMul { left: Expr, right: Expr }
+  | EDiv { left: Expr, right: Expr };
+
+fn eval(e: Expr) -> Int {
+    match e {
+        ENum(n) => n,
+        EAdd { left, right } => eval(left) + eval(right),
+        ESub { left, right } => eval(left) - eval(right),
+        EMul { left, right } => eval(left) * eval(right),
+        EDiv { left, right } => {
+            let r = eval(right);
+            if r == 0 { 0 } else { eval(left) / r }
+        },
+    }
+}
+
+fn expr_depth(e: Expr) -> Int {
+    match e {
+        ENum(_) => 0,
+        EAdd { left, right } => {
+            let ld = expr_depth(left);
+            let rd = expr_depth(right);
+            1 + if ld > rd { ld } else { rd }
+        },
+        ESub { left, right } => {
+            let ld = expr_depth(left);
+            let rd = expr_depth(right);
+            1 + if ld > rd { ld } else { rd }
+        },
+        EMul { left, right } => {
+            let ld = expr_depth(left);
+            let rd = expr_depth(right);
+            1 + if ld > rd { ld } else { rd }
+        },
+        EDiv { left, right } => {
+            let ld = expr_depth(left);
+            let rd = expr_depth(right);
+            1 + if ld > rd { ld } else { rd }
+        },
+    }
+}
+
+fn count_ops(e: Expr) -> Int {
+    match e {
+        ENum(_) => 0,
+        EAdd { left, right } => 1 + count_ops(left) + count_ops(right),
+        ESub { left, right } => 1 + count_ops(left) + count_ops(right),
+        EMul { left, right } => 1 + count_ops(left) + count_ops(right),
+        EDiv { left, right } => 1 + count_ops(left) + count_ops(right),
+    }
+}
+
+fn main() -> Int {
+    // === Basic eval ===
+    assert_eq(eval(ENum(42)), 42);
+    assert_eq(eval(EAdd { left: ENum(10), right: ENum(20) }), 30);
+    assert_eq(eval(ESub { left: ENum(10), right: ENum(3) }), 7);
+    assert_eq(eval(EMul { left: ENum(5), right: ENum(6) }), 30);
+    assert_eq(eval(EDiv { left: ENum(100), right: ENum(7) }), 14);
+    assert_eq(eval(EDiv { left: ENum(100), right: ENum(0) }), 0);
+
+    // === Depth ===
+    assert_eq(expr_depth(ENum(1)), 0);
+    assert_eq(expr_depth(EAdd { left: ENum(1), right: ENum(2) }), 1);
+    assert_eq(expr_depth(EMul {
+        left: EAdd { left: ENum(2), right: ENum(3) },
+        right: ENum(4),
+    }), 2);
+
+    // === Count ops ===
+    assert_eq(count_ops(ENum(1)), 0);
+    assert_eq(count_ops(EAdd { left: ENum(1), right: ENum(2) }), 1);
+
+    // === Complex tree: ((1+2)*(3+4)) - ((5-6)*(7+8)) = 21 - (-15) = 36 ===
+    let complex = ESub {
+        left: EMul {
+            left: EAdd { left: ENum(1), right: ENum(2) },
+            right: EAdd { left: ENum(3), right: ENum(4) },
+        },
+        right: EMul {
+            left: ESub { left: ENum(5), right: ENum(6) },
+            right: EAdd { left: ENum(7), right: ENum(8) },
+        },
+    };
+    assert_eq(eval(complex), 36);
+    assert_eq(expr_depth(complex), 3);
+    assert_eq(count_ops(complex), 7);
+
+    // === All ops: (10-3) + ((6*4)/8) = 7 + 3 = 10 ===
+    let all_ops = EAdd {
+        left: ESub { left: ENum(10), right: ENum(3) },
+        right: EDiv {
+            left: EMul { left: ENum(6), right: ENum(4) },
+            right: ENum(8),
+        },
+    };
+    assert_eq(eval(all_ops), 10);
+    assert_eq(expr_depth(all_ops), 3);
+    assert_eq(count_ops(all_ops), 4);
+
+    // === Deep left spine ===
+    let deep = EAdd {
+        left: EAdd {
+            left: EAdd {
+                left: EAdd { left: ENum(1), right: ENum(2) },
+                right: ENum(3),
+            },
+            right: ENum(4),
+        },
+        right: ENum(5),
+    };
+    assert_eq(eval(deep), 15);
+    assert_eq(expr_depth(deep), 4);
+    assert_eq(count_ops(deep), 4);
+
+    0
+}

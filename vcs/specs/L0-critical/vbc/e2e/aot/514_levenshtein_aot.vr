@@ -1,0 +1,181 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, levenshtein, edit-distance, string-algorithms
+// @timeout: 30000
+
+// Levenshtein edit distance using 2-row DP approach
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn min3(a: Int, b: Int, c: Int) -> Int { min2(min2(a, b), c) }
+
+// Compute edit distance between two sequences stored as Arr8
+// a[0..m-1], b[0..n-1], both m,n <= 7
+fn edit_distance(a: Arr8, m: Int, b: Arr8, n: Int) -> Int {
+    // dp[j] = edit distance of a[0..i-1] and b[0..j-1]
+    // Initialize: dp[j] = j
+    let mut dp = zeros();
+    let mut j = 0;
+    while j <= n {
+        dp = set8(dp, j, j);
+        j = j + 1;
+    }
+
+    let mut i = 1;
+    while i <= m {
+        let mut prev = get8(dp, 0); // dp[i-1][0]
+        dp = set8(dp, 0, i); // dp[i][0] = i
+        j = 1;
+        while j <= n {
+            let old = get8(dp, j); // dp[i-1][j]
+            let cost = if get8(a, i - 1) == get8(b, j - 1) { 0 } else { 1 };
+            let val = min3(
+                old + 1,           // delete
+                get8(dp, j - 1) + 1,  // insert
+                prev + cost        // replace/match
+            );
+            dp = set8(dp, j, val);
+            prev = old;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    get8(dp, n)
+}
+
+// Longest common subsequence length
+fn lcs_len(a: Arr8, m: Int, b: Arr8, n: Int) -> Int {
+    let mut dp = zeros();
+    let mut i = 1;
+    while i <= m {
+        let mut prev = 0;
+        let mut j = 1;
+        while j <= n {
+            let old = get8(dp, j);
+            if get8(a, i - 1) == get8(b, j - 1) {
+                dp = set8(dp, j, prev + 1);
+            } else {
+                let up = old;
+                let left = get8(dp, j - 1);
+                dp = set8(dp, j, if up > left { up } else { left });
+            }
+            prev = old;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    get8(dp, n)
+}
+
+// Hamming distance (same length sequences)
+fn hamming_dist(a: Arr8, b: Arr8, n: Int) -> Int {
+    let mut dist = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(a, i) != get8(b, i) { dist = dist + 1; }
+        i = i + 1;
+    }
+    dist
+}
+
+fn test_equal() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(a, 3, a, 3), 0);
+    1
+}
+
+fn test_empty() -> Int {
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = zeros();
+    assert_eq(edit_distance(a, 3, b, 0), 3); // 3 deletions
+    assert_eq(edit_distance(b, 0, a, 3), 3); // 3 insertions
+    1
+}
+
+fn test_single_edit() -> Int {
+    // [1,2,3] → [1,2,4]: one substitution
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 1, v1: 2, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(a, 3, b, 3), 1);
+
+    // [1,2,3] → [1,2]: one deletion
+    let c = Arr8 { v0: 1, v1: 2, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(a, 3, c, 2), 1);
+
+    // [1,2,3] → [1,5,2,3]: one insertion
+    let d = Arr8 { v0: 1, v1: 5, v2: 2, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(a, 3, d, 4), 1);
+    1
+}
+
+fn test_complex_edit() -> Int {
+    // [1,2,3,4,5] → [2,3,5,6]: need delete 1, delete 4, insert 6 = 3
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 2, v1: 3, v2: 5, v3: 6, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(a, 5, b, 4), 3);
+    1
+}
+
+fn test_lcs() -> Int {
+    // LCS of [1,2,3,4] and [2,4,5] = [2,4], length 2
+    let a = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 2, v1: 4, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcs_len(a, 4, b, 3), 2);
+
+    // LCS of identical sequences
+    assert_eq(lcs_len(a, 4, a, 4), 4);
+
+    // LCS of disjoint sequences
+    let c = Arr8 { v0: 5, v1: 6, v2: 7, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcs_len(a, 4, c, 3), 0);
+    1
+}
+
+fn test_hamming() -> Int {
+    let a = Arr8 { v0: 1, v1: 0, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 1, v1: 1, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(hamming_dist(a, b, 4), 2); // positions 1,2 differ
+    assert_eq(hamming_dist(a, a, 4), 0);
+    1
+}
+
+fn test_symmetry() -> Int {
+    // Edit distance is symmetric
+    let a = Arr8 { v0: 1, v1: 3, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let b = Arr8 { v0: 2, v1: 3, v2: 4, v3: 6, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(edit_distance(a, 3, b, 4), edit_distance(b, 4, a, 3));
+    1
+}
+
+fn main() -> Int {
+    test_equal();
+    test_empty();
+    test_single_edit();
+    test_complex_edit();
+    test_lcs();
+    test_hamming();
+    test_symmetry();
+    print("[OK] 514_levenshtein_aot");
+    0
+}

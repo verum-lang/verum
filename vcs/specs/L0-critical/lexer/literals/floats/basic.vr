@@ -1,0 +1,164 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, floats, basic
+
+// Basic floating-point literals
+
+fn test_simple_floats() {
+    // Simple decimal floats
+    let zero = 0.0;
+    let one = 1.0;
+    let pi = 3.14;
+    let e = 2.71828;
+    let half = 0.5;
+    let quarter = 0.25;
+}
+
+fn test_math_constants() {
+    // Common mathematical constants
+    let pi_full = 3.14159265358979;
+    let e_full = 2.71828182845904;
+    let sqrt2 = 1.41421356237309;
+    let phi = 1.61803398874989;
+}
+
+fn test_small_values() {
+    // Small decimal values
+    let tenth = 0.1;
+    let hundredth = 0.01;
+    let thousandth = 0.001;
+    let tiny = 0.0001;
+}
+
+fn test_larger_floats() {
+    // Larger float values
+    let hundred = 100.0;
+    let thousand = 1000.0;
+    let million = 1000000.0;
+}
+
+fn test_mixed_precision() {
+    // Mixed precision
+    let precise = 123.456789;
+    let less_precise = 123.45;
+    let rounded = 123.0;
+}
+
+fn test_negative_floats() {
+    // Negative floats
+    let neg_one = -1.0;
+    let neg_pi = -3.14159;
+    let neg_half = -0.5;
+    let neg_tiny = -0.001;
+}
+
+fn test_expressions() {
+    // Floats in expressions
+    let sum = 1.5 + 2.5;
+    let product = 3.0 * 4.0;
+    let quotient = 10.0 / 4.0;
+    let difference = 5.5 - 2.5;
+}
+
+fn test_comparisons() {
+    // Floats in comparisons
+    let is_positive = 3.14 > 0.0;
+    let is_equal = 1.0 == 1.0;
+}
+
+// Floats in function calls
+fn area(radius: Float) -> Float {
+    3.14159 * radius * radius
+}
+
+fn test_function_calls() {
+    let circle_area = area(2.5);
+}
+
+fn test_arrays() {
+    // Floats in arrays
+    let values = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let coordinates = [0.0, 0.5, 1.0, 1.5, 2.0];
+    let measurements = [98.6, 99.1, 98.2, 99.8];
+}
+
+fn test_tuples() {
+    // Floats in tuples
+    let point = (3.5, 4.5);
+    let vector = (1.0, 0.0, 0.0);
+    let complex = (2.5, -1.5);
+}
+
+// Floats in match expressions
+fn classify_value(x: Float) -> Text {
+    match x {
+        0.0 => "zero"
+        1.0 => "one"
+        _ if x < 0.0 => "negative"
+        _ if x > 0.0 && x < 1.0 => "fraction"
+        _ => "positive"
+    }
+}
+
+// Floats in struct fields
+type Rectangle is {
+    width: Float,
+    height: Float,
+};
+
+fn test_struct_fields() {
+    let rect = Rectangle {
+        width: 10.5,
+        height: 7.25,
+    };
+}
+
+// Floats in range checks
+fn is_percentage(x: Float) -> Bool {
+    x >= 0.0 && x <= 100.0
+}
+
+fn is_normalized(x: Float) -> Bool {
+    x >= 0.0 && x <= 1.0
+}
+
+fn test_monetary_values() {
+    // Monetary values
+    let price = 19.99;
+    let tax_rate = 0.08;
+    let discount = 0.15;
+}
+
+fn test_physical_measurements() {
+    // Physical measurements
+    let temperature_c = 23.5;
+    let temperature_f = 74.3;
+    let weight_kg = 68.5;
+    let height_m = 1.75;
+}
+
+fn test_angles() {
+    // Angles in radians
+    let angle_0 = 0.0;
+    let angle_90 = 1.5707963267949;
+    let angle_180 = 3.14159265358979;
+    let angle_360 = 6.28318530717959;
+}
+
+fn test_probabilities() {
+    // Probabilities
+    let certain = 1.0;
+    let impossible = 0.0;
+    let likely = 0.75;
+    let unlikely = 0.25;
+    let coin_flip = 0.5;
+}
+
+fn test_coordinates() {
+    // Coordinates
+    let origin_x = 0.0;
+    let origin_y = 0.0;
+    let target_x = 100.5;
+    let target_y = 75.25;
+}

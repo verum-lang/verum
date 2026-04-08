@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, impl, error
+// @description: Test missing impl block braces detection
+// @expected-error: E057
+
+implement Point
+    fn new() -> Self { Point { x: 0, y: 0 } }
+
+implement Display for Point
+    fn show(&self) -> Text { f"({self.x}, {self.y})" }
+
+implement Clone for User fn clone(&self) -> Self { self }

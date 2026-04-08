@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: simd, type-system, protocol, marker
+// @description: Test SimdElement marker protocol for SIMD lane types
+
+/// SimdElement is a marker protocol indicating types that can be SIMD lanes.
+/// Spec: low-level-features.md Section 5.1
+
+/// Test that Int implements SimdElement
+fn test_int_simd_element() {
+    // Int is a valid SIMD element type
+    let x: Int = 42;
+    // This function requires T: SimdElement
+    accept_simd_element(x);
+}
+
+/// Test that Float implements SimdElement
+fn test_float_simd_element() {
+    // Float is a valid SIMD element type
+    let y: Float = 3.14;
+    accept_simd_element(y);
+}
+
+/// Test that Bool implements SimdElement (for masks)
+fn test_bool_simd_element() {
+    // Bool is valid for SIMD masks
+    let b: Bool = true;
+    accept_simd_element(b);
+}
+
+/// Helper function requiring SimdElement bound
+fn accept_simd_element<T: SimdElement>(value: T) {
+    // Just needs to type-check
+}
+
+/// Test Numeric protocol for arithmetic-capable types
+fn test_numeric_protocol() {
+    // Int and Float implement Numeric
+    let i: Int = 10;
+    let f: Float = 2.5;
+
+    accept_numeric(i);
+    accept_numeric(f);
+}
+
+/// Helper function requiring Numeric bound
+fn accept_numeric<T: Numeric>(value: T) {
+    // Just needs to type-check
+}
+
+/// Test combined bounds for SIMD arithmetic
+fn accept_simd_numeric<T: SimdElement + Numeric>(value: T) {
+    // Types that are both SimdElement and Numeric
+    // can be used for SIMD arithmetic operations
+}
+
+fn test_simd_numeric_bounds() {
+    let i: Int = 100;
+    let f: Float = 1.5;
+
+    // Both Int and Float satisfy SimdElement + Numeric
+    accept_simd_numeric(i);
+    accept_simd_numeric(f);
+}
+
+fn main() {
+    test_int_simd_element();
+    test_float_simd_element();
+    test_bool_simd_element();
+    test_numeric_protocol();
+    test_simd_numeric_bounds();
+}

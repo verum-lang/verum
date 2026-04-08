@@ -1,0 +1,29 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, checked, escape, negative-test
+// @description: Verifies that &checked refs cannot escape through function calls (E310)
+
+/// Test that checked tier promotion fails when value may escape.
+/// Escape analysis must prove safety for Tier 1 (checked) references.
+/// This is a COMPILE-TIME optimization decision, not a borrow checker.
+/// Spec: 26-cbgr-implementation.md#escape-analysis
+///
+/// Note: E310 is a CBGR tier promotion error.
+/// When escape analysis cannot prove a checked reference stays local,
+/// the promotion is rejected. The programmer must either:
+/// 1. Use Tier 0 (&T) with runtime CBGR checks (~15ns overhead)
+/// 2. Refactor code to prevent escape
+
+fn capture_ref(r: &Int) -> &Int {
+    r  // Returns the reference, causing escape
+}
+
+fn main() {
+    let local = 42;
+    let checked_ref: &checked Int = &checked local;
+
+    // Cannot use checked ref in context where it might escape
+    // Checked refs promise no runtime checks, but escape makes them unsafe
+    let escaped = capture_ref(checked_ref);  // ERROR: E310 checked ref escapes
+}

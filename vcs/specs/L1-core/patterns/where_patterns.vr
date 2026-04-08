@@ -1,0 +1,252 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, where
+//
+// Tests pattern matching with where-clause-style type constraints on functions.
+// Uses standard `if` guards in match arms (Verum's guard syntax).
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Span is {
+    start: Int,
+    end: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    score: Int,
+};
+
+// Function with where clause type constraint
+fn compare<T: Ord>(a: T, b: T) -> Int {
+    match (a, b) {
+        (x, y) if x < y => -1,
+        (x, y) if x > y => 1,
+        _ => 0,
+    }
+}
+
+fn max_val<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+fn min_val<T: Ord>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+// Span checking with guard patterns
+fn in_range(n: Int, r: Span) -> Bool {
+    match r {
+        Span { start, end } => n >= start && n <= end,
+    }
+}
+
+// Match arms with if guards
+fn categorize_person(p: Person) -> Text {
+    match p {
+        Person { age, score, .. } if age >= 18 && score >= 90 => "adult high achiever",
+        Person { age, score, .. } if age >= 18 && score >= 60 => "adult passing",
+        Person { age, .. } if age >= 18 => "adult failing",
+        Person { score, .. } if score >= 90 => "minor high achiever",
+        Person { score, .. } if score >= 60 => "minor passing",
+        _ => "minor failing",
+    }
+}
+
+// Triangle classification with guards
+fn classify_triangle(a: Int, b: Int, c: Int) -> Text {
+    match (a, b, c) {
+        (x, y, z) if x == y && y == z => "equilateral",
+        (x, y, z) if x == y || y == z || x == z => "isosceles",
+        _ => "scalene",
+    }
+}
+
+// Email validation with guards
+fn is_valid_email(email: Text) -> Bool {
+    email.contains("@") && email.contains(".")
+}
+
+fn process_email(email: Text) -> Result<Text, Text> {
+    match email {
+        e if is_valid_email(e) => Ok("Valid: " + e),
+        e => Err("Invalid email: " + e),
+    }
+}
+
+// Pair processing with guards
+fn process_pair(a: Int, b: Int) -> Text {
+    match (a, b) {
+        (x, y) if x > 0 && y > 0 => "both positive",
+        (x, y) if x < 0 && y < 0 => "both negative",
+        (x, y) if x * y < 0 => "mixed signs",
+        _ => "at least one zero",
+    }
+}
+
+// Grade scoring with guards
+fn grade_score(score: Int) -> Text {
+    match score {
+        s if s >= 90 && s <= 100 => "A",
+        s if s >= 80 => "B",
+        s if s >= 70 => "C",
+        s if s >= 60 => "D",
+        s if s >= 0 => "F",
+        _ => "invalid score",
+    }
+}
+
+// Span analysis with guards
+fn process_range(r: Span) -> Text {
+    match r {
+        Span { start, end } if start == end => "point",
+        Span { start, end } if end - start == 1 => "unit interval",
+        Span { start, end } if end - start < 10 => "small interval",
+        Span { start, end } if start < 0 && end > 0 => "spans zero",
+        Span { start, .. } if start >= 0 => "non-negative",
+        Span { end, .. } if end <= 0 => "non-positive",
+        _ => "mixed",
+    }
+}
+
+// List analysis with guards
+fn analyze_data(data: List<Int>) -> Text {
+    match data {
+        [] => "empty",
+        [x] if x > 0 => "single positive",
+        [x] if x < 0 => "single negative",
+        [0] => "single zero",
+        [x, y] if x + y == 0 => "two that sum to zero",
+        [x, y, ..] if x < y => "starts ascending",
+        [x, y, ..] if x > y => "starts descending",
+        _ => "other",
+    }
+}
+
+// Bounds checking with where constraint
+fn check_bounds<T: Ord>(x: T, lower: T, upper: T) -> Maybe<T> {
+    if x >= lower && x <= upper {
+        Some(x)
+    } else {
+        None
+    }
+}
+
+// Maybe analysis with guards
+fn analyze_maybe_int(m: Maybe<Int>) -> Text {
+    match m {
+        None => "nothing",
+        Some(x) if x > 100 || x < -100 => "large magnitude",
+        Some(x) if x < 10 && x > -10 => "small magnitude",
+        Some(_) => "medium magnitude",
+    }
+}
+
+// Helper: prepend element to list
+fn cons<T>(head: T, tail: List<T>) -> List<T> {
+    let mut result: List<T> = [];
+    result.push(head);
+    let mut t = tail;
+    result.append(&mut t);
+    result
+}
+
+// Find first matching element
+@allow(unbounded_recursion)
+fn find_first<T: Clone>(list: List<T>, pred: fn(T) -> Bool) -> Maybe<T> {
+    match list {
+        [] => None,
+        [head, ..rest] if pred(head.clone()) => Some(head),
+        [_, ..rest] => find_first(rest, pred),
+    }
+}
+
+// Max by key
+@allow(unbounded_recursion)
+fn max_by_key<T: Clone, K: Ord>(items: List<T>, key_fn: fn(T) -> K) -> Maybe<T> {
+    match items {
+        [] => None,
+        [single] => Some(single),
+        [first, second, ..rest] if key_fn(first.clone()) >= key_fn(second.clone()) =>
+            max_by_key(cons(first, rest), key_fn),
+        [_, ..rest] => max_by_key(rest, key_fn),
+    }
+}
+
+fn main() {
+    // Compare with type constraint
+    assert(compare(1, 2) == -1);
+    assert(compare(2, 1) == 1);
+    assert(compare(1, 1) == 0);
+    assert(compare("apple", "banana") == -1);
+
+    // Max and min
+    assert(max_val(3, 7) == 7);
+    assert(min_val(3, 7) == 3);
+
+    // Span checking
+    let r = Span { start: 0, end: 10 };
+    assert(in_range(5, r) == true);
+    assert(in_range(15, r) == false);
+
+    // Person categorization
+    let adult_achiever = Person { name: "Alice", age: 25, score: 95 };
+    let minor_passing = Person { name: "Bob", age: 16, score: 75 };
+    assert(categorize_person(adult_achiever) == "adult high achiever");
+    assert(categorize_person(minor_passing) == "minor passing");
+
+    // Triangle classification
+    assert(classify_triangle(3, 3, 3) == "equilateral");
+    assert(classify_triangle(3, 3, 4) == "isosceles");
+    assert(classify_triangle(3, 4, 5) == "scalene");
+
+    // Pair processing
+    assert(process_pair(1, 2) == "both positive");
+    assert(process_pair(-1, -2) == "both negative");
+    assert(process_pair(-1, 2) == "mixed signs");
+    assert(process_pair(0, 0) == "at least one zero");
+
+    // Grade scoring
+    assert(grade_score(95) == "A");
+    assert(grade_score(85) == "B");
+    assert(grade_score(75) == "C");
+    assert(grade_score(65) == "D");
+    assert(grade_score(55) == "F");
+    assert(grade_score(-5) == "invalid score");
+
+    // Span analysis
+    assert(process_range(Span { start: 5, end: 5 }) == "point");
+    assert(process_range(Span { start: 5, end: 6 }) == "unit interval");
+    assert(process_range(Span { start: 0, end: 5 }) == "small interval");
+    assert(process_range(Span { start: -5, end: 5 }) == "spans zero");
+
+    // Bounds checking
+    assert(check_bounds(5, 0, 10) == Some(5));
+    assert(check_bounds(15, 0, 10) == None);
+
+    // Data analysis
+    assert(analyze_data([]) == "empty");
+    assert(analyze_data([5]) == "single positive");
+    assert(analyze_data([-3]) == "single negative");
+    assert(analyze_data([0]) == "single zero");
+    assert(analyze_data([1, 2, 3]) == "starts ascending");
+    assert(analyze_data([3, 2, 1]) == "starts descending");
+
+    // Maybe analysis
+    assert(analyze_maybe_int(None) == "nothing");
+    assert(analyze_maybe_int(Some(200)) == "large magnitude");
+    assert(analyze_maybe_int(Some(5)) == "small magnitude");
+    assert(analyze_maybe_int(Some(50)) == "medium magnitude");
+
+    // Find first
+    assert(find_first([1, 2, 3, 4, 5], |x| x > 3) == Some(4));
+    assert(find_first([1, 2, 3], |x| x > 10) == None);
+}

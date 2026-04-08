@@ -1,0 +1,672 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 15ns per check
+// @tags: cbgr, memory, safety, performance, critical
+
+/// CBGR Check Latency Benchmark
+///
+/// Measures the overhead of CBGR (Capability-Based Generation References)
+/// validation checks during reference operations. This is a critical
+/// performance metric for Verum's memory safety system.
+///
+/// CBGR provides memory safety with ~15ns overhead per check compared
+/// to raw pointer dereference.
+///
+/// Target: < 15ns per CBGR check
+///
+/// Comparison:
+/// - Raw pointer: ~0.5ns
+/// - Rust borrow check: 0ns (compile-time)
+/// - CBGR check: < 15ns (runtime)
+///
+/// The overhead includes:
+/// - Generation counter validation (4ns)
+/// - Epoch capabilities check (6ns)
+/// - Memory barrier (3ns)
+/// - Branch prediction (2ns)
+
+module vcs.benchmarks.micro.cbgr_check_latency
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// ThinRef layout: 16 bytes
+/// - ptr: 8 bytes
+/// - generation: 4 bytes
+/// - epoch_caps: 4 bytes
+type ThinRef<T> is {
+    ptr: *T,
+    generation: u32,
+    epoch_caps: u32,
+};
+
+/// FatRef layout: 24 bytes (for slices)
+/// - ptr: 8 bytes
+/// - generation: 4 bytes
+/// - epoch_caps: 4 bytes
+/// - len: 8 bytes
+type FatRef<T> is {
+    ptr: *T,
+    generation: u32,
+    epoch_caps: u32,
+    len: usize,
+};
+
+fn main() {
+    let results = BenchmarkResults.new("CBGR Check Latency");
+
+    // Core CBGR check benchmarks
+    results.add(benchmark_thin_ref_check());
+    results.add(benchmark_fat_ref_check());
+    results.add(benchmark_checked_ref());
+    results.add(benchmark_unsafe_ref());
+
+    // Access pattern benchmarks
+    results.add(benchmark_sequential_access());
+    results.add(benchmark_random_access());
+    results.add(benchmark_strided_access());
+
+    // Contention benchmarks
+    results.add(benchmark_single_ref_repeated());
+    results.add(benchmark_multiple_refs());
+    results.add(benchmark_nested_refs());
+
+    // Comparison benchmarks
+    results.add(benchmark_raw_pointer());
+    results.add(benchmark_array_bounds_check());
+
+    // Real-world scenario benchmarks
+    results.add(benchmark_list_iteration());
+    results.add(benchmark_tree_traversal());
+    results.add(benchmark_graph_traversal());
+
+    results.report();
+
+    // Validate critical target
+    let thin_ref_result = results.get("thin_ref_check");
+    if let Some(result) = thin_ref_result {
+        if result.value > 15.0 {
+            println("\n{} CBGR overhead ({:.2}ns) exceeds 15ns target!",
+                    "WARNING:".yellow(), result.value);
+        } else {
+            println("\n{} CBGR overhead ({:.2}ns) within 15ns target",
+                    "SUCCESS:".green(), result.value);
+        }
+    }
+
+    assert(results.all_pass(), "CBGR check latency exceeds target");
+}
+
+/// Benchmark ThinRef check (Tier 0 - full CBGR)
+fn benchmark_thin_ref_check() -> BenchmarkResult {
+    let data = list![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let ref_data = &data;  // Creates ThinRef
+    let mut sum: Int = 0;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        sum += ref_data[0];  // CBGR check happens here
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // Each index access triggers CBGR validation
+        sum += ref_data[i % 10];
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "thin_ref_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 15.0,
+        passed: per_check_ns < 15.0,
+    }
+}
+
+/// Benchmark FatRef check (for slices)
+fn benchmark_fat_ref_check() -> BenchmarkResult {
+    let data = list![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let slice = &data[..];  // Creates FatRef (includes length)
+    let mut sum: Int = 0;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        sum += slice[0];
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += slice[i % 10];
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "fat_ref_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 18.0,  // Slightly higher due to length field
+        passed: per_check_ns < 18.0,
+    }
+}
+
+/// Benchmark &checked T (Tier 1 - compiler proven safe)
+fn benchmark_checked_ref() -> BenchmarkResult {
+    let data = list![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let checked_ref: &checked List<Int> = &checked data;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // Tier 1: No runtime check (compiler verified)
+        sum += checked_ref[i % 10];
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_access_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "checked_ref",
+        metric: "ns/access",
+        value: per_access_ns,
+        target: 2.0,  // Should be near zero
+        passed: per_access_ns < 2.0,
+    }
+}
+
+/// Benchmark &unsafe T (Tier 2 - manual safety)
+fn benchmark_unsafe_ref() -> BenchmarkResult {
+    let data = list![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    // SAFETY: data outlives this scope
+    let unsafe_ref: &unsafe List<Int> = unsafe { &unsafe data };
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // Tier 2: No runtime check (programmer verified)
+        sum += unsafe_ref[i % 10];
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_access_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "unsafe_ref",
+        metric: "ns/access",
+        value: per_access_ns,
+        target: 1.0,  // Should be essentially zero
+        passed: per_access_ns < 1.0,
+    }
+}
+
+/// Benchmark sequential access pattern
+fn benchmark_sequential_access() -> BenchmarkResult {
+    let size = 10000;
+    let data: List<Int> = (0..size).collect();
+    let ref_data = &data;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / size) {
+        for i in 0..size {
+            sum += ref_data[i];
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "sequential_access",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 12.0,  // Better due to prefetching
+        passed: per_check_ns < 12.0,
+    }
+}
+
+/// Benchmark random access pattern
+fn benchmark_random_access() -> BenchmarkResult {
+    let size = 10000;
+    let data: List<Int> = (0..size).collect();
+    let ref_data = &data;
+    let mut sum: Int = 0;
+
+    // Pre-generate random indices
+    let mut rng = Rng.seed(42);
+    let indices: List<Int> = (0..BENCHMARK_ITERATIONS / 10)
+        .map(|_| rng.next_int() % size)
+        .collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for idx in indices.iter() {
+        sum += ref_data[*idx];
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / (BENCHMARK_ITERATIONS / 10) as Float;
+
+    BenchmarkResult {
+        name: "random_access",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 20.0,  // Higher due to cache misses
+        passed: per_check_ns < 20.0,
+    }
+}
+
+/// Benchmark strided access pattern
+fn benchmark_strided_access() -> BenchmarkResult {
+    let size = 10000;
+    let stride = 64;  // Cache line size
+    let data: List<Int> = (0..size).collect();
+    let ref_data = &data;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / (size / stride)) {
+        for i in (0..size).step_by(stride) {
+            sum += ref_data[i];
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let total_accesses = (BENCHMARK_ITERATIONS / (size / stride)) * (size / stride);
+    let per_check_ns = elapsed_ns as Float / total_accesses as Float;
+
+    BenchmarkResult {
+        name: "strided_access",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 18.0,
+        passed: per_check_ns < 18.0,
+    }
+}
+
+/// Benchmark repeated access to same reference
+fn benchmark_single_ref_repeated() -> BenchmarkResult {
+    let value = 42;
+    let ref_value = &value;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum += *ref_value;  // Same reference, repeated check
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "single_ref_repeated",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 10.0,  // Should benefit from branch prediction
+        passed: per_check_ns < 10.0,
+    }
+}
+
+/// Benchmark multiple different references
+fn benchmark_multiple_refs() -> BenchmarkResult {
+    let values: List<Int> = (0..16).collect();
+    let refs: List<&Int> = values.iter().collect();
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..(BENCHMARK_ITERATIONS / 16) {
+        for r in refs.iter() {
+            sum += **r;
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "multiple_refs",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 15.0,
+        passed: per_check_ns < 15.0,
+    }
+}
+
+/// Benchmark nested references (ref to ref)
+fn benchmark_nested_refs() -> BenchmarkResult {
+    let value = 42;
+    let ref1 = &value;
+    let ref2 = &ref1;
+    let ref3 = &ref2;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum += ***ref3;  // Three CBGR checks
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_chain_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "nested_refs_3deep",
+        metric: "ns/chain",
+        value: per_chain_ns,
+        target: 40.0,  // ~13ns per check x 3
+        passed: per_chain_ns < 40.0,
+    }
+}
+
+/// Baseline: raw pointer (unsafe, no checks)
+fn benchmark_raw_pointer() -> BenchmarkResult {
+    let data = list![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let ptr = data.as_ptr();
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // SAFETY: We know bounds
+        unsafe {
+            sum += *ptr.add(i % 10);
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_access_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "raw_pointer_baseline",
+        metric: "ns/access",
+        value: per_access_ns,
+        target: 1.0,  // Nearly zero
+        passed: per_access_ns < 1.0,
+    }
+}
+
+/// Benchmark array bounds check only
+fn benchmark_array_bounds_check() -> BenchmarkResult {
+    let data = list![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        // This includes bounds check but NOT CBGR check
+        sum += data.get_unchecked_cbgr(i % 10);
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_access_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "bounds_check_only",
+        metric: "ns/access",
+        value: per_access_ns,
+        target: 3.0,
+        passed: per_access_ns < 3.0,
+    }
+}
+
+/// Realistic: List iteration with CBGR
+fn benchmark_list_iteration() -> BenchmarkResult {
+    let data: List<Int> = (0..1000).collect();
+    let ref_data = &data;
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 1000) {
+        for item in ref_data.iter() {
+            sum += item;
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "list_iteration",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 12.0,
+        passed: per_check_ns < 12.0,
+    }
+}
+
+/// Realistic: Binary tree traversal
+fn benchmark_tree_traversal() -> BenchmarkResult {
+    type TreeNode is Node { value: Int, left: Maybe<Heap<TreeNode>>, right: Maybe<Heap<TreeNode>> } | Leaf;
+
+    fn build_tree(depth: Int) -> TreeNode {
+        if depth == 0 {
+            TreeNode.Leaf
+        } else {
+            TreeNode.Node {
+                value: depth,
+                left: Some(Heap(build_tree(depth - 1))),
+                right: Some(Heap(build_tree(depth - 1))),
+            }
+        }
+    }
+
+    fn sum_tree(node: &TreeNode) -> Int {
+        match node {
+            TreeNode.Leaf => 0,
+            TreeNode.Node { value, left, right } => {
+                let mut sum = *value;
+                if let Some(ref l) = left {
+                    sum += sum_tree(l);  // CBGR check
+                }
+                if let Some(ref r) = right {
+                    sum += sum_tree(r);  // CBGR check
+                }
+                sum
+            }
+        }
+    }
+
+    let tree = build_tree(10);  // 2^10 - 1 = 1023 nodes
+    let tree_ref = &tree;
+    let nodes_per_traversal = 1023;
+    let iterations = BENCHMARK_ITERATIONS / nodes_per_traversal;
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut total: Int = 0;
+    for _ in 0..iterations {
+        total += sum_tree(tree_ref);
+    }
+    black_box(total);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / (iterations * nodes_per_traversal) as Float;
+
+    BenchmarkResult {
+        name: "tree_traversal",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 25.0,  // Higher due to pointer chasing
+        passed: per_check_ns < 25.0,
+    }
+}
+
+/// Realistic: Graph traversal (BFS)
+fn benchmark_graph_traversal() -> BenchmarkResult {
+    type Graph is { nodes: List<List<Int>> };
+
+    fn build_graph(n: Int, edges_per_node: Int) -> Graph {
+        let mut rng = Rng.seed(42);
+        let nodes: List<List<Int>> = (0..n)
+            .map(|_| {
+                (0..edges_per_node)
+                    .map(|_| rng.next_int() % n)
+                    .collect()
+            })
+            .collect();
+        Graph { nodes }
+    }
+
+    fn bfs_count(graph: &Graph, start: Int) -> Int {
+        let mut visited: Set<Int> = Set.new();
+        let mut queue: List<Int> = list![start];
+        let mut count = 0;
+
+        while !queue.is_empty() {
+            let node = queue.pop_front();
+            if !visited.contains(&node) {
+                visited.insert(node);
+                count += 1;
+                for neighbor in graph.nodes[node].iter() {  // CBGR checks
+                    if !visited.contains(neighbor) {
+                        queue.push_back(*neighbor);
+                    }
+                }
+            }
+        }
+        count
+    }
+
+    let graph = build_graph(1000, 4);
+    let graph_ref = &graph;
+    let iterations = BENCHMARK_ITERATIONS / 10000;  // ~10K accesses per BFS
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut total: Int = 0;
+    for i in 0..iterations {
+        total += bfs_count(graph_ref, i % 1000);
+    }
+    black_box(total);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / (iterations * 10000) as Float;
+
+    BenchmarkResult {
+        name: "graph_traversal",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 30.0,  // Higher due to random access
+        passed: per_check_ns < 30.0,
+    }
+}
+
+// Benchmark infrastructure
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn get(&self, name: &str) -> Maybe<&BenchmarkResult> {
+        self.results.iter().find(|r| r.name == name)
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+type Rng is { state: u64 };
+
+implement Rng {
+    fn seed(s: u64) -> Self { Self { state: s } }
+
+    fn next_int(&mut self) -> Int {
+        self.state ^= self.state << 13;
+        self.state ^= self.state >> 7;
+        self.state ^= self.state << 17;
+        self.state as Int
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is { start_time: u64 };
+
+implement Timer {
+    fn new() -> Self { Self { start_time: 0 } }
+    fn start(&mut self) { self.start_time = clock_ns(); }
+    fn elapsed_ns(&self) -> u64 { clock_ns() - self.start_time }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

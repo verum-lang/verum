@@ -1,0 +1,182 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, milestone
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #5: exercises a wide range of features.
+// Milestone: 257 interpreter tests.
+
+type Vec3 is { x: Int, y: Int, z: Int };
+
+fn vec3_dot(a: Vec3, b: Vec3) -> Int {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn vec3_cross_x(a: Vec3, b: Vec3) -> Int {
+    a.y * b.z - a.z * b.y
+}
+
+type Maybe is Nothing | Just(Int);
+
+fn* range(start: Int, end_excl: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + 1;
+    }
+}
+
+@allow(unbounded_recursion)
+fn fast_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    if exp == 0 { return 1; }
+    if exp % 2 == 0 {
+        let half = fast_pow(base, exp / 2, modulus);
+        (half * half) % modulus
+    } else {
+        (base * fast_pow(base, exp - 1, modulus)) % modulus
+    }
+}
+
+fn test_cross_product() {
+    let i = Vec3 { x: 1, y: 0, z: 0 };
+    let j = Vec3 { x: 0, y: 1, z: 0 };
+    // i × j = k → x component should be 0, y=0, z=1
+    // But we only compute x component: cross_x(i,j) = 0*0 - 0*1 = 0
+    assert_eq(vec3_cross_x(i, j), 0);
+
+    let a = Vec3 { x: 1, y: 2, z: 3 };
+    let b = Vec3 { x: 4, y: 5, z: 6 };
+    // a × b = (2*6-3*5, 3*4-1*6, 1*5-2*4) = (-3, 6, -3)
+    assert_eq(vec3_cross_x(a, b), -3);
+    assert_eq(vec3_dot(a, b), 32); // 4+10+18
+
+    print("cross_product: ok");
+}
+
+fn test_fermat_little_theorem() {
+    // a^(p-1) ≡ 1 (mod p) for prime p, a not divisible by p
+    let p = 97;
+    assert_eq(fast_pow(2, p - 1, p), 1);
+    assert_eq(fast_pow(3, p - 1, p), 1);
+    assert_eq(fast_pow(42, p - 1, p), 1);
+    print("fermat_little_theorem: ok");
+}
+
+fn test_generator_pipeline() {
+    // Compute sum of squares of odd numbers in 1..20
+    let mut sum = 0;
+    for i in range(1, 21) {
+        if i % 2 == 1 {
+            sum = sum + i * i;
+        }
+    }
+    // 1+9+25+49+81+121+169+225+289+361 = 1330
+    assert_eq(sum, 1330);
+    print("generator_pipeline: ok");
+}
+
+fn test_spawn_computation() {
+    let t = spawn fast_pow(7, 100, 1000000007);
+    let result = t.await;
+    // 7^100 mod 10^9+7 — verify it's a valid modular result
+    assert(result >= 0);
+    assert(result < 1000000007);
+    print("spawn_computation: ok");
+}
+
+fn test_variant_accumulator() {
+    let mut total = 0;
+    let mut nothing_count = 0;
+    let mut i = 0;
+    while i < 20 {
+        let m = if i % 4 == 0 { Just(i * i) } else { Nothing };
+        match m {
+            Just(v) => { total = total + v; },
+            Nothing => { nothing_count = nothing_count + 1; },
+        }
+        i = i + 1;
+    }
+    // i=0: 0, i=4: 16, i=8: 64, i=12: 144, i=16: 256 → total=480
+    assert_eq(total, 480);
+    assert_eq(nothing_count, 15);
+    print("variant_accumulator: ok");
+}
+
+fn test_matrix_power() {
+    // Matrix [[1,1],[1,0]]^n gives fibonacci numbers
+    // Using 2x2 matrix as 4-element array
+    // We compute M^10 by repeated squaring (iterative)
+    let mut m00 = 1; let mut m01 = 1;
+    let mut m10 = 1; let mut m11 = 0;
+
+    let mut r00 = 1; let mut r01 = 0;
+    let mut r10 = 0; let mut r11 = 1; // Identity
+
+    let mut n = 10;
+    while n > 0 {
+        if n % 2 == 1 {
+            // R = R * M
+            let t00 = r00 * m00 + r01 * m10;
+            let t01 = r00 * m01 + r01 * m11;
+            let t10 = r10 * m00 + r11 * m10;
+            let t11 = r10 * m01 + r11 * m11;
+            r00 = t00; r01 = t01; r10 = t10; r11 = t11;
+        }
+        // M = M * M
+        let t00 = m00 * m00 + m01 * m10;
+        let t01 = m00 * m01 + m01 * m11;
+        let t10 = m10 * m00 + m11 * m10;
+        let t11 = m10 * m01 + m11 * m11;
+        m00 = t00; m01 = t01; m10 = t10; m11 = t11;
+        n = n / 2;
+    }
+
+    // fib(10) = 55, fib(11) = 89
+    assert_eq(r00, 89);
+    assert_eq(r01, 55);
+    print("matrix_power: ok");
+}
+
+fn test_bitset_operations() {
+    // Set operations on bitsets (integers as sets of 0..63)
+    let set_a = (1 << 0) | (1 << 2) | (1 << 4) | (1 << 6);  // {0,2,4,6}
+    let set_b = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3);  // {0,1,2,3}
+
+    let union_ab = set_a | set_b;       // {0,1,2,3,4,6}
+    let intersect_ab = set_a & set_b;   // {0,2}
+    let diff_ab = set_a & (!set_b);     // {4,6}
+
+    // Count bits in intersection
+    let mut count = 0;
+    let mut val = intersect_ab;
+    while val > 0 {
+        count = count + (val & 1);
+        val = val >> 1;
+    }
+    assert_eq(count, 2); // {0,2}
+
+    // Count bits in union
+    count = 0;
+    val = union_ab;
+    while val > 0 {
+        count = count + (val & 1);
+        val = val >> 1;
+    }
+    assert_eq(count, 6); // {0,1,2,3,4,6}
+
+    print("bitset_operations: ok");
+}
+
+fn main() -> Int {
+    test_cross_product();
+    test_fermat_little_theorem();
+    test_generator_pipeline();
+    test_spawn_computation();
+    test_variant_accumulator();
+    test_matrix_power();
+    test_bitset_operations();
+    print("[OK] 430_interp_comprehensive5 — MILESTONE: 257 interpreter tests");
+    0
+}

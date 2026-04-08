@@ -1,0 +1,71 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: dyn, protocol, dispatch, e2e
+// @description: Test dynamic protocol dispatch via dyn keyword
+
+type Drawable is protocol {
+    fn area(&self) -> Int;
+    fn name(&self) -> Text;
+};
+
+type Circle is { radius: Int };
+type Rectangle is { width: Int, height: Int };
+
+implement Drawable for Circle {
+    fn area(&self) -> Int {
+        self.radius * self.radius * 3
+    }
+    fn name(&self) -> Text {
+        "Circle"
+    }
+}
+
+implement Drawable for Rectangle {
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+    fn name(&self) -> Text {
+        "Rectangle"
+    }
+}
+
+fn print_area(shape: &dyn Drawable) -> Int {
+    shape.area()
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    let c = Circle { radius: 5 };
+    let r = Rectangle { width: 4, height: 6 };
+
+    // Test 1: Direct protocol method call
+    if c.area() != 75 {
+        print(f"FAIL 1: circle area = {c.area()}");
+        f = f + 1;
+    } else {
+        print("  circle_area: OK");
+    }
+
+    // Test 2: Direct protocol method call
+    if r.area() != 24 {
+        print(f"FAIL 2: rect area = {r.area()}");
+        f = f + 1;
+    } else {
+        print("  rect_area: OK");
+    }
+
+    // Test 3: Name method
+    if c.name() != "Circle" {
+        print(f"FAIL 3: circle name = '{c.name()}'");
+        f = f + 1;
+    } else {
+        print("  circle_name: OK");
+    }
+
+    if f == 0 {
+        print("All dyn dispatch tests passed");
+    }
+    f
+}

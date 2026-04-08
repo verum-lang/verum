@@ -1,0 +1,683 @@
+// @test: benchmark
+// @tier: baseline
+// @level: L4
+// @expected-performance: within 15% of C qsort
+// @tags: sorting, baseline, comparison, performance
+
+/// Sorting Algorithm Benchmark - Verum Implementation
+///
+/// Compares Verum's sorting performance against C, Rust, and Go
+/// using various sorting algorithms and data patterns.
+///
+/// Targets:
+/// - Quicksort: within 10% of C
+/// - Mergesort: within 15% of C
+/// - Standard sort: within 10% of Rust
+
+module vcs.benchmarks.baselines.sort_comparison
+
+const WARMUP_ITERATIONS: Int = 5;
+
+fn main() {
+    let results = BenchmarkResults.new("Sorting - Verum vs Other Languages");
+
+    // Small array sorting
+    results.add(benchmark_sort_100());
+    results.add(benchmark_sort_1000());
+
+    // Large array sorting
+    results.add(benchmark_sort_10000());
+    results.add(benchmark_sort_100000());
+    results.add(benchmark_sort_1000000());
+
+    // Different data patterns
+    results.add(benchmark_sort_random());
+    results.add(benchmark_sort_sorted());
+    results.add(benchmark_sort_reverse());
+    results.add(benchmark_sort_nearly_sorted());
+    results.add(benchmark_sort_few_unique());
+
+    // Algorithm comparison
+    results.add(benchmark_quicksort());
+    results.add(benchmark_mergesort());
+    results.add(benchmark_heapsort());
+
+    // Stable vs unstable
+    results.add(benchmark_stable_sort());
+    results.add(benchmark_unstable_sort());
+
+    results.report();
+    assert(results.all_pass(), "Sorting performance below target");
+}
+
+/// Generate random array
+fn generate_random_array(size: Int, seed: u64) -> List<Int> {
+    let mut rng = Rng.seed(seed);
+    (0..size).map(|_| rng.next_int()).collect()
+}
+
+/// Generate sorted array
+fn generate_sorted_array(size: Int) -> List<Int> {
+    (0..size).collect()
+}
+
+/// Generate reverse-sorted array
+fn generate_reverse_array(size: Int) -> List<Int> {
+    (0..size).rev().collect()
+}
+
+/// Generate nearly sorted array (10% swapped)
+fn generate_nearly_sorted_array(size: Int, seed: u64) -> List<Int> {
+    let mut arr: List<Int> = (0..size).collect();
+    let mut rng = Rng.seed(seed);
+    let swaps = size / 10;
+
+    for _ in 0..swaps {
+        let i = rng.next_int() % size;
+        let j = rng.next_int() % size;
+        arr.swap(i, j);
+    }
+
+    arr
+}
+
+/// Generate array with few unique values
+fn generate_few_unique_array(size: Int, unique_count: Int, seed: u64) -> List<Int> {
+    let mut rng = Rng.seed(seed);
+    (0..size).map(|_| rng.next_int() % unique_count).collect()
+}
+
+/// Quicksort implementation
+fn quicksort<T: Ord>(arr: &mut [T]) {
+    if arr.len() <= 1 {
+        return;
+    }
+
+    let pivot_idx = partition(arr);
+
+    if pivot_idx > 0 {
+        quicksort(&mut arr[..pivot_idx]);
+    }
+    quicksort(&mut arr[pivot_idx + 1..]);
+}
+
+fn partition<T: Ord>(arr: &mut [T]) -> Int {
+    let len = arr.len();
+    let pivot_idx = len / 2;
+    arr.swap(pivot_idx, len - 1);
+
+    let mut i = 0;
+    for j in 0..(len - 1) {
+        if arr[j] < arr[len - 1] {
+            arr.swap(i, j);
+            i += 1;
+        }
+    }
+    arr.swap(i, len - 1);
+    i
+}
+
+/// Mergesort implementation
+fn mergesort<T: Ord + Clone>(arr: &mut [T]) {
+    if arr.len() <= 1 {
+        return;
+    }
+
+    let mid = arr.len() / 2;
+    let left = arr[..mid].to_vec();
+    let right = arr[mid..].to_vec();
+
+    mergesort(&mut left);
+    mergesort(&mut right);
+
+    merge(arr, &left, &right);
+}
+
+fn merge<T: Ord + Clone>(arr: &mut [T], left: &[T], right: &[T]) {
+    let (mut i, mut j, mut k) = (0, 0, 0);
+
+    while i < left.len() && j < right.len() {
+        if left[i] <= right[j] {
+            arr[k] = left[i].clone();
+            i += 1;
+        } else {
+            arr[k] = right[j].clone();
+            j += 1;
+        }
+        k += 1;
+    }
+
+    while i < left.len() {
+        arr[k] = left[i].clone();
+        i += 1;
+        k += 1;
+    }
+
+    while j < right.len() {
+        arr[k] = right[j].clone();
+        j += 1;
+        k += 1;
+    }
+}
+
+/// Heapsort implementation
+fn heapsort<T: Ord>(arr: &mut [T]) {
+    let len = arr.len();
+
+    // Build max heap
+    for i in (0..len / 2).rev() {
+        heapify(arr, len, i);
+    }
+
+    // Extract elements from heap
+    for i in (1..len).rev() {
+        arr.swap(0, i);
+        heapify(arr, i, 0);
+    }
+}
+
+fn heapify<T: Ord>(arr: &mut [T], n: Int, i: Int) {
+    let mut largest = i;
+    let left = 2 * i + 1;
+    let right = 2 * i + 2;
+
+    if left < n && arr[left] > arr[largest] {
+        largest = left;
+    }
+
+    if right < n && arr[right] > arr[largest] {
+        largest = right;
+    }
+
+    if largest != i {
+        arr.swap(i, largest);
+        heapify(arr, n, largest);
+    }
+}
+
+/// Benchmark sorting 100 elements
+fn benchmark_sort_100() -> BenchmarkResult {
+    let size = 100;
+    let iterations = 100_000;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let mut arr = generate_random_array(size, 42);
+        arr.sort();
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ns = elapsed_ns as Float / iterations as Float;
+
+    // Expected: ~1us for 100 elements
+    BenchmarkResult {
+        name: "sort_100",
+        metric: "us/sort",
+        value: per_sort_ns / 1000.0,
+        target: 2.0,
+        passed: per_sort_ns < 2000.0,
+    }
+}
+
+/// Benchmark sorting 1000 elements
+fn benchmark_sort_1000() -> BenchmarkResult {
+    let size = 1000;
+    let iterations = 10_000;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_us = (elapsed_ns as Float / 1000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "sort_1000",
+        metric: "us/sort",
+        value: per_sort_us,
+        target: 20.0,
+        passed: per_sort_us < 20.0,
+    }
+}
+
+/// Benchmark sorting 10000 elements
+fn benchmark_sort_10000() -> BenchmarkResult {
+    let size = 10_000;
+    let iterations = 1_000;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_us = (elapsed_ns as Float / 1000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "sort_10000",
+        metric: "us/sort",
+        value: per_sort_us,
+        target: 300.0,
+        passed: per_sort_us < 300.0,
+    }
+}
+
+/// Benchmark sorting 100000 elements
+fn benchmark_sort_100000() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "sort_100000",
+        metric: "ms/sort",
+        value: per_sort_ms,
+        target: 5.0,
+        passed: per_sort_ms < 5.0,
+    }
+}
+
+/// Benchmark sorting 1 million elements
+fn benchmark_sort_1000000() -> BenchmarkResult {
+    let size = 1_000_000;
+    let iterations = 10;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    // Compare to expected C qsort (~70ms for 1M elements)
+    let c_baseline_ms = 70.0;
+    let ratio = per_sort_ms / c_baseline_ms;
+
+    BenchmarkResult {
+        name: "sort_1000000",
+        metric: "ratio to C",
+        value: ratio,
+        target: 1.15,  // Within 15% of C
+        passed: ratio < 1.15,
+    }
+}
+
+/// Benchmark sorting random data
+fn benchmark_sort_random() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 50;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "sort_random_100k",
+        metric: "ms/sort",
+        value: per_sort_ms,
+        target: 5.0,
+        passed: per_sort_ms < 5.0,
+    }
+}
+
+/// Benchmark sorting already-sorted data
+fn benchmark_sort_sorted() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let mut arr = generate_sorted_array(size);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    // Should be fast for sorted input (Timsort optimization)
+    BenchmarkResult {
+        name: "sort_sorted_100k",
+        metric: "ms/sort",
+        value: per_sort_ms,
+        target: 1.0,  // Should be very fast
+        passed: per_sort_ms < 1.0,
+    }
+}
+
+/// Benchmark sorting reverse-sorted data
+fn benchmark_sort_reverse() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        let mut arr = generate_reverse_array(size);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "sort_reverse_100k",
+        metric: "ms/sort",
+        value: per_sort_ms,
+        target: 2.0,  // Should recognize reverse pattern
+        passed: per_sort_ms < 2.0,
+    }
+}
+
+/// Benchmark sorting nearly-sorted data
+fn benchmark_sort_nearly_sorted() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_nearly_sorted_array(size, i as u64);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    // Should be faster than random due to Timsort's run detection
+    BenchmarkResult {
+        name: "sort_nearly_sorted_100k",
+        metric: "ms/sort",
+        value: per_sort_ms,
+        target: 3.0,
+        passed: per_sort_ms < 3.0,
+    }
+}
+
+/// Benchmark sorting data with few unique values
+fn benchmark_sort_few_unique() -> BenchmarkResult {
+    let size = 100_000;
+    let unique_values = 10;
+    let iterations = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_few_unique_array(size, unique_values, i as u64);
+        arr.sort();
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "sort_few_unique_100k",
+        metric: "ms/sort",
+        value: per_sort_ms,
+        target: 4.0,
+        passed: per_sort_ms < 4.0,
+    }
+}
+
+/// Benchmark explicit quicksort
+fn benchmark_quicksort() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 50;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        quicksort(&mut arr);
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    // Compare to C qsort baseline
+    let c_baseline_ms = 5.0;
+    let ratio = per_sort_ms / c_baseline_ms;
+
+    BenchmarkResult {
+        name: "quicksort_100k",
+        metric: "ratio to C",
+        value: ratio,
+        target: 1.10,  // Within 10% of C
+        passed: ratio < 1.10,
+    }
+}
+
+/// Benchmark explicit mergesort
+fn benchmark_mergesort() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 50;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        mergesort(&mut arr);
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    // Mergesort has more allocations, expect slightly worse than quicksort
+    let c_baseline_ms = 6.0;
+    let ratio = per_sort_ms / c_baseline_ms;
+
+    BenchmarkResult {
+        name: "mergesort_100k",
+        metric: "ratio to C",
+        value: ratio,
+        target: 1.15,  // Within 15% of C
+        passed: ratio < 1.15,
+    }
+}
+
+/// Benchmark explicit heapsort
+fn benchmark_heapsort() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 50;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        heapsort(&mut arr);
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "heapsort_100k",
+        metric: "ms/sort",
+        value: per_sort_ms,
+        target: 10.0,  // Heapsort typically slower than quicksort
+        passed: per_sort_ms < 10.0,
+    }
+}
+
+/// Benchmark stable sort
+fn benchmark_stable_sort() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 50;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        arr.sort_stable();  // Stable sort preserves equal element order
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    BenchmarkResult {
+        name: "stable_sort_100k",
+        metric: "ms/sort",
+        value: per_sort_ms,
+        target: 6.0,
+        passed: per_sort_ms < 6.0,
+    }
+}
+
+/// Benchmark unstable sort
+fn benchmark_unstable_sort() -> BenchmarkResult {
+    let size = 100_000;
+    let iterations = 50;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let mut arr = generate_random_array(size, i as u64);
+        arr.sort_unstable();  // May be faster, doesn't preserve equal element order
+        black_box(&arr);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_sort_ms = (elapsed_ns as Float / 1_000_000.0) / iterations as Float;
+
+    // Compare to Rust's sort_unstable baseline
+    let rust_baseline_ms = 4.0;
+    let ratio = per_sort_ms / rust_baseline_ms;
+
+    BenchmarkResult {
+        name: "unstable_sort_100k",
+        metric: "ratio to Rust",
+        value: ratio,
+        target: 1.10,  // Within 10% of Rust
+        passed: ratio < 1.10,
+    }
+}
+
+// Benchmark infrastructure
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.3} {} (target: {:.3})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is { start_time: u64 };
+
+implement Timer {
+    fn new() -> Self { Self { start_time: 0 } }
+    fn start(&mut self) { self.start_time = clock_ns(); }
+    fn elapsed_ns(&self) -> u64 { clock_ns() - self.start_time }
+}
+
+type Rng is { state: u64 };
+
+implement Rng {
+    fn seed(s: u64) -> Self { Self { state: s } }
+
+    fn next_int(&mut self) -> Int {
+        // xorshift64
+        self.state ^= self.state << 13;
+        self.state ^= self.state >> 7;
+        self.state ^= self.state << 17;
+        self.state as Int
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

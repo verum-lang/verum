@@ -1,0 +1,57 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, stage, float, error
+// @expected-error: M006
+// @description: Meta stage numbers must be integers, not floating-point
+
+// =============================================================================
+// Grammar Reference:
+// meta_function = 'meta' , [ '(' , stage_number , ')' ] , function_def ;
+// stage_number = integer_literal ;  (* Floats are not allowed *)
+// =============================================================================
+
+// ERROR: Float stage number
+meta(1.0) fn float_stage_one() -> Int {
+    42
+}
+
+// ERROR: Float with decimal places
+meta(1.5) fn float_stage_with_decimal() -> Text {
+    "hello"
+}
+
+// ERROR: Larger float stage
+meta(2.7) fn float_stage_larger() -> Bool {
+    true
+}
+
+// ERROR: Float with many decimal places
+meta(1.123456) fn float_many_decimals() {}
+
+// ERROR: Float in scientific notation
+meta(1e1) fn scientific_notation_stage() {}
+
+// ERROR: Float with explicit positive sign
+meta(+1.0) fn positive_float_stage() {}
+
+// ERROR: Negative float stage (double invalid)
+meta(-1.5) fn negative_float_stage() {}
+
+// ERROR: Zero as float
+meta(0.0) fn zero_float_stage() {}
+
+// ERROR: Very small float
+meta(0.001) fn very_small_float_stage() {}
+
+// ERROR: Float stage for type definition
+meta(2.5) type FloatStageType is { value: Int };
+
+// ERROR: Float stage for const
+meta(1.1) const FLOAT_CONST: Int = 42;
+
+// ERROR: Float stage with using clause
+meta(1.5) fn float_with_using() using [Logger] {
+    log("test");
+}

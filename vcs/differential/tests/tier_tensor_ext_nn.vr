@@ -1,0 +1,236 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, tensor-ext-nn
+// @timeout: 10000
+
+/// Tests RMS norm, attention score computation, softmax-like normalization,
+/// and layer norm consistency between interpreter (tier 0) and AOT (tier 3).
+/// All transcendentals computed via manual Taylor/Newton approximations.
+
+fn main() {
+    test_rms_norm();
+    test_attention_scores();
+    test_softmax_manual();
+    test_layer_norm();
+}
+
+/// Newton's method square root (6 iterations, sufficient for f64 precision)
+fn newton_sqrt(x: Float) -> Float {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    let mut guess = x;
+    // Rough initial guess
+    if x > 1.0 {
+        guess = x / 2.0;
+    } else {
+        guess = 1.0;
+    }
+    let mut i = 0;
+    while i < 12 {
+        guess = (guess + x / guess) / 2.0;
+        i = i + 1;
+    }
+    guess
+}
+
+/// Taylor series exp(x) around 0, 20 terms
+fn taylor_exp(x: Float) -> Float {
+    let mut sum = 1.0;
+    let mut term = 1.0;
+    let mut n = 1;
+    while n <= 20 {
+        term = term * x / n as Float;
+        sum = sum + term;
+        n = n + 1;
+    }
+    sum
+}
+
+/// RMS Norm: x_i / sqrt(mean(x_i^2) + eps)
+/// Used in transformer architectures (LLaMA, etc.)
+fn test_rms_norm() {
+    println("=== RMS Norm ===");
+
+    let values = [1.0, -2.0, 3.0, -4.0, 5.0];
+    let n = 5;
+    let eps = 1e-6;
+
+    // Compute mean of squares
+    let mut sum_sq = 0.0;
+    let mut i = 0;
+    while i < n {
+        sum_sq = sum_sq + values[i] * values[i];
+        i = i + 1;
+    }
+    let mean_sq = sum_sq / n as Float;
+    println(f"sum_sq: {sum_sq}");
+    println(f"mean_sq: {mean_sq}");
+
+    let rms = newton_sqrt(mean_sq + eps);
+    println(f"rms: {rms}");
+
+    // Normalize each value
+    let mut j = 0;
+    while j < n {
+        let normed = values[j] / rms;
+        println(f"rms_norm[{j}]: {normed}");
+        j = j + 1;
+    }
+
+    // Verify: norm of output should be close to sqrt(n)
+    let mut out_sq = 0.0;
+    let mut k = 0;
+    while k < n {
+        let normed = values[k] / rms;
+        out_sq = out_sq + normed * normed;
+        k = k + 1;
+    }
+    println(f"output_norm_sq: {out_sq}");
+}
+
+/// Scaled dot-product attention scores: Q * K^T / sqrt(d_k)
+/// Simulates a tiny 3x2 Q and 3x2 K (3 tokens, d_k=2)
+fn test_attention_scores() {
+    println("\n=== Attention Scores ===");
+
+    // Q matrix (3 tokens, d_k=2): row-major flat
+    let q0_0 = 1.0; let q0_1 = 0.5;
+    let q1_0 = -0.5; let q1_1 = 1.5;
+    let q2_0 = 0.0; let q2_1 = -1.0;
+
+    // K matrix (3 tokens, d_k=2): row-major flat
+    let k0_0 = 0.5; let k0_1 = 1.0;
+    let k1_0 = 1.0; let k1_1 = -0.5;
+    let k2_0 = -1.0; let k2_1 = 0.0;
+
+    let d_k = 2.0;
+    let scale = newton_sqrt(d_k);
+    println(f"scale (sqrt(d_k)): {scale}");
+
+    // Compute Q * K^T: 3x3 attention matrix
+    // score[i][j] = (Q[i] dot K[j]) / scale
+    let s00 = (q0_0 * k0_0 + q0_1 * k0_1) / scale;
+    let s01 = (q0_0 * k1_0 + q0_1 * k1_1) / scale;
+    let s02 = (q0_0 * k2_0 + q0_1 * k2_1) / scale;
+
+    let s10 = (q1_0 * k0_0 + q1_1 * k0_1) / scale;
+    let s11 = (q1_0 * k1_0 + q1_1 * k1_1) / scale;
+    let s12 = (q1_0 * k2_0 + q1_1 * k2_1) / scale;
+
+    let s20 = (q2_0 * k0_0 + q2_1 * k0_1) / scale;
+    let s21 = (q2_0 * k1_0 + q2_1 * k1_1) / scale;
+    let s22 = (q2_0 * k2_0 + q2_1 * k2_1) / scale;
+
+    println(f"attn[0]: [{s00}, {s01}, {s02}]");
+    println(f"attn[1]: [{s10}, {s11}, {s12}]");
+    println(f"attn[2]: [{s20}, {s21}, {s22}]");
+
+    // Row sums (before softmax, useful for debugging)
+    println(f"row_sum[0]: {s00 + s01 + s02}");
+    println(f"row_sum[1]: {s10 + s11 + s12}");
+    println(f"row_sum[2]: {s20 + s21 + s22}");
+}
+
+/// Manual softmax: exp(x_i) / sum(exp(x_j))
+/// Tests numerical stability with max-subtraction trick
+fn test_softmax_manual() {
+    println("\n=== Softmax ===");
+
+    let logits = [2.0, 1.0, 0.1, -1.0, 3.0];
+    let n = 5;
+
+    // Find max for numerical stability
+    let mut max_val = logits[0];
+    let mut i = 0;
+    while i < n {
+        if logits[i] > max_val {
+            max_val = logits[i];
+        }
+        i = i + 1;
+    }
+    println(f"max_logit: {max_val}");
+
+    // Compute exp(x_i - max) and sum
+    let mut exp_sum = 0.0;
+    let mut exps = [0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut j = 0;
+    while j < n {
+        exps[j] = taylor_exp(logits[j] - max_val);
+        exp_sum = exp_sum + exps[j];
+        j = j + 1;
+    }
+    println(f"exp_sum: {exp_sum}");
+
+    // Normalize
+    let mut k = 0;
+    while k < n {
+        let prob = exps[k] / exp_sum;
+        println(f"softmax[{k}]: {prob}");
+        k = k + 1;
+    }
+
+    // Verify probabilities sum to ~1.0
+    let mut prob_sum = 0.0;
+    let mut m = 0;
+    while m < n {
+        prob_sum = prob_sum + exps[m] / exp_sum;
+        m = m + 1;
+    }
+    println(f"prob_sum: {prob_sum}");
+}
+
+/// Layer normalization: (x - mean) / sqrt(var + eps) * gamma + beta
+fn test_layer_norm() {
+    println("\n=== Layer Norm ===");
+
+    let values = [0.5, -1.2, 2.3, -0.4, 1.1];
+    let gamma = [1.0, 1.0, 1.0, 1.0, 1.0]; // scale
+    let beta = [0.0, 0.0, 0.0, 0.0, 0.0];   // shift
+    let n = 5;
+    let eps = 1e-5;
+
+    // Compute mean
+    let mut sum = 0.0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + values[i];
+        i = i + 1;
+    }
+    let mean = sum / n as Float;
+    println(f"mean: {mean}");
+
+    // Compute variance
+    let mut var_sum = 0.0;
+    let mut j = 0;
+    while j < n {
+        let diff = values[j] - mean;
+        var_sum = var_sum + diff * diff;
+        j = j + 1;
+    }
+    let variance = var_sum / n as Float;
+    println(f"variance: {variance}");
+
+    let std_dev = newton_sqrt(variance + eps);
+    println(f"std_dev: {std_dev}");
+
+    // Normalize: y_i = gamma_i * (x_i - mean) / std + beta_i
+    let mut k = 0;
+    while k < n {
+        let normed = gamma[k] * (values[k] - mean) / std_dev + beta[k];
+        println(f"layer_norm[{k}]: {normed}");
+        k = k + 1;
+    }
+
+    // Verify: output should have mean ~0 and variance ~1
+    let mut out_sum = 0.0;
+    let mut m = 0;
+    while m < n {
+        let normed = gamma[m] * (values[m] - mean) / std_dev + beta[m];
+        out_sum = out_sum + normed;
+        m = m + 1;
+    }
+    let out_mean = out_sum / n as Float;
+    println(f"output_mean: {out_mean}");
+}

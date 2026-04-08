@@ -1,0 +1,130 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, integers, decimal
+
+// Decimal integer literals
+
+fn test_basic_decimal() {
+    // Basic decimal integers
+    let zero = 0;
+    let one = 1;
+    let forty_two = 42;
+    let hundred = 100;
+    let thousand = 1000;
+
+    // Larger numbers
+    let million = 1000000;
+    let billion = 1000000000;
+    let large = 123456789;
+}
+
+fn test_single_digits() {
+    // Single digits
+    let d0 = 0;
+    let d1 = 1;
+    let d2 = 2;
+    let d3 = 3;
+    let d4 = 4;
+    let d5 = 5;
+    let d6 = 6;
+    let d7 = 7;
+    let d8 = 8;
+    let d9 = 9;
+}
+
+fn test_two_digit() {
+    // Two digit numbers
+    let ten = 10;
+    let eleven = 11;
+    let ninety_nine = 99;
+}
+
+fn test_negative() {
+    // Negative numbers (unary minus + literal)
+    let neg_one = -1;
+    let neg_forty_two = -42;
+    let neg_million = -1000000;
+}
+
+fn test_expressions() {
+    // In expressions
+    let sum = 10 + 20;
+    let product = 6 * 7;
+    let difference = 100 - 58;
+    let quotient = 84 / 2;
+}
+
+fn test_comparisons() {
+    // In comparisons
+    let is_positive = 42 > 0;
+    let is_equal = 42 == 42;
+    let is_less = 10 < 20;
+}
+
+// In function calls
+fn double(x: Int) -> Int { x * 2 }
+
+fn test_function_calls() {
+    let doubled = double(21);
+}
+
+fn test_arrays() {
+    // In arrays
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29];
+}
+
+// In match expressions
+fn describe(n: Int) -> Text {
+    match n {
+        0 => "zero"
+        1 => "one"
+        2 => "two"
+        10 => "ten"
+        100 => "hundred"
+        1000 => "thousand"
+        _ => "other"
+    }
+}
+
+fn test_ranges() {
+    // In ranges
+    let range_to_ten = 0..10;
+    let range_inclusive = 1..=100;
+}
+
+fn test_indices() {
+    // As indices
+    let array = [10, 20, 30, 40, 50];
+    let first = array[0];
+    let third = array[2];
+    let last = array[4];
+}
+
+fn test_tuples() {
+    // In tuple positions
+    let tuple = (1, 2, 3);
+    let point = (100, 200);
+    let coords = (0, 0, 0);
+}
+
+fn test_max_values() {
+    // Maximum values (platform dependent)
+    let max_i32 = 2147483647;
+    let max_i64 = 9223372036854775807;
+}
+
+fn test_powers_of_two() {
+    // Powers of two
+    let p1 = 2;
+    let p2 = 4;
+    let p3 = 8;
+    let p4 = 16;
+    let p5 = 32;
+    let p6 = 64;
+    let p7 = 128;
+    let p8 = 256;
+    let p9 = 512;
+    let p10 = 1024;
+}

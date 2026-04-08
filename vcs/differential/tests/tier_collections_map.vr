@@ -1,0 +1,530 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, collections, map
+// @timeout: 20000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for Map operations.
+/// Tests creation, access, mutation, iteration, and transformations on key-value collections.
+
+fn main() {
+    test_map_creation();
+    test_map_access();
+    test_map_mutation();
+    test_map_iteration();
+    test_map_transformations();
+    test_map_aggregations();
+    test_map_merging();
+    test_map_keys_values();
+    test_nested_maps();
+    test_map_with_complex_types();
+}
+
+/// Map creation patterns
+fn test_map_creation() {
+    println("=== Map Creation ===");
+
+    // Empty map
+    let empty: Map<Text, Int> = {};
+    println(f"empty: len={empty.len()}, is_empty={empty.is_empty()}");
+
+    // Literal initialization
+    let scores = {"alice": 95, "bob": 87, "charlie": 92};
+    println(f"scores: len={scores.len()}");
+
+    // Different key types
+    let int_keys: Map<Int, Text> = {1: "one", 2: "two", 3: "three"};
+    println(f"int_keys: len={int_keys.len()}");
+
+    // Single entry
+    let single = {"key": "value"};
+    println(f"single: len={single.len()}");
+
+    // From entries
+    let entries = [("a", 1), ("b", 2), ("c", 3)];
+    let from_entries = Map.from(entries);
+    println(f"from_entries: len={from_entries.len()}");
+
+    // From zipped iterators
+    let keys = ["x", "y", "z"];
+    let values = [10, 20, 30];
+    let from_zip = Map.from(keys.zip(values).collect());
+    println(f"from_zip: len={from_zip.len()}");
+
+    // With capacity hint
+    let with_capacity: Map<Int, Int> = Map.with_capacity(100);
+    println(f"with_capacity: len={with_capacity.len()}");
+}
+
+/// Map access patterns
+fn test_map_access() {
+    println("\n=== Map Access ===");
+
+    let map = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5};
+
+    // Direct access
+    println(f"map['a']: {map['a']}");
+    println(f"map['c']: {map['c']}");
+
+    // Get with Maybe
+    println(f"map.get('a'): {map.get('a')}");
+    println(f"map.get('z'): {map.get('z')}");
+
+    // Get or default
+    println(f"map.get_or('a', 0): {map.get_or('a', 0)}");
+    println(f"map.get_or('z', 0): {map.get_or('z', 0)}");
+
+    // Contains key
+    println(f"contains 'a': {map.contains_key('a')}");
+    println(f"contains 'z': {map.contains_key('z')}");
+
+    // Contains value
+    println(f"contains value 3: {map.contains_value(3)}");
+    println(f"contains value 100: {map.contains_value(100)}");
+
+    // Get key by value (first match)
+    println(f"key for value 3: {map.find_key(|v| v == 3)}");
+    println(f"key for value 100: {map.find_key(|v| v == 100)}");
+
+    // Length and emptiness
+    println(f"len: {map.len()}");
+    println(f"is_empty: {map.is_empty()}");
+
+    // Empty map access
+    let empty: Map<Text, Int> = {};
+    println(f"empty.get('a'): {empty.get('a')}");
+    println(f"empty.get_or('a', -1): {empty.get_or('a', -1)}");
+}
+
+/// Map mutation operations
+fn test_map_mutation() {
+    println("\n=== Map Mutation ===");
+
+    // Insert
+    let mut map: Map<Text, Int> = {};
+    map.insert("a", 1);
+    map.insert("b", 2);
+    map.insert("c", 3);
+    println(f"after inserts: len={map.len()}");
+    for (k, v) in map.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Insert returns old value
+    let old = map.insert("b", 20);
+    println(f"old value for 'b': {old}");
+    println(f"new value for 'b': {map['b']}");
+
+    // Insert if not present
+    let inserted = map.insert_if_absent("d", 4);
+    println(f"inserted 'd': {inserted}");
+    let not_inserted = map.insert_if_absent("a", 100);
+    println(f"tried to insert 'a' again: {not_inserted}");
+    println(f"'a' still: {map['a']}");
+
+    // Update via index
+    map["c"] = 30;
+    println(f"after update 'c': {map['c']}");
+
+    // Remove
+    let mut map2 = {"x": 10, "y": 20, "z": 30};
+    let removed = map2.remove("y");
+    println(f"removed 'y': {removed}");
+    println(f"after remove: len={map2.len()}");
+
+    // Remove if
+    let mut map3 = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5};
+    map3.retain(|_, v| v % 2 != 0);  // Keep odd values
+    println("after retain odd values:");
+    for (k, v) in map3.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Clear
+    let mut map4 = {"a": 1, "b": 2};
+    map4.clear();
+    println(f"after clear: is_empty={map4.is_empty()}");
+
+    // Entry API
+    let mut map5: Map<Text, Int> = {"a": 1};
+    map5.entry("a").and_modify(|v| *v = *v + 10);
+    map5.entry("b").or_insert(5);
+    println("after entry operations:");
+    for (k, v) in map5.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+}
+
+/// Map iteration patterns
+fn test_map_iteration() {
+    println("\n=== Map Iteration ===");
+
+    let map = {"alice": 95, "bob": 87, "charlie": 92, "dave": 88, "eve": 91};
+
+    // Iterate entries (sorted for determinism)
+    println("entries:");
+    for (key, value) in map.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {key}: {value}");
+    }
+
+    // Iterate keys only
+    println("keys:");
+    for key in map.keys().sorted() {
+        println(f"  {key}");
+    }
+
+    // Iterate values only (sorted)
+    println("values (sorted):");
+    for value in map.values().sorted() {
+        println(f"  {value}");
+    }
+
+    // Mutable iteration
+    let mut scores = {"a": 10, "b": 20, "c": 30};
+    for (_, value) in &mut scores {
+        *value = *value * 2;
+    }
+    println("after doubling:");
+    for (k, v) in scores.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // With enumerate
+    println("enumerated:");
+    for (i, (key, value)) in map.entries().sorted_by_key(|(k, _)| k).enumerate() {
+        println(f"  [{i}] {key}: {value}");
+    }
+}
+
+/// Map transformation operations
+fn test_map_transformations() {
+    println("\n=== Map Transformations ===");
+
+    let map = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5};
+
+    // Map values
+    let doubled = map.map_values(|v| v * 2);
+    println("doubled values:");
+    for (k, v) in doubled.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Map keys
+    let upper_keys = map.map_keys(|k| k.to_uppercase());
+    println("uppercase keys:");
+    for (k, v) in upper_keys.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Filter
+    let evens = map.filter(|_, v| v % 2 == 0);
+    println("even values:");
+    for (k, v) in evens.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Filter by key
+    let selected = map.filter(|k, _| k >= "c");
+    println("keys >= 'c':");
+    for (k, v) in selected.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Transform entries
+    let transformed = map.entries()
+        .map(|(k, v)| (k.to_uppercase(), v * 10))
+        .collect();
+    println("transformed:");
+    for (k, v) in transformed.sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Invert (swap keys and values)
+    let inverted: Map<Int, Text> = map.entries()
+        .map(|(k, v)| (v, k))
+        .collect();
+    println("inverted:");
+    for (k, v) in inverted.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+}
+
+/// Map aggregation operations
+fn test_map_aggregations() {
+    println("\n=== Map Aggregations ===");
+
+    let scores = {"alice": 95, "bob": 87, "charlie": 92, "dave": 88, "eve": 91};
+
+    // Sum of values
+    let total = scores.values().sum();
+    println(f"sum of scores: {total}");
+
+    // Average
+    let avg = total as Float / scores.len() as Float;
+    println(f"average score: {avg}");
+
+    // Min/max value
+    let min_score = scores.values().min();
+    let max_score = scores.values().max();
+    println(f"min score: {min_score}");
+    println(f"max score: {max_score}");
+
+    // Min/max entry by value
+    let lowest = scores.entries().min_by_key(|(_, v)| v);
+    let highest = scores.entries().max_by_key(|(_, v)| v);
+    println(f"lowest: {lowest}");
+    println(f"highest: {highest}");
+
+    // Count with predicate
+    let above_90 = scores.values().filter(|v| v >= 90).count();
+    println(f"scores >= 90: {above_90}");
+
+    // Fold
+    let description = scores.entries()
+        .sorted_by_key(|(k, _)| k)
+        .fold("", |acc, (k, v)| {
+            if acc.is_empty() { f"{k}:{v}" }
+            else { f"{acc}, {k}:{v}" }
+        });
+    println(f"folded: {description}");
+
+    // Partition
+    let (passing, failing) = scores.partition(|_, v| v >= 90);
+    println(f"passing (>=90): {passing.len()}");
+    println(f"failing (<90): {failing.len()}");
+
+    // Group by
+    let numbers = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6};
+    let grouped = numbers.entries()
+        .group_by(|(_, v)| if v % 2 == 0 { "even" } else { "odd" })
+        .collect();
+    println("grouped by parity:");
+    for (group, items) in grouped.sorted_by_key(|(k, _)| k) {
+        let keys: List<Text> = items.map(|(k, _)| k).sorted().collect();
+        println(f"  {group}: {keys}");
+    }
+}
+
+/// Map merging operations
+fn test_map_merging() {
+    println("\n=== Map Merging ===");
+
+    let map1 = {"a": 1, "b": 2, "c": 3};
+    let map2 = {"c": 30, "d": 4, "e": 5};
+
+    // Simple merge (second wins conflicts)
+    let merged = map1.merge(map2);
+    println("merged (second wins):");
+    for (k, v) in merged.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Merge with combiner
+    let combined = map1.merge_with(map2, |v1, v2| v1 + v2);
+    println("merged with sum:");
+    for (k, v) in combined.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Difference (keys in first but not second)
+    let diff = map1.difference(map2);
+    println("difference (in map1 not map2):");
+    for (k, v) in diff.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Intersection (keys in both)
+    let inter = map1.intersection(map2);
+    println("intersection:");
+    for (k, v) in inter.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Symmetric difference
+    let sym_diff = map1.symmetric_difference(map2);
+    println("symmetric difference:");
+    for (k, v) in sym_diff.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Chain multiple maps
+    let map3 = {"f": 6, "g": 7};
+    let chained = map1.merge(map2).merge(map3);
+    println(f"chained merge: len={chained.len()}");
+}
+
+/// Keys and values operations
+fn test_map_keys_values() {
+    println("\n=== Keys and Values ===");
+
+    let map = {"alice": 95, "bob": 87, "charlie": 92, "dave": 88};
+
+    // Get all keys
+    let keys = map.keys().sorted().collect();
+    println(f"keys: {keys}");
+
+    // Get all values (sorted)
+    let values = map.values().sorted().collect();
+    println(f"values: {values}");
+
+    // Keys to set
+    let key_set: Set<Text> = map.keys().collect();
+    println(f"key_set contains 'alice': {key_set.contains('alice')}");
+
+    // Values to list
+    let value_list: List<Int> = map.values().collect();
+    println(f"value_list: {value_list.sorted().collect()}");
+
+    // Find key by predicate
+    let first_passing = map.entries()
+        .sorted_by_key(|(k, _)| k)
+        .find(|(_, v)| v >= 90);
+    println(f"first passing (sorted): {first_passing}");
+
+    // All keys with value > 90
+    let high_scorers = map.entries()
+        .filter(|(_, v)| v >= 90)
+        .map(|(k, _)| k)
+        .sorted()
+        .collect();
+    println(f"high scorers: {high_scorers}");
+
+    // Transform keys
+    let name_lengths: Map<Int, Text> = map.entries()
+        .map(|(k, _)| (k.len(), k))
+        .collect();
+    println("by name length:");
+    for (len, name) in name_lengths.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {len}: {name}");
+    }
+}
+
+/// Nested map operations
+fn test_nested_maps() {
+    println("\n=== Nested Maps ===");
+
+    // Map of maps
+    let nested: Map<Text, Map<Text, Int>> = {
+        "user1": {"score": 95, "level": 10, "coins": 500},
+        "user2": {"score": 87, "level": 8, "coins": 350},
+        "user3": {"score": 92, "level": 12, "coins": 800},
+    };
+
+    println("nested access:");
+    for (user, data) in nested.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {user}:");
+        for (key, value) in data.entries().sorted_by_key(|(k, _)| k) {
+            println(f"    {key}: {value}");
+        }
+    }
+
+    // Access nested value
+    println(f"user1.score: {nested['user1']['score']}");
+    println(f"user2.level: {nested['user2']['level']}");
+
+    // Flatten nested
+    let flattened: List<(Text, Text, Int)> = nested.entries()
+        .flat_map(|(user, data)| {
+            data.entries().map(|(key, value)| (user, key, value))
+        })
+        .sorted_by_key(|(u, k, _)| (u, k))
+        .collect();
+    println("flattened:");
+    for (user, key, value) in flattened {
+        println(f"  {user}.{key}: {value}");
+    }
+
+    // Aggregate across nested
+    let total_coins: Int = nested.values()
+        .map(|data| data.get_or("coins", 0))
+        .sum();
+    println(f"total coins: {total_coins}");
+
+    // Find in nested
+    let high_level_users: List<Text> = nested.entries()
+        .filter(|(_, data)| data.get_or("level", 0) >= 10)
+        .map(|(user, _)| user)
+        .sorted()
+        .collect();
+    println(f"high level users (>=10): {high_level_users}");
+}
+
+/// Map with complex value types
+fn test_map_with_complex_types() {
+    println("\n=== Complex Types ===");
+
+    // Map with list values
+    let lists: Map<Text, List<Int>> = {
+        "primes": [2, 3, 5, 7, 11],
+        "evens": [2, 4, 6, 8, 10],
+        "odds": [1, 3, 5, 7, 9],
+    };
+
+    println("map of lists:");
+    for (key, values) in lists.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {key}: {values}");
+    }
+
+    // Operations on list values
+    let lengths: Map<Text, Int> = lists.map_values(|v| v.len());
+    println("list lengths:");
+    for (k, v) in lengths.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Map with struct values
+    type Stats is { min: Int, max: Int, sum: Int };
+
+    let stats: Map<Text, Stats> = {
+        "group_a": Stats { min: 10, max: 50, sum: 150 },
+        "group_b": Stats { min: 5, max: 100, sum: 300 },
+    };
+
+    println("map of structs:");
+    for (group, s) in stats.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {group}: min={s.min}, max={s.max}, sum={s.sum}");
+    }
+
+    // Map with Maybe values
+    let optional: Map<Text, Maybe<Int>> = {
+        "present": Some(42),
+        "absent": None,
+        "also_present": Some(100),
+    };
+
+    println("map of optionals:");
+    for (key, value) in optional.entries().sorted_by_key(|(k, _)| k) {
+        match value {
+            Some(v) => println(f"  {key}: {v}"),
+            None => println(f"  {key}: (none)"),
+        }
+    }
+
+    // Filter and unwrap
+    let present_only: Map<Text, Int> = optional.entries()
+        .filter_map(|(k, v)| {
+            match v {
+                Some(val) => Some((k, val)),
+                None => None,
+            }
+        })
+        .collect();
+    println("present only:");
+    for (k, v) in present_only.entries().sorted_by_key(|(k, _)| k) {
+        println(f"  {k}: {v}");
+    }
+
+    // Map with tuple keys
+    let tuple_keys: Map<(Int, Int), Text> = {
+        (0, 0): "origin",
+        (1, 0): "right",
+        (0, 1): "up",
+        (-1, 0): "left",
+        (0, -1): "down",
+    };
+
+    println("map with tuple keys:");
+    for ((x, y), name) in tuple_keys.entries().sorted_by_key(|((x, y), _)| (x, y)) {
+        println(f"  ({x}, {y}): {name}");
+    }
+}

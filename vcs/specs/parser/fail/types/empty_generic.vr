@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, generics, empty, error
+// @description: Test detection of empty generic type arguments
+// @expected-error: E082
+
+// Generic type with empty arguments - must have at least one type argument
+fn test(x: List<>) {}

@@ -1,0 +1,71 @@
+// @test: parse
+// @level: L1
+// @tags: meta, introspection, type-fields, variants
+// @timeout: 5000
+
+/// Meta functions using type introspection intrinsics.
+/// Grammar meta_function_name includes: type_name, type_fields, field_access,
+///         type_of, fields_of, variants_of, is_struct, is_enum, is_tuple, implements
+
+type Color is Red | Green | Blue;
+
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+type Maybe<T> is None | Some(T);
+
+// Using @type_name
+fn test_type_name() {
+    const NAME: Text = @type_name(Color);
+    assert_eq(NAME, "Color");
+}
+
+// Using @is_struct and @is_enum
+fn test_type_predicates() {
+    assert(@is_struct(Person));
+    assert(!@is_enum(Person));
+    assert(@is_enum(Color));
+    assert(!@is_struct(Color));
+    assert(@is_enum(Maybe<Int>));
+    assert(@is_tuple((Int, Text)));
+}
+
+// Using @variants_of
+fn test_variants() {
+    let variants = @variants_of(Color);
+    assert_eq(variants.len(), 3);
+}
+
+// Using @fields_of
+fn test_fields() {
+    let fields = @fields_of(Person);
+    assert_eq(fields.len(), 2);
+}
+
+// Using @type_of
+fn test_type_of() {
+    let x = 42;
+    let t = @type_of(x);
+    assert_eq(@type_name(t), "Int");
+}
+
+// Using @implements
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+fn test_implements() {
+    const IMPL: Bool = @implements(Person, Display);
+}
+
+fn main() {
+    test_type_name();
+    test_type_predicates();
+    test_variants();
+    test_fields();
+    test_type_of();
+    test_implements();
+    print("Meta introspection tests parsed");
+}

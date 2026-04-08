@@ -1,0 +1,246 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, bellman-ford, shortest-path, negative-edges
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Bellman-Ford single-source shortest paths with negative edges.
+// Uses compact edge-list in Arr8 (up to 8 edges encoded as pairs in separate arrays).
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_fill(v: Int) -> Arr8 {
+    Arr8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// Edge list: separate arrays for src, dst, weight (up to 8 edges)
+type EdgeList is { src: Arr8, dst: Arr8, wt: Arr8, count: Int };
+
+fn el_new() -> EdgeList {
+    EdgeList { src: arr8_new(), dst: arr8_new(), wt: arr8_new(), count: 0 }
+}
+
+fn el_add(el: EdgeList, s: Int, d: Int, w: Int) -> EdgeList {
+    let idx = el.count;
+    EdgeList {
+        src: arr8_set(el.src, idx, s),
+        dst: arr8_set(el.dst, idx, d),
+        wt: arr8_set(el.wt, idx, w),
+        count: idx + 1
+    }
+}
+
+// =============================================================================
+// Bellman-Ford
+// =============================================================================
+
+type BFResult is { dist: Arr8, has_neg_cycle: Int };
+
+fn bellman_ford(el: EdgeList, num_nodes: Int, source: Int) -> BFResult {
+    let inf = 999999;
+    let mut d = arr8_fill(inf);
+    d = arr8_set(d, source, 0);
+
+    // Relax edges (num_nodes - 1) times
+    let mut iter = 0;
+    while iter < num_nodes - 1 {
+        let mut e = 0;
+        while e < el.count {
+            let u = arr8_get(el.src, e);
+            let v = arr8_get(el.dst, e);
+            let w = arr8_get(el.wt, e);
+            let du = arr8_get(d, u);
+            if du < inf {
+                let new_dist = du + w;
+                if new_dist < arr8_get(d, v) {
+                    d = arr8_set(d, v, new_dist);
+                }
+            }
+            e = e + 1;
+        }
+        iter = iter + 1;
+    }
+
+    // Check for negative cycles
+    let mut neg_cycle = 0;
+    let mut e = 0;
+    while e < el.count {
+        let u = arr8_get(el.src, e);
+        let v = arr8_get(el.dst, e);
+        let w = arr8_get(el.wt, e);
+        let du = arr8_get(d, u);
+        if du < inf {
+            if du + w < arr8_get(d, v) {
+                neg_cycle = 1;
+            }
+        }
+        e = e + 1;
+    }
+
+    BFResult { dist: d, has_neg_cycle: neg_cycle }
+}
+
+// =============================================================================
+// Test 1: Simple graph with positive weights
+//   0->1:4, 0->2:2, 2->1:1, 1->3:3, 2->3:2
+// =============================================================================
+
+fn test_positive_weights() {
+    let mut el = el_new();
+    el = el_add(el, 0, 1, 4);
+    el = el_add(el, 0, 2, 2);
+    el = el_add(el, 2, 1, 1);
+    el = el_add(el, 1, 3, 3);
+    el = el_add(el, 2, 3, 2);
+
+    let bf = bellman_ford(el, 4, 0);
+    assert_eq(bf.has_neg_cycle, 0);
+    assert_eq(arr8_get(bf.dist, 0), 0);
+    assert_eq(arr8_get(bf.dist, 1), 3);  // 0->2->1 = 2+1
+    assert_eq(arr8_get(bf.dist, 2), 2);
+    assert_eq(arr8_get(bf.dist, 3), 4);  // 0->2->3 = 2+2
+}
+
+// =============================================================================
+// Test 2: Graph with negative edges (no negative cycle)
+//   0->1:1, 1->2:-3, 2->3:2, 0->3:5
+//   Shortest 0->3: 1+(-3)+2 = 0
+// =============================================================================
+
+fn test_negative_edges() {
+    let mut el = el_new();
+    el = el_add(el, 0, 1, 1);
+    el = el_add(el, 1, 2, -3);
+    el = el_add(el, 2, 3, 2);
+    el = el_add(el, 0, 3, 5);
+
+    let bf = bellman_ford(el, 4, 0);
+    assert_eq(bf.has_neg_cycle, 0);
+    assert_eq(arr8_get(bf.dist, 0), 0);
+    assert_eq(arr8_get(bf.dist, 1), 1);
+    assert_eq(arr8_get(bf.dist, 2), -2);
+    assert_eq(arr8_get(bf.dist, 3), 0);
+}
+
+// =============================================================================
+// Test 3: Negative cycle detection
+//   0->1:1, 1->2:-2, 2->1:-1 (cycle weight: -3)
+// =============================================================================
+
+fn test_negative_cycle() {
+    let mut el = el_new();
+    el = el_add(el, 0, 1, 1);
+    el = el_add(el, 1, 2, -2);
+    el = el_add(el, 2, 1, -1);
+
+    let bf = bellman_ford(el, 3, 0);
+    assert_eq(bf.has_neg_cycle, 1);
+}
+
+// =============================================================================
+// Test 4: Single node
+// =============================================================================
+
+fn test_single_node() {
+    let el = el_new();
+    let bf = bellman_ford(el, 1, 0);
+    assert_eq(bf.has_neg_cycle, 0);
+    assert_eq(arr8_get(bf.dist, 0), 0);
+}
+
+// =============================================================================
+// Test 5: Two nodes
+// =============================================================================
+
+fn test_two_nodes() {
+    let mut el = el_new();
+    el = el_add(el, 0, 1, 7);
+    let bf = bellman_ford(el, 2, 0);
+    assert_eq(bf.has_neg_cycle, 0);
+    assert_eq(arr8_get(bf.dist, 1), 7);
+}
+
+// =============================================================================
+// Test 6: Diamond with negative edge
+//   0->1:2, 0->2:4, 1->3:3, 2->3:-1
+//   Shortest 0->3: 0->2->3 = 4+(-1) = 3
+// =============================================================================
+
+fn test_diamond_negative() {
+    let mut el = el_new();
+    el = el_add(el, 0, 1, 2);
+    el = el_add(el, 0, 2, 4);
+    el = el_add(el, 1, 3, 3);
+    el = el_add(el, 2, 3, -1);
+
+    let bf = bellman_ford(el, 4, 0);
+    assert_eq(bf.has_neg_cycle, 0);
+    assert_eq(arr8_get(bf.dist, 3), 3);
+}
+
+// =============================================================================
+// Test 7: Source different from 0
+// =============================================================================
+
+fn test_different_source() {
+    let mut el = el_new();
+    el = el_add(el, 0, 1, 5);
+    el = el_add(el, 1, 2, 3);
+    el = el_add(el, 2, 3, 1);
+
+    let bf = bellman_ford(el, 4, 1);
+    assert_eq(bf.has_neg_cycle, 0);
+    assert_eq(arr8_get(bf.dist, 0), 999999);
+    assert_eq(arr8_get(bf.dist, 1), 0);
+    assert_eq(arr8_get(bf.dist, 2), 3);
+    assert_eq(arr8_get(bf.dist, 3), 4);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_positive_weights();
+    test_negative_edges();
+    test_negative_cycle();
+    test_single_node();
+    test_two_nodes();
+    test_diamond_negative();
+    test_different_source();
+    print("[OK] 322_interp_bellman_ford");
+    0
+}

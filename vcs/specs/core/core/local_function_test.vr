@@ -1,0 +1,163 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: function, local, scoping, types
+// @description: Comprehensive tests for local function type resolution
+
+module specs.stdlib.core.local_function_test;
+
+mount core.primitives.*;
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// LOCAL FUNCTION TYPE RESOLUTION TEST SUITE
+// =============================================================================
+//
+// Verifies that local functions (functions defined inside other functions)
+// can correctly resolve imported types in their signatures.
+
+// -----------------------------------------------------------------------------
+// Test: Local Function with Result Return Type
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_function_with_result() {
+    fn local_get_value() -> Result<Int, Text> {
+        Ok(42)
+    }
+
+    fn local_fail() -> Result<Int, Text> {
+        Err("error")
+    }
+
+    match local_get_value() {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
+    }
+
+    match local_fail() {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "error"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test: Local Function with Maybe Return Type
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_function_with_maybe() {
+    fn local_some() -> Maybe<Int> {
+        Some(100)
+    }
+
+    fn local_none() -> Maybe<Int> {
+        None
+    }
+
+    match local_some() {
+        Some(v) => assert_eq(v, 100),
+        None => assert(false),
+    }
+
+    assert(local_none() is None);
+}
+
+// -----------------------------------------------------------------------------
+// Test: Local Function with Generic Parameters
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_function_with_generic_params() {
+    fn wrap_in_some<T>(value: T) -> Maybe<T> {
+        Some(value)
+    }
+
+    match wrap_in_some(42) {
+        Some(v) => assert_eq(v, 42),
+        None => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test: Nested Local Functions
+// -----------------------------------------------------------------------------
+
+@test
+fn test_nested_local_functions() {
+    fn outer() -> Result<Int, Text> {
+        fn inner() -> Int {
+            10
+        }
+        Ok(inner() * 2)
+    }
+
+    match outer() {
+        Ok(v) => assert_eq(v, 20),
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test: Local Function with List Parameter
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_function_with_list_param() {
+    fn get_first(list: &List<Int>) -> Maybe<Int> {
+        list.get(0).map(|v| *v)
+    }
+
+    let numbers = List.from([10, 20, 30]);
+    match get_first(&numbers) {
+        Some(v) => assert_eq(v, 10),
+        None => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test: Local Function Using Try Operator
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_function_with_try_operator() {
+    fn helper_value() -> Result<Int, Text> {
+        Ok(50)
+    }
+
+    fn use_try() -> Result<Int, Text> {
+        let x = helper_value()?;
+        Ok(x * 2)
+    }
+
+    match use_try() {
+        Ok(v) => assert_eq(v, 100),
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test: Multiple Local Functions Referencing Each Other
+// -----------------------------------------------------------------------------
+
+@test
+fn test_local_functions_cross_reference() {
+    fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    fn double(x: Int) -> Int {
+        add(x, x)
+    }
+
+    fn quad(x: Int) -> Int {
+        double(double(x))
+    }
+
+    assert_eq(add(1, 2), 3);
+    assert_eq(double(5), 10);
+    assert_eq(quad(3), 12);
+}
+

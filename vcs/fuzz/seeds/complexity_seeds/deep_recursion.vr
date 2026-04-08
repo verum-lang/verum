@@ -1,0 +1,35 @@
+// Complexity: Deep recursion patterns
+fn deep(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else { deep(n - 1) + 1 }
+}
+
+fn mutual_a(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else { mutual_b(n - 1) }
+}
+
+fn mutual_b(n: Int) -> Int {
+    if n <= 0 { 1 }
+    else { mutual_a(n - 1) }
+}
+
+type Tree<T> is
+    Leaf(T)
+    | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+fn tree_depth<T>(tree: &Tree<T>) -> Int {
+    match tree {
+        Leaf(_) => 1,
+        Node { left, right } => {
+            let l = tree_depth(left);
+            let r = tree_depth(right);
+            if l > r { l + 1 } else { r + 1 }
+        },
+    }
+}
+
+fn main() {
+    let result = deep(10);
+    let mutual = mutual_a(5);
+}

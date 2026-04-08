@@ -1,0 +1,143 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: text, builder, string-manipulation, format
+// @description: Test string building and manipulation patterns
+
+fn repeat_char(ch: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < n {
+        result = result + ch;
+        i = i + 1;
+    }
+    result
+}
+
+fn test_repeat() -> Int {
+    let stars = repeat_char("*", 5);
+    if stars != "*****" {
+        print(f"FAIL repeat: '{stars}'");
+        return 1;
+    }
+    let empty = repeat_char("x", 0);
+    if empty != "" {
+        print(f"FAIL repeat_empty: '{empty}'");
+        return 1;
+    }
+    print("  repeat: OK");
+    0
+}
+
+fn join_with(items: List<Text>, sep: Text) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < items.len() {
+        if i > 0 {
+            result = result + sep;
+        }
+        result = result + items[i];
+        i = i + 1;
+    }
+    result
+}
+
+fn test_join() -> Int {
+    let mut words = List.new();
+    words.push("hello");
+    words.push("world");
+    words.push("test");
+    let joined = join_with(words, ", ");
+    if joined != "hello, world, test" {
+        print(f"FAIL join: '{joined}'");
+        return 1;
+    }
+    print("  join: OK");
+    0
+}
+
+fn int_to_str(n: Int) -> Text {
+    f"{n}"
+}
+
+fn test_int_format() -> Int {
+    let s = int_to_str(42);
+    if s != "42" {
+        print(f"FAIL int_format: '{s}'");
+        return 1;
+    }
+    let neg = int_to_str(-7);
+    if neg != "-7" {
+        print(f"FAIL int_format_neg: '{neg}'");
+        return 1;
+    }
+    let zero = int_to_str(0);
+    if zero != "0" {
+        print(f"FAIL int_format_zero: '{zero}'");
+        return 1;
+    }
+    print("  int_format: OK");
+    0
+}
+
+fn test_multiline_build() -> Int {
+    let header = "Name: ";
+    let name = "Test";
+    let line = header + name;
+    if line != "Name: Test" {
+        print(f"FAIL multiline: '{line}'");
+        return 1;
+    }
+
+    let mut lines = List.new();
+    let mut i = 1;
+    while i <= 3 {
+        lines.push(f"line {i}");
+        i = i + 1;
+    }
+    if lines[0] != "line 1" || lines[2] != "line 3" {
+        print("FAIL multiline content");
+        return 1;
+    }
+    print("  multiline_build: OK");
+    0
+}
+
+fn test_text_comparison() -> Int {
+    let a = "abc";
+    let b = "abc";
+    let c = "def";
+    if a != b {
+        print("FAIL: identical strings not equal");
+        return 1;
+    }
+    if a == c {
+        print("FAIL: different strings equal");
+        return 1;
+    }
+    // Concatenated equality
+    let d = "ab" + "c";
+    if d != a {
+        print("FAIL: concatenated not equal");
+        return 1;
+    }
+    print("  text_comparison: OK");
+    0
+}
+
+fn main() -> Int {
+    print("String Builder Tests:");
+    let mut failures = 0;
+    failures = failures + test_repeat();
+    failures = failures + test_join();
+    failures = failures + test_int_format();
+    failures = failures + test_multiline_build();
+    failures = failures + test_text_comparison();
+
+    if failures == 0 {
+        print("All string builder tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

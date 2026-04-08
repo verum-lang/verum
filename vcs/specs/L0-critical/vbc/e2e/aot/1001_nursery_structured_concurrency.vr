@@ -1,0 +1,142 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: concurrency, spawn, await, channel, mutex
+// @description: Comprehensive concurrency: spawn/await, channels, mutex
+
+fn __mutex_new_raw() -> Int { 0 }
+fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+
+fn main() -> Int {
+    // Test 1: spawn/await with channels — fan-out 3 workers
+    let ch = Channel.new(10);
+
+    let t1 = spawn {
+        ch.send(10);
+        10
+    };
+    let t2 = spawn {
+        ch.send(20);
+        20
+    };
+    let t3 = spawn {
+        ch.send(30);
+        30
+    };
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    let mut total = 0;
+    let mut i = 0;
+    while (i < 3) {
+        match ch.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        i = i + 1;
+    }
+    if (total != 60) {
+        print(f"FAIL test1: total={total}");
+        return 1;
+    }
+
+    // Test 2: producer-consumer with channel
+    let data_ch = Channel.new(20);
+    let result_ch = Channel.new(1);
+
+    // Producer: sends 10 values
+    let producer = spawn {
+        let mut i = 0;
+        while (i < 10) {
+            data_ch.send(i * i);
+            i = i + 1;
+        }
+        data_ch.send(-1);  // sentinel
+        0
+    };
+
+    // Consumer: sums until sentinel
+    let consumer = spawn {
+        let mut sum = 0;
+        let mut done = false;
+        while (!done) {
+            match data_ch.recv() {
+                Some(v) => {
+                    if (v == -1) {
+                        done = true;
+                    } else {
+                        sum = sum + v;
+                    }
+                }
+                None => { done = true; }
+            }
+        }
+        result_ch.send(sum);
+        sum
+    };
+
+    let _p = producer.await;
+    let _c = consumer.await;
+
+    // 0+1+4+9+16+25+36+49+64+81 = 285
+    let mut final_sum = 0;
+    match result_ch.recv() {
+        Some(v) => { final_sum = v; }
+        None => {}
+    }
+    if (final_sum != 285) {
+        print(f"FAIL test2: sum={final_sum}");
+        return 1;
+    }
+
+    // Test 3: mutex-protected shared counter
+    let mtx = __mutex_new_raw();
+    let counter_ch = Channel.new(10);
+    counter_ch.send(0);
+
+    let w1 = spawn {
+        let mut i = 0;
+        while (i < 50) {
+            __mutex_lock_raw(mtx);
+            match counter_ch.recv() {
+                Some(v) => { counter_ch.send(v + 1); }
+                None => {}
+            }
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        1
+    };
+    let w2 = spawn {
+        let mut i = 0;
+        while (i < 50) {
+            __mutex_lock_raw(mtx);
+            match counter_ch.recv() {
+                Some(v) => { counter_ch.send(v + 1); }
+                None => {}
+            }
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        1
+    };
+
+    let _w1r = w1.await;
+    let _w2r = w2.await;
+
+    let mut counter_val = 0;
+    match counter_ch.recv() {
+        Some(v) => { counter_val = v; }
+        None => {}
+    }
+    if (counter_val != 100) {
+        print(f"FAIL test3: counter={counter_val}");
+        return 1;
+    }
+
+    print("1001_nursery_structured_concurrency: PASS");
+    0
+}

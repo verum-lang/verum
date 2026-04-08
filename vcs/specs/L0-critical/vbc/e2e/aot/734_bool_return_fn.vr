@@ -1,0 +1,58 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, bool, return, function
+// @expected-exit: 0
+
+// Tests that bool-returning functions properly track the register type.
+// Without bool tracking, NOT on the result does bitwise NOT instead of logical NOT.
+
+fn is_even(x: Int) -> Bool {
+    x % 2 == 0
+}
+
+fn is_positive(x: Int) -> Bool {
+    x > 0
+}
+
+fn both(a: Bool, b: Bool) -> Bool {
+    if (a) {
+        b
+    } else {
+        false
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Bool return + logical NOT
+    let even = is_even(4);
+    assert(even);
+    let odd = !is_even(5);
+    assert(odd);
+
+    // Test 2: Bool return in condition
+    if (is_positive(10)) {
+        print("10 is positive: correct");
+    } else {
+        print("ERROR");
+        return 1;
+    }
+
+    // Test 3: NOT on bool function return
+    if (!is_positive(-5)) {
+        print("-5 is not positive: correct");
+    } else {
+        print("ERROR");
+        return 1;
+    }
+
+    // Test 4: Bool function results combined
+    let result = both(is_even(4), is_positive(3));
+    assert(result);
+
+    let result2 = both(is_even(3), is_positive(3));
+    assert(!result2);
+
+    print("Bool return fn: PASS");
+    0
+}

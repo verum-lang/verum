@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, union, leading, error
+// @description: Test detection of leading pipe in type definition without proper context
+// @expected-error: E048
+
+// Leading pipe in 'is' type definition is valid for variant lists,
+// but not for type expressions in other contexts
+fn test(x: | A | B) {}

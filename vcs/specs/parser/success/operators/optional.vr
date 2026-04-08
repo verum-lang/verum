@@ -1,0 +1,31 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, optional, null-coalesce
+// @description: Test optional chaining and null coalescing operators
+
+fn test_optional_operators() {
+    // Optional chaining
+    let a = obj?.field;
+    let b = obj?.method();
+    let c = obj?.field?.nested;
+    let d = obj?.method()?.result;
+
+    // Try operator
+    let e = fallible_fn()?;
+    let f = try_parse(input)?;
+    let g = obj.method()?;
+
+    // Null coalescing
+    let h = maybe_value ?? default;
+    let i = a ?? b ?? c;
+    let j = get_optional() ?? fallback();
+
+    // Combined
+    let k = obj?.field ?? default;
+    let l = parse(input)? ?? default_value;
+    let m = config?.setting ?? env?.setting ?? default;
+
+    // In expressions
+    let n = (a?.b ?? c).method();
+    let o = items.get(key)? ?? create_new()?;
+}

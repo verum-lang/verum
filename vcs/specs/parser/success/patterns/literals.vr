@@ -1,0 +1,424 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for literal patterns (int, string, bool, char)
+
+// Grammar Reference:
+// literal_pattern = literal_expr ;
+
+// ============================================================================
+// SECTION 1: Integer Literal Patterns
+// ============================================================================
+
+fn test_integer_literals() {
+    // Zero
+    match n {
+        0 => zero(),
+        _ => nonzero()
+    }
+
+    // Positive integers
+    match n {
+        1 => one(),
+        2 => two(),
+        3 => three(),
+        42 => answer(),
+        100 => hundred(),
+        _ => other()
+    }
+
+    // Negative integers (use guards since patterns don't support negation)
+    match n {
+        x if x == -1 => neg_one(),
+        x if x == -42 => neg_answer(),
+        x if x == -100 => neg_hundred(),
+        _ => other()
+    }
+
+    // Large integers
+    match n {
+        1000000 => million(),
+        999999999 => large(),
+        _ => other()
+    }
+
+    // Binary literals
+    match flags {
+        0b0000 => none_set(),
+        0b0001 => first_set(),
+        0b1111 => all_set(),
+        _ => some_set()
+    }
+
+    // Hexadecimal literals
+    match code {
+        0x00 => null_byte(),
+        0xFF => max_byte(),
+        0xDEADBEEF => magic(),
+        _ => other()
+    }
+
+    // Octal literals
+    match perms {
+        0o000 => no_perms(),
+        0o755 => executable(),
+        0o644 => readable(),
+        _ => other()
+    }
+
+    // Integer with underscores
+    match n {
+        1_000 => thousand(),
+        1_000_000 => million(),
+        0xFF_FF => two_bytes(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 2: Floating Point Literal Patterns
+// ============================================================================
+
+fn test_float_literals() {
+    // Basic floats
+    match f {
+        0.0 => zero(),
+        1.0 => one(),
+        3.14159 => pi_approx(),
+        _ => other()
+    }
+
+    // Negative floats (use guards since patterns don't support negation)
+    match f {
+        x if x == -1.0 => neg_one(),
+        x if x == -0.5 => neg_half(),
+        _ => other()
+    }
+
+    // Scientific notation
+    match f {
+        1e10 => ten_billion(),
+        1.5e-3 => small(),
+        2.998e8 => light_speed(),
+        _ => other()
+    }
+
+    // Float with underscores
+    match f {
+        1_000.0 => thousand(),
+        3.141_592_653 => pi(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 3: Boolean Literal Patterns
+// ============================================================================
+
+fn test_boolean_literals() {
+    // Simple match
+    match flag {
+        true => is_true(),
+        false => is_false()
+    }
+
+    // Boolean in tuple
+    match pair {
+        (true, true) => both_true(),
+        (true, false) => first_true(),
+        (false, true) => second_true(),
+        (false, false) => both_false()
+    }
+
+    // Boolean in variant
+    match option {
+        Some(true) => some_true(),
+        Some(false) => some_false(),
+        None => none()
+    }
+
+    // Boolean in record
+    match flags {
+        Flags { enabled: true, visible: true } => fully_on(),
+        Flags { enabled: true, visible: false } => hidden_active(),
+        Flags { enabled: false, visible: true } => visible_inactive(),
+        Flags { enabled: false, visible: false } => fully_off()
+    }
+}
+
+// ============================================================================
+// SECTION 4: Character Literal Patterns
+// ============================================================================
+
+fn test_character_literals() {
+    // Basic characters
+    match c {
+        'a' => lowercase_a(),
+        'A' => uppercase_a(),
+        'z' => lowercase_z(),
+        'Z' => uppercase_z(),
+        _ => other()
+    }
+
+    // Digits
+    match c {
+        '0' => digit_zero(),
+        '1' => digit_one(),
+        '9' => digit_nine(),
+        _ => other()
+    }
+
+    // Whitespace and special
+    match c {
+        ' ' => space(),
+        '\t' => tab(),
+        '\n' => newline(),
+        '\r' => carriage_return(),
+        _ => other()
+    }
+
+    // Escape sequences
+    match c {
+        '\\' => backslash(),
+        '\'' => single_quote(),
+        '\"' => double_quote(),
+        '\0' => null_char(),
+        _ => other()
+    }
+
+    // Punctuation
+    match c {
+        '.' => period(),
+        ',' => comma(),
+        '!' => exclamation(),
+        '?' => question(),
+        ':' => colon(),
+        ';' => semicolon(),
+        _ => other()
+    }
+
+    // Brackets
+    match c {
+        '(' => open_paren(),
+        ')' => close_paren(),
+        '[' => open_bracket(),
+        ']' => close_bracket(),
+        '{' => open_brace(),
+        '}' => close_brace(),
+        _ => other()
+    }
+
+    // Operators
+    match c {
+        '+' => plus(),
+        '-' => minus(),
+        '*' => star(),
+        '/' => slash(),
+        '=' => equals(),
+        _ => other()
+    }
+
+    // Unicode escape (if supported)
+    match c {
+        '\u{0041}' => unicode_a(),
+        '\u{03B1}' => greek_alpha(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 5: String Literal Patterns
+// ============================================================================
+
+fn test_string_literals() {
+    // Empty string
+    match s {
+        "" => empty(),
+        _ => nonempty()
+    }
+
+    // Simple strings
+    match s {
+        "hello" => greet(),
+        "world" => world(),
+        "goodbye" => farewell(),
+        _ => other()
+    }
+
+    // Strings with spaces
+    match s {
+        "hello world" => hello_world(),
+        "foo bar baz" => foo_bar_baz(),
+        _ => other()
+    }
+
+    // Single character strings
+    match s {
+        "a" => single_a(),
+        "1" => single_one(),
+        " " => single_space(),
+        _ => other()
+    }
+
+    // Strings with escape sequences
+    match s {
+        "hello\nworld" => with_newline(),
+        "tab\there" => with_tab(),
+        "quote\"here" => with_quote(),
+        "back\\slash" => with_backslash(),
+        _ => other()
+    }
+
+    // Command strings
+    match cmd {
+        "start" => start_command(),
+        "stop" => stop_command(),
+        "restart" => restart_command(),
+        "status" => status_command(),
+        "help" => help_command(),
+        _ => unknown_command()
+    }
+
+    // HTTP methods
+    match method {
+        "GET" => handle_get(),
+        "POST" => handle_post(),
+        "PUT" => handle_put(),
+        "DELETE" => handle_delete(),
+        "PATCH" => handle_patch(),
+        _ => method_not_allowed()
+    }
+}
+
+// ============================================================================
+// SECTION 6: Literal Patterns in Let Bindings (for irrefutable patterns)
+// ============================================================================
+
+fn test_literals_in_let() {
+    // These would require the value to match at runtime
+    // Parser should accept them
+    let 42 = get_answer();
+    let "expected" = get_expected();
+    let true = check_invariant();
+    let 'x' = get_char();
+}
+
+// ============================================================================
+// SECTION 7: Literal Patterns Combined with Other Patterns
+// ============================================================================
+
+fn test_literals_combined() {
+    // Literal in tuple
+    let (0, y) = pair;
+    let (x, 0) = pair;
+    let (1, 2, 3) = triple;
+
+    // Literal in array
+    let [0, rest] = array;
+    let [head, 0] = array;
+    let [1, 2, 3] = array;
+
+    // Literal in variant
+    match option {
+        Some(0) => some_zero(),
+        Some(1) => some_one(),
+        Some(n) => some_other(n),
+        None => none()
+    }
+
+    // Literal in record
+    match point {
+        Point { x: 0, y: 0 } => origin(),
+        Point { x: 0, y } => on_y_axis(y),
+        Point { x, y: 0 } => on_x_axis(x),
+        Point { x, y } => general(x, y)
+    }
+}
+
+// ============================================================================
+// SECTION 8: Literal Patterns with Guards
+// ============================================================================
+
+fn test_literals_with_guards() {
+    match n {
+        0 if debug_mode => debug_zero(),
+        0 => release_zero(),
+        1 if special_case => special_one(),
+        n => other(n)
+    }
+
+    match s {
+        "admin" if is_authenticated => admin_panel(),
+        "admin" => login_required(),
+        user => user_page(user)
+    }
+}
+
+// ============================================================================
+// SECTION 9: Literal Patterns with @ Binding
+// ============================================================================
+
+fn test_literals_with_at() {
+    match n {
+        zero @ 0 => handle_zero(zero),
+        one @ 1 => handle_one(one),
+        answer @ 42 => handle_answer(answer),
+        other @ _ => handle_other(other)
+    }
+
+    match s {
+        greeting @ "hello" => echo_greeting(greeting),
+        farewell @ "goodbye" => echo_farewell(farewell),
+        other @ _ => echo_other(other)
+    }
+}
+
+// ============================================================================
+// SECTION 10: Unit Literal Pattern
+// ============================================================================
+
+fn test_unit_literal() {
+    // Unit pattern in match
+    match unit_value {
+        () => is_unit()
+    }
+
+    // Unit in variant
+    match result {
+        Ok(()) => success(),
+        Err(e) => failure(e)
+    }
+
+    // Unit in function return
+    let () = function_returning_unit();
+}
+
+// ============================================================================
+// SECTION 11: Multiple Literal Types in Same Match
+// ============================================================================
+
+fn test_mixed_context() {
+    // Different literal types (in different matches)
+    match value {
+        0 => is_zero(),
+        1 => is_one(),
+        _ => is_other()
+    }
+
+    match flag {
+        true => enabled(),
+        false => disabled()
+    }
+
+    match char {
+        'y' => yes(),
+        'n' => no(),
+        _ => invalid()
+    }
+
+    match string {
+        "yes" => affirmative(),
+        "no" => negative(),
+        _ => handle_unknown()
+    }
+}

@@ -1,0 +1,23 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Int128 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test Int128.BITS
+    assert_eq(Int128.BITS(), 128);
+
+    // Test i128 alias (FFI compatibility)
+    assert_eq(i128.BITS(), 128);
+
+    // Test UInt128.BITS
+    assert_eq(UInt128.BITS(), 128);
+
+    // Test u128 alias
+    assert_eq(u128.BITS(), 128);
+
+    // Test MIN/MAX for i128
+    assert_eq(i128.MIN(), -170141183460469231731687303715884105728);
+    assert_eq(i128.MAX(), 170141183460469231731687303715884105727);
+}

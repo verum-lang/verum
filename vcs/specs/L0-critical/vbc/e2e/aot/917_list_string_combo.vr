@@ -1,0 +1,233 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, string, combo, sort, split, replace, contains
+// @expected-exit: 0
+
+// Test: Combined list + string operations — real-world patterns
+
+fn main() -> Int {
+    // Scenario 1: Build a list, sort, verify ordering, compute sum
+    let mut scores = List.new();
+    scores.push(92);
+    scores.push(95);
+    scores.push(99);
+    scores.push(87);
+    scores.push(78);
+
+    scores.sort();
+    // Should be: [78, 87, 92, 95, 99]
+    if (scores[0] != 78) {
+        print(f"FAIL s1a: scores[0]={scores[0]}");
+        return 1;
+    }
+    if (scores[4] != 99) {
+        print(f"FAIL s1b: scores[4]={scores[4]}");
+        return 1;
+    }
+
+    let mut total = 0;
+    let mut j = 0;
+    while (j < scores.len()) {
+        total = total + scores[j];
+        j = j + 1;
+    }
+    // 78 + 87 + 92 + 95 + 99 = 451
+    if (total != 451) {
+        print(f"FAIL s1c: total={total}");
+        return 1;
+    }
+
+    // Scenario 2: Sort 10 elements and verify each position
+    let mut data = List.new();
+    data.push(5);
+    data.push(3);
+    data.push(8);
+    data.push(1);
+    data.push(9);
+    data.push(2);
+    data.push(7);
+    data.push(4);
+    data.push(6);
+    data.push(0);
+
+    data.sort();
+    let mut sorted_ok = true;
+    let mut k = 0;
+    while (k < 10) {
+        if (data[k] != k) {
+            sorted_ok = false;
+        }
+        k = k + 1;
+    }
+    if (sorted_ok != true) {
+        print("FAIL s2: sort not correct");
+        return 1;
+    }
+
+    // Scenario 3: String split + contains on fields
+    let csv_line = "alice,bob,charlie,dave,eve";
+    let names = csv_line.split(",");
+    if (names.len() != 5) {
+        print(f"FAIL s3a: names.len()={names.len()}");
+        return 1;
+    }
+    if (csv_line.contains("charlie") != true) {
+        print("FAIL s3b: should contain 'charlie'");
+        return 1;
+    }
+    if (csv_line.contains("frank") != false) {
+        print("FAIL s3c: should not contain 'frank'");
+        return 1;
+    }
+
+    // Scenario 4: String replace + verify
+    let template = "Hello NAME, welcome to PLACE!";
+    let step1 = template.replace("NAME", "Alice");
+    let step2 = step1.replace("PLACE", "Verum");
+    if (step2 != "Hello Alice, welcome to Verum!") {
+        print(f"FAIL s4: step2='{step2}'");
+        return 1;
+    }
+
+    // Scenario 5: List insert at sorted position
+    let mut sorted_list = List.new();
+    sorted_list.push(10);
+    sorted_list.push(30);
+    sorted_list.push(50);
+    sorted_list.push(70);
+    // Insert 40 at the right position
+    let mut pos = 0;
+    while (pos < sorted_list.len()) {
+        if (sorted_list[pos] > 40) {
+            sorted_list.insert(pos, 40);
+            pos = sorted_list.len(); // break
+        }
+        pos = pos + 1;
+    }
+    // [10, 30, 40, 50, 70]
+    if (sorted_list.len() != 5) {
+        print(f"FAIL s5a: len={sorted_list.len()}");
+        return 1;
+    }
+    if (sorted_list[2] != 40) {
+        print(f"FAIL s5b: sorted_list[2]={sorted_list[2]}");
+        return 1;
+    }
+
+    // Scenario 6: Multi-line text processing with split + contains
+    let text = "the quick brown fox\njumps over the lazy dog\nhello world";
+    let text_lines = text.split("\n");
+    if (text_lines.len() != 3) {
+        print(f"FAIL s6a: lines={text_lines.len()}");
+        return 1;
+    }
+
+    // Count lines containing "the"
+    let mut the_count = 0;
+    let mut li = 0;
+    while (li < text_lines.len()) {
+        let tl = text_lines[li];
+        if (tl.contains("the") == true) {
+            the_count = the_count + 1;
+        }
+        li = li + 1;
+    }
+    // "the quick brown fox" and "jumps over the lazy dog" contain "the"
+    if (the_count != 2) {
+        print(f"FAIL s6b: the_count={the_count}");
+        return 1;
+    }
+
+    // Scenario 7: List reverse + sum verification
+    let mut rev = List.new();
+    rev.push(100);
+    rev.push(200);
+    rev.push(300);
+    rev.push(400);
+    rev.push(500);
+    rev.reverse();
+    // [500, 400, 300, 200, 100]
+    if (rev[0] != 500) {
+        print(f"FAIL s7a: rev[0]={rev[0]}");
+        return 1;
+    }
+    if (rev[4] != 100) {
+        print(f"FAIL s7b: rev[4]={rev[4]}");
+        return 1;
+    }
+
+    let mut rev_sum = 0;
+    let mut ri = 0;
+    while (ri < rev.len()) {
+        rev_sum = rev_sum + rev[ri];
+        ri = ri + 1;
+    }
+    if (rev_sum != 1500) {
+        print(f"FAIL s7c: rev_sum={rev_sum}");
+        return 1;
+    }
+
+    // Scenario 8: String starts_with/ends_with on path
+    let file_path = "/usr/local/bin/verum";
+    if (file_path.starts_with("/usr") != true) {
+        print("FAIL s8a: starts_with /usr");
+        return 1;
+    }
+    if (file_path.ends_with("verum") != true) {
+        print("FAIL s8b: ends_with verum");
+        return 1;
+    }
+    if (file_path.starts_with("usr") != false) {
+        print("FAIL s8c: should not start with 'usr'");
+        return 1;
+    }
+
+    // Scenario 9: trim + replace combo
+    let messy = "  hello world  ";
+    let clean = messy.trim();
+    let shouting = clean.replace("hello", "HELLO");
+    if (shouting != "HELLO world") {
+        print(f"FAIL s9: shouting='{shouting}'");
+        return 1;
+    }
+
+    // Scenario 10: List extend + sort + remove
+    let mut combined = List.new();
+    combined.push(50);
+    combined.push(30);
+    combined.push(10);
+    // extend with more values
+    let mut extras = List.new();
+    extras.push(40);
+    extras.push(20);
+    extras.push(60);
+    combined.extend(extras);
+    combined.sort();
+    // [10, 20, 30, 40, 50, 60]
+    if (combined.len() != 6) {
+        print(f"FAIL s10a: len={combined.len()}");
+        return 1;
+    }
+    if (combined[0] != 10) {
+        print(f"FAIL s10b: combined[0]={combined[0]}");
+        return 1;
+    }
+    if (combined[5] != 60) {
+        print(f"FAIL s10c: combined[5]={combined[5]}");
+        return 1;
+    }
+    // Remove middle element (30 at index 2)
+    let mid = combined.remove(2);
+    if (mid != 30) {
+        print(f"FAIL s10d: removed={mid}");
+        return 1;
+    }
+    if (combined.len() != 5) {
+        print(f"FAIL s10e: len after remove={combined.len()}");
+        return 1;
+    }
+
+    print("917_list_string_combo: PASS");
+    0
+}

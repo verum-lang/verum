@@ -1,0 +1,138 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, integration, elm, counter
+// @description: Integration test — Counter app from spec Section 13.1
+
+
+/// Full counter TUI application pattern from architecture doc.
+/// Exercises all layers: events → style → layout → widgets → app framework.
+
+mount core.term.*;
+
+// Application messages
+type CounterMsg is Increment | Decrement | Reset;
+
+// Application model
+type Counter is { count: Int };
+
+// Update: pure state transition
+fn counter_update(model: &mut Counter, msg: CounterMsg) -> Command<CounterMsg> {
+    match msg {
+        Increment => { model.count = model.count + 1; Command.None }
+        Decrement => { model.count = model.count - 1; Command.None }
+        Reset => { model.count = 0; Command.None }
+    }
+}
+
+// View: renders the UI
+fn counter_view(model: &Counter, frame: &mut Frame) {
+    let areas = Layout.vertical()
+        .constraints(List.new())
+        .split(frame.size());
+
+    // Header block with title
+    let header = Block.new()
+        .title("Counter Demo")
+        .borders(Borders.ALL)
+        .border_type(BorderType.Rounded);
+
+    // Counter display
+    let counter_text = Paragraph.new()
+        .text(List.new())
+        .block(Block.new().borders(Borders.ALL));
+
+    // Status bar
+    let status = Paragraph.new()
+        .text(List.new());
+}
+
+// Event handler: maps terminal events to app messages
+fn counter_handle_event(event: Event) -> Maybe<CounterMsg> {
+    match event {
+        Event.Key(ke) => match ke.code {
+            KeyCode.Up => Some(CounterMsg.Increment),
+            KeyCode.Down => Some(CounterMsg.Decrement),
+            KeyCode.Char('r') => Some(CounterMsg.Reset),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn test_counter_logic() {
+    let mut model = Counter { count: 0 };
+
+    // Increment 3 times
+    counter_update(&mut model, CounterMsg.Increment);
+    counter_update(&mut model, CounterMsg.Increment);
+    counter_update(&mut model, CounterMsg.Increment);
+    assert_eq(model.count, 3);
+
+    // Decrement once
+    counter_update(&mut model, CounterMsg.Decrement);
+    assert_eq(model.count, 2);
+
+    // Reset
+    counter_update(&mut model, CounterMsg.Reset);
+    assert_eq(model.count, 0);
+}
+
+fn test_event_mapping() {
+    // Up arrow → Increment
+    let up_event = Event.Key(KeyEvent {
+        code: KeyCode.Up,
+        modifiers: Modifiers.NONE,
+        kind: KeyEventKind.Press,
+    });
+    assert(counter_handle_event(up_event).is_some());
+
+    // Down arrow → Decrement
+    let down_event = Event.Key(KeyEvent {
+        code: KeyCode.Down,
+        modifiers: Modifiers.NONE,
+        kind: KeyEventKind.Press,
+    });
+    assert(counter_handle_event(down_event).is_some());
+
+    // 'r' → Reset
+    let r_event = Event.Key(KeyEvent {
+        code: KeyCode.Char('r'),
+        modifiers: Modifiers.NONE,
+        kind: KeyEventKind.Press,
+    });
+    assert(counter_handle_event(r_event).is_some());
+
+    // Mouse → None (not handled)
+    let mouse_event = Event.Mouse(MouseEvent {
+        kind: MouseEventKind.Down(MouseButton.Left),
+        column: 0, row: 0,
+        modifiers: Modifiers.NONE,
+    });
+    assert(counter_handle_event(mouse_event).is_none());
+}
+
+fn test_style_composition() {
+    // Dark theme with custom overrides
+    let theme = Theme.dark();
+    let custom_primary = theme.primary.patch(Style.new().bold());
+    assert(custom_primary.add_modifier.contains(Modifier.BOLD));
+}
+
+fn test_layout_pattern() {
+    let area = Rect.new(0, 0, 80, 24);
+    let (header, body, footer) = header_body_footer(area, 3, 1);
+
+    assert_eq(header.y, 0);
+    assert_eq(header.height, 3);
+    assert(body.height >= 18);
+    assert_eq(footer.height, 1);
+    assert_eq(footer.bottom(), 24);
+}
+
+fn main() {
+    test_counter_logic();
+    test_event_mapping();
+    test_style_composition();
+    test_layout_pattern();
+}

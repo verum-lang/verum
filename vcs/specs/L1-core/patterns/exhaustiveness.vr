@@ -1,0 +1,253 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, exhaustiveness
+//
+// Tests exhaustive pattern matching - patterns that cover all possible values.
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// EXHAUSTIVE: All enum variants covered
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+    }
+}
+
+// EXHAUSTIVE: All Bool values covered
+fn bool_to_text(b: Bool) -> Text {
+    match b {
+        true => "yes",
+        false => "no",
+    }
+}
+
+// EXHAUSTIVE: Maybe with both variants
+fn unwrap_or_default(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        None => 0,
+    }
+}
+
+// EXHAUSTIVE: Result with both variants
+fn result_to_maybe<T, E>(r: Result<T, E>) -> Maybe<T> {
+    match r {
+        Ok(x) => Some(x),
+        Err(_) => None,
+    }
+}
+
+// EXHAUSTIVE: Wildcard covers remaining cases
+fn is_primary(c: Color) -> Bool {
+    match c {
+        Red => true,
+        Blue => true,
+        _ => false,  // Covers Green
+    }
+}
+
+// EXHAUSTIVE: All weekday variants
+fn is_weekday(day: Weekday) -> Bool {
+    match day {
+        Monday => true,
+        Tuesday => true,
+        Wednesday => true,
+        Thursday => true,
+        Friday => true,
+        Saturday => false,
+        Sunday => false,
+    }
+}
+
+// EXHAUSTIVE: Or-pattern covers multiple at once
+fn is_weekend(day: Weekday) -> Bool {
+    match day {
+        Saturday | Sunday => true,
+        Monday | Tuesday | Wednesday | Thursday | Friday => false,
+    }
+}
+
+// EXHAUSTIVE: Tuple with all boolean combinations
+fn bool_pair_to_int(pair: (Bool, Bool)) -> Int {
+    match pair {
+        (true, true) => 3,
+        (true, false) => 2,
+        (false, true) => 1,
+        (false, false) => 0,
+    }
+}
+
+// EXHAUSTIVE: Nested enum
+fn flatten_maybe<T>(mm: Maybe<Maybe<T>>) -> Maybe<T> {
+    match mm {
+        None => None,
+        Some(None) => None,
+        Some(Some(x)) => Some(x),
+    }
+}
+
+// EXHAUSTIVE: ConsList with recursive patterns
+fn list_length<T>(list: ConsList<T>) -> Int {
+    match list {
+        Nil => 0,
+        Cons(_, rest) => 1 + list_length(rest),
+    }
+}
+
+// EXHAUSTIVE: Integer with ranges covering all
+fn classify_sign(n: Int) -> Text {
+    match n {
+        ..0 => "negative",    // -infinity to -1
+        0 => "zero",
+        1.. => "positive",    // 1 to +infinity
+    }
+}
+
+// EXHAUSTIVE: Char with ranges
+fn char_category(c: Char) -> Text {
+    match c {
+        'a'..='z' => "lowercase",
+        'A'..='Z' => "uppercase",
+        '0'..='9' => "digit",
+        _ => "other",
+    }
+}
+
+// EXHAUSTIVE: Struct with wildcard
+fn get_x(p: Point) -> Int {
+    match p {
+        Point { x, .. } => x,
+    }
+}
+
+// EXHAUSTIVE: Mixed enum and literal
+fn maybe_to_default(m: Maybe<Int>) -> Int {
+    match m {
+        Some(0) => 0,
+        Some(n) if n > 0 => n,
+        Some(n) => -n,  // Covers negative
+        None => 0,
+    }
+}
+
+// EXHAUSTIVE: Complex nested exhaustive
+fn process_result_maybe<T, E>(rm: Result<Maybe<T>, E>) -> Maybe<T> {
+    match rm {
+        Ok(Some(x)) => Some(x),
+        Ok(None) => None,
+        Err(_) => None,
+    }
+}
+
+// EXHAUSTIVE: All combinations of two-variant enums
+type AB is
+    | A
+    | B;
+
+fn pair_ab(pair: (AB, AB)) -> Int {
+    match pair {
+        (A, A) => 1,
+        (A, B) => 2,
+        (B, A) => 3,
+        (B, B) => 4,
+    }
+}
+
+// EXHAUSTIVE: Guards that together cover all (with catch-all for type checker)
+fn classify_positive(n: Int) -> Text {
+    match n {
+        x if x < 0 => "negative",
+        x if x == 0 => "zero",
+        x if x > 0 => "positive",
+        _ => unreachable(),  // Unreachable but needed for exhaustiveness
+    }
+}
+
+fn main() {
+    // Color
+    assert(color_name(Red) == "red");
+    assert(color_name(Green) == "green");
+    assert(color_name(Blue) == "blue");
+
+    // Bool
+    assert(bool_to_text(true) == "yes");
+    assert(bool_to_text(false) == "no");
+
+    // Maybe
+    assert(unwrap_or_default(Some(42)) == 42);
+    assert(unwrap_or_default(None) == 0);
+
+    // Result
+    let r_ok: Result<Int, Text> = Ok(42);
+    let r_err: Result<Int, Text> = Err("error");
+    assert(result_to_maybe(r_ok) == Some(42));
+    assert(result_to_maybe(r_err) == None);
+
+    // Primary
+    assert(is_primary(Red) == true);
+    assert(is_primary(Green) == false);
+
+    // Weekday
+    assert(is_weekday(Monday) == true);
+    assert(is_weekday(Sunday) == false);
+
+    // Weekend
+    assert(is_weekend(Saturday) == true);
+    assert(is_weekend(Monday) == false);
+
+    // Bool pair
+    assert(bool_pair_to_int((true, true)) == 3);
+    assert(bool_pair_to_int((false, false)) == 0);
+
+    // Flatten maybe
+    assert(flatten_maybe(Some(Some(42))) == Some(42));
+    assert(flatten_maybe(Some(None)) == None);
+    assert(flatten_maybe(None) == None);
+
+    // ConsList length
+    assert(list_length(Nil) == 0);
+    assert(list_length(Cons(1, Cons(2, Nil))) == 2);
+
+    // Sign classification
+    assert(classify_sign(-5) == "negative");
+    assert(classify_sign(0) == "zero");
+    assert(classify_sign(5) == "positive");
+
+    // Char category
+    assert(char_category('a') == "lowercase");
+    assert(char_category('Z') == "uppercase");
+    assert(char_category('5') == "digit");
+    assert(char_category('!') == "other");
+}

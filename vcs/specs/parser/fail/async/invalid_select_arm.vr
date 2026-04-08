@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, select, arm, error
+// @description: Test invalid select arm without proper syntax
+// @expected-error: E018
+
+async fn test() {
+    select {
+        x
+    }
+}

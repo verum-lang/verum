@@ -1,0 +1,323 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, nesting, stress
+
+// Helper types
+type Nested is A(Nested2) | Other;
+type Nested2 is B(Nested3) | Other;
+type Nested3 is C(Nested4) | Other;
+type Nested4 is D(Nested5) | Other;
+type Nested5 is E(Int) | Other;
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+type Ref<T> is { value: T };
+type Wrapper<T> is { value: T };
+type Container<T> is { data: T };
+type Data is { value: Int };
+type DeepGeneric is List<Maybe<Result<Heap<Ref<Wrapper<Container<Data>>>>>>>;
+type Error is { message: Text };
+type Status is Ready | Pending | Failed(Error);
+type Output is { data: Int };
+type Inner1 is { b: Inner2 };
+type Inner2 is { c: Inner3 };
+type Inner3 is { d: Inner4 };
+type Inner4 is { e: Inner5 };
+type Inner5 is { value: Int };
+type Outer is { a: Inner1 };
+type DeepRefined is Int;
+
+// Helper functions
+fn innermost() { }
+fn a<T>(x: T) -> T { x }
+fn b<T>(x: T) -> T { x }
+fn c<T>(x: T) -> T { x }
+fn d<T>(x: T) -> T { x }
+fn e<T>(x: T) -> T { x }
+fn f<T>(x: T) -> T { x }
+fn g<T>(x: T) -> T { x }
+fn h<T>(x: T) -> T { x }
+fn i<T>(x: T) -> T { x }
+fn j<T>(x: T) -> T { x }
+fn k<T>(x: T) -> T { x }
+fn l<T>(x: T) -> T { x }
+fn m<T>(x: T) -> T { x }
+fn n<T>(x: T) -> T { x }
+fn o<T>(x: T) -> T { x }
+fn p<T>(x: T) -> T { x }
+fn q<T>() -> T { panic("") }
+fn innermost_closure() { }
+fn use<T>(x: T) { }
+fn default() { }
+fn risky() -> Result<Int, Error> { Result.Ok(42) }
+fn level4_recover(e: Error) -> Result<Int, Error> { Result.Ok(0) }
+fn level3_recover(e: Error) -> Result<Int, Error> { Result.Ok(0) }
+fn level2_recover(e: Error) -> Result<Int, Error> { Result.Ok(0) }
+fn level1_recover(e: Error) -> Int { 0 }
+fn handle(e: Error) { }
+fn compute(x: Int) { }
+fn step1(x: Int) -> Int { x }
+fn step2(x: Int) -> Int { x }
+fn step3(x: Int) -> Int { x }
+fn step4(x: Int) -> Int { x }
+fn step5(x: Int) -> Int { x }
+fn step6(x: Int) -> Int { x }
+fn step7(x: Int) -> Int { x }
+fn step8(x: Int) -> Int { x }
+fn step9(x: Int) -> Int { x }
+fn step10(x: Int) -> Int { x }
+fn condition() -> Bool { true }
+fn final_operation() -> Int { 42 }
+fn fetch_a() -> Maybe<Data> { Maybe.Some(Data { value: 1 }) }
+fn fetch_b(x: Data) -> Maybe<Data> { Maybe.Some(x) }
+fn process_data(a: Data, b: Data) -> Maybe<Data> { Maybe.Some(a) }
+fn wait_and_retry(c: Data) -> Maybe<Data> { Maybe.Some(c) }
+// panic is a built-in, no need to define it
+fn compute_inner(x: Int, y: Int, z: Int) { }
+fn compute_all(a: Int, b: Int, c: Int, d: Int, r: Int) { }
+
+fn test_deeply_nested_parentheses() {
+    // Deeply nested parentheses
+    let res = ((((((((((1 + 2))))))))));
+}
+
+// Deeply nested blocks
+fn deep_blocks() {
+    {
+        {
+            {
+                {
+                    {
+                        {
+                            innermost();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn test_deeply_nested_function_calls() {
+    // Deeply nested function calls
+    let value = a(b(c(d(e(f(g(h(i(j(k(l(m(n(o(p(q()))))))))))))))));
+}
+
+fn test_deeply_nested_method_chains() {
+    type Obj is { val: Int };
+    fn make_obj() -> Obj { Obj { val: 0 } }
+    let obj = make_obj();
+
+    // Deeply nested method chains
+    let chained = obj.val + obj.val + obj.val + obj.val + obj.val;
+}
+
+// Deeply nested match expressions
+fn deep_match(x: Nested) -> Int {
+    match x {
+        A(inner) => match inner {
+            B(deeper) => match deeper {
+                C(deepest) => match deepest {
+                    D(value) => match value {
+                        E(final_value) => final_value,
+                        _ => 0,
+                    },
+                    _ => 0,
+                },
+                _ => 0,
+            },
+            _ => 0,
+        },
+        _ => 0,
+    }
+}
+
+// Deeply nested if-else
+fn deep_if(x: Int) -> Text {
+    if x > 100 {
+        if x > 200 {
+            if x > 300 {
+                if x > 400 {
+                    if x > 500 {
+                        "very large"
+                    } else {
+                        "large"
+                    }
+                } else {
+                    "medium-large"
+                }
+            } else {
+                "medium"
+            }
+        } else {
+            "medium-small"
+        }
+    } else {
+        "small"
+    }
+}
+
+// Deeply nested loops
+fn deep_loops() {
+    let n = 10;
+    let m = 10;
+    let p_val = 10;
+    let q_val = 10;
+    let s = 10;
+
+    for i in 0..n {
+        for j in 0..m {
+            for k in 0..p_val {
+                for l in 0..q_val {
+                    for r in 0..s {
+                        compute_all(i, j, k, l, r);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn test_deeply_nested_closures() {
+    // Deeply nested closures - each closure returns the next inner closure
+    // Use unit parameter to avoid || ambiguity
+    let deep_closure = |_: ()| { |_: ()| { |_: ()| { |_: ()| { |_: ()| { |_: ()| { innermost_closure() } } } } } };
+}
+
+fn test_deeply_nested_tuples() {
+    // Deeply nested tuples
+    let deep_tuple: (((((Int, Int), Int), Int), Int), Int) =
+        (((((1, 2), 3), 4), 5), 6);
+}
+
+fn test_deeply_nested_array_indexing() {
+    let matrix = [[[[[[1]]]]]];
+    let a = 0;
+    let b_val = 0;
+    let c_val = 0;
+    let d_val = 0;
+    let e_val = 0;
+    let f_val = 0;
+
+    // Deeply nested array indexing
+    let value = matrix[a][b_val][c_val][d_val][e_val][f_val];
+}
+
+fn test_deeply_nested_patterns() {
+    let opt: Maybe<Maybe<Maybe<Int>>> = Maybe.Some(Maybe.Some(Maybe.Some(42)));
+
+    // Deeply nested patterns
+    match opt {
+        Maybe.Some(Maybe.Some(Maybe.Some(v))) => use(v),
+        _ => default(),
+    };
+}
+
+fn test_deeply_nested_type_annotations() {
+    fn outer_fn(f: fn(fn(fn(fn(Int) -> Int) -> Int) -> Int) -> Int) -> Int { 0 }
+
+    // Deeply nested type annotations
+    let complex: fn(fn(fn(fn(Int) -> Int) -> Int) -> Int) -> Int = outer_fn;
+}
+
+// Deeply nested try blocks
+fn deep_try() -> Result<Int, Error> {
+    try {
+        try {
+            try {
+                try {
+                    risky()?
+                } recover {
+                    e => level4_recover(e)?
+                }
+            } recover {
+                e => level3_recover(e)?
+            }
+        } recover {
+            e => level2_recover(e)?
+        }
+    } recover {
+        e => level1_recover(e)
+    }
+}
+
+// Combined deep nesting
+fn ultimate_nesting() {
+    let condition_val = true;
+    let value: Maybe<Int> = Maybe.Some(10);
+    let a = 1;
+    let b_val = 2;
+    let c_val = 3;
+
+    if condition_val {
+        match value {
+            Maybe.Some(x) => {
+                for i in 0..x {
+                    try {
+                        (|_: ()| { compute_inner(((a + b_val) * c_val), 0, 0); })();
+                    } recover {
+                        e => handle(e)
+                    }
+                }
+            }
+            Maybe.None => {}
+        }
+    }
+}
+
+fn test_deeply_nested_pipeline() {
+    let data = 42;
+
+    // Deeply nested pipeline operators
+    let res = data
+        |> step1
+        |> step2
+        |> step3
+        |> step4
+        |> step5
+        |> step6
+        |> step7
+        |> step8
+        |> step9
+        |> step10;
+}
+
+fn test_deeply_nested_ternary() {
+    let a = true;
+    let b_val = true;
+    let c_val = true;
+    let d_val = true;
+    let e_val = true;
+
+    // Deeply nested ternary-like if expressions
+    let value = if a { if b_val { if c_val { if d_val { if e_val { 5 } else { 4 } } else { 3 } } else { 2 } } else { 1 } } else { 0 };
+}
+
+// Deeply nested async/await
+async fn deep_async() -> Int {
+    async {
+        async {
+            async {
+                async {
+                    final_operation()
+                }.await
+            }.await
+        }.await
+    }.await
+}
+
+fn test_deeply_nested_struct_literals() {
+    // Deeply nested struct literals - built step by step
+    let inner5 = Inner5 { value: 42 };
+    let inner4 = Inner4 { e: inner5 };
+    let inner3 = Inner3 { d: inner4 };
+    let inner2 = Inner2 { c: inner3 };
+    let inner1 = Inner1 { b: inner2 };
+    let nested_struct = Outer { a: inner1 };
+}
+
+fn test_deeply_nested_array_literals() {
+    // Deeply nested array literals
+    let nested_array = [[[[[[1, 2], [3, 4]], [[5, 6], [7, 8]]], [[[9, 10], [11, 12]], [[13, 14], [15, 16]]]]]];
+}

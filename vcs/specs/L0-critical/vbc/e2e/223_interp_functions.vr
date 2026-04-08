@@ -1,0 +1,181 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, functions, calls
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: function definitions, calls, return values,
+// multiple parameters (up to 6), nested calls
+
+// =============================================================================
+// Basic function definitions and calls
+// =============================================================================
+
+fn identity(x: Int) -> Int {
+    x
+}
+
+fn constant_42() -> Int {
+    42
+}
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn test_basic_functions() {
+    assert_eq(identity(0), 0);
+    assert_eq(identity(42), 42);
+    assert_eq(identity(-7), -7);
+    assert_eq(constant_42(), 42);
+    assert_eq(add(3, 4), 7);
+    assert_eq(add(0, 0), 0);
+    assert_eq(add(-5, 5), 0);
+}
+
+// =============================================================================
+// Multiple parameters
+// =============================================================================
+
+fn add3(a: Int, b: Int, c: Int) -> Int {
+    a + b + c
+}
+
+fn add4(a: Int, b: Int, c: Int, d: Int) -> Int {
+    a + b + c + d
+}
+
+fn add5(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
+    a + b + c + d + e
+}
+
+fn add6(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Int {
+    a + b + c + d + e + f
+}
+
+fn test_multi_params() {
+    assert_eq(add3(1, 2, 3), 6);
+    assert_eq(add4(1, 2, 3, 4), 10);
+    assert_eq(add5(1, 2, 3, 4, 5), 15);
+    assert_eq(add6(1, 2, 3, 4, 5, 6), 21);
+}
+
+fn test_multi_params_large_values() {
+    assert_eq(add3(100, 200, 300), 600);
+    assert_eq(add4(1000, 2000, 3000, 4000), 10000);
+    assert_eq(add6(10, 20, 30, 40, 50, 60), 210);
+}
+
+// =============================================================================
+// Return values
+// =============================================================================
+
+fn max_of(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn min_of(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn abs_val(n: Int) -> Int {
+    if n < 0 { -n } else { n }
+}
+
+fn test_return_values() {
+    assert_eq(max_of(3, 7), 7);
+    assert_eq(max_of(10, -5), 10);
+    assert_eq(max_of(5, 5), 5);
+    assert_eq(min_of(3, 7), 3);
+    assert_eq(min_of(10, -5), -5);
+    assert_eq(abs_val(5), 5);
+    assert_eq(abs_val(-5), 5);
+    assert_eq(abs_val(0), 0);
+}
+
+// =============================================================================
+// Nested function calls
+// =============================================================================
+
+fn double(n: Int) -> Int {
+    n * 2
+}
+
+fn triple(n: Int) -> Int {
+    n * 3
+}
+
+fn square(n: Int) -> Int {
+    n * n
+}
+
+fn test_nested_calls() {
+    // double(triple(2)) = double(6) = 12
+    assert_eq(double(triple(2)), 12);
+    // triple(double(2)) = triple(4) = 12
+    assert_eq(triple(double(2)), 12);
+    // square(double(3)) = square(6) = 36
+    assert_eq(square(double(3)), 36);
+    // double(square(3)) = double(9) = 18
+    assert_eq(double(square(3)), 18);
+    // add(double(3), triple(4)) = add(6, 12) = 18
+    assert_eq(add(double(3), triple(4)), 18);
+}
+
+fn test_deeply_nested_calls() {
+    // double(double(double(1))) = 2 -> 4 -> 8
+    assert_eq(double(double(double(1))), 8);
+    // identity(identity(identity(42))) = 42
+    assert_eq(identity(identity(identity(42))), 42);
+}
+
+// =============================================================================
+// Functions calling functions
+// =============================================================================
+
+fn sum_of_squares(a: Int, b: Int) -> Int {
+    square(a) + square(b)
+}
+
+fn hypotenuse_squared(a: Int, b: Int) -> Int {
+    sum_of_squares(a, b)
+}
+
+fn test_functions_calling_functions() {
+    assert_eq(sum_of_squares(3, 4), 25);
+    assert_eq(sum_of_squares(0, 5), 25);
+    assert_eq(hypotenuse_squared(3, 4), 25);
+    assert_eq(hypotenuse_squared(5, 12), 169);
+}
+
+// =============================================================================
+// Functions with local variables
+// =============================================================================
+
+fn compute(x: Int, y: Int) -> Int {
+    let sum = x + y;
+    let product = x * y;
+    let diff = x - y;
+    sum + product + diff
+}
+
+fn test_functions_with_locals() {
+    // compute(3, 2) = (3+2) + (3*2) + (3-2) = 5 + 6 + 1 = 12
+    assert_eq(compute(3, 2), 12);
+    // compute(5, 5) = 10 + 25 + 0 = 35
+    assert_eq(compute(5, 5), 35);
+}
+
+fn main() -> Int {
+    test_basic_functions();
+    test_multi_params();
+    test_multi_params_large_values();
+    test_return_values();
+    test_nested_calls();
+    test_deeply_nested_calls();
+    test_functions_calling_functions();
+    test_functions_with_locals();
+    print("[OK] 223_interp_functions");
+    0
+}

@@ -1,0 +1,189 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, string, first, last, swap, is_empty, repeat, parse_int
+// @expected-exit: 0
+
+// Test: Newly wired methods — List first/last/swap, Text is_empty/repeat/parse_int
+
+fn test_first_last() -> Int {
+    let mut arr = List.new();
+    arr.push(10);
+    arr.push(20);
+    arr.push(30);
+    match arr.first() {
+        Some(f) => {
+            if (f != 10) {
+                print(f"FAIL first: {f}");
+                return 1;
+            }
+        }
+        None => {
+            print("FAIL first: got None");
+            return 1;
+        }
+    }
+    match arr.last() {
+        Some(l) => {
+            if (l != 30) {
+                print(f"FAIL last: {l}");
+                return 1;
+            }
+        }
+        None => {
+            print("FAIL last: got None");
+            return 1;
+        }
+    }
+    0
+}
+
+fn test_swap() -> Int {
+    let mut arr = List.new();
+    arr.push(10);
+    arr.push(20);
+    arr.push(30);
+
+    arr.swap(0, 2);
+    if (arr[0] != 30) {
+        print(f"FAIL swap[0]: {arr[0]}");
+        return 1;
+    }
+    if (arr[2] != 10) {
+        print(f"FAIL swap[2]: {arr[2]}");
+        return 1;
+    }
+    arr.swap(0, 2);
+    if (arr[0] != 10) {
+        print(f"FAIL swap-back[0]: {arr[0]}");
+        return 1;
+    }
+    arr.swap(1, 1);
+    if (arr[1] != 20) {
+        print(f"FAIL swap-self: {arr[1]}");
+        return 1;
+    }
+    0
+}
+
+fn test_text_methods() -> Int {
+    let empty = "";
+    let notempty = "hello";
+    if (empty.is_empty() != true) {
+        print("FAIL is_empty(empty) should be true");
+        return 1;
+    }
+    if (notempty.is_empty() != false) {
+        print("FAIL is_empty(notempty) should be false");
+        return 1;
+    }
+
+    let star = "*";
+    let stars = star.repeat(5);
+    if (stars != "*****") {
+        print(f"FAIL repeat 5: '{stars}'");
+        return 1;
+    }
+    let ab = "ab";
+    let ababab = ab.repeat(3);
+    if (ababab != "ababab") {
+        print(f"FAIL repeat 3: '{ababab}'");
+        return 1;
+    }
+    let once = star.repeat(1);
+    if (once != "*") {
+        print(f"FAIL repeat 1: '{once}'");
+        return 1;
+    }
+
+    let dash = "-";
+    let divider = dash.repeat(20);
+    if (divider.contains("----") != true) {
+        print("FAIL repeat-contains");
+        return 1;
+    }
+    if (divider.len() != 20) {
+        print(f"FAIL repeat-len: {divider.len()}");
+        return 1;
+    }
+
+    let whitespace = "   ";
+    let trimmed = whitespace.trim();
+    if (trimmed.is_empty() != true) {
+        print("FAIL trim-is_empty");
+        return 1;
+    }
+    0
+}
+
+fn test_sorted_first_last() -> Int {
+    let mut nums = List.new();
+    nums.push(50);
+    nums.push(10);
+    nums.push(30);
+    nums.push(20);
+    nums.push(40);
+    nums.sort();
+    match nums.first() {
+        Some(f) => {
+            if (f != 10) {
+                print(f"FAIL sorted first: {f}");
+                return 1;
+            }
+        }
+        None => { return 1; }
+    }
+    match nums.last() {
+        Some(l) => {
+            if (l != 50) {
+                print(f"FAIL sorted last: {l}");
+                return 1;
+            }
+        }
+        None => { return 1; }
+    }
+    0
+}
+
+fn test_selection_sort() -> Int {
+    let mut data = List.new();
+    data.push(5);
+    data.push(1);
+    data.push(4);
+    data.push(2);
+    data.push(3);
+    let mut i = 0;
+    while (i < data.len()) {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while (j < data.len()) {
+            if (data[j] < data[min_idx]) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if (min_idx != i) {
+            data.swap(i, min_idx);
+        }
+        i = i + 1;
+    }
+    if (data[0] != 1) {
+        print(f"FAIL sel-sort[0]: {data[0]}");
+        return 1;
+    }
+    if (data[4] != 5) {
+        print(f"FAIL sel-sort[4]: {data[4]}");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    if (test_first_last() != 0) { return 1; }
+    if (test_swap() != 0) { return 1; }
+    if (test_text_methods() != 0) { return 1; }
+    if (test_sorted_first_last() != 0) { return 1; }
+    if (test_selection_sort() != 0) { return 1; }
+    print("918_new_methods: PASS");
+    0
+}

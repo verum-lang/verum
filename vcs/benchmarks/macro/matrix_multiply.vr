@@ -1,0 +1,307 @@
+// @test: benchmark
+// @tier: macro
+// @level: L4
+// @expected-performance: > 50 GFLOPS (optimized), > 200 GFLOPS (parallel)
+// @tags: matrix, linear-algebra, simd, performance
+
+/// Matrix Multiplication Benchmark (Realistic Workloads)
+///
+/// Tests matrix operations common in:
+/// - Machine learning
+/// - Scientific computing
+/// - Graphics processing
+/// - Signal processing
+
+module benchmarks.macro.matrix_multiply
+
+using [Benchmark, Matrix, Linalg]
+
+/// Dense matrix multiplication - ML inference size
+fn benchmark_matrix_ml_inference() {
+    // Typical sizes for neural network layers
+    let batch = 64;
+    let input_dim = 768;
+    let hidden_dim = 3072;
+    let output_dim = 768;
+
+    let input = Matrix.randn<Float>([batch, input_dim]);
+    let weights1 = Matrix.randn<Float>([input_dim, hidden_dim]);
+    let weights2 = Matrix.randn<Float>([hidden_dim, output_dim]);
+
+    for _ in 0..100 {
+        // Forward pass
+        let hidden = input.matmul(&weights1);
+        let output = hidden.matmul(&weights2);
+        let _ = output;
+    }
+}
+
+/// Dense matrix multiplication - ML training size
+fn benchmark_matrix_ml_training() {
+    let batch = 256;
+    let seq_len = 512;
+    let hidden = 768;
+    let heads = 12;
+    let head_dim = hidden / heads;
+
+    // Attention matrices
+    let query = Matrix.randn<Float>([batch * heads, seq_len, head_dim]);
+    let key = Matrix.randn<Float>([batch * heads, head_dim, seq_len]);
+
+    for _ in 0..20 {
+        // Attention scores: Q @ K^T
+        let scores = query.bmm(&key);  // [batch*heads, seq_len, seq_len]
+        let _ = scores;
+    }
+}
+
+/// Sparse matrix multiplication
+fn benchmark_matrix_sparse_multiply() {
+    // Create sparse matrices (10% non-zero)
+    let n = 5000;
+    let sparsity = 0.1;
+
+    let a = SparseMatrix.random<Float>([n, n], sparsity);
+    let b = SparseMatrix.random<Float>([n, n], sparsity);
+
+    for _ in 0..50 {
+        let c = a.sparse_matmul(&b);
+        let _ = c.nnz();  // Number of non-zeros
+    }
+}
+
+/// Sparse-dense multiplication
+fn benchmark_matrix_sparse_dense() {
+    let n = 10000;
+    let sparsity = 0.01;  // 1% non-zero
+
+    let sparse = SparseMatrix.random<Float>([n, n], sparsity);
+    let dense = Matrix.randn<Float>([n, 64]);
+
+    for _ in 0..100 {
+        let result = sparse.spmm(&dense);  // Sparse @ Dense
+        let _ = result;
+    }
+}
+
+/// Block matrix multiplication
+fn benchmark_matrix_blocked() {
+    let n = 2048;
+    let block_size = 64;
+
+    let a = Matrix.randn<Float>([n, n]);
+    let b = Matrix.randn<Float>([n, n]);
+
+    for _ in 0..10 {
+        let c = a.blocked_matmul(&b, block_size);
+        let _ = c;
+    }
+}
+
+/// Strassen's algorithm for large matrices
+fn benchmark_matrix_strassen() {
+    let n = 4096;
+
+    let a = Matrix.randn<Float>([n, n]);
+    let b = Matrix.randn<Float>([n, n]);
+
+    for _ in 0..5 {
+        let c = a.strassen(&b);
+        let _ = c;
+    }
+}
+
+/// Parallel matrix multiplication
+fn benchmark_matrix_parallel() {
+    let n = 2048;
+
+    let a = Matrix.randn<Float>([n, n]);
+    let b = Matrix.randn<Float>([n, n]);
+
+    for _ in 0..10 {
+        let c = a.par_matmul(&b);  // Uses all available cores
+        let _ = c;
+    }
+}
+
+/// Matrix chain multiplication (optimal ordering)
+fn benchmark_matrix_chain() {
+    // Different sized matrices in a chain
+    let matrices = list![
+        Matrix.randn<Float>([100, 500]),
+        Matrix.randn<Float>([500, 50]),
+        Matrix.randn<Float>([50, 200]),
+        Matrix.randn<Float>([200, 10]),
+    ];
+
+    for _ in 0..1000 {
+        // Automatically finds optimal multiplication order
+        let result = Matrix.chain_multiply(&matrices);
+        let _ = result;
+    }
+}
+
+/// Matrix-vector multiplication (GEMV)
+fn benchmark_matrix_gemv() {
+    let n = 10000;
+
+    let a = Matrix.randn<Float>([n, n]);
+    let x = Vector.randn<Float>([n]);
+
+    for _ in 0..500 {
+        let y = a.mv(&x);
+        let _ = y;
+    }
+}
+
+/// Rank-k update (SYRK)
+fn benchmark_matrix_syrk() {
+    let n = 1000;
+    let k = 100;
+
+    let a = Matrix.randn<Float>([n, k]);
+
+    for _ in 0..100 {
+        // C = A @ A^T (symmetric rank-k update)
+        let c = a.syrk();
+        let _ = c;
+    }
+}
+
+/// Triangular solve (TRSM)
+fn benchmark_matrix_trsm() {
+    let n = 1000;
+
+    let lower = Matrix.randn<Float>([n, n]).tril();  // Lower triangular
+    let b = Matrix.randn<Float>([n, 100]);
+
+    for _ in 0..100 {
+        // Solve L @ X = B
+        let x = lower.solve_triangular(&b);
+        let _ = x;
+    }
+}
+
+/// Cholesky factorization
+fn benchmark_matrix_cholesky() {
+    let n = 1000;
+
+    // Create positive definite matrix
+    let a = Matrix.randn<Float>([n, n]);
+    let spd = a.matmul(&a.t()) + Matrix.eye<Float>(n) * n as Float;
+
+    for _ in 0..50 {
+        let chol = spd.cholesky();
+        let _ = chol;
+    }
+}
+
+/// LU decomposition
+fn benchmark_matrix_lu() {
+    let n = 1000;
+
+    let a = Matrix.randn<Float>([n, n]);
+
+    for _ in 0..50 {
+        let (l, u, p) = a.lu();
+        let _ = (l, u, p);
+    }
+}
+
+/// QR decomposition
+fn benchmark_matrix_qr() {
+    let m = 2000;
+    let n = 1000;
+
+    let a = Matrix.randn<Float>([m, n]);
+
+    for _ in 0..20 {
+        let (q, r) = a.qr();
+        let _ = (q, r);
+    }
+}
+
+/// SVD (Singular Value Decomposition)
+fn benchmark_matrix_svd() {
+    let m = 500;
+    let n = 300;
+
+    let a = Matrix.randn<Float>([m, n]);
+
+    for _ in 0..10 {
+        let (u, s, vt) = a.svd();
+        let _ = (u, s, vt);
+    }
+}
+
+/// Eigenvalue decomposition
+fn benchmark_matrix_eig() {
+    let n = 500;
+
+    let a = Matrix.randn<Float>([n, n]);
+    let symmetric = (a + a.t()) / 2.0;
+
+    for _ in 0..10 {
+        let (eigenvalues, eigenvectors) = symmetric.eig();
+        let _ = (eigenvalues, eigenvectors);
+    }
+}
+
+/// Matrix inverse
+fn benchmark_matrix_inverse() {
+    let n = 1000;
+
+    let a = Matrix.randn<Float>([n, n]);
+
+    for _ in 0..20 {
+        let inv = a.inv();
+        let _ = inv;
+    }
+}
+
+/// Least squares solver
+fn benchmark_matrix_lstsq() {
+    let m = 2000;
+    let n = 500;
+
+    let a = Matrix.randn<Float>([m, n]);
+    let b = Vector.randn<Float>([m]);
+
+    for _ in 0..50 {
+        // Solve min ||Ax - b||^2
+        let x = a.lstsq(&b);
+        let _ = x;
+    }
+}
+
+/// Convolution (as matrix multiplication)
+fn benchmark_matrix_conv_as_matmul() {
+    // Im2col + GEMM approach for convolution
+    let batch = 32;
+    let channels_in = 64;
+    let channels_out = 128;
+    let kernel_size = 3;
+    let spatial = 56;
+
+    let patches = Matrix.randn<Float>([batch * spatial * spatial, channels_in * kernel_size * kernel_size]);
+    let kernel = Matrix.randn<Float>([channels_in * kernel_size * kernel_size, channels_out]);
+
+    for _ in 0..50 {
+        let output = patches.matmul(&kernel);
+        let _ = output;
+    }
+}
+
+/// Batched small matrix multiplication (many small matrices)
+fn benchmark_matrix_batched_small() {
+    let batch = 10000;
+    let n = 4;
+
+    let a = Matrix.randn<Float>([batch, n, n]);
+    let b = Matrix.randn<Float>([batch, n, n]);
+
+    for _ in 0..100 {
+        let c = a.bmm(&b);
+        let _ = c;
+    }
+}

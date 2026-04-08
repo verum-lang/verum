@@ -1,0 +1,129 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, graph, algorithms, dfs, bfs
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for graph algorithms on small fixed-size graphs
+
+// Adjacency matrix for 6 nodes (stored as 36 ints in a flat struct)
+// adj[i*6+j] = 1 means edge from i to j
+type Graph6 is {
+    e00: Int, e01: Int, e02: Int, e03: Int, e04: Int, e05: Int,
+    e10: Int, e11: Int, e12: Int, e13: Int, e14: Int, e15: Int,
+    e20: Int, e21: Int, e22: Int, e23: Int, e24: Int, e25: Int,
+    e30: Int, e31: Int, e32: Int, e33: Int, e34: Int, e35: Int,
+    e40: Int, e41: Int, e42: Int, e43: Int, e44: Int, e45: Int,
+    e50: Int, e51: Int, e52: Int, e53: Int, e54: Int, e55: Int
+};
+
+fn edge(g: Graph6, i: Int, j: Int) -> Int {
+    let idx = i * 6 + j;
+    if idx == 0 { g.e00 } else if idx == 1 { g.e01 }
+    else if idx == 2 { g.e02 } else if idx == 3 { g.e03 }
+    else if idx == 4 { g.e04 } else if idx == 5 { g.e05 }
+    else if idx == 6 { g.e10 } else if idx == 7 { g.e11 }
+    else if idx == 8 { g.e12 } else if idx == 9 { g.e13 }
+    else if idx == 10 { g.e14 } else if idx == 11 { g.e15 }
+    else if idx == 12 { g.e20 } else if idx == 13 { g.e21 }
+    else if idx == 14 { g.e22 } else if idx == 15 { g.e23 }
+    else if idx == 16 { g.e24 } else if idx == 17 { g.e25 }
+    else if idx == 18 { g.e30 } else if idx == 19 { g.e31 }
+    else if idx == 20 { g.e32 } else if idx == 21 { g.e33 }
+    else if idx == 22 { g.e34 } else if idx == 23 { g.e35 }
+    else if idx == 24 { g.e40 } else if idx == 25 { g.e41 }
+    else if idx == 26 { g.e42 } else if idx == 27 { g.e43 }
+    else if idx == 28 { g.e44 } else if idx == 29 { g.e45 }
+    else if idx == 30 { g.e50 } else if idx == 31 { g.e51 }
+    else if idx == 32 { g.e52 } else if idx == 33 { g.e53 }
+    else if idx == 34 { g.e54 } else { g.e55 }
+}
+
+fn count_edges(g: Graph6) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 6 {
+        let mut j = 0;
+        while j < 6 {
+            if edge(g, i, j) == 1 { count = count + 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn out_degree(g: Graph6, node: Int) -> Int {
+    let mut count = 0;
+    let mut j = 0;
+    while j < 6 {
+        if edge(g, node, j) == 1 { count = count + 1; }
+        j = j + 1;
+    }
+    count
+}
+
+fn in_degree(g: Graph6, node: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 6 {
+        if edge(g, i, node) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn is_symmetric(g: Graph6) -> Bool {
+    let mut i = 0;
+    while i < 6 {
+        let mut j = 0;
+        while j < 6 {
+            if edge(g, i, j) != edge(g, j, i) { return false; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn main() -> Int {
+    // Undirected graph: 0-1, 1-2, 2-3, 3-4, 4-5, 0-5 (a cycle)
+    let g = Graph6 {
+        e00: 0, e01: 1, e02: 0, e03: 0, e04: 0, e05: 1,
+        e10: 1, e11: 0, e12: 1, e13: 0, e14: 0, e15: 0,
+        e20: 0, e21: 1, e22: 0, e23: 1, e24: 0, e25: 0,
+        e30: 0, e31: 0, e32: 1, e33: 0, e34: 1, e35: 0,
+        e40: 0, e41: 0, e42: 0, e43: 1, e44: 0, e45: 1,
+        e50: 1, e51: 0, e52: 0, e53: 0, e54: 1, e55: 0
+    };
+
+    // Each node has degree 2 (cycle graph)
+    assert_eq(out_degree(g, 0), 2);
+    assert_eq(out_degree(g, 3), 2);
+    assert_eq(in_degree(g, 0), 2);
+
+    // Total edges: 6 undirected = 12 directed
+    assert_eq(count_edges(g), 12);
+
+    // Symmetric (undirected)
+    assert_eq(is_symmetric(g), true);
+
+    // Directed graph: 0->1, 1->2, 2->0 (triangle)
+    let dg = Graph6 {
+        e00: 0, e01: 1, e02: 0, e03: 0, e04: 0, e05: 0,
+        e10: 0, e11: 0, e12: 1, e13: 0, e14: 0, e15: 0,
+        e20: 1, e21: 0, e22: 0, e23: 0, e24: 0, e25: 0,
+        e30: 0, e31: 0, e32: 0, e33: 0, e34: 0, e35: 0,
+        e40: 0, e41: 0, e42: 0, e43: 0, e44: 0, e45: 0,
+        e50: 0, e51: 0, e52: 0, e53: 0, e54: 0, e55: 0
+    };
+
+    assert_eq(count_edges(dg), 3);
+    assert_eq(out_degree(dg, 0), 1);
+    assert_eq(in_degree(dg, 0), 1);
+    assert_eq(is_symmetric(dg), false);
+
+    print("[OK] 191_graph_algorithms_aot");
+    0
+}

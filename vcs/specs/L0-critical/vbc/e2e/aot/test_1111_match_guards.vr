@@ -1,0 +1,116 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: match, guards, if-guard, pattern-matching
+// @description: Test match with guard clauses
+
+type Shape is Circle(Int) | Rect(Int, Int) | Triangle(Int, Int, Int);
+
+fn classify_number(n: Int) -> Int {
+    match n {
+        0 => 0,
+        x if x > 0 && x < 10 => 1,
+        x if x >= 10 && x < 100 => 2,
+        x if x >= 100 => 3,
+        _ => -1,
+    }
+}
+
+fn test_number_classify() -> Int {
+    if classify_number(0) != 0 {
+        print("FAIL: classify(0)");
+        return 1;
+    }
+    if classify_number(5) != 1 {
+        print("FAIL: classify(5)");
+        return 1;
+    }
+    if classify_number(42) != 2 {
+        print("FAIL: classify(42)");
+        return 1;
+    }
+    if classify_number(200) != 3 {
+        print("FAIL: classify(200)");
+        return 1;
+    }
+    if classify_number(-5) != -1 {
+        print("FAIL: classify(-5)");
+        return 1;
+    }
+    print("  number_classify: OK");
+    0
+}
+
+fn shape_area_approx(s: Shape) -> Int {
+    match s {
+        Circle(r) if r > 0 => r * r * 3,
+        Circle(_) => 0,
+        Rect(w, h) if w > 0 && h > 0 => w * h,
+        Rect(_, _) => 0,
+        Triangle(a, b, c) if a > 0 && b > 0 && c > 0 => {
+            // Approximate: base * height / 2 ~ a * b / 2
+            a * b / 2
+        },
+        Triangle(_, _, _) => 0,
+    }
+}
+
+fn test_shape_guards() -> Int {
+    let c = Circle(5);
+    let area = shape_area_approx(c);
+    if area != 75 {
+        print(f"FAIL shape_guards: circle area={area}, expected 75");
+        return 1;
+    }
+    let r = Rect(4, 6);
+    let rarea = shape_area_approx(r);
+    if rarea != 24 {
+        print(f"FAIL shape_guards: rect area={rarea}, expected 24");
+        return 1;
+    }
+    let zero_circle = Circle(0);
+    let za = shape_area_approx(zero_circle);
+    if za != 0 {
+        print(f"FAIL shape_guards: zero circle area={za}, expected 0");
+        return 1;
+    }
+    print("  shape_guards: OK");
+    0
+}
+
+fn test_nested_guard() -> Int {
+    let values = [10, 25, 50, 75, 100];
+    let mut count_medium = 0;
+    let mut i = 0;
+    while i < 5 {
+        let v = values[i];
+        match v {
+            x if x >= 20 && x <= 80 => {
+                count_medium = count_medium + 1;
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+    if count_medium != 3 {
+        print(f"FAIL nested_guard: count={count_medium}, expected 3");
+        return 1;
+    }
+    print("  nested_guard: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Match Guard Tests:");
+    let mut failures = 0;
+    failures = failures + test_number_classify();
+    failures = failures + test_shape_guards();
+    failures = failures + test_nested_guard();
+
+    if failures == 0 {
+        print("All match guard tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

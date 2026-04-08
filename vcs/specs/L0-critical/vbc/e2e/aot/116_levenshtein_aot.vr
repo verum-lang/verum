@@ -1,0 +1,397 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, levenshtein, edit-distance, dynamic-programming, strings
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT Levenshtein edit distance using DP on flat 2D grid (record-based arrays)
+
+// Represent a "string" as up to 8 integer character codes
+type Str8 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    len: Int
+};
+
+fn str_get(s: Str8, i: Int) -> Int {
+    if i == 0 { s.c0 }
+    else if i == 1 { s.c1 }
+    else if i == 2 { s.c2 }
+    else if i == 3 { s.c3 }
+    else if i == 4 { s.c4 }
+    else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 }
+    else { s.c7 }
+}
+
+fn str_empty() -> Str8 {
+    Str8 { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 0 }
+}
+
+// Row of up to 9 elements (for strings of length 0..8, we need indices 0..8)
+type Row9 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int
+};
+
+fn row_get(r: Row9, i: Int) -> Int {
+    if i == 0 { r.a0 }
+    else if i == 1 { r.a1 }
+    else if i == 2 { r.a2 }
+    else if i == 3 { r.a3 }
+    else if i == 4 { r.a4 }
+    else if i == 5 { r.a5 }
+    else if i == 6 { r.a6 }
+    else if i == 7 { r.a7 }
+    else { r.a8 }
+}
+
+fn row_set(r: Row9, i: Int, v: Int) -> Row9 {
+    Row9 {
+        a0: if i == 0 { v } else { r.a0 },
+        a1: if i == 1 { v } else { r.a1 },
+        a2: if i == 2 { v } else { r.a2 },
+        a3: if i == 3 { v } else { r.a3 },
+        a4: if i == 4 { v } else { r.a4 },
+        a5: if i == 5 { v } else { r.a5 },
+        a6: if i == 6 { v } else { r.a6 },
+        a7: if i == 7 { v } else { r.a7 },
+        a8: if i == 8 { v } else { r.a8 }
+    }
+}
+
+fn row_zero() -> Row9 {
+    Row9 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, a8: 0 }
+}
+
+fn min2(a: Int, b: Int) -> Int {
+    if a < b { a } else { b }
+}
+
+fn min3(a: Int, b: Int, c: Int) -> Int {
+    min2(a, min2(b, c))
+}
+
+// Compute Levenshtein edit distance between two Str8s
+// Uses rolling two-row DP approach
+// dp[i][j] = edit distance of s[0..i] and t[0..j]
+fn levenshtein(s: Str8, t: Str8) -> Int {
+    let n = s.len;
+    let m = t.len;
+
+    // Initialize previous row: dp[0][j] = j (inserting j chars)
+    let mut prev = row_zero();
+    let mut j = 0;
+    while j <= m {
+        prev = row_set(prev, j, j);
+        j = j + 1;
+    }
+
+    // Fill row by row
+    let mut i = 1;
+    while i <= n {
+        let mut curr = row_zero();
+        curr = row_set(curr, 0, i);  // dp[i][0] = i (deleting i chars)
+
+        let mut j2 = 1;
+        while j2 <= m {
+            let cost = if str_get(s, i - 1) == str_get(t, j2 - 1) { 0 } else { 1 };
+            let del = row_get(prev, j2) + 1;
+            let ins = row_get(curr, j2 - 1) + 1;
+            let sub = row_get(prev, j2 - 1) + cost;
+            curr = row_set(curr, j2, min3(del, ins, sub));
+            j2 = j2 + 1;
+        }
+
+        prev = curr;
+        i = i + 1;
+    }
+
+    row_get(prev, m)
+}
+
+// Full DP table for reconstruction (9 rows of Row9)
+type DPTable is {
+    r0: Row9, r1: Row9, r2: Row9, r3: Row9,
+    r4: Row9, r5: Row9, r6: Row9, r7: Row9,
+    r8: Row9
+};
+
+fn dp_get_row(t: DPTable, i: Int) -> Row9 {
+    if i == 0 { t.r0 }
+    else if i == 1 { t.r1 }
+    else if i == 2 { t.r2 }
+    else if i == 3 { t.r3 }
+    else if i == 4 { t.r4 }
+    else if i == 5 { t.r5 }
+    else if i == 6 { t.r6 }
+    else if i == 7 { t.r7 }
+    else { t.r8 }
+}
+
+fn dp_set_row(t: DPTable, i: Int, r: Row9) -> DPTable {
+    DPTable {
+        r0: if i == 0 { r } else { t.r0 },
+        r1: if i == 1 { r } else { t.r1 },
+        r2: if i == 2 { r } else { t.r2 },
+        r3: if i == 3 { r } else { t.r3 },
+        r4: if i == 4 { r } else { t.r4 },
+        r5: if i == 5 { r } else { t.r5 },
+        r6: if i == 6 { r } else { t.r6 },
+        r7: if i == 7 { r } else { t.r7 },
+        r8: if i == 8 { r } else { t.r8 }
+    }
+}
+
+// Build full DP table for analysis
+fn levenshtein_table(s: Str8, t: Str8) -> DPTable {
+    let n = s.len;
+    let m = t.len;
+    let z = row_zero();
+    let mut table = DPTable { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z, r8: z };
+
+    // Row 0: dp[0][j] = j
+    let mut r0 = row_zero();
+    let mut j = 0;
+    while j <= m {
+        r0 = row_set(r0, j, j);
+        j = j + 1;
+    }
+    table = dp_set_row(table, 0, r0);
+
+    // Remaining rows
+    let mut i = 1;
+    while i <= n {
+        let prev = dp_get_row(table, i - 1);
+        let mut curr = row_zero();
+        curr = row_set(curr, 0, i);
+
+        let mut j2 = 1;
+        while j2 <= m {
+            let cost = if str_get(s, i - 1) == str_get(t, j2 - 1) { 0 } else { 1 };
+            let del = row_get(prev, j2) + 1;
+            let ins = row_get(curr, j2 - 1) + 1;
+            let sub = row_get(prev, j2 - 1) + cost;
+            curr = row_set(curr, j2, min3(del, ins, sub));
+            j2 = j2 + 1;
+        }
+
+        table = dp_set_row(table, i, curr);
+        i = i + 1;
+    }
+
+    table
+}
+
+// Damerau-Levenshtein: also allows transposition of adjacent characters
+fn damerau_levenshtein(s: Str8, t: Str8) -> Int {
+    let n = s.len;
+    let m = t.len;
+
+    // We need three rows: prev_prev, prev, curr
+    let mut pp = row_zero();  // row i-2
+    let mut prev = row_zero();
+    let mut j = 0;
+    while j <= m {
+        prev = row_set(prev, j, j);
+        j = j + 1;
+    }
+
+    let mut i = 1;
+    while i <= n {
+        let mut curr = row_zero();
+        curr = row_set(curr, 0, i);
+
+        let mut j2 = 1;
+        while j2 <= m {
+            let cost = if str_get(s, i - 1) == str_get(t, j2 - 1) { 0 } else { 1 };
+            let del = row_get(prev, j2) + 1;
+            let ins = row_get(curr, j2 - 1) + 1;
+            let sub = row_get(prev, j2 - 1) + cost;
+            let mut best = min3(del, ins, sub);
+
+            // Transposition
+            if i > 1 && j2 > 1 {
+                if str_get(s, i - 1) == str_get(t, j2 - 2) && str_get(s, i - 2) == str_get(t, j2 - 1) {
+                    let trans = row_get(pp, j2 - 2) + 1;
+                    best = min2(best, trans);
+                }
+            }
+
+            curr = row_set(curr, j2, best);
+            j2 = j2 + 1;
+        }
+
+        pp = prev;
+        prev = curr;
+        i = i + 1;
+    }
+
+    row_get(prev, m)
+}
+
+// Hamming distance: count positions where characters differ (same length only)
+fn hamming(s: Str8, t: Str8) -> Int {
+    let mut dist = 0;
+    let mut i = 0;
+    while i < s.len {
+        if str_get(s, i) != str_get(t, i) {
+            dist = dist + 1;
+        }
+        i = i + 1;
+    }
+    dist
+}
+
+fn main() -> Int {
+    // Encode strings as integer sequences for testing
+    // "kitten" = [107, 105, 116, 116, 101, 110, 0, 0], len=6
+    let kitten = Str8 { c0: 107, c1: 105, c2: 116, c3: 116, c4: 101, c5: 110, c6: 0, c7: 0, len: 6 };
+    // "sitting" = [115, 105, 116, 116, 105, 110, 103, 0], len=7
+    let sitting = Str8 { c0: 115, c1: 105, c2: 116, c3: 116, c4: 105, c5: 110, c6: 103, c7: 0, len: 7 };
+
+    // === Test 1: Classic "kitten" -> "sitting" = 3 ===
+    assert_eq(levenshtein(kitten, sitting), 3);
+
+    // === Test 2: Identical strings = 0 ===
+    assert_eq(levenshtein(kitten, kitten), 0);
+    assert_eq(levenshtein(sitting, sitting), 0);
+
+    // === Test 3: Empty string cases ===
+    let empty = str_empty();
+    assert_eq(levenshtein(empty, empty), 0);
+    assert_eq(levenshtein(kitten, empty), 6);  // delete all 6 chars
+    assert_eq(levenshtein(empty, sitting), 7);  // insert all 7 chars
+
+    // === Test 4: Single char strings ===
+    let a = Str8 { c0: 1, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 1 };
+    let b = Str8 { c0: 2, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 1 };
+    let c = Str8 { c0: 1, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 1 };
+    assert_eq(levenshtein(a, b), 1);   // substitution
+    assert_eq(levenshtein(a, c), 0);   // identical
+    assert_eq(levenshtein(a, empty), 1);
+    assert_eq(levenshtein(empty, a), 1);
+
+    // === Test 5: Symmetry: d(s,t) == d(t,s) ===
+    assert_eq(levenshtein(kitten, sitting), levenshtein(sitting, kitten));
+
+    // === Test 6: "abc" -> "abc" = 0 ===
+    let abc = Str8 { c0: 1, c1: 2, c2: 3, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 3 };
+    assert_eq(levenshtein(abc, abc), 0);
+
+    // === Test 7: "abc" -> "axc" = 1 (one substitution) ===
+    let axc = Str8 { c0: 1, c1: 24, c2: 3, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 3 };
+    assert_eq(levenshtein(abc, axc), 1);
+
+    // === Test 8: "abc" -> "abcd" = 1 (one insertion) ===
+    let abcd = Str8 { c0: 1, c1: 2, c2: 3, c3: 4, c4: 0, c5: 0, c6: 0, c7: 0, len: 4 };
+    assert_eq(levenshtein(abc, abcd), 1);
+
+    // === Test 9: "abcd" -> "abc" = 1 (one deletion) ===
+    assert_eq(levenshtein(abcd, abc), 1);
+
+    // === Test 10: Completely different strings ===
+    let xyz = Str8 { c0: 24, c1: 25, c2: 26, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 3 };
+    assert_eq(levenshtein(abc, xyz), 3);  // all substitutions
+
+    // === Test 11: Triangle inequality: d(a,c) <= d(a,b) + d(b,c) ===
+    let dab = levenshtein(abc, axc);
+    let dbc = levenshtein(axc, xyz);
+    let dac = levenshtein(abc, xyz);
+    assert(dac <= dab + dbc);
+
+    // === Test 12: Full DP table analysis ===
+    // "ab" -> "ba": expected distance 2 (delete+insert, or two substitutions)
+    let ab = Str8 { c0: 1, c1: 2, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    let ba = Str8 { c0: 2, c1: 1, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 2 };
+    assert_eq(levenshtein(ab, ba), 2);
+
+    let table = levenshtein_table(ab, ba);
+    // dp[0][0]=0, dp[0][1]=1, dp[0][2]=2
+    assert_eq(row_get(dp_get_row(table, 0), 0), 0);
+    assert_eq(row_get(dp_get_row(table, 0), 1), 1);
+    assert_eq(row_get(dp_get_row(table, 0), 2), 2);
+    // dp[1][0]=1, dp[2][0]=2
+    assert_eq(row_get(dp_get_row(table, 1), 0), 1);
+    assert_eq(row_get(dp_get_row(table, 2), 0), 2);
+    // dp[2][2] = final answer
+    assert_eq(row_get(dp_get_row(table, 2), 2), 2);
+
+    // === Test 13: Damerau-Levenshtein (transposition) ===
+    // "ab" -> "ba" should be 1 with transposition
+    assert_eq(damerau_levenshtein(ab, ba), 1);
+
+    // Damerau-Levenshtein still works for normal cases
+    assert_eq(damerau_levenshtein(empty, empty), 0);
+    assert_eq(damerau_levenshtein(abc, abc), 0);
+    assert_eq(damerau_levenshtein(abc, axc), 1);
+
+    // "abc" -> "bac" = 1 (transpose first two)
+    let bac = Str8 { c0: 2, c1: 1, c2: 3, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 3 };
+    assert_eq(damerau_levenshtein(abc, bac), 1);
+
+    // "abc" -> "acb" = 1 (transpose last two)
+    let acb = Str8 { c0: 1, c1: 3, c2: 2, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, len: 3 };
+    assert_eq(damerau_levenshtein(abc, acb), 1);
+
+    // Damerau <= Levenshtein always
+    assert(damerau_levenshtein(ab, ba) <= levenshtein(ab, ba));
+    assert(damerau_levenshtein(abc, bac) <= levenshtein(abc, bac));
+
+    // === Test 14: Hamming distance ===
+    assert_eq(hamming(abc, abc), 0);
+    assert_eq(hamming(abc, axc), 1);
+    assert_eq(hamming(abc, xyz), 3);
+
+    // Hamming >= 0 always
+    assert(hamming(abc, abc) >= 0);
+
+    // Hamming of single chars
+    assert_eq(hamming(a, b), 1);
+    assert_eq(hamming(a, c), 0);
+
+    // === Test 15: Longer strings ===
+    // "abcdefgh" -> "abcdefgh" = 0
+    let full = Str8 { c0: 1, c1: 2, c2: 3, c3: 4, c4: 5, c5: 6, c6: 7, c7: 8, len: 8 };
+    assert_eq(levenshtein(full, full), 0);
+
+    // Change last char: distance 1
+    let full2 = Str8 { c0: 1, c1: 2, c2: 3, c3: 4, c4: 5, c5: 6, c6: 7, c7: 9, len: 8 };
+    assert_eq(levenshtein(full, full2), 1);
+
+    // Change all chars: distance 8
+    let allx = Str8 { c0: 11, c1: 12, c2: 13, c3: 14, c4: 15, c5: 16, c6: 17, c7: 18, len: 8 };
+    assert_eq(levenshtein(full, allx), 8);
+
+    // === Test 16: Prefix/suffix distances ===
+    // "abc" vs "abcde" (len 3 vs 5): just 2 insertions
+    let abcde = Str8 { c0: 1, c1: 2, c2: 3, c3: 4, c4: 5, c5: 0, c6: 0, c7: 0, len: 5 };
+    assert_eq(levenshtein(abc, abcde), 2);
+
+    // === Test 17: Distance bounds ===
+    // d(s,t) <= max(|s|, |t|)
+    assert(levenshtein(kitten, sitting) <= 7);
+    assert(levenshtein(abc, allx) <= 8);
+
+    // d(s,t) >= | |s| - |t| |
+    let len_diff = if kitten.len > sitting.len { kitten.len - sitting.len } else { sitting.len - kitten.len };
+    assert(levenshtein(kitten, sitting) >= len_diff);
+
+    // === Test 18: Monotonicity of DP table rows ===
+    let table2 = levenshtein_table(abc, abcde);
+    // Each row starts with dp[i][0] = i
+    let mut i = 0;
+    while i <= 3 {
+        assert_eq(row_get(dp_get_row(table2, i), 0), i);
+        i = i + 1;
+    }
+    // First row: dp[0][j] = j
+    let mut j3 = 0;
+    while j3 <= 5 {
+        assert_eq(row_get(dp_get_row(table2, 0), j3), j3);
+        j3 = j3 + 1;
+    }
+
+    0
+}

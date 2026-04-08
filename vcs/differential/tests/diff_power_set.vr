@@ -1,0 +1,156 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, power-set, combinatorics, bit-manipulation
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+// Get bit i of mask
+fn bit(mask: Int, i: Int) -> Int {
+    let mut m = mask;
+    let mut j = 0;
+    while j < i { m = m / 2; j = j + 1; }
+    m % 2
+}
+
+// Count bits set in mask
+fn popcount(mask: Int) -> Int {
+    let mut count = 0;
+    let mut m = mask;
+    while m > 0 {
+        count = count + m % 2;
+        m = m / 2;
+    }
+    count
+}
+
+// Sum of elements in subset defined by bitmask
+fn subset_sum(data: Arr8, n: Int, mask: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        if bit(mask, i) == 1 {
+            sum = sum + get(data, i);
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+// Count subsets with given sum
+fn count_subsets_with_sum(data: Arr8, n: Int, target: Int) -> Int {
+    let total = 1;
+    let mut power = 1;
+    let mut i = 0;
+    while i < n { power = power * 2; i = i + 1; }
+
+    let mut count = 0;
+    let mut mask = 0;
+    while mask < power {
+        if subset_sum(data, n, mask) == target {
+            count = count + 1;
+        }
+        mask = mask + 1;
+    }
+    count
+}
+
+// Count subsets of size k
+fn count_subsets_of_size(n: Int, k: Int) -> Int {
+    let mut power = 1;
+    let mut i = 0;
+    while i < n { power = power * 2; i = i + 1; }
+
+    let mut count = 0;
+    let mut mask = 0;
+    while mask < power {
+        if popcount(mask) == k { count = count + 1; }
+        mask = mask + 1;
+    }
+    count
+}
+
+// Check if mask1 is a subset of mask2
+fn is_sub(mask1: Int, mask2: Int, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        if bit(mask1, i) == 1 {
+            if bit(mask2, i) == 0 { return 0; }
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn main() -> Int {
+    let data = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let n = 4;
+
+    // Total subsets of n elements = 2^n
+    assert_eq(count_subsets_of_size(4, 0) + count_subsets_of_size(4, 1) +
+              count_subsets_of_size(4, 2) + count_subsets_of_size(4, 3) +
+              count_subsets_of_size(4, 4), 16);
+
+    // C(4,0)=1, C(4,1)=4, C(4,2)=6, C(4,3)=4, C(4,4)=1
+    assert_eq(count_subsets_of_size(4, 0), 1);
+    assert_eq(count_subsets_of_size(4, 1), 4);
+    assert_eq(count_subsets_of_size(4, 2), 6);
+    assert_eq(count_subsets_of_size(4, 3), 4);
+    assert_eq(count_subsets_of_size(4, 4), 1);
+
+    // Subset sums
+    assert_eq(subset_sum(data, 4, 0), 0);   // empty set
+    assert_eq(subset_sum(data, 4, 15), 10); // full set: 1+2+3+4
+    assert_eq(subset_sum(data, 4, 1), 1);   // {1}
+    assert_eq(subset_sum(data, 4, 5), 4);   // {1,3} = mask 0101 = 5
+    assert_eq(subset_sum(data, 4, 6), 5);   // {2,3} = mask 0110 = 6
+
+    // Count subsets with sum = 5
+    // {1,4}=5, {2,3}=5 → 2 subsets
+    assert_eq(count_subsets_with_sum(data, 4, 5), 2);
+
+    // Sum = 10: only full set
+    assert_eq(count_subsets_with_sum(data, 4, 10), 1);
+
+    // Sum = 0: only empty set
+    assert_eq(count_subsets_with_sum(data, 4, 0), 1);
+
+    // Sum = 11: impossible
+    assert_eq(count_subsets_with_sum(data, 4, 11), 0);
+
+    // Popcount
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(15), 4);
+    assert_eq(popcount(10), 2); // 1010
+
+    // Subset relation
+    assert_eq(is_sub(0, 15, 4), 1);  // empty ⊂ full
+    assert_eq(is_sub(15, 15, 4), 1); // self ⊂ self
+    assert_eq(is_sub(3, 7, 4), 1);   // {0,1} ⊂ {0,1,2}
+    assert_eq(is_sub(5, 3, 4), 0);   // {0,2} ⊄ {0,1}
+
+    // C(5,2) = 10
+    assert_eq(count_subsets_of_size(5, 2), 10);
+
+    print("DIFF_OK: power_set");
+    0
+}

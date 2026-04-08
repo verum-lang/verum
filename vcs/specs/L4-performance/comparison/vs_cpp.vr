@@ -1,0 +1,725 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: comparison, cpp, c++, baseline, performance
+// @description: Verum vs C++ performance comparison (target: 0.85-0.95x C++)
+
+/// Verum vs C++ Performance Comparison
+///
+/// This benchmark compares Verum's performance against C++.
+/// C++ represents the performance ceiling for systems programming.
+///
+/// Target: 0.85-0.95x C++ performance (85-95%)
+///
+/// Key comparisons:
+/// - Raw compute (no safety overhead)
+/// - Memory operations
+/// - Data structures
+/// - Low-level operations
+///
+/// Note: Verum's CBGR adds ~15ns per reference access for safety.
+/// C++ raw pointers have zero overhead but no safety guarantees.
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const ITERATIONS: Int = 10_000_000;
+const DATA_SIZE: Int = 1_000_000;
+
+/// C++ baseline measurements (pre-measured)
+module cpp_baselines {
+    /// C++ fibonacci(40) time in milliseconds
+    pub const FIB_40_MS: Float = 450.0;
+
+    /// C++ 1000x1000 matrix multiply in milliseconds
+    pub const MATRIX_1000_MS: Float = 700.0;
+
+    /// C++ quicksort 1M elements in milliseconds
+    pub const QSORT_1M_MS: Float = 100.0;
+
+    /// C++ binary search 1M lookups in milliseconds
+    pub const BSEARCH_1M_MS: Float = 20.0;
+
+    /// C++ raw pointer access 10M times in milliseconds
+    pub const PTR_ACCESS_10M_MS: Float = 10.0;
+
+    /// C++ std.vector push_back 1M elements in milliseconds
+    pub const VECTOR_PUSH_1M_MS: Float = 12.0;
+
+    /// C++ std.unordered_map insert 1M elements in milliseconds
+    pub const HASHMAP_1M_MS: Float = 180.0;
+
+    /// C++ memcpy 100MB in milliseconds
+    pub const MEMCPY_100MB_MS: Float = 8.0;
+
+    /// C++ malloc/free 1M times in milliseconds
+    pub const MALLOC_FREE_1M_MS: Float = 40.0;
+
+    /// C++ virtual function call 10M times in milliseconds
+    pub const VIRTUAL_CALL_10M_MS: Float = 30.0;
+
+    /// C++ lambda call 10M times in milliseconds
+    pub const LAMBDA_10M_MS: Float = 15.0;
+
+    /// C++ atomic increment 10M times in milliseconds
+    pub const ATOMIC_INC_10M_MS: Float = 100.0;
+
+    /// C++ mutex lock/unlock 1M times in milliseconds
+    pub const MUTEX_1M_MS: Float = 50.0;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs C++ Performance");
+
+    // Pure compute benchmarks
+    results.add(benchmark_fibonacci());
+    results.add(benchmark_matrix_multiply());
+    results.add(benchmark_quicksort());
+    results.add(benchmark_binary_search());
+
+    // Memory access benchmarks
+    results.add(benchmark_pointer_access());
+    results.add(benchmark_memcpy());
+    results.add(benchmark_malloc_free());
+
+    // Data structure benchmarks
+    results.add(benchmark_vector_push());
+    results.add(benchmark_hashmap_insert());
+
+    // Function call benchmarks
+    results.add(benchmark_virtual_call());
+    results.add(benchmark_lambda_call());
+
+    // Concurrency benchmarks
+    results.add(benchmark_atomic_increment());
+    results.add(benchmark_mutex_operations());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_cpp.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.ratio >= r.min_target);
+    assert(all_meet_target, "Verum performance below 85% of C++");
+}
+
+/// Benchmark: Fibonacci (pure compute)
+fn benchmark_fibonacci() -> ComparisonResult {
+    let n = 40;
+
+    // Warmup
+    black_box(fib(35));
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result = fib(n);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.FIB_40_MS;
+
+    black_box(result);
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "fibonacci_40",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.95,  // Pure compute should be close
+        category: "compute",
+    }
+}
+
+fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib(n - 1) + fib(n - 2) }
+}
+
+/// Benchmark: Matrix multiplication
+fn benchmark_matrix_multiply() -> ComparisonResult {
+    let size = 1000;
+
+    let a = create_matrix(size, size, 1.0);
+    let b = create_matrix(size, size, 2.0);
+
+    // Warmup
+    let small_a = create_matrix(100, 100, 1.0);
+    let small_b = create_matrix(100, 100, 2.0);
+    black_box(matrix_multiply(&small_a, &small_b));
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result = matrix_multiply(&a, &b);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.MATRIX_1000_MS;
+
+    black_box(result);
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "matrix_1000x1000",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.90,
+        category: "compute",
+    }
+}
+
+fn create_matrix(rows: Int, cols: Int, value: Float) -> List<List<Float>> {
+    (0..rows).map(|_| {
+        (0..cols).map(|_| value).collect()
+    }).collect()
+}
+
+fn matrix_multiply(a: &List<List<Float>>, b: &List<List<Float>>) -> List<List<Float>> {
+    let rows = a.len();
+    let cols = b[0].len();
+    let k = b.len();
+
+    let mut result = create_matrix(rows, cols, 0.0);
+
+    for i in 0..rows {
+        for j in 0..cols {
+            let mut sum = 0.0;
+            for l in 0..k {
+                sum += a[i][l] * b[l][j];
+            }
+            result[i][j] = sum;
+        }
+    }
+
+    result
+}
+
+/// Benchmark: Quicksort
+fn benchmark_quicksort() -> ComparisonResult {
+    let size = DATA_SIZE;
+
+    let mut rng = Random.with_seed(42);
+    let data: List<Int> = (0..size).map(|_| rng.gen()).collect();
+
+    // Warmup
+    let mut small = data[0..10_000].to_vec();
+    quicksort(&mut small);
+    black_box(small);
+
+    let mut to_sort = data.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    quicksort(&mut to_sort);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.QSORT_1M_MS;
+
+    black_box(to_sort);
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "quicksort_1m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.85,
+        category: "algorithm",
+    }
+}
+
+fn quicksort<T: Ord>(arr: &mut List<T>) {
+    if arr.len() <= 1 { return; }
+
+    let pivot_idx = partition(arr);
+
+    let (left, right) = arr.split_at_mut(pivot_idx);
+    quicksort(left);
+    quicksort(&mut right[1..]);
+}
+
+fn partition<T: Ord>(arr: &mut List<T>) -> Int {
+    let pivot_idx = arr.len() - 1;
+    let mut i = 0;
+
+    for j in 0..pivot_idx {
+        if arr[j] < arr[pivot_idx] {
+            arr.swap(i, j);
+            i += 1;
+        }
+    }
+    arr.swap(i, pivot_idx);
+    i
+}
+
+/// Benchmark: Binary search
+fn benchmark_binary_search() -> ComparisonResult {
+    let size = DATA_SIZE;
+
+    let data: List<Int> = (0..size).collect();
+    let mut rng = Random.with_seed(123);
+    let lookups: List<Int> = (0..DATA_SIZE)
+        .map(|_| rng.gen_range(0, size))
+        .collect();
+
+    // Warmup
+    for i in 0..10_000 {
+        black_box(data.binary_search(&lookups[i]));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        black_box(data.binary_search(&lookups[i]));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.BSEARCH_1M_MS;
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "binary_search_1m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.90,
+        category: "algorithm",
+    }
+}
+
+/// Benchmark: Pointer/reference access
+fn benchmark_pointer_access() -> ComparisonResult {
+    let data = Heap(42i64);
+    let ref_data = &*data;
+
+    // Warmup
+    for _ in 0..100_000 {
+        black_box(*ref_data);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        // CBGR check happens on each access
+        black_box(*ref_data);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.PTR_ACCESS_10M_MS;
+
+    let ratio = cpp_ms / verum_ms;
+
+    // CBGR adds overhead, so lower target
+    ComparisonResult {
+        name: "pointer_access_10m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.40,  // CBGR overhead expected
+        category: "memory",
+    }
+}
+
+/// Benchmark: Memory copy
+fn benchmark_memcpy() -> ComparisonResult {
+    let size = 100 * 1024 * 1024;  // 100MB
+    let src: List<u8> = (0..size).map(|i| (i % 256) as u8).collect();
+    let mut dst: List<u8> = List.with_capacity(size);
+
+    // Warmup
+    dst.extend_from_slice(&src[0..1024*1024]);
+    dst.clear();
+
+    let timer = Timer.new();
+    timer.start();
+
+    dst.extend_from_slice(&src);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.MEMCPY_100MB_MS;
+
+    black_box(&dst);
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "memcpy_100mb",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.95,  // Should be very close
+        category: "memory",
+    }
+}
+
+/// Benchmark: Allocation performance
+fn benchmark_malloc_free() -> ComparisonResult {
+    let count = DATA_SIZE;
+
+    // Warmup
+    for _ in 0..10_000 {
+        let x = Heap(42);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..count {
+        let x = Heap(42);
+        black_box(&*x);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.MALLOC_FREE_1M_MS;
+
+    let ratio = cpp_ms / verum_ms;
+
+    // CBGR adds generation tracking overhead
+    ComparisonResult {
+        name: "malloc_free_1m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.70,
+        category: "memory",
+    }
+}
+
+/// Benchmark: Vector/List push
+fn benchmark_vector_push() -> ComparisonResult {
+    let count = DATA_SIZE;
+
+    // Warmup
+    let mut warmup: List<Int> = List.new();
+    for i in 0..10_000 {
+        warmup.push(i);
+    }
+    black_box(warmup);
+
+    let mut list: List<Int> = List.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..count {
+        list.push(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.VECTOR_PUSH_1M_MS;
+
+    black_box(list);
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "list_push_1m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.85,
+        category: "container",
+    }
+}
+
+/// Benchmark: HashMap insert
+fn benchmark_hashmap_insert() -> ComparisonResult {
+    let count = DATA_SIZE;
+
+    // Warmup
+    let mut warmup: Map<Int, Int> = Map.new();
+    for i in 0..10_000 {
+        warmup.insert(i, i * 2);
+    }
+    black_box(warmup);
+
+    let mut map: Map<Int, Int> = Map.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..count {
+        map.insert(i, i * 2);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.HASHMAP_1M_MS;
+
+    black_box(map);
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "map_insert_1m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.85,
+        category: "container",
+    }
+}
+
+/// Benchmark: Virtual function call (trait dispatch)
+fn benchmark_virtual_call() -> ComparisonResult {
+    type Shape is protocol {
+        fn area(&self) -> Float;
+    };
+
+    type Circle is { radius: Float };
+    implement Shape for Circle {
+        fn area(&self) -> Float { 3.14159 * self.radius * self.radius }
+    }
+
+    let shape: &Shape = &Circle { radius: 5.0 };
+
+    // Warmup
+    for _ in 0..100_000 {
+        black_box(shape.area());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        black_box(shape.area());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.VIRTUAL_CALL_10M_MS;
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "virtual_call_10m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.90,
+        category: "dispatch",
+    }
+}
+
+/// Benchmark: Lambda/closure call
+fn benchmark_lambda_call() -> ComparisonResult {
+    let x = 42;
+    let lambda = |y: Int| -> Int { x + y };
+
+    // Warmup
+    for _ in 0..100_000 {
+        black_box(lambda(1));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..ITERATIONS {
+        black_box(lambda(i));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.LAMBDA_10M_MS;
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "lambda_call_10m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.90,
+        category: "dispatch",
+    }
+}
+
+/// Benchmark: Atomic operations
+fn benchmark_atomic_increment() -> ComparisonResult {
+    mount std.sync.atomic.{AtomicI64, Ordering};
+
+    let counter = AtomicI64.new(0);
+
+    // Warmup
+    for _ in 0..100_000 {
+        counter.fetch_add(1, Ordering.Relaxed);
+    }
+    counter.store(0, Ordering.Relaxed);
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        counter.fetch_add(1, Ordering.Relaxed);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.ATOMIC_INC_10M_MS;
+
+    black_box(counter.load(Ordering.Relaxed));
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "atomic_inc_10m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.95,  // Atomics should be very close
+        category: "concurrency",
+    }
+}
+
+/// Benchmark: Mutex operations
+fn benchmark_mutex_operations() -> ComparisonResult {
+    mount std.sync.Mutex;
+
+    let mutex = Mutex.new(0);
+
+    // Warmup
+    for _ in 0..10_000 {
+        let mut guard = mutex.lock().unwrap();
+        *guard += 1;
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..DATA_SIZE {
+        let mut guard = mutex.lock().unwrap();
+        *guard += 1;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let cpp_ms = cpp_baselines.MUTEX_1M_MS;
+
+    let ratio = cpp_ms / verum_ms;
+
+    ComparisonResult {
+        name: "mutex_lock_1m",
+        verum_ms,
+        cpp_ms,
+        ratio,
+        min_target: 0.90,
+        category: "concurrency",
+    }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    cpp_ms: Float,
+    ratio: Float,
+    min_target: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<25} {:>12} {:>12} {:>10} {:>8} {:>8}",
+                "Benchmark", "Verum (ms)", "C++ (ms)", "Ratio", "Target", "Status");
+        println("{}", "-".repeat(80));
+
+        for result in &self.results {
+            let passed = result.ratio >= result.min_target;
+            let status = if passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.ratio * 100.0;
+
+            println("{:<25} {:>12.2} {:>12.2} {:>9.1}% {:>7.0}% {:>8}",
+                    result.name, result.verum_ms, result.cpp_ms,
+                    ratio_pct, result.min_target * 100.0, status);
+        }
+
+        println("");
+        let avg_ratio = self.results.iter()
+            .map(|r| r.ratio)
+            .sum.<Float>() / self.results.len() as Float;
+        println("Average performance ratio: {:.1}% of C++", avg_ratio * 100.0);
+
+        let passed = self.results.iter().filter(|r| r.ratio >= r.min_target).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("comparison", "c++");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("cpp_ms", result.cpp_ms);
+            r.set("ratio", result.ratio);
+            r.set("min_target", result.min_target);
+            r.set("category", &result.category);
+            r.set("passed", result.ratio >= result.min_target);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+        println("Comparison exported to {}", path);
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Random is { seed: u64 };
+implement Random {
+    fn with_seed(seed: u64) -> Self { Self { seed } }
+    fn gen(&mut self) -> Int { 0 }
+    fn gen_range(&mut self, min: Int, max: Int) -> Int { min }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

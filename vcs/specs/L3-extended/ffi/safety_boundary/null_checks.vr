@@ -1,0 +1,152 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, safety, null-checks
+// @description: Tests null pointer handling patterns at FFI boundaries
+
+/// ============================================================
+/// NULL POINTER HANDLING
+/// ============================================================
+///
+/// Null pointers are a major source of FFI bugs. Verum provides
+/// patterns and types to safely handle nullable FFI pointers.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_char is i8;
+type c_int is i32;
+type c_size is usize;
+
+type NullError is
+    | NullPointer
+    | InvalidPointer;
+
+// ------------------------------------------------------------
+// Null-Checked Pointer Types
+// ------------------------------------------------------------
+
+/// Non-null pointer type (guaranteed non-null)
+@repr(C)
+type NonNull is {
+    ptr: *mut c_void,
+};
+
+/// Non-null const pointer
+@repr(C)
+type NonNullConst is {
+    ptr: *const c_void,
+};
+
+// ------------------------------------------------------------
+// Maybe Pointer Types
+// ------------------------------------------------------------
+
+/// Nullable pointer that must be checked before use
+@repr(C)
+type MaybePtr is {
+    ptr: *mut c_void,
+};
+
+/// Nullable const pointer
+@repr(C)
+type MaybePtrConst is {
+    ptr: *const c_void,
+};
+
+// ------------------------------------------------------------
+// FFI Declarations with Null Contracts
+// ------------------------------------------------------------
+
+ffi null_safe_api_get {
+    /// Returns possibly-null pointer
+    @extern("C")
+    fn get_resource() -> *mut c_void;
+}
+
+ffi null_safe_api_put {
+    /// Takes non-null pointer
+    @extern("C")
+    fn put_resource(ptr: *mut c_void) -> c_int;
+}
+
+ffi null_safe_api_optional {
+    /// Takes possibly-null pointer (null is valid)
+    @extern("C")
+    fn optional_resource(ptr: *mut c_void) -> c_int;
+}
+
+// ------------------------------------------------------------
+// String Null Handling
+// ------------------------------------------------------------
+
+/// C string that may be null
+@repr(C)
+type CStrMaybe is {
+    ptr: *const c_char,
+};
+
+/// C string that is guaranteed non-null
+@repr(C)
+type CStrNonNull is {
+    ptr: *const c_char,
+};
+
+// ------------------------------------------------------------
+// FFI String Functions
+// ------------------------------------------------------------
+
+ffi string_api_strlen {
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size;
+}
+
+ffi string_api_strcpy {
+    @extern("C")
+    fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+}
+
+// ------------------------------------------------------------
+// Pointer Validation FFI
+// ------------------------------------------------------------
+
+ffi validate_api_check {
+    /// Validate a pointer before use
+    @extern("C")
+    fn validate_pointer(ptr: *const c_void) -> c_int;
+}
+
+ffi validate_api_verify {
+    /// Check if memory is accessible
+    @extern("C")
+    fn verify_access(ptr: *const c_void, size: c_size) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Sentinel Value Types
+// ------------------------------------------------------------
+
+/// Result type that uses null as error
+@repr(C)
+type PtrResult is {
+    ptr: *mut c_void,
+    // null means error, non-null means success
+};
+
+/// Result type that uses -1 as error
+@repr(C)
+type IntResult is {
+    value: c_int,
+    // -1 means error, >=0 means success
+};
+
+// ------------------------------------------------------------
+// Main
+// ------------------------------------------------------------
+
+fn main() {
+    // Test FFI declarations and types compile
+    print("Null check patterns passed");
+}

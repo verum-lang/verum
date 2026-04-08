@@ -1,0 +1,93 @@
+// @test: parse
+// @level: L0
+// @tags: parser, ffi, boundary
+// @description: Test FFI boundary declaration parsing
+
+// Basic FFI boundary
+ffi LibC {
+    @extern("C")
+    fn printf(format: *const i8, ...) -> Int;
+
+    @extern("C")
+    fn strlen(s: *const i8) -> usize;
+}
+
+// FFI with extension
+ffi PosixIO extends LibC {
+    @extern("C")
+    fn open(path: *const i8, flags: Int) -> Int;
+
+    @extern("C")
+    fn close(fd: Int) -> Int;
+
+    @extern("C")
+    fn read(fd: Int, buf: *mut u8, count: usize) -> isize;
+
+    @extern("C")
+    fn write(fd: Int, buf: *const u8, count: usize) -> isize;
+}
+
+// FFI with contracts
+ffi SafeLib {
+    @extern("C")
+    fn safe_alloc(size: usize) -> *mut u8;
+
+    requires size > 0;
+    ensures result != null;
+}
+
+// FFI with memory effects
+ffi MemLib {
+    @extern("C")
+    fn allocate(size: usize) -> *mut u8;
+
+    memory_effects = Allocates;
+}
+
+// FFI with thread safety
+ffi ThreadSafeLib {
+    @extern("C")
+    fn atomic_add(ptr: *mut Int, value: Int) -> Int;
+
+    thread_safe = true;
+}
+
+// FFI with error protocol
+ffi ErrorLib {
+    @extern("C")
+    fn try_parse(s: *const i8) -> *mut Value;
+
+    errors_via = ReturnValue(null) with Errno;
+}
+
+// FFI with ownership
+ffi OwnershipLib {
+    @extern("C")
+    @ownership(transfer_to = "callee")
+    fn consume(ptr: *mut Data);
+
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn produce() -> *mut Data;
+
+    @extern("C")
+    @ownership(borrow)
+    fn inspect(ptr: *const Data);
+}
+
+// Complex FFI with calling convention
+ffi WindowsAPI {
+    @extern("C", calling_convention = "stdcall")
+    fn MessageBoxA(
+        hwnd: *mut (),
+        text: *const i8,
+        caption: *const i8,
+        utype: u32
+    ) -> Int;
+}
+
+// Public FFI
+pub ffi PublicFFI {
+    @extern("C")
+    fn public_func();
+}

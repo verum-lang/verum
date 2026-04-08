@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, context
+// @description: Contextual type inference - types inferred from surrounding context
+
+/// Test for contextual type inference.
+/// Types are inferred from surrounding context (expected types).
+
+fn main() {
+    // Inference from explicit type annotation
+    let list: List<Int> = [1, 2, 3];
+    // Elements 1, 2, 3 inferred as Int from List<Int>
+
+    // Inference from function return type
+    fn make_text_list() -> List<Text> {
+        ["a", "b", "c"]  // Elements inferred as Text from return type
+    }
+
+    // Inference from parameter type
+    fn process(items: List<Float>) -> Float {
+        let mut sum = 0.0;
+        for item in items {
+            sum = sum + item;
+        }
+        sum
+    }
+    let total = process([1.0, 2.0, 3.0]);  // Elements inferred as Float
+    assert(total == 6.0);
+
+    // Inference from struct field types
+    type Point is {
+        x: Float,
+        y: Float,
+    };
+    let p = Point { x: 1.0, y: 2.0 };  // 1.0, 2.0 inferred as Float
+
+    // Inference in let with tuple pattern
+    let (a, b): (Int, Text) = (42, "hello");
+    // 42 inferred as Int, "hello" as Text
+
+    // Inference from Map usage
+    let mut map: Map<Text, Int> = {};
+    map.insert("one", 1);
+    map.insert("two", 2);
+    // Keys inferred as Text, values as Int
+
+    // Inference from closure expected type
+    let add: fn(Int, Int) -> Int = |a: Int, b: Int| a + b;
+    // a, b explicit as Int, return as Int (inferred from body)
+
+    // Inference in match arms
+    let maybe: Maybe<Int> = Some(42);
+    let value = match maybe {
+        Some(n) => n,  // n inferred as Int
+        None => 0,     // 0 inferred as Int to match
+    };
+
+    // Inference from conditional expression context
+    let result: Float = if true { 1.0 } else { 2.0 };
+
+    // Inference in function with Result return type
+    fn fallible() -> Result<Int, Text> {
+        Ok(42)  // 42 inferred as Int
+    }
+
+    // Inference from comparison context
+    let comparison: Bool = list.len() > 0;  // 0 inferred as usize/Int
+
+    // Inference with map+closure
+    fn double_list(items: List<Int>) -> List<Int> {
+        let mut result: List<Int> = [];
+        for item in items {
+            result.push(item * 2);
+        }
+        result
+    }
+    let doubled = double_list([1, 2, 3]);
+
+    // Inference through nested data
+    type Wrapper<T> is { inner: T };
+    let w_int: Wrapper<Int> = Wrapper { inner: 42 };
+    let w_text: Wrapper<Text> = Wrapper { inner: "hello" };
+
+    // Inference in generic function from argument
+    fn first<T>(list: List<T>) -> Maybe<T> {
+        if list.is_empty() { None } else { Some(list[0]) }
+    }
+    let fi: Maybe<Int> = first([10, 20]);  // T = Int from annotation
+    let ft: Maybe<Text> = first(["x", "y"]);  // T = Text from annotation
+
+    // Inference from nested option
+    let nested_opt: Maybe<Maybe<Int>> = Some(Some(99));
+    let inner_val = match nested_opt {
+        Some(Some(n)) => n,
+        _ => 0,
+    };
+
+    // Assertions
+    assert(list.len() == 3);
+    assert(p.x == 1.0);
+    assert(a == 42);
+    assert(b == "hello");
+    assert(map.len() == 2);
+    assert(map.contains_key("one"));
+    assert(add(3, 4) == 7);
+    assert(value == 42);
+    assert(result == 1.0);
+    assert(comparison == true);
+    assert(doubled == [2, 4, 6]);
+    assert(w_int.inner == 42);
+    assert(fi == Some(10));
+    assert(inner_val == 99);
+}

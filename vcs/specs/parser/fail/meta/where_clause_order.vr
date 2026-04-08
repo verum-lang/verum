@@ -1,0 +1,56 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, where, clause, order, error
+// @expected-error: E038
+// @description: Generic where clause must come before meta where clause
+
+// =============================================================================
+// Grammar Reference:
+// function_def = ... , [ generic_where_clause ] , [ meta_where_clause ] , function_body ;
+// Correct order: where T: Bound where meta stage > 0
+// Wrong order: where meta X where T: Bound (meta BEFORE generic)
+// =============================================================================
+
+// ERROR: Meta where BEFORE generic where (wrong order)
+meta(1) fn wrong_where_order<T>() -> T
+    where meta stage > 0      // ERROR: Meta where must come AFTER generic where
+    where T: Clone
+{
+    T.default()
+}
+
+// ERROR: Meta where before all generic where clauses
+meta(1) fn meta_before_generics<T, U>() -> T
+    where meta stage >= 1     // ERROR: Wrong order
+    where T: Clone
+    where U: Debug
+{
+    T.default()
+}
+
+// ERROR: Complex meta where before generic where
+meta(2) fn complex_wrong_order<T, U, V>() -> T
+    where meta stage == 2 && has_feature("reflection")  // ERROR: Wrong order
+    where T: Clone + Debug
+    where U: Serialize
+    where V: Default
+{
+    T.default()
+}
+
+// ERROR: Multiple meta where clauses before generic
+meta(1) fn double_meta_before_generic<T>() -> T
+    where meta stage > 0          // ERROR: Wrong order
+    where meta has_feature("x")   // ERROR: Also wrong
+    where T: Clone
+{
+    T.default()
+}
+
+// CORRECT ORDER (for reference, not tested here):
+// meta(1) fn correct_order<T>() -> T
+//     where T: Clone              // Generic where FIRST
+//     where meta stage > 0        // Meta where SECOND
+// { ... }

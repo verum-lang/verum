@@ -1,0 +1,20 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, use-after-free, cbgr, closure
+// @description: Tests that CBGR detects use-after-free through closures
+
+fn main() {
+    let data = Heap.new(42);
+
+    // Closure captures reference to data
+    let get_value = || {
+        *data  // Uses reference to heap data
+    };
+
+    // Free the underlying data
+    drop(data);
+
+    // Closure still holds stale reference
+    let _ = get_value();  // CBGR detects use after free
+}

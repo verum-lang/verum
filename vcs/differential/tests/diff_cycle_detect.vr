@@ -1,0 +1,131 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, cycle-detection, floyd, tortoise-hare
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// Floyd's cycle detection in a functional sequence
+// next[i] gives the next element from position i
+fn has_cycle(next: Arr8, start: Int, n: Int) -> Int {
+    let mut slow = start;
+    let mut fast = start;
+    let mut steps = 0;
+    let max_steps = n * 2;
+    let mut found = 0;
+
+    slow = get(next, slow);
+    fast = get(next, get(next, fast));
+    steps = 1;
+
+    while steps < max_steps {
+        if found == 0 {
+            if slow == fast { found = 1; }
+            else {
+                slow = get(next, slow);
+                fast = get(next, get(next, fast));
+                steps = steps + 1;
+            }
+        } else {
+            steps = max_steps;
+        }
+    }
+    found
+}
+
+// Find cycle length once detected
+fn cycle_length(next: Arr8, start: Int, n: Int) -> Int {
+    // First find meeting point
+    let mut slow = start;
+    let mut fast = start;
+    let mut met = 0;
+    let mut i = 0;
+    while i < n * 2 {
+        if met == 0 {
+            slow = get(next, slow);
+            fast = get(next, get(next, fast));
+            if slow == fast { met = 1; }
+        }
+        i = i + 1;
+    }
+    if met == 0 { return 0; }
+
+    // Count cycle length from meeting point
+    let mut len = 1;
+    let mut pos = get(next, slow);
+    while pos != slow {
+        pos = get(next, pos);
+        len = len + 1;
+    }
+    len
+}
+
+// Find cycle start (mu)
+fn cycle_start(next: Arr8, start: Int, n: Int) -> Int {
+    // Find meeting point
+    let mut slow = start;
+    let mut fast = start;
+    let mut met = 0;
+    let mut i = 0;
+    while i < n * 2 {
+        if met == 0 {
+            slow = get(next, slow);
+            fast = get(next, get(next, fast));
+            if slow == fast { met = 1; }
+        }
+        i = i + 1;
+    }
+    if met == 0 { return -1; }
+
+    // Move one pointer to start, advance both at same speed
+    slow = start;
+    while slow != fast {
+        slow = get(next, slow);
+        fast = get(next, fast);
+    }
+    slow
+}
+
+fn main() -> Int {
+    // Chain: 0→1→2→3→4→5→6→7 (no cycle, but wraps since next[7] not defined)
+    // Cycle: 0→1→2→3→4→2 (cycle at 2, length 3: 2→3→4→2)
+    let cyc1 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 2, d5: 0, d6: 0, d7: 0 };
+    assert_eq(has_cycle(cyc1, 0, 5), 1);
+    assert_eq(cycle_length(cyc1, 0, 5), 3);
+    assert_eq(cycle_start(cyc1, 0, 5), 2);
+
+    // Self-loop: 0→1→1 (cycle at 1, length 1)
+    let cyc2 = Arr8 { d0: 1, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(has_cycle(cyc2, 0, 2), 1);
+    assert_eq(cycle_length(cyc2, 0, 2), 1);
+    assert_eq(cycle_start(cyc2, 0, 2), 1);
+
+    // Full cycle: 0→1→2→3→0 (cycle length 4, starts at 0)
+    let cyc3 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(has_cycle(cyc3, 0, 4), 1);
+    assert_eq(cycle_length(cyc3, 0, 4), 4);
+    assert_eq(cycle_start(cyc3, 0, 4), 0);
+
+    // Rho-shaped: 0→1→2→3→4→5→3 (tail=3, cycle=3: 3→4→5→3)
+    let cyc4 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 3, d6: 0, d7: 0 };
+    assert_eq(has_cycle(cyc4, 0, 6), 1);
+    assert_eq(cycle_length(cyc4, 0, 6), 3);
+    assert_eq(cycle_start(cyc4, 0, 6), 3);
+
+    // Immediate self-loop: 0→0
+    let cyc5 = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(has_cycle(cyc5, 0, 1), 1);
+    assert_eq(cycle_length(cyc5, 0, 1), 1);
+    assert_eq(cycle_start(cyc5, 0, 1), 0);
+
+    print("DIFF_OK: cycle_detect");
+    0
+}

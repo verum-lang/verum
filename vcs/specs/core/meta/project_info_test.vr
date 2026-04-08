@@ -1,0 +1,299 @@
+// =============================================================================
+// vcs/specs/stdlib/meta/project_info_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L3
+// @tags: stdlib, meta, project_info, context, target, build, platform
+// @note: ProjectInfo — types resolve for typecheck
+// @description: Comprehensive tests for the ProjectInfo context which provides
+//               compile-time access to project and target platform information.
+//
+// Coverage:
+// - Target platform: target_os(), target_arch(), target_triple()
+// - Target details: target_pointer_width(), target_endian(), target_has_feature()
+// - Build configuration: is_debug(), is_release(), opt_level()
+// - Feature flags: has_feature(), enabled_features()
+// - Package metadata: package_name(), package_version(), manifest_dir()
+//
+// Test Strategy:
+// - Method existence and return type validation
+// - Value range validation (e.g., pointer width must be 32 or 64)
+// - Platform-specific conditional compilation
+// - Feature detection consistency
+// =============================================================================
+
+module test.stdlib.meta.project_info_test;
+
+mount core.meta.contexts.ProjectInfo;
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Target Platform Tests
+// =============================================================================
+
+@test
+fn test_target_os() using [ProjectInfo] {
+    let os = ProjectInfo.target_os();
+
+    // OS string should be non-empty
+    assert(os.len() > 0);
+
+    // Should be one of the known operating systems
+    let valid_os = os == "linux" || os == "macos" || os == "windows"
+                || os == "ios" || os == "android" || os == "freebsd"
+                || os == "netbsd" || os == "openbsd" || os == "dragonfly"
+                || os == "solaris" || os == "fuchsia" || os == "wasi"
+                || os == "none" || os == "unknown";
+
+    assert(valid_os);
+
+    print("target_os test passed: " + os);
+}
+
+@test
+fn test_target_arch() using [ProjectInfo] {
+    let arch = ProjectInfo.target_arch();
+
+    // Architecture string should be non-empty
+    assert(arch.len() > 0);
+
+    // Should be one of the known architectures
+    let valid_arch = arch == "x86_64" || arch == "x86" || arch == "aarch64"
+                  || arch == "arm" || arch == "mips" || arch == "mips64"
+                  || arch == "powerpc" || arch == "powerpc64"
+                  || arch == "riscv32" || arch == "riscv64"
+                  || arch == "wasm32" || arch == "wasm64"
+                  || arch == "sparc" || arch == "sparc64"
+                  || arch == "unknown";
+
+    assert(valid_arch);
+
+    print("target_arch test passed: " + arch);
+}
+
+@test
+fn test_target_triple() using [ProjectInfo] {
+    let triple = ProjectInfo.target_triple();
+
+    // Triple should be non-empty
+    assert(triple.len() > 0);
+
+    // Triple should contain architecture component
+    let arch = ProjectInfo.target_arch();
+    assert(triple.contains(arch) || triple.starts_with(arch));
+
+    print("target_triple test passed: " + triple);
+}
+
+// =============================================================================
+// New Target Detail Functions Tests
+// =============================================================================
+
+@test
+fn test_target_pointer_width() using [ProjectInfo] {
+    let width = ProjectInfo.target_pointer_width();
+
+    // Pointer width must be 32 or 64 on common platforms
+    assert(width == 32 || width == 64);
+
+    // On 64-bit systems, should be 64
+    let arch = ProjectInfo.target_arch();
+    if arch == "x86_64" || arch == "aarch64" || arch == "powerpc64"
+        || arch == "mips64" || arch == "riscv64" || arch == "sparc64"
+        || arch == "wasm64"
+    {
+        assert(width == 64);
+    }
+
+    print("target_pointer_width test passed: " + width.to_text());
+}
+
+@test
+fn test_target_endian() using [ProjectInfo] {
+    let endian = ProjectInfo.target_endian();
+
+    // Endianness must be "little" or "big"
+    assert(endian == "little" || endian == "big");
+
+    // x86/x86_64/aarch64 are little-endian
+    let arch = ProjectInfo.target_arch();
+    if arch == "x86" || arch == "x86_64" || arch == "aarch64" {
+        assert(endian == "little");
+    }
+
+    print("target_endian test passed: " + endian);
+}
+
+@test
+fn test_target_has_feature() using [ProjectInfo] {
+    // Test feature detection (results are platform-dependent)
+    let arch = ProjectInfo.target_arch();
+
+    // On x86_64, sse2 is baseline
+    if arch == "x86_64" {
+        let has_sse2 = ProjectInfo.target_has_feature("sse2");
+        assert(has_sse2);  // SSE2 is mandatory on x86_64
+    }
+
+    // On aarch64, neon is baseline
+    if arch == "aarch64" {
+        let has_neon = ProjectInfo.target_has_feature("neon");
+        assert(has_neon);  // NEON is mandatory on AArch64
+    }
+
+    // Unknown features should return false
+    let has_nonexistent = ProjectInfo.target_has_feature("nonexistent_feature_xyz");
+    assert(!has_nonexistent);
+
+    print("target_has_feature test passed");
+}
+
+// =============================================================================
+// Build Configuration Tests
+// =============================================================================
+
+@test
+fn test_build_configuration() using [ProjectInfo] {
+    let is_debug = ProjectInfo.is_debug();
+    let is_release = ProjectInfo.is_release();
+    let opt = ProjectInfo.opt_level();
+
+    // Debug and release are mutually exclusive
+    assert(is_debug != is_release);
+
+    // Optimization level should be in valid range
+    assert(opt >= 0 && opt <= 3);
+
+    // Debug mode typically has opt_level 0
+    if is_debug {
+        assert(opt == 0 || opt == 1);  // Some debug builds use opt=1
+    }
+
+    // Release mode typically has opt_level >= 2
+    if is_release {
+        assert(opt >= 2);
+    }
+
+    print("build_configuration test passed: debug=" + is_debug.to_text()
+          + ", opt=" + opt.to_text());
+}
+
+// =============================================================================
+// Feature Flags Tests
+// =============================================================================
+
+@test
+fn test_feature_flags() using [ProjectInfo] {
+    // has_feature() checks if a Cargo feature is enabled
+    // enabled_features() returns all enabled features
+
+    let features = ProjectInfo.enabled_features();
+
+    // features should be a list (may be empty)
+    // Test that we can iterate it
+    for feature in features {
+        assert(feature.len() > 0);  // Each feature name should be non-empty
+    }
+
+    // Test consistency: if a feature is in enabled_features, has_feature should return true
+    for feature in features {
+        assert(ProjectInfo.has_feature(feature));
+    }
+
+    print("feature_flags test passed, " + features.len().to_text() + " features enabled");
+}
+
+// =============================================================================
+// Package Metadata Tests
+// =============================================================================
+
+@test
+fn test_package_metadata() using [ProjectInfo] {
+    let name = ProjectInfo.package_name();
+    let version = ProjectInfo.package_version();
+    let dir = ProjectInfo.manifest_dir();
+
+    // Package name should be non-empty
+    assert(name.len() > 0);
+
+    // Version should be non-empty and follow semver format (x.y.z)
+    assert(version.len() > 0);
+
+    // Manifest directory should be a valid path
+    assert(dir.len() > 0);
+
+    print("package_metadata test passed: " + name + " v" + version);
+}
+
+// =============================================================================
+// Conditional Compilation Tests
+// =============================================================================
+
+@test
+fn test_conditional_compilation() using [ProjectInfo] {
+    // Demonstrate using ProjectInfo for conditional compilation
+    let os = ProjectInfo.target_os();
+
+    // Platform-specific assertions
+    @cfg(target_os = "linux") {
+        assert(os == "linux");
+    }
+
+    @cfg(target_os = "macos") {
+        assert(os == "macos");
+    }
+
+    @cfg(target_os = "windows") {
+        assert(os == "windows");
+    }
+
+    // Architecture-specific code
+    let arch = ProjectInfo.target_arch();
+    let width = ProjectInfo.target_pointer_width();
+
+    @cfg(target_arch = "x86_64") {
+        assert(arch == "x86_64");
+        assert(width == 64);
+    }
+
+    @cfg(target_arch = "aarch64") {
+        assert(arch == "aarch64");
+        assert(width == 64);
+    }
+
+    print("conditional_compilation test passed");
+}
+
+// =============================================================================
+// Cross-Function Consistency Tests
+// =============================================================================
+
+@test
+fn test_cross_function_consistency() using [ProjectInfo] {
+    // Values should be consistent across multiple calls
+    let os1 = ProjectInfo.target_os();
+    let os2 = ProjectInfo.target_os();
+    assert(os1 == os2);
+
+    let arch1 = ProjectInfo.target_arch();
+    let arch2 = ProjectInfo.target_arch();
+    assert(arch1 == arch2);
+
+    let width1 = ProjectInfo.target_pointer_width();
+    let width2 = ProjectInfo.target_pointer_width();
+    assert(width1 == width2);
+
+    let endian1 = ProjectInfo.target_endian();
+    let endian2 = ProjectInfo.target_endian();
+    assert(endian1 == endian2);
+
+    print("cross_function_consistency test passed");
+}

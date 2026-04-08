@@ -1,0 +1,1699 @@
+// =============================================================================
+// rwlock_test.vr - Tests for RwLock<T> and related types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, rwlock, lock, concurrency, core
+// @description: Comprehensive tests for RwLock<T>, RwLockReadGuard, RwLockWriteGuard
+// =============================================================================
+
+mount core.sync.rwlock.{RwLock, RwLockReadGuard, RwLockWriteGuard};
+mount core.sync.mutex.{LockResult, TryLockResult, PoisonError, TryLockError};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: RwLock Construction Tests
+// =============================================================================
+
+@test
+fn test_rwlock_new_int() {
+    let rw: RwLock<Int> = RwLock.new(42);
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            // Access data through rwlock field
+            assert_eq(guard.rwlock.data, 42);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_new_text() {
+    let rw: RwLock<Text> = RwLock.new("hello");
+    let result: LockResult<RwLockReadGuard<Text>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "hello");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_new_bool() {
+    let rw: RwLock<Bool> = RwLock.new(true);
+    let result: LockResult<RwLockReadGuard<Bool>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, true);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_default() {
+    let rw: RwLock<Int> = RwLock.default();
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 0); // Int default is 0
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 2: RwLock Read Operations
+// =============================================================================
+
+@test
+fn test_rwlock_read() {
+    let rw: RwLock<Int> = RwLock.new(10);
+
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 10);
+        }
+        Err(_) => panic("Expected Ok for read"),
+    }
+}
+
+@test
+fn test_rwlock_try_read_uncontended() {
+    let rw: RwLock<Int> = RwLock.new(20);
+
+    let result: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 20);
+        }
+        Err(_) => panic("Expected Ok for try_read"),
+    }
+}
+
+@test
+fn test_rwlock_multiple_readers() {
+    let rw: RwLock<Int> = RwLock.new(30);
+
+    // Acquire multiple read locks (should all succeed)
+    let result1: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result1 {
+        Ok(guard1) => {
+            let result2: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+            match result2 {
+                Ok(guard2) => {
+                    // Both readers can access data
+                    assert_eq(guard1.rwlock.data, 30);
+                    assert_eq(guard2.rwlock.data, 30);
+                }
+                Err(_) => panic("Expected second reader to succeed"),
+            }
+        }
+        Err(_) => panic("Expected Ok for first read"),
+    }
+}
+
+// =============================================================================
+// Section 3: RwLock Write Operations
+// =============================================================================
+
+@test
+fn test_rwlock_write() {
+    let rw: RwLock<Int> = RwLock.new(100);
+
+    let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 100);
+        }
+        Err(_) => panic("Expected Ok for write"),
+    }
+}
+
+@test
+fn test_rwlock_try_write_uncontended() {
+    let rw: RwLock<Int> = RwLock.new(200);
+
+    let result: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 200);
+        }
+        Err(_) => panic("Expected Ok for try_write"),
+    }
+}
+
+@test
+fn test_rwlock_write_blocks_read() {
+    let rw: RwLock<Int> = RwLock.new(300);
+
+    // Acquire write lock
+    let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    match result {
+        Ok(write_guard) => {
+            // Try to read - should fail
+            let read_result: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+            match read_result {
+                Err(TryLockError.WouldBlock) => {} // Expected
+                Ok(_) => panic("Expected WouldBlock for read while write held"),
+                Err(_) => panic("Expected WouldBlock"),
+            }
+        }
+        Err(_) => panic("Expected Ok for write"),
+    }
+}
+
+@test
+fn test_rwlock_read_blocks_write() {
+    let rw: RwLock<Int> = RwLock.new(400);
+
+    // Acquire read lock
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(read_guard) => {
+            // Try to write - should fail
+            let write_result: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+            match write_result {
+                Err(TryLockError.WouldBlock) => {} // Expected
+                Ok(_) => panic("Expected WouldBlock for write while read held"),
+                Err(_) => panic("Expected WouldBlock"),
+            }
+        }
+        Err(_) => panic("Expected Ok for read"),
+    }
+}
+
+// =============================================================================
+// Section 4: RwLock get_mut and into_inner
+// =============================================================================
+
+@test
+fn test_rwlock_get_mut() {
+    let mut rw: RwLock<Int> = RwLock.new(50);
+
+    // get_mut doesn't require locking (exclusive ownership)
+    let result: LockResult<&mut Int> = rw.get_mut();
+    match result {
+        Ok(data) => {
+            *data = 100;
+        }
+        Err(_) => panic("Expected Ok for get_mut"),
+    }
+
+    let read_result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match read_result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 100);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_into_inner() {
+    let rw: RwLock<Int> = RwLock.new(77);
+
+    let result: LockResult<Int> = rw.into_inner();
+    match result {
+        Ok(data) => assert_eq(data, 77),
+        Err(_) => panic("Expected Ok for into_inner"),
+    }
+}
+
+// =============================================================================
+// Section 5: RwLock Poison State
+// =============================================================================
+
+@test
+fn test_rwlock_not_poisoned_initially() {
+    let rw: RwLock<Int> = RwLock.new(0);
+    assert(!rw.is_poisoned());
+}
+
+@test
+fn test_rwlock_clear_poison() {
+    let rw: RwLock<Int> = RwLock.new(0);
+    rw.clear_poison();
+    assert(!rw.is_poisoned());
+}
+
+// =============================================================================
+// Section 6: Multiple Read/Write Cycles
+// =============================================================================
+
+@test
+fn test_rwlock_read_write_cycles() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Write
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                // Modify through raw pointer (workaround for deref_mut issues)
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 10;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read
+    {
+        let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match result {
+            Ok(guard) => {
+                assert_eq(guard.rwlock.data, 10);
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Write again
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 20;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Final read
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 20);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 7: Lock Release Tests
+// =============================================================================
+
+@test
+fn test_rwlock_read_release() {
+    let rw: RwLock<Int> = RwLock.new(100);
+
+    // Read then release
+    {
+        let _: LockResult<RwLockReadGuard<Int>> = rw.read();
+    }
+
+    // Should be able to write now
+    let result: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+    match result {
+        Ok(_) => {} // Good - write succeeded after read released
+        Err(_) => panic("Expected write to succeed after read release"),
+    }
+}
+
+@test
+fn test_rwlock_write_release() {
+    let rw: RwLock<Int> = RwLock.new(100);
+
+    // Write then release
+    {
+        let _: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    }
+
+    // Should be able to read now
+    let result: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+    match result {
+        Ok(_) => {} // Good - read succeeded after write released
+        Err(_) => panic("Expected read to succeed after write release"),
+    }
+}
+
+// =============================================================================
+// Section 8: Write Blocks Write
+// =============================================================================
+
+@test
+fn test_rwlock_write_blocks_write() {
+    let rw: RwLock<Int> = RwLock.new(500);
+
+    // Acquire write lock
+    let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    match result {
+        Ok(write_guard) => {
+            // Try second write - should fail
+            let write_result: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+            match write_result {
+                Err(TryLockError.WouldBlock) => {} // Expected
+                Ok(_) => panic("Expected WouldBlock for write while write held"),
+                Err(_) => panic("Expected WouldBlock"),
+            }
+        }
+        Err(_) => panic("Expected Ok for write"),
+    }
+}
+
+// =============================================================================
+// Section 9: Multiple Reader Tests
+// =============================================================================
+
+@test
+fn test_rwlock_three_readers() {
+    let rw: RwLock<Int> = RwLock.new(99);
+
+    let r1: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match r1 {
+        Ok(guard1) => {
+            let r2: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+            match r2 {
+                Ok(guard2) => {
+                    let r3: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+                    match r3 {
+                        Ok(guard3) => {
+                            // All three readers can access data
+                            assert_eq(guard1.rwlock.data, 99);
+                            assert_eq(guard2.rwlock.data, 99);
+                            assert_eq(guard3.rwlock.data, 99);
+                        }
+                        Err(_) => panic("Expected third reader to succeed"),
+                    }
+                }
+                Err(_) => panic("Expected second reader to succeed"),
+            }
+        }
+        Err(_) => panic("Expected first reader to succeed"),
+    }
+}
+
+@test
+fn test_rwlock_read_release_then_write() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Acquire and release read lock
+    {
+        let r: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match r {
+            Ok(guard) => {
+                assert_eq(guard.rwlock.data, 0);
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Now write should succeed
+    let w: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+    match w {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 0);
+        }
+        Err(_) => panic("Expected write after read release to succeed"),
+    }
+}
+
+// =============================================================================
+// Section 10: Generic Type Tests
+// =============================================================================
+
+@test
+fn test_rwlock_list() {
+    let rw: RwLock<List<Int>> = RwLock.new(List.new());
+
+    // Write: add elements
+    {
+        let result: LockResult<RwLockWriteGuard<List<Int>>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const List<Int> as *mut List<Int>;
+                    (*ptr).push(1);
+                    (*ptr).push(2);
+                    (*ptr).push(3);
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read: verify elements
+    let result: LockResult<RwLockReadGuard<List<Int>>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data.len(), 3);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_maybe() {
+    let rw: RwLock<Maybe<Text>> = RwLock.new(None);
+
+    // Write: set value
+    {
+        let result: LockResult<RwLockWriteGuard<Maybe<Text>>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Maybe<Text> as *mut Maybe<Text>;
+                    *ptr = Some("hello");
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read: verify value
+    let result: LockResult<RwLockReadGuard<Maybe<Text>>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert(guard.rwlock.data.is_some());
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_tuple() {
+    let rw: RwLock<(Int, Text)> = RwLock.new((42, "answer"));
+
+    let result: LockResult<RwLockReadGuard<(Int, Text)>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data.0, 42);
+            assert_eq(guard.rwlock.data.1, "answer");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 11: into_inner Extended Tests
+// =============================================================================
+
+@test
+fn test_rwlock_into_inner_text() {
+    let rw: RwLock<Text> = RwLock.new("world");
+
+    let result: LockResult<Text> = rw.into_inner();
+    match result {
+        Ok(data) => assert_eq(data, "world"),
+        Err(_) => panic("Expected Ok for into_inner"),
+    }
+}
+
+@test
+fn test_rwlock_into_inner_bool() {
+    let rw: RwLock<Bool> = RwLock.new(true);
+
+    let result: LockResult<Bool> = rw.into_inner();
+    match result {
+        Ok(data) => assert(data),
+        Err(_) => panic("Expected Ok for into_inner"),
+    }
+}
+
+@test
+fn test_rwlock_into_inner_list() {
+    let mut list = List.new();
+    list.push(10);
+    list.push(20);
+    let rw: RwLock<List<Int>> = RwLock.new(list);
+
+    let result: LockResult<List<Int>> = rw.into_inner();
+    match result {
+        Ok(data) => assert_eq(data.len(), 2),
+        Err(_) => panic("Expected Ok for into_inner"),
+    }
+}
+
+// =============================================================================
+// Section 12: get_mut Extended Tests
+// =============================================================================
+
+@test
+fn test_rwlock_get_mut_text() {
+    let mut rw: RwLock<Text> = RwLock.new("original");
+
+    let result: LockResult<&mut Text> = rw.get_mut();
+    match result {
+        Ok(data) => {
+            *data = "modified";
+        }
+        Err(_) => panic("Expected Ok for get_mut"),
+    }
+
+    let read_result: LockResult<RwLockReadGuard<Text>> = rw.read();
+    match read_result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "modified");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_get_mut_multiple_times() {
+    let mut rw: RwLock<Int> = RwLock.new(0);
+
+    // First modification
+    {
+        let result: LockResult<&mut Int> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = 10; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Second modification
+    {
+        let result: LockResult<&mut Int> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = 20; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let read_result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match read_result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 20);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 13: Poison State Extended Tests
+// =============================================================================
+
+@test
+fn test_rwlock_not_poisoned_after_normal_use() {
+    let rw: RwLock<Int> = RwLock.new(42);
+
+    // Read and release
+    {
+        let _: LockResult<RwLockReadGuard<Int>> = rw.read();
+    }
+
+    // Write and release
+    {
+        let _: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    }
+
+    // Should still not be poisoned
+    assert(!rw.is_poisoned());
+}
+
+@test
+fn test_rwlock_clear_poison_idempotent() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Clear poison multiple times should be fine
+    rw.clear_poison();
+    rw.clear_poison();
+    rw.clear_poison();
+
+    assert(!rw.is_poisoned());
+}
+
+// =============================================================================
+// Section 14: Read-Write-Read Upgrade Pattern
+// =============================================================================
+
+@test
+fn test_rwlock_upgrade_pattern() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Read to check value
+    {
+        let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match result {
+            Ok(guard) => {
+                assert_eq(guard.rwlock.data, 0);
+                // Drop read guard
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Write to modify
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 42;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read again to verify
+    {
+        let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match result {
+            Ok(guard) => {
+                assert_eq(guard.rwlock.data, 42);
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+}
+
+@test
+fn test_rwlock_downgrade_pattern() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Write first
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 100;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Then read (downgrade)
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 100);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 15: Read Lock Deeper Tests
+// =============================================================================
+
+@test
+fn test_rwlock_read_float() {
+    let rw: RwLock<Float> = RwLock.new(3.14);
+
+    let result: LockResult<RwLockReadGuard<Float>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 3.14);
+        }
+        Err(_) => panic("Expected Ok for read float"),
+    }
+}
+
+@test
+fn test_rwlock_read_large_int() {
+    let rw: RwLock<Int> = RwLock.new(999999999);
+
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 999999999);
+        }
+        Err(_) => panic("Expected Ok for read large int"),
+    }
+}
+
+@test
+fn test_rwlock_read_value_unchanged() {
+    let rw: RwLock<Int> = RwLock.new(55);
+
+    // Read multiple times - value should never change
+    {
+        let r1: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match r1 {
+            Ok(guard) => { assert_eq(guard.rwlock.data, 55); }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    {
+        let r2: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match r2 {
+            Ok(guard) => { assert_eq(guard.rwlock.data, 55); }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    {
+        let r3: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match r3 {
+            Ok(guard) => { assert_eq(guard.rwlock.data, 55); }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+}
+
+@test
+fn test_rwlock_read_negative_int() {
+    let rw: RwLock<Int> = RwLock.new(-42);
+
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, -42);
+        }
+        Err(_) => panic("Expected Ok for read negative"),
+    }
+}
+
+@test
+fn test_rwlock_read_zero() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 0);
+        }
+        Err(_) => panic("Expected Ok for read zero"),
+    }
+}
+
+// =============================================================================
+// Section 16: Write Lock Deeper Tests
+// =============================================================================
+
+@test
+fn test_rwlock_write_modify_text() {
+    let rw: RwLock<Text> = RwLock.new("initial");
+
+    // Write: modify text
+    {
+        let result: LockResult<RwLockWriteGuard<Text>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Text as *mut Text;
+                    *ptr = "modified";
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read: verify
+    let result: LockResult<RwLockReadGuard<Text>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "modified");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_write_modify_bool() {
+    let rw: RwLock<Bool> = RwLock.new(false);
+
+    // Write: set to true
+    {
+        let result: LockResult<RwLockWriteGuard<Bool>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Bool as *mut Bool;
+                    *ptr = true;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read: verify
+    let result: LockResult<RwLockReadGuard<Bool>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert(guard.rwlock.data);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_write_modify_float() {
+    let rw: RwLock<Float> = RwLock.new(1.0);
+
+    // Write: change float
+    {
+        let result: LockResult<RwLockWriteGuard<Float>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Float as *mut Float;
+                    *ptr = 2.718;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read: verify
+    let result: LockResult<RwLockReadGuard<Float>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 2.718);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_write_modify_to_negative() {
+    let rw: RwLock<Int> = RwLock.new(100);
+
+    // Write: set to negative
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = -500;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read: verify negative value
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, -500);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_write_overwrite_text() {
+    let rw: RwLock<Text> = RwLock.new("first");
+
+    // First write
+    {
+        let result: LockResult<RwLockWriteGuard<Text>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Text as *mut Text;
+                    *ptr = "second";
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Second write
+    {
+        let result: LockResult<RwLockWriteGuard<Text>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Text as *mut Text;
+                    *ptr = "third";
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Verify final value
+    let result: LockResult<RwLockReadGuard<Text>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "third");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 17: try_read Pattern Tests
+// =============================================================================
+
+@test
+fn test_rwlock_try_read_success_uncontended() {
+    let rw: RwLock<Int> = RwLock.new(77);
+
+    let result: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 77);
+        }
+        Err(_) => panic("Expected Ok for uncontended try_read"),
+    }
+}
+
+@test
+fn test_rwlock_try_read_multiple_times() {
+    let rw: RwLock<Int> = RwLock.new(88);
+
+    // try_read multiple times in sequence (no contention)
+    {
+        let r1: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+        match r1 {
+            Ok(guard) => { assert_eq(guard.rwlock.data, 88); }
+            Err(_) => panic("Expected Ok for first try_read"),
+        }
+    }
+    {
+        let r2: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+        match r2 {
+            Ok(guard) => { assert_eq(guard.rwlock.data, 88); }
+            Err(_) => panic("Expected Ok for second try_read"),
+        }
+    }
+    {
+        let r3: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+        match r3 {
+            Ok(guard) => { assert_eq(guard.rwlock.data, 88); }
+            Err(_) => panic("Expected Ok for third try_read"),
+        }
+    }
+}
+
+@test
+fn test_rwlock_try_read_with_text() {
+    let rw: RwLock<Text> = RwLock.new("try_read_text");
+
+    let result: TryLockResult<RwLockReadGuard<Text>> = rw.try_read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "try_read_text");
+        }
+        Err(_) => panic("Expected Ok for try_read text"),
+    }
+}
+
+@test
+fn test_rwlock_try_read_with_float() {
+    let rw: RwLock<Float> = RwLock.new(6.28);
+
+    let result: TryLockResult<RwLockReadGuard<Float>> = rw.try_read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 6.28);
+        }
+        Err(_) => panic("Expected Ok for try_read float"),
+    }
+}
+
+@test
+fn test_rwlock_try_read_concurrent_with_read() {
+    let rw: RwLock<Int> = RwLock.new(111);
+
+    // Hold a read lock, then try_read should still succeed
+    let r1: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match r1 {
+        Ok(guard1) => {
+            let r2: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+            match r2 {
+                Ok(guard2) => {
+                    assert_eq(guard1.rwlock.data, 111);
+                    assert_eq(guard2.rwlock.data, 111);
+                }
+                Err(_) => panic("try_read should succeed while read held"),
+            }
+        }
+        Err(_) => panic("Expected Ok for read"),
+    }
+}
+
+// =============================================================================
+// Section 18: try_write Pattern Tests
+// =============================================================================
+
+@test
+fn test_rwlock_try_write_success_uncontended() {
+    let rw: RwLock<Int> = RwLock.new(222);
+
+    let result: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 222);
+        }
+        Err(_) => panic("Expected Ok for uncontended try_write"),
+    }
+}
+
+@test
+fn test_rwlock_try_write_with_text() {
+    let rw: RwLock<Text> = RwLock.new("try_write_text");
+
+    let result: TryLockResult<RwLockWriteGuard<Text>> = rw.try_write();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "try_write_text");
+        }
+        Err(_) => panic("Expected Ok for try_write text"),
+    }
+}
+
+@test
+fn test_rwlock_try_write_modify_and_verify() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // try_write and modify
+    {
+        let result: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 999;
+                }
+            }
+            Err(_) => panic("Expected Ok for try_write"),
+        }
+    }
+
+    // Verify the change
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 999);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_try_write_fails_during_read() {
+    let rw: RwLock<Int> = RwLock.new(333);
+
+    // Hold a read lock
+    let r: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match r {
+        Ok(read_guard) => {
+            // try_write should fail
+            let w: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+            match w {
+                Err(TryLockError.WouldBlock) => {} // Expected
+                Ok(_) => panic("Expected WouldBlock"),
+                Err(_) => panic("Expected WouldBlock"),
+            }
+        }
+        Err(_) => panic("Expected Ok for read"),
+    }
+}
+
+@test
+fn test_rwlock_try_write_fails_during_write() {
+    let rw: RwLock<Int> = RwLock.new(444);
+
+    // Hold a write lock
+    let w1: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    match w1 {
+        Ok(write_guard) => {
+            // try_write should fail
+            let w2: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write();
+            match w2 {
+                Err(TryLockError.WouldBlock) => {} // Expected
+                Ok(_) => panic("Expected WouldBlock"),
+                Err(_) => panic("Expected WouldBlock"),
+            }
+        }
+        Err(_) => panic("Expected Ok for write"),
+    }
+}
+
+// =============================================================================
+// Section 19: into_inner Additional Types
+// =============================================================================
+
+@test
+fn test_rwlock_into_inner_float() {
+    let rw: RwLock<Float> = RwLock.new(2.718);
+
+    let result: LockResult<Float> = rw.into_inner();
+    match result {
+        Ok(data) => assert_eq(data, 2.718),
+        Err(_) => panic("Expected Ok for into_inner float"),
+    }
+}
+
+@test
+fn test_rwlock_into_inner_tuple() {
+    let rw: RwLock<(Int, Bool)> = RwLock.new((10, true));
+
+    let result: LockResult<(Int, Bool)> = rw.into_inner();
+    match result {
+        Ok(data) => {
+            assert_eq(data.0, 10);
+            assert(data.1);
+        }
+        Err(_) => panic("Expected Ok for into_inner tuple"),
+    }
+}
+
+@test
+fn test_rwlock_into_inner_after_modification() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Write: modify value
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 42;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // into_inner should return modified value
+    let result: LockResult<Int> = rw.into_inner();
+    match result {
+        Ok(data) => assert_eq(data, 42),
+        Err(_) => panic("Expected Ok for into_inner after modification"),
+    }
+}
+
+@test
+fn test_rwlock_into_inner_maybe_some() {
+    let rw: RwLock<Maybe<Int>> = RwLock.new(Some(123));
+
+    let result: LockResult<Maybe<Int>> = rw.into_inner();
+    match result {
+        Ok(data) => {
+            assert(data.is_some());
+        }
+        Err(_) => panic("Expected Ok for into_inner maybe"),
+    }
+}
+
+@test
+fn test_rwlock_into_inner_maybe_none() {
+    let rw: RwLock<Maybe<Int>> = RwLock.new(None);
+
+    let result: LockResult<Maybe<Int>> = rw.into_inner();
+    match result {
+        Ok(data) => {
+            assert(data.is_none());
+        }
+        Err(_) => panic("Expected Ok for into_inner maybe none"),
+    }
+}
+
+// =============================================================================
+// Section 20: get_mut Additional Types
+// =============================================================================
+
+@test
+fn test_rwlock_get_mut_bool() {
+    let mut rw: RwLock<Bool> = RwLock.new(false);
+
+    let result: LockResult<&mut Bool> = rw.get_mut();
+    match result {
+        Ok(data) => {
+            *data = true;
+        }
+        Err(_) => panic("Expected Ok for get_mut bool"),
+    }
+
+    let read_result: LockResult<RwLockReadGuard<Bool>> = rw.read();
+    match read_result {
+        Ok(guard) => {
+            assert(guard.rwlock.data);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_get_mut_float() {
+    let mut rw: RwLock<Float> = RwLock.new(0.0);
+
+    let result: LockResult<&mut Float> = rw.get_mut();
+    match result {
+        Ok(data) => {
+            *data = 9.81;
+        }
+        Err(_) => panic("Expected Ok for get_mut float"),
+    }
+
+    let read_result: LockResult<RwLockReadGuard<Float>> = rw.read();
+    match read_result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 9.81);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_get_mut_three_times() {
+    let mut rw: RwLock<Int> = RwLock.new(0);
+
+    // First
+    {
+        let result: LockResult<&mut Int> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = 1; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Second
+    {
+        let result: LockResult<&mut Int> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = 2; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Third
+    {
+        let result: LockResult<&mut Int> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = 3; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let read_result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match read_result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 3);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_get_mut_text_multiple() {
+    let mut rw: RwLock<Text> = RwLock.new("alpha");
+
+    {
+        let result: LockResult<&mut Text> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = "beta"; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    {
+        let result: LockResult<&mut Text> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = "gamma"; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let read_result: LockResult<RwLockReadGuard<Text>> = rw.read();
+    match read_result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "gamma");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 21: Poison Additional Tests
+// =============================================================================
+
+@test
+fn test_rwlock_not_poisoned_after_read() {
+    let rw: RwLock<Int> = RwLock.new(42);
+
+    // Acquire and release read lock
+    {
+        let _: LockResult<RwLockReadGuard<Int>> = rw.read();
+    }
+
+    assert(!rw.is_poisoned());
+}
+
+@test
+fn test_rwlock_not_poisoned_after_write() {
+    let rw: RwLock<Int> = RwLock.new(42);
+
+    // Acquire and release write lock
+    {
+        let _: LockResult<RwLockWriteGuard<Int>> = rw.write();
+    }
+
+    assert(!rw.is_poisoned());
+}
+
+@test
+fn test_rwlock_clear_poison_three_times() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    rw.clear_poison();
+    assert(!rw.is_poisoned());
+
+    rw.clear_poison();
+    assert(!rw.is_poisoned());
+
+    rw.clear_poison();
+    assert(!rw.is_poisoned());
+}
+
+@test
+fn test_rwlock_not_poisoned_after_multiple_operations() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Read
+    { let _: LockResult<RwLockReadGuard<Int>> = rw.read(); }
+    assert(!rw.is_poisoned());
+
+    // Write
+    { let _: LockResult<RwLockWriteGuard<Int>> = rw.write(); }
+    assert(!rw.is_poisoned());
+
+    // try_read
+    { let _: TryLockResult<RwLockReadGuard<Int>> = rw.try_read(); }
+    assert(!rw.is_poisoned());
+
+    // try_write
+    { let _: TryLockResult<RwLockWriteGuard<Int>> = rw.try_write(); }
+    assert(!rw.is_poisoned());
+}
+
+// =============================================================================
+// Section 22: Default Type Tests
+// =============================================================================
+
+@test
+fn test_rwlock_default_int_is_zero() {
+    let rw: RwLock<Int> = RwLock.default();
+
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 0);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_default_bool_is_false() {
+    let rw: RwLock<Bool> = RwLock.default();
+
+    let result: LockResult<RwLockReadGuard<Bool>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert(!guard.rwlock.data);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_default_text_is_empty() {
+    let rw: RwLock<Text> = RwLock.default();
+
+    let result: LockResult<RwLockReadGuard<Text>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_default_float_is_zero() {
+    let rw: RwLock<Float> = RwLock.default();
+
+    let result: LockResult<RwLockReadGuard<Float>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, 0.0);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 23: Complex Read-Write Patterns
+// =============================================================================
+
+@test
+fn test_rwlock_read_write_read_verify() {
+    let rw: RwLock<Int> = RwLock.new(10);
+
+    // Read initial
+    {
+        let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match result {
+            Ok(guard) => { assert_eq(guard.rwlock.data, 10); }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Write new value
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 20;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read again - should see updated value
+    {
+        let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+        match result {
+            Ok(guard) => { assert_eq(guard.rwlock.data, 20); }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+}
+
+@test
+fn test_rwlock_multiple_writes_accumulate() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Write 1: set to 10
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 10;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Write 2: set to 20
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 20;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Write 3: set to 30
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 30;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Verify final value
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => { assert_eq(guard.rwlock.data, 30); }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_write_set_then_get_mut_override() {
+    let mut rw: RwLock<Int> = RwLock.new(0);
+
+    // Write via lock
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 50;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Override via get_mut
+    {
+        let result: LockResult<&mut Int> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = 75; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Verify get_mut value wins
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => { assert_eq(guard.rwlock.data, 75); }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_write_release_then_multiple_readers() {
+    let rw: RwLock<Int> = RwLock.new(0);
+
+    // Write a value
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 42;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Multiple readers should see the written value
+    let r1: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match r1 {
+        Ok(guard1) => {
+            let r2: TryLockResult<RwLockReadGuard<Int>> = rw.try_read();
+            match r2 {
+                Ok(guard2) => {
+                    assert_eq(guard1.rwlock.data, 42);
+                    assert_eq(guard2.rwlock.data, 42);
+                }
+                Err(_) => panic("Expected second reader to succeed"),
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_get_mut_then_read() {
+    let mut rw: RwLock<Int> = RwLock.new(0);
+
+    // Modify via get_mut
+    {
+        let result: LockResult<&mut Int> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = 123; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read should see updated value
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => { assert_eq(guard.rwlock.data, 123); }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_get_mut_then_write_then_read() {
+    let mut rw: RwLock<Int> = RwLock.new(0);
+
+    // get_mut to set initial
+    {
+        let result: LockResult<&mut Int> = rw.get_mut();
+        match result {
+            Ok(data) => { *data = 10; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Write to override
+    {
+        let result: LockResult<RwLockWriteGuard<Int>> = rw.write();
+        match result {
+            Ok(mut guard) => {
+                unsafe {
+                    let ptr = &guard.rwlock.data as *const Int as *mut Int;
+                    *ptr = 20;
+                }
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // Read final
+    let result: LockResult<RwLockReadGuard<Int>> = rw.read();
+    match result {
+        Ok(guard) => { assert_eq(guard.rwlock.data, 20); }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_rwlock_into_inner_negative() {
+    let rw: RwLock<Int> = RwLock.new(-100);
+
+    let result: LockResult<Int> = rw.into_inner();
+    match result {
+        Ok(data) => assert_eq(data, -100),
+        Err(_) => panic("Expected Ok for into_inner negative"),
+    }
+}
+
+@test
+fn test_rwlock_new_empty_text() {
+    let rw: RwLock<Text> = RwLock.new("");
+
+    let result: LockResult<RwLockReadGuard<Text>> = rw.read();
+    match result {
+        Ok(guard) => {
+            assert_eq(guard.rwlock.data, "");
+        }
+        Err(_) => panic("Expected Ok for read empty text"),
+    }
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

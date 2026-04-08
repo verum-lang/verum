@@ -1,0 +1,77 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, newtype, wrapper
+
+// Simple newtype wrapping primitive - uses tuple syntax per grammar
+type Meters is (Float);
+type Seconds is (Float);
+type Kilograms is (Float);
+
+// Newtype wrapping integer
+type UserId is (Int);
+type OrderId is (Int);
+type Timestamp is (Int);
+
+// Newtype wrapping text
+type Email is (Text);
+type Username is (Text);
+type Password is (Text);
+type Url is (Text);
+
+// Newtype with generic underlying type
+type Id<T> is (Int);
+type Tagged<Tag, T> is (T);
+
+// Newtype for domain modeling
+type Money is (Float);
+type Percentage is (Float);
+type Temperature is (Float);
+
+// Newtype with methods (implement block)
+type Celsius is (Float);
+
+implement Celsius {
+    fn to_fahrenheit(&self) -> Fahrenheit {
+        Fahrenheit((self.0 * 9.0 / 5.0) + 32.0)
+    }
+
+    fn from_fahrenheit(f: Fahrenheit) -> Celsius {
+        Celsius((f.0 - 32.0) * 5.0 / 9.0)
+    }
+}
+
+type Fahrenheit is (Float);
+
+// Newtype with derive-like attributes
+@derive(Debug, Clone, Eq, Hash)
+type ProductSku is (Text);
+
+// Newtype wrapping complex type
+type NonEmptyList<T> is (List<T>);
+type SortedList<T> is (List<T>);
+
+// Newtype for type-safe indices
+type RowIndex is (Int);
+type ColumnIndex is (Int);
+
+// Newtype with validation in constructor (pattern)
+type PositiveInt is (Int);
+
+implement PositiveInt {
+    fn new(value: Int) -> Maybe<PositiveInt> {
+        if value > 0 {
+            Some(PositiveInt(value))
+        } else {
+            None
+        }
+    }
+}
+
+// Newtype for opaque type pattern
+type Handle is (Int);
+type Token is (Text);
+type SessionId is (Text);
+
+// Newtype with refinement - using inline refinement syntax
+type ValidEmail is Text{contains(self, "@")};

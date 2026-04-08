@@ -1,0 +1,95 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, context, tier1, metatypes
+// @description: Test that Tier 1 MetaTypes builtins work with MetaTypes context
+// @contexts: MetaTypes
+
+// =============================================================================
+// TYPE NAME AND ID FUNCTIONS
+// =============================================================================
+
+meta fn test_type_name_with_context() -> Text using [MetaTypes] {
+    type_name(Int)
+}
+
+meta fn test_type_id_with_context() -> Int using [MetaTypes] {
+    type_id(Int)
+}
+
+// =============================================================================
+// SIZE/ALIGNMENT FUNCTIONS
+// =============================================================================
+
+meta fn test_size_of_with_context() -> Int using [MetaTypes] {
+    size_of(Int)
+}
+
+meta fn test_align_of_with_context() -> Int using [MetaTypes] {
+    align_of(Int)
+}
+
+meta fn test_stride_of_with_context() -> Int using [MetaTypes] {
+    stride_of(Int)
+}
+
+meta fn test_type_bits_with_context() -> Int using [MetaTypes] {
+    type_bits(Int)
+}
+
+// =============================================================================
+// PROTOCOL CHECKING FUNCTIONS
+// =============================================================================
+
+meta fn test_is_copy_with_context() -> Bool using [MetaTypes] {
+    is_copy(Int)
+}
+
+meta fn test_is_send_with_context() -> Bool using [MetaTypes] {
+    is_send(Int)
+}
+
+meta fn test_is_sync_with_context() -> Bool using [MetaTypes] {
+    is_sync(Int)
+}
+
+meta fn test_is_sized_with_context() -> Bool using [MetaTypes] {
+    is_sized(Int)
+}
+
+// =============================================================================
+// COMBINED CONTEXT USAGE
+// =============================================================================
+
+meta fn test_combined_reflection() -> Bool using [MetaTypes] {
+    let name = type_name(Int);
+    let size = size_of(Int);
+    let is_copy_val = is_copy(Int);
+
+    text_len(name) > 0 && size > 0 && is_copy_val
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Type name and ID
+    @const assert(text_len(test_type_name_with_context()) > 0);
+    @const assert(test_type_id_with_context() >= 0);
+
+    // Size/alignment
+    @const assert(test_size_of_with_context() > 0);
+    @const assert(test_align_of_with_context() > 0);
+    @const assert(test_stride_of_with_context() > 0);
+    @const assert(test_type_bits_with_context() > 0);
+
+    // Protocol checking
+    @const assert(test_is_copy_with_context());
+    @const assert(test_is_send_with_context());
+    @const assert(test_is_sync_with_context());
+    @const assert(test_is_sized_with_context());
+
+    // Combined
+    @const assert(test_combined_reflection());
+}

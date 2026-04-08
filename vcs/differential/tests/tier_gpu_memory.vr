@@ -1,0 +1,327 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, gpu, memory
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for GPU memory concepts.
+/// Tests allocation/free tracking, host-device transfer simulation, memory pool management,
+/// and coalesced access patterns using pure Verum arithmetic.
+
+fn main() {
+    test_allocation_tracking();
+    test_host_device_transfer();
+    test_memory_pool();
+    test_coalesced_access();
+    test_memory_bank_conflicts();
+}
+
+/// Simulated GPU memory allocation and free tracking
+fn test_allocation_tracking() {
+    println("=== Allocation Tracking ===");
+
+    // Simulate a simple allocator with a free list
+    // Memory pool of 1024 bytes, track allocations as (offset, size)
+    let total_memory = 1024;
+    let mut next_offset = 0;
+
+    // Allocation requests
+    let alloc_sizes = [64, 128, 256, 32, 64];
+    let num_allocs = 5;
+
+    // Track offsets
+    let mut offsets = [0, 0, 0, 0, 0];
+
+    let mut i = 0;
+    while i < num_allocs {
+        // Align to 16-byte boundary
+        let aligned_offset = ((next_offset + 15) / 16) * 16;
+        offsets[i] = aligned_offset;
+        next_offset = aligned_offset + alloc_sizes[i];
+        println(f"alloc[{i}]: size={alloc_sizes[i]}, offset={offsets[i]}, next_free={next_offset}");
+        i = i + 1;
+    }
+
+    let used_memory = next_offset;
+    let free_memory = total_memory - used_memory;
+    let fragmentation = (next_offset - 544) * 100 / total_memory;  // 544 = sum of alloc_sizes
+    println(f"used: {used_memory}, free: {free_memory}");
+    println(f"total allocated payload: 544");
+
+    // Free middle allocation (index 2, size 256) and track the hole
+    let freed_offset = offsets[2];
+    let freed_size = alloc_sizes[2];
+    println(f"freeing alloc[2]: offset={freed_offset}, size={freed_size}");
+
+    // Simulate reallocation into the freed space
+    let new_alloc_size = 128;
+    if new_alloc_size <= freed_size {
+        println(f"realloc into freed space: size={new_alloc_size} fits in hole of {freed_size}");
+        let remaining_hole = freed_size - new_alloc_size;
+        println(f"remaining hole: {remaining_hole} bytes at offset {freed_offset + new_alloc_size}");
+    } else {
+        println(f"realloc: size={new_alloc_size} does not fit in hole of {freed_size}");
+    }
+}
+
+/// Simulated host-device memory transfers
+fn test_host_device_transfer() {
+    println("\n=== Host-Device Transfer ===");
+
+    // Simulate PCIe bandwidth modeling
+    // PCIe Gen4 x16: ~25 GB/s, Gen5 x16: ~50 GB/s
+    let pcie_gen4_bw = 25;  // GB/s
+    let pcie_gen5_bw = 50;  // GB/s
+
+    // Transfer sizes in MB
+    let transfer_sizes = [1, 10, 100, 500, 1000];
+    let num_transfers = 5;
+
+    println("PCIe Gen4 transfer times:");
+    let mut i = 0;
+    while i < num_transfers {
+        // Time in microseconds: (size_MB * 1000) / bandwidth_GB_s
+        let time_us = transfer_sizes[i] * 1000 / pcie_gen4_bw;
+        println(f"  {transfer_sizes[i]}MB: {time_us}us");
+        i = i + 1;
+    }
+
+    println("PCIe Gen5 transfer times:");
+    let mut j = 0;
+    while j < num_transfers {
+        let time_us = transfer_sizes[j] * 1000 / pcie_gen5_bw;
+        println(f"  {transfer_sizes[j]}MB: {time_us}us");
+        j = j + 1;
+    }
+
+    // Pinned vs pageable transfer: pinned is ~2x faster due to no staging buffer
+    println("pinned vs pageable (Gen4):");
+    let mut k = 0;
+    while k < num_transfers {
+        let pageable_us = transfer_sizes[k] * 1000 / pcie_gen4_bw;
+        let pinned_us = transfer_sizes[k] * 1000 / (pcie_gen4_bw * 2);
+        let speedup_pct = (pageable_us - pinned_us) * 100 / pageable_us;
+        println(f"  {transfer_sizes[k]}MB: pageable={pageable_us}us, pinned={pinned_us}us, savings={speedup_pct}%");
+        k = k + 1;
+    }
+
+    // Simulate double-buffering overlap
+    // While transferring chunk N, compute on chunk N-1
+    let chunk_size = 100;  // MB
+    let total_data = 500;  // MB
+    let transfer_time = chunk_size * 1000 / pcie_gen4_bw;  // us per chunk
+    let compute_time = 3000;  // us per chunk
+
+    let num_chunks = total_data / chunk_size;
+    // First chunk: transfer only. Last chunk: compute only. Middle: overlap.
+    let sequential_time = num_chunks * (transfer_time + compute_time);
+    let pipeline_time = transfer_time + num_chunks * compute_time;  // simplified overlap model
+    println(f"double-buffering: {num_chunks} chunks of {chunk_size}MB");
+    println(f"sequential time: {sequential_time}us");
+    println(f"pipelined time: {pipeline_time}us");
+}
+
+/// Simulated memory pool with sub-allocation
+fn test_memory_pool() {
+    println("\n=== Memory Pool ===");
+
+    // Buddy allocator simulation
+    // Pool size: 512 bytes, minimum block: 16 bytes
+    let pool_size = 512;
+    let min_block = 16;
+
+    // Find the power-of-2 block that fits the request
+    fn next_power_of_2(size: Int) -> Int {
+        let mut p = 1;
+        while p < size {
+            p = p * 2;
+        }
+        p
+    }
+
+    let requests = [10, 30, 100, 50, 200];
+    let num_requests = 5;
+
+    let mut allocated = 0;
+    let mut i = 0;
+    while i < num_requests {
+        let requested = requests[i];
+        let mut block_size = next_power_of_2(requested);
+        if block_size < min_block {
+            block_size = min_block;
+        }
+
+        let internal_fragmentation = block_size - requested;
+        allocated = allocated + block_size;
+        let remaining = pool_size - allocated;
+
+        println(f"request[{i}]: need={requested}, block={block_size}, internal_frag={internal_fragmentation}, pool_remaining={remaining}");
+        i = i + 1;
+    }
+
+    println(f"total allocated: {allocated}");
+    println(f"total requested: 390");
+    println(f"overhead: {allocated - 390} bytes ({(allocated - 390) * 100 / 390}%)");
+
+    // Slab allocator simulation: fixed-size slabs for common allocation sizes
+    let slab_sizes = [32, 64, 128, 256];
+    let num_slabs = 4;
+
+    println("slab allocator sizing:");
+    let mut s = 0;
+    while s < num_slabs {
+        let objects_per_slab = pool_size / slab_sizes[s];
+        println(f"  slab[{slab_sizes[s]}]: {objects_per_slab} objects per page");
+        s = s + 1;
+    }
+}
+
+/// Simulated coalesced memory access pattern analysis
+fn test_coalesced_access() {
+    println("\n=== Coalesced Access ===");
+
+    // Warp size = 32 threads. Coalesced access occurs when threads
+    // access consecutive memory addresses within a cache line (128 bytes)
+    let warp_size = 32;
+    let cache_line = 128;
+    let element_size = 4;  // 4 bytes per element (e.g., float32)
+
+    // Pattern 1: Sequential access (fully coalesced)
+    // Thread i accesses element i
+    let mut transactions_sequential = 0;
+    let elements_per_line = cache_line / element_size;
+    transactions_sequential = (warp_size + elements_per_line - 1) / elements_per_line;
+    println(f"sequential access: {transactions_sequential} transactions for {warp_size} threads");
+
+    // Pattern 2: Strided access (stride 2)
+    // Thread i accesses element 2*i
+    let stride = 2;
+    let span = (warp_size - 1) * stride * element_size;
+    let strided_transactions = (span + cache_line - 1) / cache_line;
+    println(f"stride-2 access: {strided_transactions} transactions for {warp_size} threads");
+
+    // Pattern 3: Various strides
+    let strides = [1, 2, 4, 8, 16, 32];
+    let num_strides = 6;
+
+    println("stride analysis:");
+    let mut i = 0;
+    while i < num_strides {
+        let s = strides[i];
+        let access_span = (warp_size - 1) * s * element_size;
+        let txns = if access_span == 0 {
+            1
+        } else {
+            (access_span + cache_line - 1) / cache_line
+        };
+        let efficiency = warp_size * element_size * 100 / (txns * cache_line);
+        println(f"  stride {s}: span={access_span}B, transactions={txns}, efficiency={efficiency}%");
+        i = i + 1;
+    }
+
+    // AoS vs SoA comparison
+    // Array of Structures: fields interleaved (poor coalescing)
+    // Structure of Arrays: fields contiguous (good coalescing)
+    let num_fields = 4;
+    let aos_stride = num_fields;  // access pattern has stride = num_fields
+    let soa_stride = 1;           // access pattern is sequential
+
+    let aos_span = (warp_size - 1) * aos_stride * element_size;
+    let aos_txns = (aos_span + cache_line - 1) / cache_line;
+
+    let soa_span = (warp_size - 1) * soa_stride * element_size;
+    let soa_txns = (soa_span + cache_line - 1) / cache_line;
+
+    println(f"AoS ({num_fields} fields): {aos_txns} transactions");
+    println(f"SoA ({num_fields} fields): {soa_txns} transactions");
+    println(f"SoA speedup: {aos_txns}x / {soa_txns}x = {aos_txns / soa_txns}x fewer transactions");
+}
+
+/// Simulated shared memory bank conflict analysis
+fn test_memory_bank_conflicts() {
+    println("\n=== Memory Bank Conflicts ===");
+
+    // 32 banks, 4 bytes per bank, 128 bytes per bank row
+    let num_banks = 32;
+    let bytes_per_bank = 4;
+
+    // Compute bank index for a given address
+    fn bank_index(addr: Int, num_banks: Int, bytes_per_bank: Int) -> Int {
+        (addr / bytes_per_bank) % num_banks
+    }
+
+    // Pattern 1: Sequential access (no conflicts)
+    println("sequential access (stride 1):");
+    let mut conflicts_seq = 0;
+    let mut bank_hits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut t = 0;
+    while t < 32 {
+        let addr = t * 4;  // stride 1 element
+        let bidx = bank_index(addr, num_banks, bytes_per_bank);
+        bank_hits[bidx] = bank_hits[bidx] + 1;
+        t = t + 1;
+    }
+
+    let mut max_hits = 0;
+    let mut b = 0;
+    while b < num_banks {
+        if bank_hits[b] > max_hits {
+            max_hits = bank_hits[b];
+        }
+        b = b + 1;
+    }
+    println(f"  max hits per bank: {max_hits} (1 = no conflict)");
+
+    // Pattern 2: Stride 2 (2-way conflicts on half the banks)
+    println("stride-2 access:");
+    let mut bank_hits2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut t2 = 0;
+    while t2 < 32 {
+        let addr = t2 * 8;  // stride 2 elements = 8 bytes
+        let bidx = bank_index(addr, num_banks, bytes_per_bank);
+        bank_hits2[bidx] = bank_hits2[bidx] + 1;
+        t2 = t2 + 1;
+    }
+
+    let mut max_hits2 = 0;
+    let mut b2 = 0;
+    while b2 < num_banks {
+        if bank_hits2[b2] > max_hits2 {
+            max_hits2 = bank_hits2[b2];
+        }
+        b2 = b2 + 1;
+    }
+    println(f"  max hits per bank: {max_hits2} ({max_hits2}-way conflict)");
+
+    // Pattern 3: Various strides
+    let test_strides = [1, 2, 4, 8, 16, 32];
+    let num_test = 6;
+
+    println("conflict summary:");
+    let mut si = 0;
+    while si < num_test {
+        let stride = test_strides[si];
+        let mut bank_max = 0;
+        let mut bank_counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut ti = 0;
+        while ti < 32 {
+            let addr = ti * stride * bytes_per_bank;
+            let bidx = bank_index(addr, num_banks, bytes_per_bank);
+            bank_counts[bidx] = bank_counts[bidx] + 1;
+            ti = ti + 1;
+        }
+        let mut bi = 0;
+        while bi < num_banks {
+            if bank_counts[bi] > bank_max {
+                bank_max = bank_counts[bi];
+            }
+            bi = bi + 1;
+        }
+        println(f"  stride {stride}: {bank_max}-way conflict");
+        si = si + 1;
+    }
+}

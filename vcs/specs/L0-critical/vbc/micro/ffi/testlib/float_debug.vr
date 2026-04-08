@@ -1,0 +1,47 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, float, debug
+// @description: Debug float FFI return values
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_sqrt_f64(x: Float) -> Float;
+    fn ffi_floor_f64(x: Float) -> Float;
+    fn ffi_ceil_f64(x: Float) -> Float;
+    fn ffi_round_f64(x: Float) -> Float;
+}
+
+fn main() {
+    // Test sqrt
+    let sqrt4 = ffi_sqrt_f64(4.0);
+    print("sqrt(4.0) = "); print(sqrt4); print("\n");
+
+    let sqrt9 = ffi_sqrt_f64(9.0);
+    print("sqrt(9.0) = "); print(sqrt9); print("\n");
+
+    let sqrt2 = ffi_sqrt_f64(2.0);
+    print("sqrt(2.0) = "); print(sqrt2); print("\n");
+
+    // Test floor
+    let floor37 = ffi_floor_f64(3.7);
+    print("floor(3.7) = "); print(floor37); print("\n");
+
+    let floor_neg = ffi_floor_f64(-2.3);
+    print("floor(-2.3) = "); print(floor_neg); print("\n");
+
+    // Test ceil
+    let ceil32 = ffi_ceil_f64(3.2);
+    print("ceil(3.2) = "); print(ceil32); print("\n");
+
+    // Test round
+    let round34 = ffi_round_f64(3.4);
+    print("round(3.4) = "); print(round34); print("\n");
+
+    let round35 = ffi_round_f64(3.5);
+    print("round(3.5) = "); print(round35); print("\n");
+
+    print("Debug complete\n");
+}

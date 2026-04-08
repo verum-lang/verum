@@ -1,0 +1,48 @@
+// @test: parse
+// @level: L1
+// @tags: meta, const, compile-time, types
+// @timeout: 5000
+
+/// Compile-time constants used in type definitions.
+
+// Protocol with associated constants
+type Sized is protocol {
+    const size: Int;
+    const alignment: Int;
+};
+
+// Type with const parameters
+type FixedArray<T, const N: Int> is {
+    data: [T; N],
+};
+
+// Constants in implement blocks
+implement Sized for Int {
+    const size: Int = 8;
+    const alignment: Int = 8;
+}
+
+implement Sized for Bool {
+    const size: Int = 1;
+    const alignment: Int = 1;
+}
+
+implement Sized for Float {
+    const size: Int = 8;
+    const alignment: Int = 8;
+}
+
+// Type-level arithmetic with constants
+const CACHE_LINE: Int = 64;
+const ELEMENTS_PER_LINE: Int = CACHE_LINE / 8;
+
+type CacheAligned is {
+    @repr(align(64))
+    data: [Int; ELEMENTS_PER_LINE],
+};
+
+fn main() {
+    assert_eq(Int.size, 8);
+    assert_eq(ELEMENTS_PER_LINE, 8);
+    print("Const in types tests parsed");
+}

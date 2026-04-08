@@ -1,0 +1,38 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, match, named-record-variant
+// @expected-exit: 0
+
+type Shape is
+    Circle { radius: Int }
+  | Triangle { base: Int, height: Int }
+  | Square { side: Int };
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle { radius: r } => r * r * 3,
+        Triangle { base: b, height: h } => b * h / 2,
+        Square { side: s } => s * s,
+    }
+}
+
+fn main() -> Int {
+    let c = Circle { radius: 5 };
+    let t = Triangle { base: 6, height: 4 };
+    let sq = Square { side: 7 };
+
+    let a1 = area(c);
+    print(a1);
+    assert_eq(a1, 75);
+
+    let a2 = area(t);
+    print(a2);
+    assert_eq(a2, 12);
+
+    let a3 = area(sq);
+    print(a3);
+    assert_eq(a3, 49);
+
+    0
+}

@@ -1,0 +1,192 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, queue, circular-buffer, enqueue, dequeue, fifo
+// @expected-exit: 0
+
+// Circular buffer queue using a 16-element list.
+// head: index of front element
+// tail: index of next insert position
+// count: number of elements
+// capacity: max elements (use 16)
+
+fn enqueue(buf: List<Int>, tail: Int, val: Int, cap: Int) -> Int {
+    buf[tail] = val;
+    (tail + 1) % cap
+}
+
+fn dequeue_val(buf: List<Int>, head: Int) -> Int {
+    buf[head]
+}
+
+fn dequeue_head(head: Int, cap: Int) -> Int {
+    (head + 1) % cap
+}
+
+fn queue_front(buf: List<Int>, head: Int) -> Int {
+    buf[head]
+}
+
+fn main() -> Int {
+    let cap = 16;
+
+    // Test 1: Enqueue single element and dequeue
+    let mut q1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut head = 0;
+    let mut tail = 0;
+    let mut count = 0;
+
+    // Enqueue 42
+    tail = enqueue(q1, tail, 42, cap);
+    count = count + 1;
+    assert_eq(count, 1);
+    assert_eq(queue_front(q1, head), 42);
+
+    // Test 2: Enqueue multiple, verify FIFO order
+    tail = enqueue(q1, tail, 10, cap);
+    count = count + 1;
+    tail = enqueue(q1, tail, 20, cap);
+    count = count + 1;
+    tail = enqueue(q1, tail, 30, cap);
+    count = count + 1;
+    // Queue: [42, 10, 20, 30], head=0, tail=4, count=4
+    assert_eq(queue_front(q1, head), 42);
+
+    // Test 3: Dequeue and verify FIFO
+    let v1 = dequeue_val(q1, head);
+    head = dequeue_head(head, cap);
+    count = count - 1;
+    assert_eq(v1, 42);
+    // Queue: [10, 20, 30], head=1, tail=4, count=3
+    assert_eq(queue_front(q1, head), 10);
+
+    // Test 4: Dequeue all remaining and verify order
+    let v2 = dequeue_val(q1, head);
+    head = dequeue_head(head, cap);
+    count = count - 1;
+    assert_eq(v2, 10);
+
+    let v3 = dequeue_val(q1, head);
+    head = dequeue_head(head, cap);
+    count = count - 1;
+    assert_eq(v3, 20);
+
+    let v4 = dequeue_val(q1, head);
+    head = dequeue_head(head, cap);
+    count = count - 1;
+    assert_eq(v4, 30);
+    assert_eq(count, 0);
+
+    // Test 5: Wrap-around behavior
+    // Start with head=14, tail=14 (near end of buffer)
+    let mut q2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut h2 = 14;
+    let mut t2 = 14;
+    let mut c2 = 0;
+
+    // Enqueue at index 14, 15, 0, 1
+    t2 = enqueue(q2, t2, 100, cap);  // goes in [14], t2=15
+    c2 = c2 + 1;
+    t2 = enqueue(q2, t2, 200, cap);  // goes in [15], t2=0
+    c2 = c2 + 1;
+    t2 = enqueue(q2, t2, 300, cap);  // goes in [0], t2=1
+    c2 = c2 + 1;
+    t2 = enqueue(q2, t2, 400, cap);  // goes in [1], t2=2
+    c2 = c2 + 1;
+
+    assert_eq(t2, 2);  // Wrapped around
+    assert_eq(c2, 4);
+
+    // Test 6: Dequeue from wrap-around queue
+    let w1 = dequeue_val(q2, h2);
+    h2 = dequeue_head(h2, cap);  // h2: 14 -> 15
+    assert_eq(w1, 100);
+
+    let w2 = dequeue_val(q2, h2);
+    h2 = dequeue_head(h2, cap);  // h2: 15 -> 0
+    assert_eq(w2, 200);
+    assert_eq(h2, 0);  // Head wrapped around
+
+    // Test 7: Continue dequeue after wrap
+    let w3 = dequeue_val(q2, h2);
+    h2 = dequeue_head(h2, cap);  // h2: 0 -> 1
+    assert_eq(w3, 300);
+
+    let w4 = dequeue_val(q2, h2);
+    h2 = dequeue_head(h2, cap);  // h2: 1 -> 2
+    assert_eq(w4, 400);
+    assert_eq(h2, t2);  // head caught up to tail = empty
+
+    // Test 8: Interleaved enqueue/dequeue (producer-consumer)
+    let mut q3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut h3 = 0;
+    let mut t3 = 0;
+    let mut sum = 0;
+
+    // Producer adds 1..5, consumer removes after each pair
+    t3 = enqueue(q3, t3, 1, cap); // [1]
+    t3 = enqueue(q3, t3, 2, cap); // [1,2]
+    sum = sum + dequeue_val(q3, h3);
+    h3 = dequeue_head(h3, cap); // sum=1, [2]
+    t3 = enqueue(q3, t3, 3, cap); // [2,3]
+    t3 = enqueue(q3, t3, 4, cap); // [2,3,4]
+    sum = sum + dequeue_val(q3, h3);
+    h3 = dequeue_head(h3, cap); // sum=3, [3,4]
+    t3 = enqueue(q3, t3, 5, cap); // [3,4,5]
+    // Drain remaining
+    sum = sum + dequeue_val(q3, h3);
+    h3 = dequeue_head(h3, cap); // sum=6
+    sum = sum + dequeue_val(q3, h3);
+    h3 = dequeue_head(h3, cap); // sum=10
+    sum = sum + dequeue_val(q3, h3);
+    h3 = dequeue_head(h3, cap); // sum=15
+    assert_eq(sum, 15);  // 1+2+3+4+5
+
+    // Test 9: Queue used as BFS level tracker
+    // BFS levels: enqueue level numbers and count per level
+    let mut q4 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut h4 = 0;
+    let mut t4 = 0;
+    // Level 0: 1 node, Level 1: 2 nodes, Level 2: 4 nodes
+    t4 = enqueue(q4, t4, 0, cap);  // level 0
+    t4 = enqueue(q4, t4, 1, cap);  // level 1
+    t4 = enqueue(q4, t4, 1, cap);  // level 1
+    t4 = enqueue(q4, t4, 2, cap);  // level 2
+    t4 = enqueue(q4, t4, 2, cap);  // level 2
+    t4 = enqueue(q4, t4, 2, cap);  // level 2
+    t4 = enqueue(q4, t4, 2, cap);  // level 2
+
+    let mut level_count = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut processed = 0;
+    while (processed < 7) {
+        let lv = dequeue_val(q4, h4);
+        h4 = dequeue_head(h4, cap);
+        level_count[lv] = level_count[lv] + 1;
+        processed = processed + 1;
+    }
+    assert_eq(level_count[0], 1);
+    assert_eq(level_count[1], 2);
+    assert_eq(level_count[2], 4);
+
+    // Test 10: Queue capacity usage - fill near capacity and drain
+    let mut q5 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut h5 = 0;
+    let mut t5 = 0;
+    let mut fill_sum = 0;
+    let mut idx = 0;
+    while (idx < 15) {
+        t5 = enqueue(q5, t5, idx + 1, cap);
+        idx = idx + 1;
+    }
+    // Drain and sum: 1+2+...+15 = 120
+    idx = 0;
+    while (idx < 15) {
+        fill_sum = fill_sum + dequeue_val(q5, h5);
+        h5 = dequeue_head(h5, cap);
+        idx = idx + 1;
+    }
+    assert_eq(fill_sum, 120);
+
+    print("Queue operations: PASS");
+    0
+}

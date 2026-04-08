@@ -1,0 +1,34 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, length-tracking, error
+// @expected-error: E400 "Type mismatch"
+
+/// Length tracking failures - type checker catches type mismatches
+/// when dependent types constrain list operations.
+
+/// Sized array with statically known length
+type SizedArray<T, N: meta Int> is {
+    data: [T; N],
+};
+
+/// ERROR: Return type is wrong - returning Text instead of SizedArray
+fn replicate_wrong<T, N: meta Int>(value: T) -> SizedArray<T, N> {
+    "not an array"  // ERROR: Text != SizedArray<T, N>
+}
+
+/// ERROR: Field type mismatch in struct construction
+fn construct_wrong() -> SizedArray<Int, 3> {
+    SizedArray { data: "hello" }  // ERROR: Text != [Int; 3]
+}
+
+/// ERROR: Wrong element type in array
+fn wrong_element_type() -> SizedArray<Int, 3> {
+    SizedArray { data: ["a", "b", "c"] }  // ERROR: Text != Int
+}
+
+fn main() {
+    let _ = replicate_wrong.<Int, 3>(0);
+    let _ = construct_wrong();
+    let _ = wrong_element_type();
+}

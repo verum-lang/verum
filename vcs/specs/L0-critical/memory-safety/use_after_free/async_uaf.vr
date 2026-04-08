@@ -1,0 +1,25 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, use-after-free, cbgr, async
+// @description: Tests that CBGR detects use-after-free in async context
+
+async fn process_data(ref_data: &List<Int>) -> Int {
+    // Simulate some async work
+    sleep(Duration.millis(10)).await;
+    ref_data[0]  // Access after original might be freed
+}
+
+fn main() {
+    let data = Heap.new([1, 2, 3]);
+    let ref_data = &data;
+
+    // Spawn async task with reference
+    let handle = spawn(process_data(ref_data));
+
+    // Free data while async task is pending
+    drop(data);
+
+    // Await will panic due to use-after-free
+    let _ = handle.await;  // CBGR detects use after free
+}

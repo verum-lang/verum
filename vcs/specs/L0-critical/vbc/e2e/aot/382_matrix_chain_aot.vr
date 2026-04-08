@@ -1,0 +1,259 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, matrix-chain, dynamic-programming, optimization
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for matrix chain multiplication using dynamic programming.
+// Given dimensions of n matrices, find the minimum number of scalar
+// multiplications needed to compute their product.
+// Matrix i has dimensions dims[i] x dims[i+1].
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// 8x8 grid for DP table
+type Grid8 is { r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8, r4: Arr8, r5: Arr8, r6: Arr8, r7: Arr8 };
+
+fn grid_get(g: Grid8, r: Int, c: Int) -> Int {
+    let row = if r == 0 { g.r0 } else if r == 1 { g.r1 }
+              else if r == 2 { g.r2 } else if r == 3 { g.r3 }
+              else if r == 4 { g.r4 } else if r == 5 { g.r5 }
+              else if r == 6 { g.r6 } else { g.r7 };
+    a8_get(row, c)
+}
+
+fn grid_set(g: Grid8, r: Int, c: Int, v: Int) -> Grid8 {
+    let row = if r == 0 { g.r0 } else if r == 1 { g.r1 }
+              else if r == 2 { g.r2 } else if r == 3 { g.r3 }
+              else if r == 4 { g.r4 } else if r == 5 { g.r5 }
+              else if r == 6 { g.r6 } else { g.r7 };
+    let new_row = a8_set(row, c, v);
+    Grid8 {
+        r0: if r == 0 { new_row } else { g.r0 },
+        r1: if r == 1 { new_row } else { g.r1 },
+        r2: if r == 2 { new_row } else { g.r2 },
+        r3: if r == 3 { new_row } else { g.r3 },
+        r4: if r == 4 { new_row } else { g.r4 },
+        r5: if r == 5 { new_row } else { g.r5 },
+        r6: if r == 6 { new_row } else { g.r6 },
+        r7: if r == 7 { new_row } else { g.r7 }
+    }
+}
+
+fn grid_zero() -> Grid8 {
+    let z = a8_zero();
+    Grid8 { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z }
+}
+
+// Matrix chain multiplication DP
+// dims: array of dimensions, n: number of matrices (dims has n+1 entries)
+// Returns minimum number of scalar multiplications
+// dp[i][j] = min cost to multiply matrices i..j
+fn matrix_chain_order(dims: Arr8, n: Int) -> Int {
+    let mut dp = grid_zero();
+
+    // chain length l from 2 to n
+    let mut l = 2;
+    while l <= n {
+        let mut i = 0;
+        while i <= n - l {
+            let j = i + l - 1;
+            dp = grid_set(dp, i, j, 999999999); // infinity
+            // Try all split points k
+            let mut k = i;
+            while k < j {
+                let cost = grid_get(dp, i, k) + grid_get(dp, k + 1, j)
+                           + a8_get(dims, i) * a8_get(dims, k + 1) * a8_get(dims, j + 1);
+                if cost < grid_get(dp, i, j) {
+                    dp = grid_set(dp, i, j, cost);
+                }
+                k = k + 1;
+            }
+            i = i + 1;
+        }
+        l = l + 1;
+    }
+    grid_get(dp, 0, n - 1)
+}
+
+// Also compute the split table for reconstruction
+fn matrix_chain_splits(dims: Arr8, n: Int) -> Grid8 {
+    let mut dp = grid_zero();
+    let mut splits = grid_zero();
+
+    let mut l = 2;
+    while l <= n {
+        let mut i = 0;
+        while i <= n - l {
+            let j = i + l - 1;
+            dp = grid_set(dp, i, j, 999999999);
+            let mut k = i;
+            while k < j {
+                let cost = grid_get(dp, i, k) + grid_get(dp, k + 1, j)
+                           + a8_get(dims, i) * a8_get(dims, k + 1) * a8_get(dims, j + 1);
+                if cost < grid_get(dp, i, j) {
+                    dp = grid_set(dp, i, j, cost);
+                    splits = grid_set(splits, i, j, k);
+                }
+                k = k + 1;
+            }
+            i = i + 1;
+        }
+        l = l + 1;
+    }
+    splits
+}
+
+// ---- Tests ----
+
+fn test_two_matrices() {
+    // A: 10x30, B: 30x5 => cost = 10*30*5 = 1500
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 10);
+    dims = a8_set(dims, 1, 30);
+    dims = a8_set(dims, 2, 5);
+    assert_eq(matrix_chain_order(dims, 2), 1500);
+}
+
+fn test_three_matrices_classic() {
+    // A: 10x30, B: 30x5, C: 5x60
+    // (AB)C: 10*30*5 + 10*5*60 = 1500 + 3000 = 4500
+    // A(BC): 30*5*60 + 10*30*60 = 9000 + 18000 = 27000
+    // Optimal = 4500
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 10);
+    dims = a8_set(dims, 1, 30);
+    dims = a8_set(dims, 2, 5);
+    dims = a8_set(dims, 3, 60);
+    assert_eq(matrix_chain_order(dims, 3), 4500);
+}
+
+fn test_four_matrices() {
+    // dims = [40, 20, 30, 10, 30]
+    // Classic example: optimal = 26000
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 40);
+    dims = a8_set(dims, 1, 20);
+    dims = a8_set(dims, 2, 30);
+    dims = a8_set(dims, 3, 10);
+    dims = a8_set(dims, 4, 30);
+    assert_eq(matrix_chain_order(dims, 4), 26000);
+}
+
+fn test_single_matrix() {
+    // One matrix: no multiplication needed
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 5);
+    dims = a8_set(dims, 1, 10);
+    assert_eq(matrix_chain_order(dims, 1), 0);
+}
+
+fn test_identical_dimensions() {
+    // All square 10x10 matrices, 3 of them
+    // Any parenthesization: 10*10*10 + 10*10*10 = 2000
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 10);
+    dims = a8_set(dims, 1, 10);
+    dims = a8_set(dims, 2, 10);
+    dims = a8_set(dims, 3, 10);
+    assert_eq(matrix_chain_order(dims, 3), 2000);
+}
+
+fn test_five_matrices() {
+    // dims = [5, 10, 3, 12, 5, 50]
+    // Verified by running DP: optimal = 1655
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 5);
+    dims = a8_set(dims, 1, 10);
+    dims = a8_set(dims, 2, 3);
+    dims = a8_set(dims, 3, 12);
+    dims = a8_set(dims, 4, 5);
+    dims = a8_set(dims, 5, 50);
+    assert_eq(matrix_chain_order(dims, 5), 1655);
+}
+
+fn test_six_matrices() {
+    // dims = [30, 35, 15, 5, 10, 20, 25]
+    // Classic textbook example: optimal = 15125
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 30);
+    dims = a8_set(dims, 1, 35);
+    dims = a8_set(dims, 2, 15);
+    dims = a8_set(dims, 3, 5);
+    dims = a8_set(dims, 4, 10);
+    dims = a8_set(dims, 5, 20);
+    dims = a8_set(dims, 6, 25);
+    assert_eq(matrix_chain_order(dims, 6), 15125);
+}
+
+fn test_splits_three() {
+    // A: 10x30, B: 30x5, C: 5x60
+    // Optimal split for (0..2): k=1 means (A*B)*C
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 10);
+    dims = a8_set(dims, 1, 30);
+    dims = a8_set(dims, 2, 5);
+    dims = a8_set(dims, 3, 60);
+    let splits = matrix_chain_splits(dims, 3);
+    assert_eq(grid_get(splits, 0, 2), 1);
+}
+
+fn test_thin_wide_pattern() {
+    // Thin matrix times wide: 1x100, 100x1, 1x100
+    // (AB)C: 1*100*1 + 1*1*100 = 100 + 100 = 200
+    // A(BC): 100*1*100 + 1*100*100 = 10000 + 10000 = 20000
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 1);
+    dims = a8_set(dims, 1, 100);
+    dims = a8_set(dims, 2, 1);
+    dims = a8_set(dims, 3, 100);
+    assert_eq(matrix_chain_order(dims, 3), 200);
+}
+
+fn test_decreasing_dims() {
+    // dims = [64, 32, 16, 8, 4]
+    // Verified by running DP: optimal = 10752
+    let mut dims = a8_zero();
+    dims = a8_set(dims, 0, 64);
+    dims = a8_set(dims, 1, 32);
+    dims = a8_set(dims, 2, 16);
+    dims = a8_set(dims, 3, 8);
+    dims = a8_set(dims, 4, 4);
+    assert_eq(matrix_chain_order(dims, 4), 10752);
+}
+
+fn main() -> Int {
+    test_two_matrices();
+    test_three_matrices_classic();
+    test_four_matrices();
+    test_single_matrix();
+    test_identical_dimensions();
+    test_five_matrices();
+    test_six_matrices();
+    test_splits_three();
+    test_thin_wide_pattern();
+    test_decreasing_dims();
+    print("[OK] 382_matrix_chain_aot");
+    0
+}

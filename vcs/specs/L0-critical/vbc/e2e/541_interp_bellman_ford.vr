@@ -1,0 +1,145 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, bellman_ford, shortest_path, negative_edges, negative_cycle
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Bellman-Ford shortest-path algorithm.
+// Handles negative-weight edges and detects negative cycles.
+// Graph encoded as parallel edge arrays: src[], dst[], wt[], num_edges.
+// Distances stored in dist[] array; INF = 1000000.
+// Returns 0 if no negative cycle detected, 1 if negative cycle found.
+
+// INF sentinel
+fn inf() -> Int { 1000000 }
+
+// Relax all edges once. Returns 1 if any distance was improved.
+fn bf_relax(src: [Int; 16], dst: [Int; 16], wt: [Int; 16],
+            dist: [Int; 8], ne: Int) -> Int {
+    let mut improved = 0;
+    let mut i = 0;
+    while i < ne {
+        let u = src[i];
+        let v = dst[i];
+        let w = wt[i];
+        if dist[u] < inf() && dist[u] + w < dist[v] {
+            dist[v] = dist[u] + w;
+            improved = 1;
+        }
+        i = i + 1;
+    }
+    improved
+}
+
+// Run Bellman-Ford from source s on a graph with nv vertices and ne edges.
+// Writes distances to dist[]. Returns 1 if negative cycle detected, 0 otherwise.
+fn bellman_ford(src: [Int; 16], dst: [Int; 16], wt: [Int; 16],
+                dist: [Int; 8], nv: Int, ne: Int, s: Int) -> Int {
+    // Initialize distances
+    let mut i = 0;
+    while i < nv {
+        dist[i] = inf();
+        i = i + 1;
+    }
+    dist[s] = 0;
+
+    // Relax nv-1 times
+    let mut iter = 0;
+    while iter < nv - 1 {
+        bf_relax(src, dst, wt, dist, ne);
+        iter = iter + 1;
+    }
+
+    // Check for negative cycle: one more relaxation should not improve
+    bf_relax(src, dst, wt, dist, ne)
+}
+
+fn test_simple_shortest_path() {
+    // Graph: 0->1 (w=4), 0->2 (w=2), 1->3 (w=5), 2->1 (w=1), 2->3 (w=8)
+    // Shortest paths from 0: d[0]=0, d[1]=3, d[2]=2, d[3]=8
+    let mut src  = [0, 0, 1, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dst  = [1, 2, 3, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut wt   = [4, 2, 5, 1, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dist = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    let neg = bellman_ford(src, dst, wt, dist, 4, 5, 0);
+    assert_eq(neg, 0);
+    assert_eq(dist[0], 0);
+    assert_eq(dist[1], 3);
+    assert_eq(dist[2], 2);
+    assert_eq(dist[3], 8);
+    print("simple_shortest_path: ok");
+}
+
+fn test_negative_weight_edges() {
+    // Graph with negative edges (no negative cycle):
+    // 0->1 (w=6), 0->2 (w=7), 1->2 (w=8), 1->3 (w=-4), 1->4 (w=5),
+    // 2->3 (w=9), 2->4 (w=-3), 3->0 (w=2), 4->3 (w=7)
+    // SSSP from 0: d[0]=0, d[1]=6, d[2]=7, d[3]=2, d[4]=4
+    let mut src  = [0, 0, 1, 1, 1, 2, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0];
+    let mut dst  = [1, 2, 2, 3, 4, 3, 4, 0, 3, 0, 0, 0, 0, 0, 0, 0];
+    let mut wt   = [6, 7, 8,-4, 5, 9,-3, 2, 7, 0, 0, 0, 0, 0, 0, 0];
+    let mut dist = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    let neg = bellman_ford(src, dst, wt, dist, 5, 9, 0);
+    assert_eq(neg, 0);
+    assert_eq(dist[0], 0);
+    assert_eq(dist[1], 6);
+    assert_eq(dist[2], 7);
+    assert_eq(dist[3], 2);
+    assert_eq(dist[4], 4);
+    print("negative_weight_edges: ok");
+}
+
+fn test_negative_cycle_detection() {
+    // Triangle with negative cycle: 0->1 (1), 1->2 (-3), 2->0 (1)
+    // Cycle total weight: 1 + (-3) + 1 = -1 < 0
+    let mut src  = [0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dst  = [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut wt   = [1,-3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dist = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    let neg = bellman_ford(src, dst, wt, dist, 3, 3, 0);
+    assert_eq(neg, 1);
+    print("negative_cycle_detection: ok");
+}
+
+fn test_single_edge() {
+    // 0->1 (w=5). From 0: d[0]=0, d[1]=5.
+    let mut src  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dst  = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut wt   = [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dist = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    let neg = bellman_ford(src, dst, wt, dist, 2, 1, 0);
+    assert_eq(neg, 0);
+    assert_eq(dist[0], 0);
+    assert_eq(dist[1], 5);
+    print("single_edge: ok");
+}
+
+fn test_unreachable_vertices() {
+    // 0->1 (w=3); vertex 2 is unreachable from 0.
+    let mut src  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dst  = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut wt   = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dist = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    let neg = bellman_ford(src, dst, wt, dist, 3, 1, 0);
+    assert_eq(neg, 0);
+    assert_eq(dist[0], 0);
+    assert_eq(dist[1], 3);
+    assert_eq(dist[2], inf());
+    print("unreachable_vertices: ok");
+}
+
+fn main() -> Int {
+    test_simple_shortest_path();
+    test_negative_weight_edges();
+    test_negative_cycle_detection();
+    test_single_edge();
+    test_unreachable_vertices();
+    print("[OK] 541_interp_bellman_ford");
+    0
+}

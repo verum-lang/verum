@@ -1,0 +1,14 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, arity, mismatch, error
+// @description: Test function arity mismatch detection
+// @expected-error: E102
+
+meta fn test_arity() -> Int {
+    abs()  // abs requires 1 argument, got 0
+}
+
+fn main() {
+    @const assert_eq(test_arity(), 0);
+}

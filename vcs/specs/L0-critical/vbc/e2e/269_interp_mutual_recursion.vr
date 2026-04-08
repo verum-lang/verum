@@ -1,0 +1,396 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, mutual-recursion, recursion
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: mutual recursion — is_even/is_odd, ping-pong patterns,
+// state-based mutual recursion, Hofstadter sequences
+
+// =============================================================================
+// Basic mutual recursion: is_even / is_odd
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn is_even_r(n: Int) -> Int {
+    if n == 0 {
+        1
+    } else if n < 0 {
+        is_even_r(-n)
+    } else {
+        is_odd_r(n - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn is_odd_r(n: Int) -> Int {
+    if n == 0 {
+        0
+    } else if n < 0 {
+        is_odd_r(-n)
+    } else {
+        is_even_r(n - 1)
+    }
+}
+
+fn test_is_even_odd() {
+    assert_eq(is_even_r(0), 1);
+    assert_eq(is_even_r(1), 0);
+    assert_eq(is_even_r(2), 1);
+    assert_eq(is_even_r(3), 0);
+    assert_eq(is_even_r(4), 1);
+    assert_eq(is_even_r(10), 1);
+    assert_eq(is_even_r(11), 0);
+
+    assert_eq(is_odd_r(0), 0);
+    assert_eq(is_odd_r(1), 1);
+    assert_eq(is_odd_r(2), 0);
+    assert_eq(is_odd_r(3), 1);
+    assert_eq(is_odd_r(5), 1);
+    assert_eq(is_odd_r(8), 0);
+}
+
+fn test_is_even_odd_negative() {
+    // Negative numbers: evenness same as absolute value
+    assert_eq(is_even_r(-2), 1);
+    assert_eq(is_even_r(-3), 0);
+    assert_eq(is_odd_r(-1), 1);
+    assert_eq(is_odd_r(-4), 0);
+}
+
+// =============================================================================
+// Ping-pong recursion: count down with alternating functions
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn ping(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        pong(n - 1, acc + n)
+    }
+}
+
+@allow(unbounded_recursion)
+fn pong(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        ping(n - 1, acc + n)
+    }
+}
+
+fn test_ping_pong() {
+    // ping(5, 0) -> pong(4, 5) -> ping(3, 9) -> pong(2, 12) -> ping(1, 14) -> pong(0, 15) = 15
+    assert_eq(ping(5, 0), 15);
+    // Same as sum 1+2+3+4+5 = 15
+    assert_eq(ping(10, 0), 55);
+    assert_eq(ping(0, 100), 100);
+    assert_eq(pong(1, 0), 1);
+    assert_eq(pong(3, 0), 6);
+}
+
+// =============================================================================
+// Mutual recursion: alternating operations
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn add_step(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        mul_step(n - 1, acc + n)
+    }
+}
+
+@allow(unbounded_recursion)
+fn mul_step(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        // Multiply by 1 (identity) to alternate, but add n
+        add_step(n - 1, acc + n * 2)
+    }
+}
+
+fn test_alternating_ops() {
+    // add_step(1, 0) -> mul_step(0, 1) = 1
+    assert_eq(add_step(1, 0), 1);
+    // add_step(2, 0) -> mul_step(1, 2) -> add_step(0, 2+2) = 4
+    assert_eq(add_step(2, 0), 4);
+    // add_step(3, 0) -> mul_step(2, 3) -> add_step(1, 3+4) = add_step(1, 7) -> mul_step(0, 8) = 8
+    assert_eq(add_step(3, 0), 8);
+}
+
+// =============================================================================
+// Mutual recursion with different base cases
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn count_a(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        1 + count_b(n - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn count_b(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if n == 1 {
+        2
+    } else {
+        2 + count_a(n - 1)
+    }
+}
+
+fn test_count_ab() {
+    assert_eq(count_a(0), 0);
+    assert_eq(count_a(1), 1);
+    // count_a(2) = 1 + count_b(1) = 1 + 2 = 3
+    assert_eq(count_a(2), 3);
+    // count_a(3) = 1 + count_b(2) = 1 + (2 + count_a(1)) = 1 + 2 + 1 = 4
+    assert_eq(count_a(3), 4);
+    // count_a(4) = 1 + count_b(3) = 1 + (2 + count_a(2)) = 1 + 2 + 3 = 6
+    assert_eq(count_a(4), 6);
+
+    assert_eq(count_b(0), 0);
+    assert_eq(count_b(1), 2);
+    // count_b(2) = 2 + count_a(1) = 2 + 1 = 3
+    assert_eq(count_b(2), 3);
+}
+
+// =============================================================================
+// State machine via mutual recursion
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn state_idle(fuel: Int, acc: Int) -> Int {
+    if fuel <= 0 {
+        acc
+    } else {
+        state_working(fuel - 1, acc)
+    }
+}
+
+@allow(unbounded_recursion)
+fn state_working(fuel: Int, acc: Int) -> Int {
+    if fuel <= 0 {
+        acc
+    } else {
+        // Working produces +10 per step
+        state_resting(fuel - 1, acc + 10)
+    }
+}
+
+@allow(unbounded_recursion)
+fn state_resting(fuel: Int, acc: Int) -> Int {
+    if fuel <= 0 {
+        acc
+    } else {
+        // Resting produces +1 per step
+        state_idle(fuel - 1, acc + 1)
+    }
+}
+
+fn test_state_machine_recursion() {
+    assert_eq(state_idle(0, 0), 0);
+    // idle(1,0) -> working(0,0) = 0
+    assert_eq(state_idle(1, 0), 0);
+    // idle(2,0) -> working(1,0) -> resting(0,10) = 10
+    assert_eq(state_idle(2, 0), 10);
+    // idle(3,0) -> working(2,0) -> resting(1,10) -> idle(0,11) = 11
+    assert_eq(state_idle(3, 0), 11);
+    // idle(4,0) -> working(3,0) -> resting(2,10) -> idle(1,11) -> working(0,11) = 11
+    assert_eq(state_idle(4, 0), 11);
+    // idle(5,0) -> working(4,0) -> resting(3,10) -> idle(2,11) -> working(1,11) -> resting(0,21) = 21
+    assert_eq(state_idle(5, 0), 21);
+}
+
+// =============================================================================
+// Fibonacci via mutual recursion (odd/even Fibonacci)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn fib_even(n: Int) -> Int {
+    // Returns the n-th value using even-indexed Fibonacci logic
+    if n == 0 {
+        0
+    } else {
+        fib_odd(n - 1) + fib_even(n - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn fib_odd(n: Int) -> Int {
+    if n == 0 {
+        1
+    } else {
+        fib_even(n)
+    }
+}
+
+fn test_fib_mutual() {
+    // fib_even(0) = 0
+    assert_eq(fib_even(0), 0);
+    // fib_odd(0) = 1
+    assert_eq(fib_odd(0), 1);
+    // fib_even(1) = fib_odd(0) + fib_even(0) = 1 + 0 = 1
+    assert_eq(fib_even(1), 1);
+    // fib_odd(1) = fib_even(1) = 1
+    assert_eq(fib_odd(1), 1);
+    // fib_even(2) = fib_odd(1) + fib_even(1) = 1 + 1 = 2
+    assert_eq(fib_even(2), 2);
+    // fib_odd(2) = fib_even(2) = 2
+    assert_eq(fib_odd(2), 2);
+}
+
+// =============================================================================
+// GCD via mutual subtraction (A calls B, B calls A)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn gcd_sub_a(a: Int, b: Int) -> Int {
+    if a == b {
+        a
+    } else if a > b {
+        gcd_sub_b(a - b, b)
+    } else {
+        gcd_sub_b(a, b - a)
+    }
+}
+
+@allow(unbounded_recursion)
+fn gcd_sub_b(a: Int, b: Int) -> Int {
+    if a == b {
+        a
+    } else if b > a {
+        gcd_sub_a(a, b - a)
+    } else {
+        gcd_sub_a(a - b, b)
+    }
+}
+
+fn test_gcd_mutual() {
+    assert_eq(gcd_sub_a(12, 8), 4);
+    assert_eq(gcd_sub_a(15, 5), 5);
+    assert_eq(gcd_sub_a(7, 7), 7);
+    assert_eq(gcd_sub_a(17, 13), 1);
+    assert_eq(gcd_sub_a(48, 18), 6);
+    assert_eq(gcd_sub_b(100, 75), 25);
+}
+
+// =============================================================================
+// Triple mutual recursion
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn triple_a(n: Int) -> Int {
+    if n <= 0 {
+        1
+    } else {
+        triple_b(n - 1) + 1
+    }
+}
+
+@allow(unbounded_recursion)
+fn triple_b(n: Int) -> Int {
+    if n <= 0 {
+        2
+    } else {
+        triple_c(n - 1) + 2
+    }
+}
+
+@allow(unbounded_recursion)
+fn triple_c(n: Int) -> Int {
+    if n <= 0 {
+        3
+    } else {
+        triple_a(n - 1) + 3
+    }
+}
+
+fn test_triple_mutual() {
+    assert_eq(triple_a(0), 1);
+    assert_eq(triple_b(0), 2);
+    assert_eq(triple_c(0), 3);
+
+    // triple_a(1) = triple_b(0) + 1 = 2 + 1 = 3
+    assert_eq(triple_a(1), 3);
+    // triple_b(1) = triple_c(0) + 2 = 3 + 2 = 5
+    assert_eq(triple_b(1), 5);
+    // triple_c(1) = triple_a(0) + 3 = 1 + 3 = 4
+    assert_eq(triple_c(1), 4);
+
+    // triple_a(2) = triple_b(1) + 1 = 5 + 1 = 6
+    assert_eq(triple_a(2), 6);
+    // triple_b(2) = triple_c(1) + 2 = 4 + 2 = 6
+    assert_eq(triple_b(2), 6);
+    // triple_c(2) = triple_a(1) + 3 = 3 + 3 = 6
+    assert_eq(triple_c(2), 6);
+
+    // triple_a(3) = triple_b(2) + 1 = 6 + 1 = 7
+    assert_eq(triple_a(3), 7);
+}
+
+// =============================================================================
+// Mutual recursion: decrease toward zero from two sides
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn decrease_a(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        decrease_b(n - 1, acc + 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn decrease_b(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        acc
+    } else {
+        decrease_a(n - 2, acc + 2)
+    }
+}
+
+fn test_decrease_mutual() {
+    // decrease_a(0, 0) = 0
+    assert_eq(decrease_a(0, 0), 0);
+    // decrease_a(1, 0) -> decrease_b(0, 1) = 1
+    assert_eq(decrease_a(1, 0), 1);
+    // decrease_a(2, 0) -> decrease_b(1, 1) -> decrease_a(-1, 3) = 3
+    assert_eq(decrease_a(2, 0), 3);
+    // decrease_a(3, 0) -> decrease_b(2, 1) -> decrease_a(0, 3) = 3
+    assert_eq(decrease_a(3, 0), 3);
+    // decrease_a(4, 0) -> decrease_b(3, 1) -> decrease_a(1, 3) -> decrease_b(0, 4) = 4
+    assert_eq(decrease_a(4, 0), 4);
+    // decrease_a(5, 0) -> decrease_b(4, 1) -> decrease_a(2, 3) -> decrease_b(1, 4) -> decrease_a(-1, 6) = 6
+    assert_eq(decrease_a(5, 0), 6);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_is_even_odd();
+    test_is_even_odd_negative();
+    test_ping_pong();
+    test_alternating_ops();
+    test_count_ab();
+    test_state_machine_recursion();
+    test_fib_mutual();
+    test_gcd_mutual();
+    test_triple_mutual();
+    test_decrease_mutual();
+    print("[OK] 269_interp_mutual_recursion");
+    0
+}

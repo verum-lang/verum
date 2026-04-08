@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, select, arm, arrow, error
+// @description: Test select arm missing fat arrow
+// @expected-error: E018
+
+async fn test() {
+    select {
+        result = task.await result,
+    }
+}

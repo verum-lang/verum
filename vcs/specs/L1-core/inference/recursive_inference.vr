@@ -1,0 +1,228 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, recursion, recursive-functions
+// @description: Type inference in recursive functions
+
+/// Test for type inference in recursive functions.
+/// Recursive functions require careful inference to:
+/// - Determine return types from base cases and recursive calls
+/// - Handle tail recursion correctly
+/// - Infer types through recursive data structures
+
+// ============================================================================
+// Basic recursive function inference
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+@allow(unbounded_recursion)
+fn count_digits(n: Int) -> Int {
+    if n < 10 {
+        1
+    } else {
+        1 + count_digits(n / 10)
+    }
+}
+
+@allow(unbounded_recursion)
+fn sum_digits(n: Int) -> Int {
+    if n < 10 {
+        n
+    } else {
+        (n % 10) + sum_digits(n / 10)
+    }
+}
+
+// ============================================================================
+// Recursive with accumulator pattern (tail recursion)
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn factorial_acc(n: Int, acc: Int) -> Int {
+    if n <= 1 {
+        acc
+    } else {
+        factorial_acc(n - 1, n * acc)
+    }
+}
+
+@allow(unbounded_recursion)
+fn sum_to(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else {
+        n + sum_to(n - 1)
+    }
+}
+
+// ============================================================================
+// Recursive with generic types
+// ============================================================================
+
+type ConsList<T> is Nil | Cons(T, Heap<ConsList<T>>);
+
+@allow(unbounded_recursion)
+fn list_sum(lst: ConsList<Int>) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(x, rest) => x + list_sum(*rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_len<T>(lst: ConsList<T>) -> Int {
+    match lst {
+        Nil => 0,
+        Cons(_, rest) => 1 + list_len(*rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn list_max(lst: ConsList<Int>, default_val: Int) -> Int {
+    match lst {
+        Nil => default_val,
+        Cons(x, rest) => {
+            let rest_max = list_max(*rest, default_val);
+            if x > rest_max { x } else { rest_max }
+        },
+    }
+}
+
+// ============================================================================
+// Mutual recursion - forward declarations
+// ============================================================================
+
+fn is_even(n: Int) -> Bool {
+    if n == 0 {
+        true
+    } else {
+        is_odd(n - 1)
+    }
+}
+
+fn is_odd(n: Int) -> Bool {
+    if n == 0 {
+        false
+    } else {
+        is_even(n - 1)
+    }
+}
+
+// ============================================================================
+// Recursive with Maybe return type
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+@allow(unbounded_recursion)
+fn search_list(lst: ConsList<Int>, target: Int) -> Maybe<Int> {
+    match lst {
+        Nil => None,
+        Cons(x, rest) => {
+            if x == target {
+                Some(x)
+            } else {
+                search_list(*rest, target)
+            }
+        },
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Basic recursive inference
+    let f5 = factorial(5);
+    assert(f5 == 120);
+
+    let f10 = factorial(10);
+    assert(f10 == 3628800);
+
+    let fib0 = fibonacci(0);
+    let fib1 = fibonacci(1);
+    let fib10 = fibonacci(10);
+    assert(fib0 == 0);
+    assert(fib1 == 1);
+    assert(fib10 == 55);
+
+    // Digit operations
+    assert(count_digits(0) == 1);
+    assert(count_digits(9) == 1);
+    assert(count_digits(10) == 2);
+    assert(count_digits(123) == 3);
+    assert(count_digits(9999) == 4);
+
+    assert(sum_digits(0) == 0);
+    assert(sum_digits(9) == 9);
+    assert(sum_digits(123) == 6);
+    assert(sum_digits(9999) == 36);
+
+    // Accumulator pattern
+    let f5_acc = factorial_acc(5, 1);
+    assert(f5_acc == 120);
+
+    let sum5 = sum_to(5);
+    assert(sum5 == 15);
+
+    let sum100 = sum_to(100);
+    assert(sum100 == 5050);
+
+    // Recursive data structure
+    let lst: ConsList<Int> = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+
+    let lst_sum = list_sum(lst);
+    assert(lst_sum == 6);
+
+    let lst_len: Int = list_len(lst);
+    assert(lst_len == 3);
+
+    let lst_max = list_max(lst, 0);
+    assert(lst_max == 3);
+
+    // Mutual recursion
+    assert(is_even(0) == true);
+    assert(is_even(1) == false);
+    assert(is_even(4) == true);
+    assert(is_even(7) == false);
+
+    assert(is_odd(0) == false);
+    assert(is_odd(1) == true);
+    assert(is_odd(5) == true);
+    assert(is_odd(10) == false);
+
+    // Maybe-returning recursive
+    assert(safe_divide(10, 2) == Some(5));
+    assert(safe_divide(10, 0) == None);
+
+    let lst2: ConsList<Int> = Cons(5, Heap(Cons(10, Heap(Cons(15, Heap(Nil))))));
+    assert(search_list(lst2, 10) == Some(10));
+    assert(search_list(lst2, 99) == None);
+
+    print("Recursive inference tests passed!");
+}

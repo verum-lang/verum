@@ -1,0 +1,252 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, polynomial, algebra, math
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for polynomial arithmetic (integer coefficients)
+
+// Polynomial up to degree 7: a0 + a1*x + a2*x^2 + ... + a7*x^7
+type Poly is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    degree: Int
+};
+
+fn poly_zero() -> Poly {
+    Poly { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 0 }
+}
+
+fn poly_const(c: Int) -> Poly {
+    Poly { c0: c, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 0 }
+}
+
+fn poly_get(p: Poly, i: Int) -> Int {
+    if i == 0 { p.c0 } else if i == 1 { p.c1 }
+    else if i == 2 { p.c2 } else if i == 3 { p.c3 }
+    else if i == 4 { p.c4 } else if i == 5 { p.c5 }
+    else if i == 6 { p.c6 } else if i == 7 { p.c7 }
+    else { 0 }
+}
+
+fn poly_set(p: Poly, i: Int, v: Int) -> Poly {
+    Poly {
+        c0: if i == 0 { v } else { p.c0 }, c1: if i == 1 { v } else { p.c1 },
+        c2: if i == 2 { v } else { p.c2 }, c3: if i == 3 { v } else { p.c3 },
+        c4: if i == 4 { v } else { p.c4 }, c5: if i == 5 { v } else { p.c5 },
+        c6: if i == 6 { v } else { p.c6 }, c7: if i == 7 { v } else { p.c7 },
+        degree: p.degree
+    }
+}
+
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+// Evaluate polynomial at x using Horner's method
+fn poly_eval(p: Poly, x: Int) -> Int {
+    let mut result = poly_get(p, p.degree);
+    let mut i = p.degree - 1;
+    while i >= 0 {
+        result = result * x + poly_get(p, i);
+        i = i - 1;
+    }
+    result
+}
+
+// Add two polynomials
+fn poly_add(a: Poly, b: Poly) -> Poly {
+    let deg = max2(a.degree, b.degree);
+    let mut r = poly_zero();
+    let mut i = 0;
+    while i <= deg {
+        r = poly_set(r, i, poly_get(a, i) + poly_get(b, i));
+        i = i + 1;
+    }
+    Poly {
+        c0: r.c0, c1: r.c1, c2: r.c2, c3: r.c3,
+        c4: r.c4, c5: r.c5, c6: r.c6, c7: r.c7,
+        degree: deg
+    }
+}
+
+// Subtract
+fn poly_sub(a: Poly, b: Poly) -> Poly {
+    let deg = max2(a.degree, b.degree);
+    let mut r = poly_zero();
+    let mut i = 0;
+    while i <= deg {
+        r = poly_set(r, i, poly_get(a, i) - poly_get(b, i));
+        i = i + 1;
+    }
+    Poly {
+        c0: r.c0, c1: r.c1, c2: r.c2, c3: r.c3,
+        c4: r.c4, c5: r.c5, c6: r.c6, c7: r.c7,
+        degree: deg
+    }
+}
+
+// Scale by constant
+fn poly_scale(p: Poly, c: Int) -> Poly {
+    let mut r = poly_zero();
+    let mut i = 0;
+    while i <= p.degree {
+        r = poly_set(r, i, poly_get(p, i) * c);
+        i = i + 1;
+    }
+    Poly {
+        c0: r.c0, c1: r.c1, c2: r.c2, c3: r.c3,
+        c4: r.c4, c5: r.c5, c6: r.c6, c7: r.c7,
+        degree: p.degree
+    }
+}
+
+// Multiply (limited to degree 7)
+fn poly_mul(a: Poly, b: Poly) -> Poly {
+    let mut r = poly_zero();
+    let mut i = 0;
+    while i <= a.degree {
+        let mut j = 0;
+        while j <= b.degree {
+            if i + j <= 7 {
+                let cur = poly_get(r, i + j);
+                r = poly_set(r, i + j, cur + poly_get(a, i) * poly_get(b, j));
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    let deg = if a.degree + b.degree <= 7 { a.degree + b.degree } else { 7 };
+    Poly {
+        c0: r.c0, c1: r.c1, c2: r.c2, c3: r.c3,
+        c4: r.c4, c5: r.c5, c6: r.c6, c7: r.c7,
+        degree: deg
+    }
+}
+
+// Formal derivative
+fn poly_deriv(p: Poly) -> Poly {
+    if p.degree == 0 { return poly_zero(); }
+    let mut r = poly_zero();
+    let mut i = 1;
+    while i <= p.degree {
+        r = poly_set(r, i - 1, poly_get(p, i) * i);
+        i = i + 1;
+    }
+    Poly {
+        c0: r.c0, c1: r.c1, c2: r.c2, c3: r.c3,
+        c4: r.c4, c5: r.c5, c6: r.c6, c7: r.c7,
+        degree: p.degree - 1
+    }
+}
+
+fn poly_eq(a: Poly, b: Poly) -> Bool {
+    if a.degree != b.degree { return false; }
+    let mut i = 0;
+    while i <= a.degree {
+        if poly_get(a, i) != poly_get(b, i) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_eval() {
+    // p(x) = 2 + 3x + x^2
+    let p = Poly { c0: 2, c1: 3, c2: 1, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 2 };
+    assert_eq(poly_eval(p, 0), 2);
+    assert_eq(poly_eval(p, 1), 6);    // 2+3+1
+    assert_eq(poly_eval(p, 2), 12);   // 2+6+4
+    assert_eq(poly_eval(p, -1), 0);   // 2-3+1
+    assert_eq(poly_eval(p, 3), 20);   // 2+9+9
+}
+
+fn test_add_sub() {
+    // p = 1 + 2x, q = 3 + x^2
+    let p = Poly { c0: 1, c1: 2, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 1 };
+    let q = Poly { c0: 3, c1: 0, c2: 1, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 2 };
+
+    // p + q = 4 + 2x + x^2
+    let sum = poly_add(p, q);
+    assert_eq(poly_eval(sum, 1), 7);
+    assert_eq(sum.c0, 4);
+    assert_eq(sum.c1, 2);
+    assert_eq(sum.c2, 1);
+
+    // p - q = -2 + 2x - x^2
+    let diff = poly_sub(p, q);
+    assert_eq(diff.c0, -2);
+    assert_eq(diff.c1, 2);
+    assert_eq(diff.c2, -1);
+}
+
+fn test_multiply() {
+    // (1 + x) * (1 - x) = 1 - x^2
+    let a = Poly { c0: 1, c1: 1, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 1 };
+    let b = Poly { c0: 1, c1: -1, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 1 };
+    let prod = poly_mul(a, b);
+    assert_eq(prod.c0, 1);
+    assert_eq(prod.c1, 0);
+    assert_eq(prod.c2, -1);
+
+    // (1 + x)^2 = 1 + 2x + x^2
+    let sq = poly_mul(a, a);
+    assert_eq(sq.c0, 1);
+    assert_eq(sq.c1, 2);
+    assert_eq(sq.c2, 1);
+}
+
+fn test_derivative() {
+    // d/dx (2 + 3x + x^2) = 3 + 2x
+    let p = Poly { c0: 2, c1: 3, c2: 1, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 2 };
+    let dp = poly_deriv(p);
+    assert_eq(dp.degree, 1);
+    assert_eq(dp.c0, 3);
+    assert_eq(dp.c1, 2);
+
+    // d/dx (x^3) = 3x^2
+    let cubic = Poly { c0: 0, c1: 0, c2: 0, c3: 1, c4: 0, c5: 0, c6: 0, c7: 0, degree: 3 };
+    let dc = poly_deriv(cubic);
+    assert_eq(dc.degree, 2);
+    assert_eq(dc.c0, 0);
+    assert_eq(dc.c1, 0);
+    assert_eq(dc.c2, 3);
+
+    // d/dx (constant) = 0
+    let c = poly_const(5);
+    let dc2 = poly_deriv(c);
+    assert_eq(dc2.degree, 0);
+    assert_eq(dc2.c0, 0);
+}
+
+fn test_identities() {
+    let p = Poly { c0: 1, c1: 2, c2: 3, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, degree: 2 };
+    let zero = poly_zero();
+    let one = poly_const(1);
+
+    // p + 0 = p
+    assert_eq(poly_eq(poly_add(p, zero), p), true);
+
+    // p * 1 = p
+    assert_eq(poly_eq(poly_mul(p, one), p), true);
+
+    // p * 0 has all zero coefficients
+    let pz = poly_mul(p, zero);
+    assert_eq(pz.c0, 0);
+    assert_eq(pz.c1, 0);
+    assert_eq(pz.c2, 0);
+
+    // p - p = 0 (all coefficients)
+    let diff = poly_sub(p, p);
+    assert_eq(diff.c0, 0);
+    assert_eq(diff.c1, 0);
+    assert_eq(diff.c2, 0);
+}
+
+fn main() -> Int {
+    test_eval();
+    test_add_sub();
+    test_multiply();
+    test_derivative();
+    test_identities();
+    print("[OK] 248_polynomial_aot");
+    0
+}

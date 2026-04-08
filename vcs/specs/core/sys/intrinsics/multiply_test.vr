@@ -1,0 +1,35 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test multiply
+
+module test.stdlib.sys.intrinsics.multiply_test;
+
+mount core.intrinsics.{sin_f64, cos_f64};
+
+fn main() {
+    print("Testing multiply outside loop...");
+    let s1 = sin_f64(0.0);
+    let c1 = cos_f64(0.0);
+    let s1_sq = s1 * s1;
+    print(f"sin^2 = {s1_sq}");
+    let c1_sq = c1 * c1;
+    print(f"cos^2 = {c1_sq}");
+    print("Outside loop works!");
+
+    print("Testing in loop...");
+    let angles: List<Float64> = [0.0];
+    for angle in angles {
+        print(f"angle = {angle}");
+        let s = sin_f64(angle);
+        print(f"s = {s}");
+        let c = cos_f64(angle);
+        print(f"c = {c}");
+        print("About to do s * s...");
+        let s2 = s * s;
+        print(f"s2 = {s2}");
+    }
+
+    print("All tests passed!");
+}

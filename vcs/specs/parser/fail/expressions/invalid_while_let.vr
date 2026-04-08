@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, while, let, error
+// @description: While let with malformed let binding
+// @expected-error: E018
+
+fn test() {
+    while let = value { }  // Missing pattern in let condition
+}

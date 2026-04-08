@@ -1,0 +1,331 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/windows/ntdll_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, windows, ntdll, native-api
+// @description: Tests for Windows NT Native API FFI functions.
+//
+// Coverage:
+// - Handle, ObjectAttributes, IoStatusBlock: NT types
+// - UnicodeString, LargeInteger: Helper types
+// - Memory constants (MEM_*, PAGE_*)
+// - NtAllocateVirtualMemory, NtFreeVirtualMemory: Memory functions
+// - NtDelayExecution: Sleep function
+//
+// Test Strategy:
+// - Test type construction and constants
+// - Test memory operations via NT API
+//
+// Platform: Windows x86_64
+// =============================================================================
+
+@cfg(target_os = "windows")
+module test.stdlib.sys.windows.ntdll_test;
+
+mount core.sys.windows.ntdll.{
+    Handle, ObjectAttributes, IoStatusBlock,
+    UnicodeString, LargeInteger,
+
+    MEM_COMMIT, MEM_RESERVE, MEM_DECOMMIT, MEM_RELEASE, MEM_RESET,
+    PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE,
+    PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_GUARD,
+
+    NtAllocateVirtualMemory, NtFreeVirtualMemory, NtProtectVirtualMemory,
+    NtDelayExecution,
+    NtQueryInformationProcess,
+};
+
+mount core.sys.windows.ntstatus.{STATUS_SUCCESS};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Memory Constants Tests
+// =============================================================================
+
+@test
+fn test_memory_constants() {
+    // Memory allocation types
+    assert(MEM_COMMIT == 0x1000);
+    assert(MEM_RESERVE == 0x2000);
+    assert(MEM_DECOMMIT == 0x4000);
+    assert(MEM_RELEASE == 0x8000);
+    assert(MEM_RESET == 0x80000);
+
+    // Combinations
+    let commit_reserve = MEM_COMMIT | MEM_RESERVE;
+    assert((commit_reserve & MEM_COMMIT) != 0);
+    assert((commit_reserve & MEM_RESERVE) != 0);
+
+    print("Memory constants tests passed");
+}
+
+// =============================================================================
+// Page Constants Tests
+// =============================================================================
+
+@test
+fn test_page_constants() {
+    // Page protection
+    assert(PAGE_NOACCESS == 0x01);
+    assert(PAGE_READONLY == 0x02);
+    assert(PAGE_READWRITE == 0x04);
+    assert(PAGE_EXECUTE == 0x10);
+    assert(PAGE_EXECUTE_READ == 0x20);
+    assert(PAGE_EXECUTE_READWRITE == 0x40);
+    assert(PAGE_GUARD == 0x100);
+
+    // Guard can be combined with other protections
+    let guarded_rw = PAGE_READWRITE | PAGE_GUARD;
+    assert((guarded_rw & PAGE_GUARD) != 0);
+    assert((guarded_rw & PAGE_READWRITE) != 0);
+
+    print("Page constants tests passed");
+}
+
+// =============================================================================
+// Handle Type Tests
+// =============================================================================
+
+@test
+fn test_handle_type() {
+    // Create handle from raw value
+    let handle = Handle.from_raw(0x100);
+    assert(handle.raw() == 0x100);
+
+    // Invalid handle
+    let invalid = Handle.INVALID;
+    assert(invalid.raw() == -1);
+    assert(!invalid.is_valid());
+
+    // Null handle
+    let null_handle = Handle.NULL;
+    assert(null_handle.raw() == 0);
+
+    // Current process pseudo-handle
+    let current_process = Handle.CURRENT_PROCESS;
+    assert(current_process.raw() == -1);
+
+    // Current thread pseudo-handle
+    let current_thread = Handle.CURRENT_THREAD;
+    assert(current_thread.raw() == -2);
+
+    print("Handle type tests passed");
+}
+
+// =============================================================================
+// LargeInteger Tests
+// =============================================================================
+
+@test
+fn test_large_integer() {
+    // Create from 64-bit value
+    let li = LargeInteger.from_i64(1000000);
+    assert(li.QuadPart == 1000000);
+
+    // Negative value (for relative time)
+    let neg_li = LargeInteger.from_i64(-100000);
+    assert(neg_li.QuadPart == -100000);
+
+    // Zero
+    let zero = LargeInteger.from_i64(0);
+    assert(zero.QuadPart == 0);
+
+    // Max value
+    let max = LargeInteger.from_i64(Int.MAX);
+    assert(max.QuadPart == Int.MAX);
+
+    // Low/High parts access
+    let parts_li = LargeInteger.from_parts(0xDEADBEEF, 0x12345678);
+    assert(parts_li.LowPart == 0xDEADBEEF);
+    assert(parts_li.HighPart == 0x12345678);
+
+    print("LargeInteger tests passed");
+}
+
+// =============================================================================
+// UnicodeString Tests
+// =============================================================================
+
+@test
+fn test_unicode_string() {
+    // Create empty Unicode string
+    let empty = UnicodeString.empty();
+    assert(empty.Length == 0);
+    assert(empty.MaximumLength == 0);
+
+    // Create from buffer
+    let buffer: [UInt16; 10] = [0x48, 0x65, 0x6C, 0x6C, 0x6F, 0, 0, 0, 0, 0];  // "Hello"
+    let hello = UnicodeString.from_buffer(&buffer, 5);
+    assert(hello.Length == 10);  // 5 chars * 2 bytes
+    assert(hello.MaximumLength == 20);
+
+    print("UnicodeString tests passed");
+}
+
+// =============================================================================
+// IoStatusBlock Tests
+// =============================================================================
+
+@test
+fn test_io_status_block() {
+    // Create IO status block
+    let mut iosb = IoStatusBlock {
+        Status: 0,
+        Information: 0,
+    };
+
+    assert(iosb.Status == 0);
+    assert(iosb.Information == 0);
+
+    // Modify status
+    iosb.Status = STATUS_SUCCESS;
+    iosb.Information = 1024;
+
+    assert(iosb.Status == STATUS_SUCCESS);
+    assert(iosb.Information == 1024);
+
+    print("IoStatusBlock tests passed");
+}
+
+// =============================================================================
+// NT Virtual Memory Tests
+// =============================================================================
+
+@test
+fn test_nt_virtual_memory() {
+    mount core.sys.windows.kernel32.{GetCurrentProcess};
+
+    let process = GetCurrentProcess();
+
+    // Allocate memory
+    let mut base_address: Int = 0;
+    let mut region_size: Int = 4096;
+
+    let alloc_status = NtAllocateVirtualMemory(
+        process,
+        &mut base_address,
+        0,
+        &mut region_size,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_READWRITE
+    );
+
+    assert(alloc_status == STATUS_SUCCESS);
+    assert(base_address != 0);
+
+    // Write and read
+    unsafe {
+        let ptr = base_address as *mut Int;
+        *ptr = 0xDEADC0DE;
+        assert(*ptr == 0xDEADC0DE);
+    }
+
+    // Change protection
+    let mut old_protect: UInt32 = 0;
+    let protect_status = NtProtectVirtualMemory(
+        process,
+        &mut base_address,
+        &mut region_size,
+        PAGE_READONLY,
+        &mut old_protect
+    );
+
+    assert(protect_status == STATUS_SUCCESS);
+    assert(old_protect == PAGE_READWRITE);
+
+    // Restore and free
+    let _ = NtProtectVirtualMemory(
+        process,
+        &mut base_address,
+        &mut region_size,
+        PAGE_READWRITE,
+        &mut old_protect
+    );
+
+    let mut free_size: Int = 0;
+    let free_status = NtFreeVirtualMemory(
+        process,
+        &mut base_address,
+        &mut free_size,
+        MEM_RELEASE
+    );
+
+    assert(free_status == STATUS_SUCCESS);
+
+    print("NT virtual memory tests passed");
+}
+
+// =============================================================================
+// NT Delay Execution Tests
+// =============================================================================
+
+@test
+fn test_nt_delay_execution() {
+    mount core.sys.windows.time.{monotonic_nanos};
+
+    // Sleep for 10ms using NT API
+    // Negative value = relative time, in 100ns units
+    // -10ms = -10 * 10000 = -100000
+    let delay = LargeInteger.from_i64(-100000);
+
+    let before = monotonic_nanos();
+    let status = NtDelayExecution(false, &delay);
+    let after = monotonic_nanos();
+
+    assert(status == STATUS_SUCCESS);
+
+    let elapsed = after - before;
+    assert(elapsed >= 9_000_000);     // At least 9ms
+    assert(elapsed < 100_000_000);    // Less than 100ms
+
+    print("NT delay execution tests passed");
+}
+
+// =============================================================================
+// Object Attributes Tests
+// =============================================================================
+
+@test
+fn test_object_attributes() {
+    // Create object attributes
+    let attr = ObjectAttributes {
+        Length: 24,  // Size of ObjectAttributes
+        RootDirectory: Handle.NULL,
+        ObjectName: 0 as &UnicodeString,
+        Attributes: 0,
+        SecurityDescriptor: 0 as &unsafe Byte,
+        SecurityQualityOfService: 0 as &unsafe Byte,
+    };
+
+    assert(attr.Length == 24);
+    assert(attr.RootDirectory.raw() == 0);
+    assert(attr.Attributes == 0);
+
+    // Attributes flags
+    let OBJ_INHERIT = 0x00000002;
+    let OBJ_PERMANENT = 0x00000010;
+    let OBJ_CASE_INSENSITIVE = 0x00000040;
+
+    let attr_with_flags = ObjectAttributes {
+        Length: 24,
+        RootDirectory: Handle.NULL,
+        ObjectName: 0 as &UnicodeString,
+        Attributes: OBJ_CASE_INSENSITIVE | OBJ_INHERIT,
+        SecurityDescriptor: 0 as &unsafe Byte,
+        SecurityQualityOfService: 0 as &unsafe Byte,
+    };
+
+    assert((attr_with_flags.Attributes & OBJ_CASE_INSENSITIVE) != 0);
+    assert((attr_with_flags.Attributes & OBJ_INHERIT) != 0);
+
+    print("Object attributes tests passed");
+}

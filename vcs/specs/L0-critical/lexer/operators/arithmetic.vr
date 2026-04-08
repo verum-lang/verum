@@ -1,0 +1,140 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, arithmetic
+
+// Arithmetic operators
+
+fn test_arithmetic() {
+    // Addition operator (+)
+    let sum = 10 + 20;
+    let add_negative = 5 + (-3);
+    let add_floats = 3.14 + 2.86;
+    let add_chain = 1 + 2 + 3 + 4 + 5;
+
+    // Subtraction operator (-)
+    let difference = 100 - 42;
+    let subtract_negative = 10 - (-5);
+    let subtract_floats = 10.5 - 3.2;
+    let subtract_chain = 100 - 20 - 30;
+
+    // Multiplication operator (*)
+    let product = 6 * 7;
+    let mult_negative = 5 * (-3);
+    let mult_floats = 2.5 * 4.0;
+    let mult_chain = 2 * 3 * 4 * 5;
+
+    // Division operator (/)
+    let quotient = 100 / 4;
+    let div_negative = 20 / (-4);
+    let div_floats = 10.0 / 3.0;
+    let div_result = 22 / 7;
+
+    // Modulo/remainder operator (%)
+    let remainder = 17 % 5;
+    let mod_negative = -17 % 5;
+    let mod_floats = 10.5 % 3.0;
+    let mod_result = 100 % 7;
+
+    // Unary minus (-)
+    let negated = -42;
+    let double_neg = -(-42);
+    let neg_float = -3.14;
+
+    // Unary plus is not supported in Verum
+    let positive = 42;
+    let pos_float = 3.14;
+
+    // Combined expressions
+    let complex = (10 + 20) * 3;
+    let precedence = 2 + 3 * 4;  // Should be 14, not 20
+    let parens = (2 + 3) * 4;    // Should be 20
+    let mixed = 100 / 5 + 3 * 2; // Should be 26
+
+    // Floating point arithmetic
+    let pi = 3.14159;
+    let radius = 5.0;
+    let area = pi * radius * radius;
+    let circumference = 2.0 * pi * radius;
+
+    // Integer division
+    let int_div = 17 / 5;  // Should be 3
+    let int_mod = 17 % 5;  // Should be 2
+
+    // Division by powers of 2 (optimization hint)
+    let half = 100 / 2;
+    let quarter = 100 / 4;
+    let eighth = 100 / 8;
+
+    // Exponentiation (if supported as operator)
+    let squared = 5 ** 2;
+    let cubed = 3 ** 3;
+    let power = 2 ** 10;
+
+    // Arithmetic with different types
+    let int_val: Int = 42;
+    let float_val: Float = 3.14;
+    let mixed_result = int_val as Float + float_val;
+
+    // In arrays
+    let values = [1 + 1, 2 * 2, 3 * 3, 4 * 4, 5 * 5];
+    let sums = [10 + 20, 30 + 40, 50 + 60];
+
+    // In conditionals
+    let a = 10;
+    let b = 20;
+    let max = if a + 5 > b - 5 { a } else { b };
+
+    // Arithmetic in loops
+    let mut total = 0;
+    for i in 1..=10 {
+        total = total + i;
+    }
+}
+
+// In function parameters
+fn calculate_area(width: Float, height: Float) -> Float {
+    width * height
+}
+
+fn test_function_calls() {
+    let rect_area = calculate_area(10.5, 7.25);
+}
+
+// Method-style arithmetic (if supported)
+fn test_methods() {
+    let sum_method = 10.add(20);
+    let prod_method = 5.mul(6);
+
+    // Saturating arithmetic (no overflow)
+    let sat_add = 255u8.saturating_add(10u8);
+    let sat_sub = 0u8.saturating_sub(10u8);
+
+    // Wrapping arithmetic
+    let wrap_add = 255u8.wrapping_add(1u8);
+    let wrap_sub = 0u8.wrapping_sub(1u8);
+
+    // Checked arithmetic (returns Option)
+    let check_add = 255u8.checked_add(1u8);
+    let check_sub = 0u8.checked_sub(1u8);
+
+    // Overflowing arithmetic (returns (result, overflow_flag))
+    let (result, overflowed) = 255u8.overflowing_add(1u8);
+
+    // Division with remainder
+    let (quot, rem) = div_rem(17, 5);
+
+    // Absolute value (related to arithmetic)
+    let abs_val = (-42).abs();
+
+    // Euclidean division/modulo
+    let euclid_div = (-7).div_euclid(4);
+    let euclid_rem = (-7).rem_euclid(4);
+
+    // Arithmetic assignment (see assignment.vr for compound)
+    let mut counter = 0;
+    counter = counter + 1;
+    counter = counter * 2;
+    counter = counter - 1;
+    counter = counter / 2;
+}

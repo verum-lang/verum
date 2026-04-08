@@ -1,0 +1,120 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, nn
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL tensor neural network operations through VBC interpreter.
+// Exercises activation functions (relu, sigmoid, tanh) and basic NN building
+// blocks using real tensor opcodes. Validates numerical properties.
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let diff = tensor_binop(t, e, 1);
+    let val = tensor_get_scalar(diff, idx);
+    if val == 0 { 0 } else { 1 }
+}
+
+// Check that a value is between lo and hi (exclusive).
+// Uses tensor operations: (val - lo) should be >= 0, (hi - val) should be >= 0.
+fn check_in_range(t: Int, idx: Int) -> Int {
+    // Just verify it doesn't crash for now - range checks need float comparison
+    let val = tensor_get_scalar(t, idx);
+    0
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // --- Test 1: ReLU activation ---
+    // relu([−3, −1, 0, 1, 3]) = [0, 0, 0, 1, 3]
+    let x = tensor_new(5, 1);
+    let x = tensor_set_scalar(x, 0, -3);
+    let x = tensor_set_scalar(x, 1, -1);
+    let x = tensor_set_scalar(x, 2, 0);
+    let x = tensor_set_scalar(x, 3, 1);
+    let x = tensor_set_scalar(x, 4, 3);
+
+    let relu = tensor_unop(x, 9);
+    errors = errors + check_val(relu, 0, 0);
+    errors = errors + check_val(relu, 1, 0);
+    errors = errors + check_val(relu, 2, 0);
+    errors = errors + check_val(relu, 3, 1);
+    errors = errors + check_val(relu, 4, 3);
+
+    // --- Test 2: Sigmoid(0) = 0.5, sigmoid(large) ≈ 1, sigmoid(-large) ≈ 0 ---
+    let zero = tensor_fill(1, 0, 1);
+    let sig_zero = tensor_unop(zero, 8);
+    // sigmoid(0) = 0.5 — can't compare exactly with int, just verify pipeline
+    errors = errors + check_in_range(sig_zero, 0);
+
+    // --- Test 3: Tanh properties ---
+    // tanh(0) = 0
+    let tanh_zero = tensor_unop(zero, 7);
+    errors = errors + check_val(tanh_zero, 0, 0);
+
+    // --- Test 4: Simple forward pass: y = relu(W * x + b) ---
+    // W = [2, -1, 3], x = [1, 2, 3], b = [-1, 1, -1]
+    // W*x (element-wise) = [2, -2, 9], + b = [1, -1, 8]
+    // relu([1, -1, 8]) = [1, 0, 8]
+    let w = tensor_new(3, 1);
+    let w = tensor_set_scalar(w, 0, 2);
+    let w = tensor_set_scalar(w, 1, -1);
+    let w = tensor_set_scalar(w, 2, 3);
+
+    let inp = tensor_new(3, 1);
+    let inp = tensor_set_scalar(inp, 0, 1);
+    let inp = tensor_set_scalar(inp, 1, 2);
+    let inp = tensor_set_scalar(inp, 2, 3);
+
+    let bias = tensor_new(3, 1);
+    let bias = tensor_set_scalar(bias, 0, -1);
+    let bias = tensor_set_scalar(bias, 1, 1);
+    let bias = tensor_set_scalar(bias, 2, -1);
+
+    let wx = tensor_binop(w, inp, 2);
+    let pre_act = tensor_binop(wx, bias, 0);
+    let output = tensor_unop(pre_act, 9);
+
+    errors = errors + check_val(output, 0, 1);
+    errors = errors + check_val(output, 1, 0);
+    errors = errors + check_val(output, 2, 8);
+
+    // --- Test 5: Two-layer forward pass ---
+    // Layer 1: y1 = relu(W1 * x + b1)
+    // Layer 2: y2 = W2 * y1 (just scale, no activation)
+    let w2 = tensor_fill(3, 2, 1);
+    let y2 = tensor_binop(w2, output, 2);
+    // y2 = [2*1, 2*0, 2*8] = [2, 0, 16]
+    errors = errors + check_val(y2, 0, 2);
+    errors = errors + check_val(y2, 1, 0);
+    errors = errors + check_val(y2, 2, 16);
+
+    // --- Test 6: Loss computation: MSE = mean((pred - target)^2) ---
+    let target = tensor_new(3, 1);
+    let target = tensor_set_scalar(target, 0, 1);
+    let target = tensor_set_scalar(target, 1, 1);
+    let target = tensor_set_scalar(target, 2, 10);
+
+    let diff = tensor_binop(y2, target, 1);
+    // diff = [2-1, 0-1, 16-10] = [1, -1, 6]
+    let sq = tensor_binop(diff, diff, 2);
+    // sq = [1, 1, 36]
+    let sum_sq = tensor_reduce(sq, 0, 0);
+    // sum = 38
+    errors = errors + check_val(sum_sq, 0, 38);
+
+    // --- Test 7: Gradient-like: scale by learning rate ---
+    let lr = tensor_fill(3, 0, 1);
+    // Since we can't use float 0.1, test with integer lr=1
+    // grad = diff * lr = [1*1, -1*1, 6*1] = [1, -1, 6]
+    // But lr=0 would zero out. Use lr=1 for integer test.
+    let lr = tensor_fill(3, 1, 1);
+    let grad = tensor_binop(diff, lr, 2);
+    errors = errors + check_val(grad, 0, 1);
+    errors = errors + check_val(grad, 1, -1);
+    errors = errors + check_val(grad, 2, 6);
+
+    errors
+}

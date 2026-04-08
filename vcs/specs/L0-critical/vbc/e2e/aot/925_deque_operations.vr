@@ -1,0 +1,170 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, deque, collection
+// @expected-exit: 0
+
+// Test: Deque operations — new, push_front, push_back, pop_front, pop_back,
+// len, clear.
+
+fn main() -> Int {
+    // Test 1: Create deque, push_back
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    if (d.len() != 3) {
+        print(f"FAIL test1: len={d.len()}, expected 3");
+        return 1;
+    }
+
+    // Test 3: pop_front
+    let v1 = match d.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (v1 != 10) {
+        print(f"FAIL test3a: pop_front={v1}, expected 10");
+        return 1;
+    }
+    if (d.len() != 2) {
+        print(f"FAIL test3b: len={d.len()}, expected 2");
+        return 1;
+    }
+
+    // Test 4: pop_back
+    let v2 = match d.pop_back() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (v2 != 30) {
+        print(f"FAIL test4a: pop_back={v2}, expected 30");
+        return 1;
+    }
+    if (d.len() != 1) {
+        print(f"FAIL test4b: len={d.len()}, expected 1");
+        return 1;
+    }
+
+    // Test 5: push_front
+    d.push_front(5);
+    d.push_front(1);
+    // Now: [1, 5, 20]
+    if (d.len() != 3) {
+        print(f"FAIL test5a: len={d.len()}, expected 3");
+        return 1;
+    }
+
+    // Test 6: Drain all via pop_front
+    let a = match d.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    let b = match d.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    let c = match d.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (a != 1) {
+        print(f"FAIL test6a: a={a}, expected 1");
+        return 1;
+    }
+    if (b != 5) {
+        print(f"FAIL test6b: b={b}, expected 5");
+        return 1;
+    }
+    if (c != 20) {
+        print(f"FAIL test6c: c={c}, expected 20");
+        return 1;
+    }
+    if (d.len() != 0) {
+        print(f"FAIL test6d: len={d.len()}, expected 0");
+        return 1;
+    }
+
+    // Test 7: Large deque (trigger grow)
+    let mut d2 = Deque.new();
+    let mut i = 0;
+    while (i < 100) {
+        d2.push_back(i * 2);
+        i = i + 1;
+    }
+    if (d2.len() != 100) {
+        print(f"FAIL test7a: len={d2.len()}, expected 100");
+        return 1;
+    }
+    let first = match d2.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (first != 0) {
+        print(f"FAIL test7b: first={first}, expected 0");
+        return 1;
+    }
+    let last = match d2.pop_back() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (last != 198) {
+        print(f"FAIL test7c: last={last}, expected 198");
+        return 1;
+    }
+
+    // Test 8: Mixed push_front/push_back with wrapping
+    let mut d3 = Deque.new();
+    d3.push_back(50);
+    d3.push_front(40);
+    d3.push_back(60);
+    d3.push_front(30);
+    // Order: [30, 40, 50, 60]
+    let p1 = match d3.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    let p2 = match d3.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    let p3 = match d3.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    let p4 = match d3.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    if (p1 != 30) {
+        print(f"FAIL test8a: {p1}, expected 30");
+        return 1;
+    }
+    if (p2 != 40) {
+        print(f"FAIL test8b: {p2}, expected 40");
+        return 1;
+    }
+    if (p3 != 50) {
+        print(f"FAIL test8c: {p3}, expected 50");
+        return 1;
+    }
+    if (p4 != 60) {
+        print(f"FAIL test8d: {p4}, expected 60");
+        return 1;
+    }
+
+    // Test 9: Clear
+    let mut d4 = Deque.new();
+    d4.push_back(1);
+    d4.push_back(2);
+    d4.push_back(3);
+    d4.clear();
+    if (d4.len() != 0) {
+        print(f"FAIL test9: len after clear={d4.len()}, expected 0");
+        return 1;
+    }
+
+    print("925_deque_operations: PASS");
+    0
+}

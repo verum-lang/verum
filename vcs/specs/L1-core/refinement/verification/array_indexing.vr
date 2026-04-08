@@ -1,0 +1,322 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, verification, arrays
+// @timeout: 5000
+
+/// Array indexing verification: proving arr[idx] is safe when idx < arr.len().
+/// Demonstrates static bounds checking through refinement types.
+
+type ValidIndex<const N: Int> is Int{>= 0};
+type NonEmptyList<T> is List<T>;
+type BoundedIndex<T> is { arr: List<T>, idx: Int };
+
+// ============================================================================
+// Basic safe indexing
+// ============================================================================
+
+@verify(proof)
+fn safe_index<T>(arr: List<T>, idx: Int{>= 0}) -> T
+    requires idx < len(arr)
+{
+    arr[idx]  // Proven safe: 0 <= idx < len(arr)
+}
+
+@verify(proof)
+fn head<T>(arr: NonEmptyList<T>) -> T {
+    arr[0]  // Proven safe: len > 0 implies 0 < len
+}
+
+@verify(proof)
+fn tail<T>(arr: NonEmptyList<T>) -> T {
+    arr[len(arr) - 1]  // Proven safe: len - 1 >= 0 && len - 1 < len
+}
+
+// ============================================================================
+// Index computation safety
+// ============================================================================
+
+@verify(proof)
+fn middle<T>(arr: List<T>{len(it) >= 1}) -> T {
+    arr[len(arr) / 2]  // Proven safe: 0 <= len/2 < len
+}
+
+@verify(proof)
+fn quarter<T>(arr: List<T>{len(it) >= 4}) -> T {
+    arr[len(arr) / 4]  // Proven safe when len >= 4
+}
+
+@verify(proof)
+fn offset_access<T>(arr: List<T>, base: Int{>= 0}, offset: Int{>= 0}) -> T
+    requires base + offset < len(arr)
+{
+    arr[base + offset]  // Proven safe by precondition
+}
+
+// ============================================================================
+// Adjacent element access
+// ============================================================================
+
+@verify(proof)
+fn pair_at<T>(arr: List<T>, idx: Int{>= 0}) -> (T, T)
+    requires idx + 1 < len(arr)
+{
+    (arr[idx], arr[idx + 1])  // Both accesses proven safe
+}
+
+@verify(proof)
+fn swap<T>(arr: &mut List<T>, i: Int{>= 0}, j: Int{>= 0})
+    requires i < len(arr) && j < len(arr)
+{
+    let tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+}
+
+// ============================================================================
+// Loop-based safe indexing
+// ============================================================================
+
+@verify(proof)
+fn sum_elements(arr: List<Int>) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+
+    while i < len(arr) {
+        invariant i >= 0 && i <= len(arr);
+
+        sum += arr[i];  // Safe: i < len(arr) in loop body
+        i += 1;
+    }
+
+    sum
+}
+
+@verify(proof)
+fn find_max(arr: NonEmptyList<Int>) -> Int {
+    let mut max = arr[0];  // Safe: len > 0
+    let mut i = 1;
+
+    while i < len(arr) {
+        invariant i >= 1 && i <= len(arr);
+
+        if arr[i] > max {  // Safe access
+            max = arr[i];
+        }
+        i += 1;
+    }
+
+    max
+}
+
+@verify(proof)
+fn reverse<T>(arr: List<T>) -> List<T>
+    ensures len(result) == len(arr)
+{
+    let mut result: List<T> = [];
+    let mut i = len(arr);
+
+    while i > 0 {
+        invariant i >= 0 && i <= len(arr);
+        invariant len(result) == len(arr) - i;
+
+        i -= 1;
+        result.push(arr[i]);  // Safe: i < len(arr) after decrement
+    }
+
+    result
+}
+
+// ============================================================================
+// Conditional indexing
+// ============================================================================
+
+@verify(proof)
+fn get_or_default<T>(arr: List<T>, idx: Int, default: T) -> T {
+    if idx >= 0 && idx < len(arr) {
+        arr[idx]  // Safe: guarded by condition
+    } else {
+        default
+    }
+}
+
+@verify(proof)
+fn safe_get<T>(arr: List<T>, idx: Int) -> Maybe<T> {
+    if idx >= 0 && idx < len(arr) {
+        Some(arr[idx])  // Safe in this branch
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Multi-dimensional array indexing
+// ============================================================================
+
+type Matrix<T> is List<List<T>> is ();
+
+@verify(proof)
+fn matrix_get<T>(m: Matrix<T>, row: Int{>= 0}, col: Int{>= 0}) -> Maybe<T> {
+    if row < len(m) {
+        let r = m[row];  // Safe: row < len(m)
+        if col < len(r) {
+            Some(r[col])  // Safe: col < len(r)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+@verify(proof)
+fn matrix_safe_get<T>(
+    m: Matrix<T>,
+    row: Int{>= 0},
+    col: Int{>= 0}
+) -> T
+    requires row < len(m)
+    requires len(m) > 0 => col < len(m[0])
+    requires forall r in m => len(r) == len(m[0])
+{
+    m[row][col]  // Both indices proven safe
+}
+
+// ============================================================================
+// Sliding window
+// ============================================================================
+
+@verify(proof)
+fn sliding_sum(arr: List<Int>, window: Int{> 0}) -> List<Int>
+    requires window <= len(arr)
+    ensures len(result) == len(arr) - window + 1
+{
+    let mut sums: List<Int> = [];
+    let mut i = 0;
+
+    while i + window <= len(arr) {
+        invariant i >= 0;
+        invariant len(sums) == i;
+
+        let mut sum = 0;
+        let mut j = 0;
+
+        while j < window {
+            invariant j >= 0 && j <= window;
+            invariant i + j <= len(arr);
+
+            sum += arr[i + j];  // Safe: i + j < i + window <= len(arr)
+            j += 1;
+        }
+
+        sums.push(sum);
+        i += 1;
+    }
+
+    sums
+}
+
+// ============================================================================
+// Binary search with index safety
+// ============================================================================
+
+@verify(proof)
+fn binary_search_index(arr: List<Int>, target: Int) -> Maybe<Int{>= 0}>
+    requires forall i in 0..(len(arr) - 1) => arr[i] <= arr[i + 1]
+    ensures match result {
+        Some(idx) => idx < len(arr),
+        None => true,
+    }
+{
+    if len(arr) == 0 {
+        return None;
+    }
+
+    let mut lo: Int{>= 0} = 0;
+    let mut hi: Int{>= 0} = len(arr) - 1;
+
+    while lo <= hi {
+        invariant lo >= 0;
+        invariant hi >= 0 && hi < len(arr);
+
+        let mid = lo + (hi - lo) / 2;
+        // mid is proven: lo <= mid <= hi < len(arr)
+
+        let val = arr[mid];  // Safe access
+
+        if val == target {
+            return Some(mid);
+        } else if val < target {
+            lo = mid + 1;
+        } else {
+            if mid == 0 {
+                return None;
+            }
+            hi = mid - 1;
+        }
+    }
+
+    None
+}
+
+// ============================================================================
+// Partition with safe indexing
+// ============================================================================
+
+@verify(proof)
+fn partition(arr: &mut List<Int>, lo: Int{>= 0}, hi: Int{>= 0}) -> Int{>= 0}
+    requires lo <= hi && hi < len(arr)
+    ensures result >= lo && result <= hi
+{
+    let pivot = arr[hi];  // Safe: hi < len
+    let mut i = lo;
+    let mut j = lo;
+
+    while j < hi {
+        invariant i >= lo && i <= j;
+        invariant j >= lo && j <= hi;
+
+        if arr[j] < pivot {  // Safe: j < hi < len
+            let tmp = arr[i];
+            arr[i] = arr[j];  // Safe: i <= j < hi < len
+            arr[j] = tmp;
+            i += 1;
+        }
+        j += 1;
+    }
+
+    // Final swap
+    let tmp = arr[i];
+    arr[i] = arr[hi];  // Safe: i <= hi < len
+    arr[hi] = tmp;
+
+    i
+}
+
+fn main() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Basic indexing
+    let h = head(arr);
+    let t = tail(arr);
+    let m = middle(arr);
+    assert(h == 1);
+    assert(t == 5);
+    assert(m == 3);
+
+    // Sum
+    let total = sum_elements(arr);
+    assert(total == 15);
+
+    // Max
+    let max_val = find_max(arr);
+    assert(max_val == 5);
+
+    // Reverse
+    let rev = reverse(arr);
+    assert(rev == [5, 4, 3, 2, 1]);
+
+    // Binary search
+    let idx = binary_search_index(arr, 3);
+    assert(idx == Some(2));
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, capability, comma, error
+// @description: Test detection of trailing comma in capability list
+// @expected-error: E084
+
+// Trailing comma is not allowed in capability list
+fn test(db: Database with [Read, Write,]) {}

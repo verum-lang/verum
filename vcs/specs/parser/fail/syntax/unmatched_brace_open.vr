@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, braces, error
+// @description: Test unmatched opening brace detection
+// @expected-error: E011
+
+fn test_unmatched() {
+    if true {
+        let x = 1;
+
+}

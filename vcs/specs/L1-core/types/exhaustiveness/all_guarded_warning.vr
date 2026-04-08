@@ -1,0 +1,14 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, guard-pattern, warning
+// @description: All-guarded match should produce W0603 warning
+// @expected-warning: W0603
+
+// WARNING: All guards could evaluate to false
+fn risky_classify(n: Int) -> Text =
+    match n {
+        x if x > 100 => "large",
+        x if x > 50 => "medium",
+        x if x > 0 => "small"
+        // W0603: match expression may not be exhaustive: all arms have guards
+    };

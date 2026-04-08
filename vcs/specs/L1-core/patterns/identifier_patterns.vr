@@ -1,0 +1,183 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, identifiers
+//
+// Tests identifier patterns: binding `x`, wildcard `_`, and named wildcard `_name`.
+
+fn bind_value(x: Int) -> Int {
+    match x {
+        value => value * 2,  // Simple identifier binding
+    }
+}
+
+fn ignore_value(pair: (Int, Int)) -> Int {
+    match pair {
+        (first, _) => first,  // Wildcard ignores second element
+    }
+}
+
+fn named_wildcard(triple: (Int, Int, Int)) -> Int {
+    match triple {
+        (a, _unused, b) => a + b,  // Named wildcard for documentation
+    }
+}
+
+fn multiple_wildcards(quad: (Int, Int, Int, Int)) -> Int {
+    match quad {
+        (a, _, _, d) => a + d,  // Multiple wildcards
+    }
+}
+
+fn shadowing_binding(x: Int) -> Int {
+    match x {
+        x => x + 1,  // Shadows outer x
+    }
+}
+
+fn let_identifier_binding() -> Int {
+    let x = 42;
+    let _ = compute_side_effect();  // Wildcard in let
+    let _unused = 100;              // Named wildcard in let
+    x
+}
+
+fn compute_side_effect() -> Int {
+    // Some computation whose result is ignored
+    1 + 1
+}
+
+fn nested_identifier_bindings(data: ((Int, Int), Int)) -> Int {
+    match data {
+        ((a, b), c) => a + b + c,
+    }
+}
+
+fn identifier_in_function_param(value: Int, _ignored: Int) -> Int {
+    value
+}
+
+// Binding without type annotation
+fn typed_binding(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        None => 0,
+    }
+}
+
+// Multiple bindings in one pattern
+fn multi_bind(data: (Int, Int, Int, Int, Int)) -> Int {
+    match data {
+        (a, b, c, d, e) => a + b + c + d + e,
+    }
+}
+
+// Binding same name in different arms
+fn bind_different_arms(x: Bool) -> Int {
+    match x {
+        true => {
+            let result = 1;
+            result
+        }
+        false => {
+            let result = 0;  // Same name, different scope
+            result
+        }
+    }
+}
+
+// Binding in nested match
+fn nested_match_binding(outer: Maybe<Maybe<Int>>) -> Int {
+    match outer {
+        Some(inner) => match inner {
+            Some(value) => value,
+            None => -1,
+        },
+        None => -2,
+    }
+}
+
+// Identifier binding with if-let
+fn if_let_binding(m: Maybe<Int>) -> Int {
+    if let Some(x) = m {
+        x * 2
+    } else {
+        0
+    }
+}
+
+// Sum using recursive pattern
+@allow(unbounded_recursion)
+fn while_let_sum(list: List<Int>) -> Int {
+    match list {
+        [] => 0,
+        [head, ..rest] => head + while_let_sum(rest),
+    }
+}
+
+// Binding in function with tuple destructuring
+@allow(unbounded_recursion)
+fn for_loop_binding(items: List<(Int, Int)>) -> Int {
+    match items {
+        [] => 0,
+        [(a, b), ..rest] => a + b + for_loop_binding(rest),
+    }
+}
+
+// Deeply nested binding
+fn deep_binding(data: (((Int, Int), Int), Int)) -> Int {
+    match data {
+        (((a, b), c), d) => a + b + c + d,
+    }
+}
+
+fn main() {
+    // Simple binding
+    assert(bind_value(5) == 10);
+    assert(bind_value(0) == 0);
+
+    // Wildcard
+    assert(ignore_value((1, 99)) == 1);
+    assert(ignore_value((42, 0)) == 42);
+
+    // Named wildcard
+    assert(named_wildcard((1, 100, 2)) == 3);
+
+    // Multiple wildcards
+    assert(multiple_wildcards((1, 2, 3, 4)) == 5);
+
+    // Shadowing
+    assert(shadowing_binding(10) == 11);
+
+    // Let bindings with identifiers
+    assert(let_identifier_binding() == 42);
+
+    // Nested bindings
+    assert(nested_identifier_bindings(((1, 2), 3)) == 6);
+
+    // Function parameter with wildcard
+    assert(identifier_in_function_param(42, 999) == 42);
+
+    // Typed binding
+    assert(typed_binding(Some(42)) == 42);
+    assert(typed_binding(None) == 0);
+
+    // Multi bind
+    assert(multi_bind((1, 2, 3, 4, 5)) == 15);
+
+    // Different arms
+    assert(bind_different_arms(true) == 1);
+    assert(bind_different_arms(false) == 0);
+
+    // Nested match
+    assert(nested_match_binding(Some(Some(42))) == 42);
+    assert(nested_match_binding(Some(None)) == -1);
+    assert(nested_match_binding(None) == -2);
+
+    // If-let
+    assert(if_let_binding(Some(5)) == 10);
+    assert(if_let_binding(None) == 0);
+
+    // Deep binding
+    assert(deep_binding((((1, 2), 3), 4)) == 10);
+}

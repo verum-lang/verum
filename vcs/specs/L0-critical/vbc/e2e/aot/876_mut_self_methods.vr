@@ -1,0 +1,58 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, mut-self, methods, impl-block
+// @expected-exit: 0
+// Tests &mut self method calls in AOT mode.
+// Previously crashed with segfault due to CBGR struct coerce_value bug.
+
+mount core.*;
+
+type Counter is {
+    val: Int,
+};
+
+implement Counter {
+    fn create(start: Int) -> Counter {
+        Counter { val: start }
+    }
+
+    fn get(&self) -> Int {
+        self.val
+    }
+
+    fn inc(&mut self) {
+        self.val = self.val + 1;
+    }
+
+    fn add(&mut self, n: Int) {
+        self.val = self.val + n;
+    }
+}
+
+fn main() -> Int {
+    let mut c = Counter.create(0);
+    assert_eq(c.get(), 0);
+
+    c.inc();
+    assert_eq(c.get(), 1);
+
+    c.inc();
+    c.inc();
+    c.inc();
+    assert_eq(c.get(), 4);
+
+    c.add(10);
+    assert_eq(c.get(), 14);
+
+    // Test nested method calls on &mut self
+    let mut c2 = Counter.create(100);
+    let mut i = 0;
+    while i < 50 {
+        c2.inc();
+        i = i + 1;
+    }
+    assert_eq(c2.get(), 150);
+
+    0
+}

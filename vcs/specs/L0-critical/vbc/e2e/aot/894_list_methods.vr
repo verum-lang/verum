@@ -1,0 +1,109 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, methods, push, pop, indexing
+// @expected-exit: 0
+
+// Test: List operations — push, pop, indexing, length, iteration.
+
+fn sum_list(arr: List<Int>) -> Int {
+    let mut acc = 0;
+    let mut i = 0;
+    while (i < arr.len()) {
+        acc = acc + arr[i];
+        i = i + 1;
+    }
+    acc
+}
+
+fn build_squares(n: Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while (i < n) {
+        result.push(i * i);
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: basic list literal and indexing
+    let arr = [10, 20, 30, 40, 50];
+    if (arr[0] != 10) {
+        print(f"FAIL test1a: arr[0]={arr[0]}");
+        return 1;
+    }
+    if (arr[4] != 50) {
+        print(f"FAIL test1b: arr[4]={arr[4]}");
+        return 1;
+    }
+    if (arr.len() != 5) {
+        print(f"FAIL test1c: len={arr.len()}");
+        return 1;
+    }
+
+    // Test 2: sum of list
+    let s = sum_list(arr);
+    if (s != 150) {
+        print(f"FAIL test2: sum={s}");
+        return 1;
+    }
+
+    // Test 3: build list with push
+    let squares = build_squares(10);
+    if (squares.len() != 10) {
+        print(f"FAIL test3a: len={squares.len()}");
+        return 1;
+    }
+    // squares = [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+    if (squares[5] != 25) {
+        print(f"FAIL test3b: squares[5]={squares[5]}");
+        return 1;
+    }
+    let sq_sum = sum_list(squares);
+    // 0+1+4+9+16+25+36+49+64+81 = 285
+    if (sq_sum != 285) {
+        print(f"FAIL test3c: sum_squares={sq_sum}");
+        return 1;
+    }
+
+    // Test 4: mutable list assignment
+    let mut data = [1, 2, 3, 4, 5];
+    data[0] = 100;
+    data[4] = 500;
+    if (data[0] != 100) {
+        print(f"FAIL test4a: data[0]={data[0]}");
+        return 1;
+    }
+    if (data[4] != 500) {
+        print(f"FAIL test4b: data[4]={data[4]}");
+        return 1;
+    }
+    let d_sum = sum_list(data);
+    // 100+2+3+4+500 = 609
+    if (d_sum != 609) {
+        print(f"FAIL test4c: sum={d_sum}");
+        return 1;
+    }
+
+    // Test 5: nested list operations
+    let mut big: List<Int> = [];
+    let mut i = 0;
+    while (i < 100) {
+        big.push(i);
+        i = i + 1;
+    }
+    if (big.len() != 100) {
+        print(f"FAIL test5a: big.len={big.len()}");
+        return 1;
+    }
+    let big_sum = sum_list(big);
+    // 0+1+...+99 = 4950
+    if (big_sum != 4950) {
+        print(f"FAIL test5b: big sum={big_sum}");
+        return 1;
+    }
+
+    print("894_list_methods: PASS");
+    0
+}

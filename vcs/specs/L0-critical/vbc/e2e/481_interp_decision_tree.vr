@@ -1,0 +1,242 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, decision_tree, classification, array_tree
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Decision tree simulation using array-based representation.
+// Each node is stored by index:
+//   node_type[i] = 0 for internal node (split), 1 for leaf node
+//   feature[i]   = feature index to split on (internal nodes only)
+//   threshold[i] = threshold value (internal nodes only)
+//   left[i]      = index of left child  (internal nodes only)
+//   right[i]     = index of right child (internal nodes only)
+//   leaf_val[i]  = prediction value     (leaf nodes only)
+//
+// Tree is 1-indexed; root is at index 1.
+
+// Classify a sample using the tree.
+// Returns the leaf prediction value.
+fn dt_classify(
+    node_type: [Int; 32],
+    feature:   [Int; 32],
+    threshold: [Int; 32],
+    left:      [Int; 32],
+    right:     [Int; 32],
+    leaf_val:  [Int; 32],
+    sample:    [Int; 8]
+) -> Int {
+    let mut cur = 1;
+    while node_type[cur] == 0 {
+        let feat = feature[cur];
+        let thr  = threshold[cur];
+        if sample[feat] <= thr {
+            cur = left[cur];
+        } else {
+            cur = right[cur];
+        }
+    }
+    leaf_val[cur]
+}
+
+// Build a small decision tree (depth 2, 3 internal nodes, 4 leaves).
+//
+// Structure (1-indexed):
+//   Node 1 (root): feature 0, threshold 5 -> left=2, right=3
+//   Node 2:        feature 1, threshold 3 -> left=4, right=5
+//   Node 3:        feature 1, threshold 7 -> left=6, right=7
+//   Node 4 (leaf): predict 10
+//   Node 5 (leaf): predict 20
+//   Node 6 (leaf): predict 30
+//   Node 7 (leaf): predict 40
+//
+// Decision logic:
+//   if x[0] <= 5:
+//     if x[1] <= 3: class=10 else class=20
+//   else:
+//     if x[1] <= 7: class=30 else class=40
+fn build_tree(
+    node_type: [Int; 32],
+    feature:   [Int; 32],
+    threshold: [Int; 32],
+    left:      [Int; 32],
+    right:     [Int; 32],
+    leaf_val:  [Int; 32]
+) {
+    // Node 1: internal, feature=0, threshold=5
+    node_type[1] = 0; feature[1] = 0; threshold[1] = 5; left[1] = 2; right[1] = 3;
+    // Node 2: internal, feature=1, threshold=3
+    node_type[2] = 0; feature[2] = 1; threshold[2] = 3; left[2] = 4; right[2] = 5;
+    // Node 3: internal, feature=1, threshold=7
+    node_type[3] = 0; feature[3] = 1; threshold[3] = 7; left[3] = 6; right[3] = 7;
+    // Leaves
+    node_type[4] = 1; leaf_val[4] = 10;
+    node_type[5] = 1; leaf_val[5] = 20;
+    node_type[6] = 1; leaf_val[6] = 30;
+    node_type[7] = 1; leaf_val[7] = 40;
+}
+
+fn test_dt_basic() {
+    let mut nt  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ft  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut thr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lft = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut rgt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lv  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_tree(nt, ft, thr, lft, rgt, lv);
+
+    // Sample A: x[0]=3, x[1]=2 -> left path (3<=5), left (2<=3) -> leaf 4 -> 10
+    let sa = [3, 2, 0, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, sa), 10);
+
+    // Sample B: x[0]=4, x[1]=5 -> left (4<=5), right (5>3)  -> leaf 5 -> 20
+    let sb = [4, 5, 0, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, sb), 20);
+
+    // Sample C: x[0]=6, x[1]=7 -> right (6>5), left (7<=7)  -> leaf 6 -> 30
+    let sc = [6, 7, 0, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, sc), 30);
+
+    // Sample D: x[0]=9, x[1]=8 -> right (9>5), right (8>7)  -> leaf 7 -> 40
+    let sd = [9, 8, 0, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, sd), 40);
+
+    // Boundary: x[0]=5 (exactly at threshold) -> left path
+    let se = [5, 4, 0, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, se), 20); // 5<=5 -> left; 4>3 -> 20
+
+    print("dt_basic: ok");
+}
+
+fn test_dt_batch() {
+    let mut nt  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ft  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut thr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lft = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut rgt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lv  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_tree(nt, ft, thr, lft, rgt, lv);
+
+    // Batch of 8 samples: (x0, x1) -> expected prediction
+    // (1,1)->10, (2,4)->20, (6,3)->30, (8,9)->40, (0,0)->10,
+    // (5,3)->10, (5,8)->20, (7,7)->30
+    let x0 = [1, 2, 6, 8, 0, 5, 5, 7];
+    let x1 = [1, 4, 3, 9, 0, 3, 8, 7];
+    let ex = [10, 20, 30, 40, 10, 10, 20, 30];
+
+    let mut i = 0;
+    let mut correct = 0;
+    while i < 8 {
+        let samp = [x0[i], x1[i], 0, 0, 0, 0, 0, 0];
+        let pred = dt_classify(nt, ft, thr, lft, rgt, lv, samp);
+        if pred == ex[i] { correct = correct + 1; }
+        i = i + 1;
+    }
+    assert_eq(correct, 8);
+    print(f"dt_batch: correct={correct}/8 ok");
+}
+
+fn test_dt_depth3() {
+    // Build a deeper tree (depth 3) manually.
+    // All nodes 1-indexed.
+    // Node 1: feature=0, thr=10 -> L=2, R=3
+    // Node 2: feature=1, thr=5  -> L=4, R=5
+    // Node 3: feature=0, thr=15 -> L=6, R=7
+    // Node 4: feature=2, thr=2  -> L=8, R=9
+    // Node 5: leaf -> 100
+    // Node 6: leaf -> 200
+    // Node 7: leaf -> 300
+    // Node 8: leaf -> 400
+    // Node 9: leaf -> 500
+    let mut nt  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ft  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut thr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lft = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut rgt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lv  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    nt[1]=0; ft[1]=0; thr[1]=10; lft[1]=2; rgt[1]=3;
+    nt[2]=0; ft[2]=1; thr[2]=5;  lft[2]=4; rgt[2]=5;
+    nt[3]=0; ft[3]=0; thr[3]=15; lft[3]=6; rgt[3]=7;
+    nt[4]=0; ft[4]=2; thr[4]=2;  lft[4]=8; rgt[4]=9;
+    nt[5]=1; lv[5]=100;
+    nt[6]=1; lv[6]=200;
+    nt[7]=1; lv[7]=300;
+    nt[8]=1; lv[8]=400;
+    nt[9]=1; lv[9]=500;
+
+    // x[0]=5, x[1]=3, x[2]=1: 5<=10 -> L; 3<=5 -> L; 1<=2 -> L(8)=400
+    let sa = [5, 3, 1, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, sa), 400);
+
+    // x[0]=5, x[1]=3, x[2]=3: 5<=10 -> L; 3<=5 -> L; 3>2 -> R(9)=500
+    let sb = [5, 3, 3, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, sb), 500);
+
+    // x[0]=8, x[1]=6, x[2]=0: 8<=10 -> L; 6>5 -> R(5)=100
+    let sc = [8, 6, 0, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, sc), 100);
+
+    // x[0]=12, x[1]=0, x[2]=0: 12>10 -> R; 12<=15 -> L(6)=200
+    let sd = [12, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, sd), 200);
+
+    // x[0]=20, x[1]=0, x[2]=0: 20>10 -> R; 20>15 -> R(7)=300
+    let se = [20, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, se), 300);
+
+    print("dt_depth3: ok");
+}
+
+fn test_dt_all_same_leaf() {
+    // Degenerate tree: root is a leaf (depth 0).
+    let mut nt  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ft  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut thr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lft = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut rgt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut lv  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Root = leaf predicting 99
+    nt[1] = 1; lv[1] = 99;
+
+    let s1 = [0, 0, 0, 0, 0, 0, 0, 0];
+    let s2 = [100, 200, 300, 0, 0, 0, 0, 0];
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, s1), 99);
+    assert_eq(dt_classify(nt, ft, thr, lft, rgt, lv, s2), 99);
+    print("dt_all_same_leaf: ok");
+}
+
+fn main() -> Int {
+    test_dt_basic();
+    test_dt_batch();
+    test_dt_depth3();
+    test_dt_all_same_leaf();
+    print("[OK] 481_interp_decision_tree");
+    0
+}

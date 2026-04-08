@@ -1,0 +1,232 @@
+// @test: typecheck-fail
+// @expected-error: Const evaluation error
+// @tier: 3
+// @level: L3
+// @tags: meta, compile-time, const-evaluation, error
+
+/// Const evaluation failure cases
+///
+/// These tests verify that const evaluation properly rejects
+/// invalid or non-const expressions.
+
+// ============================================================
+// NON-CONST FUNCTION CALLS
+// ============================================================
+
+// Runtime-only function
+fn runtime_only() -> Int {
+    println("Side effect!");  // Has IO
+    42
+}
+
+// ERROR: Calling runtime function in const context
+const BAD1: Int = runtime_only();
+
+// ERROR: Calling method with side effects
+type Logger is {};
+
+implement Logger {
+    fn log(&self, msg: Text) {
+        println(msg);  // Side effect
+    }
+}
+
+const BAD2: () = Logger {}.log("test");
+
+// ============================================================
+// NON-CONST OPERATIONS
+// ============================================================
+
+// ERROR: Heap allocation in const
+const HEAP_ALLOC: List<Int> = List.with_capacity(100);
+
+// ERROR: Dynamic dispatch in const
+type Trait is protocol {
+    fn value(&self) -> Int;
+}
+
+const DYNAMIC: &Trait = &SomeImpl {};  // ERROR: protocol objects not const
+
+// ERROR: Heap allocation in const
+const BOXED: Heap<Int> = Heap(42);
+
+// ERROR: Text formatting with runtime values
+fn get_name() -> Text { "test" }
+const FORMATTED: Text = f"Name: {get_name()}";  // get_name is not const
+
+// ============================================================
+// ARITHMETIC ERRORS
+// ============================================================
+
+// ERROR: Division by zero
+const DIV_ZERO: Int = 100 / 0;
+
+// ERROR: Modulo by zero
+const MOD_ZERO: Int = 100 % 0;
+
+// ERROR: Integer overflow (checked)
+const OVERFLOW_ADD: UInt8 = 255 + 1;
+const OVERFLOW_SUB: UInt8 = 0 - 1;
+const OVERFLOW_MUL: UInt8 = 200 * 2;
+
+// ERROR: Shift overflow
+const SHIFT_OVERFLOW: UInt64 = 1 << 64;
+const SHIFT_NEGATIVE: UInt64 = 1 >> -1;
+
+// ============================================================
+// BOUNDS ERRORS
+// ============================================================
+
+// ERROR: Array index out of bounds
+const ARR: [Int; 3] = [1, 2, 3];
+const OOB: Int = ARR[10];
+
+// ERROR: Slice index out of bounds
+const SLICE: &[Int] = &[1, 2, 3];
+const SLICE_OOB: Int = SLICE[5];
+
+// ERROR: Negative array index
+const NEG_IDX: Int = ARR[-1];
+
+// ============================================================
+// OPTION/RESULT UNWRAP FAILURES
+// ============================================================
+
+// ERROR: Unwrap None
+const NONE_VAL: Maybe<Int> = None;
+const UNWRAPPED_NONE: Int = NONE_VAL.unwrap();
+
+// ERROR: Expect on None
+const EXPECTED_NONE: Int = NONE_VAL.expect("Should have value");
+
+// ERROR: Unwrap Err
+const ERR_VAL: Result<Int, Text> = Err("error");
+const UNWRAPPED_ERR: Int = ERR_VAL.unwrap();
+
+// ============================================================
+// MEMORY AND POINTER ERRORS
+// ============================================================
+
+// ERROR: Dereferencing null
+const NULL_PTR: *const Int = std.ptr.null();
+const DEREF_NULL: Int = unsafe { *NULL_PTR };
+
+// ERROR: Creating dangling reference
+meta fn dangling_ref() -> &'static Int {
+    let x = 42;
+    &x  // ERROR: x does not live long enough
+}
+const DANGLING: &'static Int = dangling_ref();
+
+// ERROR: Mutable reference in const
+meta fn mut_in_const() -> Int {
+    let mut x = 0;
+    x += 1;  // ERROR: Cannot mutate in const context (for some interpretations)
+    x
+}
+
+// ============================================================
+// TYPE ERRORS IN CONST CONTEXT
+// ============================================================
+
+// ERROR: Type mismatch in const
+const TYPE_MISMATCH: Int = "hello";  // ERROR: expected Int, found Text
+
+// ERROR: Mismatched array sizes
+const SIZE_MISMATCH: [Int; 5] = [1, 2, 3];  // ERROR: expected 5 elements, found 3
+
+// ERROR: Struct field type mismatch
+type Point is { x: Int, y: Int };
+const POINT_BAD: Point = Point { x: "bad", y: 10 };
+
+// ============================================================
+// CONST GENERIC ERRORS
+// ============================================================
+
+// ERROR: Const generic out of bounds
+type BoundedArray<const N: USize> is [Int; N] where N <= 100;
+const TOO_BIG: BoundedArray<1000> = [0; 1000];  // ERROR: N must be <= 100
+
+// ERROR: Negative const generic where unsigned expected
+const NEG_SIZE: [Int; -5] = [];  // ERROR: array size cannot be negative
+
+// ERROR: Non-literal const generic
+fn get_size() -> USize { 10 }
+const DYN_SIZE: [Int; get_size()] = [0; 10];  // ERROR: get_size is not const
+
+// ============================================================
+// LOOP AND RECURSION LIMITS
+// ============================================================
+
+// ERROR: Infinite loop in const
+meta fn infinite_const() -> Int {
+    loop {}  // ERROR: Const evaluation limit exceeded
+}
+const INFINITE: Int = infinite_const();
+
+// ERROR: Deep recursion in const
+meta fn deep_recursion(n: UInt64) -> UInt64 {
+    if n == 0 { 0 }
+    else { deep_recursion(n - 1) + 1 }
+}
+const DEEP: UInt64 = deep_recursion(1_000_000);  // ERROR: Recursion limit
+
+// ERROR: While loop doesn't terminate
+meta fn while_forever() -> Int {
+    while true {}
+    0
+}
+const WHILE: Int = while_forever();
+
+// ============================================================
+// ASSERTION FAILURES
+// ============================================================
+
+// ERROR: Compile-time assertion failure
+const _: () = assert(1 + 1 == 3);  // ERROR: assertion failed
+
+// ERROR: Debug assertion in const
+const _: () = debug_assert(false);
+
+// ERROR: Const panic
+meta fn const_panic() -> Int {
+    panic("Const panic")
+}
+const PANIC: Int = const_panic();
+
+// ============================================================
+// FLOATING POINT SPECIAL CASES
+// ============================================================
+
+// ERROR: NaN comparison in const
+const NAN: Float64 = Float64.NAN;
+const NAN_EQ: Bool = NAN == NAN;  // This is false, but may be disallowed
+
+// ERROR: Infinity arithmetic
+const INF: Float64 = Float64.INFINITY;
+const INF_MINUS_INF: Float64 = INF - INF;  // NaN result
+
+// ERROR: Division of infinity
+const DIV_INF: Float64 = INF / INF;  // NaN result
+
+// ============================================================
+// PATTERN MATCHING EXHAUSTIVENESS
+// ============================================================
+
+type Status is
+    | Active
+    | Inactive
+    | Pending;
+
+meta fn match_status(s: Status) -> Int {
+    // ERROR: Non-exhaustive patterns
+    match s {
+        Status.Active => 1,
+        Status.Inactive => 0,
+        // Missing: Pending
+    }
+}
+
+fn main() {
+    // All const evaluations above should fail
+}

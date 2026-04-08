@@ -1,0 +1,48 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test bit manipulation methods for integer types
+
+fn main() {
+    // Test leading_zeros
+    let x: Int = 0x0000_0000_0000_00FF;
+    assert_eq(x.leading_zeros(), 56);
+
+    let y: Int = 0x8000_0000_0000_0000;  // High bit set
+    assert_eq(y.leading_zeros(), 0);
+
+    // Test trailing_zeros
+    let z: Int = 0x0000_0000_0000_FF00;  // 8 trailing zeros
+    assert_eq(z.trailing_zeros(), 8);
+
+    // Test count_ones (popcount)
+    let all_ones: Int = 0xFF;  // 8 ones
+    assert_eq(all_ones.count_ones(), 8);
+
+    let pattern: Int = 0x5555;  // 01010101_01010101 in binary = 8 ones
+    assert_eq(pattern.count_ones(), 8);
+
+    // Test count_zeros
+    assert_eq((0xFF as Int).count_zeros(), 56);  // 64 - 8 = 56
+
+    // Test rotate_left
+    let val: Int = 0x0000_0000_0000_00F0;
+    let rotated = val.rotate_left(8);
+    assert_eq(rotated, 0x0000_0000_0000_F000);
+
+    // Test rotate_right
+    let rotated_back = rotated.rotate_right(8);
+    assert_eq(rotated_back, val);
+
+    // Test swap_bytes
+    let to_swap: Int = 0x0102030405060708;
+    let swapped = to_swap.swap_bytes();
+    assert_eq(swapped, 0x0807060504030201);
+
+    // Test reverse_bits for a simple pattern
+    let simple: Int = 1;  // LSB set
+    let reversed = simple.reverse_bits();
+    // LSB becomes MSB, so result should be 0x8000_0000_0000_0000
+    assert(reversed < 0);  // High bit set means negative in signed
+}

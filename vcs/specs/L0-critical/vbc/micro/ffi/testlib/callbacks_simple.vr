@@ -1,0 +1,23 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, callbacks, function-pointers
+// @description: Simple FFI callback test
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_apply_unary(f: fn(Int32) -> Int32, x: Int32) -> Int32;
+}
+
+fn double_val(x: Int32) -> Int32 { x * 2 }
+
+fn main() {
+    print("Starting simple callback test\n");
+    let doubled = ffi_apply_unary(double_val, 7);
+    print("Called ffi_apply_unary, result: ");
+    print(doubled);
+    print("\n");
+    assert_eq(doubled, 14);
+    print("Simple callback test passed!\n");
+}

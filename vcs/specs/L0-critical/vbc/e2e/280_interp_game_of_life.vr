@@ -1,0 +1,221 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, cellular-automata, game-of-life
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Conway's Game of Life logic.
+// Tests the rules and applies them to specific patterns.
+
+// =============================================================================
+// Game of Life rule
+// =============================================================================
+
+fn gol_rule(alive: Int, nb: Int) -> Int {
+    if alive == 1 {
+        if nb == 2 || nb == 3 { 1 } else { 0 }
+    } else {
+        if nb == 3 { 1 } else { 0 }
+    }
+}
+
+fn test_rules() {
+    assert_eq(gol_rule(1, 0), 0);
+    assert_eq(gol_rule(1, 1), 0);
+    assert_eq(gol_rule(1, 2), 1);
+    assert_eq(gol_rule(1, 3), 1);
+    assert_eq(gol_rule(1, 4), 0);
+    assert_eq(gol_rule(1, 5), 0);
+    assert_eq(gol_rule(1, 8), 0);
+    assert_eq(gol_rule(0, 0), 0);
+    assert_eq(gol_rule(0, 2), 0);
+    assert_eq(gol_rule(0, 3), 1);
+    assert_eq(gol_rule(0, 4), 0);
+}
+
+// =============================================================================
+// Neighbor count helpers for 3x3 grid
+// =============================================================================
+
+fn nb_corner() -> Int { 3 }
+fn nb_edge() -> Int { 5 }
+fn nb_center() -> Int { 8 }
+
+fn test_max_neighbors() {
+    assert_eq(gol_rule(1, nb_corner()), 1);
+    assert_eq(gol_rule(1, nb_edge()), 0);
+    assert_eq(gol_rule(1, nb_center()), 0);
+}
+
+// =============================================================================
+// Pattern: Vertical blinker -> horizontal blinker on 3x3
+// .X.    ...
+// .X. -> XXX
+// .X.    ...
+//
+// Compute neighbor counts for each cell, then apply rule:
+// =============================================================================
+
+fn test_blinker() {
+    // (0,0): alive=0, nb=0+0+1=1 -> stays dead
+    assert_eq(gol_rule(0, 1), 0);
+    // (0,1): alive=1, nb=0+0+0+1+0=1 -> dies
+    assert_eq(gol_rule(1, 1), 0);
+    // (1,0): alive=0, nb=0+1+1+0+1=3 -> birth!
+    assert_eq(gol_rule(0, 3), 1);
+    // (1,1): alive=1, nb=0+1+0+0+0+0+1+0=2 -> survives
+    assert_eq(gol_rule(1, 2), 1);
+    // (1,2): alive=0, nb=1+0+1+1+0=3 -> birth!
+    assert_eq(gol_rule(0, 3), 1);
+    // (2,1): alive=1, nb=0+1+0+0+0=1 -> dies
+    assert_eq(gol_rule(1, 1), 0);
+    // Result: (1,0),(1,1),(1,2) alive = horizontal blinker. 3 cells.
+}
+
+// =============================================================================
+// Pattern: Block is stable (still life)
+// XX.    XX.
+// XX. -> XX.
+// ...    ...
+// Each corner of the block has 3 neighbors -> survives
+// =============================================================================
+
+fn test_block() {
+    // All 4 cells have 3 neighbors -> survive
+    assert_eq(gol_rule(1, 3), 1);
+    assert_eq(gol_rule(1, 3), 1);
+    assert_eq(gol_rule(1, 3), 1);
+    assert_eq(gol_rule(1, 3), 1);
+    // Cells adjacent to block have 2 neighbors -> stay dead
+    assert_eq(gol_rule(0, 2), 0);
+}
+
+// =============================================================================
+// Pattern: Single cell dies (0 neighbors)
+// =============================================================================
+
+fn test_single() {
+    assert_eq(gol_rule(1, 0), 0);
+}
+
+// =============================================================================
+// Pattern: L-shape becomes block
+// XX.    XX.
+// X.. -> XX.
+// ...    ...
+// (1,1): dead, nb=(1,0)+(0,0)+(0,1)=3 -> birth
+// =============================================================================
+
+fn test_l_shape() {
+    // (0,0): alive=1, nb=c01+c10+c11=1+1+0=2 -> survives
+    assert_eq(gol_rule(1, 2), 1);
+    // (0,1): alive=1, nb=c00+c02+c10+c11+c12=1+0+1+0+0=2 -> survives
+    assert_eq(gol_rule(1, 2), 1);
+    // (1,0): alive=1, nb=c00+c01+c11+c20+c21=1+1+0+0+0=2 -> survives
+    assert_eq(gol_rule(1, 2), 1);
+    // (1,1): alive=0, nb=c00+c01+c02+c10+c12+c20+c21+c22=1+1+0+1+0+0+0+0=3 -> BIRTH!
+    assert_eq(gol_rule(0, 3), 1);
+}
+
+// =============================================================================
+// Pattern: Overpopulation (full 3x3 grid)
+// Corners: 3 nb -> survive. Edges: 5 nb -> die. Center: 8 nb -> die.
+// Result: 4 corners alive
+// =============================================================================
+
+fn test_overpop() {
+    // Corners survive
+    assert_eq(gol_rule(1, 3), 1);
+    // Edges die
+    assert_eq(gol_rule(1, 5), 0);
+    // Center dies
+    assert_eq(gol_rule(1, 8), 0);
+    // After: corners alive (4), edges dead, center dead
+    // Each former corner now has nb from other 3 corners: count depends on pattern
+}
+
+// =============================================================================
+// Pattern: T-shape -> 2x3 rectangle
+// XXX    XXX
+// .X. -> XXX
+// ...    ...
+// =============================================================================
+
+fn test_t_shape() {
+    // (0,0): alive=1, nb=1+0+1=2 -> survives
+    assert_eq(gol_rule(1, 2), 1);
+    // (0,1): alive=1, nb=1+1+0+1+0=3 -> survives
+    assert_eq(gol_rule(1, 3), 1);
+    // (1,0): alive=0, nb=1+1+1+0+0=3 -> BIRTH
+    assert_eq(gol_rule(0, 3), 1);
+    // (1,1): alive=1, nb=1+1+1+0+0+0+0+0=3 -> survives
+    assert_eq(gol_rule(1, 3), 1);
+    // (1,2): alive=0, nb=1+1+1+0+0=3 -> BIRTH
+    assert_eq(gol_rule(0, 3), 1);
+    // Total: 6 alive
+}
+
+// =============================================================================
+// Test: Count alive cells after blinker step
+// =============================================================================
+
+fn count_next_blinker() -> Int {
+    // Vertical blinker: 0,1,0 / 0,1,0 / 0,1,0
+    let n00 = gol_rule(0, 1);
+    let n01 = gol_rule(1, 1);
+    let n02 = gol_rule(0, 1);
+    let n10 = gol_rule(0, 3);
+    let n11 = gol_rule(1, 2);
+    let n12 = gol_rule(0, 3);
+    let n20 = gol_rule(0, 1);
+    let n21 = gol_rule(1, 1);
+    let n22 = gol_rule(0, 1);
+    n00 + n01 + n02 + n10 + n11 + n12 + n20 + n21 + n22
+}
+
+fn test_blinker_count() {
+    assert_eq(count_next_blinker(), 3);
+}
+
+// =============================================================================
+// Test: Period 2 oscillation
+// After 2 steps of blinker, should return to original vertical pattern.
+// Gen1 is horizontal: 0,0,0 / 1,1,1 / 0,0,0
+// Gen2 neighbor counts:
+//   (0,1): nb=0+0+1+1+1=3 -> birth
+//   (1,0): nb=0+0+1+0+0=1 -> dies
+//   (1,1): nb=0+0+0+1+1+0+0+0=2 -> survives
+//   (1,2): nb=0+0+1+0+0=1 -> dies
+//   (2,1): nb=1+1+1+0+0=3 -> birth
+// Gen2: vertical again! 0,1,0 / 0,1,0 / 0,1,0
+// =============================================================================
+
+fn test_period2() {
+    // Gen1 -> Gen2: horizontal -> vertical
+    assert_eq(gol_rule(0, 3), 1);  // (0,1) births
+    assert_eq(gol_rule(1, 1), 0);  // (1,0) dies
+    assert_eq(gol_rule(1, 2), 1);  // (1,1) survives
+    assert_eq(gol_rule(1, 1), 0);  // (1,2) dies
+    assert_eq(gol_rule(0, 3), 1);  // (2,1) births
+    // Back to vertical! Period = 2
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_rules();
+    test_max_neighbors();
+    test_blinker();
+    test_block();
+    test_single();
+    test_l_shape();
+    test_overpop();
+    test_t_shape();
+    test_blinker_count();
+    test_period2();
+    print("[OK] 280_interp_game_of_life");
+    0
+}

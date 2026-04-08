@@ -1,0 +1,67 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: mmio, parser, register_block, hardware
+// @timeout: 5000
+// @description: Test @register_block attribute parsing for MMIO peripherals
+//
+// Spec: docs/architecture/low-level-features.md - Section 3.2 (Register Blocks)
+
+/// Access mode marker types for MMIO registers.
+public type ReadOnly is ();
+public type WriteOnly is ();
+public type ReadWrite is ();
+public type WriteOneToClear is ();
+
+/// Type-safe MMIO register wrapper.
+@repr(transparent)
+public type Register<T, Mode> is {
+    addr: *mut T,
+};
+
+/// GPIO peripheral register block with memory-mapped offsets.
+@repr(C)
+@register_block(base = 0x4002_0000, stride = 0x400)
+public type GpioRegisters is {
+    @offset(0x00) moder: Register<UInt32, ReadWrite>,
+    @offset(0x04) otyper: Register<UInt32, ReadWrite>,
+    @offset(0x08) ospeedr: Register<UInt32, ReadWrite>,
+    @offset(0x0C) pupdr: Register<UInt32, ReadWrite>,
+    @offset(0x10) idr: Register<UInt32, ReadOnly>,
+    @offset(0x14) odr: Register<UInt32, ReadWrite>,
+    @offset(0x18) bsrr: Register<UInt32, WriteOnly>,
+    @offset(0x1C) lckr: Register<UInt32, ReadWrite>,
+    @offset(0x20) afrl: Register<UInt32, ReadWrite>,
+    @offset(0x24) afrh: Register<UInt32, ReadWrite>,
+};
+
+/// UART peripheral register block.
+@repr(C)
+@register_block(base = 0x4000_4400)
+public type UartRegisters is {
+    @offset(0x00) sr: Register<UInt32, ReadOnly>,
+    @offset(0x04) dr: Register<UInt32, ReadWrite>,
+    @offset(0x08) brr: Register<UInt32, ReadWrite>,
+    @offset(0x0C) cr1: Register<UInt32, ReadWrite>,
+    @offset(0x10) cr2: Register<UInt32, ReadWrite>,
+    @offset(0x14) cr3: Register<UInt32, ReadWrite>,
+};
+
+/// Timer peripheral with write-one-to-clear status register.
+@repr(C)
+@register_block(base = 0x4000_0000, stride = 0x400)
+public type TimerRegisters is {
+    @offset(0x00) cr1: Register<UInt32, ReadWrite>,
+    @offset(0x04) cr2: Register<UInt32, ReadWrite>,
+    @offset(0x08) smcr: Register<UInt32, ReadWrite>,
+    @offset(0x0C) dier: Register<UInt32, ReadWrite>,
+    @offset(0x10) sr: Register<UInt32, WriteOneToClear>,
+    @offset(0x14) egr: Register<UInt32, WriteOnly>,
+    @offset(0x24) cnt: Register<UInt32, ReadWrite>,
+    @offset(0x28) psc: Register<UInt32, ReadWrite>,
+    @offset(0x2C) arr: Register<UInt32, ReadWrite>,
+};
+
+fn main() -> Int {
+    0
+}

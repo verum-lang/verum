@@ -1,0 +1,96 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: comprehension, list, map, filter, e2e
+// @description: Test list comprehensions and functional collection operations
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: List comprehension - squares
+    let squares = [x * x for x in 1..6];
+    if squares.len() != 5 {
+        print(f"FAIL: squares len expected 5, got {squares.len()}");
+        failures = failures + 1;
+    }
+    let mut sq_sum = 0;
+    let mut i = 0;
+    while i < squares.len() {
+        sq_sum = sq_sum + squares[i];
+        i = i + 1;
+    }
+    // 1+4+9+16+25 = 55
+    if sq_sum != 55 {
+        print(f"FAIL: squares sum expected 55, got {sq_sum}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  squares: OK");
+    }
+
+    // Test 2: Filtered comprehension
+    let evens = [x for x in 1..11 if x % 2 == 0];
+    if evens.len() != 5 {
+        print(f"FAIL: evens len expected 5, got {evens.len()}");
+        failures = failures + 1;
+    }
+    let mut ev_sum = 0;
+    i = 0;
+    while i < evens.len() {
+        ev_sum = ev_sum + evens[i];
+        i = i + 1;
+    }
+    // 2+4+6+8+10 = 30
+    if ev_sum != 30 {
+        print(f"FAIL: evens sum expected 30, got {ev_sum}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  filtered: OK");
+    }
+
+    // Test 3: Nested operations via manual build
+    let mut pairs = List.new();
+    let mut a = 1;
+    while a <= 3 {
+        let mut b = 1;
+        while b <= 3 {
+            if a != b {
+                pairs.push(a * 10 + b);
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    // (1,2),(1,3),(2,1),(2,3),(3,1),(3,2) = 6 pairs
+    if pairs.len() != 6 {
+        print(f"FAIL: pairs len expected 6, got {pairs.len()}");
+        failures = failures + 1;
+    } else {
+        print("  nested_build: OK");
+    }
+
+    // Test 4: Transform comprehension
+    let data = [10, 20, 30, 40, 50];
+    let doubled = [x * 2 for x in data];
+    if doubled.len() != 5 {
+        print(f"FAIL: doubled len expected 5, got {doubled.len()}");
+        failures = failures + 1;
+    }
+    if doubled[0] != 20 {
+        print(f"FAIL: doubled[0] expected 20, got {doubled[0]}");
+        failures = failures + 1;
+    }
+    if doubled[4] != 100 {
+        print(f"FAIL: doubled[4] expected 100, got {doubled[4]}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  transform: OK");
+    }
+
+    if failures == 0 {
+        print("All comprehension tests passed");
+    }
+    failures
+}

@@ -1,0 +1,59 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, tcp, networking, highlevel
+// @timeout: 15000
+// @expected-exit: 0
+
+// Test: TCP using method-based API (TcpListener.bind, TcpStream.connect)
+
+fn tcp_listen(port: Int) -> Int { 0 }
+fn tcp_accept(listen_fd: Int) -> Int { 0 }
+fn tcp_connect(host: Text, port: Int) -> Int { 0 }
+fn tcp_send(fd: Int, data: Text) -> Int { 0 }
+fn tcp_recv(fd: Int) -> Text { "" }
+fn tcp_close(fd: Int) -> Int { 0 }
+fn __time_sleep_nanos_raw(nanos: Int) -> Int { 0 }
+
+fn server(port: Int) -> Int {
+    let listen_fd = tcp_listen(port);
+    if listen_fd < 0 { return 1; }
+    let client_fd = tcp_accept(listen_fd);
+    if client_fd < 0 { tcp_close(listen_fd); return 1; }
+    let data = tcp_recv(client_fd);
+    tcp_send(client_fd, f"echo:{data}");
+    tcp_close(client_fd);
+    tcp_close(listen_fd);
+    0
+}
+
+fn main() -> Int {
+    let port = 19982;
+    let srv = spawn server(port);
+    __time_sleep_nanos_raw(200000000);
+
+    let fd = tcp_connect("127.0.0.1", port);
+    if fd < 0 {
+        print(f"FAIL: connect returned {fd}");
+        return 1;
+    }
+
+    tcp_send(fd, "ping");
+    __time_sleep_nanos_raw(100000000);
+    let resp = tcp_recv(fd);
+    tcp_close(fd);
+
+    let srv_res = srv.await;
+    if srv_res != 0 {
+        print(f"FAIL: server returned {srv_res}");
+        return 1;
+    }
+
+    if resp == "echo:ping" {
+        print("ALL OK");
+        0
+    } else {
+        print(f"FAIL: expected 'echo:ping', got '{resp}'");
+        1
+    }
+}

@@ -1,0 +1,130 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: threading, channels, mutex, spawn, concurrency
+// @description: Comprehensive threading + channels + mutex integration test
+
+fn __mutex_new_raw() -> Int { 0 }
+fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+
+fn main() -> Int {
+    // Test 1: basic channel send/recv with spawn
+    let ch1 = Channel.new(4);
+    let t1 = spawn {
+        ch1.send(42);
+        ch1.send(100);
+        2
+    };
+    let r1 = t1.await;
+
+    let mut sum = 0;
+    match ch1.recv() {
+        Some(v) => { sum = sum + v; }
+        None => {}
+    };
+    match ch1.recv() {
+        Some(v) => { sum = sum + v; }
+        None => {}
+    };
+    if (sum != 142) {
+        print(f"FAIL test1: sum={sum}, expected 142");
+        return 1;
+    }
+
+    // Test 2: multiple producers into one channel
+    let ch2 = Channel.new(10);
+    let p1 = spawn {
+        ch2.send(100);
+        ch2.send(200);
+        2
+    };
+    let p2 = spawn {
+        ch2.send(300);
+        ch2.send(400);
+        2
+    };
+    let r_p1 = p1.await;
+    let r_p2 = p2.await;
+
+    let mut total = 0;
+    let mut count = 0;
+    while (count < 4) {
+        match ch2.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        };
+        count = count + 1;
+    }
+    if (total != 1000) {
+        print(f"FAIL test2: total={total}, expected 1000");
+        return 1;
+    }
+
+    // Test 3: mutex-protected counter with channels
+    let mtx = __mutex_new_raw();
+    let counter_ch = Channel.new(1);
+    counter_ch.send(0);
+
+    let w1 = spawn {
+        let mut i = 0;
+        while (i < 50) {
+            __mutex_lock_raw(mtx);
+            match counter_ch.recv() {
+                Some(v) => { counter_ch.send(v + 1); }
+                None => {}
+            };
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        50
+    };
+    let w2 = spawn {
+        let mut i = 0;
+        while (i < 50) {
+            __mutex_lock_raw(mtx);
+            match counter_ch.recv() {
+                Some(v) => { counter_ch.send(v + 1); }
+                None => {}
+            };
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        50
+    };
+
+    let rw1 = w1.await;
+    let rw2 = w2.await;
+
+    let mut final_val = 0;
+    match counter_ch.recv() {
+        Some(v) => { final_val = v; }
+        None => {}
+    };
+    if (final_val != 100) {
+        print(f"FAIL test3: counter={final_val}, expected 100");
+        return 1;
+    }
+
+    // Test 4: spawn returning computed value
+    let t4 = spawn {
+        let mut fib_a = 0;
+        let mut fib_b = 1;
+        let mut i = 0;
+        while (i < 10) {
+            let tmp = fib_a + fib_b;
+            fib_a = fib_b;
+            fib_b = tmp;
+            i = i + 1;
+        }
+        fib_b  // fib(11) = 89
+    };
+    let fib_result = t4.await;
+    if (fib_result != 89) {
+        print(f"FAIL test4: fib={fib_result}, expected 89");
+        return 1;
+    }
+
+    print("988_threading_channels: PASS");
+    0
+}

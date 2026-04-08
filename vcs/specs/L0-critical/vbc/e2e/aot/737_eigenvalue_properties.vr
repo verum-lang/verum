@@ -1,0 +1,98 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, linalg, eigenvalue, trace, determinant
+// @expected-exit: 0
+
+// Tests eigenvalue properties:
+// 1. Sum of eigenvalues = trace of matrix
+// 2. Product of eigenvalues = determinant
+// 3. Characteristic polynomial evaluation
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn mat3_det(a: List<Int>) -> Int {
+    a[0] * (a[4] * a[8] - a[5] * a[7])
+    - a[1] * (a[3] * a[8] - a[5] * a[6])
+    + a[2] * (a[3] * a[7] - a[4] * a[6])
+}
+
+fn mat3_trace(a: List<Int>) -> Int {
+    a[0] + a[4] + a[8]
+}
+
+// Evaluate characteristic polynomial det(A - λI) at λ
+fn char_poly_eval(a: List<Int>, lambda: Int) -> Int {
+    let mut shifted = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < 9) {
+        shifted[i] = a[i];
+        i = i + 1;
+    }
+    shifted[0] = shifted[0] - lambda;
+    shifted[4] = shifted[4] - lambda;
+    shifted[8] = shifted[8] - lambda;
+    mat3_det(shifted)
+}
+
+fn main() -> Int {
+    // Test 1: Diagonal matrix — eigenvalues are diagonal elements
+    let diag = [3, 0, 0, 0, 5, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(mat3_trace(diag), 15);
+    assert_eq(mat3_det(diag), 105);
+    // Verify characteristic polynomial is zero at eigenvalues
+    assert_eq(char_poly_eval(diag, 3), 0);
+    assert_eq(char_poly_eval(diag, 5), 0);
+    assert_eq(char_poly_eval(diag, 7), 0);
+    // Non-eigenvalue should be non-zero
+    assert(char_poly_eval(diag, 4) != 0);
+
+    // Test 2: Symmetric matrix with known eigenvalues
+    // A = [[2,1,0],[1,3,1],[0,1,2]], eigenvalues = {1, 2, 4}
+    let sym = [2, 1, 0, 1, 3, 1, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(mat3_trace(sym), 7);  // 1+2+4 = 7
+    assert_eq(mat3_det(sym), 8);    // 1*2*4 = 8
+    assert_eq(char_poly_eval(sym, 1), 0);
+    assert_eq(char_poly_eval(sym, 2), 0);
+    assert_eq(char_poly_eval(sym, 4), 0);
+
+    // Test 3: Matrix with repeated eigenvalue
+    // A = [[2,1,0],[0,2,0],[0,0,3]], eigenvalues = {2, 2, 3}
+    let rep = [2, 1, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(mat3_trace(rep), 7);  // 2+2+3 = 7
+    assert_eq(mat3_det(rep), 12);   // 2*2*3 = 12
+    assert_eq(char_poly_eval(rep, 2), 0);
+    assert_eq(char_poly_eval(rep, 3), 0);
+
+    // Test 4: Cayley-Hamilton theorem: A satisfies its own characteristic polynomial
+    // For A = [[2,1],[1,2]], char poly is λ^2 - 4λ + 3 = 0
+    // So A^2 - 4A + 3I = 0
+    let a = [2, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // A^2 = [[5,4],[4,5]]
+    let a2_00 = 2*2 + 1*1;  // 5
+    let a2_01 = 2*1 + 1*2;  // 4
+    let a2_10 = 1*2 + 2*1;  // 4
+    let a2_11 = 1*1 + 2*2;  // 5
+    // A^2 - 4A + 3I
+    let ch00 = a2_00 - 4*2 + 3;  // 5-8+3 = 0
+    let ch01 = a2_01 - 4*1 + 0;  // 4-4 = 0
+    let ch10 = a2_10 - 4*1 + 0;  // 4-4 = 0
+    let ch11 = a2_11 - 4*2 + 3;  // 5-8+3 = 0
+    assert_eq(ch00, 0);
+    assert_eq(ch01, 0);
+    assert_eq(ch10, 0);
+    assert_eq(ch11, 0);
+
+    // Test 5: Symmetric matrix eigenvalues are real
+    // For A = [[4,1,1],[1,4,1],[1,1,4]], eigenvalues = {3, 3, 6}
+    let sym2 = [4, 1, 1, 1, 4, 1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(mat3_trace(sym2), 12);  // 3+3+6 = 12
+    assert_eq(mat3_det(sym2), 54);    // 3*3*6 = 54
+    assert_eq(char_poly_eval(sym2, 3), 0);
+    assert_eq(char_poly_eval(sym2, 6), 0);
+
+    print("Eigenvalue properties: PASS");
+    0
+}

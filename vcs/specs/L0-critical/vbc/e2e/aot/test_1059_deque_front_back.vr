@@ -1,0 +1,78 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: deque, front, back, maybe-ref, auto-deref
+// @description: Test Deque.front()/back() returning Maybe<&T> with auto-deref in pattern match
+
+fn test_deque_front() -> Int {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    let front = match d.front() { Some(v) => v, None => -1 };
+    if front != 10 {
+        print(f"FAIL deque_front: expected 10, got {front}");
+        return 1;
+    }
+    print("  deque_front: OK");
+    0
+}
+
+fn test_deque_back() -> Int {
+    let mut d = Deque.new();
+    d.push_back(100);
+    d.push_back(200);
+    d.push_back(300);
+
+    let back = match d.back() { Some(v) => v, None => -1 };
+    if back != 300 {
+        print(f"FAIL deque_back: expected 300, got {back}");
+        return 1;
+    }
+    print("  deque_back: OK");
+    0
+}
+
+fn test_deque_front_empty() -> Int {
+    let mut d = Deque.new();
+    let front = match d.front() { Some(v) => v, None => -999 };
+    if front != -999 {
+        print(f"FAIL deque_front_empty: expected -999, got {front}");
+        return 1;
+    }
+    print("  deque_front_empty: OK");
+    0
+}
+
+fn test_deque_front_after_pop() -> Int {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let _ = d.pop_front();
+    // front should now be 2
+    let front = match d.front() { Some(v) => v, None => -1 };
+    if front != 2 {
+        print(f"FAIL deque_front_after_pop: expected 2, got {front}");
+        return 1;
+    }
+    print("  deque_front_after_pop: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Deque Front/Back Tests:");
+    let mut failures = 0;
+    failures = failures + test_deque_front();
+    failures = failures + test_deque_back();
+    failures = failures + test_deque_front_empty();
+    failures = failures + test_deque_front_after_pop();
+
+    if failures == 0 {
+        print("All deque front/back tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

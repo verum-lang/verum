@@ -1,0 +1,60 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, active, delimiter, error
+// @description: Test unclosed active pattern invocation
+// @expected-error: E074
+
+// Active pattern definitions
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+pattern Positive(n: Int) -> Bool = n > 0;
+
+fn test_unclosed_simple_active() {
+    let value = 42;
+
+    // Invalid: missing closing parenthesis on active pattern
+    match value {
+        Even( => print("even"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_parameterized_active() {
+    let value = 42;
+
+    // Invalid: missing closing parenthesis on parameterized active pattern
+    match value {
+        InRange(0, 100)( => print("in range"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_params() {
+    let value = 42;
+
+    // Invalid: missing closing parenthesis on pattern parameters
+    match value {
+        InRange(0, 100() => print("in range"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_both() {
+    let value = 42;
+
+    // Invalid: missing both closing parentheses
+    match value {
+        InRange(0, 100( => print("in range"),
+        _ => print("other"),
+    }
+}
+
+fn test_active_pattern_missing_invocation() {
+    let value = 42;
+
+    // Invalid: active pattern without invocation parens
+    match value {
+        Even => print("even"),
+        _ => print("other"),
+    }
+}

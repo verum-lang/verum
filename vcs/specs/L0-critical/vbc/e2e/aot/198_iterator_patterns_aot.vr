@@ -1,0 +1,158 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, iterator, functional, closures
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for iterator patterns using closures and HOFs
+
+fn for_each_range(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    // Returns sum of f(i) for i in [start, end)
+    let mut sum = 0;
+    let mut i = start;
+    while i < end {
+        sum = sum + f(i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn map_reduce(start: Int, end: Int, mapper: fn(Int) -> Int, reducer: fn(Int, Int) -> Int, init: Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = reducer(acc, mapper(i));
+        i = i + 1;
+    }
+    acc
+}
+
+fn count_matching(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn take_while_sum(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    while i < end {
+        if !pred(i) { return sum; }
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn skip_while_sum(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    let mut skipping = true;
+    while i < end {
+        if skipping {
+            if !pred(i) { skipping = false; }
+        }
+        if !skipping {
+            sum = sum + i;
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn zip_with(n: Int, f: fn(Int, Int) -> Int) -> Int {
+    // zip [0..n) with [n..2n), applying f, summing results
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + f(i, i + n);
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_for_each() {
+    let double = |x: Int| -> Int { x * 2 };
+    let identity = |x: Int| -> Int { x };
+    let constant = |x: Int| -> Int { 1 };
+
+    // Sum of 0..10 = 45
+    assert_eq(for_each_range(0, 10, identity), 45);
+    // Sum of double(0..10) = 0+2+4+6+8+10+12+14+16+18 = 90
+    assert_eq(for_each_range(0, 10, double), 90);
+    // Count: 10 ones
+    assert_eq(for_each_range(0, 10, constant), 10);
+}
+
+fn test_map_reduce() {
+    let square = |x: Int| -> Int { x * x };
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let mul = |a: Int, b: Int| -> Int { a * b };
+
+    // Sum of squares 1^2 + 2^2 + 3^2 + 4^2 = 1+4+9+16 = 30
+    assert_eq(map_reduce(1, 5, square, add, 0), 30);
+
+    // Product of 1..5 = 24
+    let id = |x: Int| -> Int { x };
+    assert_eq(map_reduce(1, 5, id, mul, 1), 24);
+}
+
+fn test_count_matching() {
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    let is_gt_5 = |x: Int| -> Bool { x > 5 };
+
+    assert_eq(count_matching(0, 10, is_even), 5);
+    assert_eq(count_matching(0, 10, is_gt_5), 4);
+    assert_eq(count_matching(0, 0, is_even), 0);
+}
+
+fn test_take_while() {
+    let lt_5 = |x: Int| -> Bool { x < 5 };
+    // take_while(0..10, <5) = 0+1+2+3+4 = 10
+    assert_eq(take_while_sum(0, 10, lt_5), 10);
+
+    let lt_1 = |x: Int| -> Bool { x < 1 };
+    // take_while(0..10, <1) = 0
+    assert_eq(take_while_sum(0, 10, lt_1), 0);
+
+    let always = |x: Int| -> Bool { true };
+    // take_while(0..5, true) = 0+1+2+3+4 = 10
+    assert_eq(take_while_sum(0, 5, always), 10);
+}
+
+fn test_skip_while() {
+    let lt_5 = |x: Int| -> Bool { x < 5 };
+    // skip_while(0..10, <5) = 5+6+7+8+9 = 35
+    assert_eq(skip_while_sum(0, 10, lt_5), 35);
+
+    let never = |x: Int| -> Bool { false };
+    // skip_while(0..5, false) = 0+1+2+3+4 = 10
+    assert_eq(skip_while_sum(0, 5, never), 10);
+}
+
+fn test_zip_with() {
+    let add = |a: Int, b: Int| -> Int { a + b };
+    let mul = |a: Int, b: Int| -> Int { a * b };
+
+    // zip [0,1,2] with [3,4,5], add: (0+3)+(1+4)+(2+5) = 3+5+7 = 15
+    assert_eq(zip_with(3, add), 15);
+
+    // zip [0,1,2,3] with [4,5,6,7], mul: 0*4+1*5+2*6+3*7 = 0+5+12+21 = 38
+    assert_eq(zip_with(4, mul), 38);
+}
+
+fn main() -> Int {
+    test_for_each();
+    test_map_reduce();
+    test_count_matching();
+    test_take_while();
+    test_skip_while();
+    test_zip_with();
+    print("[OK] 198_iterator_patterns_aot");
+    0
+}

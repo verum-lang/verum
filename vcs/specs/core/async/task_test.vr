@@ -1,0 +1,780 @@
+// =============================================================================
+// task_test.vr - Tests for Task spawning and JoinHandle
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, task, spawn, joinhandle, joinset, core
+// @description: Comprehensive tests for Task spawning, JoinHandle, JoinSet, and related types
+// =============================================================================
+
+mount core.async.task.{
+    Task, TaskId, JoinHandle, JoinError, Cancelled, Panicked,
+    yield_now, YieldNow,
+    JoinSet,
+};
+mount core.async.future.{Future, ready, ReadyFuture};
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.waker.{Waker, Context, noop_waker};
+mount core.sync.atomics.{AtomicInt, Relaxed, Acquire};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TaskId
+// =============================================================================
+
+@test
+fn test_task_id_creation() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    // Each TaskId should be unique
+    assert(id1.ne(&id2));
+}
+
+@test
+fn test_task_id_equality() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+
+    // Same ID equals itself
+    assert(id1.eq(&id1));
+    // Different IDs are not equal
+    assert(!id1.eq(&id2));
+}
+
+@test
+fn test_task_id_inequality() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+
+    assert(id1.ne(&id2));
+    assert(!id1.ne(&id1));
+}
+
+@test
+fn test_task_id_sequential() {
+    // TaskIds should be sequential (monotonically increasing)
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    let id3: TaskId = TaskId.new();
+
+    // All three should be different
+    assert(id1.ne(&id2));
+    assert(id2.ne(&id3));
+    assert(id1.ne(&id3));
+}
+
+// =============================================================================
+// Section 2: JoinError
+// =============================================================================
+
+@test
+fn test_join_error_cancelled_variant() {
+    let error: JoinError = Cancelled;
+    match error {
+        Cancelled => {} // Expected
+        Panicked => panic("Expected Cancelled"),
+    }
+}
+
+@test
+fn test_join_error_panicked_variant() {
+    let error: JoinError = Panicked;
+    match error {
+        Cancelled => panic("Expected Panicked"),
+        Panicked => {} // Expected
+    }
+}
+
+@test
+fn test_join_error_is_pattern() {
+    let cancelled: JoinError = Cancelled;
+    let panicked: JoinError = Panicked;
+
+    assert(cancelled is Cancelled);
+    assert(!(cancelled is Panicked));
+    assert(panicked is Panicked);
+    assert(!(panicked is Cancelled));
+}
+
+@test
+fn test_join_error_match_all_variants() {
+    let errors: List<JoinError> = [Cancelled, Panicked];
+
+    for error in errors.iter() {
+        match *error {
+            Cancelled => {} // Valid
+            Panicked => {} // Valid
+        }
+    }
+}
+
+// =============================================================================
+// Section 3: yield_now()
+// =============================================================================
+
+@test
+fn test_yield_now_returns_yield_future() {
+    let fut: YieldNow = yield_now();
+    // YieldNow future created
+}
+
+@test
+fn test_yield_now_future_poll_first() {
+    let mut fut: YieldNow = yield_now();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // First poll returns Pending (yields)
+    let first_result: Poll<()> = fut.poll(&mut cx);
+    assert(first_result.is_pending());
+}
+
+@test
+fn test_yield_now_future_poll_second() {
+    let mut fut: YieldNow = yield_now();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // First poll - pending
+    let _: Poll<()> = fut.poll(&mut cx);
+
+    // Second poll returns Ready (resumed)
+    let second_result: Poll<()> = fut.poll(&mut cx);
+    assert(second_result.is_ready());
+}
+
+@test
+fn test_yield_now_multiple_yields() {
+    // Create multiple yield futures
+    let fut1: YieldNow = yield_now();
+    let fut2: YieldNow = yield_now();
+    let fut3: YieldNow = yield_now();
+    // All created successfully
+}
+
+// =============================================================================
+// Section 4: JoinSet
+// =============================================================================
+
+@test
+fn test_join_set_new() {
+    let set: JoinSet<Int> = JoinSet.new();
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+@test
+fn test_join_set_len_initial() {
+    let set: JoinSet<Int> = JoinSet.new();
+    assert_eq(set.len(), 0);
+}
+
+@test
+fn test_join_set_is_empty_true() {
+    let set: JoinSet<Int> = JoinSet.new();
+    assert(set.is_empty());
+}
+
+@test
+fn test_join_set_cancel_all_empty() {
+    let mut set: JoinSet<Int> = JoinSet.new();
+    set.cancel_all();
+    // Cancel all tasks on empty set is no-op
+    assert(set.is_empty());
+}
+
+@test
+fn test_join_set_detach_all_empty() {
+    let mut set: JoinSet<Int> = JoinSet.new();
+    set.detach_all();
+    // Detach all tasks on empty set is no-op
+    assert(set.is_empty());
+}
+
+@test
+fn test_join_set_with_different_types() {
+    // Int set
+    let set_int: JoinSet<Int> = JoinSet.new();
+    assert(set_int.is_empty());
+
+    // Bool set
+    let set_bool: JoinSet<Bool> = JoinSet.new();
+    assert(set_bool.is_empty());
+
+    // Text set
+    let set_text: JoinSet<Text> = JoinSet.new();
+    assert(set_text.is_empty());
+}
+
+// =============================================================================
+// Section 5: YieldNow Lifecycle
+// =============================================================================
+
+@test
+fn test_yield_now_lifecycle() {
+    let mut fut: YieldNow = yield_now();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // Initial state - not yielded yet
+    // Poll 1: yields
+    assert(fut.poll(&mut cx).is_pending());
+
+    // Poll 2: resumes
+    assert(fut.poll(&mut cx).is_ready());
+}
+
+// =============================================================================
+// Section 6: JoinError Variants
+// =============================================================================
+
+@test
+fn test_cancelled_error_construction() {
+    let err: JoinError = Cancelled;
+    assert(err is Cancelled);
+}
+
+@test
+fn test_panicked_error_construction() {
+    let err: JoinError = Panicked;
+    assert(err is Panicked);
+}
+
+// =============================================================================
+// Section 7: TaskId Uniqueness
+// =============================================================================
+
+@test
+fn test_task_id_uniqueness_many() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    let id3: TaskId = TaskId.new();
+    let id4: TaskId = TaskId.new();
+    let id5: TaskId = TaskId.new();
+
+    // All should be unique
+    assert(id1.ne(&id2));
+    assert(id1.ne(&id3));
+    assert(id1.ne(&id4));
+    assert(id1.ne(&id5));
+    assert(id2.ne(&id3));
+    assert(id2.ne(&id4));
+    assert(id2.ne(&id5));
+    assert(id3.ne(&id4));
+    assert(id3.ne(&id5));
+    assert(id4.ne(&id5));
+}
+
+@test
+fn test_task_id_self_equality() {
+    let id: TaskId = TaskId.new();
+    // Same ID equals itself
+    assert(id.eq(&id));
+    assert(!id.ne(&id));
+}
+
+// =============================================================================
+// Section 8: JoinSet Type Parameters
+// =============================================================================
+
+@test
+fn test_join_set_unit_type() {
+    let set: JoinSet<()> = JoinSet.new();
+    assert(set.is_empty());
+}
+
+@test
+fn test_join_set_tuple_type() {
+    let set: JoinSet<(Int, Bool)> = JoinSet.new();
+    assert(set.is_empty());
+}
+
+// =============================================================================
+// Section 9: Edge Cases
+// =============================================================================
+
+@test
+fn test_multiple_yield_now_futures() {
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    let mut fut1: YieldNow = yield_now();
+    let mut fut2: YieldNow = yield_now();
+
+    // Both start as pending
+    assert(fut1.poll(&mut cx).is_pending());
+    assert(fut2.poll(&mut cx).is_pending());
+
+    // Both become ready after second poll
+    assert(fut1.poll(&mut cx).is_ready());
+    assert(fut2.poll(&mut cx).is_ready());
+}
+
+@test
+fn test_join_set_operations_sequence() {
+    let mut set: JoinSet<Int> = JoinSet.new();
+
+    // Initial state
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+
+    // Cancel and detach on empty
+    set.cancel_all();
+    set.detach_all();
+
+    // Still empty
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+// =============================================================================
+// Section 10: TaskId Field Access
+// =============================================================================
+
+@test
+fn test_task_id_field_access() {
+    let id: TaskId = TaskId.new();
+    // Internal id field is an Int
+    let raw: Int = id.id;
+    assert(raw > 0);
+}
+
+@test
+fn test_task_id_monotonically_increasing() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    assert(id2.id > id1.id);
+}
+
+// =============================================================================
+// Section 11: JoinError in Result Types
+// =============================================================================
+
+@test
+fn test_join_error_in_ok_result() {
+    let result: Result<Int, JoinError> = Ok(42);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_join_error_in_err_result_cancelled() {
+    let result: Result<Int, JoinError> = Err(Cancelled);
+    assert(result.is_err());
+}
+
+@test
+fn test_join_error_in_err_result_panicked() {
+    let result: Result<Int, JoinError> = Err(Panicked);
+    assert(result.is_err());
+}
+
+@test
+fn test_join_error_result_match_ok() {
+    let result: Result<Int, JoinError> = Ok(100);
+    let val = match result {
+        Ok(v) => v,
+        Err(_) => -1,
+    };
+    assert_eq(val, 100);
+}
+
+@test
+fn test_join_error_result_match_cancelled() {
+    let result: Result<Text, JoinError> = Err(Cancelled);
+    let val = match result {
+        Ok(s) => s,
+        Err(Cancelled) => "cancelled",
+        Err(Panicked) => "panicked",
+    };
+    assert_eq(val, "cancelled");
+}
+
+@test
+fn test_join_error_result_match_panicked() {
+    let result: Result<Text, JoinError> = Err(Panicked);
+    let val = match result {
+        Ok(s) => s,
+        Err(Cancelled) => "cancelled",
+        Err(Panicked) => "panicked",
+    };
+    assert_eq(val, "panicked");
+}
+
+// =============================================================================
+// Section 12: JoinSet Type Variations
+// =============================================================================
+
+@test
+fn test_join_set_result_type() {
+    let set: JoinSet<Result<Int, Text>> = JoinSet.new();
+    assert(set.is_empty());
+}
+
+@test
+fn test_join_set_maybe_type() {
+    let set: JoinSet<Maybe<Int>> = JoinSet.new();
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+@test
+fn test_join_set_list_type() {
+    let set: JoinSet<List<Int>> = JoinSet.new();
+    assert(set.is_empty());
+}
+
+// =============================================================================
+// Section 13: YieldNow State Detailed
+// =============================================================================
+
+@test
+fn test_yield_now_yielded_field_false() {
+    let y: YieldNow = yield_now();
+    assert_eq(y.yielded, false);
+}
+
+@test
+fn test_yield_now_yielded_field_after_poll() {
+    let mut y: YieldNow = yield_now();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+    let _ = y.poll(&mut cx);
+    assert_eq(y.yielded, true);
+}
+
+@test
+fn test_yield_now_two_independent() {
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    let mut y1: YieldNow = yield_now();
+    let mut y2: YieldNow = yield_now();
+
+    // y1 first poll: pending
+    assert(y1.poll(&mut cx).is_pending());
+    // y2 first poll: pending
+    assert(y2.poll(&mut cx).is_pending());
+    // y1 second poll: ready
+    assert(y1.poll(&mut cx).is_ready());
+    // y2 second poll: ready
+    assert(y2.poll(&mut cx).is_ready());
+}
+
+// =============================================================================
+// Section 14: TaskId Equality Reflexive/Symmetric
+// =============================================================================
+
+@test
+fn test_task_id_eq_reflexive() {
+    let id: TaskId = TaskId.new();
+    assert(id.eq(&id));
+    assert(!id.ne(&id));
+}
+
+@test
+fn test_task_id_eq_symmetric() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    // If a != b then b != a
+    assert(id1.ne(&id2) == id2.ne(&id1));
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+// =============================================================================
+// Section 15: Additional TaskId Properties
+// =============================================================================
+
+@test
+fn test_task_id_six_unique() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    let id3: TaskId = TaskId.new();
+    let id4: TaskId = TaskId.new();
+    let id5: TaskId = TaskId.new();
+    let id6: TaskId = TaskId.new();
+
+    // All strictly increasing
+    assert(id1.id < id2.id);
+    assert(id2.id < id3.id);
+    assert(id3.id < id4.id);
+    assert(id4.id < id5.id);
+    assert(id5.id < id6.id);
+}
+
+@test
+fn test_task_id_ne_transitive() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    let id3: TaskId = TaskId.new();
+    // If id1 != id2 and id2 != id3, then id1 != id3
+    assert(id1.ne(&id2));
+    assert(id2.ne(&id3));
+    assert(id1.ne(&id3));
+}
+
+@test
+fn test_task_id_field_positive_multiple() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    let id3: TaskId = TaskId.new();
+    assert(id1.id > 0);
+    assert(id2.id > 0);
+    assert(id3.id > 0);
+}
+
+// =============================================================================
+// Section 16: Additional JoinSet Types
+// =============================================================================
+
+@test
+fn test_join_set_float_type() {
+    let set: JoinSet<Float> = JoinSet.new();
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+@test
+fn test_join_set_cancel_then_detach() {
+    let mut set: JoinSet<Int> = JoinSet.new();
+    set.cancel_all();
+    set.detach_all();
+    set.cancel_all();
+    // Multiple cancel/detach on empty is fine
+    assert(set.is_empty());
+}
+
+@test
+fn test_join_set_nested_result_type() {
+    let set: JoinSet<Result<Maybe<Int>, Text>> = JoinSet.new();
+    assert(set.is_empty());
+}
+
+// =============================================================================
+// Section 17: Additional YieldNow Tests
+// =============================================================================
+
+@test
+fn test_yield_now_three_independent() {
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    let mut y1: YieldNow = yield_now();
+    let mut y2: YieldNow = yield_now();
+    let mut y3: YieldNow = yield_now();
+
+    // All start pending
+    assert(y1.poll(&mut cx).is_pending());
+    assert(y2.poll(&mut cx).is_pending());
+    assert(y3.poll(&mut cx).is_pending());
+
+    // All become ready
+    assert(y1.poll(&mut cx).is_ready());
+    assert(y2.poll(&mut cx).is_ready());
+    assert(y3.poll(&mut cx).is_ready());
+}
+
+@test
+fn test_yield_now_yielded_starts_false_multiple() {
+    let y1: YieldNow = yield_now();
+    let y2: YieldNow = yield_now();
+    let y3: YieldNow = yield_now();
+    assert_eq(y1.yielded, false);
+    assert_eq(y2.yielded, false);
+    assert_eq(y3.yielded, false);
+}
+
+// =============================================================================
+// Section 18: JoinError in Maybe
+// =============================================================================
+
+@test
+fn test_join_error_in_maybe_some() {
+    let val: Maybe<JoinError> = Some(Cancelled);
+    assert(val.is_some());
+}
+
+@test
+fn test_join_error_in_maybe_none() {
+    let val: Maybe<JoinError> = None;
+    assert(val.is_none());
+}
+
+// =============================================================================
+// Section 19: TaskId Advanced Properties
+// =============================================================================
+
+@test
+fn test_task_id_distinct_values_ten() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    let id3: TaskId = TaskId.new();
+    let id4: TaskId = TaskId.new();
+    let id5: TaskId = TaskId.new();
+    let id6: TaskId = TaskId.new();
+    let id7: TaskId = TaskId.new();
+    let id8: TaskId = TaskId.new();
+    let id9: TaskId = TaskId.new();
+    let id10: TaskId = TaskId.new();
+
+    // All IDs are strictly increasing
+    assert(id1.id < id2.id);
+    assert(id2.id < id3.id);
+    assert(id3.id < id4.id);
+    assert(id4.id < id5.id);
+    assert(id5.id < id6.id);
+    assert(id6.id < id7.id);
+    assert(id7.id < id8.id);
+    assert(id8.id < id9.id);
+    assert(id9.id < id10.id);
+}
+
+@test
+fn test_task_id_inequality_chain() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    let id3: TaskId = TaskId.new();
+    let id4: TaskId = TaskId.new();
+
+    // All pairwise comparisons are not equal
+    assert(id1.ne(&id2));
+    assert(id1.ne(&id3));
+    assert(id1.ne(&id4));
+    assert(id2.ne(&id3));
+    assert(id2.ne(&id4));
+    assert(id3.ne(&id4));
+}
+
+@test
+fn test_task_id_field_consistent() {
+    let id1: TaskId = TaskId.new();
+    let id2: TaskId = TaskId.new();
+    // Field value difference matches ordering
+    assert(id2.id > id1.id);
+    assert(id2.id - id1.id >= 1);
+}
+
+// =============================================================================
+// Section 20: JoinSet Advanced Types
+// =============================================================================
+
+@test
+fn test_join_set_with_join_error_output() {
+    // JoinSet where tasks return Result<T, JoinError>
+    let set: JoinSet<Result<Int, JoinError>> = JoinSet.new();
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+@test
+fn test_join_set_with_nested_maybe() {
+    let set: JoinSet<Maybe<Maybe<Int>>> = JoinSet.new();
+    assert(set.is_empty());
+}
+
+@test
+fn test_join_set_with_triple_nested_result() {
+    let set: JoinSet<Result<Result<Int, Text>, JoinError>> = JoinSet.new();
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+// =============================================================================
+// Section 21: YieldNow Extended Polling
+// =============================================================================
+
+@test
+fn test_yield_now_poll_after_ready() {
+    let mut y: YieldNow = yield_now();
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    // First poll: Pending
+    assert(y.poll(&mut cx).is_pending());
+    // Second poll: Ready
+    assert(y.poll(&mut cx).is_ready());
+    // Third poll: still Ready (idempotent)
+    assert(y.poll(&mut cx).is_ready());
+}
+
+@test
+fn test_yield_now_multiple_contexts() {
+    let waker1: Waker = noop_waker();
+    let waker2: Waker = noop_waker();
+    let mut cx1: Context = Context.from_waker(&waker1);
+    let mut cx2: Context = Context.from_waker(&waker2);
+
+    let mut y: YieldNow = yield_now();
+
+    // Poll with first context: Pending
+    assert(y.poll(&mut cx1).is_pending());
+    // Poll with second context: Ready (state persists across contexts)
+    assert(y.poll(&mut cx2).is_ready());
+}
+
+// =============================================================================
+// Section 23: JoinError Pattern Matching Coverage
+// =============================================================================
+
+@test
+fn test_join_error_all_variants_list() {
+    let errors: List<JoinError> = [Cancelled, Panicked];
+    assert_eq(errors.len(), 2);
+
+    // Ensure both variants are distinct
+    assert(errors[0] is Cancelled);
+    assert(errors[1] is Panicked);
+}
+
+@test
+fn test_join_error_nested_in_maybe_result() {
+    let val: Maybe<Result<Int, JoinError>> = Some(Err(Cancelled));
+
+    match val {
+        Some(Ok(_)) => panic("Expected error"),
+        Some(Err(Cancelled)) => {} // Expected
+        Some(Err(Panicked)) => panic("Wrong error"),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 24: JoinSet Operations Chain
+// =============================================================================
+
+@test
+fn test_join_set_multiple_cancel_detach_cycle() {
+    let mut set: JoinSet<Bool> = JoinSet.new();
+
+    // Cancel all
+    set.cancel_all();
+    assert(set.is_empty());
+
+    // Detach all
+    set.detach_all();
+    assert(set.is_empty());
+
+    // Cancel again
+    set.cancel_all();
+    assert(set.is_empty());
+
+    // Detach again
+    set.detach_all();
+    assert(set.is_empty());
+}
+
+@test
+fn test_join_set_with_tuple_triple() {
+    let set: JoinSet<(Int, Bool, Text)> = JoinSet.new();
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

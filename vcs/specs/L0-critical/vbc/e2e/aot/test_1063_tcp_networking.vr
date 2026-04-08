@@ -1,0 +1,157 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: tcp, networking, spawn, channels
+// @description: Test TCP networking - loopback server/client with spawn
+
+fn tcp_listen(port: Int) -> Int { -1 }
+fn tcp_accept(fd: Int) -> Int { -1 }
+fn tcp_connect(host: Text, port: Int) -> Int { -1 }
+fn tcp_send(fd: Int, data: Text) -> Int { -1 }
+fn tcp_recv(fd: Int) -> Text { "" }
+fn tcp_close(fd: Int) -> Int { -1 }
+fn sleep_ms(millis: Int) -> Int { 0 }
+
+fn test_tcp_echo() -> Int {
+    // Start server on a port
+    let port = 18931;
+    let server_fd = tcp_listen(port);
+    if server_fd < 0 {
+        print(f"FAIL tcp_echo: listen failed (fd={server_fd})");
+        return 1;
+    }
+
+    let result_ch = Channel.new(1);
+
+    // Server thread: accept one client, echo back
+    let server = spawn {
+        let client = tcp_accept(server_fd);
+        if client < 0 {
+            result_ch.send(-1);
+        } else {
+            let msg = tcp_recv(client);
+            let _ = tcp_send(client, msg);
+            tcp_close(client);
+            result_ch.send(1);
+        }
+        0
+    };
+
+    // Give server a moment to start accepting
+    sleep_ms(10);
+
+    // Client: connect, send, receive
+    let client_fd = tcp_connect("127.0.0.1", port);
+    if client_fd < 0 {
+        print(f"FAIL tcp_echo: connect failed (fd={client_fd})");
+        tcp_close(server_fd);
+        return 1;
+    }
+
+    let _ = tcp_send(client_fd, "hello TCP");
+    let response = tcp_recv(client_fd);
+    tcp_close(client_fd);
+
+    // Wait for server
+    server.await;
+    tcp_close(server_fd);
+
+    let server_ok = match result_ch.recv() { Some(v) => v, None => -1 };
+    if server_ok != 1 {
+        print("FAIL tcp_echo: server error");
+        return 1;
+    }
+    if response != "hello TCP" {
+        print(f"FAIL tcp_echo: expected 'hello TCP', got '{response}'");
+        return 1;
+    }
+    print("  tcp_echo: OK");
+    0
+}
+
+fn test_tcp_multi_message() -> Int {
+    let port = 18932;
+    let server_fd = tcp_listen(port);
+    if server_fd < 0 {
+        print(f"FAIL tcp_multi: listen failed");
+        return 1;
+    }
+
+    let count_ch = Channel.new(1);
+
+    // Server: receive messages and count them
+    let server = spawn {
+        let client = tcp_accept(server_fd);
+        if client < 0 {
+            count_ch.send(0);
+        } else {
+            let mut count = 0;
+            let mut done = false;
+            while !done {
+                let msg = tcp_recv(client);
+                if msg == "" || msg == "DONE" {
+                    done = true;
+                } else {
+                    count = count + 1;
+                    let _ = tcp_send(client, "ACK");
+                }
+            }
+            tcp_close(client);
+            count_ch.send(count);
+        }
+        0
+    };
+
+    sleep_ms(10);
+    let client_fd = tcp_connect("127.0.0.1", port);
+    if client_fd < 0 {
+        print("FAIL tcp_multi: connect failed");
+        tcp_close(server_fd);
+        return 1;
+    }
+
+    // Send 3 messages, receive ACK for each
+    let mut acks = 0;
+    let _ = tcp_send(client_fd, "msg1");
+    let r1 = tcp_recv(client_fd);
+    if r1 == "ACK" { acks = acks + 1; }
+
+    let _ = tcp_send(client_fd, "msg2");
+    let r2 = tcp_recv(client_fd);
+    if r2 == "ACK" { acks = acks + 1; }
+
+    let _ = tcp_send(client_fd, "msg3");
+    let r3 = tcp_recv(client_fd);
+    if r3 == "ACK" { acks = acks + 1; }
+
+    tcp_close(client_fd);
+    server.await;
+    tcp_close(server_fd);
+
+    let server_count = match count_ch.recv() { Some(v) => v, None => 0 };
+
+    if acks != 3 {
+        print(f"FAIL tcp_multi: expected 3 acks, got {acks}");
+        return 1;
+    }
+    if server_count != 3 {
+        print(f"FAIL tcp_multi: server counted {server_count}, expected 3");
+        return 1;
+    }
+    print("  tcp_multi: OK");
+    0
+}
+
+fn main() -> Int {
+    print("TCP Networking Tests:");
+    let mut failures = 0;
+    failures = failures + test_tcp_echo();
+    failures = failures + test_tcp_multi_message();
+
+    if failures == 0 {
+        print("All TCP networking tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

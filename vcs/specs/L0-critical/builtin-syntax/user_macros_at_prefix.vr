@@ -1,0 +1,43 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: builtin-syntax, macros, meta
+// @timeout: 5000
+//
+// Tests that user-defined macros use @ prefix (NOT Rust-style ! suffix).
+// Verum does NOT use `!` anywhere - this is a Rust-ism we avoid.
+// Spec: grammar/verum.ebnf Section 2.20.3 - User-Defined Macros
+
+// User-defined macro declaration
+meta log_debug(msg: tt) {
+    // Macro implementation would go here
+    // This generates debug logging code
+}
+
+meta sql_query(query: tt) {
+    // Macro implementation for SQL query parsing
+    // Returns a type-safe query object
+}
+
+meta validate_email(addr: tt) {
+    // Macro implementation for email validation
+}
+
+fn main() -> Int {
+    // User-defined macros use @ prefix (same as attributes)
+    @log_debug("Starting application");
+
+    let query = @sql_query("SELECT * FROM users WHERE id = ?");
+
+    let is_valid = @validate_email("user@example.com");
+
+    // Verum syntax principles:
+    // - Built-in functions: print("Hello")      - standard call
+    // - User macros:        @sql_query("...")   - @ prefix
+    // - Attributes:         @derive(Clone)      - @ prefix
+    // - Meta functions:     @const, @cfg        - @ prefix
+    //
+    // NO `!` suffix anywhere in Verum!
+
+    0
+}

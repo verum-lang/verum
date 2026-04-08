@@ -1,0 +1,662 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, ml, sampling
+// @timeout: 50000
+// @expected-exit: 0
+// @description: ML sampling operations — top-k, temperature, softmax concepts
+
+// ============================================================================
+// Fixed-size array types
+// ============================================================================
+
+type Scores4 is { s0: Float, s1: Float, s2: Float, s3: Float };
+
+type Scores8 is {
+    s0: Float, s1: Float, s2: Float, s3: Float,
+    s4: Float, s5: Float, s6: Float, s7: Float
+};
+
+// ============================================================================
+// Float arithmetic wrappers (needed for record-extracted float values)
+// The VBC interpreter has a known issue where binary operations on float
+// values extracted from record fields are miscompiled as integer ops.
+// Wrapping in functions with explicit Float parameter types works around it.
+// ============================================================================
+
+fn add_f(x: Float, y: Float) -> Float { x + y }
+fn gt_f(x: Float, y: Float) -> Int { if x > y { 1 } else { 0 } }
+fn lt_f(x: Float, y: Float) -> Int { if x < y { 1 } else { 0 } }
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn max_f(a: Float, b: Float) -> Float {
+    if a > b { a } else { b }
+}
+
+fn check_near(val: Float, expected: Float, tol: Float) {
+    let d = abs_f(val - expected);
+    assert(d < tol);
+}
+
+// ============================================================================
+// Scores4 helpers — all arithmetic inside functions with typed params
+// ============================================================================
+
+fn s4_get(s: Scores4, i: Int) -> Float {
+    if i == 0 { s.s0 }
+    else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 }
+    else { s.s3 }
+}
+
+fn s4_set(s: Scores4, i: Int, v: Float) -> Scores4 {
+    if i == 0 { Scores4 { s0: v, s1: s.s1, s2: s.s2, s3: s.s3 } }
+    else if i == 1 { Scores4 { s0: s.s0, s1: v, s2: s.s2, s3: s.s3 } }
+    else if i == 2 { Scores4 { s0: s.s0, s1: s.s1, s2: v, s3: s.s3 } }
+    else { Scores4 { s0: s.s0, s1: s.s1, s2: s.s2, s3: v } }
+}
+
+fn s4_sum(s: Scores4) -> Float {
+    let a = s.s0;
+    let b = s.s1;
+    let c = s.s2;
+    let d = s.s3;
+    let ab = add_f(a, b);
+    let cd = add_f(c, d);
+    add_f(ab, cd)
+}
+
+fn s4_max(s: Scores4) -> Float {
+    let m01 = max_f(s.s0, s.s1);
+    let m23 = max_f(s.s2, s.s3);
+    max_f(m01, m23)
+}
+
+fn s4_check_uniform(s: Scores4, expected: Float, tol: Float) {
+    check_near(s.s0, expected, tol);
+    check_near(s.s1, expected, tol);
+    check_near(s.s2, expected, tol);
+    check_near(s.s3, expected, tol);
+}
+
+fn s4_check_sum_one(s: Scores4, tol: Float) {
+    let sum = s4_sum(s);
+    check_near(sum, 1.0, tol);
+}
+
+fn s4_check_order_desc(s: Scores4) {
+    assert(gt_f(s.s0, s.s1) == 1);
+    assert(gt_f(s.s1, s.s2) == 1);
+    assert(gt_f(s.s2, s.s3) == 1);
+}
+
+// ============================================================================
+// Scores8 helpers
+// ============================================================================
+
+fn s8_get(s: Scores8, i: Int) -> Float {
+    if i == 0 { s.s0 }
+    else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 }
+    else if i == 3 { s.s3 }
+    else if i == 4 { s.s4 }
+    else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 }
+    else { s.s7 }
+}
+
+fn s8_set(s: Scores8, i: Int, v: Float) -> Scores8 {
+    if i == 0 { Scores8 { s0: v, s1: s.s1, s2: s.s2, s3: s.s3, s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7 } }
+    else if i == 1 { Scores8 { s0: s.s0, s1: v, s2: s.s2, s3: s.s3, s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7 } }
+    else if i == 2 { Scores8 { s0: s.s0, s1: s.s1, s2: v, s3: s.s3, s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7 } }
+    else if i == 3 { Scores8 { s0: s.s0, s1: s.s1, s2: s.s2, s3: v, s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7 } }
+    else if i == 4 { Scores8 { s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3, s4: v, s5: s.s5, s6: s.s6, s7: s.s7 } }
+    else if i == 5 { Scores8 { s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3, s4: s.s4, s5: v, s6: s.s6, s7: s.s7 } }
+    else if i == 6 { Scores8 { s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3, s4: s.s4, s5: s.s5, s6: v, s7: s.s7 } }
+    else { Scores8 { s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3, s4: s.s4, s5: s.s5, s6: s.s6, s7: v } }
+}
+
+// ============================================================================
+// Approximate exp via repeated squaring: (1 + x/256)^256
+// ============================================================================
+
+fn approx_exp(x: Float) -> Float {
+    let mut t = 1.0 + x / 256.0;
+    t = t * t;
+    t = t * t;
+    t = t * t;
+    t = t * t;
+    t = t * t;
+    t = t * t;
+    t = t * t;
+    t = t * t;
+    t
+}
+
+// ============================================================================
+// Softmax on 4 elements (all arithmetic on Float fields inside function)
+// ============================================================================
+
+fn softmax4(logits: Scores4) -> Scores4 {
+    let mx = s4_max(logits);
+    let e0 = approx_exp(logits.s0 - mx);
+    let e1 = approx_exp(logits.s1 - mx);
+    let e2 = approx_exp(logits.s2 - mx);
+    let e3 = approx_exp(logits.s3 - mx);
+    let total = e0 + e1 + e2 + e3;
+    Scores4 {
+        s0: e0 / total,
+        s1: e1 / total,
+        s2: e2 / total,
+        s3: e3 / total
+    }
+}
+
+// ============================================================================
+// Test 1: Softmax
+// ============================================================================
+
+fn test_softmax_uniform() {
+    let logits = Scores4 { s0: 1.0, s1: 1.0, s2: 1.0, s3: 1.0 };
+    let probs = softmax4(logits);
+    s4_check_uniform(probs, 0.25, 0.01);
+}
+
+fn test_softmax_uniform_sum() {
+    let logits = Scores4 { s0: 1.0, s1: 1.0, s2: 1.0, s3: 1.0 };
+    let probs = softmax4(logits);
+    s4_check_sum_one(probs, 0.001);
+}
+
+fn test_softmax_dominant() {
+    let logits = Scores4 { s0: 10.0, s1: 1.0, s2: 1.0, s3: 1.0 };
+    let probs = softmax4(logits);
+    // s0 should dominate
+    assert(gt_f(probs.s0, 0.9) == 1);
+    assert(lt_f(probs.s1, 0.05) == 1);
+}
+
+fn test_softmax_dominant_sum() {
+    let logits = Scores4 { s0: 10.0, s1: 1.0, s2: 1.0, s3: 1.0 };
+    let probs = softmax4(logits);
+    s4_check_sum_one(probs, 0.001);
+}
+
+fn test_softmax_negative() {
+    let logits = Scores4 { s0: 0.0 - 1.0, s1: 0.0 - 2.0, s2: 0.0 - 3.0, s3: 0.0 - 4.0 };
+    let probs = softmax4(logits);
+    s4_check_order_desc(probs);
+}
+
+fn test_softmax_negative_sum() {
+    let logits = Scores4 { s0: 0.0 - 1.0, s1: 0.0 - 2.0, s2: 0.0 - 3.0, s3: 0.0 - 4.0 };
+    let probs = softmax4(logits);
+    s4_check_sum_one(probs, 0.01);
+}
+
+fn test_softmax_basic() {
+    test_softmax_uniform();
+    test_softmax_uniform_sum();
+    test_softmax_dominant();
+    test_softmax_dominant_sum();
+    test_softmax_negative();
+    test_softmax_negative_sum();
+    print("  test_softmax_basic: ok");
+}
+
+// ============================================================================
+// Test 2: Temperature scaling
+// ============================================================================
+
+fn apply_temperature4(logits: Scores4, temp: Float) -> Scores4 {
+    Scores4 {
+        s0: logits.s0 / temp,
+        s1: logits.s1 / temp,
+        s2: logits.s2 / temp,
+        s3: logits.s3 / temp
+    }
+}
+
+fn test_temp_identity() {
+    let logits = Scores4 { s0: 3.0, s1: 1.0, s2: 4.0, s3: 1.5 };
+    let scaled = apply_temperature4(logits, 1.0);
+    check_near(scaled.s0, 3.0, 0.001);
+    check_near(scaled.s2, 4.0, 0.001);
+}
+
+fn check_s4_order_2031(s: Scores4) {
+    // Check s2 > s0 > s3 > s1
+    assert(gt_f(s.s2, s.s0) == 1);
+    assert(gt_f(s.s0, s.s3) == 1);
+    assert(gt_f(s.s3, s.s1) == 1);
+}
+
+fn test_temp_peak_comparison() {
+    let logits = Scores4 { s0: 3.0, s1: 1.0, s2: 4.0, s3: 1.5 };
+    let ph = softmax4(apply_temperature4(logits, 2.0));
+    let pl = softmax4(apply_temperature4(logits, 0.5));
+    // Max element (s2) more peaked at low temp
+    assert(gt_f(pl.s2, ph.s2) == 1);
+    // Min element (s1) more probable at high temp
+    assert(gt_f(ph.s1, pl.s1) == 1);
+}
+
+fn test_temp_high_ordering() {
+    let logits = Scores4 { s0: 3.0, s1: 1.0, s2: 4.0, s3: 1.5 };
+    let ph = softmax4(apply_temperature4(logits, 2.0));
+    check_s4_order_2031(ph);
+}
+
+fn test_temp_low_ordering() {
+    let logits = Scores4 { s0: 3.0, s1: 1.0, s2: 4.0, s3: 1.5 };
+    let pl = softmax4(apply_temperature4(logits, 0.5));
+    check_s4_order_2031(pl);
+}
+
+fn test_temperature_scaling() {
+    test_temp_identity();
+    test_temp_peak_comparison();
+    test_temp_high_ordering();
+    test_temp_low_ordering();
+    print("  test_temperature_scaling: ok");
+}
+
+// ============================================================================
+// Test 3: Top-k selection
+// ============================================================================
+
+type TopK3 is { idx0: Int, idx1: Int, idx2: Int };
+
+fn argmax8(s: Scores8) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = s.s0;
+    let mut i = 1;
+    while i < 8 {
+        let v = s8_get(s, i);
+        if v > best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn top_k_3(scores: Scores8) -> TopK3 {
+    let mut s = scores;
+    let idx0 = argmax8(s);
+    s = s8_set(s, idx0, 0.0 - 999999.0);
+    let idx1 = argmax8(s);
+    s = s8_set(s, idx1, 0.0 - 999999.0);
+    let idx2 = argmax8(s);
+    TopK3 { idx0: idx0, idx1: idx1, idx2: idx2 }
+}
+
+fn check_topk3(t: TopK3, e0: Int, e1: Int, e2: Int) {
+    assert_eq(t.idx0, e0);
+    assert_eq(t.idx1, e1);
+    assert_eq(t.idx2, e2);
+}
+
+fn test_top_k_basic() {
+    let scores = Scores8 {
+        s0: 0.1, s1: 0.8, s2: 0.3, s3: 0.95,
+        s4: 0.2, s5: 0.6, s6: 0.05, s7: 0.4
+    };
+    let top3 = top_k_3(scores);
+    check_topk3(top3, 3, 1, 5);
+}
+
+fn test_top_k_different() {
+    let scores = Scores8 {
+        s0: 5.0, s1: 2.0, s2: 8.0, s3: 1.0,
+        s4: 9.0, s5: 3.0, s6: 7.0, s7: 4.0
+    };
+    let top3 = top_k_3(scores);
+    check_topk3(top3, 4, 2, 6);
+}
+
+fn test_top_k_equal() {
+    let scores = Scores8 {
+        s0: 1.0, s1: 1.0, s2: 1.0, s3: 1.0,
+        s4: 1.0, s5: 1.0, s6: 1.0, s7: 1.0
+    };
+    let top3 = top_k_3(scores);
+    check_topk3(top3, 0, 1, 2);
+}
+
+fn test_top_k_selection() {
+    test_top_k_basic();
+    test_top_k_different();
+    test_top_k_equal();
+    print("  test_top_k_selection: ok");
+}
+
+// ============================================================================
+// Test 4: Top-p (nucleus) sampling
+// ============================================================================
+
+fn sort4_pass1(s: Scores4) -> Scores4 {
+    let mut r = s;
+    if lt_f(r.s0, r.s1) == 1 {
+        let tmp = r.s0;
+        r = Scores4 { s0: r.s1, s1: tmp, s2: r.s2, s3: r.s3 };
+    }
+    if lt_f(r.s1, r.s2) == 1 {
+        let tmp = r.s1;
+        r = Scores4 { s0: r.s0, s1: r.s2, s2: tmp, s3: r.s3 };
+    }
+    if lt_f(r.s2, r.s3) == 1 {
+        let tmp = r.s2;
+        r = Scores4 { s0: r.s0, s1: r.s1, s2: r.s3, s3: tmp };
+    }
+    r
+}
+
+fn sort4_pass2(s: Scores4) -> Scores4 {
+    let mut r = s;
+    if lt_f(r.s0, r.s1) == 1 {
+        let tmp = r.s0;
+        r = Scores4 { s0: r.s1, s1: tmp, s2: r.s2, s3: r.s3 };
+    }
+    if lt_f(r.s1, r.s2) == 1 {
+        let tmp = r.s1;
+        r = Scores4 { s0: r.s0, s1: r.s2, s2: tmp, s3: r.s3 };
+    }
+    r
+}
+
+fn sort4_pass3(s: Scores4) -> Scores4 {
+    let mut r = s;
+    if lt_f(r.s0, r.s1) == 1 {
+        let tmp = r.s0;
+        r = Scores4 { s0: r.s1, s1: tmp, s2: r.s2, s3: r.s3 };
+    }
+    r
+}
+
+fn sort4_desc(probs: Scores4) -> Scores4 {
+    let a = sort4_pass1(probs);
+    let b = sort4_pass2(a);
+    sort4_pass3(b)
+}
+
+fn nucleus_count(sorted_probs: Scores4, p_threshold: Float) -> Int {
+    let mut cumsum = 0.0;
+    let mut n = 0;
+    let mut answer = 4;
+    while n < 4 {
+        cumsum = cumsum + s4_get(sorted_probs, n);
+        n = n + 1;
+        if cumsum >= p_threshold {
+            if answer == 4 {
+                answer = n;
+            }
+        }
+    }
+    answer
+}
+
+fn test_nucleus_sort() {
+    let probs = Scores4 { s0: 0.1, s1: 0.5, s2: 0.3, s3: 0.1 };
+    let sorted = sort4_desc(probs);
+    check_near(sorted.s0, 0.5, 0.001);
+    check_near(sorted.s1, 0.3, 0.001);
+}
+
+fn test_nucleus_sort_tail() {
+    let probs = Scores4 { s0: 0.1, s1: 0.5, s2: 0.3, s3: 0.1 };
+    let sorted = sort4_desc(probs);
+    check_near(sorted.s2, 0.1, 0.001);
+    check_near(sorted.s3, 0.1, 0.001);
+}
+
+fn test_nucleus_p90() {
+    let sorted = Scores4 { s0: 0.5, s1: 0.3, s2: 0.1, s3: 0.1 };
+    assert_eq(nucleus_count(sorted, 0.9), 3);
+}
+
+fn test_nucleus_p50() {
+    let sorted = Scores4 { s0: 0.5, s1: 0.3, s2: 0.1, s3: 0.1 };
+    assert_eq(nucleus_count(sorted, 0.5), 1);
+}
+
+fn test_nucleus_p70() {
+    let sorted = Scores4 { s0: 0.5, s1: 0.3, s2: 0.1, s3: 0.1 };
+    assert_eq(nucleus_count(sorted, 0.7), 2);
+}
+
+fn test_nucleus_p99() {
+    let sorted = Scores4 { s0: 0.5, s1: 0.3, s2: 0.1, s3: 0.1 };
+    assert_eq(nucleus_count(sorted, 0.99), 4);
+}
+
+fn test_nucleus_peaked() {
+    let peaked = Scores4 { s0: 0.01, s1: 0.01, s2: 0.97, s3: 0.01 };
+    let sorted = sort4_desc(peaked);
+    check_near(sorted.s0, 0.97, 0.001);
+    assert_eq(nucleus_count(sorted, 0.9), 1);
+}
+
+fn test_top_p_nucleus() {
+    test_nucleus_sort();
+    test_nucleus_sort_tail();
+    test_nucleus_p90();
+    test_nucleus_p50();
+    test_nucleus_p70();
+    test_nucleus_p99();
+    test_nucleus_peaked();
+    print("  test_top_p_nucleus: ok");
+}
+
+// ============================================================================
+// Test 5: Argmax
+// ============================================================================
+
+fn argmax4(s: Scores4) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = s.s0;
+    if gt_f(s.s1, best_val) == 1 { best_val = s.s1; best_idx = 1; }
+    if gt_f(s.s2, best_val) == 1 { best_val = s.s2; best_idx = 2; }
+    if gt_f(s.s3, best_val) == 1 { best_idx = 3; }
+    best_idx
+}
+
+fn test_argmax4_cases() {
+    assert_eq(argmax4(Scores4 { s0: 1.0, s1: 3.0, s2: 2.0, s3: 0.5 }), 1);
+    assert_eq(argmax4(Scores4 { s0: 10.0, s1: 3.0, s2: 2.0, s3: 0.5 }), 0);
+}
+
+fn test_argmax4_more() {
+    assert_eq(argmax4(Scores4 { s0: 1.0, s1: 3.0, s2: 2.0, s3: 50.0 }), 3);
+    assert_eq(argmax4(Scores4 { s0: 1.0, s1: 3.0, s2: 20.0, s3: 5.0 }), 2);
+}
+
+fn test_argmax4_equal() {
+    assert_eq(argmax4(Scores4 { s0: 5.0, s1: 5.0, s2: 5.0, s3: 5.0 }), 0);
+}
+
+fn test_argmax4_negative() {
+    let s = Scores4 { s0: 0.0 - 1.0, s1: 0.0 - 0.5, s2: 0.0 - 3.0, s3: 0.0 - 2.0 };
+    assert_eq(argmax4(s), 1);
+}
+
+fn test_argmax8_middle() {
+    let s = Scores8 {
+        s0: 0.1, s1: 0.2, s2: 0.9, s3: 0.3,
+        s4: 0.4, s5: 0.5, s6: 0.6, s7: 0.7
+    };
+    assert_eq(argmax8(s), 2);
+}
+
+fn test_argmax8_last() {
+    let s = Scores8 {
+        s0: 0.1, s1: 0.2, s2: 0.3, s3: 0.4,
+        s4: 0.5, s5: 0.6, s6: 0.7, s7: 0.8
+    };
+    assert_eq(argmax8(s), 7);
+}
+
+fn test_argmax() {
+    test_argmax4_cases();
+    test_argmax4_more();
+    test_argmax4_equal();
+    test_argmax4_negative();
+    test_argmax8_middle();
+    test_argmax8_last();
+    print("  test_argmax: ok");
+}
+
+// ============================================================================
+// Test 6: Repetition penalty
+// ============================================================================
+
+type UsedTokens8 is {
+    u0: Int, u1: Int, u2: Int, u3: Int,
+    u4: Int, u5: Int, u6: Int, u7: Int
+};
+
+fn ut8_get(u: UsedTokens8, i: Int) -> Int {
+    if i == 0 { u.u0 }
+    else if i == 1 { u.u1 }
+    else if i == 2 { u.u2 }
+    else if i == 3 { u.u3 }
+    else if i == 4 { u.u4 }
+    else if i == 5 { u.u5 }
+    else if i == 6 { u.u6 }
+    else { u.u7 }
+}
+
+fn apply_rep_penalty(scores: Scores8, used: UsedTokens8, penalty: Float) -> Scores8 {
+    let mut result = scores;
+    let mut i = 0;
+    while i < 8 {
+        if ut8_get(used, i) == 1 {
+            let val = s8_get(scores, i);
+            if val > 0.0 {
+                result = s8_set(result, i, val / penalty);
+            } else {
+                result = s8_set(result, i, val * penalty);
+            }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn make_test_scores() -> Scores8 {
+    Scores8 {
+        s0: 2.0, s1: 3.0, s2: 1.0, s3: 4.0,
+        s4: 0.5, s5: 2.5, s6: 1.5, s7: 3.5
+    }
+}
+
+fn make_test_used() -> UsedTokens8 {
+    UsedTokens8 {
+        u0: 0, u1: 1, u2: 0, u3: 1,
+        u4: 0, u5: 0, u6: 0, u7: 1
+    }
+}
+
+fn test_rep_penalty_unchanged() {
+    let scores = make_test_scores();
+    let used = make_test_used();
+    let p = apply_rep_penalty(scores, used, 1.5);
+    // Check via s8_get which returns Float and passes to check_near
+    check_near(s8_get(p, 0), 2.0, 0.001);
+    check_near(s8_get(p, 2), 1.0, 0.001);
+}
+
+fn test_rep_penalty_unchanged2() {
+    let scores = make_test_scores();
+    let used = make_test_used();
+    let p = apply_rep_penalty(scores, used, 1.5);
+    check_near(s8_get(p, 4), 0.5, 0.001);
+    check_near(s8_get(p, 5), 2.5, 0.001);
+    check_near(s8_get(p, 6), 1.5, 0.001);
+}
+
+fn test_rep_penalty_used() {
+    let scores = make_test_scores();
+    let used = make_test_used();
+    let p = apply_rep_penalty(scores, used, 1.5);
+    check_near(s8_get(p, 1), 2.0, 0.001);    // 3.0/1.5
+    check_near(s8_get(p, 3), 2.666, 0.01);   // 4.0/1.5
+    check_near(s8_get(p, 7), 2.333, 0.01);   // 3.5/1.5
+}
+
+fn test_rep_penalty_argmax() {
+    let scores = make_test_scores();
+    assert_eq(argmax8(scores), 3);
+    let used = make_test_used();
+    let p = apply_rep_penalty(scores, used, 1.5);
+    // 4.0/1.5 = 2.666 is still largest
+    assert_eq(argmax8(p), 3);
+}
+
+fn test_rep_penalty_strong() {
+    let scores = make_test_scores();
+    let used = make_test_used();
+    let sp = apply_rep_penalty(scores, used, 5.0);
+    check_near(s8_get(sp, 1), 0.6, 0.001);
+    check_near(s8_get(sp, 3), 0.8, 0.001);
+    // Now unused token 5 (2.5) is argmax
+    assert_eq(argmax8(sp), 5);
+}
+
+fn test_rep_penalty_negative() {
+    let scores = Scores8 {
+        s0: 0.0 - 1.0, s1: 0.0 - 2.0, s2: 0.0 - 0.5, s3: 0.0 - 3.0,
+        s4: 0.0 - 1.5, s5: 0.0 - 0.1, s6: 0.0 - 2.5, s7: 0.0 - 4.0
+    };
+    let used = UsedTokens8 {
+        u0: 0, u1: 1, u2: 0, u3: 0,
+        u4: 0, u5: 0, u6: 0, u7: 1
+    };
+    let p = apply_rep_penalty(scores, used, 2.0);
+    check_near(s8_get(p, 1), 0.0 - 4.0, 0.001);
+    check_near(s8_get(p, 7), 0.0 - 8.0, 0.001);
+}
+
+fn test_rep_penalty_neg_unchanged() {
+    let scores = Scores8 {
+        s0: 0.0 - 1.0, s1: 0.0 - 2.0, s2: 0.0 - 0.5, s3: 0.0 - 3.0,
+        s4: 0.0 - 1.5, s5: 0.0 - 0.1, s6: 0.0 - 2.5, s7: 0.0 - 4.0
+    };
+    let used = UsedTokens8 {
+        u0: 0, u1: 1, u2: 0, u3: 0,
+        u4: 0, u5: 0, u6: 0, u7: 1
+    };
+    let p = apply_rep_penalty(scores, used, 2.0);
+    check_near(s8_get(p, 0), 0.0 - 1.0, 0.001);
+    check_near(s8_get(p, 5), 0.0 - 0.1, 0.001);
+}
+
+fn test_repetition_penalty() {
+    test_rep_penalty_unchanged();
+    test_rep_penalty_unchanged2();
+    test_rep_penalty_used();
+    test_rep_penalty_argmax();
+    test_rep_penalty_strong();
+    test_rep_penalty_negative();
+    test_rep_penalty_neg_unchanged();
+    print("  test_repetition_penalty: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_softmax_basic();
+    test_temperature_scaling();
+    test_top_k_selection();
+    test_top_p_nucleus();
+    test_argmax();
+    test_repetition_penalty();
+    print("[OK] 068_ml_sampling");
+    0
+}

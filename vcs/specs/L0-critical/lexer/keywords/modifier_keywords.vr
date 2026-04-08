@@ -1,0 +1,138 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, modifiers
+
+// Modifier keywords for visibility, mutability, and safety
+
+// Public visibility
+pub fn public_function() -> Int {
+    42
+}
+
+pub type PublicType is {
+    field: Int,
+};
+
+pub const PUBLIC_CONSTANT: Int = 100;
+
+// Mutable bindings
+fn mutability_examples() {
+    let immutable = 42;
+    let mut mutable = 0;
+
+    // mutable can be reassigned
+    mutable = 1;
+    mutable = 2;
+
+    // Mutable reference
+    let mut list = [1, 2, 3];
+    list.push(4);
+    list[0] = 10;
+}
+
+// Mutable parameters
+fn swap(mut a: Int, mut b: Int) -> (Int, Int) {
+    let temp = a;
+    a = b;
+    b = temp;
+    (a, b)
+}
+
+// Const declarations
+const PI: Float = 3.14159265358979;
+const E: Float = 2.71828182845904;
+const MAX_SIZE: Int = 1024;
+const GREETING: Text = "Hello, World!";
+
+// Const in expressions (compile-time evaluation)
+const DOUBLED_PI: Float = PI * 2.0;
+const AREA_FACTOR: Float = PI * PI;
+
+// Meta functions (compile-time evaluable)
+meta fn square(x: Int) -> Int {
+    x * x
+}
+
+meta fn factorial(n: Int) -> Int {
+    if n <= 1 {
+        1
+    } else {
+        n * factorial(n - 1)
+    }
+}
+
+// Unsafe blocks inside functions
+fn unsafe_examples() {
+    // Raw pointer operations
+    unsafe {
+        let ptr = raw_pointer_to_data();
+        let value = *ptr;
+        *ptr = value + 1;
+    }
+
+    // Calling unsafe operations
+    unsafe {
+        low_level_operation();
+    }
+}
+
+// Module-level visibility combinations
+pub type ExportedRecord is {
+    pub visible_field: Int,
+    internal_field: Int,
+};
+
+// Const generic parameters
+type Array<const N: Int, T> is {
+    data: [T; N],
+};
+
+meta fn array_size<const N: Int, T>() -> Int {
+    N
+}
+
+// Mutable closures
+fn mutable_closure_example() {
+    let mut counter = 0;
+
+    let increment = || {
+        counter = counter + 1;
+        counter
+    };
+
+    let _ = increment();  // 1
+    let _ = increment();  // 2
+}
+
+// Unsafe in match
+fn unsafe_match(ptr: RawPtr<Int>) -> Maybe<Int> {
+    match ptr {
+        RawPtr.Null => None,
+        RawPtr.Valid(p) => unsafe { Some(*p) },
+    }
+}
+
+// Static mutable (requires unsafe to access)
+static mut INSTANCE_COUNT: Int = 0;
+
+fn increment_instances() {
+    unsafe {
+        INSTANCE_COUNT = INSTANCE_COUNT + 1;
+    }
+}
+
+// Modifiers on implement blocks
+implement MyType {
+    fn new() -> Self {
+        MyType { value: 0 }
+    }
+
+    pub fn public_method(&self) -> Int {
+        self.value
+    }
+
+    fn internal_method(&mut self) {
+        self.value = self.value + 1;
+    }
+}

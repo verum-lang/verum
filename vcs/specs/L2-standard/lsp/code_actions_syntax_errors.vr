@@ -1,0 +1,168 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L2
+// @tags: lsp, code-actions, quick-fixes, syntax-errors
+// @description: Tests code actions for syntax errors including quick fixes.
+//              Verifies appropriate fixes are suggested for common errors.
+
+// ============================================================================
+// This file tests code action generation for syntax error quick fixes.
+// Each error case documents expected code actions.
+// ============================================================================
+
+// Test 1: Quick fix for missing semicolon
+// Expected action: "Add semicolon"
+// Action applies: Insert ';' after '42'
+fn test_add_semicolon() {
+    let x = 42
+    x
+}
+
+// Test 2: Quick fix for unclosed parenthesis
+// Expected action: "Close parenthesis"
+// Action applies: Insert ')' to balance
+fn test_close_paren() {
+    let x = (1 + 2;
+    x
+}
+
+// Test 3: Quick fix for unclosed bracket
+// Expected action: "Close bracket"
+fn test_close_bracket() {
+    let arr = [1, 2, 3;
+    arr
+}
+
+// Test 4: Quick fix for unclosed brace
+// Expected action: "Close brace"
+fn test_close_brace() {
+    let block = {
+        42
+    // missing }
+}
+
+// Test 5: Quick fix for mismatched delimiter
+// Expected actions: "Replace ']' with ')'" or "Change '(' to '['"
+fn test_fix_mismatch() {
+    let x = (1 + 2];
+    x
+}
+
+// Test 6: Quick fix for missing colon in type annotation
+// Expected action: "Add ':' before type"
+fn test_add_colon() {
+    let x Int = 42;
+    x
+}
+
+// Test 7: Quick fix for missing arrow in return type
+// Expected action: "Add '->' before return type"
+fn test_add_arrow() Int {
+    42
+}
+
+// Test 8: Quick fix for missing comma in parameter list
+// Expected action: "Add comma between parameters"
+fn test_add_comma(a: Int b: Int) -> Int {
+    a + b
+}
+
+// Test 9: Quick fix for missing comma in array
+// Expected action: "Add comma between elements"
+fn test_array_comma() {
+    let arr = [1 2 3];
+    arr
+}
+
+// Test 10: Quick fix for missing comma in record
+// Expected action: "Add comma between fields"
+fn test_record_comma() {
+    let point = Point { x: 1 y: 2 };
+    point
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// Test 11: Quick fix for duplicate comma
+// Expected action: "Remove extra comma"
+fn test_remove_comma() {
+    let arr = [1,, 2,, 3];
+    arr
+}
+
+// Test 12: Quick fix for extra semicolon
+// Expected action: "Remove extra semicolon"
+fn test_remove_semicolon() {
+    let x = 42;;
+    x
+}
+
+// Test 13: Quick fix for deprecated syntax
+// Expected action: "Update to new syntax"
+// Note: This tests migration suggestions
+struct OldStyle {
+    field: Int,
+}
+
+// Test 14: Quick fix suggestions for typos
+// Expected action: "Did you mean 'fn'?"
+// Note: This is heuristic based
+fu typo_function() -> Int {
+    42
+}
+
+// Test 15: Quick fix for missing 'is' in type definition
+// Expected action: "Add 'is' keyword"
+type MissingIs {
+    field: Int,
+};
+
+// Test 16: Multiple quick fixes available
+// Expected: Multiple fix options presented
+fn test_multiple_fixes() {
+    let x = (1 + 2]
+    x
+}
+
+// Test 17: Quick fix preserves formatting
+// After applying fix, surrounding code should stay formatted
+fn test_preserves_format() {
+    let a = 1;
+    let b = 2  // missing semicolon but formatted
+    let c = 3;
+    a + b + c
+}
+
+// Test 18: Quick fix in nested context
+fn test_nested_fix() {
+    if true {
+        if false {
+            let nested = 42
+            nested
+        }
+    }
+}
+
+// Test 19: Code action for empty match
+// Expected action: "Add match arms"
+fn test_empty_match(opt: Maybe<Int>) -> Int {
+    match opt {
+    }
+}
+
+// Test 20: Code action for incomplete function
+// Expected action: "Add function body"
+fn incomplete_function() -> Int
+
+// ============================================================================
+// Valid code - no code actions expected
+// ============================================================================
+
+fn no_actions_needed() -> Int {
+    let x = 42;
+    let y = x + 1;
+    y
+}

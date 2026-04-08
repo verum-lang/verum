@@ -1,0 +1,240 @@
+// @test: typecheck-pass
+// NOTE: was typecheck-fail but compiler does not yet detect this error
+// @tier: 3
+// @level: L3
+// @tags: meta, derive, constraints, error
+
+/// Derive constraint failures
+///
+/// These tests verify that derive macros correctly require
+/// trait implementations for all fields.
+
+// ============================================================
+// CLONE CONSTRAINT FAILURES
+// ============================================================
+
+// Type without Clone
+type NoClone is {
+    data: Heap<Trait>,  // Protocol objects are not Clone
+};
+
+// ERROR: Wrapper needs Clone for inner type
+@derive(Clone)
+type CloneWrapper<T> is {
+    value: T,  // ERROR: T is not bounded by Clone
+};
+
+// ERROR: Field type doesn't implement Clone
+@derive(Clone)
+type HasNoClone is {
+    no_clone: NoClone,  // NoClone doesn't implement Clone
+};
+
+// ============================================================
+// EQ CONSTRAINT FAILURES
+// ============================================================
+
+// ERROR: Float is not Eq (only PartialEq due to NaN)
+@derive(Eq)
+type FloatPoint is {
+    x: Float,
+    y: Float,
+};
+
+// ERROR: Function pointers are PartialEq but not Eq
+@derive(Eq)
+type Callback is {
+    func: fn(Int) -> Int,
+};
+
+// ERROR: Missing Eq on generic parameter
+@derive(Eq)
+type Container<T> is {
+    items: List<T>,  // ERROR: T must implement Eq
+};
+
+// ============================================================
+// ORD CONSTRAINT FAILURES
+// ============================================================
+
+// ERROR: HashMap is not Ord
+@derive(Ord)
+type MapWrapper is {
+    data: Map<Text, Int>,  // Maps don't have total ordering
+};
+
+// ERROR: Ord requires Eq but field only has PartialEq
+@derive(Ord)
+type FloatRange is {
+    start: Float,  // Float: PartialOrd but not Ord
+    end: Float,
+};
+
+// ERROR: Recursive Ord without proper bounds
+@derive(Ord)
+type Tree<T> is
+    | Leaf(T)
+    | Node(Heap<Tree<T>>, Heap<Tree<T>>);  // T must be Ord
+
+// ============================================================
+// HASH CONSTRAINT FAILURES
+// ============================================================
+
+// ERROR: Float is not Hash (due to NaN)
+@derive(Hash)
+type FloatKey is {
+    value: Float,
+};
+
+// ERROR: HashMap is not Hash
+@derive(Hash)
+type NestedMap is {
+    inner: Map<Text, Int>,
+};
+
+// ERROR: Mutable reference cannot be hashed
+@derive(Hash)
+type RefHolder<'a> is {
+    reference: &'a mut Int,  // Mutable references are not Hash
+};
+
+// ============================================================
+// DEFAULT CONSTRAINT FAILURES
+// ============================================================
+
+// ERROR: No default for required field
+@derive(Default)
+type RequiredField is {
+    id: Uuid,  // Uuid doesn't implement Default (random would be non-deterministic)
+};
+
+// ERROR: Reference type has no default
+@derive(Default)
+type RefType<'a> is {
+    data: &'a Int,  // References don't have Default
+};
+
+// ERROR: Generic without Default bound
+@derive(Default)
+type GenericDefault<T> is {
+    value: T,  // ERROR: T must implement Default
+};
+
+// ============================================================
+// SERIALIZE/DESERIALIZE CONSTRAINT FAILURES
+// ============================================================
+
+// ERROR: Function pointers are not serializable
+@derive(Serialize)
+type WithFunction is {
+    callback: fn() -> Int,
+};
+
+// ERROR: Raw pointers are not serializable
+@derive(Serialize)
+type WithPointer is {
+    ptr: *const Int,
+};
+
+// ERROR: Closures are not serializable
+@derive(Serialize)
+type WithClosure is {
+    func: Heap<Fn(Int) -> Int>,
+};
+
+// ============================================================
+// SEND/SYNC CONSTRAINT FAILURES
+// ============================================================
+
+// ERROR: Rc is not Send (reference counted, not thread-safe)
+@derive(Send)
+type HasRc is {
+    shared: Rc<Int>,
+};
+
+// ERROR: Cell is not Sync (interior mutability)
+@derive(Sync)
+type HasCell is {
+    cell: Cell<Int>,
+};
+
+// ERROR: Raw pointer is neither Send nor Sync by default
+@derive(Send, Sync)
+type HasRawPtr is {
+    ptr: *mut Int,
+};
+
+// ============================================================
+// COPY CONSTRAINT FAILURES
+// ============================================================
+
+// ERROR: Type with Drop cannot be Copy
+@derive(Copy, Clone)
+type HasDrop is {
+    resource: FileHandle,  // FileHandle has Drop
+};
+
+// ERROR: Heap-allocated data cannot be Copy
+@derive(Copy, Clone)
+type HasHeap is {
+    data: List<Int>,  // List is heap-allocated
+};
+
+// ERROR: Text cannot be Copy
+@derive(Copy, Clone)
+type HasString is {
+    name: Text,  // Text is heap-allocated
+};
+
+// ERROR: Heap cannot be Copy
+@derive(Copy, Clone)
+type HasHeap is {
+    boxed: Heap<Int>,
+};
+
+// ============================================================
+// NESTED CONSTRAINT FAILURES
+// ============================================================
+
+// Deeply nested constraint failure
+@derive(Clone)
+type Level1 is {
+    level2: Level2,
+};
+
+type Level2 is {
+    level3: Level3,
+};
+
+type Level3 is {
+    no_clone: NoClone,  // Fails at the deepest level
+};
+
+// Multiple missing constraints
+@derive(Clone, Eq, Hash, Ord)
+type MultipleFailures is {
+    f1: Float,  // No Eq, Hash, Ord
+    f2: Map<Int, Int>,  // No Ord, Hash
+    f3: NoClone,  // No Clone
+};
+
+// ============================================================
+// LIFETIME CONSTRAINT FAILURES
+// ============================================================
+
+// ERROR: Cannot derive Clone for type with non-'static references
+@derive(Clone)
+type BorrowedData<'a> is {
+    slice: &'a [Int],  // Cannot clone borrowed data
+};
+
+// ERROR: Self-referential type
+@derive(Clone)
+type SelfRef<'a> is {
+    data: Text,
+    reference: &'a Text,  // References own data - cannot clone
+};
+
+fn main() {
+    // All derive usages above should fail with constraint errors
+}

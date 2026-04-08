@@ -1,0 +1,47 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, build_assets, error, file_not_found
+// @description: Test that build assets properly reports file not found errors
+// @expected-error: requires
+
+// =============================================================================
+// BUILD ASSETS REQUIRE CONTEXT
+// =============================================================================
+
+// These tests verify that build asset functions require the BuildAssets context.
+// Without the context, they should fail with "requires [BuildAssets]".
+
+// ERROR: load_text requires BuildAssets context
+meta fn test_load_text_no_context() -> Text {
+    load_text("file.txt")  // ERROR: requires BuildAssets
+}
+
+// ERROR: include_str requires BuildAssets context
+meta fn test_include_str_no_context() -> Text {
+    include_str("template.html")  // ERROR: requires BuildAssets
+}
+
+// ERROR: include_bytes requires BuildAssets context
+meta fn test_include_bytes_no_context() -> () {
+    include_bytes("data.bin");  // ERROR: requires BuildAssets
+}
+
+// ERROR: asset_exists requires BuildAssets context
+meta fn test_asset_exists_no_context() -> Bool {
+    asset_exists("file.txt")  // ERROR: requires BuildAssets
+}
+
+// ERROR: asset_list_dir requires BuildAssets context
+meta fn test_list_dir_no_context() -> () {
+    asset_list_dir("dir/");  // ERROR: requires BuildAssets
+}
+
+// ERROR: asset_metadata requires BuildAssets context
+meta fn test_metadata_no_context() -> () {
+    asset_metadata("file.txt");  // ERROR: requires BuildAssets
+}
+
+fn main() {
+    @const test_load_text_no_context();
+}

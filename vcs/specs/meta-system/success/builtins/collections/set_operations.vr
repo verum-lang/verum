@@ -1,0 +1,261 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, set, operations
+// @description: Test set algebra operations (set_union, set_intersection, set_difference)
+
+// =============================================================================
+// SET_UNION TESTS
+// =============================================================================
+
+// Test set_union of two empty sets
+meta fn test_set_union_empty() -> Int {
+    let s1 = set_new();
+    let s2 = set_new();
+    let result = set_union(s1, s2);
+    set_len(result)  // Should be 0
+}
+
+// Test set_union with disjoint sets
+meta fn test_set_union_disjoint() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "c");
+    let s2 = set_insert(s2, "d");
+    let result = set_union(s1, s2);
+    set_len(result)  // Should be 4
+}
+
+// Test set_union with overlapping sets
+meta fn test_set_union_overlapping() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "b");
+    let s2 = set_insert(s2, "c");
+    let result = set_union(s1, s2);
+    set_len(result)  // Should be 3 (a, b, c)
+}
+
+// Test set_union with identical sets
+meta fn test_set_union_identical() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "x");
+    let s1 = set_insert(s1, "y");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "x");
+    let s2 = set_insert(s2, "y");
+    let result = set_union(s1, s2);
+    set_len(result)  // Should be 2
+}
+
+// Test set_union with one empty set
+meta fn test_set_union_one_empty() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s2 = set_new();
+    let result = set_union(s1, s2);
+    set_len(result)  // Should be 2
+}
+
+// =============================================================================
+// SET_INTERSECTION TESTS
+// =============================================================================
+
+// Test set_intersection of two empty sets
+meta fn test_set_intersection_empty() -> Int {
+    let s1 = set_new();
+    let s2 = set_new();
+    let result = set_intersection(s1, s2);
+    set_len(result)  // Should be 0
+}
+
+// Test set_intersection with disjoint sets
+meta fn test_set_intersection_disjoint() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "c");
+    let s2 = set_insert(s2, "d");
+    let result = set_intersection(s1, s2);
+    set_len(result)  // Should be 0 (no common elements)
+}
+
+// Test set_intersection with overlapping sets
+meta fn test_set_intersection_overlapping() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s1 = set_insert(s1, "c");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "b");
+    let s2 = set_insert(s2, "c");
+    let s2 = set_insert(s2, "d");
+    let result = set_intersection(s1, s2);
+    set_len(result)  // Should be 2 (b, c)
+}
+
+// Test set_intersection with identical sets
+meta fn test_set_intersection_identical() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "x");
+    let s1 = set_insert(s1, "y");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "x");
+    let s2 = set_insert(s2, "y");
+    let result = set_intersection(s1, s2);
+    set_len(result)  // Should be 2
+}
+
+// Test set_intersection contains correct elements
+meta fn test_set_intersection_contains() -> Bool {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "b");
+    let s2 = set_insert(s2, "c");
+    let result = set_intersection(s1, s2);
+    set_contains(result, "b") && !set_contains(result, "a") && !set_contains(result, "c")
+}
+
+// =============================================================================
+// SET_DIFFERENCE TESTS
+// =============================================================================
+
+// Test set_difference of two empty sets
+meta fn test_set_difference_empty() -> Int {
+    let s1 = set_new();
+    let s2 = set_new();
+    let result = set_difference(s1, s2);
+    set_len(result)  // Should be 0
+}
+
+// Test set_difference with disjoint sets
+meta fn test_set_difference_disjoint() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "c");
+    let s2 = set_insert(s2, "d");
+    let result = set_difference(s1, s2);
+    set_len(result)  // Should be 2 (a, b - nothing removed)
+}
+
+// Test set_difference with overlapping sets
+meta fn test_set_difference_overlapping() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s1 = set_insert(s1, "c");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "b");
+    let result = set_difference(s1, s2);
+    set_len(result)  // Should be 2 (a, c)
+}
+
+// Test set_difference with identical sets
+meta fn test_set_difference_identical() -> Int {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "x");
+    let s1 = set_insert(s1, "y");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "x");
+    let s2 = set_insert(s2, "y");
+    let result = set_difference(s1, s2);
+    set_len(result)  // Should be 0
+}
+
+// Test set_difference contains correct elements
+meta fn test_set_difference_contains() -> Bool {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s1 = set_insert(s1, "c");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "b");
+    let result = set_difference(s1, s2);
+    set_contains(result, "a") && !set_contains(result, "b") && set_contains(result, "c")
+}
+
+// Test set_difference is not commutative
+meta fn test_set_difference_not_commutative() -> Bool {
+    let s1 = set_new();
+    let s1 = set_insert(s1, "a");
+    let s1 = set_insert(s1, "b");
+    let s2 = set_new();
+    let s2 = set_insert(s2, "b");
+    let s2 = set_insert(s2, "c");
+    let diff1 = set_difference(s1, s2);  // {a}
+    let diff2 = set_difference(s2, s1);  // {c}
+    set_len(diff1) == 1 && set_len(diff2) == 1 &&
+    set_contains(diff1, "a") && set_contains(diff2, "c")
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test algebraic identity: A union empty = A
+meta fn test_union_identity() -> Bool {
+    let s = set_new();
+    let s = set_insert(s, "a");
+    let s = set_insert(s, "b");
+    let empty = set_new();
+    let result = set_union(s, empty);
+    set_len(result) == set_len(s)
+}
+
+// Test algebraic identity: A intersect A = A
+meta fn test_intersection_idempotent() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "a");
+    let s = set_insert(s, "b");
+    let result = set_intersection(s, s);
+    set_len(result)  // Should be 2
+}
+
+// Test algebraic identity: A difference A = empty
+meta fn test_difference_self_empty() -> Int {
+    let s = set_new();
+    let s = set_insert(s, "a");
+    let s = set_insert(s, "b");
+    let result = set_difference(s, s);
+    set_len(result)  // Should be 0
+}
+
+// Main test function
+fn main() {
+    // union tests
+    assert_eq(@const(test_set_union_empty()), 0);
+    assert_eq(@const(test_set_union_disjoint()), 4);
+    assert_eq(@const(test_set_union_overlapping()), 3);
+    assert_eq(@const(test_set_union_identical()), 2);
+    assert_eq(@const(test_set_union_one_empty()), 2);
+
+    // intersection tests
+    assert_eq(@const(test_set_intersection_empty()), 0);
+    assert_eq(@const(test_set_intersection_disjoint()), 0);
+    assert_eq(@const(test_set_intersection_overlapping()), 2);
+    assert_eq(@const(test_set_intersection_identical()), 2);
+    assert(@const(test_set_intersection_contains()));
+
+    // difference tests
+    assert_eq(@const(test_set_difference_empty()), 0);
+    assert_eq(@const(test_set_difference_disjoint()), 2);
+    assert_eq(@const(test_set_difference_overlapping()), 2);
+    assert_eq(@const(test_set_difference_identical()), 0);
+    assert(@const(test_set_difference_contains()));
+    assert(@const(test_set_difference_not_commutative()));
+
+    // algebraic identity tests
+    assert(@const(test_union_identity()));
+    assert_eq(@const(test_intersection_idempotent()), 2);
+    assert_eq(@const(test_difference_self_empty()), 0);
+}

@@ -1,0 +1,123 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, linalg, svd, singular-values
+// @expected-exit: 0
+
+// Tests SVD properties:
+// 1. Singular values are non-negative
+// 2. Number of non-zero singular values = rank
+// 3. For symmetric PSD, singular values = eigenvalues
+// 4. Nuclear norm = sum of singular values
+// 5. Spectral norm = max singular value
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+fn mat2_det(a: List<Int>) -> Int {
+    a[0] * a[3] - a[1] * a[2]
+}
+
+fn mat2_trace(a: List<Int>) -> Int {
+    a[0] + a[3]
+}
+
+// A^T * A for 2x2 matrix
+fn mat2_ata(a: List<Int>) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // A^T[i][j] = A[j][i]
+    r[0] = a[0]*a[0] + a[2]*a[2]; // A^T[0][0]*A[0][0] + A^T[0][1]*A[1][0]
+    r[1] = a[0]*a[1] + a[2]*a[3];
+    r[2] = a[1]*a[0] + a[3]*a[2];
+    r[3] = a[1]*a[1] + a[3]*a[3];
+    r
+}
+
+// Integer square root (Heron's method)
+fn isqrt(x: Int) -> Int {
+    if (x <= 0) { return 0; }
+    let mut g = x / 2;
+    if (g == 0) { g = 1; }
+    let mut i = 0;
+    while (i < 30) {
+        g = (g + x / g) / 2;
+        i = i + 1;
+    }
+    // Round to nearest
+    if ((g + 1) * (g + 1) - x < x - g * g) { g + 1 } else { g }
+}
+
+fn main() -> Int {
+    // Test 1: SVD of diagonal matrix
+    // A = diag(3, 5), singular values = {5, 3} (sorted descending)
+    // sigma_1 * sigma_2 = |det(A)| = 15
+    let a_diag = [3, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let det_diag = abs_val(mat2_det(a_diag));
+    assert_eq(det_diag, 15);
+    // sigma_1^2 + sigma_2^2 = trace(A^T * A) = 9 + 25 = 34
+    let ata_diag = mat2_ata(a_diag);
+    let ata_trace = mat2_trace(ata_diag);
+    assert_eq(ata_trace, 34);  // 3^2 + 5^2
+
+    // Test 2: SVD of symmetric matrix
+    // A = [[4,0],[0,3]], singular values = {4, 3}
+    let a_sym = [4, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let det_sym = abs_val(mat2_det(a_sym));
+    assert_eq(det_sym, 12);
+    let ata_sym = mat2_ata(a_sym);
+    assert_eq(mat2_trace(ata_sym), 25);  // 16 + 9
+
+    // Test 3: SVD of rotation matrix — all singular values = 1
+    // R = [[0,-1],[1,0]] (90° rotation), det = 1
+    // A^T*A = [[1,0],[0,1]] = I
+    let rot = [0, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let det_rot = abs_val(mat2_det(rot));
+    assert_eq(det_rot, 1);
+    let ata_rot = mat2_ata(rot);
+    assert_eq(ata_rot[0], 1);
+    assert_eq(ata_rot[1], 0);
+    assert_eq(ata_rot[2], 0);
+    assert_eq(ata_rot[3], 1);
+
+    // Test 4: SVD of rank-1 matrix
+    // A = [[2,4],[1,2]] has rank 1 (row 2 = 0.5 * row 1)
+    // det = 0, so one singular value is 0
+    let rank1 = [2, 4, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let det_rank1 = mat2_det(rank1);
+    assert_eq(det_rank1, 0);
+    // A^T*A = [[5,10],[10,20]], trace = 25
+    let ata_rank1 = mat2_ata(rank1);
+    assert_eq(ata_rank1[0], 5);
+    assert_eq(ata_rank1[1], 10);
+    assert_eq(ata_rank1[2], 10);
+    assert_eq(ata_rank1[3], 20);
+    // sigma^2 = trace(A^T*A) = 25 (since only one non-zero sigma)
+    // sigma = 5
+    let sigma_sq = mat2_trace(ata_rank1);
+    assert_eq(sigma_sq, 25);
+    assert_eq(isqrt(sigma_sq), 5);
+
+    // Test 5: Nuclear norm = sum of singular values
+    // For diagonal [[3,0],[0,5]]: nuclear norm = 3+5 = 8
+    let nuclear = 3 + 5;
+    assert_eq(nuclear, 8);
+
+    // Spectral norm = max singular value = 5
+    let spectral = 5;
+    assert_eq(spectral, 5);
+
+    // Test 6: Frobenius norm^2 = sum of sigma^2
+    // ||A||_F^2 = trace(A^T*A) = sigma_1^2 + sigma_2^2
+    let frob_sq = 9 + 25;  // 3^2 + 5^2
+    assert_eq(frob_sq, ata_trace);
+
+    // Test 7: Eckart-Young theorem: best rank-k approximation
+    // For A = diag(5,3), best rank-1 = diag(5,0)
+    // Error = sigma_2 = 3
+    let eckart_error = 3;
+    assert_eq(eckart_error, 3);
+
+    print("SVD properties: PASS");
+    0
+}

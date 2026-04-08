@@ -1,0 +1,51 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, type-system
+// @description: Tests that Verum has no null pointers - uses Maybe<T> instead
+
+/// Verum has no null value in the language.
+/// This test demonstrates the correct approach: using Maybe<T> for optional values.
+/// - Maybe<T> = Some(T) | None
+/// - Forces explicit handling of absence
+/// - Compile-time checked, runtime safe
+
+fn test_maybe_none() {
+    // Correct way to express absence: use Maybe with None
+    let x: Maybe<Int> = Maybe.None;
+
+    // Pattern matching to handle the optional value
+    match x {
+        Some(value) => print(f"Got value: {value}"),
+        None => print("No value present"),
+    }
+}
+
+fn test_maybe_some() {
+    // Correct way to express presence: use Maybe with Some
+    let y: Maybe<Int> = Maybe.Some(42);
+
+    // Safe unwrap with pattern matching
+    match y {
+        Some(value) => assert_eq(value, 42),
+        None => panic("Expected Some value"),
+    }
+}
+
+fn test_maybe_unwrap() {
+    let z: Maybe<Int> = Maybe.Some(100);
+
+    // unwrap() can be used when you're certain the value exists
+    // (panics if None)
+    let value = z.unwrap();
+    assert_eq(value, 100);
+}
+
+fn main() -> Int {
+    // Test demonstrates correct usage of Maybe<T> instead of null
+    let opt: Maybe<Int> = Maybe.None;
+    match opt {
+        Some(v) => v,
+        None => 0,
+    }
+}

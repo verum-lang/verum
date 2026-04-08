@@ -1,0 +1,29 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+
+fn test_guards() {
+    // Match with guards
+    match value {
+        n if n > 0 => positive(n),
+        n if n < 0 => negative(n),
+        _ => zero()
+    };
+
+    // Complex guards with record patterns
+    match point {
+        Point { x, y } if x == y => diagonal(),
+        Point { x: 0, y } if y > 0 => y_axis_positive(),
+        Point { x, y: 0 } if x > 0 => x_axis_positive(),
+        Point { x, y } if x > 0 && y > 0 => first_quadrant(),
+        _ => other()
+    };
+
+    // Guards with variant bindings
+    match data {
+        Some(n) if n > threshold => process_large(n),
+        Some(n) if n > 0 => process_positive(n),
+        Some(n) => process_other(n),
+        None => handle_none()
+    };
+}

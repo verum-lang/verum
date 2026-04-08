@@ -1,0 +1,172 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, wasm, imports
+// @description: WebAssembly function imports from host environment
+
+/// Importing functions from the JavaScript/WASM host environment.
+
+// ============================================================
+// CONSOLE IMPORTS
+// ============================================================
+
+ffi wasm_console {
+    @extern("C")
+    fn console_log(ptr: i32, len: i32);
+
+    @extern("C")
+    fn console_error(ptr: i32, len: i32);
+
+    @extern("C")
+    fn console_time(label_ptr: i32, label_len: i32);
+
+    @extern("C")
+    fn console_time_end(label_ptr: i32, label_len: i32);
+}
+
+// ============================================================
+// DOM IMPORTS
+// ============================================================
+
+ffi wasm_dom {
+    @extern("C")
+    fn get_element_by_id(id_ptr: i32, id_len: i32) -> i32;
+
+    @extern("C")
+    fn set_inner_html(element: i32, html_ptr: i32, html_len: i32);
+
+    @extern("C")
+    fn add_event_listener(element: i32, event_ptr: i32, event_len: i32, callback: i32);
+
+    @extern("C")
+    fn remove_element(element: i32);
+
+    @extern("C")
+    fn create_element(tag_ptr: i32, tag_len: i32) -> i32;
+
+    @extern("C")
+    fn append_child(parent: i32, child: i32);
+}
+
+// ============================================================
+// FETCH API IMPORTS
+// ============================================================
+
+ffi wasm_fetch {
+    @extern("C")
+    fn fetch_start(url_ptr: i32, url_len: i32, options_ptr: i32) -> i32;
+
+    @extern("C")
+    fn fetch_poll(request_id: i32) -> i32;
+
+    @extern("C")
+    fn fetch_get_response(request_id: i32, out_ptr: i32, out_len: i32) -> i32;
+
+    @extern("C")
+    fn fetch_abort(request_id: i32);
+}
+
+// ============================================================
+// TIMER IMPORTS
+// ============================================================
+
+ffi wasm_timer {
+    @extern("C")
+    fn set_timeout(callback: i32, delay_ms: i32) -> i32;
+
+    @extern("C")
+    fn set_interval(callback: i32, interval_ms: i32) -> i32;
+
+    @extern("C")
+    fn clear_timeout(timer_id: i32);
+
+    @extern("C")
+    fn clear_interval(timer_id: i32);
+}
+
+// ============================================================
+// CRYPTO IMPORTS
+// ============================================================
+
+ffi wasm_crypto {
+    @extern("C")
+    fn get_random_values(ptr: i32, len: i32);
+}
+
+// ============================================================
+// STORAGE IMPORTS
+// ============================================================
+
+ffi wasm_storage {
+    @extern("C")
+    fn local_storage_get(key_ptr: i32, key_len: i32, out_ptr: i32, out_len: i32) -> i32;
+
+    @extern("C")
+    fn local_storage_set(key_ptr: i32, key_len: i32, value_ptr: i32, value_len: i32);
+
+    @extern("C")
+    fn local_storage_remove(key_ptr: i32, key_len: i32);
+}
+
+// ============================================================
+// SAFE WRAPPERS
+// ============================================================
+
+/// Safe console log wrapper
+fn log_message(msg: &Text) {
+    // Would serialize text to linear memory and call wasm_console.console_log
+}
+
+/// Safe DOM element access
+type DomElement is { handle: i32 };
+
+implement DomElement {
+    fn get_by_id(id: &Text) -> Maybe<DomElement> {
+        // Would call wasm_dom.get_element_by_id
+        Some(DomElement { handle: 1 })
+    }
+
+    fn set_html(&self, html: &Text) {
+        // Would call wasm_dom.set_inner_html
+    }
+}
+
+/// Safe fetch wrapper
+type FetchRequest is { id: i32 };
+
+type FetchStatus is
+    | Pending
+    | Complete(i32)
+    | Failed;
+
+implement FetchRequest {
+    fn start(url: &Text) -> FetchRequest {
+        // Would call wasm_fetch.fetch_start
+        FetchRequest { id: 1 }
+    }
+
+    fn poll(&self) -> FetchStatus {
+        let status = unsafe { wasm_fetch.fetch_poll(self.id) };
+        if status == 0 { FetchStatus.Pending }
+        else if status > 0 { FetchStatus.Complete(status) }
+        else { FetchStatus.Failed }
+    }
+}
+
+/// Safe timer wrapper
+type Timer is { id: i32 };
+
+implement Timer {
+    fn set_timeout(callback_idx: i32, delay_ms: i32) -> Timer {
+        let id = unsafe { wasm_timer.set_timeout(callback_idx, delay_ms) };
+        Timer { id }
+    }
+
+    fn cancel(&self) {
+        unsafe { wasm_timer.clear_timeout(self.id); }
+    }
+}
+
+fn main() {
+    // WASM import test
+}

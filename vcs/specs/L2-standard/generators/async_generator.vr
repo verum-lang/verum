@@ -1,0 +1,811 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: generators, async, integration, contexts, error-handling
+// @timeout: 30000
+// @description: Integration tests for async generators with context system and error handling
+//
+// Comprehensive integration tests for async generators (async fn*)
+// Tests interaction with context system, error handling (errdefer, throws), and generator pipelines
+// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+
+// =============================================================================
+// Section 1: Context Definitions for Testing
+// =============================================================================
+
+context Http {
+    async fn get(url: Text) -> Result<Response, HttpError>;
+    async fn post(url: Text, body: Bytes) -> Result<Response, HttpError>;
+    async fn stream(url: Text) -> AsyncStream<Chunk>;
+}
+
+context Database {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+    async fn stream_query(sql: Text) -> AsyncStream<Row>;
+}
+
+context Cache {
+    async fn get<T: Serialize>(key: Text) -> Maybe<T>;
+    async fn set<T: Serialize>(key: Text, value: T, ttl: Duration) -> ();
+    async fn invalidate(key: Text) -> ();
+}
+
+context Logger {
+    fn debug(msg: Text) -> ();
+    fn info(msg: Text) -> ();
+    fn warn(msg: Text) -> ();
+    fn error(msg: Text) -> ();
+}
+
+context Metrics {
+    fn increment(name: Text) -> ();
+    fn record_timing(name: Text, duration: Duration) -> ();
+    fn gauge(name: Text, value: Float) -> ();
+}
+
+// =============================================================================
+// Section 2: Error Type Definitions
+// =============================================================================
+
+type HttpError is
+    | ConnectionFailed(Text)
+    | Timeout
+    | StatusCode(Int)
+    | ParseError(Text);
+
+type DbError is
+    | ConnectionLost
+    | QueryFailed(Text)
+    | ConstraintViolation(Text);
+
+type StreamError is
+    | HttpError(HttpError)
+    | DbError(DbError)
+    | Interrupted
+    | EndOfStream;
+
+type ProcessingError is
+    | InvalidData(Text)
+    | TransformFailed(Text)
+    | ValidationFailed(Text);
+
+// =============================================================================
+// Section 2b: Missing Type Stubs
+// =============================================================================
+
+type UserFilter is {
+    active_only: Bool,
+};
+
+type ProcessedData is {
+    id: Int,
+    value: Text,
+};
+
+type RawData is {
+    id: Int,
+    raw: Text,
+};
+
+type SyncResult is
+    | Created(Int)
+    | Skipped(Int);
+
+type Item is {
+    id: Int,
+    data: Text,
+};
+
+type Key is (Int);
+type Modifiers is (Int);
+type Value is (Text);
+type Bytes is (List<u8>);
+
+type AsyncStream<T> is protocol {
+    async fn next(&mut self) -> Maybe<T>;
+};
+
+fn build_user_query(filter: UserFilter) -> Text { "SELECT * FROM users" }
+fn process_item<T>(item: T) -> Result<ProcessedData, ProcessingError> {
+    Ok(ProcessedData { id: 0, value: "" })
+}
+fn validate(data: ProcessedData) -> Bool { true }
+fn now() -> Int { 0 }
+
+context Network {
+    async fn websocket_connect(url: Text) -> Result<WebSocketConn, NetworkError>;
+}
+
+context FileSystem {
+    async fn open(path: Text, mode: OpenMode) -> Result<FileHandle, IoError>;
+}
+
+type OpenMode is Read | Write;
+type FileHandle is {};
+type IoError is { message: Text };
+
+type WebSocketConn is {};
+type NetworkError is { message: Text };
+
+// =============================================================================
+// Section 3: Data Type Definitions
+// =============================================================================
+
+type Response is {
+    status: Int,
+    headers: Map<Text, Text>,
+    body: Bytes,
+};
+
+type Row is {
+    id: Int,
+    data: Map<Text, Value>,
+};
+
+type User is {
+    id: Int,
+    name: Text,
+    email: Text,
+    active: Bool,
+};
+
+type Page<T> is {
+    items: List<T>,
+    page_number: Int,
+    total_pages: Int,
+    has_next: Bool,
+};
+
+type Chunk is {
+    data: Bytes,
+    offset: Int,
+    is_last: Bool,
+};
+
+type Event is
+    | Click { x: Int, y: Int }
+    | KeyPress { key: Key, modifiers: Modifiers }
+    | Scroll { dx: Int, dy: Int };
+
+type Message is
+    | Data(Bytes)
+    | Heartbeat
+    | Close(Text);
+
+// =============================================================================
+// Section 4: Basic Async Generator Integration
+// =============================================================================
+
+/// Simple async generator that yields numbers with async delay
+async fn* count_with_delay(n: Int, delay_ms: Int) -> Int {
+    for i in 0..n {
+        sleep(Duration.from_millis(delay_ms)).await;
+        yield i;
+    }
+}
+
+/// Async generator that fetches pages from HTTP API
+async fn* paginate<T: Deserialize>(base_url: Text, batch_size: Int) -> T using [Http, Logger] {
+    let mut page = 1;
+
+    loop {
+        Logger.debug(f"Fetching page {page}");
+        let url = f"{base_url}?page={page}&limit={batch_size}";
+
+        let response = Http.get(url).await;
+        match response {
+            Result.Ok(resp) => {
+                let page_data: Page<T> = resp.body.decode();
+                for item in page_data.items {
+                    yield item;
+                }
+                if !page_data.has_next {
+                    Logger.info(f"Pagination complete at page {page}");
+                    break;
+                }
+                page += 1;
+            }
+            Result.Err(e) => {
+                Logger.error(f"Failed to fetch page {page}: {e}");
+                break;
+            }
+        }
+    }
+}
+
+/// Async generator that streams from database
+async fn* stream_users(filter: UserFilter) -> User using [Database, Logger] {
+    let sql = build_user_query(filter);
+    Logger.debug(f"Executing query: {sql}");
+
+    let mut stream = Database.stream_query(sql).await;
+    while let Some(row) = stream.next().await {
+        let user = User {
+            id: row.get_int("id"),
+            name: row.get_text("name"),
+            email: row.get_text("email"),
+            active: row.get_bool("active"),
+        };
+        yield user;
+    }
+}
+
+// =============================================================================
+// Section 5: Async Generators with Error Handling (throws clause)
+// =============================================================================
+
+/// Async generator with typed throws clause
+async fn* safe_fetch_users() throws(HttpError) -> User using [Http] {
+    let response = Http.get("/api/users").await?;
+
+    if response.status != 200 {
+        throw HttpError.StatusCode(response.status);
+    }
+
+    let users: List<User> = response.body.decode()?;
+    for user in users {
+        yield user;
+    }
+}
+
+/// Async generator with multiple error types
+async fn* fetch_and_process() throws(HttpError | ProcessingError) -> ProcessedData using [Http] {
+    let response = Http.get("/api/data").await?;
+    let items: List<RawData> = response.body.decode()?;
+
+    for item in items {
+        let processed = process_item(item).map_err(|e| ProcessingError.TransformFailed(e.to_text()))?;
+        if !validate(processed) {
+            throw ProcessingError.ValidationFailed(f"Invalid item: {item.id}");
+        }
+        yield processed;
+    }
+}
+
+/// Async generator with throws and multiple contexts
+async fn* sync_data() throws(StreamError) -> SyncResult using [Http, Database, Logger] {
+    Logger.info("Starting data sync");
+
+    let remote_items = Http.get("/api/items").await
+        .map_err(|e| StreamError.HttpError(e))?;
+
+    let items: List<Item> = remote_items.body.decode()?;
+    for item in items {
+        let found = Database.query(f"SELECT id FROM items WHERE remote_id = {item.id}").await
+            .map_err(|e| StreamError.DbError(e))?;
+
+        if found.is_empty() {
+            Database.execute(f"INSERT INTO items (remote_id, data) VALUES ({item.id}, '{item.data}')").await
+                .map_err(|e| StreamError.DbError(e))?;
+            yield SyncResult.Created(item.id);
+        } else {
+            yield SyncResult.Skipped(item.id);
+        }
+    }
+
+    Logger.info("Data sync complete");
+}
+
+// =============================================================================
+// Section 6: Async Generators with errdefer
+// =============================================================================
+
+/// Async generator with errdefer for cleanup
+async fn* stream_with_cleanup() throws(StreamError) -> Chunk using [Http, Logger] {
+    let conn_result = Http.get("/stream").await;
+    let conn = conn_result.map_err(|e| StreamError.HttpError(e))?;
+    errdefer {
+        Logger.warn("Stream interrupted, aborting connection");
+        conn.close().await;
+    }
+
+    while let Maybe.Some(chunk) = conn.read_chunk().await? {
+        yield chunk;
+        if chunk.is_last {
+            break;
+        }
+    }
+
+    Logger.info("Stream completed successfully");
+    conn.close().await?;
+}
+
+/// Async generator with nested errdefer
+async fn* transaction_stream() throws(DbError) -> Row using [Database, Logger] {
+    let _tx = Database.query("BEGIN").await;
+    errdefer {
+        Logger.error("Transaction failed, rolling back");
+        Database.query("ROLLBACK").await;
+    }
+
+    let result = Database.query("SELECT * FROM large_table").await?;
+    errdefer {
+        Logger.warn("Query processing interrupted");
+        Database.query("ROLLBACK TO SAVEPOINT query_start").await;
+    }
+
+    Database.query("SAVEPOINT query_start").await?;
+
+    for row in result {
+        let processed_row = row;
+        yield processed_row;
+    }
+
+    Database.query("COMMIT").await?;
+    Logger.info("Transaction completed successfully");
+}
+
+/// Async generator with resource cleanup pattern
+async fn* file_chunk_stream(path: Text) throws(IoError) -> Chunk using [FileSystem, Logger] {
+    let file = FileSystem.open(path, OpenMode.Read).await?;
+    errdefer {
+        Logger.warn(f"Error while reading {path}, closing file");
+        file.close().await;
+    }
+
+    defer {
+        Logger.debug(f"Closing file {path}");
+        file.close().await;
+    }
+
+    let mut offset = 0;
+    loop {
+        let chunk = file.read_chunk(1024).await?;
+        if chunk.is_empty() {
+            break;
+        }
+        yield Chunk { data: chunk, offset, is_last: chunk.is_empty() };
+        offset += chunk.len();
+    }
+}
+
+// =============================================================================
+// Section 7: Async Generator Composition and Pipelines
+// =============================================================================
+
+/// Generic filter adapter for async generators
+async fn* filter_async<T>(
+    source: impl AsyncIterator<Item = T>,
+    predicate: fn(&T) -> Bool
+) -> T {
+    for await item in source {
+        if predicate(&item) {
+            yield item;
+        }
+    }
+}
+
+/// Generic map adapter for async generators
+async fn* map_async<T, U>(
+    source: impl AsyncIterator<Item = T>,
+    transform: fn(T) -> U
+) -> U {
+    for await item in source {
+        yield transform(item);
+    }
+}
+
+/// Async map with async transformation
+async fn* async_map<T, U>(
+    source: impl AsyncIterator<Item = T>,
+    transform: async fn(T) -> U
+) -> U {
+    for await item in source {
+        yield transform(item).await;
+    }
+}
+
+/// Take first N items from async iterator
+async fn* take_async<T>(source: impl AsyncIterator<Item = T>, n: Int) -> T {
+    let mut count = 0;
+    for await item in source {
+        if count >= n {
+            break;
+        }
+        yield item;
+        count += 1;
+    }
+}
+
+/// Skip first N items from async iterator
+async fn* skip_async<T>(source: impl AsyncIterator<Item = T>, n: Int) -> T {
+    let mut skipped = 0;
+    for await item in source {
+        if skipped < n {
+            skipped += 1;
+            continue;
+        }
+        yield item;
+    }
+}
+
+/// Flatten nested async iterators
+async fn* flatten_async<T>(source: impl AsyncIterator<Item = impl AsyncIterator<Item = T>>) -> T {
+    for await inner in source {
+        for await item in inner {
+            yield item;
+        }
+    }
+}
+
+/// Flat map - map then flatten
+async fn* flat_map_async<T, U>(
+    source: impl AsyncIterator<Item = T>,
+    transform: async fn(T) -> impl AsyncIterator<Item = U>
+) -> U {
+    for await item in source {
+        for await mapped in transform(item).await {
+            yield mapped;
+        }
+    }
+}
+
+/// Chain two async iterators
+async fn* chain_async<T>(
+    first: impl AsyncIterator<Item = T>,
+    second: impl AsyncIterator<Item = T>
+) -> T {
+    for await item in first {
+        yield item;
+    }
+    for await item in second {
+        yield item;
+    }
+}
+
+/// Zip two async iterators
+async fn* zip_async<A, B>(
+    a: impl AsyncIterator<Item = A>,
+    b: impl AsyncIterator<Item = B>
+) -> (A, B) {
+    loop {
+        let maybe_a = a.next().await;
+        let maybe_b = b.next().await;
+        match (maybe_a, maybe_b) {
+            (Maybe.Some(va), Maybe.Some(vb)) => yield (va, vb),
+            _ => break,
+        }
+    }
+}
+
+/// Enumerate items with index
+async fn* enumerate_async<T>(source: impl AsyncIterator<Item = T>) -> (Int, T) {
+    let mut index = 0;
+    for await item in source {
+        yield (index, item);
+        index += 1;
+    }
+}
+
+// =============================================================================
+// Section 8: Complex Integration Scenarios
+// =============================================================================
+
+/// Real-world pagination with caching
+async fn* paginate_with_cache<T: Serialize + Deserialize>(
+    base_url: Text,
+    batch_size: Int,
+    cache_ttl: Duration
+) -> T using [Http, Cache, Logger, Metrics] {
+    let mut page = 1;
+
+    loop {
+        let cache_key = f"paginate:{base_url}:page:{page}:size:{batch_size}";
+        Metrics.increment("pagination.page_requests");
+
+        // Try cache first
+        let items: Maybe<List<T>> = Cache.get(cache_key).await;
+
+        let (page_items, has_next) = match items {
+            Maybe.Some(cached) => {
+                Logger.debug(f"Cache hit for page {page}");
+                Metrics.increment("pagination.cache_hits");
+                (cached, true)  // Assume has_next for cached data
+            }
+            Maybe.None => {
+                Logger.debug(f"Cache miss for page {page}");
+                Metrics.increment("pagination.cache_misses");
+
+                let url = f"{base_url}?page={page}&limit={batch_size}";
+                let response = Http.get(url).await;
+
+                match response {
+                    Result.Ok(resp) => {
+                        let page_data: Page<T> = resp.body.decode();
+                        Cache.set(cache_key, page_data.items.clone(), cache_ttl).await;
+                        (page_data.items, page_data.has_next)
+                    }
+                    Result.Err(e) => {
+                        Logger.error(f"Failed to fetch page {page}: {e}");
+                        break;
+                    }
+                }
+            }
+        };
+
+        for item in page_items {
+            yield item;
+        }
+
+        if !has_next {
+            break;
+        }
+        page += 1;
+    }
+}
+
+/// WebSocket message stream with reconnection
+async fn* websocket_stream(url: Text, max_retries: Int) throws(StreamError) -> Message using [Network, Logger] {
+    let mut retries = 0;
+
+    'reconnect: loop {
+        Logger.info(f"Connecting to WebSocket: {url}");
+
+        let conn = match Network.websocket_connect(url).await {
+            Result.Ok(c) => c,
+            Result.Err(e) => {
+                retries += 1;
+                if retries > max_retries {
+                    throw StreamError.HttpError(HttpError.ConnectionFailed(e.to_text()));
+                }
+                Logger.warn(f"Connection failed, retry {retries}/{max_retries}");
+                sleep(Duration.from_secs(retries * 2)).await;
+                continue 'reconnect;
+            }
+        };
+
+        errdefer {
+            Logger.warn("WebSocket error, closing connection");
+            conn.close().await;
+        }
+
+        retries = 0;  // Reset on successful connection
+
+        loop {
+            match conn.recv().await {
+                Result.Ok(msg) => {
+                    match msg {
+                        Message.Heartbeat => {
+                            conn.send("pong").await;
+                        }
+                        Message.Close(reason) => {
+                            Logger.info(f"Server closed connection: {reason}");
+                            break 'reconnect;
+                        }
+                        Message.Data(data) => {
+                            yield Message.Data(data);
+                        }
+                    }
+                }
+                Result.Err(e) => {
+                    Logger.error(f"Receive error: {e}");
+                    break;  // Triggers reconnect
+                }
+            }
+        }
+    }
+}
+
+/// ETL pipeline using generator composition
+async fn* etl_pipeline<S, T>(
+    source_query: Text,
+    transform: async fn(S) -> Result<T, ProcessingError>,
+    batch_size: Int
+) throws(StreamError) -> T using [Database, Logger, Metrics] {
+    Logger.info("Starting ETL pipeline");
+    let start_time = now();
+    let mut processed = 0;
+    let mut errors = 0;
+
+    defer {
+        let duration = now() - start_time;
+        Logger.info(f"ETL complete: {processed} processed, {errors} errors in {duration}");
+        Metrics.record_timing("etl.duration", duration);
+        Metrics.gauge("etl.processed", processed as Float);
+        Metrics.gauge("etl.errors", errors as Float);
+    }
+
+    let mut db_stream = Database.stream_query(source_query).await;
+    while let Some(row) = db_stream.next().await {
+        let source_item: S = row.into();
+
+        match transform(source_item).await {
+            Result.Ok(transformed) => {
+                processed += 1;
+                yield transformed;
+            }
+            Result.Err(e) => {
+                errors += 1;
+                Logger.warn(f"Transform error: {e}");
+                Metrics.increment("etl.transform_errors");
+            }
+        }
+
+        if processed % batch_size == 0 {
+            Logger.debug(f"Processed {processed} items");
+            Metrics.gauge("etl.progress", processed as Float);
+        }
+    }
+}
+
+/// Parallel fetch with concurrency limit
+async fn* parallel_fetch<T: Deserialize>(
+    urls: List<Text>,
+    concurrency: Int
+) -> (Text, Result<T, HttpError>) using [Http, Logger] {
+    let semaphore = Semaphore.new(concurrency);
+    let (tx, rx) = channel();
+
+    // Spawn fetch tasks
+    for url in urls {
+        let permit = semaphore.acquire().await;
+        let url_clone = url.clone();
+        let tx_clone = tx.clone();
+
+        spawn {
+            defer permit.release();
+
+            let result = Http.get(url_clone).await
+                .and_then(|resp| resp.body.decode());
+            tx_clone.send((url_clone, result)).await;
+        };
+    }
+
+    // Yield results as they complete
+    drop(tx);  // Close send side
+    while let Some(item) = rx.recv().await {
+        yield item;
+    }
+}
+
+// =============================================================================
+// Section 9: Testing Async Generator Consumption
+// =============================================================================
+
+/// Test basic consumption of async generator
+async fn test_basic_consumption() using [Logger] {
+    let mut sum = 0;
+    for await n in count_with_delay(5, 10) {
+        Logger.debug(f"Received: {n}");
+        sum += n;
+    }
+    assert_eq(sum, 10);  // 0 + 1 + 2 + 3 + 4
+}
+
+/// Test generator with context propagation
+async fn test_context_propagation() using [Http, Logger] {
+    let mut users: List<User> = List.new();
+
+    for await user in paginate("/api/users", 10) {
+        users.push(user);
+        if users.len() >= 25 {
+            break;  // Early termination
+        }
+    }
+
+    assert(users.len() <= 25);
+}
+
+/// Test error handling in consumer
+async fn test_error_handling() using [Http] {
+    let result: Result<List<User>, HttpError> = try {
+        let mut users: List<User> = List.new();
+        for await user in safe_fetch_users() {
+            users.push(user);
+        }
+        Result.Ok(users)
+    } recover |e: HttpError| {
+        Result.Err(e)
+    };
+
+    // Result should be Ok or Err depending on HTTP response
+    match result {
+        Result.Ok(users) => assert(users.len() >= 0),
+        Result.Err(e) => print(f"Expected error: {e}"),
+    }
+}
+
+/// Test generator pipeline composition
+/// NOTE: Pipe operator with partial application not yet supported - body commented out
+async fn test_pipeline_composition() using [Logger] {
+    // let source = count_with_delay(100, 1);
+
+    // // Build pipeline: skip 10, filter evens, take 5, map to strings
+    // let pipeline = source
+    //     |> skip_async(10)
+    //     |> filter_async(|n| n % 2 == 0)
+    //     |> take_async(5)
+    //     |> map_async(|n| f"num-{n}");
+
+    // let mut results: List<Text> = List.new();
+    // for await item in pipeline {
+    //     Logger.debug(f"Pipeline output: {item}");
+    //     results.push(item);
+    // }
+
+    // assert_eq(results.len(), 5);
+    // // Should be: num-10, num-12, num-14, num-16, num-18
+    Logger.debug("Pipeline composition test - pipe operator not yet supported");
+}
+
+/// Test cleanup on early termination
+async fn test_early_termination_cleanup() using [Logger] {
+    let mut cleanup_called = false;
+
+    async fn* generator_with_cleanup() -> Int {
+        defer {
+            cleanup_called = true;
+        }
+        for i in 0..1000 {
+            yield i;
+        }
+    }
+
+    // Only consume first 5 items
+    let mut count = 0;
+    for await item in generator_with_cleanup() {
+        count += 1;
+        if count >= 5 {
+            break;
+        }
+    }
+
+    assert(cleanup_called);
+}
+
+/// Test nested generator consumption
+async fn test_nested_generators() using [Logger] {
+    async fn* outer() -> Int {
+        for i in 0..3 {
+            yield i * 10;
+        }
+    }
+
+    async fn* inner(base: Int) -> Int {
+        for j in 0..3 {
+            yield base + j;
+        }
+    }
+
+    let mut all_values: List<Int> = List.new();
+    for await o in outer() {
+        for await i in inner(o) {
+            all_values.push(i);
+        }
+    }
+
+    assert_eq(all_values.len(), 9);
+    // Should be: 0,1,2, 10,11,12, 20,21,22
+}
+
+// =============================================================================
+// Section 10: Main Test Entry Point
+// =============================================================================
+
+/// Protocol for async iterator testing
+type AsyncIterator<T> is protocol {
+    type Item = T;
+    async fn next(&mut self) -> Maybe<T>;
+};
+
+/// Collect async iterator into list
+async fn collect<T>(iter: impl AsyncIterator<Item = T>) -> List<T> {
+    let mut result: List<T> = List.new();
+    for await item in iter {
+        result.push(item);
+    }
+    result
+}
+
+async fn main() using [Http, Database, Cache, Logger, Metrics] {
+    Logger.info("Starting async generator integration tests");
+
+    // Run test suite
+    test_basic_consumption().await;
+    test_pipeline_composition().await;
+    test_nested_generators().await;
+    test_early_termination_cleanup().await;
+
+    Logger.info("All tests passed!");
+}

@@ -1,0 +1,180 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @category: comprehensions
+// @tags: parser, comprehensions, generator, lazy
+// @description: Generator expression syntax: gen{expr for pattern in iter clause*}
+
+// ============================================================================
+// BASIC GENERATOR EXPRESSION SYNTAX
+// Grammar: generator_expr = 'gen' , '{' , expression , 'for' , pattern ,
+//          'in' , expression , { comprehension_clause } , '}' ;
+// Result: Iterator<T> - lazy, single-pass evaluation
+// ============================================================================
+
+fn test_basic_generator_expression() {
+    // Simple generator
+    let squares = gen{x * x for x in items};
+
+    // With transformation
+    let doubled = gen{x * 2 for x in numbers};
+
+    // With method call
+    let lowercased = gen{s.to_lower() for s in strings};
+
+    // With function call
+    let processed = gen{normalize(x) for x in raw_data};
+
+    // From range
+    let range_gen = gen{i for i in 0..10};
+
+    // From infinite range (lazy evaluation makes this safe)
+    let infinite = gen{x for x in 0..};
+
+    // Field extraction
+    let ids = gen{item.id for item in items};
+}
+
+fn test_generator_expression_with_filter() {
+    // Basic filter
+    let positives = gen{x for x in numbers if x > 0};
+
+    // Filter with method
+    let evens = gen{x for x in numbers if x.is_even()};
+
+    // Compound filter
+    let in_range = gen{x for x in values if x >= min && x <= max};
+
+    // Filter with negation
+    let non_empty = gen{s for s in strings if !s.is_empty()};
+
+    // Multiple if clauses
+    let multi_filter = gen{x for x in items if x > 0 if x < 100};
+
+    // Filter on infinite range
+    let infinite_evens = gen{x for x in 0.. if x % 2 == 0};
+}
+
+fn test_generator_expression_with_let() {
+    // Let binding for expensive computation
+    let with_computed = gen{result for x in items let result = expensive(x)};
+
+    // Let binding with type annotation
+    let typed_let = gen{computed for x in items let computed: Int = x * 2};
+
+    // Multiple let bindings
+    let multi_let = gen{final for x in source
+                               let intermediate = process(x)
+                               let final = finalize(intermediate)};
+
+    // Let with filter
+    let filtered_let = gen{result for x in items
+                                  let result = expensive(x)
+                                  if result > threshold};
+}
+
+fn test_generator_expression_nested_for() {
+    // Cartesian product (lazy)
+    let pairs = gen{(x, y) for x in xs for y in ys};
+
+    // Dependent generators
+    let triangular = gen{(i, j) for i in 0..n for j in 0..i};
+
+    // Nested with filter
+    let filtered_pairs = gen{(x, y) for x in xs if x > 0 for y in ys if y > x};
+
+    // Flatten nested structure (lazy)
+    let flattened = gen{item for group in groups for item in group.items};
+
+    // Three-way nesting
+    let triples = gen{(x, y, z) for x in xs for y in ys for z in zs};
+}
+
+fn test_generator_expression_complex() {
+    // Conditional
+    let clamped = gen{if x > max { max } else { x } for x in values};
+
+    // Match expression
+    let unwrapped = gen{match opt { Some(v) => v, None => 0 } for opt in options};
+
+    // Tuple construction
+    let tuples = gen{(i, i * 2) for i in 0..};
+
+    // Pipeline
+    let piped = gen{x |> f |> g for x in source};
+
+    // String interpolation
+    let labeled = gen{f"item_{x}" for x in items};
+}
+
+fn test_generator_expression_lazy_evaluation() {
+    // Generators are lazy - only compute when consumed
+    let expensive_gen = gen{expensive_computation(x) for x in huge_list};
+
+    // Infinite sequence (only possible due to laziness)
+    let fibonacci_like = gen{fib(n) for n in 0..};
+
+    // Filter on infinite
+    let primes = gen{n for n in 2.. if is_prime(n)};
+
+    // Lazy flatmap
+    let lazy_flat = gen{y for x in xs for y in expensive_iter(x)};
+}
+
+fn test_generator_expression_consumption_patterns() {
+    // Take first N elements
+    let first_10 = gen{x * x for x in 0..}.take(10);
+
+    // Take while condition
+    let until_100 = gen{x for x in 0..}.take_while(|x| x < 100);
+
+    // Skip and take
+    let page = gen{x for x in items}.skip(offset).take(limit);
+
+    // Collect into list
+    let list = gen{x * 2 for x in items}.collect();
+
+    // Sum
+    let sum = gen{x for x in 1..=100}.sum();
+
+    // Any/All
+    let has_positive = gen{x for x in items}.any(|x| x > 0);
+    let all_positive = gen{x for x in items}.all(|x| x > 0);
+}
+
+fn test_generator_expression_pipeline() {
+    // Generator in pipeline
+    let result = items
+        |> gen{x * 2 for x in _}
+        |> .filter(|x| x > 10)
+        |> .take(5)
+        |> .collect();
+
+    // Multiple generator transformations
+    let transformed = gen{x for x in source}
+        |> .map(|x| x * 2)
+        |> .filter(|x| x > 0)
+        |> .take(100);
+}
+
+fn test_gen_keyword_as_identifier() {
+    // 'gen' can be used as identifier when not followed by '{'
+    let gen = some_module.gen;
+    let result = gen.next();
+    let value = gen.advance();
+}
+
+// ============================================================================
+// COMPARISON WITH STREAM COMPREHENSION
+// stream[...] is reusable, gen{...} is single-pass
+// ============================================================================
+
+fn test_generator_vs_stream() {
+    // Generator - single-pass Iterator<T>
+    let gen_iter = gen{x * 2 for x in items};
+    // Can only iterate once
+
+    // Stream - reusable Stream<T>
+    let stream_iter = stream[x * 2 for x in items];
+    // Can iterate multiple times
+}

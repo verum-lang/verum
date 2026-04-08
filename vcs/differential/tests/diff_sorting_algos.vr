@@ -1,0 +1,121 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, sorting, insertion-sort, selection-sort
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn swap(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = get(a, i);
+    let vj = get(a, j);
+    set(set(a, i, vj), j, vi)
+}
+
+// Selection sort
+fn selection_sort(a: Arr8, n: Int) -> Arr8 {
+    let mut arr = a;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if get(arr, j) < get(arr, min_idx) { min_idx = j; }
+            j = j + 1;
+        }
+        if min_idx != i { arr = swap(arr, i, min_idx); }
+        i = i + 1;
+    }
+    arr
+}
+
+// Check if sorted
+fn is_sorted(a: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n - 1 {
+        if get(a, i) > get(a, i + 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Count inversions
+fn count_inversions(a: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if get(a, i) > get(a, j) { count = count + 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_selection_sort() -> Int {
+    let a = Arr8 { d0: 5, d1: 3, d2: 8, d3: 1, d4: 4, d5: 0, d6: 0, d7: 0 };
+    let s = selection_sort(a, 5);
+    assert_eq(get(s, 0), 1);
+    assert_eq(get(s, 1), 3);
+    assert_eq(get(s, 2), 4);
+    assert_eq(get(s, 3), 5);
+    assert_eq(get(s, 4), 8);
+    assert_eq(is_sorted(s, 5), 1);
+    1
+}
+
+fn test_already_sorted() -> Int {
+    let a = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 0, d6: 0, d7: 0 };
+    let s = selection_sort(a, 5);
+    assert_eq(get(s, 0), 1);
+    assert_eq(get(s, 4), 5);
+    assert_eq(is_sorted(s, 5), 1);
+    assert_eq(count_inversions(a, 5), 0);
+    1
+}
+
+fn test_reversed() -> Int {
+    let a = Arr8 { d0: 5, d1: 4, d2: 3, d3: 2, d4: 1, d5: 0, d6: 0, d7: 0 };
+    assert_eq(count_inversions(a, 5), 10);
+    let s = selection_sort(a, 5);
+    assert_eq(is_sorted(s, 5), 1);
+    assert_eq(count_inversions(s, 5), 0);
+    1
+}
+
+fn test_duplicates() -> Int {
+    let a = Arr8 { d0: 3, d1: 1, d2: 3, d3: 1, d4: 2, d5: 0, d6: 0, d7: 0 };
+    let s = selection_sort(a, 5);
+    assert_eq(get(s, 0), 1);
+    assert_eq(get(s, 1), 1);
+    assert_eq(get(s, 2), 2);
+    assert_eq(get(s, 3), 3);
+    assert_eq(get(s, 4), 3);
+    1
+}
+
+fn main() -> Int {
+    test_selection_sort();
+    test_already_sorted();
+    test_reversed();
+    test_duplicates();
+    print("DIFF_OK: sorting_algos");
+    0
+}

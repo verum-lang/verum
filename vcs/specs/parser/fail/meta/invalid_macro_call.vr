@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, meta, macro, error
+// @description: Test invalid macro call with bare @ symbol
+// @expected-error: E018
+
+fn test() {
+    let x = @;
+}

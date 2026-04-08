@@ -1,0 +1,119 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, allocation, patterns
+
+mount core.time.{Time};
+
+/// Test performance of different allocation patterns with CBGR.
+/// Validates that CBGR works correctly for various heap allocation scenarios.
+
+fn main() {
+    print("Starting allocation pattern tests...");
+
+    test_single_allocation();
+    test_sequential_allocations();
+    test_nested_allocations();
+    test_allocation_reuse_pattern();
+    test_multiple_references_same_allocation();
+
+    print("All allocation pattern tests passed!");
+}
+
+/// Test single heap allocation with reference creation and dereferencing.
+fn test_single_allocation() {
+    print("  [TEST] test_single_allocation");
+
+    let value = Heap.new(42);
+    let ref_val = &*value;
+    let x = *ref_val;
+
+    assert_eq(x, 42);
+    print("  [OK] test_single_allocation");
+}
+
+/// Test multiple sequential allocations in a loop.
+fn test_sequential_allocations() {
+    print("  [TEST] test_sequential_allocations");
+
+    // Allocate and use values sequentially
+    for i in 0..10 {
+        let value = Heap.new(i * 10);
+        let ref_val = &*value;
+        let x = *ref_val;
+        assert_eq(x, i * 10);
+    }
+
+    print("  [OK] test_sequential_allocations");
+}
+
+/// Test nested allocations (allocation containing reference to another).
+fn test_nested_allocations() {
+    print("  [TEST] test_nested_allocations");
+
+    // Inner allocation
+    let inner = Heap.new(100);
+    let inner_ref = &*inner;
+
+    // Use inner value
+    let inner_val = *inner_ref;
+    assert_eq(inner_val, 100);
+
+    // Create another allocation that coexists
+    let outer = Heap.new(200);
+    let outer_ref = &*outer;
+    let outer_val = *outer_ref;
+    assert_eq(outer_val, 200);
+
+    // Both should still be accessible
+    let inner_val2 = *inner_ref;
+    assert_eq(inner_val2, 100);
+
+    print("  [OK] test_nested_allocations");
+}
+
+/// Test allocation reuse pattern - creating new allocations after old ones go out of scope.
+fn test_allocation_reuse_pattern() {
+    print("  [TEST] test_allocation_reuse_pattern");
+
+    // First batch of allocations
+    for i in 0..5 {
+        let value = Heap.new(i);
+        let ref_val = &*value;
+        let x = *ref_val;
+        assert_eq(x, i);
+        // value goes out of scope here, CBGR should handle this
+    }
+
+    // Second batch - allocator may reuse memory from first batch
+    for i in 0..5 {
+        let value = Heap.new(i + 100);
+        let ref_val = &*value;
+        let x = *ref_val;
+        assert_eq(x, i + 100);
+    }
+
+    print("  [OK] test_allocation_reuse_pattern");
+}
+
+/// Test multiple references to the same allocation.
+fn test_multiple_references_same_allocation() {
+    print("  [TEST] test_multiple_references_same_allocation");
+
+    let value = Heap.new(999);
+
+    // Create first reference
+    let ref1 = &*value;
+    let x1 = *ref1;
+    assert_eq(x1, 999);
+
+    // Create second reference to same allocation
+    let ref2 = &*value;
+    let x2 = *ref2;
+    assert_eq(x2, 999);
+
+    // Both references should yield the same value
+    assert_eq(*ref1, *ref2);
+
+    print("  [OK] test_multiple_references_same_allocation");
+}

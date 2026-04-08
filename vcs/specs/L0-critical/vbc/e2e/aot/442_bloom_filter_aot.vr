@@ -1,0 +1,125 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, bloom, filter, hash, probabilistic
+// @timeout: 30000
+
+// Bloom filter simulation with 3 hash functions over 16-bit array
+
+fn hash1(x: Int) -> Int {
+    (x * 7 + 3) % 16
+}
+
+fn hash2(x: Int) -> Int {
+    (x * 13 + 5) % 16
+}
+
+fn hash3(x: Int) -> Int {
+    (x * 19 + 11) % 16
+}
+
+// 16-bit bitvector stored as integer (bit manipulation)
+fn get_bit(bv: Int, pos: Int) -> Int {
+    let mut mask = 1;
+    let mut i = 0;
+    while i < pos {
+        mask = mask * 2;
+        i = i + 1;
+    }
+    if (bv / mask) % 2 == 1 { 1 } else { 0 }
+}
+
+fn set_bit(bv: Int, pos: Int) -> Int {
+    let mut mask = 1;
+    let mut i = 0;
+    while i < pos {
+        mask = mask * 2;
+        i = i + 1;
+    }
+    if get_bit(bv, pos) == 1 { bv } else { bv + mask }
+}
+
+fn bloom_insert(bv: Int, x: Int) -> Int {
+    let mut b = bv;
+    b = set_bit(b, hash1(x));
+    b = set_bit(b, hash2(x));
+    b = set_bit(b, hash3(x));
+    b
+}
+
+fn bloom_query(bv: Int, x: Int) -> Int {
+    if get_bit(bv, hash1(x)) == 1 {
+        if get_bit(bv, hash2(x)) == 1 {
+            if get_bit(bv, hash3(x)) == 1 {
+                1
+            } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+// Count set bits (popcount)
+fn popcount(x: Int) -> Int {
+    let mut count = 0;
+    let mut v = x;
+    let mut i = 0;
+    while i < 16 {
+        if v % 2 == 1 { count = count + 1; }
+        v = v / 2;
+        i = i + 1;
+    }
+    count
+}
+
+fn test_bloom() -> Int {
+    let mut bv = 0;
+    // Insert 5, 10, 15
+    bv = bloom_insert(bv, 5);
+    bv = bloom_insert(bv, 10);
+    bv = bloom_insert(bv, 15);
+
+    // Definite members should return 1
+    assert_eq(bloom_query(bv, 5), 1);
+    assert_eq(bloom_query(bv, 10), 1);
+    assert_eq(bloom_query(bv, 15), 1);
+
+    // Non-members: some may have false positives, but test a few
+    // (with 3 hash functions and only 3 insertions into 16 bits,
+    //  most non-members should return 0)
+    let fp_count = bloom_query(bv, 1) + bloom_query(bv, 2) + bloom_query(bv, 3) + bloom_query(bv, 4);
+    // At most 2 false positives out of 4 queries (probabilistic guarantee)
+    assert(fp_count <= 3);
+    1
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(255), 8);    // 0xFF
+    assert_eq(popcount(65535), 16); // 0xFFFF
+    assert_eq(popcount(42), 3);     // 101010 -> 3 bits
+    1
+}
+
+fn test_bit_ops() -> Int {
+    let mut bv = 0;
+    bv = set_bit(bv, 0);
+    assert_eq(bv, 1);
+    bv = set_bit(bv, 3);
+    assert_eq(bv, 9);  // 1001
+    assert_eq(get_bit(bv, 0), 1);
+    assert_eq(get_bit(bv, 1), 0);
+    assert_eq(get_bit(bv, 2), 0);
+    assert_eq(get_bit(bv, 3), 1);
+
+    // Setting same bit again should be idempotent
+    bv = set_bit(bv, 0);
+    assert_eq(bv, 9);
+    1
+}
+
+fn main() -> Int {
+    test_bit_ops();
+    test_popcount();
+    test_bloom();
+    print("[OK] 442_bloom_filter_aot");
+    0
+}

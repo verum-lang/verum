@@ -1,0 +1,166 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, encoding, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests encoding algorithms: base conversion, XOR cipher, checksum.
+
+fn test_decimal_to_binary() {
+    // Convert 42 to binary representation as array of bits
+    let mut bits = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut n = 42;
+    let mut pos = 7;
+    while n > 0 {
+        bits[pos] = n % 2;
+        n = n / 2;
+        pos = pos - 1;
+    }
+    // 42 = 0b00101010
+    assert_eq(bits[0], 0);
+    assert_eq(bits[1], 0);
+    assert_eq(bits[2], 1);
+    assert_eq(bits[3], 0);
+    assert_eq(bits[4], 1);
+    assert_eq(bits[5], 0);
+    assert_eq(bits[6], 1);
+    assert_eq(bits[7], 0);
+
+    // Convert back to decimal
+    let mut decimal = 0;
+    let mut i = 0;
+    while i < 8 {
+        decimal = decimal * 2 + bits[i];
+        i = i + 1;
+    }
+    assert_eq(decimal, 42);
+    print("decimal_to_binary: ok");
+}
+
+fn test_xor_cipher() {
+    // XOR cipher: encrypt then decrypt
+    let plaintext = [72, 101, 108, 108, 111]; // "Hello"
+    let key = 42;
+    let mut encrypted = [0, 0, 0, 0, 0];
+    let mut decrypted = [0, 0, 0, 0, 0];
+
+    // Encrypt
+    let mut i = 0;
+    while i < 5 {
+        encrypted[i] = plaintext[i] ^ key;
+        i = i + 1;
+    }
+
+    // Verify encrypted != plaintext
+    let mut diff = 0;
+    i = 0;
+    while i < 5 {
+        if encrypted[i] != plaintext[i] { diff = diff + 1; }
+        i = i + 1;
+    }
+    assert_eq(diff, 5);
+
+    // Decrypt
+    i = 0;
+    while i < 5 {
+        decrypted[i] = encrypted[i] ^ key;
+        i = i + 1;
+    }
+
+    // Verify decrypted == plaintext
+    let mut matches = 0;
+    i = 0;
+    while i < 5 {
+        if decrypted[i] == plaintext[i] { matches = matches + 1; }
+        i = i + 1;
+    }
+    assert_eq(matches, 5);
+    print("xor_cipher: ok");
+}
+
+fn test_checksum() {
+    // Simple additive checksum
+    let data = [0x12, 0x34, 0x56, 0x78, 0x9A];
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        sum = sum + data[i];
+        i = i + 1;
+    }
+    let checksum = sum & 0xFF; // Keep lower byte
+    assert_eq(checksum, 0xAE); // (0x12+0x34+0x56+0x78+0x9A) = 0x1AE, & 0xFF = 0xAE
+
+    // Verify checksum
+    sum = 0;
+    i = 0;
+    while i < 5 {
+        sum = sum + data[i];
+        i = i + 1;
+    }
+    assert_eq(sum & 0xFF, checksum);
+    print("checksum: ok");
+}
+
+fn test_base_conversion() {
+    // Convert number to base 7 representation
+    let mut n = 1000;
+    let base = 7;
+    let mut digits = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut pos = 7;
+    while n > 0 {
+        digits[pos] = n % base;
+        n = n / base;
+        pos = pos - 1;
+    }
+
+    // Convert back from base 7
+    let mut result = 0;
+    let mut i = 0;
+    while i < 8 {
+        result = result * base + digits[i];
+        i = i + 1;
+    }
+    assert_eq(result, 1000);
+    print("base_conversion: ok");
+}
+
+fn test_gray_code() {
+    // Generate Gray code for 4-bit numbers
+    // Gray code: n XOR (n >> 1)
+    let mut gray = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < 16 {
+        gray[i] = i ^ (i >> 1);
+        i = i + 1;
+    }
+
+    // Verify adjacent Gray codes differ by exactly 1 bit
+    let mut all_valid = 1;
+    i = 0;
+    while i < 15 {
+        let diff = gray[i] ^ gray[i + 1];
+        // diff should be a power of 2 (exactly 1 bit different)
+        if diff == 0 { all_valid = 0; }
+        if (diff & (diff - 1)) != 0 { all_valid = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_valid, 1);
+
+    // First few values: 0, 1, 3, 2, 6, 7, 5, 4
+    assert_eq(gray[0], 0);
+    assert_eq(gray[1], 1);
+    assert_eq(gray[2], 3);
+    assert_eq(gray[3], 2);
+    print("gray_code: ok");
+}
+
+fn main() -> Int {
+    test_decimal_to_binary();
+    test_xor_cipher();
+    test_checksum();
+    test_base_conversion();
+    test_gray_code();
+    print("[OK] 423_interp_encoding_algorithms");
+    0
+}

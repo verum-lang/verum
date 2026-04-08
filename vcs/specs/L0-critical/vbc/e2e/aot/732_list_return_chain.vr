@@ -1,0 +1,114 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, return, chain
+// @expected-exit: 0
+
+// Tests complex list return patterns: chained function calls,
+// nested operations, and list-returning functions as arguments.
+
+fn zeros(n: Int) -> List<Int> {
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    out
+}
+
+fn iota(n: Int) -> List<Int> {
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        out[i] = i;
+        i = i + 1;
+    }
+    out
+}
+
+fn map_add(a: List<Int>, val: Int, n: Int) -> List<Int> {
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        out[i] = a[i] + val;
+        i = i + 1;
+    }
+    out
+}
+
+fn map_mul(a: List<Int>, val: Int, n: Int) -> List<Int> {
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        out[i] = a[i] * val;
+        i = i + 1;
+    }
+    out
+}
+
+fn add_lists(a: List<Int>, b: List<Int>, n: Int) -> List<Int> {
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        out[i] = a[i] + b[i];
+        i = i + 1;
+    }
+    out
+}
+
+fn sum(a: List<Int>, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < n) {
+        total = total + a[i];
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Test 1: Simple list return
+    let z = zeros(8);
+    assert_eq(z[0], 0);
+    assert_eq(z[7], 0);
+
+    // Test 2: Iota
+    let seq = iota(8);
+    assert_eq(seq[0], 0);
+    assert_eq(seq[7], 7);
+
+    // Test 3: Chain: iota → map_add
+    let added = map_add(iota(8), 10, 8);
+    assert_eq(added[0], 10);
+    assert_eq(added[7], 17);
+
+    // Test 4: Deep chain: iota → map_add → map_mul
+    let chained = map_mul(map_add(iota(4), 1, 4), 3, 4);
+    // iota(4) = [0,1,2,3], +1 = [1,2,3,4], *3 = [3,6,9,12]
+    assert_eq(chained[0], 3);
+    assert_eq(chained[1], 6);
+    assert_eq(chained[2], 9);
+    assert_eq(chained[3], 12);
+
+    // Test 5: Two list returns combined
+    let a = iota(4);
+    let b = map_add(a, 10, 4);
+    let c = add_lists(a, b, 4);
+    // a=[0,1,2,3], b=[10,11,12,13], c=[10,12,14,16]
+    assert_eq(c[0], 10);
+    assert_eq(c[1], 12);
+    assert_eq(c[2], 14);
+    assert_eq(c[3], 16);
+
+    // Test 6: Sum of list-returned values
+    let s = sum(map_mul(iota(4), 2, 4), 4);
+    // iota(4)=[0,1,2,3], *2=[0,2,4,6], sum=12
+    assert_eq(s, 12);
+
+    // Test 7: Multiple independent list returns
+    let x = iota(4);
+    let y = map_add(zeros(4), 100, 4);
+    let z2 = map_mul(iota(4), 5, 4);
+    assert_eq(x[2], 2);
+    assert_eq(y[0], 100);
+    assert_eq(z2[3], 15);
+
+    print("List return chain: PASS");
+    0
+}

@@ -1,0 +1,372 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, memory, oracle, cbgr
+// @timeout: 20000
+
+/// Memory Oracle Tests
+/// Compare memory operations between Tier 0 (interpreter) and Tier 3 (AOT)
+/// to ensure semantic equivalence for memory management and CBGR.
+///
+/// These tests cover:
+/// - Stack allocation
+/// - Heap allocation (Heap<T>)
+/// - Reference semantics (&T, &mut T)
+/// - CBGR generation tracking
+/// - Move vs copy semantics
+/// - Drop ordering
+
+fn test_stack_allocation() {
+    // Basic stack allocation
+    let a = 42;
+    let b = 3.14;
+    let c = true;
+    let d = 'x';
+    let e = "hello";
+
+    println(f"a = {a}");
+    println(f"b = {b}");
+    println(f"c = {c}");
+    println(f"d = {d}");
+    println(f"e = {e}");
+
+    // Shadowing
+    let x = 1;
+    println(f"x = {x}");
+    let x = x + 1;
+    println(f"x after shadow = {x}");
+    let x = "now a string";
+    println(f"x as string = {x}");
+}
+
+fn test_heap_allocation() {
+    // Heap allocation with Heap<T>
+    let boxed = Heap(42);
+    println(f"boxed value: {*boxed}");
+
+    // Nested heap allocation
+    let nested = Heap(Heap(100));
+    println(f"nested value: {**nested}");
+
+    // Heap with complex type
+    type Point is { x: Int, y: Int };
+    let boxed_point = Heap(Point { x: 10, y: 20 });
+    println(f"boxed point: ({boxed_point.x}, {boxed_point.y})");
+}
+
+fn test_reference_basic() {
+    let value = 42;
+
+    // Immutable reference
+    let ref_value = &value;
+    println(f"value through ref: {*ref_value}");
+
+    // Multiple immutable references
+    let ref1 = &value;
+    let ref2 = &value;
+    println(f"ref1: {*ref1}, ref2: {*ref2}");
+}
+
+fn test_mutable_reference() {
+    let mut value = 10;
+    println(f"initial value: {value}");
+
+    // Mutable reference
+    {
+        let ref_mut = &mut value;
+        *ref_mut = 20;
+        println(f"value through mut ref: {*ref_mut}");
+    }
+
+    println(f"value after mutation: {value}");
+
+    // Function taking mutable reference
+    fn double(x: &mut Int) {
+        *x = *x * 2;
+    }
+
+    double(&mut value);
+    println(f"value after double: {value}");
+}
+
+fn test_reference_to_field() {
+    type Point is { x: Int, y: Int };
+    let mut p = Point { x: 10, y: 20 };
+
+    // Reference to field
+    let ref_x = &p.x;
+    println(f"x through ref: {*ref_x}");
+
+    // Mutable reference to field
+    {
+        let ref_mut_y = &mut p.y;
+        *ref_mut_y = 30;
+    }
+    println(f"y after mutation: {p.y}");
+}
+
+fn test_move_semantics() {
+    // Move semantics for heap types
+    let a = Heap(42);
+    println(f"a: {*a}");
+
+    // Move to new binding
+    let b = a;
+    // a is now moved, cannot be used
+    println(f"b after move: {*b}");
+
+    // Move into function
+    fn consume(x: Heap<Int>) -> Int {
+        *x * 2
+    }
+
+    let c = Heap(50);
+    let result = consume(c);
+    // c is now moved
+    println(f"consume result: {result}");
+}
+
+fn test_copy_semantics() {
+    // Copy types (primitives)
+    let a = 42;
+    let b = a;  // Copy, not move
+    println(f"a: {a}, b: {b}");  // Both valid
+
+    // Explicit clone for non-copy types
+    let s1 = "hello".to_text();
+    let s2 = s1.clone();
+    println(f"s1: {s1}");
+    println(f"s2: {s2}");
+}
+
+fn test_drop_ordering() {
+    type Droppable is {
+        name: Text,
+    };
+
+    implement Drop for Droppable {
+        fn drop(&mut self) {
+            println(f"Dropping {self.name}");
+        }
+    }
+
+    println("Creating objects...");
+    {
+        let a = Droppable { name: "first" };
+        let b = Droppable { name: "second" };
+        let c = Droppable { name: "third" };
+        println("Objects created");
+        // Drop should happen in reverse order: third, second, first
+    }
+    println("Scope ended");
+}
+
+fn test_nested_drop() {
+    type Inner is { id: Int };
+    type Outer is { inner: Inner, name: Text };
+
+    implement Drop for Inner {
+        fn drop(&mut self) {
+            println(f"Dropping Inner {self.id}");
+        }
+    }
+
+    implement Drop for Outer {
+        fn drop(&mut self) {
+            println(f"Dropping Outer {self.name}");
+        }
+    }
+
+    {
+        let obj = Outer {
+            inner: Inner { id: 1 },
+            name: "container",
+        };
+        println(f"Created: {obj.name} with inner id {obj.inner.id}");
+    }
+    // Outer should drop before Inner
+    println("After nested drop");
+}
+
+fn test_list_memory() {
+    // List allocation and growth
+    let mut list: List<Int> = [];
+
+    // Add elements
+    for i in 0..10 {
+        list.push(i);
+    }
+    println(f"list length: {list.len()}");
+
+    // Remove elements
+    while !list.is_empty() {
+        let val = list.pop();
+        match val {
+            Some(v) => println(f"popped: {v}"),
+            None => break,
+        }
+    }
+    println(f"list after pop all: {list.len()}");
+}
+
+fn test_map_memory() {
+    // Map allocation
+    let mut map: Map<Text, Int> = {};
+
+    map.insert("one", 1);
+    map.insert("two", 2);
+    map.insert("three", 3);
+
+    println(f"map size: {map.len()}");
+
+    // Lookup
+    match map.get("two") {
+        Some(v) => println(f"found 'two': {v}"),
+        None => println("not found"),
+    }
+
+    // Remove
+    map.remove("two");
+    println(f"map size after remove: {map.len()}");
+}
+
+fn test_shared_reference() {
+    // Shared<T> for shared ownership
+    let shared = Shared(42);
+    println(f"shared value: {*shared}");
+
+    // Clone creates another owner
+    let shared2 = shared.clone();
+    println(f"shared2 value: {*shared2}");
+
+    // Both still valid
+    println(f"shared still valid: {*shared}");
+}
+
+fn test_weak_reference() {
+    // Weak references to break cycles
+    let strong = Shared(100);
+    let weak = Weak.from(&strong);
+
+    // Upgrade weak to strong
+    match weak.upgrade() {
+        Some(s) => println(f"upgraded: {*s}"),
+        None => println("value was dropped"),
+    }
+}
+
+fn test_reference_lifetime() {
+    fn get_ref<'a>(x: &'a Int) -> &'a Int {
+        x
+    }
+
+    let value = 42;
+    let ref_val = get_ref(&value);
+    println(f"borrowed value: {*ref_val}");
+}
+
+fn test_interior_mutability() {
+    // Cell for interior mutability
+    let cell = Cell(10);
+    println(f"cell initial: {cell.get()}");
+
+    cell.set(20);
+    println(f"cell after set: {cell.get()}");
+
+    // RefCell for dynamic borrowing
+    let refcell = RefCell(100);
+    {
+        let borrowed = refcell.borrow();
+        println(f"refcell borrowed: {*borrowed}");
+    }
+    {
+        let mut borrowed_mut = refcell.borrow_mut();
+        *borrowed_mut = 200;
+    }
+    println(f"refcell after mut: {*refcell.borrow()}");
+}
+
+fn test_cbgr_generation() {
+    // CBGR generation tracking
+    let mut data = [1, 2, 3, 4, 5];
+
+    // Take reference - captures current generation
+    let ref_data = &data;
+    println(f"first element: {ref_data[0]}");
+
+    // Mutation would invalidate old references
+    // data.push(6);  // Would be caught by CBGR
+
+    // After mutation, need new reference
+    data.push(6);
+    let new_ref = &data;
+    println(f"length after push: {new_ref.len()}");
+}
+
+fn test_allocation_stress() {
+    // Many small allocations
+    let mut results = [];
+
+    for i in 0..100 {
+        let boxed = Heap(i * i);
+        results.push(*boxed);
+    }
+
+    let sum: Int = results.iter().sum();
+    println(f"sum of squares 0-99: {sum}");
+}
+
+fn main() {
+    println("=== Stack Allocation ===");
+    test_stack_allocation();
+
+    println("\n=== Heap Allocation ===");
+    test_heap_allocation();
+
+    println("\n=== Reference Basic ===");
+    test_reference_basic();
+
+    println("\n=== Mutable Reference ===");
+    test_mutable_reference();
+
+    println("\n=== Reference to Field ===");
+    test_reference_to_field();
+
+    println("\n=== Move Semantics ===");
+    test_move_semantics();
+
+    println("\n=== Copy Semantics ===");
+    test_copy_semantics();
+
+    println("\n=== Drop Ordering ===");
+    test_drop_ordering();
+
+    println("\n=== Nested Drop ===");
+    test_nested_drop();
+
+    println("\n=== List Memory ===");
+    test_list_memory();
+
+    println("\n=== Map Memory ===");
+    test_map_memory();
+
+    println("\n=== Shared Reference ===");
+    test_shared_reference();
+
+    println("\n=== Weak Reference ===");
+    test_weak_reference();
+
+    println("\n=== Reference Lifetime ===");
+    test_reference_lifetime();
+
+    println("\n=== Interior Mutability ===");
+    test_interior_mutability();
+
+    println("\n=== CBGR Generation ===");
+    test_cbgr_generation();
+
+    println("\n=== Allocation Stress ===");
+    test_allocation_stress();
+
+    println("\n=== All memory tests complete ===");
+}

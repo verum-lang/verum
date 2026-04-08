@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, re-exports, conditional, cfg
+
+/// Conditional re-export - platform/feature-specific public APIs.
+/// Re-exports can be conditioned on compile-time configuration using @cfg.
+
+module platform_library {
+    // Platform-specific internal implementations
+    pub module unix {
+        pub type FileDescriptor is {
+            fd: Int
+        };
+
+        pub type UnixError is
+    | PermissionDenied
+    | NotFound
+    | TooManyFiles;
+
+        pub fn open_file(path: &Text) -> Result<FileDescriptor, UnixError> {
+            Ok(FileDescriptor { fd: 3 })
+        }
+    }
+
+    pub module windows {
+        pub type Handle is {
+            value: Int
+        };
+
+        pub type WinError is
+    | AccessDenied
+    | FileNotFound
+    | InvalidHandle;
+
+        pub fn open_file(path: &Text) -> Result<Handle, WinError> {
+            Ok(Handle { value: 0x1234 })
+        }
+    }
+
+    // Cross-platform abstraction that selects implementation
+    pub module cross_platform {
+        // For this test, we use unix implementation directly
+        mount super.unix.{FileDescriptor, UnixError};
+
+        pub type File is {
+            handle: FileDescriptor,
+            path: Text
+        };
+
+        pub fn open(path: Text) -> Result<File, UnixError> {
+            let handle = super.unix.open_file(&path)?;
+            Ok(File { handle, path })
+        }
+    }
+
+    // Feature-based module
+    pub module debug_utils {
+        pub fn trace(msg: &Text) {
+            print("[TRACE] {}", msg);
+        }
+
+        pub type DebugInfo is {
+            file: Text,
+            line: Int,
+            function: Text
+        };
+    }
+
+    // Conditional cfg-gated items
+    @cfg(feature = "debug")
+    pub fn debug_trace(msg: &Text) {
+        print("[DEBUG] {}", msg);
+    }
+
+    @cfg(not(feature = "debug"))
+    pub fn debug_trace(_msg: &Text) {
+        // No-op in release
+    }
+}
+
+// Feature flag module
+module features {
+    // Conditional compilation based on features
+    @cfg(feature = "serialization")
+    pub module serde {
+        pub type Serialize is protocol {
+            fn serialize(&self) -> Bytes;
+        };
+
+        pub type Deserialize is protocol {
+            fn deserialize(data: &Bytes) -> Result<Self, SerdeError>;
+        };
+
+        pub type SerdeError is
+    | InvalidData
+    | TypeMismatch;
+    }
+
+    @cfg(feature = "compression")
+    pub module compression {
+        pub fn compress(data: &Bytes) -> Bytes {
+            data.clone()
+        }
+
+        pub fn decompress(data: &Bytes) -> Result<Bytes, CompressionError> {
+            Ok(data.clone())
+        }
+
+        pub type CompressionError is
+    | InvalidHeader
+    | CorruptedData;
+    }
+}
+
+fn main() {
+    mount platform_library.cross_platform.{File, open};
+    mount platform_library.debug_utils.trace;
+
+    // Cross-platform file opening
+    let result = open("config.txt");
+
+    match result {
+        Ok(file) => {
+            // Use cross-platform file
+            trace(&file.path);
+        },
+        Err(e) => {
+            // Handle error
+        }
+    }
+}

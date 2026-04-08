@@ -1,0 +1,274 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, gradient-descent, optimization
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Gradient descent optimization
+// Minimize various functions using gradient descent.
+// Uses integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// Gradient descent: minimize f(x) = (x - target)^2
+// f'(x) = 2*(x - target)
+// =============================================================================
+
+fn gd_quadratic(x_init: Int, target: Int, lr: Int, steps: Int) -> Int {
+    let mut x = x_init;
+    let mut i = 0;
+    while i < steps {
+        let grad = 2 * (x - target); // derivative of (x-target)^2
+        x = x - smul(lr, grad);
+        i = i + 1;
+    }
+    x
+}
+
+fn test_gd_simple() {
+    // Minimize (x-5)^2, starting at x=0, lr=0.1, 100 steps
+    // Should converge to x=5
+    let target = 5 * scale();
+    let lr = 100; // 0.1 scaled
+    let result = gd_quadratic(0, target, lr, 100);
+    assert_eq(within_tol(result, target, 50), 1);
+}
+
+fn test_gd_from_above() {
+    // Start at x=10, target=3
+    let target = 3 * scale();
+    let result = gd_quadratic(10 * scale(), target, 100, 100);
+    assert_eq(within_tol(result, target, 50), 1);
+}
+
+fn test_gd_negative_target() {
+    // Target = -4
+    let target = -4 * scale();
+    let result = gd_quadratic(0, target, 100, 100);
+    assert_eq(within_tol(result, target, 50), 1);
+}
+
+fn test_gd_already_at_minimum() {
+    // Start at the minimum
+    let target = 3 * scale();
+    let result = gd_quadratic(target, target, 100, 10);
+    assert_eq(result, target);
+}
+
+// =============================================================================
+// 2D gradient descent: minimize f(x,y) = x^2 + y^2
+// grad = (2x, 2y), minimum at (0,0)
+// =============================================================================
+
+type Vec2 is { x: Int, y: Int };
+
+fn gd_2d_sphere(init: Vec2, lr: Int, steps: Int) -> Vec2 {
+    let mut pos = init;
+    let mut i = 0;
+    while i < steps {
+        let gx = 2 * pos.x;  // df/dx = 2x
+        let gy = 2 * pos.y;  // df/dy = 2y
+        pos = Vec2 {
+            x: pos.x - smul(lr, gx),
+            y: pos.y - smul(lr, gy)
+        };
+        i = i + 1;
+    }
+    pos
+}
+
+fn test_gd_2d() {
+    let init = Vec2 { x: 5 * scale(), y: 3 * scale() };
+    let result = gd_2d_sphere(init, 100, 100);
+    assert_eq(within_tol(result.x, 0, 50), 1);
+    assert_eq(within_tol(result.y, 0, 50), 1);
+}
+
+// =============================================================================
+// Rosenbrock-like: f(x,y) = (1-x)^2 + 10*(y-x^2)^2
+// Simplified version using step tracking
+// =============================================================================
+
+fn rosenbrock_val(x: Int, y: Int) -> Int {
+    let term1 = smul(scale() - x, scale() - x);  // (1-x)^2
+    let x_sq = smul(x, x);
+    let diff = y - x_sq;
+    let term2 = 10 * smul(diff, diff);  // 10*(y-x^2)^2
+    term1 + term2
+}
+
+fn rosenbrock_grad_x(x: Int, y: Int) -> Int {
+    // df/dx = -2*(1-x) + 10*2*(y-x^2)*(-2x)
+    //       = 2*(x-1) - 40*x*(y-x^2)
+    let x_sq = smul(x, x);
+    let t1 = 2 * (x - scale());
+    let t2 = smul(40 * x, y - x_sq);
+    t1 - t2
+}
+
+fn rosenbrock_grad_y(x: Int, y: Int) -> Int {
+    // df/dy = 10*2*(y-x^2) = 20*(y-x^2)
+    let x_sq = smul(x, x);
+    20 * (y - x_sq)
+}
+
+fn test_rosenbrock_gradient_at_minimum() {
+    // At (1,1) the gradient should be (0,0)
+    let gx = rosenbrock_grad_x(scale(), scale());
+    let gy = rosenbrock_grad_y(scale(), scale());
+    assert_eq(gx, 0);
+    assert_eq(gy, 0);
+}
+
+fn test_rosenbrock_value_at_minimum() {
+    let v = rosenbrock_val(scale(), scale());
+    assert_eq(v, 0);
+}
+
+fn test_rosenbrock_descent() {
+    // Start at (0, 0), use small learning rate
+    let mut x = 0;
+    let mut y = 0;
+    let lr = 5; // 0.005 — very small for stability
+
+    let mut i = 0;
+    while i < 200 {
+        let gx = rosenbrock_grad_x(x, y);
+        let gy = rosenbrock_grad_y(x, y);
+        x = x - smul(lr, gx);
+        y = y - smul(lr, gy);
+        i = i + 1;
+    }
+
+    // After 200 steps with small lr, should move towards (1,1)
+    // May not converge fully, but should be closer than start
+    let final_val = rosenbrock_val(x, y);
+    let init_val = rosenbrock_val(0, 0);
+    assert(final_val < init_val); // Progress was made
+}
+
+// =============================================================================
+// Learning rate comparison
+// =============================================================================
+
+fn test_lr_comparison() {
+    // Larger learning rate converges faster on quadratic
+    let target = 7 * scale();
+
+    // Small lr: 50 steps with lr=0.05
+    let r1 = gd_quadratic(0, target, 50, 50);
+    let err1 = abs_val(r1 - target);
+
+    // Larger lr: 50 steps with lr=0.1
+    let r2 = gd_quadratic(0, target, 100, 50);
+    let err2 = abs_val(r2 - target);
+
+    // Larger lr should have smaller error (for well-behaved quadratic)
+    assert(err2 <= err1 + 1);
+}
+
+// =============================================================================
+// Momentum-based gradient descent
+// =============================================================================
+
+fn gd_momentum(x_init: Int, target: Int, lr: Int, momentum: Int, steps: Int) -> Int {
+    let mut x = x_init;
+    let mut v = 0; // velocity
+    let mut i = 0;
+    while i < steps {
+        let grad = 2 * (x - target);
+        v = smul(momentum, v) - smul(lr, grad);
+        x = x + v;
+        i = i + 1;
+    }
+    x
+}
+
+fn test_momentum() {
+    // Momentum should help converge faster
+    let target = 5 * scale();
+    let result = gd_momentum(0, target, 50, 900, 100); // lr=0.05, momentum=0.9
+    assert_eq(within_tol(result, target, 100), 1);
+}
+
+// =============================================================================
+// Gradient descent with loss tracking
+// =============================================================================
+
+fn test_loss_decreases() {
+    // Track that loss monotonically decreases (with appropriate lr)
+    let target = 3 * scale();
+    let lr = 100; // 0.1
+
+    let mut x = 10 * scale();
+    let mut prev_loss = smul(x - target, x - target);
+    let mut all_decreasing = 1;
+
+    let mut i = 0;
+    while i < 20 {
+        let grad = 2 * (x - target);
+        x = x - smul(lr, grad);
+        let loss = smul(x - target, x - target);
+        if loss > prev_loss {
+            all_decreasing = 0;
+        }
+        prev_loss = loss;
+        i = i + 1;
+    }
+
+    assert_eq(all_decreasing, 1);
+}
+
+fn test_convergence_steps() {
+    // Count steps needed to get within tolerance
+    let target = 5 * scale();
+    let lr = 100;
+    let tol = 10; // 0.01 tolerance
+
+    let mut x = 0;
+    let mut steps = 0;
+    while abs_val(x - target) > tol && steps < 500 {
+        let grad = 2 * (x - target);
+        x = x - smul(lr, grad);
+        steps = steps + 1;
+    }
+
+    // Should converge within 500 steps
+    assert(steps < 500);
+    assert_eq(within_tol(x, target, tol), 1);
+}
+
+fn main() -> Int {
+    test_gd_simple();
+    test_gd_from_above();
+    test_gd_negative_target();
+    test_gd_already_at_minimum();
+    test_gd_2d();
+    test_rosenbrock_gradient_at_minimum();
+    test_rosenbrock_value_at_minimum();
+    test_rosenbrock_descent();
+    test_lr_comparison();
+    test_momentum();
+    test_loss_decreases();
+    test_convergence_steps();
+    print("[OK] 383_interp_autodiff_gradient_descent");
+    0
+}

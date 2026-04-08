@@ -1,0 +1,285 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, concurrency, data-race, cbgr, send, sync
+// @active: testing concurrency patterns
+// @description: CBGR concurrency analysis enforces thread safety
+
+/// Concurrency Safety Compile-Time Tests
+///
+/// These tests validate that the CBGR concurrency analyzer correctly
+/// enforces thread safety via Send and Sync bounds:
+///
+/// - Send: Type can be transferred to another thread
+/// - Sync: Type can be shared between threads via reference
+///
+/// Spec: docs/detailed/26-cbgr-implementation.md#concurrency-analysis
+
+// ============================================================================
+// TEST 1: Send type transfer
+// ============================================================================
+
+type SafeData is {
+    value: Int,
+};
+
+fn test_send_transfer() {
+    let data = SafeData { value: 42 };
+
+    // Simple types are Send by default
+    let moved_data = data;
+
+    assert(moved_data.value == 42);
+}
+
+// ============================================================================
+// TEST 2: Sync shared reference
+// ============================================================================
+
+fn read_value(r: &Int) -> Int {
+    *r
+}
+
+fn test_sync_shared_ref() {
+    let value = 100;
+
+    // Multiple readers via shared reference (Sync)
+    let r1 = &value;
+    let r2 = &value;
+
+    let v1 = read_value(r1);
+    let v2 = read_value(r2);
+
+    assert(v1 == v2);
+    assert(v1 == 100);
+}
+
+// ============================================================================
+// TEST 3: Exclusive mutation (no data race)
+// ============================================================================
+
+fn test_exclusive_mutation() {
+    let mut counter = 0;
+
+    // Sequential exclusive access - no race possible
+    {
+        let r = &mut counter;
+        *r += 1;
+    }
+
+    {
+        let r = &mut counter;
+        *r += 1;
+    }
+
+    {
+        let r = &mut counter;
+        *r += 1;
+    }
+
+    assert(counter == 3);
+}
+
+// ============================================================================
+// TEST 4: Array safety in concurrent context
+// ============================================================================
+
+fn test_array_thread_safety() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Immutable array is Sync - can be read from multiple threads
+    let r1 = &data;
+    let r2 = &data;
+
+    let sum1 = r1[0] + r1[1];
+    let sum2 = r2[2] + r2[3];
+
+    assert(sum1 == 3);
+    assert(sum2 == 7);
+}
+
+// ============================================================================
+// TEST 5: Struct with Send fields
+// ============================================================================
+
+type ThreadSafeStruct is {
+    id: Int,
+    name: Text,
+    values: [Int; 3],
+};
+
+fn test_send_struct() {
+    let ts = ThreadSafeStruct {
+        id: 1,
+        name: "safe",
+        values: [10, 20, 30],
+    };
+
+    // Struct is Send because all fields are Send
+    let moved = ts;
+
+    assert(moved.id == 1);
+    assert(moved.values[0] == 10);
+}
+
+// ============================================================================
+// TEST 6: Safe mutex-like pattern
+// ============================================================================
+
+type IntMutex is {
+    data: Int,
+    locked: Bool,
+};
+
+implement IntMutex {
+    fn new(value: Int) -> IntMutex {
+        IntMutex { data: value, locked: false }
+    }
+
+    fn lock(&mut self) -> &mut Int {
+        // In real implementation, this would be atomic
+        self.locked = true;
+        &mut self.data
+    }
+
+    fn unlock(&mut self) {
+        self.locked = false;
+    }
+}
+
+fn test_mutex_pattern() {
+    let mut mutex = IntMutex.new(0);
+
+    {
+        let guard = mutex.lock();
+        *guard = 42;
+    }
+
+    mutex.unlock();
+
+    // Safe access after unlock
+    let guard2 = mutex.lock();
+    assert(*guard2 == 42);
+}
+
+// ============================================================================
+// TEST 7: Read-only concurrent access
+// ============================================================================
+
+fn process_data(data: &[Int; 5], start: Int, end: Int) -> Int {
+    let mut sum = 0;
+    for i in start..end {
+        sum += data[i];
+    }
+    sum
+}
+
+fn test_readonly_concurrent() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Simulating concurrent read access (all from same reference)
+    let r = &data;
+
+    let part1 = process_data(r, 0, 2);
+    let part2 = process_data(r, 2, 5);
+
+    assert(part1 == 3);   // 1 + 2
+    assert(part2 == 12);  // 3 + 4 + 5
+}
+
+// ============================================================================
+// TEST 8: Copy types are inherently thread-safe
+// ============================================================================
+
+fn test_copy_thread_safe() {
+    let x: Int = 42;
+    let y: Float = 3.14;
+    let z: Bool = true;
+
+    // Copy types can be freely sent to other threads
+    let x2 = x;
+    let y2 = y;
+    let z2 = z;
+
+    // Original still valid (Copy semantics)
+    assert(x == 42);
+    assert(y == 3.14);
+    assert(z == true);
+
+    assert(x2 == 42);
+    assert(y2 == 3.14);
+    assert(z2 == true);
+}
+
+// ============================================================================
+// TEST 9: Immutable shared state
+// ============================================================================
+
+type ImmutableConfig is {
+    max_threads: Int,
+    buffer_size: Int,
+    timeout_ms: Int,
+};
+
+fn get_max_threads(config: &ImmutableConfig) -> Int {
+    config.max_threads
+}
+
+fn get_buffer_size(config: &ImmutableConfig) -> Int {
+    config.buffer_size
+}
+
+fn test_immutable_shared() {
+    let config = ImmutableConfig {
+        max_threads: 8,
+        buffer_size: 4096,
+        timeout_ms: 5000,
+    };
+
+    // Multiple references to immutable data are safe
+    let r1 = &config;
+    let r2 = &config;
+
+    let threads = get_max_threads(r1);
+    let buffer = get_buffer_size(r2);
+
+    assert(threads == 8);
+    assert(buffer == 4096);
+}
+
+// ============================================================================
+// TEST 10: Sequential thread-safe operations
+// ============================================================================
+
+fn test_sequential_ops() {
+    let mut data = [0, 0, 0, 0, 0];
+
+    // Sequential operations - each has exclusive access
+    for i in 0..5 {
+        let r = &mut data[i];
+        *r = (i + 1) * 10;
+    }
+
+    assert(data[0] == 10);
+    assert(data[1] == 20);
+    assert(data[2] == 30);
+    assert(data[3] == 40);
+    assert(data[4] == 50);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    test_send_transfer();
+    test_sync_shared_ref();
+    test_exclusive_mutation();
+    test_array_thread_safety();
+    test_send_struct();
+    test_mutex_pattern();
+    test_readonly_concurrent();
+    test_copy_thread_safe();
+    test_immutable_shared();
+    test_sequential_ops();
+}

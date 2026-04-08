@@ -1,0 +1,123 @@
+// @test: run
+// Pattern matching — exhaustive match, nested, guards, wildcards
+
+type Color is Red | Green | Blue | Custom(Int);
+
+fn color_value(c: Color) -> Int {
+    match c {
+        Red => 0xFF0000,
+        Green => 0x00FF00,
+        Blue => 0x0000FF,
+        Custom(v) => v,
+    }
+}
+
+type Pair is { first: Int, second: Int };
+
+fn classify_pair(p: Pair) -> Text {
+    if (p.first == p.second) {
+        return "equal";
+    }
+    if (p.first > p.second) {
+        return "descending";
+    }
+    "ascending"
+}
+
+type Token is
+    Number(Int)
+  | Plus
+  | Minus
+  | Star;
+
+fn token_priority(t: Token) -> Int {
+    match t {
+        Number(_) => 0,
+        Plus => 1,
+        Minus => 1,
+        Star => 2,
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Simple match
+    let r = color_value(Red);
+    let g = color_value(Green);
+    let b = color_value(Blue);
+    if (r != 0xFF0000 || g != 0x00FF00 || b != 0x0000FF) {
+        print("FAIL test1: color values");
+        return 1;
+    }
+    print("test1 color match: OK");
+
+    // Test 2: Custom variant with payload
+    let c = color_value(Custom(0xABCDEF));
+    if (c != 0xABCDEF) {
+        print(f"FAIL test2: custom = {c}");
+        return 1;
+    }
+    print("test2 custom: OK");
+
+    // Test 3: Struct matching via if chains
+    let p1 = Pair { first: 5, second: 5 };
+    let p2 = Pair { first: 10, second: 3 };
+    let p3 = Pair { first: 1, second: 9 };
+    if (classify_pair(p1) != "equal") {
+        print("FAIL test3a");
+        return 1;
+    }
+    if (classify_pair(p2) != "descending") {
+        print("FAIL test3b");
+        return 1;
+    }
+    if (classify_pair(p3) != "ascending") {
+        print("FAIL test3c");
+        return 1;
+    }
+    print("test3 classify: OK");
+
+    // Test 4: Token priority
+    if (token_priority(Number(42)) != 0) {
+        print("FAIL test4a");
+        return 1;
+    }
+    if (token_priority(Plus) != 1) {
+        print("FAIL test4b");
+        return 1;
+    }
+    if (token_priority(Star) != 2) {
+        print("FAIL test4c");
+        return 1;
+    }
+    print("test4 token priority: OK");
+
+    // Test 5: Match with wildcard
+    let tok = Minus;
+    let is_op = match tok {
+        Number(_) => false,
+        _ => true,
+    };
+    if (!is_op) {
+        print("FAIL test5: wildcard");
+        return 1;
+    }
+    print("test5 wildcard: OK");
+
+    // Test 6: Match in loop
+    let tokens = [Number(1), Plus, Number(2), Star, Number(3)];
+    let mut sum_priority = 0;
+    let mut i = 0;
+    while i < tokens.len() {
+        sum_priority = sum_priority + token_priority(tokens[i]);
+        i = i + 1;
+    }
+    // priorities: 0 + 1 + 0 + 2 + 0 = 3
+    if (sum_priority != 3) {
+        print(f"FAIL test6: sum_priority = {sum_priority}");
+        return 1;
+    }
+    print("test6 match in loop: OK");
+
+    print("1034_match_patterns: PASS");
+    0
+}

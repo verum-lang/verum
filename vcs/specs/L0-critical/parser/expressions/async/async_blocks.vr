@@ -1,0 +1,246 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, async, await, block
+
+// Simple async block
+fn test_simple_async_block() {
+    let future = async {
+        42
+    };
+}
+
+// Async block with await
+async fn test_async_block_with_await() {
+    let result = async {
+        let data = 42;
+        data
+    };
+}
+
+// Async block with multiple steps
+async fn test_async_block_with_multiple_steps() {
+    let complex = async {
+        let a = 1;
+        let b = 2;
+        let c = 3;
+        (a, b, c)
+    };
+}
+
+// Async block with error handling
+fn test_async_block_with_error_handling() {
+    let safe = async {
+        try {
+            42?
+        } recover {
+            e => 0
+        }
+    };
+}
+
+// Async block with let bindings
+fn test_async_block_with_let_bindings() {
+    let computed = async {
+        let a = 1;
+        let b = 2;
+        let c = a + b;
+        c * 2
+    };
+}
+
+// Async block with control flow
+fn test_async_block_with_control_flow() {
+    let condition = true;
+
+    let conditional = async {
+        if condition {
+            1
+        } else {
+            2
+        }
+    };
+}
+
+// Async block with match
+fn test_async_block_with_match() {
+    type Option<T> is None | Some(T);
+
+    let opt = Option.Some(42);
+
+    let matched = async {
+        match opt {
+            Option.Some(x) => x * 2,
+            Option.None => 0,
+        }
+    };
+}
+
+// Async block with for loop
+fn test_async_block_with_for_loop() {
+    let items = [1, 2, 3];
+
+    let collected = async {
+        let mut sum = 0;
+        for item in items {
+            sum += item;
+        }
+        sum
+    };
+}
+
+// Async block in expression position
+fn test_async_block_in_expression() {
+    let value = async { 42 };
+}
+
+// Nested async blocks
+fn test_nested_async_blocks() {
+    let nested = async {
+        let inner = async {
+            42
+        };
+        inner
+    };
+}
+
+// Async block with capture
+fn test_async_block_with_capture() {
+    let captured = 42;
+
+    // Note: async blocks capture by reference - 'move' not supported in grammar
+    let capturing = async {
+        captured * 2
+    };
+}
+
+// Async block with closure
+fn test_async_block_with_closure() {
+    let with_closure = async {
+        let mapper = |x| x * 2;
+        let value = 21;
+        mapper(value)
+    };
+}
+
+// Async block with spawn
+fn test_async_block_with_spawn() {
+    let spawned = async {
+        let handle1 = spawn { 1 };
+        let handle2 = spawn { 2 };
+        (handle1, handle2)
+    };
+}
+
+// Async block with defer
+fn test_async_block_with_defer() {
+    let cleaned = async {
+        defer { let _ = 1; };
+        42
+    };
+}
+
+// Async block with try-finally
+fn test_async_block_with_try_finally() {
+    let safe_async = async {
+        try {
+            42?
+        } finally {
+            let _ = 0;
+        }
+    };
+}
+
+// Async block returning result pattern
+fn test_async_block_result_pattern() {
+    type Result<T, E> is Ok(T) | Err(E);
+    type Error is ();
+
+    let fallible = async {
+        let a = 1;
+        let b = 2;
+        Result.Ok(a + b)
+    };
+}
+
+// Async block in conditional
+fn test_async_block_in_conditional() {
+    type Option<T> is None | Some(T);
+
+    let enabled = true;
+
+    let maybe = if enabled {
+        Option.Some(async { 42 })
+    } else {
+        Option.None
+    };
+}
+
+// Multiple async blocks
+fn test_multiple_async_blocks() {
+    let a = async { 1 };
+    let b = async { 2 };
+    let c = async { 3 };
+}
+
+// Async block with while loop
+fn test_async_block_with_while() {
+    let looped = async {
+        let mut count = 0;
+        while count < 10 {
+            count += 1;
+        }
+        count
+    };
+}
+
+// Async block with loop
+fn test_async_block_with_loop() {
+    let looped = async {
+        let mut i = 0;
+        loop {
+            i += 1;
+            if i >= 5 {
+                break i;
+            }
+        }
+    };
+}
+
+// Empty async block
+fn test_empty_async_block() {
+    let empty = async {};
+}
+
+// Async block with single expression
+fn test_async_block_single_expr() {
+    let single = async { 42 };
+    let string_async = async { "hello" };
+    let bool_async = async { true };
+}
+
+// Async block with struct construction
+fn test_async_block_struct() {
+    type Point is { x: Int, y: Int };
+
+    let point_future = async {
+        Point {
+            x: 10,
+            y: 20,
+        }
+    };
+}
+
+// Async block with tuple
+fn test_async_block_tuple() {
+    let tuple_future = async {
+        (1, 2, 3)
+    };
+}
+
+// Async block with array
+fn test_async_block_array() {
+    let array_future = async {
+        [1, 2, 3, 4, 5]
+    };
+}

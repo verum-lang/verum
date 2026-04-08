@@ -1,0 +1,218 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, unresolved
+// @expected-error: E101
+
+/// Test for unresolved type errors.
+/// These examples should fail with E402 when a type cannot be found.
+
+fn main() {
+    // ========================================================================
+    // Undefined type names
+    // ========================================================================
+
+    // E402: Type doesn't exist
+    let x: UndefinedType = 42;  // ERROR: UndefinedType not found
+
+    // E402: Typo in type name
+    let y: Sting = "hello";  // ERROR: Sting (typo for Text) not found
+
+    // E402: Wrong case
+    let z: int = 42;  // ERROR: int not found (should be Int)
+
+    // E402: Misspelled primitive
+    let b: boolean = true;  // ERROR: boolean not found (should be Bool)
+
+    // E402: Non-existent semantic type
+    let arr: Array<Int> = [1, 2, 3];  // ERROR: Array not found (should be List)
+
+    // ========================================================================
+    // Undefined generic types
+    // ========================================================================
+
+    // E402: Generic type doesn't exist
+    let generic: NonExistentGeneric<Int> = something;  // ERROR
+
+    // E402: Wrong generic name
+    let vec_err: List<Int> = [1, 2, 3];  // ERROR: Vec not in Verum (use List)
+
+    // E402: Wrong option type
+    let opt: Maybe<Int> = Some(42);  // ERROR: Option not found (use Maybe)
+
+    // E402: Wrong result type
+    let res: Result<Int, Text> = Ok(42);  // ERROR: might need specific link
+
+    // ========================================================================
+    // Undefined path types
+    // ========================================================================
+
+    // E402: Module path types (dotted paths in type position not yet supported in parser)
+    // let imported: std.nonexistent.Type = value;  // ERROR: path not found
+    // let deep: some.deep.path.Type = value;       // ERROR: module path not found
+    // let typo_mod: verum_cor.List<Int> = List.new(); // ERROR: verum_cor not found
+
+    // ========================================================================
+    // Undefined type in function signatures
+    // ========================================================================
+
+    // E402: Unknown parameter type
+    fn takes_unknown(x: UnknownParam) -> Int {
+        42
+    }
+
+    // E402: Unknown return type
+    fn returns_unknown(x: Int) -> UnknownReturn {
+        x
+    }
+
+    // E402: Unknown type in generic bound
+    fn with_unknown_bound<T: UnknownProtocol>(x: T) {
+        // do nothing
+    }
+
+    // E402: Unknown associated type
+    fn with_assoc<T>(x: T) -> T.UnknownAssoc {
+        x.unknown_method()
+    }
+
+    // ========================================================================
+    // Undefined type in type definitions
+    // ========================================================================
+
+    // E402: Using undefined type in struct field
+    type BadStruct is {
+        field: UndefinedFieldType,
+    };
+
+    // E402: Using undefined type in enum variant
+    type BadEnum is
+        | Good(Int)
+        | Bad(UndefinedVariantType);
+
+    // E402: Undefined supertype
+    type DerivedType is UndefinedBaseType {
+        extra: Int,
+    };
+
+    // E402: Undefined type in tuple
+    type BadTuple is (Int, UnknownMiddle, Text);
+
+    // ========================================================================
+    // Undefined type in impl blocks
+    // ========================================================================
+
+    // E402: Implementing non-existent protocol
+    implement UnknownProtocol for Int {
+        fn method(&self) -> Int { *self }
+    }
+
+    // E402: Implementing for non-existent type
+    implement Clone for NonExistentType {
+        fn clone(&self) -> Self { *self }
+    }
+
+    // E402: Unknown type in impl generic bound
+    implement<T: UnknownBound> MyProtocol for List<T> {
+        // ...
+    }
+
+    // ========================================================================
+    // Undefined type in expressions
+    // ========================================================================
+
+    // E402: Unknown type in cast
+    let cast_bad = 42 as UnknownCastTarget;
+
+    // E402: Unknown type in type ascription
+    let ascribed: UnknownAscription = 42;
+
+    // E402: Unknown type in sizeof/alignof
+    let size = sizeof(UnknownSizeType);
+
+    // E402: Unknown type in constructor
+    let constructed = UnknownConstructor { field: 1 };
+
+    // E402: Unknown enum variant path
+    let variant = UnknownEnum.Variant;
+
+    // ========================================================================
+    // Undefined generic type parameters
+    // ========================================================================
+
+    // E402: Using undeclared type parameter
+    fn missing_param(x: T) -> T {  // ERROR: T not declared in generics
+        x
+    }
+
+    // E402: Typo in type parameter usage
+    fn typo_param<T>(x: U) -> T {  // ERROR: U not found, meant T
+        x
+    }
+
+    // E402: Using type param outside scope
+    fn outer<T>() {
+        fn inner(x: T) -> T {  // ERROR: T not in scope for inner
+            x
+        }
+    }
+
+    // ========================================================================
+    // Undefined associated types
+    // ========================================================================
+
+    type MyIterator is protocol {
+        type Item;
+        fn next(&mut self) -> Maybe<Self.Item>;
+    };
+
+    // E402: Wrong associated type name
+    fn get_elem<I: MyIterator>(iter: &mut I) -> Maybe<I.Element> {  // ERROR: Element not Item
+        iter.next()
+    }
+
+    // E402: Non-existent associated type
+    fn get_nonexistent<T>(x: T) -> T.DoesNotExist {  // ERROR
+        x.method()
+    }
+
+    // ========================================================================
+    // Undefined type in closures
+    // ========================================================================
+
+    // E402: Unknown type in closure parameter
+    let closure = |x: UnknownClosureParam| x;
+
+    // E402: Unknown type in closure return
+    let typed_closure: fn(Int) -> UnknownClosureReturn = |x| x;
+
+    // ========================================================================
+    // Undefined type in patterns
+    // ========================================================================
+
+    let value = 42;
+
+    // E402: Unknown type in pattern path
+    match value {
+        UnknownPattern.Variant => {},
+        _ => {},
+    }
+
+    // E402: Unknown struct in pattern
+    match value {
+        UnknownStruct { field } => {},
+        _ => {},
+    }
+
+    // ========================================================================
+    // Undefined type in refinements
+    // ========================================================================
+
+    // E402: Unknown type in refined type
+    type Refined is UnknownBase{> 0};
+
+    // E402: Unknown predicate type
+    type WithPredicate is Int where unknown_predicate(it);
+}
+
+// All examples above should produce E402 "Unresolved type" error

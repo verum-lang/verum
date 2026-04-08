@@ -1,0 +1,131 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L3
+// @tags: meta, staging, metaprogramming, self-hosting-critical
+// @description: Tests for meta programming features using correct Verum syntax
+
+// =============================================================================
+// BASIC META FUNCTIONS
+// Note: Uses 'meta fn' syntax, not '@meta fn'
+// =============================================================================
+
+// Simple meta function
+meta fn add_one(n: Int) -> Int {
+    n + 1
+}
+
+// Meta function with type parameter
+meta fn identity<T>(x: T) -> T {
+    x
+}
+
+// Meta constant evaluation
+meta fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+// =============================================================================
+// COMPILE-TIME CONDITIONALS
+// =============================================================================
+
+meta fn select_impl<T>(use_fast: Bool) -> Text {
+    if use_fast {
+        "fast_implementation"
+    } else {
+        "standard_implementation"
+    }
+}
+
+meta fn platform_check() -> Bool {
+    cfg.target_os == "linux"
+}
+
+// =============================================================================
+// TYPE-LEVEL META FUNCTIONS
+// =============================================================================
+
+meta fn type_size<T>() -> Int {
+    size_of<T>()
+}
+
+meta fn is_copy<T>() -> Bool {
+    T.implements(Copy)
+}
+
+meta fn type_name<T>() -> Text {
+    T.name()
+}
+
+// =============================================================================
+// META ATTRIBUTES
+// =============================================================================
+
+@derive(Debug, Clone, Eq)
+type MetaPoint is {
+    x: Int,
+    y: Int,
+};
+
+@repr(C)
+type CCompatible is {
+    a: Int,
+    b: Float,
+};
+
+@cfg(target_os = "linux")
+fn linux_only() {
+    print("Linux specific code");
+}
+
+// =============================================================================
+// CONST EVALUATION
+// Note: Uses 'const' keyword, not '@const'
+// =============================================================================
+
+const SIZE: Int = factorial(5);
+
+const TABLE: [Int; 10] = compute_table();
+
+meta fn compute_table() -> [Int; 10] {
+    let mut result = [0; 10];
+    let mut i = 0;
+    while i < 10 {
+        result[i] = i * i;
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// COMPILE-TIME ASSERTIONS (as meta function)
+// Note: Meta expressions can be used inside functions
+// =============================================================================
+
+meta fn validate_constants() {
+    assert(SIZE > 0, "SIZE must be positive");
+    assert(is_copy<Int>(), "Int must be Copy");
+}
+
+// =============================================================================
+// META TYPE CONSTRUCTION
+// =============================================================================
+
+meta fn make_wrapper_type<T>() -> TypeDef {
+    TypeDef.struct_type(
+        f"Wrapper_{T.name()}",
+        [Field { name: "value", ty: T }]
+    )
+}
+
+// =============================================================================
+// VISIBILITY
+// =============================================================================
+
+pub meta fn public_meta() -> Int {
+    42
+}
+
+// Note: Visibility must come before 'meta' modifier
+pub meta fn meta_public() -> Int {
+    42
+}

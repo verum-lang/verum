@@ -1,0 +1,268 @@
+// @test: verify-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, smt, verification, error
+// @expected-error: E502 "SMT verification failed"
+
+/// Equality proofs via SMT - failure cases
+///
+/// These tests verify that the SMT solver correctly rejects
+/// invalid equality claims.
+
+/// Arithmetic equality failures
+module ArithmeticFails {
+    /// ERROR: 2 + 2 != 5
+    @verify
+    fn two_plus_two_is_five() -> Eq<2 + 2, 5> {
+        Eq.smt_proof()  // ERROR: SMT cannot prove 4 = 5
+    }
+
+    /// ERROR: Commutativity claim is wrong
+    @verify
+    fn add_not_comm(a: Nat, b: Nat) -> Eq<a + b, a - b> {
+        Eq.smt_proof()  // ERROR: a + b != a - b in general
+    }
+
+    /// ERROR: Associativity with wrong grouping
+    @verify
+    fn mul_assoc_wrong(a: Nat, b: Nat, c: Nat) -> Eq<(a * b) * c, a * (b + c)> {
+        Eq.smt_proof()  // ERROR: (a*b)*c != a*(b+c)
+    }
+
+    /// ERROR: Distributivity with wrong operation
+    @verify
+    fn distributive_wrong(a: Nat, b: Nat, c: Nat) -> Eq<a * (b + c), a + b * a + c> {
+        Eq.smt_proof()  // ERROR: Wrong expansion
+    }
+
+    /// ERROR: Division claim that doesn't hold
+    @verify
+    fn div_wrong(a: Nat, b: Nat) -> Eq<a / b * b, a>
+    where b > 0 {
+        Eq.smt_proof()  // ERROR: Only true when a % b == 0
+    }
+}
+
+/// Integer equality failures
+module IntegerFails {
+    /// ERROR: Negation claim is wrong
+    @verify
+    fn neg_wrong(n: Int) -> Eq<-(-n), -n> {
+        Eq.smt_proof()  // ERROR: -(-n) = n, not -n
+    }
+
+    /// ERROR: Subtraction claim is wrong
+    @verify
+    fn sub_wrong(n: Int) -> Eq<n - n, n> {
+        Eq.smt_proof()  // ERROR: n - n = 0, not n
+    }
+
+    /// ERROR: Add negation claim is wrong
+    @verify
+    fn add_neg_wrong(a: Int, b: Int) -> Eq<a + (-b), a + b> {
+        Eq.smt_proof()  // ERROR: a + (-b) = a - b, not a + b
+    }
+
+    /// ERROR: Multiplication sign claim is wrong
+    @verify
+    fn mul_neg_wrong(a: Int, b: Int) -> Eq<(-a) * b, a * b> {
+        Eq.smt_proof()  // ERROR: (-a) * b = -(a * b), not a * b
+    }
+}
+
+/// List equality failures
+module ListFails {
+    /// ERROR: Append nil claim is wrong
+    @verify
+    fn append_nil_wrong<T>(xs: List<T>) -> Eq<xs ++ [], []> {
+        Eq.smt_proof()  // ERROR: xs ++ [] = xs, not []
+    }
+
+    /// ERROR: Length append claim is wrong
+    @verify
+    fn length_append_wrong<T>(xs: List<T>, ys: List<T>)
+        -> Eq<len(xs ++ ys), len(xs) * len(ys)>
+    {
+        Eq.smt_proof()  // ERROR: Should be len(xs) + len(ys)
+    }
+
+    /// ERROR: Reverse claim is wrong
+    @verify
+    fn length_reverse_wrong<T>(xs: List<T>) -> Eq<len(reverse(xs)), len(xs) + 1> {
+        Eq.smt_proof()  // ERROR: reverse preserves length, doesn't add 1
+    }
+
+    /// ERROR: Map length claim is wrong
+    @verify
+    fn length_map_wrong<T, U>(xs: List<T>, f: fn(T) -> U)
+        -> Eq<len(map(xs, f)), 0>
+    {
+        Eq.smt_proof()  // ERROR: map preserves length
+    }
+}
+
+/// Conditional equality failures
+module ConditionalFails {
+    /// ERROR: if true claim is wrong
+    @verify
+    fn if_true_wrong<T>(x: T, y: T) -> Eq<if true { x } else { y }, y> {
+        Eq.smt_proof()  // ERROR: if true returns x, not y
+    }
+
+    /// ERROR: if false claim is wrong
+    @verify
+    fn if_false_wrong<T>(x: T, y: T) -> Eq<if false { x } else { y }, x> {
+        Eq.smt_proof()  // ERROR: if false returns y, not x
+    }
+
+    /// ERROR: if not claim is wrong
+    @verify
+    fn if_not_wrong<T>(cond: Bool, x: T, y: T)
+        -> Eq<if !cond { x } else { y }, if cond { x } else { y }>
+    {
+        Eq.smt_proof()  // ERROR: Negation swaps branches
+    }
+}
+
+/// Modular arithmetic failures
+module ModularFails {
+    /// ERROR: mod mod claim is wrong
+    @verify
+    fn mod_mod_wrong(a: Nat, n: Nat) -> Eq<(a % n) % n, a>
+    where n > 0 {
+        Eq.smt_proof()  // ERROR: (a % n) % n = a % n, not a
+    }
+
+    /// ERROR: mod claim is wrong
+    @verify
+    fn zero_mod_wrong(n: Nat) -> Eq<0 % n, n>
+    where n > 0 {
+        Eq.smt_proof()  // ERROR: 0 % n = 0, not n
+    }
+
+    /// ERROR: self mod claim is wrong
+    @verify
+    fn mod_self_wrong(n: Nat) -> Eq<n % n, n>
+    where n > 0 {
+        Eq.smt_proof()  // ERROR: n % n = 0, not n
+    }
+}
+
+/// Bitwise equality failures
+module BitwiseFails {
+    /// ERROR: xor self claim is wrong
+    @verify
+    fn xor_self_wrong(x: U64) -> Eq<x ^ x, x> {
+        Eq.smt_proof()  // ERROR: x ^ x = 0, not x
+    }
+
+    /// ERROR: and zero claim is wrong
+    @verify
+    fn and_zero_wrong(x: U64) -> Eq<x & 0, x> {
+        Eq.smt_proof()  // ERROR: x & 0 = 0, not x
+    }
+
+    /// ERROR: De Morgan claim is wrong
+    @verify
+    fn de_morgan_wrong(x: U64, y: U64) -> Eq<!(x & y), !x & !y> {
+        Eq.smt_proof()  // ERROR: !(x & y) = !x | !y, not !x & !y
+    }
+}
+
+/// Min/Max failures
+module MinMaxFails {
+    /// ERROR: min self claim is wrong
+    @verify
+    fn min_self_wrong(a: Int) -> Eq<min(a, a), 0> {
+        Eq.smt_proof()  // ERROR: min(a, a) = a, not 0
+    }
+
+    /// ERROR: min max identity claim is wrong
+    @verify
+    fn min_max_wrong(a: Int, b: Int) -> Eq<min(a, b) + max(a, b), a * b> {
+        Eq.smt_proof()  // ERROR: min + max = a + b, not a * b
+    }
+
+    /// ERROR: min associativity claim is wrong
+    @verify
+    fn min_assoc_wrong(a: Int, b: Int, c: Int) -> Eq<min(min(a, b), c), min(a, c)> {
+        Eq.smt_proof()  // ERROR: Should be min(a, min(b, c))
+    }
+}
+
+/// Complex proof failures
+module ComplexFails {
+    /// ERROR: Quadratic factoring claim is wrong
+    @verify
+    fn quadratic_wrong(a: Int, b: Int)
+        -> Eq<(a + b) * (a - b), a * a + b * b>
+    {
+        Eq.smt_proof()  // ERROR: (a+b)(a-b) = a^2 - b^2, not a^2 + b^2
+    }
+
+    /// ERROR: Perfect square claim is wrong
+    @verify
+    fn perfect_square_wrong(a: Int, b: Int)
+        -> Eq<(a + b) * (a + b), a * a + b * b>
+    {
+        Eq.smt_proof()  // ERROR: Missing 2ab term
+    }
+
+    /// ERROR: Sum formula claim is wrong
+    @verify
+    fn sum_formula_wrong(n: Nat)
+        -> Eq<2 * sum_to(n), n * n>
+    {
+        Eq.smt_proof()  // ERROR: Should be n * (n + 1)
+    }
+}
+
+/// Dependent type SMT failures
+module DependentFails {
+    /// ERROR: Vec concat length claim is wrong
+    @verify
+    fn vec_concat_wrong<T, M: meta Nat, N: meta Nat>(
+        xs: Vect<T, M>,
+        ys: Vect<T, N>
+    ) -> Eq<len(concat(xs, ys)), M * N> {
+        Eq.smt_proof()  // ERROR: Should be M + N
+    }
+
+    /// ERROR: Safe index bounds claim is wrong
+    @verify
+    fn safe_index_wrong<T, N: meta Nat>(
+        arr: &[T; N],
+        i: Fin<N>
+    ) -> Proof<i.to_nat() >= N> {
+        Proof.smt()  // ERROR: Fin<N> guarantees i < N, not i >= N
+    }
+
+    /// ERROR: Matrix dims claim is wrong for non-commutative case
+    @verify
+    fn matmul_dims_wrong<M: meta Nat, N: meta Nat, K: meta Nat>()
+        -> Proof<M * N == K>
+    where M > 0, N > 0 {
+        Proof.smt()  // ERROR: M * N doesn't equal arbitrary K
+    }
+}
+
+fn main() {
+    // All proofs should fail SMT verification
+
+    // Arithmetic failures
+    let _ = ArithmeticFails.two_plus_two_is_five();
+    let _ = ArithmeticFails.mul_assoc_wrong(2, 3, 4);
+
+    // Integer failures
+    let _ = IntegerFails.neg_wrong(5);
+    let _ = IntegerFails.sub_wrong(10);
+
+    // List failures
+    let _ = ListFails.append_nil_wrong([1, 2, 3]);
+
+    // Bitwise failures
+    let _ = BitwiseFails.xor_self_wrong(0xFF);
+
+    // Complex failures
+    let _ = ComplexFails.quadratic_wrong(3, 4);
+}

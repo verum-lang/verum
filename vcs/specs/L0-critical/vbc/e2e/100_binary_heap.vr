@@ -1,0 +1,248 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, binary-heap, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Min-heap with insert (bubble-up) and extract-min (bubble-down), 8 elements max
+
+// ============================================================================
+// Heap type (fixed-size array of 8 elements)
+// ============================================================================
+
+type Heap8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn heap_new() -> Heap8 {
+    Heap8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn h_get(h: Heap8, i: Int) -> Int {
+    if i == 0 { h.e0 } else if i == 1 { h.e1 } else if i == 2 { h.e2 }
+    else if i == 3 { h.e3 } else if i == 4 { h.e4 } else if i == 5 { h.e5 }
+    else if i == 6 { h.e6 } else { h.e7 }
+}
+
+fn h_set(h: Heap8, i: Int, val: Int) -> Heap8 {
+    Heap8 {
+        e0: if i == 0 { val } else { h.e0 },
+        e1: if i == 1 { val } else { h.e1 },
+        e2: if i == 2 { val } else { h.e2 },
+        e3: if i == 3 { val } else { h.e3 },
+        e4: if i == 4 { val } else { h.e4 },
+        e5: if i == 5 { val } else { h.e5 },
+        e6: if i == 6 { val } else { h.e6 },
+        e7: if i == 7 { val } else { h.e7 },
+        len: h.len
+    }
+}
+
+// ============================================================================
+// Heap helpers
+// ============================================================================
+
+fn parent_idx(i: Int) -> Int {
+    (i - 1) / 2
+}
+
+fn left_child(i: Int) -> Int {
+    2 * i + 1
+}
+
+fn right_child(i: Int) -> Int {
+    2 * i + 2
+}
+
+fn swap_elems(h: Heap8, i: Int, j: Int) -> Heap8 {
+    let vi = h_get(h, i);
+    let vj = h_get(h, j);
+    let tmp = h_set(h, i, vj);
+    h_set(tmp, j, vi)
+}
+
+// ============================================================================
+// Insert with bubble-up
+// ============================================================================
+
+fn heap_insert(h: Heap8, val: Int) -> Heap8 {
+    let idx = h.len;
+    let mut result = h_set(h, idx, val);
+    result = Heap8 {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: h.len + 1
+    };
+    // Bubble up
+    let mut cur = idx;
+    let mut done = 0;
+    while done == 0 {
+        if cur == 0 {
+            done = 1;
+        } else {
+            let p = parent_idx(cur);
+            let cv = h_get(result, cur);
+            let pv = h_get(result, p);
+            if cv < pv {
+                result = swap_elems(result, cur, p);
+                cur = p;
+            } else {
+                done = 1;
+            }
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Extract-min with bubble-down
+// ============================================================================
+
+fn heap_peek_min(h: Heap8) -> Int {
+    h_get(h, 0)
+}
+
+fn heap_extract_min(h: Heap8) -> Heap8 {
+    let new_len = h.len - 1;
+    // Move last element to root
+    let last_val = h_get(h, new_len);
+    let mut result = h_set(h, 0, last_val);
+    result = Heap8 {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: new_len
+    };
+    // Bubble down
+    let mut cur = 0;
+    let mut done = 0;
+    while done == 0 {
+        let lc = left_child(cur);
+        let rc = right_child(cur);
+        let mut smallest = cur;
+        if lc < result.len {
+            if h_get(result, lc) < h_get(result, smallest) {
+                smallest = lc;
+            }
+        }
+        if rc < result.len {
+            if h_get(result, rc) < h_get(result, smallest) {
+                smallest = rc;
+            }
+        }
+        if smallest == cur {
+            done = 1;
+        } else {
+            result = swap_elems(result, cur, smallest);
+            cur = smallest;
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_insert_and_min() -> Int {
+    let mut h = heap_new();
+    h = heap_insert(h, 50);
+    h = heap_insert(h, 30);
+    h = heap_insert(h, 70);
+    h = heap_insert(h, 10);
+    h = heap_insert(h, 40);
+    // Min should be 10
+    assert_eq(heap_peek_min(h), 10);
+    assert_eq(h.len, 5);
+    0
+}
+
+@test
+fn test_extract_min_order() -> Int {
+    let mut h = heap_new();
+    h = heap_insert(h, 5);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 8);
+    h = heap_insert(h, 1);
+    h = heap_insert(h, 4);
+    // Extract in order: 1, 3, 4, 5, 8
+    assert_eq(heap_peek_min(h), 1);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 3);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 4);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 5);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 8);
+    assert_eq(h.len, 1);
+    0
+}
+
+@test
+fn test_heap_property_after_inserts() -> Int {
+    let mut h = heap_new();
+    h = heap_insert(h, 7);
+    h = heap_insert(h, 2);
+    h = heap_insert(h, 9);
+    h = heap_insert(h, 1);
+    // After inserts, root should be minimum (1)
+    assert_eq(h_get(h, 0), 1);
+    // Parent <= children invariant
+    // Parent 0 <= children at 1, 2
+    let p0 = h_get(h, 0);
+    let c1 = h_get(h, 1);
+    let c2 = h_get(h, 2);
+    let p0_le_c1 = if p0 <= c1 { 1 } else { 0 };
+    let p0_le_c2 = if p0 <= c2 { 1 } else { 0 };
+    assert_eq(p0_le_c1, 1);
+    assert_eq(p0_le_c2, 1);
+    0
+}
+
+@test
+fn test_sorted_input() -> Int {
+    // Insert already-sorted values
+    let mut h = heap_new();
+    h = heap_insert(h, 1);
+    h = heap_insert(h, 2);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 4);
+    assert_eq(heap_peek_min(h), 1);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 2);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 3);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 4);
+    assert_eq(h.len, 1);
+    0
+}
+
+@test
+fn test_reverse_sorted_input() -> Int {
+    // Insert reverse-sorted values
+    let mut h = heap_new();
+    h = heap_insert(h, 8);
+    h = heap_insert(h, 6);
+    h = heap_insert(h, 4);
+    h = heap_insert(h, 2);
+    assert_eq(heap_peek_min(h), 2);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 4);
+    h = heap_extract_min(h);
+    assert_eq(heap_peek_min(h), 6);
+    0
+}
+
+fn main() -> Int {
+    test_insert_and_min();
+    test_extract_min_order();
+    test_heap_property_after_inserts();
+    test_sorted_input();
+    test_reverse_sorted_input();
+    print("[OK] 100_binary_heap");
+    0
+}

@@ -1,0 +1,116 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, memory, cbgr
+// @description: Tests bridging CBGR memory safety with FFI raw pointers
+
+type c_int is i32;
+type c_void is ();
+type size_t is usize;
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+    @extern("C")
+    fn free(ptr: *mut c_void);
+}
+
+/// Generation counter for CBGR
+type Generation is { value: u64 };
+
+implement Generation {
+    fn new() -> Generation { Generation { value: 0 } }
+    fn increment(&mut self) { self.value += 1; }
+    fn is_valid(&self) -> Bool { self.value > 0 }
+}
+
+/// Epoch capabilities for CBGR
+type EpochCaps is { epoch: u64 };
+
+/// CBGR-managed FFI pointer
+type CbgrPtr<T> is {
+    ptr: *mut T,
+    generation: Generation,
+    epoch_caps: EpochCaps,
+};
+
+type CbgrError is
+    | StaleGeneration
+    | NullPointer
+    | EpochViolation;
+
+implement<T> CbgrPtr<T> {
+    fn new(ptr: *mut T) -> CbgrPtr<T> {
+        CbgrPtr {
+            ptr,
+            generation: Generation.new(),
+            epoch_caps: EpochCaps { epoch: 0 },
+        }
+    }
+
+    fn borrow(&self) -> Result<&T, CbgrError> {
+        if self.ptr.is_null() {
+            Err(CbgrError.NullPointer)
+        } else if !self.generation.is_valid() {
+            Err(CbgrError.StaleGeneration)
+        } else {
+            Ok(unsafe { &*self.ptr })
+        }
+    }
+
+    fn borrow_mut(&mut self) -> Result<&mut T, CbgrError> {
+        if self.ptr.is_null() {
+            Err(CbgrError.NullPointer)
+        } else {
+            Ok(unsafe { &mut *self.ptr })
+        }
+    }
+}
+
+/// Bridge from raw C pointer to CBGR-managed
+fn bridge_from_c<T>(raw: *mut T) -> Result<CbgrPtr<T>, CbgrError> {
+    if raw.is_null() {
+        Err(CbgrError.NullPointer)
+    } else {
+        Ok(CbgrPtr.new(raw))
+    }
+}
+
+/// Export CBGR pointer to C (strips safety)
+fn export_to_c<T>(cbgr: &CbgrPtr<T>) -> *mut T {
+    cbgr.ptr
+}
+
+/// RAII wrapper for C-allocated memory with CBGR tracking
+type TrackedAllocation is {
+    ptr: *mut c_void,
+    size: size_t,
+    generation: Generation,
+};
+
+implement TrackedAllocation {
+    fn new(size: size_t) -> Maybe<TrackedAllocation> {
+        let ptr = unsafe { libc.malloc(size) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(TrackedAllocation {
+                ptr,
+                size,
+                generation: Generation.new(),
+            })
+        }
+    }
+}
+
+implement Drop for TrackedAllocation {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { libc.free(self.ptr); }
+        }
+    }
+}
+
+fn main() {
+    let alloc = TrackedAllocation.new(1024);
+}

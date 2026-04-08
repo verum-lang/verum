@@ -1,0 +1,82 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: try, f-string, text, result, string-tracking, e2e
+// @description: Test that f-string interpolation works correctly with ? operator results inside try blocks
+
+type ParseError is Invalid(Text) | Empty;
+
+fn parse_name(s: Text) -> Result<Text, ParseError> {
+    if s == "" {
+        Err(ParseError.Empty)
+    } else {
+        Ok(s)
+    }
+}
+
+fn parse_greeting(name: Text, title: Text) -> Result<Text, ParseError> {
+    if title == "" {
+        Err(ParseError.Invalid("empty title"))
+    } else {
+        Ok(f"{title} {name}")
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: single ? result in f-string
+    let r1 = try {
+        let name = parse_name("Alice")?;
+        f"Hello, {name}!"
+    } recover |_| {
+        "error"
+    };
+    if r1 != "Hello, Alice!" {
+        print(f"FAIL 1: r1 = {r1}");
+        f = f + 1;
+    }
+
+    // Test 2: two ? results in f-string
+    let r2 = try {
+        let first = parse_name("Bob")?;
+        let last = parse_name("Smith")?;
+        f"{first} {last}"
+    } recover |_| {
+        "error"
+    };
+    if r2 != "Bob Smith" {
+        print(f"FAIL 2: r2 = {r2}");
+        f = f + 1;
+    }
+
+    // Test 3: ? result used in print inside try
+    let r3 = try {
+        let name = parse_name("Charlie")?;
+        print(f"  greeting: Hello, {name}");
+        name
+    } recover |_| {
+        "error"
+    };
+    if r3 != "Charlie" {
+        print(f"FAIL 3: r3 = {r3}");
+        f = f + 1;
+    }
+
+    // Test 4: chained function calls with ?
+    let r4 = try {
+        let greeting = parse_greeting("Diana", "Dr.")?;
+        f"Welcome, {greeting}!"
+    } recover |_| {
+        "error"
+    };
+    if r4 != "Welcome, Dr. Diana!" {
+        print(f"FAIL 4: r4 = {r4}");
+        f = f + 1;
+    }
+
+    if f == 0 {
+        print("All try f-string text tests passed");
+    }
+    f
+}

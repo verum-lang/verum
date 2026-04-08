@@ -1,0 +1,95 @@
+// @test: run
+// @expected-stdout: UserService initialized with database and cache
+// User found: Alice
+// @tier: 0
+// @level: L2
+// @tags: di, inject, constructor
+// @description: Tests @inject on constructor for automatic dependency resolution
+
+@injectable(Scope.Singleton)
+type DatabaseConnection is {
+    connection_string: Text,
+    connected: Bool,
+};
+
+implement DatabaseConnection {
+    @inject
+    fn new() -> Self {
+        Self {
+            connection_string: "postgres://localhost/app",
+            connected: true,
+        }
+    }
+
+    fn query(&self, sql: Text) -> Maybe<Text> {
+        // Simulated query
+        if sql.contains("SELECT") {
+            Some("Alice")
+        } else {
+            None
+        }
+    }
+}
+
+@injectable(Scope.Singleton)
+type CacheService is {
+    enabled: Bool,
+};
+
+implement CacheService {
+    @inject
+    fn new() -> Self {
+        Self { enabled: true }
+    }
+
+    fn get(&self, key: Text) -> Maybe<Text> {
+        None // Cache miss for demo
+    }
+
+    fn set(&self, key: Text, value: Text) {
+        // Store in cache
+    }
+}
+
+@injectable(Scope.Singleton)
+type UserService is {
+    db: DatabaseConnection,
+    cache: CacheService,
+};
+
+implement UserService {
+    // @inject marks this constructor for automatic DI
+    // Dependencies (DatabaseConnection, CacheService) are automatically resolved
+    @inject
+    fn new(db: DatabaseConnection, cache: CacheService) -> Self {
+        println("UserService initialized with database and cache");
+        Self { db, cache }
+    }
+
+    fn find_user(&self, id: Int) -> Maybe<Text> {
+        // Try cache first
+        let cache_key = "user:" + id.to_text();
+        match self.cache.get(cache_key) {
+            Some(user) => Some(user),
+            None => {
+                // Cache miss - query database
+                let result = self.db.query("SELECT name FROM users WHERE id = " + id.to_text());
+                if let Some(user) = result {
+                    self.cache.set(cache_key, user);
+                }
+                result
+            }
+        }
+    }
+}
+
+fn main() {
+    // UserService is automatically constructed with its dependencies
+    let user_service = inject UserService;
+
+    // Use the service
+    match user_service.find_user(1) {
+        Some(name) => println("User found: " + name),
+        None => println("User not found"),
+    }
+}

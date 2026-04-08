@@ -1,0 +1,146 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, sliding_window, deque, maximum, monotonic_queue
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Sliding window maximum using a deque-based monotonic queue.
+// The deque stores indices in decreasing order of their array values.
+// For each new element, pop from back while it's smaller; pop from front when out of window.
+
+// Deque backed by a fixed array with head/tail pointers.
+// dq[0] = head index, dq[1] = tail index (exclusive), dq[2..] = stored values.
+// Max capacity: 32 elements.
+
+fn dq_make(dq: [Int; 34]) {
+    dq[0] = 2;   // head
+    dq[1] = 2;   // tail
+}
+
+fn dq_size(dq: [Int; 34]) -> Int { dq[1] - dq[0] }
+fn dq_empty(dq: [Int; 34]) -> Int { if dq[1] == dq[0] { 1 } else { 0 } }
+fn dq_front(dq: [Int; 34]) -> Int { dq[dq[0]] }
+fn dq_back(dq: [Int; 34]) -> Int { dq[dq[1] - 1] }
+
+fn dq_push_back(dq: [Int; 34], v: Int) {
+    dq[dq[1]] = v;
+    dq[1] = dq[1] + 1;
+}
+
+fn dq_pop_front(dq: [Int; 34]) {
+    if dq[0] < dq[1] { dq[0] = dq[0] + 1; }
+}
+
+fn dq_pop_back(dq: [Int; 34]) {
+    if dq[0] < dq[1] { dq[1] = dq[1] - 1; }
+}
+
+// Compute sliding window maximum of arr[0..n-1] with window size k.
+// Writes result into out[0..n-k].
+fn sliding_window_max(arr: [Int; 32], n: Int, k: Int, out: [Int; 32]) {
+    let mut dq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0];
+    dq_make(dq);
+    let mut i = 0;
+    while i < n {
+        // Remove indices outside window.
+        while dq_empty(dq) == 0 && dq_front(dq) <= i - k {
+            dq_pop_front(dq);
+        }
+        // Remove smaller elements from back.
+        while dq_empty(dq) == 0 && arr[dq_back(dq)] <= arr[i] {
+            dq_pop_back(dq);
+        }
+        dq_push_back(dq, i);
+        // Record max when first full window is complete.
+        if i >= k - 1 {
+            out[i - k + 1] = arr[dq_front(dq)];
+        }
+        i = i + 1;
+    }
+}
+
+fn test_basic_window() {
+    // arr = [1, 3, -1, -3, 5, 3, 6, 7], k = 3
+    // Windows: [1,3,-1]=3, [3,-1,-3]=3, [-1,-3,5]=5, [-3,5,3]=5, [5,3,6]=6, [3,6,7]=7
+    let mut arr = [1, 3, 999, 999, 5, 3, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    arr[2] = -1;
+    arr[3] = -3;
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sliding_window_max(arr, 8, 3, out);
+    assert_eq(out[0], 3);
+    assert_eq(out[1], 3);
+    assert_eq(out[2], 5);
+    assert_eq(out[3], 5);
+    assert_eq(out[4], 6);
+    assert_eq(out[5], 7);
+    print("basic_window: ok");
+}
+
+fn test_window_size_one() {
+    // k=1: max of each single element = the element itself.
+    let mut arr = [4, 2, 7, 1, 9, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sliding_window_max(arr, 6, 1, out);
+    assert_eq(out[0], 4);
+    assert_eq(out[1], 2);
+    assert_eq(out[2], 7);
+    assert_eq(out[3], 1);
+    assert_eq(out[4], 9);
+    assert_eq(out[5], 3);
+    print("window_size_one: ok");
+}
+
+fn test_window_full_array() {
+    // k = n: only one window, max of all elements.
+    let mut arr = [5, 2, 8, 1, 3, 9, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sliding_window_max(arr, 7, 7, out);
+    assert_eq(out[0], 9);
+    print("window_full_array: ok");
+}
+
+fn test_non_decreasing() {
+    // Monotone increasing: max of each window is the last element.
+    // arr = [1,2,3,4,5,6,7,8], k=3 -> [3,4,5,6,7,8]
+    let mut arr = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sliding_window_max(arr, 8, 3, out);
+    assert_eq(out[0], 3);
+    assert_eq(out[1], 4);
+    assert_eq(out[5], 8);
+    print("non_decreasing: ok");
+}
+
+fn test_all_equal() {
+    // All elements equal: every window max is the same value.
+    let mut arr = [7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    sliding_window_max(arr, 6, 2, out);
+    assert_eq(out[0], 7);
+    assert_eq(out[2], 7);
+    assert_eq(out[4], 7);
+    print("all_equal: ok");
+}
+
+fn main() -> Int {
+    test_basic_window();
+    test_window_size_one();
+    test_window_full_array();
+    test_non_decreasing();
+    test_all_equal();
+    print("[OK] 525_interp_sliding_window_max");
+    0
+}

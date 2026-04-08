@@ -1,0 +1,34 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, build_assets, security, symlink, error
+// @description: Tests that build asset functions require context
+// @expected-error: requires
+
+// =============================================================================
+// BUILD ASSETS REQUIRE CONTEXT
+// =============================================================================
+
+// Test that load_text requires BuildAssets context
+meta fn test_load_text_needs_context() -> Text {
+    load_text("some_file")  // ERROR: requires BuildAssets context
+}
+
+// Test that include_str requires BuildAssets context
+meta fn test_include_str_needs_context() -> Text {
+    include_str("template.html")  // ERROR: requires BuildAssets context
+}
+
+// Test that asset_exists requires BuildAssets context
+meta fn test_asset_exists_needs_context() -> Bool {
+    asset_exists("file.txt")  // ERROR: requires BuildAssets context
+}
+
+// Test that asset_list_dir requires BuildAssets context
+meta fn test_list_dir_needs_context() -> () {
+    asset_list_dir("some_dir/");  // ERROR: requires BuildAssets context
+}
+
+fn main() {
+    @const test_load_text_needs_context();
+}

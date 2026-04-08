@@ -1,0 +1,43 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: default_params, function
+// @expect: pass
+
+// Test default function parameters.
+
+fn greet(name: Text, greeting: Text = "Hello") -> Text {
+    f"{greeting}, {name}!"
+}
+
+fn compute(a: Int, b: Int = 0, c: Int = 0) -> Int {
+    a + b + c
+}
+
+fn main() -> Int {
+    // Test with all args provided
+    let r1 = compute(1, 2, 3);
+    if r1 != 6 {
+        print(f"FAIL: compute(1,2,3) = {r1}");
+        return 1;
+    }
+
+    // Test with default c
+    let r2 = compute(10, 20);
+    // c defaults to 0, so 10 + 20 + 0 = 30
+    if r2 != 30 {
+        print(f"FAIL: compute(10,20) = {r2}");
+        return 1;
+    }
+
+    // Test with both defaults
+    let r3 = compute(5);
+    // b=0, c=0, so 5 + 0 + 0 = 5
+    if r3 != 5 {
+        print(f"FAIL: compute(5) = {r3}");
+        return 1;
+    }
+
+    print("PASS: default params work");
+    0
+}

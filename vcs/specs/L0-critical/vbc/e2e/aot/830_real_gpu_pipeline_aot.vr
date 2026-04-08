@@ -1,0 +1,114 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, gpu, real-opcode, pipeline
+// @expected-exit: 0
+
+// Tests full GPU pipeline through AOT (LLVM): alloc -> memset -> copy -> sync -> free.
+// Mirror of interpreter test 210. Validates the complete lifecycle of GPU
+// resource management via the AOT compilation path.
+
+// GPU intrinsic declarations (all needed for full pipeline)
+fn gpu_stream_create() -> Int { @intrinsic("GPU_STREAM_CREATE") }
+fn gpu_stream_destroy(stream_id: Int) -> Int { @intrinsic("GPU_STREAM_DESTROY", stream_id) }
+fn gpu_sync(stream_id: Int) -> Int { @intrinsic("GPU_SYNC", stream_id) }
+fn gpu_event_create() -> Int { @intrinsic("GPU_EVENT_CREATE") }
+fn gpu_event_record(event: Int, stream_id: Int) -> Int { @intrinsic("GPU_EVENT_RECORD", event, stream_id) }
+fn gpu_event_sync(event: Int) -> Int { @intrinsic("GPU_EVENT_SYNC", event) }
+fn gpu_event_destroy(event: Int) -> Int { @intrinsic("GPU_EVENT_DESTROY", event) }
+fn gpu_event_elapsed(start_event: Int, end_event: Int) -> Int { @intrinsic("GPU_EVENT_ELAPSED", start_event, end_event) }
+fn gpu_malloc(size: Int, space: Int) -> Int { @intrinsic("GPU_MALLOC", size, space) }
+fn gpu_free(ptr: Int) -> Int { @intrinsic("GPU_FREE", ptr) }
+fn gpu_memset(ptr: Int, value: Int, size: Int) -> Int { @intrinsic("GPU_MEMSET", ptr, value, size) }
+fn gpu_memcpy(dst: Int, src: Int, size: Int) -> Int { @intrinsic("GPU_MEMCPY", dst, src, size) }
+fn gpu_malloc_managed(size: Int) -> Int { @intrinsic("GPU_MALLOC_MANAGED", size) }
+fn gpu_prefetch(ptr: Int, size: Int, device: Int) -> Int { @intrinsic("GPU_PREFETCH", ptr, size, device) }
+
+fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
+
+fn main() -> Int {
+    if gpu_get_device() == 0 {
+        print("SKIP: No GPU device available");
+        return 0;
+    }
+
+    let mut errors = 0;
+
+    // --- Full Pipeline Test ---
+    // 1. Create stream
+    let stream_val = gpu_stream_create();
+    if stream_val < 0 { errors = errors + 1; }
+
+    // 2. Create events for timing
+    let start_event = gpu_event_create();
+    let end_event = gpu_event_create();
+    if start_event < 0 { errors = errors + 1; }
+    if end_event < 0 { errors = errors + 1; }
+
+    // 3. Allocate source and destination buffers
+    let src = gpu_malloc(4096, 0);
+    let dst = gpu_malloc(4096, 0);
+    if src == 0 { errors = errors + 1; }
+    if dst == 0 { errors = errors + 1; }
+
+    // 4. Record start event
+    let rec1 = gpu_event_record(start_event, stream_val);
+    if rec1 != 0 { errors = errors + 1; }
+
+    // 5. Initialize source with memset
+    let ms = gpu_memset(src, 42, 4096);
+    if ms != 0 { errors = errors + 1; }
+
+    // 6. Copy source to destination
+    let cp = gpu_memcpy(dst, src, 4096);
+    if cp != 0 { errors = errors + 1; }
+
+    // 7. Record end event
+    let rec2 = gpu_event_record(end_event, stream_val);
+    if rec2 != 0 { errors = errors + 1; }
+
+    // 8. Sync stream
+    let sync_res = gpu_sync(stream_val);
+    if sync_res != 0 { errors = errors + 1; }
+
+    // 9. Sync events
+    let se1 = gpu_event_sync(start_event);
+    let se2 = gpu_event_sync(end_event);
+    if se1 != 0 { errors = errors + 1; }
+    if se2 != 0 { errors = errors + 1; }
+
+    // 10. Check elapsed time (should be >= 0)
+    let elapsed = gpu_event_elapsed(start_event, end_event);
+    if elapsed < 0 { errors = errors + 1; }
+
+    // 11. Cleanup: free memory
+    let f1 = gpu_free(src);
+    let f2 = gpu_free(dst);
+    if f1 != 0 { errors = errors + 1; }
+    if f2 != 0 { errors = errors + 1; }
+
+    // 12. Destroy events
+    let de1 = gpu_event_destroy(start_event);
+    let de2 = gpu_event_destroy(end_event);
+    if de1 != 0 { errors = errors + 1; }
+    if de2 != 0 { errors = errors + 1; }
+
+    // 13. Destroy stream
+    let ds = gpu_stream_destroy(stream_val);
+    if ds != 0 { errors = errors + 1; }
+
+    // --- Second pipeline: managed memory ---
+    let managed = gpu_malloc_managed(2048);
+    if managed == 0 { errors = errors + 1; }
+
+    let pf = gpu_prefetch(managed, 2048, 0);
+    if pf != 0 { errors = errors + 1; }
+
+    let ms2 = gpu_memset(managed, 0, 2048);
+    if ms2 != 0 { errors = errors + 1; }
+
+    let fm = gpu_free(managed);
+    if fm != 0 { errors = errors + 1; }
+
+    errors
+}

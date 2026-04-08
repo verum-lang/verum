@@ -1,0 +1,268 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, scc, kosaraju, strongly-connected
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Kosaraju's algorithm for strongly connected components.
+// Uses Arr16 for 4x4 adjacency. Two passes: DFS for finish order, then DFS on
+// transposed graph to find SCCs.
+
+// =============================================================================
+// Arr16 for 4x4 adjacency, Arr4 for visited/finish/component
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn edge_get(m: Arr16, i: Int, j: Int) -> Int { a16_get(m, i * 4 + j) }
+fn edge_add(m: Arr16, i: Int, j: Int) -> Arr16 { a16_set(m, i * 4 + j, 1) }
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+fn arr4_fill(v: Int) -> Arr4 { Arr4 { e0: v, e1: v, e2: v, e3: v } }
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+// =============================================================================
+// Transpose
+// =============================================================================
+
+fn transpose(adj: Arr16, n: Int) -> Arr16 {
+    let mut tr = a16_zeros();
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            if edge_get(adj, i, j) == 1 { tr = edge_add(tr, j, i); }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    tr
+}
+
+// =============================================================================
+// Iterative DFS pass 1: compute finish order
+// =============================================================================
+
+type DFS1State is { visited: Arr4, finish_order: Arr4, finish_count: Int };
+
+fn dfs1_from(adj: Arr16, n: Int, start: Int, state: DFS1State) -> DFS1State {
+    if arr4_get(state.visited, start) == 1 { return state; }
+
+    let mut stk_node = arr4_fill(0);
+    let mut stk_next = arr4_fill(0);
+    let mut sp = 0;
+    let mut vis = arr4_set(state.visited, start, 1);
+    let mut fo = state.finish_order;
+    let mut fc = state.finish_count;
+
+    stk_node = arr4_set(stk_node, sp, start);
+    stk_next = arr4_set(stk_next, sp, 0);
+    sp = sp + 1;
+
+    while sp > 0 {
+        let top = sp - 1;
+        let node = arr4_get(stk_node, top);
+        let nb = arr4_get(stk_next, top);
+        if nb >= n {
+            sp = sp - 1;
+            fo = arr4_set(fo, fc, node);
+            fc = fc + 1;
+        } else {
+            stk_next = arr4_set(stk_next, top, nb + 1);
+            if edge_get(adj, node, nb) == 1 && arr4_get(vis, nb) == 0 {
+                vis = arr4_set(vis, nb, 1);
+                stk_node = arr4_set(stk_node, sp, nb);
+                stk_next = arr4_set(stk_next, sp, 0);
+                sp = sp + 1;
+            }
+        }
+    }
+    DFS1State { visited: vis, finish_order: fo, finish_count: fc }
+}
+
+// =============================================================================
+// DFS pass 2: assign components
+// =============================================================================
+
+fn dfs2_assign(tr: Arr16, n: Int, start: Int, comp_id: Int, vis: Arr4, comp: Arr4) -> Arr4 {
+    let mut stk = arr4_fill(0);
+    let mut sp = 0;
+    let mut c = arr4_set(comp, start, comp_id);
+    let mut v = arr4_set(vis, start, 1);
+    stk = arr4_set(stk, sp, start);
+    sp = sp + 1;
+    while sp > 0 {
+        sp = sp - 1;
+        let node = arr4_get(stk, sp);
+        let mut nb = 0;
+        while nb < n {
+            if edge_get(tr, node, nb) == 1 && arr4_get(v, nb) == 0 {
+                v = arr4_set(v, nb, 1);
+                c = arr4_set(c, nb, comp_id);
+                stk = arr4_set(stk, sp, nb);
+                sp = sp + 1;
+            }
+            nb = nb + 1;
+        }
+    }
+    c
+}
+
+// =============================================================================
+// Kosaraju
+// =============================================================================
+
+type SCCResult is { comp: Arr4, num_scc: Int };
+
+fn kosaraju(adj: Arr16, n: Int) -> SCCResult {
+    let mut state = DFS1State {
+        visited: arr4_fill(0), finish_order: arr4_fill(0), finish_count: 0
+    };
+    let mut i = 0;
+    while i < n {
+        if arr4_get(state.visited, i) == 0 { state = dfs1_from(adj, n, i, state); }
+        i = i + 1;
+    }
+    let tr = transpose(adj, n);
+    let mut vis2 = arr4_fill(0);
+    let mut comp = arr4_fill(-1);
+    let mut num_scc = 0;
+    let mut k = n - 1;
+    while k >= 0 {
+        let node = arr4_get(state.finish_order, k);
+        if arr4_get(vis2, node) == 0 {
+            comp = dfs2_assign(tr, n, node, num_scc, vis2, comp);
+            let mut m = 0;
+            while m < n {
+                if arr4_get(comp, m) == num_scc { vis2 = arr4_set(vis2, m, 1); }
+                m = m + 1;
+            }
+            num_scc = num_scc + 1;
+        }
+        k = k - 1;
+    }
+    SCCResult { comp: comp, num_scc: num_scc }
+}
+
+fn same_scc(comp: Arr4, a: Int, b: Int) -> Int {
+    if arr4_get(comp, a) == arr4_get(comp, b) { 1 } else { 0 }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_simple_cycle() {
+    let mut adj = a16_zeros();
+    adj = edge_add(adj, 0, 1); adj = edge_add(adj, 1, 2); adj = edge_add(adj, 2, 0);
+    let sr = kosaraju(adj, 3);
+    assert_eq(sr.num_scc, 1);
+    assert_eq(same_scc(sr.comp, 0, 1), 1);
+    assert_eq(same_scc(sr.comp, 1, 2), 1);
+}
+
+fn test_no_edges() {
+    let adj = a16_zeros();
+    let sr = kosaraju(adj, 4);
+    assert_eq(sr.num_scc, 4);
+}
+
+fn test_linear_chain() {
+    let mut adj = a16_zeros();
+    adj = edge_add(adj, 0, 1); adj = edge_add(adj, 1, 2); adj = edge_add(adj, 2, 3);
+    let sr = kosaraju(adj, 4);
+    assert_eq(sr.num_scc, 4);
+    assert_eq(same_scc(sr.comp, 0, 1), 0);
+}
+
+fn test_two_sccs() {
+    let mut adj = a16_zeros();
+    adj = edge_add(adj, 0, 1); adj = edge_add(adj, 1, 0);
+    adj = edge_add(adj, 2, 3); adj = edge_add(adj, 3, 2);
+    adj = edge_add(adj, 1, 2);
+    let sr = kosaraju(adj, 4);
+    assert_eq(sr.num_scc, 2);
+    assert_eq(same_scc(sr.comp, 0, 1), 1);
+    assert_eq(same_scc(sr.comp, 2, 3), 1);
+    assert_eq(same_scc(sr.comp, 0, 2), 0);
+}
+
+fn test_single_node() {
+    let adj = a16_zeros();
+    let sr = kosaraju(adj, 1);
+    assert_eq(sr.num_scc, 1);
+}
+
+fn test_self_loop() {
+    let mut adj = a16_zeros();
+    adj = edge_add(adj, 0, 0);
+    let sr = kosaraju(adj, 1);
+    assert_eq(sr.num_scc, 1);
+}
+
+fn test_all_connected() {
+    let mut adj = a16_zeros();
+    adj = edge_add(adj, 0, 1); adj = edge_add(adj, 1, 2);
+    adj = edge_add(adj, 2, 3); adj = edge_add(adj, 3, 0);
+    let sr = kosaraju(adj, 4);
+    assert_eq(sr.num_scc, 1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_simple_cycle();
+    test_no_edges();
+    test_linear_chain();
+    test_two_sccs();
+    test_single_node();
+    test_self_loop();
+    test_all_connected();
+    print("[OK] 325_interp_strongly_connected");
+    0
+}

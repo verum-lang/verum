@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, debug
+// @description: Simplest FFI call test
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_add_i32(a: Int, b: Int) -> Int;
+}
+
+fn main() {
+    // First test a simple value-passing FFI call
+    let a = 10;
+    let b = 32;
+    let result = ffi_add_i32(a, b);
+    print("result="); print(result); print("\n");
+    assert(result == 42);
+}

@@ -1,0 +1,569 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, platform, linux
+// @description: Tests Linux-specific FFI bindings
+
+type c_void is ();
+type c_char is i8;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type size_t is usize;
+type ssize_t is isize;
+
+ffi libc {
+    @extern("C")
+    fn close(fd: c_int) -> c_int;
+    @extern("C")
+    fn read(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t;
+    @extern("C")
+    fn __errno_location() -> *mut c_int;
+}
+
+/// ============================================================
+/// LINUX FFI BINDINGS
+/// ============================================================
+///
+/// Linux-specific system calls and APIs that are not part of POSIX.
+
+@cfg(target_os = "linux")
+
+// ------------------------------------------------------------
+// Linux Types
+// ------------------------------------------------------------
+
+type pid_t is i32;
+type uid_t is u32;
+type gid_t is u32;
+type off_t is i64;
+type size_t is usize;
+type ssize_t is isize;
+type clockid_t is i32;
+
+// ------------------------------------------------------------
+// epoll - Event Polling
+// ------------------------------------------------------------
+
+ffi linux {
+    @extern("C")
+    fn epoll_create(size: c_int) -> c_int;
+
+    @extern("C")
+    fn epoll_create1(flags: c_int) -> c_int;
+
+    @extern("C")
+    fn epoll_ctl(
+        epfd: c_int,
+        op: c_int,
+        fd: c_int,
+        event: *mut epoll_event
+    ) -> c_int;
+
+    @extern("C")
+    fn epoll_wait(
+        epfd: c_int,
+        events: *mut epoll_event,
+        maxevents: c_int,
+        timeout: c_int
+    ) -> c_int;
+
+    @extern("C")
+    fn epoll_pwait(
+        epfd: c_int,
+        events: *mut epoll_event,
+        maxevents: c_int,
+        timeout: c_int,
+        sigmask: *const sigset_t
+    ) -> c_int;
+}
+
+// epoll flags
+const EPOLL_CLOEXEC: c_int = 0x80000;
+
+// epoll operations
+const EPOLL_CTL_ADD: c_int = 1;
+const EPOLL_CTL_DEL: c_int = 2;
+const EPOLL_CTL_MOD: c_int = 3;
+
+// epoll events
+const EPOLLIN: u32 = 0x001;
+const EPOLLOUT: u32 = 0x004;
+const EPOLLERR: u32 = 0x008;
+const EPOLLHUP: u32 = 0x010;
+const EPOLLRDHUP: u32 = 0x2000;
+const EPOLLET: u32 = 0x80000000;
+const EPOLLONESHOT: u32 = 0x40000000;
+
+@repr(C, packed)
+type epoll_event is {
+    events: u32,
+    data: epoll_data_t,
+};
+
+@repr(C)
+type epoll_data_t is { fd: c_int };
+
+type sigset_t is [c_ulong; 16];
+
+type Epoll is {
+    fd: c_int,
+};
+
+implement Epoll {
+    fn new() -> Result<Epoll, LinuxError> {
+        let fd = unsafe { linux.epoll_create1(EPOLL_CLOEXEC) };
+        if fd < 0 {
+            Err(LinuxError.from_errno())
+        } else {
+            Ok(Epoll { fd })
+        }
+    }
+
+    fn add(&self, target_fd: c_int, events: u32, data: u64) -> Result<(), LinuxError> {
+        let mut event = epoll_event {
+            events,
+            data: epoll_data_t { fd: data as c_int },
+        };
+
+        let r = unsafe { linux.epoll_ctl(self.fd, EPOLL_CTL_ADD, target_fd, &mut event) };
+        if r < 0 { Err(LinuxError.from_errno()) } else { Ok(()) }
+    }
+
+    fn modify(&self, target_fd: c_int, events: u32, data: u64) -> Result<(), LinuxError> {
+        let mut event = epoll_event {
+            events,
+            data: epoll_data_t { fd: data as c_int },
+        };
+
+        let r = unsafe { linux.epoll_ctl(self.fd, EPOLL_CTL_MOD, target_fd, &mut event) };
+        if r < 0 { Err(LinuxError.from_errno()) } else { Ok(()) }
+    }
+
+    fn remove(&self, target_fd: c_int) -> Result<(), LinuxError> {
+        let r = unsafe { linux.epoll_ctl(self.fd, EPOLL_CTL_DEL, target_fd, 0 as *mut epoll_event) };
+        if r < 0 { Err(LinuxError.from_errno()) } else { Ok(()) }
+    }
+
+    fn wait(&self, events: &mut [epoll_event], timeout_ms: c_int) -> Result<usize, LinuxError> {
+        let n = unsafe {
+            linux.epoll_wait(self.fd, events.as_mut_ptr(), events.len() as c_int, timeout_ms)
+        };
+
+        if n < 0 {
+            Err(LinuxError.from_errno())
+        } else {
+            Ok(n as usize)
+        }
+    }
+}
+
+implement Drop for Epoll {
+    fn drop(&mut self) {
+        unsafe { libc.close(self.fd) };
+    }
+}
+
+// ------------------------------------------------------------
+// inotify - File System Notifications
+// ------------------------------------------------------------
+
+ffi linux {
+    @extern("C")
+    fn inotify_init() -> c_int;
+
+    @extern("C")
+    fn inotify_init1(flags: c_int) -> c_int;
+
+    @extern("C")
+    fn inotify_add_watch(fd: c_int, pathname: *const c_char, mask: u32) -> c_int;
+
+    @extern("C")
+    fn inotify_rm_watch(fd: c_int, wd: c_int) -> c_int;
+}
+
+// inotify flags
+const IN_NONBLOCK: c_int = 0x800;
+const IN_CLOEXEC: c_int = 0x80000;
+
+// inotify events
+const IN_ACCESS: u32 = 0x00000001;
+const IN_MODIFY: u32 = 0x00000002;
+const IN_ATTRIB: u32 = 0x00000004;
+const IN_CLOSE_WRITE: u32 = 0x00000008;
+const IN_CLOSE_NOWRITE: u32 = 0x00000010;
+const IN_OPEN: u32 = 0x00000020;
+const IN_MOVED_FROM: u32 = 0x00000040;
+const IN_MOVED_TO: u32 = 0x00000080;
+const IN_CREATE: u32 = 0x00000100;
+const IN_DELETE: u32 = 0x00000200;
+const IN_DELETE_SELF: u32 = 0x00000400;
+const IN_MOVE_SELF: u32 = 0x00000800;
+
+@repr(C)
+type inotify_event is {
+    wd: c_int,
+    mask: u32,
+    cookie: u32,
+    len: u32,
+    // name follows (variable length)
+};
+
+type Inotify is {
+    fd: c_int,
+};
+
+implement Inotify {
+    fn new() -> Result<Inotify, LinuxError> {
+        let fd = unsafe { linux.inotify_init1(IN_NONBLOCK | IN_CLOEXEC) };
+        if fd < 0 {
+            Err(LinuxError.from_errno())
+        } else {
+            Ok(Inotify { fd })
+        }
+    }
+
+    fn add_watch(&self, path: &str, mask: u32) -> Result<c_int, LinuxError> {
+        let c_path = path.to_cstring();
+        let wd = unsafe { linux.inotify_add_watch(self.fd, c_path.as_ptr(), mask) };
+        if wd < 0 {
+            Err(LinuxError.from_errno())
+        } else {
+            Ok(wd)
+        }
+    }
+
+    fn remove_watch(&self, wd: c_int) -> Result<(), LinuxError> {
+        let r = unsafe { linux.inotify_rm_watch(self.fd, wd) };
+        if r < 0 { Err(LinuxError.from_errno()) } else { Ok(()) }
+    }
+}
+
+implement Drop for Inotify {
+    fn drop(&mut self) {
+        unsafe { libc.close(self.fd) };
+    }
+}
+
+// ------------------------------------------------------------
+// eventfd - Event File Descriptor
+// ------------------------------------------------------------
+
+ffi linux {
+    @extern("C")
+    fn eventfd(initval: c_uint, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn eventfd_read(fd: c_int, value: *mut u64) -> c_int;
+
+    @extern("C")
+    fn eventfd_write(fd: c_int, value: u64) -> c_int;
+}
+
+const EFD_CLOEXEC: c_int = 0x80000;
+const EFD_NONBLOCK: c_int = 0x800;
+const EFD_SEMAPHORE: c_int = 0x1;
+
+type EventFd is {
+    fd: c_int,
+};
+
+implement EventFd {
+    fn new(initial: u32) -> Result<EventFd, LinuxError> {
+        let fd = unsafe { linux.eventfd(initial, EFD_CLOEXEC | EFD_NONBLOCK) };
+        if fd < 0 {
+            Err(LinuxError.from_errno())
+        } else {
+            Ok(EventFd { fd })
+        }
+    }
+
+    fn read(&self) -> Result<u64, LinuxError> {
+        let mut value: u64 = 0;
+        let r = unsafe { linux.eventfd_read(self.fd, &mut value) };
+        if r < 0 { Err(LinuxError.from_errno()) } else { Ok(value) }
+    }
+
+    fn write(&self, value: u64) -> Result<(), LinuxError> {
+        let r = unsafe { linux.eventfd_write(self.fd, value) };
+        if r < 0 { Err(LinuxError.from_errno()) } else { Ok(()) }
+    }
+}
+
+implement Drop for EventFd {
+    fn drop(&mut self) {
+        unsafe { libc.close(self.fd) };
+    }
+}
+
+// ------------------------------------------------------------
+// timerfd - Timer File Descriptor
+// ------------------------------------------------------------
+
+ffi linux {
+    @extern("C")
+    fn timerfd_create(clockid: clockid_t, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn timerfd_settime(
+        fd: c_int,
+        flags: c_int,
+        new_value: *const itimerspec,
+        old_value: *mut itimerspec
+    ) -> c_int;
+
+    @extern("C")
+    fn timerfd_gettime(fd: c_int, curr_value: *mut itimerspec) -> c_int;
+}
+
+const CLOCK_REALTIME: clockid_t = 0;
+const CLOCK_MONOTONIC: clockid_t = 1;
+
+const TFD_CLOEXEC: c_int = 0x80000;
+const TFD_NONBLOCK: c_int = 0x800;
+const TFD_TIMER_ABSTIME: c_int = 1;
+
+@repr(C)
+type timespec is {
+    tv_sec: i64,
+    tv_nsec: i64,
+};
+
+@repr(C)
+type itimerspec is {
+    it_interval: timespec,
+    it_value: timespec,
+};
+
+type TimerFd is {
+    fd: c_int,
+};
+
+implement TimerFd {
+    fn new(clockid: clockid_t) -> Result<TimerFd, LinuxError> {
+        let fd = unsafe { linux.timerfd_create(clockid, TFD_CLOEXEC | TFD_NONBLOCK) };
+        if fd < 0 {
+            Err(LinuxError.from_errno())
+        } else {
+            Ok(TimerFd { fd })
+        }
+    }
+
+    fn set(&self, interval_ns: u64, initial_ns: u64) -> Result<(), LinuxError> {
+        let new_value = itimerspec {
+            it_interval: timespec {
+                tv_sec: (interval_ns / 1_000_000_000) as i64,
+                tv_nsec: (interval_ns % 1_000_000_000) as i64,
+            },
+            it_value: timespec {
+                tv_sec: (initial_ns / 1_000_000_000) as i64,
+                tv_nsec: (initial_ns % 1_000_000_000) as i64,
+            },
+        };
+
+        let r = unsafe { linux.timerfd_settime(self.fd, 0, &new_value, 0 as *mut itimerspec) };
+        if r < 0 { Err(LinuxError.from_errno()) } else { Ok(()) }
+    }
+
+    fn read(&self) -> Result<u64, LinuxError> {
+        let mut expirations: u64 = 0;
+        let r = unsafe {
+            libc.read(self.fd, &mut expirations as *mut u64 as *mut c_void, 8)
+        };
+        if r < 0 { Err(LinuxError.from_errno()) } else { Ok(expirations) }
+    }
+}
+
+implement Drop for TimerFd {
+    fn drop(&mut self) {
+        unsafe { libc.close(self.fd) };
+    }
+}
+
+// ------------------------------------------------------------
+// signalfd - Signal File Descriptor
+// ------------------------------------------------------------
+
+ffi linux {
+    @extern("C")
+    fn signalfd(fd: c_int, mask: *const sigset_t, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn sigemptyset(set: *mut sigset_t) -> c_int;
+
+    @extern("C")
+    fn sigaddset(set: *mut sigset_t, signum: c_int) -> c_int;
+
+    @extern("C")
+    fn sigprocmask(how: c_int, set: *const sigset_t, oldset: *mut sigset_t) -> c_int;
+}
+
+const SFD_CLOEXEC: c_int = 0x80000;
+const SFD_NONBLOCK: c_int = 0x800;
+
+const SIG_BLOCK: c_int = 0;
+const SIG_UNBLOCK: c_int = 1;
+const SIG_SETMASK: c_int = 2;
+
+@repr(C)
+type signalfd_siginfo is {
+    ssi_signo: u32,
+    ssi_errno: i32,
+    ssi_code: i32,
+    ssi_pid: u32,
+    ssi_uid: u32,
+    ssi_fd: i32,
+    ssi_tid: u32,
+    ssi_band: u32,
+    ssi_overrun: u32,
+    ssi_trapno: u32,
+    ssi_status: i32,
+    ssi_int: i32,
+    ssi_ptr: u64,
+    ssi_utime: u64,
+    ssi_stime: u64,
+    ssi_addr: u64,
+    _pad: [u8; 48],
+};
+
+// ------------------------------------------------------------
+// io_uring (Linux 5.1+)
+// ------------------------------------------------------------
+
+ffi linux {
+    @extern("C")
+    fn io_uring_setup(entries: c_uint, params: *mut io_uring_params) -> c_int;
+
+    @extern("C")
+    fn io_uring_enter(
+        fd: c_int,
+        to_submit: c_uint,
+        min_complete: c_uint,
+        flags: c_uint,
+        sig: *const sigset_t
+    ) -> c_int;
+
+    @extern("C")
+    fn io_uring_register(
+        fd: c_int,
+        opcode: c_uint,
+        arg: *const c_void,
+        nr_args: c_uint
+    ) -> c_int;
+}
+
+@repr(C)
+type io_uring_params is {
+    sq_entries: u32,
+    cq_entries: u32,
+    flags: u32,
+    sq_thread_cpu: u32,
+    sq_thread_idle: u32,
+    features: u32,
+    wq_fd: u32,
+    resv: [u32; 3],
+    sq_off: io_sqring_offsets,
+    cq_off: io_cqring_offsets,
+};
+
+@repr(C)
+type io_sqring_offsets is {
+    head: u32,
+    tail: u32,
+    ring_mask: u32,
+    ring_entries: u32,
+    flags: u32,
+    dropped: u32,
+    array: u32,
+    resv1: u32,
+    resv2: u64,
+};
+
+@repr(C)
+type io_cqring_offsets is {
+    head: u32,
+    tail: u32,
+    ring_mask: u32,
+    ring_entries: u32,
+    overflow: u32,
+    cqes: u32,
+    flags: u32,
+    resv1: u32,
+    resv2: u64,
+};
+
+// ------------------------------------------------------------
+// Error Handling
+// ------------------------------------------------------------
+
+ffi libc {
+    @extern("C")
+    fn __errno_location() -> *mut c_int;
+
+    @extern("C")
+    fn close(fd: c_int) -> c_int;
+
+    @extern("C")
+    fn read(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t;
+}
+
+fn get_errno() -> c_int {
+    unsafe { *libc.__errno_location() }
+}
+
+type LinuxError is
+    | PermissionDenied
+    | FileNotFound
+    | InvalidArgument
+    | WouldBlock
+    | Interrupted
+    | IoError
+    | Unknown(c_int);
+
+implement LinuxError {
+    fn from_errno() -> LinuxError {
+        match get_errno() {
+            1 => LinuxError.PermissionDenied,
+            2 => LinuxError.FileNotFound,
+            22 => LinuxError.InvalidArgument,
+            11 => LinuxError.WouldBlock,
+            4 => LinuxError.Interrupted,
+            5 => LinuxError.IoError,
+            e => LinuxError.Unknown(e),
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_char is i8;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+
+type CString is { data: List<u8> };
+
+type ToCString is protocol {
+    fn to_cstring(&self) -> CString;
+}
+
+implement ToCString for str {
+    fn to_cstring(&self) -> CString {
+        let mut data = self.as_bytes().to_vec();
+        data.push(0);
+        CString { data }
+    }
+}
+
+implement CString {
+    fn as_ptr(&self) -> *const c_char { self.data.as_ptr() as *const c_char }
+}
+
+fn main() {
+    // Linux FFI test
+}

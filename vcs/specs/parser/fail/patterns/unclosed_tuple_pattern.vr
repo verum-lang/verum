@@ -1,0 +1,32 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, tuple, delimiter, error
+// @description: Test unclosed tuple pattern (missing closing parenthesis)
+// @expected-error: E072
+
+fn test_unclosed_tuple_simple() {
+    let pair = (1, 2);
+
+    // Invalid: missing closing parenthesis
+    match pair {
+        (a, b => print("tuple"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_tuple_nested() {
+    let nested = ((1, 2), 3);
+
+    // Invalid: nested tuple with missing closing paren
+    match nested {
+        ((x, y, z) => print("nested"),
+        _ => print("other"),
+    }
+}
+
+fn test_unclosed_tuple_in_let() {
+    let pair = (1, 2);
+
+    // Invalid: unclosed tuple in let pattern
+    let (a, b = pair;
+}

@@ -1,0 +1,185 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, hash, djb2
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Simple non-cryptographic hash (DJB2 variant) — determinism, collision resistance, avalanche
+
+// ============================================================================
+// Arr8: Fixed-size array of 8 Ints with length
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn arr_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr_push(a: Arr8, val: Int) -> Arr8 {
+    let idx = a.len;
+    let updated = Arr8 {
+        e0: if idx == 0 { val } else { a.e0 },
+        e1: if idx == 1 { val } else { a.e1 },
+        e2: if idx == 2 { val } else { a.e2 },
+        e3: if idx == 3 { val } else { a.e3 },
+        e4: if idx == 4 { val } else { a.e4 },
+        e5: if idx == 5 { val } else { a.e5 },
+        e6: if idx == 6 { val } else { a.e6 },
+        e7: if idx == 7 { val } else { a.e7 },
+        len: idx + 1
+    };
+    updated
+}
+
+// ============================================================================
+// DJB2-like hash function
+// hash = ((hash * 33) + c) mod MODULUS
+// We use a 32-bit-safe modulus to avoid overflow: 2^30 = 1073741824
+// ============================================================================
+
+fn hash_djb2(data: Arr8) -> Int {
+    let modulus = 1073741824;
+    let mut h = 5381;
+    let mut i = 0;
+    while i < data.len {
+        let c = arr_get(data, i);
+        // h = h * 33 + c (mod modulus)
+        h = (h * 33 + c) - ((h * 33 + c) / modulus) * modulus;
+        // Ensure non-negative
+        if h < 0 { h = h + modulus; }
+        i = i + 1;
+    }
+    h
+}
+
+// Simpler FNV-1a-like hash for comparison
+fn hash_fnv(data: Arr8) -> Int {
+    let modulus = 1073741824;
+    let mut h = 2166136261;
+    // Reduce initial value
+    h = h - (h / modulus) * modulus;
+    let mut i = 0;
+    while i < data.len {
+        let c = arr_get(data, i);
+        // XOR step: h = h XOR c (simulate with add for simplicity)
+        h = h + c;
+        // Multiply step: h = h * 16777619 mod modulus
+        // To avoid overflow, split multiplication
+        let factor = 16777;
+        h = (h * factor) - ((h * factor) / modulus) * modulus;
+        if h < 0 { h = h + modulus; }
+        i = i + 1;
+    }
+    h
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_determinism() -> Int {
+    // Same input -> same hash
+    let mut data = arr_new();
+    data = arr_push(data, 72);   // H
+    data = arr_push(data, 101);  // e
+    data = arr_push(data, 108);  // l
+    data = arr_push(data, 108);  // l
+    data = arr_push(data, 111);  // o
+    let h1 = hash_djb2(data);
+    let h2 = hash_djb2(data);
+    assert_eq(h1, h2);
+    // Hash should be non-zero for non-empty input
+    let is_nonzero = if h1 != 0 { 1 } else { 0 };
+    assert_eq(is_nonzero, 1);
+    0
+}
+
+@test
+fn test_different_inputs() -> Int {
+    // Different inputs -> (almost certainly) different hashes
+    let mut data1 = arr_new();
+    data1 = arr_push(data1, 65);  // A
+    data1 = arr_push(data1, 66);  // B
+
+    let mut data2 = arr_new();
+    data2 = arr_push(data2, 66);  // B
+    data2 = arr_push(data2, 65);  // A
+
+    let h1 = hash_djb2(data1);
+    let h2 = hash_djb2(data2);
+    // "AB" and "BA" should hash differently
+    let are_different = if h1 != h2 { 1 } else { 0 };
+    assert_eq(are_different, 1);
+    0
+}
+
+@test
+fn test_empty_hash() -> Int {
+    // Empty input -> initial seed value
+    let data = arr_new();
+    let h = hash_djb2(data);
+    assert_eq(h, 5381);
+    0
+}
+
+@test
+fn test_single_values() -> Int {
+    // Single different bytes should produce different hashes
+    let mut d1 = arr_new();
+    d1 = arr_push(d1, 0);
+    let mut d2 = arr_new();
+    d2 = arr_push(d2, 1);
+    let mut d3 = arr_new();
+    d3 = arr_push(d3, 255);
+
+    let h1 = hash_djb2(d1);
+    let h2 = hash_djb2(d2);
+    let h3 = hash_djb2(d3);
+
+    // All three should be different
+    let diff12 = if h1 != h2 { 1 } else { 0 };
+    let diff13 = if h1 != h3 { 1 } else { 0 };
+    let diff23 = if h2 != h3 { 1 } else { 0 };
+    assert_eq(diff12, 1);
+    assert_eq(diff13, 1);
+    assert_eq(diff23, 1);
+    0
+}
+
+@test
+fn test_known_vector() -> Int {
+    // Compute hash of [1, 2, 3] and verify it's stable
+    let mut data = arr_new();
+    data = arr_push(data, 1);
+    data = arr_push(data, 2);
+    data = arr_push(data, 3);
+    let h = hash_djb2(data);
+    // h = ((5381 * 33 + 1) * 33 + 2) * 33 + 3
+    // = (177574 * 33 + 2) * 33 + 3
+    // = 5859944 * 33 + 3
+    // = 193378155 mod 1073741824 = 193378155
+    assert_eq(h, 193378155);
+    0
+}
+
+fn main() -> Int {
+    test_determinism();
+    test_different_inputs();
+    test_empty_hash();
+    test_single_values();
+    test_known_vector();
+    print("[OK] 128_sha_simple");
+    0
+}

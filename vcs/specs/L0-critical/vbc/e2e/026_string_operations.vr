@@ -1,0 +1,724 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, string, text, encoding, cipher, rle, palindrome
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: string-like operations simulated with integer arrays
+// through VBC interpreter. Uses flat struct arrays to represent
+// character sequences (each Int element = one character code).
+
+// ============================================================================
+// 16-element flat array (simulates a string of up to 16 characters)
+// ============================================================================
+
+type Str16 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    c12: Int, c13: Int, c14: Int, c15: Int,
+    len: Int
+};
+
+fn str16_empty() -> Str16 {
+    Str16 {
+        c0: 0, c1: 0, c2: 0, c3: 0,
+        c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0,
+        c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 0
+    }
+}
+
+fn str16_get(s: Str16, i: Int) -> Int {
+    if i == 0 { s.c0 } else if i == 1 { s.c1 }
+    else if i == 2 { s.c2 } else if i == 3 { s.c3 }
+    else if i == 4 { s.c4 } else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 } else if i == 7 { s.c7 }
+    else if i == 8 { s.c8 } else if i == 9 { s.c9 }
+    else if i == 10 { s.c10 } else if i == 11 { s.c11 }
+    else if i == 12 { s.c12 } else if i == 13 { s.c13 }
+    else if i == 14 { s.c14 } else { s.c15 }
+}
+
+fn str16_set(s: Str16, i: Int, val: Int) -> Str16 {
+    Str16 {
+        c0: if i == 0 { val } else { s.c0 },
+        c1: if i == 1 { val } else { s.c1 },
+        c2: if i == 2 { val } else { s.c2 },
+        c3: if i == 3 { val } else { s.c3 },
+        c4: if i == 4 { val } else { s.c4 },
+        c5: if i == 5 { val } else { s.c5 },
+        c6: if i == 6 { val } else { s.c6 },
+        c7: if i == 7 { val } else { s.c7 },
+        c8: if i == 8 { val } else { s.c8 },
+        c9: if i == 9 { val } else { s.c9 },
+        c10: if i == 10 { val } else { s.c10 },
+        c11: if i == 11 { val } else { s.c11 },
+        c12: if i == 12 { val } else { s.c12 },
+        c13: if i == 13 { val } else { s.c13 },
+        c14: if i == 14 { val } else { s.c14 },
+        c15: if i == 15 { val } else { s.c15 },
+        len: s.len
+    }
+}
+
+fn str16_with_len(s: Str16, new_len: Int) -> Str16 {
+    Str16 {
+        c0: s.c0, c1: s.c1, c2: s.c2, c3: s.c3,
+        c4: s.c4, c5: s.c5, c6: s.c6, c7: s.c7,
+        c8: s.c8, c9: s.c9, c10: s.c10, c11: s.c11,
+        c12: s.c12, c13: s.c13, c14: s.c14, c15: s.c15,
+        len: new_len
+    }
+}
+
+// Push a character, return new Str16 with incremented len
+fn str16_push(s: Str16, ch: Int) -> Str16 {
+    let pos = s.len;
+    let updated = str16_set(s, pos, ch);
+    str16_with_len(updated, pos + 1)
+}
+
+// ============================================================================
+// Character counting and frequency
+// ============================================================================
+
+// Count occurrences of a specific character code in the string
+fn str16_count_char(s: Str16, ch: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len {
+        if str16_get(s, i) == ch {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Count distinct characters (by checking each position against all previous)
+fn str16_count_distinct(s: Str16) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len {
+        let ch = str16_get(s, i);
+        let mut seen = false;
+        let mut j = 0;
+        while j < i {
+            if str16_get(s, j) == ch {
+                seen = true;
+            }
+            j = j + 1;
+        }
+        if !seen {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_character_counting() {
+    // Build string: [1, 2, 3, 2, 1, 2, 3, 3] (len=8)
+    let mut s = str16_empty();
+    s = str16_push(s, 1);
+    s = str16_push(s, 2);
+    s = str16_push(s, 3);
+    s = str16_push(s, 2);
+    s = str16_push(s, 1);
+    s = str16_push(s, 2);
+    s = str16_push(s, 3);
+    s = str16_push(s, 3);
+
+    assert_eq(s.len, 8);
+    assert_eq(str16_count_char(s, 1), 2);
+    assert_eq(str16_count_char(s, 2), 3);
+    assert_eq(str16_count_char(s, 3), 3);
+    assert_eq(str16_count_char(s, 4), 0);
+    assert_eq(str16_count_distinct(s), 3);
+
+    // Single-element string
+    let mut s2 = str16_empty();
+    s2 = str16_push(s2, 42);
+    assert_eq(str16_count_distinct(s2), 1);
+
+    // All same
+    let mut s3 = str16_empty();
+    s3 = str16_push(s3, 7);
+    s3 = str16_push(s3, 7);
+    s3 = str16_push(s3, 7);
+    s3 = str16_push(s3, 7);
+    assert_eq(str16_count_distinct(s3), 1);
+    assert_eq(str16_count_char(s3, 7), 4);
+}
+
+// ============================================================================
+// Simple encoding: shift each character by a constant (like ASCII offset)
+// ============================================================================
+
+fn str16_encode_shift(s: Str16, shift: Int) -> Str16 {
+    let mut result = s;
+    let mut i = 0;
+    while i < s.len {
+        let ch = str16_get(result, i);
+        result = str16_set(result, i, ch + shift);
+        i = i + 1;
+    }
+    result
+}
+
+fn str16_decode_shift(s: Str16, shift: Int) -> Str16 {
+    str16_encode_shift(s, -shift)
+}
+
+fn test_simple_encoding() {
+    // Original: [10, 20, 30, 40] (len=4)
+    let mut s = str16_empty();
+    s = str16_push(s, 10);
+    s = str16_push(s, 20);
+    s = str16_push(s, 30);
+    s = str16_push(s, 40);
+
+    let encoded = str16_encode_shift(s, 5);
+    assert_eq(str16_get(encoded, 0), 15);
+    assert_eq(str16_get(encoded, 1), 25);
+    assert_eq(str16_get(encoded, 2), 35);
+    assert_eq(str16_get(encoded, 3), 45);
+
+    let decoded = str16_decode_shift(encoded, 5);
+    assert_eq(str16_get(decoded, 0), 10);
+    assert_eq(str16_get(decoded, 1), 20);
+    assert_eq(str16_get(decoded, 2), 30);
+    assert_eq(str16_get(decoded, 3), 40);
+}
+
+// ============================================================================
+// String comparison (element by element)
+// ============================================================================
+
+// Returns 0 if equal, negative if s1 < s2, positive if s1 > s2
+fn str16_compare(s1: Str16, s2: Str16) -> Int {
+    let min_len = if s1.len < s2.len { s1.len } else { s2.len };
+    let mut i = 0;
+    let mut result = 0;
+    let mut found_diff = false;
+    while i < min_len {
+        if !found_diff {
+            let c1 = str16_get(s1, i);
+            let c2 = str16_get(s2, i);
+            if c1 != c2 {
+                result = c1 - c2;
+                found_diff = true;
+            }
+        }
+        i = i + 1;
+    }
+    if found_diff { result }
+    else { s1.len - s2.len }
+}
+
+fn str16_equals(s1: Str16, s2: Str16) -> Bool {
+    str16_compare(s1, s2) == 0
+}
+
+fn test_string_comparison() {
+    // "abc" = [1, 2, 3]
+    let mut s1 = str16_empty();
+    s1 = str16_push(s1, 1);
+    s1 = str16_push(s1, 2);
+    s1 = str16_push(s1, 3);
+
+    // Same string
+    let mut s2 = str16_empty();
+    s2 = str16_push(s2, 1);
+    s2 = str16_push(s2, 2);
+    s2 = str16_push(s2, 3);
+
+    assert(str16_equals(s1, s2));
+    assert_eq(str16_compare(s1, s2), 0);
+
+    // Different last char: [1, 2, 4]
+    let mut s3 = str16_empty();
+    s3 = str16_push(s3, 1);
+    s3 = str16_push(s3, 2);
+    s3 = str16_push(s3, 4);
+
+    assert(!str16_equals(s1, s3));
+    assert(str16_compare(s1, s3) < 0);  // s1 < s3
+    assert(str16_compare(s3, s1) > 0);  // s3 > s1
+
+    // Different lengths: [1, 2] vs [1, 2, 3]
+    let mut s4 = str16_empty();
+    s4 = str16_push(s4, 1);
+    s4 = str16_push(s4, 2);
+
+    assert(!str16_equals(s1, s4));
+    assert(str16_compare(s4, s1) < 0);  // shorter is "less"
+    assert(str16_compare(s1, s4) > 0);
+
+    // Empty strings
+    let e1 = str16_empty();
+    let e2 = str16_empty();
+    assert(str16_equals(e1, e2));
+}
+
+// ============================================================================
+// Caesar cipher on integer array
+// ============================================================================
+
+// Caesar cipher: shift values within range [lo, hi] by `shift`, wrapping around
+fn caesar_encrypt(s: Str16, shift: Int, lo: Int, hi: Int) -> Str16 {
+    let range = hi - lo + 1;
+    let mut result = s;
+    let mut i = 0;
+    while i < s.len {
+        let ch = str16_get(result, i);
+        if ch >= lo && ch <= hi {
+            let offset = ch - lo;
+            let shifted = (offset + shift) % range;
+            // Handle negative modulo
+            let normalized = if shifted < 0 { shifted + range } else { shifted };
+            result = str16_set(result, i, lo + normalized);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn caesar_decrypt(s: Str16, shift: Int, lo: Int, hi: Int) -> Str16 {
+    caesar_encrypt(s, -shift, lo, hi)
+}
+
+fn test_caesar_cipher() {
+    // Characters in range [0, 25] (simulating a-z as 0-25)
+    // "hello" = [7, 4, 11, 11, 14]
+    let mut msg = str16_empty();
+    msg = str16_push(msg, 7);
+    msg = str16_push(msg, 4);
+    msg = str16_push(msg, 11);
+    msg = str16_push(msg, 11);
+    msg = str16_push(msg, 14);
+
+    // Shift by 3 (classic Caesar)
+    let encrypted = caesar_encrypt(msg, 3, 0, 25);
+    assert_eq(str16_get(encrypted, 0), 10); // h(7) -> k(10)
+    assert_eq(str16_get(encrypted, 1), 7);  // e(4) -> h(7)
+    assert_eq(str16_get(encrypted, 2), 14); // l(11) -> o(14)
+    assert_eq(str16_get(encrypted, 3), 14); // l(11) -> o(14)
+    assert_eq(str16_get(encrypted, 4), 17); // o(14) -> r(17)
+
+    // Decrypt should get back original
+    let decrypted = caesar_decrypt(encrypted, 3, 0, 25);
+    assert(str16_equals(msg, decrypted));
+
+    // Wrap-around test: shift 'x'(23) by 5 => 'c'(2)
+    let mut wrap_test = str16_empty();
+    wrap_test = str16_push(wrap_test, 23); // x
+    wrap_test = str16_push(wrap_test, 24); // y
+    wrap_test = str16_push(wrap_test, 25); // z
+    let wrapped = caesar_encrypt(wrap_test, 5, 0, 25);
+    assert_eq(str16_get(wrapped, 0), 2);  // x(23) + 5 = 28 % 26 = 2
+    assert_eq(str16_get(wrapped, 1), 3);  // y(24) + 5 = 29 % 26 = 3
+    assert_eq(str16_get(wrapped, 2), 4);  // z(25) + 5 = 30 % 26 = 4
+
+    // Round-trip
+    let unwrapped = caesar_decrypt(wrapped, 5, 0, 25);
+    assert(str16_equals(wrap_test, unwrapped));
+
+    // ROT13 (shift by 13): applying twice = identity
+    let rot13_once = caesar_encrypt(msg, 13, 0, 25);
+    let rot13_twice = caesar_encrypt(rot13_once, 13, 0, 25);
+    assert(str16_equals(msg, rot13_twice));
+}
+
+// ============================================================================
+// Run-length encoding/decoding
+// ============================================================================
+
+// RLE result: pairs of (value, count) stored in a Str16
+// e.g., [1,1,1,2,2,3] => [1,3, 2,2, 3,1] (value,count pairs)
+type RleResult is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int,
+    d12: Int, d13: Int, d14: Int, d15: Int,
+    len: Int  // number of ints used (pairs * 2)
+};
+
+fn rle_empty() -> RleResult {
+    RleResult {
+        d0: 0, d1: 0, d2: 0, d3: 0,
+        d4: 0, d5: 0, d6: 0, d7: 0,
+        d8: 0, d9: 0, d10: 0, d11: 0,
+        d12: 0, d13: 0, d14: 0, d15: 0,
+        len: 0
+    }
+}
+
+fn rle_get(r: RleResult, i: Int) -> Int {
+    if i == 0 { r.d0 } else if i == 1 { r.d1 }
+    else if i == 2 { r.d2 } else if i == 3 { r.d3 }
+    else if i == 4 { r.d4 } else if i == 5 { r.d5 }
+    else if i == 6 { r.d6 } else if i == 7 { r.d7 }
+    else if i == 8 { r.d8 } else if i == 9 { r.d9 }
+    else if i == 10 { r.d10 } else if i == 11 { r.d11 }
+    else if i == 12 { r.d12 } else if i == 13 { r.d13 }
+    else if i == 14 { r.d14 } else { r.d15 }
+}
+
+fn rle_set(r: RleResult, i: Int, val: Int) -> RleResult {
+    RleResult {
+        d0: if i == 0 { val } else { r.d0 },
+        d1: if i == 1 { val } else { r.d1 },
+        d2: if i == 2 { val } else { r.d2 },
+        d3: if i == 3 { val } else { r.d3 },
+        d4: if i == 4 { val } else { r.d4 },
+        d5: if i == 5 { val } else { r.d5 },
+        d6: if i == 6 { val } else { r.d6 },
+        d7: if i == 7 { val } else { r.d7 },
+        d8: if i == 8 { val } else { r.d8 },
+        d9: if i == 9 { val } else { r.d9 },
+        d10: if i == 10 { val } else { r.d10 },
+        d11: if i == 11 { val } else { r.d11 },
+        d12: if i == 12 { val } else { r.d12 },
+        d13: if i == 13 { val } else { r.d13 },
+        d14: if i == 14 { val } else { r.d14 },
+        d15: if i == 15 { val } else { r.d15 },
+        len: r.len
+    }
+}
+
+fn rle_with_len(r: RleResult, new_len: Int) -> RleResult {
+    RleResult {
+        d0: r.d0, d1: r.d1, d2: r.d2, d3: r.d3,
+        d4: r.d4, d5: r.d5, d6: r.d6, d7: r.d7,
+        d8: r.d8, d9: r.d9, d10: r.d10, d11: r.d11,
+        d12: r.d12, d13: r.d13, d14: r.d14, d15: r.d15,
+        len: new_len
+    }
+}
+
+fn rle_encode(s: Str16) -> RleResult {
+    let mut result = rle_empty();
+    if s.len == 0 {
+        result
+    } else {
+        let mut out_pos = 0;
+        let mut i = 0;
+        while i < s.len {
+            let ch = str16_get(s, i);
+            let mut count = 1;
+            let mut j = i + 1;
+            while j < s.len {
+                if str16_get(s, j) == ch {
+                    count = count + 1;
+                    j = j + 1;
+                } else {
+                    // break simulation
+                    j = s.len;
+                }
+            }
+            result = rle_set(result, out_pos, ch);
+            result = rle_set(result, out_pos + 1, count);
+            out_pos = out_pos + 2;
+            i = i + count;
+        }
+        rle_with_len(result, out_pos)
+    }
+}
+
+fn rle_decode(r: RleResult) -> Str16 {
+    let mut result = str16_empty();
+    let mut out_pos = 0;
+    let mut i = 0;
+    while i < r.len {
+        let ch = rle_get(r, i);
+        let count = rle_get(r, i + 1);
+        let mut j = 0;
+        while j < count {
+            result = str16_set(result, out_pos, ch);
+            out_pos = out_pos + 1;
+            j = j + 1;
+        }
+        i = i + 2;
+    }
+    str16_with_len(result, out_pos)
+}
+
+fn test_rle_encoding() {
+    // [1,1,1,2,2,3] => encoded: [1,3, 2,2, 3,1]
+    let mut s = str16_empty();
+    s = str16_push(s, 1);
+    s = str16_push(s, 1);
+    s = str16_push(s, 1);
+    s = str16_push(s, 2);
+    s = str16_push(s, 2);
+    s = str16_push(s, 3);
+
+    let encoded = rle_encode(s);
+    assert_eq(encoded.len, 6);  // 3 pairs * 2
+    assert_eq(rle_get(encoded, 0), 1);  // value
+    assert_eq(rle_get(encoded, 1), 3);  // count
+    assert_eq(rle_get(encoded, 2), 2);
+    assert_eq(rle_get(encoded, 3), 2);
+    assert_eq(rle_get(encoded, 4), 3);
+    assert_eq(rle_get(encoded, 5), 1);
+
+    // Decode back
+    let decoded = rle_decode(encoded);
+    assert_eq(decoded.len, 6);
+    assert(str16_equals(s, decoded));
+}
+
+fn test_rle_all_same() {
+    // [5,5,5,5,5] => [5,5]
+    let mut s = str16_empty();
+    s = str16_push(s, 5);
+    s = str16_push(s, 5);
+    s = str16_push(s, 5);
+    s = str16_push(s, 5);
+    s = str16_push(s, 5);
+
+    let encoded = rle_encode(s);
+    assert_eq(encoded.len, 2);
+    assert_eq(rle_get(encoded, 0), 5);
+    assert_eq(rle_get(encoded, 1), 5);
+
+    let decoded = rle_decode(encoded);
+    assert(str16_equals(s, decoded));
+}
+
+fn test_rle_all_different() {
+    // [1,2,3,4] => [1,1, 2,1, 3,1, 4,1]
+    let mut s = str16_empty();
+    s = str16_push(s, 1);
+    s = str16_push(s, 2);
+    s = str16_push(s, 3);
+    s = str16_push(s, 4);
+
+    let encoded = rle_encode(s);
+    assert_eq(encoded.len, 8);  // 4 pairs
+    assert_eq(rle_get(encoded, 0), 1);
+    assert_eq(rle_get(encoded, 1), 1);
+    assert_eq(rle_get(encoded, 2), 2);
+    assert_eq(rle_get(encoded, 3), 1);
+
+    let decoded = rle_decode(encoded);
+    assert(str16_equals(s, decoded));
+}
+
+fn test_rle_empty_string() {
+    let s = str16_empty();
+    let encoded = rle_encode(s);
+    assert_eq(encoded.len, 0);
+}
+
+// ============================================================================
+// Palindrome detection
+// ============================================================================
+
+fn str16_is_palindrome(s: Str16) -> Bool {
+    if s.len <= 1 {
+        true
+    } else {
+        let mut is_pal = true;
+        let mut i = 0;
+        let half = s.len / 2;
+        while i < half {
+            if str16_get(s, i) != str16_get(s, s.len - 1 - i) {
+                is_pal = false;
+            }
+            i = i + 1;
+        }
+        is_pal
+    }
+}
+
+fn test_palindrome_detection() {
+    // Palindrome: [1, 2, 3, 2, 1]
+    let mut p = str16_empty();
+    p = str16_push(p, 1);
+    p = str16_push(p, 2);
+    p = str16_push(p, 3);
+    p = str16_push(p, 2);
+    p = str16_push(p, 1);
+    assert(str16_is_palindrome(p));
+
+    // Even-length palindrome: [1, 2, 2, 1]
+    let mut p2 = str16_empty();
+    p2 = str16_push(p2, 1);
+    p2 = str16_push(p2, 2);
+    p2 = str16_push(p2, 2);
+    p2 = str16_push(p2, 1);
+    assert(str16_is_palindrome(p2));
+
+    // Not a palindrome: [1, 2, 3]
+    let mut np = str16_empty();
+    np = str16_push(np, 1);
+    np = str16_push(np, 2);
+    np = str16_push(np, 3);
+    assert(!str16_is_palindrome(np));
+
+    // Single element
+    let mut s1 = str16_empty();
+    s1 = str16_push(s1, 42);
+    assert(str16_is_palindrome(s1));
+
+    // Empty
+    assert(str16_is_palindrome(str16_empty()));
+
+    // All same: [7, 7, 7, 7]
+    let mut same = str16_empty();
+    same = str16_push(same, 7);
+    same = str16_push(same, 7);
+    same = str16_push(same, 7);
+    same = str16_push(same, 7);
+    assert(str16_is_palindrome(same));
+}
+
+// ============================================================================
+// Substring search (find first occurrence of pattern in text)
+// ============================================================================
+
+fn str16_find(text: Str16, pattern: Str16) -> Int {
+    if pattern.len == 0 { 0 }
+    else if pattern.len > text.len { -1 }
+    else {
+        let mut found = -1;
+        let mut i = 0;
+        let limit = text.len - pattern.len + 1;
+        while i < limit {
+            if found == -1 {
+                let mut match_ok = true;
+                let mut j = 0;
+                while j < pattern.len {
+                    if str16_get(text, i + j) != str16_get(pattern, j) {
+                        match_ok = false;
+                    }
+                    j = j + 1;
+                }
+                if match_ok {
+                    found = i;
+                }
+            }
+            i = i + 1;
+        }
+        found
+    }
+}
+
+fn test_substring_search() {
+    // Text: [1, 2, 3, 4, 5, 6]
+    let mut text = str16_empty();
+    text = str16_push(text, 1);
+    text = str16_push(text, 2);
+    text = str16_push(text, 3);
+    text = str16_push(text, 4);
+    text = str16_push(text, 5);
+    text = str16_push(text, 6);
+
+    // Pattern: [3, 4]
+    let mut pat = str16_empty();
+    pat = str16_push(pat, 3);
+    pat = str16_push(pat, 4);
+    assert_eq(str16_find(text, pat), 2);
+
+    // Pattern at start: [1, 2]
+    let mut pat2 = str16_empty();
+    pat2 = str16_push(pat2, 1);
+    pat2 = str16_push(pat2, 2);
+    assert_eq(str16_find(text, pat2), 0);
+
+    // Pattern at end: [5, 6]
+    let mut pat3 = str16_empty();
+    pat3 = str16_push(pat3, 5);
+    pat3 = str16_push(pat3, 6);
+    assert_eq(str16_find(text, pat3), 4);
+
+    // Pattern not found: [7, 8]
+    let mut pat4 = str16_empty();
+    pat4 = str16_push(pat4, 7);
+    pat4 = str16_push(pat4, 8);
+    assert_eq(str16_find(text, pat4), -1);
+
+    // Empty pattern
+    assert_eq(str16_find(text, str16_empty()), 0);
+
+    // Pattern longer than text
+    let mut long_pat = str16_empty();
+    long_pat = str16_push(long_pat, 1);
+    long_pat = str16_push(long_pat, 2);
+    long_pat = str16_push(long_pat, 3);
+    long_pat = str16_push(long_pat, 4);
+    long_pat = str16_push(long_pat, 5);
+    long_pat = str16_push(long_pat, 6);
+    long_pat = str16_push(long_pat, 7);
+    assert_eq(str16_find(text, long_pat), -1);
+}
+
+// ============================================================================
+// String reversal
+// ============================================================================
+
+fn str16_reverse(s: Str16) -> Str16 {
+    let mut result = s;
+    let mut i = 0;
+    let half = s.len / 2;
+    while i < half {
+        let j = s.len - 1 - i;
+        let ci = str16_get(result, i);
+        let cj = str16_get(result, j);
+        result = str16_set(result, i, cj);
+        result = str16_set(result, j, ci);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_string_reversal() {
+    // [1, 2, 3, 4, 5]
+    let mut s = str16_empty();
+    s = str16_push(s, 1);
+    s = str16_push(s, 2);
+    s = str16_push(s, 3);
+    s = str16_push(s, 4);
+    s = str16_push(s, 5);
+
+    let rev = str16_reverse(s);
+    assert_eq(str16_get(rev, 0), 5);
+    assert_eq(str16_get(rev, 1), 4);
+    assert_eq(str16_get(rev, 2), 3);
+    assert_eq(str16_get(rev, 3), 2);
+    assert_eq(str16_get(rev, 4), 1);
+    assert_eq(rev.len, 5);
+
+    // Reversing a palindrome gives the same string
+    let mut pal = str16_empty();
+    pal = str16_push(pal, 1);
+    pal = str16_push(pal, 2);
+    pal = str16_push(pal, 1);
+    let rev_pal = str16_reverse(pal);
+    assert(str16_equals(pal, rev_pal));
+
+    // Double reverse = identity
+    let double_rev = str16_reverse(str16_reverse(s));
+    assert(str16_equals(s, double_rev));
+}
+
+fn main() -> Int {
+    test_character_counting();
+    test_simple_encoding();
+    test_string_comparison();
+    test_caesar_cipher();
+    test_rle_encoding();
+    test_rle_all_same();
+    test_rle_all_different();
+    test_rle_empty_string();
+    test_palindrome_detection();
+    test_substring_search();
+    test_string_reversal();
+    print("[OK] 026_string_operations");
+    0
+}

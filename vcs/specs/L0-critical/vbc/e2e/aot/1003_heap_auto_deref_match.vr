@@ -1,0 +1,154 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: heap, pattern-matching, auto-deref, recursive-data
+// @description: Auto-deref through Heap<T> in pattern matching for recursive data structures
+
+// Linked list with heap-allocated tail
+type IntList is Nil | Cons(Int, Heap<IntList>);
+
+// Binary tree with heap-allocated children
+type Tree is Leaf(Int) | Branch(Heap<Tree>, Heap<Tree>);
+
+// --- Linked list operations ---
+
+@allow(unbounded_recursion)
+fn sum_list(list: Heap<IntList>) -> Int {
+    match list {
+        Nil => 0,
+        Cons(v, rest) => v + sum_list(rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn len_list(list: Heap<IntList>) -> Int {
+    match list {
+        Nil => 0,
+        Cons(_, rest) => 1 + len_list(rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn contains(list: Heap<IntList>, target: Int) -> Bool {
+    match list {
+        Nil => false,
+        Cons(v, rest) => {
+            if (v == target) { true } else { contains(rest, target) }
+        }
+    }
+}
+
+// --- Tree operations ---
+
+@allow(unbounded_recursion)
+fn tree_sum(t: Heap<Tree>) -> Int {
+    match t {
+        Leaf(v) => v,
+        Branch(left, right) => tree_sum(left) + tree_sum(right),
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_depth(t: Heap<Tree>) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Branch(left, right) => {
+            let ld = tree_depth(left);
+            let rd = tree_depth(right);
+            if (ld > rd) { ld + 1 } else { rd + 1 }
+        }
+    }
+}
+
+@allow(unbounded_recursion)
+fn count_leaves(t: Heap<Tree>) -> Int {
+    match t {
+        Leaf(_) => 1,
+        Branch(left, right) => count_leaves(left) + count_leaves(right),
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Linked list sum
+    let list = Heap(Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil)))))))));
+    let s = sum_list(list);
+    if (s != 10) {
+        print(f"FAIL test1: sum={s}");
+        return 1;
+    }
+
+    // Test 2: Linked list length
+    let l = len_list(list);
+    if (l != 4) {
+        print(f"FAIL test2: len={l}");
+        return 1;
+    }
+
+    // Test 3: Contains
+    if (!contains(list, 3)) {
+        print("FAIL test3a");
+        return 1;
+    }
+    if (contains(list, 5)) {
+        print("FAIL test3b");
+        return 1;
+    }
+
+    // Test 4: Empty list
+    let empty = Heap(Nil);
+    if (sum_list(empty) != 0) {
+        print("FAIL test4a");
+        return 1;
+    }
+    if (len_list(empty) != 0) {
+        print("FAIL test4b");
+        return 1;
+    }
+
+    // Test 5: Single element list
+    let single = Heap(Cons(42, Heap(Nil)));
+    if (sum_list(single) != 42) {
+        print("FAIL test5");
+        return 1;
+    }
+
+    // Test 6: Binary tree sum
+    //       Branch
+    //      /      \
+    //   Branch    Leaf(4)
+    //   /    \
+    // Leaf(1) Leaf(2)
+    let tree = Heap(Branch(
+        Heap(Branch(Heap(Leaf(1)), Heap(Leaf(2)))),
+        Heap(Leaf(4))
+    ));
+    let ts = tree_sum(tree);
+    if (ts != 7) {
+        print(f"FAIL test6: tree_sum={ts}");
+        return 1;
+    }
+
+    // Test 7: Tree depth
+    let td = tree_depth(tree);
+    if (td != 3) {
+        print(f"FAIL test7: depth={td}");
+        return 1;
+    }
+
+    // Test 8: Count leaves
+    let lc = count_leaves(tree);
+    if (lc != 3) {
+        print(f"FAIL test8: leaves={lc}");
+        return 1;
+    }
+
+    // Test 9: Single leaf tree
+    let leaf = Heap(Leaf(99));
+    if (tree_sum(leaf) != 99 || tree_depth(leaf) != 1 || count_leaves(leaf) != 1) {
+        print("FAIL test9");
+        return 1;
+    }
+
+    print("1003_heap_auto_deref_match: PASS");
+    0
+}

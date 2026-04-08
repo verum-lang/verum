@@ -1,0 +1,20 @@
+// @test: verify-fail
+// @level: L1
+// @tags: proofs, verification, errors, requires
+// @timeout: 5000
+
+/// Tests that missing preconditions are detected.
+
+// divide_unsafe has no requires on divisor — should warn about division by zero
+fn divide_unsafe(a: Int, b: Int) -> Int {
+    a / b  // b could be 0
+}
+
+// Array access without bounds check
+fn unsafe_index(arr: List<Int>, idx: Int) -> Int {
+    arr[idx]  // idx could be out of bounds
+}
+
+fn main() {
+    print("Missing requires error tests");
+}

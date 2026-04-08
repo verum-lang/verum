@@ -1,0 +1,153 @@
+// @test: run
+// @level: L0
+// @description: Fan-out/fan-in with multiple worker threads
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Two channels captured in one spawn
+    let work = Channel.new(10);
+    let done = Channel.new(10);
+
+    work.send(10);
+    work.send(20);
+
+    let w1 = spawn {
+        let mut s = 0;
+        match work.recv() {
+            Some(v) => { s = s + v; }
+            None => {}
+        }
+        match work.recv() {
+            Some(v) => { s = s + v; }
+            None => {}
+        }
+        done.send(s);
+        s
+    };
+
+    w1.await;
+
+    let mut result = 0;
+    match done.recv() {
+        Some(v) => { result = v; }
+        None => {}
+    }
+
+    if (result != 30) {
+        print(f"FAIL test1: expected 30, got {result}");
+        return 1;
+    }
+    print(f"Test 1 PASS: two channels in spawn = {result}");
+
+    // Test 2: Fan-out with 2 workers sharing work+done channels
+    let work2 = Channel.new(10);
+    let done2 = Channel.new(10);
+
+    work2.send(100);
+    work2.send(200);
+    work2.send(300);
+    work2.send(400);
+    work2.close();
+
+    let wa = spawn {
+        let mut s = 0;
+        match work2.recv() { Some(v) => { s = s + v; } None => {} }
+        match work2.recv() { Some(v) => { s = s + v; } None => {} }
+        done2.send(s);
+        s
+    };
+    let wb = spawn {
+        let mut s = 0;
+        match work2.recv() { Some(v) => { s = s + v; } None => {} }
+        match work2.recv() { Some(v) => { s = s + v; } None => {} }
+        done2.send(s);
+        s
+    };
+
+    wa.await;
+    wb.await;
+
+    let mut total = 0;
+    let mut c = 0;
+    while (c < 2) {
+        match done2.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        c = c + 1;
+    }
+
+    // 100+200+300+400 = 1000
+    if (total != 1000) {
+        print(f"FAIL test2: expected 1000, got {total}");
+        return 1;
+    }
+    print(f"Test 2 PASS: 2-worker fan-out = {total}");
+
+    // Test 3: 4 workers with separate result channels (avoid shared-channel issue)
+    let work3 = Channel.new(20);
+    let r1 = Channel.new(5);
+    let r2 = Channel.new(5);
+    let r3 = Channel.new(5);
+    let r4 = Channel.new(5);
+
+    work3.send(10);
+    work3.send(20);
+    work3.send(30);
+    work3.send(40);
+    work3.send(50);
+    work3.send(60);
+    work3.send(70);
+    work3.send(80);
+    work3.close();
+
+    let t1 = spawn {
+        let mut s = 0;
+        match work3.recv() { Some(v) => { s = s + v; } None => {} }
+        match work3.recv() { Some(v) => { s = s + v; } None => {} }
+        r1.send(s);
+        s
+    };
+    let t2 = spawn {
+        let mut s = 0;
+        match work3.recv() { Some(v) => { s = s + v; } None => {} }
+        match work3.recv() { Some(v) => { s = s + v; } None => {} }
+        r2.send(s);
+        s
+    };
+    let t3 = spawn {
+        let mut s = 0;
+        match work3.recv() { Some(v) => { s = s + v; } None => {} }
+        match work3.recv() { Some(v) => { s = s + v; } None => {} }
+        r3.send(s);
+        s
+    };
+    let t4 = spawn {
+        let mut s = 0;
+        match work3.recv() { Some(v) => { s = s + v; } None => {} }
+        match work3.recv() { Some(v) => { s = s + v; } None => {} }
+        r4.send(s);
+        s
+    };
+
+    t1.await;
+    t2.await;
+    t3.await;
+    t4.await;
+
+    let mut grand = 0;
+    match r1.recv() { Some(v) => { grand = grand + v; } None => {} }
+    match r2.recv() { Some(v) => { grand = grand + v; } None => {} }
+    match r3.recv() { Some(v) => { grand = grand + v; } None => {} }
+    match r4.recv() { Some(v) => { grand = grand + v; } None => {} }
+
+    // 10+20+30+40+50+60+70+80 = 360
+    if (grand != 360) {
+        print(f"FAIL test3: expected 360, got {grand}");
+        return 1;
+    }
+    print(f"Test 3 PASS: 4-worker with separate result channels = {grand}");
+
+    print("All fan-out/fan-in tests passed");
+    0
+}

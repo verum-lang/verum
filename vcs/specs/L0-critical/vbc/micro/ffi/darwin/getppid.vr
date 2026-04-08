@@ -1,0 +1,19 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, libsystem
+// @description: Test getppid() FFI call to libSystem
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn getppid() -> Int;
+}
+
+fn main() {
+    // getppid() returns parent process ID
+    // Parent PID is always > 0 (init/launchd is 1)
+    let ppid = getppid();
+    assert(ppid > 0);
+}

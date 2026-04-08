@@ -1,0 +1,125 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, newtypes, errors, type-safety
+// @expected-error: E400
+
+/// Test for newtype type safety - these should fail type checking.
+/// Newtypes provide compile-time type safety by being distinct from
+/// their wrapped types and from each other.
+
+// Define distinct newtypes wrapping the same base type
+type UserId is (Int);
+type ProductId is (Int);
+type OrderId is (Int);
+
+type Email is (Text);
+type Username is (Text);
+
+type Meters is (Float);
+type Seconds is (Float);
+type Kilograms is (Float);
+
+fn main() {
+    // === Cannot assign wrapped type directly ===
+
+    // E401: Cannot assign Int to UserId
+    let id: UserId = 42;  // ERROR: expected UserId, found Int
+
+    // E401: Cannot assign Text to Email
+    let email: Email = "test@example.com";  // ERROR: expected Email, found Text
+
+    // E401: Cannot assign Float to Meters
+    let dist: Meters = 100.5;  // ERROR: expected Meters, found Float
+
+    // === Cannot mix different newtypes of same base type ===
+
+    // E401: Cannot assign UserId to ProductId
+    let user_id: UserId = UserId(1001);
+    let product_id: ProductId = user_id;  // ERROR: expected ProductId, found UserId
+
+    // E401: Cannot assign Email to Username
+    let email_val: Email = Email("user@example.com");
+    let username: Username = email_val;  // ERROR: expected Username, found Email
+
+    // E401: Cannot assign Meters to Seconds
+    let distance: Meters = Meters(100.0);
+    let time: Seconds = distance;  // ERROR: expected Seconds, found Meters
+
+    // === Cannot use newtype where base type expected ===
+
+    fn takes_int(n: Int) -> Int { n * 2 }
+    let uid: UserId = UserId(42);
+    let result = takes_int(uid);  // ERROR: expected Int, found UserId
+
+    fn takes_text(s: Text) -> Text { s }
+    let mail: Email = Email("test@example.com");
+    let text_result = takes_text(mail);  // ERROR: expected Text, found Email
+
+    fn takes_float(f: Float) -> Float { f * 2.0 }
+    let meters: Meters = Meters(50.0);
+    let float_result = takes_float(meters);  // ERROR: expected Float, found Meters
+
+    // === Cannot use base type where newtype expected ===
+
+    fn takes_user_id(id: UserId) -> Int {
+        let UserId(n) = id;
+        n
+    }
+    let raw_int: Int = 42;
+    let uid_result = takes_user_id(raw_int);  // ERROR: expected UserId, found Int
+
+    fn takes_email(e: Email) -> Text {
+        let Email(s) = e;
+        s
+    }
+    let raw_text: Text = "hello@world.com";
+    let email_result = takes_email(raw_text);  // ERROR: expected Email, found Text
+
+    // === Cannot compare different newtypes ===
+
+    let user1: UserId = UserId(100);
+    let product1: ProductId = ProductId(100);
+    let same_value = user1 == product1;  // ERROR: cannot compare UserId with ProductId
+
+    let dist1: Meters = Meters(50.0);
+    let time1: Seconds = Seconds(50.0);
+    let same_number = dist1 == time1;  // ERROR: cannot compare Meters with Seconds
+
+    // === Cannot perform arithmetic across newtypes ===
+
+    let m1: Meters = Meters(10.0);
+    let s1: Seconds = Seconds(5.0);
+    let invalid_add = m1 + s1;  // ERROR: cannot add Meters and Seconds
+
+    let id1: UserId = UserId(10);
+    let id2: ProductId = ProductId(20);
+    let invalid_sub = id1 - id2;  // ERROR: cannot subtract ProductId from UserId
+
+    // === Newtype in collections must match ===
+
+    let user_ids: List<UserId> = [UserId(1), UserId(2)];
+    let mixed_ids: List<UserId> = [UserId(1), ProductId(2)];  // ERROR: expected UserId, found ProductId
+
+    // === Generic newtype type safety ===
+
+    type Wrapper<T> is (T);
+
+    let int_wrapper: Wrapper<Int> = Wrapper(42);
+    let text_wrapper: Wrapper<Text> = int_wrapper;  // ERROR: expected Wrapper<Text>, found Wrapper<Int>
+
+    // === Cannot implicitly unwrap ===
+
+    let wrapped: UserId = UserId(42);
+    let raw: Int = wrapped;  // ERROR: expected Int, found UserId (must explicitly destructure)
+
+    // === Return type mismatch ===
+
+    fn create_user_id() -> UserId {
+        42  // ERROR: expected UserId, found Int
+    }
+
+    fn create_from_product_id(pid: ProductId) -> UserId {
+        pid  // ERROR: expected UserId, found ProductId
+    }
+}

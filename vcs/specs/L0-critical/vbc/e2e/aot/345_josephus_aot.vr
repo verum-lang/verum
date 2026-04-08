@@ -1,0 +1,207 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, josephus, circular-elimination, modular-arithmetic
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for the Josephus problem:
+// n people in a circle, every k-th person is eliminated.
+// Find the position of the last survivor (0-indexed).
+
+type Arr16 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+                a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int };
+
+fn ar_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn ar_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn ar_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+// Mathematical Josephus: J(n, k) = (J(n-1, k) + k) % n, J(1, k) = 0
+fn josephus_math(n: Int, k: Int) -> Int {
+    let mut pos = 0;
+    let mut i = 2;
+    while i <= n {
+        pos = (pos + k) % i;
+        i = i + 1;
+    }
+    pos
+}
+
+// Simulation
+fn josephus_sim(n: Int, k: Int) -> Int {
+    let mut alive = ar_zero();
+    let mut i = 0;
+    while i < n {
+        alive = ar_set(alive, i, 1);
+        i = i + 1;
+    }
+
+    let mut remaining = n;
+    let mut cur = 0;
+
+    while remaining > 1 {
+        let mut count = 0;
+        while count < k {
+            if ar_get(alive, cur) == 1 {
+                count = count + 1;
+                if count == k {
+                    alive = ar_set(alive, cur, 0);
+                    remaining = remaining - 1;
+                }
+            }
+            cur = (cur + 1) % n;
+        }
+    }
+
+    let mut survivor = -1;
+    i = 0;
+    while i < n {
+        if ar_get(alive, i) == 1 { survivor = i; }
+        i = i + 1;
+    }
+    survivor
+}
+
+// Get elimination order
+fn josephus_elim_seq(n: Int, k: Int) -> Arr16 {
+    let mut alive = ar_zero();
+    let mut i = 0;
+    while i < n {
+        alive = ar_set(alive, i, 1);
+        i = i + 1;
+    }
+
+    let mut seq = ar_zero();
+    let mut remaining = n;
+    let mut cur = 0;
+    let mut elim_idx = 0;
+
+    while remaining > 1 {
+        let mut count = 0;
+        while count < k {
+            if ar_get(alive, cur) == 1 {
+                count = count + 1;
+                if count == k {
+                    alive = ar_set(alive, cur, 0);
+                    seq = ar_set(seq, elim_idx, cur);
+                    elim_idx = elim_idx + 1;
+                    remaining = remaining - 1;
+                }
+            }
+            cur = (cur + 1) % n;
+        }
+    }
+
+    i = 0;
+    while i < n {
+        if ar_get(alive, i) == 1 {
+            seq = ar_set(seq, elim_idx, i);
+        }
+        i = i + 1;
+    }
+    seq
+}
+
+fn test_classic_k2() {
+    assert_eq(josephus_math(1, 2), 0);
+    assert_eq(josephus_math(2, 2), 0);
+    assert_eq(josephus_math(3, 2), 2);
+    assert_eq(josephus_math(5, 2), 2);
+    assert_eq(josephus_math(7, 2), 6);
+    assert_eq(josephus_math(10, 2), 4);
+}
+
+fn test_k3() {
+    assert_eq(josephus_math(3, 3), 1);
+    assert_eq(josephus_math(5, 3), 3);
+    assert_eq(josephus_math(7, 3), 3);
+    assert_eq(josephus_math(10, 3), 3);
+}
+
+fn test_k1() {
+    assert_eq(josephus_math(1, 1), 0);
+    assert_eq(josephus_math(5, 1), 4);
+    assert_eq(josephus_math(10, 1), 9);
+}
+
+fn test_sim_matches_math() {
+    assert_eq(josephus_sim(5, 2), josephus_math(5, 2));
+    assert_eq(josephus_sim(7, 3), josephus_math(7, 3));
+    assert_eq(josephus_sim(6, 4), josephus_math(6, 4));
+    assert_eq(josephus_sim(8, 2), josephus_math(8, 2));
+    assert_eq(josephus_sim(10, 3), josephus_math(10, 3));
+    assert_eq(josephus_sim(12, 5), josephus_math(12, 5));
+}
+
+fn test_power_of_2() {
+    assert_eq(josephus_math(1, 2), 0);
+    assert_eq(josephus_math(2, 2), 0);
+    assert_eq(josephus_math(4, 2), 0);
+    assert_eq(josephus_math(8, 2), 0);
+    assert_eq(josephus_math(16, 2), 0);
+}
+
+fn test_elim_n5_k2() {
+    let seq = josephus_elim_seq(5, 2);
+    assert_eq(ar_get(seq, 0), 1);
+    assert_eq(ar_get(seq, 1), 3);
+    assert_eq(ar_get(seq, 2), 0);
+    assert_eq(ar_get(seq, 3), 4);
+    assert_eq(ar_get(seq, 4), 2);
+}
+
+fn test_n_eq_k() {
+    assert_eq(josephus_sim(4, 4), josephus_math(4, 4));
+    let seq = josephus_elim_seq(4, 4);
+    assert_eq(ar_get(seq, 0), 3);
+}
+
+fn test_k_gt_n() {
+    assert_eq(josephus_sim(3, 5), josephus_math(3, 5));
+}
+
+fn test_two_people() {
+    assert_eq(josephus_math(2, 3), 1);
+    assert_eq(josephus_sim(2, 3), 1);
+    assert_eq(josephus_math(2, 2), 0);
+    assert_eq(josephus_sim(2, 2), 0);
+}
+
+fn main() -> Int {
+    test_classic_k2();
+    test_k3();
+    test_k1();
+    test_sim_matches_math();
+    test_power_of_2();
+    test_elim_n5_k2();
+    test_n_eq_k();
+    test_k_gt_n();
+    test_two_people();
+    print("[OK] 345_josephus_aot");
+    0
+}

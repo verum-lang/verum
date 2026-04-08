@@ -1,0 +1,150 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, tensor, broadcasting, numpy
+// @expected-exit: 0
+
+// Tests NumPy-style broadcasting rules using list-based matrix operations.
+// Broadcasting rule: dimensions are compatible when they are equal or one of them is 1.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Simulate broadcasting: scalar + vector
+fn scalar_add_vec(s: Int, v: List<Int>, n: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        r[i] = s + v[i];
+        i = i + 1;
+    }
+    r
+}
+
+// Simulate broadcasting: vector + matrix (add vector to each row)
+fn vec_add_mat_rows(v: List<Int>, mat: List<Int>, rows: Int, cols: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < rows) {
+        let mut j = 0;
+        while (j < cols) {
+            r[i * cols + j] = mat[i * cols + j] + v[j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    r
+}
+
+// Simulate broadcasting: column vector + matrix (add column vec to each column)
+fn colvec_add_mat(cv: List<Int>, mat: List<Int>, rows: Int, cols: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < rows) {
+        let mut j = 0;
+        while (j < cols) {
+            r[i * cols + j] = mat[i * cols + j] + cv[i];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    r
+}
+
+// Outer product via broadcasting: col_vec * row_vec
+fn outer_broadcast(col: List<Int>, row: List<Int>, m: Int, n: Int) -> List<Int> {
+    let mut r = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < m) {
+        let mut j = 0;
+        while (j < n) {
+            r[i * n + j] = col[i] * row[j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    r
+}
+
+fn main() -> Int {
+    // Test 1: Scalar + Vector broadcasting
+    // scalar(5) + [1,2,3,4] = [6,7,8,9]
+    let v = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sv = scalar_add_vec(5, v, 4);
+    assert_eq(sv[0], 6);
+    assert_eq(sv[1], 7);
+    assert_eq(sv[2], 8);
+    assert_eq(sv[3], 9);
+
+    // Test 2: Vector + Matrix row broadcasting
+    // [10,20,30] + [[1,2,3],[4,5,6]] = [[11,22,33],[14,25,36]]
+    let row_v = [10, 20, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mat = [1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bcast = vec_add_mat_rows(row_v, mat, 2, 3);
+    assert_eq(bcast[0], 11);
+    assert_eq(bcast[1], 22);
+    assert_eq(bcast[2], 33);
+    assert_eq(bcast[3], 14);
+    assert_eq(bcast[4], 25);
+    assert_eq(bcast[5], 36);
+
+    // Test 3: Column vector + Matrix broadcasting
+    // [[100],[200]] + [[1,2,3],[4,5,6]] = [[101,102,103],[204,205,206]]
+    let col_v = [100, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bcast2 = colvec_add_mat(col_v, mat, 2, 3);
+    assert_eq(bcast2[0], 101);
+    assert_eq(bcast2[1], 102);
+    assert_eq(bcast2[2], 103);
+    assert_eq(bcast2[3], 204);
+    assert_eq(bcast2[4], 205);
+    assert_eq(bcast2[5], 206);
+
+    // Test 4: Outer product via broadcasting
+    // [1,2,3] * [10,20] = [[10,20],[20,40],[30,60]]
+    let col = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let row = [10, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let outer = outer_broadcast(col, row, 3, 2);
+    assert_eq(outer[0], 10);
+    assert_eq(outer[1], 20);
+    assert_eq(outer[2], 20);
+    assert_eq(outer[3], 40);
+    assert_eq(outer[4], 30);
+    assert_eq(outer[5], 60);
+
+    // Test 5: Broadcasting commutativity
+    // A + B should equal B + A for compatible shapes
+    let a = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b = [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ab = scalar_add_vec(0, a, 4);  // Just copy
+    let mut i = 0;
+    while (i < 4) {
+        assert_eq(a[i] + b[i], b[i] + a[i]);
+        i = i + 1;
+    }
+
+    // Test 6: Broadcasting associativity
+    // (A + B) + C = A + (B + C)
+    let c = [100, 200, 300, 400, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut j = 0;
+    while (j < 4) {
+        let lhs = (a[j] + b[j]) + c[j];
+        let rhs = a[j] + (b[j] + c[j]);
+        assert_eq(lhs, rhs);
+        j = j + 1;
+    }
+
+    // Test 7: Scalar multiplication distributes over addition
+    // s * (A + B) = s*A + s*B
+    let s = 3;
+    let mut k = 0;
+    while (k < 4) {
+        let lhs2 = s * (a[k] + b[k]);
+        let rhs2 = s * a[k] + s * b[k];
+        assert_eq(lhs2, rhs2);
+        k = k + 1;
+    }
+
+    print("Broadcasting rules: PASS");
+    0
+}

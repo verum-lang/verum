@@ -1,0 +1,271 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, double-hashing, hash-table, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for hash table with double hashing collision resolution.
+// Uses a fixed-size table of 16 slots stored as two Arr8 records (keys + values).
+// Empty slot sentinel: -1 for key. Double hashing probes: h(k,i) = (h1(k) + i*h2(k)) % SIZE.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_fill(val: Int) -> Arr8 {
+    Arr8 { a0: val, a1: val, a2: val, a3: val, a4: val, a5: val, a6: val, a7: val }
+}
+
+// Hash table with 16 slots: keys_lo/hi and vals_lo/hi each hold 8 elements
+type HashTable is { keys_lo: Arr8, keys_hi: Arr8, vals_lo: Arr8, vals_hi: Arr8, count: Int };
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+fn ht_new() -> HashTable {
+    HashTable { keys_lo: a8_fill(-1), keys_hi: a8_fill(-1), vals_lo: a8_fill(0), vals_hi: a8_fill(0), count: 0 }
+}
+
+fn ht_get_key(ht: HashTable, i: Int) -> Int {
+    if i < 8 { a8_get(ht.keys_lo, i) } else { a8_get(ht.keys_hi, i - 8) }
+}
+
+fn ht_get_val(ht: HashTable, i: Int) -> Int {
+    if i < 8 { a8_get(ht.vals_lo, i) } else { a8_get(ht.vals_hi, i - 8) }
+}
+
+fn ht_set_key(ht: HashTable, i: Int, k: Int) -> HashTable {
+    if i < 8 {
+        HashTable { keys_lo: a8_set(ht.keys_lo, i, k), keys_hi: ht.keys_hi, vals_lo: ht.vals_lo, vals_hi: ht.vals_hi, count: ht.count }
+    } else {
+        HashTable { keys_lo: ht.keys_lo, keys_hi: a8_set(ht.keys_hi, i - 8, k), vals_lo: ht.vals_lo, vals_hi: ht.vals_hi, count: ht.count }
+    }
+}
+
+fn ht_set_val(ht: HashTable, i: Int, v: Int) -> HashTable {
+    if i < 8 {
+        HashTable { keys_lo: ht.keys_lo, keys_hi: ht.keys_hi, vals_lo: a8_set(ht.vals_lo, i, v), vals_hi: ht.vals_hi, count: ht.count }
+    } else {
+        HashTable { keys_lo: ht.keys_lo, keys_hi: ht.keys_hi, vals_lo: ht.vals_lo, vals_hi: a8_set(ht.vals_hi, i - 8, v), count: ht.count }
+    }
+}
+
+// Primary hash: multiplicative
+fn hash1(k: Int) -> Int {
+    abs_val((k * 2654435761) % 1000000007) % 16
+}
+
+// Secondary hash: must be odd (to be coprime with 16) and non-zero
+fn hash2(k: Int) -> Int {
+    let h = abs_val((k * 1327217885) % 999999937) % 8;
+    h * 2 + 1
+}
+
+// Insert key-value pair. Returns updated table.
+// If key already exists, updates value.
+fn ht_insert(ht: HashTable, k: Int, v: Int) -> HashTable {
+    let h1 = hash1(k);
+    let h2 = hash2(k);
+    let mut i = 0;
+    let mut pos = h1;
+    let mut found = -1;
+    while i < 16 {
+        let existing = ht_get_key(ht, pos);
+        if existing == -1 {
+            // Empty slot - insert here
+            if found == -1 { found = pos; }
+            i = 16; // break
+        } else if existing == k {
+            // Key exists - update
+            found = pos;
+            i = 16; // break
+        } else {
+            i = i + 1;
+            pos = (h1 + i * h2) % 16;
+        }
+    }
+    if found == -1 { return ht; } // table full
+    let existing_key = ht_get_key(ht, found);
+    let ht2 = ht_set_key(ht, found, k);
+    let ht3 = ht_set_val(ht2, found, v);
+    if existing_key == -1 {
+        // New key inserted
+        HashTable { keys_lo: ht3.keys_lo, keys_hi: ht3.keys_hi, vals_lo: ht3.vals_lo, vals_hi: ht3.vals_hi, count: ht3.count + 1 }
+    } else {
+        ht3
+    }
+}
+
+// Lookup key. Returns value or -9999 if not found.
+fn ht_lookup(ht: HashTable, k: Int) -> Int {
+    let h1 = hash1(k);
+    let h2 = hash2(k);
+    let mut i = 0;
+    let mut pos = h1;
+    while i < 16 {
+        let existing = ht_get_key(ht, pos);
+        if existing == -1 { return -9999; } // empty slot = not found
+        if existing == k { return ht_get_val(ht, pos); }
+        i = i + 1;
+        pos = (h1 + i * h2) % 16;
+    }
+    -9999
+}
+
+// Check if key exists
+fn ht_contains(ht: HashTable, k: Int) -> Int {
+    if ht_lookup(ht, k) == -9999 { 0 } else { 1 }
+}
+
+fn test_empty_table() {
+    let ht = ht_new();
+    assert_eq(ht.count, 0);
+    assert_eq(ht_lookup(ht, 42), -9999);
+    assert_eq(ht_contains(ht, 0), 0);
+}
+
+fn test_single_insert() {
+    let ht = ht_insert(ht_new(), 42, 100);
+    assert_eq(ht.count, 1);
+    assert_eq(ht_lookup(ht, 42), 100);
+    assert_eq(ht_contains(ht, 42), 1);
+    assert_eq(ht_contains(ht, 43), 0);
+}
+
+fn test_multiple_inserts() {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 10, 100);
+    ht = ht_insert(ht, 20, 200);
+    ht = ht_insert(ht, 30, 300);
+    ht = ht_insert(ht, 40, 400);
+    ht = ht_insert(ht, 50, 500);
+    assert_eq(ht.count, 5);
+    assert_eq(ht_lookup(ht, 10), 100);
+    assert_eq(ht_lookup(ht, 20), 200);
+    assert_eq(ht_lookup(ht, 30), 300);
+    assert_eq(ht_lookup(ht, 40), 400);
+    assert_eq(ht_lookup(ht, 50), 500);
+    assert_eq(ht_lookup(ht, 60), -9999);
+}
+
+fn test_update_value() {
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 5, 50);
+    assert_eq(ht_lookup(ht, 5), 50);
+    assert_eq(ht.count, 1);
+    ht = ht_insert(ht, 5, 99);
+    assert_eq(ht_lookup(ht, 5), 99);
+    assert_eq(ht.count, 1); // count should not increase on update
+}
+
+fn test_collision_resolution() {
+    // Insert keys that will likely collide and verify all are found
+    let mut ht = ht_new();
+    let mut i = 0;
+    while i < 10 {
+        ht = ht_insert(ht, i * 16 + 3, i * 10);
+        i = i + 1;
+    }
+    assert_eq(ht.count, 10);
+    // Verify all values
+    let mut j = 0;
+    while j < 10 {
+        assert_eq(ht_lookup(ht, j * 16 + 3), j * 10);
+        j = j + 1;
+    }
+}
+
+fn test_hash_properties() {
+    // hash2 must always return odd values (1,3,5,7,9,11,13,15)
+    let mut i = 0;
+    while i < 20 {
+        let h = hash2(i);
+        assert_eq(h % 2, 1);
+        assert_eq(h >= 1, true);
+        assert_eq(h <= 15, true);
+        i = i + 1;
+    }
+    // hash1 must be in range [0, 15]
+    let mut j = 0;
+    while j < 20 {
+        let h = hash1(j);
+        assert_eq(h >= 0, true);
+        assert_eq(h < 16, true);
+        j = j + 1;
+    }
+}
+
+fn test_probe_sequence() {
+    // Verify that double hashing visits all 16 slots (since h2 is coprime with 16)
+    // For a given key, track which slots are visited
+    let k = 7;
+    let h1 = hash1(k);
+    let h2 = hash2(k);
+    let mut visited = 0; // bitmask of visited slots
+    let mut i = 0;
+    while i < 16 {
+        let pos = (h1 + i * h2) % 16;
+        // Set bit at position pos
+        let mut bit = 1;
+        let mut p = 0;
+        while p < pos { bit = bit * 2; p = p + 1; }
+        visited = visited + bit;
+        i = i + 1;
+    }
+    // All 16 slots visited means visited = 2^16 - 1 = 65535
+    assert_eq(visited, 65535);
+}
+
+fn test_near_full_table() {
+    // Fill 14 of 16 slots
+    let mut ht = ht_new();
+    let mut i = 0;
+    while i < 14 {
+        ht = ht_insert(ht, i * 7 + 1, i * 100 + 1);
+        i = i + 1;
+    }
+    assert_eq(ht.count, 14);
+    // All should be retrievable
+    let mut j = 0;
+    while j < 14 {
+        assert_eq(ht_lookup(ht, j * 7 + 1), j * 100 + 1);
+        j = j + 1;
+    }
+}
+
+fn test_zero_key() {
+    // Key 0 should work (not confused with empty sentinel -1)
+    let mut ht = ht_new();
+    ht = ht_insert(ht, 0, 999);
+    assert_eq(ht.count, 1);
+    assert_eq(ht_lookup(ht, 0), 999);
+    assert_eq(ht_contains(ht, 0), 1);
+}
+
+fn main() -> Int {
+    test_empty_table();
+    test_single_insert();
+    test_multiple_inserts();
+    test_update_value();
+    test_collision_resolution();
+    test_hash_properties();
+    test_probe_sequence();
+    test_near_full_table();
+    test_zero_key();
+    print("[OK] 333_double_hashing_aot");
+    0
+}

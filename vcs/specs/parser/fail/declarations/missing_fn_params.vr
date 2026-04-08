@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, error
+// @description: Test missing function parameter list detection
+// @expected-error: E031
+
+fn foo {
+    let x = 1;
+}

@@ -1,0 +1,18 @@
+// Complexity: Nested generics
+type Nested<T> is Maybe<List<Map<Text, T>>>;
+
+type DeepNested<A, B> is List<Maybe<Map<A, List<B>>>>;
+
+type Container<T> is {
+    data: Heap<List<T>>,
+    cache: Map<Text, T>,
+};
+
+fn process<T>(container: &Container<T>) -> Int {
+    0
+}
+
+fn main() {
+    let nested: Nested<Int> = None;
+    let deep: DeepNested<Text, Int> = [];
+}

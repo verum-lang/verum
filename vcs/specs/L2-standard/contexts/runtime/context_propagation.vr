@@ -1,0 +1,61 @@
+// @test: run
+// @expected-stdout: Level 1: depth=1\nLevel 2: depth=2\nLevel 3: depth=3\nUnwinding: depth=3\nUnwinding: depth=2\nUnwinding: depth=1
+// @tier: 0
+// @level: L2
+// @tags: contexts, using, propagation, vbc, runtime
+// @description: Tests context propagation through nested function calls
+
+// Depth tracking context
+context DepthTracker {
+    fn get_depth(&self) -> Int;
+    fn increment(&mut self);
+}
+
+// Concrete implementation
+type Tracker is {
+    depth: Int,
+};
+
+implement DepthTracker for Tracker {
+    fn get_depth(&self) -> Int {
+        self.depth
+    }
+
+    fn increment(&mut self) {
+        self.depth = self.depth + 1;
+    }
+}
+
+// Leaf function - deepest level
+fn level_3() using [DepthTracker] {
+    DepthTracker.increment();
+    let d = DepthTracker.get_depth();
+    println(f"Level 3: depth={d}");
+    println(f"Unwinding: depth={d}");
+}
+
+// Middle function
+fn level_2() using [DepthTracker] {
+    DepthTracker.increment();
+    let d = DepthTracker.get_depth();
+    println(f"Level 2: depth={d}");
+    level_3();
+    println(f"Unwinding: depth={d}");
+}
+
+// Top level function
+fn level_1() using [DepthTracker] {
+    DepthTracker.increment();
+    let d = DepthTracker.get_depth();
+    println(f"Level 1: depth={d}");
+    level_2();
+    println(f"Unwinding: depth={d}");
+}
+
+fn main() {
+    // Provide depth tracker context
+    let tracker = Tracker { depth: 0 };
+    provide DepthTracker = tracker;
+
+    level_1();
+}

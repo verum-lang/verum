@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, associated, brackets, error
+// @description: Test detection of unclosed associated type binding
+// @expected-error: E018
+
+// Associated type binding with unclosed angle bracket
+fn test(x: dyn Iterator<Item = Int) {}

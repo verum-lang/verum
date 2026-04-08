@@ -1,0 +1,412 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: memory, stack, frame, overhead, recursion
+// @description: Stack usage benchmark (target: < 20% frame overhead)
+
+/// Stack Usage Benchmark
+///
+/// This benchmark measures stack memory usage and frame sizes in Verum.
+/// Efficient stack usage is critical for recursive algorithms and deep call stacks.
+///
+/// Targets:
+/// - Stack frame overhead: < 20% vs C
+/// - Maximum recursion depth: > 10,000
+/// - Stack growth: linear with call depth
+///
+/// Stack frame components:
+/// - Return address (8 bytes)
+/// - Frame pointer (8 bytes)
+/// - Local variables
+/// - Saved registers
+/// - CBGR metadata for local references
+///
+/// Spec reference: docs/detailed/04-memory-model.md
+
+const MAX_RECURSION_DEPTH: Int = 100_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Stack Usage Performance");
+
+    // Stack frame size
+    results.add(benchmark_minimal_frame_size());
+    results.add(benchmark_frame_with_locals());
+    results.add(benchmark_frame_with_refs());
+
+    // Recursion depth
+    results.add(benchmark_max_recursion_depth());
+    results.add(benchmark_tail_call_optimization());
+
+    // Stack growth patterns
+    results.add(benchmark_linear_stack_growth());
+    results.add(benchmark_stack_usage_per_call());
+
+    // Compare with expectations
+    results.add(benchmark_stack_overhead_vs_c());
+
+    results.report();
+    assert(results.all_pass(), "Stack usage exceeds acceptable limits");
+}
+
+/// Measure minimal stack frame size (empty function)
+fn benchmark_minimal_frame_size() -> BenchmarkResult {
+    let depth = 1000;
+
+    let stack_before = stack_pointer();
+    recurse_empty(depth);
+    let stack_after = stack_pointer();
+
+    // This won't work directly - need to measure inside recursion
+    let frame_size = measure_frame_size_empty();
+
+    // Minimal frame: return addr + frame ptr = 16 bytes minimum
+    // Plus any ABI-required padding
+    let expected_min = 16;
+    let expected_max = 32;
+
+    BenchmarkResult {
+        name: "minimal_frame_size",
+        metric: "bytes",
+        value: frame_size as Float,
+        target: expected_max as Float,
+        passed: frame_size >= expected_min && frame_size <= expected_max,
+    }
+}
+
+@inline(never)
+fn recurse_empty(depth: Int) {
+    if depth > 0 {
+        recurse_empty(depth - 1);
+    }
+}
+
+fn measure_frame_size_empty() -> Int {
+    let sp1 = stack_pointer();
+    let sp2 = inner_frame_measure();
+    (sp1 - sp2).abs() as Int
+}
+
+@inline(never)
+fn inner_frame_measure() -> Int {
+    stack_pointer()
+}
+
+/// Measure frame size with local variables
+fn benchmark_frame_with_locals() -> BenchmarkResult {
+    let frame_size = measure_frame_with_locals();
+
+    // Frame with 8 Int locals: 16 (base) + 64 (locals) = 80 bytes
+    let expected_max = 128;  // Allow for alignment
+
+    BenchmarkResult {
+        name: "frame_with_8_locals",
+        metric: "bytes",
+        value: frame_size as Float,
+        target: expected_max as Float,
+        passed: frame_size <= expected_max,
+    }
+}
+
+@inline(never)
+fn measure_frame_with_locals() -> Int {
+    let sp1 = stack_pointer();
+
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+    let h = 8;
+
+    // Prevent optimization
+    black_box(a + b + c + d + e + f + g + h);
+
+    let sp2 = inner_with_locals();
+    (sp1 - sp2).abs() as Int
+}
+
+@inline(never)
+fn inner_with_locals() -> Int {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+    let h = 8;
+    black_box(a + b + c + d + e + f + g + h);
+    stack_pointer()
+}
+
+/// Measure frame size with references (includes CBGR metadata)
+fn benchmark_frame_with_refs() -> BenchmarkResult {
+    let frame_size = measure_frame_with_refs();
+
+    // Frame with refs: 16 (base) + refs (16 each with CBGR)
+    // 4 refs = 64 bytes additional
+    let expected_max = 160;
+
+    BenchmarkResult {
+        name: "frame_with_4_refs",
+        metric: "bytes",
+        value: frame_size as Float,
+        target: expected_max as Float,
+        passed: frame_size <= expected_max,
+    }
+}
+
+fn measure_frame_with_refs() -> Int {
+    let data1 = Heap.new(1);
+    let data2 = Heap.new(2);
+    let data3 = Heap.new(3);
+    let data4 = Heap.new(4);
+
+    let sp1 = stack_pointer();
+    let result = inner_with_refs(&*data1, &*data2, &*data3, &*data4);
+    let sp2 = stack_pointer();
+
+    black_box(result);
+    (sp1 - sp2).abs() as Int
+}
+
+@inline(never)
+fn inner_with_refs(a: &Int, b: &Int, c: &Int, d: &Int) -> Int {
+    *a + *b + *c + *d
+}
+
+/// Benchmark maximum recursion depth
+fn benchmark_max_recursion_depth() -> BenchmarkResult {
+    let mut max_depth = 0;
+
+    // Binary search for max depth
+    let mut low = 1;
+    let mut high = MAX_RECURSION_DEPTH;
+
+    while low < high {
+        let mid = (low + high + 1) / 2;
+
+        if can_recurse_to_depth(mid) {
+            low = mid;
+            max_depth = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+
+    // Target: at least 10,000 recursion depth
+    BenchmarkResult {
+        name: "max_recursion_depth",
+        metric: "calls",
+        value: max_depth as Float,
+        target: 10_000.0,
+        passed: max_depth >= 10_000,
+    }
+}
+
+fn can_recurse_to_depth(depth: Int) -> Bool {
+    // Use catch to detect stack overflow
+    match catch_stack_overflow(|| recurse_empty(depth)) {
+        Ok(()) => true,
+        Err(_) => false,
+    }
+}
+
+/// Benchmark tail call optimization effectiveness
+fn benchmark_tail_call_optimization() -> BenchmarkResult {
+    // Tail recursive function should not consume stack
+    let depth = 100_000;
+
+    let stack_before = stack_usage();
+
+    // This should be optimized to not grow stack
+    let result = tail_recursive_sum(depth, 0);
+
+    let stack_after = stack_usage();
+    let stack_growth = stack_after - stack_before;
+
+    black_box(result);
+
+    // With TCO, stack growth should be minimal (< 1KB)
+    BenchmarkResult {
+        name: "tail_call_optimization",
+        metric: "bytes growth",
+        value: stack_growth as Float,
+        target: 1024.0,
+        passed: stack_growth < 1024,
+    }
+}
+
+@inline(never)
+fn tail_recursive_sum(n: Int, acc: Int) -> Int {
+    if n == 0 {
+        acc
+    } else {
+        tail_recursive_sum(n - 1, acc + n)  // Tail position
+    }
+}
+
+/// Benchmark linear stack growth
+fn benchmark_linear_stack_growth() -> BenchmarkResult {
+    let depths = [100, 200, 500, 1000];
+    let mut usages: List<Int> = List.new();
+
+    for depth in depths {
+        let usage = measure_stack_at_depth(depth);
+        usages.push(usage);
+    }
+
+    // Check linearity: usage should scale with depth
+    // Calculate regression coefficient
+    let ratios: List<Float> = usages.windows(2)
+        .zip(depths.windows(2))
+        .map(|(u, d)| {
+            let usage_ratio = u[1] as Float / u[0] as Float;
+            let depth_ratio = d[1] as Float / d[0] as Float;
+            usage_ratio / depth_ratio
+        })
+        .collect();
+
+    // Linearity: ratios should be close to 1.0
+    let avg_ratio = ratios.iter().sum.<Float>() / ratios.len() as Float;
+    let deviation = (avg_ratio - 1.0).abs();
+
+    BenchmarkResult {
+        name: "linear_stack_growth",
+        metric: "deviation",
+        value: deviation,
+        target: 0.1,  // < 10% deviation from linear
+        passed: deviation < 0.1,
+    }
+}
+
+fn measure_stack_at_depth(depth: Int) -> Int {
+    let baseline = stack_usage();
+    recurse_and_measure(depth, baseline)
+}
+
+@inline(never)
+fn recurse_and_measure(depth: Int, baseline: Int) -> Int {
+    if depth == 0 {
+        stack_usage() - baseline
+    } else {
+        let local = depth;  // Ensure frame has locals
+        black_box(local);
+        recurse_and_measure(depth - 1, baseline)
+    }
+}
+
+/// Benchmark stack usage per function call
+fn benchmark_stack_usage_per_call() -> BenchmarkResult {
+    let depth = 1000;
+
+    let usage = measure_stack_at_depth(depth);
+    let per_call = usage as Float / depth as Float;
+
+    // Target: < 64 bytes per call for simple functions
+    BenchmarkResult {
+        name: "stack_per_call",
+        metric: "bytes",
+        value: per_call,
+        target: 64.0,
+        passed: per_call < 64.0,
+    }
+}
+
+/// Compare stack overhead with C equivalent
+fn benchmark_stack_overhead_vs_c() -> BenchmarkResult {
+    // Measure Verum stack usage
+    let verum_per_call = measure_stack_at_depth(100) as Float / 100.0;
+
+    // C equivalent frame size for simple function:
+    // - return address: 8 bytes
+    // - frame pointer: 8 bytes
+    // - one local: 8 bytes
+    // Total: ~24-32 bytes
+    let c_equivalent = 32.0;
+
+    let overhead_pct = ((verum_per_call - c_equivalent) / c_equivalent) * 100.0;
+
+    // Target: < 20% overhead vs C
+    BenchmarkResult {
+        name: "stack_overhead_vs_c",
+        metric: "% overhead",
+        value: overhead_pct,
+        target: 20.0,
+        passed: overhead_pct < 20.0,
+    }
+}
+
+/// Get current stack pointer (platform-specific)
+fn stack_pointer() -> Int {
+    @cfg(target_arch = "x86_64")
+    {
+        let sp: Int;
+// ASM:         asm("mov {}, rsp", out(reg) sp);
+        sp
+    }
+    @cfg(target_arch = "aarch64")
+    {
+        let sp: Int;
+// ASM:         asm("mov {}, sp", out(reg) sp);
+        sp
+    }
+}
+
+/// Get current stack usage
+fn stack_usage() -> Int {
+    // Use OS API to get thread stack info
+    thread.current_stack_usage()
+}
+
+/// Catch stack overflow
+fn catch_stack_overflow<T>(f: fn() -> T) -> Result<T, StackOverflow> {
+    runtime.catch_stack_overflow(f)
+}
+
+type StackOverflow is  {};
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: <{:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

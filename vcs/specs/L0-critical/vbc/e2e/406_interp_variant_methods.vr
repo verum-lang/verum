@@ -1,0 +1,141 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, variants, methods, pattern-matching
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests variant types with methods, complex pattern matching, and
+// variant-based algorithms.
+
+type Shape is Circle(Int) | Rectangle(Int, Int) | Triangle(Int, Int);
+
+fn shape_area_x2(s: Shape) -> Int {
+    match s {
+        Circle(r) => 6 * r * r,
+        Rectangle(w, h) => 2 * w * h,
+        Triangle(b, h) => b * h,
+    }
+}
+
+fn shape_name(s: Shape) -> Text {
+    match s {
+        Circle(r) => "circle",
+        Rectangle(w, h) => "rectangle",
+        Triangle(b, h) => "triangle",
+    }
+}
+
+type Expr is Num(Int) | Add(Int, Int) | Mul(Int, Int) | Neg(Int);
+
+fn eval_expr(e: Expr) -> Int {
+    match e {
+        Num(n) => n,
+        Add(a, b) => a + b,
+        Mul(a, b) => a * b,
+        Neg(n) => 0 - n,
+    }
+}
+
+type Maybe is Nothing | Just(Int);
+
+fn maybe_map(m: Maybe, f: fn(Int) -> Int) -> Maybe {
+    match m {
+        Nothing => Nothing,
+        Just(x) => Just(f(x)),
+    }
+}
+
+fn maybe_value_or(m: Maybe, default_val: Int) -> Int {
+    match m {
+        Nothing => default_val,
+        Just(x) => x,
+    }
+}
+
+fn test_shapes() {
+    let c = Circle(5);
+    let r = Rectangle(3, 4);
+    let t = Triangle(6, 8);
+
+    // Circle: 6*25 = 150 (approx 2*pi*r^2)
+    assert_eq(shape_area_x2(c), 150);
+    // Rectangle: 2*12 = 24 (2*area)
+    assert_eq(shape_area_x2(r), 24);
+    // Triangle: 48 (2*area = b*h)
+    assert_eq(shape_area_x2(t), 48);
+
+    print("shapes: ok");
+}
+
+fn test_expr_eval() {
+    assert_eq(eval_expr(Num(42)), 42);
+    assert_eq(eval_expr(Add(10, 20)), 30);
+    assert_eq(eval_expr(Mul(6, 7)), 42);
+    assert_eq(eval_expr(Neg(100)), -100);
+    print("expr_eval: ok");
+}
+
+fn test_maybe_ops() {
+    let x = Just(10);
+    let n = Nothing;
+
+    // Map
+    let doubled = maybe_map(x, |v| v * 2);
+    assert_eq(maybe_value_or(doubled, 0), 20);
+
+    let nothing_mapped = maybe_map(n, |v| v * 2);
+    assert_eq(maybe_value_or(nothing_mapped, -1), -1);
+
+    // Chain operations
+    let result = maybe_map(Just(5), |v| v + 10);
+    let final_val = maybe_value_or(result, 0);
+    assert_eq(final_val, 15);
+
+    print("maybe_ops: ok");
+}
+
+fn test_variant_in_loop() {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let m = if i % 2 == 0 { Just(i * 10) } else { Nothing };
+        total = total + maybe_value_or(m, 0);
+        i = i + 1;
+    }
+    // i=0: Just(0)=0, i=1: Nothing=0, i=2: Just(20)=20, i=3: Nothing=0, i=4: Just(40)=40
+    assert_eq(total, 60);
+    print("variant_in_loop: ok");
+}
+
+fn test_nested_variant_matching() {
+    // Match with complex expressions
+    let shapes = [1, 2, 3, 4, 5];
+    let mut area_sum = 0;
+    let mut i = 0;
+    while i < 5 {
+        let s = if shapes[i] <= 2 {
+            Circle(shapes[i])
+        } else if shapes[i] <= 4 {
+            Rectangle(shapes[i], shapes[i])
+        } else {
+            Triangle(shapes[i], shapes[i])
+        };
+        area_sum = area_sum + shape_area_x2(s);
+        i = i + 1;
+    }
+    // i=0: Circle(1) = 6, i=1: Circle(2) = 24, i=2: Rect(3,3) = 18,
+    // i=3: Rect(4,4) = 32, i=4: Tri(5,5) = 25
+    assert_eq(area_sum, 105);
+    print("nested_variant_matching: ok");
+}
+
+fn main() -> Int {
+    test_shapes();
+    test_expr_eval();
+    test_maybe_ops();
+    test_variant_in_loop();
+    test_nested_variant_matching();
+    print("[OK] 406_interp_variant_methods");
+    0
+}

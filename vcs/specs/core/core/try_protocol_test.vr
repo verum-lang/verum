@@ -1,0 +1,311 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: try, protocol, error-handling, result, maybe
+// @description: Comprehensive tests for the Try protocol implementation
+
+module specs.stdlib.core.try_protocol_test;
+
+mount core.primitives.*;
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// TRY PROTOCOL TEST SUITE
+// =============================================================================
+//
+// Tests the ? operator (Try protocol) with:
+// - Result<T, E> types
+// - Maybe<T> types
+// - Error propagation
+// - Type inference through ? chains
+// - Nested Try usage
+//
+// NOTE: Helper functions are defined at module level for clarity and reusability.
+// Local functions inside test functions CAN resolve module-level types.
+
+// -----------------------------------------------------------------------------
+// Helper Functions at Module Level
+// -----------------------------------------------------------------------------
+
+fn helper_get_value_result() -> Result<Int, Text> {
+    Ok(42)
+}
+
+fn helper_use_value_result() -> Result<Int, Text> {
+    let x = helper_get_value_result()?;
+    Ok(x + 1)
+}
+
+fn helper_fail_always() -> Result<Int, Text> {
+    Err("error")
+}
+
+fn helper_try_use_fail() -> Result<Int, Text> {
+    let x = helper_fail_always()?;
+    Ok(x + 1)
+}
+
+fn helper_step1_result() -> Result<Int, Text> {
+    Ok(10)
+}
+
+fn helper_step2_result(x: Int) -> Result<Int, Text> {
+    Ok(x * 2)
+}
+
+fn helper_step3_result(x: Int) -> Result<Int, Text> {
+    Ok(x + 5)
+}
+
+fn helper_chain_result() -> Result<Int, Text> {
+    let a = helper_step1_result()?;
+    let b = helper_step2_result(a)?;
+    let c = helper_step3_result(b)?;
+    Ok(c)
+}
+
+fn helper_get_value_maybe() -> Maybe<Int> {
+    Some(42)
+}
+
+fn helper_use_value_maybe() -> Maybe<Int> {
+    let x = helper_get_value_maybe()?;
+    Some(x + 1)
+}
+
+fn helper_get_none() -> Maybe<Int> {
+    None
+}
+
+fn helper_try_use_none() -> Maybe<Int> {
+    let x = helper_get_none()?;
+    Some(x + 1)
+}
+
+fn helper_step1_maybe() -> Maybe<Int> {
+    Some(10)
+}
+
+fn helper_step2_maybe(x: Int) -> Maybe<Int> {
+    Some(x * 2)
+}
+
+fn helper_step3_maybe(x: Int) -> Maybe<Int> {
+    Some(x + 5)
+}
+
+fn helper_chain_maybe() -> Maybe<Int> {
+    let a = helper_step1_maybe()?;
+    let b = helper_step2_maybe(a)?;
+    let c = helper_step3_maybe(b)?;
+    Some(c)
+}
+
+fn helper_get_result_for_inference() -> Result<Int, Text> {
+    Ok(100)
+}
+
+fn helper_use_result_for_inference() -> Result<Int, Text> {
+    let x = helper_get_result_for_inference()?;
+    assert_eq(x, 100);
+    Ok(x)
+}
+
+fn helper_get_maybe_for_inference() -> Maybe<Text> {
+    Some("hello")
+}
+
+fn helper_use_maybe_for_inference() -> Maybe<Text> {
+    let x = helper_get_maybe_for_inference()?;
+    assert_eq(x, "hello");
+    Some(x)
+}
+
+fn helper_safe_get(list: &List<Int>, idx: Int) -> Maybe<Int> {
+    if idx < 0 {
+        return None;
+    }
+    // list.get returns Maybe<&Int>, need to map and dereference
+    list.get(idx).map(|x| *x)
+}
+
+fn helper_sum_first_three(list: &List<Int>) -> Maybe<Int> {
+    let a = helper_safe_get(list, 0)?;
+    let b = helper_safe_get(list, 1)?;
+    let c = helper_safe_get(list, 2)?;
+    Some(a + b + c)
+}
+
+fn helper_get_a() -> Result<Int, Text> { Ok(10) }
+fn helper_get_b() -> Result<Int, Text> { Ok(5) }
+
+fn helper_compute_sum() -> Result<Int, Text> {
+    let result = helper_get_a()? + helper_get_b()?;
+    Ok(result)
+}
+
+fn helper_get_arg() -> Result<Int, Text> { Ok(42) }
+fn helper_double(x: Int) -> Int { x * 2 }
+
+fn helper_compute_double() -> Result<Int, Text> {
+    let result = helper_double(helper_get_arg()?);
+    Ok(result)
+}
+
+fn helper_get_50() -> Result<Int, Text> { Ok(50) }
+fn helper_fail_text() -> Result<Int, Text> { Err("failed") }
+
+// -----------------------------------------------------------------------------
+// Result Type with ? Operator
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_operator_result_basic() {
+    match helper_use_value_result() {
+        Ok(v) => assert_eq(v, 43),
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_operator_result_error_propagation() {
+    match helper_try_use_fail() {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "error"),
+    }
+}
+
+@test
+fn test_try_operator_result_chain() {
+    match helper_chain_result() {
+        Ok(v) => assert_eq(v, 25),  // 10 * 2 + 5
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Maybe Type with ? Operator
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_operator_maybe_basic() {
+    match helper_use_value_maybe() {
+        Some(v) => assert_eq(v, 43),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_try_operator_maybe_none_propagation() {
+    assert(helper_try_use_none() is None);
+}
+
+@test
+fn test_try_operator_maybe_chain() {
+    match helper_chain_maybe() {
+        Some(v) => assert_eq(v, 25),
+        None => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Type Inference Through ? Operator
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_type_inference_result() {
+    let _ = helper_use_result_for_inference();
+}
+
+@test
+fn test_try_type_inference_maybe() {
+    let _ = helper_use_maybe_for_inference();
+}
+
+// -----------------------------------------------------------------------------
+// Method Chain with Try
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_with_method_chains() {
+    let list = List.from([1, 2, 3, 4, 5]);
+
+    match helper_sum_first_three(&list) {
+        Some(v) => assert_eq(v, 6),  // 1 + 2 + 3
+        None => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Nested Try in Expressions
+// -----------------------------------------------------------------------------
+
+@test
+fn test_try_in_expressions() {
+    match helper_compute_sum() {
+        Ok(v) => assert_eq(v, 15),
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_in_function_args() {
+    match helper_compute_double() {
+        Ok(v) => assert_eq(v, 84),
+        Err(_) => assert(false),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Try Block Expression
+// -----------------------------------------------------------------------------
+// NOTE: try blocks currently have a type inference issue where the block body
+// is expected to return the full Result type rather than automatically wrapping
+// the success value in Ok(). This is tracked as a P0 issue.
+//
+// The following tests demonstrate proper workaround using explicit Ok() wrapping.
+
+@test
+fn test_try_block_success() {
+    // Workaround: explicitly return Ok() from try block
+    let result: Result<Int, Text> = try {
+        let a = 10;
+        let b = 20;
+        Ok(a + b)
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 30),
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_block_with_question_mark() {
+    // Workaround: explicitly return Ok() from try block
+    let result: Result<Int, Text> = try {
+        let x = helper_get_50()?;
+        Ok(x * 2)
+    };
+
+    match result {
+        Ok(v) => assert_eq(v, 100),
+        Err(_) => assert(false),
+    }
+}
+
+@test
+fn test_try_block_error_propagation() {
+    // Workaround: explicitly return Ok() from try block
+    let result: Result<Int, Text> = try {
+        let x = helper_fail_text()?;
+        Ok(x * 2)
+    };
+
+    match result {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "failed"),
+    }
+}

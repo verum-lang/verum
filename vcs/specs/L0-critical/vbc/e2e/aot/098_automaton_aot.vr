@@ -1,0 +1,385 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, automaton, dfa, finite-state-machine, simulation
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT deterministic finite automaton simulation with multiple DFAs
+
+// DFA transition table for up to 8 states, alphabet {0, 1}
+// For state s and input a: next_state = trans[s * 2 + a]
+// We store transitions as a flat 16-element array (8 states * 2 inputs)
+type DFA is {
+    t0: Int, t1: Int, t2: Int, t3: Int,
+    t4: Int, t5: Int, t6: Int, t7: Int,
+    t8: Int, t9: Int, t10: Int, t11: Int,
+    t12: Int, t13: Int, t14: Int, t15: Int,
+    num_states: Int,
+    start_state: Int
+};
+
+fn dfa_trans(d: DFA, idx: Int) -> Int {
+    if idx == 0 { d.t0 } else if idx == 1 { d.t1 }
+    else if idx == 2 { d.t2 } else if idx == 3 { d.t3 }
+    else if idx == 4 { d.t4 } else if idx == 5 { d.t5 }
+    else if idx == 6 { d.t6 } else if idx == 7 { d.t7 }
+    else if idx == 8 { d.t8 } else if idx == 9 { d.t9 }
+    else if idx == 10 { d.t10 } else if idx == 11 { d.t11 }
+    else if idx == 12 { d.t12 } else if idx == 13 { d.t13 }
+    else if idx == 14 { d.t14 } else { d.t15 }
+}
+
+// Accept states stored as a bitmask (bit i set = state i is accepting)
+type DFAConfig is {
+    automaton: DFA,
+    accept_mask: Int
+};
+
+// Single step: given current state and input symbol, return next state
+fn dfa_step(d: DFA, state: Int, input: Int) -> Int {
+    dfa_trans(d, state * 2 + input)
+}
+
+// Check if state is accepting
+fn is_accepting(cfg: DFAConfig, state: Int) -> Bool {
+    (cfg.accept_mask >> state) & 1 == 1
+}
+
+// Input sequence stored as Arr16
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int,
+    len: Int
+};
+
+fn arr_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn arr_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 },
+        len: a.len
+    }
+}
+
+fn arr_new(n: Int) -> Arr16 {
+    Arr16 {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0,
+        len: n
+    }
+}
+
+// Run DFA on input sequence, return final state
+fn dfa_run(d: DFA, input: Arr16) -> Int {
+    let mut state = d.start_state;
+    let mut i = 0;
+    while i < input.len {
+        state = dfa_step(d, state, arr_get(input, i));
+        i = i + 1;
+    }
+    state
+}
+
+// Check if DFA accepts the input
+fn dfa_accepts(cfg: DFAConfig, input: Arr16) -> Bool {
+    let final_state = dfa_run(cfg.automaton, input);
+    is_accepting(cfg, final_state)
+}
+
+// Build input array from individual bits (helper for readability)
+fn make_input2(b0: Int, b1: Int) -> Arr16 {
+    let mut a = arr_new(2);
+    a = arr_set(a, 0, b0);
+    a = arr_set(a, 1, b1);
+    a
+}
+
+fn make_input3(b0: Int, b1: Int, b2: Int) -> Arr16 {
+    let mut a = arr_new(3);
+    a = arr_set(a, 0, b0);
+    a = arr_set(a, 1, b1);
+    a = arr_set(a, 2, b2);
+    a
+}
+
+fn make_input4(b0: Int, b1: Int, b2: Int, b3: Int) -> Arr16 {
+    let mut a = arr_new(4);
+    a = arr_set(a, 0, b0);
+    a = arr_set(a, 1, b1);
+    a = arr_set(a, 2, b2);
+    a = arr_set(a, 3, b3);
+    a
+}
+
+fn make_input6(b0: Int, b1: Int, b2: Int, b3: Int, b4: Int, b5: Int) -> Arr16 {
+    let mut a = arr_new(6);
+    a = arr_set(a, 0, b0);
+    a = arr_set(a, 1, b1);
+    a = arr_set(a, 2, b2);
+    a = arr_set(a, 3, b3);
+    a = arr_set(a, 4, b4);
+    a = arr_set(a, 5, b5);
+    a
+}
+
+fn main() -> Int {
+    // ========================================================
+    // DFA 1: Accepts binary strings divisible by 3
+    // States: 0 (remainder 0), 1 (remainder 1), 2 (remainder 2)
+    // Start: 0, Accept: {0}
+    // Reading MSB first:
+    //   state 0, input 0 -> 0  (0*2+0=0, 0%3=0)
+    //   state 0, input 1 -> 1  (0*2+1=1, 1%3=1)
+    //   state 1, input 0 -> 2  (1*2+0=2, 2%3=2)
+    //   state 1, input 1 -> 0  (1*2+1=3, 3%3=0)
+    //   state 2, input 0 -> 1  (2*2+0=4, 4%3=1)
+    //   state 2, input 1 -> 2  (2*2+1=5, 5%3=2)
+    // ========================================================
+    let div3_dfa = DFA {
+        t0: 0, t1: 1,   // state 0: on 0->0, on 1->1
+        t2: 2, t3: 0,   // state 1: on 0->2, on 1->0
+        t4: 1, t5: 2,   // state 2: on 0->1, on 1->2
+        t6: 0, t7: 0, t8: 0, t9: 0, t10: 0, t11: 0,
+        t12: 0, t13: 0, t14: 0, t15: 0,
+        num_states: 3,
+        start_state: 0
+    };
+    let div3_cfg = DFAConfig { automaton: div3_dfa, accept_mask: 1 };  // bit 0 set
+
+    // Empty string: state 0 (accepting) -> 0 is divisible by 3
+    let empty = arr_new(0);
+    assert(dfa_accepts(div3_cfg, empty));
+
+    // "0" = 0, divisible by 3 -> accept
+    let mut inp_0 = arr_new(1);
+    inp_0 = arr_set(inp_0, 0, 0);
+    assert(dfa_accepts(div3_cfg, inp_0));
+
+    // "1" = 1, not divisible by 3 -> reject
+    let mut inp_1 = arr_new(1);
+    inp_1 = arr_set(inp_1, 0, 1);
+    assert(!dfa_accepts(div3_cfg, inp_1));
+
+    // "11" = 3, divisible by 3 -> accept
+    assert(dfa_accepts(div3_cfg, make_input2(1, 1)));
+
+    // "10" = 2, not divisible -> reject
+    assert(!dfa_accepts(div3_cfg, make_input2(1, 0)));
+
+    // "110" = 6, divisible -> accept
+    assert(dfa_accepts(div3_cfg, make_input3(1, 1, 0)));
+
+    // "100" = 4, not divisible -> reject
+    assert(!dfa_accepts(div3_cfg, make_input3(1, 0, 0)));
+
+    // "1001" = 9, divisible -> accept
+    assert(dfa_accepts(div3_cfg, make_input4(1, 0, 0, 1)));
+
+    // "1010" = 10, not divisible -> reject
+    assert(!dfa_accepts(div3_cfg, make_input4(1, 0, 1, 0)));
+
+    // "1100" = 12, divisible -> accept
+    assert(dfa_accepts(div3_cfg, make_input4(1, 1, 0, 0)));
+
+    // "1111" = 15, divisible -> accept
+    assert(dfa_accepts(div3_cfg, make_input4(1, 1, 1, 1)));
+
+    // "10101" = 21, divisible -> accept
+    let mut inp_21 = arr_new(5);
+    inp_21 = arr_set(inp_21, 0, 1);
+    inp_21 = arr_set(inp_21, 1, 0);
+    inp_21 = arr_set(inp_21, 2, 1);
+    inp_21 = arr_set(inp_21, 3, 0);
+    inp_21 = arr_set(inp_21, 4, 1);
+    assert(dfa_accepts(div3_cfg, inp_21));
+
+    // "10110" = 22, not divisible -> reject
+    let mut inp_22 = arr_new(5);
+    inp_22 = arr_set(inp_22, 0, 1);
+    inp_22 = arr_set(inp_22, 1, 0);
+    inp_22 = arr_set(inp_22, 2, 1);
+    inp_22 = arr_set(inp_22, 3, 1);
+    inp_22 = arr_set(inp_22, 4, 0);
+    assert(!dfa_accepts(div3_cfg, inp_22));
+
+    // ========================================================
+    // DFA 2: Accepts strings ending in "01"
+    // States: 0 (start/default), 1 (last was 0), 2 (last two were 01)
+    //   state 0, input 0 -> 1
+    //   state 0, input 1 -> 0
+    //   state 1, input 0 -> 1  (still ends in 0)
+    //   state 1, input 1 -> 2  (ends in 01)
+    //   state 2, input 0 -> 1  (ends in 0 now)
+    //   state 2, input 1 -> 0  (ends in 1 now)
+    // Accept: {2}
+    // ========================================================
+    let ends01_dfa = DFA {
+        t0: 1, t1: 0,   // state 0
+        t2: 1, t3: 2,   // state 1
+        t4: 1, t5: 0,   // state 2
+        t6: 0, t7: 0, t8: 0, t9: 0, t10: 0, t11: 0,
+        t12: 0, t13: 0, t14: 0, t15: 0,
+        num_states: 3,
+        start_state: 0
+    };
+    let ends01_cfg = DFAConfig { automaton: ends01_dfa, accept_mask: 4 };  // bit 2 set
+
+    // Empty string: reject (state 0, not accepting)
+    assert(!dfa_accepts(ends01_cfg, empty));
+
+    // "01" -> accept
+    assert(dfa_accepts(ends01_cfg, make_input2(0, 1)));
+
+    // "00" -> reject (ends in 0, state 1)
+    assert(!dfa_accepts(ends01_cfg, make_input2(0, 0)));
+
+    // "10" -> reject (ends in 0, state 1)
+    assert(!dfa_accepts(ends01_cfg, make_input2(1, 0)));
+
+    // "11" -> reject (state 0)
+    assert(!dfa_accepts(ends01_cfg, make_input2(1, 1)));
+
+    // "001" -> accept
+    assert(dfa_accepts(ends01_cfg, make_input3(0, 0, 1)));
+
+    // "101" -> accept
+    assert(dfa_accepts(ends01_cfg, make_input3(1, 0, 1)));
+
+    // "110" -> reject
+    assert(!dfa_accepts(ends01_cfg, make_input3(1, 1, 0)));
+
+    // "1101" -> accept (ends in 01)
+    assert(dfa_accepts(ends01_cfg, make_input4(1, 1, 0, 1)));
+
+    // "0101" -> accept
+    assert(dfa_accepts(ends01_cfg, make_input4(0, 1, 0, 1)));
+
+    // "0110" -> reject (ends in 10)
+    assert(!dfa_accepts(ends01_cfg, make_input4(0, 1, 1, 0)));
+
+    // ========================================================
+    // DFA 3: Accepts strings with even number of 1s
+    // States: 0 (even count), 1 (odd count)
+    //   state 0, input 0 -> 0
+    //   state 0, input 1 -> 1
+    //   state 1, input 0 -> 1
+    //   state 1, input 1 -> 0
+    // Accept: {0}
+    // ========================================================
+    let even1s_dfa = DFA {
+        t0: 0, t1: 1,
+        t2: 1, t3: 0,
+        t4: 0, t5: 0, t6: 0, t7: 0, t8: 0, t9: 0, t10: 0, t11: 0,
+        t12: 0, t13: 0, t14: 0, t15: 0,
+        num_states: 2,
+        start_state: 0
+    };
+    let even1s_cfg = DFAConfig { automaton: even1s_dfa, accept_mask: 1 };
+
+    // Empty: 0 ones (even) -> accept
+    assert(dfa_accepts(even1s_cfg, empty));
+
+    // "0" -> accept (0 ones)
+    assert(dfa_accepts(even1s_cfg, inp_0));
+
+    // "1" -> reject (1 one, odd)
+    assert(!dfa_accepts(even1s_cfg, inp_1));
+
+    // "11" -> accept (2 ones)
+    assert(dfa_accepts(even1s_cfg, make_input2(1, 1)));
+
+    // "10" -> reject (1 one)
+    assert(!dfa_accepts(even1s_cfg, make_input2(1, 0)));
+
+    // "1010" -> accept (2 ones)
+    assert(dfa_accepts(even1s_cfg, make_input4(1, 0, 1, 0)));
+
+    // "1110" -> reject (3 ones)
+    assert(!dfa_accepts(even1s_cfg, make_input4(1, 1, 1, 0)));
+
+    // "111100" -> accept (4 ones)
+    assert(dfa_accepts(even1s_cfg, make_input6(1, 1, 1, 1, 0, 0)));
+
+    // "111110" -> reject (5 ones)
+    assert(!dfa_accepts(even1s_cfg, make_input6(1, 1, 1, 1, 1, 0)));
+
+    // ========================================================
+    // Test: Step-by-step state tracing for div3 DFA
+    // ========================================================
+    // "1001" = 9: trace states
+    // Start: 0
+    // Read 1: state = step(0, 1) = 1
+    // Read 0: state = step(1, 0) = 2
+    // Read 0: state = step(2, 0) = 1
+    // Read 1: state = step(1, 1) = 0 -> accepting!
+    assert_eq(dfa_step(div3_dfa, 0, 1), 1);
+    assert_eq(dfa_step(div3_dfa, 1, 0), 2);
+    assert_eq(dfa_step(div3_dfa, 2, 0), 1);
+    assert_eq(dfa_step(div3_dfa, 1, 1), 0);
+
+    let final_9 = dfa_run(div3_dfa, make_input4(1, 0, 0, 1));
+    assert_eq(final_9, 0);
+
+    // ========================================================
+    // Test: Run all 4-bit numbers through div3 DFA
+    // Verify against actual divisibility
+    // ========================================================
+    let mut n = 0;
+    while n < 16 {
+        let b3 = (n >> 3) & 1;
+        let b2 = (n >> 2) & 1;
+        let b1 = (n >> 1) & 1;
+        let b0 = n & 1;
+        let input = make_input4(b3, b2, b1, b0);
+        let accepted = dfa_accepts(div3_cfg, input);
+        let divisible = n % 3 == 0;
+        assert_eq(accepted, divisible);
+        n = n + 1;
+    }
+
+    // ========================================================
+    // Test: DFA product construction concept
+    // Verify that "divisible by 3 AND ends in 01" works manually
+    // 9 = "1001" -> div by 3: yes, ends in 01: yes -> both accept
+    // ========================================================
+    assert(dfa_accepts(div3_cfg, make_input4(1, 0, 0, 1)));
+    assert(dfa_accepts(ends01_cfg, make_input4(1, 0, 0, 1)));
+
+    // 6 = "110" -> div by 3: yes, ends in 01: no
+    assert(dfa_accepts(div3_cfg, make_input3(1, 1, 0)));
+    assert(!dfa_accepts(ends01_cfg, make_input3(1, 1, 0)));
+
+    // 5 = "101" -> div by 3: no, ends in 01: yes
+    assert(!dfa_accepts(div3_cfg, make_input3(1, 0, 1)));
+    assert(dfa_accepts(ends01_cfg, make_input3(1, 0, 1)));
+
+    0
+}

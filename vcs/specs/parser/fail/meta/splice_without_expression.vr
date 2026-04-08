@@ -1,0 +1,68 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, quote, splice, error
+// @expected-error: M400
+// @description: Invalid splice syntax inside quote - $ must be followed by identifier or {expr}
+
+// =============================================================================
+// Grammar Reference:
+// splice = '$' , ( identifier | ( '{' , expression , '}' ) ) ;
+// =============================================================================
+
+// ERROR: Splice without any expression - just $ followed by other tokens
+meta(1) fn test_bare_splice() {
+    let code = quote {
+        let x = $;  // ERROR: Expected identifier or {expr} after $
+    };
+}
+
+// ERROR: Splice followed by operator instead of identifier
+meta(1) fn test_splice_followed_by_operator() {
+    let code = quote {
+        let result = $ + 1;  // ERROR: $ not followed by identifier
+    };
+}
+
+// ERROR: Splice at end of quote block
+meta(1) fn test_splice_at_end() {
+    let code = quote {
+        let y = $  // ERROR: Unexpected end after $
+    };
+}
+
+// ERROR: Splice followed by semicolon
+meta(1) fn test_splice_semicolon() {
+    let code = quote {
+        $;  // ERROR: $ not followed by identifier or {expr}
+    };
+}
+
+// ERROR: Empty braces after splice
+meta(1) fn test_empty_splice_braces() {
+    let code = quote {
+        let z = ${};  // ERROR: Empty expression in splice braces
+    };
+}
+
+// ERROR: Multiple $ in sequence without expression
+meta(1) fn test_double_splice() {
+    let code = quote {
+        let a = $$name;  // ERROR: $ followed by another $
+    };
+}
+
+// ERROR: Splice followed by closing brace
+meta(1) fn test_splice_before_close() {
+    let code = quote {
+        let b = $}  // ERROR: $ followed by }
+    };
+}
+
+// ERROR: Splice with whitespace and then closing
+meta(1) fn test_splice_whitespace_close() {
+    let code = quote {
+        $
+    };  // ERROR: $ not followed by valid splice target
+}

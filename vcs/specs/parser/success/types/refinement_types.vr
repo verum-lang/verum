@@ -1,0 +1,469 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for refinement type productions
+// Grammar: type_refinement = inline_refinement | value_where_clause ;
+//          inline_refinement = '{' , refinement_predicates , '}' ;
+//          refinement_predicates = refinement_predicate , { ',' , refinement_predicate } ;
+//          refinement_predicate = identifier , ':' , expression | expression ;
+//          value_where_clause = 'where' , [ 'value' ] , refinement_expr ;
+//          sigma_type = identifier , ':' , type_expr , [ 'where' , expression ] ;
+
+// =============================================================================
+// Section 1: Basic Inline Refinement Types
+// =============================================================================
+
+// Grammar: inline_refinement = '{' , refinement_predicates , '}' ;
+
+// Simple predicates
+type PositiveInt is Int { self > 0 };
+type NegativeInt is Int { self < 0 };
+type NonNegativeInt is Int { self >= 0 };
+type NonPositiveInt is Int { self <= 0 };
+type NonZeroInt is Int { self != 0 };
+
+fn test_basic_refined_ints() {
+    let pos: PositiveInt = 42;
+    let neg: NegativeInt = -42;
+    let non_neg: NonNegativeInt = 0;
+    let non_pos: NonPositiveInt = 0;
+    let non_zero: NonZeroInt = 1;
+}
+
+// =============================================================================
+// Section 2: Bounded Numeric Types
+// =============================================================================
+
+// Single bound
+type SmallInt is Int { self <= 100 };
+type LargeInt is Int { self >= 1000 };
+
+// Range bounds (multiple predicates)
+type Percentage is Float { self >= 0.0, self <= 100.0 };
+type UnitInterval is Float { self >= 0.0, self <= 1.0 };
+type ByteValue is Int { self >= 0, self <= 255 };
+type Angle is Float { self >= 0.0, self < 360.0 };
+
+// Named predicate syntax
+type BoundedInt is Int { value: self, min: self >= 0, max: self <= 100 };
+
+fn test_bounded_types() {
+    let pct: Percentage = 75.5;
+    let unit: UnitInterval = 0.5;
+    let byte: ByteValue = 128;
+    let angle: Angle = 45.0;
+}
+
+// =============================================================================
+// Section 3: String/Text Refinements
+// =============================================================================
+
+// Length constraints
+type NonEmptyText is Text { self.len() > 0 };
+type ShortText is Text { self.len() <= 100 };
+type FixedLengthText is Text { self.len() == 10 };
+type BoundedText is Text { self.len() >= 1, self.len() <= 256 };
+
+// Pattern/content constraints
+type AlphaText is Text { self.is_alphabetic() };
+type NumericText is Text { self.is_numeric() };
+type AlphanumericText is Text { self.is_alphanumeric() };
+
+// Combined constraints
+type Username is Text { self.len() >= 3, self.len() <= 20, self.is_alphanumeric() };
+type Email is Text { self.contains("@"), self.len() > 0 };
+type Password is Text { self.len() >= 8 };
+
+fn test_text_refinements() {
+    let name: NonEmptyText = "hello";
+    let short: ShortText = "brief";
+    let user: Username = "john_doe";
+    let email: Email = "user@example.com";
+}
+
+// =============================================================================
+// Section 4: Collection Refinements
+// =============================================================================
+
+// List refinements
+type NonEmptyList<T> is List<T> { self.len() > 0 };
+type SmallList<T> is List<T> { self.len() <= 10 };
+type FixedSizeList<T> is List<T> { self.len() == 5 };
+type BoundedList<T> is List<T> { self.len() >= 1, self.len() <= 100 };
+
+// Array refinements (with const generics)
+type NonEmptyArray<T, const N: Int> is [T; N] where N > 0;
+
+// Set refinements
+type NonEmptySet<T> is Set<T> { self.len() > 0 };
+
+// Map refinements
+type NonEmptyMap<K, V> is Map<K, V> { self.len() > 0 };
+
+fn test_collection_refinements() {
+    let list: NonEmptyList<Int> = List.of(1, 2, 3);
+    let small: SmallList<Int> = List.of(1, 2, 3);
+    let my_set: NonEmptySet<Int> = Set.of(1, 2, 3);  // Note: `set` is a keyword in Verum
+    let my_map: NonEmptyMap<Text, Int> = Map.of(("a", 1));
+}
+
+// =============================================================================
+// Section 5: Tuple and Record Refinements
+// =============================================================================
+
+// Tuple refinements
+type OrderedPair is (Int, Int) { self.0 <= self.1 };
+type PositivePair is (Int, Int) { self.0 > 0, self.1 > 0 };
+type ValidRange is (Int, Int) { self.0 < self.1 };
+
+// Record refinements
+type PositivePoint is {
+    x: Int,
+    y: Int
+} { self.x > 0, self.y > 0 };
+
+type ValidRectangle is {
+    width: Int,
+    height: Int
+} { self.width > 0, self.height > 0 };
+
+type NormalizedVector is {
+    x: Float,
+    y: Float,
+    z: Float
+} { (self.x * self.x + self.y * self.y + self.z * self.z).abs() - 1.0 < 0.0001 };
+
+fn test_tuple_record_refinements() {
+    let pair: OrderedPair = (1, 5);
+    let pos_pair: PositivePair = (3, 7);
+    let range: ValidRange = (10, 20);
+    let point: PositivePoint = { x: 5, y: 10 };
+    let rect: ValidRectangle = { width: 100, height: 50 };
+}
+
+// =============================================================================
+// Section 6: Value Where Clause Syntax
+// =============================================================================
+
+// Grammar: value_where_clause = 'where' , [ 'value' ] , refinement_expr ;
+
+// Implicit value
+type Natural is Int where self >= 0;
+type PositiveFloat is Float where self > 0.0;
+
+// Explicit 'value' keyword
+type EvenInt is Int where value self % 2 == 0;
+type OddInt is Int where value self % 2 == 1;
+
+// Complex where expressions
+type SafeDivisor is Int where self != 0;
+type ValidIndex<const N: Int> is Int where self >= 0, self < N;
+
+fn test_where_refinements() {
+    let nat: Natural = 42;
+    let pos_f: PositiveFloat = 3.14;
+    let even: EvenInt = 4;
+    let odd: OddInt = 5;
+    let divisor: SafeDivisor = 2;
+}
+
+// =============================================================================
+// Section 7: Sigma Types (Dependent Pairs)
+// =============================================================================
+
+// Grammar: sigma_type = identifier , ':' , type_expr , [ 'where' , expression ] ;
+
+// Basic sigma type
+type SizedVec is n: Int, data: [Int; n];
+
+// Sigma with constraint on first component
+type BoundedVec is n: Int where n > 0, data: [Int; n];
+
+// Sigma with dependent constraint
+type Matrix is rows: Int, cols: Int, data: [[Float; cols]; rows];
+
+// Complex sigma types
+type DynamicArray<T> is len: Int where len >= 0, data: [T; len];
+
+fn test_sigma_types() {
+    // Using sigma types
+    let vec: SizedVec = { n: 5, data: [1, 2, 3, 4, 5] };
+    let bounded: BoundedVec = { n: 3, data: [1, 2, 3] };
+}
+
+// =============================================================================
+// Section 8: Refinements with Functions
+// =============================================================================
+
+// Custom predicate functions
+fn is_even(n: Int) -> Bool { n % 2 == 0 }
+fn is_positive(n: Int) -> Bool { n > 0 }
+fn is_prime(n: Int) -> Bool { /* prime check */ true }
+
+// Using function predicates
+type EvenNumber is Int { is_even(self) };
+type PositiveNumber is Int { is_positive(self) };
+type PrimeNumber is Int { is_prime(self), self > 1 };
+
+// Complex function-based refinements
+type SortedList<T> is List<T> { is_sorted(self) };
+
+fn is_sorted<T: Ord>(list: &List<T>) -> Bool {
+    list.windows(2).all(|w| w[0] <= w[1])
+}
+
+// =============================================================================
+// Section 9: Generic Refinement Types
+// =============================================================================
+
+// Generic with refinement
+type NonEmpty<T> is { items: List<T> } { self.items.len() > 0 };
+
+// Generic container with bounds
+type BoundedContainer<T, const MIN: Int, const MAX: Int> is {
+    items: List<T>
+} { self.items.len() >= MIN, self.items.len() <= MAX };
+
+// Generic pair with ordering
+type OrderedPairGeneric<T: Ord> is (T, T) { self.0 <= self.1 };
+
+// =============================================================================
+// Section 10: Refinements on Custom Types
+// =============================================================================
+
+// Base type
+type User is {
+    id: Int,
+    name: Text,
+    age: Int,
+    email: Text
+};
+
+// Refined versions
+type ValidUser is User {
+    self.id > 0,
+    self.name.len() > 0,
+    self.age >= 0,
+    self.age <= 150,
+    self.email.contains("@")
+};
+
+type AdultUser is User { self.age >= 18 };
+type SeniorUser is User { self.age >= 65 };
+
+// Enum variant refinements
+type Status is Pending | Active(Int) | Completed;
+type ActiveStatus is Status { self is Active(_) };
+
+fn test_custom_refinements() {
+    let user: ValidUser = User {
+        id: 1,
+        name: "Alice",
+        age: 30,
+        email: "alice@example.com"
+    };
+    let adult: AdultUser = user;
+}
+
+// =============================================================================
+// Section 11: Refinements with Method Calls
+// =============================================================================
+
+type NonEmptyString is Text { self.len() > 0, self.trim().len() > 0 };
+type TrimmedString is Text { self == self.trim() };
+type LowercaseString is Text { self == self.to_lowercase() };
+type UppercaseString is Text { self == self.to_uppercase() };
+
+type ValidUrl is Text {
+    self.starts_with("http://") || self.starts_with("https://"),
+    self.len() <= 2048
+};
+
+type ValidPath is Text {
+    !self.contains(".."),
+    self.starts_with("/")
+};
+
+// =============================================================================
+// Section 12: Logical Operators in Refinements
+// =============================================================================
+
+// AND (implicit via multiple predicates)
+type PositiveEven is Int { self > 0, self % 2 == 0 };
+
+// AND (explicit &&)
+type ValidAge is Int { self >= 0 && self <= 150 };
+
+// OR (||)
+type ZeroOrPositive is Int { self == 0 || self > 0 };
+type ExtremeTempis is Float { self < -40.0 || self > 50.0 };
+
+// NOT (!)
+type NotZero is Int { !(self == 0) };
+type NonWhitespace is Char { !self.is_whitespace() };
+
+// Complex logical combinations
+type ValidInput is Int {
+    (self >= 0 && self <= 100) || self == -1
+};
+
+// =============================================================================
+// Section 13: Arithmetic in Refinements
+// =============================================================================
+
+type PowerOfTwo is Int { (self & (self - 1)) == 0, self > 0 };
+type MultipleOf10 is Int { self % 10 == 0 };
+type Squared is Int { exists n: Int. n * n == self };
+
+// Floating point arithmetic
+type UnitVector2D is (Float, Float) {
+    (self.0 * self.0 + self.1 * self.1 - 1.0).abs() < 0.0001
+};
+
+type PositiveProduct is (Int, Int) { self.0 * self.1 > 0 };
+
+// =============================================================================
+// Section 14: Quantifier Expressions in Refinements
+// =============================================================================
+
+// Forall in refinement
+type AllPositive is List<Int> { forall x: Int. x in self => x > 0 };
+
+// Exists in refinement
+type HasNegative is List<Int> { exists x: Int. x in self && x < 0 };
+
+// Combined quantifiers
+type MixedList is List<Int> {
+    exists pos: Int. pos in self && pos > 0,
+    exists neg: Int. neg in self && neg < 0
+};
+
+// =============================================================================
+// Section 15: Refinements in Function Signatures
+// =============================================================================
+
+// Parameter refinements
+fn divide(a: Int, b: Int { b != 0 }) -> Int {
+    a / b
+}
+
+fn sqrt(x: Float { x >= 0.0 }) -> Float {
+    x.sqrt()
+}
+
+fn get_element<T>(list: List<T> { list.len() > 0 }, idx: Int { idx >= 0, idx < list.len() }) -> T {
+    list[idx]
+}
+
+// Return type refinements
+fn abs(x: Int) -> Int { result >= 0 } {
+    if x < 0 { -x } else { x }
+}
+
+fn clamp(x: Int, min: Int, max: Int) -> Int { result >= min, result <= max } {
+    if x < min { min }
+    else if x > max { max }
+    else { x }
+}
+
+// =============================================================================
+// Section 16: Refinements with Ensures and Requires
+// =============================================================================
+
+fn safe_divide(a: Int, b: Int) -> Int
+    requires b != 0
+    ensures result * b == a
+{
+    a / b
+}
+
+fn binary_search(arr: &[Int], target: Int) -> Maybe<Int>
+    requires is_sorted(arr)
+    ensures result is Some(idx) => arr[idx] == target
+{
+    // Implementation
+    None
+}
+
+fn is_sorted(arr: &[Int]) -> Bool {
+    arr.windows(2).all(|w| w[0] <= w[1])
+}
+
+// =============================================================================
+// Section 17: Type Aliases with Refinements
+// =============================================================================
+
+// Simple aliases
+type Age is Int { self >= 0, self <= 150 };
+type Score is Float { self >= 0.0, self <= 100.0 };
+type UserId is Int { self > 0 };
+type NonNegative is Int { self >= 0 };
+
+// Parameterized aliases
+type Bounded<const MIN: Int, const MAX: Int> is Int { self >= MIN, self <= MAX };
+type InRange<const LO: Float, const HI: Float> is Float { self >= LO, self <= HI };
+
+// Using parameterized aliases
+type SmallNumber is Bounded<0, 100>;
+type Probability is InRange<0.0, 1.0>;
+
+fn test_type_aliases() {
+    let age: Age = 30;
+    let score: Score = 85.5;
+    let id: UserId = 42;
+    let small: SmallNumber = 50;
+    let prob: Probability = 0.75;
+}
+
+// =============================================================================
+// Section 18: Refinement Type Coercions
+// =============================================================================
+
+fn test_refinement_coercions() {
+    // Refined type to base type (always safe)
+    let pos: PositiveInt = 42;
+    let n: Int = pos;  // Coerce PositiveInt to Int
+
+    // Narrowing (requires runtime check)
+    let x: Int = get_int();
+    let pos2: PositiveInt = x as PositiveInt;  // May fail at runtime
+
+    // Transitive refinements
+    let small_pos: Int { self > 0, self < 10 } = 5;
+    let just_pos: PositiveInt = small_pos;  // Safe: small_pos > 0
+}
+
+fn get_int() -> Int { 42 }
+
+// =============================================================================
+// Section 19: Edge Cases and Complex Combinations
+// =============================================================================
+
+// Empty refinement (always true)
+type AnyInt is Int { true };
+
+// Impossible refinement (always false - for testing)
+type ImpossibleInt is Int { false };
+
+// Self-referential refinement
+type Idempotent is Int { self == self };
+
+// Deeply nested refinement
+type ComplexType is {
+    data: List<{
+        value: Int { value > 0 },
+        name: Text { name.len() > 0 }
+    }>
+} { self.data.len() > 0 };
+
+// Refinement on function type
+type PositiveMapper is fn(Int) -> Int { result > 0 };
+
+// Multiple refinement levels
+type StrictlyPositive is PositiveInt { self > 1 };
+
+fn test_edge_cases() {
+    let any: AnyInt = 42;
+    let idem: Idempotent = 42;
+    let strict: StrictlyPositive = 5;
+}

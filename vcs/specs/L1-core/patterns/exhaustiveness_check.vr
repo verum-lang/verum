@@ -1,0 +1,179 @@
+// @tier: 0
+// Non-exhaustive pattern detection not fully implemented
+//
+// @test: typecheck-fail
+// @level: L1
+// @tags: patterns, exhaustiveness
+// @expected-error: E0601 "non-exhaustive patterns"
+//
+// Tests that the compiler detects non-exhaustive pattern matches.
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+// ERROR: Missing Blue variant
+fn color_to_string(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        // Missing: Blue => "blue",
+    }
+}
+
+// ERROR: Missing None variant
+fn unwrap_unsafe(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        // Missing: None => ...
+    }
+}
+
+// ERROR: Missing Err variant
+fn unwrap_ok(r: Result<Int, Text>) -> Int {
+    match r {
+        Ok(x) => x,
+        // Missing: Err(e) => ...
+    }
+}
+
+// ERROR: Missing multiple weekday variants
+fn is_monday(day: Weekday) -> Bool {
+    match day {
+        Monday => true,
+        Tuesday => false,
+        Wednesday => false,
+        // Missing: Thursday, Friday, Saturday, Sunday
+    }
+}
+
+// ERROR: Missing case in nested pattern
+fn process_maybe_pair(mp: Maybe<(Int, Int)>) -> Int {
+    match mp {
+        Some((a, b)) if a > 0 => a + b,
+        // Missing: Some((a, b)) where a <= 0
+        None => 0,
+    }
+}
+
+// ERROR: Missing case for Bool (not using wildcard)
+fn bool_to_int(b: Bool) -> Int {
+    match b {
+        true => 1,
+        // Missing: false => 0,
+    }
+}
+
+// ERROR: Integer without wildcard
+fn classify_int(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        // Missing: wildcard for other integers
+    }
+}
+
+// ERROR: Char without wildcard
+fn classify_char(c: Char) -> Text {
+    match c {
+        'a' => "letter a",
+        'b' => "letter b",
+        // Missing: wildcard for other chars
+    }
+}
+
+// ERROR: Tuple missing case
+fn classify_pair(p: (Bool, Bool)) -> Text {
+    match p {
+        (true, true) => "both true",
+        (true, false) => "first true",
+        (false, true) => "second true",
+        // Missing: (false, false)
+    }
+}
+
+// ERROR: List pattern missing cases
+fn list_length(list: List<Int>) -> Int {
+    match list {
+        [] => 0,
+        [_] => 1,
+        [_, _] => 2,
+        // Missing: longer lists
+    }
+}
+
+// ERROR: Nested enum missing inner variant
+type Outer is
+    | A(Inner)
+    | B;
+
+type Inner is
+    | X
+    | Y
+    | Z;
+
+fn process_outer(o: Outer) -> Text {
+    match o {
+        A(X) => "a-x",
+        A(Y) => "a-y",
+        // Missing: A(Z)
+        B => "b",
+    }
+}
+
+// ERROR: Guard makes pattern non-exhaustive
+fn guarded_match(n: Int) -> Text {
+    match n {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        // Missing: x == 0 case (guards can fail)
+    }
+}
+
+// ERROR: Range pattern missing values
+fn digit_name(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 => "one",
+        2 => "two",
+        3..10 => "larger",
+        // Missing: negative numbers and numbers >= 10
+    }
+}
+
+// ERROR: Or-pattern doesn't cover all
+fn primary_color(c: Color) -> Bool {
+    match c {
+        Red | Blue => true,
+        // Missing: Green
+    }
+}
+
+fn main() {
+    // These would all cause runtime errors if reached with missing variants
+    let _ = color_to_string(Blue);           // Would crash
+    let _ = unwrap_unsafe(None);             // Would crash
+    let _ = unwrap_ok(Err("error"));         // Would crash
+    let _ = is_monday(Saturday);             // Would crash
+    let _ = bool_to_int(false);              // Would crash
+    let _ = classify_pair((false, false));   // Would crash
+}

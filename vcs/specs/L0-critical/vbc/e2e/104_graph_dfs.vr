@@ -1,0 +1,450 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, graph, dfs, cycle-detection, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+// @description: DFS on 6-node adjacency matrix graph with cycle detection
+
+// ============================================================================
+// Graph: 6-node adjacency matrix stored as flat 36-element array
+// ============================================================================
+
+type Graph6 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int,
+    a6: Int, a7: Int, a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int, a16: Int, a17: Int,
+    a18: Int, a19: Int, a20: Int, a21: Int, a22: Int, a23: Int,
+    a24: Int, a25: Int, a26: Int, a27: Int, a28: Int, a29: Int,
+    a30: Int, a31: Int, a32: Int, a33: Int, a34: Int, a35: Int
+};
+
+fn empty_graph() -> Graph6 {
+    Graph6 {
+        a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0,
+        a6: 0, a7: 0, a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0, a16: 0, a17: 0,
+        a18: 0, a19: 0, a20: 0, a21: 0, a22: 0, a23: 0,
+        a24: 0, a25: 0, a26: 0, a27: 0, a28: 0, a29: 0,
+        a30: 0, a31: 0, a32: 0, a33: 0, a34: 0, a35: 0
+    }
+}
+
+fn g_get(g: Graph6, idx: Int) -> Int {
+    if idx == 0 { g.a0 } else if idx == 1 { g.a1 }
+    else if idx == 2 { g.a2 } else if idx == 3 { g.a3 }
+    else if idx == 4 { g.a4 } else if idx == 5 { g.a5 }
+    else if idx == 6 { g.a6 } else if idx == 7 { g.a7 }
+    else if idx == 8 { g.a8 } else if idx == 9 { g.a9 }
+    else if idx == 10 { g.a10 } else if idx == 11 { g.a11 }
+    else if idx == 12 { g.a12 } else if idx == 13 { g.a13 }
+    else if idx == 14 { g.a14 } else if idx == 15 { g.a15 }
+    else if idx == 16 { g.a16 } else if idx == 17 { g.a17 }
+    else if idx == 18 { g.a18 } else if idx == 19 { g.a19 }
+    else if idx == 20 { g.a20 } else if idx == 21 { g.a21 }
+    else if idx == 22 { g.a22 } else if idx == 23 { g.a23 }
+    else if idx == 24 { g.a24 } else if idx == 25 { g.a25 }
+    else if idx == 26 { g.a26 } else if idx == 27 { g.a27 }
+    else if idx == 28 { g.a28 } else if idx == 29 { g.a29 }
+    else if idx == 30 { g.a30 } else if idx == 31 { g.a31 }
+    else if idx == 32 { g.a32 } else if idx == 33 { g.a33 }
+    else if idx == 34 { g.a34 } else { g.a35 }
+}
+
+fn g_set(g: Graph6, idx: Int, val: Int) -> Graph6 {
+    Graph6 {
+        a0: if idx == 0 { val } else { g.a0 },
+        a1: if idx == 1 { val } else { g.a1 },
+        a2: if idx == 2 { val } else { g.a2 },
+        a3: if idx == 3 { val } else { g.a3 },
+        a4: if idx == 4 { val } else { g.a4 },
+        a5: if idx == 5 { val } else { g.a5 },
+        a6: if idx == 6 { val } else { g.a6 },
+        a7: if idx == 7 { val } else { g.a7 },
+        a8: if idx == 8 { val } else { g.a8 },
+        a9: if idx == 9 { val } else { g.a9 },
+        a10: if idx == 10 { val } else { g.a10 },
+        a11: if idx == 11 { val } else { g.a11 },
+        a12: if idx == 12 { val } else { g.a12 },
+        a13: if idx == 13 { val } else { g.a13 },
+        a14: if idx == 14 { val } else { g.a14 },
+        a15: if idx == 15 { val } else { g.a15 },
+        a16: if idx == 16 { val } else { g.a16 },
+        a17: if idx == 17 { val } else { g.a17 },
+        a18: if idx == 18 { val } else { g.a18 },
+        a19: if idx == 19 { val } else { g.a19 },
+        a20: if idx == 20 { val } else { g.a20 },
+        a21: if idx == 21 { val } else { g.a21 },
+        a22: if idx == 22 { val } else { g.a22 },
+        a23: if idx == 23 { val } else { g.a23 },
+        a24: if idx == 24 { val } else { g.a24 },
+        a25: if idx == 25 { val } else { g.a25 },
+        a26: if idx == 26 { val } else { g.a26 },
+        a27: if idx == 27 { val } else { g.a27 },
+        a28: if idx == 28 { val } else { g.a28 },
+        a29: if idx == 29 { val } else { g.a29 },
+        a30: if idx == 30 { val } else { g.a30 },
+        a31: if idx == 31 { val } else { g.a31 },
+        a32: if idx == 32 { val } else { g.a32 },
+        a33: if idx == 33 { val } else { g.a33 },
+        a34: if idx == 34 { val } else { g.a34 },
+        a35: if idx == 35 { val } else { g.a35 }
+    }
+}
+
+fn has_edge(g: Graph6, from: Int, to: Int) -> Int {
+    g_get(g, from * 6 + to)
+}
+
+fn add_edge_directed(g: Graph6, from: Int, to: Int) -> Graph6 {
+    g_set(g, from * 6 + to, 1)
+}
+
+fn add_edge_undirected(g: Graph6, u: Int, v: Int) -> Graph6 {
+    let g2 = add_edge_directed(g, u, v);
+    add_edge_directed(g2, v, u)
+}
+
+// ============================================================================
+// 6-element arrays for DFS state
+// ============================================================================
+
+type Arr6 is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int
+};
+
+fn a6_new(val: Int) -> Arr6 {
+    Arr6 { e0: val, e1: val, e2: val, e3: val, e4: val, e5: val }
+}
+
+fn a6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else { a.e5 }
+}
+
+fn a6_set(a: Arr6, i: Int, val: Int) -> Arr6 {
+    Arr6 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 }
+    }
+}
+
+// ============================================================================
+// DFS result type
+// ============================================================================
+
+type DfsResult is {
+    visited: Arr6,       // 1 if visited, 0 otherwise
+    discovery: Arr6,     // discovery order
+    has_cycle: Int       // 1 if cycle detected (for directed), 0 otherwise
+};
+
+// ============================================================================
+// Iterative DFS (undirected) using explicit stack
+// Returns visited array and discovery order
+// ============================================================================
+
+type Stk6 is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int,
+    top: Int
+};
+
+fn stk_new() -> Stk6 {
+    Stk6 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, top: 0 }
+}
+
+fn stk_get(s: Stk6, i: Int) -> Int {
+    if i == 0 { s.e0 } else if i == 1 { s.e1 } else if i == 2 { s.e2 }
+    else if i == 3 { s.e3 } else if i == 4 { s.e4 } else { s.e5 }
+}
+
+fn stk_set(s: Stk6, i: Int, val: Int) -> Stk6 {
+    Stk6 {
+        e0: if i == 0 { val } else { s.e0 },
+        e1: if i == 1 { val } else { s.e1 },
+        e2: if i == 2 { val } else { s.e2 },
+        e3: if i == 3 { val } else { s.e3 },
+        e4: if i == 4 { val } else { s.e4 },
+        e5: if i == 5 { val } else { s.e5 },
+        top: s.top
+    }
+}
+
+fn stk_push(s: Stk6, val: Int) -> Stk6 {
+    let updated = stk_set(s, s.top, val);
+    Stk6 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2,
+        e3: updated.e3, e4: updated.e4, e5: updated.e5,
+        top: s.top + 1
+    }
+}
+
+fn stk_pop_val(s: Stk6) -> Int {
+    stk_get(s, s.top - 1)
+}
+
+fn stk_pop(s: Stk6) -> Stk6 {
+    Stk6 {
+        e0: s.e0, e1: s.e1, e2: s.e2, e3: s.e3, e4: s.e4, e5: s.e5,
+        top: s.top - 1
+    }
+}
+
+fn dfs_visit_order(g: Graph6, src: Int) -> Arr6 {
+    // Returns array of discovery order (index = order, value = node)
+    let mut visited = a6_new(0);
+    let mut order = a6_new(-1);
+    let mut stk = stk_new();
+    let mut order_idx = 0;
+
+    stk = stk_push(stk, src);
+
+    while stk.top > 0 {
+        let u = stk_pop_val(stk);
+        stk = stk_pop(stk);
+        if a6_get(visited, u) == 0 {
+            visited = a6_set(visited, u, 1);
+            order = a6_set(order, order_idx, u);
+            order_idx = order_idx + 1;
+            // Push neighbors in reverse order so lower indices are visited first
+            let mut v = 5;
+            while v >= 0 {
+                if has_edge(g, u, v) == 1 {
+                    if a6_get(visited, v) == 0 {
+                        stk = stk_push(stk, v);
+                    }
+                }
+                v = v - 1;
+            }
+        }
+    }
+    order
+}
+
+fn dfs_count_visited(g: Graph6, src: Int) -> Int {
+    let mut visited = a6_new(0);
+    let mut stk = stk_new();
+    let mut cnt = 0;
+    stk = stk_push(stk, src);
+    while stk.top > 0 {
+        let u = stk_pop_val(stk);
+        stk = stk_pop(stk);
+        if a6_get(visited, u) == 0 {
+            visited = a6_set(visited, u, 1);
+            cnt = cnt + 1;
+            let mut v = 0;
+            while v < 6 {
+                if has_edge(g, u, v) == 1 {
+                    if a6_get(visited, v) == 0 {
+                        stk = stk_push(stk, v);
+                    }
+                }
+                v = v + 1;
+            }
+        }
+    }
+    cnt
+}
+
+// ============================================================================
+// Directed cycle detection using coloring:
+//   0 = white (unvisited), 1 = gray (in current path), 2 = black (finished)
+// A back edge (to a gray node) indicates a cycle.
+// Iterative approach using a stack with state encoding.
+// ============================================================================
+
+// We encode stack entries: node * 10 + phase
+// phase 0 = entering (mark gray, push neighbors)
+// phase 1 = leaving (mark black)
+
+type Stk12 is {
+    e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int,
+    e6: Int, e7: Int, e8: Int, e9: Int, e10: Int, e11: Int,
+    top: Int
+};
+
+fn stk12_new() -> Stk12 {
+    Stk12 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0,
+            e6: 0, e7: 0, e8: 0, e9: 0, e10: 0, e11: 0, top: 0 }
+}
+
+fn stk12_get(s: Stk12, i: Int) -> Int {
+    if i == 0 { s.e0 } else if i == 1 { s.e1 }
+    else if i == 2 { s.e2 } else if i == 3 { s.e3 }
+    else if i == 4 { s.e4 } else if i == 5 { s.e5 }
+    else if i == 6 { s.e6 } else if i == 7 { s.e7 }
+    else if i == 8 { s.e8 } else if i == 9 { s.e9 }
+    else if i == 10 { s.e10 } else { s.e11 }
+}
+
+fn stk12_set(s: Stk12, i: Int, val: Int) -> Stk12 {
+    Stk12 {
+        e0: if i == 0 { val } else { s.e0 },
+        e1: if i == 1 { val } else { s.e1 },
+        e2: if i == 2 { val } else { s.e2 },
+        e3: if i == 3 { val } else { s.e3 },
+        e4: if i == 4 { val } else { s.e4 },
+        e5: if i == 5 { val } else { s.e5 },
+        e6: if i == 6 { val } else { s.e6 },
+        e7: if i == 7 { val } else { s.e7 },
+        e8: if i == 8 { val } else { s.e8 },
+        e9: if i == 9 { val } else { s.e9 },
+        e10: if i == 10 { val } else { s.e10 },
+        e11: if i == 11 { val } else { s.e11 },
+        top: s.top
+    }
+}
+
+fn stk12_push(s: Stk12, val: Int) -> Stk12 {
+    let updated = stk12_set(s, s.top, val);
+    Stk12 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        e8: updated.e8, e9: updated.e9, e10: updated.e10, e11: updated.e11,
+        top: s.top + 1
+    }
+}
+
+fn detect_cycle_directed(g: Graph6, src: Int) -> Int {
+    // Returns 1 if cycle found, 0 otherwise
+    // color: 0=white, 1=gray, 2=black
+    let mut color = a6_new(0);
+    let mut stk = stk12_new();
+    let mut cycle_found = 0;
+
+    // Push entering phase for source
+    stk = stk12_push(stk, src * 10 + 0);
+
+    while stk.top > 0 {
+        let entry = stk12_get(stk, stk.top - 1);
+        stk = Stk12 {
+            e0: stk.e0, e1: stk.e1, e2: stk.e2, e3: stk.e3,
+            e4: stk.e4, e5: stk.e5, e6: stk.e6, e7: stk.e7,
+            e8: stk.e8, e9: stk.e9, e10: stk.e10, e11: stk.e11,
+            top: stk.top - 1
+        };
+        let node = entry / 10;
+        let phase = entry - (entry / 10) * 10;
+
+        if phase == 1 {
+            // Leaving: mark black
+            color = a6_set(color, node, 2);
+        } else {
+            // Entering
+            let c = a6_get(color, node);
+            if c == 0 {
+                // Mark gray
+                color = a6_set(color, node, 1);
+                // Push leaving phase
+                stk = stk12_push(stk, node * 10 + 1);
+                // Push neighbors (entering phase)
+                let mut v = 5;
+                while v >= 0 {
+                    if has_edge(g, node, v) == 1 {
+                        let vc = a6_get(color, v);
+                        if vc == 1 {
+                            // Back edge to gray node = cycle
+                            cycle_found = 1;
+                        } else if vc == 0 {
+                            stk = stk12_push(stk, v * 10 + 0);
+                        }
+                    }
+                    v = v - 1;
+                }
+            }
+        }
+    }
+    cycle_found
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_dfs_tree_visit() -> Int {
+    // Tree: 0-1, 0-2, 1-3, 1-4, 2-5
+    let mut g = empty_graph();
+    g = add_edge_undirected(g, 0, 1);
+    g = add_edge_undirected(g, 0, 2);
+    g = add_edge_undirected(g, 1, 3);
+    g = add_edge_undirected(g, 1, 4);
+    g = add_edge_undirected(g, 2, 5);
+    // DFS from 0 should visit all 6 nodes
+    let cnt = dfs_count_visited(g, 0);
+    assert_eq(cnt, 6);
+    // First visited should be 0
+    let order = dfs_visit_order(g, 0);
+    assert_eq(a6_get(order, 0), 0);
+    0
+}
+
+@test
+fn test_dfs_disconnected() -> Int {
+    // Two components: {0, 1, 2} and {3, 4, 5}
+    let mut g = empty_graph();
+    g = add_edge_undirected(g, 0, 1);
+    g = add_edge_undirected(g, 1, 2);
+    g = add_edge_undirected(g, 3, 4);
+    g = add_edge_undirected(g, 4, 5);
+    // DFS from 0 visits only 3 nodes
+    let cnt = dfs_count_visited(g, 0);
+    assert_eq(cnt, 3);
+    // DFS from 3 visits the other 3
+    let cnt2 = dfs_count_visited(g, 3);
+    assert_eq(cnt2, 3);
+    0
+}
+
+@test
+fn test_no_cycle_directed_tree() -> Int {
+    // Directed tree (DAG): 0->1, 0->2, 1->3, 2->3
+    let mut g = empty_graph();
+    g = add_edge_directed(g, 0, 1);
+    g = add_edge_directed(g, 0, 2);
+    g = add_edge_directed(g, 1, 3);
+    g = add_edge_directed(g, 2, 3);
+    let has_cyc = detect_cycle_directed(g, 0);
+    assert_eq(has_cyc, 0);
+    0
+}
+
+@test
+fn test_cycle_detected() -> Int {
+    // Directed cycle: 0->1->2->0
+    let mut g = empty_graph();
+    g = add_edge_directed(g, 0, 1);
+    g = add_edge_directed(g, 1, 2);
+    g = add_edge_directed(g, 2, 0);
+    let has_cyc = detect_cycle_directed(g, 0);
+    assert_eq(has_cyc, 1);
+    0
+}
+
+@test
+fn test_longer_cycle() -> Int {
+    // Directed: 0->1->2->3->4->2 (cycle 2->3->4->2)
+    let mut g = empty_graph();
+    g = add_edge_directed(g, 0, 1);
+    g = add_edge_directed(g, 1, 2);
+    g = add_edge_directed(g, 2, 3);
+    g = add_edge_directed(g, 3, 4);
+    g = add_edge_directed(g, 4, 2);
+    let has_cyc = detect_cycle_directed(g, 0);
+    assert_eq(has_cyc, 1);
+    0
+}
+
+fn main() -> Int {
+    test_dfs_tree_visit();
+    test_dfs_disconnected();
+    test_no_cycle_directed_tree();
+    test_cycle_detected();
+    test_longer_cycle();
+    print("[OK] 104_graph_dfs");
+    0
+}

@@ -1,0 +1,212 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, state-machine, parser, lexer
+// @timeout: 30000
+
+// State machine: simple lexer for integer expressions
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Token types: 1=NUMBER, 2=PLUS, 3=MINUS, 4=TIMES, 5=LPAREN, 6=RPAREN, 7=ERROR, 0=EOF
+// Input: encoded as symbols
+// 0-9 = digit, 10='+', 11='-', 12='*', 13='(', 14=')', 15=EOF
+
+fn is_digit(sym: Int) -> Int {
+    if sym >= 0 {
+        if sym <= 9 { 1 } else { 0 }
+    } else { 0 }
+}
+
+type LexResult is { token_types: Arr8, token_vals: Arr8, count: Int };
+
+fn lex(input: Arr8, input_len: Int) -> LexResult {
+    let mut types = zeros();
+    let mut vals = zeros();
+    let mut count = 0;
+    let mut i = 0;
+    while i < input_len {
+        let sym = get8(input, i);
+        if is_digit(sym) == 1 {
+            // Read multi-digit number
+            let mut num = 0;
+            let mut cont = 1;
+            while cont == 1 {
+                if i >= input_len { cont = 0; }
+                else if is_digit(get8(input, i)) == 0 { cont = 0; }
+                else {
+                    num = num * 10 + get8(input, i);
+                    i = i + 1;
+                }
+            }
+            if count < 8 {
+                types = set8(types, count, 1);
+                vals = set8(vals, count, num);
+                count = count + 1;
+            }
+        } else if sym == 10 {
+            if count < 8 { types = set8(types, count, 2); count = count + 1; }
+            i = i + 1;
+        } else if sym == 11 {
+            if count < 8 { types = set8(types, count, 3); count = count + 1; }
+            i = i + 1;
+        } else if sym == 12 {
+            if count < 8 { types = set8(types, count, 4); count = count + 1; }
+            i = i + 1;
+        } else if sym == 13 {
+            if count < 8 { types = set8(types, count, 5); count = count + 1; }
+            i = i + 1;
+        } else if sym == 14 {
+            if count < 8 { types = set8(types, count, 6); count = count + 1; }
+            i = i + 1;
+        } else {
+            i = i + 1; // skip unknown
+        }
+    }
+    LexResult { token_types: types, token_vals: vals, count: count }
+}
+
+// Simple recursive-descent parser for: expr = term ((+|-) term)*
+// term = factor ((*) factor)*
+// factor = number | (expr)
+// Using iterative approach since we can't have mutual recursion easily
+
+// Evaluate simple expression without parentheses: a op b op c ...
+fn eval_simple(types: Arr8, vals: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    // First pass: handle multiplication
+    let mut result_vals = zeros();
+    let mut result_ops = zeros();
+    let mut rn = 0;
+
+    let mut i = 0;
+    let mut cur = get8(vals, 0);
+    i = 1;
+    while i < n {
+        let op = get8(types, i);
+        let next = get8(vals, i + 1);
+        if op == 4 {
+            // Multiply
+            cur = cur * next;
+        } else {
+            result_vals = set8(result_vals, rn, cur);
+            result_ops = set8(result_ops, rn, op);
+            rn = rn + 1;
+            cur = next;
+        }
+        i = i + 2;
+    }
+    result_vals = set8(result_vals, rn, cur);
+    rn = rn + 1;
+
+    // Second pass: handle add/sub
+    let mut total = get8(result_vals, 0);
+    i = 0;
+    while i < rn - 1 {
+        let op = get8(result_ops, i);
+        let next = get8(result_vals, i + 1);
+        if op == 2 { total = total + next; }
+        else if op == 3 { total = total - next; }
+        i = i + 1;
+    }
+    total
+}
+
+fn test_lex_simple() -> Int {
+    // "3+4" → [3, +, 4] → digits: 3, 10, 4
+    let input = Arr8 { v0: 3, v1: 10, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let lr = lex(input, 3);
+    assert_eq(lr.count, 3);
+    assert_eq(get8(lr.token_types, 0), 1); // NUMBER
+    assert_eq(get8(lr.token_vals, 0), 3);
+    assert_eq(get8(lr.token_types, 1), 2); // PLUS
+    assert_eq(get8(lr.token_types, 2), 1); // NUMBER
+    assert_eq(get8(lr.token_vals, 2), 4);
+    1
+}
+
+fn test_lex_multidigit() -> Int {
+    // "12+34" → [1,2,+,3,4] → digits: 1,2,10,3,4
+    let input = Arr8 { v0: 1, v1: 2, v2: 10, v3: 3, v4: 4, v5: 0, v6: 0, v7: 0 };
+    let lr = lex(input, 5);
+    assert_eq(lr.count, 3);
+    assert_eq(get8(lr.token_vals, 0), 12);
+    assert_eq(get8(lr.token_vals, 2), 34);
+    1
+}
+
+fn test_lex_parens() -> Int {
+    // "(2+3)*4" → [13,2,10,3,14,12,4]
+    let input = Arr8 { v0: 13, v1: 2, v2: 10, v3: 3, v4: 14, v5: 12, v6: 4, v7: 0 };
+    let lr = lex(input, 7);
+    assert_eq(lr.count, 7);
+    assert_eq(get8(lr.token_types, 0), 5); // LPAREN
+    assert_eq(get8(lr.token_types, 4), 6); // RPAREN
+    assert_eq(get8(lr.token_types, 5), 4); // TIMES
+    1
+}
+
+fn test_eval_simple_expr() -> Int {
+    // 3 + 4 = 7
+    let types = Arr8 { v0: 1, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 3, v1: 0, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_simple(types, vals, 3), 7);
+
+    // 10 - 3 = 7
+    let types2 = Arr8 { v0: 1, v1: 3, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals2 = Arr8 { v0: 10, v1: 0, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_simple(types2, vals2, 3), 7);
+    1
+}
+
+fn test_eval_with_multiply() -> Int {
+    // 2 + 3 * 4 = 2 + 12 = 14
+    let types = Arr8 { v0: 1, v1: 2, v2: 1, v3: 4, v4: 1, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 2, v1: 0, v2: 3, v3: 0, v4: 4, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_simple(types, vals, 5), 14);
+
+    // 3 * 4 + 2 = 12 + 2 = 14
+    let types2 = Arr8 { v0: 1, v1: 4, v2: 1, v3: 2, v4: 1, v5: 0, v6: 0, v7: 0 };
+    let vals2 = Arr8 { v0: 3, v1: 0, v2: 4, v3: 0, v4: 2, v5: 0, v6: 0, v7: 0 };
+    assert_eq(eval_simple(types2, vals2, 5), 14);
+    1
+}
+
+fn test_eval_multi_ops() -> Int {
+    // 1 + 2 + 3 + 4 = 10
+    let types = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 1, v5: 2, v6: 1, v7: 0 };
+    let vals = Arr8 { v0: 1, v1: 0, v2: 2, v3: 0, v4: 3, v5: 0, v6: 4, v7: 0 };
+    assert_eq(eval_simple(types, vals, 7), 10);
+    1
+}
+
+fn main() -> Int {
+    test_lex_simple();
+    test_lex_multidigit();
+    test_lex_parens();
+    test_eval_simple_expr();
+    test_eval_with_multiply();
+    test_eval_multi_ops();
+    print("[OK] 502_state_machine_aot");
+    0
+}

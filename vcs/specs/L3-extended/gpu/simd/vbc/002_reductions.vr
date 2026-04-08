@@ -1,0 +1,88 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, simd, reductions
+// @timeout: 50000
+// @expected-exit: 0
+// @description: SIMD reduction operations — horizontal add, mul, min, max, bitwise
+
+type SimdVec4 is { x0: Float, x1: Float, x2: Float, x3: Float };
+
+fn splat4(v: Float) -> SimdVec4 {
+    SimdVec4 { x0: v, x1: v, x2: v, x3: v }
+}
+
+fn reduce_add(v: SimdVec4) -> Float { v.x0 + v.x1 + v.x2 + v.x3 }
+fn reduce_mul(v: SimdVec4) -> Float { v.x0 * v.x1 * v.x2 * v.x3 }
+
+fn min_f(a: Float, b: Float) -> Float { if a < b { a } else { b } }
+fn max_f(a: Float, b: Float) -> Float { if a > b { a } else { b } }
+
+fn reduce_min(v: SimdVec4) -> Float {
+    min_f(min_f(v.x0, v.x1), min_f(v.x2, v.x3))
+}
+
+fn reduce_max(v: SimdVec4) -> Float {
+    max_f(max_f(v.x0, v.x1), max_f(v.x2, v.x3))
+}
+
+// Bitwise reductions simulated with Int lanes
+type SimdVec4i is { x0: Int, x1: Int, x2: Int, x3: Int };
+
+fn splat4i(v: Int) -> SimdVec4i {
+    SimdVec4i { x0: v, x1: v, x2: v, x3: v }
+}
+
+fn reduce_and(v: SimdVec4i) -> Int { v.x0 & v.x1 & v.x2 & v.x3 }
+fn reduce_or(v: SimdVec4i) -> Int { v.x0 | v.x1 | v.x2 | v.x3 }
+
+@test
+fn test_simd_reduce_add() {
+    let a = splat4(1.0);
+    let sum = reduce_add(a);
+    assert(sum == 4.0);
+}
+
+@test
+fn test_simd_reduce_mul() {
+    let a = splat4(2.0);
+    let prod = reduce_mul(a);
+    assert(prod == 16.0);
+}
+
+@test
+fn test_simd_reduce_min() {
+    let a = splat4(3.0);
+    let mn = reduce_min(a);
+    assert(mn == 3.0);
+}
+
+@test
+fn test_simd_reduce_max() {
+    let a = splat4(7.0);
+    let mx = reduce_max(a);
+    assert(mx == 7.0);
+}
+
+@test
+fn test_simd_reduce_and() {
+    let a = splat4i(255);
+    let result = reduce_and(a);
+    assert(result == 255);
+}
+
+@test
+fn test_simd_reduce_or() {
+    let a = splat4i(15);
+    let result = reduce_or(a);
+    assert(result == 15);
+}
+
+fn main() {
+    test_simd_reduce_add();
+    test_simd_reduce_mul();
+    test_simd_reduce_min();
+    test_simd_reduce_max();
+    test_simd_reduce_and();
+    test_simd_reduce_or();
+}

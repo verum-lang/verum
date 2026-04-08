@@ -1,0 +1,65 @@
+// @test: run
+// @expected-stdout: Contract skipped: divide(10, 2) = 5
+// @tier: 0
+// @level: L2
+// @tags: verification, none, contracts
+// @description: Verification level none - contracts become documentation only
+
+/// @verify(none) - contracts are not verified at all
+/// Used during rapid development or when verification is too expensive
+/// Contracts remain as documentation but incur no runtime/compile-time cost
+
+@verify(none)
+fn divide(a: Int, b: Int) -> Int {
+    contract#"
+        requires b != 0;
+        ensures result == a / b;
+    ";
+    // With verify(none), even division by zero would not be caught
+    // by the contract system (though runtime error would still occur)
+    a / b
+}
+
+@verify(none)
+fn unchecked_array_access<T>(arr: List<T>, idx: Int) -> T {
+    contract#"
+        requires idx >= 0;
+        requires idx < arr.len();
+    ";
+    // Contract not checked - could panic at runtime
+    arr[idx]
+}
+
+@verify(none)
+fn potentially_overflowing_add(a: Int, b: Int) -> Int {
+    contract#"
+        requires a > 0 && b > 0;
+        ensures result > a && result > b;
+    ";
+    // Overflow not verified
+    a + b
+}
+
+/// Type for demonstration
+type Counter is {
+    value: Int,
+    max: Int,
+};
+
+@verify(none)
+implement Counter {
+    fn increment(mut self) -> Int {
+        contract#"
+            requires self.value < self.max;
+            ensures self.value == old(self.value) + 1;
+        ";
+        self.value += 1;
+        self.value
+    }
+}
+
+fn main() {
+    // Contracts present but not verified
+    let result = divide(10, 2);
+    println(f"Contract skipped: divide(10, 2) = {result}");
+}

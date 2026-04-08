@@ -1,0 +1,22 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M400
+// @tags: meta, quote, hygiene, syntax, invalid
+// @description: Tests detection of invalid quote syntax
+
+// =============================================================================
+// INVALID SPLICE SYNTAX
+// =============================================================================
+
+meta fn invalid_splice_dollar_bracket() -> TokenStream {
+    let x = 42;
+    quote {
+        // Invalid splice syntax - $[ requires 'for' for repetition
+        let y = $[x];  // ERROR: M400 - Invalid quote syntax: expected 'for' after '$['
+    }
+}
+
+fn main() {
+    @const assert(true);
+}

@@ -1,0 +1,482 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, graph, dfs, bfs, topological-sort, cycle-detection
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT DFS/BFS on directed graph as flat adjacency list, cycle detection, topological sort
+
+// Adjacency list for up to 8 nodes, each with up to 4 neighbors
+// adj[node][slot] = neighbor, adj_len[node] = number of neighbors
+type AdjRow is { n0: Int, n1: Int, n2: Int, n3: Int, count: Int };
+type Graph8 is {
+    r0: AdjRow, r1: AdjRow, r2: AdjRow, r3: AdjRow,
+    r4: AdjRow, r5: AdjRow, r6: AdjRow, r7: AdjRow,
+    num_nodes: Int
+};
+
+fn empty_row() -> AdjRow {
+    AdjRow { n0: 0, n1: 0, n2: 0, n3: 0, count: 0 }
+}
+
+fn empty_graph(n: Int) -> Graph8 {
+    Graph8 {
+        r0: empty_row(), r1: empty_row(), r2: empty_row(), r3: empty_row(),
+        r4: empty_row(), r5: empty_row(), r6: empty_row(), r7: empty_row(),
+        num_nodes: n
+    }
+}
+
+fn get_row(g: Graph8, i: Int) -> AdjRow {
+    if i == 0 { g.r0 }
+    else if i == 1 { g.r1 }
+    else if i == 2 { g.r2 }
+    else if i == 3 { g.r3 }
+    else if i == 4 { g.r4 }
+    else if i == 5 { g.r5 }
+    else if i == 6 { g.r6 }
+    else { g.r7 }
+}
+
+fn set_row(g: Graph8, i: Int, r: AdjRow) -> Graph8 {
+    Graph8 {
+        r0: if i == 0 { r } else { g.r0 },
+        r1: if i == 1 { r } else { g.r1 },
+        r2: if i == 2 { r } else { g.r2 },
+        r3: if i == 3 { r } else { g.r3 },
+        r4: if i == 4 { r } else { g.r4 },
+        r5: if i == 5 { r } else { g.r5 },
+        r6: if i == 6 { r } else { g.r6 },
+        r7: if i == 7 { r } else { g.r7 },
+        num_nodes: g.num_nodes
+    }
+}
+
+fn row_get_neighbor(r: AdjRow, slot: Int) -> Int {
+    if slot == 0 { r.n0 }
+    else if slot == 1 { r.n1 }
+    else if slot == 2 { r.n2 }
+    else { r.n3 }
+}
+
+fn row_add_neighbor(r: AdjRow, neighbor: Int) -> AdjRow {
+    let c = r.count;
+    if c >= 4 { r }
+    else if c == 0 { AdjRow { n0: neighbor, n1: r.n1, n2: r.n2, n3: r.n3, count: 1 } }
+    else if c == 1 { AdjRow { n0: r.n0, n1: neighbor, n2: r.n2, n3: r.n3, count: 2 } }
+    else if c == 2 { AdjRow { n0: r.n0, n1: r.n1, n2: neighbor, n3: r.n3, count: 3 } }
+    else { AdjRow { n0: r.n0, n1: r.n1, n2: r.n2, n3: neighbor, count: 4 } }
+}
+
+// Add directed edge from -> to
+fn add_edge(g: Graph8, from: Int, to: Int) -> Graph8 {
+    let row = get_row(g, from);
+    let new_row = row_add_neighbor(row, to);
+    set_row(g, from, new_row)
+}
+
+// === BFS using bitset visited ===
+// Returns bitset of reachable nodes from src
+fn bfs_reachable(g: Graph8, src: Int) -> Int {
+    let n = g.num_nodes;
+    let mut visited = 1 << src;
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let mut i = 0;
+        while i < n {
+            if (visited >> i) & 1 == 1 {
+                let row = get_row(g, i);
+                let mut s = 0;
+                while s < row.count {
+                    let nbr = row_get_neighbor(row, s);
+                    if (visited >> nbr) & 1 == 0 {
+                        visited = visited | (1 << nbr);
+                        changed = true;
+                    }
+                    s = s + 1;
+                }
+            }
+            i = i + 1;
+        }
+    }
+    visited
+}
+
+fn count_bits(mask: Int, n: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        if (mask >> i) & 1 == 1 { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+fn has_path(g: Graph8, src: Int, dst: Int) -> Bool {
+    let reachable = bfs_reachable(g, src);
+    (reachable >> dst) & 1 == 1
+}
+
+// === DFS order (iterative using a stack encoded in a flat buffer) ===
+// Returns a Buf8 with DFS visit order
+type Buf8 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    len: Int
+};
+
+fn buf8_new() -> Buf8 {
+    Buf8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 0 }
+}
+
+fn buf8_get(b: Buf8, i: Int) -> Int {
+    if i == 0 { b.a0 }
+    else if i == 1 { b.a1 }
+    else if i == 2 { b.a2 }
+    else if i == 3 { b.a3 }
+    else if i == 4 { b.a4 }
+    else if i == 5 { b.a5 }
+    else if i == 6 { b.a6 }
+    else { b.a7 }
+}
+
+fn buf8_set(b: Buf8, i: Int, v: Int) -> Buf8 {
+    Buf8 {
+        a0: if i == 0 { v } else { b.a0 },
+        a1: if i == 1 { v } else { b.a1 },
+        a2: if i == 2 { v } else { b.a2 },
+        a3: if i == 3 { v } else { b.a3 },
+        a4: if i == 4 { v } else { b.a4 },
+        a5: if i == 5 { v } else { b.a5 },
+        a6: if i == 6 { v } else { b.a6 },
+        a7: if i == 7 { v } else { b.a7 },
+        len: b.len
+    }
+}
+
+fn buf8_push(b: Buf8, v: Int) -> Buf8 {
+    let n = b.len;
+    if n >= 8 { b }
+    else {
+        let b2 = buf8_set(b, n, v);
+        Buf8 {
+            a0: b2.a0, a1: b2.a1, a2: b2.a2, a3: b2.a3,
+            a4: b2.a4, a5: b2.a5, a6: b2.a6, a7: b2.a7,
+            len: n + 1
+        }
+    }
+}
+
+// DFS from start node, returns visit order in Buf8
+fn dfs_order(g: Graph8, start: Int) -> Buf8 {
+    let n = g.num_nodes;
+    let mut visited = 0;
+    let mut result = buf8_new();
+
+    // Stack: store nodes to visit (use a Buf8 as stack)
+    let mut stack = buf8_new();
+    stack = buf8_push(stack, start);
+
+    while stack.len > 0 {
+        // Pop from stack
+        let top_idx = stack.len - 1;
+        let node = buf8_get(stack, top_idx);
+        stack = Buf8 {
+            a0: stack.a0, a1: stack.a1, a2: stack.a2, a3: stack.a3,
+            a4: stack.a4, a5: stack.a5, a6: stack.a6, a7: stack.a7,
+            len: top_idx
+        };
+
+        if (visited >> node) & 1 == 0 {
+            visited = visited | (1 << node);
+            result = buf8_push(result, node);
+
+            // Push neighbors in reverse order for correct DFS ordering
+            let row = get_row(g, node);
+            let mut s = row.count - 1;
+            while s >= 0 {
+                let nbr = row_get_neighbor(row, s);
+                if (visited >> nbr) & 1 == 0 {
+                    stack = buf8_push(stack, nbr);
+                }
+                s = s - 1;
+            }
+        }
+    }
+    result
+}
+
+// === Cycle detection using DFS coloring ===
+// Color: 0=white(unvisited), 1=gray(in stack), 2=black(done)
+// We encode colors as a bitfield: 2 bits per node in a single Int
+fn get_color(colors: Int, node: Int) -> Int {
+    (colors >> (node * 2)) & 3
+}
+
+fn set_color(colors: Int, node: Int, color: Int) -> Int {
+    let mask = 3 << (node * 2);
+    let cleared = colors & (mask ^ (0 - 1));  // clear bits using XOR with all-ones
+    cleared | (color << (node * 2))
+}
+
+// Check if graph has a cycle - iterative approach
+// Uses the BFS reachability to detect if any node can reach itself
+fn has_cycle_from(g: Graph8, start: Int) -> Bool {
+    // Check if start can reach itself through any path of length >= 1
+    let row = get_row(g, start);
+    let mut s = 0;
+    let mut found = false;
+    while s < row.count && !found {
+        let nbr = row_get_neighbor(row, s);
+        let reachable = bfs_reachable(g, nbr);
+        if (reachable >> start) & 1 == 1 {
+            found = true;
+        }
+        s = s + 1;
+    }
+    found
+}
+
+fn has_cycle(g: Graph8) -> Bool {
+    let n = g.num_nodes;
+    let mut i = 0;
+    let mut found = false;
+    while i < n && !found {
+        if has_cycle_from(g, i) {
+            found = true;
+        }
+        i = i + 1;
+    }
+    found
+}
+
+// === Topological sort (Kahn's algorithm) ===
+// Returns sorted order in Buf8; valid only for DAGs
+fn topo_sort(g: Graph8) -> Buf8 {
+    let n = g.num_nodes;
+
+    // Compute in-degrees using a flat encoding
+    let mut in_deg = buf8_new();
+    let mut i = 0;
+    while i < n {
+        in_deg = buf8_set(in_deg, i, 0);
+        i = i + 1;
+    }
+    in_deg = Buf8 {
+        a0: in_deg.a0, a1: in_deg.a1, a2: in_deg.a2, a3: in_deg.a3,
+        a4: in_deg.a4, a5: in_deg.a5, a6: in_deg.a6, a7: in_deg.a7,
+        len: n
+    };
+
+    i = 0;
+    while i < n {
+        let row = get_row(g, i);
+        let mut s = 0;
+        while s < row.count {
+            let nbr = row_get_neighbor(row, s);
+            let old_deg = buf8_get(in_deg, nbr);
+            in_deg = buf8_set(in_deg, nbr, old_deg + 1);
+            s = s + 1;
+        }
+        i = i + 1;
+    }
+
+    // Queue: nodes with in-degree 0 (use bitset)
+    let mut queue = 0;
+    i = 0;
+    while i < n {
+        if buf8_get(in_deg, i) == 0 {
+            queue = queue | (1 << i);
+        }
+        i = i + 1;
+    }
+
+    let mut result = buf8_new();
+    let mut processed = 0;
+
+    while processed < n {
+        // Find first node in queue
+        let mut node = -1;
+        let mut k = 0;
+        while k < n && node == -1 {
+            if (queue >> k) & 1 == 1 {
+                node = k;
+            }
+            k = k + 1;
+        }
+        if node == -1 {
+            // Cycle detected, stop
+            processed = n;
+        } else {
+            queue = queue & ((1 << node) ^ (0 - 1));  // remove from queue
+            result = buf8_push(result, node);
+            processed = processed + 1;
+
+            // Decrease in-degree of neighbors
+            let row = get_row(g, node);
+            let mut s = 0;
+            while s < row.count {
+                let nbr = row_get_neighbor(row, s);
+                let new_deg = buf8_get(in_deg, nbr) - 1;
+                in_deg = buf8_set(in_deg, nbr, new_deg);
+                if new_deg == 0 {
+                    queue = queue | (1 << nbr);
+                }
+                s = s + 1;
+            }
+        }
+    }
+    result
+}
+
+// Count edges in graph
+fn count_edges(g: Graph8) -> Int {
+    let n = g.num_nodes;
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        total = total + get_row(g, i).count;
+        i = i + 1;
+    }
+    total
+}
+
+// Out-degree of node
+fn out_degree(g: Graph8, node: Int) -> Int {
+    get_row(g, node).count
+}
+
+fn main() -> Int {
+    // === Build a simple DAG ===
+    // 0 -> 1 -> 3
+    // 0 -> 2 -> 3 -> 4
+    let mut dag = empty_graph(5);
+    dag = add_edge(dag, 0, 1);
+    dag = add_edge(dag, 0, 2);
+    dag = add_edge(dag, 1, 3);
+    dag = add_edge(dag, 2, 3);
+    dag = add_edge(dag, 3, 4);
+
+    assert_eq(count_edges(dag), 5);
+    assert_eq(out_degree(dag, 0), 2);
+    assert_eq(out_degree(dag, 3), 1);
+    assert_eq(out_degree(dag, 4), 0);
+
+    // === BFS reachability ===
+    let reach0 = bfs_reachable(dag, 0);
+    assert_eq(count_bits(reach0, 5), 5);  // 0 reaches all
+
+    let reach3 = bfs_reachable(dag, 3);
+    assert_eq(count_bits(reach3, 5), 2);  // 3 reaches {3, 4}
+
+    let reach4 = bfs_reachable(dag, 4);
+    assert_eq(count_bits(reach4, 5), 1);  // 4 is sink
+
+    // === Path existence ===
+    assert(has_path(dag, 0, 4));
+    assert(has_path(dag, 0, 3));
+    assert(has_path(dag, 1, 4));
+    assert(!has_path(dag, 4, 0));
+    assert(!has_path(dag, 3, 0));
+
+    // === DFS order ===
+    let dfs = dfs_order(dag, 0);
+    assert_eq(dfs.len, 5);
+    assert_eq(buf8_get(dfs, 0), 0);  // start node first
+
+    // === No cycle in DAG ===
+    assert(!has_cycle(dag));
+
+    // === Topological sort ===
+    let topo = topo_sort(dag);
+    assert_eq(topo.len, 5);
+    // 0 must come before 1 and 2; 1 and 2 before 3; 3 before 4
+    assert_eq(buf8_get(topo, 0), 0);  // source first
+    assert_eq(buf8_get(topo, 4), 4);  // sink last
+
+    // Verify: for every edge u->v, u appears before v in topo order
+    // We check by position: pos[u] < pos[v]
+    let mut pos = buf8_new();
+    let mut i = 0;
+    while i < 5 {
+        let node = buf8_get(topo, i);
+        pos = buf8_set(pos, node, i);
+        i = i + 1;
+    }
+    assert(buf8_get(pos, 0) < buf8_get(pos, 1));  // 0 before 1
+    assert(buf8_get(pos, 0) < buf8_get(pos, 2));  // 0 before 2
+    assert(buf8_get(pos, 1) < buf8_get(pos, 3));  // 1 before 3
+    assert(buf8_get(pos, 2) < buf8_get(pos, 3));  // 2 before 3
+    assert(buf8_get(pos, 3) < buf8_get(pos, 4));  // 3 before 4
+
+    // === Graph with cycle ===
+    // 0 -> 1 -> 2 -> 0  (cycle!)
+    let mut cyc = empty_graph(3);
+    cyc = add_edge(cyc, 0, 1);
+    cyc = add_edge(cyc, 1, 2);
+    cyc = add_edge(cyc, 2, 0);
+
+    assert(has_cycle(cyc));
+    assert(has_path(cyc, 0, 2));
+    assert(has_path(cyc, 2, 0));  // back edge
+    assert_eq(count_bits(bfs_reachable(cyc, 0), 3), 3);
+
+    // === Diamond DAG ===
+    //   0
+    //  / \
+    // 1   2
+    //  \ /
+    //   3
+    let mut diamond = empty_graph(4);
+    diamond = add_edge(diamond, 0, 1);
+    diamond = add_edge(diamond, 0, 2);
+    diamond = add_edge(diamond, 1, 3);
+    diamond = add_edge(diamond, 2, 3);
+
+    assert(!has_cycle(diamond));
+    assert(has_path(diamond, 0, 3));
+    assert(!has_path(diamond, 3, 0));
+
+    let topo_d = topo_sort(diamond);
+    assert_eq(topo_d.len, 4);
+    assert_eq(buf8_get(topo_d, 0), 0);
+    assert_eq(buf8_get(topo_d, 3), 3);
+
+    // === Linear chain ===
+    // 0 -> 1 -> 2 -> 3 -> 4 -> 5
+    let mut chain = empty_graph(6);
+    chain = add_edge(chain, 0, 1);
+    chain = add_edge(chain, 1, 2);
+    chain = add_edge(chain, 2, 3);
+    chain = add_edge(chain, 3, 4);
+    chain = add_edge(chain, 4, 5);
+
+    assert(!has_cycle(chain));
+    assert(has_path(chain, 0, 5));
+    assert(!has_path(chain, 5, 0));
+
+    let topo_c = topo_sort(chain);
+    // Linear chain: topo sort must be 0,1,2,3,4,5
+    assert_eq(buf8_get(topo_c, 0), 0);
+    assert_eq(buf8_get(topo_c, 1), 1);
+    assert_eq(buf8_get(topo_c, 2), 2);
+    assert_eq(buf8_get(topo_c, 3), 3);
+    assert_eq(buf8_get(topo_c, 4), 4);
+    assert_eq(buf8_get(topo_c, 5), 5);
+
+    // === Disconnected graph ===
+    // 0 -> 1, 2 -> 3 (two components)
+    let mut disc = empty_graph(4);
+    disc = add_edge(disc, 0, 1);
+    disc = add_edge(disc, 2, 3);
+
+    assert(!has_cycle(disc));
+    assert(has_path(disc, 0, 1));
+    assert(!has_path(disc, 0, 2));
+    assert(!has_path(disc, 1, 3));
+    assert_eq(count_bits(bfs_reachable(disc, 0), 4), 2);  // {0, 1}
+    assert_eq(count_bits(bfs_reachable(disc, 2), 4), 2);  // {2, 3}
+
+    0
+}

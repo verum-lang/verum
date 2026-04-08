@@ -1,0 +1,24 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "hello world";
+    let n = "world";
+
+    // Test contains - calls Text.find which calls needle.as_bytes()
+    if s.contains(n) {
+        print("contains: yes");
+    } else {
+        print("contains: no");
+    }
+
+    // Test starts_with - calls prefix.as_bytes()
+    if s.starts_with("hello") {
+        print("starts_with: yes");
+    } else {
+        print("starts_with: no");
+    }
+
+    0
+}

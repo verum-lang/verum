@@ -1,0 +1,282 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, undecidable, fallback
+// @timeout: 5000
+
+/// Undecidable fallback tests.
+/// Demonstrates graceful degradation when SMT solver cannot decide.
+
+// ============================================================================
+// Runtime check fallback
+// ============================================================================
+
+/// When SMT times out or returns unknown, insert runtime check
+@verify(fallback: runtime)
+fn sqrt_fallback(x: Float) -> Float{>= 0.0} {
+    // If SMT can't prove x.sqrt() >= 0, insert runtime assertion
+    let result = x.sqrt();
+    assert(result >= 0.0);
+    result
+}
+
+@verify(fallback: runtime)
+fn complex_division(a: Float, b: Float, c: Float) -> Float
+    requires b * c != 0.0  // SMT might struggle with floating point
+{
+    // Fallback to runtime check if SMT can't verify
+    a / (b * c)
+}
+
+// ============================================================================
+// Assume annotation (trust the programmer)
+// ============================================================================
+
+/// User assertion that SMT should trust without proof
+@verify(assume)
+fn trusted_positive(x: Int) -> Int{> 0}
+    requires x != 0
+{
+    // Programmer asserts: |x| > 0 for all non-zero x
+    // SMT trusts this without proof
+    if x > 0 { x } else { -x }
+}
+
+/// External function with assumed properties
+@extern
+@verify(assume: "returns value in [0, 1)")
+fn random() -> Float{>= 0.0 && < 1.0};
+
+@verify(proof)
+fn random_in_range() -> Float{>= 0.0 && < 1.0} {
+    random()  // Verified by assumed property
+}
+
+// ============================================================================
+// Partial verification (verify what's decidable)
+// ============================================================================
+
+/// Verify decidable parts, skip undecidable
+@verify(partial)
+fn mixed_verification(x: Int{>= 0}) -> Int{>= 0} {
+    // Decidable: x >= 0 => x + 1 >= 0
+    let a = x + 1;
+
+    // Undecidable: complex floating point
+    let b = (x as Float).sin();
+
+    // Decidable: a >= 1 => a >= 0
+    a
+}
+
+// ============================================================================
+// Gradual verification levels
+// ============================================================================
+
+/// Level 0: No verification (development mode)
+@verify(level: 0)
+fn unverified_code(x: Int) -> Int {
+    x * 2 + 1  // No checks whatsoever
+}
+
+/// Level 1: Type checking only (no refinements)
+@verify(level: 1)
+fn type_checked_only(x: Int) -> Int {
+    x * 2 + 1  // Types checked, refinements skipped
+}
+
+/// Level 2: Syntactic refinement checking
+@verify(level: 2)
+fn syntactic_refinements(x: Int{>= 0}) -> Int{>= 0} {
+    x  // Simple refinement subsumption
+}
+
+/// Level 3: Full SMT verification
+@verify(level: 3)
+fn full_verification(x: Int{>= 0}, y: Int{>= 0}) -> Int{>= 0} {
+    x + y  // SMT proves: x >= 0 /\ y >= 0 => x + y >= 0
+}
+
+// ============================================================================
+// Timeout with fallback strategy
+// ============================================================================
+
+/// Try SMT, fallback to runtime on timeout
+@verify(proof, timeout: 1000, fallback: runtime)
+fn with_timeout_fallback(arr: List<Int>, idx: Int{>= 0}) -> Maybe<Int> {
+    if idx < len(arr) {
+        Some(arr[idx])
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Unknown result handling
+// ============================================================================
+
+/// When Z3 returns "unknown", try alternative strategies
+@verify(proof, on_unknown: simplify_and_retry)
+fn retry_on_unknown(x: Int, y: Int) -> Int
+    requires x > 0 && y > 0
+    ensures result > 0
+{
+    // If first attempt fails, simplify constraints and retry
+    x + y
+}
+
+/// Accept "unknown" as success for non-critical code
+@verify(proof, on_unknown: accept)
+fn accept_unknown(x: Float, y: Float) -> Float {
+    // Floating point often returns unknown
+    (x + y) / 2.0
+}
+
+// ============================================================================
+// Modular verification with assumptions
+// ============================================================================
+
+/// Module provides assumed lemmas for external verification
+module trusted_lemmas {
+    /// Assume: squaring preserves positivity for non-zero
+    @verify(assume)
+    pub fn square_positive(x: Int{!= 0}) -> Int{> 0} {
+        x * x
+    }
+
+    /// Assume: logarithm is monotonic
+    @verify(assume)
+    pub fn log_monotonic(x: Float{> 0.0}, y: Float{> 0.0}) -> Bool
+        requires x < y
+        ensures log(x) < log(y)
+    {
+        true
+    }
+}
+
+@verify(proof)
+fn use_assumed_lemmas(x: Int{!= 0}) -> Int{> 0} {
+    trusted_lemmas.square_positive(x)  // Uses assumed property
+}
+
+// ============================================================================
+// Interactive proof assistance
+// ============================================================================
+
+/// Provide hints to help SMT solver
+@verify(proof, hints: ["unfold gcd", "induction on n"])
+fn gcd_with_hints(a: Int{> 0}, b: Int{>= 0}) -> Int{> 0} {
+    if b == 0 {
+        a
+    } else {
+        gcd_with_hints(b, a % b)
+    }
+}
+
+/// Specify proof tactic
+@verify(proof, tactic: induction(n))
+fn sum_formula(n: Int{>= 0}) -> Int
+    ensures result == n * (n + 1) / 2
+{
+    if n == 0 {
+        0
+    } else {
+        n + sum_formula(n - 1)
+    }
+}
+
+// ============================================================================
+// Witness-based verification
+// ============================================================================
+
+/// Provide a witness value when existence is hard to prove
+@verify(proof)
+fn find_sqrt(n: Int{>= 0}) -> Maybe<Int{>= 0}>
+    ensures match result {
+        Some(x) => x * x == n,
+        None => forall x: Int{>= 0 && <= n} => x * x != n,
+    }
+{
+    // Provide witness to help SMT
+    let mut i = 0;
+    while i * i <= n {
+        // SMT witness: consider i as potential witness
+        if i * i == n {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+// ============================================================================
+// Bounded model checking fallback
+// ============================================================================
+
+/// When unbounded verification fails, try bounded
+@verify(proof)
+fn bounded_verification(arr: List<Int>) -> Int{>= 0}
+    requires len(arr) <= 100
+{
+    let mut sum = 0;
+    for x in arr {
+        if x > 0 {
+            sum += x;
+        }
+    }
+    sum
+}
+
+// ============================================================================
+// External prover integration
+// ============================================================================
+
+/// Delegate to external prover (Coq, Lean, etc.)
+@verify(proof)
+fn sqrt_proven_externally(x: Float{>= 0.0}) -> Float{>= 0.0} {
+    x.sqrt()
+}
+
+// ============================================================================
+// Practical undecidable example: string matching
+// ============================================================================
+
+/// Regular expression matching is undecidable in general
+@verify(fallback: runtime)
+fn regex_match(s: Text, pattern: Text) -> Bool {
+    // SMT string theory is incomplete for general regex
+    // Fallback to runtime regex engine
+    runtime_regex_match(s, pattern)
+}
+
+/// External runtime function
+@extern
+fn runtime_regex_match(s: Text, pattern: Text) -> Bool;
+
+fn main() {
+    // Runtime fallback
+    let sqrt_result = sqrt_fallback(4.0);
+    assert(sqrt_result == 2.0);
+
+    // Trusted assertions
+    let pos = trusted_positive(5);
+    assert(pos == 5);
+
+    // Random in range
+    let r = random_in_range();
+    assert(r >= 0.0 && r < 1.0);
+
+    // Gradual levels
+    let l0 = unverified_code(5);
+    let l1 = type_checked_only(5);
+    let l2 = syntactic_refinements(5);
+    let l3 = full_verification(3, 4);
+
+    // Assumed lemmas
+    let sq = use_assumed_lemmas(7);
+    assert(sq == 49);
+
+    // Witness verification
+    let sqrt_int = find_sqrt(16);
+    assert(sqrt_int == Some(4));
+}

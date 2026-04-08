@@ -1,0 +1,206 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: text, string, processing, algorithms
+// @description: Test string processing algorithms and text manipulation
+
+fn is_palindrome(s: Text) -> Bool {
+    let n = s.len();
+    if n <= 1 { return true; }
+    let mut i = 0;
+    while i < n / 2 {
+        let ci = match s.char_at(i) { Some(v) => v, None => -1, };
+        let cj = match s.char_at(n - 1 - i) { Some(v) => v, None => -2, };
+        if ci != cj {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn test_palindrome() -> Int {
+    if !is_palindrome("racecar") {
+        print("FAIL palindrome: racecar should be palindrome");
+        return 1;
+    }
+    if !is_palindrome("madam") {
+        print("FAIL palindrome: madam should be palindrome");
+        return 1;
+    }
+    if is_palindrome("hello") {
+        print("FAIL palindrome: hello should not be palindrome");
+        return 1;
+    }
+    if !is_palindrome("a") {
+        print("FAIL palindrome: single char should be palindrome");
+        return 1;
+    }
+    print("  palindrome: OK");
+    0
+}
+
+fn count_char_code(s: Text, code: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len() {
+        let ch = match s.char_at(i) { Some(v) => v, None => -1, };
+        if ch == code {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_count_char() -> Int {
+    let s = "mississippi";
+    // 's' = 115, 'p' = 112, 'i' = 105
+    let si = count_char_code(s, 115);
+    let pi = count_char_code(s, 112);
+    let ii = count_char_code(s, 105);
+
+    if si != 4 {
+        print(f"FAIL count_char: s count={si}, expected 4");
+        return 1;
+    }
+    if pi != 2 {
+        print(f"FAIL count_char: p count={pi}, expected 2");
+        return 1;
+    }
+    if ii != 4 {
+        print(f"FAIL count_char: i count={ii}, expected 4");
+        return 1;
+    }
+    print("  count_char: OK");
+    0
+}
+
+fn test_split_join() -> Int {
+    let csv = "alice,bob,charlie,dave";
+    let parts = csv.split(",");
+
+    if parts.len() != 4 {
+        print(f"FAIL split_join: len={parts.len()}, expected 4");
+        return 1;
+    }
+    if parts[0] != "alice" {
+        print(f"FAIL split_join: parts[0]={parts[0]}");
+        return 1;
+    }
+    if parts[3] != "dave" {
+        print(f"FAIL split_join: parts[3]={parts[3]}");
+        return 1;
+    }
+
+    // Join back
+    let rejoined = parts.join(";");
+    if rejoined != "alice;bob;charlie;dave" {
+        print(f"FAIL split_join: rejoined={rejoined}");
+        return 1;
+    }
+
+    print("  split_join: OK");
+    0
+}
+
+fn test_text_replace() -> Int {
+    let s = "the quick brown fox";
+    let r = s.replace("quick", "slow");
+    if r != "the slow brown fox" {
+        print(f"FAIL replace: got '{r}'");
+        return 1;
+    }
+
+    // Replace non-existent
+    let r2 = s.replace("xyz", "abc");
+    if r2 != "the quick brown fox" {
+        print("FAIL replace: no-op should return original");
+        return 1;
+    }
+
+    print("  text_replace: OK");
+    0
+}
+
+fn test_text_concat_heavy() -> Int {
+    // Build a string by repeated concatenation
+    let mut result = "";
+    let mut i = 0;
+    while i < 10 {
+        result = result + f"{i}";
+        i = i + 1;
+    }
+    if result != "0123456789" {
+        print(f"FAIL concat_heavy: got '{result}'");
+        return 1;
+    }
+
+    if result.len() != 10 {
+        print(f"FAIL concat_heavy: len={result.len()}");
+        return 1;
+    }
+
+    print("  concat_heavy: OK");
+    0
+}
+
+fn test_text_comparison() -> Int {
+    let a = "apple";
+    let b = "banana";
+    let c = "apple";
+
+    if a == b {
+        print("FAIL comparison: apple == banana");
+        return 1;
+    }
+    if a != c {
+        print("FAIL comparison: apple != apple");
+        return 1;
+    }
+
+    // Empty string checks
+    let empty = "";
+    if empty.len() != 0 {
+        print("FAIL comparison: empty len != 0");
+        return 1;
+    }
+
+    print("  text_comparison: OK");
+    0
+}
+
+fn test_substring() -> Int {
+    let s = "hello world";
+    let sub = s.substring(0, 5);
+    if sub != "hello" {
+        print(f"FAIL substring: got '{sub}'");
+        return 1;
+    }
+    let sub2 = s.substring(6, 11);
+    if sub2 != "world" {
+        print(f"FAIL substring: got '{sub2}'");
+        return 1;
+    }
+    print("  substring: OK");
+    0
+}
+
+fn main() -> Int {
+    print("String Processing Tests:");
+    let mut failures = 0;
+    failures = failures + test_palindrome();
+    failures = failures + test_count_char();
+    failures = failures + test_split_join();
+    failures = failures + test_text_replace();
+    failures = failures + test_text_concat_heavy();
+    failures = failures + test_text_comparison();
+    failures = failures + test_substring();
+
+    if failures == 0 {
+        print("All string processing tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

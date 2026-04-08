@@ -1,0 +1,29 @@
+// @test: run-interpreter-panic
+// @expected-panic: CBGR use-after-free detected
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, use-after-free, runtime, safety
+
+/// Test CBGR detection of use-after-free at runtime.
+/// When a reference is used after its target is freed,
+/// the generation check fails and triggers a panic.
+/// This is the core safety guarantee of CBGR.
+/// Spec: 26-cbgr-implementation.md#use-after-free-detection
+
+fn main() {
+    // Canonical use-after-free: reference outlives its target
+    // This demonstrates CBGR's runtime safety guarantee
+
+    let dangling_ref: &Int = {
+        let local = 42;
+        &local  // Reference captured, local will be dropped
+    };
+    // local is dropped here, generation bumped
+
+    // CBGR checks on dereference:
+    // - stored_generation (captured when & was created)
+    // - current_generation (at memory location)
+    // These don't match → PANIC
+
+    print(*dangling_ref);  // PANIC: CBGR use-after-free detected
+}

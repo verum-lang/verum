@@ -1,0 +1,29 @@
+// =============================================================================
+// reexport_method_test.vr - Minimal reproduction of re-export method bug
+// =============================================================================
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: reexport, method, bug-reproduction
+// @description: Tests that methods are available on re-exported types
+//
+// BUG: When types are re-exported via `public mount .path.Path`, the methods
+// from `implement Path { ... }` blocks are not resolved through the re-export.
+// =============================================================================
+
+// Import Path from core.io (which re-exports from core.io.path)
+mount core.io.{Path};
+mount core.base.maybe.{Maybe, Some, None};
+
+// Try to call a method on Path
+@test
+fn test_path_method() {
+    // This should work but currently fails with:
+    // "no method named `is_empty` found for type `Path`"
+    let p = Path.new("test");
+    let _empty = p.is_empty();
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

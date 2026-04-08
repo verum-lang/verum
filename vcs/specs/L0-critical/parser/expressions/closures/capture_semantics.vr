@@ -1,0 +1,150 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, capture, semantics
+
+// Extended closure capture semantics tests
+
+// Test capture by reference (default for reads)
+fn test_capture_by_reference() {
+    let x = 10;
+    let f = || x + 1;  // Captures x by reference
+}
+
+// Test capture by mutable reference
+fn test_capture_mutable() {
+    let mut counter = 0;
+    let inc = || {
+        counter += 1;  // Captures counter mutably
+    };
+}
+
+// Test capture by value (move)
+fn test_capture_by_value() {
+    let owned = Text.from("hello");
+    let f = move || {
+        owned.len()  // Takes ownership of owned
+    };
+}
+
+// Test explicit move for all captures
+fn test_explicit_move() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let f = move || a + b + c;  // Moves a, b, c
+}
+
+// Test capture in nested closure
+fn test_nested_capture() {
+    let x = 10;
+    let outer = || {
+        let y = 20;
+        let inner = || x + y;  // Captures x from outer scope, y from enclosing
+        inner()
+    };
+}
+
+// Test closure in loop - fresh capture each iteration
+fn test_closure_in_loop() {
+    let mut closures = [];
+    for i in 0..5 {
+        let f = move || i * i;  // Each captures its own i
+        closures.push(f);
+    }
+}
+
+// Test common capture issue - shared reference
+fn test_shared_reference_capture() {
+    let data = [1, 2, 3];
+    let f = || data.iter().sum();  // Borrows data
+}
+
+// Test capture Option/Maybe contents
+fn test_capture_option() {
+    let maybe = Some(42);
+    let f = || {
+        if let Some(x) = maybe {
+            x * 2
+        } else {
+            0
+        }
+    };
+}
+
+// Test capture in async closure
+fn test_async_capture() {
+    let data = fetch_initial();
+    let async_closure = async move || {
+        process(data).await
+    };
+}
+
+// Test clone before capture to avoid move
+fn test_clone_before_capture() {
+    let expensive = create_expensive_resource();
+    let cloned = expensive.clone();
+    let f = move || use_resource(cloned);
+}
+
+// Test capture Shared for shared ownership
+fn test_shared_capture() {
+    let data = create_data();
+    let shared = Shared.new(data);
+    let shared_clone = shared.clone();
+    let f = move || {
+        shared_clone.read()
+    };
+}
+
+// Test capture with pattern destructuring
+fn test_capture_pattern_destructuring() {
+    let (a, b) = (1, 2);
+    let f = || a + b;  // Captures a and b separately
+}
+
+// Test FnOnce - consumes captured values
+fn test_fn_once() {
+    let owned = Text.from("hello");
+    let f = || owned;  // Moves owned out
+    // f can only be called once
+}
+
+// Test FnMut - mutates captured values
+fn test_fn_mut() {
+    let mut vec = List.new();
+    let mut f = |x| vec.push(x);
+    f(1);
+    f(2);  // Can be called multiple times
+}
+
+// Test Fn - only reads captured values
+fn test_fn_read_only() {
+    let x = 42;
+    let f = || x;
+    let a = f();
+    let b = f();  // Can be called multiple times
+}
+
+// Test capture with borrow checker rules
+fn test_borrow_checker_capture() {
+    let mut data = [1, 2, 3];
+    let reader = || data.len();  // Immutable borrow
+    // Cannot mutate data while reader is alive
+    let len = reader();
+}
+
+// Test capture struct field
+fn test_capture_struct_field() {
+    let person = Person { name: "Alice", age: 30 };
+    let get_name = || person.name.clone();  // Captures person
+    let get_age = || person.age;            // Captures person
+}
+
+// Test disjoint capture (field-level granularity)
+fn test_disjoint_capture() {
+    let mut p = Point { x: 1, y: 2 };
+    let x_reader = || p.x;
+    let y_mutator = || { p.y += 1; };
+    // Both can coexist as they touch different fields
+}

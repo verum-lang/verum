@@ -1,0 +1,793 @@
+// =============================================================================
+// collections_protocols_test.vr - Protocol implementation tests for ALL
+//                                 collection types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, protocols, clone, default, eq, debug, display, from_iter,
+//        extend, hash, map, deque, btree, heap, list, production, core
+// @description: Comprehensive tests for protocol implementations (Clone,
+//               Default, Eq, Debug, Display, FromIterator, Extend, Hash, Ord)
+//               across Map, Deque, BTreeMap, BTreeSet, BinaryHeap, and List.
+//               Also tests constructor helper functions.
+// =============================================================================
+
+module specs.core.collections.collections_protocols_test;
+
+mount core.*;
+mount core.text.format.{format_display, format_debug};
+
+// =============================================================================
+// MAP<K,V> PROTOCOL TESTS
+// =============================================================================
+
+// --- Map Clone ---
+
+@test
+fn test_map_clone_basic() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a".clone(), 1);
+    m.insert("b".clone(), 2);
+    let cloned = m.clone();
+    assert_eq(cloned.len(), 2);
+    assert_eq(*cloned.get(&"a").unwrap(), 1);
+    assert_eq(*cloned.get(&"b").unwrap(), 2);
+}
+
+@test
+fn test_map_clone_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let cloned = m.clone();
+    assert(cloned.is_empty());
+}
+
+@test
+fn test_map_clone_independence() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    let cloned = m.clone();
+    m.insert(2, 20);
+    assert_eq(m.len(), 2);
+    assert_eq(cloned.len(), 1);
+}
+
+// --- Map Default ---
+
+@test
+fn test_map_default() {
+    let m: Map<Text, Int> = Map.default();
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_default_usable() {
+    let mut m: Map<Int, Int> = Map.default();
+    m.insert(42, 100);
+    assert_eq(m.len(), 1);
+}
+
+// --- Map Eq ---
+
+@test
+fn test_map_eq_same() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(1, 10);
+    b.insert(2, 20);
+    assert(a == b);
+}
+
+@test
+fn test_map_eq_different_values() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(1, 99);
+    assert(a != b);
+}
+
+@test
+fn test_map_eq_different_keys() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(2, 10);
+    assert(a != b);
+}
+
+@test
+fn test_map_eq_different_sizes() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(1, 10);
+    b.insert(2, 20);
+    assert(a != b);
+}
+
+@test
+fn test_map_eq_empty() {
+    let a: Map<Int, Int> = Map.new();
+    let b: Map<Int, Int> = Map.new();
+    assert(a == b);
+}
+
+@test
+fn test_map_eq_insertion_order_irrelevant() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(2, 20);
+    b.insert(1, 10);
+    assert(a == b);
+}
+
+// --- Map Debug/Display ---
+
+@test
+fn test_map_debug_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let text = format_debug(&m);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_map_debug_nonempty() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    let text = format_debug(&m);
+    assert(text.contains(&"1"));
+    assert(text.contains(&"10"));
+}
+
+@test
+fn test_map_display_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let text = format_display(&m);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_map_display_nonempty() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(42, 100);
+    let text = format_display(&m);
+    assert(text.contains(&"42"));
+    assert(text.contains(&"100"));
+}
+
+// --- Map FromIterator ---
+
+@test
+fn test_map_from_iter_pairs() {
+    let pairs: List<(Int, Int)> = [(1, 10), (2, 20), (3, 30)];
+    let m: Map<Int, Int> = Map.from_iter(pairs.iter().map(|p| *p));
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+    assert_eq(*m.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_map_from_iter_empty() {
+    let pairs: List<(Int, Int)> = [];
+    let m: Map<Int, Int> = Map.from_iter(pairs.iter().map(|p| *p));
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_from_iter_duplicate_keys() {
+    let pairs: List<(Int, Int)> = [(1, 10), (1, 20), (2, 30)];
+    let m: Map<Int, Int> = Map.from_iter(pairs.iter().map(|p| *p));
+    assert_eq(m.len(), 2);
+    // Last value for key 1 should win
+    assert_eq(*m.get(&2).unwrap(), 30);
+}
+
+// --- Map Extend ---
+
+@test
+fn test_map_extend_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    let extra: List<(Int, Int)> = [(2, 20), (3, 30)];
+    m.extend(extra.iter().map(|p| *p));
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_map_extend_overwrite() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    let extra: List<(Int, Int)> = [(1, 99)];
+    m.extend(extra.iter().map(|p| *p));
+    assert_eq(m.len(), 1);
+    assert_eq(*m.get(&1).unwrap(), 99);
+}
+
+// =============================================================================
+// DEQUE<T> PROTOCOL TESTS
+// =============================================================================
+
+// --- Deque Clone ---
+
+@test
+fn test_deque_clone_basic() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let cloned = d.clone();
+    assert_eq(cloned.len(), 3);
+}
+
+@test
+fn test_deque_clone_empty() {
+    let d: Deque<Int> = Deque.new();
+    let cloned = d.clone();
+    assert(cloned.is_empty());
+}
+
+@test
+fn test_deque_clone_independence() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    let cloned = d.clone();
+    d.push_back(2);
+    assert_eq(d.len(), 2);
+    assert_eq(cloned.len(), 1);
+}
+
+// --- Deque Default ---
+
+@test
+fn test_deque_default() {
+    let d: Deque<Int> = Deque.default();
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_default_usable() {
+    let mut d: Deque<Int> = Deque.default();
+    d.push_back(42);
+    assert_eq(d.len(), 1);
+}
+
+// --- Deque Eq ---
+
+@test
+fn test_deque_eq_same() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(2);
+    assert(a == b);
+}
+
+@test
+fn test_deque_ne_different() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(2);
+    assert(a != b);
+}
+
+@test
+fn test_deque_eq_empty() {
+    let a: Deque<Int> = Deque.new();
+    let b: Deque<Int> = Deque.new();
+    assert(a == b);
+}
+
+@test
+fn test_deque_eq_order_matters() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(2);
+    b.push_back(1);
+    assert(a != b);
+}
+
+// --- Deque Ord ---
+
+@test
+fn test_deque_ord_less() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(3);
+    assert(a.cmp(&b) is Less);
+}
+
+@test
+fn test_deque_ord_equal() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    assert(a.cmp(&b) is Equal);
+}
+
+@test
+fn test_deque_ord_prefix_shorter() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(2);
+    assert(a.cmp(&b) is Less);
+}
+
+// --- Deque Hash ---
+
+@test
+fn test_deque_hash_equal_same_hash() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(2);
+    let mut h1 = DefaultHasher.new();
+    a.hash(&mut h1);
+    let mut h2 = DefaultHasher.new();
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+// --- Deque Debug/Display ---
+
+@test
+fn test_deque_debug() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let text = format_debug(&d);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_deque_display() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+    let text = format_display(&d);
+    assert(text.contains(&"42"));
+}
+
+// --- Deque FromIterator ---
+
+@test
+fn test_deque_from_iter() {
+    let d: Deque<Int> = Deque.from_iter(range(1, 6));
+    assert_eq(d.len(), 5);
+}
+
+@test
+fn test_deque_from_iter_empty() {
+    let d: Deque<Int> = Deque.from_iter(empty());
+    assert(d.is_empty());
+}
+
+// --- Deque Extend ---
+
+@test
+fn test_deque_extend() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.extend(range(2, 5));
+    assert_eq(d.len(), 4);
+}
+
+// --- Deque constructor ---
+
+@test
+fn test_deque_constructor() {
+    let d = deque(&[1, 2, 3]);
+    assert_eq(d.len(), 3);
+}
+
+// =============================================================================
+// BTREEMAP<K,V> PROTOCOL TESTS
+// =============================================================================
+
+// --- BTreeMap Clone ---
+
+@test
+fn test_btreemap_clone() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let cloned = m.clone();
+    assert_eq(cloned.len(), 2);
+}
+
+@test
+fn test_btreemap_clone_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let cloned = m.clone();
+    assert(cloned.is_empty());
+}
+
+// --- BTreeMap Default ---
+
+@test
+fn test_btreemap_default() {
+    let m: BTreeMap<Int, Int> = BTreeMap.default();
+    assert(m.is_empty());
+}
+
+// --- BTreeMap Eq ---
+
+@test
+fn test_btreemap_eq_same() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 10);
+    b.insert(2, 20);
+    assert(a == b);
+}
+
+@test
+fn test_btreemap_ne_different() {
+    let mut a: BTreeMap<Int, Int> = BTreeMap.new();
+    a.insert(1, 10);
+    let mut b: BTreeMap<Int, Int> = BTreeMap.new();
+    b.insert(1, 99);
+    assert(a != b);
+}
+
+@test
+fn test_btreemap_eq_empty() {
+    let a: BTreeMap<Int, Int> = BTreeMap.new();
+    let b: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(a == b);
+}
+
+// --- BTreeMap Debug/Display ---
+
+@test
+fn test_btreemap_debug() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 10);
+    let text = format_debug(&m);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_btreemap_display() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 10);
+    let text = format_display(&m);
+    assert(text.len() > 0);
+}
+
+// --- BTreeMap FromIterator ---
+
+@test
+fn test_btreemap_from_iter() {
+    let pairs: List<(Int, Int)> = [(3, 30), (1, 10), (2, 20)];
+    let m: BTreeMap<Int, Int> = BTreeMap.from_iter(pairs.iter().map(|p| *p));
+    assert_eq(m.len(), 3);
+}
+
+// --- BTreeMap Extend ---
+
+@test
+fn test_btreemap_extend() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 10);
+    let extra: List<(Int, Int)> = [(2, 20), (3, 30)];
+    m.extend(extra.iter().map(|p| *p));
+    assert_eq(m.len(), 3);
+}
+
+// =============================================================================
+// BTREESET<T> PROTOCOL TESTS
+// =============================================================================
+
+// --- BTreeSet Clone ---
+
+@test
+fn test_btreeset_clone() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(2);
+    let cloned = s.clone();
+    assert_eq(cloned.len(), 3);
+}
+
+// --- BTreeSet Default ---
+
+@test
+fn test_btreeset_default() {
+    let s: BTreeSet<Int> = BTreeSet.default();
+    assert(s.is_empty());
+}
+
+// --- BTreeSet Eq ---
+
+@test
+fn test_btreeset_eq() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(2);
+    b.insert(1);
+    assert(a == b);
+}
+
+@test
+fn test_btreeset_ne() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    a.insert(1);
+    let mut b: BTreeSet<Int> = BTreeSet.new();
+    b.insert(2);
+    assert(a != b);
+}
+
+// --- BTreeSet Debug/Display ---
+
+@test
+fn test_btreeset_debug() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(1);
+    let text = format_debug(&s);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_btreeset_display() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(1);
+    let text = format_display(&s);
+    assert(text.len() > 0);
+}
+
+// --- BTreeSet FromIterator ---
+
+@test
+fn test_btreeset_from_iter() {
+    let s: BTreeSet<Int> = BTreeSet.from_iter(range(1, 6));
+    assert_eq(s.len(), 5);
+}
+
+// --- BTreeSet Extend ---
+
+@test
+fn test_btreeset_extend() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    s.insert(1);
+    s.extend(range(2, 5));
+    assert_eq(s.len(), 4);
+}
+
+// =============================================================================
+// BINARYHEAP<T> PROTOCOL TESTS
+// =============================================================================
+
+// --- BinaryHeap Clone ---
+
+@test
+fn test_heap_clone() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(2);
+    let cloned = h.clone();
+    assert_eq(cloned.len(), 3);
+}
+
+@test
+fn test_heap_clone_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let cloned = h.clone();
+    assert(cloned.is_empty());
+}
+
+// --- BinaryHeap Default ---
+
+@test
+fn test_heap_default() {
+    let h: BinaryHeap<Int> = BinaryHeap.default();
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_default_usable() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.default();
+    h.push(42);
+    assert_eq(h.len(), 1);
+}
+
+// --- BinaryHeap Debug/Display ---
+
+@test
+fn test_heap_debug() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(42);
+    let text = format_debug(&h);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_heap_display() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(42);
+    let text = format_display(&h);
+    assert(text.len() > 0);
+}
+
+// --- BinaryHeap FromIterator ---
+
+@test
+fn test_heap_from_iter() {
+    let h: BinaryHeap<Int> = BinaryHeap.from_iter(range(1, 6));
+    assert_eq(h.len(), 5);
+}
+
+@test
+fn test_heap_from_iter_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.from_iter(empty());
+    assert(h.is_empty());
+}
+
+// --- BinaryHeap Extend ---
+
+@test
+fn test_heap_extend() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.extend(range(2, 5));
+    assert_eq(h.len(), 4);
+}
+
+// =============================================================================
+// LIST<T> PROTOCOL TESTS (gaps)
+// =============================================================================
+
+// --- List Debug/Display ---
+
+@test
+fn test_list_debug_empty() {
+    let l: List<Int> = [];
+    let text = format_debug(&l);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_list_debug_nonempty() {
+    let l: List<Int> = [1, 2, 3];
+    let text = format_debug(&l);
+    assert(text.contains(&"1"));
+    assert(text.contains(&"3"));
+}
+
+@test
+fn test_list_display_empty() {
+    let l: List<Int> = [];
+    let text = format_display(&l);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_list_display_nonempty() {
+    let l: List<Int> = [1, 2, 3];
+    let text = format_display(&l);
+    assert(text.contains(&"1"));
+}
+
+// --- List FromIterator ---
+
+@test
+fn test_list_from_iter_range() {
+    let l: List<Int> = List.from_iter(range(1, 6));
+    assert_eq(l.len(), 5);
+}
+
+@test
+fn test_list_from_iter_empty() {
+    let l: List<Int> = List.from_iter(empty());
+    assert(l.is_empty());
+}
+
+@test
+fn test_list_from_iter_mapped() {
+    let src: List<Int> = [1, 2, 3];
+    let doubled: List<Int> = List.from_iter(src.iter().map(|x| *x * 2));
+    assert_eq(doubled.len(), 3);
+}
+
+// --- List Default ---
+
+@test
+fn test_list_default() {
+    let l: List<Int> = List.default();
+    assert(l.is_empty());
+}
+
+// --- List Eq ---
+
+@test
+fn test_list_eq_same() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 3];
+    assert(a == b);
+}
+
+@test
+fn test_list_ne_different() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 4];
+    assert(a != b);
+}
+
+@test
+fn test_list_ne_different_length() {
+    let a: List<Int> = [1, 2];
+    let b: List<Int> = [1, 2, 3];
+    assert(a != b);
+}
+
+@test
+fn test_list_eq_empty() {
+    let a: List<Int> = [];
+    let b: List<Int> = [];
+    assert(a == b);
+}
+
+// --- List constructor ---
+
+@test
+fn test_list_constructor() {
+    let l = list([1, 2, 3, 4, 5]);
+    assert_eq(l.len(), 5);
+}
+
+// =============================================================================
+// CROSS-COLLECTION TESTS
+// =============================================================================
+
+@test
+fn test_collect_range_into_set() {
+    let s: Set<Int> = Set.from_iter(range(0, 10));
+    assert_eq(s.len(), 10);
+}
+
+@test
+fn test_collect_range_into_list() {
+    let l: List<Int> = List.from_iter(range(0, 10));
+    assert_eq(l.len(), 10);
+}
+
+@test
+fn test_collect_range_into_deque() {
+    let d: Deque<Int> = Deque.from_iter(range(0, 10));
+    assert_eq(d.len(), 10);
+}
+
+@test
+fn test_collect_range_into_btreeset() {
+    let s: BTreeSet<Int> = BTreeSet.from_iter(range(0, 10));
+    assert_eq(s.len(), 10);
+}
+
+@test
+fn test_collect_range_into_heap() {
+    let h: BinaryHeap<Int> = BinaryHeap.from_iter(range(0, 10));
+    assert_eq(h.len(), 10);
+}

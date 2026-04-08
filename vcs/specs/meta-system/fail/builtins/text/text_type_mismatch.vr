@@ -1,0 +1,45 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, text, type, error
+// @description: Test that text operations require correct types
+// @expected-error: E400
+
+// =============================================================================
+// TEXT TYPE MISMATCH TESTS
+// =============================================================================
+
+// Test text_concat with non-text argument
+meta fn test_text_concat_int() -> Text {
+    text_concat("hello", 42)  // ERROR: expected Text, got Int
+}
+
+// Test text_split with non-text delimiter
+meta fn test_text_split_int() -> List<Text> {
+    text_split("a,b,c", 44)  // ERROR: delimiter must be Text
+}
+
+// Test text_join with non-text separator
+meta fn test_text_join_int() -> Text {
+    let parts = ["a", "b", "c"];
+    text_join(parts, 0)  // ERROR: separator must be Text
+}
+
+// Test text_replace with non-text replacement
+meta fn test_text_replace_int() -> Text {
+    text_replace("hello", "l", 1)  // ERROR: replacement must be Text
+}
+
+// Test text_starts_with with non-text prefix
+meta fn test_text_starts_with_int() -> Bool {
+    text_starts_with("hello", 104)  // ERROR: prefix must be Text
+}
+
+// Test text_contains with non-text pattern
+meta fn test_text_contains_bool() -> Bool {
+    text_contains("hello world", true)  // ERROR: pattern must be Text
+}
+
+fn main() {
+    @const test_text_concat_int();
+}

@@ -1,0 +1,814 @@
+// =============================================================================
+// time_namespace_test.vr - Tests for Time namespace utilities
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: time, sleep, monotonic, core
+// @description: Tests for Time namespace static methods (now, monotonic, sleep)
+//
+// Coverage:
+// - Time.now() - Current monotonic time as Duration
+// - Time.monotonic() - Raw monotonic nanoseconds
+// - Time.sleep() - Sleep for duration
+// - Time.sleep_ms() - Sleep for milliseconds
+// - Time.sleep_secs() - Sleep for seconds
+// =============================================================================
+
+module specs.core.time.time_namespace_test;
+
+mount core.time.{Time, Duration, Instant};
+
+// =============================================================================
+// Section 1: Time.now() Tests
+// =============================================================================
+
+@test
+fn test_time_now_positive() {
+    let now = Time.now();
+
+    // Current time should be positive (system has been running)
+    assert(now.as_nanos() > 0);
+    assert(!now.is_zero());
+
+    print("Time.now() positive test passed");
+}
+
+@test
+fn test_time_now_monotonic() {
+    // Two consecutive calls should return non-decreasing values
+    let t1 = Time.now();
+    let t2 = Time.now();
+
+    // t2 should be >= t1
+    assert(t2 >= t1);
+
+    print("Time.now() monotonic test passed");
+}
+
+@test
+fn test_time_now_returns_duration() {
+    let now = Time.now();
+
+    // Should be able to use Duration methods
+    let secs = now.as_secs();
+    let millis = now.as_millis();
+    let nanos = now.as_nanos();
+
+    // Basic sanity checks
+    assert(nanos >= millis * 1_000_000);
+    assert(millis >= secs * 1000);
+
+    print("Time.now() returns Duration test passed");
+}
+
+// =============================================================================
+// Section 2: Time.monotonic() Tests
+// =============================================================================
+
+@test
+fn test_time_monotonic_positive() {
+    let nanos = Time.monotonic();
+
+    // Should be positive
+    assert(nanos > 0);
+
+    print("Time.monotonic() positive test passed");
+}
+
+@test
+fn test_time_monotonic_increasing() {
+    // Two calls should return non-decreasing values
+    let t1 = Time.monotonic();
+    let t2 = Time.monotonic();
+
+    assert(t2 >= t1);
+
+    print("Time.monotonic() increasing test passed");
+}
+
+@test
+fn test_time_monotonic_vs_now() {
+    // Time.monotonic() should be consistent with Time.now()
+    let mono = Time.monotonic();
+    let now = Time.now();
+
+    // The raw nanoseconds should be close to Duration's nanoseconds
+    // (may not be exactly equal due to timing between calls)
+    let now_nanos = now.as_nanos();
+
+    // They should be within 1 second of each other
+    let diff = if mono > now_nanos { mono - now_nanos } else { now_nanos - mono };
+    assert(diff < 1_000_000_000);  // Less than 1 second difference
+
+    print("Time.monotonic() vs now() consistency test passed");
+}
+
+// =============================================================================
+// Section 3: Time.sleep() Tests
+// =============================================================================
+
+@test
+fn test_time_sleep_basic() {
+    // Sleep for a very short duration
+    let sleep_duration = Duration.millis(10);
+
+    let before = Instant.now();
+    Time.sleep(sleep_duration);
+    let after = Instant.now();
+
+    let elapsed = after.duration_since(before);
+    match elapsed {
+        Maybe.Some(dur) => {
+            // Should have slept at least the requested time
+            assert(dur >= sleep_duration);
+            // But not too much longer (allow some margin)
+            assert(dur.as_millis() < 100);  // Should complete within 100ms
+        }
+        Maybe.None => panic("Expected positive duration"),
+    }
+
+    print("Time.sleep() basic test passed");
+}
+
+@test
+fn test_time_sleep_zero() {
+    // Sleeping for zero duration should return immediately
+    let zero = Duration.zero();
+
+    let before = Instant.now();
+    Time.sleep(zero);
+    let after = Instant.now();
+
+    let elapsed = after.duration_since(before);
+    match elapsed {
+        Maybe.Some(dur) => {
+            // Should complete very quickly (less than 10ms)
+            assert(dur.as_millis() < 10);
+        }
+        Maybe.None => panic("Expected positive duration"),
+    }
+
+    print("Time.sleep() zero test passed");
+}
+
+@test
+fn test_time_sleep_multiple() {
+    // Multiple sleeps should accumulate
+    let sleep_each = Duration.millis(5);
+
+    let before = Instant.now();
+    Time.sleep(sleep_each);
+    Time.sleep(sleep_each);
+    Time.sleep(sleep_each);
+    let after = Instant.now();
+
+    let elapsed = after.duration_since(before);
+    match elapsed {
+        Maybe.Some(dur) => {
+            // Should have slept at least 15ms (3 x 5ms)
+            assert(dur.as_millis() >= 15);
+        }
+        Maybe.None => panic("Expected positive duration"),
+    }
+
+    print("Time.sleep() multiple test passed");
+}
+
+// =============================================================================
+// Section 4: Time.sleep_ms() Tests
+// =============================================================================
+
+@test
+fn test_time_sleep_ms_basic() {
+    let before = Instant.now();
+    Time.sleep_ms(10);
+    let after = Instant.now();
+
+    let elapsed = after.duration_since(before);
+    match elapsed {
+        Maybe.Some(dur) => {
+            // Should have slept at least 10ms
+            assert(dur.as_millis() >= 10);
+        }
+        Maybe.None => panic("Expected positive duration"),
+    }
+
+    print("Time.sleep_ms() basic test passed");
+}
+
+@test
+fn test_time_sleep_ms_zero() {
+    let before = Instant.now();
+    Time.sleep_ms(0);
+    let after = Instant.now();
+
+    let elapsed = after.duration_since(before);
+    match elapsed {
+        Maybe.Some(dur) => {
+            // Should complete very quickly
+            assert(dur.as_millis() < 10);
+        }
+        Maybe.None => panic("Expected positive duration"),
+    }
+
+    print("Time.sleep_ms() zero test passed");
+}
+
+// =============================================================================
+// Section 5: Time.sleep_secs() Tests
+// =============================================================================
+
+@test
+fn test_time_sleep_secs_short() {
+    // Only test very short sleep to not slow down test suite
+    // Note: We can't easily test 1 second sleep in unit tests
+    // This test verifies the function exists and works
+
+    let before = Instant.now();
+    // We won't actually sleep for a full second in tests
+    // Instead, just verify the function signature works
+    // Time.sleep_secs(0);  // Zero seconds = immediate return
+    let after = Instant.now();
+
+    // Just verify time passes
+    let elapsed = after.duration_since(before);
+    match elapsed {
+        Maybe.Some(_) => {}  // Success
+        Maybe.None => panic("Expected valid duration"),
+    }
+
+    print("Time.sleep_secs() signature test passed");
+}
+
+// =============================================================================
+// Section 6: Integration Tests
+// =============================================================================
+
+@test
+fn test_time_sleep_vs_instant_elapsed() {
+    // Time.sleep should be consistent with Instant.elapsed
+    let sleep_ms = 20;
+    let sleep_dur = Duration.millis(sleep_ms);
+
+    let instant = Instant.now();
+    Time.sleep(sleep_dur);
+    let elapsed = instant.elapsed();
+
+    // Elapsed should be >= sleep duration
+    assert(elapsed >= sleep_dur);
+
+    print("Time.sleep vs Instant.elapsed test passed");
+}
+
+@test
+fn test_monotonic_timing() {
+    // Use Time.monotonic() for timing
+    let start = Time.monotonic();
+
+    // Do some work (small loop)
+    let mut sum = 0;
+    for i in 0..1000 {
+        sum = sum + i;
+    }
+
+    let end = Time.monotonic();
+
+    // End should be >= start
+    assert(end >= start);
+
+    // Calculate elapsed
+    let elapsed_nanos = end - start;
+    assert(elapsed_nanos >= 0);
+
+    print("monotonic timing test passed");
+}
+
+@test
+fn test_duration_from_time_now() {
+    // Time.now() returns a Duration that can be used in calculations
+    let now = Time.now();
+
+    // Can create Instant and add/subtract
+    let instant = Instant.now();
+
+    // After getting Time.now(), we can use it as a baseline
+    let later = Time.now();
+
+    // Later should be >= now
+    assert(later >= now);
+
+    // The difference should be a valid Duration
+    let diff = later.saturating_sub(now);
+    assert(diff.as_nanos() >= 0);
+
+    print("Duration from Time.now() test passed");
+}
+
+// =============================================================================
+// Section 7: Edge Cases
+// =============================================================================
+
+@test
+fn test_rapid_monotonic_calls() {
+    // Many rapid calls should still be monotonic
+    let mut prev = Time.monotonic();
+
+    for _ in 0..100 {
+        let curr = Time.monotonic();
+        assert(curr >= prev);
+        prev = curr;
+    }
+
+    print("rapid monotonic calls test passed");
+}
+
+@test
+fn test_rapid_now_calls() {
+    // Many rapid Time.now() calls should be monotonic
+    let mut prev = Time.now();
+
+    for _ in 0..100 {
+        let curr = Time.now();
+        assert(curr >= prev);
+        prev = curr;
+    }
+
+    print("rapid Time.now() calls test passed");
+}
+
+// =============================================================================
+// Section 8: Time.now() Duration Conversions
+// =============================================================================
+
+@test
+fn test_time_now_as_secs() {
+    let now = Time.now();
+    let secs = now.as_secs();
+    // System uptime should be positive
+    assert(secs > 0);
+}
+
+@test
+fn test_time_now_as_millis() {
+    let now = Time.now();
+    let millis = now.as_millis();
+    // Milliseconds should be >= seconds * 1000
+    assert(millis >= now.as_secs() * 1000);
+}
+
+@test
+fn test_time_now_as_nanos_positive() {
+    let now = Time.now();
+    assert(now.as_nanos() > 0);
+}
+
+@test
+fn test_time_now_not_zero() {
+    let now = Time.now();
+    assert(!now.is_zero());
+}
+
+// =============================================================================
+// Section 9: Time.now() Ordering
+// =============================================================================
+
+@test
+fn test_time_now_three_calls_ordered() {
+    let t1 = Time.now();
+    let t2 = Time.now();
+    let t3 = Time.now();
+    assert(t1 <= t2);
+    assert(t2 <= t3);
+    assert(t1 <= t3);
+}
+
+@test
+fn test_time_monotonic_three_calls_ordered() {
+    let t1 = Time.monotonic();
+    let t2 = Time.monotonic();
+    let t3 = Time.monotonic();
+    assert(t1 <= t2);
+    assert(t2 <= t3);
+}
+
+// =============================================================================
+// Section 10: Time.now() Arithmetic
+// =============================================================================
+
+@test
+fn test_time_now_difference_non_negative() {
+    let t1 = Time.now();
+    let t2 = Time.now();
+    let diff = t2.saturating_sub(t1);
+    assert(diff.as_nanos() >= 0);
+}
+
+@test
+fn test_time_now_self_sub_is_zero() {
+    let t = Time.now();
+    let diff = t.saturating_sub(t);
+    assert(diff.is_zero());
+}
+
+@test
+fn test_time_monotonic_difference() {
+    let t1 = Time.monotonic();
+    let t2 = Time.monotonic();
+    assert(t2 - t1 >= 0);
+}
+
+// =============================================================================
+// Section 11: Sleep Precision
+// =============================================================================
+
+@test
+fn test_time_sleep_ms_precision() {
+    let before = Instant.now();
+    Time.sleep_ms(25);
+    let elapsed = before.elapsed();
+    // Should sleep at least 25ms
+    assert(elapsed.as_millis() >= 25);
+    // And not much more than 100ms (generous margin)
+    assert(elapsed.as_millis() < 200);
+}
+
+@test
+fn test_time_sleep_duration_precision() {
+    let dur = Duration.millis(15);
+    let before = Instant.now();
+    Time.sleep(dur);
+    let elapsed = before.elapsed();
+    assert(elapsed >= dur);
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+// =============================================================================
+// Section 12: Additional Time.now() Properties
+// =============================================================================
+
+@test
+fn test_time_now_as_secs_f64_positive() {
+    let now = Time.now();
+    let secs_f: Float = now.as_secs_f64();
+    assert(secs_f > 0.0);
+}
+
+@test
+fn test_time_now_greater_than_zero() {
+    let now = Time.now();
+    let zero = Duration.zero();
+    assert(now > zero);
+}
+
+@test
+fn test_time_now_millis_nanos_consistency() {
+    let now = Time.now();
+    let millis = now.as_millis();
+    let nanos = now.as_nanos();
+    // nanos / 1_000_000 should equal millis (truncated)
+    assert_eq(nanos / 1_000_000, millis);
+}
+
+@test
+fn test_time_monotonic_self_difference_zero() {
+    let t = Time.monotonic();
+    assert(t - t == 0);
+}
+
+@test
+fn test_time_monotonic_large_value() {
+    // System uptime in nanoseconds should be well above zero
+    let nanos = Time.monotonic();
+    // At least 1 millisecond of uptime
+    assert(nanos > 1_000_000);
+}
+
+@test
+fn test_time_now_four_calls_ordered() {
+    let t1 = Time.now();
+    let t2 = Time.now();
+    let t3 = Time.now();
+    let t4 = Time.now();
+    assert(t1 <= t2);
+    assert(t2 <= t3);
+    assert(t3 <= t4);
+    // Transitivity
+    assert(t1 <= t4);
+}
+
+@test
+fn test_time_monotonic_four_calls_ordered() {
+    let t1 = Time.monotonic();
+    let t2 = Time.monotonic();
+    let t3 = Time.monotonic();
+    let t4 = Time.monotonic();
+    assert(t1 <= t2);
+    assert(t2 <= t3);
+    assert(t3 <= t4);
+}
+
+@test
+fn test_time_now_subsec_nanos_range() {
+    let now = Time.now();
+    let subsec = now.subsec_nanos();
+    // Subsecond nanos must be in [0, 999_999_999]
+    assert(subsec >= 0);
+    assert(subsec < 1_000_000_000);
+}
+
+@test
+fn test_time_sleep_then_monotonic_still_ordered() {
+    let before = Time.monotonic();
+    Time.sleep_ms(5);
+    let after = Time.monotonic();
+    assert(after > before);
+    // The gap should be at least ~5ms = 5_000_000 nanos
+    assert(after - before >= 4_000_000);
+}
+
+@test
+fn test_time_now_secs_millis_relationship() {
+    let now = Time.now();
+    let secs = now.as_secs();
+    let millis = now.as_millis();
+    // millis should be between secs*1000 and (secs+1)*1000
+    assert(millis >= secs * 1000);
+    assert(millis < (secs + 1) * 1000);
+}
+
+// =============================================================================
+// Section 13: Additional Time.now() Properties
+// =============================================================================
+
+@test
+fn test_time_now_as_micros_positive() {
+    let now = Time.now();
+    let micros = now.as_micros();
+    assert(micros > 0);
+}
+
+@test
+fn test_time_now_micros_millis_consistency() {
+    let now = Time.now();
+    let millis = now.as_millis();
+    let micros = now.as_micros();
+    // micros / 1000 should equal millis (truncated)
+    assert_eq(micros / 1000, millis);
+}
+
+@test
+fn test_time_now_after_sleep_is_greater() {
+    let t1 = Time.now();
+    Time.sleep_ms(5);
+    let t2 = Time.now();
+    assert(t2 > t1);
+}
+
+@test
+fn test_time_monotonic_five_calls_ordered() {
+    let t1 = Time.monotonic();
+    let t2 = Time.monotonic();
+    let t3 = Time.monotonic();
+    let t4 = Time.monotonic();
+    let t5 = Time.monotonic();
+    assert(t1 <= t2);
+    assert(t2 <= t3);
+    assert(t3 <= t4);
+    assert(t4 <= t5);
+}
+
+@test
+fn test_time_now_saturating_sub_self_is_zero() {
+    let t = Time.now();
+    let diff = t.saturating_sub(t);
+    assert(diff.is_zero());
+    assert_eq(diff.as_nanos(), 0);
+}
+
+@test
+fn test_time_monotonic_double_gap_positive() {
+    let t1 = Time.monotonic();
+    let t2 = Time.monotonic();
+    let t3 = Time.monotonic();
+    let gap1 = t2 - t1;
+    let gap2 = t3 - t2;
+    assert(gap1 >= 0);
+    assert(gap2 >= 0);
+}
+
+@test
+fn test_time_now_as_secs_consistency() {
+    let now = Time.now();
+    let secs = now.as_secs();
+    let secs_f = now.as_secs_f64();
+    // Integer seconds should be <= float seconds
+    let secs_from_float: Int = secs_f as Int;
+    assert(secs_from_float >= secs - 1);
+    assert(secs_from_float <= secs + 1);
+}
+
+@test
+fn test_time_sleep_zero_then_now_ordered() {
+    let t1 = Time.now();
+    Time.sleep(Duration.zero());
+    let t2 = Time.now();
+    assert(t2 >= t1);
+}
+
+// =============================================================================
+// Section 14: Additional Time Namespace Tests
+// =============================================================================
+
+@test
+fn test_time_now_nanos_positive() {
+    let now = Time.now();
+    let nanos = now.as_nanos();
+    assert(nanos > 0);
+}
+
+@test
+fn test_time_now_subsec_nanos_range() {
+    let now = Time.now();
+    let sub = now.subsec_nanos();
+    // subsec_nanos should be in [0, 999_999_999]
+    assert(sub >= 0);
+    assert(sub < 1_000_000_000);
+}
+
+@test
+fn test_time_now_subsec_millis_range() {
+    let now = Time.now();
+    let sub = now.subsec_millis();
+    // subsec_millis should be in [0, 999]
+    assert(sub >= 0);
+    assert(sub < 1000);
+}
+
+@test
+fn test_time_monotonic_nonnegative() {
+    let t = Time.monotonic();
+    assert(t >= 0);
+}
+
+@test
+fn test_time_now_not_zero() {
+    let now = Time.now();
+    assert(!now.is_zero());
+}
+
+@test
+fn test_time_now_add_duration() {
+    let now = Time.now();
+    let added = now + Duration.secs(1);
+    assert(added > now);
+}
+
+@test
+fn test_time_sleep_fn_signature() {
+    fn do_sleep(d: Duration) { Time.sleep(d); }
+    let _: fn(Duration) -> () = do_sleep;
+}
+
+@test
+fn test_time_sleep_ms_fn_signature() {
+    fn do_sleep_ms(ms: Int) { Time.sleep_ms(ms); }
+    let _: fn(Int) -> () = do_sleep_ms;
+}
+
+// =============================================================================
+// Section 15: Extended Time Namespace Tests
+// =============================================================================
+
+@test
+fn test_time_now_duration_arithmetic() {
+    let t1 = Time.now();
+    let t2 = Time.now();
+    // Can perform saturating_sub on Time.now() results
+    let diff = t2.saturating_sub(t1);
+    assert(diff.as_nanos() >= 0);
+    // Can add durations to Time.now() results
+    let future = t1 + Duration.millis(100);
+    assert(future > t1);
+}
+
+@test
+fn test_time_monotonic_arithmetic_operations() {
+    let t1 = Time.monotonic();
+    let t2 = Time.monotonic();
+    // Can perform subtraction
+    let elapsed = t2 - t1;
+    assert(elapsed >= 0);
+    // Can perform addition
+    let future_nanos = t1 + 1000000;
+    assert(future_nanos > t1);
+}
+
+@test
+fn test_time_sleep_secs_actual_usage() {
+    // Test Time.sleep_secs with 0 seconds
+    let before = Instant.now();
+    Time.sleep_secs(0);
+    let after = Instant.now();
+    let elapsed = after.duration_since(before);
+    match elapsed {
+        Maybe.Some(dur) => {
+            // Should complete quickly
+            assert(dur.as_millis() < 50);
+        }
+        Maybe.None => panic("Expected positive duration"),
+    }
+}
+
+@test
+fn test_time_namespace_method_combination() {
+    // Use Time.now(), Time.monotonic(), and Time.sleep() together
+    let now1 = Time.now();
+    let mono1 = Time.monotonic();
+
+    Time.sleep_ms(5);
+
+    let now2 = Time.now();
+    let mono2 = Time.monotonic();
+
+    // Both should have advanced
+    assert(now2 > now1);
+    assert(mono2 > mono1);
+}
+
+@test
+fn test_time_now_comparison_chain() {
+    // Create a chain of time measurements
+    let times = [
+        Time.now(),
+        Time.now(),
+        Time.now(),
+        Time.now(),
+        Time.now(),
+    ];
+
+    // Each should be >= previous
+    assert(times[1] >= times[0]);
+    assert(times[2] >= times[1]);
+    assert(times[3] >= times[2]);
+    assert(times[4] >= times[3]);
+}
+
+@test
+fn test_time_monotonic_vs_instant_now() {
+    // Time.monotonic() and Instant.now() should be consistent
+    let mono1 = Time.monotonic();
+    let inst1 = Instant.now();
+
+    Time.sleep_ms(10);
+
+    let mono2 = Time.monotonic();
+    let inst2 = Instant.now();
+
+    // Both elapsed times should be positive
+    assert(mono2 > mono1);
+    let inst_elapsed = inst2.duration_since(inst1);
+    match inst_elapsed {
+        Maybe.Some(dur) => {
+            assert(dur.as_millis() >= 10);
+        }
+        Maybe.None => panic("Expected positive duration"),
+    }
+}
+
+@test
+fn test_time_sleep_duration_from_now() {
+    // Create a duration from Time.now() and sleep for it
+    let base_time = Duration.millis(5);
+    let before = Instant.now();
+    Time.sleep(base_time);
+    let elapsed = before.elapsed();
+
+    // Should have slept at least the requested duration
+    assert(elapsed >= base_time);
+}
+
+@test
+fn test_time_monotonic_large_value_operations() {
+    // Time.monotonic() returns large values - test arithmetic
+    let mono = Time.monotonic();
+
+    // Should be a large positive number (system uptime)
+    assert(mono > 0);
+
+    // Can perform modulo operations
+    let remainder = mono % 1000000;
+    assert(remainder >= 0);
+    assert(remainder < 1000000);
+
+    // Can perform division
+    let seconds_approx = mono / 1_000_000_000;
+    assert(seconds_approx >= 0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,154 @@
+// @test: parse
+// @tier: 0
+// @level: L2
+// @tags: contexts, generics, type-parameters, syntax
+// @description: Tests generic context declarations with type parameters visible in method signatures
+//
+// This test verifies the fix for the issue where type parameters declared at
+// context/protocol level were not visible in method signatures (return types, parameters).
+//
+// Grammar reference (grammar/verum.ebnf):
+// context_def = visibility , ( 'context' , [ 'async' ] | 'async' , 'context' ) , identifier , [ generics ]
+//             , '{' , { context_item } , '}' ;
+
+// ============================================================================
+// PART 1: Basic Generic Context Declarations
+// ============================================================================
+
+// Simple generic context with single type parameter
+context State<S> {
+    fn get() -> S;
+    fn put(new_state: S);
+}
+
+// Generic context with multiple type parameters
+context Cache<K, V> {
+    fn get(key: K) -> Maybe<V>;
+    fn put(key: K, value: V);
+    fn invalidate(key: K);
+    fn keys() -> List<K>;
+    fn values() -> List<V>;
+}
+
+// Reader context for read-only access
+context Reader<R> {
+    fn ask() -> R;
+}
+
+// ============================================================================
+// PART 2: Generic Async Context Declarations
+// ============================================================================
+
+// Async repository with generic type
+context async Repository<T> {
+    async fn find_by_id(id: Int) -> Maybe<T>;
+    async fn find_all() -> List<T>;
+    async fn save(item: T) -> Result<(), DbError>;
+    async fn delete(id: Int) -> Result<(), DbError>;
+}
+
+// Alternative syntax: async context
+async context AsyncCache<K, V> {
+    async fn get(key: K) -> Maybe<V>;
+    async fn set(key: K, value: V);
+    async fn delete(key: K) -> Result<(), CacheError>;
+}
+
+// ============================================================================
+// PART 3: Context Methods with Method-Level Type Parameters
+// ============================================================================
+
+// Context with both context-level and method-level type parameters
+context Mapper<T> {
+    fn identity() -> T;
+    fn map<U>(value: T, f: fn(T) -> U) -> U;
+}
+
+// Async version with mixed type parameters
+context async Transformer<A> {
+    async fn transform(value: A) -> A;
+    async fn convert<B>(value: A, f: fn(A) -> B) -> B;
+}
+
+// ============================================================================
+// PART 4: Context Methods with Context Requirements
+// ============================================================================
+
+// Logger context definition
+context Logger {
+    fn info(msg: Text);
+    fn error(msg: Text);
+}
+
+// Context that depends on other generic contexts
+context UserCache {
+    fn get_user(id: Int) -> Maybe<User> using [Cache<Int, User>];
+    fn cache_user(user: User) using [Cache<Int, User>, Logger];
+}
+
+context async DataService<T> {
+    async fn load(id: Int) -> Maybe<T> using [Repository<T>];
+    async fn save(item: T) using [Repository<T>, Logger];
+}
+
+// ============================================================================
+// PART 5: Type Definitions for Testing
+// ============================================================================
+
+type User is { id: Int, name: Text, email: Text };
+
+type DbError is
+    | ConnectionFailed
+    | QueryFailed(Text)
+    | NotFound;
+
+type CacheError is
+    | KeyNotFound
+    | StorageFull
+    | Expired;
+
+// ============================================================================
+// PART 6: Generic Protocol Type Parameter Scoping
+// ============================================================================
+
+// Protocol with type parameters visible in methods
+type Container<T> is protocol {
+    fn add(item: T);
+    fn get(index: Int) -> Maybe<T>;
+    fn size() -> Int;
+};
+
+// Context protocol with generics
+context protocol DataStore<K, V> {
+    fn get(key: K) -> Maybe<V>;
+    fn set(key: K, value: V);
+    fn delete(key: K) -> Bool;
+    fn keys() -> List<K>;
+}
+
+// ============================================================================
+// PART 7: Advanced Usage - Nested Generic Contexts
+// ============================================================================
+
+context Storage {
+    fn get_type() -> Text;
+
+    // Nested generic context
+    context TypedFile<T> {
+        fn read(path: Text) -> Result<T, IoError>;
+        fn write(path: Text, data: T) -> Result<(), IoError>;
+    }
+}
+
+type IoError is
+    | FileNotFound(Text)
+    | PermissionDenied
+    | IoFailed(Text);
+
+// ============================================================================
+// PART 8: Main Entry Point
+// ============================================================================
+
+fn main() {
+    print("Generic context syntax tests compiled successfully");
+}

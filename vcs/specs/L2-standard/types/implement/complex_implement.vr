@@ -1,0 +1,217 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: implement, generic, specialization
+// @expect: pass
+// @description: Complex implement block scenarios
+// @spec: 03-type-system.md Section 14 - Implement block support
+
+// ============================================================
+// Test 1: Chained method calls
+// ============================================================
+
+type Builder<T> is {
+    value: Maybe<T>,
+    validated: Bool
+};
+
+implement<T> Builder<T> {
+    fn new() -> Builder<T> {
+        Builder { value: None, validated: false }
+    }
+
+    fn with_value(self, v: T) -> Builder<T> {
+        Builder { value: Some(v), validated: self.validated }
+    }
+
+    fn validate(self) -> Builder<T> {
+        Builder { value: self.value, validated: true }
+    }
+
+    fn build(self) -> Result<T, Text> {
+        if !self.validated {
+            Err("Not validated")
+        } else {
+            self.value.ok_or("No value")
+        }
+    }
+}
+
+// ============================================================
+// Test 2: Multiple protocol implementations
+// ============================================================
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+type Point3D is {
+    x: Float,
+    y: Float,
+    z: Float
+};
+
+implement Clone for Point3D {
+    fn clone(&self) -> Point3D {
+        Point3D { x: self.x, y: self.y, z: self.z }
+    }
+}
+
+implement Debug for Point3D {
+    fn debug(&self) -> Text {
+        f"Point3D({self.x}, {self.y}, {self.z})"
+    }
+}
+
+implement Eq for Point3D {
+    fn eq(&self, other: &Point3D) -> Bool {
+        self.x == other.x && self.y == other.y && self.z == other.z
+    }
+}
+
+// ============================================================
+// Test 3: Inherent + protocol methods
+// ============================================================
+
+implement Point3D {
+    fn origin() -> Point3D {
+        Point3D { x: 0.0, y: 0.0, z: 0.0 }
+    }
+
+    fn distance_from_origin(&self) -> Float {
+        (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
+    }
+
+    fn translate(&mut self, dx: Float, dy: Float, dz: Float) {
+        self.x = self.x + dx;
+        self.y = self.y + dy;
+        self.z = self.z + dz;
+    }
+}
+
+// ============================================================
+// Test 4: Generic protocol implementation with constraints
+// ============================================================
+
+type Add is protocol {
+    type Output;
+    fn add(self, rhs: Self) -> Self.Output;
+};
+
+implement Add for Point3D {
+    type Output is Point3D;
+
+    fn add(self, rhs: Point3D) -> Point3D {
+        Point3D {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            z: self.z + rhs.z
+        }
+    }
+}
+
+// ============================================================
+// Test 5: Wrapper types with delegation
+// ============================================================
+
+type Wrapper<T> is {
+    inner: T
+};
+
+implement<T: Clone> Clone for Wrapper<T> {
+    fn clone(&self) -> Wrapper<T> {
+        Wrapper { inner: self.inner.clone() }
+    }
+}
+
+implement<T: Debug> Debug for Wrapper<T> {
+    fn debug(&self) -> Text {
+        f"Wrapper({self.inner.debug()})"
+    }
+}
+
+implement<T> Wrapper<T> {
+    fn new(inner: T) -> Wrapper<T> {
+        Wrapper { inner }
+    }
+
+    fn unwrap(self) -> T {
+        self.inner
+    }
+
+    fn get(&self) -> &T {
+        &self.inner
+    }
+}
+
+// ============================================================
+// Test 6: Specialization with @specialize
+// ============================================================
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+implement<T: Debug> Display for List<T> {
+    fn display(&self) -> Text {
+        let items = self.iter().map(|x| x.debug()).join(", ");
+        f"[{items}]"
+    }
+}
+
+@specialize
+implement Display for List<Int> {
+    fn display(&self) -> Text {
+        // Optimized for Int
+        let items = self.iter().map(|x| x.to_text()).join(", ");
+        f"IntList[{items}]"
+    }
+}
+
+// ============================================================
+// Main test function
+// ============================================================
+
+fn main() {
+    // Test 1: Chained methods
+    let result = Builder.new()
+        .with_value(42)
+        .validate()
+        .build();
+    let expected: Result<Int, Text> = Ok(42);
+    assert(result == expected);
+
+    // Test 2: Multiple protocols
+    let p = Point3D { x: 1.0, y: 2.0, z: 3.0 };
+    let p2 = p.clone();
+    assert(p.eq(&p2));
+    assert(p.debug() == "Point3D(1.0, 2.0, 3.0)");
+
+    // Test 3: Inherent + protocol
+    let origin = Point3D.origin();
+    assert(origin.distance_from_origin() == 0.0);
+
+    // Test 4: Add protocol
+    let sum = p.add(p2);
+    assert(sum.x == 2.0);
+    assert(sum.y == 4.0);
+    assert(sum.z == 6.0);
+
+    // Test 5: Wrapper
+    let wrapped = Wrapper.new(p);
+    assert(wrapped.debug() == "Wrapper(Point3D(1.0, 2.0, 3.0))");
+
+    // Test 6: Specialization
+    let ints: List<Int> = [1, 2, 3];
+    let floats: List<Float> = [1.0, 2.0, 3.0];
+    assert(ints.display().starts_with("IntList"));  // Specialized
+    assert(floats.display().starts_with("["));       // Generic
+}

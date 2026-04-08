@@ -1,0 +1,319 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, integration, 360
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Milestone 360 integration test: comprehensive exercise of AOT features.
+// Combines: record types, loops, recursion, bit manipulation,
+// functional-style accumulation, and complex control flow.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// --- Section 1: Bit counting and manipulation ---
+
+fn popcount(n: Int) -> Int {
+    let mut count = 0;
+    let mut val = n;
+    while val > 0 {
+        count = count + (val % 2);
+        val = val / 2;
+    }
+    count
+}
+
+fn reverse_bits_8(n: Int) -> Int {
+    let mut result = 0;
+    let mut val = n;
+    let mut i = 0;
+    while i < 8 {
+        result = result * 2 + (val % 2);
+        val = val / 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn is_power_of_2(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut val = n;
+    while val > 1 {
+        if val % 2 != 0 { return 0; }
+        val = val / 2;
+    }
+    1
+}
+
+// --- Section 2: Integer sequences ---
+
+@allow(unbounded_recursion)
+fn fibonacci(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    a
+}
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 2;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+
+// Sum of digits
+fn digit_sum(n: Int) -> Int {
+    let mut sum = 0;
+    let mut val = n;
+    if val < 0 { val = 0 - val; }
+    while val > 0 {
+        sum = sum + (val % 10);
+        val = val / 10;
+    }
+    sum
+}
+
+// Digital root: repeatedly sum digits until single digit
+fn digital_root(n: Int) -> Int {
+    let mut val = n;
+    if val < 0 { val = 0 - val; }
+    while val >= 10 {
+        val = digit_sum(val);
+    }
+    val
+}
+
+// --- Section 3: Array operations ---
+
+fn arr_sum(a: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + a8_get(a, i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn arr_max(a: Arr8, n: Int) -> Int {
+    let mut mx = a8_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = a8_get(a, i);
+        if v > mx { mx = v; }
+        i = i + 1;
+    }
+    mx
+}
+
+fn arr_min(a: Arr8, n: Int) -> Int {
+    let mut mn = a8_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let v = a8_get(a, i);
+        if v < mn { mn = v; }
+        i = i + 1;
+    }
+    mn
+}
+
+// Prefix sums
+fn prefix_sums(a: Arr8, n: Int) -> Arr8 {
+    let mut result = a8_zero();
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + a8_get(a, i);
+        result = a8_set(result, i, sum);
+        i = i + 1;
+    }
+    result
+}
+
+// --- Section 4: Number theory ---
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n == 2 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut d = 3;
+    while d * d <= n {
+        if n % d == 0 { return 0; }
+        d = d + 2;
+    }
+    1
+}
+
+fn count_primes_upto(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= n {
+        count = count + is_prime(i);
+        i = i + 1;
+    }
+    count
+}
+
+// --- Section 5: Geometric / mathematical ---
+
+// Integer square root (floor)
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+// --- Tests ---
+
+fn test_milestone_bits() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(360), 4); // 360 = 101101000
+
+    assert_eq(reverse_bits_8(1), 128);
+    assert_eq(reverse_bits_8(255), 255);
+    assert_eq(reverse_bits_8(0), 0);
+
+    assert_eq(is_power_of_2(1), 1);
+    assert_eq(is_power_of_2(2), 1);
+    assert_eq(is_power_of_2(256), 1);
+    assert_eq(is_power_of_2(360), 0);
+}
+
+fn test_milestone_sequences() {
+    // Fibonacci
+    assert_eq(fibonacci(0), 0);
+    assert_eq(fibonacci(1), 1);
+    assert_eq(fibonacci(10), 55);
+    assert_eq(fibonacci(15), 610);
+
+    // Factorial
+    assert_eq(factorial(0), 1);
+    assert_eq(factorial(5), 120);
+    assert_eq(factorial(10), 3628800);
+
+    // Digit sum
+    assert_eq(digit_sum(360), 9);
+    assert_eq(digit_sum(12345), 15);
+    assert_eq(digit_sum(0), 0);
+
+    // Digital root
+    assert_eq(digital_root(360), 9);
+    assert_eq(digital_root(12345), 6);
+    assert_eq(digital_root(9999), 9);
+}
+
+fn test_milestone_arrays() {
+    let a = Arr8 { a0: 3, a1: 6, a2: 0, a3: 1, a4: 5, a5: 8, a6: 2, a7: 7 };
+    assert_eq(arr_sum(a, 8), 32);
+    assert_eq(arr_max(a, 8), 8);
+    assert_eq(arr_min(a, 8), 0);
+
+    let ps = prefix_sums(a, 5);
+    assert_eq(a8_get(ps, 0), 3);
+    assert_eq(a8_get(ps, 1), 9);
+    assert_eq(a8_get(ps, 2), 9);
+    assert_eq(a8_get(ps, 3), 10);
+    assert_eq(a8_get(ps, 4), 15);
+}
+
+fn test_milestone_primes() {
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(360), 0);
+    assert_eq(is_prime(359), 1);
+    assert_eq(is_prime(997), 1);
+
+    // pi(30) = 10: primes 2,3,5,7,11,13,17,19,23,29
+    assert_eq(count_primes_upto(30), 10);
+    // pi(100) = 25
+    assert_eq(count_primes_upto(100), 25);
+}
+
+fn test_milestone_math() {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(360), 18); // floor(sqrt(360)) = 18
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(99), 9);
+    assert_eq(isqrt(10000), 100);
+}
+
+fn test_milestone_360_special() {
+    // Properties of 360
+    // 360 = 2^3 * 3^2 * 5
+    assert_eq(360 % 2, 0);
+    assert_eq(360 % 3, 0);
+    assert_eq(360 % 5, 0);
+    assert_eq(360 / 2 / 2 / 2 / 3 / 3 / 5, 1);
+
+    // 360 degrees in a circle: count divisors
+    let mut divisor_count = 0;
+    let mut i = 1;
+    while i <= 360 {
+        if 360 % i == 0 {
+            divisor_count = divisor_count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(divisor_count, 24); // 360 has 24 divisors
+
+    // Sum of first 360-related Fibonacci: F(0) + F(1) + ... + F(9) = 88
+    let mut fib_sum = 0;
+    i = 0;
+    while i < 10 {
+        fib_sum = fib_sum + fibonacci(i);
+        i = i + 1;
+    }
+    assert_eq(fib_sum, 88);
+}
+
+fn main() -> Int {
+    test_milestone_bits();
+    test_milestone_sequences();
+    test_milestone_arrays();
+    test_milestone_primes();
+    test_milestone_math();
+    test_milestone_360_special();
+    print("[OK] 360_milestone_360_aot");
+    0
+}

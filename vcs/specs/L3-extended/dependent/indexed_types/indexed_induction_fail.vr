@@ -1,0 +1,41 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, induction, error
+// @expected-error: E400 "Type mismatch"
+
+/// Indexed induction - failure cases
+
+/// Peano natural numbers
+type PeanoNat is | PZero | PSucc(Heap<PeanoNat>);
+
+/// Length-indexed vector
+type Vect<T, N: meta Int> is
+    | VNil where N == 0
+    | VCons { head: T, tail: Vect<T, N - 1> } where N > 0;
+
+/// ERROR: Induction returning wrong type
+fn nat_ind_wrong(n: PeanoNat) -> Text {
+    match n {
+        PZero => 0,  // ERROR: Int != Text
+        PSucc(pred) => 1 + nat_ind_wrong(*pred),
+    }
+}
+
+/// ERROR: Vector induction with type mismatch
+fn vect_ind_wrong(v: Vect<Int, 3>) -> Text {
+    match v {
+        VNil => 0,  // ERROR: Int != Text
+        VCons { head, tail } => head,
+    }
+}
+
+/// ERROR: Wrong constructor return
+fn wrong_constructor() -> PeanoNat {
+    "hello"  // ERROR: Text != PeanoNat
+}
+
+fn main() {
+    let _ = nat_ind_wrong(PZero);
+    let _ = wrong_constructor();
+}

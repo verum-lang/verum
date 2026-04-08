@@ -1,0 +1,221 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: lsp, goto-definition, navigation
+// @description: Tests go-to-definition functionality for various symbol types.
+//              Verifies correct navigation to definition locations.
+
+// ============================================================================
+// This file tests go-to-definition for all navigable symbol types.
+// Each symbol use should resolve to its definition.
+// ============================================================================
+
+// Test 1: Go to local variable definition
+// Clicking on 'local_var' use should jump to 'let local_var = ...'
+fn test_local_goto() {
+    let local_var = 42;         // Definition location
+    let use1 = local_var + 1;   // Use 1: should go to line above
+    let use2 = local_var * 2;   // Use 2: should go to definition
+    use1 + use2
+}
+
+// Test 2: Go to parameter definition
+// Clicking on 'param' in body should jump to parameter list
+fn test_param_goto(param: Int) -> Int {  // Definition location
+    param + param + param                 // Uses: should go to param
+}
+
+// Test 3: Go to function definition
+fn target_function(x: Int) -> Int {  // Definition location
+    x * 2
+}
+
+fn calls_target() -> Int {
+    target_function(1) +      // Use 1
+    target_function(2) +      // Use 2
+    target_function(3)        // Use 3: all should go to target_function def
+}
+
+// Test 4: Go to type definition
+type TargetType is {          // Definition location
+    value: Int,
+};
+
+fn uses_type() -> TargetType {    // Use in return type
+    let instance: TargetType = TargetType { value: 42 };  // Uses
+    instance
+}
+
+fn takes_type(t: TargetType) {    // Use in parameter type
+    t
+}
+
+// Test 5: Go to field definition
+type FieldNavType is {
+    navigable_field: Int,     // Definition location
+    other_field: Text,
+};
+
+fn accesses_fields(fnt: FieldNavType) -> Int {
+    fnt.navigable_field       // Use: should go to field def
+}
+
+fn constructs_fields() -> FieldNavType {
+    FieldNavType {
+        navigable_field: 42,  // Use: should go to field def
+        other_field: "text",
+    }
+}
+
+// Test 6: Go to method definition
+type MethodNavType is {
+    data: Int,
+};
+
+implement MethodNavType {
+    fn nav_method(self) -> Int {  // Definition location
+        self.data
+    }
+
+    fn calls_nav(self) -> Int {
+        self.nav_method()         // Use: should go to nav_method def
+    }
+}
+
+fn external_call(m: MethodNavType) -> Int {
+    m.nav_method()                // Use: should go to nav_method def
+}
+
+// Test 7: Go to protocol definition
+type NavigableProtocol is protocol {  // Definition location
+    fn protocol_fn(self) -> Int;
+};
+
+implement NavigableProtocol for MethodNavType {  // Use in impl
+    fn protocol_fn(self) -> Int {
+        self.data
+    }
+}
+
+fn constrained<T>(value: T) -> Int
+where T: NavigableProtocol       // Use in constraint
+{
+    value.protocol_fn()
+}
+
+// Test 8: Go to generic type parameter definition
+fn generic_nav<T>(value: T) -> T  // T definition location
+where T: Clone                    // T use
+{
+    value.clone()                 // Methods on T
+}
+
+// Test 9: Go to closure parameter
+fn closure_nav() {
+    let closure = |x: Int| {      // x definition location
+        x + x + x                 // x uses: should go to closure param
+    };
+    closure(42)
+}
+
+// Test 10: Go to match binding definition
+fn match_nav(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(bound_value) => {    // bound_value definition
+            bound_value * 2       // Use: should go to pattern binding
+        },
+        None => 0,
+    }
+}
+
+// Test 11: Go to link source
+mount core.collections.List;      // Import location
+mount core.io.print;
+
+fn uses_imports() {
+    let list: List<Int> = [];     // Use: should go to link or std def
+    print("hello");               // Use: should go to link
+    list
+}
+
+// Test 12: Go to context definition
+context NavContext {              // Definition location
+    fn context_fn(self) -> Int;
+}
+
+fn uses_nav_context() -> Int using [NavContext] {  // Use
+    42
+}
+
+type DefaultContextImpl is { value: Int };
+
+fn provides_nav_context() {
+    provide NavContext = DefaultContextImpl { value: 42 };
+    let result = uses_nav_context();
+    result
+}
+
+// Test 13: Go to shadowed definition
+fn shadow_nav() {
+    let shadowed = 1;             // Outer definition
+    let use_outer = shadowed;     // Should go to outer def
+    {
+        let shadowed = 2;         // Inner definition (shadows)
+        let use_inner = shadowed; // Should go to inner def
+        use_inner
+    };
+    shadowed                      // Should go to outer def
+}
+
+// Test 14: Go to Self type
+type SelfNavType is {
+    value: Int,
+};
+
+implement SelfNavType {
+    fn create() -> Self {         // Self should resolve to SelfNavType
+        SelfNavType { value: 0 }   // Constructor
+    }
+
+    fn clone(self) -> Self {      // Self in return type
+        SelfNavType { value: self.value }
+    }
+}
+
+// Test 15: Go to associated type
+type ContainerProtocol is protocol {
+    type Item;                    // Associated type definition
+    fn get(self) -> Self.Item;
+};
+
+type IntContainer is {
+    value: Int,
+};
+
+implement ContainerProtocol for IntContainer {
+    type Item is Int;             // Associated type binding;
+    fn get(self) -> Self.Item {   // Self.Item use
+        self.value
+    }
+}
+
+// Test 16: Go to definition in different scope levels
+fn scope_levels() {
+    let level1 = 1;               // Level 1 def
+    {
+        let level2 = 2;           // Level 2 def
+        {
+            let level3 = 3;       // Level 3 def
+            level1 + level2 + level3  // Uses from different scopes
+        }
+    }
+}
+
+// Test 17: Cross-file goto (documented behavior)
+// Clicking on standard library types should navigate to their definitions
+fn uses_stdlib() {
+    let list: List<Int> = [];     // Should navigate to List definition
+    let text: Text = "hello";     // Should navigate to Text definition
+    let opt: Maybe<Int> = None;   // Should navigate to Maybe definition
+    list
+}

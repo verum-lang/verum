@@ -1,0 +1,439 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, wasm, tables
+// @description: Tests WebAssembly function tables and indirect calls
+
+/// ============================================================
+/// WEBASSEMBLY FUNCTION TABLES
+/// ============================================================
+///
+/// WASM tables store references (primarily function references)
+/// and enable indirect function calls for dynamic dispatch.
+
+// ------------------------------------------------------------
+// Table Types
+// ------------------------------------------------------------
+
+/// Function reference type
+type FuncRef is {
+    index: u32,
+};
+
+implement FuncRef {
+    const NULL: FuncRef = FuncRef { index: u32.MAX };
+
+    fn is_null(&self) -> Bool {
+        self.index == u32.MAX
+    }
+}
+
+/// External reference type (opaque host object)
+type ExternRef is {
+    index: u32,
+};
+
+implement ExternRef {
+    const NULL: ExternRef = ExternRef { index: u32.MAX };
+
+    fn is_null(&self) -> Bool {
+        self.index == u32.MAX
+    }
+}
+
+/// WASM table representation
+type WasmTable<T> is {
+    elements: List<Maybe<T>>,
+    max_size: Maybe<u32>,
+};
+
+implement<T: Clone> WasmTable<T> {
+    fn new(initial_size: u32, max_size: Maybe<u32>) -> WasmTable<T> {
+        let mut elements = List.with_capacity(initial_size as usize);
+        for _ in 0..initial_size {
+            elements.push(None);
+        }
+        WasmTable { elements, max_size }
+    }
+
+    fn size(&self) -> u32 {
+        self.elements.len() as u32
+    }
+
+    fn get(&self, index: u32) -> Result<Maybe<T>, TableError> {
+        self.elements
+            .get(index as usize)
+            .cloned()
+            .ok_or(TableError.OutOfBounds { index, size: self.size() })
+    }
+
+    fn set(&mut self, index: u32, value: Maybe<T>) -> Result<(), TableError> {
+        if index >= self.size() {
+            return Err(TableError.OutOfBounds { index, size: self.size() });
+        }
+        self.elements[index as usize] = value;
+        Ok(())
+    }
+
+    fn grow(&mut self, delta: u32, init: Maybe<T>) -> Result<u32, TableError> {
+        let old_size = self.size();
+        let new_size = old_size.checked_add(delta)
+            .ok_or(TableError.GrowthOverflow)?;
+
+        if let Some(max) = self.max_size {
+            if new_size > max {
+                return Err(TableError.MaxSizeExceeded);
+            }
+        }
+
+        for _ in 0..delta {
+            self.elements.push(init.clone());
+        }
+
+        Ok(old_size)
+    }
+
+    fn fill(&mut self, start: u32, count: u32, value: Maybe<T>) -> Result<(), TableError> {
+        let end = start.checked_add(count)
+            .ok_or(TableError.GrowthOverflow)?;
+
+        if end > self.size() {
+            return Err(TableError.OutOfBounds { index: end - 1, size: self.size() });
+        }
+
+        for i in start..end {
+            self.elements[i as usize] = value.clone();
+        }
+
+        Ok(())
+    }
+
+    fn copy(&mut self, dst: u32, src: u32, count: u32) -> Result<(), TableError> {
+        let src_end = src.checked_add(count)
+            .ok_or(TableError.GrowthOverflow)?;
+        let dst_end = dst.checked_add(count)
+            .ok_or(TableError.GrowthOverflow)?;
+
+        if src_end > self.size() || dst_end > self.size() {
+            return Err(TableError.OutOfBounds {
+                index: max(src_end, dst_end) - 1,
+                size: self.size(),
+            });
+        }
+
+        // Handle overlapping regions
+        if dst <= src {
+            for i in 0..count {
+                self.elements[(dst + i) as usize] = self.elements[(src + i) as usize].clone();
+            }
+        } else {
+            for i in (0..count).rev() {
+                self.elements[(dst + i) as usize] = self.elements[(src + i) as usize].clone();
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------
+// Indirect Function Calls
+// ------------------------------------------------------------
+
+/// Function type signature
+type FuncType is {
+    params: List<ValueType>,
+    results: List<ValueType>,
+};
+
+type ValueType is
+    | I32
+    | I64
+    | F32
+    | F64
+    | FuncRef
+    | ExternRef;
+
+/// Table for function references
+type FuncTable is {
+    table: WasmTable<FuncRef>,
+    signatures: List<FuncType>,
+};
+
+implement FuncTable {
+    fn new(size: u32) -> FuncTable {
+        FuncTable {
+            table: WasmTable.new(size, None),
+            signatures: List.new(),
+        }
+    }
+
+    /// Register a function type
+    fn register_type(&mut self, sig: FuncType) -> u32 {
+        let idx = self.signatures.len() as u32;
+        self.signatures.push(sig);
+        idx
+    }
+
+    /// Call function indirectly
+    fn call_indirect<Args, Ret>(
+        &self,
+        index: u32,
+        expected_type: u32,
+        args: Args
+    ) -> Result<Ret, CallError>
+    where
+        Args: WasmCallArgs,
+        Ret: WasmCallResult,
+    {
+        // Get function reference from table
+        let get_result = self.table.get(index);
+        let func_ref_opt = match get_result {
+            Ok(v) => v,
+            Err(_e) => return Err(CallError.NotImplemented),
+        };
+        let func_ref = match func_ref_opt {
+            Some(v) => v,
+            None => return Err(CallError.NullReference),
+        };
+
+        // Type check
+        // In real WASM, this would verify the function signature matches
+        if expected_type >= self.signatures.len() as u32 {
+            return Err(CallError.InvalidType);
+        }
+
+        // Perform the indirect call
+        // In real implementation, this would invoke the actual function
+        Err(CallError.NotImplemented)
+    }
+}
+
+/// Trait for function arguments
+protocol WasmCallArgs {
+    fn encode(&self) -> List<wasm_i64>;
+}
+
+/// Trait for function results
+protocol WasmCallResult {
+    fn decode(results: &[wasm_i64]) -> Self;
+}
+
+// ------------------------------------------------------------
+// Callback Table Pattern
+// ------------------------------------------------------------
+
+/// Table for JS callbacks
+type CallbackTable is {
+    callbacks: WasmTable<u32>,  // Table indices
+    next_id: u32,
+};
+
+implement CallbackTable {
+    fn new() -> CallbackTable {
+        CallbackTable {
+            callbacks: WasmTable.new(16, Some(1024)),
+            next_id: 0,
+        }
+    }
+
+    /// Register a callback, returns handle
+    fn register(&mut self, func_index: u32) -> Result<u32, TableError> {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        // Grow table if needed
+        if id >= self.callbacks.size() {
+            match self.callbacks.grow(16, None) {
+                Ok(_) => {},
+                Err(e) => return Err(TableError.GrowthOverflow),
+            }
+        }
+
+        match self.callbacks.set(id, Some(func_index)) {
+            Ok(_) => Ok(id),
+            Err(_e) => Err(TableError.OutOfBounds { index: id, size: self.callbacks.size() as u32 }),
+        }
+    }
+
+    /// Unregister a callback
+    fn unregister(&mut self, handle: u32) -> Result<(), TableError> {
+        match self.callbacks.set(handle, None) {
+            Ok(_) => Ok(()),
+            Err(_e) => Err(TableError.OutOfBounds { index: handle, size: self.callbacks.size() as u32 }),
+        }
+    }
+
+    /// Get function index for handle
+    fn get(&self, handle: u32) -> Result<u32, TableError> {
+        let entry = match self.callbacks.get(handle) {
+            Ok(v) => v,
+            Err(_e) => return Err(TableError.OutOfBounds { index: handle, size: self.callbacks.size() as u32 }),
+        };
+        match entry {
+            Some(v) => Ok(v),
+            None => Err(TableError.NullReference),
+        }
+    }
+}
+
+/// Export callback management
+@wasm_export
+fn register_callback(func_index: i32) -> i32 {
+    // Would register callback in table
+    func_index
+}
+
+@wasm_export
+fn unregister_callback(handle: i32) -> i32 {
+    if handle < 0 {
+        return -1;
+    }
+    // Would unregister callback from table
+    0
+}
+
+static mut callback_table: CallbackTable = CallbackTable {
+    callbacks: WasmTable { elements: List.new(), max_size: Some(1024) },
+    next_id: 0,
+};
+
+// ------------------------------------------------------------
+// Event Handler Table
+// ------------------------------------------------------------
+
+/// Event types
+type EventType is
+    | Click = 0
+    | KeyDown = 1
+    | KeyUp = 2
+    | MouseMove = 3
+    | Resize = 4;
+
+/// Event handler entry
+type EventHandler is {
+    event_type: EventType,
+    callback: FuncRef,
+    user_data: i32,
+};
+
+/// Event dispatch table
+type EventTable is {
+    handlers: List<EventHandler>,
+};
+
+implement EventTable {
+    fn new() -> EventTable {
+        EventTable { handlers: List.new() }
+    }
+
+    fn add_handler(&mut self, event_type: EventType, callback: FuncRef, user_data: i32) -> u32 {
+        let idx = self.handlers.len() as u32;
+        self.handlers.push(EventHandler { event_type, callback, user_data });
+        idx
+    }
+
+    fn remove_handler(&mut self, index: u32) {
+        if (index as usize) < self.handlers.len() {
+            self.handlers.remove(index as usize);
+        }
+    }
+
+    fn dispatch(&self, event_type: EventType, event_data: i32) {
+        for handler in &self.handlers {
+            if handler.event_type == event_type && !handler.callback.is_null() {
+                // Would call: call_indirect(handler.callback.index, event_data, handler.user_data)
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Virtual Method Table Pattern
+// ------------------------------------------------------------
+
+/// Interface for polymorphic objects
+type VTable is {
+    destroy: FuncRef,
+    clone: FuncRef,
+    to_string: FuncRef,
+    // ... more methods
+};
+
+/// Object with vtable
+type PolymorphicObject is {
+    vtable: *const VTable,
+    data: *mut u8,
+    size: u32,
+};
+
+implement PolymorphicObject {
+    fn destroy(self) {
+        if !self.vtable.is_null() {
+            let vtable = unsafe { &*self.vtable };
+            if !vtable.destroy.is_null() {
+                // call_indirect(vtable.destroy.index, self.data)
+            }
+        }
+    }
+
+    fn clone(&self) -> Maybe<PolymorphicObject> {
+        if self.vtable.is_null() {
+            return None;
+        }
+        let vtable = unsafe { &*self.vtable };
+        if vtable.clone.is_null() {
+            return None;
+        }
+        // call_indirect(vtable.clone.index, self.data) -> new_data
+        None
+    }
+}
+
+// ------------------------------------------------------------
+// Import/Export of Tables
+// ------------------------------------------------------------
+
+/// Exported function table
+@wasm_export
+static __indirect_function_table: WasmTable<FuncRef> = WasmTable { elements: List.new(), max_size: Some(1024) };
+
+/// Table for external references (host objects)
+@wasm_export
+static __externref_table: WasmTable<ExternRef> = WasmTable { elements: List.new(), max_size: Some(256) };
+
+/// Import table from host
+@wasm_import
+static imported_table: WasmTable<FuncRef> = WasmTable { elements: List.new(), max_size: Some(512) };
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type wasm_i32 is i32;
+type wasm_i64 is i64;
+
+type TableError is
+    | OutOfBounds { index: u32, size: u32 }
+    | GrowthOverflow
+    | MaxSizeExceeded
+    | NullReference;
+
+type CallError is
+    | TableError(TableError)
+    | NullReference
+    | InvalidType
+    | TypeMismatch
+    | NotImplemented;
+
+implement From<TableError> for CallError {
+    fn from(e: TableError) -> CallError {
+        CallError.TableError(e)
+    }
+}
+
+fn max(a: u32, b: u32) -> u32 { if a > b { a } else { b } }
+
+fn main() {
+    // WASM tables test
+}

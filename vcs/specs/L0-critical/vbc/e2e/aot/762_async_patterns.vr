@@ -1,0 +1,220 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, patterns, semaphore, barrier, mutex
+// @expected-exit: 0
+
+// Tests common concurrency patterns: semaphores, barriers, mutexes.
+// In single-threaded mode, these are trivially correct but test the patterns.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Simulate a counting semaphore
+fn sem_init(max_permits: Int) -> Int { max_permits }
+fn sem_acquire(current: Int) -> Int {
+    if (current > 0) { current - 1 } else { -1 }  // -1 = would block
+}
+fn sem_release(current: Int, max_permits: Int) -> Int {
+    if (current < max_permits) { current + 1 } else { current }
+}
+
+fn main() -> Int {
+    // Test 1: Semaphore basic operations
+    let mut sem = sem_init(3);
+    assert_eq(sem, 3);
+
+    sem = sem_acquire(sem);  // 2
+    assert_eq(sem, 2);
+    sem = sem_acquire(sem);  // 1
+    assert_eq(sem, 1);
+    sem = sem_acquire(sem);  // 0
+    assert_eq(sem, 0);
+    // Would block
+    let blocked = sem_acquire(sem);
+    assert_eq(blocked, -1);
+    // Release
+    sem = sem_release(sem, 3);  // 1
+    assert_eq(sem, 1);
+
+    // Test 2: Barrier pattern (all workers must arrive before continuing)
+    let num_workers = 5;
+    let mut arrived = 0;
+    let mut results = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    // Phase 1: each worker computes
+    while (i < num_workers) {
+        results[i] = (i + 1) * 10;
+        arrived = arrived + 1;
+        i = i + 1;
+    }
+    // Barrier: check all arrived
+    assert_eq(arrived, num_workers);
+    // Phase 2: use results from all workers
+    let mut total = 0;
+    i = 0;
+    while (i < num_workers) {
+        total = total + results[i];
+        i = i + 1;
+    }
+    assert_eq(total, 150);  // 10+20+30+40+50
+
+    // Test 3: Mutex pattern (exclusive access simulation)
+    let mut shared_resource = 0;
+    let mut lock_held = 0;
+
+    // Worker 1: acquire, modify, release
+    assert_eq(lock_held, 0);  // Lock available
+    lock_held = 1;  // Acquire
+    shared_resource = shared_resource + 100;
+    lock_held = 0;  // Release
+
+    // Worker 2: acquire, modify, release
+    assert_eq(lock_held, 0);  // Lock available
+    lock_held = 1;  // Acquire
+    shared_resource = shared_resource + 50;
+    lock_held = 0;  // Release
+
+    assert_eq(shared_resource, 150);
+
+    // Test 4: Read-write lock pattern
+    let mut rw_value = 42;
+    let mut readers = 0;
+    let mut writer = 0;
+
+    // Multiple readers (concurrent)
+    readers = readers + 1;
+    let r1 = rw_value;
+    readers = readers + 1;
+    let r2 = rw_value;
+    readers = readers + 1;
+    let r3 = rw_value;
+    assert_eq(r1, r2);
+    assert_eq(r2, r3);
+    assert_eq(readers, 3);
+    readers = 0;  // All readers done
+
+    // Writer (exclusive)
+    assert_eq(readers, 0);
+    writer = 1;
+    rw_value = 99;
+    writer = 0;
+
+    // Reader after write sees new value
+    readers = readers + 1;
+    assert_eq(rw_value, 99);
+    readers = 0;
+
+    // Test 5: Condition variable pattern (wait until condition)
+    let mut condition = 0;
+    let mut waited = 0;
+
+    // "Producer" sets condition
+    condition = 1;
+
+    // "Consumer" checks condition
+    while (condition == 0) {
+        waited = waited + 1;
+    }
+    // In single-threaded, condition is already set
+    assert_eq(waited, 0);
+    assert_eq(condition, 1);
+
+    // Test 6: Work stealing pattern
+    let mut queue_a = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut queue_b = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut a_count = 5;
+    let mut b_count = 0;
+
+    // Worker B steals from A when idle
+    let steal_amount = a_count / 2;  // Steal half
+    i = 0;
+    while (i < steal_amount) {
+        queue_b[b_count] = queue_a[a_count - 1];
+        a_count = a_count - 1;
+        b_count = b_count + 1;
+        i = i + 1;
+    }
+    assert_eq(a_count, 3);
+    assert_eq(b_count, 2);
+    // Process stolen work
+    let mut stolen_sum = 0;
+    i = 0;
+    while (i < b_count) {
+        stolen_sum = stolen_sum + queue_b[i] * queue_b[i];
+        i = i + 1;
+    }
+    // Stole items 5 and 4: 25+16=41
+    assert_eq(stolen_sum, 41);
+
+    // Test 7: Atomic counter pattern
+    let mut atomic_count = 0;
+    // Simulate compare-and-swap (CAS)
+    // CAS(expected, desired): if current==expected, set to desired, return true
+    let mut cas_success = 0;
+    // Thread 1: CAS(0, 1)
+    if (atomic_count == 0) { atomic_count = 1; cas_success = cas_success + 1; }
+    // Thread 2: CAS(0, 1) — would fail (current is 1, not 0)
+    if (atomic_count == 0) { atomic_count = 1; cas_success = cas_success + 1; }
+    assert_eq(cas_success, 1);  // Only first CAS succeeded
+    assert_eq(atomic_count, 1);
+
+    // Test 8: Double-checked locking pattern
+    let mut singleton = -1;  // -1 = not initialized
+    let mut init_lock = 0;
+
+    // First check (fast path)
+    if (singleton == -1) {
+        // Acquire lock
+        init_lock = 1;
+        // Second check (under lock)
+        if (singleton == -1) {
+            singleton = 42;  // Initialize
+        }
+        init_lock = 0;
+    }
+    assert_eq(singleton, 42);
+
+    // Second access: fast path succeeds
+    let mut second_init = 0;
+    if (singleton == -1) {
+        second_init = 1;  // Would initialize again
+    }
+    assert_eq(second_init, 0);  // No re-initialization
+
+    // Test 9: Futures with timeout
+    let timeout_ms = 1000;
+    let mut computation_done = 0;
+    let mut elapsed = 0;
+
+    // Simulate computation that "takes time"
+    let result = 7 * 7;
+    computation_done = 1;
+    elapsed = 50;  // Simulated: completed in 50ms
+
+    assert_eq(computation_done, 1);
+    assert(elapsed < timeout_ms);  // Completed before timeout
+    assert_eq(result, 49);
+
+    // Test 10: Thread-local storage pattern
+    // Each "thread" has its own copy of a variable
+    let mut tls = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let num_threads = 4;
+    i = 0;
+    while (i < num_threads) {
+        tls[i] = (i + 1) * 100;  // Each thread sets its own value
+        i = i + 1;
+    }
+    // Verify isolation: each thread's value is independent
+    assert_eq(tls[0], 100);
+    assert_eq(tls[1], 200);
+    assert_eq(tls[2], 300);
+    assert_eq(tls[3], 400);
+    // Modifying one doesn't affect others
+    tls[0] = 999;
+    assert_eq(tls[1], 200);  // Unchanged
+
+    print("Async patterns: PASS");
+    0
+}

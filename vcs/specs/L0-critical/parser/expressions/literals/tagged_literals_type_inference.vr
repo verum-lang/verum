@@ -1,0 +1,249 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, type-inference
+
+// Tagged Literal Type Inference Tests
+// Tests format-specific type inference for tagged literals
+// Note: Type annotations are demonstrative; actual type inference is tested in Rust unit tests
+// See: crates/verum_types/tests/tagged_literal_type_tests.rs
+// Spec: grammar/verum.ebnf Section 1.5.2.1
+// Spec: docs/detailed/05-syntax-grammar.md - Format Tag Categories
+
+// ============================================================================
+// SECTION 1: Data Interchange Formats
+// ============================================================================
+
+fn test_json_type_inference() {
+    let value: JsonValue = json#"{ \"name\": \"Alice\" }";
+    let relaxed: JsonValue = json5#"{ name: 'Bob' }";
+}
+
+fn test_yaml_type_inference() {
+    let config: YamlValue = yaml#"""
+name: Alice
+age: 30
+""";
+}
+
+fn test_toml_type_inference() {
+    let settings: TomlValue = toml#"""
+[server]
+port = 8080
+""";
+}
+
+fn test_xml_type_inference() {
+    let doc: XmlDocument = xml#"<root><item>value</item></root>";
+}
+
+fn test_html_type_inference() {
+    let page: HtmlDocument = html#"<html><body>Hello</body></html>";
+}
+
+// ============================================================================
+// SECTION 2: Query Languages
+// ============================================================================
+
+fn test_sql_type_inference() {
+    let query: SqlQuery = sql#"SELECT * FROM users WHERE id = 1";
+}
+
+fn test_graphql_type_inference() {
+    let gql_query: GraphQLQuery = gql#"{ user(id: 1) { name } }";
+    let graphql_query: GraphQLQuery = graphql#"query { users { id } }";
+}
+
+// ============================================================================
+// SECTION 3: Pattern Matching
+// ============================================================================
+
+fn test_regex_type_inference() {
+    let rx_pattern: Regex = rx#"[a-zA-Z]+";
+    let re_pattern: Regex = re#"\d{3}-\d{4}";
+    let regex_pattern: Regex = regex#"^hello.*world$";
+}
+
+fn test_glob_type_inference() {
+    let pattern: GlobPattern = glob#"**/*.vr";
+}
+
+fn test_xpath_type_inference() {
+    let expr: XPathExpr = xpath#"//div[@class='content']";
+}
+
+fn test_jsonpath_type_inference() {
+    let path: JsonPath = jpath#"$.store.book[*].author";
+}
+
+// ============================================================================
+// SECTION 4: Identifiers
+// ============================================================================
+
+fn test_url_type_inference() {
+    let url_val: Url = url#"https://example.com/path";
+    let uri_val: Url = uri#"mailto:user@example.com";
+}
+
+fn test_email_type_inference() {
+    let addr: Email = email#"user@example.com";
+}
+
+fn test_path_type_inference() {
+    let filepath: PathBuf = path#"/usr/local/bin";
+}
+
+fn test_mime_type_inference() {
+    let content_type: MimeType = mime#"application/json";
+}
+
+fn test_uuid_type_inference() {
+    let id: Uuid = uuid#"550e8400-e29b-41d4-a716-446655440000";
+}
+
+// ============================================================================
+// SECTION 5: Temporal
+// ============================================================================
+
+fn test_datetime_type_inference() {
+    let date: DateTime = d#"2025-01-04";
+    let datetime: DateTime = datetime#"2025-01-04T10:30:00Z";
+}
+
+fn test_duration_type_inference() {
+    let dur_val: Duration = dur#"3h30m";
+    let duration_val: Duration = duration#"PT1H30M";
+}
+
+fn test_time_type_inference() {
+    let t: Time = time#"14:30:00";
+}
+
+fn test_timezone_type_inference() {
+    let tz_val: Timezone = tz#"America/New_York";
+    let timezone_val: Timezone = timezone#"UTC+05:30";
+}
+
+// ============================================================================
+// SECTION 6: Networking
+// ============================================================================
+
+fn test_ip_type_inference() {
+    let addr: IpAddr = ip#"192.168.1.1";
+}
+
+fn test_cidr_type_inference() {
+    let range: CidrRange = cidr#"10.0.0.0/8";
+}
+
+fn test_mac_type_inference() {
+    let hw_addr: MacAddr = mac#"00:11:22:33:44:55";
+}
+
+// ============================================================================
+// SECTION 7: Versioning
+// ============================================================================
+
+fn test_version_type_inference() {
+    let ver_val: Version = ver#"1.2.3";
+    let semver_val: Version = semver#"2.0.0-alpha.1+build.123";
+}
+
+fn test_encoding_type_inference() {
+    let base64: Base64 = b64#"SGVsbG8gV29ybGQ=";
+    let hex_bytes: HexBytes = hex#"48656c6c6f";
+}
+
+// ============================================================================
+// SECTION 8: Structured Data
+// ============================================================================
+
+fn test_matrix_type_inference() {
+    let mat_val: Matrix = mat#"[[1, 2], [3, 4]]";
+    let matrix_val: Matrix = matrix#"[[1, 0], [0, 1]]";
+}
+
+fn test_vector_type_inference() {
+    let vec_val: Vector = vec#"[1, 2, 3]";
+    let vector_val: Vector = vector#"[0.5, 0.5, 0.7]";
+}
+
+fn test_interval_type_inference() {
+    let range: Interval = interval#"[0, 100)";
+}
+
+fn test_ratio_type_inference() {
+    let frac: Ratio = ratio#"3/4";
+}
+
+// ============================================================================
+// SECTION 9: Code/Script
+// ============================================================================
+
+fn test_shell_type_inference() {
+    let cmd: ShellCommand = sh#"ls -la";
+}
+
+fn test_css_type_inference() {
+    let styles: CssStylesheet = css#".class { color: red; }";
+}
+
+// ============================================================================
+// SECTION 10: Scientific
+// ============================================================================
+
+fn test_geo_type_inference() {
+    let point: GeoPoint = geo#"40.7128,-74.0060";
+}
+
+fn test_chemical_type_inference() {
+    let molecule: Chemical = chem#"H2O";
+}
+
+// ============================================================================
+// SECTION 11: Multiline Type Inference
+// ============================================================================
+
+fn test_multiline_json_type() {
+    let config: JsonValue = json#"""
+    {
+        name: "Alice",
+        settings: {
+            theme: "dark",
+            notifications: true
+        }
+    }
+    """;
+}
+
+fn test_multiline_yaml_type() {
+    let config: YamlValue = yaml#"""
+    server:
+      host: localhost
+      port: 8080
+    database:
+      connection: postgres://localhost/db
+    """;
+}
+
+fn test_multiline_sql_type() {
+    let query: SqlQuery = sql#"""
+    SELECT
+        users.name,
+        COUNT(orders.id) as order_count
+    FROM users
+    LEFT JOIN orders ON users.id = orders.user_id
+    GROUP BY users.name
+    HAVING COUNT(orders.id) > 5
+    """;
+}
+
+// ============================================================================
+// SECTION 12: Unknown Tags Fall Back to Text
+// ============================================================================
+
+fn test_unknown_tag_fallback() {
+    let custom: Text = custom#"some custom content";
+    let unrecognized: Text = mytag#"arbitrary data";
+}
+

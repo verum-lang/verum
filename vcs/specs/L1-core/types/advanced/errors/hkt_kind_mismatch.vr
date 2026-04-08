@@ -1,0 +1,256 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: hkt, kind, mismatch, errors, advanced-type-syntax
+// @expect: error(E0402)
+// @expected-error: E0402 "Kind mismatch in higher-kinded type"
+// @description: Tests for kind mismatches in HKT usage
+// @spec: 03-type-system.md Section 13. 3.1.4
+
+// =============================================================================
+// ERROR 1: Wrong number of type placeholders
+// =============================================================================
+
+type Functor is protocol {
+    type F<_>;
+
+    fn map<A, B>(self: Self.F<A>, f: fn(A) -> B) -> Self.F<B>;
+};
+
+type BadFunctor is ();
+
+// ERROR: Providing F<_, _> (kind: * -> * -> *) where F<_> (kind: * -> *) expected
+implement Functor for BadFunctor {
+    type F<A, B> is (A, B);  // E0402: Expected kind * -> *, got * -> * -> *
+
+    fn map<A, B>(self: (A, A), f: fn(A) -> B) -> (B, B) {
+        (f(self.0), f(self.1))
+    }
+}
+
+// =============================================================================
+// ERROR 2: Using type where type constructor expected
+// =============================================================================
+
+fn apply_functor<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa.map(f)
+}
+
+fn bad_use_concrete_type() {
+    let numbers = [1, 2, 3];
+    // E0402: Int has kind *, but F<_> expects kind * -> *
+    apply_functor<Int, _, _>(42, |x| x + 1)  // ERROR
+}
+
+// =============================================================================
+// ERROR 3: Using type constructor where type expected
+// =============================================================================
+
+fn process_value<T>(value: T) -> T {
+    value
+}
+
+fn bad_use_type_constructor() {
+    // E0402: List has kind * -> *, but T expects kind *
+    process_value<List>([1, 2, 3])  // ERROR: List is not a type, List<Int> is
+}
+
+// =============================================================================
+// ERROR 4: Nested kind mismatch
+// =============================================================================
+
+type Bifunctor is protocol {
+    type F<_, _>;
+
+    fn bimap<A, B, C, D>(
+        self: Self.F<A, B>,
+        f: fn(A) -> C,
+        g: fn(B) -> D
+    ) -> Self.F<C, D>;
+};
+
+type BadBifunctor is ();
+
+// ERROR: Providing F<_> (kind: * -> *) where F<_, _> (kind: * -> * -> *) expected
+implement Bifunctor for BadBifunctor {
+    type F<A> is Maybe<A>;  // E0402: Expected kind * -> * -> *, got * -> *
+
+    fn bimap<A, B, C, D>(
+        self: Maybe<A>,  // Wrong arity
+        f: fn(A) -> C,
+        g: fn(B) -> D
+    ) -> Maybe<C> {
+        self.map(f)
+    }
+}
+
+// =============================================================================
+// ERROR 5: Higher-order kind mismatch
+// =============================================================================
+
+// A protocol expecting a type constructor that takes a type constructor
+type Transform is protocol {
+    type T<F<_>>;  // Expects kind: (* -> *) -> *
+
+    fn transform<F<_>: Functor>(self: Self.T<F>);
+};
+
+type BadTransform is ();
+
+// ERROR: Providing T<A> (kind: * -> *) where T<F<_>> (kind: (* -> *) -> *) expected
+implement Transform for BadTransform {
+    type T<A> is List<A>;  // E0402: Expected kind (* -> *) -> *, got * -> *
+
+    fn transform<F<_>: Functor>(self: List<F>) {  // F is wrong kind
+        // ...
+    }
+}
+
+// =============================================================================
+// ERROR 6: Applying type constructor to wrong kind
+// =============================================================================
+
+type Container<T> is { value: T };
+
+fn bad_apply_to_constructor() {
+    // E0402: List expects kind *, but Container has kind * -> *
+    type X is List<Container>;  // ERROR: Container is not a type
+}
+
+// =============================================================================
+// ERROR 7: Using HKT parameter with wrong application
+// =============================================================================
+
+fn bad_hkt_application<F<_>: Functor>(fa: F<Int>) -> F {
+    // E0402: F<_> must be applied to a type argument
+    fa  // ERROR: Return type F is not fully applied (should be F<SomeType>)
+}
+
+// =============================================================================
+// ERROR 8: Mixing up type parameter and HKT parameter
+// =============================================================================
+
+fn with_functor<F<_>: Functor, A>(x: A) -> F<A> {
+    F.pure(x)  // Assuming Functor has pure
+}
+
+fn bad_swap_params<A, F<_>: Functor>(fa: A<Int>) -> F<Int> {
+    // E0402: A has kind *, cannot be applied like A<Int>
+    fa  // ERROR: A is not a type constructor
+}
+
+// =============================================================================
+// ERROR 9: Constraint on wrong kind
+// =============================================================================
+
+type Monad is protocol extends Functor {
+    fn pure<A>(value: A) -> Self.F<A>;
+    fn flat_map<A, B>(self: Self.F<A>, f: fn(A) -> Self.F<B>) -> Self.F<B>;
+};
+
+// ERROR: Clone applies to kind *, not kind * -> *
+fn bad_bound_on_hkt<F<_>: Functor + Clone, A>(fa: F<A>) -> F<A> {
+    // E0402: Clone has kind * -> Constraint, cannot apply to F which has kind * -> *
+    fa.clone()  // ERROR
+}
+
+// =============================================================================
+// ERROR 10: Returning partially applied HKT
+// =============================================================================
+
+type State<S, A> is { run: fn(S) -> (A, S) };
+
+// State has kind: * -> * -> *
+// State<Int> has kind: * -> *
+// State<Int, Int> has kind: *
+
+fn bad_partial_application() -> State {
+    // E0402: State requires 2 type arguments, got 0
+    State { run: |s| (s, s) }  // ERROR: Cannot infer both type parameters
+}
+
+fn bad_partial_application_2() -> State<Int> {
+    // E0402: State<Int> has kind * -> *, expected kind *
+    State { run: |s| (s, s) }  // ERROR: Return type is not fully applied
+}
+
+// =============================================================================
+// ERROR 11: HKT in associated type with wrong kind
+// =============================================================================
+
+type HigherProtocol is protocol {
+    type Higher<F<_>>;  // Kind: (* -> *) -> *
+};
+
+type BadHigher is ();
+
+implement HigherProtocol for BadHigher {
+    // ERROR: Providing kind * -> * where (* -> *) -> * expected
+    type Higher<T> is List<T>;  // E0402: T should be F<_>, not T
+}
+
+// =============================================================================
+// ERROR 12: Kind mismatch in where clause
+// =============================================================================
+
+fn bad_where_clause<F<_>, G>()
+    where type F: Functor,     // E0402: F has kind * -> *, Functor expects Self to have kind * -> * (OK)
+          type G<_>: Functor   // E0402: G has kind *, cannot have G<_>
+{
+}
+
+// =============================================================================
+// ERROR 13: Recursive kind error
+// =============================================================================
+
+// Attempting self-referential kind
+type BadRecursive is protocol {
+    type F<F<_>>;  // E0402: Cannot use F in its own kind signature
+};
+
+// =============================================================================
+// ERROR 14: HKT protocol implemented with wrong associated type kind
+// =============================================================================
+
+type Traversable is protocol {
+    type F<_>;
+
+    fn traverse<G<_>: Applicative, A, B>(
+        self: Self.F<A>,
+        f: fn(A) -> G<B>
+    ) -> G<Self.F<B>>;
+};
+
+type Applicative is protocol extends Functor {
+    fn pure<A>(value: A) -> Self.F<A>;
+    fn apply<A, B>(self: Self.F<fn(A) -> B>, fa: Self.F<A>) -> Self.F<B>;
+};
+
+type BadTraversable is ();
+
+implement Traversable for BadTraversable {
+    type F<A, B> is (A, B);  // E0402: Expected * -> *, got * -> * -> *
+
+    fn traverse<G<_>: Applicative, A, B>(
+        self: (A, A),  // Wrong type
+        f: fn(A) -> G<B>
+    ) -> G<(B, B)> {
+        // Cannot implement correctly due to kind mismatch
+        G.pure((f(self.0), f(self.1)))  // Would still be wrong
+    }
+}
+
+// Helper declarations
+type Maybe<T> is None | Some(T);
+implement<T> Maybe<T> {
+    fn map<U>(self, f: fn(T) -> U) -> Maybe<U> {
+        match self {
+            Some(x) => Some(f(x)),
+            None => None,
+        }
+    }
+}
+
+fn main() {
+    // All above examples should produce E0402 kind mismatch errors
+}

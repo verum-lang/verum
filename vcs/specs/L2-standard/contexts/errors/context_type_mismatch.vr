@@ -1,0 +1,108 @@
+// @test: typecheck-fail
+// @expected-error: E101
+// @tier: 0
+// @level: L2
+// @tags: contexts, type, mismatch, error
+// @description: Tests detection of context type mismatches when providing implementations
+
+/// When providing a context, the provided value must implement
+/// the expected context trait.
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Rows, DbError>;
+    fn execute(&self, sql: Text) -> Result<Int, DbError>;
+}
+
+context Cache {
+    fn get(&self, key: Text) -> Maybe<Text>;
+    fn set(&self, key: Text, value: Text);
+}
+
+type PostgresDb is { conn: Text };
+
+// PostgresDb only implements Database, not Cache
+implement Database for PostgresDb {
+    fn query(&self, sql: Text) -> Result<Rows, DbError> { Ok(Rows.empty()) }
+    fn execute(&self, sql: Text) -> Result<Int, DbError> { Ok(0) }
+}
+
+type RedisCache is { conn: Text };
+
+implement Cache for RedisCache {
+    fn get(&self, key: Text) -> Maybe<Text> { None }
+    fn set(&self, key: Text, value: Text) {}
+}
+
+fn use_database() using [Database] {
+    Database.query("SELECT 1");
+}
+
+fn use_cache() using [Cache] {
+    Cache.get("key");
+}
+
+fn main() {
+    let db = PostgresDb { conn: "postgres://..." };
+    let cache = RedisCache { conn: "redis://..." };
+
+    // OK: Correct type
+    provide Database = db in {
+        use_database();
+    }
+
+    // ERROR: Wrong context type
+    // E0304: Type mismatch: expected `Cache`, found `Database`
+    provide Cache = db in {  // db doesn't implement Cache
+        use_cache();
+    }
+
+    // ERROR: Providing wrong context for function
+    provide Database = cache in {  // cache doesn't implement Database
+        use_database();
+    }
+}
+
+/// More complex type mismatch: generic constraints
+context Repository<T> {
+    fn find(&self, id: Int) -> Maybe<T>;
+    fn save(&self, item: T) -> Result<Int, DbError>;
+}
+
+type User is { id: Int, name: Text };
+type Order is { id: Int, total: Float };
+
+type UserRepository is { db: PostgresDb };
+
+implement Repository<User> for UserRepository {
+    fn find(&self, id: Int) -> Maybe<User> { None }
+    fn save(&self, item: User) -> Result<Int, DbError> { Ok(item.id) }
+}
+
+fn use_user_repo() using [Repository<User>] {
+    Repository<User>.find(1);
+}
+
+fn use_order_repo() using [Repository<Order>] {
+    Repository<Order>.find(1);
+}
+
+fn generic_mismatch_example() {
+    let user_repo = UserRepository { db: PostgresDb { conn: "..." } };
+
+    // OK
+    provide UserRepository = user_repo in {
+        use_user_repo();
+    }
+
+    // ERROR: UserRepository implements Repository<User>, not Repository<Order>
+    // E0304: Type mismatch: `UserRepository` does not implement `Repository<Order>`
+    provide Repository<Order> = user_repo in {
+        use_order_repo();
+    }
+}
+
+type Rows is { data: List<Text> };
+implement Rows {
+    fn empty() -> Self { Self { data: List.new() } }
+}
+type DbError is Failed;

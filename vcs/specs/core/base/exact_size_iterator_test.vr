@@ -1,0 +1,556 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: base, iterator, exact_size, protocol
+// @description: Tests for ExactSizeIterator protocol implementations
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: List iterator ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_list_iter_len() {
+    let list = [1, 2, 3, 4, 5];
+    let iter = list.iter();
+    assert_eq(iter.len(), 5);
+}
+
+@test
+fn test_list_iter_len_after_next() {
+    let list = [1, 2, 3, 4, 5];
+    let mut iter = list.iter();
+    iter.next();
+    assert_eq(iter.len(), 4);
+    iter.next();
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_list_iter_len_exhausted() {
+    let list = [1, 2];
+    let mut iter = list.iter();
+    iter.next();
+    iter.next();
+    assert_eq(iter.len(), 0);
+}
+
+@test
+fn test_list_iter_is_empty_false() {
+    let list = [1, 2, 3];
+    let iter = list.iter();
+    assert(!iter.is_empty());
+}
+
+@test
+fn test_list_iter_is_empty_true() {
+    let list: List<Int> = [];
+    let iter = list.iter();
+    assert(iter.is_empty());
+}
+
+@test
+fn test_list_iter_is_empty_after_exhaust() {
+    let list = [42];
+    let mut iter = list.iter();
+    assert(!iter.is_empty());
+    iter.next();
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// Section 2: List mutable iterator ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_list_iter_mut_len() {
+    let mut list = [10, 20, 30];
+    let iter = list.iter_mut();
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_list_iter_mut_len_after_next() {
+    let mut list = [10, 20, 30];
+    let mut iter = list.iter_mut();
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_list_iter_mut_is_empty() {
+    let mut list: List<Int> = [];
+    let iter = list.iter_mut();
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// Section 3: IntoList ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_into_list_len() {
+    let list = [1, 2, 3, 4];
+    let iter = list.into_iter();
+    assert_eq(iter.len(), 4);
+}
+
+@test
+fn test_into_list_len_after_next() {
+    let list = [1, 2, 3, 4];
+    let mut iter = list.into_iter();
+    iter.next();
+    assert_eq(iter.len(), 3);
+    iter.next();
+    iter.next();
+    assert_eq(iter.len(), 1);
+}
+
+@test
+fn test_into_list_is_empty() {
+    let list: List<Int> = [];
+    let iter = list.into_iter();
+    assert(iter.is_empty());
+}
+
+@test
+fn test_into_list_is_empty_after_exhaust() {
+    let list = [1, 2];
+    let mut iter = list.into_iter();
+    iter.next();
+    iter.next();
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// Section 4: Drain ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_drain_len() {
+    let mut list = [1, 2, 3, 4, 5];
+    let drain = list.drain(1, 4);
+    assert_eq(drain.len(), 3);
+}
+
+@test
+fn test_drain_len_after_next() {
+    let mut list = [1, 2, 3, 4, 5];
+    let mut drain = list.drain(0, 3);
+    drain.next();
+    assert_eq(drain.len(), 2);
+}
+
+@test
+fn test_drain_is_empty() {
+    let mut list = [1, 2, 3];
+    let mut drain = list.drain(0, 2);
+    drain.next();
+    drain.next();
+    assert(drain.is_empty());
+}
+
+// =============================================================================
+// Section 5: Deque iterator ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_deque_iter_len() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let iter = d.iter();
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_deque_iter_len_after_next() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let mut iter = d.iter();
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_deque_iter_is_empty() {
+    let d: Deque<Int> = Deque.new();
+    let iter = d.iter();
+    assert(iter.is_empty());
+}
+
+@test
+fn test_deque_iter_is_empty_after_exhaust() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    let mut iter = d.iter();
+    assert(!iter.is_empty());
+    iter.next();
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// Section 6: Deque mutable iterator ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_deque_iter_mut_len() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    let iter = d.iter_mut();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_deque_iter_mut_is_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    let iter = d.iter_mut();
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// Section 7: DequeIntoIter ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_deque_into_iter_len() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let iter = d.into_iter();
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_deque_into_iter_len_after_next() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let mut iter = d.into_iter();
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_deque_into_iter_is_empty() {
+    let d: Deque<Int> = Deque.new();
+    let iter = d.into_iter();
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// Section 8: DequeDrain ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_deque_drain_len() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let drain = d.drain();
+    assert_eq(drain.len(), 3);
+}
+
+@test
+fn test_deque_drain_len_after_next() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let mut drain = d.drain();
+    drain.next();
+    assert_eq(drain.len(), 2);
+    drain.next();
+    assert_eq(drain.len(), 1);
+}
+
+@test
+fn test_deque_drain_is_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    let drain = d.drain();
+    assert(drain.is_empty());
+}
+
+// =============================================================================
+// Section 9: Range<Int> ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_range_len() {
+    let r = range(0, 10);
+    assert_eq(r.len(), 10);
+}
+
+@test
+fn test_range_len_after_next() {
+    let mut r = range(0, 5);
+    r.next();
+    assert_eq(r.len(), 4);
+    r.next();
+    r.next();
+    assert_eq(r.len(), 2);
+}
+
+@test
+fn test_range_len_empty() {
+    let r = range(5, 5);
+    assert_eq(r.len(), 0);
+}
+
+@test
+fn test_range_is_empty() {
+    let r = range(5, 5);
+    assert(r.is_empty());
+}
+
+@test
+fn test_range_is_empty_false() {
+    let r = range(0, 1);
+    assert(!r.is_empty());
+}
+
+@test
+fn test_range_len_exhausted() {
+    let mut r = range(0, 3);
+    r.next();
+    r.next();
+    r.next();
+    assert_eq(r.len(), 0);
+    assert(r.is_empty());
+}
+
+// =============================================================================
+// Section 10: RangeInclusive<Int> ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_range_inclusive_len() {
+    let r = range_inclusive(0, 9);
+    assert_eq(r.len(), 10);
+}
+
+@test
+fn test_range_inclusive_len_single() {
+    let r = range_inclusive(5, 5);
+    assert_eq(r.len(), 1);
+}
+
+@test
+fn test_range_inclusive_len_after_next() {
+    let mut r = range_inclusive(1, 4);
+    r.next();
+    assert_eq(r.len(), 3);
+}
+
+@test
+fn test_range_inclusive_is_empty_false() {
+    let r = range_inclusive(0, 0);
+    assert(!r.is_empty());
+}
+
+@test
+fn test_range_inclusive_is_empty_after_exhaust() {
+    let mut r = range_inclusive(0, 0);
+    r.next();
+    assert(r.is_empty());
+    assert_eq(r.len(), 0);
+}
+
+// =============================================================================
+// Section 11: Once and Empty ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_once_len() {
+    let iter = once(42);
+    assert_eq(iter.len(), 1);
+    assert(!iter.is_empty());
+}
+
+@test
+fn test_once_len_after_next() {
+    let mut iter = once(42);
+    iter.next();
+    assert_eq(iter.len(), 0);
+    assert(iter.is_empty());
+}
+
+@test
+fn test_empty_len() {
+    let iter: Empty<Int> = Empty { _marker: () };
+    assert_eq(iter.len(), 0);
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// Section 12: RepeatN ExactSizeIterator
+// =============================================================================
+
+@test
+fn test_repeat_n_len() {
+    let iter = repeat_n(7, 5);
+    assert_eq(iter.len(), 5);
+}
+
+@test
+fn test_repeat_n_len_after_next() {
+    let mut iter = repeat_n(7, 5);
+    iter.next();
+    assert_eq(iter.len(), 4);
+    iter.next();
+    iter.next();
+    assert_eq(iter.len(), 2);
+}
+
+@test
+fn test_repeat_n_is_empty() {
+    let iter = repeat_n(7, 0);
+    assert(iter.is_empty());
+}
+
+@test
+fn test_repeat_n_is_empty_after_exhaust() {
+    let mut iter = repeat_n(7, 2);
+    iter.next();
+    iter.next();
+    assert(iter.is_empty());
+}
+
+// =============================================================================
+// Section 13: len() matches size_hint consistency
+// =============================================================================
+
+@test
+fn test_len_matches_size_hint_list() {
+    let list = [1, 2, 3, 4, 5];
+    let iter = list.iter();
+    assert_eq(iter.len(), iter.size_hint().0);
+}
+
+@test
+fn test_len_matches_size_hint_range() {
+    let r = range(0, 100);
+    assert_eq(r.len(), r.size_hint().0);
+}
+
+@test
+fn test_len_matches_size_hint_deque() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let iter = d.iter();
+    assert_eq(iter.len(), iter.size_hint().0);
+}
+
+@test
+fn test_len_matches_count_list() {
+    let list = [1, 2, 3, 4, 5];
+    let len = list.iter().len();
+    let count = list.iter().count();
+    assert_eq(len, count);
+}
+
+@test
+fn test_len_matches_count_range() {
+    let len = range(0, 50).len();
+    let count = range(0, 50).count();
+    assert_eq(len, count);
+}
+
+// =============================================================================
+// Section 14: Bidirectional + ExactSizeIterator consistency
+// =============================================================================
+
+@test
+fn test_list_len_after_next_back() {
+    let list = [1, 2, 3, 4, 5];
+    let mut iter = list.iter();
+    iter.next_back();
+    assert_eq(iter.len(), 4);
+}
+
+@test
+fn test_list_len_after_both_directions() {
+    let list = [1, 2, 3, 4, 5];
+    let mut iter = list.iter();
+    iter.next();       // consume front
+    iter.next_back();  // consume back
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_deque_len_after_next_back() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    let mut iter = d.iter();
+    iter.next_back();
+    assert_eq(iter.len(), 3);
+}
+
+@test
+fn test_range_len_after_next_back() {
+    let mut r = range(0, 10);
+    r.next_back();
+    assert_eq(r.len(), 9);
+}
+
+@test
+fn test_range_inclusive_len_after_next_back() {
+    let mut r = range_inclusive(0, 9);
+    r.next_back();
+    assert_eq(r.len(), 9);
+}
+
+// =============================================================================
+// Section 15: Large iterators
+// =============================================================================
+
+@test
+fn test_large_list_len() {
+    let mut list: List<Int> = List.with_capacity(100);
+    let mut i = 0;
+    while i < 100 {
+        list.push(i);
+        i = i + 1;
+    }
+    let mut iter = list.iter();
+    assert_eq(iter.len(), 100);
+    // Consume 50
+    let mut j = 0;
+    while j < 50 {
+        iter.next();
+        j = j + 1;
+    }
+    assert_eq(iter.len(), 50);
+}
+
+@test
+fn test_large_range_len() {
+    let r = range(0, 10000);
+    assert_eq(r.len(), 10000);
+}
+
+@test
+fn test_large_deque_len() {
+    let mut d: Deque<Int> = Deque.with_capacity(100);
+    let mut i = 0;
+    while i < 100 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    let iter = d.iter();
+    assert_eq(iter.len(), 100);
+}

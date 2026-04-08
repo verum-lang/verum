@@ -1,0 +1,113 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, text, concat, len
+// @description: Test basic text operations (text_concat, text_len)
+
+// =============================================================================
+// TEXT_CONCAT TESTS
+// =============================================================================
+
+// Test text_concat with two strings
+meta fn test_text_concat_basic() -> Text {
+    text_concat("hello", " world")  // Should be "hello world"
+}
+
+// Test text_concat with empty string first
+meta fn test_text_concat_empty_first() -> Text {
+    text_concat("", "hello")  // Should be "hello"
+}
+
+// Test text_concat with empty string second
+meta fn test_text_concat_empty_second() -> Text {
+    text_concat("hello", "")  // Should be "hello"
+}
+
+// Test text_concat with both empty
+meta fn test_text_concat_both_empty() -> Text {
+    text_concat("", "")  // Should be ""
+}
+
+// Test text_concat multiple
+meta fn test_text_concat_multiple() -> Text {
+    let s = text_concat("a", "b");
+    let s = text_concat(s, "c");
+    text_concat(s, "d")  // Should be "abcd"
+}
+
+// Test text_concat with special chars
+meta fn test_text_concat_special() -> Text {
+    text_concat("line1\n", "line2")  // Should be "line1\nline2"
+}
+
+// =============================================================================
+// TEXT_LEN TESTS
+// =============================================================================
+
+// Test text_len empty
+meta fn test_text_len_empty() -> Int {
+    text_len("")  // Should be 0
+}
+
+// Test text_len single char
+meta fn test_text_len_single() -> Int {
+    text_len("a")  // Should be 1
+}
+
+// Test text_len multiple chars
+meta fn test_text_len_multiple() -> Int {
+    text_len("hello")  // Should be 5
+}
+
+// Test text_len with spaces
+meta fn test_text_len_spaces() -> Int {
+    text_len("hello world")  // Should be 11
+}
+
+// Test text_len computed
+meta fn test_text_len_computed() -> Int {
+    let s = text_concat("hello", " world");
+    text_len(s)  // Should be 11
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test concat then len
+meta fn test_concat_then_len() -> Int {
+    let s = text_concat("abc", "defgh");
+    text_len(s)  // Should be 8
+}
+
+// Test building string
+meta fn test_building_string() -> Text {
+    let parts = ["Hello", ", ", "World", "!"];
+    let result = "";
+    let result = text_concat(result, maybe_unwrap(list_get(parts, 0)));
+    let result = text_concat(result, maybe_unwrap(list_get(parts, 1)));
+    let result = text_concat(result, maybe_unwrap(list_get(parts, 2)));
+    text_concat(result, maybe_unwrap(list_get(parts, 3)))  // Should be "Hello, World!"
+}
+
+// Main test function
+fn main() {
+    // concat tests
+    assert_eq(@const(test_text_concat_basic()), "hello world");
+    assert_eq(@const(test_text_concat_empty_first()), "hello");
+    assert_eq(@const(test_text_concat_empty_second()), "hello");
+    assert_eq(@const(test_text_concat_both_empty()), "");
+    assert_eq(@const(test_text_concat_multiple()), "abcd");
+    assert_eq(@const(test_text_concat_special()), "line1\nline2");
+
+    // len tests
+    assert_eq(@const(test_text_len_empty()), 0);
+    assert_eq(@const(test_text_len_single()), 1);
+    assert_eq(@const(test_text_len_multiple()), 5);
+    assert_eq(@const(test_text_len_spaces()), 11);
+    assert_eq(@const(test_text_len_computed()), 11);
+
+    // combined tests
+    assert_eq(@const(test_concat_then_len()), 8);
+    assert_eq(@const(test_building_string()), "Hello, World!");
+}

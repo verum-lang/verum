@@ -1,0 +1,39 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, debugging, trace, error, type_mismatch
+// @description: Type mismatch error tests for meta_trace_* debugging builtins
+// @expected-error: M003
+
+// =============================================================================
+// TYPE MISMATCH ERRORS
+// =============================================================================
+
+// Test meta_trace_enter with non-text argument
+meta fn test_trace_enter_type() -> () {
+    meta_trace_enter(42)  // ERROR: M102 - expected Text, got Int
+}
+
+// Test meta_trace_exit with non-text argument
+meta fn test_trace_exit_type() -> () {
+    meta_trace_exit(true)  // ERROR: M102 - expected Text, got Bool
+}
+
+// Test meta_trace_value with non-text label
+meta fn test_trace_value_label_type() -> () {
+    meta_trace_value(123, "value")  // ERROR: M102 - expected Text for label
+}
+
+// Test meta_trace_assert with non-bool condition
+meta fn test_trace_assert_condition_type() -> () {
+    meta_trace_assert("not a bool", "message")  // ERROR: M102 - expected Bool
+}
+
+// Test meta_trace_assert with int condition
+meta fn test_trace_assert_int_condition() -> () {
+    meta_trace_assert(42, "message")  // ERROR: M102 - expected Bool, got Int
+}
+
+fn main() {
+    test_trace_enter_type();
+}

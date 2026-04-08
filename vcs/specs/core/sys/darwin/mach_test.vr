@@ -1,0 +1,411 @@
+// =============================================================================
+// vcs/specs/core/sys/darwin/mach_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, darwin, mach, kernel
+// @description: Tests for Mach kernel primitives on macOS.
+//
+// Coverage:
+// - current_task, current_thread, host_self: Task/thread handles
+// - vm_allocate, vm_deallocate, vm_protect: Virtual memory (safe wrappers)
+// - semaphore_create, semaphore_destroy: Mach semaphores (safe wrappers)
+// - semaphore_signal, semaphore_wait: Semaphore operations
+// - error_string: Error message lookup
+// - Types: MachPort, KernReturn, VmAddress, VmSize, VmProt, SemaphoreT
+// - Constants: KERN_*, VM_PROT_*, VM_FLAGS_*, SYNC_POLICY_*
+//
+// Test Strategy:
+// - Compare newtype constants directly (e.g., KERN_SUCCESS == KernReturn(0))
+// - Use 'as Int' for raw value extraction
+// - Test virtual memory operations via safe wrapper API
+// - Test semaphore lifecycle via safe wrapper API
+//
+// Platform: macOS (XNU/Mach kernel)
+// =============================================================================
+
+@cfg(target_os = "macos")
+module test.stdlib.sys.darwin.mach_test;
+
+// Import everything from mach module directly
+mount core.sys.darwin.mach.{
+    // Functions
+    current_task, current_thread, host_self,
+    safe_vm_allocate, safe_vm_deallocate, safe_vm_protect,
+    safe_semaphore_create, safe_semaphore_destroy,
+    safe_semaphore_signal, safe_semaphore_wait,
+    sleep_until, error_string,
+
+    // Types
+    MachPort, KernReturn, VmAddress, VmSize, VmProt,
+    SemaphoreT, MachMsgHeader,
+
+    // Kernel return constants
+    KERN_SUCCESS, KERN_INVALID_ADDRESS, KERN_PROTECTION_FAILURE,
+    KERN_NO_SPACE, KERN_INVALID_ARGUMENT, KERN_FAILURE,
+    KERN_RESOURCE_SHORTAGE, KERN_ABORTED, KERN_OPERATION_TIMED_OUT,
+
+    // VM protection constants
+    VM_PROT_NONE, VM_PROT_READ, VM_PROT_WRITE, VM_PROT_EXECUTE,
+    VM_PROT_DEFAULT, VM_PROT_ALL,
+
+    // VM flags constants
+    VM_FLAGS_FIXED, VM_FLAGS_ANYWHERE, VM_FLAGS_PURGABLE,
+
+    // Semaphore policies
+    SYNC_POLICY_FIFO, SYNC_POLICY_LIFO,
+};
+
+mount core.sys.common.{PAGE_SIZE};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Kernel Return Constants Tests
+// =============================================================================
+
+@test
+fn test_kern_return_constants() {
+    // Success
+    assert(KERN_SUCCESS == KernReturn(0));
+
+    // Error codes should be non-zero
+    assert(KERN_INVALID_ADDRESS != KernReturn(0));
+    assert(KERN_PROTECTION_FAILURE != KernReturn(0));
+    assert(KERN_NO_SPACE != KernReturn(0));
+    assert(KERN_INVALID_ARGUMENT != KernReturn(0));
+    assert(KERN_FAILURE != KernReturn(0));
+    assert(KERN_RESOURCE_SHORTAGE != KernReturn(0));
+    assert(KERN_ABORTED != KernReturn(0));
+    assert(KERN_OPERATION_TIMED_OUT != KernReturn(0));
+
+    // Standard Mach error codes
+    assert(KERN_INVALID_ADDRESS == KernReturn(1));
+    assert(KERN_PROTECTION_FAILURE == KernReturn(2));
+    assert(KERN_NO_SPACE == KernReturn(3));
+    assert(KERN_INVALID_ARGUMENT == KernReturn(4));
+    assert(KERN_FAILURE == KernReturn(5));
+
+    print("Kernel return constants tests passed");
+}
+
+// =============================================================================
+// VM Protection Constants Tests
+// =============================================================================
+
+@test
+fn test_vm_prot_constants() {
+    // Individual protections (VmProt newtypes)
+    assert(VM_PROT_NONE == VmProt(0x00));
+    assert(VM_PROT_READ == VmProt(0x01));
+    assert(VM_PROT_WRITE == VmProt(0x02));
+    assert(VM_PROT_EXECUTE == VmProt(0x04));
+
+    // Combined protections — use 'as Int' to extract raw values for bitwise ops
+    let default_val = VM_PROT_READ as Int | VM_PROT_WRITE as Int;
+    assert(VM_PROT_DEFAULT == VmProt(default_val));
+
+    let all_val = VM_PROT_READ as Int | VM_PROT_WRITE as Int | VM_PROT_EXECUTE as Int;
+    assert(VM_PROT_ALL == VmProt(all_val));
+
+    // Verify combinations
+    assert((VM_PROT_READ as Int | VM_PROT_WRITE as Int) == 0x03);
+    assert((VM_PROT_READ as Int | VM_PROT_EXECUTE as Int) == 0x05);
+
+    print("VM protection constants tests passed");
+}
+
+// =============================================================================
+// VM Flags Constants Tests
+// =============================================================================
+
+@test
+fn test_vm_flags_constants() {
+    // VM allocation flags (plain Int)
+    assert(VM_FLAGS_FIXED == 0x0000);
+    assert(VM_FLAGS_ANYWHERE == 0x0001);
+    assert(VM_FLAGS_PURGABLE == 0x0002);
+
+    // Flags should be combinable
+    let anywhere_purgable = VM_FLAGS_ANYWHERE | VM_FLAGS_PURGABLE;
+    assert((anywhere_purgable & VM_FLAGS_ANYWHERE) != 0);
+    assert((anywhere_purgable & VM_FLAGS_PURGABLE) != 0);
+
+    print("VM flags constants tests passed");
+}
+
+// =============================================================================
+// Sync Policy Constants Tests
+// =============================================================================
+
+@test
+fn test_sync_policy_constants() {
+    // Semaphore sync policies (plain Int)
+    assert(SYNC_POLICY_FIFO == 0);
+    assert(SYNC_POLICY_LIFO == 2);
+
+    // Policies should be distinct
+    assert(SYNC_POLICY_FIFO != SYNC_POLICY_LIFO);
+
+    print("Sync policy constants tests passed");
+}
+
+// =============================================================================
+// Task/Thread Port Tests
+// =============================================================================
+
+@test
+fn test_task_thread_ports() {
+    // Get current task port
+    let task = current_task();
+
+    // Task port should be valid (non-zero)
+    let task_val = task as Int;
+    assert(task_val != 0);
+
+    // Multiple calls return same task
+    let task2 = current_task();
+    assert(task as Int == task2 as Int);
+
+    // Get current thread port
+    let thread = current_thread();
+    let thread_val = thread as Int;
+    assert(thread_val != 0);
+
+    // Multiple calls return same thread
+    let thread2 = current_thread();
+    assert(thread as Int == thread2 as Int);
+
+    // Get host port
+    let host = host_self();
+    let host_val = host as Int;
+    assert(host_val != 0);
+
+    // All ports should be distinct
+    assert(task_val != thread_val);
+    assert(task_val != host_val);
+    assert(thread_val != host_val);
+
+    print(f"Task: {task_val}, Thread: {thread_val}, Host: {host_val}");
+}
+
+// =============================================================================
+// VM Allocate/Deallocate Tests
+// =============================================================================
+
+@test
+fn test_vm_allocate_deallocate() {
+    // Allocate a page using the safe wrapper
+    // safe_vm_allocate(size: VmSize, anywhere: Bool) -> Result<VmAddress, KernReturn>
+    let result = safe_vm_allocate(VmSize(PAGE_SIZE as Int), true);
+    assert(result.is_ok());
+    let addr: VmAddress = @unwrap(result);
+
+    // Address should be non-zero and page-aligned
+    let addr_val = addr as Int;
+    assert(addr_val != 0);
+    assert(addr_val % (PAGE_SIZE as Int) == 0);
+
+    // Write to allocated memory
+    unsafe {
+        let ptr = addr_val as *mut Int;
+        *ptr = 0xDEADC0DE;
+        assert(*ptr == 0xDEADC0DE);
+    }
+
+    // Deallocate
+    // safe_vm_deallocate(address: VmAddress, size: VmSize) -> Result<(), KernReturn>
+    let dealloc_result = safe_vm_deallocate(addr, VmSize(PAGE_SIZE as Int));
+    assert(dealloc_result.is_ok());
+
+    // Allocate multiple pages
+    let large_size = (PAGE_SIZE as Int) * 8;
+    let result2 = safe_vm_allocate(VmSize(large_size), true);
+    assert(result2.is_ok());
+    let addr2: VmAddress = @unwrap(result2);
+
+    let addr2_val = addr2 as Int;
+    assert(addr2_val != 0);
+
+    // Write to first and last page
+    unsafe {
+        let start_ptr = addr2_val as *mut Int;
+        let end_ptr = (addr2_val + large_size - 8) as *mut Int;
+        *start_ptr = 100;
+        *end_ptr = 200;
+        assert(*start_ptr == 100);
+        assert(*end_ptr == 200);
+    }
+
+    let _ = safe_vm_deallocate(addr2, VmSize(large_size));
+
+    print("vm_allocate/vm_deallocate tests passed");
+}
+
+// =============================================================================
+// VM Protect Tests
+// =============================================================================
+
+@test
+fn test_vm_protect() {
+    // Allocate writable memory
+    let alloc_result = safe_vm_allocate(VmSize(PAGE_SIZE as Int), true);
+    assert(alloc_result.is_ok());
+    let addr: VmAddress = @unwrap(alloc_result);
+    let addr_val = addr as Int;
+
+    // Write initial value
+    unsafe {
+        let ptr = addr_val as *mut Int;
+        *ptr = 12345;
+    }
+
+    // Make read-only
+    // safe_vm_protect(address: VmAddress, size: VmSize, prot: VmProt) -> Result<(), KernReturn>
+    let prot_result = safe_vm_protect(addr, VmSize(PAGE_SIZE as Int), VM_PROT_READ);
+    assert(prot_result.is_ok());
+
+    // Read should still work
+    unsafe {
+        let ptr = addr_val as *mut Int;
+        assert(*ptr == 12345);
+    }
+
+    // Make writable again
+    let rw_prot = VmProt(VM_PROT_READ as Int | VM_PROT_WRITE as Int);
+    let prot_result2 = safe_vm_protect(addr, VmSize(PAGE_SIZE as Int), rw_prot);
+    assert(prot_result2.is_ok());
+
+    // Write should work
+    unsafe {
+        let ptr = addr_val as *mut Int;
+        *ptr = 54321;
+        assert(*ptr == 54321);
+    }
+
+    // Cleanup
+    let _ = safe_vm_deallocate(addr, VmSize(PAGE_SIZE as Int));
+
+    print("vm_protect tests passed");
+}
+
+// =============================================================================
+// Semaphore Lifecycle Tests
+// =============================================================================
+
+@test
+fn test_semaphore_lifecycle() {
+    // Create semaphore with initial count 1
+    // safe_semaphore_create(initial_value: Int) -> Result<SemaphoreT, KernReturn>
+    let create_result = safe_semaphore_create(1);
+    assert(create_result.is_ok());
+    let sem: SemaphoreT = @unwrap(create_result);
+
+    // Wait should succeed (count = 1)
+    let wait_result = safe_semaphore_wait(sem);
+    assert(wait_result.is_ok());
+
+    // Signal should succeed
+    let signal_result = safe_semaphore_signal(sem);
+    assert(signal_result.is_ok());
+
+    // Wait again should succeed
+    let wait_result2 = safe_semaphore_wait(sem);
+    assert(wait_result2.is_ok());
+
+    // Destroy semaphore
+    let destroy_result = safe_semaphore_destroy(sem);
+    assert(destroy_result.is_ok());
+
+    // Create semaphore with initial count 0
+    let create_result2 = safe_semaphore_create(0);
+    assert(create_result2.is_ok());
+    let sem2: SemaphoreT = @unwrap(create_result2);
+
+    // Signal first
+    let _ = safe_semaphore_signal(sem2);
+
+    // Wait should succeed now
+    let wait_result3 = safe_semaphore_wait(sem2);
+    assert(wait_result3.is_ok());
+
+    let _ = safe_semaphore_destroy(sem2);
+
+    print("Semaphore lifecycle tests passed");
+}
+
+// =============================================================================
+// Mach Error String Tests
+// =============================================================================
+
+@test
+fn test_mach_error_string() {
+    // error_string(kr: KernReturn) -> Text
+    let success_str = error_string(KERN_SUCCESS);
+    assert(success_str.len() > 0);
+
+    // Get error string for invalid address
+    let invalid_addr_str = error_string(KERN_INVALID_ADDRESS);
+    assert(invalid_addr_str.len() > 0);
+
+    // Get error string for protection failure
+    let prot_fail_str = error_string(KERN_PROTECTION_FAILURE);
+    assert(prot_fail_str.len() > 0);
+
+    // Get error string for no space
+    let no_space_str = error_string(KERN_NO_SPACE);
+    assert(no_space_str.len() > 0);
+
+    // Unknown error should still return something
+    let unknown_str = error_string(KernReturn(999999));
+    assert(unknown_str.len() > 0);
+
+    print("mach_error_string tests passed");
+}
+
+// =============================================================================
+// Mach Port Type Tests
+// =============================================================================
+
+@test
+fn test_mach_port_types() {
+    // Create MachPort from constructor
+    let port = MachPort(12345);
+    assert(port as Int == 12345);
+
+    // Invalid port
+    let invalid = MachPort(0);
+    assert(invalid as Int == 0);
+
+    // Valid port
+    let task = current_task();
+    assert(task as Int != 0);
+
+    print("Mach port type tests passed");
+}
+
+// =============================================================================
+// KernReturn Type Tests
+// =============================================================================
+
+@test
+fn test_kern_return_type() {
+    // KernReturn values
+    let success = KERN_SUCCESS;
+    let failure = KERN_FAILURE;
+
+    assert(success as Int == 0);
+    assert(failure as Int != 0);
+
+    assert(success == KERN_SUCCESS);
+    assert(failure == KERN_FAILURE);
+
+    print("KernReturn type tests passed");
+}

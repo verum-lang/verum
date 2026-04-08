@@ -1,0 +1,203 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, linear-types, resource-safety, cbgr
+// @description: Linear types must be consumed exactly once
+
+/// Linear Types Tests
+///
+/// These tests validate that linear types (exactly-once usage) are properly
+/// tracked and enforced as specified in docs/improvements.md Section 6.
+///
+/// Key behavior:
+/// - Linear types must be consumed exactly once
+/// - Unused linear values cause compile-time error
+/// - Double use of linear values is also an error
+///
+/// Spec: docs/improvements.md Section 6 (Linear Types)
+/// Impl: crates/verum_types/src/affine.rs
+
+// ============================================================================
+// TEST 1: Linear type consumed once (valid)
+// ============================================================================
+
+type linear MustClose is {
+    fd: Int,
+};
+
+fn close_file(f: MustClose) {
+    // Consumes the linear value
+}
+
+fn test_linear_consumed_once() {
+    let f = MustClose { fd: 42 };
+    close_file(f);  // OK - consumed exactly once
+}
+
+// ============================================================================
+// TEST 2: Linear type passed to function
+// ============================================================================
+
+fn process_linear(resource: MustClose) -> Int {
+    resource.fd
+}
+
+fn test_linear_passed_to_function() {
+    let f = MustClose { fd: 100 };
+    let result = process_linear(f);  // Linear consumed by function
+    assert(result == 100);
+}
+
+// ============================================================================
+// TEST 3: Linear type in conditional
+// ============================================================================
+
+fn test_linear_in_conditional() {
+    let f = MustClose { fd: 50 };
+    let cond = true;
+
+    if cond {
+        close_file(f);  // Consumed in this branch
+    } else {
+        close_file(f);  // Would be consumed in this branch
+    }
+}
+
+// ============================================================================
+// TEST 4: Linear type returned from function
+// ============================================================================
+
+fn create_resource() -> MustClose {
+    MustClose { fd: 999 }
+}
+
+fn test_linear_returned() {
+    let f = create_resource();  // Linear returned
+    close_file(f);              // Must consume it
+}
+
+// ============================================================================
+// TEST 5: Linear type in match
+// ============================================================================
+
+type Option<T> is None | Some(T);
+
+fn maybe_resource(b: Bool) -> Option<MustClose> {
+    if b {
+        Maybe.Some(MustClose { fd: 1 })
+    } else {
+        Maybe.None
+    }
+}
+
+fn test_linear_in_match() {
+    let opt = maybe_resource(true);
+
+    match opt {
+        Maybe.Some(f) => {
+            close_file(f);  // Consume if present
+        }
+        Maybe.None => {
+            // Nothing to consume
+        }
+    }
+}
+
+// ============================================================================
+// TEST 6: Multiple linear values
+// ============================================================================
+
+fn test_multiple_linear_values() {
+    let f1 = MustClose { fd: 1 };
+    let f2 = MustClose { fd: 2 };
+    let f3 = MustClose { fd: 3 };
+
+    // All must be consumed
+    close_file(f1);
+    close_file(f2);
+    close_file(f3);
+}
+
+// ============================================================================
+// TEST 7: Linear type in struct field (consumed via struct)
+// ============================================================================
+
+type Container is {
+    resource: MustClose,
+    name: Text,
+};
+
+fn consume_container(c: Container) {
+    // Container consumes the linear field
+    close_file(c.resource);
+}
+
+fn test_linear_in_struct() {
+    let c = Container {
+        resource: MustClose { fd: 77 },
+        name: "test",
+    };
+    consume_container(c);
+}
+
+// ============================================================================
+// TEST 8: Linear type with chained operations
+// ============================================================================
+
+fn transform_resource(r: MustClose) -> MustClose {
+    MustClose { fd: r.fd * 2 }
+}
+
+fn test_linear_chain() {
+    let f = MustClose { fd: 5 };
+    let f2 = transform_resource(f);  // f consumed, f2 created
+    close_file(f2);                   // f2 consumed
+}
+
+// ============================================================================
+// TEST 9: Affine vs Linear distinction
+// ============================================================================
+
+type affine Handle is {
+    id: Int,
+};
+
+fn test_affine_not_required_to_consume() {
+    let h = Handle { id: 42 };
+    // Affine can be dropped without explicit consumption
+    // (cleanup() called automatically)
+}
+
+fn test_linear_required_to_consume() {
+    let f = MustClose { fd: 42 };
+    close_file(f);  // Linear MUST be consumed
+}
+
+// ============================================================================
+// TEST 10: Linear type with loop (each iteration)
+// ============================================================================
+
+fn test_linear_in_loop() {
+    for i in 0..5 {
+        let f = MustClose { fd: i };  // Created each iteration
+        close_file(f);                 // Consumed each iteration
+    }
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    test_linear_consumed_once();
+    test_linear_passed_to_function();
+    test_linear_in_conditional();
+    test_linear_returned();
+    test_linear_in_match();
+    test_multiple_linear_values();
+    test_linear_in_struct();
+    test_linear_chain();
+    test_affine_not_required_to_consume();
+    test_linear_required_to_consume();
+    test_linear_in_loop();
+}

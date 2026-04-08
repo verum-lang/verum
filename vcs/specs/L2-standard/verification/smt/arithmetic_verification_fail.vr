@@ -1,0 +1,130 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: smt, arithmetic, error
+// @timeout: 5000
+// @expected-error: E501 "SMT arithmetic verification failed"
+
+/// SMT verification failures for arithmetic operations
+/// Tests error detection in linear and non-linear arithmetic
+
+/// Incorrect arithmetic relationship
+@verify(proof)
+fn wrong_sum_formula(n: Int{>= 0}) -> Int {
+    contract#"
+        requires n >= 0;
+        ensures result == n * (n + 1);  // ERROR: Missing division by 2
+    ";
+    let mut sum = 0;
+    for i in 0..=n {
+        sum += i;
+    }
+    sum  // Actually returns n*(n+1)/2
+}
+
+/// Division property that doesn't hold
+@verify(proof)
+fn bad_div_mod(a: Int, b: Int{> 0}) -> (Int, Int) {
+    contract#"
+        requires b > 0;
+        ensures result.0 == a / b;
+        ensures result.1 == a % b;
+        ensures result.0 * b + result.1 == a + 1;  // ERROR: Off by one
+    ";
+    (a / b, a % b)
+}
+
+/// Non-linear constraint that fails
+@verify(proof)
+fn square_claim(x: Int) -> Int {
+    contract#"
+        ensures result == x * x;
+        ensures result <= x;  // ERROR: Only true for x in [0,1]
+    ";
+    x * x
+}
+
+/// Overflow not handled
+@verify(proof)
+fn unsafe_multiply(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result == a * b;
+        ensures result > a;  // ERROR: Not true for a*1, a*0, or negative b
+    ";
+    a * b
+}
+
+/// Wrong bound computation
+@verify(proof)
+fn clamp_wrong_bound(value: Int, bound: Int{> 0}) -> Int {
+    contract#"
+        requires bound > 0;
+        ensures result >= -bound && result <= bound;
+        ensures result == value;  // ERROR: Can't be both bounded AND equal
+    ";
+    if value < -bound { -bound }
+    else if value > bound { bound }
+    else { value }
+}
+
+/// GCD property violation
+@verify(proof)
+fn fake_gcd(a: Int{> 0}, b: Int{> 0}) -> Int {
+    contract#"
+        requires a > 0 && b > 0;
+        ensures result > 0;
+        ensures a % result == 0;
+        ensures b % result == 0;
+    ";
+    // ERROR: Returns min, which doesn't always divide both
+    if a < b { a } else { b }
+}
+
+/// Absolute value wrong for edge case
+@verify(proof)
+fn abs_overflow(x: Int) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == x || result == -x;
+        ensures -result == x || -result == -x;  // Circular but error: -x for Int.MIN overflows
+    ";
+    if x >= 0 { x } else { -x }
+}
+
+/// Exponential growth claim
+@verify(proof)
+fn power_wrong(base: Int, exp: Int{>= 0}) -> Int {
+    contract#"
+        requires exp >= 0;
+        ensures result == base * exp;  // ERROR: Should be base^exp
+    ";
+    let mut result = 1;
+    for _ in 0..exp {
+        result *= base;
+    }
+    result
+}
+
+/// Floating-point precision issues
+@verify(proof)
+fn float_associativity(a: Float, b: Float, c: Float) -> Bool {
+    contract#"
+        ensures result == true;
+        ensures (a + b) + c == a + (b + c);  // ERROR: FP not associative
+    ";
+    let left = (a + b) + c;
+    let right = a + (b + c);
+    left == right
+}
+
+/// Integer division rounding
+@verify(proof)
+fn div_round_up(a: Int, b: Int{> 0}) -> Int {
+    contract#"
+        requires b > 0;
+        ensures result * b >= a;
+        ensures (result - 1) * b < a;
+        ensures result == a / b;  // ERROR: Floor division, not ceiling
+    ";
+    (a + b - 1) / b  // Ceiling division, but claims floor
+}

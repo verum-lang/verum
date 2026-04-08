@@ -1,0 +1,188 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, regex
+
+// Regular expression literal syntax
+
+fn test_basic_regex() {
+    // Basic regex literals
+    let simple = re#"""hello""";
+    let word = re#"""\w+""";
+    let digits = re#"""\d+""";
+    let whitespace = re#"""\s+""";
+}
+
+fn test_character_classes() {
+    // Character classes
+    let lowercase = re#"""[a-z]+""";
+    let uppercase = re#"""[A-Z]+""";
+    let alphanumeric = re#"""[a-zA-Z0-9]+""";
+    let not_digits = re#"""[^0-9]+""";
+    let vowels = re#"""[aeiouAEIOU]""";
+}
+
+fn test_quantifiers() {
+    // Quantifiers
+    let zero_or_more = re#"""a*""";
+    let one_or_more = re#"""a+""";
+    let zero_or_one = re#"""a?""";
+    let exactly_3 = re#"""a{3}""";
+    let range_2_5 = re#"""a{2,5}""";
+    let at_least_2 = re#"""a{2,}""";
+}
+
+fn test_anchors() {
+    // Anchors
+    let start_anchor = re#"""^hello""";
+    let end_anchor = re#"""world$""";
+    let both_anchors = re#"""^exact$""";
+    let word_boundary = re#"""\bword\b""";
+}
+
+fn test_groups_and_alternation() {
+    // Groups and alternation
+    let group = re#"""(abc)+""";
+    let alternation = re#"""cat|dog|bird""";
+    let grouped_alt = re#"""(cat|dog)""";
+    let nested_groups = re#"""((a|b)c)+""";
+}
+
+fn test_non_capturing_groups() {
+    // Non-capturing groups
+    let non_capturing = re#"""(?:abc)+""";
+}
+
+fn test_lookahead_lookbehind() {
+    // Lookahead and lookbehind
+    let positive_lookahead = re#"""foo(?=bar)""";
+    let negative_lookahead = re#"""foo(?!bar)""";
+    let positive_lookbehind = re#"""(?<=foo)bar""";
+    let negative_lookbehind = re#"""(?<!foo)bar""";
+}
+
+fn test_backreferences() {
+    // Backreferences
+    let backreference = re#"""(\w+)\s+\1""";
+}
+
+fn test_special_chars_escaped() {
+    // Special characters (escaped)
+    let dot = re#"""\.""";
+    let asterisk = re#"""\*""";
+    let plus = re#"""\+""";
+    let question = re#"""\?""";
+    let caret = re#"""\^""";
+    let dollar = re#"""\$""";
+    let pipe = re#"""\|""";
+    let backslash = re#"""\\""";
+    let brackets = re#"""\[\]""";
+    let parens = re#"""\(\)""";
+    let braces = re#"""\{\}""";
+}
+
+fn test_common_patterns() {
+    // Common patterns
+    let email = re#"""^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$""";
+    let phone_us = re#"""^\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})$""";
+    let url = re#"""https?://[^\s/$.?#].[^\s]*""";
+    let ipv4 = re#"""\b(?:\d{1,3}\.){3}\d{1,3}\b""";
+    let date_iso = re#"""\d{4}-\d{2}-\d{2}""";
+    let time_24h = re#"""([01]?[0-9]|2[0-3]):[0-5][0-9]""";
+}
+
+fn test_flags_modifiers() {
+    // Flags/modifiers
+    let case_insensitive = re#"""(?i)hello""";
+    let multiline = re#"""(?m)^line""";
+    let dotall = re#"""(?s).*""";
+    let extended = re#"""(?x) \d+ \s+ \w+""";
+}
+
+fn test_combined_flags() {
+    // Combined flags
+    let multi_flags = re#"""(?im)^hello""";
+}
+
+fn test_unicode_patterns() {
+    // Unicode patterns
+    let unicode_letter = re#"""\p{L}+""";
+    let unicode_digit = re#"""\p{N}+""";
+    let unicode_script = re#"""\p{Script=Greek}""";
+    let emoji = re#"""\p{Emoji}""";
+}
+
+fn test_using_regex_operations() {
+    // Using regex in operations
+    let pattern = re#"""\d+""";
+    let text = "There are 42 apples and 17 oranges";
+
+    // Match check
+    let has_numbers = pattern.is_match(text);
+
+    // Find first match
+    let first_match = pattern.find(text);
+
+    // Find all matches
+    let all_matches = pattern.find_all(text);
+
+    // Replace
+    let replaced = pattern.replace(text, "N");
+    let replaced_all = pattern.replace_all(text, "N");
+}
+
+fn test_split() {
+    // Split
+    let split_pattern = re#"""\s+""";
+    let words = split_pattern.split("hello world foo bar");
+}
+
+fn test_capture_groups() {
+    // Capture groups
+    let capture_pattern = re#"""(\w+)@(\w+)\.(\w+)""";
+    let email_text = "user@example.com";
+    let captures = capture_pattern.captures(email_text);
+    let username = captures[1];
+    let domain = captures[2];
+    let tld = captures[3];
+}
+
+fn test_named_capture_groups() {
+    // Named capture groups
+    let named_pattern = re#"""(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})""";
+    let date_captures = named_pattern.captures("2025-01-15");
+    let year = date_captures["year"];
+    let month = date_captures["month"];
+}
+
+// Regex in function
+fn is_valid_email(email: Text) -> Bool {
+    let pattern = re#"""^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$""";
+    pattern.is_match(email)
+}
+
+fn test_regex_in_arrays() {
+    // Regex in arrays
+    let patterns = [
+        re#"""\d+""",       // digits
+        re#"""[a-z]+""",    // lowercase
+        re#"""\s+""",       // whitespace
+    ];
+}
+
+// Regex in match
+fn classify_string(s: Text) -> Text {
+    match s {
+        _ if re#"""^\d+$""".is_match(s) => "number"
+        _ if re#"""^[a-z]+$""".is_match(s) => "lowercase"
+        _ if re#"""^[A-Z]+$""".is_match(s) => "uppercase"
+        _ => "mixed"
+    }
+}
+
+fn test_complex_patterns() {
+    // Complex patterns
+    let password_strong = re#"""^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$""";
+    let credit_card = re#"""^(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})$""";
+    let ssn = re#"""^\d{3}-\d{2}-\d{4}$""";
+}

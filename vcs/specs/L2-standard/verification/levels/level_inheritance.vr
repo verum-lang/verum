@@ -1,0 +1,129 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, inheritance, levels
+// @description: Verification level inheritance through modules and traits
+
+/// Verification levels can be inherited from containing modules,
+/// overridden by functions, or specified at the trait level.
+
+// Module-level verification setting
+@verify(static)
+module math {
+    // Inherits @verify(static) from module
+    pub fn add(a: Int{>= 0}, b: Int{>= 0}) -> Int{>= 0} {
+        // contract:
+        //             requires a >= 0 && b >= 0;
+        //             ensures result >= 0;
+        a + b
+    }
+
+    // Explicitly overrides to runtime
+    @verify(runtime)
+    fn divide(a: Int, b: Int{!= 0}) -> Int {
+        // contract:
+        //             requires b != 0;
+        a / b
+    }
+
+    // Inherits @verify(static)
+    fn multiply(a: Int{>= 0}, b: Int{>= 0}) -> Int{>= 0} {
+        // contract:
+        //             requires a >= 0 && b >= 0;
+        //             ensures result >= 0;
+        a * b
+    }
+}
+
+/// Trait with verification level
+@verify(proof)
+type Monoid is protocol {
+    type Element;
+
+    fn identity() -> Self.Element {
+        // contract:
+        //             ensures forall x: Self.Element => combine(identity(), x) == x;
+        //             ensures forall x: Self.Element => combine(x, identity()) == x;
+    }
+
+    fn combine(a: Self.Element, b: Self.Element) -> Self.Element {
+        // contract:
+        //             // Associativity - proven by implementors
+        //             ensures forall x, y, z: Self.Element =>
+                combine(combine(x, y), z) == combine(x, combine(y, z));
+    }
+}
+
+/// Implementation inherits @verify(proof) from protocol
+implement Monoid for Int {
+    type Element = Int;
+
+    fn identity() -> Int {
+        0  // Must prove: combine(0, x) == x && combine(x, 0) == x
+    }
+
+    fn combine(a: Int, b: Int) -> Int {
+        a + b  // Must prove associativity
+    }
+}
+
+/// Struct with verification at declaration
+@verify(runtime)
+type SafeBuffer<T, const N: Int> is {
+    data: [T; N],
+    len: Int,
+    invariant len >= 0,
+    invariant len <= N,
+};
+
+implement SafeBuffer<T, N> {
+    // Inherits @verify(runtime) from type
+    fn push(mut self, item: T) -> Bool {
+        // contract:
+        //             ensures result implies self.len == old(self.len) + 1;
+        //             ensures !result implies self.len == old(self.len);
+        if self.len < N {
+            self.data[self.len] = item;
+            self.len += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    // Override to static for simple getter
+    @verify(static)
+    fn capacity(&self) -> Int{== N} {
+        N
+    }
+}
+
+/// Nested module inheritance
+@verify(static)
+module outer {
+    // Inherits @verify(static)
+    fn outer_fn(x: Int{> 0}) -> Int{> 0} { x }
+
+    @verify(runtime)
+    module inner {
+        // Inherits @verify(runtime) from inner module
+        fn inner_fn(x: Int) -> Int {
+            // contract: requires x > 0; ensures result > 0
+            x
+        }
+
+        @verify(proof)
+        module innermost {
+            // Inherits @verify(proof)
+            fn proven_fn(x: Int{> 0}, y: Int{> 0}) -> Int{> 0} {
+                // contract: requires x > 0 && y > 0; ensures result > 0
+                x + y
+            }
+        }
+    }
+}
+
+fn main() {
+    let sum = math.add(5, 10);
+    assert(sum == 15);
+}

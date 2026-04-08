@@ -1,0 +1,73 @@
+// =============================================================================
+// buffer_protocols_test.vr - Tests for IntoInnerError Debug/Display
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: io, buffer, protocols, debug, display, error, core
+// @description: Tests Debug and Display implementations for IntoInnerError<W>
+// =============================================================================
+
+mount core.io.buffer.{BufWriter, IntoInnerError, Cursor};
+mount core.io.protocols.{Write, StreamError as IoError, IoResult};
+mount core.base.protocols.{Display, Debug};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+mount core.{List, Byte};
+
+// =============================================================================
+// Section 1: IntoInnerError Type
+// =============================================================================
+
+@test
+fn test_into_inner_error_type_exists() {
+    let _: Maybe<IntoInnerError<Cursor<List<Byte>>>> = None;
+}
+
+// =============================================================================
+// Section 2: IntoInnerError Display Protocol
+// =============================================================================
+
+@test
+fn test_into_inner_error_has_display() {
+    // Prove Display is implemented by defining a function that requires it
+    fn display_err(e: &IntoInnerError<Cursor<List<Byte>>>) -> Text {
+        format_display(e)
+    }
+    let _ = display_err;
+}
+
+@test
+fn test_into_inner_error_has_debug() {
+    fn debug_err(e: &IntoInnerError<Cursor<List<Byte>>>) -> Text {
+        format_debug(e)
+    }
+    let _ = debug_err;
+}
+
+// =============================================================================
+// Section 3: IntoInnerError Methods
+// =============================================================================
+
+@test
+fn test_into_inner_error_error_method() {
+    // error() returns &IoError
+    fn get_error(e: &IntoInnerError<Cursor<List<Byte>>>) -> &IoError {
+        e.error()
+    }
+    let _ = get_error;
+}
+
+@test
+fn test_into_inner_error_into_inner_method() {
+    // into_inner() returns BufWriter<W>
+    fn recover(e: IntoInnerError<Cursor<List<Byte>>>) -> BufWriter<Cursor<List<Byte>>> {
+        e.into_inner()
+    }
+    let _ = recover;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,305 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/time_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, time, monotonic, realtime, rdtsc
+// @description: Comprehensive tests for time-related intrinsics covering
+//               monotonic clocks, wall-clock time, and CPU timestamp counters.
+//
+// Coverage:
+// - monotonic_nanos(): High-resolution monotonic time
+// - realtime_secs(): Wall-clock Unix timestamp
+// - rdtsc(): CPU timestamp counter (x86_64)
+// - rdtscp(): Serializing timestamp with processor ID
+// - sleep_ms(): Blocking sleep
+//
+// Test Strategy:
+// - Monotonicity (time never goes backward)
+// - Reasonable value ranges
+// - Timing consistency
+// - Platform-specific behavior
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.time_test;
+
+mount core.intrinsics.{
+    monotonic_nanos, realtime_secs,
+    rdtsc, rdtscp,
+    sleep_ms,
+    target_arch,
+};
+
+// Architecture constants
+const ARCH_X86_64: UInt8 = 1;
+
+// Time constants
+const NANOS_PER_SECOND: UInt64 = 1_000_000_000;
+const NANOS_PER_MILLI: UInt64 = 1_000_000;
+
+// Reasonable bounds for Unix timestamp (2024-2030)
+const MIN_UNIX_TIMESTAMP: Int64 = 1704067200;  // 2024-01-01 00:00:00 UTC
+const MAX_UNIX_TIMESTAMP: Int64 = 1893456000;  // 2030-01-01 00:00:00 UTC
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Monotonic Time Tests
+// =============================================================================
+
+@test
+fn test_monotonic_nanos() {
+    let t1 = monotonic_nanos();
+
+    // Time should be positive (not zero after boot)
+    assert(t1 > 0);
+
+    // Multiple reads should be consistent
+    let t2 = monotonic_nanos();
+    let t3 = monotonic_nanos();
+
+    // Time should be monotonically increasing (or at least non-decreasing)
+    assert(t2 >= t1);
+    assert(t3 >= t2);
+
+    // Time shouldn't jump too much between consecutive reads (< 1 second)
+    // Unless system is heavily loaded
+    let delta = t3 - t1;
+    assert(delta < NANOS_PER_SECOND);
+}
+
+@test
+fn test_monotonic_ordering() {
+    // Test monotonicity over multiple samples
+    let samples = 100;
+    let mut prev = monotonic_nanos();
+
+    for i in 0..samples {
+        let curr = monotonic_nanos();
+        assert(curr >= prev);  // Never goes backward
+        prev = curr;
+    }
+
+    // Calculate total elapsed time
+    let final_time = monotonic_nanos();
+    let elapsed = final_time - prev;
+
+    // Total time for 100 reads should be < 1ms typically
+    // (unless running on very slow hardware)
+    print(f"100 monotonic_nanos() calls took {elapsed} ns");
+}
+
+// =============================================================================
+// Realtime (Wall-Clock) Tests
+// =============================================================================
+
+@test
+fn test_realtime_secs() {
+    let timestamp = realtime_secs();
+
+    // Timestamp should be within reasonable bounds
+    // This test will fail if run before 2024 or after 2030
+    assert(timestamp >= MIN_UNIX_TIMESTAMP);
+    assert(timestamp <= MAX_UNIX_TIMESTAMP);
+
+    // Multiple reads should be consistent
+    let t1 = realtime_secs();
+    let t2 = realtime_secs();
+
+    // Realtime can technically go backward (NTP adjustment)
+    // but for this test, consecutive reads should be very close
+    let diff = if t2 >= t1 { t2 - t1 } else { t1 - t2 };
+    assert(diff <= 1);  // Should differ by at most 1 second
+
+    // Print timestamp for debugging
+    print(f"Current Unix timestamp: {timestamp}");
+}
+
+// =============================================================================
+// RDTSC Tests (x86_64 only)
+// =============================================================================
+
+@test
+fn test_rdtsc_if_x86() {
+    let arch = target_arch();
+
+    if arch == ARCH_X86_64 {
+        test_rdtsc();
+        test_rdtscp();
+    } else {
+        print("Skipping RDTSC tests on non-x86_64 architecture");
+    }
+}
+
+@test
+fn test_rdtsc() {
+    let tsc1 = rdtsc();
+
+    // TSC should be non-zero
+    assert(tsc1 > 0);
+
+    // Multiple reads should increase (on same core)
+    let tsc2 = rdtsc();
+    let tsc3 = rdtsc();
+
+    // TSC should be monotonic on same core
+    // Note: May not be true across cores on some systems
+    assert(tsc2 >= tsc1);
+    assert(tsc3 >= tsc2);
+
+    // Calculate cycles between reads
+    let cycles = tsc3 - tsc1;
+    print(f"2 RDTSC calls took {cycles} cycles");
+
+    // Sanity check: Should be less than billions of cycles
+    assert(cycles < 1_000_000_000);
+}
+
+@test
+fn test_rdtscp() {
+    let (tsc1, cpu1) = rdtscp();
+
+    // TSC should be non-zero
+    assert(tsc1 > 0);
+
+    // CPU ID should be reasonable (typically 0-1023)
+    assert(cpu1 < 1024);
+
+    // Multiple reads
+    let (tsc2, cpu2) = rdtscp();
+    let (tsc3, cpu3) = rdtscp();
+
+    // If running on same CPU, TSC should increase
+    if cpu1 == cpu2 && cpu2 == cpu3 {
+        assert(tsc2 >= tsc1);
+        assert(tsc3 >= tsc2);
+    }
+
+    // CPU IDs might differ (scheduler migration)
+    // but should all be valid
+    assert(cpu2 < 1024);
+    assert(cpu3 < 1024);
+
+    print(f"RDTSCP: TSC={tsc3}, CPU={cpu3}");
+}
+
+// =============================================================================
+// Sleep Tests
+// =============================================================================
+
+@test
+fn test_sleep_ms() {
+    // Test short sleep
+    let before = monotonic_nanos();
+    sleep_ms(10);  // Sleep for 10ms
+    let after = monotonic_nanos();
+
+    let elapsed_ns = after - before;
+    let elapsed_ms = elapsed_ns / NANOS_PER_MILLI;
+
+    // Should have slept at least 10ms
+    // Allow some tolerance for scheduling delays
+    assert(elapsed_ms >= 9);  // At least 9ms (accounting for resolution)
+
+    // Shouldn't have slept much longer than requested
+    // (typically within 20ms due to scheduler)
+    assert(elapsed_ms < 100);  // Less than 100ms
+
+    print(f"sleep_ms(10) actually slept {elapsed_ms} ms");
+
+    // Test zero sleep (should return immediately)
+    let before = monotonic_nanos();
+    sleep_ms(0);
+    let after = monotonic_nanos();
+
+    let elapsed = after - before;
+    // Zero sleep should be very fast (< 1ms)
+    assert(elapsed < NANOS_PER_MILLI);
+}
+
+// =============================================================================
+// Time Precision Tests
+// =============================================================================
+
+@test
+fn test_time_precision() {
+    // Test monotonic_nanos resolution
+    // Measure minimum observable time difference
+
+    let mut min_delta: UInt64 = UInt64.MAX;
+    let mut max_delta: UInt64 = 0;
+    let samples = 1000;
+
+    for i in 0..samples {
+        let t1 = monotonic_nanos();
+        let t2 = monotonic_nanos();
+
+        if t2 > t1 {
+            let delta = t2 - t1;
+            if delta < min_delta {
+                min_delta = delta;
+            }
+            if delta > max_delta {
+                max_delta = delta;
+            }
+        }
+    }
+
+    // Minimum observable delta should be < 1μs on modern systems
+    // (typically 20-100ns)
+    assert(min_delta < 1000);  // < 1μs
+
+    print(f"Monotonic time resolution: min={min_delta}ns, max={max_delta}ns");
+
+    // Test consistency with sleep
+    // Sleep for 100ms and verify elapsed time
+    let start = monotonic_nanos();
+    sleep_ms(100);
+    let end = monotonic_nanos();
+
+    let elapsed_nanos = end - start;
+    let elapsed_millis = elapsed_nanos / NANOS_PER_MILLI;
+
+    // Should be between 95-150ms (accounting for scheduling)
+    assert(elapsed_millis >= 95);
+    assert(elapsed_millis <= 150);
+
+    print(f"100ms sleep measured as {elapsed_millis}ms");
+}
+
+// =============================================================================
+// Cross-Reference Tests
+// =============================================================================
+
+@test
+fn test_time_consistency() {
+    // Verify monotonic and realtime move in roughly same direction
+    // (they should both increase over time)
+
+    let mono1 = monotonic_nanos();
+    let real1 = realtime_secs();
+
+    sleep_ms(500);  // Wait 500ms
+
+    let mono2 = monotonic_nanos();
+    let real2 = realtime_secs();
+
+    // Monotonic should have increased by ~500ms
+    let mono_delta = mono2 - mono1;
+    let mono_delta_ms = mono_delta / NANOS_PER_MILLI;
+
+    assert(mono_delta_ms >= 450);  // At least 450ms
+    assert(mono_delta_ms <= 600);  // At most 600ms
+
+    // Realtime should have increased by 0 or 1 second
+    let real_delta = real2 - real1;
+    assert(real_delta >= 0);
+    assert(real_delta <= 1);
+}

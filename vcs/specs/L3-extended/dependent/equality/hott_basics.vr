@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, equality, hott, path
+
+/// Homotopy Type Theory basics
+///
+/// Basic concepts from HoTT expressed in Verum's type system.
+
+/// Identity/equality witness type
+type IdWitness<T> is | IdRefl;
+
+/// Reflexivity
+fn refl<T>() -> IdWitness<T> { IdRefl }
+
+/// Symmetry
+fn symm<T>(p: IdWitness<T>) -> IdWitness<T> {
+    match p { IdRefl => IdRefl }
+}
+
+/// Transitivity
+fn id_trans<T>(p: IdWitness<T>, q: IdWitness<T>) -> IdWitness<T> {
+    match (p, q) { (IdRefl, IdRefl) => IdRefl }
+}
+
+/// Congruence (ap): functions preserve equality
+fn ap<A, B>(f: fn(A) -> B, p: IdWitness<A>) -> IdWitness<B> {
+    match p { IdRefl => IdRefl }
+}
+
+/// Transport: equality allows moving between types
+fn transport<A>(p: IdWitness<A>, x: A) -> A {
+    match p { IdRefl => x }
+}
+
+/// Groupoid laws
+fn refl_left<T>(p: IdWitness<T>) -> IdWitness<T> {
+    id_trans(refl(), p)
+}
+
+fn refl_right<T>(p: IdWitness<T>) -> IdWitness<T> {
+    id_trans(p, refl())
+}
+
+fn inverse_left<T>(p: IdWitness<T>) -> IdWitness<T> {
+    id_trans(symm(p), p)
+}
+
+fn inverse_right<T>(p: IdWitness<T>) -> IdWitness<T> {
+    id_trans(p, symm(p))
+}
+
+/// Associativity
+fn assoc<T>(p: IdWitness<T>, q: IdWitness<T>, r: IdWitness<T>) -> IdWitness<T> {
+    id_trans(id_trans(p, q), r)
+}
+
+/// Based path induction (J-eliminator)
+fn j_elim<T>(p: IdWitness<T>, base_case: T) -> T {
+    match p { IdRefl => base_case }
+}
+
+/// Contractible type
+type Contractible<T> is { center: T };
+
+fn singleton_contractible<T>(x: T) -> Contractible<T> {
+    Contractible { center: x }
+}
+
+/// Equivalence type
+type Equiv<A, B> is {
+    forward: fn(A) -> B,
+    backward: fn(B) -> A,
+};
+
+fn id_equiv<T>() -> Equiv<T, T> {
+    Equiv { forward: |x| x, backward: |x| x }
+}
+
+fn compose_equiv<A, B, C>(e1: Equiv<A, B>, e2: Equiv<B, C>) -> Equiv<A, C> {
+    Equiv {
+        forward: |x| (e2.forward)((e1.forward)(x)),
+        backward: |x| (e1.backward)((e2.backward)(x)),
+    }
+}
+
+fn inverse_equiv<A, B>(e: Equiv<A, B>) -> Equiv<B, A> {
+    Equiv { forward: e.backward, backward: e.forward }
+}
+
+fn main() {
+    let r: IdWitness<Int> = refl();
+    let s = symm(r);
+    let t = id_trans(r, s);
+    let left = refl_left(r);
+    let right = refl_right(r);
+    let id = id_equiv.<Int>();
+    let inv = inverse_equiv(id);
+    let c = singleton_contractible(42);
+    assert(c.center == 42);
+}

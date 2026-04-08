@@ -1,0 +1,238 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, ring_buffer, circular
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests ring buffer (circular buffer) with wrap-around, fixed-size array,
+// head/tail tracking, full/empty detection, and overflow handling.
+
+fn test_basic_ring_buffer() {
+    // Capacity 4 ring buffer
+    let cap = 4;
+    let mut buf = [0, 0, 0, 0];
+    let mut head = 0; // read position
+    let mut tail = 0; // write position
+    let mut size = 0;
+
+    // Enqueue helper: returns 1 on success, 0 if full
+    // Push 1, 2, 3
+    // Enqueue 1
+    assert(size < cap); // not full
+    buf[tail] = 1;
+    tail = (tail + 1) % cap;
+    size = size + 1;
+
+    // Enqueue 2
+    assert(size < cap);
+    buf[tail] = 2;
+    tail = (tail + 1) % cap;
+    size = size + 1;
+
+    // Enqueue 3
+    assert(size < cap);
+    buf[tail] = 3;
+    tail = (tail + 1) % cap;
+    size = size + 1;
+
+    assert_eq(size, 3);
+    assert_eq(head, 0);
+    assert_eq(tail, 3);
+
+    // Dequeue: should get 1
+    assert(size > 0);
+    let v1 = buf[head];
+    head = (head + 1) % cap;
+    size = size - 1;
+    assert_eq(v1, 1);
+    assert_eq(size, 2);
+
+    // Enqueue 4, 5 (5 will wrap around)
+    assert(size < cap);
+    buf[tail] = 4;
+    tail = (tail + 1) % cap;
+    size = size + 1;
+
+    assert(size < cap);
+    buf[tail] = 5;
+    tail = (tail + 1) % cap; // tail = 4 % 4 = 0 (wrap)
+    size = size + 1;
+
+    assert_eq(size, 4);
+    assert_eq(tail, 1); // tail=3→write→tail=0→write→tail=1
+
+    // Buffer full: 2, 3, 4, 5
+    let v2 = buf[head]; head = (head + 1) % cap; size = size - 1;
+    let v3 = buf[head]; head = (head + 1) % cap; size = size - 1;
+    let v4 = buf[head]; head = (head + 1) % cap; size = size - 1;
+    let v5 = buf[head]; head = (head + 1) % cap; size = size - 1;
+
+    assert_eq(v2, 2);
+    assert_eq(v3, 3);
+    assert_eq(v4, 4);
+    assert_eq(v5, 5);
+    assert_eq(size, 0); // empty
+
+    print("basic_ring_buffer: ok");
+}
+
+fn test_wraparound_indexing() {
+    // Demonstrate wrap-around by doing many writes/reads
+    let cap = 8;
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut head = 0;
+    let mut tail = 0;
+    let mut size = 0;
+
+    // Write 20 values sequentially, dequeue each after enqueue of 3
+    let mut total_written = 0;
+    let mut total_read = 0;
+    let mut sum_read = 0;
+
+    // Write 3, read 1, write 3, read 1 ... (keeps size around 2-5)
+    let mut round = 0;
+    while round < 6 {
+        // Write 3 items if space allows
+        let mut w = 0;
+        while w < 3 {
+            if size < cap {
+                buf[tail] = total_written + 1;
+                tail = (tail + 1) % cap;
+                size = size + 1;
+                total_written = total_written + 1;
+            }
+            w = w + 1;
+        }
+        // Read 2 items
+        let mut r = 0;
+        while r < 2 {
+            if size > 0 {
+                sum_read = sum_read + buf[head];
+                head = (head + 1) % cap;
+                size = size - 1;
+                total_read = total_read + 1;
+            }
+            r = r + 1;
+        }
+        round = round + 1;
+    }
+
+    // Drain remaining
+    while size > 0 {
+        sum_read = sum_read + buf[head];
+        head = (head + 1) % cap;
+        size = size - 1;
+        total_read = total_read + 1;
+    }
+
+    assert_eq(total_written, total_read); // All written items were read
+    // 1+2+...+18 = 18*19/2 = 171
+    assert_eq(sum_read, 171);
+
+    print("wraparound_indexing: ok");
+}
+
+fn test_full_empty_detection() {
+    let cap = 4;
+    let mut buf = [0, 0, 0, 0];
+    let mut head = 0;
+    let mut tail = 0;
+    let mut size = 0;
+
+    // Empty check
+    assert_eq(size, 0);
+
+    // Fill to capacity
+    let mut i = 0;
+    while i < cap {
+        buf[tail] = (i + 1) * 10;
+        tail = (tail + 1) % cap;
+        size = size + 1;
+        i = i + 1;
+    }
+    assert_eq(size, cap); // full
+
+    // Cannot write when full (verify full detection)
+    let can_write = if size < cap { 1 } else { 0 };
+    assert_eq(can_write, 0);
+
+    // Peek at head without removing
+    let peek_val = buf[head];
+    assert_eq(peek_val, 10);
+    assert_eq(size, cap); // still full
+
+    // Drain all
+    let mut drain_sum = 0;
+    while size > 0 {
+        drain_sum = drain_sum + buf[head];
+        head = (head + 1) % cap;
+        size = size - 1;
+    }
+    // 10 + 20 + 30 + 40 = 100
+    assert_eq(drain_sum, 100);
+    assert_eq(size, 0); // empty again
+
+    print("full_empty_detection: ok");
+}
+
+fn test_ring_buffer_stats() {
+    // Track min/max of items seen in ring buffer
+    let cap = 6;
+    let mut buf = [0, 0, 0, 0, 0, 0];
+    let mut head = 0;
+    let mut tail = 0;
+    let mut size = 0;
+
+    let data = [42, 7, 99, 13, 55, 3, 88, 21];
+    let n = 8;
+
+    let mut max_val = 0;
+    let mut min_val = 999;
+    let mut count_read = 0;
+
+    let mut di = 0;
+    while di < n {
+        // Enqueue
+        if size < cap {
+            buf[tail] = data[di];
+            tail = (tail + 1) % cap;
+            size = size + 1;
+        }
+        // Dequeue every other step
+        if di % 2 == 1 && size > 0 {
+            let val = buf[head];
+            head = (head + 1) % cap;
+            size = size - 1;
+            if val > max_val { max_val = val; }
+            if val < min_val { min_val = val; }
+            count_read = count_read + 1;
+        }
+        di = di + 1;
+    }
+
+    // Drain remaining
+    while size > 0 {
+        let val = buf[head];
+        head = (head + 1) % cap;
+        size = size - 1;
+        if val > max_val { max_val = val; }
+        if val < min_val { min_val = val; }
+        count_read = count_read + 1;
+    }
+
+    assert_eq(count_read, 8); // all 8 items read
+    assert_eq(max_val, 99);
+    assert_eq(min_val, 3);
+
+    print("ring_buffer_stats: ok");
+}
+
+fn main() -> Int {
+    test_basic_ring_buffer();
+    test_wraparound_indexing();
+    test_full_empty_detection();
+    test_ring_buffer_stats();
+    print("[OK] 441_interp_ring_buffer");
+    0
+}

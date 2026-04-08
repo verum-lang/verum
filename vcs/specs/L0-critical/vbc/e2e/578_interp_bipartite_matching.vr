@@ -1,0 +1,165 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, bipartite_matching, augmenting_paths, hungarian, maximum_matching
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Maximum bipartite matching via augmenting paths (Hopcroft-Karp style DFS).
+// Graph: left nodes L={0..nl-1}, right nodes R={0..nr-1}.
+// Edge (u,v): left node u can be matched to right node v.
+// Adjacency: adj[u*8+v] = 1 if edge exists (max 8 nodes per side).
+//
+// Algorithm:
+//   match_l[u] = right node matched to left u (-1 if unmatched).
+//   match_r[v] = left node matched to right v (-1 if unmatched).
+//   For each unmatched left node, try to find augmenting path via DFS.
+//   An augmenting path flips matched/unmatched edges along the path.
+//
+// Returns total matching size.
+
+fn bp_adj(adj: [Int; 64], u: Int, v: Int) -> Int { adj[u * 8 + v] }
+
+fn make_bp_adj() -> [Int; 64] {
+    [0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0]
+}
+
+// DFS augmenting path from left node u.
+// visited[v]=1 if right node v has been considered in this DFS call.
+@allow(unbounded_recursion)
+fn bp_dfs(adj: [Int; 64], nl: Int, nr: Int, u: Int,
+          match_l: [Int; 8], match_r: [Int; 8], visited: [Int; 8]) -> Int {
+    let mut v = 0;
+    while v < nr {
+        if bp_adj(adj, u, v) == 1 && visited[v] == 0 {
+            visited[v] = 1;
+            // If v is unmatched or its current left partner can find another match
+            if match_r[v] == -1 || bp_dfs(adj, nl, nr, match_r[v], match_l, match_r, visited) == 1 {
+                match_l[u] = v;
+                match_r[v] = u;
+                return 1;
+            }
+        }
+        v = v + 1;
+    }
+    0
+}
+
+fn max_bipartite_matching(adj: [Int; 64], nl: Int, nr: Int,
+                           match_l: [Int; 8], match_r: [Int; 8],
+                           visited: [Int; 8]) -> Int {
+    let mut i = 0;
+    while i < nl { match_l[i] = -1; i = i + 1; }
+    i = 0;
+    while i < nr { match_r[i] = -1; i = i + 1; }
+    let mut result = 0;
+    i = 0;
+    while i < nl {
+        // Reset visited for this DFS
+        let mut j = 0;
+        while j < nr { visited[j] = 0; j = j + 1; }
+        if bp_dfs(adj, nl, nr, i, match_l, match_r, visited) == 1 {
+            result = result + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn test_perfect_matching() {
+    // 3 left, 3 right: 0->0, 1->1, 2->2. Perfect matching of size 3.
+    let mut adj = make_bp_adj();
+    adj[0*8+0] = 1; adj[1*8+1] = 1; adj[2*8+2] = 1;
+    let mut ml = [0,0,0,0,0,0,0,0];
+    let mut mr = [0,0,0,0,0,0,0,0];
+    let mut vis = [0,0,0,0,0,0,0,0];
+    let m = max_bipartite_matching(adj, 3, 3, ml, mr, vis);
+    assert_eq(m, 3);
+    assert_eq(ml[0], 0);
+    assert_eq(ml[1], 1);
+    assert_eq(ml[2], 2);
+    print("perfect_matching: ok");
+}
+
+fn test_contention_matching() {
+    // 3 left, 2 right: all left can connect to right 0 and 1.
+    // Max matching = 2.
+    let mut adj = make_bp_adj();
+    adj[0*8+0] = 1; adj[0*8+1] = 1;
+    adj[1*8+0] = 1; adj[1*8+1] = 1;
+    adj[2*8+0] = 1; adj[2*8+1] = 1;
+    let mut ml  = [0,0,0,0,0,0,0,0];
+    let mut mr  = [0,0,0,0,0,0,0,0];
+    let mut vis = [0,0,0,0,0,0,0,0];
+    let m = max_bipartite_matching(adj, 3, 2, ml, mr, vis);
+    assert_eq(m, 2);
+    print("contention: ok");
+}
+
+fn test_no_edges() {
+    // No edges: matching = 0.
+    let mut adj = make_bp_adj();
+    let mut ml  = [0,0,0,0,0,0,0,0];
+    let mut mr  = [0,0,0,0,0,0,0,0];
+    let mut vis = [0,0,0,0,0,0,0,0];
+    let m = max_bipartite_matching(adj, 3, 3, ml, mr, vis);
+    assert_eq(m, 0);
+    assert_eq(ml[0], -1);
+    assert_eq(ml[1], -1);
+    print("no_edges: ok");
+}
+
+fn test_augmenting_path() {
+    // Left={0,1,2}, Right={0,1,2}.
+    // Edges: 0->0, 1->0, 1->1, 2->1, 2->2.
+    // Processing order: L0 -> matches R0 (size=1).
+    //   L1 tries R0 (taken by L0), DFS: L0 tries R? L0 only has R0, fails.
+    //   L1 matches R1 (size=2).
+    //   L2 tries R1 (taken by L1), DFS: L1 tries R0 (taken, L0 fails), then tries R1 (visited).
+    //   L1 re-match fails. L2 tries R2, matches (size=3).
+    // Max matching = 3.
+    let mut adj = make_bp_adj();
+    adj[0*8+0] = 1;
+    adj[1*8+0] = 1; adj[1*8+1] = 1;
+    adj[2*8+1] = 1; adj[2*8+2] = 1;
+    let mut ml  = [0,0,0,0,0,0,0,0];
+    let mut mr  = [0,0,0,0,0,0,0,0];
+    let mut vis = [0,0,0,0,0,0,0,0];
+    let m = max_bipartite_matching(adj, 3, 3, ml, mr, vis);
+    assert_eq(m, 3);
+    print("augmenting_path: ok");
+}
+
+fn test_asymmetric() {
+    // Left={0,1,2,3}, Right={0,1}.
+    // 0->0, 1->0, 2->1, 3->1. Max matching = 2.
+    let mut adj = make_bp_adj();
+    adj[0*8+0] = 1;
+    adj[1*8+0] = 1;
+    adj[2*8+1] = 1;
+    adj[3*8+1] = 1;
+    let mut ml  = [0,0,0,0,0,0,0,0];
+    let mut mr  = [0,0,0,0,0,0,0,0];
+    let mut vis = [0,0,0,0,0,0,0,0];
+    let m = max_bipartite_matching(adj, 4, 2, ml, mr, vis);
+    assert_eq(m, 2);
+    // Right nodes 0 and 1 are both matched
+    let r0_matched = if mr[0] != -1 { 1 } else { 0 };
+    let r1_matched = if mr[1] != -1 { 1 } else { 0 };
+    assert_eq(r0_matched, 1);
+    assert_eq(r1_matched, 1);
+    print("asymmetric: ok");
+}
+
+fn main() -> Int {
+    test_perfect_matching();
+    test_contention_matching();
+    test_no_edges();
+    test_augmenting_path();
+    test_asymmetric();
+    print("[OK] 578_interp_bipartite_matching");
+    0
+}

@@ -1,0 +1,151 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Module with all item types
+module comprehensive {
+    // Constants
+    const MAX_VALUE: Int = 1000;
+    const MIN_VALUE: Int = 0;
+    pub const PUBLIC_CONST: Float = 3.14;
+
+    // Statics
+    static COUNTER: Int = 0;
+    static mut MUTABLE_COUNTER: Int = 0;
+
+    // Type definitions
+    type Point is { x: Float, y: Float };
+    type Color is Red | Green | Blue;
+    type Maybe<T> is None | Some(T);
+
+    // Generic types
+    type Container<T> is { value: T };
+    type Pair<A, B> is { first: A, second: B };
+
+    // Protocol types
+    type Drawable is protocol {
+        fn draw(&self);
+    };
+
+    // Functions
+    fn helper() -> Int { 42 }
+    pub fn public_helper() -> Int { 100 }
+    async fn async_helper() -> Int { 200 }
+
+    // Generic functions
+    fn identity<T>(x: T) -> T { x }
+    fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+        Pair { first: pair.second, second: pair.first }
+    }
+
+    // Implementations
+    implement Point {
+        fn new(x: Float, y: Float) -> Self {
+            Point { x: x, y: y }
+        }
+
+        fn distance(&self, other: &Point) -> Float {
+            let dx = self.x - other.x;
+            let dy = self.y - other.y;
+            (dx * dx + dy * dy).sqrt()
+        }
+    }
+
+    implement Drawable for Point {
+        fn draw(&self) {
+            print(f"Point({self.x}, {self.y})");
+        }
+    }
+}
+
+// Module with mount statements
+module with_imports {
+    mount core.collections.List;
+    mount core.io as io;
+
+    fn use_list() -> List<Int> {
+        List.new()
+    }
+}
+
+// Module with nested modules and cross-references
+module hierarchical {
+    type SharedConfig is { name: Text };
+
+    module models {
+        type User is { name: Text, config: super.SharedConfig };
+        type Product is { id: Int, name: Text };
+    }
+
+    module services {
+        mount super.models.User;
+        mount super.models.Product;
+
+        fn create_user(name: Text) -> User {
+            User { name: name, config: super.super.SharedConfig { name: "default" } }
+        }
+    }
+
+    module api {
+        mount super.services;
+        mount super.models;
+
+        pub fn get_user() -> models.User {
+            services.create_user("test")
+        }
+    }
+}
+
+// Module with attributes
+module attributed {
+    @deprecated("Use new_helper instead")
+    fn old_helper() -> Int { 0 }
+
+    fn new_helper() -> Int { 1 }
+
+    @derive(Clone, Debug)
+    type Data is { value: Int };
+}
+
+// Module with async functions
+module async_module {
+    async fn fetch_data() -> Text {
+        http_get("https://api.example.com").await
+    }
+
+    async fn process() -> Int {
+        let data = fetch_data().await;
+        data.len()
+    }
+
+    fn http_get(url: Text) -> Text {
+        todo()
+    }
+}
+
+// Module with context-using functions
+module contextual {
+    context Database {
+        fn query(&self, sql: Text) -> List<Row>;
+    }
+
+    type Row is { data: Text };
+
+    fn fetch_all() -> List<Row> using [Database] {
+        Database.query("SELECT * FROM table")
+    }
+}
+
+// Module with error handling
+module errors {
+    type MyError is { message: Text };
+
+    fn might_fail() -> Result<Int, MyError> {
+        Ok(42)
+    }
+
+    fn uses_try() -> Result<Int, MyError> {
+        let value = might_fail()?;
+        Ok(value * 2)
+    }
+}

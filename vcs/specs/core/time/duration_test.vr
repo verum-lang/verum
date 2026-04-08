@@ -1,0 +1,854 @@
+// =============================================================================
+// duration_test.vr - Comprehensive tests for Duration type
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: time, duration, core
+// @description: Comprehensive tests for Duration type and methods
+// =============================================================================
+
+mount core.time.Duration;
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: Constructor Tests
+// =============================================================================
+
+@test
+fn test_duration_zero() {
+    let d = Duration.zero();
+    assert_eq(d.as_nanos(), 0);
+    assert_eq(d.as_millis(), 0);
+    assert_eq(d.as_secs(), 0);
+    assert(d.is_zero());
+}
+
+@test
+fn test_duration_from_nanos() {
+    let d = Duration.nanos(1_000_000);  // 1 million nanoseconds = 1 millisecond
+    assert_eq(d.as_nanos(), 1_000_000);
+    assert_eq(d.as_micros(), 1_000);
+    assert_eq(d.as_millis(), 1);
+}
+
+@test
+fn test_duration_from_micros() {
+    let d = Duration.micros(1_000);  // 1000 microseconds = 1 millisecond
+    assert_eq(d.as_micros(), 1_000);
+    assert_eq(d.as_millis(), 1);
+}
+
+@test
+fn test_duration_from_millis() {
+    let d = Duration.millis(1_000);  // 1000 milliseconds = 1 second
+    assert_eq(d.as_millis(), 1_000);
+    assert_eq(d.as_secs(), 1);
+}
+
+@test
+fn test_duration_from_secs() {
+    let d = Duration.secs(60);  // 60 seconds
+    assert_eq(d.as_secs(), 60);
+    assert_eq(d.as_millis(), 60_000);
+}
+
+@test
+fn test_duration_from_mins() {
+    let d = Duration.mins(2);  // 2 minutes = 120 seconds
+    assert_eq(d.as_secs(), 120);
+}
+
+@test
+fn test_duration_from_hours() {
+    let d = Duration.hours(1);  // 1 hour = 3600 seconds
+    assert_eq(d.as_secs(), 3600);
+}
+
+@test
+fn test_duration_new() {
+    let d = Duration.new(5, 500_000_000);  // 5.5 seconds
+    assert_eq(d.as_secs(), 5);
+    assert_eq(d.subsec_nanos(), 500_000_000);
+}
+
+// =============================================================================
+// Section 2: Accessor Tests
+// =============================================================================
+
+@test
+fn test_duration_as_nanos() {
+    let d = Duration.millis(1);
+    assert_eq(d.as_nanos(), 1_000_000);
+}
+
+@test
+fn test_duration_as_micros() {
+    let d = Duration.millis(1);
+    assert_eq(d.as_micros(), 1_000);
+}
+
+@test
+fn test_duration_as_millis() {
+    let d = Duration.secs(1);
+    assert_eq(d.as_millis(), 1_000);
+}
+
+@test
+fn test_duration_as_secs() {
+    let d = Duration.mins(1);
+    assert_eq(d.as_secs(), 60);
+}
+
+@test
+fn test_duration_subsec_nanos() {
+    let d = Duration.new(2, 123_456_789);
+    assert_eq(d.subsec_nanos(), 123_456_789);
+}
+
+@test
+fn test_duration_subsec_micros() {
+    let d = Duration.new(2, 123_456_789);
+    assert_eq(d.subsec_micros(), 123_456);
+}
+
+@test
+fn test_duration_subsec_millis() {
+    let d = Duration.new(2, 123_456_789);
+    assert_eq(d.subsec_millis(), 123);
+}
+
+// =============================================================================
+// Section 3: Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_duration_add() {
+    let d1 = Duration.secs(5);
+    let d2 = Duration.secs(3);
+    // Note: Using .add() method call instead of + operator
+    // because operator desugaring for non-primitive types is not yet implemented
+    let sum = d1.add(d2);
+
+    assert_eq(sum.as_secs(), 8);
+}
+
+@test
+fn test_duration_add_different_units() {
+    let d1 = Duration.secs(1);
+    let d2 = Duration.millis(500);
+    // Note: Using .add() method call instead of + operator
+    // because operator desugaring for non-primitive types is not yet implemented
+    let sum = d1.add(d2);
+
+    assert_eq(sum.as_millis(), 1_500);
+}
+
+@test
+fn test_duration_sub() {
+    let d1 = Duration.secs(10);
+    let d2 = Duration.secs(3);
+    // Note: Using .sub() method call instead of - operator
+    // because operator desugaring for non-primitive types is not yet implemented
+    let diff = d1.sub(d2);
+
+    assert_eq(diff.as_secs(), 7);
+}
+
+@test
+fn test_duration_sub_saturating() {
+    let d1 = Duration.secs(3);
+    let d2 = Duration.secs(10);
+    let diff = d1.saturating_sub(d2);
+
+    // Should be 0, not negative
+    assert_eq(diff.as_secs(), 0);
+    assert(diff.is_zero());
+}
+
+@test
+fn test_duration_mul() {
+    let d = Duration.secs(5);
+    // Note: Using .mul() method call instead of * operator
+    // because operator desugaring for non-primitive types is not yet implemented
+    let result = d.mul(3);
+
+    assert_eq(result.as_secs(), 15);
+}
+
+@test
+fn test_duration_div() {
+    let d = Duration.secs(15);
+    // Note: Using .div() method call instead of / operator
+    // because operator desugaring for non-primitive types is not yet implemented
+    let result = d.div(3);
+
+    assert_eq(result.as_secs(), 5);
+}
+
+// =============================================================================
+// Section 4: Comparison Tests
+// =============================================================================
+
+@test
+fn test_duration_eq() {
+    let d1 = Duration.secs(5);
+    let d2 = Duration.millis(5_000);
+
+    assert_eq(d1, d2);
+}
+
+@test
+fn test_duration_cmp() {
+    let shorter = Duration.secs(5);
+    let longer = Duration.secs(10);
+
+    assert(shorter < longer);
+    assert(longer > shorter);
+    assert(shorter <= shorter);
+    assert(shorter >= shorter);
+}
+
+// =============================================================================
+// Section 5: Utility Tests
+// =============================================================================
+
+@test
+fn test_duration_is_zero() {
+    let zero = Duration.zero();
+    let non_zero = Duration.nanos(1);
+
+    assert(zero.is_zero());
+    assert(!non_zero.is_zero());
+}
+
+@test
+fn test_duration_checked_add() {
+    let d1 = Duration.secs(5);
+    let d2 = Duration.secs(3);
+
+    match d1.checked_add(d2) {
+        Maybe.Some(result) => assert_eq(result.as_secs(), 8),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_sub() {
+    let d1 = Duration.secs(10);
+    let d2 = Duration.secs(3);
+
+    match d1.checked_sub(d2) {
+        Maybe.Some(result) => assert_eq(result.as_secs(), 7),
+        Maybe.None => panic("Expected Some"),
+    }
+
+    // Underflow case
+    let d3 = Duration.secs(3);
+    let d4 = Duration.secs(10);
+    match d3.checked_sub(d4) {
+        Maybe.None => {} // Expected - would underflow
+        Maybe.Some(_) => panic("Expected None for underflow"),
+    }
+}
+
+// =============================================================================
+// Section 6: Edge Cases
+// =============================================================================
+
+@test
+fn test_duration_negative_input() {
+    // Duration should treat negative inputs as 0
+    let d = Duration.nanos(-100);
+    assert_eq(d.as_nanos(), 0);
+}
+
+@test
+fn test_duration_large_values() {
+    let d = Duration.hours(24 * 365);  // 1 year in hours
+    assert(d.as_secs() > 0);
+}
+
+@test
+fn test_duration_precision() {
+    let d = Duration.nanos(1);
+    assert_eq(d.as_nanos(), 1);
+    assert_eq(d.as_micros(), 0);  // Truncated
+    assert_eq(d.as_millis(), 0);  // Truncated
+}
+
+@test
+fn test_duration_fractional_seconds() {
+    let d = Duration.new(1, 500_000_000);  // 1.5 seconds
+
+    assert_eq(d.as_secs(), 1);
+    assert_eq(d.as_millis(), 1_500);
+    assert_eq(d.subsec_millis(), 500);
+}
+
+// =============================================================================
+// Section 7: Constructor Aliases
+// =============================================================================
+
+@test
+fn test_duration_from_nanos_alias() {
+    let d1 = Duration.nanos(5000);
+    let d2 = Duration.from_nanos(5000);
+    assert_eq(d1.as_nanos(), d2.as_nanos());
+}
+
+@test
+fn test_duration_from_micros_alias() {
+    let d1 = Duration.micros(500);
+    let d2 = Duration.from_micros(500);
+    assert_eq(d1.as_micros(), d2.as_micros());
+}
+
+@test
+fn test_duration_from_millis_alias() {
+    let d1 = Duration.millis(250);
+    let d2 = Duration.from_millis(250);
+    assert_eq(d1.as_millis(), d2.as_millis());
+}
+
+@test
+fn test_duration_from_secs_alias() {
+    let d1 = Duration.secs(10);
+    let d2 = Duration.from_secs(10);
+    assert_eq(d1.as_secs(), d2.as_secs());
+}
+
+// =============================================================================
+// Section 8: as_secs_f64 Patterns
+// =============================================================================
+
+@test
+fn test_duration_as_secs_f64_whole_seconds() {
+    let d = Duration.secs(3);
+    let f: Float = d.as_secs_f64();
+    assert_eq(f, 3.0);
+}
+
+@test
+fn test_duration_as_secs_f64_fractional() {
+    let d = Duration.new(1, 500_000_000);  // 1.5 seconds
+    let f: Float = d.as_secs_f64();
+    assert_eq(f, 1.5);
+}
+
+@test
+fn test_duration_as_secs_f64_zero() {
+    let d = Duration.zero();
+    let f: Float = d.as_secs_f64();
+    assert_eq(f, 0.0);
+}
+
+@test
+fn test_duration_as_secs_f64_millis_only() {
+    let d = Duration.millis(250);
+    let f: Float = d.as_secs_f64();
+    assert_eq(f, 0.25);
+}
+
+@test
+fn test_duration_as_secs_f64_large() {
+    let d = Duration.hours(1);
+    let f: Float = d.as_secs_f64();
+    assert_eq(f, 3600.0);
+}
+
+// =============================================================================
+// Section 9: from_secs_f64 Patterns
+// =============================================================================
+
+@test
+fn test_duration_from_secs_f64_whole() {
+    let d = Duration.from_secs_f64(2.0);
+    assert_eq(d.as_secs(), 2);
+    assert_eq(d.subsec_nanos(), 0);
+}
+
+@test
+fn test_duration_from_secs_f64_fractional() {
+    let d = Duration.from_secs_f64(1.5);
+    assert_eq(d.as_secs(), 1);
+    assert_eq(d.subsec_millis(), 500);
+}
+
+@test
+fn test_duration_from_secs_f64_zero() {
+    let d = Duration.from_secs_f64(0.0);
+    assert(d.is_zero());
+    assert_eq(d.as_nanos(), 0);
+}
+
+@test
+fn test_duration_from_secs_f64_small() {
+    let d = Duration.from_secs_f64(0.001);
+    assert_eq(d.as_millis(), 1);
+}
+
+@test
+fn test_duration_from_secs_f64_large() {
+    let d = Duration.from_secs_f64(3600.0);
+    assert_eq(d.as_secs(), 3600);
+}
+
+// =============================================================================
+// Section 10: Checked Arithmetic Deeper
+// =============================================================================
+
+@test
+fn test_duration_checked_add_two_nonzero() {
+    let d1 = Duration.millis(750);
+    let d2 = Duration.millis(500);
+    match d1.checked_add(d2) {
+        Maybe.Some(result) => assert_eq(result.as_millis(), 1_250),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_add_zero_plus_nonzero() {
+    let d1 = Duration.zero();
+    let d2 = Duration.secs(5);
+    match d1.checked_add(d2) {
+        Maybe.Some(result) => assert_eq(result.as_secs(), 5),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_add_commutative() {
+    let d1 = Duration.secs(3);
+    let d2 = Duration.millis(700);
+    match d1.checked_add(d2) {
+        Maybe.Some(r1) => {
+            match d2.checked_add(d1) {
+                Maybe.Some(r2) => assert_eq(r1.as_nanos(), r2.as_nanos()),
+                Maybe.None => panic("Expected Some"),
+            }
+        },
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_sub_to_zero() {
+    let d1 = Duration.secs(5);
+    let d2 = Duration.secs(5);
+    match d1.checked_sub(d2) {
+        Maybe.Some(result) => {
+            assert(result.is_zero());
+            assert_eq(result.as_nanos(), 0);
+        },
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_sub_larger_minus_smaller() {
+    let d1 = Duration.millis(1_500);
+    let d2 = Duration.millis(500);
+    match d1.checked_sub(d2) {
+        Maybe.Some(result) => assert_eq(result.as_millis(), 1_000),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_mul_by_zero() {
+    let d = Duration.secs(10);
+    match d.checked_mul(0) {
+        Maybe.Some(result) => {
+            assert(result.is_zero());
+            assert_eq(result.as_nanos(), 0);
+        },
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_mul_by_one() {
+    let d = Duration.millis(750);
+    match d.checked_mul(1) {
+        Maybe.Some(result) => assert_eq(result.as_millis(), 750),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_mul_by_large() {
+    let d = Duration.secs(1);
+    match d.checked_mul(3600) {
+        Maybe.Some(result) => assert_eq(result.as_secs(), 3600),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_div_by_one() {
+    let d = Duration.secs(42);
+    match d.checked_div(1) {
+        Maybe.Some(result) => assert_eq(result.as_secs(), 42),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_div_evenly() {
+    let d = Duration.millis(900);
+    match d.checked_div(3) {
+        Maybe.Some(result) => assert_eq(result.as_millis(), 300),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_div_with_truncation() {
+    let d = Duration.secs(10);
+    match d.checked_div(3) {
+        Maybe.Some(result) => assert_eq(result.as_secs(), 3),
+        Maybe.None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_duration_checked_div_by_zero() {
+    let d = Duration.secs(5);
+    match d.checked_div(0) {
+        Maybe.None => {}  // Expected - division by zero
+        Maybe.Some(_) => panic("Expected None for division by zero"),
+    }
+}
+
+// =============================================================================
+// Section 11: Saturating Arithmetic
+// =============================================================================
+
+@test
+fn test_duration_saturating_add_basic() {
+    let d1 = Duration.secs(3);
+    let d2 = Duration.secs(4);
+    let result = d1.saturating_add(d2);
+    assert_eq(result.as_secs(), 7);
+}
+
+@test
+fn test_duration_saturating_add_with_zero() {
+    let d1 = Duration.secs(10);
+    let d2 = Duration.zero();
+    let result = d1.saturating_add(d2);
+    assert_eq(result.as_secs(), 10);
+}
+
+@test
+fn test_duration_saturating_sub_larger_from_smaller() {
+    let d1 = Duration.secs(2);
+    let d2 = Duration.secs(5);
+    let result = d1.saturating_sub(d2);
+    assert(result.is_zero());
+    assert_eq(result.as_nanos(), 0);
+}
+
+@test
+fn test_duration_saturating_sub_zero_minus_something() {
+    let d1 = Duration.zero();
+    let d2 = Duration.secs(100);
+    let result = d1.saturating_sub(d2);
+    assert(result.is_zero());
+}
+
+@test
+fn test_duration_saturating_sub_equal() {
+    let d1 = Duration.millis(500);
+    let d2 = Duration.millis(500);
+    let result = d1.saturating_sub(d2);
+    assert(result.is_zero());
+}
+
+@test
+fn test_duration_saturating_mul_basic() {
+    let d = Duration.millis(100);
+    let result = d.saturating_mul(5);
+    assert_eq(result.as_millis(), 500);
+}
+
+@test
+fn test_duration_saturating_mul_by_zero() {
+    let d = Duration.secs(999);
+    let result = d.saturating_mul(0);
+    assert(result.is_zero());
+}
+
+// =============================================================================
+// Section 12: Comparison Deeper
+// =============================================================================
+
+@test
+fn test_duration_eq_same_construction() {
+    let d1 = Duration.secs(5);
+    let d2 = Duration.secs(5);
+    assert_eq(d1, d2);
+}
+
+@test
+fn test_duration_eq_different_construction() {
+    let d1 = Duration.millis(1_000);
+    let d2 = Duration.secs(1);
+    assert_eq(d1, d2);
+}
+
+@test
+fn test_duration_cmp_zero_vs_nonzero() {
+    let zero = Duration.zero();
+    let nonzero = Duration.nanos(1);
+    assert(zero < nonzero);
+    assert(nonzero > zero);
+}
+
+@test
+fn test_duration_cmp_nanos_vs_micros() {
+    let small = Duration.nanos(999);
+    let bigger = Duration.micros(1);  // 1000 nanos
+    assert(small < bigger);
+}
+
+@test
+fn test_duration_cmp_transitivity() {
+    let a = Duration.secs(1);
+    let b = Duration.secs(2);
+    let c = Duration.secs(3);
+    assert(a < b);
+    assert(b < c);
+    assert(a < c);
+}
+
+@test
+fn test_duration_neq() {
+    let d1 = Duration.secs(5);
+    let d2 = Duration.secs(6);
+    assert(d1 != d2);
+}
+
+@test
+fn test_duration_le_ge_equal() {
+    let d1 = Duration.millis(100);
+    let d2 = Duration.millis(100);
+    assert(d1 <= d2);
+    assert(d1 >= d2);
+}
+
+// =============================================================================
+// Section 13: Arithmetic Edge Cases
+// =============================================================================
+
+@test
+fn test_duration_add_zero_left() {
+    let d1 = Duration.zero();
+    let d2 = Duration.secs(7);
+    let result = d1.add(d2);
+    assert_eq(result.as_secs(), 7);
+}
+
+@test
+fn test_duration_add_zero_right() {
+    let d1 = Duration.secs(7);
+    let d2 = Duration.zero();
+    let result = d1.add(d2);
+    assert_eq(result.as_secs(), 7);
+}
+
+@test
+fn test_duration_sub_zero() {
+    let d1 = Duration.secs(10);
+    let d2 = Duration.zero();
+    let result = d1.sub(d2);
+    assert_eq(result.as_secs(), 10);
+}
+
+@test
+fn test_duration_mul_by_one() {
+    let d = Duration.millis(333);
+    let result = d.mul(1);
+    assert_eq(result.as_millis(), 333);
+}
+
+@test
+fn test_duration_mul_by_zero() {
+    let d = Duration.secs(100);
+    let result = d.mul(0);
+    assert(result.is_zero());
+}
+
+@test
+fn test_duration_div_by_one() {
+    let d = Duration.millis(777);
+    let result = d.div(1);
+    assert_eq(result.as_millis(), 777);
+}
+
+// =============================================================================
+// Section 14: Mixed Unit Construction
+// =============================================================================
+
+@test
+fn test_duration_new_subsec_nanos_small() {
+    let d = Duration.new(0, 100);
+    assert_eq(d.as_secs(), 0);
+    assert_eq(d.as_nanos(), 100);
+    assert_eq(d.subsec_nanos(), 100);
+}
+
+@test
+fn test_duration_new_large_secs_with_nanos() {
+    let d = Duration.new(3600, 999_999_999);
+    assert_eq(d.as_secs(), 3600);
+    assert_eq(d.subsec_nanos(), 999_999_999);
+}
+
+@test
+fn test_duration_new_zero_secs_with_nanos() {
+    let d = Duration.new(0, 500_000_000);  // 0.5 seconds
+    assert_eq(d.as_secs(), 0);
+    assert_eq(d.as_millis(), 500);
+}
+
+@test
+fn test_duration_new_both_zero() {
+    let d = Duration.new(0, 0);
+    assert(d.is_zero());
+}
+
+// =============================================================================
+// Section 15: is_zero Deeper
+// =============================================================================
+
+@test
+fn test_duration_is_zero_after_sub_to_zero() {
+    let d1 = Duration.secs(5);
+    let d2 = Duration.secs(5);
+    let result = d1.sub(d2);
+    assert(result.is_zero());
+}
+
+@test
+fn test_duration_is_zero_not_for_one_nano() {
+    let d = Duration.nanos(1);
+    assert(!d.is_zero());
+}
+
+@test
+fn test_duration_is_zero_not_for_one_micro() {
+    let d = Duration.micros(1);
+    assert(!d.is_zero());
+}
+
+@test
+fn test_duration_is_zero_not_for_one_milli() {
+    let d = Duration.millis(1);
+    assert(!d.is_zero());
+}
+
+@test
+fn test_duration_is_zero_not_for_one_sec() {
+    let d = Duration.secs(1);
+    assert(!d.is_zero());
+}
+
+// =============================================================================
+// Section 16: from_mins and from_hours Verification
+// =============================================================================
+
+@test
+fn test_duration_from_mins_to_millis() {
+    let d = Duration.mins(1);
+    assert_eq(d.as_millis(), 60_000);
+}
+
+@test
+fn test_duration_from_mins_multiple() {
+    let d = Duration.mins(5);
+    assert_eq(d.as_secs(), 300);
+}
+
+@test
+fn test_duration_from_hours_to_millis() {
+    let d = Duration.hours(1);
+    assert_eq(d.as_millis(), 3_600_000);
+}
+
+@test
+fn test_duration_from_hours_multiple() {
+    let d = Duration.hours(24);
+    assert_eq(d.as_secs(), 86_400);
+}
+
+// =============================================================================
+// Section 17: Subsecond Accessors with Various Durations
+// =============================================================================
+
+@test
+fn test_duration_subsec_nanos_exact_millis() {
+    let d = Duration.new(0, 500_000_000);  // exactly 500ms
+    assert_eq(d.subsec_nanos(), 500_000_000);
+    assert_eq(d.subsec_micros(), 500_000);
+    assert_eq(d.subsec_millis(), 500);
+}
+
+@test
+fn test_duration_subsec_nanos_odd_value() {
+    let d = Duration.new(1, 123_000_000);
+    assert_eq(d.subsec_nanos(), 123_000_000);
+    assert_eq(d.subsec_micros(), 123_000);
+    assert_eq(d.subsec_millis(), 123);
+}
+
+@test
+fn test_duration_subsec_nanos_with_remainder() {
+    let d = Duration.new(0, 1_234_567);
+    assert_eq(d.subsec_nanos(), 1_234_567);
+    assert_eq(d.subsec_micros(), 1_234);
+    assert_eq(d.subsec_millis(), 1);
+}
+
+@test
+fn test_duration_subsec_nanos_zero() {
+    let d = Duration.secs(5);
+    assert_eq(d.subsec_nanos(), 0);
+    assert_eq(d.subsec_micros(), 0);
+    assert_eq(d.subsec_millis(), 0);
+}
+
+// =============================================================================
+// Section 18: Protocol Behavior
+// =============================================================================
+
+@test
+fn test_duration_default_is_zero() {
+    let d = Duration.zero();
+    assert(d.is_zero());
+    assert_eq(d.as_nanos(), 0);
+    assert_eq(d.as_secs(), 0);
+}
+
+@test
+fn test_duration_eq_reflexive() {
+    let d = Duration.new(3, 141_592_653);
+    assert_eq(d, d);
+}
+
+@test
+fn test_duration_ord_consistent_with_eq() {
+    let d1 = Duration.millis(1_000);
+    let d2 = Duration.secs(1);
+    // Equal durations should not be less or greater
+    assert(d1 <= d2);
+    assert(d1 >= d2);
+    assert(!(d1 < d2));
+    assert(!(d1 > d2));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

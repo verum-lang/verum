@@ -1,0 +1,64 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: spawn, thread, concurrency, runtime
+// @description: Test basic thread spawn/join with value capture
+
+fn worker_square(x: Int) -> Int {
+    x * x
+}
+
+fn test_single_spawn() -> Int {
+    let h = spawn { worker_square(7) };
+    let result = h.await;
+    if result != 49 {
+        print(f"FAIL: expected 49, got {result}");
+        return 1;
+    }
+    print("  single_spawn: OK");
+    0
+}
+
+fn test_multiple_spawns() -> Int {
+    let h1 = spawn { worker_square(3) };
+    let h2 = spawn { worker_square(4) };
+    let h3 = spawn { worker_square(5) };
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+
+    let sum = r1 + r2 + r3;
+    // 9 + 16 + 25 = 50
+    if sum != 50 {
+        print(f"FAIL: expected 50, got {sum}");
+        return 1;
+    }
+    print("  multiple_spawns: OK");
+    0
+}
+
+fn test_spawn_capture() -> Int {
+    let a = 10;
+    let b = 32;
+    let h = spawn { a + b };
+    let result = h.await;
+    if result != 42 {
+        print(f"FAIL: expected 42, got {result}");
+        return 1;
+    }
+    print("  spawn_capture: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_single_spawn();
+    failures = failures + test_multiple_spawns();
+    failures = failures + test_spawn_capture();
+
+    if failures == 0 {
+        print("All spawn thread tests passed");
+    }
+    failures
+}

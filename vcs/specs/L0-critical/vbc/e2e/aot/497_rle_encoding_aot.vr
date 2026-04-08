@@ -1,0 +1,206 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, rle, encoding, compression
+// @timeout: 30000
+
+// Run-length encoding and decoding
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// RLE encode: store as (value, count) pairs packed as value*100+count
+type RLEResult is { encoded: Arr8, len: Int };
+
+fn rle_encode2(data: Arr8, n: Int) -> RLEResult {
+    if n == 0 { return RLEResult { encoded: zeros(), len: 0 }; }
+    let mut encoded = zeros();
+    let mut pos = 0;
+    let mut i = 0;
+    while i < n {
+        let val = get8(data, i);
+        let mut count = 1;
+        let mut cont = 1;
+        while cont == 1 {
+            if i + count >= n { cont = 0; }
+            else if get8(data, i + count) != val { cont = 0; }
+            else { count = count + 1; }
+        }
+        if pos < 8 {
+            encoded = set8(encoded, pos, val * 100 + count);
+        }
+        pos = pos + 1;
+        i = i + count;
+    }
+    RLEResult { encoded: encoded, len: pos }
+}
+
+// Decode RLE
+fn rle_decode(encoded: Arr8, enc_len: Int) -> RLEResult {
+    let mut decoded = zeros();
+    let mut pos = 0;
+    let mut i = 0;
+    while i < enc_len {
+        let pair = get8(encoded, i);
+        let val = pair / 100;
+        let count = pair % 100;
+        let mut j = 0;
+        while j < count {
+            if pos < 8 {
+                decoded = set8(decoded, pos, val);
+            }
+            pos = pos + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    RLEResult { encoded: decoded, len: pos }
+}
+
+// Count runs (number of distinct consecutive groups)
+fn count_runs(data: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut runs = 1;
+    let mut i = 1;
+    while i < n {
+        if get8(data, i) != get8(data, i - 1) { runs = runs + 1; }
+        i = i + 1;
+    }
+    runs
+}
+
+// Longest run length
+fn longest_run(data: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut max_run = 1;
+    let mut cur_run = 1;
+    let mut i = 1;
+    while i < n {
+        if get8(data, i) == get8(data, i - 1) {
+            cur_run = cur_run + 1;
+            if cur_run > max_run { max_run = cur_run; }
+        } else {
+            cur_run = 1;
+        }
+        i = i + 1;
+    }
+    max_run
+}
+
+// Value of the longest run
+fn longest_run_val(data: Arr8, n: Int) -> Int {
+    if n == 0 { return -1; }
+    let mut max_run = 1;
+    let mut max_val = get8(data, 0);
+    let mut cur_run = 1;
+    let mut i = 1;
+    while i < n {
+        if get8(data, i) == get8(data, i - 1) {
+            cur_run = cur_run + 1;
+            if cur_run > max_run {
+                max_run = cur_run;
+                max_val = get8(data, i);
+            }
+        } else {
+            cur_run = 1;
+        }
+        i = i + 1;
+    }
+    max_val
+}
+
+fn test_encode_decode() -> Int {
+    // [1,1,1,2,2,3,3,3]
+    let data = Arr8 { v0: 1, v1: 1, v2: 1, v3: 2, v4: 2, v5: 3, v6: 3, v7: 3 };
+    let enc = rle_encode2(data, 8);
+    assert_eq(enc.len, 3); // 3 runs
+    assert_eq(get8(enc.encoded, 0), 103); // 1*100+3
+    assert_eq(get8(enc.encoded, 1), 202); // 2*100+2
+    assert_eq(get8(enc.encoded, 2), 303); // 3*100+3
+
+    // Decode back
+    let dec = rle_decode(enc.encoded, enc.len);
+    assert_eq(dec.len, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(get8(dec.encoded, i), get8(data, i));
+        i = i + 1;
+    }
+    1
+}
+
+fn test_all_same() -> Int {
+    let data = Arr8 { v0: 5, v1: 5, v2: 5, v3: 5, v4: 5, v5: 5, v6: 5, v7: 5 };
+    let enc = rle_encode2(data, 8);
+    assert_eq(enc.len, 1);
+    assert_eq(get8(enc.encoded, 0), 508); // 5*100+8
+    1
+}
+
+fn test_all_different() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 0 };
+    let enc = rle_encode2(data, 8);
+    assert_eq(enc.len, 8); // 8 runs of 1
+    assert_eq(get8(enc.encoded, 0), 101); // 1*100+1
+    assert_eq(get8(enc.encoded, 1), 201); // 2*100+1
+    1
+}
+
+fn test_count_runs() -> Int {
+    let data = Arr8 { v0: 1, v1: 1, v2: 2, v3: 2, v4: 2, v5: 1, v6: 1, v7: 3 };
+    assert_eq(count_runs(data, 8), 4); // 1,2,1,3
+
+    let all_same = Arr8 { v0: 7, v1: 7, v2: 7, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(count_runs(all_same, 4), 1);
+    1
+}
+
+fn test_longest_run() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 2, v3: 2, v4: 3, v5: 3, v6: 1, v7: 0 };
+    assert_eq(longest_run(data, 7), 3); // three 2s
+    assert_eq(longest_run_val(data, 7), 2);
+
+    let data2 = Arr8 { v0: 5, v1: 5, v2: 5, v3: 5, v4: 5, v5: 5, v6: 5, v7: 5 };
+    assert_eq(longest_run(data2, 8), 8);
+    1
+}
+
+fn test_single_element() -> Int {
+    let data = Arr8 { v0: 42, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let enc = rle_encode2(data, 1);
+    assert_eq(enc.len, 1);
+    assert_eq(get8(enc.encoded, 0), 4201); // 42*100+1
+    assert_eq(count_runs(data, 1), 1);
+    assert_eq(longest_run(data, 1), 1);
+    1
+}
+
+fn main() -> Int {
+    test_encode_decode();
+    test_all_same();
+    test_all_different();
+    test_count_runs();
+    test_longest_run();
+    test_single_element();
+    print("[OK] 497_rle_encoding_aot");
+    0
+}

@@ -1,0 +1,53 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, functions
+// @description: Test basic function declaration parsing
+
+// Minimal function
+fn minimal() {}
+
+// Function with return type
+fn with_return() -> Int {
+    42
+}
+
+// Function with parameters
+fn with_params(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// Function with body expression
+fn expr_body(x: Int) -> Int = x * 2;
+
+// Multiple parameters
+fn many_params(a: Int, b: Float, c: Text, d: Bool) -> Text {
+    f"{a} {b} {c} {d}"
+}
+
+// Generic function
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Multiple type parameters
+fn pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+// With bounds
+fn bounded<T: Display>(x: T) -> Text {
+    x.to_text()
+}
+
+// Multiple bounds
+fn multi_bound<T: Clone + Debug + Display>(x: T) -> T {
+    x.clone()
+}
+
+// Visibility modifiers
+pub fn public_fn() {}
+internal fn internal_fn() {}
+protected fn protected_fn() {}
+
+// Forward declaration
+fn forward_decl(x: Int) -> Int;

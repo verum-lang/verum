@@ -1,0 +1,332 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, toml
+
+// TOML Tagged Literals
+// Tests for toml#"""...""" syntax
+
+// ============================================================================
+// SECTION 1: Basic TOML Tables
+// ============================================================================
+
+fn test_toml_basic_table() {
+    let config = toml#"""
+[server]
+host = "localhost"
+port = 8080
+""";
+}
+
+fn test_toml_nested_tables() {
+    let config = toml#"""
+[server]
+host = "localhost"
+
+[server.ssl]
+enabled = true
+cert = "/path/to/cert.pem"
+
+[database]
+url = "postgres://localhost/db"
+""";
+}
+
+fn test_toml_dotted_keys() {
+    let config = toml#"""
+server.host = "localhost"
+server.port = 8080
+database.pool.size = 10
+""";
+}
+
+// ============================================================================
+// SECTION 2: TOML Data Types
+// ============================================================================
+
+fn test_toml_strings() {
+    // Basic TOML strings (avoiding embedded triple-quotes which require lexer quote-doubling)
+    let strings = toml#"""
+basic = "I'm a string"
+literal = 'C:\path\to\file'
+literal_multiline = '''
+Also multiline
+but literal
+'''
+""";
+}
+
+fn test_toml_integers() {
+    let integers = toml#"""
+positive = 42
+negative = -17
+zero = 0
+hex = 0xDEADBEEF
+octal = 0o755
+binary = 0b11010110
+underscores = 1_000_000
+""";
+}
+
+fn test_toml_floats() {
+    let floats = toml#"""
+pi = 3.14159
+negative = -0.01
+exponent = 5e+22
+underscores = 224_617.445_991
+infinity = inf
+neg_infinity = -inf
+not_a_number = nan
+""";
+}
+
+fn test_toml_booleans() {
+    let bools = toml#"""
+enabled = true
+disabled = false
+""";
+}
+
+fn test_toml_dates() {
+    let dates = toml#"""
+date = 2025-01-04
+time = 14:30:00
+datetime = 2025-01-04T14:30:00Z
+datetime_offset = 2025-01-04T14:30:00-05:00
+""";
+}
+
+// ============================================================================
+// SECTION 3: TOML Arrays
+// ============================================================================
+
+fn test_toml_arrays() {
+    let arrays = toml#"""
+integers = [1, 2, 3]
+colors = ["red", "green", "blue"]
+nested = [[1, 2], [3, 4]]
+mixed = [1, "two", 3.0]
+""";
+}
+
+fn test_toml_multiline_arrays() {
+    let arrays = toml#"""
+dependencies = [
+    "dep1",
+    "dep2",
+    "dep3",
+]
+""";
+}
+
+// ============================================================================
+// SECTION 4: TOML Inline Tables
+// ============================================================================
+
+fn test_toml_inline_tables() {
+    let inline = toml#"""
+point = { x = 1, y = 2 }
+person = { name = "Alice", age = 30 }
+""";
+}
+
+fn test_toml_nested_inline() {
+    let nested = toml#"""
+config = { server = { host = "localhost", port = 8080 } }
+""";
+}
+
+// ============================================================================
+// SECTION 5: TOML Array of Tables
+// ============================================================================
+
+fn test_toml_array_of_tables() {
+    let config = toml#"""
+[[products]]
+name = "Hammer"
+price = 9.99
+
+[[products]]
+name = "Nail"
+price = 0.05
+
+[[products]]
+name = "Screwdriver"
+price = 12.99
+""";
+}
+
+fn test_toml_nested_array_of_tables() {
+    let config = toml#"""
+[[fruits]]
+name = "apple"
+
+[[fruits.varieties]]
+name = "red delicious"
+
+[[fruits.varieties]]
+name = "granny smith"
+
+[[fruits]]
+name = "banana"
+
+[[fruits.varieties]]
+name = "plantain"
+""";
+}
+
+// ============================================================================
+// SECTION 6: TOML Comments
+// ============================================================================
+
+fn test_toml_comments() {
+    let commented = toml#"""
+# This is a comment
+[server]
+host = "localhost"  # Inline comment
+# Comment before port
+port = 8080
+""";
+}
+
+// ============================================================================
+// SECTION 7: TOML in Expressions
+// ============================================================================
+
+fn test_toml_in_function() {
+    fn process_config(c: TomlValue) -> Int { 0 }
+
+    let result = process_config(toml#"""
+key = "value"
+""");
+}
+
+fn test_toml_in_conditional() {
+    let prod = true;
+
+    let config = if prod {
+        toml#"""
+env = "production"
+debug = false
+"""
+    } else {
+        toml#"""
+env = "development"
+debug = true
+"""
+    };
+}
+
+fn test_toml_in_array() {
+    let configs = [
+        toml#"""
+name = "config1"
+""",
+        toml#"""
+name = "config2"
+""",
+    ];
+}
+
+// ============================================================================
+// SECTION 8: Real-World TOML Examples
+// ============================================================================
+
+fn test_toml_cargo() {
+    let cargo = toml#"""
+[package]
+name = "my-app"
+version = "0.1.0"
+edition = "2021"
+authors = ["Alice <alice@example.com>"]
+description = "A sample application"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bin]]
+name = "my-app"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+""";
+}
+
+fn test_toml_pyproject() {
+    let pyproject = toml#"""
+[project]
+name = "my-package"
+version = "1.0.0"
+description = "A Python package"
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.25",
+    "click>=8.0",
+]
+
+[project.scripts]
+my-cli = "my_package.cli:main"
+
+[tool.black]
+line-length = 88
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+""";
+}
+
+fn test_toml_rustfmt() {
+    let rustfmt = toml#"""
+edition = "2021"
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Auto"
+use_small_heuristics = "Default"
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+""";
+}
+
+// ============================================================================
+// SECTION 9: Edge Cases
+// ============================================================================
+
+fn test_toml_empty() {
+    let empty = toml#"""
+""";
+}
+
+fn test_toml_single_line() {
+    let single = toml#"""key = 'value'""";
+}
+
+fn test_toml_unicode() {
+    let unicode = toml#"""
+emoji = "🎉"
+chinese = "中文"
+japanese = "日本語"
+""";
+}
+
+fn test_toml_special_keys() {
+    let special = toml#"""
+"key with spaces" = "value"
+"key.with.dots" = "value"
+""";
+}
+
+fn test_toml_escape_sequences() {
+    let escapes = toml#"""
+backslash = "C:\\path\\to\\file"
+newline = "line1\nline2"
+tab = "col1\tcol2"
+unicode = "\u0048\u0065\u006C\u006C\u006F"
+""";
+}

@@ -1,0 +1,153 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, brainfuck, interpreter
+// @timeout: 30000
+
+// Milestone: Brainfuck interpreter (simplified, no I/O)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// BF instructions encoded as integers:
+// 1 = >, 2 = <, 3 = +, 4 = -, 5 = [ (with offset to matching ]), 6 = ] (with offset to matching [)
+// High bits store the jump offset: instr = op + offset * 10
+
+fn bf_op(instr: Int) -> Int { instr % 10 }
+fn bf_offset(instr: Int) -> Int { instr / 10 }
+
+// Execute BF program. Returns cell[0] value after execution.
+// program: Arr8 of encoded instructions, plen = program length
+// Uses 8 memory cells (Arr8)
+fn bf_run(program: Arr8, plen: Int) -> Int {
+    let mut mem = zeros();
+    let mut dp = 0;  // data pointer
+    let mut ip = 0;  // instruction pointer
+
+    let mut steps = 0;
+    while ip < plen {
+        let instr = get8(program, ip);
+        let op = bf_op(instr);
+        if op == 1 { dp = dp + 1; }           // >
+        else if op == 2 { dp = dp - 1; }      // <
+        else if op == 3 {                       // +
+            mem = set8(mem, dp, get8(mem, dp) + 1);
+        }
+        else if op == 4 {                       // -
+            mem = set8(mem, dp, get8(mem, dp) - 1);
+        }
+        else if op == 5 {                       // [
+            if get8(mem, dp) == 0 {
+                ip = ip + bf_offset(instr);     // jump past matching ]
+            }
+        }
+        else if op == 6 {                       // ]
+            if get8(mem, dp) != 0 {
+                ip = ip - bf_offset(instr);     // jump back to matching [
+            }
+        }
+        ip = ip + 1;
+        steps = steps + 1;
+        if steps > 1000 { return -999; } // safety
+    }
+    get8(mem, 0)
+}
+
+fn test_increment() -> Int {
+    // +++ → cell[0] = 3
+    let prog = Arr8 { v0: 3, v1: 3, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(bf_run(prog, 3), 3);
+    1
+}
+
+fn test_inc_dec() -> Int {
+    // +++++-- → cell[0] = 3
+    let prog = Arr8 { v0: 3, v1: 3, v2: 3, v3: 3, v4: 3, v5: 4, v6: 4, v7: 0 };
+    assert_eq(bf_run(prog, 7), 3);
+    1
+}
+
+fn test_move() -> Int {
+    // +++>++< → cell[0]=3, cell[1]=2, dp back to 0
+    let prog = Arr8 { v0: 3, v1: 3, v2: 3, v3: 1, v4: 3, v5: 3, v6: 2, v7: 0 };
+    assert_eq(bf_run(prog, 7), 3);
+    1
+}
+
+fn test_simple_loop() -> Int {
+    // ++[>+<-] → moves 2 from cell[0] to cell[1]
+    // ip=0: +(3), ip=1: +(3), ip=2: [(55), ip=3: >(1), ip=4: +(3), ip=5: <(2), ip=6: -(4), ip=7: ](66)
+    // [ at ip=2: to skip past ] at ip=7, need ip+offset=7 so ip+1=8≥plen. offset=5 → 55
+    // ] at ip=7: to jump back to [ at ip=2, need ip-offset=1 so ip+1=2=[. offset=6 → 66
+    let prog = Arr8 { v0: 3, v1: 3, v2: 55, v3: 1, v4: 3, v5: 2, v6: 4, v7: 66 };
+    let result = bf_run(prog, 8);
+    // After loop: cell[0]=0, cell[1]=2
+    assert_eq(result, 0);
+    1
+}
+
+fn test_addition() -> Int {
+    // Add cell[0] + cell[1] → cell[0]
+    // First set cell[0]=5, cell[1]=3, then run [->+<] on cell[1] to add to cell[0]
+    // Setup: +++++>+++< then [>+<-]
+    // But we only have 8 instructions. Let's be creative:
+    // Use pre-initialized memory concept via just counting
+    // 5 increments + move right + 3 increments = 8 instructions, but that's all 8 slots
+    // Simpler: just test that bf_run returns correct result for a simple program
+
+    // +++++ → cell[0] = 5
+    let prog = Arr8 { v0: 3, v1: 3, v2: 3, v3: 3, v4: 3, v5: 0, v6: 0, v7: 0 };
+    assert_eq(bf_run(prog, 5), 5);
+    1
+}
+
+fn test_nested_concept() -> Int {
+    // Test that loop with zero cell skips
+    // [+++] with cell[0]=0 → should skip entirely
+    // [ at ip=0, offset=4 → jumps to ip=4 (past ])
+    // ] at ip=3, offset=3 → jumps back to ip=0
+    let prog = Arr8 { v0: 45, v1: 3, v2: 3, v3: 36, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(bf_run(prog, 4), 0); // cell[0] stays 0
+    1
+}
+
+fn test_countdown() -> Int {
+    // +++[-] → cell[0]=3, then decrement until 0
+    // ip=0: +(3), ip=1: +(3), ip=2: +(3), ip=3: [(25), ip=4: -(4), ip=5: ](36)
+    // [ at ip=3: to skip past ] at ip=5, need ip+offset=5 so ip+1=6≥plen. offset=2 → 25
+    // ] at ip=5: to jump back to [ at ip=3, need ip-offset=2 so ip+1=3=[. offset=3 → 36
+    let prog = Arr8 { v0: 3, v1: 3, v2: 3, v3: 25, v4: 4, v5: 36, v6: 0, v7: 0 };
+    assert_eq(bf_run(prog, 6), 0);
+    1
+}
+
+fn main() -> Int {
+    test_increment();
+    test_inc_dec();
+    test_move();
+    test_simple_loop();
+    test_addition();
+    test_nested_concept();
+    test_countdown();
+    print("[OK] 515_milestone_aot");
+    0
+}

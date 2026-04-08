@@ -1,0 +1,160 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, refinement-desugaring
+
+/// Sigma types - dependent pairs (refinement types as a special case)
+///
+/// Refinement types are syntactic sugar for dependent pairs where
+/// the second component is a proof about the first.
+
+/// Refinement type: even integer
+type EvenInt is Int where self % 2 == 0;
+
+/// Refinement type: positive integer
+type Positive is Int{> 0};
+
+/// Refinement type: valid age
+type ValidAge is Int{>= 0 && self <= 150};
+
+/// Refinement type: non-empty text
+type NonEmptyText is Text where self.len() > 0;
+
+/// Explicit sigma-style: non-empty list
+type NonEmptyList<T> is {
+    data: List<T>,
+    length: Int,
+};
+
+/// Safe head extraction
+fn head<T>(ne: NonEmptyList<T>) -> T
+where ne.length > 0 {
+    ne.data[0]
+}
+
+/// Safe last element
+fn last_elem<T>(ne: NonEmptyList<T>) -> T
+where ne.length > 0 {
+    ne.data[ne.length - 1]
+}
+
+/// Division that cannot divide by zero
+fn safe_div(a: Int, b: Positive) -> Int {
+    a / b
+}
+
+/// Sorted list type
+type SortedList<T> is {
+    data: List<T>,
+};
+
+/// Binary search only on sorted lists
+fn binary_search(sorted: SortedList<Int>, target: Int) -> Maybe<Int> {
+    let mut lo = 0;
+    let mut hi = sorted.data.len() - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if sorted.data[mid] == target {
+            return Some(mid);
+        } else if sorted.data[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    None
+}
+
+/// Bounded integer (sigma-style)
+type BoundedInt<Lo: meta Int, Hi: meta Int> is Int{>= Lo && self <= Hi};
+
+/// Percentage (0-100)
+type Percentage is BoundedInt<0, 100>;
+
+/// Create percentage with runtime check
+fn make_percentage(value: Int) -> Maybe<Percentage> {
+    if 0 <= value && value <= 100 {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+/// Matrix with size proof
+type Matrix<T, Rows: meta Int, Cols: meta Int> is {
+    data: [T; Rows * Cols],
+};
+
+/// Square matrix type alias
+type SquareMatrix<T, N: meta Int> is Matrix<T, N, N>;
+
+/// Constructing dependent pairs
+fn mk_nonempty<T>(x: T, xs: List<T>) -> NonEmptyList<T> {
+    let mut data = [x];
+    for item in xs {
+        data.push(item);
+    }
+    NonEmptyList {
+        data,
+        length: 1 + xs.len(),
+    }
+}
+
+/// Preserving proofs through operations
+fn map_nonempty<T, U>(ne: NonEmptyList<T>, f: fn(T) -> U) -> NonEmptyList<U> {
+    NonEmptyList {
+        data: ne.data.map(f),
+        length: ne.length,
+    }
+}
+
+/// Combining collections
+fn concat_nonempty<T>(a: NonEmptyList<T>, b: NonEmptyList<T>) -> NonEmptyList<T> {
+    NonEmptyList {
+        data: a.data ++ b.data,
+        length: a.length + b.length,
+    }
+}
+
+fn main() {
+    // Refinement types
+    let even: EvenInt = 42;
+    let pos: Positive = 10;
+    let age: ValidAge = 25;
+
+    // Safe division
+    let result = safe_div(100, pos);
+    assert(result == 10);
+
+    // NonEmpty list
+    let ne = mk_nonempty(1, [2, 3, 4]);
+    assert(ne.length == 4);
+
+    // Map preserves non-emptiness
+    let doubled = map_nonempty(ne, |x| x * 2);
+    assert(doubled.length == 4);
+
+    // Sorted list
+    let sorted: SortedList<Int> = SortedList { data: [1, 3, 5, 7, 9] };
+    let found = binary_search(sorted, 5);
+    assert(found.is_some());
+
+    // Bounded values
+    let pct = make_percentage(75);
+    assert(pct.is_some());
+
+    let invalid = make_percentage(150);
+    assert(invalid.is_none());
+
+    // Matrix with size
+    let m: Matrix<Float, 2, 3> = Matrix {
+        data: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+    };
+    assert(m.data.len() == 6);
+
+    // Square matrix
+    let sq: SquareMatrix<Float, 3> = SquareMatrix {
+        data: [0.0; 9],
+    };
+    assert(sq.data.len() == 9);
+}

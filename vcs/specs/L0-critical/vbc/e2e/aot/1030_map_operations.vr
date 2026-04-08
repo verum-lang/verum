@@ -1,0 +1,84 @@
+// @test: run
+// Map operations — insert, get, contains, remove, len
+
+fn main() -> Int {
+    // Test 1: Basic map operations
+    let mut m = Map.new();
+    m.insert("one", 1);
+    m.insert("two", 2);
+    m.insert("three", 3);
+
+    if (m.len() != 3) {
+        print(f"FAIL test1: len = {m.len()}");
+        return 1;
+    }
+    print("test1 map len: OK");
+
+    // Test 2: Map get
+    let v = m.get("two");
+    if (v != 2) {
+        print(f"FAIL test2: get('two') = {v}");
+        return 1;
+    }
+    print("test2 map get: OK");
+
+    // Test 3: Contains key
+    if (!m.contains_key("one")) {
+        print("FAIL test3a: missing 'one'");
+        return 1;
+    }
+    if (m.contains_key("four")) {
+        print("FAIL test3b: found 'four'");
+        return 1;
+    }
+    print("test3 contains_key: OK");
+
+    // Test 4: Update existing key
+    m.insert("two", 22);
+    let v2 = m.get("two");
+    if (v2 != 22) {
+        print(f"FAIL test4: get('two') after update = {v2}");
+        return 1;
+    }
+    if (m.len() != 3) {
+        print(f"FAIL test4: len after update = {m.len()}");
+        return 1;
+    }
+    print("test4 update: OK");
+
+    // Test 5: Remove
+    m.remove("two");
+    if (m.len() != 2) {
+        print(f"FAIL test5: len after remove = {m.len()}");
+        return 1;
+    }
+    if (m.contains_key("two")) {
+        print("FAIL test5: still contains 'two'");
+        return 1;
+    }
+    print("test5 remove: OK");
+
+    // Test 6: Int keys
+    let mut nums = Map.new();
+    let mut i = 0;
+    while i < 10 {
+        nums.insert(i, i * i);
+        i = i + 1;
+    }
+    if (nums.len() != 10) {
+        print(f"FAIL test6: len = {nums.len()}");
+        return 1;
+    }
+    if (nums.get(5) != 25) {
+        print(f"FAIL test6: get(5) = {nums.get(5)}");
+        return 1;
+    }
+    if (nums.get(9) != 81) {
+        print(f"FAIL test6: get(9) = {nums.get(9)}");
+        return 1;
+    }
+    print("test6 int keys: OK");
+
+    print("1030_map_operations: PASS");
+    0
+}

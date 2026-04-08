@@ -1,0 +1,684 @@
+// =============================================================================
+// primitive_protocol_compliance_test.vr - Protocol compliance for ALL primitives
+// =============================================================================
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: base, protocols, eq, ord, hash, clone, copy, compliance, sized-integers
+// @description: Verifies every primitive type correctly implements core protocols
+//               (Eq, Ord, Hash, Clone, Copy). TDD — these tests expose gaps.
+// =============================================================================
+
+mount core.*;
+mount core.base.protocols.{Eq, Ord, PartialOrd, Hash, Hasher, DefaultHasher, Clone, Copy};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Eq Protocol — Sized Signed Integers
+// =============================================================================
+
+@test
+fn test_eq_int8() {
+    let a: Int8 = 42 as Int8;
+    let b: Int8 = 42 as Int8;
+    let c: Int8 = 10 as Int8;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+    assert(a.ne(&c));
+}
+
+@test
+fn test_eq_int16() {
+    let a: Int16 = 1000 as Int16;
+    let b: Int16 = 1000 as Int16;
+    let c: Int16 = 2000 as Int16;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_int32() {
+    let a: Int32 = 100000 as Int32;
+    let b: Int32 = 100000 as Int32;
+    let c: Int32 = 200000 as Int32;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_int64() {
+    let a: Int64 = 1000000 as Int64;
+    let b: Int64 = 1000000 as Int64;
+    let c: Int64 = 2000000 as Int64;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_int128() {
+    let a: Int128 = 999 as Int128;
+    let b: Int128 = 999 as Int128;
+    let c: Int128 = 0 as Int128;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_isize() {
+    let a: ISize = 77 as ISize;
+    let b: ISize = 77 as ISize;
+    let c: ISize = 88 as ISize;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+// =============================================================================
+// Section 2: Eq Protocol — Sized Unsigned Integers
+// =============================================================================
+
+@test
+fn test_eq_uint8() {
+    let a: UInt8 = 200 as UInt8;
+    let b: UInt8 = 200 as UInt8;
+    let c: UInt8 = 100 as UInt8;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_uint16() {
+    let a: UInt16 = 50000 as UInt16;
+    let b: UInt16 = 50000 as UInt16;
+    let c: UInt16 = 30000 as UInt16;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_uint32() {
+    let a: UInt32 = 3000000 as UInt32;
+    let b: UInt32 = 3000000 as UInt32;
+    let c: UInt32 = 1000000 as UInt32;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_uint64() {
+    let a: UInt64 = 9000000 as UInt64;
+    let b: UInt64 = 9000000 as UInt64;
+    let c: UInt64 = 1 as UInt64;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_uint128() {
+    let a: UInt128 = 42 as UInt128;
+    let b: UInt128 = 42 as UInt128;
+    let c: UInt128 = 0 as UInt128;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_usize() {
+    let a: USize = 256 as USize;
+    let b: USize = 256 as USize;
+    let c: USize = 512 as USize;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+// =============================================================================
+// Section 3: Eq Protocol — Self-equality (reflexivity)
+// =============================================================================
+
+@test
+fn test_eq_self_equality_signed() {
+    let a: Int8 = 127 as Int8;
+    assert(a.eq(&a));
+    let b: Int16 = 32000 as Int16;
+    assert(b.eq(&b));
+    let c: Int32 = 100 as Int32;
+    assert(c.eq(&c));
+    let d: Int64 = 999 as Int64;
+    assert(d.eq(&d));
+    let e: Int128 = 1 as Int128;
+    assert(e.eq(&e));
+    let f: ISize = 50 as ISize;
+    assert(f.eq(&f));
+}
+
+@test
+fn test_eq_self_equality_unsigned() {
+    let a: UInt8 = 255 as UInt8;
+    assert(a.eq(&a));
+    let b: UInt16 = 65000 as UInt16;
+    assert(b.eq(&b));
+    let c: UInt32 = 100 as UInt32;
+    assert(c.eq(&c));
+    let d: UInt64 = 999 as UInt64;
+    assert(d.eq(&d));
+    let e: UInt128 = 1 as UInt128;
+    assert(e.eq(&e));
+    let f: USize = 50 as USize;
+    assert(f.eq(&f));
+}
+
+// =============================================================================
+// Section 4: Ord Protocol — Sized Signed Integers
+// =============================================================================
+
+@test
+fn test_ord_int8() {
+    let a: Int8 = 10 as Int8;
+    let b: Int8 = 20 as Int8;
+    let c: Int8 = 10 as Int8;
+    assert(a.cmp(&b) is Less);
+    assert(b.cmp(&a) is Greater);
+    assert(a.cmp(&c) is Equal);
+}
+
+@test
+fn test_ord_int16() {
+    let a: Int16 = 100 as Int16;
+    let b: Int16 = 200 as Int16;
+    let c: Int16 = 100 as Int16;
+    assert(a.cmp(&b) is Less);
+    assert(b.cmp(&a) is Greater);
+    assert(a.cmp(&c) is Equal);
+}
+
+@test
+fn test_ord_int32() {
+    let a: Int32 = 1000 as Int32;
+    let b: Int32 = 2000 as Int32;
+    assert(a.cmp(&b) is Less);
+    assert(b.cmp(&a) is Greater);
+}
+
+@test
+fn test_ord_int64() {
+    let a: Int64 = 10000 as Int64;
+    let b: Int64 = 20000 as Int64;
+    assert(a.cmp(&b) is Less);
+    assert(b.cmp(&a) is Greater);
+}
+
+@test
+fn test_ord_int128() {
+    let a: Int128 = 1 as Int128;
+    let b: Int128 = 2 as Int128;
+    assert(a.cmp(&b) is Less);
+}
+
+@test
+fn test_ord_isize() {
+    let a: ISize = 5 as ISize;
+    let b: ISize = 10 as ISize;
+    assert(a.cmp(&b) is Less);
+    assert(b.cmp(&a) is Greater);
+}
+
+// =============================================================================
+// Section 5: Ord Protocol — Sized Unsigned Integers
+// =============================================================================
+
+@test
+fn test_ord_uint8() {
+    let a: UInt8 = 10 as UInt8;
+    let b: UInt8 = 200 as UInt8;
+    assert(a.cmp(&b) is Less);
+    assert(b.cmp(&a) is Greater);
+}
+
+@test
+fn test_ord_uint16() {
+    let a: UInt16 = 100 as UInt16;
+    let b: UInt16 = 60000 as UInt16;
+    assert(a.cmp(&b) is Less);
+}
+
+@test
+fn test_ord_uint32() {
+    let a: UInt32 = 100 as UInt32;
+    let b: UInt32 = 200 as UInt32;
+    assert(a.cmp(&b) is Less);
+}
+
+@test
+fn test_ord_uint64() {
+    let a: UInt64 = 100 as UInt64;
+    let b: UInt64 = 200 as UInt64;
+    assert(a.cmp(&b) is Less);
+}
+
+@test
+fn test_ord_uint128() {
+    let a: UInt128 = 0 as UInt128;
+    let b: UInt128 = 1 as UInt128;
+    assert(a.cmp(&b) is Less);
+}
+
+@test
+fn test_ord_usize() {
+    let a: USize = 10 as USize;
+    let b: USize = 20 as USize;
+    assert(a.cmp(&b) is Less);
+}
+
+// =============================================================================
+// Section 6: Ord Protocol — min/max
+// =============================================================================
+
+@test
+fn test_ord_min_max_signed() {
+    let a: Int8 = 10 as Int8;
+    let b: Int8 = 20 as Int8;
+    assert_eq(a.cmp(&b) is Less, true);
+
+    let c: Int32 = 100 as Int32;
+    let d: Int32 = 50 as Int32;
+    assert(c.cmp(&d) is Greater);
+}
+
+@test
+fn test_ord_min_max_unsigned() {
+    let a: UInt8 = 10 as UInt8;
+    let b: UInt8 = 20 as UInt8;
+    assert(a.cmp(&b) is Less);
+
+    let c: UInt64 = 100 as UInt64;
+    let d: UInt64 = 50 as UInt64;
+    assert(c.cmp(&d) is Greater);
+}
+
+// =============================================================================
+// Section 7: Hash Protocol — Sized Integers (equal values → equal hashes)
+// =============================================================================
+
+@test
+fn test_hash_int8() {
+    let a: Int8 = 42 as Int8;
+    let b: Int8 = 42 as Int8;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_int16() {
+    let a: Int16 = 1000 as Int16;
+    let b: Int16 = 1000 as Int16;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_int32() {
+    let a: Int32 = 100000 as Int32;
+    let b: Int32 = 100000 as Int32;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_int64() {
+    let a: Int64 = 999999 as Int64;
+    let b: Int64 = 999999 as Int64;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_int128() {
+    let a: Int128 = 42 as Int128;
+    let b: Int128 = 42 as Int128;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_isize() {
+    let a: ISize = 77 as ISize;
+    let b: ISize = 77 as ISize;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_uint8() {
+    let a: UInt8 = 200 as UInt8;
+    let b: UInt8 = 200 as UInt8;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_uint16() {
+    let a: UInt16 = 50000 as UInt16;
+    let b: UInt16 = 50000 as UInt16;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_uint32() {
+    let a: UInt32 = 3000000 as UInt32;
+    let b: UInt32 = 3000000 as UInt32;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_uint64() {
+    let a: UInt64 = 9000000 as UInt64;
+    let b: UInt64 = 9000000 as UInt64;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_uint128() {
+    let a: UInt128 = 42 as UInt128;
+    let b: UInt128 = 42 as UInt128;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_usize() {
+    let a: USize = 256 as USize;
+    let b: USize = 256 as USize;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_eq(h1.finish(), h2.finish());
+}
+
+// =============================================================================
+// Section 8: Hash Protocol — Different values → different hashes
+// =============================================================================
+
+@test
+fn test_hash_different_int8() {
+    let a: Int8 = 1 as Int8;
+    let b: Int8 = 2 as Int8;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_ne(h1.finish(), h2.finish());
+}
+
+@test
+fn test_hash_different_uint64() {
+    let a: UInt64 = 0 as UInt64;
+    let b: UInt64 = 1 as UInt64;
+    let mut h1 = DefaultHasher.new();
+    let mut h2 = DefaultHasher.new();
+    a.hash(&mut h1);
+    b.hash(&mut h2);
+    assert_ne(h1.finish(), h2.finish());
+}
+
+// =============================================================================
+// Section 9: Clone Protocol — Sized Integers
+// =============================================================================
+
+@test
+fn test_clone_int8() {
+    let a: Int8 = 42 as Int8;
+    let b: Int8 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_int16() {
+    let a: Int16 = 1000 as Int16;
+    let b: Int16 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_int32() {
+    let a: Int32 = 100000 as Int32;
+    let b: Int32 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_int64() {
+    let a: Int64 = 999999 as Int64;
+    let b: Int64 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_int128() {
+    let a: Int128 = 42 as Int128;
+    let b: Int128 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_isize() {
+    let a: ISize = 77 as ISize;
+    let b: ISize = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_uint8() {
+    let a: UInt8 = 200 as UInt8;
+    let b: UInt8 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_uint16() {
+    let a: UInt16 = 50000 as UInt16;
+    let b: UInt16 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_uint32() {
+    let a: UInt32 = 3000000 as UInt32;
+    let b: UInt32 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_uint64() {
+    let a: UInt64 = 9000000 as UInt64;
+    let b: UInt64 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_uint128() {
+    let a: UInt128 = 42 as UInt128;
+    let b: UInt128 = a.clone();
+    assert(a.eq(&b));
+}
+
+@test
+fn test_clone_usize() {
+    let a: USize = 256 as USize;
+    let b: USize = a.clone();
+    assert(a.eq(&b));
+}
+
+// =============================================================================
+// Section 10: Clone Independence — clone produces independent value
+// =============================================================================
+
+@test
+fn test_clone_independence_int32() {
+    let mut a: Int32 = 100 as Int32;
+    let b: Int32 = a.clone();
+    a = 200 as Int32;
+    assert_eq(b, 100 as Int32);
+}
+
+@test
+fn test_clone_independence_uint64() {
+    let mut a: UInt64 = 100 as UInt64;
+    let b: UInt64 = a.clone();
+    a = 200 as UInt64;
+    assert_eq(b, 100 as UInt64);
+}
+
+// =============================================================================
+// Section 11: Float32 — Eq, PartialOrd, Clone, Copy
+// =============================================================================
+
+@test
+fn test_eq_float32() {
+    let a: Float32 = 3.14 as Float32;
+    let b: Float32 = 3.14 as Float32;
+    let c: Float32 = 2.71 as Float32;
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+@test
+fn test_eq_float32_zero() {
+    let a: Float32 = 0.0 as Float32;
+    let b: Float32 = 0.0 as Float32;
+    assert(a.eq(&b));
+}
+
+@test
+fn test_partial_ord_float32() {
+    let a: Float32 = 1.0 as Float32;
+    let b: Float32 = 2.0 as Float32;
+    let c: Float32 = 1.0 as Float32;
+    let r1: Maybe<Ordering> = a.partial_cmp(&b);
+    assert(r1 is Some);
+    let r2: Maybe<Ordering> = b.partial_cmp(&a);
+    assert(r2 is Some);
+    let r3: Maybe<Ordering> = a.partial_cmp(&c);
+    assert(r3 is Some);
+}
+
+@test
+fn test_partial_ord_float32_nan() {
+    let nan: Float32 = Float32.nan();
+    let one: Float32 = 1.0 as Float32;
+    let r: Maybe<Ordering> = nan.partial_cmp(&one);
+    assert(r is None);
+    let r2: Maybe<Ordering> = one.partial_cmp(&nan);
+    assert(r2 is None);
+}
+
+@test
+fn test_clone_float32() {
+    let a: Float32 = 3.14 as Float32;
+    let b: Float32 = a.clone();
+    assert(a.eq(&b));
+}
+
+// =============================================================================
+// Section 12: Byte — Display
+// =============================================================================
+
+@test
+fn test_display_byte() {
+    let b: Byte = 65;
+    // Byte should have Display protocol — verify it type-checks
+    let val: Int = b as Int;
+    assert_eq(val, 65);
+}
+
+// =============================================================================
+// Section 13: Ord negative values — signed integers
+// =============================================================================
+
+@test
+fn test_ord_negative_int8() {
+    let a: Int8 = -10 as Int8;
+    let b: Int8 = 10 as Int8;
+    assert(a.cmp(&b) is Less);
+}
+
+@test
+fn test_ord_negative_int32() {
+    let a: Int32 = -1000 as Int32;
+    let b: Int32 = 1000 as Int32;
+    assert(a.cmp(&b) is Less);
+    let c: Int32 = -1000 as Int32;
+    assert(a.cmp(&c) is Equal);
+}
+
+// =============================================================================
+// Section 14: Eq with zero values
+// =============================================================================
+
+@test
+fn test_eq_zero_signed() {
+    let z8: Int8 = 0 as Int8;
+    let z16: Int16 = 0 as Int16;
+    let z32: Int32 = 0 as Int32;
+    let z64: Int64 = 0 as Int64;
+    let z128: Int128 = 0 as Int128;
+    let zis: ISize = 0 as ISize;
+    assert(z8.eq(&(0 as Int8)));
+    assert(z16.eq(&(0 as Int16)));
+    assert(z32.eq(&(0 as Int32)));
+    assert(z64.eq(&(0 as Int64)));
+    assert(z128.eq(&(0 as Int128)));
+    assert(zis.eq(&(0 as ISize)));
+}
+
+@test
+fn test_eq_zero_unsigned() {
+    let z8: UInt8 = 0 as UInt8;
+    let z16: UInt16 = 0 as UInt16;
+    let z32: UInt32 = 0 as UInt32;
+    let z64: UInt64 = 0 as UInt64;
+    let z128: UInt128 = 0 as UInt128;
+    let zus: USize = 0 as USize;
+    assert(z8.eq(&(0 as UInt8)));
+    assert(z16.eq(&(0 as UInt16)));
+    assert(z32.eq(&(0 as UInt32)));
+    assert(z64.eq(&(0 as UInt64)));
+    assert(z128.eq(&(0 as UInt128)));
+    assert(zus.eq(&(0 as USize)));
+}

@@ -1,0 +1,384 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, floyd_warshall, counting_sort, polynomial, rle, matrix, binary_gcd, catalan, fsm
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #14: combines algorithms from tests 511-519.
+// Pipeline: Floyd-Warshall shortest paths -> counting sort of distances ->
+//           polynomial evaluation on sorted values -> RLE compression of sorted sequence ->
+//           GCD/Catalan cross-checks -> FSM validation -> matrix pipeline.
+
+// ============================================================
+// Floyd-Warshall (from 511): 4x4 matrix paths
+// ============================================================
+
+type FWMat is {
+    m00: Int, m01: Int, m02: Int, m03: Int,
+    m10: Int, m11: Int, m12: Int, m13: Int,
+    m20: Int, m21: Int, m22: Int, m23: Int,
+    m30: Int, m31: Int, m32: Int, m33: Int
+};
+
+fn fw_get(m: FWMat, r: Int, c: Int) -> Int {
+    let idx = r * 4 + c;
+    if idx == 0  { m.m00 } else if idx == 1  { m.m01 }
+    else if idx == 2  { m.m02 } else if idx == 3  { m.m03 }
+    else if idx == 4  { m.m10 } else if idx == 5  { m.m11 }
+    else if idx == 6  { m.m12 } else if idx == 7  { m.m13 }
+    else if idx == 8  { m.m20 } else if idx == 9  { m.m21 }
+    else if idx == 10 { m.m22 } else if idx == 11 { m.m23 }
+    else if idx == 12 { m.m30 } else if idx == 13 { m.m31 }
+    else if idx == 14 { m.m32 } else { m.m33 }
+}
+
+fn fw_set(m: FWMat, r: Int, c: Int, v: Int) -> FWMat {
+    let idx = r * 4 + c;
+    FWMat {
+        m00: if idx == 0  { v } else { m.m00 },
+        m01: if idx == 1  { v } else { m.m01 },
+        m02: if idx == 2  { v } else { m.m02 },
+        m03: if idx == 3  { v } else { m.m03 },
+        m10: if idx == 4  { v } else { m.m10 },
+        m11: if idx == 5  { v } else { m.m11 },
+        m12: if idx == 6  { v } else { m.m12 },
+        m13: if idx == 7  { v } else { m.m13 },
+        m20: if idx == 8  { v } else { m.m20 },
+        m21: if idx == 9  { v } else { m.m21 },
+        m22: if idx == 10 { v } else { m.m22 },
+        m23: if idx == 11 { v } else { m.m23 },
+        m30: if idx == 12 { v } else { m.m30 },
+        m31: if idx == 13 { v } else { m.m31 },
+        m32: if idx == 14 { v } else { m.m32 },
+        m33: if idx == 15 { v } else { m.m33 }
+    }
+}
+
+fn floyd_warshall(d: FWMat) -> FWMat {
+    let mut dist = d;
+    let mut k = 0;
+    while k < 4 {
+        let mut i = 0;
+        while i < 4 {
+            let mut j = 0;
+            while j < 4 {
+                let dij = fw_get(dist, i, j);
+                let dik = fw_get(dist, i, k);
+                let dkj = fw_get(dist, k, j);
+                if dik + dkj < dij {
+                    dist = fw_set(dist, i, j, dik + dkj);
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    dist
+}
+
+fn test_fw_pipeline() {
+    let inf = 9999;
+    let d0 = FWMat {
+        m00: 0,   m01: 1,   m02: inf, m03: 5,
+        m10: inf, m11: 0,   m12: 2,   m13: inf,
+        m20: inf, m21: inf, m22: 0,   m23: 3,
+        m30: inf, m31: inf, m32: inf, m33: 0
+    };
+    let d = floyd_warshall(d0);
+    // 0->2 = 0->1->2 = 1+2 = 3
+    assert_eq(fw_get(d, 0, 2), 3);
+    // 0->3 = 0->1->2->3 = 1+2+3 = 6 (better than direct 5? no: direct=5 < 6)
+    assert_eq(fw_get(d, 0, 3), 5);
+    // 1->3 = 1->2->3 = 2+3 = 5
+    assert_eq(fw_get(d, 1, 3), 5);
+    print("fw_pipeline: ok");
+}
+
+// ============================================================
+// Counting sort (from 512)
+// ============================================================
+
+fn counting_sort(arr: [Int; 16], n: Int, max_val: Int, out: [Int; 16]) {
+    let mut counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < n {
+        let v = arr[i];
+        counts[v] = counts[v] + 1;
+        i = i + 1;
+    }
+    let mut pos = 0;
+    let mut v = 0;
+    while v <= max_val {
+        let mut c = 0;
+        while c < counts[v] {
+            out[pos] = v;
+            pos = pos + 1;
+            c = c + 1;
+        }
+        v = v + 1;
+    }
+}
+
+fn is_sorted_16(arr: [Int; 16], n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if arr[i] < arr[i - 1] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_counting_sort_pipeline() {
+    let mut arr = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    counting_sort(arr, 10, 9, out);
+    // Sorted: [1,1,2,3,3,4,5,5,6,9]
+    assert_eq(out[0], 1); assert_eq(out[1], 1);
+    assert_eq(out[2], 2); assert_eq(out[3], 3);
+    assert_eq(out[9], 9);
+    assert_eq(is_sorted_16(out, 10), 1);
+    print("counting_sort_pipeline: ok");
+}
+
+// ============================================================
+// Polynomial evaluation (from 513): Horner's method
+// ============================================================
+
+fn horner_eval(coeffs: [Int; 8], deg: Int, x: Int) -> Int {
+    let mut result = coeffs[deg];
+    let mut i = deg - 1;
+    while i >= 0 {
+        result = result * x + coeffs[i];
+        i = i - 1;
+    }
+    result
+}
+
+fn test_polynomial_pipeline() {
+    // Evaluate p(x) = 2 + 3*x + x^2 at x = 0,1,2,3,4
+    let mut coeffs = [2, 3, 1, 0, 0, 0, 0, 0];
+    assert_eq(horner_eval(coeffs, 2, 0), 2);   // 2
+    assert_eq(horner_eval(coeffs, 2, 1), 6);   // 2+3+1=6
+    assert_eq(horner_eval(coeffs, 2, 2), 12);  // 2+6+4=12
+    assert_eq(horner_eval(coeffs, 2, 3), 20);  // 2+9+9=20
+    assert_eq(horner_eval(coeffs, 2, 4), 30);  // 2+12+16=30
+    print("polynomial_pipeline: ok");
+}
+
+// ============================================================
+// RLE (from 514)
+// ============================================================
+
+fn rle_encode(arr: [Int; 32], n: Int, out: [Int; 32]) -> Int {
+    if n == 0 { return 0; }
+    let mut pairs = 0;
+    let mut i = 0;
+    while i < n {
+        let val = arr[i];
+        let mut cnt = 1;
+        while i + cnt < n && arr[i + cnt] == val {
+            cnt = cnt + 1;
+        }
+        out[pairs * 2]     = val;
+        out[pairs * 2 + 1] = cnt;
+        pairs = pairs + 1;
+        i = i + cnt;
+    }
+    pairs
+}
+
+fn test_rle_pipeline() {
+    // Encode sorted output from counting sort: [1,1,2,3,3,4,5,5,6,9] -> pairs
+    let mut arr = [1, 1, 2, 3, 3, 4, 5, 5, 6, 9, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let pairs = rle_encode(arr, 10, out);
+    // (1,2),(2,1),(3,2),(4,1),(5,2),(6,1),(9,1) = 7 pairs
+    assert_eq(pairs, 7);
+    assert_eq(out[0], 1); assert_eq(out[1], 2);
+    assert_eq(out[2], 2); assert_eq(out[3], 1);
+    assert_eq(out[4], 3); assert_eq(out[5], 2);
+    assert_eq(out[12], 9); assert_eq(out[13], 1);
+    print("rle_pipeline: ok");
+}
+
+// ============================================================
+// Binary GCD (from 517)
+// ============================================================
+
+@allow(unbounded_recursion)
+fn binary_gcd(u: Int, v: Int) -> Int {
+    if u == 0 { return v; }
+    if v == 0 { return u; }
+    let u_even = if u % 2 == 0 { 1 } else { 0 };
+    let v_even = if v % 2 == 0 { 1 } else { 0 };
+    if u_even == 1 && v_even == 1 { return 2 * binary_gcd(u / 2, v / 2); }
+    if u_even == 1 { return binary_gcd(u / 2, v); }
+    if v_even == 1 { return binary_gcd(u, v / 2); }
+    if u >= v { binary_gcd((u - v) / 2, v) } else { binary_gcd(u, (v - u) / 2) }
+}
+
+fn test_gcd_pipeline() {
+    // Verify GCD properties used in the pipeline.
+    assert_eq(binary_gcd(12, 8), 4);
+    assert_eq(binary_gcd(42, 18), 6);
+    assert_eq(binary_gcd(100, 75), 25);
+    // Catalan cross-check: gcd(C(4), C(5)) = gcd(14, 42) = 14
+    assert_eq(binary_gcd(14, 42), 14);
+    print("gcd_pipeline: ok");
+}
+
+// ============================================================
+// Catalan DP (from 518)
+// ============================================================
+
+fn catalan_dp(n: Int, out: [Int; 16]) {
+    out[0] = 1;
+    let mut i = 1;
+    while i <= n {
+        out[i] = 0;
+        let mut j = 0;
+        while j < i {
+            out[i] = out[i] + out[j] * out[i - 1 - j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn test_catalan_pipeline() {
+    let mut c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    catalan_dp(7, c);
+    assert_eq(c[3], 5);
+    assert_eq(c[5], 42);
+    // Cross-check: gcd(C(4),C(6)) = gcd(14,132) = 2
+    assert_eq(binary_gcd(c[4], c[6]), 2);
+    // Sum of first 4 Catalan numbers: 1+1+2+5 = 9
+    let s4 = c[0] + c[1] + c[2] + c[3];
+    assert_eq(s4, 9);
+    print("catalan_pipeline: ok");
+}
+
+// ============================================================
+// FSM (from 519): mod-3 checker
+// ============================================================
+
+fn make_fsm_table() -> [Int; 64] {
+    let mut t = [0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0];
+    // Divisibility-by-3 FSM for binary strings.
+    t[0 * 8 + 0] = 0; t[0 * 8 + 1] = 1;
+    t[1 * 8 + 0] = 2; t[1 * 8 + 1] = 0;
+    t[2 * 8 + 0] = 1; t[2 * 8 + 1] = 2;
+    t
+}
+
+fn fsm_run(table: [Int; 64], start: Int, inp: [Int; 32], n: Int) -> Int {
+    let mut state = start;
+    let mut i = 0;
+    while i < n {
+        state = table[state * 8 + inp[i]];
+        i = i + 1;
+    }
+    state
+}
+
+fn test_fsm_pipeline() {
+    let table = make_fsm_table();
+    // "110" = binary 6, divisible by 3 -> should end in state 0
+    let mut inp6 = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(fsm_run(table, 0, inp6, 3), 0);
+
+    // "1001" = binary 9, divisible by 3 -> state 0
+    let mut inp9 = [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(fsm_run(table, 0, inp9, 4), 0);
+
+    // "101" = binary 5, not divisible by 3 -> non-zero state
+    let mut inp5 = [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert(fsm_run(table, 0, inp5, 3) != 0);
+    print("fsm_pipeline: ok");
+}
+
+// ============================================================
+// Cross-algorithm pipeline: combine GCD, polynomial, and sort
+// ============================================================
+
+fn test_combined_pipeline() {
+    // Step 1: Catalan numbers.
+    let mut cat = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    catalan_dp(6, cat);
+    // cat = [1, 1, 2, 5, 14, 42, 132]
+
+    // Step 2: Sort cat[1..6] using counting sort (max = 132, but we scale down by index).
+    // Instead evaluate polynomial at Catalan values and collect.
+    // p(x) = x + 1 (degree 1 with coeffs [1, 1])
+    let mut pcoeffs = [1, 1, 0, 0, 0, 0, 0, 0];
+    let v1 = horner_eval(pcoeffs, 1, cat[1]);  // p(1) = 2
+    let v2 = horner_eval(pcoeffs, 1, cat[2]);  // p(2) = 3
+    let v3 = horner_eval(pcoeffs, 1, cat[3]);  // p(5) = 6
+    assert_eq(v1, 2);
+    assert_eq(v2, 3);
+    assert_eq(v3, 6);
+
+    // Step 3: GCD of polynomial values.
+    assert_eq(binary_gcd(v1, v2), 1);   // gcd(2, 3) = 1
+    assert_eq(binary_gcd(v2, v3), 3);   // gcd(3, 6) = 3
+
+    // Step 4: Floyd-Warshall on small graph, then RLE-encode diagonal distances.
+    let inf = 9999;
+    let d0 = FWMat {
+        m00: 0,   m01: 2,   m02: inf, m03: inf,
+        m10: inf, m11: 0,   m12: 3,   m13: inf,
+        m20: inf, m21: inf, m22: 0,   m23: 4,
+        m30: inf, m31: inf, m32: inf, m33: 0
+    };
+    let d = floyd_warshall(d0);
+    // Diagonal: 0,0,0,0 (already proven in 511)
+    assert_eq(fw_get(d, 0, 0), 0);
+    // Path 0->3 = 2+3+4 = 9
+    assert_eq(fw_get(d, 0, 3), 9);
+
+    // Step 5: Encode the sequence [0,2,5,9] (source-row distances from node 0) with RLE.
+    let mut dists = [0, 2, 5, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dists[0] = fw_get(d, 0, 0);
+    dists[1] = fw_get(d, 0, 1);
+    dists[2] = fw_get(d, 0, 2);
+    dists[3] = fw_get(d, 0, 3);
+    let mut rle_out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let pairs = rle_encode(dists, 4, rle_out);
+    // All distinct values -> 4 pairs, each count = 1
+    assert_eq(pairs, 4);
+    assert_eq(rle_out[1], 1);
+    assert_eq(rle_out[3], 1);
+
+    let msg = f"combined: catalan5={cat[5]} gcd_v2_v3={binary_gcd(v2,v3)} fw_0_3={fw_get(d,0,3)} rle_pairs={pairs}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_fw_pipeline();
+    test_counting_sort_pipeline();
+    test_polynomial_pipeline();
+    test_rle_pipeline();
+    test_gcd_pipeline();
+    test_catalan_pipeline();
+    test_fsm_pipeline();
+    test_combined_pipeline();
+    print("[OK] 520_interp_comprehensive14");
+    0
+}

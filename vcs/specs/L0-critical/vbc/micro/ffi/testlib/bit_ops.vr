@@ -1,0 +1,74 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, bitwise
+// @description: Test bitwise operations through FFI
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_clz_u64(x: Int) -> Int;
+    fn ffi_ctz_u64(x: Int) -> Int;
+    fn ffi_popcnt_u64(x: Int) -> Int;
+    fn ffi_bswap_u32(x: Int) -> Int;
+    fn ffi_rotl_u64(x: Int, n: Int) -> Int;
+    fn ffi_rotr_u64(x: Int, n: Int) -> Int;
+}
+
+fn main() {
+    // Test count leading zeros
+    let clz1 = ffi_clz_u64(1);
+    print("clz(1)="); print(clz1); print("\n");
+    assert(clz1 == 63);
+
+    let clz256 = ffi_clz_u64(256);
+    print("clz(256)="); print(clz256); print("\n");
+    assert(clz256 == 55);  // 256 = 2^8, so 64-9=55 leading zeros
+
+    // Test count trailing zeros
+    let ctz1 = ffi_ctz_u64(1);
+    print("ctz(1)="); print(ctz1); print("\n");
+    assert(ctz1 == 0);
+
+    let ctz2 = ffi_ctz_u64(2);
+    print("ctz(2)="); print(ctz2); print("\n");
+    assert(ctz2 == 1);
+
+    let ctz8 = ffi_ctz_u64(8);
+    print("ctz(8)="); print(ctz8); print("\n");
+    assert(ctz8 == 3);
+
+    // Test population count
+    let pop0 = ffi_popcnt_u64(0);
+    print("popcnt(0)="); print(pop0); print("\n");
+    assert(pop0 == 0);
+
+    let pop1 = ffi_popcnt_u64(1);
+    print("popcnt(1)="); print(pop1); print("\n");
+    assert(pop1 == 1);
+
+    let pop255 = ffi_popcnt_u64(255);
+    print("popcnt(255)="); print(pop255); print("\n");
+    assert(pop255 == 8);
+
+    // Test rotate left
+    let rotl1 = ffi_rotl_u64(1, 1);
+    print("rotl(1,1)="); print(rotl1); print("\n");
+    assert(rotl1 == 2);
+
+    let rotl4 = ffi_rotl_u64(1, 4);
+    print("rotl(1,4)="); print(rotl4); print("\n");
+    assert(rotl4 == 16);
+
+    // Test rotate right
+    let rotr1 = ffi_rotr_u64(2, 1);
+    print("rotr(2,1)="); print(rotr1); print("\n");
+    assert(rotr1 == 1);
+
+    let rotr4 = ffi_rotr_u64(16, 4);
+    print("rotr(16,4)="); print(rotr4); print("\n");
+    assert(rotr4 == 1);
+
+    print("All bit ops tests passed!\n");
+}

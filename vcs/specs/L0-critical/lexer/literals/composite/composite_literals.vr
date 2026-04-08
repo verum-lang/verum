@@ -1,0 +1,247 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, composite, domain-specific
+
+// Composite literals - domain-specific structured data with tagged delimiters
+
+fn test_interval_notation() {
+    // Interval notation
+    let closed_interval = interval#"[0, 100]";
+    let open_interval = interval#"(0, 100)";
+    let half_open_left = interval#"(0, 100]";
+    let half_open_right = interval#"[0, 100)";
+    let infinite_right = interval#"[0, infinity)";
+    let infinite_left = interval#"(-infinity, 100]";
+    let date_interval = interval#"[2025-01-01, 2025-12-31]";
+}
+
+fn test_matrix_literals() {
+    // Matrix literals
+    let matrix_2x2 = mat#"[[1, 2], [3, 4]]";
+    let matrix_3x3 = mat#"[
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1]
+]";
+    let float_matrix = mat#"[[1.0, 2.5], [3.7, 4.2]]";
+    let identity_4x4 = mat#"identity(4)";
+}
+
+fn test_vector_literals() {
+    // Vector literals
+    let vec2 = vec#"<1, 2>";
+    let vec3 = vec#"<1.0, 2.0, 3.0>";
+    let vec4 = vec#"<0, 0, 0, 1>";
+    let named_vec = vec#"{x: 1, y: 2, z: 3}";
+}
+
+fn test_complex_number_literals() {
+    // Complex number literals
+    let complex1 = complex#"3 + 4i";
+    let complex2 = complex#"2.5 - 1.5i";
+    let pure_imaginary = complex#"5i";
+    let pure_real = complex#"7";
+    let polar_form = complex#"r=5, theta=pi/4";
+}
+
+fn test_rational_number_literals() {
+    // Rational number literals
+    let rational1 = rat#"1/2";
+    let rational2 = rat#"22/7";
+    let mixed_number = rat#"3 1/4";
+    let negative_rational = rat#"-5/8";
+}
+
+fn test_chemical_formula_literals() {
+    // Chemical formula literals
+    let water = chem#"H2O";
+    let glucose = chem#"C6H12O6";
+    let sodium_chloride = chem#"NaCl";
+    let sulfuric_acid = chem#"H2SO4";
+    let complex_molecule = chem#"Ca(OH)2";
+    let organic = chem#"CH3CH2OH";
+}
+
+fn test_musical_notation_literals() {
+    // Musical notation literals
+    let chord = music#"Cmaj7";
+    let melody = music#"C4 D4 E4 F4 G4";
+    let rhythm = music#"q q h | e e e e q";
+    let time_sig = music#"4/4";
+    let key_sig = music#"Gmaj";
+    let notes_with_duration = music#"C4:q D4:q E4:h";
+}
+
+fn test_color_literals() {
+    // Color literals (various formats)
+    let hex_color = color#"#FF5733";
+    let rgb_color = color#"rgb(255, 87, 51)";
+    let rgba_color = color#"rgba(255, 87, 51, 0.8)";
+    let hsl_color = color#"hsl(14, 100%, 60%)";
+    let hsla_color = color#"hsla(14, 100%, 60%, 0.8)";
+    let named_color = color#"coral";
+}
+
+fn test_geographic_coordinates() {
+    // Geographic coordinates
+    let coord1 = geo#"40.7128, -74.0060";
+    let coord2 = geo#"40 42'46\"N, 74 0'22\"W";
+    let coord3 = geo#"lat: 40.7128, lon: -74.0060";
+    let geojson_point = geo#"{\"type\": \"Point\", \"coordinates\": [-74.0060, 40.7128]}";
+}
+
+fn test_binary_data_literals() {
+    // Binary data literals
+    let bytes1 = bytes#"48656c6c6f";
+    let bytes2 = bytes#"[0x48, 0x65, 0x6c, 0x6c, 0x6f]";
+    let base64_data = base64#"SGVsbG8gV29ybGQ=";
+}
+
+fn test_cidr_notation() {
+    // CIDR notation for IP addresses
+    let cidr_v4 = cidr#"192.168.1.0/24";
+    let cidr_v6 = cidr#"2001:db8::/32";
+    let ip_range = iprange#"192.168.1.1-192.168.1.254";
+}
+
+fn test_semantic_versioning() {
+    // Semantic versioning
+    let semver1 = version#"1.0.0";
+    let semver2 = version#"2.1.3-beta.1";
+    let semver3 = version#"1.0.0+build.123";
+    let version_constraint = version#">=1.0.0 <2.0.0";
+}
+
+fn test_currency_amounts() {
+    // Currency amounts
+    let usd = money#"$1,234.56";
+    let eur = money#"EUR 1234.56";
+    let gbp = money#"GBP 1,234.56";
+    let btc = money#"BTC 0.00123456";
+}
+
+fn test_physical_units() {
+    // Physical units
+    let length = unit#"100 km";
+    let mass = unit#"5.5 kg";
+    let time = unit#"2.5 hours";
+    let speed = unit#"60 mph";
+    let temperature = unit#"25 C";
+    let energy = unit#"100 kWh";
+}
+
+fn test_cron_expressions() {
+    // Cron expressions
+    let cron_daily = cron#"0 0 * * *";
+    let cron_weekly = cron#"0 0 * * 0";
+    let cron_monthly = cron#"0 0 1 * *";
+    let cron_hourly = cron#"0 * * * *";
+}
+
+fn test_duration_literals() {
+    // Duration literals
+    let duration1 = duration#"2h 30m 15s";
+    let duration2 = duration#"P1DT2H30M";
+    let duration3 = duration#"1d 2h 30m";
+    let duration4 = duration#"1500ms";
+}
+
+fn test_path_literals() {
+    // Path literals
+    let unix_path = path#"/home/user/documents";
+    let windows_path = path#"C:\\Users\\Documents";
+    let relative_path = path#"./src/main.vr";
+    let glob_path = path#"**/*.vr";
+}
+
+fn test_glob_patterns() {
+    // Glob patterns
+    let glob1 = glob#"*.txt";
+    let glob2 = glob#"**/*.{js,ts}";
+    let glob3 = glob#"src/**/test_*.vr";
+    let glob4 = glob#"[abc]*.log";
+}
+
+fn test_phone_numbers() {
+    // Phone numbers
+    let phone_us = phone#"+1 (555) 123-4567";
+    let phone_intl = phone#"+44 20 7946 0958";
+    let phone_simple = phone#"555-1234";
+}
+
+fn test_credit_card() {
+    // Credit card (masked for testing)
+    let cc_masked = cc#"**** **** **** 1234";
+    let cc_format = cc#"4111-1111-1111-1111";
+}
+
+fn test_tensor_literals() {
+    // Tensor literals (for ML)
+    let tensor1 = tensor#"[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]";
+    let tensor_shape = tensor#"shape(2, 3, 4)";
+    let tensor_zeros = tensor#"zeros(3, 3)";
+    let tensor_ones = tensor#"ones(2, 2)";
+}
+
+fn test_sql_schema() {
+    // SQL table schema (compile-time checked)
+    let schema = schema#"
+    users (
+        id: INT PRIMARY KEY,
+        name: VARCHAR(100),
+        email: VARCHAR(255) UNIQUE
+    )
+";
+}
+
+fn test_graphql_schema() {
+    // GraphQL schema fragment
+    let gql_type = gqltype#"
+    type User {
+        id: ID!
+        name: Text!
+        email: Text
+    }
+";
+}
+
+fn test_protobuf_message() {
+    // Protobuf message definition
+    let proto_msg = proto#"
+    message Person {
+        string name = 1;
+        int32 id = 2;
+        string email = 3;
+    }
+";
+}
+
+// Using composite literals in code
+fn process_interval(range: Interval<Float>) -> Bool {
+    let test_range = interval#"[0.0, 1.0]";
+    range.overlaps(test_range)
+}
+
+fn create_matrix() -> Matrix<3, 3, Float> {
+    mat#"[
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0]
+    ]"
+}
+
+fn test_composite_in_arrays() {
+    // Composite literals in arrays
+    let colors = [
+        color#"#FF0000",
+        color#"#00FF00",
+        color#"#0000FF",
+    ];
+
+    let coordinates = [
+        geo#"40.7128, -74.0060",
+        geo#"34.0522, -118.2437",
+        geo#"41.8781, -87.6298",
+    ];
+}

@@ -1,0 +1,421 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, operations, elementwise, reduction, linalg
+// @timeout: 3000
+// @expect: pass
+// @skip-disabled: Tensor const generic syntax and named arguments now supported by parser
+//
+// Test: TENSOR_BINOP, TENSOR_UNOP, TENSOR_REDUCE, TENSOR_MATMUL
+// Verifies tensor mathematical operations
+
+// =============================================================================
+// Element-wise binary operations
+// =============================================================================
+
+fn test_add() {
+    let a = Tensor.from([1.0, 2.0, 3.0]);
+    let b = Tensor.from([4.0, 5.0, 6.0]);
+    let c = a + b;
+
+    assert_eq(c[0], 5.0);
+    assert_eq(c[1], 7.0);
+    assert_eq(c[2], 9.0);
+}
+
+fn test_sub() {
+    let a = Tensor.from([5.0, 7.0, 9.0]);
+    let b = Tensor.from([1.0, 2.0, 3.0]);
+    let c = a - b;
+
+    assert_eq(c[0], 4.0);
+    assert_eq(c[1], 5.0);
+    assert_eq(c[2], 6.0);
+}
+
+fn test_mul() {
+    let a = Tensor.from([2.0, 3.0, 4.0]);
+    let b = Tensor.from([5.0, 6.0, 7.0]);
+    let c = a * b;
+
+    assert_eq(c[0], 10.0);
+    assert_eq(c[1], 18.0);
+    assert_eq(c[2], 28.0);
+}
+
+fn test_div() {
+    let a = Tensor.from([10.0, 20.0, 30.0]);
+    let b = Tensor.from([2.0, 4.0, 5.0]);
+    let c = a / b;
+
+    assert_eq(c[0], 5.0);
+    assert_eq(c[1], 5.0);
+    assert_eq(c[2], 6.0);
+}
+
+fn test_pow() {
+    let a = Tensor.from([2.0, 3.0, 4.0]);
+    let b = Tensor.from([2.0, 2.0, 2.0]);
+    let c = a.pow(b);
+
+    assert_eq(c[0], 4.0);
+    assert_eq(c[1], 9.0);
+    assert_eq(c[2], 16.0);
+}
+
+fn test_scalar_operations() {
+    let a = Tensor.from([1.0, 2.0, 3.0]);
+
+    let b = a + 10.0;
+    assert_eq(b[0], 11.0);
+
+    let c = a * 2.0;
+    assert_eq(c[1], 4.0);
+
+    let d = 10.0 - a;
+    assert_eq(d[2], 7.0);
+}
+
+// =============================================================================
+// Element-wise unary operations
+// =============================================================================
+
+fn test_neg() {
+    let a = Tensor.from([1.0, -2.0, 3.0]);
+    let b = -a;
+
+    assert_eq(b[0], -1.0);
+    assert_eq(b[1], 2.0);
+    assert_eq(b[2], -3.0);
+}
+
+fn test_abs() {
+    let a = Tensor.from([-1.0, 2.0, -3.0]);
+    let b = a.abs();
+
+    assert_eq(b[0], 1.0);
+    assert_eq(b[1], 2.0);
+    assert_eq(b[2], 3.0);
+}
+
+fn test_sqrt() {
+    let a = Tensor.from([1.0, 4.0, 9.0, 16.0]);
+    let b = a.sqrt();
+
+    assert_eq(b[0], 1.0);
+    assert_eq(b[1], 2.0);
+    assert_eq(b[2], 3.0);
+    assert_eq(b[3], 4.0);
+}
+
+fn test_exp_log() {
+    let a = Tensor.from([0.0, 1.0, 2.0]);
+
+    let exp_a = a.exp();
+    assert(@abs(exp_a[0] - 1.0) < 0.001);
+    assert(@abs(exp_a[1] - 2.718) < 0.01);
+
+    let log_exp = exp_a.log();
+    assert(@abs(log_exp[0] - 0.0) < 0.001);
+    assert(@abs(log_exp[1] - 1.0) < 0.001);
+}
+
+fn test_trigonometric() {
+    let a = Tensor.from([0.0, 3.14159/2.0, 3.14159]);
+
+    let sin_a = a.sin();
+    assert(@abs(sin_a[0] - 0.0) < 0.001);
+    assert(@abs(sin_a[1] - 1.0) < 0.01);
+    assert(@abs(sin_a[2] - 0.0) < 0.01);
+
+    let cos_a = a.cos();
+    assert(@abs(cos_a[0] - 1.0) < 0.001);
+    assert(@abs(cos_a[1] - 0.0) < 0.01);
+}
+
+fn test_activation_functions() {
+    let x = Tensor.from([-2.0, -1.0, 0.0, 1.0, 2.0]);
+
+    // ReLU
+    let relu = x.relu();
+    assert_eq(relu[0], 0.0);
+    assert_eq(relu[2], 0.0);
+    assert_eq(relu[4], 2.0);
+
+    // Sigmoid
+    let sig = x.sigmoid();
+    assert(sig[0] < 0.2);
+    assert(@abs(sig[2] - 0.5) < 0.001);
+    assert(sig[4] > 0.8);
+
+    // Tanh
+    let tanh = x.tanh();
+    assert(tanh[0] < -0.9);
+    assert(@abs(tanh[2]) < 0.001);
+    assert(tanh[4] > 0.9);
+}
+
+fn test_gelu_silu() {
+    let x = Tensor.from([-1.0, 0.0, 1.0]);
+
+    let gelu = x.gelu();
+    assert(gelu[0] < 0.0);
+    assert(@abs(gelu[1]) < 0.001);
+    assert(gelu[2] > 0.8);
+
+    let silu = x.silu();  // x * sigmoid(x)
+    assert(silu[0] < 0.0);
+    assert(@abs(silu[1]) < 0.001);
+    assert(silu[2] > 0.7);
+}
+
+// =============================================================================
+// Comparison operations
+// =============================================================================
+
+fn test_comparison() {
+    let a = Tensor.from([1.0, 2.0, 3.0]);
+    let b = Tensor.from([2.0, 2.0, 2.0]);
+
+    let eq = a.eq(b);
+    assert_eq(eq[0], false);
+    assert_eq(eq[1], true);
+    assert_eq(eq[2], false);
+
+    let lt = a.lt(b);
+    assert_eq(lt[0], true);
+    assert_eq(lt[1], false);
+    assert_eq(lt[2], false);
+
+    let gt = a.gt(b);
+    assert_eq(gt[0], false);
+    assert_eq(gt[1], false);
+    assert_eq(gt[2], true);
+}
+
+fn test_where() {
+    let condition = Tensor.from([true, false, true]);
+    let a = Tensor.from([1.0, 2.0, 3.0]);
+    let b = Tensor.from([10.0, 20.0, 30.0]);
+
+    let result = Tensor.where(condition, a, b);
+    assert_eq(result[0], 1.0);
+    assert_eq(result[1], 20.0);
+    assert_eq(result[2], 3.0);
+}
+
+fn test_clamp() {
+    let a = Tensor.from([-5.0, 0.0, 5.0, 10.0]);
+    let clamped = a.clamp(0.0, 5.0);
+
+    assert_eq(clamped[0], 0.0);
+    assert_eq(clamped[1], 0.0);
+    assert_eq(clamped[2], 5.0);
+    assert_eq(clamped[3], 5.0);
+}
+
+// =============================================================================
+// Reduction operations
+// =============================================================================
+
+fn test_sum() {
+    let a = Tensor.from([1.0, 2.0, 3.0, 4.0, 5.0]);
+    let total = a.sum();
+
+    assert_eq(total, 15.0);
+}
+
+fn test_mean() {
+    let a = Tensor.from([1.0, 2.0, 3.0, 4.0, 5.0]);
+    let avg = a.mean();
+
+    assert_eq(avg, 3.0);
+}
+
+fn test_max_min() {
+    let a = Tensor.from([3.0, 1.0, 4.0, 1.0, 5.0]);
+
+    assert_eq(a.max(), 5.0);
+    assert_eq(a.min(), 1.0);
+}
+
+fn test_reduce_along_axis() {
+    let a = Tensor.from([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+
+    // Sum along axis 0 (columns)
+    let col_sum = a.sum(axis: 0);
+    assert_eq(col_sum.shape(), [3]);
+    assert_eq(col_sum[0], 5.0);
+    assert_eq(col_sum[1], 7.0);
+    assert_eq(col_sum[2], 9.0);
+
+    // Sum along axis 1 (rows)
+    let row_sum = a.sum(axis: 1);
+    assert_eq(row_sum.shape(), [2]);
+    assert_eq(row_sum[0], 6.0);
+    assert_eq(row_sum[1], 15.0);
+}
+
+fn test_var_std() {
+    let a = Tensor.from([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]);
+
+    let variance = a.var();
+    assert(@abs(variance - 4.0) < 0.001);
+
+    let std = a.std();
+    assert(@abs(std - 2.0) < 0.001);
+}
+
+fn test_argmax_argmin() {
+    let a = Tensor.from([3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0]);
+
+    assert_eq(a.argmax(), 5);  // Index of 9.0
+    assert_eq(a.argmin(), 1);  // Index of first 1.0
+}
+
+fn test_topk() {
+    let a = Tensor.from([3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0]);
+    let (values, indices) = a.topk(3);
+
+    assert_eq(values[0], 9.0);
+    assert_eq(values[1], 5.0);
+    assert_eq(values[2], 4.0);
+    assert_eq(indices[0], 5);
+}
+
+// =============================================================================
+// Matrix operations
+// =============================================================================
+
+fn test_matmul() {
+    let a = Tensor.from([[1.0, 2.0], [3.0, 4.0]]);
+    let b = Tensor.from([[5.0, 6.0], [7.0, 8.0]]);
+    let c = a @ b;  // or a.matmul(b)
+
+    // [[1*5+2*7, 1*6+2*8], [3*5+4*7, 3*6+4*8]]
+    // [[19, 22], [43, 50]]
+    assert_eq(c[[0, 0]], 19.0);
+    assert_eq(c[[0, 1]], 22.0);
+    assert_eq(c[[1, 0]], 43.0);
+    assert_eq(c[[1, 1]], 50.0);
+}
+
+fn test_matmul_vector() {
+    let a = Tensor.from([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+    let b = Tensor.from([1.0, 2.0, 3.0]);
+    let c = a @ b;
+
+    // [1*1+2*2+3*3, 4*1+5*2+6*3] = [14, 32]
+    assert_eq(c[0], 14.0);
+    assert_eq(c[1], 32.0);
+}
+
+fn test_batched_matmul() {
+    let a = Tensor.rand([10, 3, 4], uniform: (0.0, 1.0));
+    let b = Tensor.rand([10, 4, 5], uniform: (0.0, 1.0));
+    let c = a.bmm(b);  // Batched matrix multiply
+
+    assert_eq(c.shape(), [10, 3, 5]);
+}
+
+fn test_transpose() {
+    let a = Tensor.from([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+    let b = a.T();
+
+    assert_eq(b.shape(), [3, 2]);
+    assert_eq(b[[0, 0]], 1.0);
+    assert_eq(b[[0, 1]], 4.0);
+    assert_eq(b[[2, 0]], 3.0);
+    assert_eq(b[[2, 1]], 6.0);
+}
+
+fn test_dot() {
+    let a = Tensor.from([1.0, 2.0, 3.0]);
+    let b = Tensor.from([4.0, 5.0, 6.0]);
+    let dot = a.dot(b);
+
+    // 1*4 + 2*5 + 3*6 = 32
+    assert_eq(dot, 32.0);
+}
+
+// =============================================================================
+// Softmax and normalization
+// =============================================================================
+
+fn test_softmax() {
+    let a = Tensor.from([1.0, 2.0, 3.0]);
+    let s = a.softmax();
+
+    // Sum should be 1
+    let total = s.sum();
+    assert(@abs(total - 1.0) < 0.001);
+
+    // Values should be ordered
+    assert(s[0] < s[1]);
+    assert(s[1] < s[2]);
+}
+
+fn test_log_softmax() {
+    let a = Tensor.from([1.0, 2.0, 3.0]);
+    let ls = a.log_softmax();
+
+    // exp(log_softmax).sum() should be 1
+    let s = ls.exp().sum();
+    assert(@abs(s - 1.0) < 0.001);
+}
+
+fn test_layer_norm() {
+    let a = Tensor.from([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+    let normalized = a.layer_norm([3]);
+
+    // Each row should have mean ~0 and std ~1
+    let row0_mean = normalized[[0, 0]] + normalized[[0, 1]] + normalized[[0, 2]];
+    assert(@abs(row0_mean / 3.0) < 0.001);
+}
+
+fn main() {
+    // Binary operations
+    test_add();
+    test_sub();
+    test_mul();
+    test_div();
+    test_pow();
+    test_scalar_operations();
+
+    // Unary operations
+    test_neg();
+    test_abs();
+    test_sqrt();
+    test_exp_log();
+    test_trigonometric();
+    test_activation_functions();
+    test_gelu_silu();
+
+    // Comparison
+    test_comparison();
+    test_where();
+    test_clamp();
+
+    // Reduction
+    test_sum();
+    test_mean();
+    test_max_min();
+    test_reduce_along_axis();
+    test_var_std();
+    test_argmax_argmin();
+    test_topk();
+
+    // Matrix
+    test_matmul();
+    test_matmul_vector();
+    test_batched_matmul();
+    test_transpose();
+    test_dot();
+
+    // Normalization
+    test_softmax();
+    test_log_softmax();
+    test_layer_norm();
+
+    print("002_operations: PASSED");
+}

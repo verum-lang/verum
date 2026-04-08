@@ -1,0 +1,684 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, collections, stack, queue, heap, hashmap
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: collection-like patterns (List, Map, Set simulation)
+// through VBC interpreter using flat struct arrays.
+// All types are flat (no nested structs) to ensure VBC interpreter compatibility.
+
+// ============================================================================
+// Stack operations (push/pop/peek on flat array, capacity 8)
+// ============================================================================
+
+type IntStack is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    s4: Int, s5: Int, s6: Int, s7: Int,
+    top: Int
+};
+
+fn stack_new() -> IntStack {
+    IntStack { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0, s7: 0, top: 0 }
+}
+
+fn stack_get(s: IntStack, i: Int) -> Int {
+    if i == 0 { s.s0 } else if i == 1 { s.s1 }
+    else if i == 2 { s.s2 } else if i == 3 { s.s3 }
+    else if i == 4 { s.s4 } else if i == 5 { s.s5 }
+    else if i == 6 { s.s6 } else { s.s7 }
+}
+
+fn stack_push(s: IntStack, val: Int) -> IntStack {
+    let i = s.top;
+    IntStack {
+        s0: if i == 0 { val } else { s.s0 },
+        s1: if i == 1 { val } else { s.s1 },
+        s2: if i == 2 { val } else { s.s2 },
+        s3: if i == 3 { val } else { s.s3 },
+        s4: if i == 4 { val } else { s.s4 },
+        s5: if i == 5 { val } else { s.s5 },
+        s6: if i == 6 { val } else { s.s6 },
+        s7: if i == 7 { val } else { s.s7 },
+        top: s.top + 1
+    }
+}
+
+fn stack_pop(s: IntStack) -> IntStack {
+    IntStack {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        s4: s.s4, s5: s.s5, s6: s.s6, s7: s.s7,
+        top: s.top - 1
+    }
+}
+
+fn stack_peek(s: IntStack) -> Int {
+    stack_get(s, s.top - 1)
+}
+
+fn stack_size(s: IntStack) -> Int { s.top }
+fn stack_is_empty(s: IntStack) -> Bool { s.top == 0 }
+
+fn test_stack_basic() {
+    let mut s = stack_new();
+    assert(stack_is_empty(s));
+    assert_eq(stack_size(s), 0);
+
+    s = stack_push(s, 10);
+    s = stack_push(s, 20);
+    s = stack_push(s, 30);
+
+    assert_eq(stack_size(s), 3);
+    assert(!stack_is_empty(s));
+    assert_eq(stack_peek(s), 30);
+
+    s = stack_pop(s);
+    assert_eq(stack_peek(s), 20);
+    assert_eq(stack_size(s), 2);
+
+    s = stack_pop(s);
+    assert_eq(stack_peek(s), 10);
+
+    s = stack_pop(s);
+    assert(stack_is_empty(s));
+}
+
+fn test_stack_lifo_order() {
+    let mut s = stack_new();
+    let mut i = 1;
+    while i <= 8 {
+        s = stack_push(s, i);
+        i = i + 1;
+    }
+    assert_eq(stack_size(s), 8);
+
+    let mut expected = 8;
+    while expected >= 1 {
+        assert_eq(stack_peek(s), expected);
+        s = stack_pop(s);
+        expected = expected - 1;
+    }
+    assert(stack_is_empty(s));
+}
+
+fn test_stack_reverse_sequence() {
+    let mut s = stack_new();
+    s = stack_push(s, 1);
+    s = stack_push(s, 2);
+    s = stack_push(s, 3);
+    s = stack_push(s, 4);
+    s = stack_push(s, 5);
+
+    // Pop into another stack to reverse
+    let mut r = stack_new();
+    while !stack_is_empty(s) {
+        r = stack_push(r, stack_peek(s));
+        s = stack_pop(s);
+    }
+
+    assert_eq(stack_peek(r), 1);
+    r = stack_pop(r);
+    assert_eq(stack_peek(r), 2);
+    r = stack_pop(r);
+    assert_eq(stack_peek(r), 3);
+    r = stack_pop(r);
+    assert_eq(stack_peek(r), 4);
+    r = stack_pop(r);
+    assert_eq(stack_peek(r), 5);
+}
+
+// ============================================================================
+// Queue operations (circular buffer, capacity 8)
+// ============================================================================
+
+type IntQueue is {
+    q0: Int, q1: Int, q2: Int, q3: Int,
+    q4: Int, q5: Int, q6: Int, q7: Int,
+    head: Int, tail: Int, count: Int, capacity: Int
+};
+
+fn queue_new(cap: Int) -> IntQueue {
+    IntQueue {
+        q0: 0, q1: 0, q2: 0, q3: 0, q4: 0, q5: 0, q6: 0, q7: 0,
+        head: 0, tail: 0, count: 0, capacity: cap
+    }
+}
+
+fn queue_get_slot(q: IntQueue, i: Int) -> Int {
+    if i == 0 { q.q0 } else if i == 1 { q.q1 }
+    else if i == 2 { q.q2 } else if i == 3 { q.q3 }
+    else if i == 4 { q.q4 } else if i == 5 { q.q5 }
+    else if i == 6 { q.q6 } else { q.q7 }
+}
+
+fn queue_set_slot(q: IntQueue, i: Int, val: Int) -> IntQueue {
+    IntQueue {
+        q0: if i == 0 { val } else { q.q0 },
+        q1: if i == 1 { val } else { q.q1 },
+        q2: if i == 2 { val } else { q.q2 },
+        q3: if i == 3 { val } else { q.q3 },
+        q4: if i == 4 { val } else { q.q4 },
+        q5: if i == 5 { val } else { q.q5 },
+        q6: if i == 6 { val } else { q.q6 },
+        q7: if i == 7 { val } else { q.q7 },
+        head: q.head, tail: q.tail, count: q.count, capacity: q.capacity
+    }
+}
+
+fn queue_enqueue(q: IntQueue, val: Int) -> IntQueue {
+    let updated = queue_set_slot(q, q.tail, val);
+    IntQueue {
+        q0: updated.q0, q1: updated.q1, q2: updated.q2, q3: updated.q3,
+        q4: updated.q4, q5: updated.q5, q6: updated.q6, q7: updated.q7,
+        head: q.head,
+        tail: (q.tail + 1) % q.capacity,
+        count: q.count + 1,
+        capacity: q.capacity
+    }
+}
+
+fn queue_dequeue(q: IntQueue) -> IntQueue {
+    IntQueue {
+        q0: q.q0, q1: q.q1, q2: q.q2, q3: q.q3,
+        q4: q.q4, q5: q.q5, q6: q.q6, q7: q.q7,
+        head: (q.head + 1) % q.capacity,
+        tail: q.tail,
+        count: q.count - 1,
+        capacity: q.capacity
+    }
+}
+
+fn queue_front(q: IntQueue) -> Int {
+    queue_get_slot(q, q.head)
+}
+
+fn queue_size(q: IntQueue) -> Int { q.count }
+fn queue_is_empty(q: IntQueue) -> Bool { q.count == 0 }
+fn queue_is_full(q: IntQueue) -> Bool { q.count == q.capacity }
+
+fn test_queue_basic() {
+    let mut q = queue_new(8);
+    assert(queue_is_empty(q));
+    assert_eq(queue_size(q), 0);
+
+    q = queue_enqueue(q, 10);
+    q = queue_enqueue(q, 20);
+    q = queue_enqueue(q, 30);
+
+    assert_eq(queue_size(q), 3);
+    assert_eq(queue_front(q), 10);
+
+    q = queue_dequeue(q);
+    assert_eq(queue_front(q), 20);
+    assert_eq(queue_size(q), 2);
+
+    q = queue_dequeue(q);
+    assert_eq(queue_front(q), 30);
+
+    q = queue_dequeue(q);
+    assert(queue_is_empty(q));
+}
+
+fn test_queue_fifo_order() {
+    let mut q = queue_new(8);
+    let mut i = 1;
+    while i <= 8 {
+        q = queue_enqueue(q, i);
+        i = i + 1;
+    }
+
+    let mut expected = 1;
+    while expected <= 8 {
+        assert_eq(queue_front(q), expected);
+        q = queue_dequeue(q);
+        expected = expected + 1;
+    }
+    assert(queue_is_empty(q));
+}
+
+fn test_queue_circular_wrap() {
+    let mut q = queue_new(4);
+
+    q = queue_enqueue(q, 1);
+    q = queue_enqueue(q, 2);
+    q = queue_enqueue(q, 3);
+    assert_eq(queue_front(q), 1);
+    q = queue_dequeue(q);
+    q = queue_dequeue(q);
+    assert_eq(queue_front(q), 3);
+
+    q = queue_enqueue(q, 4);
+    q = queue_enqueue(q, 5);
+    q = queue_enqueue(q, 6);
+    assert(queue_is_full(q));
+
+    assert_eq(queue_front(q), 3);
+    q = queue_dequeue(q);
+    assert_eq(queue_front(q), 4);
+    q = queue_dequeue(q);
+    assert_eq(queue_front(q), 5);
+    q = queue_dequeue(q);
+    assert_eq(queue_front(q), 6);
+    q = queue_dequeue(q);
+    assert(queue_is_empty(q));
+}
+
+// ============================================================================
+// Priority Queue (Min-Heap on flat array, capacity 8)
+// ============================================================================
+
+type IntHeap is {
+    h0: Int, h1: Int, h2: Int, h3: Int,
+    h4: Int, h5: Int, h6: Int, h7: Int,
+    heap_size: Int
+};
+
+fn heap_new() -> IntHeap {
+    IntHeap { h0: 0, h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0, h7: 0, heap_size: 0 }
+}
+
+fn heap_get(h: IntHeap, i: Int) -> Int {
+    if i == 0 { h.h0 } else if i == 1 { h.h1 }
+    else if i == 2 { h.h2 } else if i == 3 { h.h3 }
+    else if i == 4 { h.h4 } else if i == 5 { h.h5 }
+    else if i == 6 { h.h6 } else { h.h7 }
+}
+
+fn heap_set(h: IntHeap, i: Int, val: Int) -> IntHeap {
+    IntHeap {
+        h0: if i == 0 { val } else { h.h0 },
+        h1: if i == 1 { val } else { h.h1 },
+        h2: if i == 2 { val } else { h.h2 },
+        h3: if i == 3 { val } else { h.h3 },
+        h4: if i == 4 { val } else { h.h4 },
+        h5: if i == 5 { val } else { h.h5 },
+        h6: if i == 6 { val } else { h.h6 },
+        h7: if i == 7 { val } else { h.h7 },
+        heap_size: h.heap_size
+    }
+}
+
+fn heap_with_size(h: IntHeap, sz: Int) -> IntHeap {
+    IntHeap {
+        h0: h.h0, h1: h.h1, h2: h.h2, h3: h.h3,
+        h4: h.h4, h5: h.h5, h6: h.h6, h7: h.h7,
+        heap_size: sz
+    }
+}
+
+fn heap_parent(i: Int) -> Int { (i - 1) / 2 }
+fn heap_left_child(i: Int) -> Int { 2 * i + 1 }
+fn heap_right_child(i: Int) -> Int { 2 * i + 2 }
+
+fn heap_swap(h: IntHeap, i: Int, j: Int) -> IntHeap {
+    let vi = heap_get(h, i);
+    let vj = heap_get(h, j);
+    let tmp = heap_set(h, i, vj);
+    heap_set(tmp, j, vi)
+}
+
+fn heap_sift_up(h: IntHeap, idx: Int) -> IntHeap {
+    let mut heap = h;
+    let mut i = idx;
+    let mut done = false;
+    while i > 0 && !done {
+        let p = heap_parent(i);
+        if heap_get(heap, i) < heap_get(heap, p) {
+            heap = heap_swap(heap, i, p);
+            i = p;
+        } else {
+            done = true;
+        }
+    }
+    heap
+}
+
+fn heap_sift_down(h: IntHeap, idx: Int) -> IntHeap {
+    let mut heap = h;
+    let mut i = idx;
+    let mut done = false;
+    while !done {
+        let l = heap_left_child(i);
+        let r = heap_right_child(i);
+        let mut smallest = i;
+        if l < heap.heap_size && heap_get(heap, l) < heap_get(heap, smallest) {
+            smallest = l;
+        }
+        if r < heap.heap_size && heap_get(heap, r) < heap_get(heap, smallest) {
+            smallest = r;
+        }
+        if smallest != i {
+            heap = heap_swap(heap, i, smallest);
+            i = smallest;
+        } else {
+            done = true;
+        }
+    }
+    heap
+}
+
+fn heap_insert(h: IntHeap, val: Int) -> IntHeap {
+    let new_h = heap_set(h, h.heap_size, val);
+    let sized = heap_with_size(new_h, h.heap_size + 1);
+    heap_sift_up(sized, h.heap_size)
+}
+
+fn heap_peek(h: IntHeap) -> Int {
+    heap_get(h, 0)
+}
+
+fn heap_pop(h: IntHeap) -> IntHeap {
+    let last_val = heap_get(h, h.heap_size - 1);
+    let updated = heap_set(h, 0, last_val);
+    let shrunk = heap_with_size(updated, h.heap_size - 1);
+    if shrunk.heap_size > 0 {
+        heap_sift_down(shrunk, 0)
+    } else {
+        shrunk
+    }
+}
+
+fn test_heap_basic() {
+    let mut h = heap_new();
+    assert_eq(h.heap_size, 0);
+
+    h = heap_insert(h, 5);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 7);
+    h = heap_insert(h, 1);
+    h = heap_insert(h, 4);
+
+    assert_eq(h.heap_size, 5);
+    assert_eq(heap_peek(h), 1);
+}
+
+fn test_heap_extract_order() {
+    let mut h = heap_new();
+    h = heap_insert(h, 10);
+    h = heap_insert(h, 4);
+    h = heap_insert(h, 15);
+    h = heap_insert(h, 1);
+    h = heap_insert(h, 7);
+
+    assert_eq(heap_peek(h), 1);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 4);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 7);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 10);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 15);
+    h = heap_pop(h);
+    assert_eq(h.heap_size, 0);
+}
+
+fn test_heap_duplicates() {
+    let mut h = heap_new();
+    h = heap_insert(h, 5);
+    h = heap_insert(h, 5);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 1);
+
+    assert_eq(heap_peek(h), 1);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 3);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 3);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 5);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 5);
+}
+
+fn test_heap_sorted_insert() {
+    let mut h = heap_new();
+    h = heap_insert(h, 1);
+    h = heap_insert(h, 2);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 4);
+    h = heap_insert(h, 5);
+
+    assert_eq(heap_peek(h), 1);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 2);
+}
+
+fn test_heap_reverse_insert() {
+    let mut h = heap_new();
+    h = heap_insert(h, 5);
+    h = heap_insert(h, 4);
+    h = heap_insert(h, 3);
+    h = heap_insert(h, 2);
+    h = heap_insert(h, 1);
+
+    assert_eq(heap_peek(h), 1);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 2);
+    h = heap_pop(h);
+    assert_eq(heap_peek(h), 3);
+}
+
+// ============================================================================
+// Flat Set simulation (using 16-element bit array for membership)
+// ============================================================================
+
+// Simple flat set: tracks membership of integers 0-15 using a 16-element array
+type FlatSet is {
+    m0: Int, m1: Int, m2: Int, m3: Int,
+    m4: Int, m5: Int, m6: Int, m7: Int,
+    m8: Int, m9: Int, m10: Int, m11: Int,
+    m12: Int, m13: Int, m14: Int, m15: Int
+};
+
+fn flatset_new() -> FlatSet {
+    FlatSet { m0: 0, m1: 0, m2: 0, m3: 0, m4: 0, m5: 0, m6: 0, m7: 0,
+              m8: 0, m9: 0, m10: 0, m11: 0, m12: 0, m13: 0, m14: 0, m15: 0 }
+}
+
+fn flatset_get(s: FlatSet, i: Int) -> Int {
+    if i == 0 { s.m0 } else if i == 1 { s.m1 }
+    else if i == 2 { s.m2 } else if i == 3 { s.m3 }
+    else if i == 4 { s.m4 } else if i == 5 { s.m5 }
+    else if i == 6 { s.m6 } else if i == 7 { s.m7 }
+    else if i == 8 { s.m8 } else if i == 9 { s.m9 }
+    else if i == 10 { s.m10 } else if i == 11 { s.m11 }
+    else if i == 12 { s.m12 } else if i == 13 { s.m13 }
+    else if i == 14 { s.m14 } else { s.m15 }
+}
+
+fn flatset_insert(s: FlatSet, i: Int) -> FlatSet {
+    FlatSet {
+        m0: if i == 0 { 1 } else { s.m0 },
+        m1: if i == 1 { 1 } else { s.m1 },
+        m2: if i == 2 { 1 } else { s.m2 },
+        m3: if i == 3 { 1 } else { s.m3 },
+        m4: if i == 4 { 1 } else { s.m4 },
+        m5: if i == 5 { 1 } else { s.m5 },
+        m6: if i == 6 { 1 } else { s.m6 },
+        m7: if i == 7 { 1 } else { s.m7 },
+        m8: if i == 8 { 1 } else { s.m8 },
+        m9: if i == 9 { 1 } else { s.m9 },
+        m10: if i == 10 { 1 } else { s.m10 },
+        m11: if i == 11 { 1 } else { s.m11 },
+        m12: if i == 12 { 1 } else { s.m12 },
+        m13: if i == 13 { 1 } else { s.m13 },
+        m14: if i == 14 { 1 } else { s.m14 },
+        m15: if i == 15 { 1 } else { s.m15 }
+    }
+}
+
+fn flatset_remove(s: FlatSet, i: Int) -> FlatSet {
+    FlatSet {
+        m0: if i == 0 { 0 } else { s.m0 },
+        m1: if i == 1 { 0 } else { s.m1 },
+        m2: if i == 2 { 0 } else { s.m2 },
+        m3: if i == 3 { 0 } else { s.m3 },
+        m4: if i == 4 { 0 } else { s.m4 },
+        m5: if i == 5 { 0 } else { s.m5 },
+        m6: if i == 6 { 0 } else { s.m6 },
+        m7: if i == 7 { 0 } else { s.m7 },
+        m8: if i == 8 { 0 } else { s.m8 },
+        m9: if i == 9 { 0 } else { s.m9 },
+        m10: if i == 10 { 0 } else { s.m10 },
+        m11: if i == 11 { 0 } else { s.m11 },
+        m12: if i == 12 { 0 } else { s.m12 },
+        m13: if i == 13 { 0 } else { s.m13 },
+        m14: if i == 14 { 0 } else { s.m14 },
+        m15: if i == 15 { 0 } else { s.m15 }
+    }
+}
+
+fn flatset_contains(s: FlatSet, i: Int) -> Bool {
+    flatset_get(s, i) == 1
+}
+
+fn flatset_count(s: FlatSet) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < 16 {
+        if flatset_get(s, i) == 1 {
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+    c
+}
+
+fn test_flatset_basic() {
+    let mut s = flatset_new();
+    assert(!flatset_contains(s, 0));
+    assert(!flatset_contains(s, 5));
+    assert_eq(flatset_count(s), 0);
+
+    s = flatset_insert(s, 3);
+    s = flatset_insert(s, 7);
+    s = flatset_insert(s, 11);
+    assert(flatset_contains(s, 3));
+    assert(flatset_contains(s, 7));
+    assert(flatset_contains(s, 11));
+    assert(!flatset_contains(s, 4));
+    assert_eq(flatset_count(s), 3);
+}
+
+fn test_flatset_duplicate_insert() {
+    let mut s = flatset_new();
+    s = flatset_insert(s, 5);
+    s = flatset_insert(s, 5);
+    s = flatset_insert(s, 5);
+    assert_eq(flatset_count(s), 1);
+    assert(flatset_contains(s, 5));
+}
+
+fn test_flatset_remove() {
+    let mut s = flatset_new();
+    s = flatset_insert(s, 1);
+    s = flatset_insert(s, 2);
+    s = flatset_insert(s, 3);
+    assert_eq(flatset_count(s), 3);
+
+    s = flatset_remove(s, 2);
+    assert(!flatset_contains(s, 2));
+    assert(flatset_contains(s, 1));
+    assert(flatset_contains(s, 3));
+    assert_eq(flatset_count(s), 2);
+}
+
+fn test_flatset_full() {
+    let mut s = flatset_new();
+    let mut i = 0;
+    while i < 16 {
+        s = flatset_insert(s, i);
+        i = i + 1;
+    }
+    assert_eq(flatset_count(s), 16);
+
+    let mut j = 0;
+    while j < 16 {
+        assert(flatset_contains(s, j));
+        j = j + 1;
+    }
+}
+
+fn test_flatset_intersection() {
+    // Simulate set intersection: A = {1,3,5,7}, B = {2,3,6,7}
+    let mut a = flatset_new();
+    a = flatset_insert(a, 1);
+    a = flatset_insert(a, 3);
+    a = flatset_insert(a, 5);
+    a = flatset_insert(a, 7);
+
+    let mut b = flatset_new();
+    b = flatset_insert(b, 2);
+    b = flatset_insert(b, 3);
+    b = flatset_insert(b, 6);
+    b = flatset_insert(b, 7);
+
+    // Intersection: elements in both A and B
+    let mut inter = flatset_new();
+    let mut k = 0;
+    while k < 16 {
+        if flatset_contains(a, k) && flatset_contains(b, k) {
+            inter = flatset_insert(inter, k);
+        }
+        k = k + 1;
+    }
+    assert_eq(flatset_count(inter), 2);
+    assert(flatset_contains(inter, 3));
+    assert(flatset_contains(inter, 7));
+    assert(!flatset_contains(inter, 1));
+    assert(!flatset_contains(inter, 2));
+}
+
+fn test_flatset_union() {
+    let mut a = flatset_new();
+    a = flatset_insert(a, 0);
+    a = flatset_insert(a, 2);
+    a = flatset_insert(a, 4);
+
+    let mut b = flatset_new();
+    b = flatset_insert(b, 1);
+    b = flatset_insert(b, 3);
+    b = flatset_insert(b, 4);
+
+    // Union
+    let mut uni = flatset_new();
+    let mut k = 0;
+    while k < 16 {
+        if flatset_contains(a, k) || flatset_contains(b, k) {
+            uni = flatset_insert(uni, k);
+        }
+        k = k + 1;
+    }
+    assert_eq(flatset_count(uni), 5); // {0,1,2,3,4}
+    assert(flatset_contains(uni, 0));
+    assert(flatset_contains(uni, 1));
+    assert(flatset_contains(uni, 2));
+    assert(flatset_contains(uni, 3));
+    assert(flatset_contains(uni, 4));
+    assert(!flatset_contains(uni, 5));
+}
+
+fn main() -> Int {
+    test_stack_basic();
+    test_stack_lifo_order();
+    test_stack_reverse_sequence();
+    test_queue_basic();
+    test_queue_fifo_order();
+    test_queue_circular_wrap();
+    test_heap_basic();
+    test_heap_extract_order();
+    test_heap_duplicates();
+    test_heap_sorted_insert();
+    test_heap_reverse_insert();
+    test_flatset_basic();
+    test_flatset_duplicate_insert();
+    test_flatset_remove();
+    test_flatset_full();
+    test_flatset_intersection();
+    test_flatset_union();
+    print("[OK] 027_collection_patterns");
+    0
+}

@@ -1,0 +1,287 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, cbgr, reference, generation, epoch
+// @timeout: 50000
+// @expected-exit: 0
+// @description: CBGR operations — reference acquire/release/check, generation tracking, epoch management
+
+// ============================================================================
+// CBGR reference simulation
+// A ThinRef has: pointer (addr), generation counter, epoch capabilities
+// ============================================================================
+
+type CbgrRef is {
+    addr: Int,
+    generation: Int,
+    epoch: Int,
+    is_valid: Int    // 1 = valid, 0 = invalidated
+};
+
+fn cbgr_new(addr: Int, gen: Int, epoch: Int) -> CbgrRef {
+    CbgrRef { addr: addr, generation: gen, epoch: epoch, is_valid: 1 }
+}
+
+fn cbgr_invalidate(r: CbgrRef) -> CbgrRef {
+    CbgrRef { addr: r.addr, generation: r.generation, epoch: r.epoch, is_valid: 0 }
+}
+
+fn cbgr_check(r: CbgrRef, current_gen: Int, current_epoch: Int) -> Int {
+    // Valid if: ref is valid, generation matches, and epoch is current
+    if r.is_valid == 0 { 0 }
+    else if r.generation == current_gen {
+        if r.epoch == current_epoch { 1 } else { 0 }
+    } else { 0 }
+}
+
+// ============================================================================
+// Generation tracker — simulates allocation generations
+// ============================================================================
+
+type GenTracker is {
+    current_gen: Int,
+    current_epoch: Int,
+    alloc_count: Int,
+    dealloc_count: Int,
+    check_pass_count: Int,
+    check_fail_count: Int
+};
+
+fn tracker_new() -> GenTracker {
+    GenTracker {
+        current_gen: 0, current_epoch: 0,
+        alloc_count: 0, dealloc_count: 0,
+        check_pass_count: 0, check_fail_count: 0
+    }
+}
+
+fn tracker_alloc(t: GenTracker, addr: Int) -> CbgrRef {
+    cbgr_new(addr, t.current_gen, t.current_epoch)
+}
+
+fn tracker_bump_alloc(t: GenTracker) -> GenTracker {
+    GenTracker {
+        current_gen: t.current_gen, current_epoch: t.current_epoch,
+        alloc_count: t.alloc_count + 1, dealloc_count: t.dealloc_count,
+        check_pass_count: t.check_pass_count, check_fail_count: t.check_fail_count
+    }
+}
+
+fn tracker_dealloc(t: GenTracker) -> GenTracker {
+    GenTracker {
+        current_gen: t.current_gen + 1, current_epoch: t.current_epoch,
+        alloc_count: t.alloc_count, dealloc_count: t.dealloc_count + 1,
+        check_pass_count: t.check_pass_count, check_fail_count: t.check_fail_count
+    }
+}
+
+fn tracker_advance_epoch(t: GenTracker) -> GenTracker {
+    GenTracker {
+        current_gen: t.current_gen, current_epoch: t.current_epoch + 1,
+        alloc_count: t.alloc_count, dealloc_count: t.dealloc_count,
+        check_pass_count: t.check_pass_count, check_fail_count: t.check_fail_count
+    }
+}
+
+fn tracker_check(t: GenTracker, r: CbgrRef) -> GenTracker {
+    let passed = cbgr_check(r, t.current_gen, t.current_epoch);
+    if passed == 1 {
+        GenTracker {
+            current_gen: t.current_gen, current_epoch: t.current_epoch,
+            alloc_count: t.alloc_count, dealloc_count: t.dealloc_count,
+            check_pass_count: t.check_pass_count + 1, check_fail_count: t.check_fail_count
+        }
+    } else {
+        GenTracker {
+            current_gen: t.current_gen, current_epoch: t.current_epoch,
+            alloc_count: t.alloc_count, dealloc_count: t.dealloc_count,
+            check_pass_count: t.check_pass_count, check_fail_count: t.check_fail_count + 1
+        }
+    }
+}
+
+// ============================================================================
+// Test 1: Basic acquire and check
+// ============================================================================
+
+@test
+fn test_basic_acquire_check() {
+    let mut t = tracker_new();
+
+    // Allocate a reference
+    let ref1 = tracker_alloc(t, 1000);
+    t = tracker_bump_alloc(t);
+    assert_eq(ref1.addr, 1000);
+    assert_eq(ref1.generation, 0);
+    assert_eq(ref1.epoch, 0);
+    assert_eq(ref1.is_valid, 1);
+
+    // Check — should pass
+    let check_result = cbgr_check(ref1, t.current_gen, t.current_epoch);
+    assert_eq(check_result, 1);
+    t = tracker_check(t, ref1);
+    assert_eq(t.check_pass_count, 1);
+    assert_eq(t.check_fail_count, 0);
+
+    print("  test_basic_acquire_check: ok");
+}
+
+// ============================================================================
+// Test 2: Generation mismatch after deallocation
+// ============================================================================
+
+@test
+fn test_generation_mismatch() {
+    let mut t = tracker_new();
+
+    // Allocate ref with generation 0
+    let ref1 = tracker_alloc(t, 2000);
+    t = tracker_bump_alloc(t);
+
+    // Check passes at generation 0
+    t = tracker_check(t, ref1);
+    assert_eq(t.check_pass_count, 1);
+
+    // Deallocate — bumps generation to 1
+    t = tracker_dealloc(t);
+    assert_eq(t.current_gen, 1);
+
+    // Old ref has generation 0, current is 1 — check fails (use-after-free detection)
+    t = tracker_check(t, ref1);
+    assert_eq(t.check_fail_count, 1);
+
+    // New allocation at generation 1
+    let ref2 = tracker_alloc(t, 2000);
+    t = tracker_bump_alloc(t);
+    assert_eq(ref2.generation, 1);
+
+    // New ref passes check
+    t = tracker_check(t, ref2);
+    assert_eq(t.check_pass_count, 2);
+
+    print("  test_generation_mismatch: ok");
+}
+
+// ============================================================================
+// Test 3: Epoch advancement
+// ============================================================================
+
+@test
+fn test_epoch_advancement() {
+    let mut t = tracker_new();
+
+    // Create ref in epoch 0
+    let ref1 = tracker_alloc(t, 3000);
+    t = tracker_bump_alloc(t);
+
+    // Valid in epoch 0
+    t = tracker_check(t, ref1);
+    assert_eq(t.check_pass_count, 1);
+
+    // Advance epoch to 1
+    t = tracker_advance_epoch(t);
+    assert_eq(t.current_epoch, 1);
+
+    // Old ref has epoch 0, current epoch is 1 — fails
+    t = tracker_check(t, ref1);
+    assert_eq(t.check_fail_count, 1);
+
+    // Create new ref in epoch 1
+    let ref2 = tracker_alloc(t, 3000);
+    t = tracker_bump_alloc(t);
+    assert_eq(ref2.epoch, 1);
+
+    // Passes in current epoch
+    t = tracker_check(t, ref2);
+    assert_eq(t.check_pass_count, 2);
+
+    print("  test_epoch_advancement: ok");
+}
+
+// ============================================================================
+// Test 4: Invalidation
+// ============================================================================
+
+@test
+fn test_invalidation() {
+    let mut t = tracker_new();
+
+    let ref1 = tracker_alloc(t, 4000);
+    t = tracker_bump_alloc(t);
+
+    // Valid before invalidation
+    t = tracker_check(t, ref1);
+    assert_eq(t.check_pass_count, 1);
+
+    // Invalidate
+    let ref1_invalid = cbgr_invalidate(ref1);
+    assert_eq(ref1_invalid.is_valid, 0);
+
+    // Check fails even though generation and epoch match
+    t = tracker_check(t, ref1_invalid);
+    assert_eq(t.check_fail_count, 1);
+
+    print("  test_invalidation: ok");
+}
+
+// ============================================================================
+// Test 5: Multiple allocations and lifecycle
+// ============================================================================
+
+@test
+fn test_lifecycle() {
+    let mut t = tracker_new();
+
+    // Allocate 3 refs
+    let r1 = tracker_alloc(t, 100);
+    t = tracker_bump_alloc(t);
+    let r2 = tracker_alloc(t, 200);
+    t = tracker_bump_alloc(t);
+    let r3 = tracker_alloc(t, 300);
+    t = tracker_bump_alloc(t);
+
+    assert_eq(t.alloc_count, 3);
+
+    // All should pass
+    t = tracker_check(t, r1);
+    t = tracker_check(t, r2);
+    t = tracker_check(t, r3);
+    assert_eq(t.check_pass_count, 3);
+    assert_eq(t.check_fail_count, 0);
+
+    // Dealloc first — bumps generation, r1 goes stale
+    t = tracker_dealloc(t);
+    assert_eq(t.dealloc_count, 1);
+
+    // r1 fails, r2 also fails (same old generation), r3 also fails
+    t = tracker_check(t, r1);
+    t = tracker_check(t, r2);
+    t = tracker_check(t, r3);
+    assert_eq(t.check_fail_count, 3);
+
+    // New alloc at current generation
+    let r4 = tracker_alloc(t, 400);
+    t = tracker_bump_alloc(t);
+    t = tracker_check(t, r4);
+    assert_eq(t.check_pass_count, 4);
+
+    // Stats
+    assert_eq(t.alloc_count, 4);
+    assert_eq(t.dealloc_count, 1);
+
+    print("  test_lifecycle: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_basic_acquire_check();
+    test_generation_mismatch();
+    test_epoch_advancement();
+    test_invalidation();
+    test_lifecycle();
+    print("[OK] 090_cbgr_operations");
+    0
+}

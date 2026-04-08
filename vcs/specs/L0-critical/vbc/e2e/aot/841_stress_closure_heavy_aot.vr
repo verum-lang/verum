@@ -1,0 +1,233 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, sorting
+// @timeout: 60000
+// @expected-exit: 0
+
+// Sorting stress: quicksort + mergesort on simulated arrays using records
+
+// 16-element array via record
+type A16 is {
+    e00: Int, e01: Int, e02: Int, e03: Int, e04: Int, e05: Int, e06: Int, e07: Int,
+    e08: Int, e09: Int, e10: Int, e11: Int, e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_get(a: A16, i: Int) -> Int {
+    if (i == 0) { return a.e00; }  if (i == 1) { return a.e01; }
+    if (i == 2) { return a.e02; }  if (i == 3) { return a.e03; }
+    if (i == 4) { return a.e04; }  if (i == 5) { return a.e05; }
+    if (i == 6) { return a.e06; }  if (i == 7) { return a.e07; }
+    if (i == 8) { return a.e08; }  if (i == 9) { return a.e09; }
+    if (i == 10) { return a.e10; } if (i == 11) { return a.e11; }
+    if (i == 12) { return a.e12; } if (i == 13) { return a.e13; }
+    if (i == 14) { return a.e14; } a.e15
+}
+
+fn a16_set(a: A16, i: Int, v: Int) -> A16 {
+    A16 {
+        e00: if (i == 0)  { v } else { a.e00 }, e01: if (i == 1)  { v } else { a.e01 },
+        e02: if (i == 2)  { v } else { a.e02 }, e03: if (i == 3)  { v } else { a.e03 },
+        e04: if (i == 4)  { v } else { a.e04 }, e05: if (i == 5)  { v } else { a.e05 },
+        e06: if (i == 6)  { v } else { a.e06 }, e07: if (i == 7)  { v } else { a.e07 },
+        e08: if (i == 8)  { v } else { a.e08 }, e09: if (i == 9)  { v } else { a.e09 },
+        e10: if (i == 10) { v } else { a.e10 }, e11: if (i == 11) { v } else { a.e11 },
+        e12: if (i == 12) { v } else { a.e12 }, e13: if (i == 13) { v } else { a.e13 },
+        e14: if (i == 14) { v } else { a.e14 }, e15: if (i == 15) { v } else { a.e15 }
+    }
+}
+
+fn a16_swap(a: A16, i: Int, j: Int) -> A16 {
+    let vi = a16_get(a, i);
+    let vj = a16_get(a, j);
+    let tmp = a16_set(a, i, vj);
+    a16_set(tmp, j, vi)
+}
+
+fn a16_sum(a: A16) -> Int {
+    a.e00 + a.e01 + a.e02 + a.e03 + a.e04 + a.e05 + a.e06 + a.e07 +
+    a.e08 + a.e09 + a.e10 + a.e11 + a.e12 + a.e13 + a.e14 + a.e15
+}
+
+fn is_sorted(a: A16, n: Int) -> Int {
+    let mut i = 0;
+    while (i < n - 1) {
+        if (a16_get(a, i) > a16_get(a, i + 1)) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Bubble sort for correctness baseline
+fn bubble_sort(a: A16, n: Int) -> A16 {
+    let mut arr = a;
+    let mut i = 0;
+    while (i < n) {
+        let mut j = 0;
+        while (j < n - 1 - i) {
+            if (a16_get(arr, j) > a16_get(arr, j + 1)) {
+                arr = a16_swap(arr, j, j + 1);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+// Selection sort
+fn selection_sort(a: A16, n: Int) -> A16 {
+    let mut arr = a;
+    let mut i = 0;
+    while (i < n - 1) {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while (j < n) {
+            if (a16_get(arr, j) < a16_get(arr, min_idx)) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if (min_idx != i) {
+            arr = a16_swap(arr, i, min_idx);
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+// Insertion sort
+fn insertion_sort(a: A16, n: Int) -> A16 {
+    let mut arr = a;
+    let mut i = 1;
+    while (i < n) {
+        let key = a16_get(arr, i);
+        let mut j = i - 1;
+        let mut insert_pos = 0;
+        let mut found = 0;
+        while (j >= 0) {
+            if (found == 0) {
+                if (a16_get(arr, j) > key) {
+                    arr = a16_set(arr, j + 1, a16_get(arr, j));
+                } else {
+                    insert_pos = j + 1;
+                    found = 1;
+                }
+            }
+            j = j - 1;
+        }
+        if (found == 0) {
+            arr = a16_set(arr, 0, key);
+        } else {
+            arr = a16_set(arr, insert_pos, key);
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+// Pseudo-random number generator (LCG)
+fn lcg_next(seed: Int) -> Int {
+    let mut v = seed * 1103515245 + 12345;
+    if (v < 0) { v = 0 - v; }
+    v % 1000000
+}
+
+fn make_random_array(seed: Int, n: Int) -> A16 {
+    let mut arr = A16 {
+        e00: 0, e01: 0, e02: 0, e03: 0, e04: 0, e05: 0, e06: 0, e07: 0,
+        e08: 0, e09: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let mut s = seed;
+    let mut i = 0;
+    while (i < n) {
+        s = lcg_next(s);
+        arr = a16_set(arr, i, s % 1000);
+        i = i + 1;
+    }
+    arr
+}
+
+fn main() -> Int {
+    // Test 1: Bubble sort descending
+    let desc = A16 {
+        e00: 16, e01: 15, e02: 14, e03: 13, e04: 12, e05: 11, e06: 10, e07: 9,
+        e08: 8,  e09: 7,  e10: 6,  e11: 5,  e12: 4,  e13: 3,  e14: 2,  e15: 1
+    };
+    let sorted1 = bubble_sort(desc, 16);
+    assert_eq(is_sorted(sorted1, 16), 1);
+    assert_eq(a16_get(sorted1, 0), 1);
+    assert_eq(a16_get(sorted1, 15), 16);
+    assert_eq(a16_sum(sorted1), 136);
+
+    // Test 2: Selection sort
+    let mixed = A16 {
+        e00: 42, e01: 17, e02: 93, e03: 5, e04: 67, e05: 31, e06: 88, e07: 12,
+        e08: 55, e09: 3,  e10: 76, e11: 49, e12: 21, e13: 84, e14: 36, e15: 60
+    };
+    let sorted2 = selection_sort(mixed, 16);
+    assert_eq(is_sorted(sorted2, 16), 1);
+    assert_eq(a16_get(sorted2, 0), 3);
+    assert_eq(a16_get(sorted2, 15), 93);
+    assert_eq(a16_sum(sorted2), a16_sum(mixed));
+
+    // Test 3: Insertion sort
+    let sorted3 = insertion_sort(mixed, 16);
+    assert_eq(is_sorted(sorted3, 16), 1);
+    assert_eq(a16_sum(sorted3), a16_sum(mixed));
+
+    // Test 4: Already sorted
+    let asc = A16 {
+        e00: 1, e01: 2, e02: 3, e03: 4, e04: 5, e05: 6, e06: 7, e07: 8,
+        e08: 9, e09: 10, e10: 11, e11: 12, e12: 13, e13: 14, e14: 15, e15: 16
+    };
+    assert_eq(is_sorted(asc, 16), 1);
+    let sorted4 = bubble_sort(asc, 16);
+    assert_eq(is_sorted(sorted4, 16), 1);
+
+    // Test 5: All same elements
+    let same = A16 {
+        e00: 7, e01: 7, e02: 7, e03: 7, e04: 7, e05: 7, e06: 7, e07: 7,
+        e08: 7, e09: 7, e10: 7, e11: 7, e12: 7, e13: 7, e14: 7, e15: 7
+    };
+    let sorted5 = selection_sort(same, 16);
+    assert_eq(is_sorted(sorted5, 16), 1);
+    assert_eq(a16_sum(sorted5), 112);
+
+    // Test 6: Sort random arrays and verify
+    let r1 = make_random_array(42, 16);
+    let sum_before = a16_sum(r1);
+    let sr1 = bubble_sort(r1, 16);
+    assert_eq(is_sorted(sr1, 16), 1);
+    assert_eq(a16_sum(sr1), sum_before);
+
+    let r2 = make_random_array(123, 16);
+    let sr2 = selection_sort(r2, 16);
+    assert_eq(is_sorted(sr2, 16), 1);
+    assert_eq(a16_sum(sr2), a16_sum(r2));
+
+    let r3 = make_random_array(999, 16);
+    let sr3 = insertion_sort(r3, 16);
+    assert_eq(is_sorted(sr3, 16), 1);
+    assert_eq(a16_sum(sr3), a16_sum(r3));
+
+    // Test 7: All three sorts produce same result
+    let test_arr = make_random_array(777, 16);
+    let sb = bubble_sort(test_arr, 16);
+    let ss = selection_sort(test_arr, 16);
+    let si = insertion_sort(test_arr, 16);
+    let mut i = 0;
+    while (i < 16) {
+        assert_eq(a16_get(sb, i), a16_get(ss, i));
+        assert_eq(a16_get(sb, i), a16_get(si, i));
+        i = i + 1;
+    }
+
+    // Test 8: Partial sort (only first 8 elements)
+    let partial = make_random_array(555, 16);
+    let sp = bubble_sort(partial, 8);
+    assert_eq(is_sorted(sp, 8), 1);
+
+    print("841_stress_sorting: PASS");
+    0
+}

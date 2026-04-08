@@ -1,0 +1,176 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, scheduler, priority-queue, task
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for task scheduler with priority
+
+// Task: id, priority (lower = higher priority), deadline
+type Task is { id: Int, priority: Int, deadline: Int };
+
+// Task queue: 4 slots
+type TaskQueue is {
+    id0: Int, p0: Int, d0: Int,
+    id1: Int, p1: Int, d1: Int,
+    id2: Int, p2: Int, d2: Int,
+    id3: Int, p3: Int, d3: Int,
+    count: Int
+};
+
+fn tq_new() -> TaskQueue {
+    TaskQueue {
+        id0: 0, p0: 999, d0: 0,
+        id1: 0, p1: 999, d1: 0,
+        id2: 0, p2: 999, d2: 0,
+        id3: 0, p3: 999, d3: 0,
+        count: 0
+    }
+}
+
+fn tq_get_id(q: TaskQueue, i: Int) -> Int {
+    if i == 0 { q.id0 } else if i == 1 { q.id1 }
+    else if i == 2 { q.id2 } else { q.id3 }
+}
+
+fn tq_get_pri(q: TaskQueue, i: Int) -> Int {
+    if i == 0 { q.p0 } else if i == 1 { q.p1 }
+    else if i == 2 { q.p2 } else { q.p3 }
+}
+
+fn tq_get_dl(q: TaskQueue, i: Int) -> Int {
+    if i == 0 { q.d0 } else if i == 1 { q.d1 }
+    else if i == 2 { q.d2 } else { q.d3 }
+}
+
+fn tq_add(q: TaskQueue, t: Task) -> TaskQueue {
+    let i = q.count;
+    TaskQueue {
+        id0: if i == 0 { t.id } else { q.id0 },
+        p0:  if i == 0 { t.priority } else { q.p0 },
+        d0:  if i == 0 { t.deadline } else { q.d0 },
+        id1: if i == 1 { t.id } else { q.id1 },
+        p1:  if i == 1 { t.priority } else { q.p1 },
+        d1:  if i == 1 { t.deadline } else { q.d1 },
+        id2: if i == 2 { t.id } else { q.id2 },
+        p2:  if i == 2 { t.priority } else { q.p2 },
+        d2:  if i == 2 { t.deadline } else { q.d2 },
+        id3: if i == 3 { t.id } else { q.id3 },
+        p3:  if i == 3 { t.priority } else { q.p3 },
+        d3:  if i == 3 { t.deadline } else { q.d3 },
+        count: q.count + 1
+    }
+}
+
+// Find highest priority task (lowest priority number)
+fn tq_find_highest(q: TaskQueue) -> Int {
+    if q.count == 0 { return -1; }
+    let mut best_idx = 0;
+    let mut best_pri = tq_get_pri(q, 0);
+    let mut i = 1;
+    while i < q.count {
+        let p = tq_get_pri(q, i);
+        if p < best_pri {
+            best_pri = p;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    tq_get_id(q, best_idx)
+}
+
+// Find task with earliest deadline
+fn tq_find_earliest(q: TaskQueue) -> Int {
+    if q.count == 0 { return -1; }
+    let mut best_idx = 0;
+    let mut best_dl = tq_get_dl(q, 0);
+    let mut i = 1;
+    while i < q.count {
+        let d = tq_get_dl(q, i);
+        if d < best_dl {
+            best_dl = d;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    tq_get_id(q, best_idx)
+}
+
+// Count tasks with priority <= threshold
+fn tq_count_urgent(q: TaskQueue, threshold: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < q.count {
+        if tq_get_pri(q, i) <= threshold {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Count overdue tasks (deadline < current_time)
+fn tq_count_overdue(q: TaskQueue, now: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < q.count {
+        if tq_get_dl(q, i) < now {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_basic_scheduling() {
+    let mut q = tq_new();
+    q = tq_add(q, Task { id: 1, priority: 3, deadline: 100 });
+    q = tq_add(q, Task { id: 2, priority: 1, deadline: 200 });
+    q = tq_add(q, Task { id: 3, priority: 2, deadline: 50 });
+
+    assert_eq(q.count, 3);
+    assert_eq(tq_find_highest(q), 2);   // Priority 1 is highest
+    assert_eq(tq_find_earliest(q), 3);  // Deadline 50 is earliest
+}
+
+fn test_urgent_count() {
+    let mut q = tq_new();
+    q = tq_add(q, Task { id: 1, priority: 1, deadline: 100 });
+    q = tq_add(q, Task { id: 2, priority: 5, deadline: 200 });
+    q = tq_add(q, Task { id: 3, priority: 3, deadline: 300 });
+    q = tq_add(q, Task { id: 4, priority: 2, deadline: 400 });
+
+    assert_eq(tq_count_urgent(q, 3), 3);  // Tasks 1, 3, 4
+    assert_eq(tq_count_urgent(q, 1), 1);  // Only task 1
+    assert_eq(tq_count_urgent(q, 5), 4);  // All tasks
+}
+
+fn test_overdue() {
+    let mut q = tq_new();
+    q = tq_add(q, Task { id: 1, priority: 1, deadline: 10 });
+    q = tq_add(q, Task { id: 2, priority: 2, deadline: 50 });
+    q = tq_add(q, Task { id: 3, priority: 3, deadline: 100 });
+
+    assert_eq(tq_count_overdue(q, 5), 0);
+    assert_eq(tq_count_overdue(q, 20), 1);
+    assert_eq(tq_count_overdue(q, 60), 2);
+    assert_eq(tq_count_overdue(q, 200), 3);
+}
+
+fn test_empty_queue() {
+    let q = tq_new();
+    assert_eq(tq_find_highest(q), -1);
+    assert_eq(tq_find_earliest(q), -1);
+    assert_eq(tq_count_urgent(q, 10), 0);
+    assert_eq(tq_count_overdue(q, 100), 0);
+}
+
+fn main() -> Int {
+    test_basic_scheduling();
+    test_urgent_count();
+    test_overdue();
+    test_empty_queue();
+    print("[OK] 225_scheduler_aot");
+    0
+}

@@ -1,0 +1,146 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, euler, totient, mobius, number-theory
+// @timeout: 10000
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+fn gcd(a: Int, b_val: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b_val);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+fn lcm(a: Int, b_val: Int) -> Int {
+    if a == 0 { return 0; }
+    if b_val == 0 { return 0; }
+    abs_val(a) / gcd(a, b_val) * abs_val(b_val)
+}
+
+// Euler's totient: count numbers 1..n coprime to n
+fn euler_totient(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if gcd(i, n) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Sum of divisors
+fn sigma(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        if n % i == 0 { sum = sum + i; }
+        i = i + 1;
+    }
+    sum
+}
+
+// Number of divisors
+fn num_divisors(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if n % i == 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn is_perfect(n: Int) -> Int {
+    if sigma(n) - n == n { 1 } else { 0 }
+}
+
+fn mod_exp(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b_val = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b_val) % modulus; }
+        e = e / 2;
+        b_val = (b_val * b_val) % modulus;
+    }
+    result
+}
+
+// Mobius function μ(n)
+fn mobius(n: Int) -> Int {
+    if n == 1 { return 1; }
+    let mut num = n;
+    let mut factors = 0;
+    let mut i = 2;
+    while i * i <= num {
+        if num % i == 0 {
+            num = num / i;
+            if num % i == 0 { return 0; }
+            factors = factors + 1;
+        }
+        i = i + 1;
+    }
+    if num > 1 { factors = factors + 1; }
+    if factors % 2 == 0 { 1 } else { -1 }
+}
+
+fn main() -> Int {
+    // GCD/LCM
+    assert_eq(gcd(12, 18), 6);
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(gcd(12, 18) * lcm(12, 18), 12 * 18);
+
+    // Euler's totient
+    assert_eq(euler_totient(1), 1);
+    assert_eq(euler_totient(7), 6);  // prime: p-1
+    assert_eq(euler_totient(12), 4);
+    assert_eq(euler_totient(10), 4);
+
+    // Divisor sum identity: Σ φ(d) for d|n = n
+    let mut phi_sum = 0;
+    let mut d = 1;
+    while d <= 12 {
+        if 12 % d == 0 { phi_sum = phi_sum + euler_totient(d); }
+        d = d + 1;
+    }
+    assert_eq(phi_sum, 12);
+
+    // Fermat's little theorem
+    assert_eq(mod_exp(2, 6, 7), 1);
+    assert_eq(mod_exp(3, 10, 11), 1);
+
+    // Euler's generalization
+    assert_eq(mod_exp(7, euler_totient(12), 12), 1);
+
+    // Divisor functions
+    assert_eq(num_divisors(12), 6);
+    assert_eq(sigma(6), 12);
+    assert_eq(sigma(28), 56);
+
+    // Perfect numbers
+    assert_eq(is_perfect(6), 1);
+    assert_eq(is_perfect(28), 1);
+    assert_eq(is_perfect(12), 0);
+
+    // Mobius
+    assert_eq(mobius(1), 1);
+    assert_eq(mobius(2), -1);
+    assert_eq(mobius(4), 0);
+    assert_eq(mobius(6), 1);
+    assert_eq(mobius(30), -1);
+
+    // Mobius sum: Σ μ(d) for d|n = 0 when n>1
+    let mut mu_sum = 0;
+    let mut d2 = 1;
+    while d2 <= 12 {
+        if 12 % d2 == 0 { mu_sum = mu_sum + mobius(d2); }
+        d2 = d2 + 1;
+    }
+    assert_eq(mu_sum, 0);
+
+    print("DIFF_OK: euler_totient");
+    0
+}

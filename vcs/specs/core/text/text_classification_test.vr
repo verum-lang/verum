@@ -1,0 +1,499 @@
+// =============================================================================
+// text_classification_test.vr - Tests for Text classification & transformation
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, classification, transformation, core
+// @description: Tests for is_whitespace, is_blank, capitalize, to_title_case,
+//               swapcase, is_uppercase, is_lowercase, expand_tabs, zfill
+// =============================================================================
+
+mount core.collections.List;
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: is_whitespace Tests
+// =============================================================================
+
+@test
+fn test_is_whitespace_spaces() {
+    let s: Text = "   ";
+    assert(s.is_whitespace());
+}
+
+@test
+fn test_is_whitespace_tabs() {
+    let s: Text = "\t\t";
+    assert(s.is_whitespace());
+}
+
+@test
+fn test_is_whitespace_newlines() {
+    let s: Text = "\n\n";
+    assert(s.is_whitespace());
+}
+
+@test
+fn test_is_whitespace_mixed() {
+    let s: Text = " \t\n\r";
+    assert(s.is_whitespace());
+}
+
+@test
+fn test_is_whitespace_empty() {
+    let s: Text = "";
+    assert(!s.is_whitespace());
+}
+
+@test
+fn test_is_whitespace_non_whitespace() {
+    let s: Text = "hello";
+    assert(!s.is_whitespace());
+}
+
+@test
+fn test_is_whitespace_mixed_content() {
+    let s: Text = "  hello  ";
+    assert(!s.is_whitespace());
+}
+
+@test
+fn test_is_whitespace_single_space() {
+    let s: Text = " ";
+    assert(s.is_whitespace());
+}
+
+// =============================================================================
+// Section 2: is_blank Tests
+// =============================================================================
+
+@test
+fn test_is_blank_empty() {
+    let s: Text = "";
+    assert(s.is_blank());
+}
+
+@test
+fn test_is_blank_spaces() {
+    let s: Text = "   ";
+    assert(s.is_blank());
+}
+
+@test
+fn test_is_blank_tabs() {
+    let s: Text = "\t";
+    assert(s.is_blank());
+}
+
+@test
+fn test_is_blank_non_blank() {
+    let s: Text = "x";
+    assert(!s.is_blank());
+}
+
+@test
+fn test_is_blank_whitespace_with_text() {
+    let s: Text = "  x  ";
+    assert(!s.is_blank());
+}
+
+// =============================================================================
+// Section 3: capitalize Tests
+// =============================================================================
+
+@test
+fn test_capitalize_lowercase() {
+    let s: Text = "hello";
+    assert_eq(s.capitalize(), "Hello");
+}
+
+@test
+fn test_capitalize_uppercase() {
+    let s: Text = "HELLO";
+    assert_eq(s.capitalize(), "Hello");
+}
+
+@test
+fn test_capitalize_mixed() {
+    let s: Text = "hELLO wORLD";
+    assert_eq(s.capitalize(), "Hello world");
+}
+
+@test
+fn test_capitalize_single_char() {
+    let s: Text = "a";
+    assert_eq(s.capitalize(), "A");
+}
+
+@test
+fn test_capitalize_single_upper() {
+    let s: Text = "A";
+    assert_eq(s.capitalize(), "A");
+}
+
+@test
+fn test_capitalize_empty() {
+    let s: Text = "";
+    assert_eq(s.capitalize(), "");
+}
+
+@test
+fn test_capitalize_already_capitalized() {
+    let s: Text = "Hello";
+    assert_eq(s.capitalize(), "Hello");
+}
+
+@test
+fn test_capitalize_number_start() {
+    let s: Text = "123abc";
+    assert_eq(s.capitalize(), "123abc");
+}
+
+// =============================================================================
+// Section 4: to_title_case Tests
+// =============================================================================
+
+@test
+fn test_title_case_basic() {
+    let s: Text = "hello world";
+    assert_eq(s.to_title_case(), "Hello World");
+}
+
+@test
+fn test_title_case_all_upper() {
+    let s: Text = "HELLO WORLD";
+    assert_eq(s.to_title_case(), "Hello World");
+}
+
+@test
+fn test_title_case_mixed() {
+    let s: Text = "hELLO wORLD";
+    assert_eq(s.to_title_case(), "Hello World");
+}
+
+@test
+fn test_title_case_single_word() {
+    let s: Text = "hello";
+    assert_eq(s.to_title_case(), "Hello");
+}
+
+@test
+fn test_title_case_empty() {
+    let s: Text = "";
+    assert_eq(s.to_title_case(), "");
+}
+
+@test
+fn test_title_case_multiple_spaces() {
+    let s: Text = "hello  world";
+    assert_eq(s.to_title_case(), "Hello  World");
+}
+
+@test
+fn test_title_case_tabs() {
+    let s: Text = "hello\tworld";
+    assert_eq(s.to_title_case(), "Hello\tWorld");
+}
+
+@test
+fn test_title_case_single_char() {
+    let s: Text = "a";
+    assert_eq(s.to_title_case(), "A");
+}
+
+// =============================================================================
+// Section 5: swapcase Tests
+// =============================================================================
+
+@test
+fn test_swapcase_basic() {
+    let s: Text = "Hello World";
+    assert_eq(s.swapcase(), "hELLO wORLD");
+}
+
+@test
+fn test_swapcase_all_upper() {
+    let s: Text = "HELLO";
+    assert_eq(s.swapcase(), "hello");
+}
+
+@test
+fn test_swapcase_all_lower() {
+    let s: Text = "hello";
+    assert_eq(s.swapcase(), "HELLO");
+}
+
+@test
+fn test_swapcase_empty() {
+    let s: Text = "";
+    assert_eq(s.swapcase(), "");
+}
+
+@test
+fn test_swapcase_no_cased() {
+    let s: Text = "123!@#";
+    assert_eq(s.swapcase(), "123!@#");
+}
+
+@test
+fn test_swapcase_mixed_with_numbers() {
+    let s: Text = "aBc123DeF";
+    assert_eq(s.swapcase(), "AbC123dEf");
+}
+
+// =============================================================================
+// Section 6: is_uppercase / is_lowercase Tests
+// =============================================================================
+
+@test
+fn test_is_uppercase_all_upper() {
+    let s: Text = "HELLO";
+    assert(s.is_uppercase());
+}
+
+@test
+fn test_is_uppercase_mixed() {
+    let s: Text = "Hello";
+    assert(!s.is_uppercase());
+}
+
+@test
+fn test_is_uppercase_all_lower() {
+    let s: Text = "hello";
+    assert(!s.is_uppercase());
+}
+
+@test
+fn test_is_uppercase_empty() {
+    let s: Text = "";
+    assert(!s.is_uppercase());
+}
+
+@test
+fn test_is_uppercase_with_numbers() {
+    let s: Text = "ABC123";
+    assert(s.is_uppercase());
+}
+
+@test
+fn test_is_uppercase_no_cased() {
+    let s: Text = "123";
+    assert(!s.is_uppercase());
+}
+
+@test
+fn test_is_lowercase_all_lower() {
+    let s: Text = "hello";
+    assert(s.is_lowercase());
+}
+
+@test
+fn test_is_lowercase_mixed() {
+    let s: Text = "Hello";
+    assert(!s.is_lowercase());
+}
+
+@test
+fn test_is_lowercase_all_upper() {
+    let s: Text = "HELLO";
+    assert(!s.is_lowercase());
+}
+
+@test
+fn test_is_lowercase_empty() {
+    let s: Text = "";
+    assert(!s.is_lowercase());
+}
+
+@test
+fn test_is_lowercase_with_numbers() {
+    let s: Text = "abc123";
+    assert(s.is_lowercase());
+}
+
+@test
+fn test_is_lowercase_no_cased() {
+    let s: Text = "123";
+    assert(!s.is_lowercase());
+}
+
+@test
+fn test_is_lowercase_with_spaces() {
+    let s: Text = "hello world";
+    assert(s.is_lowercase());
+}
+
+@test
+fn test_is_uppercase_with_spaces() {
+    let s: Text = "HELLO WORLD";
+    assert(s.is_uppercase());
+}
+
+// =============================================================================
+// Section 7: expand_tabs Tests
+// =============================================================================
+
+@test
+fn test_expand_tabs_basic() {
+    let s: Text = "a\tb";
+    let expanded = s.expand_tabs(4);
+    assert_eq(expanded, "a   b");
+}
+
+@test
+fn test_expand_tabs_at_start() {
+    let s: Text = "\thello";
+    let expanded = s.expand_tabs(4);
+    assert_eq(expanded, "    hello");
+}
+
+@test
+fn test_expand_tabs_multiple() {
+    let s: Text = "\t\t";
+    let expanded = s.expand_tabs(4);
+    assert_eq(expanded, "        ");
+}
+
+@test
+fn test_expand_tabs_empty() {
+    let s: Text = "";
+    let expanded = s.expand_tabs(4);
+    assert_eq(expanded, "");
+}
+
+@test
+fn test_expand_tabs_no_tabs() {
+    let s: Text = "hello";
+    let expanded = s.expand_tabs(4);
+    assert_eq(expanded, "hello");
+}
+
+@test
+fn test_expand_tabs_size_8() {
+    let s: Text = "\thello";
+    let expanded = s.expand_tabs(8);
+    assert_eq(expanded, "        hello");
+}
+
+@test
+fn test_expand_tabs_tab_stop_alignment() {
+    // "ab\tc" with tab_size=4: "ab" is 2 chars, so 2 spaces to reach column 4
+    let s: Text = "ab\tc";
+    let expanded = s.expand_tabs(4);
+    assert_eq(expanded, "ab  c");
+}
+
+@test
+fn test_expand_tabs_newline_resets() {
+    let s: Text = "a\tb\na\tb";
+    let expanded = s.expand_tabs(4);
+    assert_eq(expanded, "a   b\na   b");
+}
+
+// =============================================================================
+// Section 8: zfill Tests
+// =============================================================================
+
+@test
+fn test_zfill_basic() {
+    let s: Text = "42";
+    assert_eq(s.zfill(5), "00042");
+}
+
+@test
+fn test_zfill_already_wide() {
+    let s: Text = "12345";
+    assert_eq(s.zfill(3), "12345");
+}
+
+@test
+fn test_zfill_exact_width() {
+    let s: Text = "123";
+    assert_eq(s.zfill(3), "123");
+}
+
+@test
+fn test_zfill_with_minus() {
+    let s: Text = "-42";
+    assert_eq(s.zfill(5), "-0042");
+}
+
+@test
+fn test_zfill_with_plus() {
+    let s: Text = "+42";
+    assert_eq(s.zfill(5), "+0042");
+}
+
+@test
+fn test_zfill_empty() {
+    let s: Text = "";
+    assert_eq(s.zfill(3), "000");
+}
+
+@test
+fn test_zfill_single_digit() {
+    let s: Text = "5";
+    assert_eq(s.zfill(3), "005");
+}
+
+@test
+fn test_zfill_text() {
+    let s: Text = "abc";
+    assert_eq(s.zfill(6), "000abc");
+}
+
+// =============================================================================
+// Section 9: Edge Cases & Interactions
+// =============================================================================
+
+@test
+fn test_capitalize_then_check_case() {
+    let s: Text = "hello world";
+    let cap = s.capitalize();
+    // "Hello world" — mixed case
+    assert(!cap.is_uppercase());
+    assert(!cap.is_lowercase());
+}
+
+@test
+fn test_swapcase_involution() {
+    // swapcase applied twice should give back original (for ASCII)
+    let s: Text = "Hello World";
+    let swapped = s.swapcase();
+    let double_swapped = swapped.swapcase();
+    assert_eq(double_swapped, s);
+}
+
+@test
+fn test_title_case_preserves_length() {
+    let s: Text = "hello world";
+    let titled = s.to_title_case();
+    assert_eq(titled.len(), s.len());
+}
+
+@test
+fn test_is_blank_vs_is_whitespace() {
+    // is_blank returns true for empty, is_whitespace returns false for empty
+    let empty: Text = "";
+    assert(empty.is_blank());
+    assert(!empty.is_whitespace());
+
+    // Both true for whitespace-only
+    let ws: Text = "   ";
+    assert(ws.is_blank());
+    assert(ws.is_whitespace());
+}
+
+@test
+fn test_zfill_width_one() {
+    let s: Text = "";
+    assert_eq(s.zfill(1), "0");
+}
+
+@test
+fn test_expand_tabs_size_one() {
+    let s: Text = "\t";
+    let expanded = s.expand_tabs(1);
+    assert_eq(expanded, " ");
+}

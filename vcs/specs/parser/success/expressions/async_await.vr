@@ -1,0 +1,384 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, async, await, spawn, select, nursery
+// @description: Test async/await expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// ASYNC BLOCK EXPRESSIONS (Section 2.12 - async_expr)
+// =============================================================================
+
+fn test_basic_async_block() {
+    let future = async {
+        42
+    };
+
+    let computation = async {
+        let x = compute();
+        x + 1
+    };
+}
+
+fn test_async_block_with_await() {
+    let future = async {
+        let data = fetch().await;
+        process(data)
+    };
+
+    let result = async {
+        let a = task_a().await;
+        let b = task_b().await;
+        a + b
+    };
+}
+
+fn test_async_block_complex() {
+    let future = async {
+        let config = load_config().await;
+        let connection = connect(config).await;
+        defer connection.close();
+
+        let data = connection.fetch().await;
+        if data.is_valid() {
+            process(data).await
+        } else {
+            default_value()
+        }
+    };
+}
+
+// =============================================================================
+// AWAIT EXPRESSIONS (Section 2.12 - postfix_op, await_expr)
+// =============================================================================
+
+fn test_basic_await() {
+    let result = future.await;
+    let data = fetch_data().await;
+    let response = client.get(url).await;
+}
+
+fn test_chained_await() {
+    let result = first().await.then_second().await;
+    let data = fetch().await.parse().await.validate().await;
+}
+
+fn test_await_in_expressions() {
+    let sum = a.await + b.await;
+    let product = compute_x().await * compute_y().await;
+    let combined = (first.await, second.await);
+}
+
+fn test_await_with_method_chain() {
+    let result = client
+        .request()
+        .header("Content-Type", "application/json")
+        .body(data)
+        .send()
+        .await
+        .json()
+        .await;
+}
+
+fn test_await_in_control_flow() {
+    if fetch_flag().await {
+        handle_true().await;
+    }
+
+    let result = match fetch_option().await {
+        Some(v) => v,
+        None => default().await
+    };
+
+    for await item in stream {
+        process(item).await;
+    }
+}
+
+// =============================================================================
+// SPAWN EXPRESSIONS (Section 2.12 - spawn_expr)
+// =============================================================================
+
+fn test_basic_spawn() {
+    let handle = spawn compute_async();
+    let task = spawn heavy_computation();
+}
+
+fn test_spawn_async_block() {
+    let handle = spawn async {
+        let data = fetch().await;
+        process(data)
+    };
+}
+
+fn test_spawn_with_context_forwarding() {
+    // Explicitly forward contexts to spawned task
+    let handle = spawn using [Database, Logger] async {
+        let data = query().await;
+        log_result(data);
+        data
+    };
+
+    let task = spawn using [Config] compute_with_config();
+}
+
+fn test_spawn_multiple() {
+    let a = spawn task_a();
+    let b = spawn task_b();
+    let c = spawn task_c();
+
+    let results = (a.await, b.await, c.await);
+}
+
+// =============================================================================
+// SELECT EXPRESSIONS (Section 2.12.2 - select_expr)
+// =============================================================================
+
+fn test_basic_select() {
+    let result = select {
+        a = future_a.await => handle_a(a),
+        b = future_b.await => handle_b(b)
+    };
+}
+
+fn test_select_with_guards() {
+    let result = select {
+        a = future_a.await if enabled_a => handle_a(a),
+        b = future_b.await if enabled_b => handle_b(b),
+        c = future_c.await => handle_c(c)
+    };
+}
+
+fn test_select_with_else() {
+    let result = select {
+        msg = channel.recv().await if !closed => process(msg),
+        _ = timeout.await => timeout_handler(),
+        else => default_action()
+    };
+}
+
+fn test_biased_select() {
+    // Prioritizes earlier branches
+    let result = select biased {
+        high = high_priority.await => handle_high(high),
+        med = medium_priority.await => handle_medium(med),
+        low = low_priority.await => handle_low(low)
+    };
+}
+
+fn test_select_patterns() {
+    let result = select {
+        Ok(data) = fetch().await => process(data),
+        Err(e) = fetch().await => handle_error(e),
+        (a, b) = pair_future.await => combine(a, b)
+    };
+}
+
+fn test_select_in_loop() {
+    loop {
+        select {
+            msg = rx.recv().await => {
+                if msg.is_done() {
+                    break;
+                }
+                handle(msg);
+            },
+            _ = shutdown.await => break
+        }
+    }
+}
+
+fn test_select_with_attributes() {
+    let result = select {
+        @hot data = hot_path.await => fast_process(data),
+        @cold err = slow_path.await => slow_process(err)
+    };
+}
+
+// =============================================================================
+// NURSERY EXPRESSIONS (Section 2.12.3 - nursery_expr)
+// =============================================================================
+
+fn test_basic_nursery() {
+    nursery {
+        let a = spawn fetch_a();
+        let b = spawn fetch_b();
+    }
+}
+
+fn test_nursery_with_results() {
+    let (a, b, c) = nursery {
+        let a = spawn compute_a();
+        let b = spawn compute_b();
+        let c = spawn compute_c();
+        (a.await, b.await, c.await)
+    };
+}
+
+fn test_nursery_with_timeout() {
+    nursery(timeout: 5.seconds) {
+        let result = spawn long_running_task();
+    }
+}
+
+fn test_nursery_with_options() {
+    nursery(timeout: 10.seconds, on_error: cancel_all) {
+        let a = spawn task_a();
+        let b = spawn task_b();
+    }
+
+    nursery(on_error: wait_all) {
+        let a = spawn might_fail_a();
+        let b = spawn might_fail_b();
+    }
+
+    nursery(max_tasks: 10) {
+        for item in items {
+            spawn process(item);
+        }
+    }
+}
+
+fn test_nursery_with_cancel_handler() {
+    nursery(timeout: 5.seconds) {
+        let result = spawn fetch_data();
+    } on_cancel {
+        log("Operation cancelled");
+        cleanup();
+    }
+}
+
+fn test_nursery_with_recover() {
+    let result = nursery {
+        let data = spawn fetch_critical();
+    } recover {
+        TimeoutError => default_data(),
+        NetworkError(e) => cached_data()
+    };
+}
+
+fn test_nursery_with_both_handlers() {
+    nursery(timeout: 10.seconds) {
+        let a = spawn task_a();
+        let b = spawn task_b();
+    } on_cancel {
+        cleanup_resources();
+    } recover |e| {
+        log_error(e);
+        fallback()
+    }
+}
+
+fn test_nested_nursery() {
+    nursery {
+        let outer_task = spawn async {
+            nursery {
+                let inner_a = spawn compute_a();
+                let inner_b = spawn compute_b();
+            }
+        };
+    }
+}
+
+// =============================================================================
+// YIELD EXPRESSIONS (Section 2.12.1.1 - yield_expr)
+// =============================================================================
+
+fn test_yield_in_generator() {
+    fn* range(n: Int) -> Int {
+        for i in 0..n {
+            yield i;
+        }
+    }
+}
+
+fn test_yield_in_async_generator() {
+    async fn* fetch_pages() -> Page {
+        while let Some(url) = next_url().await {
+            let page = fetch(url).await;
+            yield page;
+        }
+    }
+}
+
+fn test_yield_expressions() {
+    fn* values() -> Int {
+        yield 1;
+        yield 2;
+        yield 3;
+    }
+
+    fn* computed() -> Int {
+        let x = compute();
+        yield x;
+        yield x * 2;
+        yield x * 3;
+    }
+}
+
+// =============================================================================
+// ASYNC FUNCTIONS (context for async expressions)
+// =============================================================================
+
+async fn test_async_function() {
+    let data = fetch().await;
+    process(data)
+}
+
+async fn test_async_with_context() using [Database] {
+    let result = query().await;
+    result
+}
+
+async fn test_async_with_try() {
+    let result = try {
+        let data = fetch().await;
+        validate(data)?;
+        process(data).await
+    } recover |e| {
+        handle_error(e)
+    };
+}
+
+// =============================================================================
+// COMBINED ASYNC PATTERNS
+// =============================================================================
+
+fn test_async_select_in_nursery() {
+    nursery {
+        spawn async {
+            loop {
+                select {
+                    msg = channel.recv().await => handle(msg),
+                    _ = tick.await => heartbeat()
+                }
+            }
+        };
+    }
+}
+
+fn test_async_with_all_constructs() {
+    let result = async {
+        nursery(timeout: 30.seconds) {
+            let data = spawn async {
+                select {
+                    fast = fast_source.await => fast,
+                    slow = slow_source.await => slow,
+                    else => default()
+                }
+            };
+            data.await
+        } recover |e| {
+            fallback()
+        }
+    };
+}
+
+fn test_concurrent_operations() {
+    // Using built-in join function (NOT join! macro)
+    let (a, b) = join(task_a(), task_b());
+
+    // Using try_join for fallible tasks
+    let result = try_join(fetch_a(), fetch_b())?;
+
+    // Using join_all for many tasks
+    let results = join_all(tasks);
+}

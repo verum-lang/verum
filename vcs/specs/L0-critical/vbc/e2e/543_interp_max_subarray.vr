@@ -1,0 +1,152 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, kadane, max_subarray, circular_subarray, dynamic_programming
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Maximum subarray sum using Kadane's algorithm (linear scan).
+// Also handles the circular variant: the maximum subarray may wrap around.
+// For the circular variant:
+//   max_circular = max(max_linear, total_sum - min_subarray_sum)
+// If all elements are negative, max_circular = max_linear (no wraparound).
+// Arrays stored as [Int; 16]; active length passed separately.
+
+// Kadane's algorithm: maximum subarray sum for a[0..n).
+fn max_subarray_sum(a: [Int; 16], n: Int) -> Int {
+    let mut best   = a[0];
+    let mut cur    = a[0];
+    let mut i = 1;
+    while i < n {
+        if cur + a[i] > a[i] { cur = cur + a[i]; } else { cur = a[i]; }
+        if cur > best { best = cur; }
+        i = i + 1;
+    }
+    best
+}
+
+// Minimum subarray sum (Kadane's negated).
+fn min_subarray_sum(a: [Int; 16], n: Int) -> Int {
+    let mut best = a[0];
+    let mut cur  = a[0];
+    let mut i = 1;
+    while i < n {
+        if cur + a[i] < a[i] { cur = cur + a[i]; } else { cur = a[i]; }
+        if cur < best { best = cur; }
+        i = i + 1;
+    }
+    best
+}
+
+// Array sum.
+fn array_sum(a: [Int; 16], n: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < n {
+        s = s + a[i];
+        i = i + 1;
+    }
+    s
+}
+
+// Maximum subarray sum for circular array.
+fn max_circular_subarray_sum(a: [Int; 16], n: Int) -> Int {
+    let lin = max_subarray_sum(a, n);
+    let tot = array_sum(a, n);
+    let mn  = min_subarray_sum(a, n);
+    // If tot == mn, all elements are negative: no valid wraparound.
+    if tot == mn { return lin; }
+    let wrap = tot - mn;
+    if wrap > lin { wrap } else { lin }
+}
+
+fn test_basic_kadane() {
+    // [-2, 1, -3, 4, -1, 2, 1, -5, 4] -> max subarray [4,-1,2,1] = 6
+    let mut a = [-2, 1, -3, 4, -1, 2, 1, -5, 4, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(a, 9), 6);
+
+    // All positive: whole array is best.
+    let mut b = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(b, 5), 15);
+
+    // All negative: single maximum element.
+    let mut c = [-5, -3, -1, -4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(c, 4), -1);
+
+    print("basic_kadane: ok");
+}
+
+fn test_single_and_two_elements() {
+    // Single element.
+    let mut a = [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(a, 1), 7);
+
+    let mut b = [-3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(b, 1), -3);
+
+    // Two elements.
+    let mut c = [3, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(c, 2), 3);
+
+    let mut d = [-2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(d, 2), 5);
+
+    print("single_and_two_elements: ok");
+}
+
+fn test_circular_wraparound() {
+    // [8, -1, 3, -2, 5, -6, 2, -4]: linear best vs circular wrap.
+    // total = 5. min_subarray = min of subarray sum.
+    // Linear Kadane: best is [8,-1,3,-2,5] = 13 or [8,-1,3,-2,5,-6,2] = 9 ...
+    // Let's just verify the result >= linear result.
+    let mut a = [8, -1, 3, -2, 5, -6, 2, -4, 0, 0, 0, 0, 0, 0, 0, 0];
+    let lin = max_subarray_sum(a, 8);
+    let mut b = [8, -1, 3, -2, 5, -6, 2, -4, 0, 0, 0, 0, 0, 0, 0, 0];
+    let circ = max_circular_subarray_sum(b, 8);
+    assert(circ >= lin);
+
+    // [5, -3, 5]: circular = [5, 5] wrapping = 10; linear = max(5, 7, 5) = 7.
+    let mut c = [5, -3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut d = [5, -3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let lin2  = max_subarray_sum(c, 3);
+    let circ2 = max_circular_subarray_sum(d, 3);
+    assert_eq(lin2, 7);
+    assert_eq(circ2, 10);
+
+    print("circular_wraparound: ok");
+}
+
+fn test_all_negative_circular() {
+    // All negative: circular = linear (no wraparound benefit).
+    let mut a = [-3, -5, -2, -7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut b = [-3, -5, -2, -7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let lin  = max_subarray_sum(a, 4);
+    let circ = max_circular_subarray_sum(b, 4);
+    assert_eq(lin, -2);
+    assert_eq(circ, -2);
+    assert_eq(circ, lin);
+    print("all_negative_circular: ok");
+}
+
+fn test_large_subarray() {
+    // [1,-1,1,-1,...,10]: max is the last element 10 or cumulative.
+    // [1,-2,3,-4,5,-6,7,-8,9,-10,11]: max ending at 11 = 11, best subarray = 11.
+    let mut a = [1,-2,3,-4,5,-6,7,-8,9,-10,11,0,0,0,0,0];
+    assert_eq(max_subarray_sum(a, 11), 11);
+
+    // Monotone increasing: best = whole array.
+    let mut b = [1,2,3,4,5,6,7,8,0,0,0,0,0,0,0,0];
+    assert_eq(max_subarray_sum(b, 8), 36);
+
+    print("large_subarray: ok");
+}
+
+fn main() -> Int {
+    test_basic_kadane();
+    test_single_and_two_elements();
+    test_circular_wraparound();
+    test_all_negative_circular();
+    test_large_subarray();
+    print("[OK] 543_interp_max_subarray");
+    0
+}

@@ -1,0 +1,15 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, select, nursery, combination, error
+// @description: Test malformed select inside nursery
+// @expected-error: E0D4
+
+async fn test() {
+    nursery |n| {
+        // select inside nursery with broken arm syntax
+        select {
+            task.await => process(result)
+            // Missing binding: should be `result = task.await => ...`
+        }
+    }
+}

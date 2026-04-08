@@ -1,0 +1,173 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, loops, invalid, error
+
+// === FOR LOOP ERRORS ===
+
+// ERROR: For without pattern
+for in items {
+    process();
+}
+
+// ERROR: For without 'in' keyword
+for x items {
+    process(x);
+}
+
+// ERROR: For without iterator
+for x in {
+    process(x);
+}
+
+// ERROR: For without body
+for x in items;
+
+// ERROR: For with multiple iterators without zip
+for x, y in items {
+    use(x, y);
+}
+
+// ERROR: For with invalid range syntax
+for i in 0 to 10 {
+    use(i);
+}
+
+// ERROR: For with assignment instead of in
+for i = 0..10 {
+    use(i);
+}
+
+// ERROR: For with expression in pattern position
+for 1 + 2 in items {
+    use();
+}
+
+// ERROR: For without closing brace
+for x in items {
+    process(x);
+
+// ERROR: Empty for pattern
+for () in items { }
+
+// ERROR: For with semicolon after range
+for i in 0..10; {
+    use(i);
+}
+
+// === WHILE LOOP ERRORS ===
+
+// ERROR: While without condition
+while {
+    body();
+}
+
+// ERROR: While without body
+while condition;
+
+// ERROR: While with semicolon before body
+while condition; {
+    body();
+}
+
+// ERROR: While with 'do' keyword (wrong language)
+while condition do {
+    body();
+}
+
+// ERROR: While let without pattern
+while let = value {
+    use();
+}
+
+// ERROR: While let with invalid pattern
+while let 1 + 2 = value {
+    use();
+}
+
+// ERROR: While with assignment as condition
+while x = 5 {  // Should be x == 5
+    use(x);
+}
+
+// ERROR: While without closing brace
+while condition {
+    body();
+
+// === LOOP ERRORS ===
+
+// ERROR: Loop with condition
+loop condition {
+    body();
+}
+
+// ERROR: Loop without body
+loop;
+
+// ERROR: Loop with parentheses (wrong syntax)
+loop() {
+    body();
+}
+
+// ERROR: Loop without closing brace
+loop {
+    body();
+
+// ERROR: Loop with 'while' keyword
+loop while condition {
+    body();
+}
+
+// === BREAK/CONTINUE ERRORS ===
+
+// ERROR: Break outside loop
+fn no_loop() {
+    break;
+}
+
+// ERROR: Continue outside loop
+fn no_loop2() {
+    continue;
+}
+
+// ERROR: Break with undefined label
+for i in 0..10 {
+    break 'undefined;
+}
+
+// ERROR: Continue with undefined label
+for i in 0..10 {
+    continue 'nonexistent;
+}
+
+// ERROR: Invalid label syntax
+'123: for i in 0..10 { }
+'@bad: loop { }
+
+// ERROR: Label without loop
+'label: let x = 5;
+'label: fn bad() { }
+
+// ERROR: Duplicate labels
+'outer: for i in 0..10 {
+    'outer: for j in 0..10 {  // Duplicate label
+        break 'outer;
+    }
+}
+
+// ERROR: Break with value in while (if not expression)
+while condition {
+    break 42;
+}
+
+// ERROR: Continue with value
+for i in 0..10 {
+    continue 5;
+}
+
+// ERROR: Break without semicolon where required
+fn returns_unit() {
+    loop {
+        break
+    }  // If break requires semicolon
+}

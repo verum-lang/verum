@@ -1,0 +1,47 @@
+// @test: parser
+// @tier: 0
+// @level: L0
+// @tags: parser, associated-types, bounds, syntax, advanced-type-syntax
+// @expect: pass
+// @description: Parser tests for associated type bounds syntax
+// @spec: 03-type-system.md Section 13 grammar extensions
+
+// Associated type bound in where clause
+fn process_items<I>(iter: I)
+    where type I: Iterator,
+          type I.Item: Display
+{
+}
+
+// Associated type path bound using colon
+fn collect_display<I>(iter: I)
+    where type I: Iterator,
+          type I.Item: Display + Clone
+{
+}
+
+// Multiple associated type bounds
+fn map_and_collect<I, F, U>(iter: I, f: F)
+    where type I: Iterator,
+          type I.Item: Clone,
+          type U: Display
+{
+}
+
+// Associated type in protocol definition
+type Container is protocol {
+    type Item;
+    type Error;
+    fn get(&self) -> Result<Self.Item, Self.Error>;
+};
+
+// Protocol referencing associated types
+type Mappable is protocol {
+    type Input;
+    type Output;
+    fn map(&self, f: fn(Self.Input) -> Self.Output) -> Self;
+};
+
+fn main() {
+    assert(true);
+}

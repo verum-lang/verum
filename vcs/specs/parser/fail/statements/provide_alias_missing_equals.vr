@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, provide, alias, error
+// @description: Test provide with alias but missing equals and value
+// @expected-error: E044
+
+fn test() {
+    provide Database as db;
+}

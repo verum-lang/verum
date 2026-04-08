@@ -1,0 +1,14 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, mutation, local
+// @description: Unsafe block with local mutable variable
+fn main() {
+    let result: Int = unsafe {
+        let mut x: Int = 0;
+        x = x + 10;
+        x = x + 20;
+        x = x + 12;
+        x
+    };
+    assert_eq(result, 42);
+}

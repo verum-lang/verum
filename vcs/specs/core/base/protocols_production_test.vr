@@ -1,0 +1,766 @@
+// =============================================================================
+// protocols_production_test.vr - Production-grade protocol tests
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: protocols, production, error, fromstr, tostring, borrow, assign, core
+// @description: Tests for production-grade protocols: Error (with source chain),
+//               FromStr, ToString (blanket from Display), Borrow/BorrowMut,
+//               compound assignment operators (AddAssign, SubAssign, etc).
+// =============================================================================
+
+module specs.core.base.protocols_production_test;
+
+mount core.*;
+mount core.base.ordering.{Ordering};
+
+// =============================================================================
+// Error Protocol Tests
+// =============================================================================
+
+// Define a simple error type
+type SimpleError is {
+    message: Text,
+};
+
+implement Describable for SimpleError {
+    fn description(&self) -> Text {
+        self.message.clone()
+    }
+}
+
+implement ErrorSource for SimpleError {}
+
+@test
+fn test_error_description() {
+    let err = SimpleError { message: "something went wrong" };
+    assert(err.description() == "something went wrong");
+}
+
+@test
+fn test_error_source_default_none() {
+    let err = SimpleError { message: "leaf error" };
+    // Default implementation returns None
+    assert(err.source().is_none());
+}
+
+// =============================================================================
+// FromStr Protocol Tests
+// =============================================================================
+
+// A simple type that can be parsed from text
+type Color is Red | Green | Blue;
+
+type ColorParseError is {
+    input: Text,
+};
+
+implement Describable for ColorParseError {
+    fn description(&self) -> Text {
+        let mut msg: Text = "unknown color: ";
+        msg.push_str(&self.input);
+        msg
+    }
+}
+
+implement FromStr for Color {
+    type ParseError = ColorParseError;
+
+    fn from_str(s: &Text) -> Result<Color, ColorParseError> {
+        if *s == "red" {
+            Ok(Red)
+        } else if *s == "green" {
+            Ok(Green)
+        } else if *s == "blue" {
+            Ok(Blue)
+        } else {
+            Err(ColorParseError { input: s.clone() })
+        }
+    }
+}
+
+@test
+fn test_from_str_valid() {
+    let r: Result<Color, ColorParseError> = Color.from_str("red");
+    assert(r.is_ok());
+}
+
+@test
+fn test_from_str_invalid() {
+    let r: Result<Color, ColorParseError> = Color.from_str("purple");
+    assert(r.is_err());
+}
+
+@test
+fn test_from_str_all_variants() {
+    assert(Color.from_str("red").is_ok());
+    assert(Color.from_str("green").is_ok());
+    assert(Color.from_str("blue").is_ok());
+}
+
+// =============================================================================
+// ToString Protocol Tests (blanket from Display)
+// =============================================================================
+
+type Pair is {
+    x: Int,
+    y: Int,
+};
+
+implement Display for Pair {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&f"({self.x}, {self.y})")
+    }
+}
+
+@test
+fn test_to_string_from_display() {
+    let p = Pair { x: 3, y: 4 };
+    let s = p.to_string();
+    assert(s == "(3, 4)");
+}
+
+@test
+fn test_to_string_int() {
+    let n: Int = 42;
+    // Int implements Display, so it should get ToString via blanket
+    let s = n.to_string();
+    assert(s == "42");
+}
+
+// =============================================================================
+// Borrow / BorrowMut Protocol Tests
+// =============================================================================
+
+type Wrapper is {
+    value: Int,
+};
+
+implement Borrow<Int> for Wrapper {
+    fn borrow(&self) -> &Int {
+        &self.value
+    }
+}
+
+@test
+fn test_borrow_basic() {
+    let w = Wrapper { value: 42 };
+    let borrowed: &Int = w.borrow();
+    assert(*borrowed == 42);
+}
+
+// =============================================================================
+// Compound Assignment Protocols Tests
+// =============================================================================
+
+type Counter is {
+    count: Int,
+};
+
+implement AddAssign<Int> for Counter {
+    fn add_assign(&mut self, rhs: Int) {
+        self.count = self.count + rhs;
+    }
+}
+
+implement SubAssign<Int> for Counter {
+    fn sub_assign(&mut self, rhs: Int) {
+        self.count = self.count - rhs;
+    }
+}
+
+@test
+fn test_add_assign() {
+    let mut c = Counter { count: 10 };
+    c.add_assign(5);
+    assert(c.count == 15);
+}
+
+@test
+fn test_sub_assign() {
+    let mut c = Counter { count: 10 };
+    c.sub_assign(3);
+    assert(c.count == 7);
+}
+
+type Accumulator is {
+    value: Int,
+};
+
+implement MulAssign<Int> for Accumulator {
+    fn mul_assign(&mut self, rhs: Int) {
+        self.value = self.value * rhs;
+    }
+}
+
+implement DivAssign<Int> for Accumulator {
+    fn div_assign(&mut self, rhs: Int) {
+        self.value = self.value / rhs;
+    }
+}
+
+implement RemAssign<Int> for Accumulator {
+    fn rem_assign(&mut self, rhs: Int) {
+        self.value = self.value % rhs;
+    }
+}
+
+@test
+fn test_mul_assign() {
+    let mut a = Accumulator { value: 5 };
+    a.mul_assign(3);
+    assert(a.value == 15);
+}
+
+@test
+fn test_div_assign() {
+    let mut a = Accumulator { value: 20 };
+    a.div_assign(4);
+    assert(a.value == 5);
+}
+
+@test
+fn test_rem_assign() {
+    let mut a = Accumulator { value: 17 };
+    a.rem_assign(5);
+    assert(a.value == 2);
+}
+
+// Bitwise compound assignment tests
+type Flags is {
+    bits: Int,
+};
+
+implement BitAndAssign<Int> for Flags {
+    fn bitand_assign(&mut self, rhs: Int) {
+        self.bits = self.bits & rhs;
+    }
+}
+
+implement BitOrAssign<Int> for Flags {
+    fn bitor_assign(&mut self, rhs: Int) {
+        self.bits = self.bits | rhs;
+    }
+}
+
+implement BitXorAssign<Int> for Flags {
+    fn bitxor_assign(&mut self, rhs: Int) {
+        self.bits = self.bits ^ rhs;
+    }
+}
+
+@test
+fn test_bitor_assign() {
+    let mut f = Flags { bits: 0b1010 };
+    f.bitor_assign(0b0101);
+    assert(f.bits == 0b1111);
+}
+
+@test
+fn test_bitand_assign() {
+    let mut f = Flags { bits: 0b1111 };
+    f.bitand_assign(0b1010);
+    assert(f.bits == 0b1010);
+}
+
+@test
+fn test_bitxor_assign() {
+    let mut f = Flags { bits: 0b1100 };
+    f.bitxor_assign(0b1010);
+    assert(f.bits == 0b0110);
+}
+
+// Shift compound assignment tests
+type Shifter is {
+    value: Int,
+};
+
+implement ShlAssign<Int> for Shifter {
+    fn shl_assign(&mut self, rhs: Int) {
+        self.value = self.value << rhs;
+    }
+}
+
+implement ShrAssign<Int> for Shifter {
+    fn shr_assign(&mut self, rhs: Int) {
+        self.value = self.value >> rhs;
+    }
+}
+
+@test
+fn test_shl_assign() {
+    let mut s = Shifter { value: 1 };
+    s.shl_assign(3);
+    assert(s.value == 8);
+}
+
+@test
+fn test_shr_assign() {
+    let mut s = Shifter { value: 16 };
+    s.shr_assign(2);
+    assert(s.value == 4);
+}
+
+// =============================================================================
+// Additional Error Protocol Tests
+// =============================================================================
+
+// Error with source chaining
+type AppError is {
+    message: Text,
+    cause: Maybe<SimpleError>,
+};
+
+implement Describable for AppError {
+    fn description(&self) -> Text {
+        self.message.clone()
+    }
+}
+
+implement ErrorSource for AppError {
+    fn source(&self) -> Maybe<&dyn Describable> {
+        // Default returns None since we can't cast to dyn Describable
+        None
+    }
+}
+
+@test
+fn test_app_error_with_cause() {
+    let cause = SimpleError { message: "root cause" };
+    let err = AppError { message: "app failed", cause: Some(cause) };
+    assert(err.description() == "app failed");
+    assert(err.cause.is_some());
+}
+
+@test
+fn test_app_error_without_cause() {
+    let err = AppError { message: "standalone", cause: None };
+    assert(err.source().is_none());
+    assert(err.cause.is_none());
+}
+
+@test
+fn test_color_parse_error_description() {
+    let err = ColorParseError { input: "magenta" };
+    let desc = err.description();
+    assert(desc.contains(&"unknown color"));
+    assert(desc.contains(&"magenta"));
+}
+
+// =============================================================================
+// Additional FromStr Tests
+// =============================================================================
+
+@test
+fn test_from_str_empty_string() {
+    let r: Result<Color, ColorParseError> = Color.from_str("");
+    assert(r.is_err());
+}
+
+@test
+fn test_from_str_case_sensitive() {
+    // "Red" should NOT match "red" - case sensitive
+    let r: Result<Color, ColorParseError> = Color.from_str("Red");
+    assert(r.is_err());
+}
+
+// =============================================================================
+// Additional ToString Tests
+// =============================================================================
+
+@test
+fn test_to_string_negative_int() {
+    let n: Int = -42;
+    let s = n.to_string();
+    assert(s == "-42");
+}
+
+@test
+fn test_to_string_zero() {
+    let n: Int = 0;
+    let s = n.to_string();
+    assert(s == "0");
+}
+
+@test
+fn test_to_string_pair_different_values() {
+    let p = Pair { x: -1, y: 100 };
+    let s = p.to_string();
+    assert(s == "(-1, 100)");
+}
+
+// =============================================================================
+// Additional Compound Assignment Edge Cases
+// =============================================================================
+
+@test
+fn test_add_assign_multiple() {
+    let mut c = Counter { count: 0 };
+    c.add_assign(10);
+    c.add_assign(20);
+    c.add_assign(30);
+    assert(c.count == 60);
+}
+
+@test
+fn test_sub_assign_to_negative() {
+    let mut c = Counter { count: 5 };
+    c.sub_assign(10);
+    assert(c.count == -5);
+}
+
+@test
+fn test_add_sub_assign_combined() {
+    let mut c = Counter { count: 100 };
+    c.add_assign(50);
+    c.sub_assign(30);
+    assert(c.count == 120);
+}
+
+@test
+fn test_mul_assign_by_zero() {
+    let mut a = Accumulator { value: 42 };
+    a.mul_assign(0);
+    assert(a.value == 0);
+}
+
+@test
+fn test_div_assign_by_one() {
+    let mut a = Accumulator { value: 42 };
+    a.div_assign(1);
+    assert(a.value == 42);
+}
+
+@test
+fn test_rem_assign_smaller_divisor() {
+    let mut a = Accumulator { value: 3 };
+    a.rem_assign(5);
+    assert(a.value == 3);
+}
+
+@test
+fn test_shl_assign_by_zero() {
+    let mut s = Shifter { value: 42 };
+    s.shl_assign(0);
+    assert(s.value == 42);
+}
+
+@test
+fn test_shr_assign_by_zero() {
+    let mut s = Shifter { value: 42 };
+    s.shr_assign(0);
+    assert(s.value == 42);
+}
+
+@test
+fn test_bitor_assign_with_zero() {
+    let mut f = Flags { bits: 0b1010 };
+    f.bitor_assign(0);
+    assert(f.bits == 0b1010);
+}
+
+@test
+fn test_bitand_assign_with_all_ones() {
+    let mut f = Flags { bits: 0b1010 };
+    f.bitand_assign(0b1111);
+    assert(f.bits == 0b1010);
+}
+
+// =============================================================================
+// Additional Borrow Tests
+// =============================================================================
+
+@test
+fn test_borrow_negative_value() {
+    let w = Wrapper { value: -100 };
+    let borrowed: &Int = w.borrow();
+    assert(*borrowed == -100);
+}
+
+@test
+fn test_borrow_zero_value() {
+    let w = Wrapper { value: 0 };
+    let borrowed: &Int = w.borrow();
+    assert(*borrowed == 0);
+}
+
+// =============================================================================
+// Additional FromStr Edge Cases
+// =============================================================================
+
+@test
+fn test_from_str_whitespace() {
+    let r: Result<Color, ColorParseError> = Color.from_str(" red ");
+    // Leading/trailing whitespace should NOT match
+    assert(r.is_err());
+}
+
+@test
+fn test_from_str_all_three_valid() {
+    let red: Result<Color, ColorParseError> = Color.from_str("red");
+    let green: Result<Color, ColorParseError> = Color.from_str("green");
+    let blue: Result<Color, ColorParseError> = Color.from_str("blue");
+    assert(red.is_ok());
+    assert(green.is_ok());
+    assert(blue.is_ok());
+}
+
+// =============================================================================
+// Additional Compound Assignment Patterns
+// =============================================================================
+
+@test
+fn test_add_assign_zero() {
+    let mut c = Counter { count: 42 };
+    c.add_assign(0);
+    assert(c.count == 42);
+}
+
+@test
+fn test_sub_assign_zero() {
+    let mut c = Counter { count: 42 };
+    c.sub_assign(0);
+    assert(c.count == 42);
+}
+
+@test
+fn test_mul_assign_by_one() {
+    let mut a = Accumulator { value: 42 };
+    a.mul_assign(1);
+    assert(a.value == 42);
+}
+
+@test
+fn test_bitxor_assign_self_is_zero() {
+    let mut f = Flags { bits: 0b1010 };
+    f.bitxor_assign(0b1010);
+    assert(f.bits == 0);
+}
+
+@test
+fn test_bitand_assign_with_zero() {
+    let mut f = Flags { bits: 0b1111 };
+    f.bitand_assign(0);
+    assert(f.bits == 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+// =============================================================================
+// Additional Error and Protocol Tests
+// =============================================================================
+
+@test
+fn test_error_description_non_empty() {
+    let err = SimpleError { message: "x" };
+    assert(err.description().len() > 0);
+}
+
+@test
+fn test_mul_assign_negative() {
+    let mut a = Accumulator { value: 5 };
+    a.mul_assign(-2);
+    assert(a.value == -10);
+}
+
+@test
+fn test_counter_add_sub_identity() {
+    let mut c = Counter { count: 42 };
+    c.add_assign(10);
+    c.sub_assign(10);
+    assert(c.count == 42);
+}
+
+@test
+fn test_shl_shr_roundtrip() {
+    let mut s = Shifter { value: 8 };
+    s.shl_assign(2);
+    s.shr_assign(2);
+    assert(s.value == 8);
+}
+
+@test
+fn test_bitor_assign_idempotent() {
+    let mut f = Flags { bits: 0b1010 };
+    f.bitor_assign(0b1010);
+    assert(f.bits == 0b1010);
+}
+
+@test
+fn test_bitand_assign_idempotent() {
+    let mut f = Flags { bits: 0b1010 };
+    f.bitand_assign(0b1010);
+    assert(f.bits == 0b1010);
+}
+
+@test
+fn test_to_string_pair_zero_zero() {
+    let p = Pair { x: 0, y: 0 };
+    let s = p.to_string();
+    assert(s == "(0, 0)");
+}
+
+@test
+fn test_from_str_green() {
+    let r = Color.from_str("green");
+    assert(r.is_ok());
+}
+
+// =============================================================================
+// PartialOrd Protocol Tests
+// =============================================================================
+
+type Versioned is {
+    major: Int,
+    minor: Int,
+    comparable: Bool,
+};
+
+implement PartialEq for Versioned {
+    fn eq(&self, other: &Self) -> Bool {
+        self.major == other.major && self.minor == other.minor
+    }
+}
+
+implement PartialOrd for Versioned {
+    fn partial_cmp(&self, other: &Self) -> Maybe<Ordering> {
+        // Versions are only comparable if both have comparable flag
+        if !self.comparable || !other.comparable {
+            return None;
+        }
+        if self.major != other.major {
+            if self.major < other.major {
+                Some(Ordering.Less)
+            } else {
+                Some(Ordering.Greater)
+            }
+        } else if self.minor != other.minor {
+            if self.minor < other.minor {
+                Some(Ordering.Less)
+            } else {
+                Some(Ordering.Greater)
+            }
+        } else {
+            Some(Ordering.Equal)
+        }
+    }
+}
+
+@test
+fn test_partial_ord_comparable_versions() {
+    let v1 = Versioned { major: 1, minor: 0, comparable: true };
+    let v2 = Versioned { major: 2, minor: 0, comparable: true };
+    assert(v1.lt(&v2));
+    assert(!v1.gt(&v2));
+}
+
+@test
+fn test_partial_ord_incomparable_versions() {
+    let v1 = Versioned { major: 1, minor: 0, comparable: false };
+    let v2 = Versioned { major: 2, minor: 0, comparable: true };
+    // Both must be comparable for comparison to succeed
+    assert(!v1.lt(&v2));
+    assert(!v1.gt(&v2));
+    assert(!v1.le(&v2));
+    assert(!v1.ge(&v2));
+}
+
+@test
+fn test_partial_ord_equal_versions() {
+    let v1 = Versioned { major: 1, minor: 5, comparable: true };
+    let v2 = Versioned { major: 1, minor: 5, comparable: true };
+    assert(v1.le(&v2));
+    assert(v1.ge(&v2));
+}
+
+// =============================================================================
+// AsRef / AsMut Protocol Tests
+// =============================================================================
+
+type TextBox is {
+    content: Text,
+};
+
+implement AsRef<Text> for TextBox {
+    fn as_ref(&self) -> &Text {
+        &self.content
+    }
+}
+
+implement AsMut<Text> for TextBox {
+    fn as_mut(&mut self) -> &mut Text {
+        &mut self.content
+    }
+}
+
+@test
+fn test_as_ref_text_box() {
+    let tbox = TextBox { content: "hello" };
+    let r: &Text = tbox.as_ref();
+    assert(*r == "hello");
+}
+
+@test
+fn test_as_mut_text_box() {
+    let mut tbox = TextBox { content: "hello" };
+    let r: &mut Text = tbox.as_mut();
+    r.push_str(" world");
+    assert(tbox.content == "hello world");
+}
+
+// =============================================================================
+// Zero / One Protocol Tests
+// =============================================================================
+
+type Distance is {
+    meters: Int,
+};
+
+implement Zero for Distance {
+    fn zero() -> Distance {
+        Distance { meters: 0 }
+    }
+
+    fn is_zero(&self) -> Bool {
+        self.meters == 0
+    }
+}
+
+implement One for Distance {
+    fn one() -> Distance {
+        Distance { meters: 1 }
+    }
+
+    fn is_one(&self) -> Bool {
+        self.meters == 1
+    }
+}
+
+@test
+fn test_zero_protocol() {
+    let d = Distance.zero();
+    assert(d.is_zero());
+    assert(d.meters == 0);
+}
+
+@test
+fn test_one_protocol() {
+    let d = Distance.one();
+    assert(d.is_one());
+    assert(d.meters == 1);
+}
+
+@test
+fn test_zero_one_not_overlap() {
+    let zero_dist = Distance.zero();
+    let one_dist = Distance.one();
+    assert(!zero_dist.is_one());
+    assert(!one_dist.is_zero());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

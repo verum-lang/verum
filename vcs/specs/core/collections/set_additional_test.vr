@@ -1,0 +1,373 @@
+// =============================================================================
+// set_additional_test.vr - Tests for is_strict_subset/superset, pop, update
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, set, strict_subset, strict_superset, pop, update
+// @description: Tests for Set methods that don't have dedicated test coverage:
+//               is_strict_subset, is_strict_superset, pop, update.
+// =============================================================================
+
+mount core.collections.set.Set;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: is_strict_subset
+// =============================================================================
+
+@test
+fn test_strict_subset_basic() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+
+    // {1,2} is a strict subset of {1,2,3}
+    assert(a.is_strict_subset(&b));
+}
+
+@test
+fn test_strict_subset_equal_sets() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+
+    // Equal sets are NOT strict subsets
+    assert(!a.is_strict_subset(&b));
+}
+
+@test
+fn test_strict_subset_empty_of_nonempty() {
+    let a: Set<Int> = Set.new();
+
+    let mut b = Set.new();
+    b.insert(1);
+
+    // Empty set is a strict subset of any nonempty set
+    assert(a.is_strict_subset(&b));
+}
+
+@test
+fn test_strict_subset_empty_of_empty() {
+    let a: Set<Int> = Set.new();
+    let b: Set<Int> = Set.new();
+
+    // Empty is NOT a strict subset of empty
+    assert(!a.is_strict_subset(&b));
+}
+
+@test
+fn test_strict_subset_not_subset() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(4);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+
+    // {1,4} is NOT a subset of {1,2,3}
+    assert(!a.is_strict_subset(&b));
+}
+
+@test
+fn test_strict_subset_larger_not_subset() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+
+    // {1,2,3} is NOT a strict subset of {1,2}
+    assert(!a.is_strict_subset(&b));
+}
+
+@test
+fn test_strict_subset_single_element() {
+    let mut a = Set.new();
+    a.insert(1);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+
+    assert(a.is_strict_subset(&b));
+}
+
+// =============================================================================
+// Section 2: is_strict_superset
+// =============================================================================
+
+@test
+fn test_strict_superset_basic() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+
+    // {1,2,3} is a strict superset of {1,2}
+    assert(a.is_strict_superset(&b));
+}
+
+@test
+fn test_strict_superset_equal_sets() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+
+    // Equal sets are NOT strict supersets
+    assert(!a.is_strict_superset(&b));
+}
+
+@test
+fn test_strict_superset_of_empty() {
+    let mut a = Set.new();
+    a.insert(1);
+
+    let b: Set<Int> = Set.new();
+
+    // Any nonempty set is a strict superset of empty
+    assert(a.is_strict_superset(&b));
+}
+
+@test
+fn test_strict_superset_empty_of_empty() {
+    let a: Set<Int> = Set.new();
+    let b: Set<Int> = Set.new();
+
+    assert(!a.is_strict_superset(&b));
+}
+
+@test
+fn test_strict_superset_not_superset() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(3);
+
+    // {1,2} is NOT a superset of {1,3}
+    assert(!a.is_strict_superset(&b));
+}
+
+@test
+fn test_strict_subset_superset_inverse() {
+    let mut small = Set.new();
+    small.insert(1);
+    small.insert(2);
+
+    let mut large = Set.new();
+    large.insert(1);
+    large.insert(2);
+    large.insert(3);
+
+    // Inverse relationship
+    assert(small.is_strict_subset(&large));
+    assert(large.is_strict_superset(&small));
+    assert(!large.is_strict_subset(&small));
+    assert(!small.is_strict_superset(&large));
+}
+
+// =============================================================================
+// Section 3: pop
+// =============================================================================
+
+@test
+fn test_pop_nonempty() {
+    let mut s = Set.new();
+    s.insert(42);
+
+    let val = s.pop();
+    assert(val is Some);
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_pop_empty() {
+    let mut s: Set<Int> = Set.new();
+    let val = s.pop();
+    assert(val is None);
+}
+
+@test
+fn test_pop_reduces_len() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    assert_eq(s.len(), 3);
+
+    let _ = s.pop();
+    assert_eq(s.len(), 2);
+
+    let _ = s.pop();
+    assert_eq(s.len(), 1);
+
+    let _ = s.pop();
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_pop_exhausts_set() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+
+    let a = s.pop();
+    let b = s.pop();
+    let c = s.pop();
+
+    assert(a is Some);
+    assert(b is Some);
+    assert(c is None);
+    assert(s.is_empty());
+}
+
+@test
+fn test_pop_returns_element() {
+    let mut s = Set.new();
+    s.insert(99);
+
+    match s.pop() {
+        Some(val) => assert_eq(val, 99),
+        None => panic("should pop element"),
+    }
+}
+
+@test
+fn test_pop_element_removed() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+
+    let popped = s.pop();
+    match popped {
+        Some(val) => assert(!s.contains(&val)),
+        None => panic("should pop"),
+    }
+}
+
+// =============================================================================
+// Section 4: update
+// =============================================================================
+
+@test
+fn test_update_basic() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b = Set.new();
+    b.insert(3);
+    b.insert(4);
+
+    a.update(&b);
+    assert_eq(a.len(), 4);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+    assert(a.contains(&4));
+}
+
+@test
+fn test_update_with_overlap() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+
+    a.update(&b);
+    assert_eq(a.len(), 4);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+    assert(a.contains(&4));
+}
+
+@test
+fn test_update_with_empty() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+
+    let b: Set<Int> = Set.new();
+    a.update(&b);
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_update_empty_with_nonempty() {
+    let mut a: Set<Int> = Set.new();
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+
+    a.update(&b);
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+}
+
+@test
+fn test_update_with_self_elements() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+
+    a.update(&b);
+    assert_eq(a.len(), 2);  // No new elements
+}
+
+@test
+fn test_update_preserves_other() {
+    let mut a = Set.new();
+    a.insert(1);
+
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+
+    a.update(&b);
+    // b should be unchanged
+    assert_eq(b.len(), 2);
+    assert(b.contains(&2));
+    assert(b.contains(&3));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, or-pattern
+// @description: Or-patterns contribute to exhaustiveness
+
+type Color is Red | Green | Blue;
+type Status is Active | Inactive | Pending;
+
+// Or-pattern covering multiple variants
+fn is_primary(c: Color) -> Bool =
+    match c {
+        Red | Blue => true,
+        Green => false
+    };
+
+// Or-pattern with all variants (exhaustive)
+fn describe_status(s: Status) -> Text =
+    match s {
+        Active | Pending => "engaged",
+        Inactive => "idle"
+    };
+
+// Nested or-patterns
+type Result<T, E> is Ok(T) | Err(E);
+type ParseError is InvalidSyntax | UnexpectedEof | InvalidToken(Text);
+
+fn is_recoverable(r: Result<Int, ParseError>) -> Bool =
+    match r {
+        Ok(_) => true,
+        Err(InvalidSyntax | InvalidToken(_)) => true,
+        Err(UnexpectedEof) => false
+    };
+
+// Or-pattern with tuple
+fn classify_pair(p: (Bool, Bool)) -> Text =
+    match p {
+        (true, true) | (false, false) => "same",
+        (true, false) | (false, true) => "different"
+    };
+
+fn main() {
+    assert(is_primary(Red) == true);
+    assert(is_primary(Green) == false);
+    assert(describe_status(Active) == "engaged");
+    assert(is_recoverable(Ok(42)) == true);
+    assert(classify_pair((true, true)) == "same");
+}

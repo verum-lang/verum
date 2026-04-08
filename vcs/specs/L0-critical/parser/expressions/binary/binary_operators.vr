@@ -1,0 +1,261 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, expressions, binary, operators
+
+// Binary operator expressions
+
+fn test_arithmetic_operators() {
+    let a = 10;
+    let b = 3;
+
+    // Arithmetic operators
+    let add = a + b;
+    let sub = a - b;
+    let mul = a * b;
+    let div = a / b;
+    let modulo = a % b;
+    let power = a ** b;
+}
+
+fn test_comparison_operators() {
+    let a = 10;
+    let b = 3;
+
+    // Comparison operators
+    let eq = a == b;
+    let ne = a != b;
+    let lt = a < b;
+    let le = a <= b;
+    let gt = a > b;
+    let ge = a >= b;
+}
+
+fn test_logical_operators() {
+    let a = true;
+    let b = false;
+
+    // Logical operators
+    let and = a && b;
+    let or = a || b;
+}
+
+fn test_bitwise_operators() {
+    let a = 0xAA;
+    let b = 0x55;
+
+    // Bitwise operators
+    let bit_and = a & b;
+    let bit_or = a | b;
+    let bit_xor = a ^ b;
+    let shl = a << b;
+    let shr = a >> b;
+}
+
+fn test_assignment_operators() {
+    let mut a = 10;
+    let b = 3;
+
+    // Assignment operators (compound)
+    a += b;
+    a -= b;
+    a *= b;
+    a /= b;
+    a %= b;
+    a &= b;
+    a |= b;
+    a ^= b;
+    a <<= b;
+    a >>= b;
+}
+
+fn test_pipeline_operator() {
+    fn transform(x: Int) -> Int { x * 2 }
+    fn validate(x: Int) -> Int { x }
+
+    let data = 10;
+
+    // Pipeline operator
+    let piped = data |> transform |> validate;
+}
+
+fn test_range_operators() {
+    let a = 1;
+    let b = 10;
+
+    // Range operators
+    let exclusive = a..b;
+    let inclusive = a..=b;
+}
+
+fn test_null_coalescing() {
+    let maybe: Maybe<Int> = None;
+    let default_value = 42;
+
+    // Null coalescing
+    let with_default = maybe ?? default_value;
+}
+
+fn test_chained_binary_operations() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+
+    // Chained binary operations
+    let chained_add = a + b + c + d;
+    let chained_mul = a * b * c * d;
+    let chained_and = true && true && true && true;
+    let chained_or = false || false || false || true;
+}
+
+fn test_mixed_precedence() {
+    let a = 2;
+    let b = 3;
+    let c = 4;
+    let d = 5;
+
+    // Mixed precedence
+    let mixed = a + b * c;          // a + (b * c)
+    let explicit = (a + b) * c;     // (a + b) * c
+    let complex = a * b + c * d;    // (a * b) + (c * d)
+}
+
+fn test_associativity() {
+    let a = 10;
+    let b = 3;
+    let c = 2;
+
+    // Associativity
+    let left_assoc = a - b - c;     // (a - b) - c
+    let right_power = 2 ** 3 ** 2;  // 2 ** (3 ** 2)
+}
+
+fn test_boolean_expression() {
+    let a = 50;
+    let b = 42;
+
+    // Boolean expression
+    let bool_expr = a > 0 && a < 100 || b == 42;
+}
+
+fn test_comparison_chains() {
+    let x = 50;
+
+    // Comparison chains
+    let in_range = 0 <= x && x < 100;
+}
+
+fn test_string_concatenation() {
+    let s1 = "Hello";
+    let s2 = "World";
+    let s3 = "!";
+
+    // String concatenation
+    let concat = s1 + s2;
+    let multi_concat = s1 + " " + s2 + " " + s3;
+}
+
+fn test_operator_with_method_call() {
+    let a = -5;
+    let b = 3;
+    let x = 3;
+    let y = 4;
+
+    fn abs(n: Int) -> Int { if n < 0 { -n } else { n } }
+    fn pow(n: Int, e: Int) -> Int { n ** e }
+
+    // Operator with method call
+    let result = abs(a + b);
+    let computed = pow(x, 2) + pow(y, 2);
+}
+
+fn test_operator_in_function_arguments() {
+    let a = 2;
+    let b = 3;
+    let c = 4;
+    let d = 5;
+
+    // Operator in function arguments
+    fn process(x: Int, y: Int) -> Int { x * y }
+    let result = process(a + b, c * d);
+}
+
+fn test_operator_in_array() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    // Operator in array
+    let values = [a + 1, b + 2, c + 3];
+}
+
+fn test_operator_in_tuple() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+
+    // Operator in tuple
+    let pair = (a + b, c * d);
+}
+
+fn test_operator_in_record() {
+    type Point is { x: Int, y: Int };
+
+    let a = 10;
+    let b = 20;
+    let offset_x = 5;
+    let offset_y = 10;
+
+    // Operator in record field
+    let point = Point {
+        x: a + offset_x,
+        y: b + offset_y,
+    };
+}
+
+fn test_operator_in_conditional() {
+    let a = 5;
+    let b = 10;
+    let threshold = 12;
+    let c = 3;
+    let d = 4;
+    let limit = 15;
+
+    fn process() {}
+
+    // Operator in conditional
+    if a + b > threshold && c * d < limit {
+        process();
+    }
+}
+
+fn test_operator_in_match_guard() {
+    let value = 5;
+
+    fn handle_large(x: Int) {}
+    fn handle_small(x: Int) {}
+    fn handle_default() {}
+
+    // Operator in match guard
+    match value {
+        x if x + 1 > 10 => handle_large(x),
+        x if x * 2 < 5 => handle_small(x),
+        _ => handle_default(),
+    };
+}
+
+fn test_operator_with_closures() {
+    // Operator with closures
+    let binary_fn = |a, b| a + b;
+    let composed = |a, b| a * b + a / b;
+}
+
+fn test_is_operator() {
+    type MyType is { value: Int };
+    let value = MyType { value: 42 };
+
+    // Is operator (pattern test)
+    let is_type = value is MyType { .. };
+}

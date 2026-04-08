@@ -1,0 +1,591 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for expression statements
+
+// =============================================================================
+// Grammar Reference:
+// expression_stmt = expression , [ ';' ] ;
+//
+// Any expression can be used as a statement. The semicolon is optional for
+// block-ending expressions but required for most expression statements.
+// =============================================================================
+
+// =============================================================================
+// FUNCTION CALL STATEMENTS
+// =============================================================================
+
+fn test_simple_function_call() {
+    // Basic function call as statement
+    do_something();
+
+    // With arguments
+    process(data);
+    compute(a, b, c);
+
+    // Discarding return value
+    get_value();
+}
+
+fn test_method_call_statements() {
+    // Method calls
+    object.method();
+    object.method(arg);
+    object.method(a, b, c);
+
+    // Chained method calls
+    text.trim();
+    list.sort();
+    map.clear();
+}
+
+fn test_chained_method_calls() {
+    // Method chains as statements (side effects in chain)
+    builder.add(1).add(2).add(3).build();
+
+    // Processing chain
+    data.validate().transform().save();
+
+    // Builder pattern
+    config.set_host("localhost")
+        .set_port(8080)
+        .set_timeout(30)
+        .apply();
+}
+
+fn test_generic_function_calls() {
+    // Generic function calls
+    process<Int>(value);
+    transform<Text, Int>(input);
+    create<User>();
+}
+
+fn test_constructor_calls() {
+    // Constructor calls (creating and discarding)
+    Point.new(0, 0);
+    User.default();
+    List<Int>.new();
+}
+
+// =============================================================================
+// ARITHMETIC EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_arithmetic_statements() {
+    // These are unusual but syntactically valid
+    // (typically you'd assign the result)
+    1 + 2;
+    a * b;
+    x / y + z;
+}
+
+fn test_increment_decrement_patterns() {
+    // Common patterns that mutate
+    let mut x = 0;
+    x += 1;
+    x -= 1;
+    x *= 2;
+    x /= 2;
+}
+
+// =============================================================================
+// LOGICAL EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_logical_statements() {
+    // Short-circuit evaluation for side effects
+    condition && do_if_true();
+    condition || do_if_false();
+}
+
+fn test_comparison_statements() {
+    // Comparisons (unusual but valid)
+    a == b;
+    x < y;
+    i >= j;
+}
+
+// =============================================================================
+// CONTROL FLOW EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_if_expression_statement() {
+    // If without using result
+    if condition { action() } else { other_action() };
+
+    // If-else chain
+    if a {
+        action_a()
+    } else if b {
+        action_b()
+    } else {
+        action_c()
+    };
+}
+
+fn test_match_expression_statement() {
+    // Match without using result
+    match value {
+        0 => zero(),
+        1 => one(),
+        _ => other()
+    };
+
+    // Match with blocks
+    match opt {
+        Some(x) => process(x),
+        None => {}
+    };
+}
+
+fn test_loop_expression_statement() {
+    // Loop as statement
+    loop {
+        if done { break; }
+    };
+
+    // While as statement
+    while condition {
+        iterate();
+    };
+
+    // For as statement
+    for item in items {
+        process(item);
+    };
+}
+
+// =============================================================================
+// BLOCK EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_block_statement() {
+    // Standalone block
+    {
+        let temp = compute();
+        use_temp(temp);
+    };
+
+    // Nested blocks
+    {
+        {
+            inner_action();
+        };
+        outer_action();
+    };
+}
+
+fn test_block_with_bindings() {
+    {
+        let x = 1;
+        let y = 2;
+        process(x, y);
+    };
+}
+
+fn test_block_for_scoping() {
+    let mut result = 0;
+    {
+        let temp = expensive_compute();
+        result = transform(temp);
+        // temp goes out of scope here
+    };
+    use_result(result);
+}
+
+// =============================================================================
+// ASYNC EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+async fn test_await_statement() {
+    // Await expression as statement
+    fetch_data().await;
+    process_async().await;
+
+    // Await on method
+    connection.send(data).await;
+    stream.flush().await;
+}
+
+async fn test_spawn_statement() {
+    // Spawn as statement (fire and forget)
+    spawn async { background_task(); };
+
+    // Spawn with context
+    spawn using [Logger] async {
+        log_activity();
+    };
+}
+
+fn test_async_block_statement() {
+    // Async block as statement
+    async {
+        prepare().await;
+        execute().await;
+    };
+}
+
+// =============================================================================
+// TRY EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_try_statement() {
+    // Try expression as statement (propagates error)
+    try_operation()?;
+
+    // Try on method call
+    connection.send(data)?;
+
+    // Try on chain
+    parse(input)?.validate()?.process()?;
+}
+
+fn test_try_block_statement() {
+    try {
+        risky_operation();
+        another_risky();
+    };
+}
+
+// =============================================================================
+// CLOSURE EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_closure_call_statement() {
+    // Closure call as statement
+    (|x| process(x))(value);
+
+    // Stored closure call
+    let f = |x| x * 2;
+    f(10);
+}
+
+fn test_closure_definition_statement() {
+    // Closure definition (unusual as statement, but valid)
+    |x| x + 1;
+
+    // Multi-line closure
+    |a, b| {
+        let sum = a + b;
+        process(sum)
+    };
+}
+
+// =============================================================================
+// PIPELINE EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_pipeline_statement() {
+    // Pipeline as statement
+    data |> transform |> validate |> save;
+
+    // Pipeline with methods
+    input |> parse |> obj.process |> finalize;
+}
+
+// =============================================================================
+// RANGE EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_range_statement() {
+    // Range expressions (unusual but valid)
+    0..10;
+    0..=100;
+    start..end;
+}
+
+// =============================================================================
+// REFERENCE EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_reference_statement() {
+    // Reference creation (unusual but valid)
+    &value;
+    &mut value;
+
+    // Dereference (unusual but valid)
+    *ptr;
+}
+
+// =============================================================================
+// MACRO/META EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_meta_call_statement() {
+    // Meta function calls
+    @debug_print(value);
+    @log_timing();
+    @assert(condition);
+}
+
+fn test_meta_block_statement() {
+    meta {
+        let code = generate_code();
+        emit(code);
+    };
+}
+
+// =============================================================================
+// UNSAFE EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_unsafe_statement() {
+    unsafe {
+        raw_memory_access();
+        direct_pointer_manipulation();
+    };
+}
+
+// =============================================================================
+// INDEX AND FIELD ACCESS AS STATEMENTS
+// =============================================================================
+
+fn test_index_statement() {
+    // Index access (unusual but valid - side effects in getter)
+    array[0];
+    map["key"];
+    matrix[i][j];
+}
+
+fn test_field_access_statement() {
+    // Field access (unusual but valid)
+    object.field;
+    nested.inner.value;
+}
+
+// =============================================================================
+// TUPLE AND ARRAY EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_tuple_statement() {
+    // Tuple creation (unusual but valid)
+    (1, 2, 3);
+    (a, b);
+}
+
+fn test_array_statement() {
+    // Array creation (unusual but valid)
+    [1, 2, 3];
+    [0; 100];
+}
+
+// =============================================================================
+// RECORD EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_record_statement() {
+    // Record creation (unusual but valid)
+    Point { x: 0, y: 0 };
+    User { name: "Alice", age: 30 };
+}
+
+// =============================================================================
+// TYPE CAST EXPRESSIONS AS STATEMENTS
+// =============================================================================
+
+fn test_cast_statement() {
+    // Cast expression (unusual but valid)
+    value as Int;
+    ptr as *const u8;
+}
+
+// =============================================================================
+// STATEMENT SEQUENCES
+// =============================================================================
+
+fn test_multiple_statements() {
+    // Multiple expression statements in sequence
+    first();
+    second();
+    third();
+
+    // Mixed with let
+    let x = compute();
+    process(x);
+    finalize();
+}
+
+fn test_interleaved_statements() {
+    // Interleaved expression and let statements
+    setup();
+    let config = load_config();
+    configure(config);
+    let data = fetch();
+    process(data);
+    cleanup();
+}
+
+// =============================================================================
+// SEMICOLON PLACEMENT
+// =============================================================================
+
+fn test_required_semicolon() {
+    // Semicolon required after most expressions
+    function_call();
+    method.call();
+    a + b;
+}
+
+fn test_optional_semicolon_block_end() {
+    // Semicolon optional at end of block
+    {
+        setup();
+        process()  // No semicolon needed at block end
+    }
+}
+
+fn test_semicolon_after_block_expressions() {
+    // Block expressions as statements need semicolon
+    if condition {
+        action()
+    };  // Semicolon needed
+
+    match value {
+        _ => result()
+    };  // Semicolon needed
+
+    loop {
+        break
+    };  // Semicolon needed
+}
+
+// =============================================================================
+// EXPRESSION STATEMENTS IN DIFFERENT CONTEXTS
+// =============================================================================
+
+fn test_expression_in_if_body() {
+    if condition {
+        action();
+        more_action();
+    }
+}
+
+fn test_expression_in_loop_body() {
+    while running {
+        process();
+        update_state();
+    }
+
+    for item in items {
+        validate(item);
+        transform(item);
+        save(item);
+    }
+}
+
+fn test_expression_in_match_arm() {
+    match value {
+        0 => {
+            log_zero();
+            handle_zero();
+        },
+        1 => handle_one(),
+        _ => handle_other()
+    };
+}
+
+fn test_expression_in_closure() {
+    let f = || {
+        setup();
+        compute();
+        cleanup()
+    };
+}
+
+// =============================================================================
+// SIDE EFFECT EXPRESSIONS
+// =============================================================================
+
+fn test_print_statement() {
+    // Print function (built-in, no !)
+    print("Hello, World");
+    print(f"Value: {value}");
+}
+
+fn test_assert_statement() {
+    // Assert (built-in, no !)
+    assert(condition);
+    assert(x > 0);
+    assert_eq(a, b);
+}
+
+fn test_panic_statement() {
+    // Panic (built-in, no !)
+    if critical_error {
+        panic("Critical failure");
+    }
+}
+
+fn test_logging_statements() {
+    // Common logging patterns
+    log.debug("Debug message");
+    log.info("Info message");
+    log.warn("Warning message");
+    log.error("Error message");
+}
+
+// =============================================================================
+// UNUSUAL BUT VALID EXPRESSION STATEMENTS
+// =============================================================================
+
+fn test_literal_statements() {
+    // Literals as statements (no effect, but syntactically valid)
+    42;
+    "hello";
+    true;
+    3.14;
+}
+
+fn test_identifier_statement() {
+    // Just an identifier (no effect, but syntactically valid)
+    value;
+    some_variable;
+}
+
+fn test_parenthesized_statement() {
+    // Parenthesized expression
+    (compute());
+    ((nested));
+}
+
+fn test_negation_statement() {
+    // Unary negation
+    -value;
+    !condition;
+    ~bits;
+}
+
+// =============================================================================
+// COMPLEX EXPRESSION STATEMENTS
+// =============================================================================
+
+fn test_complex_chain() {
+    // Long method chain
+    collection.iter()
+        .filter(|x| x.is_valid())
+        .map(|x| x.transform())
+        .for_each(|x| process(x));
+}
+
+fn test_complex_conditional() {
+    // Complex conditional expression as statement
+    if a && b || c && d {
+        complex_action()
+    } else if e || f {
+        other_action()
+    } else {
+        default_action()
+    };
+}
+
+fn test_complex_match() {
+    // Complex match as statement
+    match complex_value {
+        Value.A { x, y } if x > 0 && y > 0 => first_quadrant(x, y),
+        Value.A { x, y } if x < 0 && y > 0 => second_quadrant(x, y),
+        Value.A { x, y } if x < 0 && y < 0 => third_quadrant(x, y),
+        Value.A { x, y } => fourth_quadrant(x, y),
+        Value.B(data) => handle_b(data),
+        _ => handle_other()
+    };
+}

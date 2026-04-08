@@ -1,0 +1,475 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, serialization, protobuf
+// @description: Tests Protocol Buffers serialization for FFI interop
+
+/// ============================================================
+/// PROTOCOL BUFFERS SERIALIZATION
+/// ============================================================
+///
+/// Protocol Buffers is Googleps language-neutral serialization
+/// format, widely used in gRPC and inter-service communication.
+
+// ------------------------------------------------------------
+// Wire Types
+// ------------------------------------------------------------
+
+type WireType is
+    | Varint = 0        // int32, int64, uint32, uint64, sint32, sint64, bool, enum
+    | Fixed64 = 1       // fixed64, sfixed64, double
+    | LengthDelimited = 2 // string, bytes, embedded messages, packed repeated
+    | StartGroup = 3    // deprecated
+    | EndGroup = 4      // deprecated
+    | Fixed32 = 5;      // fixed32, sfixed32, float
+
+implement WireType {
+    fn from_u8(n: u8) -> Result<WireType, ProtoError> {
+        match n {
+            0 => Ok(Varint),
+            1 => Ok(Fixed64),
+            2 => Ok(LengthDelimited),
+            3 => Ok(WireType.StartGroup),
+            4 => Ok(WireType.EndGroup),
+            5 => Ok(Fixed32),
+            _ => Err(InvalidWireType(n)),
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Protobuf Encoding
+// ------------------------------------------------------------
+
+type ProtoWriter is {
+    buffer: List<u8>,
+};
+
+implement ProtoWriter {
+    fn new() -> ProtoWriter {
+        ProtoWriter { buffer: List.new() }
+    }
+
+    fn into_bytes(self) -> List<u8> {
+        self.buffer
+    }
+
+    /// Write tag (field number + wire type)
+    fn write_tag(&mut self, field_number: u32, wire_type_val: u32) {
+        let tag = (field_number << 3) | wire_type_val;
+        self.write_varint(tag as u64);
+    }
+
+    /// Write unsigned varint
+    fn write_varint(&mut self, mut value: u64) {
+        loop {
+            let mut byte = (value & 0x7F) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            self.buffer.push(byte);
+            if value == 0 {
+                break;
+            }
+        }
+    }
+
+    /// Write signed varint (zigzag encoding)
+    fn write_sint32(&mut self, value: i32) {
+        let encoded = ((value << 1) ^ (value >> 31)) as u32;
+        self.write_varint(encoded as u64);
+    }
+
+    fn write_sint64(&mut self, value: i64) {
+        let encoded = ((value << 1) ^ (value >> 63)) as u64;
+        self.write_varint(encoded);
+    }
+
+    /// Write fixed-width integers
+    fn write_fixed32(&mut self, value: u32) {
+        self.buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_fixed64(&mut self, value: u64) {
+        self.buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_sfixed32(&mut self, value: i32) {
+        self.buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_sfixed64(&mut self, value: i64) {
+        self.buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// Write floating point
+    fn write_float(&mut self, value: f32) {
+        self.buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_double(&mut self, value: f64) {
+        self.buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// Write length-delimited data
+    fn write_bytes(&mut self, data: &[u8]) {
+        self.write_varint(data.len() as u64);
+        self.buffer.extend_from_slice(data);
+    }
+
+    fn write_string(&mut self, s: &str) {
+        self.write_bytes(s.as_bytes());
+    }
+
+    /// Write embedded message
+    fn write_message<M: ProtoMessage>(&mut self, msg: &M) {
+        let mut inner = ProtoWriter.new();
+        msg.encode(&mut inner);
+        let bytes = inner.into_bytes();
+        self.write_bytes(&bytes);
+    }
+
+    /// Write packed repeated field
+    fn write_packed<T, F>(&mut self, values: &[T], write_fn: F)
+    where F: Fn(&mut ProtoWriter, &T)
+    {
+        let mut inner = ProtoWriter.new();
+        for value in values {
+            write_fn(&mut inner, value);
+        }
+        self.write_bytes(&inner.buffer);
+    }
+
+    // Field helpers with tags
+    fn write_int32_field(&mut self, field_number: u32, value: i32) {
+        if value != 0 {
+            self.write_tag(field_number, Varint);
+            self.write_varint(value as u64);
+        }
+    }
+
+    fn write_int64_field(&mut self, field_number: u32, value: i64) {
+        if value != 0 {
+            self.write_tag(field_number, Varint);
+            self.write_varint(value as u64);
+        }
+    }
+
+    fn write_uint32_field(&mut self, field_number: u32, value: u32) {
+        if value != 0 {
+            self.write_tag(field_number, Varint);
+            self.write_varint(value as u64);
+        }
+    }
+
+    fn write_bool_field(&mut self, field_number: u32, value: Bool) {
+        if value {
+            self.write_tag(field_number, Varint);
+            self.write_varint(1);
+        }
+    }
+
+    fn write_string_field(&mut self, field_number: u32, value: &str) {
+        if !value.is_empty() {
+            self.write_tag(field_number, LengthDelimited);
+            self.write_string(value);
+        }
+    }
+
+    fn write_bytes_field(&mut self, field_number: u32, value: &[u8]) {
+        if !value.is_empty() {
+            self.write_tag(field_number, LengthDelimited);
+            self.write_bytes(value);
+        }
+    }
+
+    fn write_message_field<M: ProtoMessage>(&mut self, field_number: u32, msg: &M) {
+        self.write_tag(field_number, LengthDelimited);
+        self.write_message(msg);
+    }
+}
+
+// ------------------------------------------------------------
+// Protobuf Decoding
+// ------------------------------------------------------------
+
+type ProtoReader is {
+    data: &[u8],
+    pos: usize,
+};
+
+implement ProtoReader {
+    fn new(data: &[u8]) -> ProtoReader {
+        ProtoReader { data, pos: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.data.len() - self.pos
+    }
+
+    fn is_at_end(&self) -> Bool {
+        self.pos >= self.data.len()
+    }
+
+    /// Read tag
+    fn read_tag(&mut self) -> Result<(u32, WireType), ProtoError> {
+        let tag = self.read_varint()? as u32;
+        let field_number = tag >> 3;
+        let wire_type = WireType.from_u8((tag & 0x7) as u8)?;
+        Ok((field_number, wire_type))
+    }
+
+    /// Read unsigned varint
+    fn read_varint(&mut self) -> Result<u64, ProtoError> {
+        let mut result: u64 = 0;
+        let mut shift = 0;
+
+        loop {
+            if self.pos >= self.data.len() {
+                return Err(UnexpectedEof);
+            }
+            if shift >= 64 {
+                return Err(VarintOverflow);
+            }
+
+            let byte = self.data[self.pos];
+            self.pos += 1;
+            result |= ((byte & 0x7F) as u64) << shift;
+            shift += 7;
+
+            if (byte & 0x80) == 0 {
+                break;
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Read signed varint (zigzag decoding)
+    fn read_sint32(&mut self) -> Result<i32, ProtoError> {
+        let n = self.read_varint()? as u32;
+        Ok(((n >> 1) as i32) ^ (-((n & 1) as i32)))
+    }
+
+    fn read_sint64(&mut self) -> Result<i64, ProtoError> {
+        let n = self.read_varint()?;
+        Ok(((n >> 1) as i64) ^ (-((n & 1) as i64)))
+    }
+
+    /// Read fixed-width
+    fn read_fixed32(&mut self) -> Result<u32, ProtoError> {
+        if self.remaining() < 4 {
+            return Err(UnexpectedEof);
+        }
+        let bytes = &self.data[self.pos..self.pos + 4];
+        self.pos += 4;
+        Ok((bytes[0] as u32) | ((bytes[1] as u32) << 8) | ((bytes[2] as u32) << 16) | ((bytes[3] as u32) << 24))
+    }
+
+    fn read_fixed64(&mut self) -> Result<u64, ProtoError> {
+        if self.remaining() < 8 {
+            return Err(UnexpectedEof);
+        }
+        let bytes = &self.data[self.pos..self.pos + 8];
+        self.pos += 8;
+        Ok(u64.from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+
+    fn read_float(&mut self) -> Result<f32, ProtoError> {
+        let bits = self.read_fixed32()?;
+        Ok(f32.from_bits(bits))
+    }
+
+    fn read_double(&mut self) -> Result<f64, ProtoError> {
+        let bits = self.read_fixed64()?;
+        Ok(f64.from_bits(bits))
+    }
+
+    /// Read length-delimited data
+    fn read_bytes(&mut self) -> Result<&[u8], ProtoError> {
+        let len = self.read_varint()? as usize;
+        if self.remaining() < len {
+            return Err(UnexpectedEof);
+        }
+        let bytes = &self.data[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(bytes)
+    }
+
+    fn read_string(&mut self) -> Result<Text, ProtoError> {
+        let bytes = self.read_bytes()?;
+        Text.from_utf8(bytes.to_vec())
+            .map_err(|_| InvalidUtf8)
+    }
+
+    /// Read embedded message
+    fn read_message<M: ProtoMessage>(&mut self) -> Result<M, ProtoError> {
+        let bytes = self.read_bytes()?;
+        let mut inner = ProtoReader.new(bytes);
+        M.decode(&mut inner)
+    }
+
+    /// Skip field based on wire type
+    fn skip_field(&mut self, wire_type: WireType) -> Result<(), ProtoError> {
+        match wire_type {
+            Varint => { self.read_varint()?; }
+            Fixed64 => { self.read_fixed64()?; }
+            LengthDelimited => { self.read_bytes()?; }
+            Fixed32 => { self.read_fixed32()?; }
+            _ => return Err(InvalidWireType(0)),
+        }
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------
+// Message Trait
+// ------------------------------------------------------------
+
+protocol ProtoMessage: Sized {
+    fn encode(&self, writer: &mut ProtoWriter);
+    fn decode(reader: &mut ProtoReader) -> Result<Self, ProtoError>;
+}
+
+// ------------------------------------------------------------
+// Example Messages
+// ------------------------------------------------------------
+
+/// message Person {
+///   string name = 1;
+///   int32 id = 2;
+///   string email = 3;
+///   repeated PhoneNumber phones = 4;
+/// }
+type Person is {
+    name: Text,
+    id: i32,
+    email: Text,
+    phones: List<PhoneNumber>,
+};
+
+implement ProtoMessage for Person {
+    fn encode(&self, w: &mut ProtoWriter) {
+        w.write_string_field(1, &self.name);
+        w.write_int32_field(2, self.id);
+        w.write_string_field(3, &self.email);
+        for phone in &self.phones {
+            w.write_message_field(4, phone);
+        }
+    }
+
+    fn decode(r: &mut ProtoReader) -> Result<Person, ProtoError> {
+        let mut result = Person {
+            name: Text.new(),
+            id: 0,
+            email: Text.new(),
+            phones: List.new(),
+        };
+
+        while !r.is_at_end() {
+            let (field_number, wire_type) = r.read_tag()?;
+            match field_number {
+                1 => result.name = r.read_string()?,
+                2 => result.id = r.read_varint()? as i32,
+                3 => result.email = r.read_string()?,
+                4 => result.phones.push(r.read_message()?),
+                _ => { let _ = r.skip_field(wire_type); },
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+/// message PhoneNumber {
+///   string number = 1;
+///   PhoneType type = 2;
+/// }
+type PhoneNumber is {
+    number: Text,
+    phone_type: PhoneType,
+};
+
+implement ProtoMessage for PhoneNumber {
+    fn encode(&self, w: &mut ProtoWriter) {
+        w.write_string_field(1, &self.number);
+        if self.phone_type != Mobile {
+            w.write_tag(2, Varint);
+            w.write_varint(0 as u64); // Placeholder: real impl converts phone_type to int
+        }
+    }
+
+    fn decode(r: &mut ProtoReader) -> Result<PhoneNumber, ProtoError> {
+        let mut result = PhoneNumber {
+            number: Text.new(),
+            phone_type: Mobile,
+        };
+
+        while !r.is_at_end() {
+            let (field_number, wire_type) = r.read_tag()?;
+            match field_number {
+                1 => result.number = r.read_string()?,
+                2 => result.phone_type = PhoneType.from_i32(r.read_varint()? as i32)?,
+                _ => { let _ = r.skip_field(wire_type); },
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+/// enum PhoneType {
+///   MOBILE = 0;
+///   HOME = 1;
+///   WORK = 2;
+/// }
+type PhoneType is
+    | Mobile = 0
+    | Home = 1
+    | Work = 2;
+
+implement PhoneType {
+    fn from_i32(n: i32) -> Result<PhoneType, ProtoError> {
+        match n {
+            0 => Ok(Mobile),
+            1 => Ok(Home),
+            2 => Ok(Work),
+            _ => Err(InvalidEnumValue(n)),
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Public API
+// ------------------------------------------------------------
+
+fn encode<M: ProtoMessage>(msg: &M) -> List<u8> {
+    let mut writer = ProtoWriter.new();
+    msg.encode(&mut writer);
+    writer.into_bytes()
+}
+
+fn decode_proto(data: &[u8]) -> Result<Person, ProtoError> {
+    let mut reader = ProtoReader.new(data);
+    Person.decode(&mut reader)
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type ProtoError is
+    | UnexpectedEof
+    | InvalidWireType(u8)
+    | VarintOverflow
+    | InvalidUtf8
+    | InvalidEnumValue(i32)
+    | MissingRequiredField(&str);
+
+fn main() {
+    // Protobuf test
+}

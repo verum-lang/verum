@@ -1,0 +1,17 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, expect
+// @description: Tests expect() with custom panic message
+
+fn load_config() -> Maybe<Text> {
+    // Simulating missing config
+    Maybe.None
+}
+
+fn main() {
+    let config = load_config();
+
+    // expect() provides a custom panic message
+    let _ = config.expect("Expected valid user configuration");  // Panic with custom message
+}

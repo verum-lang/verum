@@ -1,0 +1,20 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test regular multiply
+
+module test.stdlib.sys.intrinsics.regular_multiply_test;
+
+fn main() {
+    print("Testing regular multiply...");
+    let a: Float = 2.0;
+    let b: Float = 3.0;
+    let c = a * b;
+    print(f"2 * 3 = {c}");
+
+    let d = a * a;
+    print(f"2 * 2 = {d}");
+
+    print("All tests passed!");
+}

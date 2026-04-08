@@ -1,0 +1,162 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btreeset, to_list, into_list, conversion
+// @description: Tests for BTreeSet.to_list and BTreeSet.into_list
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: BTreeSet.to_list
+// =============================================================================
+
+@test
+fn test_btreeset_to_list_basic() {
+    let mut s = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(2);
+    let list = s.to_list();
+    assert_eq(list.len(), 3);
+    // BTreeSet iteration is sorted
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_btreeset_to_list_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    let list = s.to_list();
+    assert(list.is_empty());
+}
+
+@test
+fn test_btreeset_to_list_single() {
+    let mut s = BTreeSet.new();
+    s.insert(42);
+    let list = s.to_list();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_btreeset_to_list_preserves_set() {
+    let mut s = BTreeSet.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    let _ = s.to_list();
+    assert_eq(s.len(), 3);
+    assert(s.contains(&10));
+}
+
+@test
+fn test_btreeset_to_list_sorted_order() {
+    let mut s = BTreeSet.new();
+    s.insert(50);
+    s.insert(10);
+    s.insert(40);
+    s.insert(20);
+    s.insert(30);
+    let list = s.to_list();
+    assert_eq(list[0], 10);
+    assert_eq(list[1], 20);
+    assert_eq(list[2], 30);
+    assert_eq(list[3], 40);
+    assert_eq(list[4], 50);
+}
+
+@test
+fn test_btreeset_to_list_negative() {
+    let mut s = BTreeSet.new();
+    s.insert(-10);
+    s.insert(5);
+    s.insert(-3);
+    s.insert(0);
+    let list = s.to_list();
+    assert_eq(list[0], -10);
+    assert_eq(list[1], -3);
+    assert_eq(list[2], 0);
+    assert_eq(list[3], 5);
+}
+
+// =============================================================================
+// Section 2: BTreeSet.into_list
+// =============================================================================
+
+@test
+fn test_btreeset_into_list_basic() {
+    let mut s = BTreeSet.new();
+    s.insert(3);
+    s.insert(1);
+    s.insert(2);
+    let list = s.into_list();
+    assert_eq(list.len(), 3);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 3);
+}
+
+@test
+fn test_btreeset_into_list_empty() {
+    let s: BTreeSet<Int> = BTreeSet.new();
+    let list = s.into_list();
+    assert(list.is_empty());
+}
+
+@test
+fn test_btreeset_into_list_large() {
+    let mut s = BTreeSet.new();
+    let mut i = 100;
+    while i > 0 {
+        s.insert(i);
+        i = i - 1;
+    }
+    let list = s.into_list();
+    assert_eq(list.len(), 100);
+    // Should be in sorted order
+    assert_eq(list[0], 1);
+    assert_eq(list[99], 100);
+}
+
+// =============================================================================
+// Section 3: Integration
+// =============================================================================
+
+@test
+fn test_btreeset_roundtrip() {
+    let mut original = BTreeSet.new();
+    original.insert(5);
+    original.insert(3);
+    original.insert(8);
+    original.insert(1);
+    let list = original.to_list();
+    // Rebuild from list
+    let mut rebuilt = BTreeSet.new();
+    let mut i = 0;
+    while i < list.len() {
+        let val = list[i];
+        rebuilt.insert(val);
+        i = i + 1;
+    }
+    assert_eq(rebuilt.len(), original.len());
+}
+
+@test
+fn test_btreeset_to_list_after_removal() {
+    let mut s = BTreeSet.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+    s.remove(&3);
+    let list = s.to_list();
+    assert_eq(list.len(), 4);
+    assert_eq(list[0], 1);
+    assert_eq(list[1], 2);
+    assert_eq(list[2], 4);
+    assert_eq(list[3], 5);
+}

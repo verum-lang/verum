@@ -1,0 +1,86 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, threading, spawn, real-threads
+// @expected-exit: 0
+
+// Test: real thread spawn with single and multi-arg functions.
+// Spawns actual OS threads, joins them, and verifies results.
+
+fn compute_square(x: Int) -> Int {
+    x * x
+}
+
+fn add_values(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn weighted_sum(a: Int, b: Int, w: Int) -> Int {
+    a * w + b * (100 - w)
+}
+
+fn sum_range(start: Int, end: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < end) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: spawn single-arg function
+    let t1 = spawn compute_square(7);
+    let r1 = t1.await;
+    if (r1 != 49) {
+        print(f"FAIL: compute_square(7)={r1}, expected=49");
+        return 1;
+    }
+
+    // Test 2: spawn two-arg function
+    let t2 = spawn add_values(30, 12);
+    let r2 = t2.await;
+    if (r2 != 42) {
+        print(f"FAIL: add_values(30,12)={r2}, expected=42");
+        return 1;
+    }
+
+    // Test 3: spawn three-arg function
+    let t3 = spawn weighted_sum(10, 5, 60);
+    let r3 = t3.await;
+    // 10*60 + 5*40 = 600 + 200 = 800
+    if (r3 != 800) {
+        print(f"FAIL: weighted_sum(10,5,60)={r3}, expected=800");
+        return 1;
+    }
+
+    // Test 4: multiple concurrent two-arg spawns
+    let ta = spawn sum_range(0, 250);
+    let tb = spawn sum_range(250, 500);
+    let tc = spawn sum_range(500, 750);
+    let td = spawn sum_range(750, 1000);
+
+    let ra = ta.await;
+    let rb = tb.await;
+    let rc = tc.await;
+    let rd = td.await;
+
+    let total = ra + rb + rc + rd;
+    // sum 0..999 = 999*1000/2 = 499500
+    if (total != 499500) {
+        print(f"FAIL: parallel sum={total}, expected=499500");
+        return 1;
+    }
+
+    // Test 5: spawn single-arg with large value
+    let t5 = spawn compute_square(1000);
+    let r5 = t5.await;
+    if (r5 != 1000000) {
+        print(f"FAIL: compute_square(1000)={r5}, expected=1000000");
+        return 1;
+    }
+
+    print("872_real_thread_spawn: PASS");
+    0
+}

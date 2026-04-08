@@ -1,0 +1,83 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, reference
+// @description: Test patterns that work at meta level (no reference patterns needed)
+
+// =============================================================================
+// META FUNCTIONS WORK WITHOUT REFERENCES
+// =============================================================================
+
+// In meta functions, we work with values directly, not references
+// These tests demonstrate pattern matching on values
+
+meta fn test_value_pattern() -> Int {
+    let x = 42;
+    match x {
+        n => n * 2,
+    }
+}
+
+meta fn test_tuple_pattern() -> Int {
+    let pair = (10, 20);
+    match pair {
+        (a, b) => a + b,
+    }
+}
+
+meta fn test_nested_tuple() -> Int {
+    let nested = ((1, 2), (3, 4));
+    match nested {
+        ((a, b), (c, d)) => a + b + c + d,
+    }
+}
+
+// =============================================================================
+// ARRAY PATTERNS
+// =============================================================================
+
+meta fn test_array_pattern() -> Int {
+    let arr = [1, 2, 3];
+    match arr {
+        [a, b, c] => a + b + c,
+    }
+}
+
+// =============================================================================
+// PATTERNS WITH GUARDS
+// =============================================================================
+
+meta fn test_pattern_guard() -> Text {
+    let x = 50;
+    match x {
+        n if n > 0 => "positive",
+        n if n < 0 => "negative",
+        _ => "zero",
+    }
+}
+
+meta fn test_tuple_guard() -> Bool {
+    let pair = (10, 20);
+    match pair {
+        (a, b) if a < b => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Value patterns
+    @const assert_eq(test_value_pattern(), 84);
+    @const assert_eq(test_tuple_pattern(), 30);
+    @const assert_eq(test_nested_tuple(), 10);
+
+    // Array patterns
+    @const assert_eq(test_array_pattern(), 6);
+
+    // Patterns with guards
+    @const assert_eq(test_pattern_guard(), "positive");
+    @const assert(test_tuple_guard());
+}

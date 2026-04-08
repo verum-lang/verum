@@ -1,0 +1,307 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, prime, sieve, eratosthenes
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Sieve of Eratosthenes using boolean record arrays
+
+// =============================================================================
+// Boolean array of 32 elements (indices 0-31) for sieve up to 31
+// 1 = potential prime (not yet sieved), 0 = composite
+// =============================================================================
+
+type Bool32 is {
+    b0: Int, b1: Int, b2: Int, b3: Int, b4: Int, b5: Int, b6: Int, b7: Int,
+    b8: Int, b9: Int, b10: Int, b11: Int, b12: Int, b13: Int, b14: Int, b15: Int,
+    b16: Int, b17: Int, b18: Int, b19: Int, b20: Int, b21: Int, b22: Int, b23: Int,
+    b24: Int, b25: Int, b26: Int, b27: Int, b28: Int, b29: Int, b30: Int, b31: Int
+};
+
+fn b32_new(val: Int) -> Bool32 {
+    Bool32 {
+        b0: val, b1: val, b2: val, b3: val, b4: val, b5: val, b6: val, b7: val,
+        b8: val, b9: val, b10: val, b11: val, b12: val, b13: val, b14: val, b15: val,
+        b16: val, b17: val, b18: val, b19: val, b20: val, b21: val, b22: val, b23: val,
+        b24: val, b25: val, b26: val, b27: val, b28: val, b29: val, b30: val, b31: val
+    }
+}
+
+fn b32_get(a: Bool32, i: Int) -> Int {
+    if i == 0 { a.b0 }
+    else if i == 1 { a.b1 }
+    else if i == 2 { a.b2 }
+    else if i == 3 { a.b3 }
+    else if i == 4 { a.b4 }
+    else if i == 5 { a.b5 }
+    else if i == 6 { a.b6 }
+    else if i == 7 { a.b7 }
+    else if i == 8 { a.b8 }
+    else if i == 9 { a.b9 }
+    else if i == 10 { a.b10 }
+    else if i == 11 { a.b11 }
+    else if i == 12 { a.b12 }
+    else if i == 13 { a.b13 }
+    else if i == 14 { a.b14 }
+    else if i == 15 { a.b15 }
+    else if i == 16 { a.b16 }
+    else if i == 17 { a.b17 }
+    else if i == 18 { a.b18 }
+    else if i == 19 { a.b19 }
+    else if i == 20 { a.b20 }
+    else if i == 21 { a.b21 }
+    else if i == 22 { a.b22 }
+    else if i == 23 { a.b23 }
+    else if i == 24 { a.b24 }
+    else if i == 25 { a.b25 }
+    else if i == 26 { a.b26 }
+    else if i == 27 { a.b27 }
+    else if i == 28 { a.b28 }
+    else if i == 29 { a.b29 }
+    else if i == 30 { a.b30 }
+    else if i == 31 { a.b31 }
+    else { 0 }
+}
+
+fn b32_set(a: Bool32, i: Int, val: Int) -> Bool32 {
+    Bool32 {
+        b0: if i == 0 { val } else { a.b0 },
+        b1: if i == 1 { val } else { a.b1 },
+        b2: if i == 2 { val } else { a.b2 },
+        b3: if i == 3 { val } else { a.b3 },
+        b4: if i == 4 { val } else { a.b4 },
+        b5: if i == 5 { val } else { a.b5 },
+        b6: if i == 6 { val } else { a.b6 },
+        b7: if i == 7 { val } else { a.b7 },
+        b8: if i == 8 { val } else { a.b8 },
+        b9: if i == 9 { val } else { a.b9 },
+        b10: if i == 10 { val } else { a.b10 },
+        b11: if i == 11 { val } else { a.b11 },
+        b12: if i == 12 { val } else { a.b12 },
+        b13: if i == 13 { val } else { a.b13 },
+        b14: if i == 14 { val } else { a.b14 },
+        b15: if i == 15 { val } else { a.b15 },
+        b16: if i == 16 { val } else { a.b16 },
+        b17: if i == 17 { val } else { a.b17 },
+        b18: if i == 18 { val } else { a.b18 },
+        b19: if i == 19 { val } else { a.b19 },
+        b20: if i == 20 { val } else { a.b20 },
+        b21: if i == 21 { val } else { a.b21 },
+        b22: if i == 22 { val } else { a.b22 },
+        b23: if i == 23 { val } else { a.b23 },
+        b24: if i == 24 { val } else { a.b24 },
+        b25: if i == 25 { val } else { a.b25 },
+        b26: if i == 26 { val } else { a.b26 },
+        b27: if i == 27 { val } else { a.b27 },
+        b28: if i == 28 { val } else { a.b28 },
+        b29: if i == 29 { val } else { a.b29 },
+        b30: if i == 30 { val } else { a.b30 },
+        b31: if i == 31 { val } else { a.b31 }
+    }
+}
+
+// =============================================================================
+// Sieve of Eratosthenes: finds all primes up to limit (limit <= 31)
+// Returns Bool32 where 1 = prime, 0 = not prime
+// =============================================================================
+
+fn sieve(limit: Int) -> Bool32 {
+    // Initialize: all 1 (potential primes)
+    let mut s = b32_new(1);
+    // 0 and 1 are not prime
+    s = b32_set(s, 0, 0);
+    s = b32_set(s, 1, 0);
+    // Sieve
+    let mut i = 2;
+    while i * i <= limit {
+        if b32_get(s, i) == 1 {
+            // Mark multiples of i as composite
+            let mut j = i * i;
+            while j <= limit {
+                s = b32_set(s, j, 0);
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+    s
+}
+
+// Count primes in sieve up to limit
+fn count_primes(s: Bool32, limit: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i <= limit {
+        if b32_get(s, i) == 1 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// =============================================================================
+// Trial division primality test (for verification)
+// =============================================================================
+
+fn is_prime_trial(n: Int) -> Int {
+    if n < 2 {
+        0
+    } else if n == 2 {
+        1
+    } else if n % 2 == 0 {
+        0
+    } else {
+        let mut d = 3;
+        let mut result = 1;
+        while d * d <= n {
+            if n % d == 0 {
+                result = 0;
+            }
+            d = d + 2;
+        }
+        result
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_sieve_small_primes() {
+    let s = sieve(31);
+    // Primes up to 31: 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31
+    assert_eq(b32_get(s, 2), 1);
+    assert_eq(b32_get(s, 3), 1);
+    assert_eq(b32_get(s, 5), 1);
+    assert_eq(b32_get(s, 7), 1);
+    assert_eq(b32_get(s, 11), 1);
+    assert_eq(b32_get(s, 13), 1);
+    assert_eq(b32_get(s, 17), 1);
+    assert_eq(b32_get(s, 19), 1);
+    assert_eq(b32_get(s, 23), 1);
+    assert_eq(b32_get(s, 29), 1);
+    assert_eq(b32_get(s, 31), 1);
+}
+
+fn test_sieve_composites() {
+    let s = sieve(31);
+    // Composites
+    assert_eq(b32_get(s, 0), 0);
+    assert_eq(b32_get(s, 1), 0);
+    assert_eq(b32_get(s, 4), 0);
+    assert_eq(b32_get(s, 6), 0);
+    assert_eq(b32_get(s, 8), 0);
+    assert_eq(b32_get(s, 9), 0);
+    assert_eq(b32_get(s, 10), 0);
+    assert_eq(b32_get(s, 12), 0);
+    assert_eq(b32_get(s, 14), 0);
+    assert_eq(b32_get(s, 15), 0);
+    assert_eq(b32_get(s, 16), 0);
+    assert_eq(b32_get(s, 18), 0);
+    assert_eq(b32_get(s, 20), 0);
+    assert_eq(b32_get(s, 21), 0);
+    assert_eq(b32_get(s, 22), 0);
+    assert_eq(b32_get(s, 24), 0);
+    assert_eq(b32_get(s, 25), 0);
+    assert_eq(b32_get(s, 26), 0);
+    assert_eq(b32_get(s, 27), 0);
+    assert_eq(b32_get(s, 28), 0);
+    assert_eq(b32_get(s, 30), 0);
+}
+
+fn test_prime_count() {
+    let s = sieve(31);
+    // pi(31) = 11
+    assert_eq(count_primes(s, 31), 11);
+    // pi(10) = 4
+    assert_eq(count_primes(s, 10), 4);
+    // pi(20) = 8
+    assert_eq(count_primes(s, 20), 8);
+    // pi(2) = 1
+    assert_eq(count_primes(s, 2), 1);
+    // pi(1) = 0
+    assert_eq(count_primes(s, 1), 0);
+}
+
+fn test_sieve_matches_trial_division() {
+    let s = sieve(31);
+    let mut i = 0;
+    while i <= 31 {
+        assert_eq(b32_get(s, i), is_prime_trial(i));
+        i = i + 1;
+    }
+}
+
+fn test_sieve_small_limits() {
+    // Sieve up to 2
+    let s2 = sieve(2);
+    assert_eq(b32_get(s2, 2), 1);
+    assert_eq(count_primes(s2, 2), 1);
+
+    // Sieve up to 5
+    let s5 = sieve(5);
+    assert_eq(count_primes(s5, 5), 3);  // 2, 3, 5
+
+    // Sieve up to 7
+    let s7 = sieve(7);
+    assert_eq(count_primes(s7, 7), 4);  // 2, 3, 5, 7
+}
+
+fn test_twin_primes() {
+    // Twin primes up to 31: (3,5), (5,7), (11,13), (17,19), (29,31)
+    let s = sieve(31);
+    let mut twin_count = 0;
+    let mut i = 2;
+    while i <= 29 {
+        if b32_get(s, i) == 1 {
+            if b32_get(s, i + 2) == 1 {
+                twin_count = twin_count + 1;
+            }
+        }
+        i = i + 1;
+    }
+    assert_eq(twin_count, 5);
+}
+
+fn test_prime_gaps() {
+    // Verify specific gaps between consecutive primes
+    let s = sieve(31);
+    // Gap between 2 and 3 is 1
+    // Gap between 23 and 29 is 6
+    // Find gap between 23 and next prime
+    let mut next_after_23 = 24;
+    while b32_get(s, next_after_23) == 0 {
+        next_after_23 = next_after_23 + 1;
+    }
+    assert_eq(next_after_23, 29);
+    assert_eq(next_after_23 - 23, 6);
+}
+
+fn test_sum_of_primes() {
+    let s = sieve(31);
+    let mut total = 0;
+    let mut i = 2;
+    while i <= 31 {
+        if b32_get(s, i) == 1 {
+            total = total + i;
+        }
+        i = i + 1;
+    }
+    // 2+3+5+7+11+13+17+19+23+29+31 = 160
+    assert_eq(total, 160);
+}
+
+fn main() -> Int {
+    test_sieve_small_primes();
+    test_sieve_composites();
+    test_prime_count();
+    test_sieve_matches_trial_division();
+    test_sieve_small_limits();
+    test_twin_primes();
+    test_prime_gaps();
+    test_sum_of_primes();
+    print("[OK] 246_interp_prime_sieve");
+    0
+}

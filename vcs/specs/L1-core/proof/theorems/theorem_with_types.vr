@@ -1,0 +1,35 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, theorem, types
+// @timeout: 5000
+
+/// Theorems about user-defined types.
+
+type Color is Red | Green | Blue;
+
+type Maybe<T> is None | Some(T);
+
+type Tree<T> is Leaf(T) | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+// Theorem about sum type exhaustiveness
+theorem color_is_three()
+    proof by cases;
+
+// Theorem about Maybe
+theorem maybe_is_binary<T>()
+    proof by cases;
+
+// Theorem about tree properties
+theorem leaf_is_terminal<T>(t: Tree<T>)
+    proof by cases(t);
+
+// Lemma about list operations
+lemma append_len<T>(a: List<T>, b: List<T>)
+    proof by auto;
+
+// Axiom about type identity
+axiom type_identity<T>(x: T, y: T) -> Bool;
+
+fn main() {
+    print("Theorem with types tests parsed");
+}

@@ -1,0 +1,21 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, type, protocol, method, error
+// @description: Test invalid protocol method syntax detection
+// @expected-error: E052
+
+type Invalid is protocol {
+    fn;
+};
+
+type BadParam is protocol {
+    fn foo(123);
+};
+
+type MissingParen is protocol {
+    fn bar(&self;
+};
+
+type NoSemicolon is protocol {
+    fn baz(&self) -> Int
+};

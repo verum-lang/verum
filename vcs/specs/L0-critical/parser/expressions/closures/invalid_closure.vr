@@ -1,0 +1,68 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, invalid, error
+
+// ERROR: Missing parameter list pipes
+let bad1 = x x * 2;
+let bad2 = x| x * 2;
+let bad3 = |x x * 2;
+
+// ERROR: Missing body
+let bad4 = |x|;
+let bad5 = |x, y|;
+
+// ERROR: Invalid parameter syntax
+let bad6 = |,| 42;
+let bad7 = |x,| 42;  // Trailing comma might be valid
+let bad8 = |,x| 42;
+
+// ERROR: Double parameter separator
+let bad9 = |x,, y| x + y;
+let bad10 = |x y| x + y;  // Missing comma
+
+// ERROR: Expression in parameter position
+let bad11 = |1 + 2| 42;
+let bad12 = |x + y| z;
+
+// ERROR: Invalid characters in parameter
+let bad13 = |@x| x;
+let bad14 = |x$| x;
+
+// ERROR: Keyword as parameter
+let bad15 = |fn| fn;
+let bad16 = |type| type;
+let bad17 = |let| let;
+
+// ERROR: Unclosed closure
+let bad18 = |x {
+    x * 2
+};
+
+// ERROR: Missing return arrow body
+let bad19 = |x| -> Int;
+let bad20 = |x| -> { };
+
+// ERROR: Multiple bodies
+let bad21 = |x| x * 2 { x * 3 };
+
+// ERROR: Async in wrong position
+let bad22 = |x| async x;
+let bad23 = async async |x| x;
+
+// ERROR: Empty pipes with trailing content
+let bad24 = | | => 42;
+
+// ERROR: Nested parameter lists
+let bad25 = ||x|| x;
+
+// ERROR: Assignment in parameter
+let bad26 = |x = 5| x;  // Unless default params are supported
+
+// ERROR: Reference patterns without type
+let bad27 = |&| 42;
+let bad28 = |&mut| 42;
+
+// ERROR: Invalid closure arrow
+let bad29 = |x| => x;  // Using => instead of expression
+let bad30 = |x| -> x;  // Arrow without type

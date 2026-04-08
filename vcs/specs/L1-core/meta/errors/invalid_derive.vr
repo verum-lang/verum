@@ -1,0 +1,17 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: meta, derive, errors
+// @expected-error: E400
+// @timeout: 5000
+
+/// Tests type errors in contexts where derive would typically be used.
+
+type Point is { x: Int, y: Int };
+
+fn takes_text(t: Text) -> Text { t }
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    // ERROR E400: Cannot pass Point where Text is expected
+    let result = takes_text(p);
+}

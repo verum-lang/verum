@@ -1,0 +1,413 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, skip-list, probabilistic, search
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Skip list simulation with multi-level forward pointers.
+// Uses flat arrays to represent nodes at multiple levels. Max 4 levels, 16 nodes.
+// Level promotion is deterministic (based on key hash) for reproducibility.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_fill(v: Int) -> Arr16 {
+    Arr16 {
+        e0: v, e1: v, e2: v, e3: v,
+        e4: v, e5: v, e6: v, e7: v,
+        e8: v, e9: v, e10: v, e11: v,
+        e12: v, e13: v, e14: v, e15: v
+    }
+}
+
+// =============================================================================
+// Skip list structure
+// Max 4 levels (0-3), node -1 = NIL
+// forward[level * 16 + node] = next node at that level
+// We use a single Arr16 per level (4 levels x 16 nodes would be 64 entries,
+// so we pack level*16+node into a 64-entry structure; but since we only have
+// Arr16, we'll use 4 separate Arr16 arrays for forward pointers).
+// =============================================================================
+
+type SkipList is {
+    keys: Arr16,
+    fwd0: Arr16,   // forward pointers at level 0
+    fwd1: Arr16,   // forward pointers at level 1
+    fwd2: Arr16,   // forward pointers at level 2
+    fwd3: Arr16,   // forward pointers at level 3
+    node_level: Arr16,  // max level of each node
+    count: Int,
+    max_level: Int  // current max level in list
+};
+
+fn sl_new() -> SkipList {
+    // Node 0 is the sentinel head node with key = -999999
+    SkipList {
+        keys: arr16_set(arr16_fill(0), 0, -999999),
+        fwd0: arr16_fill(-1),
+        fwd1: arr16_fill(-1),
+        fwd2: arr16_fill(-1),
+        fwd3: arr16_fill(-1),
+        node_level: arr16_fill(0),
+        count: 1,   // head takes slot 0
+        max_level: 0
+    }
+}
+
+fn sl_get_fwd(sl: SkipList, lvl: Int, node: Int) -> Int {
+    if node == -1 { return -1; }
+    if lvl == 0 { arr16_get(sl.fwd0, node) }
+    else if lvl == 1 { arr16_get(sl.fwd1, node) }
+    else if lvl == 2 { arr16_get(sl.fwd2, node) }
+    else { arr16_get(sl.fwd3, node) }
+}
+
+fn sl_set_fwd(sl: SkipList, lvl: Int, node: Int, val: Int) -> SkipList {
+    if lvl == 0 {
+        SkipList { keys: sl.keys, fwd0: arr16_set(sl.fwd0, node, val), fwd1: sl.fwd1, fwd2: sl.fwd2, fwd3: sl.fwd3, node_level: sl.node_level, count: sl.count, max_level: sl.max_level }
+    } else if lvl == 1 {
+        SkipList { keys: sl.keys, fwd0: sl.fwd0, fwd1: arr16_set(sl.fwd1, node, val), fwd2: sl.fwd2, fwd3: sl.fwd3, node_level: sl.node_level, count: sl.count, max_level: sl.max_level }
+    } else if lvl == 2 {
+        SkipList { keys: sl.keys, fwd0: sl.fwd0, fwd1: sl.fwd1, fwd2: arr16_set(sl.fwd2, node, val), fwd3: sl.fwd3, node_level: sl.node_level, count: sl.count, max_level: sl.max_level }
+    } else {
+        SkipList { keys: sl.keys, fwd0: sl.fwd0, fwd1: sl.fwd1, fwd2: sl.fwd2, fwd3: arr16_set(sl.fwd3, node, val), node_level: sl.node_level, count: sl.count, max_level: sl.max_level }
+    }
+}
+
+// Deterministic level assignment based on key
+fn sl_random_level(key: Int) -> Int {
+    let abs_key = if key < 0 { -key } else { key };
+    let h = (abs_key * 2654435761) % 16;
+    if h < 1 { 3 }
+    else if h < 3 { 2 }
+    else if h < 7 { 1 }
+    else { 0 }
+}
+
+// =============================================================================
+// Insert
+// =============================================================================
+
+fn sl_insert(sl: SkipList, key: Int) -> SkipList {
+    let new_idx = sl.count;
+    if new_idx >= 15 { return sl; }  // full
+
+    let nlvl = sl_random_level(key);
+
+    // Find update points at each level
+    // We traverse from top level down, recording the last node before insertion point
+    let mut upd0 = 0;
+    let mut upd1 = 0;
+    let mut upd2 = 0;
+    let mut upd3 = 0;
+    let mut cur = 0;  // start at head
+
+    // Level 3
+    if sl.max_level >= 3 {
+        let mut nxt = sl_get_fwd(sl, 3, cur);
+        let mut steps = 0;
+        while nxt != -1 && arr16_get(sl.keys, nxt) < key && steps < 20 {
+            cur = nxt;
+            nxt = sl_get_fwd(sl, 3, cur);
+            steps = steps + 1;
+        }
+    }
+    upd3 = cur;
+
+    // Level 2
+    if sl.max_level >= 2 {
+        let mut nxt = sl_get_fwd(sl, 2, cur);
+        let mut steps = 0;
+        while nxt != -1 && arr16_get(sl.keys, nxt) < key && steps < 20 {
+            cur = nxt;
+            nxt = sl_get_fwd(sl, 2, cur);
+            steps = steps + 1;
+        }
+    }
+    upd2 = cur;
+
+    // Level 1
+    if sl.max_level >= 1 {
+        let mut nxt = sl_get_fwd(sl, 1, cur);
+        let mut steps = 0;
+        while nxt != -1 && arr16_get(sl.keys, nxt) < key && steps < 20 {
+            cur = nxt;
+            nxt = sl_get_fwd(sl, 1, cur);
+            steps = steps + 1;
+        }
+    }
+    upd1 = cur;
+
+    // Level 0
+    let mut nxt = sl_get_fwd(sl, 0, cur);
+    let mut steps = 0;
+    while nxt != -1 && arr16_get(sl.keys, nxt) < key && steps < 20 {
+        cur = nxt;
+        nxt = sl_get_fwd(sl, 0, cur);
+        steps = steps + 1;
+    }
+    upd0 = cur;
+
+    // Create new node
+    let new_max = if nlvl > sl.max_level { nlvl } else { sl.max_level };
+    let mut s = SkipList {
+        keys: arr16_set(sl.keys, new_idx, key),
+        fwd0: sl.fwd0, fwd1: sl.fwd1, fwd2: sl.fwd2, fwd3: sl.fwd3,
+        node_level: arr16_set(sl.node_level, new_idx, nlvl),
+        count: sl.count + 1,
+        max_level: new_max
+    };
+
+    // Link at level 0
+    let old_next0 = sl_get_fwd(s, 0, upd0);
+    s = sl_set_fwd(s, 0, new_idx, old_next0);
+    s = sl_set_fwd(s, 0, upd0, new_idx);
+
+    // Link at level 1
+    if nlvl >= 1 {
+        let old_next1 = sl_get_fwd(s, 1, upd1);
+        s = sl_set_fwd(s, 1, new_idx, old_next1);
+        s = sl_set_fwd(s, 1, upd1, new_idx);
+    }
+
+    // Link at level 2
+    if nlvl >= 2 {
+        let old_next2 = sl_get_fwd(s, 2, upd2);
+        s = sl_set_fwd(s, 2, new_idx, old_next2);
+        s = sl_set_fwd(s, 2, upd2, new_idx);
+    }
+
+    // Link at level 3
+    if nlvl >= 3 {
+        let old_next3 = sl_get_fwd(s, 3, upd3);
+        s = sl_set_fwd(s, 3, new_idx, old_next3);
+        s = sl_set_fwd(s, 3, upd3, new_idx);
+    }
+
+    s
+}
+
+// =============================================================================
+// Search
+// =============================================================================
+
+fn sl_search(sl: SkipList, key: Int) -> Int {
+    let mut cur = 0;  // head
+
+    // Level 3
+    if sl.max_level >= 3 {
+        let mut nxt = sl_get_fwd(sl, 3, cur);
+        let mut steps = 0;
+        while nxt != -1 && arr16_get(sl.keys, nxt) < key && steps < 20 {
+            cur = nxt;
+            nxt = sl_get_fwd(sl, 3, cur);
+            steps = steps + 1;
+        }
+    }
+    // Level 2
+    if sl.max_level >= 2 {
+        let mut nxt = sl_get_fwd(sl, 2, cur);
+        let mut steps = 0;
+        while nxt != -1 && arr16_get(sl.keys, nxt) < key && steps < 20 {
+            cur = nxt;
+            nxt = sl_get_fwd(sl, 2, cur);
+            steps = steps + 1;
+        }
+    }
+    // Level 1
+    if sl.max_level >= 1 {
+        let mut nxt = sl_get_fwd(sl, 1, cur);
+        let mut steps = 0;
+        while nxt != -1 && arr16_get(sl.keys, nxt) < key && steps < 20 {
+            cur = nxt;
+            nxt = sl_get_fwd(sl, 1, cur);
+            steps = steps + 1;
+        }
+    }
+    // Level 0: traverse to find exact match
+    let mut nxt = sl_get_fwd(sl, 0, cur);
+    let mut steps = 0;
+    while nxt != -1 && arr16_get(sl.keys, nxt) < key && steps < 20 {
+        cur = nxt;
+        nxt = sl_get_fwd(sl, 0, cur);
+        steps = steps + 1;
+    }
+    if nxt != -1 && arr16_get(sl.keys, nxt) == key { 1 }
+    else { 0 }
+}
+
+// Collect sorted keys from level 0
+fn sl_sorted_key(sl: SkipList, idx: Int) -> Int {
+    // Walk level 0 from head, return the idx-th key (0-indexed)
+    let mut cur = sl_get_fwd(sl, 0, 0);  // first real node
+    let mut i = 0;
+    while i < idx && cur != -1 {
+        cur = sl_get_fwd(sl, 0, cur);
+        i = i + 1;
+    }
+    if cur == -1 { -1 } else { arr16_get(sl.keys, cur) }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_empty_list() {
+    let sl = sl_new();
+    assert_eq(sl.count, 1);  // only head
+    assert_eq(sl_search(sl, 42), 0);
+}
+
+fn test_single_insert_search() {
+    let mut sl = sl_new();
+    sl = sl_insert(sl, 50);
+    assert_eq(sl_search(sl, 50), 1);
+    assert_eq(sl_search(sl, 49), 0);
+    assert_eq(sl_search(sl, 51), 0);
+}
+
+fn test_multiple_inserts_sorted() {
+    let mut sl = sl_new();
+    sl = sl_insert(sl, 30);
+    sl = sl_insert(sl, 10);
+    sl = sl_insert(sl, 50);
+    sl = sl_insert(sl, 20);
+    sl = sl_insert(sl, 40);
+
+    // All should be found
+    assert_eq(sl_search(sl, 10), 1);
+    assert_eq(sl_search(sl, 20), 1);
+    assert_eq(sl_search(sl, 30), 1);
+    assert_eq(sl_search(sl, 40), 1);
+    assert_eq(sl_search(sl, 50), 1);
+
+    // Level 0 traversal should give sorted order
+    assert_eq(sl_sorted_key(sl, 0), 10);
+    assert_eq(sl_sorted_key(sl, 1), 20);
+    assert_eq(sl_sorted_key(sl, 2), 30);
+    assert_eq(sl_sorted_key(sl, 3), 40);
+    assert_eq(sl_sorted_key(sl, 4), 50);
+}
+
+fn test_sequential_inserts() {
+    let mut sl = sl_new();
+    let mut i = 1;
+    while i <= 10 {
+        sl = sl_insert(sl, i * 10);
+        i = i + 1;
+    }
+    // Search all
+    let mut j = 1;
+    while j <= 10 {
+        assert_eq(sl_search(sl, j * 10), 1);
+        j = j + 1;
+    }
+    // Sorted order at level 0
+    let mut k = 0;
+    while k < 10 {
+        assert_eq(sl_sorted_key(sl, k), (k + 1) * 10);
+        k = k + 1;
+    }
+}
+
+fn test_levels_assigned() {
+    // Just verify the level assignment function gives valid levels
+    let mut i = 0;
+    while i < 50 {
+        let lvl = sl_random_level(i);
+        assert(lvl >= 0);
+        assert(lvl <= 3);
+        i = i + 1;
+    }
+}
+
+fn test_reverse_inserts() {
+    let mut sl = sl_new();
+    sl = sl_insert(sl, 50);
+    sl = sl_insert(sl, 40);
+    sl = sl_insert(sl, 30);
+    sl = sl_insert(sl, 20);
+    sl = sl_insert(sl, 10);
+
+    assert_eq(sl_sorted_key(sl, 0), 10);
+    assert_eq(sl_sorted_key(sl, 1), 20);
+    assert_eq(sl_sorted_key(sl, 2), 30);
+    assert_eq(sl_sorted_key(sl, 3), 40);
+    assert_eq(sl_sorted_key(sl, 4), 50);
+}
+
+fn test_count_after_inserts() {
+    let mut sl = sl_new();
+    assert_eq(sl.count, 1);
+    sl = sl_insert(sl, 5);
+    assert_eq(sl.count, 2);
+    sl = sl_insert(sl, 15);
+    assert_eq(sl.count, 3);
+    sl = sl_insert(sl, 25);
+    assert_eq(sl.count, 4);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_empty_list();
+    test_single_insert_search();
+    test_multiple_inserts_sorted();
+    test_sequential_inserts();
+    test_levels_assigned();
+    test_reverse_inserts();
+    test_count_after_inserts();
+    print("[OK] 293_interp_skip_list_sim");
+    0
+}

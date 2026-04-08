@@ -1,0 +1,109 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: map, contains, remove, iteration
+// @description: Test advanced map operations
+
+fn test_map_contains() -> Int {
+    let mut m = Map.new();
+    m.insert(10, 100);
+    m.insert(20, 200);
+    m.insert(30, 300);
+
+    if !m.contains_key(10) {
+        print("FAIL contains: should contain 10");
+        return 1;
+    }
+    if m.contains_key(99) {
+        print("FAIL contains: should not contain 99");
+        return 1;
+    }
+    print("  map_contains: OK");
+    0
+}
+
+fn test_map_remove() -> Int {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    if m.len() != 3 {
+        print(f"FAIL remove: initial len={m.len()}");
+        return 1;
+    }
+    m.remove(2);
+    if m.len() != 2 {
+        print(f"FAIL remove: after remove len={m.len()}");
+        return 1;
+    }
+    if m.contains_key(2) {
+        print("FAIL remove: key 2 should be gone");
+        return 1;
+    }
+    // Remaining keys should still work
+    let v1 = m.get(1);
+    if v1 != 10 {
+        print(f"FAIL remove: get(1)={v1}");
+        return 1;
+    }
+    print("  map_remove: OK");
+    0
+}
+
+fn test_map_many_entries() -> Int {
+    let mut m = Map.new();
+    let mut i = 0;
+    while i < 50 {
+        m.insert(i, i * i);
+        i = i + 1;
+    }
+    if m.len() != 50 {
+        print(f"FAIL many: len={m.len()}, expected 50");
+        return 1;
+    }
+    // Check a few values
+    if m.get(7) != 49 {
+        print(f"FAIL many: get(7)={m.get(7)}");
+        return 1;
+    }
+    if m.get(25) != 625 {
+        print(f"FAIL many: get(25)={m.get(25)}");
+        return 1;
+    }
+    print("  map_many: OK");
+    0
+}
+
+fn test_map_overwrite() -> Int {
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(1, 999); // overwrite
+    if m.get(1) != 999 {
+        print(f"FAIL overwrite: get(1)={m.get(1)}");
+        return 1;
+    }
+    if m.len() != 2 {
+        print(f"FAIL overwrite: len={m.len()}");
+        return 1;
+    }
+    print("  map_overwrite: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Map Advanced Tests:");
+    let mut failures = 0;
+    failures = failures + test_map_contains();
+    failures = failures + test_map_remove();
+    failures = failures + test_map_many_entries();
+    failures = failures + test_map_overwrite();
+
+    if failures == 0 {
+        print("All map advanced tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

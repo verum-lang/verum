@@ -1,0 +1,259 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, error, result, propagation
+// @timeout: 10000
+// @description: Error propagation and Result chain semantics must be consistent across tiers
+
+/// Error propagation differential test.
+/// Result chains, try/recover semantics, error value consistency.
+
+type Result<T, E> is Ok(T) | Err(E);
+
+fn main() -> Int {
+    test_basic_result();
+    test_result_chaining();
+    test_error_propagation();
+    test_nested_results();
+    test_result_combinators();
+    test_try_recover();
+    0
+}
+
+/// Basic Result construction and matching
+fn test_basic_result() {
+    print("=== Basic Result ===");
+
+    let ok_val: Result<Int, Text> = Ok(42);
+    let err_val: Result<Int, Text> = Err("something went wrong");
+
+    match ok_val {
+        Ok(v) => print(f"ok = {v}"),
+        Err(e) => print(f"err = {e}"),
+    }
+
+    match err_val {
+        Ok(v) => print(f"ok = {v}"),
+        Err(e) => print(f"err = {e}"),
+    }
+
+    // is_ok / is_err
+    print(f"ok_val is Ok = {ok_val is Ok}");
+    print(f"err_val is Err = {err_val is Err}");
+}
+
+/// Chaining Result operations
+fn test_result_chaining() {
+    print("\n=== Result Chaining ===");
+
+    fn parse_int(s: Text) -> Result<Int, Text> {
+        if s == "42" {
+            Ok(42)
+        } else if s == "0" {
+            Ok(0)
+        } else if s == "-1" {
+            Ok(-1)
+        } else {
+            Err(f"cannot parse '{s}'")
+        }
+    }
+
+    fn double_if_positive(n: Int) -> Result<Int, Text> {
+        if n > 0 {
+            Ok(n * 2)
+        } else {
+            Err("not positive")
+        }
+    }
+
+    // Successful chain
+    let r1 = parse_int("42");
+    let r2 = match r1 {
+        Ok(n) => double_if_positive(n),
+        Err(e) => Err(e),
+    };
+    print(f"parse '42' then double = {result_to_text(r2)}");
+
+    // Chain fails at parse
+    let r3 = parse_int("abc");
+    let r4 = match r3 {
+        Ok(n) => double_if_positive(n),
+        Err(e) => Err(e),
+    };
+    print(f"parse 'abc' then double = {result_to_text(r4)}");
+
+    // Chain fails at double
+    let r5 = parse_int("-1");
+    let r6 = match r5 {
+        Ok(n) => double_if_positive(n),
+        Err(e) => Err(e),
+    };
+    print(f"parse '-1' then double = {result_to_text(r6)}");
+}
+
+/// Multi-step error propagation
+fn test_error_propagation() {
+    print("\n=== Error Propagation ===");
+
+    fn step1(input: Int) -> Result<Int, Text> {
+        if input >= 0 { Ok(input + 10) } else { Err("step1: negative input") }
+    }
+
+    fn step2(input: Int) -> Result<Int, Text> {
+        if input < 100 { Ok(input * 2) } else { Err("step2: too large") }
+    }
+
+    fn step3(input: Int) -> Result<Int, Text> {
+        if input % 2 == 0 { Ok(input / 2) } else { Err("step3: odd number") }
+    }
+
+    fn pipeline(input: Int) -> Result<Int, Text> {
+        let r1 = step1(input);
+        let v1 = match r1 {
+            Ok(v) => v,
+            Err(e) => { return Err(e); },
+        };
+        let r2 = step2(v1);
+        let v2 = match r2 {
+            Ok(v) => v,
+            Err(e) => { return Err(e); },
+        };
+        step3(v2)
+    }
+
+    // All steps succeed
+    print(f"pipeline(5) = {result_to_text(pipeline(5))}");
+    print(f"pipeline(0) = {result_to_text(pipeline(0))}");
+
+    // Fails at step1
+    print(f"pipeline(-1) = {result_to_text(pipeline(-1))}");
+
+    // Fails at step2
+    print(f"pipeline(90) = {result_to_text(pipeline(90))}");
+
+    // Fails at step3 (would need odd result from step2)
+    print(f"pipeline(10) = {result_to_text(pipeline(10))}");
+}
+
+/// Nested Result types
+fn test_nested_results() {
+    print("\n=== Nested Results ===");
+
+    fn outer_op(x: Int) -> Result<Result<Int, Text>, Text> {
+        if x < 0 {
+            Err("outer: negative")
+        } else if x > 100 {
+            Ok(Err("inner: too large"))
+        } else {
+            Ok(Ok(x * 2))
+        }
+    }
+
+    let cases = [-1, 50, 150];
+    let mut i = 0;
+    while i < 3 {
+        let x = cases[i];
+        let r = outer_op(x);
+        match r {
+            Err(e) => print(f"outer_op({x}) = Outer Err: {e}"),
+            Ok(inner) => match inner {
+                Err(e) => print(f"outer_op({x}) = Inner Err: {e}"),
+                Ok(v) => print(f"outer_op({x}) = Ok({v})"),
+            },
+        }
+        i = i + 1;
+    }
+}
+
+/// Result combinators: map, and_then, or_else, unwrap_or
+fn test_result_combinators() {
+    print("\n=== Result Combinators ===");
+
+    fn result_map(r: Result<Int, Text>, f: fn(Int) -> Int) -> Result<Int, Text> {
+        match r {
+            Ok(v) => Ok(f(v)),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn result_and_then(r: Result<Int, Text>, f: fn(Int) -> Result<Int, Text>) -> Result<Int, Text> {
+        match r {
+            Ok(v) => f(v),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn result_or_else(r: Result<Int, Text>, f: fn(Text) -> Result<Int, Text>) -> Result<Int, Text> {
+        match r {
+            Ok(v) => Ok(v),
+            Err(e) => f(e),
+        }
+    }
+
+    fn unwrap_or(r: Result<Int, Text>, default: Int) -> Int {
+        match r {
+            Ok(v) => v,
+            Err(_) => default,
+        }
+    }
+
+    let ok: Result<Int, Text> = Ok(10);
+    let err: Result<Int, Text> = Err("failed");
+
+    // map
+    print(f"map ok *2 = {result_to_text(result_map(ok, |x| x * 2))}");
+    print(f"map err *2 = {result_to_text(result_map(err, |x| x * 2))}");
+
+    // and_then
+    let safe_div = |x: Int| -> Result<Int, Text> {
+        if x != 0 { Ok(100 / x) } else { Err("division by zero") }
+    };
+    print(f"and_then ok = {result_to_text(result_and_then(ok, safe_div))}");
+    print(f"and_then err = {result_to_text(result_and_then(err, safe_div))}");
+
+    // or_else
+    let fallback = |_e: Text| -> Result<Int, Text> { Ok(0) };
+    print(f"or_else ok = {result_to_text(result_or_else(ok, fallback))}");
+    print(f"or_else err = {result_to_text(result_or_else(err, fallback))}");
+
+    // unwrap_or
+    print(f"unwrap_or ok = {unwrap_or(ok, -1)}");
+    print(f"unwrap_or err = {unwrap_or(err, -1)}");
+}
+
+/// Try/recover pattern
+fn test_try_recover() {
+    print("\n=== Try/Recover ===");
+
+    fn risky_operation(x: Int) -> Result<Int, Text> {
+        if x == 0 { Err("zero") }
+        else if x < 0 { Err("negative") }
+        else if x > 50 { Err("too large") }
+        else { Ok(x * x) }
+    }
+
+    // Try with recovery
+    let inputs = [5, 0, -3, 100, 25];
+    let mut i = 0;
+    while i < 5 {
+        let x = inputs[i];
+        let result = risky_operation(x);
+        let recovered = match result {
+            Ok(v) => v,
+            Err(e) => {
+                print(f"  recovering from '{e}' for input {x}");
+                -1
+            },
+        };
+        print(f"input {x} -> {recovered}");
+        i = i + 1;
+    }
+}
+
+/// Helper to convert Result to Text for printing
+fn result_to_text(r: Result<Int, Text>) -> Text {
+    match r {
+        Ok(v) => f"Ok({v})",
+        Err(e) => f"Err({e})",
+    }
+}

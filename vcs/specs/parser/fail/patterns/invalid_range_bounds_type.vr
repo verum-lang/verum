@@ -1,0 +1,55 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, range, types, error
+// @description: Test range patterns with mixed/invalid bound types
+// @expected-error: E084
+
+fn test_int_to_char_range() {
+    let value = 'c';
+
+    // Invalid: mixing integer and character in range
+    match value {
+        1..'z' => print("int to char"),
+        _ => print("other"),
+    }
+}
+
+fn test_string_range() {
+    let value = "hello";
+
+    // Invalid: strings cannot be range bounds in patterns
+    match value {
+        "a".."z" => print("string range"),
+        _ => print("other"),
+    }
+}
+
+fn test_float_range_pattern() {
+    let value = 3.14;
+
+    // Invalid: float literals typically not allowed in range patterns
+    match value {
+        0.0..1.0 => print("float range"),
+        _ => print("other"),
+    }
+}
+
+fn test_bool_range() {
+    let value = true;
+
+    // Invalid: booleans cannot form ranges
+    match value {
+        false..true => print("bool range"),
+        _ => print("other"),
+    }
+}
+
+fn test_negative_range_syntax() {
+    let value = -5;
+
+    // Invalid: negative literals may need parentheses
+    match value {
+        -10..-1 => print("negative range"),
+        _ => print("other"),
+    }
+}

@@ -1,0 +1,241 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 100ns per send (unbounded), < 50ns (bounded non-blocking)
+// @tags: channels, concurrency, performance
+
+/// Benchmark for channel send operations
+///
+/// Tests various channel types:
+/// - Unbounded channels
+/// - Bounded channels
+/// - MPSC (Multi-producer, single-consumer)
+/// - SPSC (Single-producer, single-consumer)
+/// - Broadcast channels
+
+module benchmarks.micro.channel_send
+
+using [Benchmark, Async, Channels]
+
+/// Unbounded channel send
+fn benchmark_channel_unbounded_send() async {
+    let (tx, rx) = channel<Int>.unbounded();
+
+    // Drain receiver in background
+    let drain = spawn async {
+        while let Some(_) = rx.recv().await {}
+    };
+
+    for i in 0..1_000_000 {
+        tx.send(i).await;
+    }
+
+    drop(tx);
+    drain.await;
+}
+
+/// Bounded channel send (non-blocking)
+fn benchmark_channel_bounded_nonblocking() async {
+    let (tx, rx) = channel<Int>.bounded(10_000);
+
+    // Fast drain
+    let drain = spawn async {
+        while let Some(_) = rx.recv().await {}
+    };
+
+    for i in 0..1_000_000 {
+        tx.send(i).await;
+    }
+
+    drop(tx);
+    drain.await;
+}
+
+/// Bounded channel send (with backpressure)
+fn benchmark_channel_bounded_backpressure() async {
+    let (tx, rx) = channel<Int>.bounded(100);
+
+    let drain = spawn async {
+        while let Some(_) = rx.recv().await {
+            // Simulate slow consumer
+        }
+    };
+
+    for i in 0..100_000 {
+        tx.send(i).await;  // Will block when buffer full
+    }
+
+    drop(tx);
+    drain.await;
+}
+
+/// MPSC channel send (multiple producers)
+fn benchmark_channel_mpsc_send() async {
+    let (tx, rx) = mpsc<Int>.channel(1000);
+
+    // Receiver
+    let receiver = spawn async {
+        let mut count = 0;
+        while let Some(_) = rx.recv().await {
+            count += 1;
+            if count >= 400_000 { break; }
+        }
+    };
+
+    // Multiple senders
+    let senders = (0..4).map(|_| {
+        let tx = tx.clone();
+        spawn async move {
+            for i in 0..100_000 {
+                tx.send(i).await;
+            }
+        }
+    }).collect();
+
+    for sender in senders {
+        sender.await;
+    }
+    drop(tx);
+    receiver.await;
+}
+
+/// SPSC channel send (optimized single-producer)
+fn benchmark_channel_spsc_send() async {
+    let (tx, rx) = spsc<Int>.channel(10_000);
+
+    let receiver = spawn async {
+        while let Some(_) = rx.recv().await {}
+    };
+
+    for i in 0..2_000_000 {
+        tx.send(i).await;
+    }
+
+    drop(tx);
+    receiver.await;
+}
+
+/// Try send (non-blocking)
+fn benchmark_channel_try_send() {
+    let (tx, rx) = channel<Int>.bounded(100_000);
+
+    for i in 0..100_000 {
+        match tx.try_send(i) {
+            Ok(()) => {},
+            Err(TrySendError.Full(_)) => break,
+        }
+    }
+}
+
+/// Send with timeout
+fn benchmark_channel_send_timeout() async {
+    let (tx, rx) = channel<Int>.bounded(100);
+
+    // Slow consumer
+    let consumer = spawn async {
+        loop {
+            match rx.recv_timeout(Duration.from_millis(1)).await {
+                Ok(_) => {},
+                Err(RecvTimeoutError.Timeout) => {},
+                Err(RecvTimeoutError.Disconnected) => break,
+            }
+        }
+    };
+
+    for i in 0..10_000 {
+        let _ = tx.send_timeout(i, Duration.from_micros(100)).await;
+    }
+
+    drop(tx);
+    consumer.await;
+}
+
+/// Broadcast channel send
+fn benchmark_channel_broadcast_send() async {
+    let (tx, _) = broadcast<Int>.channel(1000);
+
+    // Create multiple receivers
+    let receivers: List<_> = (0..4).map(|_| {
+        let rx = tx.subscribe();
+        spawn async move {
+            while let Ok(_) = rx.recv().await {}
+        }
+    }).collect();
+
+    for i in 0..100_000 {
+        let _ = tx.send(i);  // Broadcast to all
+    }
+
+    drop(tx);
+    for r in receivers {
+        r.await;
+    }
+}
+
+/// Oneshot channel send
+fn benchmark_channel_oneshot_send() async {
+    for _ in 0..500_000 {
+        let (tx, rx) = oneshot<Int>.channel();
+        tx.send(42);
+        let _ = rx.await;
+    }
+}
+
+/// Send large messages
+fn benchmark_channel_send_large() async {
+    type LargeMessage is {
+        data: [Int; 1024],
+    };
+
+    let (tx, rx) = channel<LargeMessage>.bounded(100);
+
+    let receiver = spawn async {
+        while let Some(_) = rx.recv().await {}
+    };
+
+    for _ in 0..10_000 {
+        tx.send(LargeMessage { data: [42; 1024] }).await;
+    }
+
+    drop(tx);
+    receiver.await;
+}
+
+/// Zero-copy send (move semantics)
+fn benchmark_channel_send_zero_copy() async {
+    let (tx, rx) = channel<List<Int>>.bounded(100);
+
+    let receiver = spawn async {
+        while let Some(_) = rx.recv().await {}
+    };
+
+    for _ in 0..100_000 {
+        let data = list![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        tx.send(data).await;  // Move, not copy
+    }
+
+    drop(tx);
+    receiver.await;
+}
+
+/// Select on multiple channels
+fn benchmark_channel_select_send() async {
+    let (tx1, rx1) = channel<Int>.bounded(100);
+    let (tx2, rx2) = channel<Int>.bounded(100);
+
+    // Drain both
+    let d1 = spawn async { while let Some(_) = rx1.recv().await {} };
+    let d2 = spawn async { while let Some(_) = rx2.recv().await {} };
+
+    for i in 0..100_000 {
+        select {
+            _ = tx1.send(i) => {},
+            _ = tx2.send(i) => {},
+        }
+    }
+
+    drop(tx1);
+    drop(tx2);
+    d1.await;
+    d2.await;
+}

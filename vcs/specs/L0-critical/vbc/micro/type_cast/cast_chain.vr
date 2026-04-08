@@ -1,0 +1,17 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Int → Float → Int roundtrip
+    let i1: Int = 42;
+    let f1: Float = i1 as Float;
+    let i2: Int = f1 as Int;
+    assert_eq(i2, 42);
+
+    // Bool → Int → Float
+    let b: Bool = true;
+    let i: Int = b as Int;
+    let f: Float = i as Float;
+    assert_eq(f, 1.0);
+}

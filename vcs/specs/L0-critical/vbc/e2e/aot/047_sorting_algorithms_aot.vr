@@ -1,0 +1,173 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, sorting, algorithms, records
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT sorting algorithms using fixed-size arrays (records)
+
+// 8-element array represented as a record
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn arr8_get(arr: Arr8, idx: Int) -> Int {
+    if idx == 0 { arr.a0 }
+    else if idx == 1 { arr.a1 }
+    else if idx == 2 { arr.a2 }
+    else if idx == 3 { arr.a3 }
+    else if idx == 4 { arr.a4 }
+    else if idx == 5 { arr.a5 }
+    else if idx == 6 { arr.a6 }
+    else { arr.a7 }
+}
+
+fn arr8_set(arr: Arr8, idx: Int, val: Int) -> Arr8 {
+    Arr8 {
+        a0: if idx == 0 { val } else { arr.a0 },
+        a1: if idx == 1 { val } else { arr.a1 },
+        a2: if idx == 2 { val } else { arr.a2 },
+        a3: if idx == 3 { val } else { arr.a3 },
+        a4: if idx == 4 { val } else { arr.a4 },
+        a5: if idx == 5 { val } else { arr.a5 },
+        a6: if idx == 6 { val } else { arr.a6 },
+        a7: if idx == 7 { val } else { arr.a7 },
+    }
+}
+
+fn arr8_swap(arr: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = arr8_get(arr, i);
+    let vj = arr8_get(arr, j);
+    let tmp = arr8_set(arr, i, vj);
+    arr8_set(tmp, j, vi)
+}
+
+// Bubble sort
+fn bubble_sort(arr: Arr8, n: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if arr8_get(a, j) > arr8_get(a, j + 1) {
+                a = arr8_swap(a, j, j + 1);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    a
+}
+
+// Selection sort
+fn selection_sort(arr: Arr8, n: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if arr8_get(a, j) < arr8_get(a, min_idx) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            a = arr8_swap(a, i, min_idx);
+        }
+        i = i + 1;
+    }
+    a
+}
+
+// Insertion sort
+fn insertion_sort(arr: Arr8, n: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = 1;
+    while i < n {
+        let key = arr8_get(a, i);
+        let mut j = i - 1;
+        while j >= 0 && arr8_get(a, j) > key {
+            a = arr8_set(a, j + 1, arr8_get(a, j));
+            j = j - 1;
+        }
+        a = arr8_set(a, j + 1, key);
+        i = i + 1;
+    }
+    a
+}
+
+fn is_sorted(arr: Arr8, n: Int) -> Bool {
+    let mut i = 0;
+    let mut ok = true;
+    while i < n - 1 {
+        if arr8_get(arr, i) > arr8_get(arr, i + 1) {
+            ok = false;
+        }
+        i = i + 1;
+    }
+    ok
+}
+
+fn arr8_sum(arr: Arr8, n: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < n {
+        s = s + arr8_get(arr, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn main() -> Int {
+    let unsorted = Arr8 { a0: 5, a1: 3, a2: 8, a3: 1, a4: 9, a5: 2, a6: 7, a7: 4 };
+    let n = 8;
+
+    // Verify unsorted
+    assert(!is_sorted(unsorted, n));
+    let orig_sum = arr8_sum(unsorted, n);
+    assert_eq(orig_sum, 39);  // 5+3+8+1+9+2+7+4
+
+    // Bubble sort
+    let bs = bubble_sort(unsorted, n);
+    assert(is_sorted(bs, n));
+    assert_eq(arr8_sum(bs, n), orig_sum);
+    assert_eq(arr8_get(bs, 0), 1);
+    assert_eq(arr8_get(bs, 7), 9);
+
+    // Selection sort
+    let ss = selection_sort(unsorted, n);
+    assert(is_sorted(ss, n));
+    assert_eq(arr8_sum(ss, n), orig_sum);
+    assert_eq(arr8_get(ss, 0), 1);
+    assert_eq(arr8_get(ss, 7), 9);
+
+    // Insertion sort
+    let is2 = insertion_sort(unsorted, n);
+    assert(is_sorted(is2, n));
+    assert_eq(arr8_sum(is2, n), orig_sum);
+    assert_eq(arr8_get(is2, 0), 1);
+    assert_eq(arr8_get(is2, 7), 9);
+
+    // Already sorted
+    let sorted = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    assert(is_sorted(sorted, n));
+    assert(is_sorted(bubble_sort(sorted, n), n));
+    assert(is_sorted(selection_sort(sorted, n), n));
+    assert(is_sorted(insertion_sort(sorted, n), n));
+
+    // Reverse sorted
+    let rev = Arr8 { a0: 8, a1: 7, a2: 6, a3: 5, a4: 4, a5: 3, a6: 2, a7: 1 };
+    assert(!is_sorted(rev, n));
+    let rev_sorted = bubble_sort(rev, n);
+    assert(is_sorted(rev_sorted, n));
+    assert_eq(arr8_get(rev_sorted, 0), 1);
+    assert_eq(arr8_get(rev_sorted, 7), 8);
+
+    // Small array (n=3)
+    let small = Arr8 { a0: 30, a1: 10, a2: 20, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let small_sorted = insertion_sort(small, 3);
+    assert_eq(arr8_get(small_sorted, 0), 10);
+    assert_eq(arr8_get(small_sorted, 1), 20);
+    assert_eq(arr8_get(small_sorted, 2), 30);
+
+    0
+}

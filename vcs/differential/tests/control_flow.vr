@@ -1,0 +1,274 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, control-flow
+// @timeout: 10000
+
+/// Control flow constructs for differential testing.
+/// Tests if/else, match, loops, and short-circuit evaluation.
+
+fn main() {
+    test_if_else();
+    test_if_expressions();
+    test_match_basic();
+    test_match_guards();
+    test_while_loops();
+    test_for_loops();
+    test_loop_break();
+    test_short_circuit();
+}
+
+/// If-else branching
+fn test_if_else() {
+    println("=== If-Else ===");
+
+    let x = 10;
+
+    if x > 5 {
+        println("x > 5: true");
+    } else {
+        println("x > 5: false");
+    }
+
+    if x > 15 {
+        println("x > 15: true");
+    } else {
+        println("x > 15: false");
+    }
+
+    // Chained if-else
+    let score = 85;
+    if score >= 90 {
+        println("grade: A");
+    } else if score >= 80 {
+        println("grade: B");
+    } else if score >= 70 {
+        println("grade: C");
+    } else {
+        println("grade: F");
+    }
+
+    // Nested if
+    let a = 5;
+    let b = 10;
+    if a > 0 {
+        if b > 5 {
+            println("both conditions met");
+        }
+    }
+}
+
+/// If as expression
+fn test_if_expressions() {
+    println("\n=== If Expressions ===");
+
+    let x = 10;
+
+    let result = if x > 5 { "greater" } else { "not greater" };
+    println(f"result: {result}");
+
+    let value = if x % 2 == 0 {
+        let doubled = x * 2;
+        doubled + 1
+    } else {
+        x
+    };
+    println(f"value: {value}");
+
+    // Nested if expression
+    let category = if x < 0 {
+        "negative"
+    } else if x == 0 {
+        "zero"
+    } else if x < 10 {
+        "small"
+    } else {
+        "large"
+    };
+    println(f"category: {category}");
+}
+
+/// Basic match expressions
+fn test_match_basic() {
+    println("\n=== Match Basic ===");
+
+    for day in [1, 2, 3, 4, 5, 6, 7] {
+        let name = match day {
+            1 => "Monday",
+            2 => "Tuesday",
+            3 => "Wednesday",
+            4 => "Thursday",
+            5 => "Friday",
+            6 | 7 => "Weekend",
+            _ => "Invalid",
+        };
+        println(f"day {day}: {name}");
+    }
+
+    // Range patterns
+    for n in [0, 5, 15, 50, 100, 150] {
+        let cat = match n {
+            0 => "zero",
+            1..=9 => "single",
+            10..=99 => "double",
+            100..=999 => "triple",
+            _ => "large",
+        };
+        println(f"{n}: {cat}");
+    }
+}
+
+/// Match with guards
+fn test_match_guards() {
+    println("\n=== Match Guards ===");
+
+    for n in [-5, 0, 3, 8, 12, 25] {
+        let desc = match n {
+            x if x < 0 => "negative",
+            0 => "zero",
+            x if x % 2 == 0 => "positive even",
+            x if x < 10 => "positive odd small",
+            _ => "positive odd large",
+        };
+        println(f"{n}: {desc}");
+    }
+
+    // Tuple pattern with guard
+    for pair in [(1, 2), (5, 5), (10, 3)] {
+        match pair {
+            (a, b) if a == b => println(f"({a}, {b}): equal"),
+            (a, b) if a > b => println(f"({a}, {b}): first larger"),
+            (a, b) => println(f"({a}, {b}): second larger"),
+        }
+    }
+}
+
+/// While loops
+fn test_while_loops() {
+    println("\n=== While Loops ===");
+
+    // Basic while
+    let mut i = 0;
+    while i < 5 {
+        println(f"while: {i}");
+        i = i + 1;
+    }
+
+    // While with complex condition
+    let mut x = 100;
+    let mut steps = 0;
+    while x > 1 && steps < 10 {
+        x = x / 2;
+        steps = steps + 1;
+    }
+    println(f"halved {steps} times, result: {x}");
+
+    // Nested while
+    let mut a = 0;
+    while a < 2 {
+        let mut b = 0;
+        while b < 2 {
+            println(f"nested: ({a}, {b})");
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+}
+
+/// For loops
+fn test_for_loops() {
+    println("\n=== For Loops ===");
+
+    // Range
+    for i in 0..5 {
+        println(f"range: {i}");
+    }
+
+    // Inclusive range
+    for i in 0..=3 {
+        println(f"inclusive: {i}");
+    }
+
+    // Collection iteration
+    let items = ["apple", "banana", "cherry"];
+    for item in items {
+        println(f"item: {item}");
+    }
+
+    // Nested for
+    for i in 0..2 {
+        for j in 0..2 {
+            println(f"nested for: ({i}, {j})");
+        }
+    }
+
+    // With enumerate
+    for (idx, item) in items.enumerate() {
+        println(f"{idx}: {item}");
+    }
+}
+
+/// Loop with break
+fn test_loop_break() {
+    println("\n=== Loop Break ===");
+
+    // Loop with break
+    let mut count = 0;
+    loop {
+        count = count + 1;
+        if count > 5 {
+            break;
+        }
+        println(f"loop: {count}");
+    }
+
+    // Loop as expression
+    let mut n = 0;
+    let result = loop {
+        n = n + 1;
+        if n * n > 50 {
+            break n;
+        }
+    };
+    println(f"loop result: {result}");
+
+    // Break and continue
+    for i in 0..10 {
+        if i == 3 {
+            continue;
+        }
+        if i == 7 {
+            break;
+        }
+        println(f"break/continue: {i}");
+    }
+}
+
+/// Short-circuit evaluation
+fn test_short_circuit() {
+    println("\n=== Short-Circuit ===");
+
+    fn returns_true(label: Text) -> Bool {
+        println(f"eval {label}: true");
+        true
+    }
+
+    fn returns_false(label: Text) -> Bool {
+        println(f"eval {label}: false");
+        false
+    }
+
+    // AND short-circuit
+    println("AND with true first:");
+    let _ = returns_true("a") && returns_true("b");
+
+    println("AND with false first:");
+    let _ = returns_false("a") && returns_true("b");
+
+    // OR short-circuit
+    println("OR with false first:");
+    let _ = returns_false("a") || returns_true("b");
+
+    println("OR with true first:");
+    let _ = returns_true("a") || returns_true("b");
+}

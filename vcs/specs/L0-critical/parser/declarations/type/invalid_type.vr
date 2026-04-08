@@ -1,0 +1,134 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, type, invalid, error
+
+// ERROR: Missing type name
+type is Int;
+
+// ERROR: Missing 'is' keyword
+type Foo Int;
+
+// ERROR: Missing type body
+type Empty is;
+
+// ERROR: Invalid record syntax - missing field type
+type BadRecord is {
+    x,
+    y: Int,
+};
+
+// ERROR: Invalid record syntax - missing colon
+type BadRecord2 is {
+    x Int,
+};
+
+// ERROR: Invalid variant syntax - missing pipe
+type BadVariant is
+    Some(T)
+    | None;
+
+// ERROR: Invalid variant - empty parentheses with type expected
+type BadVariant2 is
+    | Bad();
+
+// ERROR: Invalid refinement - unclosed brace
+type BadRefinement is Int{> 0;
+
+// ERROR: Invalid refinement - empty constraint
+type BadRefinement2 is Int{};
+
+// ERROR: Invalid tuple type syntax (for newtypes)
+type BadNewtype is ();      // Empty newtype not allowed
+type BadNewtype2 is (Int Int);  // Missing comma
+
+// ERROR: Invalid protocol syntax - missing braces
+type BadProtocol is protocol;
+type BadProtocol2 is protocol fn display();
+
+// ERROR: Invalid generic syntax - unclosed angle bracket
+type BadGeneric<T is { value: T };
+
+// ERROR: Invalid generic - empty parameters
+type BadGeneric2<> is { };
+
+// ERROR: Invalid constraint syntax
+type BadConstraint<T:> is { value: T };
+
+// ERROR: Invalid where clause
+type BadWhere<T> is { value: T } where;
+type BadWhere2<T> is { value: T } where T:;
+
+// ERROR: Duplicate type parameter
+type DupParam<T, T> is { a: T, b: T };
+
+// ERROR: Using keyword as type name
+type fn is Int;
+type let is Int;
+type type is Int;
+
+// ERROR: Invalid associated type syntax
+type BadAssoc is protocol {
+    type;
+    type Item =;
+};
+
+// ERROR: Recursive type without indirection
+type Infinite is {
+    next: Infinite,  // Would be infinite size
+};
+
+// ERROR: Mixed syntax (record and variant)
+type Mixed is {
+    x: Int,
+} | Variant;
+
+// ERROR: Circular type alias without indirection
+type A is B;
+type B is A;
+
+// ERROR: Type parameter shadows built-in
+type Bad<Int> is { value: Int };
+type Bad2<Bool> is { flag: Bool };
+
+// ERROR: Invalid protocol extension syntax
+type BadExtend is protocol extends { };
+type BadExtend2 is protocol: { };
+
+// ERROR: Empty generic parameter list
+type Empty<> is Int;
+
+// ERROR: Trailing comma in variant without variants
+type BadVariant is |;
+
+// ERROR: Double pipe in variant
+type DoublePipe is
+    | A
+    || B;
+
+// ERROR: Invalid refinement expression
+type BadRef is Int{};
+type BadRef2 is Int{> };
+type BadRef3 is Int{> 0 &&};
+
+// ERROR: Tuple type with record body (invalid mix)
+type BadTupleType is ({ x: Int });
+
+// ERROR: Protocol with variant body
+type BadProtocol is protocol
+    | A
+    | B;
+
+// ERROR: Type with expression body
+type BadExpr is 1 + 2;
+type BadExpr2 is if true { Int } else { Text };
+
+// ERROR: Incomplete associated type
+type BadAssoc is protocol {
+    type Item: ;
+};
+
+// ERROR: Invalid visibility on variant arm
+type BadVis is
+    | pub A
+    | priv B;

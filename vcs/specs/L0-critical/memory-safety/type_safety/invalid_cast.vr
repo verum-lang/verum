@@ -1,0 +1,139 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, type-safety, invalid-cast, compile-time
+// @description: Tests that invalid type casts are rejected at compile time
+
+/// Verum rejects unsafe type casts that could lead to:
+/// - Type confusion vulnerabilities
+/// - Memory corruption
+/// - Undefined behavior
+///
+/// All valid conversions must use explicit, checked mechanisms.
+
+fn main() {
+    test_invalid_primitive_cast();
+    test_invalid_struct_cast();
+    test_invalid_transmute();
+    test_unsafe_cast_without_block();
+}
+
+fn test_invalid_primitive_cast() {
+    let text = Text.from("hello");
+
+    // INVALID: Cannot cast string to int with 'as'
+    let n: Int = text as Int;  // ERROR: Invalid cast: cannot convert 'Text' to 'Int'
+
+    // INVALID: Cannot cast between unrelated primitives
+    let b: Bool = true;
+    let f: Float = b as Float;  // ERROR: Invalid cast: cannot convert 'Bool' to 'Float'
+
+    // INVALID: Cannot cast reference to value
+    let x = 42;
+    let r = &x;
+    let v: Int = r as Int;  // ERROR: Invalid cast: cannot convert '&Int' to 'Int'
+}
+
+// Unrelated types
+type User is {
+    id: Int,
+    name: Text,
+};
+
+type Product is {
+    id: Int,
+    name: Text,
+};
+
+fn test_invalid_struct_cast() {
+    let user = User { id: 1, name: Text.from("Alice") };
+
+    // INVALID: Cannot cast between unrelated structs
+    // Even though they have same memory layout!
+    let product: Product = user as Product;  // ERROR: Invalid cast: cannot convert 'User' to 'Product'
+
+    // INVALID: Cannot cast struct to primitive
+    let id: Int = user as Int;  // ERROR: Invalid cast: cannot convert 'User' to 'Int'
+}
+
+fn test_invalid_transmute() {
+    // INVALID: transmute not available in safe code
+    let x: Int = 42;
+
+    // This function doesn't exist in safe Verum
+    let f: Float = transmute(x);  // ERROR: Unknown function 'transmute'
+
+    // INVALID: Even if it did, size mismatch would be rejected
+    let small: Int = 42;
+    let large: Int = unsafe_transmute(small);  // ERROR: Cannot transmute between types of different sizes
+}
+
+fn test_unsafe_cast_without_block() {
+    let ptr = 0x12345678;
+
+    // INVALID: raw pointer cast requires unsafe block
+    let ref_val: &Int = ptr as &Int;  // ERROR: Unsafe cast requires unsafe block
+
+    // INVALID: reinterpret cast requires unsafe block
+    let x: Int = 0x4048F5C2;
+    let f: Float = reinterpret(x);  // ERROR: Unsafe cast requires unsafe block
+}
+
+// VALID: Safe alternatives
+
+fn valid_string_to_int() {
+    let text = Text.from("42");
+
+    // Use parse() which returns Result
+    match Int.parse(text) {
+        Ok(n) => print(f"Parsed: {n}"),
+        Err(e) => print(f"Parse failed: {e}"),
+    }
+}
+
+// Types for struct conversion test
+type UserForConversion is { id: Int, name: Text };
+type UserDto is { id: Int, name: Text };
+
+implement From<UserForConversion> for UserDto {
+    fn from(user: UserForConversion) -> UserDto {
+        UserDto {
+            id: user.id,
+            name: user.name.clone(),
+        }
+    }
+}
+
+fn valid_struct_conversion() {
+    let user = UserForConversion { id: 1, name: Text.from("Alice") };
+    let dto: UserDto = user.into();  // Explicit, type-safe conversion
+}
+
+fn valid_unsafe_cast_in_block() {
+    // Raw pointer operations REQUIRE unsafe block
+    // In Verum, unsafe operations use &unsafe T references (CBGR tier 2)
+    let ptr: &unsafe Int = 0x12345678 as &unsafe Int;
+    // Only valid if address is actually valid
+    // Programmer takes responsibility
+}
+
+// Additional invalid patterns
+
+fn invalid_reference_coercion() {
+    let mut x: Int = 42;
+    let immut_ref: &Int = &x;
+
+    // INVALID: Cannot cast immutable to mutable reference
+    let mut_ref: &mut Int = immut_ref as &mut Int;  // ERROR: Cannot cast '&Int' to '&mut Int'
+
+    // INVALID: Cannot extend lifetime through cast
+    // Note: Verum uses CBGR epochs instead of Rust-style named lifetimes
+}
+
+fn invalid_function_pointer_cast() {
+    fn foo(x: Int) -> Int { x + 1 }
+    fn bar(x: Int, y: Int) -> Int { x + y }
+
+    // INVALID: Cannot cast between function types with different signatures
+    let f: fn(Int, Int) -> Int = foo as fn(Int, Int) -> Int;  // ERROR: Incompatible function signatures
+}

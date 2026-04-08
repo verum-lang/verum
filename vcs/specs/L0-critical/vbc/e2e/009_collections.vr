@@ -1,0 +1,231 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, collections, list, map, set, pipeline
+// @timeout: 5000
+// @expect: pass
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies List, Map, and Set operations through the full pipeline
+
+// =============================================================================
+// List basics
+// =============================================================================
+
+@test
+fn test_list_empty() {
+    let lst: List<Int> = List.new();
+    assert_eq(lst.len(), 0);
+    assert(lst.is_empty());
+}
+
+@test
+fn test_list_from_literal() {
+    let lst = [1, 2, 3, 4, 5];
+    assert_eq(lst.len(), 5);
+    assert(!lst.is_empty());
+}
+
+@test
+fn test_list_push_and_access() {
+    let mut lst: List<Int> = List.new();
+    lst.push(10);
+    lst.push(20);
+    lst.push(30);
+    assert_eq(lst.len(), 3);
+    assert_eq(lst[0], 10);
+    assert_eq(lst[1], 20);
+    assert_eq(lst[2], 30);
+}
+
+@test
+fn test_list_pop() {
+    let mut lst = [1, 2, 3];
+    let last = lst.pop();
+    assert_eq(last, Some(3));
+    assert_eq(lst.len(), 2);
+}
+
+// =============================================================================
+// List iteration
+// =============================================================================
+
+@test
+fn test_list_iterate() {
+    let lst = [10, 20, 30];
+    let mut sum = 0;
+    for val in lst {
+        sum = sum + val;
+    }
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_list_iterate_strings() {
+    let words = ["hello", "world"];
+    let mut count = 0;
+    for _ in words {
+        count = count + 1;
+    }
+    assert_eq(count, 2);
+}
+
+// =============================================================================
+// List transformation
+// =============================================================================
+
+@test
+fn test_list_map() {
+    let lst = [1, 2, 3, 4, 5];
+    let doubled: List<Int> = lst.iter().map(|x| x * 2).collect();
+    assert_eq(doubled.len(), 5);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[4], 10);
+}
+
+@test
+fn test_list_filter() {
+    let lst = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evens: List<Int> = lst.iter().filter(|x| x % 2 == 0).collect();
+    assert_eq(evens.len(), 5);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[4], 10);
+}
+
+@test
+fn test_list_fold() {
+    let lst = [1, 2, 3, 4, 5];
+    let sum = lst.iter().fold(0, |acc, x| acc + x);
+    assert_eq(sum, 15);
+}
+
+// =============================================================================
+// Map basics
+// =============================================================================
+
+@test
+fn test_map_empty() {
+    let m: Map<Text, Int> = Map.new();
+    assert_eq(m.len(), 0);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_insert_and_get() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("one", 1);
+    m.insert("two", 2);
+    m.insert("three", 3);
+    assert_eq(m.len(), 3);
+    assert_eq(m.get("one"), 1);
+    assert_eq(m.get("two"), 2);
+    assert_eq(m.get("three"), 3);
+}
+
+@test
+fn test_map_get_missing() {
+    let m: Map<Text, Int> = Map.new();
+    assert_eq(m.get("missing"), 0);  // Map.get returns default value (0 for Int) when missing
+}
+
+@test
+fn test_map_contains() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+    assert(m.contains_key("key"));
+    assert(!m.contains_key("other"));
+}
+
+@test
+fn test_map_overwrite() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("x", 1);
+    m.insert("x", 2);
+    assert_eq(m.get("x"), 2);
+    assert_eq(m.len(), 1);
+}
+
+@test
+fn test_map_remove() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.remove("a");
+    assert_eq(m.len(), 1);
+    assert_eq(m.get("a"), 0);  // removed key returns default
+    assert_eq(m.get("b"), 2);
+}
+
+// =============================================================================
+// Set basics
+// =============================================================================
+
+@test
+fn test_set_empty() {
+    let s: Set<Int> = Set.new();
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_insert_and_contains() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    assert_eq(s.len(), 3);
+    assert(s.contains(1));
+    assert(s.contains(2));
+    assert(s.contains(3));
+    assert(!s.contains(4));
+}
+
+@test
+fn test_set_no_duplicates() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(1);
+    s.insert(1);
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_remove() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.remove(10);
+    assert_eq(s.len(), 1);
+    assert(!s.contains(10));
+    assert(s.contains(20));
+}
+
+// =============================================================================
+// Collection building patterns
+// =============================================================================
+
+@test
+fn test_build_list_in_loop() {
+    let mut lst: List<Int> = List.new();
+    for i in 0..5 {
+        lst.push(i * i);
+    }
+    assert_eq(lst.len(), 5);
+    assert_eq(lst[0], 0);
+    assert_eq(lst[1], 1);
+    assert_eq(lst[2], 4);
+    assert_eq(lst[3], 9);
+    assert_eq(lst[4], 16);
+}
+
+@test
+fn test_build_map_in_loop() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 1..6 {
+        m.insert(i, i * i);
+    }
+    assert_eq(m.len(), 5);
+    assert_eq(m.get(1), 1);
+    assert_eq(m.get(3), 9);
+    assert_eq(m.get(5), 25);
+}

@@ -1,0 +1,580 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, creation
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT tensor creation operations — arange, linspace, identity, one-hot
+
+// ============================================================================
+// Flat array representation (max 16 elements)
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// ============================================================================
+// 2D matrix with shape metadata
+// ============================================================================
+
+type Mat16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int,
+    rows: Int,
+    cols: Int
+};
+
+fn mat16_get(m: Mat16, i: Int) -> Int {
+    if i == 0 { m.e0 } else if i == 1 { m.e1 } else if i == 2 { m.e2 }
+    else if i == 3 { m.e3 } else if i == 4 { m.e4 } else if i == 5 { m.e5 }
+    else if i == 6 { m.e6 } else if i == 7 { m.e7 } else if i == 8 { m.e8 }
+    else if i == 9 { m.e9 } else if i == 10 { m.e10 } else if i == 11 { m.e11 }
+    else if i == 12 { m.e12 } else if i == 13 { m.e13 } else if i == 14 { m.e14 }
+    else { m.e15 }
+}
+
+fn mat16_get2d(m: Mat16, row: Int, col: Int) -> Int {
+    mat16_get(m, row * m.cols + col)
+}
+
+fn mat16_set(m: Mat16, i: Int, v: Int) -> Mat16 {
+    Mat16 {
+        e0: if i == 0 { v } else { m.e0 },
+        e1: if i == 1 { v } else { m.e1 },
+        e2: if i == 2 { v } else { m.e2 },
+        e3: if i == 3 { v } else { m.e3 },
+        e4: if i == 4 { v } else { m.e4 },
+        e5: if i == 5 { v } else { m.e5 },
+        e6: if i == 6 { v } else { m.e6 },
+        e7: if i == 7 { v } else { m.e7 },
+        e8: if i == 8 { v } else { m.e8 },
+        e9: if i == 9 { v } else { m.e9 },
+        e10: if i == 10 { v } else { m.e10 },
+        e11: if i == 11 { v } else { m.e11 },
+        e12: if i == 12 { v } else { m.e12 },
+        e13: if i == 13 { v } else { m.e13 },
+        e14: if i == 14 { v } else { m.e14 },
+        e15: if i == 15 { v } else { m.e15 },
+        rows: m.rows,
+        cols: m.cols
+    }
+}
+
+fn mat16_zeros(rows: Int, cols: Int) -> Mat16 {
+    Mat16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0,
+        rows: rows, cols: cols
+    }
+}
+
+// ============================================================================
+// Tensor creation operations (integer simulation)
+// ============================================================================
+
+// arange: produce [start, start+step, start+2*step, ...] while < end
+fn arange(start: Int, end: Int, step: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    let mut val = start;
+    let mut idx = 0;
+    while val < end && idx < 16 {
+        out = arr16_set(out, idx, val);
+        val = val + step;
+        idx = idx + 1;
+    }
+    out
+}
+
+// arange_len: return the number of elements produced by arange
+fn arange_len(start: Int, end: Int, step: Int) -> Int {
+    if step <= 0 { 0 }
+    else if end <= start { 0 }
+    else {
+        let diff = end - start;
+        let len = (diff + step - 1) / step;
+        if len > 16 { 16 } else { len }
+    }
+}
+
+// linspace_int: integer approximation of linspace using scaled arithmetic
+// Produces n equally spaced integers from start to end (inclusive)
+// Uses scaling factor of 1000 for precision, then divides back
+fn linspace_int(start: Int, end: Int, n: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    if n <= 0 { out }
+    else if n == 1 {
+        out = arr16_set(out, 0, start);
+        out
+    } else {
+        let range = end - start;
+        let mut i = 0;
+        while i < n && i < 16 {
+            // val = start + range * i / (n - 1)
+            let val = start + range * i / (n - 1);
+            out = arr16_set(out, i, val);
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// identity: create NxN identity matrix (1 on diagonal, 0 elsewhere)
+fn identity_matrix(n: Int) -> Mat16 {
+    let mut out = mat16_zeros(n, n);
+    let mut i = 0;
+    while i < n {
+        out = mat16_set(out, i * n + i, 1);
+        i = i + 1;
+    }
+    out
+}
+
+// one_hot: create a 1D array with 1 at position idx, 0 elsewhere
+fn one_hot(idx: Int, size: Int) -> Arr16 {
+    let mut out = arr16_zeros();
+    if idx >= 0 && idx < size && idx < 16 {
+        out = arr16_set(out, idx, 1);
+        out
+    } else {
+        out
+    }
+}
+
+// one_hot_matrix: create NxC one-hot matrix where row i has 1 at column labels[i]
+// labels is an Arr16 containing class indices, n is the number of rows, c is the number of classes
+fn one_hot_matrix(labels: Arr16, n: Int, c: Int) -> Mat16 {
+    let mut out = mat16_zeros(n, c);
+    let mut i = 0;
+    while i < n {
+        let col = arr16_get(labels, i);
+        if col >= 0 && col < c {
+            out = mat16_set(out, i * c + col, 1);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Tests: arange
+// ============================================================================
+
+fn test_arange_basic() {
+    // arange(0, 5, 1) = [0, 1, 2, 3, 4]
+    let a = arange(0, 5, 1);
+    assert_eq(arr16_get(a, 0), 0);
+    assert_eq(arr16_get(a, 1), 1);
+    assert_eq(arr16_get(a, 2), 2);
+    assert_eq(arr16_get(a, 3), 3);
+    assert_eq(arr16_get(a, 4), 4);
+    assert_eq(arange_len(0, 5, 1), 5);
+}
+
+fn test_arange_step2() {
+    // arange(0, 10, 2) = [0, 2, 4, 6, 8]
+    let a = arange(0, 10, 2);
+    assert_eq(arr16_get(a, 0), 0);
+    assert_eq(arr16_get(a, 1), 2);
+    assert_eq(arr16_get(a, 2), 4);
+    assert_eq(arr16_get(a, 3), 6);
+    assert_eq(arr16_get(a, 4), 8);
+    assert_eq(arange_len(0, 10, 2), 5);
+}
+
+fn test_arange_step3() {
+    // arange(1, 13, 3) = [1, 4, 7, 10]
+    let a = arange(1, 13, 3);
+    assert_eq(arr16_get(a, 0), 1);
+    assert_eq(arr16_get(a, 1), 4);
+    assert_eq(arr16_get(a, 2), 7);
+    assert_eq(arr16_get(a, 3), 10);
+    assert_eq(arange_len(1, 13, 3), 4);
+}
+
+fn test_arange_nonzero_start() {
+    // arange(5, 10, 1) = [5, 6, 7, 8, 9]
+    let a = arange(5, 10, 1);
+    assert_eq(arr16_get(a, 0), 5);
+    assert_eq(arr16_get(a, 1), 6);
+    assert_eq(arr16_get(a, 2), 7);
+    assert_eq(arr16_get(a, 3), 8);
+    assert_eq(arr16_get(a, 4), 9);
+    assert_eq(arange_len(5, 10, 1), 5);
+}
+
+fn test_arange_single_element() {
+    // arange(7, 8, 1) = [7]
+    let a = arange(7, 8, 1);
+    assert_eq(arr16_get(a, 0), 7);
+    assert_eq(arange_len(7, 8, 1), 1);
+}
+
+fn test_arange_empty() {
+    // arange(5, 5, 1) = [] (empty: start == end)
+    assert_eq(arange_len(5, 5, 1), 0);
+
+    // arange(10, 5, 1) = [] (empty: start > end)
+    assert_eq(arange_len(10, 5, 1), 0);
+}
+
+fn test_arange_large_step() {
+    // arange(0, 100, 25) = [0, 25, 50, 75]
+    let a = arange(0, 100, 25);
+    assert_eq(arr16_get(a, 0), 0);
+    assert_eq(arr16_get(a, 1), 25);
+    assert_eq(arr16_get(a, 2), 50);
+    assert_eq(arr16_get(a, 3), 75);
+    assert_eq(arange_len(0, 100, 25), 4);
+}
+
+fn test_arange_step_not_dividing() {
+    // arange(0, 7, 3) = [0, 3, 6] (7 is not divisible by 3)
+    let a = arange(0, 7, 3);
+    assert_eq(arr16_get(a, 0), 0);
+    assert_eq(arr16_get(a, 1), 3);
+    assert_eq(arr16_get(a, 2), 6);
+    assert_eq(arange_len(0, 7, 3), 3);
+}
+
+// ============================================================================
+// Tests: linspace (integer approximation)
+// ============================================================================
+
+fn test_linspace_basic() {
+    // linspace_int(0, 100, 5) = [0, 25, 50, 75, 100]
+    let a = linspace_int(0, 100, 5);
+    assert_eq(arr16_get(a, 0), 0);
+    assert_eq(arr16_get(a, 1), 25);
+    assert_eq(arr16_get(a, 2), 50);
+    assert_eq(arr16_get(a, 3), 75);
+    assert_eq(arr16_get(a, 4), 100);
+}
+
+fn test_linspace_two_points() {
+    // linspace_int(10, 20, 2) = [10, 20]
+    let a = linspace_int(10, 20, 2);
+    assert_eq(arr16_get(a, 0), 10);
+    assert_eq(arr16_get(a, 1), 20);
+}
+
+fn test_linspace_single_point() {
+    // linspace_int(42, 99, 1) = [42] (single point returns start)
+    let a = linspace_int(42, 99, 1);
+    assert_eq(arr16_get(a, 0), 42);
+}
+
+fn test_linspace_same_endpoints() {
+    // linspace_int(5, 5, 4) = [5, 5, 5, 5]
+    let a = linspace_int(5, 5, 4);
+    assert_eq(arr16_get(a, 0), 5);
+    assert_eq(arr16_get(a, 1), 5);
+    assert_eq(arr16_get(a, 2), 5);
+    assert_eq(arr16_get(a, 3), 5);
+}
+
+fn test_linspace_three_points() {
+    // linspace_int(0, 10, 3) = [0, 5, 10]
+    let a = linspace_int(0, 10, 3);
+    assert_eq(arr16_get(a, 0), 0);
+    assert_eq(arr16_get(a, 1), 5);
+    assert_eq(arr16_get(a, 2), 10);
+}
+
+fn test_linspace_endpoints_always_exact() {
+    // First element is always start, last is always end
+    let a = linspace_int(0, 1000, 11);
+    assert_eq(arr16_get(a, 0), 0);
+    assert_eq(arr16_get(a, 10), 1000);
+    // Midpoint: 1000 * 5 / 10 = 500
+    assert_eq(arr16_get(a, 5), 500);
+}
+
+// ============================================================================
+// Tests: identity matrix
+// ============================================================================
+
+fn test_identity_1x1() {
+    let id = identity_matrix(1);
+    assert_eq(id.rows, 1);
+    assert_eq(id.cols, 1);
+    assert_eq(mat16_get2d(id, 0, 0), 1);
+}
+
+fn test_identity_2x2() {
+    let id = identity_matrix(2);
+    assert_eq(id.rows, 2);
+    assert_eq(id.cols, 2);
+    assert_eq(mat16_get2d(id, 0, 0), 1);
+    assert_eq(mat16_get2d(id, 0, 1), 0);
+    assert_eq(mat16_get2d(id, 1, 0), 0);
+    assert_eq(mat16_get2d(id, 1, 1), 1);
+}
+
+fn test_identity_3x3() {
+    let id = identity_matrix(3);
+    assert_eq(id.rows, 3);
+    assert_eq(id.cols, 3);
+    // Diagonal
+    assert_eq(mat16_get2d(id, 0, 0), 1);
+    assert_eq(mat16_get2d(id, 1, 1), 1);
+    assert_eq(mat16_get2d(id, 2, 2), 1);
+    // Off-diagonal
+    assert_eq(mat16_get2d(id, 0, 1), 0);
+    assert_eq(mat16_get2d(id, 0, 2), 0);
+    assert_eq(mat16_get2d(id, 1, 0), 0);
+    assert_eq(mat16_get2d(id, 1, 2), 0);
+    assert_eq(mat16_get2d(id, 2, 0), 0);
+    assert_eq(mat16_get2d(id, 2, 1), 0);
+}
+
+fn test_identity_4x4() {
+    let id = identity_matrix(4);
+    assert_eq(id.rows, 4);
+    assert_eq(id.cols, 4);
+    // Check all 16 elements
+    let mut r = 0;
+    while r < 4 {
+        let mut c = 0;
+        while c < 4 {
+            let expected = if r == c { 1 } else { 0 };
+            assert_eq(mat16_get2d(id, r, c), expected);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+}
+
+fn test_identity_trace() {
+    // Trace of NxN identity = N
+    let id3 = identity_matrix(3);
+    let trace3 = mat16_get2d(id3, 0, 0) + mat16_get2d(id3, 1, 1) + mat16_get2d(id3, 2, 2);
+    assert_eq(trace3, 3);
+
+    let id4 = identity_matrix(4);
+    let trace4 = mat16_get2d(id4, 0, 0) + mat16_get2d(id4, 1, 1)
+               + mat16_get2d(id4, 2, 2) + mat16_get2d(id4, 3, 3);
+    assert_eq(trace4, 4);
+}
+
+// ============================================================================
+// Tests: one-hot encoding
+// ============================================================================
+
+fn test_one_hot_basic() {
+    // one_hot(2, 5) = [0, 0, 1, 0, 0]
+    let oh = one_hot(2, 5);
+    assert_eq(arr16_get(oh, 0), 0);
+    assert_eq(arr16_get(oh, 1), 0);
+    assert_eq(arr16_get(oh, 2), 1);
+    assert_eq(arr16_get(oh, 3), 0);
+    assert_eq(arr16_get(oh, 4), 0);
+}
+
+fn test_one_hot_first() {
+    // one_hot(0, 4) = [1, 0, 0, 0]
+    let oh = one_hot(0, 4);
+    assert_eq(arr16_get(oh, 0), 1);
+    assert_eq(arr16_get(oh, 1), 0);
+    assert_eq(arr16_get(oh, 2), 0);
+    assert_eq(arr16_get(oh, 3), 0);
+}
+
+fn test_one_hot_last() {
+    // one_hot(3, 4) = [0, 0, 0, 1]
+    let oh = one_hot(3, 4);
+    assert_eq(arr16_get(oh, 0), 0);
+    assert_eq(arr16_get(oh, 1), 0);
+    assert_eq(arr16_get(oh, 2), 0);
+    assert_eq(arr16_get(oh, 3), 1);
+}
+
+fn test_one_hot_sum_is_one() {
+    // Sum of one-hot vector is always 1
+    let oh = one_hot(5, 10);
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10 {
+        sum = sum + arr16_get(oh, i);
+        i = i + 1;
+    }
+    assert_eq(sum, 1);
+}
+
+fn test_one_hot_matrix_basic() {
+    // Labels [0, 2, 1] with 3 classes -> 3x3 one-hot matrix
+    let mut labels = arr16_zeros();
+    labels = arr16_set(labels, 0, 0);
+    labels = arr16_set(labels, 1, 2);
+    labels = arr16_set(labels, 2, 1);
+
+    let oh = one_hot_matrix(labels, 3, 3);
+    assert_eq(oh.rows, 3);
+    assert_eq(oh.cols, 3);
+
+    // Row 0: class 0 -> [1, 0, 0]
+    assert_eq(mat16_get2d(oh, 0, 0), 1);
+    assert_eq(mat16_get2d(oh, 0, 1), 0);
+    assert_eq(mat16_get2d(oh, 0, 2), 0);
+
+    // Row 1: class 2 -> [0, 0, 1]
+    assert_eq(mat16_get2d(oh, 1, 0), 0);
+    assert_eq(mat16_get2d(oh, 1, 1), 0);
+    assert_eq(mat16_get2d(oh, 1, 2), 1);
+
+    // Row 2: class 1 -> [0, 1, 0]
+    assert_eq(mat16_get2d(oh, 2, 0), 0);
+    assert_eq(mat16_get2d(oh, 2, 1), 1);
+    assert_eq(mat16_get2d(oh, 2, 2), 0);
+}
+
+fn test_one_hot_matrix_row_sums() {
+    // Each row of a one-hot matrix sums to 1
+    let mut labels = arr16_zeros();
+    labels = arr16_set(labels, 0, 3);
+    labels = arr16_set(labels, 1, 0);
+    labels = arr16_set(labels, 2, 2);
+    labels = arr16_set(labels, 3, 1);
+
+    let oh = one_hot_matrix(labels, 4, 4);
+    let mut r = 0;
+    while r < 4 {
+        let mut row_sum = 0;
+        let mut c = 0;
+        while c < 4 {
+            row_sum = row_sum + mat16_get2d(oh, r, c);
+            c = c + 1;
+        }
+        assert_eq(row_sum, 1);
+        r = r + 1;
+    }
+}
+
+// ============================================================================
+// Tests: edge cases and combinations
+// ============================================================================
+
+fn test_arange_fills_sequentially() {
+    // Verify values are strictly increasing with step 1
+    let a = arange(10, 20, 1);
+    let mut i = 0;
+    while i < 9 {
+        let curr = arr16_get(a, i);
+        let next = arr16_get(a, i + 1);
+        assert(next > curr);
+        i = i + 1;
+    }
+}
+
+fn test_identity_times_vector() {
+    // Identity matrix * any vector = same vector (simulated via row dot products)
+    let id = identity_matrix(3);
+    // Vector [7, 11, 13]
+    let v0 = 7;
+    let v1 = 11;
+    let v2 = 13;
+
+    // Row 0 dot v: 1*7 + 0*11 + 0*13 = 7
+    let r0 = mat16_get2d(id, 0, 0) * v0 + mat16_get2d(id, 0, 1) * v1 + mat16_get2d(id, 0, 2) * v2;
+    assert_eq(r0, 7);
+
+    // Row 1 dot v: 0*7 + 1*11 + 0*13 = 11
+    let r1 = mat16_get2d(id, 1, 0) * v0 + mat16_get2d(id, 1, 1) * v1 + mat16_get2d(id, 1, 2) * v2;
+    assert_eq(r1, 11);
+
+    // Row 2 dot v: 0*7 + 0*11 + 1*13 = 13
+    let r2 = mat16_get2d(id, 2, 0) * v0 + mat16_get2d(id, 2, 1) * v1 + mat16_get2d(id, 2, 2) * v2;
+    assert_eq(r2, 13);
+}
+
+fn test_arange_sum() {
+    // Sum of arange(0, n, 1) = n*(n-1)/2
+    let a = arange(0, 10, 1);
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 10 {
+        sum = sum + arr16_get(a, i);
+        i = i + 1;
+    }
+    // 0+1+2+...+9 = 45
+    assert_eq(sum, 45);
+}
+
+fn main() -> Int {
+    test_arange_basic();
+    test_arange_step2();
+    test_arange_step3();
+    test_arange_nonzero_start();
+    test_arange_single_element();
+    test_arange_empty();
+    test_arange_large_step();
+    test_arange_step_not_dividing();
+    test_linspace_basic();
+    test_linspace_two_points();
+    test_linspace_single_point();
+    test_linspace_same_endpoints();
+    test_linspace_three_points();
+    test_linspace_endpoints_always_exact();
+    test_identity_1x1();
+    test_identity_2x2();
+    test_identity_3x3();
+    test_identity_4x4();
+    test_identity_trace();
+    test_one_hot_basic();
+    test_one_hot_first();
+    test_one_hot_last();
+    test_one_hot_sum_is_one();
+    test_one_hot_matrix_basic();
+    test_one_hot_matrix_row_sums();
+    test_arange_fills_sequentially();
+    test_identity_times_vector();
+    test_arange_sum();
+    print("ALL PASSED");
+    0
+}

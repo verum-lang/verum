@@ -1,0 +1,246 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, stack, queue, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Stack (LIFO) and Queue (FIFO) using fixed-size 8-element arrays
+
+// ============================================================================
+// Stack type (array + top index)
+// ============================================================================
+
+type Stack8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    top: Int   // index of next push position (also = size)
+};
+
+fn stack_new() -> Stack8 {
+    Stack8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, top: 0 }
+}
+
+fn s_get(s: Stack8, i: Int) -> Int {
+    if i == 0 { s.e0 } else if i == 1 { s.e1 } else if i == 2 { s.e2 }
+    else if i == 3 { s.e3 } else if i == 4 { s.e4 } else if i == 5 { s.e5 }
+    else if i == 6 { s.e6 } else { s.e7 }
+}
+
+fn s_set(s: Stack8, i: Int, val: Int) -> Stack8 {
+    Stack8 {
+        e0: if i == 0 { val } else { s.e0 },
+        e1: if i == 1 { val } else { s.e1 },
+        e2: if i == 2 { val } else { s.e2 },
+        e3: if i == 3 { val } else { s.e3 },
+        e4: if i == 4 { val } else { s.e4 },
+        e5: if i == 5 { val } else { s.e5 },
+        e6: if i == 6 { val } else { s.e6 },
+        e7: if i == 7 { val } else { s.e7 },
+        top: s.top
+    }
+}
+
+fn stack_push(s: Stack8, val: Int) -> Stack8 {
+    let updated = s_set(s, s.top, val);
+    Stack8 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        top: s.top + 1
+    }
+}
+
+fn stack_pop(s: Stack8) -> Stack8 {
+    Stack8 {
+        e0: s.e0, e1: s.e1, e2: s.e2, e3: s.e3,
+        e4: s.e4, e5: s.e5, e6: s.e6, e7: s.e7,
+        top: s.top - 1
+    }
+}
+
+fn stack_peek(s: Stack8) -> Int {
+    s_get(s, s.top - 1)
+}
+
+fn stack_is_empty(s: Stack8) -> Int {
+    if s.top == 0 { 1 } else { 0 }
+}
+
+fn stack_size(s: Stack8) -> Int {
+    s.top
+}
+
+// ============================================================================
+// Queue type (array + head/tail)
+// ============================================================================
+
+type Queue8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    head: Int,    // front of queue
+    tail: Int,    // next write position
+    count: Int
+};
+
+fn queue_new() -> Queue8 {
+    Queue8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+             head: 0, tail: 0, count: 0 }
+}
+
+fn q_get(q: Queue8, i: Int) -> Int {
+    if i == 0 { q.e0 } else if i == 1 { q.e1 } else if i == 2 { q.e2 }
+    else if i == 3 { q.e3 } else if i == 4 { q.e4 } else if i == 5 { q.e5 }
+    else if i == 6 { q.e6 } else { q.e7 }
+}
+
+fn q_set(q: Queue8, i: Int, val: Int) -> Queue8 {
+    Queue8 {
+        e0: if i == 0 { val } else { q.e0 },
+        e1: if i == 1 { val } else { q.e1 },
+        e2: if i == 2 { val } else { q.e2 },
+        e3: if i == 3 { val } else { q.e3 },
+        e4: if i == 4 { val } else { q.e4 },
+        e5: if i == 5 { val } else { q.e5 },
+        e6: if i == 6 { val } else { q.e6 },
+        e7: if i == 7 { val } else { q.e7 },
+        head: q.head, tail: q.tail, count: q.count
+    }
+}
+
+fn wrap_q(i: Int) -> Int {
+    i - (i / 8) * 8
+}
+
+fn queue_enqueue(q: Queue8, val: Int) -> Queue8 {
+    let updated = q_set(q, q.tail, val);
+    Queue8 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        head: q.head, tail: wrap_q(q.tail + 1), count: q.count + 1
+    }
+}
+
+fn queue_dequeue_val(q: Queue8) -> Int {
+    q_get(q, q.head)
+}
+
+fn queue_dequeue(q: Queue8) -> Queue8 {
+    Queue8 {
+        e0: q.e0, e1: q.e1, e2: q.e2, e3: q.e3,
+        e4: q.e4, e5: q.e5, e6: q.e6, e7: q.e7,
+        head: wrap_q(q.head + 1), tail: q.tail, count: q.count - 1
+    }
+}
+
+fn queue_peek(q: Queue8) -> Int {
+    q_get(q, q.head)
+}
+
+fn queue_is_empty(q: Queue8) -> Int {
+    if q.count == 0 { 1 } else { 0 }
+}
+
+fn queue_size(q: Queue8) -> Int {
+    q.count
+}
+
+// ============================================================================
+// Stack Tests
+// ============================================================================
+
+@test
+fn test_stack_lifo() -> Int {
+    let mut s = stack_new();
+    s = stack_push(s, 10);
+    s = stack_push(s, 20);
+    s = stack_push(s, 30);
+    // LIFO: last in (30) comes out first
+    assert_eq(stack_peek(s), 30);
+    s = stack_pop(s);
+    assert_eq(stack_peek(s), 20);
+    s = stack_pop(s);
+    assert_eq(stack_peek(s), 10);
+    s = stack_pop(s);
+    assert_eq(stack_is_empty(s), 1);
+    0
+}
+
+@test
+fn test_stack_size() -> Int {
+    let mut s = stack_new();
+    assert_eq(stack_size(s), 0);
+    assert_eq(stack_is_empty(s), 1);
+    s = stack_push(s, 1);
+    s = stack_push(s, 2);
+    s = stack_push(s, 3);
+    assert_eq(stack_size(s), 3);
+    assert_eq(stack_is_empty(s), 0);
+    s = stack_pop(s);
+    assert_eq(stack_size(s), 2);
+    0
+}
+
+@test
+fn test_stack_push_pop_cycle() -> Int {
+    let mut s = stack_new();
+    s = stack_push(s, 100);
+    s = stack_push(s, 200);
+    assert_eq(stack_peek(s), 200);
+    s = stack_pop(s);
+    s = stack_push(s, 300);
+    s = stack_push(s, 400);
+    // Stack now: 100, 300, 400
+    assert_eq(stack_peek(s), 400);
+    s = stack_pop(s);
+    assert_eq(stack_peek(s), 300);
+    s = stack_pop(s);
+    assert_eq(stack_peek(s), 100);
+    0
+}
+
+// ============================================================================
+// Queue Tests
+// ============================================================================
+
+@test
+fn test_queue_fifo() -> Int {
+    let mut q = queue_new();
+    q = queue_enqueue(q, 10);
+    q = queue_enqueue(q, 20);
+    q = queue_enqueue(q, 30);
+    // FIFO: first in (10) comes out first
+    let v1 = queue_dequeue_val(q);
+    q = queue_dequeue(q);
+    assert_eq(v1, 10);
+    let v2 = queue_dequeue_val(q);
+    q = queue_dequeue(q);
+    assert_eq(v2, 20);
+    let v3 = queue_dequeue_val(q);
+    q = queue_dequeue(q);
+    assert_eq(v3, 30);
+    assert_eq(queue_is_empty(q), 1);
+    0
+}
+
+@test
+fn test_queue_peek_and_size() -> Int {
+    let mut q = queue_new();
+    assert_eq(queue_size(q), 0);
+    assert_eq(queue_is_empty(q), 1);
+    q = queue_enqueue(q, 42);
+    q = queue_enqueue(q, 99);
+    assert_eq(queue_size(q), 2);
+    // Peek shows front without removing
+    assert_eq(queue_peek(q), 42);
+    assert_eq(queue_size(q), 2);
+    0
+}
+
+fn main() -> Int {
+    test_stack_lifo();
+    test_stack_size();
+    test_stack_push_pop_cycle();
+    test_queue_fifo();
+    test_queue_peek_and_size();
+    print("[OK] 102_stack_queue");
+    0
+}

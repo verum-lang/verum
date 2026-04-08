@@ -1,0 +1,156 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, invalid, negative
+
+// Invalid tagged literal syntax - each line should fail to parse
+
+fn test_missing_closing_delimiter() {
+    // Missing closing delimiter
+    let incomplete_date = d#"2025-01-15;
+    let incomplete_regex = rx#"[a-z]+;
+    let incomplete_uuid = uuid#"550e8400-e29b-41d4;
+}
+
+fn test_invalid_date_formats() {
+    // Invalid date formats
+    let bad_date_month = d#"2025-13-01";
+    let bad_date_day = d#"2025-01-32";
+    let bad_date_format = d#"01-15-2025";
+    let bad_date_slashes = d#"2025/01/15";
+    let bad_date_dots = d#"2025.01.15";
+    let bad_date_incomplete = d#"2025-01";
+    let bad_date_year_only = d#"2025";
+    let bad_date_time_no_t = d#"2025-01-15 10:30:00";
+    let bad_date_invalid_time = d#"2025-01-15T25:00:00";
+    let bad_date_invalid_minute = d#"2025-01-15T10:60:00";
+    let bad_date_invalid_second = d#"2025-01-15T10:30:60";
+}
+
+fn test_invalid_uuid_formats() {
+    // Invalid UUID formats
+    let bad_uuid_short = uuid#"550e8400";
+    let bad_uuid_no_dashes = uuid#"550e8400e29b41d4a716446655440000";
+    let bad_uuid_wrong_dashes = uuid#"550e-8400-e29b-41d4-a716";
+    let bad_uuid_invalid_hex = uuid#"GGGG8400-e29b-41d4-a716-446655440000";
+    let bad_uuid_extra_chars = uuid#"550e8400-e29b-41d4-a716-4466554400001";
+}
+
+fn test_invalid_regex_patterns() {
+    // Invalid regex patterns
+    let bad_regex_unclosed_group = rx#"[a-z";
+    let bad_regex_unclosed_paren = rx#"(abc";
+    let bad_regex_invalid_escape = rx#"\q";
+    let bad_regex_unclosed_brace = rx#"a{5";
+    let bad_regex_bad_quantifier = rx#"a{-1}";
+    let bad_regex_unbalanced = rx#"(()";
+}
+
+fn test_invalid_json_literals() {
+    // Invalid JSON literals
+    let bad_json_trailing_comma = json#"{\"a\": 1,}";
+    let bad_json_single_quotes = json#"{'a': 1}";
+    let bad_json_no_quotes = json#"{a: 1}";
+    let bad_json_unclosed = json#"{\"a\": 1";
+    let bad_json_array_unclosed = json#"[1, 2, 3";
+}
+
+fn test_invalid_sql_literals() {
+    // Invalid SQL literals
+    let bad_sql_unclosed_string = sql#"SELECT * FROM users WHERE name = 'John";
+    let bad_sql_syntax = sql#"SELEC * FROM users";
+}
+
+fn test_invalid_hex_color_literals() {
+    // Invalid hex color literals
+    let bad_hex_short = hex#"#FFF";
+    let bad_hex_wrong_length = hex#"#FFFFF";
+    let bad_hex_invalid_chars = hex#"#GGGGGG";
+    let bad_hex_no_hash = hex#"FF5733";
+}
+
+fn test_missing_tag_prefix() {
+    // Missing tag prefix
+    let no_tag = #"2025-01-15";
+}
+
+fn test_invalid_tag_names() {
+    // Invalid tag names
+    let numeric_tag = 123#"value";
+    let special_tag = @#"value";
+    let space_in_tag = da te#"2025-01-15";
+}
+
+fn test_mismatched_raw_delimiters() {
+    // Mismatched raw string delimiters with tags
+    let tag_raw_mismatch = d#"value"##;
+    let tag_raw_extra = d##"value"#;
+}
+
+fn test_empty_tagged_content() {
+    // Empty tagged content
+    let empty_date = d#"";
+    let empty_uuid = uuid#"";
+    let empty_regex = rx#"";
+}
+
+fn test_whitespace_between_tag_and_content() {
+    // Whitespace between tag and content
+    let space_before = d #"2025-01-15";
+    let newline_before = d;
+#"2025-01-15"
+}
+
+fn test_multiple_tags() {
+    // Multiple tags
+    let double_tag = d#d#"2025-01-15";
+}
+
+fn test_tag_with_wrong_type() {
+    // Tag with wrong string type
+    let tag_char = d#'x';
+    let tag_number = d#42;
+}
+
+fn test_nested_tagged_literals() {
+    // Nested tagged literals (if not supported)
+    let nested_tags = json#"{ \"date\": d#\"2025-01-15\" }";
+}
+
+fn test_control_chars_in_tagged() {
+    // Control characters in tagged content
+    let control_in_tag = d#"2025\x00-01-15";
+}
+
+fn test_unicode_in_date() {
+    // Unicode issues in date
+    let unicode_in_date = d#"２０２５-01-15";
+}
+
+fn test_invalid_email_formats() {
+    // Email validation failures
+    let bad_email_no_at = email#"userexample.com";
+    let bad_email_no_domain = email#"user@";
+    let bad_email_double_at = email#"user@@example.com";
+    let bad_email_spaces = email#"user @example.com";
+}
+
+fn test_invalid_url_formats() {
+    // URL validation failures
+    let bad_url_no_scheme = url#"example.com/path";
+    let bad_url_bad_scheme = url#"htp://example.com";
+    let bad_url_spaces = url#"https://example .com";
+}
+
+fn test_invalid_graphql() {
+    // GraphQL validation failures
+    let bad_gql_syntax = gql#"query { user(id: ) { name } }";
+    let bad_gql_unclosed = gql#"query { user { name ";
+}
+
+fn test_invalid_interval_notation() {
+    // Interval notation failures
+    let bad_interval_no_comma = interval#"[0 100)";
+    let bad_interval_wrong_brackets = interval#"(0, 100])";
+    let bad_interval_invalid = interval#"[100, 0)";
+}

@@ -1,0 +1,256 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, union-find, disjoint-set, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for disjoint set / union-find with path compression and union by rank
+
+// Parent array: parent[i] gives the parent of node i (-1 = self-root)
+type UF16 is {
+    p0: Int, p1: Int, p2: Int, p3: Int, p4: Int, p5: Int, p6: Int, p7: Int,
+    p8: Int, p9: Int, p10: Int, p11: Int, p12: Int, p13: Int, p14: Int, p15: Int,
+    size: Int
+};
+
+// Rank array
+type Rank16 is {
+    r0: Int, r1: Int, r2: Int, r3: Int, r4: Int, r5: Int, r6: Int, r7: Int,
+    r8: Int, r9: Int, r10: Int, r11: Int, r12: Int, r13: Int, r14: Int, r15: Int
+};
+
+fn uf_get(u: UF16, i: Int) -> Int {
+    if i == 0 { u.p0 } else if i == 1 { u.p1 }
+    else if i == 2 { u.p2 } else if i == 3 { u.p3 }
+    else if i == 4 { u.p4 } else if i == 5 { u.p5 }
+    else if i == 6 { u.p6 } else if i == 7 { u.p7 }
+    else if i == 8 { u.p8 } else if i == 9 { u.p9 }
+    else if i == 10 { u.p10 } else if i == 11 { u.p11 }
+    else if i == 12 { u.p12 } else if i == 13 { u.p13 }
+    else if i == 14 { u.p14 } else { u.p15 }
+}
+
+fn uf_set(u: UF16, i: Int, v: Int) -> UF16 {
+    UF16 {
+        p0: if i == 0 { v } else { u.p0 }, p1: if i == 1 { v } else { u.p1 },
+        p2: if i == 2 { v } else { u.p2 }, p3: if i == 3 { v } else { u.p3 },
+        p4: if i == 4 { v } else { u.p4 }, p5: if i == 5 { v } else { u.p5 },
+        p6: if i == 6 { v } else { u.p6 }, p7: if i == 7 { v } else { u.p7 },
+        p8: if i == 8 { v } else { u.p8 }, p9: if i == 9 { v } else { u.p9 },
+        p10: if i == 10 { v } else { u.p10 }, p11: if i == 11 { v } else { u.p11 },
+        p12: if i == 12 { v } else { u.p12 }, p13: if i == 13 { v } else { u.p13 },
+        p14: if i == 14 { v } else { u.p14 }, p15: if i == 15 { v } else { u.p15 },
+        size: u.size
+    }
+}
+
+fn rank_get(r: Rank16, i: Int) -> Int {
+    if i == 0 { r.r0 } else if i == 1 { r.r1 }
+    else if i == 2 { r.r2 } else if i == 3 { r.r3 }
+    else if i == 4 { r.r4 } else if i == 5 { r.r5 }
+    else if i == 6 { r.r6 } else if i == 7 { r.r7 }
+    else if i == 8 { r.r8 } else if i == 9 { r.r9 }
+    else if i == 10 { r.r10 } else if i == 11 { r.r11 }
+    else if i == 12 { r.r12 } else if i == 13 { r.r13 }
+    else if i == 14 { r.r14 } else { r.r15 }
+}
+
+fn rank_set(r: Rank16, i: Int, v: Int) -> Rank16 {
+    Rank16 {
+        r0: if i == 0 { v } else { r.r0 }, r1: if i == 1 { v } else { r.r1 },
+        r2: if i == 2 { v } else { r.r2 }, r3: if i == 3 { v } else { r.r3 },
+        r4: if i == 4 { v } else { r.r4 }, r5: if i == 5 { v } else { r.r5 },
+        r6: if i == 6 { v } else { r.r6 }, r7: if i == 7 { v } else { r.r7 },
+        r8: if i == 8 { v } else { r.r8 }, r9: if i == 9 { v } else { r.r9 },
+        r10: if i == 10 { v } else { r.r10 }, r11: if i == 11 { v } else { r.r11 },
+        r12: if i == 12 { v } else { r.r12 }, r13: if i == 13 { v } else { r.r13 },
+        r14: if i == 14 { v } else { r.r14 }, r15: if i == 15 { v } else { r.r15 }
+    }
+}
+
+// Initialize: each element is its own parent
+fn uf_make(n: Int) -> UF16 {
+    UF16 {
+        p0: 0, p1: 1, p2: 2, p3: 3, p4: 4, p5: 5, p6: 6, p7: 7,
+        p8: 8, p9: 9, p10: 10, p11: 11, p12: 12, p13: 13, p14: 14, p15: 15,
+        size: n
+    }
+}
+
+fn rank_make() -> Rank16 {
+    Rank16 {
+        r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0,
+        r8: 0, r9: 0, r10: 0, r11: 0, r12: 0, r13: 0, r14: 0, r15: 0
+    }
+}
+
+// Find root with path compression (iterative)
+fn uf_find(u: UF16, x: Int) -> Int {
+    let mut cur = x;
+    while uf_get(u, cur) != cur {
+        cur = uf_get(u, cur);
+    }
+    cur
+}
+
+// Path compression: make all nodes on path point directly to root
+fn uf_compress(u: UF16, x: Int, root: Int) -> UF16 {
+    let mut result = u;
+    let mut cur = x;
+    while cur != root {
+        let next = uf_get(result, cur);
+        result = uf_set(result, cur, root);
+        cur = next;
+    }
+    result
+}
+
+// Pair for returning both UF and Rank together
+type UFState is { parent: UF16, rank: Rank16, components: Int };
+
+// Union by rank
+fn uf_union(state: UFState, a: Int, b_val: Int) -> UFState {
+    let root_a = uf_find(state.parent, a);
+    let root_b = uf_find(state.parent, b_val);
+    if root_a == root_b { return state; }
+
+    let rank_a = rank_get(state.rank, root_a);
+    let rank_b = rank_get(state.rank, root_b);
+
+    let mut new_parent = state.parent;
+    let mut new_rank = state.rank;
+
+    if rank_a < rank_b {
+        new_parent = uf_set(new_parent, root_a, root_b);
+    } else if rank_a > rank_b {
+        new_parent = uf_set(new_parent, root_b, root_a);
+    } else {
+        new_parent = uf_set(new_parent, root_b, root_a);
+        new_rank = rank_set(new_rank, root_a, rank_a + 1);
+    }
+
+    // Path compression for both
+    new_parent = uf_compress(new_parent, a, uf_find(new_parent, a));
+    new_parent = uf_compress(new_parent, b_val, uf_find(new_parent, b_val));
+
+    UFState { parent: new_parent, rank: new_rank, components: state.components - 1 }
+}
+
+fn uf_connected(state: UFState, a: Int, b_val: Int) -> Bool {
+    uf_find(state.parent, a) == uf_find(state.parent, b_val)
+}
+
+// Count distinct components
+fn count_components(state: UFState) -> Int {
+    state.components
+}
+
+fn test_basic_union() {
+    let s = UFState { parent: uf_make(8), rank: rank_make(), components: 8 };
+
+    // Union 0-1, 2-3
+    let s1 = uf_union(s, 0, 1);
+    assert_eq(uf_connected(s1, 0, 1), true);
+    assert_eq(uf_connected(s1, 0, 2), false);
+    assert_eq(count_components(s1), 7);
+
+    let s2 = uf_union(s1, 2, 3);
+    assert_eq(uf_connected(s2, 2, 3), true);
+    assert_eq(uf_connected(s2, 0, 2), false);
+    assert_eq(count_components(s2), 6);
+
+    // Union the two groups
+    let s3 = uf_union(s2, 1, 3);
+    assert_eq(uf_connected(s3, 0, 2), true);
+    assert_eq(uf_connected(s3, 0, 3), true);
+    assert_eq(uf_connected(s3, 1, 2), true);
+    assert_eq(count_components(s3), 5);
+}
+
+fn test_chain_union() {
+    // Union in a chain: 0-1, 1-2, 2-3, ..., 6-7
+    let mut s = UFState { parent: uf_make(8), rank: rank_make(), components: 8 };
+    let mut i = 0;
+    while i < 7 {
+        s = uf_union(s, i, i + 1);
+        i = i + 1;
+    }
+    // All connected
+    assert_eq(uf_connected(s, 0, 7), true);
+    assert_eq(uf_connected(s, 3, 5), true);
+    assert_eq(count_components(s), 1);
+}
+
+fn test_self_union() {
+    let s = UFState { parent: uf_make(4), rank: rank_make(), components: 4 };
+    let s2 = uf_union(s, 0, 0);
+    assert_eq(count_components(s2), 4);  // No change
+    assert_eq(uf_connected(s2, 0, 1), false);
+}
+
+fn test_idempotent_union() {
+    let s = UFState { parent: uf_make(4), rank: rank_make(), components: 4 };
+    let s2 = uf_union(s, 0, 1);
+    assert_eq(count_components(s2), 3);
+    // Union same pair again: no change
+    let s3 = uf_union(s2, 0, 1);
+    assert_eq(count_components(s3), 3);
+    let s4 = uf_union(s3, 1, 0);
+    assert_eq(count_components(s4), 3);
+}
+
+fn test_multiple_components() {
+    let mut s = UFState { parent: uf_make(10), rank: rank_make(), components: 10 };
+    // Component A: {0, 1, 2}
+    s = uf_union(s, 0, 1);
+    s = uf_union(s, 1, 2);
+    // Component B: {3, 4}
+    s = uf_union(s, 3, 4);
+    // Component C: {5, 6, 7}
+    s = uf_union(s, 5, 6);
+    s = uf_union(s, 6, 7);
+
+    assert_eq(count_components(s), 5);  // A, B, C, {8}, {9}
+    assert_eq(uf_connected(s, 0, 2), true);
+    assert_eq(uf_connected(s, 3, 4), true);
+    assert_eq(uf_connected(s, 5, 7), true);
+    assert_eq(uf_connected(s, 0, 3), false);
+    assert_eq(uf_connected(s, 3, 5), false);
+    assert_eq(uf_connected(s, 0, 8), false);
+
+    // Now merge A and B
+    s = uf_union(s, 2, 4);
+    assert_eq(count_components(s), 4);
+    assert_eq(uf_connected(s, 0, 4), true);
+    assert_eq(uf_connected(s, 1, 3), true);
+}
+
+fn test_path_compression() {
+    // Build a long chain: 0->1->2->3->4
+    let mut s = UFState { parent: uf_make(8), rank: rank_make(), components: 8 };
+    s = uf_union(s, 0, 1);
+    s = uf_union(s, 1, 2);
+    s = uf_union(s, 2, 3);
+    s = uf_union(s, 3, 4);
+
+    // After finding root from 0, path should be compressed
+    let root = uf_find(s.parent, 0);
+    let compressed = uf_compress(s.parent, 0, root);
+
+    // 0 should now point directly to root
+    assert_eq(uf_get(compressed, 0), root);
+    // All should still be connected
+    assert_eq(uf_find(compressed, 0) == uf_find(compressed, 4), true);
+}
+
+fn main() -> Int {
+    test_basic_union();
+    test_chain_union();
+    test_self_union();
+    test_idempotent_union();
+    test_multiple_components();
+    test_path_compression();
+    print("[OK] 289_union_find_aot");
+    0
+}

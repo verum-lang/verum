@@ -1,0 +1,127 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, fenwick, bit, tree
+// @timeout: 30000
+
+// Fenwick (Binary Indexed) Tree for prefix sums
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+// Lowest set bit
+fn lsb(x: Int) -> Int {
+    x & (-x)
+}
+
+// Fenwick update: add delta at position i (1-indexed, n<=7)
+fn fenwick_update(tree: Arr8, i: Int, delta: Int, n: Int) -> Arr8 {
+    let mut t = tree;
+    let mut idx = i;
+    while idx <= n {
+        t = set8(t, idx, get8(t, idx) + delta);
+        idx = idx + lsb(idx);
+    }
+    t
+}
+
+// Fenwick query: prefix sum [1..i]
+fn fenwick_query(tree: Arr8, i: Int) -> Int {
+    let mut sum_val = 0;
+    let mut idx = i;
+    while idx > 0 {
+        sum_val = sum_val + get8(tree, idx);
+        idx = idx - lsb(idx);
+    }
+    sum_val
+}
+
+// Range sum [l..r]
+fn fenwick_range(tree: Arr8, l: Int, r: Int) -> Int {
+    fenwick_query(tree, r) - fenwick_query(tree, l - 1)
+}
+
+// Build from array (1-indexed)
+fn fenwick_build(arr: Arr8, n: Int) -> Arr8 {
+    let mut tree = new_arr8();
+    let mut i = 1;
+    while i <= n {
+        tree = fenwick_update(tree, i, get8(arr, i), n);
+        i = i + 1;
+    }
+    tree
+}
+
+fn test_basic() -> Int {
+    // Array (1-indexed): [0, 3, 2, -1, 6, 5, 4, -3]
+    let arr = Arr8 { v0: 0, v1: 3, v2: 2, v3: -1, v4: 6, v5: 5, v6: 4, v7: -3 };
+    let tree = fenwick_build(arr, 7);
+
+    // Prefix sums: [3, 5, 4, 10, 15, 19, 16]
+    assert_eq(fenwick_query(tree, 1), 3);
+    assert_eq(fenwick_query(tree, 2), 5);
+    assert_eq(fenwick_query(tree, 3), 4);
+    assert_eq(fenwick_query(tree, 4), 10);
+    assert_eq(fenwick_query(tree, 7), 16);
+    1
+}
+
+fn test_range() -> Int {
+    let arr = Arr8 { v0: 0, v1: 3, v2: 2, v3: -1, v4: 6, v5: 5, v6: 4, v7: -3 };
+    let tree = fenwick_build(arr, 7);
+
+    // Range [2,4] = 2 + (-1) + 6 = 7
+    assert_eq(fenwick_range(tree, 2, 4), 7);
+    // Range [5,7] = 5 + 4 + (-3) = 6
+    assert_eq(fenwick_range(tree, 5, 7), 6);
+    1
+}
+
+fn test_update() -> Int {
+    let arr = Arr8 { v0: 0, v1: 1, v2: 2, v3: 3, v4: 4, v5: 5, v6: 0, v7: 0 };
+    let mut tree = fenwick_build(arr, 5);
+    // Sum [1..5] = 15
+    assert_eq(fenwick_query(tree, 5), 15);
+
+    // Add 10 to position 3
+    tree = fenwick_update(tree, 3, 10, 5);
+    // Sum [1..5] = 25
+    assert_eq(fenwick_query(tree, 5), 25);
+    // Sum [1..2] unchanged = 3
+    assert_eq(fenwick_query(tree, 2), 3);
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_range();
+    test_update();
+    print("[OK] 429_fenwick_tree_aot");
+    0
+}

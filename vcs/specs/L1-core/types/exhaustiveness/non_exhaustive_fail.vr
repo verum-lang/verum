@@ -1,0 +1,19 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: exhaustiveness, pattern-matching, error
+// @expected-error: E0601
+// @description: Non-exhaustive pattern match should fail type checking
+
+type Color is Red | Green | Blue;
+
+// ERROR: Missing Blue case
+fn color_name(c: Color) -> Text =
+    match c {
+        Red => "red",
+        Green => "green"
+        // E0601: non-exhaustive patterns: `Blue` not covered
+    };
+
+fn main() {
+    let _ = color_name(Blue);
+}

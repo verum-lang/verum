@@ -1,0 +1,121 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, binary_gcd, stein_algorithm, number_theory, gcd, lcm
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Binary GCD (Stein's algorithm): computes GCD without division using only
+// subtraction and bit shifts (halving/doubling).
+//
+// Algorithm:
+//   gcd(0, v) = v, gcd(u, 0) = u
+//   Both even:  gcd(u, v) = 2 * gcd(u/2, v/2)
+//   u even, v odd: gcd(u, v) = gcd(u/2, v)
+//   u odd, v even: gcd(u, v) = gcd(u, v/2)
+//   Both odd (u >= v): gcd(u, v) = gcd((u-v)/2, v)
+
+@allow(unbounded_recursion)
+fn binary_gcd(u: Int, v: Int) -> Int {
+    if u == 0 { return v; }
+    if v == 0 { return u; }
+    let u_even = if u % 2 == 0 { 1 } else { 0 };
+    let v_even = if v % 2 == 0 { 1 } else { 0 };
+    if u_even == 1 && v_even == 1 {
+        return 2 * binary_gcd(u / 2, v / 2);
+    }
+    if u_even == 1 {
+        return binary_gcd(u / 2, v);
+    }
+    if v_even == 1 {
+        return binary_gcd(u, v / 2);
+    }
+    // Both odd
+    if u >= v {
+        binary_gcd((u - v) / 2, v)
+    } else {
+        binary_gcd(u, (v - u) / 2)
+    }
+}
+
+// Iterative Euclidean GCD for comparison.
+fn euclidean_gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    let g = binary_gcd(a, b);
+    (a / g) * b
+}
+
+fn test_basic_gcd() {
+    assert_eq(binary_gcd(48, 18), 6);
+    assert_eq(binary_gcd(18, 48), 6);   // commutative
+    assert_eq(binary_gcd(100, 75), 25);
+    assert_eq(binary_gcd(7, 13), 1);    // coprime
+    assert_eq(binary_gcd(0, 42), 42);   // identity
+    assert_eq(binary_gcd(42, 0), 42);   // identity
+    print("basic_gcd: ok");
+}
+
+fn test_matches_euclidean() {
+    // Binary GCD must agree with Euclidean GCD on all test cases.
+    assert_eq(binary_gcd(12, 8),   euclidean_gcd(12, 8));
+    assert_eq(binary_gcd(35, 14),  euclidean_gcd(35, 14));
+    assert_eq(binary_gcd(56, 98),  euclidean_gcd(56, 98));
+    assert_eq(binary_gcd(1071, 462), euclidean_gcd(1071, 462));
+    assert_eq(binary_gcd(270, 192), euclidean_gcd(270, 192));
+    print("matches_euclidean: ok");
+}
+
+fn test_prime_pairs() {
+    // gcd of two distinct primes = 1
+    assert_eq(binary_gcd(17, 19), 1);
+    assert_eq(binary_gcd(97, 89), 1);
+    assert_eq(binary_gcd(2, 3),   1);
+    // gcd(p, p) = p
+    assert_eq(binary_gcd(13, 13), 13);
+    assert_eq(binary_gcd(37, 37), 37);
+    print("prime_pairs: ok");
+}
+
+fn test_lcm() {
+    // lcm(4, 6) = 12
+    assert_eq(lcm(4, 6), 12);
+    // lcm(3, 5) = 15
+    assert_eq(lcm(3, 5), 15);
+    // lcm(12, 18) = 36
+    assert_eq(lcm(12, 18), 36);
+    // lcm(a,b) * gcd(a,b) = a*b
+    let a = 60; let b = 48;
+    let g = binary_gcd(a, b);
+    let l = lcm(a, b);
+    assert_eq(g * l, a * b);
+    print("lcm: ok");
+}
+
+fn test_powers_of_two() {
+    // gcd(2^n, 2^m) = 2^min(n,m)
+    assert_eq(binary_gcd(8, 16), 8);    // 2^3, 2^4 -> 2^3
+    assert_eq(binary_gcd(16, 32), 16);  // 2^4, 2^5 -> 2^4
+    assert_eq(binary_gcd(64, 48), 16);  // 64=2^6, 48=16*3 -> 16
+    assert_eq(binary_gcd(36, 24), 12);  // 36=4*9, 24=4*6 -> 4*gcd(9,6)=4*3=12
+    print("powers_of_two: ok");
+}
+
+fn main() -> Int {
+    test_basic_gcd();
+    test_matches_euclidean();
+    test_prime_pairs();
+    test_lcm();
+    test_powers_of_two();
+    print("[OK] 517_interp_binary_gcd");
+    0
+}

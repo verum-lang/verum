@@ -1,0 +1,82 @@
+// @test: parse-pass
+// @tier: all
+// @level: L1
+// @tags: modules, profiles, application, systems, research
+
+/// Language profiles at module level (Spec Section 13).
+/// Modules can declare which language profiles they require.
+/// This test verifies the syntax for profile-related attributes.
+
+// Application profile - default, safe, productive
+@profile(application)
+module web_server {
+    pub fn handle_request(req: Request) -> Response {
+        Response { status: 200, body: "OK" }
+    }
+
+    pub type Request is {
+        user_id: Int,
+        path: Text
+    };
+
+    pub type Response is {
+        status: Int,
+        body: Text
+    };
+
+    pub fn safe_operation() -> Int {
+        42
+    }
+}
+
+// Systems profile - maximum control
+@profile(systems)
+module low_level {
+    pub fn custom_allocator() -> Allocator {
+        Allocator.new()
+    }
+
+    pub type Allocator is {
+        size: Int
+    };
+
+    implement Allocator {
+        pub fn new() -> Allocator {
+            Allocator { size: 0 }
+        }
+    }
+}
+
+// Research profile - formal verification
+@profile(research)
+module verified_math {
+    pub fn verified_sqrt(x: Float) -> Float {
+        x.sqrt()
+    }
+
+    pub fn factorial(n: Int) -> Int {
+        if n == 0 { 1 }
+        else { n * factorial(n - 1) }
+    }
+}
+
+// Child modules inherit profile restrictions
+@profile(systems)
+pub module runtime {
+    pub module gc {
+        pub fn collect() {
+            // Only available in Systems profile
+        }
+    }
+
+    pub module scheduler {
+        pub fn spawn_task() {
+            // Also inherits Systems profile
+        }
+    }
+}
+
+fn main() -> Int {
+    let result = web_server.safe_operation();
+    0
+}

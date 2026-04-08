@@ -1,0 +1,54 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: channel, spawn, producer-consumer, runtime
+// @description: Test producer-consumer pattern across threads with channels
+
+fn main() -> Int {
+    let mut failures = 0;
+    let n = 100;
+
+    let data_ch = Channel.new(32);
+    let result_ch = Channel.new(1);
+
+    // Producer thread
+    let p = spawn {
+        let mut i = 0;
+        while i < n {
+            data_ch.send(i);
+            i = i + 1;
+        }
+        data_ch.send(-1);
+        0
+    };
+
+    // Consumer thread
+    let c = spawn {
+        let mut sum = 0;
+        loop {
+            let val = match data_ch.recv() { Some(v) => v, None => -1 };
+            if val == -1 {
+                break;
+            }
+            sum = sum + val;
+        }
+        result_ch.send(sum);
+        0
+    };
+
+    p.await;
+    c.await;
+
+    let sum = match result_ch.recv() { Some(v) => v, None => -1 };
+
+    // Sum of 0..99 = 4950
+    if sum != 4950 {
+        print(f"FAIL: expected 4950, got {sum}");
+        failures = failures + 1;
+    }
+
+    if failures == 0 {
+        print("All producer-consumer tests passed");
+    }
+    failures
+}

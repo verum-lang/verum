@@ -1,0 +1,129 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, forall, quantifiers, error
+// @timeout: 5000
+// @expected-error: E605 "Universal quantifier not satisfied"
+
+/// Tests for forall quantifier verification failures
+/// Postconditions with universal quantification that don't hold
+
+/// Forall over array - not all elements satisfy
+@verify(proof)
+fn fill_incomplete<T: Clone>(arr: &mut List<T>, value: T) {
+    contract#"
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == value;
+    ";
+    // ERROR: Only fills half the array
+    for i in 0..arr.len() / 2 {
+        arr[i] = value.clone();
+    }
+}
+
+/// Forall with wrong index bounds
+@verify(proof)
+fn all_positive_wrong(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int. 0 <= i < arr.len() implies arr[i] > 0;
+    ";
+    // ERROR: Skips first element
+    for i in 1..arr.len() {
+        if arr[i] <= 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Nested forall not established
+@verify(proof)
+fn matrix_zero(matrix: &mut List<List<Int>>) {
+    contract#"
+        ensures forall i: Int. 0 <= i < matrix.len() implies
+            forall j: Int. 0 <= j < matrix[i].len() implies matrix[i][j] == 0;
+    ";
+    // ERROR: Only zeroes diagonal
+    for i in 0..matrix.len() {
+        if i < matrix[i].len() {
+            matrix[i][i] = 0;
+        }
+    }
+}
+
+/// Forall with implication - consequent doesn't hold
+@verify(proof)
+fn sorted_claim(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result implies forall i: Int, j: Int.
+            0 <= i < j < arr.len() implies arr[i] <= arr[j];
+    ";
+    // ERROR: Returns true without checking if sorted
+    arr.len() > 0
+}
+
+/// Forall preservation broken by operation
+@verify(proof)
+fn increment_all_wrong(arr: &mut List<Int>) {
+    contract#"
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == old(arr[i]) + 1;
+    ";
+    // ERROR: Adds different amounts to different elements
+    for i in 0..arr.len() {
+        arr[i] += i as Int + 1;  // Adds i+1, not 1
+    }
+}
+
+/// Forall with function - wrong predicate
+fn is_even(x: Int) -> Bool { x % 2 == 0 }
+
+@verify(proof)
+fn double_all_even(arr: &mut List<Int>) {
+    contract#"
+        ensures forall i: Int. 0 <= i < arr.len() implies is_even(arr[i]);
+    ";
+    // ERROR: Doesn't guarantee even results
+    for i in 0..arr.len() {
+        arr[i] *= 2;
+        arr[i] += 1;  // Makes odd again!
+    }
+}
+
+/// Forall with disjunction - neither branch satisfied
+@verify(proof)
+fn bound_or_zero(arr: &mut List<Int>, bound: Int) {
+    contract#"
+        ensures forall i: Int. 0 <= i < arr.len() implies
+            arr[i] == 0 || (arr[i] >= -bound && arr[i] <= bound);
+    ";
+    // ERROR: Values outside bound are not zeroed
+    // Just truncates to bound, doesn't zero
+    for i in 0..arr.len() {
+        if arr[i] > bound { arr[i] = bound; }
+        if arr[i] < -bound { arr[i] = -bound; }
+    }
+}
+
+/// Forall frame - wrong elements claimed unchanged
+@verify(proof)
+fn set_first(arr: &mut List<Int>, value: Int) {
+    contract#"
+        requires arr.len() > 0;
+        ensures arr[0] == value;
+        // ERROR: Claims element 1 unchanged, but array might be length 1
+        ensures forall i: Int. 1 <= i < arr.len() implies arr[i] == old(arr[i]);
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == old(arr[i]);  // Wrong!
+    ";
+    arr[0] = value;
+}
+
+/// Forall uniqueness claim that fails
+@verify(proof)
+fn make_unique_wrong(arr: &mut List<Int>) {
+    contract#"
+        ensures forall i: Int, j: Int.
+            0 <= i < arr.len() && 0 <= j < arr.len() && i != j
+            implies arr[i] != arr[j];
+    ";
+    // ERROR: Just sorts, doesn't remove duplicates
+    arr.sort();
+}

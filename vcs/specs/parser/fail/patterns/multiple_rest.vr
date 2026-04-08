@@ -1,0 +1,55 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, rest, multiple, error
+// @description: Test multiple rest patterns in same context
+// @expected-error: E077
+
+fn test_multiple_rest_array() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Invalid: multiple rest patterns in array
+    match arr {
+        [.., x, ..] => print("multiple rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_multiple_rest_slice() {
+    let slice: &[Int] = &[1, 2, 3];
+
+    // Invalid: multiple rest patterns in slice
+    match slice {
+        [first, .., middle, .., last] => print("multiple rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_multiple_rest_tuple() {
+    let tuple = (1, 2, 3, 4, 5);
+
+    // Invalid: multiple rest patterns in tuple (if tuple rest is supported)
+    match tuple {
+        (.., x, ..) => print("multiple rest tuple"),
+        _ => print("other"),
+    }
+}
+
+fn test_triple_rest() {
+    let arr = [1, 2, 3, 4, 5, 6, 7];
+
+    // Invalid: three rest patterns
+    match arr {
+        [.., a, .., b, ..] => print("triple rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_adjacent_rest() {
+    let arr = [1, 2, 3];
+
+    // Invalid: adjacent rest patterns
+    match arr {
+        [.. ..] => print("adjacent rest"),
+        _ => print("other"),
+    }
+}

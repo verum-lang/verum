@@ -1,0 +1,146 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, characters, escapes
+
+// Character escape sequences
+
+fn test_common_escape_sequences() {
+    // Common escape sequences
+    let newline = '\n';
+    let carriage_return = '\r';
+    let tab = '\t';
+    let null_char = '\0';
+}
+
+fn test_quote_escapes() {
+    // Quote escapes
+    let single_quote = '\'';
+    let double_quote = '\"';
+    let backslash = '\\';
+}
+
+fn test_whitespace_escapes() {
+    // Whitespace escapes
+    let vertical_tab = '\v';
+    let form_feed = '\f';
+}
+
+fn test_backspace_and_alert() {
+    // Backspace and alert
+    let backspace = '\b';
+    let alert_bell = '\a';
+}
+
+fn test_hex_escape_sequences() {
+    // Hex escape sequences
+    let nul_hex = '\x00';
+    let space_hex = '\x20';
+    let tilde_hex = '\x7E';
+    let del_hex = '\x7F';
+}
+
+fn test_ascii_control_characters() {
+    // ASCII control characters via hex
+    let soh = '\x01';
+    let stx = '\x02';
+    let etx = '\x03';
+    let eot = '\x04';
+    let esc = '\x1B';
+}
+
+fn test_printable_ascii_via_hex() {
+    // Printable ASCII via hex
+    let a_hex = '\x61';
+    let z_hex = '\x7A';
+    let A_hex = '\x41';
+    let Z_hex = '\x5A';
+}
+
+fn test_unicode_escape_sequences() {
+    // Unicode escape sequences
+    let snowflake = '\u{2744}';
+    let heart = '\u{2665}';
+    let smiley = '\u{263A}';
+    let star = '\u{2605}';
+    let check = '\u{2713}';
+    let cross = '\u{2717}';
+}
+
+fn test_unicode_letters() {
+    // Unicode letters
+    let alpha = '\u{03B1}';  // Greek alpha
+    let beta = '\u{03B2}';   // Greek beta
+    let gamma = '\u{03B3}';  // Greek gamma
+    let omega_char = '\u{03C9}';  // Greek omega
+}
+
+fn test_unicode_mathematical_symbols() {
+    // Unicode mathematical symbols
+    let infinity = '\u{221E}';
+    let pi_symbol = '\u{03C0}';
+    let sum_symbol = '\u{2211}';
+    let integral = '\u{222B}';
+}
+
+fn test_unicode_arrows() {
+    // Unicode arrows
+    let right_arrow = '\u{2192}';
+    let left_arrow = '\u{2190}';
+    let up_arrow = '\u{2191}';
+    let down_arrow = '\u{2193}';
+}
+
+fn test_unicode_box_drawing() {
+    // Unicode box drawing
+    let horizontal = '\u{2500}';
+    let vertical = '\u{2502}';
+    let corner_tl = '\u{250C}';
+    let corner_tr = '\u{2510}';
+    let corner_bl = '\u{2514}';
+    let corner_br = '\u{2518}';
+}
+
+fn test_emoji_characters() {
+    // Emoji characters (extended Unicode)
+    let smile = '\u{1F600}';
+    let thumbs_up = '\u{1F44D}';
+    let fire = '\u{1F525}';
+    let rocket = '\u{1F680}';
+}
+
+fn test_escape_sequences_in_arrays() {
+    // Escape sequences in arrays
+    let whitespace = ['\n', '\r', '\t', ' '];
+    let controls = ['\0', '\x01', '\x1B', '\x7F'];
+    let quotes = ['\'', '\"', '\\'];
+}
+
+// Escape sequences in match
+fn escape_char(c: Char) -> Text {
+    match c {
+        '\n' => "\\n"
+        '\r' => "\\r"
+        '\t' => "\\t"
+        '\0' => "\\0"
+        '\\' => "\\\\"
+        '\'' => "\\'"
+        '\"' => "\\\""
+        _ => c.to_text()
+    }
+}
+
+// Control character classification
+fn is_control(c: Char) -> Bool {
+    match c {
+        '\x00'..='\x1F' => true
+        '\x7F' => true
+        _ => false
+    }
+}
+
+fn test_unicode_escape_with_leading_zeros() {
+    // Unicode escape with leading zeros (max 6 hex digits per grammar)
+    let a_long = '\u{0061}';
+    let b_long = '\u{000062}';  // 6 digits max
+}

@@ -1,0 +1,181 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, number, theory, math
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for number theory algorithms
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 || b == 0 { return 0; }
+    abs_val(a) / gcd(a, b) * abs_val(b)
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    let mut i = 2;
+    while i * i <= n {
+        if n % i == 0 { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Count primes up to n (sieve-like)
+fn count_primes(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 2;
+    while i <= n {
+        if is_prime(i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Euler's totient function
+fn euler_totient(n: Int) -> Int {
+    let mut result = 0;
+    let mut i = 1;
+    while i <= n {
+        if gcd(i, n) == 1 { result = result + 1; }
+        i = i + 1;
+    }
+    result
+}
+
+// Modular exponentiation: base^exp mod m
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % m;
+        }
+        e = e / 2;
+        b = (b * b) % m;
+    }
+    result
+}
+
+// Extended GCD: returns (gcd, x) where a*x + b*y = gcd
+// We only need x for modular inverse
+fn mod_inverse(a: Int, m: Int) -> Int {
+    // Simple search (works for small m)
+    let mut i = 1;
+    while i < m {
+        if (a * i) % m == 1 { return i; }
+        i = i + 1;
+    }
+    -1  // No inverse
+}
+
+// Sum of divisors
+fn sum_divisors(n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= n {
+        if n % i == 0 { sum = sum + i; }
+        i = i + 1;
+    }
+    sum
+}
+
+// Is perfect number (sum of proper divisors = n)
+fn is_perfect(n: Int) -> Bool {
+    sum_divisors(n) - n == n
+}
+
+fn test_gcd_lcm() {
+    assert_eq(gcd(12, 18), 6);
+    assert_eq(gcd(35, 49), 7);
+    assert_eq(gcd(17, 19), 1);
+    assert_eq(gcd(0, 5), 5);
+
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 7), 21);
+    assert_eq(lcm(6, 6), 6);
+
+    // Property: gcd(a,b) * lcm(a,b) = a * b
+    assert_eq(gcd(12, 18) * lcm(12, 18), 12 * 18);
+}
+
+fn test_primes() {
+    assert_eq(is_prime(2), true);
+    assert_eq(is_prime(3), true);
+    assert_eq(is_prime(4), false);
+    assert_eq(is_prime(97), true);
+    assert_eq(is_prime(100), false);
+
+    // Prime counting function
+    assert_eq(count_primes(10), 4);    // 2,3,5,7
+    assert_eq(count_primes(20), 8);    // +11,13,17,19
+    assert_eq(count_primes(30), 10);   // +23,29
+}
+
+fn test_totient() {
+    assert_eq(euler_totient(1), 1);
+    assert_eq(euler_totient(2), 1);
+    assert_eq(euler_totient(6), 2);    // 1, 5
+    assert_eq(euler_totient(12), 4);   // 1, 5, 7, 11
+
+    // For prime p, totient(p) = p-1
+    assert_eq(euler_totient(7), 6);
+    assert_eq(euler_totient(13), 12);
+}
+
+fn test_mod_pow() {
+    assert_eq(mod_pow(2, 10, 1000), 1024 % 1000);  // 24
+    assert_eq(mod_pow(3, 4, 100), 81);
+    assert_eq(mod_pow(2, 0, 100), 1);
+    assert_eq(mod_pow(7, 2, 50), 49);
+
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p
+    assert_eq(mod_pow(2, 6, 7), 1);
+    assert_eq(mod_pow(3, 12, 13), 1);
+}
+
+fn test_mod_inverse() {
+    // 3 * x ≡ 1 (mod 7) -> x = 5 (3*5=15≡1)
+    assert_eq(mod_inverse(3, 7), 5);
+    // 2 * x ≡ 1 (mod 5) -> x = 3 (2*3=6≡1)
+    assert_eq(mod_inverse(2, 5), 3);
+
+    // Verify: a * inverse(a) mod m = 1
+    let inv = mod_inverse(3, 11);
+    assert_eq((3 * inv) % 11, 1);
+}
+
+fn test_perfect_numbers() {
+    assert_eq(is_perfect(6), true);     // 1+2+3=6
+    assert_eq(is_perfect(28), true);    // 1+2+4+7+14=28
+    assert_eq(is_perfect(12), false);
+
+    assert_eq(sum_divisors(12), 28);    // 1+2+3+4+6+12
+    assert_eq(sum_divisors(1), 1);
+}
+
+fn main() -> Int {
+    test_gcd_lcm();
+    test_primes();
+    test_totient();
+    test_mod_pow();
+    test_mod_inverse();
+    test_perfect_numbers();
+    print("[OK] 255_number_theory_aot");
+    0
+}

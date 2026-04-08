@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: builtin-syntax, is-operator, pattern-matching
+// @timeout: 5000
+//
+// Tests the `is` operator for pattern testing (replaces matches!() macro).
+// Spec: grammar/verum.ebnf Section 2.20 - Pattern Testing
+
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+
+fn test_is_operator() -> Int {
+    let value: Maybe<Int> = Maybe.Some(42);
+
+    // Basic pattern test with is (NOT matches!(value, Some(_)))
+    if value is Maybe.Some(x) {
+        assert_eq(x, 42);
+    }
+
+    // Negated pattern test with is not
+    if value is not Maybe.None {
+        print("Value is not None");
+    }
+
+    // While loop with is
+    let mut result: Maybe<Int> = Maybe.Some(10);
+    while result is Maybe.Some(n) {
+        if n <= 0 {
+            result = Maybe.None;
+        } else {
+            result = Maybe.Some(n - 1);
+        }
+    }
+
+    // Guard expressions with comparison
+    let data: Result<Int, Text> = Result.Ok(100);
+    let output = match data {
+        Result.Ok(x) if x > 50 => x * 2,
+        Result.Ok(x) => x,
+        Result.Err(e) => 0,
+    };
+    assert_eq(output, 200);
+
+    0
+}
+
+fn main() -> Int {
+    test_is_operator()
+}

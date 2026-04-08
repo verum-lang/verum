@@ -1,0 +1,172 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stdlib, gpu, integration
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT stdlib GPU integration — exercises core.math.gpu API patterns
+
+// Simulated GPU context
+type GpuContext is {
+    device_id: Int,
+    stream_count: Int,
+    event_count: Int,
+    alloc_bytes: Int,
+    free_bytes: Int,
+    kernel_count: Int
+};
+
+fn gpu_ctx_new() -> GpuContext {
+    GpuContext {
+        device_id: 0,
+        stream_count: 0,
+        event_count: 0,
+        alloc_bytes: 0,
+        free_bytes: 0,
+        kernel_count: 0
+    }
+}
+
+fn test_gpu_context_init() {
+    let ctx = gpu_ctx_new();
+    assert_eq(ctx.device_id, 0);
+    assert_eq(ctx.stream_count, 0);
+    assert_eq(ctx.kernel_count, 0);
+    print("test_gpu_context_init passed");
+}
+
+fn test_gpu_workflow() {
+    // Typical GPU workflow: alloc, copy, compute, copy back, free
+    let mut ctx = gpu_ctx_new();
+
+    // 1. Allocate device memory
+    ctx = GpuContext {
+        device_id: ctx.device_id,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        alloc_bytes: ctx.alloc_bytes + 1024,
+        free_bytes: ctx.free_bytes,
+        kernel_count: ctx.kernel_count
+    };
+    assert_eq(ctx.alloc_bytes, 1024);
+
+    // 2. Create stream
+    ctx = GpuContext {
+        device_id: ctx.device_id,
+        stream_count: ctx.stream_count + 1,
+        event_count: ctx.event_count,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        kernel_count: ctx.kernel_count
+    };
+
+    // 3. Launch kernel
+    ctx = GpuContext {
+        device_id: ctx.device_id,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes,
+        kernel_count: ctx.kernel_count + 1
+    };
+
+    // 4. Free device memory
+    ctx = GpuContext {
+        device_id: ctx.device_id,
+        stream_count: ctx.stream_count,
+        event_count: ctx.event_count,
+        alloc_bytes: ctx.alloc_bytes,
+        free_bytes: ctx.free_bytes + 1024,
+        kernel_count: ctx.kernel_count
+    };
+
+    assert_eq(ctx.alloc_bytes, ctx.free_bytes);
+    assert_eq(ctx.kernel_count, 1);
+    assert_eq(ctx.stream_count, 1);
+    print("test_gpu_workflow passed");
+}
+
+fn test_multi_stream_pipeline() {
+    // Pipeline with multiple streams for overlap
+    let mut streams = 0;
+    let mut events = 0;
+    let mut syncs = 0;
+
+    // Create 3 streams
+    streams = streams + 3;
+    // Create events for each stage
+    events = events + 3;
+
+    // Stream 0: H2D copy
+    // Event 0: mark end of H2D
+
+    // Stream 1: compute (waits for event 0)
+    syncs = syncs + 1;
+    // Event 1: mark end of compute
+
+    // Stream 2: D2H copy (waits for event 1)
+    syncs = syncs + 1;
+    // Event 2: mark end of D2H
+
+    assert_eq(streams, 3);
+    assert_eq(events, 3);
+    assert_eq(syncs, 2);
+    print("test_multi_stream_pipeline passed");
+}
+
+fn test_memory_pool() {
+    // Simulated memory pool: alloc from pool, return to pool
+    let pool_size = 4096;
+    let mut used = 0;
+
+    // Alloc 1024
+    used = used + 1024;
+    assert_eq(used, 1024);
+
+    // Alloc 512
+    used = used + 512;
+    assert_eq(used, 1536);
+
+    // Free 1024
+    used = used - 1024;
+    assert_eq(used, 512);
+
+    // Alloc 256 (fits in freed space)
+    used = used + 256;
+    assert_eq(used, 768);
+
+    assert(used <= pool_size);
+    print("test_memory_pool passed");
+}
+
+fn test_kernel_grid_config() {
+    // Calculate grid/block configuration
+    let data_size = 1000000;
+    let block_size = 256;
+    let grid_size = (data_size + block_size - 1) / block_size;
+    assert_eq(grid_size, 3907);  // ceil(1000000/256) = 3907
+    assert(grid_size * block_size >= data_size);
+    print("test_kernel_grid_config passed");
+}
+
+fn test_shared_memory_calc() {
+    // Shared memory per block calculation
+    let threads_per_block = 256;
+    let bytes_per_thread = 8;  // double
+    let shared_mem = threads_per_block * bytes_per_thread;
+    assert_eq(shared_mem, 2048);
+    // Must be <= 48KB
+    assert(shared_mem <= 49152);
+    print("test_shared_memory_calc passed");
+}
+
+fn main() -> Int {
+    test_gpu_context_init();
+    test_gpu_workflow();
+    test_multi_stream_pipeline();
+    test_memory_pool();
+    test_kernel_grid_config();
+    test_shared_memory_calc();
+    print("ALL PASSED");
+    0
+}

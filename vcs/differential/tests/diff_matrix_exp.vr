@@ -1,0 +1,166 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, matrix, exponentiation, fibonacci
+// @timeout: 10000
+
+// 2x2 matrix exponentiation for Fibonacci and linear recurrences
+type Mat2 is { a00: Int, a01: Int, a10: Int, a11: Int };
+
+fn mat2_mul(a: Mat2, b_mat: Mat2) -> Mat2 {
+    Mat2 {
+        a00: a.a00 * b_mat.a00 + a.a01 * b_mat.a10,
+        a01: a.a00 * b_mat.a01 + a.a01 * b_mat.a11,
+        a10: a.a10 * b_mat.a00 + a.a11 * b_mat.a10,
+        a11: a.a10 * b_mat.a01 + a.a11 * b_mat.a11
+    }
+}
+
+fn mat2_identity() -> Mat2 {
+    Mat2 { a00: 1, a01: 0, a10: 0, a11: 1 }
+}
+
+// Matrix power via repeated squaring
+fn mat2_pow(m: Mat2, n: Int) -> Mat2 {
+    let mut result = mat2_identity();
+    let mut base = m;
+    let mut exp = n;
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = mat2_mul(result, base);
+        }
+        base = mat2_mul(base, base);
+        exp = exp / 2;
+    }
+    result
+}
+
+// Fibonacci via matrix exponentiation
+// [[1,1],[1,0]]^n gives [[F(n+1), F(n)], [F(n), F(n-1)]]
+fn fib_matrix(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let fib_mat = Mat2 { a00: 1, a01: 1, a10: 1, a11: 0 };
+    let result = mat2_pow(fib_mat, n);
+    result.a01  // F(n)
+}
+
+// Iterative fibonacci for verification
+fn fib_iter(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut a = 0;
+    let mut b_val = 1;
+    let mut i = 2;
+    while i <= n {
+        let tmp = a + b_val;
+        a = b_val;
+        b_val = tmp;
+        i = i + 1;
+    }
+    b_val
+}
+
+// Linear recurrence: a(n) = 2*a(n-1) + a(n-2), a(0)=0, a(1)=1
+// Matrix: [[2,1],[1,0]]
+fn pell_like(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let m = Mat2 { a00: 2, a01: 1, a10: 1, a11: 0 };
+    let result = mat2_pow(m, n);
+    result.a01
+}
+
+// Modular matrix multiplication
+fn mat2_mul_mod(a: Mat2, b_mat: Mat2, modulus: Int) -> Mat2 {
+    Mat2 {
+        a00: (a.a00 * b_mat.a00 + a.a01 * b_mat.a10) % modulus,
+        a01: (a.a00 * b_mat.a01 + a.a01 * b_mat.a11) % modulus,
+        a10: (a.a10 * b_mat.a00 + a.a11 * b_mat.a10) % modulus,
+        a11: (a.a10 * b_mat.a01 + a.a11 * b_mat.a11) % modulus
+    }
+}
+
+fn mat2_pow_mod(m: Mat2, n: Int, modulus: Int) -> Mat2 {
+    let mut result = mat2_identity();
+    let mut base = m;
+    let mut exp = n;
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = mat2_mul_mod(result, base, modulus);
+        }
+        base = mat2_mul_mod(base, base, modulus);
+        exp = exp / 2;
+    }
+    result
+}
+
+fn fib_mod(n: Int, modulus: Int) -> Int {
+    if n == 0 { return 0; }
+    let fib_mat = Mat2 { a00: 1, a01: 1, a10: 1, a11: 0 };
+    let result = mat2_pow_mod(fib_mat, n, modulus);
+    result.a01
+}
+
+fn main() -> Int {
+    // Identity matrix
+    let id = mat2_identity();
+    assert_eq(id.a00, 1); assert_eq(id.a01, 0);
+    assert_eq(id.a10, 0); assert_eq(id.a11, 1);
+
+    // A * I = A
+    let a = Mat2 { a00: 3, a01: 7, a10: 2, a11: 5 };
+    let ai = mat2_mul(a, id);
+    assert_eq(ai.a00, 3); assert_eq(ai.a01, 7);
+    assert_eq(ai.a10, 2); assert_eq(ai.a11, 5);
+
+    // M^0 = I
+    let m0 = mat2_pow(a, 0);
+    assert_eq(m0.a00, 1); assert_eq(m0.a01, 0);
+
+    // M^1 = M
+    let m1 = mat2_pow(a, 1);
+    assert_eq(m1.a00, 3); assert_eq(m1.a01, 7);
+
+    // Fibonacci: verify matrix matches iterative
+    let mut i = 0;
+    while i <= 15 {
+        assert_eq(fib_matrix(i), fib_iter(i));
+        i = i + 1;
+    }
+
+    // Known values
+    assert_eq(fib_matrix(0), 0);
+    assert_eq(fib_matrix(1), 1);
+    assert_eq(fib_matrix(10), 55);
+    assert_eq(fib_matrix(15), 610);
+    assert_eq(fib_matrix(20), 6765);
+
+    // Pell-like sequence: 0, 1, 2, 5, 12, 29, 70, 169, ...
+    assert_eq(pell_like(0), 0);
+    assert_eq(pell_like(1), 1);
+    assert_eq(pell_like(2), 2);
+    assert_eq(pell_like(3), 5);
+    assert_eq(pell_like(4), 12);
+    assert_eq(pell_like(5), 29);
+
+    // Verify recurrence: a(n) = 2*a(n-1) + a(n-2)
+    assert_eq(pell_like(5), 2 * pell_like(4) + pell_like(3));
+    assert_eq(pell_like(4), 2 * pell_like(3) + pell_like(2));
+
+    // Modular fibonacci
+    assert_eq(fib_mod(10, 100), 55);
+    assert_eq(fib_mod(20, 1000), 765); // 6765 mod 1000
+    assert_eq(fib_mod(15, 100), 10);   // 610 mod 100
+
+    // Pisano period: fib(n) mod m is periodic
+    // fib mod 2: period = 3 (0,1,1,0,1,1,...)
+    assert_eq(fib_mod(0, 2), 0);
+    assert_eq(fib_mod(1, 2), 1);
+    assert_eq(fib_mod(2, 2), 1);
+    assert_eq(fib_mod(3, 2), 0);
+    assert_eq(fib_mod(4, 2), 1); // same as fib_mod(1,2)
+    assert_eq(fib_mod(5, 2), 1); // same as fib_mod(2,2)
+
+    print("DIFF_OK: matrix_exp");
+    0
+}

@@ -1,0 +1,278 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/linux/errno_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, linux, errno
+// @description: Tests for Linux errno constants and helper functions.
+//
+// Coverage:
+// - Common errno constants (EPERM, ENOENT, EINTR, etc.)
+// - Socket error constants
+// - Helper functions (is_retryable, is_connection_error, etc.)
+// - errno_name function
+//
+// Test Strategy:
+// - Verify errno constant values match Linux kernel definitions
+// - Test categorization functions on all relevant errors
+// - Verify errno_name returns correct strings
+//
+// Platform: Linux x86_64
+// =============================================================================
+
+@cfg(target_os = "linux")
+module test.stdlib.sys.linux.errno_test;
+
+mount core.sys.linux.errno.{
+    // Common errors
+    EPERM, ENOENT, ESRCH, EINTR, EIO, ENXIO,
+    EAGAIN, EWOULDBLOCK, ENOMEM, EACCES, EFAULT,
+    EBUSY, EEXIST, EINVAL, ENOSYS,
+
+    // Socket errors
+    ECONNREFUSED, ECONNRESET, ETIMEDOUT,
+    EADDRINUSE, EADDRNOTAVAIL,
+
+    // Helper functions
+    is_retryable,
+    is_connection_error,
+    is_permission_error,
+    is_not_found,
+    errno_name,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Common Errno Value Tests
+// =============================================================================
+
+@test
+fn test_common_errno_values() {
+    // Standard POSIX errno values
+    assert(EPERM == 1);       // Operation not permitted
+    assert(ENOENT == 2);      // No such file or directory
+    assert(ESRCH == 3);       // No such process
+    assert(EINTR == 4);       // Interrupted system call
+    assert(EIO == 5);         // I/O error
+    assert(ENXIO == 6);       // No such device or address
+
+    // Memory errors
+    assert(ENOMEM == 12);     // Out of memory
+    assert(EFAULT == 14);     // Bad address
+
+    // Permission errors
+    assert(EACCES == 13);     // Permission denied
+
+    // Resource errors
+    assert(EBUSY == 16);      // Device or resource busy
+    assert(EEXIST == 17);     // File exists
+
+    // Invalid arguments
+    assert(EINVAL == 22);     // Invalid argument
+
+    // System call errors
+    assert(ENOSYS == 38);     // Function not implemented
+
+    // Non-blocking I/O
+    assert(EAGAIN == 11);     // Try again
+    assert(EWOULDBLOCK == EAGAIN);  // Same as EAGAIN on Linux
+
+    print("Common errno value tests passed");
+}
+
+// =============================================================================
+// Socket Errno Value Tests
+// =============================================================================
+
+@test
+fn test_socket_errno_values() {
+    // Connection errors
+    assert(ECONNREFUSED == 111);  // Connection refused
+    assert(ECONNRESET == 104);    // Connection reset by peer
+    assert(ETIMEDOUT == 110);     // Connection timed out
+
+    // Address errors
+    assert(EADDRINUSE == 98);     // Address already in use
+    assert(EADDRNOTAVAIL == 99);  // Cannot assign requested address
+
+    // All socket errors should be positive
+    assert(ECONNREFUSED > 0);
+    assert(ECONNRESET > 0);
+    assert(ETIMEDOUT > 0);
+    assert(EADDRINUSE > 0);
+    assert(EADDRNOTAVAIL > 0);
+
+    print("Socket errno value tests passed");
+}
+
+// =============================================================================
+// is_retryable Tests
+// =============================================================================
+
+@test
+fn test_is_retryable() {
+    // EAGAIN is retryable
+    assert(is_retryable(EAGAIN));
+
+    // EWOULDBLOCK is retryable (same as EAGAIN on Linux)
+    assert(is_retryable(EWOULDBLOCK));
+
+    // EINTR is retryable
+    assert(is_retryable(EINTR));
+
+    // Other errors are not retryable
+    assert(!is_retryable(EPERM));
+    assert(!is_retryable(ENOENT));
+    assert(!is_retryable(EIO));
+    assert(!is_retryable(ENOMEM));
+    assert(!is_retryable(EACCES));
+    assert(!is_retryable(EINVAL));
+    assert(!is_retryable(ECONNREFUSED));
+    assert(!is_retryable(ECONNRESET));
+    assert(!is_retryable(ETIMEDOUT));
+
+    print("is_retryable tests passed");
+}
+
+// =============================================================================
+// is_connection_error Tests
+// =============================================================================
+
+@test
+fn test_is_connection_error() {
+    // Connection errors
+    assert(is_connection_error(ECONNREFUSED));
+    assert(is_connection_error(ECONNRESET));
+    assert(is_connection_error(ETIMEDOUT));
+
+    // Non-connection errors
+    assert(!is_connection_error(EPERM));
+    assert(!is_connection_error(ENOENT));
+    assert(!is_connection_error(EAGAIN));
+    assert(!is_connection_error(EINTR));
+    assert(!is_connection_error(ENOMEM));
+    assert(!is_connection_error(EINVAL));
+
+    print("is_connection_error tests passed");
+}
+
+// =============================================================================
+// is_permission_error Tests
+// =============================================================================
+
+@test
+fn test_is_permission_error() {
+    // Permission errors
+    assert(is_permission_error(EPERM));
+    assert(is_permission_error(EACCES));
+
+    // Non-permission errors
+    assert(!is_permission_error(ENOENT));
+    assert(!is_permission_error(EAGAIN));
+    assert(!is_permission_error(EINTR));
+    assert(!is_permission_error(ENOMEM));
+    assert(!is_permission_error(EINVAL));
+    assert(!is_permission_error(ECONNREFUSED));
+
+    print("is_permission_error tests passed");
+}
+
+// =============================================================================
+// is_not_found Tests
+// =============================================================================
+
+@test
+fn test_is_not_found() {
+    // Not found errors
+    assert(is_not_found(ENOENT));
+    assert(is_not_found(ESRCH));  // Process not found
+
+    // Found-related errors
+    assert(!is_not_found(EPERM));
+    assert(!is_not_found(EACCES));
+    assert(!is_not_found(EAGAIN));
+    assert(!is_not_found(EINTR));
+    assert(!is_not_found(ENOMEM));
+    assert(!is_not_found(EINVAL));
+
+    print("is_not_found tests passed");
+}
+
+// =============================================================================
+// errno_name Tests
+// =============================================================================
+
+@test
+fn test_errno_name() {
+    // Common errors
+    assert(errno_name(EPERM) == "EPERM");
+    assert(errno_name(ENOENT) == "ENOENT");
+    assert(errno_name(ESRCH) == "ESRCH");
+    assert(errno_name(EINTR) == "EINTR");
+    assert(errno_name(EIO) == "EIO");
+    assert(errno_name(EAGAIN) == "EAGAIN");
+    assert(errno_name(ENOMEM) == "ENOMEM");
+    assert(errno_name(EACCES) == "EACCES");
+    assert(errno_name(EINVAL) == "EINVAL");
+
+    // Socket errors
+    assert(errno_name(ECONNREFUSED) == "ECONNREFUSED");
+    assert(errno_name(ECONNRESET) == "ECONNRESET");
+    assert(errno_name(ETIMEDOUT) == "ETIMEDOUT");
+
+    // Unknown error should return a reasonable result
+    let unknown_name = errno_name(9999);
+    assert(unknown_name.contains("9999") || unknown_name == "UNKNOWN");
+
+    print("errno_name tests passed");
+}
+
+// =============================================================================
+// Errno Categorization Completeness Tests
+// =============================================================================
+
+@test
+fn test_errno_categories_complete() {
+    // Test that all common errors fall into exactly one category
+    let test_errors = [
+        EPERM, ENOENT, ESRCH, EINTR, EIO, ENXIO,
+        EAGAIN, ENOMEM, EACCES, EFAULT, EBUSY,
+        EEXIST, EINVAL, ENOSYS, ECONNREFUSED,
+        ECONNRESET, ETIMEDOUT, EADDRINUSE, EADDRNOTAVAIL,
+    ];
+
+    for err in test_errors {
+        // Count how many categories this error belongs to
+        let mut categories = 0;
+
+        if is_retryable(err) {
+            categories += 1;
+        }
+        if is_connection_error(err) {
+            categories += 1;
+        }
+        if is_permission_error(err) {
+            categories += 1;
+        }
+        if is_not_found(err) {
+            categories += 1;
+        }
+
+        // Each error belongs to 0 or 1 categories (some are uncategorized)
+        assert(categories <= 1);
+
+        // Verify error has a name
+        let name = errno_name(err);
+        assert(name.len() > 0);
+    }
+
+    print("Errno categorization completeness tests passed");
+}

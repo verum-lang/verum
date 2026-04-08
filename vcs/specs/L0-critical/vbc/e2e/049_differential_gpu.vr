@@ -1,0 +1,408 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, differential, interpreter-vs-aot, gpu, device, memory, stream
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential GPU device management test: verifies interpreter and AOT produce
+// identical results for simulated GPU device tracking, stream lifecycle, memory
+// allocation counters, and multi-device scheduling via structs and counters.
+
+// ============================================================================
+// Device state tracking
+// ============================================================================
+
+type DeviceState is {
+    device_id: Int,
+    is_active: Bool,
+    alloc_count: Int,
+    free_count: Int,
+    total_allocated: Int,
+    peak_allocated: Int
+};
+
+fn ds_new(id: Int) -> DeviceState {
+    DeviceState {
+        device_id: id, is_active: false,
+        alloc_count: 0, free_count: 0,
+        total_allocated: 0, peak_allocated: 0
+    }
+}
+
+fn ds_activate(d: DeviceState) -> DeviceState {
+    DeviceState {
+        device_id: d.device_id, is_active: true,
+        alloc_count: d.alloc_count, free_count: d.free_count,
+        total_allocated: d.total_allocated, peak_allocated: d.peak_allocated
+    }
+}
+
+fn ds_deactivate(d: DeviceState) -> DeviceState {
+    DeviceState {
+        device_id: d.device_id, is_active: false,
+        alloc_count: d.alloc_count, free_count: d.free_count,
+        total_allocated: d.total_allocated, peak_allocated: d.peak_allocated
+    }
+}
+
+fn ds_alloc(d: DeviceState, size: Int) -> DeviceState {
+    let new_total = d.total_allocated + size;
+    let new_peak = if new_total > d.peak_allocated { new_total } else { d.peak_allocated };
+    DeviceState {
+        device_id: d.device_id, is_active: d.is_active,
+        alloc_count: d.alloc_count + 1, free_count: d.free_count,
+        total_allocated: new_total, peak_allocated: new_peak
+    }
+}
+
+fn ds_free(d: DeviceState, size: Int) -> DeviceState {
+    DeviceState {
+        device_id: d.device_id, is_active: d.is_active,
+        alloc_count: d.alloc_count, free_count: d.free_count + 1,
+        total_allocated: d.total_allocated - size, peak_allocated: d.peak_allocated
+    }
+}
+
+fn ds_live_allocs(d: DeviceState) -> Int {
+    d.alloc_count - d.free_count
+}
+
+fn test_device_state_basic() {
+    let d = ds_new(0);
+    assert_eq(d.device_id, 0);
+    assert_eq(d.is_active, false);
+    assert_eq(d.alloc_count, 0);
+
+    let d2 = ds_activate(d);
+    assert_eq(d2.is_active, true);
+
+    let d3 = ds_deactivate(d2);
+    assert_eq(d3.is_active, false);
+
+    print("device_state_basic: ok");
+}
+
+fn test_device_alloc_free() {
+    let mut d = ds_activate(ds_new(1));
+
+    d = ds_alloc(d, 1024);
+    assert_eq(d.alloc_count, 1);
+    assert_eq(d.total_allocated, 1024);
+    assert_eq(d.peak_allocated, 1024);
+
+    d = ds_alloc(d, 2048);
+    assert_eq(d.total_allocated, 3072);
+    assert_eq(ds_live_allocs(d), 2);
+
+    d = ds_free(d, 1024);
+    assert_eq(d.total_allocated, 2048);
+    assert_eq(d.peak_allocated, 3072);
+    assert_eq(ds_live_allocs(d), 1);
+
+    d = ds_free(d, 2048);
+    assert_eq(d.total_allocated, 0);
+    assert_eq(ds_live_allocs(d), 0);
+
+    print("device_alloc_free: ok");
+}
+
+fn test_device_peak_tracking() {
+    let mut d = ds_activate(ds_new(2));
+
+    d = ds_alloc(d, 100);
+    d = ds_alloc(d, 200);   // total=300, peak=300
+    d = ds_free(d, 100);    // total=200
+    d = ds_alloc(d, 50);    // total=250
+    d = ds_alloc(d, 100);   // total=350, peak=350
+    d = ds_free(d, 200);    // total=150
+    d = ds_alloc(d, 500);   // total=650, peak=650
+    d = ds_free(d, 500);    // total=150
+    d = ds_free(d, 50);     // total=100
+    d = ds_free(d, 100);    // total=0
+
+    assert_eq(d.total_allocated, 0);
+    assert_eq(d.peak_allocated, 650);
+    assert_eq(d.alloc_count, 5);
+    assert_eq(d.free_count, 5);
+
+    print("device_peak_tracking: ok");
+}
+
+// ============================================================================
+// Stream manager with up to 4 streams
+// ============================================================================
+
+type StreamMgr is {
+    s0: Int, s1: Int, s2: Int, s3: Int,
+    count: Int,
+    next_id: Int,
+    total_created: Int,
+    total_destroyed: Int
+};
+
+fn sm_new() -> StreamMgr {
+    StreamMgr {
+        s0: 0, s1: 0, s2: 0, s3: 0,
+        count: 0, next_id: 1, total_created: 0, total_destroyed: 0
+    }
+}
+
+fn sm_get(m: StreamMgr, i: Int) -> Int {
+    if i == 0 { m.s0 }
+    else if i == 1 { m.s1 }
+    else if i == 2 { m.s2 }
+    else { m.s3 }
+}
+
+fn sm_set(m: StreamMgr, i: Int, v: Int) -> StreamMgr {
+    StreamMgr {
+        s0: if i == 0 { v } else { m.s0 },
+        s1: if i == 1 { v } else { m.s1 },
+        s2: if i == 2 { v } else { m.s2 },
+        s3: if i == 3 { v } else { m.s3 },
+        count: m.count, next_id: m.next_id,
+        total_created: m.total_created, total_destroyed: m.total_destroyed
+    }
+}
+
+fn sm_create(m: StreamMgr) -> StreamMgr {
+    if m.count >= 4 { m }
+    else {
+        let id = m.next_id;
+        let m2 = sm_set(m, m.count, id);
+        StreamMgr {
+            s0: m2.s0, s1: m2.s1, s2: m2.s2, s3: m2.s3,
+            count: m2.count + 1, next_id: id + 1,
+            total_created: m2.total_created + 1, total_destroyed: m2.total_destroyed
+        }
+    }
+}
+
+fn sm_destroy(m: StreamMgr, sid: Int) -> StreamMgr {
+    let mut found = 0 - 1;
+    let mut i = 0;
+    while i < m.count {
+        if sm_get(m, i) == sid { found = i; }
+        i = i + 1;
+    }
+    if found >= 0 {
+        let mut m2 = m;
+        let mut j = found;
+        while j < m.count - 1 {
+            m2 = sm_set(m2, j, sm_get(m2, j + 1));
+            j = j + 1;
+        }
+        m2 = sm_set(m2, m.count - 1, 0);
+        StreamMgr {
+            s0: m2.s0, s1: m2.s1, s2: m2.s2, s3: m2.s3,
+            count: m2.count - 1, next_id: m2.next_id,
+            total_created: m2.total_created, total_destroyed: m2.total_destroyed + 1
+        }
+    } else { m }
+}
+
+fn sm_destroy_all(m: StreamMgr) -> StreamMgr {
+    StreamMgr {
+        s0: 0, s1: 0, s2: 0, s3: 0,
+        count: 0, next_id: m.next_id,
+        total_created: m.total_created, total_destroyed: m.total_destroyed + m.count
+    }
+}
+
+fn test_stream_lifecycle() {
+    let mut sm = sm_new();
+    sm = sm_create(sm);
+    sm = sm_create(sm);
+    sm = sm_create(sm);
+    assert_eq(sm.count, 3);
+    assert_eq(sm_get(sm, 0), 1);
+    assert_eq(sm_get(sm, 1), 2);
+    assert_eq(sm_get(sm, 2), 3);
+
+    // Destroy middle stream
+    sm = sm_destroy(sm, 2);
+    assert_eq(sm.count, 2);
+    assert_eq(sm_get(sm, 0), 1);
+    assert_eq(sm_get(sm, 1), 3);
+
+    // Create another (gets id 4)
+    sm = sm_create(sm);
+    assert_eq(sm_get(sm, 2), 4);
+
+    // Destroy nonexistent (no-op)
+    sm = sm_destroy(sm, 999);
+    assert_eq(sm.count, 3);
+
+    print("stream_lifecycle: ok");
+}
+
+fn test_stream_capacity() {
+    let mut sm = sm_new();
+    sm = sm_create(sm);
+    sm = sm_create(sm);
+    sm = sm_create(sm);
+    sm = sm_create(sm);
+    assert_eq(sm.count, 4);
+
+    // Over capacity is no-op
+    sm = sm_create(sm);
+    assert_eq(sm.count, 4);
+    assert_eq(sm.total_created, 4);
+
+    // Destroy one, create one
+    sm = sm_destroy(sm, 1);
+    sm = sm_create(sm);
+    assert_eq(sm.count, 4);
+    assert_eq(sm_get(sm, 3), 5);
+
+    print("stream_capacity: ok");
+}
+
+fn test_stream_destroy_all() {
+    let mut sm = sm_new();
+    sm = sm_create(sm);
+    sm = sm_create(sm);
+    sm = sm_create(sm);
+    sm = sm_destroy_all(sm);
+    assert_eq(sm.count, 0);
+    assert_eq(sm.total_destroyed, 3);
+
+    sm = sm_create(sm);
+    assert_eq(sm_get(sm, 0), 4);
+    assert_eq(sm.total_created, 4);
+
+    print("stream_destroy_all: ok");
+}
+
+// ============================================================================
+// Multi-device round-robin scheduler
+// ============================================================================
+
+type Scheduler is {
+    num_devices: Int,
+    current: Int,
+    tasks_d0: Int,
+    tasks_d1: Int,
+    tasks_d2: Int,
+    tasks_d3: Int,
+    total_tasks: Int
+};
+
+fn sched_new(n: Int) -> Scheduler {
+    Scheduler {
+        num_devices: n, current: 0,
+        tasks_d0: 0, tasks_d1: 0, tasks_d2: 0, tasks_d3: 0,
+        total_tasks: 0
+    }
+}
+
+fn sched_get_tasks(s: Scheduler, dev: Int) -> Int {
+    if dev == 0 { s.tasks_d0 }
+    else if dev == 1 { s.tasks_d1 }
+    else if dev == 2 { s.tasks_d2 }
+    else { s.tasks_d3 }
+}
+
+fn sched_submit_rr(s: Scheduler) -> Scheduler {
+    let dev = s.current;
+    let next = (dev + 1) % s.num_devices;
+    Scheduler {
+        num_devices: s.num_devices, current: next,
+        tasks_d0: if dev == 0 { s.tasks_d0 + 1 } else { s.tasks_d0 },
+        tasks_d1: if dev == 1 { s.tasks_d1 + 1 } else { s.tasks_d1 },
+        tasks_d2: if dev == 2 { s.tasks_d2 + 1 } else { s.tasks_d2 },
+        tasks_d3: if dev == 3 { s.tasks_d3 + 1 } else { s.tasks_d3 },
+        total_tasks: s.total_tasks + 1
+    }
+}
+
+fn test_round_robin() {
+    // Single device: all 5 tasks to device 0
+    let mut s1 = sched_new(1);
+    let mut i = 0;
+    while i < 5 { s1 = sched_submit_rr(s1); i = i + 1; }
+    assert_eq(sched_get_tasks(s1, 0), 5);
+
+    // Two devices: 7 tasks split 4/3
+    let mut s2 = sched_new(2);
+    let mut j = 0;
+    while j < 7 { s2 = sched_submit_rr(s2); j = j + 1; }
+    assert_eq(sched_get_tasks(s2, 0), 4);
+    assert_eq(sched_get_tasks(s2, 1), 3);
+
+    // Four devices: 12 tasks split 3/3/3/3
+    let mut s3 = sched_new(4);
+    let mut k = 0;
+    while k < 12 { s3 = sched_submit_rr(s3); k = k + 1; }
+    assert_eq(sched_get_tasks(s3, 0), 3);
+    assert_eq(sched_get_tasks(s3, 1), 3);
+    assert_eq(sched_get_tasks(s3, 2), 3);
+    assert_eq(sched_get_tasks(s3, 3), 3);
+
+    print("round_robin: ok");
+}
+
+// ============================================================================
+// Combined: device memory + streams lifecycle
+// ============================================================================
+
+fn test_combined_lifecycle() {
+    let mut dev = ds_activate(ds_new(0));
+    let mut streams = sm_new();
+
+    streams = sm_create(streams);
+    streams = sm_create(streams);
+
+    dev = ds_alloc(dev, 4096);
+    dev = ds_alloc(dev, 4096);
+    dev = ds_alloc(dev, 1024);
+    assert_eq(dev.total_allocated, 9216);
+
+    dev = ds_free(dev, 1024);
+    dev = ds_alloc(dev, 2048);
+    assert_eq(dev.peak_allocated, 10240);
+
+    dev = ds_free(dev, 4096);
+    dev = ds_free(dev, 4096);
+    dev = ds_free(dev, 2048);
+    assert_eq(dev.total_allocated, 0);
+
+    streams = sm_destroy_all(streams);
+    dev = ds_deactivate(dev);
+    assert_eq(dev.is_active, false);
+
+    print("combined_lifecycle: ok");
+}
+
+fn test_multi_device_alloc() {
+    let mut d0 = ds_activate(ds_new(0));
+    let mut d1 = ds_activate(ds_new(1));
+
+    d0 = ds_alloc(d0, 10000);
+    d0 = ds_alloc(d0, 5000);
+    d1 = ds_alloc(d1, 256);
+    d1 = ds_alloc(d1, 512);
+    assert_eq(d0.total_allocated, 15000);
+    assert_eq(d1.total_allocated, 768);
+
+    d0 = ds_free(d0, 10000);
+    assert_eq(d0.peak_allocated, 15000);
+    assert_eq(d1.total_allocated, 768);
+
+    print("multi_device_alloc: ok");
+}
+
+fn main() -> Int {
+    test_device_state_basic();
+    test_device_alloc_free();
+    test_device_peak_tracking();
+    test_stream_lifecycle();
+    test_stream_capacity();
+    test_stream_destroy_all();
+    test_round_robin();
+    test_combined_lifecycle();
+    test_multi_device_alloc();
+    print("[OK] 049_differential_gpu");
+    0
+}

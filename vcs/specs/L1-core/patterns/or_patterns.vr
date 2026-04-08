@@ -1,0 +1,254 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, or
+//
+// Tests or-patterns: A | B | C for combining multiple patterns into one arm.
+
+type Weekday is
+    | Monday
+    | Tuesday
+    | Wednesday
+    | Thursday
+    | Friday
+    | Saturday
+    | Sunday;
+
+type Color is
+    | Red
+    | Orange
+    | Yellow
+    | Green
+    | Blue
+    | Indigo
+    | Violet;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// Basic or-pattern with unit variants
+fn is_weekend(day: Weekday) -> Bool {
+    match day {
+        Saturday | Sunday => true,
+        Monday | Tuesday | Wednesday | Thursday | Friday => false,
+    }
+}
+
+fn is_weekday(day: Weekday) -> Bool {
+    match day {
+        Monday | Tuesday | Wednesday | Thursday | Friday => true,
+        Saturday | Sunday => false,
+    }
+}
+
+// Or-pattern with literals
+fn is_vowel(c: Char) -> Bool {
+    match c {
+        'a' | 'e' | 'i' | 'o' | 'u' |
+        'A' | 'E' | 'I' | 'O' | 'U' => true,
+        _ => false,
+    }
+}
+
+fn classify_digit(n: Int) -> Text {
+    match n {
+        0 | 1 => "binary digit",
+        2 | 3 | 4 | 5 | 6 | 7 => "octal digit",
+        8 | 9 => "decimal only",
+        _ => "not a digit",
+    }
+}
+
+// Or-pattern with bindings (all alternatives must bind same names)
+fn extract_value(r: Result<Int, Int>) -> Int {
+    match r {
+        Ok(x) | Err(x) => x,
+    }
+}
+
+// Or-pattern in enum variants
+fn is_warm_color(c: Color) -> Bool {
+    match c {
+        Red | Orange | Yellow => true,
+        Green | Blue | Indigo | Violet => false,
+    }
+}
+
+fn is_primary_color(c: Color) -> Bool {
+    match c {
+        Red | Yellow | Blue => true,
+        Orange | Green | Indigo | Violet => false,
+    }
+}
+
+// Or-pattern with tuples
+fn classify_pair(pair: (Int, Int)) -> Text {
+    match pair {
+        (0, 0) => "origin",
+        (0, _) | (_, 0) => "on axis",
+        (1, 1) | (-1, -1) | (1, -1) | (-1, 1) => "unit square corner",
+        _ => "general point",
+    }
+}
+
+// Or-pattern with guards
+fn classify_number(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        1 | -1 => "unit",
+        x if x > 0 && (x == 2 || x == 3 || x == 5 || x == 7) => "small prime",
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+    }
+}
+
+// Nested or-patterns
+type Nested is
+    | A(Int)
+    | B(Int)
+    | C(Int);
+
+fn extract_nested(n: Nested) -> Int {
+    match n {
+        A(x) | B(x) | C(x) => x,
+    }
+}
+
+// Or-pattern in let (requires all alternatives to bind same variables)
+fn first_non_none<T>(a: Maybe<T>, b: Maybe<T>) -> Maybe<T> {
+    match (a, b) {
+        (Some(x), _) | (None, Some(x)) => Some(x),
+        (None, None) => None,
+    }
+}
+
+// Complex or-pattern with struct-like variants
+type Shape is
+    | Circle { radius: Int }
+    | Square { side: Int }
+    | Rectangle { width: Int, height: Int };
+
+fn is_regular(s: Shape) -> Bool {
+    match s {
+        Circle { .. } | Square { .. } => true,
+        Rectangle { width, height } if width == height => true,
+        Rectangle { .. } => false,
+    }
+}
+
+fn is_whitespace(c: Char) -> Bool {
+    match c {
+        ' ' | '\t' | '\n' | '\r' => true,
+        _ => false,
+    }
+}
+
+// Multiple or-patterns in one match
+fn categorize_char(c: Char) -> Text {
+    match c {
+        'a' | 'e' | 'i' | 'o' | 'u' => "lowercase vowel",
+        'A' | 'E' | 'I' | 'O' | 'U' => "uppercase vowel",
+        'b' | 'c' | 'd' | 'f' | 'g' | 'h' | 'j' | 'k' | 'l' | 'm' |
+        'n' | 'p' | 'q' | 'r' | 's' | 't' | 'v' | 'w' | 'x' | 'y' | 'z' => "lowercase consonant",
+        'B' | 'C' | 'D' | 'F' | 'G' | 'H' | 'J' | 'K' | 'L' | 'M' |
+        'N' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'V' | 'W' | 'X' | 'Y' | 'Z' => "uppercase consonant",
+        '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => "digit",
+        _ => "other",
+    }
+}
+
+// Or-pattern with more than 2 alternatives
+fn large_or(n: Int) -> Text {
+    match n {
+        1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 => "first ten",
+        11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 => "second ten",
+        _ => "other",
+    }
+}
+
+// Or-pattern in struct field
+fn struct_field_or(p: Point) -> Text {
+    match p {
+        Point { x: 0 | 1, y: 0 | 1 } => "near origin",
+        Point { x, y } => "elsewhere",
+    }
+}
+
+fn main() {
+    // Weekend check
+    assert(is_weekend(Saturday) == true);
+    assert(is_weekend(Sunday) == true);
+    assert(is_weekend(Monday) == false);
+    assert(is_weekend(Friday) == false);
+
+    // Vowel check
+    assert(is_vowel('a') == true);
+    assert(is_vowel('E') == true);
+    assert(is_vowel('b') == false);
+
+    // Digit classification
+    assert(classify_digit(0) == "binary digit");
+    assert(classify_digit(1) == "binary digit");
+    assert(classify_digit(5) == "octal digit");
+    assert(classify_digit(9) == "decimal only");
+    assert(classify_digit(10) == "not a digit");
+
+    // Value extraction
+    assert(extract_value(Ok(42)) == 42);
+    assert(extract_value(Err(42)) == 42);
+
+    // Color tests
+    assert(is_warm_color(Red) == true);
+    assert(is_warm_color(Blue) == false);
+    assert(is_primary_color(Yellow) == true);
+    assert(is_primary_color(Orange) == false);
+
+    // Pair classification
+    assert(classify_pair((0, 0)) == "origin");
+    assert(classify_pair((0, 5)) == "on axis");
+    assert(classify_pair((5, 0)) == "on axis");
+    assert(classify_pair((1, 1)) == "unit square corner");
+    assert(classify_pair((2, 3)) == "general point");
+
+    // Nested extraction
+    assert(extract_nested(A(1)) == 1);
+    assert(extract_nested(B(2)) == 2);
+    assert(extract_nested(C(3)) == 3);
+
+    // First non-none
+    assert(first_non_none(Some(1), Some(2)) == Some(1));
+    assert(first_non_none(None, Some(2)) == Some(2));
+    assert(first_non_none(None, None) == None);
+
+    // Shape regularity
+    assert(is_regular(Circle { radius: 5 }) == true);
+    assert(is_regular(Square { side: 4 }) == true);
+    assert(is_regular(Rectangle { width: 3, height: 3 }) == true);
+    assert(is_regular(Rectangle { width: 3, height: 4 }) == false);
+
+    // Whitespace
+    assert(is_whitespace(' ') == true);
+    assert(is_whitespace('\n') == true);
+    assert(is_whitespace('a') == false);
+
+    // Character categorization
+    assert(categorize_char('a') == "lowercase vowel");
+    assert(categorize_char('B') == "uppercase consonant");
+    assert(categorize_char('5') == "digit");
+    assert(categorize_char('!') == "other");
+
+    // Large or
+    assert(large_or(5) == "first ten");
+    assert(large_or(15) == "second ten");
+    assert(large_or(25) == "other");
+}

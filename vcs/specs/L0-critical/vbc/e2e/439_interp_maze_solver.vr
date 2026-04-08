@@ -1,0 +1,144 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, maze, pathfinding
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests maze solving using BFS on a grid.
+
+fn test_maze_bfs() {
+    // 5x5 maze: 0=path, 1=wall
+    // S=start(0,0), E=end(4,4)
+    let maze = [
+        0, 0, 1, 0, 0,
+        1, 0, 1, 0, 1,
+        0, 0, 0, 0, 0,
+        0, 1, 1, 1, 0,
+        0, 0, 0, 0, 0
+    ];
+    let rows = 5;
+    let cols = 5;
+
+    // BFS to find shortest path length
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dist_arr = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+
+    // Queue: store (row*cols+col) as single int
+    let mut queue_data = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut head = 0;
+    let mut tail = 0;
+
+    // Start at (0,0)
+    visited[0] = 1;
+    dist_arr[0] = 0;
+    queue_data[tail] = 0;
+    tail = tail + 1;
+
+    // Direction offsets: right, down, left, up
+    let dr = [0, 1, 0, -1];
+    let dc = [1, 0, -1, 0];
+
+    while head < tail {
+        let pos = queue_data[head];
+        head = head + 1;
+        let r = pos / cols;
+        let c = pos % cols;
+
+        let mut d = 0;
+        while d < 4 {
+            let nr = r + dr[d];
+            let nc = c + dc[d];
+            if nr >= 0 && nr < rows && nc >= 0 && nc < cols {
+                let npos = nr * cols + nc;
+                if visited[npos] == 0 && maze[npos] == 0 {
+                    visited[npos] = 1;
+                    dist_arr[npos] = dist_arr[pos] + 1;
+                    queue_data[tail] = npos;
+                    tail = tail + 1;
+                }
+            }
+            d = d + 1;
+        }
+    }
+
+    // Check shortest path to (4,4)
+    let end_pos = 4 * cols + 4;
+    assert(dist_arr[end_pos] > 0); // Path exists
+    assert_eq(dist_arr[end_pos], 8); // Shortest path length
+
+    print("maze_bfs: ok");
+}
+
+fn test_flood_fill() {
+    // 5x5 grid, flood fill from (2,2)
+    let mut grid = [
+        0, 0, 1, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 1, 0, 0
+    ];
+    let rows = 5;
+    let cols = 5;
+
+    // BFS flood fill with value 2
+    let mut queue_data = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut head = 0;
+    let mut tail = 0;
+
+    let start = 2 * cols + 2; // (2,2)
+    grid[start] = 2;
+    queue_data[tail] = start;
+    tail = tail + 1;
+
+    let dr = [0, 1, 0, -1];
+    let dc = [1, 0, -1, 0];
+
+    while head < tail {
+        let pos = queue_data[head];
+        head = head + 1;
+        let r = pos / cols;
+        let c = pos % cols;
+
+        let mut d = 0;
+        while d < 4 {
+            let nr = r + dr[d];
+            let nc = c + dc[d];
+            if nr >= 0 && nr < rows && nc >= 0 && nc < cols {
+                let npos = nr * cols + nc;
+                if grid[npos] == 0 {
+                    grid[npos] = 2;
+                    queue_data[tail] = npos;
+                    tail = tail + 1;
+                }
+            }
+            d = d + 1;
+        }
+    }
+
+    // Count filled cells
+    let mut filled = 0;
+    let mut i = 0;
+    while i < 25 {
+        if grid[i] == 2 { filled = filled + 1; }
+        i = i + 1;
+    }
+    // Should fill all non-wall connected cells
+    // Walls at (0,2),(1,2),(3,2),(4,2)
+    // Connected from (2,2): the center area + left side + right side
+    // Left side: (0,0),(0,1),(1,0),(1,1),(2,0),(2,1),(3,0),(3,1),(4,0),(4,1) = 10
+    // Center: (2,2) = 1
+    // Right side: (2,3),(2,4),(0,3),(0,4),(1,3) = 5? Let's check...
+    // (2,2)→(2,3)→(2,4), (2,3)→(1,3)→(0,3)→(0,4), (2,4)→(3,4)→(4,4)→(4,3)→(3,3)→(3,4)already
+    // Total connected: 25 - 4 walls = 21 reachable cells
+    assert_eq(filled, 21);
+    print("flood_fill: ok");
+}
+
+fn main() -> Int {
+    test_maze_bfs();
+    test_flood_fill();
+    print("[OK] 439_interp_maze_solver");
+    0
+}

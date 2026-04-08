@@ -1,0 +1,74 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: channel, spawn, concurrency, e2e
+// @description: Test channel-based communication between spawned threads
+
+fn producer(ch: Channel<Int>, count: Int) {
+    let mut i = 0;
+    while i < count {
+        ch.send(i * 10);
+        i = i + 1;
+    }
+}
+
+fn recv_or(ch: Channel<Int>, default: Int) -> Int {
+    match ch.recv() {
+        Some(v) => v,
+        None => default,
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Basic channel send/recv
+    let ch = Channel.new(16);
+    ch.send(42);
+    let v = recv_or(ch, -1);
+    if v != 42 {
+        print(f"FAIL 1: recv = {v}");
+        f = f + 1;
+    } else {
+        print("  basic_channel: OK");
+    }
+
+    // Test 2: Channel with spawn
+    let ch2 = Channel.new(16);
+    spawn producer(ch2, 5);
+
+    let mut sum = 0;
+    let mut count = 0;
+    while count < 5 {
+        let val = recv_or(ch2, 0);
+        sum = sum + val;
+        count = count + 1;
+    }
+    // 0 + 10 + 20 + 30 + 40 = 100
+    if sum != 100 {
+        print(f"FAIL 2: sum = {sum}, expected 100");
+        f = f + 1;
+    } else {
+        print("  spawn_channel: OK");
+    }
+
+    // Test 3: Multiple values
+    let ch3 = Channel.new(16);
+    ch3.send(1);
+    ch3.send(2);
+    ch3.send(3);
+    let a = recv_or(ch3, 0);
+    let b = recv_or(ch3, 0);
+    let c = recv_or(ch3, 0);
+    if a + b + c != 6 {
+        print(f"FAIL 3: a+b+c = {a + b + c}");
+        f = f + 1;
+    } else {
+        print("  multi_send: OK");
+    }
+
+    if f == 0 {
+        print("All channel spawn tests passed");
+    }
+    f
+}

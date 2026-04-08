@@ -1,0 +1,714 @@
+// =============================================================================
+// vcs/specs/core/math/autodiff_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @note: autodiff.vr fixed — corrected meta syntax and Tensor<T, []> to DynTensor<T>
+// @tags: core, math, autodiff, gradient, vjp, jvp, differentiation, optype,
+//        compute-graph, checkpoint, memory-tracker
+// @description: Tests for the automatic differentiation system including
+//               DiffMode selection, Differentiable protocol, VJP/JVP results,
+//               gradient API, checkpointing, higher-order derivative types,
+//               OpType variants, compute graph types, and memory optimization.
+//
+// Coverage:
+// - DiffMode: ReverseMode, ForwardMode, MixedMode, auto selection
+// - Differentiable protocol: Float, Vector, Matrix implementations
+// - VJPResult, JVPResult type structures
+// - OpType: all 18 unit variants + Custom
+// - Compute graph: NodeId, TensorId, GraphNode, GraphEdge, CheckpointData
+// - MemoryTracker: construction and field access
+// - ComputeGraph: construction
+// - GradientScope type
+// - VJPRule, JVPRule opaque handle types
+// - Function imports: vjp, jvp, grad, value_and_grad, stop_gradient,
+//   custom_vjp, jacobian, hessian, hvp, gnvp, checkpoint, recompute,
+//   with_no_grad, with_inference, compute_checkpoint_schedule
+//
+// Test Strategy:
+// - Type construction and variant matching
+// - Protocol implementation verification
+// - Auto mode selection logic
+// - Result type field access
+// - OpType exhaustive variant coverage
+// - Compute graph type existence and field access
+// - Function import existence verification
+// =============================================================================
+
+module specs.core.math.autodiff_test;
+
+mount core.math.autodiff.{
+    DiffMode,
+    Differentiable,
+    VJPResult, JVPResult,
+    OpType, GradientScope,
+    NodeId, TensorId,
+    GraphNode, GraphEdge, CheckpointData,
+    MemoryTracker, ComputeGraph,
+    VJPRule, JVPRule,
+    vjp, jvp, grad, value_and_grad, stop_gradient, custom_vjp,
+    jacobian, hessian, hvp, gnvp,
+    checkpoint, recompute,
+    with_no_grad, with_inference,
+    compute_checkpoint_schedule,
+};
+mount core.math.linalg.{Vector, Matrix};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// DiffMode Tests
+// =============================================================================
+
+@test
+fn test_diff_mode_reverse() {
+    let mode = DiffMode.ReverseMode;
+    match mode {
+        DiffMode.ReverseMode => { /* expected */ }
+        _ => assert(false, "Should be ReverseMode"),
+    }
+}
+
+@test
+fn test_diff_mode_forward() {
+    let mode = DiffMode.ForwardMode;
+    match mode {
+        DiffMode.ForwardMode => { /* expected */ }
+        _ => assert(false, "Should be ForwardMode"),
+    }
+}
+
+@test
+fn test_diff_mode_mixed() {
+    let thresh = 1.5;
+    let mode = DiffMode.MixedMode { threshold: thresh };
+    assert(mode is DiffMode.MixedMode);
+    assert_eq(thresh, 1.5);
+}
+
+@test
+fn test_diff_mode_default() {
+    let mode = DiffMode.default();
+    match mode {
+        DiffMode.ReverseMode => { /* expected: default is ReverseMode */ }
+        _ => assert(false, "Default mode should be ReverseMode"),
+    }
+}
+
+@test
+fn test_diff_mode_auto_reverse() {
+    // When output_dim < input_dim, reverse mode is preferred
+    let mode = DiffMode.auto(1000, 1);
+    match mode {
+        DiffMode.ReverseMode => { /* expected: scalar output, many inputs */ }
+        _ => assert(false, "Should select ReverseMode for output_dim < input_dim"),
+    }
+}
+
+@test
+fn test_diff_mode_auto_forward() {
+    // When output_dim > input_dim, forward mode is preferred
+    let mode = DiffMode.auto(1, 1000);
+    match mode {
+        DiffMode.ForwardMode => { /* expected: many outputs, scalar input */ }
+        _ => assert(false, "Should select ForwardMode for output_dim > input_dim"),
+    }
+}
+
+@test
+fn test_diff_mode_auto_equal() {
+    // When equal, ratio = 1.0 which is NOT > 1.0, so ReverseMode
+    let mode = DiffMode.auto(100, 100);
+    match mode {
+        DiffMode.ReverseMode => { /* expected: ratio = 1.0, not > 1.0 */ }
+        _ => assert(false, "Should select ReverseMode for equal dims"),
+    }
+}
+
+// =============================================================================
+// Differentiable Protocol Tests (Float)
+// =============================================================================
+
+@test
+fn test_float_zero_tangent() {
+    let z: Float = Float.zero_tangent();
+    assert_eq(z, 0.0);
+}
+
+@test
+fn test_float_add_tangent() {
+    let result = Float.add_tangent(3.0, 4.0);
+    assert_eq(result, 7.0);
+}
+
+@test
+fn test_float_scale_tangent() {
+    let result = Float.scale_tangent(5.0, 2.0);
+    assert_eq(result, 10.0);
+}
+
+@test
+fn test_float_tangent_identity() {
+    // Adding zero tangent should be identity
+    let x = 42.0;
+    let result = Float.add_tangent(x, Float.zero_tangent());
+    assert_eq(result, x);
+}
+
+@test
+fn test_float_scale_zero() {
+    let result = Float.scale_tangent(100.0, 0.0);
+    assert_eq(result, 0.0);
+}
+
+@test
+fn test_float_scale_one() {
+    let result = Float.scale_tangent(42.0, 1.0);
+    assert_eq(result, 42.0);
+}
+
+// =============================================================================
+// Differentiable Protocol Tests (Vector) — using concrete operations
+// =============================================================================
+
+@test
+fn test_vector_zero_tangent() {
+    // Vector<Float>.zero_tangent() returns Vector.zeros(0)
+    let z: Vector<Float> = Vector.zeros(0);
+    assert_eq(z.len(), 0);
+}
+
+@test
+fn test_vector_add_tangent() {
+    let mut a: Vector<Float> = Vector.zeros(3);
+    a.set(0, 1.0); a.set(1, 2.0); a.set(2, 3.0);
+    let mut b: Vector<Float> = Vector.zeros(3);
+    b.set(0, 4.0); b.set(1, 5.0); b.set(2, 6.0);
+    // Differentiable.add_tangent delegates to a.add(&b)
+    let result: Vector<Float> = a.add(&b);
+    assert_eq(result.get(0), 5.0);
+    assert_eq(result.get(1), 7.0);
+    assert_eq(result.get(2), 9.0);
+}
+
+@test
+fn test_vector_scale_tangent() {
+    let mut v: Vector<Float> = Vector.zeros(3);
+    v.set(0, 1.0); v.set(1, 2.0); v.set(2, 3.0);
+    // Differentiable.scale_tangent delegates to v.scale(s) (in-place)
+    v.scale(2.0);
+    assert_eq(v.get(0), 2.0);
+    assert_eq(v.get(1), 4.0);
+    assert_eq(v.get(2), 6.0);
+}
+
+// =============================================================================
+// Differentiable Protocol Tests (Matrix) — using concrete operations
+// =============================================================================
+
+@test
+fn test_matrix_zero_tangent() {
+    // Matrix<Float>.zero_tangent() returns Matrix.zeros(0, 0)
+    let z: Matrix<Float> = Matrix.zeros(0, 0);
+    assert_eq(z.rows(), 0);
+    assert_eq(z.cols(), 0);
+}
+
+@test
+fn test_matrix_add_tangent() {
+    let mut a: Matrix<Float> = Matrix.zeros(2, 2);
+    a.set(0, 0, 1.0); a.set(0, 1, 2.0);
+    a.set(1, 0, 3.0); a.set(1, 1, 4.0);
+    let mut b: Matrix<Float> = Matrix.zeros(2, 2);
+    b.set(0, 0, 5.0); b.set(0, 1, 6.0);
+    b.set(1, 0, 7.0); b.set(1, 1, 8.0);
+    // Differentiable.add_tangent delegates to a.add(&b)
+    let result: Matrix<Float> = a.add(&b);
+    assert_eq(result.get(0, 0), 6.0);
+    assert_eq(result.get(1, 1), 12.0);
+}
+
+@test
+fn test_matrix_scale_tangent() {
+    let mut m: Matrix<Float> = Matrix.zeros(2, 2);
+    m.set(0, 0, 1.0); m.set(0, 1, 2.0);
+    m.set(1, 0, 3.0); m.set(1, 1, 4.0);
+    // Matrix has scaled() which returns a new matrix
+    let result: Matrix<Float> = m.scaled(3.0);
+    assert_eq(result.get(0, 0), 3.0);
+    assert_eq(result.get(0, 1), 6.0);
+    assert_eq(result.get(1, 0), 9.0);
+    assert_eq(result.get(1, 1), 12.0);
+}
+
+// =============================================================================
+// Auto Mode Selection Property Tests
+// =============================================================================
+
+@test
+fn test_auto_mode_always_valid() {
+    // auto() should never fail regardless of dimensions
+    let _ = DiffMode.auto(0, 0);
+    let _ = DiffMode.auto(1, 0);
+    let _ = DiffMode.auto(0, 1);
+    let _ = DiffMode.auto(10000, 1);
+    let _ = DiffMode.auto(1, 10000);
+}
+
+@test
+fn test_auto_mode_neural_net() {
+    // Typical neural net: many parameters, scalar loss
+    // Should use reverse mode (backprop)
+    let mode = DiffMode.auto(1000000, 1);
+    match mode {
+        DiffMode.ReverseMode => { /* expected for training */ }
+        _ => assert(false, "Neural net training should use ReverseMode"),
+    }
+}
+
+@test
+fn test_auto_mode_sensitivity_analysis() {
+    // Sensitivity analysis: one parameter, many outputs
+    // Should use forward mode
+    let mode = DiffMode.auto(1, 1000);
+    match mode {
+        DiffMode.ForwardMode => { /* expected for sensitivity */ }
+        _ => assert(false, "Sensitivity analysis should use ForwardMode"),
+    }
+}
+
+// =============================================================================
+// OpType Variant Tests
+// =============================================================================
+
+@test
+fn test_optype_add() {
+    let op = OpType.Add;
+    assert(op is OpType.Add);
+}
+
+@test
+fn test_optype_sub() {
+    let op = OpType.Sub;
+    assert(op is OpType.Sub);
+}
+
+@test
+fn test_optype_mul() {
+    let op = OpType.Mul;
+    assert(op is OpType.Mul);
+}
+
+@test
+fn test_optype_div() {
+    let op = OpType.Div;
+    assert(op is OpType.Div);
+}
+
+@test
+fn test_optype_pow() {
+    let op = OpType.Pow;
+    assert(op is OpType.Pow);
+}
+
+@test
+fn test_optype_neg() {
+    let op = OpType.Neg;
+    assert(op is OpType.Neg);
+}
+
+@test
+fn test_optype_exp() {
+    let op = OpType.Exp;
+    assert(op is OpType.Exp);
+}
+
+@test
+fn test_optype_log() {
+    let op = OpType.Log;
+    assert(op is OpType.Log);
+}
+
+@test
+fn test_optype_sqrt() {
+    let op = OpType.Sqrt;
+    assert(op is OpType.Sqrt);
+}
+
+@test
+fn test_optype_sin() {
+    let op = OpType.Sin;
+    assert(op is OpType.Sin);
+}
+
+@test
+fn test_optype_cos() {
+    let op = OpType.Cos;
+    assert(op is OpType.Cos);
+}
+
+@test
+fn test_optype_tanh() {
+    let op = OpType.Tanh;
+    assert(op is OpType.Tanh);
+}
+
+@test
+fn test_optype_matmul() {
+    let op = OpType.Matmul;
+    assert(op is OpType.Matmul);
+}
+
+@test
+fn test_optype_softmax() {
+    let op = OpType.Softmax;
+    assert(op is OpType.Softmax);
+}
+
+@test
+fn test_optype_sum() {
+    let op = OpType.Sum;
+    assert(op is OpType.Sum);
+}
+
+@test
+fn test_optype_mean() {
+    let op = OpType.Mean;
+    assert(op is OpType.Mean);
+}
+
+@test
+fn test_optype_reshape() {
+    let op = OpType.Reshape;
+    assert(op is OpType.Reshape);
+}
+
+@test
+fn test_optype_transpose() {
+    let op = OpType.Transpose;
+    assert(op is OpType.Transpose);
+}
+
+@test
+fn test_optype_custom() {
+    let op = OpType.Custom("my_op");
+    assert(op is OpType.Custom);
+}
+
+@test
+fn test_optype_distinctness_arithmetic() {
+    assert(!(OpType.Add is OpType.Sub));
+    assert(!(OpType.Sub is OpType.Mul));
+    assert(!(OpType.Mul is OpType.Div));
+    assert(!(OpType.Div is OpType.Pow));
+    assert(!(OpType.Pow is OpType.Neg));
+}
+
+@test
+fn test_optype_distinctness_transcendental() {
+    assert(!(OpType.Exp is OpType.Log));
+    assert(!(OpType.Log is OpType.Sqrt));
+    assert(!(OpType.Sqrt is OpType.Sin));
+    assert(!(OpType.Sin is OpType.Cos));
+    assert(!(OpType.Cos is OpType.Tanh));
+}
+
+@test
+fn test_optype_distinctness_tensor() {
+    assert(!(OpType.Matmul is OpType.Softmax));
+    assert(!(OpType.Softmax is OpType.Sum));
+    assert(!(OpType.Sum is OpType.Mean));
+    assert(!(OpType.Mean is OpType.Reshape));
+    assert(!(OpType.Reshape is OpType.Transpose));
+}
+
+@test
+fn test_optype_match_exhaustive() {
+    let ops = [
+        OpType.Add, OpType.Sub, OpType.Mul, OpType.Div,
+        OpType.Pow, OpType.Neg, OpType.Exp, OpType.Log,
+        OpType.Sqrt, OpType.Sin, OpType.Cos, OpType.Tanh,
+        OpType.Matmul, OpType.Softmax, OpType.Sum, OpType.Mean,
+        OpType.Reshape, OpType.Transpose, OpType.Custom("test"),
+    ];
+    let mut count = 0;
+    for op in ops {
+        match op {
+            OpType.Add => count = count + 1,
+            OpType.Sub => count = count + 1,
+            OpType.Mul => count = count + 1,
+            OpType.Div => count = count + 1,
+            OpType.Pow => count = count + 1,
+            OpType.Neg => count = count + 1,
+            OpType.Exp => count = count + 1,
+            OpType.Log => count = count + 1,
+            OpType.Sqrt => count = count + 1,
+            OpType.Sin => count = count + 1,
+            OpType.Cos => count = count + 1,
+            OpType.Tanh => count = count + 1,
+            OpType.Matmul => count = count + 1,
+            OpType.Softmax => count = count + 1,
+            OpType.Sum => count = count + 1,
+            OpType.Mean => count = count + 1,
+            OpType.Reshape => count = count + 1,
+            OpType.Transpose => count = count + 1,
+            OpType.Custom(_) => count = count + 1,
+        }
+    }
+    assert_eq(count, 19);
+}
+
+// =============================================================================
+// Compute Graph Type Tests
+// =============================================================================
+
+@test
+fn test_node_id_type_exists() {
+    fn accept_node_id(id: NodeId) -> Bool { true }
+    let _ = accept_node_id;
+}
+
+@test
+fn test_tensor_id_type_exists() {
+    fn accept_tensor_id(id: TensorId) -> Bool { true }
+    let _ = accept_tensor_id;
+}
+
+@test
+fn test_graph_node_type_exists() {
+    fn accept_graph_node(n: &GraphNode) -> Bool { true }
+    let _ = accept_graph_node;
+}
+
+@test
+fn test_graph_node_has_id_field() {
+    fn get_id(n: &GraphNode) -> &NodeId { &n.id }
+    let _ = get_id;
+}
+
+@test
+fn test_graph_node_has_op_field() {
+    fn get_op(n: &GraphNode) -> &OpType { &n.op }
+    let _ = get_op;
+}
+
+@test
+fn test_graph_node_has_output_field() {
+    fn get_output(n: &GraphNode) -> &TensorId { &n.output }
+    let _ = get_output;
+}
+
+@test
+fn test_graph_edge_type_exists() {
+    fn accept_graph_edge(e: &GraphEdge) -> Bool { true }
+    let _ = accept_graph_edge;
+}
+
+@test
+fn test_graph_edge_has_from_field() {
+    fn get_from(e: &GraphEdge) -> &NodeId { &e.from }
+    let _ = get_from;
+}
+
+@test
+fn test_graph_edge_has_to_field() {
+    fn get_to(e: &GraphEdge) -> &NodeId { &e.to }
+    let _ = get_to;
+}
+
+@test
+fn test_graph_edge_has_tensor_id_field() {
+    fn get_tensor_id(e: &GraphEdge) -> &TensorId { &e.tensor_id }
+    let _ = get_tensor_id;
+}
+
+@test
+fn test_checkpoint_data_type_exists() {
+    fn accept_checkpoint_data(cd: &CheckpointData) -> Bool { true }
+    let _ = accept_checkpoint_data;
+}
+
+@test
+fn test_checkpoint_data_has_recompute_from() {
+    fn get_recompute(cd: &CheckpointData) -> &NodeId { &cd.recompute_from }
+    let _ = get_recompute;
+}
+
+@test
+fn test_vjp_rule_type_exists() {
+    fn accept_vjp_rule(r: VJPRule) -> Bool { true }
+    let _ = accept_vjp_rule;
+}
+
+@test
+fn test_jvp_rule_type_exists() {
+    fn accept_jvp_rule(r: JVPRule) -> Bool { true }
+    let _ = accept_jvp_rule;
+}
+
+// =============================================================================
+// MemoryTracker Tests
+// =============================================================================
+
+@test
+fn test_memory_tracker_new() {
+    let tracker = MemoryTracker.new();
+    assert_eq(tracker.current_usage(), 0 as USize);
+}
+
+@test
+fn test_memory_tracker_type_exists() {
+    fn accept_tracker(t: &MemoryTracker) -> Bool { true }
+    let _ = accept_tracker;
+}
+
+@test
+fn test_memory_tracker_has_peak_usage() {
+    fn get_peak(t: &MemoryTracker) -> USize { t.peak_usage }
+    let _ = get_peak;
+}
+
+// =============================================================================
+// ComputeGraph Tests
+// =============================================================================
+
+@test
+fn test_compute_graph_new() {
+    let graph = ComputeGraph.new();
+    assert_eq(graph.nodes.len(), 0);
+    assert_eq(graph.edges.len(), 0);
+}
+
+@test
+fn test_compute_graph_type_exists() {
+    fn accept_graph(g: &ComputeGraph) -> Bool { true }
+    let _ = accept_graph;
+}
+
+@test
+fn test_compute_graph_has_nodes() {
+    fn get_nodes(g: &ComputeGraph) -> &List<GraphNode> { &g.nodes }
+    let _ = get_nodes;
+}
+
+@test
+fn test_compute_graph_has_edges() {
+    fn get_edges(g: &ComputeGraph) -> &List<GraphEdge> { &g.edges }
+    let _ = get_edges;
+}
+
+// =============================================================================
+// GradientScope Tests
+// =============================================================================
+
+@test
+fn test_gradient_scope_type_exists() {
+    fn accept_scope(s: &GradientScope) -> Bool { true }
+    let _ = accept_scope;
+}
+
+@test
+fn test_gradient_scope_has_previous_recording() {
+    fn get_prev(s: &GradientScope) -> Bool { s.previous_recording }
+    let _ = get_prev;
+}
+
+@test
+fn test_gradient_scope_has_previous_mode() {
+    fn get_mode(s: &GradientScope) -> &DiffMode { &s.previous_mode }
+    let _ = get_mode;
+}
+
+// =============================================================================
+// Function Import Existence — Core Gradient API
+// =============================================================================
+
+@test
+fn test_vjp_fn_exists() {
+    let _ = vjp;
+}
+
+@test
+fn test_jvp_fn_exists() {
+    let _ = jvp;
+}
+
+@test
+fn test_grad_fn_exists() {
+    let _ = grad;
+}
+
+@test
+fn test_value_and_grad_fn_exists() {
+    let _ = value_and_grad;
+}
+
+@test
+fn test_stop_gradient_fn_exists() {
+    let _ = stop_gradient;
+}
+
+@test
+fn test_custom_vjp_fn_exists() {
+    let _ = custom_vjp;
+}
+
+// =============================================================================
+// Function Import Existence — Higher-Order Derivatives
+// =============================================================================
+
+@test
+fn test_jacobian_fn_exists() {
+    let _ = jacobian;
+}
+
+@test
+fn test_hessian_fn_exists() {
+    let _ = hessian;
+}
+
+@test
+fn test_hvp_fn_exists() {
+    let _ = hvp;
+}
+
+@test
+fn test_gnvp_fn_exists() {
+    let _ = gnvp;
+}
+
+// =============================================================================
+// Function Import Existence — Memory Optimization
+// =============================================================================
+
+@test
+fn test_checkpoint_fn_exists() {
+    let _ = checkpoint;
+}
+
+@test
+fn test_recompute_fn_exists() {
+    let _ = recompute;
+}
+
+@test
+fn test_with_no_grad_fn_exists() {
+    let _ = with_no_grad;
+}
+
+@test
+fn test_with_inference_fn_exists() {
+    let _ = with_inference;
+}
+
+@test
+fn test_compute_checkpoint_schedule_fn_exists() {
+    let _ = compute_checkpoint_schedule;
+}

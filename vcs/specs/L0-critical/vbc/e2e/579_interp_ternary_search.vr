@@ -1,0 +1,135 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, ternary_search, unimodal, peak_finding, integer_search
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Ternary search on a discrete unimodal integer function.
+// A unimodal function f on [lo, hi] has a unique peak: it strictly increases
+// up to some peak index p, then strictly decreases after p.
+//
+// Algorithm:
+//   m1 = lo + (hi - lo) / 3
+//   m2 = hi - (hi - lo) / 3
+//   if f(m1) < f(m2): peak is in [m1+1, hi], so lo = m1 + 1
+//   else:             peak is in [lo, m2-1], so hi = m2 - 1
+//   Repeat until lo == hi; return lo as peak index.
+//
+// For strictly unimodal functions this always converges.
+// We encode functions as integer arrays and evaluate by index lookup.
+// Also implement a linear scan to verify results.
+
+fn linear_peak(arr: [Int; 32], lo: Int, hi: Int) -> Int {
+    let mut best_idx = lo;
+    let mut best_val = arr[lo];
+    let mut i = lo + 1;
+    while i <= hi {
+        if arr[i] > best_val {
+            best_val = arr[i];
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+fn ternary_peak(arr: [Int; 32], lo_in: Int, hi_in: Int) -> Int {
+    let mut lo = lo_in;
+    let mut hi = hi_in;
+    while lo < hi {
+        let m1 = lo + (hi - lo) / 3;
+        let m2 = hi - (hi - lo) / 3;
+        if arr[m1] < arr[m2] {
+            lo = m1 + 1;
+        } else {
+            hi = m2 - 1;
+        }
+    }
+    lo
+}
+
+fn test_peak_in_middle() {
+    // f = [1, 3, 7, 10, 6, 2, 0]: peak at index 3 (value 10).
+    let mut arr = [1,3,7,10,6,2,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let p = ternary_peak(arr, 0, 6);
+    assert_eq(p, 3);
+    assert_eq(arr[p], 10);
+    let lp = linear_peak(arr, 0, 6);
+    assert_eq(lp, 3);
+    print("peak_in_middle: ok");
+}
+
+fn test_peak_at_start() {
+    // f = [100, 50, 20, 5, 1]: peak at index 0.
+    let mut arr = [100,50,20,5,1,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let p = ternary_peak(arr, 0, 4);
+    assert_eq(p, 0);
+    assert_eq(arr[p], 100);
+    print("peak_at_start: ok");
+}
+
+fn test_peak_at_end() {
+    // f = [1, 2, 4, 8, 16]: peak at index 4.
+    let mut arr = [1,2,4,8,16,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let p = ternary_peak(arr, 0, 4);
+    assert_eq(p, 4);
+    assert_eq(arr[p], 16);
+    let lp = linear_peak(arr, 0, 4);
+    assert_eq(lp, 4);
+    print("peak_at_end: ok");
+}
+
+fn test_large_unimodal() {
+    // f[i] = -(i-7)^2 + 100 for i=0..14: peak at i=7, value=100.
+    // Values: i=0: -(49)+100=51, i=7: 100, i=14: -(49)+100=51.
+    // Strictly unimodal: f[i] < f[i+1] for i<7, f[i] > f[i+1] for i>=7.
+    // -(i-7)^2 + 100: computed as 100 - (i-7)*(i-7).
+    let mut arr = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut i = 0;
+    while i <= 14 {
+        let d = i - 7;
+        arr[i] = 100 - d * d;
+        i = i + 1;
+    }
+    assert_eq(arr[7], 100);
+    assert_eq(arr[0], 51);
+    assert_eq(arr[14], 51);
+    let p = ternary_peak(arr, 0, 14);
+    assert_eq(p, 7);
+    assert_eq(arr[p], 100);
+    print("large_unimodal: ok");
+}
+
+fn test_two_element() {
+    // f=[3,7]: peak at index 1.
+    let mut arr = [3,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let p = ternary_peak(arr, 0, 1);
+    assert_eq(p, 1);
+    // f=[9,4]: peak at index 0.
+    let mut arr2 = [9,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let p2 = ternary_peak(arr2, 0, 1);
+    assert_eq(p2, 0);
+    // Single element: f=[42]: peak at 0.
+    let mut arr3 = [42,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let p3 = ternary_peak(arr3, 0, 0);
+    assert_eq(p3, 0);
+    print("two_element: ok");
+}
+
+fn main() -> Int {
+    test_peak_in_middle();
+    test_peak_at_start();
+    test_peak_at_end();
+    test_large_unimodal();
+    test_two_element();
+    print("[OK] 579_interp_ternary_search");
+    0
+}

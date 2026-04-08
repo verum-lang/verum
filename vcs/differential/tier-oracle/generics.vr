@@ -1,0 +1,196 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, generics
+
+/// Generic functions must behave identically across
+/// interpreter (Tier 0) and AOT (Tier 3)
+
+/// Identity function
+fn identity<T>(x: T) -> T {
+    x
+}
+
+/// Swap two values
+fn swap<T>(a: T, b: T) -> (T, T) {
+    (b, a)
+}
+
+/// First element of a pair
+fn first<A, B>(pair: (A, B)) -> A {
+    pair.0
+}
+
+/// Second element of a pair
+fn second<A, B>(pair: (A, B)) -> B {
+    pair.1
+}
+
+/// Map a function over a pair
+fn map_pair<A, B, C>(pair: (A, A), f: Fn(A) -> B) -> (B, B) {
+    (f(pair.0), f(pair.1))
+}
+
+/// Generic container
+type Container<T> is {
+    value: T,
+};
+
+implement<T> Container<T> {
+    fn new(value: T) -> Container<T> {
+        Container { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn map<U>(&self, f: Fn(&T) -> U) -> Container<U> {
+        Container { value: f(&self.value) }
+    }
+}
+
+/// Generic linked list node
+type ListNode<T> is Nil | Cons(T, Heap<ListNode<T>>);
+
+implement<T> ListNode<T> {
+    fn new() -> ListNode<T> {
+        ListNode.Nil
+    }
+
+    fn prepend(self, value: T) -> ListNode<T> {
+        ListNode.Cons(value, Heap(self))
+    }
+
+    fn len(&self) -> Int {
+        match self {
+            ListNode.Nil => 0,
+            ListNode.Cons(_, tail) => 1 + tail.len(),
+        }
+    }
+}
+
+/// Generic binary tree
+type Tree<T> is Empty | Node {
+    value: T,
+    left: Heap<Tree<T>>,
+    right: Heap<Tree<T>>,
+};
+
+implement<T> Tree<T> {
+    fn leaf(value: T) -> Tree<T> {
+        Tree.Node {
+            value,
+            left: Heap(Tree.Empty),
+            right: Heap(Tree.Empty),
+        }
+    }
+
+    fn size(&self) -> Int {
+        match self {
+            Tree.Empty => 0,
+            Tree.Node { left, right, .. } => 1 + left.size() + right.size(),
+        }
+    }
+}
+
+/// Trait-bounded generic
+fn max<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+fn min<T: Ord>(a: T, b: T) -> T {
+    if a < b { a } else { b }
+}
+
+/// Multiple trait bounds
+fn display_max<T: Ord + Display>(a: T, b: T) -> Text {
+    let m = max(a, b);
+    f"max = {m}"
+}
+
+/// Generic function with where clause
+fn find_first<T, F>(list: List<T>, predicate: F) -> Maybe<T>
+where
+    F: Fn(&T) -> Bool,
+{
+    for item in list {
+        if predicate(&item) {
+            return Some(item);
+        }
+    }
+    None
+}
+
+/// Associated types
+type ContainerProtocol is protocol {
+    type Item;
+
+    fn get(&self, index: Int) -> Maybe<Self.Item>;
+    fn len(&self) -> Int;
+};
+
+fn main() {
+    // Identity
+    println(f"identity(42) = {identity(42)}");
+    println(f"identity(\"hello\") = {identity(\"hello\")}");
+    println(f"identity(3.14) = {identity(3.14)}");
+
+    // Swap
+    let (a, b) = swap(1, 2);
+    println(f"swap(1, 2) = ({a}, {b})");
+
+    let (s1, s2) = swap("first", "second");
+    println(f"swap strings = ({s1}, {s2})");
+
+    // Pair operations
+    let pair = (10, "ten");
+    println(f"first(pair) = {first(pair)}");
+    println(f"second(pair) = {second(pair)}");
+
+    let num_pair = (3, 4);
+    let squared = map_pair(num_pair, |n| n * n);
+    println(f"map_pair squared = ({squared.0}, {squared.1})");
+
+    // Container
+    let int_container = Container.new(42);
+    println(f"int_container.get() = {int_container.get()}");
+
+    let mapped = int_container.map(|n| n * 2);
+    println(f"mapped container = {mapped.get()}");
+
+    // Linked list
+    let list = ListNode.new()
+        .prepend(3)
+        .prepend(2)
+        .prepend(1);
+    println(f"list.len() = {list.len()}");
+
+    // Tree
+    let tree = Tree.Node {
+        value: 1,
+        left: Heap(Tree.leaf(2)),
+        right: Heap(Tree.Node {
+            value: 3,
+            left: Heap(Tree.leaf(4)),
+            right: Heap(Tree.Empty),
+        }),
+    };
+    println(f"tree.size() = {tree.size()}");
+
+    // max/min
+    println(f"max(10, 20) = {max(10, 20)}");
+    println(f"min(10, 20) = {min(10, 20)}");
+    println(f"max(\"apple\", \"banana\") = {max(\"apple\", \"banana\")}");
+
+    // display_max
+    println(display_max(100, 50));
+
+    // find_first
+    let numbers = [1, 2, 3, 4, 5, 6];
+    let first_even = find_first(numbers, |n| n % 2 == 0);
+    println(f"first_even = {first_even}");
+
+    let first_big = find_first(numbers, |n| n > 10);
+    println(f"first_big = {first_big}");
+}

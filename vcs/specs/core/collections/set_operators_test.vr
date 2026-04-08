@@ -1,0 +1,924 @@
+// =============================================================================
+// set_operators_test.vr - Tests for Set operator protocol implementations,
+//                         standard protocol implementations, and constructors
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, set, operators, protocols, clone, default, eq, debug,
+//        display, from_iter, extend, constructor, production, core
+// @description: Comprehensive tests for Set<T> operator protocol method calls
+//               (bitor, bitand, sub, bitxor and their assign variants),
+//               protocol implementations (Clone, Default, Eq, Debug, Display,
+//               FromIterator, Extend, Hash, IntoIterator), constructor
+//               functions (set(), set_from_iter()), and algebraic properties.
+// =============================================================================
+
+module specs.core.collections.set_operators_test;
+
+mount core.*;
+mount core.text.format.{format_display, format_debug};
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn make_123() -> Set<Int> {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s
+}
+
+fn make_345() -> Set<Int> {
+    let mut s = Set.new();
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+    s
+}
+
+fn make_12345() -> Set<Int> {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+    s
+}
+
+fn make_empty() -> Set<Int> {
+    Set.new()
+}
+
+// =============================================================================
+// SECTION 1: BitOrAssign - Union-assign (|=)
+// =============================================================================
+
+@test
+fn test_bitor_assign_basic() {
+    let mut a = make_123();
+    let b = make_345();
+    a.bitor_assign(&b);
+    assert_eq(a.len(), 5);
+    assert(a.contains(&1));
+    assert(a.contains(&4));
+    assert(a.contains(&5));
+}
+
+@test
+fn test_bitor_assign_empty_rhs() {
+    let mut a = make_123();
+    let b = make_empty();
+    a.bitor_assign(&b);
+    assert_eq(a.len(), 3);
+}
+
+@test
+fn test_bitor_assign_empty_lhs() {
+    let mut a = make_empty();
+    let b = make_123();
+    a.bitor_assign(&b);
+    assert_eq(a.len(), 3);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+}
+
+@test
+fn test_bitor_assign_identical() {
+    let mut a = make_123();
+    let b = make_123();
+    a.bitor_assign(&b);
+    assert_eq(a.len(), 3);
+}
+
+@test
+fn test_bitor_assign_disjoint() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = Set.new();
+    b.insert(3);
+    b.insert(4);
+    a.bitor_assign(&b);
+    assert_eq(a.len(), 4);
+}
+
+// =============================================================================
+// SECTION 2: BitAndAssign - Intersection-assign (&=)
+// =============================================================================
+
+@test
+fn test_bitand_assign_basic() {
+    let mut a = make_123();
+    let b = make_345();
+    a.bitand_assign(&b);
+    assert_eq(a.len(), 1);
+    assert(a.contains(&3));
+}
+
+@test
+fn test_bitand_assign_disjoint() {
+    let mut a = make_123();
+    let mut b = Set.new();
+    b.insert(10);
+    b.insert(20);
+    a.bitand_assign(&b);
+    assert(a.is_empty());
+}
+
+@test
+fn test_bitand_assign_identical() {
+    let mut a = make_123();
+    let b = make_123();
+    a.bitand_assign(&b);
+    assert_eq(a.len(), 3);
+}
+
+@test
+fn test_bitand_assign_empty_rhs() {
+    let mut a = make_123();
+    let b = make_empty();
+    a.bitand_assign(&b);
+    assert(a.is_empty());
+}
+
+@test
+fn test_bitand_assign_subset() {
+    let mut a = make_12345();
+    let b = make_123();
+    a.bitand_assign(&b);
+    assert_eq(a.len(), 3);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+}
+
+// =============================================================================
+// SECTION 3: SubAssign - Difference-assign (-=)
+// =============================================================================
+
+@test
+fn test_sub_assign_basic() {
+    let mut a = make_123();
+    let b = make_345();
+    a.sub_assign(&b);
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(!a.contains(&3));
+}
+
+@test
+fn test_sub_assign_disjoint() {
+    let mut a = make_123();
+    let mut b = Set.new();
+    b.insert(10);
+    b.insert(20);
+    a.sub_assign(&b);
+    assert_eq(a.len(), 3);
+}
+
+@test
+fn test_sub_assign_all_removed() {
+    let mut a = make_123();
+    let b = make_123();
+    a.sub_assign(&b);
+    assert(a.is_empty());
+}
+
+@test
+fn test_sub_assign_empty_rhs() {
+    let mut a = make_123();
+    let b = make_empty();
+    a.sub_assign(&b);
+    assert_eq(a.len(), 3);
+}
+
+@test
+fn test_sub_assign_superset() {
+    let mut a = make_12345();
+    let b = make_123();
+    a.sub_assign(&b);
+    assert_eq(a.len(), 2);
+    assert(a.contains(&4));
+    assert(a.contains(&5));
+}
+
+// =============================================================================
+// SECTION 4: BitXorAssign - Symmetric-difference-assign (^=)
+// =============================================================================
+
+@test
+fn test_bitxor_assign_basic() {
+    let mut a = make_123();
+    let b = make_345();
+    a.bitxor_assign(&b);
+    assert_eq(a.len(), 4);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(!a.contains(&3));
+    assert(a.contains(&4));
+    assert(a.contains(&5));
+}
+
+@test
+fn test_bitxor_assign_identical() {
+    let mut a = make_123();
+    let b = make_123();
+    a.bitxor_assign(&b);
+    assert(a.is_empty());
+}
+
+@test
+fn test_bitxor_assign_disjoint() {
+    let mut a = make_123();
+    let mut b = Set.new();
+    b.insert(4);
+    b.insert(5);
+    a.bitxor_assign(&b);
+    assert_eq(a.len(), 5);
+}
+
+@test
+fn test_bitxor_assign_empty_rhs() {
+    let mut a = make_123();
+    let b = make_empty();
+    a.bitxor_assign(&b);
+    assert_eq(a.len(), 3);
+}
+
+@test
+fn test_bitxor_assign_empty_lhs() {
+    let mut a = make_empty();
+    let b = make_123();
+    a.bitxor_assign(&b);
+    assert_eq(a.len(), 3);
+}
+
+// =============================================================================
+// SECTION 5: Operator algebraic properties
+// =============================================================================
+
+@test
+fn test_union_commutative() {
+    let a = make_123();
+    let b = make_345();
+    let ab = a.union(&b);
+    let ba = b.union(&a);
+    assert(ab == ba);
+}
+
+@test
+fn test_intersection_commutative() {
+    let a = make_123();
+    let b = make_345();
+    let ab = a.intersection(&b);
+    let ba = b.intersection(&a);
+    assert(ab == ba);
+}
+
+@test
+fn test_symmetric_difference_commutative() {
+    let a = make_123();
+    let b = make_345();
+    let ab = a.symmetric_difference(&b);
+    let ba = b.symmetric_difference(&a);
+    assert(ab == ba);
+}
+
+@test
+fn test_difference_not_commutative() {
+    let a = make_123();
+    let b = make_345();
+    let ab = a.difference(&b);
+    let ba = b.difference(&a);
+    assert_eq(ab.len(), 2);
+    assert_eq(ba.len(), 2);
+    assert(ab.contains(&1));
+    assert(ba.contains(&4));
+}
+
+@test
+fn test_union_associative() {
+    let a = make_123();
+    let mut b = Set.new();
+    b.insert(3);
+    b.insert(4);
+    let mut c = Set.new();
+    c.insert(5);
+    c.insert(6);
+    let ab = a.union(&b);
+    let ab_c = ab.union(&c);
+    let bc = b.union(&c);
+    let a_bc = a.union(&bc);
+    assert(ab_c == a_bc);
+}
+
+@test
+fn test_intersection_associative() {
+    let a = make_12345();
+    let b = make_123();
+    let c = make_345();
+    let ab = a.intersection(&b);
+    let ab_c = ab.intersection(&c);
+    let bc = b.intersection(&c);
+    let a_bc = a.intersection(&bc);
+    assert(ab_c == a_bc);
+}
+
+@test
+fn test_union_identity() {
+    let a = make_123();
+    let empty = make_empty();
+    let result = a.union(&empty);
+    assert(result == a);
+}
+
+@test
+fn test_intersection_with_self() {
+    let a = make_123();
+    let result = a.intersection(&a);
+    assert(result == a);
+}
+
+@test
+fn test_difference_self() {
+    let a = make_123();
+    let result = a.difference(&a);
+    assert(result.is_empty());
+}
+
+@test
+fn test_symmetric_difference_self() {
+    let a = make_123();
+    let result = a.symmetric_difference(&a);
+    assert(result.is_empty());
+}
+
+@test
+fn test_de_morgan_property() {
+    // A △ B = (A ∪ B) \ (A ∩ B)
+    let a = make_123();
+    let b = make_345();
+    let sym_diff = a.symmetric_difference(&b);
+    let union_val = a.union(&b);
+    let inter_val = a.intersection(&b);
+    let union_minus_inter = union_val.difference(&inter_val);
+    assert(sym_diff == union_minus_inter);
+}
+
+@test
+fn test_distributive_property() {
+    // A ∪ (B ∩ C) = (A ∪ B) ∩ (A ∪ C)
+    let a = make_123();
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(4);
+    let mut c = Set.new();
+    c.insert(3);
+    c.insert(5);
+    let bc = b.intersection(&c);
+    let lhs = a.union(&bc);
+    let ab = a.union(&b);
+    let ac = a.union(&c);
+    let rhs = ab.intersection(&ac);
+    assert(lhs == rhs);
+}
+
+@test
+fn test_absorption_law_1() {
+    // A ∪ (A ∩ B) = A
+    let a = make_123();
+    let b = make_345();
+    let ab = a.intersection(&b);
+    let result = a.union(&ab);
+    assert(result == a);
+}
+
+@test
+fn test_absorption_law_2() {
+    // A ∩ (A ∪ B) = A
+    let a = make_123();
+    let b = make_345();
+    let ab = a.union(&b);
+    let result = a.intersection(&ab);
+    assert(result == a);
+}
+
+@test
+fn test_complement_law() {
+    // A \ B is disjoint from B
+    let a = make_123();
+    let b = make_345();
+    let diff = a.difference(&b);
+    assert(diff.is_disjoint(&b));
+}
+
+// =============================================================================
+// SECTION 6: Clone protocol
+// =============================================================================
+
+@test
+fn test_set_clone_basic() {
+    let a = make_123();
+    let b = a.clone();
+    assert_eq(b.len(), 3);
+    assert(b.contains(&1));
+    assert(b.contains(&2));
+    assert(b.contains(&3));
+}
+
+@test
+fn test_set_clone_empty() {
+    let a: Set<Int> = Set.new();
+    let b = a.clone();
+    assert(b.is_empty());
+}
+
+@test
+fn test_set_clone_independence() {
+    let mut a = make_123();
+    let b = a.clone();
+    a.insert(99);
+    assert_eq(a.len(), 4);
+    assert_eq(b.len(), 3);
+    assert(!b.contains(&99));
+}
+
+@test
+fn test_set_clone_text() {
+    let mut s: Set<Text> = Set.new();
+    s.insert("hello".clone());
+    s.insert("world".clone());
+    let cloned = s.clone();
+    assert_eq(cloned.len(), 2);
+    assert(cloned.contains(&"hello"));
+    assert(cloned.contains(&"world"));
+}
+
+@test
+fn test_set_clone_preserves_equality() {
+    let a = make_12345();
+    let b = a.clone();
+    assert(a == b);
+}
+
+// =============================================================================
+// SECTION 7: Default protocol
+// =============================================================================
+
+@test
+fn test_set_default() {
+    let s: Set<Int> = Set.default();
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_set_default_text() {
+    let s: Set<Text> = Set.default();
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_default_is_usable() {
+    let mut s: Set<Int> = Set.default();
+    s.insert(42);
+    assert_eq(s.len(), 1);
+    assert(s.contains(&42));
+}
+
+// =============================================================================
+// SECTION 8: Eq protocol
+// =============================================================================
+
+@test
+fn test_set_eq_same_elements() {
+    let a = make_123();
+    let b = make_123();
+    assert(a == b);
+}
+
+@test
+fn test_set_ne_different_elements() {
+    let a = make_123();
+    let b = make_345();
+    assert(a != b);
+}
+
+@test
+fn test_set_ne_different_sizes() {
+    let a = make_123();
+    let b = make_12345();
+    assert(a != b);
+}
+
+@test
+fn test_set_eq_both_empty() {
+    let a: Set<Int> = Set.new();
+    let b: Set<Int> = Set.new();
+    assert(a == b);
+}
+
+@test
+fn test_set_eq_insertion_order_irrelevant() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = Set.new();
+    b.insert(3);
+    b.insert(1);
+    b.insert(2);
+    assert(a == b);
+}
+
+@test
+fn test_set_eq_reflexive() {
+    let a = make_123();
+    assert(a == a);
+}
+
+@test
+fn test_set_eq_symmetric() {
+    let a = make_123();
+    let b = make_123();
+    assert(a == b);
+    assert(b == a);
+}
+
+@test
+fn test_set_eq_single_element_diff() {
+    let a = make_123();
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(4); // different!
+    assert(a != b);
+}
+
+// =============================================================================
+// SECTION 9: Debug formatting
+// =============================================================================
+
+@test
+fn test_set_debug_empty() {
+    let s: Set<Int> = Set.new();
+    let text = format_debug(&s);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_set_debug_single() {
+    let mut s = Set.new();
+    s.insert(42);
+    let text = format_debug(&s);
+    assert(text.contains(&"42"));
+}
+
+@test
+fn test_set_debug_multiple() {
+    let s = make_123();
+    let text = format_debug(&s);
+    assert(text.contains(&"{"));
+    assert(text.contains(&"}"));
+}
+
+// =============================================================================
+// SECTION 10: Display formatting
+// =============================================================================
+
+@test
+fn test_set_display_empty() {
+    let s: Set<Int> = Set.new();
+    let text = format_display(&s);
+    assert(text.len() > 0);
+}
+
+@test
+fn test_set_display_single() {
+    let mut s = Set.new();
+    s.insert(1);
+    let text = format_display(&s);
+    assert(text.contains(&"1"));
+}
+
+// =============================================================================
+// SECTION 11: FromIterator protocol
+// =============================================================================
+
+@test
+fn test_set_from_iterator_range() {
+    let s: Set<Int> = Set.from_iter(range(1, 6));
+    assert_eq(s.len(), 5);
+    assert(s.contains(&1));
+    assert(s.contains(&5));
+}
+
+@test
+fn test_set_from_iterator_empty() {
+    let s: Set<Int> = Set.from_iter(empty());
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_from_iterator_with_duplicates() {
+    let items: List<Int> = [1, 2, 2, 3, 3, 3];
+    let s: Set<Int> = Set.from_iter(items.iter().map(|x| *x));
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_set_from_iterator_single() {
+    let s: Set<Int> = Set.from_iter(once(42));
+    assert_eq(s.len(), 1);
+    assert(s.contains(&42));
+}
+
+@test
+fn test_set_from_iterator_large() {
+    let s: Set<Int> = Set.from_iter(range(0, 100));
+    assert_eq(s.len(), 100);
+}
+
+// =============================================================================
+// SECTION 12: Extend protocol
+// =============================================================================
+
+@test
+fn test_set_extend_range() {
+    let mut s = make_123();
+    s.extend(range(4, 7));
+    assert_eq(s.len(), 6);
+    assert(s.contains(&4));
+    assert(s.contains(&5));
+    assert(s.contains(&6));
+}
+
+@test
+fn test_set_extend_with_duplicates() {
+    let mut s = make_123();
+    s.extend(range(1, 4));
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_set_extend_empty_into_nonempty() {
+    let mut s = make_123();
+    let empty_list: List<Int> = [];
+    s.extend(empty_list.iter().map(|x| *x));
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_set_extend_into_empty() {
+    let mut s: Set<Int> = Set.new();
+    s.extend(range(1, 4));
+    assert_eq(s.len(), 3);
+}
+
+// =============================================================================
+// SECTION 13: Constructor functions
+// =============================================================================
+
+@test
+fn test_set_constructor_basic() {
+    let s = set(&[1, 2, 3, 4, 5]);
+    assert_eq(s.len(), 5);
+    assert(s.contains(&1));
+    assert(s.contains(&5));
+}
+
+@test
+fn test_set_constructor_single() {
+    let s = set(&[42]);
+    assert_eq(s.len(), 1);
+    assert(s.contains(&42));
+}
+
+@test
+fn test_set_constructor_duplicates() {
+    let s = set(&[1, 1, 2, 2, 3]);
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_set_from_iter_constructor() {
+    let s = set_from_iter(range(1, 11));
+    assert_eq(s.len(), 10);
+    assert(s.contains(&1));
+    assert(s.contains(&10));
+}
+
+@test
+fn test_set_from_iter_constructor_empty() {
+    let s: Set<Int> = set_from_iter(empty());
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// SECTION 14: Iterator
+// =============================================================================
+
+@test
+fn test_set_iter_count() {
+    let s = make_123();
+    let mut count = 0;
+    let mut iter = s.iter();
+    loop {
+        match iter.next() {
+            Some(_) => { count = count + 1; }
+            None => { break; }
+        }
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_set_iter_empty() {
+    let s: Set<Int> = Set.new();
+    let mut iter = s.iter();
+    assert(iter.next() is None);
+}
+
+@test
+fn test_set_iter_all_present() {
+    let s = make_123();
+    let mut found_1 = false;
+    let mut found_2 = false;
+    let mut found_3 = false;
+    let mut iter = s.iter();
+    loop {
+        match iter.next() {
+            Some(v) => {
+                if *v == 1 { found_1 = true; }
+                if *v == 2 { found_2 = true; }
+                if *v == 3 { found_3 = true; }
+            }
+            None => { break; }
+        }
+    }
+    assert(found_1);
+    assert(found_2);
+    assert(found_3);
+}
+
+// =============================================================================
+// SECTION 15: Assign operator chaining
+// =============================================================================
+
+@test
+fn test_assign_chain_union_then_difference() {
+    let mut s = make_123();
+    let extra = make_345();
+    s.bitor_assign(&extra);
+    assert_eq(s.len(), 5);
+
+    let mut to_remove = Set.new();
+    to_remove.insert(1);
+    to_remove.insert(2);
+    s.sub_assign(&to_remove);
+    assert_eq(s.len(), 3);
+    assert(s.contains(&3));
+    assert(s.contains(&4));
+    assert(s.contains(&5));
+}
+
+@test
+fn test_assign_chain_intersect_then_xor() {
+    let mut s = make_12345();
+    let keep = make_123();
+    s.bitand_assign(&keep);
+    assert_eq(s.len(), 3);
+
+    let mut toggle = Set.new();
+    toggle.insert(2);
+    toggle.insert(4);
+    s.bitxor_assign(&toggle);
+    assert_eq(s.len(), 3);
+    assert(s.contains(&1));
+    assert(!s.contains(&2));
+    assert(s.contains(&3));
+    assert(s.contains(&4));
+}
+
+// =============================================================================
+// SECTION 16: Large set operations
+// =============================================================================
+
+@test
+fn test_large_set_union() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        a.insert(i);
+        i = i + 1;
+    }
+    i = 50;
+    while i < 150 {
+        b.insert(i);
+        i = i + 1;
+    }
+    let result = a.union(&b);
+    assert_eq(result.len(), 150);
+}
+
+@test
+fn test_large_set_intersection() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        a.insert(i);
+        i = i + 1;
+    }
+    i = 50;
+    while i < 150 {
+        b.insert(i);
+        i = i + 1;
+    }
+    let result = a.intersection(&b);
+    assert_eq(result.len(), 50);
+}
+
+@test
+fn test_large_set_difference() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        a.insert(i);
+        i = i + 1;
+    }
+    i = 50;
+    while i < 150 {
+        b.insert(i);
+        i = i + 1;
+    }
+    let result = a.difference(&b);
+    assert_eq(result.len(), 50); // 0..49
+}
+
+@test
+fn test_large_set_symmetric_difference() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        a.insert(i);
+        i = i + 1;
+    }
+    i = 50;
+    while i < 150 {
+        b.insert(i);
+        i = i + 1;
+    }
+    let result = a.symmetric_difference(&b);
+    assert_eq(result.len(), 100); // 0..49 + 100..149
+}
+
+// =============================================================================
+// SECTION 17: Text sets
+// =============================================================================
+
+@test
+fn test_text_set_operations() {
+    let mut a: Set<Text> = Set.new();
+    a.insert("apple".clone());
+    a.insert("banana".clone());
+    a.insert("cherry".clone());
+
+    let mut b: Set<Text> = Set.new();
+    b.insert("banana".clone());
+    b.insert("cherry".clone());
+    b.insert("date".clone());
+
+    let union_result = a.union(&b);
+    assert_eq(union_result.len(), 4);
+
+    let inter_result = a.intersection(&b);
+    assert_eq(inter_result.len(), 2);
+    assert(inter_result.contains(&"banana"));
+    assert(inter_result.contains(&"cherry"));
+}
+
+@test
+fn test_text_set_difference() {
+    let mut a: Set<Text> = Set.new();
+    a.insert("alpha".clone());
+    a.insert("beta".clone());
+    a.insert("gamma".clone());
+
+    let mut b: Set<Text> = Set.new();
+    b.insert("beta".clone());
+
+    let diff = a.difference(&b);
+    assert_eq(diff.len(), 2);
+    assert(diff.contains(&"alpha"));
+    assert(diff.contains(&"gamma"));
+}

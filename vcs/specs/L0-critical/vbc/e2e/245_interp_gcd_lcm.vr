@@ -1,0 +1,263 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, gcd, lcm, number-theory
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: GCD (Euclidean), extended GCD (Bezout), LCM
+
+// =============================================================================
+// Absolute value helper
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// =============================================================================
+// GCD — Euclidean algorithm (iterative)
+// =============================================================================
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// =============================================================================
+// GCD — recursive version
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn gcd_rec(a: Int, b: Int) -> Int {
+    if b == 0 {
+        a
+    } else {
+        gcd_rec(b, a % b)
+    }
+}
+
+// =============================================================================
+// Extended GCD: returns (gcd, x, y) such that a*x + b*y = gcd(a, b)
+// We use a record to return multiple values
+// =============================================================================
+
+type ExtGcdResult is { g: Int, x: Int, y: Int };
+
+@allow(unbounded_recursion)
+fn ext_gcd(a: Int, b: Int) -> ExtGcdResult {
+    if b == 0 {
+        ExtGcdResult { g: a, x: 1, y: 0 }
+    } else {
+        let r = ext_gcd(b, a % b);
+        ExtGcdResult { g: r.g, x: r.y, y: r.x - (a / b) * r.y }
+    }
+}
+
+// =============================================================================
+// LCM
+// =============================================================================
+
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 {
+        0
+    } else if b == 0 {
+        0
+    } else {
+        abs_val(a) / gcd(a, b) * abs_val(b)
+    }
+}
+
+// =============================================================================
+// Tests — GCD
+// =============================================================================
+
+fn test_gcd_basic() {
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(gcd(54, 24), 6);
+    assert_eq(gcd(35, 14), 7);
+}
+
+fn test_gcd_edge_cases() {
+    assert_eq(gcd(0, 5), 5);
+    assert_eq(gcd(5, 0), 5);
+    assert_eq(gcd(0, 0), 0);
+    assert_eq(gcd(1, 1), 1);
+    assert_eq(gcd(1, 100), 1);
+    assert_eq(gcd(100, 1), 1);
+}
+
+fn test_gcd_same_number() {
+    assert_eq(gcd(7, 7), 7);
+    assert_eq(gcd(42, 42), 42);
+    assert_eq(gcd(100, 100), 100);
+}
+
+fn test_gcd_multiples() {
+    // When one is a multiple of the other
+    assert_eq(gcd(10, 5), 5);
+    assert_eq(gcd(5, 10), 5);
+    assert_eq(gcd(100, 25), 25);
+    assert_eq(gcd(36, 12), 12);
+    assert_eq(gcd(12, 36), 12);
+}
+
+fn test_gcd_coprime() {
+    // Coprime pairs (gcd = 1)
+    assert_eq(gcd(7, 11), 1);
+    assert_eq(gcd(13, 17), 1);
+    assert_eq(gcd(8, 15), 1);
+    assert_eq(gcd(9, 16), 1);
+    assert_eq(gcd(25, 49), 1);
+}
+
+fn test_gcd_negative() {
+    assert_eq(gcd(-12, 8), 4);
+    assert_eq(gcd(12, -8), 4);
+    assert_eq(gcd(-12, -8), 4);
+}
+
+fn test_gcd_recursive_matches_iterative() {
+    assert_eq(gcd_rec(12, 8), gcd(12, 8));
+    assert_eq(gcd_rec(100, 75), gcd(100, 75));
+    assert_eq(gcd_rec(17, 13), gcd(17, 13));
+    assert_eq(gcd_rec(48, 18), gcd(48, 18));
+    assert_eq(gcd_rec(0, 5), gcd(0, 5));
+}
+
+// =============================================================================
+// Tests — Extended GCD
+// =============================================================================
+
+fn test_ext_gcd_basic() {
+    // 12*x + 8*y = 4
+    let r = ext_gcd(12, 8);
+    assert_eq(r.g, 4);
+    assert_eq(12 * r.x + 8 * r.y, 4);
+}
+
+fn test_ext_gcd_coprime() {
+    // 7*x + 11*y = 1
+    let r = ext_gcd(7, 11);
+    assert_eq(r.g, 1);
+    assert_eq(7 * r.x + 11 * r.y, 1);
+}
+
+fn test_ext_gcd_various() {
+    let r1 = ext_gcd(35, 15);
+    assert_eq(r1.g, 5);
+    assert_eq(35 * r1.x + 15 * r1.y, 5);
+
+    let r2 = ext_gcd(100, 45);
+    assert_eq(r2.g, 5);
+    assert_eq(100 * r2.x + 45 * r2.y, 5);
+
+    let r3 = ext_gcd(252, 198);
+    assert_eq(r3.g, 18);
+    assert_eq(252 * r3.x + 198 * r3.y, 18);
+}
+
+fn test_ext_gcd_one_zero() {
+    let r = ext_gcd(5, 0);
+    assert_eq(r.g, 5);
+    assert_eq(r.x, 1);
+    assert_eq(r.y, 0);
+}
+
+fn test_ext_gcd_consecutive() {
+    // Consecutive integers are always coprime
+    let r = ext_gcd(13, 14);
+    assert_eq(r.g, 1);
+    assert_eq(13 * r.x + 14 * r.y, 1);
+}
+
+// =============================================================================
+// Tests — LCM
+// =============================================================================
+
+fn test_lcm_basic() {
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 5), 15);
+    assert_eq(lcm(12, 8), 24);
+    assert_eq(lcm(7, 11), 77);
+}
+
+fn test_lcm_edge_cases() {
+    assert_eq(lcm(0, 5), 0);
+    assert_eq(lcm(5, 0), 0);
+    assert_eq(lcm(1, 7), 7);
+    assert_eq(lcm(7, 1), 7);
+}
+
+fn test_lcm_same() {
+    assert_eq(lcm(5, 5), 5);
+    assert_eq(lcm(12, 12), 12);
+}
+
+fn test_lcm_multiples() {
+    assert_eq(lcm(5, 10), 10);
+    assert_eq(lcm(10, 5), 10);
+    assert_eq(lcm(3, 9), 9);
+    assert_eq(lcm(9, 3), 9);
+}
+
+fn test_lcm_coprime() {
+    // LCM of coprime numbers = product
+    assert_eq(lcm(7, 11), 77);
+    assert_eq(lcm(3, 8), 24);
+    assert_eq(lcm(5, 9), 45);
+}
+
+fn test_gcd_lcm_relationship() {
+    // gcd(a,b) * lcm(a,b) = a * b for positive a,b
+    let a = 12;
+    let b = 18;
+    assert_eq(gcd(a, b) * lcm(a, b), a * b);
+
+    let c = 15;
+    let d = 20;
+    assert_eq(gcd(c, d) * lcm(c, d), c * d);
+
+    let e = 7;
+    let f = 11;
+    assert_eq(gcd(e, f) * lcm(e, f), e * f);
+}
+
+fn test_lcm_negative() {
+    assert_eq(lcm(-4, 6), 12);
+    assert_eq(lcm(4, -6), 12);
+    assert_eq(lcm(-4, -6), 12);
+}
+
+fn main() -> Int {
+    test_gcd_basic();
+    test_gcd_edge_cases();
+    test_gcd_same_number();
+    test_gcd_multiples();
+    test_gcd_coprime();
+    test_gcd_negative();
+    test_gcd_recursive_matches_iterative();
+    test_ext_gcd_basic();
+    test_ext_gcd_coprime();
+    test_ext_gcd_various();
+    test_ext_gcd_one_zero();
+    test_ext_gcd_consecutive();
+    test_lcm_basic();
+    test_lcm_edge_cases();
+    test_lcm_same();
+    test_lcm_multiples();
+    test_lcm_coprime();
+    test_gcd_lcm_relationship();
+    test_lcm_negative();
+    print("[OK] 245_interp_gcd_lcm");
+    0
+}

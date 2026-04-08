@@ -1,0 +1,238 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress
+// @timeout: 60000
+// @expected-exit: 0
+
+// Deep recursion stress: fibonacci, Ackermann, tower of Hanoi, mutual recursion
+
+// Fibonacci via double recursion
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int {
+    if (n <= 1) { return n; }
+    fib(n - 1) + fib(n - 2)
+}
+
+// Ackermann function (bounded inputs to avoid stack overflow)
+@allow(unbounded_recursion)
+fn ack(m: Int, n: Int) -> Int {
+    if (m == 0) { return n + 1; }
+    if (n == 0) { return ack(m - 1, 1); }
+    ack(m - 1, ack(m, n - 1))
+}
+
+// Tower of Hanoi move counter
+@allow(unbounded_recursion)
+fn hanoi_moves(n: Int) -> Int {
+    if (n <= 0) { return 0; }
+    hanoi_moves(n - 1) + 1 + hanoi_moves(n - 1)
+}
+
+// Tail-recursive sum accumulator
+@allow(unbounded_recursion)
+fn tail_sum(n: Int, acc: Int) -> Int {
+    if (n <= 0) { return acc; }
+    tail_sum(n - 1, acc + n)
+}
+
+// Mutual recursion: even/odd check
+@allow(unbounded_recursion)
+fn is_even_r(n: Int) -> Int {
+    if (n == 0) { return 1; }
+    if (n < 0) { return is_even_r(0 - n); }
+    is_odd_r(n - 1)
+}
+
+@allow(unbounded_recursion)
+fn is_odd_r(n: Int) -> Int {
+    if (n == 0) { return 0; }
+    if (n < 0) { return is_odd_r(0 - n); }
+    is_even_r(n - 1)
+}
+
+// Three-way mutual recursion
+@allow(unbounded_recursion)
+fn trip_a(n: Int) -> Int {
+    if (n <= 0) { return 1; }
+    trip_b(n - 1) + 1
+}
+
+@allow(unbounded_recursion)
+fn trip_b(n: Int) -> Int {
+    if (n <= 0) { return 2; }
+    trip_c(n - 1) + 2
+}
+
+@allow(unbounded_recursion)
+fn trip_c(n: Int) -> Int {
+    if (n <= 0) { return 3; }
+    trip_a(n - 1) + 3
+}
+
+// Fast exponentiation via recursion
+@allow(unbounded_recursion)
+fn fast_pow(base: Int, exp: Int) -> Int {
+    if (exp == 0) { return 1; }
+    if (exp == 1) { return base; }
+    if (exp % 2 == 0) {
+        let half = fast_pow(base, exp / 2);
+        return half * half;
+    }
+    base * fast_pow(base, exp - 1)
+}
+
+// Recursive GCD (Euclidean)
+@allow(unbounded_recursion)
+fn rgcd(a: Int, b: Int) -> Int {
+    if (b == 0) { return a; }
+    rgcd(b, a % b)
+}
+
+// Recursive digit sum
+@allow(unbounded_recursion)
+fn dsum(n: Int) -> Int {
+    if (n < 0) { return dsum(0 - n); }
+    if (n < 10) { return n; }
+    (n % 10) + dsum(n / 10)
+}
+
+// Recursive binary bit count
+@allow(unbounded_recursion)
+fn bit_count(n: Int) -> Int {
+    if (n <= 0) { return 0; }
+    (n % 2) + bit_count(n / 2)
+}
+
+// Recursive flatten: compute f(n) = f(n-1) + f(n-2) + f(n-3) (tribonacci)
+@allow(unbounded_recursion)
+fn tribonacci(n: Int) -> Int {
+    if (n == 0) { return 0; }
+    if (n == 1) { return 0; }
+    if (n == 2) { return 1; }
+    tribonacci(n - 1) + tribonacci(n - 2) + tribonacci(n - 3)
+}
+
+// Deep recursive countdown that returns depth
+@allow(unbounded_recursion)
+fn countdown(n: Int) -> Int {
+    if (n <= 0) { return 0; }
+    1 + countdown(n - 1)
+}
+
+// Recursive Catalan-like: C(n) = sum of C(i)*C(n-1-i) for i=0..n-1
+// Use small n only
+@allow(unbounded_recursion)
+fn catalan(n: Int) -> Int {
+    if (n <= 1) { return 1; }
+    let mut total = 0;
+    let mut i = 0;
+    while (i < n) {
+        total = total + catalan(i) * catalan(n - 1 - i);
+        i = i + 1;
+    }
+    total
+}
+
+fn main() -> Int {
+    // Fibonacci
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+    assert_eq(fib(5), 5);
+    assert_eq(fib(10), 55);
+    assert_eq(fib(15), 610);
+    assert_eq(fib(20), 6765);
+
+    // Ackermann
+    assert_eq(ack(0, 0), 1);
+    assert_eq(ack(0, 5), 6);
+    assert_eq(ack(1, 0), 2);
+    assert_eq(ack(1, 5), 7);
+    assert_eq(ack(2, 0), 3);
+    assert_eq(ack(2, 3), 9);
+    assert_eq(ack(3, 0), 5);
+    assert_eq(ack(3, 1), 13);
+    assert_eq(ack(3, 2), 29);
+    assert_eq(ack(3, 3), 61);
+    assert_eq(ack(3, 4), 125);
+
+    // Tower of Hanoi: 2^n - 1 moves
+    assert_eq(hanoi_moves(1), 1);
+    assert_eq(hanoi_moves(2), 3);
+    assert_eq(hanoi_moves(3), 7);
+    assert_eq(hanoi_moves(4), 15);
+    assert_eq(hanoi_moves(10), 1023);
+    assert_eq(hanoi_moves(15), 32767);
+
+    // Tail sum
+    assert_eq(tail_sum(100, 0), 5050);
+    assert_eq(tail_sum(500, 0), 125250);
+    assert_eq(tail_sum(1000, 0), 500500);
+
+    // Mutual recursion depth 300
+    assert_eq(is_even_r(0), 1);
+    assert_eq(is_odd_r(0), 0);
+    assert_eq(is_even_r(300), 1);
+    assert_eq(is_odd_r(300), 0);
+    assert_eq(is_even_r(301), 0);
+    assert_eq(is_odd_r(301), 1);
+
+    // Three-way mutual recursion
+    assert_eq(trip_a(0), 1);
+    assert_eq(trip_a(1), 3);
+    assert_eq(trip_a(3), 7);
+    assert_eq(trip_b(0), 2);
+    assert_eq(trip_c(0), 3);
+
+    // Fast power
+    assert_eq(fast_pow(2, 0), 1);
+    assert_eq(fast_pow(2, 10), 1024);
+    assert_eq(fast_pow(2, 20), 1048576);
+    assert_eq(fast_pow(3, 5), 243);
+    assert_eq(fast_pow(5, 4), 625);
+    assert_eq(fast_pow(7, 3), 343);
+
+    // GCD
+    assert_eq(rgcd(48, 18), 6);
+    assert_eq(rgcd(100, 75), 25);
+    assert_eq(rgcd(17, 13), 1);
+    assert_eq(rgcd(1000000, 500000), 500000);
+    assert_eq(rgcd(12345, 6789), 3);
+
+    // Digit sum
+    assert_eq(dsum(0), 0);
+    assert_eq(dsum(12345), 15);
+    assert_eq(dsum(999), 27);
+    assert_eq(dsum(100000), 1);
+
+    // Bit count
+    assert_eq(bit_count(0), 0);
+    assert_eq(bit_count(1), 1);
+    assert_eq(bit_count(255), 8);
+    assert_eq(bit_count(1023), 10);
+    assert_eq(bit_count(128), 1);
+
+    // Tribonacci
+    assert_eq(tribonacci(0), 0);
+    assert_eq(tribonacci(1), 0);
+    assert_eq(tribonacci(2), 1);
+    assert_eq(tribonacci(3), 1);
+    assert_eq(tribonacci(4), 2);
+    assert_eq(tribonacci(10), 81);
+
+    // Deep countdown
+    assert_eq(countdown(500), 500);
+    assert_eq(countdown(0), 0);
+
+    // Catalan numbers
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+    assert_eq(catalan(6), 132);
+
+    print("831_stress_deep_recursion: PASS");
+    0
+}

@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @expected-error: E321
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, stack-overflow, recursion, termination
+// @description: Tests that unbounded recursion is detected at compile-time
+
+fn infinite_recurse(n: Int) -> Int {
+    // No base case - infinite recursion
+    infinite_recurse(n + 1)
+}
+
+fn main() {
+    let _ = infinite_recurse(0);  // Stack overflow
+}

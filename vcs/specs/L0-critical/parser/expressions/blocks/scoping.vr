@@ -1,0 +1,213 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, blocks, scoping
+
+// Block scoping rules
+
+fn test_basic_scope_isolation() {
+    // Basic scope isolation
+    let outer = 10;
+    {
+        let inner = 20;
+        // 'inner' visible here
+        let _ = inner;
+    }
+    // 'inner' not visible here
+    // 'outer' still visible
+    let _ = outer;
+}
+
+fn test_variable_shadowing() {
+    // Variable shadowing in blocks
+    let x = 1;
+    let result = {
+        let x = 2;  // Shadows outer x
+        x          // Returns 2
+    };
+    // x is still 1 here
+    let _ = x;
+    let _ = result;
+}
+
+fn test_multiple_levels_of_shadowing() {
+    // Multiple levels of shadowing
+    let a = "outer";
+    {
+        let a = "middle";
+        {
+            let a = "inner";
+            assert(a == "inner");
+        }
+        assert(a == "middle");
+    }
+    assert(a == "outer");
+}
+
+fn test_accessing_outer_scope() {
+    // Accessing outer scope
+    let base = 100;
+    let computed = {
+        let factor = 5;
+        base * factor  // Uses outer 'base'
+    };
+    let _ = computed;
+}
+
+fn test_modifying_outer_mutable() {
+    // Modifying outer mutable
+    let mut counter = 0;
+    {
+        counter += 1;
+        counter += 2;
+    }
+    assert(counter == 3);
+}
+
+fn test_loop_variable_scope() {
+    // Block creates new scope for loop variables
+    for i in 0..10 {
+        // i is only visible in this block
+        let _ = i;
+    }
+    // i not visible here
+}
+
+fn test_match_arm_scopes() {
+    type Option<T> is None | Some(T);
+
+    fn process(x: Int) -> Int { x }
+    fn handle_none() -> Int { 0 }
+
+    let value = Option.Some(42);
+
+    // Match arm scopes
+    let result = match value {
+        Option.Some(x) => {
+            // x visible only in this arm
+            process(x)
+        },
+        Option.None => {
+            // x not visible here
+            handle_none()
+        }
+    };
+    let _ = result;
+}
+
+fn test_closure_captures() {
+    // Closure captures from outer scope
+    let multiplier = 2;
+    let closure = |x| {
+        x * multiplier  // Captures 'multiplier'
+    };
+    let _ = closure;
+}
+
+fn test_block_in_closure() {
+    // Block in closure
+    let complex_closure = |x| {
+        let step1 = x + 1;
+        let step2 = {
+            let intermediate = step1 * 2;
+            intermediate + 1
+        };
+        step2
+    };
+    let _ = complex_closure;
+}
+
+fn test_if_let_scope() {
+    type Option<T> is None | Some(T);
+
+    fn use_value(v: Int) {}
+
+    let maybe = Option.Some(42);
+
+    // Let binding scope in if-let
+    if let Option.Some(value) = maybe {
+        // 'value' visible here
+        use_value(value);
+    }
+    // 'value' not visible here
+}
+
+fn test_while_let_scope() {
+    type Option<T> is None | Some(T);
+    type Iterator is { idx: Int };
+
+    fn next(it: &mut Iterator) -> Option<Int> { Option.None }
+    fn process(x: Int) {}
+
+    let mut iterator = Iterator { idx: 0 };
+
+    // While-let scope
+    while let Option.Some(item) = next(&mut iterator) {
+        // 'item' visible here
+        process(item);
+    }
+    // 'item' not visible here
+}
+
+fn test_scope_in_try_blocks() {
+    fn might_fail() -> Int { 42 }
+    fn transform(x: Int) -> Int { x * 2 }
+
+    // Scope in try blocks
+    let result = try {
+        let temp = might_fail()?;
+        transform(temp)
+    };
+    let _ = result;
+}
+
+fn test_labeled_loop_scopes() {
+    let condition = true;
+
+    // Labeled loop scopes - labels must be on loops
+    let result = 'outer: loop {
+        let x = 1;
+        'inner: loop {
+            let y = 2;
+            if condition {
+                break 'outer x + y;
+            }
+            break 'inner;
+        }
+        break 'outer 0;
+    };
+    let _ = result;
+}
+
+// Function parameter scope
+fn function(param: Int) {
+    // 'param' visible in function body
+    let local = param * 2;
+    let _ = local;
+}
+// 'param' and 'local' not visible here
+
+// Type parameter scope
+fn generic<T>(value: T) -> T {
+    // T visible in function signature and body
+    value
+}
+
+fn test_const_in_block() {
+    // Const in block
+    let with_const = {
+        const LOCAL_CONST: Int = 42;
+        LOCAL_CONST * 2
+    };
+    let _ = with_const;
+}
+
+fn test_mutable_in_block() {
+    // Mutable variable in block
+    let with_mutable = {
+        let mut counter: Int = 0;
+        counter += 1;
+        counter
+    };
+    let _ = with_mutable;
+}

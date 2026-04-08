@@ -1,0 +1,233 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, cbgr, references, ref, ref_mut, deref
+// @timeout: 5000
+// @expect: pass
+//
+// Test: REF, REF_MUT, DEREF, DEREF_MUT
+// Verifies reference creation and dereferencing
+
+type Point is { x: Float, y: Float };
+
+fn test_immutable_reference() {
+    let x: Int = 42;
+    let r: &Int = &x;
+
+    assert_eq(*r, 42);
+}
+
+fn test_mutable_reference() {
+    let mut x: Int = 0;
+    let r: &mut Int = &mut x;
+
+    *r = 100;
+
+    assert_eq(x, 100);
+}
+
+fn test_reference_to_struct() {
+    let p = Point { x: 1.0, y: 2.0 };
+    let r: &Point = &p;
+
+    assert_eq(r.x, 1.0);
+    assert_eq(r.y, 2.0);
+    assert_eq((*r).x, 1.0);
+}
+
+fn test_mutable_reference_to_struct() {
+    let mut p = Point { x: 0.0, y: 0.0 };
+    let r: &mut Point = &mut p;
+
+    r.x = 10.0;
+    r.y = 20.0;
+
+    assert_eq(p.x, 10.0);
+    assert_eq(p.y, 20.0);
+}
+
+fn test_reference_to_array_element() {
+    let arr = [1, 2, 3, 4, 5];
+    let r: &Int = &arr[2];
+
+    assert_eq(*r, 3);
+}
+
+fn test_mutable_reference_to_array_element() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let r: &mut Int = &mut arr[2];
+
+    *r = 100;
+
+    assert_eq(arr[2], 100);
+}
+
+fn test_reference_to_struct_field() {
+    let p = Point { x: 1.0, y: 2.0 };
+    let rx: &Float = &p.x;
+    let ry: &Float = &p.y;
+
+    assert_eq(*rx, 1.0);
+    assert_eq(*ry, 2.0);
+}
+
+fn test_mutable_reference_to_struct_field() {
+    let mut p = Point { x: 0.0, y: 0.0 };
+
+    {
+        let rx: &mut Float = &mut p.x;
+        *rx = 10.0;
+    }
+
+    {
+        let ry: &mut Float = &mut p.y;
+        *ry = 20.0;
+    }
+
+    assert_eq(p.x, 10.0);
+    assert_eq(p.y, 20.0);
+}
+
+fn test_pass_by_reference() {
+    fn increment(x: &mut Int) {
+        *x = *x + 1;
+    }
+
+    let mut value: Int = 0;
+
+    increment(&mut value);
+    increment(&mut value);
+    increment(&mut value);
+
+    assert_eq(value, 3);
+}
+
+fn test_return_reference() {
+    fn get_first(arr: &[Int]) -> &Int {
+        &arr[0]
+    }
+
+    let arr = [10, 20, 30];
+    let first: &Int = get_first(&arr);
+
+    assert_eq(*first, 10);
+}
+
+fn test_return_mutable_reference() {
+    fn get_first_mut(arr: &mut [Int]) -> &mut Int {
+        &mut arr[0]
+    }
+
+    let mut arr = [10, 20, 30];
+    let first: &mut Int = get_first_mut(&mut arr);
+
+    *first = 100;
+
+    assert_eq(arr[0], 100);
+}
+
+fn test_nested_references() {
+    let x: Int = 42;
+    let r1: &Int = &x;
+    let r2: &&Int = &r1;
+
+    assert_eq(**r2, 42);
+}
+
+fn test_reborrow() {
+    let mut x: Int = 0;
+    let r1: &mut Int = &mut x;
+
+    // Reborrow as immutable
+    let r2: &Int = &*r1;
+    assert_eq(*r2, 0);
+
+    // Continue using mutable
+    *r1 = 10;
+    assert_eq(*r1, 10);
+}
+
+fn test_reference_in_struct() {
+    type Holder<'a> is { value: &'a Int };
+
+    let x: Int = 42;
+    let h = Holder { value: &x };
+
+    assert_eq(*h.value, 42);
+}
+
+fn test_multiple_immutable_references() {
+    let x: Int = 42;
+
+    let r1: &Int = &x;
+    let r2: &Int = &x;
+    let r3: &Int = &x;
+
+    // All can coexist and read
+    assert_eq(*r1, 42);
+    assert_eq(*r2, 42);
+    assert_eq(*r3, 42);
+}
+
+fn test_reference_slice() {
+    let arr = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &arr[1..4];
+
+    assert_eq(slice.len(), 3);
+    assert_eq(slice[0], 2);
+    assert_eq(slice[1], 3);
+    assert_eq(slice[2], 4);
+}
+
+fn test_mutable_reference_slice() {
+    let mut arr = [1, 2, 3, 4, 5];
+    let slice: &mut [Int] = &mut arr[1..4];
+
+    slice[0] = 20;
+    slice[1] = 30;
+    slice[2] = 40;
+
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 40);
+}
+
+fn test_deref_coercion() {
+    type Wrapper is { inner: Int };
+
+    implement Deref for Wrapper {
+        type Target = Int;
+
+        fn deref(&self) -> &Int {
+            &self.inner
+        }
+    }
+
+    let w = Wrapper { inner: 42 };
+    let r: &Wrapper = &w;
+
+    // Access inner field through reference
+    assert_eq(r.inner, 42);
+}
+
+fn main() {
+    test_immutable_reference();
+    test_mutable_reference();
+    test_reference_to_struct();
+    test_mutable_reference_to_struct();
+    test_reference_to_array_element();
+    test_mutable_reference_to_array_element();
+    test_reference_to_struct_field();
+    test_mutable_reference_to_struct_field();
+    test_pass_by_reference();
+    test_return_reference();
+    test_return_mutable_reference();
+    test_nested_references();
+    test_reborrow();
+    test_reference_in_struct();
+    test_multiple_immutable_references();
+    test_reference_slice();
+    test_mutable_reference_slice();
+    test_deref_coercion();
+    print("001_references: PASSED");
+}

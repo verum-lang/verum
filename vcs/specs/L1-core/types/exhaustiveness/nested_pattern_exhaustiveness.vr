@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, nested-pattern
+// @description: Nested patterns must be exhaustive at all levels
+
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Pair<A, B> is { fst: A, snd: B };
+
+// Nested option types
+fn nested_option(x: Maybe<Maybe<Int>>) -> Int =
+    match x {
+        None => 0,
+        Some(None) => 1,
+        Some(Some(n)) => n
+    };
+
+// Deeply nested variants
+fn nested_result(r: Result<Maybe<Int>, Text>) -> Int =
+    match r {
+        Ok(None) => 0,
+        Ok(Some(n)) => n,
+        Err(_) => -1
+    };
+
+// Record with nested variants
+fn record_variant(p: Pair<Maybe<Int>, Bool>) -> Text =
+    match (p.fst, p.snd) {
+        (None, true) => "none-true",
+        (None, false) => "none-false",
+        (Some(_), true) => "some-true",
+        (Some(_), false) => "some-false"
+    };
+
+// Triple nesting
+type Tree<T> is Leaf(T) | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+fn tree_depth_check(t: Tree<Maybe<Int>>) -> Text =
+    match t {
+        Leaf(None) => "empty leaf",
+        Leaf(Some(0)) => "zero leaf",
+        Leaf(Some(_)) => "value leaf",
+        Node { .. } => "branch"
+    };
+
+// Tuple nesting
+fn tuple_match(t: (Maybe<Int>, Maybe<Int>, Maybe<Int>)) -> Int =
+    match t {
+        (None, None, None) => 0,
+        (Some(_), None, None) => 1,
+        (None, Some(_), None) => 2,
+        (None, None, Some(_)) => 3,
+        (Some(_), Some(_), None) => 4,
+        (Some(_), None, Some(_)) => 5,
+        (None, Some(_), Some(_)) => 6,
+        (Some(_), Some(_), Some(_)) => 7
+    };
+
+fn main() {
+    assert(nested_option(Some(Some(42))) == 42);
+    assert(nested_result(Ok(Some(10))) == 10);
+    assert(record_variant(Pair { fst: None, snd: true }) == "none-true");
+    assert(tree_depth_check(Leaf(None)) == "empty leaf");
+    assert(tuple_match((None, None, None)) == 0);
+}

@@ -1,0 +1,44 @@
+// @test: parser
+// @tier: 0
+// @level: L0
+// @tags: parser, negative-bounds, syntax, advanced-type-syntax
+// @expect: pass
+// @description: Parser tests for negative bounds syntax
+// @spec: 03-type-system.md Section 13 grammar extensions
+
+// Single negative bound
+fn local_only<T: !Send>(value: T) {
+    // T cannot be sent between threads
+}
+
+// Negative bound with positive bound
+fn special_clone<T: Clone + !Copy>(value: T) {
+    // T is Clone but not Copy
+}
+
+// Multiple negative bounds
+fn thread_local<T: !Send + !Sync>(value: T) {
+    // T cannot be sent or shared
+}
+
+// Negative bound in where clause
+fn complex_bounds<T>(value: T)
+    where type T: Debug + Clone,
+          type T: !Copy + !Default
+{
+    // T is Debug and Clone but not Copy or Default
+}
+
+// Negative bound in protocol implementation
+implement<T: Clone + !Copy> DeepClone for T {
+    fn deep_clone(&self) -> Self {
+        self.clone()
+    }
+}
+
+// Negative bound in protocol definition
+type SingleThreaded is protocol
+    where type Self: !Sync
+{
+    fn process(&mut self);
+};

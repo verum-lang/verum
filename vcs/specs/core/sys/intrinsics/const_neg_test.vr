@@ -1,0 +1,23 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Test constant negation
+
+module test.stdlib.sys.intrinsics.const_neg_test;
+
+const PI: Float = 3.14159265358979323846;
+
+fn main() {
+    print("Testing constant negation...");
+    let a = -PI;
+    print(f"-PI = {a}");
+
+    let b = PI / 2.0;
+    print(f"PI/2 = {b}");
+
+    let c = -PI / 2.0;
+    print(f"-PI/2 = {c}");
+
+    print("All tests passed!");
+}

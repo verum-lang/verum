@@ -1,0 +1,263 @@
+// @test: run
+// @expected-exit-code: 1
+// @expected-stderr: panic: User validation failed
+// @tier: 0
+// @level: L2
+// @tags: errors, panic, message, formatting
+
+/// Panic messages - formatted error information for debugging.
+/// Demonstrates various panic message patterns and best practices.
+
+/// Simple string panic
+fn simple_message() {
+    panic("Operation failed");
+}
+
+/// Formatted panic with interpolation
+fn formatted_message(user_id: Int, action: &Text) {
+    panic(f"User {user_id} is not authorized to perform action '{action}'");
+}
+
+/// Multi-line panic message
+fn detailed_message(context: &OperationContext) {
+    panic(f"Critical failure in operation\nOperation: {context.operation}\nUser: {context.user_id}\nTimestamp: {context.timestamp}\nDetails: {context.details}");
+}
+
+type OperationContext is {
+    operation: Text,
+    user_id: Int,
+    timestamp: Int,
+    details: Text
+};
+
+/// Panic with debug representation
+fn debug_panic<T: Debug>(value: &T, expected: &Text) {
+    panic(f"Unexpected value: {value}\nExpected: {expected}");
+}
+
+/// Panic with structured data
+type ValidationError is {
+    field: Text,
+    value: Text,
+    rule: Text,
+    message: Text
+};
+
+fn panic_with_validation_error(error: &ValidationError) {
+    panic(
+        "Validation failed:\nField: {}\nValue: '{}'\nRule violated: {}\nMessage: {}",
+        error.field,
+        error.value,
+        error.rule,
+        error.message
+    );
+}
+
+/// Panic with source location (automatic)
+fn panic_with_location() {
+    // Panic messages automatically include file:line:column
+    panic("Error at this location");
+    // Output includes: src/file.vr:42:5
+}
+
+/// Custom location information
+fn panic_with_custom_location(file: &Text, line: Int, function: &Text) {
+    panic(
+        "[{}:{}] in {}: Unexpected state",
+        file,
+        line,
+        function
+    );
+}
+
+/// Panic with error chain
+fn panic_with_chain(errors: &List<Text>) {
+    let chain = errors.join("\n  caused by: ");
+    panic("Error chain:\n  {}", chain);
+}
+
+/// Panic with suggestions
+fn panic_with_suggestion(got: &Text, expected: List<&Text>) {
+    let suggestions = expected.join(", ");
+    panic(
+        "Invalid input: '{}'\nDid you mean one of: {}?",
+        got,
+        suggestions
+    );
+}
+
+/// Panic with state dump
+type SystemState is {
+    component: Text,
+    status: Text,
+    pending_ops: Int,
+    last_error: Maybe<Text>
+};
+
+fn panic_with_state(state: &SystemState) {
+    let error_info = match &state.last_error {
+        Some(e) => format("Last error: {}", e),
+        None => "No previous errors".to_text()
+    };
+
+    panic(
+        "System panic in component '{}'\nStatus: {}\nPending operations: {}\n{}",
+        state.component,
+        state.status,
+        state.pending_ops,
+        error_info
+    );
+}
+
+/// Assertion with custom message
+fn assert_with_message(condition: Bool, message: fn() -> Text) {
+    if !condition {
+        panic("Assertion failed: {}", message());
+    }
+}
+
+/// Panic message formatting helpers
+module panic_helpers {
+    /// Format a list for panic message
+    pub fn format_list<T: Display>(items: &List<T>) -> Text {
+        if items.is_empty() {
+            "[]".to_text()
+        } else if items.len() <= 5 {
+            format("[{}]", items.iter().map(|x| x.to_text()).join(", "))
+        } else {
+            format(
+                "[{}, ... and {} more]",
+                items.iter().take(5).map(|x| x.to_text()).join(", "),
+                items.len() - 5
+            )
+        }
+    }
+
+    /// Format bytes for panic message
+    pub fn format_bytes(bytes: &Bytes) -> Text {
+        if bytes.len() <= 16 {
+            format("{:02x?}", bytes)
+        } else {
+            format(
+                "{:02x?}... ({} bytes total)",
+                &bytes[..16],
+                bytes.len()
+            )
+        }
+    }
+
+    /// Truncate long strings in panic messages
+    pub fn truncate(s: &Text, max_len: Int) -> Text {
+        if s.len() as Int <= max_len {
+            s.clone()
+        } else {
+            format("{}...", &s[..(max_len as usize - 3)])
+        }
+    }
+}
+
+/// Panic with internal state for debugging
+fn panic_with_debug_info<T: Debug>(
+    message: &Text,
+    state: &T,
+    backtrace: Bool
+) {
+    let mut output = format("PANIC: {}\n", message);
+    output.push_str(&format("State: {:?}\n", state));
+
+    if backtrace {
+        output.push_str("Backtrace:\n");
+        // Backtrace would be captured here
+        output.push_str("  <backtrace unavailable>\n");
+    }
+
+    panic("{}", output);
+}
+
+/// Conditional panic message (different in debug/release)
+fn conditional_message(value: Int) {
+    @cfg(debug)
+    {
+        if value < 0 {
+            panic(
+                "Debug: Negative value detected\nValue: {}\nThis indicates a bug in the caller",
+                value
+            );
+        }
+    }
+
+    @cfg(not(debug))
+    {
+        if value < 0 {
+            panic("Invalid value");
+        }
+    }
+}
+
+/// Panic message builder pattern
+type PanicMessage is {
+    main: Text,
+    context: List<(Text, Text)>,
+    suggestion: Maybe<Text>
+};
+
+implement PanicMessage {
+    fn new(main: Text) -> Self {
+        PanicMessage {
+            main,
+            context: List.new(),
+            suggestion: None
+        }
+    }
+
+    fn with_context(mut self, key: Text, value: Text) -> Self {
+        self.context.push((key, value));
+        self
+    }
+
+    fn with_suggestion(mut self, suggestion: Text) -> Self {
+        self.suggestion = Some(suggestion);
+        self
+    }
+
+    fn do_panic(self) {
+        let mut msg = self.main.clone();
+
+        if !self.context.is_empty() {
+            msg.push_str("\n\nContext:");
+            for (key, value) in &self.context {
+                msg.push_str(f"\n  {key}: {value}");
+            }
+        }
+
+        match self.suggestion {
+            Some(suggestion) => msg.push_str(f"\n\nSuggestion: {suggestion}"),
+            None => {}
+        }
+
+        panic(msg);
+    }
+}
+
+/// Example using panic message builder
+fn demonstrate_builder() {
+    PanicMessage.new("User validation failed")
+        .with_context("user_id", "12345")
+        .with_context("field", "email")
+        .with_context("value", "invalid@")
+        .with_suggestion("Ensure email contains a valid domain")
+        .do_panic();
+}
+
+fn main() {
+    // Demonstrate panic with detailed message
+    let ctx = OperationContext {
+        operation: "validate_user",
+        user_id: 42,
+        timestamp: 1704067200,
+        details: "Email format invalid"
+    };
+
+    // This will panic with formatted message
+    demonstrate_builder();
+}

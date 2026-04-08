@@ -1,0 +1,41 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, btreeset, collections
+// @timeout: 50000
+// @expected-exit: 0
+//
+// E2E test for stdlib BTreeSet API.
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    let mut s = BTreeSet.new();
+    s.insert(42);
+    s.insert(7);
+    s.insert(42);  // duplicate
+    if s.len() == 2 { pass = pass + 1; }
+
+    let v1 = 7;
+    if s.contains(&v1) { pass = pass + 1; }
+
+    let v2 = 99;
+    if !s.contains(&v2) { pass = pass + 1; }
+
+    // remove
+    s.remove(&v1);
+    if s.len() == 1 { pass = pass + 1; }
+    if !s.contains(&v1) { pass = pass + 1; }
+
+    // insert after remove
+    s.insert(100);
+    s.insert(200);
+    if s.len() == 3 { pass = pass + 1; }
+
+    print(f"pass = {pass}/6");
+    if pass == 6 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

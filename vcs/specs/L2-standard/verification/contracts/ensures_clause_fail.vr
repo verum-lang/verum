@@ -1,0 +1,91 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, ensures, error
+// @timeout: 5000
+// @expected-error: E602 "Postcondition cannot be verified"
+
+/// Tests for ensures clause violations
+/// Postconditions that cannot be proven from implementation
+
+/// Implementation doesn't match postcondition
+@verify(proof)
+fn wrong_double(x: Int) -> Int {
+    contract#"
+        ensures result == x * 2;
+    ";
+    // ERROR: Implementation returns x + 2, not x * 2
+    x + 2
+}
+
+/// Missing case in postcondition coverage
+@verify(proof)
+fn incomplete_abs(x: Int) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == x;  // ERROR: false for negative x
+    ";
+    if x >= 0 { x } else { -x }
+}
+
+/// Postcondition too strong
+@verify(proof)
+fn clamp_wrong_ensures(value: Int, min: Int, max: Int) -> Int {
+    contract#"
+        requires min <= max;
+        ensures result >= min && result <= max;
+        ensures result == value;  // ERROR: not true when clamping occurs
+    ";
+    if value < min { min }
+    else if value > max { max }
+    else { value }
+}
+
+/// Ensures with quantifier - not all elements satisfy
+@verify(proof)
+fn fill_zeros(arr: &mut List<Int>) {
+    contract#"
+        ensures forall i: Int. 0 <= i < arr.len() implies arr[i] == 0;
+    ";
+    // ERROR: Only fills first half
+    for i in 0..arr.len() / 2 {
+        arr[i] = 0;
+    }
+}
+
+/// Ensures relating input to output incorrectly
+@verify(proof)
+fn wrong_increment(x: Int) -> Int {
+    contract#"
+        ensures result == x + 1;
+        ensures result > x + 1;  // ERROR: contradicts previous ensures
+    ";
+    x + 1
+}
+
+/// Ensures with match - missing branch
+@verify(proof)
+fn find_element(arr: &List<Int>, target: Int) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < arr.len() && arr[idx] == target,
+            // ERROR: Missing None branch specification
+        };
+    ";
+    for i in 0..arr.len() {
+        if arr[i] == target {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Idempotency claim that doesn't hold
+@verify(proof)
+fn wrong_idempotent(x: Int) -> Int {
+    contract#"
+        ensures wrong_idempotent(result) == result;  // Claims idempotent
+    ";
+    // ERROR: f(f(x)) = f(x+1) = x+2 != x+1 = f(x)
+    x + 1
+}

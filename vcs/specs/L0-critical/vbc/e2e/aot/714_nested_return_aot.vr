@@ -1,0 +1,40 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, record, nested-return
+// @expected-exit: 0
+
+type Node is { value: Int, next: Int };
+
+fn get_node(idx: Int) -> Node {
+    if (idx == 0) {
+        Node { value: 10, next: 1 }
+    } else {
+        Node { value: 20, next: -1 }
+    }
+}
+
+fn get_value(idx: Int) -> Int {
+    let n = get_node(idx);
+    n.value
+}
+
+fn main() -> Int {
+    // Test via accessor function (known workaround)
+    let v0 = get_value(0);
+    print(v0);
+    assert_eq(v0, 10);
+
+    let v1 = get_value(1);
+    print(v1);
+    assert_eq(v1, 20);
+
+    // Test direct nested access: get_node(0).value
+    // This was previously known to crash ("expected StructValue variant")
+    let n = get_node(0);
+    let val = n.value;
+    print(val);
+    assert_eq(val, 10);
+
+    0
+}

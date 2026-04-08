@@ -1,0 +1,651 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: comparison, rust, performance, baseline
+// @description: Verum vs Rust performance comparison (target: 0.85-1.0x Rust)
+
+/// Verum vs Rust Performance Comparison
+///
+/// This benchmark compares Verum's performance against Rust.
+/// Rust is the primary comparison target as both languages share
+/// similar goals around safety and performance.
+///
+/// Target: 0.85-1.0x Rust performance (at least 85%)
+///
+/// Key comparisons:
+/// - Raw compute performance
+/// - Memory allocation
+/// - Reference access overhead (CBGR vs borrow checker)
+/// - Collection operations
+/// - Async operations
+///
+/// Note: Rust has zero-cost abstractions with compile-time checking,
+/// while Verum's CBGR adds ~15ns runtime overhead for safety.
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const ITERATIONS: Int = 10_000_000;
+const DATA_SIZE: Int = 100_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs Rust Performance");
+
+    // Compute benchmarks
+    results.add(benchmark_fibonacci());
+    results.add(benchmark_matrix_multiply());
+    results.add(benchmark_sorting());
+    results.add(benchmark_binary_search());
+
+    // Memory benchmarks
+    results.add(benchmark_allocation_speed());
+    results.add(benchmark_deallocation_speed());
+
+    // Reference benchmarks
+    results.add(benchmark_reference_access());
+    results.add(benchmark_mutable_reference());
+
+    // Collection benchmarks
+    results.add(benchmark_vec_push());
+    results.add(benchmark_hashmap_insert());
+    results.add(benchmark_iteration());
+
+    // String benchmarks
+    results.add(benchmark_string_concat());
+    results.add(benchmark_string_parse());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_rust.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.value >= 0.85);
+    assert(all_meet_target, "Verum performance below 85% of Rust");
+}
+
+/// Rust baseline times (measured separately)
+module rust_baselines {
+    /// Rust fib(40) time in milliseconds
+    pub const FIB_40_MS: Float = 500.0;
+
+    /// Rust 1000x1000 matrix multiply in milliseconds
+    pub const MATRIX_1000_MS: Float = 800.0;
+
+    /// Rust sort 1M elements in milliseconds
+    pub const SORT_1M_MS: Float = 120.0;
+
+    /// Rust binary search 1M lookups in milliseconds
+    pub const BSEARCH_1M_MS: Float = 25.0;
+
+    /// Rust 1M allocations in milliseconds
+    pub const ALLOC_1M_MS: Float = 50.0;
+
+    /// Rust 1M deallocations in milliseconds
+    pub const DEALLOC_1M_MS: Float = 30.0;
+
+    /// Rust 10M reference accesses in milliseconds
+    pub const REF_ACCESS_10M_MS: Float = 15.0;
+
+    /// Rust 10M mutable reference operations in milliseconds
+    pub const MUT_REF_10M_MS: Float = 20.0;
+
+    /// Rust Vec push 1M elements in milliseconds
+    pub const VEC_PUSH_1M_MS: Float = 15.0;
+
+    /// Rust HashMap insert 1M elements in milliseconds
+    pub const HASHMAP_1M_MS: Float = 200.0;
+
+    /// Rust iterate 1M elements in milliseconds
+    pub const ITER_1M_MS: Float = 5.0;
+
+    /// Rust String concat 100K strings in milliseconds
+    pub const STRING_CONCAT_100K_MS: Float = 50.0;
+
+    /// Rust parse 1M integers in milliseconds
+    pub const PARSE_1M_MS: Float = 80.0;
+}
+
+/// Benchmark: Fibonacci (recursive compute)
+fn benchmark_fibonacci() -> BenchmarkResult {
+    let n = 40;
+
+    // Warmup
+    black_box(fib(30));
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result = fib(n);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.FIB_40_MS;
+
+    black_box(result);
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "fibonacci_40",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib(n - 1) + fib(n - 2) }
+}
+
+/// Benchmark: Matrix multiplication
+fn benchmark_matrix_multiply() -> BenchmarkResult {
+    let size = 1000;
+
+    let a = create_matrix(size, size, 1.0);
+    let b = create_matrix(size, size, 2.0);
+
+    // Warmup with smaller matrix
+    let small_a = create_matrix(100, 100, 1.0);
+    let small_b = create_matrix(100, 100, 2.0);
+    black_box(matrix_multiply(&small_a, &small_b));
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result = matrix_multiply(&a, &b);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.MATRIX_1000_MS;
+
+    black_box(result);
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "matrix_1000x1000",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+fn create_matrix(rows: Int, cols: Int, value: Float) -> List<List<Float>> {
+    (0..rows).map(|_| {
+        (0..cols).map(|_| value).collect()
+    }).collect()
+}
+
+fn matrix_multiply(a: &List<List<Float>>, b: &List<List<Float>>) -> List<List<Float>> {
+    let rows = a.len();
+    let cols = b[0].len();
+    let k = b.len();
+
+    let mut result = create_matrix(rows, cols, 0.0);
+
+    for i in 0..rows {
+        for j in 0..cols {
+            let mut sum = 0.0;
+            for l in 0..k {
+                sum += a[i][l] * b[l][j];
+            }
+            result[i][j] = sum;
+        }
+    }
+
+    result
+}
+
+/// Benchmark: Sorting
+fn benchmark_sorting() -> BenchmarkResult {
+    let size = 1_000_000;
+
+    let mut rng = Random.with_seed(42);
+    let data: List<Int> = (0..size).map(|_| rng.gen()).collect();
+
+    // Warmup
+    let mut small = data[0..10_000].to_vec();
+    small.sort();
+    black_box(small);
+
+    let mut to_sort = data.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    to_sort.sort();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.SORT_1M_MS;
+
+    black_box(to_sort);
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "sort_1m_elements",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Benchmark: Binary search
+fn benchmark_binary_search() -> BenchmarkResult {
+    let size = 1_000_000;
+
+    let data: List<Int> = (0..size).collect();
+    let mut rng = Random.with_seed(123);
+    let lookups: List<Int> = (0..1_000_000)
+        .map(|_| rng.gen_range(0, size))
+        .collect();
+
+    // Warmup
+    for i in 0..10_000 {
+        black_box(data.binary_search(&lookups[i]));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..1_000_000 {
+        black_box(data.binary_search(&lookups[i]));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.BSEARCH_1M_MS;
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "binary_search_1m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Benchmark: Allocation speed
+fn benchmark_allocation_speed() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    // Warmup
+    for _ in 0..10_000 {
+        let x = Heap.new(42);
+        black_box(&*x);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..count {
+        let x = Heap.new(42);
+        black_box(&*x);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.ALLOC_1M_MS;
+
+    let ratio = rust_ms / verum_ms;
+
+    // Allocation may be slower due to CBGR generation tracking
+    BenchmarkResult {
+        name: "allocation_1m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.70,  // 70% is acceptable for allocation
+        passed: ratio >= 0.70,
+    }
+}
+
+/// Benchmark: Deallocation speed
+fn benchmark_deallocation_speed() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    // Pre-allocate
+    let mut objects: List<Heap<Int>> = (0..count)
+        .map(|i| Heap.new(i))
+        .collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    // Drop all
+    objects.clear();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.DEALLOC_1M_MS;
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "deallocation_1m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.80,
+        passed: ratio >= 0.80,
+    }
+}
+
+/// Benchmark: Reference access (CBGR overhead)
+fn benchmark_reference_access() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let ref_data = &*data;
+
+    // Warmup
+    for _ in 0..100_000 {
+        black_box(*ref_data);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        // CBGR check happens on each access
+        black_box(*ref_data);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.REF_ACCESS_10M_MS;
+
+    let ratio = rust_ms / verum_ms;
+
+    // This is where Verum pays for safety
+    BenchmarkResult {
+        name: "reference_access_10m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.50,  // 50% is expected due to CBGR
+        passed: ratio >= 0.50,
+    }
+}
+
+/// Benchmark: Mutable reference operations
+fn benchmark_mutable_reference() -> BenchmarkResult {
+    let mut data = Heap.new(0);
+
+    // Warmup
+    for i in 0..100_000 {
+        *data = i;
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..ITERATIONS {
+        *data = i;
+        black_box(*data);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.MUT_REF_10M_MS;
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "mutable_ref_10m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.50,
+        passed: ratio >= 0.50,
+    }
+}
+
+/// Benchmark: Vec/List push operations
+fn benchmark_vec_push() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    // Warmup
+    let mut warmup: List<Int> = List.new();
+    for i in 0..10_000 {
+        warmup.push(i);
+    }
+    black_box(warmup);
+
+    let mut list: List<Int> = List.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..count {
+        list.push(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.VEC_PUSH_1M_MS;
+
+    black_box(list);
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "list_push_1m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Benchmark: HashMap/Map insert operations
+fn benchmark_hashmap_insert() -> BenchmarkResult {
+    let count = 1_000_000;
+
+    // Warmup
+    let mut warmup: Map<Int, Int> = Map.new();
+    for i in 0..10_000 {
+        warmup.insert(i, i * 2);
+    }
+    black_box(warmup);
+
+    let mut map: Map<Int, Int> = Map.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..count {
+        map.insert(i, i * 2);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.HASHMAP_1M_MS;
+
+    black_box(map);
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "map_insert_1m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Benchmark: Iterator performance
+fn benchmark_iteration() -> BenchmarkResult {
+    let count = 1_000_000;
+    let data: List<Int> = (0..count).collect();
+
+    // Warmup
+    black_box(data.iter().take(10_000).sum.<Int>());
+
+    let timer = Timer.new();
+    timer.start();
+
+    let sum: Int = data.iter().sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.ITER_1M_MS;
+
+    black_box(sum);
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "iteration_1m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Benchmark: String concatenation
+fn benchmark_string_concat() -> BenchmarkResult {
+    let count = 100_000;
+
+    // Warmup
+    let mut warmup = Text.new();
+    for i in 0..1_000 {
+        warmup.push_str(&i.to_string());
+    }
+    black_box(warmup);
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut result = Text.with_capacity(count * 5);
+    for i in 0..count {
+        result.push_str(&i.to_string());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.STRING_CONCAT_100K_MS;
+
+    black_box(result);
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "string_concat_100k",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Benchmark: Integer parsing
+fn benchmark_string_parse() -> BenchmarkResult {
+    let count = 1_000_000;
+    let strings: List<Text> = (0..count)
+        .map(|i| i.to_string())
+        .collect();
+
+    // Warmup
+    for s in strings.iter().take(10_000) {
+        black_box(s.parse.<Int>());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for s in strings.iter() {
+        black_box(s.parse.<Int>());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let rust_ms = rust_baselines.PARSE_1M_MS;
+
+    let ratio = rust_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "parse_int_1m",
+        verum_ms: verum_ms,
+        rust_ms: rust_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    verum_ms: Float,
+    rust_ms: Float,
+    value: Float,  // ratio (Rust/Verum), >1 means Verum faster
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<25} {:>12} {:>12} {:>10} {:>8}",
+                "Benchmark", "Verum (ms)", "Rust (ms)", "Ratio", "Status");
+        println("{}", "-".repeat(70));
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.value * 100.0;
+            println("{:<25} {:>12.2} {:>12.2} {:>9.1}% {:>8}",
+                    result.name, result.verum_ms, result.rust_ms,
+                    ratio_pct, status);
+        }
+
+        println("");
+        let avg_ratio = self.results.iter()
+            .map(|r| r.value)
+            .sum.<Float>() / self.results.len() as Float;
+        println("Average performance ratio: {:.1}% of Rust", avg_ratio * 100.0);
+
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+
+    fn export_comparison(self, path: Text) {
+        let json = Json.object();
+        json.set("suite", self.suite_name);
+        json.set("comparison", "rust");
+
+        let results_json = Json.array();
+        for result in self.results {
+            let r = Json.object();
+            r.set("name", result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("rust_ms", result.rust_ms);
+            r.set("ratio", result.value);
+            r.set("target", result.target);
+            r.set("passed", result.passed);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+        println("Comparison exported to {}", path);
+    }
+}

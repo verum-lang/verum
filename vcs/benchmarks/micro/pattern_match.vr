@@ -1,0 +1,752 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 5ns per pattern match
+// @tags: pattern, match, performance, micro
+
+/// Pattern Matching Benchmark
+///
+/// Measures the performance of Verum's pattern matching system.
+/// Pattern matching is a core feature used extensively in Verum code.
+///
+/// Targets:
+/// - Simple patterns: < 5ns
+/// - Nested patterns: < 10ns
+/// - Guard patterns: < 15ns
+/// - Exhaustive matching: comparable to if-else chains
+///
+/// Spec reference: docs/detailed/05-syntax-grammar.md
+
+module vcs.benchmarks.micro.pattern_match
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Simple sum type for testing
+type SimpleEnum is
+    | First
+    | Second
+    | Third
+    | Fourth;
+
+/// Data-carrying variants
+type DataEnum is
+    | Empty
+    | Single(Int)
+    | Pair(Int, Int)
+    | Triple(Int, Int, Int);
+
+/// Nested structure
+type Nested is {
+    inner: InnerType,
+    value: Int,
+};
+
+type InnerType is
+    | InnerA { x: Int }
+    | InnerB { x: Int, y: Int };
+
+/// Option-like type
+type Maybe<T> is
+    | None
+    | Some(T);
+
+/// Result-like type
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+/// Deep nesting for complex patterns
+type DeepNested is {
+    level1: Level1,
+};
+
+type Level1 is {
+    level2: Level2,
+};
+
+type Level2 is {
+    value: Int,
+};
+
+fn main() {
+    let results = BenchmarkResults.new("Pattern Matching Performance");
+
+    // Simple pattern matching
+    results.add(benchmark_simple_enum_match());
+    results.add(benchmark_simple_enum_sequential());
+
+    // Data-carrying patterns
+    results.add(benchmark_data_enum_match());
+    results.add(benchmark_data_extraction());
+
+    // Nested patterns
+    results.add(benchmark_nested_struct_match());
+    results.add(benchmark_deep_nested_match());
+
+    // Maybe/Option patterns
+    results.add(benchmark_maybe_match());
+    results.add(benchmark_maybe_chain());
+
+    // Result patterns
+    results.add(benchmark_result_match());
+    results.add(benchmark_result_propagation());
+
+    // Guard patterns
+    results.add(benchmark_guard_simple());
+    results.add(benchmark_guard_complex());
+
+    // Or-patterns
+    results.add(benchmark_or_pattern());
+
+    // Comparison with if-else
+    results.add(benchmark_match_vs_if_else());
+
+    // Wildcard patterns
+    results.add(benchmark_wildcard_pattern());
+
+    results.report();
+    assert(results.all_pass(), "Pattern matching performance below target");
+}
+
+/// Simple enum matching
+fn benchmark_simple_enum_match() -> BenchmarkResult {
+    let variants = list![
+        SimpleEnum.First,
+        SimpleEnum.Second,
+        SimpleEnum.Third,
+        SimpleEnum.Fourth,
+    ];
+
+    let mut sum: Int = 0;
+
+    // Warmup
+    for _ in 0..(WARMUP_ITERATIONS / 4) {
+        for v in variants.iter() {
+            sum += match *v {
+                First => 1,
+                Second => 2,
+                Third => 3,
+                Fourth => 4,
+            };
+        }
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 4) {
+        for v in variants.iter() {
+            sum += match *v {
+                First => 1,
+                Second => 2,
+                Third => 3,
+                Fourth => 4,
+            };
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "simple_enum_match",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 5.0,
+        passed: per_match_ns < 5.0,
+    }
+}
+
+/// Sequential access pattern (worst case for jump table)
+fn benchmark_simple_enum_sequential() -> BenchmarkResult {
+    let mut variant = SimpleEnum.First;
+    let mut sum: Int = 0;
+
+    // Warmup
+    for i in 0..WARMUP_ITERATIONS {
+        variant = match i % 4 {
+            0 => SimpleEnum.First,
+            1 => SimpleEnum.Second,
+            2 => SimpleEnum.Third,
+            _ => SimpleEnum.Fourth,
+        };
+
+        sum += match variant {
+            First => 1,
+            Second => 2,
+            Third => 3,
+            Fourth => 4,
+        };
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        variant = match i % 4 {
+            0 => SimpleEnum.First,
+            1 => SimpleEnum.Second,
+            2 => SimpleEnum.Third,
+            _ => SimpleEnum.Fourth,
+        };
+
+        sum += match variant {
+            First => 1,
+            Second => 2,
+            Third => 3,
+            Fourth => 4,
+        };
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "simple_enum_sequential",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 8.0,
+        passed: per_match_ns < 8.0,
+    }
+}
+
+/// Data-carrying enum matching
+fn benchmark_data_enum_match() -> BenchmarkResult {
+    let variants = list![
+        DataEnum.Empty,
+        DataEnum.Single(42),
+        DataEnum.Pair(1, 2),
+        DataEnum.Triple(1, 2, 3),
+    ];
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 4) {
+        for v in variants.iter() {
+            sum += match *v {
+                Empty => 0,
+                Single(x) => x,
+                Pair(x, y) => x + y,
+                Triple(x, y, z) => x + y + z,
+            };
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "data_enum_match",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 8.0,
+        passed: per_match_ns < 8.0,
+    }
+}
+
+/// Data extraction from patterns
+fn benchmark_data_extraction() -> BenchmarkResult {
+    let value = DataEnum.Triple(10, 20, 30);
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        if let Triple(x, y, z) = value {
+            sum += x + y + z;
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "data_extraction",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 6.0,
+        passed: per_match_ns < 6.0,
+    }
+}
+
+/// Nested struct pattern matching
+fn benchmark_nested_struct_match() -> BenchmarkResult {
+    let values = list![
+        Nested { inner: InnerType.InnerA { x: 1 }, value: 10 },
+        Nested { inner: InnerType.InnerB { x: 2, y: 3 }, value: 20 },
+    ];
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 2) {
+        for v in values.iter() {
+            sum += match v {
+                Nested { inner: InnerA { x }, value } => *x + *value,
+                Nested { inner: InnerB { x, y }, value } => *x + *y + *value,
+            };
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "nested_struct_match",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 10.0,
+        passed: per_match_ns < 10.0,
+    }
+}
+
+/// Deep nested pattern matching
+fn benchmark_deep_nested_match() -> BenchmarkResult {
+    let value = DeepNested {
+        level1: Level1 {
+            level2: Level2 { value: 42 },
+        },
+    };
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum += match value {
+            DeepNested { level1: Level1 { level2: Level2 { value } } } => value,
+        };
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "deep_nested_match",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 8.0,
+        passed: per_match_ns < 8.0,
+    }
+}
+
+/// Maybe/Option pattern matching
+fn benchmark_maybe_match() -> BenchmarkResult {
+    let values = list![
+        Maybe.Some(42),
+        Maybe.None,
+    ];
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 2) {
+        for v in values.iter() {
+            sum += match *v {
+                Some(x) => x,
+                None => 0,
+            };
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "maybe_match",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 5.0,
+        passed: per_match_ns < 5.0,
+    }
+}
+
+/// Maybe chaining
+fn benchmark_maybe_chain() -> BenchmarkResult {
+    fn get_outer() -> Maybe<Maybe<Int>> {
+        Maybe.Some(Maybe.Some(42))
+    }
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum += match get_outer() {
+            Some(Some(x)) => x,
+            Some(None) => 0,
+            None => -1,
+        };
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "maybe_chain",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 12.0,
+        passed: per_match_ns < 12.0,
+    }
+}
+
+/// Result pattern matching
+fn benchmark_result_match() -> BenchmarkResult {
+    let values = list![
+        Result.Ok(42),
+        Result.Err("error".to_text()),
+    ];
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 2) {
+        for v in values.iter() {
+            sum += match v {
+                Ok(x) => *x,
+                Err(_) => 0,
+            };
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "result_match",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 6.0,
+        passed: per_match_ns < 6.0,
+    }
+}
+
+/// Result propagation pattern
+fn benchmark_result_propagation() -> BenchmarkResult {
+    fn fallible_op(x: Int) -> Result<Int, Text> {
+        if x >= 0 {
+            Result.Ok(x * 2)
+        } else {
+            Result.Err("negative".to_text())
+        }
+    }
+
+    fn chain_ops(x: Int) -> Result<Int, Text> {
+        let a = fallible_op(x)?;
+        let b = fallible_op(a)?;
+        Ok(b)
+    }
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += match chain_ops(i % 100) {
+            Ok(x) => x,
+            Err(_) => 0,
+        };
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "result_propagation",
+        metric: "ns/chain",
+        value: per_match_ns,
+        target: 15.0,
+        passed: per_match_ns < 15.0,
+    }
+}
+
+/// Simple guard pattern
+fn benchmark_guard_simple() -> BenchmarkResult {
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        sum += match i % 100 {
+            x where x < 25 => 1,
+            x where x < 50 => 2,
+            x where x < 75 => 3,
+            _ => 4,
+        };
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "guard_simple",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 10.0,
+        passed: per_match_ns < 10.0,
+    }
+}
+
+/// Complex guard pattern
+fn benchmark_guard_complex() -> BenchmarkResult {
+    let values = list![
+        DataEnum.Single(10),
+        DataEnum.Single(50),
+        DataEnum.Pair(5, 10),
+        DataEnum.Triple(1, 2, 3),
+    ];
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 4) {
+        for v in values.iter() {
+            sum += match *v {
+                Single(x) where x < 25 => x,
+                Single(x) where x < 75 => x * 2,
+                Single(x) => x * 3,
+                Pair(x, y) where x + y < 20 => x + y,
+                Pair(x, y) => x * y,
+                Triple(x, y, z) where x + y + z < 10 => x + y + z,
+                Triple(_, _, _) => 0,
+                Empty => 0,
+            };
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "guard_complex",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 15.0,
+        passed: per_match_ns < 15.0,
+    }
+}
+
+/// Or-pattern matching
+fn benchmark_or_pattern() -> BenchmarkResult {
+    let variants = list![
+        SimpleEnum.First,
+        SimpleEnum.Second,
+        SimpleEnum.Third,
+        SimpleEnum.Fourth,
+    ];
+
+    let mut count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 4) {
+        for v in variants.iter() {
+            count += match *v {
+                First | Second => 1,
+                Third | Fourth => 2,
+            };
+        }
+    }
+    black_box(count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "or_pattern",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 5.0,
+        passed: per_match_ns < 5.0,
+    }
+}
+
+/// Compare match vs if-else
+fn benchmark_match_vs_if_else() -> BenchmarkResult {
+    let mut sum_match: Int = 0;
+    let mut sum_if: Int = 0;
+
+    // Measure match
+    let timer_match = Timer.new();
+    timer_match.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let v = i % 4;
+        sum_match += match v {
+            0 => 1,
+            1 => 2,
+            2 => 3,
+            _ => 4,
+        };
+    }
+    black_box(sum_match);
+    let match_ns = timer_match.elapsed_ns();
+
+    // Measure if-else
+    let timer_if = Timer.new();
+    timer_if.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let v = i % 4;
+        sum_if += if v == 0 {
+            1
+        } else if v == 1 {
+            2
+        } else if v == 2 {
+            3
+        } else {
+            4
+        };
+    }
+    black_box(sum_if);
+    let if_ns = timer_if.elapsed_ns();
+
+    // Match should be no worse than if-else
+    let ratio = match_ns as Float / if_ns as Float;
+
+    BenchmarkResult {
+        name: "match_vs_if_else_ratio",
+        metric: "ratio",
+        value: ratio,
+        target: 1.5,  // Match should be at most 50% slower
+        passed: ratio < 1.5,
+    }
+}
+
+/// Wildcard pattern matching
+fn benchmark_wildcard_pattern() -> BenchmarkResult {
+    let values = list![
+        DataEnum.Empty,
+        DataEnum.Single(42),
+        DataEnum.Pair(1, 2),
+        DataEnum.Triple(1, 2, 3),
+    ];
+
+    let mut count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 4) {
+        for v in values.iter() {
+            count += match *v {
+                Empty => 0,
+                _ => 1,
+            };
+        }
+    }
+    black_box(count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_match_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "wildcard_pattern",
+        metric: "ns/match",
+        value: per_match_ns,
+        target: 3.0,
+        passed: per_match_ns < 3.0,
+    }
+}
+
+// Benchmark infrastructure
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;

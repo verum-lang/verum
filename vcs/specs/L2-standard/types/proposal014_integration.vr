@@ -1,0 +1,409 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: advanced-type-syntax, hkt, existential, negative-bounds, integration
+// @expect: pass
+// @description: Complex integration tests combining multiple advanced type syntax features
+// @spec: 03-type-system.md Section 13
+
+// =============================================================================
+// Scenario 1: Plugin System with Existential Types and HKT
+// =============================================================================
+
+// Plugin interface with existential return type
+type Plugin is protocol {
+    type Config;
+    type Output;
+
+    fn name(&self) -> Text;
+    fn configure(&mut self, config: Self.Config);
+    fn execute(&self) -> Self.Output;
+};
+
+// Plugin loader returns opaque plugin type
+fn load_plugin(name: Text) -> some P: Plugin {
+    match name.as_str() {
+        "logger" => LoggerPlugin.new(),
+        "metrics" => MetricsPlugin.new(),
+        _ => NoOpPlugin.new(),
+    }
+}
+
+type LoggerPlugin is { level: LogLevel };
+type MetricsPlugin is { prefix: Text };
+type NoOpPlugin is ();
+
+type LogLevel is Debug | Info | Warn | Error;
+
+implement Plugin for LoggerPlugin {
+    type Config = LogLevel;
+    type Output = ();
+
+    fn name(&self) -> Text { "logger" }
+    fn configure(&mut self, config: LogLevel) { self.level = config; }
+    fn execute(&self) { print(f"Logger at level: {self.level}"); }
+}
+
+implement Plugin for MetricsPlugin {
+    type Config = Text;
+    type Output = Int;
+
+    fn name(&self) -> Text { "metrics" }
+    fn configure(&mut self, config: Text) { self.prefix = config; }
+    fn execute(&self) -> Int { 42 }
+}
+
+implement Plugin for NoOpPlugin {
+    type Config = ();
+    type Output = ();
+
+    fn name(&self) -> Text { "noop" }
+    fn configure(&mut self, _config: ()) {}
+    fn execute(&self) {}
+}
+
+// =============================================================================
+// Scenario 2: Effect System with HKT and Negative Bounds
+// =============================================================================
+
+// Effect protocol using HKT
+type Effect is protocol {
+    type F<_>;
+
+    fn pure<A>(value: A) -> Self.F<A>;
+    fn flat_map<A, B>(self: Self.F<A>, f: fn(A) -> Self.F<B>) -> Self.F<B>;
+};
+
+// IO Effect
+type IO<T> is { run: fn() -> T };
+
+type IOEffect is ();
+
+implement Effect for IOEffect {
+    type F<T> is IO<T>;
+
+    fn pure<A>(value: A) -> IO<A> {
+        IO { run: || value }
+    }
+
+    fn flat_map<A, B>(self: IO<A>, f: fn(A) -> IO<B>) -> IO<B> {
+        IO { run: || {
+            let a = (self.run)();
+            let io_b = f(a);
+            (io_b.run)()
+        }}
+    }
+}
+
+// Pure computation (no effects) - marked with !IO bound
+fn pure_computation<T: !Send>(value: T) -> T {
+    // Guaranteed pure - no IO operations possible
+    value
+}
+
+// =============================================================================
+// Scenario 3: Type-Level State Machine with Associated Types
+// =============================================================================
+
+type State<S, A> is {
+    run_state: fn(S) -> (A, S),
+};
+
+type StateT<S> is ();
+
+implement<S> Effect for StateT<S> {
+    type F<T> is State<S, T>;
+
+    fn pure<A>(value: A) -> State<S, A> {
+        State { run_state: |s| (value, s) }
+    }
+
+    fn flat_map<A, B>(self: State<S, A>, f: fn(A) -> State<S, B>) -> State<S, B> {
+        State { run_state: |s0| {
+            let (a, s1) = (self.run_state)(s0);
+            let state_b = f(a);
+            (state_b.run_state)(s1)
+        }}
+    }
+}
+
+// State machine states
+type Disconnected is ();
+type Connected is { session_id: Text };
+type Authenticated is { user: Text, session_id: Text };
+
+// Connection state machine with type-level transitions
+type Connection<S> is { state: S };
+
+implement Connection<Disconnected> {
+    fn connect(self, host: Text) -> Connection<Connected> {
+        Connection { state: Connected { session_id: f"session_{host}" } }
+    }
+}
+
+implement Connection<Connected> {
+    fn authenticate(self, user: Text, _password: Text) -> Connection<Authenticated> {
+        Connection {
+            state: Authenticated {
+                user: user,
+                session_id: self.state.session_id,
+            }
+        }
+    }
+
+    fn disconnect(self) -> Connection<Disconnected> {
+        Connection { state: Disconnected {} }
+    }
+}
+
+implement Connection<Authenticated> {
+    fn query(&self, sql: Text) -> Result<List<Row>, DbError> {
+        // Only authenticated connections can query
+        Ok([])
+    }
+
+    fn logout(self) -> Connection<Connected> {
+        Connection { state: Connected { session_id: self.state.session_id } }
+    }
+}
+
+type Row is { data: Map<Text, Text> };
+type DbError is { message: Text };
+
+// =============================================================================
+// Scenario 4: Generic Repository Pattern with Complex Bounds
+// =============================================================================
+
+type Entity is protocol {
+    type Id: Eq + Hash + Clone;
+
+    fn id(&self) -> Self.Id;
+};
+
+type Repository<E: Entity> is protocol {
+    type Error;
+
+    async fn find_by_id(&self, id: E.Id) -> Result<Maybe<E>, Self.Error>;
+    async fn save(&self, entity: E) -> Result<E, Self.Error>;
+    async fn delete(&self, id: E.Id) -> Result<Bool, Self.Error>;
+};
+
+// In-memory repository - for non-Send entities (local only)
+type InMemoryRepository<E: Entity + !Send> is {
+    store: Map<E.Id, E>,
+};
+
+implement<E: Entity + Clone + !Send> Repository<E> for InMemoryRepository<E> {
+    type Error = RepositoryError;
+
+    async fn find_by_id(&self, id: E.Id) -> Result<Maybe<E>, RepositoryError> {
+        Ok(self.store.get(&id).cloned())
+    }
+
+    async fn save(&self, entity: E) -> Result<E, RepositoryError> {
+        let id = entity.id();
+        self.store.insert(id, entity.clone());
+        Ok(entity)
+    }
+
+    async fn delete(&self, id: E.Id) -> Result<Bool, RepositoryError> {
+        Ok(self.store.remove(&id).is_some())
+    }
+}
+
+// Async repository - for Send entities (thread-safe)
+type AsyncRepository<E: Entity + Send + Sync> is {
+    connection: Shared<DatabaseConnection>,
+};
+
+implement<E: Entity + Send + Sync + Serialize + Deserialize> Repository<E> for AsyncRepository<E> {
+    type Error = DatabaseError;
+
+    async fn find_by_id(&self, id: E.Id) -> Result<Maybe<E>, DatabaseError> {
+        let conn = self.connection.lock().await;
+        conn.query_one(id).await
+    }
+
+    async fn save(&self, entity: E) -> Result<E, DatabaseError> {
+        let conn = self.connection.lock().await;
+        conn.insert(entity.clone()).await;
+        Ok(entity)
+    }
+
+    async fn delete(&self, id: E.Id) -> Result<Bool, DatabaseError> {
+        let conn = self.connection.lock().await;
+        conn.delete(id).await
+    }
+}
+
+type RepositoryError is NotFound | StorageError(Text);
+type DatabaseError is ConnectionLost | QueryFailed(Text);
+type DatabaseConnection is { url: Text };
+
+implement DatabaseConnection {
+    async fn query_one<T>(&self, id: impl Eq + Hash) -> Result<Maybe<T>, DatabaseError> {
+        Ok(None)
+    }
+
+    async fn insert<T>(&self, entity: T) {
+    }
+
+    async fn delete<T>(&self, id: T) -> Result<Bool, DatabaseError> {
+        Ok(false)
+    }
+}
+
+// =============================================================================
+// Scenario 5: Streaming Pipeline with Existential and Associated Types
+// =============================================================================
+
+type Stream<T> is protocol {
+    type Item = T;
+
+    async fn next(&mut self) -> Maybe<T>;
+};
+
+type Transformer is protocol {
+    type Input;
+    type Output;
+
+    fn transform(&self, input: Self.Input) -> Self.Output;
+};
+
+// Create a pipeline that transforms a stream
+fn create_pipeline<S, T>(
+    source: S,
+    transformer: T
+) -> some O: Stream<T.Output>
+    where type S: Stream,
+          type T: Transformer<Input = S.Item>
+{
+    TransformedStream {
+        source: source,
+        transformer: transformer,
+    }
+}
+
+type TransformedStream<S, T> is {
+    source: S,
+    transformer: T,
+};
+
+implement<S: Stream, T: Transformer<Input = S.Item>> Stream<T.Output> for TransformedStream<S, T> {
+    async fn next(&mut self) -> Maybe<T.Output> {
+        match self.source.next().await {
+            Some(item) => Some(self.transformer.transform(item)),
+            None => None,
+        }
+    }
+}
+
+// =============================================================================
+// Scenario 6: Builder Pattern with Type-Level Validation
+// =============================================================================
+
+type ConfigBuilder<HasHost, HasPort> is {
+    host: Maybe<Text>,
+    port: Maybe<Int>,
+    timeout: Int,
+};
+
+type Yes is ();
+type No is ();
+
+implement<HasPort> ConfigBuilder<No, HasPort> {
+    fn with_host(self, host: Text) -> ConfigBuilder<Yes, HasPort> {
+        ConfigBuilder {
+            host: Some(host),
+            port: self.port,
+            timeout: self.timeout,
+        }
+    }
+}
+
+implement<HasHost> ConfigBuilder<HasHost, No> {
+    fn with_port(self, port: Int) -> ConfigBuilder<HasHost, Yes> {
+        ConfigBuilder {
+            host: self.host,
+            port: Some(port),
+            timeout: self.timeout,
+        }
+    }
+}
+
+implement<HasHost, HasPort> ConfigBuilder<HasHost, HasPort> {
+    fn with_timeout(self, timeout: Int) -> Self {
+        ConfigBuilder {
+            host: self.host,
+            port: self.port,
+            timeout: timeout,
+        }
+    }
+}
+
+// Only complete builders can build
+implement ConfigBuilder<Yes, Yes> {
+    fn build(self) -> Config {
+        Config {
+            host: self.host.unwrap(),
+            port: self.port.unwrap(),
+            timeout: self.timeout,
+        }
+    }
+}
+
+type Config is {
+    host: Text,
+    port: Int,
+    timeout: Int,
+};
+
+fn create_config() -> Config {
+    ConfigBuilder { host: None, port: None, timeout: 30 }
+        .with_host("localhost")
+        .with_port(8080)
+        .with_timeout(60)
+        .build()
+}
+
+// =============================================================================
+// Helper Protocol Declarations
+// =============================================================================
+
+type Clone is protocol { fn clone(&self) -> Self; };
+type Eq is protocol { fn eq(&self, other: &Self) -> Bool; };
+type Hash is protocol { fn hash(&self) -> Int; };
+type Send is protocol {};
+type Sync is protocol {};
+type Serialize is protocol { fn serialize(&self) -> Bytes; };
+type Deserialize is protocol { fn deserialize(bytes: Bytes) -> Result<Self, DeserializeError>; };
+type DeserializeError is { message: Text };
+type Bytes is { data: List<Byte> };
+type Shared<T> is { inner: T };
+implement<T> Shared<T> {
+    async fn lock(&self) -> &T { &self.inner }
+}
+
+implement LoggerPlugin { fn new() -> Self { LoggerPlugin { level: Info } } }
+implement MetricsPlugin { fn new() -> Self { MetricsPlugin { prefix: "" } } }
+implement NoOpPlugin { fn new() -> Self { NoOpPlugin } }
+
+fn main() {
+    // Test plugin system
+    let plugin = load_plugin("logger");
+    print(f"Loaded plugin: {plugin.name()}");
+
+    // Test state machine
+    let conn = Connection { state: Disconnected };
+    let connected = conn.connect("db.example.com");
+    let authed = connected.authenticate("admin", "secret");
+    let _result = authed.query("SELECT * FROM users");
+
+    // Test builder pattern
+    let config = create_config();
+    assert(config.host == "localhost");
+    assert(config.port == 8080);
+    assert(config.timeout == 60);
+
+    assert(true);
+}

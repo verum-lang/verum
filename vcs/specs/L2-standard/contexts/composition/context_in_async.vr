@@ -1,0 +1,126 @@
+// @test: run
+// @expected-stdout: Starting async operations
+// [Task 1] Fetching user: 1
+// [Task 1] User found: Alice
+// [Task 2] Saving user: Bob
+// [Task 2] User saved
+// All tasks completed
+// @tier: 0
+// @level: L2
+// @tags: contexts, async, concurrent
+// @description: Tests contexts in async functions with concurrent operations
+//
+// Contexts are properly maintained across async/await boundaries and
+// are available in concurrent async tasks.
+
+context Logger {
+    fn info(tag: Text, message: Text);
+}
+
+context async Database {
+    async fn fetch_user(id: Int) -> Maybe<User>;
+    async fn save_user(user: &User) -> Result<(), DbError>;
+}
+
+type User is {
+    id: Int,
+    name: Text,
+};
+
+type DbError is
+    | NotFound
+    | SaveFailed(Text);
+
+// Logger implementation
+type TaggedLogger is {};
+
+implement Logger for TaggedLogger {
+    fn info(tag: Text, message: Text) {
+        println("[" + tag + "] " + message);
+    }
+}
+
+// Database implementation
+type InMemoryDatabase is {
+    users: Map<Int, User>,
+};
+
+implement InMemoryDatabase {
+    fn new() -> Self {
+        let mut users = Map.new();
+        users.insert(1, User { id: 1, name: "Alice" });
+        Self { users }
+    }
+}
+
+implement Database for InMemoryDatabase {
+    async fn fetch_user(&self, id: Int) -> Maybe<User> {
+        // Simulate async I/O delay
+        self.users.get(id)
+    }
+
+    async fn save_user(&mut self, user: &User) -> Result<(), DbError> {
+        // Simulate async I/O delay
+        self.users.insert(user.id, user.clone());
+        Ok(())
+    }
+}
+
+// Async function using contexts
+async fn fetch_and_log(user_id: Int, tag: Text) -> Maybe<User> using [Logger, Database] {
+    Logger.info(tag, "Fetching user: " + user_id.to_text());
+
+    match Database.fetch_user(user_id).await {
+        Some(user) => {
+            Logger.info(tag, "User found: " + user.name);
+            Some(user)
+        }
+        None => {
+            Logger.info(tag, "User not found");
+            None
+        }
+    }
+}
+
+async fn save_and_log(user: User, tag: Text) -> Result<(), DbError> using [Logger, Database] {
+    Logger.info(tag, "Saving user: " + user.name);
+
+    match Database.save_user(&user).await {
+        Ok(()) => {
+            Logger.info(tag, "User saved");
+            Ok(())
+        }
+        Err(e) => {
+            Logger.info(tag, "Failed to save user");
+            Err(e)
+        }
+    }
+}
+
+// Async function that spawns concurrent tasks
+async fn run_concurrent_operations() using [Logger, Database] {
+    println("Starting async operations");
+
+    // Run tasks sequentially (both have access to the same contexts)
+    let result1 = fetch_and_log(1, "Task 1").await;
+
+    let new_user = User { id: 2, name: "Bob" };
+    let result2 = save_and_log(new_user, "Task 2").await;
+
+    println("All tasks completed");
+}
+
+async fn main() {
+    // Provide contexts at the top level
+    provide Logger = TaggedLogger {};
+    provide Database = InMemoryDatabase.new();
+
+    // Run async operations with contexts
+    run_concurrent_operations().await;
+}
+
+// Helper function stubs for concurrent execution
+// These would be provided by the runtime
+fn unreachable_pair<A, B>() -> (A, B) {
+    panic("not reachable")
+}

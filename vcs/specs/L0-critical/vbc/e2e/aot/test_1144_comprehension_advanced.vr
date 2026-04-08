@@ -1,0 +1,117 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: comprehension, advanced, nested, filtered
+// @description: Test advanced list comprehension patterns
+
+fn test_nested_comprehension() -> Int {
+    // Flatten: [i + j for i in 0..3 for j in 0..3 if i != j]
+    // (0,1), (0,2), (1,0), (1,2), (2,0), (2,1) => [1, 2, 1, 3, 2, 3]
+    let pairs = [i * 10 + j for i in 0..3 for j in 0..3 if i != j];
+    if pairs.len() != 6 {
+        print(f"FAIL nested: len={pairs.len()}, expected 6");
+        return 1;
+    }
+    // Verify first pair: i=0, j=1 => 1
+    if pairs[0] != 1 {
+        print(f"FAIL nested[0]: {pairs[0]}, expected 1");
+        return 1;
+    }
+    print("  nested_comprehension: OK");
+    0
+}
+
+fn test_comprehension_with_let() -> Int {
+    // [y for x in 1..=5 let y = x * x if y > 10]
+    let big_squares = [y for x in 1..=5 let y = x * x if y > 10];
+    // x=1:y=1, x=2:y=4, x=3:y=9, x=4:y=16(>10), x=5:y=25(>10)
+    if big_squares.len() != 2 {
+        print(f"FAIL let: len={big_squares.len()}, expected 2");
+        return 1;
+    }
+    if big_squares[0] != 16 || big_squares[1] != 25 {
+        print(f"FAIL let values: [{big_squares[0]}, {big_squares[1]}]");
+        return 1;
+    }
+    print("  comprehension_let: OK");
+    0
+}
+
+fn test_comprehension_from_list() -> Int {
+    let mut source = List.new();
+    source.push(1);
+    source.push(2);
+    source.push(3);
+    source.push(4);
+    source.push(5);
+
+    // [x * 2 for x in source if x % 2 == 1]
+    let doubled_odds = [x * 2 for x in source if x % 2 == 1];
+    // Odds: 1, 3, 5 => doubled: 2, 6, 10
+    if doubled_odds.len() != 3 {
+        print(f"FAIL from_list: len={doubled_odds.len()}");
+        return 1;
+    }
+    if doubled_odds[0] != 2 || doubled_odds[1] != 6 || doubled_odds[2] != 10 {
+        print("FAIL from_list values");
+        return 1;
+    }
+    print("  comprehension_from_list: OK");
+    0
+}
+
+fn test_sieve_comprehension() -> Int {
+    // Simple sieve using comprehension
+    // [x for x in 2..20 if is_prime_simple(x)]
+    let mut primes = List.new();
+    let mut n = 2;
+    while n < 20 {
+        let mut is_p = true;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 {
+                is_p = false;
+                break;
+            }
+            d = d + 1;
+        }
+        if is_p {
+            primes.push(n);
+        }
+        n = n + 1;
+    }
+    // Primes < 20: 2,3,5,7,11,13,17,19 = 8
+    if primes.len() != 8 {
+        print(f"FAIL sieve: len={primes.len()}, expected 8");
+        return 1;
+    }
+    print("  sieve: OK");
+    0
+}
+
+fn test_empty_comprehension() -> Int {
+    let empty = [x for x in 0..10 if x > 100];
+    if empty.len() != 0 {
+        print(f"FAIL empty: len={empty.len()}");
+        return 1;
+    }
+    print("  empty_comprehension: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Advanced Comprehension Tests:");
+    let mut failures = 0;
+    failures = failures + test_nested_comprehension();
+    failures = failures + test_comprehension_with_let();
+    failures = failures + test_comprehension_from_list();
+    failures = failures + test_sieve_comprehension();
+    failures = failures + test_empty_comprehension();
+
+    if failures == 0 {
+        print("All advanced comprehension tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

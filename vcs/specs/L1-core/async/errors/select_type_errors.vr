@@ -1,0 +1,397 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: async, select, types, errors, negative
+// @expected-error: E018
+
+/// Test for select expression type errors.
+/// Select expressions race multiple async branches and execute the first to complete.
+/// These examples demonstrate type checking errors in select expressions.
+/// Spec: grammar/verum.ebnf - select_expr
+/// Spec: docs/detailed/05-syntax-grammar.md Section 2.12.1
+
+// ============================================================================
+// 1. BRANCH TYPES DON'T UNIFY
+// ============================================================================
+
+async fn returns_int() -> Int {
+    42
+}
+
+async fn returns_text() -> Text {
+    "hello"
+}
+
+async fn returns_float() -> Float {
+    3.14
+}
+
+async fn returns_bool() -> Bool {
+    true
+}
+
+// E410: Incompatible branch types - Int vs Text
+async fn branch_types_mismatch_basic() {
+    let result = select {
+        x = returns_int().await => x,      // Int
+        y = returns_text().await => y,     // ERROR: Text doesn't unify with Int
+    };
+}
+
+// E410: Three branches with incompatible types
+async fn branch_types_mismatch_multiple() {
+    let result = select {
+        a = returns_int().await => a,      // Int
+        b = returns_float().await => b,    // Float (might unify with Int in some type systems)
+        c = returns_text().await => c,     // ERROR: Text doesn't unify with Int or Float
+    };
+}
+
+// E410: Branch body expression doesn't match pattern binding type
+async fn branch_body_type_mismatch() {
+    let result: Int = select {
+        x = returns_int().await => x,           // OK: returns Int
+        y = returns_text().await => y.len(),    // OK: Text.len() returns Int
+        _ = returns_bool().await => "oops",     // ERROR: Text doesn't match expected Int
+    };
+}
+
+// E410: One branch returns Maybe, another returns bare value
+async fn branch_maybe_mismatch() {
+    let result = select {
+        x = returns_int().await => Some(x),     // Maybe<Int>
+        y = returns_int().await => y,           // ERROR: Int doesn't match Maybe<Int>
+    };
+}
+
+// E410: Result types with different Ok/Err types
+async fn branch_result_mismatch() {
+    type Error is Text;
+
+    let result = select {
+        x = returns_int().await => Ok<Int, Error>(x),     // Result<Int, Error>
+        y = returns_text().await => Ok<Text, Error>(y),   // ERROR: Result<Text, Error> doesn't unify
+    };
+}
+
+// E410: Block body returns wrong type
+async fn branch_block_wrong_type() {
+    let result: Int = select {
+        x = returns_int().await => {
+            let processed = x * 2;
+            processed
+        },  // OK: returns Int
+        y = returns_int().await => {
+            let formatted = f"Value: {y}";
+            formatted  // ERROR: Text doesn't match Int
+        },
+    };
+}
+
+// ============================================================================
+// 2. GUARD NOT BOOLEAN
+// ============================================================================
+
+// E410: Guard expression is Int, not Bool
+async fn guard_not_bool_int() {
+    let result = select {
+        x = returns_int().await if x => x,  // ERROR: guard 'x' is Int, not Bool
+        else => 0,
+    };
+}
+
+// E410: Guard expression is Text
+async fn guard_not_bool_text() {
+    let condition = "true";
+
+    let result = select {
+        x = returns_int().await if condition => x,  // ERROR: guard is Text, not Bool
+        else => 0,
+    };
+}
+
+// E410: Guard expression is Maybe (not unwrapped)
+async fn guard_not_bool_maybe() {
+    let flag: Maybe<Bool> = Maybe.Some(true);
+
+    let result = select {
+        x = returns_int().await if flag => x,  // ERROR: guard is Maybe<Bool>, not Bool
+        else => 0,
+    };
+}
+
+// E410: Guard uses comparison with wrong types
+async fn guard_comparison_type_error() {
+    let result = select {
+        x = returns_int().await if x > "five" => x,  // ERROR: Int > Text invalid
+        else => 0,
+    };
+}
+
+// E410: Guard calls function returning wrong type
+async fn guard_function_wrong_type() {
+    fn not_a_predicate(x: Int) -> Int {
+        x * 2
+    }
+
+    let result = select {
+        x = returns_int().await if not_a_predicate(x) => x,  // ERROR: guard is Int
+        else => 0,
+    };
+}
+
+// E410: Guard expression is unit type
+async fn guard_unit_type() {
+    fn do_something() {
+        // returns ()
+    }
+
+    let result = select {
+        x = returns_int().await if do_something() => x,  // ERROR: guard is (), not Bool
+        else => 0,
+    };
+}
+
+// ============================================================================
+// 3. MISSING .AWAIT IN SELECT ARM
+// ============================================================================
+
+// E410: Future not awaited - bare future in pattern position
+async fn missing_await_bare() {
+    let result = select {
+        x = returns_int() => x,  // ERROR: returns_int() returns Future<Int>, not Int
+        y = returns_text().await => y.len(),
+    };
+}
+
+// E410: Async block not awaited
+async fn missing_await_async_block() {
+    let result = select {
+        x = async { 42 } => x,  // ERROR: async block not awaited
+        y = async { 100 }.await => y,
+    };
+}
+
+// E410: Method returning future not awaited
+async fn missing_await_method() {
+    type Client is ();
+
+    implement Client {
+        async fn fetch(&self) -> Int {
+            42
+        }
+    }
+
+    let client = Client {};
+
+    let result = select {
+        x = client.fetch() => x,  // ERROR: fetch() returns Future, not awaited
+        else => 0,
+    };
+}
+
+// E410: Chained async not awaited at end
+async fn missing_await_chain() {
+    async fn step1() -> Int { 1 }
+    async fn step2(x: Int) -> Int { x + 1 }
+
+    let result = select {
+        // Missing .await on step2
+        x = step1().await |> step2 => x,  // ERROR: step2 returns Future
+        else => 0,
+    };
+}
+
+// ============================================================================
+// 4. SELECT ARM PATTERN ERRORS
+// ============================================================================
+
+// E410: Pattern doesn't match awaited type
+async fn pattern_type_mismatch() {
+    type Response is { status: Int, body: Text };
+
+    async fn fetch() -> Response {
+        Response { status: 200, body: "ok" }
+    }
+
+    let result = select {
+        // Pattern expects (Int, Text) tuple, but fetch returns Response struct
+        (status, body) = fetch().await => status,  // ERROR: pattern mismatch
+        else => 0,
+    };
+}
+
+// E410: Pattern binding wrong type
+async fn pattern_binding_wrong_type() {
+    type Data is
+        | Number(Int)
+        | Text(Text);
+
+    async fn get_data() -> Data {
+        Data.Number(42)
+    }
+
+    let result = select {
+        // Binding expects Text but variant contains Int
+        Data.Number(t: Text) = get_data().await => t.len(),  // ERROR: Number contains Int
+        else => 0,
+    };
+}
+
+// E410: Or pattern with inconsistent bindings
+async fn pattern_or_inconsistent() {
+    type Result<T, E> is Ok(T) | Err(E);
+
+    async fn operation() -> Result<Int, Text> {
+        Result.Ok(42)
+    }
+
+    let result = select {
+        // x bound in Ok but not in Err
+        Result.Ok(x) | Result.Err(_) = operation().await => x,  // ERROR: x not bound in Err
+        else => 0,
+    };
+}
+
+// ============================================================================
+// 5. ELSE BRANCH TYPE ERRORS
+// ============================================================================
+
+// E410: Else branch type doesn't match other branches
+async fn else_type_mismatch() {
+    let result = select {
+        x = returns_int().await if false => x,  // Int
+        else => "fallback",  // ERROR: Text doesn't match Int
+    };
+}
+
+// E410: Else block returns wrong type
+async fn else_block_wrong_type() {
+    let result: Int = select {
+        x = returns_int().await if false => x,
+        else => {
+            log("Using fallback");
+            "oops"  // ERROR: Text doesn't match Int
+        },
+    };
+}
+
+// ============================================================================
+// 6. BIASED SELECT ERRORS
+// ============================================================================
+
+// E410: Biased select with incompatible branch types
+async fn biased_type_mismatch() {
+    let result = select biased {
+        high = returns_int().await => high,
+        low = returns_text().await => low,  // ERROR: Text doesn't unify with Int
+    };
+}
+
+// E410: Biased select guard not bool
+async fn biased_guard_not_bool() {
+    let result = select biased {
+        x = returns_int().await if x => x,  // ERROR: guard is Int
+        y = returns_int().await => y,
+    };
+}
+
+// ============================================================================
+// 7. NESTED SELECT TYPE ERRORS
+// ============================================================================
+
+// E410: Inner select type doesn't match outer expectation
+async fn nested_select_type_mismatch() {
+    let result: Int = select {
+        outer = select {
+            inner = returns_text().await => inner,  // Text
+            _ = returns_text().await => "default",  // Text
+        } => outer,  // outer is Text, but result expects Int - ERROR
+        fallback = returns_int().await => fallback,  // Int
+    };
+}
+
+// E410: Nested select in body has wrong type
+async fn nested_in_body_wrong_type() {
+    let result: Int = select {
+        first = returns_int().await => {
+            select {
+                nested = returns_text().await => nested,  // ERROR: Text doesn't match Int
+                else => "fallback",
+            }
+        },
+        else => 0,
+    };
+}
+
+// ============================================================================
+// 8. SELECT WITH CHANNELS - TYPE ERRORS
+// ============================================================================
+
+type Channel<T> is ();
+
+implement<T> Channel<T> {
+    async fn recv(&self) -> Maybe<T> {
+        Maybe.None
+    }
+
+    async fn send(&self, value: T) {
+        // send implementation
+    }
+}
+
+// E410: Channel pattern type mismatch
+async fn channel_type_mismatch() {
+    let int_channel: Channel<Int> = Channel {};
+    let text_channel: Channel<Text> = Channel {};
+
+    let result = select {
+        // Expecting uniform type but channels have different element types
+        x = int_channel.recv().await => x,      // Maybe<Int>
+        y = text_channel.recv().await => y,     // ERROR: Maybe<Text> doesn't unify
+    };
+}
+
+// ============================================================================
+// 9. SELECT WITH TIMEOUT - TYPE ERRORS
+// ============================================================================
+
+async fn sleep(ms: Int) {
+    // sleep implementation
+}
+
+// E410: Timeout branch returns wrong type
+async fn timeout_type_mismatch() {
+    let result = select {
+        data = returns_int().await => data,     // Int
+        _ = sleep(1000).await => "timeout",     // ERROR: Text doesn't match Int
+    };
+}
+
+// E410: Timeout pattern expects value from unit-returning sleep
+async fn timeout_pattern_mismatch() {
+    let result = select {
+        x = returns_int().await => x,
+        val = sleep(1000).await => val + 1,  // ERROR: sleep returns (), not Int
+    };
+}
+
+// ============================================================================
+// 10. GENERIC SELECT ERRORS
+// ============================================================================
+
+async fn generic_fetch<T>() -> T {
+    panic("not implemented")
+}
+
+// E410: Generic type parameter mismatch
+async fn generic_select_mismatch() {
+    let result: Int = select {
+        x = generic_fetch.<Int>().await => x,      // Int
+        y = generic_fetch.<Text>().await => y,     // ERROR: Text doesn't match Int
+    };
+}
+
+fn main() {
+    // All examples above should produce E410 "Select expression type error"
+}

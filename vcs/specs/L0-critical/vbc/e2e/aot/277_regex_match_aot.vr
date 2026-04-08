@@ -1,0 +1,162 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, regex, match, pattern
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for simple regex-like pattern matching on integer arrays
+
+// Pattern types: 0=LITERAL(val), 1=ANY(.), 2=STAR(*prev), 3=END
+type Pat8 is {
+    t0: Int, v0: Int, t1: Int, v1: Int,
+    t2: Int, v2: Int, t3: Int, v3: Int,
+    t4: Int, v4: Int, t5: Int, v5: Int,
+    t6: Int, v6: Int, t7: Int, v7: Int,
+    len: Int
+};
+
+fn pat_type(p: Pat8, i: Int) -> Int {
+    if i == 0 { p.t0 } else if i == 1 { p.t1 }
+    else if i == 2 { p.t2 } else if i == 3 { p.t3 }
+    else if i == 4 { p.t4 } else if i == 5 { p.t5 }
+    else if i == 6 { p.t6 } else { p.t7 }
+}
+
+fn pat_val(p: Pat8, i: Int) -> Int {
+    if i == 0 { p.v0 } else if i == 1 { p.v1 }
+    else if i == 2 { p.v2 } else if i == 3 { p.v3 }
+    else if i == 4 { p.v4 } else if i == 5 { p.v5 }
+    else if i == 6 { p.v6 } else { p.v7 }
+}
+
+// Input string (integer array)
+type Str16 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    c12: Int, c13: Int, c14: Int, c15: Int,
+    len: Int
+};
+
+fn str_get(s: Str16, i: Int) -> Int {
+    if i == 0 { s.c0 } else if i == 1 { s.c1 }
+    else if i == 2 { s.c2 } else if i == 3 { s.c3 }
+    else if i == 4 { s.c4 } else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 } else if i == 7 { s.c7 }
+    else if i == 8 { s.c8 } else if i == 9 { s.c9 }
+    else if i == 10 { s.c10 } else if i == 11 { s.c11 }
+    else if i == 12 { s.c12 } else if i == 13 { s.c13 }
+    else if i == 14 { s.c14 } else { s.c15 }
+}
+
+// Does pattern element match character?
+fn elem_matches(p: Pat8, pi: Int, ch: Int) -> Bool {
+    let ty = pat_type(p, pi);
+    if ty == 1 { return true; }  // ANY matches everything
+    if ty == 0 { return pat_val(p, pi) == ch; }  // LITERAL
+    false
+}
+
+// Simple match: no backtracking, just literal and any
+fn simple_match(p: Pat8, s: Str16, pi: Int, si: Int) -> Bool {
+    if pi >= p.len { return si >= s.len; }
+    if si >= s.len { return pi >= p.len; }
+    if elem_matches(p, pi, str_get(s, si)) {
+        return simple_match_next(p, s, pi + 1, si + 1);
+    }
+    false
+}
+
+// Wrapper to avoid recursion issues
+fn simple_match_next(p: Pat8, s: Str16, pi: Int, si: Int) -> Bool {
+    if pi >= p.len { return si >= s.len; }
+    if si >= s.len { return pi >= p.len; }
+    if elem_matches(p, pi, str_get(s, si)) {
+        return simple_match_iter(p, s, pi + 1, si + 1);
+    }
+    false
+}
+
+fn simple_match_iter(p: Pat8, s: Str16, pi: Int, si: Int) -> Bool {
+    // Iterative continuation
+    let mut cpi = pi;
+    let mut csi = si;
+    while cpi < p.len && csi < s.len {
+        if elem_matches(p, cpi, str_get(s, csi)) {
+            cpi = cpi + 1;
+            csi = csi + 1;
+        } else {
+            return false;
+        }
+    }
+    cpi >= p.len && csi >= s.len
+}
+
+fn make_str(a: Int, b: Int, c: Int) -> Str16 {
+    Str16 {
+        c0: a, c1: b, c2: c, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0,
+        c8: 0, c9: 0, c10: 0, c11: 0, c12: 0, c13: 0, c14: 0, c15: 0,
+        len: 3
+    }
+}
+
+fn test_literal_match() {
+    // Pattern: [1, 2, 3]
+    let p = Pat8 {
+        t0: 0, v0: 1, t1: 0, v1: 2, t2: 0, v2: 3, t3: 3, v3: 0,
+        t4: 3, v4: 0, t5: 3, v5: 0, t6: 3, v6: 0, t7: 3, v7: 0,
+        len: 3
+    };
+    let s = make_str(1, 2, 3);
+    assert_eq(simple_match(p, s, 0, 0), true);
+
+    let s2 = make_str(1, 2, 4);
+    assert_eq(simple_match(p, s2, 0, 0), false);
+}
+
+fn test_any_match() {
+    // Pattern: [1, ANY, 3]
+    let p = Pat8 {
+        t0: 0, v0: 1, t1: 1, v1: 0, t2: 0, v2: 3, t3: 3, v3: 0,
+        t4: 3, v4: 0, t5: 3, v5: 0, t6: 3, v6: 0, t7: 3, v7: 0,
+        len: 3
+    };
+    let s1 = make_str(1, 99, 3);
+    assert_eq(simple_match(p, s1, 0, 0), true);
+    let s2 = make_str(1, 0, 3);
+    assert_eq(simple_match(p, s2, 0, 0), true);
+    let s3 = make_str(2, 99, 3);
+    assert_eq(simple_match(p, s3, 0, 0), false);
+}
+
+fn test_all_any() {
+    // Pattern: [ANY, ANY, ANY]
+    let p = Pat8 {
+        t0: 1, v0: 0, t1: 1, v1: 0, t2: 1, v2: 0, t3: 3, v3: 0,
+        t4: 3, v4: 0, t5: 3, v5: 0, t6: 3, v6: 0, t7: 3, v7: 0,
+        len: 3
+    };
+    let s = make_str(42, 99, 7);
+    assert_eq(simple_match(p, s, 0, 0), true);
+}
+
+fn test_length_mismatch() {
+    // Pattern: [1, 2] vs string [1, 2, 3]
+    let p = Pat8 {
+        t0: 0, v0: 1, t1: 0, v1: 2, t2: 3, v2: 0, t3: 3, v3: 0,
+        t4: 3, v4: 0, t5: 3, v5: 0, t6: 3, v6: 0, t7: 3, v7: 0,
+        len: 2
+    };
+    let s = make_str(1, 2, 3);
+    assert_eq(simple_match(p, s, 0, 0), false);
+}
+
+fn main() -> Int {
+    test_literal_match();
+    test_any_match();
+    test_all_any();
+    test_length_mismatch();
+    print("[OK] 277_regex_match_aot");
+    0
+}

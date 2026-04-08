@@ -1,0 +1,509 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, smt, z3, solver, verification, integration
+// @solver: z3
+// @timeout: 20000
+
+/// SMT solver integration test cases.
+/// Comprehensive testing of refinement type verification through
+/// SMT solving, covering all major SMT theories and their integration
+/// with Verum's refinement type system.
+///
+/// Covers:
+/// - Linear integer arithmetic (QF_LIA)
+/// - Non-linear integer arithmetic (QF_NIA)
+/// - Bitvector theory (QF_BV)
+/// - Array theory (QF_A)
+/// - Uninterpreted functions (QF_UF)
+/// - Combined theories
+/// - Quantified formulas
+/// - Proof tactics and strategies
+
+// =============================================================================
+// SECTION 1: Linear Integer Arithmetic (QF_LIA)
+// =============================================================================
+
+/// Basic linear arithmetic constraints
+@verify(proof)
+fn linear_addition(x: Int{>= 0}, y: Int{>= 0}) -> Int{>= 0} {
+    x + y  // SMT: x >= 0 /\ y >= 0 => x + y >= 0
+}
+
+@verify(proof)
+fn linear_subtraction_bounded(x: Int{>= 10}, y: Int{>= 0 && <= 5}) -> Int{>= 5} {
+    x - y  // SMT: x >= 10 /\ 0 <= y <= 5 => x - y >= 5
+}
+
+@verify(proof)
+fn linear_multiplication_by_const(x: Int{>= 1}) -> Int{>= 3} {
+    3 * x  // SMT: x >= 1 => 3 * x >= 3
+}
+
+@verify(proof)
+fn linear_bound_propagation(
+    a: Int{>= 0 && < 100},
+    b: Int{>= 0 && < 100},
+    c: Int{>= 0 && < 100},
+) -> Int{>= 0 && < 300} {
+    a + b + c  // SMT: bounds propagate through addition
+}
+
+/// Linear inequalities
+@verify(proof)
+fn linear_transitivity(x: Int, y: Int, z: Int) -> Bool
+    requires x < y
+    requires y < z
+    ensures result == true
+{
+    x < z  // SMT: x < y /\ y < z => x < z
+}
+
+// =============================================================================
+// SECTION 2: Non-Linear Integer Arithmetic (QF_NIA)
+// =============================================================================
+
+/// Square is non-negative
+@verify(proof)
+fn square_non_negative(x: Int) -> Int{>= 0} {
+    x * x  // SMT: forall x. x * x >= 0
+}
+
+/// Product of positives is positive
+@verify(proof)
+fn product_positive(x: Int{> 0}, y: Int{> 0}) -> Int{> 0} {
+    x * y  // SMT: x > 0 /\ y > 0 => x * y > 0
+}
+
+/// Product sign preservation
+@verify(proof)
+fn product_negative(x: Int{< 0}, y: Int{> 0}) -> Int{< 0} {
+    x * y  // SMT: x < 0 /\ y > 0 => x * y < 0
+}
+
+/// Power of positive
+@verify(proof)
+fn cube_sign(x: Int{> 0}) -> Int{> 0} {
+    x * x * x  // SMT: x > 0 => x^3 > 0
+}
+
+/// Absolute value via squaring
+@verify(proof)
+fn abs_via_sqrt(x: Int) -> Int{>= 0}
+    requires x * x <= 100
+{
+    if x >= 0 { x } else { -x }
+}
+
+// =============================================================================
+// SECTION 3: Bitvector Theory (QF_BV)
+// =============================================================================
+
+/// Byte bounds
+@verify(proof)
+fn byte_add_safe(x: u8, y: u8) -> Bool
+    requires x <= 127 && y <= 127
+    ensures result == true
+{
+    (x + y) <= 254  // No overflow when both < 128
+}
+
+/// Bitwise AND bound
+@verify(proof)
+fn bitwise_and_bound(x: u32, y: u32) -> u32
+    ensures result <= x
+    ensures result <= y
+{
+    x & y  // SMT BV: x & y <= min(x, y)
+}
+
+/// Bitwise OR bound
+@verify(proof)
+fn bitwise_or_bound(x: u32, y: u32) -> u32
+    ensures result >= x
+    ensures result >= y
+{
+    x | y  // SMT BV: x | y >= max(x, y)
+}
+
+/// Shift equivalence
+@verify(proof)
+fn shift_multiply(x: Int{>= 0 && < 1000}) -> Int
+    ensures result == x * 2
+{
+    x << 1  // SMT BV: x << 1 == x * 2 (when no overflow)
+}
+
+@verify(proof)
+fn shift_divide(x: Int{>= 0}) -> Int
+    ensures result == x / 2
+{
+    x >> 1  // SMT BV: x >> 1 == x / 2
+}
+
+/// Power of two check
+@verify(proof)
+fn is_power_of_two(n: Int{> 0}) -> Bool {
+    (n & (n - 1)) == 0  // SMT BV: n is power of 2 iff n & (n-1) == 0
+}
+
+// =============================================================================
+// SECTION 4: Array Theory (QF_A)
+// =============================================================================
+
+/// Read after write (select-store axiom)
+@verify(proof)
+fn array_read_write<T: Clone>(arr: &mut List<T>, idx: Int{>= 0}, val: T) -> T
+    requires idx < len(arr)
+    ensures result == val
+{
+    arr[idx] = val.clone();
+    arr[idx].clone()  // SMT: select(store(a, i, v), i) == v
+}
+
+/// Non-interference
+@verify(proof)
+fn array_non_interference<T: Clone + Eq>(
+    arr: &mut List<T>,
+    i: Int{>= 0},
+    j: Int{>= 0},
+    val: T,
+) -> Bool
+    requires i < len(arr) && j < len(arr)
+    requires i != j
+    ensures result == true
+{
+    let original = arr[j].clone();
+    arr[i] = val;
+    arr[j] == original  // SMT: select(store(a, i, v), j) == select(a, j) when i != j
+}
+
+/// Array equality extensionality
+@verify(proof)
+fn array_extensionality<T: Eq>(a: &List<T>, b: &List<T>) -> Bool
+    requires len(a) == len(b)
+    requires forall i in 0..len(a) => a[i] == b[i]
+    ensures result == true
+{
+    a == b  // SMT: extensionality axiom
+}
+
+// =============================================================================
+// SECTION 5: Uninterpreted Functions (QF_UF)
+// =============================================================================
+
+/// Abstract hash function
+fn hash(x: Int) -> Int;
+
+/// Hash determinism (congruence)
+@verify(proof)
+fn hash_deterministic(x: Int, y: Int) -> Bool
+    requires x == y
+    ensures result == true
+{
+    hash(x) == hash(y)  // SMT UF: f(x) == f(y) when x == y
+}
+
+/// Abstract comparison
+fn compare<T>(a: T, b: T) -> Int;  // Returns -1, 0, or 1
+
+/// Comparison reflexivity
+@verify(proof)
+fn compare_reflexive<T>(x: T) -> Bool
+    ensures result == true
+{
+    compare(x, x) == 0  // SMT UF with axiom
+}
+
+/// Abstract key function for maps
+fn key(item: Int) -> Int;
+
+/// Key uniqueness
+@verify(proof)
+fn key_unique(a: Int, b: Int) -> Bool
+    requires key(a) == key(b)
+    requires a != b
+    ensures result == false
+{
+    a == b  // Contradiction: different items can have same key
+}
+
+// =============================================================================
+// SECTION 6: Combined Theories
+// =============================================================================
+
+/// LIA + Arrays
+@verify(proof)
+fn combined_lia_array(arr: &mut List<Int>, idx: Int{>= 0}, delta: Int{> 0}) -> Bool
+    requires idx < len(arr)
+    requires arr[idx] >= 0
+    ensures result == true
+{
+    let old_val = arr[idx];
+    arr[idx] = old_val + delta;
+    arr[idx] > old_val  // SMT: LIA + Arrays
+}
+
+/// NIA + BV
+@verify(proof)
+fn combined_nia_bv(x: Int{>= 0 && < 256}, y: Int{>= 0 && < 256}) -> Int{>= 0}
+    ensures result == x * y
+{
+    // Can use either multiplication or shifts
+    x * y  // SMT: NIA reasoning on bounded values
+}
+
+/// UF + LIA
+@verify(proof)
+fn combined_uf_lia(x: Int, y: Int) -> Bool
+    requires x < y
+    requires hash(x) == hash(y)
+{
+    // Hash collision doesn't affect ordering
+    x < y  // SMT: UF doesn't interfere with LIA
+}
+
+// =============================================================================
+// SECTION 7: Quantified Formulas
+// =============================================================================
+
+/// Universal elimination
+@verify(proof)
+fn forall_elimination(arr: List<Int>{forall x in it => x > 0}, idx: Int{>= 0}) -> Int{> 0}
+    requires idx < len(arr)
+{
+    arr[idx]  // SMT: instantiate forall with idx
+}
+
+/// Existential witness
+@verify(proof)
+fn exists_witness(arr: List<Int>{exists x in it => x == 0}) -> Bool
+    ensures result == true
+{
+    arr.contains(&0)  // SMT: existential provides witness
+}
+
+/// Bounded quantifier
+@verify(proof)
+fn bounded_forall(arr: &List<Int>, bound: Int) -> Bool
+    requires forall i in 0..len(arr) => arr[i] < bound
+    ensures result == true
+{
+    for x in arr {
+        if *x >= bound {
+            return false;
+        }
+    }
+    true
+}
+
+// =============================================================================
+// SECTION 8: Proof Tactics
+// =============================================================================
+
+/// Split tactic: case analysis
+@verify(proof)
+fn abs_correct(x: Int) -> Int{>= 0}
+    // Uses split tactic on x >= 0 vs x < 0
+{
+    if x >= 0 { x } else { -x }
+}
+
+/// Induction tactic: for recursive functions
+@verify(proof)
+fn sum_positive(n: Int{>= 0}) -> Int{>= 0}
+    decreases n
+    // Uses induction on n
+{
+    if n == 0 { 0 }
+    else { n + sum_positive(n - 1) }
+}
+
+/// Simplify tactic: algebraic simplification
+@verify(proof)
+fn algebraic_identity(x: Int) -> Bool
+    ensures result == true
+{
+    (x + 1) * (x - 1) == x * x - 1  // SMT: simplify
+}
+
+/// Auto tactic: automatic proof search
+@verify(proof)
+fn auto_example(a: Int{> 0}, b: Int{> 0}, c: Int{> 0}) -> Int{> 0} {
+    (a + b) * c  // SMT: auto solves
+}
+
+// =============================================================================
+// SECTION 9: Proof by Contradiction
+// =============================================================================
+
+/// Vacuous truth (contradictory preconditions)
+@verify(proof)
+fn vacuous_truth(x: Int) -> Bool
+    requires x > 5
+    requires x < 3
+    ensures result == true  // Vacuously true: preconditions unsatisfiable
+{
+    false  // Unreachable: contradiction in preconditions
+}
+
+/// Reductio ad absurdum
+@verify(proof)
+fn sqrt_of_2_irrational() -> Bool
+    // Proof: assume sqrt(2) = p/q, derive contradiction
+{
+    // This is a mathematical theorem, not directly provable in SMT
+    true  // Placeholder
+}
+
+// =============================================================================
+// SECTION 10: Timeout and Complexity Management
+// =============================================================================
+
+/// Simple: should solve quickly
+@verify(proof)
+fn quick_proof(x: Int{> 0}) -> Int{> 0} {
+    x + 1
+}
+
+/// Moderate complexity
+@verify(proof)
+fn moderate_proof(
+    a: Int{>= 0 && < 100},
+    b: Int{>= 0 && < 100},
+    c: Int{>= 0 && < 100},
+    d: Int{>= 0 && < 100},
+) -> Int{>= 0 && < 400} {
+    a + b + c + d
+}
+
+/// Complex: may need more time
+@verify(proof)
+fn complex_proof(arr: List<Int>) -> Int{>= 0}
+    requires len(arr) <= 100
+    requires forall x in arr => x >= 0
+    ensures result == arr.iter().sum()
+{
+    let mut sum = 0;
+    for x in arr {
+        invariant sum >= 0;
+        sum += x;
+    }
+    sum
+}
+
+// =============================================================================
+// SECTION 11: SMT Theory Selection
+// =============================================================================
+
+/// Pure LIA (most decidable)
+@verify(proof)
+fn pure_lia(x: Int, y: Int, z: Int) -> Bool
+    requires x + y == z
+    requires x > 0
+    requires y > 0
+    ensures result == true
+{
+    z > x && z > y
+}
+
+/// Needs NIA (less decidable)
+@verify(proof)
+fn needs_nia(x: Int{> 1}) -> Bool
+    ensures result == true
+{
+    x * x > x  // Requires non-linear reasoning
+}
+
+/// Needs arrays
+@verify(proof)
+fn needs_arrays<T: Clone>(arr: &List<T>, i: Int{>= 0}) -> Bool
+    requires i < len(arr)
+    ensures result == true
+{
+    let val = arr[i].clone();
+    let mut arr2 = arr.clone();
+    arr2[i] = val.clone();
+    arr2[i] == val
+}
+
+// =============================================================================
+// SECTION 12: Edge Cases and Limitations
+// =============================================================================
+
+/// Division by non-zero
+@verify(proof)
+fn safe_division(x: Int, y: Int{!= 0}) -> Int {
+    x / y  // SMT: y != 0 ensures no division by zero
+}
+
+/// Modulo properties
+@verify(proof)
+fn modulo_bounds(x: Int{>= 0}, m: Int{> 0}) -> Int{>= 0 && < m}
+    ensures result == x % m
+{
+    x % m  // SMT: 0 <= x % m < m when m > 0
+}
+
+/// Overflow handling (conceptual)
+@verify(proof)
+fn no_overflow(x: i32{>= 0 && < 1000}, y: i32{>= 0 && < 1000}) -> i32{>= 0}
+    ensures result == x + y
+{
+    x + y  // SMT: within i32 bounds
+}
+
+// =============================================================================
+// SECTION 13: Main Test Function
+// =============================================================================
+
+fn main() {
+    // Linear arithmetic
+    let la_result = linear_addition(10, 20);
+    assert(la_result == 30);
+
+    let lb_result = linear_subtraction_bounded(15, 3);
+    assert(lb_result == 12);
+
+    // Non-linear arithmetic
+    let sq = square_non_negative(-7);
+    assert(sq == 49);
+
+    let prod = product_positive(5, 8);
+    assert(prod == 40);
+
+    // Bitvector
+    let safe = byte_add_safe(100, 100);
+    assert(safe == true);
+
+    // Array theory
+    let mut arr = [1, 2, 3];
+    let val = array_read_write(&mut arr, 1, 42);
+    assert(val == 42);
+
+    // Combined
+    let mut arr2 = [10, 20, 30];
+    let combined = combined_lia_array(&mut arr2, 0, 5);
+    assert(combined == true);
+
+    // Quantified
+    let positives: List<Int> = [1, 2, 3, 4, 5];
+    let elem = forall_elimination(positives, 2);
+    assert(elem == 3);
+
+    // Tactics
+    let abs_neg = abs_correct(-5);
+    assert(abs_neg == 5);
+
+    let sum = sum_positive(10);
+    assert(sum == 55);
+
+    // Division
+    let div = safe_division(100, 7);
+    assert(div == 14);
+
+    let modulo = modulo_bounds(17, 5);
+    assert(modulo == 2);
+
+    print("All SMT integration tests passed!");
+}

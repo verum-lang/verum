@@ -1,0 +1,83 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, context, using
+
+// Function with single context
+fn with_context() using [Database] {
+    let conn = Database.connection();
+    conn.query("SELECT 1")
+}
+
+// Function with multiple contexts
+fn multi_context() using [Database, Logger, FileSystem] {
+    Logger.info("Starting operation");
+    let data = Database.fetch();
+    FileSystem.write("output.txt", data);
+}
+
+// Function with context and return type
+fn query_users() -> List<User> using [Database] {
+    Database.query("SELECT * FROM users")
+}
+
+// Function with context and parameters
+fn find_user(id: Int) -> Maybe<User> using [Database] {
+    Database.find_by_id(id)
+}
+
+// Function with context and generic type
+fn generic_with_context<T: Serialize>() using [Logger] {
+    Logger.debug("Processing");
+}
+
+// Async function with context
+async fn async_with_context() using [HttpClient] {
+    HttpClient.get("https://api.example.com").await
+}
+
+// Function providing context to inner scope
+// Syntax: provide Context = expr in { block } or provide Context = expr;
+fn provide_context() {
+    provide Database = create_connection() in {
+        inner_function();
+    }
+}
+
+// Function with nested context provision
+fn nested_provide() {
+    provide Logger = FileLogger.new("app.log") in {
+        provide Database = PostgreSQL.connect() in {
+            application_logic();
+        }
+    }
+}
+
+// Context-dependent function calling other context-dependent
+fn outer_context() using [Database] {
+    let users = query_users();
+    process_users(users);
+}
+
+// Function requiring context with constraint
+fn constrained_context<C: Connection>() using [C] {
+    let conn = C.get();
+    conn.execute("BEGIN");
+}
+
+// Method with context requirement
+// NOTE: Methods cannot be defined inside type definitions (records).
+// They must be in an `implement` block.
+type Service is { name: Text };
+
+implement Service {
+    fn process(&self) using [Logger, Metrics] {
+        Logger.info("Processing");
+        Metrics.increment("requests");
+    }
+}
+
+// Context with type parameters
+fn generic_context<T>() using [Cache<T>] {
+    Cache.get("key")
+}

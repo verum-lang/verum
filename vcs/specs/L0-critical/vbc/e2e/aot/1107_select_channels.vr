@@ -1,0 +1,126 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, select, channels, concurrency
+// @timeout: 15000
+// @expected-exit: 0
+// @description: Channel patterns for select-like behavior — readiness, multi-channel, close
+
+fn test_channel_readiness() -> Int {
+    // Pre-fill channel, then recv — should get value immediately
+    let ch = Channel.new(5);
+    ch.send(100);
+
+    let mut val = 0;
+    match ch.recv() {
+        Some(v) => { val = v; }
+        None => {}
+    }
+    if val != 100 { return 1; }
+    0
+}
+
+fn test_two_channel_collect() -> Int {
+    let a = Channel.new(5);
+    let b = Channel.new(5);
+
+    let pa = spawn { a.send(10); 0 };
+    let pb = spawn { b.send(20); 0 };
+
+    pa.await;
+    pb.await;
+
+    let mut sum = 0;
+    match a.recv() { Some(v) => { sum = sum + v; } None => {} }
+    match b.recv() { Some(v) => { sum = sum + v; } None => {} }
+
+    if sum != 30 { return 1; }
+    0
+}
+
+fn test_three_channel_race() -> Int {
+    let ch_a = Channel.new(5);
+    let ch_b = Channel.new(5);
+    let ch_c = Channel.new(5);
+
+    let ra = spawn { ch_a.send(1); 0 };
+    let rb = spawn { ch_b.send(2); 0 };
+    let rc = spawn { ch_c.send(3); 0 };
+
+    ra.await;
+    rb.await;
+    rc.await;
+
+    let mut got_a = false;
+    let mut got_b = false;
+    let mut got_c = false;
+
+    match ch_a.recv() { Some(v) => { if v == 1 { got_a = true; } } None => {} }
+    match ch_b.recv() { Some(v) => { if v == 2 { got_b = true; } } None => {} }
+    match ch_c.recv() { Some(v) => { if v == 3 { got_c = true; } } None => {} }
+
+    if !got_a { return 1; }
+    if !got_b { return 1; }
+    if !got_c { return 1; }
+    0
+}
+
+fn test_channel_close() -> Int {
+    let ch = Channel.new(5);
+    ch.send(99);
+    ch.close();
+
+    // Should still get the value sent before close
+    let mut val = 0;
+    match ch.recv() {
+        Some(v) => { val = v; }
+        None => {}
+    }
+    if val != 99 { return 1; }
+    0
+}
+
+fn test_channel_spawn_ordering() -> Int {
+    // Verify that spawn + await guarantees data availability
+    let results = Channel.new(10);
+
+    let t1 = spawn { results.send(10); 10 };
+    let t2 = spawn { results.send(20); 20 };
+    let t3 = spawn { results.send(30); 30 };
+    let t4 = spawn { results.send(40); 40 };
+
+    t1.await;
+    t2.await;
+    t3.await;
+    t4.await;
+
+    let mut total = 0;
+    let mut count = 0;
+    while count < 4 {
+        match results.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        count = count + 1;
+    }
+    // 10+20+30+40 = 100
+    if total != 100 { return 1; }
+    0
+}
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    if test_channel_readiness() == 0 { pass = pass + 1; } else { print("FAIL1"); }
+    if test_two_channel_collect() == 0 { pass = pass + 1; } else { print("FAIL2"); }
+    if test_three_channel_race() == 0 { pass = pass + 1; } else { print("FAIL3"); }
+    if test_channel_close() == 0 { pass = pass + 1; } else { print("FAIL4"); }
+    if test_channel_spawn_ordering() == 0 { pass = pass + 1; } else { print("FAIL5"); }
+
+    print(f"pass = {pass}/5");
+    if pass == 5 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

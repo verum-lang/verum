@@ -1,0 +1,106 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: string, text, processing, e2e
+// @description: Test string processing patterns - splitting, joining, searching
+
+fn is_digit(c: Text) -> Bool {
+    c == "0" || c == "1" || c == "2" || c == "3" || c == "4" ||
+    c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+}
+
+fn repeat_text(s: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while i < n {
+        result = result.concat(s);
+        i = i + 1;
+    }
+    result
+}
+
+fn count_char(s: Text, target: Text) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len() {
+        let ch = s.slice(i, i + 1);
+        if ch == target {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: String concatenation
+    let hello = "Hello".concat(", ").concat("World!");
+    if hello != "Hello, World!" {
+        print(f"FAIL 1: hello = {hello}");
+        f = f + 1;
+    } else {
+        print("  concat: OK");
+    }
+
+    // Test 2: repeat
+    let stars = repeat_text("*", 5);
+    if stars != "*****" {
+        print(f"FAIL 2: stars = {stars}");
+        f = f + 1;
+    } else {
+        print("  repeat: OK");
+    }
+
+    // Test 3: count_char
+    let sentence = "hello world";
+    let l_count = count_char(sentence, "l");
+    if l_count != 3 {
+        print(f"FAIL 3: l_count = {l_count}");
+        f = f + 1;
+    } else {
+        print("  count_char: OK");
+    }
+
+    // Test 4: starts_with / ends_with
+    let path = "/home/user/file.txt";
+    if !path.starts_with("/home") {
+        print("FAIL 4: starts_with");
+        f = f + 1;
+    } else if !path.ends_with(".txt") {
+        print("FAIL 4: ends_with");
+        f = f + 1;
+    } else {
+        print("  starts_ends: OK");
+    }
+
+    // Test 5: to_uppercase / to_lowercase
+    let upper = "hello".to_uppercase();
+    let lower = "WORLD".to_lowercase();
+    if upper != "HELLO" {
+        print(f"FAIL 5: upper = {upper}");
+        f = f + 1;
+    } else if lower != "world" {
+        print(f"FAIL 5: lower = {lower}");
+        f = f + 1;
+    } else {
+        print("  case: OK");
+    }
+
+    // Test 6: f-string with expressions
+    let x = 42;
+    let y = 7;
+    let msg = f"{x} + {y} = {x + y}";
+    if !msg.contains("42 + 7 = 49") {
+        print(f"FAIL 6: msg = {msg}");
+        f = f + 1;
+    } else {
+        print("  fstring: OK");
+    }
+
+    if f == 0 {
+        print("All string processing tests passed");
+    }
+    f
+}

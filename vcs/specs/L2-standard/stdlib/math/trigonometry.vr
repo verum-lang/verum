@@ -1,0 +1,495 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: stdlib, math, trigonometry
+
+/// Comprehensive test suite for trigonometric functions.
+/// Tests sin, cos, tan and their inverses, hyperbolic functions.
+
+fn main() {
+    test_sin();
+    test_cos();
+    test_tan();
+    test_sin_cos();
+    test_asin();
+    test_acos();
+    test_atan();
+    test_atan2();
+    test_sinh();
+    test_cosh();
+    test_tanh();
+    test_asinh();
+    test_acosh();
+    test_atanh();
+    test_angle_conversion();
+    test_trigonometric_identities();
+}
+
+const EPSILON: Float = 1e-10;
+const PI: Float = std.f64.consts.PI;
+
+/// Test sine function
+fn test_sin() {
+    // Special values
+    assert(0.0.sin().abs() < EPSILON);
+    assert((PI.sin()).abs() < EPSILON);
+    assert(((2.0 * PI).sin()).abs() < EPSILON);
+
+    // Quarter rotations
+    assert(((PI / 2.0).sin() - 1.0).abs() < EPSILON);
+    assert(((3.0 * PI / 2.0).sin() + 1.0).abs() < EPSILON);
+
+    // Common angles
+    assert(((PI / 6.0).sin() - 0.5).abs() < EPSILON);  // 30 degrees
+    assert(((PI / 4.0).sin() - std.f64.consts.FRAC_1_SQRT_2).abs() < EPSILON);  // 45 degrees
+    assert(((PI / 3.0).sin() - 3.0.sqrt() / 2.0).abs() < EPSILON);  // 60 degrees
+
+    // Negative angles
+    assert(((-PI / 2.0).sin() + 1.0).abs() < EPSILON);
+    assert(((-PI / 6.0).sin() + 0.5).abs() < EPSILON);
+
+    // Symmetry: sin(-x) = -sin(x)
+    for x in [0.1, 0.5, 1.0, 2.0, 3.0] {
+        assert(((-x).sin() + x.sin()).abs() < EPSILON);
+    }
+
+    // Range: -1 <= sin(x) <= 1
+    for x in [0.0, 1.0, 5.0, 10.0, 100.0] {
+        assert(x.sin() >= -1.0);
+        assert(x.sin() <= 1.0);
+    }
+
+    // Large values
+    let large: Float = 1e10;
+    assert(large.sin().abs() <= 1.0);
+
+    // NaN and infinity
+    assert(Float.nan.sin().is_nan());
+    assert(Float.infinity.sin().is_nan());
+    assert(Float.neg_infinity.sin().is_nan());
+}
+
+/// Test cosine function
+fn test_cos() {
+    // Special values
+    assert((0.0.cos() - 1.0).abs() < EPSILON);
+    assert((PI.cos() + 1.0).abs() < EPSILON);
+    assert(((2.0 * PI).cos() - 1.0).abs() < EPSILON);
+
+    // Quarter rotations
+    assert((PI / 2.0).cos().abs() < EPSILON);
+    assert((3.0 * PI / 2.0).cos().abs() < EPSILON);
+
+    // Common angles
+    assert(((PI / 6.0).cos() - 3.0.sqrt() / 2.0).abs() < EPSILON);  // 30 degrees
+    assert(((PI / 4.0).cos() - std.f64.consts.FRAC_1_SQRT_2).abs() < EPSILON);  // 45 degrees
+    assert(((PI / 3.0).cos() - 0.5).abs() < EPSILON);  // 60 degrees
+
+    // Negative angles: cos(-x) = cos(x)
+    for x in [0.1, 0.5, 1.0, 2.0, 3.0] {
+        assert(((-x).cos() - x.cos()).abs() < EPSILON);
+    }
+
+    // Range: -1 <= cos(x) <= 1
+    for x in [0.0, 1.0, 5.0, 10.0, 100.0] {
+        assert(x.cos() >= -1.0);
+        assert(x.cos() <= 1.0);
+    }
+
+    // Relationship with sin
+    for x in [0.0, 0.5, 1.0, PI / 4.0] {
+        assert((x.cos() - (PI / 2.0 - x).sin()).abs() < EPSILON);
+    }
+}
+
+/// Test tangent function
+fn test_tan() {
+    // Special values
+    assert(0.0.tan().abs() < EPSILON);
+    assert(PI.tan().abs() < EPSILON);
+
+    // Common angles
+    assert(((PI / 4.0).tan() - 1.0).abs() < EPSILON);  // 45 degrees
+    assert(((PI / 6.0).tan() - 1.0 / 3.0.sqrt()).abs() < EPSILON);  // 30 degrees
+    assert(((PI / 3.0).tan() - 3.0.sqrt()).abs() < EPSILON);  // 60 degrees
+
+    // Negative angles: tan(-x) = -tan(x)
+    for x in [0.1, 0.5, 1.0] {
+        assert(((-x).tan() + x.tan()).abs() < EPSILON);
+    }
+
+    // Near asymptotes
+    let near_asymptote: Float = PI / 2.0 - 0.001;
+    assert(near_asymptote.tan() > 100.0);
+
+    // Relationship: tan(x) = sin(x) / cos(x)
+    for x in [0.1, 0.5, 1.0, 1.2] {
+        assert((x.tan() - x.sin() / x.cos()).abs() < EPSILON);
+    }
+
+    // Period: tan(x + pi) = tan(x)
+    for x in [0.1, 0.5, 1.0] {
+        assert((x.tan() - (x + PI).tan()).abs() < EPSILON);
+    }
+}
+
+/// Test combined sin_cos function
+fn test_sin_cos() {
+    // sin_cos returns both values (more efficient)
+    for x in [0.0, PI / 6.0, PI / 4.0, PI / 3.0, PI / 2.0, PI] {
+        let (s, c) = x.sin_cos();
+        assert((s - x.sin()).abs() < EPSILON);
+        assert((c - x.cos()).abs() < EPSILON);
+    }
+
+    // Pythagorean identity
+    for x in [0.0, 0.5, 1.0, 2.0, 5.0, -1.0, -3.0] {
+        let (s, c) = x.sin_cos();
+        assert((s * s + c * c - 1.0).abs() < EPSILON);
+    }
+}
+
+/// Test arcsine function
+fn test_asin() {
+    // Special values
+    assert(0.0.asin().abs() < EPSILON);
+    assert((1.0.asin() - PI / 2.0).abs() < EPSILON);
+    assert(((-1.0).asin() + PI / 2.0).abs() < EPSILON);
+
+    // Common values
+    assert((0.5.asin() - PI / 6.0).abs() < EPSILON);
+
+    // Range: asin returns [-pi/2, pi/2]
+    for x in [-1.0, -0.5, 0.0, 0.5, 1.0] {
+        let result = x.asin();
+        assert(result >= -PI / 2.0);
+        assert(result <= PI / 2.0);
+    }
+
+    // Inverse relationship
+    for x in [-0.9, -0.5, 0.0, 0.5, 0.9] {
+        assert((x.asin().sin() - x).abs() < EPSILON);
+    }
+
+    // Domain error
+    assert(2.0.asin().is_nan());
+    assert((-2.0).asin().is_nan());
+}
+
+/// Test arccosine function
+fn test_acos() {
+    // Special values
+    assert((1.0.acos()).abs() < EPSILON);
+    assert((0.0.acos() - PI / 2.0).abs() < EPSILON);
+    assert(((-1.0).acos() - PI).abs() < EPSILON);
+
+    // Common values
+    assert((0.5.acos() - PI / 3.0).abs() < EPSILON);
+
+    // Range: acos returns [0, pi]
+    for x in [-1.0, -0.5, 0.0, 0.5, 1.0] {
+        let result = x.acos();
+        assert(result >= 0.0);
+        assert(result <= PI);
+    }
+
+    // Inverse relationship
+    for x in [-0.9, -0.5, 0.0, 0.5, 0.9] {
+        assert((x.acos().cos() - x).abs() < EPSILON);
+    }
+
+    // Identity: asin(x) + acos(x) = pi/2
+    for x in [-0.9, -0.5, 0.0, 0.5, 0.9] {
+        assert((x.asin() + x.acos() - PI / 2.0).abs() < EPSILON);
+    }
+
+    // Domain error
+    assert(2.0.acos().is_nan());
+    assert((-2.0).acos().is_nan());
+}
+
+/// Test arctangent function
+fn test_atan() {
+    // Special values
+    assert(0.0.atan().abs() < EPSILON);
+    assert((1.0.atan() - PI / 4.0).abs() < EPSILON);
+    assert(((-1.0).atan() + PI / 4.0).abs() < EPSILON);
+
+    // Range: atan returns (-pi/2, pi/2)
+    for x in [-100.0, -1.0, 0.0, 1.0, 100.0] {
+        let result = x.atan();
+        assert(result > -PI / 2.0);
+        assert(result < PI / 2.0);
+    }
+
+    // Limits
+    assert((1e10f64.atan() - PI / 2.0).abs() < 1e-9);
+    assert(((-1e10f64).atan() + PI / 2.0).abs() < 1e-9);
+
+    // Inverse relationship
+    for x in [-10.0, -1.0, 0.0, 1.0, 10.0] {
+        assert((x.atan().tan() - x).abs() < EPSILON);
+    }
+
+    // Odd function: atan(-x) = -atan(x)
+    for x in [0.1, 1.0, 10.0] {
+        assert(((-x).atan() + x.atan()).abs() < EPSILON);
+    }
+}
+
+/// Test two-argument arctangent
+fn test_atan2() {
+    // Quadrant I
+    assert((1.0.atan2(1.0) - PI / 4.0).abs() < EPSILON);
+    assert((1.0.atan2(0.0) - PI / 2.0).abs() < EPSILON);
+
+    // Quadrant II
+    assert((1.0.atan2(-1.0) - 3.0 * PI / 4.0).abs() < EPSILON);
+    assert((0.0.atan2(-1.0) - PI).abs() < EPSILON);
+
+    // Quadrant III
+    assert(((-1.0).atan2(-1.0) + 3.0 * PI / 4.0).abs() < EPSILON);
+    assert(((-1.0).atan2(0.0) + PI / 2.0).abs() < EPSILON);
+
+    // Quadrant IV
+    assert(((-1.0).atan2(1.0) + PI / 4.0).abs() < EPSILON);
+
+    // Axes
+    assert(0.0.atan2(1.0).abs() < EPSILON);  // Positive x-axis
+    assert((0.0.atan2(-1.0) - PI).abs() < EPSILON);  // Negative x-axis
+
+    // Zero handling
+    assert(0.0.atan2(0.0).abs() < EPSILON);  // Usually 0
+
+    // Convert Cartesian to polar angle
+    fn angle(x: Float, y: Float) -> Float {
+        y.atan2(x)
+    }
+
+    assert((angle(1.0, 0.0)).abs() < EPSILON);
+    assert((angle(0.0, 1.0) - PI / 2.0).abs() < EPSILON);
+    assert((angle(-1.0, 0.0) - PI).abs() < EPSILON);
+    assert((angle(0.0, -1.0) + PI / 2.0).abs() < EPSILON);
+}
+
+/// Test hyperbolic sine
+fn test_sinh() {
+    // Special values
+    assert(0.0.sinh().abs() < EPSILON);
+
+    // Definition: sinh(x) = (e^x - e^(-x)) / 2
+    for x in [-2.0, -1.0, 0.5, 1.0, 2.0] {
+        let expected = (x.exp() - (-x).exp()) / 2.0;
+        assert((x.sinh() - expected).abs() < EPSILON);
+    }
+
+    // Odd function: sinh(-x) = -sinh(x)
+    for x in [0.5, 1.0, 2.0] {
+        assert(((-x).sinh() + x.sinh()).abs() < EPSILON);
+    }
+
+    // Range: unbounded
+    assert(10.0.sinh() > 1000.0);
+    assert((-10.0).sinh() < -1000.0);
+}
+
+/// Test hyperbolic cosine
+fn test_cosh() {
+    // Special value
+    assert((0.0.cosh() - 1.0).abs() < EPSILON);
+
+    // Definition: cosh(x) = (e^x + e^(-x)) / 2
+    for x in [-2.0, -1.0, 0.5, 1.0, 2.0] {
+        let expected = (x.exp() + (-x).exp()) / 2.0;
+        assert((x.cosh() - expected).abs() < EPSILON);
+    }
+
+    // Even function: cosh(-x) = cosh(x)
+    for x in [0.5, 1.0, 2.0] {
+        assert(((-x).cosh() - x.cosh()).abs() < EPSILON);
+    }
+
+    // Range: cosh(x) >= 1
+    for x in [-10.0, -1.0, 0.0, 1.0, 10.0] {
+        assert(x.cosh() >= 1.0);
+    }
+
+    // Identity: cosh^2(x) - sinh^2(x) = 1
+    for x in [-2.0, 0.0, 1.0, 2.0] {
+        let c = x.cosh();
+        let s = x.sinh();
+        assert((c * c - s * s - 1.0).abs() < EPSILON);
+    }
+}
+
+/// Test hyperbolic tangent
+fn test_tanh() {
+    // Special values
+    assert(0.0.tanh().abs() < EPSILON);
+
+    // Definition: tanh(x) = sinh(x) / cosh(x)
+    for x in [-2.0, -1.0, 0.5, 1.0, 2.0] {
+        let expected = x.sinh() / x.cosh();
+        assert((x.tanh() - expected).abs() < EPSILON);
+    }
+
+    // Odd function: tanh(-x) = -tanh(x)
+    for x in [0.5, 1.0, 2.0] {
+        assert(((-x).tanh() + x.tanh()).abs() < EPSILON);
+    }
+
+    // Range: -1 < tanh(x) < 1
+    for x in [-100.0, -1.0, 0.0, 1.0, 100.0] {
+        assert(x.tanh() > -1.0);
+        assert(x.tanh() < 1.0);
+    }
+
+    // Limits
+    assert((100.0.tanh() - 1.0).abs() < EPSILON);
+    assert(((-100.0).tanh() + 1.0).abs() < EPSILON);
+}
+
+/// Test inverse hyperbolic sine
+fn test_asinh() {
+    // Special value
+    assert(0.0.asinh().abs() < EPSILON);
+
+    // Inverse relationship
+    for x in [-10.0, -1.0, 0.0, 1.0, 10.0] {
+        assert((x.asinh().sinh() - x).abs() < EPSILON);
+    }
+
+    // Odd function: asinh(-x) = -asinh(x)
+    for x in [0.5, 1.0, 2.0] {
+        assert(((-x).asinh() + x.asinh()).abs() < EPSILON);
+    }
+
+    // Domain: all real numbers
+    assert(!(-1e10f64).asinh().is_nan());
+    assert(!1e10f64.asinh().is_nan());
+}
+
+/// Test inverse hyperbolic cosine
+fn test_acosh() {
+    // Special value
+    assert(1.0.acosh().abs() < EPSILON);
+
+    // Inverse relationship
+    for x in [1.0, 2.0, 10.0] {
+        assert((x.acosh().cosh() - x).abs() < EPSILON);
+    }
+
+    // Range: acosh(x) >= 0 for x >= 1
+    for x in [1.0, 2.0, 10.0] {
+        assert(x.acosh() >= 0.0);
+    }
+
+    // Domain error: x < 1
+    assert(0.5.acosh().is_nan());
+    assert(0.0.acosh().is_nan());
+    assert((-1.0).acosh().is_nan());
+}
+
+/// Test inverse hyperbolic tangent
+fn test_atanh() {
+    // Special value
+    assert(0.0.atanh().abs() < EPSILON);
+
+    // Inverse relationship
+    for x in [-0.9, -0.5, 0.0, 0.5, 0.9] {
+        assert((x.atanh().tanh() - x).abs() < EPSILON);
+    }
+
+    // Odd function: atanh(-x) = -atanh(x)
+    for x in [0.1, 0.5, 0.9] {
+        assert(((-x).atanh() + x.atanh()).abs() < EPSILON);
+    }
+
+    // Domain: -1 < x < 1
+    assert(1.0.atanh().is_infinite());
+    assert((-1.0).atanh().is_infinite());
+    assert(2.0.atanh().is_nan());
+    assert((-2.0).atanh().is_nan());
+}
+
+/// Test angle conversion
+fn test_angle_conversion() {
+    // Degrees to radians
+    assert((180.0f64.to_radians() - PI).abs() < EPSILON);
+    assert((90.0f64.to_radians() - PI / 2.0).abs() < EPSILON);
+    assert((45.0f64.to_radians() - PI / 4.0).abs() < EPSILON);
+    assert((0.0f64.to_radians()).abs() < EPSILON);
+    assert((360.0f64.to_radians() - 2.0 * PI).abs() < EPSILON);
+
+    // Radians to degrees
+    assert((PI.to_degrees() - 180.0).abs() < EPSILON);
+    assert(((PI / 2.0).to_degrees() - 90.0).abs() < EPSILON);
+    assert(((PI / 4.0).to_degrees() - 45.0).abs() < EPSILON);
+    assert((0.0f64.to_degrees()).abs() < EPSILON);
+
+    // Round-trip
+    for deg in [0.0, 30.0, 45.0, 60.0, 90.0, 180.0, 270.0, 360.0] {
+        let rad = deg.to_radians();
+        assert((rad.to_degrees() - deg).abs() < EPSILON);
+    }
+
+    // Negative angles
+    assert(((-180.0f64).to_radians() + PI).abs() < EPSILON);
+    assert(((-PI).to_degrees() + 180.0).abs() < EPSILON);
+}
+
+/// Test trigonometric identities
+fn test_trigonometric_identities() {
+    for x in [0.0, 0.5, 1.0, PI / 4.0, PI / 3.0, 1.5, 2.0] {
+        // Pythagorean: sin^2 + cos^2 = 1
+        let s = x.sin();
+        let c = x.cos();
+        assert((s * s + c * c - 1.0).abs() < EPSILON);
+
+        // tan = sin / cos (where cos != 0)
+        if c.abs() > EPSILON {
+            assert((x.tan() - s / c).abs() < EPSILON);
+        }
+
+        // Double angle formulas
+        let s2 = (2.0 * x).sin();
+        let c2 = (2.0 * x).cos();
+        assert((s2 - 2.0 * s * c).abs() < EPSILON);
+        assert((c2 - (c * c - s * s)).abs() < EPSILON);
+
+        // Half angle formulas (for x in appropriate range)
+        if x > 0.0 && x < PI {
+            let half = x / 2.0;
+            let s_half = half.sin();
+            let c_half = half.cos();
+            // sin^2(x/2) = (1 - cos(x)) / 2
+            assert((s_half * s_half - (1.0 - c) / 2.0).abs() < EPSILON);
+            // cos^2(x/2) = (1 + cos(x)) / 2
+            assert((c_half * c_half - (1.0 + c) / 2.0).abs() < EPSILON);
+        }
+    }
+
+    // Sum formulas
+    let a: Float = 0.5;
+    let b: Float = 0.7;
+    let sa = a.sin();
+    let ca = a.cos();
+    let sb = b.sin();
+    let cb = b.cos();
+
+    // sin(a + b) = sin(a)cos(b) + cos(a)sin(b)
+    assert(((a + b).sin() - (sa * cb + ca * sb)).abs() < EPSILON);
+
+    // cos(a + b) = cos(a)cos(b) - sin(a)sin(b)
+    assert(((a + b).cos() - (ca * cb - sa * sb)).abs() < EPSILON);
+
+    // sin(a - b) = sin(a)cos(b) - cos(a)sin(b)
+    assert(((a - b).sin() - (sa * cb - ca * sb)).abs() < EPSILON);
+
+    // cos(a - b) = cos(a)cos(b) + sin(a)sin(b)
+    assert(((a - b).cos() - (ca * cb + sa * sb)).abs() < EPSILON);
+
+    // Euler's formula (as a sanity check)
+    // e^(ix) = cos(x) + i*sin(x)
+    // |e^(ix)| = 1, which means cos^2 + sin^2 = 1
+}

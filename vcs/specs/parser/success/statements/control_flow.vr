@@ -1,0 +1,624 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for return/break/continue statements
+
+// =============================================================================
+// Grammar Reference:
+// return_expr = 'return' , [ expression ] ;
+// break_expr = 'break' , [ expression ] ;
+// continue_expr = 'continue' ;
+// =============================================================================
+
+// =============================================================================
+// RETURN STATEMENTS
+// =============================================================================
+
+fn test_basic_return() {
+    // Empty return (returns unit)
+    return;
+}
+
+fn test_return_value() -> Int {
+    // Return with literal value
+    return 42;
+}
+
+fn test_return_expression() -> Int {
+    // Return with arithmetic expression
+    return 1 + 2 + 3;
+}
+
+fn test_return_variable() -> Int {
+    let x = 42;
+    // Return variable
+    return x;
+}
+
+fn test_return_function_call() -> Int {
+    // Return function call result
+    return compute();
+}
+
+fn test_return_method_call() -> Int {
+    // Return method call result
+    return obj.get_value();
+}
+
+fn test_return_chained_calls() -> Text {
+    // Return chained method calls
+    return text.trim().to_lowercase().replace("a", "b");
+}
+
+fn test_return_block_expression() -> Int {
+    // Return block expression
+    return {
+        let a = 1;
+        let b = 2;
+        a + b
+    };
+}
+
+fn test_return_if_expression() -> Int {
+    // Return if expression
+    return if condition { 1 } else { 2 };
+}
+
+fn test_return_match_expression() -> Text {
+    // Return match expression
+    return match value {
+        0 => "zero",
+        1 => "one",
+        _ => "other"
+    };
+}
+
+fn test_return_constructor() -> Point {
+    // Return record constructor
+    return Point { x: 10, y: 20 };
+}
+
+fn test_return_tuple() -> (Int, Int) {
+    // Return tuple
+    return (1, 2);
+}
+
+fn test_return_array() -> [Int; 3] {
+    // Return array
+    return [1, 2, 3];
+}
+
+fn test_return_closure_result() -> Int {
+    let f = |x| x * 2;
+    // Return closure call result
+    return f(21);
+}
+
+fn test_return_pipeline() -> Int {
+    // Return pipeline expression
+    return data |> transform |> finalize;
+}
+
+fn test_return_try_expression() -> Result<Int, Error> {
+    // Return try expression
+    return Ok(parse()?);
+}
+
+fn test_return_option() -> Maybe<Int> {
+    // Return Some
+    return Some(42);
+
+    // Or None
+    return None;
+}
+
+fn test_return_result() -> Result<Int, Text> {
+    // Return Ok
+    return Ok(42);
+
+    // Or Err
+    return Err("error message");
+}
+
+fn test_early_return() -> Int {
+    if condition {
+        return 0;  // Early return
+    }
+
+    let x = compute();
+    if x < 0 {
+        return -1;  // Another early return
+    }
+
+    return x;  // Normal return
+}
+
+fn test_return_in_nested_blocks() -> Int {
+    {
+        {
+            {
+                return 42;  // Return from deeply nested block
+            }
+        }
+    }
+}
+
+fn test_return_in_if() -> Int {
+    if x > 0 {
+        return 1;
+    } else if x < 0 {
+        return -1;
+    } else {
+        return 0;
+    }
+}
+
+fn test_return_in_match() -> Text {
+    match opt {
+        Some(x) => {
+            if x > 0 {
+                return "positive";
+            }
+            return "non-positive";
+        },
+        None => {
+            return "none";
+        }
+    }
+}
+
+fn test_return_after_let_else() -> Int {
+    let Some(x) = opt else {
+        return 0;  // Return in else block
+    };
+    return x;
+}
+
+async fn test_async_return() -> Int {
+    // Return in async function
+    return compute_async().await;
+}
+
+// =============================================================================
+// BREAK STATEMENTS
+// =============================================================================
+
+fn test_basic_break() {
+    // Break without value
+    loop {
+        break;
+    }
+}
+
+fn test_break_with_value() {
+    // Break with value
+    let result = loop {
+        if found {
+            break 42;
+        }
+    };
+}
+
+fn test_break_with_expression() {
+    // Break with complex expression
+    let result = loop {
+        break compute() + offset;
+    };
+}
+
+fn test_break_with_block() {
+    // Break with block expression
+    let result = loop {
+        break {
+            let a = compute_a();
+            let b = compute_b();
+            a + b
+        };
+    };
+}
+
+fn test_break_with_if() {
+    // Break with if expression
+    let result = loop {
+        break if condition { value_a } else { value_b };
+    };
+}
+
+fn test_break_with_match() {
+    // Break with match expression
+    let result = loop {
+        break match opt {
+            Some(x) => x,
+            None => default()
+        };
+    };
+}
+
+fn test_break_with_constructor() {
+    // Break with record constructor
+    let point = loop {
+        break Point { x: 10, y: 20 };
+    };
+}
+
+fn test_break_with_tuple() {
+    // Break with tuple
+    let pair = loop {
+        break (1, 2);
+    };
+}
+
+fn test_conditional_break() {
+    // Break in conditional
+    loop {
+        if done {
+            break;
+        }
+        do_work();
+    }
+}
+
+fn test_break_in_nested_if() {
+    loop {
+        if condition1 {
+            if condition2 {
+                break;
+            }
+        }
+    }
+}
+
+fn test_break_with_conditional_value() {
+    let result = loop {
+        if found {
+            break value;
+        }
+        if timeout {
+            break default();
+        }
+    };
+}
+
+fn test_break_in_while() {
+    // Break in while loop
+    while true {
+        if done {
+            break;
+        }
+    }
+}
+
+fn test_break_in_for() {
+    // Break in for loop
+    for item in items {
+        if is_target(item) {
+            break;
+        }
+    }
+}
+
+fn test_break_in_nested_loop() {
+    // Break only breaks innermost loop
+    loop {
+        loop {
+            break;  // Breaks inner loop
+        }
+        // Outer loop continues
+        break;  // Breaks outer loop
+    }
+}
+
+fn test_break_in_match_arm() {
+    loop {
+        match value {
+            0 => break,
+            1 => continue,
+            _ => process(value)
+        }
+    }
+}
+
+fn test_break_after_let_else() {
+    loop {
+        let Some(x) = get() else {
+            break;
+        };
+        process(x);
+    }
+}
+
+// =============================================================================
+// CONTINUE STATEMENTS
+// =============================================================================
+
+fn test_basic_continue() {
+    // Continue in loop
+    loop {
+        if skip {
+            continue;
+        }
+        process();
+    }
+}
+
+fn test_continue_in_while() {
+    // Continue in while loop
+    while condition {
+        if skip_this {
+            continue;
+        }
+        do_work();
+    }
+}
+
+fn test_continue_in_for() {
+    // Continue in for loop
+    for item in items {
+        if should_skip(item) {
+            continue;
+        }
+        process(item);
+    }
+}
+
+fn test_continue_in_nested_if() {
+    for item in items {
+        if condition1 {
+            if condition2 {
+                continue;
+            }
+        }
+        process(item);
+    }
+}
+
+fn test_continue_in_match_arm() {
+    for item in items {
+        match item.kind {
+            Kind.Skip => continue,
+            Kind.Process => process(item),
+            _ => default_handle(item)
+        }
+    }
+}
+
+fn test_continue_after_let_else() {
+    for item in items {
+        let Some(value) = item.value else {
+            continue;
+        };
+        process(value);
+    }
+}
+
+fn test_continue_in_nested_loop() {
+    // Continue only affects innermost loop
+    for i in 0..10 {
+        for j in 0..10 {
+            if skip_condition(i, j) {
+                continue;  // Continues inner for loop
+            }
+            process(i, j);
+        }
+    }
+}
+
+fn test_multiple_continues() {
+    for item in items {
+        if filter_a(item) {
+            continue;
+        }
+        if filter_b(item) {
+            continue;
+        }
+        if filter_c(item) {
+            continue;
+        }
+        process(item);
+    }
+}
+
+// =============================================================================
+// COMBINED CONTROL FLOW
+// =============================================================================
+
+fn test_mixed_control_flow() -> Int {
+    for item in items {
+        if should_skip(item) {
+            continue;
+        }
+
+        match process(item) {
+            Ok(val) => {
+                if val > threshold {
+                    return val;
+                }
+            },
+            Err(_) => {}
+        }
+    }
+    return default();
+}
+
+fn test_control_flow_in_loop_with_return() -> Int {
+    loop {
+        let value = try_get();
+        if value > 100 {
+            return value;  // Return from function
+        }
+        if value < 0 {
+            break;  // Exit loop
+        }
+        // Loop continues
+    }
+    return 0;
+}
+
+fn test_control_flow_in_nested_loops() {
+    for i in 0..10 {
+        loop {
+            if some_condition {
+                break;  // Exit inner loop
+            }
+            if other_condition {
+                continue;  // Continue inner loop
+            }
+
+            for j in 0..10 {
+                if skip_j(j) {
+                    continue;  // Continue innermost for
+                }
+                if found(i, j) {
+                    break;  // Exit innermost for
+                }
+            }
+        }
+    }
+}
+
+fn test_control_flow_in_async() -> Int {
+    loop {
+        let result = fetch().await;
+        if result.done {
+            break;
+        }
+        if result.error {
+            continue;
+        }
+        process(result);
+    }
+}
+
+fn test_control_flow_with_defer() {
+    loop {
+        let resource = acquire();
+        defer resource.release();
+
+        if should_exit {
+            break;  // Defer runs before break
+        }
+
+        if should_skip {
+            continue;  // Defer runs before continue
+        }
+
+        process(resource);
+    }
+}
+
+fn test_control_flow_patterns() {
+    // Pattern: find first matching item
+    for item in items {
+        if matches(item) {
+            process(item);
+            break;
+        }
+    }
+
+    // Pattern: skip invalid items
+    for item in items {
+        let Some(valid) = validate(item) else {
+            continue;
+        };
+        process(valid);
+    }
+
+    // Pattern: process until error
+    for item in items {
+        match process(item) {
+            Ok(_) => {},
+            Err(_) => break
+        }
+    }
+}
+
+fn test_return_vs_break() -> Int {
+    // Return exits function
+    let value = loop {
+        if exit_function {
+            return 0;  // Exits entire function
+        }
+        if exit_loop {
+            break 42;  // Only exits loop
+        }
+    };
+    return value;  // This is reached if we broke from loop
+}
+
+// =============================================================================
+// THROW AS CONTROL FLOW (in throws functions)
+// =============================================================================
+
+fn test_throw_basic() throws(Error) {
+    // Basic throw
+    throw Error.new("something went wrong");
+}
+
+fn test_throw_with_variant() throws(ParseError) {
+    throw ParseError.InvalidSyntax;
+}
+
+fn test_throw_with_data() throws(ValidationError) {
+    throw ValidationError { field: "name", message: "required" };
+}
+
+fn test_throw_in_conditional() throws(Error) {
+    if !valid {
+        throw Error.Validation("invalid input");
+    }
+}
+
+fn test_throw_in_match() throws(Error) {
+    match result {
+        Ok(v) => v,
+        Err(e) => throw e
+    }
+}
+
+fn test_throw_in_let_else() throws(Error) {
+    let Some(x) = opt else {
+        throw Error.NotFound;
+    };
+}
+
+fn test_throw_after_try() throws(Error) {
+    let result = try_operation()?;  // Propagates error
+    if !validate(result) {
+        throw Error.Invalid;  // Throws new error
+    }
+}
+
+// =============================================================================
+// YIELD AS CONTROL FLOW (in generators)
+// =============================================================================
+
+fn* test_yield_basic() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+fn* test_yield_in_loop() -> Int {
+    for i in 0..10 {
+        yield i;
+    }
+}
+
+fn* test_yield_with_control_flow() -> Int {
+    for i in 0..100 {
+        if i % 2 == 0 {
+            continue;  // Skip odd numbers
+        }
+        if i > 50 {
+            break;  // Stop after 50
+        }
+        yield i;
+    }
+}
+
+async fn* test_async_yield() -> Int {
+    for i in 0..10 {
+        let value = compute(i).await;
+        yield value;
+    }
+}

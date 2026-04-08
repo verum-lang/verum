@@ -1,0 +1,129 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, sorting, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for sorting algorithms using fixed-size struct arrays
+
+type Arr5 is { a: Int, b: Int, c: Int, d: Int, e: Int };
+
+fn arr5_get(arr: Arr5, i: Int) -> Int {
+    if i == 0 { arr.a } else if i == 1 { arr.b }
+    else if i == 2 { arr.c } else if i == 3 { arr.d }
+    else { arr.e }
+}
+
+fn arr5_set(arr: Arr5, i: Int, val: Int) -> Arr5 {
+    if i == 0 { Arr5 { a: val, b: arr.b, c: arr.c, d: arr.d, e: arr.e } }
+    else if i == 1 { Arr5 { a: arr.a, b: val, c: arr.c, d: arr.d, e: arr.e } }
+    else if i == 2 { Arr5 { a: arr.a, b: arr.b, c: val, d: arr.d, e: arr.e } }
+    else if i == 3 { Arr5 { a: arr.a, b: arr.b, c: arr.c, d: val, e: arr.e } }
+    else { Arr5 { a: arr.a, b: arr.b, c: arr.c, d: arr.d, e: val } }
+}
+
+fn arr5_swap(arr: Arr5, i: Int, j: Int) -> Arr5 {
+    let vi = arr5_get(arr, i);
+    let vj = arr5_get(arr, j);
+    let tmp = arr5_set(arr, i, vj);
+    arr5_set(tmp, j, vi)
+}
+
+fn is_sorted(arr: Arr5, n: Int) -> Bool {
+    let mut i = 0;
+    while i < n - 1 {
+        if arr5_get(arr, i) > arr5_get(arr, i + 1) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn bubble_sort(arr: Arr5, n: Int) -> Arr5 {
+    let mut result = arr;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if arr5_get(result, j) > arr5_get(result, j + 1) {
+                result = arr5_swap(result, j, j + 1);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn selection_sort(arr: Arr5, n: Int) -> Arr5 {
+    let mut result = arr;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if arr5_get(result, j) < arr5_get(result, min_idx) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        if min_idx != i {
+            result = arr5_swap(result, i, min_idx);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn insertion_sort(arr: Arr5, n: Int) -> Arr5 {
+    let mut result = arr;
+    let mut i = 1;
+    while i < n {
+        let key = arr5_get(result, i);
+        let mut j = i - 1;
+        while j >= 0 && arr5_get(result, j) > key {
+            result = arr5_set(result, j + 1, arr5_get(result, j));
+            j = j - 1;
+        }
+        result = arr5_set(result, j + 1, key);
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Bubble sort
+    let a1 = Arr5 { a: 5, b: 3, c: 1, d: 4, e: 2 };
+    let s1 = bubble_sort(a1, 5);
+    assert_eq(is_sorted(s1, 5), true);
+    assert_eq(arr5_get(s1, 0), 1);
+    assert_eq(arr5_get(s1, 4), 5);
+
+    // Selection sort
+    let a2 = Arr5 { a: 42, b: 17, c: 93, d: 5, e: 28 };
+    let s2 = selection_sort(a2, 5);
+    assert_eq(is_sorted(s2, 5), true);
+    assert_eq(arr5_get(s2, 0), 5);
+    assert_eq(arr5_get(s2, 4), 93);
+
+    // Insertion sort (reverse order)
+    let a3 = Arr5 { a: 5, b: 4, c: 3, d: 2, e: 1 };
+    let s3 = insertion_sort(a3, 5);
+    assert_eq(is_sorted(s3, 5), true);
+    assert_eq(arr5_get(s3, 0), 1);
+    assert_eq(arr5_get(s3, 4), 5);
+
+    // Already sorted
+    let a4 = Arr5 { a: 1, b: 2, c: 3, d: 4, e: 5 };
+    let s4 = bubble_sort(a4, 5);
+    assert_eq(is_sorted(s4, 5), true);
+
+    // All same values
+    let a5 = Arr5 { a: 7, b: 7, c: 7, d: 7, e: 7 };
+    let s5 = selection_sort(a5, 5);
+    assert_eq(arr5_get(s5, 0), 7);
+    assert_eq(arr5_get(s5, 4), 7);
+
+    print("[OK] 186_sorting_aot");
+    0
+}

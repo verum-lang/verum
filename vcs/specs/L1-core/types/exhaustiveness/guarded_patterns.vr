@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, guard-pattern
+// @description: Guard patterns with exhaustiveness checking
+
+// Guard patterns with wildcard fallback (exhaustive)
+fn classify_number(n: Int) -> Text =
+    match n {
+        x if x < 0 => "negative",
+        x if x == 0 => "zero",
+        x if x > 0 => "positive",
+        _ => "unknown"  // Fallback covers all cases
+    };
+
+// Guard patterns with explicit exhaustive coverage
+fn describe_range(n: Int) -> Text =
+    match n {
+        x if x < -100 => "very negative",
+        x if x < 0 => "negative",
+        0 => "zero",
+        x if x < 100 => "small positive",
+        _ => "large positive"
+    };
+
+// Nested guards with variant patterns
+type Status is Active { score: Int } | Inactive;
+
+fn status_message(s: Status) -> Text =
+    match s {
+        Active { score } if score >= 100 => "excellent",
+        Active { score } if score >= 50 => "good",
+        Active { .. } => "needs improvement",
+        Inactive => "inactive"
+    };
+
+fn main() {
+    assert(classify_number(-5) == "negative");
+    assert(classify_number(0) == "zero");
+    assert(classify_number(10) == "positive");
+    assert(describe_range(-200) == "very negative");
+    assert(status_message(Active { score: 150 }) == "excellent");
+}

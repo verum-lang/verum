@@ -1,0 +1,820 @@
+// =============================================================================
+// map_test.vr - Comprehensive tests for Map<K, V> collection
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, map, hash-map, core
+// @description: Comprehensive tests for Map<K, V> type and methods
+// =============================================================================
+
+mount core.collections.map.Map;
+mount core.collections.list.List;
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Construction Tests
+// =============================================================================
+
+@test
+fn test_map_new() {
+    let empty: Map<Text, Int> = Map.new();
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_map_with_capacity() {
+    let map: Map<Text, Int> = Map.with_capacity(10);
+    assert(map.is_empty());
+}
+
+// =============================================================================
+// Section 2: Insert and Get Tests
+// =============================================================================
+
+@test
+fn test_map_insert() {
+    let mut map: Map<Text, Int> = Map.new();
+
+    map.insert("one", 1);
+    map.insert("two", 2);
+    map.insert("three", 3);
+
+    assert_eq(map.len(), 3);
+}
+
+@test
+fn test_map_get() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("key", 42);
+
+    match map.get(&"key") {
+        Some(v) => assert_eq(*v, 42),
+        None => panic("Expected Some"),
+    }
+
+    match map.get(&"missing") {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_map_insert_overwrite() {
+    let mut map: Map<Text, Int> = Map.new();
+
+    let old1 = map.insert("key", 1);
+    match old1 {
+        None => {} // First insert returns None
+        Some(_) => panic("Expected None for first insert"),
+    }
+
+    let old2 = map.insert("key", 2);
+    match old2 {
+        Some(v) => assert_eq(v, 1), // Returns old value
+        None => panic("Expected Some for overwrite"),
+    }
+
+    match map.get(&"key") {
+        Some(v) => assert_eq(*v, 2), // New value
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 3: Contains and Remove Tests
+// =============================================================================
+
+@test
+fn test_map_contains_key() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("exists", 1);
+
+    assert(map.contains_key(&"exists"));
+    assert(!map.contains_key(&"missing"));
+}
+
+@test
+fn test_map_remove() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("key", 42);
+
+    assert_eq(map.len(), 1);
+
+    let removed = map.remove(&"key");
+    match removed {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+
+    assert_eq(map.len(), 0);
+    assert(!map.contains_key(&"key"));
+
+    // Remove non-existent key
+    let removed2 = map.remove(&"missing");
+    match removed2 {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_map_clear() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("a", 1);
+    map.insert("b", 2);
+    map.insert("c", 3);
+
+    assert_eq(map.len(), 3);
+
+    map.clear();
+
+    assert(map.is_empty());
+    assert_eq(map.len(), 0);
+}
+
+// =============================================================================
+// Section 4: Multiple Key Tests
+// =============================================================================
+
+@test
+fn test_map_multiple_keys() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("a", 1);
+    map.insert("b", 2);
+    map.insert("c", 3);
+
+    assert_eq(map.len(), 3);
+    assert(map.contains_key(&"a"));
+    assert(map.contains_key(&"b"));
+    assert(map.contains_key(&"c"));
+    assert(!map.contains_key(&"d"));
+}
+
+@test
+fn test_map_get_all() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("x", 10);
+    map.insert("y", 20);
+    map.insert("z", 30);
+
+    match map.get(&"x") {
+        Some(v) => assert_eq(*v, 10),
+        None => panic("Expected Some for x"),
+    }
+    match map.get(&"y") {
+        Some(v) => assert_eq(*v, 20),
+        None => panic("Expected Some for y"),
+    }
+    match map.get(&"z") {
+        Some(v) => assert_eq(*v, 30),
+        None => panic("Expected Some for z"),
+    }
+}
+
+// =============================================================================
+// Section 5: Int Key Tests
+// =============================================================================
+
+@test
+fn test_map_int_key() {
+    let mut map: Map<Int, Text> = Map.new();
+
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+
+    match map.get(&2) {
+        Some(v) => assert_eq(*v, "two"),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 6: Edge Cases
+// =============================================================================
+
+@test
+fn test_map_empty_operations() {
+    let empty: Map<Text, Int> = Map.new();
+
+    assert(empty.is_empty());
+    assert(!empty.contains_key(&"key"));
+
+    match empty.get(&"key") {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_map_single_entry() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("key", 42);
+
+    assert_eq(map.len(), 1);
+    assert(map.contains_key(&"key"));
+
+    map.remove(&"key");
+    assert(map.is_empty());
+}
+
+@test
+fn test_map_get_mut() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("key", 10);
+
+    match map.get_mut(&"key") {
+        Some(v) => *v = 20,
+        None => panic("Expected Some"),
+    }
+
+    match map.get(&"key") {
+        Some(v) => assert_eq(*v, 20),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 7: Different Value Types
+// =============================================================================
+
+@test
+fn test_map_bool_values() {
+    let mut map: Map<Text, Bool> = Map.new();
+    map.insert("flag1", true);
+    map.insert("flag2", false);
+    assert_eq(*map.get(&"flag1").unwrap(), true);
+    assert_eq(*map.get(&"flag2").unwrap(), false);
+    assert_eq(map.len(), 2);
+}
+
+@test
+fn test_map_float_values() {
+    let mut map: Map<Text, Float> = Map.new();
+    map.insert("pi", 3.14159);
+    map.insert("e", 2.71828);
+    let pi = *map.get(&"pi").unwrap();
+    assert(pi > 3.14);
+    assert(pi < 3.15);
+}
+
+@test
+fn test_map_text_key_text_value() {
+    let mut map: Map<Text, Text> = Map.new();
+    map.insert("greeting", "hello");
+    map.insert("farewell", "goodbye");
+    assert_eq(*map.get(&"greeting").unwrap(), "hello");
+    assert_eq(*map.get(&"farewell").unwrap(), "goodbye");
+}
+
+@test
+fn test_map_int_key_int_value() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 100);
+    map.insert(2, 200);
+    map.insert(3, 300);
+    assert_eq(map.len(), 3);
+    assert_eq(*map.get(&1).unwrap(), 100);
+    assert_eq(*map.get(&3).unwrap(), 300);
+}
+
+@test
+fn test_map_int_key_bool_value() {
+    let mut map: Map<Int, Bool> = Map.new();
+    map.insert(0, false);
+    map.insert(1, true);
+    assert_eq(*map.get(&0).unwrap(), false);
+    assert_eq(*map.get(&1).unwrap(), true);
+}
+
+// =============================================================================
+// Section 8: Key Type Edge Cases
+// =============================================================================
+
+@test
+fn test_map_negative_int_keys() {
+    let mut map: Map<Int, Text> = Map.new();
+    map.insert(-1, "neg_one");
+    map.insert(0, "zero");
+    map.insert(1, "one");
+    assert_eq(map.len(), 3);
+    assert_eq(*map.get(&-1).unwrap(), "neg_one");
+    assert_eq(*map.get(&0).unwrap(), "zero");
+}
+
+@test
+fn test_map_zero_key() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(0, 100);
+    assert(map.contains_key(&0));
+    assert_eq(*map.get(&0).unwrap(), 100);
+}
+
+@test
+fn test_map_large_int_keys() {
+    let mut map: Map<Int, Text> = Map.new();
+    map.insert(1000000, "million");
+    map.insert(999999999, "many");
+    assert_eq(map.len(), 2);
+    assert_eq(*map.get(&1000000).unwrap(), "million");
+}
+
+@test
+fn test_map_empty_text_key() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("", 42);
+    assert(map.contains_key(&""));
+    assert_eq(*map.get(&"").unwrap(), 42);
+}
+
+// =============================================================================
+// Section 9: Insert Overwrite Patterns
+// =============================================================================
+
+@test
+fn test_map_insert_overwrite_chain() {
+    let mut map: Map<Text, Int> = Map.new();
+    let first = map.insert("k", 1);
+    assert(first.is_none());
+    let second = map.insert("k", 2);
+    assert_eq(second.unwrap(), 1);
+    let third = map.insert("k", 3);
+    assert_eq(third.unwrap(), 2);
+    assert_eq(*map.get(&"k").unwrap(), 3);
+}
+
+@test
+fn test_map_overwrite_all_values() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("x", 1);
+    map.insert("y", 2);
+    map.insert("z", 3);
+    map.insert("x", 10);
+    map.insert("y", 20);
+    map.insert("z", 30);
+    assert_eq(map.len(), 3);
+    assert_eq(*map.get(&"x").unwrap(), 10);
+    assert_eq(*map.get(&"y").unwrap(), 20);
+    assert_eq(*map.get(&"z").unwrap(), 30);
+}
+
+@test
+fn test_map_insert_same_key_many_times() {
+    let mut map: Map<Text, Int> = Map.new();
+    for i in 0..100 {
+        map.insert("key", i);
+    }
+    assert_eq(map.len(), 1);
+    assert_eq(*map.get(&"key").unwrap(), 99);
+}
+
+@test
+fn test_map_bool_values_overwrite() {
+    let mut map: Map<Text, Bool> = Map.new();
+    map.insert("flag", true);
+    assert_eq(*map.get(&"flag").unwrap(), true);
+    map.insert("flag", false);
+    assert_eq(*map.get(&"flag").unwrap(), false);
+}
+
+// =============================================================================
+// Section 10: Remove Patterns
+// =============================================================================
+
+@test
+fn test_map_remove_nonexistent() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("a", 1);
+    let removed = map.remove(&"b");
+    assert(removed.is_none());
+    assert_eq(map.len(), 1);
+}
+
+@test
+fn test_map_remove_last_element() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("only", 42);
+    assert_eq(map.len(), 1);
+    map.remove(&"only");
+    assert(map.is_empty());
+    assert_eq(map.len(), 0);
+}
+
+@test
+fn test_map_remove_returns_value() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("a", 10);
+    map.insert("b", 20);
+    let val = map.remove(&"a");
+    assert_eq(val.unwrap(), 10);
+    assert_eq(map.len(), 1);
+}
+
+@test
+fn test_map_multiple_removes() {
+    let mut map: Map<Int, Text> = Map.new();
+    map.insert(1, "one");
+    map.insert(2, "two");
+    map.insert(3, "three");
+    map.insert(4, "four");
+    map.insert(5, "five");
+    map.remove(&1);
+    map.remove(&3);
+    map.remove(&5);
+    assert_eq(map.len(), 2);
+    assert(!map.contains_key(&1));
+    assert(map.contains_key(&2));
+    assert(!map.contains_key(&3));
+    assert(map.contains_key(&4));
+    assert(!map.contains_key(&5));
+}
+
+// =============================================================================
+// Section 11: Clear Patterns
+// =============================================================================
+
+@test
+fn test_map_clear_and_reuse() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("a", 1);
+    map.insert("b", 2);
+    map.clear();
+    assert(map.is_empty());
+    map.insert("c", 3);
+    assert_eq(map.len(), 1);
+    assert_eq(*map.get(&"c").unwrap(), 3);
+}
+
+@test
+fn test_map_clear_empty() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.clear();
+    assert(map.is_empty());
+}
+
+@test
+fn test_map_insert_after_clear() {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..10 {
+        map.insert(i, i);
+    }
+    map.clear();
+    for i in 10..20 {
+        map.insert(i, i);
+    }
+    assert_eq(map.len(), 10);
+    assert(!map.contains_key(&0));
+    assert(map.contains_key(&10));
+}
+
+// =============================================================================
+// Section 12: Contains Patterns
+// =============================================================================
+
+@test
+fn test_map_contains_after_remove() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("key", 42);
+    assert(map.contains_key(&"key"));
+    map.remove(&"key");
+    assert(!map.contains_key(&"key"));
+}
+
+@test
+fn test_map_contains_empty_map() {
+    let map: Map<Int, Int> = Map.new();
+    assert(!map.contains_key(&0));
+    assert(!map.contains_key(&1));
+    assert(!map.contains_key(&-1));
+}
+
+// =============================================================================
+// Section 13: Get/Get_mut Patterns
+// =============================================================================
+
+@test
+fn test_map_get_mut_modify_multiple_times() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("counter", 0);
+    for _i in 0..10 {
+        match map.get_mut(&"counter") {
+            Some(v) => *v = *v + 1,
+            None => panic("Expected Some"),
+        }
+    }
+    assert_eq(*map.get(&"counter").unwrap(), 10);
+}
+
+@test
+fn test_map_get_returns_none_on_empty() {
+    let map: Map<Text, Int> = Map.new();
+    assert(map.get(&"anything").is_none());
+}
+
+@test
+fn test_map_get_mut_returns_none_for_missing() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("a", 1);
+    assert(map.get_mut(&"b").is_none());
+}
+
+@test
+fn test_map_get_mut_on_empty() {
+    let mut map: Map<Text, Int> = Map.new();
+    assert(map.get_mut(&"key").is_none());
+}
+
+@test
+fn test_map_get_multiple_keys() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(10, 100);
+    map.insert(20, 200);
+    map.insert(30, 300);
+    assert_eq(*map.get(&10).unwrap(), 100);
+    assert_eq(*map.get(&20).unwrap(), 200);
+    assert_eq(*map.get(&30).unwrap(), 300);
+    assert(map.get(&40).is_none());
+}
+
+// =============================================================================
+// Section 14: Len/is_empty Tracking
+// =============================================================================
+
+@test
+fn test_map_len_tracking() {
+    let mut map: Map<Text, Int> = Map.new();
+    assert_eq(map.len(), 0);
+    map.insert("a", 1);
+    assert_eq(map.len(), 1);
+    map.insert("b", 2);
+    assert_eq(map.len(), 2);
+    map.remove(&"a");
+    assert_eq(map.len(), 1);
+    map.remove(&"b");
+    assert_eq(map.len(), 0);
+}
+
+@test
+fn test_map_is_empty_transitions() {
+    let mut map: Map<Text, Int> = Map.new();
+    assert(map.is_empty());
+    map.insert("key", 1);
+    assert(!map.is_empty());
+    map.remove(&"key");
+    assert(map.is_empty());
+}
+
+@test
+fn test_map_len_with_overwrites() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("a", 1);
+    map.insert("b", 2);
+    assert_eq(map.len(), 2);
+    // Overwrite should not change len
+    map.insert("a", 10);
+    assert_eq(map.len(), 2);
+}
+
+// =============================================================================
+// Section 15: Capacity
+// =============================================================================
+
+@test
+fn test_map_with_capacity_still_works() {
+    let mut map: Map<Text, Int> = Map.with_capacity(100);
+    map.insert("a", 1);
+    map.insert("b", 2);
+    assert_eq(map.len(), 2);
+    assert_eq(*map.get(&"a").unwrap(), 1);
+}
+
+@test
+fn test_map_capacity_grows() {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..100 {
+        map.insert(i, i);
+    }
+    assert(map.capacity() >= 100);
+}
+
+// =============================================================================
+// Section 16: Stress Tests
+// =============================================================================
+
+@test
+fn test_map_insert_many_sequential() {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..50 {
+        map.insert(i, i * i);
+    }
+    assert_eq(map.len(), 50);
+    assert_eq(*map.get(&0).unwrap(), 0);
+    assert_eq(*map.get(&7).unwrap(), 49);
+    assert_eq(*map.get(&49).unwrap(), 2401);
+}
+
+@test
+fn test_map_insert_remove_cycle() {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..20 {
+        map.insert(i, i);
+    }
+    assert_eq(map.len(), 20);
+    for i in 0..10 {
+        map.remove(&i);
+    }
+    assert_eq(map.len(), 10);
+    for i in 10..20 {
+        assert(map.contains_key(&i));
+    }
+    for i in 0..10 {
+        assert(!map.contains_key(&i));
+    }
+}
+
+@test
+fn test_map_single_insert_remove_cycle() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("key", 1);
+    assert_eq(map.remove(&"key").unwrap(), 1);
+    map.insert("key", 2);
+    assert_eq(map.remove(&"key").unwrap(), 2);
+    map.insert("key", 3);
+    assert_eq(*map.get(&"key").unwrap(), 3);
+}
+
+@test
+fn test_map_many_text_keys() {
+    let mut map: Map<Text, Int> = Map.new();
+    let keys = ["alpha", "beta", "gamma", "delta", "epsilon",
+                "zeta", "eta", "theta", "iota", "kappa"];
+    for i in 0..10 {
+        map.insert(keys[i], i);
+    }
+    assert_eq(map.len(), 10);
+    assert_eq(*map.get(&"alpha").unwrap(), 0);
+    assert_eq(*map.get(&"kappa").unwrap(), 9);
+}
+
+@test
+fn test_map_interleaved_insert_remove() {
+    let mut map: Map<Int, Int> = Map.new();
+    // Insert 1, 2, 3 then remove 1, insert 4, remove 2, etc.
+    map.insert(1, 10);
+    map.insert(2, 20);
+    map.insert(3, 30);
+    map.remove(&1);
+    map.insert(4, 40);
+    map.remove(&2);
+    map.insert(5, 50);
+    assert_eq(map.len(), 3);
+    assert(!map.contains_key(&1));
+    assert(!map.contains_key(&2));
+    assert(map.contains_key(&3));
+    assert(map.contains_key(&4));
+    assert(map.contains_key(&5));
+}
+
+@test
+fn test_map_repeated_clear_insert() {
+    let mut map: Map<Int, Int> = Map.new();
+    for round in 0..5 {
+        for i in 0..10 {
+            map.insert(i, round * 10 + i);
+        }
+        assert_eq(map.len(), 10);
+        map.clear();
+        assert(map.is_empty());
+    }
+}
+
+// =============================================================================
+// Section 17: Get_mut Complex Modifications
+// =============================================================================
+
+@test
+fn test_map_get_mut_set_to_zero() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("a", 100);
+    map.insert("b", 200);
+    match map.get_mut(&"a") {
+        Some(v) => *v = 0,
+        None => panic("Expected Some"),
+    }
+    assert_eq(*map.get(&"a").unwrap(), 0);
+    assert_eq(*map.get(&"b").unwrap(), 200);
+}
+
+@test
+fn test_map_get_mut_negative_value() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("val", 10);
+    match map.get_mut(&"val") {
+        Some(v) => *v = -5,
+        None => panic("Expected Some"),
+    }
+    assert_eq(*map.get(&"val").unwrap(), -5);
+}
+
+@test
+fn test_map_get_mut_successive_keys() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 0);
+    map.insert(2, 0);
+    map.insert(3, 0);
+
+    match map.get_mut(&1) {
+        Some(v) => *v = 10,
+        None => panic("Expected Some"),
+    }
+    match map.get_mut(&2) {
+        Some(v) => *v = 20,
+        None => panic("Expected Some"),
+    }
+    match map.get_mut(&3) {
+        Some(v) => *v = 30,
+        None => panic("Expected Some"),
+    }
+
+    assert_eq(*map.get(&1).unwrap(), 10);
+    assert_eq(*map.get(&2).unwrap(), 20);
+    assert_eq(*map.get(&3).unwrap(), 30);
+}
+
+// =============================================================================
+// Section 18: Combined Operation Patterns
+// =============================================================================
+
+@test
+fn test_map_insert_get_remove_all() {
+    let mut map: Map<Int, Text> = Map.new();
+    for i in 0..20 {
+        map.insert(i, "val");
+    }
+    // Verify all present
+    for i in 0..20 {
+        assert(map.contains_key(&i));
+    }
+    // Remove all
+    for i in 0..20 {
+        assert(map.remove(&i).is_some());
+    }
+    assert(map.is_empty());
+}
+
+@test
+fn test_map_remove_nonexistent_many() {
+    let mut map: Map<Int, Int> = Map.new();
+    map.insert(1, 1);
+    // Remove many nonexistent keys
+    for i in 100..200 {
+        assert(map.remove(&i).is_none());
+    }
+    assert_eq(map.len(), 1);
+}
+
+@test
+fn test_map_overwrite_preserves_len() {
+    let mut map: Map<Int, Int> = Map.new();
+    for i in 0..10 {
+        map.insert(i, i);
+    }
+    assert_eq(map.len(), 10);
+    // Overwrite all with different values
+    for i in 0..10 {
+        map.insert(i, i * 100);
+    }
+    assert_eq(map.len(), 10);
+    assert_eq(*map.get(&5).unwrap(), 500);
+}
+
+@test
+fn test_map_int_to_float() {
+    let mut map: Map<Int, Float> = Map.new();
+    map.insert(1, 1.5);
+    map.insert(2, 2.5);
+    map.insert(3, 3.5);
+    let v = *map.get(&2).unwrap();
+    assert(v > 2.4);
+    assert(v < 2.6);
+}
+
+@test
+fn test_map_two_element_operations() {
+    let mut map: Map<Text, Int> = Map.new();
+    map.insert("first", 1);
+    map.insert("second", 2);
+    assert_eq(map.len(), 2);
+    assert_eq(*map.get(&"first").unwrap(), 1);
+    assert_eq(*map.get(&"second").unwrap(), 2);
+    map.remove(&"first");
+    assert_eq(map.len(), 1);
+    assert(!map.contains_key(&"first"));
+    assert(map.contains_key(&"second"));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,150 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, shell_sort, gap_sequence, knuth, hibbard, sorting
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Shell sort with gap sequence variants.
+// Knuth sequence: gaps = (3^k - 1)/2 = 1, 4, 13, 40, ...  (used in reverse: descend from largest <= n/3)
+// Hibbard sequence: gaps = 2^k - 1 = 1, 3, 7, 15, ...
+// Arrays stored as [Int; 16]; active length passed separately.
+
+// Shell sort using a hard-coded Knuth gap sequence for n <= 16.
+// Knuth gaps <= 16: 13, 4, 1  (13 = (3^3-1)/2, 4 = (3^2-1)/2, 1 = (3^1-1)/2)
+fn shell_sort_knuth(a: [Int; 16], n: Int) {
+    // Gap sequence (Knuth): 13, 4, 1  — only use gaps < n
+    let mut gi = 0;
+    while gi < 3 {
+        let gap = if gi == 0 { 13 } else { if gi == 1 { 4 } else { 1 } };
+        if gap < n {
+            let mut i = gap;
+            while i < n {
+                let tmp = a[i];
+                let mut j = i;
+                while j >= gap && a[j - gap] > tmp {
+                    a[j] = a[j - gap];
+                    j = j - gap;
+                }
+                a[j] = tmp;
+                i = i + 1;
+            }
+        }
+        gi = gi + 1;
+    }
+}
+
+// Shell sort using a hard-coded Hibbard gap sequence for n <= 16.
+// Hibbard gaps <= 16: 15, 7, 3, 1  (2^4-1, 2^3-1, 2^2-1, 2^1-1)
+fn shell_sort_hibbard(a: [Int; 16], n: Int) {
+    let mut gi = 0;
+    while gi < 4 {
+        let gap = if gi == 0 { 15 } else { if gi == 1 { 7 } else { if gi == 2 { 3 } else { 1 } } };
+        if gap < n {
+            let mut i = gap;
+            while i < n {
+                let tmp = a[i];
+                let mut j = i;
+                while j >= gap && a[j - gap] > tmp {
+                    a[j] = a[j - gap];
+                    j = j - gap;
+                }
+                a[j] = tmp;
+                i = i + 1;
+            }
+        }
+        gi = gi + 1;
+    }
+}
+
+// Check that a[0..n) is non-decreasing.
+fn is_sorted(a: [Int; 16], n: Int) -> Int {
+    let mut i = 1;
+    while i < n {
+        if a[i] < a[i - 1] { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Sum elements a[0..n).
+fn array_sum(a: [Int; 16], n: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < n { s = s + a[i]; i = i + 1; }
+    s
+}
+
+fn test_knuth_random() {
+    // [5, 3, 8, 1, 9, 2, 7, 4, 6, 0]: sorted = [0,1,2,3,4,5,6,7,8,9], sum=45
+    let mut a = [5, 3, 8, 1, 9, 2, 7, 4, 6, 0, 0, 0, 0, 0, 0, 0];
+    shell_sort_knuth(a, 10);
+    assert_eq(is_sorted(a, 10), 1);
+    assert_eq(a[0], 0);
+    assert_eq(a[9], 9);
+    assert_eq(array_sum(a, 10), 45);
+    print("knuth_random: ok");
+}
+
+fn test_knuth_reversed() {
+    // [16, 14, 12, 10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0] n=8
+    // sorted: [2, 4, 6, 8, 10, 12, 14, 16], sum=72
+    let mut a = [16, 14, 12, 10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0];
+    shell_sort_knuth(a, 8);
+    assert_eq(is_sorted(a, 8), 1);
+    assert_eq(a[0], 2);
+    assert_eq(a[7], 16);
+    assert_eq(array_sum(a, 8), 72);
+    print("knuth_reversed: ok");
+}
+
+fn test_hibbard_random() {
+    // [11, 3, 15, 7, 1, 13, 5, 9, 0, 0, 0, 0, 0, 0, 0, 0] n=8
+    // sorted: [1, 3, 5, 7, 9, 11, 13, 15], sum=64
+    let mut a = [11, 3, 15, 7, 1, 13, 5, 9, 0, 0, 0, 0, 0, 0, 0, 0];
+    shell_sort_hibbard(a, 8);
+    assert_eq(is_sorted(a, 8), 1);
+    assert_eq(a[0], 1);
+    assert_eq(a[7], 15);
+    assert_eq(array_sum(a, 8), 64);
+    print("hibbard_random: ok");
+}
+
+fn test_hibbard_nearly_sorted() {
+    // [1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 0, 0, 0, 0, 0, 0] n=10 — only one inversion
+    // sorted: [1..10], sum=55
+    let mut a = [1, 2, 3, 5, 4, 6, 7, 8, 9, 10, 0, 0, 0, 0, 0, 0];
+    shell_sort_hibbard(a, 10);
+    assert_eq(is_sorted(a, 10), 1);
+    assert_eq(a[3], 4);
+    assert_eq(a[4], 5);
+    assert_eq(array_sum(a, 10), 55);
+    print("hibbard_nearly_sorted: ok");
+}
+
+fn test_single_and_duplicates() {
+    // Single element: no-op.
+    let mut a = [42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    shell_sort_knuth(a, 1);
+    assert_eq(a[0], 42);
+
+    // Duplicates: [3, 1, 2, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] n=6
+    // sorted: [1, 1, 2, 2, 3, 3], sum=12
+    let mut b = [3, 1, 2, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    shell_sort_hibbard(b, 6);
+    assert_eq(is_sorted(b, 6), 1);
+    assert_eq(b[0], 1);
+    assert_eq(b[5], 3);
+    assert_eq(array_sum(b, 6), 12);
+    print("single_and_duplicates: ok");
+}
+
+fn main() -> Int {
+    test_knuth_random();
+    test_knuth_reversed();
+    test_hibbard_random();
+    test_hibbard_nearly_sorted();
+    test_single_and_duplicates();
+    print("[OK] 551_interp_shell_sort");
+    0
+}

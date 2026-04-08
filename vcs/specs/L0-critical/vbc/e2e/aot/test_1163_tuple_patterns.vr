@@ -1,0 +1,78 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: tuple, pattern, destructuring
+// @description: Test tuple construction and pattern matching
+
+fn make_pair(a: Int, b: Int) -> (Int, Int) {
+    (a, b)
+}
+
+fn test_tuple_basic() -> Int {
+    let pair = make_pair(10, 20);
+    let (a, b) = pair;
+    if a != 10 || b != 20 {
+        print(f"FAIL tuple_basic: ({a}, {b})");
+        return 1;
+    }
+    print("  tuple_basic: OK");
+    0
+}
+
+fn min_max(items: List<Int>) -> (Int, Int) {
+    let mut lo = items[0];
+    let mut hi = items[0];
+    let mut i = 1;
+    while i < items.len() {
+        if items[i] < lo { lo = items[i]; }
+        if items[i] > hi { hi = items[i]; }
+        i = i + 1;
+    }
+    (lo, hi)
+}
+
+fn test_tuple_return() -> Int {
+    let mut nums = List.new();
+    nums.push(5);
+    nums.push(2);
+    nums.push(8);
+    nums.push(1);
+    nums.push(9);
+
+    let (lo, hi) = min_max(nums);
+    if lo != 1 || hi != 9 {
+        print(f"FAIL tuple_return: ({lo}, {hi}), expected (1, 9)");
+        return 1;
+    }
+    print("  tuple_return: OK");
+    0
+}
+
+fn divmod(a: Int, b: Int) -> (Int, Int) {
+    (a / b, a % b)
+}
+
+fn test_divmod() -> Int {
+    let (q, r) = divmod(17, 5);
+    if q != 3 || r != 2 {
+        print(f"FAIL divmod: q={q}, r={r}");
+        return 1;
+    }
+    print("  divmod: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Tuple Pattern Tests:");
+    let mut failures = 0;
+    failures = failures + test_tuple_basic();
+    failures = failures + test_tuple_return();
+    failures = failures + test_divmod();
+
+    if failures == 0 {
+        print("All tuple tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

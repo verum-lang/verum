@@ -1,0 +1,85 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/runtime/tier_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, runtime, tier, vbc
+// @description: Tests for VBC tier management intrinsics.
+//
+// Coverage:
+// - Tier detection: is_interpreted, get_tier
+// - (SKIPPED) Tier promotion: tier_promote (requires JIT)
+//
+// Test Strategy:
+// - Test is_interpreted returns valid boolean
+// - Test get_tier returns valid tier value (0-3)
+// =============================================================================
+
+module test.stdlib.intrinsics.runtime.tier_test;
+
+mount core.intrinsics.runtime.tier.{
+    is_interpreted,
+    get_tier,
+    // tier_promote - requires JIT, skip in Tier 0 tests
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Tier Detection Tests
+// =============================================================================
+
+@test
+fn test_is_interpreted() {
+    // In VBC Tier 0, is_interpreted should return true
+    let interp = is_interpreted();
+
+    // Type check
+    let _: Bool = interp;
+
+    // When running in VBC interpreter, this should be true
+    // In AOT mode, it would be false
+    // We just verify it's a valid boolean
+    if interp {
+        print("Running in interpreted mode (Tier 0)");
+    } else {
+        print("Running in compiled mode");
+    }
+
+    print("is_interpreted test passed");
+}
+
+@test
+fn test_get_tier() {
+    // get_tier returns: 0=VBC interpreter, 1=JIT baseline, 2=JIT optimized, 3=AOT
+    let tier = get_tier();
+
+    // Type check
+    let _: UInt8 = tier;
+
+    // Tier must be in valid range
+    assert(tier <= (3 as UInt8));
+
+    // When running in VBC Tier 0 interpreter, tier should be 0
+    // We can't assert this firmly as tests might run in different modes
+    if tier == (0 as UInt8) {
+        print("Tier 0: VBC Interpreter");
+    } else if tier == (1 as UInt8) {
+        print("Tier 1: JIT Baseline");
+    } else if tier == (2 as UInt8) {
+        print("Tier 2: JIT Optimized");
+    } else if tier == (3 as UInt8) {
+        print("Tier 3: AOT");
+    } else {
+        print("Unknown tier");
+    }
+
+    print("get_tier test passed");
+}

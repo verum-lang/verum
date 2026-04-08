@@ -1,0 +1,191 @@
+// @test: parse-pass
+// @tier: 0
+// @category: contexts
+// @description: Test scoped provide statements with 'in' block syntax
+
+fn test_basic_scoped_provide() {
+    // Simple scoped provide
+    provide Logger = TestLogger.new() in {
+        Logger.log("This uses TestLogger");
+    };
+
+    // After block, original context (if any) is restored
+    Logger.log("This uses original Logger");
+}
+
+fn test_scoped_provide_with_alias() {
+    // Scoped with alias
+    provide Database as test_db = InMemoryDb.new() in {
+        test_db.execute("CREATE TABLE test (id INT)");
+        test_db.execute("INSERT INTO test VALUES (1)");
+    };
+
+    // Multiple aliases scoped
+    provide Logger as log1 = FileLogger.new("a.log") in {
+        provide Logger as log2 = FileLogger.new("b.log") in {
+            log1.info("to file a");
+            log2.info("to file b");
+        }
+    };
+}
+
+fn test_nested_scoped_provide() {
+    // Nested scopes
+    provide Database = TestDatabase.new() in {
+        provide Logger = TestLogger.new() in {
+            provide Cache = NoOpCache.new() in {
+                run_integration_tests();
+            }
+        }
+    };
+
+    // Deeply nested
+    provide A = a1 in {
+        provide B = b1 in {
+            provide C = c1 in {
+                provide D = d1 in {
+                    deep_operation();
+                }
+            }
+        }
+    };
+}
+
+fn test_scoped_provide_with_block() {
+    // Scoped block with provide
+    provide Database = TestDb.new() in {
+        let result = Database.query("SELECT COUNT(*) FROM users");
+        process_result(result);
+    };
+
+    // Complex nested provide
+    provide Database = TestDb.new() in {
+        provide Cache = LruCache.new(100) in {
+            let cached = Cache.get("users");
+            if cached is Some(data) {
+                process(data);
+            } else {
+                let data = Database.query("SELECT * FROM users");
+                Cache.set("users", data);
+                process(data);
+            }
+        }
+    };
+}
+
+fn test_scoped_provide_with_control_flow() {
+    // With early return
+    provide Logger = VerboseLogger.new() in {
+        if !should_continue {
+            return;
+        }
+        Logger.info("Continuing...");
+    };
+
+    // With loops
+    provide Logger = LoopLogger.new() in {
+        for i in 0..10 {
+            Logger.info(f"Iteration {i}");
+        }
+    };
+
+    // With match
+    provide Config = DynamicConfig.new() in {
+        match Config.get("mode") {
+            Some("fast") => run_fast(),
+            Some("slow") => run_slow(),
+            _ => run_default()
+        }
+    };
+}
+
+fn test_scoped_provide_with_services() {
+    // Scoped provide with service
+    provide UserRepository = MockUserRepo.new() in {
+        let user = UserRepository.find(1);
+        assert(user is Some(_));
+    };
+
+    // Multiple provides scoped
+    provide UserCache = TestCache.new() in {
+        provide OrderRepository = MockOrderRepo.new() in {
+            run_tests();
+        }
+    };
+}
+
+fn test_scoped_provide_expressions() {
+    // Conditional in scope
+    provide Logger = if verbose { VerboseLogger.new() } else { QuietLogger.new() } in {
+        do_work();
+    };
+
+    // Block expression for provider
+    provide Database = {
+        let config = TestConfig.load();
+        TestDatabase.with_config(config)
+    } in {
+        run_db_tests();
+    };
+
+    // Method chain for provider
+    provide HttpClient = HttpClient.builder()
+        .mock_responses(responses)
+        .build() in {
+        test_api_calls();
+    };
+}
+
+fn test_scoped_provide_practical() {
+    // Transaction scope
+    provide Database = Database.transaction() in {
+        Database.execute("INSERT INTO orders VALUES (...)");
+        Database.execute("UPDATE inventory SET ...");
+        // Auto-commit on successful exit, rollback on error
+    };
+
+    // Test isolation
+    provide Database = fresh_test_db() in {
+        provide Logger = null_logger() in {
+            provide Time = frozen_time(EPOCH) in {
+                run_deterministic_test();
+            }
+        }
+    };
+
+    // Temporary override
+    provide Logger = debug_logger() in {
+        // Extra verbose logging for this section
+        complex_operation_under_investigation();
+    };
+    // Back to normal logging
+
+    // Resource acquisition
+    let file = File.open("data.txt")?;
+    provide FileHandle = file in {
+        let content = FileHandle.read_all();
+        process(content);
+        // FileHandle automatically closed on scope exit
+    };
+}
+
+fn test_scoped_provide_with_error_handling() {
+    // Try in scoped provide
+    provide Database = TestDb.new() in {
+        try {
+            risky_operation();
+        } recover |e| {
+            Logger.error(f"Failed: {e}");
+        }
+    };
+
+    // Scoped provide in try
+    try {
+        let db = PostgresDb.connect(url)?;
+        provide Database = db in {
+            perform_queries();
+        }
+    } recover |e| {
+        handle_db_error(e);
+    };
+}

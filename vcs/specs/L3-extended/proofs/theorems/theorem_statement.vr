@@ -1,0 +1,82 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, theorems, statements
+// @timeout: 15000
+
+/// Theorem statement forms
+
+/// Simple proposition
+theorem thm_true(): true { proof by trivial }
+theorem thm_refl(x: Int): x == x { proof by trivial }
+
+/// With pre/post
+theorem thm_pre_post(x: Int) requires x > 0 ensures x >= 1 { proof by omega }
+
+/// Quantified
+theorem thm_forall(): forall x: Int. x + 0 == x { proof by auto }
+theorem thm_exists(): exists x: Nat. x > 0 { proof { witness 1; trivial } }
+
+/// Proof by induction
+theorem thm_ind(n: Nat): n + 0 == n {
+    proof by induction on n {
+        case 0 => { trivial }
+        case succ(k) => { have ih: k + 0 == k; conclude by auto }
+    }
+}
+
+/// Proof by contradiction
+theorem thm_contra(): !(1 == 0) {
+    proof by contradiction {
+        assume h: 1 == 0;
+        contradiction
+    }
+}
+
+/// Proof by cases
+theorem thm_cases(x: Int): x >= 0 || x < 0 {
+    proof by cases {
+        case x >= 0 => { left; trivial }
+        case x < 0 => { right; trivial }
+    }
+}
+
+/// Proof by SMT
+theorem thm_smt(x: Int, y: Int) requires x > 0 requires y > 0 ensures x + y > 1 { proof by smt }
+
+/// Proof by ring
+theorem thm_ring<T: Ring>(a: T, b: T): a + b == b + a { proof by ring }
+
+/// Proof by omega
+theorem thm_omega(n: Int) requires n >= 5 ensures n >= 3 { proof by omega }
+
+/// Proof by auto
+theorem thm_auto<P: Prop, Q: Prop>() requires P && Q ensures Q && P { proof by auto }
+
+/// Generic theorem
+theorem thm_generic<T: Eq>(x: T, y: T) requires x == y ensures y == x { proof by auto }
+
+/// Calc proof
+theorem thm_calc(a: Int, b: Int): (a + b) * 2 == 2 * a + 2 * b {
+    proof { calc { (a + b) * 2 == { by ring } 2 * a + 2 * b } }
+}
+
+/// Multiple preconditions
+theorem thm_multi_pre(a: Int, b: Int, c: Int)
+    requires a > 0
+    requires b > 0
+    requires c > 0
+    ensures a + b + c > 0
+{ proof by omega }
+
+/// Multiple postconditions
+theorem thm_multi_post(x: Int)
+    requires x > 0
+    ensures x >= 0
+    ensures x >= 1
+{ proof by omega }
+
+/// Bounded type parameter
+theorem thm_bounded<T: Ord>(a: T, b: T) requires a <= b ensures !(a > b) { proof by auto }
+
+fn main() {}

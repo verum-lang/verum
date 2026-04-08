@@ -1,0 +1,121 @@
+// @test: run
+// State machine — variant-based FSM, transitions
+
+type State is
+    Idle
+  | Running(Int)
+  | Paused(Int)
+  | Done(Int);
+
+fn step(s: State, input: Int) -> State {
+    match s {
+        Idle => {
+            if (input == 1) { Running(0) }
+            else { Idle }
+        },
+        Running(progress) => {
+            if (input == 0) { Paused(progress) }
+            else if (progress + input >= 100) { Done(progress + input) }
+            else { Running(progress + input) }
+        },
+        Paused(progress) => {
+            if (input == 1) { Running(progress) }
+            else if (input == -1) { Idle }
+            else { Paused(progress) }
+        },
+        Done(result) => Done(result),
+    }
+}
+
+fn is_done(s: State) -> Bool {
+    s is Done
+}
+
+fn get_progress(s: State) -> Int {
+    match s {
+        Idle => 0,
+        Running(p) => p,
+        Paused(p) => p,
+        Done(p) => p,
+    }
+}
+
+fn main() -> Int {
+    // Test 1: Start from idle
+    let s0 = Idle;
+    let s1 = step(s0, 1);
+    if (!(s1 is Running)) {
+        print("FAIL test1: should be Running");
+        return 1;
+    }
+    print("test1 start: OK");
+
+    // Test 2: Progress
+    let mut state = Running(0);
+    state = step(state, 25);
+    state = step(state, 30);
+    let prog = get_progress(state);
+    if (prog != 55) {
+        print(f"FAIL test2: progress = {prog}");
+        return 1;
+    }
+    print("test2 progress: OK");
+
+    // Test 3: Pause and resume
+    let s = Running(50);
+    let paused = step(s, 0);
+    if (!(paused is Paused)) {
+        print("FAIL test3a: should be Paused");
+        return 1;
+    }
+    let resumed = step(paused, 1);
+    if (!(resumed is Running)) {
+        print("FAIL test3b: should be Running");
+        return 1;
+    }
+    if (get_progress(resumed) != 50) {
+        print("FAIL test3c: progress lost");
+        return 1;
+    }
+    print("test3 pause/resume: OK");
+
+    // Test 4: Complete
+    let s4 = Running(90);
+    let s4done = step(s4, 20);
+    if (!is_done(s4done)) {
+        print("FAIL test4a: should be Done");
+        return 1;
+    }
+    if (get_progress(s4done) != 110) {
+        print(f"FAIL test4b: result = {get_progress(s4done)}");
+        return 1;
+    }
+    print("test4 complete: OK");
+
+    // Test 5: Done is terminal
+    let d = Done(100);
+    let d2 = step(d, 50);
+    if (get_progress(d2) != 100) {
+        print("FAIL test5: done should be terminal");
+        return 1;
+    }
+    print("test5 terminal: OK");
+
+    // Test 6: Full lifecycle
+    let mut machine = Idle;
+    let inputs = [1, 20, 0, 1, 30, 50, 10];
+    let mut idx = 0;
+    while idx < inputs.len() {
+        machine = step(machine, inputs[idx]);
+        idx = idx + 1;
+    }
+    // idle->running(0)->running(20)->paused(20)->running(20)->running(50)->running(100)->done(110)
+    if (!is_done(machine)) {
+        print(f"FAIL test6: not done, progress={get_progress(machine)}");
+        return 1;
+    }
+    print("test6 lifecycle: OK");
+
+    print("1037_state_machine: PASS");
+    0
+}

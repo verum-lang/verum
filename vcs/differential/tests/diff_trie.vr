@@ -1,0 +1,178 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, trie, prefix-tree, data-structure
+// @timeout: 10000
+
+// Trie for small alphabet (values 0-3) with max depth 4
+// Flat array: node i has children at 4*i+1 .. 4*i+4
+// Node value: 0=empty, 1=present (end of word)
+// Max nodes: 1 + 4 + 16 + 64 = 85, but we use 32 for simplicity (depth 3)
+
+type Arr32 is {
+    d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int,
+    d8: Int, d9: Int, d10: Int, d11: Int, d12: Int, d13: Int, d14: Int, d15: Int,
+    d16: Int, d17: Int, d18: Int, d19: Int, d20: Int, d21: Int, d22: Int, d23: Int,
+    d24: Int, d25: Int, d26: Int, d27: Int, d28: Int, d29: Int, d30: Int, d31: Int
+};
+
+fn get32(a: Arr32, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else if i == 7 { a.d7 } else if i == 8 { a.d8 }
+    else if i == 9 { a.d9 } else if i == 10 { a.d10 } else if i == 11 { a.d11 }
+    else if i == 12 { a.d12 } else if i == 13 { a.d13 } else if i == 14 { a.d14 }
+    else if i == 15 { a.d15 } else if i == 16 { a.d16 } else if i == 17 { a.d17 }
+    else if i == 18 { a.d18 } else if i == 19 { a.d19 } else if i == 20 { a.d20 }
+    else if i == 21 { a.d21 } else if i == 22 { a.d22 } else if i == 23 { a.d23 }
+    else if i == 24 { a.d24 } else if i == 25 { a.d25 } else if i == 26 { a.d26 }
+    else if i == 27 { a.d27 } else if i == 28 { a.d28 } else if i == 29 { a.d29 }
+    else if i == 30 { a.d30 } else { a.d31 }
+}
+
+fn set32(a: Arr32, i: Int, v: Int) -> Arr32 {
+    Arr32 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 },
+        d8: if i == 8 { v } else { a.d8 }, d9: if i == 9 { v } else { a.d9 },
+        d10: if i == 10 { v } else { a.d10 }, d11: if i == 11 { v } else { a.d11 },
+        d12: if i == 12 { v } else { a.d12 }, d13: if i == 13 { v } else { a.d13 },
+        d14: if i == 14 { v } else { a.d14 }, d15: if i == 15 { v } else { a.d15 },
+        d16: if i == 16 { v } else { a.d16 }, d17: if i == 17 { v } else { a.d17 },
+        d18: if i == 18 { v } else { a.d18 }, d19: if i == 19 { v } else { a.d19 },
+        d20: if i == 20 { v } else { a.d20 }, d21: if i == 21 { v } else { a.d21 },
+        d22: if i == 22 { v } else { a.d22 }, d23: if i == 23 { v } else { a.d23 },
+        d24: if i == 24 { v } else { a.d24 }, d25: if i == 25 { v } else { a.d25 },
+        d26: if i == 26 { v } else { a.d26 }, d27: if i == 27 { v } else { a.d27 },
+        d28: if i == 28 { v } else { a.d28 }, d29: if i == 29 { v } else { a.d29 },
+        d30: if i == 30 { v } else { a.d30 }, d31: if i == 31 { v } else { a.d31 }
+    }
+}
+
+fn zeros32() -> Arr32 {
+    Arr32 {
+        d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0,
+        d8: 0, d9: 0, d10: 0, d11: 0, d12: 0, d13: 0, d14: 0, d15: 0,
+        d16: 0, d17: 0, d18: 0, d19: 0, d20: 0, d21: 0, d22: 0, d23: 0,
+        d24: 0, d25: 0, d26: 0, d27: 0, d28: 0, d29: 0, d30: 0, d31: 0
+    }
+}
+
+type Arr4 is { d0: Int, d1: Int, d2: Int, d3: Int };
+
+fn get4(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 } else { a.d3 }
+}
+
+// Child index of node at index `node` for character `ch` (0-3)
+fn child(node: Int, ch: Int) -> Int { 4 * node + ch + 1 }
+
+// Insert word (Arr4 of length len) into trie
+fn trie_insert(trie: Arr32, word: Arr4, len: Int) -> Arr32 {
+    let mut t = trie;
+    let mut node = 0;
+    let mut i = 0;
+    while i < len {
+        node = child(node, get4(word, i));
+        i = i + 1;
+    }
+    // Mark as end-of-word
+    t = set32(t, node, get32(t, node) + 1);
+    t
+}
+
+// Search for exact word
+fn trie_search(trie: Arr32, word: Arr4, len: Int) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    while i < len {
+        node = child(node, get4(word, i));
+        if node >= 32 { return 0; }
+        i = i + 1;
+    }
+    if get32(trie, node) > 0 { 1 } else { 0 }
+}
+
+// Check if any word starts with prefix
+fn trie_has_prefix(trie: Arr32, prefix: Arr4, len: Int) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    while i < len {
+        node = child(node, get4(prefix, i));
+        if node >= 32 { return 0; }
+        i = i + 1;
+    }
+    // Check if any node in subtree has a word
+    // Simple check: is this node or any reachable child marked?
+    if get32(trie, node) > 0 { return 1; }
+    let mut ch = 0;
+    while ch < 4 {
+        let c = child(node, ch);
+        if c < 32 {
+            if get32(trie, c) > 0 { return 1; }
+        }
+        ch = ch + 1;
+    }
+    0
+}
+
+// Count total words in trie
+fn trie_count(trie: Arr32) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 32 {
+        count = count + get32(trie, i);
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    let mut trie = zeros32();
+
+    // Insert word [0, 1] (length 2)
+    let w1 = Arr4 { d0: 0, d1: 1, d2: 0, d3: 0 };
+    trie = trie_insert(trie, w1, 2);
+    assert_eq(trie_search(trie, w1, 2), 1);
+    assert_eq(trie_count(trie), 1);
+
+    // Search for non-existent
+    let w2 = Arr4 { d0: 0, d1: 2, d2: 0, d3: 0 };
+    assert_eq(trie_search(trie, w2, 2), 0);
+
+    // Insert another word
+    trie = trie_insert(trie, w2, 2);
+    assert_eq(trie_search(trie, w2, 2), 1);
+    assert_eq(trie_count(trie), 2);
+
+    // Prefix test: prefix [0] should have words
+    let p1 = Arr4 { d0: 0, d1: 0, d2: 0, d3: 0 };
+    assert_eq(trie_has_prefix(trie, p1, 1), 1);
+
+    // Prefix [1] has no words
+    let p2 = Arr4 { d0: 1, d1: 0, d2: 0, d3: 0 };
+    assert_eq(trie_has_prefix(trie, p2, 1), 0);
+
+    // Insert single character word [3]
+    let w3 = Arr4 { d0: 3, d1: 0, d2: 0, d3: 0 };
+    trie = trie_insert(trie, w3, 1);
+    assert_eq(trie_search(trie, w3, 1), 1);
+    assert_eq(trie_count(trie), 3);
+
+    // Insert duplicate
+    trie = trie_insert(trie, w1, 2);
+    assert_eq(trie_count(trie), 4); // Duplicates counted
+
+    // Different length: searching [0] should not find [0,1]
+    let w0 = Arr4 { d0: 0, d1: 0, d2: 0, d3: 0 };
+    assert_eq(trie_search(trie, w0, 1), 0); // [0] not inserted as word
+
+    // But prefix [0] has words
+    assert_eq(trie_has_prefix(trie, w0, 1), 1);
+
+    print("DIFF_OK: trie");
+    0
+}

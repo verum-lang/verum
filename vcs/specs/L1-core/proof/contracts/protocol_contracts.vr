@@ -1,0 +1,59 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, contracts, protocol
+// @timeout: 5000
+
+/// Contracts on protocol method declarations.
+/// Grammar: protocol_function includes return_type_with_refinement
+
+// Protocol with refined return types
+type Stack<T> is protocol {
+    fn push(&mut self, item: T);
+    fn pop(&mut self) -> Maybe<T>;
+    fn len(&self) -> Int;
+    fn is_empty(&self) -> Bool;
+};
+
+// Protocol with pre/postconditions on methods
+type SortedCollection is protocol {
+    fn insert(&mut self, value: Int);
+    fn min(&self) -> Maybe<Int>;
+    fn max(&self) -> Maybe<Int>;
+    fn contains(&self, value: Int) -> Bool;
+    fn len(&self) -> Int;
+};
+
+// Implementing type with contracts
+type BoundedBuffer is {
+    data: List<Int>,
+    capacity: Int,
+};
+
+implement BoundedBuffer {
+    fn new(cap: Int) -> BoundedBuffer {
+        BoundedBuffer { data: List.new(), capacity: cap }
+    }
+
+    fn push(&mut self, item: Int) -> Bool {
+        if self.data.len() < self.capacity {
+            self.data.push(item);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn len(&self) -> Int {
+        self.data.len()
+    }
+}
+
+fn main() {
+    let mut buf = BoundedBuffer.new(3);
+    assert(buf.push(1));
+    assert(buf.push(2));
+    assert(buf.push(3));
+    assert(!buf.push(4));
+    assert_eq(buf.len(), 3);
+    print("Protocol contract tests passed");
+}

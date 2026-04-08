@@ -1,0 +1,19 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, complex, expression
+// @description: Complex unsafe expression with multiple operations
+fn compute(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn main() {
+    let result: Int = compute(
+        unsafe { 10 + 5 },
+        unsafe {
+            let x: Int = 20;
+            let y: Int = 7;
+            x + y
+        }
+    );
+    assert_eq(result, 42);
+}

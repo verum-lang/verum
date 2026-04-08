@@ -1,0 +1,131 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, primitives, coercion
+
+/// Test for type coercions and conversions in Verum.
+/// Tests explicit `as` casts and implicit coercions that are supported.
+
+fn apply_fn(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn takes_text(s: Text) -> Int {
+    s.len()
+}
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn main() {
+    // === Explicit numeric casts with `as` ===
+
+    let i: Int = 42;
+    let f: Float = i as Float;
+    assert(f == 42.0);
+
+    let big_float: Float = 3.99;
+    let truncated: Int = big_float as Int;
+    assert(truncated == 3);
+
+    // Float arithmetic to Int cast
+    let ratio: Float = 10.0 / 3.0;
+    let int_ratio: Int = ratio as Int;
+    assert(int_ratio == 3);
+
+    // Negative cast
+    let neg_float: Float = -7.5;
+    let neg_int: Int = neg_float as Int;
+    assert(neg_int == -7);
+
+    // Int to Float operations
+    let a: Int = 7;
+    let b: Int = 2;
+    let float_div: Float = (a as Float) / (b as Float);
+    assert(float_div == 3.5);
+
+    // Usize conversion
+    let len: Int = 5;
+    let doubled: Int = len * 2;
+    assert(doubled == 10);
+
+    // === None coercion to any Maybe<T> ===
+
+    let none_int: Maybe<Int> = None;
+    let none_text: Maybe<Text> = None;
+    let none_bool: Maybe<Bool> = None;
+
+    assert(none_int == None);
+    assert(none_text == None);
+    assert(none_bool == None);
+
+    // === Never type coercion ===
+
+    // Never in match arms (panic returns Never, coerces to any type)
+    let match_result: Text = match Some(42) {
+        Some(n) => f"number: {n}",
+        None => panic("impossible"),  // Never coerces to Text
+    };
+    assert(match_result == "number: 42");
+
+    // Never in if-else
+    let result: Int = if true { 42 } else { panic("never reaches") };
+    assert(result == 42);
+
+    // === Text literal coercions ===
+
+    // Text literals work as both Text values and Text references
+    let owned_text: Text = "hello";
+    let text_len = owned_text.len();
+    assert(text_len == 5);
+
+    // Text in function calls
+    let ln = takes_text("world");
+    assert(ln == 5);
+
+    // === Closure to function pointer coercions ===
+
+    // Non-capturing closures can be used where fn(T) -> T is expected
+    let result2: Int = apply_fn(|x: Int| x * 2, 21);
+    assert(result2 == 42);
+
+    let result3: Int = apply_fn(|x: Int| x + 100, 5);
+    assert(result3 == 105);
+
+    // === Generic identity preserves types ===
+
+    let int_id: Int = identity(42);
+    assert(int_id == 42);
+
+    let text_id: Text = identity("hello");
+    assert(text_id == "hello");
+
+    let float_id: Float = identity(3.14);
+    assert(float_id == 3.14);
+
+    // === Numeric precision ===
+
+    let large_int: Int = 1_000_000;
+    let as_float: Float = large_int as Float;
+    assert(as_float == 1000000.0);
+
+    let neg_large: Int = -500_000;
+    let neg_float: Float = neg_large as Float;
+    assert(neg_float == -500000.0);
+
+    // === Cast chains ===
+
+    let start: Int = 100;
+    let mid: Float = start as Float;
+    let result4: Int = (mid * 1.5) as Int;
+    assert(result4 == 150);
+
+    // === Unit coercions ===
+
+    let unit_val: Unit = ();
+    let some_unit: Maybe<Unit> = Some(unit_val);
+    assert(some_unit == Some(()));
+
+    print("Type coercion tests passed!");
+}

@@ -1,0 +1,124 @@
+// @test: run
+// Generic functions — type parameters, constraints
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn max_val(a: Int, b: Int) -> Int {
+    if (a > b) { a } else { b }
+}
+
+fn min_val(a: Int, b: Int) -> Int {
+    if (a < b) { a } else { b }
+}
+
+fn clamp(val: Int, lo: Int, hi: Int) -> Int {
+    max_val(lo, min_val(val, hi))
+}
+
+fn swap_pair(a: Int, b: Int) -> Int {
+    // Return a + b to prove both values are accessible
+    a + b
+}
+
+fn find_index(xs: List<Int>, target: Int) -> Int {
+    let mut i = 0;
+    while i < xs.len() {
+        if (xs[i] == target) {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn count_if(xs: List<Int>, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < xs.len() {
+        if (pred(xs[i])) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Test 1: Identity
+    let a = identity(42);
+    if (a != 42) {
+        print(f"FAIL test1: identity(42) = {a}");
+        return 1;
+    }
+    print("test1 identity: OK");
+
+    // Test 2: Max/Min
+    if (max_val(3, 7) != 7) {
+        print("FAIL test2a");
+        return 1;
+    }
+    if (min_val(3, 7) != 3) {
+        print("FAIL test2b");
+        return 1;
+    }
+    print("test2 max/min: OK");
+
+    // Test 3: Clamp
+    if (clamp(5, 0, 10) != 5) {
+        print("FAIL test3a");
+        return 1;
+    }
+    if (clamp(-5, 0, 10) != 0) {
+        print("FAIL test3b");
+        return 1;
+    }
+    if (clamp(15, 0, 10) != 10) {
+        print("FAIL test3c");
+        return 1;
+    }
+    print("test3 clamp: OK");
+
+    // Test 4: Find index
+    let data = [10, 20, 30, 40, 50];
+    let idx = find_index(data, 30);
+    if (idx != 2) {
+        print(f"FAIL test4a: idx = {idx}");
+        return 1;
+    }
+    let missing = find_index(data, 99);
+    if (missing != -1) {
+        print(f"FAIL test4b: missing = {missing}");
+        return 1;
+    }
+    print("test4 find_index: OK");
+
+    // Test 5: Count if
+    fn is_positive(x: Int) -> Bool { x > 0 }
+    fn is_even(x: Int) -> Bool { x % 2 == 0 }
+
+    let nums = [3, -1, 4, -1, 5, 9, -2, 6];
+    let pos = count_if(nums, is_positive);
+    if (pos != 5) {
+        print(f"FAIL test5a: positive count = {pos}");
+        return 1;
+    }
+    let ev = count_if(nums, is_even);
+    if (ev != 3) {
+        print(f"FAIL test5b: even count = {ev}");
+        return 1;
+    }
+    print("test5 count_if: OK");
+
+    // Test 6: Nested generic calls
+    let x = identity(identity(identity(100)));
+    if (x != 100) {
+        print(f"FAIL test6: nested identity = {x}");
+        return 1;
+    }
+    print("test6 nested generics: OK");
+
+    print("1032_generic_functions: PASS");
+    0
+}

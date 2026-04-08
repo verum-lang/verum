@@ -1,0 +1,163 @@
+// =============================================================================
+// record_import_test.vr - Tests for record type link and field access
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, types, link, record, field-access
+// @description: Verifies that imported record types work correctly including
+//               field access, static method calls, and type construction.
+//
+// This test file is designed to catch regressions in the type system's
+// handling of imported record types with complex field structures.
+// =============================================================================
+
+mount core.base.result.{Error, DefectInfo, ContextError, RetryOptions, RetryBackoff};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.protocols.{Clone};
+
+// =============================================================================
+// SECTION 1: Simple Record Type Import (Error)
+// =============================================================================
+
+/// Test that Error type can be imported and constructed via static method
+@test
+fn test_error_new() {
+    let err = Error.new("test error message");
+    // This should work - simple record with one Text field
+}
+
+/// Test that Error fields are accessible
+@test
+fn test_error_field_access() {
+    let err = Error.new("test error message");
+    let msg = err.message;
+    assert_eq(msg, "test error message");
+}
+
+// =============================================================================
+// SECTION 2: Complex Record Type Import (DefectInfo)
+// =============================================================================
+
+/// Test DefectInfo static method resolution
+@test
+fn test_defectinfo_new() {
+    // DefectInfo has fields: message: Text, location: Maybe<Text>, backtrace: Maybe<Text>
+    let info: DefectInfo = DefectInfo.new("defect message");
+    // This tests that DefectInfo.new returns DefectInfo type
+}
+
+/// Test DefectInfo field access on message field
+@test
+fn test_defectinfo_message_access() {
+    let info: DefectInfo = DefectInfo.new("defect message");
+    let msg = info.message;
+    assert_eq(msg, "defect message");
+}
+
+/// Test DefectInfo field access on Maybe<Text> fields
+@test
+fn test_defectinfo_maybe_fields() {
+    let info: DefectInfo = DefectInfo.new("defect message");
+    // location should be None by default
+    assert(info.location.is_none());
+    // backtrace should be None by default
+    assert(info.backtrace.is_none());
+}
+
+/// Test DefectInfo method chaining
+@test
+fn test_defectinfo_with_location() {
+    let info: DefectInfo = DefectInfo.new("defect message").with_location("main.vr:42");
+    assert_eq(info.message, "defect message");
+    assert(info.location.is_some());
+    assert_eq(info.location.unwrap(), "main.vr:42");
+}
+
+// =============================================================================
+// SECTION 3: Generic Record Type Import (ContextError<E>)
+// =============================================================================
+
+/// Test ContextError construction and field access
+@test
+fn test_context_error_new() {
+    let ctx_err: ContextError<Text> = ContextError.new("context info", "source error");
+    // Verify the error was created
+}
+
+/// Test ContextError field accessor methods
+@test
+fn test_context_error_accessors() {
+    let ctx_err: ContextError<Text> = ContextError.new("context info", "source error");
+    let ctx = ctx_err.message();
+    let src = ctx_err.source();
+    assert_eq(*ctx, "context info");
+    assert_eq(*src, "source error");
+}
+
+/// Test ContextError into_source consumption
+@test
+fn test_context_error_into_source() {
+    let ctx_err: ContextError<Text> = ContextError.new("context", "source");
+    let source = ctx_err.into_source();
+    assert_eq(source, "source");
+}
+
+// =============================================================================
+// SECTION 4: Record with Function Field (RetryOptions<E>)
+// =============================================================================
+
+/// Test RetryOptions with simple configuration
+@test
+fn test_retry_config_simple() {
+    let config: RetryOptions<Text> = RetryOptions.simple(3);
+    assert_eq(config.max_attempts, 3);
+}
+
+/// Test RetryOptions with exponential backoff
+@test
+fn test_retry_config_exponential() {
+    let config: RetryOptions<Text> = RetryOptions.exponential(5, 100, 5000);
+    assert_eq(config.max_attempts, 5);
+}
+
+// =============================================================================
+// SECTION 5: Variant Type with Methods (RetryBackoff)
+// =============================================================================
+
+/// Test RetryBackoff.None delay calculation
+@test
+fn test_backoff_none() {
+    let strategy = RetryBackoff.None;
+    let delay = strategy.delay_for_attempt(5);
+    assert_eq(delay, 0);
+}
+
+/// Test RetryBackoff.Linear delay calculation
+@test
+fn test_backoff_linear() {
+    let strategy = RetryBackoff.Linear { delay_ms: 500 };
+    let delay = strategy.delay_for_attempt(3);
+    assert_eq(delay, 500);
+}
+
+/// Test RetryBackoff.Exponential delay calculation (capped)
+@test
+fn test_backoff_exponential_capped() {
+    let strategy = RetryBackoff.Exponential {
+        initial_ms: 100,
+        max_ms: 500,
+        multiplier: 2.0,
+    };
+    // At attempt 10, delay would be 100 * 2^10 = 102400, but capped at 500
+    let delay = strategy.delay_for_attempt(10);
+    assert_eq(delay, 500);
+}
+
+// =============================================================================
+// Main function for test execution
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

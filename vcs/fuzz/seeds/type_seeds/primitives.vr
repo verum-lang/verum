@@ -1,0 +1,167 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, primitives
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// Primitive Types - Type System Primitive Test Seed
+// Tests all primitive types and their usage
+// =============================================================================
+
+// Integer types
+fn integer_types() {
+    let i: Int = 42;
+    let i8: I8 = 127;
+    let i16: I16 = 32767;
+    let i32: I32 = 2147483647;
+    let i64: I64 = 9223372036854775807;
+
+    let u: UInt = 42;
+    let u8: U8 = 255;
+    let u16: U16 = 65535;
+    let u32: U32 = 4294967295;
+    let u64: U64 = 18446744073709551615;
+
+    let size: USize = 1024;
+    let isize: ISize = -1024;
+}
+
+// Float types
+fn float_types() {
+    let f: Float = 3.14159;
+    let f32: F32 = 3.14;
+    let f64: F64 = 3.14159265358979;
+}
+
+// Boolean type
+fn boolean_type() {
+    let t: Bool = true;
+    let f: Bool = false;
+    let and: Bool = t && f;
+    let or: Bool = t || f;
+    let not: Bool = !t;
+}
+
+// Character type
+fn char_type() {
+    let c: Char = 'a';
+    let unicode: Char = '\u{1F600}';
+    let escape: Char = '\n';
+}
+
+// Text type (semantic String)
+fn text_type() {
+    let s: Text = "Hello, World!";
+    let empty: Text = "";
+    let multiline: Text = """
+        Multiple
+        lines
+    """;
+}
+
+// Unit type
+fn unit_type() {
+    let u: () = ();
+    fn returns_unit() {}
+    fn explicit_unit() -> () { () }
+}
+
+// Never type (bottom type)
+fn never_type() -> ! {
+    loop {}
+}
+
+// Type aliases for primitives
+type MyInt is Int;
+type MyFloat is Float;
+type MyBool is Bool;
+type MyChar is Char;
+type MyText is Text;
+
+fn use_aliases() {
+    let i: MyInt = 42;
+    let f: MyFloat = 3.14;
+    let b: MyBool = true;
+    let c: MyChar = 'x';
+    let s: MyText = "hello";
+}
+
+// Primitive conversions
+fn conversions() {
+    let i: Int = 42;
+    let f: Float = i as Float;
+    let u: UInt = i as UInt;
+
+    let big: I64 = 1000;
+    let small: I32 = big as I32;
+
+    let c: Char = 'A';
+    let code: Int = c as Int;
+}
+
+// Primitive operations
+fn operations() {
+    // Arithmetic
+    let sum: Int = 1 + 2;
+    let diff: Int = 5 - 3;
+    let prod: Int = 4 * 2;
+    let quot: Int = 10 / 3;
+    let rem: Int = 10 % 3;
+
+    // Comparison
+    let eq: Bool = 1 == 1;
+    let ne: Bool = 1 != 2;
+    let lt: Bool = 1 < 2;
+    let le: Bool = 1 <= 2;
+    let gt: Bool = 2 > 1;
+    let ge: Bool = 2 >= 1;
+
+    // Bitwise
+    let band: Int = 0xFF & 0x0F;
+    let bor: Int = 0xF0 | 0x0F;
+    let xor: Int = 0xFF ^ 0x0F;
+    let shl: Int = 1 << 4;
+    let shr: Int = 16 >> 2;
+}
+
+// Primitive methods
+fn methods() {
+    let i: Int = -42;
+    let abs: Int = i.abs();
+    let neg: Int = i.negate();
+
+    let f: Float = 3.14159;
+    let floor: Float = f.floor();
+    let ceil: Float = f.ceil();
+    let round: Float = f.round();
+
+    let s: Text = "Hello";
+    let len: USize = s.len();
+    let upper: Text = s.to_uppercase();
+    let lower: Text = s.to_lowercase();
+}
+
+// Primitive literals with type suffixes
+fn typed_literals() {
+    let i8_lit = 42i8;
+    let i16_lit = 42i16;
+    let i32_lit = 42i32;
+    let i64_lit = 42i64;
+
+    let u8_lit = 42u8;
+    let u16_lit = 42u16;
+    let u32_lit = 42u32;
+    let u64_lit = 42u64;
+
+    let f32_lit = 3.14f32;
+    let f64_lit = 3.14f64;
+}
+
+// Primitive bounds
+fn bounded_primitives<T>() where type T: Numeric {}
+fn integer_bound<T>() where type T: Integer {}
+fn floating_bound<T>() where type T: Floating {}
+fn ordered_bound<T>() where type T: Ord {}
+fn equatable_bound<T>() where type T: Eq {}

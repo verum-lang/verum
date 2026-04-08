@@ -1,0 +1,380 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, protocol, trait
+// @description: Comprehensive protocols with async methods
+
+// Basic async protocol
+type AsyncReader is protocol {
+    async fn read(self, buf: &mut List<Byte>) -> Result<Int, IoError>;
+    async fn read_to_end(self, buf: &mut List<Byte>) -> Result<Int, IoError>;
+    async fn read_exact(self, buf: &mut List<Byte>, len: Int) -> Result<(), IoError>;
+}
+
+type AsyncWriter is protocol {
+    async fn write(self, data: &List<Byte>) -> Result<Int, IoError>;
+    async fn write_all(self, data: &List<Byte>) -> Result<(), IoError>;
+    async fn flush(self) -> Result<(), IoError>;
+}
+
+// Protocol inheritance with async methods
+type AsyncStream is protocol extends AsyncReader + AsyncWriter {
+    async fn shutdown(self) -> Result<(), IoError>;
+    async fn peek(self, buf: &mut List<Byte>) -> Result<Int, IoError>;
+}
+
+// Protocol with default async implementation
+type AsyncIterator is protocol {
+    type Item;
+
+    async fn next(self) -> Maybe<Self.Item>;
+
+    // Default implementation using async method
+    async fn collect(self) -> List<Self.Item> {
+        let mut result = [];
+        while let Some(item) = self.next().await {
+            result.push(item);
+        }
+        result
+    }
+
+    // Default fold implementation
+    async fn fold<B>(self, init: B, f: fn(B, Self.Item) -> B) -> B {
+        let mut acc = init;
+        while let Some(item) = self.next().await {
+            acc = f(acc, item);
+        }
+        acc
+    }
+
+    // Skip implementation
+    async fn skip(self, n: Int) -> Self {
+        for _ in 0..n {
+            self.next().await;
+        }
+        self
+    }
+
+    // Take implementation
+    async fn take(self, n: Int) -> List<Self.Item> {
+        let mut result = [];
+        for _ in 0..n {
+            match self.next().await {
+                Some(item) => result.push(item),
+                None => break,
+            }
+        }
+        result
+    }
+}
+
+// Protocol with associated types and async methods
+type AsyncService is protocol {
+    type Request;
+    type Response;
+    type Error;
+
+    async fn call(self, req: Self.Request) -> Result<Self.Response, Self.Error>;
+
+    // Health check with default implementation
+    async fn health_check(self) -> Bool {
+        true
+    }
+}
+
+// Protocol with generic async methods
+type AsyncMapper<T, U> is protocol {
+    async fn map(self, item: T) -> U;
+    async fn try_map(self, item: T) -> Result<U, Error>;
+}
+
+// Implementation of AsyncReader for TcpStream
+type TcpStream is {
+    handle: Int,
+    read_buffer: List<Byte>,
+};
+
+implement AsyncReader for TcpStream {
+    async fn read(self, buf: &mut List<Byte>) -> Result<Int, IoError> {
+        // Platform-specific async read
+        let bytes_read = platform_read(self.handle, buf).await?;
+        Ok(bytes_read)
+    }
+
+    async fn read_to_end(self, buf: &mut List<Byte>) -> Result<Int, IoError> {
+        let mut total = 0;
+        loop {
+            let n = self.read(buf).await?;
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        Ok(total)
+    }
+
+    async fn read_exact(self, buf: &mut List<Byte>, len: Int) -> Result<(), IoError> {
+        let mut read = 0;
+        while read < len {
+            let n = self.read(buf).await?;
+            if n == 0 {
+                return Err(IoError.UnexpectedEof);
+            }
+            read += n;
+        }
+        Ok(())
+    }
+}
+
+implement AsyncWriter for TcpStream {
+    async fn write(self, data: &List<Byte>) -> Result<Int, IoError> {
+        platform_write(self.handle, data).await
+    }
+
+    async fn write_all(self, data: &List<Byte>) -> Result<(), IoError> {
+        let mut written = 0;
+        while written < data.len() {
+            let n = self.write(&data[written..]).await?;
+            if n == 0 {
+                return Err(IoError.WriteZero);
+            }
+            written += n;
+        }
+        Ok(())
+    }
+
+    async fn flush(self) -> Result<(), IoError> {
+        platform_flush(self.handle).await
+    }
+}
+
+implement AsyncStream for TcpStream {
+    async fn shutdown(self) -> Result<(), IoError> {
+        platform_shutdown(self.handle).await
+    }
+
+    async fn peek(self, buf: &mut List<Byte>) -> Result<Int, IoError> {
+        platform_peek(self.handle, buf).await
+    }
+}
+
+// HTTP Service implementation
+type HttpService is {
+    base_url: Text,
+    client: HttpClient,
+};
+
+implement AsyncService for HttpService {
+    type Request = HttpRequest;
+    type Response = HttpResponse;
+    type Error = HttpError;
+
+    async fn call(self, req: Self.Request) -> Result<Self.Response, Self.Error> {
+        let full_url = f"{self.base_url}{req.path}";
+        self.client.request(req.method, full_url, req.body).await
+    }
+
+    async fn health_check(self) -> Bool {
+        match self.call(HttpRequest.get("/health")).await {
+            Ok(response) => response.status == 200,
+            Err(_) => false,
+        }
+    }
+}
+
+// Channel-based async iterator
+type ChannelIterator<T> is {
+    receiver: Receiver<T>,
+};
+
+implement AsyncIterator for ChannelIterator<T> {
+    type Item = T;
+
+    async fn next(self) -> Maybe<T> {
+        self.receiver.recv().await
+    }
+}
+
+// Generic function using async protocol
+async fn copy<R: AsyncReader, W: AsyncWriter>(
+    reader: &R,
+    writer: &W,
+) -> Result<Int, IoError> {
+    let mut buf = List.with_capacity(1024);
+    let mut total = 0;
+
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        writer.write(&buf[..n]).await?;
+        total += n;
+    }
+
+    writer.flush().await?;
+    Ok(total)
+}
+
+// Protocol with lifetime bounds
+type AsyncBorrowedReader is protocol {
+    async fn read_borrowed(self) -> &[Byte];
+}
+
+// Protocol requiring Send + Sync
+type AsyncSendService is protocol extends Send + Sync {
+    type Request: Send;
+    type Response: Send;
+
+    async fn serve(self, req: Self.Request) -> Self.Response;
+}
+
+// Implementation of Send service
+type ConcurrentService is {
+    counter: AtomicInt,
+};
+
+implement AsyncSendService for ConcurrentService {
+    type Request = Int;
+    type Response = Int;
+
+    async fn serve(self, req: Int) -> Int {
+        self.counter.fetch_add(1);
+        req * 2
+    }
+}
+
+// Protocol with async associated function (not method)
+type AsyncFactory is protocol {
+    type Product;
+
+    async fn create() -> Self.Product;
+    async fn create_many(count: Int) -> List<Self.Product>;
+}
+
+type Widget is {
+    id: Int,
+};
+
+implement AsyncFactory for Widget {
+    type Product = Widget;
+
+    async fn create() -> Widget {
+        Widget { id: generate_id().await }
+    }
+
+    async fn create_many(count: Int) -> List<Widget> {
+        let mut widgets = [];
+        for _ in 0..count {
+            widgets.push(Widget.create().await);
+        }
+        widgets
+    }
+}
+
+async fn generate_id() -> Int {
+    42
+}
+
+// Protocol with const and async methods
+type AsyncConfig is protocol {
+    const NAME: Text;
+
+    async fn load() -> Result<Self, Error>;
+    async fn save(self) -> Result<(), Error>;
+
+    fn name() -> Text {
+        Self.NAME
+    }
+}
+
+// Protocol object with async methods
+async fn use_any_reader(reader: &AsyncReader) -> Result<List<Byte>, IoError> {
+    let mut buf = [];
+    reader.read_to_end(&mut buf).await?;
+    Ok(buf)
+}
+
+// Protocol with async drop
+type AsyncDisposable is protocol {
+    async fn dispose(self);
+}
+
+implement AsyncDisposable for TcpStream {
+    async fn dispose(self) {
+        self.shutdown().await.ok();
+    }
+}
+
+// Using async protocol with bounds
+async fn fetch_and_process<S>(service: &S, request: S.Request) -> Result<S.Response, S.Error>
+where type S: AsyncService, S.Request: Clone, S.Response: Debug
+{
+    let response = service.call(request).await?;
+    Ok(response)
+}
+
+// Platform stubs
+async fn platform_read(handle: Int, buf: &mut List<Byte>) -> Result<Int, IoError> {
+    Ok(0)
+}
+
+async fn platform_write(handle: Int, data: &List<Byte>) -> Result<Int, IoError> {
+    Ok(data.len())
+}
+
+async fn platform_flush(handle: Int) -> Result<(), IoError> {
+    Ok(())
+}
+
+async fn platform_shutdown(handle: Int) -> Result<(), IoError> {
+    Ok(())
+}
+
+async fn platform_peek(handle: Int, buf: &mut List<Byte>) -> Result<Int, IoError> {
+    Ok(0)
+}
+
+// Error types
+type IoError is
+    | NotFound
+    | PermissionDenied
+    | ConnectionRefused
+    | UnexpectedEof
+    | WriteZero
+    | Other(Text);
+
+type HttpRequest is {
+    method: Text,
+    path: Text,
+    body: Maybe<List<Byte>>,
+};
+
+implement HttpRequest {
+    fn get(path: Text) -> Self {
+        Self { method: "GET", path, body: None }
+    }
+}
+
+type HttpResponse is {
+    status: Int,
+    body: List<Byte>,
+};
+
+type HttpError is
+    | ConnectionError
+    | Timeout
+    | InvalidResponse;
+
+type HttpClient is {};
+
+implement HttpClient {
+    async fn request(
+        self,
+        method: Text,
+        url: Text,
+        body: Maybe<List<Byte>>,
+    ) -> Result<HttpResponse, HttpError> {
+        Ok(HttpResponse { status: 200, body: [] })
+    }
+}

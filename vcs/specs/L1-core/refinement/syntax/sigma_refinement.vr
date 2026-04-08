@@ -1,0 +1,194 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, syntax, sigma, dependent
+
+/// Sigma-style refinement syntax (dependent sum type notation).
+/// Uses x: Type where predicate syntax similar to mathematical notation.
+/// This is the most explicit and mathematical form of refinement types.
+
+// ============================================================================
+// Basic sigma refinements with explicit binding
+// ============================================================================
+
+/// Positive integer with explicit binding 'x'
+type Positive is x: Int where x > 0;
+
+/// Non-negative integer with binding 'n'
+type NonNegative is n: Int where n >= 0;
+
+/// Non-zero integer with binding 'x'
+type NonZero is x: Int where x != 0;
+
+/// Negative integer with binding 'v'
+type Negative is v: Int where v < 0;
+
+// ============================================================================
+// Range refinements with sigma syntax
+// ============================================================================
+
+/// Bounded value within symmetric range
+type Bounded is v: Int where v >= -100 && v <= 100;
+
+/// Unit interval [0.0, 1.0] with explicit float binding
+type UnitInterval is x: Float where x >= 0.0 && x <= 1.0;
+
+/// Probability value (alias for unit interval)
+type Probability is p: Float where p >= 0.0 && p <= 1.0;
+
+/// Byte range with explicit binding
+type Byte is b: Int where b >= 0 && b < 256;
+
+/// Percentage with descriptive binding name
+type Percentage is pct: Int where pct >= 0 && pct <= 100;
+
+/// Valid age with meaningful binding
+type ValidAge is age: Int where age >= 0 && age <= 150;
+
+/// Port number with domain-specific binding
+type Port is port: Int where port >= 1 && port <= 65535;
+
+// ============================================================================
+// Sigma refinements with complex predicates
+// ============================================================================
+
+/// Even positive number
+type EvenPositive is x: Int where x > 0 && x % 2 == 0;
+
+/// Odd negative number
+type OddNegative is x: Int where x < 0 && x % 2 != 0;
+
+/// Divisible by specific values
+type DivisibleBy3 is x: Int where x % 3 == 0;
+type DivisibleBy5 is x: Int where x % 5 == 0;
+type DivisibleBy15 is x: Int where x % 3 == 0 && x % 5 == 0;
+
+/// Power of two
+type PowerOfTwo is n: Int where n > 0 && (n & (n - 1)) == 0;
+
+/// Odd integer
+type Odd is n: Int where n % 2 != 0;
+
+/// Even integer
+type Even is n: Int where n % 2 == 0;
+
+// ============================================================================
+// Sigma refinements on strings/text
+// ============================================================================
+
+/// Non-empty string with binding 's'
+type NonEmptyText is s: Text where len(s) > 0;
+
+/// Short string with binding
+type ShortString is s: Text where len(s) <= 255;
+
+/// Identifier with length constraints
+type Identifier is s: Text where len(s) > 0 && len(s) <= 64;
+
+/// Email-like text with binding
+type Email is s: Text where contains(s, "@") && len(s) >= 3;
+
+/// Username with specific constraints
+type Username is name: Text where len(name) >= 3 && len(name) <= 20;
+
+// ============================================================================
+// Sigma refinements on collections
+// ============================================================================
+
+/// Non-empty list with binding 'xs'
+type NonEmptyList<T> is xs: List<T> where len(xs) > 0;
+
+/// Singleton list
+type Singleton<T> is xs: List<T> where len(xs) == 1;
+
+/// Pair list (exactly 2 elements)
+type PairList<T> is xs: List<T> where len(xs) == 2;
+
+/// Bounded list with explicit capacity
+type BoundedList<T> is xs: List<T> where len(xs) <= 100;
+
+/// Even length list
+type EvenLengthList<T> is xs: List<T> where len(xs) % 2 == 0;
+
+// ============================================================================
+// Sigma refinements with quantifiers
+// ============================================================================
+
+/// List where all elements are positive
+type AllPositive is xs: List<Int> where forall x in xs => x > 0;
+
+/// List where all elements are non-negative
+type AllNonNegative is xs: List<Int> where forall x in xs => x >= 0;
+
+/// Sorted list (ascending)
+type Sorted is xs: List<Int> where forall i in 0..(len(xs) - 1) => xs[i] <= xs[i + 1];
+
+/// List containing at least one positive element
+type HasPositive is xs: List<Int> where exists x in xs => x > 0;
+
+// ============================================================================
+// Functions using sigma types
+// ============================================================================
+
+fn safe_divide(x: Int, y: NonZero) -> Int {
+    x / y
+}
+
+fn clamp_to_byte(x: Int) -> Byte {
+    if x < 0 { 0 }
+    else if x > 255 { 255 }
+    else { x }
+}
+
+fn absolute(x: Int) -> NonNegative {
+    if x >= 0 { x } else { -x }
+}
+
+// ============================================================================
+// Main function demonstrating usage
+// ============================================================================
+
+fn main() {
+    // Basic sigma types
+    let pos: Positive = 42;
+    let non_neg: NonNegative = 0;
+    let nz: NonZero = -1;
+    let neg: Negative = -5;
+
+    // Range types
+    let bounded: Bounded = 50;
+    let unit: UnitInterval = 0.5;
+    let prob: Probability = 0.75;
+    let byte: Byte = 200;
+    let pct: Percentage = 50;
+    let age: ValidAge = 25;
+    let port: Port = 8080;
+
+    // Complex predicates
+    let even_pos: EvenPositive = 4;
+    let div15: DivisibleBy15 = 30;
+    let pow2: PowerOfTwo = 8;
+
+    // Text types
+    let name: NonEmptyText = "hello";
+    let short: ShortString = "brief";
+    let ident: Identifier = "my_var";
+    let user: Username = "alice";
+
+    // Collection types
+    let items: NonEmptyList<Int> = [1, 2, 3];
+    let single: Singleton<Int> = [42];
+    let pair: PairList<Int> = [1, 2];
+
+    // Function calls
+    let result = safe_divide(10, 2);
+    let clamped = clamp_to_byte(300);
+    let abs = absolute(-10);
+
+    assert(pos > 0);
+    assert(byte >= 0 && byte < 256);
+    assert(even_pos > 0 && even_pos % 2 == 0);
+    assert(result == 5);
+    assert(clamped == 255);
+    assert(abs == 10);
+}

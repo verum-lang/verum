@@ -1,0 +1,138 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, wasm, export
+
+/// WebAssembly export demonstration
+/// Shows how to export Verum functions for use in WebAssembly
+
+type c_void is ();
+
+// ============================================================
+// WASM ENVIRONMENT IMPORTS
+// ============================================================
+
+ffi wasm_env {
+    @extern("C")
+    fn memory_grow(pages: u32) -> *mut u8;
+
+    @extern("C")
+    fn memory_size() -> u32;
+}
+
+// ============================================================
+// EXPORTED FUNCTIONS
+// ============================================================
+
+/// Simple arithmetic export
+@wasm_export
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+@wasm_export
+fn multiply(a: i32, b: i32) -> i32 {
+    a * b
+}
+
+/// String processing
+@wasm_export
+fn string_to_upper(ptr: i32, len: i32) -> i32 {
+    // Would process string in linear memory
+    ptr
+}
+
+/// Memory allocation for WASM
+@wasm_export
+fn wasm_alloc(size: i32) -> i32 {
+    // Simple bump allocator for WASM linear memory
+    size
+}
+
+@wasm_export
+fn wasm_free(ptr: i32, size: i32) {
+    // WASM linear memory doesn't support fine-grained deallocation
+}
+
+// ============================================================
+// DATA PROCESSING EXPORTS
+// ============================================================
+
+/// Process array of i32 values
+@wasm_export
+fn sum_array(ptr: i32, len: i32) -> i32 {
+    // Would read from linear memory
+    0
+}
+
+/// Find max value in array
+@wasm_export
+fn find_max(ptr: i32, len: i32) -> i32 {
+    // Would read from linear memory
+    0
+}
+
+/// Sort array in place
+@wasm_export
+fn sort_array(ptr: i32, len: i32) {
+    // Would sort in linear memory
+}
+
+// ============================================================
+// STATE MANAGEMENT
+// ============================================================
+
+/// Global state for WASM module
+type WasmState is {
+    initialized: Bool,
+    counter: i32,
+};
+
+static mut STATE: WasmState = WasmState { initialized: false, counter: 0 };
+
+/// Initialize module
+@wasm_export
+fn init() {
+    // Module initialization
+}
+
+/// Increment counter
+@wasm_export
+fn increment() -> i32 {
+    1
+}
+
+/// Get current count
+@wasm_export
+fn get_count() -> i32 {
+    0
+}
+
+// ============================================================
+// CALLBACK EXPORTS
+// ============================================================
+
+/// Register a WASM callback (table indirect call)
+@wasm_export
+fn register_handler(func_idx: i32) -> i32 {
+    // Would store function index for later indirect call
+    func_idx
+}
+
+/// Event processing
+@wasm_export
+fn process_event(event_type: i32, data_ptr: i32, data_len: i32) -> i32 {
+    if event_type == 0 {
+        // Click event
+        1
+    } else if event_type == 1 {
+        // Key event
+        2
+    } else {
+        -1
+    }
+}
+
+fn main() {
+    // WASM export tests
+}

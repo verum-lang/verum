@@ -1,0 +1,284 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, widget, block, border, rendering
+// @expected-exit: 0
+// @description: Terminal Block widget border rendering with Plain, Rounded, Double, Thick border types
+
+fn max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+type BorderType is Plain | Rounded | Double | Thick;
+
+// Borders bitfield: top=1, right=2, bottom=4, left=8, all=15
+type Borders is { bits: Int };
+
+implement Borders {
+    pub fn none() -> Borders { Borders { bits: 0 } }
+    pub fn all() -> Borders { Borders { bits: 15 } }
+    pub fn top_bottom() -> Borders { Borders { bits: 5 } }
+    pub fn left_right() -> Borders { Borders { bits: 10 } }
+    pub fn has_top(&self) -> Bool { (self.bits & 1) != 0 }
+    pub fn has_right(&self) -> Bool { (self.bits & 2) != 0 }
+    pub fn has_bottom(&self) -> Bool { (self.bits & 4) != 0 }
+    pub fn has_left(&self) -> Bool { (self.bits & 8) != 0 }
+}
+
+// Border character set for each type
+type BorderChars is {
+    top_left: Text, top_right: Text, bottom_left: Text, bottom_right: Text,
+    horizontal: Text, vertical: Text
+};
+
+fn border_chars_for(bt: BorderType) -> BorderChars {
+    match bt {
+        Plain => BorderChars {
+            top_left: "+", top_right: "+", bottom_left: "+", bottom_right: "+",
+            horizontal: "-", vertical: "|"
+        },
+        Rounded => BorderChars {
+            top_left: "/", top_right: "\\", bottom_left: "\\", bottom_right: "/",
+            horizontal: "-", vertical: "|"
+        },
+        Double => BorderChars {
+            top_left: "#", top_right: "#", bottom_left: "#", bottom_right: "#",
+            horizontal: "=", vertical: "H"
+        },
+        Thick => BorderChars {
+            top_left: "*", top_right: "*", bottom_left: "*", bottom_right: "*",
+            horizontal: "~", vertical: "!"
+        },
+    }
+}
+
+type Cell is { ch: Text };
+
+type Buffer is { cells: List<Cell>, width: Int, height: Int };
+
+implement Buffer {
+    pub fn new(width: Int, height: Int) -> Buffer {
+        let mut cells: List<Cell> = [];
+        let total = width * height;
+        let mut i = 0;
+        while i < total {
+            cells.push(Cell { ch: " " });
+            i = i + 1;
+        }
+        Buffer { cells: cells, width: width, height: height }
+    }
+
+    pub fn set(&mut self, x: Int, y: Int, ch: Text) {
+        if x >= 0 && x < self.width && y >= 0 && y < self.height {
+            let idx = y * self.width + x;
+            self.cells[idx] = Cell { ch: ch };
+        }
+    }
+
+    pub fn get(&self, x: Int, y: Int) -> Text {
+        let idx = y * self.width + x;
+        self.cells[idx].ch
+    }
+}
+
+fn render_block(buf: &mut Buffer, x: Int, y: Int, w: Int, h: Int, borders: Borders, bt: BorderType) {
+    let chars = border_chars_for(bt);
+
+    // Top border
+    if borders.has_top() && h > 0 {
+        let mut col = x + 1;
+        while col < x + w - 1 {
+            buf.set(col, y, chars.horizontal);
+            col = col + 1;
+        }
+    }
+
+    // Bottom border
+    if borders.has_bottom() && h > 1 {
+        let mut col = x + 1;
+        while col < x + w - 1 {
+            buf.set(col, y + h - 1, chars.horizontal);
+            col = col + 1;
+        }
+    }
+
+    // Left border
+    if borders.has_left() && w > 0 {
+        let mut row = y + 1;
+        while row < y + h - 1 {
+            buf.set(x, row, chars.vertical);
+            row = row + 1;
+        }
+    }
+
+    // Right border
+    if borders.has_right() && w > 1 {
+        let mut row = y + 1;
+        while row < y + h - 1 {
+            buf.set(x + w - 1, row, chars.vertical);
+            row = row + 1;
+        }
+    }
+
+    // Corners
+    if borders.has_top() && borders.has_left() {
+        buf.set(x, y, chars.top_left);
+    }
+    if borders.has_top() && borders.has_right() {
+        buf.set(x + w - 1, y, chars.top_right);
+    }
+    if borders.has_bottom() && borders.has_left() {
+        buf.set(x, y + h - 1, chars.bottom_left);
+    }
+    if borders.has_bottom() && borders.has_right() {
+        buf.set(x + w - 1, y + h - 1, chars.bottom_right);
+    }
+}
+
+fn test_plain_border() -> Int {
+    let mut buf = Buffer.new(10, 5);
+    render_block(&mut buf, 0, 0, 10, 5, Borders.all(), Plain);
+
+    // Corners
+    if buf.get(0, 0) != "+" {
+        print(f"FAIL top-left: {buf.get(0, 0)}");
+        return 1;
+    }
+    if buf.get(9, 0) != "+" {
+        print(f"FAIL top-right: {buf.get(9, 0)}");
+        return 1;
+    }
+    if buf.get(0, 4) != "+" {
+        print(f"FAIL bottom-left: {buf.get(0, 4)}");
+        return 1;
+    }
+    if buf.get(9, 4) != "+" {
+        print(f"FAIL bottom-right: {buf.get(9, 4)}");
+        return 1;
+    }
+
+    // Horizontal edges
+    if buf.get(5, 0) != "-" {
+        print(f"FAIL top edge: {buf.get(5, 0)}");
+        return 1;
+    }
+    if buf.get(5, 4) != "-" {
+        print(f"FAIL bottom edge: {buf.get(5, 4)}");
+        return 1;
+    }
+
+    // Vertical edges
+    if buf.get(0, 2) != "|" {
+        print(f"FAIL left edge: {buf.get(0, 2)}");
+        return 1;
+    }
+    if buf.get(9, 2) != "|" {
+        print(f"FAIL right edge: {buf.get(9, 2)}");
+        return 1;
+    }
+
+    // Interior should be blank
+    if buf.get(5, 2) != " " {
+        print(f"FAIL interior: {buf.get(5, 2)}");
+        return 1;
+    }
+
+    0
+}
+
+fn test_rounded_border() -> Int {
+    let mut buf = Buffer.new(6, 4);
+    render_block(&mut buf, 0, 0, 6, 4, Borders.all(), Rounded);
+
+    if buf.get(0, 0) != "/" {
+        print(f"FAIL rounded top-left: {buf.get(0, 0)}");
+        return 1;
+    }
+    if buf.get(5, 0) != "\\" {
+        print(f"FAIL rounded top-right: {buf.get(5, 0)}");
+        return 1;
+    }
+    if buf.get(0, 3) != "\\" {
+        print(f"FAIL rounded bottom-left: {buf.get(0, 3)}");
+        return 1;
+    }
+    if buf.get(5, 3) != "/" {
+        print(f"FAIL rounded bottom-right: {buf.get(5, 3)}");
+        return 1;
+    }
+    0
+}
+
+fn test_double_border() -> Int {
+    let mut buf = Buffer.new(6, 4);
+    render_block(&mut buf, 0, 0, 6, 4, Borders.all(), Double);
+
+    if buf.get(0, 0) != "#" {
+        print(f"FAIL double corner: {buf.get(0, 0)}");
+        return 1;
+    }
+    if buf.get(3, 0) != "=" {
+        print(f"FAIL double horiz: {buf.get(3, 0)}");
+        return 1;
+    }
+    if buf.get(0, 1) != "H" {
+        print(f"FAIL double vert: {buf.get(0, 1)}");
+        return 1;
+    }
+    0
+}
+
+fn test_partial_borders() -> Int {
+    let mut buf = Buffer.new(6, 4);
+    render_block(&mut buf, 0, 0, 6, 4, Borders.top_bottom(), Plain);
+
+    // Top edge should exist
+    if buf.get(3, 0) != "-" {
+        print(f"FAIL partial top: {buf.get(3, 0)}");
+        return 1;
+    }
+    // Left edge should NOT exist (only top+bottom)
+    if buf.get(0, 1) != " " {
+        print(f"FAIL partial left should be blank: {buf.get(0, 1)}");
+        return 1;
+    }
+    // No corners since left is missing
+    if buf.get(0, 0) != " " {
+        print(f"FAIL partial no top-left corner: {buf.get(0, 0)}");
+        return 1;
+    }
+    0
+}
+
+fn test_no_borders() -> Int {
+    let mut buf = Buffer.new(5, 3);
+    render_block(&mut buf, 0, 0, 5, 3, Borders.none(), Plain);
+    // Everything should be blank
+    let mut y = 0;
+    while y < 3 {
+        let mut x = 0;
+        while x < 5 {
+            if buf.get(x, y) != " " {
+                print(f"FAIL no-border ({x},{y})");
+                return 1;
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_plain_border();
+    if r1 != 0 { return r1; }
+    let r2 = test_rounded_border();
+    if r2 != 0 { return r2; }
+    let r3 = test_double_border();
+    if r3 != 0 { return r3; }
+    let r4 = test_partial_borders();
+    if r4 != 0 { return r4; }
+    let r5 = test_no_borders();
+    if r5 != 0 { return r5; }
+    print("PASS: term_widget_block");
+    0
+}

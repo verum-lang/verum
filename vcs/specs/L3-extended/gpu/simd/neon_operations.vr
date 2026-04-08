@@ -1,0 +1,442 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: simd, neon, arm, intrinsics
+
+/// ARM NEON SIMD operations for ARM64/AArch64 processors.
+/// Includes basic operations, advanced SIMD, and SVE2 extensions.
+
+mount std.simd.neon.*;
+
+fn main() {
+    if !cpu_has_feature(CpuFeature.NEON) {
+        return;  // Skip on non-NEON systems
+    }
+
+    test_basic_neon();
+    test_load_store();
+    test_arithmetic();
+    test_shuffle_permute();
+    test_horizontal_ops();
+    test_polynomial();
+    test_crypto_neon();
+    test_dot_product();
+}
+
+fn test_basic_neon() {
+    // 128-bit vector types
+    let a: float32x4_t = vdupq_n_f32(1.0);  // Splat 1.0
+    let b: float32x4_t = float32x4_t.from_array([1.0, 2.0, 3.0, 4.0]);
+
+    // 64-bit vector types
+    let a64: float32x2_t = vdup_n_f32(1.0);
+    let b64: float32x2_t = float32x2_t.from_array([1.0, 2.0]);
+
+    // Integer vectors
+    let ia: int32x4_t = vdupq_n_s32(1);
+    let ib: int32x4_t = int32x4_t.from_array([1, 2, 3, 4]);
+
+    // Unsigned vectors
+    let ua: uint32x4_t = vdupq_n_u32(1);
+
+    // 8-bit vectors (for byte processing)
+    let bytes: uint8x16_t = vdupq_n_u8(0xFF);
+
+    // 16-bit vectors
+    let shorts: int16x8_t = vdupq_n_s16(100);
+}
+
+fn test_load_store() {
+    let data: [f32; 8] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let mut output: [f32; 8] = [0.0; 8];
+
+    // Load 128-bit (4 floats)
+    let v = vld1q_f32(&data[0]);
+
+    // Store 128-bit
+    vst1q_f32(&mut output[0], v);
+
+    // Load with lane insert
+    let base = vdupq_n_f32(0.0);
+    let with_lane = vld1q_lane_f32.<2>(&data[5], base);
+
+    // Load pair (interleaved)
+    let interleaved: [f32; 8] = [1.0, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0];
+    let (evens, odds) = vld2q_f32(&interleaved[0]);
+    // evens = [1, 2, 3, 4], odds = [5, 6, 7, 8]
+
+    // Store pair (interleaved)
+    let mut interleaved_out: [f32; 8] = [0.0; 8];
+    vst2q_f32(&mut interleaved_out[0], evens, odds);
+
+    // Load triple/quad interleaved
+    let rgb: [u8; 12] = [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255];
+    let (r, g, b) = vld3u8(&rgb[0]);
+
+    // Load with replicate
+    let replicated = vld1q_dup_f32(&data[0]);  // [data[0]; 4]
+
+    // Load structure of arrays
+    type Pixel is { r: u8, g: u8, b: u8, a: u8 };
+    let pixels: [Pixel; 4] = [Pixel { r: 255, g: 0, b: 0, a: 255 }; 4];
+    let (r, g, b, a) = vld4u8(&pixels as *const _ as *const u8);
+}
+
+fn test_arithmetic() {
+    let a = float32x4_t.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = float32x4_t.from_array([5.0, 6.0, 7.0, 8.0]);
+
+    // Basic arithmetic
+    let add = vaddq_f32(a, b);
+    let sub = vsubq_f32(a, b);
+    let mul = vmulq_f32(a, b);
+    let div = vdivq_f32(a, b);
+
+    // Fused multiply-add: a * b + c
+    let c = vdupq_n_f32(10.0);
+    let fma = vfmaq_f32(c, a, b);  // c + a * b
+
+    // Fused multiply-subtract: c - a * b
+    let fms = vfmsq_f32(c, a, b);
+
+    // Negate
+    let neg = vnegq_f32(a);
+
+    // Absolute value
+    let abs_val = vabsq_f32(a);
+
+    // Reciprocal estimate
+    let recip = vrecpeq_f32(a);
+
+    // Reciprocal square root estimate
+    let rsqrt = vrsqrteq_f32(a);
+
+    // Newton-Raphson refinement for reciprocal
+    let recip_refined = vmulq_f32(recip, vrecpsq_f32(a, recip));
+
+    // Rounding
+    let rounded = vrndnq_f32(a);   // Round to nearest
+    let floor = vrndmq_f32(a);     // Floor
+    let ceil = vrndpq_f32(a);      // Ceiling
+    let trunc = vrndq_f32(a);      // Truncate
+
+    // Min/Max
+    let min_val = vminq_f32(a, b);
+    let max_val = vmaxq_f32(a, b);
+
+    // Min/Max across lanes
+    let min_lane = vminvq_f32(a);  // Minimum value in vector
+    let max_lane = vmaxvq_f32(a);  // Maximum value in vector
+
+    // Integer arithmetic
+    let ia = int32x4_t.from_array([1, 2, 3, 4]);
+    let ib = int32x4_t.from_array([5, 6, 7, 8]);
+
+    let iadd = vaddq_s32(ia, ib);
+    let isub = vsubq_s32(ia, ib);
+    let imul = vmulq_s32(ia, ib);
+
+    // Saturating arithmetic
+    let sat_add = vqaddq_s32(ia, ib);  // Saturate on overflow
+    let sat_sub = vqsubq_s32(ia, ib);
+
+    // Widening multiply (32x32 -> 64)
+    let ia_low: int32x2_t = vget_low_s32(ia);
+    let ib_low: int32x2_t = vget_low_s32(ib);
+    let wide_mul: int64x2_t = vmull_s32(ia_low, ib_low);
+
+    // Narrowing operations
+    let narrow: int16x4_t = vmovn_s32(ia);
+
+    // Bitwise operations
+    let and = vandq_s32(ia, ib);
+    let or = vorrq_s32(ia, ib);
+    let xor = veorq_s32(ia, ib);
+    let not = vmvnq_s32(ia);
+
+    // Shifts
+    let shl = vshlq_n_s32.<2>(ia);     // Left shift by immediate
+    let shr = vshrq_n_s32.<2>(ia);     // Right shift by immediate
+    let shl_var = vshlq_s32(ia, ib);    // Variable shift
+}
+
+fn test_shuffle_permute() {
+    let a = float32x4_t.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = float32x4_t.from_array([5.0, 6.0, 7.0, 8.0]);
+
+    // Extract low/high halves
+    let low: float32x2_t = vget_low_f32(a);   // [1.0, 2.0]
+    let high: float32x2_t = vget_high_f32(a); // [3.0, 4.0]
+
+    // Combine halves
+    let combined = vcombine_f32(high, low);  // [3.0, 4.0, 1.0, 2.0]
+
+    // Zip (interleave)
+    let (zip1, zip2) = vzipq_f32(a, b);
+    // zip1 = [1, 5, 2, 6], zip2 = [3, 7, 4, 8]
+
+    // Unzip (deinterleave)
+    let (unzip1, unzip2) = vuzpq_f32(a, b);
+    // unzip1 = [1, 3, 5, 7], unzip2 = [2, 4, 6, 8]
+
+    // Transpose
+    let (trn1, trn2) = vtrnq_f32(a, b);
+    // trn1 = [1, 5, 3, 7], trn2 = [2, 6, 4, 8]
+
+    // Reverse elements
+    let rev64 = vrev64q_f32(a);  // Reverse within 64-bit lanes: [2, 1, 4, 3]
+
+    // Extract (EXT)
+    let ext = vextq_f32.<2>(a, b);  // Concat and extract: [3, 4, 5, 6]
+
+    // Table lookup
+    let table: uint8x16_t = uint8x16_t.from_array([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    ]);
+    let indices: uint8x16_t = uint8x16_t.from_array([
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+    ]);
+    let looked_up = vqtbl1q_u8(table, indices);
+
+    // Duplicate lane
+    let dup_lane = vdupq_laneq_f32.<2>(a);  // [3.0; 4]
+}
+
+fn test_horizontal_ops() {
+    let a = float32x4_t.from_array([1.0, 2.0, 3.0, 4.0]);
+    let b = float32x4_t.from_array([5.0, 6.0, 7.0, 8.0]);
+
+    // Pairwise add
+    let padd = vpaddq_f32(a, b);  // [1+2, 3+4, 5+6, 7+8] = [3, 7, 11, 15]
+
+    // Pairwise max
+    let pmax = vpmaxq_f32(a, b);  // [max(1,2), max(3,4), max(5,6), max(7,8)]
+
+    // Pairwise min
+    let pmin = vpminq_f32(a, b);
+
+    // Add across (sum all lanes)
+    let sum = vaddvq_f32(a);  // 1 + 2 + 3 + 4 = 10
+
+    // Max across
+    let max_all = vmaxvq_f32(a);  // 4
+
+    // Min across
+    let min_all = vminvq_f32(a);  // 1
+
+    // Dot product (ARMv8.2-A DOTPROD extension)
+    if cpu_has_feature(CpuFeature.DOTPROD) {
+        let u8a: uint8x16_t = uint8x16_t.from_array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        let u8b: uint8x16_t = uint8x16_t.from_array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+
+        let acc: uint32x4_t = vdupq_n_u32(0);
+        let dot = vdotq_u32(acc, u8a, u8b);
+        // Each 32-bit lane contains dot product of 4 bytes
+        // [1+2+3+4, 5+6+7+8, 9+10+11+12, 13+14+15+16] = [10, 26, 42, 58]
+    }
+}
+
+fn test_polynomial() {
+    // Polynomial evaluation using NEON
+    let x = float32x4_t.from_array([0.5, 1.0, 1.5, 2.0]);
+
+    // Evaluate p(x) = c0 + c1*x + c2*x^2 + c3*x^3 using Hornerps method
+    let c0 = vdupq_n_f32(1.0);
+    let c1 = vdupq_n_f32(2.0);
+    let c2 = vdupq_n_f32(3.0);
+    let c3 = vdupq_n_f32(4.0);
+
+    // Horner: ((c3*x + c2)*x + c1)*x + c0
+    let p = vfmaq_f32(c2, c3, x);    // c3*x + c2
+    let p = vfmaq_f32(c1, p, x);      // p*x + c1
+    let p = vfmaq_f32(c0, p, x);      // p*x + c0
+
+    // Polynomial multiply (for GF(2) polynomials)
+    let poly_a: poly8x16_t = vdupq_n_p8(0x1B);
+    let poly_b: poly8x16_t = vdupq_n_p8(0x02);
+    let poly_mul: poly16x8_t = vmull_p8(vget_low_p8(poly_a), vget_low_p8(poly_b));
+}
+
+fn test_crypto_neon() {
+    // AES instructions (requires Crypto extension)
+    if cpu_has_feature(CpuFeature.AES) {
+        let state: uint8x16_t = vdupq_n_u8(0);
+        let key: uint8x16_t = vdupq_n_u8(0);
+
+        // AES single round encryption
+        let encrypted = vaeseq_u8(state, key);
+
+        // AES single round decryption
+        let decrypted = vaesdq_u8(state, key);
+
+        // AES MixColumns
+        let mixed = vaesmcq_u8(state);
+
+        // AES InverseMixColumns
+        let inv_mixed = vaesimcq_u8(state);
+    }
+
+    // SHA instructions (requires SHA extension)
+    if cpu_has_feature(CpuFeature.SHA) {
+        let hash: uint32x4_t = vdupq_n_u32(0);
+        let w: uint32x4_t = vdupq_n_u32(0);
+
+        // SHA-256 hash update
+        let sha256_hash = vsha256hq_u32(hash, hash, w);
+
+        // SHA-256 schedule update
+        let schedule = vsha256su0q_u32(w, w);
+    }
+}
+
+fn test_dot_product() {
+    // SDOT/UDOT for int8 machine learning
+    if cpu_has_feature(CpuFeature.DOTPROD) {
+        // Quantized neural network inference
+        let activations: int8x16_t = int8x16_t.from_array([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
+        ]);
+        let weights: int8x16_t = int8x16_t.from_array([
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+        ]);
+
+        let acc: int32x4_t = vdupq_n_s32(0);
+
+        // 4x int8 dot products producing 4x int32
+        let result = vdotq_s32(acc, activations, weights);
+    }
+
+    // BF16/FP16 matrix operations (ARMv8.6-A)
+    if cpu_has_feature(CpuFeature.BF16) {
+        let bf16_a: bfloat16x8_t = vdupq_n_bf16(1.0);
+        let bf16_b: bfloat16x8_t = vdupq_n_bf16(2.0);
+
+        let acc: float32x4_t = vdupq_n_f32(0.0);
+
+        // BF16 dot product accumulating to FP32
+        let result = vbfdotq_f32(acc, bf16_a, bf16_b);
+    }
+}
+
+// NEON type definitions (stubs)
+type float32x4_t is { data: [f32; 4] };
+type float32x2_t is { data: [f32; 2] };
+type int32x4_t is { data: [i32; 4] };
+type int32x2_t is { data: [i32; 2] };
+type int64x2_t is { data: [i64; 2] };
+type int16x8_t is { data: [i16; 8] };
+type int16x4_t is { data: [i16; 4] };
+type int8x16_t is { data: [i8; 16] };
+type uint32x4_t is { data: [u32; 4] };
+type uint8x16_t is { data: [u8; 16] };
+type uint8x8_t is { data: [u8; 8] };
+type poly8x16_t is { data: [u8; 16] };
+type poly16x8_t is { data: [u16; 8] };
+type bfloat16x8_t is { data: [u16; 8] };
+
+implement float32x4_t {
+    fn from_array(arr: [f32; 4]) -> Self { Self { data: arr } }
+}
+
+implement float32x2_t {
+    fn from_array(arr: [f32; 2]) -> Self { Self { data: arr } }
+}
+
+implement int32x4_t {
+    fn from_array(arr: [i32; 4]) -> Self { Self { data: arr } }
+}
+
+implement int8x16_t {
+    fn from_array(arr: [i8; 16]) -> Self { Self { data: arr } }
+}
+
+implement uint8x16_t {
+    fn from_array(arr: [u8; 16]) -> Self { Self { data: arr } }
+}
+
+// NEON intrinsic function stubs
+fn vdupq_n_f32(v: f32) -> float32x4_t { unreachable() }
+fn vdup_n_f32(v: f32) -> float32x2_t { unreachable() }
+fn vdupq_n_s32(v: i32) -> int32x4_t { unreachable() }
+fn vdupq_n_u32(v: u32) -> uint32x4_t { unreachable() }
+fn vdupq_n_u8(v: u8) -> uint8x16_t { unreachable() }
+fn vdupq_n_s16(v: i16) -> int16x8_t { unreachable() }
+fn vdupq_n_p8(v: u8) -> poly8x16_t { unreachable() }
+fn vdupq_n_bf16(v: f32) -> bfloat16x8_t { unreachable() }
+
+fn vld1q_f32(ptr: *const f32) -> float32x4_t { unreachable() }
+fn vst1q_f32(ptr: *mut f32, v: float32x4_t) { unreachable() }
+fn vld1q_lane_f32<const LANE: usize>(ptr: *const f32, v: float32x4_t) -> float32x4_t { unreachable() }
+fn vld2q_f32(ptr: *const f32) -> (float32x4_t, float32x4_t) { unreachable() }
+fn vst2q_f32(ptr: *mut f32, a: float32x4_t, b: float32x4_t) { unreachable() }
+fn vld3u8(ptr: *const u8) -> (uint8x8_t, uint8x8_t, uint8x8_t) { unreachable() }
+fn vld4u8(ptr: *const u8) -> (uint8x8_t, uint8x8_t, uint8x8_t, uint8x8_t) { unreachable() }
+fn vld1q_dup_f32(ptr: *const f32) -> float32x4_t { unreachable() }
+
+fn vaddq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vsubq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vmulq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vdivq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vfmaq_f32(c: float32x4_t, a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vfmsq_f32(c: float32x4_t, a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vnegq_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vabsq_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vrecpeq_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vrsqrteq_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vrecpsq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vrndnq_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vrndmq_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vrndpq_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vrndq_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vminq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vmaxq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vminvq_f32(a: float32x4_t) -> f32 { unreachable() }
+fn vmaxvq_f32(a: float32x4_t) -> f32 { unreachable() }
+
+fn vaddq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+fn vsubq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+fn vmulq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+fn vqaddq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+fn vqsubq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+fn vmull_s32(a: int32x2_t, b: int32x2_t) -> int64x2_t { unreachable() }
+fn vmovn_s32(a: int32x4_t) -> int16x4_t { unreachable() }
+fn vandq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+fn vorrq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+fn veorq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+fn vmvnq_s32(a: int32x4_t) -> int32x4_t { unreachable() }
+fn vshlq_n_s32<const N: usize>(a: int32x4_t) -> int32x4_t { unreachable() }
+fn vshrq_n_s32<const N: usize>(a: int32x4_t) -> int32x4_t { unreachable() }
+fn vshlq_s32(a: int32x4_t, b: int32x4_t) -> int32x4_t { unreachable() }
+
+fn vget_low_f32(a: float32x4_t) -> float32x2_t { unreachable() }
+fn vget_high_f32(a: float32x4_t) -> float32x2_t { unreachable() }
+fn vget_low_s32(a: int32x4_t) -> int32x2_t { unreachable() }
+fn vget_low_p8(a: poly8x16_t) -> poly8x8_t { unreachable() }
+fn vcombine_f32(a: float32x2_t, b: float32x2_t) -> float32x4_t { unreachable() }
+fn vzipq_f32(a: float32x4_t, b: float32x4_t) -> (float32x4_t, float32x4_t) { unreachable() }
+fn vuzpq_f32(a: float32x4_t, b: float32x4_t) -> (float32x4_t, float32x4_t) { unreachable() }
+fn vtrnq_f32(a: float32x4_t, b: float32x4_t) -> (float32x4_t, float32x4_t) { unreachable() }
+fn vrev64q_f32(a: float32x4_t) -> float32x4_t { unreachable() }
+fn vextq_f32<const N: usize>(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vqtbl1q_u8(t: uint8x16_t, idx: uint8x16_t) -> uint8x16_t { unreachable() }
+fn vdupq_laneq_f32<const N: usize>(a: float32x4_t) -> float32x4_t { unreachable() }
+
+fn vpaddq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vpmaxq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vpminq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t { unreachable() }
+fn vaddvq_f32(a: float32x4_t) -> f32 { unreachable() }
+fn vdotq_u32(acc: uint32x4_t, a: uint8x16_t, b: uint8x16_t) -> uint32x4_t { unreachable() }
+fn vdotq_s32(acc: int32x4_t, a: int8x16_t, b: int8x16_t) -> int32x4_t { unreachable() }
+
+fn vmull_p8(a: poly8x8_t, b: poly8x8_t) -> poly16x8_t { unreachable() }
+
+fn vaeseq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t { unreachable() }
+fn vaesdq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t { unreachable() }
+fn vaesmcq_u8(a: uint8x16_t) -> uint8x16_t { unreachable() }
+fn vaesimcq_u8(a: uint8x16_t) -> uint8x16_t { unreachable() }
+fn vsha256hq_u32(a: uint32x4_t, b: uint32x4_t, c: uint32x4_t) -> uint32x4_t { unreachable() }
+fn vsha256su0q_u32(a: uint32x4_t, b: uint32x4_t) -> uint32x4_t { unreachable() }
+fn vbfdotq_f32(acc: float32x4_t, a: bfloat16x8_t, b: bfloat16x8_t) -> float32x4_t { unreachable() }
+
+type poly8x8_t is { data: [u8; 8] };

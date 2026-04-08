@@ -1,0 +1,69 @@
+// @test: run
+// @level: L0
+// @description: 4 workers each capturing 2 channels
+// @expected-exit: 0
+
+fn main() -> Int {
+    let work = Channel.new(20);
+    let done = Channel.new(10);
+
+    // Pre-fill work
+    let mut w = 1;
+    while (w <= 8) {
+        work.send(w * 10);
+        w = w + 1;
+    }
+
+    // 4 workers, each capturing both work and done channels
+    let w1 = spawn {
+        let mut s = 0;
+        match work.recv() { Some(v) => { s = s + v; } None => {} }
+        match work.recv() { Some(v) => { s = s + v; } None => {} }
+        done.send(s);
+        s
+    };
+    let w2 = spawn {
+        let mut s = 0;
+        match work.recv() { Some(v) => { s = s + v; } None => {} }
+        match work.recv() { Some(v) => { s = s + v; } None => {} }
+        done.send(s);
+        s
+    };
+    let w3 = spawn {
+        let mut s = 0;
+        match work.recv() { Some(v) => { s = s + v; } None => {} }
+        match work.recv() { Some(v) => { s = s + v; } None => {} }
+        done.send(s);
+        s
+    };
+    let w4 = spawn {
+        let mut s = 0;
+        match work.recv() { Some(v) => { s = s + v; } None => {} }
+        match work.recv() { Some(v) => { s = s + v; } None => {} }
+        done.send(s);
+        s
+    };
+
+    w1.await;
+    w2.await;
+    w3.await;
+    w4.await;
+
+    let mut total = 0;
+    let mut c = 0;
+    while (c < 4) {
+        match done.recv() {
+            Some(v) => { total = total + v; }
+            None => {}
+        }
+        c = c + 1;
+    }
+
+    // 10+20+30+40+50+60+70+80 = 360
+    if (total != 360) {
+        print(f"FAIL: expected 360, got {total}");
+        return 1;
+    }
+    print(f"PASS: 4 workers x 2 channels = {total}");
+    0
+}

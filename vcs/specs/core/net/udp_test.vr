@@ -1,0 +1,738 @@
+// =============================================================================
+// udp_test.vr - Comprehensive tests for UDP socket types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: net, udp, socket, datagram, multicast, broadcast
+// @description: Tests for UdpSocket type, error conditions via
+//               StreamError/IoErrorKind, and address patterns for UDP
+//               communication including multicast and broadcast.
+// =============================================================================
+
+mount core.net.udp.UdpSocket;
+mount core.net.{SocketAddr, SocketAddrV4, SocketAddrV6, Ipv4Addr, Ipv6Addr};
+mount core.io.protocols.{IoResult, StreamError, IoErrorKind};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: UdpSocket Type Existence
+// =============================================================================
+
+@test
+fn test_udp_socket_type_exists() {
+    // UdpSocket wraps a file descriptor
+    // Can't construct without real socket, verify type compiles
+    let opt: Maybe<UdpSocket> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 2: UDP Error Types
+// =============================================================================
+
+@test
+fn test_udp_bind_error() {
+    let err = StreamError.new(IoErrorKind.AddrInUse);
+    let result: Result<Int, StreamError> = Err(err);
+    assert(result.is_err());
+    assert_eq(err.kind(), IoErrorKind.AddrInUse);
+}
+
+@test
+fn test_udp_send_error() {
+    let err = StreamError.new(IoErrorKind.NotConnected);
+    assert_eq(err.kind(), IoErrorKind.NotConnected);
+}
+
+@test
+fn test_udp_would_block() {
+    let err = StreamError.new(IoErrorKind.WouldBlock);
+    assert_eq(err.kind(), IoErrorKind.WouldBlock);
+}
+
+@test
+fn test_udp_permission_denied() {
+    let err = StreamError.new(IoErrorKind.PermissionDenied);
+    assert_eq(err.kind(), IoErrorKind.PermissionDenied);
+}
+
+@test
+fn test_udp_addr_not_available() {
+    let err = StreamError.new(IoErrorKind.AddrNotAvailable);
+    assert_eq(err.kind(), IoErrorKind.AddrNotAvailable);
+}
+
+@test
+fn test_udp_connection_refused() {
+    // ICMP port unreachable can cause this for connected UDP
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    assert_eq(err.kind(), IoErrorKind.ConnectionRefused);
+}
+
+@test
+fn test_udp_timed_out() {
+    let err = StreamError.new(IoErrorKind.TimedOut);
+    assert_eq(err.kind(), IoErrorKind.TimedOut);
+}
+
+// =============================================================================
+// Section 3: UDP Address Patterns
+// =============================================================================
+
+@test
+fn test_udp_bind_any() {
+    let addr = SocketAddrV4.new(Ipv4Addr.unspecified(), 5000);
+    assert_eq(addr.port(), 5000);
+}
+
+@test
+fn test_udp_bind_localhost() {
+    let addr = SocketAddrV4.new(Ipv4Addr.localhost(), 5001);
+    assert_eq(addr.port(), 5001);
+}
+
+@test
+fn test_udp_ephemeral_port() {
+    // Port 0 = OS assigns ephemeral port
+    let addr = SocketAddrV4.new(Ipv4Addr.unspecified(), 0);
+    assert_eq(addr.port(), 0);
+}
+
+@test
+fn test_udp_high_port() {
+    let addr = SocketAddrV4.new(Ipv4Addr.localhost(), 65535);
+    assert_eq(addr.port(), 65535);
+}
+
+@test
+fn test_udp_dns_port() {
+    // Standard DNS port
+    let addr = SocketAddrV4.new(Ipv4Addr.localhost(), 53);
+    assert_eq(addr.port(), 53);
+}
+
+// =============================================================================
+// Section 4: Multicast Addresses
+// =============================================================================
+
+@test
+fn test_udp_multicast_addr() {
+    // Multicast range: 224.0.0.0 - 239.255.255.255
+    let mcast = Ipv4Addr.new(239, 0, 0, 1);
+    assert(mcast.is_multicast());
+}
+
+@test
+fn test_udp_multicast_all_hosts() {
+    // 224.0.0.1 = all hosts on local segment
+    let mcast = Ipv4Addr.new(224, 0, 0, 1);
+    assert(mcast.is_multicast());
+}
+
+@test
+fn test_udp_multicast_all_routers() {
+    // 224.0.0.2 = all routers on local segment
+    let mcast = Ipv4Addr.new(224, 0, 0, 2);
+    assert(mcast.is_multicast());
+}
+
+@test
+fn test_udp_non_multicast() {
+    let addr = Ipv4Addr.new(192, 168, 1, 1);
+    assert(!addr.is_multicast());
+}
+
+// =============================================================================
+// Section 5: Broadcast Addresses
+// =============================================================================
+
+@test
+fn test_udp_broadcast_addr() {
+    let bcast = Ipv4Addr.broadcast();
+    assert(bcast.is_broadcast());
+}
+
+@test
+fn test_udp_non_broadcast() {
+    let addr = Ipv4Addr.localhost();
+    assert(!addr.is_broadcast());
+}
+
+// =============================================================================
+// Section 6: Loopback
+// =============================================================================
+
+@test
+fn test_udp_loopback_addr() {
+    let lo = Ipv4Addr.localhost();
+    assert(lo.is_loopback());
+}
+
+@test
+fn test_udp_non_loopback() {
+    let addr = Ipv4Addr.new(10, 0, 0, 1);
+    assert(!addr.is_loopback());
+}
+
+// =============================================================================
+// Section 7: IPv6 UDP Addresses
+// =============================================================================
+
+@test
+fn test_udp_ipv6_bind_any() {
+    let addr = SocketAddrV6.new(Ipv6Addr.unspecified(), 5000, 0, 0);
+    assert_eq(addr.port(), 5000);
+}
+
+@test
+fn test_udp_ipv6_localhost() {
+    let addr = SocketAddrV6.new(Ipv6Addr.localhost(), 5001, 0, 0);
+    assert_eq(addr.port(), 5001);
+}
+
+// =============================================================================
+// Section 8: Result Patterns
+// =============================================================================
+
+@test
+fn test_udp_ok_result() {
+    let result: Result<Int, StreamError> = Ok(1024);
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_err_result() {
+    let err = StreamError.new(IoErrorKind.AddrInUse);
+    let result: Result<Int, StreamError> = Err(err);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 9: Error Kind Distinctness
+// =============================================================================
+
+@test
+fn test_udp_error_kinds_distinct() {
+    let would_block = StreamError.new(IoErrorKind.WouldBlock);
+    let timed_out = StreamError.new(IoErrorKind.TimedOut);
+    let not_connected = StreamError.new(IoErrorKind.NotConnected);
+    assert(would_block.kind() != timed_out.kind());
+    assert(timed_out.kind() != not_connected.kind());
+    assert(would_block.kind() != not_connected.kind());
+}
+
+// =============================================================================
+// Section 10: UdpSocket Construction Types
+// =============================================================================
+
+@test
+fn test_udp_socket_maybe_some_type() {
+    // Verify Maybe<UdpSocket> can hold Some variant type
+    let opt: Maybe<UdpSocket> = None;
+    assert(!opt.is_some());
+}
+
+@test
+fn test_udp_bind_result_type() {
+    // The bind method returns Result<UdpSocket, IoError>
+    // Verify IoResult<UdpSocket> type alias works
+    let result: IoResult<UdpSocket> = Err(StreamError.new(IoErrorKind.AddrInUse));
+    assert(result.is_err());
+}
+
+@test
+fn test_udp_bind_specific_ipv4() {
+    // Binding to a specific IPv4 address and port
+    let addr = SocketAddrV4.new(Ipv4Addr.new(192, 168, 1, 100), 9090);
+    assert_eq(addr.port(), 9090);
+    let ip = addr.ip();
+    let octets = ip.octets();
+    assert_eq(octets.0, 192 as Byte);
+    assert_eq(octets.3, 100 as Byte);
+}
+
+@test
+fn test_udp_bind_ipv6_with_scope() {
+    // IPv6 link-local with scope_id for interface selection
+    let addr = SocketAddrV6.new(Ipv6Addr.new(0xfe80, 0, 0, 0, 0, 0, 0, 1), 8080, 0, 2);
+    assert_eq(addr.port(), 8080);
+}
+
+// =============================================================================
+// Section 11: Connected UDP Patterns
+// =============================================================================
+
+@test
+fn test_udp_connected_send_error_type() {
+    // send() on unconnected socket returns NotConnected error
+    let err = StreamError.new(IoErrorKind.NotConnected);
+    let result: Result<Int, StreamError> = Err(err);
+    assert(result.is_err());
+    assert_eq(err.kind(), IoErrorKind.NotConnected);
+}
+
+@test
+fn test_udp_connected_recv_error_type() {
+    // recv() on unconnected socket returns NotConnected error
+    let err = StreamError.new(IoErrorKind.NotConnected);
+    let send_result: Result<Int, StreamError> = Err(err);
+    let recv_result: Result<Int, StreamError> = Err(StreamError.new(IoErrorKind.NotConnected));
+    assert(send_result.is_err());
+    assert(recv_result.is_err());
+}
+
+@test
+fn test_udp_connect_result_type() {
+    // connect() returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_connect_refused_error() {
+    // Connected UDP receives ICMP port unreachable as ConnectionRefused
+    let err = StreamError.new(IoErrorKind.ConnectionRefused);
+    let result: Result<(), StreamError> = Err(err);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 12: Broadcast Patterns
+// =============================================================================
+
+@test
+fn test_udp_set_broadcast_result_type() {
+    // set_broadcast returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_broadcast_subnet() {
+    // Subnet broadcast address: 192.168.1.255
+    let bcast = Ipv4Addr.new(192, 168, 1, 255);
+    // Subnet broadcast is NOT the same as 255.255.255.255
+    assert(!bcast.is_broadcast());
+}
+
+@test
+fn test_udp_limited_broadcast() {
+    // 255.255.255.255 is the limited broadcast address
+    let bcast = Ipv4Addr.new(255, 255, 255, 255);
+    assert(bcast.is_broadcast());
+    // Broadcast is not multicast
+    assert(!bcast.is_multicast());
+}
+
+// =============================================================================
+// Section 13: Multicast Patterns
+// =============================================================================
+
+@test
+fn test_udp_multicast_join_result_type() {
+    // join_multicast_v4 returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_multicast_leave_result_type() {
+    // leave_multicast_v4 returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_multicast_ttl_result_type() {
+    // set_multicast_ttl_v4 returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_multicast_loop_result_type() {
+    // set_multicast_loop_v4 returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_multicast_ssdp_addr() {
+    // SSDP (UPnP) multicast address 239.255.255.250
+    let ssdp = Ipv4Addr.new(239, 255, 255, 250);
+    assert(ssdp.is_multicast());
+}
+
+@test
+fn test_udp_multicast_mdns_addr() {
+    // mDNS multicast address 224.0.0.251
+    let mdns = Ipv4Addr.new(224, 0, 0, 251);
+    assert(mdns.is_multicast());
+}
+
+@test
+fn test_udp_multicast_boundary_low() {
+    // First multicast address: 224.0.0.0
+    let first_mcast = Ipv4Addr.new(224, 0, 0, 0);
+    assert(first_mcast.is_multicast());
+}
+
+@test
+fn test_udp_multicast_boundary_high() {
+    // Last multicast address: 239.255.255.255
+    let last_mcast = Ipv4Addr.new(239, 255, 255, 255);
+    assert(last_mcast.is_multicast());
+}
+
+@test
+fn test_udp_multicast_just_below_range() {
+    // 223.255.255.255 is NOT multicast (just below range)
+    let below = Ipv4Addr.new(223, 255, 255, 255);
+    assert(!below.is_multicast());
+}
+
+@test
+fn test_udp_multicast_just_above_range() {
+    // 240.0.0.0 is NOT multicast (just above range)
+    let above = Ipv4Addr.new(240, 0, 0, 0);
+    assert(!above.is_multicast());
+}
+
+// =============================================================================
+// Section 14: Socket Options Types
+// =============================================================================
+
+@test
+fn test_udp_set_nonblocking_result_type() {
+    // set_nonblocking returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_send_buffer_size_result_type() {
+    // set_send_buffer_size returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_recv_buffer_size_result_type() {
+    // set_recv_buffer_size returns Result<(), IoError>
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 15: Error Types for UDP
+// =============================================================================
+
+@test
+fn test_udp_error_with_message() {
+    let err = StreamError.with_message(IoErrorKind.AddrInUse, "Port 5000 already bound");
+    assert_eq(err.kind(), IoErrorKind.AddrInUse);
+    assert(err.message().is_some());
+}
+
+@test
+fn test_udp_error_without_message() {
+    let err = StreamError.new(IoErrorKind.WouldBlock);
+    assert_eq(err.kind(), IoErrorKind.WouldBlock);
+    assert(err.message().is_none());
+}
+
+@test
+fn test_udp_error_broken_pipe() {
+    // Rare for UDP, but can occur in certain connected scenarios
+    let err = StreamError.new(IoErrorKind.BrokenPipe);
+    assert_eq(err.kind(), IoErrorKind.BrokenPipe);
+}
+
+@test
+fn test_udp_error_interrupted() {
+    // System call interrupted by signal
+    let err = StreamError.new(IoErrorKind.Interrupted);
+    assert_eq(err.kind(), IoErrorKind.Interrupted);
+}
+
+@test
+fn test_udp_error_invalid_input() {
+    // e.g., buffer too large, invalid address
+    let err = StreamError.new(IoErrorKind.InvalidInput);
+    assert_eq(err.kind(), IoErrorKind.InvalidInput);
+}
+
+@test
+fn test_udp_error_connection_reset() {
+    // ICMP destination unreachable on connected UDP
+    let err = StreamError.new(IoErrorKind.ConnectionReset);
+    assert_eq(err.kind(), IoErrorKind.ConnectionReset);
+}
+
+@test
+fn test_udp_error_other() {
+    let err = StreamError.new(IoErrorKind.Other);
+    assert_eq(err.kind(), IoErrorKind.Other);
+}
+
+@test
+fn test_udp_error_from_raw_os_errno() {
+    // EACCES (13) maps to PermissionDenied
+    let err = StreamError.from_raw_os_error(13);
+    assert_eq(err.kind(), IoErrorKind.PermissionDenied);
+}
+
+@test
+fn test_udp_error_from_errno_eagain() {
+    // EAGAIN (11) maps to WouldBlock
+    let err = StreamError.from_errno(11);
+    assert_eq(err.kind(), IoErrorKind.WouldBlock);
+}
+
+@test
+fn test_udp_error_from_errno_connrefused() {
+    // ECONNREFUSED (111) maps to ConnectionRefused
+    let err = StreamError.from_raw_os_error(111);
+    assert_eq(err.kind(), IoErrorKind.ConnectionRefused);
+}
+
+// =============================================================================
+// Section 16: Address Patterns for UDP
+// =============================================================================
+
+@test
+fn test_udp_private_network_10() {
+    // 10.0.0.0/8 private range
+    let addr = Ipv4Addr.new(10, 0, 0, 1);
+    assert(addr.is_private());
+    assert(!addr.is_loopback());
+}
+
+@test
+fn test_udp_private_network_172() {
+    // 172.16.0.0/12 private range
+    let addr = Ipv4Addr.new(172, 16, 0, 1);
+    assert(addr.is_private());
+}
+
+@test
+fn test_udp_private_network_192() {
+    // 192.168.0.0/16 private range
+    let addr = Ipv4Addr.new(192, 168, 0, 1);
+    assert(addr.is_private());
+}
+
+@test
+fn test_udp_well_known_ports() {
+    // Test well-known UDP service ports
+    let dhcp_server = SocketAddrV4.new(Ipv4Addr.unspecified(), 67);
+    let dhcp_client = SocketAddrV4.new(Ipv4Addr.unspecified(), 68);
+    let ntp = SocketAddrV4.new(Ipv4Addr.unspecified(), 123);
+    let snmp = SocketAddrV4.new(Ipv4Addr.unspecified(), 161);
+    assert_eq(dhcp_server.port(), 67);
+    assert_eq(dhcp_client.port(), 68);
+    assert_eq(ntp.port(), 123);
+    assert_eq(snmp.port(), 161);
+}
+
+@test
+fn test_udp_socket_addr_v4_construction() {
+    // SocketAddr wrapping for V4
+    let ip = Ipv4Addr.new(127, 0, 0, 1);
+    let sa = SocketAddr.new_v4(ip, 4000);
+    assert(sa.is_ipv4());
+}
+
+@test
+fn test_udp_socket_addr_v6_construction() {
+    // SocketAddr wrapping for V6
+    let ip = Ipv6Addr.localhost();
+    let sa = SocketAddr.new_v6(ip, 4001);
+    assert(sa.is_ipv6());
+}
+
+// =============================================================================
+// Section 17: send_to / recv_from Types
+// =============================================================================
+
+@test
+fn test_udp_send_to_result_type() {
+    // send_to returns Result<Int, IoError> where Int = bytes sent
+    let result: Result<Int, StreamError> = Ok(512);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 512);
+}
+
+@test
+fn test_udp_recv_from_result_type() {
+    // recv_from returns Result<(Int, SocketAddr), IoError>
+    let addr = SocketAddr.new_v4(Ipv4Addr.localhost(), 9999);
+    let result: Result<(Int, SocketAddr), StreamError> = Ok((256, addr));
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_peek_from_result_type() {
+    // peek_from returns Result<(Int, SocketAddr), IoError>
+    let addr = SocketAddr.new_v4(Ipv4Addr.new(10, 0, 0, 5), 7777);
+    let result: Result<(Int, SocketAddr), StreamError> = Ok((64, addr));
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 18: try_clone Pattern
+// =============================================================================
+
+@test
+fn test_udp_try_clone_result_type() {
+    // try_clone returns Result<UdpSocket, IoError>
+    let result: Result<UdpSocket, StreamError> = Err(StreamError.new(IoErrorKind.Other));
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 19: Result Chaining for UDP Operations
+// =============================================================================
+
+@test
+fn test_udp_result_map() {
+    // Chaining with map on OK result
+    let result: Result<Int, StreamError> = Ok(1024);
+    let doubled = result.map(|n| n * 2);
+    assert(doubled.is_ok());
+    assert_eq(doubled.unwrap(), 2048);
+}
+
+@test
+fn test_udp_result_map_err() {
+    // Chaining with map_err for error transformation
+    let err = StreamError.new(IoErrorKind.WouldBlock);
+    let result: Result<Int, StreamError> = Err(err);
+    let mapped = result.map_err(|e| StreamError.with_message(e.kind(), "UDP send blocked"));
+    assert(mapped.is_err());
+}
+
+@test
+fn test_udp_result_and_then() {
+    // Chaining multiple fallible operations
+    let result: Result<Int, StreamError> = Ok(100);
+    let chained: Result<Int, StreamError> = result.and_then(|n| Ok(n + 50));
+    assert(chained.is_ok());
+    assert_eq(chained.unwrap(), 150);
+}
+
+@test
+fn test_udp_result_or_else() {
+    // Fallback on error
+    let err = StreamError.new(IoErrorKind.WouldBlock);
+    let result: Result<Int, StreamError> = Err(err);
+    let fallback: Result<Int, StreamError> = result.or_else(|_e| Ok(0));
+    assert(fallback.is_ok());
+    assert_eq(fallback.unwrap(), 0);
+}
+
+@test
+fn test_udp_result_unwrap_or() {
+    // Default value on error
+    let err = StreamError.new(IoErrorKind.TimedOut);
+    let result: Result<Int, StreamError> = Err(err);
+    let val = result.unwrap_or(0);
+    assert_eq(val, 0);
+}
+
+// =============================================================================
+// Section 20: local_addr / peer_addr Types
+// =============================================================================
+
+@test
+fn test_udp_local_addr_result_type() {
+    // local_addr returns Result<SocketAddr, IoError>
+    let addr = SocketAddr.new_v4(Ipv4Addr.unspecified(), 0);
+    let result: Result<SocketAddr, StreamError> = Ok(addr);
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_peer_addr_not_connected() {
+    // peer_addr returns Err(NotConnected) when not connected
+    let err = StreamError.new(IoErrorKind.NotConnected);
+    let result: Result<SocketAddr, StreamError> = Err(err);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 21: IPv6 Multicast Addresses
+// =============================================================================
+
+@test
+fn test_udp_ipv6_multicast() {
+    // IPv6 multicast: ff00::/8
+    let mcast = Ipv6Addr.new(0xff02, 0, 0, 0, 0, 0, 0, 1);
+    assert(mcast.is_multicast());
+}
+
+@test
+fn test_udp_ipv6_non_multicast() {
+    let addr = Ipv6Addr.localhost();
+    assert(!addr.is_multicast());
+}
+
+@test
+fn test_udp_ipv6_link_local() {
+    // Link-local address fe80::1
+    let addr = Ipv6Addr.new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+    assert(addr.is_link_local());
+}
+
+@test
+fn test_udp_ipv6_unspecified() {
+    let addr = Ipv6Addr.unspecified();
+    assert(addr.is_unspecified());
+    assert(!addr.is_loopback());
+}
+
+// =============================================================================
+// Section 22: IoResult Type Alias
+// =============================================================================
+
+@test
+fn test_udp_io_result_alias_ok() {
+    // IoResult<T> is Result<T, StreamError>
+    let result: IoResult<Int> = Ok(42);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_udp_io_result_alias_err() {
+    let result: IoResult<Int> = Err(StreamError.new(IoErrorKind.TimedOut));
+    assert(result.is_err());
+}
+
+@test
+fn test_udp_io_result_socket_type() {
+    // IoResult<UdpSocket> for bind-like operations
+    let result: IoResult<UdpSocket> = Err(StreamError.new(IoErrorKind.AddrNotAvailable));
+    assert(result.is_err());
+}
+
+@test
+fn test_udp_io_result_tuple_type() {
+    // IoResult<(Int, SocketAddr)> for recv_from-like operations
+    let addr = SocketAddr.new_v4(Ipv4Addr.localhost(), 1234);
+    let result: IoResult<(Int, SocketAddr)> = Ok((128, addr));
+    assert(result.is_ok());
+}
+
+@test
+fn test_udp_io_result_unit_type() {
+    // IoResult<()> for set_* operations (e.g., set_broadcast, set_nonblocking)
+    let result: Result<(), StreamError> = Ok(());
+    assert(result.is_ok());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

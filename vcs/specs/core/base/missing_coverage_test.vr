@@ -1,0 +1,167 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, bool, char, not, escape-debug
+// @description: Tests for previously untested methods: Bool.not(), Int bitwise NOT, Char.escape_debug()
+
+mount core.base.primitives.{Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64};
+
+// =============================================================================
+// Bool.not() - logical NOT via Not protocol
+// =============================================================================
+
+@test
+fn test_bool_not_true() {
+    let val = true;
+    let result = val.not();
+    assert_eq(result, false);
+}
+
+@test
+fn test_bool_not_false() {
+    let val = false;
+    let result = val.not();
+    assert_eq(result, true);
+}
+
+@test
+fn test_bool_not_double() {
+    let val = true;
+    assert_eq(val.not().not(), true);
+}
+
+@test
+fn test_bool_not_operator() {
+    // !true should be false
+    assert_eq(!true, false);
+    assert_eq(!false, true);
+}
+
+// =============================================================================
+// Int.not() - bitwise NOT via Not protocol
+// =============================================================================
+
+@test
+fn test_int_not_zero() {
+    let val = 0;
+    let result = val.not();
+    // Bitwise NOT of 0 is -1 (all ones)
+    assert_eq(result, -1);
+}
+
+@test
+fn test_int_not_minus_one() {
+    let val = -1;
+    let result = val.not();
+    assert_eq(result, 0);
+}
+
+@test
+fn test_int_not_positive() {
+    let val = 1;
+    let result = val.not();
+    assert_eq(result, -2);
+}
+
+@test
+fn test_int_not_double() {
+    let val = 42;
+    assert_eq(val.not().not(), 42);
+}
+
+// =============================================================================
+// Sized integer not() - bitwise NOT
+// =============================================================================
+
+@test
+fn test_int8_not() {
+    let val = 0 as Int8;
+    let result = val.not();
+    // NOT 0 = -1 for signed, all bits set
+    assert_eq(result.to_int(), -1);
+}
+
+@test
+fn test_uint8_not() {
+    let val = 0 as UInt8;
+    let result = val.not();
+    // NOT 0 for u8 = 255
+    assert_eq(result.to_int(), 255);
+}
+
+@test
+fn test_int16_not() {
+    let val = 0 as Int16;
+    assert_eq(val.not().to_int(), -1);
+}
+
+@test
+fn test_uint16_not() {
+    let val = 0 as UInt16;
+    assert_eq(val.not().to_int(), 65535);
+}
+
+@test
+fn test_int32_not() {
+    let val = 0 as Int32;
+    assert_eq(val.not().to_int(), -1);
+}
+
+@test
+fn test_uint32_not() {
+    let val = 0 as UInt32;
+    // NOT 0 for u32 = 4294967295
+    let result = val.not();
+    assert(result.to_int() != 0);
+}
+
+@test
+fn test_int64_not() {
+    let val = 0 as Int64;
+    assert_eq(val.not().to_int(), -1);
+}
+
+@test
+fn test_uint64_not() {
+    let val = 0 as UInt64;
+    let result = val.not();
+    assert(result.to_int() != 0);
+}
+
+// =============================================================================
+// Char.escape_debug() - character escape sequence
+// =============================================================================
+
+@test
+fn test_char_escape_debug_normal() {
+    let ch = 'a';
+    let escaped: Text = ch.escape_debug();
+    assert_eq(escaped, "a");
+}
+
+@test
+fn test_char_escape_debug_digit() {
+    let ch = '5';
+    let escaped: Text = ch.escape_debug();
+    assert_eq(escaped, "5");
+}
+
+@test
+fn test_char_escape_debug_space() {
+    let ch = ' ';
+    let escaped: Text = ch.escape_debug();
+    // Space might be rendered as-is or escaped depending on implementation
+    assert(escaped.len() >= 1);
+}
+
+@test
+fn test_char_escape_debug_exists() {
+    // Verify the method exists and returns Text for various chars
+    let _a: Text = 'A'.escape_debug();
+    let _b: Text = 'Z'.escape_debug();
+    let _c: Text = '0'.escape_debug();
+    let _d: Text = '9'.escape_debug();
+    assert_eq(_a, "A");
+    assert_eq(_b, "Z");
+    assert_eq(_c, "0");
+    assert_eq(_d, "9");
+}

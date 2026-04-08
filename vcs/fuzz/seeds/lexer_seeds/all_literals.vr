@@ -1,0 +1,176 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: lexer, literals, comprehensive
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// All Verum Literals - Comprehensive Lexer Test Seed
+// Tests all literal types for correct tokenization
+// =============================================================================
+
+fn integer_literals() {
+    // Decimal integers
+    let dec1 = 0;
+    let dec2 = 42;
+    let dec3 = 1_000_000;
+    let dec4 = 9999999999999;
+
+    // Hexadecimal integers
+    let hex1 = 0x0;
+    let hex2 = 0xFF;
+    let hex3 = 0xDEAD_BEEF;
+    let hex4 = 0xCAFE_BABE;
+
+    // Octal integers
+    let oct1 = 0o0;
+    let oct2 = 0o777;
+    let oct3 = 0o755;
+    let oct4 = 0o12_34_56;
+
+    // Binary integers
+    let bin1 = 0b0;
+    let bin2 = 0b1;
+    let bin3 = 0b1010_1010;
+    let bin4 = 0b1111_1111_0000_0000;
+
+    // Typed integers
+    let typed_i8 = 127i8;
+    let typed_i16 = 32767i16;
+    let typed_i32 = 2147483647i32;
+    let typed_i64 = 9223372036854775807i64;
+    let typed_u8 = 255u8;
+    let typed_u16 = 65535u16;
+    let typed_u32 = 4294967295u32;
+    let typed_u64 = 18446744073709551615u64;
+}
+
+fn float_literals() {
+    // Basic floats
+    let f1 = 0.0;
+    let f2 = 3.14159;
+    let f3 = 2.71828;
+    let f4 = 1_000.000_001;
+
+    // Scientific notation
+    let sci1 = 1e10;
+    let sci2 = 1E10;
+    let sci3 = 1.5e-10;
+    let sci4 = 2.99792458e8;
+    let sci5 = 6.022e+23;
+
+    // Typed floats
+    let typed_f32 = 3.14f32;
+    let typed_f64 = 3.14159265358979f64;
+}
+
+fn string_literals() {
+    // Plain strings
+    let plain1 = "";
+    let plain2 = "hello";
+    let plain3 = "hello, world!";
+    let plain4 = "contains \"quotes\"";
+
+    // Escape sequences
+    let esc1 = "newline\n";
+    let esc2 = "tab\there";
+    let esc3 = "carriage\rreturn";
+    let esc4 = "backslash\\here";
+    let esc5 = "quote\"inside";
+    let esc6 = "apostrophe\'here";
+    let esc7 = "\x41\x42\x43";         // hex escapes: ABC
+    let esc8 = "\u{1F600}";            // unicode: emoji
+    let esc9 = "\u{0041}\u{0042}";     // unicode: AB
+
+    // Multiline strings
+    let multi = """
+        This is a
+        multiline string
+        with indentation preserved.
+    """;
+
+    // Raw strings
+    let raw1 = r#"no escapes \n here"#;
+    let raw2 = r##"can contain # symbols"##;
+    let raw3 = r###"even "quotes" work"###;
+}
+
+fn char_literals() {
+    let c1 = 'a';
+    let c2 = 'Z';
+    let c3 = '0';
+    let c4 = '\n';          // newline
+    let c5 = '\t';          // tab
+    let c6 = '\\';          // backslash
+    let c7 = '\'';          // single quote
+    let c8 = '\x41';        // hex: A
+    let c9 = '\u{1F600}';   // unicode emoji
+}
+
+fn boolean_literals() {
+    let t = true;
+    let f = false;
+}
+
+fn semantic_literals() {
+    // SQL
+    let query = sql#"SELECT * FROM users WHERE id = ?"#;
+
+    // GraphQL
+    let gql_query = gql#"{ user(id: 1) { name email } }"#;
+
+    // Regex
+    let pattern = rx#"^\d{3}-\d{4}$"#;
+
+    // URL
+    let url = url#"https://example.com/api/v1"#;
+
+    // Email
+    let email = email#"user@example.com"#;
+
+    // JSON
+    let json_data = json#"{"name": "value"}"#;
+
+    // XML
+    let xml_data = xml#"<root><child/></root>"#;
+
+    // YAML
+    let yaml_data = yaml#"key: value"#;
+
+    // Shell
+    let cmd = sh#"ls -la | grep test"#;
+
+    // Contract
+    let spec = contract#"requires x > 0 ensures result >= 0"#;
+}
+
+fn interpolated_strings() {
+    let name = "world";
+    let greeting = f"hello, {name}!";
+    let math = f"2 + 2 = {2 + 2}";
+    let nested = f"result: {compute({x: 1})}";
+}
+
+fn composite_literals() {
+    // Tagged literals with various delimiters
+    let tagged1 = tag#"content";
+    let tagged2 = tag#(content);
+    let tagged3 = tag#[content];
+    let tagged4 = tag#{content};
+
+    // Color literals
+    let color1 = #FF0000;
+    let color2 = #00FF00FF;
+    let color3 = #DEADBEEF;
+}
+
+fn context_adaptive_literals() {
+    // At-prefixed
+    let at1 = @identifier;
+    let at2 = @attribute;
+
+    // Dollar-prefixed
+    let dollar1 = $variable;
+    let dollar2 = $env_var;
+}

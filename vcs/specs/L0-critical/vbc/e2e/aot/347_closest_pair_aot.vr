@@ -1,0 +1,288 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, closest-pair, brute-force, geometry, 1d-sorting
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for closest pair of points:
+// 1. 1D closest pair: sort points, then check adjacent pairs (O(n log n) optimal)
+// 2. 2D closest pair: brute force O(n^2) for small point sets
+// Uses integer coordinates with squared distances to avoid floating point.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn a8_swap(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = a8_get(a, i);
+    let vj = a8_get(a, j);
+    a8_set(a8_set(a, i, vj), j, vi)
+}
+
+// Selection sort
+fn sort_arr(a: Arr8, n: Int) -> Arr8 {
+    let mut arr = a;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if a8_get(arr, j) < a8_get(arr, min_idx) { min_idx = j; }
+            j = j + 1;
+        }
+        if min_idx != i { arr = a8_swap(arr, i, min_idx); }
+        i = i + 1;
+    }
+    arr
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+// Result type for closest pair
+type PairOut is { idx1: Int, idx2: Int, dist_sq: Int };
+
+// 1D closest pair: sort then check adjacent
+fn closest_1d(pts: Arr8, n: Int) -> PairOut {
+    let sorted = sort_arr(pts, n);
+    let mut best_dist = 999999999;
+    // Track which sorted indices are closest
+    let mut best_i = 0;
+    let mut best_j = 1;
+
+    let mut i = 0;
+    while i < n - 1 {
+        let d = abs_val(a8_get(sorted, i + 1) - a8_get(sorted, i));
+        if d < best_dist {
+            best_dist = d;
+            best_i = i;
+            best_j = i + 1;
+        }
+        i = i + 1;
+    }
+
+    PairOut { idx1: best_i, idx2: best_j, dist_sq: best_dist }
+}
+
+// 2D points stored as parallel x and y arrays
+type Points2D is { xs: Arr8, ys: Arr8, count: Int };
+
+// Squared Euclidean distance between points i and j
+fn dist2d_sq(pts: Points2D, i: Int, j: Int) -> Int {
+    let dx = a8_get(pts.xs, i) - a8_get(pts.xs, j);
+    let dy = a8_get(pts.ys, i) - a8_get(pts.ys, j);
+    dx * dx + dy * dy
+}
+
+// 2D brute force closest pair
+fn closest_2d(pts: Points2D) -> PairOut {
+    let n = pts.count;
+    let mut best_dist = 999999999;
+    let mut best_i = 0;
+    let mut best_j = 1;
+
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            let d = dist2d_sq(pts, i, j);
+            if d < best_dist {
+                best_dist = d;
+                best_i = i;
+                best_j = j;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    PairOut { idx1: best_i, idx2: best_j, dist_sq: best_dist }
+}
+
+// Find farthest pair in 2D (brute force)
+fn farthest_2d(pts: Points2D) -> PairOut {
+    let n = pts.count;
+    let mut best_dist = -1;
+    let mut best_i = 0;
+    let mut best_j = 1;
+
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            let d = dist2d_sq(pts, i, j);
+            if d > best_dist {
+                best_dist = d;
+                best_i = i;
+                best_j = j;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    PairOut { idx1: best_i, idx2: best_j, dist_sq: best_dist }
+}
+
+fn test_1d_basic() {
+    let pts = Arr8 { a0: 10, a1: 3, a2: 7, a3: 1, a4: 20, a5: 0, a6: 0, a7: 0 };
+    let out = closest_1d(pts, 5);
+    // Sorted: 1, 3, 7, 10, 20
+    // Adjacent diffs: 2, 4, 3, 10 -> minimum is 2 (between 1 and 3)
+    assert_eq(out.dist_sq, 2);
+}
+
+fn test_1d_duplicates() {
+    let pts = Arr8 { a0: 5, a1: 5, a2: 10, a3: 20, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = closest_1d(pts, 4);
+    // Sorted: 5, 5, 10, 20 -> min diff = 0
+    assert_eq(out.dist_sq, 0);
+}
+
+fn test_1d_already_sorted() {
+    let pts = Arr8 { a0: 1, a1: 4, a2: 8, a3: 13, a4: 19, a5: 0, a6: 0, a7: 0 };
+    let out = closest_1d(pts, 5);
+    // Diffs: 3, 4, 5, 6 -> min = 3
+    assert_eq(out.dist_sq, 3);
+}
+
+fn test_1d_negative() {
+    let pts = Arr8 { a0: -10, a1: -3, a2: 0, a3: 5, a4: 100, a5: 0, a6: 0, a7: 0 };
+    let out = closest_1d(pts, 5);
+    // Sorted: -10, -3, 0, 5, 100 -> diffs: 7, 3, 5, 95 -> min = 3
+    assert_eq(out.dist_sq, 3);
+}
+
+fn test_1d_two_points() {
+    let pts = Arr8 { a0: 42, a1: 17, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let out = closest_1d(pts, 2);
+    assert_eq(out.dist_sq, 25); // |42-17| = 25
+}
+
+fn test_2d_basic() {
+    // Points: (0,0), (3,4), (1,1), (6,8)
+    let xs = Arr8 { a0: 0, a1: 3, a2: 1, a3: 6, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let ys = Arr8 { a0: 0, a1: 4, a2: 1, a3: 8, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let pts = Points2D { xs: xs, ys: ys, count: 4 };
+    let out = closest_2d(pts);
+    // Distances squared:
+    // (0,0)-(3,4): 9+16=25
+    // (0,0)-(1,1): 1+1=2  <-- closest
+    // (0,0)-(6,8): 36+64=100
+    // (3,4)-(1,1): 4+9=13
+    // (3,4)-(6,8): 9+16=25
+    // (1,1)-(6,8): 25+49=74
+    assert_eq(out.dist_sq, 2);
+    assert_eq(out.idx1, 0);
+    assert_eq(out.idx2, 2);
+}
+
+fn test_2d_collinear() {
+    // All points on x-axis: (0,0), (5,0), (2,0), (8,0)
+    let xs = Arr8 { a0: 0, a1: 5, a2: 2, a3: 8, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let ys = Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let pts = Points2D { xs: xs, ys: ys, count: 4 };
+    let out = closest_2d(pts);
+    // (0,0)-(2,0): 4, (2,0)-(5,0): 9, (0,0)-(5,0): 25, etc.
+    assert_eq(out.dist_sq, 4); // closest is (0,0) and (2,0)
+}
+
+fn test_2d_coincident() {
+    // Two points at same location
+    let xs = Arr8 { a0: 3, a1: 7, a2: 3, a3: 10, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let ys = Arr8 { a0: 4, a1: 1, a2: 4, a3: 2, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let pts = Points2D { xs: xs, ys: ys, count: 4 };
+    let out = closest_2d(pts);
+    assert_eq(out.dist_sq, 0);
+    assert_eq(out.idx1, 0);
+    assert_eq(out.idx2, 2);
+}
+
+fn test_2d_farthest() {
+    // Points: (0,0), (3,4), (1,1), (6,8)
+    let xs = Arr8 { a0: 0, a1: 3, a2: 1, a3: 6, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let ys = Arr8 { a0: 0, a1: 4, a2: 1, a3: 8, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let pts = Points2D { xs: xs, ys: ys, count: 4 };
+    let out = farthest_2d(pts);
+    // Farthest: (0,0)-(6,8) = 36+64 = 100
+    assert_eq(out.dist_sq, 100);
+    assert_eq(out.idx1, 0);
+    assert_eq(out.idx2, 3);
+}
+
+fn test_2d_right_triangle() {
+    // (0,0), (3,0), (0,4) - right triangle
+    let xs = Arr8 { a0: 0, a1: 3, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let ys = Arr8 { a0: 0, a1: 0, a2: 4, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let pts = Points2D { xs: xs, ys: ys, count: 3 };
+    let out = closest_2d(pts);
+    // (0,0)-(3,0): 9, (0,0)-(0,4): 16, (3,0)-(0,4): 9+16=25
+    assert_eq(out.dist_sq, 9);
+    let far = farthest_2d(pts);
+    assert_eq(far.dist_sq, 25); // hypotenuse
+}
+
+fn test_2d_grid() {
+    // 2x2 grid: (0,0), (1,0), (0,1), (1,1)
+    let xs = Arr8 { a0: 0, a1: 1, a2: 0, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let ys = Arr8 { a0: 0, a1: 0, a2: 1, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let pts = Points2D { xs: xs, ys: ys, count: 4 };
+    let out = closest_2d(pts);
+    // All adjacent pairs have distance 1, min squared = 1
+    assert_eq(out.dist_sq, 1);
+    let far = farthest_2d(pts);
+    // Diagonal: (0,0)-(1,1) or (1,0)-(0,1) = 2
+    assert_eq(far.dist_sq, 2);
+}
+
+fn test_2d_negative_coords() {
+    // (-2,-3), (1,1), (4,5)
+    let xs = Arr8 { a0: -2, a1: 1, a2: 4, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let ys = Arr8 { a0: -3, a1: 1, a2: 5, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let pts = Points2D { xs: xs, ys: ys, count: 3 };
+    let out = closest_2d(pts);
+    // (-2,-3)-(1,1): 9+16=25
+    // (-2,-3)-(4,5): 36+64=100
+    // (1,1)-(4,5): 9+16=25
+    assert_eq(out.dist_sq, 25);
+    // Both pairs (0,1) and (1,2) have distance 25; first found wins
+    assert_eq(out.idx1, 0);
+    assert_eq(out.idx2, 1);
+}
+
+fn main() -> Int {
+    test_1d_basic();
+    test_1d_duplicates();
+    test_1d_already_sorted();
+    test_1d_negative();
+    test_1d_two_points();
+    test_2d_basic();
+    test_2d_collinear();
+    test_2d_coincident();
+    test_2d_farthest();
+    test_2d_right_triangle();
+    test_2d_grid();
+    test_2d_negative_coords();
+    print("[OK] 347_closest_pair_aot");
+    0
+}

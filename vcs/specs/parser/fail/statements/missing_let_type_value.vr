@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let, type, value, error
+// @description: Test missing value after type annotation in let statement
+// @expected-error: E041
+
+fn test() {
+    let x: Int =;
+}

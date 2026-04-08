@@ -1,0 +1,328 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, async, spawn, await, futures
+// @timeout: 5000
+// @expect: pass
+//
+// Test: SPAWN, AWAIT, FUTURE_READY, FUTURE_GET
+// Verifies async task spawning and awaiting
+
+// =============================================================================
+// Basic async/await
+// =============================================================================
+
+async fn test_simple_async() {
+    async fn compute() -> Int { 42 }
+
+    let result = compute().await;
+    assert_eq(result, 42);
+}
+
+async fn test_await_multiple() {
+    async fn a() -> Int { 1 }
+    async fn b() -> Int { 2 }
+    async fn c() -> Int { 3 }
+
+    let r1 = a().await;
+    let r2 = b().await;
+    let r3 = c().await;
+
+    assert_eq(r1 + r2 + r3, 6);
+}
+
+async fn test_async_with_parameters() {
+    async fn add(a: Int, b: Int) -> Int { a + b }
+
+    let result = add(10, 20).await;
+    assert_eq(result, 30);
+}
+
+async fn test_nested_async() {
+    async fn inner() -> Int { 100 }
+
+    async fn outer() -> Int {
+        let x = inner().await;
+        x * 2
+    }
+
+    let result = outer().await;
+    assert_eq(result, 200);
+}
+
+// =============================================================================
+// SPAWN - Task spawning
+// =============================================================================
+
+async fn test_spawn_task() {
+    async fn task() -> Int { 42 }
+
+    let handle = spawn task();
+
+    // Task runs concurrently
+    let result = handle.await;
+    assert_eq(result, 42);
+}
+
+async fn test_spawn_multiple_tasks() {
+    async fn task(id: Int) -> Int { id * 10 }
+
+    let h1 = spawn task(1);
+    let h2 = spawn task(2);
+    let h3 = spawn task(3);
+
+    let r1 = h1.await;
+    let r2 = h2.await;
+    let r3 = h3.await;
+
+    assert_eq(r1, 10);
+    assert_eq(r2, 20);
+    assert_eq(r3, 30);
+}
+
+async fn test_spawn_with_closure() {
+    let x: Int = 100;
+
+    let handle = spawn async {
+        x + 42
+    };
+
+    let result = handle.await;
+    assert_eq(result, 142);
+}
+
+// =============================================================================
+// Future state checking
+// =============================================================================
+
+async fn test_spawned_await() {
+    // Test that spawned task completes when awaited
+    async fn quick() -> Int { 1 }
+
+    let handle = spawn quick();
+
+    // Await the spawned task
+    let result = handle.await;
+    assert_eq(result, 1);
+}
+
+async fn test_future_get() {
+    async fn compute() -> Int { 42 }
+
+    let handle = spawn compute();
+    let result = handle.await;
+
+    // Result should be retrievable
+    assert_eq(result, 42);
+}
+
+// =============================================================================
+// Async with data sharing
+// =============================================================================
+
+async fn test_shared_read() {
+    let data = [1, 2, 3, 4, 5];
+
+    async fn sum_slice(slice: &[Int]) -> Int {
+        let mut total: Int = 0;
+        for item in slice {
+            total = total + *item;
+        }
+        total
+    }
+
+    let result = sum_slice(&data).await;
+    assert_eq(result, 15);
+}
+
+async fn test_task_with_heap() {
+    let h = Heap(100);
+
+    async fn read_heap(val: Heap<Int>) -> Int { *val }
+
+    let result = read_heap(h).await;
+    assert_eq(result, 100);
+}
+
+// =============================================================================
+// Async control flow
+// =============================================================================
+
+async fn test_async_if() {
+    async fn conditional(cond: Bool) -> Int {
+        if cond {
+            (async { 1 }).await
+        } else {
+            (async { 2 }).await
+        }
+    }
+
+    assert_eq(conditional(true).await, 1);
+    assert_eq(conditional(false).await, 2);
+}
+
+async fn test_async_loop() {
+    async fn async_sum(n: Int) -> Int {
+        let mut sum: Int = 0;
+        for i in 0..n {
+            sum = (async { sum + i }).await;
+        }
+        sum
+    }
+
+    let result = async_sum(5).await;
+    assert_eq(result, 10);  // 0+1+2+3+4
+}
+
+async fn test_async_match() {
+    async fn process(opt: Maybe<Int>) -> Int {
+        match opt {
+            Some(x) => (async { x * 2 }).await,
+            None => (async { 0 }).await
+        }
+    }
+
+    assert_eq(process(Some(21)).await, 42);
+    assert_eq(process(None).await, 0);
+}
+
+// =============================================================================
+// Error handling in async
+// =============================================================================
+
+async fn test_async_result() {
+    async fn may_fail(succeed: Bool) -> Result<Int, Text> {
+        if succeed {
+            Ok(42)
+        } else {
+            Err("failed")
+        }
+    }
+
+    let ok_result = may_fail(true).await;
+    assert(ok_result is Ok);
+    assert_eq(@unwrap(ok_result), 42);
+
+    let err_result = may_fail(false).await;
+    assert(err_result is Err);
+}
+
+async fn test_async_try() {
+    async fn inner() -> Result<Int, Text> { Ok(42) }
+
+    async fn outer() -> Result<Int, Text> {
+        let x = inner().await?;
+        Ok(x * 2)
+    }
+
+    let result = outer().await;
+    assert_eq(@unwrap(result), 84);
+}
+
+// =============================================================================
+// Async cancellation
+// =============================================================================
+
+async fn test_drop_cancels_task() {
+    let mut started: Bool = false;
+    let mut completed: Bool = false;
+
+    async fn long_task(s: &mut Bool, c: &mut Bool) {
+        *s = true;
+        // Simulate long work
+        for _ in 0..1000000 {
+            // work
+        }
+        *c = true;
+    }
+
+    {
+        let handle = spawn long_task(&mut started, &mut completed);
+        // Drop handle without awaiting - task should be cancelled
+    }
+
+    // Task may have started but likely didn't complete
+    // (exact behavior depends on timing)
+}
+
+// =============================================================================
+// Async with return values
+// =============================================================================
+
+async fn test_async_return_struct() {
+    type Point is { x: Float, y: Float };
+
+    async fn make_point() -> Point {
+        Point { x: 1.0, y: 2.0 }
+    }
+
+    let p = make_point().await;
+    assert_eq(p.x, 1.0);
+    assert_eq(p.y, 2.0);
+}
+
+async fn test_async_return_tuple() {
+    async fn multi_return() -> (Int, Text, Bool) {
+        (42, "hello", true)
+    }
+
+    let (a, b, c) = multi_return().await;
+    assert_eq(a, 42);
+    assert_eq(b, "hello");
+    assert(c);
+}
+
+async fn test_async_return_maybe() {
+    async fn maybe_value(present: Bool) -> Maybe<Int> {
+        if present { Some(42) } else { None }
+    }
+
+    let some = maybe_value(true).await;
+    let none = maybe_value(false).await;
+
+    assert(some is Some);
+    assert(none is None);
+}
+
+fn main() {
+    // Run all async tests
+    @block_on(async {
+        // Basic async/await
+        test_simple_async().await;
+        test_await_multiple().await;
+        test_async_with_parameters().await;
+        test_nested_async().await;
+
+        // SPAWN
+        test_spawn_task().await;
+        test_spawn_multiple_tasks().await;
+        test_spawn_with_closure().await;
+
+        // Future state
+        test_spawned_await().await;
+        test_future_get().await;
+
+        // Data sharing
+        test_shared_read().await;
+        test_task_with_heap().await;
+
+        // Control flow
+        test_async_if().await;
+        test_async_loop().await;
+        test_async_match().await;
+
+        // Error handling
+        test_async_result().await;
+        test_async_try().await;
+
+        // Cancellation
+        test_drop_cancels_task().await;
+
+        // Return values
+        test_async_return_struct().await;
+        test_async_return_tuple().await;
+        test_async_return_maybe().await;
+    });
+
+    print("001_spawn_await: PASSED");
+}

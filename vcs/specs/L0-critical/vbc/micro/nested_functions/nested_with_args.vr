@@ -1,0 +1,25 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn add(a: Int, b: Int) -> Int {
+        return a + b;
+    }
+
+    fn multiply(x: Int, y: Int) -> Int {
+        return x * y;
+    }
+
+    let sum = add(10, 20);
+    assert_eq(sum, 30);
+
+    let product = multiply(5, 7);
+    assert_eq(product, 35);
+
+    let combined = add(multiply(3, 4), 8);
+    assert_eq(combined, 20);
+}

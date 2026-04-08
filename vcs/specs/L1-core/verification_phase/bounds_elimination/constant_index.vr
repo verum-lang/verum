@@ -1,0 +1,157 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, bounds-elimination, constant-index, mir
+// @timeout: 5000
+// @description: Tests bounds check elimination for constant indices
+
+/// Constant index bounds check elimination.
+/// When array size is known and index is a constant within bounds,
+/// the bounds check can be statically eliminated.
+
+// =============================================================================
+// Constant index within bounds - should eliminate bounds check
+// =============================================================================
+
+fn access_first(arr: [Int; 5]) -> Int {
+    // Index 0 is always valid for non-empty array
+    arr[0]
+}
+
+fn access_last_of_5(arr: [Int; 5]) -> Int {
+    // Index 4 is valid for array of size 5
+    arr[4]
+}
+
+fn access_middle(arr: [Int; 5]) -> Int {
+    // Index 2 is valid for array of size 5
+    arr[2]
+}
+
+fn access_multiple_constants(arr: [Int; 10]) -> Int {
+    // All constant indices within bounds
+    arr[0] + arr[3] + arr[5] + arr[9]
+}
+
+// =============================================================================
+// Array element assignment with constant index
+// =============================================================================
+
+fn assign_first(arr: &mut [Int; 5], value: Int) {
+    arr[0] = value;
+}
+
+fn assign_last(arr: &mut [Int; 5], value: Int) {
+    arr[4] = value;
+}
+
+fn swap_first_last(arr: &mut [Int; 5]) {
+    let tmp = arr[0];
+    arr[0] = arr[4];
+    arr[4] = tmp;
+}
+
+// =============================================================================
+// Nested constant index access
+// =============================================================================
+
+fn matrix_diagonal_sum(m: [[Int; 3]; 3]) -> Int {
+    // All constant indices - fully eliminable
+    m[0][0] + m[1][1] + m[2][2]
+}
+
+fn matrix_first_row_sum(m: [[Int; 3]; 3]) -> Int {
+    m[0][0] + m[0][1] + m[0][2]
+}
+
+fn matrix_corners(m: [[Int; 3]; 3]) -> (Int, Int, Int, Int) {
+    (m[0][0], m[0][2], m[2][0], m[2][2])
+}
+
+// =============================================================================
+// Constant folding in index expressions
+// =============================================================================
+
+fn folded_index_access(arr: [Int; 10]) -> Int {
+    // Index expression folds to constant 5
+    let idx = 2 + 3;
+    arr[idx]
+}
+
+fn computed_constant_index(arr: [Int; 10]) -> Int {
+    // Compile-time computable: 10 / 2 - 1 = 4
+    arr[10 / 2 - 1]
+}
+
+// =============================================================================
+// Struct field with array - constant index
+// =============================================================================
+
+type Point3D is { coords: [Float; 3] };
+
+fn get_x(p: Point3D) -> Float {
+    p.coords[0]
+}
+
+fn get_y(p: Point3D) -> Float {
+    p.coords[1]
+}
+
+fn get_z(p: Point3D) -> Float {
+    p.coords[2]
+}
+
+fn get_all_coords(p: Point3D) -> (Float, Float, Float) {
+    (p.coords[0], p.coords[1], p.coords[2])
+}
+
+// =============================================================================
+// Generic with constant index
+// =============================================================================
+
+fn first_of_5<T>(arr: [T; 5]) -> T {
+    arr[0]
+}
+
+fn last_of_5<T>(arr: [T; 5]) -> T {
+    arr[4]
+}
+
+fn third_of_5<T>(arr: [T; 5]) -> T {
+    arr[2]
+}
+
+// =============================================================================
+// Main - basic validation
+// =============================================================================
+
+fn main() {
+    let arr5: [Int; 5] = [1, 2, 3, 4, 5];
+    let arr10: [Int; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // Constant index access
+    assert(access_first(arr5) == 1);
+    assert(access_last_of_5(arr5) == 5);
+    assert(access_middle(arr5) == 3);
+    assert(access_multiple_constants(arr10) == 0 + 3 + 5 + 9);
+
+    // Matrix operations
+    let m: [[Int; 3]; 3] = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9]
+    ];
+    assert(matrix_diagonal_sum(m) == 15);
+    assert(matrix_first_row_sum(m) == 6);
+
+    // Generic constant index
+    assert(first_of_5(arr5) == 1);
+    assert(last_of_5(arr5) == 5);
+    assert(third_of_5(arr5) == 3);
+
+    // Struct field access
+    let p = Point3D { coords: [1.0, 2.0, 3.0] };
+    assert(get_x(p) == 1.0);
+    assert(get_y(p) == 2.0);
+    assert(get_z(p) == 3.0);
+}

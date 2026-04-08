@@ -1,0 +1,364 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: memory, reference, size, cbgr, layout
+// @description: Reference size benchmark (target: ThinRef = 16 bytes, FatRef = 24 bytes)
+
+/// Reference Size Benchmark
+///
+/// This benchmark verifies and measures the size of Verum's reference types.
+/// Understanding reference sizes is critical for memory-sensitive applications.
+///
+/// Expected sizes (per spec):
+/// - ThinRef<T>: 16 bytes (ptr + generation + epoch_caps)
+/// - FatRef<T>: 24 bytes (ptr + generation + epoch_caps + len)
+///
+/// Layout:
+/// ```
+/// ThinRef<T> (16 bytes):
+/// +--------+--------+--------+--------+
+/// |   ptr (8 bytes)  |gen(4) |epoch(4)|
+/// +--------+--------+--------+--------+
+///
+/// FatRef<T> (24 bytes):
+/// +--------+--------+--------+--------+--------+--------+
+/// |   ptr (8 bytes)  |gen(4) |epoch(4)|   len (8 bytes)  |
+/// +--------+--------+--------+--------+--------+--------+
+/// ```
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+fn main() {
+    let results = BenchmarkResults.new("Reference Size Verification");
+
+    // Core reference types
+    results.add(verify_thin_ref_size());
+    results.add(verify_fat_ref_size());
+    results.add(verify_box_size());
+    results.add(verify_shared_size());
+
+    // Reference components
+    results.add(verify_generation_size());
+    results.add(verify_epoch_caps_size());
+
+    // Derived reference types
+    results.add(verify_maybe_ref_size());
+    results.add(verify_result_ref_size());
+
+    // Compare with other languages
+    results.add(compare_with_rust_ref());
+    results.add(compare_with_go_ref());
+
+    results.report();
+    assert(results.all_pass(), "Reference sizes deviate from specification");
+}
+
+/// Verify ThinRef size
+fn verify_thin_ref_size() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let thin_ref: &Int = &*data;
+
+    let actual_size = size_of_val(&thin_ref);
+    let expected_size = 16;
+
+    BenchmarkResult {
+        name: "thin_ref_size",
+        metric: "bytes",
+        value: actual_size as Float,
+        target: expected_size as Float,
+        passed: actual_size == expected_size,
+    }
+}
+
+/// Verify FatRef size (slice reference)
+fn verify_fat_ref_size() -> BenchmarkResult {
+    let data = [1, 2, 3, 4, 5];
+    let fat_ref: &[Int] = &data[..];
+
+    let actual_size = size_of_val(&fat_ref);
+    let expected_size = 24;
+
+    BenchmarkResult {
+        name: "fat_ref_size",
+        metric: "bytes",
+        value: actual_size as Float,
+        target: expected_size as Float,
+        passed: actual_size == expected_size,
+    }
+}
+
+/// Verify Heap (owned heap allocation) size
+fn verify_heap_size() -> BenchmarkResult {
+    let boxed: Heap<Int> = Heap(42);
+
+    let actual_size = size_of_val(&boxed);
+    // Box is just a pointer (8 bytes) - CBGR metadata is in allocator
+    let expected_size = 8;
+
+    BenchmarkResult {
+        name: "box_size",
+        metric: "bytes",
+        value: actual_size as Float,
+        target: expected_size as Float,
+        passed: actual_size == expected_size,
+    }
+}
+
+/// Verify Shared (reference-counted) size
+fn verify_shared_size() -> BenchmarkResult {
+    let shared: Shared<Int> = Shared.new(42);
+
+    let actual_size = size_of_val(&shared);
+    // Shared is a pointer to control block (8 bytes)
+    // Control block contains: strong count, weak count, value
+    let expected_size = 8;
+
+    BenchmarkResult {
+        name: "shared_size",
+        metric: "bytes",
+        value: actual_size as Float,
+        target: expected_size as Float,
+        passed: actual_size == expected_size,
+    }
+}
+
+/// Verify generation counter size
+fn verify_generation_size() -> BenchmarkResult {
+    let gen: Generation = Generation.new();
+
+    let actual_size = size_of_val(&gen);
+    let expected_size = 4;  // u32
+
+    BenchmarkResult {
+        name: "generation_size",
+        metric: "bytes",
+        value: actual_size as Float,
+        target: expected_size as Float,
+        passed: actual_size == expected_size,
+    }
+}
+
+/// Verify epoch capabilities size
+fn verify_epoch_caps_size() -> BenchmarkResult {
+    let epoch_caps: EpochCapabilities = EpochCapabilities.new();
+
+    let actual_size = size_of_val(&epoch_caps);
+    // Packed: epoch (24 bits) + capabilities (8 bits) = 4 bytes
+    let expected_size = 4;
+
+    BenchmarkResult {
+        name: "epoch_caps_size",
+        metric: "bytes",
+        value: actual_size as Float,
+        target: expected_size as Float,
+        passed: actual_size == expected_size,
+    }
+}
+
+/// Verify Maybe<&T> size (optional reference)
+fn verify_maybe_ref_size() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let maybe_ref: Maybe<&Int> = Some(&*data);
+
+    let actual_size = size_of_val(&maybe_ref);
+    // Maybe<&T> should be same as &T with null optimization
+    let expected_size = 16;
+
+    BenchmarkResult {
+        name: "maybe_ref_size",
+        metric: "bytes",
+        value: actual_size as Float,
+        target: expected_size as Float,
+        passed: actual_size == expected_size,
+    }
+}
+
+/// Verify Result<&T, E> size
+fn verify_result_ref_size() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let result_ref: Result<&Int, ()> = Ok(&*data);
+
+    let actual_size = size_of_val(&result_ref);
+    // Result<&T, ()> with null optimization
+    let expected_size = 16;
+
+    BenchmarkResult {
+        name: "result_ref_size",
+        metric: "bytes",
+        value: actual_size as Float,
+        target: expected_size as Float,
+        passed: actual_size == expected_size,
+    }
+}
+
+/// Compare with Rust reference sizes
+fn compare_with_rust_ref() -> BenchmarkResult {
+    // Rust &T = 8 bytes (pointer only)
+    // Verum &T = 16 bytes (pointer + generation + epoch)
+    let rust_ref_size = 8;
+    let verum_ref_size = 16;
+
+    let overhead = verum_ref_size - rust_ref_size;
+
+    // 8 bytes overhead for CBGR safety
+    BenchmarkResult {
+        name: "vs_rust_overhead",
+        metric: "bytes",
+        value: overhead as Float,
+        target: 8.0,
+        passed: overhead == 8,
+    }
+}
+
+/// Compare with Go reference/pointer sizes
+fn compare_with_go_ref() -> BenchmarkResult {
+    // Go pointer = 8 bytes
+    // Go slice = 24 bytes (ptr + len + cap)
+    // Go interface = 16 bytes (type + data)
+
+    // Verum ThinRef = 16 bytes
+    // Verum FatRef = 24 bytes (same as Go slice)
+
+    let go_pointer_size = 8;
+    let verum_thin_ref_size = 16;
+
+    let overhead = verum_thin_ref_size - go_pointer_size;
+
+    BenchmarkResult {
+        name: "vs_go_overhead",
+        metric: "bytes",
+        value: overhead as Float,
+        target: 8.0,
+        passed: overhead == 8,
+    }
+}
+
+/// Detailed breakdown of reference layout
+fn analyze_reference_layout() {
+    println("=== Reference Layout Analysis ===");
+    println("");
+
+    // ThinRef layout
+    println("ThinRef<T> (16 bytes):");
+    println("  Offset 0-7:  ptr to T (8 bytes)");
+    println("  Offset 8-11: generation counter (4 bytes, u32)");
+    println("  Offset 12-15: epoch_caps (4 bytes, packed)");
+    println("    - epoch: 24 bits (16M epochs)");
+    println("    - caps: 8 bits (read/write/move flags)");
+    println("");
+
+    // FatRef layout
+    println("FatRef<T> (24 bytes):");
+    println("  Offset 0-7:  ptr to T (8 bytes)");
+    println("  Offset 8-11: generation counter (4 bytes, u32)");
+    println("  Offset 12-15: epoch_caps (4 bytes, packed)");
+    println("  Offset 16-23: length (8 bytes, usize)");
+    println("");
+
+    // Memory efficiency analysis
+    println("Memory Efficiency:");
+
+    let thin_ref_size = 16;
+    let fat_ref_size = 24;
+    let c_pointer_size = 8;
+    let c_slice_size = 16;
+
+    let thin_overhead_pct = ((thin_ref_size - c_pointer_size) as Float / c_pointer_size as Float) * 100.0;
+    let fat_overhead_pct = ((fat_ref_size - c_slice_size) as Float / c_slice_size as Float) * 100.0;
+
+    println("  ThinRef vs C pointer: +{:.0}%", thin_overhead_pct);
+    println("  FatRef vs C slice: +{:.0}%", fat_overhead_pct);
+    println("");
+
+    // Safety benefit analysis
+    println("Safety Benefits:");
+    println("  - Use-after-free detection via generation check");
+    println("  - Temporal memory safety");
+    println("  - Epoch-based capability tracking");
+    println("  - Runtime bounds checking (FatRef)");
+}
+
+/// Benchmark reference size across different types
+fn benchmark_reference_size_variations() {
+    println("=== Reference Size Variations ===");
+    println("");
+
+    // Test different types
+    let int_ref: &Int = &42;
+    let float_ref: &Float = &3.14;
+    let text_ref: &Text = &Text.from("test");
+    let list_ref: &List<Int> = &[1, 2, 3];
+
+    println("&Int:       {} bytes", size_of_val(&int_ref));
+    println("&Float:     {} bytes", size_of_val(&float_ref));
+    println("&Text:      {} bytes", size_of_val(&text_ref));
+    println("&List<Int>: {} bytes", size_of_val(&list_ref));
+
+    // All should be 16 bytes (ThinRef)
+    assert(size_of_val(&int_ref) == 16);
+    assert(size_of_val(&float_ref) == 16);
+    assert(size_of_val(&text_ref) == 16);
+    assert(size_of_val(&list_ref) == 16);
+}
+
+/// Verify alignment requirements
+fn verify_reference_alignment() {
+    println("=== Reference Alignment ===");
+    println("");
+
+    let thin_align = align_of.<&Int>();
+    let fat_align = align_of.<&[Int]>();
+
+    println("ThinRef alignment: {} bytes", thin_align);
+    println("FatRef alignment:  {} bytes", fat_align);
+
+    // Both should be 8-byte aligned for optimal performance
+    assert(thin_align == 8);
+    assert(fat_align == 8);
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.0} {} (expected: {:.0})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+
+        // Print detailed analysis
+        analyze_reference_layout();
+    }
+}

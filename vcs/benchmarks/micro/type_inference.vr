@@ -1,0 +1,275 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 100ms per 10K LOC
+// @tags: compiler, type-inference, performance
+
+/// Benchmark for type inference performance
+///
+/// Type inference must handle:
+/// - Local type inference (Hindley-Milner)
+/// - Bidirectional type checking
+/// - Constraint solving
+/// - Refinement type verification
+
+module benchmarks.micro.type_inference
+
+using [Benchmark, Compiler]
+
+/// Simple expression type inference
+fn benchmark_inference_simple_expr() {
+    let compiler = Compiler.new();
+
+    let code = "
+        fn test() {
+            let x = 42;
+            let y = 3.14;
+            let z = x + 10;
+        }
+    ";
+
+    for _ in 0..10_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Generic function instantiation
+fn benchmark_inference_generics() {
+    let compiler = Compiler.new();
+
+    let code = "
+        fn identity<T>(x: T) -> T { x }
+
+        fn test() {
+            let a = identity(42);
+            let b = identity(\"hello\");
+            let c = identity(list![1, 2, 3]);
+        }
+    ";
+
+    for _ in 0..5_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Complex nested generics
+fn benchmark_inference_nested_generics() {
+    let compiler = Compiler.new();
+
+    let code = "
+        fn test() {
+            let nested: List<Map<Text, List<Int>>> = list![];
+            let result = nested.iter()
+                .flat_map(|m| m.values())
+                .flatten()
+                .sum();
+        }
+    ";
+
+    for _ in 0..2_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Closure type inference
+fn benchmark_inference_closures() {
+    let compiler = Compiler.new();
+
+    let code = "
+        fn test() {
+            let add = |a, b| a + b;
+            let multiply = |x| |y| x * y;
+            let compose = |f, g| |x| f(g(x));
+
+            let result = compose(|x| x + 1, |x| x * 2)(5);
+        }
+    ";
+
+    for _ in 0..5_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Trait/interface constraint solving
+fn benchmark_inference_constraints() {
+    let compiler = Compiler.new();
+
+    let code = "
+        type Addable is protocol {
+            fn add(self, other: Self) -> Self;
+        };
+
+        fn sum<T: Addable>(items: List<T>) -> T {
+            items.reduce(|a, b| a.add(b))
+        }
+
+        fn test() {
+            let ints = list![1, 2, 3];
+            let floats = list![1.0, 2.0, 3.0];
+            let _ = sum(ints);
+            let _ = sum(floats);
+        }
+    ";
+
+    for _ in 0..3_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Bidirectional type checking
+fn benchmark_inference_bidirectional() {
+    let compiler = Compiler.new();
+
+    let code = "
+        fn test() {
+            // Check mode (expected type known)
+            let x: Int = 42;
+
+            // Synth mode (infer from expression)
+            let y = 42;
+
+            // Mixed
+            let z: List<Int> = list![1, 2, 3].map(|x| x * 2);
+        }
+    ";
+
+    for _ in 0..10_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Refinement type inference
+fn benchmark_inference_refinements() {
+    let compiler = Compiler.new();
+
+    let code = "
+        fn test() {
+            let positive: Int where self > 0 = 42;
+            let bounded: Int where 0 <= self && self < 100 = 50;
+            let non_empty: List<Int> where self.len() > 0 = list![1];
+        }
+    ";
+
+    for _ in 0..1_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Associated type resolution
+fn benchmark_inference_associated_types() {
+    let compiler = Compiler.new();
+
+    let code = "
+        type Container is protocol {
+            type Item;
+            fn get(self, index: Int) -> Self.Item;
+        };
+
+        implement Container for List<T> {
+            type Item = T;
+            fn get(self, index: Int) -> T { self[index] }
+        }
+
+        fn first<C: Container>(c: C) -> C.Item {
+            c.get(0)
+        }
+
+        fn test() {
+            let list = list![1, 2, 3];
+            let item = first(list);  // Infer: Int
+        }
+    ";
+
+    for _ in 0..2_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Higher-kinded type inference
+fn benchmark_inference_hkt() {
+    let compiler = Compiler.new();
+
+    let code = "
+        type Functor<F<_>> is protocol {
+            fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
+        };
+
+        fn double_functor<F: Functor>(fa: F<Int>) -> F<Int> {
+            Functor.map(fa, |x| x * 2)
+        }
+
+        fn test() {
+            let list = list![1, 2, 3];
+            let doubled = double_functor(list);
+        }
+    ";
+
+    for _ in 0..1_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Large function with many locals
+fn benchmark_inference_many_locals() {
+    let compiler = Compiler.new();
+
+    // Generate code with many local variables
+    let mut code = "fn test() {\n".to_text();
+    for i in 0..100 {
+        code.push_str(text("    let x{} = {};\n", i, i));
+    }
+    code.push_str("}");
+
+    for _ in 0..1_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Recursive type inference
+fn benchmark_inference_recursive() {
+    let compiler = Compiler.new();
+
+    let code = "
+        type Node<T> is {
+            value: T,
+            next: Maybe<Heap<Node<T>>>,
+        };
+
+        fn length<T>(node: &Node<T>) -> Int {
+            match node.next {
+                Some(next) => 1 + length(next),
+                None => 1,
+            }
+        }
+
+        fn test() {
+            let list = Node { value: 1, next: Some(Heap.alloc(Node { value: 2, next: None })) };
+            let len = length(&list);
+        }
+    ";
+
+    for _ in 0..2_000 {
+        let _ = compiler.infer_types(code);
+    }
+}
+
+/// Pattern matching type inference
+fn benchmark_inference_patterns() {
+    let compiler = Compiler.new();
+
+    let code = "
+        type Result<T, E> is Ok(T) | Err(E);
+
+        fn process(result: Result<Int, Text>) -> Int {
+            match result {
+                Ok(value) => value,
+                Err(msg) if msg.len() > 0 => -1,
+                Err(_) => 0,
+            }
+        }
+    ";
+
+    for _ in 0..5_000 {
+        let _ = compiler.infer_types(code);
+    }
+}

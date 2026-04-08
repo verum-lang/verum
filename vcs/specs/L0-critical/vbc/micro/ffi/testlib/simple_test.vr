@@ -1,0 +1,35 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, debug
+// @description: Simple FFI test with debug output
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_add_i32(a: Int, b: Int) -> Int;
+    fn ffi_get_version() -> Int;
+}
+
+fn main() {
+    print("Starting test\n");
+
+    let version = ffi_get_version();
+    print("Version: ");
+    print(version);
+    print("\n");
+
+    let result = ffi_add_i32(10, 32);
+    print("10 + 32 = ");
+    print(result);
+    print("\n");
+
+    if result == 42 {
+        print("Test passed!\n");
+    } else {
+        print("Test failed! Expected 42\n");
+    }
+
+    assert(result == 42);
+}

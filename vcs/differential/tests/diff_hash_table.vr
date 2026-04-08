@@ -1,0 +1,168 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, hash, table, data-structure
+// @timeout: 30000
+
+// Simple open-addressing hash table with linear probing (capacity 8)
+
+type HT is { 
+    k0: Int, k1: Int, k2: Int, k3: Int, k4: Int, k5: Int, k6: Int, k7: Int,
+    v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int,
+    sz: Int
+};
+
+fn new_ht() -> HT {
+    HT {
+        k0: -1, k1: -1, k2: -1, k3: -1, k4: -1, k5: -1, k6: -1, k7: -1,
+        v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+        sz: 0
+    }
+}
+
+fn get_key(t: HT, i: Int) -> Int {
+    if i == 0 { t.k0 } else if i == 1 { t.k1 } else if i == 2 { t.k2 }
+    else if i == 3 { t.k3 } else if i == 4 { t.k4 } else if i == 5 { t.k5 }
+    else if i == 6 { t.k6 } else { t.k7 }
+}
+
+fn get_val(t: HT, i: Int) -> Int {
+    if i == 0 { t.v0 } else if i == 1 { t.v1 } else if i == 2 { t.v2 }
+    else if i == 3 { t.v3 } else if i == 4 { t.v4 } else if i == 5 { t.v5 }
+    else if i == 6 { t.v6 } else { t.v7 }
+}
+
+fn set_key(t: HT, i: Int, k: Int) -> HT {
+    HT {
+        k0: if i == 0 { k } else { t.k0 }, k1: if i == 1 { k } else { t.k1 },
+        k2: if i == 2 { k } else { t.k2 }, k3: if i == 3 { k } else { t.k3 },
+        k4: if i == 4 { k } else { t.k4 }, k5: if i == 5 { k } else { t.k5 },
+        k6: if i == 6 { k } else { t.k6 }, k7: if i == 7 { k } else { t.k7 },
+        v0: t.v0, v1: t.v1, v2: t.v2, v3: t.v3,
+        v4: t.v4, v5: t.v5, v6: t.v6, v7: t.v7,
+        sz: t.sz
+    }
+}
+
+fn set_val(t: HT, i: Int, v: Int) -> HT {
+    HT {
+        k0: t.k0, k1: t.k1, k2: t.k2, k3: t.k3,
+        k4: t.k4, k5: t.k5, k6: t.k6, k7: t.k7,
+        v0: if i == 0 { v } else { t.v0 }, v1: if i == 1 { v } else { t.v1 },
+        v2: if i == 2 { v } else { t.v2 }, v3: if i == 3 { v } else { t.v3 },
+        v4: if i == 4 { v } else { t.v4 }, v5: if i == 5 { v } else { t.v5 },
+        v6: if i == 6 { v } else { t.v6 }, v7: if i == 7 { v } else { t.v7 },
+        sz: t.sz
+    }
+}
+
+fn hash_fn(key: Int) -> Int {
+    let h = (key * 2654435761) / 65536;
+    let pos = h % 8;
+    if pos < 0 { pos + 8 } else { pos }
+}
+
+// Insert or update key-value pair
+fn ht_put(t: HT, key: Int, val: Int) -> HT {
+    let mut idx = hash_fn(key);
+    let mut probes = 0;
+    let mut ht = t;
+    while probes < 8 {
+        let k = get_key(ht, idx);
+        if k == -1 {
+            // Empty slot
+            ht = set_key(ht, idx, key);
+            ht = set_val(ht, idx, val);
+            ht = HT {
+                k0: ht.k0, k1: ht.k1, k2: ht.k2, k3: ht.k3,
+                k4: ht.k4, k5: ht.k5, k6: ht.k6, k7: ht.k7,
+                v0: ht.v0, v1: ht.v1, v2: ht.v2, v3: ht.v3,
+                v4: ht.v4, v5: ht.v5, v6: ht.v6, v7: ht.v7,
+                sz: ht.sz + 1
+            };
+            return ht;
+        }
+        if k == key {
+            // Update existing
+            ht = set_val(ht, idx, val);
+            return ht;
+        }
+        idx = (idx + 1) % 8;
+        probes = probes + 1;
+    }
+    ht // table full
+}
+
+// Get value for key (-1 if not found)
+fn ht_get(t: HT, key: Int) -> Int {
+    let mut idx = hash_fn(key);
+    let mut probes = 0;
+    while probes < 8 {
+        let k = get_key(t, idx);
+        if k == -1 { return -1; } // not found
+        if k == key { return get_val(t, idx); }
+        idx = (idx + 1) % 8;
+        probes = probes + 1;
+    }
+    -1
+}
+
+fn ht_contains(t: HT, key: Int) -> Int {
+    if ht_get(t, key) != -1 { 1 } else { 0 }
+}
+
+fn test_basic() -> Int {
+    let mut ht = new_ht();
+    ht = ht_put(ht, 10, 100);
+    ht = ht_put(ht, 20, 200);
+    ht = ht_put(ht, 30, 300);
+
+    assert_eq(ht.sz, 3);
+    assert_eq(ht_get(ht, 10), 100);
+    assert_eq(ht_get(ht, 20), 200);
+    assert_eq(ht_get(ht, 30), 300);
+    assert_eq(ht_get(ht, 40), -1);
+    1
+}
+
+fn test_update() -> Int {
+    let mut ht = new_ht();
+    ht = ht_put(ht, 5, 50);
+    assert_eq(ht_get(ht, 5), 50);
+    ht = ht_put(ht, 5, 55);
+    assert_eq(ht_get(ht, 5), 55);
+    assert_eq(ht.sz, 1); // size shouldn't change on update
+    1
+}
+
+fn test_collision() -> Int {
+    let mut ht = new_ht();
+    // Insert several keys that may collide
+    ht = ht_put(ht, 1, 10);
+    ht = ht_put(ht, 9, 90);  // may hash to same bucket
+    ht = ht_put(ht, 17, 170);
+    ht = ht_put(ht, 25, 250);
+
+    assert_eq(ht_get(ht, 1), 10);
+    assert_eq(ht_get(ht, 9), 90);
+    assert_eq(ht_get(ht, 17), 170);
+    assert_eq(ht_get(ht, 25), 250);
+    1
+}
+
+fn test_contains() -> Int {
+    let mut ht = new_ht();
+    ht = ht_put(ht, 42, 1);
+    assert_eq(ht_contains(ht, 42), 1);
+    assert_eq(ht_contains(ht, 43), 0);
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_update();
+    test_collision();
+    test_contains();
+    print("[OK] diff_hash_table");
+    0
+}

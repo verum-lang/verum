@@ -1,0 +1,61 @@
+// @test: parse
+// @level: L1
+// @tags: meta, quote, interpolation, staged-metaprogramming
+// @timeout: 5000
+
+/// Quote interpolation and repetition.
+/// Grammar: quote_interpolation = splice_operator (identifier | '{' expression '}')
+///          splice_operator = '$' { '$' }
+///          quote_repetition = splice_operator '[' 'for' pattern 'in' expression '{' token_tree '}' ']'
+
+// Simple variable interpolation
+meta fn make_fn(name: Text) {
+    quote {
+        fn $name() -> Int {
+            42
+        }
+    }
+}
+
+// Expression interpolation with ${}
+meta fn make_constant(name: Text, val: Int) {
+    let doubled = val * 2;
+    quote {
+        const $name: Int = ${doubled};
+    }
+}
+
+// Repetition with $[for ... in ... { }]
+meta fn make_fields(names: List<Text>) {
+    quote {
+        type Generated is {
+            $[for name in names {
+                $name: Int,
+            }]
+        };
+    }
+}
+
+// Multi-level splice ($$var for parent quote)
+meta(2) fn make_meta() {
+    quote {
+        meta fn inner() {
+            let val = 100;
+            quote {
+                const GENERATED: Int = $$val;
+            }
+        }
+    }
+}
+
+// Quote with lift
+meta fn with_lift(computed: Int) {
+    quote {
+        let x = lift(computed);
+        print(f"computed = {x}");
+    }
+}
+
+fn main() {
+    print("Quote interpolation tests parsed");
+}

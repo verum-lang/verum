@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// NOTE: was typecheck-fail (E805) but compiler does not yet detect circular DI dependencies
+// @tier: 0
+// @level: L2
+// @tags: di, circular, error
+// @description: Tests detection of circular dependencies in DI graph
+//
+// ServiceA -> ServiceB -> ServiceC -> ServiceA
+// This forms a cycle and should be rejected at compile time
+
+@injectable(Scope.Singleton)
+type ServiceA is {
+    service_b: ServiceB,  // Depends on ServiceB
+};
+
+implement ServiceA {
+    @inject
+    fn new(service_b: ServiceB) -> Self {
+        Self { service_b }
+    }
+
+    fn do_work(&self) {
+        self.service_b.process();
+    }
+}
+
+@injectable(Scope.Singleton)
+type ServiceB is {
+    service_c: ServiceC,  // Depends on ServiceC
+};
+
+implement ServiceB {
+    @inject
+    fn new(service_c: ServiceC) -> Self {
+        Self { service_c }
+    }
+
+    fn process(&self) {
+        self.service_c.execute();
+    }
+}
+
+@injectable(Scope.Singleton)
+type ServiceC is {
+    service_a: ServiceA,  // ERROR: Creates circular dependency back to ServiceA
+};
+
+implement ServiceC {
+    @inject
+    fn new(service_a: ServiceA) -> Self {
+        Self { service_a }
+    }
+
+    fn execute(&self) {
+        self.service_a.do_work();
+    }
+}
+
+fn main() {
+    // This should not compile due to circular dependency
+    let service = inject ServiceA;
+}

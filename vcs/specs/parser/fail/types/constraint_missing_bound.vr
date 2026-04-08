@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, constraint, bound, error
+// @description: Test detection of negation without bound
+// @expected-error: E050
+
+// Negative bound must have a protocol after !
+fn test<T: Clone + !>(x: T) {}

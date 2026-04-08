@@ -1,0 +1,631 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, bindings, windows, win32, unsafe
+// @description: Tests Windows API bindings for Win32 functions
+
+/// ============================================================
+/// WINDOWS API BINDINGS
+/// ============================================================
+///
+/// Win32 API bindings for Windows-specific functionality.
+/// Uses stdcall on x86 and win64 convention on x64.
+
+@cfg(target_os = "windows")
+
+// ============================================================
+// KERNEL32 - Core System Functions
+// ============================================================
+
+@link(name = "kernel32")
+ffi kernel32 {
+    // ------------------------------------------------------------
+    // Error Handling
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn GetLastError() -> DWORD;
+        // thread_safe = true;
+
+    @extern("system")
+    fn SetLastError(dwErrCode: DWORD);
+        // thread_safe = true;
+
+    @extern("system")
+    fn FormatMessageW(
+        dwFlags: DWORD,
+        lpSource: LPCVOID,
+        dwMessageId: DWORD,
+        dwLanguageId: DWORD,
+        lpBuffer: LPWSTR,
+        nSize: DWORD,
+        Arguments: *mut va_list
+    ) -> DWORD;
+
+    // ------------------------------------------------------------
+    // File I/O
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn CreateFileW(
+        lpFileName: LPCWSTR,
+        dwDesiredAccess: DWORD,
+        dwShareMode: DWORD,
+        lpSecurityAttributes: LPSECURITY_ATTRIBUTES,
+        dwCreationDisposition: DWORD,
+        dwFlagsAndAttributes: DWORD,
+        hTemplateFile: HANDLE
+    ) -> HANDLE;
+        // requires lpFileName != null;
+        // errors_via = ReturnValue(INVALID_HANDLE_VALUE);
+
+    @extern("system")
+    fn ReadFile(
+        hFile: HANDLE,
+        lpBuffer: LPVOID,
+        nNumberOfBytesToRead: DWORD,
+        lpNumberOfBytesRead: LPDWORD,
+        lpOverlapped: LPOVERLAPPED
+    ) -> BOOL;
+        // requires lpBuffer != null || nNumberOfBytesToRead == 0;
+
+    @extern("system")
+    fn WriteFile(
+        hFile: HANDLE,
+        lpBuffer: LPCVOID,
+        nNumberOfBytesToWrite: DWORD,
+        lpNumberOfBytesWritten: LPDWORD,
+        lpOverlapped: LPOVERLAPPED
+    ) -> BOOL;
+        // requires lpBuffer != null || nNumberOfBytesToWrite == 0;
+
+    @extern("system")
+    fn CloseHandle(hObject: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn SetFilePointer(
+        hFile: HANDLE,
+        lDistanceToMove: LONG,
+        lpDistanceToMoveHigh: PLONG,
+        dwMoveMethod: DWORD
+    ) -> DWORD;
+
+    @extern("system")
+    fn SetFilePointerEx(
+        hFile: HANDLE,
+        liDistanceToMove: LARGE_INTEGER,
+        lpNewFilePointer: PLARGE_INTEGER,
+        dwMoveMethod: DWORD
+    ) -> BOOL;
+
+    @extern("system")
+    fn GetFileSize(hFile: HANDLE, lpFileSizeHigh: LPDWORD) -> DWORD;
+
+    @extern("system")
+    fn FlushFileBuffers(hFile: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn DeleteFileW(lpFileName: LPCWSTR) -> BOOL;
+        // requires lpFileName != null;
+
+    @extern("system")
+    fn MoveFileW(lpExistingFileName: LPCWSTR, lpNewFileName: LPCWSTR) -> BOOL;
+        // requires lpExistingFileName != null && lpNewFileName != null;
+
+    @extern("system")
+    fn CopyFileW(
+        lpExistingFileName: LPCWSTR,
+        lpNewFileName: LPCWSTR,
+        bFailIfExists: BOOL
+    ) -> BOOL;
+
+    // ------------------------------------------------------------
+    // Directory Operations
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn CreateDirectoryW(
+        lpPathName: LPCWSTR,
+        lpSecurityAttributes: LPSECURITY_ATTRIBUTES
+    ) -> BOOL;
+        // requires lpPathName != null;
+
+    @extern("system")
+    fn RemoveDirectoryW(lpPathName: LPCWSTR) -> BOOL;
+        // requires lpPathName != null;
+
+    @extern("system")
+    fn GetCurrentDirectoryW(nBufferLength: DWORD, lpBuffer: LPWSTR) -> DWORD;
+
+    @extern("system")
+    fn SetCurrentDirectoryW(lpPathName: LPCWSTR) -> BOOL;
+        // requires lpPathName != null;
+
+    @extern("system")
+    fn FindFirstFileW(lpFileName: LPCWSTR, lpFindFileData: LPWIN32_FIND_DATAW) -> HANDLE;
+        // requires lpFileName != null && lpFindFileData != null;
+
+    @extern("system")
+    fn FindNextFileW(hFindFile: HANDLE, lpFindFileData: LPWIN32_FIND_DATAW) -> BOOL;
+        // requires lpFindFileData != null;
+
+    @extern("system")
+    fn FindClose(hFindFile: HANDLE) -> BOOL;
+
+    // ------------------------------------------------------------
+    // Memory Management
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn VirtualAlloc(
+        lpAddress: LPVOID,
+        dwSize: SIZE_T,
+        flAllocationType: DWORD,
+        flProtect: DWORD
+    ) -> LPVOID;
+        // memory_effects = Allocates;
+
+    @extern("system")
+    fn VirtualFree(lpAddress: LPVOID, dwSize: SIZE_T, dwFreeType: DWORD) -> BOOL;
+        // memory_effects = Deallocates(lpAddress);
+
+    @extern("system")
+    fn VirtualProtect(
+        lpAddress: LPVOID,
+        dwSize: SIZE_T,
+        flNewProtect: DWORD,
+        lpflOldProtect: PDWORD
+    ) -> BOOL;
+
+    @extern("system")
+    fn HeapCreate(flOptions: DWORD, dwInitialSize: SIZE_T, dwMaximumSize: SIZE_T) -> HANDLE;
+
+    @extern("system")
+    fn HeapDestroy(hHeap: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn HeapAlloc(hHeap: HANDLE, dwFlags: DWORD, dwBytes: SIZE_T) -> LPVOID;
+        // memory_effects = Allocates;
+
+    @extern("system")
+    fn HeapFree(hHeap: HANDLE, dwFlags: DWORD, lpMem: LPVOID) -> BOOL;
+        // memory_effects = Deallocates(lpMem);
+
+    @extern("system")
+    fn HeapReAlloc(
+        hHeap: HANDLE,
+        dwFlags: DWORD,
+        lpMem: LPVOID,
+        dwBytes: SIZE_T
+    ) -> LPVOID;
+
+    @extern("system")
+    fn GetProcessHeap() -> HANDLE;
+
+    // ------------------------------------------------------------
+    // Process and Thread
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn GetCurrentProcess() -> HANDLE;
+
+    @extern("system")
+    fn GetCurrentProcessId() -> DWORD;
+
+    @extern("system")
+    fn GetCurrentThread() -> HANDLE;
+
+    @extern("system")
+    fn GetCurrentThreadId() -> DWORD;
+
+    @extern("system")
+    fn CreateThread(
+        lpThreadAttributes: LPSECURITY_ATTRIBUTES,
+        dwStackSize: SIZE_T,
+        lpStartAddress: LPTHREAD_START_ROUTINE,
+        lpParameter: LPVOID,
+        dwCreationFlags: DWORD,
+        lpThreadId: LPDWORD
+    ) -> HANDLE;
+
+    @extern("system")
+    fn ExitThread(dwExitCode: DWORD);
+
+    @extern("system")
+    @noreturn
+    fn ExitProcess(uExitCode: UINT) -> !;
+
+    @extern("system")
+    fn TerminateProcess(hProcess: HANDLE, uExitCode: UINT) -> BOOL;
+
+    @extern("system")
+    fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) -> DWORD;
+
+    @extern("system")
+    fn WaitForMultipleObjects(
+        nCount: DWORD,
+        lpHandles: *const HANDLE,
+        bWaitAll: BOOL,
+        dwMilliseconds: DWORD
+    ) -> DWORD;
+
+    @extern("system")
+    fn Sleep(dwMilliseconds: DWORD);
+
+    @extern("system")
+    fn SleepEx(dwMilliseconds: DWORD, bAlertable: BOOL) -> DWORD;
+
+    // ------------------------------------------------------------
+    // Synchronization
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn InitializeCriticalSection(lpCriticalSection: LPCRITICAL_SECTION);
+
+    @extern("system")
+    fn DeleteCriticalSection(lpCriticalSection: LPCRITICAL_SECTION);
+
+    @extern("system")
+    fn EnterCriticalSection(lpCriticalSection: LPCRITICAL_SECTION);
+
+    @extern("system")
+    fn LeaveCriticalSection(lpCriticalSection: LPCRITICAL_SECTION);
+
+    @extern("system")
+    fn TryEnterCriticalSection(lpCriticalSection: LPCRITICAL_SECTION) -> BOOL;
+
+    @extern("system")
+    fn CreateMutexW(
+        lpMutexAttributes: LPSECURITY_ATTRIBUTES,
+        bInitialOwner: BOOL,
+        lpName: LPCWSTR
+    ) -> HANDLE;
+
+    @extern("system")
+    fn ReleaseMutex(hMutex: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn CreateEventW(
+        lpEventAttributes: LPSECURITY_ATTRIBUTES,
+        bManualReset: BOOL,
+        bInitialState: BOOL,
+        lpName: LPCWSTR
+    ) -> HANDLE;
+
+    @extern("system")
+    fn SetEvent(hEvent: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn ResetEvent(hEvent: HANDLE) -> BOOL;
+
+    @extern("system")
+    fn CreateSemaphoreW(
+        lpSemaphoreAttributes: LPSECURITY_ATTRIBUTES,
+        lInitialCount: LONG,
+        lMaximumCount: LONG,
+        lpName: LPCWSTR
+    ) -> HANDLE;
+
+    @extern("system")
+    fn ReleaseSemaphore(
+        hSemaphore: HANDLE,
+        lReleaseCount: LONG,
+        lpPreviousCount: LPLONG
+    ) -> BOOL;
+
+    // ------------------------------------------------------------
+    // Module/DLL Functions
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE;
+
+    @extern("system")
+    fn LoadLibraryW(lpLibFileName: LPCWSTR) -> HMODULE;
+        // requires lpLibFileName != null;
+
+    @extern("system")
+    fn LoadLibraryExW(
+        lpLibFileName: LPCWSTR,
+        hFile: HANDLE,
+        dwFlags: DWORD
+    ) -> HMODULE;
+
+    @extern("system")
+    fn FreeLibrary(hLibModule: HMODULE) -> BOOL;
+
+    @extern("system")
+    fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC;
+
+    // ------------------------------------------------------------
+    // Time Functions
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn GetSystemTime(lpSystemTime: LPSYSTEMTIME);
+        // requires: lpSystemTime != null;
+
+    @extern("system")
+    fn GetLocalTime(lpSystemTime: LPSYSTEMTIME);
+        // requires: lpSystemTime != null;
+
+    @extern("system")
+    fn GetTickCount() -> DWORD;
+
+    @extern("system")
+    fn GetTickCount64() -> ULONGLONG;
+
+    @extern("system")
+    fn QueryPerformanceCounter(lpPerformanceCount: *mut LARGE_INTEGER) -> BOOL;
+
+    @extern("system")
+    fn QueryPerformanceFrequency(lpFrequency: *mut LARGE_INTEGER) -> BOOL;
+
+    // ------------------------------------------------------------
+    // Console Functions
+    // ------------------------------------------------------------
+
+    @extern("system")
+    fn GetStdHandle(nStdHandle: DWORD) -> HANDLE;
+
+    @extern("system")
+    fn SetConsoleTextAttribute(hConsoleOutput: HANDLE, wAttributes: WORD) -> BOOL;
+
+    @extern("system")
+    fn WriteConsoleW(
+        hConsoleOutput: HANDLE,
+        lpBuffer: LPCVOID,
+        nNumberOfCharsToWrite: DWORD,
+        lpNumberOfCharsWritten: LPDWORD,
+        lpReserved: LPVOID
+    ) -> BOOL;
+
+    @extern("system")
+    fn ReadConsoleW(
+        hConsoleInput: HANDLE,
+        lpBuffer: LPVOID,
+        nNumberOfCharsToRead: DWORD,
+        lpNumberOfCharsRead: LPDWORD,
+        pInputControl: LPVOID
+    ) -> BOOL;
+}
+
+// ============================================================
+// USER32 - User Interface
+// ============================================================
+
+@link(name = "user32")
+ffi user32 {
+    @extern("system")
+    fn MessageBoxW(
+        hWnd: HWND,
+        lpText: LPCWSTR,
+        lpCaption: LPCWSTR,
+        uType: UINT
+    ) -> c_int;
+
+    @extern("system")
+    fn GetDesktopWindow() -> HWND;
+
+    @extern("system")
+    fn GetWindowRect(hWnd: HWND, lpRect: LPRECT) -> BOOL;
+
+    @extern("system")
+    fn GetClientRect(hWnd: HWND, lpRect: LPRECT) -> BOOL;
+
+    @extern("system")
+    fn SetWindowTextW(hWnd: HWND, lpString: LPCWSTR) -> BOOL;
+
+    @extern("system")
+    fn GetWindowTextW(hWnd: HWND, lpString: LPWSTR, nMaxCount: c_int) -> c_int;
+
+    @extern("system")
+    fn ShowWindow(hWnd: HWND, nCmdShow: c_int) -> BOOL;
+
+    @extern("system")
+    fn UpdateWindow(hWnd: HWND) -> BOOL;
+
+    @extern("system")
+    fn DestroyWindow(hWnd: HWND) -> BOOL;
+
+    @extern("system")
+    fn GetMessageW(
+        lpMsg: LPMSG,
+        hWnd: HWND,
+        wMsgFilterMin: UINT,
+        wMsgFilterMax: UINT
+    ) -> BOOL;
+
+    @extern("system")
+    fn TranslateMessage(lpMsg: *const MSG) -> BOOL;
+
+    @extern("system")
+    fn DispatchMessageW(lpMsg: *const MSG) -> LRESULT;
+
+    @extern("system")
+    fn PostQuitMessage(nExitCode: c_int);
+
+    @extern("system")
+    fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT;
+}
+
+// ============================================================
+// WS2_32 - Windows Sockets
+// ============================================================
+
+@link(name = "ws2_32")
+ffi winsock {
+    @extern("system")
+    fn WSAStartup(wVersionRequested: WORD, lpWSAData: LPWSADATA) -> c_int;
+
+    @extern("system")
+    fn WSACleanup() -> c_int;
+
+    @extern("system")
+    fn WSAGetLastError() -> c_int;
+
+    @extern("system")
+    fn socket(af: c_int, type_: c_int, protocol: c_int) -> SOCKET;
+
+    @extern("system")
+    fn closesocket(s: SOCKET) -> c_int;
+
+    @extern("system")
+    fn bind(s: SOCKET, name: *const sockaddr, namelen: c_int) -> c_int;
+
+    @extern("system")
+    fn listen(s: SOCKET, backlog: c_int) -> c_int;
+
+    @extern("system")
+    fn accept(s: SOCKET, addr: *mut sockaddr, addrlen: *mut c_int) -> SOCKET;
+
+    @extern("system")
+    fn connect(s: SOCKET, name: *const sockaddr, namelen: c_int) -> c_int;
+
+    @extern("system")
+    fn send(s: SOCKET, buf: *const c_char, len: c_int, flags: c_int) -> c_int;
+
+    @extern("system")
+    fn recv(s: SOCKET, buf: *mut c_char, len: c_int, flags: c_int) -> c_int;
+
+    @extern("system")
+    fn shutdown(s: SOCKET, how: c_int) -> c_int;
+
+    @extern("system")
+    fn setsockopt(
+        s: SOCKET,
+        level: c_int,
+        optname: c_int,
+        optval: *const c_char,
+        optlen: c_int
+    ) -> c_int;
+
+    @extern("system")
+    fn ioctlsocket(s: SOCKET, cmd: c_long, argp: *mut c_ulong) -> c_int;
+
+    @extern("system")
+    fn select(
+        nfds: c_int,
+        readfds: *mut fd_set,
+        writefds: *mut fd_set,
+        exceptfds: *mut fd_set,
+        timeout: *const timeval
+    ) -> c_int;
+}
+
+// ============================================================
+// TYPE DEFINITIONS
+// ============================================================
+
+// Basic types
+type c_int is i32;
+type c_long is i32;   // Windows uses 32-bit long
+type c_ulong is u32;
+type c_char is i8;
+type c_void is ();
+
+// Windows types
+type BOOL is c_int;
+type BYTE is u8;
+type WORD is u16;
+type DWORD is u32;
+type UINT is u32;
+type LONG is i32;
+type ULONG is u32;
+type LONGLONG is i64;
+type ULONGLONG is u64;
+type SIZE_T is usize;
+
+type HANDLE is *mut c_void;
+type HWND is *mut c_void;
+type HMODULE is *mut c_void;
+type FARPROC is *mut c_void;
+type SOCKET is usize;
+
+type LPVOID is *mut c_void;
+type LPCVOID is *const c_void;
+type LPSTR is *mut c_char;
+type LPCSTR is *const c_char;
+type LPWSTR is *mut u16;
+type LPCWSTR is *const u16;
+type LPDWORD is *mut DWORD;
+type PDWORD is *mut DWORD;
+type PLONG is *mut LONG;
+type LPLONG is *mut LONG;
+
+type WPARAM is usize;
+type LPARAM is isize;
+type LRESULT is isize;
+
+type LPTHREAD_START_ROUTINE is extern "system" fn(LPVOID) -> DWORD;
+type va_list is *mut c_void;
+
+@extern type SECURITY_ATTRIBUTES is ();
+type LPSECURITY_ATTRIBUTES is *mut SECURITY_ATTRIBUTES;
+
+@extern type OVERLAPPED is ();
+type LPOVERLAPPED is *mut OVERLAPPED;
+
+@extern type WIN32_FIND_DATAW is ();
+type LPWIN32_FIND_DATAW is *mut WIN32_FIND_DATAW;
+
+@extern type CRITICAL_SECTION is ();
+type LPCRITICAL_SECTION is *mut CRITICAL_SECTION;
+
+@extern type SYSTEMTIME is ();
+type LPSYSTEMTIME is *mut SYSTEMTIME;
+
+@extern type LARGE_INTEGER is ();
+type PLARGE_INTEGER is *mut LARGE_INTEGER;
+
+@extern type RECT is ();
+type LPRECT is *mut RECT;
+
+@extern type MSG is ();
+type LPMSG is *mut MSG;
+
+@extern type WSADATA is ();
+type LPWSADATA is *mut WSADATA;
+
+@extern type sockaddr is ();
+@extern type fd_set is ();
+
+@repr(C)
+type timeval is {
+    tv_sec: c_long,
+    tv_usec: c_long,
+};
+
+// Constants
+const INVALID_HANDLE_VALUE: HANDLE = -1isize as HANDLE;
+const NULL: HANDLE = 0 as HANDLE;
+
+const GENERIC_READ: DWORD = 0x80000000;
+const GENERIC_WRITE: DWORD = 0x40000000;
+const FILE_SHARE_READ: DWORD = 0x00000001;
+const FILE_SHARE_WRITE: DWORD = 0x00000002;
+const CREATE_NEW: DWORD = 1;
+const CREATE_ALWAYS: DWORD = 2;
+const OPEN_EXISTING: DWORD = 3;
+const OPEN_ALWAYS: DWORD = 4;
+
+const MEM_COMMIT: DWORD = 0x1000;
+const MEM_RESERVE: DWORD = 0x2000;
+const MEM_RELEASE: DWORD = 0x8000;
+const PAGE_READWRITE: DWORD = 0x04;
+const PAGE_EXECUTE_READWRITE: DWORD = 0x40;
+
+const INFINITE: DWORD = 0xFFFFFFFF;
+const WAIT_OBJECT_0: DWORD = 0;
+const WAIT_TIMEOUT: DWORD = 258;
+
+const STD_INPUT_HANDLE: DWORD = 0xFFFFFFF6;  // -10
+const STD_OUTPUT_HANDLE: DWORD = 0xFFFFFFF5; // -11
+const STD_ERROR_HANDLE: DWORD = 0xFFFFFFF4;  // -12
+
+const INVALID_SOCKET: SOCKET = !0;
+const SOCKET_ERROR: c_int = -1;
+
+fn main() {
+    // Windows bindings tests
+}

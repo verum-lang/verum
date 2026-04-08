@@ -1,0 +1,206 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, access, optional
+
+// Optional chaining access expressions
+
+// Types for examples
+type User is { name: Text, age: Int, address: Maybe<Address>, profile: Maybe<Profile>, status: Maybe<Status>, email: Maybe<Text>, first_name: Maybe<Text>, last_name: Maybe<Text>, role: Maybe<Role>, settings: Maybe<UserSettings> };
+type Address is { city: Text, zip_code: Text };
+type Profile is { name: Maybe<Text> };
+type UserSettings is { theme: Maybe<Theme> };
+type Status is Active | Inactive;
+type Role is Admin | User | Guest;
+type Theme is Light | Dark;
+type Config is { host: Text, port: Int, settings: Maybe<Settings> };
+type Settings is { timeout: Duration, value: Int };
+type Duration is { secs: Int };
+type Data is { value: Maybe<Value> };
+type Value is { };
+type Output is { name: Text };
+type Error is ParseError | ValidationError;
+type ParseError is ();
+type ValidationError is ();
+type Result<T, E> is Ok(T) | Err(E);
+
+// Helper functions
+fn get_user() -> Maybe<User> {
+    None
+}
+
+fn greet(name: Text) { }
+
+fn admin_panel() { }
+
+fn user_panel() { }
+
+fn guest_panel() { }
+
+fn fetch_data() -> Maybe<Data> {
+    None
+}
+
+fn compute() -> Maybe<Value> {
+    None
+}
+
+fn expensive_lookup() -> Maybe<Value> {
+    None
+}
+
+// Duration helper
+fn from_secs(s: Int) -> Duration {
+    Duration { secs: s }
+}
+
+// Basic optional field access
+fn test_basic_optional_field_access() {
+    let maybe_user: Maybe<User> = get_user();
+    let name = maybe_user?.name;
+    let age = maybe_user?.age;
+}
+
+// Chained optional access
+fn test_chained_optional_access() {
+    let user: Maybe<User> = get_user();
+    let city = user?.address?.city;
+    let zip = user?.address?.zip_code;
+    let data: Maybe<Data> = fetch_data();
+    let deep = data?.value;
+}
+
+// Optional method calls
+fn test_optional_method_calls() {
+    let maybe_text: Maybe<Text> = Some("hello");
+    let len = maybe_text?.len();
+    let upper = maybe_text?.to_uppercase();
+    let trimmed = maybe_text?.trim();
+}
+
+// Optional with method chains
+fn test_optional_with_method_chains() {
+    let maybe_data: Maybe<Data> = fetch_data();
+    let result = maybe_data?.value;
+}
+
+// Optional index access
+fn test_optional_index_access() {
+    let maybe_list: Maybe<List<Int>> = Some([1, 2, 3]);
+    let first = maybe_list?[0];
+    let maybe_arr: Maybe<List<Int>> = Some([10, 20, 30]);
+    let last = maybe_arr?[-1];
+}
+
+// Mixed optional and regular access
+fn test_mixed_optional_access() {
+    let config: Maybe<Config> = Some(Config { host: "localhost", port: 8080, settings: None });
+    let value = config?.settings?.value;
+}
+
+// Optional in conditionals
+fn test_optional_in_conditionals() {
+    let user: Maybe<User> = get_user();
+    if let Some(name) = user?.name {
+        greet(name);
+    }
+}
+
+// Optional with comparison
+fn test_optional_with_comparison() {
+    let user: Maybe<User> = get_user();
+    let is_active = user?.status == Some(Status.Active);
+    let has_email = user?.email.is_some();
+}
+
+// Optional with default
+fn test_optional_with_default() {
+    let user: Maybe<User> = get_user();
+    let name = user?.name ?? "Anonymous";
+    let config: Maybe<Config> = None;
+    let port = config?.port ?? 8080;
+    let settings: Maybe<Settings> = None;
+    let timeout = settings?.timeout ?? from_secs(30);
+}
+
+// Optional in expressions
+fn test_optional_in_expressions() {
+    let user: Maybe<User> = get_user();
+    let full_name = user?.first_name.map(|f| f + " " + user?.last_name.unwrap_or(""));
+}
+
+// Optional on result of function
+fn test_optional_on_function_result() {
+    let data = fetch_data()?.value;
+    let value = compute();
+}
+
+// Optional with async
+async fn test_optional_with_async() {
+    let client: Maybe<HttpClient> = None;
+    let url = "http://example.com";
+    let data = client?.fetch(url).await;
+}
+
+type HttpClient is { };
+type Request is { };
+
+// Optional in array operations
+fn test_optional_in_array_operations() {
+    type Item is { name: Maybe<Text> };
+    let items: List<Maybe<Item>> = [];
+    let lengths = items.map(|i| i?.name?.len());
+    let valid = items.filter(|i| i?.name.is_some());
+}
+
+// Optional field assignment (if supported)
+fn test_optional_field_assignment() {
+    let mut user: Maybe<User> = get_user();
+    // Assignment through optional not typical in parser tests
+}
+
+// Triple optional chaining
+fn test_triple_optional_chaining() {
+    let a: Maybe<B> = None;
+    let value = a?.b?.c?.d;
+}
+
+type B is { b: Maybe<C> };
+type C is { c: Maybe<D> };
+type D is { d: Int };
+
+// Optional with pattern matching (simplified - removed guard patterns)
+fn test_optional_with_pattern_matching() {
+    let maybe_user: Maybe<User> = get_user();
+    match maybe_user?.role {
+        Some(Role.Admin) => admin_panel(),
+        Some(Role.User) => user_panel(),
+        _ => guest_panel(),
+    }
+}
+
+// Optional in struct initialization
+fn test_optional_in_struct_init() {
+    let env: Maybe<Map<Text, Text>> = None;
+    let config = Config {
+        host: env?.get("HOST") ?? "localhost",
+        port: env?.get("PORT")?.parse_int() ?? 8080,
+        settings: None,
+    };
+}
+
+// Optional with closures
+fn test_optional_with_closures() {
+    let processor = |data: Maybe<Data>| data?.value;
+}
+
+// Short-circuit evaluation
+fn test_short_circuit_evaluation() {
+    let result = expensive_lookup()?.quick_check();
+}
+
+// Optional type coercion
+fn test_optional_type_coercion() {
+    let maybe_int: Maybe<Int> = Some(42);
+    let text: Maybe<Text> = maybe_int?.to_text();
+}

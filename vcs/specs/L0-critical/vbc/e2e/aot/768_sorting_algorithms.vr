@@ -1,0 +1,176 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, sorting, insertion-sort, selection-sort, bubble-sort, merge
+// @expected-exit: 0
+
+// Insertion sort: shift elements right until correct position found
+fn isort(arr: List<Int>, n: Int) -> Int {
+    let mut i = 1;
+    while (i < n) {
+        let key = arr[i];
+        let mut j = i - 1;
+        while (j >= 0 && arr[j] > key) {
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+        i = i + 1;
+    }
+    0
+}
+
+// Selection sort: find min in unsorted portion, swap to front
+fn ssort(arr: List<Int>, n: Int) -> Int {
+    let mut i = 0;
+    while (i < n - 1) {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while (j < n) {
+            if (arr[j] < arr[min_idx]) {
+                min_idx = j;
+            }
+            j = j + 1;
+        }
+        let tmp = arr[i];
+        arr[i] = arr[min_idx];
+        arr[min_idx] = tmp;
+        i = i + 1;
+    }
+    0
+}
+
+// Bubble sort: repeatedly swap adjacent out-of-order elements
+fn bsort(arr: List<Int>, n: Int) -> Int {
+    let mut i = 0;
+    while (i < n - 1) {
+        let mut j = 0;
+        while (j < n - 1 - i) {
+            if (arr[j] > arr[j + 1]) {
+                let tmp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    0
+}
+
+// Merge two sorted halves: arr[0..mid) and arr[mid..n) into dst[0..n)
+fn merge_halves(left: List<Int>, right: List<Int>, dst: List<Int>, ln: Int, rn: Int) -> Int {
+    let mut i = 0;
+    let mut j = 0;
+    let mut k = 0;
+    while (i < ln) {
+        if (j < rn) {
+            if (left[i] <= right[j]) {
+                dst[k] = left[i];
+                i = i + 1;
+            } else {
+                dst[k] = right[j];
+                j = j + 1;
+            }
+        } else {
+            dst[k] = left[i];
+            i = i + 1;
+        }
+        k = k + 1;
+    }
+    while (j < rn) {
+        dst[k] = right[j];
+        j = j + 1;
+        k = k + 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    // Test 1: Insertion sort on small array
+    // Input: [5, 3, 8, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // After sort(5 elems): [1, 3, 4, 5, 8, ...]
+    let mut a1 = [5, 3, 8, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    isort(a1, 5);
+    assert_eq(a1[0], 1);
+    assert_eq(a1[1], 3);
+    assert_eq(a1[4], 8);
+
+    // Test 2: Selection sort on same input pattern
+    // Input: [9, 7, 2, 6, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // After sort(5 elems): [2, 3, 6, 7, 9, ...]
+    let mut a2 = [9, 7, 2, 6, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    ssort(a2, 5);
+    assert_eq(a2[0], 2);
+    assert_eq(a2[2], 6);
+    assert_eq(a2[4], 9);
+
+    // Test 3: Bubble sort
+    // Input: [4, 2, 7, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // After sort(5 elems): [1, 2, 3, 4, 7, ...]
+    let mut a3 = [4, 2, 7, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    bsort(a3, 5);
+    assert_eq(a3[0], 1);
+    assert_eq(a3[3], 4);
+
+    // Test 4: Merge two sorted halves
+    // left: [1, 3, 5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] (4 elems)
+    // right: [2, 4, 6, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] (4 elems)
+    // merged: [1, 2, 3, 4, 5, 6, 7, 8, ...]
+    let left = [1, 3, 5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let right = [2, 4, 6, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut merged = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    merge_halves(left, right, merged, 4, 4);
+    assert_eq(merged[0], 1);
+    assert_eq(merged[3], 4);
+    assert_eq(merged[7], 8);
+
+    // Test 5: Sort already sorted array (insertion sort)
+    let mut a5 = [1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    isort(a5, 5);
+    assert_eq(a5[0], 1);
+    assert_eq(a5[4], 5);
+
+    // Test 6: Sort reverse-sorted array (bubble sort)
+    // Input: [5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // After sort: [1, 2, 3, 4, 5, ...]
+    let mut a6 = [5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    bsort(a6, 5);
+    assert_eq(a6[0], 1);
+    assert_eq(a6[4], 5);
+
+    // Test 7: Sort array with duplicates (selection sort)
+    // Input: [3, 1, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // After sort(5 elems): [1, 1, 2, 3, 3, ...]
+    let mut a7 = [3, 1, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    ssort(a7, 5);
+    assert_eq(a7[0], 1);
+    assert_eq(a7[1], 1);
+    assert_eq(a7[4], 3);
+
+    // Test 8: Merge with one empty side
+    let left2 = [2, 5, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let right2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut merged2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    merge_halves(left2, right2, merged2, 3, 0);
+    assert_eq(merged2[0], 2);
+    assert_eq(merged2[2], 9);
+
+    // Test 9: Single element sort
+    let mut a9 = [42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    isort(a9, 1);
+    assert_eq(a9[0], 42);
+
+    // Test 10: Verify stability concept - insertion sort preserves relative order
+    // Input: [20, 10, 20, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // After insertion sort(4 elems): [10, 10, 20, 20]
+    let mut a10 = [20, 10, 20, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    isort(a10, 4);
+    assert_eq(a10[0], 10);
+    assert_eq(a10[1], 10);
+    assert_eq(a10[2], 20);
+    assert_eq(a10[3], 20);
+
+    print("Sorting algorithms: PASS");
+    0
+}

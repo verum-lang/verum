@@ -1,0 +1,342 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stdlib, collections
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT stdlib collection lifecycle — List, Map, Set operations simulated with records
+
+// ============================================================================
+// Fixed-size List (capacity 8)
+// ============================================================================
+
+type List8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn list_new() -> List8 {
+    List8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+fn list_get(l: List8, i: Int) -> Int {
+    if i == 0 { l.e0 } else if i == 1 { l.e1 } else if i == 2 { l.e2 }
+    else if i == 3 { l.e3 } else if i == 4 { l.e4 } else if i == 5 { l.e5 }
+    else if i == 6 { l.e6 } else { l.e7 }
+}
+
+fn list_set(l: List8, i: Int, v: Int) -> List8 {
+    List8 {
+        e0: if i == 0 { v } else { l.e0 },
+        e1: if i == 1 { v } else { l.e1 },
+        e2: if i == 2 { v } else { l.e2 },
+        e3: if i == 3 { v } else { l.e3 },
+        e4: if i == 4 { v } else { l.e4 },
+        e5: if i == 5 { v } else { l.e5 },
+        e6: if i == 6 { v } else { l.e6 },
+        e7: if i == 7 { v } else { l.e7 },
+        len: l.len
+    }
+}
+
+fn list_push(l: List8, v: Int) -> List8 {
+    let mut result = list_set(l, l.len, v);
+    result = List8 {
+        e0: result.e0, e1: result.e1, e2: result.e2, e3: result.e3,
+        e4: result.e4, e5: result.e5, e6: result.e6, e7: result.e7,
+        len: l.len + 1
+    };
+    result
+}
+
+fn list_pop(l: List8) -> List8 {
+    List8 {
+        e0: l.e0, e1: l.e1, e2: l.e2, e3: l.e3,
+        e4: l.e4, e5: l.e5, e6: l.e6, e7: l.e7,
+        len: l.len - 1
+    }
+}
+
+fn list_contains(l: List8, v: Int) -> Int {
+    let mut found = 0;
+    let mut i = 0;
+    while i < l.len {
+        if list_get(l, i) == v { found = 1; }
+        i = i + 1;
+    }
+    found
+}
+
+// ============================================================================
+// Test 1: List push/pop/get lifecycle
+// ============================================================================
+
+fn test_list_lifecycle() {
+    let mut l = list_new();
+    assert_eq(l.len, 0);
+
+    l = list_push(l, 10);
+    l = list_push(l, 20);
+    l = list_push(l, 30);
+    assert_eq(l.len, 3);
+    assert_eq(list_get(l, 0), 10);
+    assert_eq(list_get(l, 1), 20);
+    assert_eq(list_get(l, 2), 30);
+
+    // Pop
+    l = list_pop(l);
+    assert_eq(l.len, 2);
+
+    // Push more
+    l = list_push(l, 40);
+    l = list_push(l, 50);
+    assert_eq(l.len, 4);
+    assert_eq(list_get(l, 2), 40);
+    assert_eq(list_get(l, 3), 50);
+
+    // Contains
+    assert_eq(list_contains(l, 10), 1);
+    assert_eq(list_contains(l, 40), 1);
+    assert_eq(list_contains(l, 30), 0);  // Was popped, slot reused
+
+    print("test_list_lifecycle passed");
+}
+
+// ============================================================================
+// Fixed-size Map (capacity 4, open addressing)
+// ============================================================================
+
+type Map4 is {
+    k0: Int, v0: Int, occ0: Int,
+    k1: Int, v1: Int, occ1: Int,
+    k2: Int, v2: Int, occ2: Int,
+    k3: Int, v3: Int, occ3: Int
+};
+
+fn map_new() -> Map4 {
+    Map4 {
+        k0: 0, v0: 0, occ0: 0,
+        k1: 0, v1: 0, occ1: 0,
+        k2: 0, v2: 0, occ2: 0,
+        k3: 0, v3: 0, occ3: 0
+    }
+}
+
+fn map_slot_key(m: Map4, s: Int) -> Int {
+    if s == 0 { m.k0 } else if s == 1 { m.k1 } else if s == 2 { m.k2 } else { m.k3 }
+}
+
+fn map_slot_val(m: Map4, s: Int) -> Int {
+    if s == 0 { m.v0 } else if s == 1 { m.v1 } else if s == 2 { m.v2 } else { m.v3 }
+}
+
+fn map_slot_occ(m: Map4, s: Int) -> Int {
+    if s == 0 { m.occ0 } else if s == 1 { m.occ1 } else if s == 2 { m.occ2 } else { m.occ3 }
+}
+
+fn map_hash(key: Int) -> Int {
+    // Simple hash: key mod 4
+    let r = key - (key / 4) * 4;
+    if r < 0 { r + 4 } else { r }
+}
+
+fn map_insert(m: Map4, key: Int, val: Int) -> Map4 {
+    // Linear probing with 4 slots
+    let h = map_hash(key);
+    let mut slot = h;
+    let mut tries = 0;
+    let mut found = 0;
+    let mut found_slot = 0;
+    while tries < 4 {
+        if found == 0 {
+            let is_empty = if map_slot_occ(m, slot) == 0 { 1 } else { 0 };
+            let is_match = if map_slot_key(m, slot) == key { 1 } else { 0 };
+            if is_empty == 1 || is_match == 1 {
+                found = 1;
+                found_slot = slot;
+            }
+        }
+        if found == 0 {
+            slot = slot + 1;
+            if slot >= 4 { slot = 0; }
+        }
+        tries = tries + 1;
+    }
+    if found == 1 {
+        Map4 {
+            k0: if found_slot == 0 { key } else { m.k0 },
+            v0: if found_slot == 0 { val } else { m.v0 },
+            occ0: if found_slot == 0 { 1 } else { m.occ0 },
+            k1: if found_slot == 1 { key } else { m.k1 },
+            v1: if found_slot == 1 { val } else { m.v1 },
+            occ1: if found_slot == 1 { 1 } else { m.occ1 },
+            k2: if found_slot == 2 { key } else { m.k2 },
+            v2: if found_slot == 2 { val } else { m.v2 },
+            occ2: if found_slot == 2 { 1 } else { m.occ2 },
+            k3: if found_slot == 3 { key } else { m.k3 },
+            v3: if found_slot == 3 { val } else { m.v3 },
+            occ3: if found_slot == 3 { 1 } else { m.occ3 }
+        }
+    } else {
+        m
+    }
+}
+
+fn map_get(m: Map4, key: Int) -> Int {
+    // Returns value or -1 if not found
+    let h = map_hash(key);
+    let mut slot = h;
+    let mut tries = 0;
+    let mut result = 0 - 1;
+    let mut done = 0;
+    while tries < 4 {
+        if done == 0 {
+            if map_slot_occ(m, slot) == 1 {
+                if map_slot_key(m, slot) == key {
+                    result = map_slot_val(m, slot);
+                    done = 1;
+                }
+            }
+        }
+        if done == 0 {
+            if map_slot_occ(m, slot) == 0 {
+                done = 1;
+            }
+        }
+        if done == 0 {
+            slot = slot + 1;
+            if slot >= 4 { slot = 0; }
+        }
+        tries = tries + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Test 2: Map insert/get lifecycle
+// ============================================================================
+
+fn test_map_lifecycle() {
+    let mut m = map_new();
+
+    m = map_insert(m, 10, 100);
+    m = map_insert(m, 20, 200);
+    m = map_insert(m, 30, 300);
+
+    assert_eq(map_get(m, 10), 100);
+    assert_eq(map_get(m, 20), 200);
+    assert_eq(map_get(m, 30), 300);
+    assert_eq(map_get(m, 40), -1);  // Not found
+
+    // Update existing key
+    m = map_insert(m, 10, 999);
+    assert_eq(map_get(m, 10), 999);
+
+    print("test_map_lifecycle passed");
+}
+
+// ============================================================================
+// Fixed-size Set (capacity 8, using sorted list)
+// ============================================================================
+
+fn set_contains(l: List8, v: Int) -> Int {
+    list_contains(l, v)
+}
+
+fn set_insert(l: List8, v: Int) -> List8 {
+    // Only insert if not present
+    if list_contains(l, v) == 1 {
+        l
+    } else {
+        list_push(l, v)
+    }
+}
+
+fn set_size(l: List8) -> Int {
+    l.len
+}
+
+// ============================================================================
+// Test 3: Set insert/contains/size
+// ============================================================================
+
+fn test_set_lifecycle() {
+    let mut s = list_new();
+
+    s = set_insert(s, 5);
+    s = set_insert(s, 10);
+    s = set_insert(s, 15);
+    assert_eq(set_size(s), 3);
+
+    // Duplicate insert: size unchanged
+    s = set_insert(s, 10);
+    assert_eq(set_size(s), 3);
+
+    // Contains
+    assert_eq(set_contains(s, 5), 1);
+    assert_eq(set_contains(s, 10), 1);
+    assert_eq(set_contains(s, 15), 1);
+    assert_eq(set_contains(s, 20), 0);
+
+    // More inserts
+    s = set_insert(s, 20);
+    s = set_insert(s, 25);
+    assert_eq(set_size(s), 5);
+
+    print("test_set_lifecycle passed");
+}
+
+// ============================================================================
+// Test 4: List sum and filter count
+// ============================================================================
+
+fn test_list_aggregate() {
+    let mut l = list_new();
+    l = list_push(l, 3);
+    l = list_push(l, 7);
+    l = list_push(l, 2);
+    l = list_push(l, 9);
+    l = list_push(l, 1);
+
+    // Sum
+    let mut sum = 0;
+    let mut i = 0;
+    while i < l.len {
+        sum = sum + list_get(l, i);
+        i = i + 1;
+    }
+    assert_eq(sum, 22);
+
+    // Count elements > 5
+    let mut count = 0;
+    i = 0;
+    while i < l.len {
+        if list_get(l, i) > 5 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(count, 2);  // 7 and 9
+
+    // Find max
+    let mut max_val = list_get(l, 0);
+    i = 1;
+    while i < l.len {
+        let v = list_get(l, i);
+        if v > max_val { max_val = v; }
+        i = i + 1;
+    }
+    assert_eq(max_val, 9);
+
+    print("test_list_aggregate passed");
+}
+
+fn main() -> Int {
+    test_list_lifecycle();
+    test_map_lifecycle();
+    test_set_lifecycle();
+    test_list_aggregate();
+    print("ALL PASSED");
+    0
+}

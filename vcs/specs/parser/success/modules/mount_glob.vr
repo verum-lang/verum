@@ -1,0 +1,52 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Glob import from module
+mount core.*;
+
+// Glob import from nested module
+mount core.collections.*;
+
+// Glob from deep path
+mount core.collections.hash.*;
+
+// Glob from very long path
+mount myorg.myproject.core.utils.helpers.*;
+
+// Multiple glob imports
+mount core.io.*;
+mount core.fs.*;
+mount core.net.*;
+
+// Glob with lowercase path
+mount lowercase.module.*;
+
+// Glob with underscored path
+mount my_module.sub_module.*;
+
+// Glob with mixed case
+mount MyModule.SubModule.*;
+
+// Prelude pattern
+mount core.prelude.*;
+mount verum.prelude.*;
+
+// Common library patterns
+mount regex.*;
+mount json.*;
+mount http.*;
+
+// Nested module globs
+module my_module {
+    mount super.sibling.*;
+    mount crate.utils.*;
+}
+
+// Glob in nested context
+module outer {
+    module inner {
+        mount core.collections.*;
+        mount super.super.shared.*;
+    }
+}

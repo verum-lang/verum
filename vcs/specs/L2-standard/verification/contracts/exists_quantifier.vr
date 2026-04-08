@@ -1,0 +1,202 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, exists, quantifiers
+// @timeout: 5000
+
+/// Tests for exists quantifier in contracts
+/// Existential quantification over elements
+
+/// Basic exists for element search
+@verify(proof)
+fn contains(arr: &List<Int>, target: Int) -> Bool {
+    contract#"
+        ensures result == exists i: Int. 0 <= i < arr.len() && arr[i] == target;
+    ";
+    for x in arr {
+        if *x == target {
+            return true;
+        }
+    }
+    false
+}
+
+/// Exists with multiple conditions
+@verify(proof)
+fn has_positive(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == exists i: Int. 0 <= i < arr.len() && arr[i] > 0;
+    ";
+    for x in arr {
+        if *x > 0 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Exists with two bound variables
+@verify(proof)
+fn has_duplicate(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == exists i, j. 0 <= i < j < arr.len() && arr[i] == arr[j];
+    ";
+    for i in 0..arr.len() {
+        for j in i + 1..arr.len() {
+            if arr[i] == arr[j] {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Exists in ensures with Maybe return
+@verify(proof)
+fn find_first_positive(arr: &List<Int>) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < arr.len() && arr[idx] > 0 &&
+                         forall j: Int. 0 <= j < idx implies arr[j] <= 0,
+            None => !exists i: Int. 0 <= i < arr.len() && arr[i] > 0
+        };
+    ";
+    for i in 0..arr.len() {
+        if arr[i] > 0 {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Exists with complex nested predicate
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+@verify(proof)
+fn has_adult(people: &List<Person>) -> Bool {
+    contract#"
+        ensures result == exists i: Int. 0 <= i < people.len() && people[i].age >= 18;
+    ";
+    for p in people {
+        if p.age >= 18 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Exists combined with forall
+@verify(proof)
+fn has_maximum(arr: &List<Int>) -> Bool {
+    contract#"
+        requires arr.len() > 0;
+        ensures result == exists i: Int. 0 <= i < arr.len() &&
+            forall j: Int. 0 <= j < arr.len() implies arr[i] >= arr[j];
+    ";
+    // Every non-empty array has a maximum
+    true
+}
+
+/// Find witness for exists
+@verify(proof)
+fn find_witness(arr: &List<Int>, predicate: fn(&Int) -> Bool) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < arr.len() && predicate(&arr[idx]),
+            None => !exists i: Int. 0 <= i < arr.len() && predicate(&arr[i])
+        };
+    ";
+    for i in 0..arr.len() {
+        if predicate(&arr[i]) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Exists with bounded range
+@verify(proof)
+fn has_value_in_range(arr: &List<Int>, min: Int, max: Int) -> Bool {
+    contract#"
+        requires min <= max;
+        ensures result == exists i: Int. 0 <= i < arr.len() && min <= arr[i] && arr[i] <= max;
+    ";
+    for x in arr {
+        if *x >= min && *x <= max {
+            return true;
+        }
+    }
+    false
+}
+
+/// Exists over matrix
+@verify(proof)
+fn matrix_has_zero(matrix: &List<List<Int>>) -> Bool {
+    contract#"
+        ensures result == exists i, j.
+            0 <= i < matrix.len() &&
+            0 <= j < matrix[i].len() &&
+            matrix[i][j] == 0;
+    ";
+    for row in matrix {
+        for elem in row {
+            if *elem == 0 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Negation of exists equals forall not
+@verify(proof)
+fn all_non_negative(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == !exists i: Int. 0 <= i < arr.len() && arr[i] < 0;
+        ensures result == forall i: Int. 0 <= i < arr.len() implies arr[i] >= 0;
+    ";
+    for x in arr {
+        if *x < 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Exists with function predicate
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    for i in 2..=(n as Float).sqrt() as Int {
+        if n % i == 0 { return false; }
+    }
+    true
+}
+
+@verify(proof)
+fn has_prime(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == exists i: Int. 0 <= i < arr.len() && is_prime(arr[i]);
+    ";
+    for x in arr {
+        if is_prime(*x) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Exists uniqueness (exactly one)
+@verify(proof)
+fn has_unique_max(arr: &List<Int>) -> Bool {
+    contract#"
+        requires arr.len() > 0;
+        ensures result == exists! i. 0 <= i < arr.len() &&
+            forall j: Int. 0 <= j < arr.len() && j != i implies arr[j] < arr[i];
+    ";
+    let max_val = arr.iter().max().unwrap();
+    let count = arr.iter().filter(|x| **x == *max_val).count();
+    count == 1
+}

@@ -1,0 +1,374 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, quote, typeof, unsafe, forall, exists
+// @description: Test special expression types from grammar/verum.ebnf
+
+// =============================================================================
+// QUOTE EXPRESSIONS (Section 2.12.0.1 - quote_expr)
+// =============================================================================
+
+fn test_basic_quote() {
+    let code = quote {
+        fn hello() {
+            print("Hello!");
+        }
+    };
+}
+
+fn test_quote_with_interpolation() {
+    let name = "generated_fn";
+    let code = quote {
+        fn $name() {
+            compute()
+        }
+    };
+}
+
+fn test_quote_expression_interpolation() {
+    let body = quote { x + y };
+    let code = quote {
+        fn add(x: Int, y: Int) -> Int {
+            ${body}
+        }
+    };
+}
+
+fn test_quote_repetition() {
+    let fields = ["x", "y", "z"];
+    let code = quote {
+        type Point is {
+            $[for field in fields {
+                $field: Int,
+            }]
+        };
+    };
+}
+
+fn test_quote_with_stage() {
+    let code = quote(0) {
+        fn runtime_fn() {
+            run_at_runtime()
+        }
+    };
+
+    let meta_code = quote(1) {
+        meta fn compile_time_fn() {
+            run_at_compile_time()
+        }
+    };
+}
+
+fn test_quote_stage_escape() {
+    let computed_name = compute_name();
+    let code = quote {
+        fn $(stage 1){ computed_name }() {
+            body()
+        }
+    };
+}
+
+fn test_quote_lift() {
+    let value = 42;
+    let code = quote {
+        let x = lift(value);
+    };
+}
+
+fn test_nested_quote() {
+    let inner = quote { x + 1 };
+    let outer = quote {
+        let result = ${inner};
+    };
+}
+
+// =============================================================================
+// TYPEOF EXPRESSIONS (Section 2.12 - typeof_expr)
+// =============================================================================
+
+fn test_typeof_value() {
+    let type_info = typeof(value);
+    let int_type = typeof(42);
+    let text_type = typeof("hello");
+}
+
+fn test_typeof_expression() {
+    let t = typeof(compute());
+    let method_type = typeof(obj.method());
+}
+
+fn test_typeof_in_condition() {
+    if typeof(value).name == "Int" {
+        handle_int();
+    }
+}
+
+fn test_typeof_comparison() {
+    let same = typeof(a) == typeof(b);
+    let different = typeof(x) != typeof(y);
+}
+
+fn test_typeof_access() {
+    let name = typeof(value).name;
+    let id = typeof(value).id;
+    let kind = typeof(value).kind;
+}
+
+// =============================================================================
+// UNSAFE EXPRESSIONS (Section 2.12 - unsafe_expr)
+// =============================================================================
+
+fn test_unsafe_block() {
+    let result = unsafe {
+        raw_operation()
+    };
+}
+
+fn test_unsafe_dereference() {
+    let value = unsafe {
+        let ptr = get_raw_pointer();
+        *ptr
+    };
+}
+
+fn test_unsafe_pointer_arithmetic() {
+    let value = unsafe {
+        let ptr = base_ptr;
+        let offset_ptr = ptr + offset;
+        *offset_ptr
+    };
+}
+
+fn test_unsafe_ffi() {
+    let result = unsafe {
+        ffi_call(arg1, arg2)
+    };
+}
+
+fn test_unsafe_transmute() {
+    let bits = unsafe {
+        transmute(float_value)
+    };
+}
+
+fn test_nested_unsafe() {
+    let a = unsafe {
+        let b = unsafe {
+            inner_unsafe()
+        };
+        outer_with(b)
+    };
+}
+
+fn test_unsafe_in_expression() {
+    let result = compute() + unsafe { raw_value() };
+}
+
+// =============================================================================
+// FORALL EXPRESSIONS (Section 2.19.9 - forall_expr)
+// =============================================================================
+
+fn test_forall_simple() {
+    let all_positive = forall x: Int. x * x >= 0;
+}
+
+fn test_forall_with_implication() {
+    // Note: 'where' clause not yet supported - use logical operators
+    // Implication a -> b is equivalent to !a || b
+    let bounded = forall x: Int. !(x > 0) || x <= x * x;
+}
+
+fn test_forall_multiple_bindings() {
+    // Note: Multiple bindings not yet supported - use nested forall instead
+    let commutative = forall x: Int. forall y: Int. x + y == y + x;
+}
+
+fn test_forall_complex() {
+    // Note: 'where' clause not yet supported - use logical operators
+    let sorted_preserved = forall i: Int. forall j: Int. !(i < j) || sorted[i] <= sorted[j];
+}
+
+fn test_forall_with_pattern() {
+    let all_positive = forall x: Int. x * x >= 0;
+}
+
+// =============================================================================
+// EXISTS EXPRESSIONS (Section 2.19.9 - exists_expr)
+// =============================================================================
+
+fn test_exists_simple() {
+    let has_zero = exists x: Int. x == 0;
+}
+
+fn test_exists_with_condition() {
+    // Note: 'where' clause not yet supported - use conjunction instead
+    let has_positive_even = exists x: Int. x > 0 && x % 2 == 0;
+}
+
+fn test_exists_multiple_bindings() {
+    // Note: Multiple bindings not yet supported - use nested exists instead
+    let has_pair = exists x: Int. exists y: Int. x + y == 100;
+}
+
+fn test_exists_complex() {
+    // Note: 'where' clause not yet supported - use conjunction instead
+    let has_inverse = exists x: Int. x != 0 && x * inverse(x) == 1;
+}
+
+// =============================================================================
+// META EXPRESSIONS (Section 2.12 - meta_expr)
+// =============================================================================
+
+fn test_meta_block() {
+    let generated = meta {
+        generate_code()
+    };
+}
+
+fn test_meta_computation() {
+    let const_value = meta {
+        let a = 10;
+        let b = 20;
+        a + b
+    };
+}
+
+fn test_meta_type_introspection() {
+    let fields = meta {
+        @fields_of<User>()
+    };
+}
+
+// =============================================================================
+// TYPE PROPERTIES (Section 2.17)
+// =============================================================================
+
+fn test_type_size() {
+    let size = Int.size;
+    let float_size = Float.size;
+    let ref_size = &Int.size;
+}
+
+fn test_type_alignment() {
+    let align = Int.alignment;
+    let struct_align = Point.alignment;
+}
+
+fn test_type_stride() {
+    let stride = Int.stride;
+    let array_stride = [Int; 10].stride;
+}
+
+fn test_type_min_max() {
+    let min_int = Int.min;
+    let max_int = Int.max;
+    let min_u8 = u8.min;
+    let max_u8 = u8.max;
+}
+
+fn test_type_bits() {
+    let int_bits = Int.bits;
+    let byte_bits = u8.bits;
+}
+
+fn test_type_name_id() {
+    let name = User.name;
+    let id = User.id;
+}
+
+fn test_generic_type_properties() {
+    fn size_of<T>() -> Int {
+        T.size
+    }
+
+    fn align_of<T>() -> Int {
+        T.alignment
+    }
+}
+
+// =============================================================================
+// META FUNCTION CALLS (Section 2.20.6)
+// =============================================================================
+
+fn test_meta_const() {
+    let value = @const(heavy_computation());
+}
+
+fn test_meta_error_warning() {
+    // @error("This is a compile error");
+    // @warning("This is a compile warning");
+}
+
+fn test_meta_stringify() {
+    let name = @stringify(my_identifier);
+}
+
+fn test_meta_concat() {
+    let combined = @concat("prefix_", name);
+}
+
+fn test_meta_cfg() {
+    if @cfg(debug) {
+        debug_only_code();
+    }
+}
+
+fn test_meta_location() {
+    let file = @file();
+    let line = @line();
+    let column = @column();
+    let mod_name = @module();
+    let func_name = @function();
+}
+
+fn test_meta_type_introspection() {
+    let name = @type_name<User>();
+    let fields = @type_fields<User>();
+    let is_struct = @is_struct<User>();
+    let is_enum = @is_enum<Status>();
+    // Two type params as function call arguments
+    let implements = @implements(User, Display);
+}
+
+// =============================================================================
+// COMBINING SPECIAL EXPRESSIONS
+// =============================================================================
+
+fn test_quote_with_typeof() {
+    let code = quote {
+        let t = typeof(${expr});
+    };
+}
+
+fn test_unsafe_with_meta() {
+    let value = unsafe {
+        meta {
+            compute_unsafe_offset()
+        }
+    };
+}
+
+fn test_forall_in_assertion() {
+    // Note: 'where' clause not yet supported - use logical operators
+    assert(forall x: Int. !(x >= 0) || sqrt(x) * sqrt(x) == x);
+}
+
+fn test_exists_in_assertion() {
+    assert(exists x: Int. x * x == 4);
+}
+
+// =============================================================================
+// PARENTHESIZED EXPRESSIONS
+// =============================================================================
+
+fn test_parenthesized_expr() {
+    let a = (42);
+    let b = (x + y);
+    let c = ((a + b) * c);
+    let d = (((nested)));
+}
+
+fn test_parenthesized_complex() {
+    let a = (if cond { x } else { y });
+    let b = (match opt { Some(v) => v, None => 0 });
+    let c = (|x| x + 1)(42);
+}

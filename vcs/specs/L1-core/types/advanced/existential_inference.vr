@@ -1,0 +1,190 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: existential, inference, advanced-type-syntax
+// @description: Existential return type inference and usage tests
+
+// =============================================================================
+// Test 1: Basic existential return type - the return type is opaque
+// =============================================================================
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+fn create_iterator(items: List<Int>) -> some I: Iterator<Item = Int> {
+    items.iter()
+}
+
+// Use existential in a generic context (pass to function that takes protocol bound)
+fn count_items<I: Iterator>(mut iter: I) -> Int {
+    let mut count = 0;
+    while let Some(_) = iter.next() {
+        count += 1;
+    }
+    count
+}
+
+fn test_existential_passthrough() {
+    let iter = create_iterator([1, 2, 3]);
+    let n = count_items(iter);
+    assert(n == 3);
+}
+
+// =============================================================================
+// Test 2: Existential return type with Display bound
+// =============================================================================
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Message is { text: Text };
+
+implement Display for Message {
+    fn display(&self) -> Text {
+        self.text
+    }
+}
+
+fn create_displayable() -> some D: Display {
+    Message { text: "hello" }
+}
+
+// Pass existential to a function with protocol bound
+fn show_item<D: Display>(item: D) -> Text {
+    item.display()
+}
+
+fn test_display_existential() {
+    let d = create_displayable();
+    let text = show_item(d);
+    assert(text == "hello");
+}
+
+// =============================================================================
+// Test 3: Existential in conditional return
+// =============================================================================
+
+type Counter is { count: Int };
+
+implement Display for Counter {
+    fn display(&self) -> Text {
+        f"{self.count}"
+    }
+}
+
+fn make_display(flag: Bool) -> some D: Display {
+    if flag {
+        Message { text: "message" }
+    } else {
+        Counter { count: 42 }
+    }
+}
+
+fn test_conditional_existential() {
+    let d1 = make_display(true);
+    let d2 = make_display(false);
+    // Both d1 and d2 are existential Display types
+    let t1 = show_item(d1);
+    let t2 = show_item(d2);
+    assert(t1 == "message");
+    assert(t2 == "42");
+}
+
+// =============================================================================
+// Test 4: Multiple existential returns in same function
+// =============================================================================
+
+type Validator is protocol {
+    fn validate(&self, input: Text) -> Bool;
+};
+
+type LengthValidator is { min: Int, max: Int };
+
+implement Validator for LengthValidator {
+    fn validate(&self, input: Text) -> Bool {
+        let len = input.len();
+        len >= self.min && len <= self.max
+    }
+}
+
+type PatternValidator is { prefix: Text };
+
+implement Validator for PatternValidator {
+    fn validate(&self, input: Text) -> Bool {
+        input.starts_with(self.prefix)
+    }
+}
+
+fn create_validator(kind: Text) -> some V: Validator {
+    if kind == "length" {
+        LengthValidator { min: 1, max: 100 }
+    } else {
+        PatternValidator { prefix: "test" }
+    }
+}
+
+fn run_validation<V: Validator>(v: V, input: Text) -> Bool {
+    v.validate(input)
+}
+
+fn test_validator_existential() {
+    let v = create_validator("length");
+    assert(run_validation(v, "hello"));
+}
+
+// =============================================================================
+// Test 5: Existential assigned to protocol-bounded variable
+// =============================================================================
+
+type Greeter is protocol {
+    fn greet(&self) -> Text;
+};
+
+type FormalGreeter is { name: Text };
+type CasualGreeter is { name: Text };
+
+implement Greeter for FormalGreeter {
+    fn greet(&self) -> Text {
+        f"Good day, {self.name}"
+    }
+}
+
+implement Greeter for CasualGreeter {
+    fn greet(&self) -> Text {
+        f"Hey {self.name}!"
+    }
+}
+
+fn make_greeter(formal: Bool, name: Text) -> some G: Greeter {
+    if formal {
+        FormalGreeter { name: name }
+    } else {
+        CasualGreeter { name: name }
+    }
+}
+
+fn use_greeter<G: Greeter>(g: G) -> Text {
+    g.greet()
+}
+
+fn test_greeter() {
+    let g = make_greeter(true, "Alice");
+    let greeting = use_greeter(g);
+    assert(greeting == "Good day, Alice");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    test_existential_passthrough();
+    test_display_existential();
+    test_conditional_existential();
+    test_validator_existential();
+    test_greeter();
+    assert(true);
+}

@@ -1,0 +1,126 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, strings, text, concatenation, format, comparison
+// @expected-exit: 0
+
+// Test: string/text operations — concatenation, length, comparison,
+//       format strings with multiple interpolations.
+
+fn greet(name: Text, age: Int) -> Text {
+    f"Hello {name}, you are {age} years old"
+}
+
+fn repeat_text(s: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while (i < n) {
+        result = result + s;
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: basic string concatenation
+    let a = "Hello";
+    let b = " World";
+    let c = a + b;
+    if (c != "Hello World") {
+        print(f"FAIL test1: c={c}");
+        return 1;
+    }
+
+    // Test 2: format string with single interpolation
+    let name = "Verum";
+    let msg = f"Language: {name}";
+    if (msg != "Language: Verum") {
+        print(f"FAIL test2: msg={msg}");
+        return 1;
+    }
+
+    // Test 3: format string with multiple interpolations
+    let x = 42;
+    let y = 100;
+    let combined = f"x={x}, y={y}, sum={x + y}";
+    if (combined != "x=42, y=100, sum=142") {
+        print(f"FAIL test3: combined={combined}");
+        return 1;
+    }
+
+    // Test 4: format string from function
+    let greeting = greet("Alice", 30);
+    if (greeting != "Hello Alice, you are 30 years old") {
+        print(f"FAIL test4: greeting={greeting}");
+        return 1;
+    }
+
+    // Test 5: string equality and inequality
+    let s1 = "abc";
+    let s2 = "abc";
+    let s3 = "xyz";
+    if (s1 != s2) {
+        print("FAIL test5a: s1 != s2");
+        return 1;
+    }
+    if (s1 == s3) {
+        print("FAIL test5b: s1 == s3");
+        return 1;
+    }
+
+    // Test 6: string concatenation in a loop (repeat)
+    let repeated = repeat_text("ab", 4);
+    if (repeated != "abababab") {
+        print(f"FAIL test6: repeated={repeated}");
+        return 1;
+    }
+
+    // Test 7: empty string operations
+    let empty = "";
+    let nonempty = empty + "hello";
+    if (nonempty != "hello") {
+        print(f"FAIL test7a: nonempty={nonempty}");
+        return 1;
+    }
+    let still_hello = "hello" + "";
+    if (still_hello != "hello") {
+        print(f"FAIL test7b: still_hello={still_hello}");
+        return 1;
+    }
+
+    // Test 8: multiple concatenations in one expression
+    let full = "a" + "b" + "c" + "d" + "e";
+    if (full != "abcde") {
+        print(f"FAIL test8: full={full}");
+        return 1;
+    }
+
+    // Test 9: format string with computation
+    let base = 10;
+    let exp = 3;
+    let result = base * base * base;
+    let desc = f"{base}^{exp} = {result}";
+    if (desc != "10^3 = 1000") {
+        print(f"FAIL test9: desc={desc}");
+        return 1;
+    }
+
+    // Test 10: building a string from list of numbers
+    let nums = [1, 2, 3, 4, 5];
+    let mut text_acc = "";
+    let mut i = 0;
+    while (i < nums.len()) {
+        if (i > 0) {
+            text_acc = text_acc + ",";
+        }
+        text_acc = text_acc + f"{nums[i]}";
+        i = i + 1;
+    }
+    if (text_acc != "1,2,3,4,5") {
+        print(f"FAIL test10: text_acc={text_acc}");
+        return 1;
+    }
+
+    print("899_string_operations: PASS");
+    0
+}

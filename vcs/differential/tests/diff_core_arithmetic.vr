@@ -1,0 +1,95 @@
+// @test: differential
+
+// @tier: all
+// @level: L0
+// @tags: differential, arithmetic, float, integer, precision
+// @timeout: 30000
+// @description: Differential test: verify interpreter and AOT produce identical results for core arithmetic
+
+fn abs_int(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+fn main() -> Int {
+    // Integer arithmetic - must be identical across tiers
+    assert_eq(1 + 2, 3);
+    assert_eq(100 * 100, 10000);
+    assert_eq(7 / 2, 3);
+    assert_eq(-7 / 2, -3);
+    assert_eq(7 % 3, 1);
+    assert_eq(-7 % 3, -1);
+    assert_eq(2 + 3 * 4, 14);
+    assert_eq((2 + 3) * 4, 20);
+
+    // Bitwise operations
+    assert_eq(0xFF & 0x0F, 15);
+    assert_eq(0xF0 | 0x0F, 255);
+    assert_eq(0xFF ^ 0xFF, 0);
+    assert_eq(1 << 10, 1024);
+    assert_eq(1024 >> 5, 32);
+
+    // Boolean logic
+    assert_eq(true && true, true);
+    assert_eq(true && false, false);
+    assert_eq(false || true, true);
+    assert_eq(false || false, false);
+    assert_eq(!true, false);
+
+    // Comparison operators
+    assert_eq(5 > 3, true);
+    assert_eq(3 > 5, false);
+    assert_eq(5 >= 5, true);
+    assert_eq(4 >= 5, false);
+    assert_eq(3 < 5, true);
+    assert_eq(5 <= 5, true);
+    assert_eq(5 == 5, true);
+    assert_eq(5 == 6, false);
+
+    // Large integer arithmetic
+    assert_eq(1000000 * 1000000, 1000000000000);
+    assert_eq(999999 * 999999, 999998000001);
+
+    // Negative arithmetic
+    assert_eq(-1 * -1, 1);
+    assert_eq(-100 + 50, -50);
+    assert_eq(-100 - -50, -50);
+
+    // Integer overflow behavior (should be consistent across tiers)
+    let big = 1000000000;
+    let big_sq = big * big;
+    assert_eq(big_sq, 1000000000000000000);
+
+    // Recursive computation: Fibonacci (must match exactly)
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < 30 {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    assert_eq(b, 1346269);
+
+    // Power function
+    let mut pow_result = 1;
+    let mut j = 0;
+    while j < 20 {
+        pow_result = pow_result * 2;
+        j = j + 1;
+    }
+    assert_eq(pow_result, 1048576);
+
+    // GCD computation
+    let mut ga = 252;
+    let mut gb = 105;
+    while gb > 0 {
+        let tmp = gb;
+        gb = ga % gb;
+        ga = tmp;
+    }
+    assert_eq(ga, 21);
+
+    print("differential arithmetic ok");
+    0
+}

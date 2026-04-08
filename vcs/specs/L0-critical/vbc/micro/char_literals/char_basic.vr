@@ -1,0 +1,9 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let c: Char = 'A';
+    let i: Int = c as Int;
+    assert_eq(i, 65);  // ASCII value of 'A'
+}

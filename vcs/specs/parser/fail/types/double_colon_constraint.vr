@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, constraint, colon, error
+// @description: Test detection of double colon in type constraint
+// @expected-error: E050
+
+// Double colon is not valid in type constraint
+fn test<T:: Clone>(x: T) {}

@@ -1,0 +1,192 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: map, collections, advanced, integration
+// @description: Advanced map operations with complex value types
+
+// Test 1: Map with counter accumulation
+fn test_word_count() -> Int {
+    let mut counts = Map.new();
+    let words = ["hello", "world", "hello", "foo", "world", "hello"];
+
+    let mut i = 0;
+    while i < 6 {
+        let word = words[i];
+        if counts.contains_key(word) {
+            let old = counts.get(word);
+            counts.insert(word, old + 1);
+        } else {
+            counts.insert(word, 1);
+        }
+        i = i + 1;
+    }
+
+    let hello_count = counts.get("hello");
+    if hello_count != 3 {
+        print(f"FAIL word_count hello: expected 3, got {hello_count}");
+        return 1;
+    }
+    let world_count = counts.get("world");
+    if world_count != 2 {
+        print(f"FAIL word_count world: expected 2, got {world_count}");
+        return 1;
+    }
+    if counts.len() != 3 {
+        print(f"FAIL word_count len: expected 3, got {counts.len()}");
+        return 1;
+    }
+    print("  word_count: OK");
+    0
+}
+
+// Test 2: Map remove
+fn test_map_remove() -> Int {
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    if m.len() != 3 {
+        print(f"FAIL map_remove initial: expected 3, got {m.len()}");
+        return 1;
+    }
+
+    m.remove("b");
+    if m.len() != 2 {
+        print(f"FAIL map_remove after: expected 2, got {m.len()}");
+        return 1;
+    }
+    if m.contains_key("b") {
+        print("FAIL map_remove: b still exists");
+        return 1;
+    }
+    if !m.contains_key("a") {
+        print("FAIL map_remove: a should exist");
+        return 1;
+    }
+    print("  map_remove: OK");
+    0
+}
+
+// Test 3: Map with integer keys
+fn test_int_keys() -> Int {
+    let mut m = Map.new();
+    let mut i = 0;
+    while i < 10 {
+        m.insert(i, i * i);
+        i = i + 1;
+    }
+
+    if m.len() != 10 {
+        print(f"FAIL int_keys len: expected 10, got {m.len()}");
+        return 1;
+    }
+
+    let v5 = m.get(5);
+    if v5 != 25 {
+        print(f"FAIL int_keys get(5): expected 25, got {v5}");
+        return 1;
+    }
+    let v9 = m.get(9);
+    if v9 != 81 {
+        print(f"FAIL int_keys get(9): expected 81, got {v9}");
+        return 1;
+    }
+    print("  int_keys: OK");
+    0
+}
+
+// Test 4: Map overwrite
+fn test_overwrite() -> Int {
+    let mut m = Map.new();
+    m.insert("key", 100);
+    m.insert("key", 200);
+    m.insert("key", 300);
+
+    let v = m.get("key");
+    if v != 300 {
+        print(f"FAIL overwrite: expected 300, got {v}");
+        return 1;
+    }
+    if m.len() != 1 {
+        print(f"FAIL overwrite len: expected 1, got {m.len()}");
+        return 1;
+    }
+    print("  overwrite: OK");
+    0
+}
+
+// Test 5: Set operations
+fn test_set_ops() -> Int {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(2);
+    s.insert(1);
+
+    if s.len() != 3 {
+        print(f"FAIL set_ops len: expected 3, got {s.len()}");
+        return 1;
+    }
+    if !s.contains(2) {
+        print("FAIL set_ops: should contain 2");
+        return 1;
+    }
+
+    s.remove(2);
+    if s.contains(2) {
+        print("FAIL set_ops: should not contain 2 after remove");
+        return 1;
+    }
+    if s.len() != 2 {
+        print(f"FAIL set_ops after remove: expected 2, got {s.len()}");
+        return 1;
+    }
+    print("  set_ops: OK");
+    0
+}
+
+// Test 6: Map in helper function
+fn sum_map_values(m: &Map<Text, Int>) -> Int {
+    // Since we can't iterate map directly in this test,
+    // we'll check specific keys
+    let mut sum = 0;
+    if m.contains_key("a") { sum = sum + m.get("a"); }
+    if m.contains_key("b") { sum = sum + m.get("b"); }
+    if m.contains_key("c") { sum = sum + m.get("c"); }
+    sum
+}
+
+fn test_map_function() -> Int {
+    let mut m = Map.new();
+    m.insert("a", 10);
+    m.insert("b", 20);
+    m.insert("c", 30);
+
+    let sum = sum_map_values(&m);
+    if sum != 60 {
+        print(f"FAIL map_function: expected 60, got {sum}");
+        return 1;
+    }
+    print("  map_function: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Advanced Map/Set Tests:");
+    let mut failures = 0;
+    failures = failures + test_word_count();
+    failures = failures + test_map_remove();
+    failures = failures + test_int_keys();
+    failures = failures + test_overwrite();
+    failures = failures + test_set_ops();
+    failures = failures + test_map_function();
+
+    if failures == 0 {
+        print("All advanced map/set tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

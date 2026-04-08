@@ -1,0 +1,200 @@
+// @test: run-interpreter
+// @expected-stdout: All closure runtime tests passed!
+// @was-skip: FIXED
+// @tier: 0
+// @level: L0
+// @tags: parser, expressions, closures, runtime, environment-capture
+// @description: Comprehensive runtime tests for closure functionality
+//              including basic closures, environment capture, higher-order functions,
+//              and closure chaining.
+
+fn main() {
+    test_basic_closure();
+    test_environment_capture();
+    test_multiple_captures();
+    test_nested_closures();
+    test_closure_as_argument();
+    test_closure_returning_closure();
+    test_immediately_invoked_closure();
+    test_list_map_with_closure();
+    test_list_filter_with_closure();
+    test_list_fold_with_closure();
+    test_chained_operations();
+
+    print("All closure runtime tests passed!");
+}
+
+/// Test basic closure creation and invocation
+fn test_basic_closure() {
+    let add = |a, b| a + b;
+    let result = add(2, 3);
+    assert(result == 5);
+
+    let multiply = |x, y| x * y;
+    assert(multiply(4, 5) == 20);
+}
+
+/// Test closure capturing environment variables
+fn test_environment_capture() {
+    let x = 10;
+    let add_x = |n| n + x;
+    assert(add_x(5) == 15);
+    assert(add_x(20) == 30);
+
+    // Multiple uses of captured variable
+    let double_plus_x = |n| n * 2 + x;
+    assert(double_plus_x(5) == 20);
+}
+
+/// Test closure capturing multiple variables
+fn test_multiple_captures() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    let sum_all = |_: ()| a + b + c;
+    assert(sum_all(()) == 6);
+
+    let weighted_sum = |w| a * w + b * w + c * w;
+    assert(weighted_sum(2) == 12);
+}
+
+/// Test nested closures with capture chains
+fn test_nested_closures() {
+    let outer_val = 10;
+
+    let outer = |_: ()| {
+        let inner_val = 20;
+        let inner = |_: ()| outer_val + inner_val;
+        inner(())
+    };
+
+    assert(outer(()) == 30);
+}
+
+/// Test passing closure as function argument
+fn test_closure_as_argument() {
+    let apply = |f, x| f(x);
+    let double = |n| n * 2;
+    let square = |n| n * n;
+
+    assert(apply(double, 21) == 42);
+    assert(apply(square, 5) == 25);
+
+    // Test with captured environment
+    let multiplier = 3;
+    let triple = |n| n * multiplier;
+    assert(apply(triple, 10) == 30);
+}
+
+/// Test closure returning another closure
+fn test_closure_returning_closure() {
+    let make_adder = |n| {
+        |x| x + n
+    };
+
+    let add_5 = make_adder(5);
+    let add_10 = make_adder(10);
+
+    assert(add_5(3) == 8);
+    assert(add_10(3) == 13);
+
+    // Test make_multiplier
+    let make_multiplier = |factor| {
+        |n| n * factor
+    };
+
+    let double = make_multiplier(2);
+    let triple = make_multiplier(3);
+
+    assert(double(7) == 14);
+    assert(triple(7) == 21);
+}
+
+/// Test immediately invoked closure expression (IICE)
+fn test_immediately_invoked_closure() {
+    let result = (|x| x * x)(5);
+    assert(result == 25);
+
+    let complex = (|a, b| {
+        let sum = a + b;
+        sum * sum
+    })(3, 4);
+    assert(complex == 49);
+}
+
+/// Test List.map with closures
+fn test_list_map_with_closure() {
+    let nums = [1, 2, 3, 4, 5];
+
+    // Double each element
+    let doubled = nums.map(|n| n * 2);
+    assert(doubled == [2, 4, 6, 8, 10]);
+
+    // Square each element
+    let squared = nums.map(|n| n * n);
+    assert(squared == [1, 4, 9, 16, 25]);
+
+    // With captured variable
+    let offset = 10;
+    let with_offset = nums.map(|n| n + offset);
+    assert(with_offset == [11, 12, 13, 14, 15]);
+}
+
+/// Test List.filter with closures
+fn test_list_filter_with_closure() {
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Filter even numbers
+    let evens = nums.filter(|n| n % 2 == 0);
+    assert(evens == [2, 4, 6, 8, 10]);
+
+    // Filter numbers greater than 5
+    let greater_than_5 = nums.filter(|n| n > 5);
+    assert(greater_than_5 == [6, 7, 8, 9, 10]);
+
+    // With captured threshold
+    let threshold = 3;
+    let above_threshold = nums.filter(|n| n > threshold);
+    assert(above_threshold == [4, 5, 6, 7, 8, 9, 10]);
+}
+
+/// Test List.fold with closures
+fn test_list_fold_with_closure() {
+    let nums = [1, 2, 3, 4, 5];
+
+    // Sum all elements
+    let sum = nums.fold(0, |acc, n| acc + n);
+    assert(sum == 15);
+
+    // Product of all elements
+    let product = nums.fold(1, |acc, n| acc * n);
+    assert(product == 120);
+
+    // Max element
+    let max = nums.fold(0, |acc, n| if n > acc { n } else { acc });
+    assert(max == 5);
+}
+
+/// Test chained closure operations
+fn test_chained_operations() {
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Filter evens, double them, sum result
+    let result = nums
+        .filter(|n| n % 2 == 0)
+        .map(|n| n * 2)
+        .fold(0, |acc, n| acc + n);
+
+    // evens: [2, 4, 6, 8, 10] -> doubled: [4, 8, 12, 16, 20] -> sum: 60
+    assert(result == 60);
+
+    // Sum of squares of odd numbers
+    let sum_of_odd_squares = nums
+        .filter(|n| n % 2 == 1)
+        .map(|n| n * n)
+        .fold(0, |acc, n| acc + n);
+
+    // odds: [1, 3, 5, 7, 9] -> squares: [1, 9, 25, 49, 81] -> sum: 165
+    assert(sum_of_odd_squares == 165);
+}

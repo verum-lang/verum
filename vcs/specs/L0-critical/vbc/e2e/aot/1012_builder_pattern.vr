@@ -1,0 +1,80 @@
+// @test: run
+// Builder pattern and self-modifying methods
+
+type Config is { width: Int, height: Int, fullscreen: Bool, title: Text };
+
+implement Config {
+    fn new() -> Config {
+        Config { width: 800, height: 600, fullscreen: false, title: "App" }
+    }
+    fn with_width(&self, w: Int) -> Config {
+        Config { width: w, height: self.height, fullscreen: self.fullscreen, title: self.title }
+    }
+    fn with_height(&self, h: Int) -> Config {
+        Config { width: self.width, height: h, fullscreen: self.fullscreen, title: self.title }
+    }
+    fn with_fullscreen(&self) -> Config {
+        Config { width: self.width, height: self.height, fullscreen: true, title: self.title }
+    }
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+}
+
+// Counter with &mut self
+type Counter is { value: Int, max: Int };
+
+implement Counter {
+    fn new(max: Int) -> Counter { Counter { value: 0, max: max } }
+    fn increment(&mut self) -> Bool {
+        if (self.value < self.max) {
+            self.value = self.value + 1;
+            true
+        } else {
+            false
+        }
+    }
+    fn reset(&mut self) {
+        self.value = 0;
+    }
+    fn current(&self) -> Int { self.value }
+}
+
+fn main() -> Int {
+    let mut passed = 0;
+    let mut failed = 0;
+
+    // Test 1: Builder pattern chain
+    let cfg = Config.new().with_width(1920).with_height(1080);
+    if (cfg.width == 1920 && cfg.height == 1080) { passed = passed + 1; }
+    else { print(f"FAIL 1: {cfg.width}x{cfg.height}"); failed = failed + 1; }
+
+    // Test 2: Area computation
+    if (cfg.area() == 1920 * 1080) { passed = passed + 1; }
+    else { print(f"FAIL 2: area={cfg.area()}"); failed = failed + 1; }
+
+    // Test 3: Counter increment
+    let mut c = Counter.new(3);
+    c.increment();
+    c.increment();
+    if (c.current() == 2) { passed = passed + 1; }
+    else { print(f"FAIL 3: current={c.current()}"); failed = failed + 1; }
+
+    // Test 4: Counter max
+    c.increment();
+    let ok = c.increment(); // Should return false (at max)
+    if (!ok && c.current() == 3) { passed = passed + 1; }
+    else { print(f"FAIL 4: ok={ok} current={c.current()}"); failed = failed + 1; }
+
+    // Test 5: Counter reset
+    c.reset();
+    if (c.current() == 0) { passed = passed + 1; }
+    else { print(f"FAIL 5: current={c.current()}"); failed = failed + 1; }
+
+    if (failed > 0) {
+        print(f"builder_pattern: {passed}/{passed + failed} passed");
+        return 1;
+    }
+    print(f"builder_pattern: PASS ({passed}/{passed} tests)");
+    0
+}

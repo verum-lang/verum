@@ -1,0 +1,172 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, overview, documentation
+
+/// Comprehensive CBGR (Checked Borrow Generation Reference) overview.
+/// This test documents and verifies the CBGR memory safety system.
+/// Spec: 26-cbgr-implementation.md
+///
+/// CBGR provides memory safety through:
+/// 1. Generation tracking - unique ID per allocation
+/// 2. Epoch system - temporal ordering of operations
+/// 3. Three-tier references - safety/performance trade-off
+/// 4. Compile-time analysis - static safety where possible
+
+fn main() {
+    print("=== CBGR Overview Tests ===");
+
+    // Core concepts
+    test_generation_concept();
+    test_epoch_concept();
+    test_tier_concept();
+
+    // Safety guarantees
+    verify_use_after_free_detection();
+    verify_double_free_detection();
+    verify_dangling_reference_prevention();
+
+    print("All CBGR overview tests passed!");
+}
+
+/// Demonstrate generation tracking concept
+fn test_generation_concept() {
+    // Each Heap allocation gets unique generation number
+    let alloc1 = Heap.new(1);
+    let alloc2 = Heap.new(2);
+    let alloc3 = Heap.new(3);
+
+    let gen1 = alloc1.generation();
+    let gen2 = alloc2.generation();
+    let gen3 = alloc3.generation();
+
+    // Generations are unique and increasing
+    assert(gen1 < gen2);
+    assert(gen2 < gen3);
+
+    // Reference stores generation at creation time
+    let ref1: &Int = &*alloc1;
+    assert(ref1.stored_generation() == gen1);
+
+    print("Generation tracking: OK");
+}
+
+/// Demonstrate epoch system concept
+fn test_epoch_concept() {
+    // Global epoch tracks temporal ordering
+    let epoch1 = Epoch.current();
+
+    // Mutations increment epoch
+    let mut value = Heap.new(42);
+    *value = 100;
+
+    let epoch2 = Epoch.current();
+    assert(epoch2 > epoch1);
+
+    // Deallocation increments epoch
+    let temp = Heap.new(0);
+    drop(temp);
+
+    let epoch3 = Epoch.current();
+    assert(epoch3 > epoch2);
+
+    print("Epoch system: OK");
+}
+
+/// Demonstrate three-tier reference system
+fn test_tier_concept() {
+    // Tier 0: Managed (full CBGR checks)
+    let heap_val = Heap.new(42);
+    let managed: &Int = &*heap_val;  // Has generation + epoch
+    // Type property: managed reference is 16 bytes
+    assert((&Int).size == 16);
+
+    // Tier 1: Checked (compile-time verified)
+    let stack_val = 42;
+    let checked_ref: &checked Int = &checked stack_val;  // Just pointer
+    // Type property: checked reference is 8 bytes
+    assert((&checked Int).size == 8);
+
+    // Tier 2: Unsafe (no checks)
+    // SAFETY: stack_val outlives this scope
+    let unsafe_ptr: &unsafe Int = unsafe { &unsafe stack_val };
+    // Type property: unsafe reference is 8 bytes
+    assert((&unsafe Int).size == 8);
+
+    print("Three-tier system: OK");
+}
+
+/// Verify CBGR detects use-after-free
+fn verify_use_after_free_detection() {
+    // CBGR catches use-after-free at runtime
+    // Generation mismatch triggers panic
+
+    // In safe code, compiler prevents this
+    // This test just documents the mechanism
+
+    let value = Heap.new(42);
+    let generation = value.generation();
+
+    // Reference captures generation
+    let _ref_val: &Int = &*value;
+
+    // When value is dropped:
+    // - Memory may be reused
+    // - New allocation gets different generation
+    // - Old reference still has old generation
+    // - Access would detect mismatch
+
+    print("Use-after-free detection: documented");
+}
+
+/// Verify CBGR detects double-free
+fn verify_double_free_detection() {
+    // CBGR marks freed memory with invalid generation
+    // Second free attempt sees invalid generation and panics
+
+    // In safe code, compiler prevents double-free
+    // This test just documents the mechanism
+
+    // When allocation is freed:
+    // 1. Generation is set to INVALID_GENERATION
+    // 2. Memory is deallocated
+    // Second free:
+    // 1. Check generation
+    // 2. See INVALID_GENERATION
+    // 3. Panic: "Double free detected"
+
+    print("Double-free detection: documented");
+}
+
+/// Verify compile-time dangling reference prevention
+fn verify_dangling_reference_prevention() {
+    // Most dangling references caught at compile time
+    // Lifetime analysis prevents returning local references
+    // CBGR runtime is backup for cases that escape analysis
+
+    // This compiles because lifetime is valid:
+    fn valid_borrow<'a>(x: &'a Int) -> &'a Int {
+        x  // Returns reference with same lifetime
+    }
+
+    // This would NOT compile:
+    // fn invalid_borrow() -> &Int {
+    //     let local = 42;
+    //     &local  // ERROR: E310 Reference outlives borrowed value
+    // }
+
+    let value = 42;
+    let borrowed = valid_borrow(&value);
+    assert(*borrowed == 42);
+
+    print("Dangling reference prevention: OK");
+}
+
+// Helper types
+type Epoch = u32;
+
+implement Epoch {
+    fn current() -> Epoch {
+        Runtime.current_epoch()
+    }
+}

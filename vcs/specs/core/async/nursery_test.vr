@@ -1,0 +1,664 @@
+// =============================================================================
+// nursery_test.vr - Tests for structured concurrency nursery types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, nursery, structured-concurrency, error-behavior
+// @description: Tests for NurseryErrorBehavior, NurseryOptions, NurseryError types.
+//               Parser fix: nursery keyword now disambiguated via lookahead -
+//               nursery { } and nursery( ) { } parse as expressions,
+//               nursery = ... and nursery.field parse as identifiers.
+// =============================================================================
+
+mount core.async.{
+    NurseryErrorBehavior, NurseryOptions, NurseryError,
+};
+mount core.time.duration.Duration;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: NurseryErrorBehavior Variants
+// =============================================================================
+
+@test
+fn test_error_behavior_cancel_all() {
+    let b: NurseryErrorBehavior = NurseryErrorBehavior.CancelAll;
+    assert(b is NurseryErrorBehavior.CancelAll);
+    assert(!(b is NurseryErrorBehavior.WaitAll));
+    assert(!(b is NurseryErrorBehavior.FailFast));
+}
+
+@test
+fn test_error_behavior_wait_all() {
+    let b: NurseryErrorBehavior = NurseryErrorBehavior.WaitAll;
+    assert(b is NurseryErrorBehavior.WaitAll);
+    assert(!(b is NurseryErrorBehavior.CancelAll));
+    assert(!(b is NurseryErrorBehavior.FailFast));
+}
+
+@test
+fn test_error_behavior_fail_fast() {
+    let b: NurseryErrorBehavior = NurseryErrorBehavior.FailFast;
+    assert(b is NurseryErrorBehavior.FailFast);
+    assert(!(b is NurseryErrorBehavior.CancelAll));
+    assert(!(b is NurseryErrorBehavior.WaitAll));
+}
+
+// =============================================================================
+// Section 2: NurseryOptions (direct construction)
+// =============================================================================
+
+@test
+fn test_nursery_options_direct_construction() {
+    // Construct NurseryOptions directly since implement block methods
+    // aren't available (nursery module internal compilation issues)
+    let opts: NurseryOptions = NurseryOptions {
+        timeout: None,
+        max_tasks: None,
+        on_error: NurseryErrorBehavior.CancelAll,
+    };
+    assert(opts.timeout.is_none());
+    assert(opts.max_tasks.is_none());
+}
+
+@test
+fn test_nursery_options_with_timeout_field() {
+    let opts = NurseryOptions {
+        timeout: Some(Duration.from_secs(5)),
+        max_tasks: None,
+        on_error: NurseryErrorBehavior.CancelAll,
+    };
+    assert(opts.timeout.is_some());
+}
+
+@test
+fn test_nursery_options_with_max_tasks_field() {
+    let opts = NurseryOptions {
+        timeout: None,
+        max_tasks: Some(100),
+        on_error: NurseryErrorBehavior.CancelAll,
+    };
+    assert(opts.max_tasks.is_some());
+}
+
+@test
+fn test_nursery_options_with_wait_all() {
+    let opts = NurseryOptions {
+        timeout: None,
+        max_tasks: None,
+        on_error: NurseryErrorBehavior.WaitAll,
+    };
+    assert(opts.on_error is NurseryErrorBehavior.WaitAll);
+}
+
+@test
+fn test_nursery_options_with_fail_fast() {
+    let opts = NurseryOptions {
+        timeout: Some(Duration.from_millis(1000)),
+        max_tasks: Some(50),
+        on_error: NurseryErrorBehavior.FailFast,
+    };
+    assert(opts.timeout.is_some());
+    assert(opts.max_tasks.is_some());
+}
+
+// =============================================================================
+// Section 3: NurseryError Variants
+// =============================================================================
+
+@test
+fn test_nursery_error_cancelled() {
+    let err: NurseryError = NurseryError.Cancelled;
+    assert(err is NurseryError.Cancelled);
+    assert(!(err is NurseryError.Timeout));
+}
+
+@test
+fn test_nursery_error_timeout() {
+    let err: NurseryError = NurseryError.Timeout {
+        pending_count: 3,
+        completed_count: 7,
+    };
+    match err {
+        NurseryError.Timeout { pending_count, completed_count } => {
+            assert_eq(pending_count, 3);
+            assert_eq(completed_count, 7);
+        },
+        _ => panic("expected Timeout"),
+    }
+}
+
+@test
+fn test_nursery_error_task_limit_exceeded() {
+    let err: NurseryError = NurseryError.TaskLimitExceeded {
+        limit: 100,
+        attempted: 101,
+    };
+    match err {
+        NurseryError.TaskLimitExceeded { limit, attempted } => {
+            assert_eq(limit, 100);
+            assert_eq(attempted, 101);
+        },
+        _ => panic("expected TaskLimitExceeded"),
+    }
+}
+
+@test
+fn test_nursery_error_in_result() {
+    let result: Result<Int, NurseryError> = Err(NurseryError.Cancelled);
+    assert(result.is_err());
+}
+
+@test
+fn test_nursery_error_ok_result() {
+    let result: Result<Int, NurseryError> = Ok(42);
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// Section 4: NurseryOptions Builder Methods
+// =============================================================================
+
+@test
+fn test_nursery_options_new() {
+    let opts = NurseryOptions.new();
+    assert(opts.timeout.is_none());
+    assert(opts.max_tasks.is_none());
+    assert(opts.on_error is NurseryErrorBehavior.CancelAll);
+}
+
+@test
+fn test_nursery_options_default_alias() {
+    let opts = NurseryOptions.default();
+    assert(opts.timeout.is_none());
+    assert(opts.max_tasks.is_none());
+    assert(opts.on_error is NurseryErrorBehavior.CancelAll);
+}
+
+@test
+fn test_nursery_options_with_timeout_ms() {
+    let opts = NurseryOptions.new().with_timeout_ms(5000);
+    assert(opts.timeout.is_some());
+    assert(opts.max_tasks.is_none());
+}
+
+@test
+fn test_nursery_options_with_max_tasks() {
+    let opts = NurseryOptions.new().with_max_tasks(100);
+    assert(opts.timeout.is_none());
+    assert(opts.max_tasks.is_some());
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 100),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_nursery_options_with_error_behavior() {
+    let opts = NurseryOptions.new()
+        .with_error_behavior(NurseryErrorBehavior.WaitAll);
+    assert(opts.on_error is NurseryErrorBehavior.WaitAll);
+}
+
+@test
+fn test_nursery_options_chained_builder() {
+    let opts = NurseryOptions.new()
+        .with_timeout_ms(3000)
+        .with_max_tasks(50)
+        .with_error_behavior(NurseryErrorBehavior.FailFast);
+    assert(opts.timeout.is_some());
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 50),
+        None => panic("expected Some"),
+    }
+    assert(opts.on_error is NurseryErrorBehavior.FailFast);
+}
+
+@test
+fn test_nursery_options_override_behavior() {
+    // Start with WaitAll, override to CancelAll
+    let opts = NurseryOptions.new()
+        .with_error_behavior(NurseryErrorBehavior.WaitAll)
+        .with_error_behavior(NurseryErrorBehavior.CancelAll);
+    assert(opts.on_error is NurseryErrorBehavior.CancelAll);
+}
+
+@test
+fn test_nursery_options_with_timeout_duration() {
+    let opts = NurseryOptions.new()
+        .with_timeout(Duration.from_secs(10));
+    assert(opts.timeout.is_some());
+}
+
+@test
+fn test_nursery_options_zero_timeout_ms() {
+    let opts = NurseryOptions.new().with_timeout_ms(0);
+    assert(opts.timeout.is_some());
+}
+
+@test
+fn test_nursery_options_large_max_tasks() {
+    let opts = NurseryOptions.new().with_max_tasks(1_000_000);
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 1_000_000),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_nursery_options_max_tasks_one() {
+    let opts = NurseryOptions.new().with_max_tasks(1);
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 1),
+        None => panic("expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 5: NurseryError - Extended Variants
+// =============================================================================
+
+@test
+fn test_nursery_error_panic() {
+    let err: NurseryError = NurseryError.Panic("something went wrong");
+    assert(err is NurseryError.Panic);
+    assert(!(err is NurseryError.Cancelled));
+    assert(!(err is NurseryError.Timeout));
+}
+
+@test
+fn test_nursery_error_timeout_zero_counts() {
+    let err = NurseryError.Timeout {
+        pending_count: 0,
+        completed_count: 0,
+    };
+    match err {
+        NurseryError.Timeout { pending_count, completed_count } => {
+            assert_eq(pending_count, 0);
+            assert_eq(completed_count, 0);
+        },
+        _ => panic("expected Timeout"),
+    }
+}
+
+@test
+fn test_nursery_error_timeout_large_counts() {
+    let err = NurseryError.Timeout {
+        pending_count: 500,
+        completed_count: 9500,
+    };
+    match err {
+        NurseryError.Timeout { pending_count, completed_count } => {
+            assert_eq(pending_count, 500);
+            assert_eq(completed_count, 9500);
+        },
+        _ => panic("expected Timeout"),
+    }
+}
+
+@test
+fn test_nursery_error_task_limit_edge() {
+    let err = NurseryError.TaskLimitExceeded {
+        limit: 1,
+        attempted: 2,
+    };
+    match err {
+        NurseryError.TaskLimitExceeded { limit, attempted } => {
+            assert_eq(limit, 1);
+            assert_eq(attempted, 2);
+        },
+        _ => panic("expected TaskLimitExceeded"),
+    }
+}
+
+@test
+fn test_nursery_error_task_limit_large() {
+    let err = NurseryError.TaskLimitExceeded {
+        limit: 10000,
+        attempted: 10001,
+    };
+    match err {
+        NurseryError.TaskLimitExceeded { limit, attempted } => {
+            assert_eq(limit, 10000);
+            assert_eq(attempted, 10001);
+        },
+        _ => panic("expected TaskLimitExceeded"),
+    }
+}
+
+@test
+fn test_nursery_error_in_result_ok() {
+    let result: Result<Text, NurseryError> = Ok("success");
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), "success");
+}
+
+@test
+fn test_nursery_error_in_result_timeout() {
+    let result: Result<Int, NurseryError> = Err(NurseryError.Timeout {
+        pending_count: 1,
+        completed_count: 5,
+    });
+    assert(result.is_err());
+}
+
+@test
+fn test_nursery_error_in_result_panic() {
+    let result: Result<Int, NurseryError> = Err(NurseryError.Panic("oops"));
+    assert(result.is_err());
+}
+
+@test
+fn test_nursery_error_cancelled_in_result_match() {
+    let result: Result<Int, NurseryError> = Err(NurseryError.Cancelled);
+    let val = match result {
+        Ok(v) => v,
+        Err(_) => -1,
+    };
+    assert_eq(val, -1);
+}
+
+// =============================================================================
+// Section 6: NurseryOptions Field Combinations
+// =============================================================================
+
+@test
+fn test_nursery_options_all_fields_set() {
+    let opts = NurseryOptions {
+        timeout: Some(Duration.from_millis(2000)),
+        max_tasks: Some(200),
+        on_error: NurseryErrorBehavior.WaitAll,
+    };
+    assert(opts.timeout.is_some());
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 200),
+        None => panic("expected Some"),
+    }
+    assert(opts.on_error is NurseryErrorBehavior.WaitAll);
+}
+
+@test
+fn test_nursery_options_only_timeout() {
+    let opts = NurseryOptions {
+        timeout: Some(Duration.from_secs(30)),
+        max_tasks: None,
+        on_error: NurseryErrorBehavior.CancelAll,
+    };
+    assert(opts.timeout.is_some());
+    assert(opts.max_tasks.is_none());
+}
+
+@test
+fn test_nursery_options_only_max_tasks() {
+    let opts = NurseryOptions {
+        timeout: None,
+        max_tasks: Some(10),
+        on_error: NurseryErrorBehavior.CancelAll,
+    };
+    assert(opts.timeout.is_none());
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 10),
+        None => panic("expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 7: NurseryErrorBehavior Exhaustive
+// =============================================================================
+
+@test
+fn test_all_error_behaviors_distinct() {
+    let ca = NurseryErrorBehavior.CancelAll;
+    let wa = NurseryErrorBehavior.WaitAll;
+    let ff = NurseryErrorBehavior.FailFast;
+
+    assert(ca is NurseryErrorBehavior.CancelAll);
+    assert(!(ca is NurseryErrorBehavior.WaitAll));
+    assert(!(ca is NurseryErrorBehavior.FailFast));
+
+    assert(wa is NurseryErrorBehavior.WaitAll);
+    assert(!(wa is NurseryErrorBehavior.CancelAll));
+    assert(!(wa is NurseryErrorBehavior.FailFast));
+
+    assert(ff is NurseryErrorBehavior.FailFast);
+    assert(!(ff is NurseryErrorBehavior.CancelAll));
+    assert(!(ff is NurseryErrorBehavior.WaitAll));
+}
+
+@test
+fn test_error_behavior_in_options_cancel_all() {
+    let opts = NurseryOptions.new()
+        .with_error_behavior(NurseryErrorBehavior.CancelAll);
+    assert(opts.on_error is NurseryErrorBehavior.CancelAll);
+}
+
+@test
+fn test_error_behavior_in_options_wait_all() {
+    let opts = NurseryOptions.new()
+        .with_error_behavior(NurseryErrorBehavior.WaitAll);
+    assert(opts.on_error is NurseryErrorBehavior.WaitAll);
+}
+
+@test
+fn test_error_behavior_in_options_fail_fast() {
+    let opts = NurseryOptions.new()
+        .with_error_behavior(NurseryErrorBehavior.FailFast);
+    assert(opts.on_error is NurseryErrorBehavior.FailFast);
+}
+
+// =============================================================================
+// Section 8: NurseryError All Variants Distinct
+// =============================================================================
+
+@test
+fn test_nursery_error_all_variants_distinct() {
+    let cancelled: NurseryError = NurseryError.Cancelled;
+    let timeout: NurseryError = NurseryError.Timeout { pending_count: 0, completed_count: 0 };
+    let task_limit: NurseryError = NurseryError.TaskLimitExceeded { limit: 0, attempted: 0 };
+    let panic_err: NurseryError = NurseryError.Panic("msg");
+
+    assert(cancelled is NurseryError.Cancelled);
+    assert(!(cancelled is NurseryError.Timeout));
+    assert(!(cancelled is NurseryError.TaskLimitExceeded));
+    assert(!(cancelled is NurseryError.Panic));
+
+    assert(timeout is NurseryError.Timeout);
+    assert(!(timeout is NurseryError.Cancelled));
+
+    assert(task_limit is NurseryError.TaskLimitExceeded);
+    assert(!(task_limit is NurseryError.Cancelled));
+
+    assert(panic_err is NurseryError.Panic);
+    assert(!(panic_err is NurseryError.Cancelled));
+}
+
+// =============================================================================
+// Section 9: Builder Pattern Chaining Variations
+// =============================================================================
+
+@test
+fn test_builder_timeout_then_max_tasks() {
+    let opts = NurseryOptions.new()
+        .with_timeout_ms(1000)
+        .with_max_tasks(5);
+    assert(opts.timeout.is_some());
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 5),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_builder_max_tasks_then_timeout() {
+    let opts = NurseryOptions.new()
+        .with_max_tasks(20)
+        .with_timeout_ms(500);
+    assert(opts.timeout.is_some());
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 20),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_builder_all_three() {
+    let opts = NurseryOptions.new()
+        .with_timeout(Duration.from_millis(100))
+        .with_max_tasks(10)
+        .with_error_behavior(NurseryErrorBehavior.WaitAll);
+    assert(opts.timeout.is_some());
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 10),
+        None => panic("expected Some"),
+    }
+    assert(opts.on_error is NurseryErrorBehavior.WaitAll);
+}
+
+@test
+fn test_builder_behavior_then_max_tasks() {
+    let opts = NurseryOptions.new()
+        .with_error_behavior(NurseryErrorBehavior.FailFast)
+        .with_max_tasks(99);
+    assert(opts.on_error is NurseryErrorBehavior.FailFast);
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 99),
+        None => panic("expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 10: Builder Override Tests
+// =============================================================================
+
+@test
+fn test_builder_override_timeout() {
+    let opts = NurseryOptions.new()
+        .with_timeout_ms(1000)
+        .with_timeout_ms(5000);
+    // Second call overrides first
+    assert(opts.timeout.is_some());
+}
+
+@test
+fn test_builder_override_max_tasks() {
+    let opts = NurseryOptions.new()
+        .with_max_tasks(10)
+        .with_max_tasks(200);
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 200),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_nursery_error_panic_empty_string() {
+    let err: NurseryError = NurseryError.Panic("");
+    assert(err is NurseryError.Panic);
+}
+
+@test
+fn test_nursery_error_in_maybe_some() {
+    let val: Maybe<NurseryError> = Some(NurseryError.Cancelled);
+    assert(val.is_some());
+}
+
+@test
+fn test_nursery_error_in_maybe_none() {
+    let val: Maybe<NurseryError> = None;
+    assert(val.is_none());
+}
+
+@test
+fn test_nursery_options_all_none_cancel_all() {
+    let opts = NurseryOptions {
+        timeout: None,
+        max_tasks: None,
+        on_error: NurseryErrorBehavior.CancelAll,
+    };
+    assert(opts.timeout.is_none());
+    assert(opts.max_tasks.is_none());
+    assert(opts.on_error is NurseryErrorBehavior.CancelAll);
+}
+
+@test
+fn test_builder_max_tasks_zero() {
+    let opts = NurseryOptions.new().with_max_tasks(0);
+    match opts.max_tasks {
+        Some(n) => assert_eq(n, 0),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_nursery_error_timeout_then_check_result() {
+    let result: Result<Text, NurseryError> = Err(NurseryError.Timeout {
+        pending_count: 2,
+        completed_count: 8,
+    });
+    let val = match result {
+        Ok(s) => s,
+        Err(_) => "timed_out",
+    };
+    assert_eq(val, "timed_out");
+}
+
+// =============================================================================
+// Additional Nursery Tests
+// =============================================================================
+
+@test
+fn test_nursery_error_cancelled_variant() {
+    let err = NurseryError.Cancelled;
+    assert(err is NurseryError.Cancelled);
+    assert(!(err is NurseryError.Panic));
+}
+
+@test
+fn test_nursery_error_behavior_fail_fast() {
+    let behavior = NurseryErrorBehavior.FailFast;
+    assert(behavior is NurseryErrorBehavior.FailFast);
+    assert(!(behavior is NurseryErrorBehavior.CancelAll));
+}
+
+@test
+fn test_nursery_error_behavior_wait_all() {
+    let behavior = NurseryErrorBehavior.WaitAll;
+    assert(behavior is NurseryErrorBehavior.WaitAll);
+}
+
+@test
+fn test_nursery_options_default_on_error() {
+    let opts = NurseryOptions.new();
+    assert(opts.on_error is NurseryErrorBehavior.CancelAll);
+}
+
+@test
+fn test_nursery_options_timeout_initially_none() {
+    let opts = NurseryOptions.new();
+    assert(opts.timeout.is_none());
+}
+
+@test
+fn test_nursery_options_max_tasks_initially_none() {
+    let opts = NurseryOptions.new();
+    assert(opts.max_tasks.is_none());
+}
+
+@test
+fn test_nursery_error_task_limit_exceeded() {
+    let err = NurseryError.TaskLimitExceeded { limit: 10, attempted: 11 };
+    assert(err is NurseryError.TaskLimitExceeded);
+}
+
+@test
+fn test_nursery_options_with_error_behavior() {
+    let opts = NurseryOptions.new()
+        .with_error_behavior(NurseryErrorBehavior.FailFast);
+    assert(opts.on_error is NurseryErrorBehavior.FailFast);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,241 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, string, pattern-matching
+// @timeout: 10000
+// @expected-exit: 0
+// @description: String matching as int arrays, verify pattern found at correct position
+
+fn main() -> Int {
+    test_naive_search();
+    test_pattern_not_found();
+    test_multiple_occurrences();
+    test_kmp_prefix();
+    0
+}
+
+// Simulated fixed-size array of 16 elements
+type A16 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int,
+              e8: Int, e9: Int, e10: Int, e11: Int, e12: Int, e13: Int, e14: Int, e15: Int };
+
+fn a16_get(a: A16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: A16, i: Int, v: Int) -> A16 {
+    A16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 },
+    }
+}
+
+fn a16_zero() -> A16 {
+    A16 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+          e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 }
+}
+
+/// Check if text[i..i+plen] matches pat[0..plen]
+fn matches_at(text: A16, pat: A16, pos: Int, plen: Int) -> Bool {
+    let mut j = 0;
+    let mut ok = true;
+    while j < plen {
+        if ok {
+            let tv = a16_get(text, pos + j);
+            let pv = a16_get(pat, j);
+            if tv != pv {
+                ok = false;
+            }
+        }
+        j = j + 1;
+    }
+    ok
+}
+
+/// Naive string search: returns first occurrence index or -1
+fn naive_find(text: A16, tlen: Int, pat: A16, plen: Int) -> Int {
+    let mut i = 0;
+    let mut result = -1;
+    let mut done = false;
+    while i <= tlen - plen {
+        if done == false {
+            if matches_at(text, pat, i, plen) {
+                result = i;
+                done = true;
+            }
+        }
+        i = i + 1;
+    }
+    result
+}
+
+/// Find pattern at known position
+fn test_naive_search() {
+    // "hello world" encoded as ints: h=104 e=101 l=108 l=108 o=111 _=32 w=119 o=111 r=114 l=108 d=100
+    let text = A16 { e0: 104, e1: 101, e2: 108, e3: 108, e4: 111, e5: 32, e6: 119, e7: 111,
+                     e8: 114, e9: 108, e10: 100, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let tlen = 11;
+
+    // "world" = [119, 111, 114, 108, 100]
+    let pat1 = A16 { e0: 119, e1: 111, e2: 114, e3: 108, e4: 100, e5: 0, e6: 0, e7: 0,
+                     e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    assert_eq(naive_find(text, tlen, pat1, 5), 6);
+
+    // "hello" = [104, 101, 108, 108, 111]
+    let pat2 = A16 { e0: 104, e1: 101, e2: 108, e3: 108, e4: 111, e5: 0, e6: 0, e7: 0,
+                     e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    assert_eq(naive_find(text, tlen, pat2, 5), 0);
+
+    // "lo" = [108, 111]
+    let pat3 = A16 { e0: 108, e1: 111, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+                     e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    assert_eq(naive_find(text, tlen, pat3, 2), 3);
+    print("naive_search: pass\n");
+}
+
+/// Pattern not in text
+fn test_pattern_not_found() {
+    let text = A16 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8,
+                     e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+
+    let pat1 = A16 { e0: 9, e1: 10, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+                     e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    assert_eq(naive_find(text, 8, pat1, 2), -1);
+
+    let pat2 = A16 { e0: 99, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+                     e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    assert_eq(naive_find(text, 8, pat2, 1), -1);
+
+    let pat3 = A16 { e0: 5, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+                     e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    assert_eq(naive_find(text, 8, pat3, 1), 4);
+    print("pattern_not_found: pass\n");
+}
+
+/// Count all occurrences of a pattern
+fn test_multiple_occurrences() {
+    // text = [1, 2, 3, 1, 2, 3, 1, 2, 3]
+    let text = A16 { e0: 1, e1: 2, e2: 3, e3: 1, e4: 2, e5: 3, e6: 1, e7: 2,
+                     e8: 3, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let tlen = 9;
+    // pat = [1, 2, 3]
+    let pat = A16 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+                    e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let plen = 3;
+
+    let mut count = 0;
+    let mut start = 0;
+    while start <= tlen - plen {
+        if matches_at(text, pat, start, plen) {
+            count = count + 1;
+        }
+        start = start + 1;
+    }
+    assert_eq(count, 3);
+    print("multiple_occurrences: pass\n");
+}
+
+/// KMP failure function helper: compute next k value
+fn kmp_next_k(pat: A16, k: Int, ch: Int) -> Int {
+    let mut kk = k;
+    let mut settled = false;
+    while settled == false {
+        let pk = a16_get(pat, kk);
+        if pk == ch {
+            kk = kk + 1;
+            settled = true;
+        } else {
+            if kk > 0 {
+                let prev = a16_get(pat, kk - 1);
+                // Naive: just go back by 1 (simplified KMP)
+                // For correctness, follow fail table, but we build it iteratively
+                // Actually for the KMP prefix table, k = fail[k-1]
+                // But we're building fail, so we need to reference previously built entries
+                // We'll just decrement k for this simplified version
+                kk = 0;
+            } else {
+                settled = true;
+            }
+        }
+    }
+    kk
+}
+
+/// KMP failure function (prefix table) computed iteratively
+fn test_kmp_prefix() {
+    // Pattern "abaabab" encoded as [1, 2, 1, 1, 2, 1, 2]
+    let pat = A16 { e0: 1, e1: 2, e2: 1, e3: 1, e4: 2, e5: 1, e6: 2, e7: 0,
+                    e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0 };
+    let plen = 7;
+
+    // Compute fail table manually using the simplified approach
+    // fail[0] = 0 always
+    // For each i, try to extend the match
+    let mut fail = a16_zero();
+
+    // i=1: pat[1]=2, pat[0]=1, no match, fail[1]=0
+    // i=2: pat[2]=1, pat[0]=1, match, fail[2]=1
+    // i=3: pat[3]=1, k=1, pat[1]=2, no match, k=0, pat[0]=1, match, fail[3]=1
+    // i=4: pat[4]=2, k=1, pat[1]=2, match, fail[4]=2
+    // i=5: pat[5]=1, k=2, pat[2]=1, match, fail[5]=3
+    // i=6: pat[6]=2, k=3, pat[3]=1, no match, k=fail[2]=1, pat[1]=2, match, fail[6]=2
+
+    // We need actual fail-table lookback. Let's compute step by step.
+    let mut i = 1;
+    let mut k = 0;
+    while i < plen {
+        let pi = a16_get(pat, i);
+        let pk = a16_get(pat, k);
+        if pk == pi {
+            k = k + 1;
+            fail = a16_set(fail, i, k);
+            i = i + 1;
+        } else {
+            if k > 0 {
+                k = a16_get(fail, k - 1);
+            } else {
+                fail = a16_set(fail, i, 0);
+                i = i + 1;
+            }
+        }
+    }
+
+    // Expected: [0, 0, 1, 1, 2, 3, 2]
+    assert_eq(a16_get(fail, 0), 0);
+    assert_eq(a16_get(fail, 1), 0);
+    assert_eq(a16_get(fail, 2), 1);
+    assert_eq(a16_get(fail, 3), 1);
+    assert_eq(a16_get(fail, 4), 2);
+    assert_eq(a16_get(fail, 5), 3);
+    assert_eq(a16_get(fail, 6), 2);
+    print("kmp_prefix: pass\n");
+}

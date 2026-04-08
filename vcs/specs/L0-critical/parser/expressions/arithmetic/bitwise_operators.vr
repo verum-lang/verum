@@ -1,0 +1,336 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arithmetic, bitwise, operators
+
+fn test_basic_bitwise_and() {
+    let a = 0xAA;
+    let b = 0x55;
+    let value = 0xFF;
+    let flags = 0x0F;
+
+    let FLAG_ENABLED = 0x01;
+
+    // Basic bitwise AND
+    let and_result = a & b;
+    let masked = value & 0xFF;
+    let flag_check = flags & FLAG_ENABLED;
+}
+
+fn test_basic_bitwise_or() {
+    let a = 0xAA;
+    let b = 0x55;
+    let flags = 0x00;
+    let left = 0xF0;
+    let right = 0x0F;
+
+    let NEW_FLAG = 0x10;
+
+    // Basic bitwise OR
+    let or_result = a | b;
+    let combined = flags | NEW_FLAG;
+    let merged = left | right;
+}
+
+fn test_basic_bitwise_xor() {
+    let a = 0xAA;
+    let b = 0x55;
+    let state = 0xFF;
+    let set1 = 0xF0;
+    let set2 = 0x0F;
+
+    let TOGGLE_MASK = 0x0F;
+
+    // Basic bitwise XOR
+    let xor_result = a ^ b;
+    let toggled = state ^ TOGGLE_MASK;
+    let difference = set1 ^ set2;
+}
+
+fn test_basic_bitwise_not() {
+    let value = 0xFF;
+    let bits = 0xAA;
+
+    // Basic bitwise NOT
+    let inverted = ~value;
+    let complement = ~bits;
+    let negated = ~0;
+}
+
+fn test_left_shift() {
+    let value = 1;
+    let x = 2;
+    let bit_position = 4;
+
+    // Left shift
+    let shifted_left = value << 2;
+    let multiplied = x << 1;
+    let positioned = 1 << bit_position;
+}
+
+fn test_right_shift() {
+    let value = 0xFF;
+    let x = 16;
+    let offset = 4;
+    let mask = 0x0F;
+
+    // Right shift
+    let shifted_right = value >> 2;
+    let divided = x >> 1;
+    let extracted = (value >> offset) & mask;
+}
+
+fn test_chained_bitwise() {
+    let a = 0xAA;
+    let b = 0x55;
+    let c = 0xF0;
+    let d = 0x0F;
+    let value = 0xFF00;
+    let low = 0x00FF;
+    let x = 0xAB;
+
+    // Chained bitwise operations
+    let complex = (a & b) | (c & d);
+    let masked_combined = (value & 0xFF00) | (low & 0x00FF);
+    let rotated = (x << 4) | (x >> 4);
+}
+
+fn test_bitwise_with_comparison() {
+    let flags = 0x0F;
+    let value = 0xAB;
+    let data = 0xCD;
+    let n = 3;
+
+    let FLAG = 0x01;
+    let mask = 0x0F;
+    let expected = 0x0D;
+
+    // Bitwise with comparison precedence
+    let flag_set = (flags & FLAG) != 0;
+    let bit_check = (value & (1 << n)) != 0;
+    let mask_match = (data & mask) == expected;
+}
+
+fn test_bitwise_assignment() {
+    let mut flags = 0xFF;
+    let mut value = 0x0F;
+    let mut bits = 0xAA;
+
+    let CLEAR_MASK = 0xF0;
+    let SET_MASK = 0x0F;
+    let TOGGLE_MASK = 0x55;
+
+    // Bitwise assignment operators
+    flags &= CLEAR_MASK;
+    flags |= SET_MASK;
+    value ^= TOGGLE_MASK;
+    bits <<= 2;
+    bits >>= 4;
+}
+
+fn test_complex_bitwise_expressions() {
+    let a = 0xAA;
+    let b = 0x55;
+    let c = 0xF0;
+    let d = 0x0F;
+    let e = 0xFF;
+    let high = 0x0A;
+    let low = 0x05;
+    let byte_val = 0xAB;
+
+    // Complex expressions with all operators
+    let result = ((a & b) | (c ^ d)) & ~e;
+    let packed = ((high & 0xF) << 4) | (low & 0xF);
+    let rotated_byte = ((byte_val << 3) | (byte_val >> 5)) & 0xFF;
+}
+
+fn test_bitwise_in_function_calls() {
+    fn extract_bits(v: Int, s: Int, c: Int) -> Int { (v >> s) & ((1 << c) - 1) }
+    fn combine(a: Int, b: Int) -> Int { a | b }
+
+    let value = 0xABCD;
+    let mask = 0x00FF;
+    let a = 0xAA;
+    let b = 0x55;
+    let start = 8;
+    let count = 4;
+
+    let FLAG = 0x01;
+    let MASK = 0x0F;
+
+    // Bitwise in function calls
+    let extracted = extract_bits(value & mask, start, count);
+    let combined = combine(a | FLAG, b & MASK);
+}
+
+fn test_bitwise_with_casts() {
+    let narrow = 0xFF;
+    let value = 0xABCD;
+
+    // Bitwise with type casts
+    let wide = (narrow as Int) << 16;
+    let masked_cast = (value & 0xFF) as Int;
+}
+
+fn test_bitwise_precedence_arithmetic() {
+    let a = 10;
+    let b = 20;
+    let x = 100;
+    let y = 50;
+
+    // Precedence tests - bitwise lower than arithmetic
+    let sum_masked = (a + b) & 0xFF;
+    let product_shifted = (x * y) >> 8;
+    let masked_sum = a & 0xFF + b;
+}
+
+fn test_bitwise_precedence_comparison() {
+    let a = 0xAA;
+    let b = 0x55;
+    let c = 0xFF;
+    let x = 0xF0;
+    let y = 0x0F;
+
+    // Precedence tests - bitwise higher than comparison
+    let compared = (a & b) == c;
+    let is_valid = (x | y) != 0;
+}
+
+fn test_shift_precedence() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    // Precedence tests - shift vs add
+    let shifted_sum = a << (b + c);
+    let sum_shift = (a << b) + c;
+}
+
+fn test_unsigned_right_shift() {
+    let value = -1;
+
+    // Unsigned right shift - using logical shift with mask
+    // Note: >>> operator not in grammar, use explicit unsigned conversion
+    let unsigned_shift = (value >> 2) & 0x3FFFFFFF;
+}
+
+fn test_bit_manipulation_patterns() {
+    let flags = 0xFF;
+    let n = 3;
+
+    // Bit manipulation patterns
+    let set_bit = flags | (1 << n);
+    let clear_bit = flags & ~(1 << n);
+    let toggle_bit = flags ^ (1 << n);
+    let check_bit = (flags >> n) & 1;
+}
+
+fn test_multi_byte_packing() {
+    let byte3 = 0xAB;
+    let byte2 = 0xCD;
+    let byte1 = 0xEF;
+    let byte0 = 0x12;
+
+    // Multi-byte packing/unpacking
+    let packed_word = (byte3 << 24) | (byte2 << 16) | (byte1 << 8) | byte0;
+    let unpacked0 = packed_word & 0xFF;
+    let unpacked1 = (packed_word >> 8) & 0xFF;
+    let unpacked2 = (packed_word >> 16) & 0xFF;
+    let unpacked3 = (packed_word >> 24) & 0xFF;
+}
+
+fn test_bit_field_extraction() {
+    let value = 0xABCD;
+    let field_start = 4;
+    let field_width = 8;
+
+    // Bit field extraction
+    let extracted_field = (value >> field_start) & ((1 << field_width) - 1);
+}
+
+fn test_sign_extension() {
+    let value = 0x80;
+
+    // Sign extension
+    let sign_bit = (value >> 7) & 1;
+    let extended = value | (sign_bit * 0xFFFFFF00);
+}
+
+fn test_rotation() {
+    let x = 0xAB;
+    let n = 3;
+
+    // Rotation
+    let rotate_left = (x << n) | (x >> (32 - n));
+    let rotate_right = (x >> n) | (x << (32 - n));
+}
+
+fn test_bitwise_in_loop() {
+    let mut flags = 0xFF;
+
+    fn process() {}
+
+    let RUNNING_FLAG = 0x01;
+    let PROCESSED_FLAG = 0x02;
+
+    // Bitwise in loop conditions
+    while (flags & RUNNING_FLAG) != 0 {
+        process();
+        flags &= ~PROCESSED_FLAG;
+        break;  // Prevent infinite loop in test
+    }
+}
+
+fn test_bitwise_in_match() {
+    let value = 2;
+
+    // Bitwise in match expressions
+    let result = match value & 0x03 {
+        0 => "case 0",
+        1 => "case 1",
+        2 => "case 2",
+        3 => "case 3",
+        _ => unreachable(),
+    };
+}
+
+fn test_bitwise_with_hex_literals() {
+    // Bitwise with hex literals
+    let hex_and = 0xDEADBEEF & 0xFF00FF00;
+    let hex_or = 0x12345678 | 0x00FF00FF;
+    let hex_xor = 0xAAAAAAAA ^ 0x55555555;
+}
+
+fn test_bitwise_with_binary_literals() {
+    // Bitwise with binary literals
+    let bin_and = 0b11110000 & 0b10101010;
+    let bin_or = 0b00001111 | 0b10100000;
+    let bin_xor = 0b11001100 ^ 0b10101010;
+}
+
+fn test_bitwise_complex_variables() {
+    let x = 0xAA;
+    let y = 0x55;
+    let z = 0xFF;
+    let a = 0xF0;
+    let b = 0x0F;
+    let offset = 4;
+
+    // Bitwise with variables in complex expressions
+    let result = (((x & a) | (y & b)) ^ z) << offset;
+}
+
+fn test_bitwise_in_closures() {
+    // Bitwise in closures
+    let mask_fn = |value| value & 0xFF;
+    let shift_fn = |value, amount| value << amount;
+}
+
+fn test_bitwise_in_conditionals() {
+    let use_mask = true;
+    let value = 0xABCD;
+    let mask = 0x00FF;
+
+    // Bitwise with conditional expressions
+    let masked = if use_mask { value & mask } else { value };
+}

@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, prelude, custom
+// @description: Custom prelude definitions for domain-specific needs
+
+/// Custom prelude module for a domain-specific library
+
+module domain_prelude {
+    // Domain-specific types
+    pub type Id is Int;
+    pub type Timestamp is Int;
+    pub type Money is { amount: Int, currency: Currency };
+    pub type Currency is USD | EUR | GBP | JPY;
+
+    // Domain-specific result types
+    pub type DomainResult<T> is Result<T, DomainError>;
+
+    pub type DomainError is
+        | NotFound(Text)
+        | Unauthorized(Text)
+        | ValidationError(List<Text>)
+        | InternalError(Text);
+
+    // Domain-specific protocols
+    pub type Entity is protocol {
+        fn id(&self) -> Id;
+        fn created_at(&self) -> Timestamp;
+        fn updated_at(&self) -> Timestamp;
+    };
+
+    pub type Repository<T: Entity> is protocol {
+        async fn find_by_id(&self, id: Id) -> DomainResult<Maybe<T>>;
+        async fn save(&self, entity: T) -> DomainResult<T>;
+        async fn delete(&self, id: Id) -> DomainResult<Bool>;
+    };
+
+    // Domain-specific utilities
+    pub fn now() -> Timestamp {
+        // Implementation
+        0
+    }
+
+    pub fn generate_id() -> Id {
+        // Implementation
+        1
+    }
+
+    // Domain-specific assertions
+    pub fn require(condition: Bool, message: Text) {
+        if !condition {
+            panic(message);
+        }
+    }
+
+    pub fn ensure<T>(value: Maybe<T>, message: Text) -> T {
+        match value {
+            Some(v) => v,
+            None => panic(message),
+        }
+    }
+}
+
+// Application module using custom prelude
+mount domain_prelude.{Id, Timestamp, DomainResult, DomainError, Entity, Repository, now, generate_id, require, ensure};
+
+type User is {
+    id: Id,
+    created_at: Timestamp,
+    updated_at: Timestamp,
+    name: Text,
+    email: Text,
+};
+
+implement Entity for User {
+    fn id(&self) -> Id { self.id }
+    fn created_at(&self) -> Timestamp { self.created_at }
+    fn updated_at(&self) -> Timestamp { self.updated_at }
+}
+
+fn create_user(name: Text, email: Text) -> Result<User, DomainError> {
+    require(!name.is_empty(), "Name cannot be empty");
+    require(email.contains("@"), "Invalid email");
+
+    Ok(User {
+        id: generate_id(),
+        created_at: now(),
+        updated_at: now(),
+        name,
+        email,
+    })
+}
+
+fn main() {
+    match create_user("Alice", "alice@example.com") {
+        Ok(user) => print(f"Created user: {user.name}"),
+        Err(e) => print(f"Error: {e}"),
+    }
+}

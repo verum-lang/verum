@@ -1,0 +1,195 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, sparse-matrix, csr, linear-algebra
+// @timeout: 30000
+
+// Sparse matrix operations using COO (coordinate) format
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// COO sparse matrix: parallel arrays of row, col, val
+// Entry i: (row[i], col[i], val[i])
+// nnz = number of non-zero entries
+
+// Get value at (r, c) in sparse matrix
+fn sparse_get(rows: Arr8, cols: Arr8, vals: Arr8, nnz: Int, r: Int, c: Int) -> Int {
+    let mut i = 0;
+    while i < nnz {
+        if get8(rows, i) == r {
+            if get8(cols, i) == c {
+                i = nnz + i + 100; // break with index
+            }
+        }
+        if i < nnz { i = i + 1; }
+    }
+    if i >= nnz + 100 {
+        let idx = i - nnz - 100;
+        get8(vals, idx)
+    } else { 0 } // not found = zero
+}
+
+// Sparse matrix-vector multiply: y = A*x
+// A is sparse (rows, cols, vals, nnz), x is dense, result y is dense
+fn spmv(rows: Arr8, cols: Arr8, vals: Arr8, nnz: Int, x: Arr8) -> Arr8 {
+    let mut y = zeros();
+    let mut i = 0;
+    while i < nnz {
+        let r = get8(rows, i);
+        let c = get8(cols, i);
+        let v = get8(vals, i);
+        y = set8(y, r, get8(y, r) + v * get8(x, c));
+        i = i + 1;
+    }
+    y
+}
+
+// Sparse trace (sum of diagonal elements)
+fn sparse_trace(rows: Arr8, cols: Arr8, vals: Arr8, nnz: Int) -> Int {
+    let mut tr = 0;
+    let mut i = 0;
+    while i < nnz {
+        if get8(rows, i) == get8(cols, i) {
+            tr = tr + get8(vals, i);
+        }
+        i = i + 1;
+    }
+    tr
+}
+
+// Sparse transpose (swap rows and cols)
+fn sparse_transpose_rows(rows: Arr8, cols: Arr8, nnz: Int) -> Arr8 {
+    // New rows = old cols
+    let mut new_rows = zeros();
+    let mut i = 0;
+    while i < nnz {
+        new_rows = set8(new_rows, i, get8(cols, i));
+        i = i + 1;
+    }
+    new_rows
+}
+
+fn sparse_transpose_cols(rows: Arr8, cols: Arr8, nnz: Int) -> Arr8 {
+    let mut new_cols = zeros();
+    let mut i = 0;
+    while i < nnz {
+        new_cols = set8(new_cols, i, get8(rows, i));
+        i = i + 1;
+    }
+    new_cols
+}
+
+// Count non-zeros per row
+fn nnz_per_row(rows: Arr8, nnz: Int, n_rows: Int) -> Arr8 {
+    let mut counts = zeros();
+    let mut i = 0;
+    while i < nnz {
+        let r = get8(rows, i);
+        counts = set8(counts, r, get8(counts, r) + 1);
+        i = i + 1;
+    }
+    counts
+}
+
+fn test_spmv() -> Int {
+    // Matrix A (3x3):
+    // [2 0 1]   nnz = 4
+    // [0 3 0]   entries: (0,0,2), (0,2,1), (1,1,3), (2,0,4)
+    // [4 0 0]
+    let rows = Arr8 { v0: 0, v1: 0, v2: 1, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let cols = Arr8 { v0: 0, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 2, v1: 1, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let x = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // y = A*x = [2*1+1*3, 3*2, 4*1] = [5, 6, 4]
+    let y = spmv(rows, cols, vals, 4, x);
+    assert_eq(get8(y, 0), 5);
+    assert_eq(get8(y, 1), 6);
+    assert_eq(get8(y, 2), 4);
+    1
+}
+
+fn test_sparse_get() -> Int {
+    let rows = Arr8 { v0: 0, v1: 0, v2: 1, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let cols = Arr8 { v0: 0, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 2, v1: 1, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(sparse_get(rows, cols, vals, 4, 0, 0), 2);
+    assert_eq(sparse_get(rows, cols, vals, 4, 0, 2), 1);
+    assert_eq(sparse_get(rows, cols, vals, 4, 1, 1), 3);
+    assert_eq(sparse_get(rows, cols, vals, 4, 0, 1), 0); // zero entry
+    assert_eq(sparse_get(rows, cols, vals, 4, 2, 2), 0); // zero entry
+    1
+}
+
+fn test_trace() -> Int {
+    // Diagonal entries: (0,0,2), (1,1,3), none at (2,2)
+    let rows = Arr8 { v0: 0, v1: 0, v2: 1, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let cols = Arr8 { v0: 0, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 2, v1: 1, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(sparse_trace(rows, cols, vals, 4), 5); // 2 + 3
+    1
+}
+
+fn test_transpose() -> Int {
+    let rows = Arr8 { v0: 0, v1: 0, v2: 1, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let cols = Arr8 { v0: 0, v1: 2, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 2, v1: 1, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let tr = sparse_transpose_rows(rows, cols, 4);
+    let tc = sparse_transpose_cols(rows, cols, 4);
+    // Entry (0,2,1) becomes (2,0,1) in transpose
+    assert_eq(get8(tr, 1), 2); // new row = old col
+    assert_eq(get8(tc, 1), 0); // new col = old row
+    1
+}
+
+fn test_nnz_per_row() -> Int {
+    let rows = Arr8 { v0: 0, v1: 0, v2: 1, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let counts = nnz_per_row(rows, 4, 3);
+    assert_eq(get8(counts, 0), 2); // row 0 has 2 entries
+    assert_eq(get8(counts, 1), 1); // row 1 has 1 entry
+    assert_eq(get8(counts, 2), 1); // row 2 has 1 entry
+    1
+}
+
+fn test_identity_spmv() -> Int {
+    // Identity matrix: (0,0,1), (1,1,1), (2,2,1)
+    let rows = Arr8 { v0: 0, v1: 1, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let cols = Arr8 { v0: 0, v1: 1, v2: 2, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let vals = Arr8 { v0: 1, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let x = Arr8 { v0: 7, v1: 11, v2: 13, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let y = spmv(rows, cols, vals, 3, x);
+    assert_eq(get8(y, 0), 7);
+    assert_eq(get8(y, 1), 11);
+    assert_eq(get8(y, 2), 13);
+    1
+}
+
+fn main() -> Int {
+    test_spmv();
+    test_sparse_get();
+    test_trace();
+    test_transpose();
+    test_nnz_per_row();
+    test_identity_spmv();
+    print("[OK] 602_sparse_matrix_aot");
+    0
+}

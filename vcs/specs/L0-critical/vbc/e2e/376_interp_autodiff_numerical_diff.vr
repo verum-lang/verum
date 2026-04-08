@@ -1,0 +1,232 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, numerical-differentiation
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Numerical differentiation baseline
+// Finite difference: f'(x) = (f(x+h) - f(x-h)) / (2h)
+// Uses integer-scaled arithmetic (scale=1000) to avoid float issues.
+
+// All values scaled by SCALE=1000. So "3.5" is stored as 3500.
+// Multiplication of scaled values: (a*b)/SCALE
+// Division of scaled values: (a*SCALE)/b
+
+fn scale() -> Int { 1000 }
+
+// Scaled multiplication: (a * b) / SCALE
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+// Scaled division: (a * SCALE) / b
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+// f(x) = x^2
+fn f_square(x: Int) -> Int {
+    smul(x, x)
+}
+
+// f(x) = x^3
+fn f_cube(x: Int) -> Int {
+    smul(smul(x, x), x)
+}
+
+// f(x) = 2x + 3 (scaled: 2*x + 3000)
+fn f_linear(x: Int) -> Int {
+    2 * x + 3 * scale()
+}
+
+// f(x) = x^2 + 2x + 1
+fn f_quadratic(x: Int) -> Int {
+    smul(x, x) + 2 * x + 1 * scale()
+}
+
+// Numerical derivative using central difference
+// f'(x) ≈ (f(x+h) - f(x-h)) / (2h)
+// h is a small step size (scaled)
+fn num_deriv_square(x: Int, h: Int) -> Int {
+    let fph = f_square(x + h);
+    let fmh = f_square(x - h);
+    sdiv(fph - fmh, 2 * h)
+}
+
+fn num_deriv_cube(x: Int, h: Int) -> Int {
+    let fph = f_cube(x + h);
+    let fmh = f_cube(x - h);
+    sdiv(fph - fmh, 2 * h)
+}
+
+fn num_deriv_linear(x: Int, h: Int) -> Int {
+    let fph = f_linear(x + h);
+    let fmh = f_linear(x - h);
+    sdiv(fph - fmh, 2 * h)
+}
+
+fn num_deriv_quadratic(x: Int, h: Int) -> Int {
+    let fph = f_quadratic(x + h);
+    let fmh = f_quadratic(x - h);
+    sdiv(fph - fmh, 2 * h)
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+// Check within tolerance (scaled tolerance)
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+fn test_square_derivative() {
+    // f(x) = x^2, f'(x) = 2x
+    let h = 1; // very small step (0.001 in real)
+
+    // f'(2.0) = 4.0 => scaled: f'(2000) = 4000
+    let d1 = num_deriv_square(2 * scale(), h);
+    assert_eq(within_tol(d1, 4 * scale(), 10), 1);
+
+    // f'(3.0) = 6.0 => scaled: f'(3000) = 6000
+    let d2 = num_deriv_square(3 * scale(), h);
+    assert_eq(within_tol(d2, 6 * scale(), 10), 1);
+
+    // f'(0.0) = 0.0
+    let d3 = num_deriv_square(0, h);
+    assert_eq(within_tol(d3, 0, 10), 1);
+
+    // f'(-1.0) = -2.0 => scaled: -2000
+    let d4 = num_deriv_square(-1 * scale(), h);
+    assert_eq(within_tol(d4, -2 * scale(), 10), 1);
+
+    // f'(5.0) = 10.0 => scaled: 10000
+    let d5 = num_deriv_square(5 * scale(), h);
+    assert_eq(within_tol(d5, 10 * scale(), 10), 1);
+}
+
+fn test_cube_derivative() {
+    // f(x) = x^3, f'(x) = 3x^2
+    let h = 1;
+
+    // f'(2.0) = 12.0 => scaled: 12000
+    let d1 = num_deriv_cube(2 * scale(), h);
+    assert_eq(within_tol(d1, 12 * scale(), 50), 1);
+
+    // f'(1.0) = 3.0 => scaled: 3000
+    let d2 = num_deriv_cube(1 * scale(), h);
+    assert_eq(within_tol(d2, 3 * scale(), 10), 1);
+
+    // f'(3.0) = 27.0 => scaled: 27000
+    let d3 = num_deriv_cube(3 * scale(), h);
+    assert_eq(within_tol(d3, 27 * scale(), 100), 1);
+}
+
+fn test_linear_derivative() {
+    // f(x) = 2x + 3, f'(x) = 2 (constant)
+    let h = 1;
+
+    let d1 = num_deriv_linear(0, h);
+    assert_eq(within_tol(d1, 2 * scale(), 10), 1);
+
+    let d2 = num_deriv_linear(5 * scale(), h);
+    assert_eq(within_tol(d2, 2 * scale(), 10), 1);
+
+    let d3 = num_deriv_linear(-3 * scale(), h);
+    assert_eq(within_tol(d3, 2 * scale(), 10), 1);
+}
+
+fn test_quadratic_derivative() {
+    // f(x) = x^2 + 2x + 1, f'(x) = 2x + 2
+    let h = 1;
+
+    // f'(0.0) = 2.0 => 2000
+    let d1 = num_deriv_quadratic(0, h);
+    assert_eq(within_tol(d1, 2 * scale(), 10), 1);
+
+    // f'(1.0) = 4.0 => 4000
+    let d2 = num_deriv_quadratic(1 * scale(), h);
+    assert_eq(within_tol(d2, 4 * scale(), 10), 1);
+
+    // f'(3.0) = 8.0 => 8000
+    let d3 = num_deriv_quadratic(3 * scale(), h);
+    assert_eq(within_tol(d3, 8 * scale(), 10), 1);
+}
+
+fn test_forward_difference() {
+    // Forward difference: f'(x) ≈ (f(x+h) - f(x)) / h
+    // Less accurate than central difference
+    let h = 10; // 0.01 scaled
+
+    // f(x) = x^2 at x=2: f'(2) = 4
+    let x = 2 * scale();
+    let fwd = sdiv(f_square(x + h) - f_square(x), h);
+    // Forward difference has O(h) error, so wider tolerance
+    assert_eq(within_tol(fwd, 4 * scale(), 50), 1);
+}
+
+fn test_backward_difference() {
+    // Backward difference: f'(x) ≈ (f(x) - f(x-h)) / h
+    let h = 10;
+
+    let x = 2 * scale();
+    let bwd = sdiv(f_square(x) - f_square(x - h), h);
+    assert_eq(within_tol(bwd, 4 * scale(), 50), 1);
+}
+
+fn test_second_derivative_approx() {
+    // f''(x) ≈ (f(x+h) - 2*f(x) + f(x-h)) / h^2
+    // f(x) = x^2, f''(x) = 2
+    // Use larger h to avoid underflow in h^2/scale
+    let h = 100; // h=0.1 in real units
+    let x = 3 * scale();
+
+    let fph = f_square(x + h);
+    let fx = f_square(x);
+    let fmh = f_square(x - h);
+
+    // numer = f(x+h) - 2f(x) + f(x-h) in scaled units
+    // f''_scaled = numer * SCALE^2 / (h * h)
+    // Since h=100, h*h=10000, and numer is small, this stays in range
+    let numer = fph - 2 * fx + fmh;
+    let d2 = (numer * scale() * scale()) / (h * h);
+    // d2 should be ≈ 2*scale() = 2000
+    assert_eq(within_tol(d2, 2 * scale(), 100), 1);
+}
+
+fn test_convergence() {
+    // As h decreases, numerical derivative should get more accurate
+    // f(x) = x^2, f'(3) = 6 => 6000 scaled
+    let x = 3 * scale();
+    let exact = 6 * scale();
+
+    let h1 = 100; // h=0.1
+    let h2 = 10;  // h=0.01
+    let h3 = 1;   // h=0.001
+
+    let d1 = num_deriv_square(x, h1);
+    let d2 = num_deriv_square(x, h2);
+    let d3 = num_deriv_square(x, h3);
+
+    let err1 = abs_val(d1 - exact);
+    let err2 = abs_val(d2 - exact);
+    let err3 = abs_val(d3 - exact);
+
+    // Errors should decrease as h decreases
+    assert(err2 <= err1 + 1); // +1 for rounding
+    assert(err3 <= err2 + 1);
+}
+
+fn main() -> Int {
+    test_square_derivative();
+    test_cube_derivative();
+    test_linear_derivative();
+    test_quadratic_derivative();
+    test_forward_difference();
+    test_backward_difference();
+    test_second_derivative_approx();
+    test_convergence();
+    print("[OK] 376_interp_autodiff_numerical_diff");
+    0
+}

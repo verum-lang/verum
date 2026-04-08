@@ -1,0 +1,117 @@
+// @test: typecheck-fail
+// @expected-error: E0200
+// @tier: 0
+// @level: L2
+// @tags: errors, diagnostics, borrow
+// @description: Borrow checker error E0200
+
+/// Error E0200: Borrow checker violation
+/// Occurs when borrowing rules are violated.
+
+fn simultaneous_mutable_borrow() {
+    let mut x = 5;
+
+    let r1 = &mut x;  // First mutable borrow
+    let r2 = &mut x;  // E0200: Second mutable borrow while first is active
+
+    *r1 = 10;
+    *r2 = 20;
+}
+
+fn mutable_and_immutable_borrow() {
+    let mut x = 5;
+
+    let r1 = &x;      // Immutable borrow
+    let r2 = &mut x;  // E0200: Cannot borrow mutably while immutable borrow exists
+
+    println(*r1);
+}
+
+fn use_after_move() {
+    let s = "hello".to_text();
+    let t = s;        // Move
+
+    println(s);       // E0200: Use of moved value
+}
+
+fn borrow_after_move() {
+    let v = [1, 2, 3];
+    let v2 = v;       // Move
+
+    let r = &v;       // E0200: Cannot borrow moved value
+}
+
+fn return_reference_to_local() {
+    fn bad() -> &Int {
+        let x = 5;
+        &x            // E0200: Cannot return reference to local variable
+    }
+}
+
+fn dangling_reference() {
+    let r;
+    {
+        let x = 5;
+        r = &x;       // E0200: `x` does not live long enough
+    }
+    println(*r);      // r would be dangling here
+}
+
+fn borrow_in_closure_escapes() {
+    let x = 5;
+    let closure = || &x;  // OK so far
+
+    let r = closure();
+    drop(x);          // E0200: Cannot drop while borrowed
+    println(*r);
+}
+
+fn mutable_borrow_during_iteration() {
+    let mut v = [1, 2, 3];
+
+    for item in &v {
+        v.push(*item);  // E0200: Cannot borrow mutably while iterating
+    }
+}
+
+fn partial_borrow_conflict() {
+    type Pair is { first: Int, second: Int };
+    let mut p = Pair { first: 1, second: 2 };
+
+    let r1 = &mut p.first;
+    let r2 = &p;      // E0200: Cannot borrow `p` while part of it is mutably borrowed
+
+    *r1 = 10;
+    println(p.second);
+}
+
+fn reborrow_violation() {
+    let mut x = 5;
+    let r1 = &mut x;
+
+    let r2 = &mut *r1;  // Reborrow OK
+    let r3 = &mut *r1;  // E0200: Cannot reborrow while r2 is active
+
+    *r2 = 10;
+    *r3 = 20;
+}
+
+// Expected error message format:
+// error[E0200]: cannot borrow `x` as mutable more than once at a time
+//   --> borrow_error.vr:12:14
+//    |
+// 10 |     let r1 = &mut x;
+//    |              ------ first mutable borrow occurs here
+// 11 |
+// 12 |     let r2 = &mut x;
+//    |              ^^^^^^ second mutable borrow occurs here
+// 13 |
+// 14 |     *r1 = 10;
+//    |     -------- first borrow later used here
+//    |
+//    = help: consider using interior mutability with Cell or RefCell
+//    = note: mutable borrows are exclusive to prevent data races
+
+fn main() {
+    // This file should not compile
+}

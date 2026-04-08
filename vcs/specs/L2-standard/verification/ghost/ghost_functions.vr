@@ -1,0 +1,167 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, ghost, functions
+// @timeout: 10000
+// @description: Ghost functions for specification-only computations
+
+/// Ghost functions exist only for verification, erased at compile time
+
+// Ghost function to specify mathematical sequence
+ghost fn fibonacci_spec(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fibonacci_spec(n - 1) + fibonacci_spec(n - 2) }
+}
+
+// Real implementation must match ghost spec
+@verify(proof)
+fn fibonacci(n: Int) -> Int {
+    contract#"
+        requires n >= 0;
+        ensures result == fibonacci_spec(n);
+    ";
+    if n <= 1 { return n; }
+
+    let mut prev = 0;
+    let mut curr = 1;
+
+    for i in 2..=n
+        invariant prev == fibonacci_spec(i - 2)
+        invariant curr == fibonacci_spec(i - 1)
+    {
+        let next = prev + curr;
+        prev = curr;
+        curr = next;
+    }
+
+    curr
+}
+
+// Ghost predicate for list properties
+ghost fn is_sorted<T: Ord>(list: &List<T>) -> Bool {
+    // Specification: forall i, j: 0 <= i < j < len implies list[i] <= list[j]
+    true  // ghost stub
+}
+
+ghost fn is_permutation<T: Eq>(a: &List<T>, b: &List<T>) -> Bool {
+    a.len() == b.len() &&
+    forall x: T. a.count(&x) == b.count(&x)
+}
+
+@verify(proof)
+fn insertion_sort<T: Ord + Clone>(mut list: List<T>) -> List<T> {
+    contract#"
+        ensures is_sorted(&result);
+        ensures is_permutation(&list, &result);
+    ";
+    for i in 1..list.len()
+        invariant is_sorted(&list[0..i])
+        invariant is_permutation(&old(list), &list)
+    {
+        let key = list[i].clone();
+        let mut j = i;
+
+        while j > 0 && list[j - 1] > key
+            invariant forall k: Int. j < k <= i implies list[k] > key
+            invariant is_permutation(&old(list), &list)
+        {
+            list[j] = list[j - 1].clone();
+            j -= 1;
+        }
+
+        list[j] = key;
+    }
+
+    list
+}
+
+// Ghost function for abstract data type specification
+type Set<T> is {
+    items: List<T>,
+};
+
+ghost fn set_contains<T: Eq>(set: &Set<T>, item: &T) -> Bool {
+    set.items.iter().any(|x| x == item)
+}
+
+ghost fn set_size<T>(set: &Set<T>) -> Int {
+    set.items.iter().filter(|x| set_count(set, x) == 1).count()
+}
+
+ghost fn set_count<T: Eq>(set: &Set<T>, item: &T) -> Int {
+    set.items.iter().filter(|x| x == item).count()
+}
+
+implement<T: Eq + Clone> Set<T> {
+    @verify(proof)
+    fn insert(&mut self, item: T) {
+        contract#"
+            ensures set_contains(self, &item);
+            ensures forall x: T. set_contains(&old(self), &x) implies set_contains(self, &x);
+            ensures set_size(self) >= set_size(&old(self));
+            ensures set_size(self) <= set_size(&old(self)) + 1;
+        ";
+        if !self.items.contains(&item) {
+            self.items.push(item);
+        }
+    }
+
+    @verify(proof)
+    fn remove(&mut self, item: &T) -> Bool {
+        contract#"
+            ensures !set_contains(self, item);
+            ensures result == set_contains(&old(self), item);
+            ensures forall x: T. x != item && set_contains(&old(self), &x) implies set_contains(self, &x);
+        ";
+        if let Some(idx) = self.items.iter().position(|x| x == item) {
+            self.items.remove(idx);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+// Ghost function with quantifiers
+ghost fn all_positive(list: &List<Int>) -> Bool {
+    // Specification: forall i: 0 <= i < len implies list[i] > 0
+    true  // ghost stub
+}
+
+ghost fn sum_spec(list: &List<Int>) -> Int {
+    if list.is_empty() { 0 }
+    else { list[0] + sum_spec(&list[1..]) }
+}
+
+@verify(proof)
+fn sum_positive(list: &List<Int>) -> Int {
+    contract#"
+        requires all_positive(list);
+        ensures result == sum_spec(list);
+        ensures result >= 0;
+        ensures list.len() > 0 implies result > 0;
+    ";
+    let mut total = 0;
+
+    for i in 0..list.len()
+        invariant total == sum_spec(&list[0..i])
+        invariant total >= 0
+    {
+        total += list[i];
+    }
+
+    total
+}
+
+fn main() {
+    assert(fibonacci(10) == 55);
+
+    let sorted = insertion_sort([3, 1, 4, 1, 5, 9, 2, 6]);
+    assert(sorted == [1, 1, 2, 3, 4, 5, 6, 9]);
+
+    let mut set = Set { items: [] };
+    set.insert(1);
+    set.insert(2);
+    set.insert(1);  // Duplicate
+    assert(set.items.len() == 2);
+}

@@ -1,0 +1,104 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, memory, raw-pointers, unsafe
+// @timeout: 10000
+// @description: Tests comprehensive raw pointer operations for FFI
+
+type c_int is i32;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+    @extern("C")
+    fn free(ptr: *mut c_void);
+    @extern("C")
+    fn memcpy(dst: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
+    @extern("C")
+    fn memset(dst: *mut c_void, val: c_int, n: size_t) -> *mut c_void;
+}
+
+/// Basic pointer operations
+fn null_const() -> *const c_void { 0 as *const c_void }
+fn null_mut_ptr() -> *mut c_void { 0 as *mut c_void }
+
+/// Create pointer from reference
+fn ref_to_ptr(r: &c_int) -> *const c_int { r as *const c_int }
+fn ref_mut_to_ptr(r: &mut c_int) -> *mut c_int { r as *mut c_int }
+
+/// Pointer offset
+fn offset_ptr(ptr: *const u8, n: size_t) -> *const u8 {
+    unsafe { ptr.add(n) }
+}
+
+/// Pointer diff
+fn ptr_distance(end: *const u8, start: *const u8) -> isize {
+    unsafe { end.offset_from(start) }
+}
+
+/// Read/write through pointers
+fn read_i32(ptr: *const c_int) -> c_int { unsafe { *ptr } }
+fn write_i32(ptr: *mut c_int, v: c_int) { unsafe { *ptr = v; } }
+
+/// Pointer casting
+fn to_void(ptr: *mut u8) -> *mut c_void { ptr as *mut c_void }
+fn from_void(ptr: *mut c_void) -> *mut u8 { ptr as *mut u8 }
+fn const_to_mut(ptr: *const c_int) -> *mut c_int { ptr as *mut c_int }
+
+/// Memory operations
+unsafe fn copy_bytes(dst: *mut u8, src: *const u8, n: size_t) {
+    libc.memcpy(dst as *mut c_void, src as *const c_void, n);
+}
+
+unsafe fn zero_bytes(dst: *mut u8, n: size_t) {
+    libc.memset(dst as *mut c_void, 0, n);
+}
+
+/// Owned allocation
+type RawAlloc is { ptr: *mut c_void, size: size_t };
+
+implement RawAlloc {
+    fn new(size: size_t) -> Maybe<RawAlloc> {
+        let ptr = unsafe { libc.malloc(size) };
+        if ptr.is_null() { None } else { Some(RawAlloc { ptr, size }) }
+    }
+
+    fn as_ptr(&self) -> *mut u8 { self.ptr as *mut u8 }
+}
+
+implement Drop for RawAlloc {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() { unsafe { libc.free(self.ptr); } }
+    }
+}
+
+/// Buffer operations
+unsafe fn fill_buffer(buf: *mut u8, len: size_t, val: u8) {
+    for i in 0..len { *buf.add(i) = val; }
+}
+
+/// Out parameter pattern
+fn get_value(out: *mut c_int) -> c_int {
+    if out.is_null() { return -1; }
+    unsafe { *out = 42; }
+    0
+}
+
+/// Double pointer (out-pointer-to-pointer)
+fn alloc_buffer(size: size_t, out: *mut *mut u8) -> c_int {
+    if out.is_null() { return -1; }
+    let ptr = unsafe { libc.malloc(size) } as *mut u8;
+    if ptr.is_null() { return -2; }
+    unsafe { *out = ptr; }
+    0
+}
+
+fn main() {
+    let mut val: c_int = 0;
+    let r = get_value(&mut val as *mut c_int);
+    assert(r == 0);
+    assert(val == 42);
+}

@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @description: Test type inference for numeric types
+
+fn test_semantic_names() {
+    // Semantic type names should be recognized
+    let a: Int8 = 42;
+    let b: Int16 = 100;
+    let c: Int32 = 1000;
+    let d: Int64 = 10000;
+    let e: Int128 = 100000;
+
+    let f: UInt8 = 42;
+    let g: UInt16 = 100;
+    let h: UInt32 = 1000;
+    let i: UInt64 = 10000;
+    let j: UInt128 = 100000;
+
+    let k: Float32 = 3.14;
+    let l: Float64 = 2.718;
+
+    let m: ISize = 42;
+    let n: USize = 42;
+}
+
+fn test_compat_names() {
+    // FFI-compatible aliases should also work
+    let a: i8 = 42;
+    let b: i16 = 100;
+    let c: i32 = 1000;
+    let d: i64 = 10000;
+    let e: i128 = 100000;
+
+    let f: u8 = 42;
+    let g: u16 = 100;
+    let h: u32 = 1000;
+    let i: u64 = 10000;
+    let j: u128 = 100000;
+
+    let k: f32 = 3.14;
+    let l: f64 = 2.718;
+
+    let m: isize = 42;
+    let n: usize = 42;
+}
+
+fn test_builtin_types() {
+    // Built-in types should work
+    let a: Int = 42;
+    let b: Float = 3.14;
+    let c: Byte = 255;
+    let d: Bool = true;
+    let e: Char = 'A';
+}
+
+fn main() {
+    test_semantic_names();
+    test_compat_names();
+    test_builtin_types();
+}

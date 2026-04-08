@@ -1,0 +1,644 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, bindings, posix, unix, unsafe
+// @description: Tests POSIX-specific bindings for Unix-like systems
+
+/// ============================================================
+/// POSIX BINDINGS
+/// ============================================================
+///
+/// POSIX (Portable Operating System Interface) APIs for
+/// Unix-like systems (Linux, macOS, BSD, etc.)
+
+@cfg(unix)
+
+// ============================================================
+// FILE DESCRIPTORS AND I/O
+// ============================================================
+
+ffi posix_io {
+    // Basic I/O
+    @extern("C")
+    fn open(pathname: *const c_char, flags: c_int, ...) -> c_int;
+        // requires pathname != null;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn creat(pathname: *const c_char, mode: mode_t) -> c_int;
+        // requires pathname != null;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn close(fd: c_int) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn read(fd: c_int, buf: *mut c_void, count: c_size_t) -> c_ssize_t;
+        // requires buf != null || count == 0;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn write(fd: c_int, buf: *const c_void, count: c_size_t) -> c_ssize_t;
+        // requires buf != null || count == 0;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn pread(fd: c_int, buf: *mut c_void, count: c_size_t, offset: off_t) -> c_ssize_t;
+        // requires buf != null;
+
+    @extern("C")
+    fn pwrite(fd: c_int, buf: *const c_void, count: c_size_t, offset: off_t) -> c_ssize_t;
+        // requires buf != null;
+
+    // File positioning
+    @extern("C")
+    fn lseek(fd: c_int, offset: off_t, whence: c_int) -> off_t;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    // Duplicating
+    @extern("C")
+    fn dup(oldfd: c_int) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn dup2(oldfd: c_int, newfd: c_int) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn dup3(oldfd: c_int, newfd: c_int, flags: c_int) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    // Pipes
+    @extern("C")
+    fn pipe(pipefd: *mut [c_int; 2]) -> c_int;
+        // requires pipefd != null;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn pipe2(pipefd: *mut [c_int; 2], flags: c_int) -> c_int;
+        // requires pipefd != null;
+
+    // File control
+    @extern("C")
+    @variadic
+    fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    @variadic
+    fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    // Synchronization
+    @extern("C")
+    fn fsync(fd: c_int) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn fdatasync(fd: c_int) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn sync();
+}
+
+// ============================================================
+// FILE SYSTEM OPERATIONS
+// ============================================================
+
+ffi posix_fs {
+    // File status
+    @extern("C")
+    fn stat(pathname: *const c_char, statbuf: *mut stat_t) -> c_int;
+        // requires pathname != null && statbuf != null;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn fstat(fd: c_int, statbuf: *mut stat_t) -> c_int;
+        // requires statbuf != null;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn lstat(pathname: *const c_char, statbuf: *mut stat_t) -> c_int;
+        // requires pathname != null && statbuf != null;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    // Directory operations
+    @extern("C")
+    fn mkdir(pathname: *const c_char, mode: mode_t) -> c_int;
+        // requires pathname != null;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn rmdir(pathname: *const c_char) -> c_int;
+        // requires pathname != null;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn opendir(name: *const c_char) -> *mut DIR;
+        // requires name != null;
+        // errors_via = ReturnValue(null) with Errno;
+
+    @extern("C")
+    fn readdir(dirp: *mut DIR) -> *mut dirent;
+        // requires dirp != null;
+
+    @extern("C")
+    fn closedir(dirp: *mut DIR) -> c_int;
+        // requires dirp != null;
+
+    @extern("C")
+    fn rewinddir(dirp: *mut DIR);
+        // requires: dirp != null;
+
+    // Links
+    @extern("C")
+    fn link(oldpath: *const c_char, newpath: *const c_char) -> c_int;
+        // requires oldpath != null && newpath != null;
+
+    @extern("C")
+    fn symlink(target: *const c_char, linkpath: *const c_char) -> c_int;
+        // requires target != null && linkpath != null;
+
+    @extern("C")
+    fn readlink(pathname: *const c_char, buf: *mut c_char, bufsiz: c_size_t) -> c_ssize_t;
+        // requires pathname != null && buf != null;
+
+    @extern("C")
+    fn unlink(pathname: *const c_char) -> c_int;
+        // requires pathname != null;
+
+    // Rename
+    @extern("C")
+    fn rename(oldpath: *const c_char, newpath: *const c_char) -> c_int;
+        // requires oldpath != null && newpath != null;
+
+    // Permissions
+    @extern("C")
+    fn chmod(pathname: *const c_char, mode: mode_t) -> c_int;
+        // requires pathname != null;
+
+    @extern("C")
+    fn fchmod(fd: c_int, mode: mode_t) -> c_int;
+
+    @extern("C")
+    fn chown(pathname: *const c_char, owner: uid_t, group: gid_t) -> c_int;
+        // requires pathname != null;
+
+    // Working directory
+    @extern("C")
+    fn chdir(path: *const c_char) -> c_int;
+        // requires path != null;
+
+    @extern("C")
+    fn getcwd(buf: *mut c_char, size: c_size_t) -> *mut c_char;
+
+    // Access checking
+    @extern("C")
+    fn access(pathname: *const c_char, mode: c_int) -> c_int;
+        // requires pathname != null;
+
+    // Truncation
+    @extern("C")
+    fn truncate(path: *const c_char, length: off_t) -> c_int;
+        // requires path != null;
+
+    @extern("C")
+    fn ftruncate(fd: c_int, length: off_t) -> c_int;
+}
+
+// ============================================================
+// PROCESS CONTROL
+// ============================================================
+
+ffi posix_process {
+    // Process creation
+    @extern("C")
+    fn fork() -> pid_t;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn vfork() -> pid_t;
+
+    @extern("C")
+    @noreturn
+    fn _exit(status: c_int) -> !;
+
+    // Exec family
+    @extern("C")
+    fn execve(
+        pathname: *const c_char,
+        argv: *const *const c_char,
+        envp: *const *const c_char
+    ) -> c_int;
+        // requires pathname != null;
+
+    @extern("C")
+    @variadic
+    fn execl(pathname: *const c_char, arg: *const c_char, ...) -> c_int;
+
+    @extern("C")
+    fn execv(pathname: *const c_char, argv: *const *const c_char) -> c_int;
+
+    @extern("C")
+    fn execvp(file: *const c_char, argv: *const *const c_char) -> c_int;
+
+    // Wait
+    @extern("C")
+    fn wait(wstatus: *mut c_int) -> pid_t;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn waitpid(pid: pid_t, wstatus: *mut c_int, options: c_int) -> pid_t;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    // Process info
+    @extern("C")
+    fn getpid() -> pid_t;
+
+    @extern("C")
+    fn getppid() -> pid_t;
+
+    @extern("C")
+    fn getuid() -> uid_t;
+
+    @extern("C")
+    fn geteuid() -> uid_t;
+
+    @extern("C")
+    fn getgid() -> gid_t;
+
+    @extern("C")
+    fn getegid() -> gid_t;
+
+    @extern("C")
+    fn setuid(uid: uid_t) -> c_int;
+
+    @extern("C")
+    fn setgid(gid: gid_t) -> c_int;
+
+    // Process groups
+    @extern("C")
+    fn getpgid(pid: pid_t) -> pid_t;
+
+    @extern("C")
+    fn setpgid(pid: pid_t, pgid: pid_t) -> c_int;
+
+    @extern("C")
+    fn setsid() -> pid_t;
+}
+
+// ============================================================
+// SIGNALS
+// ============================================================
+
+ffi posix_signal {
+    @extern("C")
+    fn signal(signum: c_int, handler: sighandler_t) -> sighandler_t;
+
+    @extern("C")
+    fn sigaction(
+        signum: c_int,
+        act: *const sigaction_t,
+        oldact: *mut sigaction_t
+    ) -> c_int;
+
+    @extern("C")
+    fn kill(pid: pid_t, sig: c_int) -> c_int;
+
+    @extern("C")
+    fn raise(sig: c_int) -> c_int;
+
+    @extern("C")
+    fn pause() -> c_int;
+
+    @extern("C")
+    fn alarm(seconds: c_uint) -> c_uint;
+
+    @extern("C")
+    fn sigemptyset(set: *mut sigset_t) -> c_int;
+
+    @extern("C")
+    fn sigfillset(set: *mut sigset_t) -> c_int;
+
+    @extern("C")
+    fn sigaddset(set: *mut sigset_t, signum: c_int) -> c_int;
+
+    @extern("C")
+    fn sigdelset(set: *mut sigset_t, signum: c_int) -> c_int;
+
+    @extern("C")
+    fn sigismember(set: *const sigset_t, signum: c_int) -> c_int;
+
+    @extern("C")
+    fn sigprocmask(how: c_int, set: *const sigset_t, oldset: *mut sigset_t) -> c_int;
+
+    @extern("C")
+    fn sigpending(set: *mut sigset_t) -> c_int;
+
+    @extern("C")
+    fn sigsuspend(mask: *const sigset_t) -> c_int;
+}
+
+// ============================================================
+// MEMORY MAPPING
+// ============================================================
+
+ffi posix_mmap {
+    @extern("C")
+    fn mmap(
+        addr: *mut c_void,
+        length: c_size_t,
+        prot: c_int,
+        flags: c_int,
+        fd: c_int,
+        offset: off_t
+    ) -> *mut c_void;
+        // errors_via = ReturnValue(MAP_FAILED) with Errno;
+
+    @extern("C")
+    fn munmap(addr: *mut c_void, length: c_size_t) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn mprotect(addr: *mut c_void, len: c_size_t, prot: c_int) -> c_int;
+
+    @extern("C")
+    fn msync(addr: *mut c_void, length: c_size_t, flags: c_int) -> c_int;
+
+    @extern("C")
+    fn mlock(addr: *const c_void, len: c_size_t) -> c_int;
+
+    @extern("C")
+    fn munlock(addr: *const c_void, len: c_size_t) -> c_int;
+
+    @extern("C")
+    fn madvise(addr: *mut c_void, length: c_size_t, advice: c_int) -> c_int;
+}
+
+// ============================================================
+// NETWORKING
+// ============================================================
+
+ffi posix_socket {
+    @extern("C")
+    fn socket(domain: c_int, type_: c_int, protocol: c_int) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn bind(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int;
+
+    @extern("C")
+    fn listen(sockfd: c_int, backlog: c_int) -> c_int;
+
+    @extern("C")
+    fn accept(sockfd: c_int, addr: *mut sockaddr, addrlen: *mut socklen_t) -> c_int;
+        // errors_via = ReturnValue(-1) with Errno;
+
+    @extern("C")
+    fn connect(sockfd: c_int, addr: *const sockaddr, addrlen: socklen_t) -> c_int;
+
+    @extern("C")
+    fn send(sockfd: c_int, buf: *const c_void, len: c_size_t, flags: c_int) -> c_ssize_t;
+
+    @extern("C")
+    fn recv(sockfd: c_int, buf: *mut c_void, len: c_size_t, flags: c_int) -> c_ssize_t;
+
+    @extern("C")
+    fn sendto(
+        sockfd: c_int,
+        buf: *const c_void,
+        len: c_size_t,
+        flags: c_int,
+        dest_addr: *const sockaddr,
+        addrlen: socklen_t
+    ) -> c_ssize_t;
+
+    @extern("C")
+    fn recvfrom(
+        sockfd: c_int,
+        buf: *mut c_void,
+        len: c_size_t,
+        flags: c_int,
+        src_addr: *mut sockaddr,
+        addrlen: *mut socklen_t
+    ) -> c_ssize_t;
+
+    @extern("C")
+    fn shutdown(sockfd: c_int, how: c_int) -> c_int;
+
+    @extern("C")
+    fn setsockopt(
+        sockfd: c_int,
+        level: c_int,
+        optname: c_int,
+        optval: *const c_void,
+        optlen: socklen_t
+    ) -> c_int;
+
+    @extern("C")
+    fn getsockopt(
+        sockfd: c_int,
+        level: c_int,
+        optname: c_int,
+        optval: *mut c_void,
+        optlen: *mut socklen_t
+    ) -> c_int;
+}
+
+// ============================================================
+// THREADS (pthreads)
+// ============================================================
+
+ffi pthread {
+    @extern("C")
+    fn pthread_create(
+        thread: *mut pthread_t,
+        attr: *const pthread_attr_t,
+        start_routine: extern "C" fn(*mut c_void) -> *mut c_void,
+        arg: *mut c_void
+    ) -> c_int;
+
+    @extern("C")
+    fn pthread_join(thread: pthread_t, retval: *mut *mut c_void) -> c_int;
+
+    @extern("C")
+    fn pthread_detach(thread: pthread_t) -> c_int;
+
+    @extern("C")
+    fn pthread_self() -> pthread_t;
+
+    @extern("C")
+    @noreturn
+    fn pthread_exit(retval: *mut c_void) -> !;
+
+    @extern("C")
+    fn pthread_cancel(thread: pthread_t) -> c_int;
+
+    // Mutex
+    @extern("C")
+    fn pthread_mutex_init(
+        mutex: *mut pthread_mutex_t,
+        attr: *const pthread_mutexattr_t
+    ) -> c_int;
+
+    @extern("C")
+    fn pthread_mutex_destroy(mutex: *mut pthread_mutex_t) -> c_int;
+
+    @extern("C")
+    fn pthread_mutex_lock(mutex: *mut pthread_mutex_t) -> c_int;
+
+    @extern("C")
+    fn pthread_mutex_trylock(mutex: *mut pthread_mutex_t) -> c_int;
+
+    @extern("C")
+    fn pthread_mutex_unlock(mutex: *mut pthread_mutex_t) -> c_int;
+
+    // Condition variables
+    @extern("C")
+    fn pthread_cond_init(
+        cond: *mut pthread_cond_t,
+        attr: *const pthread_condattr_t
+    ) -> c_int;
+
+    @extern("C")
+    fn pthread_cond_destroy(cond: *mut pthread_cond_t) -> c_int;
+
+    @extern("C")
+    fn pthread_cond_wait(cond: *mut pthread_cond_t, mutex: *mut pthread_mutex_t) -> c_int;
+
+    @extern("C")
+    fn pthread_cond_timedwait(
+        cond: *mut pthread_cond_t,
+        mutex: *mut pthread_mutex_t,
+        abstime: *const timespec
+    ) -> c_int;
+
+    @extern("C")
+    fn pthread_cond_signal(cond: *mut pthread_cond_t) -> c_int;
+
+    @extern("C")
+    fn pthread_cond_broadcast(cond: *mut pthread_cond_t) -> c_int;
+
+    // Read-write locks
+    @extern("C")
+    fn pthread_rwlock_init(
+        rwlock: *mut pthread_rwlock_t,
+        attr: *const pthread_rwlockattr_t
+    ) -> c_int;
+
+    @extern("C")
+    fn pthread_rwlock_destroy(rwlock: *mut pthread_rwlock_t) -> c_int;
+
+    @extern("C")
+    fn pthread_rwlock_rdlock(rwlock: *mut pthread_rwlock_t) -> c_int;
+
+    @extern("C")
+    fn pthread_rwlock_wrlock(rwlock: *mut pthread_rwlock_t) -> c_int;
+
+    @extern("C")
+    fn pthread_rwlock_unlock(rwlock: *mut pthread_rwlock_t) -> c_int;
+}
+
+// ============================================================
+// TIME
+// ============================================================
+
+ffi posix_time {
+    @extern("C")
+    fn time(tloc: *mut time_t) -> time_t;
+
+    @extern("C")
+    fn gettimeofday(tv: *mut timeval, tz: *mut c_void) -> c_int;
+
+    @extern("C")
+    fn clock_gettime(clk_id: clockid_t, tp: *mut timespec) -> c_int;
+
+    @extern("C")
+    fn nanosleep(req: *const timespec, rem: *mut timespec) -> c_int;
+
+    @extern("C")
+    fn usleep(usec: useconds_t) -> c_int;
+
+    @extern("C")
+    fn sleep(seconds: c_uint) -> c_uint;
+}
+
+// ============================================================
+// TYPE DEFINITIONS
+// ============================================================
+
+type c_char is i8;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type c_size_t is usize;
+type c_ssize_t is isize;
+type c_void is ();
+
+type mode_t is u32;
+type off_t is i64;
+type pid_t is i32;
+type uid_t is u32;
+type gid_t is u32;
+type time_t is i64;
+type clockid_t is i32;
+type useconds_t is u32;
+type socklen_t is u32;
+type pthread_t is usize;
+
+type sighandler_t is extern "C" fn(c_int);
+
+@extern type DIR is ();
+@extern type dirent is ();
+@extern type stat_t is ();
+@extern type sigaction_t is ();
+@extern type sigset_t is ();
+@extern type sockaddr is ();
+@extern type pthread_attr_t is ();
+@extern type pthread_mutex_t is ();
+@extern type pthread_mutexattr_t is ();
+@extern type pthread_cond_t is ();
+@extern type pthread_condattr_t is ();
+@extern type pthread_rwlock_t is ();
+@extern type pthread_rwlockattr_t is ();
+
+@repr(C)
+type timespec is {
+    tv_sec: time_t,
+    tv_nsec: c_long,
+};
+
+@repr(C)
+type timeval is {
+    tv_sec: time_t,
+    tv_usec: c_long,
+};
+
+const MAP_FAILED: *mut c_void = -1isize as *mut c_void;
+
+// Open flags
+const O_RDONLY: c_int = 0;
+const O_WRONLY: c_int = 1;
+const O_RDWR: c_int = 2;
+const O_CREAT: c_int = 0o100;
+const O_EXCL: c_int = 0o200;
+const O_TRUNC: c_int = 0o1000;
+const O_APPEND: c_int = 0o2000;
+
+// mmap protection
+const PROT_NONE: c_int = 0;
+const PROT_READ: c_int = 1;
+const PROT_WRITE: c_int = 2;
+const PROT_EXEC: c_int = 4;
+
+// mmap flags
+const MAP_SHARED: c_int = 1;
+const MAP_PRIVATE: c_int = 2;
+const MAP_ANONYMOUS: c_int = 0x20;
+
+fn main() {
+    // POSIX bindings tests
+}

@@ -1,0 +1,45 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, pointers
+// @description: Test FFI pointer operations
+
+@ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
+extern {
+    fn ffi_deref_i32(ptr: &Int32) -> Int32;
+    fn ffi_write_i32(ptr: &mut Int32, value: Int32);
+    fn ffi_inc_i32(ptr: &mut Int32) -> Int32;
+    fn ffi_swap_i32(a: &mut Int32, b: &mut Int32);
+}
+
+fn main() {
+    // Test dereference
+    let x: Int32 = 42;
+    let result = ffi_deref_i32(&x);
+    print("deref(&42)="); print(result); print("\n");
+    assert(result == 42);
+
+    // Test write
+    let mut y: Int32 = 100;
+    ffi_write_i32(&mut y, 200);
+    print("after write="); print(y); print("\n");
+    assert(y == 200);
+
+    // Test increment (returns new value after incrementing)
+    let mut z: Int32 = 50;
+    let new_val = ffi_inc_i32(&mut z);
+    print("inc result="); print(new_val); print(" in z="); print(z); print("\n");
+    assert(new_val == 51);  // Returns the incremented value
+    assert(z == 51);         // Variable also updated
+
+    // Test swap
+    let mut a: Int32 = 10;
+    let mut b: Int32 = 20;
+    ffi_swap_i32(&mut a, &mut b);
+    print("after swap a="); print(a); print(" b="); print(b); print("\n");
+    assert(a == 20);
+    assert(b == 10);
+
+    print("All pointer tests passed!\n");
+}

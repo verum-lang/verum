@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, select, empty, error
+// @description: Empty select expression with no arms
+// @expected-error: E0A8
+
+async fn test() {
+    select { }  // Select must have at least one arm
+}

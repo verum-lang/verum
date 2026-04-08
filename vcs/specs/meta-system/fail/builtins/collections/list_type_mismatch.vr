@@ -1,0 +1,18 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, list, type, error
+// @description: Test that list operations require correct types
+// @expected-error: type
+
+// Test list_get with wrong type argument
+meta fn test_list_get_wrong_type() -> Int {
+    let arr = [1, 2, 3];
+    list_get(arr, "hello")  // ERROR: expected Int index, got Text
+}
+
+fn main() {
+    @const {
+        let _ = test_list_get_wrong_type();
+    };
+}

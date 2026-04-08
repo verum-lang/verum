@@ -1,0 +1,457 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, operators, arithmetic, logical, bitwise, comparison
+// @description: Test all operator expressions from grammar/verum.ebnf
+
+// =============================================================================
+// ARITHMETIC OPERATORS (Section 1.6 - arith_op)
+// =============================================================================
+
+fn test_addition() {
+    let a = 1 + 2;
+    let b = x + y;
+    let c = a + b + c;
+    let d = 1 + 2 + 3 + 4 + 5;
+}
+
+fn test_subtraction() {
+    let a = 5 - 3;
+    let b = x - y;
+    let c = a - b - c;
+    let d = 10 - 5 - 3 - 1;
+}
+
+fn test_multiplication() {
+    let a = 2 * 3;
+    let b = x * y;
+    let c = a * b * c;
+    let d = 2 * 3 * 4 * 5;
+}
+
+fn test_division() {
+    let a = 10 / 2;
+    let b = x / y;
+    let c = a / b / c;
+    let d = 100 / 10 / 2;
+}
+
+fn test_modulo() {
+    let a = 10 % 3;
+    let b = x % y;
+    let c = a % b;
+    let d = 100 % 7;
+}
+
+fn test_power() {
+    let a = 2 ** 3;
+    let b = x ** y;
+    let c = 2 ** 2 ** 3;  // Right associative: 2 ** (2 ** 3)
+    let d = base ** exponent;
+}
+
+fn test_mixed_arithmetic() {
+    let a = 1 + 2 * 3;
+    let b = (1 + 2) * 3;
+    let c = a * b + c * d;
+    let d = x ** 2 + y ** 2;
+    let e = a / b + c % d;
+}
+
+// =============================================================================
+// COMPARISON OPERATORS (Section 1.6 - compare_op)
+// =============================================================================
+
+fn test_equality() {
+    let a = x == y;
+    let b = 1 == 1;
+    let c = "hello" == "hello";
+}
+
+fn test_inequality() {
+    let a = x != y;
+    let b = 1 != 2;
+    let c = a != b;
+}
+
+fn test_less_than() {
+    let a = x < y;
+    let b = 1 < 2;
+    let c = a < b;
+}
+
+fn test_less_than_or_equal() {
+    let a = x <= y;
+    let b = 1 <= 2;
+    let c = a <= b;
+}
+
+fn test_greater_than() {
+    let a = x > y;
+    let b = 2 > 1;
+    let c = a > b;
+}
+
+fn test_greater_than_or_equal() {
+    let a = x >= y;
+    let b = 2 >= 1;
+    let c = a >= b;
+}
+
+fn test_chained_comparisons() {
+    let a = x < y && y < z;
+    let b = a <= b && b <= c;
+    let c = 0 <= x && x < 100;
+}
+
+// =============================================================================
+// LOGICAL OPERATORS (Section 1.6 - logical_op)
+// =============================================================================
+
+fn test_logical_and() {
+    let a = true && false;
+    let b = x && y;
+    let c = a && b && c;
+    let d = condition1 && condition2 && condition3;
+}
+
+fn test_logical_or() {
+    let a = true || false;
+    let b = x || y;
+    let c = a || b || c;
+    let d = option1 || option2 || option3;
+}
+
+fn test_logical_not() {
+    let a = !true;
+    let b = !x;
+    let c = !condition;
+    let d = !!double_negation;
+}
+
+fn test_mixed_logical() {
+    let a = x && y || z;
+    let b = (x || y) && z;
+    let c = !x && y;
+    let d = x || !y;
+    let e = !(x && y);
+    let f = !x || !y;
+}
+
+fn test_short_circuit() {
+    let a = x != 0 && 10 / x > 1;
+    let b = maybe.is_some() && maybe.unwrap() > 0;
+    let c = list.is_empty() || list[0] == expected;
+}
+
+// =============================================================================
+// BITWISE OPERATORS (Section 1.6 - bitwise_op)
+// =============================================================================
+
+fn test_bitwise_and() {
+    let a = 0xFF & 0x0F;
+    let b = x & y;
+    let c = flags & MASK;
+}
+
+fn test_bitwise_or() {
+    let a = 0xF0 | 0x0F;
+    let b = x | y;
+    let c = flags | NEW_FLAG;
+}
+
+fn test_bitwise_xor() {
+    let a = 0xFF ^ 0xAA;
+    let b = x ^ y;
+    let c = a ^ b;
+}
+
+fn test_bitwise_not() {
+    let a = ~0xFF;
+    let b = ~x;
+    let c = ~flags;
+}
+
+fn test_left_shift() {
+    let a = 1 << 4;
+    let b = x << n;
+    let c = value << shift_amount;
+}
+
+fn test_right_shift() {
+    let a = 16 >> 2;
+    let b = x >> n;
+    let c = value >> shift_amount;
+}
+
+fn test_mixed_bitwise() {
+    let a = (x & MASK) | FLAG;
+    let b = (a ^ b) & c;
+    let c = ~(x & y);
+    let d = (1 << n) - 1;
+    let e = x >> 4 & 0x0F;
+}
+
+// =============================================================================
+// UNARY OPERATORS (Section 2.10 - unary_expr, unary_op)
+// =============================================================================
+
+fn test_unary_negation() {
+    let a = -x;
+    let b = -42;
+    let c = -value;
+    let d = --double_neg;
+}
+
+fn test_unary_not() {
+    let a = !flag;
+    let b = !condition;
+    let c = !!double_not;
+}
+
+fn test_unary_bitwise_not() {
+    let a = ~bits;
+    let b = ~0xFF;
+    let c = ~~double_complement;
+}
+
+fn test_reference_operators() {
+    let a = &value;
+    let b = &mut mutable;
+    let c = &checked safe_ref;
+    let d = &checked mut safe_mut_ref;
+    let e = &unsafe raw_ref;
+    let f = &unsafe mut raw_mut_ref;
+}
+
+fn test_dereference() {
+    let a = *ptr;
+    let b = *reference;
+    let c = **double_ptr;
+}
+
+fn test_combined_unary() {
+    let a = -&value;
+    let b = !*ptr;
+    let c = ~*bits_ptr;
+    let d = &-negated;
+}
+
+// =============================================================================
+// ASSIGNMENT OPERATORS (Section 1.6 - assign_op)
+// =============================================================================
+
+fn test_simple_assignment() {
+    let mut x = 0;
+    x = 10;
+    x = compute();
+}
+
+fn test_compound_addition() {
+    let mut x = 0;
+    x += 1;
+    x += delta;
+}
+
+fn test_compound_subtraction() {
+    let mut x = 10;
+    x -= 1;
+    x -= delta;
+}
+
+fn test_compound_multiplication() {
+    let mut x = 1;
+    x *= 2;
+    x *= factor;
+}
+
+fn test_compound_division() {
+    let mut x = 100;
+    x /= 2;
+    x /= divisor;
+}
+
+fn test_compound_modulo() {
+    let mut x = 100;
+    x %= 7;
+    x %= modulus;
+}
+
+fn test_compound_bitwise() {
+    let mut flags = 0;
+    flags &= MASK;
+    flags |= NEW_FLAG;
+    flags ^= TOGGLE;
+    flags <<= 1;
+    flags >>= 2;
+}
+
+// =============================================================================
+// IS OPERATOR (Section 2.10 - is_relational_expr)
+// =============================================================================
+
+fn test_is_pattern() {
+    let a = value is Some(x);
+    let b = result is Ok(_);
+    let c = option is None;
+}
+
+fn test_is_not_pattern() {
+    let a = value is not None;
+    let b = result is not Err(_);
+}
+
+fn test_is_type() {
+    // Type tests use patterns; types alone are parsed as path patterns
+    let a = value is Int;
+    let b = obj is User;
+    // For generic types, patterns work with the constructor
+    let c = data is List;
+}
+
+fn test_is_in_conditions() {
+    if value is Some(x) {
+        use(x);
+    }
+
+    while result is not Done {
+        poll();
+    }
+}
+
+// =============================================================================
+// AS OPERATOR (type cast, Section 2.12 - postfix_op)
+// =============================================================================
+
+fn test_as_cast() {
+    let a = x as Int;
+    let b = value as Float;
+    let c = obj as dyn Protocol;
+}
+
+fn test_as_in_expression() {
+    let a = (x as Int) + 1;
+    let b = compute() as Float * 2.0;
+}
+
+fn test_chained_as() {
+    let a = x as Int as Float;
+}
+
+// =============================================================================
+// OPERATOR PRECEDENCE
+// =============================================================================
+
+fn test_arithmetic_precedence() {
+    // * and / bind tighter than + and -
+    let a = 1 + 2 * 3;       // 1 + (2 * 3) = 7
+    let b = 1 - 2 / 2;       // 1 - (2 / 2) = 0
+    let c = 2 ** 3 * 2;      // (2 ** 3) * 2 = 16
+}
+
+fn test_comparison_precedence() {
+    // Arithmetic binds tighter than comparison
+    let a = x + 1 < y * 2;   // (x + 1) < (y * 2)
+    let b = a - b == c + d;  // (a - b) == (c + d)
+}
+
+fn test_logical_precedence() {
+    // && binds tighter than ||
+    let a = x || y && z;     // x || (y && z)
+    let b = x && y || z;     // (x && y) || z
+}
+
+fn test_bitwise_precedence() {
+    // & binds tighter than |
+    let a = x | y & z;       // x | (y & z)
+    let b = x & y | z;       // (x & y) | z
+}
+
+fn test_mixed_precedence() {
+    let a = 1 + 2 * 3 > 5 && x || !y;
+    let b = a | b & c == d + e * f;
+}
+
+// =============================================================================
+// OPERATOR ASSOCIATIVITY
+// =============================================================================
+
+fn test_left_associative() {
+    // Most binary operators are left-associative
+    let a = 1 - 2 - 3;       // (1 - 2) - 3 = -4
+    let b = 100 / 10 / 2;    // (100 / 10) / 2 = 5
+    let c = x && y && z;     // (x && y) && z
+}
+
+fn test_right_associative() {
+    // Power and assignment are right-associative
+    let a = 2 ** 3 ** 2;     // 2 ** (3 ** 2) = 512
+    let mut x = 0;
+    x = y = z = 10;          // x = (y = (z = 10))
+}
+
+// =============================================================================
+// COMPLEX EXPRESSIONS
+// =============================================================================
+
+fn test_complex_arithmetic() {
+    let a = (x + y) * (z - w) / (a + b);
+    let b = x ** 2 + y ** 2 - 2 * x * y;
+    let c = (a + b) ** 2 - (a - b) ** 2;
+}
+
+fn test_complex_logical() {
+    let a = (x > 0 && x < 100) || (y > 0 && y < 100);
+    let b = !empty && (valid || fallback) && active;
+    let c = a == b && c != d || e == f;
+}
+
+fn test_complex_bitwise() {
+    let a = (flags & MASK) | (other & ~MASK);
+    let b = ((x << 8) | (y >> 8)) & 0xFFFF;
+    let c = (a ^ b) & (c | d);
+}
+
+fn test_mixed_complex() {
+    let a = x > 0 && (y & MASK) != 0 || z ** 2 < limit;
+    let b = !flag && bits | EXTRA == expected;
+    let c = (a + b) * c == d && (e | f) != 0;
+}
+
+// =============================================================================
+// OPERATORS WITH METHOD CALLS
+// =============================================================================
+
+fn test_operators_with_calls() {
+    let a = compute_x() + compute_y();
+    let b = obj.get_value() * factor;
+    let c = list.len() > 0 && list[0] == expected;
+}
+
+fn test_operators_in_chain() {
+    let a = (x + y).abs();
+    let b = (a * b).sqrt();
+    let c = (flags | NEW).to_string();
+}
+
+// =============================================================================
+// OPERATOR EDGE CASES
+// =============================================================================
+
+fn test_multiple_unary() {
+    let a = - - x;     // Double negation
+    let b = ! ! flag;  // Double not
+    let c = ~ ~ bits;  // Double complement
+}
+
+fn test_unary_with_binary() {
+    let a = -x + y;
+    let b = !a && b;
+    let c = ~x | y;
+}
+
+fn test_parenthesized_operators() {
+    let a = (1 + 2) * 3;
+    let b = -(x + y);
+    let c = !(a && b);
+    let d = ~(x | y);
+}

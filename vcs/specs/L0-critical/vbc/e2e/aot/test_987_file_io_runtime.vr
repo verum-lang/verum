@@ -1,0 +1,59 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: io, file, read, write, runtime
+// @description: Test file I/O runtime operations
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: write and read
+    let path = "/tmp/verum_test_987.txt";
+    let content = "Hello from Verum!";
+    let write_ok = file_write(path, content);
+    if write_ok < 0 {
+        print(f"FAIL: file write failed with {write_ok}");
+        failures = failures + 1;
+    } else {
+        let read_content = file_read(path);
+        if read_content != content {
+            print(f"FAIL: expected '{content}', got '{read_content}'");
+            failures = failures + 1;
+        } else {
+            print("  write_and_read: OK");
+        }
+    }
+
+    // Test 2: write lines and read back
+    let path2 = "/tmp/verum_test_987_lines.txt";
+    let lines = "line1\nline2\nline3";
+    file_write(path2, lines);
+    let data = file_read(path2);
+    if data != lines {
+        print(f"FAIL: lines mismatch");
+        failures = failures + 1;
+    } else {
+        print("  write_lines: OK");
+    }
+
+    // Test 3: append
+    let append_data = "\nline4";
+    file_append(path2, append_data);
+    let data2 = file_read(path2);
+    let expected = "line1\nline2\nline3\nline4";
+    if data2 != expected {
+        print(f"FAIL: append mismatch");
+        failures = failures + 1;
+    } else {
+        print("  append: OK");
+    }
+
+    // Cleanup
+    file_delete(path);
+    file_delete(path2);
+
+    if failures == 0 {
+        print("All file I/O tests passed");
+    }
+    failures
+}

@@ -1,0 +1,133 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, threads, channels, producer-consumer, pipeline
+// @expected-exit: 0
+
+// Test: Multi-stage producer-consumer pipeline.
+// Stage 1: 4 producers compute partial sums
+// Stage 2: Results aggregated via channel
+// Stage 3: Verification of all results
+
+fn producer_range(start: Int, count: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn producer_squares(n: Int) -> Int {
+    let mut acc = 0;
+    let mut i = 1;
+    while (i <= n) {
+        acc = acc + i * i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn producer_fib(n: Int) -> Int {
+    if (n <= 1) {
+        return n;
+    }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while (i <= n) {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+fn main() -> Int {
+    // Test 1: 4 producers compute non-overlapping ranges
+    let p1 = spawn producer_range(0, 250);
+    let p2 = spawn producer_range(250, 250);
+    let p3 = spawn producer_range(500, 250);
+    let p4 = spawn producer_range(750, 250);
+
+    let total = p1.await + p2.await + p3.await + p4.await;
+    // sum(0..999) = 999*1000/2 = 499500
+    if (total != 499500) {
+        print(f"FAIL test1: total={total} expected 499500");
+        return 1;
+    }
+
+    // Test 2: Channel pipeline — send results, recv and aggregate
+    let ch = Channel.new(16);
+    ch.send(100);
+    ch.send(200);
+    ch.send(300);
+    ch.send(400);
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    let mut d = 0;
+    match ch.recv() { Some(v) => { a = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { b = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { c = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { d = v; } None => { return 1; } }
+    if (a + b + c + d != 1000) {
+        print(f"FAIL test2: sum={a + b + c + d} expected 1000");
+        return 1;
+    }
+
+    // Test 3: Heterogeneous workers — different computations in parallel
+    let sq = spawn producer_squares(100);
+    let fib = spawn producer_fib(30);
+    let rng = spawn producer_range(0, 1000);
+
+    let sq_result = sq.await;
+    let fib_result = fib.await;
+    let rng_result = rng.await;
+
+    // sum of squares 1..100 = 100*101*201/6 = 338350
+    if (sq_result != 338350) {
+        print(f"FAIL test3a: squares={sq_result} expected 338350");
+        return 1;
+    }
+    // fib(30) = 832040
+    if (fib_result != 832040) {
+        print(f"FAIL test3b: fib={fib_result} expected 832040");
+        return 1;
+    }
+    // sum(0..999) = 499500
+    if (rng_result != 499500) {
+        print(f"FAIL test3c: range={rng_result} expected 499500");
+        return 1;
+    }
+
+    // Test 4: Channel with computed values
+    let ch2 = Channel.new(8);
+    ch2.send(1);
+    ch2.send(4);
+    ch2.send(9);
+    ch2.send(16);
+    ch2.send(25);
+    let mut s1 = 0;
+    let mut s2 = 0;
+    let mut s3 = 0;
+    let mut s4 = 0;
+    let mut s5 = 0;
+    match ch2.recv() { Some(v) => { s1 = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { s2 = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { s3 = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { s4 = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { s5 = v; } None => { return 1; } }
+    let sum_sq = s1 + s2 + s3 + s4 + s5;
+    // 1+4+9+16+25 = 55
+    if (sum_sq != 55) {
+        print(f"FAIL test4: sum_sq={sum_sq} expected 55");
+        return 1;
+    }
+    ch2.close();
+
+    print("930_producer_consumer: PASS");
+    0
+}

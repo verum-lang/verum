@@ -1,0 +1,29 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, testlib, float, debug
+// @description: Debug basic function calls
+
+fn simple_add(a: Float, b: Float) -> Float {
+    a + b
+}
+
+fn compare_lt(a: Float, b: Float) -> Bool {
+    a < b
+}
+
+fn main() {
+    print(1); print("\n");
+
+    let sum = simple_add(1.0, 2.0);
+    print(2); print("\n");
+    print(sum); print("\n");
+
+    let cmp = compare_lt(1.0, 2.0);
+    print(3); print("\n");
+    print(cmp); print("\n");
+
+    print(4); print("\n");
+}

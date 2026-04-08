@@ -1,0 +1,98 @@
+// @test: run
+// @level: L0
+// @description: Channel patterns: send/recv on same thread, FIFO ordering, thread computation
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Simple send/recv on same thread
+    let ch = Channel.new(10);
+    ch.send(42);
+    ch.send(99);
+
+    let mut sum = 0;
+    match ch.recv() {
+        Some(v) => { sum = sum + v; }
+        None => {}
+    }
+    match ch.recv() {
+        Some(v) => { sum = sum + v; }
+        None => {}
+    }
+
+    if (sum != 141) {
+        print(f"FAIL test1: expected 141, got {sum}");
+        return 1;
+    }
+    print(f"Test 1 PASS: channel sum = {sum}");
+
+    // Test 2: Bounded channel FIFO ordering
+    let ch2 = Channel.new(5);
+    ch2.send(1);
+    ch2.send(2);
+    ch2.send(3);
+    ch2.send(4);
+    ch2.send(5);
+
+    let mut ordered = true;
+    let mut expected = 1;
+    let mut count = 0;
+    while (count < 5) {
+        match ch2.recv() {
+            Some(v) => {
+                if (v != expected) {
+                    ordered = false;
+                }
+                expected = expected + 1;
+            }
+            None => { ordered = false; }
+        }
+        count = count + 1;
+    }
+
+    if (!ordered) {
+        print("FAIL test2: channel not FIFO ordered");
+        return 1;
+    }
+    print("Test 2 PASS: channel FIFO order verified");
+
+    // Test 3: Spawn thread with computation, recv on main thread
+    let ch3 = Channel.new(10);
+    ch3.send(100);
+    ch3.send(200);
+
+    let h = spawn {
+        // Thread does independent computation
+        let mut s = 0;
+        let mut i = 1;
+        while (i <= 10) {
+            s = s + i;
+            i = i + 1;
+        }
+        s  // returns 55
+    };
+
+    let thread_result = h.await;
+    // Also consume channel on main thread
+    let mut ch3_sum = 0;
+    match ch3.recv() {
+        Some(v) => { ch3_sum = ch3_sum + v; }
+        None => {}
+    }
+    match ch3.recv() {
+        Some(v) => { ch3_sum = ch3_sum + v; }
+        None => {}
+    }
+
+    if (thread_result != 55) {
+        print(f"FAIL test3a: expected 55, got {thread_result}");
+        return 1;
+    }
+    if (ch3_sum != 300) {
+        print(f"FAIL test3b: expected 300, got {ch3_sum}");
+        return 1;
+    }
+    print(f"Test 3 PASS: thread={thread_result}, channel={ch3_sum}");
+
+    print("All channel pattern tests passed");
+    0
+}

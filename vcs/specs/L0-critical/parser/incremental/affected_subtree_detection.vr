@@ -1,0 +1,147 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, incremental, subtree, affected-range
+// @description: Tests IncrementalEngine finding affected subtrees after edits.
+//              Verifies minimal reparsing scope is correctly identified.
+
+// ============================================================================
+// This file tests the IncrementalEngine's ability to identify which parts of
+// the AST are affected by an edit and need reparsing vs which can be reused.
+// ============================================================================
+
+// Test 1: Edit within function body affects only that function
+// Edit: Change '42' to '43' in first_fn
+// Expected: Only first_fn's body subtree is affected
+fn first_fn() -> Int {
+    42
+}
+
+fn second_fn() -> Int {
+    100
+}
+
+fn third_fn() -> Int {
+    200
+}
+
+// Test 2: Edit in function signature affects entire function
+// Edit: Change function name 'sig_fn' to 'renamed_fn'
+// Expected: Entire function is affected, other items unchanged
+fn sig_fn(x: Int) -> Int {
+    x * 2
+}
+
+fn unaffected_fn() -> Int {
+    1
+}
+
+// Test 3: Edit in type definition affects only that type
+// Edit: Change field name 'x' to 'a'
+// Expected: Only TypeA is affected
+type TypeA is {
+    x: Int,
+    y: Int,
+};
+
+type TypeB is {
+    name: Text,
+};
+
+// Test 4: Edit in implement block affects only that block
+// Edit: Change method body
+// Expected: Only MethodType's impl is affected
+type MethodType is {
+    value: Int,
+};
+
+implement MethodType {
+    fn get_value(self) -> Int {
+        self.value
+    }
+
+    fn double(self) -> Int {
+        self.value * 2
+    }
+}
+
+implement TypeA {
+    fn sum(self) -> Int {
+        self.x + self.y
+    }
+}
+
+// Test 5: Edit in nested block affects containing function
+// Edit: Change value inside nested block
+// Expected: Outer function affected but other functions not
+fn nested_blocks() -> Int {
+    let outer = 1;
+    {
+        let inner = {
+            let deepest = 42;
+            deepest
+        };
+        inner
+    }
+}
+
+fn unrelated_to_nested() -> Int {
+    0
+}
+
+// Test 6: Edit in match arm affects match expression
+// Edit: Change pattern or result in one arm
+// Expected: Match expression affected, surrounding code not
+fn match_edit(opt: Maybe<Int>) -> Int {
+    let before = 10;
+    let result = match opt {
+        Some(x) => x * 2,
+        None => 0,
+    };
+    let after = 20;
+    result
+}
+
+// Test 7: Edit at item boundary might affect adjacent items
+// Edit: Delete semicolon between type definitions
+// Expected: Affects parsing of subsequent item
+type BoundaryType1 is {
+    a: Int,
+};
+
+type BoundaryType2 is {
+    b: Int,
+};
+
+// Test 8: Edit in expression affects containing statement
+// Edit: Change operator in expression
+// Expected: Statement affected, other statements not
+fn expr_edit() {
+    let unchanged1 = 1;
+    let changed = 2 + 3;
+    let unchanged2 = 4;
+    changed
+}
+
+// Test 9: Edit in closure affects containing expression
+// Edit: Change closure body
+// Expected: Only closure's parent expression affected
+fn closure_edit() {
+    let list = [1, 2, 3];
+    let mapped = list.map(|x| x * 2);
+    let summed = list.sum();
+    mapped
+}
+
+// Test 10: Edit adds new item - scope expansion test
+// Edit: Insert new function between existing ones
+// Expected: New function parsed, adjacent functions unchanged
+fn before_insertion() -> Int {
+    1
+}
+
+// Space for insertion
+
+fn after_insertion() -> Int {
+    2
+}

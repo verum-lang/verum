@@ -1,0 +1,258 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, gaussian, elimination
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Gaussian elimination for solving 2x2 and 3x3 linear
+// systems. Uses integer-scaled arithmetic (scale 1000) with Cramer's rule for
+// 2x2 and direct elimination for 3x3. Simplified for interpreter speed.
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// =============================================================================
+// 2x2 system: ax + by = e, cx + dy = f (Cramer's rule)
+// All inputs and outputs scaled by 1000
+// =============================================================================
+
+type Sol2 is { x_s: Int, y_s: Int, valid: Int };
+
+fn solve_2x2(a: Int, b: Int, e: Int, c: Int, d: Int, f: Int) -> Sol2 {
+    let det = (a * d - b * c) / 1000;
+    if det == 0 {
+        return Sol2 { x_s: 0, y_s: 0, valid: 0 };
+    }
+    let x_numer = (e * d - b * f) / 1000;
+    let y_numer = (a * f - e * c) / 1000;
+    Sol2 {
+        x_s: (x_numer * 1000) / det,
+        y_s: (y_numer * 1000) / det,
+        valid: 1
+    }
+}
+
+fn test_2x2_simple() {
+    // x + y = 3, x - y = 1 => x=2, y=1
+    let sol = solve_2x2(1000, 1000, 3000, 1000, -1000, 1000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 2000, 5);
+    assert_near(sol.y_s, 1000, 5);
+}
+
+fn test_2x2_general() {
+    // 2x + 3y = 8, 4x + y = 2
+    // det = 2-12 = -10. x = (8-6)/(-10) = -0.2, y = (4-32)/(-10) = 2.8
+    let sol = solve_2x2(2000, 3000, 8000, 4000, 1000, 2000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, -200, 5);
+    assert_near(sol.y_s, 2800, 5);
+}
+
+fn test_2x2_singular() {
+    // x + 2y = 3, 2x + 4y = 6 (det = 0)
+    let sol = solve_2x2(1000, 2000, 3000, 2000, 4000, 6000);
+    assert_eq(sol.valid, 0);
+}
+
+fn test_2x2_verify() {
+    // 3x - y = 5, x + 2y = 4 => x=2, y=1
+    let sol = solve_2x2(3000, -1000, 5000, 1000, 2000, 4000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 2000, 5);
+    assert_near(sol.y_s, 1000, 5);
+
+    // Verify
+    let lhs1 = (3000 * sol.x_s - 1000 * sol.y_s) / 1000;
+    assert_near(lhs1, 5000, 10);
+    let lhs2 = (1000 * sol.x_s + 2000 * sol.y_s) / 1000;
+    assert_near(lhs2, 4000, 10);
+}
+
+fn test_2x2_negative() {
+    // -x + 2y = 5, 3x - y = -1 => det = 1-6 = -5
+    // x = (5*(-1) - 2*(-1)) / (-5) = (-5+2)/(-5) = 3/5 = 0.6
+    // y = ((-1)*(-1) - 5*3) / (-5) = (1-15)/(-5) = -14/(-5) = 2.8
+    let sol = solve_2x2(-1000, 2000, 5000, 3000, -1000, -1000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 600, 5);
+    assert_near(sol.y_s, 2800, 5);
+}
+
+fn test_2x2_large() {
+    // 5x + 7y = 19, 2x + 3y = 8 => det = 15-14 = 1
+    // x = (57-56)/1 = 1, y = (40-38)/1 = 2
+    let sol = solve_2x2(5000, 7000, 19000, 2000, 3000, 8000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 1000, 5);
+    assert_near(sol.y_s, 2000, 5);
+}
+
+// =============================================================================
+// 3x3 system via direct Cramer's rule (using determinants, no row reduction)
+// Avoids record-heavy Gaussian elimination for interpreter speed.
+// Inputs: 9 coefficients + 3 RHS, all scaled by 1000
+// =============================================================================
+
+fn det3(a00: Int, a01: Int, a02: Int,
+        a10: Int, a11: Int, a12: Int,
+        a20: Int, a21: Int, a22: Int) -> Int {
+    let c0 = (a11 * a22 - a12 * a21) / 1000;
+    let c1 = (a10 * a22 - a12 * a20) / 1000;
+    let c2 = (a10 * a21 - a11 * a20) / 1000;
+    (a00 * c0 - a01 * c1 + a02 * c2) / 1000
+}
+
+type Sol3 is { x_s: Int, y_s: Int, z_s: Int, valid: Int };
+
+fn solve_3x3(a00: Int, a01: Int, a02: Int, b0: Int,
+             a10: Int, a11: Int, a12: Int, b1: Int,
+             a20: Int, a21: Int, a22: Int, b2: Int) -> Sol3 {
+    let det_a = det3(a00, a01, a02, a10, a11, a12, a20, a21, a22);
+    if det_a == 0 {
+        return Sol3 { x_s: 0, y_s: 0, z_s: 0, valid: 0 };
+    }
+    // Cramer: x = det(A_x)/det(A) where A_x replaces column 0 with b
+    let det_x = det3(b0, a01, a02, b1, a11, a12, b2, a21, a22);
+    let det_y = det3(a00, b0, a02, a10, b1, a12, a20, b2, a22);
+    let det_z = det3(a00, a01, b0, a10, a11, b1, a20, a21, b2);
+    Sol3 {
+        x_s: (det_x * 1000) / det_a,
+        y_s: (det_y * 1000) / det_a,
+        z_s: (det_z * 1000) / det_a,
+        valid: 1
+    }
+}
+
+fn test_3x3_identity() {
+    // x=1, y=2, z=3
+    let sol = solve_3x3(1000, 0, 0, 1000,
+                        0, 1000, 0, 2000,
+                        0, 0, 1000, 3000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 1000, 5);
+    assert_near(sol.y_s, 2000, 5);
+    assert_near(sol.z_s, 3000, 5);
+}
+
+fn test_3x3_diagonal() {
+    // 2x=4, 3y=9, 5z=10 => x=2, y=3, z=2
+    let sol = solve_3x3(2000, 0, 0, 4000,
+                        0, 3000, 0, 9000,
+                        0, 0, 5000, 10000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 2000, 5);
+    assert_near(sol.y_s, 3000, 5);
+    assert_near(sol.z_s, 2000, 5);
+}
+
+fn test_3x3_upper_triangular() {
+    // x + y + z = 6, y + z = 5, z = 3 => z=3, y=2, x=1
+    let sol = solve_3x3(1000, 1000, 1000, 6000,
+                        0, 1000, 1000, 5000,
+                        0, 0, 1000, 3000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 1000, 5);
+    assert_near(sol.y_s, 2000, 5);
+    assert_near(sol.z_s, 3000, 5);
+}
+
+fn test_3x3_general() {
+    // 2x + y - z = 1, x + 3y + 2z = 13, x - y + z = 2
+    // Solution: x=1, y=2, z=3
+    let sol = solve_3x3(2000, 1000, -1000, 1000,
+                        1000, 3000, 2000, 13000,
+                        1000, -1000, 1000, 2000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 1000, 30);
+    assert_near(sol.y_s, 2000, 30);
+    assert_near(sol.z_s, 3000, 30);
+}
+
+fn test_3x3_verify() {
+    // 3x + 2y + z = 10, x + y + z = 6, 2x + y + 3z = 13
+    // Solution: x=1, y=2, z=3
+    let sol = solve_3x3(3000, 2000, 1000, 10000,
+                        1000, 1000, 1000, 6000,
+                        2000, 1000, 3000, 13000);
+    assert_eq(sol.valid, 1);
+
+    // Verify substitution
+    let lhs1 = (3000 * sol.x_s + 2000 * sol.y_s + 1000 * sol.z_s) / 1000;
+    assert_near(lhs1, 10000, 50);
+    let lhs2 = (1000 * sol.x_s + 1000 * sol.y_s + 1000 * sol.z_s) / 1000;
+    assert_near(lhs2, 6000, 50);
+    let lhs3 = (2000 * sol.x_s + 1000 * sol.y_s + 3000 * sol.z_s) / 1000;
+    assert_near(lhs3, 13000, 50);
+}
+
+fn test_3x3_negative() {
+    // x - y = 3, y - z = -2, x + z = 4
+    // x = y+3, z = y+2, y+3+y+2=4 => 2y=-1 => not integer
+    // Use different: x + y + z = 6, x - y + z = 4, 2x + y = 5
+    // From eq1-eq2: 2y = 2 => y=1. From eq3: 2x=4 => x=2. z=3.
+    let sol = solve_3x3(1000, 1000, 1000, 6000,
+                        1000, -1000, 1000, 4000,
+                        2000, 1000, 0, 5000);
+    assert_eq(sol.valid, 1);
+    assert_near(sol.x_s, 2000, 30);
+    assert_near(sol.y_s, 1000, 30);
+    assert_near(sol.z_s, 3000, 30);
+}
+
+fn test_3x3_singular() {
+    // Dependent rows: [1,2,3], [2,4,6], [1,1,1]
+    let sol = solve_3x3(1000, 2000, 3000, 1000,
+                        2000, 4000, 6000, 2000,
+                        1000, 1000, 1000, 1000);
+    assert_eq(sol.valid, 0);
+}
+
+fn test_determinant_properties() {
+    // det(I) = 1
+    let d1 = det3(1000, 0, 0, 0, 1000, 0, 0, 0, 1000);
+    assert_eq(d1, 1000);
+
+    // det(diagonal) = product of diagonal
+    let d2 = det3(2000, 0, 0, 0, 3000, 0, 0, 0, 4000);
+    assert_eq(d2, 24000);
+
+    // det with row swap = -det
+    let d3a = det3(1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 10000);
+    let d3b = det3(4000, 5000, 6000, 1000, 2000, 3000, 7000, 8000, 10000);
+    assert_eq(d3a, -d3b);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_2x2_simple();
+    test_2x2_general();
+    test_2x2_singular();
+    test_2x2_verify();
+    test_2x2_negative();
+    test_2x2_large();
+    test_3x3_identity();
+    test_3x3_diagonal();
+    test_3x3_upper_triangular();
+    test_3x3_general();
+    test_3x3_verify();
+    test_3x3_negative();
+    test_3x3_singular();
+    test_determinant_properties();
+    print("[OK] 309_interp_gaussian_elim");
+    0
+}

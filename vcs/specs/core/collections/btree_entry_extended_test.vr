@@ -1,0 +1,100 @@
+// =============================================================================
+// btree_entry_extended_test.vr - Tests for BTreeEntry.or_insert_with_key()
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btree, entry
+// @description: Tests for BTreeEntry.or_insert_with_key() - inserts value computed from key
+// =============================================================================
+
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// PART 1: or_insert_with_key basic operations
+// =============================================================================
+
+@test
+fn test_or_insert_with_key_vacant() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    let val = map.entry(5).or_insert_with_key(|k| *k * 10);
+
+    assert_eq(*val, 50);
+    assert_eq(map.len(), 1);
+    assert_eq(*map.get(&5).unwrap(), 50);
+}
+
+@test
+fn test_or_insert_with_key_occupied() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(5, 999);
+
+    // Should NOT call the function since key is occupied
+    let val = map.entry(5).or_insert_with_key(|k| *k * 10);
+
+    assert_eq(*val, 999);
+    assert_eq(map.len(), 1);
+}
+
+@test
+fn test_or_insert_with_key_derives_from_key() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+
+    // Value is derived from the key itself
+    map.entry(3).or_insert_with_key(|k| *k + 100);
+    map.entry(7).or_insert_with_key(|k| *k + 100);
+    map.entry(1).or_insert_with_key(|k| *k + 100);
+
+    assert_eq(*map.get(&3).unwrap(), 103);
+    assert_eq(*map.get(&7).unwrap(), 107);
+    assert_eq(*map.get(&1).unwrap(), 101);
+}
+
+@test
+fn test_or_insert_with_key_preserves_existing() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(10, 42);
+    map.insert(20, 84);
+
+    // Occupied entries should keep their values
+    map.entry(10).or_insert_with_key(|k| *k * 100);
+    map.entry(20).or_insert_with_key(|k| *k * 100);
+    // Vacant entry gets computed value
+    map.entry(30).or_insert_with_key(|k| *k * 100);
+
+    assert_eq(*map.get(&10).unwrap(), 42);
+    assert_eq(*map.get(&20).unwrap(), 84);
+    assert_eq(*map.get(&30).unwrap(), 3000);
+}
+
+@test
+fn test_or_insert_with_key_empty_map() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(map.is_empty());
+
+    let val = map.entry(1).or_insert_with_key(|k| *k * 2);
+
+    assert_eq(*val, 2);
+    assert_eq(map.len(), 1);
+}
+
+@test
+fn test_or_insert_with_key_chain_and_modify() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    map.insert(1, 10);
+
+    // Occupied: and_modify runs, then or_insert_with_key is a no-op
+    // Note: chained .and_modify().or_insert_with_key() hits type checker
+    // narrowing issue, so we use separate calls for each step.
+    let entry1 = map.entry(1).and_modify(|v| *v = *v + 5);
+    entry1.or_insert_with_key(|k| *k * 100);
+
+    assert_eq(*map.get(&1).unwrap(), 15);
+
+    // Vacant: and_modify is a no-op, or_insert_with_key computes value
+    let entry2 = map.entry(2).and_modify(|v| *v = *v + 5);
+    entry2.or_insert_with_key(|k| *k * 100);
+
+    assert_eq(*map.get(&2).unwrap(), 200);
+}

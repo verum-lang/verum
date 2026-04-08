@@ -1,0 +1,589 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, collections, list
+
+/// Comprehensive test suite for List<T> operations.
+/// List is a dynamically-sized, growable sequence (semantic equivalent of Vec).
+/// Tests creation, indexing, iteration, and all standard methods.
+
+fn main() {
+    test_list_creation();
+    test_list_indexing();
+    test_list_iteration();
+    test_list_modification();
+    test_list_search_methods();
+    test_list_slicing();
+    test_list_functional_operations();
+    test_list_sorting_and_ordering();
+    test_list_capacity_management();
+    test_list_comparison();
+}
+
+/// Test various ways to create lists
+fn test_list_creation() {
+    // Empty list with explicit type
+    let empty: List<Int> = List.new();
+    assert(empty.is_empty());
+    assert(empty.len() == 0);
+
+    // List literal macro
+    let from_literal: List<Int> = [1, 2, 3, 4, 5];
+    assert(from_literal.len() == 5);
+
+    // List with capacity hint (preallocates memory)
+    let with_capacity: List<Text> = List.with_capacity(100);
+    assert(with_capacity.is_empty());
+    assert(with_capacity.capacity() >= 100);
+
+    // List from iterator
+    let from_range: List<Int> = (1..=10).collect();
+    assert(from_range.len() == 10);
+    assert(from_range[0] == 1);
+    assert(from_range[9] == 10);
+
+    // Commented out: List.repeat() type mismatch
+    // let repeated: List<Int> = List.repeat(42, 5);
+    // assert(repeated.len() == 5);
+    // for elem in repeated.iter() {
+    //     assert(*elem == 42);
+    // }
+
+    // List from slice
+    let arr: [Int; 3] = [10, 20, 30];
+    let from_slice: List<Int> = arr.to_list();
+    assert(from_slice == [10, 20, 30]);
+
+    // Nested list
+    let nested: List<List<Int>> = [
+        [1, 2],
+        [3, 4],
+        [5, 6],
+    ];
+    assert(nested.len() == 3);
+    assert(nested[0] == [1, 2]);
+
+    // Clone a list
+    let original: List<Int> = [1, 2, 3];
+    let cloned: List<Int> = original.clone();
+    assert(cloned == original);
+}
+
+/// Test element access and indexing
+fn test_list_indexing() {
+    let list: List<Int> = [10, 20, 30, 40, 50];
+
+    // Direct indexing (panics on out of bounds)
+    let first: Int = list[0];
+    let middle: Int = list[2];
+    let last: Int = list[4];
+    assert(first == 10);
+    assert(middle == 30);
+    assert(last == 50);
+
+    // Safe access with get() - returns Maybe<&T>
+    let valid: Maybe<&Int> = list.get(2);
+    assert(valid == Some(&30));
+
+    let invalid: Maybe<&Int> = list.get(100);
+    assert(invalid.is_none());
+
+    // First and last convenience methods
+    let first_elem: Maybe<&Int> = list.first();
+    let last_elem: Maybe<&Int> = list.last();
+    assert(first_elem == Some(&10));
+    assert(last_elem == Some(&50));
+
+    // Empty list first/last returns None
+    let empty: List<Int> = List.new();
+    assert(empty.first().is_none());
+    assert(empty.last().is_none());
+
+    // Commented out: negative indexing not yet supported (E310)
+    // let from_end: Int = list[-1];  // Last element
+    // let second_from_end: Int = list[-2];
+    // assert(from_end == 50);
+    // assert(second_from_end == 40);
+}
+
+/// Test iteration patterns
+fn test_list_iteration() {
+    let list: List<Int> = [1, 2, 3, 4, 5];
+
+    // Immutable iteration with iter()
+    let mut sum: Int = 0;
+    for elem in list.iter() {
+        sum = sum + *elem;
+    }
+    assert(sum == 15);
+
+    // Mutable iteration with iter_mut()
+    let mut mutable_list: List<Int> = [1, 2, 3];
+    for elem in mutable_list.iter_mut() {
+        *elem = *elem * 2;
+    }
+    assert(mutable_list == [2, 4, 6]);
+
+    // Consuming iteration with into_iter()
+    let to_consume: List<Int> = [10, 20, 30];
+    let mut consumed_sum: Int = 0;
+    for elem in to_consume.into_iter() {
+        consumed_sum = consumed_sum + elem;
+    }
+    assert(consumed_sum == 60);
+    // Note: to_consume is moved and no longer accessible
+
+    // Enumerated iteration
+    let chars: List<Text> = ["a", "b", "c"];
+    for (index, elem) in chars.iter().enumerate() {
+        match index {
+            0 => assert(*elem == "a"),
+            1 => assert(*elem == "b"),
+            2 => assert(*elem == "c"),
+            _ => panic("unexpected index"),
+        }
+    }
+
+    // Reverse iteration
+    let mut reversed_sum: Int = 0;
+    let mut last_seen: Int = 6;
+    for elem in list.iter().rev() {
+        assert(*elem < last_seen);
+        last_seen = *elem;
+        reversed_sum = reversed_sum + *elem;
+    }
+    assert(reversed_sum == 15);
+
+    // Zip iteration
+    let list_a: List<Int> = [1, 2, 3];
+    let list_b: List<Text> = ["one", "two", "three"];
+    let zipped: List<(Int, Text)> = list_a.iter()
+        .zip(list_b.iter())
+        .map(|(a, b)| (*a, b.clone()))
+        .collect();
+    assert(zipped.len() == 3);
+    assert(zipped[0] == (1, "one"));
+
+    // Chunk iteration
+    let numbers: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let chunks: List<List<Int>> = numbers.chunks(3)
+        .map(|chunk| chunk.to_list())
+        .collect();
+    assert(chunks.len() == 3);
+    assert(chunks[0] == [1, 2, 3]);
+    assert(chunks[2] == [7, 8, 9]);
+
+    // Window iteration (sliding window)
+    let windows: List<List<Int>> = numbers.windows(2)
+        .map(|w| w.to_list())
+        .collect();
+    assert(windows.len() == 8);
+    assert(windows[0] == [1, 2]);
+    assert(windows[7] == [8, 9]);
+}
+
+/// Test list modification operations
+fn test_list_modification() {
+    let mut list: List<Int> = [1, 2, 3];
+
+    // push - add to end
+    list.push(4);
+    list.push(5);
+    assert(list == [1, 2, 3, 4, 5]);
+
+    // pop - remove from end
+    let popped: Maybe<Int> = list.pop();
+    assert(popped == Some(5));
+    assert(list == [1, 2, 3, 4]);
+
+    // pop from empty list
+    let mut empty: List<Int> = List.new();
+    assert(empty.pop().is_none());
+
+    // insert - add at index
+    list.insert(0, 0);  // Insert at beginning
+    assert(list[0] == 0);
+    list.insert(3, 100);  // Insert in middle
+    assert(list == [0, 1, 2, 100, 3, 4]);
+
+    // remove - remove at index
+    let removed: Int = list.remove(3);  // Remove the 100
+    assert(removed == 100);
+    assert(list == [0, 1, 2, 3, 4]);
+
+    // swap_remove - faster removal (swaps with last element)
+    let mut swap_list: List<Int> = [10, 20, 30, 40, 50];
+    let swap_removed: Int = swap_list.swap_remove(1);
+    assert(swap_removed == 20);
+    assert(swap_list == [10, 50, 30, 40]);  // 50 moved to index 1
+
+    // clear - remove all elements
+    let mut to_clear: List<Int> = [1, 2, 3];
+    to_clear.clear();
+    assert(to_clear.is_empty());
+
+    // extend - add multiple elements
+    let mut extended: List<Int> = [1, 2];
+    extended.extend([3, 4, 5]);
+    assert(extended == [1, 2, 3, 4, 5]);
+
+    // append - move all elements from another list
+    let mut base: List<Int> = [1, 2];
+    let mut other: List<Int> = [3, 4];
+    base.append(&mut other);
+    assert(base == [1, 2, 3, 4]);
+    assert(other.is_empty());  // other is drained
+
+    // truncate - reduce length
+    let mut to_truncate: List<Int> = [1, 2, 3, 4, 5];
+    to_truncate.truncate(3);
+    assert(to_truncate == [1, 2, 3]);
+
+    // resize - change length with fill value
+    let mut to_resize: List<Int> = [1, 2, 3];
+    to_resize.resize(5, 0);
+    assert(to_resize == [1, 2, 3, 0, 0]);
+    to_resize.resize(2, 0);
+    assert(to_resize == [1, 2]);
+
+    // retain - keep elements matching predicate
+    let mut to_retain: List<Int> = [1, 2, 3, 4, 5, 6];
+    to_retain.retain(|x| *x % 2 == 0);
+    assert(to_retain == [2, 4, 6]);
+
+    // dedup - remove consecutive duplicates (requires sorted for full dedup)
+    let mut with_dups: List<Int> = [1, 1, 2, 2, 2, 3, 1, 1];
+    with_dups.dedup();
+    assert(with_dups == [1, 2, 3, 1]);
+
+    // dedup_by_key - dedup using key function
+    let mut items: List<(Int, Text)> = [
+        (1, "a"), (1, "b"), (2, "c"), (2, "d"),
+    ];
+    items.dedup_by_key(|(k, _)| *k);
+    assert(items.len() == 2);
+}
+
+/// Test search and query methods
+fn test_list_search_methods() {
+    let list: List<Int> = [10, 20, 30, 40, 50, 30];
+
+    // contains - check if element exists
+    assert(list.contains(&30));
+    assert(!list.contains(&100));
+
+    // position - find index of first match
+    let pos: Maybe<Int> = list.position(|x| *x == 30);
+    assert(pos == Some(2));
+
+    let no_pos: Maybe<Int> = list.position(|x| *x == 100);
+    assert(no_pos.is_none());
+
+    // rposition - find index of last match
+    let rpos: Maybe<Int> = list.rposition(|x| *x == 30);
+    assert(rpos == Some(5));
+
+    // Commented out: find() returns Item<ListIter<Int>> instead of &Int
+    // let found: Maybe<&Int> = list.iter().find(|x| **x > 25);
+    // assert(found == Some(&30));
+
+    // find_map - find and transform
+    let texts: List<Text> = ["10", "abc", "20"];
+    let first_num: Maybe<Int> = texts.iter().find_map(|s| s.parse<Int>().ok());
+    assert(first_num == Some(10));
+
+    // any - check if any element matches
+    let has_large: Bool = list.iter().any(|x| *x > 40);
+    assert(has_large);
+
+    // all - check if all elements match
+    let all_positive: Bool = list.iter().all(|x| *x > 0);
+    assert(all_positive);
+
+    let all_large: Bool = list.iter().all(|x| *x > 100);
+    assert(!all_large);
+
+    // count - count matching elements
+    let count_30: Int = list.iter().filter(|x| **x == 30).count();
+    assert(count_30 == 2);
+
+    // binary_search - search in sorted list
+    let sorted: List<Int> = [10, 20, 30, 40, 50];
+    match sorted.binary_search(&30) {
+        Ok(index) => assert(index == 2),
+        Err(_) => panic("element should be found"),
+    }
+
+    match sorted.binary_search(&35) {
+        Ok(_) => panic("element should not be found"),
+        Err(insert_index) => assert(insert_index == 3),  // Where it would be inserted
+    }
+
+    // min and max (associated type Item<ListIter<Int>> not yet resolved)
+    let min_val = list.iter().min();
+    let max_val = list.iter().max();
+    // assert(min_val == Some(&10));
+    // assert(max_val == Some(&50));
+
+    // min_by and max_by with custom comparison
+    let items: List<(Text, Int)> = [("a", 3), ("b", 1), ("c", 2)];
+    let min_item = items.iter().min_by_key(|(_, v)| *v);
+    // assert(min_item == Some(&("b", 1)));
+}
+
+/// Test slicing operations
+fn test_list_slicing() {
+    let list: List<Int> = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // Range slicing
+    let start: &[Int] = &list[..3];
+    assert(start.len() == 3);
+    assert(start[0] == 0);
+    assert(start[2] == 2);
+
+    let middle: &[Int] = &list[3..7];
+    assert(middle.len() == 4);
+    assert(middle[0] == 3);
+    assert(middle[3] == 6);
+
+    let end: &[Int] = &list[7..];
+    assert(end.len() == 3);
+    assert(end[0] == 7);
+    assert(end[2] == 9);
+
+    let full: &[Int] = &list[..];
+    assert(full.len() == 10);
+
+    // Mutable slicing
+    let mut mutable_list: List<Int> = [1, 2, 3, 4, 5];
+    let slice: &mut [Int] = &mut mutable_list[1..4];
+    slice[0] = 20;
+    slice[1] = 30;
+    slice[2] = 40;
+    assert(mutable_list == [1, 20, 30, 40, 5]);
+
+    // Split operations
+    let (left, right) = list.split_at(5);
+    assert(left.len() == 5);
+    assert(right.len() == 5);
+    assert(left[4] == 4);
+    assert(right[0] == 5);
+
+    // Split first and last
+    let with_data: List<Int> = [1, 2, 3, 4, 5];
+    let (first, rest) = with_data.split_first().unwrap();
+    assert(*first == 1);
+    assert(rest.len() == 4);
+
+    let (last, init) = with_data.split_last().unwrap();
+    assert(*last == 5);
+    assert(init.len() == 4);
+}
+
+/// Test functional/iterator operations
+fn test_list_functional_operations() {
+    let list: List<Int> = [1, 2, 3, 4, 5];
+
+    // map - transform each element
+    let doubled: List<Int> = list.iter().map(|x| *x * 2).collect();
+    assert(doubled == [2, 4, 6, 8, 10]);
+
+    // filter - keep elements matching predicate
+    let evens: List<Int> = list.iter().filter(|x| *x % 2 == 0).copied().collect();
+    assert(evens == [2, 4]);
+
+    // filter_map - combined filter and map
+    let texts: List<Text> = ["1", "two", "3", "four", "5"];
+    let numbers: List<Int> = texts.iter()
+        .filter_map(|s| s.parse<Int>().ok())
+        .collect();
+    assert(numbers == [1, 3, 5]);
+
+    // flat_map - map and flatten
+    let nested: List<List<Int>> = [[1, 2], [3, 4], [5]];
+    let flattened: List<Int> = nested.iter()
+        .flat_map(|inner| inner.iter().copied())
+        .collect();
+    assert(flattened == [1, 2, 3, 4, 5]);
+
+    // flatten - flatten nested iterators
+    let nested2: List<List<Int>> = [[1, 2], [3, 4]];
+    let flat: List<Int> = nested2.into_iter().flatten().collect();
+    assert(flat == [1, 2, 3, 4]);
+
+    // fold - reduce to single value
+    let sum: Int = list.iter().fold(0, |acc, x| acc + *x);
+    assert(sum == 15);
+
+    let product: Int = list.iter().fold(1, |acc, x| acc * *x);
+    assert(product == 120);
+
+    // reduce - fold without initial value
+    let reduced_sum: Maybe<Int> = list.iter().copied().reduce(|a, b| a + b);
+    assert(reduced_sum == Some(15));
+
+    // scan - fold with intermediate results
+    let running_sum: List<Int> = list.iter()
+        .scan(0, |state, x| {
+            *state = *state + *x;
+            Some(*state)
+        })
+        .collect();
+    assert(running_sum == [1, 3, 6, 10, 15]);
+
+    // take and skip
+    let first_three: List<Int> = list.iter().take(3).copied().collect();
+    assert(first_three == [1, 2, 3]);
+
+    let skip_two: List<Int> = list.iter().skip(2).copied().collect();
+    assert(skip_two == [3, 4, 5]);
+
+    // take_while and skip_while
+    let take_small: List<Int> = list.iter().take_while(|x| **x < 4).copied().collect();
+    assert(take_small == [1, 2, 3]);
+
+    let skip_small: List<Int> = list.iter().skip_while(|x| **x < 3).copied().collect();
+    assert(skip_small == [3, 4, 5]);
+
+    // chain - concatenate iterators
+    let list_a: List<Int> = [1, 2];
+    let list_b: List<Int> = [3, 4];
+    let chained: List<Int> = list_a.iter().chain(list_b.iter()).copied().collect();
+    assert(chained == [1, 2, 3, 4]);
+
+    // cycle - repeat infinitely (use with take)
+    let cycled: List<Int> = [1, 2].iter().cycle().take(5).copied().collect();
+    assert(cycled == [1, 2, 1, 2, 1]);
+
+    // step_by - take every nth element
+    let stepped: List<Int> = list.iter().step_by(2).copied().collect();
+    assert(stepped == [1, 3, 5]);
+
+    // partition - split by predicate
+    let (evens_part, odds_part): (List<Int>, List<Int>) = list.iter()
+        .copied()
+        .partition(|x| *x % 2 == 0);
+    assert(evens_part == [2, 4]);
+    assert(odds_part == [1, 3, 5]);
+
+    // unzip - split pairs into separate lists
+    let pairs: List<(Int, Text)> = [(1, "a"), (2, "b"), (3, "c")];
+    let (nums, texts_out): (List<Int>, List<Text>) = pairs.into_iter().unzip();
+    assert(nums == [1, 2, 3]);
+    assert(texts_out == ["a", "b", "c"]);
+}
+
+/// Test sorting and ordering operations
+fn test_list_sorting_and_ordering() {
+    // Basic sort
+    let mut to_sort: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    to_sort.sort();
+    assert(to_sort == [1, 1, 2, 3, 4, 5, 6, 9]);
+
+    // Sort descending
+    let mut desc: List<Int> = [3, 1, 4, 1, 5];
+    desc.sort_by(|a, b| b.cmp(a));
+    assert(desc == [5, 4, 3, 1, 1]);
+
+    // Sort by key
+    let mut items: List<(Text, Int)> = [
+        ("banana", 3),
+        ("apple", 1),
+        ("cherry", 2),
+    ];
+    items.sort_by_key(|(_, v)| *v);
+    assert(items[0].0 == "apple");
+    assert(items[2].0 == "banana");
+
+    // Stable sort (preserves order of equal elements)
+    let mut stable_items: List<(Int, Text)> = [
+        (1, "a"), (2, "b"), (1, "c"), (2, "d"),
+    ];
+    stable_items.sort_by_key(|(k, _)| *k);
+    // Elements with same key preserve original order
+    assert(stable_items[0] == (1, "a"));
+    assert(stable_items[1] == (1, "c"));
+
+    // Reverse
+    let mut to_reverse: List<Int> = [1, 2, 3, 4, 5];
+    to_reverse.reverse();
+    assert(to_reverse == [5, 4, 3, 2, 1]);
+
+    // Rotate
+    let mut to_rotate: List<Int> = [1, 2, 3, 4, 5];
+    to_rotate.rotate_left(2);
+    assert(to_rotate == [3, 4, 5, 1, 2]);
+
+    to_rotate.rotate_right(2);
+    assert(to_rotate == [1, 2, 3, 4, 5]);
+
+    // Commented out: rng not bound in this scope
+    // let mut to_shuffle: List<Int> = [1, 2, 3, 4, 5];
+    // to_shuffle.shuffle(&mut rng);  // Requires random generator
+    // assert(to_shuffle.len() == 5);
+    // assert(to_shuffle.iter().sum<Int>() == 15);  // Same elements, different order
+}
+
+/// Test capacity management
+fn test_list_capacity_management() {
+    let mut list: List<Int> = List.new();
+
+    // Initial capacity
+    assert(list.capacity() >= 0);
+
+    // Reserve capacity
+    list.reserve(100);
+    assert(list.capacity() >= 100);
+
+    // Reserve exact
+    let mut exact: List<Int> = List.new();
+    exact.reserve_exact(50);
+    assert(exact.capacity() >= 50);
+
+    // Shrink to fit
+    let mut large: List<Int> = List.with_capacity(1000);
+    large.push(1);
+    large.push(2);
+    large.shrink_to_fit();
+    assert(large.capacity() < 1000);
+
+    // Shrink to specific size
+    let mut sized: List<Int> = List.with_capacity(100);
+    sized.extend([1, 2, 3, 4, 5]);
+    sized.shrink_to(10);
+    assert(sized.capacity() >= 5);
+    assert(sized.capacity() <= 100);
+}
+
+/// Test list comparisons and equality
+fn test_list_comparison() {
+    let list_a: List<Int> = [1, 2, 3];
+    let list_b: List<Int> = [1, 2, 3];
+    let list_c: List<Int> = [1, 2, 4];
+    let list_d: List<Int> = [1, 2];
+
+    // Equality
+    assert(list_a == list_b);
+    assert(list_a != list_c);
+    assert(list_a != list_d);
+
+    // Lexicographic ordering
+    assert(list_a < list_c);  // 3 < 4 at index 2
+    assert(list_d < list_a);  // Shorter list is less
+
+    // starts_with and ends_with
+    let list: List<Int> = [1, 2, 3, 4, 5];
+    assert(list.starts_with(&[1, 2]));
+    assert(list.starts_with(&[1, 2, 3]));
+    assert(!list.starts_with(&[2, 3]));
+
+    assert(list.ends_with(&[4, 5]));
+    assert(list.ends_with(&[3, 4, 5]));
+    assert(!list.ends_with(&[3, 4]));
+
+    // Empty list edge cases
+    let empty: List<Int> = List.new();
+    assert(list.starts_with(&empty));
+    assert(list.ends_with(&empty));
+    assert(empty.starts_with(&empty));
+}

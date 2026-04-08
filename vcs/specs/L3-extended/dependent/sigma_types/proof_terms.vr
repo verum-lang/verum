@@ -1,0 +1,179 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, proof-terms
+
+/// Proof terms - explicit witnesses for propositions
+///
+/// Proof terms are values that witness the truth of propositions.
+/// They enable compile-time verification of program properties.
+
+/// Proof witness type
+type ProofWitness<T> is | Witnessed;
+
+/// Equality proof type
+type EqProof<T> is | EqRefl;
+
+/// Construct reflexivity proof
+fn refl<T>() -> EqProof<T> {
+    EqRefl
+}
+
+/// Symmetry: swap sides of equality
+fn symm<T>(proof: EqProof<T>) -> EqProof<T> {
+    match proof {
+        EqRefl => EqRefl,
+    }
+}
+
+/// Transitivity: chain equalities
+fn trans<T>(p: EqProof<T>, q: EqProof<T>) -> EqProof<T> {
+    match (p, q) {
+        (EqRefl, EqRefl) => EqRefl,
+    }
+}
+
+/// Congruence: equal inputs give equal outputs
+fn cong<A, B>(f: fn(A) -> B, proof: EqProof<A>) -> EqProof<B> {
+    match proof {
+        EqRefl => EqRefl,
+    }
+}
+
+/// Ordering proof type
+type LtProof is | LtWitness;
+
+/// Transitivity of less-than
+fn lt_trans(p: LtProof, q: LtProof) -> LtProof {
+    match (p, q) {
+        (LtWitness, LtWitness) => LtWitness,
+    }
+}
+
+/// Bounded value with proof of bounds
+type BoundedValue is {
+    value: Int,
+    lo: Int,
+    hi: Int,
+};
+
+/// Safe access using bounded index
+fn safe_index<T>(arr: List<T>, bv: BoundedValue) -> T
+where bv.value >= 0, bv.value < arr.len() {
+    arr[bv.value]
+}
+
+/// Non-empty list (carries length proof)
+type NonEmptyList<T> is {
+    data: List<T>,
+    length: Int,
+};
+
+fn mk_nonempty<T>(xs: List<T>) -> Maybe<NonEmptyList<T>> {
+    if xs.len() > 0 {
+        Some(NonEmptyList { data: xs, length: xs.len() })
+    } else {
+        None
+    }
+}
+
+fn ne_head<T>(ne: NonEmptyList<T>) -> T
+where ne.length > 0 {
+    ne.data[0]
+}
+
+/// Sorted list (carries proof of sortedness)
+type SortedList<T> is {
+    data: List<T>,
+    sorted: Bool,
+};
+
+fn mk_sorted<T>(xs: List<T>) -> SortedList<T> {
+    let mut data = xs;
+    data.sort();
+    SortedList { data, sorted: true }
+}
+
+fn binary_search_sorted(sorted: SortedList<Int>, target: Int) -> Maybe<Int> {
+    // Can safely use binary search since data is sorted
+    let mut lo = 0;
+    let mut hi = sorted.data.len() - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if sorted.data[mid] == target {
+            return Some(mid);
+        } else if sorted.data[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    None
+}
+
+/// Even number proof
+type EvenNum is {
+    value: Int,
+};
+
+fn double_to_even(n: Int) -> EvenNum {
+    EvenNum { value: n * 2 }
+}
+
+fn sum_evens(a: EvenNum, b: EvenNum) -> EvenNum {
+    EvenNum { value: a.value + b.value }
+}
+
+/// Percentage: value between 0 and 100
+type Percentage is {
+    value: Int,
+};
+
+fn mk_percentage(v: Int) -> Maybe<Percentage> {
+    if v >= 0 && v <= 100 {
+        Some(Percentage { value: v })
+    } else {
+        None
+    }
+}
+
+fn main() {
+    // Equality proofs
+    let p: EqProof<Int> = refl();
+    let q: EqProof<Int> = symm(p);
+    let r: EqProof<Int> = trans(p, q);
+
+    // Ordering proof
+    let lt1: LtProof = LtWitness;
+    let lt2: LtProof = LtWitness;
+    let lt3 = lt_trans(lt1, lt2);
+
+    // Bounded value
+    let bv: BoundedValue = BoundedValue { value: 2, lo: 0, hi: 10 };
+
+    // Non-empty list
+    let ne = mk_nonempty([1, 2, 3]);
+    assert(ne.is_some());
+
+    let empty = mk_nonempty([]);
+    assert(empty.is_none());
+
+    // Sorted list
+    let sorted = mk_sorted([3, 1, 4, 1, 5]);
+    assert(sorted.sorted == true);
+    let found = binary_search_sorted(sorted, 4);
+    assert(found.is_some());
+
+    // Even numbers
+    let e1 = double_to_even(21);
+    assert(e1.value == 42);
+    let e2 = double_to_even(5);
+    let e3 = sum_evens(e1, e2);
+    assert(e3.value == 52);
+
+    // Percentage
+    let pct = mk_percentage(75);
+    assert(pct.is_some());
+    let invalid = mk_percentage(150);
+    assert(invalid.is_none());
+}

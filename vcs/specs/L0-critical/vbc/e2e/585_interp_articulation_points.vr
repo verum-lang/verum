@@ -1,0 +1,189 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, articulation_points, dfs, tarjan, graph, cut_vertices
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Articulation point finding via DFS (Tarjan-style).
+//
+// An articulation point (cut vertex) is a vertex whose removal disconnects the graph.
+//
+// Algorithm:
+//   DFS with discovery times (disc[]) and low-link values (low[]).
+//   low[u] = min(disc[u], min{disc[w] : back edge u->w}, min{low[v] : tree edge u->v}).
+//   u is an articulation point if:
+//     (a) u is root of DFS tree and has >=2 children, OR
+//     (b) u is non-root and has a child v with low[v] >= disc[u].
+//
+// Graph: adjacency matrix 8x8 stored as [Int; 64].
+// ap[] stores 1 for articulation points, 0 otherwise.
+// num_ap[0] = count of articulation points.
+
+fn ap_adj(adj: [Int; 64], u: Int, v: Int) -> Int { adj[u * 8 + v] }
+
+fn make_adj64() -> [Int; 64] {
+    [0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+     0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0]
+}
+
+// DFS for articulation point detection.
+// timer[0] = current timestamp, children[0] = child count of DFS root.
+@allow(unbounded_recursion)
+fn ap_dfs(adj: [Int; 64], n: Int, u: Int, parent: Int,
+          disc: [Int; 8], low: [Int; 8], vis: [Int; 8],
+          timer: [Int; 8], ap: [Int; 8], children: [Int; 8]) {
+    vis[u] = 1;
+    disc[u] = timer[0];
+    low[u]  = timer[0];
+    timer[0] = timer[0] + 1;
+    let mut v = 0;
+    while v < n {
+        if ap_adj(adj, u, v) == 1 {
+            if vis[v] == 0 {
+                if parent == -1 { children[0] = children[0] + 1; }
+                ap_dfs(adj, n, v, u, disc, low, vis, timer, ap, children);
+                if low[v] < low[u] { low[u] = low[v]; }
+                // Non-root articulation point check.
+                if parent != -1 && low[v] >= disc[u] { ap[u] = 1; }
+            } else {
+                if v != parent && disc[v] < low[u] { low[u] = disc[v]; }
+            }
+        }
+        v = v + 1;
+    }
+}
+
+// Find articulation points. Fills ap[]. Returns count.
+fn find_ap(adj: [Int; 64], n: Int,
+           disc: [Int; 8], low: [Int; 8], vis: [Int; 8],
+           timer: [Int; 8], ap: [Int; 8]) -> Int {
+    let mut i = 0;
+    while i < n { vis[i] = 0; disc[i] = -1; low[i] = -1; ap[i] = 0; i = i + 1; }
+    timer[0] = 0;
+    i = 0;
+    while i < n {
+        if vis[i] == 0 {
+            let mut children = [0,0,0,0,0,0,0,0];
+            ap_dfs(adj, n, i, -1, disc, low, vis, timer, ap, children);
+            // Root articulation point check.
+            if children[0] >= 2 { ap[i] = 1; }
+        }
+        i = i + 1;
+    }
+    let mut cnt = 0;
+    i = 0;
+    while i < n { cnt = cnt + ap[i]; i = i + 1; }
+    cnt
+}
+
+fn test_path_graph() {
+    // Path 0-1-2-3: nodes 1 and 2 are articulation points (2 APs).
+    let mut adj = make_adj64();
+    adj[0*8+1] = 1; adj[1*8+0] = 1;
+    adj[1*8+2] = 1; adj[2*8+1] = 1;
+    adj[2*8+3] = 1; adj[3*8+2] = 1;
+    let mut disc  = [0,0,0,0,0,0,0,0];
+    let mut low   = [0,0,0,0,0,0,0,0];
+    let mut vis   = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut ap    = [0,0,0,0,0,0,0,0];
+    let cnt = find_ap(adj, 4, disc, low, vis, timer, ap);
+    assert_eq(cnt, 2);
+    assert_eq(ap[1], 1);
+    assert_eq(ap[2], 1);
+    assert_eq(ap[0], 0);
+    assert_eq(ap[3], 0);
+    print("path_graph: ok");
+}
+
+fn test_triangle_no_ap() {
+    // Triangle 0-1-2-0: no articulation points.
+    let mut adj = make_adj64();
+    adj[0*8+1] = 1; adj[1*8+0] = 1;
+    adj[1*8+2] = 1; adj[2*8+1] = 1;
+    adj[2*8+0] = 1; adj[0*8+2] = 1;
+    let mut disc  = [0,0,0,0,0,0,0,0];
+    let mut low   = [0,0,0,0,0,0,0,0];
+    let mut vis   = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut ap    = [0,0,0,0,0,0,0,0];
+    let cnt = find_ap(adj, 3, disc, low, vis, timer, ap);
+    assert_eq(cnt, 0);
+    assert_eq(ap[0], 0);
+    assert_eq(ap[1], 0);
+    assert_eq(ap[2], 0);
+    print("triangle_no_ap: ok");
+}
+
+fn test_star_center_is_ap() {
+    // Star: center=0, leaves=1,2,3. Center is the only AP.
+    let mut adj = make_adj64();
+    adj[0*8+1] = 1; adj[1*8+0] = 1;
+    adj[0*8+2] = 1; adj[2*8+0] = 1;
+    adj[0*8+3] = 1; adj[3*8+0] = 1;
+    let mut disc  = [0,0,0,0,0,0,0,0];
+    let mut low   = [0,0,0,0,0,0,0,0];
+    let mut vis   = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut ap    = [0,0,0,0,0,0,0,0];
+    let cnt = find_ap(adj, 4, disc, low, vis, timer, ap);
+    assert_eq(cnt, 1);
+    assert_eq(ap[0], 1);
+    assert_eq(ap[1], 0);
+    assert_eq(ap[2], 0);
+    assert_eq(ap[3], 0);
+    print("star_center_is_ap: ok");
+}
+
+fn test_two_triangles_joined() {
+    // Two triangles joined at node 2:
+    // 0-1-2-0 and 2-3-4-2. Node 2 is the only AP.
+    let mut adj = make_adj64();
+    adj[0*8+1] = 1; adj[1*8+0] = 1;
+    adj[1*8+2] = 1; adj[2*8+1] = 1;
+    adj[2*8+0] = 1; adj[0*8+2] = 1;
+    adj[2*8+3] = 1; adj[3*8+2] = 1;
+    adj[3*8+4] = 1; adj[4*8+3] = 1;
+    adj[4*8+2] = 1; adj[2*8+4] = 1;
+    let mut disc  = [0,0,0,0,0,0,0,0];
+    let mut low   = [0,0,0,0,0,0,0,0];
+    let mut vis   = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut ap    = [0,0,0,0,0,0,0,0];
+    let cnt = find_ap(adj, 5, disc, low, vis, timer, ap);
+    assert_eq(cnt, 1);
+    assert_eq(ap[2], 1);
+    print("two_triangles_joined: ok");
+}
+
+fn test_fully_connected() {
+    // Complete graph K4: no articulation points.
+    let mut adj = make_adj64();
+    adj[0*8+1] = 1; adj[1*8+0] = 1;
+    adj[0*8+2] = 1; adj[2*8+0] = 1;
+    adj[0*8+3] = 1; adj[3*8+0] = 1;
+    adj[1*8+2] = 1; adj[2*8+1] = 1;
+    adj[1*8+3] = 1; adj[3*8+1] = 1;
+    adj[2*8+3] = 1; adj[3*8+2] = 1;
+    let mut disc  = [0,0,0,0,0,0,0,0];
+    let mut low   = [0,0,0,0,0,0,0,0];
+    let mut vis   = [0,0,0,0,0,0,0,0];
+    let mut timer = [0,0,0,0,0,0,0,0];
+    let mut ap    = [0,0,0,0,0,0,0,0];
+    let cnt = find_ap(adj, 4, disc, low, vis, timer, ap);
+    assert_eq(cnt, 0);
+    print("fully_connected: ok");
+}
+
+fn main() -> Int {
+    test_path_graph();
+    test_triangle_no_ap();
+    test_star_center_is_ap();
+    test_two_triangles_joined();
+    test_fully_connected();
+    print("[OK] 585_interp_articulation_points");
+    0
+}

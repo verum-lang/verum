@@ -1,0 +1,169 @@
+// @test: parse
+// @level: L0
+// @tags: parser, expressions, paths
+// @description: Test path expression parsing from grammar/verum.ebnf
+
+// =============================================================================
+// SIMPLE PATH EXPRESSIONS (Section 2.12 - path_expr)
+// =============================================================================
+
+fn test_simple_identifiers() {
+    // Single identifier paths
+    let a = x;
+    let b = foo;
+    let c = my_variable;
+    let d = _underscore;
+    let e = camelCase;
+    let f = PascalCase;
+    let g = SCREAMING_CASE;
+}
+
+fn test_qualified_paths() {
+    // Multi-segment paths using . (NOT .)
+    let a = mymod.item;
+    let b = package.mymod.item;
+    let c = std.collections.List;
+    let d = my.deeply.nested.mymod.function;
+    let e = verum.core.Text;
+}
+
+// =============================================================================
+// SPECIAL PATH SEGMENTS (Section 2.2 - path_segment)
+// =============================================================================
+
+fn test_self_paths() {
+    // self refers to current module/type
+    let a = self.field;
+    let b = self.method();
+    let c = self.nested.item;
+}
+
+fn test_super_paths() {
+    // super refers to parent module
+    let a = super.item;
+    let b = super.parent_function;
+    let c = super.super.grandparent;
+}
+
+fn test_crate_paths() {
+    // crate refers to crate root
+    let a = crate.mymod;
+    let b = crate.utils.helper;
+    let c = crate.config.Settings;
+}
+
+fn test_mixed_special_paths() {
+    let a = self.field;
+    let b = super.sibling;
+    let c = crate.root_item;
+    let d = super.super.ancestor;
+}
+
+// =============================================================================
+// PATH WITH TYPE ARGUMENTS (via postfix_op)
+// =============================================================================
+
+fn test_generic_paths() {
+    // Generic type paths in type annotations
+    let a: List<Int> = items;
+    let b: Map<Text, Int> = data;
+    let c: Maybe<User> = user;
+    let d: Result<Data, Error> = result;
+    let e: std.collections.List<Int> = list;
+}
+
+fn test_nested_generic_paths() {
+    // Generic types in type annotations
+    let a: List<List<Int>> = items;
+    let b: Map<Text, List<User>> = data;
+    let c: Result<Maybe<Value>, Error> = result;
+    let d: Container<Inner<Deep<T>>> = container;
+}
+
+// =============================================================================
+// PATHS IN VARIOUS CONTEXTS
+// =============================================================================
+
+fn test_paths_as_values() {
+    // Path expressions used as values
+    let a = some_constant;
+    let b = mymod.CONSTANT;
+    let c = config.DEBUG_MODE;
+}
+
+fn test_paths_to_functions() {
+    // Paths to functions (not calling them)
+    let f = compute;
+    let g = mymod.helper;
+    let h = std.io.print;
+}
+
+fn test_paths_to_types() {
+    // Paths used in type position (though typically in type annotations)
+    let x: mymod.Type = value;
+    let y: std.collections.List<Int> = items;
+}
+
+// =============================================================================
+// RELATIVE VS ABSOLUTE PATHS
+// =============================================================================
+
+fn test_relative_paths() {
+    // Paths relative to current scope
+    let a = local_item;
+    let b = sibling.item;
+    let c = child.grandchild.item;
+}
+
+fn test_absolute_paths() {
+    // Paths from crate root
+    let a = crate.absolute.path;
+    let b = crate.mymod.sumymod.item;
+}
+
+// =============================================================================
+// UNICODE IDENTIFIERS IN PATHS
+// =============================================================================
+
+fn test_unicode_paths() {
+    // Unicode identifiers are allowed per grammar
+    let a = nombre;
+    let b = valeur;
+}
+
+// =============================================================================
+// PATHS WITH UNDERSCORES
+// =============================================================================
+
+fn test_underscore_paths() {
+    let a = _private;
+    let b = __dunder__;
+    let c = _leading_underscore;
+    let d = trailing_underscore_;
+    let e = with_multiple__underscores;
+}
+
+// =============================================================================
+// COMPLEX PATH EXPRESSIONS
+// =============================================================================
+
+fn test_paths_in_expressions() {
+    // Paths combined with other expressions
+    let a = mymod.value + other.value;
+    let b = self.count * factor;
+    let c = if crate.config.enabled { super.default } else { local };
+}
+
+fn test_paths_with_field_access() {
+    // Path followed by field access
+    let a = mymod.instance.field;
+    let b = self.data.inner.value;
+    let c = crate.singleton.config.setting;
+}
+
+fn test_paths_with_method_calls() {
+    // Path followed by method call
+    let a = mymod.instance.method();
+    let b = self.data.process();
+    let c = std.collections.List.new();
+}

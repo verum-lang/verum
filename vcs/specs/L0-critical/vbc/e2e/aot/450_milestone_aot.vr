@@ -1,0 +1,167 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, 450
+// @timeout: 30000
+
+// Milestone test 450: number theory showcase
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    a / gcd(a, b) * b
+}
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n == 2 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        i = i + 2;
+    }
+    1
+}
+
+// Nth prime (small values)
+fn nth_prime(n: Int) -> Int {
+    let mut count = 0;
+    let mut candidate = 2;
+    while count < n {
+        if is_prime(candidate) == 1 {
+            count = count + 1;
+            if count == n { return candidate; }
+        }
+        candidate = candidate + 1;
+    }
+    candidate
+}
+
+// Sum of proper divisors
+fn sigma(n: Int) -> Int {
+    if n <= 1 { return 0; }
+    let mut sum = 1;
+    let mut i = 2;
+    while i * i <= n {
+        if n % i == 0 {
+            sum = sum + i;
+            if i != n / i { sum = sum + n / i; }
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+// Perfect number check
+fn is_perfect(n: Int) -> Int {
+    if sigma(n) == n { 1 } else { 0 }
+}
+
+// Count twin primes up to n
+fn count_twin_primes(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 3;
+    while i + 2 <= n {
+        if is_prime(i) == 1 {
+            if is_prime(i + 2) == 1 {
+                count = count + 1;
+            }
+        }
+        i = i + 2;
+    }
+    count
+}
+
+// Collatz sequence length
+fn collatz_len(n: Int) -> Int {
+    let mut steps = 0;
+    let mut v = n;
+    while v != 1 {
+        if v % 2 == 0 { v = v / 2; }
+        else { v = 3 * v + 1; }
+        steps = steps + 1;
+    }
+    steps
+}
+
+// Modular exponentiation
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = result * b % m; }
+        b = b * b % m;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_gcd_lcm() -> Int {
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(12, 18), 36);
+    1
+}
+
+fn test_primes() -> Int {
+    assert_eq(nth_prime(1), 2);
+    assert_eq(nth_prime(5), 11);
+    assert_eq(nth_prime(10), 29);
+    assert_eq(nth_prime(25), 97);
+    1
+}
+
+fn test_perfect() -> Int {
+    assert_eq(is_perfect(6), 1);    // 1+2+3=6
+    assert_eq(is_perfect(28), 1);   // 1+2+4+7+14=28
+    assert_eq(is_perfect(12), 0);
+    1
+}
+
+fn test_twin_primes() -> Int {
+    // Twin primes up to 30: (3,5), (5,7), (11,13), (17,19), (29,31)
+    // Up to 30 means i+2<=30, so (29,31) doesn't count
+    assert_eq(count_twin_primes(30), 4);
+    assert_eq(count_twin_primes(100), 8);
+    1
+}
+
+fn test_collatz() -> Int {
+    assert_eq(collatz_len(1), 0);
+    assert_eq(collatz_len(2), 1);
+    assert_eq(collatz_len(3), 7);   // 3->10->5->16->8->4->2->1
+    assert_eq(collatz_len(27), 111);
+    1
+}
+
+fn test_mod_pow() -> Int {
+    assert_eq(mod_pow(2, 10, 1024), 0);
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(3, 7, 100), 87); // 2187 % 100 = 87
+    // Fermat's little theorem: 2^6 ≡ 1 (mod 7)
+    assert_eq(mod_pow(2, 6, 7), 1);
+    1
+}
+
+fn main() -> Int {
+    test_gcd_lcm();
+    test_primes();
+    test_perfect();
+    test_twin_primes();
+    test_collatz();
+    test_mod_pow();
+    print("[OK] 450_milestone_aot");
+    0
+}

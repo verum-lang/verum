@@ -1,0 +1,252 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, arithmetic, power, exponentiation
+
+fn test_basic_power_operations() {
+    let x = 2;
+    let y = 3;
+    let z = 4;
+    let n = 5;
+
+    // Basic power operations
+    let squared = x ** 2;
+    let cubed = y ** 3;
+    let fourth = z ** 4;
+
+    // Power with floating point exponent
+    let sqrt = x ** 0.5;
+    let cbrt = y ** (1.0 / 3.0);
+    let fractional = z ** 2.5;
+
+    // Power with negative exponent
+    let inverse = x ** -1;
+    let inverse_square = y ** -2;
+
+    // Power with zero
+    let any_to_zero = x ** 0;
+    let base_zero = 0 ** n;
+
+    // Power with one
+    let to_one = x ** 1;
+    let one_base = 1 ** n;
+}
+
+fn test_power_associativity() {
+    // Power right associativity
+    let tower = 2 ** 3 ** 4;
+    let explicit_right = 2 ** (3 ** 4);
+
+    // Power with parentheses
+    let explicit_left = (2 ** 3) ** 4;
+    let a = 1;
+    let b = 2;
+    let grouped = (a + b) ** 2;
+}
+
+fn test_power_precedence() {
+    let x = 2;
+    let a = 3;
+    let b = 4;
+
+    // Power precedence with unary
+    let neg_base = (-x) ** 2;
+    let neg_result = -(x ** 2);
+
+    // Power precedence with multiplication
+    let product_power = a * b ** 2;
+    let power_product = (a * b) ** 2;
+
+    // Power precedence with addition
+    let sum_power = a + b ** 2;
+    let power_sum = (a + b) ** 2;
+}
+
+fn test_power_with_calls() {
+    fn f(x: Int) -> Int { x }
+
+    let x = 2;
+
+    // Power with function calls
+    let call_power = f(x) ** 2;
+    let power_call = f(x ** 2);
+}
+
+fn test_power_in_expressions() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let x = 4;
+
+    // Power in complex expressions
+    let quadratic = a * x ** 2 + b * x + c;
+    let polynomial = a ** 3 + 3 * a ** 2 * b + 3 * a * b ** 2 + b ** 3;
+}
+
+fn test_power_with_methods() {
+    type Value is { val: Int };
+
+    fn abs(v: Value) -> Int { v.val }
+    fn get_value(v: Value) -> Int { v.val }
+
+    let value = Value { val: 5 };
+    let exponent = 2;
+
+    // Power with method calls
+    let chained = abs(value) ** 2;
+    let method_power = get_value(value) ** exponent;
+}
+
+fn test_power_in_closures() {
+    // Power in closures
+    let square = |x| x ** 2;
+    let power_of = |base, exp| base ** exp;
+}
+
+fn test_power_with_casts() {
+    let x = 2;
+
+    // Power with type casts
+    let casted_power = (x as Float) ** 2.0;
+    let power_casted = (x ** 2) as Int;
+}
+
+fn test_power_in_conditionals() {
+    let x = 2;
+
+    // Power in conditionals
+    let result = if x > 0 { x ** 2 } else { x ** -2 };
+}
+
+fn test_power_in_match() {
+    let exponent = 2;
+    let base = 3;
+
+    // Power in match expressions
+    let power_value = match exponent {
+        0 => 1,
+        1 => base,
+        2 => base ** 2,
+        n => base ** n,
+    };
+}
+
+fn test_power_in_loop() {
+    // Power in loop bodies
+    for i in 1..=10 {
+        let power = 2 ** i;
+        print(power);
+    }
+}
+
+fn test_power_compound_expressions() {
+    let a = 3;
+    let b = 4;
+    let x1 = 0;
+    let x2 = 3;
+    let y1 = 0;
+    let y2 = 4;
+
+    // Power with compound expressions
+    let complex = (a ** 2 + b ** 2) ** 0.5;
+    let distance = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5;
+}
+
+fn test_power_tower() {
+    // Power tower (right-associative chain)
+    let tower_of_twos = 2 ** 2 ** 2 ** 2;
+
+    // Power with negative base
+    let neg_base_even = (-2) ** 4;
+    let neg_base_odd = (-2) ** 3;
+}
+
+fn test_power_in_arrays() {
+    // Power in array expressions
+    let powers = [2 ** 0, 2 ** 1, 2 ** 2, 2 ** 3, 2 ** 4];
+    let squares = [x ** 2 for x in 1..=5];
+}
+
+fn test_power_scientific_notation() {
+    // Power with scientific notation
+    let large = 10 ** 6;
+    let small = 10 ** -6;
+    let sci = 1.5e3 ** 2;
+}
+
+fn test_power_in_struct() {
+    type PowerPoint is { base: Int, exponent: Int, result: Int };
+
+    let x = 2;
+
+    // Power in struct fields
+    let point = PowerPoint { base: x, exponent: 2, result: x ** 2 };
+}
+
+fn test_power_with_optional() {
+    type Maybe<T> is None | Some(T);
+
+    fn power(m: Maybe<Int>) -> Int {
+        match m {
+            Maybe.Some(v) => v ** 2,
+            Maybe.None => 0,
+        }
+    }
+}
+
+fn test_power_in_pipeline() {
+    fn square(x: Int) -> Int { x ** 2 }
+    fn cube(x: Int) -> Int { x ** 3 }
+
+    let value = 2;
+
+    // Power in pipeline
+    let transformed = value |> square |> cube;
+}
+
+fn test_power_with_null_coalescing() {
+    let maybe_base = 2;
+    let exponent = 3;
+
+    // Power with null coalescing pattern
+    let safe_power = maybe_base ** exponent;
+}
+
+fn test_power_math_expressions() {
+    fn factorial(n: Int) -> Int { if n <= 1 { 1 } else { n * factorial(n - 1) } }
+    fn choose(n: Int, k: Int) -> Int { factorial(n) / (factorial(k) * factorial(n - k)) }
+
+    let x = 2;
+    let n = 3;
+    let a = 1;
+    let r = 2;
+    let k = 1;
+    let p = 0.5;
+
+    // Complex mathematical expressions
+    let taylor_term = x ** n / factorial(n);
+    let binomial = choose(n, k) * (p ** k) * ((1 - p) ** (n - k));
+    let geometric = a * r ** n;
+}
+
+// Power in function return
+fn calculate_power(base: Float, exp: Float) -> Float {
+    base ** exp
+}
+
+// Power in method implementation
+type Number is { value: Int };
+
+implement Number {
+    fn squared(&self) -> Int {
+        self.value ** 2
+    }
+
+    fn cubed(&self) -> Int {
+        self.value ** 3
+    }
+
+    fn power(&self, exp: Int) -> Int {
+        self.value ** exp
+    }
+}

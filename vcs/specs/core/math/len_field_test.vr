@@ -1,0 +1,35 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, struct, len
+// @description: Test field named 'len'
+
+module specs.core.math.len_field_test;
+
+type MyVec<T> is {
+    data: List<T>,
+    len: Int,
+};
+
+implement<T> MyVec<T> {
+    public fn new(n: Int) -> MyVec<T> {
+        let data = List.with_capacity(n);
+        MyVec { data, len: n }
+    }
+
+    public fn get_len(&self) -> Int {
+        self.len
+    }
+}
+
+fn main() {
+    print("Creating MyVec<Float> with len 3...");
+    let v: MyVec<Float> = MyVec.new(3);
+    print("MyVec created!");
+
+    print("Getting len...");
+    let l = v.get_len();
+    print(f"len = {l}");
+
+    print("Test done!");
+}

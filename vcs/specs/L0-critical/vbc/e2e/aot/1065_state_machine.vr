@@ -1,0 +1,114 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: state_machine, enum, match, production
+// @expect: pass
+
+// Production pattern: TCP connection state machine.
+
+type ConnState is
+    Closed
+    | SynSent
+    | Established(Int)  // payload: connection_id
+    | Closing(Int)      // payload: reason_code
+    | Error(Text);
+
+fn transition(state: ConnState, event: Text) -> ConnState {
+    match state {
+        Closed => {
+            if event == "connect" {
+                SynSent
+            } else {
+                Closed
+            }
+        },
+        SynSent => {
+            if event == "ack" {
+                Established(1)
+            } else if event == "timeout" {
+                Error("connection timeout")
+            } else {
+                SynSent
+            }
+        },
+        Established(id) => {
+            if event == "close" {
+                Closing(0)
+            } else if event == "error" {
+                Error(f"connection {id} error")
+            } else {
+                Established(id)
+            }
+        },
+        Closing(reason) => {
+            if event == "ack" {
+                Closed
+            } else {
+                Closing(reason)
+            }
+        },
+        Error(msg) => {
+            if event == "reset" {
+                Closed
+            } else {
+                Error(msg)
+            }
+        },
+    }
+}
+
+fn is_established(state: ConnState) -> Bool {
+    match state {
+        Established(_) => true,
+        _ => false,
+    }
+}
+
+fn main() -> Int {
+    let mut state = Closed;
+
+    // Closed → SynSent → Established → Closing → Closed
+    state = transition(state, "connect");
+    match state {
+        SynSent => {},
+        _ => { print("FAIL: expected SynSent"); return 1; }
+    }
+
+    state = transition(state, "ack");
+    if !is_established(state) {
+        print("FAIL: expected Established");
+        return 1;
+    }
+
+    state = transition(state, "close");
+    match state {
+        Closing(_) => {},
+        _ => { print("FAIL: expected Closing"); return 1; }
+    }
+
+    state = transition(state, "ack");
+    match state {
+        Closed => {},
+        _ => { print("FAIL: expected Closed"); return 1; }
+    }
+
+    // Test error path
+    state = transition(Closed, "connect");
+    state = transition(state, "timeout");
+    match state {
+        Error(msg) => {
+            print(f"Error: {msg}");
+        },
+        _ => { print("FAIL: expected Error"); return 1; }
+    }
+
+    // Reset from error
+    state = transition(state, "reset");
+    match state {
+        Closed => {},
+        _ => { print("FAIL: expected Closed after reset"); return 1; }
+    }
+
+    print("PASS: state machine works");
+    0
+}

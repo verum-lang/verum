@@ -1,0 +1,201 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, type_props, stride_of, type_bits
+// @description: Comprehensive tests for stride_of and type_bits builtins
+// @contexts: MetaTypes
+
+// =============================================================================
+// STRIDE_OF TESTS
+// =============================================================================
+
+// stride_of returns the distance between consecutive elements in an array
+// stride_of(T) >= size_of(T) and stride_of(T) is multiple of align_of(T)
+
+meta fn test_stride_of_u8() -> Int using [MetaTypes] {
+    stride_of(U8)  // Should be 1
+}
+
+meta fn test_stride_of_u16() -> Int using [MetaTypes] {
+    stride_of(U16)  // Should be 2
+}
+
+meta fn test_stride_of_u32() -> Int using [MetaTypes] {
+    stride_of(U32)  // Should be 4
+}
+
+meta fn test_stride_of_u64() -> Int using [MetaTypes] {
+    stride_of(U64)  // Should be 8
+}
+
+// Test stride >= size invariant for primitives
+meta fn test_stride_size_invariant_primitives() -> Bool using [MetaTypes] {
+    stride_of(Int) >= size_of(Int) &&
+    stride_of(U8) >= size_of(U8) &&
+    stride_of(U16) >= size_of(U16) &&
+    stride_of(U32) >= size_of(U32) &&
+    stride_of(U64) >= size_of(U64)
+}
+
+// Test stride is multiple of alignment for primitives
+meta fn test_stride_alignment_invariant_primitives() -> Bool using [MetaTypes] {
+    let stride_int = stride_of(Int);
+    let align_int = align_of(Int);
+    let stride_u32 = stride_of(U32);
+    let align_u32 = align_of(U32);
+
+    (stride_int == 0 || stride_int % align_int == 0) &&
+    (stride_u32 == 0 || stride_u32 % align_u32 == 0)
+}
+
+// Test stride matches size for power-of-2 aligned types
+meta fn test_stride_equals_size_for_primitives() -> Bool using [MetaTypes] {
+    // For well-aligned primitive types, stride usually equals size
+    stride_of(U8) == size_of(U8) &&
+    stride_of(U16) == size_of(U16) &&
+    stride_of(U32) == size_of(U32) &&
+    stride_of(U64) == size_of(U64)
+}
+
+// =============================================================================
+// TYPE_BITS TESTS
+// =============================================================================
+
+// type_bits returns the number of bits in a type
+
+meta fn test_type_bits_u8() -> Int using [MetaTypes] {
+    type_bits(U8)  // Should be 8
+}
+
+meta fn test_type_bits_u16() -> Int using [MetaTypes] {
+    type_bits(U16)  // Should be 16
+}
+
+meta fn test_type_bits_u32() -> Int using [MetaTypes] {
+    type_bits(U32)  // Should be 32
+}
+
+meta fn test_type_bits_u64() -> Int using [MetaTypes] {
+    type_bits(U64)  // Should be 64
+}
+
+meta fn test_type_bits_i8() -> Int using [MetaTypes] {
+    type_bits(I8)  // Should be 8
+}
+
+meta fn test_type_bits_i16() -> Int using [MetaTypes] {
+    type_bits(I16)  // Should be 16
+}
+
+meta fn test_type_bits_i32() -> Int using [MetaTypes] {
+    type_bits(I32)  // Should be 32
+}
+
+meta fn test_type_bits_i64() -> Int using [MetaTypes] {
+    type_bits(I64)  // Should be 64
+}
+
+meta fn test_type_bits_int() -> Int using [MetaTypes] {
+    type_bits(Int)  // Platform-dependent, typically 64
+}
+
+meta fn test_type_bits_bool() -> Int using [MetaTypes] {
+    type_bits(Bool)  // Typically 8 (even though only 1 bit used)
+}
+
+meta fn test_type_bits_float() -> Int using [MetaTypes] {
+    type_bits(Float)  // Typically 64 (f64)
+}
+
+meta fn test_type_bits_f32() -> Int using [MetaTypes] {
+    type_bits(F32)  // Should be 32
+}
+
+meta fn test_type_bits_f64() -> Int using [MetaTypes] {
+    type_bits(F64)  // Should be 64
+}
+
+// Test type_bits == size_of * 8 for primitive types
+meta fn test_type_bits_size_relationship() -> Bool using [MetaTypes] {
+    type_bits(U8) == size_of(U8) * 8 &&
+    type_bits(U16) == size_of(U16) * 8 &&
+    type_bits(U32) == size_of(U32) * 8 &&
+    type_bits(U64) == size_of(U64) * 8 &&
+    type_bits(I8) == size_of(I8) * 8 &&
+    type_bits(I16) == size_of(I16) * 8 &&
+    type_bits(I32) == size_of(I32) * 8 &&
+    type_bits(I64) == size_of(I64) * 8
+}
+
+// Test comparing bits
+meta fn test_type_bits_comparison() -> Bool using [MetaTypes] {
+    type_bits(U8) < type_bits(U16) &&
+    type_bits(U16) < type_bits(U32) &&
+    type_bits(U32) < type_bits(U64)
+}
+
+// =============================================================================
+// COMBINED STRIDE AND BITS TESTS
+// =============================================================================
+
+// Test stride in bits
+meta fn test_stride_in_bits() -> Bool using [MetaTypes] {
+    let stride_u32 = stride_of(U32);
+    let bits_u32 = type_bits(U32);
+    // stride * 8 should equal or exceed bits
+    stride_u32 * 8 >= bits_u32
+}
+
+// Test array element spacing calculation
+meta fn test_array_element_calculation() -> Bool using [MetaTypes] {
+    // For an array [T; N], element at index i is at offset (i * stride_of(T))
+    let stride = stride_of(U32);
+    let elem_0_offset = 0 * stride;
+    let elem_1_offset = 1 * stride;
+    let elem_2_offset = 2 * stride;
+
+    elem_0_offset == 0 &&
+    elem_1_offset == stride &&
+    elem_2_offset == 2 * stride
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Stride tests - basic types
+    @const assert(test_stride_of_u8() == 1);
+    @const assert(test_stride_of_u16() == 2);
+    @const assert(test_stride_of_u32() == 4);
+    @const assert(test_stride_of_u64() == 8);
+
+    // Stride invariants
+    @const assert(test_stride_size_invariant_primitives());
+    @const assert(test_stride_alignment_invariant_primitives());
+    @const assert(test_stride_equals_size_for_primitives());
+
+    // Type bits tests - unsigned
+    @const assert(test_type_bits_u8() == 8);
+    @const assert(test_type_bits_u16() == 16);
+    @const assert(test_type_bits_u32() == 32);
+    @const assert(test_type_bits_u64() == 64);
+
+    // Type bits tests - signed
+    @const assert(test_type_bits_i8() == 8);
+    @const assert(test_type_bits_i16() == 16);
+    @const assert(test_type_bits_i32() == 32);
+    @const assert(test_type_bits_i64() == 64);
+
+    // Type bits tests - floats
+    @const assert(test_type_bits_f32() == 32);
+    @const assert(test_type_bits_f64() == 64);
+
+    // Type bits relationships
+    @const assert(test_type_bits_size_relationship());
+    @const assert(test_type_bits_comparison());
+
+    // Combined tests
+    @const assert(test_stride_in_bits());
+    @const assert(test_array_element_calculation());
+}

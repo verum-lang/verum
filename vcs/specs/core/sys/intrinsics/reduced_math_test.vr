@@ -1,0 +1,61 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Reduced test to find breaking point
+
+module test.stdlib.sys.intrinsics.reduced_math_test;
+
+mount core.intrinsics.{
+    sqrt_f64, abs_f64, floor_f64, ceil_f64, round_f64, trunc_f64,
+};
+
+const EPSILON_F64: Float64 = 1e-10;
+
+fn approx_eq_f64(a: Float64, b: Float64, epsilon: Float64) -> Bool {
+    let diff = abs_f64(a - b);
+    diff < epsilon
+}
+
+fn main() {
+    // sqrt - 4 assertions
+    assert(approx_eq_f64(sqrt_f64(0.0), 0.0, EPSILON_F64));
+    print("sqrt(0) passed");
+
+    assert(approx_eq_f64(sqrt_f64(1.0), 1.0, EPSILON_F64));
+    print("sqrt(1) passed");
+
+    assert(approx_eq_f64(sqrt_f64(4.0), 2.0, EPSILON_F64));
+    print("sqrt(4) passed");
+
+    assert(approx_eq_f64(sqrt_f64(100.0), 10.0, EPSILON_F64));
+    print("sqrt(100) passed");
+
+    // abs - 4 assertions
+    assert(abs_f64(5.0) == 5.0);
+    print("abs(5.0) passed");
+
+    assert(abs_f64(-5.0) == 5.0);
+    print("abs(-5.0) passed");
+
+    assert(abs_f64(0.0) == 0.0);
+    print("abs(0.0) passed");
+
+    assert(abs_f64(-0.0) == 0.0);
+    print("abs(-0.0) passed");
+
+    // floor - 4 assertions
+    assert(floor_f64(3.7) == 3.0);
+    print("floor(3.7) passed");
+
+    assert(floor_f64(3.0) == 3.0);
+    print("floor(3.0) passed");
+
+    assert(floor_f64(-3.7) == -4.0);
+    print("floor(-3.7) passed");
+
+    assert(floor_f64(-3.0) == -3.0);
+    print("floor(-3.0) passed");
+
+    print("All reduced tests passed!");
+}

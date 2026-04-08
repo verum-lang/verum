@@ -1,0 +1,845 @@
+// =============================================================================
+// elementary_test.vr - Tests for elementary mathematical functions
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, elementary, trig, exp, log, power, rounding, core
+// @description: Comprehensive tests for trigonometric, exponential, logarithmic,
+//               power, rounding, and utility functions from elementary.vr
+// =============================================================================
+
+mount core.math.elementary.{
+    sin, cos, tan, sincos, asin, acos, atan, atan2,
+    asin_safe, acos_safe,
+    exp, exp2, expm1,
+    log, log2, log10, log1p, log_safe,
+    pow, powi, sqrt, sqrt_safe, cbrt, hypot,
+    floor, ceil, round, trunc, fract,
+    min, max, clamp, abs, signum,
+    fma, lerp, inverse_lerp, remap,
+    smoothstep, smootherstep,
+};
+mount core.math.constants.{PI, FRAC_PI_2, FRAC_PI_4, E, LN2, LN10, SQRT2, EPSILON, INFINITY, NEG_INFINITY, NAN};
+mount core.base.maybe.{Maybe, Some, None};
+
+// Helper for approximate equality
+fn approx_eq(a: Float, b: Float, tolerance: Float) -> Bool {
+    if a == b { return true; }
+    let diff = abs(a - b);
+    diff < tolerance
+}
+
+// Default tolerance for most tests
+const TOLERANCE: Float = 1e-10;
+
+// =============================================================================
+// SECTION 1: Trigonometric Functions - sin
+// =============================================================================
+
+@test
+fn test_sin_zero() {
+    assert(approx_eq(sin(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_sin_pi_2() {
+    assert(approx_eq(sin(FRAC_PI_2), 1.0, TOLERANCE));
+}
+
+@test
+fn test_sin_pi() {
+    assert(approx_eq(sin(PI), 0.0, TOLERANCE));
+}
+
+@test
+fn test_sin_3pi_2() {
+    assert(approx_eq(sin(3.0 * FRAC_PI_2), -1.0, TOLERANCE));
+}
+
+@test
+fn test_sin_2pi() {
+    assert(approx_eq(sin(2.0 * PI), 0.0, TOLERANCE));
+}
+
+@test
+fn test_sin_negative() {
+    // sin(-x) = -sin(x)
+    assert(approx_eq(sin(-FRAC_PI_2), -1.0, TOLERANCE));
+}
+
+@test
+fn test_sin_pi_4() {
+    // sin(π/4) = √2/2
+    let expected = SQRT2 / 2.0;
+    assert(approx_eq(sin(FRAC_PI_4), expected, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 2: Trigonometric Functions - cos
+// =============================================================================
+
+@test
+fn test_cos_zero() {
+    assert(approx_eq(cos(0.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_cos_pi_2() {
+    assert(approx_eq(cos(FRAC_PI_2), 0.0, TOLERANCE));
+}
+
+@test
+fn test_cos_pi() {
+    assert(approx_eq(cos(PI), -1.0, TOLERANCE));
+}
+
+@test
+fn test_cos_2pi() {
+    assert(approx_eq(cos(2.0 * PI), 1.0, TOLERANCE));
+}
+
+@test
+fn test_cos_negative() {
+    // cos(-x) = cos(x)
+    assert(approx_eq(cos(-FRAC_PI_4), cos(FRAC_PI_4), TOLERANCE));
+}
+
+@test
+fn test_cos_pi_4() {
+    // cos(π/4) = √2/2
+    let expected = SQRT2 / 2.0;
+    assert(approx_eq(cos(FRAC_PI_4), expected, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 3: Trigonometric Functions - tan
+// =============================================================================
+
+@test
+fn test_tan_zero() {
+    assert(approx_eq(tan(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_tan_pi_4() {
+    // tan(π/4) = 1
+    assert(approx_eq(tan(FRAC_PI_4), 1.0, TOLERANCE));
+}
+
+@test
+fn test_tan_negative_pi_4() {
+    // tan(-π/4) = -1
+    assert(approx_eq(tan(-FRAC_PI_4), -1.0, TOLERANCE));
+}
+
+@test
+fn test_tan_pi() {
+    assert(approx_eq(tan(PI), 0.0, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 4: sincos
+// =============================================================================
+
+@test
+fn test_sincos_zero() {
+    let (s, c) = sincos(0.0);
+    assert(approx_eq(s, 0.0, TOLERANCE));
+    assert(approx_eq(c, 1.0, TOLERANCE));
+}
+
+@test
+fn test_sincos_pi_4() {
+    let (s, c) = sincos(FRAC_PI_4);
+    let expected = SQRT2 / 2.0;
+    assert(approx_eq(s, expected, TOLERANCE));
+    assert(approx_eq(c, expected, TOLERANCE));
+}
+
+@test
+fn test_sincos_identity() {
+    // sin²(x) + cos²(x) = 1
+    let x = 1.234;
+    let (s, c) = sincos(x);
+    assert(approx_eq(s * s + c * c, 1.0, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 5: Inverse Trigonometric Functions
+// =============================================================================
+
+@test
+fn test_asin_zero() {
+    assert(approx_eq(asin(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_asin_one() {
+    assert(approx_eq(asin(1.0), FRAC_PI_2, TOLERANCE));
+}
+
+@test
+fn test_asin_neg_one() {
+    assert(approx_eq(asin(-1.0), -FRAC_PI_2, TOLERANCE));
+}
+
+@test
+fn test_asin_half() {
+    // asin(0.5) = π/6
+    assert(approx_eq(asin(0.5), PI / 6.0, TOLERANCE));
+}
+
+@test
+fn test_asin_safe_valid() {
+    let result = asin_safe(0.5);
+    assert(result.is_some());
+}
+
+@test
+fn test_asin_safe_invalid() {
+    let result = asin_safe(1.5);
+    assert(result.is_none());
+}
+
+@test
+fn test_acos_zero() {
+    assert(approx_eq(acos(0.0), FRAC_PI_2, TOLERANCE));
+}
+
+@test
+fn test_acos_one() {
+    assert(approx_eq(acos(1.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_acos_neg_one() {
+    assert(approx_eq(acos(-1.0), PI, TOLERANCE));
+}
+
+@test
+fn test_atan_zero() {
+    assert(approx_eq(atan(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_atan_one() {
+    assert(approx_eq(atan(1.0), FRAC_PI_4, TOLERANCE));
+}
+
+@test
+fn test_atan_neg_one() {
+    assert(approx_eq(atan(-1.0), -FRAC_PI_4, TOLERANCE));
+}
+
+@test
+fn test_atan_large() {
+    // atan approaches π/2 as x → ∞
+    assert(approx_eq(atan(1000.0), FRAC_PI_2, 0.001));
+}
+
+// =============================================================================
+// SECTION 6: atan2
+// =============================================================================
+
+@test
+fn test_atan2_quadrant_1() {
+    // First quadrant: (1, 1) -> π/4
+    assert(approx_eq(atan2(1.0, 1.0), FRAC_PI_4, TOLERANCE));
+}
+
+@test
+fn test_atan2_quadrant_2() {
+    // Second quadrant: (1, -1) -> 3π/4
+    assert(approx_eq(atan2(1.0, -1.0), 3.0 * FRAC_PI_4, TOLERANCE));
+}
+
+@test
+fn test_atan2_quadrant_3() {
+    // Third quadrant: (-1, -1) -> -3π/4
+    assert(approx_eq(atan2(-1.0, -1.0), -3.0 * FRAC_PI_4, TOLERANCE));
+}
+
+@test
+fn test_atan2_quadrant_4() {
+    // Fourth quadrant: (-1, 1) -> -π/4
+    assert(approx_eq(atan2(-1.0, 1.0), -FRAC_PI_4, TOLERANCE));
+}
+
+@test
+fn test_atan2_positive_y_axis() {
+    assert(approx_eq(atan2(1.0, 0.0), FRAC_PI_2, TOLERANCE));
+}
+
+@test
+fn test_atan2_negative_y_axis() {
+    assert(approx_eq(atan2(-1.0, 0.0), -FRAC_PI_2, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 7: Exponential Functions
+// =============================================================================
+
+@test
+fn test_exp_zero() {
+    assert(approx_eq(exp(0.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_exp_one() {
+    assert(approx_eq(exp(1.0), E, TOLERANCE));
+}
+
+@test
+fn test_exp_ln2() {
+    assert(approx_eq(exp(LN2), 2.0, TOLERANCE));
+}
+
+@test
+fn test_exp_negative() {
+    assert(approx_eq(exp(-1.0), 1.0 / E, TOLERANCE));
+}
+
+@test
+fn test_exp2_zero() {
+    assert(approx_eq(exp2(0.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_exp2_one() {
+    assert(approx_eq(exp2(1.0), 2.0, TOLERANCE));
+}
+
+@test
+fn test_exp2_ten() {
+    assert(approx_eq(exp2(10.0), 1024.0, TOLERANCE));
+}
+
+@test
+fn test_expm1_zero() {
+    // expm1(0) = 0
+    assert(approx_eq(expm1(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_expm1_small() {
+    // For small x, expm1(x) ≈ x
+    let x = 1e-15;
+    assert(approx_eq(expm1(x), x, 1e-20));
+}
+
+@test
+fn test_expm1_one() {
+    assert(approx_eq(expm1(1.0), E - 1.0, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 8: Logarithmic Functions
+// =============================================================================
+
+@test
+fn test_log_one() {
+    assert(approx_eq(log(1.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_log_e() {
+    assert(approx_eq(log(E), 1.0, TOLERANCE));
+}
+
+@test
+fn test_log_exp() {
+    // log(exp(x)) = x
+    let x = 2.5;
+    assert(approx_eq(log(exp(x)), x, TOLERANCE));
+}
+
+@test
+fn test_log_safe_positive() {
+    let result = log_safe(E);
+    assert(result.is_some());
+    if let Some(v) = result {
+        assert(approx_eq(v, 1.0, TOLERANCE));
+    }
+}
+
+@test
+fn test_log_safe_zero() {
+    let result = log_safe(0.0);
+    assert(result.is_none());
+}
+
+@test
+fn test_log_safe_negative() {
+    let result = log_safe(-1.0);
+    assert(result.is_none());
+}
+
+@test
+fn test_log2_one() {
+    assert(approx_eq(log2(1.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_log2_two() {
+    assert(approx_eq(log2(2.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_log2_1024() {
+    assert(approx_eq(log2(1024.0), 10.0, TOLERANCE));
+}
+
+@test
+fn test_log10_one() {
+    assert(approx_eq(log10(1.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_log10_ten() {
+    assert(approx_eq(log10(10.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_log10_100() {
+    assert(approx_eq(log10(100.0), 2.0, TOLERANCE));
+}
+
+@test
+fn test_log1p_zero() {
+    assert(approx_eq(log1p(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_log1p_small() {
+    // For small x, log1p(x) ≈ x
+    let x = 1e-15;
+    assert(approx_eq(log1p(x), x, 1e-20));
+}
+
+@test
+fn test_log1p_one() {
+    assert(approx_eq(log1p(1.0), LN2, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 9: Power Functions
+// =============================================================================
+
+@test
+fn test_pow_zero_exp() {
+    // x^0 = 1
+    assert(approx_eq(pow(5.0, 0.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_pow_one_base() {
+    // 1^y = 1
+    assert(approx_eq(pow(1.0, 100.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_pow_square() {
+    assert(approx_eq(pow(3.0, 2.0), 9.0, TOLERANCE));
+}
+
+@test
+fn test_pow_cube() {
+    assert(approx_eq(pow(2.0, 3.0), 8.0, TOLERANCE));
+}
+
+@test
+fn test_pow_negative_exp() {
+    assert(approx_eq(pow(2.0, -1.0), 0.5, TOLERANCE));
+}
+
+@test
+fn test_pow_fractional_exp() {
+    // 4^0.5 = 2
+    assert(approx_eq(pow(4.0, 0.5), 2.0, TOLERANCE));
+}
+
+@test
+fn test_powi_positive() {
+    assert(approx_eq(powi(2.0, 10), 1024.0, TOLERANCE));
+}
+
+@test
+fn test_powi_zero() {
+    assert(approx_eq(powi(5.0, 0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_powi_negative() {
+    assert(approx_eq(powi(2.0, -3), 0.125, TOLERANCE));
+}
+
+@test
+fn test_sqrt_four() {
+    assert(approx_eq(sqrt(4.0), 2.0, TOLERANCE));
+}
+
+@test
+fn test_sqrt_two() {
+    assert(approx_eq(sqrt(2.0), SQRT2, TOLERANCE));
+}
+
+@test
+fn test_sqrt_zero() {
+    assert(approx_eq(sqrt(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_sqrt_safe_positive() {
+    let result = sqrt_safe(4.0);
+    assert(result.is_some());
+}
+
+@test
+fn test_sqrt_safe_negative() {
+    let result = sqrt_safe(-1.0);
+    assert(result.is_none());
+}
+
+@test
+fn test_cbrt_eight() {
+    assert(approx_eq(cbrt(8.0), 2.0, TOLERANCE));
+}
+
+@test
+fn test_cbrt_negative() {
+    assert(approx_eq(cbrt(-8.0), -2.0, TOLERANCE));
+}
+
+@test
+fn test_cbrt_27() {
+    assert(approx_eq(cbrt(27.0), 3.0, TOLERANCE));
+}
+
+@test
+fn test_hypot_3_4() {
+    // 3-4-5 right triangle
+    assert(approx_eq(hypot(3.0, 4.0), 5.0, TOLERANCE));
+}
+
+@test
+fn test_hypot_1_1() {
+    assert(approx_eq(hypot(1.0, 1.0), SQRT2, TOLERANCE));
+}
+
+@test
+fn test_hypot_zero() {
+    assert(approx_eq(hypot(0.0, 5.0), 5.0, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 10: Rounding Functions
+// =============================================================================
+
+@test
+fn test_floor_positive() {
+    assert_eq(floor(2.7), 2.0);
+    assert_eq(floor(2.3), 2.0);
+    assert_eq(floor(2.0), 2.0);
+}
+
+@test
+fn test_floor_negative() {
+    assert_eq(floor(-2.3), -3.0);
+    assert_eq(floor(-2.7), -3.0);
+    assert_eq(floor(-2.0), -2.0);
+}
+
+@test
+fn test_ceil_positive() {
+    assert_eq(ceil(2.3), 3.0);
+    assert_eq(ceil(2.7), 3.0);
+    assert_eq(ceil(2.0), 2.0);
+}
+
+@test
+fn test_ceil_negative() {
+    assert_eq(ceil(-2.3), -2.0);
+    assert_eq(ceil(-2.7), -2.0);
+    assert_eq(ceil(-2.0), -2.0);
+}
+
+@test
+fn test_round_half() {
+    // Round half away from zero
+    assert_eq(round(2.5), 3.0);
+    assert_eq(round(-2.5), -3.0);
+}
+
+@test
+fn test_round_normal() {
+    assert_eq(round(2.3), 2.0);
+    assert_eq(round(2.7), 3.0);
+}
+
+@test
+fn test_trunc_positive() {
+    assert_eq(trunc(2.7), 2.0);
+    assert_eq(trunc(2.3), 2.0);
+}
+
+@test
+fn test_trunc_negative() {
+    assert_eq(trunc(-2.7), -2.0);
+    assert_eq(trunc(-2.3), -2.0);
+}
+
+@test
+fn test_fract_positive() {
+    assert(approx_eq(fract(2.75), 0.75, TOLERANCE));
+}
+
+@test
+fn test_fract_negative() {
+    assert(approx_eq(fract(-2.25), -0.25, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 11: Min, Max, Clamp
+// =============================================================================
+
+@test
+fn test_min_basic() {
+    assert_eq(min(3.0, 5.0), 3.0);
+    assert_eq(min(5.0, 3.0), 3.0);
+}
+
+@test
+fn test_min_equal() {
+    assert_eq(min(3.0, 3.0), 3.0);
+}
+
+@test
+fn test_min_negative() {
+    assert_eq(min(-5.0, -3.0), -5.0);
+}
+
+@test
+fn test_max_basic() {
+    assert_eq(max(3.0, 5.0), 5.0);
+    assert_eq(max(5.0, 3.0), 5.0);
+}
+
+@test
+fn test_max_equal() {
+    assert_eq(max(3.0, 3.0), 3.0);
+}
+
+@test
+fn test_max_negative() {
+    assert_eq(max(-5.0, -3.0), -3.0);
+}
+
+@test
+fn test_clamp_within() {
+    assert_eq(clamp(5.0, 0.0, 10.0), 5.0);
+}
+
+@test
+fn test_clamp_below() {
+    assert_eq(clamp(-5.0, 0.0, 10.0), 0.0);
+}
+
+@test
+fn test_clamp_above() {
+    assert_eq(clamp(15.0, 0.0, 10.0), 10.0);
+}
+
+// =============================================================================
+// SECTION 12: Absolute Value and Sign
+// =============================================================================
+
+@test
+fn test_abs_positive() {
+    assert_eq(abs(5.0), 5.0);
+}
+
+@test
+fn test_abs_negative() {
+    assert_eq(abs(-5.0), 5.0);
+}
+
+@test
+fn test_abs_zero() {
+    assert_eq(abs(0.0), 0.0);
+}
+
+@test
+fn test_signum_positive() {
+    assert_eq(signum(5.0), 1.0);
+}
+
+@test
+fn test_signum_negative() {
+    assert_eq(signum(-5.0), -1.0);
+}
+
+@test
+fn test_signum_zero() {
+    assert_eq(signum(0.0), 0.0);
+}
+
+// =============================================================================
+// SECTION 13: Fused Multiply-Add
+// =============================================================================
+
+@test
+fn test_fma_basic() {
+    // fma(a, b, c) = a * b + c
+    assert(approx_eq(fma(2.0, 3.0, 4.0), 10.0, TOLERANCE));
+}
+
+@test
+fn test_fma_precision() {
+    // FMA should be more precise than separate operations
+    let a = 1.0 + 1e-16;
+    let b = 1.0 - 1e-16;
+    let c = -1.0;
+    // (1 + ε)(1 - ε) - 1 = -ε²
+    let result = fma(a, b, c);
+    assert(abs(result) < 1e-30);
+}
+
+// =============================================================================
+// SECTION 14: Linear Interpolation
+// =============================================================================
+
+@test
+fn test_lerp_endpoints() {
+    assert_eq(lerp(0.0, 10.0, 0.0), 0.0);
+    assert_eq(lerp(0.0, 10.0, 1.0), 10.0);
+}
+
+@test
+fn test_lerp_middle() {
+    assert_eq(lerp(0.0, 10.0, 0.5), 5.0);
+}
+
+@test
+fn test_lerp_quarter() {
+    assert_eq(lerp(0.0, 100.0, 0.25), 25.0);
+}
+
+@test
+fn test_inverse_lerp_endpoints() {
+    assert_eq(inverse_lerp(0.0, 10.0, 0.0), 0.0);
+    assert_eq(inverse_lerp(0.0, 10.0, 10.0), 1.0);
+}
+
+@test
+fn test_inverse_lerp_middle() {
+    assert_eq(inverse_lerp(0.0, 10.0, 5.0), 0.5);
+}
+
+@test
+fn test_remap_basic() {
+    // Map [0, 10] -> [0, 100], value 5 -> 50
+    assert_eq(remap(5.0, 0.0, 10.0, 0.0, 100.0), 50.0);
+}
+
+@test
+fn test_remap_reverse() {
+    // Map [0, 10] -> [100, 0], value 2 -> 80
+    assert_eq(remap(2.0, 0.0, 10.0, 100.0, 0.0), 80.0);
+}
+
+// =============================================================================
+// SECTION 15: Smooth Interpolation
+// =============================================================================
+
+@test
+fn test_smoothstep_edges() {
+    // Below edge0 returns 0
+    assert_eq(smoothstep(0.0, 1.0, -0.5), 0.0);
+    // Above edge1 returns 1
+    assert_eq(smoothstep(0.0, 1.0, 1.5), 1.0);
+}
+
+@test
+fn test_smoothstep_middle() {
+    // At middle, smoothstep(0, 1, 0.5) = 0.5
+    assert_eq(smoothstep(0.0, 1.0, 0.5), 0.5);
+}
+
+@test
+fn test_smoothstep_smooth() {
+    // Values should be smooth (between 0 and 1 for inputs between edges)
+    let v = smoothstep(0.0, 1.0, 0.25);
+    assert(v > 0.0);
+    assert(v < 0.5);
+}
+
+@test
+fn test_smootherstep_edges() {
+    assert_eq(smootherstep(0.0, 1.0, -0.5), 0.0);
+    assert_eq(smootherstep(0.0, 1.0, 1.5), 1.0);
+}
+
+@test
+fn test_smootherstep_middle() {
+    assert_eq(smootherstep(0.0, 1.0, 0.5), 0.5);
+}
+
+// =============================================================================
+// SECTION 16: Mathematical Identities
+// =============================================================================
+
+@test
+fn test_pythagorean_identity() {
+    // sin²(x) + cos²(x) = 1
+    let angles = [0.1, 0.5, 1.0, 2.0, 3.0];
+    for angle in angles.iter() {
+        let s: Float = sin(*angle);
+        let c: Float = cos(*angle);
+        assert(approx_eq(s * s + c * c, 1.0, TOLERANCE));
+    }
+}
+
+@test
+fn test_exp_log_inverse() {
+    // exp(log(x)) = x for x > 0
+    let values = [0.1, 1.0, 2.0, 10.0, 100.0];
+    for v in values.iter() {
+        assert(approx_eq(exp(log(*v)), *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_log_exp_inverse() {
+    // log(exp(x)) = x
+    let values = [-2.0, -1.0, 0.0, 1.0, 2.0];
+    for v in values.iter() {
+        assert(approx_eq(log(exp(*v)), *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_sqrt_square_identity() {
+    // sqrt(x²) = |x|
+    let values = [1.0, 2.0, 3.0, 10.0];
+    for v in values.iter() {
+        assert(approx_eq(sqrt(*v * *v), *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_cbrt_cube_identity() {
+    // cbrt(x³) = x
+    let values = [-3.0, -2.0, -1.0, 1.0, 2.0, 3.0];
+    for v in values.iter() {
+        assert(approx_eq(cbrt(*v * *v * *v), *v, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

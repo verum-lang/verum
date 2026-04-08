@@ -1,0 +1,529 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, numeric, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: numerical algorithms — Newton's method for integer
+// square root, binary exponentiation, integer log base 2, digit extraction,
+// base conversion (decimal to binary as array).
+
+// =============================================================================
+// Array record infrastructure
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// =============================================================================
+// Newton's method for integer square root
+// floor(sqrt(n)) using successive approximation
+// =============================================================================
+
+fn isqrt_newton(n: Int) -> Int {
+    if n <= 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    // Initial guess: n/2
+    let mut x = n / 2;
+    if x == 0 {
+        x = 1;
+    }
+    let mut iterations = 0;
+    while iterations < 64 {
+        // Newton step: x_new = (x + n/x) / 2
+        let x_new = (x + n / x) / 2;
+        if x_new >= x {
+            // Converged
+            return x;
+        }
+        x = x_new;
+        iterations = iterations + 1;
+    }
+    x
+}
+
+fn test_isqrt_newton() {
+    assert_eq(isqrt_newton(0), 0);
+    assert_eq(isqrt_newton(1), 1);
+    assert_eq(isqrt_newton(4), 2);
+    assert_eq(isqrt_newton(9), 3);
+    assert_eq(isqrt_newton(16), 4);
+    assert_eq(isqrt_newton(25), 5);
+    assert_eq(isqrt_newton(36), 6);
+    assert_eq(isqrt_newton(49), 7);
+    assert_eq(isqrt_newton(64), 8);
+    assert_eq(isqrt_newton(81), 9);
+    assert_eq(isqrt_newton(100), 10);
+    assert_eq(isqrt_newton(144), 12);
+    assert_eq(isqrt_newton(10000), 100);
+
+    // Non-perfect squares: floor(sqrt(n))
+    assert_eq(isqrt_newton(2), 1);
+    assert_eq(isqrt_newton(3), 1);
+    assert_eq(isqrt_newton(5), 2);
+    assert_eq(isqrt_newton(8), 2);
+    assert_eq(isqrt_newton(10), 3);
+    assert_eq(isqrt_newton(15), 3);
+    assert_eq(isqrt_newton(24), 4);
+    assert_eq(isqrt_newton(99), 9);
+    assert_eq(isqrt_newton(101), 10);
+    assert_eq(isqrt_newton(1000), 31);
+}
+
+// Verify: isqrt(n)^2 <= n < (isqrt(n)+1)^2
+fn test_isqrt_invariant() {
+    let mut n = 1;
+    while n <= 200 {
+        let s = isqrt_newton(n);
+        assert(s * s <= n);
+        assert((s + 1) * (s + 1) > n);
+        n = n + 1;
+    }
+}
+
+// =============================================================================
+// Binary exponentiation (fast power via squaring)
+// =============================================================================
+
+fn fast_pow(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut b = base;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = result * b;
+        }
+        b = b * b;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_fast_pow() {
+    assert_eq(fast_pow(2, 0), 1);
+    assert_eq(fast_pow(2, 1), 2);
+    assert_eq(fast_pow(2, 2), 4);
+    assert_eq(fast_pow(2, 3), 8);
+    assert_eq(fast_pow(2, 10), 1024);
+    assert_eq(fast_pow(2, 16), 65536);
+    assert_eq(fast_pow(2, 20), 1048576);
+    assert_eq(fast_pow(3, 0), 1);
+    assert_eq(fast_pow(3, 1), 3);
+    assert_eq(fast_pow(3, 5), 243);
+    assert_eq(fast_pow(3, 10), 59049);
+    assert_eq(fast_pow(5, 4), 625);
+    assert_eq(fast_pow(7, 3), 343);
+    assert_eq(fast_pow(10, 6), 1000000);
+    assert_eq(fast_pow(1, 100), 1);
+}
+
+// Modular exponentiation
+fn mod_pow(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        b = (b * b) % modulus;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_mod_pow() {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    // 3^5 mod 100 = 243 mod 100 = 43
+    assert_eq(mod_pow(3, 5, 100), 43);
+    // 7^3 mod 10 = 343 mod 10 = 3
+    assert_eq(mod_pow(7, 3, 10), 3);
+    // Fermat's little theorem: a^(p-1) mod p = 1 for prime p
+    assert_eq(mod_pow(2, 6, 7), 1);
+    assert_eq(mod_pow(3, 10, 11), 1);
+}
+
+// =============================================================================
+// Integer log base 2 (floor)
+// =============================================================================
+
+fn ilog2(n: Int) -> Int {
+    if n <= 0 {
+        return -1;
+    }
+    let mut val = n;
+    let mut count = 0;
+    while val > 1 {
+        val = val / 2;
+        count = count + 1;
+    }
+    count
+}
+
+fn test_ilog2() {
+    assert_eq(ilog2(1), 0);
+    assert_eq(ilog2(2), 1);
+    assert_eq(ilog2(3), 1);
+    assert_eq(ilog2(4), 2);
+    assert_eq(ilog2(7), 2);
+    assert_eq(ilog2(8), 3);
+    assert_eq(ilog2(15), 3);
+    assert_eq(ilog2(16), 4);
+    assert_eq(ilog2(31), 4);
+    assert_eq(ilog2(32), 5);
+    assert_eq(ilog2(64), 6);
+    assert_eq(ilog2(128), 7);
+    assert_eq(ilog2(256), 8);
+    assert_eq(ilog2(1024), 10);
+    assert_eq(ilog2(1048576), 20);
+}
+
+// General integer log base b
+fn ilog_base(n: Int, base: Int) -> Int {
+    if n <= 0 || base <= 1 {
+        return -1;
+    }
+    let mut val = n;
+    let mut count = 0;
+    while val >= base {
+        val = val / base;
+        count = count + 1;
+    }
+    count
+}
+
+fn test_ilog_base() {
+    // log_10
+    assert_eq(ilog_base(1, 10), 0);
+    assert_eq(ilog_base(9, 10), 0);
+    assert_eq(ilog_base(10, 10), 1);
+    assert_eq(ilog_base(99, 10), 1);
+    assert_eq(ilog_base(100, 10), 2);
+    assert_eq(ilog_base(999, 10), 2);
+    assert_eq(ilog_base(1000, 10), 3);
+    assert_eq(ilog_base(1000000, 10), 6);
+
+    // log_3
+    assert_eq(ilog_base(1, 3), 0);
+    assert_eq(ilog_base(3, 3), 1);
+    assert_eq(ilog_base(9, 3), 2);
+    assert_eq(ilog_base(27, 3), 3);
+    assert_eq(ilog_base(81, 3), 4);
+}
+
+// =============================================================================
+// Digit extraction
+// =============================================================================
+
+fn count_digits(n: Int) -> Int {
+    let mut val = n;
+    if val < 0 { val = -val; }
+    if val == 0 { return 1; }
+    let mut count = 0;
+    while val > 0 {
+        count = count + 1;
+        val = val / 10;
+    }
+    count
+}
+
+fn get_digit(n: Int, pos: Int) -> Int {
+    // Get digit at position pos (0 = ones, 1 = tens, etc.)
+    let mut val = n;
+    if val < 0 { val = -val; }
+    let mut i = 0;
+    while i < pos {
+        val = val / 10;
+        i = i + 1;
+    }
+    val % 10
+}
+
+fn test_count_digits() {
+    assert_eq(count_digits(0), 1);
+    assert_eq(count_digits(5), 1);
+    assert_eq(count_digits(42), 2);
+    assert_eq(count_digits(100), 3);
+    assert_eq(count_digits(9999), 4);
+    assert_eq(count_digits(10000), 5);
+    assert_eq(count_digits(-123), 3);
+}
+
+fn test_get_digit() {
+    // 12345: digit at pos 0 = 5, pos 1 = 4, pos 2 = 3, pos 3 = 2, pos 4 = 1
+    assert_eq(get_digit(12345, 0), 5);
+    assert_eq(get_digit(12345, 1), 4);
+    assert_eq(get_digit(12345, 2), 3);
+    assert_eq(get_digit(12345, 3), 2);
+    assert_eq(get_digit(12345, 4), 1);
+
+    assert_eq(get_digit(7, 0), 7);
+    assert_eq(get_digit(100, 0), 0);
+    assert_eq(get_digit(100, 1), 0);
+    assert_eq(get_digit(100, 2), 1);
+}
+
+fn digit_sum(n: Int) -> Int {
+    let mut val = n;
+    if val < 0 { val = -val; }
+    if val == 0 { return 0; }
+    let mut sum = 0;
+    while val > 0 {
+        sum = sum + val % 10;
+        val = val / 10;
+    }
+    sum
+}
+
+fn test_digit_sum() {
+    assert_eq(digit_sum(0), 0);
+    assert_eq(digit_sum(123), 6);
+    assert_eq(digit_sum(999), 27);
+    assert_eq(digit_sum(12345), 15);
+}
+
+// =============================================================================
+// Base conversion: decimal to binary representation as array
+// =============================================================================
+
+type BinResult is { bits: Arr16, length: Int };
+
+fn to_binary(n: Int) -> BinResult {
+    if n == 0 {
+        let bits = arr16_set(arr16_zeros(), 0, 0);
+        return BinResult { bits: bits, length: 1 };
+    }
+    let mut val = n;
+    let mut bits = arr16_zeros();
+    let mut idx = 0;
+    while val > 0 {
+        bits = arr16_set(bits, idx, val % 2);
+        val = val / 2;
+        idx = idx + 1;
+    }
+    // bits are stored in reverse (LSB first)
+    BinResult { bits: bits, length: idx }
+}
+
+fn binary_to_int(br: BinResult) -> Int {
+    let mut val = 0;
+    let mut i = br.length - 1;
+    while i >= 0 {
+        val = val * 2 + arr16_get(br.bits, i);
+        i = i - 1;
+    }
+    val
+}
+
+fn test_to_binary() {
+    // 0 -> [0], length 1
+    let b0 = to_binary(0);
+    assert_eq(b0.length, 1);
+    assert_eq(arr16_get(b0.bits, 0), 0);
+
+    // 1 -> [1], length 1
+    let b1 = to_binary(1);
+    assert_eq(b1.length, 1);
+    assert_eq(arr16_get(b1.bits, 0), 1);
+
+    // 5 -> [1, 0, 1] (LSB first), length 3
+    let b5 = to_binary(5);
+    assert_eq(b5.length, 3);
+    assert_eq(arr16_get(b5.bits, 0), 1); // LSB
+    assert_eq(arr16_get(b5.bits, 1), 0);
+    assert_eq(arr16_get(b5.bits, 2), 1); // MSB
+
+    // 255 -> 8 bits all 1
+    let b255 = to_binary(255);
+    assert_eq(b255.length, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(arr16_get(b255.bits, i), 1);
+        i = i + 1;
+    }
+
+    // 256 -> [0,0,0,0,0,0,0,0,1], length 9
+    let b256 = to_binary(256);
+    assert_eq(b256.length, 9);
+    assert_eq(arr16_get(b256.bits, 8), 1);
+    i = 0;
+    while i < 8 {
+        assert_eq(arr16_get(b256.bits, i), 0);
+        i = i + 1;
+    }
+}
+
+fn test_binary_roundtrip() {
+    // Verify roundtrip: int -> binary -> int
+    let mut n = 0;
+    while n <= 100 {
+        let br = to_binary(n);
+        let back = binary_to_int(br);
+        assert_eq(back, n);
+        n = n + 1;
+    }
+    // Larger values
+    assert_eq(binary_to_int(to_binary(1000)), 1000);
+    assert_eq(binary_to_int(to_binary(12345)), 12345);
+}
+
+// =============================================================================
+// Count set bits (popcount)
+// =============================================================================
+
+fn popcount(n: Int) -> Int {
+    let mut val = n;
+    let mut count = 0;
+    while val > 0 {
+        count = count + (val % 2);
+        val = val / 2;
+    }
+    count
+}
+
+fn test_popcount() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(2), 1);
+    assert_eq(popcount(3), 2);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(8), 1);
+    assert_eq(popcount(15), 4);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(1023), 10);
+}
+
+// =============================================================================
+// Integer nth root (generalized)
+// =============================================================================
+
+fn inth_root(n: Int, k: Int) -> Int {
+    // Find floor of n^(1/k) via binary search
+    if n <= 0 { return 0; }
+    if k == 1 { return n; }
+    let mut lo = 1;
+    let mut hi = n;
+    // Clamp hi to avoid overflow
+    if hi > 1000000 { hi = 1000000; }
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        let mut power = 1;
+        let mut j = 0;
+        let mut overflow = 0;
+        while j < k {
+            power = power * mid;
+            // Simple overflow check
+            if power > n {
+                overflow = 1;
+                j = k; // break
+            }
+            j = j + 1;
+        }
+        if overflow != 0 || power > n {
+            hi = mid - 1;
+        } else {
+            lo = mid;
+        }
+    }
+    lo
+}
+
+fn test_inth_root() {
+    // Cube root
+    assert_eq(inth_root(8, 3), 2);
+    assert_eq(inth_root(27, 3), 3);
+    assert_eq(inth_root(64, 3), 4);
+    assert_eq(inth_root(125, 3), 5);
+    assert_eq(inth_root(1000, 3), 10);
+
+    // Fourth root
+    assert_eq(inth_root(16, 4), 2);
+    assert_eq(inth_root(81, 4), 3);
+    assert_eq(inth_root(256, 4), 4);
+    assert_eq(inth_root(625, 4), 5);
+
+    // Non-perfect: floor
+    assert_eq(inth_root(10, 3), 2);   // 2^3=8 <= 10 < 27=3^3
+    assert_eq(inth_root(100, 3), 4);  // 4^3=64 <= 100 < 125=5^3
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_isqrt_newton();
+    test_isqrt_invariant();
+    test_fast_pow();
+    test_mod_pow();
+    test_ilog2();
+    test_ilog_base();
+    test_count_digits();
+    test_get_digit();
+    test_digit_sum();
+    test_to_binary();
+    test_binary_roundtrip();
+    test_popcount();
+    test_inth_root();
+    print("[OK] 285_interp_numeric_algorithms");
+    0
+}

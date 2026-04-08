@@ -1,0 +1,502 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: memory, heap, fragmentation, allocator, stress
+// @description: Heap fragmentation benchmark (target: < 15% fragmentation after stress)
+
+/// Heap Fragmentation Benchmark
+///
+/// This benchmark measures heap memory fragmentation under various
+/// allocation patterns. Low fragmentation is critical for long-running
+/// applications and memory-constrained environments.
+///
+/// Target: < 15% fragmentation after stress testing
+///
+/// Fragmentation metrics:
+/// - External fragmentation: unusable free space between allocations
+/// - Internal fragmentation: wasted space within allocations
+/// - Memory utilization: actual_used / total_allocated
+///
+/// Spec reference: docs/detailed/04-memory-model.md
+
+const STRESS_ITERATIONS: Int = 100;
+const ALLOCATION_COUNT: Int = 100_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Heap Fragmentation");
+
+    // Fragmentation under different patterns
+    results.add(benchmark_sequential_fragmentation());
+    results.add(benchmark_random_fragmentation());
+    results.add(benchmark_interleaved_fragmentation());
+    results.add(benchmark_size_class_fragmentation());
+
+    // Long-running fragmentation
+    results.add(benchmark_sustained_fragmentation());
+    results.add(benchmark_fragmentation_recovery());
+
+    // Specific patterns
+    results.add(benchmark_lifo_pattern());
+    results.add(benchmark_fifo_pattern());
+    results.add(benchmark_mixed_sizes_pattern());
+
+    // Memory utilization
+    results.add(benchmark_memory_utilization());
+
+    results.report();
+    assert(results.all_pass(), "Heap fragmentation exceeds acceptable limits");
+}
+
+/// Calculate fragmentation ratio
+fn calculate_fragmentation() -> Float {
+    let stats = memory.heap_stats();
+
+    // External fragmentation = 1 - (largest_free_block / total_free)
+    let external_frag = if stats.total_free > 0 {
+        1.0 - (stats.largest_free_block as Float / stats.total_free as Float)
+    } else {
+        0.0
+    };
+
+    // Internal fragmentation = wasted_in_blocks / total_allocated
+    let internal_frag = if stats.total_allocated > 0 {
+        stats.internal_waste as Float / stats.total_allocated as Float
+    } else {
+        0.0
+    };
+
+    // Combined fragmentation metric
+    (external_frag + internal_frag) / 2.0 * 100.0
+}
+
+/// Benchmark: Sequential allocate then free
+fn benchmark_sequential_fragmentation() -> BenchmarkResult {
+    // Reset heap state
+    gc.collect();
+    let baseline_frag = calculate_fragmentation();
+
+    // Sequential allocation
+    let mut objects: List<Heap<[u8; 64]> > = List.new();
+    for _ in 0..ALLOCATION_COUNT {
+        objects.push(Heap.new([0u8; 64]));
+    }
+
+    // Sequential deallocation
+    objects.clear();
+    gc.collect();
+
+    let final_frag = calculate_fragmentation();
+    let frag_increase = final_frag - baseline_frag;
+
+    // Sequential pattern should have minimal fragmentation
+    BenchmarkResult {
+        name: "sequential_frag",
+        metric: "% increase",
+        value: frag_increase,
+        target: 5.0,
+        passed: frag_increase < 5.0,
+    }
+}
+
+/// Benchmark: Random allocation sizes and deallocation order
+fn benchmark_random_fragmentation() -> BenchmarkResult {
+    gc.collect();
+    let baseline_frag = calculate_fragmentation();
+
+    let mut rng = Random.with_seed(42);
+    let mut objects: List<Maybe<Heap<List<u8> >>> = List.new();
+
+    // Allocate with random sizes
+    for _ in 0..ALLOCATION_COUNT {
+        let size = rng.gen_range(16, 4096);
+        objects.push(Some(Heap.new([0u8; size])));
+    }
+
+    // Free in random order
+    let mut indices: List<Int> = (0..ALLOCATION_COUNT).collect();
+    rng.shuffle(&mut indices);
+
+    for idx in indices {
+        objects[idx] = None;
+    }
+
+    gc.collect();
+    let final_frag = calculate_fragmentation();
+
+    // Random pattern causes more fragmentation
+    BenchmarkResult {
+        name: "random_frag",
+        metric: "%",
+        value: final_frag,
+        target: 15.0,
+        passed: final_frag < 15.0,
+    }
+}
+
+/// Benchmark: Interleaved allocation and deallocation
+fn benchmark_interleaved_fragmentation() -> BenchmarkResult {
+    gc.collect();
+    let baseline_frag = calculate_fragmentation();
+
+    let mut objects: List<Maybe<Heap<[u8; 128]> >> = List.new();
+    let mut rng = Random.with_seed(123);
+
+    // Interleaved alloc/free operations
+    for i in 0..(ALLOCATION_COUNT * 2) {
+        if i < ALLOCATION_COUNT / 2 || rng.gen_bool(0.5) {
+            objects.push(Some(Heap.new([0u8; 128])));
+        } else if !objects.is_empty() {
+            let idx = rng.gen_range(0, objects.len());
+            objects[idx] = None;
+        }
+    }
+
+    // Clean up
+    objects.clear();
+    gc.collect();
+
+    let final_frag = calculate_fragmentation();
+
+    BenchmarkResult {
+        name: "interleaved_frag",
+        metric: "%",
+        value: final_frag,
+        target: 15.0,
+        passed: final_frag < 15.0,
+    }
+}
+
+/// Benchmark: Size class transitions
+fn benchmark_size_class_fragmentation() -> BenchmarkResult {
+    gc.collect();
+    let baseline_frag = calculate_fragmentation();
+
+    // Allocate objects of varying size classes
+    let size_classes = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
+    let mut objects: List<Heap<List<u8> >> = List.new();
+
+    for _ in 0..STRESS_ITERATIONS {
+        for size in size_classes {
+            objects.push(Heap.new([0u8; size]));
+        }
+    }
+
+    // Free half of each size class
+    let mut to_remove = List.new();
+    for i in 0..objects.len() {
+        if i % 2 == 0 {
+            to_remove.push(i);
+        }
+    }
+
+    // Remove in reverse to maintain indices
+    for idx in to_remove.iter().rev() {
+        objects.swap_remove(*idx);
+    }
+
+    gc.collect();
+    let mid_frag = calculate_fragmentation();
+
+    // Reallocate with different sizes
+    for _ in 0..to_remove.len() {
+        let size = size_classes[objects.len() % size_classes.len()];
+        objects.push(Heap.new([0u8; size]));
+    }
+
+    objects.clear();
+    gc.collect();
+
+    let final_frag = calculate_fragmentation();
+
+    BenchmarkResult {
+        name: "size_class_frag",
+        metric: "%",
+        value: final_frag,
+        target: 12.0,
+        passed: final_frag < 12.0,
+    }
+}
+
+/// Benchmark: Sustained allocation over time
+fn benchmark_sustained_fragmentation() -> BenchmarkResult {
+    gc.collect();
+
+    let mut max_frag: Float = 0.0;
+    let mut pool: List<Maybe<Heap<[u8; 256]> >> = List.with_capacity(10_000);
+
+    // Initialize pool
+    for _ in 0..10_000 {
+        pool.push(Some(Heap.new([0u8; 256])));
+    }
+
+    let mut rng = Random.with_seed(456);
+
+    // Sustained churn
+    for _ in 0..(STRESS_ITERATIONS * 100) {
+        // Free random slot
+        let free_idx = rng.gen_range(0, pool.len());
+        pool[free_idx] = None;
+
+        // Allocate in same slot
+        pool[free_idx] = Some(Heap.new([0u8; 256]));
+
+        // Periodically measure fragmentation
+        if rng.gen_range(0, 1000) == 0 {
+            let frag = calculate_fragmentation();
+            max_frag = max_frag.max(frag);
+        }
+    }
+
+    pool.clear();
+    gc.collect();
+
+    // Fragmentation should stay bounded during sustained use
+    BenchmarkResult {
+        name: "sustained_frag_max",
+        metric: "%",
+        value: max_frag,
+        target: 15.0,
+        passed: max_frag < 15.0,
+    }
+}
+
+/// Benchmark: Fragmentation recovery after stress
+fn benchmark_fragmentation_recovery() -> BenchmarkResult {
+    gc.collect();
+    let baseline_frag = calculate_fragmentation();
+
+    // Create significant fragmentation
+    let mut objects: List<Maybe<Heap<List<u8> >>> = List.new();
+    let mut rng = Random.with_seed(789);
+
+    for _ in 0..ALLOCATION_COUNT {
+        let size = rng.gen_range(8, 2048);
+        objects.push(Some(Heap.new([0u8; size])));
+    }
+
+    // Free odd indices
+    for i in 0..objects.len() {
+        if i % 2 == 1 {
+            objects[i] = None;
+        }
+    }
+
+    let fragmented = calculate_fragmentation();
+
+    // Full cleanup
+    objects.clear();
+    gc.collect();
+
+    // Compact if available
+    if memory.supports_compaction() {
+        memory.compact();
+    }
+
+    let recovered_frag = calculate_fragmentation();
+
+    // Should recover close to baseline
+    let recovery = fragmented - recovered_frag;
+    let recovery_pct = (recovery / fragmented) * 100.0;
+
+    BenchmarkResult {
+        name: "fragmentation_recovery",
+        metric: "% recovered",
+        value: recovery_pct,
+        target: 80.0,  // Should recover at least 80%
+        passed: recovery_pct > 80.0,
+    }
+}
+
+/// Benchmark: LIFO allocation pattern (stack-like)
+fn benchmark_lifo_pattern() -> BenchmarkResult {
+    gc.collect();
+    let baseline = calculate_fragmentation();
+
+    let mut stack: List<Heap<[u8; 128]> > = List.new();
+
+    for _ in 0..STRESS_ITERATIONS {
+        // Push phase
+        for _ in 0..1000 {
+            stack.push(Heap.new([0u8; 128]));
+        }
+
+        // Pop phase
+        for _ in 0..500 {
+            stack.pop();
+        }
+    }
+
+    stack.clear();
+    gc.collect();
+
+    let final_frag = calculate_fragmentation();
+
+    // LIFO pattern is allocator-friendly
+    BenchmarkResult {
+        name: "lifo_pattern_frag",
+        metric: "%",
+        value: final_frag,
+        target: 5.0,
+        passed: final_frag < 5.0,
+    }
+}
+
+/// Benchmark: FIFO allocation pattern (queue-like)
+fn benchmark_fifo_pattern() -> BenchmarkResult {
+    gc.collect();
+    let baseline = calculate_fragmentation();
+
+    let mut queue: VecDeque<Heap<[u8; 128]> > = VecDeque.new();
+
+    for _ in 0..STRESS_ITERATIONS {
+        // Enqueue
+        for _ in 0..1000 {
+            queue.push_back(Heap.new([0u8; 128]));
+        }
+
+        // Dequeue
+        for _ in 0..500 {
+            queue.pop_front();
+        }
+    }
+
+    queue.clear();
+    gc.collect();
+
+    let final_frag = calculate_fragmentation();
+
+    // FIFO can cause more fragmentation than LIFO
+    BenchmarkResult {
+        name: "fifo_pattern_frag",
+        metric: "%",
+        value: final_frag,
+        target: 10.0,
+        passed: final_frag < 10.0,
+    }
+}
+
+/// Benchmark: Mixed allocation sizes
+fn benchmark_mixed_sizes_pattern() -> BenchmarkResult {
+    gc.collect();
+
+    let sizes = [16, 64, 256, 1024, 4096];
+    let mut buckets: Map<Int, List<Heap<List<u8> >>> = Map.new();
+
+    for size in sizes {
+        buckets.insert(size, List.new());
+    }
+
+    let mut rng = Random.with_seed(321);
+
+    // Mixed allocations and deallocations
+    for _ in 0..(ALLOCATION_COUNT / 10) {
+        let size = sizes[rng.gen_range(0, sizes.len())];
+        let bucket = buckets.get_mut(&size).unwrap();
+
+        if rng.gen_bool(0.6) {
+            // Allocate
+            bucket.push(Heap.new([0u8; size]));
+        } else if !bucket.is_empty() {
+            // Deallocate random
+            let idx = rng.gen_range(0, bucket.len());
+            bucket.swap_remove(idx);
+        }
+    }
+
+    buckets.clear();
+    gc.collect();
+
+    let final_frag = calculate_fragmentation();
+
+    BenchmarkResult {
+        name: "mixed_sizes_frag",
+        metric: "%",
+        value: final_frag,
+        target: 15.0,
+        passed: final_frag < 15.0,
+    }
+}
+
+/// Benchmark: Overall memory utilization
+fn benchmark_memory_utilization() -> BenchmarkResult {
+    gc.collect();
+
+    // Allocate known amount
+    let object_size = 256;
+    let count = 10_000;
+    let expected_usage = object_size * count;
+
+    let before = memory.process_memory();
+
+    let objects: List<Heap<[u8; 256]> > = (0..count)
+        .map(|_| Heap.new([0u8; 256]))
+        .collect();
+
+    let after = memory.process_memory();
+    let actual_usage = after - before;
+
+    let utilization = expected_usage as Float / actual_usage as Float * 100.0;
+
+    black_box(objects);
+
+    // Target: > 85% utilization (< 15% overhead)
+    BenchmarkResult {
+        name: "memory_utilization",
+        metric: "%",
+        value: utilization,
+        target: 85.0,
+        passed: utilization > 85.0,
+    }
+}
+
+type HeapStats is {
+    total_allocated: Int,
+    total_free: Int,
+    largest_free_block: Int,
+    internal_waste: Int,
+};
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            let compare = if result.name.contains("utilization") { ">" } else { "<" };
+            println("[{}] {}: {:.2}{} (target: {}{:.2})",
+                    status, result.name, result.value, result.metric,
+                    compare, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

@@ -1,0 +1,14 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, context, unknown
+// @description: Test that unknown context name is rejected by the compiler
+
+// NonExistentContext is not defined anywhere
+meta fn test_unknown_context() -> Int using [NonExistentContext] {
+    42
+}
+
+fn main() {
+    @const assert_eq(test_unknown_context(), 42);
+}

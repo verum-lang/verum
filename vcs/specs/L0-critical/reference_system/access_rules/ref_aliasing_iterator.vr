@@ -1,0 +1,22 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, aliasing, iterators, negative-test
+
+/// Test iterator invalidation prevention.
+/// Modifying a collection while iterating over it causes compile-time error.
+/// This is a classic source of bugs in languages without ownership.
+/// Verum detects this at COMPILE-TIME via borrow checking.
+/// Spec: 04-memory-model.md#iterator-invalidation
+
+fn main() {
+    let mut items = [1, 2, 3, 4, 5];
+
+    for item in &items {         // Immutable reference for iteration - read epoch capability
+        if *item == 3 {
+            items.push(100);     // Mutation attempt - requires exclusive write capability
+            // PANIC: epoch violation (iterator holds read capability)
+        }
+    }
+}

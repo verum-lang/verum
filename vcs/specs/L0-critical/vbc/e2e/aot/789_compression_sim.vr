@@ -1,0 +1,240 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, compression
+// @expected-exit: 0
+
+// Compression simulation algorithms
+
+// --- Huffman-like frequency counting ---
+// Count frequency of each symbol (0-15) in data
+fn count_frequencies(data: List<Int>, data_len: Int, freq: List<Int>) -> Int {
+    let mut f = freq;
+    let mut i = 0;
+    while i < data_len {
+        let sym = data[i];
+        if sym >= 0 {
+            if sym < 16 {
+                f[sym] = f[sym] + 1;
+            }
+        }
+        i = i + 1;
+    }
+    // Return number of distinct symbols
+    let mut distinct = 0;
+    let mut j = 0;
+    while j < 16 {
+        if f[j] > 0 {
+            distinct = distinct + 1;
+        }
+        j = j + 1;
+    }
+    distinct
+}
+
+// --- Find two minimum frequencies (for Huffman tree building) ---
+// Returns encoded pair: min1_idx * 100 + min2_idx
+fn find_two_min(freq: List<Int>, num_symbols: Int) -> Int {
+    let mut min1 = 999999;
+    let mut min1_idx = -1;
+    let mut min2 = 999999;
+    let mut min2_idx = -1;
+
+    let mut i = 0;
+    while i < num_symbols {
+        if freq[i] > 0 {
+            if freq[i] < min1 {
+                min2 = min1;
+                min2_idx = min1_idx;
+                min1 = freq[i];
+                min1_idx = i;
+            } else if freq[i] < min2 {
+                min2 = freq[i];
+                min2_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+
+    min1_idx * 100 + min2_idx
+}
+
+// --- LZ-like dictionary building ---
+// Simulates building a dictionary of previously seen sequences
+// Returns dictionary size (number of unique pairs seen)
+fn lz_dict_size(data: List<Int>, data_len: Int) -> Int {
+    // Store pairs as (data[i], data[i+1]) encoded as data[i]*1000 + data[i+1]
+    let mut dict = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dict_size = 0;
+    let mut i = 0;
+    while i < data_len - 1 {
+        let pair = data[i] * 1000 + data[i + 1];
+        // Check if pair already in dict
+        let mut found = 0;
+        let mut j = 0;
+        while j < dict_size {
+            if dict[j] == pair {
+                found = 1;
+                j = dict_size; // break
+            }
+            j = j + 1;
+        }
+        if found == 0 {
+            if dict_size < 16 {
+                dict[dict_size] = pair;
+                dict_size = dict_size + 1;
+            }
+        }
+        i = i + 1;
+    }
+    dict_size
+}
+
+// --- Entropy estimation (scaled by 1000) ---
+// H = -sum(p_i * log2(p_i))
+// Approximation: use integer arithmetic with lookup table for log2
+// log2(1/p) = log2(n/freq) ≈ scaled value
+// For simplicity: H_scaled = sum(freq[i] * log2_approx(data_len / freq[i])) * 1000 / data_len
+fn entropy_scaled(data: List<Int>, data_len: Int) -> Int {
+    let mut freq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < data_len {
+        let sym = data[i];
+        freq[sym] = freq[sym] + 1;
+        i = i + 1;
+    }
+
+    // H = sum(-p_i * log2(p_i)) = sum(freq_i/n * log2(n/freq_i))
+    // Scaled: H*1000 = sum(freq_i * log2_1000(n/freq_i)) / n
+    // log2_1000(x) = 1000 * log2(x)
+    // log2_1000(1)=0, log2_1000(2)=1000, log2_1000(4)=2000, log2_1000(8)=3000
+    // For ratio r = n/freq: use table lookup
+    let mut h_sum = 0;
+    let mut s = 0;
+    while s < 16 {
+        if freq[s] > 0 {
+            let ratio = data_len / freq[s]; // integer ratio
+            // Approximate log2(ratio) * 1000
+            let log2_val = approx_log2_1000(ratio);
+            h_sum = h_sum + freq[s] * log2_val;
+        }
+        s = s + 1;
+    }
+    h_sum / data_len
+}
+
+// Approximate log2(n) * 1000 for small positive integers
+fn approx_log2_1000(n: Int) -> Int {
+    if n <= 1 { 0 }
+    else if n == 2 { 1000 }
+    else if n == 3 { 1585 }
+    else if n == 4 { 2000 }
+    else if n == 5 { 2322 }
+    else if n == 6 { 2585 }
+    else if n == 7 { 2807 }
+    else if n == 8 { 3000 }
+    else if n == 9 { 3170 }
+    else if n == 10 { 3322 }
+    else if n == 12 { 3585 }
+    else if n == 16 { 4000 }
+    else { 3500 } // rough approximation for others
+}
+
+// --- Data deduplication ---
+// Count unique elements in data
+fn count_unique(data: List<Int>, data_len: Int) -> Int {
+    let mut seen = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut unique = 0;
+    let mut i = 0;
+    while i < data_len {
+        let val = data[i];
+        // Check if seen before
+        let mut found = 0;
+        let mut j = 0;
+        while j < unique {
+            if seen[j] == val {
+                found = 1;
+                j = unique; // break
+            }
+            j = j + 1;
+        }
+        if found == 0 {
+            seen[unique] = val;
+            unique = unique + 1;
+        }
+        i = i + 1;
+    }
+    unique
+}
+
+// --- Compression ratio estimation (scaled by 100) ---
+// Ratio = (unique_count * bits_per_symbol) / (data_len * original_bits) * 100
+// Simplified: ratio = unique * 100 / data_len
+fn compression_ratio(data: List<Int>, data_len: Int) -> Int {
+    let unique = count_unique(data, data_len);
+    unique * 100 / data_len
+}
+
+fn main() -> Int {
+    // Data: [1, 2, 1, 2, 1, 3, 3, 3, 4, 5]
+    let data = [1, 2, 1, 2, 1, 3, 3, 3, 4, 5, 0, 0, 0, 0, 0, 0];
+    let data_len = 10;
+
+    // Test 1: Frequency counting - 5 distinct symbols (1,2,3,4,5)
+    let mut freq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let distinct = count_frequencies(data, data_len, freq);
+    assert_eq(distinct, 5);
+
+    // Test 2: Frequency of symbol 1 = 3
+    assert_eq(freq[1], 3);
+
+    // Test 3: Frequency of symbol 3 = 3
+    assert_eq(freq[3], 3);
+
+    // Test 4: Find two minimum frequencies
+    // freq: [0,3,2,3,1,1,0,...] -> min1=1 (symbol 4), min2=1 (symbol 5)
+    // Encoded: 4*100 + 5 = 405
+    let two_min = find_two_min(freq, 16);
+    assert_eq(two_min, 405);
+
+    // Test 5: LZ dictionary size
+    // Pairs: (1,2), (2,1), (1,2)dup, (2,1)dup, (1,3), (3,3), (3,3)dup, (3,4), (4,5)
+    // Unique pairs: (1,2), (2,1), (1,3), (3,3), (3,4), (4,5) = 6
+    let lz_size = lz_dict_size(data, data_len);
+    assert_eq(lz_size, 6);
+
+    // Test 6: Count unique elements
+    let unique = count_unique(data, data_len);
+    assert_eq(unique, 5);
+
+    // Test 7: Compression ratio (unique/total * 100)
+    // 5/10 * 100 = 50
+    let ratio = compression_ratio(data, data_len);
+    assert_eq(ratio, 50);
+
+    // Test 8: Entropy of uniform data [0,1,2,3,0,1,2,3] (4 symbols, equal freq)
+    // H = log2(4) = 2.0 -> scaled = 2000
+    // freq[0]=2, freq[1]=2, freq[2]=2, freq[3]=2, n=8
+    // ratio for each: 8/2=4, log2(4)*1000=2000
+    // H = sum(2*2000)/8 = 4*2000/8 = 8000/8 = 1000... wait
+    // H = sum(freq_i * log2(n/freq_i)) / n
+    // = (2*2000 + 2*2000 + 2*2000 + 2*2000) / 8
+    // = 16000 / 8 = 2000
+    let uniform_data = [0, 1, 2, 3, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0];
+    let h1 = entropy_scaled(uniform_data, 8);
+    assert_eq(h1, 2000);
+
+    // Test 9: Entropy of constant data [5,5,5,5,5,5,5,5] = 0
+    // freq[5]=8, ratio=1, log2(1)=0
+    let const_data = [5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0];
+    let h2 = entropy_scaled(const_data, 8);
+    assert_eq(h2, 0);
+
+    // Test 10: Deduplication of already-unique data
+    let unique_data = [7, 3, 9, 1, 5, 2, 8, 4, 0, 0, 0, 0, 0, 0, 0, 0];
+    let u = count_unique(unique_data, 8);
+    assert_eq(u, 8);
+
+    print("789_compression_sim: PASS");
+    0
+}

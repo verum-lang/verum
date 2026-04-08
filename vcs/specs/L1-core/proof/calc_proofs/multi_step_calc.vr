@@ -1,0 +1,42 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, calc, multi-step
+// @timeout: 5000
+
+/// Multi-step calculational proofs with various relations.
+
+// Long equality chain
+theorem distributive(a: Int, b: Int, c: Int)
+    proof {
+        calc {
+            a * (b + c)
+            == { by ring } a * b + a * c
+            == { by simp } a * b + a * c
+        }
+    };
+
+// Chain with inequality steps
+theorem triangle_ineq(a: Int, b: Int, c: Int)
+    requires a >= 0, b >= 0, c >= 0
+    requires a + b >= c
+    proof {
+        calc {
+            a + b
+            >= { by assumption } c
+            >= { by omega } 0
+        }
+    };
+
+// Calc with != relation
+theorem nonzero_product(a: Int, b: Int)
+    requires a != 0, b != 0
+    proof {
+        calc {
+            a * b
+            != { by ring } 0
+        }
+    };
+
+fn main() {
+    print("Multi-step calc proof tests parsed");
+}

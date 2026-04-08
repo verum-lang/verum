@@ -1,0 +1,244 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, bitwise
+// @description: Comprehensive tests for bitwise operation builtins
+
+// =============================================================================
+// BITWISE AND
+// =============================================================================
+
+meta fn test_bitwise_and_basic() -> Bool {
+    let a = bitwise_and(0b1100, 0b1010);
+    a == 0b1000
+}
+
+meta fn test_bitwise_and_zero() -> Bool {
+    let a = bitwise_and(0xFF, 0x00);
+    a == 0
+}
+
+meta fn test_bitwise_and_identity() -> Bool {
+    let a = bitwise_and(0xFF, 0xFF);
+    a == 0xFF
+}
+
+meta fn test_bitwise_and_negative() -> Bool {
+    let a = bitwise_and(-1, 0xFF);
+    // -1 in i128 is all bits set, AND with 0xFF gives 0xFF
+    a == 0xFF
+}
+
+// =============================================================================
+// BITWISE OR
+// =============================================================================
+
+meta fn test_bitwise_or_basic() -> Bool {
+    let a = bitwise_or(0b1100, 0b1010);
+    a == 0b1110
+}
+
+meta fn test_bitwise_or_zero() -> Bool {
+    let a = bitwise_or(0xFF, 0x00);
+    a == 0xFF
+}
+
+meta fn test_bitwise_or_identity() -> Bool {
+    let a = bitwise_or(0x00, 0x00);
+    a == 0x00
+}
+
+// =============================================================================
+// BITWISE XOR
+// =============================================================================
+
+meta fn test_bitwise_xor_basic() -> Bool {
+    let a = bitwise_xor(0b1100, 0b1010);
+    a == 0b0110
+}
+
+meta fn test_bitwise_xor_same() -> Bool {
+    // XOR with itself is 0
+    let a = bitwise_xor(0xFF, 0xFF);
+    a == 0
+}
+
+meta fn test_bitwise_xor_zero() -> Bool {
+    // XOR with 0 is identity
+    let a = bitwise_xor(0xAB, 0x00);
+    a == 0xAB
+}
+
+meta fn test_bitwise_xor_double() -> Bool {
+    // XOR twice returns original
+    let original = 0x12345678;
+    let key = 0xDEADBEEF;
+    let encrypted = bitwise_xor(original, key);
+    let decrypted = bitwise_xor(encrypted, key);
+    decrypted == original
+}
+
+// =============================================================================
+// BITWISE NOT
+// =============================================================================
+
+meta fn test_bitwise_not_basic() -> Bool {
+    let a = bitwise_not(0);
+    a == -1  // All bits set in signed representation
+}
+
+meta fn test_bitwise_not_double() -> Bool {
+    // NOT twice returns original
+    let original = 0x12345678;
+    let inverted = bitwise_not(original);
+    let restored = bitwise_not(inverted);
+    restored == original
+}
+
+// =============================================================================
+// SHIFT LEFT
+// =============================================================================
+
+meta fn test_shift_left_basic() -> Bool {
+    let a = shift_left(1, 4);
+    a == 16
+}
+
+meta fn test_shift_left_zero() -> Bool {
+    let a = shift_left(0xFF, 0);
+    a == 0xFF
+}
+
+meta fn test_shift_left_large() -> Bool {
+    let a = shift_left(1, 63);
+    a == 9223372036854775808  // 2^63
+}
+
+meta fn test_shift_left_multiply() -> Bool {
+    // Shift left by n is multiply by 2^n
+    let val = 5;
+    let shifted = shift_left(val, 3);
+    shifted == val * 8
+}
+
+// =============================================================================
+// SHIFT RIGHT
+// =============================================================================
+
+meta fn test_shift_right_basic() -> Bool {
+    let a = shift_right(16, 4);
+    a == 1
+}
+
+meta fn test_shift_right_zero() -> Bool {
+    let a = shift_right(0xFF, 0);
+    a == 0xFF
+}
+
+meta fn test_shift_right_divide() -> Bool {
+    // Shift right by n is integer divide by 2^n (for positive numbers)
+    let val = 40;
+    let shifted = shift_right(val, 3);
+    shifted == 5  // 40 / 8 = 5
+}
+
+meta fn test_shift_right_truncate() -> Bool {
+    // Shift right truncates low bits
+    let val = 0b1111;
+    let shifted = shift_right(val, 2);
+    shifted == 0b11
+}
+
+// =============================================================================
+// COMBINED BITWISE OPERATIONS
+// =============================================================================
+
+meta fn test_extract_byte() -> Bool {
+    // Extract byte at position using shift and AND
+    let value = 0x12345678;
+    let byte0 = bitwise_and(value, 0xFF);           // 0x78
+    let byte1 = bitwise_and(shift_right(value, 8), 0xFF);   // 0x56
+    let byte2 = bitwise_and(shift_right(value, 16), 0xFF);  // 0x34
+    let byte3 = bitwise_and(shift_right(value, 24), 0xFF);  // 0x12
+    byte0 == 0x78 && byte1 == 0x56 && byte2 == 0x34 && byte3 == 0x12
+}
+
+meta fn test_set_bit() -> Bool {
+    // Set bit at position using OR
+    let value = 0;
+    let with_bit3 = bitwise_or(value, shift_left(1, 3));
+    with_bit3 == 8
+}
+
+meta fn test_clear_bit() -> Bool {
+    // Clear bit at position using AND with NOT
+    let value = 0xFF;
+    let mask = bitwise_not(shift_left(1, 3));
+    let cleared = bitwise_and(value, mask);
+    bitwise_and(cleared, 8) == 0
+}
+
+meta fn test_toggle_bit() -> Bool {
+    // Toggle bit using XOR
+    let value = 0b1010;
+    let toggled = bitwise_xor(value, 0b0100);  // Toggle bit 2
+    toggled == 0b1110
+}
+
+meta fn test_is_power_of_two() -> Bool {
+    // n is power of 2 if n & (n-1) == 0
+    let n = 64;
+    bitwise_and(n, n - 1) == 0
+}
+
+meta fn test_is_not_power_of_two() -> Bool {
+    let n = 65;
+    bitwise_and(n, n - 1) != 0
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Bitwise AND
+    @const assert(test_bitwise_and_basic());
+    @const assert(test_bitwise_and_zero());
+    @const assert(test_bitwise_and_identity());
+    @const assert(test_bitwise_and_negative());
+
+    // Bitwise OR
+    @const assert(test_bitwise_or_basic());
+    @const assert(test_bitwise_or_zero());
+    @const assert(test_bitwise_or_identity());
+
+    // Bitwise XOR
+    @const assert(test_bitwise_xor_basic());
+    @const assert(test_bitwise_xor_same());
+    @const assert(test_bitwise_xor_zero());
+    @const assert(test_bitwise_xor_double());
+
+    // Bitwise NOT
+    @const assert(test_bitwise_not_basic());
+    @const assert(test_bitwise_not_double());
+
+    // Shift Left
+    @const assert(test_shift_left_basic());
+    @const assert(test_shift_left_zero());
+    @const assert(test_shift_left_large());
+    @const assert(test_shift_left_multiply());
+
+    // Shift Right
+    @const assert(test_shift_right_basic());
+    @const assert(test_shift_right_zero());
+    @const assert(test_shift_right_divide());
+    @const assert(test_shift_right_truncate());
+
+    // Combined operations
+    @const assert(test_extract_byte());
+    @const assert(test_set_bit());
+    @const assert(test_clear_bit());
+    @const assert(test_toggle_bit());
+    @const assert(test_is_power_of_two());
+    @const assert(test_is_not_power_of_two());
+}

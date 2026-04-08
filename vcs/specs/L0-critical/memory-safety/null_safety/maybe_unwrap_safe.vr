@@ -1,0 +1,195 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, maybe, safe-access
+// @description: Tests safe access patterns for Maybe<T> values
+
+/// Safe access patterns for Maybe<T> that never panic:
+/// - Pattern matching (match)
+/// - map/map_or/map_or_else
+/// - unwrap_or/unwrap_or_else/unwrap_or_default
+/// - if let / let else
+/// - and_then chaining
+///
+/// These are the idiomatic ways to handle optional values in Verum.
+
+fn main() {
+    test_pattern_matching();
+    test_map_combinators();
+    test_unwrap_with_defaults();
+    test_conditional_binding();
+    test_chaining();
+    test_early_return();
+
+    print("All Maybe safety tests passed!");
+}
+
+fn test_pattern_matching() {
+    let some_value: Maybe<Int> = Maybe.Some(42);
+    let none_value: Maybe<Int> = Maybe.None;
+
+    // Pattern matching is always safe
+    let result1 = match some_value {
+        Some(x) => x * 2,
+        None => 0,
+    };
+    assert(result1 == 84);
+
+    let result2 = match none_value {
+        Some(x) => x * 2,
+        None => -1,
+    };
+    assert(result2 == -1);
+}
+
+fn test_map_combinators() {
+    let some_value: Maybe<Int> = Maybe.Some(10);
+    let none_value: Maybe<Int> = Maybe.None;
+
+    // map: transform inner value, preserve None
+    let mapped_some = some_value.map(|x| x * 2);
+    assert(mapped_some == Maybe.Some(20));
+
+    let mapped_none = none_value.map(|x| x * 2);
+    assert(mapped_none == Maybe.None);
+
+    // map_or: provide default for None case
+    let result1 = some_value.map_or(0, |x| x + 5);
+    assert(result1 == 15);
+
+    let result2 = none_value.map_or(0, |x| x + 5);
+    assert(result2 == 0);
+
+    // map_or_else: lazy default computation
+    let result3 = none_value.map_or_else(
+        || expensive_default(),
+        |x| x * 2
+    );
+    assert(result3 == 999);
+}
+
+fn expensive_default() -> Int {
+    // Simulating expensive computation for default
+    999
+}
+
+fn test_unwrap_with_defaults() {
+    let some_value: Maybe<Int> = Maybe.Some(42);
+    let none_value: Maybe<Int> = Maybe.None;
+
+    // unwrap_or: provide immediate default
+    let result1 = some_value.unwrap_or(0);
+    assert(result1 == 42);
+
+    let result2 = none_value.unwrap_or(0);
+    assert(result2 == 0);
+
+    // unwrap_or_else: lazy default
+    let result3 = none_value.unwrap_or_else(|| {
+        compute_fallback()
+    });
+    assert(result3 == 100);
+
+    // unwrap_or_default: use Default trait
+    let none_text: Maybe<Text> = Maybe.None;
+    let result4 = none_text.unwrap_or_default();
+    assert(result4 == "");
+}
+
+fn compute_fallback() -> Int {
+    100
+}
+
+fn test_conditional_binding() {
+    let maybe_name: Maybe<Text> = Maybe.Some(Text.from("Alice"));
+    let maybe_empty: Maybe<Text> = Maybe.None;
+
+    // if let: conditional extraction
+    if let Some(name) = maybe_name {
+        assert(name == "Alice");
+    } else {
+        panic("Should have matched Some");
+    }
+
+    // let else: extract or diverge
+    let Some(name) = maybe_name else {
+        panic("Should not reach here");
+    };
+    assert(name == "Alice");
+
+    // Works with None - goes to else branch
+    let result = if let Some(text) = maybe_empty {
+        text.len()
+    } else {
+        0
+    };
+    assert(result == 0);
+}
+
+fn test_chaining() {
+    let nested: Maybe<Maybe<Int>> = Maybe.Some(Maybe.Some(42));
+
+    // flatten: remove one level of Maybe
+    let flattened = nested.flatten();
+    assert(flattened == Maybe.Some(42));
+
+    // and_then: chain operations that return Maybe
+    let result = Maybe.Some(10)
+        .and_then(|x| if x > 5 { Maybe.Some(x * 2) } else { Maybe.None })
+        .and_then(|x| Maybe.Some(x + 1));
+    assert(result == Maybe.Some(21));
+
+    // Chain breaks on None
+    let result2 = Maybe.Some(3)
+        .and_then(|x| if x > 5 { Maybe.Some(x * 2) } else { Maybe.None })
+        .and_then(|x| Maybe.Some(x + 1));
+    assert(result2 == Maybe.None);
+
+    // filter: keep Some only if predicate passes
+    let filtered1 = Maybe.Some(10).filter(|x| x > 5);
+    assert(filtered1 == Maybe.Some(10));
+
+    let filtered2 = Maybe.Some(3).filter(|x| x > 5);
+    assert(filtered2 == Maybe.None);
+}
+
+fn test_early_return() {
+    let result1 = process_optional(Maybe.Some(10));
+    assert(result1 == 20);
+
+    let result2 = process_optional(Maybe.None);
+    assert(result2 == -1);
+}
+
+fn process_optional(value: Maybe<Int>) -> Int {
+    // Early return with ? operator safely returns None-equivalent
+    // For functions returning Int, use match or combinators
+    match value {
+        Some(x) => x * 2,
+        None => -1,
+    }
+}
+
+// Demonstrate safe Maybe<T> in data structures
+type User is {
+    name: Text,
+    email: Maybe<Text>,      // Optional field
+    age: Maybe<Int>,         // Optional field
+};
+
+fn test_struct_with_optionals() {
+    let user = User {
+        name: Text.from("Bob"),
+        email: Maybe.None,
+        age: Maybe.Some(30),
+    };
+
+    // Safe access patterns
+    let email_display = user.email.unwrap_or(Text.from("No email"));
+    assert(email_display == "No email");
+
+    let age_display = user.age.map_or("Unknown", |a| {
+        f"{a} years old"
+    });
+    assert(age_display == "30 years old");
+}

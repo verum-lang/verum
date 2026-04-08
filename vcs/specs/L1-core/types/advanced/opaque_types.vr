@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, opaque, abstraction, encapsulation
+// @description: Test opaque type declarations and their type-checking behavior
+
+// Opaque newtype - internal representation hidden from callers
+@opaque
+type Token is (Text);
+
+// Opaque unit type - pure handle semantics
+@opaque
+type SessionId is ();
+
+// Opaque record type - fields not accessible outside module
+@opaque
+type ConnectionPool is {
+    max_size: Int,
+    current: Int,
+};
+
+// Opaque generic type
+@opaque
+type Handle<T> is (Int);
+
+// Implement methods on opaque type
+implement Token {
+    fn new(value: Text) -> Token {
+        Token(value)
+    }
+
+    fn is_valid(&self) -> Bool {
+        true
+    }
+}
+
+implement SessionId {
+    fn generate() -> SessionId {
+        SessionId
+    }
+}
+
+implement<T> Handle<T> {
+    fn from_raw(id: Int) -> Handle<T> {
+        Handle(id)
+    }
+
+    fn raw(&self) -> Int {
+        self.0
+    }
+}
+
+// Functions using opaque types
+fn validate_token(token: &Token) -> Bool {
+    token.is_valid()
+}
+
+fn create_session() -> SessionId {
+    SessionId.generate()
+}
+
+fn main() {
+    let t = Token.new("abc123");
+    assert(validate_token(&t));
+
+    let s = create_session();
+
+    let h: Handle<Int> = Handle.from_raw(42);
+    assert(h.raw() == 42);
+}

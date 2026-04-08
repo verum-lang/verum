@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, math, linalg, vector, basic
+// @description: Basic test for Vector generic type method resolution
+
+module specs.core.math.vector_basic_test;
+
+mount core.math.{Vector, Matrix};
+
+@test
+fn test_vector_zeros() {
+    let v0: Vector<Float> = Vector.zeros(3);
+    assert(v0.len() == 3);
+    assert(v0.get(0) == 0.0);
+}
+
+@test
+fn test_vector_filled() {
+    let v1: Vector<Float> = Vector.filled(4, 2.5);
+    assert(v1.len() == 4);
+    assert(v1.get(0) == 2.5);
+}
+
+@test
+fn test_matrix_zeros() {
+    let m0: Matrix<Float> = Matrix.zeros(2, 3);
+    assert(m0.rows() == 2);
+    assert(m0.cols() == 3);
+}
+
+@test
+fn test_matrix_eye() {
+    let eye_mat: Matrix<Float> = Matrix.eye(3);
+    assert(eye_mat.get(0, 0) == 1.0);
+    assert(eye_mat.get(1, 1) == 1.0);
+    assert(eye_mat.get(0, 1) == 0.0);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

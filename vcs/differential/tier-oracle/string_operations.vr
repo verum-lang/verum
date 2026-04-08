@@ -1,0 +1,216 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, string_operations
+
+/// String/Text operations must behave identically across
+/// interpreter (Tier 0) and AOT (Tier 3)
+
+fn main() {
+    // ===== Basic string operations =====
+    println("=== Basic Operations ===");
+
+    let s = "Hello, World!";
+    println(f"s = \"{s}\"");
+    println(f"s.len() = {s.len()}");
+    println(f"s.is_empty() = {s.is_empty()}");
+
+    let empty = "";
+    println(f"empty.is_empty() = {empty.is_empty()}");
+
+    // ===== String concatenation =====
+    println("\n=== Concatenation ===");
+
+    let a = "Hello";
+    let b = "World";
+    let concat = a + ", " + b + "!";
+    println(f"concat = \"{concat}\"");
+
+    // String interpolation
+    let name = "Alice";
+    let age = 30;
+    let interpolated = f"Name: {name}, Age: {age}";
+    println(f"interpolated = \"{interpolated}\"");
+
+    // ===== Character access =====
+    println("\n=== Character Access ===");
+
+    let text = "Hello";
+    println(f"text[0] = '{text[0]}'");
+    println(f"text[4] = '{text[4]}'");
+
+    let chars = text.chars();
+    println(f"chars = {chars}");
+
+    // ===== Substrings/Slicing =====
+    println("\n=== Slicing ===");
+
+    let full = "Hello, World!";
+    println(f"full[0..5] = \"{full[0..5]}\"");
+    println(f"full[7..12] = \"{full[7..12]}\"");
+    println(f"full[..5] = \"{full[..5]}\"");
+    println(f"full[7..] = \"{full[7..]}\"");
+
+    // ===== Case conversion =====
+    println("\n=== Case Conversion ===");
+
+    let mixed = "Hello World";
+    println(f"to_uppercase = \"{mixed.to_uppercase()}\"");
+    println(f"to_lowercase = \"{mixed.to_lowercase()}\"");
+
+    let title = "hello world";
+    println(f"to_titlecase = \"{title.to_titlecase()}\"");
+
+    // ===== Trimming =====
+    println("\n=== Trimming ===");
+
+    let padded = "   Hello   ";
+    println(f"trim = \"{padded.trim()}\"");
+    println(f"trim_start = \"{padded.trim_start()}\"");
+    println(f"trim_end = \"{padded.trim_end()}\"");
+
+    let custom = "xxHelloxx";
+    println(f"trim_chars('x') = \"{custom.trim_chars('x')}\"");
+
+    // ===== Searching =====
+    println("\n=== Searching ===");
+
+    let haystack = "Hello, World!";
+    println(f"contains(\"World\") = {haystack.contains(\"World\")}");
+    println(f"contains(\"Rust\") = {haystack.contains(\"Rust\")}");
+
+    println(f"starts_with(\"Hello\") = {haystack.starts_with(\"Hello\")}");
+    println(f"ends_with(\"!\") = {haystack.ends_with(\"!\")}");
+
+    println(f"find(\"o\") = {haystack.find(\"o\")}");
+    println(f"rfind(\"o\") = {haystack.rfind(\"o\")}");
+    println(f"find(\"xyz\") = {haystack.find(\"xyz\")}");
+
+    let all_positions = haystack.find_all("o");
+    println(f"find_all(\"o\") = {all_positions}");
+
+    // ===== Splitting =====
+    println("\n=== Splitting ===");
+
+    let csv = "a,b,c,d,e";
+    let parts = csv.split(",");
+    println(f"split(\",\") = {parts}");
+
+    let whitespace = "hello   world  test";
+    let words = whitespace.split_whitespace();
+    println(f"split_whitespace = {words}");
+
+    let lines = "line1\nline2\nline3";
+    println(f"lines = {lines.lines()}");
+
+    // ===== Joining =====
+    println("\n=== Joining ===");
+
+    let items = ["a", "b", "c"];
+    println(f"join(\", \") = \"{items.join(\", \")}\"");
+    println(f"join(\"\") = \"{items.join(\"\")}\"");
+
+    // ===== Replacing =====
+    println("\n=== Replacing ===");
+
+    let original = "Hello, World!";
+    println(f"replace(\"World\", \"Rust\") = \"{original.replace(\"World\", \"Rust\")}\"");
+
+    let multiple = "aaa bbb aaa";
+    println(f"replace_all(\"aaa\", \"xxx\") = \"{multiple.replace(\"aaa\", \"xxx\")}\"");
+
+    // ===== Padding =====
+    println("\n=== Padding ===");
+
+    let short = "42";
+    println(f"pad_start(5, '0') = \"{short.pad_start(5, '0')}\"");
+    println(f"pad_end(5, '.') = \"{short.pad_end(5, '.')}\"");
+
+    // ===== Repeat =====
+    println("\n=== Repeat ===");
+
+    let unit = "ab";
+    println(f"repeat(3) = \"{unit.repeat(3)}\"");
+
+    // ===== Comparison =====
+    println("\n=== Comparison ===");
+
+    let s1 = "apple";
+    let s2 = "banana";
+    let s3 = "Apple";
+
+    println(f"\"apple\" == \"apple\" = {s1 == "apple"}");
+    println(f"\"apple\" < \"banana\" = {s1 < s2}");
+    println(f"eq_ignore_case(\"Apple\") = {s1.eq_ignore_case(s3)}");
+
+    // ===== Parsing =====
+    println("\n=== Parsing ===");
+
+    let num_str = "42";
+    let parsed_int = num_str.parse<Int>();
+    println(f"parse \"42\" as Int = {parsed_int}");
+
+    let float_str = "3.14";
+    let parsed_float = float_str.parse<Float>();
+    println(f"parse \"3.14\" as Float = {parsed_float}");
+
+    let invalid = "not a number";
+    let failed_parse = invalid.parse<Int>();
+    println(f"parse \"not a number\" = {failed_parse}");
+
+    // ===== Formatting =====
+    println("\n=== Formatting ===");
+
+    let pi = 3.14159265359;
+    println(f"pi = {pi}");
+    println(f"pi:.2 = {pi:.2}");
+    println(f"pi:.4 = {pi:.4}");
+
+    let num = 42;
+    println(f"num:05 = {num:05}");
+    println(f"num:>10 = \"{num:>10}\"");
+    println(f"num:<10 = \"{num:<10}\"");
+    println(f"num:^10 = \"{num:^10}\"");
+
+    // ===== Unicode =====
+    println("\n=== Unicode ===");
+
+    let unicode = "Hello, Мир, 世界!";
+    println(f"unicode = \"{unicode}\"");
+    println(f"unicode.len() = {unicode.len()}");
+    println(f"unicode.chars().len() = {unicode.chars().len()}");
+
+    let emoji = "Hello 👋 World 🌍";
+    println(f"emoji = \"{emoji}\"");
+    println(f"emoji.chars() = {emoji.chars()}");
+
+    // ===== Raw strings =====
+    println("\n=== Raw Strings ===");
+
+    let raw = r"Hello\nWorld";
+    println(f"raw = \"{raw}\"");
+
+    let raw_quotes = r#"He said "Hello""#;
+    println(f"raw_quotes = \"{raw_quotes}\"");
+
+    // ===== Multiline strings =====
+    println("\n=== Multiline ===");
+
+    let multiline = """
+        Line 1
+        Line 2
+        Line 3
+    """;
+    println(f"multiline:\n{multiline}");
+
+    // ===== String builder =====
+    println("\n=== String Builder ===");
+
+    let mut builder = TextBuilder.new();
+    builder.append("Hello");
+    builder.append(", ");
+    builder.append("World");
+    builder.append("!");
+    let built = builder.build();
+    println(f"built = \"{built}\"");
+}

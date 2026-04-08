@@ -1,0 +1,111 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, gpu, reduction
+// @expected-exit: 0
+
+// GPU parallel reduction simulation.
+// Tests tree reduction and multi-block patterns via functions returning List<Int>.
+
+fn tree_reduce_sum(data: List<Int>, n: Int) -> Int {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        buf[i] = data[i];
+        i = i + 1;
+    }
+    let mut stride = n / 2;
+    while (stride > 0) {
+        let mut tid = 0;
+        while (tid < stride) {
+            buf[tid] = buf[tid] + buf[tid + stride];
+            tid = tid + 1;
+        }
+        stride = stride / 2;
+    }
+    buf[0]
+}
+
+fn tree_reduce_max(data: List<Int>, n: Int) -> Int {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        buf[i] = data[i];
+        i = i + 1;
+    }
+    let mut stride = n / 2;
+    while (stride > 0) {
+        let mut tid = 0;
+        while (tid < stride) {
+            if (buf[tid + stride] > buf[tid]) {
+                buf[tid] = buf[tid + stride];
+            }
+            tid = tid + 1;
+        }
+        stride = stride / 2;
+    }
+    buf[0]
+}
+
+fn block_reduce(data: List<Int>, n: Int, block_size: Int) -> List<Int> {
+    // Multi-block reduction: each block produces one partial sum
+    let num_blocks = (n + block_size - 1) / block_size;
+    let mut block_results = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut bid = 0;
+    while (bid < num_blocks) {
+        let start = bid * block_size;
+        let mut block_sum = 0;
+        let mut tid = 0;
+        while (tid < block_size) {
+            let idx = start + tid;
+            if (idx < n) {
+                block_sum = block_sum + data[idx];
+            }
+            tid = tid + 1;
+        }
+        block_results[bid] = block_sum;
+        bid = bid + 1;
+    }
+    block_results
+}
+
+fn main() -> Int {
+    // Test 1: Power-of-2 tree reduction
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sum = tree_reduce_sum(data, 8);
+    assert_eq(sum, 36);
+
+    // Test 2: Tree reduce with 4 elements
+    let data2 = [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sum2 = tree_reduce_sum(data2, 4);
+    assert_eq(sum2, 100);
+
+    // Test 3: Max reduction
+    let data3 = [5, 3, 9, 1, 7, 2, 8, 4, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mx = tree_reduce_max(data3, 8);
+    assert_eq(mx, 9);
+
+    // Test 4: Multi-block reduction via function returning List<Int>
+    let data4 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let partials = block_reduce(data4, 16, 4);
+    // Block 0: 1+2+3+4=10, Block 1: 5+6+7+8=26, Block 2: 9+10+11+12=42, Block 3: 13+14+15+16=58
+    assert_eq(partials[0], 10);
+    assert_eq(partials[1], 26);
+    assert_eq(partials[2], 42);
+    assert_eq(partials[3], 58);
+    // Final sum: reduce the partial sums
+    let total = tree_reduce_sum(partials, 4);
+    assert_eq(total, 136);
+
+    // Test 5: Multi-block with non-divisible size
+    let partials2 = block_reduce(data4, 10, 4);
+    // Block 0: 1+2+3+4=10, Block 1: 5+6+7+8=26, Block 2: 9+10=19
+    assert_eq(partials2[0], 10);
+    assert_eq(partials2[1], 26);
+    assert_eq(partials2[2], 19);
+    let total2 = partials2[0] + partials2[1] + partials2[2];
+    assert_eq(total2, 55);
+
+    print("GPU reduction: PASS");
+    0
+}

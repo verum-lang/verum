@@ -1,0 +1,214 @@
+// @test: parse-pass
+// @tier: 0
+// @category: errors
+// @description: Test try/recover with closure syntax for error handling
+
+fn test_recover_closure_basic() {
+    // Basic closure recovery
+    try {
+        risky_operation();
+    } recover |e| {
+        handle_error(e)
+    }
+
+    // Single expression body
+    try {
+        parse(input)
+    } recover |e| default_value
+
+    // Block body with multiple statements
+    try {
+        fetch_data()
+    } recover |e| {
+        log_error(e);
+        metrics.increment("fetch_failures");
+        cached_data()
+    }
+}
+
+fn test_recover_closure_with_finally() {
+    // Closure recover with finally
+    try {
+        process_file(path);
+    } recover |e| {
+        log_error(e);
+        None
+    } finally {
+        cleanup();
+    }
+
+    // Complex combination
+    try {
+        let conn = connect();
+        let result = conn.query(sql);
+        process(result)
+    } recover |e| {
+        log_db_error(e);
+        fallback_result()
+    } finally {
+        conn.close();
+    }
+}
+
+fn test_recover_closure_expressions() {
+    // As expression in let
+    let result = try {
+        dangerous_computation()
+    } recover |e| {
+        log_and_return_default(e)
+    };
+
+    // Try expression assigned to variable then returned
+    let value = try {
+        get_value()
+    } recover |e| {
+        Err(wrap_error(e))
+    };
+
+    // In method chain (conceptually)
+    let processed = try {
+        fetch()
+    } recover |_| default()
+        |> transform
+        |> validate;
+
+    // Conditional recovery
+    let cond_value = try {
+        compute()
+    } recover |e| if e.is_retryable() {
+        retry()
+    } else {
+        give_up()
+    };
+}
+
+fn test_recover_closure_complex() {
+    // With type annotation in closure
+    try {
+        operation()
+    } recover |e: MyError| {
+        e.message()
+    }
+
+    // Pattern in closure param
+    try {
+        fetch()
+    } recover |Error { code, message }| {
+        log(f"Error {code}: {message}");
+        default()
+    }
+
+    // Nested try in recovery
+    try {
+        primary_operation()
+    } recover |e| {
+        try {
+            fallback_operation()
+        } recover |e2| {
+            log_both_errors(e, e2);
+            ultimate_fallback()
+        }
+    }
+}
+
+fn test_recover_closure_control_flow() {
+    // Early return from closure
+    try {
+        process()
+    } recover |e| {
+        if e.is_fatal() {
+            return Err(e);
+        }
+        default_value()
+    }
+
+    // In loop with continue/break
+    for item in items {
+        let processed = try {
+            process_item(item)
+        } recover |e| {
+            if e.is_skip() {
+                continue;
+            }
+            if e.is_stop() {
+                break;
+            }
+            default_for_item(item)
+        };
+        results.push(processed);
+    }
+}
+
+fn test_recover_closure_async() {
+    // Async closure recovery
+    try {
+        fetch_data().await
+    } recover |e| {
+        log_async_error(e);
+        cached_data().await
+    }
+
+    // With finally in async
+    try {
+        let response = http.get(url).await;
+        parse_response(response)
+    } recover |e| {
+        log_error(e);
+        default_response()
+    } finally {
+        close_connection().await;
+    }
+}
+
+fn test_recover_closure_chaining() {
+    // Multiple fallback attempts
+    try {
+        primary()
+    } recover |_| {
+        try {
+            secondary()
+        } recover |_| {
+            try {
+                tertiary()
+            } recover |_| {
+                ultimate_default()
+            }
+        }
+    }
+
+    // Explicit fallback chain
+    let result = try { primary() } recover |_| default1()
+        ?? try { secondary() } recover |_| default2()
+        ?? fallback;
+}
+
+fn test_recover_closure_patterns() {
+    // Error transformation
+    try {
+        parse(input)
+    } recover |e| {
+        Err(WrapperError.from(e))
+    }
+
+    // Logging and re-throw pattern
+    try {
+        operation()
+    } recover |e| {
+        log_error(e);
+        metrics.increment("errors");
+        throw e
+    }
+
+    // Retry pattern
+    try {
+        flaky_operation()
+    } recover |e| {
+        if attempts < max_attempts {
+            attempts += 1;
+            let retry_result = try { flaky_operation() } recover |e2| handle(e2);
+            retry_result
+        } else {
+            Err(e)
+        }
+    }
+}

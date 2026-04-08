@@ -1,0 +1,239 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, async, channels, producer-consumer, pipeline
+// @expected-exit: 0
+
+// Tests channel-based communication patterns.
+// Channels allow message passing between concurrent tasks.
+// In single-threaded mode, channels are simulated with lists.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Simulate a bounded channel with a list
+// Channel: [write_idx, read_idx, item0, item1, ..., itemN]
+// Using first two slots for indices
+
+fn channel_send(ch: List<Int>, idx: Int, val: Int) -> Int {
+    ch[idx + 2] = val;
+    idx + 1
+}
+
+fn channel_recv(ch: List<Int>, idx: Int) -> Int {
+    ch[idx + 2]
+}
+
+fn main() -> Int {
+    // Test 1: Simple send/receive
+    let mut ch = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut write_idx = 0;
+    let mut read_idx = 0;
+
+    // Send
+    write_idx = channel_send(ch, write_idx, 42);
+    write_idx = channel_send(ch, write_idx, 17);
+    assert_eq(write_idx, 2);
+
+    // Receive
+    let v1 = channel_recv(ch, read_idx);
+    read_idx = read_idx + 1;
+    let v2 = channel_recv(ch, read_idx);
+    read_idx = read_idx + 1;
+    assert_eq(v1, 42);
+    assert_eq(v2, 17);
+
+    // Test 2: Producer-consumer pattern
+    let mut produced = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut consumed = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Producer: generate squares
+    let mut i = 0;
+    while (i < 8) {
+        produced[i] = (i + 1) * (i + 1);
+        i = i + 1;
+    }
+
+    // Consumer: process (double each)
+    i = 0;
+    while (i < 8) {
+        consumed[i] = produced[i] * 2;
+        i = i + 1;
+    }
+    assert_eq(consumed[0], 2);   // 1*2
+    assert_eq(consumed[3], 32);  // 16*2
+    assert_eq(consumed[7], 128); // 64*2
+
+    // Test 3: Fan-out with multiple consumers
+    let source = [10, 20, 30, 40, 50, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut consumer1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut consumer2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Round-robin distribution
+    i = 0;
+    while (i < 6) {
+        if (i % 2 == 0) {
+            consumer1[i / 2] = source[i];
+        } else {
+            consumer2[i / 2] = source[i];
+        }
+        i = i + 1;
+    }
+    assert_eq(consumer1[0], 10);
+    assert_eq(consumer1[1], 30);
+    assert_eq(consumer1[2], 50);
+    assert_eq(consumer2[0], 20);
+    assert_eq(consumer2[1], 40);
+    assert_eq(consumer2[2], 60);
+
+    // Test 4: Fan-in with multiple producers
+    let mut merged = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut merge_idx = 0;
+    // Producer 1: odd numbers
+    i = 1;
+    while (i <= 5) {
+        merged[merge_idx] = i * 2 - 1;
+        merge_idx = merge_idx + 1;
+        i = i + 1;
+    }
+    // Producer 2: even numbers
+    i = 1;
+    while (i <= 5) {
+        merged[merge_idx] = i * 2;
+        merge_idx = merge_idx + 1;
+        i = i + 1;
+    }
+    assert_eq(merge_idx, 10);
+    // First 5: 1, 3, 5, 7, 9
+    assert_eq(merged[0], 1);
+    assert_eq(merged[4], 9);
+    // Next 5: 2, 4, 6, 8, 10
+    assert_eq(merged[5], 2);
+    assert_eq(merged[9], 10);
+
+    // Test 5: Pipeline stage processing
+    // Stage 1: increment
+    // Stage 2: square
+    // Stage 3: modulo
+    let pipeline_input = [3, 7, 11, 5, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut after_s1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut after_s2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut after_s3 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    i = 0;
+    while (i < 5) {
+        after_s1[i] = pipeline_input[i] + 1;  // 4, 8, 12, 6, 10
+        i = i + 1;
+    }
+    i = 0;
+    while (i < 5) {
+        after_s2[i] = after_s1[i] * after_s1[i];  // 16, 64, 144, 36, 100
+        i = i + 1;
+    }
+    i = 0;
+    while (i < 5) {
+        after_s3[i] = after_s2[i] % 10;  // 6, 4, 4, 6, 0
+        i = i + 1;
+    }
+    assert_eq(after_s3[0], 6);
+    assert_eq(after_s3[1], 4);
+    assert_eq(after_s3[2], 4);
+    assert_eq(after_s3[3], 6);
+    assert_eq(after_s3[4], 0);
+
+    // Test 6: Buffered channel semantics (FIFO order preservation)
+    let mut fifo = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    // Write in order
+    i = 0;
+    while (i < 10) {
+        fifo[i] = i * 7 + 3;
+        i = i + 1;
+    }
+    // Read in order - verify FIFO
+    i = 0;
+    while (i < 10) {
+        assert_eq(fifo[i], i * 7 + 3);
+        i = i + 1;
+    }
+
+    // Test 7: Bounded buffer with wraparound (circular buffer)
+    let capacity = 4;
+    let mut rbuf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut wr = 0;
+    let mut rd = 0;
+
+    // Write 3 items
+    rbuf[wr % capacity] = 100; wr = wr + 1;
+    rbuf[wr % capacity] = 200; wr = wr + 1;
+    rbuf[wr % capacity] = 300; wr = wr + 1;
+    assert_eq(wr - rd, 3);  // 3 items in buffer
+
+    // Read 2 items
+    assert_eq(rbuf[rd % capacity], 100); rd = rd + 1;
+    assert_eq(rbuf[rd % capacity], 200); rd = rd + 1;
+    assert_eq(wr - rd, 1);  // 1 item remaining
+
+    // Write 2 more (wraps around)
+    rbuf[wr % capacity] = 400; wr = wr + 1;
+    rbuf[wr % capacity] = 500; wr = wr + 1;
+    assert_eq(wr - rd, 3);  // 3 items
+
+    // Read all
+    assert_eq(rbuf[rd % capacity], 300); rd = rd + 1;
+    assert_eq(rbuf[rd % capacity], 400); rd = rd + 1;
+    assert_eq(rbuf[rd % capacity], 500); rd = rd + 1;
+    assert_eq(wr - rd, 0);  // Buffer empty
+
+    // Test 8: Channel close pattern
+    let sentinel = -1;
+    let mut closed = 0;
+    let mut recv_count = 0;
+    let mut msgs = [5, 10, 15, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < 16) {
+        if (msgs[i] == sentinel) {
+            closed = 1;
+            i = 16;  // Break
+        } else {
+            recv_count = recv_count + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(closed, 1);
+    assert_eq(recv_count, 3);
+
+    // Test 9: Multi-producer single-consumer orderbuf
+    // Each producer writes a tag + value
+    let mut mpsc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut idx = 0;
+    // Producer A: tag=1
+    mpsc[idx] = 1 * 100 + 10; idx = idx + 1;  // 110
+    mpsc[idx] = 1 * 100 + 20; idx = idx + 1;  // 120
+    // Producer B: tag=2
+    mpsc[idx] = 2 * 100 + 30; idx = idx + 1;  // 230
+    mpsc[idx] = 2 * 100 + 40; idx = idx + 1;  // 240
+    // Consumer reads all
+    let sum_a = (mpsc[0] % 100) + (mpsc[1] % 100);  // 10 + 20
+    let sum_b = (mpsc[2] % 100) + (mpsc[3] % 100);  // 30 + 40
+    assert_eq(sum_a, 30);
+    assert_eq(sum_b, 70);
+
+    // Test 10: Broadcast channel (one-to-many)
+    let broadcast_val = 99;
+    let n_subscribers = 5;
+    let mut received = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    i = 0;
+    while (i < n_subscribers) {
+        received[i] = broadcast_val;
+        i = i + 1;
+    }
+    // All subscribers got the value
+    i = 0;
+    while (i < n_subscribers) {
+        assert_eq(received[i], 99);
+        i = i + 1;
+    }
+
+    print("Async channels: PASS");
+    0
+}

@@ -1,0 +1,80 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Single level of nesting
+module outer {
+    module inner {}
+}
+
+// Two levels of nesting
+module level1 {
+    module level2 {
+        module level3 {}
+    }
+}
+
+// Multiple nested modules at same level
+module parent {
+    module child1 {}
+    module child2 {}
+    module child3 {}
+}
+
+// Deep nesting with content
+module a {
+    module b {
+        module c {
+            module d {
+                fn deeply_nested() -> Int {
+                    100
+                }
+            }
+        }
+    }
+}
+
+// Nested modules with types
+module shapes {
+    module two_d {
+        type Point is { x: Float, y: Float };
+        type Circle is { center: Point, radius: Float };
+    }
+
+    module three_d {
+        type Point3D is { x: Float, y: Float, z: Float };
+        type Sphere is { center: Point3D, radius: Float };
+    }
+}
+
+// Nested modules accessing sibling items
+module services {
+    type Config is { name: Text };
+
+    module api {
+        fn get_config() -> super.Config {
+            super.Config { name: "api" }
+        }
+    }
+
+    module internal {
+        fn get_config() -> super.Config {
+            super.Config { name: "internal" }
+        }
+    }
+}
+
+// Mix of nested modules and items
+module mixed {
+    fn top_level() -> Int { 1 }
+
+    module sub {
+        fn sub_level() -> Int { 2 }
+
+        module subsub {
+            fn subsub_level() -> Int { 3 }
+        }
+    }
+
+    type TopType is { value: Int };
+}

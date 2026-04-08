@@ -1,0 +1,247 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, comprehensive, final-600
+// @timeout: 30000
+
+// Milestone 600: Comprehensive arithmetic and algorithm potpourri
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// Integer square root
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else {
+        let mut x = n;
+        let mut y = (x + 1) / 2;
+        while y < x { x = y; y = (x + n / x) / 2; }
+        x
+    }
+}
+
+// Power
+fn pow_int(base: Int, exp: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < exp { r = r * base; i = i + 1; }
+    r
+}
+
+// GCD
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+// Is perfect square
+fn is_perfect_sq(n: Int) -> Int {
+    let s = isqrt(n);
+    if s * s == n { 1 } else { 0 }
+}
+
+// Pythagorean triple check
+fn is_pythagorean(a: Int, b: Int, c: Int) -> Int {
+    if a * a + b * b == c * c { 1 } else { 0 }
+}
+
+// Happy number: keep squaring digits until 1 or cycle
+fn sum_sq_digits(n: Int) -> Int {
+    let mut s = 0;
+    let mut v = n;
+    while v > 0 {
+        let d = v % 10;
+        s = s + d * d;
+        v = v / 10;
+    }
+    s
+}
+
+fn is_happy(n: Int) -> Int {
+    let mut slow = n;
+    let mut fast = n;
+    let mut steps = 0;
+    // Floyd's cycle detection
+    slow = sum_sq_digits(slow);
+    fast = sum_sq_digits(sum_sq_digits(fast));
+    while slow != fast {
+        slow = sum_sq_digits(slow);
+        fast = sum_sq_digits(sum_sq_digits(fast));
+        steps = steps + 1;
+        if steps > 100 { slow = fast; } // safety
+    }
+    if slow == 1 { 1 } else { 0 }
+}
+
+// Collatz sequence length
+fn collatz_len(n: Int) -> Int {
+    let mut v = n;
+    let mut count = 0;
+    while v != 1 {
+        if v % 2 == 0 { v = v / 2; }
+        else { v = 3 * v + 1; }
+        count = count + 1;
+        if count > 500 { v = 1; } // safety
+    }
+    count
+}
+
+// Armstrong number check (narcissistic)
+fn is_armstrong(n: Int) -> Int {
+    let mut digits = 0;
+    let mut v = n;
+    while v > 0 { v = v / 10; digits = digits + 1; }
+    let mut sum = 0;
+    let mut v2 = n;
+    while v2 > 0 {
+        let d = v2 % 10;
+        sum = sum + pow_int(d, digits);
+        v2 = v2 / 10;
+    }
+    if sum == n { 1 } else { 0 }
+}
+
+// Kaprekar routine: sort digits desc - sort digits asc
+fn sort_4digits_desc(n: Int) -> Int {
+    // Extract 4 digits
+    let mut d = zeros();
+    let mut v = n;
+    let mut i = 0;
+    while i < 4 { d = set8(d, i, v % 10); v = v / 10; i = i + 1; }
+    // Sort descending (bubble sort)
+    let mut pass = 0;
+    while pass < 3 {
+        let mut j = 0;
+        while j < 3 - pass {
+            if get8(d, j) < get8(d, j + 1) {
+                let tmp = get8(d, j);
+                d = set8(d, j, get8(d, j + 1));
+                d = set8(d, j + 1, tmp);
+            }
+            j = j + 1;
+        }
+        pass = pass + 1;
+    }
+    get8(d, 0) * 1000 + get8(d, 1) * 100 + get8(d, 2) * 10 + get8(d, 3)
+}
+
+fn sort_4digits_asc(n: Int) -> Int {
+    let mut d = zeros();
+    let mut v = n;
+    let mut i = 0;
+    while i < 4 { d = set8(d, i, v % 10); v = v / 10; i = i + 1; }
+    let mut pass = 0;
+    while pass < 3 {
+        let mut j = 0;
+        while j < 3 - pass {
+            if get8(d, j) > get8(d, j + 1) {
+                let tmp = get8(d, j);
+                d = set8(d, j, get8(d, j + 1));
+                d = set8(d, j + 1, tmp);
+            }
+            j = j + 1;
+        }
+        pass = pass + 1;
+    }
+    get8(d, 0) * 1000 + get8(d, 1) * 100 + get8(d, 2) * 10 + get8(d, 3)
+}
+
+fn kaprekar_step(n: Int) -> Int {
+    sort_4digits_desc(n) - sort_4digits_asc(n)
+}
+
+fn test_isqrt_fn() -> Int {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(10), 3); // floor
+    assert_eq(is_perfect_sq(144), 1);
+    assert_eq(is_perfect_sq(145), 0);
+    1
+}
+
+fn test_pythagorean() -> Int {
+    assert_eq(is_pythagorean(3, 4, 5), 1);
+    assert_eq(is_pythagorean(5, 12, 13), 1);
+    assert_eq(is_pythagorean(8, 15, 17), 1);
+    assert_eq(is_pythagorean(3, 4, 6), 0);
+    1
+}
+
+fn test_happy() -> Int {
+    assert_eq(is_happy(1), 1);
+    assert_eq(is_happy(7), 1);   // 49->97->130->10->1
+    assert_eq(is_happy(10), 1);
+    assert_eq(is_happy(4), 0);   // enters 4->16->37->58->89->145->42->20->4 cycle
+    1
+}
+
+fn test_collatz() -> Int {
+    assert_eq(collatz_len(1), 0);
+    assert_eq(collatz_len(2), 1);  // 2->1
+    assert_eq(collatz_len(3), 7);  // 3->10->5->16->8->4->2->1
+    assert_eq(collatz_len(6), 8);  // 6->3->10->5->16->8->4->2->1
+    1
+}
+
+fn test_armstrong() -> Int {
+    assert_eq(is_armstrong(1), 1);     // 1^1 = 1
+    assert_eq(is_armstrong(153), 1);   // 1^3 + 5^3 + 3^3 = 1+125+27 = 153
+    assert_eq(is_armstrong(370), 1);   // 3^3 + 7^3 + 0^3 = 27+343+0 = 370
+    assert_eq(is_armstrong(100), 0);
+    1
+}
+
+fn test_kaprekar() -> Int {
+    // Kaprekar's constant: 6174
+    // 3524 -> 5432-2345 = 3087 -> 8730-0378 = 8352 -> 8532-2358 = 6174
+    assert_eq(kaprekar_step(3524), 3087);
+    assert_eq(kaprekar_step(6174), 6174); // fixed point
+    1
+}
+
+fn test_power() -> Int {
+    assert_eq(pow_int(2, 0), 1);
+    assert_eq(pow_int(2, 10), 1024);
+    assert_eq(pow_int(3, 5), 243);
+    assert_eq(pow_int(5, 3), 125);
+    1
+}
+
+fn main() -> Int {
+    test_isqrt_fn();
+    test_pythagorean();
+    test_happy();
+    test_collatz();
+    test_armstrong();
+    test_kaprekar();
+    test_power();
+    print("[OK] 600_milestone_aot");
+    0
+}

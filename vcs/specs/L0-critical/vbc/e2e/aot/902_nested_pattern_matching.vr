@@ -1,0 +1,245 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, pattern-matching, nested, wildcard, exhaustive, variants
+// @expected-exit: 0
+
+// Test: nested pattern matching — match inside match, wildcard patterns,
+//       exhaustive matching on various sum types.
+
+type Color is Red | Green | Blue;
+
+fn color_name(c: Color) -> Int {
+    match c {
+        Red => 1,
+        Green => 2,
+        Blue => 3,
+    }
+}
+
+type Priority is Low | Medium | High | Critical;
+
+fn priority_level(p: Priority) -> Int {
+    match p {
+        Low => 0,
+        Medium => 1,
+        High => 2,
+        Critical => 3,
+    }
+}
+
+type Shape is Circle(Int) | Rect(Int, Int) | Triangle(Int, Int);
+
+fn shape_area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rect(w, h) => w * h,
+        Triangle(b, h) => b * h / 2,
+    }
+}
+
+type Wrapper is Empty | Single(Int) | Pair(Int, Int) | Triple(Int, Int, Int);
+
+fn wrapper_sum(w: Wrapper) -> Int {
+    match w {
+        Empty => 0,
+        Single(a) => a,
+        Pair(a, b) => a + b,
+        Triple(a, b, c) => a + b + c,
+    }
+}
+
+// Nested match: classify shape then apply color multiplier
+fn colored_area(s: Shape, c: Color) -> Int {
+    let base = shape_area(s);
+    let multiplier = match c {
+        Red => 1,
+        Green => 2,
+        Blue => 3,
+    };
+    base * multiplier
+}
+
+// Wildcard pattern testing
+fn classify_number(n: Int) -> Int {
+    if (n == 0) {
+        return 0;
+    }
+    if (n == 1) {
+        return 1;
+    }
+    if (n < 0) {
+        return 0 - 1;
+    }
+    // default: positive > 1
+    2
+}
+
+fn main() -> Int {
+    // Test 1: basic color match
+    let r1 = color_name(Red);
+    if (r1 != 1) {
+        print(f"FAIL test1a: Red={r1}");
+        return 1;
+    }
+    let r1b = color_name(Blue);
+    if (r1b != 3) {
+        print(f"FAIL test1b: Blue={r1b}");
+        return 1;
+    }
+
+    // Test 2: priority matching
+    let r2 = priority_level(Critical);
+    if (r2 != 3) {
+        print(f"FAIL test2: Critical={r2}");
+        return 1;
+    }
+
+    // Test 3: shape matching with data
+    let r3a = shape_area(Circle(5));
+    // 5*5*3 = 75
+    if (r3a != 75) {
+        print(f"FAIL test3a: Circle(5)={r3a}");
+        return 1;
+    }
+    let r3b = shape_area(Rect(6, 8));
+    if (r3b != 48) {
+        print(f"FAIL test3b: Rect(6,8)={r3b}");
+        return 1;
+    }
+    let r3c = shape_area(Triangle(10, 6));
+    // 10*6/2 = 30
+    if (r3c != 30) {
+        print(f"FAIL test3c: Triangle(10,6)={r3c}");
+        return 1;
+    }
+
+    // Test 4: wrapper with varying fields
+    let r4a = wrapper_sum(Empty);
+    if (r4a != 0) {
+        print(f"FAIL test4a: Empty={r4a}");
+        return 1;
+    }
+    let r4b = wrapper_sum(Single(42));
+    if (r4b != 42) {
+        print(f"FAIL test4b: Single(42)={r4b}");
+        return 1;
+    }
+    let r4c = wrapper_sum(Pair(10, 20));
+    if (r4c != 30) {
+        print(f"FAIL test4c: Pair(10,20)={r4c}");
+        return 1;
+    }
+    let r4d = wrapper_sum(Triple(1, 2, 3));
+    if (r4d != 6) {
+        print(f"FAIL test4d: Triple(1,2,3)={r4d}");
+        return 1;
+    }
+
+    // Test 5: nested match — colored_area
+    let r5a = colored_area(Circle(4), Green);
+    // area=4*4*3=48, multiplier=2, result=96
+    if (r5a != 96) {
+        print(f"FAIL test5a: colored Circle(4) Green={r5a}");
+        return 1;
+    }
+    let r5b = colored_area(Rect(3, 5), Blue);
+    // area=15, multiplier=3, result=45
+    if (r5b != 45) {
+        print(f"FAIL test5b: colored Rect(3,5) Blue={r5b}");
+        return 1;
+    }
+
+    // Test 6: match in a loop — iterate over shapes
+    let shapes = [1, 2, 3, 4, 5];
+    let mut total_area = 0;
+    let mut idx = 0;
+    while (idx < shapes.len()) {
+        let side = shapes[idx];
+        let s = Circle(side);
+        total_area = total_area + shape_area(s);
+        idx = idx + 1;
+    }
+    // Circle(1)=3, Circle(2)=12, Circle(3)=27, Circle(4)=48, Circle(5)=75
+    // total = 3+12+27+48+75 = 165
+    if (total_area != 165) {
+        print(f"FAIL test6: total_area={total_area}");
+        return 1;
+    }
+
+    // Test 7: wildcard with _ pattern
+    let w7 = match Single(99) {
+        Empty => 0,
+        _ => 1,
+    };
+    if (w7 != 1) {
+        print(f"FAIL test7: wildcard={w7}");
+        return 1;
+    }
+
+    // Test 8: match result used directly in expression
+    let bonus = 10 + match High {
+        Low => 0,
+        Medium => 5,
+        High => 15,
+        Critical => 25,
+    };
+    if (bonus != 25) {
+        print(f"FAIL test8: bonus={bonus}");
+        return 1;
+    }
+
+    // Test 9: nested match — match inside match arm
+    let shape = Rect(10, 5);
+    let color = Green;
+    let description = match shape {
+        Circle(r) => {
+            match color {
+                Red => r * 10,
+                _ => r * 20,
+            }
+        },
+        Rect(w, h) => {
+            match color {
+                Red => w + h,
+                Green => w * h,
+                Blue => w * h * 2,
+            }
+        },
+        Triangle(b, h2) => {
+            match color {
+                _ => b + h2,
+            }
+        },
+    };
+    // Rect(10,5) + Green => 10*5 = 50
+    if (description != 50) {
+        print(f"FAIL test9: nested match={description}");
+        return 1;
+    }
+
+    // Test 10: classify multiple values
+    let c_zero = classify_number(0);
+    let c_one = classify_number(1);
+    let c_neg = classify_number(0 - 5);
+    let c_pos = classify_number(42);
+    if (c_zero != 0) {
+        print(f"FAIL test10a: classify(0)={c_zero}");
+        return 1;
+    }
+    if (c_one != 1) {
+        print(f"FAIL test10b: classify(1)={c_one}");
+        return 1;
+    }
+    if (c_neg != 0 - 1) {
+        print(f"FAIL test10c: classify(-5)={c_neg}");
+        return 1;
+    }
+    if (c_pos != 2) {
+        print(f"FAIL test10d: classify(42)={c_pos}");
+        return 1;
+    }
+
+    print("902_nested_pattern_matching: PASS");
+    0
+}

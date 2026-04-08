@@ -1,0 +1,80 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: nested, struct, text, comparison, e2e
+// @description: Test text field comparison in nested struct methods
+
+type Inner is { label: Text, value: Int };
+
+type Outer is { inner: Inner, name: Text };
+
+implement Outer {
+    fn new(name: Text, label: Text, value: Int) -> Outer {
+        Outer { inner: Inner { label: label, value: value }, name: name }
+    }
+
+    fn inner_value(&self) -> Int {
+        self.inner.value
+    }
+
+    fn has_label(&self, expected: Text) -> Bool {
+        self.inner.label == expected
+    }
+
+    fn check_name(&self, expected: Text) -> Bool {
+        self.name == expected
+    }
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Direct field text comparison
+    let a = "hello";
+    let b = "hello";
+    if a != b {
+        print("FAIL: direct text compare");
+        failures = failures + 1;
+    } else {
+        print("  direct_cmp: OK");
+    }
+
+    // Test 2: Struct text field comparison
+    let inner = Inner { label: "test", value: 42 };
+    if inner.label != "test" {
+        print(f"FAIL: inner.label != 'test', got '{inner.label}'");
+        failures = failures + 1;
+    } else {
+        print("  struct_field: OK");
+    }
+
+    // Test 3: Nested struct Int field
+    let o = Outer.new("obj", "lbl", 99);
+    if o.inner_value() != 99 {
+        print(f"FAIL: inner_value expected 99, got {o.inner_value()}");
+        failures = failures + 1;
+    } else {
+        print("  nested_int: OK");
+    }
+
+    // Test 4: Top-level text field method
+    if !o.check_name("obj") {
+        print("FAIL: check_name('obj')");
+        failures = failures + 1;
+    } else {
+        print("  check_name: OK");
+    }
+
+    // Test 5: Nested text field method
+    if !o.has_label("lbl") {
+        print("FAIL: has_label('lbl')");
+        failures = failures + 1;
+    } else {
+        print("  has_label: OK");
+    }
+
+    if failures == 0 {
+        print("All nested text compare tests passed");
+    }
+    failures
+}

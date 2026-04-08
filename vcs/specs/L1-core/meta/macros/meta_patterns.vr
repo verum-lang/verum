@@ -1,0 +1,60 @@
+// @test: parse
+// @level: L1
+// @tags: meta, macros, patterns, meta-def
+// @timeout: 5000
+
+/// Meta definitions with pattern matching rules.
+/// Tests various meta parameter fragment types and expansion patterns.
+
+// Macro with ident and expr fragments
+meta match_log(level: ident, msg: expr) {
+    level => {
+        let level_str = @stringify($level);
+        if level_str == "info" { print($msg) }
+        else if level_str == "warn" { print($msg) }
+        else { print($msg) }
+    }
+}
+
+// Macro with block fragment - repeat pattern
+meta repeat_block(n: expr, body: block) {
+    n => {
+        let mut i = 0;
+        while i < $n {
+            $body;
+            i = i + 1;
+        }
+    }
+}
+
+// Macro generating conditional logic
+meta guard(cond: expr, body: block) {
+    cond => {
+        if $cond {
+            $body
+        }
+    }
+}
+
+// Macro with two expression parameters
+meta min_val(a: expr, b: expr) {
+    a => if $a < $b { $a } else { $b }
+}
+
+// Macro with expression returning value
+meta double(x: expr) {
+    x => $x + $x
+}
+
+// Macro with nested block pattern
+meta try_or_default(body: block, default_val: expr) {
+    body => {
+        let result = $body;
+        if result.is_some() { result.unwrap() }
+        else { $default_val }
+    }
+}
+
+fn main() {
+    print("Meta patterns tests parsed");
+}

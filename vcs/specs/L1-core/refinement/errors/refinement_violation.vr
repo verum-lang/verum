@@ -1,0 +1,136 @@
+// @test: typecheck-fail
+// @expected-error: E0503
+// @tier: 0
+// @level: L1
+// @tags: refinement, errors, violation
+// @description: Values that violate refinement type constraints
+
+/// Error E0503: Refinement violation
+/// Occurs when a value does not satisfy its refinement predicate.
+/// The type checker or SMT solver determines the value violates constraints.
+
+// ============================================================================
+// Basic comparison violations
+// ============================================================================
+
+fn basic_violations() {
+    // E0503: Negative value assigned to Positive type
+    type Positive is Int{> 0};
+    let p: Positive = -5;  // Error: -5 does not satisfy > 0
+
+    // E0503: Zero assigned to NonZero type
+    type NonZero is Int{!= 0};
+    let nz: NonZero = 0;  // Error: 0 does not satisfy != 0
+
+    // E0503: Positive value assigned to Negative type
+    type Negative is Int{< 0};
+    let n: Negative = 42;  // Error: 42 does not satisfy < 0
+
+    // E0503: Value outside range
+    type Percentage is Int{>= 0 && <= 100};
+    let pct1: Percentage = -10;  // Error: -10 < 0
+    let pct2: Percentage = 150;  // Error: 150 > 100
+}
+
+// ============================================================================
+// Float refinement violations
+// ============================================================================
+
+fn float_violations() {
+    // E0503: Negative assigned to positive float
+    type PositiveFloat is Float{> 0.0};
+    let pf: PositiveFloat = -1.5;  // Error: -1.5 !> 0.0
+
+    // E0503: Value outside probability range
+    type Probability is Float{>= 0.0 && <= 1.0};
+    let prob1: Probability = -0.1;  // Error: -0.1 < 0.0
+    let prob2: Probability = 1.5;   // Error: 1.5 > 1.0
+}
+
+// ============================================================================
+// Function parameter violations
+// ============================================================================
+
+fn divide(x: Float, y: Float{!= 0.0}) -> Float {
+    x / y
+}
+
+fn param_violations() {
+    // E0503: Zero passed to non-zero parameter
+    let result = divide(10.0, 0.0);  // Error: 0.0 violates != 0.0
+}
+
+// ============================================================================
+// Return type violations
+// ============================================================================
+
+fn returns_positive(x: Int) -> Int{> 0} {
+    x  // Error: x may not be > 0
+}
+
+fn returns_bounded(x: Int) -> Int{>= 0 && <= 100} {
+    x * 2  // Error: result may exceed 100
+}
+
+// ============================================================================
+// Struct field violations (numeric only)
+// ============================================================================
+
+type User is {
+    id: Int{> 0},
+    age: Int{>= 0 && <= 150},
+};
+
+fn struct_violations() {
+    // E0503: Invalid id (not positive)
+    let u1 = User { id: 0, age: 25 };
+    // Error: id: 0 does not satisfy > 0
+
+    // E0503: Invalid age (negative)
+    let u2 = User { id: 1, age: -5 };
+    // Error: age: -5 does not satisfy >= 0
+
+    // E0503: Invalid age (too old)
+    let u3 = User { id: 1, age: 200 };
+    // Error: age: 200 does not satisfy <= 150
+}
+
+// ============================================================================
+// Assignment violations after mutation
+// ============================================================================
+
+fn mutation_violations() {
+    type Positive is Int{> 0};
+    let mut p: Positive = 5;
+    p = 0;  // Error: 0 does not satisfy > 0
+}
+
+// ============================================================================
+// Conditional branch violations
+// ============================================================================
+
+fn conditional_violations(cond: Bool) {
+    type Positive is Int{> 0};
+
+    // E0503: One branch returns invalid value
+    let x: Positive = if cond { 10 } else { -5 };
+    // Error: else branch returns -5 which !> 0
+}
+
+// ============================================================================
+// Cast violations
+// ============================================================================
+
+fn cast_violations() {
+    type ByteValue is Int{>= 0 && < 256};
+
+    let x: Int = 300;
+    let b: ByteValue = x;  // Error: 300 >= 256
+
+    let y: Int = -50;
+    let c: ByteValue = y;  // Error: -50 < 0
+}
+
+fn main() {
+    // This file should not compile - all assignments violate refinements
+}

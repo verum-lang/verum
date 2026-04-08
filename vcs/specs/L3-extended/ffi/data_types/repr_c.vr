@@ -1,0 +1,449 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, data-types, repr-c, struct-layout
+// @timeout: 10000
+// @description: Tests @repr(C) type layout for FFI compatibility
+
+/// ============================================================
+/// @repr(C) TYPE LAYOUT
+/// ============================================================
+///
+/// The @repr(C) attribute ensures struct layout matches C ABI,
+/// enabling safe data exchange with C libraries.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type c_short is i16;
+type c_ushort is u16;
+type c_char is i8;
+type c_uchar is u8;
+type c_float is f32;
+type c_double is f64;
+type c_void is ();
+type size_t is usize;
+
+// ============================================================
+// BASIC @repr(C) STRUCTS
+// ============================================================
+
+// ------------------------------------------------------------
+// Simple Structures
+// ------------------------------------------------------------
+
+/// Simple 2D point
+@repr(C)
+type Point2D is {
+    x: c_int,
+    y: c_int,
+};
+
+/// Verify layout matches C
+const _POINT_CHECKS: () = {
+    static_assert(Point2D.size == 8);
+    static_assert(Point2D.alignment == 4);
+};
+
+/// 3D point with floating point
+@repr(C)
+type Point3D is {
+    x: c_double,
+    y: c_double,
+    z: c_double,
+};
+
+const _POINT3D_CHECKS: () = {
+    static_assert(Point3D.size == 24);
+    static_assert(Point3D.alignment == 8);
+};
+
+/// Rectangle
+@repr(C)
+type Rect is {
+    left: c_int,
+    top: c_int,
+    right: c_int,
+    bottom: c_int,
+};
+
+const _RECT_CHECKS: () = {
+    static_assert(Rect.size == 16);
+};
+
+// ------------------------------------------------------------
+// Structures with Padding
+// ------------------------------------------------------------
+
+/// Structure that requires padding
+@repr(C)
+type PaddedStruct is {
+    a: c_char,      // offset 0, size 1
+    // 3 bytes padding to align b
+    b: c_int,       // offset 4, size 4
+    c: c_char,      // offset 8, size 1
+    // 7 bytes padding to align d
+    d: c_double,    // offset 16, size 8
+};
+
+const _PADDED_CHECKS: () = {
+    static_assert(PaddedStruct.size == 24);
+    static_assert(PaddedStruct.alignment == 8);
+};
+
+/// No padding needed (all same size/alignment)
+@repr(C)
+type NoPaddingStruct is {
+    a: c_int,
+    b: c_int,
+    c: c_int,
+    d: c_int,
+};
+
+const _NOPAD_CHECKS: () = {
+    static_assert(NoPaddingStruct.size == 16);
+    static_assert(NoPaddingStruct.alignment == 4);
+};
+
+// ------------------------------------------------------------
+// Nested Structures
+// ------------------------------------------------------------
+
+/// Nested structure
+@repr(C)
+type Line is {
+    start: Point2D,
+    end: Point2D,
+};
+
+const _LINE_CHECKS: () = {
+    static_assert(Line.size == 16);
+};
+
+/// Deeply nested
+@repr(C)
+type Triangle is {
+    a: Point2D,
+    b: Point2D,
+    c: Point2D,
+};
+
+@repr(C)
+type ColoredTriangle is {
+    triangle: Triangle,
+    color: Color,
+};
+
+@repr(C)
+type Color is {
+    r: c_uchar,
+    g: c_uchar,
+    b: c_uchar,
+    a: c_uchar,
+};
+
+const _COLOR_CHECKS: () = {
+    static_assert(Color.size == 4);
+    static_assert(Color.alignment == 1);
+};
+
+// ============================================================
+// ARRAYS IN REPR(C) STRUCTS
+// ============================================================
+
+/// Fixed-size array
+@repr(C)
+type FixedBuffer is {
+    data: [c_uchar; 256],
+    len: size_t,
+};
+
+const _BUFFER_CHECKS: () = {
+    // Array of 256 bytes + size_t (8 bytes on 64-bit)
+    static_assert(FixedBuffer.size == 264);
+};
+
+/// Array of structs
+@repr(C)
+type Polygon is {
+    vertices: [Point2D; 8],
+    vertex_count: c_uint,
+};
+
+/// Matrix
+@repr(C)
+type Matrix4x4 is {
+    m: [[c_float; 4]; 4],
+};
+
+const _MATRIX_CHECKS: () = {
+    static_assert(Matrix4x4.size == 64);
+    static_assert(Matrix4x4.alignment == 4);
+};
+
+// ============================================================
+// POINTERS IN REPR(C) STRUCTS
+// ============================================================
+
+/// Structure with pointer
+@repr(C)
+type StringView is {
+    data: *const c_char,
+    len: size_t,
+};
+
+const _STRINGVIEW_CHECKS: () = {
+    static_assert(StringView.size == 16);  // 64-bit pointers
+};
+
+/// Linked list node
+@repr(C)
+type ListNode is {
+    value: c_int,
+    next: *mut ListNode,
+};
+
+/// Callback structure
+@repr(C)
+type CallbackInfo is {
+    callback: extern "C" fn(*mut c_void, c_int) -> c_int,
+    user_data: *mut c_void,
+};
+
+// ============================================================
+// EXPLICIT ALIGNMENT
+// ============================================================
+
+/// Force specific alignment
+@repr(C, align(16))]
+type Aligned16 is {
+    data: [c_uchar; 32],
+};
+
+const _ALIGNED16_CHECKS: () = {
+    static_assert(Aligned16.alignment == 16);
+    static_assert(Aligned16.size == 32);
+};
+
+/// 64-byte alignment for cache line
+@repr(C, align(64))]
+type CacheAligned is {
+    data: [c_uchar; 64],
+};
+
+const _CACHE_CHECKS: () = {
+    static_assert(CacheAligned.alignment == 64);
+    static_assert(CacheAligned.size == 64);
+};
+
+/// SIMD-friendly alignment
+@repr(C, align(32))]
+type SimdVector is {
+    values: [c_float; 8],
+};
+
+// ============================================================
+// OPAQUE TYPES
+// ============================================================
+
+/// Opaque type (forward declaration)
+@opaque
+type OpaqueHandle is ();
+
+/// Structure containing opaque pointer
+@repr(C)
+type HandleWrapper is {
+    handle: *mut OpaqueHandle,
+    flags: c_uint,
+};
+
+/// Multiple opaque types
+@opaque
+type Context is ();
+
+@opaque
+type Session is ();
+
+@repr(C)
+type Connection is {
+    ctx: *mut Context,
+    session: *mut Session,
+    fd: c_int,
+};
+
+// ============================================================
+// PLATFORM-SPECIFIC REPR(C)
+// ============================================================
+
+/// Windows-specific structure
+@cfg(target_os = "windows")
+@repr(C)
+type POINT is {
+    x: c_long,  // LONG on Windows
+    y: c_long,
+};
+
+@cfg(target_os = "windows")
+@repr(C)
+type RECT is {
+    left: c_long,
+    top: c_long,
+    right: c_long,
+    bottom: c_long,
+};
+
+@cfg(target_os = "windows")
+@repr(C)
+type GUID is {
+    Data1: c_ulong,
+    Data2: c_ushort,
+    Data3: c_ushort,
+    Data4: [c_uchar; 8],
+};
+
+/// POSIX-specific structure
+@cfg(unix)
+@repr(C)
+type timeval is {
+    tv_sec: c_long,   // time_t
+    tv_usec: c_long,  // suseconds_t
+};
+
+@cfg(unix)
+@repr(C)
+type timespec is {
+    tv_sec: c_long,   // time_t
+    tv_nsec: c_long,
+};
+
+// ============================================================
+// COMPARING REPR(C) VS DEFAULT LAYOUT
+// ============================================================
+
+/// Default Verum layout (may reorder fields)
+type DefaultLayout is {
+    a: c_char,
+    b: c_double,
+    c: c_int,
+};
+
+/// C-compatible layout (no reordering)
+@repr(C)
+type CLayout is {
+    a: c_char,      // offset 0
+    // 7 bytes padding
+    b: c_double,    // offset 8
+    c: c_int,       // offset 16
+    // 4 bytes padding
+};
+
+const _LAYOUT_COMPARE: () = {
+    // Default layout may be more compact due to reordering
+    // C layout has specific field order with padding
+    static_assert(CLayout.size == 24);
+};
+
+// ============================================================
+// BITFIELDS (SIMULATED)
+// ============================================================
+
+/// Bitfields must be manually implemented
+@repr(C)
+type Bitfields is {
+    packed: c_uint,  // Manually pack/unpack bits
+};
+
+implement Bitfields {
+    fn flag_a(&self) -> Bool {
+        (self.packed & 0x01) != 0
+    }
+
+    fn set_flag_a(&mut self, value: Bool) {
+        if value {
+            self.packed |= 0x01;
+        } else {
+            self.packed &= !0x01;
+        }
+    }
+
+    fn flag_b(&self) -> Bool {
+        (self.packed & 0x02) != 0
+    }
+
+    fn value(&self) -> c_uint {
+        (self.packed >> 2) & 0x3FF  // 10 bits
+    }
+
+    fn set_value(&mut self, val: c_uint) {
+        self.packed = (self.packed & !0xFFC) | ((val & 0x3FF) << 2);
+    }
+}
+
+// ============================================================
+// FFI USAGE EXAMPLES
+// ============================================================
+
+ffi graphics {
+    @extern("C")
+    fn draw_point(p: *const Point2D);
+
+    @extern("C")
+    fn draw_line(start: *const Point2D, end: *const Point2D);
+
+    @extern("C")
+    fn fill_rect(r: *const Rect, color: Color);
+
+    @extern("C")
+    fn transform_points(
+        points: *mut Point3D,
+        count: size_t,
+        matrix: *const Matrix4x4
+    );
+}
+
+ffi strings {
+    @extern("C")
+    fn process_string(sv: StringView) -> c_int;
+
+    @extern("C")
+    fn copy_string(dest: *mut c_char, src: StringView) -> size_t;
+}
+
+/// Safe wrapper using repr(C) types
+fn draw_rectangle(x: i32, y: i32, w: i32, h: i32, color: Color) {
+    let rect = Rect {
+        left: x,
+        top: y,
+        right: x + w,
+        bottom: y + h,
+    };
+    unsafe {
+        graphics.fill_rect(&rect, color);
+    }
+}
+
+fn main() {
+    // Create repr(C) structures
+    let p = Point2D { x: 10, y: 20 };
+    let line = Line {
+        start: Point2D { x: 0, y: 0 },
+        end: Point2D { x: 100, y: 100 },
+    };
+
+    // Use bitfields
+    let mut bf = Bitfields { packed: 0 };
+    bf.set_flag_a(true);
+    bf.set_value(42);
+    assert(bf.flag_a());
+    assert(bf.value() == 42);
+
+    // Verify sizes
+    assert(Point2D.size == 8);
+    assert(Color.size == 4);
+    assert(Line.size == 16);
+}

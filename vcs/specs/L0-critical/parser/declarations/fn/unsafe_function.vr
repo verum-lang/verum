@@ -1,0 +1,89 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, unsafe
+
+// NOTE: `unsafe fn` as a top-level modifier is NOT currently supported in the parser.
+// The grammar defines it, but the parser implementation doesn't handle it yet.
+// Use unsafe blocks inside regular functions instead.
+
+// Safe function with unsafe block inside
+fn raw_pointer_deref(ptr: *Int) -> Int {
+    unsafe { *ptr }
+}
+
+// Safe function with unsafe block for write
+fn write_memory(ptr: *mut Int, value: Int) {
+    unsafe { *ptr = value; }
+}
+
+// Safe function using unsafe reference tier
+fn with_unsafe_ref(r: &unsafe Int) -> Int {
+    unsafe { *r }
+}
+
+// Safe function calling multiple unsafe operations
+fn compound_unsafe() {
+    unsafe {
+        let ptr = allocate(1024);
+        write_memory(ptr, 42);
+        deallocate(ptr);
+    }
+}
+
+// Generic function with unsafe block
+fn unsafe_generic<T>(ptr: *T) -> T {
+    unsafe { *ptr }
+}
+
+// FFI call wrapped in unsafe block
+fn extern_call() {
+    unsafe {
+        libc.malloc(1024)
+    }
+}
+
+// Safe function with unsafe block inside
+fn safe_with_unsafe_block() {
+    let result = unsafe {
+        raw_pointer_deref(ptr)
+    };
+    print(result);
+}
+
+// Multiple unsafe blocks in a function
+fn multiple_unsafe_blocks() {
+    let a = unsafe { read_a() };
+    let b = unsafe { read_b() };
+    process(a, b);
+}
+
+// Unsafe with explicit safety comment pattern
+fn documented_unsafe(ptr: *mut Data) {
+    // SAFETY: Caller guarantees ptr is valid and aligned
+    unsafe {
+        (*ptr).field = 42;
+    }
+}
+
+// Async function with unsafe block
+async fn async_unsafe() {
+    unsafe {
+        unsafe_async_operation().await
+    }
+}
+
+// NOTE: `extern "C"` syntax is NOT supported in Verum.
+// Use @extern("C") attribute instead within ffi declarations.
+// unsafe extern "C" fn c_callback(data: *void) { }  // UNSUPPORTED: Rust extern syntax
+
+// Verum FFI example:
+// ffi CBindings {
+//     @extern("C")
+//     fn c_callback(data: *void);
+// }
+
+// Function with CBGR tier 2 reference and unsafe block
+fn tier2_reference(r: &unsafe Data) -> Int {
+    unsafe { r.value }
+}

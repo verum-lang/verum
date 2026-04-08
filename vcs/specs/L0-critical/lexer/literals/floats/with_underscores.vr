@@ -1,0 +1,144 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, floats, underscores, separators
+
+// Floating-point literals with underscore separators
+
+fn test_basic_underscore() {
+    // Basic underscore usage in mantissa
+    let thousand_point = 1_000.0;
+    let million_point = 1_000_000.0;
+    let billion_point = 1_000_000_000.0;
+}
+
+fn test_decimal_part() {
+    // Underscores in decimal part
+    let precise_1 = 3.141_592_653;
+    let precise_2 = 2.718_281_828;
+    let precise_3 = 1.414_213_562;
+}
+
+fn test_both_parts() {
+    // Underscores in both parts
+    let both_parts = 1_234.567_890;
+    let large_precise = 123_456.789_012;
+    let formatted_pi = 3.141_592_653_589_793;
+}
+
+fn test_grouped_thousands() {
+    // Grouped by threes (thousands)
+    let thousands_format = 1_234_567.890_123_456;
+    let money_format = 1_234.56;
+    let scientific_like = 6.022_140_76e23;
+}
+
+fn test_near_decimal() {
+    // Underscores near decimal point
+    let before_dot = 1_000.5;
+    let after_dot = 1.000_5;
+    let around_dot = 1_000.000_5;
+}
+
+fn test_scientific_mantissa() {
+    // Scientific notation with underscores in mantissa
+    let sci_underscore_1 = 1.234_567e10;
+    let sci_underscore_2 = 6.022_140_76e23;
+    let sci_underscore_3 = 9.109_383_56e-31;
+}
+
+fn test_scientific_exponent() {
+    // Scientific notation with underscores in exponent (if supported)
+    let sci_exp_under = 1.0e1_0;
+    let sci_exp_under_2 = 1.0e10_0;
+    let sci_exp_under_3 = 1.0e-1_0;
+}
+
+fn test_combinations() {
+    // Combination patterns
+    let combo_1 = 123_456.789_012e3;
+    let combo_2 = 1_000.000_001e-3;
+    let combo_3 = 9_999.999_999e99;
+}
+
+fn test_expressions() {
+    // In expressions
+    let sum_under = 1_000.5 + 2_000.5;
+    let prod_under = 1.5_0 * 2.0_0;
+    let div_under = 1_000_000.0 / 1_000.0;
+}
+
+fn test_comparisons() {
+    // In comparisons
+    let gt_under = 1_000.0 > 999.999_999;
+    let eq_under = 1_234.567 == 1_234.567;
+}
+
+fn test_arrays() {
+    // In arrays
+    let formatted_values = [1_000.0, 2_000.0, 3_000.0];
+    let precise_constants = [3.141_592, 2.718_281, 1.414_213];
+    let scientific_values = [1.0e1_0, 2.0e2_0, 3.0e3_0];
+}
+
+// In function parameters
+fn calculate(x: Float, y: Float) -> Float {
+    x * 1_000.0 + y / 1_000.0
+}
+
+fn test_function_calls() {
+    let result = calculate(1.234_567, 9_876.543_21);
+}
+
+fn test_type_suffixes() {
+    // Type suffixes with underscores
+    let f32_under = 1_234.567f32;
+    let f64_under = 1_234_567.890_123f64;
+}
+
+fn test_physical_constants() {
+    // Physical constants with underscores for readability
+    let avogadro = 6.022_140_76e23;
+    let planck = 6.626_070_15e-34;
+    let boltzmann = 1.380_649e-23;
+    let speed_of_light = 2.997_924_58e8;
+}
+
+fn test_monetary() {
+    // Monetary values (conceptual)
+    let price_1 = 1_234_567.89;
+    let price_2 = 99_999.99;
+    let tax_amount = 1_234.56;
+}
+
+fn test_physical() {
+    // Physical measurements
+    let distance_km = 384_400.0;
+    let mass_kg = 5.972e24;
+    let radius_m = 6_371_000.0;
+}
+
+// In struct fields
+type Measurement is {
+    value: Float,
+    uncertainty: Float,
+};
+
+fn test_struct_fields() {
+    let measurement = Measurement {
+        value: 1_234.567_890,
+        uncertainty: 0.000_001,
+    };
+}
+
+fn test_edge_cases() {
+    // Edge cases with underscores
+    let single_under = 1_0.0;
+    let many_under = 1_0_0_0.0_0_0;
+}
+
+fn test_complex_expressions() {
+    // Complex expressions
+    let complex_calc = (1_000.5 * 2.0) + (3_000.25 / 4.0);
+    let nested_under = ((1_000.0 + 2_000.0) * 3_000.0) / 1_000_000.0;
+}

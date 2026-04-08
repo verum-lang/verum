@@ -1,0 +1,80 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, gpu, tensor
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Tensor GPU operations — simulated shape tracking for zeros, ones, full, matmul, sum
+
+type SimTensor is { rows: Int, cols: Int };
+
+fn sim_zeros(r: Int, c: Int) -> SimTensor { SimTensor { rows: r, cols: c } }
+fn sim_ones(r: Int, c: Int) -> SimTensor { SimTensor { rows: r, cols: c } }
+fn sim_full(r: Int, c: Int, v: Float) -> SimTensor { SimTensor { rows: r, cols: c } }
+
+fn shape_eq(t: SimTensor, r: Int, c: Int) -> Bool { t.rows == r && t.cols == c }
+fn numel(t: SimTensor) -> Int { t.rows * t.cols }
+
+fn t_add(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_mul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_matmul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.cols, b.rows);
+    SimTensor { rows: a.rows, cols: b.cols }
+}
+
+fn t_sum(a: SimTensor) -> SimTensor { SimTensor { rows: 1, cols: 1 } }
+
+@test
+fn test_tensor_on_default_device() {
+    let t = sim_zeros(3, 3);
+    assert(shape_eq(t, 3, 3));
+}
+
+@test
+fn test_tensor_add_default() {
+    let a = sim_ones(4, 4);
+    let b = sim_ones(4, 4);
+    let c = t_add(a, b);
+    assert(shape_eq(c, 4, 4));
+}
+
+@test
+fn test_tensor_mul_default() {
+    let a = sim_full(3, 3, 2.0);
+    let b = sim_full(3, 3, 3.0);
+    let c = t_mul(a, b);
+    assert(shape_eq(c, 3, 3));
+}
+
+@test
+fn test_tensor_matmul_default() {
+    let a = sim_ones(2, 3);
+    let b = sim_ones(3, 4);
+    let c = t_matmul(a, b);
+    assert(shape_eq(c, 2, 4));
+}
+
+@test
+fn test_tensor_reduce_sum() {
+    let t = sim_ones(5, 5);
+    let s = t_sum(t);
+    assert_eq(numel(s), 1);
+}
+
+fn main() {
+    test_tensor_on_default_device();
+    test_tensor_add_default();
+    test_tensor_mul_default();
+    test_tensor_matmul_default();
+    test_tensor_reduce_sum();
+}

@@ -1,0 +1,379 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L1
+// @tags: contracts, invariants
+// @timeout: 5000
+
+/// Invariants: conditions that must hold throughout a type's lifetime.
+/// Demonstrates type invariants and their verification.
+
+// ============================================================================
+// Basic type invariants
+// ============================================================================
+
+/// A non-empty list that maintains its invariant
+type NonEmptyList<T> is {
+    data: List<T>,
+
+    invariant len(self.data) > 0;
+};
+
+implement NonEmptyList<T> {
+    @verify(proof)
+    fn new(first: T) -> NonEmptyList<T> {
+        NonEmptyList { data: [first] }
+    }
+
+    @verify(proof)
+    fn push(&mut self, elem: T) {
+        self.data.push(elem);
+        // Invariant preserved: len was > 0, adding element keeps it > 0
+    }
+
+    @verify(proof)
+    fn pop(&mut self) -> Maybe<T>
+        ensures len(self.data) > 0  // Invariant still holds
+    {
+        if len(self.data) > 1 {
+            self.data.pop()
+        } else {
+            None  // Can't pop the last element
+        }
+    }
+
+    @verify(proof)
+    fn head(&self) -> T {
+        self.data[0]  // Safe: invariant guarantees len > 0
+    }
+}
+
+// ============================================================================
+// Sorted container invariant
+// ============================================================================
+
+type SortedList is {
+    data: List<Int>,
+
+    invariant forall i in 0..(len(self.data) - 1) => self.data[i] <= self.data[i + 1];
+};
+
+implement SortedList {
+    @verify(proof)
+    fn new() -> SortedList {
+        SortedList { data: [] }  // Empty list is trivially sorted
+    }
+
+    @verify(proof)
+    fn insert(&mut self, value: Int) {
+        // Find insertion point to maintain sortedness
+        let mut i = 0;
+        while i < len(self.data) && self.data[i] < value {
+            invariant i >= 0;
+            i += 1;
+        }
+        self.data.insert(i, value);
+        // Invariant preserved: inserted at correct position
+    }
+
+    @verify(proof)
+    fn min(&self) -> Maybe<Int> {
+        if len(self.data) > 0 {
+            Some(self.data[0])  // First element is minimum
+        } else {
+            None
+        }
+    }
+
+    @verify(proof)
+    fn max(&self) -> Maybe<Int> {
+        if len(self.data) > 0 {
+            Some(self.data[len(self.data) - 1])  // Last element is maximum
+        } else {
+            None
+        }
+    }
+}
+
+// ============================================================================
+// Range invariant
+// ============================================================================
+
+type Range is {
+    start: Int,
+    end: Int,
+
+    invariant self.start <= self.end;
+};
+
+implement Range {
+    @verify(proof)
+    fn new(start: Int, end: Int) -> Maybe<Range> {
+        if start <= end {
+            Some(Range { start, end })
+        } else {
+            None
+        }
+    }
+
+    @verify(proof)
+    fn length(&self) -> Int
+        ensures result >= 0
+    {
+        self.end - self.start  // Non-negative due to invariant
+    }
+
+    @verify(proof)
+    fn contains(&self, value: Int) -> Bool {
+        value >= self.start && value < self.end
+    }
+
+    @verify(proof)
+    fn expand(&mut self, delta: Int)
+        requires delta >= 0
+    {
+        self.start -= delta;
+        self.end += delta;
+        // Invariant preserved: both changes maintain start <= end
+    }
+
+    @verify(proof)
+    fn intersect(&self, other: Range) -> Maybe<Range> {
+        let new_start = max(self.start, other.start);
+        let new_end = min(self.end, other.end);
+        if new_start <= new_end {
+            Some(Range { start: new_start, end: new_end })
+        } else {
+            None  // No intersection
+        }
+    }
+}
+
+// ============================================================================
+// Bounded value invariant
+// ============================================================================
+
+type Bounded<MIN: meta Int, MAX: meta Int> is {
+    value: Int,
+
+    invariant self.value >= MIN && self.value <= MAX;
+};
+
+implement Bounded<MIN, MAX> {
+    @verify(proof)
+    fn new(value: Int) -> Maybe<Bounded<MIN, MAX>> {
+        if value >= MIN && value <= MAX {
+            Some(Bounded { value })
+        } else {
+            None
+        }
+    }
+
+    @verify(proof)
+    fn get(&self) -> Int
+        ensures result >= MIN && result <= MAX
+    {
+        self.value
+    }
+
+    @verify(proof)
+    fn set(&mut self, new_value: Int)
+        requires new_value >= MIN && new_value <= MAX
+    {
+        self.value = new_value;
+    }
+
+    @verify(proof)
+    fn increment(&mut self) -> Bool {
+        if self.value < MAX {
+            self.value += 1;
+            true
+        } else {
+            false  // At max, can't increment
+        }
+    }
+}
+
+type Percentage is Bounded<0, 100>;
+type Byte is Bounded<0, 255>;
+
+// ============================================================================
+// Circular buffer invariant
+// ============================================================================
+
+type CircularBuffer<T, CAP: meta Int> is {
+    data: List<Maybe<T>>,
+    head: Int,
+    tail: Int,
+    size: Int,
+
+    invariant len(self.data) == CAP;
+    invariant self.head >= 0 && self.head < CAP;
+    invariant self.tail >= 0 && self.tail < CAP;
+    invariant self.size >= 0 && self.size <= CAP;
+    invariant (self.head + self.size) % CAP == self.tail || self.size == 0;
+};
+
+implement CircularBuffer<T, CAP>
+    where CAP > 0
+{
+    @verify(proof)
+    fn new() -> CircularBuffer<T, CAP> {
+        CircularBuffer {
+            data: List.with_capacity(CAP),
+            head: 0,
+            tail: 0,
+            size: 0,
+        }
+    }
+
+    @verify(proof)
+    fn is_empty(&self) -> Bool {
+        self.size == 0
+    }
+
+    @verify(proof)
+    fn is_full(&self) -> Bool {
+        self.size == CAP
+    }
+
+    @verify(proof)
+    fn push(&mut self, elem: T) -> Bool {
+        if self.size < CAP {
+            self.data[self.tail] = Some(elem);
+            self.tail = (self.tail + 1) % CAP;
+            self.size += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    @verify(proof)
+    fn pop(&mut self) -> Maybe<T> {
+        if self.size > 0 {
+            let elem = self.data[self.head].take();
+            self.head = (self.head + 1) % CAP;
+            self.size -= 1;
+            elem
+        } else {
+            None
+        }
+    }
+}
+
+// ============================================================================
+// Binary tree invariant
+// ============================================================================
+
+type BinaryTree<T> is
+    | Leaf
+    | Node { value: T, left: Heap<BinaryTree<T>>, right: Heap<BinaryTree<T>> };
+
+type BinarySearchTree is {
+    root: BinaryTree<Int>,
+
+    invariant is_bst(self.root);
+};
+
+predicate is_bst(tree: BinaryTree<Int>) -> Bool {
+    match tree {
+        BinaryTree.Leaf => true,
+        BinaryTree.Node { value, left, right } =>
+            all_less_than(*left, value) &&
+            all_greater_than(*right, value) &&
+            is_bst(*left) &&
+            is_bst(*right),
+    }
+}
+
+predicate all_less_than(tree: BinaryTree<Int>, bound: Int) -> Bool {
+    match tree {
+        BinaryTree.Leaf => true,
+        BinaryTree.Node { value, left, right } =>
+            value < bound &&
+            all_less_than(*left, bound) &&
+            all_less_than(*right, bound),
+    }
+}
+
+predicate all_greater_than(tree: BinaryTree<Int>, bound: Int) -> Bool {
+    match tree {
+        BinaryTree.Leaf => true,
+        BinaryTree.Node { value, left, right } =>
+            value > bound &&
+            all_greater_than(*left, bound) &&
+            all_greater_than(*right, bound),
+    }
+}
+
+// ============================================================================
+// Resource invariant (capacity tracking)
+// ============================================================================
+
+type ResourcePool<T> is {
+    available: List<T>,
+    in_use: Int,
+    capacity: Int,
+
+    invariant self.in_use >= 0;
+    invariant len(self.available) + self.in_use <= self.capacity;
+    invariant self.capacity > 0;
+};
+
+implement ResourcePool<T> {
+    @verify(proof)
+    fn acquire(&mut self) -> Maybe<T> {
+        if len(self.available) > 0 {
+            self.in_use += 1;
+            self.available.pop()
+        } else {
+            None
+        }
+    }
+
+    @verify(proof)
+    fn release(&mut self, resource: T)
+        requires self.in_use > 0
+    {
+        self.available.push(resource);
+        self.in_use -= 1;
+    }
+
+    @verify(proof)
+    fn available_count(&self) -> Int
+        ensures result >= 0
+    {
+        len(self.available)
+    }
+}
+
+fn main() {
+    // NonEmptyList
+    let mut list = NonEmptyList.new(1);
+    list.push(2);
+    assert(list.head() == 1);
+
+    // SortedList
+    let mut sorted = SortedList.new();
+    sorted.insert(3);
+    sorted.insert(1);
+    sorted.insert(2);
+    assert(sorted.min() == Some(1));
+    assert(sorted.max() == Some(3));
+
+    // Range
+    let range = Range.new(0, 10).unwrap();
+    assert(range.length() == 10);
+    assert(range.contains(5));
+
+    // Bounded
+    let mut pct: Percentage = Percentage.new(50).unwrap();
+    pct.increment();
+    assert(pct.get() == 51);
+
+    // CircularBuffer
+    let mut buf: CircularBuffer<Int, 3> = CircularBuffer.new();
+    buf.push(1);
+    buf.push(2);
+    assert(buf.pop() == Some(1));
+}

@@ -1,0 +1,264 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, network, routing, simulation, packet
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Network routing simulation.
+// Uses Arr16 for 4x4 adjacency and routing tables.
+// BFS-based routing, packet forwarding, hop counting, loop detection.
+
+// =============================================================================
+// Arr16 for 4x4 matrices, Arr4 for per-node data
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn a16_fill(v: Int) -> Arr16 {
+    Arr16 {
+        e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v,
+        e8: v, e9: v, e10: v, e11: v, e12: v, e13: v, e14: v, e15: v
+    }
+}
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn link_get(m: Arr16, i: Int, j: Int) -> Int { a16_get(m, i * 4 + j) }
+fn link_set(m: Arr16, i: Int, j: Int, v: Int) -> Arr16 { a16_set(m, i * 4 + j, v) }
+
+fn add_link(m: Arr16, i: Int, j: Int) -> Arr16 {
+    let m1 = link_set(m, i, j, 1);
+    link_set(m1, j, i, 1)
+}
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+fn arr4_new() -> Arr4 { Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 } }
+fn arr4_fill(v: Int) -> Arr4 { Arr4 { e0: v, e1: v, e2: v, e3: v } }
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+// =============================================================================
+// BFS-based routing table construction
+// rt[node*4+dest] = next hop for destination
+// =============================================================================
+
+fn build_routing_table(adj: Arr16, n: Int) -> Arr16 {
+    let mut rt = a16_fill(-1);
+
+    let mut dest = 0;
+    while dest < n {
+        let mut visited = arr4_new();
+        let mut parent = arr4_fill(-1);
+        let mut queue = arr4_new();
+        let mut q_front = 0;
+        let mut q_back = 0;
+
+        visited = arr4_set(visited, dest, 1);
+        queue = arr4_set(queue, q_back, dest);
+        q_back = q_back + 1;
+        rt = link_set(rt, dest, dest, dest);
+
+        while q_front < q_back {
+            let u = arr4_get(queue, q_front);
+            q_front = q_front + 1;
+            let mut v = 0;
+            while v < n {
+                if link_get(adj, u, v) == 1 && arr4_get(visited, v) == 0 {
+                    visited = arr4_set(visited, v, 1);
+                    parent = arr4_set(parent, v, u);
+                    queue = arr4_set(queue, q_back, v);
+                    q_back = q_back + 1;
+                }
+                v = v + 1;
+            }
+        }
+
+        // Set next hop for each node toward dest
+        let mut node = 0;
+        while node < n {
+            if node != dest && arr4_get(visited, node) == 1 {
+                let nh = arr4_get(parent, node);
+                rt = link_set(rt, node, dest, nh);
+            }
+            node = node + 1;
+        }
+        dest = dest + 1;
+    }
+    rt
+}
+
+// =============================================================================
+// Packet simulation
+// =============================================================================
+
+type PacketResult is { delivered: Int, hops: Int, looped: Int };
+
+fn simulate_packet(rt: Arr16, src: Int, dest: Int, max_hops: Int) -> PacketResult {
+    let mut cur = src;
+    let mut hops = 0;
+    while cur != dest && hops < max_hops {
+        let nh = link_get(rt, cur, dest);
+        if nh == -1 { return PacketResult { delivered: 0, hops: hops, looped: 0 }; }
+        cur = nh;
+        hops = hops + 1;
+    }
+    if cur == dest {
+        PacketResult { delivered: 1, hops: hops, looped: 0 }
+    } else {
+        PacketResult { delivered: 0, hops: hops, looped: 1 }
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_chain_routing() {
+    let mut adj = a16_zeros();
+    adj = add_link(adj, 0, 1);
+    adj = add_link(adj, 1, 2);
+    adj = add_link(adj, 2, 3);
+    let rt = build_routing_table(adj, 4);
+
+    let p1 = simulate_packet(rt, 0, 3, 10);
+    assert_eq(p1.delivered, 1);
+    assert_eq(p1.hops, 3);
+
+    let p2 = simulate_packet(rt, 0, 1, 10);
+    assert_eq(p2.delivered, 1);
+    assert_eq(p2.hops, 1);
+
+    let p3 = simulate_packet(rt, 2, 2, 10);
+    assert_eq(p3.delivered, 1);
+    assert_eq(p3.hops, 0);
+}
+
+fn test_star_routing() {
+    let mut adj = a16_zeros();
+    adj = add_link(adj, 0, 1);
+    adj = add_link(adj, 0, 2);
+    adj = add_link(adj, 0, 3);
+    let rt = build_routing_table(adj, 4);
+
+    // 1->2: 1->0->2 = 2 hops
+    let p1 = simulate_packet(rt, 1, 2, 10);
+    assert_eq(p1.delivered, 1);
+    assert_eq(p1.hops, 2);
+
+    let p2 = simulate_packet(rt, 0, 3, 10);
+    assert_eq(p2.delivered, 1);
+    assert_eq(p2.hops, 1);
+}
+
+fn test_ring_routing() {
+    let mut adj = a16_zeros();
+    adj = add_link(adj, 0, 1);
+    adj = add_link(adj, 1, 2);
+    adj = add_link(adj, 2, 3);
+    adj = add_link(adj, 3, 0);
+    let rt = build_routing_table(adj, 4);
+
+    let p1 = simulate_packet(rt, 0, 2, 10);
+    assert_eq(p1.delivered, 1);
+    assert_eq(p1.hops, 2);
+}
+
+fn test_disconnected() {
+    let mut adj = a16_zeros();
+    adj = add_link(adj, 0, 1);
+    adj = add_link(adj, 2, 3);
+    let rt = build_routing_table(adj, 4);
+
+    let p1 = simulate_packet(rt, 0, 1, 10);
+    assert_eq(p1.delivered, 1);
+
+    let p2 = simulate_packet(rt, 0, 2, 10);
+    assert_eq(p2.delivered, 0);
+}
+
+fn test_routing_loop() {
+    let mut rt = a16_fill(-1);
+    // Manual loop: 0->1->2->0 for dest 3
+    rt = link_set(rt, 0, 3, 1);
+    rt = link_set(rt, 1, 3, 2);
+    rt = link_set(rt, 2, 3, 0);
+    let p = simulate_packet(rt, 0, 3, 10);
+    assert_eq(p.delivered, 0);
+    assert_eq(p.looped, 1);
+    assert_eq(p.hops, 10);
+}
+
+fn test_batch_delivery() {
+    let mut adj = a16_zeros();
+    adj = add_link(adj, 0, 1);
+    adj = add_link(adj, 1, 2);
+    adj = add_link(adj, 2, 3);
+    let rt = build_routing_table(adj, 4);
+
+    let mut total_hops = 0;
+    let mut delivered = 0;
+    let mut src = 0;
+    while src < 4 {
+        let p = simulate_packet(rt, src, 3, 20);
+        total_hops = total_hops + p.hops;
+        delivered = delivered + p.delivered;
+        src = src + 1;
+    }
+    assert_eq(delivered, 4);
+    assert_eq(total_hops, 6);  // 3+2+1+0 = 6
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_chain_routing();
+    test_star_routing();
+    test_ring_routing();
+    test_disconnected();
+    test_routing_loop();
+    test_batch_delivery();
+    print("[OK] 329_interp_network_sim");
+    0
+}

@@ -1,0 +1,177 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, ghost, types
+// @timeout: 10000
+// @description: Ghost types for abstract specification models
+
+/// Ghost types provide abstract models for verification
+
+// Ghost type for mathematical sequences
+ghost type Seq<T> is protocol {
+    fn empty() -> Seq<T>;
+    fn singleton(x: T) -> Seq<T>;
+    fn concat(a: Seq<T>, b: Seq<T>) -> Seq<T>;
+    fn len(s: Seq<T>) -> Int;
+    fn get(s: Seq<T>, i: Int) -> T;
+    fn update(s: Seq<T>, i: Int, v: T) -> Seq<T>;
+    fn slice(s: Seq<T>, start: Int, end: Int) -> Seq<T>;
+};
+
+// Axioms for ghost type
+ghost axiom seq_empty_len<T>:
+    Seq.len(Seq.empty<T>()) == 0;
+
+ghost axiom seq_singleton_len<T>:
+    forall x: T. Seq.len(Seq.singleton(x)) == 1;
+
+ghost axiom seq_concat_len<T>:
+    forall a, b: Seq<T>. Seq.len(Seq.concat(a, b)) == Seq.len(a) + Seq.len(b);
+
+ghost axiom seq_get_singleton<T>:
+    forall x: T. Seq.get(Seq.singleton(x), 0) == x;
+
+// Ghost type for sets
+ghost type GhostSet<T> is protocol {
+    fn empty() -> GhostSet<T>;
+    fn singleton(x: T) -> GhostSet<T>;
+    fn union(a: GhostSet<T>, b: GhostSet<T>) -> GhostSet<T>;
+    fn intersect(a: GhostSet<T>, b: GhostSet<T>) -> GhostSet<T>;
+    fn contains(s: GhostSet<T>, x: T) -> Bool;
+    fn size(s: GhostSet<T>) -> Int;
+    fn subset(a: GhostSet<T>, b: GhostSet<T>) -> Bool;
+};
+
+ghost axiom set_empty_contains<T>:
+    forall x: T. !GhostSet.contains(GhostSet.empty<T>(), x);
+
+ghost axiom set_singleton_contains<T>:
+    forall x, y: T. GhostSet.contains(GhostSet.singleton(x), y) == (x == y);
+
+ghost axiom set_union_contains<T>:
+    forall a, b: GhostSet<T>, x: T.
+        GhostSet.contains(GhostSet.union(a, b), x) ==
+        (GhostSet.contains(a, x) || GhostSet.contains(b, x));
+
+// Ghost type for maps
+ghost type GhostMap<K, V> is protocol {
+    fn empty() -> GhostMap<K, V>;
+    fn put(m: GhostMap<K, V>, k: K, v: V) -> GhostMap<K, V>;
+    fn get(m: GhostMap<K, V>, k: K) -> Maybe<V>;
+    fn contains_key(m: GhostMap<K, V>, k: K) -> Bool;
+    fn remove(m: GhostMap<K, V>, k: K) -> GhostMap<K, V>;
+    fn keys(m: GhostMap<K, V>) -> GhostSet<K>;
+};
+
+ghost axiom map_empty_get<K, V>:
+    forall k: K. GhostMap.get(GhostMap.empty<K, V>(), k) == None;
+
+ghost axiom map_put_get<K, V>:
+    forall m: GhostMap<K, V>, k1, k2: K, v: V.
+        GhostMap.get(GhostMap.put(m, k1, v), k2) ==
+        if k1 == k2 { Some(v) } else { GhostMap.get(m, k2) };
+
+// Real type backed by ghost model
+type RealList<T> is {
+    data: List<T>,
+    ghost model: Seq<T>,
+};
+
+implement<T: Clone> RealList<T> {
+    @verify(proof)
+    fn new() -> Self {
+        contract#"
+            ensures result.model == Seq.empty();
+        ";
+        Self {
+            data: [],
+            ghost model: Seq.empty(),
+        }
+    }
+
+    @verify(proof)
+    fn push(&mut self, item: T) {
+        contract#"
+            ensures self.model == Seq.concat(old(self.model), Seq.singleton(item));
+            ensures Seq.len(self.model) == Seq.len(old(self.model)) + 1;
+        ";
+        self.data.push(item.clone());
+        ghost {
+            self.model = Seq.concat(self.model, Seq.singleton(item));
+        }
+    }
+
+    @verify(proof)
+    fn get(&self, index: Int) -> &T {
+        contract#"
+            requires 0 <= index < Seq.len(self.model);
+            ensures *result == Seq.get(self.model, index);
+        ";
+        &self.data[index]
+    }
+
+    @verify(proof)
+    fn len(&self) -> Int {
+        contract#"
+            ensures result == Seq.len(self.model);
+        ";
+        self.data.len()
+    }
+}
+
+// Ghost type for permissions/capabilities
+ghost type Permission is protocol {
+    fn read() -> Permission;
+    fn write() -> Permission;
+    fn full() -> Permission;
+    fn none() -> Permission;
+    fn combine(a: Permission, b: Permission) -> Permission;
+    fn allows_read(p: Permission) -> Bool;
+    fn allows_write(p: Permission) -> Bool;
+};
+
+ghost axiom perm_read:
+    Permission.allows_read(Permission.read()) &&
+    !Permission.allows_write(Permission.read());
+
+ghost axiom perm_write:
+    Permission.allows_write(Permission.write()) &&
+    !Permission.allows_read(Permission.write());
+
+ghost axiom perm_full:
+    Permission.allows_read(Permission.full()) &&
+    Permission.allows_write(Permission.full());
+
+// Using permissions in verification
+type GuardedResource<T> is {
+    value: T,
+    ghost permission: Permission,
+};
+
+implement<T: Clone> GuardedResource<T> {
+    @verify(proof)
+    fn read(&self) -> T {
+        contract#"
+            requires Permission.allows_read(self.permission);
+        ";
+        self.value.clone()
+    }
+
+    @verify(proof)
+    fn write(&mut self, new_value: T) {
+        contract#"
+            requires Permission.allows_write(self.permission);
+            ensures self.value == new_value;
+        ";
+        self.value = new_value;
+    }
+}
+
+fn main() {
+    let mut list = RealList.new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+    assert(list.len() == 3);
+    assert(*list.get(1) == 2);
+}

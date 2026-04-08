@@ -1,0 +1,24 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, recursion, stack, stress
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Test recursion depth of 500 levels (stress test for call stack)
+
+fn deep_recurse(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        return acc;
+    }
+    return deep_recurse(n - 1, acc + 1);
+}
+
+fn main() {
+    // Test 500 levels of recursion
+    let result = deep_recurse(500, 0);
+    assert_eq(result, 500);
+
+    // Test with computation at each level
+    let result2 = deep_recurse(500, 500);
+    assert_eq(result2, 1000);
+}

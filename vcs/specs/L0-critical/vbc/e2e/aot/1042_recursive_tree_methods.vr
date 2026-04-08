@@ -1,0 +1,81 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: heap, deref, method, tree, recursive
+// @expect: pass
+
+// Tests recursive tree with multiple methods using (*node).method() pattern
+
+type Tree is
+    Leaf(Int)
+    | Branch(Heap<Tree>, Heap<Tree>);
+
+implement Tree {
+    @allow(unbounded_recursion)
+    fn sum(&self) -> Int {
+        match self {
+            Tree.Leaf(v) => v,
+            Tree.Branch(l, r) => (*l).sum() + (*r).sum(),
+        }
+    }
+
+    @allow(unbounded_recursion)
+    fn count(&self) -> Int {
+        match self {
+            Tree.Leaf(_) => 1,
+            Tree.Branch(l, r) => (*l).count() + (*r).count(),
+        }
+    }
+
+    @allow(unbounded_recursion)
+    fn max_val(&self) -> Int {
+        match self {
+            Tree.Leaf(v) => v,
+            Tree.Branch(l, r) => {
+                let lm = (*l).max_val();
+                let rm = (*r).max_val();
+                if lm > rm { lm } else { rm }
+            },
+        }
+    }
+
+    @allow(unbounded_recursion)
+    fn contains(&self, target: Int) -> Bool {
+        match self {
+            Tree.Leaf(v) => v == target,
+            Tree.Branch(l, r) => (*l).contains(target) || (*r).contains(target),
+        }
+    }
+}
+
+fn main() -> Int {
+    //       Branch
+    //      /      \
+    //   Branch    Leaf(5)
+    //   /    \
+    // Leaf(1) Leaf(3)
+    let tree = Tree.Branch(
+        Heap(Tree.Branch(Heap(Tree.Leaf(1)), Heap(Tree.Leaf(3)))),
+        Heap(Tree.Leaf(5))
+    );
+
+    // sum = 1 + 3 + 5 = 9
+    if tree.sum() != 9 { return 1; }
+
+    // count = 3 leaves
+    if tree.count() != 3 { return 2; }
+
+    // max = 5
+    if tree.max_val() != 5 { return 3; }
+
+    // contains
+    if !tree.contains(3) { return 4; }
+    if tree.contains(7) { return 5; }
+
+    // Single leaf
+    let leaf = Tree.Leaf(42);
+    if leaf.sum() != 42 { return 6; }
+    if leaf.count() != 1 { return 7; }
+
+    0
+}

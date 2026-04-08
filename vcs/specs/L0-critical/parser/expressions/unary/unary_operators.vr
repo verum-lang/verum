@@ -1,0 +1,199 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, unary, operators
+
+// Unary operator expressions
+// Tests unary operators beyond basic arithmetic
+
+// Helper type
+type Vector is { x: Float, y: Float };
+
+fn test_negation() {
+    let x = 42;
+    // Negation
+    let neg = -x;
+    let neg_literal = -42;
+    let neg_float = -3.14;
+}
+
+fn test_double_negation() {
+    let x = 42;
+    // Double negation
+    let double_neg = --x;
+    let pos = -(-x);
+}
+
+fn test_logical_not() {
+    let flag = true;
+    // Logical not
+    let not_flag = !flag;
+    let not_true = !true;
+    let not_false = !false;
+}
+
+fn test_double_logical_not() {
+    let flag = true;
+    // Double logical not
+    let double_not = !!flag;
+}
+
+fn test_bitwise_not() {
+    let bits = 0xFF;
+    // Bitwise not (complement)
+    let complement = ~bits;
+    let flip = ~0xFF;
+}
+
+fn test_reference_operators() {
+    let value = 42;
+    let mut mut_value = 42;
+    let pointer = &value;
+    // Reference operators
+    let ref_val = &value;
+    let ref_mut = &mut mut_value;
+    let deref = *pointer;
+}
+
+fn test_try_operator() {
+    type Result<T, E> is Ok(T) | Err(E);
+    fn operation() -> Result<Int, Text> { Ok(42) }
+
+    // Try operator (postfix)
+    let result = operation()?;
+}
+
+fn test_await_operator() {
+    fn fetch() -> Int { 42 }
+    // Await operator (postfix)
+    let data = fetch().await;
+}
+
+fn test_address_of() {
+    let value = 42;
+    let mut mut_value = 42;
+    // Address of
+    let addr = &value;
+    let addr_mut = &mut mut_value;
+}
+
+fn test_dereference_chains() {
+    let value = 42;
+    let ptr = &&&value;
+    // Dereference chains
+    let deep = ***ptr;
+    let nested = *(*ptr);
+}
+
+fn test_unary_in_expressions() {
+    let a = 10;
+    let b = 20;
+    let x = 5;
+    let y = 3;
+    // Unary in expressions
+    let sum = -a + (-b);
+    let product = -x * -y;
+    let negated_sum = -(a + b);
+}
+
+fn test_unary_with_method_call() {
+    let x = -5;
+    let text = "hello";
+    // Unary with method call
+    let abs = (-x).abs();
+    let neg_len = -(text.len());
+}
+
+fn test_unary_in_function_call() {
+    // Unary in function call
+    fn negate(x: Int) -> Int { -x }
+    let input = 5;
+    let result = negate(-input);
+}
+
+fn test_unary_in_array() {
+    let a = true;
+    let b = false;
+    let c = true;
+    // Unary in array
+    let negatives = [-1, -2, -3, -4];
+    let flipped = [!a, !b, !c];
+}
+
+fn test_unary_in_conditionals() {
+    let done = false;
+    let x = -5;
+    let threshold = -10;
+    fn process() {}
+    // Unary in conditionals
+    if !done && -x > threshold {
+        process()
+    }
+}
+
+fn test_unary_in_match() {
+    let value = 5;
+    fn is_valid(x: Int) -> Bool { x > 0 }
+    fn reject(x: Int) {}
+    fn handle_negative(x: Int) {}
+    fn handle_default() {}
+    // Unary in match
+    match value {
+        x if !is_valid(x) => reject(x),
+        x if -x > 0 => handle_negative(x),
+        _ => handle_default(),
+    };
+}
+
+fn test_range_from_start() {
+    // Range from start
+    let from_zero = ..10;
+}
+
+fn test_clone_operator() {
+    let value = 42;
+    // Clone/copy operator
+    let cloned = value.clone();
+}
+
+fn test_heap_allocation() {
+    let value = 42;
+    // Heap allocation
+    let boxed = Heap(value);
+}
+
+fn test_unary_precedence() {
+    let x = 5;
+    let flag = true;
+    // Unary precedence
+    let complex = !(-x > 0);
+}
+
+fn test_unary_with_generics() {
+    type Neg is protocol {
+        type Output;
+        fn neg(self) -> Self.Output;
+    };
+
+    // Unary with generics
+    fn negate_generic<T: Neg>(x: T) -> T.Output {
+        -x
+    }
+}
+
+fn test_unary_in_struct_field() {
+    let v = Vector { x: 1.0, y: 2.0 };
+    // Unary in struct field
+    let negated = Vector {
+        x: -v.x,
+        y: -v.y,
+    };
+}
+
+fn test_safe_navigation() {
+    type Maybe<T> is None | Some(T);
+    type Inner is { value: Int };
+    let maybe: Maybe<Inner> = None;
+    // Safe navigation
+    let safe = maybe?.value;
+}

@@ -1,0 +1,586 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for defer and errdefer statements
+
+// =============================================================================
+// Grammar Reference:
+// defer_stmt = 'defer' , defer_body | 'errdefer' , defer_body ;
+// defer_body = expression , ';' | block_expr ;
+// =============================================================================
+
+// =============================================================================
+// BASIC DEFER
+// =============================================================================
+
+fn test_defer_expression() {
+    // Defer with simple expression
+    defer cleanup();
+
+    // Defer with method call
+    defer file.close();
+
+    // Defer with field access
+    defer resource.handle.release();
+}
+
+fn test_defer_with_semicolon() {
+    // Explicit semicolon
+    defer cleanup();
+    defer file.close();
+    defer resource.release();
+}
+
+fn test_defer_block() {
+    // Defer with block
+    defer {
+        cleanup();
+    };
+
+    // Defer with multiple statements in block
+    defer {
+        log("Cleaning up");
+        release_resources();
+        notify_completion();
+    };
+}
+
+fn test_defer_block_with_local_bindings() {
+    defer {
+        let status = get_cleanup_status();
+        log(f"Cleanup status: {status}");
+        if !status.success {
+            report_failure(status);
+        }
+    };
+}
+
+fn test_multiple_defers_lifo() {
+    // Multiple defers execute in LIFO order
+    defer step_3();  // Executes third
+    defer step_2();  // Executes second
+    defer step_1();  // Executes first (last in, first out)
+
+    do_work();
+}
+
+// =============================================================================
+// DEFER WITH RESOURCES
+// =============================================================================
+
+fn test_defer_file_close() {
+    let file = open("data.txt")?;
+    defer file.close();
+
+    let contents = file.read_all();
+    process(contents);
+}
+
+fn test_defer_lock_release() {
+    let lock = mutex.lock();
+    defer lock.release();
+
+    // Critical section
+    shared_data += 1;
+}
+
+fn test_defer_connection_close() {
+    let conn = Database.connect()?;
+    defer conn.close();
+
+    let result = conn.query("SELECT * FROM users");
+    process(result);
+}
+
+fn test_defer_transaction_rollback() {
+    let tx = db.begin_transaction()?;
+    defer tx.rollback();  // Rollback if not committed
+
+    tx.execute("INSERT INTO users VALUES (1, 'Alice')");
+    tx.execute("INSERT INTO orders VALUES (1, 100)");
+
+    tx.commit();  // Success - rollback won't execute due to commit
+}
+
+fn test_defer_memory_free() {
+    let buffer = allocate(1024);
+    defer free(buffer);
+
+    fill(buffer, 0);
+    process(buffer);
+}
+
+fn test_defer_temp_file_cleanup() {
+    let temp = create_temp_file();
+    defer delete_file(temp.path);
+
+    write_data(temp);
+    process_file(temp);
+}
+
+// =============================================================================
+// DEFER WITH CLOSURES
+// =============================================================================
+
+fn test_defer_with_capture() {
+    let resource = acquire();
+    defer {
+        // Captures resource
+        resource.release();
+    };
+}
+
+fn test_defer_capturing_variables() {
+    let name = "test_resource";
+    let id = 42;
+
+    defer {
+        log(f"Releasing {name} with id {id}");
+        release_by_id(id);
+    };
+
+    use_resource(id);
+}
+
+// =============================================================================
+// DEFER IN CONTROL FLOW
+// =============================================================================
+
+fn test_defer_with_early_return() {
+    let file = open("data.txt")?;
+    defer file.close();  // Still runs on early return
+
+    if file.is_empty() {
+        return;  // defer runs here
+    }
+
+    process(file);
+    // defer runs here too
+}
+
+fn test_defer_with_error_propagation() {
+    let conn = connect()?;
+    defer conn.disconnect();
+
+    let data = fetch(conn)?;  // If this fails, defer still runs
+    transform(data)?;         // If this fails, defer still runs
+    save(data)?;              // If this fails, defer still runs
+}
+
+fn test_defer_in_loop() {
+    for file_path in file_paths {
+        let file = open(file_path)?;
+        defer file.close();  // Runs at end of each iteration
+
+        process(file);
+    }
+}
+
+fn test_defer_with_break() {
+    loop {
+        let resource = acquire();
+        defer resource.release();  // Runs on break
+
+        if done {
+            break;  // defer runs here
+        }
+
+        use_resource(resource);
+        // defer runs here too (end of iteration)
+    }
+}
+
+fn test_defer_with_continue() {
+    for item in items {
+        let lock = item.lock();
+        defer lock.unlock();  // Runs on continue
+
+        if skip(item) {
+            continue;  // defer runs here
+        }
+
+        process(item);
+        // defer runs here too
+    }
+}
+
+// =============================================================================
+// BASIC ERRDEFER
+// =============================================================================
+
+fn test_errdefer_expression() {
+    // Errdefer with expression (only runs on error path)
+    errdefer rollback();
+
+    errdefer cleanup_partial();
+
+    errdefer notify_failure();
+}
+
+fn test_errdefer_block() {
+    errdefer {
+        log_error("Operation failed");
+        rollback_changes();
+        notify_admin();
+    };
+}
+
+fn test_errdefer_with_error_capture() {
+    // Errdefer can capture the error (if syntax supports it)
+    errdefer {
+        log_error("Failed during operation");
+        send_alert();
+    };
+}
+
+// =============================================================================
+// ERRDEFER WITH RESOURCES
+// =============================================================================
+
+fn test_errdefer_partial_initialization() {
+    let db = connect_db()?;
+    errdefer db.close();  // Only if rest fails
+
+    let cache = connect_cache()?;
+    errdefer cache.close();  // Only if rest fails
+
+    let queue = connect_queue()?;
+    errdefer queue.close();  // Only if rest fails
+
+    // All connected, return success
+    // errdefers don't run on success
+    Ok(ServiceContext { db, cache, queue })
+}
+
+fn test_errdefer_file_cleanup() {
+    let file = create_file("output.txt")?;
+    errdefer delete_file("output.txt");  // Delete on error
+
+    write_header(file)?;
+    write_body(file)?;
+    write_footer(file)?;
+
+    // Success - file kept
+    Ok(file)
+}
+
+fn test_errdefer_transaction() {
+    let tx = db.begin()?;
+    errdefer tx.rollback();  // Rollback on error
+
+    tx.execute(query1)?;
+    tx.execute(query2)?;
+    tx.execute(query3)?;
+
+    tx.commit()?;  // Success - errdefer doesn't run
+    Ok(())
+}
+
+fn test_errdefer_allocation() {
+    let buffer1 = allocate(1024)?;
+    errdefer free(buffer1);
+
+    let buffer2 = allocate(2048)?;
+    errdefer free(buffer2);
+
+    let buffer3 = allocate(4096)?;
+    errdefer free(buffer3);
+
+    // All allocated successfully
+    // errdefers don't run
+    Ok(Buffers { buffer1, buffer2, buffer3 })
+}
+
+// =============================================================================
+// COMBINING DEFER AND ERRDEFER
+// =============================================================================
+
+fn test_defer_and_errdefer_together() {
+    let file = open_or_create("data.txt")?;
+    defer file.close();        // Always close
+    errdefer delete("data.txt");  // Delete only on error
+
+    write_data(file)?;
+    // On success: close file (keep it)
+    // On error: delete file, then close
+}
+
+fn test_defer_errdefer_ordering() {
+    // Order matters for cleanup logic
+    let tx = db.begin()?;
+    defer log("Transaction ended");       // Always logs
+    errdefer tx.rollback();               // Only on error
+    defer log("Starting cleanup");        // Always logs
+
+    perform_operations(tx)?;
+    tx.commit()?;
+
+    // Success path: "Starting cleanup", "Transaction ended"
+    // Error path: rollback, "Starting cleanup", "Transaction ended"
+}
+
+fn test_resource_with_both() {
+    let conn = connect()?;
+    defer conn.close();  // Always close connection
+
+    let session = conn.create_session()?;
+    defer session.end();    // Always end session
+    errdefer session.abort();  // Abort only on error
+
+    perform_work(session)?;
+    session.commit()?;
+}
+
+// =============================================================================
+// DEFER/ERRDEFER IN NESTED SCOPES
+// =============================================================================
+
+fn test_defer_nested_blocks() {
+    defer outer_cleanup();
+
+    {
+        defer inner_cleanup();
+
+        {
+            defer innermost_cleanup();
+            do_innermost_work();
+        }
+        // innermost_cleanup runs here
+
+        do_inner_work();
+    }
+    // inner_cleanup runs here
+
+    do_outer_work();
+    // outer_cleanup runs here
+}
+
+fn test_defer_in_if_blocks() {
+    if condition {
+        defer cleanup_a();
+        do_a();
+    } else {
+        defer cleanup_b();
+        do_b();
+    }
+}
+
+fn test_defer_in_match_arms() {
+    match resource_type {
+        Type.File => {
+            let file = open()?;
+            defer file.close();
+            process_file(file);
+        },
+        Type.Network => {
+            let conn = connect()?;
+            defer conn.disconnect();
+            process_network(conn);
+        },
+        Type.Memory => {
+            let buf = allocate()?;
+            defer free(buf);
+            process_memory(buf);
+        }
+    };
+}
+
+// =============================================================================
+// DEFER WITH COMPLEX EXPRESSIONS
+// =============================================================================
+
+fn test_defer_with_method_chain() {
+    defer logger.with_context(ctx).log_cleanup();
+
+    defer resource.get_handle().release();
+}
+
+fn test_defer_with_conditional() {
+    let resource = acquire();
+
+    defer {
+        if resource.needs_cleanup() {
+            resource.cleanup();
+        }
+    };
+}
+
+fn test_defer_with_match() {
+    let resource = acquire();
+
+    defer {
+        match resource.state {
+            State.Active => resource.deactivate(),
+            State.Pending => resource.cancel(),
+            State.Done => {}
+        }
+    };
+}
+
+fn test_defer_with_loop_in_block() {
+    let resources = acquire_many();
+
+    defer {
+        for resource in resources {
+            resource.release();
+        }
+    };
+}
+
+// =============================================================================
+// DEFER PATTERNS
+// =============================================================================
+
+fn test_raii_pattern() {
+    // RAII-style resource management
+    fn with_file<T>(path: Text, f: fn(&File) -> T) -> Result<T, Error> {
+        let file = open(path)?;
+        defer file.close();
+        Ok(f(&file))
+    }
+}
+
+fn test_cleanup_on_scope_exit() {
+    fn process_with_cleanup() {
+        let state = setup();
+        defer teardown(state);
+
+        // No matter how we exit, teardown runs
+        if error_condition {
+            return;
+        }
+
+        for item in items {
+            if skip(item) {
+                continue;
+            }
+            if done(item) {
+                break;
+            }
+            process(item);
+        }
+    }
+}
+
+fn test_logging_pattern() {
+    fn timed_operation() {
+        let start = now();
+        defer {
+            let elapsed = now() - start;
+            log(f"Operation took {elapsed}ms");
+        };
+
+        perform_operation();
+    }
+}
+
+fn test_mutex_guard_pattern() {
+    fn critical_section() {
+        let guard = mutex.lock();
+        defer guard.unlock();
+
+        // Automatically unlocked on any exit
+        if condition {
+            return early();
+        }
+        do_critical_work();
+    }
+}
+
+fn test_builder_commit_pattern() {
+    fn build_with_rollback() -> Result<Built, Error> {
+        let builder = Builder.new();
+        errdefer builder.discard();
+
+        builder.add_component_a()?;
+        builder.add_component_b()?;
+        builder.add_component_c()?;
+
+        Ok(builder.build())  // errdefer doesn't run on success
+    }
+}
+
+// =============================================================================
+// DEFER IN ASYNC CONTEXT
+// =============================================================================
+
+async fn test_async_defer() {
+    let conn = connect_async().await;
+    defer conn.close();  // Note: close might be sync or async
+
+    let data = fetch(conn).await;
+    process(data);
+}
+
+async fn test_async_defer_block() {
+    let session = create_session().await;
+
+    defer {
+        log("Ending session");
+        session.end();
+    };
+
+    perform_async_work(session).await;
+}
+
+async fn test_async_errdefer() {
+    let tx = db.begin_async().await;
+    errdefer tx.rollback();
+
+    tx.execute(query1).await;
+    tx.execute(query2).await;
+
+    tx.commit().await;
+}
+
+// =============================================================================
+// MULTIPLE DEFERS INTERACTION
+// =============================================================================
+
+fn test_multiple_defers_order() {
+    defer log("Fourth");   // Runs 4th
+    defer log("Third");    // Runs 3rd
+
+    {
+        defer log("Second");  // Runs 2nd (inner scope exits first)
+        defer log("First");   // Runs 1st
+
+        work();
+    }
+    // Inner defers run here: "First", "Second"
+
+    more_work();
+    // Outer defers run here: "Third", "Fourth"
+}
+
+fn test_defers_with_different_resources() {
+    let file = open("a.txt")?;
+    defer file.close();
+
+    let conn = connect()?;
+    defer conn.disconnect();
+
+    let lock = mutex.lock();
+    defer lock.unlock();
+
+    // Use all three resources
+    let data = file.read();
+    conn.send(data);
+    shared_state.update(data);
+
+    // On exit: unlock, disconnect, close (reverse order)
+}
+
+fn test_errdefers_partial_success() {
+    let a = create_a()?;
+    errdefer destroy_a(a);
+
+    let b = create_b()?;  // If this fails, destroy_a runs
+    errdefer destroy_b(b);
+
+    let c = create_c()?;  // If this fails, destroy_b and destroy_a run
+    errdefer destroy_c(c);
+
+    // All succeed - return combined, no errdefers run
+    Ok(Combined { a, b, c })
+}

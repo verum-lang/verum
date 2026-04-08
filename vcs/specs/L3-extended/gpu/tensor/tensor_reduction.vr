@@ -1,0 +1,183 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: tensor, reduction
+
+fn main() {
+    // 1D reductions
+    let v: Tensor<f32, [5]> = tensor<5>f32{1.0, 2.0, 3.0, 4.0, 5.0};
+
+    // Sum
+    let total = v.sum();
+    assert(total == 15.0);
+
+    // Mean
+    let avg = v.mean();
+    assert(avg == 3.0);
+
+    // Product
+    let prod = v.prod();
+    assert(prod == 120.0);
+
+    // Min/Max
+    let min_val = v.min();
+    assert(min_val == 1.0);
+
+    let max_val = v.max();
+    assert(max_val == 5.0);
+
+    // Argmin/Argmax
+    let min_idx = v.argmin();
+    assert(min_idx == 0);
+
+    let max_idx = v.argmax();
+    assert(max_idx == 4);
+
+    // 2D reductions
+    let m: Tensor<f32, [3, 4]> = tensor<3, 4>f32{
+        {1.0, 2.0, 3.0, 4.0},
+        {5.0, 6.0, 7.0, 8.0},
+        {9.0, 10.0, 11.0, 12.0}
+    };
+
+    // Global reduction
+    let total_sum = m.sum();
+    assert(total_sum == 78.0);
+
+    let total_mean = m.mean();
+    assert(total_mean == 6.5);
+
+    // Reduction along axis 0 (column-wise)
+    let col_sum = m.reduce_sum(axis: 0);
+    assert(col_sum.shape() == [4]);
+    assert(col_sum[0] == 15.0);  // 1 + 5 + 9
+    assert(col_sum[3] == 24.0);  // 4 + 8 + 12
+
+    let col_mean = m.reduce_mean(axis: 0);
+    assert(col_mean.shape() == [4]);
+    assert(col_mean[0] == 5.0);
+    assert(col_mean[3] == 8.0);
+
+    // Reduction along axis 1 (row-wise)
+    let row_sum = m.reduce_sum(axis: 1);
+    assert(row_sum.shape() == [3]);
+    assert(row_sum[0] == 10.0);  // 1 + 2 + 3 + 4
+    assert(row_sum[2] == 42.0);  // 9 + 10 + 11 + 12
+
+    let row_mean = m.reduce_mean(axis: 1);
+    assert(row_mean.shape() == [3]);
+    assert(row_mean[0] == 2.5);
+    assert(row_mean[2] == 10.5);
+
+    // Min/Max along axis
+    let col_min = m.reduce_min(axis: 0);
+    assert(col_min.shape() == [4]);
+    assert(col_min[0] == 1.0);
+
+    let row_max = m.reduce_max(axis: 1);
+    assert(row_max.shape() == [3]);
+    assert(row_max[2] == 12.0);
+
+    // Keepdims option
+    let sum_keepdim = m.reduce_sum(axis: 0, keepdims: true);
+    assert(sum_keepdim.shape() == [1, 4]);
+
+    let mean_keepdim = m.reduce_mean(axis: 1, keepdims: true);
+    assert(mean_keepdim.shape() == [3, 1]);
+
+    // Multiple axes reduction
+    let t: Tensor<f32, [2, 3, 4]> = Tensor.ones();
+
+    let sum_01 = t.reduce_sum(axes: [0, 1]);
+    assert(sum_01.shape() == [4]);
+    assert(sum_01[0] == 6.0);  // 2 * 3 = 6 ones
+
+    let sum_12 = t.reduce_sum(axes: [1, 2]);
+    assert(sum_12.shape() == [2]);
+    assert(sum_12[0] == 12.0);  // 3 * 4 = 12 ones
+
+    // Statistical reductions
+    let data: Tensor<f32, [6]> = tensor<6>f32{2.0, 4.0, 4.0, 4.0, 5.0, 5.0};
+
+    let variance = data.var();
+    assert((variance - 1.0).abs() < 1e-5);
+
+    let std_dev = data.std();
+    assert((std_dev - 1.0).abs() < 1e-5);
+
+    // Variance along axis
+    let mat_var = m.reduce_var(axis: 1);
+    assert(mat_var.shape() == [3]);
+
+    // Norm reductions
+    let vec: Tensor<f32, [4]> = tensor<4>f32{3.0, 4.0, 0.0, 0.0};
+
+    let l1_norm = vec.norm(p: 1);  // L1 norm
+    assert(l1_norm == 7.0);
+
+    let l2_norm = vec.norm(p: 2);  // L2 norm (Euclidean)
+    assert(l2_norm == 5.0);
+
+    let inf_norm = vec.norm(p: f32.infinity);  // Infinity norm
+    assert(inf_norm == 4.0);
+
+    // Frobenius norm for matrices
+    let frob = m.frobenius_norm();
+    // sqrt(sum of squares)
+
+    // All/Any (boolean reductions)
+    let bools: Tensor<bool, [4]> = tensor<4>bool{true, true, true, false};
+
+    let all_true = bools.all();
+    assert(all_true == false);
+
+    let any_true = bools.any();
+    assert(any_true == true);
+
+    let all_true_mask: Tensor<bool, [3]> = tensor<3>bool{true, true, true};
+    assert(all_true_mask.all() == true);
+
+    // Count nonzero
+    let sparse: Tensor<f32, [5]> = tensor<5>f32{0.0, 1.0, 0.0, 2.0, 0.0};
+    let nonzero_count = sparse.count_nonzero();
+    assert(nonzero_count == 2);
+
+    // Cumulative operations
+    let cumsum = v.cumsum();
+    assert(cumsum.shape() == [5]);
+    assert(cumsum[0] == 1.0);
+    assert(cumsum[1] == 3.0);
+    assert(cumsum[2] == 6.0);
+    assert(cumsum[4] == 15.0);
+
+    let cumprod = v.cumprod();
+    assert(cumprod.shape() == [5]);
+    assert(cumprod[0] == 1.0);
+    assert(cumprod[1] == 2.0);
+    assert(cumprod[2] == 6.0);
+    assert(cumprod[4] == 120.0);
+
+    // Cumsum along axis
+    let row_cumsum = m.cumsum(axis: 1);
+    assert(row_cumsum.shape() == [3, 4]);
+    assert(row_cumsum[0, 0] == 1.0);
+    assert(row_cumsum[0, 3] == 10.0);
+
+    // Diff (differences between consecutive elements)
+    let diffs = v.diff();
+    assert(diffs.shape() == [4]);
+    assert(diffs[0] == 1.0);  // 2 - 1
+    assert(diffs[3] == 1.0);  // 5 - 4
+
+    // Softmax (normalization reduction)
+    let logits: Tensor<f32, [3]> = tensor<3>f32{1.0, 2.0, 3.0};
+    let probs = logits.softmax();
+    assert(probs.shape() == [3]);
+    let prob_sum = probs.sum();
+    assert((prob_sum - 1.0).abs() < 1e-5);  // Sums to 1
+
+    // Log-sum-exp (numerically stable)
+    let lse = logits.logsumexp();
+    // log(exp(1) + exp(2) + exp(3))
+}

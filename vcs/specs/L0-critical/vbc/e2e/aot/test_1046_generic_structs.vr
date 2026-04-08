@@ -1,0 +1,169 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: generics, struct, implement, methods
+// @description: Generic struct types with methods and type parameters
+
+type Pair<A, B> is { first: A, second: B };
+
+implement Pair<A, B> {
+    fn new(a: A, b: B) -> Pair<A, B> {
+        Pair { first: a, second: b }
+    }
+
+    fn get_first(&self) -> A {
+        self.first
+    }
+
+    fn get_second(&self) -> B {
+        self.second
+    }
+}
+
+type Triple<T> is { x: T, y: T, z: T };
+
+implement Triple<T> {
+    fn new(x: T, y: T, z: T) -> Triple<T> {
+        Triple { x: x, y: y, z: z }
+    }
+
+    fn sum_ints(&self) -> Int {
+        self.x + self.y + self.z
+    }
+}
+
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+fn test_pair_int_int() -> Int {
+    let p = Pair.new(10, 20);
+    if p.get_first() != 10 {
+        print(f"FAIL pair_int: first expected 10, got {p.get_first()}");
+        return 1;
+    }
+    if p.get_second() != 20 {
+        print(f"FAIL pair_int: second expected 20, got {p.get_second()}");
+        return 1;
+    }
+    print("  pair_int_int: OK");
+    0
+}
+
+fn test_triple() -> Int {
+    let t = Triple.new(3, 5, 7);
+    if t.sum_ints() != 15 {
+        print(f"FAIL triple: expected 15, got {t.sum_ints()}");
+        return 1;
+    }
+    print("  triple: OK");
+    0
+}
+
+fn test_swap() -> Int {
+    let p = Pair.new(1, 2);
+    let swapped = swap(p);
+    if swapped.first != 2 {
+        print(f"FAIL swap first: expected 2, got {swapped.first}");
+        return 1;
+    }
+    if swapped.second != 1 {
+        print(f"FAIL swap second: expected 1, got {swapped.second}");
+        return 1;
+    }
+    print("  swap: OK");
+    0
+}
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn apply<T>(f: fn(T) -> T, x: T) -> T {
+    f(x)
+}
+
+fn double(x: Int) -> Int { x * 2 }
+fn negate(x: Int) -> Int { 0 - x }
+
+fn test_generic_functions() -> Int {
+    let a = identity(42);
+    if a != 42 {
+        print(f"FAIL identity: expected 42, got {a}");
+        return 1;
+    }
+
+    let b = apply(double, 7);
+    if b != 14 {
+        print(f"FAIL apply double: expected 14, got {b}");
+        return 1;
+    }
+
+    let c = apply(negate, 5);
+    if c != -5 {
+        print(f"FAIL apply negate: expected -5, got {c}");
+        return 1;
+    }
+    print("  generic_functions: OK");
+    0
+}
+
+type Stack<T> is { data: List<T>, size: Int };
+
+implement Stack<T> {
+    fn new() -> Stack<T> {
+        Stack { data: List.new(), size: 0 }
+    }
+
+    fn push(&mut self, val: T) {
+        self.data.push(val);
+        self.size = self.size + 1;
+    }
+
+    fn peek(&self) -> T {
+        self.data[self.size - 1]
+    }
+
+    fn len(&self) -> Int {
+        self.size
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.size == 0
+    }
+}
+
+fn test_generic_stack() -> Int {
+    let mut s = Stack.new();
+    s.push(10);
+    s.push(20);
+    s.push(30);
+
+    if s.len() != 3 {
+        print(f"FAIL stack len: expected 3, got {s.len()}");
+        return 1;
+    }
+    if s.peek() != 30 {
+        print(f"FAIL stack peek: expected 30, got {s.peek()}");
+        return 1;
+    }
+    print("  generic_stack: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Generic Struct Tests:");
+    let mut failures = 0;
+    failures = failures + test_pair_int_int();
+    failures = failures + test_triple();
+    failures = failures + test_swap();
+    failures = failures + test_generic_functions();
+    failures = failures + test_generic_stack();
+
+    if failures == 0 {
+        print("All generic struct tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,161 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, zero-cost, checked-tier
+
+/// Verify that Tier 1 (checked) references have zero runtime cost.
+/// Escape analysis enables compile-time verification.
+/// Spec: 26-cbgr-implementation.md#zero-cost-tier
+
+fn main() {
+    test_checked_vs_raw();
+    test_escape_analysis_simple();
+    test_escape_analysis_complex();
+    benchmark_checked_tier();
+}
+
+/// Compare checked reference to raw pointer access
+fn test_checked_vs_raw() {
+    let value = 42;
+    let iterations = 10_000_000;
+
+    // Checked reference access
+    let checked_ref: &checked Int = &checked value;
+    let start1 = Time.now();
+    let mut sum1 = 0;
+    for _ in 0..iterations {
+        sum1 += *checked_ref;
+    }
+    let time1 = Time.now() - start1;
+
+    // Raw pointer access (baseline)
+    let raw_ptr = &value as *const Int;
+    let start2 = Time.now();
+    let mut sum2 = 0;
+    for _ in 0..iterations {
+        sum2 += unsafe { *raw_ptr };
+    }
+    let time2 = Time.now() - start2;
+
+    print("Checked ref time: " + time1.as_nanos().to_string() + "ns");
+    print("Raw pointer time: " + time2.as_nanos().to_string() + "ns");
+
+    // Times should be nearly identical (within noise)
+    let ratio = (time1.as_nanos() as f64) / (time2.as_nanos() as f64);
+    print("Ratio: " + ratio.to_string());
+
+    // Allow 20% variance for measurement noise
+    assert(ratio < 1.2);
+    assert(ratio > 0.8);
+
+    assert(sum1 == sum2);
+}
+
+/// Test simple escape analysis case
+fn test_escape_analysis_simple() {
+    // Local variable that doesn't escape
+    let x = 100;
+
+    // Compiler can prove this is safe at compile time
+    let ref_x: &checked Int = &checked x;
+
+    // No runtime check needed
+    let result = *ref_x + *ref_x + *ref_x;
+
+    assert(result == 300);
+}
+
+/// Test more complex escape analysis
+fn test_escape_analysis_complex() {
+    // Multiple locals, nested scopes
+    let outer = 10;
+
+    let result = {
+        let inner = 20;
+        let ref_outer: &checked Int = &checked outer;
+        let ref_inner: &checked Int = &checked inner;
+
+        *ref_outer + *ref_inner
+    };
+
+    assert(result == 30);
+
+    // Even with conditionals
+    let condition = true;
+    let val = if condition { outer } else { 0 };
+    let ref_val: &checked Int = &checked val;
+    assert(*ref_val == 10);
+}
+
+/// Benchmark checked tier performance
+fn benchmark_checked_tier() {
+    let iterations = 1_000_000;
+    let array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Checked refs to array elements
+    let refs: [&checked Int; 10] = [
+        &checked array[0], &checked array[1], &checked array[2],
+        &checked array[3], &checked array[4], &checked array[5],
+        &checked array[6], &checked array[7], &checked array[8],
+        &checked array[9],
+    ];
+
+    let start = Time.now();
+    let mut sum = 0;
+
+    for _ in 0..iterations {
+        for i in 0..10 {
+            sum += *refs[i];
+        }
+    }
+
+    let elapsed = Time.now() - start;
+    let ns_per_access = elapsed.as_nanos() / (iterations * 10);
+
+    print("Checked tier benchmark:");
+    print("  Total accesses: " + (iterations * 10).to_string());
+    print("  Time: " + elapsed.as_millis().to_string() + "ms");
+    print("  Per access: " + ns_per_access.to_string() + "ns");
+
+    // Should be < 1ns (essentially free)
+    assert(ns_per_access < 2);
+    assert(sum == 55 * iterations);
+}
+
+/// Verify no code generation difference
+fn verify_codegen_equivalence() {
+    // These two functions should generate identical code:
+
+    fn with_checked(x: &checked Int) -> Int {
+        *x + 1
+    }
+
+    fn with_raw(x: *const Int) -> Int {
+        unsafe { *x + 1 }
+    }
+
+    let value = 41;
+    let r1 = with_checked(&checked value);
+    let r2 = with_raw(&value as *const Int);
+
+    assert(r1 == r2);
+    assert(r1 == 42);
+}
+
+/// Test that escape analysis catches escaping values
+fn test_escape_detection() {
+    // This would NOT be eligible for checked tier:
+    // fn escapes() -> &Int {
+    //     let local = 42;
+    //     &local  // ERROR: returns ref to local
+    // }
+
+    // But this is fine:
+    fn no_escape(value: &checked Int) -> Int {
+        *value  // Copies value, ref doesn't escape
+    }
+
+    let x = 42;
+    let result = no_escape(&checked x);
+    assert(result == 42);
+}

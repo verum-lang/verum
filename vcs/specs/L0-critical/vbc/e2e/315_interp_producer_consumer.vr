@@ -1,0 +1,353 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, design-patterns, producer-consumer, buffer
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Producer-consumer pattern with bounded buffer.
+// Simulates single-threaded interleaving of producer and consumer operations
+// on a ring buffer.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Ring buffer (bounded buffer)
+// =============================================================================
+
+type RingBuf is {
+    data: Arr8,
+    head: Int,
+    tail: Int,
+    count: Int,
+    capacity: Int
+};
+
+fn rb_new(cap: Int) -> RingBuf {
+    RingBuf { data: a8_zeros(), head: 0, tail: 0, count: 0, capacity: cap }
+}
+
+fn rb_is_full(rb: RingBuf) -> Int {
+    if rb.count >= rb.capacity { 1 } else { 0 }
+}
+
+fn rb_is_empty(rb: RingBuf) -> Int {
+    if rb.count <= 0 { 1 } else { 0 }
+}
+
+type RBPushResult is { buf: RingBuf, ok: Int };
+
+fn rb_push(rb: RingBuf, val: Int) -> RBPushResult {
+    if rb_is_full(rb) == 1 {
+        return RBPushResult { buf: rb, ok: 0 };
+    }
+    let new_data = a8_set(rb.data, rb.tail, val);
+    let new_tail = (rb.tail + 1) % rb.capacity;
+    RBPushResult {
+        buf: RingBuf {
+            data: new_data, head: rb.head, tail: new_tail,
+            count: rb.count + 1, capacity: rb.capacity
+        },
+        ok: 1
+    }
+}
+
+type RBPopResult is { buf: RingBuf, value: Int, ok: Int };
+
+fn rb_pop(rb: RingBuf) -> RBPopResult {
+    if rb_is_empty(rb) == 1 {
+        return RBPopResult { buf: rb, value: -1, ok: 0 };
+    }
+    let val = a8_get(rb.data, rb.head);
+    let new_head = (rb.head + 1) % rb.capacity;
+    RBPopResult {
+        buf: RingBuf {
+            data: rb.data, head: new_head, tail: rb.tail,
+            count: rb.count - 1, capacity: rb.capacity
+        },
+        value: val,
+        ok: 1
+    }
+}
+
+// =============================================================================
+// Producer-Consumer simulation state
+// =============================================================================
+
+type PCState is {
+    buf: RingBuf,
+    produced: Int,
+    consumed: Int,
+    produce_blocked: Int,
+    consume_blocked: Int,
+    consumed_sum: Int
+};
+
+fn pc_new(buf_cap: Int) -> PCState {
+    PCState {
+        buf: rb_new(buf_cap),
+        produced: 0,
+        consumed: 0,
+        produce_blocked: 0,
+        consume_blocked: 0,
+        consumed_sum: 0
+    }
+}
+
+// Producer tries to add an item (its sequence number)
+fn pc_produce(state: PCState) -> PCState {
+    let item = state.produced + 1;
+    let pr = rb_push(state.buf, item);
+    if pr.ok == 1 {
+        PCState {
+            buf: pr.buf,
+            produced: state.produced + 1,
+            consumed: state.consumed,
+            produce_blocked: state.produce_blocked,
+            consume_blocked: state.consume_blocked,
+            consumed_sum: state.consumed_sum
+        }
+    } else {
+        PCState {
+            buf: state.buf,
+            produced: state.produced,
+            consumed: state.consumed,
+            produce_blocked: state.produce_blocked + 1,
+            consume_blocked: state.consume_blocked,
+            consumed_sum: state.consumed_sum
+        }
+    }
+}
+
+// Consumer tries to remove an item
+fn pc_consume(state: PCState) -> PCState {
+    let pr = rb_pop(state.buf);
+    if pr.ok == 1 {
+        PCState {
+            buf: pr.buf,
+            produced: state.produced,
+            consumed: state.consumed + 1,
+            produce_blocked: state.produce_blocked,
+            consume_blocked: state.consume_blocked,
+            consumed_sum: state.consumed_sum + pr.value
+        }
+    } else {
+        PCState {
+            buf: state.buf,
+            produced: state.produced,
+            consumed: state.consumed,
+            produce_blocked: state.produce_blocked,
+            consume_blocked: state.consume_blocked + 1,
+            consumed_sum: state.consumed_sum
+        }
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_ring_buffer_basic() {
+    let mut rb = rb_new(4);
+    let r1 = rb_push(rb, 10);
+    assert_eq(r1.ok, 1);
+    rb = r1.buf;
+
+    let r2 = rb_push(rb, 20);
+    assert_eq(r2.ok, 1);
+    rb = r2.buf;
+
+    assert_eq(rb.count, 2);
+
+    let p1 = rb_pop(rb);
+    assert_eq(p1.ok, 1);
+    assert_eq(p1.value, 10);
+    rb = p1.buf;
+
+    let p2 = rb_pop(rb);
+    assert_eq(p2.ok, 1);
+    assert_eq(p2.value, 20);
+    rb = p2.buf;
+
+    assert_eq(rb.count, 0);
+}
+
+fn test_ring_buffer_full() {
+    let mut rb = rb_new(3);
+    let r1 = rb_push(rb, 1);
+    rb = r1.buf;
+    let r2 = rb_push(rb, 2);
+    rb = r2.buf;
+    let r3 = rb_push(rb, 3);
+    rb = r3.buf;
+
+    assert_eq(rb_is_full(rb), 1);
+
+    let r4 = rb_push(rb, 4);
+    assert_eq(r4.ok, 0);  // buffer full
+}
+
+fn test_ring_buffer_wraparound() {
+    let mut rb = rb_new(3);
+    // Fill
+    let r1 = rb_push(rb, 10);
+    rb = r1.buf;
+    let r2 = rb_push(rb, 20);
+    rb = r2.buf;
+    let r3 = rb_push(rb, 30);
+    rb = r3.buf;
+
+    // Remove one
+    let p1 = rb_pop(rb);
+    assert_eq(p1.value, 10);
+    rb = p1.buf;
+
+    // Add one more (wraps around)
+    let r4 = rb_push(rb, 40);
+    assert_eq(r4.ok, 1);
+    rb = r4.buf;
+
+    // Pop all
+    let p2 = rb_pop(rb);
+    assert_eq(p2.value, 20);
+    let p3 = rb_pop(p2.buf);
+    assert_eq(p3.value, 30);
+    let p4 = rb_pop(p3.buf);
+    assert_eq(p4.value, 40);
+}
+
+fn test_alternating_produce_consume() {
+    // Produce one, consume one, repeat
+    let mut state = pc_new(4);
+    let mut i = 0;
+    while i < 10 {
+        state = pc_produce(state);
+        state = pc_consume(state);
+        i = i + 1;
+    }
+    assert_eq(state.produced, 10);
+    assert_eq(state.consumed, 10);
+    assert_eq(state.produce_blocked, 0);
+    assert_eq(state.consume_blocked, 0);
+    // Sum of consumed = 1+2+3+...+10 = 55
+    assert_eq(state.consumed_sum, 55);
+}
+
+fn test_batch_produce_then_consume() {
+    let mut state = pc_new(4);
+    // Produce 4 items
+    let mut i = 0;
+    while i < 4 {
+        state = pc_produce(state);
+        i = i + 1;
+    }
+    assert_eq(state.produced, 4);
+    assert_eq(state.buf.count, 4);
+
+    // Try producing one more -> blocked
+    state = pc_produce(state);
+    assert_eq(state.produce_blocked, 1);
+    assert_eq(state.produced, 4);
+
+    // Consume all 4
+    i = 0;
+    while i < 4 {
+        state = pc_consume(state);
+        i = i + 1;
+    }
+    assert_eq(state.consumed, 4);
+    assert_eq(state.consumed_sum, 10);  // 1+2+3+4
+
+    // Try consuming one more -> blocked
+    state = pc_consume(state);
+    assert_eq(state.consume_blocked, 1);
+}
+
+fn test_produce_2_consume_1() {
+    // Producer is faster: produce 2, consume 1
+    let mut state = pc_new(4);
+    let mut i = 0;
+    while i < 8 {
+        state = pc_produce(state);
+        state = pc_produce(state);
+        state = pc_consume(state);
+        i = i + 1;
+    }
+    // Should have some produce_blocked events when buffer was full
+    assert(state.produced > 0);
+    assert(state.consumed > 0);
+    assert(state.produced >= state.consumed);
+}
+
+fn test_empty_buffer_consume() {
+    let mut state = pc_new(4);
+    // Try consuming from empty buffer
+    state = pc_consume(state);
+    assert_eq(state.consume_blocked, 1);
+    state = pc_consume(state);
+    assert_eq(state.consume_blocked, 2);
+}
+
+fn test_large_throughput() {
+    // Produce and consume many items with small buffer
+    let mut state = pc_new(2);
+    let mut i = 0;
+    while i < 50 {
+        state = pc_produce(state);
+        if i % 2 == 0 {
+            state = pc_consume(state);
+        }
+        i = i + 1;
+    }
+    // Drain remaining
+    let mut drain = 0;
+    while drain < 10 {
+        state = pc_consume(state);
+        drain = drain + 1;
+    }
+    // Invariant: produced = consumed + items_still_in_buffer
+    assert(state.consumed > 0);
+    assert(state.produced > 0);
+    assert_eq(state.produced, state.consumed + state.buf.count);
+}
+
+fn main() -> Int {
+    test_ring_buffer_basic();
+    test_ring_buffer_full();
+    test_ring_buffer_wraparound();
+    test_alternating_produce_consume();
+    test_batch_produce_then_consume();
+    test_produce_2_consume_1();
+    test_empty_buffer_consume();
+    test_large_throughput();
+    print("[OK] 315_interp_producer_consumer");
+    0
+}

@@ -1,0 +1,37 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+
+fn test_destructuring() {
+    // Tuple destructuring
+    let (a, b) = pair;
+    let (x, y, z) = triple;
+    let (first, .., last) = list;
+
+    // Record destructuring with type name
+    let Person { name, age } = person;
+    let Point { x: px, y: py } = point;
+    let Record { id, .. } = record;
+
+    // Nested destructuring
+    let Shape { point: Point { x, y }, color } = shape;
+    let (a, (b, c)) = nested;
+
+    // Variant destructuring in match
+    match maybe {
+        Some(value) => use(value),
+        None => default()
+    };
+
+    // In function parameters
+    fn process_point(Point { x, y }: Point) -> Int {
+        x + y
+    }
+
+    // In match
+    match data {
+        Data { id: 0, .. } => zero_id(),
+        Data { name: n, .. } => use_name(n),
+        other => fallback(other)
+    };
+}

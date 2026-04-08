@@ -1,0 +1,725 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 50ns per runtime refinement check
+// @tags: refinement, types, verification, performance, micro
+
+/// Refinement Verification Benchmark
+///
+/// Measures the performance of refinement type checking at runtime.
+/// Refinements that cannot be statically verified require runtime checks.
+///
+/// Targets:
+/// - Simple refinements: < 20ns
+/// - Compound refinements: < 50ns
+/// - Range refinements: < 30ns
+/// - Dynamic refinements: < 100ns
+///
+/// Spec reference: docs/detailed/03-type-system.md
+
+module vcs.benchmarks.micro.refinement_check
+
+const WARMUP_ITERATIONS: Int = 100_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Type with non-zero refinement
+type NonZero is Int { value: it != 0 };
+
+/// Type with positive refinement
+type Positive is Int { value: it > 0 };
+
+/// Type with range refinement
+type Percentage is Int { value: it >= 0 && it <= 100 };
+
+/// Type with complex refinement
+type ValidAge is Int { value: it >= 0 && it <= 150 };
+
+/// Type with modular refinement
+type Even is Int { value: it % 2 == 0 };
+
+/// Compound refinement
+type PositiveEven is Int { value: it > 0 && it % 2 == 0 };
+
+/// Dependent refinement type
+type BoundedIndex<N: meta Int> is Int { value: it >= 0 && it < N };
+
+fn main() {
+    let results = BenchmarkResults.new("Refinement Verification Performance");
+
+    // Simple refinement checks
+    results.add(benchmark_non_zero_check());
+    results.add(benchmark_positive_check());
+    results.add(benchmark_even_check());
+
+    // Range refinement checks
+    results.add(benchmark_percentage_check());
+    results.add(benchmark_valid_age_check());
+    results.add(benchmark_range_check());
+
+    // Compound refinements
+    results.add(benchmark_positive_even_check());
+    results.add(benchmark_multiple_constraints());
+
+    // Refinement in function parameters
+    results.add(benchmark_refinement_parameter());
+    results.add(benchmark_refinement_return());
+
+    // Dependent refinements
+    results.add(benchmark_bounded_index());
+    results.add(benchmark_length_dependent());
+
+    // Runtime vs static
+    results.add(benchmark_static_elimination());
+    results.add(benchmark_dynamic_check());
+
+    // Real-world patterns
+    results.add(benchmark_division_safety());
+    results.add(benchmark_array_bounds_refinement());
+
+    results.report();
+    assert(results.all_pass(), "Refinement check performance below target");
+}
+
+/// Non-zero refinement check
+fn benchmark_non_zero_check() -> BenchmarkResult {
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 1..=BENCHMARK_ITERATIONS {
+        // Runtime check that i != 0
+        if let Some(nz) = NonZero.try_from(i) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "non_zero_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 15.0,
+        passed: per_check_ns < 15.0,
+    }
+}
+
+/// Positive refinement check
+fn benchmark_positive_check() -> BenchmarkResult {
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 1..=BENCHMARK_ITERATIONS {
+        if let Some(pos) = Positive.try_from(i) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "positive_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 15.0,
+        passed: per_check_ns < 15.0,
+    }
+}
+
+/// Even number refinement check
+fn benchmark_even_check() -> BenchmarkResult {
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        if let Some(even) = Even.try_from(i * 2) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "even_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 20.0,
+        passed: per_check_ns < 20.0,
+    }
+}
+
+/// Percentage range check (0..=100)
+fn benchmark_percentage_check() -> BenchmarkResult {
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let value = i % 101;
+        if let Some(pct) = Percentage.try_from(value) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "percentage_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 25.0,
+        passed: per_check_ns < 25.0,
+    }
+}
+
+/// Valid age range check (0..=150)
+fn benchmark_valid_age_check() -> BenchmarkResult {
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let value = i % 151;
+        if let Some(age) = ValidAge.try_from(value) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "valid_age_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 25.0,
+        passed: per_check_ns < 25.0,
+    }
+}
+
+/// Generic range check
+fn benchmark_range_check() -> BenchmarkResult {
+    type InRange is Int { value: it >= 10 && it <= 1000 };
+
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let value = (i % 1100) + 1;
+        if let Some(_) = InRange.try_from(value) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "range_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 30.0,
+        passed: per_check_ns < 30.0,
+    }
+}
+
+/// Compound refinement (positive AND even)
+fn benchmark_positive_even_check() -> BenchmarkResult {
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 1..=BENCHMARK_ITERATIONS {
+        if let Some(_) = PositiveEven.try_from(i * 2) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "positive_even_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 35.0,
+        passed: per_check_ns < 35.0,
+    }
+}
+
+/// Multiple independent constraints
+fn benchmark_multiple_constraints() -> BenchmarkResult {
+    type Constrained is Int {
+        value: it > 0 && it < 1000 && it % 3 == 0 && it % 5 != 0
+    };
+
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 1..=BENCHMARK_ITERATIONS {
+        let value = (i % 999) + 1;
+        if let Some(_) = Constrained.try_from(value) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "multiple_constraints",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 50.0,
+        passed: per_check_ns < 50.0,
+    }
+}
+
+/// Refinement as function parameter
+fn benchmark_refinement_parameter() -> BenchmarkResult {
+    fn process_positive(x: Positive) -> Int {
+        x.value() * 2
+    }
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 1..=BENCHMARK_ITERATIONS {
+        if let Some(pos) = Positive.try_from(i) {
+            sum += process_positive(pos);
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "refinement_parameter",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 25.0,
+        passed: per_call_ns < 25.0,
+    }
+}
+
+/// Refinement as function return
+fn benchmark_refinement_return() -> BenchmarkResult {
+    fn make_positive(x: Int) -> Maybe<Positive> {
+        Positive.try_from(x)
+    }
+
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 1..=BENCHMARK_ITERATIONS {
+        if let Some(_) = make_positive(i) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "refinement_return",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 25.0,
+        passed: per_call_ns < 25.0,
+    }
+}
+
+/// Bounded index (dependent on array length)
+fn benchmark_bounded_index() -> BenchmarkResult {
+    const ARRAY_SIZE: Int = 100;
+
+    let array: [Int; ARRAY_SIZE] = [0; ARRAY_SIZE];
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let idx = i % ARRAY_SIZE;
+        if let Some(bounded) = BoundedIndex<ARRAY_SIZE>.try_from(idx) {
+            sum += array[bounded.value()];
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "bounded_index",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 30.0,
+        passed: per_check_ns < 30.0,
+    }
+}
+
+/// Length-dependent refinement
+fn benchmark_length_dependent() -> BenchmarkResult {
+    type ValidIndex is Int where value { 0 <= value && value < len };
+
+    fn get_element<T>(list: &List<T>, idx: ValidIndex) -> &T {
+        &list[idx.value()]
+    }
+
+    let list: List<Int> = (0..100).collect();
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let idx = i % 100;
+        // Bounds check is part of ValidIndex construction
+        sum += list[idx];
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_access_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "length_dependent",
+        metric: "ns/access",
+        value: per_access_ns,
+        target: 25.0,
+        passed: per_access_ns < 25.0,
+    }
+}
+
+/// Static refinement elimination
+fn benchmark_static_elimination() -> BenchmarkResult {
+    // Compiler should prove this is always positive
+    fn always_positive() -> Positive {
+        // 42 is a constant, compiler knows it's > 0
+        Positive.from_unchecked(42)
+    }
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        sum += always_positive().value();
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_call_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Static elimination should result in near-zero overhead
+    BenchmarkResult {
+        name: "static_elimination",
+        metric: "ns/call",
+        value: per_call_ns,
+        target: 5.0,
+        passed: per_call_ns < 5.0,
+    }
+}
+
+/// Dynamic refinement check (user input simulation)
+fn benchmark_dynamic_check() -> BenchmarkResult {
+    fn validate_user_input(input: Int) -> Result<Positive, Text> {
+        Positive.try_from(input)
+            .ok_or("Input must be positive".to_text())
+    }
+
+    let mut rng = Rng.with_seed(12345);
+    let mut success_count: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let input = rng.next_int() % 200 - 100;  // Range: -100 to 99
+        if let Ok(_) = validate_user_input(input) {
+            success_count += 1;
+        }
+    }
+    black_box(success_count);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_check_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "dynamic_check",
+        metric: "ns/check",
+        value: per_check_ns,
+        target: 50.0,
+        passed: per_check_ns < 50.0,
+    }
+}
+
+/// Division safety with refinement
+fn benchmark_division_safety() -> BenchmarkResult {
+    fn safe_divide(numerator: Int, denominator: NonZero) -> Int {
+        numerator / denominator.value()
+    }
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 1..=BENCHMARK_ITERATIONS {
+        if let Some(nz) = NonZero.try_from(i) {
+            sum += safe_divide(100, nz);
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "division_safety",
+        metric: "ns/op",
+        value: per_op_ns,
+        target: 30.0,
+        passed: per_op_ns < 30.0,
+    }
+}
+
+/// Array bounds with refinement
+fn benchmark_array_bounds_refinement() -> BenchmarkResult {
+    const SIZE: Int = 1000;
+    let array: [Int; SIZE] = [0; SIZE];
+
+    let mut sum: Int = 0;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        let idx = i % SIZE;
+        if let Some(bounded) = BoundedIndex<SIZE>.try_from(idx) {
+            // No bounds check needed - refinement guarantees safety
+            sum += unsafe { array.get_unchecked(bounded.value()) };
+        }
+    }
+    black_box(sum);
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_access_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "array_bounds_refinement",
+        metric: "ns/access",
+        value: per_access_ns,
+        target: 25.0,
+        passed: per_access_ns < 25.0,
+    }
+}
+
+// Refinement type implementations
+implement NonZero {
+    fn try_from(value: Int) -> Maybe<Self> {
+        if value != 0 {
+            Some(unsafe { Self.from_unchecked(value) })
+        } else {
+            None
+        }
+    }
+
+    fn from_unchecked(value: Int) -> Self {
+        // SAFETY: Caller guarantees value != 0
+        unsafe { transmute(value) }
+    }
+
+    fn value(&self) -> Int {
+        *self as Int
+    }
+}
+
+implement Positive {
+    fn try_from(value: Int) -> Maybe<Self> {
+        if value > 0 {
+            Some(unsafe { Self.from_unchecked(value) })
+        } else {
+            None
+        }
+    }
+
+    fn from_unchecked(value: Int) -> Self {
+        unsafe { transmute(value) }
+    }
+
+    fn value(&self) -> Int {
+        *self as Int
+    }
+}
+
+implement Percentage {
+    fn try_from(value: Int) -> Maybe<Self> {
+        if value >= 0 && value <= 100 {
+            Some(unsafe { transmute(value) })
+        } else {
+            None
+        }
+    }
+}
+
+implement ValidAge {
+    fn try_from(value: Int) -> Maybe<Self> {
+        if value >= 0 && value <= 150 {
+            Some(unsafe { transmute(value) })
+        } else {
+            None
+        }
+    }
+}
+
+implement Even {
+    fn try_from(value: Int) -> Maybe<Self> {
+        if value % 2 == 0 {
+            Some(unsafe { transmute(value) })
+        } else {
+            None
+        }
+    }
+}
+
+implement PositiveEven {
+    fn try_from(value: Int) -> Maybe<Self> {
+        if value > 0 && value % 2 == 0 {
+            Some(unsafe { transmute(value) })
+        } else {
+            None
+        }
+    }
+}
+
+implement<N: meta Int> BoundedIndex<N> {
+    fn try_from(value: Int) -> Maybe<Self> {
+        if value >= 0 && value < N {
+            Some(unsafe { transmute(value) })
+        } else {
+            None
+        }
+    }
+
+    fn value(&self) -> Int {
+        *self as Int
+    }
+}
+
+// Benchmark infrastructure
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(&self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results.iter() {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}
+
+@extern("verum_bench")
+fn black_box<T>(value: T) -> T;
+
+@extern("verum_intrinsics")
+unsafe fn transmute<T, U>(value: T) -> U;
+
+type Timer is {
+    start_time: u64,
+};
+
+implement Timer {
+    fn new() -> Self {
+        Self { start_time: 0 }
+    }
+
+    fn start(&mut self) {
+        self.start_time = clock_ns();
+    }
+
+    fn elapsed_ns(&self) -> u64 {
+        clock_ns() - self.start_time
+    }
+}
+
+@extern("verum_time")
+fn clock_ns() -> u64;
+
+type Rng is {
+    state: u64,
+};
+
+implement Rng {
+    fn with_seed(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_int(&mut self) -> Int {
+        self.state = self.state * 6364136223846793005 + 1442695040888963407;
+        (self.state >> 32) as Int
+    }
+}

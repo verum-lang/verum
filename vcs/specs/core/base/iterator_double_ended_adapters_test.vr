@@ -1,0 +1,605 @@
+// =============================================================================
+// iterator_double_ended_adapters_test.vr - DoubleEndedIterator for adapters
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, iterator, double_ended, adapters, size_hint, fused
+// @description: Tests for DoubleEndedIterator on adapter types (MappedIter,
+//               FilterIter, FilterMapIter, ChainIter, InspectIter, FuseIter,
+//               Cloned), improved size_hint, and FusedIterator markers.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering};
+mount core.collections.list.{List};
+
+// =============================================================================
+// SECTION 1: MappedIter DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_mapped_next_back_basic() {
+    let mut iter = range(1, 6).map(|x| x * 2);
+    // range(1,6) = 1,2,3,4,5 => mapped: 2,4,6,8,10
+    assert_eq(iter.next_back(), Some(10));
+    assert_eq(iter.next_back(), Some(8));
+    assert_eq(iter.next_back(), Some(6));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_mapped_next_back_empty() {
+    let mut iter = range(0, 0).map(|x| x + 1);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_mapped_mixed_front_back() {
+    let mut iter = range(0, 5).map(|x| x * 10);
+    // 0,10,20,30,40
+    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.next_back(), Some(40));
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next_back(), Some(30));
+    assert_eq(iter.next(), Some(20));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_mapped_rfold() {
+    // rfold on mapped: fold from back
+    let result = range(1, 4).map(|x| x * 10).rfold(0, |acc, x| acc + x);
+    // 10,20,30 from back: 0 + 30 + 20 + 10 = 60
+    assert_eq(result, 60);
+}
+
+// =============================================================================
+// SECTION 2: FilterIter DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_filter_next_back_basic() {
+    let mut iter = range(1, 10).filter(|x| *x % 2 == 0);
+    // evens: 2,4,6,8
+    assert_eq(iter.next_back(), Some(8));
+    assert_eq(iter.next_back(), Some(6));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_filter_next_back_none_match() {
+    let mut iter = range(0, 5).filter(|x| *x > 100);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_filter_mixed_front_back() {
+    let mut iter = range(1, 10).filter(|x| *x % 2 == 0);
+    // evens: 2,4,6,8
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next_back(), Some(8));
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next_back(), Some(6));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_filter_next_back_single_match() {
+    let mut iter = range(0, 5).filter(|x| *x == 3);
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_filter_rfold() {
+    let result = range(1, 6).filter(|x| *x % 2 != 0).rfold(0, |acc, x| acc * 10 + x);
+    // odds: 1,3,5 from back: ((0*10+5)*10+3)*10+1 = 531
+    assert_eq(result, 531);
+}
+
+@test
+fn test_filter_size_hint() {
+    let iter = range(0, 10).filter(|x| *x > 5);
+    let hint = iter.size_hint();
+    // Filter: lower must be 0 (may reject all), upper is inner upper
+    assert_eq(hint.0, 0);
+    assert_eq(hint.1, Some(10));
+}
+
+// =============================================================================
+// SECTION 3: FilterMapIter DoubleEndedIterator
+// =============================================================================
+
+fn even_double(x: Int) -> Maybe<Int> {
+    if x % 2 == 0 {
+        Some(x * 2)
+    } else {
+        None
+    }
+}
+
+@test
+fn test_filter_map_next_back_basic() {
+    let mut iter = range(1, 8).filter_map(even_double);
+    // 1..8: evens are 2,4,6 => doubled: 4,8,12
+    assert_eq(iter.next_back(), Some(12));
+    assert_eq(iter.next_back(), Some(8));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_filter_map_next_back_empty() {
+    let mut iter = range(0, 0).filter_map(even_double);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_filter_map_mixed_front_back() {
+    let mut iter = range(1, 8).filter_map(even_double);
+    // results: 4,8,12
+    assert_eq(iter.next(), Some(4));
+    assert_eq(iter.next_back(), Some(12));
+    assert_eq(iter.next(), Some(8));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_filter_map_rfold() {
+    let result = range(1, 8).filter_map(even_double).rfold(0, |acc, x| acc + x);
+    // 4 + 8 + 12 = 24 (order doesn't matter for sum)
+    assert_eq(result, 24);
+}
+
+// =============================================================================
+// SECTION 4: ChainIter DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_chain_next_back_basic() {
+    let mut iter = range(1, 4).chain(range(10, 13));
+    // chain: 1,2,3,10,11,12
+    assert_eq(iter.next_back(), Some(12));
+    assert_eq(iter.next_back(), Some(11));
+    assert_eq(iter.next_back(), Some(10));
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), Some(1));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_chain_next_back_first_empty() {
+    let mut iter = range(0, 0).chain(range(1, 4));
+    // chain: 1,2,3
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), Some(1));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_chain_next_back_second_empty() {
+    let mut iter = range(1, 4).chain(range(0, 0));
+    // chain: 1,2,3
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), Some(1));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_chain_mixed_front_back() {
+    let mut iter = range(1, 4).chain(range(10, 13));
+    // chain: 1,2,3,10,11,12
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next_back(), Some(12));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next_back(), Some(11));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next_back(), Some(10));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_chain_rfold() {
+    let result = range(1, 3).chain(range(10, 12)).rfold(0, |acc, x| acc * 100 + x);
+    // 1,2,10,11 from back: ((0*100+11)*100+10)*100+2)*100+1 = 11100201
+    assert_eq(result, 11100201);
+}
+
+// =============================================================================
+// SECTION 5: InspectIter DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_inspect_next_back_basic() {
+    let mut count = 0;
+    let mut iter = range(1, 6).inspect(|_x| { count = count + 1; });
+    assert_eq(iter.next_back(), Some(5));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(count, 3);
+}
+
+@test
+fn test_inspect_mixed_front_back() {
+    let mut count = 0;
+    let mut iter = range(1, 4).inspect(|_x| { count = count + 1; });
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(count, 3);
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_inspect_rfold() {
+    let result = range(1, 4).inspect(|_x| {}).rfold(0, |acc, x| acc + x);
+    assert_eq(result, 6); // 3 + 2 + 1
+}
+
+// =============================================================================
+// SECTION 6: FuseIter DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_fuse_next_back_basic() {
+    let mut iter = range(1, 4).fuse();
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), Some(1));
+    assert_eq(iter.next_back(), None);
+    // Fused: stays None
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_fuse_next_back_empty() {
+    let mut iter = range(0, 0).fuse();
+    assert_eq(iter.next_back(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_fuse_mixed_front_back() {
+    let mut iter = range(1, 5).fuse();
+    // 1,2,3,4
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+// =============================================================================
+// SECTION 7: Cloned DoubleEndedIterator
+// =============================================================================
+
+@test
+fn test_cloned_next_back_basic() {
+    let data = [10, 20, 30, 40, 50];
+    let mut iter = data.iter().cloned();
+    assert_eq(iter.next_back(), Some(50));
+    assert_eq(iter.next_back(), Some(40));
+    assert_eq(iter.next_back(), Some(30));
+}
+
+@test
+fn test_cloned_mixed_front_back() {
+    let data = [1, 2, 3, 4];
+    let mut iter = data.iter().cloned();
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next_back(), Some(3));
+    assert_eq(iter.next(), None);
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_cloned_rfold() {
+    let data = [1, 2, 3];
+    let result = data.iter().cloned().rfold(0, |acc, x| acc * 10 + x);
+    // From back: 0*10+3=3, 3*10+2=32, 32*10+1=321
+    assert_eq(result, 321);
+}
+
+// =============================================================================
+// SECTION 8: Adapter Composition (double-ended chains)
+// =============================================================================
+
+@test
+fn test_map_filter_next_back() {
+    // map then filter — both should support next_back
+    let mut iter = range(1, 10).map(|x| x * 2).filter(|x| *x > 10);
+    // range: 1..10, mapped: 2,4,6,8,10,12,14,16,18
+    // filtered (>10): 12,14,16,18
+    assert_eq(iter.next_back(), Some(18));
+    assert_eq(iter.next_back(), Some(16));
+    assert_eq(iter.next(), Some(12));
+    assert_eq(iter.next_back(), Some(14));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_filter_map_chain_composition() {
+    // filter on first, chain with another range, read from back
+    let mut iter = range(1, 6).filter(|x| *x % 2 == 0).chain(range(10, 12));
+    // filtered first: 2,4 then chain: 10,11 => total: 2,4,10,11
+    assert_eq(iter.next_back(), Some(11));
+    assert_eq(iter.next_back(), Some(10));
+    assert_eq(iter.next_back(), Some(4));
+    assert_eq(iter.next_back(), Some(2));
+    assert_eq(iter.next_back(), None);
+}
+
+@test
+fn test_inspect_map_next_back() {
+    let mut seen = 0;
+    let mut iter = range(1, 4).inspect(|_x| { seen = seen + 1; }).map(|x| x * 100);
+    // 100, 200, 300
+    assert_eq(iter.next_back(), Some(300));
+    assert_eq(iter.next(), Some(100));
+    assert_eq(iter.next_back(), Some(200));
+    assert_eq(seen, 3);
+}
+
+@test
+fn test_fuse_map_next_back() {
+    let mut iter = range(1, 4).fuse().map(|x| x + 10);
+    // 11, 12, 13
+    assert_eq(iter.next_back(), Some(13));
+    assert_eq(iter.next(), Some(11));
+    assert_eq(iter.next_back(), Some(12));
+    assert_eq(iter.next(), None);
+}
+
+// =============================================================================
+// SECTION 9: Improved size_hint Tests
+// =============================================================================
+
+@test
+fn test_filter_size_hint_bounds() {
+    let iter = range(0, 100).filter(|x| *x > 50);
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 0);
+    assert_eq(hint.1, Some(100));
+}
+
+@test
+fn test_skip_size_hint() {
+    let iter = range(0, 10).skip(3);
+    let hint = iter.size_hint();
+    // Inner has (10, Some(10)), skip 3: (7, Some(7))
+    assert_eq(hint.0, 7);
+    assert_eq(hint.1, Some(7));
+}
+
+@test
+fn test_skip_size_hint_skip_more_than_available() {
+    let iter = range(0, 3).skip(10);
+    let hint = iter.size_hint();
+    // Inner has (3, Some(3)), skip 10: (0, Some(0))
+    assert_eq(hint.0, 0);
+    assert_eq(hint.1, Some(0));
+}
+
+@test
+fn test_peekable_size_hint_without_peek() {
+    let iter = range(0, 5).peekable();
+    let hint = iter.size_hint();
+    // Same as inner: (5, Some(5))
+    assert_eq(hint.0, 5);
+    assert_eq(hint.1, Some(5));
+}
+
+@test
+fn test_peekable_size_hint_after_peek() {
+    let mut iter = range(0, 5).peekable();
+    iter.peek();
+    let hint = iter.size_hint();
+    // After peek: inner has advanced by 1 but peeked holds it
+    // Inner: (4, Some(4)) + 1 for peeked = (5, Some(5))
+    assert_eq(hint.0, 5);
+    assert_eq(hint.1, Some(5));
+}
+
+@test
+fn test_zip_longest_size_hint() {
+    let iter = range(0, 10).zip_longest(range(0, 5));
+    let hint = iter.size_hint();
+    // ZipLongest: max of both = (10, Some(10))
+    assert_eq(hint.0, 10);
+    assert_eq(hint.1, Some(10));
+}
+
+@test
+fn test_intersperse_size_hint() {
+    let iter = range(0, 5).intersperse(99);
+    let hint = iter.size_hint();
+    // 5 elements => 5 + 4 separators = 9
+    // lower: 2*5 - 1 = 9, upper: 2*5 - 1 = 9
+    assert_eq(hint.0, 9);
+    assert_eq(hint.1, Some(9));
+}
+
+@test
+fn test_intersperse_size_hint_empty() {
+    let iter = range(0, 0).intersperse(99);
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 0);
+    assert_eq(hint.1, Some(0));
+}
+
+@test
+fn test_intersperse_size_hint_single() {
+    let iter = range(0, 1).intersperse(99);
+    let hint = iter.size_hint();
+    // 1 element, 0 separators = 1
+    assert_eq(hint.0, 1);
+    assert_eq(hint.1, Some(1));
+}
+
+@test
+fn test_chunks_size_hint() {
+    let iter = range(0, 10).chunks(3);
+    let hint = iter.size_hint();
+    // 10 / 3 = 3 full + 1 partial = 4 chunks
+    // lower: ceil(10/3) = 4, upper: ceil(10/3) = 4
+    assert_eq(hint.0, 4);
+    assert_eq(hint.1, Some(4));
+}
+
+@test
+fn test_chunks_size_hint_exact() {
+    let iter = range(0, 9).chunks(3);
+    let hint = iter.size_hint();
+    assert_eq(hint.0, 3);
+    assert_eq(hint.1, Some(3));
+}
+
+@test
+fn test_windows_size_hint() {
+    let iter = range(0, 10).windows(3);
+    let hint = iter.size_hint();
+    // 10 elements, window size 3: 10 - 3 + 1 = 8 windows
+    assert_eq(hint.0, 8);
+    assert_eq(hint.1, Some(8));
+}
+
+@test
+fn test_windows_size_hint_too_few() {
+    let iter = range(0, 2).windows(5);
+    let hint = iter.size_hint();
+    // 2 elements < 5 window size: 0 windows
+    assert_eq(hint.0, 0);
+    assert_eq(hint.1, Some(0));
+}
+
+// =============================================================================
+// SECTION 10: FusedIterator Marker Tests
+// =============================================================================
+
+// These tests verify that FusedIterator is implemented as a marker protocol.
+// Since it's a marker with no methods, we test that the types are recognized
+// by the type checker.
+
+fn accepts_fused<I: FusedIterator>(iter: I) -> Bool {
+    true
+}
+
+@test
+fn test_fused_fuse_iter() {
+    let iter = range(0, 5).fuse();
+    assert(accepts_fused(iter));
+}
+
+@test
+fn test_fused_empty() {
+    let iter: Empty<Int> = Empty { _marker: () };
+    assert(accepts_fused(iter));
+}
+
+@test
+fn test_fused_once() {
+    let iter = once(42);
+    assert(accepts_fused(iter));
+}
+
+@test
+fn test_fused_repeat_n() {
+    let iter = repeat_n(7, 3);
+    assert(accepts_fused(iter));
+}
+
+@test
+fn test_fused_mapped() {
+    let iter = range(0, 5).fuse().map(|x| x * 2);
+    assert(accepts_fused(iter));
+}
+
+@test
+fn test_fused_filtered() {
+    let iter = range(0, 5).fuse().filter(|x| *x > 2);
+    assert(accepts_fused(iter));
+}
+
+@test
+fn test_fused_enumerate() {
+    let iter = range(0, 5).fuse().enumerate();
+    assert(accepts_fused(iter));
+}
+
+@test
+fn test_fused_chain() {
+    let iter = range(0, 3).fuse().chain(range(3, 6).fuse());
+    assert(accepts_fused(iter));
+}
+
+// =============================================================================
+// SECTION 11: Rev adapter with new DoubleEndedIterator adapters
+// =============================================================================
+
+@test
+fn test_rev_mapped() {
+    let mut iter = range(1, 4).map(|x| x * 10).rev();
+    // 10,20,30 reversed: 30,20,10
+    assert_eq(iter.next(), Some(30));
+    assert_eq(iter.next(), Some(20));
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_rev_filtered() {
+    let mut iter = range(1, 10).filter(|x| *x % 3 == 0).rev();
+    // multiples of 3: 3,6,9 reversed: 9,6,3
+    assert_eq(iter.next(), Some(9));
+    assert_eq(iter.next(), Some(6));
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_rev_chain() {
+    let mut iter = range(1, 3).chain(range(10, 12)).rev();
+    // 1,2,10,11 reversed: 11,10,2,1
+    assert_eq(iter.next(), Some(11));
+    assert_eq(iter.next(), Some(10));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), None);
+}
+
+@test
+fn test_rev_inspect() {
+    let mut count = 0;
+    let mut iter = range(1, 4).inspect(|_x| { count = count + 1; }).rev();
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(count, 3);
+}
+
+@test
+fn test_rev_cloned() {
+    let data = [1, 2, 3];
+    let mut iter = data.iter().cloned().rev();
+    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.next(), Some(2));
+    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), None);
+}

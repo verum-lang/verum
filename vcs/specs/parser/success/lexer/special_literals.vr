@@ -1,0 +1,172 @@
+// @test: parse-pass
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, special, hex-color
+// @description: Tests for special literal parsing per grammar/verum.ebnf
+//
+// Grammar productions tested:
+//   hex_color_literal = '#' , hex_digit , hex_digit , hex_digit
+//                     , hex_digit , hex_digit , hex_digit
+//                     , [ hex_digit , hex_digit ]
+//
+// Note: @literal and $literal are only valid in specific contexts (attributes and macros),
+// not as general expression values. Tests for those are in separate files.
+
+// ============================================================================
+// HEX COLOR LITERALS (#RRGGBB and #RRGGBBAA)
+// ============================================================================
+
+fn test_hex_color_6_digit() {
+    // Basic 6-digit hex colors
+    let black = #000000;
+    let white = #FFFFFF;
+    let red = #FF0000;
+    let green = #00FF00;
+    let blue = #0000FF;
+
+    // Common web colors
+    let yellow = #FFFF00;
+    let cyan = #00FFFF;
+    let magenta = #FF00FF;
+    let orange = #FFA500;
+    let purple = #800080;
+    let pink = #FFC0CB;
+    let gray = #808080;
+    let navy = #000080;
+    let teal = #008080;
+    let olive = #808000;
+    let maroon = #800000;
+
+    // Mixed case
+    let color_lower = #abcdef;
+    let color_upper = #ABCDEF;
+    let color_mixed = #AbCdEf;
+    let color_mixed2 = #aBcDeF;
+}
+
+fn test_hex_color_8_digit() {
+    // 8-digit hex colors with alpha
+    let transparent = #00000000;
+    let opaque_black = #000000FF;
+    let opaque_white = #FFFFFFFF;
+
+    // Semi-transparent colors
+    let red_50 = #FF000080;
+    let green_75 = #00FF00C0;
+    let blue_25 = #0000FF40;
+
+    // Various alpha values
+    let alpha_00 = #FF000000;
+    let alpha_10 = #FF00001A;
+    let alpha_20 = #FF000033;
+    let alpha_30 = #FF00004D;
+    let alpha_40 = #FF000066;
+    let alpha_50 = #FF000080;
+    let alpha_60 = #FF000099;
+    let alpha_70 = #FF0000B3;
+    let alpha_80 = #FF0000CC;
+    let alpha_90 = #FF0000E6;
+    let alpha_FF = #FF0000FF;
+}
+
+fn test_hex_color_edge_cases() {
+    // Minimum value
+    let min = #000000;
+    let min_alpha = #00000000;
+
+    // Maximum value
+    let max = #FFFFFF;
+    let max_alpha = #FFFFFFFF;
+
+    // Single digit patterns
+    let ones = #111111;
+    let twos = #222222;
+    let threes = #333333;
+    let fours = #444444;
+    let fives = #555555;
+    let sixes = #666666;
+    let sevens = #777777;
+    let eights = #888888;
+    let nines = #999999;
+    let ayes = #AAAAAA;
+    let bees = #BBBBBB;
+    let cees = #CCCCCC;
+    let dees = #DDDDDD;
+    let ees = #EEEEEE;
+    let effs = #FFFFFF;
+}
+
+fn test_hex_color_usage() {
+    // In assignments
+    let primary_color = #3498DB;
+    let secondary_color = #2ECC71;
+    let accent_color = #E74C3C;
+
+    // In array
+    let palette = [#FF0000, #00FF00, #0000FF];
+
+    // In expressions
+    let background = #F5F5F5;
+    let foreground = #333333;
+}
+
+// ============================================================================
+// BOOLEAN LITERALS
+// ============================================================================
+
+fn test_bool_literals() {
+    // Basic booleans
+    let t = true;
+    let f = false;
+
+    // With type annotation
+    let t_typed: Bool = true;
+    let f_typed: Bool = false;
+
+    // In expressions
+    let and_result = true && false;
+    let or_result = true || false;
+    let not_result = !true;
+
+    // In control flow
+    if true {
+        let x = 1;
+    }
+
+    // In arrays
+    let bools = [true, false, true, false];
+
+    // In tuples
+    let pair = (true, false);
+}
+
+// ============================================================================
+// BYTE CHARACTER LITERALS
+// ============================================================================
+
+fn test_byte_char_literals() {
+    // Simple byte characters
+    let a = b'a';
+    let z = b'z';
+    let A = b'A';
+    let Z = b'Z';
+    let zero = b'0';
+    let nine = b'9';
+    let space = b' ';
+    let underscore = b'_';
+
+    // Escape sequences in byte chars
+    let newline = b'\n';
+    let carriage = b'\r';
+    let tab = b'\t';
+    let null = b'\0';
+    let backslash = b'\\';
+    // Note: b'\'' (escaped single quote in byte char) is not yet supported
+
+    // Hex escapes in byte chars
+    let hex_00 = b'\x00';
+    let hex_41 = b'\x41';  // 'A'
+    let hex_7F = b'\x7F';
+    let hex_FF = b'\xFF';
+}

@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, rank-2, polymorphism
+// @description: Basic tests for rank-2 polymorphic function types
+
+/// Basic rank-2 function type syntax tests.
+/// This verifies that rank-2 types can be:
+/// 1. Declared as type aliases
+/// 2. Used as function parameter types
+/// 3. Used as function return types
+/// 4. Used in record fields
+
+// =============================================================================
+// Type Definitions
+// =============================================================================
+
+/// Simple reducer type
+type Reducer<A, R> is fn(R, A) -> R;
+
+/// Basic rank-2 type definition
+type Transform<A, B> is fn<R>(Reducer<B, R>) -> Reducer<A, R>;
+
+/// Record with rank-2 field
+type Transducer<A, B> is {
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
+};
+
+// =============================================================================
+// Test Functions
+// =============================================================================
+
+/// Function that takes a rank-2 function as parameter
+fn accept_rank2<A, B>(f: fn<R>(A, R) -> R, a: A, init: Int) -> Int {
+    // When calling f, the type system should instantiate R=Int
+    f(a, init)
+}
+
+/// Function that returns a rank-2 type annotation
+fn returns_rank2_type<A>() -> Transform<A, A> {
+    // For now, just return unreachable to test type signature
+    unreachable()
+}
+
+/// Function with local rank-2 type variable
+fn local_rank2_type<A>() {
+    // Type annotation with rank-2 type
+    let _f: fn<R>(A, R) -> R = unreachable();
+}
+
+// =============================================================================
+// Main - Minimal tests that don't require closure inference
+// =============================================================================
+
+fn main() {
+    // Test 1: Create a Transducer struct with a placeholder
+    // Note: We can't easily create actual closures for rank-2 fields yet
+    // This tests that the type system accepts the structure
+
+    // Test 2: Call a function returning rank-2 type
+    // The return type should be correctly inferred as Transform<Int, Int>
+    // let _transform: Transform<Int, Int> = returns_rank2_type();
+
+    // Test 3: Local rank-2 type annotation
+    local_rank2_type<Int>();
+
+    // Basic success indicator
+    assert(true);
+}

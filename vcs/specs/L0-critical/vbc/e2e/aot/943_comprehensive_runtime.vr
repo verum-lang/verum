@@ -1,0 +1,715 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, integration, runtime, comprehensive
+// @expected-exit: 0
+
+// Comprehensive integration test exercising ALL major Verum runtime mechanisms
+// in a single program: collections, strings, HOF, threading, channels, mutex,
+// file I/O, generators, pattern matching, and timing.
+
+// ---- Sum types for pattern matching ----
+type Shape is Circle(Int) | Rect(Int, Int) | Triangle(Int, Int);
+
+type Priority is Low | Medium | High | Critical;
+
+// ---- Intrinsic stubs for raw APIs ----
+fn __mutex_new_raw() -> Int { 0 }
+fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
+fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
+fn __time_monotonic_nanos_raw() -> Int { 0 }
+
+fn file_read_all(path: Text) -> Text { "" }
+fn file_write_all(path: Text, data: Text) -> Int { 0 }
+fn file_exists(path: Text) -> Int { 0 }
+fn file_delete(path: Text) -> Int { 0 }
+
+// ---- Higher-order function helpers ----
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn map_list(nums: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while (i < nums.len()) {
+        result.push(f(nums[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(nums: List<Int>, pred: fn(Int) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while (i < nums.len()) {
+        if (pred(nums[i]) != 0) {
+            result.push(nums[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(nums: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while (i < nums.len()) {
+        acc = f(acc, nums[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+// ---- Pattern matching helpers ----
+fn shape_area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rect(w, h) => w * h,
+        Triangle(b, h) => b * h / 2,
+    }
+}
+
+fn priority_value(p: Priority) -> Int {
+    match p {
+        Low => 1,
+        Medium => 2,
+        High => 3,
+        Critical => 4,
+    }
+}
+
+// ---- Generators ----
+fn* count_up(n: Int) -> Int {
+    let mut i = 0;
+    while (i < n) {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn* fibonacci_gen(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while (i < n) {
+        yield a;
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+}
+
+// ---- Thread worker functions ----
+fn compute_partial_sum(start: Int, count: Int) -> Int {
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    acc
+}
+
+fn compute_square(x: Int) -> Int {
+    x * x
+}
+
+fn test_file_io() -> Int {
+    let fpath = "/tmp/verum_test_943.txt";
+    let fcontent = "Verum comprehensive test!";
+    print(f"fpath='{fpath}' fcontent='{fcontent}'");
+    let wb = file_write_all(fpath, fcontent);
+    if (wb <= 0) {
+        print(f"FAIL 7a: write_all returned {wb}");
+        return 1;
+    }
+    let fread = file_read_all(fpath);
+    if (fread != fcontent) {
+        print(f"FAIL 7b: read='{fread}'");
+        return 1;
+    }
+    let fe = file_exists(fpath);
+    if (fe != 1) {
+        print(f"FAIL 7c: file_exists={fe}");
+        return 1;
+    }
+    let fd = file_delete(fpath);
+    if (fd != 0) {
+        print(f"FAIL 7d: file_delete={fd}");
+        return 1;
+    }
+    let fe2 = file_exists(fpath);
+    if (fe2 != 0) {
+        print(f"FAIL 7e: file_exists after delete={fe2}");
+        return 1;
+    }
+    let fpath2 = "/tmp/verum_test_943b.txt";
+    let num_val = 12345;
+    let fcontent2 = f"value={num_val}";
+    file_write_all(fpath2, fcontent2);
+    let fread2 = file_read_all(fpath2);
+    if (fread2 != fcontent2) {
+        print(f"FAIL 7f: read2='{fread2}'");
+        return 1;
+    }
+    file_delete(fpath2);
+    0
+}
+
+// ---- Main test ----
+fn main() -> Int {
+    // ============================================================
+    // SECTION 1: Collections (List + Map)
+    // ============================================================
+    print("--- Section 1: Collections ---");
+
+    // List push/pop/len/indexing
+    let mut nums: List<Int> = [];
+    nums.push(10);
+    nums.push(20);
+    nums.push(30);
+    nums.push(40);
+    nums.push(50);
+    if (nums.len() != 5) {
+        print(f"FAIL 1a: len={nums.len()}");
+        return 1;
+    }
+    if (nums[0] != 10) {
+        print(f"FAIL 1b: [0]={nums[0]}");
+        return 1;
+    }
+    if (nums[4] != 50) {
+        print(f"FAIL 1c: [4]={nums[4]}");
+        return 1;
+    }
+
+    // List iteration via for-in
+    let mut list_sum = 0;
+    for v in nums {
+        list_sum = list_sum + v;
+    }
+    if (list_sum != 150) {
+        print(f"FAIL 1d: list_sum={list_sum}");
+        return 1;
+    }
+
+    // Map insert/get/contains_key/remove/len
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+    if (m.len() != 3) {
+        print(f"FAIL 1e: map.len={m.len()}");
+        return 1;
+    }
+    let v1 = m.get(2);
+    if (v1 != 200) {
+        print(f"FAIL 1f: map.get(2)={v1}");
+        return 1;
+    }
+    let has_key = m.contains_key(3);
+    if (has_key != 1) {
+        print(f"FAIL 1g: contains_key(3)={has_key}");
+        return 1;
+    }
+    m.remove(2);
+    if (m.len() != 2) {
+        print(f"FAIL 1h: map.len after remove={m.len()}");
+        return 1;
+    }
+    let no_key = m.contains_key(2);
+    if (no_key != 0) {
+        print(f"FAIL 1i: contains_key(2) after remove={no_key}");
+        return 1;
+    }
+
+    print("Section 1: OK");
+
+    // ============================================================
+    // SECTION 2: String Operations
+    // ============================================================
+    print("--- Section 2: Strings ---");
+
+    let greeting = "Hello";
+    let target = "World";
+    let combined = greeting + ", " + target + "!";
+    if (combined != "Hello, World!") {
+        print(f"FAIL 2a: combined='{combined}'");
+        return 1;
+    }
+
+    // f-string interpolation
+    let x_val = 42;
+    let msg = f"x={x_val}";
+    if (msg != "x=42") {
+        print(f"FAIL 2b: msg='{msg}'");
+        return 1;
+    }
+
+    // String comparison
+    let s1 = "abc";
+    let s2 = "abc";
+    let s3 = "xyz";
+    if (s1 != s2) {
+        print("FAIL 2c: s1 != s2");
+        return 1;
+    }
+    if (s1 == s3) {
+        print("FAIL 2d: s1 == s3");
+        return 1;
+    }
+
+    // Multi-part f-string
+    let a_val = 10;
+    let b_val = 20;
+    let report = f"a={a_val}, b={b_val}, sum={a_val + b_val}";
+    if (report != "a=10, b=20, sum=30") {
+        print(f"FAIL 2e: report='{report}'");
+        return 1;
+    }
+
+    print("Section 2: OK");
+
+    // ============================================================
+    // SECTION 3: Higher-Order Functions
+    // ============================================================
+    print("--- Section 3: Higher-Order Functions ---");
+
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // map: double each element
+    let doubled = map_list(data, |x: Int| -> Int { x * 2 });
+    if (doubled.len() != 10) {
+        print(f"FAIL 3a: doubled.len={doubled.len()}");
+        return 1;
+    }
+    if (doubled[0] != 2) {
+        print(f"FAIL 3b: doubled[0]={doubled[0]}");
+        return 1;
+    }
+    if (doubled[9] != 20) {
+        print(f"FAIL 3c: doubled[9]={doubled[9]}");
+        return 1;
+    }
+
+    // filter: keep evens
+    let evens = filter_list(data, |x: Int| -> Int {
+        if (x % 2 == 0) { 1 } else { 0 }
+    });
+    if (evens.len() != 5) {
+        print(f"FAIL 3d: evens.len={evens.len()}");
+        return 1;
+    }
+    if (evens[0] != 2) {
+        print(f"FAIL 3e: evens[0]={evens[0]}");
+        return 1;
+    }
+    if (evens[4] != 10) {
+        print(f"FAIL 3f: evens[4]={evens[4]}");
+        return 1;
+    }
+
+    // fold: sum all
+    let total = fold_list(data, 0, |acc: Int, x: Int| -> Int { acc + x });
+    if (total != 55) {
+        print(f"FAIL 3g: fold sum={total}");
+        return 1;
+    }
+
+    // Closure capturing outer variable
+    let multiplier = 7;
+    let times7 = |x: Int| -> Int { x * multiplier };
+    let r_apply = apply(times7, 6);
+    if (r_apply != 42) {
+        print(f"FAIL 3h: apply(times7, 6)={r_apply}");
+        return 1;
+    }
+
+    // fold: product
+    let product = fold_list([1, 2, 3, 4, 5], 1, |acc: Int, x: Int| -> Int { acc * x });
+    if (product != 120) {
+        print(f"FAIL 3i: fold product={product}");
+        return 1;
+    }
+
+    print("Section 3: OK");
+
+    // ============================================================
+    // SECTION 4: Threading
+    // ============================================================
+    print("--- Section 4: Threading ---");
+
+    // Single thread spawn + await
+    let t1 = spawn compute_square(12);
+    let r1 = t1.await;
+    if (r1 != 144) {
+        print(f"FAIL 4a: compute_square(12)={r1}");
+        return 1;
+    }
+
+    // Multiple concurrent threads: parallel partial sums
+    let ta = spawn compute_partial_sum(0, 250);
+    let tb = spawn compute_partial_sum(250, 250);
+    let tc = spawn compute_partial_sum(500, 250);
+    let td = spawn compute_partial_sum(750, 250);
+    let par_total = ta.await + tb.await + tc.await + td.await;
+    // sum(0..999) = 999*1000/2 = 499500
+    if (par_total != 499500) {
+        print(f"FAIL 4b: parallel sum={par_total}, expected=499500");
+        return 1;
+    }
+
+    print("Section 4: OK");
+
+    // ============================================================
+    // SECTION 5: Channels
+    // ============================================================
+    print("--- Section 5: Channels ---");
+
+    let ch = Channel.new(8);
+
+    // Send and receive on main thread
+    ch.send(100);
+    ch.send(200);
+    ch.send(300);
+    let mut cv1 = 0;
+    let mut cv2 = 0;
+    let mut cv3 = 0;
+    match ch.recv() { Some(v) => { cv1 = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { cv2 = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { cv3 = v; } None => { return 1; } }
+    if (cv1 != 100) {
+        print(f"FAIL 5a: recv1={cv1}");
+        return 1;
+    }
+    if (cv2 != 200) {
+        print(f"FAIL 5b: recv2={cv2}");
+        return 1;
+    }
+    if (cv3 != 300) {
+        print(f"FAIL 5c: recv3={cv3}");
+        return 1;
+    }
+
+    // Multiple sends then sequential recvs, plus close
+    let ch2 = Channel.new(16);
+    ch2.send(10);
+    ch2.send(20);
+    ch2.send(30);
+    let mut ca = 0;
+    let mut cb = 0;
+    let mut cc = 0;
+    match ch2.recv() { Some(v) => { ca = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { cb = v; } None => { return 1; } }
+    match ch2.recv() { Some(v) => { cc = v; } None => { return 1; } }
+    ch2.close();
+    if (ca != 10) {
+        print(f"FAIL 5d: ca={ca}");
+        return 1;
+    }
+    if (cb != 20) {
+        print(f"FAIL 5e: cb={cb}");
+        return 1;
+    }
+    if (cc != 30) {
+        print(f"FAIL 5f: cc={cc}");
+        return 1;
+    }
+    // Verify sum via variables (avoids Maybe+Int type issue)
+    let ch_total = ca + cb + cc;
+    if (ch_total != 60) {
+        print(f"FAIL 5g: ch_total={ch_total}");
+        return 1;
+    }
+
+    print("Section 5: OK");
+
+    // ============================================================
+    // SECTION 6: Mutex
+    // ============================================================
+    print("--- Section 6: Mutex ---");
+
+    let mtx = __mutex_new_raw();
+    if (mtx == 0) {
+        print("FAIL 6a: mutex_new returned null");
+        return 1;
+    }
+
+    // Lock/unlock cycle
+    __mutex_lock_raw(mtx);
+    __mutex_unlock_raw(mtx);
+
+    // Multiple lock/unlock cycles
+    let mut mi = 0;
+    while (mi < 50) {
+        __mutex_lock_raw(mtx);
+        __mutex_unlock_raw(mtx);
+        mi = mi + 1;
+    }
+
+    // Two distinct mutexes
+    let mtx2 = __mutex_new_raw();
+    if (mtx2 == 0) {
+        print("FAIL 6b: second mutex null");
+        return 1;
+    }
+    if (mtx2 == mtx) {
+        print("FAIL 6c: two mutexes same address");
+        return 1;
+    }
+
+    // Nested lock (different mutexes)
+    __mutex_lock_raw(mtx);
+    __mutex_lock_raw(mtx2);
+    __mutex_unlock_raw(mtx2);
+    __mutex_unlock_raw(mtx);
+
+    print("Section 6: OK");
+
+    // ============================================================
+    // SECTION 7: File I/O (in helper to avoid large-main issue)
+    // ============================================================
+    print("--- Section 7: File I/O ---");
+    if (test_file_io() != 0) { return 1; }
+    print("Section 7: OK");
+
+    // ============================================================
+    // SECTION 8: Generators
+    // ============================================================
+    print("--- Section 8: Generators ---");
+
+    // count_up generator with for-in
+    let mut gen_sum = 0;
+    for v in count_up(10) {
+        gen_sum = gen_sum + v;
+    }
+    // 0+1+2+...+9 = 45
+    if (gen_sum != 45) {
+        print(f"FAIL 8a: count_up sum={gen_sum}");
+        return 1;
+    }
+
+    // fibonacci generator collected into a list
+    let mut fibs: List<Int> = [];
+    for v in fibonacci_gen(10) {
+        fibs.push(v);
+    }
+    if (fibs.len() != 10) {
+        print(f"FAIL 8b: fibs.len={fibs.len()}");
+        return 1;
+    }
+    if (fibs[0] != 0) {
+        print(f"FAIL 8c: fibs[0]={fibs[0]}");
+        return 1;
+    }
+    if (fibs[9] != 34) {
+        print(f"FAIL 8d: fibs[9]={fibs[9]}");
+        return 1;
+    }
+
+    // Sum fibonacci values: 0+1+1+2+3+5+8+13+21+34 = 88
+    let mut fib_sum = 0;
+    let mut fi = 0;
+    while (fi < fibs.len()) {
+        fib_sum = fib_sum + fibs[fi];
+        fi = fi + 1;
+    }
+    if (fib_sum != 88) {
+        print(f"FAIL 8e: fib_sum={fib_sum}");
+        return 1;
+    }
+
+    // Generator with has_next/next loop
+    let gen2 = count_up(5);
+    let mut gen2_count = 0;
+    while (gen2.has_next()) {
+        match gen2.next() {
+            Some(v) => { gen2_count = gen2_count + 1; }
+            None => {}
+        }
+    }
+    if (gen2_count != 5) {
+        print(f"FAIL 8f: gen2_count={gen2_count}");
+        return 1;
+    }
+
+    print("Section 8: OK");
+
+    // ============================================================
+    // SECTION 9: Pattern Matching
+    // ============================================================
+    print("--- Section 9: Pattern Matching ---");
+
+    // Match on Shape variants with data
+    let area_circle = shape_area(Circle(5));
+    if (area_circle != 75) {
+        print(f"FAIL 9a: Circle(5)={area_circle}");
+        return 1;
+    }
+    let area_rect = shape_area(Rect(6, 8));
+    if (area_rect != 48) {
+        print(f"FAIL 9b: Rect(6,8)={area_rect}");
+        return 1;
+    }
+    let area_tri = shape_area(Triangle(10, 6));
+    if (area_tri != 30) {
+        print(f"FAIL 9c: Triangle(10,6)={area_tri}");
+        return 1;
+    }
+
+    // Match on unit variants
+    let pv1 = priority_value(Low);
+    let pv2 = priority_value(Medium);
+    let pv3 = priority_value(High);
+    let pv4 = priority_value(Critical);
+    if (pv1 + pv2 + pv3 + pv4 != 10) {
+        print(f"FAIL 9d: priority sum={pv1 + pv2 + pv3 + pv4}");
+        return 1;
+    }
+
+    // Match in a loop: compute total area of multiple shapes
+    let mut shapes_total = 0;
+    let radii = [1, 2, 3, 4, 5];
+    let mut si = 0;
+    while (si < radii.len()) {
+        shapes_total = shapes_total + shape_area(Circle(radii[si]));
+        si = si + 1;
+    }
+    // Circle(1)=3, Circle(2)=12, Circle(3)=27, Circle(4)=48, Circle(5)=75
+    // total = 165
+    if (shapes_total != 165) {
+        print(f"FAIL 9e: shapes_total={shapes_total}");
+        return 1;
+    }
+
+    // Wildcard pattern
+    let wc = match Circle(99) {
+        Rect(w, h) => 0,
+        _ => 1,
+    };
+    if (wc != 1) {
+        print(f"FAIL 9f: wildcard={wc}");
+        return 1;
+    }
+
+    // Match result used in expression
+    let bonus = 10 + match High {
+        Low => 0,
+        Medium => 5,
+        High => 15,
+        Critical => 25,
+    };
+    if (bonus != 25) {
+        print(f"FAIL 9g: bonus={bonus}");
+        return 1;
+    }
+
+    print("Section 9: OK");
+
+    // ============================================================
+    // SECTION 10: Timing
+    // ============================================================
+    print("--- Section 10: Timing ---");
+
+    let t_start = __time_monotonic_nanos_raw();
+    if (t_start <= 0) {
+        print(f"FAIL 10a: start_nanos={t_start}");
+        return 1;
+    }
+
+    // Do some work to measure
+    let mut dummy = 0;
+    let mut ti = 0;
+    while (ti < 10000) {
+        dummy = dummy + ti;
+        ti = ti + 1;
+    }
+
+    let t_end = __time_monotonic_nanos_raw();
+    if (t_end < t_start) {
+        print(f"FAIL 10b: clock not monotonic start={t_start} end={t_end}");
+        return 1;
+    }
+    let elapsed = t_end - t_start;
+    // Elapsed should be > 0 (we did work) and < 10 seconds (sanity)
+    if (elapsed <= 0) {
+        print(f"FAIL 10c: elapsed={elapsed} (should be > 0)");
+        return 1;
+    }
+    if (elapsed > 10000000000) {
+        print(f"FAIL 10d: elapsed={elapsed} (> 10s, too slow)");
+        return 1;
+    }
+
+    print(f"Section 10: OK (elapsed={elapsed}ns)");
+
+    // ============================================================
+    // FINAL: Cross-mechanism integration
+    // ============================================================
+    print("--- Final: Cross-mechanism checks ---");
+
+    // Thread + generator + map: spawn workers, collect fib values into map
+    let fib_worker = spawn compute_partial_sum(0, 100);
+    let mut fib_map: Map<Int, Int> = Map.new();
+    let mut fmi = 0;
+    for v in fibonacci_gen(8) {
+        fib_map.insert(fmi, v);
+        fmi = fmi + 1;
+    }
+    let worker_result = fib_worker.await;
+    // sum(0..99) = 4950
+    if (worker_result != 4950) {
+        print(f"FAIL final-a: worker_result={worker_result}");
+        return 1;
+    }
+    if (fib_map.len() != 8) {
+        print(f"FAIL final-b: fib_map.len={fib_map.len()}");
+        return 1;
+    }
+
+    // HOF + collections: map then fold
+    let mapped = map_list([3, 6, 9], |x: Int| -> Int { x * x });
+    let sum_sq = fold_list(mapped, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // 9 + 36 + 81 = 126
+    if (sum_sq != 126) {
+        print(f"FAIL final-c: sum_sq={sum_sq}");
+        return 1;
+    }
+
+    // File I/O + f-string: write computed result to file, read back
+    let final_path = "/tmp/verum_test_943_final.txt";
+    let final_content = f"result={sum_sq}";
+    file_write_all(final_path, final_content);
+    let final_read = file_read_all(final_path);
+    if (final_read != final_content) {
+        print(f"FAIL final-d: read='{final_read}'");
+        return 1;
+    }
+    file_delete(final_path);
+
+    // Channel + timing: measure channel round-trip
+    let ch_time = Channel.new(4);
+    let t_ch_start = __time_monotonic_nanos_raw();
+    ch_time.send(999);
+    let mut ch_val = 0;
+    match ch_time.recv() { Some(v) => { ch_val = v; } None => {} }
+    let t_ch_end = __time_monotonic_nanos_raw();
+    ch_time.close();
+    if (ch_val != 999) {
+        print(f"FAIL final-e: ch_val={ch_val}");
+        return 1;
+    }
+    let ch_elapsed = t_ch_end - t_ch_start;
+    if (ch_elapsed < 0) {
+        print(f"FAIL final-f: ch_elapsed={ch_elapsed}");
+        return 1;
+    }
+
+    print("Final checks: OK");
+
+    // ============================================================
+    print("943_comprehensive_runtime: PASS");
+    0
+}

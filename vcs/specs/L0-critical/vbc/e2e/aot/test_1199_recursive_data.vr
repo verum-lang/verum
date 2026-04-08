@@ -1,0 +1,94 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: recursive, tree, heap, e2e
+// @description: Test recursive data structures with Heap allocation
+
+type Tree is Leaf(Int) | Node { left: Heap<Tree>, right: Heap<Tree>, value: Int };
+
+fn tree_sum(t: &Tree) -> Int {
+    match t {
+        Tree.Leaf(v) => v,
+        Tree.Node { left, right, value } => {
+            value + tree_sum(left) + tree_sum(right)
+        }
+    }
+}
+
+fn tree_depth(t: &Tree) -> Int {
+    match t {
+        Tree.Leaf(_) => 1,
+        Tree.Node { left, right, value: _ } => {
+            let ld = tree_depth(left);
+            let rd = tree_depth(right);
+            if ld > rd { 1 + ld } else { 1 + rd }
+        }
+    }
+}
+
+@allow(unbounded_recursion)
+fn tree_count(t: &Tree) -> Int {
+    match t {
+        Tree.Leaf(_) => 1,
+        Tree.Node { left, right, value: _ } => {
+            1 + tree_count(left) + tree_count(right)
+        }
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Build a tree:
+    //       10
+    //      /  \
+    //     5    15
+    //    / \
+    //   2   7
+    let leaf2 = Tree.Leaf(2);
+    let leaf7 = Tree.Leaf(7);
+    let leaf15 = Tree.Leaf(15);
+    let left = Tree.Node { left: Heap(leaf2), right: Heap(leaf7), value: 5 };
+    let root = Tree.Node { left: Heap(left), right: Heap(leaf15), value: 10 };
+
+    // Test 1: Sum of all values
+    let s = tree_sum(&root);
+    if s != 39 {
+        print(f"FAIL 1: sum = {s}, expected 39");
+        f = f + 1;
+    } else {
+        print("  tree_sum: OK");
+    }
+
+    // Test 2: Depth
+    let d = tree_depth(&root);
+    if d != 3 {
+        print(f"FAIL 2: depth = {d}, expected 3");
+        f = f + 1;
+    } else {
+        print("  tree_depth: OK");
+    }
+
+    // Test 3: Node count
+    let c = tree_count(&root);
+    if c != 5 {
+        print(f"FAIL 3: count = {c}, expected 5");
+        f = f + 1;
+    } else {
+        print("  tree_count: OK");
+    }
+
+    // Test 4: Leaf
+    let leaf = Tree.Leaf(42);
+    if tree_sum(&leaf) != 42 {
+        print("FAIL 4: leaf sum");
+        f = f + 1;
+    } else {
+        print("  leaf_sum: OK");
+    }
+
+    if f == 0 {
+        print("All recursive data tests passed");
+    }
+    f
+}

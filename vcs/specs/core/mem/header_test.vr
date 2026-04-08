@@ -1,0 +1,914 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/header.vr - AllocationHeader Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, cbgr, header, allocation, generation, epoch
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for AllocationHeader, the 32-byte metadata prepended to every
+// CBGR-managed allocation. Validates generation/epoch tracking, atomic
+// operations, capability storage, and reference validation.
+//
+// =============================================================================
+
+mount core.mem.header.{
+    AllocationHeader, AllocationFlags, ValidationError,
+    HEADER_SIZE, HEADER_ALIGN,
+    GEN_INITIAL, GEN_UNALLOCATED, GEN_MAX,
+    FLAG_BORROWED, FLAG_SHARED, FLAG_PINNED,
+    FLAG_LEAKED, FLAG_WEAK, FLAG_LARGE,
+};
+mount core.mem.capability.{CAP_READ, CAP_WRITE, CAP_OWNED, CAP_BORROW_SHARED};
+
+// =============================================================================
+// Constants and Layout Tests
+// =============================================================================
+
+@test
+fn test_header_size_is_32_bytes() {
+    // AllocationHeader must be exactly 32 bytes for cache efficiency
+    assert_eq(HEADER_SIZE, 32);
+    assert_eq(AllocationHeader.size, 32);
+}
+
+@test
+fn test_header_alignment_is_8_bytes() {
+    // Header must be 8-byte aligned for atomic operations
+    assert_eq(HEADER_ALIGN, 8);
+    assert_eq(AllocationHeader.align, 8);
+}
+
+@test
+fn test_generation_constants() {
+    // GEN_INITIAL must be 1 (0 reserved for unallocated)
+    assert_eq(GEN_INITIAL, 1);
+
+    // GEN_UNALLOCATED must be 0 (sentinel value)
+    assert_eq(GEN_UNALLOCATED, 0);
+
+    // GEN_MAX must be 0xFFFFFFFE (one less than wraparound)
+    assert_eq(GEN_MAX, 0xFFFFFFFE as UInt32);
+}
+
+@test
+fn test_flag_constants() {
+    // Flags should be distinct bit positions
+    assert_eq(FLAG_BORROWED & FLAG_SHARED, 0);
+    assert_eq(FLAG_BORROWED & FLAG_PINNED, 0);
+    assert_eq(FLAG_SHARED & FLAG_PINNED, 0);
+}
+
+// =============================================================================
+// Header Construction Tests
+// =============================================================================
+
+@test
+fn test_header_new_initializes_correctly() {
+    let header = AllocationHeader.new(128, 8, 0, CAP_OWNED);
+
+    assert_eq(header.size, 128);
+    assert_eq(header.alignment, 8);
+    assert_eq(header.load_generation(), GEN_INITIAL);
+    assert_eq(header.load_epoch(), 0);
+    assert_eq(header.load_capabilities(), CAP_OWNED);
+    assert_eq(header.type_id, 0);
+    assert_eq(header.flags, 0);
+}
+
+@test
+fn test_header_new_with_type_id() {
+    // Use full constructor with explicit type_id
+    let header = AllocationHeader.new(256, 16, 42, CAP_OWNED);
+
+    assert_eq(header.size, 256);
+    assert_eq(header.alignment, 16);
+    assert_eq(header.type_id, 42);
+    assert_eq(header.load_generation(), GEN_INITIAL);
+}
+
+@test
+fn test_header_default_capabilities() {
+    let header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Default should be CAP_OWNED (full access)
+    assert(header.has_capability(CAP_READ));
+    assert(header.has_capability(CAP_WRITE));
+}
+
+// =============================================================================
+// Generation Counter Tests
+// =============================================================================
+
+@test
+fn test_load_generation_atomic() {
+    let header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Initial generation should be GEN_INITIAL
+    let gen = header.load_generation();
+    assert_eq(gen, GEN_INITIAL);
+}
+
+@test
+fn test_store_generation_atomic() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_generation(100);
+    assert_eq(header.load_generation(), 100);
+
+    header.store_generation(999);
+    assert_eq(header.load_generation(), 999);
+}
+
+@test
+fn test_increment_generation_returns_old_value() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // First increment: 1 -> 2, returns 1
+    let old1 = header.increment_generation();
+    assert_eq(old1, GEN_INITIAL);
+    assert_eq(header.load_generation(), GEN_INITIAL + 1);
+
+    // Second increment: 2 -> 3, returns 2
+    let old2 = header.increment_generation();
+    assert_eq(old2, GEN_INITIAL + 1);
+    assert_eq(header.load_generation(), GEN_INITIAL + 2);
+}
+
+@test
+fn test_increment_generation_sequential() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Increment 1000 times
+    let mut i = 0;
+    while i < 1000 {
+        let old = header.increment_generation();
+        assert_eq(old, GEN_INITIAL + i as UInt32);
+        i = i + 1;
+    }
+
+    assert_eq(header.load_generation(), GEN_INITIAL + 1000);
+}
+
+@test
+fn test_generation_near_max() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Set to near max
+    header.store_generation(GEN_MAX - 1);
+
+    // Increment should reach GEN_MAX
+    let old = header.increment_generation();
+    assert_eq(old, GEN_MAX - 1);
+    assert_eq(header.load_generation(), GEN_MAX);
+}
+
+@test
+fn test_generation_wraparound_triggers_epoch_increment() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Set to GEN_MAX
+    header.store_generation(GEN_MAX);
+    let initial_epoch = header.load_epoch();
+
+    // Increment should wrap to GEN_INITIAL and increment epoch
+    header.increment_generation();
+
+    assert_eq(header.load_generation(), GEN_INITIAL);
+    assert_eq(header.load_epoch(), initial_epoch + 1);
+}
+
+// =============================================================================
+// Epoch Counter Tests
+// =============================================================================
+
+@test
+fn test_load_epoch_atomic() {
+    let header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Initial epoch should be 0
+    assert_eq(header.load_epoch(), 0);
+}
+
+@test
+fn test_store_epoch_atomic() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_epoch(5);
+    assert_eq(header.load_epoch(), 5);
+
+    header.store_epoch(1000);
+    assert_eq(header.load_epoch(), 1000);
+}
+
+@test
+fn test_epoch_max_value() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Epoch is 16-bit
+    header.store_epoch(0xFFFF);
+    assert_eq(header.load_epoch(), 0xFFFF);
+}
+
+// =============================================================================
+// Combined Generation+Epoch Tests
+// =============================================================================
+
+@test
+fn test_load_generation_epoch_fast() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_generation(42);
+    header.store_epoch(7);
+
+    let (gen, epoch) = header.load_generation_epoch_fast();
+    assert_eq(gen, 42);
+    assert_eq(epoch, 7);
+}
+
+@test
+fn test_load_generation_epoch_combined() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_generation(12345);
+    header.store_epoch(99);
+
+    let (gen, epoch) = header.load_generation_epoch_combined();
+    assert_eq(gen, 12345);
+    assert_eq(epoch, 99);
+}
+
+@test
+fn test_generation_epoch_consistency() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Set specific values
+    header.store_generation(0xABCDEF01);
+    header.store_epoch(0x1234);
+
+    // Both methods should return consistent values
+    let (gen1, epoch1) = header.load_generation_epoch_fast();
+    let (gen2, epoch2) = header.load_generation_epoch_combined();
+
+    assert_eq(gen1, gen2);
+    assert_eq(epoch1, epoch2);
+}
+
+// =============================================================================
+// Capability Tests
+// =============================================================================
+
+@test
+fn test_load_capabilities() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_capabilities(CAP_OWNED);
+    assert_eq(header.load_capabilities(), CAP_OWNED);
+}
+
+@test
+fn test_store_capabilities() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_capabilities(CAP_BORROW_SHARED);
+    assert_eq(header.load_capabilities(), CAP_BORROW_SHARED);
+}
+
+@test
+fn test_has_capability() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_capabilities(CAP_READ | CAP_WRITE);
+
+    assert(header.has_capability(CAP_READ));
+    assert(header.has_capability(CAP_WRITE));
+    assert(header.has_capability(CAP_READ | CAP_WRITE));
+}
+
+@test
+fn test_attenuate_capabilities() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_capabilities(CAP_OWNED);
+
+    // Attenuate to read-only
+    header.attenuate_capabilities(CAP_READ);
+
+    assert(header.has_capability(CAP_READ));
+    assert(!header.has_capability(CAP_WRITE));
+}
+
+// =============================================================================
+// Reference Validation Tests
+// =============================================================================
+
+@test
+fn test_validate_reference_success() {
+    let header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    let gen = header.load_generation();
+    let epoch = header.load_epoch();
+
+    // Validation should succeed with matching gen/epoch
+    let result = header.validate_reference(gen, epoch);
+    assert(result.is_ok());
+}
+
+@test
+fn test_validate_reference_generation_mismatch() {
+    let header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    let gen = header.load_generation();
+    let epoch = header.load_epoch();
+
+    // Wrong generation should fail
+    let result = header.validate_reference(gen + 1, epoch);
+    assert(result.is_err());
+}
+
+@test
+fn test_validate_reference_epoch_mismatch() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    let gen = header.load_generation();
+    header.store_epoch(5);
+
+    // Wrong epoch should fail
+    let result = header.validate_reference(gen, 0);
+    assert(result.is_err());
+}
+
+@test
+fn test_validate_reference_fast() {
+    let header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    let gen = header.load_generation();
+    let epoch = header.load_epoch();
+
+    // Fast validation should succeed
+    let result = header.validate_reference_fast(gen, epoch);
+    assert(result.is_ok());
+}
+
+@test
+fn test_validate_detects_use_after_free() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Capture initial state
+    let old_gen = header.load_generation();
+    let old_epoch = header.load_epoch();
+
+    // Simulate deallocation by incrementing generation
+    header.increment_generation();
+
+    // Old reference should now fail validation
+    let result = header.validate_reference(old_gen, old_epoch);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Pointer Conversion Tests
+// =============================================================================
+
+@test
+fn test_from_user_ptr() {
+    // Allocate buffer with header space
+    let buffer: [Byte; 96] = [0; 96];  // 32 header + 64 user data
+    let buffer_ptr = &buffer[0] as &unsafe Byte;
+
+    // Initialize header at buffer start
+    unsafe {
+        let header = buffer_ptr as &mut AllocationHeader;
+        *header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    }
+
+    // User data starts after header
+    let user_ptr = unsafe { ptr_offset(buffer_ptr, HEADER_SIZE) };
+
+    // from_user_ptr should return the header
+    let header = unsafe { AllocationHeader.from_user_ptr(user_ptr) };
+
+    assert_eq(header.size, 64);
+    assert_eq(header.alignment, 8);
+}
+
+@test
+fn test_to_user_ptr() {
+    let mut buffer: [Byte; 96] = [0; 96];
+    let buffer_ptr = &mut buffer[0] as &unsafe mut Byte;
+
+    unsafe {
+        let header = buffer_ptr as &unsafe mut AllocationHeader;
+        *header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+        let user_ptr = header.user_ptr();
+
+        // User ptr should be HEADER_SIZE bytes after header
+        let header_addr = (header as &unsafe Byte) as USize;
+        let user_addr = (user_ptr as &unsafe Byte) as USize;
+        assert_eq((user_addr - header_addr) as Int, HEADER_SIZE);
+    }
+}
+
+@test
+fn test_user_ptr_roundtrip() {
+    let mut buffer: [Byte; 96] = [0; 96];
+    let buffer_ptr = &mut buffer[0] as &unsafe mut Byte;
+
+    unsafe {
+        let header = buffer_ptr as &unsafe mut AllocationHeader;
+        *header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+        let user_ptr = header.user_ptr();
+        let header_back = AllocationHeader.from_user_ptr(user_ptr);
+
+        let addr1 = (header as &unsafe Byte) as USize;
+        let addr2 = (header_back as &unsafe Byte) as USize;
+        assert_eq(addr1, addr2);
+    }
+}
+
+// =============================================================================
+// Flag Tests
+// =============================================================================
+
+@test
+fn test_set_flag() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.set_flag(FLAG_BORROWED);
+    assert(header.has_flag(FLAG_BORROWED));
+    assert(!header.has_flag(FLAG_SHARED));
+}
+
+@test
+fn test_clear_flag() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.set_flag(FLAG_BORROWED);
+    assert(header.has_flag(FLAG_BORROWED));
+
+    header.clear_flag(FLAG_BORROWED);
+    assert(!header.has_flag(FLAG_BORROWED));
+}
+
+@test
+fn test_multiple_flags() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.set_flag(FLAG_BORROWED);
+    header.set_flag(FLAG_PINNED);
+
+    assert(header.has_flag(FLAG_BORROWED));
+    assert(header.has_flag(FLAG_PINNED));
+    assert(!header.has_flag(FLAG_SHARED));
+
+    header.clear_flag(FLAG_BORROWED);
+
+    assert(!header.has_flag(FLAG_BORROWED));
+    assert(header.has_flag(FLAG_PINNED));
+}
+
+// =============================================================================
+// Type ID Tests
+// =============================================================================
+
+@test
+fn test_type_id_stored() {
+    let header = AllocationHeader.new_with_type(64, 8, 12345);
+    assert_eq(header.type_id, 12345);
+}
+
+@test
+fn test_type_id_max_value() {
+    let header = AllocationHeader.new_with_type(64, 8, 0xFFFF);
+    assert_eq(header.type_id, 0xFFFF);
+}
+
+// =============================================================================
+// Size and Alignment Tests
+// =============================================================================
+
+@test
+fn test_size_stored_correctly() {
+    let header1 = AllocationHeader.new(1, 1, 0, CAP_OWNED);
+    assert_eq(header1.size, 1 as UInt32);
+
+    let header2 = AllocationHeader.new((1024 * 1024) as UInt32, 8, 0, CAP_OWNED);
+    assert_eq(header2.size, (1024 * 1024) as UInt32);
+}
+
+@test
+fn test_alignment_stored_correctly() {
+    let header1 = AllocationHeader.new(64, 1, 0, CAP_OWNED);
+    assert_eq(header1.alignment, 1);
+
+    let header2 = AllocationHeader.new(64, 4096, 0, CAP_OWNED);
+    assert_eq(header2.alignment, 4096);
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_zero_size_allocation() {
+    // Zero-size allocations should still have valid headers
+    let header = AllocationHeader.new(0, 8, 0, CAP_OWNED);
+    assert_eq(header.size, 0);
+    assert_eq(header.load_generation(), GEN_INITIAL);
+}
+
+@test
+fn test_large_size_allocation() {
+    // Large allocations should work
+    let header = AllocationHeader.new(1_000_000_000, 8, 0, CAP_OWNED);
+    assert_eq(header.size, 1_000_000_000);
+}
+
+@test
+fn test_generation_after_many_increments() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Increment many times
+    for _ in 0..10000 {
+        header.increment_generation();
+    }
+
+    assert_eq(header.load_generation(), GEN_INITIAL + 10000);
+}
+
+// =============================================================================
+// Memory Ordering Tests (Conceptual)
+// =============================================================================
+
+@test
+fn test_generation_load_has_acquire_semantics() {
+    // This tests that generation loads use acquire ordering
+    // ensuring visibility of prior writes
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_generation(42);
+
+    // Acquire load should see the stored value
+    let gen = header.load_generation();
+    assert_eq(gen, 42);
+}
+
+@test
+fn test_generation_store_has_release_semantics() {
+    // This tests that generation stores use release ordering
+    // ensuring prior writes are visible to other threads
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    header.store_generation(100);
+
+    // Value should be visible
+    assert_eq(header.load_generation(), 100);
+}
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+@test
+fn test_full_allocation_lifecycle() {
+    let mut header = AllocationHeader.new(128, 16, 0, CAP_OWNED);
+
+    // Initial state
+    assert_eq(header.load_generation(), GEN_INITIAL);
+    assert_eq(header.load_epoch(), 0);
+    assert(header.has_capability(CAP_READ));
+    assert(header.has_capability(CAP_WRITE));
+
+    // Capture reference state
+    let ref_gen = header.load_generation();
+    let ref_epoch = header.load_epoch();
+
+    // Validate should succeed
+    assert(header.validate_reference(ref_gen, ref_epoch).is_ok());
+
+    // Simulate borrow
+    header.set_flag(FLAG_BORROWED);
+    assert(header.has_flag(FLAG_BORROWED));
+
+    // Simulate deallocation
+    header.increment_generation();
+
+    // Old reference should be invalid
+    assert(header.validate_reference(ref_gen, ref_epoch).is_err());
+
+    // New reference with correct gen should work
+    let new_gen = header.load_generation();
+    let new_epoch = header.load_epoch();
+    assert(header.validate_reference(new_gen, new_epoch).is_ok());
+}
+
+@test
+fn test_multiple_allocations_unique_generations() {
+    let mut header1 = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    let mut header2 = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Both start at GEN_INITIAL
+    assert_eq(header1.load_generation(), GEN_INITIAL);
+    assert_eq(header2.load_generation(), GEN_INITIAL);
+
+    // Increment header1 multiple times
+    for _ in 0..5 {
+        header1.increment_generation();
+    }
+
+    // Headers should have different generations
+    assert(header1.load_generation() != header2.load_generation());
+}
+
+// =============================================================================
+// Additional Header Tests
+// =============================================================================
+
+@test
+fn test_header_new_generation_is_initial() {
+    let header = AllocationHeader.new(32, 8, 0, CAP_OWNED);
+    assert_eq(header.load_generation(), GEN_INITIAL);
+    assert_eq(header.load_generation(), 1);
+}
+
+@test
+fn test_flag_constants_nonzero() {
+    assert(FLAG_BORROWED != 0);
+    assert(FLAG_SHARED != 0);
+    assert(FLAG_PINNED != 0);
+}
+
+@test
+fn test_generation_store_then_validate() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header.store_generation(500);
+    let result = header.validate_reference(500, 0);
+    assert(result.is_ok());
+}
+
+@test
+fn test_capability_read_only() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_READ);
+    assert(header.has_capability(CAP_READ));
+    assert(!header.has_capability(CAP_WRITE));
+}
+
+@test
+fn test_header_size_different_values() {
+    let h1 = AllocationHeader.new(16, 8, 0, CAP_OWNED);
+    let h2 = AllocationHeader.new(256, 8, 0, CAP_OWNED);
+    let h3 = AllocationHeader.new(4096, 8, 0, CAP_OWNED);
+    assert_eq(h1.size, 16);
+    assert_eq(h2.size, 256);
+    assert_eq(h3.size, 4096);
+}
+
+@test
+fn test_multiple_epoch_increments() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header.store_epoch(0);
+    header.store_epoch(1);
+    header.store_epoch(2);
+    assert_eq(header.load_epoch(), 2);
+}
+
+@test
+fn test_set_clear_all_flags() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header.set_flag(FLAG_BORROWED);
+    header.set_flag(FLAG_SHARED);
+    header.set_flag(FLAG_PINNED);
+    assert(header.has_flag(FLAG_BORROWED));
+    assert(header.has_flag(FLAG_SHARED));
+    assert(header.has_flag(FLAG_PINNED));
+    header.clear_flag(FLAG_BORROWED);
+    header.clear_flag(FLAG_SHARED);
+    header.clear_flag(FLAG_PINNED);
+    assert(!header.has_flag(FLAG_BORROWED));
+    assert(!header.has_flag(FLAG_SHARED));
+    assert(!header.has_flag(FLAG_PINNED));
+}
+
+@test
+fn test_generation_epoch_independence() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header.store_generation(999);
+    header.store_epoch(7);
+    // Changing generation shouldn't affect epoch and vice versa
+    assert_eq(header.load_generation(), 999);
+    assert_eq(header.load_epoch(), 7);
+    header.store_generation(1);
+    assert_eq(header.load_epoch(), 7);
+    header.store_epoch(0);
+    assert_eq(header.load_generation(), 1);
+}
+
+// Import for pointer operations
+mount core.intrinsics.{ptr_offset};
+
+// =============================================================================
+// Additional Comprehensive Tests (8 new tests)
+// =============================================================================
+
+@test
+fn test_allocation_flags_type_methods() {
+    // Test AllocationFlags type and its is_* methods
+    let flags_none = AllocationFlags.none();
+    assert(!flags_none.is_pinned());
+    assert(!flags_none.is_leaked());
+    assert(!flags_none.is_shared());
+    assert(!flags_none.has_weak());
+    assert(!flags_none.is_large());
+    assert(!flags_none.is_arena());
+
+    let flags_pinned = AllocationFlags(FLAG_PINNED);
+    assert(flags_pinned.is_pinned());
+    assert(!flags_pinned.is_leaked());
+
+    let flags_combined = AllocationFlags(FLAG_SHARED | FLAG_LARGE);
+    assert(flags_combined.is_shared());
+    assert(flags_combined.is_large());
+    assert(!flags_combined.is_pinned());
+    assert(!flags_combined.is_arena());
+}
+
+@test
+fn test_validation_error_constructors() {
+    // Test ValidationError constructors and variant matching
+    let gen_err = ValidationError.generation_mismatch(100, 200);
+    assert(gen_err is ValidationError.GenerationMismatch);
+
+    let epoch_err = ValidationError.epoch_mismatch(5, 10);
+    assert(epoch_err is ValidationError.EpochMismatch);
+
+    // Test different mismatch values
+    let err1 = ValidationError.generation_mismatch(GEN_INITIAL, GEN_MAX);
+    assert(err1 is ValidationError.GenerationMismatch);
+
+    let err2 = ValidationError.epoch_mismatch(0, 0xFFFF);
+    assert(err2 is ValidationError.EpochMismatch);
+}
+
+@test
+fn test_header_total_size_calculation() {
+    // Test total_size() method includes header and data
+    let header1 = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    assert_eq(header1.total_size(), HEADER_SIZE + 64);
+
+    let header2 = AllocationHeader.new(1024, 16, 0, CAP_OWNED);
+    assert_eq(header2.total_size(), HEADER_SIZE + 1024);
+
+    let header3 = AllocationHeader.new(0, 8, 0, CAP_OWNED);
+    assert_eq(header3.total_size(), HEADER_SIZE);
+
+    let header4 = AllocationHeader.new((1024 * 1024) as UInt32, 8, 0, CAP_OWNED);
+    assert_eq(header4.total_size(), HEADER_SIZE + 1024 * 1024);
+}
+
+@test
+fn test_header_getter_methods() {
+    // Test get_size(), get_alignment(), get_type_id() methods
+    let header = AllocationHeader.new(512, 32, 99999, CAP_OWNED);
+
+    assert_eq(header.get_size(), 512);
+    assert_eq(header.get_alignment(), 32);
+    assert_eq(header.get_type_id(), 99999);
+
+    // Test with different values
+    let header2 = AllocationHeader.new(8, 1, 0, CAP_READ);
+    assert_eq(header2.get_size(), 8);
+    assert_eq(header2.get_alignment(), 1);
+    assert_eq(header2.get_type_id(), 0);
+
+    // Test with max alignment
+    let header3 = AllocationHeader.new(256, 4096, 0xABCD, CAP_OWNED);
+    assert_eq(header3.get_size(), 256);
+    assert_eq(header3.get_alignment(), 4096);
+    assert_eq(header3.get_type_id(), 0xABCD);
+}
+
+@test
+fn test_header_specific_flag_setters() {
+    // Test set_pinned(), set_leaked(), set_shared(), set_has_weak()
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Initially no flags
+    assert(!header.is_pinned());
+    assert(!header.is_leaked());
+    assert(!header.is_shared());
+    assert(!header.has_weak_refs());
+
+    // Set pinned
+    header.set_pinned();
+    assert(header.is_pinned());
+    assert(!header.is_leaked());
+
+    // Set leaked
+    header.set_leaked();
+    assert(header.is_pinned());
+    assert(header.is_leaked());
+    assert(!header.is_shared());
+
+    // Set shared
+    header.set_shared();
+    assert(header.is_pinned());
+    assert(header.is_leaked());
+    assert(header.is_shared());
+    assert(!header.has_weak_refs());
+
+    // Set weak
+    header.set_has_weak();
+    assert(header.is_pinned());
+    assert(header.is_leaked());
+    assert(header.is_shared());
+    assert(header.has_weak_refs());
+}
+
+@test
+fn test_header_specific_flag_checkers() {
+    // Test is_pinned(), is_leaked(), is_shared(), has_weak_refs() on constructed flags
+    let mut header = AllocationHeader.new(128, 8, 0, CAP_OWNED);
+
+    // Set flags directly via flags field
+    header.flags = FLAG_PINNED | FLAG_SHARED;
+    assert(header.is_pinned());
+    assert(header.is_shared());
+    assert(!header.is_leaked());
+    assert(!header.has_weak_refs());
+
+    // Test leaked and weak combination
+    header.flags = FLAG_LEAKED | FLAG_WEAK;
+    assert(header.is_leaked());
+    assert(header.has_weak_refs());
+    assert(!header.is_pinned());
+    assert(!header.is_shared());
+
+    // Test all flags
+    header.flags = FLAG_PINNED | FLAG_LEAKED | FLAG_SHARED | FLAG_WEAK;
+    assert(header.is_pinned());
+    assert(header.is_leaked());
+    assert(header.is_shared());
+    assert(header.has_weak_refs());
+}
+
+@test
+fn test_capability_attenuation_scenarios() {
+    // Test complex capability attenuation scenarios
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    // Start with full ownership (read + write)
+    assert(header.has_capability(CAP_READ));
+    assert(header.has_capability(CAP_WRITE));
+
+    // Attenuate to read-only
+    let old_caps = header.attenuate_capabilities(CAP_READ);
+    assert_eq(old_caps, CAP_OWNED);  // Returns old value
+    assert(header.has_capability(CAP_READ));
+    assert(!header.has_capability(CAP_WRITE));
+
+    // Cannot restore capabilities (attenuation is permanent)
+    header.store_capabilities(CAP_OWNED);
+    header.attenuate_capabilities(CAP_READ);
+    assert(!header.has_capability(CAP_WRITE));
+
+    // Test multiple attenuation steps
+    let mut header2 = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header2.attenuate_capabilities(CAP_READ | CAP_WRITE);
+    header2.attenuate_capabilities(CAP_READ);
+    assert(header2.has_capability(CAP_READ));
+    assert(!header2.has_capability(CAP_WRITE));
+}
+
+@test
+fn test_validation_with_fast_vs_normal_paths() {
+    // Compare validate_reference() vs validate_reference_fast()
+    let mut header = AllocationHeader.new(128, 8, 0, CAP_OWNED);
+
+    header.store_generation(777);
+    header.store_epoch(3);
+
+    // Both methods should agree
+    let result_normal = header.validate_reference(777, 3);
+    let result_fast = header.validate_reference_fast(777, 3);
+
+    assert(result_normal.is_ok());
+    assert(result_fast.is_ok());
+
+    // Test failure case
+    let result_normal_fail = header.validate_reference(778, 3);
+    let result_fast_fail = header.validate_reference_fast(778, 3);
+
+    assert(result_normal_fail.is_err());
+    assert(result_fast_fail.is_err());
+
+    // Test epoch mismatch
+    let result_normal_epoch = header.validate_reference(777, 4);
+    let result_fast_epoch = header.validate_reference_fast(777, 4);
+
+    assert(result_normal_epoch.is_err());
+    assert(result_fast_epoch.is_err());
+}

@@ -1,0 +1,136 @@
+// @test: run
+// @expected-stdout: Request 1: Ok\nRequest 2: Ok\nRequest 3: Err(ServiceError)\nRequest 4: Err(ServiceError)\nRequest 5: Err(ServiceError)\nCircuit opened\nRequest 6: Err(CircuitOpen)\nCircuit half-open, testing...\nRequest 7: Ok\nCircuit closed
+// @tier: 0
+// @level: L2
+// @tags: async, spawn, circuit-breaker, resilience
+// @description: Circuit breaker pattern for fault tolerance
+
+type CircuitError is
+    | CircuitOpen
+    | ServiceError(Error);
+
+type CircuitBreaker<T> is {
+    state: Shared<CircuitState>,
+    failure_threshold: Int,
+    reset_timeout: Duration,
+    service: fn() -> Future<Result<T, Error>>,
+};
+
+type CircuitState is
+    | Closed { failures: Int }
+    | Open { opened_at: Instant }
+    | HalfOpen;
+
+implement CircuitBreaker<T> {
+    fn new(
+        failure_threshold: Int,
+        reset_timeout: Duration,
+        service: fn() -> Future<Result<T, Error>>,
+    ) -> Self {
+        Self {
+            state: Shared.new(CircuitState.Closed { failures: 0 }),
+            failure_threshold,
+            reset_timeout,
+            service,
+        }
+    }
+
+    async fn call(self) -> Result<T, CircuitError> {
+        match self.state.load() {
+            CircuitState.Open { opened_at } => {
+                if Instant.now() - opened_at > self.reset_timeout {
+                    self.state.store(CircuitState.HalfOpen);
+                    println("Circuit half-open, testing...");
+                } else {
+                    return Err(CircuitError.CircuitOpen);
+                }
+            }
+            _ => {}
+        }
+
+        match (self.service)().await {
+            Ok(result) => {
+                self.state.store(CircuitState.Closed { failures: 0 });
+                Ok(result)
+            }
+            Err(e) => {
+                let state = self.state.load();
+                match state {
+                    CircuitState.Closed { failures } => {
+                        let new_failures = failures + 1;
+                        if new_failures >= self.failure_threshold {
+                            self.state.store(CircuitState.Open {
+                                opened_at: Instant.now(),
+                            });
+                            println("Circuit opened");
+                        } else {
+                            self.state.store(CircuitState.Closed {
+                                failures: new_failures,
+                            });
+                        }
+                    }
+                    CircuitState.HalfOpen => {
+                        self.state.store(CircuitState.Open {
+                            opened_at: Instant.now(),
+                        });
+                    }
+                    _ => {}
+                }
+                Err(CircuitError.ServiceError(e))
+            }
+        }
+    }
+}
+
+async fn main() {
+    let call_count = Shared.new(0);
+
+    let breaker = CircuitBreaker.new(
+        3, // Open after 3 failures
+        Duration.from_millis(100), // Reset after 100ms
+        || async {
+            let count = call_count.fetch_add(1);
+            // Fail on calls 3, 4, 5
+            if count >= 2 && count <= 4 {
+                Err(Error.new("Service unavailable"))
+            } else {
+                Ok(())
+            }
+        },
+    );
+
+    // Requests 1-2: Success
+    for i in 1..=2 {
+        match breaker.call().await {
+            Ok(_) => println(f"Request {i}: Ok"),
+            Err(e) => println(f"Request {i}: Err({e})"),
+        }
+    }
+
+    // Requests 3-5: Fail, circuit opens
+    for i in 3..=5 {
+        match breaker.call().await {
+            Ok(_) => println(f"Request {i}: Ok"),
+            Err(e) => println(f"Request {i}: Err({e})"),
+        }
+    }
+
+    // Request 6: Circuit is open
+    match breaker.call().await {
+        Ok(_) => println("Request 6: Ok"),
+        Err(CircuitError.CircuitOpen) => println("Request 6: Err(CircuitOpen)"),
+        Err(e) => println(f"Request 6: Err({e})"),
+    }
+
+    // Wait for reset timeout
+    sleep(Duration.from_millis(150)).await;
+
+    // Request 7: Half-open, test succeeds, circuit closes
+    match breaker.call().await {
+        Ok(_) => {
+            println("Request 7: Ok");
+            println("Circuit closed");
+        }
+        Err(e) => println(f"Request 7: Err({e})"),
+    }
+}

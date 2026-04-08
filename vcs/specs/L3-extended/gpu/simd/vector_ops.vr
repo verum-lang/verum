@@ -1,0 +1,179 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: SIMD tests can parse without runtime
+// @tags: simd, vector
+
+fn main() {
+    // SIMD vector types
+    let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+    let b: f32x4 = f32x4(5.0, 6.0, 7.0, 8.0);
+
+    // Vector addition
+    let sum = a + b;
+    assert(sum[0] == 6.0);
+    assert(sum[1] == 8.0);
+    assert(sum[2] == 10.0);
+    assert(sum[3] == 12.0);
+
+    // Vector subtraction
+    let diff = b - a;
+    assert(diff[0] == 4.0);
+    assert(diff[1] == 4.0);
+    assert(diff[2] == 4.0);
+    assert(diff[3] == 4.0);
+
+    // Vector multiplication
+    let prod = a * b;
+    assert(prod[0] == 5.0);
+    assert(prod[1] == 12.0);
+    assert(prod[2] == 21.0);
+    assert(prod[3] == 32.0);
+
+    // Vector division
+    let quot = b / a;
+    assert(quot[0] == 5.0);
+    assert(quot[1] == 3.0);
+    assert((quot[2] - 2.333333).abs() < 0.001);
+    assert(quot[3] == 2.0);
+
+    // Scalar broadcast operations
+    let scaled = a * 2.0;
+    assert(scaled[0] == 2.0);
+    assert(scaled[3] == 8.0);
+
+    let shifted = a + 10.0;
+    assert(shifted[0] == 11.0);
+    assert(shifted[3] == 14.0);
+
+    // Negation
+    let neg = -a;
+    assert(neg[0] == -1.0);
+    assert(neg[3] == -4.0);
+
+    // Absolute value
+    let mixed: f32x4 = f32x4(-1.0, 2.0, -3.0, 4.0);
+    let abs_val = mixed.abs();
+    assert(abs_val[0] == 1.0);
+    assert(abs_val[2] == 3.0);
+
+    // Min/Max element-wise
+    let min_val = a.min(b);
+    assert(min_val[0] == 1.0);
+    assert(min_val[3] == 4.0);
+
+    let max_val = a.max(b);
+    assert(max_val[0] == 5.0);
+    assert(max_val[3] == 8.0);
+
+    // Square root
+    let squares: f32x4 = f32x4(1.0, 4.0, 9.0, 16.0);
+    let roots = squares.sqrt();
+    assert(roots[0] == 1.0);
+    assert(roots[1] == 2.0);
+    assert(roots[2] == 3.0);
+    assert(roots[3] == 4.0);
+
+    // Reciprocal (approximate)
+    let recip = a.rcp();  // 1/x
+    assert((recip[0] - 1.0).abs() < 0.001);
+    assert((recip[1] - 0.5).abs() < 0.001);
+
+    // Reciprocal square root (approximate)
+    let rsqrt = squares.rsqrt();  // 1/sqrt(x)
+    assert((rsqrt[0] - 1.0).abs() < 0.001);
+    assert((rsqrt[1] - 0.5).abs() < 0.001);
+
+    // FMA (Fused Multiply-Add): a * b + c
+    let c: f32x4 = f32x4(10.0, 20.0, 30.0, 40.0);
+    let fma_result = a.fma(b, c);
+    assert(fma_result[0] == 15.0);   // 1*5 + 10
+    assert(fma_result[1] == 32.0);   // 2*6 + 20
+    assert(fma_result[2] == 51.0);   // 3*7 + 30
+    assert(fma_result[3] == 72.0);   // 4*8 + 40
+
+    // Integer SIMD operations
+    let ia: i32x4 = i32x4(1, 2, 3, 4);
+    let ib: i32x4 = i32x4(5, 6, 7, 8);
+
+    let isum = ia + ib;
+    assert(isum[0] == 6);
+    assert(isum[3] == 12);
+
+    let iprod = ia * ib;
+    assert(iprod[0] == 5);
+    assert(iprod[3] == 32);
+
+    // Bitwise operations (integer)
+    let bits_a: u32x4 = u32x4(0xFF, 0x0F, 0xF0, 0x00);
+    let bits_b: u32x4 = u32x4(0x0F, 0xFF, 0x0F, 0xFF);
+
+    let and_result = bits_a & bits_b;
+    assert(and_result[0] == 0x0F);
+    assert(and_result[1] == 0x0F);
+
+    let or_result = bits_a | bits_b;
+    assert(or_result[0] == 0xFF);
+    assert(or_result[3] == 0xFF);
+
+    let xor_result = bits_a ^ bits_b;
+    assert(xor_result[0] == 0xF0);
+
+    // Wider SIMD types
+    let wide_a: f32x8 = f32x8(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
+    let wide_b: f32x8 = f32x8.splat(2.0);
+
+    let wide_prod = wide_a * wide_b;
+    assert(wide_prod[0] == 2.0);
+    assert(wide_prod[7] == 16.0);
+
+    // Double precision
+    let da: f64x2 = f64x2(1.0, 2.0);
+    let db: f64x2 = f64x2(3.0, 4.0);
+
+    let dsum = da + db;
+    assert(dsum[0] == 4.0);
+    assert(dsum[1] == 6.0);
+
+    // f64x4 for AVX
+    let qda: f64x4 = f64x4(1.0, 2.0, 3.0, 4.0);
+    let qdb: f64x4 = f64x4(5.0, 6.0, 7.0, 8.0);
+
+    let qdsum = qda + qdb;
+    assert(qdsum[0] == 6.0);
+    assert(qdsum[3] == 12.0);
+
+    // Lane extraction and insertion
+    let v: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);
+
+    let lane2 = v.extract(2);
+    assert(lane2 == 3.0);
+
+    let modified = v.insert(1, 100.0);
+    assert(modified[1] == 100.0);
+    assert(modified[2] == 3.0);
+
+    // Splat (broadcast scalar to all lanes)
+    let splatted = f32x4.splat(42.0);
+    assert(splatted[0] == 42.0);
+    assert(splatted[3] == 42.0);
+
+    // Load from array
+    let arr: [f32; 8] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let loaded = f32x4.load(&arr[0]);
+    assert(loaded[0] == 1.0);
+    assert(loaded[3] == 4.0);
+
+    let loaded_offset = f32x4.load(&arr[4]);
+    assert(loaded_offset[0] == 5.0);
+
+    // Store to array
+    let mut output: [f32; 4] = [0.0; 4];
+    sum.store(&mut output[0]);
+    assert(output[0] == 6.0);
+    assert(output[3] == 12.0);
+
+    // Aligned load/store
+    let aligned = f32x4.load_aligned(&arr[0]);  // Requires 16-byte alignment
+    aligned.store_aligned(&mut output[0]);
+}

@@ -1,0 +1,131 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, matrix-chain, dynamic-programming
+// @timeout: 30000
+
+// Matrix chain multiplication order optimization
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// 2D array simulation using flat indexing: dp[i][j] = dp_flat[i*N + j]
+// For N=5 matrices, we need 5x5 = 25 entries. Use 4 Arr8s (32 slots).
+type Grid4 is { r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8 };
+
+fn grid_zeros() -> Grid4 { Grid4 { r0: zeros(), r1: zeros(), r2: zeros(), r3: zeros() } }
+
+fn grid_get(g: Grid4, flat: Int) -> Int {
+    if flat < 8 { get8(g.r0, flat) }
+    else if flat < 16 { get8(g.r1, flat - 8) }
+    else if flat < 24 { get8(g.r2, flat - 16) }
+    else { get8(g.r3, flat - 24) }
+}
+
+fn grid_set(g: Grid4, flat: Int, v: Int) -> Grid4 {
+    if flat < 8 { Grid4 { r0: set8(g.r0, flat, v), r1: g.r1, r2: g.r2, r3: g.r3 } }
+    else if flat < 16 { Grid4 { r0: g.r0, r1: set8(g.r1, flat - 8, v), r2: g.r2, r3: g.r3 } }
+    else if flat < 24 { Grid4 { r0: g.r0, r1: g.r1, r2: set8(g.r2, flat - 16, v), r3: g.r3 } }
+    else { Grid4 { r0: g.r0, r1: g.r1, r2: g.r2, r3: set8(g.r3, flat - 24, v) } }
+}
+
+// Matrix chain multiplication: given dimensions p[0..n], find minimum
+// number of scalar multiplications to compute A0 * A1 * ... * A(n-1)
+// where Ai has dimensions p[i] x p[i+1]
+fn mcm(dims: Arr8, n: Int) -> Int {
+    // dp[i][j] = min cost to multiply matrices i..j
+    let stride = n;
+    let mut dp = grid_zeros();
+
+    // Length of chain
+    let mut len = 2;
+    while len <= n {
+        let mut i = 0;
+        while i <= n - len {
+            let j = i + len - 1;
+            let idx = i * stride + j;
+            let mut best = 999999999;
+            let mut k = i;
+            while k < j {
+                let cost = grid_get(dp, i * stride + k) + grid_get(dp, (k + 1) * stride + j)
+                         + get8(dims, i) * get8(dims, k + 1) * get8(dims, j + 1);
+                if cost < best { best = cost; }
+                k = k + 1;
+            }
+            dp = grid_set(dp, idx, best);
+            i = i + 1;
+        }
+        len = len + 1;
+    }
+    grid_get(dp, 0 * stride + n - 1)
+}
+
+fn test_two_matrices() -> Int {
+    // A(10x30) * B(30x5) = 10*30*5 = 1500
+    let dims = Arr8 { v0: 10, v1: 30, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(mcm(dims, 2), 1500);
+    1
+}
+
+fn test_three_matrices() -> Int {
+    // A(10x30) * B(30x5) * C(5x60)
+    // Option 1: (AB)C = 10*30*5 + 10*5*60 = 1500 + 3000 = 4500
+    // Option 2: A(BC) = 30*5*60 + 10*30*60 = 9000 + 18000 = 27000
+    // Optimal: 4500
+    let dims = Arr8 { v0: 10, v1: 30, v2: 5, v3: 60, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(mcm(dims, 3), 4500);
+    1
+}
+
+fn test_classic_example() -> Int {
+    // Classic example: dimensions [40, 20, 30, 10, 30]
+    // 4 matrices: 40x20, 20x30, 30x10, 10x30
+    // Optimal = 26000
+    let dims = Arr8 { v0: 40, v1: 20, v2: 30, v3: 10, v4: 30, v5: 0, v6: 0, v7: 0 };
+    assert_eq(mcm(dims, 4), 26000);
+    1
+}
+
+fn test_identical_dims() -> Int {
+    // All square matrices: 10x10 * 10x10 * 10x10
+    // Any order: 2 * 10^3 = 2000
+    let dims = Arr8 { v0: 10, v1: 10, v2: 10, v3: 10, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(mcm(dims, 3), 2000);
+    1
+}
+
+fn test_single_matrix() -> Int {
+    // Single matrix: no multiplications needed
+    let dims = Arr8 { v0: 5, v1: 10, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(mcm(dims, 1), 0);
+    1
+}
+
+fn main() -> Int {
+    test_two_matrices();
+    test_three_matrices();
+    test_classic_example();
+    test_identical_dims();
+    test_single_matrix();
+    print("[OK] 521_matrix_chain_aot");
+    0
+}

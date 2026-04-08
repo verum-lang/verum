@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, basic
+
+
+/// Test for basic generic functions and types.
+/// Generics enable type-safe polymorphism without runtime overhead.
+
+// Generic identity function
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Generic function with multiple uses
+fn duplicate<T: Clone>(x: T) -> (T, T) {
+    (x.clone(), x)
+}
+
+// Generic struct (using Heap semantic type)
+type Wrapper<T> is {
+    value: T,
+};
+
+// Generic enum
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+// Generic method implementation
+implement<T> Wrapper<T> {
+    fn new(value: T) -> Wrapper<T> {
+        Wrapper { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+// Generic function operating on generic types
+fn map_wrapper<T, U>(wrapper: Wrapper<T>, f: fn(T) -> U) -> Wrapper<U> {
+    Wrapper { value: f(wrapper.value) }
+}
+
+fn main() {
+    // Identity with different types
+    let int_result: Int = identity(42);
+    let text_result: Text = identity("hello");
+    let bool_result: Bool = identity(true);
+    let list_result: List<Int> = identity([1, 2, 3]);
+
+    // Duplicate function
+    let (a, b) = duplicate(100);
+
+    // Generic Wrapper usage
+    let int_wrapper: Wrapper<Int> = Wrapper.new(42);
+    let text_wrapper: Wrapper<Text> = Wrapper.new("world");
+    let nested_wrapper: Wrapper<Wrapper<Int>> = Wrapper.new(Wrapper.new(99));
+
+    // Accessing generic values
+    let unwrapped_int: &Int = int_wrapper.get();
+    let unwrapped_text: &Text = text_wrapper.get();
+
+    // Mapping over wrapper
+    let doubled_wrapper: Wrapper<Int> = map_wrapper(Wrapper.new(21), |x| x * 2);
+
+    // Generic enum usage
+    let some_value: Maybe<Int> = Some(42);
+    let no_value: Maybe<Text> = None;
+
+    // Pattern matching on generic enum
+    let result = match some_value {
+        Some(n) => n * 2,
+        None => 0,
+    };
+
+    // Type inference with generics
+    let inferred_wrapper = Wrapper.new(123);  // Wrapper<Int> inferred
+    let inferred_id = identity("test");  // Text inferred
+
+    // Assertions
+    assert(int_result == 42);
+    assert(text_result == "hello");
+    assert(bool_result == true);
+    assert(a == 100);
+    assert(b == 100);
+    assert(*unwrapped_int == 42);
+    assert(*unwrapped_text == "world");
+    assert(*doubled_wrapper.get() == 42);
+    assert(result == 84);
+    assert(*inferred_wrapper.get() == 123);
+}

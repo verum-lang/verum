@@ -1,0 +1,122 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, string, encoding, ascii
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn str_eq(a: Arr8, b: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        if get(a, i) != get(b, i) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn is_palindrome(a: Arr8, n: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        if get(a, lo) != get(a, hi) { return 0; }
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+    1
+}
+
+fn count_char(a: Arr8, n: Int, c: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get(a, i) == c { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn count_distinct(a: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        let mut found = 0;
+        let mut j = 0;
+        while j < i {
+            if get(a, j) == get(a, i) { found = 1; }
+            j = j + 1;
+        }
+        if found == 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn is_subsequence(a: Arr8, an: Int, b: Arr8, bn: Int) -> Int {
+    let mut ai = 0;
+    let mut bi = 0;
+    while ai < an {
+        if bi < bn {
+            if get(a, ai) == get(b, bi) { bi = bi + 1; }
+        }
+        ai = ai + 1;
+    }
+    if bi == bn { 1 } else { 0 }
+}
+
+fn test_palindrome() -> Int {
+    let p = Arr8 { d0: 97, d1: 98, d2: 99, d3: 98, d4: 97, d5: 0, d6: 0, d7: 0 };
+    assert_eq(is_palindrome(p, 5), 1);
+    let np = Arr8 { d0: 97, d1: 98, d2: 99, d3: 100, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(is_palindrome(np, 4), 0);
+    assert_eq(is_palindrome(p, 1), 1);
+    let aa = Arr8 { d0: 97, d1: 97, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(is_palindrome(aa, 2), 1);
+    1
+}
+
+fn test_count() -> Int {
+    let s = Arr8 { d0: 97, d1: 97, d2: 98, d3: 97, d4: 98, d5: 99, d6: 0, d7: 0 };
+    assert_eq(count_char(s, 6, 97), 3);
+    assert_eq(count_char(s, 6, 98), 2);
+    assert_eq(count_char(s, 6, 99), 1);
+    assert_eq(count_distinct(s, 6), 3);
+    1
+}
+
+fn test_subsequence() -> Int {
+    let a = Arr8 { d0: 97, d1: 98, d2: 99, d3: 100, d4: 101, d5: 102, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 97, d1: 99, d2: 101, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(is_subsequence(a, 6, b, 3), 1);
+    let c = Arr8 { d0: 97, d1: 102, d2: 99, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(is_subsequence(a, 6, c, 3), 0);
+    let e = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(is_subsequence(a, 6, e, 0), 1);
+    1
+}
+
+fn test_equality() -> Int {
+    let a = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let c = Arr8 { d0: 1, d1: 2, d2: 4, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(str_eq(a, b, 3), 1);
+    assert_eq(str_eq(a, c, 3), 0);
+    assert_eq(str_eq(a, c, 2), 1);
+    1
+}
+
+fn main() -> Int {
+    test_palindrome();
+    test_count();
+    test_subsequence();
+    test_equality();
+    print("DIFF_OK: string_ops");
+    0
+}

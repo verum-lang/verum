@@ -1,0 +1,27 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, recursion, stack
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Test recursion depth of 100 levels
+
+fn recurse(n: Int, acc: Int) -> Int {
+    if n <= 0 {
+        return acc;
+    }
+    return recurse(n - 1, acc + 1);
+}
+
+fn main() {
+    let result = recurse(100, 0);
+    assert_eq(result, 100);
+
+    // Also test with different starting accumulator
+    let result2 = recurse(100, 50);
+    assert_eq(result2, 150);
+
+    // Test edge case: zero iterations
+    let result3 = recurse(0, 42);
+    assert_eq(result3, 42);
+}

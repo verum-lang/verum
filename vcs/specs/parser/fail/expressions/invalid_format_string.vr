@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, format-string, interpolation, error
+// @description: Format string with unclosed interpolation
+// @expected-error: E006
+
+fn test() {
+    let x = f"value is {value";  // Unclosed interpolation
+}

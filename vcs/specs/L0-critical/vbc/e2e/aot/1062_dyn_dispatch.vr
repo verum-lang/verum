@@ -1,0 +1,69 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: protocol, dyn, dispatch
+// @expect: pass
+
+// Test dynamic dispatch with protocol objects.
+
+type Shape is protocol {
+    fn area(&self) -> Int;
+    fn name(&self) -> Text;
+};
+
+type Circle is { radius: Int };
+type Rect is { width: Int, height: Int };
+
+implement Shape for Circle {
+    fn area(&self) -> Int {
+        self.radius * self.radius * 3
+    }
+    fn name(&self) -> Text {
+        "circle"
+    }
+}
+
+implement Shape for Rect {
+    fn area(&self) -> Int {
+        self.width * self.height
+    }
+    fn name(&self) -> Text {
+        "rect"
+    }
+}
+
+fn print_shape(s: &Shape) {
+    let a = s.area();
+    let n = s.name();
+    print(f"  {n}: area={a}");
+}
+
+fn total_area(shapes: List<&Shape>) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < shapes.len() {
+        sum = sum + shapes[i].area();
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() -> Int {
+    let c = Circle { radius: 5 };
+    let r = Rect { width: 4, height: 6 };
+
+    print_shape(&c);
+    print_shape(&r);
+
+    if c.area() != 75 {
+        print(f"FAIL: circle area = {c.area()}");
+        return 1;
+    }
+    if r.area() != 24 {
+        print(f"FAIL: rect area = {r.area()}");
+        return 1;
+    }
+
+    print("PASS: dynamic dispatch works");
+    0
+}

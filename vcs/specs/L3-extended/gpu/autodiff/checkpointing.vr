@@ -1,0 +1,333 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, autodiff, checkpointing, memory
+
+/// Gradient checkpointing (activation checkpointing) for memory-efficient
+/// training of large models. Trade compute for memory by recomputing
+/// activations during backward pass instead of storing them.
+
+mount autodiff.{GradientTape, checkpoint, no_grad};
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // Basic checkpointing
+    test_basic_checkpoint(device);
+
+    // Selective checkpointing
+    test_selective_checkpoint(device);
+
+    // Automatic optimal checkpointing
+    test_auto_checkpoint(device);
+
+    // Custom checkpoint policy
+    test_custom_policy(device);
+
+    // Memory savings verification
+    test_memory_savings(device);
+}
+
+fn test_basic_checkpoint(device: Device) {
+    let tape = GradientTape.new();
+
+    let x = tape.variable(Tensor.randn<f32, [64, 1024]>().to(device));
+
+    // Without checkpointing: all intermediate activations stored
+    fn expensive_block_no_checkpoint(x: Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+        let a = x.relu();
+        let b = matmul(matmul(a, a.T), a);  // O(N*M) memory for intermediate
+        let c = b.layer_norm();
+        c.gelu()
+    }
+
+    // With checkpointing: recompute during backward
+    @checkpoint
+    fn expensive_block(x: Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+        let a = x.relu();
+        let b = matmul(matmul(a, a.T), a);
+        let c = b.layer_norm();
+        c.gelu()
+    }
+
+    // Forward pass stores only input and output
+    let y = expensive_block(x);
+    let loss = y.sum();
+
+    // Backward pass recomputes intermediate activations
+    let grads = tape.gradient(loss, [x]);
+
+    // Gradient should be correct
+    assert(grads[x].shape() == [64, 1024]);
+}
+
+fn test_selective_checkpoint(device: Device) {
+    // Checkpoint only specific layers
+
+    @differentiable
+    fn layer1(x: Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+        x.relu()  // Cheap, don't checkpoint
+    }
+
+    @checkpoint  // Expensive, checkpoint this
+    @differentiable
+    fn layer2(x: Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+        let h = matmul(x, x.T);  // Attention-like, memory intensive
+        matmul(h, x)
+    }
+
+    @differentiable
+    fn layer3(x: Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+        x.tanh()  // Cheap, don't checkpoint
+    }
+
+    @checkpoint
+    @differentiable
+    fn layer4(x: Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+        // Another expensive layer
+        matmul(x.softmax(axis: 1), x)
+    }
+
+    let tape = GradientTape.new();
+    let x = tape.variable(Tensor.randn<f32, [32, 512]>().to(device));
+
+    let h1 = layer1(x);
+    let h2 = layer2(h1);  // Checkpointed
+    let h3 = layer3(h2);
+    let h4 = layer4(h3);  // Checkpointed
+    let loss = h4.sum();
+
+    let grads = tape.gradient(loss, [x]);
+    assert(grads[x].shape() == [32, 512]);
+}
+
+fn test_auto_checkpoint(device: Device) {
+    // Automatic checkpointing based on memory budget
+
+    type TransformerBlock is {
+        attn_proj: Tensor<f32, [D, D]>,
+        ff_proj1: Tensor<f32, [D, 4*D]>,
+        ff_proj2: Tensor<f32, [4*D, D]>,
+    };
+
+    implement TransformerBlock {
+        @differentiable
+        fn forward(&self, x: Tensor<f32, [B, S, D]>) -> Tensor<f32, [B, S, D]> {
+            // Attention
+            let qkv = matmul(x, self.attn_proj);
+            let attn_out = self.attention(qkv);
+            let h = x + attn_out;
+
+            // FFN
+            let ff1 = matmul(h, self.ff_proj1).gelu();
+            let ff2 = matmul(ff1, self.ff_proj2);
+            h + ff2
+        }
+
+        fn attention(&self, qkv: Tensor<f32, [B, S, D]>) -> Tensor<f32, [B, S, D]> {
+            // Simplified attention
+            let scores = matmul(qkv, qkv.transpose(-2, -1));
+            let weights = scores.softmax(axis: -1);
+            matmul(weights, qkv)
+        }
+    }
+
+    // Create deep model
+    let num_layers = 24;
+    let layers: List<TransformerBlock> = (0..num_layers)
+        .map(|_| TransformerBlock {
+            attn_proj: Tensor.randn().to(device),
+            ff_proj1: Tensor.randn().to(device),
+            ff_proj2: Tensor.randn().to(device),
+        })
+        .collect();
+
+    // Auto-checkpoint with memory budget
+    let memory_budget = 8 * 1024 * 1024 * 1024;  // 8 GB
+    let tape = GradientTape.with_memory_budget(memory_budget);
+
+    let x = tape.variable(Tensor.randn<f32, [32, 512, 768]>().to(device));
+
+    // Forward pass with automatic checkpointing decisions
+    let mut h = x;
+    for (i, layer) in layers.iter().enumerate() {
+        h = tape.auto_checkpoint(|h| layer.forward(h), h);
+    }
+
+    let loss = h.sum();
+    let grads = tape.gradient(loss, [x]);
+}
+
+fn test_custom_policy(device: Device) {
+    // Custom checkpointing policy
+
+    type CheckpointPolicy is {
+        checkpoint_every_n: Int,
+        min_layer_size: Int,
+    };
+
+    implement CheckpointPolicy {
+        fn should_checkpoint(&self, layer_idx: Int, layer_size: Int) -> bool {
+            layer_idx % self.checkpoint_every_n == 0 && layer_size >= self.min_layer_size
+        }
+    }
+
+    let policy = CheckpointPolicy {
+        checkpoint_every_n: 3,  // Checkpoint every 3rd layer
+        min_layer_size: 1024 * 1024,  // At least 1MB
+    };
+
+    // Segment-based checkpointing (like Megatron-LM)
+    @differentiable
+    fn checkpoint_segment(
+        layers: List<&Layer>,
+        x: Tensor<f32, [N, M]>,
+        segment_size: Int
+    ) -> Tensor<f32, [N, M]> {
+        let num_segments = (layers.len() + segment_size - 1) / segment_size;
+        let mut h = x;
+
+        for seg in 0..num_segments {
+            let start = seg * segment_size;
+            let end = min((seg + 1) * segment_size, layers.len());
+
+            // Checkpoint entire segment
+            h = checkpoint(|| {
+                let mut seg_h = h;
+                for i in start..end {
+                    seg_h = layers[i].forward(seg_h);
+                }
+                seg_h
+            });
+        }
+
+        h
+    }
+
+    // Uniform checkpointing (sqrt(n) memory)
+    fn uniform_checkpoint<F>(
+        func: F,
+        x: Tensor<f32, [N, M]>,
+        num_checkpoints: Int
+    ) -> Tensor<f32, [N, M]>
+    where F: Fn(Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+        // Divide computation into num_checkpoints segments
+        // Store only checkpoint outputs, recompute segments during backward
+        checkpoint_uniform(func, x, num_checkpoints)
+    }
+}
+
+fn test_memory_savings(device: Device) {
+    // Measure memory savings from checkpointing
+
+    let batch_size = 64;
+    let seq_len = 512;
+    let hidden_dim = 1024;
+    let num_layers = 12;
+
+    @differentiable
+    fn layer(x: Tensor<f32, [B, S, D]>) -> Tensor<f32, [B, S, D]> {
+        // Simulate transformer layer
+        let h = x.layer_norm();
+        let attn = matmul(h, h.transpose(-2, -1));
+        let weights = attn.softmax(axis: -1);
+        let out = matmul(weights, h);
+        out + x  // Residual
+    }
+
+    // Without checkpointing
+    let initial_mem = device.memory_info().used;
+
+    {
+        let tape = GradientTape.new();
+        let x = tape.variable(Tensor.randn<f32, [64, 512, 1024]>().to(device));
+
+        let mut h = x;
+        for _ in 0..num_layers {
+            h = layer(h);
+        }
+
+        let loss = h.sum();
+        let mem_no_checkpoint = device.memory_info().used - initial_mem;
+
+        let grads = tape.gradient(loss, [x]);
+    }
+
+    device.synchronize();
+
+    // With checkpointing
+    let initial_mem2 = device.memory_info().used;
+
+    {
+        let tape = GradientTape.new_with_checkpointing();
+        let x = tape.variable(Tensor.randn<f32, [64, 512, 1024]>().to(device));
+
+        @checkpoint
+        fn layer_checkpointed(x: Tensor<f32, [B, S, D]>) -> Tensor<f32, [B, S, D]> {
+            layer(x)
+        }
+
+        let mut h = x;
+        for _ in 0..num_layers {
+            h = layer_checkpointed(h);
+        }
+
+        let loss = h.sum();
+        let mem_with_checkpoint = device.memory_info().used - initial_mem2;
+
+        let grads = tape.gradient(loss, [x]);
+
+        // Memory with checkpointing should be significantly less
+        // Approximately: O(sqrt(n)) vs O(n) for n layers
+    }
+
+    // Nested checkpointing for very deep models
+    @checkpoint(nested = true)
+    fn deeply_nested_forward(x: Tensor<f32, [N, M]>, depth: Int) -> Tensor<f32, [N, M]> {
+        if depth == 0 {
+            x.relu()
+        } else {
+            let h = deeply_nested_forward(x, depth - 1);
+            deeply_nested_forward(h + x, depth - 1)
+        }
+    }
+
+    // Rematerialization during backward
+    let tape = GradientTape.new_with_checkpointing();
+    let x = tape.variable(Tensor.randn<f32, [32, 256]>().to(device));
+
+    // Track recomputation count
+    let mut recompute_count = 0;
+
+    @checkpoint(on_recompute = || { recompute_count += 1; })
+    fn tracked_block(x: Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+        x.pow(2).sqrt().relu()
+    }
+
+    let y = tracked_block(x);
+    let loss = y.sum();
+    let grads = tape.gradient(loss, [x]);
+
+    // Block was recomputed during backward
+    assert(recompute_count >= 1);
+}
+
+// Placeholder trait for demonstration
+type Layer is protocol {
+    fn forward(&self, x: Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]>;
+}
+
+fn checkpoint<F, T>(f: F) -> T where F: Fn() -> T {
+    // Implemented by runtime
+    f()
+}
+
+fn checkpoint_uniform<F>(f: F, x: Tensor<f32, [N, M]>, n: Int) -> Tensor<f32, [N, M]>
+where F: Fn(Tensor<f32, [N, M]>) -> Tensor<f32, [N, M]> {
+    f(x)
+}
+
+const B: Int = 64;
+const S: Int = 512;
+const D: Int = 1024;

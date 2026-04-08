@@ -1,0 +1,129 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: patterns, errors, invalid
+// @expected-error: Pattern length mismatch
+
+/// Test for invalid pattern errors.
+/// These patterns are syntactically or semantically invalid.
+
+fn main() {
+    // ========================================================================
+    // Type mismatch in patterns
+    // ========================================================================
+
+    // E502: Pattern type doesn't match expression type
+    let x: Int = 42;
+    match x {
+        "hello" => {},  // ERROR: Text pattern for Int
+        _ => {},
+    }
+
+    // E502: Wrong tuple arity
+    let pair: (Int, Int) = (1, 2);
+    match pair {
+        (a, b, c) => {},  // ERROR: 3-tuple pattern for 2-tuple
+        _ => {},
+    }
+
+    // E502: Wrong struct type
+    type Point is { x: Int, y: Int };
+    type Size is { width: Int, height: Int };
+
+    let p = Point { x: 1, y: 2 };
+    match p {
+        Size { width, height } => {},  // ERROR: Size pattern for Point
+        _ => {},
+    }
+
+    // ========================================================================
+    // Invalid struct field patterns
+    // ========================================================================
+
+    // E502: Unknown field in struct pattern
+    match p {
+        Point { x, y, z } => {},  // ERROR: z is not a field of Point
+        _ => {},
+    }
+
+    // E502: Missing required field without rest pattern
+    match p {
+        Point { x } => {},  // ERROR: missing y (no ..)
+        _ => {},
+    }
+
+    // ========================================================================
+    // Invalid enum variant patterns
+    // ========================================================================
+
+    type Color is
+        | Red
+        | Green
+        | Blue
+        | Rgb(Int, Int, Int);
+
+    let c: Color = Red;
+
+    // E502: Non-existent variant
+    match c {
+        Yellow => {},  // ERROR: Yellow is not a variant
+        _ => {},
+    }
+
+    // E502: Wrong variant arity
+    match c {
+        Rgb(r, g) => {},  // ERROR: Rgb has 3 components
+        _ => {},
+    }
+
+    // E502: Treating unit variant as tuple
+    match c {
+        Red(x) => {},  // ERROR: Red is unit variant
+        _ => {},
+    }
+
+    // ========================================================================
+    // Invalid binding patterns
+    // ========================================================================
+
+    // ========================================================================
+    // Invalid guard patterns
+    // ========================================================================
+
+    // E502: Guard references unbound variable
+    let n: Int = 5;
+    match n {
+        x if y > 0 => {},  // ERROR: y is not defined
+        _ => {},
+    }
+
+    // E502: Guard has wrong type
+    match n {
+        x if x => {},  // ERROR: guard must be Bool, x is Int
+        _ => {},
+    }
+
+    // ========================================================================
+    // Invalid or patterns
+    // ========================================================================
+
+    type Maybe<T> is Some(T) | None;
+
+    // E502: Or pattern with different bindings
+    match Maybe.Some(42) {
+        Some(x) | None => {},  // ERROR: x not bound in None branch
+        _ => {},
+    }
+
+    // ========================================================================
+    // Invalid @ patterns
+    // ========================================================================
+
+    // E502: @ with incompatible sub-pattern
+    match n {
+        x @ "string" => {},  // ERROR: Int bound to Text pattern
+        _ => {},
+    }
+}
+
+// All examples above should produce E502 "Invalid pattern" error

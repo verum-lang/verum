@@ -1,0 +1,161 @@
+// =============================================================================
+// config_protocols_test.vr - Tests for runtime config error Display/Debug
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, config, error, display, debug, protocols, core
+// @description: Tests Display for InitError and Debug/Display for RuntimeIoError
+// =============================================================================
+
+mount core.runtime.config.{InitError, RuntimeIoError};
+mount core.base.protocols.{Display, Debug};
+mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, None};
+
+// =============================================================================
+// Section 1: InitError Display
+// =============================================================================
+
+@test
+fn test_init_error_tls_display() {
+    let err = InitError.TlsInitFailed;
+    let text = format_display(&err);
+    assert(text.contains("thread-local") || text.contains("TLS") || text.contains("tls"));
+}
+
+@test
+fn test_init_error_io_driver_display() {
+    let err = InitError.IoDriverInitFailed("kqueue unavailable");
+    let text = format_display(&err);
+    assert(text.contains("I/O") || text.contains("driver"));
+    assert(text.contains("kqueue unavailable"));
+}
+
+@test
+fn test_init_error_executor_display() {
+    let err = InitError.ExecutorInitFailed("no threads");
+    let text = format_display(&err);
+    assert(text.contains("executor"));
+}
+
+@test
+fn test_init_error_platform_display() {
+    let err = InitError.PlatformNotSupported;
+    let text = format_display(&err);
+    assert(text.contains("Platform") || text.contains("platform") || text.contains("supported"));
+}
+
+@test
+fn test_init_error_already_init_display() {
+    let err = InitError.AlreadyInitialized;
+    let text = format_display(&err);
+    assert(text.contains("already") || text.contains("initialized"));
+}
+
+@test
+fn test_init_error_debug() {
+    let err = InitError.TlsInitFailed;
+    let text = format_debug(&err);
+    assert(text.contains("InitError") || text.contains("TlsInitFailed"));
+}
+
+@test
+fn test_init_error_display_fn_exists() {
+    fn display_err(e: &InitError) -> Text {
+        format_display(e)
+    }
+    let _ = display_err;
+}
+
+// =============================================================================
+// Section 2: RuntimeIoError Display
+// =============================================================================
+
+@test
+fn test_runtime_io_error_would_block_display() {
+    let err = RuntimeIoError.WouldBlock;
+    let text = format_display(&err);
+    assert(text.contains("block") || text.contains("would"));
+}
+
+@test
+fn test_runtime_io_error_timed_out_display() {
+    let err = RuntimeIoError.TimedOut;
+    let text = format_display(&err);
+    assert(text.contains("timed") || text.contains("timeout"));
+}
+
+@test
+fn test_runtime_io_error_permission_denied_display() {
+    let err = RuntimeIoError.PermissionDenied;
+    let text = format_display(&err);
+    assert(text.contains("permission"));
+}
+
+@test
+fn test_runtime_io_error_other_display() {
+    let err = RuntimeIoError.Other(42);
+    let text = format_display(&err);
+    assert(text.contains("42"));
+}
+
+// =============================================================================
+// Section 3: RuntimeIoError Debug
+// =============================================================================
+
+@test
+fn test_runtime_io_error_debug_would_block() {
+    let err = RuntimeIoError.WouldBlock;
+    let text = format_debug(&err);
+    assert(text.contains("WouldBlock"));
+}
+
+@test
+fn test_runtime_io_error_debug_other() {
+    let err = RuntimeIoError.Other(99);
+    let text = format_debug(&err);
+    assert(text.contains("Other") && text.contains("99"));
+}
+
+@test
+fn test_runtime_io_error_display_differs_by_variant() {
+    let err1 = RuntimeIoError.WouldBlock;
+    let err2 = RuntimeIoError.TimedOut;
+    assert(format_display(&err1) != format_display(&err2));
+}
+
+@test
+fn test_runtime_io_error_display_fn_exists() {
+    fn display_err(e: &RuntimeIoError) -> Text {
+        format_display(e)
+    }
+    let _ = display_err;
+}
+
+@test
+fn test_runtime_io_error_debug_fn_exists() {
+    fn debug_err(e: &RuntimeIoError) -> Text {
+        format_debug(e)
+    }
+    let _ = debug_err;
+}
+
+// =============================================================================
+// Section 4: Type Existence
+// =============================================================================
+
+@test
+fn test_init_error_type_exists() {
+    let _: Maybe<InitError> = None;
+}
+
+@test
+fn test_runtime_io_error_type_exists() {
+    let _: Maybe<RuntimeIoError> = None;
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

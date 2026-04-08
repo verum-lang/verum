@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, const, error
+// @description: Test missing const value detection
+// @expected-error: E066
+
+const X: Int;
+
+const PI: Float;
+
+const NAME: Text =;
+
+public const MAX: Int = ;

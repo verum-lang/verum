@@ -1,0 +1,106 @@
+// @test: typecheck-fail
+// @expected-error: E101
+// @tier: 0
+// @level: L2
+// @tags: contexts, circular, dependency, error
+// @description: Tests detection of circular dependencies in context initialization
+
+/// Contexts cannot have circular dependencies in their initialization.
+/// This would require each context to exist before the other.
+
+context ServiceA {
+    fn do_a(&self) -> Int;
+}
+
+context ServiceB {
+    fn do_b(&self) -> Int;
+}
+
+/// Type that requires ServiceB to construct
+type ServiceAImpl is {
+    b_ref: &ServiceB,  // Depends on ServiceB
+};
+
+implement ServiceA for ServiceAImpl {
+    fn do_a(&self) -> Int {
+        self.b_ref.do_b() + 1
+    }
+}
+
+/// Type that requires ServiceA to construct
+type ServiceBImpl is {
+    a_ref: &ServiceA,  // Depends on ServiceA
+};
+
+implement ServiceB for ServiceBImpl {
+    fn do_b(&self) -> Int {
+        self.a_ref.do_a() + 1
+    }
+}
+
+fn main() {
+    // ERROR: Circular context dependency
+    // ServiceA needs ServiceB, and ServiceB needs ServiceA
+
+    // Cannot construct either without the other already existing
+    // let a = ServiceAImpl { b_ref: ??? };  // Need B first
+    // let b = ServiceBImpl { a_ref: ??? };  // Need A first
+
+    // E0303: Circular context dependency detected:
+    //   ServiceA -> ServiceB -> ServiceA
+}
+
+// The following patterns can break circular dependencies:
+
+/// Pattern 1: Lazy initialization
+context LazyServiceA {
+    fn get(&self) -> &ServiceA;
+}
+
+type LazyServiceAImpl is {
+    inner: Lazy<ServiceAImpl>,
+};
+
+/// Pattern 2: Trait objects with late binding
+context DynamicServiceA {
+    fn do_a(&self) -> Int;
+}
+
+type DynamicAImpl is {
+    b: Heap<ServiceB>,
+};
+
+/// Pattern 3: Event-based communication
+context EventBus {
+    fn publish(&self, event: Event);
+    fn subscribe(&self, handler: fn(Event));
+}
+
+type Event is
+    | ServiceAEvent(Int)
+    | ServiceBEvent(Int);
+
+/// Independent services communicating via events
+type IndependentA is {
+    bus: &EventBus,
+};
+
+implement IndependentA {
+    fn do_a(&self) -> Int {
+        self.bus.publish(Event.ServiceAEvent(42));
+        42
+    }
+}
+
+type IndependentB is {
+    bus: &EventBus,
+};
+
+implement IndependentB {
+    fn do_b(&self) -> Int {
+        self.bus.publish(Event.ServiceBEvent(24));
+        24
+    }
+}
+
+type Lazy<T> is { value: Maybe<T> };

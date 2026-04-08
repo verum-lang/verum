@@ -1,0 +1,171 @@
+// @test: differential
+
+// @level: L0
+// @tags: differential, sorting, basic
+// @timeout: 30000
+
+// Basic sorting algorithms on small arrays
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn swap8(a: Arr8, i: Int, j: Int) -> Arr8 {
+    let vi = get8(a, i);
+    let vj = get8(a, j);
+    set8(set8(a, i, vj), j, vi)
+}
+
+fn is_sorted(a: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n - 1 {
+        if get8(a, i) > get8(a, i + 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Selection sort
+fn selection_sort(a: Arr8, n: Int) -> Arr8 {
+    let mut arr = a;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n {
+            if get8(arr, j) < get8(arr, min_idx) { min_idx = j; }
+            j = j + 1;
+        }
+        if min_idx != i { arr = swap8(arr, i, min_idx); }
+        i = i + 1;
+    }
+    arr
+}
+
+// Bubble sort
+fn bubble_sort(a: Arr8, n: Int) -> Arr8 {
+    let mut arr = a;
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n - 1 - i {
+            if get8(arr, j) > get8(arr, j + 1) {
+                arr = swap8(arr, j, j + 1);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+// Insertion sort
+fn insertion_sort(a: Arr8, n: Int) -> Arr8 {
+    let mut arr = a;
+    let mut i = 1;
+    while i < n {
+        let key = get8(arr, i);
+        let mut j = i - 1;
+        let mut insert_pos = i;
+        let mut found = 0;
+        while j >= 0 {
+            if get8(arr, j) > key {
+                arr = set8(arr, j + 1, get8(arr, j));
+            } else {
+                insert_pos = j + 1;
+                found = 1;
+                j = -1; // break
+            }
+            if found == 0 { j = j - 1; }
+        }
+        if found == 0 { insert_pos = 0; }
+        arr = set8(arr, insert_pos, key);
+        i = i + 1;
+    }
+    arr
+}
+
+fn arrays_equal(a: Arr8, b: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        if get8(a, i) != get8(b, i) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_all_sorts() -> Int {
+    let arr = Arr8 { v0: 5, v1: 3, v2: 8, v3: 1, v4: 7, v5: 2, v6: 0, v7: 0 };
+    let n = 6;
+
+    let sel = selection_sort(arr, n);
+    let bub = bubble_sort(arr, n);
+    let ins = insertion_sort(arr, n);
+
+    assert_eq(is_sorted(sel, n), 1);
+    assert_eq(is_sorted(bub, n), 1);
+    assert_eq(is_sorted(ins, n), 1);
+
+    // All three should produce the same result
+    assert_eq(arrays_equal(sel, bub, n), 1);
+    assert_eq(arrays_equal(sel, ins, n), 1);
+    1
+}
+
+fn test_already_sorted() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let sel = selection_sort(arr, 5);
+    assert_eq(is_sorted(sel, 5), 1);
+    assert_eq(get8(sel, 0), 1);
+    assert_eq(get8(sel, 4), 5);
+    1
+}
+
+fn test_reverse() -> Int {
+    let arr = Arr8 { v0: 5, v1: 4, v2: 3, v3: 2, v4: 1, v5: 0, v6: 0, v7: 0 };
+    let bub = bubble_sort(arr, 5);
+    assert_eq(is_sorted(bub, 5), 1);
+    assert_eq(get8(bub, 0), 1);
+    assert_eq(get8(bub, 4), 5);
+    1
+}
+
+fn test_duplicates() -> Int {
+    let arr = Arr8 { v0: 3, v1: 1, v2: 3, v3: 1, v4: 2, v5: 0, v6: 0, v7: 0 };
+    let ins = insertion_sort(arr, 5);
+    assert_eq(is_sorted(ins, 5), 1);
+    assert_eq(get8(ins, 0), 1);
+    assert_eq(get8(ins, 1), 1);
+    assert_eq(get8(ins, 4), 3);
+    1
+}
+
+fn main() -> Int {
+    test_all_sorts();
+    test_already_sorted();
+    test_reverse();
+    test_duplicates();
+    print("[OK] diff_sorting_basic");
+    0
+}

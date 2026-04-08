@@ -1,0 +1,488 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/arithmetic_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, arithmetic, math, overflow
+// @description: Comprehensive tests for arithmetic intrinsics including basic ops,
+//               checked, wrapping, saturating, and comparison operations.
+//
+// Coverage:
+// - Basic arithmetic: add, sub, mul, div, rem, neg, abs, signum
+// - Checked arithmetic: checked_add, checked_sub, checked_mul, checked_div
+// - Overflow detection: overflowing_add, overflowing_sub, overflowing_mul
+// - Wrapping arithmetic: wrapping_add, wrapping_sub, wrapping_mul
+// - Saturating arithmetic: saturating_add, saturating_sub, saturating_mul
+// - Comparison: eq, ne, lt, le, gt, ge, min, max, clamp
+// - Wide arithmetic: widening_mul, carrying_add, borrowing_sub
+// - Integer utilities: ilog2, ilog10, is_power_of_two
+//
+// Test Strategy:
+// - Test with Int (default integer type)
+// - Test with sized types: Int32, Int64, UInt32, UInt64
+// - Test edge cases: MIN, MAX, zero, overflow boundaries
+// =============================================================================
+
+module test.stdlib.intrinsics.arithmetic_test;
+
+mount core.intrinsics.arithmetic.{
+    // Basic
+    add, sub, mul, div, rem, neg, abs, signum,
+    // Checked
+    checked_add, checked_sub, checked_mul, checked_div, checked_neg,
+    // Overflow
+    overflowing_add, overflowing_sub, overflowing_mul, overflowing_neg,
+    // Wrapping
+    wrapping_add, wrapping_sub, wrapping_mul, wrapping_neg,
+    wrapping_add_u32, wrapping_sub_u32,
+    // Saturating
+    saturating_add, saturating_sub, saturating_mul, saturating_neg,
+    saturating_add_i32, saturating_sub_i32,
+    saturating_add_u32, saturating_sub_u32,
+    // Comparison
+    eq, ne, lt, le, gt, ge, min, max, clamp,
+    // Wide
+    widening_mul, carrying_add, borrowing_sub,
+    // Utilities
+    ilog2, ilog10, is_power_of_two,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+@test
+fn test_basic_ops() {
+    // Addition
+    assert(add(2, 3) == 5);
+    assert(add(-1, 1) == 0);
+    assert(add(0, 0) == 0);
+
+    // Subtraction
+    assert(sub(5, 3) == 2);
+    assert(sub(3, 5) == -2);
+
+    // Multiplication
+    assert(mul(3, 4) == 12);
+    assert(mul(-2, 3) == -6);
+    assert(mul(0, 100) == 0);
+
+    // Division
+    assert(div(10, 2) == 5);
+    assert(div(10, 3) == 3);
+
+    // Remainder
+    assert(rem(10, 3) == 1);
+    assert(rem(10, 5) == 0);
+
+    // Negation
+    assert(neg(5) == -5);
+    assert(neg(-5) == 5);
+    assert(neg(0) == 0);
+
+    // Absolute value
+    assert(abs(5) == 5);
+    assert(abs(-5) == 5);
+    assert(abs(0) == 0);
+
+    // Signum
+    assert(signum(42) == 1);
+    assert(signum(-42) == -1);
+    assert(signum(0) == 0);
+
+    print("Basic operations tests passed");
+}
+
+@test
+fn test_comparison_intrinsics() {
+    // Equality
+    assert(eq(5, 5));
+    assert(!eq(5, 6));
+
+    // Inequality
+    assert(ne(5, 6));
+    assert(!ne(5, 5));
+
+    // Less than
+    assert(lt(3, 5));
+    assert(!lt(5, 3));
+
+    // Less than or equal
+    assert(le(3, 5));
+    assert(le(5, 5));
+
+    // Greater than
+    assert(gt(5, 3));
+    assert(!gt(3, 5));
+
+    // Greater than or equal
+    assert(ge(5, 3));
+    assert(ge(5, 5));
+
+    // Min/Max
+    assert(min(3, 5) == 3);
+    assert(max(3, 5) == 5);
+
+    // Clamp
+    assert(clamp(5, 0, 10) == 5);
+    assert(clamp(-5, 0, 10) == 0);
+    assert(clamp(15, 0, 10) == 10);
+
+    print("Comparison operations tests passed");
+}
+
+// =============================================================================
+// Basic Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_basic_arithmetic() {
+    // Addition
+    assert(add(2, 3) == 5);
+    assert(add(-1, 1) == 0);
+    assert(add(0, 0) == 0);
+
+    // Subtraction
+    assert(sub(5, 3) == 2);
+    assert(sub(3, 5) == -2);
+    assert(sub(0, 0) == 0);
+
+    // Multiplication
+    assert(mul(3, 4) == 12);
+    assert(mul(-2, 3) == -6);
+    assert(mul(0, 100) == 0);
+    assert(mul(-3, -4) == 12);
+
+    // Division
+    assert(div(10, 2) == 5);
+    assert(div(10, 3) == 3);  // Integer division truncates toward zero
+    assert(div(-10, 3) == -3);
+    assert(div(10, -3) == -3);
+
+    // Remainder
+    assert(rem(10, 3) == 1);
+    assert(rem(10, 5) == 0);
+    assert(rem(-10, 3) == -1);  // Sign follows dividend in Verum
+
+    // Negation
+    assert(neg(5) == -5);
+    assert(neg(-5) == 5);
+    assert(neg(0) == 0);
+
+    // Absolute value
+    assert(abs(5) == 5);
+    assert(abs(-5) == 5);
+    assert(abs(0) == 0);
+
+    // Signum
+    assert(signum(42) == 1);
+    assert(signum(-42) == -1);
+    assert(signum(0) == 0);
+
+    print("Basic arithmetic tests passed");
+}
+
+// =============================================================================
+// Checked Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_checked_arithmetic() {
+    // Checked addition - success cases
+    let sum = checked_add(10, 20);
+    assert(sum is Some);
+    match sum {
+        Some(v) => assert(v == 30),
+        None => panic("Expected Some"),
+    }
+
+    // Checked addition with negative numbers
+    let sum2 = checked_add(-5, 3);
+    assert(sum2 is Some);
+    match sum2 {
+        Some(v) => assert(v == -2),
+        None => panic("Expected Some"),
+    }
+
+    // Checked subtraction - success
+    let diff = checked_sub(100, 30);
+    assert(diff is Some);
+    match diff {
+        Some(v) => assert(v == 70),
+        None => panic("Expected Some"),
+    }
+
+    // Checked multiplication - success
+    let prod = checked_mul(7, 8);
+    assert(prod is Some);
+    match prod {
+        Some(v) => assert(v == 56),
+        None => panic("Expected Some"),
+    }
+
+    // Checked division - success
+    let quot = checked_div(100, 5);
+    assert(quot is Some);
+    match quot {
+        Some(v) => assert(v == 20),
+        None => panic("Expected Some"),
+    }
+
+    // Checked division by zero - returns None
+    let div_zero = checked_div(10, 0);
+    assert(div_zero is None);
+
+    // Checked negation - success
+    let negated = checked_neg(42);
+    assert(negated is Some);
+    match negated {
+        Some(v) => assert(v == -42),
+        None => panic("Expected Some"),
+    }
+
+    print("Checked arithmetic tests passed");
+}
+
+// =============================================================================
+// Overflowing Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_overflowing_arithmetic() {
+    // Overflowing add - no overflow
+    let (sum, overflow) = overflowing_add(10, 20);
+    assert(sum == 30);
+    assert(!overflow);
+
+    // Overflowing sub - no overflow
+    let (diff, underflow) = overflowing_sub(50, 20);
+    assert(diff == 30);
+    assert(!underflow);
+
+    // Overflowing mul - no overflow
+    let (prod, mul_overflow) = overflowing_mul(5, 6);
+    assert(prod == 30);
+    assert(!mul_overflow);
+
+    // Overflowing neg - no overflow for positive
+    let (negated, neg_overflow) = overflowing_neg(42);
+    assert(negated == -42);
+    assert(!neg_overflow);
+
+    // Zero cases
+    let (zero_sum, zero_overflow) = overflowing_add(0, 0);
+    assert(zero_sum == 0);
+    assert(!zero_overflow);
+
+    print("Overflowing arithmetic tests passed");
+}
+
+// =============================================================================
+// Wrapping Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_wrapping_arithmetic() {
+    // Basic wrapping add
+    assert(wrapping_add(10, 20) == 30);
+    assert(wrapping_add(-5, 10) == 5);
+
+    // Basic wrapping sub
+    assert(wrapping_sub(50, 20) == 30);
+    assert(wrapping_sub(20, 50) == -30);
+
+    // Basic wrapping mul
+    assert(wrapping_mul(6, 7) == 42);
+    assert(wrapping_mul(-3, 4) == -12);
+
+    // Wrapping neg
+    assert(wrapping_neg(5) == -5);
+    assert(wrapping_neg(-5) == 5);
+
+    // Type-specific wrapping (UInt32)
+    let u32_a: UInt32 = 100 as UInt32;
+    let u32_b: UInt32 = 50 as UInt32;
+    assert(wrapping_add_u32(u32_a, u32_b) == (150 as UInt32));
+    assert(wrapping_sub_u32(u32_a, u32_b) == (50 as UInt32));
+
+    print("Wrapping arithmetic tests passed");
+}
+
+// =============================================================================
+// Saturating Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_saturating_arithmetic() {
+    // Basic saturating add
+    assert(saturating_add(10, 20) == 30);
+    assert(saturating_add(-5, 10) == 5);
+
+    // Basic saturating sub
+    assert(saturating_sub(50, 20) == 30);
+    assert(saturating_sub(20, 50) == -30);
+
+    // Basic saturating mul
+    assert(saturating_mul(6, 7) == 42);
+    assert(saturating_mul(-3, 4) == -12);
+
+    // Saturating neg
+    assert(saturating_neg(5) == -5);
+    assert(saturating_neg(-5) == 5);
+
+    // Type-specific saturating (Int32)
+    let i32_a: Int32 = 100 as Int32;
+    let i32_b: Int32 = 50 as Int32;
+    assert(saturating_add_i32(i32_a, i32_b) == (150 as Int32));
+    assert(saturating_sub_i32(i32_a, i32_b) == (50 as Int32));
+
+    // Type-specific saturating (UInt32)
+    let u32_a: UInt32 = 100 as UInt32;
+    let u32_b: UInt32 = 50 as UInt32;
+    assert(saturating_add_u32(u32_a, u32_b) == (150 as UInt32));
+    assert(saturating_sub_u32(u32_a, u32_b) == (50 as UInt32));
+
+    // Saturating at zero for unsigned
+    let u32_small: UInt32 = 10 as UInt32;
+    let u32_large: UInt32 = 100 as UInt32;
+    assert(saturating_sub_u32(u32_small, u32_large) == (0 as UInt32));
+
+    print("Saturating arithmetic tests passed");
+}
+
+// =============================================================================
+// Comparison Operations Tests
+// =============================================================================
+
+@test
+fn test_comparison_ops() {
+    // Equality
+    assert(eq(5, 5));
+    assert(!eq(5, 6));
+
+    // Inequality
+    assert(ne(5, 6));
+    assert(!ne(5, 5));
+
+    // Less than
+    assert(lt(3, 5));
+    assert(!lt(5, 3));
+    assert(!lt(5, 5));
+
+    // Less than or equal
+    assert(le(3, 5));
+    assert(le(5, 5));
+    assert(!le(6, 5));
+
+    // Greater than
+    assert(gt(5, 3));
+    assert(!gt(3, 5));
+    assert(!gt(5, 5));
+
+    // Greater than or equal
+    assert(ge(5, 3));
+    assert(ge(5, 5));
+    assert(!ge(3, 5));
+
+    // Min
+    assert(min(3, 5) == 3);
+    assert(min(5, 3) == 3);
+    assert(min(-5, -3) == -5);
+
+    // Max
+    assert(max(3, 5) == 5);
+    assert(max(5, 3) == 5);
+    assert(max(-5, -3) == -3);
+
+    // Clamp
+    assert(clamp(5, 0, 10) == 5);   // Within range
+    assert(clamp(-5, 0, 10) == 0);  // Below min
+    assert(clamp(15, 0, 10) == 10); // Above max
+    assert(clamp(0, 0, 10) == 0);   // At min
+    assert(clamp(10, 0, 10) == 10); // At max
+
+    print("Comparison operations tests passed");
+}
+
+// =============================================================================
+// Wide Arithmetic Tests
+// =============================================================================
+
+@test
+fn test_wide_arithmetic() {
+    // Widening multiply - basic
+    let (low, high) = widening_mul(10, 20);
+    assert(low == 200);
+    assert(high == 0);  // No overflow for small numbers
+
+    // Widening multiply - larger numbers
+    let (low2, high2) = widening_mul(1000, 1000);
+    assert(low2 == 1000000);
+    assert(high2 == 0);
+
+    // Carrying add - no carry
+    let (sum, carry_out) = carrying_add(10, 20, false);
+    assert(sum == 30);
+    assert(!carry_out);
+
+    // Carrying add - with carry in
+    let (sum2, carry_out2) = carrying_add(10, 20, true);
+    assert(sum2 == 31);
+    assert(!carry_out2);
+
+    // Borrowing sub - no borrow
+    let (diff, borrow_out) = borrowing_sub(50, 20, false);
+    assert(diff == 30);
+    assert(!borrow_out);
+
+    // Borrowing sub - with borrow in
+    let (diff2, borrow_out2) = borrowing_sub(50, 20, true);
+    assert(diff2 == 29);
+    assert(!borrow_out2);
+
+    print("Wide arithmetic tests passed");
+}
+
+// =============================================================================
+// Integer Utilities Tests
+// =============================================================================
+
+@test
+fn test_integer_utilities() {
+    // ilog2
+    assert(ilog2(1) == 0);
+    assert(ilog2(2) == 1);
+    assert(ilog2(4) == 2);
+    assert(ilog2(8) == 3);
+    assert(ilog2(16) == 4);
+    assert(ilog2(7) == 2);   // floor(log2(7)) = 2
+    assert(ilog2(15) == 3);  // floor(log2(15)) = 3
+
+    // ilog10
+    assert(ilog10(1) == 0);
+    assert(ilog10(10) == 1);
+    assert(ilog10(100) == 2);
+    assert(ilog10(1000) == 3);
+    assert(ilog10(99) == 1);  // floor(log10(99)) = 1
+    assert(ilog10(999) == 2); // floor(log10(999)) = 2
+
+    // is_power_of_two
+    assert(is_power_of_two(1));
+    assert(is_power_of_two(2));
+    assert(is_power_of_two(4));
+    assert(is_power_of_two(8));
+    assert(is_power_of_two(16));
+    assert(is_power_of_two(256));
+    assert(!is_power_of_two(0));
+    assert(!is_power_of_two(3));
+    assert(!is_power_of_two(5));
+    assert(!is_power_of_two(6));
+    assert(!is_power_of_two(7));
+
+    print("Integer utilities tests passed");
+}

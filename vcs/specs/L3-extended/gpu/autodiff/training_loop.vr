@@ -1,0 +1,391 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: autodiff, training, optimization
+
+type LinearLayer is {
+    weight: Tensor<f32, [IN, OUT]>,
+    bias: Tensor<f32, [OUT]>,
+};
+
+implement LinearLayer {
+    fn new<const IN: Int, const OUT: Int>() -> Self {
+        // Xavier initialization
+        let scale = (2.0 / (IN + OUT) as f32).sqrt();
+        Self {
+            weight: Tensor.randn() * scale,
+            bias: Tensor.zeros(),
+        }
+    }
+
+    @differentiable
+    fn forward(&self, x: Tensor<f32, [BATCH, IN]>) -> Tensor<f32, [BATCH, OUT]> {
+        matmul(x, self.weight) + self.bias
+    }
+}
+
+type MLP is {
+    layer1: LinearLayer<784, 256>,
+    layer2: LinearLayer<256, 128>,
+    layer3: LinearLayer<128, 10>,
+};
+
+implement MLP {
+    fn new() -> Self {
+        Self {
+            layer1: LinearLayer.new(),
+            layer2: LinearLayer.new(),
+            layer3: LinearLayer.new(),
+        }
+    }
+
+    @differentiable
+    fn forward(&self, x: Tensor<f32, [BATCH, 784]>) -> Tensor<f32, [BATCH, 10]> {
+        let h1 = self.layer1.forward(x).relu();
+        let h2 = self.layer2.forward(h1).relu();
+        self.layer3.forward(h2)
+    }
+
+    fn parameters(&self) -> List<&Tensor> {
+        [
+            &self.layer1.weight, &self.layer1.bias,
+            &self.layer2.weight, &self.layer2.bias,
+            &self.layer3.weight, &self.layer3.bias,
+        ]
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut Tensor> {
+        [
+            &mut self.layer1.weight, &mut self.layer1.bias,
+            &mut self.layer2.weight, &mut self.layer2.bias,
+            &mut self.layer3.weight, &mut self.layer3.bias,
+        ]
+    }
+}
+
+@differentiable
+fn cross_entropy_loss(logits: Tensor<f32, [BATCH, N]>, targets: Tensor<i64, [BATCH]>) -> f32 {
+    let log_probs = logits.log_softmax(axis: 1);
+    let selected = log_probs.gather(axis: 1, indices: targets.unsqueeze(1));
+    -selected.mean()
+}
+
+fn main() {
+    let device = Device.gpu(0);
+
+    // Initialize model
+    let mut model = MLP.new();
+
+    // Move to GPU
+    for param in model.parameters_mut() {
+        *param = param.to(device);
+    }
+
+    // Optimizer
+    let mut optimizer = Adam.new(
+        model.parameters(),
+        lr: 0.001,
+        betas: (0.9, 0.999),
+        eps: 1e-8,
+        weight_decay: 0.0
+    );
+
+    // Training data (simulated)
+    let train_data: Tensor<f32, [60000, 784]> = Tensor.randn();
+    let train_labels: Tensor<i64, [60000]> = Tensor.randint(0, 10);
+
+    let batch_size = 32;
+    let num_epochs = 10;
+    let num_batches = train_data.shape()[0] / batch_size;
+
+    // Training loop
+    for epoch in 0..num_epochs {
+        let mut total_loss = 0.0;
+        let mut correct = 0;
+        let mut total = 0;
+
+        for batch_idx in 0..num_batches {
+            let start = batch_idx * batch_size;
+            let end = start + batch_size;
+
+            // Get batch
+            let batch_x = train_data.slice_rows(start, end).to(device);
+            let batch_y = train_labels[start..end].to(device);
+
+            // Create gradient tape
+            let tape = GradientTape.new();
+
+            // Track parameters
+            let tracked_params: List<Variable<_>> = model.parameters()
+                .iter()
+                .map(|p| tape.variable(**p))
+                .collect();
+
+            // Forward pass
+            let logits = model.forward(batch_x);
+
+            // Compute loss
+            let loss = cross_entropy_loss(logits, batch_y);
+
+            // Backward pass
+            let grads = tape.gradient(loss, tracked_params);
+
+            // Update parameters
+            optimizer.zero_grad();
+
+            for (param, grad) in model.parameters_mut().iter_mut().zip(grads.values()) {
+                optimizer.step(param, grad);
+            }
+
+            // Metrics
+            total_loss += loss;
+
+            let predictions = logits.argmax(axis: 1);
+            correct += (predictions == batch_y).sum();
+            total += batch_size;
+
+            // Logging
+            if batch_idx % 100 == 0 {
+                let avg_loss = total_loss / (batch_idx + 1) as f32;
+                let accuracy = correct as f32 / total as f32;
+            }
+        }
+
+        // Epoch summary
+        let epoch_loss = total_loss / num_batches as f32;
+        let epoch_acc = correct as f32 / total as f32;
+    }
+
+    // Evaluation mode
+    let test_data: Tensor<f32, [10000, 784]> = Tensor.randn();
+    let test_labels: Tensor<i64, [10000]> = Tensor.randint(0, 10);
+
+    let mut test_correct = 0;
+
+    // No gradient tracking during evaluation
+    no_grad(|| {
+        for batch_idx in 0..(test_data.shape()[0] / batch_size) {
+            let start = batch_idx * batch_size;
+            let end = start + batch_size;
+
+            let batch_x = test_data.slice_rows(start, end).to(device);
+            let batch_y = test_labels[start..end].to(device);
+
+            let logits = model.forward(batch_x);
+            let predictions = logits.argmax(axis: 1);
+            test_correct += (predictions == batch_y).sum();
+        }
+    });
+
+    let test_accuracy = test_correct as f32 / test_data.shape()[0] as f32;
+}
+
+// SGD Optimizer
+type SGD is {
+    lr: f32,
+    momentum: f32,
+    weight_decay: f32,
+    velocities: Map<Int, Tensor>,
+};
+
+implement SGD {
+    fn new(params: List<&Tensor>, lr: f32, momentum: f32 = 0.0, weight_decay: f32 = 0.0) -> Self {
+        let mut velocities = Map.new();
+        for (i, param) in params.iter().enumerate() {
+            velocities.insert(i, Tensor.zeros_like(*param));
+        }
+        Self { lr, momentum, weight_decay, velocities }
+    }
+
+    fn step(&mut self, param: &mut Tensor<f32, [_]>, grad: &Tensor<f32, [_]>, param_id: Int) {
+        let mut g = grad.clone();
+
+        // Weight decay
+        if self.weight_decay != 0.0 {
+            g = g + self.weight_decay * *param;
+        }
+
+        // Momentum
+        if self.momentum != 0.0 {
+            let v = self.velocities.get_mut(&param_id).unwrap();
+            *v = self.momentum * *v + g;
+            g = v.clone();
+        }
+
+        // Update
+        *param = *param - self.lr * g;
+    }
+}
+
+// Adam Optimizer
+type Adam is {
+    lr: f32,
+    beta1: f32,
+    beta2: f32,
+    eps: f32,
+    weight_decay: f32,
+    t: i32,
+    m: Map<Int, Tensor>,  // First moment
+    v: Map<Int, Tensor>,  // Second moment
+};
+
+implement Adam {
+    fn new(
+        params: List<&Tensor>,
+        lr: f32,
+        betas: (f32, f32) = (0.9, 0.999),
+        eps: f32 = 1e-8,
+        weight_decay: f32 = 0.0
+    ) -> Self {
+        let mut m = Map.new();
+        let mut v = Map.new();
+        for (i, param) in params.iter().enumerate() {
+            m.insert(i, Tensor.zeros_like(*param));
+            v.insert(i, Tensor.zeros_like(*param));
+        }
+        Self {
+            lr,
+            beta1: betas.0,
+            beta2: betas.1,
+            eps,
+            weight_decay,
+            t: 0,
+            m,
+            v,
+        }
+    }
+
+    fn zero_grad(&mut self) {
+        // Called before backward pass to reset accumulated gradients
+    }
+
+    fn step(&mut self, param: &mut Tensor<f32, [_]>, grad: &Tensor<f32, [_]>, param_id: Int) {
+        self.t += 1;
+
+        let mut g = grad.clone();
+
+        // Weight decay (AdamW style)
+        if self.weight_decay != 0.0 {
+            *param = *param * (1.0 - self.lr * self.weight_decay);
+        }
+
+        // Update biased first moment estimate
+        let m = self.m.get_mut(&param_id).unwrap();
+        *m = self.beta1 * *m + (1.0 - self.beta1) * g;
+
+        // Update biased second raw moment estimate
+        let v = self.v.get_mut(&param_id).unwrap();
+        *v = self.beta2 * *v + (1.0 - self.beta2) * g.pow(2);
+
+        // Compute bias-corrected estimates
+        let m_hat = *m / (1.0 - self.beta1.pow(self.t));
+        let v_hat = *v / (1.0 - self.beta2.pow(self.t));
+
+        // Update parameters
+        *param = *param - self.lr * m_hat / (v_hat.sqrt() + self.eps);
+    }
+}
+
+// Learning rate scheduler
+type CosineAnnealingLR is {
+    optimizer: Adam,
+    T_max: i32,
+    eta_min: f32,
+    base_lr: f32,
+    current_step: i32,
+};
+
+implement CosineAnnealingLR {
+    fn new(optimizer: Adam, T_max: i32, eta_min: f32 = 0.0) -> Self {
+        Self {
+            base_lr: optimizer.lr,
+            optimizer,
+            T_max,
+            eta_min,
+            current_step: 0,
+        }
+    }
+
+    fn step(&mut self) {
+        self.current_step += 1;
+        let t = self.current_step;
+        let new_lr = self.eta_min + (self.base_lr - self.eta_min) *
+            (1.0 + (3.14159 * t as f32 / self.T_max as f32).cos()) / 2.0;
+        self.optimizer.lr = new_lr;
+    }
+
+    fn get_lr(&self) -> f32 {
+        self.optimizer.lr
+    }
+}
+
+// Gradient clipping utility
+fn clip_grad_norm(grads: &mut List<Tensor>, max_norm: f32) -> f32 {
+    let mut total_norm: f32 = 0.0;
+
+    for grad in grads.iter() {
+        total_norm += grad.pow(2).sum();
+    }
+    total_norm = total_norm.sqrt();
+
+    let clip_coef = max_norm / (total_norm + 1e-6);
+    if clip_coef < 1.0 {
+        for grad in grads.iter_mut() {
+            *grad = *grad * clip_coef;
+        }
+    }
+
+    total_norm
+}
+
+// Mixed precision training helper
+type GradScaler is {
+    scale: f32,
+    growth_factor: f32,
+    backoff_factor: f32,
+    growth_interval: i32,
+    steps_since_growth: i32,
+};
+
+implement GradScaler {
+    fn new(init_scale: f32 = 65536.0) -> Self {
+        Self {
+            scale: init_scale,
+            growth_factor: 2.0,
+            backoff_factor: 0.5,
+            growth_interval: 2000,
+            steps_since_growth: 0,
+        }
+    }
+
+    fn scale_loss(&self, loss: f32) -> f32 {
+        loss * self.scale
+    }
+
+    fn unscale_grads(&self, grads: &mut List<Tensor>) {
+        for grad in grads.iter_mut() {
+            *grad = *grad / self.scale;
+        }
+    }
+
+    fn step(&mut self, optimizer: &mut Adam, grads: &List<Tensor>) {
+        // Check for inf/nan in gradients
+        let has_inf_nan = grads.iter().any(|g| g.has_inf() || g.has_nan());
+
+        if has_inf_nan {
+            // Skip update, reduce scale
+            self.scale *= self.backoff_factor;
+            self.steps_since_growth = 0;
+        } else {
+            // Proceed with update
+            // optimizer.step() would be called externally
+
+            self.steps_since_growth += 1;
+            if self.steps_since_growth >= self.growth_interval {
+                self.scale *= self.growth_factor;
+                self.steps_since_growth = 0;
+            }
+        }
+    }
+}

@@ -1,0 +1,100 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: string, multiline, escape, text
+// @description: Test multiline strings and advanced string operations
+
+fn test_string_concat() -> Int {
+    let a = "Hello";
+    let b = " World";
+    let c = a + b;
+    if c != "Hello World" {
+        print(f"FAIL concat: {c}");
+        return 1;
+    }
+    print("  string_concat: OK");
+    0
+}
+
+fn test_fstring_complex() -> Int {
+    let name = "Verum";
+    let version = 5;
+    let msg = f"Language: {name} v{version}";
+    if msg != "Language: Verum v5" {
+        print(f"FAIL fstring: {msg}");
+        return 1;
+    }
+    print("  fstring_complex: OK");
+    0
+}
+
+fn test_fstring_expr() -> Int {
+    let x = 10;
+    let y = 20;
+    let msg = f"sum={x + y}, prod={x * y}";
+    if msg != "sum=30, prod=200" {
+        print(f"FAIL fstring_expr: {msg}");
+        return 1;
+    }
+    print("  fstring_expr: OK");
+    0
+}
+
+fn test_string_methods() -> Int {
+    let s = "Hello World";
+    if s.len() != 11 {
+        print(f"FAIL str_len: {s.len()}");
+        return 1;
+    }
+    print("  string_methods: OK");
+    0
+}
+
+fn test_string_comparison() -> Int {
+    let a = "abc";
+    let b = "abc";
+    let c = "def";
+    if a != b {
+        print("FAIL str_eq");
+        return 1;
+    }
+    if a == c {
+        print("FAIL str_neq");
+        return 1;
+    }
+    print("  string_comparison: OK");
+    0
+}
+
+fn test_empty_string() -> Int {
+    let empty = "";
+    if empty.len() != 0 {
+        print(f"FAIL empty_len: {empty.len()}");
+        return 1;
+    }
+    let non_empty = empty + "x";
+    if non_empty != "x" {
+        print(f"FAIL empty_concat: {non_empty}");
+        return 1;
+    }
+    print("  empty_string: OK");
+    0
+}
+
+fn main() -> Int {
+    print("String Tests:");
+    let mut failures = 0;
+    failures = failures + test_string_concat();
+    failures = failures + test_fstring_complex();
+    failures = failures + test_fstring_expr();
+    failures = failures + test_string_methods();
+    failures = failures + test_string_comparison();
+    failures = failures + test_empty_string();
+
+    if failures == 0 {
+        print("All string tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

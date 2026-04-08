@@ -1,0 +1,205 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, simulation, cellular
+// @timeout: 30000
+
+// Milestone test: 1D cellular automata (Rule 30, Rule 110, etc.)
+// Grid stored as bitmask
+
+fn bit_test(mask: Int, pos: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < pos { b = b * 2; i = i + 1; }
+    (mask / b) % 2
+}
+
+fn bit_set_val(mask: Int, pos: Int, val: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < pos { b = b * 2; i = i + 1; }
+    let current = (mask / b) % 2;
+    if val == 1 {
+        if current == 0 { mask + b } else { mask }
+    } else {
+        if current == 1 { mask - b } else { mask }
+    }
+}
+
+fn popcount(mask: Int) -> Int {
+    let mut count = 0;
+    let mut m = mask;
+    while m > 0 {
+        count = count + m % 2;
+        m = m / 2;
+    }
+    count
+}
+
+// Apply 1D cellular automaton rule to a row of width bits
+// rule_num encodes 8 output bits for the 8 possible 3-cell neighborhoods
+fn ca_step(row: Int, width: Int, rule_num: Int) -> Int {
+    let mut new_row = 0;
+    let mut i = 0;
+    while i < width {
+        let left = if i > 0 { bit_test(row, i - 1) } else { 0 };
+        let center = bit_test(row, i);
+        let right = if i < width - 1 { bit_test(row, i + 1) } else { 0 };
+        let neighborhood = left * 4 + center * 2 + right;
+        let new_val = bit_test(rule_num, neighborhood);
+        new_row = bit_set_val(new_row, i, new_val);
+        i = i + 1;
+    }
+    new_row
+}
+
+// Run CA for n steps, return final row
+fn ca_run(initial: Int, width: Int, rule_num: Int, steps: Int) -> Int {
+    let mut row = initial;
+    let mut s = 0;
+    while s < steps {
+        row = ca_step(row, width, rule_num);
+        s = s + 1;
+    }
+    row
+}
+
+// Count total live cells across all steps
+fn ca_total_live(initial: Int, width: Int, rule_num: Int, steps: Int) -> Int {
+    let mut row = initial;
+    let mut total = popcount(row);
+    let mut s = 0;
+    while s < steps {
+        row = ca_step(row, width, rule_num);
+        total = total + popcount(row);
+        s = s + 1;
+    }
+    total
+}
+
+// Elementary CA: determine if pattern eventually becomes all-zero
+fn ca_dies_out(initial: Int, width: Int, rule_num: Int, max_steps: Int) -> Int {
+    let mut row = initial;
+    let mut s = 0;
+    while s < max_steps {
+        row = ca_step(row, width, rule_num);
+        if row == 0 { return 1; }
+        s = s + 1;
+    }
+    0
+}
+
+// Check if CA produces a fixed point (row unchanged after one step)
+fn ca_is_fixed(row: Int, width: Int, rule_num: Int) -> Int {
+    let next = ca_step(row, width, rule_num);
+    if next == row { 1 } else { 0 }
+}
+
+// Check for period-2 oscillation
+fn ca_period2(initial: Int, width: Int, rule_num: Int) -> Int {
+    let step1 = ca_step(initial, width, rule_num);
+    let step2 = ca_step(step1, width, rule_num);
+    if step2 == initial { 1 } else { 0 }
+}
+
+fn test_rule30() -> Int {
+    // Rule 30: 00011110 = 30
+    // Single cell in middle of 7-wide grid: bit 3 set = 8
+    let initial = 8; // 0001000
+    let step1 = ca_step(initial, 7, 30);
+    // Neighborhood around bit 3: left=0, center=1, right=0 → idx 2 → rule30[2]=1
+    // So center stays 1. But neighbors also change...
+    // Let's trace: for each position i (0-6):
+    // i=0: L=0,C=0,R=0 → idx=0 → rule[0]=0
+    // i=1: L=0,C=0,R=0 → idx=0 → 0
+    // i=2: L=0,C=0,R=1 → idx=1 → rule[1]=1
+    // i=3: L=0,C=1,R=0 → idx=2 → rule[2]=1
+    // i=4: L=1,C=0,R=0 → idx=4 → rule[4]=1
+    // i=5: L=0,C=0,R=0 → 0
+    // i=6: L=0,C=0,R=0 → 0
+    // Result: bits 2,3,4 set = 4+8+16 = 28
+    assert_eq(step1, 28);
+
+    // After 2 steps
+    let step2 = ca_step(step1, 7, 30);
+    // Trace step2 with row=28 (0011100):
+    // i=0: L=0,C=0,R=0 → 0
+    // i=1: L=0,C=0,R=1 → idx=1 → 1
+    // i=2: L=0,C=1,R=1 → idx=3 → rule[3]=1
+    // i=3: L=1,C=1,R=1 → idx=7 → rule[7]=0 (30=00011110, bit7=0)
+    // i=4: L=1,C=1,R=0 → idx=6 → rule[6]=0
+    // i=5: L=1,C=0,R=0 → idx=4 → rule[4]=1
+    // i=6: L=0,C=0,R=0 → 0
+    // Result: bits 1,2,5 = 2+4+32 = 38
+    assert_eq(step2, 38);
+    1
+}
+
+fn test_rule110() -> Int {
+    // Rule 110: 01101110 = 110
+    let initial = 8; // single cell
+    let step1 = ca_step(initial, 7, 110);
+    // i=0: 000→rule[0]=0
+    // i=1: 000→0
+    // i=2: 001→rule[1]=1
+    // i=3: 010→rule[2]=1
+    // i=4: 100→rule[4]=0 (110=01101110, bit4=0... wait)
+    // 110 in binary: 01101110
+    // bit0=0,bit1=1,bit2=1,bit3=1,bit4=0,bit5=1,bit6=1,bit7=0
+    // i=4: 100→idx=4→bit4=0
+    // Result: bits 2,3 = 4+8 = 12
+    assert_eq(step1, 12);
+    1
+}
+
+fn test_all_zeros() -> Int {
+    // All zeros should stay all zeros for most rules
+    assert_eq(ca_step(0, 8, 30), 0);
+    assert_eq(ca_step(0, 8, 110), 0);
+    assert_eq(ca_step(0, 8, 90), 0);
+    1
+}
+
+fn test_total_live() -> Int {
+    let initial = 8;
+    // ca_total_live counts popcount at each step (including initial)
+    // step0: row=8, popcount=1
+    // step1: row=28, popcount=3 → total=4
+    let total1 = ca_total_live(initial, 7, 30, 1);
+    assert_eq(total1, 4);
+
+    // step0: 1, step1: 3, step2: 3 → total=7
+    let total2 = ca_total_live(initial, 7, 30, 2);
+    assert_eq(total2, 7);
+    1
+}
+
+fn test_fixed_point() -> Int {
+    // All zeros is a fixed point for rule 0 (all neighborhoods -> 0)
+    assert_eq(ca_is_fixed(0, 8, 0), 1);
+
+    // Rule 255 (all neighborhoods -> 1): all-ones is the only fixed point
+    // 255 with width 8 = all bits set
+    assert_eq(ca_is_fixed(255, 8, 255), 1);
+
+    // Non-all-ones input under rule 255 is NOT a fixed point (transforms to all-ones)
+    assert_eq(ca_is_fixed(42, 8, 255), 0);
+    assert_eq(ca_is_fixed(0, 8, 255), 0);
+    1
+}
+
+fn test_dies_out() -> Int {
+    // Rule 0 kills everything in one step
+    assert_eq(ca_dies_out(255, 8, 0, 5), 1);
+    1
+}
+
+fn main() -> Int {
+    test_rule30();
+    test_rule110();
+    test_all_zeros();
+    test_total_live();
+    test_fixed_point();
+    test_dies_out();
+    print("[OK] 470_milestone_aot");
+    0
+}

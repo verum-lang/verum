@@ -1,0 +1,175 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, closures, callbacks, advanced
+// @timeout: 50000
+// @expected-exit: 0
+
+// =============================================================================
+// Closure as callback
+// =============================================================================
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn apply_n(f: fn(Int) -> Int, x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_apply_functions() {
+    let inc = |x: Int| -> Int { x + 1 };
+    assert_eq(apply_twice(inc, 5), 7);
+    assert_eq(apply_n(inc, 0, 10), 10);
+
+    let dbl = |x: Int| -> Int { x * 2 };
+    assert_eq(apply_twice(dbl, 3), 12);  // 3*2=6, 6*2=12
+    assert_eq(apply_n(dbl, 1, 10), 1024); // 2^10
+    print("  test_apply_functions: ok");
+}
+
+// =============================================================================
+// Closure factories with different captured values
+// =============================================================================
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x| x * n
+}
+
+fn test_closure_factories() {
+    let add3 = make_adder(3);
+    let add7 = make_adder(7);
+    let mul5 = make_multiplier(5);
+
+    assert_eq(add3(10), 13);
+    assert_eq(add7(10), 17);
+    assert_eq(mul5(10), 50);
+
+    // Use factory closures in a pipeline
+    let result = mul5(add3(add7(0)));
+    assert_eq(result, 50); // ((0+7)+3)*5 = 50
+    print("  test_closure_factories: ok");
+}
+
+// =============================================================================
+// Predicate combinators
+// =============================================================================
+
+fn filter_count(items: List<Int>, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_predicate_combinators() {
+    let nums: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    let is_gt5 = |x: Int| -> Bool { x > 5 };
+
+    assert_eq(filter_count(nums, is_even), 5);
+    assert_eq(filter_count(nums, is_gt5), 5);
+    print("  test_predicate_combinators: ok");
+}
+
+// =============================================================================
+// Closure as comparator for sorting
+// =============================================================================
+
+fn sort_with(items: List<Int>, less_than: fn(Int, Int) -> Bool) -> List<Int> {
+    let n = items.len();
+    let mut arr: List<Int> = [];
+    let mut i = 0;
+    while i < n {
+        arr.push(items[i]);
+        i = i + 1;
+    }
+
+    let mut swapped = true;
+    while swapped {
+        swapped = false;
+        let mut j = 0;
+        while j < n - 1 {
+            if less_than(arr[j + 1], arr[j]) {
+                let tmp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = tmp;
+                swapped = true;
+            }
+            j = j + 1;
+        }
+    }
+    arr
+}
+
+fn test_custom_sorting() {
+    let nums: List<Int> = [5, 3, 8, 1, 9, 2];
+
+    // Sort ascending
+    let asc = sort_with(nums, |a: Int, b: Int| -> Bool { a < b });
+    assert_eq(asc[0], 1);
+    assert_eq(asc[5], 9);
+
+    // Sort descending
+    let desc = sort_with(nums, |a: Int, b: Int| -> Bool { a > b });
+    assert_eq(desc[0], 9);
+    assert_eq(desc[5], 1);
+    print("  test_custom_sorting: ok");
+}
+
+// =============================================================================
+// Reduce with different operations
+// =============================================================================
+
+fn reduce(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_reduce_operations() {
+    let nums: List<Int> = [1, 2, 3, 4, 5];
+
+    let sum = reduce(nums, 0, |a: Int, b: Int| -> Int { a + b });
+    assert_eq(sum, 15);
+
+    let product = reduce(nums, 1, |a: Int, b: Int| -> Int { a * b });
+    assert_eq(product, 120);
+
+    let max_val = reduce(nums, 0, |a: Int, b: Int| -> Int { if a > b { a } else { b } });
+    assert_eq(max_val, 5);
+
+    let min_val = reduce(nums, 999, |a: Int, b: Int| -> Int { if a < b { a } else { b } });
+    assert_eq(min_val, 1);
+    print("  test_reduce_operations: ok");
+}
+
+fn main() -> Int {
+    test_apply_functions();
+    test_closure_factories();
+    test_predicate_combinators();
+    test_custom_sorting();
+    test_reduce_operations();
+    print("[OK] 623_interp_advanced_closures");
+    0
+}

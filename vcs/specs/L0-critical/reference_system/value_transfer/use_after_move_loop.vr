@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, loops, negative-test
+
+// NOTE: When affine types are implemented, should produce: E302 "type not found: token"
+
+/// Test use after move in loop context with affine types at compile time.
+/// An affine value moved in one iteration cannot be used in subsequent iterations.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-types
+
+// Affine type representing a one-time-use resource
+type affine Token is {
+    value: Int,
+};
+
+fn consume_token(t: Token) {
+    print(t.value);
+}
+
+fn main() {
+    let token = Token { value: 42 };
+    for _ in 0..3 {
+        consume_token(token);  // COMPILE ERROR: type not found: token (moved in loop)
+    }
+}

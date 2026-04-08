@@ -1,0 +1,153 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, closures
+// @description: Type inference in closures and higher-order functions
+
+/// Test for type inference in closures.
+/// Closure parameters and return types are inferred from context.
+
+// ============================================================================
+// Helper functions for testing closure inference
+// ============================================================================
+
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U {
+    f(x)
+}
+
+fn map_list<A, B>(items: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result: List<B> = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn filter_list<T: Clone>(items: List<T>, pred: fn(T) -> Bool) -> List<T> {
+    let mut result: List<T> = [];
+    for item in items {
+        if pred(item.clone()) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+fn fold_list<T, A>(items: List<T>, init: A, f: fn(A, T) -> A) -> A {
+    let mut acc = init;
+    for item in items {
+        acc = f(acc, item);
+    }
+    acc
+}
+
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T {
+    f(f(x))
+}
+
+fn compose<A, B, C>(f: fn(B) -> C, g: fn(A) -> B, x: A) -> C {
+    f(g(x))
+}
+
+fn text_len(s: Text) -> Int { s.len() }
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Basic closure with explicit parameter type
+    let doubled = map_list(numbers, |x: Int| x * 2);
+    assert(doubled == [2, 4, 6, 8, 10]);
+
+    // Closure with explicit parameter, different return type
+    let text_list = map_list([1, 2, 3], |x: Int| f"n{x}");
+    assert(text_list[0] == "n1");
+
+    // Closure as filter predicate: return Bool
+    let evens = filter_list(numbers, |x: Int| x % 2 == 0);
+    assert(evens == [2, 4]);
+
+    // Closure as fold accumulator: infer types from init value
+    let sum = fold_list(numbers, 0, |acc: Int, x: Int| acc + x);
+    assert(sum == 15);
+
+    // Fold with text accumulator
+    let str_list = fold_list(
+        [1, 2, 3],
+        "",
+        |acc: Text, x: Int| f"{acc}{x}"
+    );
+    assert(str_list == "123");
+
+    // Closure capturing environment variable
+    let multiplier: Int = 10;
+    let scaled = map_list(numbers, |x: Int| x * multiplier);
+    assert(scaled == [10, 20, 30, 40, 50]);
+
+    // Closure with conditional
+    let classify = |x: Int| {
+        if x < 0 { "negative" }
+        else if x == 0 { "zero" }
+        else { "positive" }
+    };
+    assert(classify(-5) == "negative");
+    assert(classify(0) == "zero");
+    assert(classify(3) == "positive");
+
+    // Closure with pattern match
+    let process_maybe = |opt: Maybe<Int>| match opt {
+        Some(n) => n * 2,
+        None => 0,
+    };
+    assert(process_maybe(Some(21)) == 42);
+    assert(process_maybe(None) == 0);
+
+    // Apply: T=Int, U=Int
+    let result = apply(|n: Int| n * n, 5);
+    assert(result == 25);
+
+    // Apply: T=Text, U=Int
+    let len = apply(text_len, "hello");
+    assert(len == 5);
+
+    // apply_twice: double-apply
+    let quad = apply_twice(|x: Int| x * 2, 3);
+    assert(quad == 12);  // 3 * 2 * 2 = 12
+
+    // compose: f(g(x)) - left to right
+    let add1 = |x: Int| x + 1;
+    let double = |x: Int| x * 2;
+    // compose(double, add1, 5) = double(add1(5)) = double(6) = 12
+    let composed = compose(double, add1, 5);
+    assert(composed == 12);
+
+    // Closure stored as variable then used
+    let add: fn(Int, Int) -> Int = |a: Int, b: Int| a + b;
+    assert(add(3, 7) == 10);
+
+    // Closure with block body
+    let complex = |x: Int| {
+        let squared = x * x;
+        let plus_one = squared + 1;
+        plus_one * 2
+    };
+    assert(complex(3) == 20);  // (9+1)*2 = 20
+    assert(complex(4) == 34);  // (16+1)*2 = 34
+
+    // Multi-step pipeline using closures
+    let pipeline_result = fold_list(
+        filter_list(
+            map_list(numbers, |x: Int| x * x),
+            |x: Int| x > 5
+        ),
+        0,
+        |acc: Int, x: Int| acc + x
+    );
+    // numbers squared: [1, 4, 9, 16, 25]
+    // filter > 5: [9, 16, 25]
+    // sum: 50
+    assert(pipeline_result == 50);
+}

@@ -1,0 +1,175 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop
+
+/// External C function declarations
+/// Demonstrates FFI bindings to C libraries
+
+/// POSIX system calls
+ffi Posix {
+    @extern("C")
+    fn write(fd: i32, buf: *const u8, count: usize) -> isize;
+
+    @extern("C")
+    fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
+
+    @extern("C")
+    fn open(path: *const i8, flags: i32) -> i32;
+
+    @extern("C")
+    fn close(fd: i32) -> i32;
+
+    @extern("C")
+    fn lseek(fd: i32, offset: i64, whence: i32) -> i64;
+
+    @extern("C")
+    fn fstat(fd: i32, stat: *mut Stat) -> i32;
+
+    @extern("C")
+    fn mmap(
+        addr: *mut u8,
+        length: usize,
+        prot: i32,
+        flags: i32,
+        fd: i32,
+        offset: i64
+    ) -> *mut u8;
+
+    @extern("C")
+    fn munmap(addr: *mut u8, length: usize) -> i32;
+}
+
+/// Standard C library functions
+ffi LibC {
+    @extern("C")
+    fn malloc(size: usize) -> *mut u8;
+
+    @extern("C")
+    fn calloc(num: usize, size: usize) -> *mut u8;
+
+    @extern("C")
+    fn realloc(ptr: *mut u8, new_size: usize) -> *mut u8;
+
+    @extern("C")
+    fn free(ptr: *mut u8);
+
+    @extern("C")
+    fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8;
+
+    @extern("C")
+    fn memset(s: *mut u8, c: i32, n: usize) -> *mut u8;
+
+    @extern("C")
+    fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32;
+
+    @extern("C")
+    fn strlen(s: *const i8) -> usize;
+
+    @extern("C")
+    fn strcmp(s1: *const i8, s2: *const i8) -> i32;
+
+    @extern("C")
+    fn strcpy(dest: *mut i8, src: *const i8) -> *mut i8;
+
+    @extern("C")
+    fn printf(format: *const i8, ...) -> i32;
+
+    @extern("C")
+    fn snprintf(str: *mut i8, size: usize, format: *const i8, ...) -> i32;
+}
+
+/// Math functions from libm
+ffi LibM {
+    @extern("C")
+    fn sin(x: f64) -> f64;
+
+    @extern("C")
+    fn cos(x: f64) -> f64;
+
+    @extern("C")
+    fn tan(x: f64) -> f64;
+
+    @extern("C")
+    fn sqrt(x: f64) -> f64;
+
+    @extern("C")
+    fn pow(base: f64, exp: f64) -> f64;
+
+    @extern("C")
+    fn exp(x: f64) -> f64;
+
+    @extern("C")
+    fn log(x: f64) -> f64;
+
+    @extern("C")
+    fn log10(x: f64) -> f64;
+
+    @extern("C")
+    fn floor(x: f64) -> f64;
+
+    @extern("C")
+    fn ceil(x: f64) -> f64;
+
+    @extern("C")
+    fn fabs(x: f64) -> f64;
+
+    @extern("C")
+    fn fmod(x: f64, y: f64) -> f64;
+}
+
+/// Pthread functions
+ffi Pthread {
+    @extern("C")
+    fn pthread_create(
+        thread: *mut PthreadT,
+        attr: *const PthreadAttrT,
+        start_routine: fn(*mut u8) -> *mut u8,
+        arg: *mut u8
+    ) -> i32;
+
+    @extern("C")
+    fn pthread_join(thread: PthreadT, retval: *mut *mut u8) -> i32;
+
+    @extern("C")
+    fn pthread_mutex_init(mutex: *mut PthreadMutexT, attr: *const PthreadMutexAttrT) -> i32;
+
+    @extern("C")
+    fn pthread_mutex_lock(mutex: *mut PthreadMutexT) -> i32;
+
+    @extern("C")
+    fn pthread_mutex_unlock(mutex: *mut PthreadMutexT) -> i32;
+
+    @extern("C")
+    fn pthread_mutex_destroy(mutex: *mut PthreadMutexT) -> i32;
+}
+
+/// Custom library linkage
+@link("mylib")
+ffi MyLib {
+    @extern("C")
+    fn my_custom_function(x: i32, y: i32) -> i32;
+
+    @extern("C")
+    fn my_init() -> i32;
+
+    @extern("C")
+    fn my_cleanup();
+}
+
+/// Conditional linkage for different platforms
+@cfg(target_os = "linux")
+@link("rt")
+ffi LinuxRealtime {
+    @extern("C")
+    fn clock_gettime(clk_id: i32, tp: *mut Timespec) -> i32;
+}
+
+@cfg(target_os = "macos")
+ffi MacOSTime {
+    @extern("C")
+    fn mach_absolute_time() -> u64;
+
+    @extern("C")
+    fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
+}

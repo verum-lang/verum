@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, operator, error
+// @description: Test invalid operator combinations
+// @expected-error: E018
+
+fn test_invalid_operators() {
+    let a = 1 +* 2;
+    let b = x <>> y;
+    let c = a !== b;
+}

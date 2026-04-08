@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, select, syntax, error
+// @description: Select expression with missing arm arrow
+// @expected-error: E018
+
+async fn test() {
+    select {
+        x = future.await process(x),  // Missing =>
+    }
+}

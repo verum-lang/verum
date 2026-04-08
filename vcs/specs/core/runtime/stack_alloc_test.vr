@@ -1,0 +1,518 @@
+// =============================================================================
+// stack_alloc_test.vr - Tests for stack-based allocators (no-heap environments)
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, allocator, stack, arena, pool, embedded, no-heap
+// @description: Tests for stack-based allocator types: StackAllocator,
+//               StackSavepoint, ArenaAllocator, ArenaSavepoint, PoolAllocator,
+//               ScopedStack, ScopedArena, and type aliases.
+//               These allocators target no-heap/embedded environments with
+//               deterministic O(1) allocation and zero fragmentation.
+// =============================================================================
+
+mount core.runtime.stack_alloc.{
+    StackAllocator,
+    StackSavepoint,
+    ArenaAllocator,
+    ArenaSavepoint,
+    PoolAllocator,
+    ScopedStack,
+    ScopedArena,
+    TinyStackAllocator,
+    SmallStackAllocator,
+    MediumStackAllocator,
+    LargeStackAllocator,
+    SmallArena,
+    MediumArena,
+    ConnectionPool,
+    RequestContextPool,
+};
+
+// =============================================================================
+// Section 1: StackSavepoint Construction and Fields
+// =============================================================================
+
+@test
+fn test_savepoint_construction() {
+    let sp = StackSavepoint { top: 0, alloc_count: 0 };
+    assert(sp.top == 0);
+    assert(sp.alloc_count == 0);
+}
+
+@test
+fn test_savepoint_with_values() {
+    let sp = StackSavepoint { top: 128, alloc_count: 5 };
+    assert(sp.top == 128);
+    assert(sp.alloc_count == 5);
+}
+
+@test
+fn test_savepoint_max_values() {
+    let sp = StackSavepoint { top: 65536, alloc_count: 1000 };
+    assert(sp.top == 65536);
+    assert(sp.alloc_count == 1000);
+}
+
+// =============================================================================
+// Section 2: ArenaSavepoint Construction and Fields
+// =============================================================================
+
+@test
+fn test_arena_savepoint_construction() {
+    let sp = ArenaSavepoint { chunk: 0, pos: 0, total: 0 };
+    assert(sp.chunk == 0);
+    assert(sp.pos == 0);
+    assert(sp.total == 0);
+}
+
+@test
+fn test_arena_savepoint_with_values() {
+    let sp = ArenaSavepoint { chunk: 3, pos: 256, total: 1024 };
+    assert(sp.chunk == 3);
+    assert(sp.pos == 256);
+    assert(sp.total == 1024);
+}
+
+@test
+fn test_arena_savepoint_chunk_boundary() {
+    // Savepoint at the boundary of a chunk
+    let sp = ArenaSavepoint { chunk: 15, pos: 4096, total: 65536 };
+    assert(sp.chunk == 15);
+    assert(sp.pos == 4096);
+    assert(sp.total == 65536);
+}
+
+// =============================================================================
+// Section 3: StackAllocator Construction
+// =============================================================================
+
+@test
+fn test_stack_allocator_new() {
+    let alloc = StackAllocator<1024>.new();
+    assert(alloc.capacity() == 1024);
+    assert(alloc.used() == 0);
+    assert(alloc.remaining() == 1024);
+}
+
+@test
+fn test_stack_allocator_initial_watermark() {
+    let alloc = StackAllocator<1024>.new();
+    assert(alloc.watermark() == 0);
+}
+
+@test
+fn test_stack_allocator_initial_alloc_count() {
+    let alloc = StackAllocator<1024>.new();
+    assert(alloc.alloc_count() == 0);
+}
+
+@test
+fn test_stack_allocator_capacity_matches_size() {
+    let alloc = StackAllocator<4096>.new();
+    assert(alloc.capacity() == 4096);
+    assert(alloc.remaining() == 4096);
+}
+
+@test
+fn test_stack_allocator_used_plus_remaining() {
+    let alloc = StackAllocator<2048>.new();
+    assert(alloc.used() + alloc.remaining() == alloc.capacity());
+}
+
+// =============================================================================
+// Section 4: StackAllocator Save/Restore
+// =============================================================================
+
+@test
+fn test_stack_save_initial() {
+    let alloc = StackAllocator<1024>.new();
+    let sp = alloc.save();
+    assert(sp.top == 0);
+    assert(sp.alloc_count == 0);
+}
+
+@test
+fn test_stack_restore_to_initial() {
+    let mut alloc = StackAllocator<1024>.new();
+    let sp = alloc.save();
+    // Restore immediately (no-op, but validates types)
+    alloc.restore(sp);
+    assert(alloc.used() == 0);
+    assert(alloc.alloc_count() == 0);
+}
+
+// =============================================================================
+// Section 5: StackAllocator Reset
+// =============================================================================
+
+@test
+fn test_stack_reset() {
+    let mut alloc = StackAllocator<1024>.new();
+    alloc.reset();
+    assert(alloc.used() == 0);
+    assert(alloc.alloc_count() == 0);
+}
+
+@test
+fn test_stack_reset_all() {
+    let mut alloc = StackAllocator<1024>.new();
+    alloc.reset_all();
+    assert(alloc.used() == 0);
+    assert(alloc.watermark() == 0);
+    assert(alloc.alloc_count() == 0);
+}
+
+// =============================================================================
+// Section 6: ArenaAllocator Construction
+// =============================================================================
+
+@test
+fn test_arena_allocator_new() {
+    let arena = ArenaAllocator<1024, 4>.new();
+    assert(arena.capacity() == 1024 * 4);
+    assert(arena.used() == 0);
+}
+
+@test
+fn test_arena_remaining_in_chunk() {
+    let arena = ArenaAllocator<1024, 4>.new();
+    assert(arena.remaining_in_chunk() == 1024);
+}
+
+@test
+fn test_arena_capacity_calculation() {
+    let arena = ArenaAllocator<4096, 16>.new();
+    assert(arena.capacity() == 65536);
+}
+
+// =============================================================================
+// Section 7: ArenaAllocator Save/Restore
+// =============================================================================
+
+@test
+fn test_arena_save_initial() {
+    let arena = ArenaAllocator<1024, 4>.new();
+    let sp = arena.save();
+    assert(sp.chunk == 0);
+    assert(sp.pos == 0);
+    assert(sp.total == 0);
+}
+
+@test
+fn test_arena_restore_to_initial() {
+    let mut arena = ArenaAllocator<1024, 4>.new();
+    let sp = arena.save();
+    arena.restore(sp);
+    assert(arena.used() == 0);
+    assert(arena.remaining_in_chunk() == 1024);
+}
+
+// =============================================================================
+// Section 8: ArenaAllocator Reset
+// =============================================================================
+
+@test
+fn test_arena_reset() {
+    let mut arena = ArenaAllocator<1024, 4>.new();
+    arena.reset();
+    assert(arena.used() == 0);
+    assert(arena.remaining_in_chunk() == 1024);
+}
+
+// =============================================================================
+// Section 9: PoolAllocator Construction
+// =============================================================================
+
+@test
+fn test_pool_allocator_new() {
+    let pool = PoolAllocator<64, 16>.new();
+    assert(pool.block_size() == 64);
+    assert(pool.block_count() == 16);
+}
+
+@test
+fn test_pool_initial_counts() {
+    let pool = PoolAllocator<64, 16>.new();
+    assert(pool.allocated() == 0);
+    assert(pool.available() == 16);
+}
+
+@test
+fn test_pool_allocated_plus_available() {
+    let pool = PoolAllocator<64, 16>.new();
+    assert(pool.allocated() + pool.available() == pool.block_count());
+}
+
+// =============================================================================
+// Section 10: Type Aliases
+// =============================================================================
+
+@test
+fn test_tiny_stack_allocator() {
+    let alloc: TinyStackAllocator = TinyStackAllocator.new();
+    assert(alloc.capacity() == 1024);
+}
+
+@test
+fn test_small_stack_allocator() {
+    let alloc: SmallStackAllocator = SmallStackAllocator.new();
+    assert(alloc.capacity() == 4096);
+}
+
+@test
+fn test_medium_stack_allocator() {
+    let alloc: MediumStackAllocator = MediumStackAllocator.new();
+    assert(alloc.capacity() == 16384);
+}
+
+@test
+fn test_large_stack_allocator() {
+    let alloc: LargeStackAllocator = LargeStackAllocator.new();
+    assert(alloc.capacity() == 65536);
+}
+
+@test
+fn test_small_arena() {
+    let arena: SmallArena = SmallArena.new();
+    assert(arena.capacity() == 4096 * 16);
+}
+
+@test
+fn test_medium_arena() {
+    let arena: MediumArena = MediumArena.new();
+    assert(arena.capacity() == 16384 * 32);
+}
+
+@test
+fn test_connection_pool() {
+    let pool: ConnectionPool = ConnectionPool.new();
+    assert(pool.block_size() == 1024);
+    assert(pool.block_count() == 128);
+}
+
+@test
+fn test_request_context_pool() {
+    let pool: RequestContextPool = RequestContextPool.new();
+    assert(pool.block_size() == 256);
+    assert(pool.block_count() == 256);
+}
+
+// =============================================================================
+// Section 11: Allocator Invariants
+// =============================================================================
+
+@test
+fn test_stack_used_starts_at_zero() {
+    let alloc = StackAllocator<512>.new();
+    assert(alloc.used() == 0);
+    assert(alloc.remaining() == 512);
+}
+
+@test
+fn test_arena_used_starts_at_zero() {
+    let arena = ArenaAllocator<512, 8>.new();
+    assert(arena.used() == 0);
+}
+
+@test
+fn test_pool_all_blocks_available() {
+    let pool = PoolAllocator<32, 64>.new();
+    assert(pool.available() == 64);
+    assert(pool.allocated() == 0);
+}
+
+@test
+fn test_stack_capacity_positive() {
+    let alloc = StackAllocator<256>.new();
+    assert(alloc.capacity() > 0);
+}
+
+@test
+fn test_arena_capacity_positive() {
+    let arena = ArenaAllocator<256, 2>.new();
+    assert(arena.capacity() > 0);
+    assert(arena.capacity() == 512);
+}
+
+@test
+fn test_pool_block_count_positive() {
+    let pool = PoolAllocator<128, 32>.new();
+    assert(pool.block_count() > 0);
+    assert(pool.block_size() > 0);
+}
+
+// =============================================================================
+// Section 12: Reset Preserves Capacity
+// =============================================================================
+
+@test
+fn test_stack_reset_preserves_capacity() {
+    let mut alloc = StackAllocator<2048>.new();
+    alloc.reset();
+    assert(alloc.capacity() == 2048);
+}
+
+@test
+fn test_arena_reset_preserves_capacity() {
+    let mut arena = ArenaAllocator<1024, 4>.new();
+    arena.reset();
+    assert(arena.capacity() == 4096);
+}
+
+// =============================================================================
+// Section 13: Multiple Save/Restore Cycles
+// =============================================================================
+
+@test
+fn test_stack_multiple_saves() {
+    let alloc = StackAllocator<1024>.new();
+    let sp1 = alloc.save();
+    let sp2 = alloc.save();
+    // Both savepoints should capture same state
+    assert(sp1.top == sp2.top);
+    assert(sp1.alloc_count == sp2.alloc_count);
+}
+
+@test
+fn test_arena_multiple_saves() {
+    let arena = ArenaAllocator<1024, 4>.new();
+    let sp1 = arena.save();
+    let sp2 = arena.save();
+    assert(sp1.chunk == sp2.chunk);
+    assert(sp1.pos == sp2.pos);
+    assert(sp1.total == sp2.total);
+}
+
+// =============================================================================
+// Section 14: Additional Invariant and Edge Case Tests
+// =============================================================================
+
+@test
+fn test_stack_allocator_small_size() {
+    let alloc = StackAllocator<64>.new();
+    assert(alloc.capacity() == 64);
+    assert(alloc.used() == 0);
+    assert(alloc.remaining() == 64);
+}
+
+@test
+fn test_arena_single_chunk() {
+    let arena = ArenaAllocator<512, 1>.new();
+    assert(arena.capacity() == 512);
+    assert(arena.remaining_in_chunk() == 512);
+}
+
+@test
+fn test_pool_single_block() {
+    let pool = PoolAllocator<128, 1>.new();
+    assert(pool.block_count() == 1);
+    assert(pool.available() == 1);
+    assert(pool.allocated() == 0);
+}
+
+@test
+fn test_stack_save_restore_cycle() {
+    let mut alloc = StackAllocator<2048>.new();
+    let sp1 = alloc.save();
+    alloc.restore(sp1);
+    let sp2 = alloc.save();
+    assert(sp2.top == 0);
+    assert(sp2.alloc_count == 0);
+}
+
+@test
+fn test_arena_capacity_chunk_product() {
+    // Verify capacity = chunk_size * max_chunks
+    let arena = ArenaAllocator<2048, 8>.new();
+    assert(arena.capacity() == 2048 * 8);
+}
+
+@test
+fn test_pool_block_invariant() {
+    let pool = PoolAllocator<256, 32>.new();
+    assert(pool.block_size() == 256);
+    assert(pool.allocated() + pool.available() == 32);
+}
+
+@test
+fn test_stack_reset_then_save() {
+    let mut alloc = StackAllocator<1024>.new();
+    alloc.reset();
+    let sp = alloc.save();
+    assert(sp.top == 0);
+    assert(sp.alloc_count == 0);
+}
+
+@test
+fn test_arena_reset_then_save() {
+    let mut arena = ArenaAllocator<1024, 4>.new();
+    arena.reset();
+    let sp = arena.save();
+    assert(sp.chunk == 0);
+    assert(sp.pos == 0);
+    assert(sp.total == 0);
+}
+
+// =============================================================================
+// Additional Stack Allocator Tests
+// =============================================================================
+
+@test
+fn test_stack_watermark_starts_zero() {
+    let alloc = StackAllocator<4096>.new();
+    assert(alloc.watermark() == 0);
+}
+
+@test
+fn test_stack_alloc_count_starts_zero() {
+    let alloc = StackAllocator<4096>.new();
+    assert(alloc.alloc_count() == 0);
+}
+
+@test
+fn test_stack_used_plus_remaining_equals_capacity() {
+    let alloc = StackAllocator<2048>.new();
+    assert(alloc.used() + alloc.remaining() == alloc.capacity());
+}
+
+@test
+fn test_pool_allocated_plus_available_equals_count() {
+    let pool = PoolAllocator<64, 16>.new();
+    assert(pool.allocated() + pool.available() == pool.block_count());
+}
+
+@test
+fn test_stack_reset_all_restores_empty() {
+    let mut alloc = StackAllocator<1024>.new();
+    alloc.reset_all();
+    assert(alloc.used() == 0);
+    assert(alloc.remaining() == 1024);
+}
+
+@test
+fn test_arena_used_starts_zero() {
+    let arena = ArenaAllocator<2048, 4>.new();
+    assert(arena.used() == 0);
+}
+
+@test
+fn test_pool_large_block_size() {
+    let pool = PoolAllocator<4096, 8>.new();
+    assert(pool.block_size() == 4096);
+    assert(pool.block_count() == 8);
+}
+
+@test
+fn test_stack_multiple_save_points() {
+    let mut alloc = StackAllocator<4096>.new();
+    let sp1 = alloc.save();
+    let sp2 = alloc.save();
+    // Both save points at top=0 since no allocs happened
+    assert(sp1.top == sp2.top);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,436 @@
+// @test: parse
+// @tier: 0
+// @level: L0
+// @tags: parser, expressions, stream, comprehension, lazy
+// @description: Stream comprehension tests for lazy stream processing (parse-only: uses symbolic variables)
+// Reference: stream_comprehension_expr = 'stream' , '[' , stream_body , ']';
+// Grammar: grammar/verum.ebnf lines 706-713
+
+fn main() {
+    test_basic_stream();
+    test_stream_with_filter();
+    test_stream_with_multiple_sources();
+    test_stream_with_let_bindings();
+    test_nested_streams();
+    test_stream_operations();
+}
+
+// =============================================================================
+// 1. Basic Stream Comprehensions
+// =============================================================================
+
+fn test_basic_stream() {
+    // Basic stream with yield
+    let numbers = stream[yield x for x in 0..100];
+
+    // Stream with transformation
+    let squares = stream[yield x * x for x in 0..50];
+
+    // Stream with doubling
+    let doubled = stream[yield x * 2 for x in source];
+
+    // Stream from iterator
+    let items = stream[yield item for item in collection.iter()];
+
+    // Stream with function application
+    let processed = stream[yield process(x) for x in inputs];
+
+    // Stream with method call
+    let lengths = stream[yield s.len() for s in strings];
+
+    // Stream with field access
+    let names = stream[yield user.name for user in users];
+
+    // Stream with tuple construction
+    let pairs = stream[yield (i, v) for (i, v) in items.enumerate()];
+
+    // Stream with negation
+    let negated = stream[yield -x for x in values];
+
+    // Stream with type conversion
+    let floats = stream[yield x as Float for x in integers];
+}
+
+// =============================================================================
+// 2. Stream with Filter (if clause)
+// =============================================================================
+
+fn test_stream_with_filter() {
+    // Basic filter
+    let positives = stream[yield x for x in numbers if x > 0];
+
+    // Filter for even numbers
+    let evens = stream[yield x for x in 0..100 if x % 2 == 0];
+
+    // Filter for odd numbers
+    let odds = stream[yield x for x in 0..100 if x % 2 != 0];
+
+    // Filter with boolean field
+    let active = stream[yield user for user in users if user.is_active];
+
+    // Filter with method call
+    let non_empty = stream[yield s for s in strings if !s.is_empty()];
+
+    // Filter with comparison
+    let adults = stream[yield person for person in people if person.age >= 18];
+
+    // Filter with range check
+    let valid = stream[yield x for x in data if x >= 0 && x <= 100];
+
+    // Filter with null/none check
+    let present = stream[yield item for item in maybes if item.is_some()];
+
+    // Filter with pattern matching style
+    let ok_values = stream[yield v for Ok(v) in results if v > threshold];
+
+    // Transform and filter combined
+    let squares_of_evens = stream[yield x * x for x in 0..50 if x % 2 == 0];
+
+    // Multiple filters
+    let filtered = stream[yield x for x in items if x > min if x < max if x % 2 == 0];
+}
+
+// =============================================================================
+// 3. Stream with Multiple Sources (nested for)
+// =============================================================================
+
+fn test_stream_with_multiple_sources() {
+    // Cartesian product
+    let product = stream[yield (x, y) for x in 0..5 for y in 0..5];
+
+    // Flattening nested structure
+    let flat = stream[yield item for row in matrix for item in row];
+
+    // Cross join
+    let combinations = stream[yield (a, b) for a in list_a for b in list_b];
+
+    // Dependent iteration
+    let triangular = stream[yield (i, j) for i in 0..n for j in 0..i];
+
+    // Triple nesting
+    let coords_3d = stream[yield (x, y, z) for x in 0..3 for y in 0..3 for z in 0..3];
+
+    // Filtered cross product
+    let valid_pairs = stream[yield (x, y) for x in xs for y in ys if x != y];
+
+    // Nested with transformation
+    let sums = stream[yield x + y for x in first for y in second];
+
+    // Nested with method calls
+    let words = stream[yield word for line in lines for word in line.split_whitespace()];
+
+    // Nested with field access
+    let all_items = stream[yield item for order in orders for item in order.items];
+
+    // Three-level nesting with filter
+    let valid_coords = stream[yield (x, y, z) for x in 0..n for y in 0..n for z in 0..n if x + y + z < limit];
+}
+
+// =============================================================================
+// 4. Stream with Let Bindings
+// =============================================================================
+
+fn test_stream_with_let_bindings() {
+    // Simple let binding
+    let computed = stream[
+        yield result
+        for x in source
+        let result = x * 2 + 1
+    ];
+
+    // Multiple let bindings
+    let multi_let = stream[
+        yield final_value
+        for x in inputs
+        let squared = x * x
+        let doubled = squared * 2
+        let final_value = doubled + 1
+    ];
+
+    // Let with filter
+    let filtered_computed = stream[
+        yield processed
+        for item in items
+        let processed = transform(item)
+        if processed > threshold
+    ];
+
+    // Let with type annotation
+    let typed_let = stream[
+        yield result
+        for x in data
+        let computed: Float = x as Float / 2.0
+        let result = computed.round()
+    ];
+
+    // Let binding from multiple sources
+    let combined = stream[
+        yield sum
+        for x in xs
+        for y in ys
+        let sum = x + y
+        if sum < limit
+    ];
+
+    // Complex let expression
+    let complex = stream[
+        yield output
+        for record in records
+        let normalized = record.value / record.max
+        let scaled = normalized * 100.0
+        let output = scaled.round() as Int
+    ];
+}
+
+// =============================================================================
+// 5. Nested Stream Comprehensions
+// =============================================================================
+
+fn test_nested_streams() {
+    // Stream of streams
+    let matrix_stream = stream[yield stream[yield col for col in 0..cols] for row in 0..rows];
+
+    // Nested stream with filter
+    let filtered_rows = stream[
+        yield stream[yield x for x in row if x > 0]
+        for row in matrix
+    ];
+
+    // Stream generating streams
+    let grouped = stream[
+        yield stream[yield item for item in group.items]
+        for group in groups
+    ];
+
+    // Deeply nested
+    let deep = stream[
+        yield stream[
+            yield stream[yield z for z in 0..depth]
+            for y in 0..height
+        ]
+        for x in 0..width
+    ];
+
+    // Nested with transformation
+    let transformed_nested = stream[
+        yield stream[yield x * factor for x in inner]
+        for inner in outer
+        for factor in factors
+    ];
+}
+
+// =============================================================================
+// 6. Stream Operations and Chaining
+// =============================================================================
+
+fn test_stream_operations() {
+    // Stream with take
+    let first_10 = stream[yield x for x in source].take(10);
+
+    // Stream with skip
+    let after_5 = stream[yield x for x in source].skip(5);
+
+    // Stream with take_while
+    let until_zero = stream[yield x for x in items].take_while(|x| x != 0);
+
+    // Stream with skip_while
+    let after_zeros = stream[yield x for x in items].skip_while(|x| x == 0);
+
+    // Stream with map
+    let mapped = stream[yield x for x in source].map(|x| x * 2);
+
+    // Stream with filter method
+    let filtered_stream = stream[yield x for x in source].filter(|x| x > 0);
+
+    // Stream with enumerate
+    let indexed = stream[yield item for item in items].enumerate();
+
+    // Stream with zip
+    let zipped = stream[yield a for a in first].zip(stream[yield b for b in second]);
+
+    // Stream with chain
+    let chained = stream[yield x for x in first].chain(stream[yield y for y in second]);
+
+    // Stream with flatten
+    let flattened = stream[yield inner for inner in nested_streams].flatten();
+
+    // Complex chain
+    let complex_chain = stream[yield x for x in source]
+        .filter(|x| x > 0)
+        .map(|x| x * 2)
+        .take(100)
+        .enumerate();
+}
+
+// =============================================================================
+// Stream Comprehensions in Functions
+// =============================================================================
+
+fn generate_range(start: Int, end: Int) -> Stream<Int> {
+    stream[yield x for x in start..end]
+}
+
+fn filter_positive(source: Stream<Int>) -> Stream<Int> {
+    stream[yield x for x in source if x > 0]
+}
+
+fn map_square(source: Stream<Int>) -> Stream<Int> {
+    stream[yield x * x for x in source]
+}
+
+fn cross_product<T, U>(xs: Stream<T>, ys: Stream<U>) -> Stream<(T, U)> {
+    stream[yield (x, y) for x in xs for y in ys]
+}
+
+fn flatten_matrix<T>(matrix: Stream<Stream<T>>) -> Stream<T> {
+    stream[yield item for row in matrix for item in row]
+}
+
+// =============================================================================
+// Stream Comprehensions with Complex Expressions
+// =============================================================================
+
+fn test_complex_stream_expressions() {
+    // Stream with match expression
+    let matched = stream[
+        yield match x {
+            0 => "zero"
+            n if n > 0 => "positive"
+            _ => "negative"
+        }
+        for x in numbers
+    ];
+
+    // Stream with if expression
+    let conditional = stream[
+        yield if x > 0 { x } else { -x }
+        for x in values
+    ];
+
+    // Stream with block expression
+    let blocked = stream[
+        yield {
+            let temp = x * 2;
+            let result = temp + 1;
+            result
+        }
+        for x in inputs
+    ];
+
+    // Stream with closure application
+    let applied = stream[
+        yield (|n| n * n)(x)
+        for x in source
+    ];
+
+    // Stream with struct construction
+    let points = stream[
+        yield Point { x: i, y: j }
+        for i in 0..width
+        for j in 0..height
+    ];
+
+    // Stream with tuple destructuring in pattern
+    let extracted = stream[
+        yield a + b
+        for (a, b) in pairs
+    ];
+
+    // Stream with record pattern
+    let fields = stream[
+        yield name
+        for Person { name, age } in people
+        if age >= 18
+    ];
+}
+
+// =============================================================================
+// Async Stream Comprehensions
+// =============================================================================
+
+fn test_async_streams() {
+    // Basic async stream
+    let async_data = stream[yield item.await for item in async_source];
+
+    // Async stream with filter
+    let filtered_async = stream[
+        yield result.await
+        for task in tasks
+        if task.is_ready()
+    ];
+
+    // Async stream with transformation
+    let transformed_async = stream[
+        yield process(data).await
+        for data in async_inputs
+    ];
+
+    // Concurrent async processing
+    let concurrent = stream[
+        yield fetch(url).await
+        for url in urls
+    ];
+}
+
+// =============================================================================
+// Stream Comprehensions with Type Annotations
+// =============================================================================
+
+fn test_typed_streams() {
+    // Explicit result type
+    let ints: Stream<Int> = stream[yield x for x in 0..10];
+
+    // Explicit element type
+    let floats: Stream<Float> = stream[yield x as Float for x in integers];
+
+    // Tuple stream
+    let pairs: Stream<(Int, Int)> = stream[yield (x, y) for x in 0..5 for y in 0..5];
+
+    // Nested stream type
+    let matrix: Stream<Stream<Int>> = stream[
+        yield stream[yield col for col in 0..cols]
+        for row in 0..rows
+    ];
+
+    // Option stream
+    let maybes: Stream<Maybe<Int>> = stream[
+        yield if x > 0 { Some(x) } else { None }
+        for x in values
+    ];
+}
+
+// =============================================================================
+// Edge Cases and Special Patterns
+// =============================================================================
+
+fn test_edge_cases() {
+    // Empty source
+    let empty = stream[yield x for x in []];
+
+    // Single element
+    let single = stream[yield x for x in [42]];
+
+    // Identity stream
+    let identity = stream[yield x for x in source];
+
+    // Constant stream
+    let constants = stream[yield 42 for _ in 0..10];
+
+    // Index-only iteration
+    let indices = stream[yield i for i in 0..len];
+
+    // Reversed iteration
+    let reversed = stream[yield x for x in source.rev()];
+
+    // Chunked iteration
+    let chunks = stream[yield chunk for chunk in source.chunks(10)];
+
+    // Windowed iteration
+    let windows = stream[yield window for window in source.windows(3)];
+
+    // Stepped iteration
+    let stepped = stream[yield x for x in (0..100).step_by(5)];
+
+    // Cycle-based (careful with infinite)
+    let cycled = stream[yield x for x in pattern.cycle()].take(100);
+}

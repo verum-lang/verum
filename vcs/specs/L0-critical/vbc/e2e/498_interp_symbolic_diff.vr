@@ -1,0 +1,343 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, symbolic_diff, expression_trees, polynomials, calculus
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Symbolic differentiation of polynomial expression trees (d/dx).
+//
+// Expression tree representation (flat array encoding):
+//   node[i * 4 + 0] = type: 0=Const, 1=Var(x), 2=Add, 3=Mul, 4=Pow(x^n)
+//   node[i * 4 + 1] = value for Const (integer coefficient), exponent for Pow
+//   node[i * 4 + 2] = left child index (for Add/Mul/Pow)
+//   node[i * 4 + 3] = right child index (for Add/Mul, unused for Pow)
+//
+// Differentiation rules:
+//   d/dx(c)     = 0
+//   d/dx(x)     = 1
+//   d/dx(f+g)   = f' + g'
+//   d/dx(f*g)   = f'*g + f*g'
+//   d/dx(x^n)   = n * x^(n-1)
+//
+// After differentiating, evaluate the resulting expression at a given x value.
+// Also provide a direct numeric evaluation for verification.
+
+// Evaluate expression tree rooted at node `i` at x=xval.
+// Returns integer result.
+@allow(unbounded_recursion)
+fn eval_expr(
+    node: [Int; 128],
+    i:    Int,
+    xval: Int
+) -> Int {
+    let ty   = node[i * 4 + 0];
+    let valu = node[i * 4 + 1];
+    let lft  = node[i * 4 + 2];
+    let rgt  = node[i * 4 + 3];
+
+    if ty == 0 { return valu; }                                   // Const
+    if ty == 1 { return xval; }                                   // Var x
+    if ty == 2 { return eval_expr(node, lft, xval) + eval_expr(node, rgt, xval); } // Add
+    if ty == 3 { return eval_expr(node, lft, xval) * eval_expr(node, rgt, xval); } // Mul
+    // ty == 4: Pow x^n
+    let n = valu;
+    let mut res = 1;
+    let mut k = 0;
+    while k < n { res = res * xval; k = k + 1; }
+    res
+}
+
+// Differentiate expression tree rooted at `i`, storing result into next_node[].
+// next_id[0] = next available node index.
+// Returns index of the differentiated expression root.
+@allow(unbounded_recursion)
+fn diff_expr(
+    node:     [Int; 128],
+    i:        Int,
+    out:      [Int; 128],
+    next_id:  [Int; 1]
+) -> Int {
+    let ty   = node[i * 4 + 0];
+    let valu = node[i * 4 + 1];
+    let lft  = node[i * 4 + 2];
+    let rgt  = node[i * 4 + 3];
+
+    if ty == 0 {
+        // d/dx(c) = 0
+        let nid = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[nid * 4 + 0] = 0; out[nid * 4 + 1] = 0;
+        out[nid * 4 + 2] = 0 - 1; out[nid * 4 + 3] = 0 - 1;
+        return nid;
+    }
+    if ty == 1 {
+        // d/dx(x) = 1
+        let nid = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[nid * 4 + 0] = 0; out[nid * 4 + 1] = 1;
+        out[nid * 4 + 2] = 0 - 1; out[nid * 4 + 3] = 0 - 1;
+        return nid;
+    }
+    if ty == 2 {
+        // d/dx(f+g) = f' + g'
+        let dl = diff_expr(node, lft, out, next_id);
+        let dr = diff_expr(node, rgt, out, next_id);
+        let nid = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[nid * 4 + 0] = 2; out[nid * 4 + 1] = 0;
+        out[nid * 4 + 2] = dl; out[nid * 4 + 3] = dr;
+        return nid;
+    }
+    if ty == 3 {
+        // d/dx(f*g) = f'*g + f*g'
+        // First, copy f and g into out so they can be referenced
+        let f_copy = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[f_copy * 4 + 0] = node[lft * 4 + 0];
+        out[f_copy * 4 + 1] = node[lft * 4 + 1];
+        out[f_copy * 4 + 2] = node[lft * 4 + 2];
+        out[f_copy * 4 + 3] = node[lft * 4 + 3];
+        let g_copy = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[g_copy * 4 + 0] = node[rgt * 4 + 0];
+        out[g_copy * 4 + 1] = node[rgt * 4 + 1];
+        out[g_copy * 4 + 2] = node[rgt * 4 + 2];
+        out[g_copy * 4 + 3] = node[rgt * 4 + 3];
+
+        let dl = diff_expr(node, lft, out, next_id); // f'
+        let dr = diff_expr(node, rgt, out, next_id); // g'
+
+        // f'*g
+        let term1 = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[term1 * 4 + 0] = 3; out[term1 * 4 + 1] = 0;
+        out[term1 * 4 + 2] = dl; out[term1 * 4 + 3] = g_copy;
+
+        // f*g'
+        let term2 = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[term2 * 4 + 0] = 3; out[term2 * 4 + 1] = 0;
+        out[term2 * 4 + 2] = f_copy; out[term2 * 4 + 3] = dr;
+
+        // sum
+        let nid = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[nid * 4 + 0] = 2; out[nid * 4 + 1] = 0;
+        out[nid * 4 + 2] = term1; out[nid * 4 + 3] = term2;
+        return nid;
+    }
+    // ty == 4: Pow x^n -> n * x^(n-1)
+    let n = valu;
+    if n == 0 {
+        // d/dx(x^0) = d/dx(1) = 0
+        let nid = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[nid * 4 + 0] = 0; out[nid * 4 + 1] = 0;
+        out[nid * 4 + 2] = 0 - 1; out[nid * 4 + 3] = 0 - 1;
+        return nid;
+    }
+    if n == 1 {
+        // d/dx(x^1) = 1
+        let nid = next_id[0]; next_id[0] = next_id[0] + 1;
+        out[nid * 4 + 0] = 0; out[nid * 4 + 1] = 1;
+        out[nid * 4 + 2] = 0 - 1; out[nid * 4 + 3] = 0 - 1;
+        return nid;
+    }
+    // n >= 2: result is Const(n) * Pow(x^(n-1))
+    let coeff_node = next_id[0]; next_id[0] = next_id[0] + 1;
+    out[coeff_node * 4 + 0] = 0; out[coeff_node * 4 + 1] = n;
+    out[coeff_node * 4 + 2] = 0 - 1; out[coeff_node * 4 + 3] = 0 - 1;
+
+    let pow_node = next_id[0]; next_id[0] = next_id[0] + 1;
+    out[pow_node * 4 + 0] = 4; out[pow_node * 4 + 1] = n - 1;
+    out[pow_node * 4 + 2] = 0 - 1; out[pow_node * 4 + 3] = 0 - 1;
+
+    let nid = next_id[0]; next_id[0] = next_id[0] + 1;
+    out[nid * 4 + 0] = 3; out[nid * 4 + 1] = 0;
+    out[nid * 4 + 2] = coeff_node; out[nid * 4 + 3] = pow_node;
+    nid
+}
+
+fn init_nodes(node: [Int; 128]) {
+    let mut i = 0;
+    while i < 128 { node[i] = 0; i = i + 1; }
+}
+
+fn test_diff_constant() {
+    // f(x) = 7, f'(x) = 0
+    let mut node = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_nodes(node);
+    // Node 0: Const(7)
+    node[0] = 0; node[1] = 7;
+
+    let mut out     = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nid = [0];
+    let root = diff_expr(node, 0, out, nid);
+    // Evaluate d/dx(7) at x=3: should be 0
+    assert_eq(eval_expr(out, root, 3), 0);
+    assert_eq(eval_expr(out, root, 10), 0);
+    print("diff_constant: ok");
+}
+
+fn test_diff_variable() {
+    // f(x) = x, f'(x) = 1
+    let mut node = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_nodes(node);
+    // Node 0: Var(x)
+    node[0] = 1;
+
+    let mut out     = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nid = [0];
+    let root = diff_expr(node, 0, out, nid);
+    assert_eq(eval_expr(out, root, 5), 1);
+    assert_eq(eval_expr(out, root, 100), 1);
+    print("diff_variable: ok");
+}
+
+fn test_diff_x_squared() {
+    // f(x) = x^2, f'(x) = 2*x^1 = 2x
+    // At x=3: f'(3) = 6. At x=5: f'(5) = 10.
+    let mut node = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_nodes(node);
+    // Node 0: Pow(x^2)
+    node[0] = 4; node[1] = 2;
+
+    let mut out     = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nid = [0];
+    let root = diff_expr(node, 0, out, nid);
+    assert_eq(eval_expr(out, root, 3), 6);  // 2*3 = 6
+    assert_eq(eval_expr(out, root, 5), 10); // 2*5 = 10
+    assert_eq(eval_expr(out, root, 1), 2);  // 2*1 = 2
+    print("diff_x_squared: ok");
+}
+
+fn test_diff_polynomial_sum() {
+    // f(x) = x^3 + x^2
+    // f'(x) = 3*x^2 + 2*x
+    // At x=2: f'(2) = 3*4 + 2*2 = 12 + 4 = 16
+    // At x=3: f'(3) = 3*9 + 2*3 = 27 + 6 = 33
+    //
+    // Tree (bottom-up, 1-indexed to keep node 0 as root):
+    // Node 0: Add, left=1, right=2
+    // Node 1: Pow(x^3)
+    // Node 2: Pow(x^2)
+    let mut node = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_nodes(node);
+    // Node 0: Add, children 1 and 2
+    node[0 * 4 + 0] = 2; node[0 * 4 + 2] = 1; node[0 * 4 + 3] = 2;
+    // Node 1: Pow x^3
+    node[1 * 4 + 0] = 4; node[1 * 4 + 1] = 3;
+    // Node 2: Pow x^2
+    node[2 * 4 + 0] = 4; node[2 * 4 + 1] = 2;
+
+    // Verify f(2) = 8 + 4 = 12
+    assert_eq(eval_expr(node, 0, 2), 12);
+
+    let mut out     = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nid = [0];
+    let droot = diff_expr(node, 0, out, nid);
+    assert_eq(eval_expr(out, droot, 2), 16); // 3*4 + 2*2 = 16
+    assert_eq(eval_expr(out, droot, 3), 33); // 3*9 + 2*3 = 33
+    assert_eq(eval_expr(out, droot, 1), 5);  // 3*1 + 2*1 = 5
+    print("diff_polynomial_sum: ok");
+}
+
+fn test_diff_product_rule() {
+    // f(x) = x * x^2 = x^3 (by product rule: f'=1*x^2 + x*2x = x^2 + 2x^2 = 3x^2)
+    // At x=3: f'(3) = 3*9 = 27.
+    // At x=2: f'(2) = 3*4 = 12.
+    //
+    // Tree:
+    // Node 0: Mul, children 1 and 2
+    // Node 1: Var(x)
+    // Node 2: Pow(x^2)
+    let mut node = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_nodes(node);
+    node[0 * 4 + 0] = 3; node[0 * 4 + 2] = 1; node[0 * 4 + 3] = 2;
+    node[1 * 4 + 0] = 1;                         // Var x
+    node[2 * 4 + 0] = 4; node[2 * 4 + 1] = 2;   // Pow x^2
+
+    // f(3) = 3 * 9 = 27
+    assert_eq(eval_expr(node, 0, 3), 27);
+
+    let mut out     = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nid = [0];
+    let droot = diff_expr(node, 0, out, nid);
+    // d/dx(x * x^2) by product rule = 1*x^2 + x*2x = x^2 + 2x^2 = 3x^2
+    assert_eq(eval_expr(out, droot, 3), 27); // 3*9=27
+    assert_eq(eval_expr(out, droot, 2), 12); // 3*4=12
+    assert_eq(eval_expr(out, droot, 1), 3);  // 3*1=3
+    print("diff_product_rule: ok");
+}
+
+fn main() -> Int {
+    test_diff_constant();
+    test_diff_variable();
+    test_diff_x_squared();
+    test_diff_polynomial_sum();
+    test_diff_product_rule();
+    print("[OK] 498_interp_symbolic_diff");
+    0
+}

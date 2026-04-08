@@ -1,0 +1,12 @@
+// @test: run-interpreter-panic
+// @expected-panic: Index out of bounds
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, bounds-checking, empty-list, panic
+// @description: Tests that accessing element of empty list causes a controlled panic
+
+fn main() {
+    let empty: List<Int> = [];
+    let val = empty[0];
+    print(f"{val}");
+}

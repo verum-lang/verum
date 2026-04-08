@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @description: Empty using clause is invalid
+// @expected-error: E039
+
+// Empty using clause should fail
+fn invalid_empty_using() using [] {
+    let x = 1;
+}

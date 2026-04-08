@@ -1,0 +1,25 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, axiom
+// @timeout: 5000
+
+/// Axiom declarations — unproven assumptions.
+/// Grammar: axiom_decl = 'axiom' identifier [generic_params] '(' [param_list] ')'
+///          ['->' type_expr] ';'
+/// Axioms have no proof body — they are assumed true.
+
+// Basic axiom (no proof required)
+axiom excluded_middle(p: Bool);
+
+// Axiom with return type
+axiom choice<T>(pred: fn(T) -> Bool) -> T;
+
+// Axiom with generic parameter
+axiom extensionality<T>(f: fn(T) -> T, g: fn(T) -> T);
+
+// Mathematical axiom
+axiom induction_principle(p: fn(Int) -> Bool);
+
+fn main() {
+    print("Basic axiom tests parsed");
+}

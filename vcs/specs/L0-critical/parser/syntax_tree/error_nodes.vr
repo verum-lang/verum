@@ -1,0 +1,75 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @tags: parser, syntax-tree, error-recovery, error-nodes, events, lossless
+// @description: Test that ERROR nodes are created for unparseable content via event system
+// @expected-error-count: 3
+
+// ============================================================================
+// SECTION 1: Basic ERROR Node Creation
+// ============================================================================
+
+// Missing semicolon - should create ERROR node
+fn missing_semi() {
+    let x = 1
+    let y = 2;
+}
+
+// Invalid token - should create ERROR node
+fn invalid_token() {
+    let @ = 1;
+}
+
+// Unclosed block - should create ERROR node
+fn unclosed_block() {
+    let z = 1;
+// Missing closing brace
+
+// ============================================================================
+// SECTION 2: Error Event to ERROR Node
+// ============================================================================
+
+// Test that Error events result in ERROR nodes in the green tree
+// Parser emits Error event -> GreenTreeSink creates ERROR node
+fn error_event_to_node() {
+    let valid = 1;
+}
+
+// ============================================================================
+// SECTION 3: ERROR Node Properties
+// ============================================================================
+
+// Test ERROR node kind is correct
+fn error_node_kind() {
+    let x = 1;
+}
+
+// Test ERROR node contains skipped tokens
+fn error_node_skipped_tokens() {
+    let y = 2;
+}
+
+// ============================================================================
+// SECTION 4: ERROR Node Span
+// ============================================================================
+
+// Test ERROR node has correct span
+fn error_node_span() {
+    let z = 3;
+}
+
+// ============================================================================
+// SECTION 5: Tree Structure with ERROR Nodes
+// ============================================================================
+
+// Test that ERROR nodes don't break tree structure
+fn error_tree_structure() {
+    let before = 1;
+    let after = 2;
+}
+
+// Test navigation around ERROR nodes
+fn error_navigation() {
+    let a = 1;
+    let b = 2;
+}

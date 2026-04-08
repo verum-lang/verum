@@ -1,0 +1,188 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, prefix-sum, range-query, data-structure
+// @timeout: 30000
+
+// Prefix sums and range queries
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// Build prefix sum array: prefix[i] = sum(arr[0..i])
+fn build_prefix(arr: Arr8, n: Int) -> Arr8 {
+    let mut prefix = zeros();
+    prefix = set8(prefix, 0, get8(arr, 0));
+    let mut i = 1;
+    while i < n {
+        prefix = set8(prefix, i, get8(prefix, i - 1) + get8(arr, i));
+        i = i + 1;
+    }
+    prefix
+}
+
+// Range sum query: sum(arr[l..r]) inclusive
+fn range_sum(prefix: Arr8, l: Int, r: Int) -> Int {
+    if l == 0 { get8(prefix, r) }
+    else { get8(prefix, r) - get8(prefix, l - 1) }
+}
+
+// Build prefix max array
+fn build_prefix_max(arr: Arr8, n: Int) -> Arr8 {
+    let mut pmax = zeros();
+    pmax = set8(pmax, 0, get8(arr, 0));
+    let mut i = 1;
+    while i < n {
+        pmax = set8(pmax, i, max_val(get8(pmax, i - 1), get8(arr, i)));
+        i = i + 1;
+    }
+    pmax
+}
+
+// Build suffix max array
+fn build_suffix_max(arr: Arr8, n: Int) -> Arr8 {
+    let mut smax = zeros();
+    smax = set8(smax, n - 1, get8(arr, n - 1));
+    let mut i = n - 2;
+    while i >= 0 {
+        smax = set8(smax, i, max_val(get8(smax, i + 1), get8(arr, i)));
+        i = i - 1;
+    }
+    smax
+}
+
+// Difference array: used for range updates
+// Apply "add val to all elements in [l, r]"
+fn diff_array_update(diff: Arr8, l: Int, r: Int, val: Int, n: Int) -> Arr8 {
+    let mut d = set8(diff, l, get8(diff, l) + val);
+    if r + 1 < n {
+        d = set8(d, r + 1, get8(d, r + 1) - val);
+    }
+    d
+}
+
+// Reconstruct array from difference array
+fn reconstruct(diff: Arr8, n: Int) -> Arr8 {
+    let mut arr = zeros();
+    arr = set8(arr, 0, get8(diff, 0));
+    let mut i = 1;
+    while i < n {
+        arr = set8(arr, i, get8(arr, i - 1) + get8(diff, i));
+        i = i + 1;
+    }
+    arr
+}
+
+// Max subarray sum (Kadane's algorithm)
+fn max_subarray_sum(arr: Arr8, n: Int) -> Int {
+    let mut max_ending = get8(arr, 0);
+    let mut max_so_far = get8(arr, 0);
+    let mut i = 1;
+    while i < n {
+        let v = get8(arr, i);
+        max_ending = max_val(v, max_ending + v);
+        max_so_far = max_val(max_so_far, max_ending);
+        i = i + 1;
+    }
+    max_so_far
+}
+
+fn test_prefix_sum() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    let prefix = build_prefix(arr, 8);
+
+    // Prefix values
+    assert_eq(get8(prefix, 0), 1);
+    assert_eq(get8(prefix, 3), 10);  // 1+2+3+4
+    assert_eq(get8(prefix, 7), 36);  // 1+2+...+8
+
+    // Range queries
+    assert_eq(range_sum(prefix, 0, 7), 36);  // entire array
+    assert_eq(range_sum(prefix, 0, 0), 1);   // single element
+    assert_eq(range_sum(prefix, 2, 4), 12);  // 3+4+5
+    assert_eq(range_sum(prefix, 3, 5), 15);  // 4+5+6
+    1
+}
+
+fn test_prefix_max() -> Int {
+    let arr = Arr8 { v0: 3, v1: 1, v2: 7, v3: 2, v4: 8, v5: 4, v6: 5, v7: 6 };
+    let pmax = build_prefix_max(arr, 8);
+    assert_eq(get8(pmax, 0), 3);
+    assert_eq(get8(pmax, 2), 7);
+    assert_eq(get8(pmax, 4), 8);
+    assert_eq(get8(pmax, 7), 8);
+
+    let smax = build_suffix_max(arr, 8);
+    assert_eq(get8(smax, 0), 8);
+    assert_eq(get8(smax, 5), 6);
+    assert_eq(get8(smax, 7), 6);
+    1
+}
+
+fn test_difference_array() -> Int {
+    let n = 8;
+    let mut diff = zeros();
+
+    // Add 5 to range [1, 4]
+    diff = diff_array_update(diff, 1, 4, 5, n);
+    // Add 3 to range [2, 6]
+    diff = diff_array_update(diff, 2, 6, 3, n);
+
+    let arr = reconstruct(diff, n);
+    assert_eq(get8(arr, 0), 0);
+    assert_eq(get8(arr, 1), 5);
+    assert_eq(get8(arr, 2), 8);  // 5+3
+    assert_eq(get8(arr, 3), 8);
+    assert_eq(get8(arr, 4), 8);
+    assert_eq(get8(arr, 5), 3);
+    assert_eq(get8(arr, 6), 3);
+    assert_eq(get8(arr, 7), 0);
+    1
+}
+
+fn test_kadane() -> Int {
+    // [-2, 1, -3, 4, -1, 2, 1, -5]
+    // Max subarray: [4, -1, 2, 1] = 6
+    // We need negative numbers... using offset: store actual values
+    let arr = Arr8 { v0: -2, v1: 1, v2: -3, v3: 4, v4: -1, v5: 2, v6: 1, v7: -5 };
+    assert_eq(max_subarray_sum(arr, 8), 6);
+
+    // All positive
+    let pos = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    assert_eq(max_subarray_sum(pos, 5), 15);
+
+    // All negative
+    let neg = Arr8 { v0: -5, v1: -3, v2: -1, v3: -4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(max_subarray_sum(neg, 4), -1);
+    1
+}
+
+fn main() -> Int {
+    test_prefix_sum();
+    test_prefix_max();
+    test_difference_array();
+    test_kadane();
+    print("[OK] 488_prefix_sum_aot");
+    0
+}

@@ -1,0 +1,46 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: thread_local, tls, memory
+// @expect: pass
+
+@thread_local
+static mut COUNTER: Int = 0;
+
+fn set_counter(n: Int) {
+    COUNTER = n;
+}
+
+fn get_counter() -> Int {
+    COUNTER
+}
+
+fn main() -> Int {
+    // Direct write then read in main
+    COUNTER = 10;
+    let a = COUNTER;
+    print(f"After write 10: {a}");
+
+    // Write via function, read in main
+    set_counter(20);
+    let b = COUNTER;
+    print(f"After set_counter(20): {b}");
+
+    // Write in main, read via function
+    COUNTER = 30;
+    let c = get_counter();
+    print(f"After write 30, get_counter: {c}");
+
+    // Multiple writes
+    set_counter(100);
+    set_counter(200);
+    let d = get_counter();
+    print(f"After two set_counter calls: {d}");
+
+    if a == 10 && b == 20 && c == 30 && d == 200 {
+        print("All TLS tests passed!");
+        0
+    } else {
+        1
+    }
+}

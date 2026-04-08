@@ -1,0 +1,18 @@
+// @test: parse-fail
+// @tier: 0
+// @category: lexer
+// @level: L0
+// @tags: parser, lexer, literals, strings, multiline, error
+// @description: Test unterminated triple-quoted string detection
+//
+// Per simplified literal architecture v6.0:
+//   - Triple-quoted strings """...""" are both raw AND multiline
+//   - Must be properly terminated with closing """
+//
+// @expected-error: E001
+
+fn test_unterminated_triple_quoted() {
+    let s = """this is unterminated
+        and continues
+        but never closes;
+}

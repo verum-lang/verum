@@ -1,0 +1,253 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, bounds-elimination, loop-induction, mir
+// @timeout: 5000
+// @description: Tests bounds check elimination via loop induction variable analysis
+
+/// Loop induction variable analysis for bounds check elimination.
+/// When loop index is bounded by array length, bounds checks can be hoisted
+/// or eliminated entirely.
+
+// =============================================================================
+// Basic loop with induction variable (using while)
+// =============================================================================
+
+fn sum_array_while(arr: [Int; 10]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    // While loop with explicit bounds check
+    while i < 10 {
+        sum = sum + arr[i];  // i < 10 implies valid index
+        i = i + 1;
+    }
+    sum
+}
+
+fn product_array(arr: [Int; 5]) -> Int {
+    let mut product: Int = 1;
+    let mut i: Int = 0;
+    while i < 5 {
+        product = product * arr[i];
+        i = i + 1;
+    }
+    product
+}
+
+// =============================================================================
+// Loop with stride
+// =============================================================================
+
+fn sum_even_indices(arr: [Int; 10]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    // Stride of 2, still bounded
+    while i < 5 {
+        sum = sum + arr[i * 2];  // 0, 2, 4, 6, 8 - all valid
+        i = i + 1;
+    }
+    sum
+}
+
+fn sum_odd_indices(arr: [Int; 10]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 5 {
+        sum = sum + arr[i * 2 + 1];  // 1, 3, 5, 7, 9 - all valid
+        i = i + 1;
+    }
+    sum
+}
+
+// =============================================================================
+// Nested loops with induction
+// =============================================================================
+
+fn matrix_sum(m: [[Int; 4]; 4]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 4 {
+        let mut j: Int = 0;
+        while j < 4 {
+            // Both i and j bounded by matrix dimensions
+            sum = sum + m[i][j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    sum
+}
+
+fn matrix_trace(m: [[Int; 4]; 4]) -> Int {
+    let mut trace: Int = 0;
+    let mut i: Int = 0;
+    while i < 4 {
+        // i < 4 for both dimensions
+        trace = trace + m[i][i];
+        i = i + 1;
+    }
+    trace
+}
+
+fn matrix_transpose(m: [[Int; 4]; 4]) -> [[Int; 4]; 4] {
+    let mut result: [[Int; 4]; 4] = [[0; 4]; 4];
+    let mut i: Int = 0;
+    while i < 4 {
+        let mut j: Int = 0;
+        while j < 4 {
+            result[j][i] = m[i][j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Loop with invariant array reference
+// =============================================================================
+
+fn find_max(arr: [Int; 10]) -> Int {
+    let mut max: Int = arr[0];  // First access - constant index
+    let mut i: Int = 1;
+    while i < 10 {
+        if arr[i] > max {  // Induction variable bounded
+            max = arr[i];
+        }
+        i = i + 1;
+    }
+    max
+}
+
+fn find_min(arr: [Int; 10]) -> Int {
+    let mut min: Int = arr[0];
+    let mut i: Int = 1;
+    while i < 10 {
+        if arr[i] < min {
+            min = arr[i];
+        }
+        i = i + 1;
+    }
+    min
+}
+
+// =============================================================================
+// Loop unrolling candidates
+// =============================================================================
+
+fn dot_product_4(a: [Int; 4], b: [Int; 4]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 4 {
+        sum = sum + a[i] * b[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn vector_add_4(a: [Int; 4], b: [Int; 4]) -> [Int; 4] {
+    let mut result: [Int; 4] = [0; 4];
+    let mut i: Int = 0;
+    while i < 4 {
+        result[i] = a[i] + b[i];
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Reverse iteration
+// =============================================================================
+
+fn reverse_sum(arr: [Int; 10]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 9;
+    while i >= 0 {
+        sum = sum + arr[i];  // i starts at 9, decrements to 0
+        i = i - 1;
+    }
+    sum
+}
+
+fn copy_reversed(arr: [Int; 5]) -> [Int; 5] {
+    let mut result: [Int; 5] = [0; 5];
+    let mut i: Int = 0;
+    while i < 5 {
+        result[4 - i] = arr[i];  // 4-i is in bounds when i in 0..5
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Adjacent element access in loop
+// =============================================================================
+
+fn pairwise_sum(arr: [Int; 10]) -> [Int; 9] {
+    let mut result: [Int; 9] = [0; 9];
+    let mut i: Int = 0;
+    while i < 9 {
+        // Both arr[i] and arr[i+1] are valid when i < 9
+        result[i] = arr[i] + arr[i + 1];
+        i = i + 1;
+    }
+    result
+}
+
+fn differences(arr: [Int; 10]) -> [Int; 9] {
+    let mut result: [Int; 9] = [0; 9];
+    let mut i: Int = 0;
+    while i < 9 {
+        result[i] = arr[i + 1] - arr[i];
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Sliding window pattern
+// =============================================================================
+
+fn sliding_sum_3(arr: [Int; 10]) -> [Int; 8] {
+    let mut result: [Int; 8] = [0; 8];
+    let mut i: Int = 0;
+    while i < 8 {
+        // Window of size 3: arr[i], arr[i+1], arr[i+2]
+        result[i] = arr[i] + arr[i + 1] + arr[i + 2];
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// Main - basic validation
+// =============================================================================
+
+fn main() {
+    let arr10: [Int; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Basic loop sum
+    assert(sum_array_while(arr10) == 55);
+
+    // Stride access
+    assert(sum_even_indices(arr10) == 1 + 3 + 5 + 7 + 9);  // 25
+    assert(sum_odd_indices(arr10) == 2 + 4 + 6 + 8 + 10);  // 30
+
+    // Find min/max
+    assert(find_max(arr10) == 10);
+    assert(find_min(arr10) == 1);
+
+    // Matrix operations
+    let m: [[Int; 4]; 4] = [
+        [1, 0, 0, 0],
+        [0, 2, 0, 0],
+        [0, 0, 3, 0],
+        [0, 0, 0, 4]
+    ];
+    assert(matrix_trace(m) == 10);
+
+    // Vector operations
+    let a: [Int; 4] = [1, 2, 3, 4];
+    let b: [Int; 4] = [4, 3, 2, 1];
+    assert(dot_product_4(a, b) == 20);  // 4+6+6+4
+}

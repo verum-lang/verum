@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, reflection, automation
+// @description: Proof by reflection technique
+
+/// Proof by reflection converts proofs to computation.
+/// Instead of building a proof term, we reflect the proposition
+/// into a decidable computation and verify it computationally.
+
+/// Boolean reflection: decide proposition by computation
+type BoolReflect<P: Prop> is
+    | ReflectTrue(P)
+    | ReflectFalse;
+
+/// Simple reflection for nat equality
+fn nat_eq_reflect(a: Nat, b: Nat) -> BoolReflect<NatEq> {
+    if a == b {
+        BoolReflect.ReflectTrue(NatEq.Refl)
+    } else {
+        BoolReflect.ReflectFalse
+    }
+}
+
+type NatEq is
+    | Refl;
+
+/// Reflect arithmetic propositions
+type ArithExpr is
+    | Const(Int)
+    | Var(Int)
+    | Plus(ArithExpr, ArithExpr)
+    | Times(ArithExpr, ArithExpr);
+
+/// Evaluate an arithmetic expression
+fn eval_expr(e: ArithExpr, env: Map<Int, Int>) -> Int {
+    match e {
+        ArithExpr.Const(n) => n,
+        ArithExpr.Var(i) => env.get(i).unwrap_or(0),
+        ArithExpr.Plus(a, b) => eval_expr(a, env) + eval_expr(b, env),
+        ArithExpr.Times(a, b) => eval_expr(a, env) * eval_expr(b, env),
+    }
+}
+
+/// Normalize expression to canonical form
+fn normalize(e: ArithExpr) -> ArithExpr {
+    match e {
+        ArithExpr.Plus(ArithExpr.Const(0), b) => normalize(b),
+        ArithExpr.Plus(a, ArithExpr.Const(0)) => normalize(a),
+        ArithExpr.Times(ArithExpr.Const(0), _) => ArithExpr.Const(0),
+        ArithExpr.Times(_, ArithExpr.Const(0)) => ArithExpr.Const(0),
+        ArithExpr.Times(ArithExpr.Const(1), b) => normalize(b),
+        ArithExpr.Times(a, ArithExpr.Const(1)) => normalize(a),
+        _ => e,
+    }
+}
+
+/// Prove equality by normalization
+theorem reflect_arith_eq(a: ArithExpr, b: ArithExpr, env: Map<Int, Int>)
+    requires normalize(a) == normalize(b)
+    ensures eval_expr(a, env) == eval_expr(b, env)
+{
+    proof by auto
+}
+
+/// Boolean tautology checker
+type BoolExpr is
+    | BTrue
+    | BFalse
+    | BVar(Int)
+    | BAnd(BoolExpr, BoolExpr)
+    | BOr(BoolExpr, BoolExpr)
+    | BNot(BoolExpr);
+
+fn eval_bool(e: BoolExpr, env: Map<Int, Bool>) -> Bool {
+    match e {
+        BoolExpr.BTrue => true,
+        BoolExpr.BFalse => false,
+        BoolExpr.BVar(i) => env.get(i).unwrap_or(false),
+        BoolExpr.BAnd(a, b) => eval_bool(a, env) && eval_bool(b, env),
+        BoolExpr.BOr(a, b) => eval_bool(a, env) || eval_bool(b, env),
+        BoolExpr.BNot(a) => !eval_bool(a, env),
+    }
+}
+
+/// Prove tautology by exhaustive evaluation
+theorem reflect_tautology(e: BoolExpr)
+    requires is_tautology(e)
+    ensures forall env: Map<Int, Bool>. eval_bool(e, env) == true
+{
+    proof by auto
+}
+
+fn is_tautology(e: BoolExpr) -> Bool;
+
+fn main() {}

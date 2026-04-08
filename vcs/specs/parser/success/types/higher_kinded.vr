@@ -1,0 +1,592 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for higher-kinded type productions
+// Grammar: higher_kinded_type = path , '<' , '_' , '>' ;
+//          hk_type_param = identifier , '<' , hk_placeholders , '>' , [ ':' , hk_bounds ] ;
+//          hk_placeholders = '_' , { ',' , '_' } ;
+//          extended_type_param = identifier , [ hk_params ] , [ ':' , bounds ] ;
+
+// =============================================================================
+// Section 1: Basic Higher-Kinded Type Syntax
+// =============================================================================
+
+// Grammar: higher_kinded_type = path , '<' , '_' , '>' ;
+// The placeholder '_' indicates a type constructor of kind * -> *
+
+fn test_basic_hkt_syntax() {
+    // Type constructors with single placeholder
+    let list_ctor: List<_> = get_list_ctor();
+    let maybe_ctor: Maybe<_> = get_maybe_ctor();
+    let set_ctor: Set<_> = get_set_ctor();
+
+    // Using HKT in generic position
+    let functor: Functor<List<_>> = ListFunctor;
+    let monad: Monad<Maybe<_>> = MaybeMonad;
+}
+
+fn get_list_ctor() -> List<_> { List }
+fn get_maybe_ctor() -> Maybe<_> { Maybe }
+fn get_set_ctor() -> Set<_> { Set }
+
+type ListFunctor is ();
+type MaybeMonad is ();
+
+// =============================================================================
+// Section 2: HKT Type Parameters in Generics
+// =============================================================================
+
+// Grammar: hk_type_param = identifier , '<' , hk_placeholders , '>' , [ ':' , hk_bounds ] ;
+
+// Single HKT parameter
+fn apply_functor<F<_>>(fa: F<Int>) -> F<Text> {
+    // Apply functor transformation
+    fa.map(|n| f"{n}")
+}
+
+// HKT with bounds
+fn map_container<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa.map(f)
+}
+
+// Multiple HKT parameters
+fn transform<F<_>, G<_>>(fa: F<Int>) -> G<Int> {
+    // Transform between type constructors
+    natural_transform(fa)
+}
+
+fn natural_transform<F<_>, G<_>>(fa: F<Int>) -> G<Int> {
+    // Implementation
+    G.pure(0)
+}
+
+// =============================================================================
+// Section 3: Functor Protocol (Classic HKT Use Case)
+// =============================================================================
+
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+implement Functor<List<_>> {
+    fn map<A, B>(self: List<A>, f: fn(A) -> B) -> List<B> {
+        self.iter().map(f).collect()
+    }
+}
+
+implement Functor<Maybe<_>> {
+    fn map<A, B>(self: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+        match self {
+            None => None,
+            Some(a) => Some(f(a))
+        }
+    }
+}
+
+implement Functor<Result<_, E>> {
+    fn map<A, B>(self: Result<A, E>, f: fn(A) -> B) -> Result<B, E> {
+        match self {
+            Err(e) => Err(e),
+            Ok(a) => Ok(f(a))
+        }
+    }
+}
+
+// =============================================================================
+// Section 4: Applicative Protocol
+// =============================================================================
+
+type Applicative<F<_>> is protocol extends Functor<F<_>> {
+    fn pure<A>(a: A) -> F<A>;
+    fn apply<A, B>(self: F<fn(A) -> B>, fa: F<A>) -> F<B>;
+};
+
+implement Applicative<Maybe<_>> {
+    fn pure<A>(a: A) -> Maybe<A> {
+        Some(a)
+    }
+
+    fn apply<A, B>(self: Maybe<fn(A) -> B>, fa: Maybe<A>) -> Maybe<B> {
+        match (self, fa) {
+            (Some(f), Some(a)) => Some(f(a)),
+            _ => None
+        }
+    }
+}
+
+implement Applicative<List<_>> {
+    fn pure<A>(a: A) -> List<A> {
+        List.of(a)
+    }
+
+    fn apply<A, B>(self: List<fn(A) -> B>, fa: List<A>) -> List<B> {
+        self.flat_map(|f| fa.map(|a| f(a)))
+    }
+}
+
+// =============================================================================
+// Section 5: Monad Protocol
+// =============================================================================
+
+type Monad<M<_>> is protocol extends Applicative<M<_>> {
+    fn flat_map<A, B>(self: M<A>, f: fn(A) -> M<B>) -> M<B>;
+
+    // Derived: join flattens nested monads
+    fn join<A>(mma: M<M<A>>) -> M<A> {
+        mma.flat_map(|ma| ma)
+    }
+};
+
+implement Monad<Maybe<_>> {
+    fn flat_map<A, B>(self: Maybe<A>, f: fn(A) -> Maybe<B>) -> Maybe<B> {
+        match self {
+            None => None,
+            Some(a) => f(a)
+        }
+    }
+}
+
+implement Monad<List<_>> {
+    fn flat_map<A, B>(self: List<A>, f: fn(A) -> List<B>) -> List<B> {
+        self.iter().flat_map(f).collect()
+    }
+}
+
+implement Monad<Result<_, E>> {
+    fn flat_map<A, B>(self: Result<A, E>, f: fn(A) -> Result<B, E>) -> Result<B, E> {
+        match self {
+            Err(e) => Err(e),
+            Ok(a) => f(a)
+        }
+    }
+}
+
+// =============================================================================
+// Section 6: Foldable Protocol
+// =============================================================================
+
+type Foldable<F<_>> is protocol {
+    fn fold_left<A, B>(self: F<A>, init: B, f: fn(B, A) -> B) -> B;
+    fn fold_right<A, B>(self: F<A>, init: B, f: fn(A, B) -> B) -> B;
+
+    // Derived operations
+    fn to_list<A>(self: F<A>) -> List<A> {
+        self.fold_right(List.empty(), |a, acc| acc.prepend(a))
+    }
+
+    fn is_empty<A>(self: F<A>) -> Bool {
+        self.fold_left(true, |_, _| false)
+    }
+};
+
+implement Foldable<List<_>> {
+    fn fold_left<A, B>(self: List<A>, init: B, f: fn(B, A) -> B) -> B {
+        self.iter().fold(init, f)
+    }
+
+    fn fold_right<A, B>(self: List<A>, init: B, f: fn(A, B) -> B) -> B {
+        self.iter().rev().fold(init, |acc, a| f(a, acc))
+    }
+}
+
+implement Foldable<Maybe<_>> {
+    fn fold_left<A, B>(self: Maybe<A>, init: B, f: fn(B, A) -> B) -> B {
+        match self {
+            None => init,
+            Some(a) => f(init, a)
+        }
+    }
+
+    fn fold_right<A, B>(self: Maybe<A>, init: B, f: fn(A, B) -> B) -> B {
+        match self {
+            None => init,
+            Some(a) => f(a, init)
+        }
+    }
+}
+
+// =============================================================================
+// Section 7: Traversable Protocol
+// =============================================================================
+
+type Traversable<T<_>> is protocol extends Functor<T<_>> + Foldable<T<_>> {
+    fn traverse<F<_>: Applicative, A, B>(self: T<A>, f: fn(A) -> F<B>) -> F<T<B>>;
+
+    // Derived: sequence just uses identity
+    fn sequence<F<_>: Applicative, A>(self: T<F<A>>) -> F<T<A>> {
+        self.traverse(|fa| fa)
+    }
+};
+
+implement Traversable<List<_>> {
+    fn traverse<F<_>: Applicative, A, B>(self: List<A>, f: fn(A) -> F<B>) -> F<List<B>> {
+        self.fold_right(
+            F.pure(List.empty()),
+            |a, acc| F.apply(f(a).map(|b| |list: List<B>| list.prepend(b)), acc)
+        )
+    }
+}
+
+implement Traversable<Maybe<_>> {
+    fn traverse<F<_>: Applicative, A, B>(self: Maybe<A>, f: fn(A) -> F<B>) -> F<Maybe<B>> {
+        match self {
+            None => F.pure(None),
+            Some(a) => f(a).map(|b| Some(b))
+        }
+    }
+}
+
+// =============================================================================
+// Section 8: Natural Transformations
+// =============================================================================
+
+// Natural transformation between type constructors
+type NaturalTransform<F<_>, G<_>> is protocol {
+    fn transform<A>(fa: F<A>) -> G<A>;
+};
+
+// Example: Maybe to List
+type MaybeToList is ();
+
+implement NaturalTransform<Maybe<_>, List<_>> for MaybeToList {
+    fn transform<A>(fa: Maybe<A>) -> List<A> {
+        match fa {
+            None => List.empty(),
+            Some(a) => List.of(a)
+        }
+    }
+}
+
+// Example: List to Maybe (head)
+type ListToMaybe is ();
+
+implement NaturalTransform<List<_>, Maybe<_>> for ListToMaybe {
+    fn transform<A>(fa: List<A>) -> Maybe<A> {
+        fa.head()
+    }
+}
+
+// =============================================================================
+// Section 9: Bifunctor (Two-Parameter HKT)
+// =============================================================================
+
+// Grammar: hk_placeholders = '_' , { ',' , '_' } ;
+// For two placeholder HKT: F<_, _>
+
+type Bifunctor<F<_, _>> is protocol {
+    fn bimap<A, B, C, D>(self: F<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> F<C, D>;
+
+    fn first<A, B, C>(self: F<A, B>, f: fn(A) -> C) -> F<C, B> {
+        self.bimap(f, |b| b)
+    }
+
+    fn second<A, B, D>(self: F<A, B>, g: fn(B) -> D) -> F<A, D> {
+        self.bimap(|a| a, g)
+    }
+};
+
+type Either<L, R> is Left(L) | Right(R);
+
+implement Bifunctor<Either<_, _>> {
+    fn bimap<A, B, C, D>(self: Either<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> Either<C, D> {
+        match self {
+            Left(a) => Left(f(a)),
+            Right(b) => Right(g(b))
+        }
+    }
+}
+
+implement Bifunctor<(_, _)> {
+    fn bimap<A, B, C, D>(self: (A, B), f: fn(A) -> C, g: fn(B) -> D) -> (C, D) {
+        (f(self.0), g(self.1))
+    }
+}
+
+// =============================================================================
+// Section 10: Contravariant Functor
+// =============================================================================
+
+type Contravariant<F<_>> is protocol {
+    fn contramap<A, B>(self: F<A>, f: fn(B) -> A) -> F<B>;
+};
+
+// Predicate is contravariant
+type Predicate<A> is fn(A) -> Bool;
+
+implement Contravariant<Predicate<_>> {
+    fn contramap<A, B>(self: Predicate<A>, f: fn(B) -> A) -> Predicate<B> {
+        |b| self(f(b))
+    }
+}
+
+// Comparator is contravariant
+type Comparator<A> is fn(A, A) -> Ordering;
+type Ordering is Less | Equal | Greater;
+
+implement Contravariant<Comparator<_>> {
+    fn contramap<A, B>(self: Comparator<A>, f: fn(B) -> A) -> Comparator<B> {
+        |b1, b2| self(f(b1), f(b2))
+    }
+}
+
+// =============================================================================
+// Section 11: Profunctor (Contravariant in first, Covariant in second)
+// =============================================================================
+
+type Profunctor<P<_, _>> is protocol {
+    fn dimap<A, B, C, D>(self: P<A, B>, f: fn(C) -> A, g: fn(B) -> D) -> P<C, D>;
+
+    fn lmap<A, B, C>(self: P<A, B>, f: fn(C) -> A) -> P<C, B> {
+        self.dimap(f, |b| b)
+    }
+
+    fn rmap<A, B, D>(self: P<A, B>, g: fn(B) -> D) -> P<A, D> {
+        self.dimap(|a| a, g)
+    }
+};
+
+// Functions are profunctors
+// Note: fn(_, _) syntax for HKT over function types is an advanced feature
+// For now, we demonstrate with a concrete wrapper type
+type FnWrapper<A, B> is (fn(A) -> B);
+
+implement Profunctor<FnWrapper<_, _>> {
+    fn dimap<A, B, C, D>(self: FnWrapper<A, B>, f: fn(C) -> A, g: fn(B) -> D) -> FnWrapper<C, D> {
+        FnWrapper(|c| g((self.0)(f(c))))
+    }
+}
+
+// =============================================================================
+// Section 12: Free Monad Construction
+// =============================================================================
+
+// Free monad for any functor
+type Free<F<_>, A> is
+    Pure(A)
+  | Suspend(F<Free<F, A>>);
+
+implement<F<_>: Functor> Monad<Free<F, _>> {
+    fn flat_map<A, B>(self: Free<F, A>, f: fn(A) -> Free<F, B>) -> Free<F, B> {
+        match self {
+            Pure(a) => f(a),
+            Suspend(ffa) => Suspend(ffa.map(|fa| fa.flat_map(f)))
+        }
+    }
+}
+
+fn lift_free<F<_>, A>(fa: F<A>) -> Free<F, A> {
+    Suspend(fa.map(|a| Pure(a)))
+}
+
+// =============================================================================
+// Section 13: Coyoneda (Free Functor)
+// =============================================================================
+
+// Coyoneda gives functor for any type constructor
+// Note: Full existential encoding with Wrap<B>(...) requires advanced dependent type features.
+// Here we show a simplified version using a concrete instantiation.
+type Coyoneda<F<_>, A> is {
+    // In full version: exists B. (F<B>, fn(B) -> A)
+    // Simplified: we use a specific B = A
+    inner: CoyonedaInner<F, A>
+};
+
+// Simplified without existential quantification on variant
+type CoyonedaInner<F<_>, A> is Wrap(F<A>, fn(A) -> A);
+
+implement<F<_>> Functor<Coyoneda<F, _>> {
+    fn map<A, B>(self: Coyoneda<F, A>, f: fn(A) -> B) -> Coyoneda<F, B> {
+        // Note: This is a simplified version. Full implementation requires
+        // existential type support on variants.
+        match self.inner {
+            Wrap(fa, g) => Coyoneda { inner: Wrap(fa.map(|a| a), |b| b) }
+        }
+    }
+}
+
+fn lift_coyoneda<F<_>, A>(fa: F<A>) -> Coyoneda<F, A> {
+    Coyoneda { inner: Wrap(fa, |a| a) }
+}
+
+// =============================================================================
+// Section 14: Type-Level Function Application
+// =============================================================================
+
+// Apply a type constructor to a type
+type Apply<F<_>, A> is F<A>;
+
+// Examples
+type ListOfInt is Apply<List<_>, Int>;        // = List<Int>
+type MaybeText is Apply<Maybe<_>, Text>;      // = Maybe<Text>
+type ResultIntError is Apply<Result<_, Error>, Int>;  // = Result<Int, Error>
+
+type Error is { message: Text };
+
+fn test_type_application() {
+    let list: ListOfInt = List.of(1, 2, 3);
+    let maybe: MaybeText = Some("hello");
+    let result: ResultIntError = Ok(42);
+}
+
+// =============================================================================
+// Section 15: Compose Type Constructors
+// =============================================================================
+
+// Compose two type constructors
+type Compose<F<_>, G<_>, A> is F<G<A>>;
+
+// Examples
+type ListOfMaybe<A> is Compose<List<_>, Maybe<_>, A>;    // List<Maybe<A>>
+type MaybeOfList<A> is Compose<Maybe<_>, List<_>, A>;    // Maybe<List<A>>
+
+// Compose preserves Functor
+implement<F<_>: Functor, G<_>: Functor> Functor<Compose<F, G, _>> {
+    fn map<A, B>(self: Compose<F, G, A>, f: fn(A) -> B) -> Compose<F, G, B> {
+        self.map(|ga| ga.map(f))
+    }
+}
+
+fn test_composition() {
+    let composed: ListOfMaybe<Int> = List.of(Some(1), None, Some(3));
+    let mapped = composed.map(|n| n * 2);
+}
+
+// =============================================================================
+// Section 16: Identity Functor
+// =============================================================================
+
+type Identity<A> is (A);
+
+implement Functor<Identity<_>> {
+    fn map<A, B>(self: Identity<A>, f: fn(A) -> B) -> Identity<B> {
+        Identity(f(self.0))
+    }
+}
+
+implement Applicative<Identity<_>> {
+    fn pure<A>(a: A) -> Identity<A> {
+        Identity(a)
+    }
+
+    fn apply<A, B>(self: Identity<fn(A) -> B>, fa: Identity<A>) -> Identity<B> {
+        Identity(self.0(fa.0))
+    }
+}
+
+implement Monad<Identity<_>> {
+    fn flat_map<A, B>(self: Identity<A>, f: fn(A) -> Identity<B>) -> Identity<B> {
+        f(self.0)
+    }
+}
+
+// =============================================================================
+// Section 17: Const Functor
+// =============================================================================
+
+type Const<C, A> is (C);
+
+implement<C> Functor<Const<C, _>> {
+    fn map<A, B>(self: Const<C, A>, f: fn(A) -> B) -> Const<C, B> {
+        Const(self.0)  // Ignores the function, keeps the constant
+    }
+}
+
+implement<C: Monoid> Applicative<Const<C, _>> {
+    fn pure<A>(a: A) -> Const<C, A> {
+        Const(C.empty())
+    }
+
+    fn apply<A, B>(self: Const<C, fn(A) -> B>, fa: Const<C, A>) -> Const<C, B> {
+        Const(C.combine(self.0, fa.0))
+    }
+}
+
+type Monoid is protocol {
+    fn empty() -> Self;
+    fn combine(a: Self, b: Self) -> Self;
+};
+
+// =============================================================================
+// Section 18: Monad Transformers (Simplified)
+// =============================================================================
+
+// MaybeT transformer
+type MaybeT<M<_>, A> is M<Maybe<A>>;
+
+implement<M<_>: Monad> Monad<MaybeT<M, _>> {
+    fn flat_map<A, B>(self: MaybeT<M, A>, f: fn(A) -> MaybeT<M, B>) -> MaybeT<M, B> {
+        self.flat_map(|maybe_a| {
+            match maybe_a {
+                None => M.pure(None),
+                Some(a) => f(a)
+            }
+        })
+    }
+}
+
+// StateT transformer
+type StateT<S, M<_>, A> is fn(S) -> M<(A, S)>;
+
+implement<S, M<_>: Monad> Monad<StateT<S, M, _>> {
+    fn flat_map<A, B>(self: StateT<S, M, A>, f: fn(A) -> StateT<S, M, B>) -> StateT<S, M, B> {
+        |s| self(s).flat_map(|(a, s2)| f(a)(s2))
+    }
+}
+
+// =============================================================================
+// Section 19: HKT in Function Bounds
+// =============================================================================
+
+// Function requiring Functor bound on HKT parameter
+fn double_map<F<_>: Functor, A>(fa: F<A>, f: fn(A) -> A) -> F<A> {
+    fa.map(f).map(f)
+}
+
+// Function with multiple HKT bounds
+fn sequence_traverse<T<_>: Traversable, F<_>: Applicative, A>(t: T<F<A>>) -> F<T<A>> {
+    t.traverse(|fa| fa)
+}
+
+// HKT in return position
+fn make_functor<F<_>>() -> Functor<F<_>> {
+    // Return the functor instance
+    get_functor_instance()
+}
+
+fn get_functor_instance<F<_>>() -> Functor<F<_>> {
+    // Implementation
+    FunctorInstance
+}
+
+type FunctorInstance is ();
+
+// =============================================================================
+// Section 20: Complex HKT Combinations
+// =============================================================================
+
+// Multiple HKT parameters with bounds
+fn transform_nested<F<_>: Functor, G<_>: Functor, A, B>(
+    fga: F<G<A>>,
+    f: fn(A) -> B
+) -> F<G<B>> {
+    fga.map(|ga| ga.map(f))
+}
+
+// HKT with associated type-like behavior
+type WithItem<F<_>> is protocol {
+    type Item;
+    fn item(self: F<Self.Item>) -> Self.Item;
+};
+
+// HKT in type definitions
+type FunctorBag<F<_>: Functor> is {
+    functor: Functor<F<_>>,
+    value: F<Int>
+};
+
+fn test_functor_bag() {
+    let bag: FunctorBag<List<_>> = FunctorBag {
+        functor: ListFunctor,
+        value: List.of(1, 2, 3)
+    };
+}

@@ -1,0 +1,36 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: map, for_in, iteration
+// @expect: pass
+
+// Test actual for-in iteration on Map — returns (key, value) tuples.
+
+fn main() -> Int {
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+
+    // for-in on Map returns (key, value) tuples
+    let mut key_sum = 0;
+    let mut val_sum = 0;
+    for entry in m {
+        // entry is (key, value) tuple
+        key_sum = key_sum + entry.0;
+        val_sum = val_sum + entry.1;
+    }
+
+    if key_sum != 6 {
+        print(f"FAIL: key_sum = {key_sum}, expected 6");
+        return 1;
+    }
+
+    if val_sum != 600 {
+        print(f"FAIL: val_sum = {val_sum}, expected 600");
+        return 1;
+    }
+
+    print(f"PASS: map for-in works, keys={key_sum}, vals={val_sum}");
+    0
+}

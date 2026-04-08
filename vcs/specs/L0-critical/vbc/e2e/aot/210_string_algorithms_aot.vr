@@ -1,0 +1,149 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, string, algorithms, encoding
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for string-like algorithms operating on integer sequences
+// (Since AOT string handling is limited, we simulate strings as int arrays)
+
+// Simulate a "string" as a record of ASCII char codes (max 12 chars)
+type Str12 is {
+    c0: Int, c1: Int, c2: Int, c3: Int,
+    c4: Int, c5: Int, c6: Int, c7: Int,
+    c8: Int, c9: Int, c10: Int, c11: Int,
+    len: Int
+};
+
+fn str12_get(s: Str12, i: Int) -> Int {
+    if i == 0 { s.c0 } else if i == 1 { s.c1 }
+    else if i == 2 { s.c2 } else if i == 3 { s.c3 }
+    else if i == 4 { s.c4 } else if i == 5 { s.c5 }
+    else if i == 6 { s.c6 } else if i == 7 { s.c7 }
+    else if i == 8 { s.c8 } else if i == 9 { s.c9 }
+    else if i == 10 { s.c10 } else { s.c11 }
+}
+
+fn str12_eq(a: Str12, b: Str12) -> Bool {
+    if a.len != b.len { return false; }
+    let mut i = 0;
+    while i < a.len {
+        if str12_get(a, i) != str12_get(b, i) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn is_palindrome(s: Str12) -> Bool {
+    let mut i = 0;
+    let mut j = s.len - 1;
+    while i < j {
+        if str12_get(s, i) != str12_get(s, j) { return false; }
+        i = i + 1;
+        j = j - 1;
+    }
+    true
+}
+
+fn count_char(s: Str12, ch: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len {
+        if str12_get(s, i) == ch { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn is_upper(ch: Int) -> Bool { ch >= 65 && ch <= 90 }
+fn is_lower(ch: Int) -> Bool { ch >= 97 && ch <= 122 }
+fn is_digit(ch: Int) -> Bool { ch >= 48 && ch <= 57 }
+
+fn to_lower(ch: Int) -> Int {
+    if is_upper(ch) { ch + 32 } else { ch }
+}
+
+fn to_upper(ch: Int) -> Int {
+    if is_lower(ch) { ch - 32 } else { ch }
+}
+
+fn count_upper(s: Str12) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len {
+        if is_upper(str12_get(s, i)) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_palindrome() {
+    // "abcba" -> palindrome
+    let p = Str12 { c0: 97, c1: 98, c2: 99, c3: 98, c4: 97,
+                     c5: 0, c6: 0, c7: 0, c8: 0, c9: 0, c10: 0, c11: 0, len: 5 };
+    assert_eq(is_palindrome(p), true);
+
+    // "abcd" -> not palindrome
+    let np = Str12 { c0: 97, c1: 98, c2: 99, c3: 100, c4: 0,
+                      c5: 0, c6: 0, c7: 0, c8: 0, c9: 0, c10: 0, c11: 0, len: 4 };
+    assert_eq(is_palindrome(np), false);
+
+    // Single char -> palindrome
+    let single = Str12 { c0: 97, c1: 0, c2: 0, c3: 0, c4: 0,
+                          c5: 0, c6: 0, c7: 0, c8: 0, c9: 0, c10: 0, c11: 0, len: 1 };
+    assert_eq(is_palindrome(single), true);
+}
+
+fn test_counting() {
+    // "hello" = [104, 101, 108, 108, 111]
+    let hello = Str12 { c0: 104, c1: 101, c2: 108, c3: 108, c4: 111,
+                         c5: 0, c6: 0, c7: 0, c8: 0, c9: 0, c10: 0, c11: 0, len: 5 };
+    assert_eq(count_char(hello, 108), 2);  // 'l' appears twice
+    assert_eq(count_char(hello, 104), 1);  // 'h' appears once
+    assert_eq(count_char(hello, 97), 0);   // 'a' doesn't appear
+}
+
+fn test_case() {
+    assert_eq(is_upper(65), true);   // 'A'
+    assert_eq(is_upper(90), true);   // 'Z'
+    assert_eq(is_upper(97), false);  // 'a'
+    assert_eq(is_lower(97), true);   // 'a'
+    assert_eq(is_lower(122), true);  // 'z'
+    assert_eq(is_digit(48), true);   // '0'
+    assert_eq(is_digit(57), true);   // '9'
+    assert_eq(is_digit(65), false);  // 'A'
+
+    assert_eq(to_lower(65), 97);     // 'A' -> 'a'
+    assert_eq(to_lower(97), 97);     // 'a' -> 'a'
+    assert_eq(to_upper(97), 65);     // 'a' -> 'A'
+    assert_eq(to_upper(65), 65);     // 'A' -> 'A'
+}
+
+fn test_equality() {
+    let a = Str12 { c0: 104, c1: 101, c2: 108, c3: 0, c4: 0,
+                     c5: 0, c6: 0, c7: 0, c8: 0, c9: 0, c10: 0, c11: 0, len: 3 };
+    let b = Str12 { c0: 104, c1: 101, c2: 108, c3: 0, c4: 0,
+                     c5: 0, c6: 0, c7: 0, c8: 0, c9: 0, c10: 0, c11: 0, len: 3 };
+    let c = Str12 { c0: 104, c1: 101, c2: 112, c3: 0, c4: 0,
+                     c5: 0, c6: 0, c7: 0, c8: 0, c9: 0, c10: 0, c11: 0, len: 3 };
+    assert_eq(str12_eq(a, b), true);
+    assert_eq(str12_eq(a, c), false);
+}
+
+fn test_upper_count() {
+    // "HeLLo" = [72, 101, 76, 76, 111]
+    let mixed = Str12 { c0: 72, c1: 101, c2: 76, c3: 76, c4: 111,
+                          c5: 0, c6: 0, c7: 0, c8: 0, c9: 0, c10: 0, c11: 0, len: 5 };
+    assert_eq(count_upper(mixed), 3);  // H, L, L
+}
+
+fn main() -> Int {
+    test_palindrome();
+    test_counting();
+    test_case();
+    test_equality();
+    test_upper_count();
+    print("[OK] 210_string_algorithms_aot");
+    0
+}

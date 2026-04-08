@@ -1,0 +1,216 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, chess, board, knight-moves
+// @timeout: 30000
+
+// Chess board operations: knight moves, board representation, attack patterns
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Board position: row*8 + col (0-63 for 8x8 board)
+fn pos_row(pos: Int) -> Int { pos / 8 }
+fn pos_col(pos: Int) -> Int { pos % 8 }
+fn make_pos(row: Int, col: Int) -> Int { row * 8 + col }
+
+fn on_board(row: Int, col: Int) -> Int {
+    if row >= 0 {
+        if row < 8 {
+            if col >= 0 {
+                if col < 8 { 1 } else { 0 }
+            } else { 0 }
+        } else { 0 }
+    } else { 0 }
+}
+
+// Knight move offsets (8 possible L-shaped moves)
+// Stored as dr*10+dc offsets (using encoding to fit in Arr8)
+// dr: [-2,-2,-1,-1,1,1,2,2], dc: [-1,1,-2,2,-2,2,-1,1]
+fn knight_dr(i: Int) -> Int {
+    if i == 0 { 0 - 2 } else if i == 1 { 0 - 2 }
+    else if i == 2 { 0 - 1 } else if i == 3 { 0 - 1 }
+    else if i == 4 { 1 } else if i == 5 { 1 }
+    else if i == 6 { 2 } else { 2 }
+}
+
+fn knight_dc(i: Int) -> Int {
+    if i == 0 { 0 - 1 } else if i == 1 { 1 }
+    else if i == 2 { 0 - 2 } else if i == 3 { 2 }
+    else if i == 4 { 0 - 2 } else if i == 5 { 2 }
+    else if i == 6 { 0 - 1 } else { 1 }
+}
+
+// Count valid knight moves from position
+fn knight_move_count(pos: Int) -> Int {
+    let r = pos_row(pos);
+    let c = pos_col(pos);
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        let nr = r + knight_dr(i);
+        let nc = c + knight_dc(i);
+        if on_board(nr, nc) == 1 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Get valid knight destinations as array
+fn knight_destinations(pos: Int) -> Arr8 {
+    let r = pos_row(pos);
+    let c = pos_col(pos);
+    let mut dests = zeros();
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        let nr = r + knight_dr(i);
+        let nc = c + knight_dc(i);
+        if on_board(nr, nc) == 1 {
+            dests = set8(dests, count, make_pos(nr, nc));
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    dests
+}
+
+// Check if a position is attacked by a knight at given position
+fn knight_attacks(knight_pos: Int, target: Int) -> Int {
+    let dr = abs_val(pos_row(knight_pos) - pos_row(target));
+    let dc = abs_val(pos_col(knight_pos) - pos_col(target));
+    if dr == 2 {
+        if dc == 1 { 1 } else { 0 }
+    } else if dr == 1 {
+        if dc == 2 { 1 } else { 0 }
+    } else { 0 }
+}
+
+// Check if a position is attacked by a rook (same row or col, no obstacles check)
+fn rook_attacks(rook_pos: Int, target: Int) -> Int {
+    if pos_row(rook_pos) == pos_row(target) { 1 }
+    else if pos_col(rook_pos) == pos_col(target) { 1 }
+    else { 0 }
+}
+
+// Check if a position is attacked by a bishop (same diagonal)
+fn bishop_attacks(bishop_pos: Int, target: Int) -> Int {
+    let dr = abs_val(pos_row(bishop_pos) - pos_row(target));
+    let dc = abs_val(pos_col(bishop_pos) - pos_col(target));
+    if dr == dc {
+        if dr > 0 { 1 } else { 0 }
+    } else { 0 }
+}
+
+// Check if queen attacks (rook + bishop)
+fn queen_attacks(queen_pos: Int, target: Int) -> Int {
+    if rook_attacks(queen_pos, target) == 1 { 1 }
+    else if bishop_attacks(queen_pos, target) == 1 { 1 }
+    else { 0 }
+}
+
+// Manhattan distance on board
+fn board_manhattan(a: Int, b: Int) -> Int {
+    abs_val(pos_row(a) - pos_row(b)) + abs_val(pos_col(a) - pos_col(b))
+}
+
+fn test_knight_corner() -> Int {
+    // Corner knight (a1 = pos 0) has 2 moves
+    assert_eq(knight_move_count(make_pos(0, 0)), 2);
+    // Edge knight (a4 = pos 24) has more
+    assert_eq(knight_move_count(make_pos(3, 0)), 4);
+    // Center knight (d4 = pos 27) has 8 moves
+    assert_eq(knight_move_count(make_pos(3, 3)), 8);
+    // Near-center (b2 = pos 9) has 4 moves
+    assert_eq(knight_move_count(make_pos(1, 1)), 4);
+    1
+}
+
+fn test_knight_attacks_fn() -> Int {
+    // Knight at d4 attacks specific squares
+    let k = make_pos(3, 3); // d4
+    assert_eq(knight_attacks(k, make_pos(1, 2)), 1); // c2
+    assert_eq(knight_attacks(k, make_pos(1, 4)), 1); // e2
+    assert_eq(knight_attacks(k, make_pos(5, 2)), 1); // c6
+    assert_eq(knight_attacks(k, make_pos(3, 5)), 0); // f4 - not an L
+    assert_eq(knight_attacks(k, k), 0); // can't attack self
+    1
+}
+
+fn test_rook_bishop_queen() -> Int {
+    let pos = make_pos(3, 3); // d4
+    // Rook attacks same row/col
+    assert_eq(rook_attacks(pos, make_pos(3, 7)), 1); // h4
+    assert_eq(rook_attacks(pos, make_pos(0, 3)), 1); // d1
+    assert_eq(rook_attacks(pos, make_pos(5, 5)), 0); // f6
+
+    // Bishop attacks diagonals
+    assert_eq(bishop_attacks(pos, make_pos(5, 5)), 1); // f6
+    assert_eq(bishop_attacks(pos, make_pos(1, 1)), 1); // b2
+    assert_eq(bishop_attacks(pos, make_pos(3, 7)), 0); // h4
+
+    // Queen = rook + bishop
+    assert_eq(queen_attacks(pos, make_pos(3, 7)), 1);
+    assert_eq(queen_attacks(pos, make_pos(5, 5)), 1);
+    assert_eq(queen_attacks(pos, make_pos(4, 5)), 0); // e6 - neither
+    1
+}
+
+fn test_board_geometry() -> Int {
+    // Manhattan distances
+    assert_eq(board_manhattan(make_pos(0, 0), make_pos(7, 7)), 14);
+    assert_eq(board_manhattan(make_pos(3, 3), make_pos(3, 3)), 0);
+    assert_eq(board_manhattan(make_pos(0, 0), make_pos(0, 7)), 7);
+
+    // Position encoding
+    assert_eq(pos_row(make_pos(5, 3)), 5);
+    assert_eq(pos_col(make_pos(5, 3)), 3);
+    1
+}
+
+fn test_knight_path_exists() -> Int {
+    // From corner, check knight can reach (2,1) in 1 move
+    let dests = knight_destinations(make_pos(0, 0));
+    // Two destinations: (1,2) and (2,1)
+    let d0 = get8(dests, 0);
+    let d1 = get8(dests, 1);
+    let has_21 = if d0 == make_pos(2, 1) { 1 }
+                 else if d1 == make_pos(2, 1) { 1 }
+                 else { 0 };
+    assert_eq(has_21, 1);
+    let has_12 = if d0 == make_pos(1, 2) { 1 }
+                 else if d1 == make_pos(1, 2) { 1 }
+                 else { 0 };
+    assert_eq(has_12, 1);
+    1
+}
+
+fn main() -> Int {
+    test_knight_corner();
+    test_knight_attacks_fn();
+    test_rook_bishop_queen();
+    test_board_geometry();
+    test_knight_path_exists();
+    print("[OK] 591_chess_board_aot");
+    0
+}

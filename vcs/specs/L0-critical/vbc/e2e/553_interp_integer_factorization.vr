@@ -1,0 +1,171 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, integer_factorization, trial_division, prime_factors, divisors
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Integer factorization via trial division.
+// Computes: prime factors, factor count (number of divisors), sum of divisors.
+// Factor lists stored in a [Int; 16] array with a separate count variable.
+// All computations on positive integers only.
+
+// Count the number of divisors of n (including 1 and n).
+// Uses trial division up to sqrt(n).
+fn count_divisors(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut count = 0;
+    let mut i = 1;
+    while i * i <= n {
+        if n % i == 0 {
+            count = count + 1;
+            if i != n / i { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Sum of all divisors of n.
+fn sum_divisors(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut s = 0;
+    let mut i = 1;
+    while i * i <= n {
+        if n % i == 0 {
+            s = s + i;
+            if i != n / i { s = s + n / i; }
+        }
+        i = i + 1;
+    }
+    s
+}
+
+// Compute prime factorization of n, storing factors in factors[] (sorted).
+// Returns number of prime factors (with multiplicity).
+fn prime_factors(n: Int, factors: [Int; 16]) -> Int {
+    let mut remaining = n;
+    let mut count = 0;
+    let mut d = 2;
+    while d * d <= remaining {
+        while remaining % d == 0 {
+            factors[count] = d;
+            count = count + 1;
+            remaining = remaining / d;
+        }
+        d = d + 1;
+    }
+    if remaining > 1 {
+        factors[count] = remaining;
+        count = count + 1;
+    }
+    count
+}
+
+// Check if n is prime.
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n == 2 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        i = i + 2;
+    }
+    1
+}
+
+fn test_small_composites() {
+    // 12 = 2^2 * 3 — factors: [2,2,3], count=3
+    let mut f = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = prime_factors(12, f);
+    assert_eq(cnt, 3);
+    assert_eq(f[0], 2);
+    assert_eq(f[1], 2);
+    assert_eq(f[2], 3);
+
+    // 30 = 2 * 3 * 5 — factors: [2,3,5], count=3
+    let mut g = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt2 = prime_factors(30, g);
+    assert_eq(cnt2, 3);
+    assert_eq(g[0], 2);
+    assert_eq(g[1], 3);
+    assert_eq(g[2], 5);
+    print("small_composites: ok");
+}
+
+fn test_prime_numbers() {
+    // 7 is prime: single factor [7], count=1
+    let mut f = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = prime_factors(7, f);
+    assert_eq(cnt, 1);
+    assert_eq(f[0], 7);
+
+    // 97 is prime.
+    assert_eq(is_prime(97), 1);
+    let mut g = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt2 = prime_factors(97, g);
+    assert_eq(cnt2, 1);
+    assert_eq(g[0], 97);
+
+    // 2 and 3 are prime; 4 and 9 are not.
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(3), 1);
+    assert_eq(is_prime(4), 0);
+    assert_eq(is_prime(9), 0);
+    print("prime_numbers: ok");
+}
+
+fn test_divisor_count() {
+    // count_divisors(1)  = 1   (only 1)
+    // count_divisors(6)  = 4   (1,2,3,6)
+    // count_divisors(12) = 6   (1,2,3,4,6,12)
+    // count_divisors(16) = 5   (1,2,4,8,16)
+    // count_divisors(36) = 9   (1,2,3,4,6,9,12,18,36)
+    assert_eq(count_divisors(1),  1);
+    assert_eq(count_divisors(6),  4);
+    assert_eq(count_divisors(12), 6);
+    assert_eq(count_divisors(16), 5);
+    assert_eq(count_divisors(36), 9);
+    print("divisor_count: ok");
+}
+
+fn test_divisor_sum() {
+    // sum_divisors(1)  = 1
+    // sum_divisors(6)  = 1+2+3+6 = 12  (perfect number)
+    // sum_divisors(12) = 1+2+3+4+6+12 = 28
+    // sum_divisors(28) = 1+2+4+7+14+28 = 56  (perfect: sum of proper divisors = 28)
+    assert_eq(sum_divisors(1),   1);
+    assert_eq(sum_divisors(6),  12);
+    assert_eq(sum_divisors(12), 28);
+    assert_eq(sum_divisors(28), 56);
+    print("divisor_sum: ok");
+}
+
+fn test_powers_of_two() {
+    // 64 = 2^6: factors = [2,2,2,2,2,2], count=6
+    let mut f = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let cnt = prime_factors(64, f);
+    assert_eq(cnt, 6);
+    assert_eq(f[0], 2);
+    assert_eq(f[5], 2);
+
+    // count_divisors(64) = 7  (2^0..2^6)
+    assert_eq(count_divisors(64), 7);
+
+    // sum_divisors(64) = 1+2+4+8+16+32+64 = 127
+    assert_eq(sum_divisors(64), 127);
+    print("powers_of_two: ok");
+}
+
+fn main() -> Int {
+    test_small_composites();
+    test_prime_numbers();
+    test_divisor_count();
+    test_divisor_sum();
+    test_powers_of_two();
+    print("[OK] 553_interp_integer_factorization");
+    0
+}

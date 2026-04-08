@@ -1,0 +1,337 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, pattern-matching
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Interpreter e2e test: pattern matching with literals, variants, destructuring,
+// guards, wildcards, nested patterns, and match-as-expression
+
+// =============================================================================
+// Type definitions for pattern matching
+// =============================================================================
+
+type Direction is North | South | East | West;
+type Shape is Circle(Int) | Rect { w: Int, h: Int } | Triangle { base: Int, height: Int };
+type Token is Ident(Text) | Num(Int) | Sym(Text) | Eof;
+type TreeNode is Leaf(Int) | Branch { left: Heap<TreeNode>, right: Heap<TreeNode> };
+
+// =============================================================================
+// Simple value matching
+// =============================================================================
+
+fn test_match_int_literal() {
+    fn classify(n: Int) -> Text {
+        match n {
+            0 => "zero",
+            1 => "one",
+            2 => "two",
+            _ => "other"
+        }
+    }
+    assert_eq(classify(0), "zero");
+    assert_eq(classify(1), "one");
+    assert_eq(classify(2), "two");
+    assert_eq(classify(99), "other");
+    assert_eq(classify(-1), "other");
+}
+
+fn test_match_bool() {
+    fn bool_to_text(b: Bool) -> Text {
+        match b {
+            true => "yes",
+            false => "no"
+        }
+    }
+    assert_eq(bool_to_text(true), "yes");
+    assert_eq(bool_to_text(false), "no");
+}
+
+// =============================================================================
+// Variant pattern matching
+// =============================================================================
+
+fn test_unit_variant_match() {
+    fn dir_name(d: Direction) -> Text {
+        match d {
+            North => "north",
+            South => "south",
+            East => "east",
+            West => "west"
+        }
+    }
+    assert_eq(dir_name(North), "north");
+    assert_eq(dir_name(South), "south");
+    assert_eq(dir_name(East), "east");
+    assert_eq(dir_name(West), "west");
+}
+
+fn test_variant_with_payload_match() {
+    fn shape_area(s: Shape) -> Int {
+        match s {
+            Circle(r) => r * r,
+            Rect { w, h } => w * h,
+            Triangle { base, height } => base * height / 2
+        }
+    }
+    assert_eq(shape_area(Circle(5)), 25);
+    assert_eq(shape_area(Rect { w: 3, h: 4 }), 12);
+    assert_eq(shape_area(Triangle { base: 6, height: 4 }), 12);
+}
+
+fn test_variant_name_match() {
+    fn shape_name(s: Shape) -> Text {
+        match s {
+            Circle(_) => "circle",
+            Rect { w: _, h: _ } => "rect",
+            Triangle { base: _, height: _ } => "triangle"
+        }
+    }
+    assert_eq(shape_name(Circle(10)), "circle");
+    assert_eq(shape_name(Rect { w: 1, h: 1 }), "rect");
+    assert_eq(shape_name(Triangle { base: 3, height: 4 }), "triangle");
+}
+
+fn test_token_match() {
+    fn token_text(t: Token) -> Text {
+        match t {
+            Ident(name) => name,
+            Num(_) => "number",
+            Sym(s) => s,
+            Eof => "eof"
+        }
+    }
+    assert_eq(token_text(Ident("foo")), "foo");
+    assert_eq(token_text(Num(42)), "number");
+    assert_eq(token_text(Sym("+")), "+");
+    assert_eq(token_text(Eof), "eof");
+}
+
+// =============================================================================
+// Tuple destructuring
+// =============================================================================
+
+fn test_tuple_destructure() {
+    fn sum_pair(p: (Int, Int)) -> Int {
+        match p {
+            (a, b) => a + b
+        }
+    }
+    assert_eq(sum_pair((3, 4)), 7);
+    assert_eq(sum_pair((0, 0)), 0);
+    assert_eq(sum_pair((-1, 1)), 0);
+}
+
+fn test_tuple_pattern_specific() {
+    fn classify_pair(p: (Int, Int)) -> Text {
+        match p {
+            (0, 0) => "origin",
+            (0, _) => "y-axis",
+            (_, 0) => "x-axis",
+            _ => "general"
+        }
+    }
+    assert_eq(classify_pair((0, 0)), "origin");
+    assert_eq(classify_pair((0, 5)), "y-axis");
+    assert_eq(classify_pair((5, 0)), "x-axis");
+    assert_eq(classify_pair((3, 4)), "general");
+}
+
+// =============================================================================
+// Guard conditions
+// =============================================================================
+
+fn test_guard_simple() {
+    fn classify_number(n: Int) -> Text {
+        match n {
+            x if x < 0 => "negative",
+            0 => "zero",
+            x if x <= 10 => "small",
+            x if x <= 100 => "medium",
+            _ => "large"
+        }
+    }
+    assert_eq(classify_number(-5), "negative");
+    assert_eq(classify_number(0), "zero");
+    assert_eq(classify_number(5), "small");
+    assert_eq(classify_number(10), "small");
+    assert_eq(classify_number(50), "medium");
+    assert_eq(classify_number(100), "medium");
+    assert_eq(classify_number(200), "large");
+}
+
+fn test_guard_with_maybe() {
+    fn classify_opt(opt: Maybe<Int>) -> Text {
+        match opt {
+            None => "empty",
+            Some(x) if x > 0 => "positive",
+            Some(x) if x < 0 => "negative",
+            Some(_) => "zero"
+        }
+    }
+    assert_eq(classify_opt(None), "empty");
+    assert_eq(classify_opt(Some(5)), "positive");
+    assert_eq(classify_opt(Some(-3)), "negative");
+    assert_eq(classify_opt(Some(0)), "zero");
+}
+
+fn test_guard_with_variant() {
+    fn classify_token(t: Token) -> Text {
+        match t {
+            Num(n) if n > 0 => "positive_number",
+            Num(n) if n < 0 => "negative_number",
+            Num(_) => "zero",
+            Eof => "eof",
+            _ => "other"
+        }
+    }
+    assert_eq(classify_token(Num(42)), "positive_number");
+    assert_eq(classify_token(Num(-7)), "negative_number");
+    assert_eq(classify_token(Num(0)), "zero");
+    assert_eq(classify_token(Eof), "eof");
+    assert_eq(classify_token(Ident("x")), "other");
+}
+
+// =============================================================================
+// Wildcard patterns
+// =============================================================================
+
+fn test_wildcard_in_tuple() {
+    fn first(p: (Int, Int)) -> Int {
+        match p { (x, _) => x }
+    }
+    fn second(p: (Int, Int)) -> Int {
+        match p { (_, y) => y }
+    }
+    assert_eq(first((10, 20)), 10);
+    assert_eq(second((10, 20)), 20);
+}
+
+fn test_wildcard_in_variant() {
+    fn has_payload(s: Shape) -> Bool {
+        match s {
+            Circle(_) => true,
+            Rect { w: _, h: _ } => true,
+            _ => false
+        }
+    }
+    assert_eq(has_payload(Circle(5)), true);
+    assert_eq(has_payload(Rect { w: 3, h: 4 }), true);
+}
+
+// =============================================================================
+// Nested patterns
+// =============================================================================
+
+fn test_nested_maybe() {
+    fn unwrap_nested(opt: Maybe<Maybe<Int>>) -> Int {
+        match opt {
+            None => -1,
+            Some(None) => 0,
+            Some(Some(x)) => x
+        }
+    }
+    assert_eq(unwrap_nested(None), -1);
+    assert_eq(unwrap_nested(Some(None)), 0);
+    assert_eq(unwrap_nested(Some(Some(42))), 42);
+}
+
+// =============================================================================
+// Match as expression
+// =============================================================================
+
+fn test_match_as_expression() {
+    let x = 5;
+    let result = match x {
+        1 => "one",
+        2 => "two",
+        _ => "other"
+    };
+    assert_eq(result, "other");
+}
+
+fn test_match_expression_in_let() {
+    let value: Maybe<Int> = Some(10);
+    let doubled = match value {
+        Some(x) => x * 2,
+        None => 0
+    };
+    assert_eq(doubled, 20);
+}
+
+fn test_match_expression_chained() {
+    fn sign(n: Int) -> Int {
+        match n {
+            x if x > 0 => 1,
+            0 => 0,
+            _ => -1
+        }
+    }
+    assert_eq(sign(42), 1);
+    assert_eq(sign(0), 0);
+    assert_eq(sign(-7), -1);
+}
+
+// =============================================================================
+// Is-pattern checks
+// =============================================================================
+
+fn test_is_pattern_basic() {
+    let x: Maybe<Int> = Some(42);
+    let y: Maybe<Int> = None;
+    assert(x is Some(_));
+    assert(y is None);
+}
+
+fn test_is_pattern_variant() {
+    let c = Circle(5);
+    let r = Rect { w: 3, h: 4 };
+    assert(c is Circle(_));
+    assert(r is Rect { w: _, h: _ });
+    assert_eq(c is Rect { w: _, h: _ }, false);
+    assert_eq(r is Circle(_), false);
+}
+
+fn test_is_in_conditional() {
+    let val: Maybe<Int> = Some(10);
+    let result = if val is Some(_) {
+        42
+    } else {
+        0
+    };
+    assert_eq(result, 42);
+
+    let none_val: Maybe<Int> = None;
+    let result2 = if none_val is Some(_) {
+        42
+    } else {
+        0
+    };
+    assert_eq(result2, 0);
+}
+
+fn main() -> Int {
+    test_match_int_literal();
+    test_match_bool();
+    test_unit_variant_match();
+    test_variant_with_payload_match();
+    test_variant_name_match();
+    test_token_match();
+    test_tuple_destructure();
+    test_tuple_pattern_specific();
+    test_guard_simple();
+    test_guard_with_maybe();
+    test_guard_with_variant();
+    test_wildcard_in_tuple();
+    test_wildcard_in_variant();
+    test_nested_maybe();
+    test_match_as_expression();
+    test_match_expression_in_let();
+    test_match_expression_chained();
+    test_is_pattern_basic();
+    test_is_pattern_variant();
+    test_is_in_conditional();
+    print("[OK] 181_interp_pattern_matching");
+    0
+}

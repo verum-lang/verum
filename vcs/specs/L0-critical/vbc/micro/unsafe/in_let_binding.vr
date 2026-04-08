@@ -1,0 +1,10 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, let, binding
+// @description: Unsafe block in let binding initialization
+fn main() {
+    let x: Int = unsafe { 42 };
+    let y: Int = unsafe { x * 2 };
+    let z: Int = unsafe { x + y };
+    assert_eq(z, 126);
+}

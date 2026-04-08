@@ -1,0 +1,439 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, extract_if, dedup, dedup_by, dedup_by_key
+// @description: Tests for Deque.extract_if, dedup, dedup_by, dedup_by_key
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Deque.extract_if
+// =============================================================================
+
+@test
+fn test_extract_if_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    fn is_even(x: &Int) -> Bool { *x % 2 == 0 }
+    let extracted = d.extract_if(is_even);
+    assert_eq(d.len(), 3);
+    assert_eq(extracted.len(), 2);
+    assert_eq(extracted[0], 2);
+    assert_eq(extracted[1], 4);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 3);
+    assert_eq(*d.get(2).unwrap(), 5);
+}
+
+@test
+fn test_extract_if_none_match() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(5);
+    fn is_even(x: &Int) -> Bool { *x % 2 == 0 }
+    let extracted = d.extract_if(is_even);
+    assert_eq(d.len(), 3);
+    assert_eq(extracted.len(), 0);
+}
+
+@test
+fn test_extract_if_all_match() {
+    let mut d = Deque.new();
+    d.push_back(2);
+    d.push_back(4);
+    d.push_back(6);
+    fn is_even(x: &Int) -> Bool { *x % 2 == 0 }
+    let extracted = d.extract_if(is_even);
+    assert(d.is_empty());
+    assert_eq(extracted.len(), 3);
+}
+
+@test
+fn test_extract_if_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    fn always(x: &Int) -> Bool { true }
+    let extracted = d.extract_if(always);
+    assert(d.is_empty());
+    assert(extracted.is_empty());
+}
+
+@test
+fn test_extract_if_single_match() {
+    let mut d = Deque.new();
+    d.push_back(42);
+    fn always(x: &Int) -> Bool { true }
+    let extracted = d.extract_if(always);
+    assert(d.is_empty());
+    assert_eq(extracted.len(), 1);
+    assert_eq(extracted[0], 42);
+}
+
+@test
+fn test_extract_if_single_no_match() {
+    let mut d = Deque.new();
+    d.push_back(42);
+    fn never(x: &Int) -> Bool { false }
+    let extracted = d.extract_if(never);
+    assert_eq(d.len(), 1);
+    assert(extracted.is_empty());
+}
+
+@test
+fn test_extract_if_negative_values() {
+    let mut d = Deque.new();
+    d.push_back(-5);
+    d.push_back(3);
+    d.push_back(-2);
+    d.push_back(7);
+    d.push_back(-1);
+    fn is_negative(x: &Int) -> Bool { *x < 0 }
+    let extracted = d.extract_if(is_negative);
+    assert_eq(d.len(), 2);
+    assert_eq(extracted.len(), 3);
+    assert_eq(extracted[0], -5);
+    assert_eq(extracted[1], -2);
+    assert_eq(extracted[2], -1);
+}
+
+@test
+fn test_extract_if_preserves_order() {
+    let mut d = Deque.new();
+    let mut i = 1;
+    while i <= 10 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    fn gt5(x: &Int) -> Bool { *x > 5 }
+    let extracted = d.extract_if(gt5);
+    // Remaining: 1,2,3,4,5
+    assert_eq(d.len(), 5);
+    let mut j = 0;
+    while j < 5 {
+        assert_eq(*d.get(j).unwrap(), j + 1);
+        j = j + 1;
+    }
+    // Extracted: 6,7,8,9,10
+    assert_eq(extracted.len(), 5);
+    let mut k = 0;
+    while k < 5 {
+        assert_eq(extracted[k], k + 6);
+        k = k + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: Deque.dedup
+// =============================================================================
+
+@test
+fn test_dedup_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(3);
+    d.push_back(3);
+    d.push_back(2);
+    let removed = d.dedup();
+    assert_eq(removed, 3);
+    assert_eq(d.len(), 4);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 2);
+}
+
+@test
+fn test_dedup_no_duplicates() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let removed = d.dedup();
+    assert_eq(removed, 0);
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_dedup_all_same() {
+    let mut d = Deque.new();
+    d.push_back(5);
+    d.push_back(5);
+    d.push_back(5);
+    d.push_back(5);
+    let removed = d.dedup();
+    assert_eq(removed, 3);
+    assert_eq(d.len(), 1);
+    assert_eq(*d.get(0).unwrap(), 5);
+}
+
+@test
+fn test_dedup_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    let removed = d.dedup();
+    assert_eq(removed, 0);
+}
+
+@test
+fn test_dedup_single() {
+    let mut d = Deque.new();
+    d.push_back(42);
+    let removed = d.dedup();
+    assert_eq(removed, 0);
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_dedup_two_same() {
+    let mut d = Deque.new();
+    d.push_back(7);
+    d.push_back(7);
+    let removed = d.dedup();
+    assert_eq(removed, 1);
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_dedup_two_different() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let removed = d.dedup();
+    assert_eq(removed, 0);
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_dedup_alternating() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(1);
+    let removed = d.dedup();
+    assert_eq(removed, 0);  // No consecutive duplicates
+    assert_eq(d.len(), 5);
+}
+
+@test
+fn test_dedup_long_runs() {
+    let mut d = Deque.new();
+    let mut i = 0;
+    while i < 5 {
+        d.push_back(1);
+        i = i + 1;
+    }
+    i = 0;
+    while i < 5 {
+        d.push_back(2);
+        i = i + 1;
+    }
+    i = 0;
+    while i < 5 {
+        d.push_back(3);
+        i = i + 1;
+    }
+    let removed = d.dedup();
+    assert_eq(removed, 12);
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+}
+
+// =============================================================================
+// Section 3: Deque.dedup_by
+// =============================================================================
+
+@test
+fn test_dedup_by_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(-1);
+    d.push_back(2);
+    d.push_back(-2);
+    d.push_back(3);
+    fn same_abs(a: &Int, b: &Int) -> Bool {
+        let abs_a = if *a < 0 { 0 - *a } else { *a };
+        let abs_b = if *b < 0 { 0 - *b } else { *b };
+        abs_a == abs_b
+    }
+    let removed = d.dedup_by(same_abs);
+    assert_eq(removed, 2);
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+}
+
+@test
+fn test_dedup_by_none_removed() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    fn always_false(a: &Int, b: &Int) -> Bool { false }
+    let removed = d.dedup_by(always_false);
+    assert_eq(removed, 0);
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_dedup_by_all_removed() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    fn always_true(a: &Int, b: &Int) -> Bool { true }
+    let removed = d.dedup_by(always_true);
+    assert_eq(removed, 2);
+    assert_eq(d.len(), 1);
+    assert_eq(*d.get(0).unwrap(), 1);
+}
+
+@test
+fn test_dedup_by_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    fn always_true(a: &Int, b: &Int) -> Bool { true }
+    let removed = d.dedup_by(always_true);
+    assert_eq(removed, 0);
+}
+
+// =============================================================================
+// Section 4: Deque.dedup_by_key
+// =============================================================================
+
+@test
+fn test_dedup_by_key_basic() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(11);
+    d.push_back(20);
+    d.push_back(21);
+    d.push_back(30);
+    fn tens(x: &Int) -> Int { *x / 10 }
+    let removed = d.dedup_by_key(tens);
+    assert_eq(removed, 2);
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 10);
+    assert_eq(*d.get(1).unwrap(), 20);
+    assert_eq(*d.get(2).unwrap(), 30);
+}
+
+@test
+fn test_dedup_by_key_no_duplicates() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    fn tens(x: &Int) -> Int { *x / 10 }
+    let removed = d.dedup_by_key(tens);
+    assert_eq(removed, 0);
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_dedup_by_key_modulo() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(11);
+    d.push_back(21);
+    d.push_back(2);
+    d.push_back(12);
+    fn mod10(x: &Int) -> Int { *x % 10 }
+    let removed = d.dedup_by_key(mod10);
+    assert_eq(removed, 2);
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 12);
+}
+
+// =============================================================================
+// Section 5: Integration
+// =============================================================================
+
+@test
+fn test_extract_if_then_dedup() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(4);
+    // First extract evens
+    fn is_even(x: &Int) -> Bool { *x % 2 == 0 }
+    let evens = d.extract_if(is_even);
+    assert_eq(d.len(), 4); // [1, 1, 3, 3]
+    assert_eq(evens.len(), 4);
+    // Then dedup
+    let removed = d.dedup();
+    assert_eq(removed, 2);
+    assert_eq(d.len(), 2); // [1, 3]
+}
+
+@test
+fn test_dedup_then_extract_if() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(3);
+    // Dedup first
+    d.dedup();
+    assert_eq(d.len(), 3); // [1, 2, 3]
+    // Then extract odds
+    fn is_odd(x: &Int) -> Bool { *x % 2 != 0 }
+    let odds = d.extract_if(is_odd);
+    assert_eq(d.len(), 1); // [2]
+    assert_eq(odds.len(), 2); // [1, 3]
+}
+
+@test
+fn test_extract_if_with_push_front() {
+    let mut d = Deque.new();
+    d.push_front(5);
+    d.push_front(4);
+    d.push_front(3);
+    d.push_front(2);
+    d.push_front(1);
+    // d = [1, 2, 3, 4, 5] (logically)
+    fn gt3(x: &Int) -> Bool { *x > 3 }
+    let extracted = d.extract_if(gt3);
+    assert_eq(extracted.len(), 2);
+    assert_eq(extracted[0], 4);
+    assert_eq(extracted[1], 5);
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_dedup_after_sort() {
+    let mut d = Deque.new();
+    d.push_back(3);
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(2);
+    d.sort();
+    // d = [1, 1, 2, 2, 3, 3]
+    let removed = d.dedup();
+    assert_eq(removed, 3);
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+}

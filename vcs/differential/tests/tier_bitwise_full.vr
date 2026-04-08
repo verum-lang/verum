@@ -1,0 +1,118 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, bitwise, shift
+// @timeout: 10000
+// @expected-exit: 0
+// @description: All bitwise ops (AND/OR/XOR/shift), verify with known values
+
+fn main() -> Int {
+    test_bitwise_and_or_xor();
+    test_shifts();
+    test_bit_manipulation();
+    test_bitmask_operations();
+    0
+}
+
+/// AND, OR, XOR with known values
+fn test_bitwise_and_or_xor() {
+    // AND operations
+    assert_eq(255 & 15, 15);
+    assert_eq(240 & 15, 0);
+    assert_eq(170 & 85, 0);
+
+    // OR operations
+    assert_eq(240 | 15, 255);
+    assert_eq(170 | 85, 255);
+    assert_eq(0 | 0, 0);
+
+    // XOR operations
+    assert_eq(255 ^ 255, 0);
+    assert_eq(255 ^ 0, 255);
+    assert_eq(170 ^ 85, 255);
+    assert_eq(42 ^ 42, 0);
+    print("bitwise_and_or_xor: pass\n");
+}
+
+/// Left and right shifts
+fn test_shifts() {
+    assert_eq(1 << 0, 1);
+    assert_eq(1 << 1, 2);
+    assert_eq(1 << 4, 16);
+    assert_eq(1 << 8, 256);
+    assert_eq(1 << 10, 1024);
+    assert_eq(3 << 4, 48);
+
+    assert_eq(256 >> 1, 128);
+    assert_eq(256 >> 4, 16);
+    assert_eq(256 >> 8, 1);
+    assert_eq(1024 >> 10, 1);
+    assert_eq(255 >> 4, 15);
+
+    // Shift round-trip
+    assert_eq((7 << 5) >> 5, 7);
+    assert_eq((15 << 3) >> 3, 15);
+    print("shifts: pass\n");
+}
+
+/// Bit manipulation patterns
+fn test_bit_manipulation() {
+    let val = 42; // binary: 101010
+    assert_eq((val >> 0) & 1, 0);
+    assert_eq((val >> 1) & 1, 1);
+    assert_eq((val >> 2) & 1, 0);
+    assert_eq((val >> 3) & 1, 1);
+    assert_eq((val >> 5) & 1, 1);
+
+    // Set a bit
+    let with_bit0 = val | (1 << 0);
+    assert_eq(with_bit0, 43);
+
+    // Toggle bit using XOR
+    let cleared2 = val ^ (1 << 1); // 42 ^ 2 = 40
+    assert_eq(cleared2, 40);
+
+    // Toggle another bit
+    let toggled = 42 ^ (1 << 2); // 101010 ^ 000100 = 101110 = 46
+    assert_eq(toggled, 46);
+    print("bit_manipulation: pass\n");
+}
+
+/// Manual popcount for 8-bit values (top-level function)
+fn popcount8(x: Int) -> Int {
+    let mut val = x & 255;
+    let mut count = 0;
+    while val > 0 {
+        count = count + (val & 1);
+        val = val >> 1;
+    }
+    count
+}
+
+/// Check if power of 2 (top-level function)
+fn is_pow2(x: Int) -> Bool {
+    if x <= 0 {
+        false
+    } else {
+        (x & (x - 1)) == 0
+    }
+}
+
+fn test_bitmask_operations() {
+    assert_eq(popcount8(0), 0);
+    assert_eq(popcount8(1), 1);
+    assert_eq(popcount8(255), 8);
+    assert_eq(popcount8(170), 4);
+    assert_eq(popcount8(85), 4);
+    assert_eq(popcount8(128), 1);
+
+    assert_eq(is_pow2(1), true);
+    assert_eq(is_pow2(2), true);
+    assert_eq(is_pow2(4), true);
+    assert_eq(is_pow2(16), true);
+    assert_eq(is_pow2(3), false);
+    assert_eq(is_pow2(6), false);
+    assert_eq(is_pow2(0), false);
+    print("bitmask_operations: pass\n");
+}

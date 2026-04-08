@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, bounds, leading, error
+// @description: Test detection of leading plus in type bounds
+// @expected-error: E048
+
+// Leading plus is not valid in type bounds
+fn test<T: + Clone + Debug>(x: T) {}

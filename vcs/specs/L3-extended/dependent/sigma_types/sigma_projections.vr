@@ -1,0 +1,185 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, projections
+
+/// Sigma projections - extracting components from dependent pairs
+///
+/// Sigma types package a value with evidence about that value.
+/// Projections allow accessing either component.
+
+/// Dependent pair: a value together with an associated datum
+type DepPair<A, B> is {
+    fst: A,
+    snd: B,
+};
+
+/// First projection - extract the value
+fn first<A, B>(pair: DepPair<A, B>) -> A {
+    pair.fst
+}
+
+/// Second projection - extract the evidence
+fn second<A, B>(pair: DepPair<A, B>) -> B {
+    pair.snd
+}
+
+/// Non-empty list as a dependent pair (list + proof of non-emptiness)
+type NonEmpty<T> is {
+    data: List<T>,
+    witness: Int,  // length >= 1
+};
+
+fn ne_list<T>(ne: NonEmpty<T>) -> List<T> {
+    ne.data
+}
+
+fn ne_head<T>(ne: NonEmpty<T>) -> T
+where ne.witness > 0 {
+    ne.data[0]
+}
+
+/// Sized collection: pairs a length with actual data
+type SizedVec<T> is {
+    len: Int,
+    data: List<T>,
+};
+
+fn sv_length<T>(sv: SizedVec<T>) -> Int {
+    sv.len
+}
+
+fn sv_data<T>(sv: SizedVec<T>) -> List<T> {
+    sv.data
+}
+
+/// Projections preserve type information
+fn double_sized<T>(sv: SizedVec<T>) -> SizedVec<T> {
+    SizedVec {
+        len: sv.len * 2,
+        data: sv.data ++ sv.data,
+    }
+}
+
+/// Nested dependent pairs
+type IndexedElem<T> is {
+    index: Int,
+    container: List<T>,
+};
+
+fn get_index<T>(ie: IndexedElem<T>) -> Int {
+    ie.index
+}
+
+fn get_container<T>(ie: IndexedElem<T>) -> List<T> {
+    ie.container
+}
+
+fn safe_access<T>(ie: IndexedElem<T>) -> T
+where ie.index >= 0, ie.index < ie.container.len() {
+    ie.container[ie.index]
+}
+
+/// Projection patterns in destructuring
+fn destructure_example<T>(ne: NonEmpty<T>) -> T {
+    let NonEmpty { data, witness } = ne;
+    data[0]
+}
+
+/// Map over dependent pairs
+fn dep_map<A, B, C>(pair: DepPair<A, B>, f: fn(B) -> C) -> DepPair<A, C> {
+    DepPair {
+        fst: pair.fst,
+        snd: f(pair.snd),
+    }
+}
+
+/// Bimap over dependent pairs
+fn dep_bimap<A, B, C, D>(
+    pair: DepPair<A, B>,
+    f: fn(A) -> C,
+    g: fn(B) -> D
+) -> DepPair<C, D> {
+    DepPair {
+        fst: f(pair.fst),
+        snd: g(pair.snd),
+    }
+}
+
+/// Swap projections
+fn dep_swap<A, B>(pair: DepPair<A, B>) -> DepPair<B, A> {
+    DepPair {
+        fst: pair.snd,
+        snd: pair.fst,
+    }
+}
+
+/// Curried projections for triples
+fn proj1<A, B, C>(triple: (A, B, C)) -> A { triple.0 }
+fn proj2<A, B, C>(triple: (A, B, C)) -> B { triple.1 }
+fn proj3<A, B, C>(triple: (A, B, C)) -> C { triple.2 }
+
+/// Dependent record as a dependent pair
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+fn person_name(p: Person) -> Text { p.name }
+fn person_age(p: Person) -> Int { p.age }
+
+fn main() {
+    // Basic dependent pair
+    let pair: DepPair<Int, Text> = DepPair { fst: 42, snd: "hello" };
+    assert(first(pair) == 42);
+    assert(second(pair) == "hello");
+
+    // Non-empty list
+    let ne: NonEmpty<Int> = NonEmpty {
+        data: [1, 2, 3],
+        witness: 3,
+    };
+    let xs = ne_list(ne);
+    assert(xs.len() == 3);
+
+    // Sized vector
+    let sv: SizedVec<Int> = SizedVec {
+        len: 5,
+        data: [10, 20, 30, 40, 50],
+    };
+    assert(sv_length(sv) == 5);
+
+    // Double
+    let sv2 = double_sized(sv);
+    assert(sv_length(sv2) == 10);
+
+    // Indexed element
+    let ie: IndexedElem<Int> = IndexedElem {
+        index: 2,
+        container: [100, 200, 300, 400],
+    };
+    assert(get_index(ie) == 2);
+
+    // Map over pair
+    let mapped = dep_map(pair, |s| s.len());
+    assert(first(mapped) == 42);
+    assert(second(mapped) == 5);
+
+    // Bimap
+    let bimapped = dep_bimap(pair, |n| n * 2, |s| s.len());
+    assert(first(bimapped) == 84);
+
+    // Swap
+    let swapped = dep_swap(pair);
+    assert(first(swapped) == "hello");
+
+    // Person record
+    let person: Person = Person { name: "Alice", age: 30 };
+    assert(person_name(person) == "Alice");
+    assert(person_age(person) == 30);
+
+    // Triple projections
+    let triple = (1, "two", 3.0);
+    assert(proj1(triple) == 1);
+    assert(proj2(triple) == "two");
+}

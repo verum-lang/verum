@@ -1,0 +1,288 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, set, filter, map, partition, count_where, filter_map
+// @description: Tests for Set functional utility methods
+
+mount core.collections.set.{Set};
+
+// =============================================================================
+// filter tests
+// =============================================================================
+
+@test
+fn test_set_filter_basic() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    let evens = s.filter(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert(evens.contains(&2));
+    assert(evens.contains(&4));
+}
+
+@test
+fn test_set_filter_empty_result() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(3);
+    s.insert(5);
+
+    let evens = s.filter(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 0);
+}
+
+@test
+fn test_set_filter_all_match() {
+    let mut s = Set.new();
+    s.insert(2);
+    s.insert(4);
+
+    let evens = s.filter(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+}
+
+@test
+fn test_set_filter_empty_set() {
+    let s: Set<Int> = Set.new();
+    let result = s.filter(|_v| true);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_set_filter_preserves_original() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+
+    let _filtered = s.filter(|v| *v > 1);
+    assert_eq(s.len(), 3);  // Original unchanged
+}
+
+// =============================================================================
+// map tests
+// =============================================================================
+
+@test
+fn test_set_map_basic() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+
+    let doubled = s.map(|v| *v * 2);
+    assert_eq(doubled.len(), 3);
+    assert(doubled.contains(&2));
+    assert(doubled.contains(&4));
+    assert(doubled.contains(&6));
+}
+
+@test
+fn test_set_map_deduplicates() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+
+    // Map to even/odd: 1%2=1, 2%2=0, 3%2=1, 4%2=0
+    let result = s.map(|v| *v % 2);
+    assert_eq(result.len(), 2);  // Only 0 and 1
+    assert(result.contains(&0));
+    assert(result.contains(&1));
+}
+
+@test
+fn test_set_map_empty() {
+    let s: Set<Int> = Set.new();
+    let result = s.map(|v| *v * 2);
+    assert_eq(result.len(), 0);
+}
+
+// =============================================================================
+// partition tests
+// =============================================================================
+
+@test
+fn test_set_partition_basic() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    let (evens, odds) = s.partition(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert_eq(odds.len(), 3);
+    assert(evens.contains(&2));
+    assert(evens.contains(&4));
+    assert(odds.contains(&1));
+    assert(odds.contains(&3));
+    assert(odds.contains(&5));
+}
+
+@test
+fn test_set_partition_all_match() {
+    let mut s = Set.new();
+    s.insert(2);
+    s.insert(4);
+
+    let (matching, rest) = s.partition(|v| *v % 2 == 0);
+    assert_eq(matching.len(), 2);
+    assert_eq(rest.len(), 0);
+}
+
+@test
+fn test_set_partition_none_match() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(3);
+
+    let (matching, rest) = s.partition(|v| *v % 2 == 0);
+    assert_eq(matching.len(), 0);
+    assert_eq(rest.len(), 2);
+}
+
+@test
+fn test_set_partition_empty() {
+    let s: Set<Int> = Set.new();
+    let (a, b) = s.partition(|_v| true);
+    assert_eq(a.len(), 0);
+    assert_eq(b.len(), 0);
+}
+
+// =============================================================================
+// count_where tests
+// =============================================================================
+
+@test
+fn test_set_count_where_basic() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    let count = s.count_where(|v| *v > 3);
+    assert_eq(count, 2);
+}
+
+@test
+fn test_set_count_where_all() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+
+    let count = s.count_where(|_v| true);
+    assert_eq(count, 2);
+}
+
+@test
+fn test_set_count_where_none() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+
+    let count = s.count_where(|_v| false);
+    assert_eq(count, 0);
+}
+
+@test
+fn test_set_count_where_empty() {
+    let s: Set<Int> = Set.new();
+    let count = s.count_where(|_v| true);
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// filter_map tests
+// =============================================================================
+
+@test
+fn test_set_filter_map_basic() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+
+    // Keep even values, double them
+    let result = s.filter_map(|v| {
+        if *v % 2 == 0 {
+            Some(*v * 2)
+        } else {
+            None
+        }
+    });
+    assert_eq(result.len(), 2);
+    assert(result.contains(&4));   // 2 * 2
+    assert(result.contains(&8));   // 4 * 2
+}
+
+@test
+fn test_set_filter_map_all_none() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+
+    let result: Set<Int> = s.filter_map(|_v| None);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_set_filter_map_all_some() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+
+    let result = s.filter_map(|v| Some(*v + 10));
+    assert_eq(result.len(), 3);
+    assert(result.contains(&11));
+    assert(result.contains(&12));
+    assert(result.contains(&13));
+}
+
+@test
+fn test_set_filter_map_empty() {
+    let s: Set<Int> = Set.new();
+    let result: Set<Int> = s.filter_map(|v| Some(*v));
+    assert_eq(result.len(), 0);
+}
+
+// =============================================================================
+// Integration tests
+// =============================================================================
+
+@test
+fn test_filter_then_map() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+
+    let result = s.filter(|v| *v > 2).map(|v| *v * 10);
+    assert_eq(result.len(), 2);
+    assert(result.contains(&30));
+    assert(result.contains(&40));
+}
+
+@test
+fn test_partition_preserves_total() {
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.insert(4);
+    s.insert(5);
+
+    let (a, b) = s.partition(|v| *v > 3);
+    assert_eq(a.len() + b.len(), s.len());
+}

@@ -1,0 +1,188 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, workspace, member
+// @description: Workspace member module dependencies
+
+/// Workspace allows multiple related packages to share dependencies
+
+// This file represents a member of a workspace
+// Workspace members can depend on each other with path dependencies
+
+// Stub types that would come from workspace sibling crates
+type UserId is Int;
+type Email is Text;
+type Timestamp is Int;
+
+fn validate_email(email: &Email) -> Bool { true }
+fn generate_id() -> UserId { 0 }
+
+type Connection is { url: Text };
+type Query is { sql: Text };
+type Transaction is { conn: Connection };
+
+implement Query {
+    fn new(sql: Text) -> Self { Self { sql } }
+    fn bind<T>(&self, val: T) -> Self { Self { sql: self.sql.clone() } }
+}
+
+implement Connection {
+    async fn fetch_optional(&self, q: Query) -> Result<Maybe<AppUser>, Text> { Ok(None) }
+    async fn execute(&self, q: Query) -> Result<Int, Text> { Ok(1) }
+}
+
+implement Timestamp {
+    fn now() -> Self { 0 }
+}
+
+// This package's types
+public type AppUser is {
+    id: UserId,
+    email: Email,
+    created_at: Timestamp,
+    profile: UserProfile,
+};
+
+public type UserProfile is {
+    display_name: Text,
+    bio: Maybe<Text>,
+    avatar_url: Maybe<Text>,
+};
+
+public type UserError is
+    | InvalidEmail(Text)
+    | UserNotFound(UserId)
+    | DuplicateEmail(Email);
+
+// Implementation using workspace dependencies
+implement AppUser {
+    public fn new(email: Email, display_name: Text) -> Result<Self, UserError> {
+        if !validate_email(&email) {
+            return Err(InvalidEmail(email));
+        }
+
+        Ok(Self {
+            id: generate_id(),
+            email,
+            created_at: Timestamp.now(),
+            profile: UserProfile {
+                display_name,
+                bio: None,
+                avatar_url: None,
+            },
+        })
+    }
+}
+
+// Repository using database from workspace
+public type UserRepository is {
+    conn: Connection,
+};
+
+implement UserRepository {
+    pub fn new(conn: Connection) -> Self {
+        Self { conn }
+    }
+
+    pub async fn find_by_id(&self, id: UserId) -> Result<Maybe<AppUser>, UserError> {
+        let query = Query.new("SELECT * FROM users WHERE id = ?")
+            .bind(id);
+
+        self.conn.fetch_optional(query).await
+            .map_err(|_| UserNotFound(id))
+    }
+
+    pub async fn find_by_email(&self, email: &Email) -> Result<Maybe<AppUser>, UserError> {
+        let query = Query.new("SELECT * FROM users WHERE email = ?")
+            .bind(email);
+
+        self.conn.fetch_optional(query).await
+            .map_err(|e| InvalidEmail(email.clone()))
+    }
+
+    pub async fn save(&self, user: &AppUser) -> Result<(), UserError> {
+        let query = Query.new("INSERT INTO users VALUES (?, ?, ?, ?)")
+            .bind(&user.id)
+            .bind(&user.email)
+            .bind(&user.created_at)
+            .bind(&user.profile);
+
+        self.conn.execute(query).await
+            .map_err(|_| DuplicateEmail(user.email.clone()))?;
+
+        Ok(())
+    }
+
+    pub async fn update(&self, user: &AppUser) -> Result<(), UserError> {
+        let query = Query.new("UPDATE users SET email = ?, profile = ? WHERE id = ?")
+            .bind(&user.email)
+            .bind(&user.profile)
+            .bind(&user.id);
+
+        let rows = self.conn.execute(query).await
+            .map_err(|_| UserNotFound(user.id))?;
+
+        if rows == 0 {
+            return Err(UserNotFound(user.id));
+        }
+
+        Ok(())
+    }
+}
+
+// Event types that would come from workspace events crate
+type EventBus is {};
+type Event is protocol {
+    fn event_type(&self) -> Text;
+};
+
+implement EventBus {
+    async fn publish<E: Event>(&self, event: E) {}
+}
+
+type UserCreatedEvent is {
+    user_id: UserId,
+    email: Email,
+    timestamp: Timestamp,
+};
+
+implement Event for UserCreatedEvent {
+    fn event_type(&self) -> Text { "user.created" }
+}
+
+public type UserService is {
+    repo: UserRepository,
+    events: EventBus,
+};
+
+implement UserService {
+    pub async fn create_user(
+        &self,
+        email: Email,
+        display_name: Text
+    ) -> Result<AppUser, UserError> {
+        // Check for existing user
+        if let Some(_) = self.repo.find_by_email(&email).await? {
+            return Err(DuplicateEmail(email));
+        }
+
+        // Create new user
+        let user = AppUser.new(email.clone(), display_name)?;
+
+        // Save to database
+        self.repo.save(&user).await?;
+
+        // Publish event
+        self.events.publish(UserCreatedEvent {
+            user_id: user.id,
+            email,
+            timestamp: Timestamp.now(),
+        }).await;
+
+        Ok(user)
+    }
+}
+
+fn main() {
+    // Workspace member example
+}

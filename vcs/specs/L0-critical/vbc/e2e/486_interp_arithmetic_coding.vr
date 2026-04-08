@@ -1,0 +1,235 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, arithmetic_coding, compression, frequency_table, interval_encoding
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Arithmetic coding simulation using integer arithmetic.
+//
+// Symbols: 0..ALPHA-1.
+// Cumulative frequency table: cum_freq[s] = sum of frequencies for symbols 0..s-1.
+// cum_freq[0] = 0, cum_freq[ALPHA] = total_freq.
+//
+// Encode: maintain interval [lo, hi) scaled to [0, SCALE).
+// For each symbol s:
+//   range = hi - lo
+//   hi    = lo + range * cum_freq[s+1] / total_freq
+//   lo    = lo + range * cum_freq[s]   / total_freq
+//
+// Decode: given a code value in [lo, hi), find symbol s such that:
+//   cum_freq[s]/total <= (code - lo)/(hi - lo) < cum_freq[s+1]/total
+//
+// All arithmetic is integer division (floor).
+
+// Find symbol for a given code point.
+// Returns symbol index s where:
+//   cum_freq[s] <= scaled_value < cum_freq[s+1]
+// scaled_value = (code - lo) * total / range
+fn ac_decode_symbol(
+    cum_freq: [Int; 16],
+    alpha:    Int,
+    lo:       Int,
+    hi:       Int,
+    code:     Int,
+    total:    Int
+) -> Int {
+    let range  = hi - lo;
+    let scaled = (code - lo) * total / range;
+    let mut s = 0;
+    while s < alpha {
+        if cum_freq[s] <= scaled && scaled < cum_freq[s + 1] {
+            return s;
+        }
+        s = s + 1;
+    }
+    alpha - 1 // fallback
+}
+
+// Update interval for encoding symbol s.
+fn ac_encode_step(
+    lo:       Int,
+    hi:       Int,
+    cum_freq: [Int; 16],
+    s:        Int,
+    total:    Int,
+    out_lo:   [Int; 2],
+    out_hi:   [Int; 2]
+) {
+    let range = hi - lo;
+    out_hi[0] = lo + range * cum_freq[s + 1] / total;
+    out_lo[0] = lo + range * cum_freq[s]     / total;
+}
+
+// Encode a sequence of symbols and return the final interval midpoint.
+fn ac_encode_sequence(
+    symbols:  [Int; 16],
+    nsymbols: Int,
+    cum_freq: [Int; 16],
+    total:    Int,
+    scale:    Int
+) -> Int {
+    let mut lo = 0;
+    let mut hi = scale;
+    let mut i = 0;
+    while i < nsymbols {
+        let s = symbols[i];
+        let range = hi - lo;
+        let new_hi = lo + range * cum_freq[s + 1] / total;
+        let new_lo = lo + range * cum_freq[s]     / total;
+        lo = new_lo;
+        hi = new_hi;
+        i = i + 1;
+    }
+    // Return midpoint of final interval
+    (lo + hi) / 2
+}
+
+// Decode a code value back to a sequence of symbols.
+// Fills out_symbols[0..nsymbols-1].
+fn ac_decode_sequence(
+    code:       Int,
+    nsymbols:   Int,
+    cum_freq:   [Int; 16],
+    alpha:      Int,
+    total:      Int,
+    scale:      Int,
+    out_symbols: [Int; 16]
+) {
+    let mut lo = 0;
+    let mut hi = scale;
+    let mut i = 0;
+    while i < nsymbols {
+        let s = ac_decode_symbol(cum_freq, alpha, lo, hi, code, total);
+        out_symbols[i] = s;
+        // Update interval
+        let range = hi - lo;
+        let new_hi = lo + range * cum_freq[s + 1] / total;
+        let new_lo = lo + range * cum_freq[s]     / total;
+        lo = new_lo;
+        hi = new_hi;
+        i = i + 1;
+    }
+}
+
+fn test_ac_uniform_alphabet() {
+    // 4 symbols (A=0,B=1,C=2,D=3) with equal freq=1 each. total=4.
+    // cum_freq = [0, 1, 2, 3, 4]
+    // scale = 1000
+    // Encode "A B C D" = [0, 1, 2, 3]
+    let mut cum_freq = [0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total  = 4;
+    let scale  = 1000;
+    let alpha  = 4;
+    let symbols = [0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Encode
+    // Start: [0, 1000)
+    // s=0: range=1000, hi=0+1000*1/4=250, lo=0+1000*0/4=0  -> [0, 250)
+    // s=1: range=250,  hi=0+250*2/4=125,  lo=0+250*1/4=62  -> [62, 125)
+    // s=2: range=63,   hi=62+63*3/4=109,  lo=62+63*2/4=93  -> [93, 109) (109=62+47, 93=62+31)
+    //   Actually: 62 + 63*3/4 = 62 + 189/4 = 62 + 47 = 109
+    //             62 + 63*2/4 = 62 + 126/4 = 62 + 31 = 93
+    // s=3: range=16,   hi=93+16*4/4=109,  lo=93+16*3/4=105 -> [105, 109)
+    //   Actually: 93 + 16*4/4 = 93 + 16 = 109
+    //             93 + 16*3/4 = 93 + 12 = 105
+    // midpoint = (105+109)/2 = 107
+    let code = ac_encode_sequence(symbols, 4, cum_freq, total, scale);
+    assert_eq(code, 107);
+
+    // Decode
+    let mut decoded = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    ac_decode_sequence(107, 4, cum_freq, alpha, total, scale, decoded);
+    assert_eq(decoded[0], 0);
+    assert_eq(decoded[1], 1);
+    assert_eq(decoded[2], 2);
+    assert_eq(decoded[3], 3);
+
+    print("ac_uniform_alphabet: ok");
+}
+
+fn test_ac_biased_alphabet() {
+    // 3 symbols with biased frequencies: A=6, B=3, C=1. total=10.
+    // cum_freq = [0, 6, 9, 10]
+    // scale = 10000
+    // Encode "A A B" = [0, 0, 1]
+    let mut cum_freq = [0, 6, 9, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total  = 10;
+    let scale  = 10000;
+    let alpha  = 3;
+    let symbols = [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // s=0 (A): range=10000, hi=10000*6/10=6000, lo=0  -> [0, 6000)
+    // s=0 (A): range=6000,  hi=6000*6/10=3600,  lo=0  -> [0, 3600)
+    // s=1 (B): range=3600,  hi=3600*9/10=3240,  lo=3600*6/10=2160 -> [2160, 3240)
+    // midpoint = (2160+3240)/2 = 2700
+    let code = ac_encode_sequence(symbols, 3, cum_freq, total, scale);
+    assert_eq(code, 2700);
+
+    // Decode
+    let mut decoded = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    ac_decode_sequence(2700, 3, cum_freq, alpha, total, scale, decoded);
+    assert_eq(decoded[0], 0);
+    assert_eq(decoded[1], 0);
+    assert_eq(decoded[2], 1);
+
+    print("ac_biased_alphabet: ok");
+}
+
+fn test_ac_single_symbol() {
+    // Alphabet: only one symbol (symbol 0). freq=1, total=1.
+    // cum_freq = [0, 1]
+    // Any encoding of this symbol maps to the same interval.
+    let mut cum_freq = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total  = 1;
+    let scale  = 1000;
+    let alpha  = 1;
+    let symbols = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Encoding 3 copies of symbol 0:
+    // Each step: range stays, interval [0, scale) stays -> midpoint = 500
+    let code = ac_encode_sequence(symbols, 3, cum_freq, total, scale);
+    assert_eq(code, 500);
+
+    // Decode
+    let mut decoded = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    ac_decode_sequence(500, 3, cum_freq, alpha, total, scale, decoded);
+    assert_eq(decoded[0], 0);
+    assert_eq(decoded[1], 0);
+    assert_eq(decoded[2], 0);
+
+    print("ac_single_symbol: ok");
+}
+
+fn test_ac_encode_decode_roundtrip() {
+    // Binary alphabet: 0 and 1 with freq 1 each. total=2.
+    // cum_freq = [0, 1, 2]
+    // scale = 10000
+    // Encode [1, 0, 1, 0] and verify decode recovers same sequence.
+    let mut cum_freq = [0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let total  = 2;
+    let scale  = 10000;
+    let alpha  = 2;
+    let symbols = [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let code = ac_encode_sequence(symbols, 4, cum_freq, total, scale);
+
+    let mut decoded = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    ac_decode_sequence(code, 4, cum_freq, alpha, total, scale, decoded);
+
+    assert_eq(decoded[0], 1);
+    assert_eq(decoded[1], 0);
+    assert_eq(decoded[2], 1);
+    assert_eq(decoded[3], 0);
+
+    print(f"ac_roundtrip: code={code} decoded=[1,0,1,0] ok");
+}
+
+fn main() -> Int {
+    test_ac_uniform_alphabet();
+    test_ac_biased_alphabet();
+    test_ac_single_symbol();
+    test_ac_encode_decode_roundtrip();
+    print("[OK] 486_interp_arithmetic_coding");
+    0
+}

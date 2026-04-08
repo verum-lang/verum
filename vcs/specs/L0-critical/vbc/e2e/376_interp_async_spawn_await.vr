@@ -1,0 +1,101 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, async, spawn, await
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests async spawn and await in cooperative single-threaded mode.
+// Verifies that spawned functions execute eagerly and their results
+// are correctly retrievable via .await.
+
+fn compute_square(n: Int) -> Int {
+    n * n
+}
+
+@allow(unbounded_recursion)
+fn compute_factorial(n: Int) -> Int {
+    if n <= 1 { 1 }
+    else { n * compute_factorial(n - 1) }
+}
+
+@allow(unbounded_recursion)
+fn compute_fib(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else { compute_fib(n - 1) + compute_fib(n - 2) }
+}
+
+fn compute_sum(limit: Int) -> Int {
+    let mut total = 0;
+    let mut i = 1;
+    while i <= limit {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+fn test_basic_spawn_await() {
+    // Spawn a simple computation
+    let task = spawn compute_square(7);
+    let sq = task.await;
+    assert_eq(sq, 49);
+
+    // Spawn factorial
+    let task2 = spawn compute_factorial(5);
+    let fact = task2.await;
+    assert_eq(fact, 120);
+
+    print("basic_spawn_await: ok");
+}
+
+fn test_multiple_spawns() {
+    // Spawn multiple tasks
+    let t1 = spawn compute_square(3);
+    let t2 = spawn compute_square(4);
+    let t3 = spawn compute_square(5);
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+    let r3 = t3.await;
+
+    assert_eq(r1, 9);
+    assert_eq(r2, 16);
+    assert_eq(r3, 25);
+    assert_eq(r1 + r2 + r3, 50);
+
+    print("multiple_spawns: ok");
+}
+
+fn test_spawn_recursive() {
+    // Spawn recursive function
+    let task = spawn compute_fib(10);
+    let fib10 = task.await;
+    assert_eq(fib10, 55);
+
+    // Spawn factorial
+    let task2 = spawn compute_factorial(10);
+    let fact10 = task2.await;
+    assert_eq(fact10, 3628800);
+
+    print("spawn_recursive: ok");
+}
+
+fn test_spawn_with_loop() {
+    // Spawn computation with loop
+    let task = spawn compute_sum(100);
+    let s = task.await;
+    assert_eq(s, 5050);
+
+    print("spawn_with_loop: ok");
+}
+
+fn main() -> Int {
+    test_basic_spawn_await();
+    test_multiple_spawns();
+    test_spawn_recursive();
+    test_spawn_with_loop();
+    print("[OK] 376_interp_async_spawn_await");
+    0
+}

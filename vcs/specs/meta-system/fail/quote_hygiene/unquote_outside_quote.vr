@@ -1,0 +1,20 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M401
+// @tags: meta, quote, hygiene, unquote, syntax
+// @description: Tests that unquote/splice ($) is rejected outside quote context
+
+// =============================================================================
+// UNQUOTE OUTSIDE QUOTE
+// =============================================================================
+
+// $ operator used outside quote block - should be an error
+meta fn invalid_unquote() -> Int {
+    let x = 42;
+    $x  // ERROR: M401 - Unquote outside quote context
+}
+
+fn main() {
+    @const assert(invalid_unquote() == 42);
+}

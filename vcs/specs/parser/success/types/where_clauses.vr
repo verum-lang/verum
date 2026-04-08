@@ -1,0 +1,674 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for where clause productions
+// Grammar: where_clause = 'where' , where_predicates ;
+//          where_predicates = where_predicate , { ',' , where_predicate } ;
+//          where_predicate = type_bound_predicate | type_equality_predicate | associated_type_bound | associated_type_eq ;
+//          generic_where_clause = 'where' , 'type' , type_constraint_list ;
+//          meta_where_clause = 'where' , 'meta' , meta_constraint_list ;
+//          value_where_clause = 'where' , [ 'value' ] , refinement_expr ;
+
+// =============================================================================
+// Section 1: Basic Type Bound Where Clauses
+// =============================================================================
+
+// Grammar: type_bound_predicate = type_expr , ':' , bounds ;
+
+// Single bound
+fn print_item<T>(item: T) where T: Display {
+    print(item.fmt());
+}
+
+fn clone_item<T>(item: &T) -> T where T: Clone {
+    item.clone()
+}
+
+fn sort_items<T>(items: &mut List<T>) where T: Ord {
+    items.sort();
+}
+
+// Multiple bounds with +
+fn process<T>(item: T) where T: Clone + Display + Debug {
+    let cloned = item.clone();
+    print(cloned.fmt());
+}
+
+fn compare_and_show<T>(a: T, b: T) where T: Ord + Display {
+    if a < b {
+        print(a.fmt());
+    } else {
+        print(b.fmt());
+    }
+}
+
+// Define the protocols
+type Display is protocol {
+    fn fmt(&self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Ord is protocol {
+    fn compare(&self, other: &Self) -> Ordering;
+};
+
+type Ordering is Less | Equal | Greater;
+
+// =============================================================================
+// Section 2: Multiple Type Parameters with Where Clauses
+// =============================================================================
+
+fn map_convert<A, B>(item: A, f: fn(A) -> B) -> B
+where
+    A: Clone,
+    B: Default
+{
+    f(item.clone())
+}
+
+fn merge<T, U, V>(t: T, u: U) -> V
+where
+    T: Into<V>,
+    U: Into<V>,
+    V: Combine
+{
+    V.combine(t.into(), u.into())
+}
+
+fn transform<I, O, E>(input: I) -> Result<O, E>
+where
+    I: Deserialize,
+    O: Serialize,
+    E: Error
+{
+    let parsed = I.deserialize(input)?;
+    Ok(O.serialize(parsed))
+}
+
+type Default is protocol {
+    fn default() -> Self;
+};
+
+type Into<T> is protocol {
+    fn into(self) -> T;
+};
+
+type Combine is protocol {
+    fn combine(a: Self, b: Self) -> Self;
+};
+
+type Deserialize is protocol {
+    fn deserialize(data: Self) -> Result<Self, DeserializeError>;
+};
+
+type Serialize is protocol {
+    fn serialize(self) -> Self;
+};
+
+type Error is protocol {
+    fn message(&self) -> Text;
+};
+
+type DeserializeError is { message: Text };
+
+// =============================================================================
+// Section 3: Associated Type Bounds in Where Clauses
+// =============================================================================
+
+// Grammar: associated_type_bound = type_path_expr , '.' , identifier , ':' , bounds ;
+
+fn process_iterator<I>(iter: I) where I: Iterator, I.Item: Display {
+    for item in iter {
+        print(item.fmt());
+    }
+}
+
+fn collect_hashable<I>(iter: I) -> Set<I.Item>
+where
+    I: Iterator,
+    I.Item: Hash + Eq
+{
+    iter.collect()
+}
+
+fn sum_numbers<I>(iter: I) -> I.Item
+where
+    I: Iterator,
+    I.Item: Add<Output = I.Item> + Default
+{
+    iter.fold(I.Item.default(), |acc, x| acc.add(x))
+}
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type Hash is protocol {
+    fn hash(&self) -> u64;
+};
+
+type Eq is protocol {
+    fn eq(&self, other: &Self) -> Bool;
+};
+
+type Add is protocol {
+    type Output;
+    fn add(self, other: Self) -> Self.Output;
+};
+
+// =============================================================================
+// Section 4: Associated Type Equality in Where Clauses
+// =============================================================================
+
+// Grammar: associated_type_eq = type_path_expr , '.' , identifier , '=' , type_expr ;
+
+fn collect_to_list<I>(iter: I) -> List<Int>
+where
+    I: Iterator,
+    I.Item = Int
+{
+    iter.collect()
+}
+
+fn map_to_text<I, F>(iter: I, f: F) -> List<Text>
+where
+    I: Iterator,
+    F: Fn(I.Item) -> Text
+{
+    iter.map(f).collect()
+}
+
+fn convert_iterator<I, J>(iter: I) -> J
+where
+    I: Iterator,
+    J: FromIterator<I.Item>
+{
+    J.from_iter(iter)
+}
+
+type Fn<Args, Output> is protocol {
+    fn call(&self, args: Args) -> Output;
+};
+
+type FromIterator<T> is protocol {
+    fn from_iter<I: Iterator<Item = T>>(iter: I) -> Self;
+};
+
+// =============================================================================
+// Section 5: Type Equality Predicates
+// =============================================================================
+
+// Grammar: type_equality_predicate = type_expr , '=' , type_expr ;
+
+fn same_type<A, B>(a: A, b: B) where A = B {
+    // A and B are the same type
+}
+
+fn convert_same<T, U>(value: T) -> U where T = U {
+    value
+}
+
+fn process_pair<T, U, V>(pair: (T, U)) -> V
+where
+    T = U,
+    V = T
+{
+    pair.0
+}
+
+// =============================================================================
+// Section 6: Negative Bounds in Where Clauses
+// =============================================================================
+
+// Grammar: negative_bound = '!' , protocol_path ;
+
+fn not_send<T>(value: T) where T: !Send {
+    // T explicitly does NOT implement Send
+}
+
+fn thread_local<T>(value: T) where T: Clone + !Send + !Sync {
+    // T is Clone but not thread-safe
+}
+
+fn single_threaded<T>(value: T)
+where
+    T: Display,
+    T: !Send,
+    T: !Sync
+{
+    print(value.fmt());
+}
+
+type Send is protocol { };
+type Sync is protocol { };
+
+// =============================================================================
+// Section 7: Generic Where Clause (where type)
+// =============================================================================
+
+// Grammar: generic_where_clause = 'where' , 'type' , type_constraint_list ;
+
+fn generic_constraint<T>(value: T) where type T: Clone {
+    let copied = value.clone();
+}
+
+fn multi_type_constraint<T, U>(t: T, u: U)
+where type T: Display, type U: Debug
+{
+    print(t.fmt());
+    print(u.debug());
+}
+
+// In type definitions
+type Container<T> where type T: Clone is {
+    items: List<T>
+};
+
+// In implementations
+implement<T> Container<T> where type T: Clone + Display {
+    fn show_all(&self) {
+        for item in self.items.iter() {
+            print(item.fmt());
+        }
+    }
+}
+
+// =============================================================================
+// Section 8: Meta Where Clause (where meta)
+// =============================================================================
+
+// Grammar: meta_where_clause = 'where' , 'meta' , meta_constraint_list ;
+
+// Compile-time constraints
+fn array_ops<T, const N: Int>(arr: [T; N]) -> [T; N]
+where meta N > 0
+{
+    arr
+}
+
+fn matrix_multiply<const M: Int, const N: Int, const P: Int>(
+    a: [[Float; N]; M],
+    b: [[Float; P]; N]
+) -> [[Float; P]; M]
+where meta M > 0, meta N > 0, meta P > 0
+{
+    // Matrix multiplication
+    [[0.0; P]; M]
+}
+
+// Boolean meta constraints
+fn power_of_two_array<T, const N: Int>(arr: [T; N])
+where meta N > 0, meta (N & (N - 1)) == 0
+{
+    // N is a power of two
+}
+
+// In type definitions
+type FixedBuffer<const SIZE: Int> where meta SIZE > 0 is {
+    data: [Byte; SIZE]
+};
+
+type ValidMatrix<const ROWS: Int, const COLS: Int>
+where meta ROWS > 0, meta COLS > 0
+is {
+    data: [[Float; COLS]; ROWS]
+};
+
+// =============================================================================
+// Section 9: Value Where Clause (Refinement)
+// =============================================================================
+
+// Grammar: value_where_clause = 'where' , [ 'value' ] , refinement_expr ;
+
+// In type definitions
+type PositiveInt is Int where self > 0;
+type NonEmptyText is Text where self.len() > 0;
+type ValidAge is Int where self >= 0 && self <= 150;
+
+// Explicit 'value' keyword
+type BoundedFloat is Float where value self >= 0.0 && self <= 1.0;
+
+// Combined predicates within inline refinement (grammar: type_refinement = inline_refinement | value_where_clause)
+type StrictPositive is Int { self > 0 && self < 1000 };
+
+// In function return types
+fn clamp(x: Int, min: Int, max: Int) -> Int where result >= min && result <= max {
+    if x < min { min }
+    else if x > max { max }
+    else { x }
+}
+
+// =============================================================================
+// Section 10: Combined Where Clause Forms
+// =============================================================================
+
+// Combining type and value constraints
+fn process_bounded<T, const N: Int>(items: [T; N])
+where
+    type T: Clone + Display,
+    meta N > 0,
+    meta N <= 100
+{
+    for item in items.iter() {
+        print(item.fmt());
+    }
+}
+
+// All three forms together
+type ValidContainer<T, const N: Int>
+where
+    type T: Clone,
+    meta N > 0
+is {
+    items: [T; N],
+    count: Int { self <= N }
+};
+
+fn complex_constraint<T, U, const N: Int>(data: [T; N]) -> List<U>
+where
+    type T: Clone + Into<U>,
+    type U: Display,
+    meta N > 0,
+    meta N * 2 < 1000
+{
+    data.iter().map(|x| x.clone().into()).collect()
+}
+
+// =============================================================================
+// Section 11: Where Clauses on Implementations
+// =============================================================================
+
+type Wrapper<T> is { inner: T };
+
+// Basic where on implement
+implement<T> Display for Wrapper<T> where T: Display {
+    fn fmt(&self) -> Text {
+        f"Wrapper({self.inner.fmt()})"
+    }
+}
+
+// Multiple bounds
+implement<T> Clone for Wrapper<T> where T: Clone + Copy {
+    fn clone(&self) -> Self {
+        Wrapper { inner: self.inner }
+    }
+}
+
+// With associated type bounds
+implement<T, U> Into<Wrapper<U>> for Wrapper<T>
+where
+    T: Into<U>,
+    U: Clone
+{
+    fn into(self) -> Wrapper<U> {
+        Wrapper { inner: self.inner.into() }
+    }
+}
+
+type Copy is protocol extends Clone { };
+
+// =============================================================================
+// Section 12: Where Clauses on Type Definitions
+// =============================================================================
+
+// Simple constraint
+type SortedList<T> where T: Ord is {
+    items: List<T>
+};
+
+// Multiple constraints
+type ComparableSet<T> where T: Eq + Hash + Ord is {
+    items: Set<T>
+};
+
+// With const generics
+type BoundedArray<T, const N: Int>
+where
+    T: Default,
+    meta N > 0
+is {
+    data: [T; N]
+};
+
+// Protocol with where clause
+type Collection<T> where T: Clone is protocol {
+    fn add(&mut self, item: T);
+    fn remove(&mut self, item: &T) -> Maybe<T>;
+    fn contains(&self, item: &T) -> Bool;
+};
+
+// =============================================================================
+// Section 13: Where Clauses in Protocols
+// =============================================================================
+
+type Mappable<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>
+    where
+        A: Clone,
+        B: Clone;
+};
+
+type Filterable<F<_>> is protocol {
+    fn filter<A>(self: F<A>, pred: fn(&A) -> Bool) -> F<A>
+    where A: Clone;
+};
+
+type Combinable is protocol {
+    fn combine<T>(self, other: Self) -> Self
+    where T: Default;
+};
+
+// Protocol with associated type constraints
+type Container is protocol {
+    type Item;
+
+    fn get(&self, index: Int) -> Maybe<Self.Item>
+    where Self.Item: Clone;
+
+    fn set(&mut self, index: Int, value: Self.Item)
+    where Self.Item: Clone;
+};
+
+// =============================================================================
+// Section 14: Higher-Kinded Type Bounds and Rank-2 Function Types
+// =============================================================================
+
+// Grammar: higher_kinded_type = path , '<' , '_' , '>'
+// Grammar: rank2_function_type = [ 'async' ] , 'fn' , generics , '(' , type_list , ')' , ...
+
+// Higher-kinded type constructor bounds
+fn transform_any<F, G, A>(fa: F<A>) -> G<A>
+where
+    F<_>: Functor,
+    G<_>: Applicative
+{
+    G.pure(fa.extract())
+}
+
+// Multiple HKT bounds
+fn sequence_all<F, G, A>(values: List<F<A>>) -> F<List<A>>
+where
+    F<_>: Applicative,
+    G<_>: Traversable
+{
+    F.sequence(values)
+}
+
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+    fn extract<A>(self: F<A>) -> A;
+};
+
+type Applicative<F<_>> is protocol extends Functor<F<_>> {
+    fn pure<A>(a: A) -> F<A>;
+};
+
+type Traversable<F<_>> is protocol {
+    fn traverse<A, B, G<_>: Applicative>(self: F<A>, f: fn(A) -> G<B>) -> G<F<B>>;
+};
+
+// =============================================================================
+// Section 15: Where Clauses with Path Types
+// =============================================================================
+
+fn process_module_type<T>(value: T)
+where T: module_a.SomeTrait
+{
+    value.trait_method();
+}
+
+fn convert_types<T, U>(value: T) -> U
+where
+    T: module_a.Convertible<U>,
+    U: module_b.Constructible
+{
+    value.convert()
+}
+
+module module_a {
+    type SomeTrait is protocol {
+        fn trait_method(&self);
+    };
+
+    type Convertible<T> is protocol {
+        fn convert(self) -> T;
+    };
+}
+
+module module_b {
+    type Constructible is protocol {
+        fn construct() -> Self;
+    };
+}
+
+// =============================================================================
+// Section 16: Ensures Clause (Post-conditions)
+// =============================================================================
+
+// Grammar: ensures_clause = 'where' , ensures_item , { ',' , ensures_item } ;
+
+fn abs(x: Int) -> Int
+where ensures result >= 0
+{
+    if x < 0 { -x } else { x }
+}
+
+fn max(a: Int, b: Int) -> Int
+where ensures result >= a, ensures result >= b
+{
+    if a > b { a } else { b }
+}
+
+fn divide(a: Int, b: Int { b != 0 }) -> Int
+where ensures result * b <= a, ensures result * b > a - b
+{
+    a / b
+}
+
+// Combined with requires
+fn binary_search(arr: &[Int], target: Int) -> Maybe<Int>
+requires is_sorted(arr)
+where ensures result is Some(idx) => arr[idx] == target
+{
+    // Implementation
+    None
+}
+
+fn is_sorted(arr: &[Int]) -> Bool {
+    arr.windows(2).all(|w| w[0] <= w[1])
+}
+
+// =============================================================================
+// Section 17: Complex Multi-Line Where Clauses
+// =============================================================================
+
+fn very_constrained<A, B, C, D, E, const N: Int>(
+    a: A,
+    b: B,
+    c: C,
+    d: D,
+    e: E,
+    arr: [A; N]
+) -> E
+where
+    A: Clone + Display + Debug,
+    B: Clone + Into<C>,
+    C: Default + Display,
+    D: Eq + Hash,
+    E: FromIterator<A> + Default,
+    A.Associated: Display,
+    meta N > 0,
+    meta N < 1000
+{
+    E.default()
+}
+
+// Complex implementation where clause
+implement<K, V, S>
+Map<K, V, S>
+where
+    K: Eq + Hash,
+    V: Clone,
+    S: BuildHasher + Default
+{
+    fn with_hasher() -> Self {
+        Map.default()
+    }
+}
+
+type BuildHasher is protocol {
+    fn build(&self) -> Hasher;
+};
+
+type Hasher is protocol {
+    fn hash(&mut self, bytes: &[Byte]);
+    fn finish(&self) -> u64;
+};
+
+// =============================================================================
+// Section 18: Edge Cases
+// =============================================================================
+
+// Empty-ish where (single simple bound)
+fn minimal<T>(x: T) where T: Clone {
+    x.clone();
+}
+
+// Self bounds
+fn self_referential<T>(x: T) where T: PartialEq<T> {
+    x.eq(&x);
+}
+
+type PartialEq<T> is protocol {
+    fn eq(&self, other: &T) -> Bool;
+};
+
+// Recursive bounds
+fn recursive_bound<T>(x: T) where T: Container<Item = T> {
+    // T contains itself
+}
+
+// Conflicting-looking bounds (for parser test)
+fn many_bounds<T>(x: T)
+where
+    T: A + B + C + D + E + F + G + H
+{
+    // Many bounds on single type
+}
+
+type A is protocol { };
+type B is protocol { };
+type C is protocol { };
+type D is protocol { };
+type E is protocol { };
+type F is protocol { };
+type G is protocol { };
+type H is protocol { };

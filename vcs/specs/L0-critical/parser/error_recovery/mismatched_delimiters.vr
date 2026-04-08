@@ -1,0 +1,67 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, delimiters, mismatch
+// @expect: errors
+// @description: Tests error recovery for mismatched delimiters (e.g., opening with '(' but closing with ']').
+//              Parser should report the mismatch and recover.
+
+// Test 1: Basic delimiter mismatch
+// Opening paren closed with bracket
+fn test_paren_bracket_mismatch() {
+    let x = (1 + 2];
+    let y = 3;
+    x + y
+}
+
+// Test 2: Bracket closed with brace
+fn test_bracket_brace_mismatch() {
+    let arr = [1, 2, 3];
+    let val = 4;
+    val
+}
+
+// Test 3: Brace closed with paren
+fn test_brace_paren_mismatch() {
+    let block = {
+        let inner = 42;
+        inner
+    );
+    block
+}
+
+// Test 4: Multiple mismatches in same expression
+fn test_multiple_mismatches() {
+    let complex = ([(1 + 2]});
+    complex
+}
+
+// Test 5: Mismatch in nested context
+fn test_nested_mismatch() {
+    let result = match value {
+        Some(x) => (x + 1],
+        None => 0,
+    };
+    result
+}
+
+// Test 6: Mismatch in function parameters
+fn test_param_mismatch(a: Int, b: Int] -> Int {
+    a + b
+}
+
+// Test 7: Mismatch with correct subsequent code
+// Parser should recover and continue correctly
+fn test_recovery_after_mismatch() {
+    let bad = (1 + 2];
+    let good = (3 + 4);
+    let also_good = [5, 6, 7];
+    bad + good
+}
+
+// Test 8: Mismatch in type annotations
+fn test_type_mismatch() {
+    let list: List<Int] = [];
+    let map: Map<Text, Int) = {};
+    list
+}

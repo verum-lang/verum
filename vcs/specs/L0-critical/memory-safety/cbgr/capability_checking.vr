@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, capability
+// @description: Tests CBGR capability checking for read/write permissions
+
+/// Tests that immutable references only have READ capability
+fn test_immutable_read_only() {
+    let x = 42;
+    let r = &x;  // Immutable reference - READ only
+
+    // Reading should succeed
+    let value = *r;
+    assert_eq(value, 42);
+}
+
+/// Tests that mutable references have READ and WRITE capabilities
+fn test_mutable_read_write() {
+    let mut x = 42;
+    let r = &mut x;  // Mutable reference - READ + WRITE
+
+    // Reading should succeed
+    let value = *r;
+    assert_eq(value, 42);
+
+    // Writing should succeed
+    *r = 100;
+    assert_eq(*r, 100);
+}
+
+/// Tests capability attenuation from mutable to immutable
+fn test_capability_attenuation() {
+    let mut x = 42;
+    let r_mut = &mut x;  // Mutable ref
+
+    // Attenuate to immutable (lose WRITE capability)
+    let r_immut: &Int = r_mut;
+
+    // Reading still works
+    let value = *r_immut;
+    assert_eq(value, 42);
+}
+
+/// Tests that capability checks are properly enforced at runtime
+fn test_capability_enforcement() {
+    let data = [1, 2, 3, 4, 5];
+    let slice = &data[..];  // Immutable slice reference
+
+    // Has READ capability
+    assert_eq(slice[0], 1);
+    assert_eq(slice.len(), 5);
+}
+
+fn main() {
+    test_immutable_read_only();
+    test_mutable_read_write();
+    test_capability_attenuation();
+    test_capability_enforcement();
+    print("All capability tests passed");
+}

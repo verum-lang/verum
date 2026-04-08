@@ -1,0 +1,67 @@
+// @test: typecheck-fail
+// @expected-error: "Array index out of bounds"
+// @tier: all
+// @level: L0
+// @tags: memory-safety, bounds-checking, static-analysis, edge-cases
+// @description: Tests edge cases in static bounds checking
+
+/// Edge cases for static bounds checking:
+/// 1. Boundary conditions (off-by-one)
+/// 2. Zero-length arrays
+/// 3. Computed constant indices
+/// 4. Negative indices via arithmetic
+/// 5. Nested function calls
+
+fn main() {
+    test_boundary_conditions();
+    test_zero_length();
+    test_computed_indices();
+    test_negative_arithmetic();
+}
+
+/// Test boundary conditions - off-by-one errors
+fn test_boundary_conditions() {
+    let arr: [Int; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // VALID: last valid index
+    let a = arr[9];   // OK: index 9 < length 10
+
+    // INVALID: first invalid index (off-by-one)
+    let b = arr[10];  // ERROR: Array index out of bounds: index 10 >= length 10
+}
+
+/// Test zero-length arrays
+fn test_zero_length() {
+    let empty: [Int; 0] = [];
+
+    // INVALID: any index on empty array
+    let x = empty[0];  // ERROR: Array index out of bounds: index 0 >= length 0
+}
+
+/// Test computed constant indices
+fn test_computed_indices() {
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    const SIZE: Int = 5;
+    const LAST: Int = SIZE - 1;  // 4
+
+    // VALID: computed index within bounds
+    let a = arr[LAST];      // OK: 4 < 5
+    let b = arr[SIZE / 2];  // OK: 2 < 5
+
+    // INVALID: computed index out of bounds
+    let c = arr[SIZE];           // ERROR: index 5 >= length 5
+    let d = arr[SIZE + 1];       // ERROR: index 6 >= length 5
+    let e = arr[SIZE * 2 - 3];   // ERROR: index 7 >= length 5
+}
+
+/// Test negative indices via arithmetic
+fn test_negative_arithmetic() {
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    const OFFSET: Int = 2;
+
+    // INVALID: arithmetic resulting in negative
+    let x = arr[0 - 1];        // ERROR: negative index
+    let y = arr[OFFSET - 5];   // ERROR: negative index -3
+}

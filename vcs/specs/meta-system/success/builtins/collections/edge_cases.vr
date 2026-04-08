@@ -1,0 +1,501 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, collections, edge_cases, empty, nested, large
+// @description: Comprehensive edge case tests for collection builtins
+
+// =============================================================================
+// EMPTY COLLECTION TESTS
+// =============================================================================
+
+// Test operations on empty list
+meta fn test_empty_list_len() -> Bool {
+    list_len([]) == 0
+}
+
+meta fn test_empty_list_is_empty() -> Bool {
+    list_is_empty([])
+}
+
+meta fn test_empty_list_concat() -> Bool {
+    let result = list_concat([], []);
+    list_len(result) == 0
+}
+
+meta fn test_empty_list_reverse() -> Bool {
+    let result = list_reverse([]);
+    list_len(result) == 0
+}
+
+meta fn test_empty_list_map() -> Bool {
+    let result = list_map([], |x: Int| x * 2);
+    list_len(result) == 0
+}
+
+meta fn test_empty_list_filter() -> Bool {
+    let result = list_filter([], |x: Int| x > 0);
+    list_len(result) == 0
+}
+
+meta fn test_empty_list_fold() -> Bool {
+    let result = list_fold([], 0, |acc: Int, x: Int| acc + x);
+    result == 0
+}
+
+// Test operations on empty map
+meta fn test_empty_map_len() -> Bool {
+    map_len(map_new()) == 0
+}
+
+meta fn test_empty_map_is_empty() -> Bool {
+    map_is_empty(map_new())
+}
+
+meta fn test_empty_map_keys() -> Bool {
+    let keys = map_keys(map_new());
+    list_len(keys) == 0
+}
+
+meta fn test_empty_map_values() -> Bool {
+    let values = map_values(map_new());
+    list_len(values) == 0
+}
+
+// Test operations on empty set
+meta fn test_empty_set_len() -> Bool {
+    set_len(set_new()) == 0
+}
+
+meta fn test_empty_set_is_empty() -> Bool {
+    set_is_empty(set_new())
+}
+
+// =============================================================================
+// NESTED COLLECTION TESTS
+// =============================================================================
+
+// Test nested lists (2D)
+meta fn test_nested_list_2d() -> Bool {
+    let nested = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    list_len(nested) == 3 &&
+    list_len(maybe_unwrap(list_get(nested, 0))) == 3
+}
+
+// Test nested lists (3D)
+meta fn test_nested_list_3d() -> Bool {
+    let nested = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+    list_len(nested) == 2 &&
+    list_len(maybe_unwrap(list_get(nested, 0))) == 2 &&
+    list_len(maybe_unwrap(list_get(maybe_unwrap(list_get(nested, 0)), 0))) == 2
+}
+
+// Test accessing deeply nested element
+meta fn test_deeply_nested_access() -> Bool {
+    let nested = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]];
+    let inner = list_get(maybe_unwrap(list_get(maybe_unwrap(list_get(nested, 1)), 0)), 1);
+    inner == Some(6)
+}
+
+// Test list of maps
+meta fn test_list_of_maps() -> Bool {
+    let m1 = map_insert(map_new(), "a", 1);
+    let m2 = map_insert(map_new(), "b", 2);
+    let list_of_maps = [m1, m2];
+    list_len(list_of_maps) == 2
+}
+
+// Test map of lists
+meta fn test_map_of_lists() -> Bool {
+    let m = map_new();
+    let m = map_insert(m, "evens", [2, 4, 6]);
+    let m = map_insert(m, "odds", [1, 3, 5]);
+    map_len(m) == 2
+}
+
+// Test map of maps
+meta fn test_map_of_maps() -> Bool {
+    let inner1 = map_insert(map_new(), "x", 1);
+    let inner2 = map_insert(map_new(), "y", 2);
+    let outer = map_insert(map_insert(map_new(), "first", inner1), "second", inner2);
+    map_len(outer) == 2
+}
+
+// Test nested set operations
+meta fn test_nested_sets() -> Bool {
+    // Sets containing tuples to simulate nested structure
+    let s = set_insert(set_new(), (1, 2));
+    let s = set_insert(s, (3, 4));
+    set_len(s) == 2
+}
+
+// =============================================================================
+// LARGE COLLECTION TESTS
+// =============================================================================
+
+// Test building a moderately large list
+meta fn test_large_list_build() -> Bool {
+    let n = 100;
+    let xs = [];
+    let i = 0;
+    while i < n {
+        xs = list_push(xs, i);
+        i = i + 1;
+    }
+    list_len(xs) == n
+}
+
+// Test operations on large list
+meta fn test_large_list_sum() -> Bool {
+    let n = 100;
+    let xs = [];
+    let i = 0;
+    while i < n {
+        xs = list_push(xs, i);
+        i = i + 1;
+    }
+    let sum = list_fold(xs, 0, |acc, x| acc + x);
+    // Sum of 0..99 = 99*100/2 = 4950
+    sum == 4950
+}
+
+// Test large list reverse
+meta fn test_large_list_reverse() -> Bool {
+    let n = 50;
+    let xs = [];
+    let i = 0;
+    while i < n {
+        xs = list_push(xs, i);
+        i = i + 1;
+    }
+    let reversed = list_reverse(xs);
+    list_get(reversed, 0) == Some(n - 1) &&
+    list_get(reversed, n - 1) == Some(0)
+}
+
+// Test large map operations
+meta fn test_large_map_build() -> Bool {
+    let n = 50;
+    let m = map_new();
+    let i = 0;
+    while i < n {
+        m = map_insert(m, int_to_text(i), i);
+        i = i + 1;
+    }
+    map_len(m) == n
+}
+
+// Test large set operations
+meta fn test_large_set_build() -> Bool {
+    let n = 50;
+    let s = set_new();
+    let i = 0;
+    while i < n {
+        s = set_insert(s, i);
+        i = i + 1;
+    }
+    set_len(s) == n
+}
+
+// =============================================================================
+// BOUNDARY CONDITION TESTS
+// =============================================================================
+
+// Test list first and last element access
+meta fn test_list_boundary_access() -> Bool {
+    let xs = [1, 2, 3, 4, 5];
+    let first = list_get(xs, 0);
+    let last = list_get(xs, 4);
+    first == Some(1) && last == Some(5)
+}
+
+// Test list_head and list_tail
+meta fn test_list_head_tail() -> Bool {
+    let xs = [1, 2, 3, 4, 5];
+    let head = list_head(xs);
+    let tail = list_tail(xs);
+    head == 1 && list_len(tail) == 4 && list_get(tail, 0) == Some(2)
+}
+
+// Test single element list operations
+meta fn test_single_element_list() -> Bool {
+    let xs = [42];
+    list_len(xs) == 1 &&
+    list_head(xs) == 42 &&
+    list_len(list_tail(xs)) == 0 &&
+    list_is_empty(list_tail(xs))
+}
+
+// Test single element map
+meta fn test_single_element_map() -> Bool {
+    let m = map_insert(map_new(), "key", "value");
+    map_len(m) == 1 &&
+    map_contains_key(m, "key") &&
+    !map_contains_key(m, "other")
+}
+
+// Test single element set
+meta fn test_single_element_set() -> Bool {
+    let s = set_insert(set_new(), 42);
+    set_len(s) == 1 &&
+    set_contains(s, 42) &&
+    !set_contains(s, 0)
+}
+
+// =============================================================================
+// DUPLICATE AND UNIQUE TESTS
+// =============================================================================
+
+// Test set ignores duplicates
+meta fn test_set_duplicates() -> Bool {
+    let s = set_new();
+    let s = set_insert(s, 1);
+    let s = set_insert(s, 2);
+    let s = set_insert(s, 1);  // duplicate
+    let s = set_insert(s, 3);
+    let s = set_insert(s, 2);  // duplicate
+    set_len(s) == 3  // Only 3 unique elements
+}
+
+// Test map overwrites on duplicate key
+meta fn test_map_overwrite() -> Bool {
+    let m = map_new();
+    let m = map_insert(m, "key", "first");
+    let m = map_insert(m, "key", "second");
+    match map_get(m, "key") {
+        Some(v) => v == "second",
+        None => false
+    }
+}
+
+// =============================================================================
+// TRANSFORMATION CHAIN TESTS
+// =============================================================================
+
+// Test chaining multiple transformations
+meta fn test_transform_chain() -> Bool {
+    let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let result = xs
+        |> list_filter(|x| x % 2 == 0)  // [2, 4, 6, 8, 10]
+        |> list_map(|x| x * 2)          // [4, 8, 12, 16, 20]
+        |> list_filter(|x| x > 10);     // [12, 16, 20]
+    list_len(result) == 3 &&
+    list_get(result, 0) == Some(12)
+}
+
+// Test map-reduce pattern
+meta fn test_map_reduce() -> Bool {
+    let xs = [1, 2, 3, 4, 5];
+    let sum_of_squares = xs
+        |> list_map(|x| x * x)
+        |> list_fold(0, |acc, x| acc + x);
+    sum_of_squares == 55  // 1 + 4 + 9 + 16 + 25
+}
+
+// =============================================================================
+// CLEAR AND RESET TESTS
+// =============================================================================
+
+// Test clearing a list
+meta fn test_list_clear() -> Bool {
+    let xs = [1, 2, 3, 4, 5];
+    let cleared = list_clear(xs);
+    list_is_empty(cleared)
+}
+
+// Test clearing a map
+meta fn test_map_clear() -> Bool {
+    let m = map_insert(map_insert(map_new(), "a", 1), "b", 2);
+    let cleared = map_clear(m);
+    map_is_empty(cleared)
+}
+
+// Test clearing a set
+meta fn test_set_clear() -> Bool {
+    let s = set_insert(set_insert(set_new(), 1), 2);
+    let cleared = set_clear(s);
+    set_is_empty(cleared)
+}
+
+// =============================================================================
+// CONTAINS AND MEMBERSHIP TESTS
+// =============================================================================
+
+// Test list contains
+meta fn test_list_contains() -> Bool {
+    let xs = [1, 2, 3, 4, 5];
+    list_contains(xs, 3) && !list_contains(xs, 6)
+}
+
+// Test list contains with different types
+meta fn test_list_contains_text() -> Bool {
+    let xs = ["apple", "banana", "cherry"];
+    list_contains(xs, "banana") && !list_contains(xs, "orange")
+}
+
+// Test map contains_key
+meta fn test_map_contains_key() -> Bool {
+    let m = map_insert(map_insert(map_new(), "a", 1), "b", 2);
+    map_contains_key(m, "a") &&
+    map_contains_key(m, "b") &&
+    !map_contains_key(m, "c")
+}
+
+// Test set contains
+meta fn test_set_contains() -> Bool {
+    let s = set_insert(set_insert(set_insert(set_new(), 1), 2), 3);
+    set_contains(s, 1) &&
+    set_contains(s, 2) &&
+    set_contains(s, 3) &&
+    !set_contains(s, 4)
+}
+
+// =============================================================================
+// INDEX AND FIND TESTS
+// =============================================================================
+
+// Test list_index_of
+meta fn test_list_index_of() -> Bool {
+    let xs = [10, 20, 30, 40, 50];
+    match list_index_of(xs, 30) {
+        Some(idx) => idx == 2,
+        None => false
+    }
+}
+
+// Test list_index_of not found
+meta fn test_list_index_of_not_found() -> Bool {
+    let xs = [10, 20, 30];
+    match list_index_of(xs, 100) {
+        None => true,
+        Some(_) => false
+    }
+}
+
+// Test list_find
+meta fn test_list_find() -> Bool {
+    let xs = [1, 2, 3, 4, 5];
+    match list_find(xs, |x| x > 3) {
+        Some(v) => v == 4,
+        None => false
+    }
+}
+
+// Test list_find not found
+meta fn test_list_find_not_found() -> Bool {
+    let xs = [1, 2, 3];
+    match list_find(xs, |x| x > 10) {
+        None => true,
+        Some(_) => false
+    }
+}
+
+// =============================================================================
+// ALL/ANY TESTS
+// =============================================================================
+
+// Test list_all
+meta fn test_list_all_true() -> Bool {
+    let xs = [2, 4, 6, 8, 10];
+    list_all(xs, |x| x % 2 == 0)
+}
+
+meta fn test_list_all_false() -> Bool {
+    let xs = [2, 4, 5, 8, 10];
+    !list_all(xs, |x| x % 2 == 0)
+}
+
+meta fn test_list_all_empty() -> Bool {
+    list_all([], |x: Int| x > 0)  // Vacuously true
+}
+
+// Test list_any
+meta fn test_list_any_true() -> Bool {
+    let xs = [1, 3, 4, 5, 7];
+    list_any(xs, |x| x % 2 == 0)
+}
+
+meta fn test_list_any_false() -> Bool {
+    let xs = [1, 3, 5, 7, 9];
+    !list_any(xs, |x| x % 2 == 0)
+}
+
+meta fn test_list_any_empty() -> Bool {
+    !list_any([], |x: Int| x > 0)  // No elements to satisfy
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Empty collection tests
+    @const assert(test_empty_list_len());
+    @const assert(test_empty_list_is_empty());
+    @const assert(test_empty_list_concat());
+    @const assert(test_empty_list_reverse());
+    @const assert(test_empty_list_map());
+    @const assert(test_empty_list_filter());
+    @const assert(test_empty_list_fold());
+    @const assert(test_empty_map_len());
+    @const assert(test_empty_map_is_empty());
+    @const assert(test_empty_map_keys());
+    @const assert(test_empty_map_values());
+    @const assert(test_empty_set_len());
+    @const assert(test_empty_set_is_empty());
+
+    // Nested collection tests
+    @const assert(test_nested_list_2d());
+    @const assert(test_nested_list_3d());
+    @const assert(test_deeply_nested_access());
+    @const assert(test_list_of_maps());
+    @const assert(test_map_of_lists());
+    @const assert(test_map_of_maps());
+    @const assert(test_nested_sets());
+
+    // Large collection tests
+    @const assert(test_large_list_build());
+    @const assert(test_large_list_sum());
+    @const assert(test_large_list_reverse());
+    @const assert(test_large_map_build());
+    @const assert(test_large_set_build());
+
+    // Boundary tests
+    @const assert(test_list_boundary_access());
+    @const assert(test_list_head_tail());
+    @const assert(test_single_element_list());
+    @const assert(test_single_element_map());
+    @const assert(test_single_element_set());
+
+    // Duplicate tests
+    @const assert(test_set_duplicates());
+    @const assert(test_map_overwrite());
+
+    // Transform chain tests
+    @const assert(test_transform_chain());
+    @const assert(test_map_reduce());
+
+    // Clear tests
+    @const assert(test_list_clear());
+    @const assert(test_map_clear());
+    @const assert(test_set_clear());
+
+    // Contains tests
+    @const assert(test_list_contains());
+    @const assert(test_list_contains_text());
+    @const assert(test_map_contains_key());
+    @const assert(test_set_contains());
+
+    // Index/find tests
+    @const assert(test_list_index_of());
+    @const assert(test_list_index_of_not_found());
+    @const assert(test_list_find());
+    @const assert(test_list_find_not_found());
+
+    // All/any tests
+    @const assert(test_list_all_true());
+    @const assert(test_list_all_false());
+    @const assert(test_list_all_empty());
+    @const assert(test_list_any_true());
+    @const assert(test_list_any_false());
+    @const assert(test_list_any_empty());
+}

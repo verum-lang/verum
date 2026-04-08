@@ -1,0 +1,39 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, tuples
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn make_pair(a: Int, b: Int) -> (Int, Int) {
+        return (a, b);
+    }
+
+    fn swap_pair(p: (Int, Int)) -> (Int, Int) {
+        let (x, y) = p;
+        return (y, x);
+    }
+
+    fn add_pairs(p1: (Int, Int), p2: (Int, Int)) -> (Int, Int) {
+        let (a, b) = p1;
+        let (c, d) = p2;
+        return (a + c, b + d);
+    }
+
+    let p1 = make_pair(10, 20);
+    let (x1, y1) = p1;
+    assert_eq(x1, 10);
+    assert_eq(y1, 20);
+
+    let p2 = swap_pair(p1);
+    let (x2, y2) = p2;
+    assert_eq(x2, 20);
+    assert_eq(y2, 10);
+
+    let p3 = make_pair(5, 15);
+    let p4 = add_pairs(p1, p3);
+    let (x4, y4) = p4;
+    assert_eq(x4, 15);
+    assert_eq(y4, 35);
+}

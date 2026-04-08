@@ -1,0 +1,48 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, theorem
+// @timeout: 10000
+
+/// Theorem declaration and proof demonstration
+/// Shows basic theorem syntax with algebraic proofs
+
+/// Commutativity of addition for ring types
+theorem add_commutative<T: Ring>(a: T, b: T): a + b == b + a {
+    proof by ring
+}
+
+/// Associativity of addition for ring types
+theorem add_associative<T: Ring>(a: T, b: T, c: T): (a + b) + c == a + (b + c) {
+    proof by ring
+}
+
+/// Commutativity of multiplication for ring types
+theorem mul_commutative<T: Ring>(a: T, b: T): a * b == b * a {
+    proof by ring
+}
+
+/// Associativity of multiplication for ring types
+theorem mul_associative<T: Ring>(a: T, b: T, c: T): (a * b) * c == a * (b * c) {
+    proof by ring
+}
+
+/// Distributivity of multiplication over addition
+theorem distributive<T: Ring>(a: T, b: T, c: T): a * (b + c) == a * b + a * c {
+    proof by ring
+}
+
+/// Identity element for addition
+theorem add_identity<T: Ring>(a: T): a + T.zero() == a {
+    proof by ring
+}
+
+/// Identity element for multiplication
+theorem mul_identity<T: Ring>(a: T): a * T.one() == a {
+    proof by ring
+}
+
+/// Zero annihilates multiplication
+theorem mul_zero<T: Ring>(a: T): a * T.zero() == T.zero() {
+    proof by ring
+}

@@ -1,0 +1,29 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: types, errors, existential, casting
+// @expected-error: E401
+
+/// Test for type errors when existential types are misused.
+/// Casting an existential type to a concrete type that is not compatible should fail.
+
+type Iterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type ListIterator<T> is {
+    items: List<T>,
+    pos: Int,
+};
+
+fn create_iterator() -> some I: Iterator<Item = Int> {
+    [1, 2, 3].iter()
+}
+
+fn main() {
+    let iter = create_iterator();
+
+    // E401: Cannot cast existential to concrete type
+    let concrete = iter as ListIterator<Int>;
+}

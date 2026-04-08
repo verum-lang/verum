@@ -1,0 +1,273 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, uninitialized, struct, initialization-patterns
+// @description: Tests correct struct initialization patterns
+
+/// Verum requires complete struct initialization to prevent
+/// reading uninitialized memory. This file demonstrates all
+/// valid initialization patterns.
+
+fn main() {
+    test_literal_init();
+    test_shorthand_init();
+    test_default_init();
+    test_builder_pattern();
+    test_update_syntax();
+    test_nested_struct();
+    test_tuple_struct();
+    // test_unit_struct(); // Unit types not yet fully supported
+
+    print("All struct initialization tests passed!");
+}
+
+// Default protocol definition
+type Default is protocol {
+    fn default() -> Self;
+};
+
+// Basic type definitions
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+    color: Text,
+};
+
+type Config is {
+    name: Text,
+    timeout: Int,
+    max_retries: Int,
+    verbose: Bool,
+};
+
+fn test_literal_init() {
+    // All fields must be specified
+    let p = Point {
+        x: 10.0,
+        y: 20.0,
+    };
+
+    assert(p.x == 10.0);
+    assert(p.y == 20.0);
+
+    // Order doesn't matter
+    let p2 = Point {
+        y: 5.0,
+        x: 3.0,
+    };
+
+    assert(p2.x == 3.0);
+    assert(p2.y == 5.0);
+}
+
+fn test_shorthand_init() {
+    // When variable name matches field name
+    let x = 100.0;
+    let y = 200.0;
+
+    // Shorthand: { x } is same as { x: x }
+    let p = Point { x, y };
+
+    assert(p.x == 100.0);
+    assert(p.y == 200.0);
+
+    // Mixed shorthand and explicit
+    let name = Text.from("my-config");
+    let config = Config {
+        name,               // Shorthand
+        timeout: 30,        // Explicit
+        max_retries: 3,
+        verbose: false,
+    };
+
+    assert(config.name == "my-config");
+}
+
+fn test_default_init() {
+    implement Default for Config {
+        fn default() -> Self {
+            Config {
+                name: Text.from("default"),
+                timeout: 60,
+                max_retries: 5,
+                verbose: false,
+            }
+        }
+    }
+
+    // Using Config.default() after implementing Default for Config
+    let config = Config.default();
+    assert(config.timeout == 60);
+    assert(config.max_retries == 5);
+    assert(config.name == "default");
+}
+
+fn test_builder_pattern() {
+    type ServerConfig is {
+        host: Text,
+        port: Int,
+        threads: Int,
+        tls: Bool,
+    };
+
+    type ServerConfigBuilder is {
+        host: Maybe<Text>,
+        port: Maybe<Int>,
+        threads: Maybe<Int>,
+        tls: Maybe<Bool>,
+    };
+
+    implement ServerConfigBuilder {
+        fn new() -> Self {
+            ServerConfigBuilder {
+                host: Maybe.None,
+                port: Maybe.None,
+                threads: Maybe.None,
+                tls: Maybe.None,
+            }
+        }
+
+        fn host(self, h: Text) -> Self {
+            ServerConfigBuilder {
+                host: Maybe.Some(h),
+                port: self.port,
+                threads: self.threads,
+                tls: self.tls,
+            }
+        }
+
+        fn port(self, p: Int) -> Self {
+            ServerConfigBuilder {
+                host: self.host,
+                port: Maybe.Some(p),
+                threads: self.threads,
+                tls: self.tls,
+            }
+        }
+
+        fn threads(self, t: Int) -> Self {
+            ServerConfigBuilder {
+                host: self.host,
+                port: self.port,
+                threads: Maybe.Some(t),
+                tls: self.tls,
+            }
+        }
+
+        fn tls(self, enabled: Bool) -> Self {
+            ServerConfigBuilder {
+                host: self.host,
+                port: self.port,
+                threads: self.threads,
+                tls: Maybe.Some(enabled),
+            }
+        }
+
+        fn build(self) -> Result<ServerConfig, Text> {
+            let host = self.host.ok_or(Text.from("host is required"))?;
+            let port = self.port.unwrap_or(8080);
+            let threads = self.threads.unwrap_or(4);
+            let tls = self.tls.unwrap_or(false);
+
+            Ok(ServerConfig { host, port, threads, tls })
+        }
+    }
+
+    // Builder pattern ensures valid initialization
+    let config = ServerConfigBuilder.new()
+        .host(Text.from("localhost"))
+        .port(3000)
+        .tls(true)
+        .build()
+        .unwrap();
+
+    assert(config.host == "localhost");
+    assert(config.port == 3000);
+    assert(config.tls == true);
+    assert(config.threads == 4);  // Default value
+}
+
+fn test_update_syntax() {
+    implement Default for Config {
+        fn default() -> Self {
+            Config {
+                name: Text.from("default"),
+                timeout: 60,
+                max_retries: 5,
+                verbose: false,
+            }
+        }
+    }
+
+    let base = Config.default();
+
+    // Struct update syntax - copy/move remaining fields from base
+    let custom = Config {
+        timeout: 120,
+        verbose: true,
+        ..base
+    };
+
+    assert(custom.timeout == 120);
+    assert(custom.verbose == true);
+    assert(custom.name == "default");      // From base
+    assert(custom.max_retries == 5);       // From base
+}
+
+fn test_nested_struct() {
+    // All nested structs must also be fully initialized
+    let rect = Rectangle {
+        top_left: Point { x: 0.0, y: 0.0 },
+        bottom_right: Point { x: 100.0, y: 100.0 },
+        color: Text.from("red"),
+    };
+
+    assert(rect.top_left.x == 0.0);
+    assert(rect.bottom_right.y == 100.0);
+    assert(rect.color == "red");
+
+    // Using pre-initialized values
+    let origin = Point { x: 0.0, y: 0.0 };
+    let corner = Point { x: 50.0, y: 50.0 };
+
+    let rect2 = Rectangle {
+        top_left: origin,
+        bottom_right: corner,
+        color: Text.from("blue"),
+    };
+
+    assert(rect2.top_left.x == 0.0);
+}
+
+// Tuple types
+type Color is (Int, Int, Int);  // RGB
+
+fn test_tuple_struct() {
+    // Positional initialization
+    let red = Color(255, 0, 0);
+    let green = Color(0, 255, 0);
+    let blue = Color(0, 0, 255);
+
+    assert(red.0 == 255);
+    assert(green.1 == 255);
+    assert(blue.2 == 255);
+
+    // Destructuring
+    let Color(r, g, b) = red;
+    assert(r == 255);
+    assert(g == 0);
+}
+
+// Unit type (no fields)
+type Marker is ();
+
+fn test_unit_struct() {
+    // No fields to initialize
+    let m = Marker;
+    // m exists as a zero-size value
+}

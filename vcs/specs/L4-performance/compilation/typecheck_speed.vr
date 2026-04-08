@@ -1,0 +1,611 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, typecheck, inference, speed
+// @description: Type checking performance benchmark (target: < 100ms per 10K LOC)
+
+/// Type Checking Performance Benchmark
+///
+/// This benchmark measures the throughput of the Verum type checker.
+/// Type checking is typically the most expensive compilation phase.
+///
+/// Target: < 100ms per 10,000 lines of code
+///
+/// Type checker characteristics:
+/// - Hindley-Milner type inference with extensions
+/// - Refinement type verification via SMT
+/// - Bidirectional type checking
+/// - Incremental type checking support
+///
+/// Spec reference: docs/detailed/03-type-system.md
+
+const TARGET_MS_PER_10K_LOC: Float = 100.0;
+const SMALL_LOC: Int = 1_000;
+const MEDIUM_LOC: Int = 10_000;
+const LARGE_LOC: Int = 50_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Type Checker Performance");
+
+    // Basic inference benchmarks
+    results.add(benchmark_simple_inference());
+    results.add(benchmark_generic_inference());
+    results.add(benchmark_complex_inference());
+
+    // Scale benchmarks
+    results.add(benchmark_small_project());
+    results.add(benchmark_medium_project());
+    results.add(benchmark_large_project());
+
+    // Specific type system features
+    results.add(benchmark_refinement_types());
+    results.add(benchmark_context_propagation());
+    results.add(benchmark_protocol_conformance());
+    results.add(benchmark_incremental_typecheck());
+
+    results.report();
+    assert(results.all_pass(), "Type checker performance below target");
+}
+
+/// Generate code with simple type inference
+fn generate_simple_inference_code(functions: Int) -> Text {
+    let mut source = Text.with_capacity(functions * 100);
+    source.push_str("module simple_inference;\n\n");
+
+    for i in 0..functions {
+        source.push_str(&format(
+            "fn simple_{}() -> Int {{
+    let x = 42;
+    let y = x + 10;
+    let z = y * 2;
+    z
+}}
+
+", i));
+    }
+
+    source
+}
+
+/// Benchmark: Simple type inference
+fn benchmark_simple_inference() -> BenchmarkResult {
+    let source = generate_simple_inference_code(100);
+    let loc = count_lines(&source);
+    let iterations = 100;
+
+    // Warmup
+    for _ in 0..10 {
+        black_box(typecheck_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+    let ms_per_10k = (avg_ms / loc as Float) * 10_000.0;
+
+    BenchmarkResult {
+        name: "simple_inference",
+        metric: "ms/10K LOC",
+        value: ms_per_10k,
+        target: TARGET_MS_PER_10K_LOC,
+        passed: ms_per_10k < TARGET_MS_PER_10K_LOC,
+    }
+}
+
+/// Generate code with generic type inference
+fn generate_generic_code(functions: Int) -> Text {
+    let mut source = Text.with_capacity(functions * 200);
+    source.push_str("module generic_inference;\n\n");
+
+    for i in 0..functions {
+        source.push_str(&format(
+            "fn generic_{}<T: Clone + Eq, U: Display>(x: T, y: U) -> (T, Text) {{
+    let cloned = x.clone();
+    let displayed = y.to_string();
+    let pair = (cloned, displayed);
+    pair
+}}
+
+fn use_generic_{}() {{
+    let result1 = generic_{}(42, \"hello\");
+    let result2 = generic_{}(3.14, true);
+    let result3 = generic_{}([1, 2, 3], Maybe.some(10));
+}}
+
+", i, i, i, i, i));
+    }
+
+    source
+}
+
+/// Benchmark: Generic type inference
+fn benchmark_generic_inference() -> BenchmarkResult {
+    let source = generate_generic_code(50);
+    let loc = count_lines(&source);
+    let iterations = 50;
+
+    for _ in 0..5 {
+        black_box(typecheck_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+    let ms_per_10k = (avg_ms / loc as Float) * 10_000.0;
+
+    // Generic inference is more expensive
+    let target = TARGET_MS_PER_10K_LOC * 1.5;
+
+    BenchmarkResult {
+        name: "generic_inference",
+        metric: "ms/10K LOC",
+        value: ms_per_10k,
+        target: target,
+        passed: ms_per_10k < target,
+    }
+}
+
+/// Generate complex code with multiple features
+fn generate_complex_code(functions: Int) -> Text {
+    let mut source = Text.with_capacity(functions * 500);
+    source.push_str("module complex_inference;\n\n");
+
+    // Record types
+    source.push_str("record Person {\n");
+    source.push_str("    name: Text,\n");
+    source.push_str("    age: Int{>= 0 && <= 150},\n");
+    source.push_str("    email: Maybe<Text>,\n");
+    source.push_str("}\n\n");
+
+    // Protocol
+    source.push_str("protocol Serializable {\n");
+    source.push_str("    fn serialize(self) -> Text;\n");
+    source.push_str("    fn deserialize(data: Text) -> Result<Self, Error>;\n");
+    source.push_str("}\n\n");
+
+    for i in 0..functions {
+        source.push_str(&format(
+            "fn complex_{}<T: Serializable + Clone>(
+    items: List<T>,
+    filter: fn(T) -> Bool,
+    transform: fn(T) -> Text
+) -> Result<List<Text>, Error> using [Logger] {{
+    let filtered = items.iter()
+        .filter(filter)
+        .map(transform)
+        .collect();
+
+    Logger.info(\"Processed {{}} items\", filtered.len());
+
+    Ok(filtered)
+}}
+
+", i));
+    }
+
+    source
+}
+
+/// Benchmark: Complex type inference
+fn benchmark_complex_inference() -> BenchmarkResult {
+    let source = generate_complex_code(30);
+    let loc = count_lines(&source);
+    let iterations = 30;
+
+    for _ in 0..3 {
+        black_box(typecheck_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+    let ms_per_10k = (avg_ms / loc as Float) * 10_000.0;
+
+    // Complex inference is more expensive
+    let target = TARGET_MS_PER_10K_LOC * 2.0;
+
+    BenchmarkResult {
+        name: "complex_inference",
+        metric: "ms/10K LOC",
+        value: ms_per_10k,
+        target: target,
+        passed: ms_per_10k < target,
+    }
+}
+
+/// Generate a project of specified LOC
+fn generate_project(loc: Int) -> Text {
+    let functions = loc / 15;  // ~15 LOC per function
+    generate_complex_code(functions)
+}
+
+/// Benchmark: Small project (~1K LOC)
+fn benchmark_small_project() -> BenchmarkResult {
+    let source = generate_project(SMALL_LOC);
+    let loc = count_lines(&source);
+    let iterations = 50;
+
+    for _ in 0..5 {
+        black_box(typecheck_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+    let ms_per_10k = (avg_ms / loc as Float) * 10_000.0;
+
+    BenchmarkResult {
+        name: "small_project_1k",
+        metric: "ms/10K LOC",
+        value: ms_per_10k,
+        target: TARGET_MS_PER_10K_LOC,
+        passed: ms_per_10k < TARGET_MS_PER_10K_LOC,
+    }
+}
+
+/// Benchmark: Medium project (~10K LOC)
+fn benchmark_medium_project() -> BenchmarkResult {
+    let source = generate_project(MEDIUM_LOC);
+    let loc = count_lines(&source);
+    let iterations = 10;
+
+    for _ in 0..2 {
+        black_box(typecheck_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+    let ms_per_10k = (avg_ms / loc as Float) * 10_000.0;
+
+    BenchmarkResult {
+        name: "medium_project_10k",
+        metric: "ms/10K LOC",
+        value: ms_per_10k,
+        target: TARGET_MS_PER_10K_LOC,
+        passed: ms_per_10k < TARGET_MS_PER_10K_LOC,
+    }
+}
+
+/// Benchmark: Large project (~50K LOC)
+fn benchmark_large_project() -> BenchmarkResult {
+    let source = generate_project(LARGE_LOC);
+    let loc = count_lines(&source);
+    let iterations = 3;
+
+    // No warmup for large project - test cold start
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+    let ms_per_10k = (avg_ms / loc as Float) * 10_000.0;
+
+    BenchmarkResult {
+        name: "large_project_50k",
+        metric: "ms/10K LOC",
+        value: ms_per_10k,
+        target: TARGET_MS_PER_10K_LOC,
+        passed: ms_per_10k < TARGET_MS_PER_10K_LOC,
+    }
+}
+
+/// Generate code with refinement types
+fn generate_refinement_code(predicates: Int) -> Text {
+    let mut source = Text.new();
+    source.push_str("module refinement_benchmark;\n\n");
+
+    for i in 0..predicates {
+        source.push_str(&format(
+            "type Bounded{} = Int{{>= {} && <= {}}};\n",
+            i, i * 10, (i + 1) * 100
+        ));
+
+        source.push_str(&format(
+            "fn use_bounded_{}(x: Bounded{}) -> Int {{
+    x * 2
+}}
+
+", i, i));
+    }
+
+    source
+}
+
+/// Benchmark: Refinement type verification
+fn benchmark_refinement_types() -> BenchmarkResult {
+    let source = generate_refinement_code(50);
+    let iterations = 30;
+
+    for _ in 0..3 {
+        black_box(typecheck_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // Refinement checking involves SMT solver
+    let target = 50.0;  // 50ms for 50 predicates
+
+    BenchmarkResult {
+        name: "refinement_types",
+        metric: "ms/50 predicates",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Generate code with context propagation
+fn generate_context_code(depth: Int) -> Text {
+    let mut source = Text.new();
+    source.push_str("module context_benchmark;\n\n");
+
+    source.push_str("context Logger { fn log(msg: Text); }\n");
+    source.push_str("context Database { fn query(q: Text) -> List<Row>; }\n");
+    source.push_str("context Config { fn get(key: Text) -> Text; }\n\n");
+
+    for i in 0..depth {
+        let contexts = match i % 3 {
+            0 => "[Logger]",
+            1 => "[Logger, Database]",
+            _ => "[Logger, Database, Config]",
+        };
+
+        source.push_str(&format(
+            "fn layer_{}(x: Int) -> Int using {} {{
+    if x > 0 {{
+        layer_{}(x - 1)
+    }} else {{
+        x
+    }}
+}}
+
+", i, contexts, if i > 0 { i - 1 } else { 0 }));
+    }
+
+    source
+}
+
+/// Benchmark: Context propagation checking
+fn benchmark_context_propagation() -> BenchmarkResult {
+    let source = generate_context_code(100);
+    let iterations = 50;
+
+    for _ in 0..5 {
+        black_box(typecheck_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    let target = 20.0;  // 20ms for 100-depth context chain
+
+    BenchmarkResult {
+        name: "context_propagation",
+        metric: "ms/100 layers",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Generate code with protocol implementations
+fn generate_protocol_code(impls: Int) -> Text {
+    let mut source = Text.new();
+    source.push_str("module protocol_benchmark;\n\n");
+
+    source.push_str("protocol Comparable {\n");
+    source.push_str("    fn compare(self, other: Self) -> Ordering;\n");
+    source.push_str("}\n\n");
+
+    source.push_str("protocol Hashable {\n");
+    source.push_str("    fn hash(self) -> Int;\n");
+    source.push_str("}\n\n");
+
+    source.push_str("protocol Displayable {\n");
+    source.push_str("    fn display(self) -> Text;\n");
+    source.push_str("}\n\n");
+
+    for i in 0..impls {
+        source.push_str(&format("record Type{} {{ value: Int }}\n\n", i));
+
+        source.push_str(&format(
+            "impl Comparable for Type{} {{
+    fn compare(self, other: Self) -> Ordering {{
+        self.value.compare(other.value)
+    }}
+}}
+
+implement Hashable for Type{} {{
+    fn hash(self) -> Int {{
+        self.value
+    }}
+}}
+
+implement Displayable for Type{} {{
+    fn display(self) -> Text {{
+        self.value.to_string()
+    }}
+}}
+
+", i, i, i));
+    }
+
+    source
+}
+
+/// Benchmark: Protocol conformance checking
+fn benchmark_protocol_conformance() -> BenchmarkResult {
+    let source = generate_protocol_code(50);
+    let iterations = 30;
+
+    for _ in 0..3 {
+        black_box(typecheck_source(&source));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_source(&source));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    let target = 30.0;  // 30ms for 50 types x 3 protocols
+
+    BenchmarkResult {
+        name: "protocol_conformance",
+        metric: "ms/150 impls",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Benchmark: Incremental type checking after small change
+fn benchmark_incremental_typecheck() -> BenchmarkResult {
+    let original = generate_project(MEDIUM_LOC);
+
+    // Initial full typecheck
+    let _types = typecheck_source(&original);
+
+    // Make a small change (modify one function)
+    let modified = original.replace(
+        "let filtered =",
+        "let filtered_items ="
+    );
+
+    let iterations = 100;
+
+    for _ in 0..10 {
+        black_box(typecheck_incremental(&modified));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(typecheck_incremental(&modified));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // Incremental should be much faster than full
+    let target = 10.0;  // 10ms for incremental update
+
+    BenchmarkResult {
+        name: "incremental_typecheck",
+        metric: "ms/change",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+fn count_lines(source: &Text) -> Int {
+    source.lines().count()
+}
+
+fn typecheck_source(source: &Text) -> TypedAst {
+    let ast = compiler.parse(source);
+    compiler.typecheck(ast)
+}
+
+fn typecheck_incremental(source: &Text) -> TypedAst {
+    compiler.typecheck_incremental(source)
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

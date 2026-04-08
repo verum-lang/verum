@@ -1,0 +1,220 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, cryptography, hashing
+// @timeout: 30000
+
+// Milestone 625: Simple hash functions and checksums
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Simple additive checksum
+fn checksum_add(data: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + get8(data, i);
+        i = i + 1;
+    }
+    sum % 256
+}
+
+// XOR checksum
+fn checksum_xor(data: Arr8, n: Int) -> Int {
+    let mut xor = 0;
+    let mut i = 0;
+    while i < n {
+        let v = get8(data, i);
+        // XOR using the formula: a XOR b = (a + b) - 2 * (a AND b)
+        // Simpler for small values: bit-by-bit XOR
+        xor = xor_val(xor, v);
+        i = i + 1;
+    }
+    xor
+}
+
+// XOR two integers (bit by bit, up to 16 bits)
+fn xor_val(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut bit = 1;
+    let mut i = 0;
+    while i < 16 {
+        let ba = (a / bit) % 2;
+        let bb = (b / bit) % 2;
+        if ba != bb {
+            result = result + bit;
+        }
+        bit = bit * 2;
+        i = i + 1;
+    }
+    result
+}
+
+// DJB2-like hash (simplified for integers)
+fn hash_djb2(data: Arr8, n: Int) -> Int {
+    let mut hash = 5381;
+    let mut i = 0;
+    while i < n {
+        // hash = hash * 33 + val (mod 2^16 to prevent overflow)
+        hash = (hash * 33 + get8(data, i)) % 65536;
+        i = i + 1;
+    }
+    hash
+}
+
+// FNV-1a-like hash
+fn hash_fnv(data: Arr8, n: Int) -> Int {
+    let mut hash = 2166136261 % 65536; // FNV offset basis (mod 16 bits)
+    let mut i = 0;
+    while i < n {
+        hash = xor_val(hash, get8(data, i));
+        hash = (hash * 16777619) % 65536; // FNV prime
+        i = i + 1;
+    }
+    hash
+}
+
+// Simple polynomial rolling hash
+fn hash_rolling(data: Arr8, n: Int, base: Int, modulus: Int) -> Int {
+    let mut hash = 0;
+    let mut i = 0;
+    while i < n {
+        hash = (hash * base + get8(data, i)) % modulus;
+        i = i + 1;
+    }
+    hash
+}
+
+// Fletcher-like checksum (sum1 and sum2)
+fn fletcher_sum1(data: Arr8, n: Int) -> Int {
+    let mut s1 = 0;
+    let mut i = 0;
+    while i < n {
+        s1 = (s1 + get8(data, i)) % 255;
+        i = i + 1;
+    }
+    s1
+}
+
+fn fletcher_sum2(data: Arr8, n: Int) -> Int {
+    let mut s1 = 0;
+    let mut s2 = 0;
+    let mut i = 0;
+    while i < n {
+        s1 = (s1 + get8(data, i)) % 255;
+        s2 = (s2 + s1) % 255;
+        i = i + 1;
+    }
+    s2
+}
+
+fn fletcher(data: Arr8, n: Int) -> Int {
+    fletcher_sum2(data, n) * 256 + fletcher_sum1(data, n)
+}
+
+fn test_xor() -> Int {
+    assert_eq(xor_val(0, 0), 0);
+    assert_eq(xor_val(255, 0), 255);
+    assert_eq(xor_val(255, 255), 0);
+    assert_eq(xor_val(170, 85), 255); // 10101010 XOR 01010101 = 11111111
+    assert_eq(xor_val(15, 240), 255); // 00001111 XOR 11110000 = 11111111
+    // XOR is self-inverse
+    assert_eq(xor_val(xor_val(42, 73), 73), 42);
+    1
+}
+
+fn test_checksum_add() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum_add(data, 5), 15);
+    let data2 = Arr8 { v0: 100, v1: 100, v2: 100, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum_add(data2, 3), 300 % 256); // 44
+    1
+}
+
+fn test_checksum_xor() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // 1 XOR 2 = 3, 3 XOR 3 = 0
+    assert_eq(checksum_xor(data, 3), 0);
+    let data2 = Arr8 { v0: 10, v1: 20, v2: 30, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // 10 XOR 20 = 30, 30 XOR 30 = 0
+    assert_eq(checksum_xor(data2, 3), 0);
+    // Any value XOR with itself should be 0
+    let data3 = Arr8 { v0: 42, v1: 42, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(checksum_xor(data3, 2), 0);
+    1
+}
+
+fn test_djb2() -> Int {
+    let data = Arr8 { v0: 104, v1: 101, v2: 108, v3: 108, v4: 111, v5: 0, v6: 0, v7: 0 };
+    let h = hash_djb2(data, 5);
+    // Same input should always give same hash
+    let h2 = hash_djb2(data, 5);
+    assert_eq(h, h2);
+    // Different input should (very likely) give different hash
+    let data2 = Arr8 { v0: 119, v1: 111, v2: 114, v3: 108, v4: 100, v5: 0, v6: 0, v7: 0 };
+    let h3 = hash_djb2(data2, 5);
+    // h and h3 should be different (extremely unlikely to collide)
+    let diff = if h == h3 { 0 } else { 1 };
+    assert_eq(diff, 1);
+    1
+}
+
+fn test_rolling_hash() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let h = hash_rolling(data, 4, 31, 1000);
+    // hash = ((((0*31+1)*31+2)*31+3)*31+4) % 1000
+    // = (((31+2)*31+3)*31+4) % 1000
+    // = ((33*31+3)*31+4) % 1000
+    // = ((1023+3)*31+4) % 1000
+    // = (1026*31+4) % 1000
+    // = (31806+4) % 1000
+    // = 31810 % 1000 = 810
+    assert_eq(h, 810);
+    // Determinism
+    assert_eq(hash_rolling(data, 4, 31, 1000), 810);
+    1
+}
+
+fn test_fletcher() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    // s1: (0+1)%255=1, (1+2)%255=3, (3+3)%255=6
+    assert_eq(fletcher_sum1(data, 3), 6);
+    // s2: (0+1)%255=1, (1+3)%255=4, (4+6)%255=10
+    assert_eq(fletcher_sum2(data, 3), 10);
+    assert_eq(fletcher(data, 3), 10 * 256 + 6);
+    1
+}
+
+fn test_hash_properties() -> Int {
+    // Empty data should hash consistently
+    let empty = zeros();
+    assert_eq(hash_djb2(empty, 0), 5381 % 65536);
+    assert_eq(hash_rolling(empty, 0, 31, 1000), 0);
+    // Single element
+    let one = Arr8 { v0: 42, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let h1 = hash_djb2(one, 1);
+    let h2 = hash_fnv(one, 1);
+    // Both should be deterministic
+    assert_eq(hash_djb2(one, 1), h1);
+    assert_eq(hash_fnv(one, 1), h2);
+    1
+}
+
+fn main() -> Int {
+    test_xor();
+    test_checksum_add();
+    test_checksum_xor();
+    test_djb2();
+    test_rolling_hash();
+    test_fletcher();
+    test_hash_properties();
+    print("[OK] 625_milestone_aot");
+    0
+}

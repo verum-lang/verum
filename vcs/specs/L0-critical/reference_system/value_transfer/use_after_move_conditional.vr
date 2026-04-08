@@ -1,0 +1,30 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, conditionals, negative-test
+// @expect: error(MovedValueUsed)
+// NOTE: When affine types are implemented, should produce: E302 "type not found: cap"
+
+/// Test use after move with conditional branches for affine types at compile time.
+/// If an affine value is moved in a branch, using it after the conditional causes error.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-types
+
+// Affine type representing a unique capability
+type affine Capability is {
+    name: Text,
+    level: Int,
+};
+
+fn main() {
+    let cap = Capability { name: Text.from("admin"), level: 10 };
+    let condition = true;
+
+    if condition {
+        let moved = cap;  // Move affine value in this branch
+        print(moved.name);
+    }
+
+    print(cap.name);  // COMPILE ERROR: type not found: cap
+}

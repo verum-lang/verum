@@ -1,0 +1,241 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, rest, spread, variadic
+
+// Helper types
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int, occupation: Text };
+type Data is Many(Int, List<Int>) | Single(Int) | None;
+type Event is Multi { first: Int, others: List<Int> } | Single { value: Int };
+type Header is { version: Int };
+type Packet is { header: Header, payload: List<Int> };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+
+// Helper functions
+fn process<T>(x: T, y: T) { }
+fn empty() { }
+fn many<T>(first: T, rest: List<T>) { }
+fn single<T>(only: T) { }
+fn none() { }
+fn handle<T>(first: T, others: List<T>) { }
+fn default() { }
+fn other() { }
+fn format(fmt: Text, x: Int) -> Text { fmt }
+fn use_first<T>(x: T) { }
+fn handle_first<T>(x: T) { }
+fn handle_rest<T>(x: T) { }
+
+fn test_rest_pattern_in_array_list() {
+    let list = [1, 2, 3, 4, 5];
+    let items = [10, 20, 30];
+
+    // Rest pattern in array/list
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let [first, rest @ ..] = list;
+    let [head, tail @ ..] = items;
+}
+
+fn test_rest_pattern_at_beginning() {
+    let list = [1, 2, 3, 4, 5];
+    let items = [10, 20, 30];
+
+    // Rest pattern at beginning
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let [init @ .., last] = list;
+    let [prefix @ .., final_item] = items;
+}
+
+fn test_rest_pattern_in_middle() {
+    let list = [1, 2, 3, 4, 5];
+    let items = [10, 20, 30, 40, 50];
+
+    // Rest pattern in middle
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let [first, middle @ .., last] = list;
+    let [a, between @ .., z] = items;
+}
+
+fn test_rest_pattern_capturing_nothing() {
+    let singleton = [42];
+    let pair_list = [1, 2];
+
+    // Rest pattern capturing nothing
+    let [only] = singleton;
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let [a, b, empty_rest @ ..] = pair_list;
+}
+
+fn test_rest_in_tuple() {
+    let tuple = (1, 2, 3, 4, 5);
+
+    // Rest in tuple
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let (first, rest @ ..) = tuple;
+    let (init @ .., last) = tuple;
+    let (a, middle @ .., z) = tuple;
+}
+
+fn test_rest_in_struct() {
+    let point = Point { x: 10, y: 20 };
+    let person = Person { name: "Alice", age: 30, occupation: "Engineer" };
+    let full_config = Point { x: 1, y: 2 };
+
+    // Rest in struct (ignoring remaining fields)
+    let Point { x, .. } = point;
+    let Person { name, age, .. } = person;
+}
+
+fn test_rest_pattern_in_match() {
+    let list = [1, 2, 3];
+
+    // Rest pattern in match
+    match list {
+        [] => "empty",
+        [only] => "singleton",
+        [first, ..] => format("starts with {}", first),
+    };
+}
+
+fn test_rest_with_binding() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Rest with binding
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    match list {
+        [first, rest @ ..] => process(first, rest),
+        [] => empty(),
+    };
+}
+
+fn test_rest_in_nested_pattern() {
+    let nested = [[1, 2], [3, 4]];
+
+    // Rest in nested pattern
+    match nested {
+        [[first, ..], ..] => use_first(first),
+        [] => empty(),
+        _ => other(),
+    };
+}
+
+fn test_rest_in_tuple_variant() {
+    let data = Data.Many(1, Cons(2, Heap(Nil)));
+
+    // Rest in tuple variant
+    match data {
+        Data.Many(first, rest) => many(first, rest),
+        Data.Single(only) => single(only),
+        Data.None => none(),
+    };
+}
+
+// Rest in function parameter (variadic if supported)
+// NOTE: Verum grammar does not support `..name` syntax for variadic parameters.
+// The rest pattern `..` can only appear in slice/array patterns, not in function params.
+// If variadic functions are needed, use a List<T> parameter explicitly:
+fn sum(numbers: List<Int>) -> Int {
+    0
+}
+
+fn test_rest_in_struct_variant() {
+    let event = Event.Multi { first: 1, others: Nil };
+
+    // Rest in struct variant
+    match event {
+        Event.Multi { first, others } => handle(first, others),
+        _ => default(),
+    };
+}
+
+fn test_named_rest_pattern() {
+    let items = [1, 2, 3, 4, 5];
+    let person = Person { name: "Alice", age: 30, occupation: "Engineer" };
+
+    // Named rest pattern
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let [first, second, remaining @ ..] = items;
+    let Person { name, .. } = person;
+}
+
+fn test_rest_pattern_ignoring() {
+    let list = [1, 2, 3, 4, 5];
+    let point = Point { x: 10, y: 20 };
+
+    // Rest pattern ignoring (using _)
+    let [first, ..] = list;       // Ignore rest
+    let [.., last] = list;        // Ignore prefix
+    let Point { x, .. } = point;  // Ignore other fields
+}
+
+fn test_rest_in_slice_pattern() {
+    let slice = [0, 1, 2, 3, 0];
+
+    // Rest in slice pattern
+    match slice {
+        [0, ..] => "starts with zero",
+        [.., 0] => "ends with zero",
+        [0, .., 0] => "bookended by zeros",
+        _ => "other",
+    };
+}
+
+// Multiple rest patterns (in different positions)
+fn process_pairs(pairs: List<(Int, Int)>) {
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    match pairs {
+        [first_pair @ (_, _), rest_pairs @ ..] => {
+            handle_first(first_pair);
+            for pair in rest_pairs {
+                handle_rest(pair);
+            }
+        },
+        _ => {},
+    };
+}
+
+fn test_rest_with_guard() {
+    let list = [1, 2, 3, 4, 5];
+
+    // Rest with guard
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    match list {
+        [first, rest @ ..] if rest.len() > 0 => "has more",
+        [only] => "just one",
+        [] => "empty",
+    };
+}
+
+fn test_rest_in_complex_destructuring() {
+    let packet = Packet {
+        header: Header { version: 1 },
+        payload: Cons(0xFF, Heap(Cons(0x00, Heap(Nil))))
+    };
+
+    // Rest in complex destructuring
+    let Packet {
+        header: Header { version },
+        payload: payload_data,
+    } = packet;
+}
+
+fn test_rest_preserving_type() {
+    let array = [1, 2, 3, 4, 5];
+    let tuple = (1, 2, 3, 4, 5);
+
+    // Rest preserving type
+    // NOTE: Per grammar, binding rest pattern uses `name @ ..` not `..name`
+    let [head, tail @ ..] = array;
+    let (first, rest @ ..) = tuple;
+}
+
+fn test_empty_rest_pattern() {
+    let any_list = [1, 2, 3];
+    let any_tuple = (1, 2, 3);
+    let any_struct = Point { x: 10, y: 20 };
+
+    // Empty rest pattern
+    let [..] = any_list;  // Match any list
+    let (..) = any_tuple; // Match any tuple
+    let Point { .. } = any_struct; // Match any struct
+}

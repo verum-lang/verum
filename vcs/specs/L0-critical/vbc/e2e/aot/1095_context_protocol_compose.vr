@@ -1,0 +1,58 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: context, protocol, composition
+// @expected-exit: 0
+// @description: Context protocol composition with regular protocol
+
+// Regular protocol (Constraint only)
+type Nameable is protocol {
+    fn name(&self) -> Text;
+};
+
+// Context protocol (Constraint & Injectable)
+context protocol Scorable {
+    fn score(&self) -> Int;
+}
+
+type Player is { player_name: Text, points: Int };
+
+implement Nameable for Player {
+    fn name(&self) -> Text { self.player_name }
+}
+
+implement Scorable for Player {
+    fn score(&self) -> Int { self.points }
+}
+
+// Mix regular + context protocol bounds
+fn describe<T: Nameable>(item: T) -> Text {
+    item.name()
+}
+
+fn rank<T: Scorable>(item: T) -> Int {
+    item.score()
+}
+
+fn main() -> Int {
+    let p = Player { player_name: "Alice", points: 95 };
+
+    // Test 1: Regular protocol bound
+    let n = describe(p);
+    if n != "Alice" {
+        print(f"FAIL test1: {n}");
+        return 1;
+    }
+    print("test1 regular protocol: OK");
+
+    // Test 2: Context protocol bound
+    let s = rank(Player { player_name: "Bob", points: 88 });
+    if s != 88 {
+        print(f"FAIL test2: {s}");
+        return 1;
+    }
+    print("test2 context protocol: OK");
+
+    print("1095_context_protocol_compose: PASS");
+    0
+}

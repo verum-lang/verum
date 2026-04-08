@@ -1,0 +1,145 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, quote, hygiene, shadowing, binding
+// @description: Tests proper handling of binding shadowing in hygienic macros
+
+// =============================================================================
+// BASIC SHADOWING ISOLATION
+// =============================================================================
+
+// Macro-introduced bindings don't shadow caller bindings
+meta fn introduce_x() -> TokenStream {
+    quote {
+        let x = "macro x";  // This 'x' is distinct from caller's 'x'
+        x
+    }
+}
+
+fn test_no_shadow_leak() {
+    let x = "caller x";
+    let macro_x = @introduce_x();  // Expands to macro's 'x', not caller's
+    // Both 'x' values should coexist without interference
+    assert(x == "caller x");
+}
+
+// =============================================================================
+// NESTED SHADOWING IN QUOTES
+// =============================================================================
+
+// Multiple levels of shadowing within the same macro
+meta fn nested_shadow() -> TokenStream {
+    quote {
+        let x = 1;           // Level 1
+        {
+            let x = 2;       // Level 2, shadows level 1 within block
+            assert(x == 2);
+        }
+        assert(x == 1);      // Back to level 1
+    }
+}
+
+fn test_nested_shadowing() {
+    @nested_shadow();
+}
+
+// =============================================================================
+// CROSS-MACRO SHADOWING ISOLATION
+// =============================================================================
+
+// Two macros both introduce 'temp' without conflict
+meta fn temp_calc_a() -> TokenStream {
+    quote {
+        let temp = 10;
+        temp * 2
+    }
+}
+
+meta fn temp_calc_b() -> TokenStream {
+    quote {
+        let temp = 5;
+        temp * 3
+    }
+}
+
+fn test_cross_macro_isolation() {
+    let result_a = @temp_calc_a();
+    let result_b = @temp_calc_b();
+    // Each macro's 'temp' is independent
+    assert(result_a == 20);
+    assert(result_b == 15);
+}
+
+// =============================================================================
+// SHADOWING WITH EXPLICIT CAPTURE
+// =============================================================================
+
+// When explicitly capturing, caller's binding is used
+@capture(x)
+meta fn capture_then_shadow() -> TokenStream {
+    quote {
+        let y = $x;     // Capture caller's x
+        let x = 999;    // Shadow with new binding (doesn't affect captured value)
+        y + x           // Uses captured x (via y) and shadowed x
+    }
+}
+
+fn test_capture_then_shadow() {
+    let x = 100;
+    let result = @capture_then_shadow();
+    assert(result == 1099);  // 100 + 999
+}
+
+// =============================================================================
+// SHADOWING IN REPETITIONS
+// =============================================================================
+
+// Each repetition iteration has isolated bindings
+meta fn repeat_with_shadow() -> TokenStream {
+    let values = [1, 2, 3];
+    quote {
+        let sum = 0;
+        $[for v in values {
+            let temp = $v * 2;  // Each iteration has its own 'temp'
+            sum = sum + temp;
+        }]
+        sum
+    }
+}
+
+fn test_repetition_shadow() {
+    let result = @repeat_with_shadow();
+    assert(result == 12);  // (1*2) + (2*2) + (3*2)
+}
+
+// =============================================================================
+// PARAMETER SHADOWING
+// =============================================================================
+
+// Macro parameters don't shadow caller bindings
+meta fn param_shadow(x: Int) -> TokenStream {
+    quote {
+        let result = ${x * 2};  // Uses macro parameter, not caller's x
+        result
+    }
+}
+
+fn test_param_shadowing() {
+    let x = 100;  // Caller's x
+    let result = @param_shadow(5);  // Pass 5 as macro parameter
+    assert(result == 10);  // 5 * 2
+    assert(x == 100);  // Caller's x unchanged
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    test_no_shadow_leak();
+    test_nested_shadowing();
+    test_cross_macro_isolation();
+    test_capture_then_shadow();
+    test_repetition_shadow();
+    test_param_shadowing();
+}

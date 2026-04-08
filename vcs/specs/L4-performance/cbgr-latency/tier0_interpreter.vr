@@ -1,0 +1,266 @@
+// @test: parse
+// @tier: 0
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: cbgr, latency, interpreter, micro
+// @description: Tier 0 interpreter CBGR latency benchmark (target: < 100ns per check)
+
+/// Tier 0 (Interpreter) CBGR Latency Benchmark
+///
+/// This benchmark measures the overhead of CBGR (Capability-Based Generation
+/// References) safety checks in the interpreter tier.
+///
+/// Target: < 100ns per check (interpreter overhead is expected)
+///
+/// The interpreter performs full runtime checks including:
+/// - Generation validation (4 bytes comparison)
+/// - Epoch capability verification
+/// - Bounds checking for fat references
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+/// Benchmark configuration
+const WARMUP_ITERATIONS: Int = 1_000;
+const BENCHMARK_ITERATIONS: Int = 100_000;
+const EXPECTED_LATENCY_NS: Float = 100.0;
+
+fn main() {
+    // Run all CBGR latency benchmarks for Tier 0
+    let results = BenchmarkResults.new("Tier 0 CBGR Latency");
+
+    results.add(benchmark_thin_ref_access());
+    results.add(benchmark_fat_ref_access());
+    results.add(benchmark_nested_ref_access());
+    results.add(benchmark_generation_check_only());
+    results.add(benchmark_epoch_check_only());
+
+    results.report();
+
+    // Verify all benchmarks meet target
+    assert(results.all_pass(), "Tier 0 CBGR latency exceeds target");
+}
+
+/// Benchmark: Single ThinRef access latency
+/// ThinRef<T> = 16 bytes (ptr + generation + epoch_caps)
+fn benchmark_thin_ref_access() -> BenchmarkResult {
+    let data = Heap.new(42);
+    let thin_ref: &Int = &*data;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*thin_ref);
+    }
+
+    // Measure
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(*thin_ref);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "thin_ref_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+    }
+}
+
+/// Benchmark: FatRef access latency (includes bounds check)
+/// FatRef<T> = 24 bytes (ptr + generation + epoch_caps + len)
+fn benchmark_fat_ref_access() -> BenchmarkResult {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let fat_ref: &[Int] = &data[..];
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(fat_ref[0]);
+    }
+
+    // Measure
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Access middle element to ensure bounds check
+        black_box(fat_ref[5]);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    BenchmarkResult {
+        name: "fat_ref_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: EXPECTED_LATENCY_NS,
+        passed: per_op_ns < EXPECTED_LATENCY_NS,
+    }
+}
+
+/// Benchmark: Nested reference access (chain of refs)
+fn benchmark_nested_ref_access() -> BenchmarkResult {
+    let inner = Heap.new(42);
+    let middle = Heap.new(&*inner);
+    let outer = Heap.new(&*middle);
+
+    let outer_ref = &*outer;
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        // Triple dereference: outer -> middle -> inner -> value
+        black_box(***outer_ref);
+    }
+
+    // Measure
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(***outer_ref);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Nested refs have 3x overhead (3 generation checks)
+    let nested_target = EXPECTED_LATENCY_NS * 3.0;
+
+    BenchmarkResult {
+        name: "nested_ref_access",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: nested_target,
+        passed: per_op_ns < nested_target,
+    }
+}
+
+/// Benchmark: Isolated generation check overhead
+fn benchmark_generation_check_only() -> BenchmarkResult {
+    let data = Heap.new(100);
+    let thin_ref = &*data;
+    let stored_gen = thin_ref.stored_generation();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(data.generation() == stored_gen);
+    }
+
+    // Measure
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Just the generation comparison
+        black_box(data.generation() == stored_gen);
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    // Generation check should be much faster than full access
+    let gen_check_target = EXPECTED_LATENCY_NS * 0.5;
+
+    BenchmarkResult {
+        name: "generation_check_only",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: gen_check_target,
+        passed: per_op_ns < gen_check_target,
+    }
+}
+
+/// Benchmark: Isolated epoch capability check
+fn benchmark_epoch_check_only() -> BenchmarkResult {
+    let data = Heap.new(100);
+    let thin_ref = &*data;
+    let epoch_caps = thin_ref.epoch_capabilities();
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(epoch_caps.is_valid());
+    }
+
+    // Measure
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        black_box(epoch_caps.is_valid());
+    }
+
+    let elapsed_ns = timer.elapsed_ns();
+    let per_op_ns = elapsed_ns as Float / BENCHMARK_ITERATIONS as Float;
+
+    let epoch_check_target = EXPECTED_LATENCY_NS * 0.3;
+
+    BenchmarkResult {
+        name: "epoch_check_only",
+        iterations: BENCHMARK_ITERATIONS,
+        total_ns: elapsed_ns,
+        per_op_ns: per_op_ns,
+        target_ns: epoch_check_target,
+        passed: per_op_ns < epoch_check_target,
+    }
+}
+
+/// Benchmark result structure
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    total_ns: Int,
+    per_op_ns: Float,
+    target_ns: Float,
+    passed: Bool,
+};
+
+/// Collection of benchmark results
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self {
+            suite_name: name,
+            results: List.new(),
+        }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}", status, result.name);
+            println("  Iterations: {}", result.iterations);
+            println("  Total time: {}ns", result.total_ns);
+            println("  Per-op:     {:.2}ns (target: {:.2}ns)",
+                    result.per_op_ns, result.target_ns);
+            println("");
+        }
+
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        let total = self.results.len();
+        println("Summary: {}/{} benchmarks passed", passed, total);
+    }
+}

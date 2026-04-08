@@ -1,0 +1,182 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, topological_sort, dfs, post_order, cycle_detection, dag
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Topological sort of a DAG using DFS post-order numbering.
+// Graph stored as 8x8 adjacency matrix (flat [Int; 64]).
+// DFS visits unvisited nodes; when all successors are processed the node
+// is appended to a result list.  Reversing that list gives topological order.
+// Cycle detection: uses a "in-stack" marker; if we visit a gray (in-stack) node,
+// a cycle exists.  Returns 0 on success, 1 if cycle detected.
+
+fn adj_get(adj: [Int; 64], u: Int, v: Int) -> Int { adj[u * 8 + v] }
+fn adj_set(adj: [Int; 64], u: Int, v: Int) { adj[u * 8 + v] = 1; }
+
+fn make_adj64() -> [Int; 64] {
+    [0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+// DFS visit for node u.  Returns 1 if cycle detected.
+// visited[u]: 0=unvisited, 1=in-stack (gray), 2=done (black)
+@allow(unbounded_recursion)
+fn dfs_visit(adj: [Int; 64], n: Int, u: Int,
+             visited: [Int; 8], order: [Int; 8], oc: [Int; 8]) -> Int {
+    visited[u] = 1;
+    let mut v = 0;
+    while v < n {
+        if adj_get(adj, u, v) == 1 {
+            if visited[v] == 1 { return 1; }  // cycle
+            if visited[v] == 0 {
+                let cyc = dfs_visit(adj, n, v, visited, order, oc);
+                if cyc == 1 { return 1; }
+            }
+        }
+        v = v + 1;
+    }
+    // Post-order: append u to order
+    order[oc[0]] = u;
+    oc[0] = oc[0] + 1;
+    visited[u] = 2;
+    0
+}
+
+// Run full topological sort. Returns 0 if DAG, 1 if cycle.
+// On success, order[0..n) contains nodes in REVERSE topological order (post-order).
+// Caller reverses if needed.
+fn topo_sort(adj: [Int; 64], n: Int, visited: [Int; 8],
+             order: [Int; 8], oc: [Int; 8]) -> Int {
+    let mut u = 0;
+    while u < n {
+        visited[u] = 0;
+        u = u + 1;
+    }
+    oc[0] = 0;
+    u = 0;
+    while u < n {
+        if visited[u] == 0 {
+            let cyc = dfs_visit(adj, n, u, visited, order, oc);
+            if cyc == 1 { return 1; }
+        }
+        u = u + 1;
+    }
+    0
+}
+
+// Check that order (reversed) is a valid topological order:
+// for every edge u->v, u must appear before v in topo order.
+// topo[i] = i-th node in topological order (smallest index first).
+fn is_valid_topo(adj: [Int; 64], n: Int, post: [Int; 8]) -> Int {
+    // Compute rank from post-order (reversed)
+    let mut rank = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while i < n {
+        rank[post[n - 1 - i]] = i;
+        i = i + 1;
+    }
+    let mut u = 0;
+    while u < n {
+        let mut v = 0;
+        while v < n {
+            if adj_get(adj, u, v) == 1 {
+                if rank[u] > rank[v] { return 0; }
+            }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    1
+}
+
+fn test_simple_dag() {
+    // DAG: 5->2, 5->0, 4->0, 4->1, 2->3, 3->1
+    // One valid topological order: 4,5,2,3,1,0 or similar
+    let mut adj = make_adj64();
+    adj_set(adj, 5, 2); adj_set(adj, 5, 0);
+    adj_set(adj, 4, 0); adj_set(adj, 4, 1);
+    adj_set(adj, 2, 3); adj_set(adj, 3, 1);
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut order   = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut oc      = [0, 0, 0, 0, 0, 0, 0, 0];
+    let cyc = topo_sort(adj, 6, visited, order, oc);
+    assert_eq(cyc, 0);
+    assert_eq(oc[0], 6);
+    assert_eq(is_valid_topo(adj, 6, order), 1);
+    print("simple_dag: ok");
+}
+
+fn test_linear_chain() {
+    // 0->1->2->3->4: unique topo order [0,1,2,3,4]
+    let mut adj = make_adj64();
+    adj_set(adj, 0, 1); adj_set(adj, 1, 2);
+    adj_set(adj, 2, 3); adj_set(adj, 3, 4);
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut order   = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut oc      = [0, 0, 0, 0, 0, 0, 0, 0];
+    let cyc = topo_sort(adj, 5, visited, order, oc);
+    assert_eq(cyc, 0);
+    assert_eq(is_valid_topo(adj, 5, order), 1);
+    // Post-order reversed: 0 must come first (rank 0).
+    // post = [4,3,2,1,0]; reversed = [0,1,2,3,4]
+    assert_eq(order[4], 0);
+    assert_eq(order[3], 1);
+    print("linear_chain: ok");
+}
+
+fn test_cycle_detection() {
+    // 0->1->2->0: cycle
+    let mut adj = make_adj64();
+    adj_set(adj, 0, 1); adj_set(adj, 1, 2); adj_set(adj, 2, 0);
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut order   = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut oc      = [0, 0, 0, 0, 0, 0, 0, 0];
+    let cyc = topo_sort(adj, 3, visited, order, oc);
+    assert_eq(cyc, 1);
+    print("cycle_detection: ok");
+}
+
+fn test_disconnected_dag() {
+    // Two disconnected components: 0->1 and 2->3
+    let mut adj = make_adj64();
+    adj_set(adj, 0, 1); adj_set(adj, 2, 3);
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut order   = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut oc      = [0, 0, 0, 0, 0, 0, 0, 0];
+    let cyc = topo_sort(adj, 4, visited, order, oc);
+    assert_eq(cyc, 0);
+    assert_eq(oc[0], 4);
+    assert_eq(is_valid_topo(adj, 4, order), 1);
+    print("disconnected_dag: ok");
+}
+
+fn test_single_node() {
+    // One node, no edges: trivially sorted.
+    let mut adj = make_adj64();
+    let mut visited = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut order   = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut oc      = [0, 0, 0, 0, 0, 0, 0, 0];
+    let cyc = topo_sort(adj, 1, visited, order, oc);
+    assert_eq(cyc, 0);
+    assert_eq(order[0], 0);
+    assert_eq(oc[0], 1);
+    print("single_node: ok");
+}
+
+fn main() -> Int {
+    test_simple_dag();
+    test_linear_chain();
+    test_cycle_detection();
+    test_disconnected_dag();
+    test_single_node();
+    print("[OK] 558_interp_topological_sort");
+    0
+}

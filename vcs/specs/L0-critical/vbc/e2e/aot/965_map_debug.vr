@@ -1,0 +1,23 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, compiled
+// @expected-exit: 0
+
+fn main() -> Int {
+    let mut m = Map.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+
+    // Create a list (heap allocation) between insert and get
+    let mut lst = List.new();
+    lst.push(42);
+    lst.push(43);
+
+    let v1 = m.get(1);
+    let v2 = m.get(2);
+    let v3 = m.get(3);
+    print(f"{v1} {v2} {v3}");
+    0
+}

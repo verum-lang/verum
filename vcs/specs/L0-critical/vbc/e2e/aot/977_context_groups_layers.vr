@@ -1,0 +1,34 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: context, groups
+// @description: Tests context group declaration and multi-context functions
+// @expected-exit: 0
+
+context Config {
+    fn get_value(&self) -> Int;
+}
+
+type SimpleConfig is { val: Int };
+implement Config for SimpleConfig {
+    fn get_value(&self) -> Int { self.val }
+}
+
+// Context group declaration
+using AppContext = [Config];
+
+// Single context function
+fn read_config() -> Int using [Config] {
+    Config.get_value()
+}
+
+fn main() {
+    let cfg = SimpleConfig { val: 100 };
+    provide Config = cfg;
+
+    let v = read_config();
+    assert(v == 100);
+    print("Test 1 PASS: single context function");
+
+    print("All context group tests passed");
+}

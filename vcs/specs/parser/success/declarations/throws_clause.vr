@@ -1,0 +1,239 @@
+// @test: parse-pass
+// @tier: 0
+// @category: declarations
+// @level: L0
+// @tags: parser, declarations, throws, error-handling, typed-errors
+// @description: Comprehensive tests for throws clause in function declarations
+
+// ============================================================================
+// Basic Throws Clause
+// Grammar: throws_clause = 'throws' , '(' , error_type_list , ')'
+// Grammar: error_type_list = type_expr , { '|' , type_expr }
+// ============================================================================
+
+fn parse_int(s: Text) throws(ParseError) -> Int {
+    s.parse()
+}
+
+fn read_file(path: Text) throws(IoError) -> Text {
+    fs.read(path)
+}
+
+fn connect(url: Text) throws(NetworkError) -> Connection {
+    Connection.new(url)
+}
+
+// ============================================================================
+// Multiple Error Types
+// ============================================================================
+
+fn process_data(input: Text) throws(ParseError | ValidationError) -> Data {
+    let parsed = parse(input)?;
+    validate(parsed)?;
+    parsed
+}
+
+fn complex_operation() throws(IoError | NetworkError | TimeoutError) -> Result {
+    let file = read_file("config.txt")?;
+    let conn = connect("api.example.com")?;
+    conn.send(file)?
+}
+
+fn many_errors() throws(A | B | C | D | E) -> () {
+    // Multiple possible error types
+}
+
+// ============================================================================
+// Throws with Generic Error Types
+// ============================================================================
+
+fn process<T, E>(value: T) throws(E) -> T where type E: Error {
+    validate(value)?;
+    value
+}
+
+fn transform<T, U, E>(input: T, f: fn(T) -> U) throws(E) -> U {
+    f(input)
+}
+
+// ============================================================================
+// Throws with Return Type
+// ============================================================================
+
+fn divide(a: Int, b: Int) throws(DivisionError) -> Int {
+    if b == 0 {
+        throw DivisionError.DivideByZero;
+    }
+    a / b
+}
+
+fn parse_and_validate(s: Text) throws(ParseError | ValidationError) -> ValidData {
+    let data = parse(s)?;
+    if !data.is_valid() {
+        throw ValidationError.Invalid(data);
+    }
+    data
+}
+
+// ============================================================================
+// Throws without Return Type (returns ())
+// ============================================================================
+
+fn log_error(e: Error) throws(IoError) {
+    file.write(e.to_text())?;
+}
+
+fn notify(user: User, message: Text) throws(NetworkError) {
+    send_notification(user.email, message)?;
+}
+
+// ============================================================================
+// Throws with Context Requirements
+// ============================================================================
+
+fn database_query(sql: Text) throws(DbError) -> List<Row> using [Database] {
+    db.execute(sql)?
+}
+
+fn api_request(endpoint: Text) throws(NetworkError | AuthError) -> Response using [Http, Auth] {
+    let token = auth.get_token()?;
+    let headers = Map.from([("Authorization", token)]);
+    http.get_with_headers(endpoint, headers)?
+}
+
+// ============================================================================
+// Throws with Where Clauses
+// ============================================================================
+
+fn serialize<T>(value: T) throws(SerializeError) -> Text
+    where type T: Serialize
+{
+    value.to_json()
+}
+
+fn deserialize<T>(json: Text) throws(ParseError | ValidationError) -> T
+    where type T: Deserialize + Validate
+{
+    let value: T = T.from_json(json)?;
+    value.validate()?;
+    value
+}
+
+// ============================================================================
+// Throws in Async Functions
+// ============================================================================
+
+async fn fetch_data(url: Text) throws(NetworkError | TimeoutError) -> Data using [Http] {
+    let response = http.get(url).await?;
+    response.json().await?
+}
+
+async fn parallel_fetch(urls: List<Text>) throws(NetworkError) -> List<Data> using [Http] {
+    let futures = urls.iter().map(|url| fetch_data(url));
+    join_all(futures).await
+}
+
+// ============================================================================
+// Throws in Iterator-returning Functions
+// Note: fn* generator syntax is a future extension
+// ============================================================================
+
+fn read_lines(path: Text) throws(IoError) -> Iterator<Text> using [FileSystem] {
+    let file = fs.open(path)?;
+    file.lines()
+}
+
+async fn stream_data(source: Text) throws(StreamError) -> AsyncIterator<Chunk> using [Network] {
+    let stream = connect_stream(source)?;
+    stream.chunks()
+}
+
+// ============================================================================
+// Throw Expressions
+// ============================================================================
+
+fn validate_age(age: Int) throws(ValidationError) -> Int {
+    if age < 0 {
+        throw ValidationError.NegativeAge;
+    }
+    if age > 150 {
+        throw ValidationError.UnrealisticAge(age);
+    }
+    age
+}
+
+fn check_conditions(data: Data) throws(CheckError) {
+    if !data.condition_a() {
+        throw CheckError.ConditionAFailed;
+    }
+    if !data.condition_b() {
+        throw CheckError.ConditionBFailed;
+    }
+    if !data.condition_c() {
+        throw CheckError.ConditionCFailed { reason: "specific reason" };
+    }
+}
+
+// ============================================================================
+// Error Propagation
+// ============================================================================
+
+fn outer_function() throws(OuterError) -> Data {
+    let result = inner_function()?;  // Propagate error
+    process(result)
+}
+
+fn call_chain() throws(A | B | C) -> Final {
+    let a = step_a()?;               // throws A
+    let b = step_b(a)?;              // throws B
+    let c = step_c(b)?;              // throws C
+    c
+}
+
+// ============================================================================
+// Throws in Protocol Definitions
+// ============================================================================
+
+type Parser is protocol {
+    fn parse(&self, input: Text) throws(ParseError) -> Ast;
+    fn validate(&self, ast: &Ast) throws(ValidationError) -> ();
+};
+
+type Serializer<T> is protocol {
+    fn serialize(&self, value: &T) throws(SerializeError) -> Bytes;
+    fn deserialize(&self, bytes: &Bytes) throws(DeserializeError) -> T;
+};
+
+// ============================================================================
+// Throws in Implementations
+// ============================================================================
+
+implement Parser for JsonParser {
+    fn parse(&self, input: Text) throws(ParseError) -> Ast {
+        json_parse(input)?
+    }
+
+    fn validate(&self, ast: &Ast) throws(ValidationError) -> () {
+        json_validate(ast)?
+    }
+}
+
+// ============================================================================
+// Complex Throws Combinations
+// ============================================================================
+
+pub async fn complex_operation<T, E>(
+    input: T,
+    config: Config
+) throws(E | IoError | NetworkError)
+    -> Result<T, E>
+    using [Database, Http, Logger]
+    where type T: Serialize + Deserialize,
+          type E: Error
+{
+    log("Starting operation")?;
+    let data = serialize(input)?;
+    let response = http.post(config.url, data).await?;
+    let result: T = deserialize(response.body)?;
+    Ok(result)
+}

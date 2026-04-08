@@ -1,0 +1,181 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, reflection, protocols
+// @description: Tests for protocol/trait checking functions
+
+// =============================================================================
+// TYPE DEFINITIONS FOR TESTING
+// =============================================================================
+
+// Simple copyable struct
+@derive(Copy)
+type Point is { x: Int, y: Int };
+
+// Non-copyable struct (heap allocated)
+type Buffer is { data: Heap<[Byte]> };
+
+// Protocol definition
+type Printable is protocol {
+    fn print(&self) -> Text;
+};
+
+// Implement protocol for Point
+implement Printable for Point {
+    fn print(&self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+// Second protocol for multi-protocol tests
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+implement Describable for Point {
+    fn describe(&self) -> Text {
+        f"Point at ({self.x}, {self.y})"
+    }
+}
+
+// =============================================================================
+// IS_COPY TESTS
+// =============================================================================
+
+meta fn test_is_copy_int() -> Bool using [MetaTypes] {
+    is_copy(Int)
+}
+
+meta fn test_is_copy_bool() -> Bool using [MetaTypes] {
+    is_copy(Bool)
+}
+
+meta fn test_is_copy_float() -> Bool using [MetaTypes] {
+    is_copy(Float)
+}
+
+meta fn test_is_copy_char() -> Bool using [MetaTypes] {
+    is_copy(Char)
+}
+
+meta fn test_is_copy_text() -> Bool using [MetaTypes] {
+    // Text is not Copy (it's a heap-allocated string)
+    !is_copy(Text)
+}
+
+meta fn test_is_copy_derived() -> Bool using [MetaTypes] {
+    // Point has @derive(Copy)
+    is_copy(Point)
+}
+
+// =============================================================================
+// IS_SEND TESTS
+// =============================================================================
+
+meta fn test_is_send_int() -> Bool using [MetaTypes] {
+    is_send(Int)
+}
+
+meta fn test_is_send_struct() -> Bool using [MetaTypes] {
+    is_send(Point)
+}
+
+meta fn test_is_send_text() -> Bool using [MetaTypes] {
+    is_send(Text)
+}
+
+// =============================================================================
+// IS_SYNC TESTS
+// =============================================================================
+
+meta fn test_is_sync_int() -> Bool using [MetaTypes] {
+    is_sync(Int)
+}
+
+meta fn test_is_sync_struct() -> Bool using [MetaTypes] {
+    is_sync(Point)
+}
+
+// =============================================================================
+// IS_SIZED TESTS
+// =============================================================================
+
+meta fn test_is_sized_int() -> Bool using [MetaTypes] {
+    is_sized(Int)
+}
+
+meta fn test_is_sized_struct() -> Bool using [MetaTypes] {
+    is_sized(Point)
+}
+
+// =============================================================================
+// NEEDS_DROP TESTS
+// =============================================================================
+
+meta fn test_needs_drop_int() -> Bool using [MetaTypes] {
+    // Primitives don't need drop
+    !needs_drop(Int)
+}
+
+meta fn test_needs_drop_bool() -> Bool using [MetaTypes] {
+    !needs_drop(Bool)
+}
+
+meta fn test_needs_drop_text() -> Bool using [MetaTypes] {
+    // Text needs drop (heap allocated)
+    needs_drop(Text)
+}
+
+// =============================================================================
+// IMPLEMENTS TESTS
+// =============================================================================
+
+meta fn test_implements_protocol() -> Bool using [MetaTypes] {
+    implements(Point, Printable)
+}
+
+meta fn test_not_implements_protocol() -> Bool using [MetaTypes] {
+    !implements(Buffer, Printable)
+}
+
+meta fn test_implements_second_protocol() -> Bool using [MetaTypes] {
+    // Point implements both Printable and Describable
+    implements(Point, Describable)
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // is_copy tests
+    @const assert(test_is_copy_int());
+    @const assert(test_is_copy_bool());
+    @const assert(test_is_copy_float());
+    @const assert(test_is_copy_char());
+    @const assert(test_is_copy_text());
+    @const assert(test_is_copy_derived());
+
+    // is_send tests
+    @const assert(test_is_send_int());
+    @const assert(test_is_send_struct());
+    @const assert(test_is_send_text());
+
+    // is_sync tests
+    @const assert(test_is_sync_int());
+    @const assert(test_is_sync_struct());
+
+    // is_sized tests
+    @const assert(test_is_sized_int());
+    @const assert(test_is_sized_struct());
+
+    // needs_drop tests
+    @const assert(test_needs_drop_int());
+    @const assert(test_needs_drop_bool());
+    @const assert(test_needs_drop_text());
+
+    // implements tests
+    @const assert(test_implements_protocol());
+    @const assert(test_not_implements_protocol());
+    @const assert(test_implements_second_protocol());
+}

@@ -1,0 +1,266 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, nn, rms_norm, flash_attention
+// @timeout: 50000
+// @expected-exit: 0
+// @description: TensorExt NN operations — RMS normalization and flash attention simulation
+
+// ============================================================================
+// Float helpers
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool {
+    abs_f(a - b) < tol
+}
+
+// Newton's method sqrt — 6 iterations for good precision
+fn manual_sqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut g = x / 2.0;
+        if g < 1.0 { g = 1.0; }
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g = (g + x / g) / 2.0;
+        g
+    }
+}
+
+// Approximate exp(x) using Taylor series: 1 + x + x^2/2 + x^3/6 + x^4/24 + x^5/120
+fn manual_exp(x: Float) -> Float {
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x4 = x3 * x;
+    let x5 = x4 * x;
+    1.0 + x + x2 / 2.0 + x3 / 6.0 + x4 / 24.0 + x5 / 120.0
+}
+
+// ============================================================================
+// 4-element float array
+// ============================================================================
+
+type FArr4 is { e0: Float, e1: Float, e2: Float, e3: Float };
+
+fn farr4_get(a: FArr4, i: Int) -> Float {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn farr4_zeros() -> FArr4 {
+    FArr4 { e0: 0.0, e1: 0.0, e2: 0.0, e3: 0.0 }
+}
+
+// ============================================================================
+// Test 1: RMS Normalization — normalize by root mean square
+// ============================================================================
+
+fn rms_norm_first(x0: Float, x1: Float, x2: Float, x3: Float, eps: Float) -> Float {
+    let mean_sq = (x0 * x0 + x1 * x1 + x2 * x2 + x3 * x3) / 4.0;
+    let rms = manual_sqrt(mean_sq + eps);
+    x0 / rms
+}
+
+@test
+fn test_rms_norm_basic() {
+    // RMS of [1,1,1,1] = sqrt(1 + eps) ~ 1.0, so 1.0 / 1.0 ~ 1.0
+    let result = rms_norm_first(1.0, 1.0, 1.0, 1.0, 0.00001);
+    assert(approx_eq(result, 1.0, 0.01));
+
+    // RMS of [2,2,2,2] = sqrt(4 + eps) ~ 2.0, so 2.0 / 2.0 ~ 1.0
+    let result2 = rms_norm_first(2.0, 2.0, 2.0, 2.0, 0.00001);
+    assert(approx_eq(result2, 1.0, 0.01));
+
+    // RMS of [3,0,0,0] = sqrt(9/4 + eps) = sqrt(2.25) ~ 1.5, so 3.0 / 1.5 = 2.0
+    let result3 = rms_norm_first(3.0, 0.0, 0.0, 0.0, 0.00001);
+    assert(approx_eq(result3, 2.0, 0.01));
+
+    print("  test_rms_norm_basic: ok");
+}
+
+// ============================================================================
+// Test 2: RMS Normalization — edge cases
+// ============================================================================
+
+@test
+fn test_rms_norm_edge_cases() {
+    // Zero vector with eps=1: RMS = sqrt(0 + 1) = 1, so 0/1 = 0
+    let result = rms_norm_first(0.0, 0.0, 0.0, 0.0, 1.0);
+    assert(approx_eq(result, 0.0, 0.001));
+
+    // Negative values: [-1, -1, -1, -1], mean_sq = 1, RMS ~ 1, result = -1/1 = -1
+    let result2 = rms_norm_first(0.0 - 1.0, 0.0 - 1.0, 0.0 - 1.0, 0.0 - 1.0, 0.00001);
+    assert(approx_eq(result2, 0.0 - 1.0, 0.01));
+
+    // Mixed: [1, -1, 1, -1], mean_sq = 1, RMS ~ 1, result = 1/1 = 1
+    let result3 = rms_norm_first(1.0, 0.0 - 1.0, 1.0, 0.0 - 1.0, 0.00001);
+    assert(approx_eq(result3, 1.0, 0.01));
+
+    print("  test_rms_norm_edge_cases: ok");
+}
+
+// ============================================================================
+// Test 3: Dot product and scaled attention score
+// ============================================================================
+
+fn dot_product_2(a0: Float, a1: Float, b0: Float, b1: Float) -> Float {
+    a0 * b0 + a1 * b1
+}
+
+fn softmax_2(s0: Float, s1: Float) -> Float {
+    // Returns softmax[0] for a 2-element vector
+    let max_val = if s0 > s1 { s0 } else { s1 };
+    let e0 = manual_exp(s0 - max_val);
+    let e1 = manual_exp(s1 - max_val);
+    e0 / (e0 + e1)
+}
+
+@test
+fn test_attention_score() {
+    // Q = [1, 0], K = [1, 0], scale = 1/sqrt(2) ~ 0.707
+    let scale = 1.0 / manual_sqrt(2.0);
+    assert(approx_eq(scale, 0.707, 0.01));
+
+    // Score = dot(Q, K) * scale = 1 * 0.707 = 0.707
+    let score = dot_product_2(1.0, 0.0, 1.0, 0.0) * scale;
+    assert(approx_eq(score, 0.707, 0.01));
+
+    // Orthogonal: Q = [1, 0], K = [0, 1], score = 0
+    let score2 = dot_product_2(1.0, 0.0, 0.0, 1.0) * scale;
+    assert(approx_eq(score2, 0.0, 0.001));
+
+    // Softmax of [0.707, 0.0]: exp(0.707) / (exp(0.707) + exp(0))
+    let w0 = softmax_2(0.707, 0.0);
+    // w0 should be > 0.5 since 0.707 > 0
+    assert(w0 > 0.5);
+    assert(w0 < 1.0);
+
+    // Equal scores: softmax([x, x]) = [0.5, 0.5]
+    let w_eq = softmax_2(1.0, 1.0);
+    assert(approx_eq(w_eq, 0.5, 0.001));
+
+    print("  test_attention_score: ok");
+}
+
+// ============================================================================
+// Test 4: Full attention — Q*K^T * scale -> softmax -> * V
+// ============================================================================
+
+@test
+fn test_attention_full() {
+    // 2x2 identity-like Q, K, V
+    let scale = 1.0 / manual_sqrt(2.0);
+
+    // Q = [[1,0],[0,1]], K = [[1,0],[0,1]], V = [[10,20],[30,40]]
+    // Score[0] = [dot([1,0],[1,0])*s, dot([1,0],[0,1])*s] = [s, 0]
+    let s00 = dot_product_2(1.0, 0.0, 1.0, 0.0) * scale;
+    let s01 = dot_product_2(1.0, 0.0, 0.0, 1.0) * scale;
+
+    // Softmax row 0
+    let w00 = softmax_2(s00, s01);
+    let w01 = 1.0 - w00;
+
+    // Output[0] = w00 * V[0] + w01 * V[1]
+    let out00 = w00 * 10.0 + w01 * 30.0;
+    let out01 = w00 * 20.0 + w01 * 40.0;
+
+    // w00 > 0.5 (score[0,0] > score[0,1]), so output should be closer to V[0]
+    assert(out00 < 20.0);  // closer to 10 than 30
+    assert(out01 < 30.0);  // closer to 20 than 40
+
+    // Score[1] = [dot([0,1],[1,0])*s, dot([0,1],[0,1])*s] = [0, s]
+    let s10 = dot_product_2(0.0, 1.0, 1.0, 0.0) * scale;
+    let s11 = dot_product_2(0.0, 1.0, 0.0, 1.0) * scale;
+
+    let w10 = softmax_2(s10, s11);
+    let w11 = 1.0 - w10;
+
+    let out10 = w10 * 10.0 + w11 * 30.0;
+    let out11 = w10 * 20.0 + w11 * 40.0;
+
+    // w10 < 0.5 (score[1,0] < score[1,1]), so output should be closer to V[1]
+    assert(out10 > 20.0);  // closer to 30 than 10
+    assert(out11 > 30.0);  // closer to 40 than 20
+
+    print("  test_attention_full: ok");
+}
+
+// ============================================================================
+// Test 5: Layer normalization (differs from batch norm)
+// ============================================================================
+
+@test
+fn test_layer_norm() {
+    // Input: [2.0, 4.0, 6.0, 8.0]
+    // Mean = 5.0, Var = 5.0
+    let x = FArr4 { e0: 2.0, e1: 4.0, e2: 6.0, e3: 8.0 };
+    let eps = 0.001;
+    let n = 4;
+
+    // Compute mean
+    let mut sum = 0.0;
+    let mut i = 0;
+    while i < n {
+        sum = sum + farr4_get(x, i);
+        i = i + 1;
+    }
+    let mean = sum / 4.0;
+    assert(approx_eq(mean, 5.0, 0.001));
+
+    // Compute variance
+    let mut var_sum = 0.0;
+    let mut j = 0;
+    while j < n {
+        let diff = farr4_get(x, j) - mean;
+        var_sum = var_sum + diff * diff;
+        j = j + 1;
+    }
+    let variance = var_sum / 4.0;
+    assert(approx_eq(variance, 5.0, 0.001));
+
+    // Normalize: (x - mean) / sqrt(var + eps)
+    let std_dev = manual_sqrt(variance + eps);
+    let norm0 = (farr4_get(x, 0) - mean) / std_dev;
+    let norm3 = (farr4_get(x, 3) - mean) / std_dev;
+
+    // norm0 ~ (2 - 5) / 2.236 ~ -1.342
+    assert(approx_eq(norm0, 0.0 - 1.342, 0.02));
+    // norm3 ~ (8 - 5) / 2.236 ~ 1.342
+    assert(approx_eq(norm3, 1.342, 0.02));
+
+    // Apply gain=2, bias=1: y = gain * norm + bias
+    let gain = 2.0;
+    let bias = 1.0;
+    let y0 = gain * norm0 + bias;
+    let y3 = gain * norm3 + bias;
+
+    // y0 ~ 2 * (-1.342) + 1 = -1.684
+    assert(approx_eq(y0, 0.0 - 1.684, 0.05));
+    // y3 ~ 2 * 1.342 + 1 = 3.684
+    assert(approx_eq(y3, 3.684, 0.05));
+
+    print("  test_layer_norm: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_rms_norm_basic();
+    test_rms_norm_edge_cases();
+    test_attention_score();
+    test_attention_full();
+    test_layer_norm();
+    print("[OK] 081_tensor_ext_nn");
+    0
+}

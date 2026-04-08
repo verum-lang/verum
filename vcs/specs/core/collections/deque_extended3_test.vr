@@ -1,0 +1,386 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: collections, deque, reduce, flat_map, starts_with, ends_with, position, intersperse
+// @description: Tests for Deque extended utility methods: reduce, flat_map, starts_with, ends_with, position, rposition, intersperse
+
+mount core.collections.deque.{Deque};
+
+// =============================================================================
+// reduce tests
+// =============================================================================
+
+@test
+fn test_deque_reduce_sum() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    let sum = d.reduce(|acc, v| acc + *v);
+    assert(sum.is_some());
+    assert_eq(sum.unwrap(), 10);
+}
+
+@test
+fn test_deque_reduce_max() {
+    let mut d = Deque.new();
+    d.push_back(3);
+    d.push_back(7);
+    d.push_back(1);
+    d.push_back(5);
+
+    let mx = d.reduce(|acc, v| if *v > acc { *v } else { acc });
+    assert_eq(mx.unwrap(), 7);
+}
+
+@test
+fn test_deque_reduce_single() {
+    let mut d = Deque.new();
+    d.push_back(42);
+
+    let result = d.reduce(|acc, v| acc + *v);
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_deque_reduce_empty() {
+    let d: Deque<Int> = Deque.new();
+    let result = d.reduce(|acc, v| acc + *v);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// flat_map tests
+// =============================================================================
+
+@test
+fn test_deque_flat_map_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let result = d.flat_map(|v| {
+        let mut l: List<Int> = [];
+        l.push(*v);
+        l.push(*v * 10);
+        l
+    });
+    assert_eq(result.len(), 6);
+    assert_eq(*result.get(0).unwrap(), 1);
+    assert_eq(*result.get(1).unwrap(), 10);
+    assert_eq(*result.get(2).unwrap(), 2);
+    assert_eq(*result.get(3).unwrap(), 20);
+    assert_eq(*result.get(4).unwrap(), 3);
+    assert_eq(*result.get(5).unwrap(), 30);
+}
+
+@test
+fn test_deque_flat_map_empty_inner() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    let result = d.flat_map(|_v| {
+        let l: List<Int> = [];
+        l
+    });
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_deque_flat_map_empty_deque() {
+    let d: Deque<Int> = Deque.new();
+    let result = d.flat_map(|v| {
+        let mut l: List<Int> = [];
+        l.push(*v);
+        l
+    });
+    assert_eq(result.len(), 0);
+}
+
+// =============================================================================
+// starts_with tests
+// =============================================================================
+
+@test
+fn test_deque_starts_with_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let mut prefix = Deque.new();
+    prefix.push_back(1);
+    prefix.push_back(2);
+
+    assert(d.starts_with(&prefix));
+}
+
+@test
+fn test_deque_starts_with_full_match() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    let mut prefix = Deque.new();
+    prefix.push_back(1);
+    prefix.push_back(2);
+
+    assert(d.starts_with(&prefix));
+}
+
+@test
+fn test_deque_starts_with_no_match() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let mut prefix = Deque.new();
+    prefix.push_back(2);
+    prefix.push_back(3);
+
+    assert(!d.starts_with(&prefix));
+}
+
+@test
+fn test_deque_starts_with_empty_prefix() {
+    let mut d = Deque.new();
+    d.push_back(1);
+
+    let prefix: Deque<Int> = Deque.new();
+    assert(d.starts_with(&prefix));
+}
+
+@test
+fn test_deque_starts_with_prefix_longer() {
+    let mut d = Deque.new();
+    d.push_back(1);
+
+    let mut prefix = Deque.new();
+    prefix.push_back(1);
+    prefix.push_back(2);
+
+    assert(!d.starts_with(&prefix));
+}
+
+// =============================================================================
+// ends_with tests
+// =============================================================================
+
+@test
+fn test_deque_ends_with_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let mut suffix = Deque.new();
+    suffix.push_back(2);
+    suffix.push_back(3);
+
+    assert(d.ends_with(&suffix));
+}
+
+@test
+fn test_deque_ends_with_full_match() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    let mut suffix = Deque.new();
+    suffix.push_back(1);
+    suffix.push_back(2);
+
+    assert(d.ends_with(&suffix));
+}
+
+@test
+fn test_deque_ends_with_no_match() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let mut suffix = Deque.new();
+    suffix.push_back(1);
+    suffix.push_back(2);
+
+    assert(!d.ends_with(&suffix));
+}
+
+@test
+fn test_deque_ends_with_empty_suffix() {
+    let mut d = Deque.new();
+    d.push_back(1);
+
+    let suffix: Deque<Int> = Deque.new();
+    assert(d.ends_with(&suffix));
+}
+
+// =============================================================================
+// position tests
+// =============================================================================
+
+@test
+fn test_deque_position_found() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    assert_eq(d.position(&20).unwrap(), 1);
+}
+
+@test
+fn test_deque_position_first() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(10);
+
+    assert_eq(d.position(&10).unwrap(), 0);
+}
+
+@test
+fn test_deque_position_not_found() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+
+    assert(d.position(&30).is_none());
+}
+
+@test
+fn test_deque_position_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(d.position(&1).is_none());
+}
+
+// =============================================================================
+// rposition tests
+// =============================================================================
+
+@test
+fn test_deque_rposition_found() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    assert_eq(d.rposition(&20).unwrap(), 1);
+}
+
+@test
+fn test_deque_rposition_last() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(10);
+
+    assert_eq(d.rposition(&10).unwrap(), 2);
+}
+
+@test
+fn test_deque_rposition_not_found() {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+
+    assert(d.rposition(&30).is_none());
+}
+
+// =============================================================================
+// intersperse tests
+// =============================================================================
+
+@test
+fn test_deque_intersperse_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let result = d.intersperse(0);
+    assert_eq(result.len(), 5);
+    assert_eq(*result.get(0).unwrap(), 1);
+    assert_eq(*result.get(1).unwrap(), 0);
+    assert_eq(*result.get(2).unwrap(), 2);
+    assert_eq(*result.get(3).unwrap(), 0);
+    assert_eq(*result.get(4).unwrap(), 3);
+}
+
+@test
+fn test_deque_intersperse_single() {
+    let mut d = Deque.new();
+    d.push_back(42);
+
+    let result = d.intersperse(0);
+    assert_eq(result.len(), 1);
+    assert_eq(*result.get(0).unwrap(), 42);
+}
+
+@test
+fn test_deque_intersperse_empty() {
+    let d: Deque<Int> = Deque.new();
+    let result = d.intersperse(0);
+    assert_eq(result.len(), 0);
+}
+
+@test
+fn test_deque_intersperse_with_basic() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let mut counter = 0;
+    let result = d.intersperse_with(|| {
+        counter = counter + 1;
+        counter * 100
+    });
+    assert_eq(result.len(), 5);
+    assert_eq(*result.get(0).unwrap(), 1);
+    assert_eq(*result.get(2).unwrap(), 2);
+    assert_eq(*result.get(4).unwrap(), 3);
+}
+
+// =============================================================================
+// Integration tests
+// =============================================================================
+
+@test
+fn test_flat_map_then_reduce() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    // Duplicate each element, then sum
+    let sum = d.flat_map(|v| {
+        let mut l: List<Int> = [];
+        l.push(*v);
+        l.push(*v);
+        l
+    }).reduce(|acc, v| acc + *v);
+    assert_eq(sum.unwrap(), 12);  // (1+1) + (2+2) + (3+3)
+}
+
+@test
+fn test_filter_then_intersperse() {
+    let mut d = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    let result = d.filter(|v| *v % 2 != 0).intersperse(0);
+    // [1, 0, 3, 0, 5]
+    assert_eq(result.len(), 5);
+    assert_eq(*result.get(0).unwrap(), 1);
+    assert_eq(*result.get(1).unwrap(), 0);
+    assert_eq(*result.get(2).unwrap(), 3);
+}

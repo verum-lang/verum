@@ -1,0 +1,23 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn add(a: Int, b: Int) -> Int {
+        return a + b;
+    }
+
+    fn mul(a: Int, b: Int) -> Int {
+        return a * b;
+    }
+
+    fn sub(a: Int, b: Int) -> Int {
+        return a - b;
+    }
+
+    let result = add(mul(2, 3), sub(10, 5));
+    assert_eq(result, 11);  // 6 + 5 = 11
+}

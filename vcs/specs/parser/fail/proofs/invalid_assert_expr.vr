@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, assert, error
+// @description: Test invalid assert call with empty parentheses
+// @expected-error: E026
+
+fn test() {
+    assert();
+}

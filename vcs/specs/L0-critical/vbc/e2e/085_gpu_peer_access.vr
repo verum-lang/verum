@@ -1,0 +1,268 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, gpu, peer_access, multi_gpu
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU peer access — enable/disable peer access, P2P transfer simulation, topology tracking
+
+// ============================================================================
+// Peer access matrix (4 GPUs max)
+// Stored as flat 16-element array (4x4)
+// ============================================================================
+
+type PeerMatrix is {
+    e00: Int, e01: Int, e02: Int, e03: Int,
+    e10: Int, e11: Int, e12: Int, e13: Int,
+    e20: Int, e21: Int, e22: Int, e23: Int,
+    e30: Int, e31: Int, e32: Int, e33: Int
+};
+
+fn peer_get(m: PeerMatrix, src: Int, dst: Int) -> Int {
+    if src == 0 {
+        if dst == 0 { m.e00 } else if dst == 1 { m.e01 }
+        else if dst == 2 { m.e02 } else { m.e03 }
+    } else if src == 1 {
+        if dst == 0 { m.e10 } else if dst == 1 { m.e11 }
+        else if dst == 2 { m.e12 } else { m.e13 }
+    } else if src == 2 {
+        if dst == 0 { m.e20 } else if dst == 1 { m.e21 }
+        else if dst == 2 { m.e22 } else { m.e23 }
+    } else {
+        if dst == 0 { m.e30 } else if dst == 1 { m.e31 }
+        else if dst == 2 { m.e32 } else { m.e33 }
+    }
+}
+
+fn peer_set(m: PeerMatrix, src: Int, dst: Int, val: Int) -> PeerMatrix {
+    PeerMatrix {
+        e00: if src == 0 { if dst == 0 { val } else { m.e00 } } else { m.e00 },
+        e01: if src == 0 { if dst == 1 { val } else { m.e01 } } else { m.e01 },
+        e02: if src == 0 { if dst == 2 { val } else { m.e02 } } else { m.e02 },
+        e03: if src == 0 { if dst == 3 { val } else { m.e03 } } else { m.e03 },
+        e10: if src == 1 { if dst == 0 { val } else { m.e10 } } else { m.e10 },
+        e11: if src == 1 { if dst == 1 { val } else { m.e11 } } else { m.e11 },
+        e12: if src == 1 { if dst == 2 { val } else { m.e12 } } else { m.e12 },
+        e13: if src == 1 { if dst == 3 { val } else { m.e13 } } else { m.e13 },
+        e20: if src == 2 { if dst == 0 { val } else { m.e20 } } else { m.e20 },
+        e21: if src == 2 { if dst == 1 { val } else { m.e21 } } else { m.e21 },
+        e22: if src == 2 { if dst == 2 { val } else { m.e22 } } else { m.e22 },
+        e23: if src == 2 { if dst == 3 { val } else { m.e23 } } else { m.e23 },
+        e30: if src == 3 { if dst == 0 { val } else { m.e30 } } else { m.e30 },
+        e31: if src == 3 { if dst == 1 { val } else { m.e31 } } else { m.e31 },
+        e32: if src == 3 { if dst == 2 { val } else { m.e32 } } else { m.e32 },
+        e33: if src == 3 { if dst == 3 { val } else { m.e33 } } else { m.e33 }
+    }
+}
+
+fn peer_zeros() -> PeerMatrix {
+    PeerMatrix {
+        e00: 0, e01: 0, e02: 0, e03: 0,
+        e10: 0, e11: 0, e12: 0, e13: 0,
+        e20: 0, e21: 0, e22: 0, e23: 0,
+        e30: 0, e31: 0, e32: 0, e33: 0
+    }
+}
+
+// ============================================================================
+// Peer access manager
+// ============================================================================
+
+type PeerManager is {
+    access_enabled: PeerMatrix,   // 1 = peer access enabled
+    can_access: PeerMatrix,       // 1 = hardware supports P2P
+    transfer_count: PeerMatrix,   // count of transfers between each pair
+    num_gpus: Int
+};
+
+fn pm_new(num_gpus: Int, topology: PeerMatrix) -> PeerManager {
+    PeerManager {
+        access_enabled: peer_zeros(),
+        can_access: topology,
+        transfer_count: peer_zeros(),
+        num_gpus: num_gpus
+    }
+}
+
+fn pm_enable(pm: PeerManager, src: Int, dst: Int) -> PeerManager {
+    if peer_get(pm.can_access, src, dst) == 1 {
+        PeerManager {
+            access_enabled: peer_set(pm.access_enabled, src, dst, 1),
+            can_access: pm.can_access,
+            transfer_count: pm.transfer_count,
+            num_gpus: pm.num_gpus
+        }
+    } else { pm }
+}
+
+fn pm_disable(pm: PeerManager, src: Int, dst: Int) -> PeerManager {
+    PeerManager {
+        access_enabled: peer_set(pm.access_enabled, src, dst, 0),
+        can_access: pm.can_access,
+        transfer_count: pm.transfer_count,
+        num_gpus: pm.num_gpus
+    }
+}
+
+fn pm_transfer(pm: PeerManager, src: Int, dst: Int) -> PeerManager {
+    if peer_get(pm.access_enabled, src, dst) == 1 {
+        let old = peer_get(pm.transfer_count, src, dst);
+        PeerManager {
+            access_enabled: pm.access_enabled,
+            can_access: pm.can_access,
+            transfer_count: peer_set(pm.transfer_count, src, dst, old + 1),
+            num_gpus: pm.num_gpus
+        }
+    } else { pm }
+}
+
+// ============================================================================
+// Test 1: Enable/disable peer access
+// ============================================================================
+
+@test
+fn test_enable_disable() {
+    // 2 GPUs with bidirectional P2P support
+    let mut topo = peer_zeros();
+    topo = peer_set(topo, 0, 1, 1);
+    topo = peer_set(topo, 1, 0, 1);
+
+    let mut pm = pm_new(2, topo);
+
+    // Initially no access enabled
+    assert_eq(peer_get(pm.access_enabled, 0, 1), 0);
+    assert_eq(peer_get(pm.access_enabled, 1, 0), 0);
+
+    // Enable 0 -> 1
+    pm = pm_enable(pm, 0, 1);
+    assert_eq(peer_get(pm.access_enabled, 0, 1), 1);
+    assert_eq(peer_get(pm.access_enabled, 1, 0), 0);
+
+    // Enable 1 -> 0
+    pm = pm_enable(pm, 1, 0);
+    assert_eq(peer_get(pm.access_enabled, 1, 0), 1);
+
+    // Disable 0 -> 1
+    pm = pm_disable(pm, 0, 1);
+    assert_eq(peer_get(pm.access_enabled, 0, 1), 0);
+    assert_eq(peer_get(pm.access_enabled, 1, 0), 1);
+
+    print("  test_enable_disable: ok");
+}
+
+// ============================================================================
+// Test 2: Cannot enable unsupported P2P
+// ============================================================================
+
+@test
+fn test_unsupported_peer() {
+    // 3 GPUs: only 0<->1 supported, 2 isolated
+    let mut topo = peer_zeros();
+    topo = peer_set(topo, 0, 1, 1);
+    topo = peer_set(topo, 1, 0, 1);
+
+    let mut pm = pm_new(3, topo);
+
+    // Try to enable 0 -> 2 (not supported)
+    pm = pm_enable(pm, 0, 2);
+    assert_eq(peer_get(pm.access_enabled, 0, 2), 0);
+
+    // Try to enable 2 -> 0 (not supported)
+    pm = pm_enable(pm, 2, 0);
+    assert_eq(peer_get(pm.access_enabled, 2, 0), 0);
+
+    // Enable supported pair
+    pm = pm_enable(pm, 0, 1);
+    assert_eq(peer_get(pm.access_enabled, 0, 1), 1);
+
+    print("  test_unsupported_peer: ok");
+}
+
+// ============================================================================
+// Test 3: P2P transfer counting
+// ============================================================================
+
+@test
+fn test_transfer_count() {
+    let mut topo = peer_zeros();
+    topo = peer_set(topo, 0, 1, 1);
+    topo = peer_set(topo, 1, 0, 1);
+
+    let mut pm = pm_new(2, topo);
+    pm = pm_enable(pm, 0, 1);
+    pm = pm_enable(pm, 1, 0);
+
+    // Do several transfers
+    pm = pm_transfer(pm, 0, 1);
+    pm = pm_transfer(pm, 0, 1);
+    pm = pm_transfer(pm, 0, 1);
+    pm = pm_transfer(pm, 1, 0);
+
+    assert_eq(peer_get(pm.transfer_count, 0, 1), 3);
+    assert_eq(peer_get(pm.transfer_count, 1, 0), 1);
+
+    // Transfer on disabled path does nothing
+    pm = pm_disable(pm, 1, 0);
+    pm = pm_transfer(pm, 1, 0);
+    assert_eq(peer_get(pm.transfer_count, 1, 0), 1);
+
+    print("  test_transfer_count: ok");
+}
+
+// ============================================================================
+// Test 4: Ring all-reduce simulation (4 GPUs)
+// ============================================================================
+
+@test
+fn test_ring_allreduce() {
+    // Full ring topology: 0->1->2->3->0
+    let mut topo = peer_zeros();
+    topo = peer_set(topo, 0, 1, 1);
+    topo = peer_set(topo, 1, 2, 1);
+    topo = peer_set(topo, 2, 3, 1);
+    topo = peer_set(topo, 3, 0, 1);
+
+    let mut pm = pm_new(4, topo);
+
+    // Enable ring links
+    pm = pm_enable(pm, 0, 1);
+    pm = pm_enable(pm, 1, 2);
+    pm = pm_enable(pm, 2, 3);
+    pm = pm_enable(pm, 3, 0);
+
+    // Simulate 3 rounds of ring reduce (N-1 rounds for N GPUs)
+    let rounds = 3;
+    let mut round = 0;
+    while round < rounds {
+        pm = pm_transfer(pm, 0, 1);
+        pm = pm_transfer(pm, 1, 2);
+        pm = pm_transfer(pm, 2, 3);
+        pm = pm_transfer(pm, 3, 0);
+        round = round + 1;
+    }
+
+    // Each link should have exactly 3 transfers
+    assert_eq(peer_get(pm.transfer_count, 0, 1), 3);
+    assert_eq(peer_get(pm.transfer_count, 1, 2), 3);
+    assert_eq(peer_get(pm.transfer_count, 2, 3), 3);
+    assert_eq(peer_get(pm.transfer_count, 3, 0), 3);
+
+    // No reverse transfers
+    assert_eq(peer_get(pm.transfer_count, 1, 0), 0);
+    assert_eq(peer_get(pm.transfer_count, 0, 3), 0);
+
+    print("  test_ring_allreduce: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_enable_disable();
+    test_unsupported_peer();
+    test_transfer_count();
+    test_ring_allreduce();
+    print("[OK] 085_gpu_peer_access");
+    0
+}

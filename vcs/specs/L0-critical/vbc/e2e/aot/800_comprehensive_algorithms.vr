@@ -1,0 +1,186 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, comprehensive_algorithms
+// @expected-exit: 0
+
+// Mixed algorithm verification
+
+// Binary GCD (Stein's algorithm)
+@allow(unbounded_recursion)
+fn binary_gcd(a: Int, b: Int) -> Int {
+    if (a == 0) { return b; }
+    if (b == 0) { return a; }
+    if (a == b) { return a; }
+
+    let a_even = (a % 2 == 0);
+    let b_even = (b % 2 == 0);
+
+    if (a_even) {
+        if (b_even) {
+            return 2 * binary_gcd(a / 2, b / 2);
+        }
+        return binary_gcd(a / 2, b);
+    }
+    if (b_even) {
+        return binary_gcd(a, b / 2);
+    }
+    // Both odd
+    if (a > b) {
+        return binary_gcd((a - b) / 2, b);
+    }
+    binary_gcd(a, (b - a) / 2)
+}
+
+// Integer square root using Newton's method
+fn isqrt(n: Int) -> Int {
+    if (n == 0) { return 0; }
+    if (n == 1) { return 1; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while (y < x) {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+// Count set bits (popcount)
+fn popcount(n: Int) -> Int {
+    let mut val = n;
+    let mut count = 0;
+    while (val > 0) {
+        count = count + (val % 2);
+        val = val / 2;
+    }
+    count
+}
+
+// Check if power of 2
+fn is_power_of_2(n: Int) -> Int {
+    if (n <= 0) { return 0; }
+    if (popcount(n) == 1) { return 1; }
+    0
+}
+
+// Next power of 2 >= n
+fn next_power_of_2(n: Int) -> Int {
+    if (n <= 1) { return 1; }
+    let mut p = 1;
+    while (p < n) {
+        p = p * 2;
+    }
+    p
+}
+
+// Bit reversal of an n-bit number
+fn reverse_bits(val: Int, n_bits: Int) -> Int {
+    let mut result = 0;
+    let mut v = val;
+    let mut i = 0;
+    while (i < n_bits) {
+        result = result * 2 + (v % 2);
+        v = v / 2;
+        i = i + 1;
+    }
+    result
+}
+
+// Count leading zeros (for n-bit representation)
+fn count_leading_zeros(val: Int, n_bits: Int) -> Int {
+    if (val == 0) { return n_bits; }
+    let mut count = 0;
+    // Find highest set bit
+    let mut threshold = 1;
+    let mut i = 0;
+    while (i < n_bits - 1) {
+        threshold = threshold * 2;
+        i = i + 1;
+    }
+    // threshold is now 2^(n_bits-1)
+    while (threshold > 0) {
+        if (val >= threshold) {
+            return count;
+        }
+        count = count + 1;
+        threshold = threshold / 2;
+    }
+    count
+}
+
+// Count trailing zeros
+fn count_trailing_zeros(val: Int) -> Int {
+    if (val == 0) { return 64; }
+    let mut v = val;
+    let mut count = 0;
+    while (v % 2 == 0) {
+        count = count + 1;
+        v = v / 2;
+    }
+    count
+}
+
+// Median of 3 values
+fn median3(a: Int, b: Int, c: Int) -> Int {
+    if (a <= b) {
+        if (b <= c) { return b; }
+        if (a <= c) { return c; }
+        return a;
+    }
+    // a > b
+    if (a <= c) { return a; }
+    if (b <= c) { return c; }
+    b
+}
+
+// Partition (quicksort-like): count elements < pivot
+fn partition_count_less(arr: List<Int>, n: Int, pivot: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while (i < n) {
+        if (arr[i] < pivot) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Test 1: Binary GCD of 48 and 18 = 6
+    assert_eq(binary_gcd(48, 18), 6);
+
+    // Test 2: Integer square root of 144 = 12
+    assert_eq(isqrt(144), 12);
+
+    // Test 3: Integer square root of 150 = 12 (floor)
+    assert_eq(isqrt(150), 12);
+
+    // Test 4: Popcount of 255 (0b11111111) = 8
+    assert_eq(popcount(255), 8);
+
+    // Test 5: Is 64 a power of 2? Yes
+    assert_eq(is_power_of_2(64), 1);
+
+    // Test 6: Is 100 a power of 2? No
+    assert_eq(is_power_of_2(100), 0);
+
+    // Test 7: Next power of 2 >= 100 = 128
+    assert_eq(next_power_of_2(100), 128);
+
+    // Test 8: Bit reversal of 0b1010 (10) in 4 bits = 0b0101 (5)
+    assert_eq(reverse_bits(10, 4), 5);
+
+    // Test 9: Leading zeros of 1 in 8 bits = 7
+    // 1 = 0b00000001, 7 leading zeros
+    assert_eq(count_leading_zeros(1, 8), 7);
+
+    // Test 10: Median of 7, 3, 5 = 5, and partition count
+    // Also verify trailing zeros: 24 = 0b11000, trailing zeros = 3
+    let med = median3(7, 3, 5);
+    let tz = count_trailing_zeros(24);
+    assert_eq(med + tz, 8);
+
+    print("800_comprehensive_algorithms: PASS");
+    0
+}

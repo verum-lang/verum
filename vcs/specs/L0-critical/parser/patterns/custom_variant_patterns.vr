@@ -1,0 +1,320 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, variants, custom, sum-types
+// @description: Tests pattern matching with user-defined sum types (variants)
+
+/// Custom Variant Pattern Matching Test Suite
+///
+/// This test demonstrates that Verum supports pattern matching
+/// with user-defined sum types (variants), not just built-in types
+/// like Maybe and Result.
+///
+/// Spec: 05-syntax-grammar.md#patterns
+
+// ============================================================================
+// SIMPLE UNIT VARIANTS
+// ============================================================================
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+fn test_simple_variant_match() {
+    let c = Color.Red;
+
+    let code = match c {
+        Color.Red => 0xFF0000,
+        Color.Green => 0x00FF00,
+        Color.Blue => 0x0000FF,
+    };
+
+    assert(code == 0xFF0000);
+}
+
+fn test_all_variant_cases() {
+    fn color_name(c: Color) -> Int {
+        match c {
+            Color.Red => 1,
+            Color.Green => 2,
+            Color.Blue => 3,
+        }
+    }
+
+    assert(color_name(Color.Red) == 1);
+    assert(color_name(Color.Green) == 2);
+    assert(color_name(Color.Blue) == 3);
+}
+
+// ============================================================================
+// VARIANTS WITH RECORD DATA
+// ============================================================================
+
+type Shape is
+    | Circle { radius: Int }
+    | Rectangle { width: Int, height: Int }
+    | Triangle { base: Int, height: Int };
+
+fn test_variant_with_record_data() {
+    let shape = Shape.Rectangle { width: 10, height: 20 };
+
+    let area = match shape {
+        Shape.Circle { radius } => radius * radius * 3,
+        Shape.Rectangle { width, height } => width * height,
+        Shape.Triangle { base, height } => base * height / 2,
+    };
+
+    assert(area == 200);
+}
+
+fn test_circle_area() {
+    let circle = Shape.Circle { radius: 5 };
+
+    let area = match circle {
+        Shape.Circle { radius } => radius * radius * 3,
+        Shape.Rectangle { width, height } => width * height,
+        Shape.Triangle { base, height } => base * height / 2,
+    };
+
+    assert(area == 75);
+}
+
+fn test_triangle_area() {
+    let tri = Shape.Triangle { base: 10, height: 8 };
+
+    let area = match tri {
+        Shape.Circle { radius } => radius * radius * 3,
+        Shape.Rectangle { width, height } => width * height,
+        Shape.Triangle { base, height } => base * height / 2,
+    };
+
+    assert(area == 40);
+}
+
+// ============================================================================
+// VARIANTS WITH TUPLE DATA
+// ============================================================================
+
+type Point2D is
+    | Cartesian(Int, Int)
+    | Polar(Int, Int);
+
+fn test_tuple_variant_pattern() {
+    let p = Point2D.Cartesian(3, 4);
+
+    let dist_squared = match p {
+        Point2D.Cartesian(x, y) => x * x + y * y,
+        Point2D.Polar(r, theta) => r * r,
+    };
+
+    assert(dist_squared == 25);
+}
+
+// ============================================================================
+// MIXED VARIANT DATA TYPES
+// ============================================================================
+
+type Message is
+    | Text { content: Text }
+    | Number { value: Int }
+    | Empty;
+
+fn test_mixed_variant_types() {
+    let msg1 = Message.Number { value: 42 };
+    let msg2 = Message.Empty;
+
+    let val1 = match msg1 {
+        Message.Text { content } => 0,
+        Message.Number { value } => value,
+        Message.Empty => 100,
+    };
+    assert(val1 == 42);
+
+    let val2 = match msg2 {
+        Message.Text { content } => 0,
+        Message.Number { value } => value,
+        Message.Empty => 100,
+    };
+    assert(val2 == 100);
+}
+
+// ============================================================================
+// VARIANT PATTERNS WITH WILDCARDS
+// ============================================================================
+
+fn test_wildcard_in_variant() {
+    let shape = Shape.Rectangle { width: 5, height: 10 };
+
+    let is_circle = match shape {
+        Shape.Circle { .. } => true,
+        _ => false,
+    };
+
+    assert(is_circle == false);
+}
+
+fn test_partial_destructure() {
+    let shape = Shape.Rectangle { width: 100, height: 200 };
+
+    let width_only = match shape {
+        Shape.Rectangle { width, .. } => width,
+        _ => 0,
+    };
+
+    assert(width_only == 100);
+}
+
+// ============================================================================
+// VARIANT PATTERNS WITH GUARDS
+// ============================================================================
+
+fn test_variant_with_guard() {
+    let shape = Shape.Circle { radius: 10 };
+
+    let size = match shape {
+        Shape.Circle { radius } if radius > 20 => 3,
+        Shape.Circle { radius } if radius > 5 => 2,
+        Shape.Circle { radius } => 1,
+        _ => 0,
+    };
+
+    assert(size == 2);
+}
+
+// ============================================================================
+// NESTED VARIANT IN STRUCT
+// ============================================================================
+
+type Container is {
+    content: Message,
+    priority: Int,
+};
+
+fn test_nested_variant_in_struct() {
+    let container = Container {
+        content: Message.Number { value: 99 },
+        priority: 1,
+    };
+
+    // Extract and match nested variant
+    let content = container.content;
+    let value = match content {
+        Message.Text { content } => 0,
+        Message.Number { value } => value,
+        Message.Empty => 0,
+    };
+
+    assert(value == 99);
+}
+
+// ============================================================================
+// STATUS/STATE MACHINE PATTERN
+// ============================================================================
+
+type Status is
+    | Pending
+    | InProgress { percent: Int }
+    | Completed { result: Int }
+    | Failed { error_code: Int };
+
+fn test_state_machine_pattern() {
+    fn process_status(s: Status) -> Int {
+        match s {
+            Status.Pending => 0,
+            Status.InProgress { percent } => percent,
+            Status.Completed { result } => 100 + result,
+            Status.Failed { error_code } => 0 - error_code,
+        }
+    }
+
+    assert(process_status(Status.Pending) == 0);
+    assert(process_status(Status.InProgress { percent: 50 }) == 50);
+    assert(process_status(Status.Completed { result: 42 }) == 142);
+    assert(process_status(Status.Failed { error_code: 1 }) == 0 - 1);
+}
+
+// ============================================================================
+// OR PATTERNS WITH VARIANTS
+// ============================================================================
+
+fn test_or_pattern_with_variants() {
+    let c = Color.Blue;
+
+    let is_primary = match c {
+        Color.Red | Color.Blue => true,
+        Color.Green => false,
+    };
+
+    assert(is_primary == true);
+}
+
+// ============================================================================
+// ARRAY OF VARIANTS
+// ============================================================================
+
+fn test_array_of_variants() {
+    let shapes = [
+        Shape.Circle { radius: 5 },
+        Shape.Rectangle { width: 4, height: 6 },
+        Shape.Triangle { base: 3, height: 4 },
+    ];
+
+    let mut total_area = 0;
+
+    for i in 0..3 {
+        let shape = shapes[i];
+        let area = match shape {
+            Shape.Circle { radius } => radius * radius * 3,
+            Shape.Rectangle { width, height } => width * height,
+            Shape.Triangle { base, height } => base * height / 2,
+        };
+        total_area += area;
+    }
+
+    // Circle: 5*5*3 = 75
+    // Rectangle: 4*6 = 24
+    // Triangle: 3*4/2 = 6
+    // Total: 105
+    assert(total_area == 105);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Simple variants
+    test_simple_variant_match();
+    test_all_variant_cases();
+
+    // Record variants
+    test_variant_with_record_data();
+    test_circle_area();
+    test_triangle_area();
+
+    // Tuple variants
+    test_tuple_variant_pattern();
+
+    // Mixed variants
+    test_mixed_variant_types();
+
+    // Wildcards
+    test_wildcard_in_variant();
+    test_partial_destructure();
+
+    // Guards
+    test_variant_with_guard();
+
+    // Nested variants
+    test_nested_variant_in_struct();
+
+    // State machine pattern
+    test_state_machine_pattern();
+
+    // Or patterns
+    test_or_pattern_with_variants();
+
+    // Array of variants
+    test_array_of_variants();
+}

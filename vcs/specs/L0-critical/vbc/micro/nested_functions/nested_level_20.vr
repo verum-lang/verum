@@ -1,0 +1,75 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, deep-nesting, stress
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    fn L1(x: Int) -> Int {
+        fn L2(x: Int) -> Int {
+            fn L3(x: Int) -> Int {
+                fn L4(x: Int) -> Int {
+                    fn L5(x: Int) -> Int {
+                        fn L6(x: Int) -> Int {
+                            fn L7(x: Int) -> Int {
+                                fn L8(x: Int) -> Int {
+                                    fn L9(x: Int) -> Int {
+                                        fn L10(x: Int) -> Int {
+                                            fn L11(x: Int) -> Int {
+                                                fn L12(x: Int) -> Int {
+                                                    fn L13(x: Int) -> Int {
+                                                        fn L14(x: Int) -> Int {
+                                                            fn L15(x: Int) -> Int {
+                                                                fn L16(x: Int) -> Int {
+                                                                    fn L17(x: Int) -> Int {
+                                                                        fn L18(x: Int) -> Int {
+                                                                            fn L19(x: Int) -> Int {
+                                                                                fn L20(x: Int) -> Int {
+                                                                                    return x + 1;
+                                                                                }
+                                                                                return L20(x) + 1;
+                                                                            }
+                                                                            return L19(x) + 1;
+                                                                        }
+                                                                        return L18(x) + 1;
+                                                                    }
+                                                                    return L17(x) + 1;
+                                                                }
+                                                                return L16(x) + 1;
+                                                            }
+                                                            return L15(x) + 1;
+                                                        }
+                                                        return L14(x) + 1;
+                                                    }
+                                                    return L13(x) + 1;
+                                                }
+                                                return L12(x) + 1;
+                                            }
+                                            return L11(x) + 1;
+                                        }
+                                        return L10(x) + 1;
+                                    }
+                                    return L9(x) + 1;
+                                }
+                                return L8(x) + 1;
+                            }
+                            return L7(x) + 1;
+                        }
+                        return L6(x) + 1;
+                    }
+                    return L5(x) + 1;
+                }
+                return L4(x) + 1;
+            }
+            return L3(x) + 1;
+        }
+        return L2(x) + 1;
+    }
+
+    // L1(0) should return 0 + 20 (each level adds 1)
+    assert_eq(L1(0), 20);
+
+    // L1(100) should return 100 + 20 = 120
+    assert_eq(L1(100), 120);
+}

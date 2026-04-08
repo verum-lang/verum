@@ -1,0 +1,590 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, comprehensive, matching
+// @description: Comprehensive pattern matching tests demonstrating Verum's expressive patterns
+
+/// Comprehensive Pattern Matching Test Suite
+///
+/// This test demonstrates Verum's pattern matching capabilities:
+///
+/// 1. Literal patterns (integers, booleans)
+/// 2. Variable binding patterns
+/// 3. Tuple patterns with destructuring
+/// 4. Struct patterns with field extraction
+/// 5. Maybe (Option) patterns
+/// 6. Or patterns (|)
+/// 7. Guard clauses (if)
+/// 8. Wildcard patterns (_)
+/// 9. Range patterns
+///
+/// Spec: 05-syntax-grammar.md#patterns
+
+// ============================================================================
+// SUPPORTING TYPE DEFINITIONS
+// ============================================================================
+
+type Coordinate is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type Person is {
+    name: Text,
+    age: Int,
+    active: Bool,
+};
+
+type Pair is {
+    first: Int,
+    second: Int,
+};
+
+// ============================================================================
+// TEST 1: Literal Patterns
+// ============================================================================
+
+fn test_integer_literal_patterns() {
+    let value = 42;
+
+    let result = match value {
+        0 => 0,
+        1 => 1,
+        42 => 100,
+        _ => 200,
+    };
+
+    assert(result == 100);
+}
+
+fn test_boolean_literal_patterns() {
+    let flag = true;
+
+    let result = match flag {
+        true => 1,
+        false => 0,
+    };
+
+    assert(result == 1);
+}
+
+fn test_zero_literal_patterns() {
+    let value = 0;
+
+    let result = match value {
+        0 => 1,
+        1 => 2,
+        2 => 3,
+        _ => 4,
+    };
+
+    assert(result == 1);
+}
+
+// ============================================================================
+// TEST 2: Variable Binding Patterns
+// ============================================================================
+
+fn test_simple_binding() {
+    let value = 42;
+
+    let result = match value {
+        x => x * 2,
+    };
+
+    assert(result == 84);
+}
+
+fn test_multiple_bindings() {
+    let pair = (10, 20);
+
+    let result = match pair {
+        (x, y) => x + y,
+    };
+
+    assert(result == 30);
+}
+
+// ============================================================================
+// TEST 3: Tuple Patterns
+// ============================================================================
+
+fn test_tuple_destructuring() {
+    let triple = (1, 2, 3);
+
+    let result = match triple {
+        (a, b, c) => a + b + c,
+    };
+
+    assert(result == 6);
+}
+
+fn test_nested_tuple_patterns() {
+    let nested = ((1, 2), (3, 4));
+
+    let result = match nested {
+        ((a, b), (c, d)) => a + b + c + d,
+    };
+
+    assert(result == 10);
+}
+
+fn test_tuple_with_literals() {
+    let pair = (1, 2);
+
+    let result = match pair {
+        (0, 0) => 0,
+        (1, 0) => 1,
+        (0, 1) => 2,
+        (1, 2) => 3,
+        (_, _) => 4,
+    };
+
+    assert(result == 3);
+}
+
+// ============================================================================
+// TEST 4: Struct Patterns
+// ============================================================================
+
+fn test_struct_destructuring() {
+    let coord = Coordinate { x: 10, y: 20, z: 30 };
+
+    let result = match coord {
+        Coordinate { x, y, z } => x + y + z,
+    };
+
+    assert(result == 60);
+}
+
+fn test_struct_partial_destructuring() {
+    let person = Person { name: "Alice", age: 30, active: true };
+
+    let result = match person {
+        Person { age, .. } => age,
+    };
+
+    assert(result == 30);
+}
+
+fn test_struct_with_field_patterns() {
+    let coord = Coordinate { x: 0, y: 0, z: 0 };
+
+    let result = match coord {
+        Coordinate { x: 0, y: 0, z: 0 } => 0,
+        Coordinate { x: 0, y: 0, .. } => 1,
+        Coordinate { x: 0, .. } => 2,
+        _ => 3,
+    };
+
+    assert(result == 0);
+}
+
+// ============================================================================
+// TEST 5: Maybe (Option) Patterns
+// ============================================================================
+
+fn test_maybe_some_pattern() {
+    let maybe: Maybe<Int> = Maybe.Some(42);
+
+    let result = match maybe {
+        Maybe.Some(x) => x,
+        Maybe.None => 0,
+    };
+
+    assert(result == 42);
+}
+
+fn test_maybe_none_pattern() {
+    let maybe: Maybe<Int> = Maybe.None;
+
+    let result = match maybe {
+        Maybe.Some(x) => x,
+        Maybe.None => 100,
+    };
+
+    assert(result == 100);
+}
+
+fn test_nested_maybe_pattern() {
+    let nested: Maybe<Maybe<Int>> = Maybe.Some(Maybe.Some(42));
+
+    let result = match nested {
+        Maybe.Some(Maybe.Some(x)) => x,
+        Maybe.Some(Maybe.None) => 0,
+        Maybe.None => 0,
+    };
+
+    assert(result == 42);
+}
+
+// ============================================================================
+// TEST 6: Or Patterns
+// ============================================================================
+
+fn test_or_patterns_with_literals() {
+    let value = 3;
+
+    let result = match value {
+        1 | 2 | 3 => 10,
+        4 | 5 | 6 => 20,
+        _ => 30,
+    };
+
+    assert(result == 10);
+}
+
+// ============================================================================
+// TEST 7: Guard Clauses
+// ============================================================================
+
+fn test_simple_guard() {
+    let value = 15;
+
+    let result = match value {
+        x if x < 10 => 1,
+        x if x < 20 => 2,
+        x if x < 30 => 3,
+        _ => 4,
+    };
+
+    assert(result == 2);
+}
+
+fn test_guard_with_binding() {
+    let pair = (5, 10);
+
+    let result = match pair {
+        (x, y) if x + y == 15 => 1,
+        (x, y) if x + y == 20 => 2,
+        _ => 3,
+    };
+
+    assert(result == 1);
+}
+
+fn test_guard_with_maybe() {
+    let maybe: Maybe<Int> = Maybe.Some(50);
+
+    let result = match maybe {
+        Maybe.Some(x) if x < 25 => 1,
+        Maybe.Some(x) if x < 75 => 2,
+        Maybe.Some(_) => 3,
+        Maybe.None => 4,
+    };
+
+    assert(result == 2);
+}
+
+// ============================================================================
+// TEST 8: Wildcard Patterns
+// ============================================================================
+
+fn test_wildcard_as_catch_all() {
+    let value = 999;
+
+    let result = match value {
+        0 => 0,
+        1 => 1,
+        _ => 99,
+    };
+
+    assert(result == 99);
+}
+
+fn test_wildcard_in_tuple() {
+    let triple = (1, 2, 3);
+
+    let result = match triple {
+        (x, _, _) => x,
+    };
+
+    assert(result == 1);
+}
+
+fn test_wildcard_in_struct() {
+    let coord = Coordinate { x: 100, y: 200, z: 300 };
+
+    let result = match coord {
+        Coordinate { x, .. } => x,
+    };
+
+    assert(result == 100);
+}
+
+fn test_wildcard_in_maybe() {
+    let maybe: Maybe<Int> = Maybe.Some(42);
+
+    let result = match maybe {
+        Maybe.Some(_) => 1,
+        Maybe.None => 0,
+    };
+
+    assert(result == 1);
+}
+
+// ============================================================================
+// TEST 9: Range Patterns
+// ============================================================================
+
+fn test_inclusive_range_pattern() {
+    let value = 5;
+
+    let result = match value {
+        1..=3 => 1,
+        4..=6 => 2,
+        7..=9 => 3,
+        _ => 4,
+    };
+
+    assert(result == 2);
+}
+
+fn test_range_with_grades() {
+    let grade = 85;
+
+    let result = match grade {
+        0..=59 => 0,    // F
+        60..=69 => 1,   // D
+        70..=79 => 2,   // C
+        80..=89 => 3,   // B
+        90..=100 => 4,  // A
+        _ => 200,
+    };
+
+    assert(result == 3);
+}
+
+// ============================================================================
+// TEST 10: Pattern Exhaustiveness
+// ============================================================================
+
+fn test_exhaustive_boolean() {
+    fn classify(b: Bool) -> Int {
+        match b {
+            true => 1,
+            false => 0,
+        }
+    }
+
+    assert(classify(true) == 1);
+    assert(classify(false) == 0);
+}
+
+fn test_exhaustive_maybe() {
+    fn extract(m: Maybe<Int>) -> Int {
+        match m {
+            Maybe.Some(x) => x,
+            Maybe.None => 0,
+        }
+    }
+
+    assert(extract(Maybe.Some(42)) == 42);
+    assert(extract(Maybe.None) == 0);
+}
+
+// ============================================================================
+// TEST 11: If-Let Patterns
+// ============================================================================
+
+fn test_if_let_simple() {
+    let maybe: Maybe<Int> = Maybe.Some(42);
+
+    let mut result = 0;
+    if let Maybe.Some(x) = maybe {
+        result = x;
+    }
+
+    assert(result == 42);
+}
+
+fn test_if_let_with_else() {
+    let maybe: Maybe<Int> = Maybe.None;
+
+    let result = if let Maybe.Some(x) = maybe {
+        x
+    } else {
+        100
+    };
+
+    assert(result == 100);
+}
+
+fn test_nested_if_let() {
+    let outer: Maybe<Maybe<Int>> = Maybe.Some(Maybe.Some(100));
+
+    let mut result = 0;
+    if let Maybe.Some(inner) = outer {
+        if let Maybe.Some(value) = inner {
+            result = value;
+        }
+    }
+
+    assert(result == 100);
+}
+
+// ============================================================================
+// TEST 12: While-Let Patterns
+// ============================================================================
+
+fn test_while_let_countdown() {
+    let mut counter: Maybe<Int> = Maybe.Some(5);
+    let mut sum = 0;
+
+    while let Maybe.Some(n) = counter {
+        sum += n;
+        if n > 0 {
+            counter = Maybe.Some(n - 1);
+        } else {
+            counter = Maybe.None;
+        }
+    }
+
+    assert(sum == 15);  // 5 + 4 + 3 + 2 + 1 + 0
+}
+
+// ============================================================================
+// TEST 13: Complex Match Expressions
+// ============================================================================
+
+fn test_match_in_expression() {
+    let value = 5;
+
+    let doubled = match value {
+        0 => 0,
+        n => n * 2,
+    };
+
+    assert(doubled == 10);
+}
+
+fn test_match_with_multiple_statements() {
+    let maybe: Maybe<Int> = Maybe.Some(42);
+
+    let output = match maybe {
+        Maybe.Some(x) => {
+            let doubled = x * 2;
+            doubled
+        }
+        Maybe.None => {
+            let default = 0;
+            default
+        }
+    };
+
+    assert(output == 84);
+}
+
+// ============================================================================
+// TEST 14: Combined Patterns
+// ============================================================================
+
+fn test_combined_maybe_and_guards() {
+    let values = [
+        Maybe.Some(10),
+        Maybe.Some(50),
+        Maybe.Some(100),
+        Maybe.None,
+    ];
+
+    let mut small_count = 0;
+    let mut medium_count = 0;
+    let mut large_count = 0;
+    let mut none_count = 0;
+
+    for i in 0..4 {
+        let v = values[i];
+        match v {
+            Maybe.Some(x) if x < 25 => small_count += 1,
+            Maybe.Some(x) if x < 75 => medium_count += 1,
+            Maybe.Some(_) => large_count += 1,
+            Maybe.None => none_count += 1,
+        }
+    }
+
+    assert(small_count == 1);   // 10
+    assert(medium_count == 1);  // 50
+    assert(large_count == 1);   // 100
+    assert(none_count == 1);
+}
+
+fn test_struct_and_maybe_combined() {
+    let data = Pair { first: 10, second: 20 };
+    let wrapped: Maybe<Pair> = Maybe.Some(data);
+
+    let sum = match wrapped {
+        Maybe.Some(Pair { first, second }) => first + second,
+        Maybe.None => 0,
+    };
+
+    assert(sum == 30);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Literal patterns
+    test_integer_literal_patterns();
+    test_boolean_literal_patterns();
+    test_zero_literal_patterns();
+
+    // Variable binding
+    test_simple_binding();
+    test_multiple_bindings();
+
+    // Tuple patterns
+    test_tuple_destructuring();
+    test_nested_tuple_patterns();
+    test_tuple_with_literals();
+
+    // Struct patterns
+    test_struct_destructuring();
+    test_struct_partial_destructuring();
+    test_struct_with_field_patterns();
+
+    // Maybe patterns
+    test_maybe_some_pattern();
+    test_maybe_none_pattern();
+    test_nested_maybe_pattern();
+
+    // Or patterns
+    test_or_patterns_with_literals();
+
+    // Guard clauses
+    test_simple_guard();
+    test_guard_with_binding();
+    test_guard_with_maybe();
+
+    // Wildcard patterns
+    test_wildcard_as_catch_all();
+    test_wildcard_in_tuple();
+    test_wildcard_in_struct();
+    test_wildcard_in_maybe();
+
+    // Range patterns
+    test_inclusive_range_pattern();
+    test_range_with_grades();
+
+    // Exhaustiveness
+    test_exhaustive_boolean();
+    test_exhaustive_maybe();
+
+    // If-let patterns
+    test_if_let_simple();
+    test_if_let_with_else();
+    test_nested_if_let();
+
+    // While-let patterns
+    test_while_let_countdown();
+
+    // Complex match expressions
+    test_match_in_expression();
+    test_match_with_multiple_statements();
+
+    // Combined patterns
+    test_combined_maybe_and_guards();
+    test_struct_and_maybe_combined();
+}

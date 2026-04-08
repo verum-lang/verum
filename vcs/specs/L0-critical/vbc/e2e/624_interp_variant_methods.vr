@@ -1,0 +1,201 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, variants, methods, sum-types
+// @timeout: 50000
+// @expected-exit: 0
+
+// =============================================================================
+// Implement blocks on variant types
+// =============================================================================
+
+type Expr is Num(Int) | Add { left: Int, right: Int } | Mul { left: Int, right: Int };
+
+fn eval_expr(e: Expr) -> Int {
+    match e {
+        Num(v) => v,
+        Add { left: a, right: b } => a + b,
+        Mul { left: a, right: b } => a * b,
+    }
+}
+
+fn test_expr_eval() {
+    assert_eq(eval_expr(Num(42)), 42);
+    assert_eq(eval_expr(Add { left: 3, right: 4 }), 7);
+    assert_eq(eval_expr(Mul { left: 5, right: 6 }), 30);
+    print("  test_expr_eval: ok");
+}
+
+// =============================================================================
+// Linked list via variants
+// =============================================================================
+
+type IntList is Empty | Cons { head: Int, tail_len: Int };
+
+fn list_size(l: IntList) -> Int {
+    match l {
+        Empty => 0,
+        Cons { head: _, tail_len: n } => 1 + n,
+    }
+}
+
+fn test_linked_list() {
+    let empty = Empty;
+    assert_eq(list_size(empty), 0);
+
+    let one = Cons { head: 42, tail_len: 0 };
+    assert_eq(list_size(one), 1);
+
+    let two = Cons { head: 10, tail_len: 1 };
+    assert_eq(list_size(two), 2);
+    print("  test_linked_list: ok");
+}
+
+// =============================================================================
+// Tagged union for JSON-like values
+// =============================================================================
+
+type JVal is JNull | JBool(Bool) | JInt(Int) | JStr(Text);
+
+fn jval_type_name(v: JVal) -> Text {
+    match v {
+        JNull => "null",
+        JBool(_) => "bool",
+        JInt(_) => "int",
+        JStr(_) => "string",
+    }
+}
+
+fn jval_to_int(v: JVal) -> Int {
+    match v {
+        JNull => 0,
+        JBool(b) => if b { 1 } else { 0 },
+        JInt(n) => n,
+        JStr(_) => -1,
+    }
+}
+
+fn test_json_values() {
+    assert_eq(jval_type_name(JNull), "null");
+    assert_eq(jval_type_name(JBool(true)), "bool");
+    assert_eq(jval_type_name(JInt(42)), "int");
+    assert_eq(jval_type_name(JStr("hello")), "string");
+
+    assert_eq(jval_to_int(JNull), 0);
+    assert_eq(jval_to_int(JBool(true)), 1);
+    assert_eq(jval_to_int(JBool(false)), 0);
+    assert_eq(jval_to_int(JInt(99)), 99);
+    print("  test_json_values: ok");
+}
+
+// =============================================================================
+// Recursive variant processing
+// =============================================================================
+
+type Token is TNumber(Int) | TPlus | TMinus | TStar;
+
+fn token_value(t: Token) -> Int {
+    match t {
+        TNumber(n) => n,
+        TPlus => -1,
+        TMinus => -2,
+        TStar => -3,
+    }
+}
+
+fn test_tokens() {
+    let tokens: List<Int> = [5, -1, 3, -3, 2]; // 5 + 3 * 2 (simplified as values)
+
+    // Just verify we can create and match tokens
+    let t1 = TNumber(42);
+    let t2 = TPlus;
+    let t3 = TMinus;
+    let t4 = TStar;
+
+    assert_eq(token_value(t1), 42);
+    assert_eq(token_value(t2), -1);
+    assert_eq(token_value(t3), -2);
+    assert_eq(token_value(t4), -3);
+    print("  test_tokens: ok");
+}
+
+// =============================================================================
+// State with variant transitions
+// =============================================================================
+
+type ParseState is Ready | Reading(Int) | Done(Int) | Failed;
+
+fn advance_parse(state: ParseState, input: Int) -> ParseState {
+    match state {
+        Ready => {
+            if input >= 0 { Reading(input) }
+            else { Failed }
+        }
+        Reading(acc) => {
+            if input >= 0 { Reading(acc + input) }
+            else if input == -1 { Done(acc) }
+            else { Failed }
+        }
+        Done(v) => Done(v),
+        Failed => Failed,
+    }
+}
+
+fn parse_result(state: ParseState) -> Int {
+    match state {
+        Done(v) => v,
+        _ => -999,
+    }
+}
+
+fn test_parse_state_machine() {
+    let mut state = Ready;
+
+    state = advance_parse(state, 10);  // Reading(10)
+    state = advance_parse(state, 20);  // Reading(30)
+    state = advance_parse(state, 30);  // Reading(60)
+    state = advance_parse(state, -1);  // Done(60)
+
+    assert_eq(parse_result(state), 60);
+
+    // Failed case
+    let mut bad_state = Ready;
+    bad_state = advance_parse(bad_state, -5); // Failed
+    assert_eq(parse_result(bad_state), -999);
+    print("  test_parse_state_machine: ok");
+}
+
+// =============================================================================
+// Variant in collection pattern
+// =============================================================================
+
+fn test_variants_with_collections() {
+    // Build a list of JVal type codes and verify classification
+    let mut type_counts: List<Int> = [0, 0, 0, 0]; // null, bool, int, string
+
+    // Process various JVal values
+    let values: List<Int> = [0, 1, 2, 2, 3, 1, 0, 2]; // type codes: 0=null, 1=bool, 2=int, 3=string
+    let mut i = 0;
+    while i < values.len() {
+        let code = values[i];
+        type_counts[code] = type_counts[code] + 1;
+        i = i + 1;
+    }
+
+    assert_eq(type_counts[0], 2); // 2 nulls
+    assert_eq(type_counts[1], 2); // 2 bools
+    assert_eq(type_counts[2], 3); // 3 ints
+    assert_eq(type_counts[3], 1); // 1 string
+    print("  test_variants_with_collections: ok");
+}
+
+fn main() -> Int {
+    test_expr_eval();
+    test_linked_list();
+    test_json_values();
+    test_tokens();
+    test_parse_state_machine();
+    test_variants_with_collections();
+    print("[OK] 624_interp_variant_methods");
+    0
+}

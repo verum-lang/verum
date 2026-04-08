@@ -1,0 +1,403 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for all primitive type productions
+// Grammar: primitive_type = 'Int' | 'Float' | 'Bool' | 'Char' | 'Text' | '()' ;
+//          never_type = '!' ;
+//          unknown_type = 'unknown' ;
+
+// =============================================================================
+// Section 1: Core Primitive Types
+// =============================================================================
+
+fn test_semantic_primitives() {
+    // Semantic primitive types (Verum philosophy: meaning over implementation)
+    let int_val: Int = 42;
+    let float_val: Float = 3.14159;
+    let bool_val: Bool = true;
+    let char_val: Char = 'x';
+    let text_val: Text = "hello world";
+    let byte_val: Byte = 0xFF;
+}
+
+fn test_unit_type() {
+    // Unit type: () - the type with exactly one value
+    let unit_val: () = ();
+
+    // Unit as function return type (implicit)
+    fn returns_unit() {
+        // returns () implicitly
+    }
+
+    // Unit as explicit return
+    fn explicit_unit() -> () {
+        ()
+    }
+}
+
+// =============================================================================
+// Section 2: Sized Integer Types
+// =============================================================================
+
+fn test_signed_integers() {
+    // Signed integers with explicit bit widths
+    let i8_val: i8 = -128;
+    let i16_val: i16 = -32768;
+    let i32_val: i32 = -2147483648;
+    let i64_val: i64 = -9223372036854775808;
+    let i128_val: i128 = 0;
+    let isize_val: isize = 0;  // Platform-dependent signed
+}
+
+fn test_unsigned_integers() {
+    // Unsigned integers with explicit bit widths
+    let u8_val: u8 = 255;
+    let u16_val: u16 = 65535;
+    let u32_val: u32 = 4294967295;
+    let u64_val: u64 = 18446744073709551615;
+    let u128_val: u128 = 0;
+    let usize_val: usize = 0;  // Platform-dependent unsigned
+}
+
+// =============================================================================
+// Section 3: Floating Point Types
+// =============================================================================
+
+fn test_floating_point() {
+    // IEEE 754 floating point types
+    let f32_val: f32 = 3.14159f32;
+    let f64_val: f64 = 3.141592653589793f64;
+
+    // Scientific notation
+    let scientific: f64 = 1.0e10;
+    let negative_exp: f64 = 1.0e-10;
+}
+
+// =============================================================================
+// Section 4: Never Type (Bottom Type)
+// =============================================================================
+
+// Grammar: never_type = '!' ;
+// The never type is the bottom type - subtype of all types
+
+fn test_never_type_return() -> ! {
+    // Functions that never return use ! as return type
+    panic("this function never returns")
+}
+
+fn test_never_in_match() {
+    let x: Int = 42;
+    let result: Int = match x {
+        0 => 0,
+        n => n,
+        // Exhaustive match - no unreachable branch needed
+    };
+}
+
+fn test_never_diverging() -> ! {
+    // Infinite loop is diverging
+    loop {
+        // never exits
+    }
+}
+
+fn test_never_unreachable() -> ! {
+    unreachable()
+}
+
+// =============================================================================
+// Section 5: Unknown Type (Top Type)
+// =============================================================================
+
+// Grammar: unknown_type = 'unknown' ;
+// The unknown type is the top type - supertype of all types
+
+fn accept_any(value: unknown) {
+    // Must narrow type before use via pattern matching or type guards
+    match value {
+        x is Int => handle_int(x),
+        s is Text => handle_text(s),
+        b is Bool => handle_bool(b),
+        _ => handle_other()
+    }
+}
+
+fn handle_int(x: Int) { }
+fn handle_text(s: Text) { }
+fn handle_bool(b: Bool) { }
+fn handle_other() { }
+
+fn return_unknown() -> unknown {
+    42  // Any value can be returned as unknown
+}
+
+fn test_unknown_type_guard() {
+    let val: unknown = get_value();
+
+    // Type narrowing with is operator
+    if val is Int {
+        let narrowed: Int = val;
+    }
+}
+
+fn get_value() -> unknown {
+    "test"
+}
+
+// =============================================================================
+// Section 6: Primitives in Complex Type Positions
+// =============================================================================
+
+fn test_primitives_in_generics() {
+    // Primitives as generic type arguments
+    let list_int: List<Int> = List.new();
+    let list_float: List<Float> = List.new();
+    let list_bool: List<Bool> = List.new();
+    let list_char: List<Char> = List.new();
+    let list_text: List<Text> = List.new();
+
+    // Nested primitives in generics
+    let map_int_text: Map<Int, Text> = Map.new();
+    let result_int_text: Result<Int, Text> = Ok(42);
+}
+
+fn test_primitives_in_arrays() {
+    // Fixed-size arrays of primitives
+    let arr_int: [Int; 10] = [0; 10];
+    let arr_float: [Float; 5] = [0.0; 5];
+    let arr_bool: [Bool; 3] = [true, false, true];
+    let arr_char: [Char; 4] = ['a', 'b', 'c', 'd'];
+
+    // Slices of primitives
+    let slice_int: [Int] = arr_int;
+    let slice_float: [Float] = arr_float;
+}
+
+fn test_primitives_in_tuples() {
+    // Tuples containing primitives
+    let pair: (Int, Float) = (42, 3.14);
+    let triple: (Int, Text, Bool) = (1, "hello", true);
+    let nested: ((Int, Int), (Float, Float)) = ((1, 2), (1.0, 2.0));
+}
+
+fn test_primitives_in_references() {
+    let x: Int = 42;
+
+    // References to primitives
+    let ref_int: &Int = &x;
+    let ref_mut_int: &mut Int = &mut x;
+    let ref_checked: &checked Int = &checked x;
+    let ref_unsafe: &unsafe Int = &unsafe x;
+}
+
+// =============================================================================
+// Section 7: Type Properties on Primitives
+// =============================================================================
+
+fn test_type_properties() {
+    // Type.size - size in bytes
+    // Grammar: type_property_name = 'size' | ...
+    let int_size = Int.size;
+    let float_size = Float.size;
+    let bool_size = Bool.size;
+    let char_size = Char.size;
+    let text_size = Text.size;
+    let byte_size = Byte.size;
+
+    // Type.alignment - alignment requirement
+    // Grammar: type_property_name = ... | 'alignment' | ...
+    let int_align = Int.alignment;
+    let float_align = Float.alignment;
+    let i64_align = i64.alignment;
+    let u128_align = u128.alignment;
+
+    // Type.stride - stride for array layouts
+    // Grammar: type_property_name = ... | 'stride' | ...
+    let int_stride = Int.stride;
+    let float_stride = Float.stride;
+    let bool_stride = Bool.stride;
+    let i32_stride = i32.stride;
+
+    // Type.min and Type.max for numeric types
+    // Grammar: type_property_name = ... | 'min' | 'max' | ...
+    let int_min = Int.min;
+    let int_max = Int.max;
+    let u8_min = u8.min;
+    let u8_max = u8.max;
+    let i8_min = i8.min;
+    let i8_max = i8.max;
+    let i16_min = i16.min;
+    let i16_max = i16.max;
+    let i32_min = i32.min;
+    let i32_max = i32.max;
+    let i64_min = i64.min;
+    let i64_max = i64.max;
+    let u16_min = u16.min;
+    let u16_max = u16.max;
+    let u32_min = u32.min;
+    let u32_max = u32.max;
+    let u64_min = u64.min;
+    let u64_max = u64.max;
+    let float_min = Float.min;
+    let float_max = Float.max;
+    let f32_min = f32.min;
+    let f32_max = f32.max;
+    let f64_min = f64.min;
+    let f64_max = f64.max;
+
+    // Type.bits for bit width
+    // Grammar: type_property_name = ... | 'bits' | ...
+    let i8_bits = i8.bits;
+    let i16_bits = i16.bits;
+    let i32_bits = i32.bits;
+    let i64_bits = i64.bits;
+    let i128_bits = i128.bits;
+    let u8_bits = u8.bits;
+    let u16_bits = u16.bits;
+    let u32_bits = u32.bits;
+    let u64_bits = u64.bits;
+    let u128_bits = u128.bits;
+
+    // Type.name - string name of type
+    // Grammar: type_property_name = ... | 'name' | ...
+    let int_name = Int.name;
+    let float_name = Float.name;
+    let bool_name = Bool.name;
+    let char_name = Char.name;
+    let text_name = Text.name;
+
+    // Type.id - unique type identifier
+    // Grammar: type_property_name = ... | 'id'
+    let int_id = Int.id;
+    let float_id = Float.id;
+    let bool_id = Bool.id;
+    let char_id = Char.id;
+    let text_id = Text.id;
+}
+
+fn test_type_properties_on_user_types() {
+    // Type properties on user-defined types
+    type Point is { x: Float, y: Float };
+    type Color is Red | Green | Blue;
+
+    // Size and alignment of user types
+    let point_size = Point.size;
+    let point_align = Point.alignment;
+    let point_stride = Point.stride;
+    let color_size = Color.size;
+    let color_align = Color.alignment;
+
+    // Name and id of user types
+    let point_name = Point.name;
+    let point_id = Point.id;
+    let color_name = Color.name;
+    let color_id = Color.id;
+}
+
+fn test_type_properties_on_generic_types() {
+    // Type properties on generic instantiations
+    let list_int_size = List<Int>.size;
+    let list_int_align = List<Int>.alignment;
+    let maybe_text_size = Maybe<Text>.size;
+    let result_size = Result<Int, Error>.size;
+
+    // Name includes type arguments
+    let list_int_name = List<Int>.name;
+    let maybe_text_name = Maybe<Text>.name;
+}
+
+fn test_type_properties_in_expressions() {
+    // Type properties in arithmetic expressions
+    let total_size = Int.size + Float.size + Bool.size;
+    let is_aligned = (Int.alignment == 4);
+    let bit_sum = i32.bits + i64.bits;
+
+    // Type properties in conditions
+    if Int.size >= 4 {
+        large_int_optimization();
+    }
+
+    // Type properties in match guards
+    match value {
+        x if T.size > 8 => handle_large(),
+        _ => handle_small()
+    }
+}
+
+fn test_type_properties_on_arrays() {
+    // Type properties on array types
+    let arr_size = [Int; 10].size;
+    let arr_align = [Float; 5].alignment;
+    let arr_stride = [Bool; 8].stride;
+
+    // Computed array sizes
+    let element_count = [Int; 100].size / Int.stride;
+}
+
+fn test_type_properties_on_tuples() {
+    // Type properties on tuple types
+    let pair_size = (Int, Float).size;
+    let pair_align = (Int, Float).alignment;
+    let triple_size = (Int, Text, Bool).size;
+}
+
+fn large_int_optimization() {}
+fn handle_large() {}
+fn handle_small() {}
+
+type Error is { message: Text };
+
+// =============================================================================
+// Section 8: Primitive Type Aliases (Semantic Equivalents)
+// =============================================================================
+
+// Type aliases for domain-specific primitive usage
+type Age is Int;
+type Temperature is Float;
+type IsActive is Bool;
+type Initial is Char;
+type Name is Text;
+type ByteValue is Byte;
+
+fn test_type_aliases() {
+    let age: Age = 25;
+    let temp: Temperature = 98.6;
+    let active: IsActive = true;
+    let initial: Initial = 'J';
+    let name: Name = "John";
+    let byte: ByteValue = 0x42;
+}
+
+// =============================================================================
+// Section 9: Primitives with Refinement Types
+// =============================================================================
+
+// Refined primitives with constraints
+type PositiveInt is Int { self > 0 };
+type Percentage is Float { self >= 0.0, self <= 100.0 };
+type NonEmptyText is Text { self.len() > 0 };
+
+fn test_refined_primitives() {
+    let pos: PositiveInt = 42;
+    let pct: Percentage = 75.5;
+    let name: NonEmptyText = "hello";
+}
+
+// =============================================================================
+// Section 10: Primitives in Function Signatures
+// =============================================================================
+
+fn identity_int(x: Int) -> Int { x }
+fn identity_float(x: Float) -> Float { x }
+fn identity_bool(x: Bool) -> Bool { x }
+fn identity_char(x: Char) -> Char { x }
+fn identity_text(x: Text) -> Text { x }
+fn identity_byte(x: Byte) -> Byte { x }
+
+fn multi_primitive_params(a: Int, b: Float, c: Bool, d: Char, e: Text) -> Int {
+    a
+}
+
+fn primitive_tuple_return() -> (Int, Float, Bool) {
+    (42, 3.14, true)
+}

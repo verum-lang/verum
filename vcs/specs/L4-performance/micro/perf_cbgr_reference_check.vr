@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: cbgr, performance, reference, managed, latency
+// @description: CBGR reference check must be < 15ns per operation
+
+/// CBGR Reference Check Microbenchmark
+///
+/// Measures the overhead of various access patterns relevant to managed references.
+/// Performance target: < 15ns per reference dereference
+
+fn bench_value_access(iters: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        let x = i * 3 + 7;
+        sum = sum + x;
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_struct_field_access(iters: Int) -> Int {
+    type Point is { x: Int, y: Int, z: Int };
+    let p = Point { x: 1, y: 2, z: 3 };
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + p.x + p.y + p.z;
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_array_access(iters: Int) -> Int {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + data[i % 10];
+        i = i + 1;
+    }
+    sum
+}
+
+fn bench_mutable_update(iters: Int) -> Int {
+    let mut val = 0;
+    let mut i = 0;
+    while i < iters {
+        val = val + 1;
+        i = i + 1;
+    }
+    val
+}
+
+fn bench_function_call(iters: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < iters {
+        sum = sum + identity(i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn identity(x: Int) -> Int { x }
+
+fn main() -> Int {
+    let iters = 10000000;
+    print("=== CBGR Reference Check Microbenchmarks ===");
+    print(f"Iterations: {iters}");
+
+    let r1 = bench_value_access(iters);
+    print(f"  value_access: done (sum={r1})");
+
+    let r2 = bench_struct_field_access(iters);
+    print(f"  struct_field_access: done (sum={r2})");
+
+    let r3 = bench_array_access(iters);
+    print(f"  array_access: done (sum={r3})");
+
+    let r4 = bench_mutable_update(iters);
+    print(f"  mutable_update: done (val={r4})");
+
+    let r5 = bench_function_call(iters);
+    print(f"  function_call: done (sum={r5})");
+
+    print("");
+    print("Target: All reference checks < 15ns");
+    print("Note: actual timing requires external measurement harness");
+    0
+}

@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, move, block, error
+// @description: Test invalid async move block without proper body
+// @expected-error: E018
+
+fn test() {
+    // async move must be followed by a block
+    let future = async move 42;
+}

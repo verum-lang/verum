@@ -1,0 +1,285 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, spec_conformance
+
+/// Specification conformance tests
+/// Verifies that both interpreter and AOT follow language spec
+
+// ===== Type system conformance =====
+
+/// Type inference must work identically
+fn test_type_inference() {
+    // Basic inference
+    let x = 42;           // Int
+    let y = 3.14;         // Float
+    let z = "hello";      // Text
+    let b = true;         // Bool
+
+    println(f"types: Int={x}, Float={y}, Text={z}, Bool={b}");
+
+    // Generic inference
+    let list = [1, 2, 3]; // List<Int>
+    let map = {"a": 1};   // Map<Text, Int>
+
+    println(f"containers: list={list}, map={map}");
+
+    // Closure inference
+    let add = |a, b| a + b;  // Fn(Int, Int) -> Int
+    println(f"closure: {add(1, 2)}");
+}
+
+/// Subtyping rules
+fn test_subtyping() {
+    // Numeric widening
+    let i: Int = 42;
+    let f: Float = i as Float;
+    println(f"Int to Float: {f}");
+
+    // Never type
+    fn diverges() -> ! {
+        panic("diverges");
+    }
+
+    let result: Int = if true { 42 } else { diverges() };
+    println(f"never type: {result}");
+}
+
+// ===== Evaluation order =====
+
+fn side_effect(name: Text, value: Int) -> Int {
+    println(f"evaluated: {name}");
+    value
+}
+
+fn test_evaluation_order() {
+    println("=== Evaluation Order ===");
+
+    // Function arguments: left to right
+    fn three_args(a: Int, b: Int, c: Int) -> Int {
+        a + b + c
+    }
+    let result = three_args(
+        side_effect("first", 1),
+        side_effect("second", 2),
+        side_effect("third", 3),
+    );
+    println(f"result: {result}");
+
+    // Binary operators: left to right
+    let sum = side_effect("left", 10) + side_effect("right", 20);
+    println(f"sum: {sum}");
+
+    // Short-circuit evaluation
+    println("short-circuit AND:");
+    let and_result = side_effect("and_left", 0) != 0 && side_effect("and_right", 1) != 0;
+    println(f"and_result: {and_result}");
+
+    println("short-circuit OR:");
+    let or_result = side_effect("or_left", 1) != 0 || side_effect("or_right", 0) != 0;
+    println(f"or_result: {or_result}");
+}
+
+// ===== Scope rules =====
+
+fn test_scoping() {
+    println("=== Scoping ===");
+
+    let x = 1;
+    println(f"outer x: {x}");
+
+    {
+        let x = 2;  // Shadowing
+        println(f"inner x: {x}");
+
+        {
+            let x = 3;
+            println(f"innermost x: {x}");
+        }
+
+        println(f"after innermost, x: {x}");
+    }
+
+    println(f"after inner, x: {x}");
+
+    // Variable capture at definition site
+    let y = 10;
+    let capture_y = || y;
+
+    let y = 20;  // New variable, doesn't affect closure
+    println(f"captured y: {capture_y()}, current y: {y}");
+}
+
+// ===== Lifetime and drop order =====
+
+type Droppable is {
+    name: Text,
+};
+
+implement Drop for Droppable {
+    fn drop(&mut self) {
+        println(f"dropping: {self.name}");
+    }
+}
+
+fn test_drop_order() {
+    println("=== Drop Order ===");
+
+    {
+        let a = Droppable { name: "a" };
+        let b = Droppable { name: "b" };
+        let c = Droppable { name: "c" };
+        println("created a, b, c");
+    }  // Should drop in reverse order: c, b, a
+
+    println("after block");
+}
+
+// ===== Pattern matching exhaustiveness =====
+
+type Status is Active | Inactive | Pending(Int);
+
+fn test_exhaustiveness() {
+    println("=== Exhaustiveness ===");
+
+    let statuses = [Status.Active, Status.Inactive, Status.Pending(5)];
+
+    for status in statuses {
+        let desc = match status {
+            Status.Active => "active",
+            Status.Inactive => "inactive",
+            Status.Pending(n) => f"pending({n})",
+        };
+        println(f"status: {desc}");
+    }
+}
+
+// ===== Operator precedence =====
+
+fn test_precedence() {
+    println("=== Operator Precedence ===");
+
+    // Arithmetic precedence
+    let a = 2 + 3 * 4;      // 2 + (3 * 4) = 14
+    let b = (2 + 3) * 4;    // 20
+    println(f"2 + 3 * 4 = {a}");
+    println(f"(2 + 3) * 4 = {b}");
+
+    // Comparison vs logical
+    let c = 1 < 2 && 3 < 4; // (1 < 2) && (3 < 4)
+    println(f"1 < 2 && 3 < 4 = {c}");
+
+    // Bitwise vs comparison
+    let d = 4 & 2 == 0;     // 4 & (2 == 0) or (4 & 2) == 0?
+    println(f"4 & 2 == 0 = {d}");
+
+    // Unary vs binary
+    let e = -2 ** 2;        // -(2 ** 2) = -4 or (-2) ** 2 = 4?
+    println(f"-2 ** 2 = {e}");
+}
+
+// ===== Associativity =====
+
+fn test_associativity() {
+    println("=== Associativity ===");
+
+    // Left associative
+    let left = 10 - 5 - 2;  // (10 - 5) - 2 = 3
+    println(f"10 - 5 - 2 = {left}");
+
+    // Right associative (power)
+    let right = 2 ** 3 ** 2; // 2 ** (3 ** 2) = 2 ** 9 = 512
+    println(f"2 ** 3 ** 2 = {right}");
+
+    // Assignment is right associative
+    let mut x = 0;
+    let mut y = 0;
+    x = y = 5;
+    println(f"x = y = 5: x={x}, y={y}");
+}
+
+// ===== Coercion rules =====
+
+fn test_coercion() {
+    println("=== Coercion ===");
+
+    // Deref coercion
+    let boxed = Heap(42);
+    let value: Int = *boxed;
+    println(f"deref coercion: {value}");
+
+    // String coercion in interpolation
+    let n = 42;
+    let s = f"{n}";  // Int -> Text
+    println(f"string coercion: {s}");
+
+    // Array to slice
+    let arr = [1, 2, 3, 4, 5];
+    fn takes_slice(s: &[Int]) -> Int {
+        s.len()
+    }
+    println(f"array to slice: {takes_slice(&arr)}");
+}
+
+// ===== Visibility rules =====
+
+module inner {
+    pub fn public_fn() -> Int { 42 }
+    fn private_fn() -> Int { 0 }
+
+    pub type PublicStruct is {
+        pub public_field: Int,
+        private_field: Int,
+    };
+
+    implement PublicStruct {
+        pub fn new(val: Int) -> PublicStruct {
+            PublicStruct {
+                public_field: val,
+                private_field: val * 2,
+            }
+        }
+    }
+}
+
+fn test_visibility() {
+    println("=== Visibility ===");
+
+    let val = inner.public_fn();
+    println(f"public_fn: {val}");
+
+    let s = inner.PublicStruct.new(10);
+    println(f"public_field: {s.public_field}");
+    // s.private_field would be compile error
+}
+
+fn main() {
+    test_type_inference();
+    println("");
+
+    test_subtyping();
+    println("");
+
+    test_evaluation_order();
+    println("");
+
+    test_scoping();
+    println("");
+
+    test_drop_order();
+    println("");
+
+    test_exhaustiveness();
+    println("");
+
+    test_precedence();
+    println("");
+
+    test_associativity();
+    println("");
+
+    test_coercion();
+    println("");
+
+    test_visibility();
+}

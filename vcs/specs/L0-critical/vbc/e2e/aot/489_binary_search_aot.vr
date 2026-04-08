@@ -1,0 +1,193 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, binary-search, search, algorithm
+// @timeout: 30000
+
+// Binary search variants on sorted arrays
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+// Standard binary search: returns index of target, or -1 if not found
+fn binary_search(arr: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let val = get8(arr, mid);
+        if val == target { return mid; }
+        if val < target { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    -1
+}
+
+// Lower bound: first index where arr[i] >= target
+fn lower_bound(arr: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if get8(arr, mid) < target { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+// Upper bound: first index where arr[i] > target
+fn upper_bound(arr: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if get8(arr, mid) <= target { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+// Count occurrences of target in sorted array
+fn count_occurrences(arr: Arr8, n: Int, target: Int) -> Int {
+    upper_bound(arr, n, target) - lower_bound(arr, n, target)
+}
+
+// Binary search on answer: find smallest x in [lo, hi] such that f(x) >= threshold
+// f(x) = x * x (for testing: find integer sqrt)
+fn int_sqrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut lo = 1;
+    let mut hi = n;
+    let mut result = 0;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        if mid <= n / mid {
+            result = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    result
+}
+
+// Find peak element in bitonic array (increases then decreases)
+fn find_peak(arr: Arr8, n: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if get8(arr, mid) < get8(arr, mid + 1) { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+// Find minimum in rotated sorted array
+fn find_min_rotated(arr: Arr8, n: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if get8(arr, mid) > get8(arr, hi) { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+fn test_binary_search() -> Int {
+    let arr = Arr8 { v0: 1, v1: 3, v2: 5, v3: 7, v4: 9, v5: 11, v6: 13, v7: 15 };
+    assert_eq(binary_search(arr, 8, 1), 0);
+    assert_eq(binary_search(arr, 8, 7), 3);
+    assert_eq(binary_search(arr, 8, 15), 7);
+    assert_eq(binary_search(arr, 8, 6), -1);
+    assert_eq(binary_search(arr, 8, 0), -1);
+    assert_eq(binary_search(arr, 8, 16), -1);
+    1
+}
+
+fn test_lower_upper_bound() -> Int {
+    // Array with duplicates
+    let arr = Arr8 { v0: 1, v1: 2, v2: 2, v3: 3, v4: 3, v5: 3, v6: 5, v7: 7 };
+    // Lower bound of 2: index 1
+    assert_eq(lower_bound(arr, 8, 2), 1);
+    // Upper bound of 2: index 3
+    assert_eq(upper_bound(arr, 8, 2), 3);
+    // Lower bound of 3: index 3
+    assert_eq(lower_bound(arr, 8, 3), 3);
+    // Upper bound of 3: index 6
+    assert_eq(upper_bound(arr, 8, 3), 6);
+    // Lower bound of 4 (not present): index 6
+    assert_eq(lower_bound(arr, 8, 4), 6);
+    // Upper bound of 4: also 6
+    assert_eq(upper_bound(arr, 8, 4), 6);
+    1
+}
+
+fn test_count_occurrences() -> Int {
+    let arr = Arr8 { v0: 1, v1: 2, v2: 2, v3: 3, v4: 3, v5: 3, v6: 5, v7: 7 };
+    assert_eq(count_occurrences(arr, 8, 1), 1);
+    assert_eq(count_occurrences(arr, 8, 2), 2);
+    assert_eq(count_occurrences(arr, 8, 3), 3);
+    assert_eq(count_occurrences(arr, 8, 4), 0);
+    assert_eq(count_occurrences(arr, 8, 5), 1);
+    1
+}
+
+fn test_int_sqrt() -> Int {
+    assert_eq(int_sqrt(0), 0);
+    assert_eq(int_sqrt(1), 1);
+    assert_eq(int_sqrt(4), 2);
+    assert_eq(int_sqrt(9), 3);
+    assert_eq(int_sqrt(10), 3);
+    assert_eq(int_sqrt(15), 3);
+    assert_eq(int_sqrt(16), 4);
+    assert_eq(int_sqrt(100), 10);
+    assert_eq(int_sqrt(99), 9);
+    1
+}
+
+fn test_find_peak() -> Int {
+    // Bitonic: increases then decreases
+    let arr = Arr8 { v0: 1, v1: 3, v2: 7, v3: 9, v4: 6, v5: 4, v6: 2, v7: 0 };
+    assert_eq(find_peak(arr, 8), 3); // peak at index 3 (value 9)
+
+    // Peak at start
+    let arr2 = Arr8 { v0: 8, v1: 6, v2: 4, v3: 2, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_peak(arr2, 5), 0);
+
+    // Peak at end
+    let arr3 = Arr8 { v0: 1, v1: 3, v2: 5, v3: 7, v4: 9, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_peak(arr3, 5), 4);
+    1
+}
+
+fn test_rotated() -> Int {
+    // Rotated sorted: [4, 5, 6, 7, 0, 1, 2, 3]
+    let arr = Arr8 { v0: 4, v1: 5, v2: 6, v3: 7, v4: 0, v5: 1, v6: 2, v7: 3 };
+    assert_eq(find_min_rotated(arr, 8), 4); // min at index 4
+
+    // Not rotated
+    let arr2 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_min_rotated(arr2, 5), 0);
+
+    // Rotated by 1
+    let arr3 = Arr8 { v0: 5, v1: 1, v2: 2, v3: 3, v4: 4, v5: 0, v6: 0, v7: 0 };
+    assert_eq(find_min_rotated(arr3, 5), 1);
+    1
+}
+
+fn main() -> Int {
+    test_binary_search();
+    test_lower_upper_bound();
+    test_count_occurrences();
+    test_int_sqrt();
+    test_find_peak();
+    test_rotated();
+    print("[OK] 489_binary_search_aot");
+    0
+}

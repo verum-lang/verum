@@ -1,0 +1,337 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, newton
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Newton's method for finding roots of functions.
+// Uses integer-scaled arithmetic (scale factor 10000) to simulate fixed-point.
+// f(x) = x^2 - N  =>  root = sqrt(N)
+// f(x) = x^3 - N  =>  root = cbrt(N)
+// Also tests Newton for solving x^2 - 2x - 3 = 0 (roots at x=3 and x=-1).
+
+// =============================================================================
+// Fixed-point arithmetic helpers (scale = 10000)
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// Multiply two scaled values: (a * b) / SCALE
+fn scaled_mul(a: Int, b: Int) -> Int {
+    (a * b) / 10000
+}
+
+// Divide two scaled values: (a * SCALE) / b
+fn scaled_div(a: Int, b: Int) -> Int {
+    (a * 10000) / b
+}
+
+// =============================================================================
+// Newton's method for sqrt(N) using integer-scaled arithmetic
+// f(x) = x^2 - N*SCALE^2, f'(x) = 2x
+// Iteration: x_new = x - f(x)/f'(x) = x - (x^2 - N*S^2)/(2x)
+//          = (x + N*S^2/x) / 2
+// Simplified: x_new = (x + N_scaled / x) / 2 where N_scaled = N * SCALE
+// =============================================================================
+
+fn newton_sqrt_scaled(n_scaled: Int) -> Int {
+    // n_scaled = N * 10000
+    // Returns sqrt(N) * 10000
+    if n_scaled <= 0 {
+        return 0;
+    }
+    // Initial guess: n_scaled / 2 (or at least SCALE)
+    let mut x = n_scaled / 2;
+    if x < 10000 {
+        x = 10000;
+    }
+    let mut i = 0;
+    while i < 100 {
+        // x_new = (x + n_scaled * SCALE / x) / 2
+        let x_new = (x + (n_scaled * 10000) / x) / 2;
+        let diff = abs_val(x_new - x);
+        if diff <= 1 {
+            return x_new;
+        }
+        x = x_new;
+        i = i + 1;
+    }
+    x
+}
+
+fn test_newton_sqrt() {
+    // sqrt(4) = 2.0 => 20000 in scaled
+    let s4 = newton_sqrt_scaled(40000); // 4 * 10000
+    assert_near(s4, 20000, 5);
+
+    // sqrt(9) = 3.0 => 30000
+    let s9 = newton_sqrt_scaled(90000);
+    assert_near(s9, 30000, 5);
+
+    // sqrt(16) = 4.0 => 40000
+    let s16 = newton_sqrt_scaled(160000);
+    assert_near(s16, 40000, 5);
+
+    // sqrt(25) = 5.0 => 50000
+    let s25 = newton_sqrt_scaled(250000);
+    assert_near(s25, 50000, 5);
+
+    // sqrt(2) ~ 1.4142 => 14142
+    let s2 = newton_sqrt_scaled(20000);
+    assert_near(s2, 14142, 10);
+
+    // sqrt(100) = 10.0 => 100000
+    let s100 = newton_sqrt_scaled(1000000);
+    assert_near(s100, 100000, 5);
+}
+
+// =============================================================================
+// Newton's method for integer square root (floor)
+// Same algorithm as above but pure integer (no scaling)
+// =============================================================================
+
+fn newton_isqrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut x = n / 2;
+    if x == 0 { x = 1; }
+    let mut i = 0;
+    while i < 64 {
+        let x_new = (x + n / x) / 2;
+        if x_new >= x {
+            return x;
+        }
+        x = x_new;
+        i = i + 1;
+    }
+    x
+}
+
+fn test_newton_isqrt() {
+    assert_eq(newton_isqrt(0), 0);
+    assert_eq(newton_isqrt(1), 1);
+    assert_eq(newton_isqrt(4), 2);
+    assert_eq(newton_isqrt(9), 3);
+    assert_eq(newton_isqrt(16), 4);
+    assert_eq(newton_isqrt(25), 5);
+    assert_eq(newton_isqrt(100), 10);
+    assert_eq(newton_isqrt(144), 12);
+
+    // Non-perfect squares: floor
+    assert_eq(newton_isqrt(2), 1);
+    assert_eq(newton_isqrt(5), 2);
+    assert_eq(newton_isqrt(10), 3);
+    assert_eq(newton_isqrt(50), 7);
+    assert_eq(newton_isqrt(99), 9);
+    assert_eq(newton_isqrt(101), 10);
+
+    // Verify invariant: s*s <= n < (s+1)*(s+1)
+    let mut n = 1;
+    while n <= 200 {
+        let s = newton_isqrt(n);
+        assert(s * s <= n);
+        assert((s + 1) * (s + 1) > n);
+        n = n + 1;
+    }
+}
+
+// =============================================================================
+// Newton's method for cube root (integer)
+// f(x) = x^3 - N, f'(x) = 3x^2
+// x_new = x - (x^3 - N) / (3*x^2) = (2*x + N/(x*x)) / 3
+// =============================================================================
+
+fn newton_icbrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    let mut x = n / 3;
+    if x == 0 { x = 1; }
+    let mut i = 0;
+    while i < 64 {
+        let x_new = (2 * x + n / (x * x)) / 3;
+        if x_new >= x {
+            // Check if x is the floor cube root
+            if x * x * x <= n {
+                return x;
+            }
+            return x - 1;
+        }
+        x = x_new;
+        i = i + 1;
+    }
+    x
+}
+
+fn test_newton_icbrt() {
+    assert_eq(newton_icbrt(0), 0);
+    assert_eq(newton_icbrt(1), 1);
+    assert_eq(newton_icbrt(8), 2);
+    assert_eq(newton_icbrt(27), 3);
+    assert_eq(newton_icbrt(64), 4);
+    assert_eq(newton_icbrt(125), 5);
+    assert_eq(newton_icbrt(1000), 10);
+
+    // Non-perfect cubes: floor
+    assert_eq(newton_icbrt(2), 1);
+    assert_eq(newton_icbrt(7), 1);
+    assert_eq(newton_icbrt(9), 2);
+    assert_eq(newton_icbrt(26), 2);
+    assert_eq(newton_icbrt(100), 4);
+}
+
+// =============================================================================
+// Newton's method for solving x^2 - 2x - 3 = 0
+// Roots: x = 3 and x = -1
+// f(x) = x^2 - 2x - 3, f'(x) = 2x - 2
+// x_new = x - (x^2 - 2x - 3) / (2x - 2)
+// Using scaled arithmetic (SCALE = 1000)
+// =============================================================================
+
+fn newton_quadratic(x0_scaled: Int) -> Int {
+    // x0_scaled is initial guess * 1000
+    // Returns root * 1000
+    let mut x = x0_scaled;
+    let mut i = 0;
+    while i < 100 {
+        // f(x) = x^2/1000 - 2*x - 3*1000
+        let fx = (x * x) / 1000 - 2 * x - 3000;
+        // f'(x) = 2*x/1000 * 1000 - 2*1000 = 2*x - 2000
+        let fpx = 2 * x - 2000;
+        if fpx == 0 {
+            return x; // Derivative zero, can't continue
+        }
+        // x_new = x - f(x) * 1000 / f'(x)
+        let x_new = x - (fx * 1000) / fpx;
+        let diff = abs_val(x_new - x);
+        if diff <= 1 {
+            return x_new;
+        }
+        x = x_new;
+        i = i + 1;
+    }
+    x
+}
+
+fn test_newton_quadratic() {
+    // Starting from x0 = 5.0 (5000 scaled), should converge to x = 3.0 (3000)
+    let root1 = newton_quadratic(5000);
+    assert_near(root1, 3000, 5);
+
+    // Starting from x0 = -3.0 (-3000 scaled), should converge to x = -1.0 (-1000)
+    let root2 = newton_quadratic(-3000);
+    assert_near(root2, -1000, 5);
+
+    // Starting from x0 = 10.0 (10000 scaled), should converge to x = 3.0
+    let root3 = newton_quadratic(10000);
+    assert_near(root3, 3000, 5);
+
+    // Starting from x0 = -5.0 (-5000 scaled), should converge to x = -1.0
+    let root4 = newton_quadratic(-5000);
+    assert_near(root4, -1000, 5);
+}
+
+// =============================================================================
+// Newton for reciprocal: find 1/a without division
+// f(x) = 1/x - a => f(x) = 1 - a*x (multiply by x)
+// Actually: f(x) = a - 1/x, f'(x) = 1/x^2
+// Standard reciprocal Newton: x_new = x * (2 - a*x)
+// Using scale factor 10000: all in scaled units
+// =============================================================================
+
+fn newton_reciprocal(a_scaled: Int) -> Int {
+    // a_scaled = a * 10000
+    // Returns (1/a) * 10000
+    // Initial guess: 10000*10000 / a_scaled (= SCALE^2 / a_scaled)
+    let mut x = (10000 * 10000) / a_scaled;
+    let mut i = 0;
+    while i < 50 {
+        // x_new = x * (2*SCALE - a*x/SCALE) / SCALE
+        let ax = (a_scaled * x) / 10000;
+        let factor = 20000 - ax;
+        let x_new = (x * factor) / 10000;
+        let diff = abs_val(x_new - x);
+        if diff <= 1 {
+            return x_new;
+        }
+        x = x_new;
+        i = i + 1;
+    }
+    x
+}
+
+fn test_newton_reciprocal() {
+    // 1/2 = 0.5 => 5000
+    let r2 = newton_reciprocal(20000);
+    assert_near(r2, 5000, 10);
+
+    // 1/4 = 0.25 => 2500
+    let r4 = newton_reciprocal(40000);
+    assert_near(r4, 2500, 10);
+
+    // 1/5 = 0.2 => 2000
+    let r5 = newton_reciprocal(50000);
+    assert_near(r5, 2000, 10);
+
+    // 1/10 = 0.1 => 1000
+    let r10 = newton_reciprocal(100000);
+    assert_near(r10, 1000, 10);
+}
+
+// =============================================================================
+// Convergence rate test: count iterations for Newton sqrt
+// =============================================================================
+
+fn newton_sqrt_iters(n: Int) -> Int {
+    if n <= 1 { return 0; }
+    let mut x = n / 2;
+    if x == 0 { x = 1; }
+    let mut iters = 0;
+    while iters < 100 {
+        let x_new = (x + n / x) / 2;
+        iters = iters + 1;
+        if x_new >= x {
+            return iters;
+        }
+        x = x_new;
+    }
+    iters
+}
+
+fn test_convergence_rate() {
+    // Newton's method has quadratic convergence
+    // Even for large numbers, should converge in very few iterations
+    let i4 = newton_sqrt_iters(4);
+    assert(i4 <= 5);
+
+    let i100 = newton_sqrt_iters(100);
+    assert(i100 <= 10);
+
+    let i10000 = newton_sqrt_iters(10000);
+    assert(i10000 <= 15);
+
+    let i1000000 = newton_sqrt_iters(1000000);
+    assert(i1000000 <= 25);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_newton_sqrt();
+    test_newton_isqrt();
+    test_newton_icbrt();
+    test_newton_quadratic();
+    test_newton_reciprocal();
+    test_convergence_rate();
+    print("[OK] 301_interp_newton_method");
+    0
+}

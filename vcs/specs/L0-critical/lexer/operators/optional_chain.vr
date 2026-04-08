@@ -1,0 +1,213 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, operators, optional_chain, null_coalesce
+
+// Optional chaining operator (?.) and null coalescing operator (??)
+
+// Optional chaining for field access
+type Person is {
+    name: Text,
+    address: Maybe<Address>,
+};
+
+type Address is {
+    street: Text,
+    city: Text,
+    zip: Maybe<Text>,
+};
+
+fn test_optional_chaining() {
+    let person: Maybe<Person> = get_person();
+
+    // Safe navigation - returns Maybe<Text> instead of panicking
+    let street = person?.address?.street;
+    let city = person?.address?.city;
+    let zip = person?.address?.zip;
+
+    // Optional method calls
+    let name_length = person?.name.len();
+    let upper_name = person?.name.to_upper();
+}
+
+// Chained optional access
+type Company is {
+    ceo: Maybe<Person>,
+    address: Maybe<Address>,
+};
+
+fn test_chained_optional_access() {
+    let company: Maybe<Company> = get_company();
+    let ceo_city = company?.ceo?.address?.city;
+
+    // Optional array/index access
+    let items: Maybe<List<Int>> = get_items();
+    let first = items?[0];
+    let last = items?[items?.len() - 1];
+
+    // Optional function call
+    let callback: Maybe<fn(Int) -> Int> = get_callback();
+    let res = callback?(42);
+
+    // Null coalescing operator (??)
+    let person: Maybe<Person> = get_person();
+    let name = person?.name ?? "Unknown";
+    let city_or_default = person?.address?.city ?? "No City";
+
+    // Chained null coalescing
+    let value = first_option ?? second_option ?? third_option ?? default_value;
+
+    // Combining ?. and ??
+    let safe_street = person?.address?.street ?? "No address";
+    let safe_zip = person?.address?.zip ?? "N/A";
+
+    // Null coalescing with expressions
+    let computed = expensive_lookup() ?? fallback_computation();
+    let cached = cache.get(key) ?? fetch_and_cache(key);
+
+    // Optional chaining in conditionals
+    if person?.address?.city == Some("New York") {
+        print("NYC resident");
+    }
+
+    // Optional chaining with method chains
+    let res = data
+        ?.parse()
+        ?.validate()
+        ?.transform()
+        ?? default_data;
+
+    // Null coalescing assignment pattern
+    let mut config: Maybe<Config> = None;
+    config = config ?? load_config();  // Only loads if None
+
+    // Optional chaining in match
+    match person?.address?.city {
+        Some(city) => print(f"City: {city}"),
+        None => print("No city found"),
+    }
+}
+
+// Optional chaining with generics
+fn get_nested<T>(outer: Maybe<Container<T>>) -> Maybe<T> {
+    outer?.inner?.value
+}
+
+fn test_multiple_optional_chains() {
+    let person: Maybe<Person> = get_person();
+
+    // Multiple optional chains in expression
+    let name = person?.name ?? "Anonymous";
+    let city = person?.address?.city ?? "Unknown";
+    let combined = name + " from " + city;
+
+    // Optional chaining on data values
+    let data_result = fetch_data();
+    let value = data_result?.field_name;
+
+    // Short-circuit evaluation with ?.
+    // If person is None, address and street are never accessed
+    let short_circuit = person?.address?.street;
+
+    // Optional chaining vs explicit matching
+    // These are equivalent:
+    let opt_chain = person?.name;
+    let explicit = match person {
+        Some(p) => Some(p.name),
+        None => None,
+    };
+
+    // Null coalescing vs unwrap_or
+    // These are equivalent:
+    let coalesce = opt_value ?? default;
+    let unwrap = opt_value.unwrap_or(default);
+}
+
+// Optional chaining in function arguments
+fn process(name: Text, city: Text) {
+    print(f"{name} lives in {city}");
+}
+
+fn test_optional_chaining_in_args() {
+    let person: Maybe<Person> = get_person();
+    process(person?.name ?? "Unknown", person?.address?.city ?? "Unknown");
+
+    // Optional chaining with tuple access - using map
+    let tuple_opt: Maybe<(Int, Text, Bool)> = get_tuple();
+    let first_elem = tuple_opt.map(|t| t.0);
+    let second_elem = tuple_opt.map(|t| t.1);
+}
+
+// Optional chaining on async results
+async fn fetch_user(id: Int) -> Maybe<User> {
+    let response = api.get(f"/users/{id}").await?;
+    let user = response.json()?.user;
+    user
+}
+
+// Complex nested optional chain
+type DeepNest is {
+    level1: Maybe<Level1>,
+};
+
+type Level1 is {
+    level2: Maybe<Level2>,
+};
+
+type Level2 is {
+    level3: Maybe<Level3>,
+};
+
+type Level3 is {
+    value: Int,
+};
+
+fn test_deep_optional_chain() {
+    let deep: Maybe<DeepNest> = get_deep();
+    let deep_value = deep?.level1?.level2?.level3?.value ?? 0;
+
+    // Optional chaining in loops
+    for person in people {
+        let city = person.address?.city ?? "Unknown";
+        print(city);
+    }
+
+    // Null coalescing with closures
+    let get_default = || expensive_default_computation();
+    let value = cached_value ?? get_default();
+
+    // Optional chaining with map
+    let person: Maybe<Person> = get_person();
+    let mapped = person?.address.map(|addr| addr.city);
+
+    // Combining with and_then
+    let chained = person
+        .and_then(|p| p.address)
+        .map(|a| a.city)
+        .unwrap_or("Unknown");
+
+    // Optional chaining in pattern guards
+    match data {
+        Some(d) if d.value?.is_valid() == Some(true) => process(d),
+        _ => skip(),
+    }
+
+    // Null coalescing precedence
+    let prec1 = a ?? b ?? c;  // Left associative: (a ?? b) ?? c
+    let prec2 = a ?? b + c;   // ?? has lower precedence than +
+
+    // Optional chaining with static methods
+    let singleton = Config?.instance()?.setting;
+
+    // Optional chaining in interpolation
+    let message = f"Welcome, {user?.name ?? \"Guest\"}!";
+
+    // Multiple null coalescing sources
+    let config = env_config ?? file_config ?? default_config;
+
+    // Conditional cache assignment pattern
+    let mut cache: Map<Text, Value> = Map.new();
+    if cache.get(key) == None {
+        cache[key] = compute_value(key);  // Only compute if not present
+    }
+}

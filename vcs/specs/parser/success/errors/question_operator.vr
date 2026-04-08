@@ -1,0 +1,186 @@
+// @test: parse-pass
+// @tier: 0
+// @category: errors
+// @description: Test ? operator for error propagation
+
+fn test_basic_question_operator() -> Result<Int, Error> {
+    // Simple propagation
+    let value = get_value()?;
+
+    // Chain of fallible operations
+    let a = step_one()?;
+    let b = step_two(a)?;
+    let c = step_three(b)?;
+
+    Ok(c)
+}
+
+fn test_question_with_method_calls() -> Result<Data, Error> {
+    // On method result
+    let conn = database.connect()?;
+    let result = conn.query(sql)?;
+    let data = result.parse()?;
+
+    Ok(data)
+}
+
+fn test_question_chaining() -> Result<Text, Error> {
+    // Chained with other operations
+    let content = File.open(path)?.read_all()?;
+
+    // With field access
+    let name = get_user()?.profile?.name;
+
+    // With method calls
+    let processed = get_data()?.transform()?.validate()?;
+
+    Ok(processed)
+}
+
+fn test_question_in_expressions() -> Result<Int, Error> {
+    // In arithmetic
+    let sum = get_a()? + get_b()?;
+
+    // In comparison
+    let bigger = get_x()? > get_y()?;
+
+    // In function call
+    let result = process(get_input()?, get_config()?)?;
+
+    // In array index
+    let item = get_array()?[get_index()?];
+
+    Ok(result)
+}
+
+fn test_question_with_let() -> Result<Output, Error> {
+    // With pattern matching
+    let Some(value) = get_maybe()? else {
+        return Err(Error.NotFound);
+    };
+
+    // With destructuring
+    let (a, b) = get_pair()?;
+
+    // With type annotation
+    let data: Data = fetch()?;
+
+    Ok(process(data))
+}
+
+fn test_question_control_flow() -> Result<(), Error> {
+    // In condition
+    if check()? {
+        do_something();
+    }
+
+    // In while
+    while has_more()? {
+        let item = next()?;
+        process(item)?;
+    }
+
+    // In for (with iterator that yields Results)
+    for item in fallible_iterator() {
+        let value = item?;
+        handle(value)?;
+    }
+
+    Ok(())
+}
+
+fn test_question_with_options() -> Maybe<Int> {
+    // Propagate None
+    let value = get_maybe_value()?;
+
+    // Chain maybes
+    let result = first()?.second()?.third()?;
+
+    Some(result)
+}
+
+fn test_question_in_closures() -> Result<List<Int>, Error> {
+    // In map closure
+    let results = items.iter()
+        .map(|item| process(item)?)
+        .collect();
+
+    // In filter_map
+    let valid = items.iter()
+        .filter_map(|item| {
+            let processed = validate(item)?;
+            Some(processed)
+        })
+        .collect();
+
+    Ok(results)
+}
+
+async fn test_question_async() -> Result<Response, Error> {
+    // Async with ?
+    let conn = connect().await?;
+    let response = conn.send(request).await?;
+    let data = response.json().await?;
+
+    Ok(data)
+}
+
+fn test_question_with_try() -> Result<Int, Error> {
+    // ? inside try block
+    try {
+        let a = get_a()?;
+        let b = get_b()?;
+        process(a, b)?
+    } recover |e| {
+        log_error(e);
+        Err(e)
+    }
+}
+
+fn test_question_error_conversion() -> Result<Output, MyError> {
+    // Auto-conversion via From protocol
+    let data = std_lib_function()?;  // Returns Result<_, StdError>
+
+    // Explicit conversion
+    let result = other_function()
+        .map_err(|e| MyError.from(e))?;
+
+    // With context
+    let value = fallible()
+        .map_err(|e| e.with_context("During processing"))?;
+
+    Ok(result)
+}
+
+async fn test_question_complex() -> Result<FinalResult, Error> {
+    // Complex expression with multiple ?
+    let result = parse(
+        fetch(
+            build_url(get_base()?, get_path()?)?
+        ).await?
+    )?;
+
+    // Pipeline with ?
+    let processed = input
+        |> validate?
+        |> transform?
+        |> finalize?;
+
+    // Match with ?
+    let value = match get_maybe()? {
+        Some(x) => process(x)?,
+        None => default()?
+    };
+
+    Ok(result)
+}
+
+fn test_question_short_circuit() -> Result<Int, Error> {
+    // ? short-circuits on error
+    let a = might_fail()?;  // Returns early if error
+    let b = definitely_runs_if_a_ok()?;
+    let c = only_if_b_ok()?;
+
+    // Remaining code only runs if all succeeded
+    Ok(a + b + c)
+}

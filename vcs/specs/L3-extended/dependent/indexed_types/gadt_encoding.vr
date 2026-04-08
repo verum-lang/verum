@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent, indexed-types, gadt
+// @description: GADTs (Generalized Algebraic Data Types) encoding
+
+/// GADT encoding - different techniques for encoding GADTs
+
+/// Technique 1: Phantom type tags
+type IntTag is ();
+type BoolTag is ();
+type TextTag is ();
+
+/// Tagged value: wraps a value with a type tag
+type Tagged<Tag, T> is { value: T };
+
+fn tag_int(n: Int) -> Tagged<IntTag, Int> {
+    Tagged { value: n }
+}
+
+fn tag_bool(b: Bool) -> Tagged<BoolTag, Bool> {
+    Tagged { value: b }
+}
+
+fn tag_text(s: Text) -> Tagged<TextTag, Text> {
+    Tagged { value: s }
+}
+
+/// Technique 2: Witness-based encoding
+type Witness<T> is
+    | IntW where T == Int
+    | BoolW where T == Bool
+    | TextW where T == Text;
+
+/// Type-safe operation using witness
+fn show_with_witness<T>(w: Witness<T>, val: T) -> Text {
+    match w {
+        IntW => f"Int: {val}",
+        BoolW => f"Bool: {val}",
+        TextW => f"Text: {val}",
+    }
+}
+
+/// Technique 3: Protocol-based GADT simulation
+type Showable is protocol {
+    fn show(&self) -> Text;
+};
+
+implement Showable for Int {
+    fn show(&self) -> Text { f"{self}" }
+}
+
+implement Showable for Bool {
+    fn show(&self) -> Text { if *self { "true" } else { "false" } }
+}
+
+implement Showable for Text {
+    fn show(&self) -> Text { *self }
+}
+
+/// Technique 4: Existential wrapper
+type AnyExpr is
+    | AnyInt(Int)
+    | AnyBool(Bool)
+    | AnyText(Text);
+
+fn eval_any(e: AnyExpr) -> Text {
+    match e {
+        AnyInt(n) => f"{n}",
+        AnyBool(b) => if b { "true" } else { "false" },
+        AnyText(s) => s,
+    }
+}
+
+/// Technique 5: Type-level computation result
+type TypeOf<T> is
+    | IsInt where T == Int
+    | IsBool where T == Bool
+    | IsText where T == Text
+    | IsOther;
+
+/// Builder pattern with GADT-like constraints
+type ExprBuilder<T> is {
+    build: fn() -> T,
+};
+
+fn int_builder(n: Int) -> ExprBuilder<Int> {
+    ExprBuilder { build: || n }
+}
+
+fn bool_builder(b: Bool) -> ExprBuilder<Bool> {
+    ExprBuilder { build: || b }
+}
+
+fn map_builder<A, B>(eb: ExprBuilder<A>, f: fn(A) -> B) -> ExprBuilder<B> {
+    ExprBuilder { build: || f((eb.build)()) }
+}
+
+fn main() {
+    // Phantom type tags
+    let ti = tag_int(42);
+    assert(ti.value == 42);
+
+    let tb = tag_bool(true);
+    assert(tb.value == true);
+
+    // Existential wrapper
+    let e1 = AnyInt(42);
+    let e2 = AnyBool(true);
+    let e3 = AnyText("hello");
+
+    assert(eval_any(e1) == "42");
+    assert(eval_any(e2) == "true");
+    assert(eval_any(e3) == "hello");
+
+    // Builder pattern
+    let b1 = int_builder(10);
+    assert((b1.build)() == 10);
+
+    let b2 = map_builder(b1, |x| x * 2);
+    assert((b2.build)() == 20);
+}

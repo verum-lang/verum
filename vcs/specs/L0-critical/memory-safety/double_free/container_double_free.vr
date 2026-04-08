@@ -1,0 +1,21 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, double-free, cbgr, container
+// @description: Tests CBGR detection of double-free of container elements
+
+fn main() {
+    let item1 = Heap.new(100);
+    let item2 = Heap.new(200);
+
+    let mut items: List<Heap<Int>> = [];
+    items.push(item1);
+    items.push(item2);
+
+    // Pop and drop an item
+    let popped = items.pop().unwrap();
+    drop(popped);
+
+    // Try to drop the same item again (simulating memory corruption)
+    drop(popped);  // CBGR detects double free
+}

@@ -1,0 +1,309 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, graph, bfs, adjacency-matrix
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for graph representation using adjacency matrix, BFS, and path finding
+
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// === Adjacency matrix for up to 6 nodes (6x6 = 36 entries) ===
+// Row-major: adj[i*6 + j] = 1 if edge from i to j
+type AdjRow is { c0: Int, c1: Int, c2: Int, c3: Int, c4: Int, c5: Int };
+
+type Graph6 is {
+    r0: AdjRow, r1: AdjRow, r2: AdjRow,
+    r3: AdjRow, r4: AdjRow, r5: AdjRow,
+    num_nodes: Int
+};
+
+fn empty_row() -> AdjRow { AdjRow { c0: 0, c1: 0, c2: 0, c3: 0, c4: 0, c5: 0 } }
+
+fn graph_new(n: Int) -> Graph6 {
+    let e = empty_row();
+    Graph6 { r0: e, r1: e, r2: e, r3: e, r4: e, r5: e, num_nodes: n }
+}
+
+fn row_get(r: AdjRow, j: Int) -> Int {
+    if j == 0 { r.c0 } else if j == 1 { r.c1 }
+    else if j == 2 { r.c2 } else if j == 3 { r.c3 }
+    else if j == 4 { r.c4 } else { r.c5 }
+}
+
+fn row_set(r: AdjRow, j: Int, v: Int) -> AdjRow {
+    AdjRow {
+        c0: if j == 0 { v } else { r.c0 }, c1: if j == 1 { v } else { r.c1 },
+        c2: if j == 2 { v } else { r.c2 }, c3: if j == 3 { v } else { r.c3 },
+        c4: if j == 4 { v } else { r.c4 }, c5: if j == 5 { v } else { r.c5 }
+    }
+}
+
+fn graph_get_row(g: Graph6, i: Int) -> AdjRow {
+    if i == 0 { g.r0 } else if i == 1 { g.r1 }
+    else if i == 2 { g.r2 } else if i == 3 { g.r3 }
+    else if i == 4 { g.r4 } else { g.r5 }
+}
+
+fn graph_set_row(g: Graph6, i: Int, r: AdjRow) -> Graph6 {
+    Graph6 {
+        r0: if i == 0 { r } else { g.r0 }, r1: if i == 1 { r } else { g.r1 },
+        r2: if i == 2 { r } else { g.r2 }, r3: if i == 3 { r } else { g.r3 },
+        r4: if i == 4 { r } else { g.r4 }, r5: if i == 5 { r } else { g.r5 },
+        num_nodes: g.num_nodes
+    }
+}
+
+fn graph_edge(g: Graph6, i: Int, j: Int) -> Int {
+    row_get(graph_get_row(g, i), j)
+}
+
+// Add undirected edge
+fn graph_add_edge(g: Graph6, i: Int, j: Int) -> Graph6 {
+    let row_i = row_set(graph_get_row(g, i), j, 1);
+    let g2 = graph_set_row(g, i, row_i);
+    let row_j = row_set(graph_get_row(g2, j), i, 1);
+    graph_set_row(g2, j, row_j)
+}
+
+// === BFS queue (up to 8 entries, circular) ===
+type Queue8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int, head: Int, tail: Int };
+
+fn queue_new() -> Queue8 {
+    Queue8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0, head: 0, tail: 0 }
+}
+
+fn queue_empty(q: Queue8) -> Bool { q.head == q.tail }
+
+fn queue_get(q: Queue8, i: Int) -> Int {
+    let idx = i % 8;
+    if idx == 0 { q.d0 } else if idx == 1 { q.d1 }
+    else if idx == 2 { q.d2 } else if idx == 3 { q.d3 }
+    else if idx == 4 { q.d4 } else if idx == 5 { q.d5 }
+    else if idx == 6 { q.d6 } else { q.d7 }
+}
+
+fn queue_set(q: Queue8, i: Int, v: Int) -> Queue8 {
+    let idx = i % 8;
+    Queue8 {
+        d0: if idx == 0 { v } else { q.d0 }, d1: if idx == 1 { v } else { q.d1 },
+        d2: if idx == 2 { v } else { q.d2 }, d3: if idx == 3 { v } else { q.d3 },
+        d4: if idx == 4 { v } else { q.d4 }, d5: if idx == 5 { v } else { q.d5 },
+        d6: if idx == 6 { v } else { q.d6 }, d7: if idx == 7 { v } else { q.d7 },
+        head: q.head, tail: q.tail
+    }
+}
+
+fn queue_push(q: Queue8, v: Int) -> Queue8 {
+    let q2 = queue_set(q, q.tail, v);
+    Queue8 {
+        d0: q2.d0, d1: q2.d1, d2: q2.d2, d3: q2.d3,
+        d4: q2.d4, d5: q2.d5, d6: q2.d6, d7: q2.d7,
+        head: q2.head, tail: q.tail + 1
+    }
+}
+
+fn queue_front(q: Queue8) -> Int { queue_get(q, q.head) }
+
+fn queue_pop(q: Queue8) -> Queue8 {
+    Queue8 {
+        d0: q.d0, d1: q.d1, d2: q.d2, d3: q.d3,
+        d4: q.d4, d5: q.d5, d6: q.d6, d7: q.d7,
+        head: q.head + 1, tail: q.tail
+    }
+}
+
+// === Visited / distance arrays ===
+type Arr6 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int };
+
+fn arr6_new(val: Int) -> Arr6 { Arr6 { v0: val, v1: val, v2: val, v3: val, v4: val, v5: val } }
+
+fn arr6_get(a: Arr6, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 } else { a.v5 }
+}
+
+fn arr6_set(a: Arr6, i: Int, v: Int) -> Arr6 {
+    Arr6 {
+        v0: if i == 0 { v } else { a.v0 }, v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 }, v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 }, v5: if i == 5 { v } else { a.v5 }
+    }
+}
+
+// BFS from source, returns distance array (-1 = unreachable)
+type BfsState is { dist: Arr6, queue: Queue8 };
+
+fn bfs(g: Graph6, source: Int) -> Arr6 {
+    let mut dist = arr6_new(-1);
+    dist = arr6_set(dist, source, 0);
+    let mut q = queue_new();
+    q = queue_push(q, source);
+
+    let mut iters = 0;
+    while queue_empty(q) == false && iters < 36 {
+        let u = queue_front(q);
+        q = queue_pop(q);
+        let d_u = arr6_get(dist, u);
+        let mut j = 0;
+        while j < g.num_nodes {
+            if graph_edge(g, u, j) == 1 && arr6_get(dist, j) == -1 {
+                dist = arr6_set(dist, j, d_u + 1);
+                q = queue_push(q, j);
+            }
+            j = j + 1;
+        }
+        iters = iters + 1;
+    }
+    dist
+}
+
+// Count edges in undirected graph
+fn count_edges(g: Graph6) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < g.num_nodes {
+        let mut j = i + 1;
+        while j < g.num_nodes {
+            count = count + graph_edge(g, i, j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Degree of a node
+fn degree(g: Graph6, node: Int) -> Int {
+    let mut d = 0;
+    let mut j = 0;
+    while j < g.num_nodes {
+        d = d + graph_edge(g, node, j);
+        j = j + 1;
+    }
+    d
+}
+
+// Check if path exists between two nodes
+fn path_exists(g: Graph6, src: Int, dst: Int) -> Bool {
+    let dist = bfs(g, src);
+    arr6_get(dist, dst) != -1
+}
+
+fn test_basic_graph() {
+    // Graph: 0-1-2-3 (path)
+    let mut g = graph_new(4);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 1, 2);
+    g = graph_add_edge(g, 2, 3);
+
+    assert_eq(graph_edge(g, 0, 1), 1);
+    assert_eq(graph_edge(g, 1, 0), 1);
+    assert_eq(graph_edge(g, 0, 3), 0);
+    assert_eq(count_edges(g), 3);
+    assert_eq(degree(g, 1), 2);
+    assert_eq(degree(g, 0), 1);
+}
+
+fn test_bfs_path() {
+    // 0-1-2-3 (path graph)
+    let mut g = graph_new(4);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 1, 2);
+    g = graph_add_edge(g, 2, 3);
+
+    let dist = bfs(g, 0);
+    assert_eq(arr6_get(dist, 0), 0);
+    assert_eq(arr6_get(dist, 1), 1);
+    assert_eq(arr6_get(dist, 2), 2);
+    assert_eq(arr6_get(dist, 3), 3);
+}
+
+fn test_bfs_star() {
+    // Star graph: 0 connected to 1,2,3,4
+    let mut g = graph_new(5);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 0, 2);
+    g = graph_add_edge(g, 0, 3);
+    g = graph_add_edge(g, 0, 4);
+
+    let dist = bfs(g, 0);
+    assert_eq(arr6_get(dist, 1), 1);
+    assert_eq(arr6_get(dist, 2), 1);
+    assert_eq(arr6_get(dist, 3), 1);
+    assert_eq(arr6_get(dist, 4), 1);
+
+    // From leaf to leaf: distance = 2
+    let dist2 = bfs(g, 1);
+    assert_eq(arr6_get(dist2, 3), 2);
+}
+
+fn test_disconnected() {
+    // 0-1, 2-3 (two components)
+    let mut g = graph_new(4);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 2, 3);
+
+    let dist = bfs(g, 0);
+    assert_eq(arr6_get(dist, 0), 0);
+    assert_eq(arr6_get(dist, 1), 1);
+    assert_eq(arr6_get(dist, 2), -1);
+    assert_eq(arr6_get(dist, 3), -1);
+
+    assert_eq(path_exists(g, 0, 1), true);
+    assert_eq(path_exists(g, 0, 2), false);
+}
+
+fn test_cycle() {
+    // Cycle: 0-1-2-3-4-0
+    let mut g = graph_new(5);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 1, 2);
+    g = graph_add_edge(g, 2, 3);
+    g = graph_add_edge(g, 3, 4);
+    g = graph_add_edge(g, 4, 0);
+
+    assert_eq(count_edges(g), 5);
+
+    // BFS from 0: shortest path to 3 is min(3, 2) = 2
+    let dist = bfs(g, 0);
+    assert_eq(arr6_get(dist, 0), 0);
+    assert_eq(arr6_get(dist, 1), 1);
+    assert_eq(arr6_get(dist, 3), 2); // via 0->4->3
+    assert_eq(arr6_get(dist, 4), 1);
+}
+
+fn test_complete_graph() {
+    // K4: all 4 nodes connected to each other
+    let mut g = graph_new(4);
+    g = graph_add_edge(g, 0, 1);
+    g = graph_add_edge(g, 0, 2);
+    g = graph_add_edge(g, 0, 3);
+    g = graph_add_edge(g, 1, 2);
+    g = graph_add_edge(g, 1, 3);
+    g = graph_add_edge(g, 2, 3);
+
+    assert_eq(count_edges(g), 6);
+    assert_eq(degree(g, 0), 3);
+    assert_eq(degree(g, 1), 3);
+
+    // All distances are 1
+    let dist = bfs(g, 0);
+    assert_eq(arr6_get(dist, 1), 1);
+    assert_eq(arr6_get(dist, 2), 1);
+    assert_eq(arr6_get(dist, 3), 1);
+}
+
+fn main() -> Int {
+    test_basic_graph();
+    test_bfs_path();
+    test_bfs_star();
+    test_disconnected();
+    test_cycle();
+    test_complete_graph();
+    print("[OK] 281_graph_bfs_aot");
+    0
+}

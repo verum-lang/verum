@@ -1,0 +1,356 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, callbacks
+// @description: Tests passing callbacks to C functions and receiving callbacks from C
+
+/// ============================================================
+/// C CALLBACKS
+/// ============================================================
+///
+/// Demonstrates bidirectional callback patterns between Verum and C,
+/// including function pointers, closures, and context passing.
+
+// ------------------------------------------------------------
+// Function Pointer Types
+// ------------------------------------------------------------
+
+/// Simple callback type
+type SimpleCallback is extern "C" fn(c_int) -> c_int;
+
+/// Callback with multiple parameters
+type BinaryCallback is extern "C" fn(c_int, c_int) -> c_int;
+
+/// Callback with void return
+type VoidCallback is extern "C" fn(c_int);
+
+/// Callback with user data
+type DataCallback is extern "C" fn(*mut c_void, c_int) -> c_int;
+
+/// Comparison callback for sorting
+type CompareCallback is extern "C" fn(*const c_void, *const c_void) -> c_int;
+
+/// Progress callback
+type ProgressCallback is extern "C" fn(current: c_size, total: c_size, user_data: *mut c_void);
+
+// ------------------------------------------------------------
+// C Library Declarations with Callbacks
+// ------------------------------------------------------------
+
+ffi libc {
+    /// Standard C qsort with comparison callback
+    @extern("C")
+    fn qsort(
+        base: *mut c_void,
+        nmemb: c_size,
+        size: c_size,
+        compar: CompareCallback
+    );
+
+    /// bsearch with comparison callback
+    @extern("C")
+    fn bsearch(
+        key: *const c_void,
+        base: *const c_void,
+        nmemb: c_size,
+        size: c_size,
+        compar: CompareCallback
+    ) -> *const c_void;
+
+    /// atexit for cleanup callbacks
+    @extern("C")
+    fn atexit(func: extern "C" fn()) -> c_int;
+}
+
+ffi custom_lib {
+    /// Register a callback with user data
+    @extern("C")
+    fn register_callback(
+        callback: DataCallback,
+        user_data: *mut c_void
+    ) -> c_int;
+
+    /// Iterate with callback
+    @extern("C")
+    fn foreach_item(
+        items: *const Item,
+        count: c_size,
+        callback: extern "C" fn(*const Item, *mut c_void),
+        user_data: *mut c_void
+    );
+
+    /// Async operation with completion callback
+    @extern("C")
+    fn async_operation(
+        data: *const c_void,
+        size: c_size,
+        on_complete: extern "C" fn(result: c_int, user_data: *mut c_void),
+        user_data: *mut c_void
+    ) -> c_int;
+}
+
+// ------------------------------------------------------------
+// Exporting Verum Functions as Callbacks
+// ------------------------------------------------------------
+
+/// Simple exported callback function
+@export("C")
+@no_mangle
+@extern("C")
+fn verum_callback(x: c_int) -> c_int {
+    x * 2
+}
+
+/// Comparison function for qsort
+@export("C")
+@no_mangle
+@extern("C")
+fn compare_ints(a: *const c_void, b: *const c_void) -> c_int {
+    // SAFETY: Caller guarantees valid pointers to i32
+    unsafe {
+        let a_val = *(a as *const c_int);
+        let b_val = *(b as *const c_int);
+
+        if a_val < b_val { -1 }
+        else if a_val > b_val { 1 }
+        else { 0 }
+    }
+}
+
+/// Comparison function for sorting in reverse
+@export("C")
+@no_mangle
+@extern("C")
+fn compare_ints_reverse(a: *const c_void, b: *const c_void) -> c_int {
+    -compare_ints(a, b)
+}
+
+/// Item processing callback
+@export("C")
+@no_mangle
+@extern("C")
+fn process_item(item: *const Item, user_data: *mut c_void) {
+    // SAFETY: Pointers are valid per C library contract
+    unsafe {
+        let sum = user_data as *mut c_int;
+        *sum += (*item).value;
+    }
+}
+
+// ------------------------------------------------------------
+// Callback Wrappers with Context
+// ------------------------------------------------------------
+
+/// Context structure for callback state
+type CallbackContext<T> is {
+    data: T,
+    callback: fn(&T, c_int) -> c_int,
+};
+
+/// Trampoline function that extracts context
+@extern("C")
+fn callback_trampoline(user_data: *mut c_void, value: c_int) -> c_int {
+    // SAFETY: user_data is a valid context pointer
+    // In real implementation, would extract and call stored callback
+    value
+}
+
+/// Safe wrapper for registering callbacks
+fn register_with_context<T>(data: T, callback: fn(&T, c_int) -> c_int) -> Result<(), c_int> {
+    let context = Heap(CallbackContext { data, callback });
+    let context_ptr = Heap.into_raw(context) as *mut c_void;
+
+    // SAFETY: Registering valid function pointer and context
+    let result = unsafe {
+        custom_lib.register_callback(callback_trampoline, context_ptr)
+    };
+
+    if result != 0 {
+        // Cleanup on failure
+        Err(result)
+    } else {
+        // Note: context ownership transferred to C library
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------
+// Closure to Function Pointer Conversion
+// ------------------------------------------------------------
+
+/// Type-erased closure wrapper
+type ClosureWrapper<F, Args, Ret> is {
+    closure: F,
+    _marker: PhantomData<fn(Args) -> Ret>,
+};
+
+/// Wrapper function for closure-to-function-pointer conversion
+@extern("C")
+fn closure_wrapper(x: c_int) -> c_int {
+    // Placeholder: in a real implementation, would invoke stored closure
+    x
+}
+
+/// Convert closure to function pointer (requires static lifetime)
+fn closure_to_fn_ptr(closure: fn(c_int) -> c_int) -> fn(c_int) -> c_int {
+    let _ = closure;
+    closure_wrapper
+}
+
+// ------------------------------------------------------------
+// Safe qsort Wrapper
+// ------------------------------------------------------------
+
+/// Safe wrapper for qsort
+fn sort_slice<T>(slice: &mut [T]) {
+    // SAFETY: slice is valid, compare_wrapper is correct
+    unsafe {
+        libc.qsort(
+            slice.as_mut_ptr() as *mut c_void,
+            slice.len(),
+            8,
+            compare_wrapper
+        );
+    }
+}
+
+/// Comparator wrapper for C qsort callback
+@extern("C")
+fn compare_wrapper(a: *const c_void, b: *const c_void) -> c_int {
+    // Placeholder: in a real implementation, would delegate to stored comparator
+    0
+}
+
+/// Sort with custom comparator
+fn sort_by<T>(slice: &mut [T]) {
+    // SAFETY: slice is valid, compare_wrapper correctly delegates
+    unsafe {
+        libc.qsort(
+            slice.as_mut_ptr() as *mut c_void,
+            slice.len(),
+            8,
+            compare_wrapper
+        );
+    }
+}
+
+// ------------------------------------------------------------
+// Async Callback Pattern
+// ------------------------------------------------------------
+
+/// Future-based wrapper for async C operation
+type PendingOperation is {
+    completed: Bool,
+    result: Maybe<c_int>,
+};
+
+/// Completion callback that signals future
+@extern("C")
+fn async_completion(result: c_int, user_data: *mut c_void) {
+    // SAFETY: user_data is valid PendingOperation pointer
+    unsafe {
+        let pending = &mut *(user_data as *mut PendingOperation);
+        pending.result = Some(result);
+        pending.completed = true;
+    }
+}
+
+/// Start async operation and return handle
+fn start_async_operation(data: &[u8]) -> PendingOperation {
+    let mut pending = PendingOperation {
+        completed: false,
+        result: None,
+    };
+
+    // SAFETY: All pointers are valid
+    unsafe {
+        custom_lib.async_operation(
+            data.as_ptr() as *const c_void,
+            data.len(),
+            async_completion,
+            &mut pending as *mut PendingOperation as *mut c_void
+        );
+    }
+
+    pending
+}
+
+// ------------------------------------------------------------
+// Event Handler Pattern
+// ------------------------------------------------------------
+
+/// Event types
+type EventType is
+    | Click
+    | KeyPress
+    | MouseMove;
+
+/// Event handler function type
+type EventHandler is extern "C" fn(event_type: c_int, event_data: *const c_void, user_data: *mut c_void);
+
+/// Event dispatcher that manages multiple handlers
+type EventDispatcher is {
+    handlers: List<(EventType, Heap<Fn(EventType, *const c_void)>)>,
+};
+
+/// Dispatch function for C-compatible event handling
+@extern("C")
+fn dispatch_event(event_type: c_int, event_data: *const c_void, user_data: *mut c_void) {
+    // SAFETY: user_data is valid EventDispatcher
+    let _ = event_data;
+    let _ = user_data;
+}
+
+implement EventDispatcher {
+    fn new() -> Self {
+        EventDispatcher { handlers: List.new() }
+    }
+
+    /// Get C-compatible handler function
+    fn as_c_handler() -> EventHandler {
+        dispatch_event
+    }
+}
+
+implement EventType {
+    fn from_int(n: c_int) -> EventType {
+        match n {
+            0 => Click,
+            1 => KeyPress,
+            2 => MouseMove,
+            _ => Click,
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_size is usize;
+type c_void is ();
+
+@repr(C)
+type Item is {
+    id: c_int,
+    value: c_int,
+};
+
+type Error is
+    | RegistrationFailed
+    | InvalidCallback;
+
+type Ordering is
+    | Less
+    | Equal
+    | Greater;
+
+type PhantomData<T> is {};
+type RefCell<T> is { value: T };
+
+// Type properties: use T.size instead of deprecated size_of<T>()
+
+fn main() {
+    // Callback test
+}

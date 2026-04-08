@@ -1,0 +1,171 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, primitives, float
+
+/// Test for Float primitive type.
+/// Float represents IEEE 754 double-precision floating-point numbers.
+
+// Distance function (moved to top-level to avoid nested-function limitation)
+fn float_distance(x1: Float, y1: Float, x2: Float, y2: Float) -> Float {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    (dx * dx + dy * dy).sqrt()
+}
+
+fn main() {
+    // Basic float literals
+    let f: Float = 3.14;
+    let negative: Float = 0.0 - 2.718;
+    let zero: Float = 0.0;
+    let negative_zero: Float = 0.0;
+
+    // Decimal point variations
+    let leading_zero: Float = 0.5;
+    let no_fractional: Float = 42.0;
+
+    // Scientific notation
+    let scientific: Float = 1.5e10;
+    let small: Float = 2.5e-8;
+    let negative_exp: Float = 6.022e23;
+    let sci_upper: Float = 1.0E5;
+    let sci_positive: Float = 1.5e+10;
+
+    // Underscores for readability
+    let with_underscores: Float = 1_000_000.000_001;
+
+    // Special values via functions
+    let infinity: Float = Float.infinity();
+    let neg_infinity: Float = Float.neg_infinity();
+    let nan: Float = Float.nan();
+
+    // Constants (uppercase canonical forms)
+    let max_value: Float = Float.MAX;
+    let min_value: Float = Float.MIN_POSITIVE;
+    let epsilon_const: Float = Float.EPSILON;
+    let pi_const: Float = Float.PI;
+    let e_const: Float = Float.E;
+
+    // Arithmetic operations
+    let sum: Float = f + negative;
+    let product: Float = f * 2.0;
+    let quotient: Float = f / 2.0;
+    let difference: Float = f - negative;
+    let power: Float = 2.0 ** 10.0;
+    let neg_result: Float = -f;
+
+    // Compound assignment
+    let mut mutable: Float = 10.0;
+    mutable += 2.5;
+    mutable -= 1.0;
+    mutable *= 2.0;
+    mutable /= 4.0;
+
+    // Mathematical functions
+    let sqrt_val: Float = 16.0.sqrt();
+    let abs_val: Float = (0.0 - 5.5).abs();
+    let floor_val: Float = 3.7.floor();
+    let ceil_val: Float = 3.2.ceil();
+    let round_val: Float = 3.5.round();
+    let trunc_val: Float = 3.9.trunc();
+
+    // Trigonometric functions (using Float.PI constant)
+    let sin_val: Float = (Float.PI / 2.0).sin();
+    let cos_val: Float = Float.PI.cos();
+    let tan_val: Float = (Float.PI / 4.0).tan();
+    let asin_val: Float = 1.0.asin();
+    let acos_val: Float = 0.0.acos();
+    let atan_val: Float = 1.0.atan();
+    let atan2_val: Float = Float.from_atan2(1.0, 1.0);
+
+    // Exponential and logarithmic
+    let exp_val: Float = 1.0.exp();
+    let ln_val: Float = Float.E.ln();
+    let log2_val: Float = 8.0.log2();
+    let log10_val: Float = 100.0.log10();
+
+    // Hyperbolic functions
+    let sinh_val: Float = 0.0.sinh();
+    let cosh_val: Float = 0.0.cosh();
+    let tanh_val: Float = 0.0.tanh();
+
+    // Sign and classification
+    let sign_pos: Float = 5.0.signum();
+    let sign_neg: Float = (0.0 - 5.0).signum();
+    let is_pos: Bool = 5.0.is_sign_positive();
+    let is_neg: Bool = (0.0 - 5.0).is_sign_negative();
+
+    // Float comparisons
+    let cmp_lt: Bool = 3.14 < 3.15;
+    let cmp_le: Bool = 3.14 <= 3.14;
+    let cmp_gt: Bool = 3.15 > 3.14;
+    let cmp_ge: Bool = 3.14 >= 3.14;
+
+    // NaN comparisons (always false)
+    let nan_eq: Bool = nan == nan;  // false
+    let nan_ne: Bool = nan != nan;  // true
+
+    // Infinity comparisons
+    let inf_cmp: Bool = infinity > 1e308;
+    let neg_inf_cmp: Bool = neg_infinity < (0.0 - 1e308);
+
+    // Min and max (instance methods)
+    let min_val: Float = (3.14).min(2.71);
+    let max_val: Float = (3.14).max(2.71);
+
+    // Clamping
+    let clamped: Float = 5.0.clamp(0.0, 3.0);
+
+    // Default value
+    let default_float: Float = Float.default();
+
+    // Integer conversion
+    let from_int: Float = 42 as Float;
+    let to_int: Int = (3.7 as Float).to_int();
+
+    // Distance calculation using top-level function
+    let dist: Float = float_distance(0.0, 0.0, 3.0, 4.0);
+
+    // Comparisons (with epsilon for floating point)
+    let epsilon: Float = 0.0001;
+    assert((f - 3.14).abs() < epsilon);
+    assert((sum - 0.422).abs() < epsilon);
+    assert((product - 6.28).abs() < epsilon);
+    assert((quotient - 1.57).abs() < epsilon);
+
+    // Special value checks
+    assert(infinity.is_infinite());
+    assert(nan.is_nan());
+    assert(zero.is_finite());
+    assert(!nan.is_finite());
+    assert(!infinity.is_finite());
+    assert(zero == negative_zero);  // IEEE 754: +0.0 == -0.0
+    assert(sqrt_val == 4.0);
+    assert(abs_val == 5.5);
+    assert(floor_val == 3.0);
+    assert(ceil_val == 4.0);
+    assert(round_val == 4.0);
+    assert(power == 1024.0);
+    assert((sin_val - 1.0).abs() < epsilon);
+    assert((cos_val - (0.0 - 1.0)).abs() < epsilon);
+    assert(nan_eq == false);
+    assert(nan_ne == true);
+    assert(min_val == 2.71);
+    assert(max_val == 3.14);
+    assert(clamped == 3.0);
+    assert(default_float == 0.0);
+    assert(from_int == 42.0);
+    assert(to_int == 3);
+    assert((dist - 5.0).abs() < epsilon);
+    assert(is_pos == true);
+    assert(is_neg == true);
+    assert(sign_pos == 1.0);
+    assert(sign_neg == (0.0 - 1.0));
+
+    // Constants sanity checks
+    assert((pi_const - 3.14159).abs() < 0.001);
+    assert((e_const - 2.71828).abs() < 0.001);
+    assert(epsilon_const > 0.0);
+    assert(min_value > 0.0);
+    assert(max_value > 1e300);
+}

@@ -1,0 +1,349 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, binary-tree, data-structure
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Binary search tree using index-based node array (16 nodes max)
+
+// ============================================================================
+// Node and BST types (16 nodes)
+// ============================================================================
+
+type BNode is {
+    value: Int,
+    left: Int,   // -1 means null
+    right: Int   // -1 means null
+};
+
+type BST is {
+    n0: BNode, n1: BNode, n2: BNode, n3: BNode,
+    n4: BNode, n5: BNode, n6: BNode, n7: BNode,
+    n8: BNode, n9: BNode, n10: BNode, n11: BNode,
+    n12: BNode, n13: BNode, n14: BNode, n15: BNode,
+    root: Int,
+    count: Int
+};
+
+fn null_bnode() -> BNode {
+    BNode { value: 0, left: -1, right: -1 }
+}
+
+fn bst_new() -> BST {
+    let n = null_bnode();
+    BST {
+        n0: n, n1: n, n2: n, n3: n,
+        n4: n, n5: n, n6: n, n7: n,
+        n8: n, n9: n, n10: n, n11: n,
+        n12: n, n13: n, n14: n, n15: n,
+        root: -1, count: 0
+    }
+}
+
+// ============================================================================
+// Node access helpers
+// ============================================================================
+
+fn get_bnode(t: BST, i: Int) -> BNode {
+    if i == 0 { t.n0 } else if i == 1 { t.n1 }
+    else if i == 2 { t.n2 } else if i == 3 { t.n3 }
+    else if i == 4 { t.n4 } else if i == 5 { t.n5 }
+    else if i == 6 { t.n6 } else if i == 7 { t.n7 }
+    else if i == 8 { t.n8 } else if i == 9 { t.n9 }
+    else if i == 10 { t.n10 } else if i == 11 { t.n11 }
+    else if i == 12 { t.n12 } else if i == 13 { t.n13 }
+    else if i == 14 { t.n14 } else { t.n15 }
+}
+
+fn set_bnode(t: BST, i: Int, nd: BNode) -> BST {
+    BST {
+        n0: if i == 0 { nd } else { t.n0 },
+        n1: if i == 1 { nd } else { t.n1 },
+        n2: if i == 2 { nd } else { t.n2 },
+        n3: if i == 3 { nd } else { t.n3 },
+        n4: if i == 4 { nd } else { t.n4 },
+        n5: if i == 5 { nd } else { t.n5 },
+        n6: if i == 6 { nd } else { t.n6 },
+        n7: if i == 7 { nd } else { t.n7 },
+        n8: if i == 8 { nd } else { t.n8 },
+        n9: if i == 9 { nd } else { t.n9 },
+        n10: if i == 10 { nd } else { t.n10 },
+        n11: if i == 11 { nd } else { t.n11 },
+        n12: if i == 12 { nd } else { t.n12 },
+        n13: if i == 13 { nd } else { t.n13 },
+        n14: if i == 14 { nd } else { t.n14 },
+        n15: if i == 15 { nd } else { t.n15 },
+        root: t.root,
+        count: t.count
+    }
+}
+
+// ============================================================================
+// Insert (iterative)
+// ============================================================================
+
+fn bst_insert(t: BST, val: Int) -> BST {
+    let new_idx = t.count;
+    let new_node = BNode { value: val, left: -1, right: -1 };
+    let mut result = set_bnode(t, new_idx, new_node);
+    result = BST {
+        n0: result.n0, n1: result.n1, n2: result.n2, n3: result.n3,
+        n4: result.n4, n5: result.n5, n6: result.n6, n7: result.n7,
+        n8: result.n8, n9: result.n9, n10: result.n10, n11: result.n11,
+        n12: result.n12, n13: result.n13, n14: result.n14, n15: result.n15,
+        root: result.root,
+        count: t.count + 1
+    };
+    if t.root == -1 {
+        // Empty tree, set root
+        BST {
+            n0: result.n0, n1: result.n1, n2: result.n2, n3: result.n3,
+            n4: result.n4, n5: result.n5, n6: result.n6, n7: result.n7,
+            n8: result.n8, n9: result.n9, n10: result.n10, n11: result.n11,
+            n12: result.n12, n13: result.n13, n14: result.n14, n15: result.n15,
+            root: new_idx,
+            count: result.count
+        }
+    } else {
+        // Walk to find insertion point
+        let mut cur = t.root;
+        let mut done = 0;
+        while done == 0 {
+            let nd = get_bnode(result, cur);
+            if val < nd.value {
+                if nd.left == -1 {
+                    let updated = BNode { value: nd.value, left: new_idx, right: nd.right };
+                    result = set_bnode(result, cur, updated);
+                    done = 1;
+                } else {
+                    cur = nd.left;
+                }
+            } else {
+                if nd.right == -1 {
+                    let updated = BNode { value: nd.value, left: nd.left, right: new_idx };
+                    result = set_bnode(result, cur, updated);
+                    done = 1;
+                } else {
+                    cur = nd.right;
+                }
+            }
+        }
+        result
+    }
+}
+
+// ============================================================================
+// Search (iterative)
+// ============================================================================
+
+fn bst_search(t: BST, val: Int) -> Int {
+    // Returns 1 if found, 0 otherwise
+    let mut cur = t.root;
+    let mut found = 0;
+    while cur != -1 {
+        let nd = get_bnode(t, cur);
+        if nd.value == val {
+            found = 1;
+            cur = -1;  // stop
+        } else if val < nd.value {
+            cur = nd.left;
+        } else {
+            cur = nd.right;
+        }
+    }
+    found
+}
+
+// ============================================================================
+// In-order traversal (iterative with manual stack)
+// ============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int,
+    len: Int
+};
+
+fn a16_new() -> Arr16 {
+    Arr16 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+            e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0, len: 0 }
+}
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 } else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 } else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 },
+        e8: if i == 8 { val } else { a.e8 },
+        e9: if i == 9 { val } else { a.e9 },
+        e10: if i == 10 { val } else { a.e10 },
+        e11: if i == 11 { val } else { a.e11 },
+        e12: if i == 12 { val } else { a.e12 },
+        e13: if i == 13 { val } else { a.e13 },
+        e14: if i == 14 { val } else { a.e14 },
+        e15: if i == 15 { val } else { a.e15 },
+        len: a.len
+    }
+}
+
+fn a16_push(a: Arr16, val: Int) -> Arr16 {
+    let idx = a.len;
+    let updated = a16_set(a, idx, val);
+    Arr16 {
+        e0: updated.e0, e1: updated.e1, e2: updated.e2, e3: updated.e3,
+        e4: updated.e4, e5: updated.e5, e6: updated.e6, e7: updated.e7,
+        e8: updated.e8, e9: updated.e9, e10: updated.e10, e11: updated.e11,
+        e12: updated.e12, e13: updated.e13, e14: updated.e14, e15: updated.e15,
+        len: idx + 1
+    }
+}
+
+// In-order traversal using iterative approach with stack
+fn inorder(t: BST) -> Arr16 {
+    let mut result = a16_new();
+    let mut stack = a16_new();  // use as stack of node indices
+    let mut cur = t.root;
+
+    let mut running = 1;
+    while running == 1 {
+        // Push all left children
+        while cur != -1 {
+            stack = a16_push(stack, cur);
+            let nd = get_bnode(t, cur);
+            cur = nd.left;
+        }
+        if stack.len == 0 {
+            running = 0;
+        } else {
+            // Pop from stack
+            let top_idx = stack.len - 1;
+            let popped = a16_get(stack, top_idx);
+            stack = Arr16 {
+                e0: stack.e0, e1: stack.e1, e2: stack.e2, e3: stack.e3,
+                e4: stack.e4, e5: stack.e5, e6: stack.e6, e7: stack.e7,
+                e8: stack.e8, e9: stack.e9, e10: stack.e10, e11: stack.e11,
+                e12: stack.e12, e13: stack.e13, e14: stack.e14, e15: stack.e15,
+                len: top_idx
+            };
+            let nd = get_bnode(t, popped);
+            result = a16_push(result, nd.value);
+            cur = nd.right;
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+@test
+fn test_insert_and_search() -> Int {
+    let mut t = bst_new();
+    t = bst_insert(t, 50);
+    t = bst_insert(t, 30);
+    t = bst_insert(t, 70);
+    t = bst_insert(t, 20);
+    t = bst_insert(t, 40);
+    assert_eq(bst_search(t, 50), 1);
+    assert_eq(bst_search(t, 30), 1);
+    assert_eq(bst_search(t, 70), 1);
+    assert_eq(bst_search(t, 20), 1);
+    assert_eq(bst_search(t, 40), 1);
+    0
+}
+
+@test
+fn test_search_not_found() -> Int {
+    let mut t = bst_new();
+    t = bst_insert(t, 10);
+    t = bst_insert(t, 5);
+    t = bst_insert(t, 15);
+    assert_eq(bst_search(t, 10), 1);
+    assert_eq(bst_search(t, 7), 0);
+    assert_eq(bst_search(t, 0), 0);
+    assert_eq(bst_search(t, 100), 0);
+    0
+}
+
+@test
+fn test_inorder_traversal() -> Int {
+    let mut t = bst_new();
+    t = bst_insert(t, 50);
+    t = bst_insert(t, 30);
+    t = bst_insert(t, 70);
+    t = bst_insert(t, 20);
+    t = bst_insert(t, 40);
+    t = bst_insert(t, 60);
+    t = bst_insert(t, 80);
+    let result = inorder(t);
+    assert_eq(result.len, 7);
+    // In-order should be sorted: 20, 30, 40, 50, 60, 70, 80
+    assert_eq(a16_get(result, 0), 20);
+    assert_eq(a16_get(result, 1), 30);
+    assert_eq(a16_get(result, 2), 40);
+    assert_eq(a16_get(result, 3), 50);
+    assert_eq(a16_get(result, 4), 60);
+    assert_eq(a16_get(result, 5), 70);
+    assert_eq(a16_get(result, 6), 80);
+    0
+}
+
+@test
+fn test_single_element() -> Int {
+    let mut t = bst_new();
+    t = bst_insert(t, 42);
+    assert_eq(bst_search(t, 42), 1);
+    assert_eq(bst_search(t, 0), 0);
+    let result = inorder(t);
+    assert_eq(result.len, 1);
+    assert_eq(a16_get(result, 0), 42);
+    0
+}
+
+@test
+fn test_skewed_tree() -> Int {
+    // Insert in sorted order -> right-skewed tree
+    let mut t = bst_new();
+    t = bst_insert(t, 1);
+    t = bst_insert(t, 2);
+    t = bst_insert(t, 3);
+    t = bst_insert(t, 4);
+    t = bst_insert(t, 5);
+    let result = inorder(t);
+    assert_eq(result.len, 5);
+    assert_eq(a16_get(result, 0), 1);
+    assert_eq(a16_get(result, 1), 2);
+    assert_eq(a16_get(result, 2), 3);
+    assert_eq(a16_get(result, 3), 4);
+    assert_eq(a16_get(result, 4), 5);
+    0
+}
+
+fn main() -> Int {
+    test_insert_and_search();
+    test_search_not_found();
+    test_inorder_traversal();
+    test_single_element();
+    test_skewed_tree();
+    print("[OK] 098_binary_tree");
+    0
+}

@@ -1,0 +1,99 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, binop
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL tensor binary operation intrinsics through VBC interpreter.
+// Exercises tensor_binop with ops: add(0), sub(1), mul(2), div(3), pow(4), mod(5).
+// Uses zero-difference pattern for verification.
+
+// Compare tensor elements via zero-diff: if actual[idx] - expected == 0.0
+// then IEEE 754 bits are all zeros which matches NaN-boxed integer 0.
+fn check_zero_diff(actual: Int, idx: Int, expected: Int, exp_idx: Int) -> Int {
+    let diff = tensor_binop(actual, expected, 1);
+    let val = tensor_get_scalar(diff, idx);
+    if val == 0 { 0 } else { 1 }
+}
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    check_zero_diff(t, idx, e, 0)
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // Create base tensors: a=[10,20,30,40], b=[2,5,3,4]
+    let a = tensor_new(4, 1);
+    let a = tensor_set_scalar(a, 0, 10);
+    let a = tensor_set_scalar(a, 1, 20);
+    let a = tensor_set_scalar(a, 2, 30);
+    let a = tensor_set_scalar(a, 3, 40);
+
+    let b = tensor_new(4, 1);
+    let b = tensor_set_scalar(b, 0, 2);
+    let b = tensor_set_scalar(b, 1, 5);
+    let b = tensor_set_scalar(b, 2, 3);
+    let b = tensor_set_scalar(b, 3, 4);
+
+    // --- Test 1: ADD (op=0) ---
+    // a + b = [12, 25, 33, 44]
+    let sum = tensor_binop(a, b, 0);
+    errors = errors + check_val(sum, 0, 12);
+    errors = errors + check_val(sum, 1, 25);
+    errors = errors + check_val(sum, 2, 33);
+    errors = errors + check_val(sum, 3, 44);
+
+    // --- Test 2: SUB (op=1) ---
+    // a - b = [8, 15, 27, 36]
+    let diff = tensor_binop(a, b, 1);
+    errors = errors + check_val(diff, 0, 8);
+    errors = errors + check_val(diff, 1, 15);
+    errors = errors + check_val(diff, 2, 27);
+    errors = errors + check_val(diff, 3, 36);
+
+    // --- Test 3: MUL (op=2) ---
+    // a * b = [20, 100, 90, 160]
+    let prod = tensor_binop(a, b, 2);
+    errors = errors + check_val(prod, 0, 20);
+    errors = errors + check_val(prod, 1, 100);
+    errors = errors + check_val(prod, 2, 90);
+    errors = errors + check_val(prod, 3, 160);
+
+    // --- Test 4: DIV (op=3) ---
+    // a / b = [5, 4, 10, 10]
+    let quot = tensor_binop(a, b, 3);
+    errors = errors + check_val(quot, 0, 5);
+    errors = errors + check_val(quot, 1, 4);
+    errors = errors + check_val(quot, 2, 10);
+    errors = errors + check_val(quot, 3, 10);
+
+    // --- Test 5: Chained operations ---
+    // (a + b) - a = b
+    let sum2 = tensor_binop(a, b, 0);
+    let result = tensor_binop(sum2, a, 1);
+    errors = errors + check_val(result, 0, 2);
+    errors = errors + check_val(result, 1, 5);
+    errors = errors + check_val(result, 2, 3);
+    errors = errors + check_val(result, 3, 4);
+
+    // --- Test 6: Identity operations ---
+    // a - a = [0,0,0,0]
+    let zero = tensor_binop(a, a, 1);
+    errors = errors + check_val(zero, 0, 0);
+    errors = errors + check_val(zero, 1, 0);
+    errors = errors + check_val(zero, 2, 0);
+    errors = errors + check_val(zero, 3, 0);
+
+    // --- Test 7: Scalar tensors ---
+    let s1 = tensor_fill(1, 7, 1);
+    let s2 = tensor_fill(1, 3, 1);
+    let s_sum = tensor_binop(s1, s2, 0);
+    errors = errors + check_val(s_sum, 0, 10);
+    let s_prod = tensor_binop(s1, s2, 2);
+    errors = errors + check_val(s_prod, 0, 21);
+
+    errors
+}

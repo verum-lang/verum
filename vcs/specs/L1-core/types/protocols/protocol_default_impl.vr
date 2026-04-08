@@ -1,0 +1,333 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, default-impl
+// @description: Default implementations in protocols
+
+/// Test for default implementations in protocols.
+/// Default implementations provide method bodies that can be overridden.
+/// Note: Defaults calling other protocol methods with extra args are not yet supported.
+
+// ============================================================================
+// Displayable protocol with defaults (calls fmt() with no extra args)
+// ============================================================================
+
+type Displayable is protocol {
+    fn fmt(&self) -> Text;
+
+    // Default convenience methods - each calls fmt() with no extra args
+    fn display(&self) -> Text {
+        self.fmt()
+    }
+
+    fn do_print(&self) {
+        print(self.fmt());
+    }
+
+    fn debug_show(&self) -> Text {
+        f"[{self.fmt()}]"
+    }
+
+    fn verbose_show(&self) -> Text {
+        f"Display({self.fmt()})"
+    }
+};
+
+// ============================================================================
+// Sized protocol with defaults using only self
+// ============================================================================
+
+type Sized is protocol {
+    fn size(&self) -> Int;
+
+    // Default methods using only size() with no extra args
+    fn is_empty(&self) -> Bool {
+        self.size() == 0
+    }
+
+    fn is_non_empty(&self) -> Bool {
+        self.size() > 0
+    }
+
+    fn has_capacity(&self, n: Int) -> Bool {
+        self.size() >= n
+    }
+};
+
+// ============================================================================
+// Tagged protocol with defaults using only self and simple values
+// ============================================================================
+
+type Tagged is protocol {
+    fn tag(&self) -> Text;
+
+    // Defaults using tag() - tag() takes no extra args
+    fn is_tagged_with_prefix(&self, prefix: Text) -> Bool {
+        self.tag().starts_with(prefix)
+    }
+
+    fn tagged_display(&self) -> Text {
+        f"[{self.tag()}]"
+    }
+};
+
+// ============================================================================
+// Numeric protocol extends required methods only (defaults with add_num(self) unsupported)
+// ============================================================================
+
+type Numeric is protocol {
+    fn num_zero() -> Self;
+    fn num_one() -> Self;
+    fn num_add(&self, other: &Self) -> Self;
+    fn num_mul(&self, other: &Self) -> Self;
+};
+
+// ============================================================================
+// Concrete type: Point
+// ============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+implement Displayable for Point {
+    fn fmt(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+    // display, do_print, debug_show, verbose_show all use defaults
+}
+
+implement Sized for Point {
+    fn size(&self) -> Int {
+        (self.x * self.x + self.y * self.y).abs()  // Manhattan-ish proxy
+    }
+    // is_empty, is_non_empty use defaults
+}
+
+implement Tagged for Point {
+    fn tag(&self) -> Text {
+        f"point:{self.x},{self.y}"
+    }
+    // tagged_display uses default
+}
+
+// ============================================================================
+// Concrete type: Rectangle - overrides some defaults
+// ============================================================================
+
+type Rectangle is {
+    width: Int,
+    height: Int,
+};
+
+implement Displayable for Rectangle {
+    fn fmt(&self) -> Text {
+        f"Rect({self.width}x{self.height})"
+    }
+
+    // Override verbose_show
+    fn verbose_show(&self) -> Text {
+        let area = self.width * self.height;
+        f"Rectangle(w={self.width}, h={self.height}, area={area})"
+    }
+    // display, do_print, debug_show use defaults
+}
+
+implement Sized for Rectangle {
+    fn size(&self) -> Int {
+        self.width * self.height
+    }
+    // All other methods use defaults
+}
+
+implement Tagged for Rectangle {
+    fn tag(&self) -> Text {
+        "rectangle"
+    }
+
+    // Override tagged_display
+    fn tagged_display(&self) -> Text {
+        f"rect:{self.width}x{self.height}"
+    }
+}
+
+// ============================================================================
+// Concrete type: Label
+// ============================================================================
+
+type Label is {
+    text: Text,
+    prefix: Text,
+};
+
+implement Displayable for Label {
+    fn fmt(&self) -> Text {
+        f"{self.prefix}: {self.text}"
+    }
+    // All defaults used
+}
+
+implement Sized for Label {
+    fn size(&self) -> Int {
+        self.text.len()
+    }
+    // All defaults used
+}
+
+implement Tagged for Label {
+    fn tag(&self) -> Text {
+        self.prefix.clone()
+    }
+    // All defaults used
+}
+
+// ============================================================================
+// IntNum: implements Numeric
+// ============================================================================
+
+type IntNum is {
+    value: Int,
+};
+
+implement Numeric for IntNum {
+    fn num_zero() -> IntNum {
+        IntNum { value: 0 }
+    }
+
+    fn num_one() -> IntNum {
+        IntNum { value: 1 }
+    }
+
+    fn num_add(&self, other: &IntNum) -> IntNum {
+        IntNum { value: self.value + other.value }
+    }
+
+    fn num_mul(&self, other: &IntNum) -> IntNum {
+        IntNum { value: self.value * other.value }
+    }
+}
+
+// ============================================================================
+// Generic functions using protocols with no-extra-arg methods
+// ============================================================================
+
+fn show_item<T: Displayable>(item: &T) -> Text {
+    item.display()  // display() uses default (calls fmt())
+}
+
+fn debug_item<T: Displayable>(item: &T) -> Text {
+    item.debug_show()  // debug_show() uses default
+}
+
+fn is_sized_empty<T: Sized>(item: &T) -> Bool {
+    item.is_empty()  // is_empty() uses default (calls size())
+}
+
+fn get_tag<T: Tagged>(item: &T) -> Text {
+    item.tagged_display()  // tagged_display() uses default or override
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Test Point Displayable defaults
+    let p1 = Point { x: 1, y: 2 };
+    let p2 = Point { x: 0, y: 0 };
+
+    assert(p1.fmt() == "(1, 2)");
+    assert(p1.display() == "(1, 2)");  // Default: calls fmt()
+    assert(p1.debug_show() == "[(1, 2)]");  // Default: wraps fmt()
+    assert(p1.verbose_show() == "Display((1, 2))");  // Default
+    p1.do_print();  // Default: prints fmt()
+
+    // Test Point Sized defaults
+    assert(!p1.is_empty());  // Default: size() != 0
+    assert(p1.is_non_empty());  // Default: size() > 0
+    assert(p2.is_empty());  // size() = 0 for origin
+    assert(p1.has_capacity(1));  // size() >= 1
+
+    // Test Point Tagged defaults
+    assert(p1.tag() == "point:1,2");
+    assert(p1.tagged_display() == "[point:1,2]");  // Default
+    assert(p1.is_tagged_with_prefix("point"));  // Default
+
+    // Test Rectangle - overrides verbose_show and tagged_display
+    let r = Rectangle { width: 4, height: 5 };
+
+    assert(r.fmt() == "Rect(4x5)");
+    assert(r.display() == "Rect(4x5)");  // Default
+    assert(r.debug_show() == "[Rect(4x5)]");  // Default
+    assert(r.verbose_show() == "Rectangle(w=4, h=5, area=20)");  // Overridden
+
+    assert(r.size() == 20);
+    assert(r.is_non_empty());  // Default
+    assert(!r.is_empty());  // Default
+    assert(r.has_capacity(15));  // Default
+    assert(!r.has_capacity(25));  // Default
+
+    assert(r.tag() == "rectangle");
+    assert(r.tagged_display() == "rect:4x5");  // Overridden
+    assert(r.is_tagged_with_prefix("rect"));  // Default
+
+    // Test Label - all defaults
+    let lbl = Label { text: "hello", prefix: "INFO" };
+
+    assert(lbl.fmt() == "INFO: hello");
+    assert(lbl.display() == "INFO: hello");  // Default
+    assert(lbl.debug_show() == "[INFO: hello]");  // Default
+    lbl.do_print();  // Default
+
+    assert(lbl.size() == 5);  // len("hello")
+    assert(!lbl.is_empty());  // Default
+    assert(lbl.is_tagged_with_prefix("INF"));  // Default
+
+    // Generic functions using protocol defaults
+    let display1 = show_item(&p1);
+    assert(display1 == "(1, 2)");
+
+    let display2 = show_item(&r);
+    assert(display2 == "Rect(4x5)");
+
+    let debug1 = debug_item(&p1);
+    assert(debug1 == "[(1, 2)]");
+
+    let empty_check = is_sized_empty(&p2);
+    assert(empty_check);
+
+    let non_empty = is_sized_empty(&p1);
+    assert(!non_empty);
+
+    let tag_p = get_tag(&p1);
+    assert(tag_p == "[point:1,2]");
+
+    let tag_r = get_tag(&r);
+    assert(tag_r == "rect:4x5");  // Uses overridden tagged_display
+
+    // IntNum - Numeric protocol
+    let n3 = IntNum { value: 3 };
+    let n5 = IntNum { value: 5 };
+
+    let sum = n3.num_add(&n5);
+    assert(sum.value == 8);
+
+    let product = n3.num_mul(&n5);
+    assert(product.value == 15);
+
+    let zero_val = IntNum.num_zero();
+    assert(zero_val.value == 0);
+
+    let one_val = IntNum.num_one();
+    assert(one_val.value == 1);
+
+    // Manual double/triple using num_add directly
+    let doubled = n3.num_add(&n3);
+    assert(doubled.value == 6);
+
+    let tripled = n3.num_add(&n3.num_add(&n3));
+    assert(tripled.value == 9);
+
+    print("Protocol default implementation tests passed!");
+}

@@ -1,0 +1,256 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, ref-passing, functions
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Real CBGR reference passing to/from functions.
+// Tests passing references as function parameters, returning computed values
+// from ref reads, multi-ref arguments, and ref-based accumulation patterns.
+
+// =============================================================================
+// Types
+// =============================================================================
+
+type Vec2 is { x: Int, y: Int };
+type Vec3 is { x: Int, y: Int, z: Int };
+type Accum is { total: Int, count: Int };
+type Range2 is { lo: Int, hi: Int };
+
+// =============================================================================
+// Functions taking immutable refs
+// =============================================================================
+
+fn vec2_len_sq(v: &Vec2) -> Int {
+    (*v).x * (*v).x + (*v).y * (*v).y
+}
+
+fn vec3_len_sq(v: &Vec3) -> Int {
+    (*v).x * (*v).x + (*v).y * (*v).y + (*v).z * (*v).z
+}
+
+fn vec2_manhattan(v: &Vec2) -> Int {
+    let ax = if (*v).x < 0 { -(*v).x } else { (*v).x };
+    let ay = if (*v).y < 0 { -(*v).y } else { (*v).y };
+    ax + ay
+}
+
+fn vec2_distance_sq(a: &Vec2, b: &Vec2) -> Int {
+    let dx = (*a).x - (*b).x;
+    let dy = (*a).y - (*b).y;
+    dx * dx + dy * dy
+}
+
+fn range_contains(r: &Range2, val: Int) -> Int {
+    if val >= (*r).lo && val <= (*r).hi { 1 } else { 0 }
+}
+
+fn range_size(r: &Range2) -> Int {
+    (*r).hi - (*r).lo + 1
+}
+
+fn range_overlap(a: &Range2, b: &Range2) -> Int {
+    let start = if (*a).lo > (*b).lo { (*a).lo } else { (*b).lo };
+    let end_val = if (*a).hi < (*b).hi { (*a).hi } else { (*b).hi };
+    if start <= end_val { end_val - start + 1 } else { 0 }
+}
+
+// =============================================================================
+// Functions taking mutable refs
+// =============================================================================
+
+fn vec2_translate(v: &mut Vec2, dx: Int, dy: Int) {
+    (*v).x = (*v).x + dx;
+    (*v).y = (*v).y + dy;
+}
+
+fn vec2_reflect_x(v: &mut Vec2) {
+    (*v).x = -(*v).x;
+}
+
+fn vec2_reflect_y(v: &mut Vec2) {
+    (*v).y = -(*v).y;
+}
+
+fn vec2_rotate90(v: &mut Vec2) {
+    let tmp = (*v).x;
+    (*v).x = -(*v).y;
+    (*v).y = tmp;
+}
+
+fn accum_add(a: &mut Accum, val: Int) {
+    (*a).total = (*a).total + val;
+    (*a).count = (*a).count + 1;
+}
+
+fn accum_avg(a: &Accum) -> Int {
+    if (*a).count == 0 { 0 } else { (*a).total / (*a).count }
+}
+
+fn vec2_clamp(v: &mut Vec2, r: &Range2) {
+    if (*v).x < (*r).lo { (*v).x = (*r).lo; }
+    if (*v).x > (*r).hi { (*v).x = (*r).hi; }
+    if (*v).y < (*r).lo { (*v).y = (*r).lo; }
+    if (*v).y > (*r).hi { (*v).y = (*r).hi; }
+}
+
+// =============================================================================
+// Test: Pass immutable refs to functions
+// =============================================================================
+
+fn test_immutable_ref_passing() {
+    let v1 = Vec2 { x: 3, y: 4 };
+    let v2 = Vec2 { x: 6, y: 8 };
+
+    assert_eq(vec2_len_sq(&v1), 25);
+    assert_eq(vec2_len_sq(&v2), 100);
+    assert_eq(vec2_manhattan(&v1), 7);
+
+    assert_eq(vec2_distance_sq(&v1, &v2), 25);
+
+    let v3 = Vec3 { x: 1, y: 2, z: 3 };
+    assert_eq(vec3_len_sq(&v3), 14);
+}
+
+// =============================================================================
+// Test: Pass mutable refs to functions
+// =============================================================================
+
+fn test_mutable_ref_passing() {
+    let mut v = Vec2 { x: 10, y: 20 };
+
+    vec2_translate(&mut v, 5, -3);
+    assert_eq(v.x, 15);
+    assert_eq(v.y, 17);
+
+    vec2_reflect_x(&mut v);
+    assert_eq(v.x, -15);
+    assert_eq(v.y, 17);
+
+    vec2_reflect_y(&mut v);
+    assert_eq(v.x, -15);
+    assert_eq(v.y, -17);
+
+    // Rotate 90 degrees: (x,y) -> (-y, x)
+    let mut r = Vec2 { x: 1, y: 0 };
+    vec2_rotate90(&mut r);
+    assert_eq(r.x, 0);
+    assert_eq(r.y, 1);
+    vec2_rotate90(&mut r);
+    assert_eq(r.x, -1);
+    assert_eq(r.y, 0);
+    vec2_rotate90(&mut r);
+    assert_eq(r.x, 0);
+    assert_eq(r.y, -1);
+    vec2_rotate90(&mut r);
+    assert_eq(r.x, 1);
+    assert_eq(r.y, 0);
+}
+
+// =============================================================================
+// Test: Accumulator pattern with ref
+// =============================================================================
+
+fn test_accumulator() {
+    let mut acc = Accum { total: 0, count: 0 };
+
+    let mut i = 1;
+    while i <= 50 {
+        accum_add(&mut acc, i * i);
+        i = i + 1;
+    }
+
+    // sum of squares 1..50 = 50*51*101/6 = 42925
+    assert_eq(acc.total, 42925);
+    assert_eq(acc.count, 50);
+    assert_eq(accum_avg(&acc), 858);
+}
+
+// =============================================================================
+// Test: Range operations with ref
+// =============================================================================
+
+fn test_range_refs() {
+    let r1 = Range2 { lo: 0, hi: 100 };
+    let r2 = Range2 { lo: 50, hi: 150 };
+
+    assert_eq(range_contains(&r1, 50), 1);
+    assert_eq(range_contains(&r1, 101), 0);
+    assert_eq(range_size(&r1), 101);
+    assert_eq(range_overlap(&r1, &r2), 51);
+
+    let r3 = Range2 { lo: 200, hi: 300 };
+    assert_eq(range_overlap(&r1, &r3), 0);
+}
+
+// =============================================================================
+// Test: Clamp via mixed refs (mutable + immutable)
+// =============================================================================
+
+fn test_clamp() {
+    let bounds = Range2 { lo: -10, hi: 10 };
+    let mut v = Vec2 { x: 50, y: -50 };
+
+    vec2_clamp(&mut v, &bounds);
+    assert_eq(v.x, 10);
+    assert_eq(v.y, -10);
+
+    let mut v2 = Vec2 { x: 5, y: -3 };
+    vec2_clamp(&mut v2, &bounds);
+    assert_eq(v2.x, 5);
+    assert_eq(v2.y, -3);
+}
+
+// =============================================================================
+// Test: Multiple function calls with same ref
+// =============================================================================
+
+fn test_multi_call_same_ref() {
+    let mut v = Vec2 { x: 0, y: 0 };
+    let r = &mut v;
+
+    // Chain of translations
+    vec2_translate(r, 1, 0);
+    vec2_translate(r, 0, 1);
+    vec2_translate(r, 1, 0);
+    vec2_translate(r, 0, 1);
+
+    assert_eq(v.x, 2);
+    assert_eq(v.y, 2);
+}
+
+// =============================================================================
+// Test: Reading results from ref-based computation
+// =============================================================================
+
+fn test_ref_computation_results() {
+    let a = Vec2 { x: 0, y: 0 };
+    let b = Vec2 { x: 3, y: 4 };
+    let c = Vec2 { x: 6, y: 0 };
+
+    // Triangle side lengths squared
+    let ab = vec2_distance_sq(&a, &b);
+    let bc = vec2_distance_sq(&b, &c);
+    let ca = vec2_distance_sq(&c, &a);
+
+    assert_eq(ab, 25);
+    assert_eq(bc, 25);
+    assert_eq(ca, 36);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_immutable_ref_passing();
+    test_mutable_ref_passing();
+    test_accumulator();
+    test_range_refs();
+    test_clamp();
+    test_multi_call_same_ref();
+    test_ref_computation_results();
+    print("ref_passing_ok");
+    0
+}

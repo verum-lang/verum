@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, generics, nested, error
+// @description: Test detection of unclosed nested generic type arguments
+// @expected-error: E081
+
+// Missing closing bracket on nested generic
+fn test(x: Map<K, List<V>) {}

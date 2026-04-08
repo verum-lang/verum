@@ -1,0 +1,48 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, mutable, arrays, aliasing
+// @expected-exit: 0
+
+type Pair is { a: Int, b: Int };
+
+fn main() -> Int {
+    let mut p1 = Pair { a: 10, b: 20 };
+    let mut p2 = Pair { a: 30, b: 40 };
+
+    // Mutate both
+    p1.a = 111;
+    p2.a = 222;
+
+    // Verify no cross-contamination
+    print(p1.a);
+    print(p1.b);
+    print(p2.a);
+    print(p2.b);
+    assert_eq(p1.a, 111);
+    assert_eq(p1.b, 20);
+    assert_eq(p2.a, 222);
+    assert_eq(p2.b, 40);
+
+    // More complex: three mutable arrays
+    let mut arr1 = [1, 2, 3];
+    let mut arr2 = [10, 20, 30];
+    let mut arr3 = [100, 200, 300];
+
+    arr1[0] = 999;
+    arr2[1] = 888;
+    arr3[2] = 777;
+
+    assert_eq(arr1[0], 999);
+    assert_eq(arr1[1], 2);
+    assert_eq(arr2[0], 10);
+    assert_eq(arr2[1], 888);
+    assert_eq(arr3[0], 100);
+    assert_eq(arr3[2], 777);
+
+    print(arr1[0]);
+    print(arr2[1]);
+    print(arr3[2]);
+
+    0
+}

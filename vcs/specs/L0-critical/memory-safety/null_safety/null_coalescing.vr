@@ -1,0 +1,39 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, null-coalescing
+// @description: Tests null coalescing operator ??
+
+fn get_value(use_none: Bool) -> Maybe<Int> {
+    if use_none {
+        Maybe.None
+    } else {
+        Maybe.Some(42)
+    }
+}
+
+fn main() {
+    let value1 = get_value(false);
+    let value2 = get_value(true);
+
+    // Null coalescing - use right side if left is None
+    let result1 = value1 ?? 0;
+    assert(result1 == 42);
+
+    let result2 = value2 ?? 0;
+    assert(result2 == 0);
+
+    // Chained null coalescing
+    let a: Maybe<Int> = Maybe.None;
+    let b: Maybe<Int> = Maybe.None;
+    let c: Maybe<Int> = Maybe.Some(100);
+
+    let result3 = a ?? b ?? c ?? 0;
+    assert(result3 == 100);
+
+    // All None
+    let result4 = a ?? b ?? 999;
+    assert(result4 == 999);
+
+    print("Null coalescing test passed");
+}

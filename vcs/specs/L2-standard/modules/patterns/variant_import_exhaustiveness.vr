@@ -1,0 +1,175 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, patterns, exhaustiveness, imports
+// @description: Exhaustive pattern matching on imported variant types
+
+// Module defining variant types
+module types {
+    pub type Color is Red | Green | Blue | Yellow;
+
+    pub type Maybe<T> is None | Some(T);
+
+    pub type Result<T, E> is Ok(T) | Err(E);
+
+    pub type Tree<T> is
+        | Leaf(T)
+        | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>>, value: T };
+
+    pub type Expression is
+        | Literal(Int)
+        | Variable(Text)
+        | BinOp { op: Op, left: Heap<Expression>, right: Heap<Expression> }
+        | UnaryOp { op: Op, operand: Heap<Expression> }
+        | Call { func: Text, args: List<Expression> };
+
+    pub type Op is Add | Sub | Mul | Div | Neg | Not;
+}
+
+// Module using imported types with exhaustive pattern matching
+module consumer {
+    mount super.types.{Color, Maybe, Result, Tree, Expression, Op};
+
+    // Exhaustive match on imported Color
+    pub fn color_to_rgb(c: Color) -> (Int, Int, Int) =
+        match c {
+            Red => (255, 0, 0),
+            Green => (0, 255, 0),
+            Blue => (0, 0, 255),
+            Yellow => (255, 255, 0)
+        }
+
+    // Exhaustive match on imported Maybe
+    pub fn unwrap_or<T>(opt: Maybe<T>, default: T) -> T =
+        match opt {
+            Some(x) => x,
+            None => default
+        }
+
+    // Exhaustive match on imported Result
+    pub fn is_ok<T, E>(r: Result<T, E>) -> Bool =
+        match r {
+            Ok(_) => true,
+            Err(_) => false
+        }
+
+    // Exhaustive match on recursive imported type
+    pub fn tree_sum(t: &Tree<Int>) -> Int =
+        match t {
+            &Leaf(x) => x,
+            &Node { left, right, value } =>
+                value + tree_sum(left) + tree_sum(right)
+        }
+
+    // Exhaustive match on complex imported type
+    pub fn eval_const(e: &Expression) -> Maybe<Int> =
+        match e {
+            &Literal(n) => Some(n),
+            &Variable(_) => None,
+            &BinOp { op: Add, left, right } =>
+                match (eval_const(left), eval_const(right)) {
+                    (Some(l), Some(r)) => Some(l + r),
+                    _ => None
+                },
+            &BinOp { op: Sub, left, right } =>
+                match (eval_const(left), eval_const(right)) {
+                    (Some(l), Some(r)) => Some(l - r),
+                    _ => None
+                },
+            &BinOp { op: Mul, left, right } =>
+                match (eval_const(left), eval_const(right)) {
+                    (Some(l), Some(r)) => Some(l * r),
+                    _ => None
+                },
+            &BinOp { op: Div, left, right } =>
+                match (eval_const(left), eval_const(right)) {
+                    (Some(l), Some(r)) if r != 0 => Some(l / r),
+                    _ => None
+                },
+            &BinOp { op: _, .. } => None,
+            &UnaryOp { op: Neg, operand } =>
+                match eval_const(operand) {
+                    Some(n) => Some(-n),
+                    None => None
+                },
+            &UnaryOp { op: _, .. } => None,
+            &Call { .. } => None
+        }
+
+    // Nested exhaustive match on imported types
+    pub fn map_result<T, E, U>(r: Result<T, E>, f: fn(T) -> U) -> Result<U, E> =
+        match r {
+            Ok(x) => Ok(f(x)),
+            Err(e) => Err(e)
+        }
+}
+
+// Third module re-using patterns across module boundaries
+module facade {
+    mount super.types.{Color, Maybe, Result};
+    mount super.consumer.{color_to_rgb, unwrap_or, is_ok};
+
+    // Compose with more pattern matching
+    pub fn color_luminance(c: Color) -> Float =
+        match c {
+            Red => 0.2126,
+            Green => 0.7152,
+            Blue => 0.0722,
+            Yellow => 0.9278  // Red + Green
+        }
+
+    pub fn maybe_map<T, U>(opt: Maybe<T>, f: fn(T) -> U) -> Maybe<U> =
+        match opt {
+            Some(x) => Some(f(x)),
+            None => None
+        }
+
+    pub fn result_and_then<T, E, U>(r: Result<T, E>, f: fn(T) -> Result<U, E>) -> Result<U, E> =
+        match r {
+            Ok(x) => f(x),
+            Err(e) => Err(e)
+        }
+}
+
+fn main() {
+    mount types.{Color, Maybe, Result, Tree, Expression, Op};
+    mount consumer.{color_to_rgb, unwrap_or, tree_sum, eval_const};
+    mount facade.{color_luminance, maybe_map};
+
+    // Test color matching
+    assert(color_to_rgb(Red) == (255, 0, 0));
+    assert(color_to_rgb(Blue) == (0, 0, 255));
+    assert(color_luminance(Green) > 0.7);
+
+    // Test Maybe matching
+    let some_val: Maybe<Int> = Some(42);
+    let none_val: Maybe<Int> = None;
+    assert(unwrap_or(some_val, 0) == 42);
+    assert(unwrap_or(none_val, 99) == 99);
+
+    // Test Result matching
+    let ok_val: Result<Int, Text> = Ok(100);
+    let err_val: Result<Int, Text> = Err("error");
+    assert(is_ok(ok_val));
+    assert(!is_ok(err_val));
+
+    // Test tree matching
+    let tree = Node {
+        left: Heap(Leaf(1)),
+        right: Heap(Leaf(2)),
+        value: 3
+    };
+    assert(tree_sum(&tree) == 6);
+
+    // Test expression matching
+    let expr = BinOp {
+        op: Add,
+        left: Heap(Literal(10)),
+        right: Heap(Literal(20))
+    };
+    assert(eval_const(&expr) == Some(30));
+
+    // Test composed operations
+    let doubled = maybe_map(Some(21), |x| { x * 2 });
+    assert(doubled == Some(42));
+}

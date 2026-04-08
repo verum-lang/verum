@@ -1,0 +1,87 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, autodiff, chain-rule
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Chain rule forward pass simulation — multi-step composition
+
+type SimTensor is { rows: Int, cols: Int };
+
+fn scalar(v: Float) -> SimTensor { SimTensor { rows: 1, cols: 1 } }
+fn ones(r: Int, c: Int) -> SimTensor { SimTensor { rows: r, cols: c } }
+fn full(r: Int, c: Int, v: Float) -> SimTensor { SimTensor { rows: r, cols: c } }
+
+fn numel(t: SimTensor) -> Int { t.rows * t.cols }
+fn shape_eq(t: SimTensor, r: Int, c: Int) -> Bool { t.rows == r && t.cols == c }
+
+fn t_add(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_mul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.rows, b.rows);
+    assert_eq(a.cols, b.cols);
+    SimTensor { rows: a.rows, cols: a.cols }
+}
+
+fn t_matmul(a: SimTensor, b: SimTensor) -> SimTensor {
+    assert_eq(a.cols, b.rows);
+    SimTensor { rows: a.rows, cols: b.cols }
+}
+
+fn t_exp(a: SimTensor) -> SimTensor { SimTensor { rows: a.rows, cols: a.cols } }
+fn t_log(a: SimTensor) -> SimTensor { SimTensor { rows: a.rows, cols: a.cols } }
+fn t_sum(a: SimTensor) -> SimTensor { SimTensor { rows: 1, cols: 1 } }
+
+@test
+fn test_chain_binary_ops() {
+    let x = scalar(2.0);
+    let y = t_mul(x, x);
+    let z = t_add(y, x);
+    assert_eq(numel(z), 1);
+}
+
+@test
+fn test_chain_unary_ops() {
+    let x = full(1, 3, 0.5);
+    let y = t_exp(x);
+    let z = t_log(y);
+    assert(shape_eq(z, 1, 3));
+}
+
+@test
+fn test_chain_matmul_add() {
+    let w = ones(3, 3);
+    let x = ones(3, 1);
+    let b = ones(3, 1);
+    let y = t_add(t_matmul(w, x), b);
+    assert(shape_eq(y, 3, 1));
+}
+
+@test
+fn test_chain_deep_composition() {
+    let x = scalar(1.0);
+    let a = t_add(x, x);
+    let b = t_mul(a, a);
+    let c = t_add(b, a);
+    assert_eq(numel(c), 1);
+}
+
+@test
+fn test_chain_reduce_after_ops() {
+    let x = ones(4, 4);
+    let y = t_mul(x, full(4, 4, 2.0));
+    let z = t_sum(y);
+    assert_eq(numel(z), 1);
+}
+
+fn main() {
+    test_chain_binary_ops();
+    test_chain_unary_ops();
+    test_chain_matmul_add();
+    test_chain_deep_composition();
+    test_chain_reduce_after_ops();
+}

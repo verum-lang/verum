@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, optional-chain, error
+// @description: Optional chain operator without operand
+// @expected-error: E018
+
+fn test() {
+    let x = ?.field;  // Missing left operand for optional chain
+}

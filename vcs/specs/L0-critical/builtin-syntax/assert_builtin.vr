@@ -1,0 +1,32 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: builtin-syntax, assert, testing
+// @timeout: 5000
+//
+// Tests that assert functions are built-ins called without ! suffix.
+// Spec: grammar/verum.ebnf Section 2.20.1 - builtin_assertion
+
+fn main() -> Int {
+    let x: Int = 42;
+    let y: Int = 42;
+    let z: Int = 0;
+
+    // Basic assert (NOT assert!)
+    assert(x > 0);
+    assert(x > 0, "x must be positive");
+
+    // Assert equality (NOT assert_eq!)
+    assert_eq(x, y);
+    assert_eq(x, y, "x and y should be equal");
+
+    // Assert inequality (NOT assert_ne!)
+    assert_ne(x, z);
+    assert_ne(x, z, "x and z should differ");
+
+    // Debug assert (NOT debug_assert!)
+    debug_assert(x == 42);
+    debug_assert(x == 42, "x should be 42");
+
+    0
+}

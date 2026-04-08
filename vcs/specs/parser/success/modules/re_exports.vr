@@ -1,0 +1,17 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Re-export from another module
+pub mount core.collections.List;
+
+// Re-export with alias
+pub mount core.sync.Mutex as Lock;
+
+// Module with re-exports
+module prelude {
+    pub mount super.types.Result;
+    pub mount super.types.Maybe;
+    pub mount super.collections.List;
+    pub mount super.collections.Map;
+}

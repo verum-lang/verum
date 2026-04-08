@@ -1,0 +1,77 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, reference, error
+// @description: Test invalid reference pattern syntax
+// @expected-error: E082
+
+type Option<T> is None | Some(T);
+
+fn test_double_ref_symbol() {
+    let value = &42;
+
+    // Invalid: double & in reference pattern
+    match value {
+        &&x => print("double ref"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_mut_symbol_order() {
+    let value = &mut 42;
+
+    // Invalid: wrong order of & and mut
+    match value {
+        mut &x => print("wrong order"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_with_checked_wrong() {
+    let value = 42;
+
+    // Invalid: checked without & in pattern
+    match value {
+        checked x => print("checked without ref"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_with_unsafe_wrong() {
+    let value = 42;
+
+    // Invalid: unsafe without & in pattern
+    match value {
+        unsafe x => print("unsafe without ref"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_checked_mut_order() {
+    let value: &checked mut Int = &checked mut 42;
+
+    // Invalid: wrong order of checked and mut
+    match value {
+        &mut checked x => print("wrong checked order"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_without_pattern() {
+    let value = &42;
+
+    // Invalid: & without following pattern
+    match value {
+        & => print("bare ref"),
+        _ => print("other"),
+    }
+}
+
+fn test_ref_with_literal_mut() {
+    let value = &mut 42;
+
+    // Invalid: mut with literal in ref pattern
+    match value {
+        &mut 42 => print("mut with literal"),
+        _ => print("other"),
+    }
+}

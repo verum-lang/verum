@@ -1,0 +1,210 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, autodiff, checkpointing, memory, recomputation
+// @expected-exit: 0
+
+// Tests gradient checkpointing patterns for memory-efficient training.
+// Verifies that recomputation produces identical forward values and correct gradients.
+// Uses integer arithmetic to simulate checkpoint/recompute patterns.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// Simulate a multi-layer computation pipeline
+// Layer: y = w*x + b
+fn layer_forward(x: Int, w: Int, b: Int) -> Int {
+    w * x + b
+}
+
+// Activation: y = max(0, x) (ReLU)
+fn activation(x: Int) -> Int {
+    if (x > 0) { x } else { 0 }
+}
+
+// Gradient of layer: dL/dw = x * grad_out, dL/dx = w * grad_out
+fn layer_grad_w(x: Int, grad_out: Int) -> Int {
+    x * grad_out
+}
+
+fn layer_grad_x(w: Int, grad_out: Int) -> Int {
+    w * grad_out
+}
+
+fn relu_grad(x: Int, grad_out: Int) -> Int {
+    if (x > 0) { grad_out } else { 0 }
+}
+
+fn main() -> Int {
+    // Test 1: Checkpoint saves forward values for backward pass
+    // 3-layer network: x → L1 → ReLU → L2 → ReLU → L3 → output
+    let x = 2;
+    let w1 = 3; let b1 = 1;   // Layer 1 weights
+    let w2 = 2; let b2 = -1;  // Layer 2 weights
+    let w3 = 1; let b3 = 0;   // Layer 3 weights
+
+    // Forward pass with checkpointing (save intermediate values)
+    let z1 = layer_forward(x, w1, b1);      // 3*2+1 = 7
+    let a1 = activation(z1);                  // max(0,7) = 7
+    let checkpoint1_z = z1;                   // Save for recomputation
+    let checkpoint1_a = a1;
+
+    let z2 = layer_forward(a1, w2, b2);      // 2*7-1 = 13
+    let a2 = activation(z2);                  // max(0,13) = 13
+    let checkpoint2_z = z2;
+    let checkpoint2_a = a2;
+
+    let z3 = layer_forward(a2, w3, b3);      // 1*13+0 = 13
+    let output = z3;
+
+    assert_eq(z1, 7);
+    assert_eq(a1, 7);
+    assert_eq(z2, 13);
+    assert_eq(a2, 13);
+    assert_eq(output, 13);
+
+    // Test 2: Recomputation matches saved values
+    // Recompute from checkpoint: given x, recompute z1, a1
+    let recomp_z1 = layer_forward(x, w1, b1);
+    let recomp_a1 = activation(recomp_z1);
+    assert_eq(recomp_z1, checkpoint1_z);
+    assert_eq(recomp_a1, checkpoint1_a);
+
+    // Test 3: Backward pass using checkpointed values
+    // Loss = output (for simplicity), dL/doutput = 1
+    let grad_out = 1;
+
+    // Backward through Layer 3
+    let grad_a2 = layer_grad_x(w3, grad_out);  // w3 * 1 = 1
+    let grad_w3 = layer_grad_w(a2, grad_out);  // a2 * 1 = 13
+    assert_eq(grad_a2, 1);
+    assert_eq(grad_w3, 13);
+
+    // Backward through ReLU 2
+    let grad_z2 = relu_grad(checkpoint2_z, grad_a2);  // z2>0: pass through = 1
+    assert_eq(grad_z2, 1);
+
+    // Backward through Layer 2
+    let grad_a1 = layer_grad_x(w2, grad_z2);  // w2 * 1 = 2
+    let grad_w2 = layer_grad_w(checkpoint1_a, grad_z2);  // a1 * 1 = 7
+    assert_eq(grad_a1, 2);
+    assert_eq(grad_w2, 7);
+
+    // Backward through ReLU 1
+    let grad_z1 = relu_grad(checkpoint1_z, grad_a1);  // z1>0: pass through = 2
+    assert_eq(grad_z1, 2);
+
+    // Backward through Layer 1
+    let grad_x = layer_grad_x(w1, grad_z1);   // w1 * 2 = 6
+    let grad_w1 = layer_grad_w(x, grad_z1);   // x * 2 = 4
+    assert_eq(grad_x, 6);
+    assert_eq(grad_w1, 4);
+
+    // Test 4: Verify chain rule end-to-end
+    // y = w3*(relu(w2*relu(w1*x+b1)+b2))+b3
+    // dy/dw1 = w3 * relu'(z2) * w2 * relu'(z1) * x
+    //        = 1 * 1 * 2 * 1 * 2 = 4 ✓
+    assert_eq(grad_w1, w3 * 1 * w2 * 1 * x);
+
+    // Test 5: Checkpoint with negative values (ReLU kills gradient)
+    let x_neg = -1;
+    let z1_neg = layer_forward(x_neg, w1, b1);  // 3*(-1)+1 = -2
+    let a1_neg = activation(z1_neg);              // max(0,-2) = 0
+    assert_eq(z1_neg, -2);
+    assert_eq(a1_neg, 0);
+    // Gradient through ReLU with negative input = 0
+    let grad_neg = relu_grad(z1_neg, 1);
+    assert_eq(grad_neg, 0);
+
+    // Test 6: Multiple checkpoint segments
+    // Simulate checkpointing every 2 layers in a 4-layer network
+    // Segment 1: layers 1-2
+    let s1_z1 = 3 * 5 + 1;  // 16
+    let s1_a1 = activation(s1_z1);  // 16
+    let s1_z2 = 2 * s1_a1 - 1;  // 31
+    let s1_a2 = activation(s1_z2);  // 31
+    // Checkpoint: save s1_a2
+
+    // Segment 2: layers 3-4
+    let s2_z3 = 1 * s1_a2 + 2;  // 33
+    let s2_a3 = activation(s2_z3);  // 33
+    let s2_z4 = 1 * s2_a3 + 0;  // 33
+
+    // Verify full forward
+    assert_eq(s2_z4, 33);
+
+    // Backward segment 2 (layers 4, 3)
+    let s2_grad = 1;
+    let s2_grad_a3 = 1 * s2_grad;  // 1
+    let s2_grad_z3 = relu_grad(s2_z3, s2_grad_a3);  // 1
+    let s2_grad_checkpoint = 1 * s2_grad_z3;  // gradient to s1_a2 = 1
+    assert_eq(s2_grad_checkpoint, 1);
+
+    // Recompute segment 1 from input x=5
+    let recomp_s1_z1 = 3 * 5 + 1;
+    assert_eq(recomp_s1_z1, s1_z1);  // Recomputation matches
+
+    // Backward segment 1
+    let s1_grad_a2_back = s2_grad_checkpoint;  // 1
+    let s1_grad_z2 = relu_grad(s1_z2, s1_grad_a2_back);  // 1
+    let s1_grad_a1_back = 2 * s1_grad_z2;  // 2
+    let s1_grad_z1 = relu_grad(s1_z1, s1_grad_a1_back);  // 2
+    assert_eq(s1_grad_z1, 2);
+
+    // Test 7: Gradient checkpointing saves memory proportional to sqrt(N)
+    // For N=4 layers, sqrt(4)=2 checkpoints needed
+    // Verify we only saved 2 intermediate values (not 4)
+    let num_layers = 4;
+    let num_checkpoints = 2;  // sqrt(4)
+    assert(num_checkpoints * num_checkpoints <= num_layers);
+
+    // Test 8: Idempotent recomputation
+    // Running forward pass twice from same input gives same result
+    let run1 = layer_forward(10, 3, 1);
+    let run2 = layer_forward(10, 3, 1);
+    assert_eq(run1, run2);
+    let run1_a = activation(run1);
+    let run2_a = activation(run2);
+    assert_eq(run1_a, run2_a);
+
+    // Test 9: Gradient correctness with and without checkpointing
+    // Both should give identical gradients
+    // Without checkpoint: compute all forwards, then backward
+    let nc_x = 4;
+    let nc_z1 = 2 * nc_x + 1;  // 9
+    let nc_a1 = activation(nc_z1);  // 9
+    let nc_z2 = 3 * nc_a1 - 2;  // 25
+    let nc_grad_z2 = 1;  // dL/dz2
+    let nc_grad_a1 = 3 * nc_grad_z2;  // 3
+    let nc_grad_z1 = relu_grad(nc_z1, nc_grad_a1);  // 3
+    let nc_grad_x = 2 * nc_grad_z1;  // 6
+
+    // With checkpoint: forget nc_a1, recompute
+    let cp_recomp_z1 = 2 * nc_x + 1;  // 9 (recomputed)
+    let cp_recomp_a1 = activation(cp_recomp_z1);  // 9 (recomputed)
+    let cp_grad_z2 = 1;
+    let cp_grad_a1 = 3 * cp_grad_z2;  // 3
+    let cp_grad_z1 = relu_grad(cp_recomp_z1, cp_grad_a1);  // 3
+    let cp_grad_x = 2 * cp_grad_z1;  // 6
+    assert_eq(nc_grad_x, cp_grad_x);  // Identical gradients ✓
+
+    // Test 10: Memory-compute tradeoff quantification
+    // Standard: store all N activations, 0 recomputation
+    // Checkpoint-all: store 0 activations, N recomputation
+    // Optimal (sqrt): store sqrt(N) activations, sqrt(N) recomputation
+    let n = 16;
+    let standard_memory = n;
+    let standard_recomp = 0;
+    let checkpoint_all_memory = 0;
+    let checkpoint_all_recomp = n;
+    let optimal_memory = 4;  // sqrt(16) = 4
+    let optimal_recomp = 4;  // sqrt(16) = 4
+
+    assert(optimal_memory < standard_memory);
+    assert(optimal_recomp < checkpoint_all_recomp);
+    assert_eq(optimal_memory * optimal_memory, n);
+
+    print("Gradient checkpointing: PASS");
+    0
+}

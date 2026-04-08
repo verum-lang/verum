@@ -1,0 +1,139 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, ring, buffer, circular
+// @timeout: 30000
+
+// Circular ring buffer implementation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn new_arr8() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 }
+    else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 }
+    else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 }
+    else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+type Ring is { data: Arr8, head: Int, tail: Int, cap: Int, sz: Int };
+
+fn ring_new(cap: Int) -> Ring {
+    Ring { data: new_arr8(), head: 0, tail: 0, cap: cap, sz: 0 }
+}
+
+fn ring_push(r: Ring, val: Int) -> Ring {
+    let new_data = set8(r.data, r.tail, val);
+    let new_tail = (r.tail + 1) % r.cap;
+    if r.sz == r.cap {
+        // Overwrite oldest (move head forward)
+        Ring { data: new_data, head: (r.head + 1) % r.cap, tail: new_tail, cap: r.cap, sz: r.sz }
+    } else {
+        Ring { data: new_data, head: r.head, tail: new_tail, cap: r.cap, sz: r.sz + 1 }
+    }
+}
+
+fn ring_peek(r: Ring) -> Int {
+    get8(r.data, r.head)
+}
+
+fn ring_pop(r: Ring) -> Ring {
+    Ring { data: r.data, head: (r.head + 1) % r.cap, tail: r.tail, cap: r.cap, sz: r.sz - 1 }
+}
+
+// Sum all elements in ring
+fn ring_sum(r: Ring) -> Int {
+    let mut sum_val = 0;
+    let mut i = 0;
+    let mut pos = r.head;
+    while i < r.sz {
+        sum_val = sum_val + get8(r.data, pos);
+        pos = (pos + 1) % r.cap;
+        i = i + 1;
+    }
+    sum_val
+}
+
+fn test_basic() -> Int {
+    let mut r = ring_new(4);
+    r = ring_push(r, 10);
+    r = ring_push(r, 20);
+    r = ring_push(r, 30);
+    assert_eq(r.sz, 3);
+    assert_eq(ring_peek(r), 10);
+    assert_eq(ring_sum(r), 60);
+    1
+}
+
+fn test_overflow() -> Int {
+    let mut r = ring_new(3);
+    r = ring_push(r, 1);
+    r = ring_push(r, 2);
+    r = ring_push(r, 3);
+    assert_eq(r.sz, 3);
+    // Push 4 - overwrites 1
+    r = ring_push(r, 4);
+    assert_eq(r.sz, 3);
+    assert_eq(ring_peek(r), 2); // oldest is now 2
+    assert_eq(ring_sum(r), 9); // 2+3+4
+    1
+}
+
+fn test_pop() -> Int {
+    let mut r = ring_new(4);
+    r = ring_push(r, 100);
+    r = ring_push(r, 200);
+    r = ring_push(r, 300);
+    let v1 = ring_peek(r);
+    r = ring_pop(r);
+    let v2 = ring_peek(r);
+    r = ring_pop(r);
+    let v3 = ring_peek(r);
+    assert_eq(v1, 100);
+    assert_eq(v2, 200);
+    assert_eq(v3, 300);
+    assert_eq(r.sz, 1);
+    1
+}
+
+fn test_moving_average() -> Int {
+    // Moving average of last 3 values
+    let mut r = ring_new(3);
+    r = ring_push(r, 10);
+    r = ring_push(r, 20);
+    r = ring_push(r, 30);
+    assert_eq(ring_sum(r) / r.sz, 20); // (10+20+30)/3
+    r = ring_push(r, 40); // overwrites 10
+    assert_eq(ring_sum(r) / r.sz, 30); // (20+30+40)/3
+    r = ring_push(r, 50); // overwrites 20
+    assert_eq(ring_sum(r) / r.sz, 40); // (30+40+50)/3
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_overflow();
+    test_pop();
+    test_moving_average();
+    print("[OK] 436_ring_buffer_aot");
+    0
+}

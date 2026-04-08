@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @level: L1
+// @expected-error: M303
+// @description: Tests circular dependency detection in meta function resolution
+// @tags: meta-system, core, circular-dependency, recursion
+
+// Meta function A calls B which calls A - mutual recursion leads to recursion limit
+meta fn circular_a() -> Int {
+    circular_b() + 1
+}
+
+meta fn circular_b() -> Int {
+    circular_a() + 1  // ERROR: M303 RecursionLimitExceeded (circular call)
+}
+
+// Entry point triggers the circular call chain
+fn main() {
+    // Calling circular_a triggers circular_a -> circular_b -> circular_a -> ...
+    // This hits the recursion limit (M303) rather than explicit circular detection (M005)
+    @const assert(circular_a() > 0);
+}

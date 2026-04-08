@@ -1,0 +1,220 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, select, concurrency
+// @expect: pass
+// @timeout: 30000
+
+/// Comprehensive test for select expressions
+/// Spec: docs/detailed/05-syntax-grammar.md Section 2.12.1
+/// Grammar: grammar/verum.ebnf v2.9 - select_expr
+
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
+type Level is Debug | Info | Warn | Error;
+
+type Response is {
+    status: Int,
+    body: Text,
+};
+
+type Data is {
+    value: Int,
+};
+
+type Error is Timeout(Text) | Network(Text) | MaxRetries | Other(Text);
+
+type FetchError is Timeout | Network | Parse;
+
+type Message is
+    Command { cmd: Text, args: List<Text> }
+    | Event { event: Text }
+    | Heartbeat;
+
+type Control is Shutdown | Pause | Resume;
+
+type Action is Ack | Execute | Handle;
+
+type Config is {
+    use_primary: Bool,
+    use_secondary: Bool,
+};
+
+type Duration is {
+    millis: Int,
+};
+
+implement Duration {
+    fn from_secs(s: Int) -> Duration {
+        Duration { millis: s * 1000 }
+    }
+
+    fn from_millis(ms: Int) -> Duration {
+        Duration { millis: ms }
+    }
+}
+
+// ============================================================================
+// Stub Functions
+// ============================================================================
+
+// Basic async stubs
+async fn future_a() -> Int { 1 }
+async fn future_b() -> Int { 2 }
+
+async fn fast_operation() -> Text { "fast" }
+async fn medium_operation() -> Text { "medium" }
+async fn slow_operation() -> Text { "slow" }
+
+async fn high_priority() -> Int { 100 }
+async fn low_priority() -> Int { 10 }
+
+async fn fetch_data() -> Data { Data { value: 42 } }
+async fn fast_op() -> Int { 1 }
+async fn slow_fetch() -> Response { Response { status: 200, body: "" } }
+
+// Timeout stubs
+async fn sleep<T>(d: T) { }
+async fn timeout_duration<T>(d: T) { }
+
+// ============================================================================
+// Part 1: Basic Select Syntax
+// ============================================================================
+
+/// Basic two-branch select - simplest form
+async fn basic_select() -> Int {
+    select {
+        x = future_a().await => x + 1,
+        y = future_b().await => y * 2,
+    }
+}
+
+/// Select with three branches
+async fn multi_branch() -> Text {
+    select {
+        a = fast_operation().await => f"fast: {a}",
+        b = medium_operation().await => f"medium: {b}",
+        c = slow_operation().await => f"slow: {c}",
+    }
+}
+
+// ============================================================================
+// Part 2: Biased Selection
+// ============================================================================
+
+/// Biased select - earlier branches have priority
+async fn biased_select() -> Int {
+    select biased {
+        x = high_priority().await => x * 10,
+        y = low_priority().await => y,
+    }
+}
+
+// ============================================================================
+// Part 3: Guards (if conditions)
+// ============================================================================
+
+/// Select with guard conditions
+async fn conditional_select(use_fast: Bool) -> Int {
+    select {
+        x = fast_op().await if use_fast.await => x,
+        y = future_a().await => y * 10,
+    }
+}
+
+/// Multiple guards
+async fn multi_guard(a_enabled: Bool, b_enabled: Bool) -> Int {
+    select {
+        x = future_a().await if a_enabled.await => x,
+        y = future_b().await if b_enabled.await => y,
+        _ = timeout_duration(Duration.from_secs(5)).await => 0,
+    }
+}
+
+// ============================================================================
+// Part 4: Default/Else Branch
+// ============================================================================
+
+/// Select with default branch
+async fn with_default() -> Int {
+    select {
+        x = fast_op().await if false.await => x,  // Disabled by guard
+        else => 42,  // Fallback when all guards are false
+    }
+}
+
+/// Timeout with default
+async fn timeout_default() -> Maybe<Response> {
+    select {
+        response = slow_fetch().await => Maybe.Some(response),
+        _ = timeout_duration(Duration.from_secs(1)).await => Maybe.None,
+        else => Maybe.None,
+    }
+}
+
+// ============================================================================
+// Part 5: Type Unification
+// ============================================================================
+
+/// All branches must return the same type
+async fn unified_types() -> Maybe<Int> {
+    select {
+        // All branches return Maybe<Int>
+        data = fetch_data().await => Maybe.Some(data.value),
+        _ = timeout_duration(Duration.from_secs(5)).await => Maybe.None,
+        else => Maybe.None,
+    }
+}
+
+// ============================================================================
+// Part 6: Real-World Patterns
+// ============================================================================
+
+/// Simple retry pattern
+async fn simple_retry() -> Int {
+    for _ in 0..3 {
+        select {
+            x = fast_op().await => return x,
+            _ = timeout_duration(Duration.from_secs(1)).await => continue,
+        }
+    }
+    0
+}
+
+/// Race pattern - first to complete wins
+async fn race_pattern() -> Text {
+    select {
+        a = fast_operation().await => f"winner: {a}",
+        b = medium_operation().await => f"winner: {b}",
+        c = slow_operation().await => f"winner: {c}",
+    }
+}
+
+// ============================================================================
+// Part 7: Nested Select
+// ============================================================================
+
+/// Nested select within async block
+async fn nested_select() -> Int {
+    select {
+        result = async {
+            select {
+                x = future_a().await => x,
+                y = future_b().await => y,
+            }
+        }.await => result * 2,
+        _ = timeout_duration(Duration.from_secs(10)).await => 0,
+    }
+}
+
+// ============================================================================
+// Entry Point
+// ============================================================================
+
+fn main() {
+    // This is a syntax/type-checking test
+    // Tests would be run by an async runtime
+    print("Select expression syntax test - compile only");
+}

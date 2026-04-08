@@ -1,0 +1,25 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, marks, stage, error
+// @expected-error: M405
+// @description: Stage mismatch when using meta binding in quote without splicing
+
+// M405 is triggered when a meta-level binding is referenced in quote
+// without using ${...} splice syntax - this is a stage mismatch
+
+meta fn stage_mismatch() -> TokenStream {
+    // This binding is at meta level (stage 1)
+    let meta_binding = 42;
+
+    quote {
+        // ERROR: Directly referencing meta_binding without ${...} splice
+        // This is a stage mismatch - meta_binding is stage 1, quote body is stage 0
+        let x = meta_binding;
+        x
+    }
+}
+
+fn main() {
+    @stage_mismatch();
+}

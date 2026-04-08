@@ -1,0 +1,173 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: pattern-match, sum-types, variants
+// @description: Test pattern matching with sum types and nested patterns
+
+type Shape is Circle(Int) | Rectangle(Int, Int) | Triangle(Int, Int, Int);
+
+type Maybe_Int is Nothing | Just(Int);
+
+type Tree is Leaf(Int) | Branch { left: Heap<Tree>, right: Heap<Tree> };
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle(r) => r * r * 3,
+        Rectangle(w, h) => w * h,
+        Triangle(a, b, c) => {
+            // Heron's formula approximation: (a+b+c)/2 * ... simplified
+            let s = (a + b + c) / 2;
+            s * (s - a)
+        }
+    }
+}
+
+fn test_basic_match() -> Int {
+    let c = Circle(5);
+    let r = Rectangle(3, 4);
+    let t = Triangle(3, 4, 5);
+
+    let ac = area(c);
+    let ar = area(r);
+    let at = area(t);
+
+    if ac != 75 {
+        print(f"FAIL basic_match: circle area={ac}, expected 75");
+        return 1;
+    }
+    if ar != 12 {
+        print(f"FAIL basic_match: rect area={ar}, expected 12");
+        return 1;
+    }
+    if at != 18 {
+        print(f"FAIL basic_match: tri area={at}, expected 18");
+        return 1;
+    }
+    print("  basic_match: OK");
+    0
+}
+
+fn unwrap_or(m: Maybe_Int, default: Int) -> Int {
+    match m {
+        Just(v) => v,
+        Nothing => default,
+    }
+}
+
+fn test_maybe_match() -> Int {
+    let some_val = Just(42);
+    let no_val = Nothing;
+
+    let r1 = unwrap_or(some_val, 0);
+    let r2 = unwrap_or(no_val, -1);
+
+    if r1 != 42 {
+        print(f"FAIL maybe: unwrap Just(42)={r1}");
+        return 1;
+    }
+    if r2 != -1 {
+        print(f"FAIL maybe: unwrap Nothing={r2}");
+        return 1;
+    }
+    print("  maybe_match: OK");
+    0
+}
+
+fn test_wildcard_match() -> Int {
+    let x = 42;
+    let result = match x {
+        0 => 100,
+        1 => 200,
+        _ => 300,
+    };
+    if result != 300 {
+        print(f"FAIL wildcard: result={result}, expected 300");
+        return 1;
+    }
+    print("  wildcard: OK");
+    0
+}
+
+fn test_match_guard() -> Int {
+    let x = 15;
+    let result = match x {
+        n if n < 10 => 1,
+        n if n < 20 => 2,
+        _ => 3,
+    };
+    if result != 2 {
+        print(f"FAIL guard: result={result}, expected 2");
+        return 1;
+    }
+    print("  match_guard: OK");
+    0
+}
+
+fn test_nested_variant() -> Int {
+    // Build list of Maybe_Int values
+    let mut items = List.new();
+    items.push(Just(10));
+    items.push(Nothing);
+    items.push(Just(30));
+
+    // Sum the Just values
+    let mut sum = 0;
+    let mut i = 0;
+    while i < items.len() {
+        let item = items[i];
+        match item {
+            Just(v) => { sum = sum + v; }
+            Nothing => {}
+        }
+        i = i + 1;
+    }
+    if sum != 40 {
+        print(f"FAIL nested_variant: sum={sum}, expected 40");
+        return 1;
+    }
+    print("  nested_variant: OK");
+    0
+}
+
+@allow(unbounded_recursion)
+fn tree_sum(t: Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Branch { left, right } => tree_sum(*left) + tree_sum(*right),
+    }
+}
+
+fn test_recursive_tree() -> Int {
+    let tree = Branch {
+        left: Heap(Leaf(1)),
+        right: Heap(Branch {
+            left: Heap(Leaf(2)),
+            right: Heap(Leaf(3)),
+        }),
+    };
+    let sum = tree_sum(tree);
+    if sum != 6 {
+        print(f"FAIL recursive_tree: sum={sum}, expected 6");
+        return 1;
+    }
+    print("  recursive_tree: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Pattern Match Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_match();
+    failures = failures + test_maybe_match();
+    failures = failures + test_wildcard_match();
+    failures = failures + test_match_guard();
+    failures = failures + test_nested_variant();
+    failures = failures + test_recursive_tree();
+
+    if failures == 0 {
+        print("All pattern match tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

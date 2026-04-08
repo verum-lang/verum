@@ -1,0 +1,60 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, tensor, real-opcode, matmul
+// @expected-exit: 0
+
+// Tests tensor dot product and linear algebra via AOT pipeline.
+
+// Tensor intrinsic declarations
+fn tensor_new(shape: Int, dtype: Int) -> Int { @intrinsic("TENSOR_NEW", shape, dtype) }
+fn tensor_fill(shape: Int, value: Int, dtype: Int) -> Int { @intrinsic("TENSOR_FILL", shape, value, dtype) }
+fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
+fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let a = tensor_get_scalar(t, idx);
+    let b = tensor_get_scalar(e, 0);
+    if a != b { 1 } else { 0 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    let a = tensor_new(3, 1);
+    let a = tensor_set_scalar(a, 0, 1);
+    let a = tensor_set_scalar(a, 1, 2);
+    let a = tensor_set_scalar(a, 2, 3);
+
+    let b = tensor_new(3, 1);
+    let b = tensor_set_scalar(b, 0, 4);
+    let b = tensor_set_scalar(b, 1, 5);
+    let b = tensor_set_scalar(b, 2, 6);
+
+    let prod = tensor_binop(a, b, 2);
+    errors = errors + check_val(prod, 0, 4);
+    errors = errors + check_val(prod, 1, 10);
+    errors = errors + check_val(prod, 2, 18);
+
+    let dot = tensor_reduce(prod, 0, 0);
+    errors = errors + check_val(dot, 0, 32);
+
+    let c = tensor_fill(5, 2, 1);
+    let d = tensor_fill(5, 3, 1);
+    let cd = tensor_binop(c, d, 2);
+    let cd_sum = tensor_reduce(cd, 0, 0);
+    errors = errors + check_val(cd_sum, 0, 30);
+
+    let two = tensor_fill(3, 2, 1);
+    let one = tensor_fill(3, 1, 1);
+    let scaled = tensor_binop(a, two, 2);
+    let shifted = tensor_binop(scaled, one, 0);
+    errors = errors + check_val(shifted, 0, 3);
+    errors = errors + check_val(shifted, 1, 5);
+    errors = errors + check_val(shifted, 2, 7);
+
+    errors
+}

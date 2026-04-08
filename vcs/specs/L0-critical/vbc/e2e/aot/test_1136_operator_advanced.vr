@@ -1,0 +1,132 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: operator-overloading, equality, comparison
+// @description: Test advanced operator overloading patterns
+
+type Fraction is { num: Int, den: Int };
+
+implement Fraction {
+    fn new(n: Int, d: Int) -> Fraction {
+        Fraction { num: n, den: d }
+    }
+
+    fn add(&self, other: Fraction) -> Fraction {
+        Fraction {
+            num: self.num * other.den + other.num * self.den,
+            den: self.den * other.den,
+        }
+    }
+
+    fn mul(&self, other: Fraction) -> Fraction {
+        Fraction {
+            num: self.num * other.num,
+            den: self.den * other.den,
+        }
+    }
+
+    fn eq(&self, other: Fraction) -> Bool {
+        self.num * other.den == other.num * self.den
+    }
+}
+
+fn test_fraction_add() -> Int {
+    let half = Fraction.new(1, 2);
+    let third = Fraction.new(1, 3);
+    let sum = half + third;
+    // 1/2 + 1/3 = 5/6
+    if sum.num != 5 || sum.den != 6 {
+        print(f"FAIL frac_add: {sum.num}/{sum.den}");
+        return 1;
+    }
+    print("  fraction_add: OK");
+    0
+}
+
+fn test_fraction_mul() -> Int {
+    let half = Fraction.new(1, 2);
+    let third = Fraction.new(1, 3);
+    let prod = half * third;
+    // 1/2 * 1/3 = 1/6
+    if prod.num != 1 || prod.den != 6 {
+        print(f"FAIL frac_mul: {prod.num}/{prod.den}");
+        return 1;
+    }
+    print("  fraction_mul: OK");
+    0
+}
+
+fn test_fraction_eq() -> Int {
+    let half = Fraction.new(1, 2);
+    let two_fourths = Fraction.new(2, 4);
+    let third = Fraction.new(1, 3);
+
+    if !(half == two_fourths) {
+        print("FAIL: 1/2 should equal 2/4");
+        return 1;
+    }
+    if half == third {
+        print("FAIL: 1/2 should not equal 1/3");
+        return 1;
+    }
+    print("  fraction_eq: OK");
+    0
+}
+
+type Weight is { grams: Int };
+
+implement Weight {
+    fn new(g: Int) -> Weight {
+        Weight { grams: g }
+    }
+
+    fn add(&self, other: Weight) -> Weight {
+        Weight { grams: self.grams + other.grams }
+    }
+
+    fn sub(&self, other: Weight) -> Weight {
+        Weight { grams: self.grams - other.grams }
+    }
+
+    fn eq(&self, other: Weight) -> Bool {
+        self.grams == other.grams
+    }
+}
+
+fn test_weight_ops() -> Int {
+    let a = Weight.new(500);
+    let b = Weight.new(300);
+    let total = a + b;
+    if total.grams != 800 {
+        print(f"FAIL weight add: {total.grams}");
+        return 1;
+    }
+    let diff = a - b;
+    if diff.grams != 200 {
+        print(f"FAIL weight sub: {diff.grams}");
+        return 1;
+    }
+    let c = Weight.new(500);
+    if !(a == c) {
+        print("FAIL: 500g should equal 500g");
+        return 1;
+    }
+    print("  weight_ops: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Advanced Operator Tests:");
+    let mut failures = 0;
+    failures = failures + test_fraction_add();
+    failures = failures + test_fraction_mul();
+    failures = failures + test_fraction_eq();
+    failures = failures + test_weight_ops();
+
+    if failures == 0 {
+        print("All advanced operator tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

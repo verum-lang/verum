@@ -1,0 +1,260 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, fixed-point, arithmetic, math, newton
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT fixed-point arithmetic (16.16 format) - add, sub, mul, div, sqrt via Newton's method
+
+// Fixed-point 16.16 format: value = raw / 65536
+// SCALE = 65536 = 2^16
+// This allows representing numbers from about -32768.0 to 32767.99998 with ~0.000015 precision
+
+fn fp_scale() -> Int { 65536 }
+
+// Convert integer to fixed-point
+fn fp_from_int(n: Int) -> Int { n * 65536 }
+
+// Convert fixed-point to integer (truncates toward zero)
+fn fp_to_int(f: Int) -> Int {
+    if f >= 0 { f / 65536 }
+    else { 0 - ((0 - f) / 65536) }
+}
+
+// Round fixed-point to nearest integer
+fn fp_round(f: Int) -> Int {
+    if f >= 0 { (f + 32768) / 65536 }
+    else { 0 - ((0 - f + 32768) / 65536) }
+}
+
+// Fixed-point from fraction: (num/den) in fixed-point
+fn fp_from_frac(num: Int, den: Int) -> Int {
+    (num * 65536) / den
+}
+
+// Addition: straightforward since same scale
+fn fp_add(a: Int, b: Int) -> Int { a + b }
+
+// Subtraction
+fn fp_sub(a: Int, b: Int) -> Int { a - b }
+
+// Multiplication: (a * b) / SCALE
+// Use intermediate to avoid overflow where possible
+fn fp_mul(a: Int, b: Int) -> Int {
+    (a * b) / 65536
+}
+
+// Division: (a * SCALE) / b
+fn fp_div(a: Int, b: Int) -> Int {
+    (a * 65536) / b
+}
+
+// Absolute value
+fn fp_abs(a: Int) -> Int {
+    if a < 0 { 0 - a } else { a }
+}
+
+// Negate
+fn fp_neg(a: Int) -> Int { 0 - a }
+
+// Compare: returns -1, 0, or 1
+fn fp_cmp(a: Int, b: Int) -> Int {
+    if a < b { 0 - 1 }
+    else if a > b { 1 }
+    else { 0 }
+}
+
+// Fixed-point square root via Newton's method
+// sqrt(S): x_{n+1} = (x_n + S/x_n) / 2
+fn fp_sqrt(s: Int) -> Int {
+    if s <= 0 { 0 }
+    else {
+        // Initial guess: integer sqrt scaled
+        let mut x = s;
+        // Normalize initial guess
+        if x > fp_from_int(100) { x = fp_from_int(10); }
+        else if x > fp_from_int(4) { x = fp_from_int(2); }
+        else { x = fp_from_int(1); }
+
+        // Newton iterations
+        let mut i = 0;
+        while i < 20 {
+            let next = (x + fp_div(s, x)) / 2;
+            if fp_abs(next - x) <= 1 {
+                i = 20;  // converged
+            } else {
+                x = next;
+            }
+            i = i + 1;
+        }
+        x
+    }
+}
+
+// Fixed-point power: a^n where n is a non-negative integer
+fn fp_powi(base: Int, n: Int) -> Int {
+    let mut result = fp_from_int(1);
+    let mut i = 0;
+    while i < n {
+        result = fp_mul(result, base);
+        i = i + 1;
+    }
+    result
+}
+
+// Linear interpolation: lerp(a, b, t) = a + t*(b-a) where t is fixed-point [0,1]
+fn fp_lerp(a: Int, b: Int, t: Int) -> Int {
+    fp_add(a, fp_mul(t, fp_sub(b, a)))
+}
+
+// Distance: sqrt(dx^2 + dy^2)
+fn fp_distance(x1: Int, y1: Int, x2: Int, y2: Int) -> Int {
+    let dx = fp_sub(x2, x1);
+    let dy = fp_sub(y2, y1);
+    fp_sqrt(fp_add(fp_mul(dx, dx), fp_mul(dy, dy)))
+}
+
+// Evaluate polynomial a0 + a1*x + a2*x^2 (fixed-point coefficients)
+fn fp_poly2(a0: Int, a1: Int, a2: Int, x: Int) -> Int {
+    fp_add(a0, fp_add(fp_mul(a1, x), fp_mul(a2, fp_mul(x, x))))
+}
+
+fn main() -> Int {
+    let one = fp_from_int(1);
+    let two = fp_from_int(2);
+    let three = fp_from_int(3);
+    let ten = fp_from_int(10);
+    let zero = fp_from_int(0);
+
+    // === Conversion ===
+    assert_eq(fp_to_int(one), 1);
+    assert_eq(fp_to_int(ten), 10);
+    assert_eq(fp_to_int(zero), 0);
+    assert_eq(fp_to_int(fp_from_int(100)), 100);
+    assert_eq(fp_to_int(fp_from_int(0 - 5)), 0 - 5);
+
+    // Fractional conversions
+    let half = fp_from_frac(1, 2);  // 0.5
+    assert_eq(fp_to_int(half), 0);
+    assert_eq(fp_round(half), 1);   // rounds to 1
+
+    let quarter = fp_from_frac(1, 4);  // 0.25
+    assert_eq(fp_round(quarter), 0);
+
+    let three_quarters = fp_from_frac(3, 4);  // 0.75
+    assert_eq(fp_round(three_quarters), 1);
+
+    // === Addition ===
+    assert_eq(fp_to_int(fp_add(one, two)), 3);
+    assert_eq(fp_to_int(fp_add(ten, ten)), 20);
+    assert_eq(fp_to_int(fp_add(one, fp_neg(one))), 0);
+    assert_eq(fp_round(fp_add(half, half)), 1);
+    assert_eq(fp_round(fp_add(quarter, three_quarters)), 1);
+
+    // === Subtraction ===
+    assert_eq(fp_to_int(fp_sub(ten, three)), 7);
+    assert_eq(fp_to_int(fp_sub(one, one)), 0);
+    assert_eq(fp_to_int(fp_sub(zero, one)), 0 - 1);
+
+    // === Multiplication ===
+    assert_eq(fp_to_int(fp_mul(two, three)), 6);
+    assert_eq(fp_to_int(fp_mul(ten, ten)), 100);
+    assert_eq(fp_to_int(fp_mul(one, fp_from_int(42))), 42);
+    assert_eq(fp_to_int(fp_mul(zero, ten)), 0);
+
+    // Fractional multiplication
+    assert_eq(fp_round(fp_mul(half, two)), 1);  // 0.5 * 2 = 1
+    assert_eq(fp_round(fp_mul(half, half)), 0);  // 0.5 * 0.5 = 0.25
+
+    assert_eq(fp_round(fp_mul(fp_from_frac(3, 2), fp_from_frac(2, 3))), 1);  // 1.5 * 0.667 ~ 1
+
+    // === Division ===
+    assert_eq(fp_to_int(fp_div(ten, two)), 5);
+    assert_eq(fp_to_int(fp_div(fp_from_int(100), ten)), 10);
+    assert_eq(fp_round(fp_div(one, three)), 0);  // 1/3 ~ 0.333
+    assert_eq(fp_round(fp_div(two, three)), 1);  // 2/3 ~ 0.667
+
+    // Division inverse: (a/b)*b ~ a
+    let a_val = fp_from_int(7);
+    let b_val = fp_from_int(3);
+    let ratio = fp_div(a_val, b_val);
+    let reconstructed = fp_mul(ratio, b_val);
+    assert(fp_abs(reconstructed - a_val) <= 2);  // within ~0.00003
+
+    // === Absolute value ===
+    assert_eq(fp_abs(one), one);
+    assert_eq(fp_abs(fp_neg(one)), one);
+    assert_eq(fp_abs(zero), zero);
+
+    // === Comparison ===
+    assert_eq(fp_cmp(one, two), 0 - 1);
+    assert_eq(fp_cmp(two, one), 1);
+    assert_eq(fp_cmp(one, one), 0);
+
+    // === Square root ===
+    let sqrt4 = fp_sqrt(fp_from_int(4));
+    assert_eq(fp_round(sqrt4), 2);
+
+    let sqrt9 = fp_sqrt(fp_from_int(9));
+    assert_eq(fp_round(sqrt9), 3);
+
+    let sqrt16 = fp_sqrt(fp_from_int(16));
+    assert_eq(fp_round(sqrt16), 4);
+
+    let sqrt100 = fp_sqrt(fp_from_int(100));
+    assert_eq(fp_round(sqrt100), 10);
+
+    let sqrt1 = fp_sqrt(one);
+    assert_eq(fp_round(sqrt1), 1);
+
+    // sqrt(2) ~ 1.414
+    let sqrt2 = fp_sqrt(two);
+    assert_eq(fp_to_int(sqrt2), 1);
+    // More precise: sqrt(2) * sqrt(2) ~ 2
+    let sq2_check = fp_mul(sqrt2, sqrt2);
+    assert(fp_abs(sq2_check - two) < fp_from_frac(1, 100));  // within 0.01
+
+    // === Power ===
+    assert_eq(fp_to_int(fp_powi(two, 0)), 1);
+    assert_eq(fp_to_int(fp_powi(two, 1)), 2);
+    assert_eq(fp_to_int(fp_powi(two, 3)), 8);
+    assert_eq(fp_to_int(fp_powi(three, 3)), 27);
+    assert_eq(fp_to_int(fp_powi(ten, 2)), 100);
+
+    // === Linear interpolation ===
+    // lerp(0, 10, 0.5) = 5
+    assert_eq(fp_round(fp_lerp(zero, ten, half)), 5);
+    // lerp(0, 10, 0) = 0
+    assert_eq(fp_round(fp_lerp(zero, ten, zero)), 0);
+    // lerp(0, 10, 1) = 10
+    assert_eq(fp_round(fp_lerp(zero, ten, one)), 10);
+    // lerp(2, 8, 0.25) = 3.5
+    let lerp_result = fp_lerp(two, fp_from_int(8), quarter);
+    assert_eq(fp_round(lerp_result), 4);  // 3.5 rounds to 4
+
+    // === Distance ===
+    // distance(0,0, 3,4) = 5
+    let dist = fp_distance(zero, zero, three, fp_from_int(4));
+    assert_eq(fp_round(dist), 5);
+
+    // distance(0,0, 0,0) = 0
+    assert_eq(fp_to_int(fp_distance(zero, zero, zero, zero)), 0);
+
+    // distance(1,0, 0,0) = 1
+    assert_eq(fp_round(fp_distance(one, zero, zero, zero)), 1);
+
+    // === Polynomial evaluation ===
+    // p(x) = 1 + 2x + 3x^2, p(0) = 1, p(1) = 6, p(2) = 17
+    assert_eq(fp_round(fp_poly2(one, two, three, zero)), 1);
+    assert_eq(fp_round(fp_poly2(one, two, three, one)), 6);
+    assert_eq(fp_round(fp_poly2(one, two, three, two)), 17);
+
+    // === Verify sqrt identity: sqrt(a*b) ~ sqrt(a) * sqrt(b) ===
+    let sa = fp_sqrt(fp_from_int(4));
+    let sb = fp_sqrt(fp_from_int(9));
+    let sab = fp_sqrt(fp_from_int(36));
+    let product = fp_mul(sa, sb);
+    assert(fp_abs(product - sab) < fp_from_frac(1, 10));
+
+    0
+}

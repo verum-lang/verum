@@ -1,0 +1,867 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, manipulation, shape
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT tensor manipulation operations — squeeze, concat, stack, split, flip, roll, repeat
+
+// ============================================================================
+// Array types: Arr4 (4 elements) and Arr8 (8 elements)
+// ============================================================================
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+// ============================================================================
+// Arr4 helpers
+// ============================================================================
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+fn arr4_new(a: Int, b: Int, c: Int, d: Int) -> Arr4 {
+    Arr4 { e0: a, e1: b, e2: c, e3: d }
+}
+
+fn arr4_eq(a: Arr4, b: Arr4) -> Bool {
+    a.e0 == b.e0 && a.e1 == b.e1 && a.e2 == b.e2 && a.e3 == b.e3
+}
+
+// ============================================================================
+// Arr8 helpers
+// ============================================================================
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_new(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: h }
+}
+
+fn arr8_eq(a: Arr8, b: Arr8) -> Bool {
+    a.e0 == b.e0 && a.e1 == b.e1 && a.e2 == b.e2 && a.e3 == b.e3
+    && a.e4 == b.e4 && a.e5 == b.e5 && a.e6 == b.e6 && a.e7 == b.e7
+}
+
+// ============================================================================
+// Shape type: represents tensor dimensions (up to 4 dims)
+// ============================================================================
+
+type Shape is { d0: Int, d1: Int, d2: Int, d3: Int, ndim: Int };
+
+fn shape1(d0: Int) -> Shape {
+    Shape { d0: d0, d1: 0, d2: 0, d3: 0, ndim: 1 }
+}
+
+fn shape2(d0: Int, d1: Int) -> Shape {
+    Shape { d0: d0, d1: d1, d2: 0, d3: 0, ndim: 2 }
+}
+
+fn shape3(d0: Int, d1: Int, d2: Int) -> Shape {
+    Shape { d0: d0, d1: d1, d2: d2, d3: 0, ndim: 3 }
+}
+
+fn shape4(d0: Int, d1: Int, d2: Int, d3: Int) -> Shape {
+    Shape { d0: d0, d1: d1, d2: d2, d3: d3, ndim: 4 }
+}
+
+fn shape_get(s: Shape, i: Int) -> Int {
+    if i == 0 { s.d0 } else if i == 1 { s.d1 } else if i == 2 { s.d2 }
+    else { s.d3 }
+}
+
+fn shape_numel(s: Shape) -> Int {
+    if s.ndim == 1 { s.d0 }
+    else if s.ndim == 2 { s.d0 * s.d1 }
+    else if s.ndim == 3 { s.d0 * s.d1 * s.d2 }
+    else { s.d0 * s.d1 * s.d2 * s.d3 }
+}
+
+// ============================================================================
+// Concatenation: join two Arr4 arrays into one Arr8
+// ============================================================================
+
+fn concat_arr4(a: Arr4, b: Arr4) -> Arr8 {
+    Arr8 {
+        e0: a.e0, e1: a.e1, e2: a.e2, e3: a.e3,
+        e4: b.e0, e5: b.e1, e6: b.e2, e7: b.e3
+    }
+}
+
+// Concatenation of two partial Arr8 arrays (len_a + len_b elements)
+fn concat_arr8(a: Arr8, len_a: Int, b: Arr8, len_b: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len_a {
+        out = arr8_set(out, i, arr8_get(a, i));
+        i = i + 1;
+    }
+    i = 0;
+    while i < len_b {
+        out = arr8_set(out, len_a + i, arr8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Split: split Arr8 at position into two Arr4s
+// ============================================================================
+
+fn split_at_arr8(a: Arr8, pos: Int) -> Arr4 {
+    // Returns the first `pos` elements (capped at 4)
+    let mut out = arr4_zeros();
+    let mut i = 0;
+    while i < pos {
+        out = arr4_set(out, i, arr8_get(a, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn split_after_arr8(a: Arr8, pos: Int, len: Int) -> Arr4 {
+    // Returns elements from position `pos` for `len` elements
+    let mut out = arr4_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr4_set(out, i, arr8_get(a, pos + i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Flip (reverse) an Arr4
+// ============================================================================
+
+fn flip_arr4(a: Arr4, len: Int) -> Arr4 {
+    let mut out = arr4_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr4_set(out, i, arr4_get(a, len - 1 - i));
+        i = i + 1;
+    }
+    out
+}
+
+// Flip (reverse) an Arr8
+fn flip_arr8(a: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(a, len - 1 - i));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Roll (circular shift): positive shift = shift right
+// ============================================================================
+
+fn roll_arr4(a: Arr4, len: Int, shift: Int) -> Arr4 {
+    let mut out = arr4_zeros();
+    let mut i = 0;
+    while i < len {
+        // Compute source index: (i - shift) mod len
+        let mut src = i - shift;
+        while src < 0 {
+            src = src + len;
+        }
+        while src >= len {
+            src = src - len;
+        }
+        out = arr4_set(out, i, arr4_get(a, src));
+        i = i + 1;
+    }
+    out
+}
+
+fn roll_arr8(a: Arr8, len: Int, shift: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        let mut src = i - shift;
+        while src < 0 {
+            src = src + len;
+        }
+        while src >= len {
+            src = src - len;
+        }
+        out = arr8_set(out, i, arr8_get(a, src));
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Repeat (tile): repeat an Arr4 into an Arr8
+// ============================================================================
+
+fn repeat_arr4(a: Arr4, len: Int, times: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut t = 0;
+    while t < times {
+        let mut i = 0;
+        while i < len {
+            let dst = t * len + i;
+            if dst < 8 {
+                out = arr8_set(out, dst, arr4_get(a, i));
+            }
+            i = i + 1;
+        }
+        t = t + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Squeeze: remove dimensions of size 1 from a shape
+// ============================================================================
+
+fn squeeze(s: Shape) -> Shape {
+    // Collect non-1 dimensions
+    let mut out_d0 = 0;
+    let mut out_d1 = 0;
+    let mut out_d2 = 0;
+    let mut out_d3 = 0;
+    let mut out_ndim = 0;
+
+    let mut i = 0;
+    while i < s.ndim {
+        let d = shape_get(s, i);
+        if d != 1 {
+            if out_ndim == 0 { out_d0 = d; }
+            else if out_ndim == 1 { out_d1 = d; }
+            else if out_ndim == 2 { out_d2 = d; }
+            else { out_d3 = d; }
+            out_ndim = out_ndim + 1;
+        }
+        i = i + 1;
+    }
+
+    // If all dims were 1, keep a scalar shape (ndim=1, d0=1)
+    if out_ndim == 0 {
+        Shape { d0: 1, d1: 0, d2: 0, d3: 0, ndim: 1 }
+    } else {
+        Shape { d0: out_d0, d1: out_d1, d2: out_d2, d3: out_d3, ndim: out_ndim }
+    }
+}
+
+// ============================================================================
+// Unsqueeze: insert a dimension of size 1 at a given axis
+// ============================================================================
+
+fn unsqueeze(s: Shape, axis: Int) -> Shape {
+    // Insert dim=1 at position `axis`, shifting existing dims right
+    let new_ndim = s.ndim + 1;
+    let mut dims = arr4_zeros();
+
+    // Copy dims before axis
+    let mut i = 0;
+    while i < axis {
+        dims = arr4_set(dims, i, shape_get(s, i));
+        i = i + 1;
+    }
+    // Insert the new dimension
+    dims = arr4_set(dims, axis, 1);
+    // Copy remaining dims
+    i = axis;
+    while i < s.ndim {
+        dims = arr4_set(dims, i + 1, shape_get(s, i));
+        i = i + 1;
+    }
+
+    Shape {
+        d0: arr4_get(dims, 0),
+        d1: arr4_get(dims, 1),
+        d2: arr4_get(dims, 2),
+        d3: arr4_get(dims, 3),
+        ndim: new_ndim
+    }
+}
+
+// ============================================================================
+// Stack simulation: unsqueeze + concat along new axis
+// For simplicity, we stack two Arr4 arrays along axis 0 to get Arr8
+// representing a 2D tensor of shape (2, len)
+// ============================================================================
+
+fn stack_arr4(a: Arr4, b: Arr4) -> Arr8 {
+    // Stack along axis 0: row 0 = a, row 1 = b
+    concat_arr4(a, b)
+}
+
+// ============================================================================
+// Flip along axis for 2D (rows x cols stored in Arr8)
+// ============================================================================
+
+fn flip_2d_axis0(data: Arr8, rows: Int, cols: Int) -> Arr8 {
+    // Reverse row order in a 2D array
+    let mut out = arr8_zeros();
+    let mut r = 0;
+    while r < rows {
+        let src_row = rows - 1 - r;
+        let mut c = 0;
+        while c < cols {
+            out = arr8_set(out, r * cols + c, arr8_get(data, src_row * cols + c));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    out
+}
+
+fn flip_2d_axis1(data: Arr8, rows: Int, cols: Int) -> Arr8 {
+    // Reverse column order in a 2D array
+    let mut out = arr8_zeros();
+    let mut r = 0;
+    while r < rows {
+        let mut c = 0;
+        while c < cols {
+            out = arr8_set(out, r * cols + c, arr8_get(data, r * cols + (cols - 1 - c)));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Test 1: Array concatenation (two Arr4 -> Arr8)
+// ============================================================================
+
+fn test_concat_basic() {
+    let a = arr4_new(1, 2, 3, 4);
+    let b = arr4_new(5, 6, 7, 8);
+    let c = concat_arr4(a, b);
+
+    assert_eq(arr8_get(c, 0), 1);
+    assert_eq(arr8_get(c, 1), 2);
+    assert_eq(arr8_get(c, 2), 3);
+    assert_eq(arr8_get(c, 3), 4);
+    assert_eq(arr8_get(c, 4), 5);
+    assert_eq(arr8_get(c, 5), 6);
+    assert_eq(arr8_get(c, 6), 7);
+    assert_eq(arr8_get(c, 7), 8);
+}
+
+fn test_concat_partial() {
+    // Concatenate 3-element and 2-element arrays
+    let a = arr8_new(10, 20, 30, 0, 0, 0, 0, 0);
+    let b = arr8_new(40, 50, 0, 0, 0, 0, 0, 0);
+    let c = concat_arr8(a, 3, b, 2);
+
+    assert_eq(arr8_get(c, 0), 10);
+    assert_eq(arr8_get(c, 1), 20);
+    assert_eq(arr8_get(c, 2), 30);
+    assert_eq(arr8_get(c, 3), 40);
+    assert_eq(arr8_get(c, 4), 50);
+}
+
+fn test_concat_with_negatives() {
+    let a = arr4_new(-1, -2, -3, -4);
+    let b = arr4_new(5, 6, 7, 8);
+    let c = concat_arr4(a, b);
+
+    assert_eq(arr8_get(c, 0), -1);
+    assert_eq(arr8_get(c, 3), -4);
+    assert_eq(arr8_get(c, 4), 5);
+    assert_eq(arr8_get(c, 7), 8);
+
+    // Sum should be: (-1-2-3-4)+(5+6+7+8) = -10+26 = 16
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 8 {
+        sum = sum + arr8_get(c, i);
+        i = i + 1;
+    }
+    assert_eq(sum, 16);
+}
+
+// ============================================================================
+// Test 2: Stack (unsqueeze + concat)
+// ============================================================================
+
+fn test_stack_two_vectors() {
+    // Stack [1,2,3,4] and [5,6,7,8] along axis 0
+    // Result shape: (2, 4), data: [1,2,3,4,5,6,7,8]
+    let a = arr4_new(1, 2, 3, 4);
+    let b = arr4_new(5, 6, 7, 8);
+    let stacked = stack_arr4(a, b);
+
+    // Row 0
+    assert_eq(arr8_get(stacked, 0), 1);
+    assert_eq(arr8_get(stacked, 1), 2);
+    assert_eq(arr8_get(stacked, 2), 3);
+    assert_eq(arr8_get(stacked, 3), 4);
+    // Row 1
+    assert_eq(arr8_get(stacked, 4), 5);
+    assert_eq(arr8_get(stacked, 5), 6);
+    assert_eq(arr8_get(stacked, 6), 7);
+    assert_eq(arr8_get(stacked, 7), 8);
+
+    // Verify shape via unsqueeze
+    let orig_shape = shape1(4);
+    let stacked_shape = unsqueeze(orig_shape, 0);
+    assert_eq(stacked_shape.ndim, 2);
+    assert_eq(stacked_shape.d0, 1);
+    assert_eq(stacked_shape.d1, 4);
+}
+
+fn test_stack_identical_vectors() {
+    let v = arr4_new(10, 20, 30, 40);
+    let stacked = stack_arr4(v, v);
+
+    // Both rows should be identical
+    assert_eq(arr8_get(stacked, 0), arr8_get(stacked, 4));
+    assert_eq(arr8_get(stacked, 1), arr8_get(stacked, 5));
+    assert_eq(arr8_get(stacked, 2), arr8_get(stacked, 6));
+    assert_eq(arr8_get(stacked, 3), arr8_get(stacked, 7));
+}
+
+// ============================================================================
+// Test 3: Split operations
+// ============================================================================
+
+fn test_split_at_middle() {
+    let data = arr8_new(10, 20, 30, 40, 50, 60, 70, 80);
+
+    // Split at position 4: first half
+    let first = split_at_arr8(data, 4);
+    assert_eq(arr4_get(first, 0), 10);
+    assert_eq(arr4_get(first, 1), 20);
+    assert_eq(arr4_get(first, 2), 30);
+    assert_eq(arr4_get(first, 3), 40);
+
+    // Second half (4 elements starting at position 4)
+    let second = split_after_arr8(data, 4, 4);
+    assert_eq(arr4_get(second, 0), 50);
+    assert_eq(arr4_get(second, 1), 60);
+    assert_eq(arr4_get(second, 2), 70);
+    assert_eq(arr4_get(second, 3), 80);
+}
+
+fn test_split_uneven() {
+    let data = arr8_new(1, 2, 3, 4, 5, 6, 7, 0);
+
+    // Split at position 3: first 3 elements
+    let first = split_at_arr8(data, 3);
+    assert_eq(arr4_get(first, 0), 1);
+    assert_eq(arr4_get(first, 1), 2);
+    assert_eq(arr4_get(first, 2), 3);
+
+    // Next 4 elements starting at position 3
+    let second = split_after_arr8(data, 3, 4);
+    assert_eq(arr4_get(second, 0), 4);
+    assert_eq(arr4_get(second, 1), 5);
+    assert_eq(arr4_get(second, 2), 6);
+    assert_eq(arr4_get(second, 3), 7);
+}
+
+fn test_split_and_reconstruct() {
+    // Split then concat should recover original
+    let orig = arr8_new(11, 22, 33, 44, 55, 66, 77, 88);
+
+    let first = split_at_arr8(orig, 4);
+    let second = split_after_arr8(orig, 4, 4);
+    let reconstructed = concat_arr4(first, second);
+
+    assert(arr8_eq(orig, reconstructed));
+}
+
+// ============================================================================
+// Test 4: Flip (reverse) along axis
+// ============================================================================
+
+fn test_flip_arr4() {
+    let a = arr4_new(1, 2, 3, 4);
+    let flipped = flip_arr4(a, 4);
+
+    assert_eq(arr4_get(flipped, 0), 4);
+    assert_eq(arr4_get(flipped, 1), 3);
+    assert_eq(arr4_get(flipped, 2), 2);
+    assert_eq(arr4_get(flipped, 3), 1);
+
+    // Double flip recovers original
+    let double_flipped = flip_arr4(flipped, 4);
+    assert(arr4_eq(a, double_flipped));
+}
+
+fn test_flip_arr8() {
+    let a = arr8_new(10, 20, 30, 40, 50, 60, 70, 80);
+    let flipped = flip_arr8(a, 8);
+
+    assert_eq(arr8_get(flipped, 0), 80);
+    assert_eq(arr8_get(flipped, 1), 70);
+    assert_eq(arr8_get(flipped, 2), 60);
+    assert_eq(arr8_get(flipped, 3), 50);
+    assert_eq(arr8_get(flipped, 4), 40);
+    assert_eq(arr8_get(flipped, 5), 30);
+    assert_eq(arr8_get(flipped, 6), 20);
+    assert_eq(arr8_get(flipped, 7), 10);
+
+    // Double flip recovers original
+    let double_flipped = flip_arr8(flipped, 8);
+    assert(arr8_eq(a, double_flipped));
+}
+
+fn test_flip_2d_rows() {
+    // 2x4 matrix: [[1,2,3,4],[5,6,7,8]]
+    let data = arr8_new(1, 2, 3, 4, 5, 6, 7, 8);
+
+    // Flip axis 0 (reverse rows): [[5,6,7,8],[1,2,3,4]]
+    let flipped = flip_2d_axis0(data, 2, 4);
+    assert_eq(arr8_get(flipped, 0), 5);
+    assert_eq(arr8_get(flipped, 1), 6);
+    assert_eq(arr8_get(flipped, 2), 7);
+    assert_eq(arr8_get(flipped, 3), 8);
+    assert_eq(arr8_get(flipped, 4), 1);
+    assert_eq(arr8_get(flipped, 5), 2);
+    assert_eq(arr8_get(flipped, 6), 3);
+    assert_eq(arr8_get(flipped, 7), 4);
+}
+
+fn test_flip_2d_cols() {
+    // 2x4 matrix: [[1,2,3,4],[5,6,7,8]]
+    let data = arr8_new(1, 2, 3, 4, 5, 6, 7, 8);
+
+    // Flip axis 1 (reverse columns): [[4,3,2,1],[8,7,6,5]]
+    let flipped = flip_2d_axis1(data, 2, 4);
+    assert_eq(arr8_get(flipped, 0), 4);
+    assert_eq(arr8_get(flipped, 1), 3);
+    assert_eq(arr8_get(flipped, 2), 2);
+    assert_eq(arr8_get(flipped, 3), 1);
+    assert_eq(arr8_get(flipped, 4), 8);
+    assert_eq(arr8_get(flipped, 5), 7);
+    assert_eq(arr8_get(flipped, 6), 6);
+    assert_eq(arr8_get(flipped, 7), 5);
+}
+
+// ============================================================================
+// Test 5: Roll (circular shift)
+// ============================================================================
+
+fn test_roll_right() {
+    let a = arr4_new(1, 2, 3, 4);
+    // Roll right by 1: [4, 1, 2, 3]
+    let rolled = roll_arr4(a, 4, 1);
+    assert_eq(arr4_get(rolled, 0), 4);
+    assert_eq(arr4_get(rolled, 1), 1);
+    assert_eq(arr4_get(rolled, 2), 2);
+    assert_eq(arr4_get(rolled, 3), 3);
+}
+
+fn test_roll_left() {
+    let a = arr4_new(1, 2, 3, 4);
+    // Roll left by 1 (shift = -1): [2, 3, 4, 1]
+    let rolled = roll_arr4(a, 4, -1);
+    assert_eq(arr4_get(rolled, 0), 2);
+    assert_eq(arr4_get(rolled, 1), 3);
+    assert_eq(arr4_get(rolled, 2), 4);
+    assert_eq(arr4_get(rolled, 3), 1);
+}
+
+fn test_roll_full_cycle() {
+    let a = arr4_new(10, 20, 30, 40);
+    // Roll by length: should return original
+    let rolled = roll_arr4(a, 4, 4);
+    assert(arr4_eq(a, rolled));
+
+    // Roll by 0: should return original
+    let rolled0 = roll_arr4(a, 4, 0);
+    assert(arr4_eq(a, rolled0));
+}
+
+fn test_roll_arr8_circular() {
+    let a = arr8_new(1, 2, 3, 4, 5, 6, 7, 8);
+    // Roll right by 3: [6, 7, 8, 1, 2, 3, 4, 5]
+    let rolled = roll_arr8(a, 8, 3);
+    assert_eq(arr8_get(rolled, 0), 6);
+    assert_eq(arr8_get(rolled, 1), 7);
+    assert_eq(arr8_get(rolled, 2), 8);
+    assert_eq(arr8_get(rolled, 3), 1);
+    assert_eq(arr8_get(rolled, 4), 2);
+    assert_eq(arr8_get(rolled, 5), 3);
+    assert_eq(arr8_get(rolled, 6), 4);
+    assert_eq(arr8_get(rolled, 7), 5);
+
+    // Roll back by -3 to recover
+    let recovered = roll_arr8(rolled, 8, -3);
+    assert(arr8_eq(a, recovered));
+}
+
+// ============================================================================
+// Test 6: Repeat (tile) simulation
+// ============================================================================
+
+fn test_repeat_twice() {
+    let a = arr4_new(1, 2, 3, 4);
+    // Repeat 2 times: [1,2,3,4,1,2,3,4]
+    let tiled = repeat_arr4(a, 4, 2);
+    assert_eq(arr8_get(tiled, 0), 1);
+    assert_eq(arr8_get(tiled, 1), 2);
+    assert_eq(arr8_get(tiled, 2), 3);
+    assert_eq(arr8_get(tiled, 3), 4);
+    assert_eq(arr8_get(tiled, 4), 1);
+    assert_eq(arr8_get(tiled, 5), 2);
+    assert_eq(arr8_get(tiled, 6), 3);
+    assert_eq(arr8_get(tiled, 7), 4);
+}
+
+fn test_repeat_short_array() {
+    // Repeat a 2-element array 4 times: [5,10,5,10,5,10,5,10]
+    let a = arr4_new(5, 10, 0, 0);
+    let tiled = repeat_arr4(a, 2, 4);
+    assert_eq(arr8_get(tiled, 0), 5);
+    assert_eq(arr8_get(tiled, 1), 10);
+    assert_eq(arr8_get(tiled, 2), 5);
+    assert_eq(arr8_get(tiled, 3), 10);
+    assert_eq(arr8_get(tiled, 4), 5);
+    assert_eq(arr8_get(tiled, 5), 10);
+    assert_eq(arr8_get(tiled, 6), 5);
+    assert_eq(arr8_get(tiled, 7), 10);
+}
+
+fn test_repeat_single() {
+    // Repeat a single element 8 times
+    let a = arr4_new(42, 0, 0, 0);
+    let tiled = repeat_arr4(a, 1, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(arr8_get(tiled, i), 42);
+        i = i + 1;
+    }
+}
+
+// ============================================================================
+// Test 7: Squeeze (remove dim of size 1)
+// ============================================================================
+
+fn test_squeeze_no_change() {
+    // Shape (3, 4) has no dims of size 1 -> unchanged
+    let s = shape2(3, 4);
+    let sq = squeeze(s);
+    assert_eq(sq.ndim, 2);
+    assert_eq(sq.d0, 3);
+    assert_eq(sq.d1, 4);
+}
+
+fn test_squeeze_leading_one() {
+    // Shape (1, 4) -> shape (4)
+    let s = shape2(1, 4);
+    let sq = squeeze(s);
+    assert_eq(sq.ndim, 1);
+    assert_eq(sq.d0, 4);
+}
+
+fn test_squeeze_trailing_one() {
+    // Shape (3, 1) -> shape (3)
+    let s = shape2(3, 1);
+    let sq = squeeze(s);
+    assert_eq(sq.ndim, 1);
+    assert_eq(sq.d0, 3);
+}
+
+fn test_squeeze_middle_one() {
+    // Shape (2, 1, 4) -> shape (2, 4)
+    let s = shape3(2, 1, 4);
+    let sq = squeeze(s);
+    assert_eq(sq.ndim, 2);
+    assert_eq(sq.d0, 2);
+    assert_eq(sq.d1, 4);
+}
+
+fn test_squeeze_multiple_ones() {
+    // Shape (1, 3, 1, 2) -> shape (3, 2)
+    let s = shape4(1, 3, 1, 2);
+    let sq = squeeze(s);
+    assert_eq(sq.ndim, 2);
+    assert_eq(sq.d0, 3);
+    assert_eq(sq.d1, 2);
+}
+
+fn test_squeeze_all_ones() {
+    // Shape (1, 1, 1) -> scalar shape (1)
+    let s = shape3(1, 1, 1);
+    let sq = squeeze(s);
+    assert_eq(sq.ndim, 1);
+    assert_eq(sq.d0, 1);
+}
+
+fn test_unsqueeze_roundtrip() {
+    // Unsqueeze then squeeze should recover original shape
+    let s = shape2(3, 4);
+
+    // Unsqueeze at axis 0: (1, 3, 4)
+    let expanded = unsqueeze(s, 0);
+    assert_eq(expanded.ndim, 3);
+    assert_eq(expanded.d0, 1);
+    assert_eq(expanded.d1, 3);
+    assert_eq(expanded.d2, 4);
+
+    // Squeeze back: (3, 4)
+    let recovered = squeeze(expanded);
+    assert_eq(recovered.ndim, 2);
+    assert_eq(recovered.d0, 3);
+    assert_eq(recovered.d1, 4);
+}
+
+fn test_unsqueeze_at_end() {
+    // Shape (2, 3) -> unsqueeze at axis 2 -> (2, 3, 1)
+    let s = shape2(2, 3);
+    let expanded = unsqueeze(s, 2);
+    assert_eq(expanded.ndim, 3);
+    assert_eq(expanded.d0, 2);
+    assert_eq(expanded.d1, 3);
+    assert_eq(expanded.d2, 1);
+
+    // Squeeze recovers
+    let recovered = squeeze(expanded);
+    assert_eq(recovered.ndim, 2);
+    assert_eq(recovered.d0, 2);
+    assert_eq(recovered.d1, 3);
+}
+
+// ============================================================================
+// Combined pipeline tests
+// ============================================================================
+
+fn test_concat_then_flip() {
+    // Concat [1,2,3,4] and [5,6,7,8], then flip
+    let a = arr4_new(1, 2, 3, 4);
+    let b = arr4_new(5, 6, 7, 8);
+    let joined = concat_arr4(a, b);
+    let flipped = flip_arr8(joined, 8);
+
+    assert_eq(arr8_get(flipped, 0), 8);
+    assert_eq(arr8_get(flipped, 7), 1);
+
+    // Flip again to recover
+    let recovered = flip_arr8(flipped, 8);
+    assert(arr8_eq(joined, recovered));
+}
+
+fn test_repeat_then_roll() {
+    // Repeat [1,2] x4 = [1,2,1,2,1,2,1,2], then roll right by 1
+    let a = arr4_new(1, 2, 0, 0);
+    let tiled = repeat_arr4(a, 2, 4);
+    let rolled = roll_arr8(tiled, 8, 1);
+
+    // Expected: [2,1,2,1,2,1,2,1]
+    assert_eq(arr8_get(rolled, 0), 2);
+    assert_eq(arr8_get(rolled, 1), 1);
+    assert_eq(arr8_get(rolled, 2), 2);
+    assert_eq(arr8_get(rolled, 3), 1);
+    assert_eq(arr8_get(rolled, 4), 2);
+    assert_eq(arr8_get(rolled, 5), 1);
+    assert_eq(arr8_get(rolled, 6), 2);
+    assert_eq(arr8_get(rolled, 7), 1);
+}
+
+fn test_shape_numel() {
+    assert_eq(shape_numel(shape1(5)), 5);
+    assert_eq(shape_numel(shape2(3, 4)), 12);
+    assert_eq(shape_numel(shape3(2, 3, 4)), 24);
+    assert_eq(shape_numel(shape4(2, 3, 4, 5)), 120);
+
+    // Squeeze preserves numel (for non-degenerate cases)
+    let s = shape3(2, 1, 4);
+    let sq = squeeze(s);
+    assert_eq(shape_numel(s), shape_numel(sq));
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+fn main() -> Int {
+    // Concatenation
+    test_concat_basic();
+    test_concat_partial();
+    test_concat_with_negatives();
+
+    // Stack
+    test_stack_two_vectors();
+    test_stack_identical_vectors();
+
+    // Split
+    test_split_at_middle();
+    test_split_uneven();
+    test_split_and_reconstruct();
+
+    // Flip
+    test_flip_arr4();
+    test_flip_arr8();
+    test_flip_2d_rows();
+    test_flip_2d_cols();
+
+    // Roll
+    test_roll_right();
+    test_roll_left();
+    test_roll_full_cycle();
+    test_roll_arr8_circular();
+
+    // Repeat
+    test_repeat_twice();
+    test_repeat_short_array();
+    test_repeat_single();
+
+    // Squeeze
+    test_squeeze_no_change();
+    test_squeeze_leading_one();
+    test_squeeze_trailing_one();
+    test_squeeze_middle_one();
+    test_squeeze_multiple_ones();
+    test_squeeze_all_ones();
+    test_unsqueeze_roundtrip();
+    test_unsqueeze_at_end();
+
+    // Combined pipelines
+    test_concat_then_flip();
+    test_repeat_then_roll();
+    test_shape_numel();
+
+    print("[OK] 142_tensor_manipulation_aot");
+    0
+}

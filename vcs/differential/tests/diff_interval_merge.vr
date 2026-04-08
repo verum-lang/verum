@@ -1,0 +1,169 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, interval, merge, sweep-line
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+fn max2(a: Int, b_val: Int) -> Int { if a > b_val { a } else { b_val } }
+fn min2(a: Int, b_val: Int) -> Int { if a < b_val { a } else { b_val } }
+
+// Intervals stored as pairs: starts[i], ends[i] for interval i
+// Sort by start time (selection sort on indices)
+fn sort_intervals(starts: Arr8, ends: Arr8, n: Int) -> Arr8 {
+    let mut idx = zeros();
+    let mut i = 0;
+    while i < n { idx = set(idx, i, i); i = i + 1; }
+    let mut i2 = 0;
+    while i2 < n - 1 {
+        let mut min_j = i2;
+        let mut j = i2 + 1;
+        while j < n {
+            if get(starts, get(idx, j)) < get(starts, get(idx, min_j)) {
+                min_j = j;
+            } else if get(starts, get(idx, j)) == get(starts, get(idx, min_j)) {
+                if get(ends, get(idx, j)) < get(ends, get(idx, min_j)) { min_j = j; }
+            }
+            j = j + 1;
+        }
+        if min_j != i2 {
+            let tmp = get(idx, i2);
+            idx = set(idx, i2, get(idx, min_j));
+            idx = set(idx, min_j, tmp);
+        }
+        i2 = i2 + 1;
+    }
+    idx
+}
+
+// Merge overlapping intervals, return count of merged intervals
+fn merge_intervals_count(starts: Arr8, ends: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let sorted = sort_intervals(starts, ends, n);
+    let mut count = 1;
+    let mut cur_end = get(ends, get(sorted, 0));
+    let mut i = 1;
+    while i < n {
+        let si = get(starts, get(sorted, i));
+        let ei = get(ends, get(sorted, i));
+        if si > cur_end {
+            count = count + 1;
+            cur_end = ei;
+        } else {
+            cur_end = max2(cur_end, ei);
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// Total covered length after merging
+fn total_covered_length(starts: Arr8, ends: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let sorted = sort_intervals(starts, ends, n);
+    let mut total = 0;
+    let mut cur_start = get(starts, get(sorted, 0));
+    let mut cur_end = get(ends, get(sorted, 0));
+    let mut i = 1;
+    while i < n {
+        let si = get(starts, get(sorted, i));
+        let ei = get(ends, get(sorted, i));
+        if si > cur_end {
+            total = total + cur_end - cur_start;
+            cur_start = si;
+            cur_end = ei;
+        } else {
+            cur_end = max2(cur_end, ei);
+        }
+        i = i + 1;
+    }
+    total = total + cur_end - cur_start;
+    total
+}
+
+// Check if point is covered by any interval
+fn point_in_intervals(starts: Arr8, ends: Arr8, n: Int, point: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        if point >= get(starts, i) {
+            if point <= get(ends, i) { return 1; }
+        }
+        i = i + 1;
+    }
+    0
+}
+
+// Intersection of two intervals, returns length (0 if no overlap)
+fn interval_intersection(s1: Int, e1: Int, s2: Int, e2: Int) -> Int {
+    let s = max2(s1, s2);
+    let e = min2(e1, e2);
+    if s > e { 0 } else { e - s }
+}
+
+fn main() -> Int {
+    // Non-overlapping: [1,3], [5,7], [9,11]
+    let s1 = Arr8 { d0: 1, d1: 5, d2: 9, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e1 = Arr8 { d0: 3, d1: 7, d2: 11, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(merge_intervals_count(s1, e1, 3), 3);
+    assert_eq(total_covered_length(s1, e1, 3), 6); // 2+2+2
+
+    // Fully overlapping: [1,10], [2,5], [3,7]
+    let s2 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e2 = Arr8 { d0: 10, d1: 5, d2: 7, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(merge_intervals_count(s2, e2, 3), 1);
+    assert_eq(total_covered_length(s2, e2, 3), 9); // [1,10]
+
+    // Partially overlapping: [1,5], [3,8], [10,12]
+    let s3 = Arr8 { d0: 1, d1: 3, d2: 10, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e3 = Arr8 { d0: 5, d1: 8, d2: 12, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(merge_intervals_count(s3, e3, 3), 2); // [1,8] and [10,12]
+    assert_eq(total_covered_length(s3, e3, 3), 9);  // 7+2
+
+    // Single interval
+    assert_eq(merge_intervals_count(s1, e1, 1), 1);
+    assert_eq(total_covered_length(s1, e1, 1), 2);
+
+    // Point containment
+    assert_eq(point_in_intervals(s3, e3, 3, 4), 1);  // in [1,5]
+    assert_eq(point_in_intervals(s3, e3, 3, 9), 0);  // gap
+    assert_eq(point_in_intervals(s3, e3, 3, 11), 1); // in [10,12]
+    assert_eq(point_in_intervals(s3, e3, 3, 0), 0);  // before all
+
+    // Intersection
+    assert_eq(interval_intersection(1, 5, 3, 8), 2); // [3,5]
+    assert_eq(interval_intersection(1, 3, 5, 7), 0); // no overlap
+    assert_eq(interval_intersection(1, 10, 3, 7), 4); // [3,7]
+    assert_eq(interval_intersection(5, 5, 5, 5), 0); // point = length 0
+
+    // Adjacent intervals: [1,5], [5,10] — touching at boundary, merged
+    let s4 = Arr8 { d0: 1, d1: 5, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e4 = Arr8 { d0: 5, d1: 10, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(merge_intervals_count(s4, e4, 2), 1); // si=5 not > cur_end=5, so merged
+    assert_eq(total_covered_length(s4, e4, 2), 9); // [1,10]
+
+    // Unsorted input
+    let s5 = Arr8 { d0: 5, d1: 1, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let e5 = Arr8 { d0: 8, d1: 4, d2: 6, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(merge_intervals_count(s5, e5, 3), 1); // [1,8] after merge
+    assert_eq(total_covered_length(s5, e5, 3), 7);
+
+    print("DIFF_OK: interval_merge");
+    0
+}

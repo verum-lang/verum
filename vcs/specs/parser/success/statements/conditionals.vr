@@ -1,0 +1,685 @@
+// @test: parse-pass
+// @tier: 0
+// @category: statements
+// @description: Comprehensive tests for if/match as statements
+
+// =============================================================================
+// Grammar Reference:
+// if_expr = 'if' , if_condition , block_expr , [ 'else' , ( if_expr | block_expr ) ] ;
+// if_condition = let_condition , { '&&' , let_condition } ;
+// let_condition = 'let' , pattern , '=' , expression | expression ;
+// match_expr = [ expression , '.' ] , 'match' , [ expression ] , '{' , match_arms , '}' ;
+// match_arms = [ match_arm , { ',' , match_arm } , [ ',' ] ] ;
+// match_arm = { attribute } , pattern , [ guard ] , '=>' , expression ;
+// guard = 'if' , expression | 'where' , expression ;
+// =============================================================================
+
+// =============================================================================
+// IF AS STATEMENT
+// =============================================================================
+
+fn test_basic_if_statement() {
+    // Simple if without else
+    if condition {
+        do_something();
+    }
+}
+
+fn test_if_else_statement() {
+    // If with else
+    if condition {
+        do_something();
+    } else {
+        do_other();
+    }
+}
+
+fn test_if_else_if_statement() {
+    // Chained if-else-if
+    if condition1 {
+        action1();
+    } else if condition2 {
+        action2();
+    } else if condition3 {
+        action3();
+    } else {
+        default_action();
+    }
+}
+
+fn test_if_with_comparison_conditions() {
+    if x > 0 {
+        positive();
+    }
+
+    if x < 0 {
+        negative();
+    }
+
+    if x == 0 {
+        zero();
+    }
+
+    if x != 0 {
+        non_zero();
+    }
+
+    if x >= min && x <= max {
+        in_range();
+    }
+}
+
+fn test_if_with_logical_conditions() {
+    // AND condition
+    if a && b {
+        both_true();
+    }
+
+    // OR condition
+    if a || b {
+        either_true();
+    }
+
+    // NOT condition
+    if !condition {
+        not_condition();
+    }
+
+    // Complex logical
+    if (a && b) || (c && d) {
+        complex_logic();
+    }
+
+    if !(a || b) && c {
+        another_complex();
+    }
+}
+
+fn test_if_with_method_call_condition() {
+    if list.is_empty() {
+        handle_empty();
+    }
+
+    if user.is_admin() && user.is_active() {
+        admin_action();
+    }
+
+    if collection.len() > 0 {
+        process(collection);
+    }
+}
+
+fn test_if_let_statement() {
+    // If let for pattern matching
+    if let Some(value) = optional {
+        use_value(value);
+    }
+
+    if let Ok(data) = result {
+        process(data);
+    }
+
+    if let Point { x, y } = point {
+        draw(x, y);
+    }
+}
+
+fn test_if_let_with_else() {
+    if let Some(value) = optional {
+        use_value(value);
+    } else {
+        handle_none();
+    }
+
+    if let Ok(data) = result {
+        process(data);
+    } else {
+        handle_error();
+    }
+}
+
+fn test_if_let_chain() {
+    // Multiple if let conditions
+    if let Some(x) = opt_x && let Some(y) = opt_y {
+        use_both(x, y);
+    }
+
+    if let Some(a) = get_a() && let Some(b) = get_b() && let Some(c) = get_c() {
+        use_all(a, b, c);
+    }
+}
+
+fn test_if_let_with_regular_condition() {
+    // Mixed let and regular conditions
+    if let Some(value) = optional && value > 0 {
+        use_positive(value);
+    }
+
+    if let Some(x) = get() && condition {
+        use_x(x);
+    }
+
+    if let Ok(n) = parse() && n > 0 && n < 100 {
+        process_valid(n);
+    }
+}
+
+fn test_nested_if_statements() {
+    if outer_condition {
+        if inner_condition {
+            inner_action();
+        }
+    }
+
+    if a {
+        if b {
+            if c {
+                deeply_nested();
+            }
+        }
+    }
+}
+
+fn test_if_with_block_bodies() {
+    if condition {
+        let x = compute();
+        let y = transform(x);
+        finalize(y);
+    } else {
+        let default = get_default();
+        use_default(default);
+    }
+}
+
+fn test_if_with_early_return() {
+    if error_condition {
+        log_error();
+        return;
+    }
+
+    let Some(x) = opt else {
+        return;
+    };
+
+    process(x);
+}
+
+fn test_if_with_control_flow() {
+    // In loop context
+    for item in items {
+        if skip(item) {
+            continue;
+        }
+
+        if done(item) {
+            break;
+        }
+
+        process(item);
+    }
+}
+
+// =============================================================================
+// MATCH AS STATEMENT
+// =============================================================================
+
+fn test_basic_match_statement() {
+    // Simple match
+    match value {
+        0 => zero(),
+        1 => one(),
+        _ => other()
+    };
+}
+
+fn test_match_with_patterns() {
+    // Literal patterns
+    match n {
+        0 => zero(),
+        1 => one(),
+        2 => two(),
+        _ => many()
+    };
+
+    // Variable binding
+    match value {
+        x => process(x)
+    };
+
+    // Wildcard
+    match value {
+        _ => ignore()
+    };
+}
+
+fn test_match_with_variant_patterns() {
+    // Maybe type
+    match optional {
+        Some(v) => use_value(v),
+        None => handle_none()
+    };
+
+    // Result type
+    match result {
+        Ok(data) => process(data),
+        Err(e) => handle_error(e)
+    };
+
+    // Custom variants
+    match color {
+        Color.Red => red(),
+        Color.Green => green(),
+        Color.Blue => blue()
+    };
+}
+
+fn test_match_with_tuple_patterns() {
+    match pair {
+        (0, 0) => origin(),
+        (x, 0) => on_x_axis(x),
+        (0, y) => on_y_axis(y),
+        (x, y) => general(x, y)
+    };
+
+    match triple {
+        (a, b, c) => process(a, b, c)
+    };
+}
+
+fn test_match_with_record_patterns() {
+    match point {
+        Point { x: 0, y: 0 } => origin(),
+        Point { x, y: 0 } => x_axis(x),
+        Point { x: 0, y } => y_axis(y),
+        Point { x, y } => general(x, y)
+    };
+
+    match person {
+        Person { name, age, .. } => greet(name, age)
+    };
+}
+
+fn test_match_with_array_patterns() {
+    match arr {
+        [] => empty(),
+        [x] => single(x),
+        [x, y] => pair(x, y),
+        [x, ..rest] => many(x, rest)
+    };
+}
+
+fn test_match_with_range_patterns() {
+    match n {
+        0..=9 => digit(),
+        10..=99 => two_digit(),
+        100..=999 => three_digit(),
+        _ => large()
+    };
+
+    match ch {
+        'a'..='z' => lowercase(),
+        'A'..='Z' => uppercase(),
+        '0'..='9' => digit(),
+        _ => other()
+    };
+}
+
+fn test_match_with_or_patterns() {
+    match value {
+        0 | 1 => small(),
+        2 | 3 | 4 => medium(),
+        _ => large()
+    };
+
+    match result {
+        Ok(0) | Ok(1) => special(),
+        Ok(n) => normal(n),
+        Err(_) => error()
+    };
+}
+
+fn test_match_with_guards() {
+    // If guard
+    match n {
+        x if x > 0 => positive(x),
+        x if x < 0 => negative(x),
+        _ => zero()
+    };
+
+    // Where guard (Verum style)
+    match point {
+        Point { x, y } where x == y => diagonal(x),
+        Point { x, y } where x > y => above_diagonal(x, y),
+        Point { x, y } => below_diagonal(x, y)
+    };
+
+    // Complex guard
+    match value {
+        x if x > 0 && x < 100 => in_range(x),
+        x if is_prime(x) => prime(x),
+        x => other(x)
+    };
+}
+
+fn test_match_with_at_patterns() {
+    match value {
+        x @ 1..=10 => small(x),
+        x @ 11..=100 => medium(x),
+        x => large(x)
+    };
+
+    match optional {
+        opt @ Some(_) => has_value(opt),
+        None => no_value()
+    };
+}
+
+fn test_match_with_nested_patterns() {
+    match nested {
+        Some(Some(x)) => deeply_some(x),
+        Some(None) => partial(),
+        None => nothing()
+    };
+
+    match result_of_option {
+        Ok(Some(x)) => success_with_value(x),
+        Ok(None) => success_empty(),
+        Err(e) => failure(e)
+    };
+}
+
+fn test_match_with_block_arms() {
+    match value {
+        0 => {
+            log("zero");
+            zero_action();
+        },
+        1 => {
+            log("one");
+            one_action();
+        },
+        n => {
+            log(f"other: {n}");
+            other_action(n);
+        }
+    };
+}
+
+fn test_match_with_return_in_arms() {
+    match result {
+        Ok(v) => return v,
+        Err(e) => {
+            log_error(e);
+            return default();
+        }
+    };
+}
+
+fn test_match_exhaustiveness() {
+    // All variants covered
+    match maybe_value {
+        Some(x) => use_x(x),
+        None => use_default()
+    };
+
+    // With wildcard
+    match number {
+        0 => zero(),
+        1 => one(),
+        2 => two(),
+        _ => many()
+    };
+}
+
+fn test_match_method_syntax() {
+    // Method-style match
+    value.match {
+        Some(x) => x,
+        None => default()
+    };
+
+    optional.match {
+        Some(v) if v > 0 => v,
+        Some(_) => 0,
+        None => -1
+    };
+}
+
+fn test_match_conditionals() {
+    // Match with boolean condition as scrutinee
+    match condition1 {
+        true => action1(),
+        false => action2()
+    };
+}
+
+fn test_match_with_variants() {
+    // Match on variant type
+    match value {
+        Number(n) => number_handler(n),
+        Text(s) => text_handler(s),
+        _ => other_handler()
+    };
+}
+
+// =============================================================================
+// MATCH WITH ATTRIBUTES
+// =============================================================================
+
+fn test_match_with_arm_attributes() {
+    match value {
+        @cold Err(e) => handle_error(e),
+        @hot Ok(v) => process(v)
+    };
+
+    match state {
+        @likely State.Running => process(),
+        @unlikely State.Error => recover(),
+        _ => wait()
+    };
+}
+
+// =============================================================================
+// COMBINED IF AND MATCH
+// =============================================================================
+
+fn test_if_containing_match() {
+    if condition {
+        match value {
+            Some(x) => use_x(x),
+            None => {}
+        };
+    }
+}
+
+fn test_match_containing_if() {
+    match option {
+        Some(x) => {
+            if x > 0 {
+                positive(x);
+            } else {
+                non_positive(x);
+            }
+        },
+        None => {}
+    };
+}
+
+fn test_if_else_with_match() {
+    if simple_case {
+        quick_action();
+    } else {
+        match complex_value {
+            Case1 => handle_case1(),
+            Case2 => handle_case2(),
+            _ => default()
+        };
+    }
+}
+
+fn test_match_with_if_guards_and_nested_if() {
+    match result {
+        Ok(x) if x > threshold => {
+            if x > upper_limit {
+                cap(upper_limit);
+            } else {
+                process(x);
+            }
+        },
+        Ok(x) => process(x),
+        Err(e) => {
+            if e.is_recoverable() {
+                recover();
+            } else {
+                abort();
+            }
+        }
+    };
+}
+
+// =============================================================================
+// CONDITIONALS IN LOOPS
+// =============================================================================
+
+fn test_if_in_loop() {
+    for item in items {
+        if condition(item) {
+            process(item);
+        }
+    }
+}
+
+fn test_match_in_loop() {
+    for item in items {
+        match item.kind {
+            Kind.A => process_a(item),
+            Kind.B => process_b(item),
+            _ => skip()
+        };
+    }
+}
+
+fn test_loop_controlled_by_match() {
+    loop {
+        match get_command() {
+            Command.Continue => {},
+            Command.Skip => continue,
+            Command.Stop => break,
+            Command.Process(data) => handle(data)
+        };
+    }
+}
+
+fn test_while_with_if() {
+    while running {
+        if should_pause {
+            pause();
+            continue;
+        }
+
+        if should_stop {
+            break;
+        }
+
+        process();
+    }
+}
+
+// =============================================================================
+// CONDITIONALS AS STATEMENTS VS EXPRESSIONS
+// =============================================================================
+
+fn test_if_as_statement_no_value() {
+    // If as statement (no value used)
+    if condition {
+        side_effect();
+    }
+
+    // Vs if as expression (value used)
+    let result = if condition { 1 } else { 2 };
+}
+
+fn test_match_as_statement_no_value() {
+    // Match as statement
+    match value {
+        0 => action_zero(),
+        1 => action_one(),
+        _ => action_other()
+    };
+
+    // Vs match as expression
+    let result = match value {
+        0 => "zero",
+        1 => "one",
+        _ => "other"
+    };
+}
+
+fn test_if_statement_for_side_effects() {
+    // All branches perform side effects, no return value needed
+    if error_state {
+        log_error();
+        send_alert();
+        increment_error_count();
+    } else if warning_state {
+        log_warning();
+    } else {
+        log_info();
+    }
+}
+
+fn test_match_statement_for_dispatch() {
+    // Dispatch to different handlers
+    match event {
+        Event.Click(x, y) => handle_click(x, y),
+        Event.KeyPress(key) => handle_key(key),
+        Event.Resize(w, h) => handle_resize(w, h),
+        Event.Close => handle_close()
+    };
+}
+
+// =============================================================================
+// CONDITIONALS WITH COMPLEX PATTERNS
+// =============================================================================
+
+fn test_if_let_with_complex_patterns() {
+    if let Some(Point { x, y }) = get_point() && x > 0 && y > 0 {
+        first_quadrant(x, y);
+    }
+
+    if let Ok((a, Some(b))) = complex_result() {
+        use_both(a, b);
+    }
+
+    if let Response { status: 200, body: Some(data), .. } = fetch() {
+        process_data(data);
+    }
+}
+
+fn test_match_with_deep_patterns() {
+    match complex {
+        Wrapper {
+            inner: Inner {
+                value: Some(Data { id, name, .. }),
+                ..
+            },
+            ..
+        } => process(id, name),
+
+        _ => default()
+    };
+}
+
+fn test_match_with_multiple_bindings() {
+    match record {
+        Record {
+            field_a: a,
+            field_b: b,
+            field_c: Some(c),
+            field_d: Ok(d),
+        } if a > 0 && b > 0 => {
+            use_all(a, b, c, d);
+        },
+        _ => {}
+    };
+}

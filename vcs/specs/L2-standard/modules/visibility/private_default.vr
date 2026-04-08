@@ -1,0 +1,224 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, visibility, private
+
+/// Private by default - items without visibility modifiers are private.
+/// Private items are only accessible within their defining module.
+
+module encapsulation {
+    /// Private type - only usable within this module
+    type PrivateType is {
+        secret_data: Int,
+        internal_state: Text
+    };
+
+    /// Private constant
+    const PRIVATE_CONST: Int = 42;
+
+    /// Private function
+    fn private_function(x: Int) -> Int {
+        x * PRIVATE_CONST
+    }
+
+    /// Private protocol
+    type PrivateTrait is protocol {
+        fn internal_method(&self) -> Int;
+    };
+
+    implement PrivateTrait for PrivateType {
+        fn internal_method(&self) -> Int {
+            self.secret_data
+        }
+    }
+
+    /// Public type with private implementation details
+    pub type PublicApi is {
+        // These fields are private (struct fields default to private)
+        internal: PrivateType,
+        cache: Map<Text, Int>
+    };
+
+    implement PublicApi {
+        /// Public constructor - creates instance with private internals
+        pub fn new() -> PublicApi {
+            PublicApi {
+                internal: PrivateType {
+                    secret_data: PRIVATE_CONST,
+                    internal_state: "initialized"
+                },
+                cache: Map.new()
+            }
+        }
+
+        /// Public method
+        pub fn get_value(&self) -> Int {
+            // Can use private items within the same module
+            private_function(self.internal.internal_method())
+        }
+
+        /// Private method - implementation detail
+        fn update_cache(&mut self, key: Text, value: Int) {
+            self.cache.insert(key, value);
+        }
+
+        /// Another public method using private helpers
+        pub fn compute(&mut self, key: Text) -> Int {
+            let result = self.get_value() + 10;
+            self.update_cache(key, result);
+            result
+        }
+    }
+
+    /// Nested module - cannot access parent's private items
+    pub module nested {
+        // The following would be errors:
+        // mount super.PrivateType;    // ERROR: private
+        // mount super.PRIVATE_CONST;  // ERROR: private
+        // mount super.private_function; // ERROR: private
+
+        // Can mount public items
+        mount super.PublicApi;
+
+        pub fn use_api() -> Int {
+            let api = PublicApi.new();
+            api.get_value()
+        }
+    }
+
+    /// Private nested module
+    module private_nested {
+        // Still cannot access parent's private items directly
+        // Must use parent module's scope
+
+        fn helper() -> Int {
+            100
+        }
+    }
+
+    // Parent can use private nested module
+    fn use_private_nested() -> Int {
+        100  // private_nested.helper() value
+    }
+}
+
+module sibling {
+    // Cannot access private items from encapsulation
+    // mount encapsulation.PrivateType;    // ERROR: private
+    // mount encapsulation.PRIVATE_CONST;  // ERROR: private
+    // mount encapsulation.private_function; // ERROR: private
+    // mount encapsulation.private_nested; // ERROR: private module
+
+    // Can only access public items
+    mount encapsulation.PublicApi;
+    mount encapsulation.nested.use_api;
+
+    pub fn use_public_api() -> Int {
+        let mut api = PublicApi.new();
+
+        // Can call public methods
+        let val = api.get_value();
+        let computed = api.compute("key");
+
+        // Cannot access private fields or methods:
+        // api.internal; // ERROR: private field
+        // api.cache;    // ERROR: private field
+        // api.update_cache("x", 1); // ERROR: private method
+
+        use_api() + val + computed
+    }
+}
+
+/// Demonstrating that struct fields are private by default
+module field_visibility {
+    pub type Person is {
+        // All fields private by default
+        name: Text,
+        age: Int,
+        ssn: Text  // Sensitive - definitely should be private
+    };
+
+    implement Person {
+        pub fn new(name: Text, age: Int, ssn: Text) -> Person {
+            Person { name, age, ssn }
+        }
+
+        // Public getters for safe access
+        pub fn name(&self) -> &Text {
+            &self.name
+        }
+
+        pub fn age(&self) -> Int {
+            self.age
+        }
+
+        // No public getter for ssn - truly private
+        fn ssn(&self) -> &Text {
+            &self.ssn
+        }
+
+        pub fn verify_ssn(&self, input: &Text) -> Bool {
+            &self.ssn == input
+        }
+    }
+
+    pub type PersonBuilder is {
+        name: Maybe<Text>,
+        age: Maybe<Int>,
+        ssn: Maybe<Text>
+    };
+
+    implement PersonBuilder {
+        pub fn new() -> PersonBuilder {
+            PersonBuilder { name: None, age: None, ssn: None }
+        }
+
+        pub fn name(mut self, name: Text) -> PersonBuilder {
+            self.name = Some(name);
+            self
+        }
+
+        pub fn age(mut self, age: Int) -> PersonBuilder {
+            self.age = Some(age);
+            self
+        }
+
+        pub fn ssn(mut self, ssn: Text) -> PersonBuilder {
+            self.ssn = Some(ssn);
+            self
+        }
+
+        pub fn build(self) -> Result<Person, Text> {
+            match (self.name, self.age, self.ssn) {
+                (Some(n), Some(a), Some(s)) => Ok(Person.new(n, a, s)),
+                _ => Err("Missing required fields")
+            }
+        }
+    }
+}
+
+fn main() {
+    mount encapsulation.PublicApi;
+    mount sibling.use_public_api;
+    mount field_visibility.{Person, PersonBuilder};
+
+    // Use public API
+    let mut api = PublicApi.new();
+    let value = api.compute("main");
+
+    let result = use_public_api();
+
+    // Use builder pattern for private fields
+    let person = Person.new("Alice", 30, "123-45-6789");
+    let person_result: Result<Person, Text> = Ok(person);
+
+    match person_result {
+        Ok(p) => {
+            // Person created successfully
+            // Methods like name(), age(), verify_ssn() are defined in the module
+        },
+        Err(e) => {
+            // Handle error
+        }
+    }
+}

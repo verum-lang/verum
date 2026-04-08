@@ -1,0 +1,188 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, return, early-return
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: return from functions, return in conditionals,
+// return in loops
+
+// =============================================================================
+// Basic return
+// =============================================================================
+
+fn simple_return() -> Int {
+    return 42;
+}
+
+fn test_simple_return() {
+    assert_eq(simple_return(), 42);
+}
+
+fn return_expression() -> Int {
+    let x = 10;
+    let y = 20;
+    return x + y;
+}
+
+fn test_return_expression() {
+    assert_eq(return_expression(), 30);
+}
+
+// =============================================================================
+// Return in conditionals
+// =============================================================================
+
+fn sign(n: Int) -> Int {
+    if n > 0 {
+        return 1;
+    }
+    if n < 0 {
+        return -1;
+    }
+    return 0;
+}
+
+fn test_return_in_conditional() {
+    assert_eq(sign(5), 1);
+    assert_eq(sign(-5), -1);
+    assert_eq(sign(0), 0);
+    assert_eq(sign(100), 1);
+    assert_eq(sign(-100), -1);
+}
+
+fn first_positive(a: Int, b: Int, c: Int) -> Int {
+    if a > 0 {
+        return a;
+    }
+    if b > 0 {
+        return b;
+    }
+    if c > 0 {
+        return c;
+    }
+    return -1;
+}
+
+fn test_first_positive() {
+    assert_eq(first_positive(5, 10, 15), 5);
+    assert_eq(first_positive(-1, 10, 15), 10);
+    assert_eq(first_positive(-1, -2, 15), 15);
+    assert_eq(first_positive(-1, -2, -3), -1);
+}
+
+// =============================================================================
+// Return in loops
+// =============================================================================
+
+fn find_first_divisor(n: Int) -> Int {
+    let mut d = 2;
+    while d * d <= n {
+        if n % d == 0 {
+            return d;
+        }
+        d = d + 1;
+    }
+    return n;
+}
+
+fn test_return_in_loop() {
+    assert_eq(find_first_divisor(2), 2);
+    assert_eq(find_first_divisor(7), 7);
+    assert_eq(find_first_divisor(12), 2);
+    assert_eq(find_first_divisor(15), 3);
+    assert_eq(find_first_divisor(49), 7);
+}
+
+fn count_until_sum_exceeds(target: Int) -> Int {
+    let mut sum = 0;
+    let mut n = 1;
+    while n < 1000 {
+        sum = sum + n;
+        if sum > target {
+            return n;
+        }
+        n = n + 1;
+    }
+    return -1;
+}
+
+fn test_return_in_loop_with_accumulation() {
+    // 1+2+3+4+5=15>10, so returns 5
+    assert_eq(count_until_sum_exceeds(10), 5);
+    // 1=1>0, returns 1
+    assert_eq(count_until_sum_exceeds(0), 1);
+    // 1+2+3+...+14=105>100, returns 14
+    assert_eq(count_until_sum_exceeds(100), 14);
+}
+
+// =============================================================================
+// Early return guards
+// =============================================================================
+
+fn safe_divide(a: Int, b: Int) -> Int {
+    if b == 0 {
+        return 0;
+    }
+    return a / b;
+}
+
+fn test_guard_return() {
+    assert_eq(safe_divide(10, 2), 5);
+    assert_eq(safe_divide(10, 0), 0);
+    assert_eq(safe_divide(0, 5), 0);
+    assert_eq(safe_divide(100, 10), 10);
+}
+
+fn bounded_value(n: Int) -> Int {
+    if n < 0 {
+        return 0;
+    }
+    if n > 100 {
+        return 100;
+    }
+    return n;
+}
+
+fn test_bounded_return() {
+    assert_eq(bounded_value(-5), 0);
+    assert_eq(bounded_value(0), 0);
+    assert_eq(bounded_value(50), 50);
+    assert_eq(bounded_value(100), 100);
+    assert_eq(bounded_value(200), 100);
+}
+
+// =============================================================================
+// Nested function with return
+// =============================================================================
+
+fn outer_fn(x: Int) -> Int {
+    fn inner_fn(y: Int) -> Int {
+        if y < 0 {
+            return 0;
+        }
+        return y * 2;
+    }
+    return inner_fn(x) + 1;
+}
+
+fn test_nested_fn_return() {
+    assert_eq(outer_fn(5), 11);
+    assert_eq(outer_fn(-5), 1);
+    assert_eq(outer_fn(0), 1);
+}
+
+fn main() -> Int {
+    test_simple_return();
+    test_return_expression();
+    test_return_in_conditional();
+    test_first_positive();
+    test_return_in_loop();
+    test_return_in_loop_with_accumulation();
+    test_guard_return();
+    test_bounded_return();
+    test_nested_fn_return();
+    print("[OK] 225_interp_early_return");
+    0
+}

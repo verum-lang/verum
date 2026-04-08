@@ -1,0 +1,460 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: stdlib-agnostic, protocol, structural-typing, fundamental
+// @description: Verifies stdlib-agnostic compiler behavior - no hardcoded type names
+//
+// ARCHITECTURAL PRINCIPLE:
+// The Verum compiler MUST be stdlib-agnostic. This means:
+// 1. No hardcoded type names like "Result", "Maybe", "List", "Ok", "Err", "Some", "None"
+// 2. Type detection via PROTOCOLS and STRUCTURAL matching, not name checking
+// 3. Compiler works with any stdlib version (past, present, future)
+// 4. Custom types implementing Try protocol should work identically to stdlib types
+
+module specs.stdlib.core.stdlib_agnostic_test;
+
+mount core.primitives.*;
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// STDLIB-AGNOSTIC TYPE SYSTEM VERIFICATION
+// =============================================================================
+//
+// The compiler should use the Try protocol for detecting Try-compatible types,
+// not hardcoded checks for "Result" or "Maybe" string names.
+//
+// Key Protocol Definitions (from grammar/verum.ebnf and stdlib):
+// - Try protocol: defines Output, Residual associated types and branch()
+// - FromResidual protocol: defines from_residual() for error conversion
+//
+// Structural Detection:
+// - A type is Try-compatible if it has Ok/Err or Some/None variant structure
+// - Detection should be based on variant keys, not type names
+
+// =============================================================================
+// Section 1: Custom Try-Compatible Types (Structural Matching)
+// =============================================================================
+
+// Custom type with Ok/Err variants (structurally equivalent to Result)
+type MyResult<T, E> is
+    | MyOk(T)
+    | MyErr(E);
+
+// Custom type with Some/None variants (structurally equivalent to Maybe)
+type MyOption<T> is
+    | MySome(T)
+    | MyNone;
+
+// Custom Try-compatible type with different variant names
+// Should work if Try protocol is properly implemented
+type Outcome<T, E> is
+    | Success(T)
+    | Failure(E);
+
+// -----------------------------------------------------------------------------
+// Section 1.1: Custom Result-like Type Usage
+// -----------------------------------------------------------------------------
+
+fn make_my_ok() -> MyResult<Int, Text> {
+    MyOk(42)
+}
+
+fn make_my_err() -> MyResult<Int, Text> {
+    MyErr("custom error")
+}
+
+@test
+fn test_custom_result_construction() {
+    match make_my_ok() {
+        MyOk(v) => assert_eq(v, 42),
+        MyErr(_) => assert(false),
+    }
+
+    match make_my_err() {
+        MyOk(_) => assert(false),
+        MyErr(e) => assert_eq(e, "custom error"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 1.2: Custom Maybe-like Type Usage
+// -----------------------------------------------------------------------------
+
+fn make_my_some() -> MyOption<Int> {
+    MySome(100)
+}
+
+fn make_my_none() -> MyOption<Int> {
+    MyNone
+}
+
+@test
+fn test_custom_option_construction() {
+    match make_my_some() {
+        MySome(v) => assert_eq(v, 100),
+        MyNone => assert(false),
+    }
+
+    assert(make_my_none() is MyNone);
+}
+
+// =============================================================================
+// Section 2: Protocol-Based Type Detection
+// =============================================================================
+// The compiler should detect Try-compatible types via protocol implementation,
+// not by checking if type name equals "Result" or "Maybe"
+
+// This type is NOT structurally similar to Result or Maybe
+// but could implement Try protocol manually
+type Validation<E, A> is
+    | Valid(A)
+    | Invalid(E);
+
+fn make_valid() -> Validation<Text, Int> {
+    Valid(42)
+}
+
+fn make_invalid() -> Validation<Text, Int> {
+    Invalid("validation error")
+}
+
+@test
+fn test_validation_pattern_matching() {
+    match make_valid() {
+        Valid(v) => assert_eq(v, 42),
+        Invalid(_) => assert(false),
+    }
+
+    match make_invalid() {
+        Valid(_) => assert(false),
+        Invalid(e) => assert_eq(e, "validation error"),
+    }
+}
+
+// =============================================================================
+// Section 3: Variant Structure Detection (Not Name-Based)
+// =============================================================================
+// The compiler should use variant keys (Ok, Err, Some, None) for structural
+// detection, not the containing type name
+
+// This creates a type that has Ok/Err variants but different outer name
+type ApiResponse<T, E> is
+    | Ok(T)
+    | Err(E);
+
+// This should be treated as Try-compatible if detection is structural
+fn make_api_ok() -> ApiResponse<Int, Text> {
+    Ok(200)
+}
+
+fn make_api_err() -> ApiResponse<Int, Text> {
+    Err("not found")
+}
+
+@test
+fn test_api_response_structural() {
+    // ApiResponse has Ok/Err variants, should work like Result
+    match make_api_ok() {
+        Ok(v) => assert_eq(v, 200),
+        Err(_) => assert(false),
+    }
+
+    match make_api_err() {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "not found"),
+    }
+}
+
+// =============================================================================
+// Section 4: Type Inference Independence
+// =============================================================================
+// Type inference should not depend on hardcoded stdlib type names
+
+@test
+fn test_inference_with_stdlib_types() {
+    // Standard Result
+    let r: Result<Int, Text> = Ok(42);
+    match r {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
+    }
+
+    // Standard Maybe
+    let m: Maybe<Int> = Some(100);
+    match m {
+        Some(v) => assert_eq(v, 100),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_inference_with_custom_types() {
+    // Custom MyResult
+    let cr: MyResult<Int, Text> = MyOk(42);
+    match cr {
+        MyOk(v) => assert_eq(v, 42),
+        MyErr(_) => assert(false),
+    }
+
+    // Custom MyOption
+    let co: MyOption<Int> = MySome(100);
+    match co {
+        MySome(v) => assert_eq(v, 100),
+        MyNone => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 5: Generic Functions Should Work with Any Try-Compatible Type
+// =============================================================================
+
+fn unwrap_or<T, E>(result: Result<T, E>, default: T) -> T {
+    match result {
+        Ok(v) => v,
+        Err(_) => default,
+    }
+}
+
+fn unwrap_maybe<T>(opt: Maybe<T>, default: T) -> T {
+    match opt {
+        Some(v) => v,
+        None => default,
+    }
+}
+
+// Generic unwrap for custom types
+fn unwrap_my_result<T, E>(result: MyResult<T, E>, default: T) -> T {
+    match result {
+        MyOk(v) => v,
+        MyErr(_) => default,
+    }
+}
+
+fn unwrap_my_option<T>(opt: MyOption<T>, default: T) -> T {
+    match opt {
+        MySome(v) => v,
+        MyNone => default,
+    }
+}
+
+@test
+fn test_generic_unwrap_functions() {
+    // Stdlib types
+    assert_eq(unwrap_or(Ok(42), 0), 42);
+    assert_eq(unwrap_or(Err("error"), 0), 0);
+    assert_eq(unwrap_maybe(Some(100), 0), 100);
+    assert_eq(unwrap_maybe(None, 0), 0);
+
+    // Custom types
+    assert_eq(unwrap_my_result(MyOk(42), 0), 42);
+    assert_eq(unwrap_my_result(MyErr("error"), 0), 0);
+    assert_eq(unwrap_my_option(MySome(100), 0), 100);
+    assert_eq(unwrap_my_option(MyNone, 0), 0);
+}
+
+// =============================================================================
+// Section 6: Nested Custom Types
+// =============================================================================
+
+@test
+fn test_nested_custom_types() {
+    // Nested Result in MyResult
+    let nested: MyResult<Result<Int, Text>, Text> = MyOk(Ok(42));
+    match nested {
+        MyOk(inner) => match inner {
+            Ok(v) => assert_eq(v, 42),
+            Err(_) => assert(false),
+        },
+        MyErr(_) => assert(false),
+    }
+
+    // Nested MyOption in Maybe
+    let nested2: Maybe<MyOption<Int>> = Some(MySome(100));
+    match nested2 {
+        Some(inner) => match inner {
+            MySome(v) => assert_eq(v, 100),
+            MyNone => assert(false),
+        },
+        None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 7: Map/FlatMap Operations on Custom Types
+// =============================================================================
+
+fn map_my_result<T, U, E>(r: MyResult<T, E>, f: fn(T) -> U) -> MyResult<U, E> {
+    match r {
+        MyOk(v) => MyOk(f(v)),
+        MyErr(e) => MyErr(e),
+    }
+}
+
+fn map_my_option<T, U>(o: MyOption<T>, f: fn(T) -> U) -> MyOption<U> {
+    match o {
+        MySome(v) => MySome(f(v)),
+        MyNone => MyNone,
+    }
+}
+
+@test
+fn test_map_on_custom_types() {
+    let double = |x: Int| x * 2;
+
+    // Map on MyResult
+    let r1 = map_my_result(MyOk(21), double);
+    match r1 {
+        MyOk(v) => assert_eq(v, 42),
+        MyErr(_) => assert(false),
+    }
+
+    let r2 = map_my_result(MyErr("error"), double);
+    match r2 {
+        MyOk(_) => assert(false),
+        MyErr(e) => assert_eq(e, "error"),
+    }
+
+    // Map on MyOption
+    let o1 = map_my_option(MySome(50), double);
+    match o1 {
+        MySome(v) => assert_eq(v, 100),
+        MyNone => assert(false),
+    }
+
+    let o2: MyOption<Int> = map_my_option(MyNone, double);
+    assert(o2 is MyNone);
+}
+
+// =============================================================================
+// Section 8: Stdlib Independence in Return Type Inference
+// =============================================================================
+
+// Function returning Result should work regardless of how Result is detected
+fn divide_safe(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+// Same logic with custom type
+fn divide_my_result(a: Int, b: Int) -> MyResult<Int, Text> {
+    if b == 0 {
+        MyErr("division by zero")
+    } else {
+        MyOk(a / b)
+    }
+}
+
+@test
+fn test_division_functions() {
+    match divide_safe(10, 2) {
+        Ok(v) => assert_eq(v, 5),
+        Err(_) => assert(false),
+    }
+
+    match divide_safe(10, 0) {
+        Ok(_) => assert(false),
+        Err(e) => assert_eq(e, "division by zero"),
+    }
+
+    match divide_my_result(10, 2) {
+        MyOk(v) => assert_eq(v, 5),
+        MyErr(_) => assert(false),
+    }
+
+    match divide_my_result(10, 0) {
+        MyOk(_) => assert(false),
+        MyErr(e) => assert_eq(e, "division by zero"),
+    }
+}
+
+// =============================================================================
+// Section 9: Type Alias Verification
+// =============================================================================
+// Type aliases should also work correctly without hardcoded names
+
+type IntResult is Result<Int, Text>;
+type IntMaybe is Maybe<Int>;
+type MyIntResult is MyResult<Int, Text>;
+type MyIntOption is MyOption<Int>;
+
+@test
+fn test_type_aliases() {
+    let r1: IntResult = Ok(42);
+    let r2: MyIntResult = MyOk(42);
+    let m1: IntMaybe = Some(100);
+    let m2: MyIntOption = MySome(100);
+
+    match r1 {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
+    }
+
+    match r2 {
+        MyOk(v) => assert_eq(v, 42),
+        MyErr(_) => assert(false),
+    }
+
+    match m1 {
+        Some(v) => assert_eq(v, 100),
+        None => assert(false),
+    }
+
+    match m2 {
+        MySome(v) => assert_eq(v, 100),
+        MyNone => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 10: Comprehensive Variant Name Testing
+// =============================================================================
+// Test that various variant names work correctly
+
+type Either<L, R> is
+    | Left(L)
+    | Right(R);
+
+type Trilean is
+    | Yes
+    | No
+    | Unknown;
+
+@test
+fn test_either_type() {
+    let e1: Either<Text, Int> = Left("hello");
+    let e2: Either<Text, Int> = Right(42);
+
+    match e1 {
+        Left(s) => assert_eq(s, "hello"),
+        Right(_) => assert(false),
+    }
+
+    match e2 {
+        Left(_) => assert(false),
+        Right(n) => assert_eq(n, 42),
+    }
+}
+
+@test
+fn test_trilean_type() {
+    let t1: Trilean = Yes;
+    let t2: Trilean = No;
+    let t3: Trilean = Unknown;
+
+    assert(t1 is Yes);
+    assert(t2 is No);
+    assert(t3 is Unknown);
+}
+
+// =============================================================================
+// SUMMARY:
+// This test file verifies that the compiler:
+// 1. Handles custom types with Try-like structure correctly
+// 2. Does not rely on hardcoded "Result", "Maybe", "Ok", "Err", "Some", "None" names
+// 3. Uses structural/protocol-based detection for Try-compatible types
+// 4. Enables stdlib versioning without compiler changes
+// =============================================================================

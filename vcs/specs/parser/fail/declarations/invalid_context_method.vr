@@ -1,0 +1,21 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, context, method, error
+// @description: Test invalid context method syntax detection
+// @expected-error: E060
+
+context Database {
+    fn;
+}
+
+context Logger {
+    fn log(123);
+}
+
+context FileSystem {
+    fn read(&self) -> Text
+}
+
+context Network {
+    fn connect missing_paren
+}

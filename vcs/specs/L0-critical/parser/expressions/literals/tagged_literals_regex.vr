@@ -1,0 +1,248 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, regex
+
+// Regex Tagged Literals
+// Tests for regex#"..." and regex#"""...""" syntax
+
+// ============================================================================
+// SECTION 1: Basic Regex Patterns
+// ============================================================================
+
+fn test_regex_simple() {
+    let pattern = regex#"hello";
+}
+
+fn test_regex_word_boundary() {
+    let pattern = regex#"\bword\b";
+}
+
+fn test_regex_digit() {
+    let pattern = regex#"\d+";
+}
+
+fn test_regex_whitespace() {
+    let pattern = regex#"\s+";
+}
+
+// ============================================================================
+// SECTION 2: Character Classes
+// ============================================================================
+
+fn test_regex_character_class() {
+    let pattern = regex#"[a-zA-Z0-9]";
+}
+
+fn test_regex_negated_class() {
+    let pattern = regex#"[^0-9]";
+}
+
+fn test_regex_predefined_classes() {
+    let word = regex#"\w+";
+    let non_word = regex#"\W+";
+    let digit = regex#"\d+";
+    let non_digit = regex#"\D+";
+}
+
+// ============================================================================
+// SECTION 3: Quantifiers
+// ============================================================================
+
+fn test_regex_quantifiers() {
+    let zero_or_more = regex#"a*";
+    let one_or_more = regex#"a+";
+    let zero_or_one = regex#"a?";
+}
+
+fn test_regex_specific_count() {
+    let exactly = regex#"a{3}";
+    let range = regex#"a{2,5}";
+    let at_least = regex#"a{3,}";
+}
+
+fn test_regex_lazy_quantifiers() {
+    let lazy_star = regex#"a*?";
+    let lazy_plus = regex#"a+?";
+    let lazy_question = regex#"a??";
+}
+
+// ============================================================================
+// SECTION 4: Anchors and Boundaries
+// ============================================================================
+
+fn test_regex_anchors() {
+    let start = regex#"^start";
+    let end = regex#"end$";
+    let both = regex#"^exact$";
+}
+
+fn test_regex_boundaries() {
+    let word_boundary = regex#"\bword\b";
+    let non_boundary = regex#"\Bword\B";
+}
+
+// ============================================================================
+// SECTION 5: Groups and Capturing
+// ============================================================================
+
+fn test_regex_capturing_group() {
+    let pattern = regex#"(group)";
+}
+
+fn test_regex_non_capturing() {
+    let pattern = regex#"(?:non-capturing)";
+}
+
+fn test_regex_named_group() {
+    let pattern = regex#"(?P<name>\w+)";
+}
+
+fn test_regex_backreference() {
+    let pattern = regex#"(\w+)\s+\1";
+}
+
+// ============================================================================
+// SECTION 6: Alternation
+// ============================================================================
+
+fn test_regex_alternation() {
+    let pattern = regex#"cat|dog|bird";
+}
+
+fn test_regex_grouped_alternation() {
+    let pattern = regex#"(cat|dog|bird)s?";
+}
+
+// ============================================================================
+// SECTION 7: Lookahead and Lookbehind
+// ============================================================================
+
+fn test_regex_positive_lookahead() {
+    let pattern = regex#"foo(?=bar)";
+}
+
+fn test_regex_negative_lookahead() {
+    let pattern = regex#"foo(?!bar)";
+}
+
+fn test_regex_positive_lookbehind() {
+    let pattern = regex#"(?<=foo)bar";
+}
+
+fn test_regex_negative_lookbehind() {
+    let pattern = regex#"(?<!foo)bar";
+}
+
+// ============================================================================
+// SECTION 8: Common Patterns
+// ============================================================================
+
+fn test_regex_email() {
+    let email = regex#"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}";
+}
+
+fn test_regex_phone() {
+    let phone = regex#"\+?1?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}";
+}
+
+fn test_regex_url() {
+    let url = regex#"https?://[a-zA-Z0-9.-]+(?:/[^\s]*)?";
+}
+
+fn test_regex_ipv4() {
+    let ipv4 = regex#"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}";
+}
+
+fn test_regex_date() {
+    let date = regex#"\d{4}-\d{2}-\d{2}";
+}
+
+// ============================================================================
+// SECTION 9: Multiline Regex
+// ============================================================================
+
+fn test_regex_multiline_simple() {
+    let pattern = regex#"""
+^[a-zA-Z0-9._%+-]+
+@
+[a-zA-Z0-9.-]+
+\.[a-zA-Z]{2,}$
+""";
+}
+
+fn test_regex_multiline_with_comments() {
+    let pattern = regex#"""
+^                   # Start of string
+[a-zA-Z0-9._%+-]+   # Local part
+@                   # At symbol
+[a-zA-Z0-9.-]+      # Domain name
+\.                  # Dot
+[a-zA-Z]{2,}        # TLD
+$                   # End of string
+""";
+}
+
+fn test_regex_complex_multiline() {
+    let pattern = regex#"""
+(?x)                    # Enable verbose mode
+^                       # Start
+(?P<protocol>https?)    # Protocol
+://                     # Separator
+(?P<host>[^:/]+)        # Host
+(?::(?P<port>\d+))?     # Optional port
+(?P<path>/[^?#]*)?      # Optional path
+(?:\?(?P<query>[^#]*))? # Optional query
+(?:\#(?P<fragment>.*))?  # Optional fragment
+$                       # End
+""";
+}
+
+// ============================================================================
+// SECTION 10: Regex in Expressions
+// ============================================================================
+
+fn test_regex_in_function() {
+    fn match_pattern(r: Regex) -> Bool { true }
+
+    let result = match_pattern(regex#"\d+");
+}
+
+fn test_regex_in_conditional() {
+    let strict = true;
+
+    let pattern = if strict {
+        regex#"^[a-zA-Z]+$"
+    } else {
+        regex#"[a-zA-Z]+"
+    };
+}
+
+fn test_regex_in_array() {
+    let patterns = [
+        regex#"\d+",
+        regex#"[a-z]+",
+        regex#"[A-Z]+",
+    ];
+}
+
+// ============================================================================
+// SECTION 11: Edge Cases
+// ============================================================================
+
+fn test_regex_empty() {
+    let empty = regex#"";
+}
+
+fn test_regex_escaped_quotes() {
+    let pattern = regex#"\"quoted\"";
+}
+
+fn test_regex_unicode() {
+    let unicode = regex#"\p{L}+";
+}
+
+fn test_regex_raw_style() {
+    let raw = regex#"C:\\path\\to\\file";
+}
+

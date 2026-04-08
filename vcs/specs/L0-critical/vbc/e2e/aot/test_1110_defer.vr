@@ -1,0 +1,92 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: defer, cleanup, scope, resource-management
+// @description: Test defer cleanup semantics
+
+// Helper: defer runs at function scope exit, modifying the list
+fn basic_defer_helper(order: List<Int>) {
+    order.push(1);
+    defer { order.push(4); }
+    order.push(2);
+    order.push(3);
+    // defer { order.push(4) } runs HERE at scope exit
+}
+
+fn test_basic_defer() -> Int {
+    let mut order = List.new();
+    basic_defer_helper(order);
+    // After function returns, defer has run: [1, 2, 3, 4]
+    if order.len() != 4 {
+        print(f"FAIL basic_defer: len={order.len()}, expected 4");
+        return 1;
+    }
+    if order[3] != 4 {
+        print(f"FAIL basic_defer: last={order[3]}, expected 4");
+        return 1;
+    }
+    print("  basic_defer: OK");
+    0
+}
+
+// Helper: multiple defers execute in LIFO order
+fn multi_defer_helper(order: List<Int>) {
+    defer { order.push(3); }
+    defer { order.push(2); }
+    defer { order.push(1); }
+    // Defers run in reverse: push(1), push(2), push(3)
+}
+
+fn test_multiple_defer() -> Int {
+    let mut order = List.new();
+    multi_defer_helper(order);
+    // After return: [1, 2, 3]
+    if order.len() != 3 {
+        print(f"FAIL multi_defer: len={order.len()}, expected 3");
+        return 1;
+    }
+    if order[0] != 1 || order[1] != 2 || order[2] != 3 {
+        print(f"FAIL multi_defer: [{order[0]}, {order[1]}, {order[2]}], expected [1, 2, 3]");
+        return 1;
+    }
+    print("  multiple_defer: OK");
+    0
+}
+
+// Helper: resource open/use/close simulation
+fn resource_simulation(log: List<Int>) {
+    log.push(10);
+    defer { log.push(30); }
+    log.push(20);
+    // defer runs at end: log = [10, 20, 30]
+}
+
+fn test_defer_resource() -> Int {
+    let mut log = List.new();
+    resource_simulation(log);
+    if log.len() != 3 {
+        print(f"FAIL defer_resource: len={log.len()}, expected 3");
+        return 1;
+    }
+    if log[2] != 30 {
+        print(f"FAIL defer_resource: log[2]={log[2]}, expected 30");
+        return 1;
+    }
+    print("  defer_resource: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Defer Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_defer();
+    failures = failures + test_multiple_defer();
+    failures = failures + test_defer_resource();
+
+    if failures == 0 {
+        print("All defer tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

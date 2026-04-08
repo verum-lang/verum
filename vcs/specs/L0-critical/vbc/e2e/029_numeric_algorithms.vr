@@ -1,0 +1,694 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, numeric, algorithms, newton, binary-search, bisection, dp
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end: numeric and mathematical algorithms through VBC interpreter.
+// Tests Newton's method, binary search, bisection, exponentiation by squaring,
+// prefix sums, sliding window averages, and matrix chain multiplication DP.
+
+// ============================================================================
+// 8-element flat array
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+// ============================================================================
+// Newton's method for integer square root
+// ============================================================================
+
+// Compute floor(sqrt(n)) using Newton's method (integer version)
+fn isqrt_newton(n: Int) -> Int {
+    if n < 0 { -1 }
+    else if n == 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        // Start with initial guess n/2
+        let mut x = n / 2;
+        let mut done = false;
+        let mut iters = 0;
+        while !done && iters < 100 {
+            let next = (x + n / x) / 2;
+            if next >= x {
+                done = true;
+            } else {
+                x = next;
+            }
+            iters = iters + 1;
+        }
+        // Verify: x*x <= n < (x+1)*(x+1)
+        x
+    }
+}
+
+fn test_isqrt_newton() {
+    assert_eq(isqrt_newton(0), 0);
+    assert_eq(isqrt_newton(1), 1);
+    assert_eq(isqrt_newton(4), 2);
+    assert_eq(isqrt_newton(9), 3);
+    assert_eq(isqrt_newton(16), 4);
+    assert_eq(isqrt_newton(25), 5);
+    assert_eq(isqrt_newton(36), 6);
+    assert_eq(isqrt_newton(49), 7);
+    assert_eq(isqrt_newton(64), 8);
+    assert_eq(isqrt_newton(81), 9);
+    assert_eq(isqrt_newton(100), 10);
+    assert_eq(isqrt_newton(10000), 100);
+
+    // Non-perfect squares (floor)
+    assert_eq(isqrt_newton(2), 1);
+    assert_eq(isqrt_newton(3), 1);
+    assert_eq(isqrt_newton(5), 2);
+    assert_eq(isqrt_newton(8), 2);
+    assert_eq(isqrt_newton(10), 3);
+    assert_eq(isqrt_newton(15), 3);
+    assert_eq(isqrt_newton(24), 4);
+    assert_eq(isqrt_newton(99), 9);
+    assert_eq(isqrt_newton(101), 10);
+
+    // Verify property: x*x <= n < (x+1)*(x+1) for several values
+    let mut n = 1;
+    while n <= 200 {
+        let x = isqrt_newton(n);
+        assert(x * x <= n);
+        assert((x + 1) * (x + 1) > n);
+        n = n + 1;
+    }
+}
+
+// ============================================================================
+// Binary search on sorted array
+// ============================================================================
+
+fn binary_search(a: Arr8, len: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = len - 1;
+    let mut result = -1;
+    let mut done = false;
+    while lo <= hi && !done {
+        let mid = lo + (hi - lo) / 2;
+        let val = arr8_get(a, mid);
+        if val == target {
+            result = mid;
+            done = true;
+        } else if val < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    result
+}
+
+fn test_binary_search() {
+    // Sorted array: [2, 5, 8, 12, 16, 23, 38, 56]
+    let a = Arr8 { e0: 2, e1: 5, e2: 8, e3: 12, e4: 16, e5: 23, e6: 38, e7: 56 };
+
+    assert_eq(binary_search(a, 8, 2), 0);
+    assert_eq(binary_search(a, 8, 5), 1);
+    assert_eq(binary_search(a, 8, 8), 2);
+    assert_eq(binary_search(a, 8, 12), 3);
+    assert_eq(binary_search(a, 8, 16), 4);
+    assert_eq(binary_search(a, 8, 23), 5);
+    assert_eq(binary_search(a, 8, 38), 6);
+    assert_eq(binary_search(a, 8, 56), 7);
+
+    // Not found
+    assert_eq(binary_search(a, 8, 1), -1);
+    assert_eq(binary_search(a, 8, 3), -1);
+    assert_eq(binary_search(a, 8, 100), -1);
+    assert_eq(binary_search(a, 8, 0), -1);
+
+    // Single element
+    let b = Arr8 { e0: 42, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(binary_search(b, 1, 42), 0);
+    assert_eq(binary_search(b, 1, 41), -1);
+}
+
+// Lower bound: find first index where a[i] >= target
+fn lower_bound(a: Arr8, len: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if arr8_get(a, mid) < target {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+fn test_lower_bound() {
+    let a = Arr8 { e0: 1, e1: 3, e2: 3, e3: 5, e4: 7, e5: 7, e6: 7, e7: 9 };
+
+    assert_eq(lower_bound(a, 8, 3), 1);  // first 3 is at index 1
+    assert_eq(lower_bound(a, 8, 7), 4);  // first 7 is at index 4
+    assert_eq(lower_bound(a, 8, 1), 0);
+    assert_eq(lower_bound(a, 8, 9), 7);
+    assert_eq(lower_bound(a, 8, 4), 3);  // 4 not present, would insert at 3
+    assert_eq(lower_bound(a, 8, 10), 8); // past end
+    assert_eq(lower_bound(a, 8, 0), 0);  // before start
+}
+
+// ============================================================================
+// Bisection method for root finding (integer version)
+// ============================================================================
+
+// Find x such that f(x) = 0, where f is monotonically increasing
+// and f(lo) < 0, f(hi) > 0
+
+// Example: find x where x^2 - target = 0 (i.e., sqrt)
+fn bisect_sqrt(target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = target;
+    if hi < 1 { hi = 1; }
+    let mut result = 0;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let sq = mid * mid;
+        if sq == target {
+            result = mid;
+            lo = hi + 1;  // break
+        } else if sq < target {
+            result = mid;  // track best floor
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    result
+}
+
+fn test_bisect_sqrt() {
+    assert_eq(bisect_sqrt(0), 0);
+    assert_eq(bisect_sqrt(1), 1);
+    assert_eq(bisect_sqrt(4), 2);
+    assert_eq(bisect_sqrt(9), 3);
+    assert_eq(bisect_sqrt(16), 4);
+    assert_eq(bisect_sqrt(100), 10);
+    assert_eq(bisect_sqrt(10000), 100);
+
+    // Non-perfect squares
+    assert_eq(bisect_sqrt(2), 1);
+    assert_eq(bisect_sqrt(8), 2);
+    assert_eq(bisect_sqrt(15), 3);
+    assert_eq(bisect_sqrt(99), 9);
+
+    // Verify against Newton's method
+    let mut n = 0;
+    while n <= 150 {
+        assert_eq(bisect_sqrt(n), isqrt_newton(n));
+        n = n + 1;
+    }
+}
+
+// General bisection: find x in [lo, hi] where f(x) crosses zero
+// f(x) = x^3 - k (find cube root)
+fn bisect_cbrt(target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = target;
+    if hi < 1 { hi = 1; }
+    let mut result = 0;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let cube = mid * mid * mid;
+        if cube == target {
+            result = mid;
+            lo = hi + 1;  // break
+        } else if cube < target {
+            result = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    result
+}
+
+fn test_bisect_cbrt() {
+    assert_eq(bisect_cbrt(0), 0);
+    assert_eq(bisect_cbrt(1), 1);
+    assert_eq(bisect_cbrt(8), 2);
+    assert_eq(bisect_cbrt(27), 3);
+    assert_eq(bisect_cbrt(64), 4);
+    assert_eq(bisect_cbrt(125), 5);
+    assert_eq(bisect_cbrt(1000), 10);
+
+    // Non-perfect cubes (floor)
+    assert_eq(bisect_cbrt(2), 1);
+    assert_eq(bisect_cbrt(7), 1);
+    assert_eq(bisect_cbrt(26), 2);
+    assert_eq(bisect_cbrt(100), 4);  // 4^3=64, 5^3=125
+}
+
+// ============================================================================
+// Integer power with exponentiation by squaring
+// ============================================================================
+
+fn ipow(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut b = base;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = result * b;
+        }
+        b = b * b;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_ipow() {
+    assert_eq(ipow(2, 0), 1);
+    assert_eq(ipow(2, 1), 2);
+    assert_eq(ipow(2, 2), 4);
+    assert_eq(ipow(2, 10), 1024);
+    assert_eq(ipow(2, 16), 65536);
+    assert_eq(ipow(2, 20), 1048576);
+    assert_eq(ipow(3, 0), 1);
+    assert_eq(ipow(3, 1), 3);
+    assert_eq(ipow(3, 5), 243);
+    assert_eq(ipow(3, 10), 59049);
+    assert_eq(ipow(5, 3), 125);
+    assert_eq(ipow(7, 4), 2401);
+    assert_eq(ipow(10, 6), 1000000);
+    assert_eq(ipow(1, 100), 1);
+    assert_eq(ipow(0, 5), 0);
+}
+
+// Modular exponentiation
+fn mod_ipow(base: Int, exp: Int, modulus: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modulus;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            result = (result * b) % modulus;
+        }
+        b = (b * b) % modulus;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_mod_ipow() {
+    assert_eq(mod_ipow(2, 10, 1000), 24);    // 1024 % 1000
+    assert_eq(mod_ipow(3, 5, 100), 43);       // 243 % 100
+    assert_eq(mod_ipow(7, 3, 13), 5);         // 343 % 13
+    assert_eq(mod_ipow(2, 0, 100), 1);
+    assert_eq(mod_ipow(10, 9, 7), 6);
+
+    // Fermat's little theorem: a^(p-1) = 1 (mod p) for prime p, gcd(a,p)=1
+    assert_eq(mod_ipow(2, 12, 13), 1);   // 2^12 mod 13 = 1
+    assert_eq(mod_ipow(3, 6, 7), 1);     // 3^6 mod 7 = 1
+    assert_eq(mod_ipow(5, 10, 11), 1);   // 5^10 mod 11 = 1
+}
+
+// ============================================================================
+// Prefix sums
+// ============================================================================
+
+fn prefix_sums(a: Arr8, len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut running = 0;
+    let mut i = 0;
+    while i < len {
+        running = running + arr8_get(a, i);
+        result = arr8_set(result, i, running);
+        i = i + 1;
+    }
+    result
+}
+
+// Range sum query using prefix sums: sum of a[l..r] inclusive
+fn range_sum(prefix: Arr8, l: Int, r: Int) -> Int {
+    if l == 0 {
+        arr8_get(prefix, r)
+    } else {
+        arr8_get(prefix, r) - arr8_get(prefix, l - 1)
+    }
+}
+
+fn test_prefix_sums() {
+    let a = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    let ps = prefix_sums(a, 8);
+
+    // Prefix sums: [3, 4, 8, 9, 14, 23, 25, 31]
+    assert_eq(arr8_get(ps, 0), 3);
+    assert_eq(arr8_get(ps, 1), 4);
+    assert_eq(arr8_get(ps, 2), 8);
+    assert_eq(arr8_get(ps, 3), 9);
+    assert_eq(arr8_get(ps, 4), 14);
+    assert_eq(arr8_get(ps, 5), 23);
+    assert_eq(arr8_get(ps, 6), 25);
+    assert_eq(arr8_get(ps, 7), 31);
+
+    // Range sum queries
+    assert_eq(range_sum(ps, 0, 7), 31);   // sum of all
+    assert_eq(range_sum(ps, 0, 0), 3);    // just first element
+    assert_eq(range_sum(ps, 2, 4), 10);   // 4 + 1 + 5
+    assert_eq(range_sum(ps, 5, 7), 17);   // 9 + 2 + 6
+    assert_eq(range_sum(ps, 3, 3), 1);    // single element
+    assert_eq(range_sum(ps, 0, 3), 9);    // 3+1+4+1
+}
+
+// ============================================================================
+// Sliding window average (integer approximation)
+// ============================================================================
+
+// Returns array of integer averages: avg of window [i..i+w-1]
+fn sliding_avg(a: Arr8, len: Int, window: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    // First compute prefix sums
+    let ps = prefix_sums(a, len);
+    let num_windows = len - window + 1;
+    let mut i = 0;
+    while i < num_windows {
+        let wsum = range_sum(ps, i, i + window - 1);
+        let avg = wsum / window;
+        result = arr8_set(result, i, avg);
+        i = i + 1;
+    }
+    result
+}
+
+fn test_sliding_avg() {
+    let a = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+
+    // Window size 3
+    let avgs = sliding_avg(a, 8, 3);
+    // avg[0] = (10+20+30)/3 = 20
+    assert_eq(arr8_get(avgs, 0), 20);
+    // avg[1] = (20+30+40)/3 = 30
+    assert_eq(arr8_get(avgs, 1), 30);
+    // avg[2] = (30+40+50)/3 = 40
+    assert_eq(arr8_get(avgs, 2), 40);
+    // avg[3] = (40+50+60)/3 = 50
+    assert_eq(arr8_get(avgs, 3), 50);
+    // avg[4] = (50+60+70)/3 = 60
+    assert_eq(arr8_get(avgs, 4), 60);
+    // avg[5] = (60+70+80)/3 = 70
+    assert_eq(arr8_get(avgs, 5), 70);
+
+    // Window size 1 = identity
+    let avgs1 = sliding_avg(a, 8, 1);
+    let mut k = 0;
+    while k < 8 {
+        assert_eq(arr8_get(avgs1, k), arr8_get(a, k));
+        k = k + 1;
+    }
+}
+
+// ============================================================================
+// Matrix chain multiplication cost (dynamic programming)
+// ============================================================================
+
+// Given matrix dimensions p[0..n], find minimum scalar multiplications
+// to multiply matrices A1(p[0] x p[1]) * A2(p[1] x p[2]) * ... * An(p[n-1] x p[n])
+//
+// We store the DP table as a flat array for a small number of matrices (up to 5).
+// dp[i][j] = min cost to multiply matrices i..j
+
+// 5x5 flat array for DP table (enough for up to 5 matrices)
+type Mat5x5 is {
+    r0c0: Int, r0c1: Int, r0c2: Int, r0c3: Int, r0c4: Int,
+    r1c0: Int, r1c1: Int, r1c2: Int, r1c3: Int, r1c4: Int,
+    r2c0: Int, r2c1: Int, r2c2: Int, r2c3: Int, r2c4: Int,
+    r3c0: Int, r3c1: Int, r3c2: Int, r3c3: Int, r3c4: Int,
+    r4c0: Int, r4c1: Int, r4c2: Int, r4c3: Int, r4c4: Int
+};
+
+fn mat5_zeros() -> Mat5x5 {
+    Mat5x5 {
+        r0c0: 0, r0c1: 0, r0c2: 0, r0c3: 0, r0c4: 0,
+        r1c0: 0, r1c1: 0, r1c2: 0, r1c3: 0, r1c4: 0,
+        r2c0: 0, r2c1: 0, r2c2: 0, r2c3: 0, r2c4: 0,
+        r3c0: 0, r3c1: 0, r3c2: 0, r3c3: 0, r3c4: 0,
+        r4c0: 0, r4c1: 0, r4c2: 0, r4c3: 0, r4c4: 0
+    }
+}
+
+fn mat5_get(m: Mat5x5, r: Int, c: Int) -> Int {
+    let idx = r * 5 + c;
+    if idx == 0 { m.r0c0 } else if idx == 1 { m.r0c1 }
+    else if idx == 2 { m.r0c2 } else if idx == 3 { m.r0c3 }
+    else if idx == 4 { m.r0c4 } else if idx == 5 { m.r1c0 }
+    else if idx == 6 { m.r1c1 } else if idx == 7 { m.r1c2 }
+    else if idx == 8 { m.r1c3 } else if idx == 9 { m.r1c4 }
+    else if idx == 10 { m.r2c0 } else if idx == 11 { m.r2c1 }
+    else if idx == 12 { m.r2c2 } else if idx == 13 { m.r2c3 }
+    else if idx == 14 { m.r2c4 } else if idx == 15 { m.r3c0 }
+    else if idx == 16 { m.r3c1 } else if idx == 17 { m.r3c2 }
+    else if idx == 18 { m.r3c3 } else if idx == 19 { m.r3c4 }
+    else if idx == 20 { m.r4c0 } else if idx == 21 { m.r4c1 }
+    else if idx == 22 { m.r4c2 } else if idx == 23 { m.r4c3 }
+    else { m.r4c4 }
+}
+
+fn mat5_set(m: Mat5x5, r: Int, c: Int, val: Int) -> Mat5x5 {
+    let idx = r * 5 + c;
+    Mat5x5 {
+        r0c0: if idx == 0 { val } else { m.r0c0 },
+        r0c1: if idx == 1 { val } else { m.r0c1 },
+        r0c2: if idx == 2 { val } else { m.r0c2 },
+        r0c3: if idx == 3 { val } else { m.r0c3 },
+        r0c4: if idx == 4 { val } else { m.r0c4 },
+        r1c0: if idx == 5 { val } else { m.r1c0 },
+        r1c1: if idx == 6 { val } else { m.r1c1 },
+        r1c2: if idx == 7 { val } else { m.r1c2 },
+        r1c3: if idx == 8 { val } else { m.r1c3 },
+        r1c4: if idx == 9 { val } else { m.r1c4 },
+        r2c0: if idx == 10 { val } else { m.r2c0 },
+        r2c1: if idx == 11 { val } else { m.r2c1 },
+        r2c2: if idx == 12 { val } else { m.r2c2 },
+        r2c3: if idx == 13 { val } else { m.r2c3 },
+        r2c4: if idx == 14 { val } else { m.r2c4 },
+        r3c0: if idx == 15 { val } else { m.r3c0 },
+        r3c1: if idx == 16 { val } else { m.r3c1 },
+        r3c2: if idx == 17 { val } else { m.r3c2 },
+        r3c3: if idx == 18 { val } else { m.r3c3 },
+        r3c4: if idx == 19 { val } else { m.r3c4 },
+        r4c0: if idx == 20 { val } else { m.r4c0 },
+        r4c1: if idx == 21 { val } else { m.r4c1 },
+        r4c2: if idx == 22 { val } else { m.r4c2 },
+        r4c3: if idx == 23 { val } else { m.r4c3 },
+        r4c4: if idx == 24 { val } else { m.r4c4 }
+    }
+}
+
+// Matrix chain order: p is dimensions array, n = number of matrices
+// (p has n+1 elements, but we pass it via Arr8 and the length)
+fn matrix_chain_order(p: Arr8, n: Int) -> Int {
+    // dp[i][j] = min cost to multiply matrices i..j (0-indexed)
+    let mut dp = mat5_zeros();
+    // dp[i][i] = 0 (already zero)
+
+    // chain_len from 2 to n
+    let mut chain_len = 2;
+    while chain_len <= n {
+        let mut i = 0;
+        while i <= n - chain_len {
+            let j = i + chain_len - 1;
+            // Initialize to a large value
+            let mut best = 999999999;
+            let mut k = i;
+            while k < j {
+                let cost = mat5_get(dp, i, k) + mat5_get(dp, k + 1, j)
+                    + arr8_get(p, i) * arr8_get(p, k + 1) * arr8_get(p, j + 1);
+                if cost < best {
+                    best = cost;
+                }
+                k = k + 1;
+            }
+            dp = mat5_set(dp, i, j, best);
+            i = i + 1;
+        }
+        chain_len = chain_len + 1;
+    }
+    mat5_get(dp, 0, n - 1)
+}
+
+fn test_matrix_chain_multiplication() {
+    // Classic example: dimensions [10, 30, 5, 60]
+    // 3 matrices: A(10x30), B(30x5), C(5x60)
+    // Optimal: (A*B)*C = 10*30*5 + 10*5*60 = 1500+3000 = 4500
+    // vs A*(B*C) = 30*5*60 + 10*30*60 = 9000+18000 = 27000
+    let p1 = Arr8 { e0: 10, e1: 30, e2: 5, e3: 60, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(matrix_chain_order(p1, 3), 4500);
+
+    // 4 matrices: [40, 20, 30, 10, 30]
+    // A(40x20), B(20x30), C(30x10), D(10x30)
+    let p2 = Arr8 { e0: 40, e1: 20, e2: 30, e3: 10, e4: 30, e5: 0, e6: 0, e7: 0 };
+    assert_eq(matrix_chain_order(p2, 4), 26000);
+
+    // 2 matrices: [5, 10, 20]
+    // Only one way: 5*10*20 = 1000
+    let p3 = Arr8 { e0: 5, e1: 10, e2: 20, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(matrix_chain_order(p3, 2), 1000);
+
+    // 5 matrices: [1, 2, 3, 4, 5, 6]
+    let p4 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 0, e7: 0 };
+    let result = matrix_chain_order(p4, 5);
+    // Correct answer: 68 (optimal: ((M1*M2*M3)*M4)*M5)
+    assert_eq(result, 68);
+}
+
+// ============================================================================
+// Kadane's algorithm: maximum subarray sum
+// ============================================================================
+
+fn max_subarray_sum(a: Arr8, len: Int) -> Int {
+    let mut max_ending = arr8_get(a, 0);
+    let mut max_so_far = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        let val = arr8_get(a, i);
+        if max_ending + val > val {
+            max_ending = max_ending + val;
+        } else {
+            max_ending = val;
+        }
+        if max_ending > max_so_far {
+            max_so_far = max_ending;
+        }
+        i = i + 1;
+    }
+    max_so_far
+}
+
+fn test_kadane() {
+    // Classic example: [-2, 1, -3, 4, -1, 2, 1, -5]
+    let a = Arr8 { e0: -2, e1: 1, e2: -3, e3: 4, e4: -1, e5: 2, e6: 1, e7: -5 };
+    assert_eq(max_subarray_sum(a, 8), 6);  // subarray [4, -1, 2, 1]
+
+    // All positive
+    let b = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    assert_eq(max_subarray_sum(b, 5), 15);  // entire array
+
+    // All negative
+    let c = Arr8 { e0: -5, e1: -3, e2: -8, e3: -1, e4: -7, e5: 0, e6: 0, e7: 0 };
+    assert_eq(max_subarray_sum(c, 5), -1);  // single element -1
+
+    // Mixed with large positive span
+    let d = Arr8 { e0: -1, e1: 10, e2: -3, e3: 10, e4: -1, e5: -1, e6: -1, e7: -1 };
+    assert_eq(max_subarray_sum(d, 8), 17);  // [10, -3, 10]
+
+    // Single element
+    let e_arr = Arr8 { e0: 42, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(max_subarray_sum(e_arr, 1), 42);
+}
+
+// ============================================================================
+// GCD / Extended Euclidean
+// ============================================================================
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a }
+    else { gcd(b, a % b) }
+}
+
+fn lcm(a: Int, b: Int) -> Int {
+    (a / gcd(a, b)) * b
+}
+
+fn test_gcd_lcm() {
+    assert_eq(gcd(12, 8), 4);
+    assert_eq(gcd(17, 13), 1);
+    assert_eq(gcd(100, 75), 25);
+    assert_eq(gcd(48, 36), 12);
+    assert_eq(gcd(0, 5), 5);
+
+    assert_eq(lcm(4, 6), 12);
+    assert_eq(lcm(3, 5), 15);
+    assert_eq(lcm(12, 18), 36);
+
+    // gcd(a,b) * lcm(a,b) = a * b
+    assert_eq(gcd(12, 8) * lcm(12, 8), 12 * 8);
+    assert_eq(gcd(15, 10) * lcm(15, 10), 15 * 10);
+}
+
+// ============================================================================
+// Integer log base 2 (floor)
+// ============================================================================
+
+fn ilog2(n: Int) -> Int {
+    if n <= 0 { -1 }
+    else {
+        let mut result = 0;
+        let mut v = n;
+        while v > 1 {
+            v = v / 2;
+            result = result + 1;
+        }
+        result
+    }
+}
+
+fn test_ilog2() {
+    assert_eq(ilog2(1), 0);
+    assert_eq(ilog2(2), 1);
+    assert_eq(ilog2(3), 1);
+    assert_eq(ilog2(4), 2);
+    assert_eq(ilog2(7), 2);
+    assert_eq(ilog2(8), 3);
+    assert_eq(ilog2(16), 4);
+    assert_eq(ilog2(32), 5);
+    assert_eq(ilog2(1024), 10);
+    assert_eq(ilog2(1023), 9);
+    assert_eq(ilog2(1025), 10);
+
+    // Verify: 2^ilog2(n) <= n < 2^(ilog2(n)+1) for powers of 2
+    assert_eq(ipow(2, ilog2(64)), 64);
+    assert_eq(ipow(2, ilog2(256)), 256);
+}
+
+fn main() -> Int {
+    test_isqrt_newton();
+    test_binary_search();
+    test_lower_bound();
+    test_bisect_sqrt();
+    test_bisect_cbrt();
+    test_ipow();
+    test_mod_ipow();
+    test_prefix_sums();
+    test_sliding_avg();
+    test_matrix_chain_multiplication();
+    test_kadane();
+    test_gcd_lcm();
+    test_ilog2();
+    print("[OK] 029_numeric_algorithms");
+    0
+}

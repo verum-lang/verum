@@ -1,0 +1,335 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, deque, double-ended-queue, circular-buffer
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for double-ended queue (deque) operations.
+// Implemented as a circular buffer with 8-element capacity.
+// Tests: push_front, push_back, pop_front, pop_back, peek, rotation.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Deque: circular buffer with front index, size, and capacity=8
+type Deque is { buf: Arr8, front: Int, size: Int };
+
+fn deque_new() -> Deque {
+    Deque { buf: a8_zero(), front: 0, size: 0 }
+}
+
+fn deque_size(dq: Deque) -> Int {
+    dq.size
+}
+
+fn deque_is_empty(dq: Deque) -> Int {
+    if dq.size == 0 { 1 } else { 0 }
+}
+
+fn deque_is_full(dq: Deque) -> Int {
+    if dq.size == 8 { 1 } else { 0 }
+}
+
+// Push to back: place at (front + size) % 8
+fn deque_push_back(dq: Deque, val: Int) -> Deque {
+    let idx = (dq.front + dq.size) % 8;
+    let new_buf = a8_set(dq.buf, idx, val);
+    Deque { buf: new_buf, front: dq.front, size: dq.size + 1 }
+}
+
+// Push to front: place at (front - 1 + 8) % 8
+fn deque_push_front(dq: Deque, val: Int) -> Deque {
+    let new_front = (dq.front - 1 + 8) % 8;
+    let new_buf = a8_set(dq.buf, new_front, val);
+    Deque { buf: new_buf, front: new_front, size: dq.size + 1 }
+}
+
+// Pop from front: return value at front, advance front
+fn deque_front(dq: Deque) -> Int {
+    a8_get(dq.buf, dq.front)
+}
+
+fn deque_pop_front(dq: Deque) -> Deque {
+    let new_front = (dq.front + 1) % 8;
+    Deque { buf: dq.buf, front: new_front, size: dq.size - 1 }
+}
+
+// Pop from back: return value at (front + size - 1) % 8
+fn deque_back(dq: Deque) -> Int {
+    let idx = (dq.front + dq.size - 1) % 8;
+    a8_get(dq.buf, idx)
+}
+
+fn deque_pop_back(dq: Deque) -> Deque {
+    Deque { buf: dq.buf, front: dq.front, size: dq.size - 1 }
+}
+
+// Get element at logical index i (0 = front)
+fn deque_at(dq: Deque, i: Int) -> Int {
+    let idx = (dq.front + i) % 8;
+    a8_get(dq.buf, idx)
+}
+
+// Rotate left: move front to back
+fn deque_rotate_left(dq: Deque) -> Deque {
+    if dq.size <= 1 { return dq; }
+    let val = deque_front(dq);
+    let dq2 = deque_pop_front(dq);
+    deque_push_back(dq2, val)
+}
+
+// Rotate right: move back to front
+fn deque_rotate_right(dq: Deque) -> Deque {
+    if dq.size <= 1 { return dq; }
+    let val = deque_back(dq);
+    let dq2 = deque_pop_back(dq);
+    deque_push_front(dq2, val)
+}
+
+// Reverse the deque contents
+fn deque_reverse(dq: Deque) -> Deque {
+    let n = dq.size;
+    let mut result = deque_new();
+    let mut i = n - 1;
+    while i >= 0 {
+        result = deque_push_back(result, deque_at(dq, i));
+        i = i - 1;
+    }
+    result
+}
+
+fn test_push_back_pop_front() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 10);
+    dq = deque_push_back(dq, 20);
+    dq = deque_push_back(dq, 30);
+    assert_eq(deque_size(dq), 3);
+    assert_eq(deque_front(dq), 10);
+    dq = deque_pop_front(dq);
+    assert_eq(deque_front(dq), 20);
+    dq = deque_pop_front(dq);
+    assert_eq(deque_front(dq), 30);
+    dq = deque_pop_front(dq);
+    assert_eq(deque_is_empty(dq), 1);
+}
+
+fn test_push_front_pop_back() {
+    let mut dq = deque_new();
+    dq = deque_push_front(dq, 10);
+    dq = deque_push_front(dq, 20);
+    dq = deque_push_front(dq, 30);
+    assert_eq(deque_size(dq), 3);
+    // Front is 30, back is 10
+    assert_eq(deque_front(dq), 30);
+    assert_eq(deque_back(dq), 10);
+    dq = deque_pop_back(dq);
+    assert_eq(deque_back(dq), 20);
+    dq = deque_pop_back(dq);
+    assert_eq(deque_back(dq), 30);
+}
+
+fn test_mixed_operations() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_front(dq, 0);
+    // Deque: [0, 1, 2]
+    assert_eq(deque_size(dq), 3);
+    assert_eq(deque_front(dq), 0);
+    assert_eq(deque_back(dq), 2);
+    assert_eq(deque_at(dq, 1), 1);
+
+    dq = deque_pop_front(dq);
+    dq = deque_push_back(dq, 3);
+    // Deque: [1, 2, 3]
+    assert_eq(deque_front(dq), 1);
+    assert_eq(deque_back(dq), 3);
+}
+
+fn test_wrap_around() {
+    // Fill from front to force wrap-around
+    let mut dq = deque_new();
+    dq = deque_push_front(dq, 5);
+    dq = deque_push_front(dq, 4);
+    dq = deque_push_front(dq, 3);
+    // front is at index 5 (wrapping), size=3
+    assert_eq(deque_front(dq), 3);
+    assert_eq(deque_back(dq), 5);
+
+    dq = deque_push_back(dq, 6);
+    dq = deque_push_back(dq, 7);
+    // [3, 4, 5, 6, 7]
+    assert_eq(deque_size(dq), 5);
+    assert_eq(deque_at(dq, 0), 3);
+    assert_eq(deque_at(dq, 4), 7);
+}
+
+fn test_at_indexing() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 100);
+    dq = deque_push_back(dq, 200);
+    dq = deque_push_back(dq, 300);
+    dq = deque_push_back(dq, 400);
+    assert_eq(deque_at(dq, 0), 100);
+    assert_eq(deque_at(dq, 1), 200);
+    assert_eq(deque_at(dq, 2), 300);
+    assert_eq(deque_at(dq, 3), 400);
+}
+
+fn test_rotate_left() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 3);
+    dq = deque_push_back(dq, 4);
+    // [1, 2, 3, 4] -> rotate left -> [2, 3, 4, 1]
+    dq = deque_rotate_left(dq);
+    assert_eq(deque_front(dq), 2);
+    assert_eq(deque_back(dq), 1);
+    assert_eq(deque_at(dq, 2), 4);
+    assert_eq(deque_size(dq), 4);
+}
+
+fn test_rotate_right() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 3);
+    dq = deque_push_back(dq, 4);
+    // [1, 2, 3, 4] -> rotate right -> [4, 1, 2, 3]
+    dq = deque_rotate_right(dq);
+    assert_eq(deque_front(dq), 4);
+    assert_eq(deque_back(dq), 3);
+    assert_eq(deque_at(dq, 1), 1);
+}
+
+fn test_rotate_roundtrip() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 10);
+    dq = deque_push_back(dq, 20);
+    dq = deque_push_back(dq, 30);
+    // Rotate left 3 times should return to original
+    dq = deque_rotate_left(dq);
+    dq = deque_rotate_left(dq);
+    dq = deque_rotate_left(dq);
+    assert_eq(deque_front(dq), 10);
+    assert_eq(deque_back(dq), 30);
+}
+
+fn test_reverse() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 3);
+    dq = deque_push_back(dq, 4);
+    let rev = deque_reverse(dq);
+    assert_eq(deque_front(rev), 4);
+    assert_eq(deque_at(rev, 1), 3);
+    assert_eq(deque_at(rev, 2), 2);
+    assert_eq(deque_back(rev), 1);
+    assert_eq(deque_size(rev), 4);
+}
+
+fn test_double_reverse() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 5);
+    dq = deque_push_back(dq, 10);
+    dq = deque_push_back(dq, 15);
+    let rev2 = deque_reverse(deque_reverse(dq));
+    assert_eq(deque_at(rev2, 0), 5);
+    assert_eq(deque_at(rev2, 1), 10);
+    assert_eq(deque_at(rev2, 2), 15);
+}
+
+fn test_empty_and_single() {
+    let dq = deque_new();
+    assert_eq(deque_is_empty(dq), 1);
+    assert_eq(deque_size(dq), 0);
+
+    let dq2 = deque_push_back(dq, 42);
+    assert_eq(deque_is_empty(dq2), 0);
+    assert_eq(deque_front(dq2), 42);
+    assert_eq(deque_back(dq2), 42);
+
+    // Rotate single element = no change
+    let dq3 = deque_rotate_left(dq2);
+    assert_eq(deque_front(dq3), 42);
+}
+
+fn test_palindrome_check() {
+    // Use deque to check if sequence is palindrome
+    // [1, 2, 3, 2, 1] is palindrome
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 3);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 1);
+
+    let mut is_pal = 1;
+    let mut check = dq;
+    while deque_size(check) > 1 {
+        if deque_front(check) != deque_back(check) {
+            is_pal = 0;
+        }
+        check = deque_pop_front(check);
+        check = deque_pop_back(check);
+    }
+    assert_eq(is_pal, 1);
+}
+
+fn test_not_palindrome() {
+    let mut dq = deque_new();
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 3);
+
+    let mut is_pal = 1;
+    let mut check = dq;
+    while deque_size(check) > 1 {
+        if deque_front(check) != deque_back(check) {
+            is_pal = 0;
+        }
+        check = deque_pop_front(check);
+        check = deque_pop_back(check);
+    }
+    assert_eq(is_pal, 0);
+}
+
+fn main() -> Int {
+    test_push_back_pop_front();
+    test_push_front_pop_back();
+    test_mixed_operations();
+    test_wrap_around();
+    test_at_indexing();
+    test_rotate_left();
+    test_rotate_right();
+    test_rotate_roundtrip();
+    test_reverse();
+    test_double_reverse();
+    test_empty_and_single();
+    test_palindrome_check();
+    test_not_palindrome();
+    print("[OK] 358_deque_ops_aot");
+    0
+}

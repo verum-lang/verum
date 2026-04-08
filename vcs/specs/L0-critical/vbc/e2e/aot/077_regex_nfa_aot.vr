@@ -1,0 +1,274 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, nfa, pattern-matching, regex, automata
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT NFA simulation for simple pattern matching on integer sequences
+
+// Pattern types for matching integer sequences
+type Pattern is PLit(Int) | PAny | PSeq { first: Pattern, second: Pattern } | PAlt { left: Pattern, right: Pattern };
+
+// Integer list for input sequences
+type IntList is ILNil | ILCons { head: Int, tail: IntList };
+
+// Match result: how many elements were consumed (-1 = no match)
+// We return the number of elements consumed on success, or -1 on failure.
+fn match_at(pat: Pattern, input: IntList) -> Int {
+    match pat {
+        PLit(expected) => {
+            match input {
+                ILNil => -1,
+                ILCons { head, tail: _ } => {
+                    if head == expected { 1 } else { -1 }
+                },
+            }
+        },
+        PAny => {
+            match input {
+                ILNil => -1,
+                ILCons { head: _, tail: _ } => 1,
+            }
+        },
+        PSeq { first, second } => {
+            let n1 = match_at(first, input);
+            if n1 < 0 { -1 }
+            else {
+                let rest = drop_n(input, n1);
+                let n2 = match_at(second, rest);
+                if n2 < 0 { -1 }
+                else { n1 + n2 }
+            }
+        },
+        PAlt { left, right } => {
+            let l = match_at(left, input);
+            if l >= 0 { l }
+            else { match_at(right, input) }
+        },
+    }
+}
+
+// Drop n elements from the front of a list
+fn drop_n(list: IntList, n: Int) -> IntList {
+    if n <= 0 { list }
+    else {
+        match list {
+            ILNil => ILNil,
+            ILCons { head: _, tail } => drop_n(tail, n - 1),
+        }
+    }
+}
+
+// Full match: pattern must consume entire input
+fn match_full(pat: Pattern, input: IntList) -> Bool {
+    let consumed = match_at(pat, input);
+    if consumed < 0 { false }
+    else { consumed == list_len(input) }
+}
+
+// Partial match: pattern matches starting from the beginning
+fn match_prefix(pat: Pattern, input: IntList) -> Bool {
+    match_at(pat, input) >= 0
+}
+
+fn list_len(list: IntList) -> Int {
+    match list {
+        ILNil => 0,
+        ILCons { head: _, tail } => 1 + list_len(tail),
+    }
+}
+
+// Count the number of literal patterns in a pattern tree
+fn count_literals(pat: Pattern) -> Int {
+    match pat {
+        PLit(_) => 1,
+        PAny => 0,
+        PSeq { first, second } => count_literals(first) + count_literals(second),
+        PAlt { left, right } => count_literals(left) + count_literals(right),
+    }
+}
+
+// Compute the minimum length of input a pattern can match
+fn pattern_min_len(pat: Pattern) -> Int {
+    match pat {
+        PLit(_) => 1,
+        PAny => 1,
+        PSeq { first, second } => pattern_min_len(first) + pattern_min_len(second),
+        PAlt { left, right } => {
+            let l = pattern_min_len(left);
+            let r = pattern_min_len(right);
+            if l < r { l } else { r }
+        },
+    }
+}
+
+// Compute the maximum length of input a pattern can match
+fn pattern_max_len(pat: Pattern) -> Int {
+    match pat {
+        PLit(_) => 1,
+        PAny => 1,
+        PSeq { first, second } => pattern_max_len(first) + pattern_max_len(second),
+        PAlt { left, right } => {
+            let l = pattern_max_len(left);
+            let r = pattern_max_len(right);
+            if l > r { l } else { r }
+        },
+    }
+}
+
+// Count nodes in the pattern tree
+fn pattern_nodes(pat: Pattern) -> Int {
+    match pat {
+        PLit(_) => 1,
+        PAny => 1,
+        PSeq { first, second } => 1 + pattern_nodes(first) + pattern_nodes(second),
+        PAlt { left, right } => 1 + pattern_nodes(left) + pattern_nodes(right),
+    }
+}
+
+// Helper: build a list from fixed values
+fn list1(a: Int) -> IntList {
+    ILCons { head: a, tail: ILNil }
+}
+
+fn list2(a: Int, b: Int) -> IntList {
+    ILCons { head: a, tail: ILCons { head: b, tail: ILNil } }
+}
+
+fn list3(a: Int, b: Int, c: Int) -> IntList {
+    ILCons { head: a, tail: ILCons { head: b, tail: ILCons { head: c, tail: ILNil } } }
+}
+
+fn list4(a: Int, b: Int, c: Int, d: Int) -> IntList {
+    ILCons { head: a, tail: ILCons { head: b, tail: ILCons { head: c, tail: ILCons { head: d, tail: ILNil } } } }
+}
+
+fn main() -> Int {
+    // === Literal matching ===
+    let p_lit5 = PLit(5);
+    assert(match_full(p_lit5, list1(5)));
+    assert(!match_full(p_lit5, list1(3)));
+    assert(!match_full(p_lit5, ILNil));
+    assert(!match_full(p_lit5, list2(5, 6)));  // too long
+
+    // === PAny matching ===
+    let p_any = PAny;
+    assert(match_full(p_any, list1(42)));
+    assert(match_full(p_any, list1(0)));
+    assert(!match_full(p_any, ILNil));
+    assert(!match_full(p_any, list2(1, 2)));  // too long
+
+    // === Sequence: PLit(1), PLit(2) matches [1, 2] ===
+    let p_seq12 = PSeq { first: PLit(1), second: PLit(2) };
+    assert(match_full(p_seq12, list2(1, 2)));
+    assert(!match_full(p_seq12, list2(2, 1)));
+    assert(!match_full(p_seq12, list1(1)));
+    assert(!match_full(p_seq12, list3(1, 2, 3)));
+
+    // === Sequence: PLit(1), PAny matches [1, x] for any x ===
+    let p_seq1any = PSeq { first: PLit(1), second: PAny };
+    assert(match_full(p_seq1any, list2(1, 99)));
+    assert(match_full(p_seq1any, list2(1, 0)));
+    assert(!match_full(p_seq1any, list2(2, 99)));
+    assert(!match_full(p_seq1any, list1(1)));
+
+    // === Alternative: PLit(1) | PLit(2) ===
+    let p_alt12 = PAlt { left: PLit(1), right: PLit(2) };
+    assert(match_full(p_alt12, list1(1)));
+    assert(match_full(p_alt12, list1(2)));
+    assert(!match_full(p_alt12, list1(3)));
+
+    // === Complex: (1, (2|3)) matches [1,2] and [1,3] but not [1,4] ===
+    let p_complex1 = PSeq {
+        first: PLit(1),
+        second: PAlt { left: PLit(2), right: PLit(3) },
+    };
+    assert(match_full(p_complex1, list2(1, 2)));
+    assert(match_full(p_complex1, list2(1, 3)));
+    assert(!match_full(p_complex1, list2(1, 4)));
+    assert(!match_full(p_complex1, list2(2, 2)));
+
+    // === Complex: (1|2), (3|4) matches [1,3], [1,4], [2,3], [2,4] ===
+    let p_grid = PSeq {
+        first: PAlt { left: PLit(1), right: PLit(2) },
+        second: PAlt { left: PLit(3), right: PLit(4) },
+    };
+    assert(match_full(p_grid, list2(1, 3)));
+    assert(match_full(p_grid, list2(1, 4)));
+    assert(match_full(p_grid, list2(2, 3)));
+    assert(match_full(p_grid, list2(2, 4)));
+    assert(!match_full(p_grid, list2(1, 1)));
+    assert(!match_full(p_grid, list2(3, 3)));
+
+    // === Nested sequence: (1, 2, 3) ===
+    let p_seq123 = PSeq {
+        first: PLit(1),
+        second: PSeq { first: PLit(2), second: PLit(3) },
+    };
+    assert(match_full(p_seq123, list3(1, 2, 3)));
+    assert(!match_full(p_seq123, list3(1, 2, 4)));
+    assert(!match_full(p_seq123, list2(1, 2)));
+
+    // === Prefix matching ===
+    assert(match_prefix(PLit(1), list3(1, 2, 3)));
+    assert(match_prefix(p_seq12, list3(1, 2, 3)));
+    assert(!match_prefix(PLit(9), list3(1, 2, 3)));
+
+    // === Pattern metrics ===
+    assert_eq(count_literals(p_lit5), 1);
+    assert_eq(count_literals(p_any), 0);
+    assert_eq(count_literals(p_seq12), 2);
+    assert_eq(count_literals(p_alt12), 2);
+    // p_complex1 = PSeq(PLit(1), PAlt(PLit(2), PLit(3))): 3 literals
+    assert_eq(count_literals(p_complex1), 3);
+    // p_grid = PSeq(PAlt(PLit(1),PLit(2)), PAlt(PLit(3),PLit(4))): 4 literals
+    assert_eq(count_literals(p_grid), 4);
+
+    // === Pattern length bounds ===
+    assert_eq(pattern_min_len(p_lit5), 1);
+    assert_eq(pattern_max_len(p_lit5), 1);
+    assert_eq(pattern_min_len(p_seq12), 2);
+    assert_eq(pattern_max_len(p_seq12), 2);
+    assert_eq(pattern_min_len(p_alt12), 1);
+    assert_eq(pattern_max_len(p_alt12), 1);
+    assert_eq(pattern_min_len(p_seq123), 3);
+    assert_eq(pattern_max_len(p_seq123), 3);
+
+    // Alt with different-length branches: PLit(1) | PSeq(PLit(2), PLit(3))
+    let p_varlen = PAlt {
+        left: PLit(1),
+        right: PSeq { first: PLit(2), second: PLit(3) },
+    };
+    assert_eq(pattern_min_len(p_varlen), 1);
+    assert_eq(pattern_max_len(p_varlen), 2);
+    assert(match_full(p_varlen, list1(1)));
+    assert(match_full(p_varlen, list2(2, 3)));
+    assert(!match_full(p_varlen, list1(2)));
+
+    // === Pattern node counts ===
+    assert_eq(pattern_nodes(PLit(1)), 1);
+    assert_eq(pattern_nodes(PAny), 1);
+    // PSeq { PLit, PLit } = 1 + 1 + 1 = 3
+    assert_eq(pattern_nodes(p_seq12), 3);
+    // PAlt { PLit, PLit } = 1 + 1 + 1 = 3
+    assert_eq(pattern_nodes(p_alt12), 3);
+    // p_complex1 = PSeq(PLit, PAlt(PLit, PLit)) = 1 + 1 + (1+1+1) = 5
+    assert_eq(pattern_nodes(p_complex1), 5);
+
+    // === Four-element sequence: (any, 5, any, 10) ===
+    let p_four = PSeq {
+        first: PAny,
+        second: PSeq {
+            first: PLit(5),
+            second: PSeq { first: PAny, second: PLit(10) },
+        },
+    };
+    assert(match_full(p_four, list4(99, 5, 77, 10)));
+    assert(match_full(p_four, list4(0, 5, 0, 10)));
+    assert(!match_full(p_four, list4(99, 6, 77, 10)));
+    assert(!match_full(p_four, list4(99, 5, 77, 11)));
+    assert_eq(pattern_min_len(p_four), 4);
+    assert_eq(count_literals(p_four), 2);
+
+    0
+}

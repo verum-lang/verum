@@ -1,0 +1,8 @@
+// Minimal: Simple expressions
+fn main() {
+    let a = 1 + 2;
+    let b = 3 * 4;
+    let c = 10 / 2;
+    let d = 7 % 3;
+    let e = a + b + c + d;
+}

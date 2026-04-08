@@ -1,0 +1,169 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, milestone, comprehensive
+// @timeout: 50000
+// @expected-exit: 0
+//
+// Milestone test #280: integration test covering many features
+
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a); let mut y = abs_val(b);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+// === Matrix 2x2 ===
+type Mat2 is { m00: Int, m01: Int, m10: Int, m11: Int };
+
+fn mat2_mul(a: Mat2, b: Mat2) -> Mat2 {
+    Mat2 {
+        m00: a.m00 * b.m00 + a.m01 * b.m10,
+        m01: a.m00 * b.m01 + a.m01 * b.m11,
+        m10: a.m10 * b.m00 + a.m11 * b.m10,
+        m11: a.m10 * b.m01 + a.m11 * b.m11
+    }
+}
+
+fn mat2_det(m: Mat2) -> Int { m.m00 * m.m11 - m.m01 * m.m10 }
+
+// Matrix power
+fn mat2_pow(m: Mat2, n: Int) -> Mat2 {
+    let mut result = Mat2 { m00: 1, m01: 0, m10: 0, m11: 1 }; // identity
+    let mut base = m;
+    let mut exp = n;
+    while exp > 0 {
+        if exp % 2 == 1 { result = mat2_mul(result, base); }
+        base = mat2_mul(base, base);
+        exp = exp / 2;
+    }
+    result
+}
+
+// Fast Fibonacci using matrix exponentiation
+// [[1,1],[1,0]]^n gives F(n+1), F(n), F(n), F(n-1)
+fn fast_fib(n: Int) -> Int {
+    if n == 0 { return 0; }
+    let m = Mat2 { m00: 1, m01: 1, m10: 1, m11: 0 };
+    let result = mat2_pow(m, n);
+    result.m01  // F(n)
+}
+
+// === Closure patterns ===
+fn apply_n(f: fn(Int) -> Int, x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n {
+        result = f(result);
+        i = i + 1;
+    }
+    result
+}
+
+// === Bit tricks ===
+fn popcount(n: Int) -> Int {
+    let mut x = n;
+    let mut count = 0;
+    while x > 0 { count = count + (x & 1); x = x >> 1; }
+    count
+}
+
+fn next_power_of_2(n: Int) -> Int {
+    let mut p = 1;
+    while p < n { p = p * 2; }
+    p
+}
+
+fn int_log2(n: Int) -> Int {
+    let mut x = n;
+    let mut bits = 0;
+    while x > 1 { bits = bits + 1; x = x / 2; }
+    bits
+}
+
+fn test_matrix() {
+    let m = Mat2 { m00: 1, m01: 2, m10: 3, m11: 4 };
+    assert_eq(mat2_det(m), -2);
+
+    let id = Mat2 { m00: 1, m01: 0, m10: 0, m11: 1 };
+    let mid = mat2_mul(m, id);
+    assert_eq(mid.m00, 1);
+    assert_eq(mid.m11, 4);
+}
+
+fn test_fast_fib() {
+    assert_eq(fast_fib(0), 0);
+    assert_eq(fast_fib(1), 1);
+    assert_eq(fast_fib(2), 1);
+    assert_eq(fast_fib(10), 55);
+    assert_eq(fast_fib(20), 6765);
+    assert_eq(fast_fib(30), 832040);
+}
+
+fn test_closures() {
+    let double = |x: Int| -> Int { x * 2 };
+    assert_eq(apply_n(double, 1, 10), 1024);
+
+    let inc = |x: Int| -> Int { x + 1 };
+    assert_eq(apply_n(inc, 0, 100), 100);
+
+    let square = |x: Int| -> Int { x * x };
+    assert_eq(apply_n(square, 2, 3), 256); // 2->4->16->256
+}
+
+fn test_bit_tricks() {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(1023), 10);
+
+    assert_eq(next_power_of_2(1), 1);
+    assert_eq(next_power_of_2(5), 8);
+    assert_eq(next_power_of_2(16), 16);
+    assert_eq(next_power_of_2(17), 32);
+
+    assert_eq(int_log2(1), 0);
+    assert_eq(int_log2(8), 3);
+    assert_eq(int_log2(1024), 10);
+}
+
+fn test_math() {
+    assert_eq(gcd(252, 105), 21);
+    assert_eq(gcd(1071, 462), 21);
+
+    // Sum of 1/1 + 1/2 + 1/3 + ... + 1/10 approximated as sum of 1000/k
+    let mut harm_sum = 0;
+    let mut k = 1;
+    while k <= 10 {
+        harm_sum = harm_sum + 1000 / k;
+        k = k + 1;
+    }
+    // ≈ 2928 (actual harmonic number ≈ 2.928)
+    assert_eq(harm_sum > 2900, true);
+    assert_eq(harm_sum < 3000, true);
+}
+
+fn test_stress() {
+    // Compute F(n) for n=1..20, verify sum
+    let mut fib_sum = 0;
+    let mut i = 1;
+    while i <= 20 {
+        fib_sum = fib_sum + fast_fib(i);
+        i = i + 1;
+    }
+    // Sum of first 20 Fibonacci: F(22) - 1 = 17711 - 1 = 17710
+    assert_eq(fib_sum, 17710);
+}
+
+fn main() -> Int {
+    test_matrix();
+    test_fast_fib();
+    test_closures();
+    test_bit_tricks();
+    test_math();
+    test_stress();
+    print("[OK] 280_milestone_280_aot");
+    0
+}

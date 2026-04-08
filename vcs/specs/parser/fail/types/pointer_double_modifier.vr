@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, pointer, modifier, error
+// @description: Test detection of pointer with double modifier
+// @expected-error: E018
+
+// Pointer can only have one modifier
+fn test(x: *const mut T) {}

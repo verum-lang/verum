@@ -1,0 +1,124 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: proof-stability, array, memory
+// @timeout: 45000
+
+/// Array and memory proofs - testing SMT array theory stability.
+/// These proofs involve the theory of arrays (select/store axioms).
+
+/// Test: Array store then select (same index)
+fn test_store_select_same(mut arr: List<Int>, idx: Int{>= 0}, val: Int) -> Bool
+    requires idx < len(arr)
+    ensures result == true
+{
+    arr.set(idx, val);
+    arr[idx] == val
+}
+
+/// Test: Array store then select (different index)
+fn test_store_select_different(
+    mut arr: List<Int>,
+    i: Int{>= 0},
+    j: Int{>= 0},
+    val: Int
+) -> Bool
+    requires i < len(arr) && j < len(arr)
+    requires i != j
+{
+    let orig_j = arr[j];
+    arr.set(i, val);
+    arr[j] == orig_j
+}
+
+/// Test: Array extensionality
+fn test_array_extensionality(
+    arr1: List<Int>,
+    arr2: List<Int>,
+    n: Int
+) -> Bool
+    requires len(arr1) == n && len(arr2) == n
+    requires forall i in 0..n => arr1[i] == arr2[i]
+    ensures result == true  // arr1 == arr2
+{
+    // If all elements are equal, arrays are equal
+    true
+}
+
+/// Test: Array bounds invariant
+fn test_bounds_invariant(arr: List<Int>, n: Int{> 0}) -> Bool
+    requires len(arr) == n
+    requires forall i in 0..n => arr[i] >= 0 && arr[i] < 100
+    ensures result == (forall i in 0..n => arr[i] < 100)
+{
+    forall i in 0..n => arr[i] < 100
+}
+
+/// Test: Array swap preserves elements
+fn swap<T>(arr: &mut List<T>, i: Int, j: Int)
+    requires i >= 0 && i < len(arr)
+    requires j >= 0 && j < len(arr)
+    ensures len(arr) == len(old(arr))
+{
+    let tmp = arr[i];
+    arr.set(i, arr[j]);
+    arr.set(j, tmp);
+}
+
+/// Test: Array sum bounds
+fn test_sum_bounds(arr: List<Int>, n: Int{> 0}) -> Bool
+    requires len(arr) == n
+    requires forall i in 0..n => arr[i] >= 0 && arr[i] <= 10
+    ensures result == (sum(arr) <= n * 10)
+{
+    sum(arr) <= n * 10
+}
+
+/// Helper: compute array sum
+fn sum(arr: List<Int>) -> Int
+    ensures result >= 0 || len(arr) == 0
+{
+    let mut total = 0;
+    for i in 0..len(arr) {
+        total = total + arr[i];
+    }
+    total
+}
+
+/// Test: Array partition property (simplified)
+fn test_partition(
+    arr: List<Int>,
+    pivot_idx: Int{>= 0}
+) -> Bool
+    requires pivot_idx < len(arr)
+    ensures result == true
+{
+    // Partition property holds (simplified)
+    let pivot = arr[pivot_idx];
+    true
+}
+
+/// Test: Multi-dimensional array access (simplified)
+fn test_2d_array(
+    matrix: List<List<Int>>,
+    rows: Int,
+    cols: Int,
+    i: Int,
+    j: Int
+) -> Bool
+    requires rows > 0 && cols > 0
+    requires len(matrix) == rows
+    requires i >= 0 && i < rows
+    requires j >= 0 && j < cols
+{
+    // Access the row then element
+    let row = matrix[i];
+    row[j] == row[j]
+}
+
+fn main() {
+    let arr = [1, 2, 3, 4, 5];
+    assert(test_store_select_same(arr, 2, 100));
+    assert(test_store_select_different(arr, 0, 4, 100));
+    assert(test_bounds_invariant([10, 20, 30], 3));
+}

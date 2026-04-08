@@ -1,0 +1,324 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, attributes, verification
+// @description: Test @verify and verification-related attributes - grammar: verify_attribute
+
+// ============================================================================
+// VERIFY ATTRIBUTE
+// Grammar: verify_attribute = 'verify' '(' ('runtime' | 'static' | 'formal') ')'
+// ============================================================================
+
+// Runtime verification (dynamic checks)
+@verify(runtime)
+@requires(x > 0)
+fn runtime_checked(x: Int) -> Int {
+    x * 2
+}
+
+// Static verification (compile-time checks)
+@verify(static)
+@requires(x >= 0)
+@ensures(result >= 0)
+fn statically_verified(x: Int) -> Int {
+    x * x
+}
+
+// Formal verification (theorem prover)
+@verify(formal)
+@requires(x > 0)
+@requires(y > 0)
+@ensures(result > x)
+@ensures(result > y)
+fn formally_proven(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// ============================================================================
+// VERIFY WITH REQUIRES/ENSURES CONTRACTS (using attributes)
+// ============================================================================
+
+@verify(runtime)
+@requires(n >= 0)
+@ensures(result >= 1)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+@verify(static)
+@requires(list.len() > 0)
+@ensures(result is Some)
+fn first<T>(list: &List<T>) -> Maybe<&T> {
+    list.first()
+}
+
+@verify(formal)
+@requires(divisor != 0)
+@ensures(result * divisor <= dividend)
+fn integer_divide(dividend: Int, divisor: Int) -> Int {
+    dividend / divisor
+}
+
+// ============================================================================
+// VERIFY ON DIFFERENT ITEM TYPES
+// ============================================================================
+
+// On type definitions with refinements
+@verify(static)
+type PositiveInt is Int{self > 0};
+
+@verify(formal)
+type NonEmptyList<T> is { items: List<T>{self.len() > 0} };
+
+@verify(runtime)
+type BoundedInt is Int{self >= 0 && self <= 100};
+
+// On protocol methods
+@verify(static)
+type Sortable is protocol {
+    @verify(formal)
+    @ensures(result.is_sorted())
+    fn sort(&mut self);
+
+    @verify(runtime)
+    @requires(index < self.len())
+    fn get(&self, index: Int) -> &Self.Item;
+};
+
+// On implement blocks
+@verify(static)
+implement Sortable for List<Int> {
+    @verify(formal)
+    fn sort(&mut self) {
+        // Implementation
+    }
+
+    @verify(runtime)
+    fn get(&self, index: Int) -> &Int {
+        &self[index]
+    }
+}
+
+// ============================================================================
+// VERIFY WITH INVARIANTS
+// ============================================================================
+
+@verify(static)
+@invariant(self.len <= self.capacity)
+@invariant(self.capacity > 0)
+type BoundedBuffer<T> is {
+    data: List<T>,
+    len: Int,
+    capacity: Int
+};
+
+@verify(formal)
+@invariant(self.balance >= 0)
+type Account is {
+    id: Int,
+    balance: Int
+};
+
+// ============================================================================
+// VERIFY COMBINED WITH OTHER ATTRIBUTES
+// ============================================================================
+
+@verify(runtime)
+@inline
+@requires(x > 0)
+fn verified_inline(x: Int) -> Int {
+    x
+}
+
+@verify(static)
+@ensures(result == a + b)
+pure fn verified_pure(a: Int, b: Int) -> Int {
+    a + b
+}
+
+@verify(formal)
+@must_use
+@ensures(result >= x)
+fn verified_must_use(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+@verify(runtime)
+@deprecated("Use new_verified instead")
+@requires(x >= 0)
+fn old_verified(x: Int) -> Int {
+    x
+}
+
+@derive(Clone, Debug)
+@verify(static)
+type VerifiedDerived is {
+    @verify(runtime)
+    positive: Int{self > 0};
+};
+
+// ============================================================================
+// VERIFY WITH QUANTIFIERS (using theorem declarations)
+// ============================================================================
+
+// Note: forall/exists quantifiers are used in theorem/lemma declarations,
+// not in @requires/@ensures attributes on regular functions
+// See declarations/proofs.vr for comprehensive theorem/lemma tests
+
+// Simple theorem example - quantifier tests are in proofs directory
+theorem simple_verify(x: Int) -> Bool
+    requires x >= 0
+    ensures result == true
+    proof by auto
+
+// ============================================================================
+// VERIFY WITH OLD EXPRESSIONS
+// ============================================================================
+
+@verify(formal)
+@ensures(self.len() == old(self.len()) + 1)
+fn push<T>(&mut self, item: T) using [Allocator] {
+    // Implementation
+}
+
+@verify(formal)
+@requires(self.len() > 0)
+@ensures(self.len() == old(self.len()) - 1)
+fn pop<T>(&mut self) -> Maybe<T> {
+    // Implementation
+    None
+}
+
+// ============================================================================
+// VERIFY WITH DECREASES CLAUSES (termination)
+// ============================================================================
+
+@verify(formal)
+@requires(n >= 0)
+@decreases(n)
+fn verified_recursive(n: Int) -> Int {
+    if n == 0 { 0 }
+    else { 1 + verified_recursive(n - 1) }
+}
+
+@verify(formal)
+@decreases(list.len())
+fn verified_list_recursive<T>(list: &List<T>) -> Int {
+    if list.is_empty() { 0 }
+    else { 1 + verified_list_recursive(&list.tail()) }
+}
+
+// ============================================================================
+// VERIFY WITH MODIFIES CLAUSES
+// ============================================================================
+
+@verify(formal)
+@modifies(buffer)
+@ensures(buffer.len() == 0)
+fn clear_buffer<T>(buffer: &mut List<T>) {
+    buffer.clear();
+}
+
+@verify(formal)
+@modifies(self.balance)
+@requires(amount >= 0)
+@requires(self.balance >= amount)
+@ensures(self.balance == old(self.balance) - amount)
+fn withdraw(&mut self, amount: Int) {
+    self.balance = self.balance - amount;
+}
+
+// ============================================================================
+// VERIFY ON CLOSURES (using assert for inline checks)
+// ============================================================================
+
+fn with_verified_closure() {
+    // Closures use inline assertions for verification
+    let validated = |x: Int| -> Int {
+        assert(x > 0);
+        x * 2
+    };
+
+    let proven = |a: Int, b: Int| -> Int {
+        if a > b { a } else { b }
+    };
+}
+
+// ============================================================================
+// MIXED VERIFICATION LEVELS
+// ============================================================================
+
+@verify(formal)
+type FormallyVerifiedApi is protocol {
+    @verify(static)
+    fn fast_check(&self, x: Int) -> Bool;
+
+    @verify(formal)
+    @requires(x >= 0)
+    @ensures(result >= 0)
+    fn proven_operation(&self, x: Int) -> Int;
+
+    @verify(runtime)
+    fn runtime_checked(&self, input: Text) -> Result<Int, Error>;
+};
+
+// ============================================================================
+// VERIFY WITH GHOST VARIABLES
+// ============================================================================
+
+@verify(formal)
+type VerifiedStack<T> is {
+    data: List<T>,
+    @ghost sequence: List<T>
+};
+
+@verify(formal)
+@ghost
+fn model_sequence<T>(stack: &VerifiedStack<T>) -> List<T> {
+    stack.sequence
+}
+
+// ============================================================================
+// CONDITIONAL VERIFICATION
+// ============================================================================
+
+@cfg(verify)
+@verify(formal)
+@requires(x > 0)
+@ensures(result > 0)
+fn only_verified_in_verify_mode(x: Int) -> Int {
+    x
+}
+
+@cfg(not(release))
+@verify(runtime)
+@requires(x >= 0)
+fn debug_verified_only(x: Int) -> Int {
+    x
+}
+
+// ============================================================================
+// SPECIALIZE WITH VERIFY
+// ============================================================================
+
+@specialize
+@verify(static)
+implement Sortable for List<i32> {
+    @verify(formal)
+    fn sort(&mut self) {
+        // Specialized, formally verified implementation for i32
+    }
+
+    fn get(&self, index: Int) -> &i32 {
+        &self[index]
+    }
+}
+
+@specialize
+@verify(formal)
+implement Hash for Text {
+    fn hash(&self) -> Int {
+        self.bytes().fold(0, |acc, b| acc * 31 + b as Int)
+    }
+}

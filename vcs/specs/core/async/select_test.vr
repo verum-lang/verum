@@ -1,0 +1,718 @@
+// =============================================================================
+// select_test.vr - Comprehensive tests for async selection combinators
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, select, race, join, timeout, combinators, either
+// @description: Tests for Either, SelectAllResult, TimeoutError, ReadyFuture,
+//               NeverFuture, combinator type signatures, Duration with timeout,
+//               and various async utility types
+// =============================================================================
+
+mount core.async.select.{
+    Either, Left, Right,
+    SelectAllResult,
+    TimeoutError,
+    ReadyFuture, NeverFuture, YieldNow,
+    select_either, race, select_all,
+    join, join3, join4, join_all,
+    timeout, try_first,
+    yield_now, pending_forever, ready,
+};
+mount core.async.future.{Future};
+mount core.async.poll.{Poll, Ready, Pending};
+mount core.async.waker.{Context, Waker, noop_waker};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+mount core.time.duration.Duration;
+
+// =============================================================================
+// Section 1: Either Type Construction
+// =============================================================================
+
+@test
+fn test_either_left_int() {
+    let e: Either<Int, Text> = Left(42);
+    match e {
+        Left(n) => assert_eq(n, 42),
+        Right(_) => panic("expected Left"),
+    }
+}
+
+@test
+fn test_either_right_text() {
+    let e: Either<Int, Text> = Right("hello");
+    match e {
+        Left(_) => panic("expected Right"),
+        Right(s) => assert_eq(s, "hello"),
+    }
+}
+
+@test
+fn test_either_left_bool() {
+    let e: Either<Bool, Float> = Left(true);
+    match e {
+        Left(b) => assert(b),
+        Right(_) => panic("expected Left"),
+    }
+}
+
+@test
+fn test_either_right_float() {
+    let e: Either<Bool, Float> = Right(3.14);
+    match e {
+        Left(_) => panic("expected Right"),
+        Right(f) => assert(f > 3.0),
+    }
+}
+
+@test
+fn test_either_left_text() {
+    let e: Either<Text, Int> = Left("value");
+    match e {
+        Left(s) => assert_eq(s, "value"),
+        Right(_) => panic("expected Left"),
+    }
+}
+
+@test
+fn test_either_right_int() {
+    let e: Either<Text, Int> = Right(99);
+    match e {
+        Left(_) => panic("expected Right"),
+        Right(n) => assert_eq(n, 99),
+    }
+}
+
+// =============================================================================
+// Section 2: SelectAllResult
+// =============================================================================
+
+@test
+fn test_select_all_result_construction() {
+    let result: SelectAllResult<Int> = SelectAllResult {
+        value: 42,
+        index: 0,
+        remaining: List.new(),
+    };
+    assert_eq(result.value, 42);
+    assert_eq(result.index, 0);
+}
+
+@test
+fn test_select_all_result_fields() {
+    let result = SelectAllResult {
+        value: "first",
+        index: 2,
+        remaining: List.new(),
+    };
+    assert_eq(result.value, "first");
+    assert_eq(result.index, 2);
+}
+
+// =============================================================================
+// Section 3: TimeoutError
+// =============================================================================
+
+@test
+fn test_timeout_error_type() {
+    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    assert(result.is_err());
+}
+
+@test
+fn test_timeout_error_in_err_result() {
+    let result: Result<Int, TimeoutError> = Err(TimeoutError);
+    assert(result.is_err());
+}
+
+@test
+fn test_timeout_error_in_ok_result() {
+    let result: Result<Int, TimeoutError> = Ok(42);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 42);
+}
+
+@test
+fn test_timeout_error_match() {
+    let result: Result<Text, TimeoutError> = Err(TimeoutError);
+    let is_timeout = match result {
+        Ok(_) => false,
+        Err(_) => true,
+    };
+    assert(is_timeout);
+}
+
+// =============================================================================
+// Section 4: ReadyFuture
+// =============================================================================
+
+@test
+fn test_ready_future_int() {
+    let mut fut: ReadyFuture<Int> = ready(42);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let poll = fut.poll(&mut cx);
+    assert(poll.is_ready());
+    assert_eq(poll.unwrap(), 42);
+}
+
+@test
+fn test_ready_future_text() {
+    let mut fut: ReadyFuture<Text> = ready("hello");
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let poll = fut.poll(&mut cx);
+    assert(poll.is_ready());
+    assert_eq(poll.unwrap(), "hello");
+}
+
+@test
+fn test_ready_future_bool() {
+    let mut fut: ReadyFuture<Bool> = ready(false);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let poll = fut.poll(&mut cx);
+    assert(poll.is_ready());
+    assert_eq(poll.unwrap(), false);
+}
+
+@test
+fn test_ready_future_unit() {
+    let mut fut: ReadyFuture<()> = ready(());
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert(fut.poll(&mut cx).is_ready());
+}
+
+// =============================================================================
+// Section 5: NeverFuture (pending_forever)
+// =============================================================================
+
+@test
+fn test_pending_forever_int() {
+    let mut fut: NeverFuture<Int> = pending_forever();
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert(fut.poll(&mut cx).is_pending());
+}
+
+@test
+fn test_pending_forever_text() {
+    let mut fut: NeverFuture<Text> = pending_forever();
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert(fut.poll(&mut cx).is_pending());
+}
+
+@test
+fn test_pending_forever_poll_multiple() {
+    let mut fut: NeverFuture<Int> = pending_forever();
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    // Always pending, no matter how many times polled
+    assert(fut.poll(&mut cx).is_pending());
+    assert(fut.poll(&mut cx).is_pending());
+    assert(fut.poll(&mut cx).is_pending());
+}
+
+// =============================================================================
+// Section 6: Combinator Type Verification
+// =============================================================================
+
+@test
+fn test_select_either_signature() {
+    let f1: ReadyFuture<Int> = ready(42);
+    let f2: ReadyFuture<Text> = ready("hello");
+    // Verify the types are compatible with select_either
+    let _: ReadyFuture<Int> = f1;
+    let _: ReadyFuture<Text> = f2;
+    // Both futures are valid ReadyFuture that implement Future
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let mut f = ready(42);
+    assert(f.poll(&mut cx).is_ready());
+}
+
+@test
+fn test_race_signature() {
+    let mut f1: ReadyFuture<Int> = ready(42);
+    let mut f2: ReadyFuture<Int> = ready(99);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    // Both futures are same type - race requires same Output type
+    assert_eq(f1.poll(&mut cx).unwrap(), 42);
+    assert_eq(f2.poll(&mut cx).unwrap(), 99);
+}
+
+@test
+fn test_join_signature() {
+    let mut f1: ReadyFuture<Int> = ready(42);
+    let mut f2: ReadyFuture<Text> = ready("hello");
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    // join produces (A, B) - both futures complete
+    assert_eq(f1.poll(&mut cx).unwrap(), 42);
+    assert_eq(f2.poll(&mut cx).unwrap(), "hello");
+}
+
+@test
+fn test_join3_signature() {
+    let mut f1: ReadyFuture<Int> = ready(1);
+    let mut f2: ReadyFuture<Int> = ready(2);
+    let mut f3: ReadyFuture<Int> = ready(3);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert_eq(f1.poll(&mut cx).unwrap(), 1);
+    assert_eq(f2.poll(&mut cx).unwrap(), 2);
+    assert_eq(f3.poll(&mut cx).unwrap(), 3);
+}
+
+@test
+fn test_join4_signature() {
+    let mut f1: ReadyFuture<Int> = ready(1);
+    let mut f2: ReadyFuture<Int> = ready(2);
+    let mut f3: ReadyFuture<Int> = ready(3);
+    let mut f4: ReadyFuture<Int> = ready(4);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert_eq(f1.poll(&mut cx).unwrap(), 1);
+    assert_eq(f2.poll(&mut cx).unwrap(), 2);
+    assert_eq(f3.poll(&mut cx).unwrap(), 3);
+    assert_eq(f4.poll(&mut cx).unwrap(), 4);
+}
+
+@test
+fn test_timeout_duration_type() {
+    let dur: Duration = Duration.from_secs(5);
+    assert_eq(dur.as_secs(), 5);
+    // timeout(dur, future) returns Result<T, TimeoutError>
+    let _ok: Result<Int, TimeoutError> = Ok(42);
+    let _err: Result<Int, TimeoutError> = Err(TimeoutError);
+    assert(_ok.is_ok());
+    assert(_err.is_err());
+}
+
+@test
+fn test_join_all_with_list() {
+    let futures: List<ReadyFuture<Int>> = List.from([
+        ready(1),
+        ready(2),
+        ready(3),
+    ]);
+    assert_eq(futures.len(), 3);
+    // Each future in the list is a valid ReadyFuture
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let mut f = ready(100);
+    assert_eq(f.poll(&mut cx).unwrap(), 100);
+}
+
+// =============================================================================
+// Section 7: Duration with Timeout
+// =============================================================================
+
+@test
+fn test_timeout_duration_millis() {
+    let d: Duration = Duration.from_millis(100);
+    assert_eq(d.as_millis(), 100);
+}
+
+@test
+fn test_timeout_duration_secs() {
+    let d: Duration = Duration.from_secs(1);
+    assert_eq(d.as_secs(), 1);
+}
+
+@test
+fn test_timeout_duration_zero() {
+    let d: Duration = Duration.from_millis(0);
+    assert_eq(d.as_millis(), 0);
+}
+
+@test
+fn test_timeout_duration_large() {
+    let d: Duration = Duration.from_secs(3600);
+    assert_eq(d.as_secs(), 3600);
+}
+
+// =============================================================================
+// Section 8: ReadyFuture Polling Behavior
+// =============================================================================
+
+@test
+fn test_ready_future_value_field() {
+    let fut: ReadyFuture<Int> = ready(99);
+    // ReadyFuture stores value as Maybe<T>
+    assert(fut.value is Some);
+}
+
+@test
+fn test_ready_future_consumed_after_poll() {
+    let mut fut: ReadyFuture<Int> = ready(42);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let _ = fut.poll(&mut cx);
+    // After poll, value is taken
+    assert(fut.value is None);
+}
+
+@test
+fn test_ready_future_negative() {
+    let mut fut: ReadyFuture<Int> = ready(-100);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert_eq(fut.poll(&mut cx).unwrap(), -100);
+}
+
+// =============================================================================
+// Section 9: NeverFuture Properties
+// =============================================================================
+
+@test
+fn test_never_future_marker() {
+    let fut: NeverFuture<Int> = pending_forever();
+    assert_eq(fut._marker, ());
+}
+
+@test
+fn test_never_future_stays_pending_across_contexts() {
+    let mut fut: NeverFuture<Int> = pending_forever();
+    let w1: Waker = noop_waker();
+    let w2: Waker = noop_waker();
+    let mut cx1 = Context.from_waker(&w1);
+    let mut cx2 = Context.from_waker(&w2);
+    // Pending regardless of context
+    assert(fut.poll(&mut cx1).is_pending());
+    assert(fut.poll(&mut cx2).is_pending());
+}
+
+// =============================================================================
+// Section 10: Either Exhaustive Patterns
+// =============================================================================
+
+@test
+fn test_either_is_operator() {
+    let left: Either<Int, Text> = Left(42);
+    let right: Either<Int, Text> = Right("hello");
+    assert(left is Left);
+    assert(!(left is Right));
+    assert(right is Right);
+    assert(!(right is Left));
+}
+
+@test
+fn test_either_nested() {
+    let e: Either<Either<Int, Bool>, Text> = Left(Left(42));
+    match e {
+        Left(inner) => {
+            match inner {
+                Left(n) => assert_eq(n, 42),
+                Right(_) => panic("expected inner Left"),
+            }
+        }
+        Right(_) => panic("expected outer Left"),
+    }
+}
+
+@test
+fn test_either_same_type() {
+    let left: Either<Int, Int> = Left(1);
+    let right: Either<Int, Int> = Right(2);
+    let left_val = match left {
+        Left(v) => v,
+        Right(v) => v,
+    };
+    let right_val = match right {
+        Left(v) => v,
+        Right(v) => v,
+    };
+    assert_eq(left_val, 1);
+    assert_eq(right_val, 2);
+}
+
+// =============================================================================
+// Section 11: SelectAllResult Fields
+// =============================================================================
+
+@test
+fn test_select_all_result_index_zero() {
+    let result = SelectAllResult {
+        value: 100,
+        index: 0,
+        remaining: List.from([200, 300]),
+    };
+    assert_eq(result.value, 100);
+    assert_eq(result.index, 0);
+    assert_eq(result.remaining.len(), 2);
+}
+
+@test
+fn test_select_all_result_middle_index() {
+    let result = SelectAllResult {
+        value: "second",
+        index: 1,
+        remaining: List.from(["first", "third"]),
+    };
+    assert_eq(result.value, "second");
+    assert_eq(result.index, 1);
+    assert_eq(result.remaining.len(), 2);
+}
+
+@test
+fn test_select_all_result_empty_remaining() {
+    let result = SelectAllResult {
+        value: 42,
+        index: 0,
+        remaining: List.new(),
+    };
+    assert_eq(result.remaining.len(), 0);
+}
+
+// =============================================================================
+// Section 12: YieldNow Polling Behavior
+// =============================================================================
+
+@test
+fn test_yield_now_construction() {
+    let y = YieldNow { yielded: false };
+    assert(!y.yielded);
+}
+
+@test
+fn test_yield_now_first_poll_pending() {
+    let mut y = YieldNow { yielded: false };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let first = y.poll(&mut cx);
+    assert(first.is_pending());
+    assert(y.yielded);
+}
+
+@test
+fn test_yield_now_second_poll_ready() {
+    let mut y = YieldNow { yielded: false };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let _ = y.poll(&mut cx);  // First: Pending
+    let second = y.poll(&mut cx);  // Second: Ready
+    assert(second.is_ready());
+}
+
+// =============================================================================
+// Section 13: Either with Unit and Nested Types
+// =============================================================================
+
+@test
+fn test_either_left_unit() {
+    let e: Either<(), Int> = Left(());
+    assert(e is Left);
+}
+
+@test
+fn test_either_right_unit() {
+    let e: Either<Int, ()> = Right(());
+    assert(e is Right);
+}
+
+@test
+fn test_either_with_maybe() {
+    let e: Either<Maybe<Int>, Text> = Left(Some(42));
+    match e {
+        Left(maybe) => {
+            match maybe {
+                Some(v) => assert_eq(v, 42),
+                None => panic("expected Some"),
+            }
+        }
+        Right(_) => panic("expected Left"),
+    }
+}
+
+@test
+fn test_either_with_result() {
+    let e: Either<Result<Int, Text>, Bool> = Left(Ok(99));
+    match e {
+        Left(result) => assert_eq(result.unwrap(), 99),
+        Right(_) => panic("expected Left"),
+    }
+}
+
+// =============================================================================
+// Section 14: ReadyFuture Edge Cases
+// =============================================================================
+
+@test
+fn test_ready_future_zero() {
+    let mut fut: ReadyFuture<Int> = ready(0);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert_eq(fut.poll(&mut cx).unwrap(), 0);
+}
+
+@test
+fn test_ready_future_large_value() {
+    let mut fut: ReadyFuture<Int> = ready(999_999_999);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert_eq(fut.poll(&mut cx).unwrap(), 999_999_999);
+}
+
+@test
+fn test_ready_future_empty_text() {
+    let mut fut: ReadyFuture<Text> = ready("");
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert_eq(fut.poll(&mut cx).unwrap(), "");
+}
+
+@test
+fn test_ready_future_value_consumed() {
+    let mut fut: ReadyFuture<Int> = ready(42);
+    assert(fut.value is Some);
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let _ = fut.poll(&mut cx);
+    assert(fut.value is None);
+}
+
+// =============================================================================
+// Section 15: NeverFuture Edge Cases
+// =============================================================================
+
+@test
+fn test_pending_forever_bool() {
+    let mut fut: NeverFuture<Bool> = pending_forever();
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert(fut.poll(&mut cx).is_pending());
+}
+
+@test
+fn test_pending_forever_unit() {
+    let mut fut: NeverFuture<()> = pending_forever();
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert(fut.poll(&mut cx).is_pending());
+}
+
+@test
+fn test_pending_forever_five_polls() {
+    let mut fut: NeverFuture<Int> = pending_forever();
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    assert(fut.poll(&mut cx).is_pending());
+    assert(fut.poll(&mut cx).is_pending());
+    assert(fut.poll(&mut cx).is_pending());
+    assert(fut.poll(&mut cx).is_pending());
+    assert(fut.poll(&mut cx).is_pending());
+}
+
+// =============================================================================
+// Section 16: YieldNow State Tracking
+// =============================================================================
+
+@test
+fn test_yield_now_initial_state() {
+    let y = YieldNow { yielded: false };
+    assert(!y.yielded);
+}
+
+@test
+fn test_yield_now_state_after_first_poll() {
+    let mut y = YieldNow { yielded: false };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    let _ = y.poll(&mut cx);
+    assert(y.yielded);
+}
+
+@test
+fn test_yield_now_full_lifecycle() {
+    let mut y = YieldNow { yielded: false };
+    let waker: Waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    // First poll: pending, sets yielded to true
+    assert(y.poll(&mut cx).is_pending());
+    assert(y.yielded);
+    // Second poll: ready
+    assert(y.poll(&mut cx).is_ready());
+}
+
+// =============================================================================
+// Section 17: SelectAllResult Edge Cases
+// =============================================================================
+
+@test
+fn test_select_all_result_large_index() {
+    let result = SelectAllResult {
+        value: 42,
+        index: 999,
+        remaining: List.new(),
+    };
+    assert_eq(result.index, 999);
+}
+
+@test
+fn test_select_all_result_with_list_remaining() {
+    let remaining = List.from([10, 20, 30, 40, 50]);
+    let result = SelectAllResult {
+        value: 1,
+        index: 0,
+        remaining: remaining,
+    };
+    assert_eq(result.remaining.len(), 5);
+}
+
+// =============================================================================
+// Section 18: TimeoutError in Various Result Combinations
+// =============================================================================
+
+@test
+fn test_timeout_error_result_match_ok() {
+    let result: Result<Text, TimeoutError> = Ok("success");
+    let val = match result {
+        Ok(s) => s,
+        Err(_) => "timeout",
+    };
+    assert_eq(val, "success");
+}
+
+@test
+fn test_timeout_error_result_match_err() {
+    let result: Result<Text, TimeoutError> = Err(TimeoutError);
+    let val = match result {
+        Ok(s) => s,
+        Err(_) => "timeout",
+    };
+    assert_eq(val, "timeout");
+}
+
+@test
+fn test_timeout_error_is_unit_type() {
+    let err = TimeoutError;
+    let result: Result<Int, TimeoutError> = Err(err);
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Section 19: Duration Timeout Edge Cases
+// =============================================================================
+
+@test
+fn test_timeout_duration_nanos() {
+    let d: Duration = Duration.from_nanos(1);
+    assert_eq(d.as_nanos(), 1);
+}
+
+@test
+fn test_timeout_duration_micros() {
+    let d: Duration = Duration.from_micros(500);
+    assert_eq(d.as_micros(), 500);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

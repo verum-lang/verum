@@ -1,0 +1,178 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, matrix, multiply, transpose, determinant, trace
+// @expected-exit: 0
+
+// Tests matrix multiply, transpose, determinant, trace, and identity check.
+// Matrices stored as flat 16-element arrays (up to 4x4), row-major order.
+// mat[r*cols + c] for element at row r, column c.
+
+fn mat_get(mat: List<Int>, row: Int, col: Int, cols: Int) -> Int {
+    mat[row * cols + col]
+}
+
+fn mat_trace(mat: List<Int>, n: Int) -> Int {
+    // Sum of diagonal elements
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < n) {
+        sum = sum + mat[i * n + i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn det2x2(a: Int, b_val: Int, c: Int, d: Int) -> Int {
+    a * d - b_val * c
+}
+
+fn det3x3(m: List<Int>) -> Int {
+    // 3x3 determinant via cofactor expansion along first row
+    // |a b c|
+    // |d e f| = a(ei - fh) - b(di - fg) + c(dh - eg)
+    // |g h i|
+    let a = m[0]; let b_val = m[1]; let c = m[2];
+    let d = m[3]; let e = m[4]; let fv = m[5];
+    let g = m[6]; let h = m[7]; let iv = m[8];
+    a * (e * iv - fv * h) - b_val * (d * iv - fv * g) + c * (d * h - e * g)
+}
+
+fn main() -> Int {
+    // 2x2 matrices for multiply test
+    // A = [[1, 2], [3, 4]]  stored as [1, 2, 3, 4, 0, 0, ...]
+    // B = [[5, 6], [7, 8]]  stored as [5, 6, 7, 8, 0, 0, ...]
+    let mat_a = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mat_b = [5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut mat_c = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Test 1: 2x2 matrix multiply C = A * B
+    // C[0][0] = 1*5 + 2*7 = 5 + 14 = 19
+    // C[0][1] = 1*6 + 2*8 = 6 + 16 = 22
+    // C[1][0] = 3*5 + 4*7 = 15 + 28 = 43
+    // C[1][1] = 3*6 + 4*8 = 18 + 32 = 50
+    let mut r = 0;
+    while (r < 2) {
+        let mut cv = 0;
+        while (cv < 2) {
+            let mut sum = 0;
+            let mut k = 0;
+            while (k < 2) {
+                sum = sum + mat_a[r * 2 + k] * mat_b[k * 2 + cv];
+                k = k + 1;
+            }
+            mat_c[r * 2 + cv] = sum;
+            cv = cv + 1;
+        }
+        r = r + 1;
+    }
+    assert_eq(mat_c[0], 19);
+    assert_eq(mat_c[1], 22);
+    assert_eq(mat_c[2], 43);
+    assert_eq(mat_c[3], 50);
+
+    // Test 2: 2x2 matrix transpose
+    // A^T = [[1, 3], [2, 4]]
+    let mut mat_at = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    r = 0;
+    while (r < 2) {
+        let mut cv = 0;
+        while (cv < 2) {
+            mat_at[cv * 2 + r] = mat_a[r * 2 + cv];
+            cv = cv + 1;
+        }
+        r = r + 1;
+    }
+    assert_eq(mat_at[0], 1);
+    assert_eq(mat_at[1], 3);
+    assert_eq(mat_at[2], 2);
+    assert_eq(mat_at[3], 4);
+
+    // Test 3: 2x2 determinant
+    // det(A) = 1*4 - 2*3 = -2
+    let det_a = det2x2(mat_a[0], mat_a[1], mat_a[2], mat_a[3]);
+    assert_eq(det_a, -2);
+
+    // Test 4: 2x2 trace
+    // tr(A) = 1 + 4 = 5
+    let tr_a = mat_trace(mat_a, 2);
+    assert_eq(tr_a, 5);
+
+    // Test 5: 3x3 determinant
+    // M = [[2, 1, 3], [0, -1, 2], [1, 4, -1]]
+    // det = 2((-1)(-1) - 2*4) - 1(0*(-1) - 2*1) + 3(0*4 - (-1)*1)
+    //     = 2(1 - 8) - 1(0 - 2) + 3(0 + 1)
+    //     = 2(-7) - 1(-2) + 3(1)
+    //     = -14 + 2 + 3 = -9
+    let mut mat_3 = [2, 1, 3, 0, -1, 2, 1, 4, -1, 0, 0, 0, 0, 0, 0, 0];
+    let det_m = det3x3(mat_3);
+    assert_eq(det_m, -9);
+
+    // Test 6: 3x3 trace
+    // tr(M) = 2 + (-1) + (-1) = 0
+    let tr_m = mat_trace(mat_3, 3);
+    assert_eq(tr_m, 0);
+
+    // Test 7: Identity matrix check
+    // I = [[1, 0], [0, 1]]
+    let mat_i = [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut is_identity = 1;
+    r = 0;
+    while (r < 2) {
+        let mut cv = 0;
+        while (cv < 2) {
+            let expected = if (r == cv) { 1 } else { 0 };
+            if (mat_i[r * 2 + cv] != expected) {
+                is_identity = 0;
+            }
+            cv = cv + 1;
+        }
+        r = r + 1;
+    }
+    assert_eq(is_identity, 1);
+
+    // Test 8: A * I = A (identity is multiplicative identity)
+    let mut mat_ai = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    r = 0;
+    while (r < 2) {
+        let mut cv = 0;
+        while (cv < 2) {
+            let mut sum = 0;
+            let mut k = 0;
+            while (k < 2) {
+                sum = sum + mat_a[r * 2 + k] * mat_i[k * 2 + cv];
+                k = k + 1;
+            }
+            mat_ai[r * 2 + cv] = sum;
+            cv = cv + 1;
+        }
+        r = r + 1;
+    }
+    assert_eq(mat_ai[0], 1);
+    assert_eq(mat_ai[1], 2);
+    assert_eq(mat_ai[2], 3);
+    assert_eq(mat_ai[3], 4);
+
+    // Test 9: det(A*B) = det(A) * det(B) for 2x2
+    let det_b = det2x2(mat_b[0], mat_b[1], mat_b[2], mat_b[3]);
+    // det(B) = 5*8 - 6*7 = 40 - 42 = -2
+    assert_eq(det_b, -2);
+    let det_c = det2x2(mat_c[0], mat_c[1], mat_c[2], mat_c[3]);
+    // det(C) = 19*50 - 22*43 = 950 - 946 = 4
+    assert_eq(det_c, 4);
+    // det(A)*det(B) = (-2)*(-2) = 4 = det(C)
+    assert_eq(det_a * det_b, det_c);
+
+    // Test 10: tr(A + B) = tr(A) + tr(B)
+    let tr_b = mat_trace(mat_b, 2);
+    // tr(B) = 5 + 8 = 13
+    assert_eq(tr_b, 13);
+    // A + B = [[6, 8], [10, 12]]
+    let mut mat_sum = [6, 8, 10, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let tr_sum = mat_trace(mat_sum, 2);
+    // tr(A+B) = 6 + 12 = 18 = 5 + 13
+    assert_eq(tr_sum, tr_a + tr_b);
+
+    print("Matrix operations: PASS");
+    0
+}

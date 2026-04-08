@@ -1,0 +1,65 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, atomic, sync
+// @timeout: 50000
+// @expected-exit: 0
+
+mount core.sync.atomic.MemoryOrdering;
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    let a = AtomicInt.new(42);
+    let v = a.load(Ordering.SeqCst);
+    if v == 42 { pass = pass + 1; } else { print(f"FAIL1: {v}"); }
+
+    a.store(100, Ordering.SeqCst);
+    let v2 = a.load(Ordering.SeqCst);
+    if v2 == 100 { pass = pass + 1; } else { print(f"FAIL2: {v2}"); }
+
+    let old = a.fetch_add(10, Ordering.SeqCst);
+    if old == 100 { pass = pass + 1; } else { print(f"FAIL3a: {old}"); }
+    let v3 = a.load(Ordering.SeqCst);
+    if v3 == 110 { pass = pass + 1; } else { print(f"FAIL3b: {v3}"); }
+
+    let old2 = a.fetch_sub(5, Ordering.SeqCst);
+    if old2 == 110 { pass = pass + 1; } else { print(f"FAIL4a: {old2}"); }
+    let v4 = a.load(Ordering.SeqCst);
+    if v4 == 105 { pass = pass + 1; } else { print(f"FAIL4b: {v4}"); }
+
+    let old3 = a.swap(200, Ordering.SeqCst);
+    if old3 == 105 { pass = pass + 1; } else { print(f"FAIL5a: {old3}"); }
+    let v5 = a.load(Ordering.SeqCst);
+    if v5 == 200 { pass = pass + 1; } else { print(f"FAIL5b: {v5}"); }
+
+    match a.compare_exchange(200, 300, Ordering.SeqCst, Ordering.SeqCst) {
+        Ok(v) => {
+            if v == 200 { pass = pass + 1; } else { print(f"FAIL6a: {v}"); }
+        },
+        Err(e) => { print(f"FAIL6-err: {e}"); },
+    }
+    let v6 = a.load(Ordering.SeqCst);
+    if v6 == 300 { pass = pass + 1; } else { print(f"FAIL6b: {v6}"); }
+
+    match a.compare_exchange(999, 400, Ordering.SeqCst, Ordering.SeqCst) {
+        Ok(v) => { print(f"FAIL7-ok: {v}"); },
+        Err(actual) => {
+            if actual == 300 { pass = pass + 1; } else { print(f"FAIL7a: {actual}"); }
+        },
+    }
+
+    a.store(50, Ordering.SeqCst);
+    let new_v = a.increment(Ordering.SeqCst);
+    if new_v == 51 { pass = pass + 1; } else { print(f"FAIL8: {new_v}"); }
+
+    let new_v2 = a.decrement(Ordering.SeqCst);
+    if new_v2 == 50 { pass = pass + 1; } else { print(f"FAIL9: {new_v2}"); }
+
+    print(f"pass = {pass}/13");
+    if pass == 13 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

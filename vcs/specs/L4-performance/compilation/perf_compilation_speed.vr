@@ -1,0 +1,431 @@
+// @test: typecheck-pass
+// @level: L4
+// @tier: 0
+// @tags: performance, compilation, throughput, speed, codegen
+// @timeout: 60000
+// @description: Compilation throughput test — generates large volumes of code patterns to stress the compiler pipeline
+
+/// Compilation Speed Benchmark
+///
+/// This file contains a high volume of varied code patterns designed to exercise
+/// all phases of the Verum compiler pipeline:
+///   - Lexer: many tokens, keywords, identifiers, literals
+///   - Parser: nested expressions, deep match trees, complex types
+///   - Type checker: inference, generics, method resolution
+///   - VBC codegen: many instructions, register pressure
+///   - LLVM lowering: function calls, branches, allocations
+///
+/// Target: > 50K LOC/sec compilation throughput
+///
+/// This file is intentionally large (~500 lines) to provide a meaningful
+/// compilation speed data point.
+
+// --- Many type definitions to stress the type checker ---
+
+type Direction is
+    | North
+    | South
+    | East
+    | West;
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Rgb(Int, Int, Int);
+
+type Shape is
+    | Circle(Int)
+    | Rect(Int, Int)
+    | Tri(Int, Int, Int);
+
+type LogLevel is
+    | Trace
+    | Debug
+    | Info
+    | Warn
+    | Error
+    | Fatal;
+
+type Expr is
+    | Lit(Int)
+    | Add(Int, Int)
+    | Mul(Int, Int)
+    | Neg(Int);
+
+type TreeNode is {
+    value: Int,
+    left_val: Int,
+    right_val: Int,
+    depth: Int,
+};
+
+type Pair is {
+    first: Int,
+    second: Int,
+};
+
+type Triple is {
+    a: Int,
+    b: Int,
+    c: Int,
+};
+
+type Config is {
+    width: Int,
+    height: Int,
+    depth: Int,
+    scale: Int,
+};
+
+type Matrix2x2 is {
+    m00: Int, m01: Int,
+    m10: Int, m11: Int,
+};
+
+// --- Implement blocks to stress method resolution ---
+
+implement Pair {
+    fn new(a: Int, b: Int) -> Pair { Pair { first: a, second: b } }
+    fn sum(&self) -> Int { self.first + self.second }
+    fn product(&self) -> Int { self.first * self.second }
+    fn swap(&self) -> Pair { Pair { first: self.second, second: self.first } }
+    fn map(&self, f: fn(Int) -> Int) -> Pair {
+        Pair { first: f(self.first), second: f(self.second) }
+    }
+}
+
+implement Triple {
+    fn new(a: Int, b: Int, c: Int) -> Triple { Triple { a: a, b: b, c: c } }
+    fn sum(&self) -> Int { self.a + self.b + self.c }
+    fn max(&self) -> Int {
+        let m = if self.a > self.b { self.a } else { self.b };
+        if self.c > m { self.c } else { m }
+    }
+    fn min(&self) -> Int {
+        let m = if self.a < self.b { self.a } else { self.b };
+        if self.c < m { self.c } else { m }
+    }
+}
+
+implement Matrix2x2 {
+    fn identity() -> Matrix2x2 {
+        Matrix2x2 { m00: 1, m01: 0, m10: 0, m11: 1 }
+    }
+    fn det(&self) -> Int {
+        self.m00 * self.m11 - self.m01 * self.m10
+    }
+    fn trace(&self) -> Int {
+        self.m00 + self.m11
+    }
+    fn add(&self, other: Matrix2x2) -> Matrix2x2 {
+        Matrix2x2 {
+            m00: self.m00 + other.m00, m01: self.m01 + other.m01,
+            m10: self.m10 + other.m10, m11: self.m11 + other.m11,
+        }
+    }
+    fn mul(&self, other: Matrix2x2) -> Matrix2x2 {
+        Matrix2x2 {
+            m00: self.m00 * other.m00 + self.m01 * other.m10,
+            m01: self.m00 * other.m01 + self.m01 * other.m11,
+            m10: self.m10 * other.m00 + self.m11 * other.m10,
+            m11: self.m10 * other.m01 + self.m11 * other.m11,
+        }
+    }
+}
+
+// --- Many small functions to stress codegen ---
+
+fn add(a: Int, b: Int) -> Int { a + b }
+fn sub(a: Int, b: Int) -> Int { a - b }
+fn mul(a: Int, b: Int) -> Int { a * b }
+fn div_safe(a: Int, b: Int) -> Int { if b == 0 { 0 } else { a / b } }
+fn mod_safe(a: Int, b: Int) -> Int { if b == 0 { 0 } else { a % b } }
+fn abs_val(x: Int) -> Int { if x < 0 { -x } else { x } }
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn clamp(v: Int, lo: Int, hi: Int) -> Int { if v < lo { lo } else if v > hi { hi } else { v } }
+fn sign(x: Int) -> Int { if x > 0 { 1 } else if x < 0 { -1 } else { 0 } }
+
+fn is_even(n: Int) -> Bool { n % 2 == 0 }
+fn is_odd(n: Int) -> Bool { n % 2 != 0 }
+fn is_positive(n: Int) -> Bool { n > 0 }
+fn is_negative(n: Int) -> Bool { n < 0 }
+fn is_zero(n: Int) -> Bool { n == 0 }
+
+fn square(n: Int) -> Int { n * n }
+fn cube(n: Int) -> Int { n * n * n }
+fn double(n: Int) -> Int { n + n }
+fn triple(n: Int) -> Int { n + n + n }
+fn quadruple(n: Int) -> Int { n + n + n + n }
+
+// --- Complex match expressions ---
+
+fn direction_dx(d: Direction) -> Int {
+    match d { North => 0, South => 0, East => 1, West => -1 }
+}
+
+fn direction_dy(d: Direction) -> Int {
+    match d { North => 1, South => -1, East => 0, West => 0 }
+}
+
+fn color_brightness(c: Color) -> Int {
+    match c {
+        Red => 76,
+        Green => 150,
+        Blue => 29,
+        Rgb(r, g, b) => (r * 76 + g * 150 + b * 29) / 255,
+    }
+}
+
+fn shape_area(s: Shape) -> Int {
+    match s {
+        Circle(r) => 314 * r * r / 100,
+        Rect(w, h) => w * h,
+        Tri(a, b, _) => a * b / 2,
+    }
+}
+
+fn eval_expr(e: Expr) -> Int {
+    match e {
+        Lit(v) => v,
+        Add(a, b) => a + b,
+        Mul(a, b) => a * b,
+        Neg(v) => -v,
+    }
+}
+
+fn log_level_value(l: LogLevel) -> Int {
+    match l { Trace => 0, Debug => 1, Info => 2, Warn => 3, Error => 4, Fatal => 5 }
+}
+
+// --- Loops and iteration patterns ---
+
+fn sum_range(start: Int, end: Int) -> Int {
+    let mut s = 0;
+    let mut i = start;
+    while i < end { s = s + i; i = i + 1; }
+    s
+}
+
+fn count_divisors(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i <= n {
+        if n % i == 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n < 4 { return true; }
+    if n % 2 == 0 { return false; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return false; }
+        i = i + 2;
+    }
+    true
+}
+
+fn nth_prime(n: Int) -> Int {
+    let mut count = 0;
+    let mut candidate = 2;
+    while count < n {
+        if is_prime(candidate) { count = count + 1; }
+        if count < n { candidate = candidate + 1; }
+    }
+    candidate
+}
+
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int {
+    if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn fib_iter(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let tmp = a + b;
+        a = b;
+        b = tmp;
+        i = i + 1;
+    }
+    b
+}
+
+// --- Closure and higher-order function patterns ---
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int { f(f(x)) }
+fn apply_n(f: fn(Int) -> Int, x: Int, n: Int) -> Int {
+    let mut result = x;
+    let mut i = 0;
+    while i < n { result = f(result); i = i + 1; }
+    result
+}
+fn compose_two(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int { |x| f(g(x)) }
+
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end { acc = f(acc, i); i = i + 1; }
+    acc
+}
+
+// --- f-string patterns ---
+
+fn format_pair(p: Pair) -> Text {
+    f"({p.first}, {p.second})"
+}
+
+fn format_triple(t: Triple) -> Text {
+    f"({t.a}, {t.b}, {t.c})"
+}
+
+fn format_matrix(m: Matrix2x2) -> Text {
+    f"[{m.m00} {m.m01}; {m.m10} {m.m11}]"
+}
+
+// --- List operations ---
+
+fn make_range(n: Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < n { result.push(i); i = i + 1; }
+    result
+}
+
+fn list_sum(data: List<Int>) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < data.len() { s = s + data[i]; i = i + 1; }
+    s
+}
+
+fn list_max(data: List<Int>) -> Int {
+    if data.len() == 0 { return 0; }
+    let mut m = data[0];
+    let mut i = 1;
+    while i < data.len() {
+        if data[i] > m { m = data[i]; }
+        i = i + 1;
+    }
+    m
+}
+
+// --- Main: verify correctness of all patterns ---
+
+fn test_types_and_methods() -> Int {
+    let p = Pair.new(3, 4);
+    if p.sum() != 7 { return 1; }
+    if p.product() != 12 { return 1; }
+
+    let t = Triple.new(5, 10, 15);
+    if t.sum() != 30 { return 1; }
+    if t.max() != 15 { return 1; }
+    if t.min() != 5 { return 1; }
+
+    let m = Matrix2x2.identity();
+    if m.det() != 1 { return 1; }
+    if m.trace() != 2 { return 1; }
+
+    print("  types_and_methods: OK");
+    0
+}
+
+fn test_math_functions() -> Int {
+    if abs_val(-42) != 42 { return 1; }
+    if max2(3, 7) != 7 { return 1; }
+    if min2(3, 7) != 3 { return 1; }
+    if clamp(5, 0, 10) != 5 { return 1; }
+    if sign(-5) != -1 { return 1; }
+    if square(5) != 25 { return 1; }
+    if cube(3) != 27 { return 1; }
+
+    print("  math_functions: OK");
+    0
+}
+
+fn test_match_patterns() -> Int {
+    if direction_dx(Direction.East) != 1 { return 1; }
+    if direction_dy(Direction.North) != 1 { return 1; }
+    if shape_area(Shape.Rect(3, 4)) != 12 { return 1; }
+    if eval_expr(Expr.Add(3, 4)) != 7 { return 1; }
+    if log_level_value(LogLevel.Error) != 4 { return 1; }
+
+    print("  match_patterns: OK");
+    0
+}
+
+fn test_iteration() -> Int {
+    if sum_range(1, 11) != 55 { return 1; }
+    if count_divisors(12) != 6 { return 1; }
+    if !is_prime(17) { return 1; }
+    if is_prime(15) { return 1; }
+    if nth_prime(5) != 11 { return 1; }
+    if fib_iter(10) != 55 { return 1; }
+
+    print("  iteration: OK");
+    0
+}
+
+fn test_closures() -> Int {
+    let inc = |x| x + 1;
+    if apply_twice(inc, 5) != 7 { return 1; }
+    if apply_n(inc, 0, 10) != 10 { return 1; }
+
+    let double_then_inc = compose_two(|x| x + 1, |x| x * 2);
+    if double_then_inc(5) != 11 { return 1; }
+
+    let sum = fold_range(1, 11, 0, |acc, x| acc + x);
+    if sum != 55 { return 1; }
+
+    print("  closures: OK");
+    0
+}
+
+fn test_fstrings() -> Int {
+    let p = Pair.new(1, 2);
+    if format_pair(p) != "(1, 2)" { return 1; }
+
+    let t = Triple.new(3, 4, 5);
+    if format_triple(t) != "(3, 4, 5)" { return 1; }
+
+    let m = Matrix2x2.identity();
+    if format_matrix(m) != "[1 0; 0 1]" { return 1; }
+
+    print("  fstrings: OK");
+    0
+}
+
+fn test_lists() -> Int {
+    let data = make_range(10);
+    if data.len() != 10 { return 1; }
+    if list_sum(data) != 45 { return 1; }
+    if list_max(data) != 9 { return 1; }
+
+    print("  lists: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_types_and_methods();
+    failures = failures + test_math_functions();
+    failures = failures + test_match_patterns();
+    failures = failures + test_iteration();
+    failures = failures + test_closures();
+    failures = failures + test_fstrings();
+    failures = failures + test_lists();
+
+    if failures == 0 {
+        print("All compilation speed benchmark patterns verified");
+        print("Note: actual compilation timing measured by external harness");
+    }
+    failures
+}

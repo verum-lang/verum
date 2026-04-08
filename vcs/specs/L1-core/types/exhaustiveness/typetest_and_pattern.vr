@@ -1,0 +1,194 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, typetest, and-pattern, pattern-matching
+// @description: TypeTest patterns combined with And patterns for exhaustiveness
+
+// ============================================================
+// TYPETEST WITH AND-PATTERNS
+// ============================================================
+// Tests exhaustiveness checking when combining type tests (is)
+// with and-patterns (&) for refined matching.
+
+type Maybe<T> is None | Some(T);
+
+// Sum types for classification
+type Sign is Positive | Negative | Zero;
+type Parity is Even | Odd;
+
+// Active patterns for classification
+pattern Sign(n: Int) -> Sign =
+    if n > 0 { Positive }
+    else if n < 0 { Negative }
+    else { Zero };
+
+pattern Parity(n: Int) -> Parity =
+    if n % 2 == 0 { Even }
+    else { Odd };
+
+// ============================================================
+// TYPE TEST IN AND PATTERNS
+// ============================================================
+
+// Combining type test with variant pattern
+fn classify_value(x: unknown) -> Text =
+    match x {
+        (x is Int) & Sign(Positive) => "positive integer",
+        (x is Int) & Sign(Negative) => "negative integer",
+        (x is Int) & Sign(Zero) => "zero",
+        x is Float => "floating point",
+        x is Text => "text",
+        x is Bool => "boolean",
+        _ => "unknown type"
+    };
+
+// Type test with parity pattern
+fn classify_int_parity(x: unknown) -> Text =
+    match x {
+        (x is Int) & Parity(Even) => "even integer",
+        (x is Int) & Parity(Odd) => "odd integer",
+        _ => "not an integer"
+    };
+
+// ============================================================
+// COMBINED TYPE AND VALUE CONSTRAINTS
+// ============================================================
+
+type Comparison is Less | Equal | Greater;
+
+pattern Compare(a: Int, b: Int) -> Comparison =
+    if a < b { Less }
+    else if a > b { Greater }
+    else { Equal };
+
+// Type test with comparison pattern
+fn analyze_pair(a: unknown, b: unknown) -> Text =
+    match (a, b) {
+        ((a is Int) & Sign(Positive), (b is Int) & Sign(Positive)) => {
+            match Compare(a, b) {
+                Less => "a < b (both positive)",
+                Equal => "a == b (both positive)",
+                Greater => "a > b (both positive)"
+            }
+        }
+        ((a is Int) & Sign(Negative), (b is Int) & Sign(Negative)) => "both negative",
+        (a is Int, b is Int) => "mixed signs",
+        _ => "not both integers"
+    };
+
+// ============================================================
+// AND PATTERN WITH GUARD
+// ============================================================
+
+fn special_positive(x: unknown) -> Maybe<Int> =
+    match x {
+        (x is Int) & Sign(Positive) if x < 100 => Some(x),
+        (x is Int) & Sign(Positive) => Some(x * 2),  // Large positive
+        _ => None
+    };
+
+// ============================================================
+// MULTIPLE TYPE TESTS IN AND
+// ============================================================
+
+// This tests that x satisfies multiple type constraints
+fn narrow_type(x: unknown) -> Text =
+    match x {
+        x is Int => "integer",
+        x is Float => "float",
+        x is Text => "text",
+        x is Bool => "boolean",
+        _ => "other"
+    };
+
+// ============================================================
+// AND PATTERN WITH OR PATTERN
+// ============================================================
+
+fn classify_number(x: unknown) -> Text =
+    match x {
+        (x is Int) & (Sign(Positive) | Sign(Zero)) => "non-negative int",
+        (x is Int) & Sign(Negative) => "negative int",
+        (x is Float) => "float",
+        _ => "not a number"
+    };
+
+// ============================================================
+// EXHAUSTIVE TYPE TEST WITH NESTED AND
+// ============================================================
+
+type Color is Red | Green | Blue;
+
+fn describe_typed_value(x: unknown) -> Text =
+    match x {
+        // Integer with sign classification
+        (x is Int) & Sign(Positive) & Parity(Even) => "positive even",
+        (x is Int) & Sign(Positive) & Parity(Odd) => "positive odd",
+        (x is Int) & Sign(Zero) => "zero",
+        (x is Int) & Sign(Negative) => "negative",
+        // Other types
+        x is Float => "float",
+        x is Text => "text",
+        x is Bool => "boolean",
+        _ => "unknown"
+    };
+
+// ============================================================
+// TYPE TEST ON VARIANT PAYLOAD
+// ============================================================
+
+type Value is
+    | IntVal(Int)
+    | FloatVal(Float)
+    | TextVal(Text)
+    | BoolVal(Bool);
+
+fn extract_positive_int(v: Value) -> Maybe<Int> =
+    match v {
+        IntVal(n) & Sign(Positive) => Some(n),
+        _ => None
+    };
+
+fn describe_value(v: Value) -> Text =
+    match v {
+        IntVal(n) & Sign(Positive) => f"positive int: {n}",
+        IntVal(n) & Sign(Negative) => f"negative int: {n}",
+        IntVal(n) & Sign(Zero) => "zero",
+        FloatVal(f) => f"float: {f}",
+        TextVal(s) => f"text: {s}",
+        BoolVal(b) => f"bool: {b}"
+    };
+
+// ============================================================
+// MAIN
+// ============================================================
+
+fn main() {
+    // Type test with and-pattern
+    assert(classify_value(42) == "positive integer");
+    assert(classify_value(-5) == "negative integer");
+    assert(classify_value(0) == "zero");
+    assert(classify_value(3.14) == "floating point");
+    assert(classify_value("hello") == "text");
+    assert(classify_value(true) == "boolean");
+
+    // Parity classification
+    assert(classify_int_parity(4) == "even integer");
+    assert(classify_int_parity(7) == "odd integer");
+    assert(classify_int_parity("not int") == "not an integer");
+
+    // Number classification
+    assert(classify_number(5) == "non-negative int");
+    assert(classify_number(0) == "non-negative int");
+    assert(classify_number(-3) == "negative int");
+    assert(classify_number(3.14) == "float");
+
+    // Value extraction
+    assert(extract_positive_int(IntVal(10)) == Some(10));
+    assert(extract_positive_int(IntVal(-5)) == None);
+    assert(extract_positive_int(FloatVal(3.14)) == None);
+
+    // Value description
+    assert(describe_value(IntVal(5)) == "positive int: 5");
+    assert(describe_value(IntVal(-3)) == "negative int: -3");
+    assert(describe_value(IntVal(0)) == "zero");
+}

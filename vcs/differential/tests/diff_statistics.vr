@@ -1,0 +1,110 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, statistics, math
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn arr_sum(a: Arr8, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n { total = total + get(a, i); i = i + 1; }
+    total
+}
+
+fn arr_min(a: Arr8, n: Int) -> Int {
+    let mut m = get(a, 0);
+    let mut i = 1;
+    while i < n { let v = get(a, i); if v < m { m = v; } i = i + 1; }
+    m
+}
+
+fn arr_max(a: Arr8, n: Int) -> Int {
+    let mut m = get(a, 0);
+    let mut i = 1;
+    while i < n { let v = get(a, i); if v > m { m = v; } i = i + 1; }
+    m
+}
+
+fn mean_int(a: Arr8, n: Int) -> Int {
+    arr_sum(a, n) / n
+}
+
+fn variance_times_n(a: Arr8, n: Int) -> Int {
+    let m = mean_int(a, n);
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let diff = get(a, i) - m;
+        total = total + diff * diff;
+        i = i + 1;
+    }
+    total
+}
+
+fn sort_arr(a: Arr8, n: Int) -> Arr8 {
+    let mut arr = a;
+    let mut i = 0;
+    while i < n - 1 {
+        let mut min_idx = i;
+        let mut j = i + 1;
+        while j < n { if get(arr, j) < get(arr, min_idx) { min_idx = j; } j = j + 1; }
+        if min_idx != i {
+            let tmp = get(arr, i);
+            arr = set(arr, i, get(arr, min_idx));
+            arr = set(arr, min_idx, tmp);
+        }
+        i = i + 1;
+    }
+    arr
+}
+
+fn median_int(a: Arr8, n: Int) -> Int {
+    let sorted = sort_arr(a, n);
+    if n % 2 == 1 { get(sorted, n / 2) }
+    else { (get(sorted, n / 2 - 1) + get(sorted, n / 2)) / 2 }
+}
+
+fn main() -> Int {
+    let data = Arr8 { d0: 4, d1: 8, d2: 6, d3: 2, d4: 10, d5: 3, d6: 7, d7: 5 };
+
+    assert_eq(arr_sum(data, 8), 45);
+    assert_eq(arr_min(data, 8), 2);
+    assert_eq(arr_max(data, 8), 10);
+    assert_eq(mean_int(data, 8), 5);
+    assert_eq(arr_max(data, 8) - arr_min(data, 8), 8);
+    assert_eq(median_int(data, 8), 5);
+
+    // Variance * 8: (4-5)^2 + (8-5)^2 + (6-5)^2 + (2-5)^2 + (10-5)^2 + (3-5)^2 + (7-5)^2 + (5-5)^2
+    // = 1 + 9 + 1 + 9 + 25 + 4 + 4 + 0 = 53
+    assert_eq(variance_times_n(data, 8), 53);
+
+    let same = Arr8 { d0: 7, d1: 7, d2: 7, d3: 7, d4: 7, d5: 7, d6: 7, d7: 7 };
+    assert_eq(mean_int(same, 8), 7);
+    assert_eq(variance_times_n(same, 8), 0);
+    assert_eq(median_int(same, 8), 7);
+
+    let asc = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 6, d6: 7, d7: 8 };
+    assert_eq(arr_sum(asc, 8), 36);
+    assert_eq(mean_int(asc, 8), 4);
+    assert_eq(median_int(asc, 8), 4);
+
+    print("DIFF_OK: statistics");
+    0
+}

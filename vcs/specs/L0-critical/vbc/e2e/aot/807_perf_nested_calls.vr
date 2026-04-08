@@ -1,0 +1,38 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, nested_calls
+// @expected-exit: 0
+
+// Performance: 10-deep call chain x 100K iterations
+
+fn level10(x: Int) -> Int { x + 1 }
+fn level9(x: Int) -> Int { level10(x) + 1 }
+fn level8(x: Int) -> Int { level9(x) + 1 }
+fn level7(x: Int) -> Int { level8(x) + 1 }
+fn level6(x: Int) -> Int { level7(x) + 1 }
+fn level5(x: Int) -> Int { level6(x) + 1 }
+fn level4(x: Int) -> Int { level5(x) + 1 }
+fn level3(x: Int) -> Int { level4(x) + 1 }
+fn level2(x: Int) -> Int { level3(x) + 1 }
+fn level1(x: Int) -> Int { level2(x) + 1 }
+
+fn main() -> Int {
+    let n = 100000;
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < n) {
+        sum = sum + level1(i);
+        i = i + 1;
+    }
+    // Each call adds 10 to input
+    // sum = sum(i + 10 for i in 0..100000) = sum(0..99999) + 100000*10
+    // = 99999*100000/2 + 1000000 = 4999950000 + 1000000 = 5000950000
+    let expected = 5000950000;
+    if (sum != expected) {
+        print(f"FAIL: sum={sum}, expected={expected}");
+        return 1;
+    }
+    print(f"OK: nested_calls_100K sum={sum}");
+    0
+}

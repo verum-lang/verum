@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, comprehension, iterable, error
+// @description: Comprehension missing iterable after 'in'
+// @expected-error: E018
+
+fn test() {
+    let x = [x * 2 for x in];  // Missing iterable expression
+}

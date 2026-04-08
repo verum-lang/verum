@@ -1,0 +1,126 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: refinement, subtyping, negative
+
+/// Negative refinements: constraints expressed via negation.
+/// Tests proper handling of != and NOT operators in refinements.
+
+// ============================================================================
+// Basic negative refinements
+// ============================================================================
+
+type NonZero is Int{!= 0};
+type NonEmpty is Text{len(it) != 0};
+fn safe_divide(x: Int, y: NonZero) -> Int {
+    x / y  // Safe: y is guaranteed non-zero
+}
+
+// ============================================================================
+// Negated ranges
+// ============================================================================
+
+type OutsideUnitInterval is Float{< 0.0 || > 1.0};
+type NotInRange is Int{< 0 || > 100};
+
+/// Value is NOT in the range [0, 100]
+fn is_outside_range(x: NotInRange) -> Bool {
+    true  // By definition
+}
+
+// ============================================================================
+// Negated predicates
+// ============================================================================
+
+predicate is_even(x: Int) -> Bool {
+    x % 2 == 0
+}
+
+type Odd is Int{it % 2 != 0};
+
+fn next_even(x: Odd) -> Int {
+    x + 1  // Adding 1 to odd gives even
+}
+
+// ============================================================================
+// Equivalent positive forms (avoiding unsupported !() syntax)
+// ============================================================================
+
+/// Double negation equivalent: Int{> 0}
+type StillPositive is Int{> 0};
+
+fn test_positive_equivalent() {
+    let x: StillPositive = 42;
+    let y: Int{> 0} = x;  // Should be equivalent
+}
+
+// ============================================================================
+// De Morgan's laws (written in positive form)
+// ============================================================================
+
+/// !(a && b) == !a || !b — written directly
+type NotBothPositive is Int{<= 0 || >= 100};
+type DeMorganEquiv is Int{<= 0 || >= 100};
+
+/// !(a || b) == !a && !b — written directly
+type NeitherZeroNorOne is Int{!= 0 && != 1};
+type DeMorganEquiv2 is Int{!= 0 && != 1};
+
+// ============================================================================
+// Negative refinements with quantifiers
+// ============================================================================
+
+type NoZeros is List<Int> where forall x in it => x != 0;
+
+// ============================================================================
+// Negative refinements in function signatures
+// ============================================================================
+
+fn reject_zero(x: Int) -> NonZero
+    requires x != 0
+{
+    x
+}
+
+// ============================================================================
+// Exclusive ranges
+// ============================================================================
+
+type NotBetween5and10 is Int{< 5 || > 10};
+
+// ============================================================================
+// Compound negative refinements
+// ============================================================================
+
+type SafeDivisor is Int{!= 0};
+type ValidPercentage is Float{>= 0.0 && <= 100.0};
+
+// ============================================================================
+// Asymmetric negation (written in positive form)
+// ============================================================================
+
+type NotNegative is Int{>= 0};  // Equivalent to !(< 0)
+type NotPositive is Int{<= 0};  // Equivalent to !(> 0)
+
+fn absolute(x: Int) -> NotNegative {
+    if x < 0 { -x } else { x }
+}
+
+fn main() {
+    // Basic negative refinements
+    let divisor: NonZero = 5;
+    let result = safe_divide(100, divisor);
+
+    let name: NonEmpty = "hello";
+
+    // Odd numbers
+    let odd: Odd = 7;
+    let even = next_even(odd);
+
+    // Exclusive ranges
+    let outside: NotBetween5and10 = 3;
+
+    // Absolute value
+    let abs = absolute(-10);
+    assert(abs >= 0);
+}

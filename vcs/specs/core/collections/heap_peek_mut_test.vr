@@ -1,0 +1,275 @@
+// =============================================================================
+// heap_peek_mut_test.vr - Tests for BinaryHeap.peek_mut() and PeekMut guard
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, collections, heap, peek_mut, guard
+// @description: Tests for PeekMut guard: value(), replace(), pop() methods.
+// =============================================================================
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.heap.{BinaryHeap, PeekMut};
+
+// =============================================================================
+// SECTION 1: peek_mut basic
+// =============================================================================
+
+@test
+fn test_peek_mut_returns_some_for_nonempty() {
+    let mut heap = BinaryHeap.new();
+    heap.push(3);
+    heap.push(1);
+    heap.push(2);
+    let guard = heap.peek_mut();
+    assert(guard.is_some());
+}
+
+@test
+fn test_peek_mut_returns_none_for_empty() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    let guard = heap.peek_mut();
+    assert(guard is None);
+}
+
+@test
+fn test_peek_mut_single_element() {
+    let mut heap = BinaryHeap.new();
+    heap.push(42);
+    let guard = heap.peek_mut();
+    assert(guard.is_some());
+}
+
+// =============================================================================
+// SECTION 2: PeekMut.value()
+// =============================================================================
+
+@test
+fn test_peek_mut_value_sees_min() {
+    let mut heap = BinaryHeap.new();
+    heap.push(5);
+    heap.push(1);
+    heap.push(3);
+    match heap.peek_mut() {
+        Some(guard) => {
+            let val = guard.value();
+            assert_eq(*val, 1);  // Min-heap: top is smallest
+        },
+        None => assert(false),
+    }
+}
+
+@test
+fn test_peek_mut_value_single() {
+    let mut heap = BinaryHeap.new();
+    heap.push(99);
+    match heap.peek_mut() {
+        Some(guard) => {
+            let val = guard.value();
+            assert_eq(*val, 99);
+        },
+        None => assert(false),
+    }
+}
+
+// =============================================================================
+// SECTION 3: PeekMut.replace()
+// =============================================================================
+
+@test
+fn test_peek_mut_replace_basic() {
+    let mut heap = BinaryHeap.new();
+    heap.push(1);
+    heap.push(5);
+    heap.push(3);
+    // Replace the minimum (1) with 10
+    match heap.peek_mut() {
+        Some(guard) => {
+            let old = guard.replace(10);
+            assert_eq(old, 1);
+        },
+        None => assert(false),
+    }
+    // Heap should still be valid with new minimum
+    assert_eq(heap.len(), 3);
+    assert_eq(heap.peek(), Some(&3));  // 3 is now the min
+}
+
+@test
+fn test_peek_mut_replace_smaller_value() {
+    let mut heap = BinaryHeap.new();
+    heap.push(5);
+    heap.push(10);
+    heap.push(15);
+    // Replace min (5) with 1
+    match heap.peek_mut() {
+        Some(guard) => {
+            let old = guard.replace(1);
+            assert_eq(old, 5);
+        },
+        None => assert(false),
+    }
+    assert_eq(heap.peek(), Some(&1));  // 1 is now the min
+}
+
+@test
+fn test_peek_mut_replace_single() {
+    let mut heap = BinaryHeap.new();
+    heap.push(42);
+    match heap.peek_mut() {
+        Some(guard) => {
+            let old = guard.replace(99);
+            assert_eq(old, 42);
+        },
+        None => assert(false),
+    }
+    assert_eq(heap.len(), 1);
+    assert_eq(heap.peek(), Some(&99));
+}
+
+// =============================================================================
+// SECTION 4: PeekMut.pop()
+// =============================================================================
+
+@test
+fn test_peek_mut_pop_basic() {
+    let mut heap = BinaryHeap.new();
+    heap.push(1);
+    heap.push(5);
+    heap.push(3);
+    match heap.peek_mut() {
+        Some(guard) => {
+            let val = guard.pop();
+            assert_eq(val, 1);
+        },
+        None => assert(false),
+    }
+    assert_eq(heap.len(), 2);
+    assert_eq(heap.peek(), Some(&3));  // Next min is 3
+}
+
+@test
+fn test_peek_mut_pop_single() {
+    let mut heap = BinaryHeap.new();
+    heap.push(42);
+    match heap.peek_mut() {
+        Some(guard) => {
+            let val = guard.pop();
+            assert_eq(val, 42);
+        },
+        None => assert(false),
+    }
+    assert(heap.is_empty());
+}
+
+@test
+fn test_peek_mut_pop_two_elements() {
+    let mut heap = BinaryHeap.new();
+    heap.push(10);
+    heap.push(20);
+    match heap.peek_mut() {
+        Some(guard) => {
+            let val = guard.pop();
+            assert_eq(val, 10);
+        },
+        None => assert(false),
+    }
+    assert_eq(heap.len(), 1);
+    assert_eq(heap.peek(), Some(&20));
+}
+
+// =============================================================================
+// SECTION 5: PeekMut preserves heap invariant
+// =============================================================================
+
+@test
+fn test_peek_mut_replace_preserves_invariant() {
+    let mut heap = BinaryHeap.new();
+    heap.push(1);
+    heap.push(2);
+    heap.push(3);
+    heap.push(4);
+    heap.push(5);
+    // Replace min with something large
+    match heap.peek_mut() {
+        Some(guard) => {
+            let _ = guard.replace(100);
+        },
+        None => assert(false),
+    }
+    // Pop all and verify ordering
+    let v1 = heap.pop();
+    assert(v1.is_some());
+    let v2 = heap.pop();
+    assert(v2.is_some());
+    let v3 = heap.pop();
+    assert(v3.is_some());
+    let v4 = heap.pop();
+    assert(v4.is_some());
+    let v5 = heap.pop();
+    assert(v5.is_some());
+    assert(heap.pop() is None);
+}
+
+@test
+fn test_peek_mut_pop_preserves_invariant() {
+    let mut heap = BinaryHeap.new();
+    heap.push(10);
+    heap.push(20);
+    heap.push(30);
+    heap.push(40);
+    // Pop via guard
+    match heap.peek_mut() {
+        Some(guard) => {
+            let val = guard.pop();
+            assert_eq(val, 10);
+        },
+        None => assert(false),
+    }
+    // Remaining should be valid min-heap
+    assert_eq(heap.peek(), Some(&20));
+    assert_eq(heap.len(), 3);
+}
+
+// =============================================================================
+// SECTION 6: Slice fill_default
+// =============================================================================
+
+@test
+fn test_slice_fill_default_ints() {
+    let mut data: List<Int> = [5, 10, 15, 20];
+    let slice = data.as_mut_slice();
+    slice.fill_default();
+    // Default for Int is 0
+    assert_eq(data[0], 0);
+    assert_eq(data[1], 0);
+    assert_eq(data[2], 0);
+    assert_eq(data[3], 0);
+}
+
+@test
+fn test_slice_fill_default_empty() {
+    let mut data: List<Int> = [];
+    let slice = data.as_mut_slice();
+    slice.fill_default();  // Should not panic
+    assert(data.is_empty());
+}
+
+@test
+fn test_slice_fill_default_single() {
+    let mut data: List<Int> = [42];
+    let slice = data.as_mut_slice();
+    slice.fill_default();
+    assert_eq(data[0], 0);
+}
+
+@test
+fn test_slice_fill_default_bools() {
+    let mut data: List<Bool> = [true, true, true];
+    let slice = data.as_mut_slice();
+    slice.fill_default();
+    // Default for Bool is false
+    assert_eq(data[0], false);
+    assert_eq(data[1], false);
+    assert_eq(data[2], false);
+}

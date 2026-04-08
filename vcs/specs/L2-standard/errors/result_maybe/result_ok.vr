@@ -1,0 +1,314 @@
+// @test: run
+// @expected-stdout: Success: 42\nUnwrapped: 100\nExpected: 50\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, result, ok, success
+// @description: Result.Ok handling patterns
+
+/// Result.Ok handling - working with successful results.
+/// Demonstrates various patterns for extracting and using Ok values.
+
+type ComputeError is
+    | DivisionByZero
+    | Overflow
+    | InvalidInput(Text);
+
+/// Basic Ok creation
+fn create_ok_values() {
+    // Direct Ok construction
+    let result1: Result<Int, ComputeError> = Ok(42);
+    let result2: Result<Text, ComputeError> = Ok("success");
+    let result3: Result<List<Int>, ComputeError> = Ok([1, 2, 3]);
+
+    // Type inference from context
+    fn takes_result(r: Result<Int, Text>) -> Int {
+        r.unwrap_or(0)
+    }
+    let inferred = takes_result(Ok(100));
+}
+
+/// Checking if result is Ok
+fn check_ok_status() {
+    let success: Result<Int, Text> = Ok(42);
+    let failure: Result<Int, Text> = Err("failed");
+
+    // is_ok() method
+    assert(success.is_ok());
+    assert(!failure.is_ok());
+
+    // is_err() method (opposite)
+    assert(!success.is_err());
+    assert(failure.is_err());
+}
+
+/// Extracting Ok values
+fn extract_ok_values() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // unwrap() - panics on Err
+    let value = result.unwrap();
+    assert_eq(value, 42);
+
+    // unwrap_or() - provides default
+    let with_default: Result<Int, Text> = Err("error");
+    let value = with_default.unwrap_or(0);
+    assert_eq(value, 0);
+
+    // unwrap_or_else() - lazy default
+    let with_lazy: Result<Int, Text> = Err("error");
+    let value = with_lazy.unwrap_or_else(|e| e.len() as Int);
+    assert_eq(value, 5);  // "error".len()
+
+    // unwrap_or_default() - uses Default trait
+    let with_trait_default: Result<Int, Text> = Err("error");
+    let value = with_trait_default.unwrap_or_default();
+    assert_eq(value, 0);
+
+    // expect() - panics with custom message on Err
+    let expected: Result<Int, Text> = Ok(100);
+    let value = expected.expect("This should never fail");
+    assert_eq(value, 100);
+}
+
+/// Pattern matching on Ok
+fn match_ok_patterns() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // Basic match
+    let message = match result {
+        Ok(n) => format("Got number: {}", n),
+        Err(e) => format("Error: {}", e)
+    };
+
+    // Match with guard
+    let result2: Result<Int, Text> = Ok(100);
+    let description = match result2 {
+        Ok(n) if n > 50 => "Large success",
+        Ok(n) if n > 0 => "Small success",
+        Ok(0) => "Zero",
+        Ok(_) => "Negative success",
+        Err(_) => "Failure"
+    };
+
+    // Match with destructuring
+    type Point is { x: Int, y: Int };
+    let point_result: Result<Point, Text> = Ok(Point { x: 10, y: 20 });
+
+    let sum = match point_result {
+        Ok(Point { x, y }) => x + y,
+        Err(_) => 0
+    };
+}
+
+/// If-let pattern for Ok
+fn if_let_ok_pattern() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // if let Ok(value) = result
+    if let Ok(n) = result {
+        println(format("Value is: {}", n));
+    }
+
+    // Combined with else
+    let maybe_err: Result<Int, Text> = Err("oops");
+    if let Ok(n) = maybe_err {
+        println(format("Got: {}", n));
+    } else {
+        println("No value available");
+    }
+
+    // With nested if-let
+    type Data is { value: Maybe<Int> };
+    let nested: Result<Data, Text> = Ok(Data { value: Some(100) });
+
+    if let Ok(Data { value: Some(v) }) = nested {
+        println(format("Nested value: {}", v));
+    }
+}
+
+/// Ok with transformations
+fn transform_ok() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // map() - transform Ok value
+    let doubled = result.map(|n| n * 2);
+    assert_eq(doubled.unwrap(), 84);
+
+    // map preserves Err
+    let err_result: Result<Int, Text> = Err("error");
+    let still_err = err_result.map(|n| n * 2);
+    assert(still_err.is_err());
+
+    // Multiple maps
+    let result: Result<Int, Text> = Ok(10);
+    let processed = result
+        .map(|n| n + 5)
+        .map(|n| n * 2)
+        .map(|n| format("Result: {}", n));
+    assert_eq(processed.unwrap(), "Result: 30");
+}
+
+/// Chaining Ok results with and_then
+fn chain_ok_results() {
+    fn double(n: Int) -> Result<Int, Text> {
+        Ok(n * 2)
+    }
+
+    fn validate_positive(n: Int) -> Result<Int, Text> {
+        if n > 0 {
+            Ok(n)
+        } else {
+            Err("Number must be positive")
+        }
+    }
+
+    let result: Result<Int, Text> = Ok(21);
+
+    // and_then chains Result-returning operations
+    let chained = result
+        .and_then(|n| double(n))
+        .and_then(|n| validate_positive(n));
+    assert_eq(chained.unwrap(), 42);
+
+    // Chain stops at first Err
+    let invalid: Result<Int, Text> = Ok(-5);
+    let stopped = invalid
+        .and_then(|n| validate_positive(n))
+        .and_then(|n| double(n));  // Never called
+    assert(stopped.is_err());
+}
+
+/// Converting Ok to Maybe
+fn ok_to_maybe() {
+    let success: Result<Int, Text> = Ok(42);
+    let failure: Result<Int, Text> = Err("error");
+
+    // ok() converts to Maybe
+    let some = success.ok();
+    assert_eq(some, Some(42));
+
+    let none = failure.ok();
+    assert_eq(none, None);
+}
+
+/// Inspecting Ok values
+fn inspect_ok() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // inspect() for side effects without consuming
+    let inspected = result.inspect(|n| {
+        println(format("Value is: {}", n));
+    });
+
+    // Value is still accessible
+    assert_eq(inspected.unwrap(), 42);
+}
+
+/// Ok with references
+fn ok_with_refs() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // as_ref() borrows the Ok value
+    let ref_result: Result<&Int, &Text> = result.as_ref();
+    assert_eq(*ref_result.unwrap(), 42);
+
+    // as_mut() for mutable reference
+    let mut result2: Result<Int, Text> = Ok(42);
+    if let Ok(ref mut n) = result2 {
+        *n = 100;
+    }
+    assert_eq(result2.unwrap(), 100);
+}
+
+/// Ok in collections
+fn ok_in_collections() {
+    let results: List<Result<Int, Text>> = [
+        Ok(1),
+        Err("a"),
+        Ok(2),
+        Err("b"),
+        Ok(3)
+    ];
+
+    // Filter to only Ok values
+    let oks: List<Int> = results.iter()
+        .filter_map(|r| r.ok())
+        .collect();
+    assert_eq(oks, [1, 2, 3]);
+
+    // Collect all Results into Result<List, E>
+    let all_ok: List<Result<Int, Text>> = [Ok(1), Ok(2), Ok(3)];
+    let collected: Result<List<Int>, Text> = all_ok.into_iter().collect();
+    assert_eq(collected.unwrap(), [1, 2, 3]);
+
+    // First Err stops collection
+    let has_err: List<Result<Int, Text>> = [Ok(1), Err("stop"), Ok(3)];
+    let failed: Result<List<Int>, Text> = has_err.into_iter().collect();
+    assert(failed.is_err());
+}
+
+/// Practical examples
+fn practical_examples() {
+    // Parsing with fallback
+    fn parse_or_default(s: &Text) -> Int {
+        parse_int(s).unwrap_or(0)
+    }
+
+    // Chained operations
+    fn process_data(input: &Text) -> Result<Int, Text> {
+        let parsed = parse_int(input)?;
+        let validated = validate_range(parsed, 0, 100)?;
+        let transformed = transform_value(validated)?;
+        Ok(transformed)
+    }
+
+    // Safe access with default
+    fn get_config_value(key: &Text) -> Int {
+        load_config(key).unwrap_or_else(|_| default_value(key))
+    }
+}
+
+fn parse_int(s: &Text) -> Result<Int, Text> {
+    if s == "42" { Ok(42) }
+    else if s == "100" { Ok(100) }
+    else { Err("Parse error") }
+}
+
+fn validate_range(n: Int, min: Int, max: Int) -> Result<Int, Text> {
+    if n >= min && n <= max {
+        Ok(n)
+    } else {
+        Err("Out of range")
+    }
+}
+
+fn transform_value(n: Int) -> Result<Int, Text> {
+    Ok(n * 2)
+}
+
+fn load_config(key: &Text) -> Result<Int, Text> {
+    Ok(42)
+}
+
+fn default_value(key: &Text) -> Int {
+    0
+}
+
+fn main() {
+    // Basic Ok handling
+    let result: Result<Int, Text> = Ok(42);
+    match result {
+        Ok(n) => println(format("Success: {}", n)),
+        Err(e) => println(format("Error: {}", e))
+    }
+
+    // Unwrapping
+    let safe: Result<Int, Text> = Ok(100);
+    println(format("Unwrapped: {}", safe.unwrap()));
+
+    // Using expect
+    let expected: Result<Int, Text> = Ok(50);
+    println(format("Expected: {}", expected.expect("should succeed")));
+
+    println("Operation completed");
+}

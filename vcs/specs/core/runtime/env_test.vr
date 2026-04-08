@@ -1,0 +1,874 @@
+// =============================================================================
+// env_test.vr - Tests for ExecutionEnv types and runtime environment
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: runtime, env, execution, tier, concurrency, isolation, cbgr, restart
+// @description: Comprehensive tests for ExecutionTier, IsolationLevel,
+//               CpuAffinity, TaskId, RestartStrategy, RestartPolicy,
+//               EnvFlags, ParallelismConfig, GenTracker, and related types.
+// =============================================================================
+
+mount core.runtime.env.{
+    ExecutionTier,
+    IsolationLevel,
+    CpuAffinity,
+    TaskId,
+    RestartStrategy,
+    RestartPolicy,
+    EnvFlags,
+    ParallelismConfig,
+    GenTracker,
+    InlineCircuitBreaker,
+    InlineRetryPolicy,
+    MemoryContext,
+    CapabilityContext,
+    RecoveryContext,
+    ConcurrencyContext,
+    ExecutionEnv,
+    SharedRegistry,
+    MiddlewareChain,
+    TaskLocalStorage,
+    DeferHandler,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.sync.{AtomicU64, Ordering};
+
+// =============================================================================
+// Section 1: ExecutionTier Variant Construction
+// =============================================================================
+
+@test
+fn test_tier_full() {
+    let tier: ExecutionTier = ExecutionTier.Tier0_Full;
+    assert(tier is ExecutionTier.Tier0_Full);
+}
+
+@test
+fn test_tier_epoch() {
+    let tier: ExecutionTier = ExecutionTier.Tier1_Epoch;
+    assert(tier is ExecutionTier.Tier1_Epoch);
+}
+
+@test
+fn test_tier_gen() {
+    let tier: ExecutionTier = ExecutionTier.Tier2_Gen;
+    assert(tier is ExecutionTier.Tier2_Gen);
+}
+
+@test
+fn test_tier_unchecked() {
+    let tier: ExecutionTier = ExecutionTier.Tier3_Unchecked;
+    assert(tier is ExecutionTier.Tier3_Unchecked);
+}
+
+// =============================================================================
+// Section 2: ExecutionTier overhead_ns()
+// =============================================================================
+
+@test
+fn test_tier_full_overhead() {
+    let tier = ExecutionTier.Tier0_Full;
+    assert_eq(tier.overhead_ns(), 15);
+}
+
+@test
+fn test_tier_epoch_overhead() {
+    let tier = ExecutionTier.Tier1_Epoch;
+    assert_eq(tier.overhead_ns(), 8);
+}
+
+@test
+fn test_tier_gen_overhead() {
+    let tier = ExecutionTier.Tier2_Gen;
+    assert_eq(tier.overhead_ns(), 3);
+}
+
+@test
+fn test_tier_unchecked_overhead() {
+    let tier = ExecutionTier.Tier3_Unchecked;
+    assert_eq(tier.overhead_ns(), 0);
+}
+
+@test
+fn test_tier_overhead_monotonically_decreasing() {
+    // Higher tiers should have less overhead
+    let t0 = ExecutionTier.Tier0_Full.overhead_ns();
+    let t1 = ExecutionTier.Tier1_Epoch.overhead_ns();
+    let t2 = ExecutionTier.Tier2_Gen.overhead_ns();
+    let t3 = ExecutionTier.Tier3_Unchecked.overhead_ns();
+    assert(t0 > t1);
+    assert(t1 > t2);
+    assert(t2 > t3);
+}
+
+// =============================================================================
+// Section 3: ExecutionTier requires_generation()
+// =============================================================================
+
+@test
+fn test_tier_full_requires_generation() {
+    assert(ExecutionTier.Tier0_Full.requires_generation());
+}
+
+@test
+fn test_tier_epoch_requires_generation() {
+    assert(ExecutionTier.Tier1_Epoch.requires_generation());
+}
+
+@test
+fn test_tier_gen_requires_generation() {
+    assert(ExecutionTier.Tier2_Gen.requires_generation());
+}
+
+@test
+fn test_tier_unchecked_not_requires_generation() {
+    assert(!ExecutionTier.Tier3_Unchecked.requires_generation());
+}
+
+// =============================================================================
+// Section 4: ExecutionTier requires_epoch()
+// =============================================================================
+
+@test
+fn test_tier_full_requires_epoch() {
+    assert(ExecutionTier.Tier0_Full.requires_epoch());
+}
+
+@test
+fn test_tier_epoch_requires_epoch() {
+    assert(ExecutionTier.Tier1_Epoch.requires_epoch());
+}
+
+@test
+fn test_tier_gen_not_requires_epoch() {
+    assert(!ExecutionTier.Tier2_Gen.requires_epoch());
+}
+
+@test
+fn test_tier_unchecked_not_requires_epoch() {
+    assert(!ExecutionTier.Tier3_Unchecked.requires_epoch());
+}
+
+// =============================================================================
+// Section 5: IsolationLevel Variants
+// =============================================================================
+
+@test
+fn test_isolation_shared() {
+    let level: IsolationLevel = IsolationLevel.Shared;
+    assert(level is IsolationLevel.Shared);
+}
+
+@test
+fn test_isolation_send_only() {
+    let level: IsolationLevel = IsolationLevel.SendOnly;
+    assert(level is IsolationLevel.SendOnly);
+}
+
+@test
+fn test_isolation_full() {
+    let level: IsolationLevel = IsolationLevel.Full;
+    assert(level is IsolationLevel.Full);
+}
+
+@test
+fn test_isolation_match_shared() {
+    let level = IsolationLevel.Shared;
+    assert(level is IsolationLevel.Shared);
+    assert(!(level is IsolationLevel.SendOnly));
+    assert(!(level is IsolationLevel.Full));
+}
+
+@test
+fn test_isolation_match_send_only() {
+    let level = IsolationLevel.SendOnly;
+    assert(level is IsolationLevel.SendOnly);
+    assert(!(level is IsolationLevel.Shared));
+    assert(!(level is IsolationLevel.Full));
+}
+
+@test
+fn test_isolation_match_full() {
+    let level = IsolationLevel.Full;
+    assert(level is IsolationLevel.Full);
+    assert(!(level is IsolationLevel.Shared));
+    assert(!(level is IsolationLevel.SendOnly));
+}
+
+// =============================================================================
+// Section 6: CpuAffinity Variants
+// =============================================================================
+
+@test
+fn test_cpu_affinity_none() {
+    let aff: CpuAffinity = CpuAffinity.None;
+    assert(aff is CpuAffinity.None);
+}
+
+@test
+fn test_cpu_affinity_auto() {
+    let aff: CpuAffinity = CpuAffinity.Auto;
+    assert(aff is CpuAffinity.Auto);
+}
+
+@test
+fn test_cpu_affinity_explicit() {
+    // Explicit with core mask: cores 0 and 1 (mask = 0x03)
+    let aff: CpuAffinity = CpuAffinity.Explicit(0x03);
+    assert(aff is CpuAffinity.Explicit);
+}
+
+@test
+fn test_cpu_affinity_explicit_all_cores() {
+    // All 64 cores enabled
+    let aff: CpuAffinity = CpuAffinity.Explicit(0xFFFFFFFFFFFFFFFF);
+    assert(aff is CpuAffinity.Explicit);
+}
+
+@test
+fn test_cpu_affinity_match_none() {
+    let aff = CpuAffinity.None;
+    assert(aff is CpuAffinity.None);
+    assert(!(aff is CpuAffinity.Auto));
+    assert(!(aff is CpuAffinity.Explicit));
+}
+
+@test
+fn test_cpu_affinity_match_auto() {
+    let aff = CpuAffinity.Auto;
+    assert(aff is CpuAffinity.Auto);
+    assert(!(aff is CpuAffinity.None));
+    assert(!(aff is CpuAffinity.Explicit));
+}
+
+@test
+fn test_cpu_affinity_match_explicit() {
+    let aff = CpuAffinity.Explicit(0x0F);
+    match aff {
+        CpuAffinity.Explicit(mask) => assert(mask == 0x0F),
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 7: TaskId
+// =============================================================================
+
+@test
+fn test_task_id_main() {
+    let id: TaskId = TaskId.main();
+    assert_eq(id.id, 0);
+}
+
+@test
+fn test_task_id_main_no_parent() {
+    let id = TaskId.main();
+    assert(id.parent_id.is_none());
+}
+
+@test
+fn test_task_id_fields() {
+    let id = TaskId.main();
+    let raw_id: UInt64 = id.id;
+    let parent: Maybe<UInt64> = id.parent_id;
+    assert_eq(raw_id, 0);
+    assert(parent.is_none());
+}
+
+// =============================================================================
+// Section 8: RestartStrategy Variants
+// =============================================================================
+
+@test
+fn test_restart_strategy_permanent() {
+    let s: RestartStrategy = RestartStrategy.Permanent;
+    assert(s is RestartStrategy.Permanent);
+}
+
+@test
+fn test_restart_strategy_transient() {
+    let s: RestartStrategy = RestartStrategy.Transient;
+    assert(s is RestartStrategy.Transient);
+}
+
+@test
+fn test_restart_strategy_temporary() {
+    let s: RestartStrategy = RestartStrategy.Temporary;
+    assert(s is RestartStrategy.Temporary);
+}
+
+@test
+fn test_restart_strategy_match_permanent() {
+    let s = RestartStrategy.Permanent;
+    assert(s is RestartStrategy.Permanent);
+    assert(!(s is RestartStrategy.Transient));
+    assert(!(s is RestartStrategy.Temporary));
+}
+
+@test
+fn test_restart_strategy_match_transient() {
+    let s = RestartStrategy.Transient;
+    assert(s is RestartStrategy.Transient);
+    assert(!(s is RestartStrategy.Permanent));
+    assert(!(s is RestartStrategy.Temporary));
+}
+
+@test
+fn test_restart_strategy_match_temporary() {
+    let s = RestartStrategy.Temporary;
+    assert(s is RestartStrategy.Temporary);
+    assert(!(s is RestartStrategy.Permanent));
+    assert(!(s is RestartStrategy.Transient));
+}
+
+// =============================================================================
+// Section 9: RestartPolicy Construction
+// =============================================================================
+
+@test
+fn test_restart_policy_permanent() {
+    let policy = RestartPolicy {
+        strategy: RestartStrategy.Permanent,
+        max_restarts: 5,
+        time_window_secs: 60,
+    };
+    assert_eq(policy.max_restarts, 5);
+    assert_eq(policy.time_window_secs, 60);
+}
+
+@test
+fn test_restart_policy_transient() {
+    let policy = RestartPolicy {
+        strategy: RestartStrategy.Transient,
+        max_restarts: 3,
+        time_window_secs: 30,
+    };
+    assert_eq(policy.max_restarts, 3);
+    assert_eq(policy.time_window_secs, 30);
+}
+
+@test
+fn test_restart_policy_temporary() {
+    let policy = RestartPolicy {
+        strategy: RestartStrategy.Temporary,
+        max_restarts: 0,
+        time_window_secs: 0,
+    };
+    assert_eq(policy.max_restarts, 0);
+    assert_eq(policy.time_window_secs, 0);
+}
+
+@test
+fn test_restart_policy_strategy_field() {
+    let policy = RestartPolicy {
+        strategy: RestartStrategy.Permanent,
+        max_restarts: 10,
+        time_window_secs: 120,
+    };
+    assert(policy.strategy is RestartStrategy.Permanent);
+    assert_eq(policy.max_restarts, 10);
+    assert_eq(policy.time_window_secs, 120);
+}
+
+@test
+fn test_restart_policy_high_limits() {
+    let policy = RestartPolicy {
+        strategy: RestartStrategy.Permanent,
+        max_restarts: 1000,
+        time_window_secs: 3600,
+    };
+    assert_eq(policy.max_restarts, 1000);
+    assert_eq(policy.time_window_secs, 3600);
+}
+
+// =============================================================================
+// Section 10: EnvFlags Construction
+// =============================================================================
+
+@test
+fn test_env_flags_all_disabled() {
+    let flags = EnvFlags {
+        monitoring: false,
+        profiling: false,
+        debug: false,
+        _padding: [0; 1],
+    };
+    assert(!flags.monitoring);
+    assert(!flags.profiling);
+    assert(!flags.debug);
+}
+
+@test
+fn test_env_flags_monitoring_enabled() {
+    let flags = EnvFlags {
+        monitoring: true,
+        profiling: false,
+        debug: false,
+        _padding: [0; 1],
+    };
+    assert(flags.monitoring);
+    assert(!flags.profiling);
+}
+
+@test
+fn test_env_flags_profiling_enabled() {
+    let flags = EnvFlags {
+        monitoring: false,
+        profiling: true,
+        debug: false,
+        _padding: [0; 1],
+    };
+    assert(flags.profiling);
+    assert(!flags.debug);
+}
+
+@test
+fn test_env_flags_debug_enabled() {
+    let flags = EnvFlags {
+        monitoring: false,
+        profiling: false,
+        debug: true,
+        _padding: [0; 1],
+    };
+    assert(flags.debug);
+}
+
+@test
+fn test_env_flags_all_enabled() {
+    let flags = EnvFlags {
+        monitoring: true,
+        profiling: true,
+        debug: true,
+        _padding: [0; 1],
+    };
+    assert(flags.monitoring);
+    assert(flags.profiling);
+    assert(flags.debug);
+}
+
+// =============================================================================
+// Section 11: ParallelismConfig Construction
+// =============================================================================
+
+@test
+fn test_parallelism_config_single_worker() {
+    let config = ParallelismConfig {
+        worker_count: 1,
+        affinity: CpuAffinity.None,
+    };
+    assert_eq(config.worker_count, 1);
+}
+
+@test
+fn test_parallelism_config_multi_worker() {
+    let config = ParallelismConfig {
+        worker_count: 8,
+        affinity: CpuAffinity.Auto,
+    };
+    assert_eq(config.worker_count, 8);
+}
+
+@test
+fn test_parallelism_config_explicit_affinity() {
+    let config = ParallelismConfig {
+        worker_count: 4,
+        affinity: CpuAffinity.Explicit(0x0F),
+    };
+    assert_eq(config.worker_count, 4);
+    match config.affinity {
+        CpuAffinity.Explicit(mask) => assert(mask == 0x0F),
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 12: ExecutionTier Cross-Property Checks
+// =============================================================================
+
+@test
+fn test_tier_full_both_tracking() {
+    // Tier 0 requires both generation and epoch tracking
+    let tier = ExecutionTier.Tier0_Full;
+    assert(tier.requires_generation());
+    assert(tier.requires_epoch());
+    assert_eq(tier.overhead_ns(), 15);
+}
+
+@test
+fn test_tier_epoch_gen_and_epoch() {
+    // Tier 1 requires generation and epoch but not full bounds
+    let tier = ExecutionTier.Tier1_Epoch;
+    assert(tier.requires_generation());
+    assert(tier.requires_epoch());
+    assert_eq(tier.overhead_ns(), 8);
+}
+
+@test
+fn test_tier_gen_only() {
+    // Tier 2 requires generation only, no epoch
+    let tier = ExecutionTier.Tier2_Gen;
+    assert(tier.requires_generation());
+    assert(!tier.requires_epoch());
+    assert_eq(tier.overhead_ns(), 3);
+}
+
+@test
+fn test_tier_unchecked_nothing() {
+    // Tier 3 requires nothing (unsafe)
+    let tier = ExecutionTier.Tier3_Unchecked;
+    assert(!tier.requires_generation());
+    assert(!tier.requires_epoch());
+    assert_eq(tier.overhead_ns(), 0);
+}
+
+// =============================================================================
+// Section 13: InlineCircuitBreaker Default
+// =============================================================================
+
+@test
+fn test_inline_circuit_breaker_default() {
+    let cb = InlineCircuitBreaker.default();
+    assert_eq(cb.state, 0);  // Closed
+    assert_eq(cb.failure_count, 0);
+    assert_eq(cb.success_count, 0);
+}
+
+@test
+fn test_inline_circuit_breaker_fields() {
+    let cb = InlineCircuitBreaker.default();
+    assert_eq(cb.name_len, 0);
+    assert_eq(cb.failure_threshold, 0);
+    assert_eq(cb.required_successes, 0);
+    assert_eq(cb.timeout_ms, 0);
+}
+
+// =============================================================================
+// Section 14: InlineRetryPolicy Default
+// =============================================================================
+
+@test
+fn test_inline_retry_policy_default() {
+    let rp = InlineRetryPolicy.default();
+    assert_eq(rp.max_attempts, 0);
+    assert_eq(rp.current_attempt, 0);
+    assert_eq(rp.backoff_strategy, 0);
+}
+
+@test
+fn test_inline_retry_policy_fields() {
+    let rp = InlineRetryPolicy.default();
+    assert_eq(rp.type_id_hash, 0);
+    assert_eq(rp.backoff_base_ms, 0);
+    assert_eq(rp.backoff_max_ms, 0);
+    assert_eq(rp.jitter_factor, 0);
+}
+
+// =============================================================================
+// Section 15: RestartPolicy with Maybe
+// =============================================================================
+
+@test
+fn test_restart_policy_optional_some() {
+    let policy = RestartPolicy {
+        strategy: RestartStrategy.Permanent,
+        max_restarts: 5,
+        time_window_secs: 60,
+    };
+    let opt: Maybe<RestartPolicy> = Some(policy);
+    assert(opt.is_some());
+}
+
+@test
+fn test_restart_policy_optional_none() {
+    let opt: Maybe<RestartPolicy> = None;
+    assert(opt.is_none());
+}
+
+// =============================================================================
+// Section 16: GenTracker Construction and Methods
+// =============================================================================
+
+@test
+fn test_gen_tracker_new() {
+    let tracker = GenTracker.new();
+    // Fresh tracker starts at epoch 1
+    assert_eq(tracker.current_epoch(), 1);
+}
+
+@test
+fn test_gen_tracker_alloc_gen() {
+    let tracker = GenTracker.new();
+    // First alloc_gen should return starting generation
+    let gen1 = tracker.alloc_gen();
+    assert(gen1 >= 1);
+}
+
+@test
+fn test_gen_tracker_alloc_gen_increments() {
+    let tracker = GenTracker.new();
+    let gen1 = tracker.alloc_gen();
+    let gen2 = tracker.alloc_gen();
+    assert(gen2 > gen1);
+}
+
+@test
+fn test_gen_tracker_current_epoch_initial() {
+    let tracker = GenTracker.new();
+    let epoch = tracker.current_epoch();
+    assert_eq(epoch, 1);
+}
+
+@test
+fn test_gen_tracker_advance_epoch() {
+    let tracker = GenTracker.new();
+    let old_epoch = tracker.advance_epoch();
+    assert_eq(old_epoch, 1);
+    let new_epoch = tracker.current_epoch();
+    assert_eq(new_epoch, 2);
+}
+
+@test
+fn test_gen_tracker_multiple_advances() {
+    let tracker = GenTracker.new();
+    tracker.advance_epoch();
+    tracker.advance_epoch();
+    tracker.advance_epoch();
+    assert_eq(tracker.current_epoch(), 4);
+}
+
+// =============================================================================
+// Section 17: TaskId with Parent
+// =============================================================================
+
+@test
+fn test_task_id_with_parent() {
+    let parent = TaskId.main();
+    let child = TaskId.new(Some(parent));
+    assert(child.parent_id.is_some());
+}
+
+@test
+fn test_task_id_new_no_parent() {
+    let id = TaskId.new(None);
+    assert(id.parent_id.is_none());
+    assert(id.id > 0); // Generated IDs should be > 0
+}
+
+@test
+fn test_task_id_unique_generation() {
+    let id1 = TaskId.new(None);
+    let id2 = TaskId.new(None);
+    // Each new TaskId should get a unique ID
+    assert(id1.id != id2.id);
+}
+
+@test
+fn test_task_id_child_has_parent_id() {
+    let parent = TaskId.main();
+    let child = TaskId.new(Some(parent));
+    match child.parent_id {
+        Some(pid) => assert_eq(pid, 0), // Parent is main (id=0)
+        None => panic("Expected parent ID"),
+    }
+}
+
+// =============================================================================
+// Section 18: InlineCircuitBreaker Extended Tests
+// =============================================================================
+
+@test
+fn test_inline_circuit_breaker_all_fields_zero() {
+    let cb = InlineCircuitBreaker.default();
+    assert_eq(cb.state, 0);
+    assert_eq(cb.failure_count, 0);
+    assert_eq(cb.success_count, 0);
+    assert_eq(cb.name_len, 0);
+    assert_eq(cb.failure_threshold, 0);
+    assert_eq(cb.required_successes, 0);
+    assert_eq(cb.timeout_ms, 0);
+    assert_eq(cb.last_transition_ms, 0);
+}
+
+@test
+fn test_inline_circuit_breaker_name_array() {
+    let cb = InlineCircuitBreaker.default();
+    // name should be a fixed array of 24 bytes
+    assert_eq(cb.name.len(), 24);
+}
+
+// =============================================================================
+// Section 19: InlineRetryPolicy Extended Tests
+// =============================================================================
+
+@test
+fn test_inline_retry_policy_all_fields() {
+    let rp = InlineRetryPolicy.default();
+    assert_eq(rp.max_attempts, 0);
+    assert_eq(rp.current_attempt, 0);
+    assert_eq(rp.backoff_strategy, 0);
+    assert_eq(rp.backoff_base_ms, 0);
+    assert_eq(rp.backoff_max_ms, 0);
+    assert_eq(rp.jitter_factor, 0);
+    assert_eq(rp.type_id_hash, 0);
+}
+
+// =============================================================================
+// Section 20: EnvFlags Combinations
+// =============================================================================
+
+@test
+fn test_env_flags_monitoring_and_profiling() {
+    let flags = EnvFlags {
+        monitoring: true,
+        profiling: true,
+        debug: false,
+        _padding: [0; 1],
+    };
+    assert(flags.monitoring);
+    assert(flags.profiling);
+    assert(!flags.debug);
+}
+
+@test
+fn test_env_flags_debug_only() {
+    let flags = EnvFlags {
+        monitoring: false,
+        profiling: false,
+        debug: true,
+        _padding: [0; 1],
+    };
+    assert(!flags.monitoring);
+    assert(!flags.profiling);
+    assert(flags.debug);
+}
+
+// =============================================================================
+// Section 21: ParallelismConfig Edge Cases
+// =============================================================================
+
+@test
+fn test_parallelism_config_zero_workers() {
+    let config = ParallelismConfig {
+        worker_count: 0,
+        affinity: CpuAffinity.None,
+    };
+    assert_eq(config.worker_count, 0);
+}
+
+@test
+fn test_parallelism_config_large_worker_count() {
+    let config = ParallelismConfig {
+        worker_count: 1024,
+        affinity: CpuAffinity.Auto,
+    };
+    assert_eq(config.worker_count, 1024);
+}
+
+@test
+fn test_parallelism_config_single_core_explicit() {
+    let config = ParallelismConfig {
+        worker_count: 1,
+        affinity: CpuAffinity.Explicit(0x01),
+    };
+    assert_eq(config.worker_count, 1);
+    match config.affinity {
+        CpuAffinity.Explicit(mask) => assert_eq(mask, 1),
+        _ => panic("Expected Explicit"),
+    }
+}
+
+// =============================================================================
+// Section 22: RestartPolicy Edge Cases
+// =============================================================================
+
+@test
+fn test_restart_policy_zero_restarts_permanent() {
+    let policy = RestartPolicy {
+        strategy: RestartStrategy.Permanent,
+        max_restarts: 0,
+        time_window_secs: 0,
+    };
+    assert(policy.strategy is RestartStrategy.Permanent);
+    assert_eq(policy.max_restarts, 0);
+}
+
+@test
+fn test_restart_policy_very_large_values() {
+    let policy = RestartPolicy {
+        strategy: RestartStrategy.Transient,
+        max_restarts: 65535,
+        time_window_secs: 86400,
+    };
+    assert_eq(policy.max_restarts, 65535);
+    assert_eq(policy.time_window_secs, 86400);
+}
+
+// =============================================================================
+// Section 23: ExecutionTier Pattern Matching
+// =============================================================================
+
+@test
+fn test_tier_match_all_variants() {
+    let tiers = [
+        ExecutionTier.Tier0_Full,
+        ExecutionTier.Tier1_Epoch,
+        ExecutionTier.Tier2_Gen,
+        ExecutionTier.Tier3_Unchecked,
+    ];
+
+    for tier in tiers {
+        let matched = match tier {
+            ExecutionTier.Tier0_Full => true,
+            ExecutionTier.Tier1_Epoch => true,
+            ExecutionTier.Tier2_Gen => true,
+            ExecutionTier.Tier3_Unchecked => true,
+        };
+        assert(matched);
+    }
+}
+
+// =============================================================================
+// Section 24: IsolationLevel in Context
+// =============================================================================
+
+@test
+fn test_isolation_level_in_parallelism() {
+    // IsolationLevel can be used alongside ParallelismConfig
+    let isolation = IsolationLevel.Full;
+    let parallelism = ParallelismConfig {
+        worker_count: 4,
+        affinity: CpuAffinity.Auto,
+    };
+    assert(isolation is IsolationLevel.Full);
+    assert_eq(parallelism.worker_count, 4);
+}
+
+// =============================================================================
+// Section 25: CpuAffinity Edge Values
+// =============================================================================
+
+@test
+fn test_cpu_affinity_explicit_single_bit() {
+    // Only core 0
+    let aff = CpuAffinity.Explicit(1);
+    match aff {
+        CpuAffinity.Explicit(mask) => assert_eq(mask, 1),
+        _ => panic("Expected Explicit"),
+    }
+}
+
+@test
+fn test_cpu_affinity_explicit_high_cores() {
+    // Cores 32-63
+    let aff = CpuAffinity.Explicit(0xFFFFFFFF00000000);
+    match aff {
+        CpuAffinity.Explicit(mask) => assert(mask > 0),
+        _ => panic("Expected Explicit"),
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

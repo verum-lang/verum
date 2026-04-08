@@ -1,0 +1,24 @@
+// @test: typecheck-fail
+// @level: L2
+// @tier: 0
+// @tags: errors, panic, match, exhaustiveness
+// @expected-error: E0601
+
+type Shape is
+    | Circle(Float)
+    | Square(Float)
+    | Triangle(Float, Float, Float);
+
+fn area(shape: Shape) -> Float {
+    match shape {
+        Circle(r) => 3.14159 * r * r,
+        Square(s) => s * s,
+        // Triangle intentionally omitted to cause panic at runtime
+    }
+}
+
+fn main() {
+    let t = Triangle(3.0, 4.0, 5.0);
+    let a = area(t);
+    print(f"Area: {a}");
+}

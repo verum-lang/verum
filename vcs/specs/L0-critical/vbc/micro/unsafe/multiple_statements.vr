@@ -1,0 +1,13 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, statements, sequential
+// @description: Unsafe block with multiple statements and trailing expression
+fn main() {
+    let result: Int = unsafe {
+        let a: Int = 1;
+        let b: Int = 2;
+        let c: Int = 3;
+        a + b + c
+    };
+    assert_eq(result, 6);
+}

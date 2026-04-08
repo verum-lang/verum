@@ -1,0 +1,81 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, format, fstring, text
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests f-string interpolation with various types and expressions.
+
+fn test_int_interpolation() {
+    let x = 42;
+    let msg = f"value is {x}";
+    print(msg);
+
+    let a = 10;
+    let b = 20;
+    let sum_msg = f"sum: {a} + {b} = {a + b}";
+    print(sum_msg);
+    print("int_interpolation: ok");
+}
+
+fn test_text_interpolation() {
+    let name = "world";
+    let greeting = f"hello, {name}!";
+    print(greeting);
+    print("text_interpolation: ok");
+}
+
+fn test_nested_expressions() {
+    let x = 5;
+    let y = 3;
+    let msg = f"product: {x * y}";
+    print(msg);
+
+    let cond = x > y;
+    print(f"x > y: {cond}");
+    print("nested_expressions: ok");
+}
+
+fn test_multiple_interpolations() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let msg = f"{a}, {b}, {c}";
+    print(msg);
+
+    let result = f"sum={a + b + c}, product={a * b * c}";
+    print(result);
+    print("multiple_interpolations: ok");
+}
+
+fn format_pair(x: Int, y: Int) -> Int {
+    print(f"({x}, {y})");
+    x + y
+}
+
+fn test_fstring_in_function() {
+    let r = format_pair(10, 20);
+    assert_eq(r, 30);
+    print("fstring_in_function: ok");
+}
+
+fn test_fstring_in_loop() {
+    let mut i = 1;
+    while i <= 3 {
+        print(f"iteration {i}");
+        i = i + 1;
+    }
+    print("fstring_in_loop: ok");
+}
+
+fn main() -> Int {
+    test_int_interpolation();
+    test_text_interpolation();
+    test_nested_expressions();
+    test_multiple_interpolations();
+    test_fstring_in_function();
+    test_fstring_in_loop();
+    print("[OK] 397_interp_format_strings");
+    0
+}

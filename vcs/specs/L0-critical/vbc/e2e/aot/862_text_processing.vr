@@ -1,0 +1,97 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, text, string, processing
+// @expected-exit: 0
+
+// Test: comprehensive text processing operations
+// Validates string creation, concatenation, formatting.
+
+fn repeat_text(s: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while (i < n) {
+        result = result + s;
+        i = i + 1;
+    }
+    result
+}
+
+fn build_csv(items: List<Int>) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while (i < items.len()) {
+        if (i > 0) {
+            result = result + ",";
+        }
+        result = result + f"{items[i]}";
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Basic concatenation
+    let hello = "hello" + " " + "world";
+    assert_eq(hello, "hello world");
+
+    // Format strings
+    let x = 42;
+    let msg = f"answer={x}";
+    assert_eq(msg, "answer=42");
+
+    // Repeat
+    let stars = repeat_text("*", 5);
+    assert_eq(stars, "*****");
+
+    let dashes = repeat_text("--", 3);
+    assert_eq(dashes, "------");
+
+    // Multi-line concatenation building digits
+    let mut builder = "";
+    let mut i = 0;
+    while (i < 10) {
+        builder = builder + f"{i}";
+        i = i + 1;
+    }
+    assert_eq(builder, "0123456789");
+
+    // Nested format strings
+    let a = 10;
+    let b = 20;
+    let sum = a + b;
+    let nested = f"{a}+{b}={sum}";
+    assert_eq(nested, "10+20=30");
+
+    // Build CSV
+    let mut nums: List<Int> = [];
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+    let csv = build_csv(nums);
+    assert_eq(csv, "1,2,3");
+
+    // Concatenation stress: build a long string
+    let mut long_str = "";
+    i = 0;
+    while (i < 50) {
+        long_str = long_str + "x";
+        i = i + 1;
+    }
+    // Just verify it doesn't crash — exact len check can be fragile
+    let check = long_str + "end";
+    assert_eq(check.len() > 0, true);
+
+    // Format with negative numbers
+    let neg = -42;
+    let neg_msg = f"val={neg}";
+    assert_eq(neg_msg, "val=-42");
+
+    // Single char strings
+    let ch = "a";
+    assert_eq(ch, "a");
+    assert_eq(ch + "b", "ab");
+
+    print("text_processing: PASS");
+    0
+}

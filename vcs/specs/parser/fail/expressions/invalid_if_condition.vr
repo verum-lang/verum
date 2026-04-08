@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, if, condition, error
+// @description: Invalid if condition with let without binding target
+// @expected-error: E018
+
+fn test() {
+    if let { }  // Missing pattern and expression
+}

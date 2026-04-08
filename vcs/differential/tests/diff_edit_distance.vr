@@ -1,0 +1,157 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, edit-distance, levenshtein, dynamic-programming
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+fn min2(a: Int, b_val: Int) -> Int { if a < b_val { a } else { b_val } }
+fn min3(a: Int, b_val: Int, c: Int) -> Int { min2(a, min2(b_val, c)) }
+
+// Edit distance (Levenshtein) using rolling 1D DP
+// a[0..m-1] and b[0..n-1], max sizes 7
+fn edit_distance(a: Arr8, m: Int, b_arr: Arr8, n: Int) -> Int {
+    // dp[j] = edit distance between a[0..i-1] and b[0..j-1]
+    let mut dp = zeros();
+    // Initialize: dp[j] = j (inserting j chars)
+    let mut j = 0;
+    while j <= n {
+        dp = set(dp, j, j);
+        j = j + 1;
+    }
+
+    let mut i = 1;
+    while i <= m {
+        let mut prev = get(dp, 0); // dp[i-1][0]
+        dp = set(dp, 0, i);       // dp[i][0] = i
+        let mut j2 = 1;
+        while j2 <= n {
+            let old_dp_j = get(dp, j2);
+            let cost = if get(a, i - 1) == get(b_arr, j2 - 1) { 0 } else { 1 };
+            let val = min3(
+                get(dp, j2) + 1,       // delete from a
+                get(dp, j2 - 1) + 1,   // insert into a
+                prev + cost             // replace
+            );
+            dp = set(dp, j2, val);
+            prev = old_dp_j;
+            j2 = j2 + 1;
+        }
+        i = i + 1;
+    }
+    get(dp, n)
+}
+
+// Longest common subsequence length
+fn lcs_length(a: Arr8, m: Int, b_arr: Arr8, n: Int) -> Int {
+    let mut dp = zeros();
+    let mut i = 1;
+    while i <= m {
+        let mut prev = 0;
+        let mut j = 1;
+        while j <= n {
+            let old = get(dp, j);
+            if get(a, i - 1) == get(b_arr, j - 1) {
+                dp = set(dp, j, prev + 1);
+            } else {
+                dp = set(dp, j, if get(dp, j) > get(dp, j - 1) { get(dp, j) } else { get(dp, j - 1) });
+            }
+            prev = old;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    get(dp, n)
+}
+
+// Hamming distance (same-length sequences)
+fn hamming_distance(a: Arr8, b_arr: Arr8, n: Int) -> Int {
+    let mut dist = 0;
+    let mut i = 0;
+    while i < n {
+        if get(a, i) != get(b_arr, i) { dist = dist + 1; }
+        i = i + 1;
+    }
+    dist
+}
+
+fn main() -> Int {
+    // Identical strings
+    let a1 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a1, 3, a1, 3), 0);
+
+    // Completely different
+    let a2 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b2 = Arr8 { d0: 4, d1: 5, d2: 6, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a2, 3, b2, 3), 3);
+
+    // One insertion: [1,2,3] → [1,2,4,3]
+    let a3 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let b3 = Arr8 { d0: 1, d1: 2, d2: 4, d3: 3, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a3, 3, b3, 4), 1);
+
+    // One deletion
+    assert_eq(edit_distance(b3, 4, a3, 3), 1);
+
+    // One substitution: [1,2,3] → [1,5,3]
+    let b4 = Arr8 { d0: 1, d1: 5, d2: 3, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(edit_distance(a3, 3, b4, 3), 1);
+
+    // Empty strings
+    assert_eq(edit_distance(a3, 0, b3, 0), 0);
+    assert_eq(edit_distance(a3, 3, b3, 0), 3); // 3 deletions
+    assert_eq(edit_distance(a3, 0, b3, 4), 4); // 4 insertions
+
+    // Classic: "kitten" → "sitting" (encoded as ints)
+    // k=1, i=2, t=3, e=4, n=5, s=6, g=7
+    let kitten  = Arr8 { d0: 1, d1: 2, d2: 3, d3: 3, d4: 4, d5: 5, d6: 0, d7: 0 };
+    let sitting = Arr8 { d0: 6, d1: 2, d2: 3, d3: 3, d4: 2, d5: 5, d6: 7, d7: 0 };
+    assert_eq(edit_distance(kitten, 6, sitting, 7), 3);
+
+    // Symmetry: d(a,b) = d(b,a)
+    assert_eq(edit_distance(a3, 3, b3, 4), edit_distance(b3, 4, a3, 3));
+
+    // Triangle inequality: d(a,c) <= d(a,b) + d(b,c)
+    let ac = edit_distance(a2, 3, b4, 3);
+    let ab = edit_distance(a2, 3, a3, 3);
+    let bc = edit_distance(a3, 3, b4, 3);
+    assert_eq(ac <= ab + bc, true);
+
+    // LCS
+    let s1 = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 0, d6: 0, d7: 0 };
+    let s2 = Arr8 { d0: 2, d1: 4, d2: 5, d3: 6, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(lcs_length(s1, 5, s2, 4), 3); // [2,4,5]
+
+    let s3 = Arr8 { d0: 1, d1: 3, d2: 5, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let s4 = Arr8 { d0: 2, d1: 4, d2: 6, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(lcs_length(s3, 3, s4, 3), 0); // No common
+
+    assert_eq(lcs_length(s1, 5, s1, 5), 5); // Same = full length
+
+    // Hamming distance
+    let h1 = Arr8 { d0: 1, d1: 0, d2: 1, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let h2 = Arr8 { d0: 1, d1: 1, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(hamming_distance(h1, h2, 4), 2); // positions 1 and 2 differ
+
+    assert_eq(hamming_distance(h1, h1, 4), 0); // same = 0
+
+    print("DIFF_OK: edit_distance");
+    0
+}

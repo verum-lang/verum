@@ -1,0 +1,363 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, rational, matrix, linear-algebra, fraction
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT 3x3 matrix operations using rational numbers (numerator/denominator pairs)
+
+// Rational number: num/den, always kept in reduced form with positive denominator
+type Rat is { num: Int, den: Int };
+
+fn abs_val(n: Int) -> Int {
+    if n < 0 { 0 - n } else { n }
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    if x == 0 { 1 } else { x }
+}
+
+fn rat_new(n: Int, d: Int) -> Rat {
+    if d == 0 {
+        Rat { num: 0, den: 1 }
+    } else if n == 0 {
+        Rat { num: 0, den: 1 }
+    } else {
+        let g = gcd(abs_val(n), abs_val(d));
+        let sign = if d < 0 { 0 - 1 } else { 1 };
+        Rat { num: sign * n / g, den: sign * d / g }
+    }
+}
+
+fn rat_zero() -> Rat { Rat { num: 0, den: 1 } }
+fn rat_one() -> Rat { Rat { num: 1, den: 1 } }
+fn rat_int(n: Int) -> Rat { Rat { num: n, den: 1 } }
+
+fn rat_add(a: Rat, b: Rat) -> Rat {
+    rat_new(a.num * b.den + b.num * a.den, a.den * b.den)
+}
+
+fn rat_sub(a: Rat, b: Rat) -> Rat {
+    rat_new(a.num * b.den - b.num * a.den, a.den * b.den)
+}
+
+fn rat_mul(a: Rat, b: Rat) -> Rat {
+    rat_new(a.num * b.num, a.den * b.den)
+}
+
+fn rat_div(a: Rat, b: Rat) -> Rat {
+    if b.num == 0 { rat_zero() }
+    else { rat_new(a.num * b.den, a.den * b.num) }
+}
+
+fn rat_neg(a: Rat) -> Rat {
+    Rat { num: 0 - a.num, den: a.den }
+}
+
+fn rat_eq(a: Rat, b: Rat) -> Bool {
+    a.num == b.num && a.den == b.den
+}
+
+// 3x3 matrix of rationals stored as 9 Rat values
+// We store them in row-major order using a flat record
+type RatMat3 is {
+    r00: Rat, r01: Rat, r02: Rat,
+    r10: Rat, r11: Rat, r12: Rat,
+    r20: Rat, r21: Rat, r22: Rat
+};
+
+// 3-element rational vector
+type RatVec3 is { x: Rat, y: Rat, z: Rat };
+
+fn rmat_zero() -> RatMat3 {
+    let z = rat_zero();
+    RatMat3 {
+        r00: z, r01: z, r02: z,
+        r10: z, r11: z, r12: z,
+        r20: z, r21: z, r22: z
+    }
+}
+
+fn rmat_identity() -> RatMat3 {
+    let z = rat_zero();
+    let o = rat_one();
+    RatMat3 {
+        r00: o, r01: z, r02: z,
+        r10: z, r11: o, r12: z,
+        r20: z, r21: z, r22: o
+    }
+}
+
+// Matrix multiplication
+fn rmat_mul(a: RatMat3, b: RatMat3) -> RatMat3 {
+    RatMat3 {
+        r00: rat_add(rat_add(rat_mul(a.r00, b.r00), rat_mul(a.r01, b.r10)), rat_mul(a.r02, b.r20)),
+        r01: rat_add(rat_add(rat_mul(a.r00, b.r01), rat_mul(a.r01, b.r11)), rat_mul(a.r02, b.r21)),
+        r02: rat_add(rat_add(rat_mul(a.r00, b.r02), rat_mul(a.r01, b.r12)), rat_mul(a.r02, b.r22)),
+        r10: rat_add(rat_add(rat_mul(a.r10, b.r00), rat_mul(a.r11, b.r10)), rat_mul(a.r12, b.r20)),
+        r11: rat_add(rat_add(rat_mul(a.r10, b.r01), rat_mul(a.r11, b.r11)), rat_mul(a.r12, b.r21)),
+        r12: rat_add(rat_add(rat_mul(a.r10, b.r02), rat_mul(a.r11, b.r12)), rat_mul(a.r12, b.r22)),
+        r20: rat_add(rat_add(rat_mul(a.r20, b.r00), rat_mul(a.r21, b.r10)), rat_mul(a.r22, b.r20)),
+        r21: rat_add(rat_add(rat_mul(a.r20, b.r01), rat_mul(a.r21, b.r11)), rat_mul(a.r22, b.r21)),
+        r22: rat_add(rat_add(rat_mul(a.r20, b.r02), rat_mul(a.r21, b.r12)), rat_mul(a.r22, b.r22))
+    }
+}
+
+// Transpose
+fn rmat_transpose(m: RatMat3) -> RatMat3 {
+    RatMat3 {
+        r00: m.r00, r01: m.r10, r02: m.r20,
+        r10: m.r01, r11: m.r11, r12: m.r21,
+        r20: m.r02, r21: m.r12, r22: m.r22
+    }
+}
+
+// Determinant
+fn rmat_det(m: RatMat3) -> Rat {
+    // det = r00*(r11*r22 - r12*r21) - r01*(r10*r22 - r12*r20) + r02*(r10*r21 - r11*r20)
+    let c00 = rat_sub(rat_mul(m.r11, m.r22), rat_mul(m.r12, m.r21));
+    let c01 = rat_sub(rat_mul(m.r10, m.r22), rat_mul(m.r12, m.r20));
+    let c02 = rat_sub(rat_mul(m.r10, m.r21), rat_mul(m.r11, m.r20));
+    rat_add(rat_sub(rat_mul(m.r00, c00), rat_mul(m.r01, c01)), rat_mul(m.r02, c02))
+}
+
+// Trace
+fn rmat_trace(m: RatMat3) -> Rat {
+    rat_add(rat_add(m.r00, m.r11), m.r22)
+}
+
+// Scalar multiply
+fn rmat_scale(m: RatMat3, s: Rat) -> RatMat3 {
+    RatMat3 {
+        r00: rat_mul(m.r00, s), r01: rat_mul(m.r01, s), r02: rat_mul(m.r02, s),
+        r10: rat_mul(m.r10, s), r11: rat_mul(m.r11, s), r12: rat_mul(m.r12, s),
+        r20: rat_mul(m.r20, s), r21: rat_mul(m.r21, s), r22: rat_mul(m.r22, s)
+    }
+}
+
+// Matrix addition
+fn rmat_add(a: RatMat3, b: RatMat3) -> RatMat3 {
+    RatMat3 {
+        r00: rat_add(a.r00, b.r00), r01: rat_add(a.r01, b.r01), r02: rat_add(a.r02, b.r02),
+        r10: rat_add(a.r10, b.r10), r11: rat_add(a.r11, b.r11), r12: rat_add(a.r12, b.r12),
+        r20: rat_add(a.r20, b.r20), r21: rat_add(a.r21, b.r21), r22: rat_add(a.r22, b.r22)
+    }
+}
+
+// Matrix equality check
+fn rmat_eq(a: RatMat3, b: RatMat3) -> Bool {
+    rat_eq(a.r00, b.r00) && rat_eq(a.r01, b.r01) && rat_eq(a.r02, b.r02)
+    && rat_eq(a.r10, b.r10) && rat_eq(a.r11, b.r11) && rat_eq(a.r12, b.r12)
+    && rat_eq(a.r20, b.r20) && rat_eq(a.r21, b.r21) && rat_eq(a.r22, b.r22)
+}
+
+// Adjugate (transpose of cofactor matrix)
+fn rmat_adjugate(m: RatMat3) -> RatMat3 {
+    let c00 = rat_sub(rat_mul(m.r11, m.r22), rat_mul(m.r12, m.r21));
+    let c01 = rat_neg(rat_sub(rat_mul(m.r10, m.r22), rat_mul(m.r12, m.r20)));
+    let c02 = rat_sub(rat_mul(m.r10, m.r21), rat_mul(m.r11, m.r20));
+    let c10 = rat_neg(rat_sub(rat_mul(m.r01, m.r22), rat_mul(m.r02, m.r21)));
+    let c11 = rat_sub(rat_mul(m.r00, m.r22), rat_mul(m.r02, m.r20));
+    let c12 = rat_neg(rat_sub(rat_mul(m.r00, m.r21), rat_mul(m.r01, m.r20)));
+    let c20 = rat_sub(rat_mul(m.r01, m.r12), rat_mul(m.r02, m.r11));
+    let c21 = rat_neg(rat_sub(rat_mul(m.r00, m.r12), rat_mul(m.r02, m.r10)));
+    let c22 = rat_sub(rat_mul(m.r00, m.r11), rat_mul(m.r01, m.r10));
+    // Transpose of cofactor matrix
+    RatMat3 {
+        r00: c00, r01: c10, r02: c20,
+        r10: c01, r11: c11, r12: c21,
+        r20: c02, r21: c12, r22: c22
+    }
+}
+
+// Inverse: adj(A) / det(A)
+fn rmat_inverse(m: RatMat3) -> RatMat3 {
+    let d = rmat_det(m);
+    if d.num == 0 { rmat_zero() }
+    else {
+        let inv_d = rat_new(d.den, d.num);
+        rmat_scale(rmat_adjugate(m), inv_d)
+    }
+}
+
+// Matrix-vector multiply
+fn rmat_vec(m: RatMat3, v: RatVec3) -> RatVec3 {
+    RatVec3 {
+        x: rat_add(rat_add(rat_mul(m.r00, v.x), rat_mul(m.r01, v.y)), rat_mul(m.r02, v.z)),
+        y: rat_add(rat_add(rat_mul(m.r10, v.x), rat_mul(m.r11, v.y)), rat_mul(m.r12, v.z)),
+        z: rat_add(rat_add(rat_mul(m.r20, v.x), rat_mul(m.r21, v.y)), rat_mul(m.r22, v.z))
+    }
+}
+
+fn main() -> Int {
+    // === Test 1: Rational arithmetic basics ===
+    let half = rat_new(1, 2);
+    let third = rat_new(1, 3);
+    assert_eq(half.num, 1);
+    assert_eq(half.den, 2);
+
+    // 1/2 + 1/3 = 5/6
+    let sum = rat_add(half, third);
+    assert_eq(sum.num, 5);
+    assert_eq(sum.den, 6);
+
+    // 1/2 - 1/3 = 1/6
+    let diff = rat_sub(half, third);
+    assert_eq(diff.num, 1);
+    assert_eq(diff.den, 6);
+
+    // 1/2 * 1/3 = 1/6
+    let prod = rat_mul(half, third);
+    assert_eq(prod.num, 1);
+    assert_eq(prod.den, 6);
+
+    // 1/2 / 1/3 = 3/2
+    let quot = rat_div(half, third);
+    assert_eq(quot.num, 3);
+    assert_eq(quot.den, 2);
+
+    // === Test 2: Reduction ===
+    let r = rat_new(6, 9);
+    assert_eq(r.num, 2);
+    assert_eq(r.den, 3);
+
+    let neg_r = rat_new(0 - 4, 6);
+    assert_eq(neg_r.num, 0 - 2);
+    assert_eq(neg_r.den, 3);
+
+    // Negative denominator flips sign
+    let neg_d = rat_new(3, 0 - 5);
+    assert_eq(neg_d.num, 0 - 3);
+    assert_eq(neg_d.den, 5);
+
+    // === Test 3: Identity matrix ===
+    let id = rmat_identity();
+    let det_id = rmat_det(id);
+    assert(rat_eq(det_id, rat_one()));
+
+    let trace_id = rmat_trace(id);
+    assert(rat_eq(trace_id, rat_int(3)));
+
+    // === Test 4: I * I = I ===
+    let id_sq = rmat_mul(id, id);
+    assert(rmat_eq(id_sq, id));
+
+    // === Test 5: Matrix with rational entries ===
+    // M = [[1/2, 1/3, 0], [0, 1, 0], [0, 0, 1]]
+    let m1 = RatMat3 {
+        r00: half, r01: third, r02: rat_zero(),
+        r10: rat_zero(), r11: rat_one(), r12: rat_zero(),
+        r20: rat_zero(), r21: rat_zero(), r22: rat_one()
+    };
+
+    // det(M) = 1/2 * (1*1 - 0*0) - 1/3 * (0*1 - 0*0) + 0 = 1/2
+    let det_m1 = rmat_det(m1);
+    assert_eq(det_m1.num, 1);
+    assert_eq(det_m1.den, 2);
+
+    // === Test 6: Transpose ===
+    let m1t = rmat_transpose(m1);
+    assert(rat_eq(m1t.r00, half));
+    assert(rat_eq(m1t.r01, rat_zero()));
+    assert(rat_eq(m1t.r10, third));
+    assert(rat_eq(m1t.r11, rat_one()));
+
+    // det(A^T) = det(A)
+    assert(rat_eq(rmat_det(m1t), rmat_det(m1)));
+
+    // === Test 7: Integer matrix ===
+    let m2 = RatMat3 {
+        r00: rat_int(2), r01: rat_int(1), r02: rat_int(3),
+        r10: rat_int(1), r11: rat_int(0), r12: rat_int(2),
+        r20: rat_int(3), r21: rat_int(2), r22: rat_int(1)
+    };
+    let det_m2 = rmat_det(m2);
+    assert(rat_eq(det_m2, rat_int(3)));
+
+    // === Test 8: A * I = A ===
+    let m2_times_id = rmat_mul(m2, id);
+    assert(rmat_eq(m2_times_id, m2));
+
+    // I * A = A
+    let id_times_m2 = rmat_mul(id, m2);
+    assert(rmat_eq(id_times_m2, m2));
+
+    // === Test 9: Inverse of integer matrix ===
+    let m2_inv = rmat_inverse(m2);
+    // A * A^-1 should = I
+    let should_be_id = rmat_mul(m2, m2_inv);
+    assert(rmat_eq(should_be_id, id));
+
+    // A^-1 * A should = I
+    let should_be_id2 = rmat_mul(m2_inv, m2);
+    assert(rmat_eq(should_be_id2, id));
+
+    // === Test 10: det(A * B) = det(A) * det(B) ===
+    let m3 = RatMat3 {
+        r00: rat_int(1), r01: rat_int(0), r02: rat_int(2),
+        r10: rat_int(0), r11: rat_int(3), r12: rat_int(1),
+        r20: rat_int(4), r21: rat_int(0), r22: rat_int(1)
+    };
+    let m2m3 = rmat_mul(m2, m3);
+    let det_product = rmat_det(m2m3);
+    let product_of_dets = rat_mul(rmat_det(m2), rmat_det(m3));
+    assert(rat_eq(det_product, product_of_dets));
+
+    // === Test 11: Trace of sum = sum of traces ===
+    let sum_mat = rmat_add(m2, m3);
+    let trace_sum = rmat_trace(sum_mat);
+    let sum_traces = rat_add(rmat_trace(m2), rmat_trace(m3));
+    assert(rat_eq(trace_sum, sum_traces));
+
+    // === Test 12: Scalar multiplication ===
+    let scaled = rmat_scale(id, rat_int(5));
+    let det_scaled = rmat_det(scaled);
+    // det(5I) = 5^3 = 125
+    assert(rat_eq(det_scaled, rat_int(125)));
+
+    // === Test 13: Matrix-vector multiply ===
+    let v1 = RatVec3 { x: rat_int(1), y: rat_int(2), z: rat_int(3) };
+    let mv1 = rmat_vec(id, v1);
+    assert(rat_eq(mv1.x, rat_int(1)));
+    assert(rat_eq(mv1.y, rat_int(2)));
+    assert(rat_eq(mv1.z, rat_int(3)));
+
+    // m2 * v1 = [2+2+9, 1+0+6, 3+4+3] = [13, 7, 10]
+    let mv2 = rmat_vec(m2, v1);
+    assert(rat_eq(mv2.x, rat_int(13)));
+    assert(rat_eq(mv2.y, rat_int(7)));
+    assert(rat_eq(mv2.z, rat_int(10)));
+
+    // === Test 14: (A^T)^T = A ===
+    let m2tt = rmat_transpose(rmat_transpose(m2));
+    assert(rmat_eq(m2tt, m2));
+
+    // === Test 15: Diagonal matrix determinant ===
+    let diag = RatMat3 {
+        r00: rat_new(1, 2), r01: rat_zero(), r02: rat_zero(),
+        r10: rat_zero(), r11: rat_new(2, 3), r12: rat_zero(),
+        r20: rat_zero(), r21: rat_zero(), r22: rat_new(3, 4)
+    };
+    // det = (1/2) * (2/3) * (3/4) = 6/24 = 1/4
+    let det_diag = rmat_det(diag);
+    assert_eq(det_diag.num, 1);
+    assert_eq(det_diag.den, 4);
+
+    // === Test 16: Zero matrix ===
+    let zero = rmat_zero();
+    let det_zero = rmat_det(zero);
+    assert_eq(det_zero.num, 0);
+
+    // A + 0 = A
+    let m2_plus_zero = rmat_add(m2, zero);
+    assert(rmat_eq(m2_plus_zero, m2));
+
+    0
+}

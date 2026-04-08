@@ -1,0 +1,443 @@
+// @test: parse-pass
+// @tier: 0
+// @category: patterns
+// @description: Comprehensive tests for array patterns (fixed size and with rest)
+
+// Grammar Reference:
+// array_pattern   = '[' , pattern_list , ']' ;
+// slice_pattern   = '[' , slice_pattern_elements , ']' ;
+// slice_pattern_elements = [ pattern , { ',' , pattern } , ',' ] , '..'
+//                        , [ ',' , pattern , { ',' , pattern } ] ;
+
+// ============================================================================
+// SECTION 1: Empty Array Pattern
+// ============================================================================
+
+fn test_empty_array() {
+    // Empty array match
+    let [] = empty_array;
+
+    match arr {
+        [] => is_empty(),
+        _ => has_elements()
+    }
+}
+
+// ============================================================================
+// SECTION 2: Single Element Array Patterns
+// ============================================================================
+
+fn test_single_element() {
+    // Single element
+    let [x] = single;
+    let [only] = singleton;
+
+    // Single with wildcard
+    let [_] = single;
+
+    // Single with literal
+    let [0] = zero_array;
+    let [42] = answer_array;
+
+    // Single with trailing comma
+    let [x,] = single;
+}
+
+// ============================================================================
+// SECTION 3: Fixed Size Array Patterns
+// ============================================================================
+
+fn test_fixed_size() {
+    // Two elements
+    let [a, b] = pair;
+    let [first, second] = two;
+
+    // Three elements
+    let [a, b, c] = triple;
+    let [x, y, z] = coords;
+
+    // Four elements
+    let [a, b, c, d] = quad;
+    let [nw, ne, sw, se] = corners;
+
+    // Five or more
+    let [a, b, c, d, e] = five;
+    let [v1, v2, v3, v4, v5, v6] = six;
+
+    // With trailing commas
+    let [a, b,] = pair;
+    let [x, y, z,] = triple;
+}
+
+// ============================================================================
+// SECTION 4: Array Patterns with Wildcards
+// ============================================================================
+
+fn test_wildcards_in_arrays() {
+    // Single wildcard at different positions
+    let [_, b] = pair;
+    let [a, _] = pair;
+    let [_, _, c] = triple;
+    let [a, _, c] = triple;
+    let [a, _, _] = triple;
+
+    // Multiple wildcards
+    let [_, _] = pair;
+    let [_, _, _] = triple;
+    let [_, b, _] = triple;
+
+    // All wildcards
+    let [_, _, _, _] = quad;
+}
+
+// ============================================================================
+// SECTION 5: Slice Patterns with Rest (..)
+// ============================================================================
+
+fn test_rest_patterns() {
+    // Rest at end (head pattern)
+    let [first, ..] = array;
+    let [head, ..] = list;
+    let [a, b, ..] = array;
+    let [x, y, z, ..] = array;
+
+    // Rest at beginning (tail pattern)
+    let [.., last] = array;
+    let [.., tail] = list;
+    let [.., a, b] = array;
+    let [.., x, y, z] = array;
+
+    // Rest in middle
+    let [first, .., last] = array;
+    let [head, .., tail] = array;
+    let [a, b, .., y, z] = array;
+    let [start, .., end] = range;
+
+    // Just rest (matches any length)
+    let [..] = any_array;
+}
+
+// ============================================================================
+// SECTION 6: Slice Patterns with Named Rest
+// ============================================================================
+
+fn test_named_rest() {
+    // Named rest at end
+    let [first, ..rest] = array;
+    let [head, ..tail] = list;
+    let [a, b, ..remaining] = array;
+
+    // Named rest at beginning
+    let [..init, last] = array;
+    let [..prefix, final_elem] = array;
+
+    // Named rest in middle
+    let [first, ..middle, last] = array;
+    let [a, ..center, z] = array;
+}
+
+// ============================================================================
+// SECTION 7: Nested Array Patterns
+// ============================================================================
+
+fn test_nested_arrays() {
+    // 2D arrays (matrix)
+    let [[a, b], [c, d]] = matrix;
+    let [[r1c1, r1c2], [r2c1, r2c2]] = grid;
+
+    // Deeper nesting
+    let [[[a]]] = deep;
+    let [[[a, b], [c, d]], [[e, f], [g, h]]] = cube;
+
+    // Mixed sizes
+    let [[a], [b, c]] = mixed;
+    let [[x, y, z], [a]] = jagged;
+
+    // Nested with wildcards
+    let [[_, b], [c, _]] = matrix;
+    let [[_, _], _] = partial;
+
+    // Nested with rest
+    let [[first, ..], ..] = matrix;
+    let [[.., last], ..] = matrix;
+}
+
+// ============================================================================
+// SECTION 8: Array Patterns with Literals
+// ============================================================================
+
+fn test_arrays_with_literals() {
+    // Integer literals
+    let [0, x] = pair;
+    let [x, 0] = pair;
+    let [0, 0] = zeros;
+    let [1, 2, 3] = sequence;
+
+    // Boolean literals
+    let [true, x] = flags;
+    let [x, false] = flags;
+    let [true, true] = all_true;
+
+    // Character literals
+    let ['a', rest] = chars;
+    let ['a', 'b', 'c'] = abc;
+
+    // Mixed with identifiers
+    let [0, y, 2] = mixed;
+    let [start, 1, end] = bounded;
+}
+
+// ============================================================================
+// SECTION 9: Array Patterns with Mutable Bindings
+// ============================================================================
+
+fn test_mutable_in_arrays() {
+    // Single mutable
+    let [mut first, second] = pair;
+    let [first, mut second] = pair;
+
+    // Multiple mutables
+    let [mut a, mut b] = pair;
+    let [mut x, mut y, mut z] = triple;
+
+    // Mixed
+    let [a, mut b, c] = triple;
+    let [mut a, b, mut c] = triple;
+}
+
+// ============================================================================
+// SECTION 10: Array Patterns with Ref Bindings
+// ============================================================================
+
+fn test_ref_in_arrays() {
+    // Ref bindings
+    let [ref a, ref b] = pair;
+    let [ref first, second] = pair;
+
+    // Ref mut bindings
+    let [ref mut a, ref mut b] = pair;
+    let [ref mut first, second] = pair;
+
+    // Mixed
+    let [ref a, ref mut b, c] = triple;
+}
+
+// ============================================================================
+// SECTION 11: Array Patterns with @ Bindings
+// ============================================================================
+
+fn test_at_in_arrays() {
+    // @ on elements
+    let [first @ 0, second] = pair;
+    let [head @ Some(_), ..] = array;
+
+    // @ on whole array
+    let all @ [a, b, c] = triple;
+    let whole @ [first, ..rest] = array;
+
+    // Nested @ bindings
+    let outer @ [inner @ [a, b], c] = nested;
+}
+
+// ============================================================================
+// SECTION 12: Array Patterns with Variants
+// ============================================================================
+
+fn test_arrays_with_variants() {
+    // Options in arrays
+    let [Some(x), Some(y)] = pair;
+    let [Some(first), None] = pair;
+    let [None, Some(second)] = pair;
+
+    // Results in arrays
+    let [Ok(a), Ok(b)] = results;
+    let [Ok(value), Err(error)] = mixed;
+
+    // With rest
+    let [Some(first), ..] = options;
+    let [.., Some(last)] = options;
+}
+
+// ============================================================================
+// SECTION 13: Array Patterns with Records
+// ============================================================================
+
+fn test_arrays_with_records() {
+    // Records in arrays
+    let [Point { x, y }, Point { x: x2, y: y2 }] = points;
+    let [Person { name, .. }, ..] = people;
+
+    // Nested
+    let [Point { x: 0, y }, rest] = points;
+}
+
+// ============================================================================
+// SECTION 14: Array Patterns with Tuples
+// ============================================================================
+
+fn test_arrays_with_tuples() {
+    // Tuples in arrays
+    let [(a, b), (c, d)] = pairs;
+    let [(x, y), ..] = coords;
+
+    // Nested combinations
+    let [(a, [b, c]), (d, [e, f])] = complex;
+}
+
+// ============================================================================
+// SECTION 15: Array Patterns in Match Arms
+// ============================================================================
+
+fn test_arrays_in_match() {
+    // Empty vs non-empty
+    match arr {
+        [] => empty(),
+        [_] => single(),
+        [_, _] => pair(),
+        _ => many()
+    }
+
+    // Head/tail matching
+    match arr {
+        [] => empty(),
+        [only] => single(only),
+        [first, ..rest] => multiple(first, rest)
+    }
+
+    // Specific lengths
+    match arr {
+        [a] => one(a),
+        [a, b] => two(a, b),
+        [a, b, c] => three(a, b, c),
+        _ => more()
+    }
+
+    // With guards
+    match arr {
+        [x, ..] if x > 0 => positive_start(x),
+        [x, ..] if x < 0 => negative_start(x),
+        [_, ..] => zero_start(),
+        [] => empty()
+    }
+
+    // First and last
+    match arr {
+        [x] => single(x),
+        [first, .., last] if first == last => bookends(first),
+        [first, .., last] => different(first, last),
+        [] => empty()
+    }
+}
+
+// ============================================================================
+// SECTION 16: Array Patterns in Function Parameters
+// ============================================================================
+
+fn sum_pair([a, b]: [Int; 2]) -> Int {
+    a + b
+}
+
+fn head_and_tail([first, ..rest]: [Int; N]) -> (Int, [Int; N-1]) {
+    (first, rest)
+}
+
+fn process_matrix([[a, b], [c, d]]: [[Int; 2]; 2]) -> Int {
+    a + b + c + d
+}
+
+// ============================================================================
+// SECTION 17: Array Patterns in For Loops
+// ============================================================================
+
+fn test_arrays_in_loops() {
+    // Destructure pairs
+    for [a, b] in pairs {
+        process(a, b)
+    }
+
+    // Nested
+    for [[x, y], z] in nested {
+        coords(x, y, z)
+    }
+}
+
+// ============================================================================
+// SECTION 18: Array Patterns in If-Let and While-Let
+// ============================================================================
+
+fn test_arrays_in_conditionals() {
+    // If-let with array
+    if let [first, ..] = maybe_array {
+        use(first)
+    }
+
+    if let [a, b] = exactly_two {
+        process(a, b)
+    }
+
+    // While-let with array
+    while let [head, ..tail] = remaining {
+        process(head);
+        remaining = tail
+    }
+}
+
+// ============================================================================
+// SECTION 19: Complex Array Patterns
+// ============================================================================
+
+fn test_complex_arrays() {
+    // Many features combined
+    let whole @ [
+        ref first,
+        mut second,
+        Point { x: 0, y },
+        Some(inner @ 42),
+        ..rest
+    ] = complex_array;
+
+    // Deep matching in match
+    match data {
+        [[0, ..], ..] => starts_with_zero(),
+        [[first, ..], .., [.., last]] => bookends(first, last),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 20: Or Patterns in Arrays
+// ============================================================================
+
+fn test_or_in_arrays() {
+    // Or pattern in array element
+    let [0 | 1, rest] = array;
+    let [first, 0 | 1] = array;
+
+    // Multiple or patterns
+    let [0 | 1, 0 | 1] = bits;
+
+    // In match
+    match arr {
+        [0 | 1, ..] => binary_start(),
+        _ => other()
+    }
+}
+
+// ============================================================================
+// SECTION 21: Edge Cases
+// ============================================================================
+
+fn test_edge_cases() {
+    // Single element with rest (rest is empty)
+    let [only, ..] = single_elem;
+
+    // Rest captures nothing
+    let [a, b, ..empty] = pair;
+
+    // Long arrays
+    let [a, b, c, d, e, f, g, h, i, j] = ten;
+
+    // Complex rest patterns
+    let [_, .., _] = at_least_two;
+    let [a, _, .., _, z] = at_least_four;
+}

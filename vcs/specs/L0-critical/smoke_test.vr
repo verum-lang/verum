@@ -1,0 +1,12 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: smoke-test, basic
+// @timeout: 5000
+//
+// Smoke test to verify VCS infrastructure is working.
+
+fn main() -> Int {
+    let x: Int = 42;
+    x
+}

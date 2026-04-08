@@ -1,0 +1,48 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, const, static
+// @description: Test const and static definition parsing
+
+// Basic const
+const PI: Float = 3.14159265358979;
+
+const E: Float = 2.71828182845904;
+
+const MAX_SIZE: Int = 1024;
+
+// Const with expressions
+const DOUBLED: Int = MAX_SIZE * 2;
+
+const COMPUTED: Float = PI * 2.0;
+
+// Public const
+pub const PUBLIC_CONST: Int = 42;
+
+// Const with complex type
+const EMPTY_LIST: List<Int> = List.new();
+
+const DEFAULT_CONFIG: Config = Config {
+    host: "localhost",
+    port: 8080
+};
+
+// Generic const (if supported)
+const ZERO<T: Default>: T = T.default();
+
+// Static variables
+static COUNTER: Int = 0;
+
+static mut MUTABLE_COUNTER: Int = 0;
+
+// Public static
+pub static INSTANCE_COUNT: Int = 0;
+
+// Static with complex initialization
+static LOGGER: Logger = Logger.new("app");
+
+static mut CACHE: Map<Text, Value> = Map.new();
+
+// Internal visibility
+internal const INTERNAL_CONST: Int = 100;
+
+internal static INTERNAL_STATIC: Text = "internal";

@@ -1,0 +1,54 @@
+// @test: typecheck-fail
+// @expected-error: Invalid date format
+// @tier: 3
+// @level: L3
+// @tags: meta, tagged-literals, literal-errors
+
+/// Ошибки в tagged literals обнаруживаются при компиляции
+///
+/// Невалидные форматы приводят к ошибкам компиляции,
+/// а не к runtime panic.
+
+fn main() {
+    // ERROR: Invalid date format - неверный формат даты
+    let bad_date = d#"31-12-2025";  // Ожидается YYYY-MM-DD
+
+    // ERROR: Invalid date format - несуществующая дата
+    let impossible_date = d#"2025-02-30";  // Февраль не имеет 30 дней
+
+    // ERROR: Invalid UUID format - неверная длина
+    let bad_uuid = uuid#"550e8400-e29b-41d4";
+
+    // ERROR: Invalid UUID format - неверные символы
+    let invalid_uuid = uuid#"550e8400-e29b-41d4-a716-44665544ZZZZ";
+
+    // ERROR: Invalid regex pattern - незакрытая группа
+    let bad_regex = regex#"([a-z]+";
+
+    // ERROR: Invalid regex pattern - неверный квантификатор
+    let invalid_regex = regex#"a{2,1}";  // min > max
+
+    // ERROR: Invalid JSON - отсутствует закрывающая скобка
+    let bad_json = json#"{"name": "test"";
+
+    // ERROR: Invalid JSON - trailing comma
+    let invalid_json = json#"{"items": [1, 2, 3,]}";
+
+    // ERROR: Invalid URL format - отсутствует схема
+    let bad_url = url#"example.com/path";
+
+    // ERROR: Invalid URL format - неверный порт
+    let invalid_url = url#"https://example.com:99999";
+
+    // ERROR: Invalid IP address - значение > 255
+    let bad_ip = ip#"192.168.1.256";
+
+    // ERROR: Invalid IP address - неверный формат
+    let invalid_ip = ip#"192.168.1";
+
+    // ERROR: Invalid duration format - неизвестная единица
+    let bad_duration = dur#"10x";
+
+    // ERROR: Invalid duration format - отрицательное значение
+    let negative_duration = dur#"-5s";
+}

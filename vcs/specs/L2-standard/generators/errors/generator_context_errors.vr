@@ -1,0 +1,390 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: generators, contexts, async, send, sync, errors, negative
+// @expected-error: "unbound variable"
+
+/// Test for generator context requirement and Send/Sync violations.
+/// Generators have unique interactions with the context system and
+/// thread safety requirements that must be enforced by the type checker.
+/// Spec: grammar/verum.ebnf - fn_keyword, context_clause
+/// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+/// Spec: docs/detailed/16-context-system.md
+
+// ============================================================================
+// 1. CONTEXT REQUIREMENT PROPAGATION
+// ============================================================================
+
+context Database {
+    async fn query(sql: Text) -> List<Row>;
+    async fn execute(sql: Text) -> Int;
+}
+
+context Logger {
+    fn info(message: Text);
+    fn error(message: Text);
+}
+
+context FileSystem {
+    fn read(path: Text) -> Result<Text, IoError>;
+    fn write(path: Text, content: Text) -> Result<(), IoError>;
+}
+
+type Row is Map<Text, Text>;
+type IoError is Text;
+
+// E421: generator uses context but doesn't declare it
+async fn* undeclared_context() -> Row {
+    let rows = Database.query("SELECT * FROM users").await;  // ERROR: context Database not in using clause
+    for row in rows {
+        yield row;
+    }
+}
+
+// E421: caller doesn't provide context that generator requires
+async fn* needs_database() -> Row using [Database] {
+    let rows = Database.query("SELECT * FROM users").await;
+    for row in rows {
+        yield row;
+    }
+}
+
+async fn consumer_missing_context() {
+    // ERROR: needs_database requires Database context
+    for await row in needs_database() {
+        process(row);
+    }
+}
+
+// E421: partial context requirements (missing one of multiple)
+async fn* needs_multiple() -> Text using [Database, Logger] {
+    Logger.info("Starting query");
+    let rows = Database.query("SELECT * FROM logs").await;
+    for row in rows {
+        yield row.get("message") ?? "";
+    }
+}
+
+async fn consumer_partial_context() using [Logger] {
+    // ERROR: needs_multiple requires Database context (only Logger provided)
+    for await msg in needs_multiple() {
+        print(msg);
+    }
+}
+
+// ============================================================================
+// 2. CONTEXT TYPE MISMATCH IN GENERATORS
+// ============================================================================
+
+context async HttpClient {
+    async fn get(url: Text) -> Response;
+    async fn post(url: Text, body: Text) -> Response;
+}
+
+type Response is { status: Int, body: Text };
+
+// Different HttpClient implementations
+type MockHttpClient is {};
+type RealHttpClient is { base_url: Text };
+
+implement HttpClient for MockHttpClient {
+    async fn get(url: Text) -> Response {
+        Response { status: 200, body: "mock" }
+    }
+    async fn post(url: Text, body: Text) -> Response {
+        Response { status: 201, body: "created" }
+    }
+}
+
+implement HttpClient for RealHttpClient {
+    async fn get(url: Text) -> Response {
+        Response { status: 200, body: "real" }
+    }
+    async fn post(url: Text, body: Text) -> Response {
+        Response { status: 201, body: "real" }
+    }
+}
+
+async fn* fetch_pages() -> Text using [HttpClient] {
+    let page1 = HttpClient.get("/page1").await;
+    yield page1.body;
+    let page2 = HttpClient.get("/page2").await;
+    yield page2.body;
+}
+
+// E421: context type conflict during generator iteration
+async fn context_type_conflict() {
+    provide HttpClient = MockHttpClient {};
+
+    for await page in fetch_pages() {
+        provide HttpClient = RealHttpClient { base_url: "https://api.example.com" };
+        // ERROR: cannot change context type during generator iteration
+        // Generator was started with MockHttpClient, cannot switch to RealHttpClient
+    }
+}
+
+// ============================================================================
+// 3. SEND VIOLATIONS FOR ASYNC GENERATORS
+// ============================================================================
+
+// Types that are NOT Send
+type NotSend is {
+    ptr: *mut Int,  // raw pointer is not Send
+};
+
+type RefCellLike<T> is {
+    value: T,
+    borrows: Int,  // interior mutability without sync
+};
+
+// E421: async generator yields non-Send type
+async fn* yields_not_send() -> NotSend {
+    yield NotSend { ptr: null() };  // ERROR: NotSend is not Send, async generators require Send
+}
+
+// E421: async generator captures non-Send value across yield
+async fn* captures_not_send() -> Int {
+    let not_send = NotSend { ptr: null() };
+    yield 1;
+    // not_send is held across yield point, but NotSend is not Send
+    // ERROR: captured value 'not_send' must be Send for async generator
+    use_ptr(not_send.ptr);
+    yield 2;
+}
+
+// E421: async generator holds RefCell across yield
+async fn* holds_refcell() -> Int {
+    let cell = RefCellLike { value: 42, borrows: 0 };
+    yield cell.value;
+    // ERROR: RefCellLike is not Send, cannot hold across yield in async generator
+    cell.value += 1;
+    yield cell.value;
+}
+
+// ============================================================================
+// 4. SYNC VIOLATIONS FOR SHARED GENERATORS
+// ============================================================================
+
+// E421: generator shared across threads but yields non-Sync
+type NotSync is {
+    value: RefCellLike<Int>,
+};
+
+fn* shared_generator() -> NotSync {
+    yield NotSync { value: RefCellLike { value: 1, borrows: 0 } };
+}
+
+fn use_shared_generator() {
+    let gen = shared_generator();
+    let shared = Shared.new(gen);  // ERROR: Iterator<NotSync> is not Sync
+
+    spawn {
+        for item in shared.lock() {
+            process(item);
+        }
+    };
+
+    spawn {
+        for item in shared.lock() {
+            process(item);
+        }
+    };
+}
+
+// ============================================================================
+// 5. GENERATOR STATE MUTATION SAFETY
+// ============================================================================
+
+type MutableState is {
+    counter: Int,
+    buffer: List<Text>,
+};
+
+// E421: generator with internal mutable state shared unsafely
+fn* stateful_generator(state: &mut MutableState) -> Int {
+    state.counter += 1;
+    yield state.counter;
+    state.counter += 1;
+    yield state.counter;
+}
+
+fn unsafe_state_sharing() {
+    let mut state = MutableState { counter: 0, buffer: [] };
+
+    let gen1 = stateful_generator(&mut state);
+    let gen2 = stateful_generator(&mut state);  // ERROR: cannot borrow 'state' mutably twice
+
+    // Attempting to iterate both generators
+    for x in gen1 {
+        for y in gen2 {  // ERROR: conflicting mutable borrows
+            print(x + y);
+        }
+    }
+}
+
+// ============================================================================
+// 6. CONTEXT LIFETIME IN GENERATORS
+// ============================================================================
+
+context Connection {
+    fn send(data: Text);
+    fn recv() -> Text;
+}
+
+type TcpConnection is { socket: Int };
+
+implement Connection for TcpConnection {
+    fn send(data: Text) { }
+    fn recv() -> Text { "" }
+}
+
+// E421: generator outlives provided context
+fn* long_lived_generator() -> Text using [Connection] {
+    loop {
+        let data = Connection.recv();
+        if data.is_empty() { break; }
+        yield data;
+    }
+}
+
+fn context_lifetime_error() {
+    let gen = {
+        let conn = TcpConnection { socket: 42 };
+        provide Connection = conn;
+        long_lived_generator()  // generator returned here
+    };  // conn dropped here
+
+    // ERROR: generator 'gen' references context that has been dropped
+    for msg in gen {
+        print(msg);
+    }
+}
+
+// ============================================================================
+// 7. ASYNC CONTEXT MISMATCH
+// ============================================================================
+
+context SyncLogger {
+    fn log(message: Text);
+}
+
+context AsyncLogger {
+    async fn log(message: Text);
+}
+
+// E421: sync context used in async generator expecting async operations
+async fn* async_gen_sync_context() -> Int using [SyncLogger] {
+    SyncLogger.log("Starting");  // This is OK - sync in async
+    yield 1;
+}
+
+// E421: async context used in sync generator
+fn* sync_gen_async_context() -> Int using [AsyncLogger] {
+    AsyncLogger.log("Starting").await;  // ERROR: cannot await in sync generator
+    yield 1;
+}
+
+// ============================================================================
+// 8. GENERATOR CONTEXT INHERITANCE
+// ============================================================================
+
+// E421: nested generator doesn't inherit outer context
+async fn* outer_with_context() -> Int using [Database] {
+    async fn* inner() -> Int {
+        // ERROR: inner generator doesn't have Database context
+        // (context not automatically inherited by nested generators)
+        let count = Database.execute("SELECT COUNT(*) FROM users").await;
+        yield count;
+    }
+
+    for await x in inner() {
+        yield x;
+    }
+}
+
+// Correct version would be:
+async fn* inner_with_context() -> Int using [Database] {
+    let count = Database.execute("SELECT COUNT(*) FROM users").await;
+    yield count;
+}
+
+async fn* outer_correct() -> Int using [Database] {
+    for await x in inner_with_context() {
+        yield x;
+    }
+}
+
+// ============================================================================
+// 9. CONTEXT SWITCH MID-ITERATION
+// ============================================================================
+
+// E421: providing different context value mid-iteration
+async fn context_switch_error() using [Database] {
+    type PostgresDb is { conn: Text };
+    type SqliteDb is { file: Text };
+
+    implement Database for PostgresDb {
+        async fn query(sql: Text) -> List<Row> { [] }
+        async fn execute(sql: Text) -> Int { 0 }
+    }
+
+    implement Database for SqliteDb {
+        async fn query(sql: Text) -> List<Row> { [] }
+        async fn execute(sql: Text) -> Int { 0 }
+    }
+
+    async fn* db_gen() -> Row using [Database] {
+        let rows = Database.query("SELECT * FROM data").await;
+        for row in rows {
+            yield row;
+        }
+    }
+
+    provide Database = PostgresDb { conn: "postgres://..." };
+
+    for await row in db_gen() {
+        // ERROR: cannot re-provide Database while generator is active
+        provide Database = SqliteDb { file: "data.db" };
+        process(row);
+    }
+}
+
+// ============================================================================
+// 10. PINNED CONTEXT REQUIREMENTS
+// ============================================================================
+
+context PinnedResource {
+    fn use_resource();
+}
+
+type PinnedHandle is {
+    @pin
+    data: [Int; 1024],
+};
+
+implement PinnedResource for PinnedHandle {
+    fn use_resource() { }
+}
+
+// E421: generator requires pinned context but context may move
+async fn* needs_pinned() -> Int using [PinnedResource] {
+    PinnedResource.use_resource();
+    yield 1;
+}
+
+async fn unpinned_context_error() {
+    let handle = PinnedHandle { data: [0; 1024] };
+    provide PinnedResource = handle;
+
+    let gen = needs_pinned();
+    let moved_gen = gen;  // generator moved
+
+    // ERROR: generator references pinned context that may have been invalidated by move
+    for await x in moved_gen {
+        print(x);
+    }
+}
+
+fn main() {
+    // All examples above should produce E421 "Generator context error"
+}

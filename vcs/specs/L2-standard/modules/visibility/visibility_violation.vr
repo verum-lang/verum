@@ -1,0 +1,129 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: modules, visibility, error
+// @expected-error: E601
+
+/// Visibility violation test - attempting to access private items.
+/// This test verifies the compiler correctly rejects visibility violations.
+
+module secret {
+    /// Private type - should not be accessible outside this module
+    type PrivateSecret is {
+        key: Text,
+        value: Int
+    };
+
+    /// Private constant
+    const SECRET_KEY: Text = "super_secret_key";
+
+    /// Private function
+    fn decrypt(data: &Bytes) -> Text {
+        "decrypted"
+    }
+
+    /// Public type that uses private internals
+    pub type PublicHandle is {
+        id: Int
+    };
+
+    implement PublicHandle {
+        pub fn new() -> PublicHandle {
+            PublicHandle { id: 1 }
+        }
+
+        /// Private method
+        fn internal_process(&self) -> Int {
+            self.id * 2
+        }
+
+        pub fn get_id(&self) -> Int {
+            self.id
+        }
+    }
+
+    module nested {
+        /// pub(super) - visible only to parent (secret)
+        pub(super) type ParentOnlyType is {
+            data: Int
+        };
+
+        pub(super) fn parent_only_function() -> Int {
+            42
+        }
+    }
+}
+
+module violator {
+    // ERROR E201: Attempting to mount private type
+    mount secret.PrivateSecret;  // <-- This line causes E201
+
+    pub fn attempt_violation() {
+        // All of these would be visibility violations:
+
+        // Trying to use private type (already fails at link)
+        let s = PrivateSecret { key: "hack", value: 0 };
+
+        // Trying to access private constant
+        let key = secret.SECRET_KEY;
+
+        // Trying to call private function
+        let decrypted = secret.decrypt(&Bytes.empty());
+
+        // Trying to call private method
+        let handle = secret.PublicHandle.new();
+        let internal = handle.internal_process();
+
+        // Trying to access pub(super) from non-parent
+        mount secret.nested.ParentOnlyType;
+        let pot = ParentOnlyType { data: 0 };
+        let result = secret.nested.parent_only_function();
+    }
+}
+
+// Additional violation scenarios
+module more_violations {
+    module inner {
+        type InnerPrivate is {
+            x: Int
+        };
+
+        pub type InnerPublic is {
+            // Private field
+            secret: InnerPrivate
+        };
+
+        implement InnerPublic {
+            pub fn new() -> InnerPublic {
+                InnerPublic {
+                    secret: InnerPrivate { x: 42 }
+                }
+            }
+        }
+    }
+
+    fn violate_field_access() {
+        let obj = inner.InnerPublic.new();
+
+        // ERROR: Accessing private field
+        let x = obj.secret.x;
+
+        // ERROR: Trying to construct with private field type
+        let bad = inner.InnerPublic {
+            secret: inner.InnerPrivate { x: 1 }  // InnerPrivate not visible
+        };
+    }
+}
+
+module cross_crate_violation {
+    // Simulating access to another crate's pub(crate) items
+    // In a real scenario, this would be in a different crate
+
+    // ERROR: pub(crate) items from external crate are not visible
+    // mount external_crate.internal.CratePrivateType;
+}
+
+fn main() {
+    // This test is expected to fail at typecheck due to E201
+    // The mount statement in `violator` module triggers the error
+}

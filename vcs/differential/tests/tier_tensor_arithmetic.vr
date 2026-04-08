@@ -1,0 +1,333 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, tier-equivalence, tensor, arithmetic
+// @timeout: 15000
+
+/// Description: Verifies Tier 0 and Tier 3 produce identical results for element-wise
+/// tensor arithmetic. Tests addition, subtraction, multiplication, division, scalar ops,
+/// and negation using struct-based array simulation.
+
+// ============================================================================
+// Flat array representation (8 elements)
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_print(label: Text, a: Arr8, len: Int) {
+    let mut i = 0;
+    while i < len {
+        println(f"  {label}[{i}]: {arr8_get(a, i)}");
+        i = i + 1;
+    }
+}
+
+// ============================================================================
+// Element-wise operations
+// ============================================================================
+
+fn arr8_add(a: Arr8, b: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(a, i) + arr8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn arr8_sub(a: Arr8, b: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(a, i) - arr8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn arr8_mul(a: Arr8, b: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(a, i) * arr8_get(b, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn arr8_div(a: Arr8, b: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        let bv = arr8_get(b, i);
+        let val = if bv == 0 { 0 } else { arr8_get(a, i) / bv };
+        out = arr8_set(out, i, val);
+        i = i + 1;
+    }
+    out
+}
+
+fn arr8_add_scalar(a: Arr8, s: Int, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(a, i) + s);
+        i = i + 1;
+    }
+    out
+}
+
+fn arr8_mul_scalar(a: Arr8, s: Int, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, arr8_get(a, i) * s);
+        i = i + 1;
+    }
+    out
+}
+
+fn arr8_negate(a: Arr8, len: Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, 0 - arr8_get(a, i));
+        i = i + 1;
+    }
+    out
+}
+
+fn arr8_sum(a: Arr8, len: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < len {
+        s = s + arr8_get(a, i);
+        i = i + 1;
+    }
+    s
+}
+
+// ============================================================================
+// Test functions
+// ============================================================================
+
+/// Test element-wise addition and subtraction
+fn test_add_sub() {
+    println("=== Element-wise Add/Sub ===");
+
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let b = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+
+    let sum = arr8_add(a, b, 8);
+    println(f"a + b:");
+    arr8_print("sum", sum, 8);
+
+    let diff = arr8_sub(b, a, 8);
+    println(f"b - a:");
+    arr8_print("diff", diff, 8);
+
+    // Subtraction yields zero when subtracting from itself
+    let zero = arr8_sub(a, a, 8);
+    println(f"a - a sum: {arr8_sum(zero, 8)}");
+
+    // Addition is commutative: a + b == b + a
+    let sum_ba = arr8_add(b, a, 8);
+    let mut commutative = true;
+    let mut i = 0;
+    while i < 8 {
+        if arr8_get(sum, i) != arr8_get(sum_ba, i) {
+            commutative = false;
+        }
+        i = i + 1;
+    }
+    println(f"add commutative: {commutative}");
+
+    // Negative numbers
+    let neg = Arr8 { e0: -5, e1: -3, e2: -1, e3: 0, e4: 1, e5: 3, e6: 5, e7: 7 };
+    let pos = Arr8 { e0: 5, e1: 3, e2: 1, e3: 0, e4: -1, e5: -3, e6: -5, e7: -7 };
+    let neg_sum = arr8_add(neg, pos, 8);
+    println(f"neg + pos:");
+    arr8_print("neg_sum", neg_sum, 8);
+}
+
+/// Test element-wise multiplication and division
+fn test_mul_div() {
+    println("\n=== Element-wise Mul/Div ===");
+
+    let a = Arr8 { e0: 2, e1: 3, e2: 4, e3: 5, e4: 6, e5: 7, e6: 8, e7: 9 };
+    let b = Arr8 { e0: 10, e1: 10, e2: 10, e3: 10, e4: 10, e5: 10, e6: 10, e7: 10 };
+
+    let product = arr8_mul(a, b, 8);
+    println(f"a * b (b=10):");
+    arr8_print("prod", product, 8);
+
+    // Division
+    let c = Arr8 { e0: 100, e1: 200, e2: 300, e3: 400, e4: 500, e5: 600, e6: 700, e7: 800 };
+    let d = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+    let quotient = arr8_div(c, d, 8);
+    println(f"c / d (all 10):");
+    arr8_print("quot", quotient, 8);
+
+    // Multiply by zero
+    let z = arr8_zeros();
+    let zero_prod = arr8_mul(a, z, 8);
+    println(f"a * zeros sum: {arr8_sum(zero_prod, 8)}");
+
+    // Multiply by one
+    let ones = Arr8 { e0: 1, e1: 1, e2: 1, e3: 1, e4: 1, e5: 1, e6: 1, e7: 1 };
+    let id_prod = arr8_mul(a, ones, 8);
+    let mut same = true;
+    let mut i = 0;
+    while i < 8 {
+        if arr8_get(id_prod, i) != arr8_get(a, i) {
+            same = false;
+        }
+        i = i + 1;
+    }
+    println(f"a * ones == a: {same}");
+
+    // Squares via self-multiply
+    let squares = arr8_mul(a, a, 8);
+    println(f"a * a (squares):");
+    arr8_print("sq", squares, 8);
+}
+
+/// Test scalar operations on arrays
+fn test_scalar_ops() {
+    println("\n=== Scalar Operations ===");
+
+    let a = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 50, e5: 60, e6: 70, e7: 80 };
+
+    let plus5 = arr8_add_scalar(a, 5, 8);
+    println(f"a + 5:");
+    arr8_print("plus5", plus5, 8);
+
+    let minus10 = arr8_add_scalar(a, -10, 8);
+    println(f"a + (-10):");
+    arr8_print("minus10", minus10, 8);
+
+    let times3 = arr8_mul_scalar(a, 3, 8);
+    println(f"a * 3:");
+    arr8_print("times3", times3, 8);
+
+    let times0 = arr8_mul_scalar(a, 0, 8);
+    println(f"a * 0 sum: {arr8_sum(times0, 8)}");
+
+    let timesNeg = arr8_mul_scalar(a, -1, 8);
+    println(f"a * (-1):");
+    arr8_print("neg", timesNeg, 8);
+
+    // Scalar add then scalar mul: (a + 5) * 2
+    let combined = arr8_mul_scalar(arr8_add_scalar(a, 5, 8), 2, 8);
+    println(f"(a + 5) * 2:");
+    arr8_print("combined", combined, 8);
+}
+
+/// Test negation and sign operations
+fn test_negation() {
+    println("\n=== Negation ===");
+
+    let a = Arr8 { e0: 1, e1: -2, e2: 3, e3: -4, e4: 5, e5: -6, e6: 7, e7: -8 };
+    let neg_a = arr8_negate(a, 8);
+    println(f"negate(a):");
+    arr8_print("neg_a", neg_a, 8);
+
+    // Double negation should restore original
+    let double_neg = arr8_negate(neg_a, 8);
+    let mut restored = true;
+    let mut i = 0;
+    while i < 8 {
+        if arr8_get(double_neg, i) != arr8_get(a, i) {
+            restored = false;
+        }
+        i = i + 1;
+    }
+    println(f"double negate restores: {restored}");
+
+    // Negate zeros stays zero
+    let z = arr8_zeros();
+    let neg_z = arr8_negate(z, 8);
+    println(f"negate(zeros) sum: {arr8_sum(neg_z, 8)}");
+
+    // a + negate(a) = 0
+    let cancel = arr8_add(a, neg_a, 8);
+    println(f"a + negate(a) sum: {arr8_sum(cancel, 8)}");
+}
+
+/// Test compound arithmetic expressions
+fn test_compound_arithmetic() {
+    println("\n=== Compound Arithmetic ===");
+
+    let x = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let y = Arr8 { e0: 5, e1: 6, e2: 7, e3: 8, e4: 0, e5: 0, e6: 0, e7: 0 };
+
+    // (x + y) * 2
+    let r1 = arr8_mul_scalar(arr8_add(x, y, 4), 2, 4);
+    println(f"(x + y) * 2:");
+    arr8_print("r1", r1, 4);
+
+    // x*y - y*x = 0 (commutative check)
+    let xy = arr8_mul(x, y, 4);
+    let yx = arr8_mul(y, x, 4);
+    let comm_diff = arr8_sub(xy, yx, 4);
+    println(f"x*y - y*x sum: {arr8_sum(comm_diff, 4)}");
+
+    // Distributive: a*(b+c) == a*b + a*c
+    let a = Arr8 { e0: 3, e1: 3, e2: 3, e3: 3, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 2, e1: 4, e2: 6, e3: 8, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let c = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 0, e5: 0, e6: 0, e7: 0 };
+
+    let lhs = arr8_mul(a, arr8_add(b, c, 4), 4);
+    let rhs = arr8_add(arr8_mul(a, b, 4), arr8_mul(a, c, 4), 4);
+    let mut distributive = true;
+    let mut i = 0;
+    while i < 4 {
+        if arr8_get(lhs, i) != arr8_get(rhs, i) {
+            distributive = false;
+        }
+        i = i + 1;
+    }
+    println(f"distributive a*(b+c) == a*b+a*c: {distributive}");
+    println(f"a*(b+c):");
+    arr8_print("lhs", lhs, 4);
+
+    // Sum of products
+    let dot = arr8_sum(arr8_mul(x, y, 4), 4);
+    println(f"dot(x, y) = sum(x*y): {dot}");
+}
+
+fn main() {
+    test_add_sub();
+    test_mul_div();
+    test_scalar_ops();
+    test_negation();
+    test_compound_arithmetic();
+}

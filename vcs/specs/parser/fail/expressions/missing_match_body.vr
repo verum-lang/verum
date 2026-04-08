@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, match, body, error
+// @description: Match arm missing body expression after =>
+// @expected-error: E087
+
+fn test(x: Int) {
+    match x {
+        1 => ,
+        _ => "other"
+    }
+}

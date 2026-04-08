@@ -1,0 +1,103 @@
+// @test: parse-fail
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, splice, quote, error
+// @expected-error: M401
+// @description: Splice operator $ can only be used inside quote blocks
+
+// =============================================================================
+// Grammar Reference:
+// quote_interpolation = '$' , ( identifier | '{' , expression , '}' ) ;
+// The $ splice operator is only valid inside quote { } blocks
+// =============================================================================
+
+// ERROR: Splice in regular function body
+fn test_splice_in_regular_function() {
+    let x = $name;  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice expression in regular function
+fn test_splice_expr_outside() {
+    let result = ${compute()};  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice in return statement
+fn test_splice_in_return() -> Int {
+    return $value;  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice in if condition
+fn test_splice_in_condition() {
+    if $condition {  // ERROR: $ outside quote block
+        do_something();
+    }
+}
+
+// ERROR: Splice in match expression
+fn test_splice_in_match() {
+    match $expr {  // ERROR: $ outside quote block
+        _ => {}
+    }
+}
+
+// ERROR: Splice in function parameter
+fn test_splice_in_param($x: Int) {}  // ERROR: $ outside quote block
+
+// ERROR: Splice in type position
+fn test_splice_in_type() -> $ReturnType {}  // ERROR: $ outside quote block
+
+// ERROR: Splice at module level
+const SPLICED: Int = $value;  // ERROR: $ outside quote block
+
+// ERROR: Splice in type definition
+type SplicedType is { field: $FieldType };  // ERROR: $ outside quote block
+
+// ERROR: Splice in record literal
+fn test_splice_in_record() {
+    let point = Point { x: $x, y: $y };  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice in array literal
+fn test_splice_in_array() {
+    let arr = [$elem1, $elem2, $elem3];  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice in binary operation
+fn test_splice_in_binop() {
+    let sum = $a + $b;  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice in function call
+fn test_splice_in_call() {
+    do_something($arg);  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice in method call
+fn test_splice_in_method() {
+    obj.$method();  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice in lambda
+fn test_splice_in_lambda() {
+    let f = |x| $body;  // ERROR: $ outside quote block
+}
+
+// ERROR: Splice in for loop
+fn test_splice_in_for() {
+    for $item in collection {  // ERROR: $ outside quote block
+        process($item);  // ERROR: $ outside quote block
+    }
+}
+
+// ERROR: Splice in while loop
+fn test_splice_in_while() {
+    while $condition {  // ERROR: $ outside quote block
+        iterate();
+    }
+}
+
+// NOTE: Valid usage (inside quote block):
+// meta(1) fn valid_splice() {
+//     let code = quote { let x = $name; };  // OK - inside quote
+// }

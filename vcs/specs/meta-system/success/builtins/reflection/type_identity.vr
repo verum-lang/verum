@@ -1,0 +1,162 @@
+// @test: meta-pass
+// @level: L1
+// @description: Tests type_id and type_of reflection builtins
+// @tags: meta-system, builtins, reflection, type-identity
+// @contexts: MetaTypes
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Color is Red | Green | Blue;
+
+type Container<T> is {
+    value: T,
+};
+
+// Test type_id for primitive types
+meta fn test_type_id_primitives(ctx: Text) -> Bool using [MetaTypes] {
+    let int_id = type_id<Int>();
+    let bool_id = type_id<Bool>();
+    let text_id = type_id<Text>();
+    let float_id = type_id<Float>();
+
+    // Each type should have a unique ID
+    int_id != bool_id && int_id != text_id && int_id != float_id &&
+    bool_id != text_id && bool_id != float_id && text_id != float_id
+}
+
+// Test type_id consistency - same type returns same ID
+meta fn test_type_id_consistency(ctx: Text) -> Bool using [MetaTypes] {
+    let id1 = type_id<Int>();
+    let id2 = type_id<Int>();
+    let check1 = id1 == id2;
+
+    let point_id1 = type_id<Point>();
+    let point_id2 = type_id<Point>();
+    let check2 = point_id1 == point_id2;
+
+    check1 && check2
+}
+
+// Test type_id for user-defined types
+meta fn test_type_id_user_types(ctx: Text) -> Bool using [MetaTypes] {
+    let point_id = type_id<Point>();
+    let color_id = type_id<Color>();
+    let int_id = type_id<Int>();
+
+    // User types have unique IDs
+    point_id != color_id && point_id != int_id && color_id != int_id
+}
+
+// Test type_id for generic instantiations
+meta fn test_type_id_generics(ctx: Text) -> Bool using [MetaTypes] {
+    let container_int = type_id<Container<Int>>();
+    let container_text = type_id<Container<Text>>();
+    let container_bool = type_id<Container<Bool>>();
+
+    // Different instantiations have different IDs
+    let diff1 = container_int != container_text;
+    let diff2 = container_int != container_bool;
+    let diff3 = container_text != container_bool;
+
+    // Same instantiation same ID
+    let container_int2 = type_id<Container<Int>>();
+    let same = container_int == container_int2;
+
+    diff1 && diff2 && diff3 && same
+}
+
+// Test type_of for expressions
+meta fn test_type_of_primitives(ctx: Text) -> Bool using [MetaTypes] {
+    let int_val = 42;
+    let bool_val = true;
+    let text_val = "hello";
+
+    let int_type = type_of(int_val);
+    let bool_type = type_of(bool_val);
+    let text_type = type_of(text_val);
+
+    type_name(int_type) == "Int" && type_name(bool_type) == "Bool" && type_name(text_type) == "Text"
+}
+
+// Test type_of for struct values
+meta fn test_type_of_structs(ctx: Text) -> Bool using [MetaTypes] {
+    let point = Point { x: 10, y: 20 };
+    let point_type = type_of(point);
+
+    type_name(point_type) == "Point"
+}
+
+// Test type_of for enum values
+meta fn test_type_of_enums(ctx: Text) -> Bool using [MetaTypes] {
+    let color = Color.Red;
+    let color_type = type_of(color);
+
+    type_name(color_type) == "Color"
+}
+
+// Test type_of for generic types
+meta fn test_type_of_generics(ctx: Text) -> Bool using [MetaTypes] {
+    let container = Container { value: 42 };
+    let container_type = type_of(container);
+
+    // The type should include the generic parameter
+    let name = type_name(container_type);
+    text_contains(name, "Container")
+}
+
+// Test type_id and type_of relationship
+meta fn test_type_id_of_relationship(ctx: Text) -> Bool using [MetaTypes] {
+    let val = 42;
+    let val_type = type_of(val);
+
+    // The type_id of the inferred type should match Int's type_id
+    let inferred_id = type_id(val_type);
+    let int_id = type_id<Int>();
+
+    inferred_id == int_id
+}
+
+// Test type_of for expressions
+meta fn test_type_of_expressions(ctx: Text) -> Bool using [MetaTypes] {
+    // Arithmetic expression
+    let sum_type = type_of(1 + 2);
+    let check1 = type_name(sum_type) == "Int";
+
+    // Comparison expression
+    let cmp_type = type_of(1 < 2);
+    let check2 = type_name(cmp_type) == "Bool";
+
+    check1 && check2
+}
+
+// Test type_id for nested generics
+meta fn test_type_id_nested_generics(ctx: Text) -> Bool using [MetaTypes] {
+    let outer1 = type_id<Container<Container<Int>>>();
+    let outer2 = type_id<Container<Container<Text>>>();
+
+    // Different nested types have different IDs
+    let diff = outer1 != outer2;
+
+    // Same nested type same ID
+    let outer1_again = type_id<Container<Container<Int>>>();
+    let same = outer1 == outer1_again;
+
+    diff && same
+}
+
+fn main() {
+    @const assert(test_type_id_primitives("ctx"));
+    @const assert(test_type_id_consistency("ctx"));
+    @const assert(test_type_id_user_types("ctx"));
+    @const assert(test_type_id_generics("ctx"));
+    @const assert(test_type_of_primitives("ctx"));
+    @const assert(test_type_of_structs("ctx"));
+    @const assert(test_type_of_enums("ctx"));
+    @const assert(test_type_of_generics("ctx"));
+    @const assert(test_type_id_of_relationship("ctx"));
+    @const assert(test_type_of_expressions("ctx"));
+    @const assert(test_type_id_nested_generics("ctx"));
+}

@@ -1,0 +1,165 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, safety, ownership
+// @description: Tests ownership transfer patterns across FFI boundaries
+
+/// ============================================================
+/// OWNERSHIP TRANSFER ACROSS FFI
+/// ============================================================
+///
+/// When passing data across FFI boundaries, ownership semantics
+/// must be carefully managed to prevent leaks and double-frees.
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_void is ();
+type c_char is i8;
+type c_int is i32;
+type c_size is usize;
+
+@repr(C)
+type Data is {
+    id: c_int,
+    value: c_int,
+};
+
+type AllocError is
+    | OutOfMemory
+    | SizeOverflow;
+
+// ------------------------------------------------------------
+// FFI Declarations - libc
+// ------------------------------------------------------------
+
+ffi libc_malloc {
+    @extern("C")
+    fn malloc(size: c_size) -> *mut c_void;
+}
+
+ffi libc_free {
+    @extern("C")
+    fn free(ptr: *mut c_void);
+}
+
+ffi libc_strdup {
+    @extern("C")
+    fn strdup(s: *const c_char) -> *mut c_char;
+}
+
+// ------------------------------------------------------------
+// Ownership Documentation FFI
+// ------------------------------------------------------------
+
+ffi ownership_take {
+    /// Takes ownership of the pointer (callee will free)
+    @extern("C")
+    fn take_ownership(ptr: *mut Data) -> c_int;
+}
+
+ffi ownership_borrow {
+    /// Borrows pointer (caller retains ownership)
+    @extern("C")
+    fn borrow_data(ptr: *const Data) -> c_int;
+}
+
+ffi ownership_create {
+    /// Returns owned pointer (caller must free)
+    @extern("C")
+    fn create_data() -> *mut Data;
+}
+
+ffi ownership_get {
+    /// Returns borrowed pointer (caller must not free)
+    @extern("C")
+    fn get_cached() -> *const Data;
+}
+
+// ------------------------------------------------------------
+// Owned Pointer Types
+// ------------------------------------------------------------
+
+/// Owned pointer that will be freed on drop
+@repr(C)
+type OwnedPtr is {
+    ptr: *mut c_void,
+};
+
+/// Borrowed pointer (no ownership, no cleanup)
+@repr(C)
+type BorrowedPtr is {
+    ptr: *const c_void,
+};
+
+// ------------------------------------------------------------
+// Text Ownership Types
+// ------------------------------------------------------------
+
+/// Owned C string (will be freed)
+@repr(C)
+type OwnedCString is {
+    ptr: *mut c_char,
+};
+
+/// Borrowed C string (caller owns)
+@repr(C)
+type BorrowedCStr is {
+    ptr: *const c_char,
+};
+
+// ------------------------------------------------------------
+// Array Ownership Types
+// ------------------------------------------------------------
+
+/// Owned array with known length
+@repr(C)
+type OwnedArray is {
+    ptr: *mut c_void,
+    len: c_size,
+};
+
+// ------------------------------------------------------------
+// Callback Ownership Types
+// ------------------------------------------------------------
+
+/// Callback context with owned data
+@repr(C)
+type OwnedCallbackCtx is {
+    callback: *const c_void,
+    context: *mut c_void,
+};
+
+// ------------------------------------------------------------
+// Reference Counted Types
+// ------------------------------------------------------------
+
+/// C-compatible reference counted pointer
+@repr(C)
+type CRefCounted is {
+    ref_count: c_int,
+    value: c_int,
+};
+
+/// Export retain/release functions for C
+@export("C")
+@no_mangle
+fn my_type_retain(ptr: *mut CRefCounted) {
+    // Would increment ref_count
+}
+
+@export("C")
+@no_mangle
+fn my_type_release(ptr: *mut CRefCounted) {
+    // Would decrement ref_count and free if zero
+}
+
+// ------------------------------------------------------------
+// Main
+// ------------------------------------------------------------
+
+fn main() {
+    // Test FFI declarations and types compile
+    print("Ownership transfer patterns passed");
+}

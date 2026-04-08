@@ -1,0 +1,409 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, rabin, lis, partition_numbers, ternary_search, bipartite_matching, z_algorithm
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #20: combines algorithms from tests 571-579 in a pipeline.
+//
+// Pipeline:
+//   1. Rabin fingerprint hash (572) — compute hash of a sequence, use as an index
+//   2. LIS DP (573)               — find LIS length of a constructed sequence
+//   3. Partition numbers (577)    — compute p(LIS_length)
+//   4. Ternary search (579)       — find peak in p-derived unimodal array
+//   5. Bipartite matching (578)   — use peak index to construct a bipartite graph
+//   6. Z-algorithm (576)          — verify pattern count in a sequence
+//   7. Bridge finding (571)       — verify bridge count in a derived graph
+
+// ============================================================
+// Rabin fingerprint (from 572)
+// ============================================================
+
+fn rb_pow(base: Int, exp: Int, modm: Int) -> Int {
+    let mut result = 1;
+    let mut b = base % modm;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = (result * b) % modm; }
+        b = (b * b) % modm;
+        e = e / 2;
+    }
+    result
+}
+
+fn rb_hash(s: [Int; 32], start: Int, len: Int, base: Int, modm: Int) -> Int {
+    let mut h = 0;
+    let mut i = 0;
+    while i < len {
+        h = (h * base + s[start + i]) % modm;
+        i = i + 1;
+    }
+    h
+}
+
+// ============================================================
+// LIS DP O(n^2) (from 573)
+// ============================================================
+
+fn lis_dp_fn(a: [Int; 16], n: Int, dp: [Int; 16]) -> Int {
+    let mut i = 0;
+    while i < n { dp[i] = 1; i = i + 1; }
+    let mut best = 1;
+    i = 1;
+    while i < n {
+        let mut j = 0;
+        while j < i {
+            if a[j] < a[i] {
+                let cand = dp[j] + 1;
+                if cand > dp[i] { dp[i] = cand; }
+            }
+            j = j + 1;
+        }
+        if dp[i] > best { best = dp[i]; }
+        i = i + 1;
+    }
+    best
+}
+
+// ============================================================
+// Partition numbers (from 577)
+// ============================================================
+
+fn partition_fn(n_max: Int, dp: [Int; 32]) -> Int {
+    let mut i = 0;
+    while i <= n_max { dp[i] = 0; i = i + 1; }
+    dp[0] = 1;
+    let mut s = 1;
+    while s <= n_max {
+        let mut j = s;
+        while j <= n_max {
+            dp[j] = dp[j] + dp[j - s];
+            j = j + 1;
+        }
+        s = s + 1;
+    }
+    dp[n_max]
+}
+
+// ============================================================
+// Ternary search (from 579)
+// ============================================================
+
+fn ternary_peak_fn(arr: [Int; 32], lo_in: Int, hi_in: Int) -> Int {
+    let mut lo = lo_in;
+    let mut hi = hi_in;
+    while lo < hi {
+        let m1 = lo + (hi - lo) / 3;
+        let m2 = hi - (hi - lo) / 3;
+        if arr[m1] < arr[m2] { lo = m1 + 1; } else { hi = m2 - 1; }
+    }
+    lo
+}
+
+// ============================================================
+// Bipartite matching (from 578)
+// ============================================================
+
+@allow(unbounded_recursion)
+fn bp_dfs2(adj: [Int; 64], nl: Int, nr: Int, u: Int,
+           match_l: [Int; 8], match_r: [Int; 8], visited: [Int; 8]) -> Int {
+    let mut v = 0;
+    while v < nr {
+        if adj[u * 8 + v] == 1 && visited[v] == 0 {
+            visited[v] = 1;
+            if match_r[v] == -1 || bp_dfs2(adj, nl, nr, match_r[v], match_l, match_r, visited) == 1 {
+                match_l[u] = v;
+                match_r[v] = u;
+                return 1;
+            }
+        }
+        v = v + 1;
+    }
+    0
+}
+
+@allow(unbounded_recursion)
+fn max_match2(adj: [Int; 64], nl: Int, nr: Int,
+              match_l: [Int; 8], match_r: [Int; 8], visited: [Int; 8]) -> Int {
+    let mut i = 0;
+    while i < nl { match_l[i] = -1; i = i + 1; }
+    i = 0;
+    while i < nr { match_r[i] = -1; i = i + 1; }
+    let mut result = 0;
+    i = 0;
+    while i < nl {
+        let mut j = 0;
+        while j < nr { visited[j] = 0; j = j + 1; }
+        if bp_dfs2(adj, nl, nr, i, match_l, match_r, visited) == 1 { result = result + 1; }
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================
+// Z-algorithm (from 576)
+// ============================================================
+
+fn z_build2(s: [Int; 32], n: Int, zarr: [Int; 32]) {
+    let mut i = 0;
+    while i < n { zarr[i] = 0; i = i + 1; }
+    let mut l = 0;
+    let mut r = 0;
+    i = 1;
+    while i < n {
+        if i < r {
+            let start = zarr[i - l];
+            let rem   = r - i + 1;
+            zarr[i] = if start < rem { start } else { rem };
+        }
+        while i + zarr[i] < n && s[zarr[i]] == s[i + zarr[i]] {
+            zarr[i] = zarr[i] + 1;
+        }
+        if i + zarr[i] - 1 > r { l = i; r = i + zarr[i] - 1; }
+        i = i + 1;
+    }
+}
+
+fn z_count_matches(pat: [Int; 32], plen: Int,
+                   text: [Int; 32], tlen: Int,
+                   combined: [Int; 32], zarr: [Int; 32]) -> Int {
+    let mut i = 0;
+    while i < plen { combined[i] = pat[i]; i = i + 1; }
+    combined[plen] = -999;
+    i = 0;
+    while i < tlen { combined[plen + 1 + i] = text[i]; i = i + 1; }
+    let total = plen + 1 + tlen;
+    z_build2(combined, total, zarr);
+    let mut count = 0;
+    i = plen + 1;
+    while i < total {
+        if zarr[i] == plen { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// ============================================================
+// Bridge finding (from 571) — simplified for pipeline
+// ============================================================
+
+fn adj_get3(adj: [Int; 64], u: Int, v: Int) -> Int { adj[u * 8 + v] }
+
+@allow(unbounded_recursion)
+fn bridge_dfs3(adj: [Int; 64], n: Int, u: Int, parent: Int,
+               disc: [Int; 8], low: [Int; 8], vis: [Int; 8], timer: [Int; 8],
+               nb: [Int; 8]) {
+    vis[u] = 1;
+    disc[u] = timer[0]; low[u] = timer[0]; timer[0] = timer[0] + 1;
+    let mut v = 0;
+    while v < n {
+        if adj_get3(adj, u, v) == 1 {
+            if vis[v] == 0 {
+                bridge_dfs3(adj, n, v, u, disc, low, vis, timer, nb);
+                if low[v] < low[u] { low[u] = low[v]; }
+                if low[v] > disc[u] { nb[0] = nb[0] + 1; }
+            } else {
+                if v != parent && disc[v] < low[u] { low[u] = disc[v]; }
+            }
+        }
+        v = v + 1;
+    }
+}
+
+fn count_bridges3(adj: [Int; 64], n: Int,
+                  disc: [Int; 8], low: [Int; 8], vis: [Int; 8],
+                  timer: [Int; 8], nb: [Int; 8]) -> Int {
+    let mut i = 0;
+    while i < n { vis[i] = 0; i = i + 1; }
+    timer[0] = 0; nb[0] = 0;
+    i = 0;
+    while i < n {
+        if vis[i] == 0 { bridge_dfs3(adj, n, i, -1, disc, low, vis, timer, nb); }
+        i = i + 1;
+    }
+    nb[0]
+}
+
+// ============================================================
+// Pipeline test 1: Rabin -> LIS -> Partition -> Ternary
+// ============================================================
+
+fn test_pipeline_rabin_lis_partition_ternary() {
+    // Step 1: Hash [3,1,4,1,5] with base=31, mod=1000003.
+    // H = ((((3*31+1)*31+4)*31+1)*31+5) mod 1000003
+    // 3*31=93; 93+1=94; 94*31=2914; 2914+4=2918; 2918*31=90458; 90458+1=90459;
+    // 90459*31=2804229; 2804229+5=2804234; 2804234 mod 1000003 = 2804234 - 2*1000003 = 804228.
+    let mut seq = [3,1,4,1,5,0,0,0,0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let h = rb_hash(seq, 0, 5, 31, 1000003);
+    assert_eq(h, 804228);
+
+    // Step 2: LIS of [3,1,4,1,5,9,2,6]. Length=4 ([1,4,5,9] or [1,4,5,6] or [3,4,5,9] etc.)
+    // dp[0]=1(3), dp[1]=1(1), dp[2]=2(1<4->1+1), dp[3]=1(1),
+    // dp[4]=3(4<5->2+1), dp[5]=4(5<9->3+1), dp[6]=2(1<2->1+1), dp[7]=4(4<6->2+1 but 5<6->3+1=4)
+    // best=4
+    let mut a = [3,1,4,1,5,9,2,6,0,0,0,0,0,0,0,0];
+    let mut dp_lis = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let lis_len = lis_dp_fn(a, 8, dp_lis);
+    assert_eq(lis_len, 4);
+
+    // Step 3: p(lis_len) = p(4) = 5.
+    let mut dp_part = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                       0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let pn = partition_fn(lis_len, dp_part);
+    assert_eq(pn, 5);
+
+    // Step 4: Ternary search on unimodal array of length pn=5 (indices 0..4).
+    // f[i] = -(i-2)^2 + 10 for i=0..4:
+    // f[0]=-(4)+10=6, f[1]=-(1)+10=9, f[2]=10, f[3]=9, f[4]=6. Peak at 2.
+    let mut unimodal = [6,9,10,9,6,0,0,0,0,0,0,0,0,0,0,0,
+                        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let peak = ternary_peak_fn(unimodal, 0, pn - 1);
+    assert_eq(peak, 2);
+    assert_eq(unimodal[peak], 10);
+
+    print("pipeline1_rabin_lis_partition_ternary: ok");
+}
+
+// ============================================================
+// Pipeline test 2: LIS -> Partition -> Bipartite Matching
+// ============================================================
+
+fn test_pipeline_lis_partition_matching() {
+    // Step 1: LIS of [2,4,1,3,5] = [2,3,5] or [2,4,5] or [1,3,5], length=3.
+    // dp[0]=1(2), dp[1]=2(2<4), dp[2]=1(1), dp[3]=2(2<3->1+1=2,1<3->1+1=2),
+    // dp[4]=3(4<5->2+1, 3<5->2+1). best=3.
+    let mut a = [2,4,1,3,5,0,0,0,0,0,0,0,0,0,0,0];
+    let mut dp_lis = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let lis_len = lis_dp_fn(a, 5, dp_lis);
+    assert_eq(lis_len, 3);
+
+    // Step 2: p(3) = 3.
+    let mut dp_part = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                       0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let pn = partition_fn(lis_len, dp_part);
+    assert_eq(pn, 3);
+
+    // Step 3: Build bipartite graph with nl=pn=3, nr=3.
+    // Perfect matching: 0->0, 1->1, 2->2. Matching size=3.
+    let mut adj = [0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+                   0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0];
+    adj[0*8+0] = 1; adj[1*8+1] = 1; adj[2*8+2] = 1;
+    let mut ml  = [0,0,0,0,0,0,0,0];
+    let mut mr  = [0,0,0,0,0,0,0,0];
+    let mut vis = [0,0,0,0,0,0,0,0];
+    let m = max_match2(adj, pn, pn, ml, mr, vis);
+    assert_eq(m, 3);
+
+    print("pipeline2_lis_partition_matching: ok");
+}
+
+// ============================================================
+// Pipeline test 3: Partition -> Ternary -> Z-algorithm -> Bridges
+// ============================================================
+
+fn test_pipeline_partition_ternary_z_bridges() {
+    // Step 1: p(5) = 7.
+    let mut dp_part = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                       0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let pn = partition_fn(5, dp_part);
+    assert_eq(pn, 7);
+
+    // Step 2: Ternary search on length-pn=7 unimodal array (indices 0..6).
+    // f[i] = -(i-3)^2 + 20: f[0]=11,f[1]=16,f[2]=19,f[3]=20,f[4]=19,f[5]=16,f[6]=11.
+    // Peak at index 3.
+    let mut unimodal = [11,16,19,20,19,16,11,0,0,0,0,0,0,0,0,0,
+                        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let peak = ternary_peak_fn(unimodal, 0, pn - 1);
+    assert_eq(peak, 3);
+
+    // Step 3: Z-algorithm count matches. pat=[1,1], text=[1,1,2,1,1,3,1,1].
+    // Combined=[1,1,-999,1,1,2,1,1,3,1,1], total=11.
+    // Z-matches at positions (relative to text): 0, 3, 6 (all where text[i]==1 and text[i+1]==1).
+    // Matches at text positions 0, 3, 6 -> count=3.
+    let mut pat2 = [1,1,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut text2 = [1,1,2,1,1,3,1,1,-1,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut combined2 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut zarr2 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let cnt = z_count_matches(pat2, 2, text2, 8, combined2, zarr2);
+    assert_eq(cnt, 3);
+
+    // Step 4: Use cnt=3 to build a star graph with 3 leaves and count bridges.
+    // Star: center=0, leaves=1,2,3. 3 bridges.
+    let mut adj3 = [0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0];
+    let mut k = 1;
+    while k <= cnt {
+        adj3[0*8+k] = 1; adj3[k*8+0] = 1;
+        k = k + 1;
+    }
+    let mut disc3  = [0,0,0,0,0,0,0,0];
+    let mut low3   = [0,0,0,0,0,0,0,0];
+    let mut vis3   = [0,0,0,0,0,0,0,0];
+    let mut timer3 = [0,0,0,0,0,0,0,0];
+    let mut nb3    = [0,0,0,0,0,0,0,0];
+    let bridges = count_bridges3(adj3, cnt + 1, disc3, low3, vis3, timer3, nb3);
+    assert_eq(bridges, cnt);
+    assert_eq(bridges, 3);
+
+    print("pipeline3_partition_ternary_z_bridges: ok");
+}
+
+// ============================================================
+// Pipeline test 4: Rabin -> Z-algorithm -> LIS -> Partition
+// ============================================================
+
+fn test_pipeline_rabin_z_lis_partition() {
+    // Step 1: Hash [1,2,1] with base=31, mod=1000003.
+    // H = (1*31+2)*31+1 = 33*31+1 = 1023+1 = 1024.
+    let mut s3 = [1,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let h = rb_hash(s3, 0, 3, 31, 1000003);
+    assert_eq(h, 1024);
+
+    // Step 2: Z-matches of pat=[1] in text=[1,2,1,3,1]. Count=3 (at 0,2,4).
+    let mut pat3 = [1,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut text3 = [1,2,1,3,1,-1,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut comb3 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let mut zarr3 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let z_cnt = z_count_matches(pat3, 1, text3, 5, comb3, zarr3);
+    assert_eq(z_cnt, 3);
+
+    // Step 3: LIS of [1,5,2,3,4] length=4 ([1,2,3,4]).
+    let mut a4 = [1,5,2,3,4,0,0,0,0,0,0,0,0,0,0,0];
+    let mut dp4 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let lis4 = lis_dp_fn(a4, 5, dp4);
+    assert_eq(lis4, 4);
+
+    // Step 4: p(lis4) = p(4) = 5.
+    let mut dp_p4 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let pn4 = partition_fn(lis4, dp_p4);
+    assert_eq(pn4, 5);
+    // Also verify z_cnt + lis4 = 7 = p(5)
+    assert_eq(z_cnt + lis4, 7);
+
+    print("pipeline4_rabin_z_lis_partition: ok");
+}
+
+fn main() -> Int {
+    test_pipeline_rabin_lis_partition_ternary();
+    test_pipeline_lis_partition_matching();
+    test_pipeline_partition_ternary_z_bridges();
+    test_pipeline_rabin_z_lis_partition();
+    print("[OK] 580_interp_comprehensive20");
+    0
+}

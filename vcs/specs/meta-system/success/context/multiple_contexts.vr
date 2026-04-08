@@ -1,0 +1,202 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, context, multiple, metatypes, metaruntime
+// @description: Test that multiple contexts can be combined
+// @contexts: MetaTypes, MetaRuntime
+
+// =============================================================================
+// TEST TYPES
+// =============================================================================
+
+type Point is { x: Float, y: Float };
+
+// =============================================================================
+// COMBINED CONTEXT FUNCTIONS
+// =============================================================================
+
+// Use both MetaTypes and MetaRuntime in the same function
+meta fn test_both_contexts() -> Bool using [MetaTypes, MetaRuntime] {
+    // From MetaTypes
+    let size = size_of(Int);
+    let type_name_val = type_name(Int);
+
+    // From MetaRuntime
+    let os = target_os();
+    let arch = target_arch();
+
+    size > 0 &&
+    text_len(type_name_val) > 0 &&
+    text_len(os) > 0 &&
+    text_len(arch) > 0
+}
+
+// Generate platform-specific type info
+meta fn platform_type_info<T>() -> Text using [MetaTypes, MetaRuntime] {
+    let type_name_val = type_name(T);
+    let size = size_of(T);
+    let align = align_of(T);
+    let os = target_os();
+    let arch = target_arch();
+    let ptr_width = target_pointer_width();
+
+    f"{type_name_val} on {os}/{arch}: size={size}, align={align}, ptr_width={ptr_width}"
+}
+
+meta fn test_platform_type_info() -> Bool using [MetaTypes, MetaRuntime] {
+    let info = platform_type_info<Point>();
+    text_contains(info, "Point") &&
+    text_contains(info, "size=") &&
+    text_contains(info, "align=")
+}
+
+// Select type representation based on platform
+meta fn select_representation<T>() -> Text using [MetaTypes, MetaRuntime] {
+    let ptr_width = target_pointer_width();
+    let size = size_of(T);
+    let is_copy_val = is_copy(T);
+
+    if ptr_width == 64 && size <= 16 && is_copy_val {
+        "inline"  // Small copy types can be passed in registers
+    } else if is_copy_val {
+        "copy"    // Copy types passed by value
+    } else {
+        "reference"  // Non-copy types passed by reference
+    }
+}
+
+meta fn test_select_representation_int() -> Bool using [MetaTypes, MetaRuntime] {
+    let repr = select_representation<Int>();
+    repr == "inline" || repr == "copy"  // Int should be inline or copy
+}
+
+meta fn test_select_representation_text() -> Bool using [MetaTypes, MetaRuntime] {
+    let repr = select_representation<Text>();
+    repr == "reference"  // Text is not Copy
+}
+
+// Generate debug-aware serialization
+meta fn generate_serializer<T>() -> Text using [MetaTypes, MetaRuntime] {
+    let type_name_val = type_name(T);
+    let debug_mode = is_debug();
+
+    if is_struct(T) {
+        let fields = fields_of(T);
+        let field_count = list_len(fields);
+
+        if debug_mode {
+            f"debug_struct_serializer<{type_name_val}>({field_count} fields, with validation)"
+        } else {
+            f"optimized_struct_serializer<{type_name_val}>({field_count} fields)"
+        }
+    } else if is_enum(T) {
+        let variants = variants_of(T);
+        let variant_count = list_len(variants);
+
+        if debug_mode {
+            f"debug_enum_serializer<{type_name_val}>({variant_count} variants, with validation)"
+        } else {
+            f"optimized_enum_serializer<{type_name_val}>({variant_count} variants)"
+        }
+    } else {
+        if debug_mode {
+            f"debug_primitive_serializer<{type_name_val}>()"
+        } else {
+            f"optimized_primitive_serializer<{type_name_val}>()"
+        }
+    }
+}
+
+meta fn test_generate_serializer_struct() -> Bool using [MetaTypes, MetaRuntime] {
+    let result = generate_serializer<Point>();
+    text_contains(result, "struct_serializer") &&
+    text_contains(result, "Point")
+}
+
+// Compute optimal buffer size based on type and platform
+meta fn optimal_buffer_size<T>(count: Int) -> Int using [MetaTypes, MetaRuntime] {
+    let elem_size = size_of(T);
+    let elem_align = align_of(T);
+    let ptr_width = target_pointer_width();
+    let cache_line = if ptr_width == 64 { 64 } else { 32 };
+
+    // Align to cache line for better performance
+    let raw_size = elem_size * count;
+    let aligned_size = ((raw_size + cache_line - 1) / cache_line) * cache_line;
+
+    aligned_size
+}
+
+meta fn test_optimal_buffer_size() -> Bool using [MetaTypes, MetaRuntime] {
+    let size = optimal_buffer_size<Int>(100);
+    size > 0 && size >= size_of(Int) * 100
+}
+
+// =============================================================================
+// CONTEXT ORDERING DOESN'T MATTER
+// =============================================================================
+
+// Same function with different context order
+meta fn test_context_order_1() -> Bool using [MetaTypes, MetaRuntime] {
+    size_of(Int) > 0 && text_len(target_os()) > 0
+}
+
+meta fn test_context_order_2() -> Bool using [MetaRuntime, MetaTypes] {
+    text_len(target_os()) > 0 && size_of(Int) > 0
+}
+
+// =============================================================================
+// CALLING FUNCTIONS WITH DIFFERENT CONTEXT REQUIREMENTS
+// =============================================================================
+
+// Helper that only needs MetaTypes
+meta fn get_type_size<T>() -> Int using [MetaTypes] {
+    size_of(T)
+}
+
+// Helper that only needs MetaRuntime
+meta fn get_platform_info() -> Text using [MetaRuntime] {
+    target_os()
+}
+
+// Function that uses both helpers
+meta fn combined_info<T>() -> Text using [MetaTypes, MetaRuntime] {
+    let size = get_type_size<T>();
+    let platform = get_platform_info();
+    f"Type size: {size}, Platform: {platform}"
+}
+
+meta fn test_combined_info() -> Bool using [MetaTypes, MetaRuntime] {
+    let info = combined_info<Int>();
+    text_contains(info, "Type size:") &&
+    text_contains(info, "Platform:")
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Basic combined context
+    @const assert(test_both_contexts());
+
+    // Platform type info
+    @const assert(test_platform_type_info());
+
+    // Representation selection
+    @const assert(test_select_representation_int());
+    @const assert(test_select_representation_text());
+
+    // Serializer generation
+    @const assert(test_generate_serializer_struct());
+
+    // Buffer size calculation
+    @const assert(test_optimal_buffer_size());
+
+    // Context ordering
+    @const assert(test_context_order_1());
+    @const assert(test_context_order_2());
+
+    // Combined helpers
+    @const assert(test_combined_info());
+}

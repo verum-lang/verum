@@ -1,0 +1,503 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, parser-combinator, digit, letter, sequence, choice
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Parser combinator simulation — digit, letter, sequence,
+// choice combinators. Input is an array of character codes; parsers return
+// (success, value, new_position) triples.
+
+// =============================================================================
+// Array infrastructure: input string as array of char codes
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 } else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 } else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+// Input: array of char codes + length
+type Input is { chars: Arr16, len: Int };
+
+// Parser result: ok=1 success, value=parsed value, pos=new position
+type ParseRes is { ok: Int, value: Int, pos: Int };
+
+fn parse_ok(value: Int, pos: Int) -> ParseRes {
+    ParseRes { ok: 1, value: value, pos: pos }
+}
+
+fn parse_fail(pos: Int) -> ParseRes {
+    ParseRes { ok: 0, value: 0, pos: pos }
+}
+
+// =============================================================================
+// Character classification (using ASCII codes)
+// '0'=48, '9'=57, 'a'=97, 'z'=122, 'A'=65, 'Z'=90
+// ' '=32, '+'=43, '-'=45, '*'=42, '('=40, ')'=41
+// =============================================================================
+
+fn is_digit_code(c: Int) -> Int {
+    if c >= 48 && c <= 57 { 1 } else { 0 }
+}
+
+fn is_lower_code(c: Int) -> Int {
+    if c >= 97 && c <= 122 { 1 } else { 0 }
+}
+
+fn is_upper_code(c: Int) -> Int {
+    if c >= 65 && c <= 90 { 1 } else { 0 }
+}
+
+fn is_alpha_code(c: Int) -> Int {
+    if is_lower_code(c) == 1 || is_upper_code(c) == 1 { 1 } else { 0 }
+}
+
+fn digit_value(c: Int) -> Int {
+    c - 48
+}
+
+// =============================================================================
+// Basic parsers
+// =============================================================================
+
+// Parse a single digit, return its numeric value (0-9)
+fn parse_digit(inp: Input, pos: Int) -> ParseRes {
+    if pos >= inp.len {
+        return parse_fail(pos);
+    }
+    let c = a16_get(inp.chars, pos);
+    if is_digit_code(c) == 1 {
+        parse_ok(digit_value(c), pos + 1)
+    } else {
+        parse_fail(pos)
+    }
+}
+
+// Parse a single letter, return its ASCII code
+fn parse_letter(inp: Input, pos: Int) -> ParseRes {
+    if pos >= inp.len {
+        return parse_fail(pos);
+    }
+    let c = a16_get(inp.chars, pos);
+    if is_alpha_code(c) == 1 {
+        parse_ok(c, pos + 1)
+    } else {
+        parse_fail(pos)
+    }
+}
+
+// Parse a specific character
+fn parse_char(inp: Input, pos: Int, expected: Int) -> ParseRes {
+    if pos >= inp.len {
+        return parse_fail(pos);
+    }
+    let c = a16_get(inp.chars, pos);
+    if c == expected {
+        parse_ok(c, pos + 1)
+    } else {
+        parse_fail(pos)
+    }
+}
+
+// Parse a multi-digit number (greedy)
+fn parse_number(inp: Input, pos: Int) -> ParseRes {
+    let first = parse_digit(inp, pos);
+    if first.ok == 0 {
+        return parse_fail(pos);
+    }
+    let mut value = first.value;
+    let mut cur = first.pos;
+    let mut cont = 1;
+    while cont == 1 {
+        let nx = parse_digit(inp, cur);
+        if nx.ok == 1 {
+            value = value * 10 + nx.value;
+            cur = nx.pos;
+        } else {
+            cont = 0;
+        }
+    }
+    parse_ok(value, cur)
+}
+
+// Parse one or more letters (return count of letters)
+fn parse_word_len(inp: Input, pos: Int) -> ParseRes {
+    let first = parse_letter(inp, pos);
+    if first.ok == 0 {
+        return parse_fail(pos);
+    }
+    let mut cnt = 1;
+    let mut cur = first.pos;
+    let mut cont = 1;
+    while cont == 1 {
+        let nx = parse_letter(inp, cur);
+        if nx.ok == 1 {
+            cnt = cnt + 1;
+            cur = nx.pos;
+        } else {
+            cont = 0;
+        }
+    }
+    parse_ok(cnt, cur)
+}
+
+// Skip whitespace
+fn skip_spaces(inp: Input, pos: Int) -> Int {
+    let mut cur = pos;
+    let mut cont = 1;
+    while cont == 1 && cur < inp.len {
+        if a16_get(inp.chars, cur) == 32 {
+            cur = cur + 1;
+        } else {
+            cont = 0;
+        }
+    }
+    cur
+}
+
+// =============================================================================
+// Combinator: sequence of two number parsers with an operator between them
+// Returns: result of applying operator. Operators: +43 -45 *42
+// =============================================================================
+
+fn parse_binop(inp: Input, pos: Int) -> ParseRes {
+    let left = parse_number(inp, pos);
+    if left.ok == 0 {
+        return parse_fail(pos);
+    }
+    let op_pos = skip_spaces(inp, left.pos);
+    if op_pos >= inp.len {
+        return parse_fail(pos);
+    }
+    let op = a16_get(inp.chars, op_pos);
+    let right_start = skip_spaces(inp, op_pos + 1);
+    let right = parse_number(inp, right_start);
+    if right.ok == 0 {
+        return parse_fail(pos);
+    }
+    let val = if op == 43 { left.value + right.value }
+              else if op == 45 { left.value - right.value }
+              else if op == 42 { left.value * right.value }
+              else { 0 };
+    parse_ok(val, right.pos)
+}
+
+// =============================================================================
+// Helper: build input from individual char codes
+// =============================================================================
+
+fn make_input(a: Arr16, len: Int) -> Input {
+    Input { chars: a, len: len }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_parse_single_digit() {
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 53);  // '5'
+    let inp = make_input(chars, 1);
+
+    let r = parse_digit(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 5);
+    assert_eq(r.pos, 1);
+}
+
+fn test_parse_digit_fail() {
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 97);  // 'a'
+    let inp = make_input(chars, 1);
+
+    let r = parse_digit(inp, 0);
+    assert_eq(r.ok, 0);
+}
+
+fn test_parse_letter() {
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 104);  // 'h'
+    let inp = make_input(chars, 1);
+
+    let r = parse_letter(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 104);
+    assert_eq(r.pos, 1);
+}
+
+fn test_parse_letter_fail_on_digit() {
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 50);  // '2'
+    let inp = make_input(chars, 1);
+
+    let r = parse_letter(inp, 0);
+    assert_eq(r.ok, 0);
+}
+
+fn test_parse_number_single() {
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 55);  // '7'
+    let inp = make_input(chars, 1);
+
+    let r = parse_number(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 7);
+}
+
+fn test_parse_number_multi() {
+    // "123"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 49);  // '1'
+    chars = a16_set(chars, 1, 50);  // '2'
+    chars = a16_set(chars, 2, 51);  // '3'
+    let inp = make_input(chars, 3);
+
+    let r = parse_number(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 123);
+    assert_eq(r.pos, 3);
+}
+
+fn test_parse_number_followed_by_letter() {
+    // "42x"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 52);   // '4'
+    chars = a16_set(chars, 1, 50);   // '2'
+    chars = a16_set(chars, 2, 120);  // 'x'
+    let inp = make_input(chars, 3);
+
+    let r = parse_number(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 42);
+    assert_eq(r.pos, 2);  // stops before 'x'
+}
+
+fn test_parse_word_len() {
+    // "hello"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 104);  // 'h'
+    chars = a16_set(chars, 1, 101);  // 'e'
+    chars = a16_set(chars, 2, 108);  // 'l'
+    chars = a16_set(chars, 3, 108);  // 'l'
+    chars = a16_set(chars, 4, 111);  // 'o'
+    let inp = make_input(chars, 5);
+
+    let r = parse_word_len(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 5);  // 5 letters
+    assert_eq(r.pos, 5);
+}
+
+fn test_parse_char() {
+    // "+"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 43);  // '+'
+    let inp = make_input(chars, 1);
+
+    let r = parse_char(inp, 0, 43);
+    assert_eq(r.ok, 1);
+
+    let r2 = parse_char(inp, 0, 45);  // '-'
+    assert_eq(r2.ok, 0);
+}
+
+fn test_skip_spaces() {
+    // "  42"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 32);  // ' '
+    chars = a16_set(chars, 1, 32);  // ' '
+    chars = a16_set(chars, 2, 52);  // '4'
+    chars = a16_set(chars, 3, 50);  // '2'
+    let inp = make_input(chars, 4);
+
+    let pos = skip_spaces(inp, 0);
+    assert_eq(pos, 2);
+}
+
+fn test_binop_add() {
+    // "3 + 5"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 51);  // '3'
+    chars = a16_set(chars, 1, 32);  // ' '
+    chars = a16_set(chars, 2, 43);  // '+'
+    chars = a16_set(chars, 3, 32);  // ' '
+    chars = a16_set(chars, 4, 53);  // '5'
+    let inp = make_input(chars, 5);
+
+    let r = parse_binop(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 8);
+}
+
+fn test_binop_mul() {
+    // "6 * 7"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 54);  // '6'
+    chars = a16_set(chars, 1, 32);  // ' '
+    chars = a16_set(chars, 2, 42);  // '*'
+    chars = a16_set(chars, 3, 32);  // ' '
+    chars = a16_set(chars, 4, 55);  // '7'
+    let inp = make_input(chars, 5);
+
+    let r = parse_binop(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 42);
+}
+
+fn test_binop_sub() {
+    // "10 - 3"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 49);  // '1'
+    chars = a16_set(chars, 1, 48);  // '0'
+    chars = a16_set(chars, 2, 32);  // ' '
+    chars = a16_set(chars, 3, 45);  // '-'
+    chars = a16_set(chars, 4, 32);  // ' '
+    chars = a16_set(chars, 5, 51);  // '3'
+    let inp = make_input(chars, 6);
+
+    let r = parse_binop(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 7);
+}
+
+fn test_choice_digit_or_letter() {
+    // Choice: try digit first, if fails try letter
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 97);  // 'a'
+    let inp = make_input(chars, 1);
+
+    let r1 = parse_digit(inp, 0);
+    if r1.ok == 0 {
+        let r2 = parse_letter(inp, 0);
+        assert_eq(r2.ok, 1);
+        assert_eq(r2.value, 97);
+    } else {
+        assert(false);
+    }
+}
+
+fn test_sequence_digit_letter() {
+    // Sequence: digit then letter "3a"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 51);  // '3'
+    chars = a16_set(chars, 1, 97);  // 'a'
+    let inp = make_input(chars, 2);
+
+    let r1 = parse_digit(inp, 0);
+    assert_eq(r1.ok, 1);
+    assert_eq(r1.value, 3);
+
+    let r2 = parse_letter(inp, r1.pos);
+    assert_eq(r2.ok, 1);
+    assert_eq(r2.value, 97);
+    assert_eq(r2.pos, 2);
+}
+
+fn test_parse_at_end() {
+    let inp = make_input(a16_zeros(), 0);
+    let r1 = parse_digit(inp, 0);
+    assert_eq(r1.ok, 0);
+    let r2 = parse_letter(inp, 0);
+    assert_eq(r2.ok, 0);
+    let r3 = parse_number(inp, 0);
+    assert_eq(r3.ok, 0);
+}
+
+fn test_parse_large_number() {
+    // "9876"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 57);  // '9'
+    chars = a16_set(chars, 1, 56);  // '8'
+    chars = a16_set(chars, 2, 55);  // '7'
+    chars = a16_set(chars, 3, 54);  // '6'
+    let inp = make_input(chars, 4);
+
+    let r = parse_number(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 9876);
+}
+
+fn test_binop_large() {
+    // "25 + 75"
+    let mut chars = a16_zeros();
+    chars = a16_set(chars, 0, 50);  // '2'
+    chars = a16_set(chars, 1, 53);  // '5'
+    chars = a16_set(chars, 2, 32);  // ' '
+    chars = a16_set(chars, 3, 43);  // '+'
+    chars = a16_set(chars, 4, 32);  // ' '
+    chars = a16_set(chars, 5, 55);  // '7'
+    chars = a16_set(chars, 6, 53);  // '5'
+    let inp = make_input(chars, 7);
+
+    let r = parse_binop(inp, 0);
+    assert_eq(r.ok, 1);
+    assert_eq(r.value, 100);
+}
+
+fn main() -> Int {
+    test_parse_single_digit();
+    test_parse_digit_fail();
+    test_parse_letter();
+    test_parse_letter_fail_on_digit();
+    test_parse_number_single();
+    test_parse_number_multi();
+    test_parse_number_followed_by_letter();
+    test_parse_word_len();
+    test_parse_char();
+    test_skip_spaces();
+    test_binop_add();
+    test_binop_mul();
+    test_binop_sub();
+    test_choice_digit_or_letter();
+    test_sequence_digit_letter();
+    test_parse_at_end();
+    test_parse_large_number();
+    test_binop_large();
+    print("[OK] 344_interp_parser_combinator");
+    0
+}

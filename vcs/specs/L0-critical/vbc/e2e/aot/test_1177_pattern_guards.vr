@@ -1,0 +1,130 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: match, pattern, guard, e2e
+// @description: Test pattern matching with guards and nested patterns
+
+type Expr is
+    | Lit(Int)
+    | Add(Heap<Expr>, Heap<Expr>)
+    | Neg(Heap<Expr>);
+
+fn eval(e: Expr) -> Int {
+    match e {
+        Expr.Lit(n) => n,
+        Expr.Add(l, r) => eval(*l) + eval(*r),
+        Expr.Neg(inner) => 0 - eval(*inner),
+    }
+}
+
+fn classify(n: Int) -> Text {
+    match n {
+        0 => "zero",
+        x if x > 0 => "positive",
+        _ => "negative",
+    }
+}
+
+fn fizzbuzz(n: Int) -> Text {
+    if n % 15 == 0 {
+        "fizzbuzz"
+    } else if n % 3 == 0 {
+        "fizz"
+    } else if n % 5 == 0 {
+        "buzz"
+    } else {
+        f"{n}"
+    }
+}
+
+type Command is
+    | Quit
+    | Move(Int, Int)
+    | Scale(Int)
+    | Color(Int, Int, Int);
+
+fn process(cmd: Command) -> Text {
+    match cmd {
+        Command.Quit => "quit",
+        Command.Move(x, y) => f"move({x},{y})",
+        Command.Scale(f) => f"scale({f})",
+        Command.Color(r, g, b) => f"color({r},{g},{b})",
+    }
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    // Test 1: Recursive expression evaluation
+    let e = Expr.Add(
+        Heap(Expr.Lit(10)),
+        Heap(Expr.Neg(Heap(Expr.Lit(3))))
+    );
+    let result = eval(e);
+    if result != 7 {
+        print(f"FAIL: eval expected 7, got {result}");
+        failures = failures + 1;
+    } else {
+        print("  expr_eval: OK");
+    }
+
+    // Test 2: Pattern guards
+    if classify(5) != "positive" {
+        print("FAIL: classify positive");
+        failures = failures + 1;
+    }
+    if classify(0) != "zero" {
+        print("FAIL: classify zero");
+        failures = failures + 1;
+    }
+    if classify(-3) != "negative" {
+        print("FAIL: classify negative");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  guards: OK");
+    }
+
+    // Test 3: FizzBuzz pattern
+    if fizzbuzz(15) != "fizzbuzz" {
+        print(f"FAIL: fizzbuzz(15) = {fizzbuzz(15)}");
+        failures = failures + 1;
+    }
+    if fizzbuzz(9) != "fizz" {
+        print(f"FAIL: fizzbuzz(9) = {fizzbuzz(9)}");
+        failures = failures + 1;
+    }
+    if fizzbuzz(10) != "buzz" {
+        print(f"FAIL: fizzbuzz(10) = {fizzbuzz(10)}");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  fizzbuzz: OK");
+    }
+
+    // Test 4: Multi-variant command dispatch
+    if process(Command.Quit) != "quit" {
+        print("FAIL: quit");
+        failures = failures + 1;
+    }
+    if process(Command.Move(10, 20)) != "move(10,20)" {
+        print(f"FAIL: move = {process(Command.Move(10, 20))}");
+        failures = failures + 1;
+    }
+    if process(Command.Scale(2)) != "scale(2)" {
+        print(f"FAIL: scale = {process(Command.Scale(2))}");
+        failures = failures + 1;
+    }
+    if process(Command.Color(255, 128, 0)) != "color(255,128,0)" {
+        print("FAIL: color");
+        failures = failures + 1;
+    }
+    if failures == 0 {
+        print("  commands: OK");
+    }
+
+    if failures == 0 {
+        print("All pattern guard tests passed");
+    }
+    failures
+}

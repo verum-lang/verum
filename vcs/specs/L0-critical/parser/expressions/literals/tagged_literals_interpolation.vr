@@ -1,0 +1,301 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, interpolation
+
+// Tagged Literal Interpolation Tests
+// Tests for ${expr} interpolation syntax in tagged literals
+// Spec: grammar/verum.ebnf Section 1.5.2.1 - Tagged Interpolation
+// Spec: docs/detailed/02-core-semantics.md Section 2.4.4
+
+// ============================================================================
+// SECTION 1: Basic Interpolation
+// ============================================================================
+
+fn test_basic_string_interpolation() {
+    let name = "Alice";
+    let greeting = json#"{ \"name\": \"${name}\" }";
+}
+
+fn test_numeric_interpolation() {
+    let age = 30;
+    let data = json#"{ \"age\": ${age} }";
+}
+
+fn test_expression_interpolation() {
+    let x = 10;
+    let y = 20;
+    let result = json#"{ \"sum\": ${x + y} }";
+}
+
+// ============================================================================
+// SECTION 2: Multiline Interpolation
+// ============================================================================
+
+fn test_multiline_json_interpolation() {
+    let name = "Alice";
+    let age = 30;
+    let city = "New York";
+
+    let user = json#"""
+    {
+        name: "${name}",
+        age: ${age},
+        city: "${city}"
+    }
+    """;
+}
+
+fn test_multiline_yaml_interpolation() {
+    let host = "localhost";
+    let port = 8080;
+
+    let config = yaml#"""
+    server:
+      host: ${host}
+      port: ${port}
+    """;
+}
+
+fn test_multiline_sql_interpolation() {
+    let table = "users";
+    let status = "active";
+
+    let query = sql#"""
+    SELECT * FROM ${table}
+    WHERE status = '${status}'
+    """;
+}
+
+// ============================================================================
+// SECTION 3: Complex Expressions
+// ============================================================================
+
+fn test_method_call_interpolation() {
+    let name = "alice";
+    let data = json#"{ \"name\": \"${name.to_uppercase()}\" }";
+}
+
+fn test_field_access_interpolation() {
+    type User is { name: Text, age: Int };
+    let user = User { name: "Alice", age: 30 };
+
+    let json_data = json#"""
+    {
+        userName: "${user.name}",
+        userAge: ${user.age}
+    }
+    """;
+}
+
+fn test_function_call_interpolation() {
+    fn get_timestamp() -> Text { "2025-01-04T10:30:00Z" }
+
+    let data = json#"""
+    {
+        created: "${get_timestamp()}"
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 4: Multiple Interpolations
+// ============================================================================
+
+fn test_multiple_interpolations() {
+    let a = "first";
+    let b = "second";
+    let c = "third";
+
+    let result = json#"""
+    {
+        one: "${a}",
+        two: "${b}",
+        three: "${c}"
+    }
+    """;
+}
+
+fn test_repeated_variable() {
+    let name = "Alice";
+
+    let result = json#"""
+    {
+        greeting: "Hello, ${name}!",
+        farewell: "Goodbye, ${name}!"
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 5: Nested Data Structures
+// ============================================================================
+
+fn test_interpolation_in_arrays() {
+    let items = ["apple", "banana", "cherry"];
+
+    // Note: This tests parsing, not runtime evaluation
+    let data = json#"""
+    {
+        count: ${items.len()},
+        first: "${items[0]}"
+    }
+    """;
+}
+
+fn test_interpolation_in_nested_objects() {
+    let host = "localhost";
+    let port = 5432;
+    let db = "myapp";
+
+    let config = json#"""
+    {
+        database: {
+            connection: {
+                host: "${host}",
+                port: ${port},
+                name: "${db}"
+            }
+        }
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 6: Different Format Tags with Interpolation
+// ============================================================================
+
+fn test_yaml_interpolation() {
+    let env = "production";
+    let config = yaml#"""
+    environment: ${env}
+    debug: false
+    """;
+}
+
+fn test_toml_interpolation() {
+    let version = "1.0.0";
+    let config = toml#"""
+    [package]
+    version = "${version}"
+    """;
+}
+
+fn test_xml_interpolation() {
+    let id = "123";
+    let name = "Product";
+    let xml_data = xml#"""
+    <item id="${id}">
+        <name>${name}</name>
+    </item>
+    """;
+}
+
+fn test_html_interpolation() {
+    let title = "My Page";
+    let content = "Welcome!";
+    let html_page = html#"""
+    <!DOCTYPE html>
+    <html>
+        <head><title>${title}</title></head>
+        <body><h1>${content}</h1></body>
+    </html>
+    """;
+}
+
+// ============================================================================
+// SECTION 7: SQL with Safe Parameterization
+// ============================================================================
+
+fn test_sql_parameterized() {
+    let user_id = 42;
+    let status = "active";
+
+    let query = sql#"""
+    SELECT * FROM users
+    WHERE id = ${user_id}
+    AND status = '${status}'
+    """;
+}
+
+fn test_sql_join_interpolation() {
+    let table1 = "users";
+    let table2 = "orders";
+
+    let query = sql#"""
+    SELECT u.name, o.total
+    FROM ${table1} u
+    JOIN ${table2} o ON u.id = o.user_id
+    """;
+}
+
+// ============================================================================
+// SECTION 8: GraphQL Interpolation
+// ============================================================================
+
+fn test_graphql_variable() {
+    let user_id = "123";
+
+    let query = gql#"""
+    query {
+        user(id: "${user_id}") {
+            name
+            email
+        }
+    }
+    """;
+}
+
+fn test_graphql_dynamic_fields() {
+    let include_email = true;
+
+    let query = gql#"""
+    query GetUser {
+        user {
+            name
+            ${if include_email { "email" } else { "" }}
+        }
+    }
+    """;
+}
+
+// ============================================================================
+// SECTION 9: Single-line Interpolation
+// ============================================================================
+
+fn test_single_line_interpolation() {
+    let x = 42;
+    let result = json#"{ \"value\": ${x} }";
+}
+
+fn test_single_line_multiple() {
+    let a = 1;
+    let b = 2;
+    let result = json#"{ \"a\": ${a}, \"b\": ${b} }";
+}
+
+// ============================================================================
+// SECTION 10: Edge Cases
+// ============================================================================
+
+fn test_empty_interpolation_string() {
+    let empty = "";
+    let result = json#"{ \"value\": \"${empty}\" }";
+}
+
+fn test_interpolation_with_escapes() {
+    let text = "Hello\nWorld";
+    let result = json#"{ \"text\": \"${text}\" }";
+}
+
+fn test_interpolation_with_special_chars() {
+    let special = "quote: \" and backslash: \\";
+    let result = json#"{ \"special\": \"${special}\" }";
+}
+
+fn test_adjacent_interpolations() {
+    let a = "foo";
+    let b = "bar";
+    let result = json#"{ \"combined\": \"${a}${b}\" }";
+}
+

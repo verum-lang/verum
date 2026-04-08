@@ -1,0 +1,313 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, monte-carlo, prng, lcg, simulation
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for Monte Carlo simulation using LCG PRNG.
+// Covers: LCG random number generation, pi estimation,
+// random walk simulation, and statistical tests.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// ========== LCG PRNG ==========
+// Linear Congruential Generator: next = (a * state + c) mod m
+// Parameters from Numerical Recipes: a=1664525, c=1013904223, m=2^32
+// We use m = 1000000007 (large prime) to avoid overflow issues with 2^32
+
+fn lcg_next(state: Int) -> Int {
+    let a = 1664525;
+    let c = 1013904223;
+    let m = 1000000007;
+    let raw = (a * (state % 100000) + c) % m;
+    abs_val(raw)
+}
+
+// Generate a random number in [0, range)
+fn lcg_range(state: Int, range: Int) -> Int {
+    abs_val(state) % range
+}
+
+fn test_lcg_deterministic() -> Int {
+    let s0 = 42;
+    let s1 = lcg_next(s0);
+    let s2 = lcg_next(s1);
+    let s1b = lcg_next(s0);
+    // Deterministic: same seed -> same sequence
+    assert_eq(s1, s1b);
+    // Different states produce different outputs
+    assert(s1 != s2);
+    0
+}
+
+fn test_lcg_range_valid() -> Int {
+    let mut state = 12345;
+    let mut i = 0;
+    let mut all_in_range = 1;
+    while i < 8 {
+        state = lcg_next(state);
+        let val = lcg_range(state, 100);
+        if val < 0 { all_in_range = 0; }
+        if val >= 100 { all_in_range = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_in_range, 1);
+    0
+}
+
+// ========== Pi Estimation ==========
+// Monte Carlo pi: random points in [0,1000)x[0,1000), check if inside circle
+// Circle radius=1000, centered at origin. Point (x,y) is inside if x^2+y^2 < R^2.
+// pi/4 ≈ (points inside) / (total points)
+// With integer arithmetic: x,y in [0,999], R=1000, check x^2+y^2 < 1000000
+
+fn estimate_pi_scaled(num_samples: Int, seed: Int) -> Int {
+    // Returns pi * 1000 (approximately 3141)
+    let mut state = seed;
+    let mut inside = 0;
+    let mut i = 0;
+    while i < num_samples {
+        state = lcg_next(state);
+        let x = lcg_range(state, 1000);
+        state = lcg_next(state);
+        let y = lcg_range(state, 1000);
+        if x * x + y * y < 1000000 {
+            inside = inside + 1;
+        }
+        i = i + 1;
+    }
+    // pi ≈ 4 * inside / num_samples
+    // pi * 1000 ≈ 4000 * inside / num_samples
+    4000 * inside / num_samples
+}
+
+fn test_pi_estimation() -> Int {
+    // With enough samples, pi*1000 should be roughly 2500-3800
+    // (loose bounds for small sample sizes with simple LCG)
+    let pi_est = estimate_pi_scaled(500, 42);
+    assert(pi_est > 2000);
+    assert(pi_est < 4000);
+    0
+}
+
+// ========== Random Walk ==========
+// 1D random walk: start at 0, each step +1 or -1
+// Return final position
+
+fn random_walk_1d(steps: Int, seed: Int) -> Int {
+    let mut pos = 0;
+    let mut state = seed;
+    let mut i = 0;
+    while i < steps {
+        state = lcg_next(state);
+        if lcg_range(state, 2) == 0 {
+            pos = pos + 1;
+        } else {
+            pos = pos - 1;
+        }
+        i = i + 1;
+    }
+    pos
+}
+
+fn test_random_walk() -> Int {
+    let pos = random_walk_1d(100, 42);
+    // After 100 steps, position should be between -100 and 100
+    assert(pos >= 0 - 100);
+    assert(pos <= 100);
+    // With 50 steps from different seed
+    let pos2 = random_walk_1d(50, 99);
+    assert(pos2 >= 0 - 50);
+    assert(pos2 <= 50);
+    0
+}
+
+// ========== 2D Random Walk ==========
+// Returns (x, y) packed as x * 10000 + y (both shifted by 5000 to be positive)
+
+fn random_walk_2d(steps: Int, seed: Int) -> Int {
+    let mut x = 0;
+    let mut y = 0;
+    let mut state = seed;
+    let mut i = 0;
+    while i < steps {
+        state = lcg_next(state);
+        let dir = lcg_range(state, 4);
+        if dir == 0 { x = x + 1; }
+        else if dir == 1 { x = x - 1; }
+        else if dir == 2 { y = y + 1; }
+        else { y = y - 1; }
+        i = i + 1;
+    }
+    (x + 5000) * 10000 + (y + 5000)
+}
+
+fn test_random_walk_2d() -> Int {
+    let packed = random_walk_2d(200, 77);
+    let x = packed / 10000 - 5000;
+    let y = packed % 10000 - 5000;
+    assert(x >= 0 - 200);
+    assert(x <= 200);
+    assert(y >= 0 - 200);
+    assert(y <= 200);
+    0
+}
+
+// ========== Statistical: Frequency Distribution ==========
+// Generate random numbers in [0,8), count frequency in each bucket
+
+fn frequency_test(num_samples: Int, seed: Int) -> Arr8 {
+    let mut counts = a8_zero();
+    let mut state = seed;
+    let mut i = 0;
+    while i < num_samples {
+        state = lcg_next(state);
+        let bucket = lcg_range(state, 8);
+        let cur = a8_get(counts, bucket);
+        counts = a8_set(counts, bucket, cur + 1);
+        i = i + 1;
+    }
+    counts
+}
+
+fn test_frequency_distribution() -> Int {
+    let counts = frequency_test(800, 42);
+    // With 800 samples in 8 buckets, expected ~100 each
+    // Check no bucket has 0 (very unlikely with working PRNG)
+    let mut i = 0;
+    let mut all_nonzero = 1;
+    while i < 8 {
+        if a8_get(counts, i) == 0 { all_nonzero = 0; }
+        i = i + 1;
+    }
+    assert_eq(all_nonzero, 1);
+    // Total should be 800
+    let mut total = 0;
+    i = 0;
+    while i < 8 {
+        total = total + a8_get(counts, i);
+        i = i + 1;
+    }
+    assert_eq(total, 800);
+    0
+}
+
+// ========== Monte Carlo Integration ==========
+// Estimate integral of f(x) = x^2 from 0 to 10 using random sampling
+// True answer = 10^3 / 3 = 333.33... ≈ 333
+
+fn mc_integrate_x_squared(num_samples: Int, seed: Int) -> Int {
+    // Integral of x^2 from 0 to 10 ≈ (10/N) * sum(f(x_i))
+    // where x_i are random points in [0, 10)
+    // We scale: x_i in [0, 1000), f = x_i^2 / 10000 (to get x^2 for x in [0,10))
+    // sum = sum of (x_i / 100)^2 = sum of x_i^2 / 10000
+    // integral ≈ (10 / N) * sum of (x_i/100)^2
+    //          = 10 * sum(x_i^2) / (N * 10000)
+    let mut state = seed;
+    let mut sum_f = 0;
+    let mut i = 0;
+    while i < num_samples {
+        state = lcg_next(state);
+        let x = lcg_range(state, 1000); // x in [0, 999] representing [0, 9.99]
+        // f(x) = (x/100)^2 = x^2 / 10000
+        // We accumulate x^2 and divide later
+        sum_f = sum_f + (x / 10) * (x / 10);
+        i = i + 1;
+    }
+    // integral ≈ 10 * sum_f / (N * 100)
+    10 * sum_f / (num_samples * 100)
+}
+
+fn test_mc_integration() -> Int {
+    // True value ≈ 333
+    let est = mc_integrate_x_squared(1000, 42);
+    // With loose bounds for MC variance
+    assert(est > 200);
+    assert(est < 500);
+    0
+}
+
+// ========== Shuffling (Fisher-Yates) ==========
+
+fn shuffle(arr: Arr8, n: Int, seed: Int) -> Arr8 {
+    let mut a = arr;
+    let mut state = seed;
+    let mut i = n - 1;
+    while i > 0 {
+        state = lcg_next(state);
+        let j = lcg_range(state, i + 1);
+        // Swap a[i] and a[j]
+        let tmp = a8_get(a, i);
+        a = a8_set(a, i, a8_get(a, j));
+        a = a8_set(a, j, tmp);
+        i = i - 1;
+    }
+    a
+}
+
+fn test_shuffle() -> Int {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let shuffled = shuffle(arr, 8, 42);
+    // Sum should be preserved
+    let mut sum_orig = 0;
+    let mut sum_shuf = 0;
+    let mut i = 0;
+    while i < 8 {
+        sum_orig = sum_orig + a8_get(arr, i);
+        sum_shuf = sum_shuf + a8_get(shuffled, i);
+        i = i + 1;
+    }
+    assert_eq(sum_orig, sum_shuf);
+    assert_eq(sum_orig, 36);
+    0
+}
+
+fn test_shuffle_deterministic() -> Int {
+    let arr = Arr8 { a0: 10, a1: 20, a2: 30, a3: 40, a4: 50, a5: 60, a6: 70, a7: 80 };
+    let s1 = shuffle(arr, 8, 42);
+    let s2 = shuffle(arr, 8, 42);
+    // Same seed => same shuffle
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(a8_get(s1, i), a8_get(s2, i));
+        i = i + 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    test_lcg_deterministic();
+    test_lcg_range_valid();
+    test_pi_estimation();
+    test_random_walk();
+    test_random_walk_2d();
+    test_frequency_distribution();
+    test_mc_integration();
+    test_shuffle();
+    test_shuffle_deterministic();
+    print("All Monte Carlo tests passed!");
+    0
+}

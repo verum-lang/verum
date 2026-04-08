@@ -1,0 +1,234 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, treap, bst, priority
+// @timeout: 30000
+
+// BST operations on a sorted array (simulating tree traversal patterns)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// BST stored in array (like a binary heap)
+// Node i: left child = 2i+1, right child = 2i+2
+// 0 means empty (no value stored)
+// Values are stored as value+1 so that 0 means empty
+
+fn bst_val(tree: Arr8, i: Int) -> Int {
+    if i >= 8 { return 0; }
+    get8(tree, i)
+}
+
+fn bst_insert(tree: Arr8, val: Int) -> Arr8 {
+    let encoded = val + 1;
+    let mut t = tree;
+    let mut i = 0;
+    let mut safety = 0;
+    while safety < 8 {
+        if i >= 8 { return t; } // no room
+        let cur = get8(t, i);
+        if cur == 0 {
+            t = set8(t, i, encoded);
+            return t;
+        }
+        if val < cur - 1 {
+            i = 2 * i + 1; // left
+        } else if val > cur - 1 {
+            i = 2 * i + 2; // right
+        } else {
+            return t; // duplicate
+        }
+        safety = safety + 1;
+    }
+    t
+}
+
+fn bst_find(tree: Arr8, val: Int) -> Int {
+    let mut i = 0;
+    let mut safety = 0;
+    while safety < 8 {
+        if i >= 8 { return 0; }
+        let cur = get8(tree, i);
+        if cur == 0 { return 0; }
+        if val == cur - 1 { return 1; }
+        if val < cur - 1 { i = 2 * i + 1; } else { i = 2 * i + 2; }
+        safety = safety + 1;
+    }
+    0
+}
+
+// Count nodes in BST
+fn bst_count(tree: Arr8) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 8 {
+        if get8(tree, i) != 0 { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Find minimum (leftmost)
+fn bst_min(tree: Arr8) -> Int {
+    let mut i = 0;
+    let mut safety = 0;
+    while safety < 8 {
+        if i >= 8 { return -1; }
+        let cur = get8(tree, i);
+        if cur == 0 { return -1; }
+        let left = 2 * i + 1;
+        if left >= 8 { return cur - 1; }
+        if get8(tree, left) == 0 { return cur - 1; }
+        i = left;
+        safety = safety + 1;
+    }
+    -1
+}
+
+// Find maximum (rightmost)
+fn bst_max(tree: Arr8) -> Int {
+    let mut i = 0;
+    let mut safety = 0;
+    while safety < 8 {
+        if i >= 8 { return -1; }
+        let cur = get8(tree, i);
+        if cur == 0 { return -1; }
+        let right = 2 * i + 2;
+        if right >= 8 { return cur - 1; }
+        if get8(tree, right) == 0 { return cur - 1; }
+        i = right;
+        safety = safety + 1;
+    }
+    -1
+}
+
+// Inorder traversal sum
+@allow(unbounded_recursion)
+fn inorder_sum_helper(tree: Arr8, i: Int) -> Int {
+    if i >= 8 { return 0; }
+    let cur = get8(tree, i);
+    if cur == 0 { return 0; }
+    inorder_sum_helper(tree, 2 * i + 1) + (cur - 1) + inorder_sum_helper(tree, 2 * i + 2)
+}
+
+fn inorder_sum(tree: Arr8) -> Int {
+    inorder_sum_helper(tree, 0)
+}
+
+// Tree height
+@allow(unbounded_recursion)
+fn tree_height_helper(tree: Arr8, i: Int) -> Int {
+    if i >= 8 { return 0; }
+    if get8(tree, i) == 0 { return 0; }
+    let lh = tree_height_helper(tree, 2 * i + 1);
+    let rh = tree_height_helper(tree, 2 * i + 2);
+    1 + (if lh > rh { lh } else { rh })
+}
+
+fn tree_height(tree: Arr8) -> Int {
+    tree_height_helper(tree, 0)
+}
+
+fn test_insert_find() -> Int {
+    let mut tree = zeros();
+    tree = bst_insert(tree, 5);
+    tree = bst_insert(tree, 3);
+    tree = bst_insert(tree, 7);
+    tree = bst_insert(tree, 1);
+
+    assert_eq(bst_find(tree, 5), 1);
+    assert_eq(bst_find(tree, 3), 1);
+    assert_eq(bst_find(tree, 7), 1);
+    assert_eq(bst_find(tree, 1), 1);
+    assert_eq(bst_find(tree, 4), 0);
+    assert_eq(bst_find(tree, 0), 0);
+    1
+}
+
+fn test_count() -> Int {
+    let mut tree = zeros();
+    assert_eq(bst_count(tree), 0);
+    tree = bst_insert(tree, 10);
+    assert_eq(bst_count(tree), 1);
+    tree = bst_insert(tree, 5);
+    tree = bst_insert(tree, 15);
+    assert_eq(bst_count(tree), 3);
+    // Duplicate doesn't increase count
+    tree = bst_insert(tree, 10);
+    assert_eq(bst_count(tree), 3);
+    1
+}
+
+fn test_min_max() -> Int {
+    let mut tree = zeros();
+    tree = bst_insert(tree, 10);
+    tree = bst_insert(tree, 5);
+    tree = bst_insert(tree, 15);
+    tree = bst_insert(tree, 3);
+    assert_eq(bst_min(tree), 3);
+    assert_eq(bst_max(tree), 15);
+    1
+}
+
+fn test_inorder_sum() -> Int {
+    let mut tree = zeros();
+    tree = bst_insert(tree, 10);
+    tree = bst_insert(tree, 5);
+    tree = bst_insert(tree, 15);
+    assert_eq(inorder_sum(tree), 30); // 5 + 10 + 15
+    1
+}
+
+fn test_height() -> Int {
+    let mut tree = zeros();
+    assert_eq(tree_height(tree), 0);
+    tree = bst_insert(tree, 10);
+    assert_eq(tree_height(tree), 1);
+    tree = bst_insert(tree, 5);
+    tree = bst_insert(tree, 15);
+    assert_eq(tree_height(tree), 2);
+    tree = bst_insert(tree, 3);
+    assert_eq(tree_height(tree), 3);
+    1
+}
+
+fn test_single_node() -> Int {
+    let mut tree = zeros();
+    tree = bst_insert(tree, 42);
+    assert_eq(bst_find(tree, 42), 1);
+    assert_eq(bst_min(tree), 42);
+    assert_eq(bst_max(tree), 42);
+    assert_eq(tree_height(tree), 1);
+    assert_eq(inorder_sum(tree), 42);
+    1
+}
+
+fn main() -> Int {
+    test_insert_find();
+    test_count();
+    test_min_max();
+    test_inorder_sum();
+    test_height();
+    test_single_node();
+    print("[OK] 554_treap_aot");
+    0
+}

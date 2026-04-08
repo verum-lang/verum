@@ -1,0 +1,182 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 30ns per deallocation (small), < 100ns (large)
+// @tags: memory, deallocation, performance
+
+/// Benchmark for memory deallocation performance
+///
+/// Tests deallocation scenarios:
+/// - CBGR-managed deallocation
+/// - Shared (reference counted) deallocation
+/// - Arena bulk deallocation
+/// - Drop cascade patterns
+
+module benchmarks.micro.deallocation
+
+using [Benchmark, Memory]
+
+/// Simple deallocation of small objects
+fn benchmark_dealloc_small() {
+    let allocations: List<Heap<SmallStruct>> = list![];
+
+    // Pre-allocate
+    for _ in 0..100_000 {
+        allocations.push(Heap.alloc(SmallStruct {
+            a: 1, b: 2, c: 3.14, d: true,
+        }));
+    }
+
+    // Measure deallocation
+    for alloc in allocations {
+        drop(alloc);  // Explicit deallocation
+    }
+}
+
+type SmallStruct is {
+    a: Int32,
+    b: Int32,
+    c: Float64,
+    d: Bool,
+};
+
+/// Deallocation of large objects
+fn benchmark_dealloc_large() {
+    let allocations: List<Heap<List<Int>>> = list![];
+
+    for _ in 0..1_000 {
+        allocations.push(Heap.alloc(list![0; 262_144]));  // 1MB each
+    }
+
+    for alloc in allocations {
+        drop(alloc);
+    }
+}
+
+/// Cascade deallocation (nested structures)
+fn benchmark_dealloc_cascade() {
+    type Node is {
+        value: Int,
+        children: List<Heap<Node>>,
+    };
+
+    fn create_tree(depth: Int) -> Heap<Node> {
+        if depth == 0 {
+            Heap.alloc(Node { value: depth, children: list![] })
+        } else {
+            Heap.alloc(Node {
+                value: depth,
+                children: list![
+                    create_tree(depth - 1),
+                    create_tree(depth - 1),
+                ],
+            })
+        }
+    }
+
+    for _ in 0..1_000 {
+        let tree = create_tree(10);  // 2^10 = 1024 nodes
+        drop(tree);  // Cascading deallocation
+    }
+}
+
+/// Shared (reference counted) deallocation
+fn benchmark_dealloc_shared() {
+    let shared = Shared.new(list![1, 2, 3, 4, 5]);
+    let clones: List<Shared<List<Int>>> = list![];
+
+    for _ in 0..10_000 {
+        clones.push(shared.clone());
+    }
+
+    // Measure reference count decrement
+    for clone in clones {
+        drop(clone);  // Decrement refcount
+    }
+
+    // Final drop deallocates
+    drop(shared);
+}
+
+/// Arena bulk deallocation
+fn benchmark_dealloc_arena_bulk() {
+    for _ in 0..100 {
+        let arena = Arena.new(10 * 1024 * 1024);  // 10MB arena
+
+        for _ in 0..100_000 {
+            let _ = arena.alloc(SmallStruct {
+                a: 1, b: 2, c: 3.14, d: true,
+            });
+        }
+
+        // Single O(1) deallocation
+        drop(arena);
+    }
+}
+
+/// LIFO deallocation pattern (stack-like)
+fn benchmark_dealloc_lifo() {
+    let mut stack: List<Heap<SmallStruct>> = list![];
+
+    for _ in 0..10 {
+        // Push phase
+        for _ in 0..10_000 {
+            stack.push(Heap.alloc(SmallStruct {
+                a: 1, b: 2, c: 3.14, d: true,
+            }));
+        }
+
+        // Pop phase (LIFO order)
+        while let Some(item) = stack.pop() {
+            drop(item);
+        }
+    }
+}
+
+/// Random deallocation pattern
+fn benchmark_dealloc_random() {
+    let mut allocations: List<Heap<SmallStruct>> = list![];
+
+    for _ in 0..10_000 {
+        allocations.push(Heap.alloc(SmallStruct {
+            a: 1, b: 2, c: 3.14, d: true,
+        }));
+    }
+
+    // Shuffle and deallocate in random order
+    allocations.shuffle();
+
+    for alloc in allocations {
+        drop(alloc);
+    }
+}
+
+/// Deallocation with finalizers
+fn benchmark_dealloc_with_finalizer() {
+    type WithFinalizer is {
+        data: List<Int>,
+    };
+
+    implement Drop for WithFinalizer {
+        fn drop(&mut self) {
+            // Custom cleanup logic
+            self.data.clear();
+        }
+    }
+
+    for _ in 0..10_000 {
+        let obj = Heap.alloc(WithFinalizer {
+            data: list![1, 2, 3, 4, 5],
+        });
+        drop(obj);  // Runs finalizer
+    }
+}
+
+/// Generation epoch recycling
+fn benchmark_dealloc_generation_recycle() {
+    // Test that generation IDs are properly recycled
+    for _ in 0..1_000_000 {
+        let obj = Heap.alloc(42);
+        drop(obj);  // Generation should be recycled
+    }
+}

@@ -1,0 +1,15 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "a,b,c";
+    let parts = s.split(",");
+    let n = parts.len();
+    print(f"parts len = {n}");
+    if n != 3 {
+        print("FAIL: expected 3 parts");
+        return 1;
+    }
+    0
+}

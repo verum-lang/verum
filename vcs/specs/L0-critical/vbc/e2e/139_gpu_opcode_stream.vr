@@ -1,0 +1,177 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, gpu, stream
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU stream simulation — create, queue operations, sync, multi-stream ordering
+
+// ============================================================================
+// GpuStream: Simulated compute stream with state tracking
+// ============================================================================
+
+type GpuStream is {
+    id: Int,
+    ops_queued: Int,
+    synced: Int,
+    total_ops: Int
+};
+
+fn stream_create(stream_id: Int) -> GpuStream {
+    GpuStream { id: stream_id, ops_queued: 0, synced: 1, total_ops: 0 }
+}
+
+fn stream_enqueue(s: GpuStream) -> GpuStream {
+    GpuStream {
+        id: s.id,
+        ops_queued: s.ops_queued + 1,
+        synced: 0,
+        total_ops: s.total_ops + 1
+    }
+}
+
+fn stream_enqueue_n(s: GpuStream, n: Int) -> GpuStream {
+    let mut st = s;
+    let mut i = 0;
+    while i < n {
+        st = stream_enqueue(st);
+        i = i + 1;
+    }
+    st
+}
+
+fn stream_sync(s: GpuStream) -> GpuStream {
+    GpuStream {
+        id: s.id,
+        ops_queued: 0,
+        synced: 1,
+        total_ops: s.total_ops
+    }
+}
+
+fn stream_is_idle(s: GpuStream) -> Int {
+    if s.ops_queued == 0 { 1 } else { 0 }
+}
+
+// ============================================================================
+// Test 1: Stream creation
+// ============================================================================
+
+@test
+fn test_stream_create() {
+    let s = stream_create(0);
+    assert_eq(s.id, 0);
+    assert_eq(s.ops_queued, 0);
+    assert_eq(s.synced, 1);
+    assert_eq(s.total_ops, 0);
+    assert_eq(stream_is_idle(s), 1);
+    print("  test_stream_create: ok");
+}
+
+// ============================================================================
+// Test 2: Enqueue operations
+// ============================================================================
+
+@test
+fn test_enqueue() {
+    let s = stream_create(1);
+    let s1 = stream_enqueue(s);
+    assert_eq(s1.ops_queued, 1);
+    assert_eq(s1.synced, 0);
+    assert_eq(stream_is_idle(s1), 0);
+
+    let s2 = stream_enqueue(s1);
+    assert_eq(s2.ops_queued, 2);
+    assert_eq(s2.total_ops, 2);
+
+    let s3 = stream_enqueue_n(s, 5);
+    assert_eq(s3.ops_queued, 5);
+    assert_eq(s3.total_ops, 5);
+    print("  test_enqueue: ok");
+}
+
+// ============================================================================
+// Test 3: Sync clears queue
+// ============================================================================
+
+@test
+fn test_sync() {
+    let s = stream_create(2);
+    let s1 = stream_enqueue_n(s, 4);
+    assert_eq(s1.ops_queued, 4);
+    assert_eq(s1.synced, 0);
+
+    let s2 = stream_sync(s1);
+    assert_eq(s2.ops_queued, 0);
+    assert_eq(s2.synced, 1);
+    assert_eq(s2.total_ops, 4);
+    assert_eq(stream_is_idle(s2), 1);
+
+    // Can enqueue after sync
+    let s3 = stream_enqueue(s2);
+    assert_eq(s3.ops_queued, 1);
+    assert_eq(s3.total_ops, 5);
+    print("  test_sync: ok");
+}
+
+// ============================================================================
+// Test 4: Multi-stream independence
+// ============================================================================
+
+@test
+fn test_multi_stream() {
+    let s0 = stream_create(0);
+    let s1 = stream_create(1);
+    let s2 = stream_create(2);
+
+    let s0a = stream_enqueue_n(s0, 3);
+    let s1a = stream_enqueue_n(s1, 5);
+    let s2a = stream_enqueue_n(s2, 1);
+
+    // Each stream independent
+    assert_eq(s0a.ops_queued, 3);
+    assert_eq(s1a.ops_queued, 5);
+    assert_eq(s2a.ops_queued, 1);
+
+    // Sync one doesn't affect others
+    let s0b = stream_sync(s0a);
+    assert_eq(s0b.ops_queued, 0);
+    assert_eq(s1a.ops_queued, 5);
+    assert_eq(s2a.ops_queued, 1);
+
+    // Total ops across all streams
+    let total = s0a.total_ops + s1a.total_ops + s2a.total_ops;
+    assert_eq(total, 9);
+    print("  test_multi_stream: ok");
+}
+
+// ============================================================================
+// Test 5: Repeated sync is idempotent
+// ============================================================================
+
+@test
+fn test_sync_idempotent() {
+    let s = stream_create(0);
+    let s1 = stream_enqueue_n(s, 3);
+    let s2 = stream_sync(s1);
+    let s3 = stream_sync(s2);
+    assert_eq(s2.ops_queued, 0);
+    assert_eq(s3.ops_queued, 0);
+    assert_eq(s2.total_ops, s3.total_ops);
+    assert_eq(s3.synced, 1);
+    print("  test_sync_idempotent: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_stream_create();
+    test_enqueue();
+    test_sync();
+    test_multi_stream();
+    test_sync_idempotent();
+    print("[OK] 139_gpu_opcode_stream");
+    0
+}

@@ -1,0 +1,398 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, safety, sync, bounds
+// @description: Comprehensive Sync bound patterns for safe shared references across tasks
+
+// The Sync trait indicates types that can be safely shared (via &T) between tasks
+// A type T is Sync if &T is Send (i.e., references can be sent across threads)
+type Sync is protocol {};
+
+// Primitive types are Sync (no interior mutability)
+implement Sync for Int {}
+implement Sync for Int8 {}
+implement Sync for Int16 {}
+implement Sync for Int32 {}
+implement Sync for Int64 {}
+implement Sync for UInt {}
+implement Sync for UInt8 {}
+implement Sync for UInt16 {}
+implement Sync for UInt32 {}
+implement Sync for UInt64 {}
+implement Sync for Float {}
+implement Sync for Float32 {}
+implement Sync for Float64 {}
+implement Sync for Bool {}
+implement Sync for Char {}
+implement Sync for Text {} // Immutable string
+
+// Unit type is Sync
+implement Sync for () {}
+
+// Immutable containers of Sync types are Sync
+implement Sync for List<T> where T: Sync {}
+implement Sync for Maybe<T> where T: Sync {}
+implement Sync for Map<K, V> where K: Sync, V: Sync {}
+implement Sync for Set<T> where T: Sync {}
+implement Sync for Heap<T> where T: Sync {}
+implement Sync for Result<T, E> where T: Sync, E: Sync {}
+
+// Tuples of Sync types are Sync
+implement Sync for (A, B) where A: Sync, B: Sync {}
+implement Sync for (A, B, C) where A: Sync, B: Sync, C: Sync {}
+implement Sync for (A, B, C, D) where A: Sync, B: Sync, C: Sync, D: Sync {}
+
+// Mutex<T> is Sync if T is Send (provides synchronized access)
+implement Sync for Mutex<T> where T: Send {}
+
+// RwLock<T> is Sync if T is Send + Sync
+implement Sync for RwLock<T> where T: Send + Sync {}
+
+// Atomic types are Sync (built-in synchronization)
+implement Sync for AtomicInt {}
+implement Sync for AtomicBool {}
+implement Sync for AtomicUInt {}
+implement Sync for AtomicCell<T> where T: Send {}
+
+// Shared<T> (Arc equivalent) is Sync if T is Send + Sync
+implement Sync for Shared<T> where T: Send + Sync {}
+
+// Channel types are Sync
+implement Sync for Sender<T> where T: Send {}
+implement Sync for Receiver<T> where T: Send {}
+
+// Types that are NOT Sync:
+// - Cell<T>: unsynchronized interior mutability
+// - RefCell<T>: unsynchronized borrow checking
+// - Rc<T>: non-atomic reference counting
+// - Raw pointers (*const T, *mut T): no synchronization
+
+// Function requiring Sync for shared references
+async fn share_between_tasks<T: Sync>(data: &T) {
+    let task1 = spawn {
+        let _ = data; // Can read safely
+    };
+
+    let task2 = spawn {
+        let _ = data; // Can read safely
+    };
+
+    task1.await; task2.await;
+}
+
+// Example: sharing immutable data
+async fn share_immutable_list() {
+    let data = [1, 2, 3, 4, 5];
+    share_between_tasks(&data).await;
+}
+
+// Example: sharing synchronized mutable data via Mutex
+async fn share_mutex() {
+    let counter = Mutex.new(0);
+
+    // Multiple tasks can share reference to Mutex
+    let task1 = spawn {
+        let mut guard = counter.lock().await;
+        // Increment via guard (deref not yet stable)
+    };
+
+    let task2 = spawn {
+        let mut guard = counter.lock().await;
+        // Increment via guard (deref not yet stable)
+    };
+
+    task1.await; task2.await;
+}
+
+// Example: sharing synchronized mutable data via RwLock
+async fn share_rwlock() {
+    let data = RwLock.new([1, 2, 3]);
+
+    // Multiple readers
+    let reader1 = spawn {
+        let guard = data.read().await;
+        let sum: Int = guard.iter().sum();
+    };
+
+    let reader2 = spawn {
+        let guard = data.read().await;
+        let len = guard.len();
+    };
+
+    reader1.await; reader2.await;
+}
+
+// Example: sharing atomic data
+async fn share_atomic() {
+    let counter = AtomicInt.new(0);
+
+    let task1 = spawn {
+        counter.fetch_add(1);
+    };
+
+    let task2 = spawn {
+        counter.fetch_add(1);
+    };
+
+    task1.await; task2.await;
+}
+
+// Struct with all Sync fields is automatically Sync
+type SharedConfig is {
+    max_connections: Int,
+    timeout_ms: Int,
+    name: Text,
+};
+
+async fn share_config() {
+    let config = SharedConfig {
+        max_connections: 100,
+        timeout_ms: 5000,
+        name: "production",
+    };
+
+    let task1 = spawn {
+        let max = config.max_connections;
+    };
+
+    let task2 = spawn {
+        let timeout = config.timeout_ms;
+    };
+
+    task1.await; task2.await;
+}
+
+// Conditional Sync based on type parameter
+type Container<T> is {
+    value: T,
+};
+
+// Only Sync if T is Sync
+implement Sync for Container<T> where T: Sync {}
+
+async fn share_container() {
+    let container = Container { value: 42 }; // Int is Sync
+    share_between_tasks(&container).await;
+}
+
+// Complex struct with nested Sync types
+type ApplicationState is {
+    config: SharedConfig,
+    cache: RwLock<Map<Text, Text>>,
+    metrics: AtomicInt,
+};
+
+async fn share_app_state() {
+    let state = Shared.new(ApplicationState {
+        config: SharedConfig {
+            max_connections: 100,
+            timeout_ms: 5000,
+            name: "app",
+        },
+        cache: RwLock.new(Map.new()),
+        metrics: AtomicInt.new(0),
+    });
+
+    let s1 = state.clone();
+    let task1 = spawn {
+        // Read config
+        let _ = s1.config.max_connections;
+        // Read cache
+        let cache = s1.cache.read().await;
+        // Increment metrics
+        s1.metrics.fetch_add(1);
+    };
+
+    let s2 = state.clone();
+    let task2 = spawn {
+        // Write cache
+        let mut cache = s2.cache.write().await;
+        cache.insert("key", "value");
+    };
+
+    task1.await; task2.await;
+}
+
+// Sync with Send combination
+// T: Send + Sync means T can be sent AND shared across tasks
+async fn send_and_share<T: Send + Sync>(value: T) {
+    let shared = Shared.new(value);
+
+    // Can clone and send
+    let s1 = shared.clone();
+    let t1 = spawn {
+        let _ = &*s1; // Reference to shared data
+    };
+
+    // Can also share via reference
+    let s2 = shared.clone();
+    let t2 = spawn {
+        let _ = &*s2;
+    };
+
+    t1.await; t2.await;
+}
+
+// Negative examples (would fail to compile):
+/*
+// ERROR: Cell<T> is not Sync
+async fn bad_cell_share() {
+    let cell = Cell.new(42);
+    share_between_tasks(&cell).await;  // Cell is not Sync!
+}
+
+// ERROR: RefCell<T> is not Sync
+async fn bad_refcell_share() {
+    let refcell = RefCell.new(42);
+    share_between_tasks(&refcell).await;  // RefCell is not Sync!
+}
+
+// ERROR: Rc<T> is not Sync
+async fn bad_rc_share() {
+    let rc = Rc.new(42);
+    share_between_tasks(&rc).await;  // Rc is not Sync!
+}
+
+// ERROR: Raw pointer is not Sync
+async fn bad_pointer_share() {
+    let ptr: *const Int = &42;
+    share_between_tasks(&ptr).await;  // *const T is not Sync!
+}
+*/
+
+// Wrapper for making non-Sync types Sync (unsafe)
+type UnsafeSync<T> is {
+    value: T,
+};
+
+// SAFETY: User asserts this is safe to share
+unsafe implement Sync for UnsafeSync<T> {}
+
+implement UnsafeSync<T> {
+    // SAFETY: Caller must ensure concurrent access is safe
+    unsafe fn new(value: T) -> Self {
+        Self { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+}
+
+// Example of asserting Sync
+async fn share_with_assertion() {
+    type NotSyncByDefault is {
+        data: Int,
+    };
+
+    let value = NotSyncByDefault { data: 42 };
+
+    // Wrap to assert Sync safety
+    let wrapped = unsafe { UnsafeSync.new(value) };
+
+    let task1 = spawn {
+        let _ = wrapped.get().data;
+    };
+
+    let task2 = spawn {
+        let _ = wrapped.get().data;
+    };
+
+    task1.await; task2.await;
+}
+
+// Sync inference in closures
+async fn closure_sync_inference() {
+    let data = [1, 2, 3]; // List is Sync
+
+    // Closure captures &data, can share reference
+    let task1 = spawn {
+        let sum: Int = data.iter().sum();
+    };
+
+    let task2 = spawn {
+        let len = data.len();
+    };
+
+    task1.await; task2.await;
+}
+
+// OnceCell is Sync (thread-safe initialization)
+implement Sync for OnceCell<T> where T: Send + Sync {}
+
+async fn share_once_cell() {
+    let cell: OnceCell<Int> = OnceCell.new();
+
+    let task1 = spawn {
+        // Initialize if not already set
+        cell.get_or_init(|| 42);
+    };
+
+    let task2 = spawn {
+        // Will see initialized value or initialize
+        cell.get_or_init(|| 100);
+    };
+
+    task1.await; task2.await;
+
+    // Both tasks see same value
+    assert_eq(cell.get(), Some(&42));
+}
+
+// Lazy<T> is Sync
+implement Sync for Lazy<T> where T: Send + Sync {}
+
+async fn share_lazy() {
+    let lazy: Lazy<List<Int>> = Lazy.new(|| {
+        [1, 2, 3, 4, 5]
+    });
+
+    let task1 = spawn {
+        let data = &*lazy;
+        data.len()
+    };
+
+    let task2 = spawn {
+        let data = &*lazy;
+        data.iter().sum()
+    };
+
+    task1.await; task2.await;
+}
+
+// Complex Sync bounds in generic functions
+async fn process_shared_data<T, U>(
+    data: &T,
+    transform: fn(&T) -> U,
+) -> U
+where type T: Sync, U: Send
+{
+    let result_holder = Mutex.new(None);
+
+    let task = spawn {
+        let result = transform(data);
+        let mut guard = result_holder.lock().await;
+        // Store via guard (deref not yet stable)
+    };
+
+    task.await;
+
+    let _guard = result_holder.lock().await;
+    // Return result from guard
+    0
+}
+
+// Sync with higher-ranked trait bounds
+async fn share_with_callback<F>(callback: F)
+where type F: Fn() -> Int + Sync
+{
+    let task1 = spawn {
+        callback()
+    };
+
+    let task2 = spawn {
+        callback()
+    };
+
+    task1.await; task2.await;
+}

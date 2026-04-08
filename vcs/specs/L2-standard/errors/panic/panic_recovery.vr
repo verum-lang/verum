@@ -1,0 +1,269 @@
+// @test: run
+// @expected-stdout: Caught panic: test panic\nRecovered successfully
+// @tier: 0
+// @level: L2
+// @tags: errors, panic, recovery, catch
+
+/// Panic recovery - catching panics at boundaries.
+/// Controlled panic catching for thread/task boundaries and FFI.
+
+/// Basic catch_unwind pattern
+fn catch_panic_basic() -> Result<Int, PanicInfo> {
+    catch_unwind(|| {
+        // Code that might panic
+        let value = risky_operation().unwrap_or(0);
+        value * 2
+    })
+}
+
+fn risky_operation() -> Result<Int, Text> {
+    // Might panic or return error
+    Ok(42)
+}
+
+type PanicInfo is {
+    message: Text,
+    location: Maybe<Location>
+};
+
+type Location is {
+    file: Text,
+    line: Int,
+    column: Int
+};
+
+/// Catch and convert panic to Result
+fn panic_to_result<T, F>(f: F) -> Result<T, Text>
+where F: Fn() -> T {
+    match catch_unwind(f) {
+        Ok(value) => Ok(value),
+        Err(panic) => Err(f"Panic: {panic}")
+    }
+}
+
+/// Panic recovery at thread boundary
+fn thread_with_recovery() {
+    let handle = spawn(|| {
+        catch_unwind(|| {
+            // Thread work that might panic
+            process_data()
+        })
+    });
+
+    match handle.join() {
+        Ok(inner) => {
+            match inner {
+                Ok(result) => println(f"Thread result: {result}"),
+                Err(panic_info) => println(f"Thread panicked: {panic_info}"),
+            }
+        },
+        Err(join_error) => {
+            println(f"Thread join error: {join_error}");
+        }
+    }
+}
+
+fn process_data() -> Int {
+    42
+}
+
+/// Recovery with cleanup
+fn recover_with_cleanup<T, F>(operation: F) -> Result<T, Text>
+where F: Fn() -> T {
+    let mut needs_cleanup = true;
+
+    let result = catch_unwind(|| {
+        let value = operation();
+        needs_cleanup = false;  // Mark successful completion
+        value
+    });
+
+    if needs_cleanup {
+        // Perform cleanup after panic
+        perform_emergency_cleanup();
+    }
+
+    result.map_err(|e| f"Operation panicked: {e}")
+}
+
+fn perform_emergency_cleanup() {
+    println("Emergency cleanup executed");
+}
+
+/// Panic barrier for isolating subsystems
+type PanicBarrier<T> is {
+    result: Result<T, PanicInfo>
+};
+
+implement<T> PanicBarrier<T> {
+    fn run<F>(f: F) -> Self
+    where F: Fn() -> T {
+        let result = catch_unwind(f);
+        PanicBarrier {
+            result: result.map_err(|p| PanicInfo {
+                message: f"{p}",
+                location: None
+            })
+        }
+    }
+
+    fn into_result(self) -> Result<T, PanicInfo> {
+        self.result
+    }
+
+    fn unwrap_or(self, default: T) -> T {
+        self.result.unwrap_or(default)
+    }
+
+    fn map<U, F>(self, f: F) -> PanicBarrier<U>
+    where F: Fn(T) -> U {
+        PanicBarrier {
+            result: self.result.map(f)
+        }
+    }
+}
+
+/// FFI boundary panic handling
+// NOTE: FFI with raw pointers requires compiler support not yet available
+// fn ffi_callback_safe(input: *const u8) -> i32 { ... }
+
+/// Panic hook for logging before recovery
+fn setup_panic_hook() {
+    // Platform-specific panic hook setup
+    // Would register a callback that logs panic information
+}
+
+fn log_panic(message: &Text, location: &Text) {
+    println(f"PANIC at {location}: {message}");
+}
+
+/// Resumable panic handling (controlled unwinding)
+fn resumable_operation<T, F, R>(
+    operation: F,
+    recovery: R
+) -> T
+where F: Fn() -> T, R: Fn(PanicInfo) -> T
+{
+    match catch_unwind(operation) {
+        Ok(value) => value,
+        Err(panic) => {
+            let info = PanicInfo {
+                message: f"{panic}",
+                location: None
+            };
+            recovery(info)
+        }
+    }
+}
+
+/// Test helper for expecting panics
+fn assert_panics<F>(f: F) -> PanicInfo
+where F: Fn() {
+    match catch_unwind(f) {
+        Ok(_) => panic("Expected panic but operation succeeded"),
+        Err(panic) => PanicInfo {
+            message: f"{panic}",
+            location: None
+        }
+    }
+}
+
+/// Panic recovery with retry
+fn retry_on_panic<T, F>(
+    operation: F,
+    max_retries: Int
+) -> Result<T, Text>
+where F: Fn() -> T {
+    let mut last_panic: Maybe<Text> = None;
+
+    for attempt in 0..max_retries {
+        match catch_unwind(operation.clone()) {
+            Ok(value) => return Ok(value),
+            Err(panic) => {
+                let msg = f"{panic}";
+                println(f"Attempt {attempt + 1} panicked: {msg}");
+                last_panic = Some(msg);
+            }
+        }
+    }
+
+    Err(last_panic.unwrap_or_else(|| "Unknown error".to_text()))
+}
+
+/// Supervisor pattern - restart on panic
+type Supervisor<T> is {
+    task: Heap<fn() -> T>,
+    restart_policy: RestartPolicy
+};
+
+type RestartPolicy is
+    | Never
+    | Always
+    | OnPanic { max_restarts: Int }
+    | Exponential { base_delay_ms: Int, max_delay_ms: Int }
+;
+
+implement<T> Supervisor<T> {
+    fn run(&self) -> Result<T, SupervisorError> {
+        match self.restart_policy {
+            RestartPolicy.Never => {
+                catch_unwind(&self.task)
+                    .map_err(|_| SupervisorError.Panicked)
+            },
+            RestartPolicy.Always => {
+                loop {
+                    match catch_unwind(&self.task) {
+                        Ok(value) => return Ok(value),
+                        Err(_) => {
+                            println("Task panicked, restarting...");
+                            continue;
+                        }
+                    }
+                }
+            },
+            RestartPolicy.OnPanic { max_restarts } => {
+                for _ in 0..=max_restarts {
+                    match catch_unwind(&self.task) {
+                        Ok(value) => return Ok(value),
+                        Err(_) => continue
+                    }
+                }
+                Err(SupervisorError.MaxRestartsExceeded)
+            },
+            RestartPolicy.Exponential { base_delay_ms, max_delay_ms } => {
+                let mut delay = base_delay_ms;
+                loop {
+                    match catch_unwind(&self.task) {
+                        Ok(value) => return Ok(value),
+                        Err(_) => {
+                            sleep_ms(delay);
+                            delay = (delay * 2).min(max_delay_ms);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+type SupervisorError is
+    | Panicked
+    | MaxRestartsExceeded;
+
+fn sleep_ms(ms: Int) {
+    // Platform sleep
+}
+
+fn main() {
+    // Demonstrate panic recovery
+    let result = panic_to_result(|| {
+        panic("test panic");
+    });
+
+    match result {
+        Ok(v) => println(f"Got value: {v}"),
+        Err(msg) => println(f"Caught panic: {msg}")
+    }
+
+    println("Recovered successfully");
+}

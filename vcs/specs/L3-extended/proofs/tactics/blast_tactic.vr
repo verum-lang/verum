@@ -1,0 +1,374 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, blast
+// @timeout: 30000
+// @description: Tests the blast tactic for aggressive automated proving (extended)
+
+/// ============================================================
+/// BLAST TACTIC (EXTENDED)
+/// ============================================================
+///
+/// Extended blast tactic tests covering advanced automated
+/// proving with tableaux, resolution, and SMT integration.
+
+// ------------------------------------------------------------
+// Blast for Classical Logic
+// ------------------------------------------------------------
+
+/// Peirceps law (requires classical logic)
+theorem blast_peirce(P: Bool, Q: Bool):
+    ((P implies Q) implies P) implies P
+{
+    proof by blast
+
+/// Excluded middle
+theorem blast_lem(P: Bool): P || !P {
+    proof by blast
+
+/// Double negation elimination
+theorem blast_dne(P: Bool)
+    requires !!P
+    ensures P
+{
+    proof by blast
+
+/// Proof by contradiction setup
+theorem blast_raa(P: Bool)
+    requires !P implies false
+    ensures P
+{
+    proof by blast
+
+// ------------------------------------------------------------
+// Blast with Equality
+// ------------------------------------------------------------
+
+/// Leibniz equality with blast
+theorem blast_leibniz_eq<T>(x: T, y: T, P: fn(T) -> Bool)
+    requires x == y
+    requires P(x)
+    ensures P(y)
+{
+    proof by blast
+}
+
+/// Equality chain
+theorem blast_eq_chain<T>(a: T, b: T, c: T, d: T, e: T)
+    requires a == b
+    requires b == c
+    requires c == d
+    requires d == e
+    ensures a == e
+{
+    proof by blast
+}
+
+/// Equality in structures
+theorem blast_struct_eq<T, U>(s1: {x: T, y: U}, s2: {x: T, y: U})
+    requires s1.x == s2.x
+    requires s1.y == s2.y
+    ensures s1 == s2
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Blast with Quantifiers
+// ------------------------------------------------------------
+
+/// Universal modus ponens
+theorem blast_universal_mp<T>(P: fn(T) -> Bool, Q: fn(T) -> Bool)
+    requires forall x: T. P(x) implies Q(x)
+    requires forall x: T. P(x)
+    ensures forall x: T. Q(x)
+{
+    proof by blast
+}
+
+/// Existential generalization
+theorem blast_exist_gen<T>(P: fn(T) -> Bool, a: T)
+    requires P(a)
+    ensures exists x: T. P(x)
+{
+    proof by blast
+}
+
+/// Quantifier duality
+theorem blast_quant_dual<T>(P: fn(T) -> Bool):
+    !(forall x: T. P(x)) == (exists x: T. !P(x))
+{
+    proof by blast
+}
+
+/// Bounded quantifier reasoning
+theorem blast_bounded_quant(n: Nat, f: fn(Nat) -> Int)
+    requires forall i: Nat. i < n implies f(i) > 0
+    requires n > 0
+    ensures f(0) > 0
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Blast with Theories
+// ------------------------------------------------------------
+
+/// Linear arithmetic theory
+theorem blast_lia(x: Int, y: Int, z: Int)
+    requires 2*x + 3*y <= z
+    requires x >= 0
+    requires y >= 0
+    requires z < 10
+    ensures x + y < 10
+{
+    proof by blast
+
+/// Array theory
+theorem blast_arrays<T>(arr: Array<T>, i: Index, j: Index, v: T, w: T)
+    requires i != j
+    ensures arr.set(i, v).set(j, w).get(i) == v
+{
+    proof by blast
+
+/// Bit-vector theory
+theorem blast_bitvector(x: u32, y: u32):
+    (x | y) & x == x & (x | y)
+{
+    proof by blast
+
+/// Combined theories
+theorem blast_combined(arr: Array<Int>, i: Nat, j: Nat)
+    requires i < len(arr)
+    requires j < len(arr)
+    requires arr.get(i) + arr.get(j) > 0
+    ensures arr.get(i) > -arr.get(j)
+{
+    proof by blast
+
+// ------------------------------------------------------------
+// Blast with Inductive Types
+// ------------------------------------------------------------
+
+/// Option exhaustiveness
+theorem blast_option_exhaust<T>(opt: Maybe<T>):
+    opt.is_some() || opt.is_none()
+{
+    proof by blast
+}
+
+/// List inversion
+theorem blast_list_inv<T>(xs: List<T>)
+    requires len(xs) > 0
+    ensures exists h: T, t: List<T>. xs == h . t
+{
+    proof by blast
+}
+
+/// Either elimination
+theorem blast_either<A, B, C>(e: Either<A, B>, f: fn(A) -> C, g: fn(B) -> C):
+    exists c: C. c == match e { Left(a) => f(a), Right(b) => g(b) }
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Blast with SAT/SMT
+// ------------------------------------------------------------
+
+/// Propositional satisfiability
+theorem blast_sat(p: Bool, q: Bool, r: Bool)
+    requires (p || q) && (!p || r) && (!q || r)
+    ensures r
+{
+    proof by blast
+
+/// UNSAT detection
+theorem blast_unsat(p: Bool, q: Bool)
+    requires p && !p
+    ensures q
+{
+    proof by blast
+
+/// SMT with quantifiers
+theorem blast_smt_quant<T: Eq>(f: fn(T) -> T)
+    requires forall x: T. f(f(x)) == x
+    ensures forall x: T. f(f(f(f(x)))) == x
+{
+    proof by blast
+
+// ------------------------------------------------------------
+// Blast Strategies
+// ------------------------------------------------------------
+
+/// Tableaux method
+theorem blast_tableaux(P: Bool, Q: Bool, R: Bool):
+    ((P implies Q) && (Q implies R)) implies (P implies R)
+{
+    proof by blast
+
+/// Resolution method
+theorem blast_resolution(P: Bool, Q: Bool, R: Bool)
+    requires (!P || Q) && (!Q || R) && P
+    ensures R
+{
+    proof by blast
+
+/// Superposition
+theorem blast_superposition<T>(f: fn(T) -> T, g: fn(T) -> T, x: T)
+    requires f(x) == g(x)
+    requires g(x) == x
+    ensures f(x) == x
+{
+    proof by blast
+
+/// Model-based reasoning
+theorem blast_model_based(x: Int)
+    requires x > 0
+    requires x < 5
+    ensures x == 1 || x == 2 || x == 3 || x == 4
+{
+    proof by blast
+
+// ------------------------------------------------------------
+// Blast with Custom Rules
+// ------------------------------------------------------------
+
+/// Custom introduction rules
+@blast_intro
+lemma custom_intro_and(P: Bool, Q: Bool)
+    given hp: P
+    given hq: Q
+    ensures P && Q
+{ proof by intro }
+
+/// Custom elimination rules
+@blast_elim
+lemma custom_elim_or<R>(P: Bool, Q: Bool, goal: R)
+    given h: P || Q
+    given hp: P -> R
+    given hq: Q -> R
+    ensures goal
+{ proof by cases h }
+
+/// Using custom rules
+theorem blast_custom_rules(a: Bool, b: Bool, c: Bool)
+    requires a
+    requires b
+    requires (a && b) implies c
+    ensures c
+{
+    proof by blast
+}
+
+// ------------------------------------------------------------
+// Blast Performance Tuning
+// ------------------------------------------------------------
+
+/// Depth-limited blast
+theorem blast_depth_limit(chain: Bool)
+    requires chain
+    ensures chain
+{
+    proof by blast
+
+/// Time-limited blast
+theorem blast_time_limit(complex: Bool)
+    requires complex
+    ensures complex
+{
+    proof by blast
+
+/// Memory-limited blast
+theorem blast_memory_limit(large_proof: Bool)
+    requires large_proof
+    ensures large_proof
+{
+    proof by blast
+
+/// Incremental blast
+theorem blast_incremental(p1: Bool, p2: Bool, p3: Bool)
+    requires p1 implies p2
+    requires p2 implies p3
+    requires p1
+    ensures p3
+{
+    proof by blast
+
+// ------------------------------------------------------------
+// Blast Debugging
+// ------------------------------------------------------------
+
+/// Verbose blast output
+theorem blast_verbose(P: Bool, Q: Bool)
+    requires P implies Q
+    requires P
+    ensures Q
+{
+    proof by blast
+
+/// Proof tree output
+theorem blast_proof_tree(a: Bool, b: Bool):
+    (a && b) implies (b && a)
+{
+    proof by blast
+
+/// Statistics output
+theorem blast_stats(complex: Bool)
+    requires complex
+    ensures complex
+{
+    proof by blast
+
+// ------------------------------------------------------------
+// Blast Integration
+// ------------------------------------------------------------
+
+/// Blast after simplification
+theorem blast_after_simp(x: Int, y: Int)
+    requires (x + 0) > (y * 1)
+    ensures x > y
+{
+    proof by simp; blast
+}
+
+/// Blast for subgoals
+theorem blast_subgoals(a: Bool, b: Bool, c: Bool):
+    (a implies c) && (b implies c) && (a || b) implies c
+{
+    proof {
+        intro h;
+        let (h1, h2, h3) = h;
+        cases h3 {
+            case left a => blast
+            case right b => blast
+        }
+    }
+}
+
+/// Blast with lemma hints
+theorem blast_with_hints<T>(xs: List<T>):
+    xs.reverse().reverse() == xs
+{
+    proof by blast
+
+// ------------------------------------------------------------
+// Blast Limitations
+// ------------------------------------------------------------
+
+/// Blast may timeout on undecidable problems
+// @test: verify-fail
+// @expected-error: timeout
+theorem blast_undecidable(f: fn(Nat) -> Nat):
+    (forall n: Nat. f(n) > n) implies (forall n: Nat. f(f(n)) > n)
+{
+    // Requires induction, blast can't handle
+    proof by blast
+
+/// Blast cannot do induction
+// @test: verify-fail
+// @expected-error: requires induction
+theorem blast_needs_induction(n: Nat): n + 0 == n {
+    // Needs structural induction on Nat
+    proof by blast  // FAILS
+}

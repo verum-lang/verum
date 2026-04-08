@@ -1,0 +1,188 @@
+// =============================================================================
+// reference_coercion_test.vr - Test reference type coercion
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, references, coercion, auto-deref, regression
+// @description: Verifies reference type coercion and auto-deref behavior
+// =============================================================================
+
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Test 1: Basic reference creation and usage
+// =============================================================================
+
+@test
+fn test_basic_references() {
+    let x: Int = 42;
+    let ref_x: &Int = &x;
+
+    // Dereference to get value
+    assert_eq(*ref_x, 42);
+}
+
+// =============================================================================
+// Test 2: Mutable references
+// =============================================================================
+
+@test
+fn test_mutable_references() {
+    let mut x: Int = 10;
+    let ref_x: &mut Int = &mut x;
+
+    // Modify through reference
+    *ref_x = 20;
+
+    assert_eq(x, 20);
+}
+
+// =============================================================================
+// Test 3: Reference in function parameters
+// =============================================================================
+
+fn add_one(x: &Int) -> Int {
+    *x + 1
+}
+
+fn increment(x: &mut Int) {
+    *x = *x + 1;
+}
+
+@test
+fn test_reference_parameters() {
+    let val: Int = 5;
+    assert_eq(add_one(&val), 6);
+
+    let mut mutable_val: Int = 10;
+    increment(&mut mutable_val);
+    assert_eq(mutable_val, 11);
+}
+
+// =============================================================================
+// Test 4: Auto-deref in method calls
+// =============================================================================
+
+type Point is { x: Int, y: Int };
+
+implement Point {
+    fn distance_from_origin(&self) -> Float {
+        let x_sq = (self.x * self.x) as Float;
+        let y_sq = (self.y * self.y) as Float;
+        (x_sq + y_sq).sqrt()
+    }
+
+    fn move_by(&mut self, dx: Int, dy: Int) {
+        self.x = self.x + dx;
+        self.y = self.y + dy;
+    }
+}
+
+@test
+fn test_auto_deref_method_calls() {
+    let p = Point { x: 3, y: 4 };
+    let ref_p: &Point = &p;
+
+    // Auto-deref should allow method call on reference
+    let dist = ref_p.distance_from_origin();
+    assert_eq(dist, 5.0);
+}
+
+// =============================================================================
+// Test 5: Reference in match patterns
+// =============================================================================
+
+@test
+fn test_reference_in_match() {
+    let opt: Maybe<Int> = Some(42);
+
+    match &opt {
+        Some(val) => {
+            // val should be &Int
+            assert_eq(*val, 42);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Test 6: Reference coercion in generic contexts
+// =============================================================================
+
+fn accepts_ref<T>(val: &T) -> Bool {
+    true
+}
+
+@test
+fn test_generic_reference_coercion() {
+    let x: Int = 42;
+    let s: Text = "hello";
+    let b: Bool = true;
+
+    assert(accepts_ref(&x));
+    assert(accepts_ref(&s));
+    assert(accepts_ref(&b));
+}
+
+// =============================================================================
+// Test 7: Nested references
+// =============================================================================
+
+@test
+fn test_nested_references() {
+    let x: Int = 42;
+    let ref1: &Int = &x;
+    let ref2: &&Int = &ref1;
+
+    assert_eq(**ref2, 42);
+}
+
+// =============================================================================
+// Test 8: Reference to tuple elements
+// =============================================================================
+
+@test
+fn test_tuple_element_references() {
+    let pair: (Int, Text) = (42, "hello");
+
+    let ref_first: &Int = &pair.0;
+    let ref_second: &Text = &pair.1;
+
+    assert_eq(*ref_first, 42);
+    assert_eq(*ref_second, "hello");
+}
+
+// =============================================================================
+// Test 9: Reference coercion with struct fields
+// =============================================================================
+
+type Container is { value: Int, name: Text };
+
+@test
+fn test_struct_field_references() {
+    let c = Container { value: 100, name: "test" };
+
+    let ref_value: &Int = &c.value;
+    let ref_name: &Text = &c.name;
+
+    assert_eq(*ref_value, 100);
+    assert_eq(*ref_name, "test");
+}
+
+// =============================================================================
+// Test 10: Reference in closures
+// =============================================================================
+
+@test
+fn test_reference_in_closures() {
+    let x: Int = 10;
+
+    let closure = |ref_val: &Int| *ref_val * 2;
+
+    assert_eq(closure(&x), 20);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

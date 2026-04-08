@@ -1,0 +1,180 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, map, string, text, hash
+// @expected-exit: 0
+
+// Test: String-keyed Map operations — insert, get, contains_key, remove,
+// overwrite, dynamic keys, and multi-entry access.
+
+fn main() -> Int {
+    // Test 1: Insert with string literals, get with same literals
+    let mut m = Map.new();
+    m.insert("apple", 10);
+    m.insert("banana", 20);
+    m.insert("cherry", 30);
+
+    let v1 = m.get("apple");
+    if (v1 != 10) {
+        print(f"FAIL test1a: get('apple')={v1}, expected 10");
+        return 1;
+    }
+    let v2 = m.get("banana");
+    if (v2 != 20) {
+        print(f"FAIL test1b: get('banana')={v2}, expected 20");
+        return 1;
+    }
+    let v3 = m.get("cherry");
+    if (v3 != 30) {
+        print(f"FAIL test1c: get('cherry')={v3}, expected 30");
+        return 1;
+    }
+
+    // Test 2: Length after inserts
+    let len1 = m.len();
+    if (len1 != 3) {
+        print(f"FAIL test2: len={len1}, expected 3");
+        return 1;
+    }
+
+    // Test 3: Insert with variable key, get with DIFFERENT variable same content
+    let key_a = "grape";
+    m.insert(key_a, 40);
+    let key_b = "grape";
+    let v4 = m.get(key_b);
+    if (v4 != 40) {
+        print(f"FAIL test3: get('grape')={v4}, expected 40");
+        return 1;
+    }
+
+    // Test 4: Dynamic key from split() result
+    let csv = "kiwi,mango,papaya";
+    let parts = csv.split(",");
+    // parts = ["kiwi", "mango", "papaya"]
+    m.insert(parts[0], 50);
+    m.insert(parts[1], 60);
+    m.insert(parts[2], 70);
+
+    // Lookup with literal matching split result content
+    let v_kiwi = m.get("kiwi");
+    if (v_kiwi != 50) {
+        print(f"FAIL test4a: get('kiwi')={v_kiwi}, expected 50");
+        return 1;
+    }
+    let v_mango = m.get("mango");
+    if (v_mango != 60) {
+        print(f"FAIL test4b: get('mango')={v_mango}, expected 60");
+        return 1;
+    }
+    let v_papaya = m.get("papaya");
+    if (v_papaya != 70) {
+        print(f"FAIL test4c: get('papaya')={v_papaya}, expected 70");
+        return 1;
+    }
+
+    // Test 5: contains_key with literal and dynamic keys
+    if (m.contains_key("apple") != true) {
+        print("FAIL test5a: contains_key('apple') should be true");
+        return 1;
+    }
+    if (m.contains_key("kiwi") != true) {
+        print("FAIL test5b: contains_key('kiwi') should be true");
+        return 1;
+    }
+    let dyn_key = "banana";
+    if (m.contains_key(dyn_key) != true) {
+        print("FAIL test5c: contains_key(dyn_key='banana') should be true");
+        return 1;
+    }
+    if (m.contains_key("watermelon") != false) {
+        print("FAIL test5d: contains_key('watermelon') should be false");
+        return 1;
+    }
+    if (m.contains_key("fig") != false) {
+        print("FAIL test5e: contains_key('fig') should be false");
+        return 1;
+    }
+
+    // Test 6: Remove with string key, verify gone
+    let removed = m.remove("banana");
+    if (removed != 20) {
+        print(f"FAIL test6a: remove('banana')={removed}, expected 20");
+        return 1;
+    }
+    if (m.contains_key("banana") != false) {
+        print("FAIL test6b: 'banana' should be gone after remove");
+        return 1;
+    }
+    // Other keys still present
+    if (m.contains_key("apple") != true) {
+        print("FAIL test6c: 'apple' should still exist");
+        return 1;
+    }
+    let len_after_remove = m.len();
+    if (len_after_remove != 6) {
+        print(f"FAIL test6d: len after remove={len_after_remove}, expected 6");
+        return 1;
+    }
+
+    // Test 7: Overwrite existing key, verify new value
+    m.insert("apple", 999);
+    let v_apple = m.get("apple");
+    if (v_apple != 999) {
+        print(f"FAIL test7a: get('apple') after overwrite={v_apple}, expected 999");
+        return 1;
+    }
+    // Length should NOT increase on overwrite
+    let len_after_overwrite = m.len();
+    if (len_after_overwrite != 6) {
+        print(f"FAIL test7b: len after overwrite={len_after_overwrite}, expected 6");
+        return 1;
+    }
+
+    // Test 8: Multiple entries, verify all accessible
+    let mut m2 = Map.new();
+    m2.insert("red", 1);
+    m2.insert("green", 2);
+    m2.insert("blue", 3);
+    m2.insert("yellow", 4);
+    m2.insert("purple", 5);
+
+    let total = m2.get("red") + m2.get("green") + m2.get("blue") + m2.get("yellow") + m2.get("purple");
+    if (total != 15) {
+        print(f"FAIL test8a: sum of values={total}, expected 15");
+        return 1;
+    }
+    if (m2.len() != 5) {
+        print(f"FAIL test8b: len={m2.len()}, expected 5");
+        return 1;
+    }
+
+    // Test 9: Overwrite all entries in second map
+    m2.insert("red", 100);
+    m2.insert("green", 200);
+    m2.insert("blue", 300);
+    m2.insert("yellow", 400);
+    m2.insert("purple", 500);
+    let total2 = m2.get("red") + m2.get("green") + m2.get("blue") + m2.get("yellow") + m2.get("purple");
+    if (total2 != 1500) {
+        print(f"FAIL test9a: sum after overwrite={total2}, expected 1500");
+        return 1;
+    }
+    if (m2.len() != 5) {
+        print(f"FAIL test9b: len after overwrite={m2.len()}, expected 5");
+        return 1;
+    }
+
+    // Test 10: Remove all, verify empty
+    m2.remove("red");
+    m2.remove("green");
+    m2.remove("blue");
+    m2.remove("yellow");
+    m2.remove("purple");
+    if (m2.len() != 0) {
+        print(f"FAIL test10: len after removing all={m2.len()}, expected 0");
+        return 1;
+    }
+
+    print("921_string_keyed_map: PASS");
+    0
+}

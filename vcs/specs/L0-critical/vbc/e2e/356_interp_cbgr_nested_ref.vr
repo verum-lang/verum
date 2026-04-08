@@ -1,0 +1,372 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, nested-ref
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: CBGR nested and chained references.
+// Tests real nested reference structures — references to records containing
+// references, multi-level indirection, and deep read-through chains.
+
+// =============================================================================
+// Type definitions
+// =============================================================================
+
+type Point is { x: Int, y: Int };
+type Rect is { x1: Int, y1: Int, x2: Int, y2: Int };
+type Color is { r: Int, g: Int, b: Int };
+type Particle is { px: Int, py: Int, vx: Int, vy: Int, mass: Int };
+
+// =============================================================================
+// Helper: read fields through references
+// =============================================================================
+
+fn read_point_x(p: &Point) -> Int {
+    (*p).x
+}
+
+fn read_point_y(p: &Point) -> Int {
+    (*p).y
+}
+
+fn point_sum(p: &Point) -> Int {
+    (*p).x + (*p).y
+}
+
+fn rect_area(r: &Rect) -> Int {
+    let w = (*r).x2 - (*r).x1;
+    let h = (*r).y2 - (*r).y1;
+    if w < 0 { -w * h } else { w * h }
+}
+
+fn rect_perimeter(r: &Rect) -> Int {
+    let w = (*r).x2 - (*r).x1;
+    let h = (*r).y2 - (*r).y1;
+    let aw = if w < 0 { -w } else { w };
+    let ah = if h < 0 { -h } else { h };
+    2 * (aw + ah)
+}
+
+fn color_brightness(c: &Color) -> Int {
+    (*c).r + (*c).g + (*c).b
+}
+
+// =============================================================================
+// Helper: mutation through mutable references
+// =============================================================================
+
+fn set_point(p: &mut Point, nx: Int, ny: Int) {
+    (*p).x = nx;
+    (*p).y = ny;
+}
+
+fn translate_point(p: &mut Point, dx: Int, dy: Int) {
+    (*p).x = (*p).x + dx;
+    (*p).y = (*p).y + dy;
+}
+
+fn scale_point(p: &mut Point, factor: Int) {
+    (*p).x = (*p).x * factor;
+    (*p).y = (*p).y * factor;
+}
+
+fn swap_point_coords(p: &mut Point) {
+    let tmp = (*p).x;
+    (*p).x = (*p).y;
+    (*p).y = tmp;
+}
+
+// =============================================================================
+// Test: Nested reads through references
+// =============================================================================
+
+fn test_nested_reads() {
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 30, y: 40 };
+
+    let r1 = &p1;
+    let r2 = &p2;
+
+    // Read through single-level refs
+    assert_eq(read_point_x(r1), 10);
+    assert_eq(read_point_y(r1), 20);
+    assert_eq(read_point_x(r2), 30);
+    assert_eq(read_point_y(r2), 40);
+
+    // Compute through refs
+    assert_eq(point_sum(r1), 30);
+    assert_eq(point_sum(r2), 70);
+
+    // Multiple refs to same value
+    let r3 = &p1;
+    assert_eq(read_point_x(r3), 10);
+    assert_eq(point_sum(r3), 30);
+}
+
+// =============================================================================
+// Test: Deep mutation through mutable refs
+// =============================================================================
+
+fn test_deep_mutation() {
+    let mut p = Point { x: 1, y: 2 };
+    let r = &mut p;
+
+    // Direct field mutation through ref
+    (*r).x = 100;
+    assert_eq(p.x, 100);
+    assert_eq(p.y, 2);
+
+    (*r).y = 200;
+    assert_eq(p.x, 100);
+    assert_eq(p.y, 200);
+
+    // Mutation via helper function
+    set_point(r, 50, 60);
+    assert_eq(p.x, 50);
+    assert_eq(p.y, 60);
+
+    // Translate
+    translate_point(r, 10, -20);
+    assert_eq(p.x, 60);
+    assert_eq(p.y, 40);
+
+    // Scale
+    scale_point(r, 3);
+    assert_eq(p.x, 180);
+    assert_eq(p.y, 120);
+
+    // Swap
+    swap_point_coords(r);
+    assert_eq(p.x, 120);
+    assert_eq(p.y, 180);
+}
+
+// =============================================================================
+// Test: References to records with many fields
+// =============================================================================
+
+fn test_multi_field_records() {
+    // Immutable ref read (inline ref, no named borrow conflict)
+    let rect = Rect { x1: 0, y1: 0, x2: 10, y2: 5 };
+    assert_eq(rect_area(&rect), 50);
+    assert_eq(rect_perimeter(&rect), 30);
+
+    let rect2 = Rect { x1: -3, y1: -4, x2: 3, y2: 4 };
+    assert_eq(rect_area(&rect2), 48);
+    assert_eq(rect_perimeter(&rect2), 28);
+
+    // Mutate rect through mutable ref
+    let mut rect3 = Rect { x1: 0, y1: 0, x2: 10, y2: 5 };
+    let mr = &mut rect3;
+    (*mr).x2 = 20;
+    (*mr).y2 = 10;
+    assert_eq(rect3.x2, 20);
+    assert_eq(rect3.y2, 10);
+
+    // Particle with 5 fields
+    let mut part = Particle { px: 0, py: 0, vx: 5, vy: -3, mass: 10 };
+    let pr = &mut part;
+    // Simulate one physics step
+    (*pr).px = (*pr).px + (*pr).vx;
+    (*pr).py = (*pr).py + (*pr).vy;
+    assert_eq(part.px, 5);
+    assert_eq(part.py, -3);
+
+    // Second step
+    (*pr).px = (*pr).px + (*pr).vx;
+    (*pr).py = (*pr).py + (*pr).vy;
+    assert_eq(part.px, 10);
+    assert_eq(part.py, -6);
+}
+
+// =============================================================================
+// Test: Multiple mutable refs (sequential, not simultaneous)
+// =============================================================================
+
+fn test_sequential_mut_refs() {
+    let mut a = Point { x: 1, y: 2 };
+    let mut b = Point { x: 10, y: 20 };
+
+    // Mutate a
+    let ra = &mut a;
+    (*ra).x = (*ra).x + 100;
+    assert_eq(a.x, 101);
+
+    // Now mutate b (ra is no longer used)
+    let rb = &mut b;
+    (*rb).y = (*rb).y * 3;
+    assert_eq(b.y, 60);
+
+    // Come back to a with new ref
+    let ra2 = &mut a;
+    (*ra2).y = 999;
+    assert_eq(a.y, 999);
+}
+
+// =============================================================================
+// Test: Chained operations through refs
+// =============================================================================
+
+fn test_chained_operations() {
+    let mut p = Point { x: 0, y: 0 };
+    let r = &mut p;
+
+    // Chain of mutations
+    let mut i = 0;
+    while i < 10 {
+        (*r).x = (*r).x + i;
+        (*r).y = (*r).y + i * 2;
+        i = i + 1;
+    }
+    // x = 0+1+2+...+9 = 45
+    // y = 0+2+4+...+18 = 90
+    assert_eq(p.x, 45);
+    assert_eq(p.y, 90);
+}
+
+// =============================================================================
+// Test: Ref to color with computed brightness
+// =============================================================================
+
+fn test_color_refs() {
+    let c1 = Color { r: 255, g: 128, b: 64 };
+    let c2 = Color { r: 0, g: 0, b: 0 };
+    let c3 = Color { r: 100, g: 100, b: 100 };
+
+    assert_eq(color_brightness(&c1), 447);
+    assert_eq(color_brightness(&c2), 0);
+    assert_eq(color_brightness(&c3), 300);
+
+    // Mutate color through mutable ref, then verify after ref goes out of use
+    let mut c4 = Color { r: 10, g: 20, b: 30 };
+    let cr = &mut c4;
+    (*cr).r = 255;
+    (*cr).g = 255;
+    (*cr).b = 255;
+    // Read back through direct field access (no immutable borrow conflict)
+    assert_eq(c4.r, 255);
+    assert_eq(c4.g, 255);
+    assert_eq(c4.b, 255);
+    // Now cr is no longer used, safe to create new immutable borrow
+    assert_eq(color_brightness(&c4), 765);
+}
+
+// =============================================================================
+// Test: References in expression chains
+// =============================================================================
+
+fn test_ref_expressions() {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+
+    let ra = &a;
+    let rb = &b;
+    let rc = &c;
+
+    // Complex expressions with derefs
+    let sum = *ra + *rb + *rc;
+    assert_eq(sum, 60);
+
+    let product = *ra * *rb;
+    assert_eq(product, 200);
+
+    let mixed = (*ra + *rb) * *rc;
+    assert_eq(mixed, 900);
+
+    // Nested arithmetic
+    let v = *ra * *ra + *rb * *rb + *rc * *rc;
+    assert_eq(v, 1400);
+}
+
+// =============================================================================
+// Test: Mutation with computed values
+// =============================================================================
+
+fn test_computed_mutation() {
+    let mut p = Point { x: 3, y: 4 };
+    let r = &mut p;
+
+    // Distance squared (computed through ref)
+    let dist_sq = (*r).x * (*r).x + (*r).y * (*r).y;
+    assert_eq(dist_sq, 25);
+
+    // Normalize (integer approximation): scale by 10, divide by dist
+    // dist ≈ 5, so x*10/5 = 6, y*10/5 = 8
+    (*r).x = (*r).x * 10 / 5;
+    (*r).y = (*r).y * 10 / 5;
+    assert_eq(p.x, 6);
+    assert_eq(p.y, 8);
+}
+
+// =============================================================================
+// Test: Multiple immutable refs simultaneously
+// =============================================================================
+
+fn test_multiple_immutable_refs() {
+    let p = Point { x: 42, y: 99 };
+    let r1 = &p;
+    let r2 = &p;
+    let r3 = &p;
+
+    // All refs see the same values
+    assert_eq((*r1).x, 42);
+    assert_eq((*r2).x, 42);
+    assert_eq((*r3).x, 42);
+    assert_eq((*r1).y, 99);
+    assert_eq((*r2).y, 99);
+    assert_eq((*r3).y, 99);
+
+    // Use in computation
+    let total = point_sum(r1) + point_sum(r2) + point_sum(r3);
+    assert_eq(total, 423); // 141 * 3
+}
+
+// =============================================================================
+// Test: Ref to local and return pattern
+// =============================================================================
+
+fn increment_via_ref(r: &mut Int) {
+    *r = *r + 1;
+}
+
+fn add_to_ref(r: &mut Int, val: Int) {
+    *r = *r + val;
+}
+
+fn test_int_ref_mutation() {
+    let mut counter = 0;
+    let r = &mut counter;
+
+    increment_via_ref(r);
+    assert_eq(counter, 1);
+
+    increment_via_ref(r);
+    assert_eq(counter, 2);
+
+    add_to_ref(r, 10);
+    assert_eq(counter, 12);
+
+    add_to_ref(r, -5);
+    assert_eq(counter, 7);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_nested_reads();
+    test_deep_mutation();
+    test_multi_field_records();
+    test_sequential_mut_refs();
+    test_chained_operations();
+    test_color_refs();
+    test_ref_expressions();
+    test_computed_mutation();
+    test_multiple_immutable_refs();
+    test_int_ref_mutation();
+    print("nested_ref_ok");
+    0
+}

@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, quote, syntax, error
+// @expected-error: parse
+// @description: Malformed quote expression should cause parse error
+
+// Quote with unclosed brace
+meta fn unclosed_quote() -> TokenStream {
+    quote {
+        let x = 42;
+    // Missing closing brace - M400: InvalidQuoteSyntax
+}
+
+fn main() {
+    let _ = @unclosed_quote();
+}

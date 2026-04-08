@@ -1,0 +1,206 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: production, patterns, error-handling, closures, iteration
+// @description: Production-ready patterns: error types, functional ops, complex data
+
+// Custom error types
+type AppError is NotFound(Text) | InvalidInput(Text) | Timeout;
+type Outcome<T> is Ok(T) | Err(AppError);
+
+// Data types
+type User is { name: Text, age: Int, active: Bool };
+
+implement User {
+    fn new(name: Text, age: Int) -> User {
+        User { name: name, age: age, active: true }
+    }
+
+    fn is_adult(&self) -> Bool {
+        self.age >= 18
+    }
+
+    fn greet(&self) -> Text {
+        f"Hello, {self.name}!"
+    }
+}
+
+// Functional operations on lists
+fn map_ints(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn filter_ints(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = [];
+    for item in items {
+        if (pred(item)) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+fn reduce_ints(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    for item in items {
+        acc = f(acc, item);
+    }
+    acc
+}
+
+fn find_user(name: Text) -> Outcome<User> {
+    if (name == "alice") {
+        Ok(User.new("Alice", 30))
+    } else if (name == "bob") {
+        Ok(User.new("Bob", 17))
+    } else {
+        Err(NotFound(f"User '{name}' not found"))
+    }
+}
+
+fn process_ages(ages: List<Int>) -> List<Int> {
+    // Pipeline: double -> filter > 30 -> sort ascending (bubble)
+    let doubled = map_ints(ages, |x: Int| -> Int { x * 2 });
+    let filtered = filter_ints(doubled, |x: Int| -> Bool { x > 30 });
+    filtered
+}
+
+fn main() -> Int {
+    // Test 1: User type with methods
+    let alice = User.new("Alice", 30);
+    if (!alice.is_adult()) {
+        print("FAIL test1a");
+        return 1;
+    }
+    let greeting = alice.greet();
+    if (greeting != "Hello, Alice!") {
+        print(f"FAIL test1b: {greeting}");
+        return 1;
+    }
+
+    // Test 2: Error handling with Outcome
+    let r1 = find_user("alice");
+    match r1 {
+        Ok(user) => {
+            if (user.name != "Alice" || user.age != 30) {
+                print("FAIL test2a");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL test2b");
+            return 1;
+        }
+    }
+
+    // Test 3: Error path
+    let r2 = find_user("unknown");
+    let is_err = r2 is Err;
+    if (!is_err) {
+        print("FAIL test3");
+        return 1;
+    }
+
+    // Test 4: Functional pipeline
+    let ages = [10, 15, 20, 25, 30, 35, 40];
+    let processed = process_ages(ages);
+    // doubled: 20,30,40,50,60,70,80
+    // > 30: 40,50,60,70,80
+    if (processed.len() != 5) {
+        print(f"FAIL test4: len={processed.len()}");
+        return 1;
+    }
+
+    // Test 5: reduce with for-in
+    let sum = reduce_ints(processed, 0, |a: Int, b: Int| -> Int { a + b });
+    // 40+50+60+70+80 = 300
+    if (sum != 300) {
+        print(f"FAIL test5: sum={sum}");
+        return 1;
+    }
+
+    // Test 6: Map with for-in iteration
+    let mut scores = Map.new();
+    scores.insert("math", 95);
+    scores.insert("science", 88);
+    scores.insert("english", 92);
+    scores.insert("history", 85);
+
+    let mut total_score = 0;
+    let mut count = 0;
+    for (subject, score) in scores {
+        total_score = total_score + score;
+        count = count + 1;
+    }
+    if (count != 4) {
+        print(f"FAIL test6a: count={count}");
+        return 1;
+    }
+    // 95+88+92+85 = 360
+    if (total_score != 360) {
+        print(f"FAIL test6b: total={total_score}");
+        return 1;
+    }
+
+    // Test 7: Nested data with methods
+    let bob = User.new("Bob", 17);
+    if (bob.is_adult()) {
+        print("FAIL test7");
+        return 1;
+    }
+
+    // Test 8: Complex match with guards
+    let values = [1, -5, 3, -2, 7, -1, 4];
+    let mut pos_sum = 0;
+    let mut neg_sum = 0;
+    for v in values {
+        if (v > 0) {
+            pos_sum = pos_sum + v;
+        } else {
+            neg_sum = neg_sum + v;
+        }
+    }
+    if (pos_sum != 15 || neg_sum != -8) {
+        print(f"FAIL test8: pos={pos_sum} neg={neg_sum}");
+        return 1;
+    }
+
+    // Test 9: List of computed results
+    let mut fibs = [1, 1];
+    let mut i = 2;
+    while (i < 10) {
+        let next = fibs[i - 1] + fibs[i - 2];
+        fibs.push(next);
+        i = i + 1;
+    }
+    // fib(10) = [1,1,2,3,5,8,13,21,34,55]
+    if (fibs[9] != 55) {
+        print(f"FAIL test9: fib[9]={fibs[9]}");
+        return 1;
+    }
+
+    // Test 10: Simple variant accumulation
+    type Counter is Zero | Count(Int);
+    let c1 = Count(42);
+    let c2 = Zero;
+    let mut csum = 0;
+    match c1 {
+        Count(v) => { csum = csum + v; }
+        Zero => {}
+    }
+    match c2 {
+        Count(v) => { csum = csum + v; }
+        Zero => {}
+    }
+    if (csum != 42) {
+        print(f"FAIL test10: csum={csum}");
+        return 1;
+    }
+
+    print("1002_production_patterns: PASS");
+    0
+}

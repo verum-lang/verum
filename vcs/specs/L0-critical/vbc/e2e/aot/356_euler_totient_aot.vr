@@ -1,0 +1,302 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, euler-totient, phi, number-theory, gcd
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for Euler's totient function phi(n).
+// phi(n) = count of integers 1..n that are coprime with n.
+// Tests:
+// 1. Direct computation via GCD counting
+// 2. Formula-based computation via prime factorization
+// 3. Properties: phi(1)=1, phi(p)=p-1 for prime p, multiplicativity
+// 4. Sum of phi(d) for d|n equals n
+// 5. Totient sieve for small values
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else if i == 9 { a.a9 }
+    else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 }
+    else if i == 14 { a.a14 } else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 },
+        a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 },
+        a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 },
+        a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 },
+        a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 },
+        a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 },
+        a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 },
+        a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 },
+        a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+fn gcd_val(a: Int, bv: Int) -> Int {
+    let mut x = a;
+    let mut y = bv;
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// Euler's totient by direct counting: count k in [1..n] with gcd(k,n)=1
+fn phi_naive(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut count = 0;
+    let mut k = 1;
+    while k <= n {
+        if gcd_val(k, n) == 1 {
+            count = count + 1;
+        }
+        k = k + 1;
+    }
+    count
+}
+
+// Euler's totient via formula: n * product of (1 - 1/p) for each prime factor p
+// Equivalent to: result = n, for each prime p|n: result = result / p * (p - 1)
+fn phi_formula(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut result = n;
+    let mut m = n;
+    let mut p = 2;
+    while p * p <= m {
+        if m % p == 0 {
+            // Remove all factors of p
+            while m % p == 0 {
+                m = m / p;
+            }
+            // Apply: result = result / p * (p - 1)
+            result = result / p * (p - 1);
+        }
+        p = p + 1;
+    }
+    // If m > 1, then m is a remaining prime factor
+    if m > 1 {
+        result = result / m * (m - 1);
+    }
+    result
+}
+
+// Check if n is prime
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    let mut i = 2;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Sum of phi(d) for all divisors d of n
+fn sum_phi_divisors(n: Int) -> Int {
+    let mut total = 0;
+    let mut d = 1;
+    while d <= n {
+        if n % d == 0 {
+            total = total + phi_naive(d);
+        }
+        d = d + 1;
+    }
+    total
+}
+
+// Compute totient sieve for 1..15 (store in Arr16, index 0 unused)
+fn totient_sieve() -> Arr16 {
+    let mut phi_arr = a16_zero();
+    // Initialize phi[i] = i
+    let mut i = 1;
+    while i <= 15 {
+        phi_arr = a16_set(phi_arr, i, i);
+        i = i + 1;
+    }
+    // Sieve: for each prime p, for each multiple m of p:
+    // phi[m] = phi[m] / p * (p - 1)
+    let mut p = 2;
+    while p <= 15 {
+        if a16_get(phi_arr, p) == p {
+            // p is prime (phi hasn't been modified yet)
+            let mut m = p;
+            while m <= 15 {
+                let cur = a16_get(phi_arr, m);
+                phi_arr = a16_set(phi_arr, m, cur / p * (p - 1));
+                m = m + p;
+            }
+        }
+        p = p + 1;
+    }
+    phi_arr
+}
+
+// === Tests ===
+
+fn test_phi_small_values() {
+    assert_eq(phi_naive(1), 1);
+    assert_eq(phi_naive(2), 1);
+    assert_eq(phi_naive(3), 2);
+    assert_eq(phi_naive(4), 2);
+    assert_eq(phi_naive(5), 4);
+    assert_eq(phi_naive(6), 2);
+    assert_eq(phi_naive(7), 6);
+    assert_eq(phi_naive(8), 4);
+    assert_eq(phi_naive(9), 6);
+    assert_eq(phi_naive(10), 4);
+    assert_eq(phi_naive(12), 4);
+}
+
+fn test_phi_formula_matches_naive() {
+    let mut n = 1;
+    while n <= 15 {
+        assert_eq(phi_formula(n), phi_naive(n));
+        n = n + 1;
+    }
+}
+
+fn test_phi_of_primes() {
+    // phi(p) = p - 1 for prime p
+    assert_eq(phi_naive(2), 1);
+    assert_eq(phi_naive(3), 2);
+    assert_eq(phi_naive(5), 4);
+    assert_eq(phi_naive(7), 6);
+    assert_eq(phi_naive(11), 10);
+    assert_eq(phi_naive(13), 12);
+}
+
+fn test_phi_prime_powers() {
+    // phi(p^k) = p^k - p^(k-1) = p^(k-1) * (p-1)
+    // phi(4) = phi(2^2) = 2^1 * 1 = 2
+    assert_eq(phi_naive(4), 2);
+    // phi(8) = phi(2^3) = 2^2 * 1 = 4
+    assert_eq(phi_naive(8), 4);
+    // phi(9) = phi(3^2) = 3^1 * 2 = 6
+    assert_eq(phi_naive(9), 6);
+}
+
+fn test_multiplicativity() {
+    // phi(mn) = phi(m) * phi(n) when gcd(m,n) = 1
+    // phi(3*4) = phi(3)*phi(4) = 2*2 = 4, phi(12) = 4 ✓
+    assert_eq(phi_naive(12), phi_naive(3) * phi_naive(4));
+    // phi(5*6) = phi(5)*phi(6) = 4*2 = 8, phi(30) = ?
+    // 30 = 2*3*5 -> phi = 30*(1-1/2)*(1-1/3)*(1-1/5) = 30*1/2*2/3*4/5 = 8
+    assert_eq(phi_naive(5) * phi_naive(6), 8);
+    // phi(3*5) = phi(15) = phi(3)*phi(5) = 2*4 = 8
+    assert_eq(phi_naive(15), phi_naive(3) * phi_naive(5));
+    // phi(2*7) = phi(14) = phi(2)*phi(7) = 1*6 = 6
+    assert_eq(phi_naive(14), phi_naive(2) * phi_naive(7));
+}
+
+fn test_sum_phi_divisors_equals_n() {
+    // Gauss's theorem: sum of phi(d) for d|n equals n
+    let mut n = 1;
+    while n <= 15 {
+        assert_eq(sum_phi_divisors(n), n);
+        n = n + 1;
+    }
+}
+
+fn test_totient_sieve() {
+    let sieve = totient_sieve();
+    // Compare sieve results with naive computation
+    let mut i = 1;
+    while i <= 15 {
+        assert_eq(a16_get(sieve, i), phi_naive(i));
+        i = i + 1;
+    }
+}
+
+fn test_phi_even_numbers() {
+    // For even n > 2, phi(n) is even
+    assert_eq(phi_naive(4) % 2, 0);
+    assert_eq(phi_naive(6) % 2, 0);
+    assert_eq(phi_naive(8) % 2, 0);
+    assert_eq(phi_naive(10) % 2, 0);
+    assert_eq(phi_naive(12) % 2, 0);
+    assert_eq(phi_naive(14) % 2, 0);
+}
+
+fn test_phi_upper_bound() {
+    // phi(n) <= n - 1 for n >= 2
+    // phi(n) = n - 1 only for prime n
+    let mut n = 2;
+    while n <= 15 {
+        let pv = phi_naive(n);
+        assert_eq(pv <= n - 1, true);
+        if is_prime(n) == 1 {
+            assert_eq(pv, n - 1);
+        } else {
+            assert_eq(pv < n - 1, true);
+        }
+        n = n + 1;
+    }
+}
+
+fn test_phi_coprime_count() {
+    // phi(12) = 4, coprimes are 1, 5, 7, 11
+    assert_eq(gcd_val(1, 12), 1);
+    assert_eq(gcd_val(5, 12), 1);
+    assert_eq(gcd_val(7, 12), 1);
+    assert_eq(gcd_val(11, 12), 1);
+    assert_eq(phi_naive(12), 4);
+    // phi(15) = 8, coprimes are 1,2,4,7,8,11,13,14
+    assert_eq(phi_naive(15), 8);
+    assert_eq(gcd_val(1, 15), 1);
+    assert_eq(gcd_val(2, 15), 1);
+    assert_eq(gcd_val(4, 15), 1);
+    assert_eq(gcd_val(7, 15), 1);
+    assert_eq(gcd_val(8, 15), 1);
+    assert_eq(gcd_val(11, 15), 1);
+    assert_eq(gcd_val(13, 15), 1);
+    assert_eq(gcd_val(14, 15), 1);
+}
+
+fn test_phi_1() {
+    assert_eq(phi_naive(1), 1);
+    assert_eq(phi_formula(1), 1);
+}
+
+fn main() -> Int {
+    test_phi_small_values();
+    test_phi_formula_matches_naive();
+    test_phi_of_primes();
+    test_phi_prime_powers();
+    test_multiplicativity();
+    test_sum_phi_divisors_equals_n();
+    test_totient_sieve();
+    test_phi_even_numbers();
+    test_phi_upper_bound();
+    test_phi_coprime_count();
+    test_phi_1();
+    print("[OK] 356_euler_totient_aot");
+    0
+}

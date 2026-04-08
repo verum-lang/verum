@@ -1,0 +1,107 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: try, recover, throw, error-handling
+// @description: Test try/recover/throw error handling
+
+fn safe_sqrt(n: Int) -> Int {
+    if n < 0 {
+        throw "negative input";
+    }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+fn test_try_recover() -> Int {
+    let result = try {
+        safe_sqrt(25)
+    } recover |e| {
+        -1
+    };
+    if result != 5 {
+        print(f"FAIL try_ok: {result}, expected 5");
+        return 1;
+    }
+
+    let err_result = try {
+        safe_sqrt(-1)
+    } recover |e| {
+        -1
+    };
+    if err_result != -1 {
+        print(f"FAIL try_err: {err_result}, expected -1");
+        return 1;
+    }
+    print("  try_recover: OK");
+    0
+}
+
+fn divide_checked(a: Int, b: Int) -> Int {
+    if b == 0 {
+        throw "division by zero";
+    }
+    a / b
+}
+
+fn test_nested_try() -> Int {
+    let result = try {
+        let x = divide_checked(100, 5);
+        let y = divide_checked(x, 2);
+        y
+    } recover |e| {
+        -999
+    };
+    if result != 10 {
+        print(f"FAIL nested: {result}, expected 10");
+        return 1;
+    }
+
+    let fail_result = try {
+        let x = divide_checked(100, 5);
+        let y = divide_checked(x, 0);
+        y
+    } recover |e| {
+        -999
+    };
+    if fail_result != -999 {
+        print(f"FAIL nested_fail: {fail_result}");
+        return 1;
+    }
+    print("  nested_try: OK");
+    0
+}
+
+fn test_recover_value() -> Int {
+    let val = try {
+        throw "oops";
+        42
+    } recover |e| {
+        0
+    };
+    if val != 0 {
+        print(f"FAIL recover_val: {val}, expected 0");
+        return 1;
+    }
+    print("  recover_value: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Try/Recover Tests:");
+    let mut failures = 0;
+    failures = failures + test_try_recover();
+    failures = failures + test_nested_try();
+    failures = failures + test_recover_value();
+
+    if failures == 0 {
+        print("All try/recover tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

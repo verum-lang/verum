@@ -1,0 +1,439 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, btreeset, compound-assignment, set-algebra
+// @description: Tests BTreeSet compound assignment operators (|=, &=, -=, ^=)
+//               and retain_from_set method
+
+mount core.*;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: retain_from_set
+// =============================================================================
+
+@test
+fn test_retain_from_set_basic() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3); a.insert(4);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(3); b.insert(5);
+    a.retain_from_set(&b);
+    assert_eq(a.len(), 2);
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+    assert(!a.contains(&1));
+    assert(!a.contains(&4));
+}
+
+@test
+fn test_retain_from_set_empty_other() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    a.retain_from_set(&b);
+    assert_eq(a.len(), 0);
+}
+
+@test
+fn test_retain_from_set_empty_self() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2);
+    a.retain_from_set(&b);
+    assert_eq(a.len(), 0);
+}
+
+@test
+fn test_retain_from_set_no_overlap() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3); b.insert(4);
+    a.retain_from_set(&b);
+    assert_eq(a.len(), 0);
+}
+
+@test
+fn test_retain_from_set_same_elements() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2); b.insert(3);
+    a.retain_from_set(&b);
+    assert_eq(a.len(), 3);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+}
+
+@test
+fn test_retain_from_set_other_unchanged() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(4);
+    a.retain_from_set(&b);
+    assert_eq(b.len(), 2);
+    assert(b.contains(&2));
+    assert(b.contains(&4));
+}
+
+// =============================================================================
+// Section 2: BitOrAssign (|=) — in-place union
+// =============================================================================
+
+@test
+fn test_bitor_assign_basic() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(3);
+    a |= &b;
+    assert_eq(a.len(), 3);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+}
+
+@test
+fn test_bitor_assign_disjoint() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3); b.insert(4);
+    a |= &b;
+    assert_eq(a.len(), 4);
+}
+
+@test
+fn test_bitor_assign_empty_rhs() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    a |= &b;
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_bitor_assign_empty_lhs() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2);
+    a |= &b;
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+}
+
+@test
+fn test_bitor_assign_identical() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2); b.insert(3);
+    a |= &b;
+    assert_eq(a.len(), 3);
+}
+
+@test
+fn test_bitor_assign_preserves_rhs() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(3);
+    a |= &b;
+    assert_eq(b.len(), 2);
+}
+
+// =============================================================================
+// Section 3: BitAndAssign (&=) — in-place intersection
+// =============================================================================
+
+@test
+fn test_bitand_assign_basic() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(3); b.insert(4);
+    a &= &b;
+    assert_eq(a.len(), 2);
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+}
+
+@test
+fn test_bitand_assign_no_overlap() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3); b.insert(4);
+    a &= &b;
+    assert_eq(a.len(), 0);
+}
+
+@test
+fn test_bitand_assign_subset() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2); b.insert(3); b.insert(4); b.insert(5);
+    a &= &b;
+    assert_eq(a.len(), 3);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+}
+
+@test
+fn test_bitand_assign_empty_rhs() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    a &= &b;
+    assert_eq(a.len(), 0);
+}
+
+@test
+fn test_bitand_assign_preserves_rhs() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(4);
+    a &= &b;
+    assert_eq(b.len(), 2);
+}
+
+// =============================================================================
+// Section 4: SubAssign (-=) — in-place difference
+// =============================================================================
+
+@test
+fn test_sub_assign_basic() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(4);
+    a -= &b;
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&3));
+    assert(!a.contains(&2));
+}
+
+@test
+fn test_sub_assign_no_overlap() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3); b.insert(4);
+    a -= &b;
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_sub_assign_full_overlap() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2); b.insert(3);
+    a -= &b;
+    assert_eq(a.len(), 0);
+}
+
+@test
+fn test_sub_assign_empty_rhs() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    a -= &b;
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_sub_assign_empty_lhs() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2);
+    a -= &b;
+    assert_eq(a.len(), 0);
+}
+
+@test
+fn test_sub_assign_preserves_rhs() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(3);
+    a -= &b;
+    assert_eq(b.len(), 2);
+}
+
+// =============================================================================
+// Section 5: BitXorAssign (^=) — in-place symmetric difference
+// =============================================================================
+
+@test
+fn test_bitxor_assign_basic() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(3); b.insert(4);
+    a ^= &b;
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&4));
+    assert(!a.contains(&2));
+    assert(!a.contains(&3));
+}
+
+@test
+fn test_bitxor_assign_disjoint() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3); b.insert(4);
+    a ^= &b;
+    assert_eq(a.len(), 4);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+    assert(a.contains(&4));
+}
+
+@test
+fn test_bitxor_assign_identical() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2); b.insert(3);
+    a ^= &b;
+    assert_eq(a.len(), 0);
+}
+
+@test
+fn test_bitxor_assign_empty_rhs() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    a ^= &b;
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_bitxor_assign_empty_lhs() {
+    let mut a: BTreeSet<Int> = BTreeSet.new();
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(2);
+    a ^= &b;
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+}
+
+@test
+fn test_bitxor_assign_preserves_rhs() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(4);
+    a ^= &b;
+    assert_eq(b.len(), 2);
+}
+
+// =============================================================================
+// Section 6: Consistency — compound ops match method results
+// =============================================================================
+
+@test
+fn test_bitor_assign_matches_union() {
+    let mut a1 = BTreeSet.new();
+    a1.insert(1); a1.insert(2); a1.insert(3);
+    let mut a2 = BTreeSet.new();
+    a2.insert(1); a2.insert(2); a2.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(3); b.insert(4); b.insert(5);
+
+    let result = a1.union(&b);
+    a2 |= &b;
+    assert_eq(a2.len(), result.len());
+}
+
+@test
+fn test_bitand_assign_matches_intersection() {
+    let mut a1 = BTreeSet.new();
+    a1.insert(1); a1.insert(2); a1.insert(3);
+    let mut a2 = BTreeSet.new();
+    a2.insert(1); a2.insert(2); a2.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(3); b.insert(4);
+
+    let result = a1.intersection(&b);
+    a2 &= &b;
+    assert_eq(a2.len(), result.len());
+}
+
+@test
+fn test_sub_assign_matches_difference() {
+    let mut a1 = BTreeSet.new();
+    a1.insert(1); a1.insert(2); a1.insert(3);
+    let mut a2 = BTreeSet.new();
+    a2.insert(1); a2.insert(2); a2.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(4);
+
+    let result = a1.difference(&b);
+    a2 -= &b;
+    assert_eq(a2.len(), result.len());
+}
+
+@test
+fn test_bitxor_assign_matches_symmetric_difference() {
+    let mut a1 = BTreeSet.new();
+    a1.insert(1); a1.insert(2); a1.insert(3);
+    let mut a2 = BTreeSet.new();
+    a2.insert(1); a2.insert(2); a2.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(2); b.insert(3); b.insert(4);
+
+    let result = a1.symmetric_difference(&b);
+    a2 ^= &b;
+    assert_eq(a2.len(), result.len());
+}
+
+// =============================================================================
+// Section 7: Chained compound operations
+// =============================================================================
+
+@test
+fn test_chained_union_then_intersect() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(3); b.insert(4);
+    let mut c = BTreeSet.new();
+    c.insert(2); c.insert(3);
+
+    a |= &b;  // a = {1, 2, 3, 4}
+    a &= &c;  // a = {2, 3}
+    assert_eq(a.len(), 2);
+    assert(a.contains(&2));
+    assert(a.contains(&3));
+}
+
+@test
+fn test_chained_difference_then_xor() {
+    let mut a = BTreeSet.new();
+    a.insert(1); a.insert(2); a.insert(3); a.insert(4); a.insert(5);
+    let mut b = BTreeSet.new();
+    b.insert(1); b.insert(5);
+    let mut c = BTreeSet.new();
+    c.insert(3); c.insert(6);
+
+    a -= &b;   // a = {2, 3, 4}
+    a ^= &c;   // a = {2, 4, 6}
+    assert_eq(a.len(), 3);
+    assert(a.contains(&2));
+    assert(a.contains(&4));
+    assert(a.contains(&6));
+}

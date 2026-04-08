@@ -1,0 +1,213 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, quote, hygiene, isolation, scoping
+// @description: Tests that variables in quotes are properly isolated from outer scope
+
+// =============================================================================
+// BASIC VARIABLE ISOLATION
+// =============================================================================
+
+// Quote should not capture outer 'x'
+meta fn isolation_basic() -> Bool {
+    let x = 10;  // Outer x
+
+    // Quote introduces its own 'x' - should be distinct
+    let ts = quote {
+        let x = 20;  // Inner x - hygienic, different binding
+        x
+    };
+
+    // The outer x should still be 10
+    x == 10
+}
+
+// Multiple levels of shadowing
+meta fn isolation_nested() -> Bool {
+    let a = 1;
+
+    let result = quote {
+        let a = 2;  // First shadow
+        {
+            let a = 3;  // Second shadow
+            a
+        }
+    };
+
+    // Outer 'a' unchanged
+    a == 1
+}
+
+// =============================================================================
+// FUNCTION PARAMETER ISOLATION
+// =============================================================================
+
+// Parameters in quoted functions are isolated
+meta fn isolation_fn_params() -> Bool {
+    let x = 100;
+    let y = 200;
+
+    let ts = quote {
+        fn add(x: Int, y: Int) -> Int {
+            x + y  // These x, y are parameters, not captured
+        }
+    };
+
+    // Outer x, y unchanged
+    x == 100 && y == 200
+}
+
+// Closure parameters are isolated
+meta fn isolation_closure_params() -> Bool {
+    let n = 42;
+
+    let ts = quote {
+        let f = |n: Int| n * 2;  // This 'n' is closure param
+    };
+
+    n == 42
+}
+
+// =============================================================================
+// PATTERN BINDING ISOLATION
+// =============================================================================
+
+// Match pattern bindings are isolated
+meta fn isolation_match_pattern() -> Bool {
+    let value = (1, 2);
+
+    let ts = quote {
+        match some_tuple {
+            (a, b) => a + b,  // a, b are pattern bindings
+            _ => 0,
+        }
+    };
+
+    // value unchanged
+    value == (1, 2)
+}
+
+// Let destructuring isolation
+meta fn isolation_let_pattern() -> Bool {
+    let x = "outer";
+    let y = "also outer";
+
+    let ts = quote {
+        let (x, y) = get_pair();  // x, y are new bindings
+        x.concat(y)
+    };
+
+    x == "outer" && y == "also outer"
+}
+
+// =============================================================================
+// LOOP VARIABLE ISOLATION
+// =============================================================================
+
+// For loop variable isolation
+meta fn isolation_for_loop() -> Bool {
+    let i = 999;
+
+    let ts = quote {
+        for i in 0..10 {  // Loop variable 'i' is isolated
+            process(i);
+        }
+    };
+
+    i == 999
+}
+
+// While let pattern isolation
+meta fn isolation_while_let() -> Bool {
+    let item = "preserved";
+
+    let ts = quote {
+        while let Some(item) = iterator.next() {
+            use_item(item);  // 'item' is pattern binding
+        }
+    };
+
+    item == "preserved"
+}
+
+// =============================================================================
+// SPLICE PRESERVES ISOLATION
+// =============================================================================
+
+// Spliced values don't break isolation
+meta fn isolation_with_splice() -> Bool {
+    let x = 50;
+    let val = 100;
+
+    let ts = quote {
+        let x = $val;  // x is new binding, val is spliced
+        x + 1
+    };
+
+    // Both preserved
+    x == 50 && val == 100
+}
+
+// Multiple splices preserve isolation
+meta fn isolation_multi_splice() -> Bool {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+
+    let ts = quote {
+        let a = $b + $c;  // New 'a', spliced b and c values
+    };
+
+    a == 1 && b == 2 && c == 3
+}
+
+// =============================================================================
+// NESTED QUOTE ISOLATION
+// =============================================================================
+
+// Inner quote maintains separate scope
+meta fn isolation_nested_quote() -> Bool {
+    let x = "level0";
+
+    let outer = quote {
+        let x = "level1";
+
+        let inner = quote {
+            let x = "level2";  // Separate from both
+            x
+        };
+
+        x  // Refers to level1 x
+    };
+
+    x == "level0"
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn main() {
+    // Basic isolation
+    @const assert(isolation_basic());
+    @const assert(isolation_nested());
+
+    // Function parameter isolation
+    @const assert(isolation_fn_params());
+    @const assert(isolation_closure_params());
+
+    // Pattern binding isolation
+    @const assert(isolation_match_pattern());
+    @const assert(isolation_let_pattern());
+
+    // Loop variable isolation
+    @const assert(isolation_for_loop());
+    @const assert(isolation_while_let());
+
+    // Splice preservation
+    @const assert(isolation_with_splice());
+    @const assert(isolation_multi_splice());
+
+    // Nested quote isolation
+    @const assert(isolation_nested_quote());
+}

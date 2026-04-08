@@ -1,0 +1,33 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, logical
+// @description: Test logical operator parsing
+
+fn test_logical_operators() {
+    let a = true && false;
+    let b = true || false;
+    let c = !true;
+    let d = !false;
+
+    // Chained
+    let e = a && b && c;
+    let f = a || b || c;
+    let g = !!a;
+
+    // Mixed precedence
+    let h = a && b || c;
+    let i = a || b && c;
+    let j = !a && b;
+    let k = !(a && b);
+    let l = !a || !b;
+
+    // With comparisons
+    let m = x > 0 && y < 10;
+    let n = x == 0 || y != 0;
+    let o = !(x > 0) && y < 10;
+
+    // Complex expressions
+    let p = (a && b) || (c && d);
+    let q = (a || b) && (c || d);
+    let r = !(!a && !b);
+}

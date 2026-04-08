@@ -1,0 +1,325 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L1
+// @tags: generics, bounds, negative-bounds, anti-traits
+
+/// Test for negative trait bounds.
+/// Negative bounds exclude types that implement specific traits.
+/// Syntax: T: !Trait
+///
+/// This file tests:
+/// - !Copy bound (value must be moved)
+/// - !Send bound (not thread-safe)
+/// - !Sync bound (not shareable)
+/// - !Clone bound (truly unique)
+/// - Combined positive and negative bounds
+
+// =============================================================================
+// SECTION 1: !Copy Bound
+// =============================================================================
+
+/// Function that requires ownership (value cannot be implicitly copied)
+fn must_move<T: !Copy>(value: T) -> T {
+    // This function takes ownership; value cannot be implicitly copied
+    value
+}
+
+/// Consume a non-copyable value
+fn consume<T: !Copy>(value: T) {
+    // Value is dropped here, cannot be used after this call
+    drop(value);
+}
+
+/// Transfer ownership explicitly
+fn transfer_ownership<T: !Copy>(value: T) -> T {
+    // The caller must give up ownership
+    value
+}
+
+// =============================================================================
+// SECTION 2: !Clone Bound (Truly Unique)
+// =============================================================================
+
+/// Handle that cannot be duplicated
+type UniqueHandle<T: !Clone> is {
+    inner: T,
+};
+
+implement UniqueHandle<T> {
+    fn new(inner: T) -> UniqueHandle<T> {
+        UniqueHandle { inner }
+    }
+
+    fn into_inner(self) -> T {
+        self.inner
+    }
+
+    // Note: Cannot implement clone() because T: !Clone
+}
+
+/// Function requiring unique ownership
+fn take_unique<T: !Clone>(value: T) -> T {
+    // Cannot clone, must work with the value directly
+    value
+}
+
+// =============================================================================
+// SECTION 3: !Send Bound (Thread-Local)
+// =============================================================================
+
+/// Process a value that cannot be sent between threads
+fn local_only<T: !Send>(value: T) {
+    // This value must stay in the current thread
+    print("Processing thread-local value");
+    drop(value);
+}
+
+/// Thread-local resource wrapper
+type ThreadLocal<T: !Send> is {
+    value: T,
+};
+
+implement ThreadLocal<T> {
+    fn new(value: T) -> ThreadLocal<T> {
+        ThreadLocal { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn get_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
+// =============================================================================
+// SECTION 4: !Sync Bound (Not Shareable)
+// =============================================================================
+
+/// Work with a value whose reference cannot be shared across threads
+fn single_thread<T: !Sync>(value: &T) {
+    // Reference to this value cannot be shared across threads
+    print("Using single-threaded reference");
+}
+
+/// Wrapper for non-sync types
+type UnsafeCell<T: !Sync> is {
+    value: T,
+};
+
+implement UnsafeCell<T> {
+    fn new(value: T) -> UnsafeCell<T> {
+        UnsafeCell { value }
+    }
+
+    // Interior mutability pattern
+    fn get_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
+// =============================================================================
+// SECTION 5: Combined Positive and Negative Bounds
+// =============================================================================
+
+/// Clone but not Copy - must explicitly clone
+fn owned_non_copyable<T: Clone + !Copy>(value: T) -> (T, T) {
+    // T can be cloned but not copied - must explicitly clone
+    let copy = value.clone();
+    (value, copy)
+}
+
+/// Debug but move-only
+fn debug_and_move<T: Debug + !Copy>(value: T) {
+    print(f"Value: {value:?}");
+    drop(value);  // Value consumed
+}
+
+/// Default available but not clonable
+fn heap_only<T: Default + !Copy>(value: T) -> Heap<T> {
+    // T cannot be copied, must be heap allocated
+    Heap.new(value)
+}
+
+/// Complex bounds: Debug + Clone + !Copy
+fn clone_debug_move<T: Debug + Clone + !Copy>(value: T) -> (T, T) {
+    print(f"Cloning: {value:?}");
+    let cloned = value.clone();
+    print(f"Cloned:  {cloned:?}");
+    (value, cloned)
+}
+
+// =============================================================================
+// SECTION 6: Negative Bounds in Where Clauses
+// =============================================================================
+
+/// Using negative bounds in where clause
+fn specialized<T>(value: T) -> T
+where
+    T: Debug,
+    T: !Copy,
+{
+    print(f"Moving value: {value:?}");
+    value
+}
+
+/// Multiple negative bounds
+fn very_restricted<T>(value: T)
+where
+    T: Debug,
+    T: !Copy,
+    T: !Send,
+{
+    print(f"Thread-local, move-only value: {value:?}");
+    drop(value);
+}
+
+// =============================================================================
+// SECTION 7: Example Non-Copy Types
+// =============================================================================
+
+/// A type that intentionally doesn't implement Copy
+type NonCopyable is {
+    data: Heap<Int>,
+};
+
+implement NonCopyable {
+    fn new(value: Int) -> NonCopyable {
+        NonCopyable { data: Heap.new(value) }
+    }
+
+    fn get(&self) -> Int {
+        *self.data
+    }
+}
+
+implement Clone for NonCopyable {
+    fn clone(&self) -> NonCopyable {
+        NonCopyable { data: Heap.new(*self.data) }
+    }
+}
+
+implement Debug for NonCopyable {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"NonCopyable({*self.data})")
+    }
+}
+
+// NonCopyable does NOT implement Copy
+
+/// Unique resource - cannot be cloned at all
+type UniqueResource is {
+    id: Int,
+    data: Heap<Text>,
+};
+
+implement UniqueResource {
+    fn new(id: Int, data: Text) -> UniqueResource {
+        UniqueResource { id, data: Heap.new(data) }
+    }
+
+    fn id(&self) -> Int {
+        self.id
+    }
+}
+
+implement Debug for UniqueResource {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"UniqueResource(id={self.id})")
+    }
+}
+
+// UniqueResource implements neither Clone nor Copy
+
+// =============================================================================
+// SECTION 8: Main Test Cases
+// =============================================================================
+
+fn main() {
+    // Test must_move with non-Copy types
+    let nc = NonCopyable.new(42);
+    let moved = must_move(nc);
+    // nc is no longer valid here
+    assert(moved.get() == 42);
+
+    // Test consume
+    let nc2 = NonCopyable.new(100);
+    consume(nc2);
+    // nc2 is no longer valid
+
+    // Test owned_non_copyable (Clone + !Copy)
+    let text: Text = "hello";  // Text is Clone but not Copy
+    let (original, cloned) = owned_non_copyable(text);
+    assert(original == "hello");
+    assert(cloned == "hello");
+
+    // Test clone_debug_move
+    let nc3 = NonCopyable.new(200);
+    let (orig, copy) = clone_debug_move(nc3);
+    assert(orig.get() == 200);
+    assert(copy.get() == 200);
+
+    // Test UniqueHandle
+    let resource = UniqueResource.new(1, "resource data");
+    let handle = UniqueHandle.new(resource);
+    let inner = handle.into_inner();
+    assert(inner.id() == 1);
+    // handle is no longer valid
+
+    // Test specialized
+    let list: List<Int> = [1, 2, 3];  // List is !Copy
+    let moved_list = specialized(list);
+    assert(moved_list == [1, 2, 3]);
+
+    // Test heap_only
+    let nc4 = NonCopyable.new(300);
+    let boxed = heap_only(nc4);
+    assert(boxed.get() == 300);
+
+    // Test ThreadLocal wrapper
+    let mut local: ThreadLocal<NonCopyable> = ThreadLocal.new(NonCopyable.new(400));
+    assert(local.get().get() == 400);
+
+    // Negative bounds prevent incorrect usage at compile time:
+    // These would be compile errors:
+    //
+    // let x: Int = 5;
+    // must_move(x);  // ERROR: Int implements Copy
+    //
+    // let y: Bool = true;
+    // must_move(y);  // ERROR: Bool implements Copy
+    //
+    // fn bad<T: Copy + !Copy>(x: T) {}  // ERROR: contradictory bounds
+
+    // Test transfer_ownership
+    let nc5 = NonCopyable.new(500);
+    let transferred = transfer_ownership(nc5);
+    assert(transferred.get() == 500);
+
+    // Verify move semantics work correctly
+    let nc6 = NonCopyable.new(600);
+    let moved_again = must_move(nc6);
+    // Using nc6 here would be a compile error:
+    // print(nc6.get());  // ERROR: value moved
+
+    assert(moved_again.get() == 600);
+}
+
+// =============================================================================
+// SECTION 9: Error Cases (documented for bound_errors.vr)
+// =============================================================================
+//
+// The following would be type errors caught at compile time:
+//
+// 1. Calling must_move with Copy type:
+//    let x: Int = 5;
+//    must_move(x);  // ERROR: Int implements Copy, violates !Copy bound
+//
+// 2. Contradictory bounds:
+//    fn impossible<T: Copy + !Copy>(x: T) {}  // ERROR: T cannot be both Copy and !Copy
+//
+// 3. Using moved value:
+//    let nc = NonCopyable.new(1);
+//    let _ = must_move(nc);
+//    let _ = nc.get();  // ERROR: use after move

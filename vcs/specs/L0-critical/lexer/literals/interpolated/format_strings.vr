@@ -1,0 +1,227 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, interpolated, format
+
+// Format string literals with interpolation (f"...")
+
+fn test_basic_variable_interpolation() {
+    // Basic variable interpolation
+    let name = "Alice";
+    let greeting = f"Hello, {name}!";
+
+    let age = 30;
+    let intro = f"I am {age} years old.";
+}
+
+fn test_multiple_interpolations() {
+    // Multiple interpolations
+    let first = "John";
+    let last = "Doe";
+    let full_name = f"{first} {last}";
+}
+
+fn test_expression_interpolation() {
+    // Expression interpolation
+    let x = 10;
+    let y = 20;
+    let sum = f"Sum: {x + y}";
+    let product = f"Product: {x * y}";
+}
+
+fn test_method_call_interpolation() {
+    // Method call interpolation
+    let text = "hello";
+    let upper = f"Uppercase: {text.to_upper()}";
+    let len = f"Length: {text.len()}";
+}
+
+// Struct definition
+type Person is { name: Text, age: Int };
+
+fn test_nested_field_access() {
+    // Nested field access
+    let person = Person { name: "Bob", age: 25 };
+    let person_info = f"Name: {person.name}, Age: {person.age}";
+}
+
+fn test_array_indexing() {
+    // Array indexing
+    let items = ["apple", "banana", "cherry"];
+    let first_item = f"First: {items[0]}";
+    let second_item = f"Second: {items[1]}";
+}
+
+fn test_conditional_expressions() {
+    // Conditional expressions (if supported in interpolation)
+    let value = 42;
+    let description = f"Value is {if value > 0 { "positive" } else { "non-positive" }}";
+}
+
+fn test_format_specifiers() {
+    let value = 42;
+    // Format specifiers (if supported)
+    let pi = 3.14159;
+    let formatted_pi = f"Pi: {pi:.2}";         // Two decimal places
+    let padded = f"Number: {value:05}";        // Zero-padded
+    let hex_format = f"Hex: {value:x}";        // Hexadecimal
+    let binary_format = f"Binary: {value:b}";  // Binary
+}
+
+fn test_width_and_alignment() {
+    let name = "Alice";
+    // Width and alignment
+    let left_align = f"|{name:<10}|";
+    let right_align = f"|{name:>10}|";
+    let center_align = f"|{name:^10}|";
+}
+
+fn test_fill_characters() {
+    let name = "Alice";
+    let value = 42;
+    // Fill characters
+    let fill_zeros = f"{value:0>5}";
+    let fill_dots = f"{name:.>10}";
+}
+
+fn test_sign_formatting() {
+    // Sign formatting
+    let positive = 42;
+    let negative = -42;
+    let with_sign = f"{positive:+}";
+    let space_sign = f"{positive: }";
+}
+
+fn test_numeric_formatting() {
+    let pi = 3.14159;
+    // Numeric formatting
+    let big_number = 1234567;
+    let with_commas = f"{big_number:,}";
+    let scientific = f"{pi:e}";
+    let percentage = f"{0.75:%}";
+}
+
+fn test_debug_formatting() {
+    let person = Person { name: "Bob", age: 25 };
+    // Debug formatting
+    let debug_value = f"{person:?}";
+    let pretty_debug = f"{person:#?}";
+}
+
+fn test_escaping_braces() {
+    // Escaping braces
+    let literal_brace = f"Literal: {{";
+    let both_braces = f"Code: {{ value }}";
+}
+
+fn test_empty_interpolation_content() {
+    let name = "Alice";
+    // Empty interpolation content
+    let empty_var = "";
+    let with_empty = f"Start{empty_var}End";
+
+    // Multiple same variable
+    let repeat = f"{name} {name} {name}";
+}
+
+fn test_adjacent_interpolations() {
+    let first = "John";
+    let last = "Doe";
+    let name = "Alice";
+    // Adjacent interpolations
+    let adjacent = f"{first}{last}";
+
+    // Interpolation at boundaries
+    let at_start = f"{name} is here";
+    let at_end = f"Hello {name}";
+    let only_interp = f"{name}";
+}
+
+// In function calls
+fn format_greeting(name: Text) -> Text {
+    f"Hello, {name}! Welcome!"
+}
+
+fn test_function_call_interpolation() {
+    let formatted_greeting = format_greeting("Charlie");
+}
+
+fn test_arrays_with_interpolation() {
+    let name = "Alice";
+    let age = 30;
+    // In arrays
+    let messages = [
+        f"User: {name}",
+        f"Age: {age}",
+        f"Status: active",
+    ];
+}
+
+fn test_complex_expressions() {
+    // Complex expressions
+    let a = 5;
+    let b = 3;
+    let complex = f"a={a}, b={b}, a+b={a + b}, a*b={a * b}, a/b={a / b}";
+}
+
+// Nested function calls
+fn double_fn(n: Int) -> Int { n * 2 }
+
+fn test_nested_call_interpolation() {
+    let value = 42;
+    let nested_call = f"Doubled: {double_fn(value)}";
+}
+
+fn test_match_in_interpolation() {
+    // Match in interpolation (if supported)
+    let status_code = 200;
+    let status_msg = f"Status: {match status_code { 200 => "OK", 404 => "Not Found", _ => "Unknown" }}";
+}
+
+fn test_multiline_format_strings() {
+    let name = "Alice";
+    let age = 30;
+    // Multiline format strings (if supported)
+    let multiline = f"""
+Name: {name}
+Age: {age}
+Status: Active
+""";
+}
+
+fn test_format_string_with_escapes() {
+    let value = 42;
+    let name = "Alice";
+    // Format string with escapes
+    let with_newline = f"Line1\nLine2: {value}";
+    let with_tab = f"Col1\t{name}\tCol3";
+}
+
+fn test_url_building() {
+    // URL building
+    let base_url = "https://api.example.com";
+    let endpoint = "users";
+    let id = 123;
+    let url = f"{base_url}/{endpoint}/{id}";
+}
+
+fn test_path_building() {
+    // Path building
+    let directory = "/home/user";
+    let filename = "document.txt";
+    let path = f"{directory}/{filename}";
+}
+
+fn test_json_like_formatting() {
+    let name = "Alice";
+    let age = 30;
+    // JSON-like formatting
+    let json_like = f"{{\"name\": \"{name}\", \"age\": {age}}}";
+}
+
+fn test_sql_query_building() {
+    let id = 123;
+    // SQL query building (use sql"" for safety!)
+    let table = "users";
+    let query = f"SELECT * FROM {table} WHERE id = {id}";
+}

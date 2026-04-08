@@ -1,0 +1,481 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: primitives, sized-integers, parity, pow, checked-div, conversions
+// @description: Tests pow, is_positive, is_negative, checked_div, in_range, to_float for all sized integer types
+
+mount core.base.primitives.{
+    Int8, Int16, Int32, Int64, Int128, ISize,
+    UInt8, UInt16, UInt32, UInt64, UInt128, USize
+};
+
+// =============================================================================
+// pow() for signed types
+// =============================================================================
+
+@test
+fn test_int8_pow() {
+    let base = 2 as Int8;
+    let result = base.pow(3);
+    assert_eq(result.to_int(), 8);
+
+    let one = 1 as Int8;
+    assert_eq(one.pow(100).to_int(), 1);
+
+    let neg = -2 as Int8;
+    assert_eq(neg.pow(3).to_int(), -8);
+
+    let any = 5 as Int8;
+    assert_eq(any.pow(0).to_int(), 1);
+}
+
+@test
+fn test_int16_pow() {
+    let base = 3 as Int16;
+    let result = base.pow(4);
+    assert_eq(result.to_int(), 81);
+
+    let neg = -3 as Int16;
+    assert_eq(neg.pow(2).to_int(), 9);
+    assert_eq(neg.pow(3).to_int(), -27);
+
+    let any = 7 as Int16;
+    assert_eq(any.pow(0).to_int(), 1);
+}
+
+@test
+fn test_int32_pow() {
+    let base = 5 as Int32;
+    assert_eq(base.pow(3).to_int(), 125);
+
+    let two = 2 as Int32;
+    assert_eq(two.pow(10).to_int(), 1024);
+
+    let neg = -2 as Int32;
+    assert_eq(neg.pow(4).to_int(), 16);
+}
+
+@test
+fn test_int64_pow() {
+    let base = 2 as Int64;
+    assert_eq(base.pow(20).to_int(), 1048576);
+
+    let three = 3 as Int64;
+    assert_eq(three.pow(10).to_int(), 59049);
+}
+
+@test
+fn test_int128_pow() {
+    let base = 2 as Int128;
+    assert_eq(base.pow(10).to_int(), 1024);
+
+    let five = 5 as Int128;
+    assert_eq(five.pow(3).to_int(), 125);
+}
+
+@test
+fn test_isize_pow() {
+    let base = 2 as ISize;
+    assert_eq(base.pow(16).to_int(), 65536);
+}
+
+// =============================================================================
+// pow() for unsigned types
+// =============================================================================
+
+@test
+fn test_uint8_pow() {
+    let base = 2 as UInt8;
+    assert_eq(base.pow(7).to_int(), 128);
+
+    let three = 3 as UInt8;
+    assert_eq(three.pow(3).to_int(), 27);
+
+    let any = 5 as UInt8;
+    assert_eq(any.pow(0).to_int(), 1);
+}
+
+@test
+fn test_uint16_pow() {
+    let base = 2 as UInt16;
+    assert_eq(base.pow(15).to_int(), 32768);
+
+    let ten = 10 as UInt16;
+    assert_eq(ten.pow(3).to_int(), 1000);
+}
+
+@test
+fn test_uint32_pow() {
+    let base = 2 as UInt32;
+    assert_eq(base.pow(20).to_int(), 1048576);
+}
+
+@test
+fn test_uint64_pow() {
+    let base = 2 as UInt64;
+    assert_eq(base.pow(32).to_int(), 4294967296);
+}
+
+@test
+fn test_uint128_pow() {
+    let base = 2 as UInt128;
+    assert_eq(base.pow(10).to_int(), 1024);
+}
+
+@test
+fn test_usize_pow() {
+    let base = 3 as USize;
+    assert_eq(base.pow(5).to_int(), 243);
+}
+
+// =============================================================================
+// is_positive / is_negative for signed types
+// =============================================================================
+
+@test
+fn test_int8_sign_checks() {
+    let pos = 42 as Int8;
+    let neg = -42 as Int8;
+    let zero = 0 as Int8;
+
+    assert(pos.is_positive());
+    assert(!pos.is_negative());
+
+    assert(!neg.is_positive());
+    assert(neg.is_negative());
+
+    assert(!zero.is_positive());
+    assert(!zero.is_negative());
+}
+
+@test
+fn test_int16_sign_checks() {
+    assert((100 as Int16).is_positive());
+    assert((-100 as Int16).is_negative());
+    assert(!(0 as Int16).is_positive());
+    assert(!(0 as Int16).is_negative());
+}
+
+@test
+fn test_int32_sign_checks() {
+    assert((1 as Int32).is_positive());
+    assert((-1 as Int32).is_negative());
+    assert(!(0 as Int32).is_positive());
+}
+
+@test
+fn test_int64_sign_checks() {
+    assert((1000000 as Int64).is_positive());
+    assert((-1000000 as Int64).is_negative());
+}
+
+@test
+fn test_int128_sign_checks() {
+    assert((1 as Int128).is_positive());
+    assert((-1 as Int128).is_negative());
+    assert(!(0 as Int128).is_positive());
+    assert(!(0 as Int128).is_negative());
+}
+
+@test
+fn test_isize_sign_checks() {
+    assert((42 as ISize).is_positive());
+    assert((-42 as ISize).is_negative());
+    assert(!(0 as ISize).is_positive());
+}
+
+// =============================================================================
+// checked_div for all types
+// =============================================================================
+
+@test
+fn test_int8_checked_div() {
+    let a = 100 as Int8;
+    let b = 10 as Int8;
+    let zero = 0 as Int8;
+
+    let result = a.checked_div(b);
+    assert(result is Some);
+
+    let div_zero = a.checked_div(zero);
+    assert(div_zero is None);
+}
+
+@test
+fn test_int16_checked_div() {
+    let a = 1000 as Int16;
+    let result = a.checked_div(10 as Int16);
+    assert(result is Some);
+    assert(a.checked_div(0 as Int16) is None);
+}
+
+@test
+fn test_int32_checked_div() {
+    let a = 100000 as Int32;
+    assert(a.checked_div(100 as Int32) is Some);
+    assert(a.checked_div(0 as Int32) is None);
+}
+
+@test
+fn test_int64_checked_div() {
+    let a = 1000000 as Int64;
+    assert(a.checked_div(1000 as Int64) is Some);
+    assert(a.checked_div(0 as Int64) is None);
+}
+
+@test
+fn test_int128_checked_div() {
+    let a = 100 as Int128;
+    assert(a.checked_div(10 as Int128) is Some);
+    assert(a.checked_div(0 as Int128) is None);
+}
+
+@test
+fn test_isize_checked_div() {
+    let a = 42 as ISize;
+    assert(a.checked_div(7 as ISize) is Some);
+    assert(a.checked_div(0 as ISize) is None);
+}
+
+@test
+fn test_uint8_checked_div() {
+    let a = 200 as UInt8;
+    assert(a.checked_div(10 as UInt8) is Some);
+    assert(a.checked_div(0 as UInt8) is None);
+}
+
+@test
+fn test_uint16_checked_div() {
+    let a = 1000 as UInt16;
+    assert(a.checked_div(10 as UInt16) is Some);
+    assert(a.checked_div(0 as UInt16) is None);
+}
+
+@test
+fn test_uint32_checked_div() {
+    let a = 100000 as UInt32;
+    assert(a.checked_div(100 as UInt32) is Some);
+    assert(a.checked_div(0 as UInt32) is None);
+}
+
+@test
+fn test_uint64_checked_div() {
+    let a = 1000000 as UInt64;
+    assert(a.checked_div(1000 as UInt64) is Some);
+    assert(a.checked_div(0 as UInt64) is None);
+}
+
+@test
+fn test_uint128_checked_div() {
+    let a = 100 as UInt128;
+    assert(a.checked_div(10 as UInt128) is Some);
+    assert(a.checked_div(0 as UInt128) is None);
+}
+
+@test
+fn test_usize_checked_div() {
+    let a = 42 as USize;
+    assert(a.checked_div(6 as USize) is Some);
+    assert(a.checked_div(0 as USize) is None);
+}
+
+// =============================================================================
+// in_range for all types
+// =============================================================================
+
+@test
+fn test_int8_in_range() {
+    let val = 5 as Int8;
+    assert(val.in_range(0 as Int8, 10 as Int8));
+    assert(!val.in_range(6 as Int8, 10 as Int8));
+    assert(!val.in_range(0 as Int8, 5 as Int8));  // exclusive end
+    assert(val.in_range(5 as Int8, 6 as Int8));    // inclusive start
+}
+
+@test
+fn test_int16_in_range() {
+    let val = 100 as Int16;
+    assert(val.in_range(0 as Int16, 200 as Int16));
+    assert(!val.in_range(101 as Int16, 200 as Int16));
+}
+
+@test
+fn test_int32_in_range() {
+    let val = 50000 as Int32;
+    assert(val.in_range(0 as Int32, 100000 as Int32));
+}
+
+@test
+fn test_uint8_in_range() {
+    let val = 128 as UInt8;
+    assert(val.in_range(100 as UInt8, 200 as UInt8));
+    assert(!val.in_range(129 as UInt8, 200 as UInt8));
+}
+
+@test
+fn test_uint16_in_range() {
+    let val = 1000 as UInt16;
+    assert(val.in_range(0 as UInt16, 2000 as UInt16));
+}
+
+@test
+fn test_uint32_in_range() {
+    let val = 50000 as UInt32;
+    assert(val.in_range(0 as UInt32, 100000 as UInt32));
+}
+
+@test
+fn test_uint64_in_range() {
+    let val = 1000 as UInt64;
+    assert(val.in_range(0 as UInt64, 2000 as UInt64));
+}
+
+@test
+fn test_isize_in_range() {
+    let val = 42 as ISize;
+    assert(val.in_range(-100 as ISize, 100 as ISize));
+}
+
+@test
+fn test_usize_in_range() {
+    let val = 42 as USize;
+    assert(val.in_range(0 as USize, 100 as USize));
+}
+
+// =============================================================================
+// to_float for all types
+// =============================================================================
+
+@test
+fn test_int8_to_float() {
+    let val = 42 as Int8;
+    let f: Float = val.to_float();
+    assert_eq(f, 42.0);
+}
+
+@test
+fn test_int16_to_float() {
+    let val = 1000 as Int16;
+    let f: Float = val.to_float();
+    assert_eq(f, 1000.0);
+}
+
+@test
+fn test_int32_to_float() {
+    let val = 100000 as Int32;
+    let f: Float = val.to_float();
+    assert_eq(f, 100000.0);
+}
+
+@test
+fn test_int64_to_float() {
+    let val = 1000000 as Int64;
+    let f: Float = val.to_float();
+    assert_eq(f, 1000000.0);
+}
+
+@test
+fn test_uint8_to_float() {
+    let val = 255 as UInt8;
+    let f: Float = val.to_float();
+    assert_eq(f, 255.0);
+}
+
+@test
+fn test_uint16_to_float() {
+    let val = 65535 as UInt16;
+    let f: Float = val.to_float();
+    assert_eq(f, 65535.0);
+}
+
+@test
+fn test_uint32_to_float() {
+    let val = 100000 as UInt32;
+    let f: Float = val.to_float();
+    assert_eq(f, 100000.0);
+}
+
+@test
+fn test_isize_to_float() {
+    let val = -42 as ISize;
+    let f: Float = val.to_float();
+    assert_eq(f, -42.0);
+}
+
+@test
+fn test_usize_to_float() {
+    let val = 100 as USize;
+    let f: Float = val.to_float();
+    assert_eq(f, 100.0);
+}
+
+// =============================================================================
+// pow edge cases
+// =============================================================================
+
+@test
+fn test_pow_zero_exponent() {
+    // x^0 = 1 for all x
+    assert_eq((0 as Int8).pow(0).to_int(), 1);
+    assert_eq((0 as UInt8).pow(0).to_int(), 1);
+    assert_eq((0 as Int16).pow(0).to_int(), 1);
+    assert_eq((0 as UInt16).pow(0).to_int(), 1);
+    assert_eq((0 as Int32).pow(0).to_int(), 1);
+    assert_eq((0 as UInt32).pow(0).to_int(), 1);
+    assert_eq((0 as Int64).pow(0).to_int(), 1);
+    assert_eq((0 as UInt64).pow(0).to_int(), 1);
+}
+
+@test
+fn test_pow_one_exponent() {
+    // x^1 = x
+    assert_eq((42 as Int8).pow(1).to_int(), 42);
+    assert_eq((42 as UInt8).pow(1).to_int(), 42);
+    assert_eq((1000 as Int16).pow(1).to_int(), 1000);
+    assert_eq((1000 as UInt16).pow(1).to_int(), 1000);
+}
+
+@test
+fn test_pow_base_one() {
+    // 1^n = 1 for all n
+    assert_eq((1 as Int8).pow(50).to_int(), 1);
+    assert_eq((1 as UInt8).pow(50).to_int(), 1);
+    assert_eq((1 as Int32).pow(1000).to_int(), 1);
+    assert_eq((1 as UInt32).pow(1000).to_int(), 1);
+}
+
+@test
+fn test_pow_negative_base() {
+    // negative base with even exponent = positive
+    assert_eq((-2 as Int8).pow(2).to_int(), 4);
+    assert_eq((-2 as Int8).pow(4).to_int(), 16);
+    // negative base with odd exponent = negative
+    assert_eq((-2 as Int8).pow(1).to_int(), -2);
+    assert_eq((-2 as Int8).pow(3).to_int(), -8);
+}
+
+// =============================================================================
+// checked_div edge cases
+// =============================================================================
+
+@test
+fn test_checked_div_exact() {
+    // Exact divisions
+    let a = 100 as Int16;
+    let result = a.checked_div(10 as Int16);
+    assert(result is Some);
+}
+
+@test
+fn test_checked_div_truncation() {
+    // Integer division truncates
+    let a = 7 as Int8;
+    let result = a.checked_div(2 as Int8);
+    assert(result is Some);
+}
+
+@test
+fn test_checked_div_negative() {
+    let a = -100 as Int16;
+    let result = a.checked_div(10 as Int16);
+    assert(result is Some);
+}

@@ -1,0 +1,15 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M301
+// @description: Tests that environment access is forbidden in meta functions
+// @tags: meta-system, builtins, runtime, environment, sandbox
+
+// Test env is forbidden in meta context
+// Should fail because env() is a non-deterministic operation
+meta fn test_env_forbidden() -> Text {
+    env("PATH")  // ERROR: M301 - environment operations are forbidden
+}
+
+fn main() {
+    @const test_env_without_context();
+}

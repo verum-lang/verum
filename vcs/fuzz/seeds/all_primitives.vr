@@ -1,0 +1,83 @@
+// All primitive types in Verum
+// Tests parsing and type checking of basic types
+
+use verum_core.base.{List, Text, Map, Maybe, Set}
+
+fn main() {
+    // Integer types
+    let int_val: Int = 42;
+    let int_neg: Int = -100;
+    let int_zero: Int = 0;
+    let int_max: Int = 9223372036854775807;
+    let int_min: Int = -9223372036854775808;
+
+    // Floating point types
+    let float_val: Float = 3.14159;
+    let float_neg: Float = -2.718;
+    let float_zero: Float = 0.0;
+    let float_exp: Float = 1.23e10;
+    let float_exp_neg: Float = 4.56e-5;
+
+    // Boolean type
+    let bool_true: Bool = true;
+    let bool_false: Bool = false;
+
+    // Text (string) type
+    let text_empty: Text = "";
+    let text_hello: Text = "Hello, Verum!";
+    let text_unicode: Text = "Unicode: \u{1F600} \u{1F680}";
+    let text_escape: Text = "Escapes: \n\t\r\\\"";
+    let text_multiline: Text = "Line 1
+Line 2
+Line 3";
+
+    // Unit type
+    let unit_val: Unit = ();
+
+    // Character type (if supported)
+    let char_a: Char = 'a';
+    let char_newline: Char = '\n';
+    let char_unicode: Char = '\u{03B1}';
+
+    // Byte type
+    let byte_val: Byte = 0xFF;
+    let byte_zero: Byte = 0x00;
+
+    // Assertions to verify values
+    assert int_val == 42;
+    assert float_val > 3.14;
+    assert bool_true == true;
+    assert text_hello == "Hello, Verum!";
+}
+
+// Function with each primitive type
+fn primitive_params(
+    i: Int,
+    f: Float,
+    b: Bool,
+    t: Text,
+    u: Unit,
+) -> Bool {
+    i > 0 && f > 0.0 && b && len(t) > 0
+}
+
+// Functions returning each primitive
+fn return_int() -> Int { 42 }
+fn return_float() -> Float { 3.14 }
+fn return_bool() -> Bool { true }
+fn return_text() -> Text { "hello" }
+fn return_unit() -> Unit { () }
+
+// Primitive type conversions
+fn conversions() {
+    let i: Int = 42;
+    let f: Float = i as Float;
+    let t: Text = i.to_string();
+    let b: Bool = i != 0;
+
+    let f2: Float = 3.7;
+    let i2: Int = f2 as Int; // Truncates to 3
+
+    let t2: Text = "123";
+    let i3: Int = t2.parse<Int>().unwrap();
+}

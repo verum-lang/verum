@@ -1,0 +1,47 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: core, math, linalg, vector, inline
+// @description: Test inline Vector definition (not imported)
+
+module specs.core.math.inline_vector_test;
+
+type Number is protocol {
+    fn zero_val() -> Self;
+};
+
+implement Number for Float {
+    fn zero_val() -> Self { 0.0 }
+}
+
+type MyVector<T: Number> is {
+    data: List<T>,
+    len: Int,
+};
+
+implement<T: Number> MyVector<T> {
+    public fn zeros(n: Int) -> MyVector<T> {
+        let data = List.with_capacity(n);
+        for _ in 0..n {
+            data.push(T.zero_val());
+        }
+        MyVector { data, len: n }
+    }
+
+    public fn len(&self) -> Int {
+        self.len
+    }
+}
+
+fn main() {
+    print("Creating MyVector<Float>.zeros(3)...");
+    let v: MyVector<Float> = MyVector.zeros(3);
+    print("Vector created!");
+
+    print("Getting length...");
+    let l = v.len();
+    print(f"Length = {l}");
+
+    assert(l == 3);
+    print("Test passed!");
+}

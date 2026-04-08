@@ -1,0 +1,118 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, const_eval, collections, list
+// @description: Test constant evaluation of collection operations
+
+// =============================================================================
+// ARRAY/LIST LITERALS
+// =============================================================================
+
+meta fn const_empty_list() -> Int {
+    list_len([])
+}
+
+meta fn const_list_len() -> Int {
+    list_len([1, 2, 3, 4, 5])
+}
+
+meta fn const_nested_list_len() -> Int {
+    // Use same-length inner arrays to avoid type mismatch
+    let outer = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    list_len(outer)
+}
+
+// =============================================================================
+// LIST OPERATIONS
+// =============================================================================
+
+meta fn const_list_get() -> Int {
+    let arr = [10, 20, 30, 40, 50];
+    maybe_unwrap(list_get(arr, 2))
+}
+
+meta fn const_list_first() -> Int {
+    let arr = [100, 200, 300];
+    maybe_unwrap(list_first(arr))
+}
+
+meta fn const_list_last() -> Int {
+    let arr = [100, 200, 300];
+    maybe_unwrap(list_last(arr))
+}
+
+// =============================================================================
+// LIST BUILDING
+// =============================================================================
+
+meta fn const_list_push() -> Int {
+    let arr = [1, 2, 3];
+    let arr2 = list_push(arr, 4);
+    list_len(arr2)
+}
+
+meta fn const_list_concat() -> Int {
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let c = list_concat(a, b);
+    list_len(c)
+}
+
+// =============================================================================
+// LIST ITERATION
+// =============================================================================
+
+meta fn const_sum_list() -> Int {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    sum
+}
+
+meta fn const_product_list() -> Int {
+    let arr = [1, 2, 3, 4, 5];
+    let mut product = 1;
+    for x in arr {
+        product = product * x;
+    }
+    product
+}
+
+// =============================================================================
+// LIST TRANSFORMATIONS
+// =============================================================================
+
+meta fn const_double_values() -> Int {
+    let arr = [1, 2, 3];
+    let mut result = [];
+    for x in arr {
+        result = list_push(result, x * 2);
+    }
+    list_len(result)
+}
+
+// Main test function
+fn main() {
+    // List literals
+    @const assert_eq(const_empty_list(), 0);
+    @const assert_eq(const_list_len(), 5);
+    @const assert_eq(const_nested_list_len(), 3);
+
+    // List operations
+    @const assert_eq(const_list_get(), 30);
+    @const assert_eq(const_list_first(), 100);
+    @const assert_eq(const_list_last(), 300);
+
+    // List building
+    @const assert_eq(const_list_push(), 4);
+    @const assert_eq(const_list_concat(), 6);
+
+    // List iteration
+    @const assert_eq(const_sum_list(), 15);
+    @const assert_eq(const_product_list(), 120);
+
+    // List transformations
+    @const assert_eq(const_double_values(), 3);
+}

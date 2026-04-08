@@ -1,0 +1,125 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @was-skip: fixed by adding collection methods and indexing
+// @tags: reference_system, cbgr, access_rules, closure, capture
+
+/// Test borrowing behavior with closure captures.
+/// Closures can borrow or move from their environment.
+/// Spec: 04-memory-model.md#aliasing-rules
+
+fn main() {
+    test_immutable_capture();
+    test_mutable_capture();
+    test_move_capture();
+    test_mixed_captures();
+}
+
+/// Test closure that borrows immutably
+fn test_immutable_capture() {
+    let data = Text.from("borrowed");
+
+    // Closure captures &data
+    let print_data = || {
+        print(&data);  // Immutable reference
+    };
+
+    print_data();
+    print_data();  // Can call multiple times
+
+    // data is still accessible
+    assert(data == "borrowed");
+}
+
+/// Test closure that borrows mutably
+fn test_mutable_capture() {
+    let mut counter = 0;
+
+    // Closure captures &mut counter
+    let mut increment = || {
+        counter += 1;
+    };
+
+    increment();
+    increment();
+    increment();
+
+    assert(counter == 3);
+}
+
+/// Test closure that moves value
+fn test_move_capture() {
+    let text = Text.from("moved");
+
+    // move closure takes ownership
+    let consume = move || {
+        print(text);  // text is moved into closure
+    };
+
+    consume();
+    // text is no longer accessible here (moved into closure)
+}
+
+/// Test closure with mixed captures
+fn test_mixed_captures() {
+    let immut_data = [1, 2, 3];
+    let mut mut_data = List.new();
+    let owned_data = Text.from("owned");
+
+    // Closure with different capture modes
+    let mut process = move || {
+        // Read from immutable capture
+        let sum: Int = immut_data.iter().sum();
+
+        // Modify mutable capture
+        mut_data.push(sum);
+
+        // Use owned data
+        print(owned_data);
+    };
+
+    process();
+}
+
+/// Test closure returning borrow
+fn test_closure_returning_ref() {
+    let data = [10, 20, 30];
+
+    let get_first = || -> &Int {
+        &data[0]
+    };
+
+    let first = get_first();
+    assert(*first == 10);
+}
+
+/// Test higher-order functions with borrows
+fn test_higher_order_borrows() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // map borrows the closure
+    // Verum iterators return owned values, not references
+    let doubled: List<Int> = numbers.iter()
+        .map(|x| x * 2)
+        .collect();
+
+    assert(doubled.len() == 5);
+    assert(doubled[0] == 2);
+    assert(doubled[4] == 10);
+}
+
+/// Test closure in struct
+fn test_closure_in_struct() {
+    let value = 42;
+
+    let handler = Handler {
+        callback: || value * 2,
+    };
+
+    let result = (handler.callback)();
+    assert(result == 84);
+}
+
+type Handler<F> is {
+    callback: F,
+};

@@ -1,0 +1,176 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: self-hosting, closure, callback, visitor, higher-order
+// @description: Closures as callbacks — critical for visitor pattern and compiler transformations
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn map_list(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        result.push(f(items[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(items: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result = List.new();
+    let mut i = 0;
+    while i < items.len() {
+        if pred(items[i]) {
+            result.push(items[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < items.len() {
+        acc = f(acc, items[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_basic_apply() -> Int {
+    let double = |x| x * 2;
+    let result = apply(double, 5);
+    if result != 10 {
+        print(f"FAIL basic_apply: expected 10, got {result}");
+        return 1;
+    }
+    print("  basic_apply: OK");
+    0
+}
+
+fn test_apply_twice() -> Int {
+    let inc = |x| x + 1;
+    let result = apply_twice(inc, 5);
+    if result != 7 {
+        print(f"FAIL apply_twice: expected 7, got {result}");
+        return 1;
+    }
+    print("  apply_twice: OK");
+    0
+}
+
+fn test_compose() -> Int {
+    let double = |x| x * 2;
+    let add_one = |x| x + 1;
+    let double_then_add = compose(add_one, double);
+    let result = double_then_add(5);
+    // double(5) = 10, add_one(10) = 11
+    if result != 11 {
+        print(f"FAIL compose: expected 11, got {result}");
+        return 1;
+    }
+    print("  compose: OK");
+    0
+}
+
+fn test_closure_capture() -> Int {
+    let offset = 100;
+    let add_offset = |x| x + offset;
+    let result = apply(add_offset, 42);
+    if result != 142 {
+        print(f"FAIL capture: expected 142, got {result}");
+        return 1;
+    }
+    print("  closure_capture: OK");
+    0
+}
+
+fn test_map_list() -> Int {
+    let items = [1, 2, 3, 4, 5];
+    let doubled = map_list(items, |x| x * 2);
+    if doubled.len() != 5 {
+        print(f"FAIL map_list: expected 5, got {doubled.len()}");
+        return 1;
+    }
+    if doubled[0] != 2 || doubled[4] != 10 {
+        print(f"FAIL map_list: first={doubled[0]}, last={doubled[4]}");
+        return 1;
+    }
+    print("  map_list: OK");
+    0
+}
+
+fn test_filter_list() -> Int {
+    let items = [1, 2, 3, 4, 5, 6, 7, 8];
+    let evens = filter_list(items, |x| x % 2 == 0);
+    if evens.len() != 4 {
+        print(f"FAIL filter_list: expected 4 evens, got {evens.len()}");
+        return 1;
+    }
+    if evens[0] != 2 || evens[3] != 8 {
+        print(f"FAIL filter_list: first={evens[0]}, last={evens[3]}");
+        return 1;
+    }
+    print("  filter_list: OK");
+    0
+}
+
+fn test_fold_list() -> Int {
+    let items = [1, 2, 3, 4, 5];
+    let sum = fold_list(items, 0, |acc, x| acc + x);
+    if sum != 15 {
+        print(f"FAIL fold_list sum: expected 15, got {sum}");
+        return 1;
+    }
+
+    let product = fold_list(items, 1, |acc, x| acc * x);
+    if product != 120 {
+        print(f"FAIL fold_list product: expected 120, got {product}");
+        return 1;
+    }
+    print("  fold_list: OK");
+    0
+}
+
+fn test_pipeline_pattern() -> Int {
+    // Pipeline: filter evens, double them, sum
+    let items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evens = filter_list(items, |x| x % 2 == 0);
+    let doubled = map_list(evens, |x| x * 2);
+    let total = fold_list(doubled, 0, |acc, x| acc + x);
+    // evens: 2,4,6,8,10 -> doubled: 4,8,12,16,20 -> sum: 60
+    if total != 60 {
+        print(f"FAIL pipeline: expected 60, got {total}");
+        return 1;
+    }
+    print("  pipeline_pattern: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_basic_apply();
+    failures = failures + test_apply_twice();
+    failures = failures + test_compose();
+    failures = failures + test_closure_capture();
+    failures = failures + test_map_list();
+    failures = failures + test_filter_list();
+    failures = failures + test_fold_list();
+    failures = failures + test_pipeline_pattern();
+
+    if failures == 0 {
+        print("All closure callback pattern tests passed");
+    }
+    failures
+}

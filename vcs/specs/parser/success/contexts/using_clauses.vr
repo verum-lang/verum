@@ -1,0 +1,147 @@
+// @test: parse-pass
+// @tier: 0
+// @category: contexts
+// @description: Test using clause parsing in function signatures
+
+// Basic using clause
+fn log_message(msg: Text) using Logger {
+    Logger.info(msg);
+}
+
+// Using with return type
+fn get_user(id: Int) -> Maybe<User> using Database {
+    Database.query(f"SELECT * FROM users WHERE id = {id}")
+}
+
+// Multiple contexts in list
+fn save_with_audit(data: Data) using [Database, Logger] {
+    Logger.info("Saving data");
+    Database.save(data);
+    Logger.info("Data saved");
+}
+
+// Three or more contexts
+fn complex_operation() using [Database, Logger, Cache, Metrics] {
+    Metrics.increment("operation.started");
+    let cached = Cache.get("key");
+    if cached is None {
+        let data = Database.query("...");
+        Cache.set("key", data);
+    }
+    Logger.info("Operation complete");
+}
+
+// Using with async function
+async fn fetch_data(url: Text) -> Data using [Network, Logger] {
+    Logger.debug(f"Fetching {url}");
+    let response = Network.fetch(url).await;
+    Logger.debug(f"Got response");
+    response.data
+}
+
+// Using with generic function
+fn find_entity<T: Entity>(id: T.Id) -> Maybe<T> using Repository<T> {
+    Repository.find(id)
+}
+
+// Using with where clause
+fn process<T>(item: T) -> Result<Output, Error> using Database
+    where type T: Processable
+{
+    Database.process(item)
+}
+
+// Using with throws
+fn risky_operation() throws(DatabaseError) using Database {
+    Database.execute("DELETE FROM important_table");
+}
+
+// Using with async and throws
+async fn fetch_and_parse(url: Text) throws(NetworkError | ParseError) -> Data
+    using [Network, Logger]
+{
+    let response = Network.fetch(url).await;
+    parse(response.body)
+}
+
+// Using with pure modifier
+pure fn compute_hash(data: Data) -> Hash using Hasher {
+    Hasher.hash(data)
+}
+
+// Using with generic contexts
+fn map_with_ctx<T, U, using C>(items: List<T>, f: fn(T) -> U using C) -> List<U> using C {
+    items.map(f)
+}
+
+// Named contexts with colon syntax
+fn dual_db_op() using [primary: Database, replica: Database] {
+    let data = replica.read("key");
+    primary.write("key", data);
+}
+
+// Named contexts with 'as' syntax
+fn aliased_contexts() using [Database as db, Logger as log] {
+    log.info("Starting");
+    db.execute("...");
+    log.info("Done");
+}
+
+// Conditional contexts
+fn conditional_op() using [Logger if cfg.logging_enabled] {
+    Logger.info("This may or may not be called");
+}
+
+// Platform-specific contexts
+fn platform_op() using [WinRegistry if platform.windows, PosixSignals if platform.unix] {
+    // Platform-specific code
+}
+
+// Negative contexts (ensuring absence)
+pure fn pure_fn(x: Int) -> Int using [!IO, !Database] {
+    x * x
+}
+
+// Transformed contexts
+fn transactional_op() using [Database.transactional()] {
+    Database.execute("INSERT ...");
+}
+
+// Multiple transforms
+fn scoped_op(req_id: Text) using [Database.transactional(), Cache.scoped(req_id)] {
+    Database.execute("...");
+    Cache.set("key", value);
+}
+
+// Context in closure type
+fn with_callback(f: fn() using Logger) using Logger {
+    Logger.info("Before callback");
+    f();
+    Logger.info("After callback");
+}
+
+// Context in return function type
+fn make_logger_fn() -> fn(Text) using Logger {
+    |msg| Logger.info(msg)
+}
+
+// Complex combination
+async fn full_operation<T: Entity>(
+    id: T.Id,
+    updater: fn(T) -> T using [Logger, Metrics]
+) throws(DbError | ValidationError) -> T
+    using [Database, Logger, Cache, Metrics]
+    where type T: Serialize + Deserialize
+{
+    Metrics.increment("operation.count");
+    Logger.info(f"Processing {id}");
+
+    let entity = Cache.get(id) ?? Database.find(id)?;
+    let updated = updater(entity);
+
+    Database.save(updated)?;
+    Cache.invalidate(id);
+
+    Logger.info("Complete");
+    updated
+}

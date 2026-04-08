@@ -1,0 +1,184 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, unicode
+
+// String literals with Unicode content and escapes
+
+fn test_unicode_escapes() {
+    // Unicode escape sequences
+    let smiley = "\u{1F600}";
+    let heart = "\u{2764}";
+    let star = "\u{2B50}";
+    let check = "\u{2714}";
+    let cross = "\u{2716}";
+}
+
+fn test_greek_escapes() {
+    // Basic Unicode escapes (BMP - 4 hex digits)
+    // Note: 'omega' is a keyword (tactic name), renamed to 'omega_char'
+    let alpha = "\u{03B1}";      // Greek alpha
+    let beta = "\u{03B2}";       // Greek beta
+    let pi_char = "\u{03C0}";    // Greek pi
+    let sigma = "\u{03C3}";      // Greek sigma
+    let omega_char = "\u{03A9}"; // Greek omega
+}
+
+fn test_emoji_escapes() {
+    // Extended Unicode (beyond BMP - up to 6 hex digits)
+    let emoji_face = "\u{1F642}";   // Slightly smiling face
+    let emoji_rocket = "\u{1F680}"; // Rocket
+    let emoji_fire = "\u{1F525}";   // Fire
+    let emoji_party = "\u{1F389}";  // Party popper
+    let emoji_100 = "\u{1F4AF}";    // Hundred points
+}
+
+fn test_direct_unicode() {
+    // Direct Unicode characters in strings
+    let direct_emoji = "Hello! Emoji: OK DONE";
+    let japanese = "Konnichi wa";
+    let chinese = "Nihao";
+    let korean = "Annyeong";
+    let russian = "Privet";
+    let arabic = "Marhaba";
+    let hebrew = "Shalom";
+}
+
+fn test_mixed_unicode() {
+    // Mixed ASCII and Unicode
+    let mixed = "Hello Welcome";
+    let greeting_emoji = "Good morning! OK";
+    let status = "Complete DONE";
+}
+
+fn test_currency_symbols() {
+    // Currency symbols
+    let dollar = "$100";
+    let euro = "EU 50";
+    let pound = "GBP 75";
+    let yen = "YEN 1000";
+    let bitcoin = "BTC 1.5";
+    let rupee = "INR 500";
+}
+
+fn test_math_symbols() {
+    // Mathematical symbols
+    let infinity = "Limit approaches INFINITY";
+    let sum = "SUM of values";
+    let integral = "INT f(x)dx";
+    let sqrt_sym = "SQRT x";
+    let pi_sym = "PI = 3.14159";
+    let delta = "DELTA x";
+}
+
+fn test_arrow_symbols() {
+    // Arrows and symbols
+    let arrow_right = "Click ARROW to continue";
+    let arrow_left = "ARROW Back";
+    let arrow_up = "ARROW Up";
+    let arrow_down = "ARROW Down";
+    let double_arrow = "DOUBLE Process ARROW Output";
+}
+
+fn test_box_drawing() {
+    // Box drawing
+    let box_corner = "BOX CORNER";
+    let horizontal = "HORIZONTAL LINE";
+    let vertical = "VERTICAL LINE";
+}
+
+fn test_combining_chars() {
+    // Combining characters
+    let accent = "e with acute: 'e";
+    let umlaut = "u with umlaut: u";
+    let tilde = "n with tilde: n";
+}
+
+fn test_unicode_identifiers() {
+    // Unicode in identifiers (if supported)
+    let value = 42;
+    let also = 100;
+    let even_more = 200;
+}
+
+fn test_zero_width() {
+    // Zero-width characters (careful - these are invisible)
+    let zero_width_space = "word\u{200B}word";
+    let zero_width_joiner = "\u{200D}";
+}
+
+fn test_multilingual() {
+    // String with multiple Unicode ranges
+    let multilingual = "English Japanese Chinese Russian";
+}
+
+fn test_unicode_escape_variations() {
+    // Unicode escape variations
+    let short_escape = "\u{41}";      // 'A' - minimum digits
+    let medium_escape = "\u{00E9}";   // 'e' with acute
+    let long_escape = "\u{01F600}";   // Emoji (leading zero)
+}
+
+fn test_unicode_expressions() {
+    // In expressions
+    let combined_emoji = "Hello " + "\u{1F44B}" + " World!";
+}
+
+// In function calls
+fn greet_with_emoji(name: Text) -> Text {
+    "Hello, " + name + "! " + "\u{1F600}"
+}
+
+fn test_unicode_function() {
+    let greeting = greet_with_emoji("Alice");
+}
+
+fn test_unicode_arrays() {
+    // In arrays
+    let emojis = ["\u{1F600}", "\u{1F601}", "\u{1F602}", "\u{1F603}"];
+    let flags = ["US FLAG", "UK FLAG", "JP FLAG", "FR FLAG"];
+}
+
+fn test_unicode_normalization() {
+    // Unicode normalization considerations
+    let nfc = "e with acute (composed)";   // Single character
+    let nfd = "e + combining acute";       // Base + combining
+}
+
+fn test_special_unicode() {
+    // Special Unicode categories
+    let nbsp = "Non-breaking\u{00A0}space";
+    let em_dash = "Word---word";
+    let en_dash = "10--20";
+    let ellipsis = "Wait...";
+    let bullet = "BULLET Item";
+}
+
+fn test_bidi_markers() {
+    // Bidirectional text markers
+    let rtl_mark = "\u{200F}";  // Right-to-left mark
+    let ltr_mark = "\u{200E}";  // Left-to-right mark
+}
+
+// In pattern matching
+fn emoji_type(s: Text) -> Text {
+    match s {
+        "\u{1F600}" => "happy"
+        "\u{1F622}" => "sad"
+        "\u{2764}" => "love"
+        _ => "unknown"
+    }
+}
+
+fn test_fullwidth_chars() {
+    // Full-width characters
+    let fullwidth_a = "Full: FW-A";
+    let fullwidth_digits = "Numbers: 0-9";
+}
+
+fn test_super_subscripts() {
+    // Superscripts and subscripts
+    let squared = "x SQUARED";
+    let cubed = "x CUBED";
+    let h2o = "H SUB2 O";
+}

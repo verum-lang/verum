@@ -1,0 +1,168 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, strings, raw, triple-quote
+//
+// Raw string literals via triple-quoted syntax """..."""
+// Per simplified literal architecture v6.0:
+//   - Triple-quoted strings are ALWAYS raw (no escape processing)
+//   - Triple-quoted strings are ALWAYS multiline-capable
+//   - The old r#"..."# syntax has been removed entirely
+
+// ============================================================================
+// BASIC RAW STRINGS (triple-quoted = raw)
+// ============================================================================
+
+fn test_basic_raw() {
+    // Triple-quoted strings preserve content literally
+    let simple = """Hello, World!""";
+    let with_backslash = """C:\Users\Documents\file.txt""";
+    let with_newline_literal = """Line1\nLine2""";
+}
+
+fn test_raw_backslashes() {
+    // Backslashes are preserved literally (no escape processing)
+    let path = """C:\Program Files\App\config.ini""";
+    let regex = """\d+\.\d+\.\d+""";
+    let pattern = """^[a-zA-Z]+$""";
+}
+
+fn test_raw_quotes() {
+    // Single and double quotes preserved inside triple-quoted strings
+    let with_double_quote = """She said "Hello" """;
+    let with_single_quote = """It's a test""";
+    let both_quotes = """Say "hi" and it's done""";
+}
+
+fn test_empty_raw() {
+    // Empty triple-quoted string
+    let empty = """""";
+}
+
+fn test_single_char_raw() {
+    // Single character raw
+    let single = """x""";
+}
+
+// ============================================================================
+// REGEX PATTERNS (common use case for raw strings)
+// ============================================================================
+
+fn test_regex_patterns() {
+    let email_regex = """^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$""";
+    let phone_regex = """^\+?[1-9]\d{1,14}$""";
+    let url_regex = """https?://[^\s/$.?#].[^\s]*""";
+    let ip_regex = """\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}""";
+}
+
+// ============================================================================
+// WINDOWS PATHS (backslashes preserved)
+// ============================================================================
+
+fn test_windows_paths() {
+    let windows_path = """C:\Windows\System32\drivers\etc\hosts""";
+    let network_path = """\\server\share\folder\file.txt""";
+    let relative_win = """.\src\main.vr""";
+}
+
+// ============================================================================
+// EMBEDDED FORMATS
+// ============================================================================
+
+fn test_json_raw() {
+    // JSON with backslashes visible
+    let json_escaped = """{"path": "C:\\Users\\file.txt"}""";
+    let json_pattern = """{"regex": "\\d+"}""";
+}
+
+fn test_latex_raw() {
+    // LaTeX-like content with backslash commands
+    let latex = """\begin{document} \textbf{Bold} \end{document}""";
+    let math = """$\frac{a}{b} = \sqrt{c}$""";
+}
+
+fn test_literal_escapes() {
+    // Escape sequences shown literally (NOT processed)
+    let literal_escapes = """\n \t \r \\ \"""";
+    let all_escapes = """\0\a\b\f\n\r\t\v\\\'""";
+}
+
+// ============================================================================
+// RAW STRINGS IN EXPRESSIONS AND CONTEXTS
+// ============================================================================
+
+fn test_raw_in_function_call() {
+    let regex_compiled = compile_regex("""^\d{4}-\d{2}-\d{2}$""");
+}
+
+fn compile_regex(pattern: Text) -> Text {
+    pattern
+}
+
+fn test_raw_arrays() {
+    let patterns = [
+        """\d+""",
+        """[a-z]+""",
+        """\s+""",
+        """[A-Z][a-z]*""",
+    ];
+}
+
+fn test_raw_in_match() {
+    let p = """\d+""";
+    match p {
+        """\d+""" => "digits",
+        """[a-z]+""" => "lowercase letters",
+        """\s+""" => "whitespace",
+        _ => "other",
+    };
+}
+
+// ============================================================================
+// MULTILINE RAW STRINGS
+// ============================================================================
+
+fn test_raw_multiline() {
+    let raw_multiline = """
+Line 1
+Line 2
+Line 3
+""";
+}
+
+// ============================================================================
+// COMPLEX PATTERNS
+// ============================================================================
+
+fn test_complex_regex() {
+    let html_tag = """<([a-z]+)(?:\s+[a-z-]+="[^"]*")*\s*/?>""";
+    let version = """v?(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9]+))?""";
+}
+
+fn test_raw_struct() {
+    type RegexPattern is {
+        name: Text,
+        pattern: Text,
+    };
+
+    let date_pattern = RegexPattern {
+        name: "date",
+        pattern: """\d{4}-\d{2}-\d{2}""",
+    };
+}
+
+// ============================================================================
+// CONTENT WITH HASH CHARACTERS (no longer need ## delimiters)
+// ============================================================================
+
+fn test_hash_in_content() {
+    // Hash characters are just regular content in triple-quoted strings
+    let with_hash = """Color: #FF0000""";
+    let with_multiple = """## Heading ##""";
+    let with_code = """let x = tag#"value";""";
+}
+
+fn test_special_chars() {
+    // All special characters preserved
+    let special = """!@#$%^&*()_+-=[]{}|;:',.<>?/""";
+}

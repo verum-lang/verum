@@ -1,0 +1,37 @@
+// @test: parse-pass
+// @tier: 0
+// @category: generics
+
+// Basic generic function
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Multiple type parameters
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: pair.second, second: pair.first }
+}
+
+// Generic function with constraints
+fn max<T: Ord>(a: T, b: T) -> T {
+    if a > b { a } else { b }
+}
+
+// Generic with multiple constraints
+fn format_and_hash<T: Display + Hash>(value: T) -> Int {
+    hash(format(value))
+}
+
+// Generic with where clause
+fn process<T, U>(input: T) -> U
+    where T: Into<U>, U: Default
+{
+    input.into()
+}
+
+// Higher-kinded generics
+fn map<F, A, B>(container: F<A>, f: fn(A) -> B) -> F<B>
+    where F: Functor
+{
+    container.map(f)
+}

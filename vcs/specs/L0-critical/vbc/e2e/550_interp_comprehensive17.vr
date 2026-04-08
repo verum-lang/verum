@@ -1,0 +1,326 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, comprehensive, bellman_ford, count_inversions, kadane, dutch_flag, kmp_failure
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Comprehensive test #17: combines algorithms from tests 541-549 in a pipeline.
+// Pipeline:
+//   1. Bellman-Ford (541)       - compute shortest paths, extract distance array
+//   2. Count inversions (542)   - count inversions in the distance array
+//   3. Kadane (543)             - find max subarray of modified distances
+//   4. Dutch flag (544)         - partition by magnitude buckets (0/1/2 labels)
+//   5. KMP failure function (547) - pattern match in the label sequence
+
+// ============================================================
+// Bellman-Ford (from 541)
+// ============================================================
+
+fn bf_inf() -> Int { 1000000 }
+
+fn bf_relax(src: [Int; 16], dst: [Int; 16], wt: [Int; 16],
+            dist: [Int; 8], ne: Int) -> Int {
+    let mut improved = 0;
+    let mut i = 0;
+    while i < ne {
+        let u = src[i];
+        let v = dst[i];
+        let w = wt[i];
+        if dist[u] < bf_inf() && dist[u] + w < dist[v] {
+            dist[v] = dist[u] + w;
+            improved = 1;
+        }
+        i = i + 1;
+    }
+    improved
+}
+
+fn bellman_ford(src: [Int; 16], dst: [Int; 16], wt: [Int; 16],
+                dist: [Int; 8], nv: Int, ne: Int, s: Int) -> Int {
+    let mut i = 0;
+    while i < nv {
+        dist[i] = bf_inf();
+        i = i + 1;
+    }
+    dist[s] = 0;
+    let mut iter = 0;
+    while iter < nv - 1 {
+        bf_relax(src, dst, wt, dist, ne);
+        iter = iter + 1;
+    }
+    bf_relax(src, dst, wt, dist, ne)
+}
+
+fn test_bf_pipeline() {
+    // Graph: 0->1(1), 0->2(4), 1->2(2), 1->3(5), 2->3(1)
+    // SSSP from 0: d=[0,1,3,4]
+    let mut src  = [0, 0, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dst  = [1, 2, 2, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut wt   = [1, 4, 2, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dist = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    let neg = bellman_ford(src, dst, wt, dist, 4, 5, 0);
+    assert_eq(neg, 0);
+    assert_eq(dist[0], 0);
+    assert_eq(dist[1], 1);
+    assert_eq(dist[2], 3);
+    assert_eq(dist[3], 4);
+    print("bf_pipeline: ok");
+}
+
+// ============================================================
+// Count inversions (from 542)
+// ============================================================
+
+fn merge_count(a: [Int; 16], tmp: [Int; 16], lo: Int, mid: Int, hi: Int) -> Int {
+    let mut i = lo;
+    while i <= hi { tmp[i] = a[i]; i = i + 1; }
+    let mut left  = lo;
+    let mut right = mid + 1;
+    let mut idx   = lo;
+    let mut inv   = 0;
+    while left <= mid && right <= hi {
+        if tmp[left] <= tmp[right] {
+            a[idx] = tmp[left]; left = left + 1;
+        } else {
+            inv = inv + (mid - left + 1);
+            a[idx] = tmp[right]; right = right + 1;
+        }
+        idx = idx + 1;
+    }
+    while left  <= mid  { a[idx] = tmp[left];  left  = left + 1;  idx = idx + 1; }
+    while right <= hi   { a[idx] = tmp[right]; right = right + 1; idx = idx + 1; }
+    inv
+}
+
+@allow(unbounded_recursion)
+fn sort_count(a: [Int; 16], tmp: [Int; 16], lo: Int, hi: Int) -> Int {
+    if lo >= hi { return 0; }
+    let mid = (lo + hi) / 2;
+    let li = sort_count(a, tmp, lo, mid);
+    let ri = sort_count(a, tmp, mid + 1, hi);
+    let ci = merge_count(a, tmp, lo, mid, hi);
+    li + ri + ci
+}
+
+fn test_inversions_pipeline() {
+    // Distances [4,1,3,0] from some BF run: inversions = (4,1),(4,3),(4,0),(1,0),(3,0) = 5.
+    let mut a   = [4, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(sort_count(a, tmp, 0, 3), 5);
+
+    // Sorted distances [0,1,3,4]: 0 inversions.
+    let mut b   = [0, 1, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(sort_count(b, tmp2, 0, 3), 0);
+
+    print("inversions_pipeline: ok");
+}
+
+// ============================================================
+// Kadane max subarray (from 543)
+// ============================================================
+
+fn max_subarray_sum(a: [Int; 16], n: Int) -> Int {
+    let mut best = a[0];
+    let mut cur  = a[0];
+    let mut i = 1;
+    while i < n {
+        if cur + a[i] > a[i] { cur = cur + a[i]; } else { cur = a[i]; }
+        if cur > best { best = cur; }
+        i = i + 1;
+    }
+    best
+}
+
+fn test_kadane_pipeline() {
+    // Use differences of BF distances: d=[0,1,3,4], diffs=[1,2,1].
+    // All positive: max subarray = 1+2+1 = 4.
+    let mut diffs = [1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(diffs, 3), 4);
+
+    // Mix: [3,-2,5,-1,4]: max = 3-2+5-1+4 = 9.
+    let mut a = [3, -2, 5, -1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(a, 5), 9);
+
+    // All negative: max = -1.
+    let mut b = [-4, -1, -3, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(max_subarray_sum(b, 4), -1);
+
+    print("kadane_pipeline: ok");
+}
+
+// ============================================================
+// Dutch national flag (from 544)
+// ============================================================
+
+fn dutch_flag(a: [Int; 16], n: Int) {
+    let mut lo  = 0;
+    let mut mid = 0;
+    let mut hi  = n - 1;
+    while mid <= hi {
+        if a[mid] == 0 {
+            let t = a[lo]; a[lo] = a[mid]; a[mid] = t;
+            lo = lo + 1; mid = mid + 1;
+        } else if a[mid] == 1 {
+            mid = mid + 1;
+        } else {
+            let t = a[mid]; a[mid] = a[hi]; a[hi] = t;
+            hi = hi - 1;
+        }
+    }
+}
+
+fn is_dutch_sorted(a: [Int; 16], n: Int) -> Int {
+    let mut phase = 0;
+    let mut i = 0;
+    while i < n {
+        if a[i] < phase { return 0; }
+        if a[i] > phase { phase = a[i]; }
+        i = i + 1;
+    }
+    1
+}
+
+fn count_val(a: [Int; 16], n: Int, val: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < n {
+        if a[i] == val { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+fn test_dutch_pipeline() {
+    // Label BF distances [0,1,3,4] as: 0->label 0, 1->label 1, 3->label 2, 4->label 2.
+    // labels = [0,1,2,2]: already DNF sorted.
+    let mut labels = [0, 1, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(labels, 4);
+    assert_eq(is_dutch_sorted(labels, 4), 1);
+    assert_eq(count_val(labels, 4, 0), 1);
+    assert_eq(count_val(labels, 4, 1), 1);
+    assert_eq(count_val(labels, 4, 2), 2);
+
+    // Mixed labels [2,0,1,2,0]: after DNF -> [0,0,1,2,2].
+    let mut m = [2, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(m, 5);
+    assert_eq(is_dutch_sorted(m, 5), 1);
+    assert_eq(count_val(m, 5, 0), 2);
+    assert_eq(count_val(m, 5, 2), 2);
+
+    print("dutch_pipeline: ok");
+}
+
+// ============================================================
+// KMP failure function (from 547)
+// ============================================================
+
+fn build_failure(p: [Int; 16], fail: [Int; 16], m: Int) {
+    fail[0] = 0;
+    let mut k = 0;
+    let mut i = 1;
+    while i < m {
+        while k > 0 && p[k] != p[i] { k = fail[k - 1]; }
+        if p[k] == p[i] { k = k + 1; }
+        fail[i] = k;
+        i = i + 1;
+    }
+}
+
+fn kmp_count(t: [Int; 16], n: Int, p: [Int; 16], fail: [Int; 16], m: Int) -> Int {
+    let mut count = 0;
+    let mut q = 0;
+    let mut i = 0;
+    while i < n {
+        while q > 0 && p[q] != t[i] { q = fail[q - 1]; }
+        if p[q] == t[i] { q = q + 1; }
+        if q == m { count = count + 1; q = fail[q - 1]; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_kmp_pipeline() {
+    // Search for pattern [0,1] in label sequence [0,1,2,2,0,1,0,0].
+    let mut t    = [0, 1, 2, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut p    = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut fail = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_failure(p, fail, 2);
+    assert_eq(fail[0], 0);
+    // Pattern [0,1] appears at positions 0 and 4 -> count = 2.
+    assert_eq(kmp_count(t, 8, p, fail, 2), 2);
+
+    // Pattern [2,2] in same text: appears at position 2 -> count = 1.
+    let mut p2   = [2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut f2   = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_failure(p2, f2, 2);
+    assert_eq(kmp_count(t, 8, p2, f2, 2), 1);
+
+    print("kmp_pipeline: ok");
+}
+
+// ============================================================
+// Combined cross-algorithm pipeline
+// ============================================================
+
+fn test_combined_pipeline() {
+    // Step 1: Bellman-Ford to get distances.
+    // Graph: 0->1(2), 0->2(6), 1->2(3), 1->3(8), 2->3(2)
+    // SSSP from 0: d=[0,2,5,7]
+    let mut src  = [0, 0, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dst  = [1, 2, 2, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut wt   = [2, 6, 3, 8, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut dist = [0, 0, 0, 0, 0, 0, 0, 0];
+    let neg = bellman_ford(src, dst, wt, dist, 4, 5, 0);
+    assert_eq(neg, 0);
+    assert_eq(dist[1], 2);
+    assert_eq(dist[2], 5);
+    assert_eq(dist[3], 7);
+
+    // Step 2: Count inversions in [dist[3], dist[2], dist[1], dist[0]] = [7,5,2,0]
+    // This is reverse-sorted: inversions = 4*3/2 = 6.
+    let mut invarray = [7, 5, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut tmp      = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let inv = sort_count(invarray, tmp, 0, 3);
+    assert_eq(inv, 6);
+    // After sort: invarray = [0,2,5,7].
+    assert_eq(invarray[0], 0);
+    assert_eq(invarray[3], 7);
+
+    // Step 3: Kadane on differences of sorted distances: [2,3,2].
+    let mut diffs = [2, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mss = max_subarray_sum(diffs, 3);
+    assert_eq(mss, 7);
+
+    // Step 4: Label distances by thirds: [0,2] -> 0, [3,4] -> 1, [5,7] -> 2.
+    // dist = [0,2,5,7] -> labels [0,0,2,2].
+    let mut labels = [0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    dutch_flag(labels, 4);
+    assert_eq(is_dutch_sorted(labels, 4), 1);
+    assert_eq(count_val(labels, 4, 0), 2);
+    assert_eq(count_val(labels, 4, 2), 2);
+
+    // Step 5: KMP search for pattern [0,0] in labels [0,0,2,2].
+    let mut p    = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut fail = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    build_failure(p, fail, 2);
+    let occ = kmp_count(labels, 4, p, fail, 2);
+    assert_eq(occ, 1);
+
+    let msg = f"combined: inv={inv} mss={mss} occ={occ}";
+    print(msg);
+    print("combined_pipeline: ok");
+}
+
+fn main() -> Int {
+    test_bf_pipeline();
+    test_inversions_pipeline();
+    test_kadane_pipeline();
+    test_dutch_pipeline();
+    test_kmp_pipeline();
+    test_combined_pipeline();
+    print("[OK] 550_interp_comprehensive17");
+    0
+}

@@ -1,0 +1,212 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, paths, self
+
+/// Self paths - paths that reference the current module.
+/// The form: `self.Item` or `self.submodule.Item`
+///
+/// Self paths explicitly reference items within the current module,
+/// useful for disambiguation and clarity in complex modules.
+
+module networking {
+    // Module-level items that can be referenced with self
+    pub type Error is
+    | ConnectionFailed
+    | Timeout
+    | InvalidAddress;
+
+    pub const DEFAULT_TIMEOUT: Int = 30000;
+    pub const DEFAULT_PORT: Int = 8080;
+
+    // Private helper function
+    fn validate_address(addr: &Text) -> Bool {
+        !addr.is_empty()
+    }
+
+    pub type Connection is {
+        address: Text,
+        port: Int,
+        timeout: Int
+    };
+
+    pub fn new_connection(address: Text) -> Result<Connection, Error> {
+        if !validate_address(&address) {
+            return Err(InvalidAddress);
+        }
+        Ok(Connection {
+            address,
+            port: DEFAULT_PORT,
+            timeout: DEFAULT_TIMEOUT
+        })
+    }
+
+    // Submodule demonstrating nested module access
+    pub module tcp {
+        pub type TcpStream is {
+            conn: super.Connection,
+            buffer_size: Int
+        };
+
+        pub const DEFAULT_BUFFER_SIZE: Int = 4096;
+
+        pub fn new_stream(address: Text) -> Result<TcpStream, super.Error> {
+            let conn = super.new_connection(address)?;
+            Ok(TcpStream {
+                conn,
+                buffer_size: DEFAULT_BUFFER_SIZE
+            })
+        }
+
+        pub type TcpListener is {
+            port: Int,
+            connections: List<TcpStream>
+        };
+
+        pub fn bind_listener(port: Int) -> TcpListener {
+            TcpListener { port, connections: List.new() }
+        }
+
+        // Nested module within tcp
+        pub module utils {
+            pub fn parse_address(addr: &Text) -> Result<(Text, Int), Text> {
+                let parts: List<&str> = addr.split(':').collect();
+                if parts.len() != 2 {
+                    return Err("Invalid address format");
+                }
+                match parts[1].parse_int() {
+                    Ok(port) => Ok((parts[0].to_text(), port)),
+                    Err(_) => Err("Invalid port number")
+                }
+            }
+
+            // Reference sibling types via super
+            pub fn create_stream(addr: &Text) -> Result<super.TcpStream, Text> {
+                let (host, port) = parse_address(addr)?;
+                let result = super.new_stream(host);
+                result.map_err(|e| format("{:?}", e))
+            }
+        }
+    }
+
+    pub module udp {
+        pub type UdpSocket is {
+            address: Text,
+            port: Int
+        };
+
+        pub const MAX_DATAGRAM_SIZE: Int = 65535;
+
+        pub fn bind_socket(address: Text, port: Int) -> UdpSocket {
+            UdpSocket { address, port }
+        }
+
+        pub fn send_data(socket: &UdpSocket, data: &Bytes, target: &Text) -> Result<Int, super.Error> {
+            if data.len() > MAX_DATAGRAM_SIZE {
+                return Err(super.Error.InvalidAddress);
+            }
+            Ok(data.len())
+        }
+    }
+
+    // Module with self-referential types
+    pub module protocol {
+        pub type Message is {
+            id: Int,
+            payload: Bytes,
+            reply_to: Maybe<Heap<Message>>
+        };
+
+        pub fn new_message(id: Int, payload: Bytes) -> Message {
+            Message {
+                id,
+                payload,
+                reply_to: None
+            }
+        }
+
+        pub fn create_reply(original: &Message, payload: Bytes) -> Message {
+            Message {
+                id: original.id + 1,
+                payload,
+                reply_to: Some(Heap.new(original.clone()))
+            }
+        }
+
+        // Trait within module
+        pub type MessageHandler is protocol {
+            fn handle(&self, msg: Message) -> Result<Message, super.Error>;
+        };
+    }
+}
+
+module application {
+    mount networking.{Connection, Error, DEFAULT_TIMEOUT};
+    mount networking.tcp.{TcpStream, TcpListener, bind_listener};
+    mount networking.udp.{UdpSocket, bind_socket};
+    mount networking.protocol.{Message, new_message};
+
+    pub type App is {
+        listener: TcpListener,
+        timeout: Int
+    };
+
+    pub fn create_app(port: Int) -> App {
+        App {
+            listener: bind_listener(port),
+            timeout: DEFAULT_TIMEOUT
+        }
+    }
+
+    pub fn create_message(data: Bytes) -> Message {
+        new_message(1, data)
+    }
+}
+
+fn main() {
+    mount networking.{Connection, new_connection};
+    mount networking.tcp.{new_stream, bind_listener};
+    mount networking.udp.{bind_socket, send_data};
+    mount networking.protocol.{new_message, create_reply};
+
+    // Create connection
+    let conn = new_connection("localhost").unwrap();
+
+    // Create TCP stream
+    let stream = new_stream("127.0.0.1").unwrap();
+
+    // Use TCP listener
+    let listener = bind_listener(8080);
+
+    // Create UDP socket
+    let socket = bind_socket("0.0.0.0", 9000);
+
+    // Create message chain
+    let msg = new_message(1, Bytes.from_text("Hello"));
+    let reply = create_reply(&msg, Bytes.from_text("World"));
+}
+
+// Additional example: self in mount statements
+module self_import_example {
+    pub type Config is {
+        name: Text,
+        value: Int
+    };
+
+    pub fn create_config(name: Text) -> Config {
+        Config { name, value: 0 }
+    }
+
+    pub module submodule {
+        // Import from parent using super
+        mount super.{Config, create_config};
+
+        pub fn make_default_config() -> Config {
+            create_config("default")
+        }
+
+        pub fn make_two_configs() -> (Config, Config) {
+            (make_default_config(), create_config("other"))
+        }
+    }
+}

@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, refinement, variable, error
+// @description: Test detection of refinement with invalid variable name (number)
+// @expected-error: E018
+
+// Refinement variable must be an identifier, not a number
+type PositiveInt is Int { 123: 123 > 0 };

@@ -1,0 +1,412 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, huffman, encoding, tree, compression
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT Huffman-like encoding tree construction, path finding, and compression analysis
+
+// Huffman tree: leaves hold symbols with frequencies, internal nodes combine subtrees
+type HTree is
+    HLeaf { sym: Int, freq: Int }
+  | HNode { freq: Int, left: HTree, right: HTree };
+
+fn make_leaf(sym: Int, freq: Int) -> HTree {
+    HLeaf { sym: sym, freq: freq }
+}
+
+fn make_node(left: HTree, right: HTree) -> HTree {
+    HNode { freq: tree_freq(left) + tree_freq(right), left: left, right: right }
+}
+
+// Get frequency of any node
+fn tree_freq(t: HTree) -> Int {
+    match t {
+        HLeaf { sym: _, freq } => freq,
+        HNode { freq, left: _, right: _ } => freq,
+    }
+}
+
+// Total number of nodes (leaves + internal)
+fn tree_size(t: HTree) -> Int {
+    match t {
+        HLeaf { sym: _, freq: _ } => 1,
+        HNode { freq: _, left, right } => 1 + tree_size(left) + tree_size(right),
+    }
+}
+
+// Count only leaf nodes
+fn tree_leaf_count(t: HTree) -> Int {
+    match t {
+        HLeaf { sym: _, freq: _ } => 1,
+        HNode { freq: _, left, right } => tree_leaf_count(left) + tree_leaf_count(right),
+    }
+}
+
+// Depth of the tree (longest path from root to leaf)
+fn tree_depth(t: HTree) -> Int {
+    match t {
+        HLeaf { sym: _, freq: _ } => 0,
+        HNode { freq: _, left, right } => {
+            let dl = tree_depth(left);
+            let dr = tree_depth(right);
+            1 + if dl > dr { dl } else { dr }
+        },
+    }
+}
+
+// Minimum depth (shortest path from root to leaf)
+fn tree_min_depth(t: HTree) -> Int {
+    match t {
+        HLeaf { sym: _, freq: _ } => 0,
+        HNode { freq: _, left, right } => {
+            let dl = tree_min_depth(left);
+            let dr = tree_min_depth(right);
+            1 + if dl < dr { dl } else { dr }
+        },
+    }
+}
+
+// Check if tree contains a symbol
+fn tree_contains(t: HTree, sym: Int) -> Bool {
+    match t {
+        HLeaf { sym: s, freq: _ } => s == sym,
+        HNode { freq: _, left, right } => tree_contains(left, sym) || tree_contains(right, sym),
+    }
+}
+
+// Find path to a symbol: returns path length, or -1 if not found
+// Path is encoded as bits: 0=left, 1=right, read from LSB
+fn encode_path_helper(t: HTree, sym: Int, depth: Int) -> Int {
+    match t {
+        HLeaf { sym: s, freq: _ } => {
+            if s == sym { depth }
+            else { 0 - 1 }
+        },
+        HNode { freq: _, left, right } => {
+            let left_result = encode_path_helper(left, sym, depth + 1);
+            if left_result >= 0 { left_result }
+            else { encode_path_helper(right, sym, depth + 1) }
+        },
+    }
+}
+
+// Get the code length (number of bits) for a symbol
+fn code_length(t: HTree, sym: Int) -> Int {
+    encode_path_helper(t, sym, 0)
+}
+
+// Total weighted path length: sum of (freq * depth) for all leaves
+// This equals the total number of bits to encode the message
+fn total_weighted_depth_helper(t: HTree, depth: Int) -> Int {
+    match t {
+        HLeaf { sym: _, freq } => freq * depth,
+        HNode { freq: _, left, right } => {
+            total_weighted_depth_helper(left, depth + 1)
+            + total_weighted_depth_helper(right, depth + 1)
+        },
+    }
+}
+
+fn total_weighted_depth(t: HTree) -> Int {
+    total_weighted_depth_helper(t, 0)
+}
+
+// Sum of all leaf frequencies
+fn total_frequency(t: HTree) -> Int {
+    match t {
+        HLeaf { sym: _, freq } => freq,
+        HNode { freq: _, left, right } => total_frequency(left) + total_frequency(right),
+    }
+}
+
+// Average code length * 1000 (to avoid floating point)
+// = total_weighted_depth * 1000 / total_frequency
+fn avg_code_length_x1000(t: HTree) -> Int {
+    total_weighted_depth(t) * 1000 / total_frequency(t)
+}
+
+// Merge two trees: smaller frequency on the left
+fn merge_sorted(a: HTree, b: HTree) -> HTree {
+    if tree_freq(a) <= tree_freq(b) {
+        make_node(a, b)
+    } else {
+        make_node(b, a)
+    }
+}
+
+// Simple 2-tree merge for building Huffman from sorted list
+// Given 4 leaves sorted by frequency, build the Huffman tree by repeatedly
+// merging the two smallest
+fn huffman_4(a: HTree, b: HTree, c: HTree, d: HTree) -> HTree {
+    // Step 1: merge two smallest (a, b since sorted)
+    let m1 = merge_sorted(a, b);
+    // Step 2: find smallest two among {m1, c, d}
+    // Compare m1 freq with c and d
+    let f_m1 = tree_freq(m1);
+    let f_c = tree_freq(c);
+    let f_d = tree_freq(d);
+
+    if f_m1 <= f_c && f_c <= f_d {
+        // merge m1, c first, then with d
+        merge_sorted(merge_sorted(m1, c), d)
+    } else if f_m1 <= f_d && f_d <= f_c {
+        // merge m1, d first, then with c
+        merge_sorted(merge_sorted(m1, d), c)
+    } else if f_c <= f_m1 && f_m1 <= f_d {
+        // merge c, m1 first, then with d
+        merge_sorted(merge_sorted(c, m1), d)
+    } else if f_c <= f_d && f_d <= f_m1 {
+        // merge c, d first, then with m1
+        merge_sorted(merge_sorted(c, d), m1)
+    } else if f_d <= f_m1 && f_m1 <= f_c {
+        // merge d, m1 first, then with c
+        merge_sorted(merge_sorted(d, m1), c)
+    } else {
+        // f_d <= f_c <= f_m1
+        merge_sorted(merge_sorted(d, c), m1)
+    }
+}
+
+fn main() -> Int {
+    // === Test 1: Basic leaf properties ===
+    let leaf_a = make_leaf(0, 10);
+    assert_eq(tree_freq(leaf_a), 10);
+    assert_eq(tree_size(leaf_a), 1);
+    assert_eq(tree_leaf_count(leaf_a), 1);
+    assert_eq(tree_depth(leaf_a), 0);
+    assert(tree_contains(leaf_a, 0));
+    assert(!tree_contains(leaf_a, 1));
+
+    // === Test 2: Simple 2-symbol tree ===
+    // Symbols: A(0) freq=3, B(1) freq=5
+    let la = make_leaf(0, 3);
+    let lb = make_leaf(1, 5);
+    let t2 = make_node(la, lb);
+
+    assert_eq(tree_freq(t2), 8);
+    assert_eq(tree_size(t2), 3);
+    assert_eq(tree_leaf_count(t2), 2);
+    assert_eq(tree_depth(t2), 1);
+    assert_eq(tree_min_depth(t2), 1);
+    assert(tree_contains(t2, 0));
+    assert(tree_contains(t2, 1));
+    assert(!tree_contains(t2, 2));
+
+    // Both symbols have code length 1
+    assert_eq(code_length(t2, 0), 1);
+    assert_eq(code_length(t2, 1), 1);
+
+    // Total weighted depth: 3*1 + 5*1 = 8
+    assert_eq(total_weighted_depth(t2), 8);
+    assert_eq(total_frequency(t2), 8);
+
+    // === Test 3: 3-symbol tree ===
+    // A(0)=1, B(1)=2, C(2)=4
+    // Optimal: merge A(1) and B(2) -> AB(3), then merge AB(3) and C(4) -> root(7)
+    // A and B get depth 2, C gets depth 1
+    let la3 = make_leaf(0, 1);
+    let lb3 = make_leaf(1, 2);
+    let lc3 = make_leaf(2, 4);
+    let ab = make_node(la3, lb3);
+    let t3 = make_node(ab, lc3);
+
+    assert_eq(tree_freq(t3), 7);
+    assert_eq(tree_size(t3), 5);
+    assert_eq(tree_leaf_count(t3), 3);
+    assert_eq(tree_depth(t3), 2);
+    assert_eq(tree_min_depth(t3), 1);
+
+    assert_eq(code_length(t3, 0), 2);  // A at depth 2
+    assert_eq(code_length(t3, 1), 2);  // B at depth 2
+    assert_eq(code_length(t3, 2), 1);  // C at depth 1
+
+    // Total weighted depth: 1*2 + 2*2 + 4*1 = 2 + 4 + 4 = 10
+    assert_eq(total_weighted_depth(t3), 10);
+
+    // === Test 4: 4-symbol Huffman tree ===
+    // Symbols with frequencies: A(0)=1, B(1)=2, C(2)=3, D(3)=5
+    // Sorted: A=1, B=2, C=3, D=5
+    // Step 1: merge A(1)+B(2) = AB(3)
+    // Step 2: merge AB(3)+C(3) = ABC(6)  (AB freq == C freq)
+    // Step 3: merge ABC(6)+D(5) = root(11)
+    let h4 = huffman_4(make_leaf(0, 1), make_leaf(1, 2), make_leaf(2, 3), make_leaf(3, 5));
+
+    assert_eq(tree_freq(h4), 11);
+    assert_eq(tree_leaf_count(h4), 4);
+    assert_eq(total_frequency(h4), 11);
+
+    // Verify all symbols present
+    assert(tree_contains(h4, 0));
+    assert(tree_contains(h4, 1));
+    assert(tree_contains(h4, 2));
+    assert(tree_contains(h4, 3));
+    assert(!tree_contains(h4, 4));
+
+    // Code lengths depend on tree structure
+    let cl0 = code_length(h4, 0);
+    let cl1 = code_length(h4, 1);
+    let cl2 = code_length(h4, 2);
+    let cl3 = code_length(h4, 3);
+
+    // All code lengths should be > 0
+    assert(cl0 > 0);
+    assert(cl1 > 0);
+    assert(cl2 > 0);
+    assert(cl3 > 0);
+
+    // A (lowest freq) should have longest or equal code
+    assert(cl0 >= cl3);
+
+    // Total weighted depth: sum of freq * code_length
+    let twd4 = total_weighted_depth(h4);
+    assert_eq(twd4, 1 * cl0 + 2 * cl1 + 3 * cl2 + 5 * cl3);
+
+    // === Test 5: Balanced 4-symbol tree (equal frequencies) ===
+    // All freq=1: any balanced tree works
+    let eq1 = make_leaf(0, 1);
+    let eq2 = make_leaf(1, 1);
+    let eq3 = make_leaf(2, 1);
+    let eq4 = make_leaf(3, 1);
+    let eq_left = make_node(eq1, eq2);
+    let eq_right = make_node(eq3, eq4);
+    let eq_tree = make_node(eq_left, eq_right);
+
+    assert_eq(tree_freq(eq_tree), 4);
+    assert_eq(tree_leaf_count(eq_tree), 4);
+    assert_eq(tree_depth(eq_tree), 2);
+    assert_eq(tree_min_depth(eq_tree), 2);
+
+    // All 4 symbols at depth 2
+    assert_eq(code_length(eq_tree, 0), 2);
+    assert_eq(code_length(eq_tree, 1), 2);
+    assert_eq(code_length(eq_tree, 2), 2);
+    assert_eq(code_length(eq_tree, 3), 2);
+
+    // Total weighted depth: 4 * (1 * 2) = 8
+    assert_eq(total_weighted_depth(eq_tree), 8);
+
+    // Average code length * 1000: 8 * 1000 / 4 = 2000
+    assert_eq(avg_code_length_x1000(eq_tree), 2000);
+
+    // === Test 6: Highly skewed tree ===
+    // A=100, B=1, C=1, D=1
+    // Optimal: merge B(1)+C(1)=BC(2), merge BC(2)+D(1)=BCD(3), merge A(100)+BCD(3)=root(103)
+    // A gets depth 1, B and C get depth 3, D gets depth 2
+    let sk_a = make_leaf(0, 100);
+    let sk_b = make_leaf(1, 1);
+    let sk_c = make_leaf(2, 1);
+    let sk_d = make_leaf(3, 1);
+    let sk_bc = make_node(sk_b, sk_c);
+    let sk_bcd = make_node(sk_d, sk_bc);
+    let sk_tree = make_node(sk_a, sk_bcd);
+
+    assert_eq(tree_freq(sk_tree), 103);
+    assert_eq(tree_leaf_count(sk_tree), 4);
+    assert_eq(tree_depth(sk_tree), 3);
+    assert_eq(tree_min_depth(sk_tree), 1);
+
+    assert_eq(code_length(sk_tree, 0), 1);  // A (most frequent)
+    assert_eq(code_length(sk_tree, 3), 2);  // D
+    assert_eq(code_length(sk_tree, 1), 3);  // B (least frequent)
+    assert_eq(code_length(sk_tree, 2), 3);  // C (least frequent)
+
+    // Total weighted depth: 100*1 + 1*3 + 1*3 + 1*2 = 108
+    assert_eq(total_weighted_depth(sk_tree), 108);
+
+    // Average code length * 1000: 108 * 1000 / 103 = 1048 (integer division)
+    assert_eq(avg_code_length_x1000(sk_tree), 1048);
+
+    // === Test 7: Merge sorted preserves smaller on left ===
+    let m1 = merge_sorted(make_leaf(0, 3), make_leaf(1, 7));
+    // Left child should have the smaller frequency
+    match m1 {
+        HNode { freq, left, right } => {
+            assert_eq(freq, 10);
+            assert_eq(tree_freq(left), 3);
+            assert_eq(tree_freq(right), 7);
+        },
+        _ => assert(false),
+    };
+
+    let m2 = merge_sorted(make_leaf(0, 9), make_leaf(1, 2));
+    match m2 {
+        HNode { freq, left, right } => {
+            assert_eq(freq, 11);
+            assert_eq(tree_freq(left), 2);
+            assert_eq(tree_freq(right), 9);
+        },
+        _ => assert(false),
+    };
+
+    // === Test 8: Tree size invariant: size = 2 * leaves - 1 ===
+    assert_eq(tree_size(t2), 2 * tree_leaf_count(t2) - 1);
+    assert_eq(tree_size(t3), 2 * tree_leaf_count(t3) - 1);
+    assert_eq(tree_size(eq_tree), 2 * tree_leaf_count(eq_tree) - 1);
+    assert_eq(tree_size(sk_tree), 2 * tree_leaf_count(sk_tree) - 1);
+
+    // === Test 9: Non-existent symbol returns -1 ===
+    assert_eq(code_length(t3, 99), 0 - 1);
+    assert_eq(code_length(eq_tree, 10), 0 - 1);
+
+    // === Test 10: Single leaf tree ===
+    let single = make_leaf(42, 100);
+    assert_eq(tree_size(single), 1);
+    assert_eq(tree_depth(single), 0);
+    assert_eq(code_length(single, 42), 0);
+    assert_eq(total_weighted_depth(single), 0);  // depth 0, so 0 bits
+    assert_eq(total_frequency(single), 100);
+
+    // === Test 11: Compression ratio for skewed vs balanced ===
+    // Skewed: 108 bits for 103 symbols
+    // Fixed-length for 4 symbols: 2 bits each -> 103 * 2 = 206 bits
+    // Huffman is better: 108 < 206
+    let fixed_bits = total_frequency(sk_tree) * 2;
+    let huffman_bits = total_weighted_depth(sk_tree);
+    assert(huffman_bits < fixed_bits);
+
+    // Balanced with equal freqs: 8 bits for 4 symbols
+    // Fixed: 4 * 2 = 8 bits — same, no improvement
+    let fixed_eq = total_frequency(eq_tree) * 2;
+    let huffman_eq = total_weighted_depth(eq_tree);
+    assert_eq(huffman_eq, fixed_eq);
+
+    // === Test 12: 8-symbol tree ===
+    // Build a complete binary tree with 8 leaves
+    let l0 = make_leaf(0, 5);
+    let l1 = make_leaf(1, 3);
+    let l2 = make_leaf(2, 8);
+    let l3 = make_leaf(3, 2);
+    let l4 = make_leaf(4, 10);
+    let l5 = make_leaf(5, 1);
+    let l6 = make_leaf(6, 7);
+    let l7 = make_leaf(7, 4);
+
+    let n01 = make_node(l0, l1);
+    let n23 = make_node(l2, l3);
+    let n45 = make_node(l4, l5);
+    let n67 = make_node(l6, l7);
+    let n0123 = make_node(n01, n23);
+    let n4567 = make_node(n45, n67);
+    let t8 = make_node(n0123, n4567);
+
+    assert_eq(tree_freq(t8), 40);
+    assert_eq(tree_leaf_count(t8), 8);
+    assert_eq(tree_size(t8), 15);  // 2*8-1
+    assert_eq(tree_depth(t8), 3);
+    assert_eq(tree_min_depth(t8), 3);
+
+    // All at depth 3, total weighted depth = sum of freq * 3
+    // = (5+3+8+2+10+1+7+4) * 3 = 40 * 3 = 120
+    assert_eq(total_weighted_depth(t8), 120);
+
+    // Verify all 8 symbols at depth 3
+    let mut si = 0;
+    while si < 8 {
+        assert_eq(code_length(t8, si), 3);
+        assert(tree_contains(t8, si));
+        si = si + 1;
+    }
+
+    0
+}

@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, dependent-return
+
+/// Pi types - functions with dependent return types
+///
+/// Pi types (dependent function types) allow the return type of a function
+/// to depend on the value of its arguments.
+
+/// Type with compile-time size
+type FixedArray<T, N: meta Int> is {
+    data: [T; N],
+};
+
+/// Replicate a value N times
+fn replicate<T, N: meta Int>(value: T) -> FixedArray<T, N> {
+    FixedArray { data: [value; N] }
+}
+
+/// Safe array indexing with compile-time bound
+fn safe_get<T, N: meta Int>(arr: FixedArray<T, N>, idx: Int) -> T
+where idx >= 0, idx < N {
+    arr.data[idx]
+}
+
+/// Reverse preserves length
+fn reverse_fixed<T, N: meta Int>(xs: FixedArray<T, N>) -> FixedArray<T, N> {
+    let mut d = xs.data;
+    d.reverse();
+    FixedArray { data: d }
+}
+
+/// Map preserves length
+fn map_fixed<T, U, N: meta Int>(xs: FixedArray<T, N>, f: fn(T) -> U) -> FixedArray<U, N> {
+    FixedArray { data: xs.data.map(f) }
+}
+
+/// Zip requires equal lengths
+fn zip_fixed<T, U, N: meta Int>(
+    xs: FixedArray<T, N>,
+    ys: FixedArray<U, N>
+) -> FixedArray<(T, U), N> {
+    FixedArray { data: xs.data.zip(ys.data) }
+}
+
+/// Head is safe for non-empty arrays
+fn head_safe<T, N: meta Int{> 0}>(xs: FixedArray<T, N>) -> T {
+    xs.data[0]
+}
+
+/// Matrix with compile-time dimensions
+type Matrix<T, Rows: meta Int, Cols: meta Int> is {
+    data: [T; Rows * Cols],
+};
+
+/// Create an identity matrix of size N x N
+fn identity_matrix<N: meta Int{> 0}>() -> Matrix<Float, N, N> {
+    Matrix {
+        data: [0.0; N * N],
+    }
+}
+
+/// Matrix multiplication with dimension tracking
+fn matmul<T, M: meta Int, N: meta Int, K: meta Int>(
+    a: Matrix<T, M, N>,
+    b: Matrix<T, N, K>
+) -> Matrix<T, M, K> {
+    // Inner dimensions (N) must match
+    // Result is M x K
+    Matrix {
+        data: [T.default(); M * K],
+    }
+}
+
+fn main() {
+    // Basic replicate
+    let three_zeros: FixedArray<Int, 3> = replicate(0);
+    assert(three_zeros.data.len() == 3);
+
+    // Reverse preserves length
+    let reversed: FixedArray<Int, 3> = reverse_fixed(three_zeros);
+    assert(reversed.data.len() == 3);
+
+    // Map preserves length
+    let arr: FixedArray<Int, 4> = replicate(5);
+    let doubled: FixedArray<Int, 4> = map_fixed(arr, |x| x * 2);
+    assert(doubled.data.len() == 4);
+
+    // Zip requires equal lengths
+    let a: FixedArray<Int, 3> = replicate(1);
+    let b: FixedArray<Int, 3> = replicate(2);
+    let zipped: FixedArray<(Int, Int), 3> = zip_fixed(a, b);
+    assert(zipped.data.len() == 3);
+
+    // Head on non-empty array
+    let h: Int = head_safe(FixedArray { data: [10, 20, 30] });
+    assert(h == 10);
+
+    // Identity matrix
+    let id: Matrix<Float, 3, 3> = identity_matrix();
+    assert(id.data.len() == 9);
+
+    // Matrix multiplication dimension tracking
+    let m1: Matrix<Float, 2, 3> = Matrix { data: [0.0; 6] };
+    let m2: Matrix<Float, 3, 4> = Matrix { data: [0.0; 12] };
+    let m3: Matrix<Float, 2, 4> = matmul(m1, m2);
+    assert(m3.data.len() == 8);
+}

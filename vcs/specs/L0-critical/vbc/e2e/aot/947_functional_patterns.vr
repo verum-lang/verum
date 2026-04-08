@@ -1,0 +1,90 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: closures, higher-order, functional, generics
+
+fn map_int(items: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn filter_int(items: List<Int>, pred: fn(Int) -> Int) -> List<Int> {
+    let mut result = [];
+    for item in items {
+        if (pred(item) != 0) {
+            result.push(item);
+        }
+    }
+    result
+}
+
+fn fold_int(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    for item in items {
+        acc = f(acc, item);
+    }
+    acc
+}
+
+fn apply<T>(f: fn(T) -> T, x: T) -> T {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x| f(g(x))
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn main() -> Int {
+    let nums = [1, 2, 3, 4, 5];
+
+    // Map + fold
+    let squared = map_int(nums, |x: Int| -> Int { x * x });
+    let sum_sq = fold_int(squared, 0, |a: Int, b: Int| -> Int { a + b });
+    if (sum_sq != 55) { print(f"FAIL: sum_sq={sum_sq}"); return 1; }
+
+    // Filter + fold
+    let evens = filter_int(nums, |x: Int| -> Int { if (x % 2 == 0) { 1 } else { 0 } });
+    let sum_evens = fold_int(evens, 0, |a: Int, b: Int| -> Int { a + b });
+    if (sum_evens != 6) { print(f"FAIL: sum_evens={sum_evens}"); return 1; }
+
+    // Fold: product
+    let product = fold_int(nums, 1, |a: Int, b: Int| -> Int { a * b });
+    if (product != 120) { print(f"FAIL: product={product}"); return 1; }
+
+    // Generic apply
+    let r = apply(|x: Int| -> Int { x * 3 }, 7);
+    if (r != 21) { print(f"FAIL: apply={r}"); return 1; }
+
+    // Closure composition
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let double_then_inc = compose(inc, double);
+    let v = double_then_inc(5);
+    if (v != 11) { print(f"FAIL: compose={v}"); return 1; }
+
+    // Factory pattern
+    let add10 = make_adder(10);
+    let add100 = make_adder(100);
+    if (add10(5) != 15) { print("FAIL: add10"); return 1; }
+    if (add100(5) != 105) { print("FAIL: add100"); return 1; }
+
+    // Mutable capture in loop
+    let mut total = 0;
+    let mut i = 0;
+    while (i < 5) {
+        let f = |x: Int| -> Int { x + i };
+        total = total + f(0);
+        i = i + 1;
+    }
+    if (total != 10) { print(f"FAIL: loop_capture={total}"); return 1; }
+
+    print("functional_patterns: PASS");
+    0
+}

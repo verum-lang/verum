@@ -1,0 +1,168 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, while, loop
+
+fn test_simple_while() {
+    // Simple while loop
+    while condition {
+        do_something();
+    }
+}
+
+fn test_while_with_counter() {
+    // While with counter
+    while i < 10 {
+        process(i);
+        i += 1;
+    }
+}
+
+fn test_while_complex_condition() {
+    // While with complex condition
+    while x > 0 && y < max {
+        compute(x, y);
+        x -= 1;
+        y += 1;
+    }
+}
+
+fn test_while_function_call() {
+    // While with function call condition
+    while has_more_items() {
+        process_next();
+    }
+}
+
+fn test_while_method_call() {
+    // While with method call condition
+    while iter.has_next() {
+        let item = iter.next();
+        process(item);
+    }
+}
+
+fn test_while_negation() {
+    // While with negation
+    while !done {
+        step();
+    }
+}
+
+fn test_while_mutable_variable() {
+    // While with mutable variable
+    let mut count = 0;
+    while count < limit {
+        action();
+        count += 1;
+    }
+}
+
+fn test_while_true() {
+    // While true (infinite loop pattern)
+    while true {
+        if should_exit() {
+            break;
+        }
+        do_work();
+    }
+}
+
+fn test_while_with_break() {
+    // While with break
+    while condition {
+        if error_detected {
+            break;
+        }
+        continue_work();
+    }
+}
+
+fn test_while_with_continue() {
+    // While with continue
+    while has_items {
+        let item = get_next();
+        if item.skip {
+            continue;
+        }
+        process(item);
+    }
+}
+
+fn test_while_let_pattern() {
+    // While let pattern
+    while let Some(item) = iterator.next() {
+        process(item);
+    }
+}
+
+fn test_while_let_result() {
+    // While let with Result
+    while let Ok(line) = reader.read_line() {
+        parse(line);
+    }
+}
+
+fn test_nested_while() {
+    // Nested while loops
+    while outer_condition {
+        while inner_condition {
+            inner_work();
+        }
+        outer_work();
+    }
+}
+
+fn test_while_labeled_break() {
+    // While with labeled break
+    'outer: while a {
+        while b {
+            if exit_condition {
+                break 'outer;
+            }
+        }
+    }
+}
+
+fn test_while_with_value() {
+    // While with block returning value
+    let result = while computing {
+        if found {
+            break value;
+        }
+    };
+}
+
+fn test_while_comparison() {
+    // While with comparison
+    while buffer.len() < capacity {
+        buffer.push(read_byte());
+    }
+}
+
+fn test_while_logical_operators() {
+    // While with logical operators
+    while connected && !timeout && retries > 0 {
+        attempt_operation();
+        retries -= 1;
+    }
+}
+
+fn test_while_state_machine() {
+    // While with state machine pattern
+    while state != State.Done {
+        state = match state {
+            State.Init => State.Running,
+            State.Running => process_and_transition(),
+            State.Done => State.Done,
+        };
+    }
+}
+
+fn test_while_let_resource() {
+    // While with resource check
+    while let Some(resource) = acquire_resource() {
+        use_resource(resource);
+        release_resource(resource);
+    }
+}

@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, numbers, hex, error
+// @description: Test invalid hex digit detection
+// @expected-error: E003
+
+fn test_invalid_hex() {
+    let a = 0xGHI;
+    let b = 0xZZZ;
+}

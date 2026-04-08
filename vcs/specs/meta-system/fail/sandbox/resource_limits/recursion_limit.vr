@@ -1,0 +1,17 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, resource, recursion
+// @description: Test that recursion limit is enforced in meta functions
+// @expected-error: M303
+
+// Test that infinite recursion hits the recursion limit
+meta fn infinite_recursion() -> Int {
+    // Each recursive call increments the depth counter
+    // When depth exceeds recursion_limit (default 100), M303 is returned
+    1 + infinite_recursion()
+}
+
+fn main() {
+    @const assert(infinite_recursion() >= 0);
+}

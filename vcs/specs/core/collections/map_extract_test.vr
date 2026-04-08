@@ -1,0 +1,718 @@
+// =============================================================================
+// map_extract_test.vr - Tests for Map iter_mut, extract_if, and merge
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, map, iter_mut, extract_if, merge, production, core
+// @description: Tests for Map.iter_mut(), Map.extract_if(), and Map.merge()
+//               methods added for production-quality map operations.
+// =============================================================================
+
+module specs.core.collections.map_extract_test;
+
+mount core.*;
+
+// =============================================================================
+// Helper predicates (named functions to avoid closure issues)
+// =============================================================================
+
+fn is_even_key(k: &Int, _v: &Int) -> Bool {
+    *k % 2 == 0
+}
+
+fn is_odd_key(k: &Int, _v: &Int) -> Bool {
+    *k % 2 != 0
+}
+
+fn value_over_50(k: &Int, v: &Int) -> Bool {
+    *v > 50
+}
+
+fn always_true(k: &Int, v: &Int) -> Bool {
+    true
+}
+
+fn always_false(k: &Int, v: &Int) -> Bool {
+    false
+}
+
+fn key_gt_3(k: &Int, _v: &Int) -> Bool {
+    *k > 3
+}
+
+fn key_lt_0(k: &Int, _v: &Int) -> Bool {
+    *k < 0
+}
+
+fn resolve_sum(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn resolve_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
+}
+
+fn resolve_keep_existing(a: Int, _b: Int) -> Int {
+    a
+}
+
+fn resolve_keep_incoming(_a: Int, b: Int) -> Int {
+    b
+}
+
+// =============================================================================
+// Section 1: Map.iter_mut() Tests
+// =============================================================================
+
+@test
+fn test_iter_mut_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let mut count = 0;
+    for (k, v) in m.iter_mut() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_iter_mut_modify_values() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    // Double all values
+    for (_k, v) in m.iter_mut() {
+        *v = *v * 2;
+    }
+
+    assert_eq(m.get(&1), Some(&20));
+    assert_eq(m.get(&2), Some(&40));
+    assert_eq(m.get(&3), Some(&60));
+}
+
+@test
+fn test_iter_mut_empty_map() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut count = 0;
+    for (_k, _v) in m.iter_mut() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_iter_mut_single_element() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(42, 100);
+
+    for (_k, v) in m.iter_mut() {
+        *v = 999;
+    }
+    assert_eq(m.get(&42), Some(&999));
+}
+
+@test
+fn test_iter_mut_preserves_keys() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    for (_k, v) in m.iter_mut() {
+        *v = 0;
+    }
+
+    // Keys must still be present
+    assert(m.contains_key(&1));
+    assert(m.contains_key(&2));
+    assert(m.contains_key(&3));
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_iter_mut_preserves_len() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let original_len = m.len();
+
+    for (_k, v) in m.iter_mut() {
+        *v = *v + 100;
+    }
+
+    assert_eq(m.len(), original_len);
+}
+
+@test
+fn test_iter_mut_conditional_modify() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    // Only modify values where key is even
+    for (k, v) in m.iter_mut() {
+        if *k % 2 == 0 {
+            *v = *v * 10;
+        }
+    }
+
+    assert_eq(m.get(&1), Some(&10));   // unchanged
+    assert_eq(m.get(&2), Some(&200));  // modified
+    assert_eq(m.get(&3), Some(&30));   // unchanged
+    assert_eq(m.get(&4), Some(&400));  // modified
+}
+
+@test
+fn test_iter_mut_set_all_same() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    for (_k, v) in m.iter_mut() {
+        *v = 42;
+    }
+
+    assert_eq(m.get(&1), Some(&42));
+    assert_eq(m.get(&2), Some(&42));
+    assert_eq(m.get(&3), Some(&42));
+}
+
+@test
+fn test_iter_mut_larger_map() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in range(0, 100) {
+        m.insert(i, i * i);
+    }
+
+    // Increment all values
+    for (_k, v) in m.iter_mut() {
+        *v = *v + 1;
+    }
+
+    assert_eq(m.get(&0), Some(&1));     // 0*0 + 1
+    assert_eq(m.get(&10), Some(&101));  // 10*10 + 1
+    assert_eq(m.get(&99), Some(&9802)); // 99*99 + 1
+}
+
+// =============================================================================
+// Section 2: Map.extract_if() Tests
+// =============================================================================
+
+@test
+fn test_extract_if_basic() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    let extracted = m.extract_if(is_even_key);
+
+    // Even keys extracted
+    assert_eq(extracted.len(), 2);
+    // Odd keys remain
+    assert_eq(m.len(), 2);
+    assert(m.contains_key(&1));
+    assert(m.contains_key(&3));
+    assert(!m.contains_key(&2));
+    assert(!m.contains_key(&4));
+}
+
+@test
+fn test_extract_if_empty_map() {
+    let mut m: Map<Int, Int> = Map.new();
+    let extracted = m.extract_if(always_true);
+    assert_eq(extracted.len(), 0);
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn test_extract_if_none_match() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let extracted = m.extract_if(always_false);
+
+    assert_eq(extracted.len(), 0);
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_extract_if_all_match() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let extracted = m.extract_if(always_true);
+
+    assert_eq(extracted.len(), 3);
+    assert_eq(m.len(), 0);
+    assert(m.is_empty());
+}
+
+@test
+fn test_extract_if_by_value() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 60);
+    m.insert(3, 30);
+    m.insert(4, 80);
+    m.insert(5, 40);
+
+    let extracted = m.extract_if(value_over_50);
+
+    assert_eq(extracted.len(), 2);
+    assert_eq(m.len(), 3);
+    assert(m.contains_key(&1));
+    assert(m.contains_key(&3));
+    assert(m.contains_key(&5));
+    assert(!m.contains_key(&2));
+    assert(!m.contains_key(&4));
+}
+
+@test
+fn test_extract_if_single_element_match() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+
+    let extracted = m.extract_if(always_true);
+
+    assert_eq(extracted.len(), 1);
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn test_extract_if_single_element_no_match() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+
+    let extracted = m.extract_if(always_false);
+
+    assert_eq(extracted.len(), 0);
+    assert_eq(m.len(), 1);
+}
+
+@test
+fn test_extract_if_preserves_remaining() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+    m.insert(5, 50);
+
+    let _extracted = m.extract_if(is_even_key);
+
+    // Remaining values must be intact
+    assert_eq(m.get(&1), Some(&10));
+    assert_eq(m.get(&3), Some(&30));
+    assert_eq(m.get(&5), Some(&50));
+}
+
+@test
+fn test_extract_if_no_match_key_negative() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let extracted = m.extract_if(key_lt_0);
+
+    assert_eq(extracted.len(), 0);
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_extract_if_by_key_threshold() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+    m.insert(5, 50);
+
+    let extracted = m.extract_if(key_gt_3);
+
+    assert_eq(extracted.len(), 2);
+    assert_eq(m.len(), 3);
+    assert(m.contains_key(&1));
+    assert(m.contains_key(&2));
+    assert(m.contains_key(&3));
+}
+
+@test
+fn test_extract_if_map_still_usable() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    let _extracted = m.extract_if(is_even_key);
+
+    // Map should still be usable after extraction
+    m.insert(10, 100);
+    assert_eq(m.len(), 3); // 1, 3, 10
+    assert(m.contains_key(&10));
+    assert_eq(m.get(&10), Some(&100));
+}
+
+@test
+fn test_extract_if_larger_map() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in range(0, 50) {
+        m.insert(i, i * 10);
+    }
+
+    let extracted = m.extract_if(is_even_key);
+
+    // 0, 2, 4, ..., 48 are even → 25 entries
+    assert_eq(extracted.len(), 25);
+    assert_eq(m.len(), 25);
+
+    // Verify odd keys remain
+    for i in range(0, 50) {
+        if i % 2 != 0 {
+            assert(m.contains_key(&i));
+        } else {
+            assert(!m.contains_key(&i));
+        }
+    }
+}
+
+// =============================================================================
+// Section 3: Map.merge() Tests
+// =============================================================================
+
+@test
+fn test_merge_disjoint() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(3, 30);
+    b.insert(4, 40);
+
+    a.merge(b, resolve_sum);
+
+    assert_eq(a.len(), 4);
+    assert_eq(a.get(&1), Some(&10));
+    assert_eq(a.get(&2), Some(&20));
+    assert_eq(a.get(&3), Some(&30));
+    assert_eq(a.get(&4), Some(&40));
+}
+
+@test
+fn test_merge_overlapping_sum() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(2, 200);
+    b.insert(3, 300);
+
+    a.merge(b, resolve_sum);
+
+    assert_eq(a.len(), 3);
+    assert_eq(a.get(&1), Some(&10));
+    assert_eq(a.get(&2), Some(&220)); // 20 + 200
+    assert_eq(a.get(&3), Some(&300));
+}
+
+@test
+fn test_merge_overlapping_max() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 100);
+    a.insert(2, 20);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(1, 50);
+    b.insert(2, 200);
+
+    a.merge(b, resolve_max);
+
+    assert_eq(a.get(&1), Some(&100)); // max(100, 50)
+    assert_eq(a.get(&2), Some(&200)); // max(20, 200)
+}
+
+@test
+fn test_merge_keep_existing() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(2, 999);
+    b.insert(3, 30);
+
+    a.merge(b, resolve_keep_existing);
+
+    assert_eq(a.get(&1), Some(&10));
+    assert_eq(a.get(&2), Some(&20));  // kept existing
+    assert_eq(a.get(&3), Some(&30));
+}
+
+@test
+fn test_merge_keep_incoming() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(2, 999);
+    b.insert(3, 30);
+
+    a.merge(b, resolve_keep_incoming);
+
+    assert_eq(a.get(&1), Some(&10));
+    assert_eq(a.get(&2), Some(&999)); // took incoming
+    assert_eq(a.get(&3), Some(&30));
+}
+
+@test
+fn test_merge_empty_into_populated() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let b: Map<Int, Int> = Map.new();
+
+    a.merge(b, resolve_sum);
+
+    assert_eq(a.len(), 2);
+    assert_eq(a.get(&1), Some(&10));
+    assert_eq(a.get(&2), Some(&20));
+}
+
+@test
+fn test_merge_populated_into_empty() {
+    let mut a: Map<Int, Int> = Map.new();
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(1, 10);
+    b.insert(2, 20);
+
+    a.merge(b, resolve_sum);
+
+    assert_eq(a.len(), 2);
+    assert_eq(a.get(&1), Some(&10));
+    assert_eq(a.get(&2), Some(&20));
+}
+
+@test
+fn test_merge_both_empty() {
+    let mut a: Map<Int, Int> = Map.new();
+    let b: Map<Int, Int> = Map.new();
+
+    a.merge(b, resolve_sum);
+
+    assert_eq(a.len(), 0);
+    assert(a.is_empty());
+}
+
+@test
+fn test_merge_all_overlap() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+    a.insert(3, 30);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(1, 100);
+    b.insert(2, 200);
+    b.insert(3, 300);
+
+    a.merge(b, resolve_sum);
+
+    assert_eq(a.len(), 3);
+    assert_eq(a.get(&1), Some(&110)); // 10 + 100
+    assert_eq(a.get(&2), Some(&220)); // 20 + 200
+    assert_eq(a.get(&3), Some(&330)); // 30 + 300
+}
+
+@test
+fn test_merge_larger_maps() {
+    let mut a: Map<Int, Int> = Map.new();
+    for i in range(0, 50) {
+        a.insert(i, i);
+    }
+
+    let mut b: Map<Int, Int> = Map.new();
+    for i in range(25, 75) {
+        b.insert(i, i * 10);
+    }
+
+    a.merge(b, resolve_sum);
+
+    // Should have keys 0..75 = 75 entries
+    assert_eq(a.len(), 75);
+
+    // Non-overlapping from a (0..25): unchanged
+    assert_eq(a.get(&0), Some(&0));
+    assert_eq(a.get(&24), Some(&24));
+
+    // Overlapping (25..50): sum of a[i] + b[i] = i + i*10
+    assert_eq(a.get(&25), Some(&275));  // 25 + 250
+    assert_eq(a.get(&49), Some(&539));  // 49 + 490
+
+    // Non-overlapping from b (50..75): just b values
+    assert_eq(a.get(&50), Some(&500));
+    assert_eq(a.get(&74), Some(&740));
+}
+
+@test
+fn test_merge_preserves_original_non_overlapping() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+    a.insert(3, 30);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(4, 40);
+
+    a.merge(b, resolve_sum);
+
+    // Original entries must be untouched
+    assert_eq(a.get(&1), Some(&10));
+    assert_eq(a.get(&2), Some(&20));
+    assert_eq(a.get(&3), Some(&30));
+    assert_eq(a.get(&4), Some(&40));
+}
+
+@test
+fn test_merge_usable_after() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(2, 20);
+
+    a.merge(b, resolve_sum);
+
+    // Map should be fully functional after merge
+    a.insert(3, 30);
+    a.remove(&1);
+    assert_eq(a.len(), 2);
+    assert(a.contains_key(&2));
+    assert(a.contains_key(&3));
+}
+
+// =============================================================================
+// Section 4: Integration / Combined Tests
+// =============================================================================
+
+@test
+fn test_extract_then_iter_mut() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+
+    // Extract evens
+    let _extracted = m.extract_if(is_even_key);
+    assert_eq(m.len(), 2);
+
+    // Now modify remaining via iter_mut
+    for (_k, v) in m.iter_mut() {
+        *v = *v + 100;
+    }
+
+    assert_eq(m.get(&1), Some(&110));
+    assert_eq(m.get(&3), Some(&130));
+}
+
+@test
+fn test_merge_then_extract() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(3, 30);
+    b.insert(4, 40);
+
+    a.merge(b, resolve_sum);
+    assert_eq(a.len(), 4);
+
+    // Extract odds
+    let extracted = a.extract_if(is_odd_key);
+    assert_eq(extracted.len(), 2); // 1, 3
+    assert_eq(a.len(), 2);
+    assert(a.contains_key(&2));
+    assert(a.contains_key(&4));
+}
+
+@test
+fn test_iter_mut_then_merge() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+
+    // Double values
+    for (_k, v) in a.iter_mut() {
+        *v = *v * 2;
+    }
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(2, 5);
+    b.insert(3, 30);
+
+    a.merge(b, resolve_sum);
+
+    assert_eq(a.get(&1), Some(&20)); // was 10, doubled to 20
+    assert_eq(a.get(&2), Some(&45)); // was 20, doubled to 40, +5 from merge
+    assert_eq(a.get(&3), Some(&30)); // from b
+}
+
+@test
+fn test_extract_if_returns_correct_pairs() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(10, 100);
+    m.insert(20, 200);
+    m.insert(30, 300);
+    m.insert(15, 150);
+    m.insert(25, 250);
+
+    let extracted = m.extract_if(is_even_key);
+
+    // All extracted keys should be even with correct values
+    for i in range(0, extracted.len()) {
+        let pair = extracted[i];
+        let k = pair.0;
+        let v = pair.1;
+        assert(k % 2 == 0);
+        assert_eq(v, k * 10);
+    }
+}
+
+@test
+fn test_merge_single_overlap() {
+    let mut a: Map<Int, Int> = Map.new();
+    a.insert(1, 10);
+    a.insert(2, 20);
+    a.insert(3, 30);
+
+    let mut b: Map<Int, Int> = Map.new();
+    b.insert(2, 200);
+
+    a.merge(b, resolve_sum);
+
+    assert_eq(a.len(), 3);
+    assert_eq(a.get(&1), Some(&10));
+    assert_eq(a.get(&2), Some(&220));
+    assert_eq(a.get(&3), Some(&30));
+}

@@ -1,0 +1,148 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, observer, pattern, design
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for observer pattern (event notification)
+
+// Event types: 0=NONE, 1=CHANGE, 2=DELETE, 3=CREATE
+type Event is { kind: Int, data: Int };
+
+fn event_none() -> Event { Event { kind: 0, data: 0 } }
+
+// Observer: a function that processes an event and returns updated state
+// We model 4 observers, each with their own state
+
+type ObserverState is { count: Int, last_kind: Int, sum_data: Int };
+
+fn obs_new() -> ObserverState { ObserverState { count: 0, last_kind: 0, sum_data: 0 } }
+
+fn obs_notify(s: ObserverState, e: Event) -> ObserverState {
+    if e.kind == 0 { return s; }
+    ObserverState {
+        count: s.count + 1,
+        last_kind: e.kind,
+        sum_data: s.sum_data + e.data
+    }
+}
+
+// Subject with 4 observers
+type Subject is {
+    obs0: ObserverState, obs1: ObserverState,
+    obs2: ObserverState, obs3: ObserverState,
+    active0: Int, active1: Int, active2: Int, active3: Int
+};
+
+fn subject_new() -> Subject {
+    Subject {
+        obs0: obs_new(), obs1: obs_new(), obs2: obs_new(), obs3: obs_new(),
+        active0: 0, active1: 0, active2: 0, active3: 0
+    }
+}
+
+fn subject_subscribe(s: Subject, idx: Int) -> Subject {
+    Subject {
+        obs0: s.obs0, obs1: s.obs1, obs2: s.obs2, obs3: s.obs3,
+        active0: if idx == 0 { 1 } else { s.active0 },
+        active1: if idx == 1 { 1 } else { s.active1 },
+        active2: if idx == 2 { 1 } else { s.active2 },
+        active3: if idx == 3 { 1 } else { s.active3 }
+    }
+}
+
+fn subject_unsubscribe(s: Subject, idx: Int) -> Subject {
+    Subject {
+        obs0: s.obs0, obs1: s.obs1, obs2: s.obs2, obs3: s.obs3,
+        active0: if idx == 0 { 0 } else { s.active0 },
+        active1: if idx == 1 { 0 } else { s.active1 },
+        active2: if idx == 2 { 0 } else { s.active2 },
+        active3: if idx == 3 { 0 } else { s.active3 }
+    }
+}
+
+fn subject_notify_all(s: Subject, e: Event) -> Subject {
+    Subject {
+        obs0: if s.active0 == 1 { obs_notify(s.obs0, e) } else { s.obs0 },
+        obs1: if s.active1 == 1 { obs_notify(s.obs1, e) } else { s.obs1 },
+        obs2: if s.active2 == 1 { obs_notify(s.obs2, e) } else { s.obs2 },
+        obs3: if s.active3 == 1 { obs_notify(s.obs3, e) } else { s.obs3 },
+        active0: s.active0, active1: s.active1, active2: s.active2, active3: s.active3
+    }
+}
+
+fn subject_get_obs(s: Subject, idx: Int) -> ObserverState {
+    if idx == 0 { s.obs0 } else if idx == 1 { s.obs1 }
+    else if idx == 2 { s.obs2 } else { s.obs3 }
+}
+
+fn subject_active_count(s: Subject) -> Int {
+    s.active0 + s.active1 + s.active2 + s.active3
+}
+
+fn test_subscribe_notify() {
+    let mut s = subject_new();
+    s = subject_subscribe(s, 0);
+    s = subject_subscribe(s, 1);
+    assert_eq(subject_active_count(s), 2);
+
+    s = subject_notify_all(s, Event { kind: 1, data: 42 });
+    assert_eq(subject_get_obs(s, 0).count, 1);
+    assert_eq(subject_get_obs(s, 0).last_kind, 1);
+    assert_eq(subject_get_obs(s, 0).sum_data, 42);
+    assert_eq(subject_get_obs(s, 1).count, 1);
+    // Observer 2 not subscribed
+    assert_eq(subject_get_obs(s, 2).count, 0);
+}
+
+fn test_multiple_events() {
+    let mut s = subject_new();
+    s = subject_subscribe(s, 0);
+    s = subject_subscribe(s, 1);
+    s = subject_subscribe(s, 2);
+
+    s = subject_notify_all(s, Event { kind: 1, data: 10 });
+    s = subject_notify_all(s, Event { kind: 2, data: 20 });
+    s = subject_notify_all(s, Event { kind: 3, data: 30 });
+
+    assert_eq(subject_get_obs(s, 0).count, 3);
+    assert_eq(subject_get_obs(s, 0).sum_data, 60);
+    assert_eq(subject_get_obs(s, 0).last_kind, 3);
+}
+
+fn test_unsubscribe() {
+    let mut s = subject_new();
+    s = subject_subscribe(s, 0);
+    s = subject_subscribe(s, 1);
+
+    s = subject_notify_all(s, Event { kind: 1, data: 10 });
+
+    s = subject_unsubscribe(s, 0);
+
+    s = subject_notify_all(s, Event { kind: 2, data: 20 });
+
+    // Observer 0 got only 1 event
+    assert_eq(subject_get_obs(s, 0).count, 1);
+    assert_eq(subject_get_obs(s, 0).sum_data, 10);
+    // Observer 1 got both
+    assert_eq(subject_get_obs(s, 1).count, 2);
+    assert_eq(subject_get_obs(s, 1).sum_data, 30);
+}
+
+fn test_none_event() {
+    let mut s = subject_new();
+    s = subject_subscribe(s, 0);
+    s = subject_notify_all(s, event_none());
+    // NONE events are ignored
+    assert_eq(subject_get_obs(s, 0).count, 0);
+}
+
+fn main() -> Int {
+    test_subscribe_notify();
+    test_multiple_events();
+    test_unsubscribe();
+    test_none_event();
+    print("[OK] 268_observer_pattern_aot");
+    0
+}

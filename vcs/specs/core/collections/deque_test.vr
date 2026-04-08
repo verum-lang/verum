@@ -1,0 +1,1539 @@
+// =============================================================================
+// deque_test.vr - Comprehensive tests for Deque<T> collection
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, double-ended-queue, core
+// @description: Comprehensive tests for Deque<T> type and methods
+// =============================================================================
+
+mount core.collections.deque.{Deque, deque};
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Construction Tests
+// =============================================================================
+
+@test
+fn test_deque_new() {
+    let empty: Deque<Int> = Deque.new();
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_deque_with_capacity() {
+    let deque: Deque<Int> = Deque.with_capacity(10);
+    assert(deque.is_empty());
+}
+
+// =============================================================================
+// Section 2: Push and Pop Operations
+// =============================================================================
+
+@test
+fn test_deque_push_back() {
+    let mut deque: Deque<Int> = Deque.new();
+
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+
+    assert_eq(deque.len(), 3);
+
+    match deque.front() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match deque.back() {
+        Some(v) => assert_eq(*v, 3),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_deque_push_front() {
+    let mut deque: Deque<Int> = Deque.new();
+
+    deque.push_front(1);
+    deque.push_front(2);
+    deque.push_front(3);
+
+    assert_eq(deque.len(), 3);
+
+    // Pushed front, so 3 is at front
+    match deque.front() {
+        Some(v) => assert_eq(*v, 3),
+        None => panic("Expected Some"),
+    }
+
+    match deque.back() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_deque_pop_back() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+
+    match deque.pop_back() {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+
+    match deque.pop_back() {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+
+    match deque.pop_back() {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match deque.pop_back() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_deque_pop_front() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+
+    match deque.pop_front() {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match deque.pop_front() {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+
+    match deque.pop_front() {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+
+    match deque.pop_front() {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 3: Front and Back Access
+// =============================================================================
+
+@test
+fn test_deque_front_back() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(10);
+    deque.push_back(20);
+    deque.push_back(30);
+
+    match deque.front() {
+        Some(v) => assert_eq(*v, 10),
+        None => panic("Expected Some"),
+    }
+
+    match deque.back() {
+        Some(v) => assert_eq(*v, 30),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_deque_front_back_mut() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(10);
+    deque.push_back(20);
+
+    match deque.front_mut() {
+        Some(v) => *v = 100,
+        None => panic("Expected Some"),
+    }
+
+    match deque.back_mut() {
+        Some(v) => *v = 200,
+        None => panic("Expected Some"),
+    }
+
+    match deque.front() {
+        Some(v) => assert_eq(*v, 100),
+        None => panic("Expected Some"),
+    }
+
+    match deque.back() {
+        Some(v) => assert_eq(*v, 200),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 4: Index Access
+// =============================================================================
+
+@test
+fn test_deque_get() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(10);
+    deque.push_back(20);
+    deque.push_back(30);
+
+    match deque.get(0) {
+        Some(v) => assert_eq(*v, 10),
+        None => panic("Expected Some"),
+    }
+
+    match deque.get(1) {
+        Some(v) => assert_eq(*v, 20),
+        None => panic("Expected Some"),
+    }
+
+    match deque.get(2) {
+        Some(v) => assert_eq(*v, 30),
+        None => panic("Expected Some"),
+    }
+
+    match deque.get(10) {
+        None => {} // Expected - out of bounds
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 5: Clear and Properties
+// =============================================================================
+
+@test
+fn test_deque_clear() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+
+    assert_eq(deque.len(), 3);
+
+    deque.clear();
+
+    assert(deque.is_empty());
+    assert_eq(deque.len(), 0);
+}
+
+@test
+fn test_deque_is_empty() {
+    let mut deque: Deque<Int> = Deque.new();
+    assert(deque.is_empty());
+
+    deque.push_back(1);
+    assert(!deque.is_empty());
+
+    deque.pop_back();
+    assert(deque.is_empty());
+}
+
+// =============================================================================
+// Section 6: Iteration Tests
+// =============================================================================
+
+@test
+fn test_deque_iter() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+
+    let mut sum = 0;
+    let mut iter = deque.iter();
+    loop {
+        match iter.next() {
+            Some(value) => sum = sum + *value,
+            None => break,
+        }
+    }
+
+    assert_eq(sum, 6);  // 1 + 2 + 3
+}
+
+// =============================================================================
+// Section 7: Mixed Push/Pop Tests (Ring Buffer Behavior)
+// =============================================================================
+
+@test
+fn test_deque_mixed_operations() {
+    let mut deque: Deque<Int> = Deque.new();
+
+    // Push from both ends
+    deque.push_back(2);   // [2]
+    deque.push_front(1);  // [1, 2]
+    deque.push_back(3);   // [1, 2, 3]
+    deque.push_front(0);  // [0, 1, 2, 3]
+
+    assert_eq(deque.len(), 4);
+
+    // Pop from both ends
+    match deque.pop_front() {
+        Some(v) => assert_eq(v, 0),
+        None => panic("Expected Some"),
+    }
+
+    match deque.pop_back() {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+
+    // Remaining: [1, 2]
+    assert_eq(deque.len(), 2);
+}
+
+@test
+fn test_deque_queue_behavior() {
+    // FIFO queue: push_back, pop_front
+    let mut queue: Deque<Int> = Deque.new();
+
+    queue.push_back(1);
+    queue.push_back(2);
+    queue.push_back(3);
+
+    match queue.pop_front() {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+
+    match queue.pop_front() {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+
+    match queue.pop_front() {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_deque_stack_behavior() {
+    // LIFO stack: push_back, pop_back
+    let mut stack: Deque<Int> = Deque.new();
+
+    stack.push_back(1);
+    stack.push_back(2);
+    stack.push_back(3);
+
+    match stack.pop_back() {
+        Some(v) => assert_eq(v, 3),
+        None => panic("Expected Some"),
+    }
+
+    match stack.pop_back() {
+        Some(v) => assert_eq(v, 2),
+        None => panic("Expected Some"),
+    }
+
+    match stack.pop_back() {
+        Some(v) => assert_eq(v, 1),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 8: Edge Cases
+// =============================================================================
+
+@test
+fn test_deque_empty_operations() {
+    let empty: Deque<Int> = Deque.new();
+
+    match empty.front() {
+        None => {} // Expected
+        Some(_) => panic("Front on empty should return None"),
+    }
+
+    match empty.back() {
+        None => {} // Expected
+        Some(_) => panic("Back on empty should return None"),
+    }
+}
+
+@test
+fn test_deque_single_element() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(42);
+
+    assert_eq(deque.len(), 1);
+
+    match deque.front() {
+        Some(v) => assert_eq(*v, 42),
+        None => panic("Expected Some"),
+    }
+
+    match deque.back() {
+        Some(v) => assert_eq(*v, 42), // Same element
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 9: Mutable Index Access
+// =============================================================================
+
+@test
+fn test_deque_get_mut() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(10);
+    deque.push_back(20);
+    deque.push_back(30);
+
+    // Modify element at index 1
+    match deque.get_mut(1) {
+        Some(v) => *v = 200,
+        None => panic("Expected Some"),
+    }
+
+    // Verify the modification
+    match deque.get(1) {
+        Some(v) => assert_eq(*v, 200),
+        None => panic("Expected Some"),
+    }
+
+    // Out of bounds returns None
+    match deque.get_mut(10) {
+        None => {} // Expected
+        Some(_) => panic("Expected None for out of bounds"),
+    }
+}
+
+@test
+fn test_deque_index() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(100);
+    deque.push_back(200);
+    deque.push_back(300);
+
+    // Direct index access
+    assert_eq(*deque.index(0), 100);
+    assert_eq(*deque.index(1), 200);
+    assert_eq(*deque.index(2), 300);
+}
+
+// =============================================================================
+// Section 10: Reserve and Capacity Management
+// =============================================================================
+
+@test
+fn test_deque_reserve() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+
+    let old_cap = deque.capacity();
+    deque.reserve(100);
+
+    // Capacity should increase
+    assert(deque.capacity() >= old_cap + 100);
+    // Data should be preserved
+    assert_eq(deque.len(), 1);
+    match deque.front() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_deque_shrink_to_fit() {
+    let mut deque: Deque<Int> = Deque.with_capacity(100);
+    deque.push_back(1);
+    deque.push_back(2);
+
+    let old_cap = deque.capacity();
+    assert(old_cap >= 100);
+
+    deque.shrink_to_fit();
+
+    // Capacity should be reduced (implementation dependent)
+    // Data should be preserved
+    assert_eq(deque.len(), 2);
+}
+
+// =============================================================================
+// Section 11: Rotation Tests
+// =============================================================================
+
+@test
+fn test_deque_rotate_left() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+    deque.push_back(4);
+
+    // [1, 2, 3, 4] -> rotate_left(1) -> [2, 3, 4, 1]
+    deque.rotate_left(1);
+
+    match deque.front() {
+        Some(v) => assert_eq(*v, 2),
+        None => panic("Expected Some"),
+    }
+
+    match deque.back() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_deque_rotate_right() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+    deque.push_back(4);
+
+    // [1, 2, 3, 4] -> rotate_right(1) -> [4, 1, 2, 3]
+    deque.rotate_right(1);
+
+    match deque.front() {
+        Some(v) => assert_eq(*v, 4),
+        None => panic("Expected Some"),
+    }
+
+    match deque.back() {
+        Some(v) => assert_eq(*v, 3),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_deque_rotate_full() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+
+    // Rotating by len should result in same order
+    deque.rotate_left(3);
+
+    match deque.front() {
+        Some(v) => assert_eq(*v, 1),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section 12: Swap and Contains Tests
+// =============================================================================
+
+@test
+fn test_deque_swap() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(10);
+    deque.push_back(20);
+    deque.push_back(30);
+
+    // Swap elements at indices 0 and 2
+    deque.swap(0, 2);
+
+    // After swap: [30, 20, 10]
+    match deque.get(0) {
+        Some(v) => assert_eq(*v, 30),
+        None => panic("Expected Some"),
+    }
+
+    match deque.get(2) {
+        Some(v) => assert_eq(*v, 10),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_deque_contains() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(10);
+    deque.push_back(20);
+    deque.push_back(30);
+
+    assert(deque.contains(&10));
+    assert(deque.contains(&20));
+    assert(deque.contains(&30));
+    assert(!deque.contains(&40)); // Not in deque
+}
+
+// =============================================================================
+// Section 13: Slices and Contiguous Access
+// =============================================================================
+
+@test
+fn test_deque_as_slices() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+
+    let (s1, s2) = deque.as_slices();
+
+    // Total length should match deque length
+    assert_eq(s1.len() + s2.len(), 3);
+}
+
+@test
+fn test_deque_make_contiguous() {
+    let mut deque: Deque<Int> = Deque.new();
+
+    // Create a non-contiguous state by pushing front and back
+    deque.push_back(2);
+    deque.push_front(1);
+    deque.push_back(3);
+
+    // Make contiguous and get slice
+    let slice = deque.make_contiguous();
+
+    assert_eq(slice.len(), 3);
+    assert_eq(slice[0], 1);
+    assert_eq(slice[1], 2);
+    assert_eq(slice[2], 3);
+}
+
+// =============================================================================
+// Section 14: Mutable Iterator Tests
+// =============================================================================
+
+@test
+fn test_deque_iter_mut() {
+    let mut deque: Deque<Int> = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+    deque.push_back(3);
+
+    // Double each element
+    let mut iter = deque.iter_mut();
+    loop {
+        match iter.next() {
+            Some(value) => *value = *value * 2,
+            None => break,
+        }
+    }
+
+    // Verify elements were doubled
+    match deque.get(0) {
+        Some(v) => assert_eq(*v, 2),
+        None => panic("Expected Some"),
+    }
+
+    match deque.get(1) {
+        Some(v) => assert_eq(*v, 4),
+        None => panic("Expected Some"),
+    }
+
+    match deque.get(2) {
+        Some(v) => assert_eq(*v, 6),
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section: Binary Search
+// =============================================================================
+
+@test
+fn test_deque_binary_search_found() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(5);
+    d.push_back(7);
+    d.push_back(9);
+    assert_eq(d.binary_search(&5), Ok(2));
+}
+
+@test
+fn test_deque_binary_search_missing() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(5);
+    d.push_back(7);
+    let result = d.binary_search(&4);
+    assert(result.is_err());
+}
+
+@test
+fn test_deque_binary_search_empty() {
+    let d: Deque<Int> = Deque.new();
+    let result = d.binary_search(&5);
+    match result {
+        Err(idx) => assert_eq(idx, 0),
+        Ok(_) => panic("expected Err"),
+    }
+}
+
+@test
+fn test_deque_binary_search_first() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    assert_eq(d.binary_search(&10), Ok(0));
+}
+
+@test
+fn test_deque_binary_search_last() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    assert_eq(d.binary_search(&30), Ok(2));
+}
+
+// =============================================================================
+// Ring Buffer Wrap-Around Tests
+// =============================================================================
+
+@test
+fn test_deque_wraparound_stress() {
+    let mut d: Deque<Int> = Deque.new();
+    // Push/pop front and back alternately to force wrap-around
+    let mut i = 0;
+    while i < 50 {
+        d.push_back(i);
+        d.push_front(100 + i);
+        i = i + 1;
+    }
+    assert_eq(d.len(), 100);
+
+    // Pop everything from front — should get front elements first
+    let mut prev_front = d.pop_front();
+    assert(prev_front.is_some());
+    let mut count = 1;
+    while count < 100 {
+        let val = d.pop_front();
+        assert(val.is_some());
+        count = count + 1;
+    }
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_fifo_ordering() {
+    let mut d: Deque<Int> = Deque.new();
+    // Use as FIFO queue: push_back, pop_front
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    assert_eq(d.pop_front(), Some(1));
+    assert_eq(d.pop_front(), Some(2));
+
+    d.push_back(4);
+    d.push_back(5);
+
+    assert_eq(d.pop_front(), Some(3));
+    assert_eq(d.pop_front(), Some(4));
+    assert_eq(d.pop_front(), Some(5));
+    assert_eq(d.pop_front(), None);
+}
+
+@test
+fn test_deque_lifo_ordering() {
+    let mut d: Deque<Int> = Deque.new();
+    // Use as LIFO stack: push_back, pop_back
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    assert_eq(d.pop_back(), Some(3));
+    assert_eq(d.pop_back(), Some(2));
+    assert_eq(d.pop_back(), Some(1));
+    assert_eq(d.pop_back(), None);
+}
+
+@test
+fn test_deque_rotate_edge_cases() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    // Rotate by 0 — no change
+    d.rotate_left(0);
+    assert_eq(*d.front().unwrap(), 1);
+
+    // Rotate left by 2: [1,2,3,4,5] -> [3,4,5,1,2]
+    d.rotate_left(2);
+    assert_eq(*d.front().unwrap(), 3);
+    assert_eq(*d.back().unwrap(), 2);
+
+    // Rotate right by 2: [3,4,5,1,2] -> [1,2,3,4,5]
+    d.rotate_right(2);
+    assert_eq(*d.front().unwrap(), 1);
+    assert_eq(*d.back().unwrap(), 5);
+}
+
+@test
+fn test_deque_large_push_pop() {
+    let mut d: Deque<Int> = Deque.new();
+    let mut i = 0;
+    while i < 100 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    assert_eq(d.len(), 100);
+
+    // Pop all from front
+    let mut j = 0;
+    while j < 100 {
+        let val = d.pop_front();
+        assert(val.is_some());
+        assert_eq(val.unwrap(), j);
+        j = j + 1;
+    }
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_interleaved_push_pop() {
+    let mut d: Deque<Int> = Deque.new();
+    // Alternate push and pop to exercise wrap-around
+    let mut i = 0;
+    while i < 20 {
+        d.push_back(i);
+        if i % 3 == 0 {
+            let _ = d.pop_front();
+        }
+        i = i + 1;
+    }
+    // Should have some elements left
+    assert(d.len() > 0);
+}
+
+@test
+fn test_deque_binary_search_sorted() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    d.push_back(40);
+    d.push_back(50);
+
+    assert_eq(d.binary_search(&10), Ok(0));
+    assert_eq(d.binary_search(&30), Ok(2));
+    assert_eq(d.binary_search(&50), Ok(4));
+    assert(d.binary_search(&25).is_err()); // Not found
+    assert(d.binary_search(&5).is_err());  // Before all
+    assert(d.binary_search(&55).is_err()); // After all
+}
+
+// =============================================================================
+// Section: Convenience Function Tests
+// =============================================================================
+
+@test
+fn test_deque_convenience_function() {
+    let d = deque(&[1, 2, 3, 4, 5]);
+    assert_eq(d.len(), 5);
+    assert_eq(*d.front().unwrap(), 1);
+    assert_eq(*d.back().unwrap(), 5);
+}
+
+@test
+fn test_deque_convenience_function_empty() {
+    let d: Deque<Int> = deque(&[]);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_convenience_preserves_order() {
+    let d = deque(&[10, 20, 30]);
+    assert_eq(*d.get(0).unwrap(), 10);
+    assert_eq(*d.get(1).unwrap(), 20);
+    assert_eq(*d.get(2).unwrap(), 30);
+}
+
+// =============================================================================
+// Section: Retain Tests
+// =============================================================================
+
+@test
+fn test_deque_retain_evens() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.push_back(6);
+
+    d.retain(|x: &Int| *x % 2 == 0);
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 2);
+    assert_eq(*d.get(1).unwrap(), 4);
+    assert_eq(*d.get(2).unwrap(), 6);
+}
+
+@test
+fn test_deque_retain_all() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    d.retain(|_x: &Int| true);
+
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_deque_retain_none() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    d.retain(|_x: &Int| false);
+
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_retain_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.retain(|_x: &Int| true);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_retain_threshold() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(5);
+    d.push_back(30);
+    d.push_back(3);
+
+    d.retain(|x: &Int| *x >= 10);
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 10);
+    assert_eq(*d.get(1).unwrap(), 20);
+    assert_eq(*d.get(2).unwrap(), 30);
+}
+
+// =============================================================================
+// Section: Truncate Tests
+// =============================================================================
+
+@test
+fn test_deque_truncate_basic() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    d.truncate(3);
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+}
+
+@test
+fn test_deque_truncate_to_zero() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    d.truncate(0);
+
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_truncate_beyond_len() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    d.truncate(100); // Beyond current length - no effect
+
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_deque_truncate_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.truncate(0);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_truncate_to_one() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    d.truncate(1);
+
+    assert_eq(d.len(), 1);
+    assert_eq(*d.front().unwrap(), 10);
+}
+
+// =============================================================================
+// Section: Insert Tests
+// =============================================================================
+
+@test
+fn test_deque_insert_middle() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(3);
+    d.push_back(4);
+
+    d.insert(1, 2); // Insert 2 at index 1
+
+    assert_eq(d.len(), 4);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 4);
+}
+
+@test
+fn test_deque_insert_front() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(2);
+    d.push_back(3);
+
+    d.insert(0, 1); // Insert at front
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.front().unwrap(), 1);
+}
+
+@test
+fn test_deque_insert_back() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    d.insert(2, 3); // Insert at end (index == len)
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.back().unwrap(), 3);
+}
+
+@test
+fn test_deque_insert_into_empty() {
+    let mut d: Deque<Int> = Deque.new();
+
+    d.insert(0, 42);
+
+    assert_eq(d.len(), 1);
+    assert_eq(*d.front().unwrap(), 42);
+}
+
+@test
+fn test_deque_insert_multiple() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(5);
+
+    d.insert(1, 2);
+    d.insert(2, 3);
+    d.insert(3, 4);
+
+    assert_eq(d.len(), 5);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 4);
+    assert_eq(*d.get(4).unwrap(), 5);
+}
+
+// =============================================================================
+// Section: Remove Tests
+// =============================================================================
+
+@test
+fn test_deque_remove_middle() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    let removed = d.remove(1);
+    assert_eq(removed, Some(2));
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 3);
+    assert_eq(*d.get(2).unwrap(), 4);
+}
+
+@test
+fn test_deque_remove_front() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let removed = d.remove(0);
+    assert_eq(removed, Some(1));
+
+    assert_eq(d.len(), 2);
+    assert_eq(*d.front().unwrap(), 2);
+}
+
+@test
+fn test_deque_remove_back() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let removed = d.remove(2);
+    assert_eq(removed, Some(3));
+
+    assert_eq(d.len(), 2);
+    assert_eq(*d.back().unwrap(), 2);
+}
+
+@test
+fn test_deque_remove_single() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    let removed = d.remove(0);
+    assert_eq(removed, Some(42));
+
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_remove_out_of_bounds() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    let removed = d.remove(5);
+    assert(removed.is_none());
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_deque_remove_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    let removed = d.remove(0);
+    assert(removed.is_none());
+}
+
+@test
+fn test_deque_remove_negative_index() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    let removed: Maybe<Int> = d.remove(-1);
+    assert(removed.is_none());
+    assert_eq(d.len(), 2);
+}
+
+// =============================================================================
+// Section: Clone Tests
+// =============================================================================
+
+@test
+fn test_deque_clone_basic() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let cloned = d.clone();
+
+    assert_eq(cloned.len(), 3);
+    assert_eq(*cloned.get(0).unwrap(), 1);
+    assert_eq(*cloned.get(1).unwrap(), 2);
+    assert_eq(*cloned.get(2).unwrap(), 3);
+}
+
+@test
+fn test_deque_clone_independence() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+
+    let mut cloned = d.clone();
+
+    // Modify original
+    d.push_back(30);
+    assert_eq(d.len(), 3);
+
+    // Clone unchanged
+    assert_eq(cloned.len(), 2);
+
+    // Modify clone
+    cloned.push_front(5);
+    assert_eq(cloned.len(), 3);
+    assert_eq(d.len(), 3); // Original unchanged
+}
+
+@test
+fn test_deque_clone_empty() {
+    let d: Deque<Int> = Deque.new();
+    let cloned = d.clone();
+    assert(cloned.is_empty());
+}
+
+@test
+fn test_deque_clone_after_wraparound() {
+    let mut d: Deque<Int> = Deque.new();
+    // Create wrap-around state
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.pop_front(); // Remove 1, head advances
+    d.push_front(0); // Push to front, may wrap
+
+    let cloned = d.clone();
+    assert_eq(cloned.len(), d.len());
+    assert_eq(*cloned.front().unwrap(), *d.front().unwrap());
+    assert_eq(*cloned.back().unwrap(), *d.back().unwrap());
+}
+
+// =============================================================================
+// Section: Default Tests
+// =============================================================================
+
+@test
+fn test_deque_default() {
+    let d: Deque<Int> = Deque.default();
+    assert(d.is_empty());
+    assert_eq(d.len(), 0);
+}
+
+@test
+fn test_deque_default_text() {
+    let d: Deque<Text> = Deque.default();
+    assert(d.is_empty());
+}
+
+// =============================================================================
+// Section: Equality Tests
+// =============================================================================
+
+@test
+fn test_deque_eq_same_elements() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+    a.push_back(3);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(2);
+    b.push_back(3);
+
+    assert(a == b);
+}
+
+@test
+fn test_deque_eq_different_elements() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+    b.push_back(3);
+
+    assert(a != b);
+}
+
+@test
+fn test_deque_eq_different_lengths() {
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_back(1);
+
+    assert(a != b);
+}
+
+@test
+fn test_deque_eq_both_empty() {
+    let a: Deque<Int> = Deque.new();
+    let b: Deque<Int> = Deque.new();
+    assert(a == b);
+}
+
+@test
+fn test_deque_eq_different_construction() {
+    // Same logical content, different internal layout
+    let mut a: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+    a.push_back(3);
+
+    let mut b: Deque<Int> = Deque.new();
+    b.push_front(3);
+    b.push_front(2);
+    b.push_front(1);
+
+    assert(a == b);
+}
+
+// =============================================================================
+// Section: Consuming Drain Tests (Pop-based consuming iteration)
+// =============================================================================
+
+@test
+fn test_deque_drain_front_sum() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    // Drain by pop_front (same as DequeIntoIter.next())
+    let mut sum = 0;
+    loop {
+        match d.pop_front() {
+            Some(val) => sum = sum + val,
+            None => break,
+        }
+    }
+    assert_eq(sum, 60);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_drain_front_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    let mut count = 0;
+    loop {
+        match d.pop_front() {
+            Some(_) => count = count + 1,
+            None => break,
+        }
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_deque_drain_front_ordering() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    let mut expected = 1;
+    loop {
+        match d.pop_front() {
+            Some(val) => {
+                assert_eq(val, expected);
+                expected = expected + 1;
+            }
+            None => break,
+        }
+    }
+    assert_eq(expected, 4);
+    assert(d.is_empty());
+}
+
+// =============================================================================
+// Section: Extend Tests
+// =============================================================================
+
+@test
+fn test_deque_extend_from_list() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+
+    let more = List.from([2, 3, 4]);
+    d.extend(more.into_iter());
+
+    assert_eq(d.len(), 4);
+    assert_eq(*d.get(0).unwrap(), 1);
+    assert_eq(*d.get(1).unwrap(), 2);
+    assert_eq(*d.get(2).unwrap(), 3);
+    assert_eq(*d.get(3).unwrap(), 4);
+}
+
+@test
+fn test_deque_extend_empty_source() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+
+    let empty: List<Int> = List.new();
+    d.extend(empty.into_iter());
+
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_deque_extend_into_empty() {
+    let mut d: Deque<Int> = Deque.new();
+
+    let source = List.from([10, 20, 30]);
+    d.extend(source.into_iter());
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.front().unwrap(), 10);
+    assert_eq(*d.back().unwrap(), 30);
+}
+
+// =============================================================================
+// Section: Capacity Tests
+// =============================================================================
+
+@test
+fn test_deque_capacity_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert_eq(d.capacity(), 0);
+}
+
+@test
+fn test_deque_capacity_with_capacity() {
+    let d: Deque<Int> = Deque.with_capacity(10);
+    // Capacity rounded to power of 2
+    assert(d.capacity() >= 10);
+}
+
+@test
+fn test_deque_capacity_grows() {
+    let mut d: Deque<Int> = Deque.new();
+    let initial_cap = d.capacity();
+
+    // Push enough to trigger growth
+    let mut i = 0;
+    while i < 20 {
+        d.push_back(i);
+        i = i + 1;
+    }
+
+    assert(d.capacity() > initial_cap);
+    assert(d.capacity() >= 20);
+}
+
+@test
+fn test_deque_capacity_power_of_two() {
+    let d: Deque<Int> = Deque.with_capacity(7);
+    // Should be rounded up to next power of 2 (8)
+    assert(d.capacity() >= 7);
+    let cap = d.capacity();
+    // Capacity should be a power of 2
+    assert(cap > 0);
+    assert(cap & (cap - 1) == 0); // Power of 2 check
+}
+
+// =============================================================================
+// Section: Edge Cases
+// =============================================================================
+
+@test
+fn test_deque_swap_same_index() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    // Swap element with itself - should be no-op
+    d.swap(1, 1);
+    assert_eq(*d.get(1).unwrap(), 20);
+}
+
+@test
+fn test_deque_rotate_single_element() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    d.rotate_left(1);
+    assert_eq(*d.front().unwrap(), 42);
+
+    d.rotate_right(1);
+    assert_eq(*d.front().unwrap(), 42);
+}
+
+@test
+fn test_deque_rotate_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.rotate_left(5);  // Should not panic
+    d.rotate_right(5); // Should not panic
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_contains_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert(!d.contains(&42));
+}
+
+@test
+fn test_deque_with_capacity_zero() {
+    let d: Deque<Int> = Deque.with_capacity(0);
+    assert(d.is_empty());
+    assert_eq(d.capacity(), 0);
+}
+
+@test
+fn test_deque_push_pop_cycle() {
+    // Push and pop many times to test buffer reuse
+    let mut d: Deque<Int> = Deque.new();
+    let mut i = 0;
+    while i < 100 {
+        d.push_back(i);
+        let val = d.pop_front();
+        assert_eq(val, Some(i));
+        i = i + 1;
+    }
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_mixed_front_back_access() {
+    let mut d: Deque<Int> = Deque.new();
+
+    // Empty front/back
+    assert(d.front().is_none());
+    assert(d.back().is_none());
+    assert(d.front_mut().is_none());
+    assert(d.back_mut().is_none());
+
+    // Single element - front and back are same
+    d.push_back(42);
+    assert_eq(*d.front().unwrap(), 42);
+    assert_eq(*d.back().unwrap(), 42);
+}
+
+@test
+fn test_deque_get_negative_index() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+
+    assert(d.get(-1).is_none());
+    assert(d.get_mut(-1).is_none());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

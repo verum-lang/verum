@@ -1,0 +1,300 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, interpolation, numerical
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: interpolation using integer arithmetic
+// All computations scaled by SCALE=1000 to avoid floating point
+
+// =============================================================================
+// Constants — scale factor for fixed-point arithmetic
+// SCALE = 1000 means 1.0 is represented as 1000
+// =============================================================================
+
+fn scale() -> Int { 1000 }
+
+// =============================================================================
+// Helper: absolute value
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// =============================================================================
+// Linear interpolation between two points
+// Given points (x0, y0) and (x1, y1), interpolate at x
+// All values are already scaled by SCALE
+// Returns y at x, scaled by SCALE
+// =============================================================================
+
+fn lerp(x0: Int, y0: Int, x1: Int, y1: Int, x: Int) -> Int {
+    // y = y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    // To maintain precision: y = y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    if x1 == x0 {
+        return y0;
+    }
+    y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+}
+
+// =============================================================================
+// Point record
+// =============================================================================
+
+type Point is { x: Int, y: Int };
+
+// =============================================================================
+// Lagrange interpolation for 2 points
+// Given (x0, y0), (x1, y1), compute y at target x
+// All coordinates are raw integers (NOT pre-scaled)
+// Returns result scaled by SCALE
+// =============================================================================
+
+fn lagrange2(p0: Point, p1: Point, x: Int) -> Int {
+    // L0(x) = (x - x1) / (x0 - x1)
+    // L1(x) = (x - x0) / (x1 - x0)
+    // P(x) = y0 * L0(x) + y1 * L1(x)
+    // Scaled: P(x)*SCALE = y0 * (x-x1)*SCALE/(x0-x1) + y1 * (x-x0)*SCALE/(x1-x0)
+    let s = scale();
+    let d01 = p0.x - p1.x;
+    let d10 = p1.x - p0.x;
+    let l0 = (x - p1.x) * s / d01;
+    let l1 = (x - p0.x) * s / d10;
+    (p0.y * l0 + p1.y * l1) / 1
+}
+
+// =============================================================================
+// Lagrange interpolation for 3 points
+// Returns result scaled by SCALE
+// =============================================================================
+
+fn lagrange3(p0: Point, p1: Point, p2: Point, x: Int) -> Int {
+    let s = scale();
+    // L0(x) = (x-x1)(x-x2) / ((x0-x1)(x0-x2))
+    let num0 = (x - p1.x) * (x - p2.x);
+    let den0 = (p0.x - p1.x) * (p0.x - p2.x);
+    // L1(x) = (x-x0)(x-x2) / ((x1-x0)(x1-x2))
+    let num1 = (x - p0.x) * (x - p2.x);
+    let den1 = (p1.x - p0.x) * (p1.x - p2.x);
+    // L2(x) = (x-x0)(x-x1) / ((x2-x0)(x2-x1))
+    let num2 = (x - p0.x) * (x - p1.x);
+    let den2 = (p2.x - p0.x) * (p2.x - p1.x);
+
+    // P(x) * SCALE = y0*num0*SCALE/den0 + y1*num1*SCALE/den1 + y2*num2*SCALE/den2
+    let t0 = p0.y * num0 * s / den0;
+    let t1 = p1.y * num1 * s / den1;
+    let t2 = p2.y * num2 * s / den2;
+    t0 + t1 + t2
+}
+
+// =============================================================================
+// Lagrange interpolation for 4 points
+// Returns result scaled by SCALE
+// =============================================================================
+
+fn lagrange4(p0: Point, p1: Point, p2: Point, p3: Point, x: Int) -> Int {
+    let s = scale();
+
+    let num0 = (x - p1.x) * (x - p2.x) * (x - p3.x);
+    let den0 = (p0.x - p1.x) * (p0.x - p2.x) * (p0.x - p3.x);
+
+    let num1 = (x - p0.x) * (x - p2.x) * (x - p3.x);
+    let den1 = (p1.x - p0.x) * (p1.x - p2.x) * (p1.x - p3.x);
+
+    let num2 = (x - p0.x) * (x - p1.x) * (x - p3.x);
+    let den2 = (p2.x - p0.x) * (p2.x - p1.x) * (p2.x - p3.x);
+
+    let num3 = (x - p0.x) * (x - p1.x) * (x - p2.x);
+    let den3 = (p3.x - p0.x) * (p3.x - p1.x) * (p3.x - p2.x);
+
+    let t0 = p0.y * num0 * s / den0;
+    let t1 = p1.y * num1 * s / den1;
+    let t2 = p2.y * num2 * s / den2;
+    let t3 = p3.y * num3 * s / den3;
+    t0 + t1 + t2 + t3
+}
+
+// =============================================================================
+// Tests — Linear interpolation
+// =============================================================================
+
+fn test_lerp_midpoint() {
+    // Points (0, 0) and (1000, 2000), interpolate at 500
+    // y = 0 + (2000-0)*(500-0)/(1000-0) = 1000
+    assert_eq(lerp(0, 0, 1000, 2000, 500), 1000);
+}
+
+fn test_lerp_endpoints() {
+    // At x0, should return y0
+    assert_eq(lerp(100, 300, 500, 700, 100), 300);
+    // At x1, should return y1
+    assert_eq(lerp(100, 300, 500, 700, 500), 700);
+}
+
+fn test_lerp_quarter() {
+    // (0, 0) to (1000, 1000), at 250 => 250
+    assert_eq(lerp(0, 0, 1000, 1000, 250), 250);
+    // at 750 => 750
+    assert_eq(lerp(0, 0, 1000, 1000, 750), 750);
+}
+
+fn test_lerp_negative() {
+    // (0, 1000) to (1000, -1000), at 500 => 0
+    assert_eq(lerp(0, 1000, 1000, -1000, 500), 0);
+}
+
+fn test_lerp_constant() {
+    // Horizontal line: (0, 500) to (1000, 500)
+    assert_eq(lerp(0, 500, 1000, 500, 300), 500);
+    assert_eq(lerp(0, 500, 1000, 500, 700), 500);
+}
+
+// =============================================================================
+// Tests — Lagrange 2-point (should agree with lerp)
+// =============================================================================
+
+fn test_lagrange2_line() {
+    // y = 2x: points (1, 2), (3, 6), interpolate at x=2
+    // Expected: y=4, scaled = 4000
+    let p0 = Point { x: 1, y: 2 };
+    let p1 = Point { x: 3, y: 6 };
+    let result = lagrange2(p0, p1, 2);
+    assert_eq(result, 4000);
+}
+
+fn test_lagrange2_endpoints() {
+    // At known points, should return exact y*scale
+    let p0 = Point { x: 0, y: 5 };
+    let p1 = Point { x: 10, y: 15 };
+    assert_eq(lagrange2(p0, p1, 0), 5000);
+    assert_eq(lagrange2(p0, p1, 10), 15000);
+}
+
+// =============================================================================
+// Tests — Lagrange 3-point (quadratic)
+// =============================================================================
+
+fn test_lagrange3_quadratic() {
+    // y = x^2: points (0,0), (1,1), (2,4)
+    // Interpolate at x=3 => y should be 9, scaled = 9000
+    let p0 = Point { x: 0, y: 0 };
+    let p1 = Point { x: 1, y: 1 };
+    let p2 = Point { x: 2, y: 4 };
+    let result = lagrange3(p0, p1, p2, 3);
+    assert_eq(result, 9000);
+}
+
+fn test_lagrange3_at_known_points() {
+    // At x=0, x=1, x=2 should return the known y values
+    let p0 = Point { x: 0, y: 0 };
+    let p1 = Point { x: 1, y: 1 };
+    let p2 = Point { x: 2, y: 4 };
+    assert_eq(lagrange3(p0, p1, p2, 0), 0);
+    assert_eq(lagrange3(p0, p1, p2, 1), 1000);
+    assert_eq(lagrange3(p0, p1, p2, 2), 4000);
+}
+
+fn test_lagrange3_linear() {
+    // 3 collinear points should give linear interpolation
+    // y = 3x + 1: (0,1), (2,7), (4,13)
+    let p0 = Point { x: 0, y: 1 };
+    let p1 = Point { x: 2, y: 7 };
+    let p2 = Point { x: 4, y: 13 };
+    // At x=1, y should be 4, scaled = 4000
+    assert_eq(lagrange3(p0, p1, p2, 1), 4000);
+    // At x=3, y should be 10, scaled = 10000
+    assert_eq(lagrange3(p0, p1, p2, 3), 10000);
+}
+
+fn test_lagrange3_negative_values() {
+    // y = x^2 - 4: points (-2, 0), (0, -4), (2, 0)
+    let p0 = Point { x: -2, y: 0 };
+    let p1 = Point { x: 0, y: -4 };
+    let p2 = Point { x: 2, y: 0 };
+    // At x=1, y = 1-4 = -3, scaled = -3000
+    assert_eq(lagrange3(p0, p1, p2, 1), -3000);
+    // At x=-1, y = 1-4 = -3, scaled = -3000
+    assert_eq(lagrange3(p0, p1, p2, -1), -3000);
+}
+
+// =============================================================================
+// Tests — Lagrange 4-point (cubic)
+// =============================================================================
+
+fn test_lagrange4_cubic() {
+    // y = x^3: points (0,0), (1,1), (2,8), (3,27)
+    // Interpolate at x=4 => y = 64, scaled = 64000
+    let p0 = Point { x: 0, y: 0 };
+    let p1 = Point { x: 1, y: 1 };
+    let p2 = Point { x: 2, y: 8 };
+    let p3 = Point { x: 3, y: 27 };
+    let result = lagrange4(p0, p1, p2, p3, 4);
+    assert_eq(result, 64000);
+}
+
+fn test_lagrange4_at_known() {
+    let p0 = Point { x: 0, y: 0 };
+    let p1 = Point { x: 1, y: 1 };
+    let p2 = Point { x: 2, y: 8 };
+    let p3 = Point { x: 3, y: 27 };
+    assert_eq(lagrange4(p0, p1, p2, p3, 0), 0);
+    assert_eq(lagrange4(p0, p1, p2, p3, 1), 1000);
+    assert_eq(lagrange4(p0, p1, p2, p3, 2), 8000);
+    assert_eq(lagrange4(p0, p1, p2, p3, 3), 27000);
+}
+
+fn test_lagrange4_quadratic() {
+    // Using 4 points of y=x^2: (0,0),(1,1),(2,4),(3,9)
+    // A quadratic through 4 points should still be exact since y=x^2 is degree 2
+    let p0 = Point { x: 0, y: 0 };
+    let p1 = Point { x: 1, y: 1 };
+    let p2 = Point { x: 2, y: 4 };
+    let p3 = Point { x: 3, y: 9 };
+    // At x=4, y=16
+    assert_eq(lagrange4(p0, p1, p2, p3, 4), 16000);
+    // At x=5, y=25
+    assert_eq(lagrange4(p0, p1, p2, p3, 5), 25000);
+}
+
+// =============================================================================
+// Tests — Edge cases
+// =============================================================================
+
+fn test_lerp_same_point() {
+    // Both endpoints are the same
+    assert_eq(lerp(500, 300, 500, 300, 500), 300);
+}
+
+fn test_lagrange3_widely_spaced() {
+    // y = 2x + 1: (0,1), (10,21), (20,41)
+    let p0 = Point { x: 0, y: 1 };
+    let p1 = Point { x: 10, y: 21 };
+    let p2 = Point { x: 20, y: 41 };
+    // At x=5 => y=11, scaled=11000
+    assert_eq(lagrange3(p0, p1, p2, 5), 11000);
+    // At x=15 => y=31, scaled=31000
+    assert_eq(lagrange3(p0, p1, p2, 15), 31000);
+}
+
+fn main() -> Int {
+    test_lerp_midpoint();
+    test_lerp_endpoints();
+    test_lerp_quarter();
+    test_lerp_negative();
+    test_lerp_constant();
+    test_lagrange2_line();
+    test_lagrange2_endpoints();
+    test_lagrange3_quadratic();
+    test_lagrange3_at_known_points();
+    test_lagrange3_linear();
+    test_lagrange3_negative_values();
+    test_lagrange4_cubic();
+    test_lagrange4_at_known();
+    test_lagrange4_quadratic();
+    test_lerp_same_point();
+    test_lagrange3_widely_spaced();
+    print("[OK] 255_interp_interpolation");
+    0
+}

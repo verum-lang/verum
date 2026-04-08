@@ -1,0 +1,181 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L1
+// @tags: types, inference, ambiguous, error
+// @expected-error: E404 "Ambiguous type"
+// @expected-error-count: 15
+
+/// Test for cases where type inference fails due to ambiguity.
+/// These are expected errors that demonstrate the limits of inference.
+/// Each case requires additional type annotations to compile.
+
+fn main() {
+    // === ERROR 1: Empty Collection Without Type ===
+    // E404: Cannot infer element type for empty collection
+    let empty = [];
+    // FIX: let empty: List<Int> = [];
+
+    // === ERROR 2: Default Without Context ===
+    // E404: Cannot infer type for Default trait
+    let default_val = Default.default();
+    // FIX: let default_val: Int = Default.default();
+
+    // === ERROR 3: None Without Maybe Type ===
+    // E404: Cannot infer type parameter for None
+    let none_val = None;
+    // FIX: let none_val: Maybe<Int> = None;
+
+    // === ERROR 4: parse() Without Target Type ===
+    // E404: Cannot infer parse target type
+    let parsed = "42".parse();
+    // FIX: let parsed: Result<Int, _> = "42".parse();
+    // OR:  let parsed = "42".parse<Int>();
+
+    // === ERROR 5: collect() Without Target Collection ===
+    // E404: Cannot infer collection type for collect()
+    let collected = (1..5).map(|x| x * 2).collect();
+    // FIX: let collected: List<Int> = (1..5).map(|x| x * 2).collect();
+
+    // === ERROR 6: From.from Without Target Type ===
+    // E404: Ambiguous conversion target
+    let converted = From.from(42);
+    // FIX: let converted: i64 = From.from(42);
+
+    // === ERROR 7: Generic Function With Unconstrained Return ===
+    fn unconstrained<T>() -> T {
+        panic("cannot create T")
+    }
+    // E404: Cannot infer T - no constraints to guide inference
+    let unknown = unconstrained();
+    // FIX: let unknown: Int = unconstrained();
+
+    // === ERROR 8: Closure With Ambiguous Parameter ===
+    // E404: Cannot infer type of closure parameter
+    let ambiguous_closure = |x| x;
+    // The closure type is deferred, but never constrained
+    // FIX: let ambiguous_closure = |x: Int| x;
+
+    // === ERROR 9: Generic With Multiple Possible Instantiations ===
+    fn identity<T>(x: T) -> T { x }
+    fn process<T>(x: T) -> T { x }
+    // E404: Multiple valid instantiations possible
+    let result = process(identity(Default.default()));
+    // FIX: let result: Int = process(identity(Default.default()));
+
+    // === ERROR 10: Read Trait Ambiguity ===
+    fn read<R: Read>() -> R {
+        panic("cannot read")
+    }
+    // E404: Multiple types implement Read
+    let reader = read();
+    // FIX: let reader: File = read();
+
+    // === ERROR 11: Numeric Literal in Generic Context ===
+    fn generic_num<T: Num>(x: T) -> T { x }
+    // E404: 42 could be Int, i32, i64, Float, etc.
+    // When multiple numeric types satisfy bounds
+    let num = generic_num(42);
+    // FIX: let num = generic_num(42i32);
+
+    // === ERROR 12: Associated Type Without Concrete Type ===
+    fn get_item<I: Iterator>() -> I.Item {
+        panic("cannot create item")
+    }
+    // E404: Cannot infer iterator type I
+    let item = get_item();
+    // FIX: let item: Int = get_item<List<Int>.IntoIter>();
+
+    // === ERROR 13: Phantom Type Without Usage ===
+    type Phantom<T> is ();
+    // E404: T is never used, cannot be inferred
+    let phantom = Phantom;
+    // FIX: let phantom: Phantom<Int> = Phantom;
+
+    // === ERROR 14: Multiple Trait Implementations ===
+    type Convertible<T> is protocol {
+        fn convert(&self) -> T;
+    }
+
+    implement Convertible<Int> for Text {
+        fn convert(&self) -> Int { self.len() as Int }
+    }
+    implement Convertible<Text> for Text {
+        fn convert(&self) -> Text { self.clone() }
+    }
+
+    let text = "hello";
+    // E404: Ambiguous - could convert to Int or Text
+    let conv = text.convert();
+    // FIX: let conv: Int = text.convert();
+
+    // === ERROR 15: Recursive Inference Failure ===
+    fn recursive<T>() -> List<T> {
+        let inner = recursive();  // T unknown here
+        [inner]  // List<List<T>> but T still unknown
+    }
+    // E404: T cannot be inferred without external constraint
+    let rec_result = recursive();
+    // FIX: let rec_result: List<Int> = recursive();
+}
+
+// === Additional Ambiguous Patterns (Separate Functions) ===
+
+// Function with ambiguous overloads (if overloading supported)
+fn ambiguous_overload() {
+    fn process(x: Int) -> Int { x }
+    fn process(x: Float) -> Float { x }
+
+    // E404: Cannot determine which overload to use
+    // let result = process(42);
+    // FIX: let result = process(42 as Int);
+}
+
+// Inference with competing constraints
+fn competing_constraints() {
+    fn first<T>(a: T, b: T) -> T { a }
+
+    // This works because both are Int
+    let ok = first(1, 2);
+
+    // This fails: 1 defaults to Int, 1.0 defaults to Float
+    // E404: Cannot unify Int with Float
+    // let fail = first(1, 1.0);
+    // FIX: let ok = first(1.0, 1.0);  // Both Float
+}
+
+// Higher-ranked type ambiguity
+fn higher_ranked_ambiguity() {
+    // When the same generic function could be instantiated
+    // at multiple types within the same expression
+    fn apply<F, A, B>(f: F, a: A) -> B
+    where F: Fn(A) -> B
+    {
+        f(a)
+    }
+
+    // Ambiguous: What is B?
+    // let result = apply(|x| x, 42);
+    // FIX: let result: Int = apply(|x| x, 42);
+}
+
+// Inference with type families/associated types
+fn associated_type_ambiguity() {
+    type Container is protocol {
+        type Item;
+        fn get(&self) -> Self.Item;
+    }
+
+    fn get_from<C: Container>(c: &C) -> C.Item {
+        c.get()
+    }
+
+    // If multiple Container implementations exist,
+    // cannot determine which Item type to use
+    // without knowing the concrete Container type
+}
+
+// Note: This file intentionally contains type errors.
+// All errors should be E404 (Ambiguous type) variants.
+// Each error case demonstrates a situation where
+// the type checker cannot make progress without
+// additional type information from the programmer.

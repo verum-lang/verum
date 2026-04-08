@@ -1,0 +1,91 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: protocol, implement-for, dispatch
+// @description: Test protocol (trait) definition and implementation
+
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+type Animal is { name: Text, legs: Int };
+type Vehicle is { name: Text, wheels: Int };
+
+implement Describable for Animal {
+    fn describe(&self) -> Text {
+        f"{self.name} with {self.legs} legs"
+    }
+}
+
+implement Describable for Vehicle {
+    fn describe(&self) -> Text {
+        f"{self.name} with {self.wheels} wheels"
+    }
+}
+
+fn test_protocol_animal() -> Int {
+    let dog = Animal { name: "Dog", legs: 4 };
+    let desc = dog.describe();
+    if desc != "Dog with 4 legs" {
+        print(f"FAIL animal: {desc}");
+        return 1;
+    }
+    print("  protocol_animal: OK");
+    0
+}
+
+fn test_protocol_vehicle() -> Int {
+    let car = Vehicle { name: "Car", wheels: 4 };
+    let desc = car.describe();
+    if desc != "Car with 4 wheels" {
+        print(f"FAIL vehicle: {desc}");
+        return 1;
+    }
+    print("  protocol_vehicle: OK");
+    0
+}
+
+type Summable is protocol {
+    fn total(&self) -> Int;
+};
+
+type Pair2 is { a: Int, b: Int };
+type Triple2 is { x: Int, y: Int, z: Int };
+
+implement Summable for Pair2 {
+    fn total(&self) -> Int { self.a + self.b }
+}
+
+implement Summable for Triple2 {
+    fn total(&self) -> Int { self.x + self.y + self.z }
+}
+
+fn test_summable() -> Int {
+    let p = Pair2 { a: 10, b: 20 };
+    if p.total() != 30 {
+        print(f"FAIL pair_total: {p.total()}");
+        return 1;
+    }
+    let t = Triple2 { x: 1, y: 2, z: 3 };
+    if t.total() != 6 {
+        print(f"FAIL triple_total: {t.total()}");
+        return 1;
+    }
+    print("  summable: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Protocol Tests:");
+    let mut failures = 0;
+    failures = failures + test_protocol_animal();
+    failures = failures + test_protocol_vehicle();
+    failures = failures + test_summable();
+
+    if failures == 0 {
+        print("All protocol tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

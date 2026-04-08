@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, array, semicolon, error
+// @description: Test detection of array type with double semicolon
+// @expected-error: E073
+
+// Double semicolon is not valid in array type
+fn test(x: [Int;; 10]) {}

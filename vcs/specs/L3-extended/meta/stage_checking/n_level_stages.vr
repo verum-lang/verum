@@ -1,0 +1,157 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, staged, stage-checking, n-level, multi-stage
+
+/// N-Level Staged Metaprogramming Tests
+///
+/// Validates proper stage level handling for multi-level staging:
+/// - Stage 0: Runtime (fn)
+/// - Stage 1: Compile-time (meta fn)
+/// - Stage 2: Meta-compile-time (meta(2) fn)
+///
+/// Spec: 17-meta-system.md Section 2.4 - Stage Coherence Rule
+/// Stage N generates Stage N-1 code via quote(N-1)
+
+// ============================================================
+// STAGE HIERARCHY: 0 -> 1 -> 2
+// ============================================================
+
+/// Stage 0: Runtime function
+fn runtime_fn(x: Int) -> Int {
+    x + 1
+}
+
+/// Stage 1: Meta function (generates stage 0)
+meta fn stage_1_fn(x: Int) -> Int {
+    x * 2
+}
+
+/// Stage 2: Meta-meta function (generates stage 1)
+meta(2) fn stage_2_fn(x: Int) -> Int {
+    x * 3
+}
+
+// ============================================================
+// VALID: SAME-STAGE CALLS
+// ============================================================
+
+/// Stage 1 calling stage 1 - valid
+meta fn stage_1_calls_stage_1(x: Int) -> Int {
+    stage_1_fn(x) + stage_1_fn(x)
+}
+
+/// Stage 2 calling stage 2 - valid
+meta(2) fn stage_2_calls_stage_2(x: Int) -> Int {
+    stage_2_fn(x) + stage_2_fn(x)
+}
+
+// ============================================================
+// VALID: GENERATING LOWER-STAGE CODE VIA QUOTE
+// ============================================================
+
+/// Stage 1 generates stage 0 code via quote
+meta fn gen_runtime_function() -> @Expr {
+    quote {
+        fn generated_runtime(x: Int) -> Int {
+            x + 100
+        }
+    }
+}
+
+/// Stage 2 generates stage 1 code via quote(1)
+meta(2) fn gen_meta_function() -> @Expr {
+    quote(1) {
+        meta fn generated_meta(x: Int) -> Int {
+            x + 200
+        }
+    }
+}
+
+// ============================================================
+// VALID: CHAINED QUOTE GENERATION
+// ============================================================
+
+/// Stage 2 generates stage 1 code that generates stage 0 code
+meta(2) fn gen_chained() -> @Expr {
+    quote(1) {
+        // This meta function will generate stage 0 code
+        meta fn inner_generator() -> @Expr {
+            quote {
+                fn final_runtime(x: Int) -> Int {
+                    x * 10
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// STAGE COHERENCE WITH SPLICING
+// ============================================================
+
+/// Stage 2 with splice into stage 1 code
+meta(2) fn gen_with_splice_to_stage_1(multiplier: Int) -> @Expr {
+    quote(1) {
+        meta fn scaled_double(x: Int) -> Int {
+            // $(multiplier) is spliced from stage 2 into stage 1
+            x * $(multiplier) * 2
+        }
+    }
+}
+
+// ============================================================
+// VALID: RECURSIVE AT SAME STAGE LEVEL
+// ============================================================
+
+@allow(unbounded_recursion)
+meta fn stage_1_recursive(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else { n + stage_1_recursive(n - 1) }
+}
+
+@allow(unbounded_recursion)
+meta(2) fn stage_2_recursive(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else { n + stage_2_recursive(n - 1) }
+}
+
+// ============================================================
+// VALID: HIGHER-ORDER AT SAME STAGE
+// ============================================================
+
+/// Higher-order meta function accepting a function parameter
+meta fn stage_1_apply<T>(f: fn(T) -> T, x: T) -> T {
+    f(x)
+}
+
+/// Use higher-order at stage 1
+meta fn use_stage_1_apply(x: Int) -> Int {
+    stage_1_apply(stage_1_fn, x)
+}
+
+/// Higher-order meta(2) function accepting a function parameter
+meta(2) fn stage_2_apply<T>(f: fn(T) -> T, x: T) -> T {
+    f(x)
+}
+
+/// Use higher-order at stage 2
+meta(2) fn use_stage_2_apply(x: Int) -> Int {
+    stage_2_apply(stage_2_fn, x)
+}
+
+// ============================================================
+// COMPILE-TIME CONSTANTS FROM SAME-STAGE FUNCTIONS
+// ============================================================
+
+const FROM_STAGE_1: Int = stage_1_fn(10);         // 20
+const RECURSIVE_1: Int = stage_1_recursive(5);    // 15
+
+fn main() {
+    // Verify compile-time computed constants
+    assert(FROM_STAGE_1 == 20);
+    assert(RECURSIVE_1 == 15);
+
+    // Runtime function works normally
+    assert(runtime_fn(41) == 42);
+}

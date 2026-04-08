@@ -1,0 +1,152 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: spawn, parallel, compute, channels, threading
+// @description: Parallel computation patterns with spawn and channels
+
+fn compute_sum(start: Int, end_val: Int) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    while i < end_val {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_parallel_sum() -> Int {
+    let ch = Channel.new(4);
+
+    // Split 0..1000 into 4 chunks
+    let t1 = spawn { ch.send(compute_sum(0, 250)); 0 };
+    let t2 = spawn { ch.send(compute_sum(250, 500)); 0 };
+    let t3 = spawn { ch.send(compute_sum(500, 750)); 0 };
+    let t4 = spawn { ch.send(compute_sum(750, 1000)); 0 };
+
+    t1.await;
+    t2.await;
+    t3.await;
+    t4.await;
+
+    let s1 = match ch.recv() { Some(v) => v, None => 0 };
+    let s2 = match ch.recv() { Some(v) => v, None => 0 };
+    let s3 = match ch.recv() { Some(v) => v, None => 0 };
+    let s4 = match ch.recv() { Some(v) => v, None => 0 };
+    let total = s1 + s2 + s3 + s4;
+
+    // sum(0..1000) = 999*1000/2 = 499500
+    if total != 499500 {
+        print(f"FAIL parallel_sum: expected 499500, got {total}");
+        return 1;
+    }
+    print("  parallel_sum: OK");
+    0
+}
+
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    if n < 4 { return true; }
+    if n % 2 == 0 { return false; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return false; }
+        i = i + 2;
+    }
+    true
+}
+
+fn count_primes(start: Int, end_val: Int) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end_val {
+        if is_prime(i) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_parallel_primes() -> Int {
+    let ch = Channel.new(4);
+
+    // Count primes in 2..200 split into 2 ranges
+    let t1 = spawn { ch.send(count_primes(2, 100)); 0 };
+    let t2 = spawn { ch.send(count_primes(100, 200)); 0 };
+
+    t1.await;
+    t2.await;
+
+    let c1 = match ch.recv() { Some(v) => v, None => 0 };
+    let c2 = match ch.recv() { Some(v) => v, None => 0 };
+    let total = c1 + c2;
+
+    // Primes < 200 = 46
+    if total != 46 {
+        print(f"FAIL parallel_primes: expected 46, got {total}");
+        return 1;
+    }
+    print("  parallel_primes: OK");
+    0
+}
+
+fn test_spawn_return_value() -> Int {
+    let h = spawn {
+        let mut sum = 0;
+        let mut i = 1;
+        while i <= 10 {
+            sum = sum + i;
+            i = i + 1;
+        }
+        sum
+    };
+    let result = h.await;
+    if result != 55 {
+        print(f"FAIL spawn_return: expected 55, got {result}");
+        return 1;
+    }
+    print("  spawn_return: OK");
+    0
+}
+
+fn test_chained_spawns() -> Int {
+    let ch1 = Channel.new(4);
+    let ch2 = Channel.new(4);
+
+    let t1 = spawn {
+        ch1.send(10);
+        0
+    };
+    let t2 = spawn {
+        let v = match ch1.recv() { Some(x) => x, None => 0 };
+        ch2.send(v * 3);
+        0
+    };
+
+    t1.await;
+    t2.await;
+
+    let result = match ch2.recv() { Some(v) => v, None => 0 };
+    if result != 30 {
+        print(f"FAIL chained_spawns: expected 30, got {result}");
+        return 1;
+    }
+    print("  chained_spawns: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Parallel Compute Tests:");
+    let mut failures = 0;
+    failures = failures + test_parallel_sum();
+    failures = failures + test_parallel_primes();
+    failures = failures + test_spawn_return_value();
+    failures = failures + test_chained_spawns();
+
+    if failures == 0 {
+        print("All parallel compute tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

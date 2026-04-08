@@ -1,0 +1,78 @@
+// @test: differential
+
+// @tier: 0,1
+// @level: L0
+// @tags: differential, control-flow, while, loop, break, continue
+// @timeout: 10000
+// @expected-exit: 0
+// @description: While loops: basic, nested, break, continue, accumulation
+
+fn main() -> Int {
+    // Basic while
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    assert_eq(sum, 55);
+
+    // While with break
+    let mut found = -1;
+    let mut j = 0;
+    while j < 100 {
+        if j * j > 50 {
+            found = j;
+            break;
+        }
+        j = j + 1;
+    }
+    assert_eq(found, 8);
+
+    // While with continue
+    let mut even_sum = 0;
+    let mut k = 0;
+    while k < 20 {
+        k = k + 1;
+        if k % 2 != 0 {
+            continue;
+        }
+        even_sum = even_sum + k;
+    }
+    assert_eq(even_sum, 110);
+
+    // Nested loops
+    let mut product_sum = 0;
+    let mut a = 1;
+    while a <= 5 {
+        let mut b = 1;
+        while b <= 5 {
+            product_sum = product_sum + a * b;
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    assert_eq(product_sum, 225);
+
+    // Countdown
+    let mut countdown = 10;
+    let mut steps = 0;
+    while countdown > 0 {
+        countdown = countdown - 1;
+        steps = steps + 1;
+    }
+    assert_eq(steps, 10);
+    assert_eq(countdown, 0);
+
+    // Power of 2 via loop
+    let mut pow2 = 1;
+    let mut p = 0;
+    while p < 20 {
+        pow2 = pow2 * 2;
+        p = p + 1;
+    }
+    assert_eq(pow2, 1048576);
+
+    print("diff_while_loops: ok");
+    0
+}

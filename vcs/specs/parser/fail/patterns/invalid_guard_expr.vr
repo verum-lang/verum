@@ -1,0 +1,67 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, guard, invalid, error
+// @description: Test invalid guard expression syntax
+// @expected-error: E086
+
+type Option<T> is None | Some(T);
+
+fn test_guard_with_let() {
+    let value = 42;
+
+    // Invalid: let statement in guard (not an expression)
+    match value {
+        x if let y = 10 => print("let in guard"),
+        _ => print("other"),
+    }
+}
+
+fn test_guard_with_semicolon() {
+    let value = 42;
+
+    // Invalid: statement with semicolon in guard
+    match value {
+        x if x > 0; => print("semicolon in guard"),
+        _ => print("other"),
+    }
+}
+
+fn test_guard_with_assignment() {
+    let value = 42;
+
+    // Invalid: assignment is not a valid guard expression
+    match value {
+        x if x = 10 => print("assignment guard"),
+        _ => print("other"),
+    }
+}
+
+fn test_guard_with_type_annotation() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: type annotation in guard
+    match opt {
+        Some(x) if x: Int => print("type in guard"),
+        None => print("none"),
+    }
+}
+
+fn test_guard_incomplete_binary_op() {
+    let value = 42;
+
+    // Invalid: incomplete binary operation in guard
+    match value {
+        x if x > => print("incomplete op"),
+        _ => print("other"),
+    }
+}
+
+fn test_guard_unmatched_paren() {
+    let value = 42;
+
+    // Invalid: unmatched parenthesis in guard
+    match value {
+        x if (x > 0 => print("unmatched paren"),
+        _ => print("other"),
+    }
+}

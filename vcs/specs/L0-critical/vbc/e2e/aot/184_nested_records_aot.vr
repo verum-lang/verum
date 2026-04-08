@@ -1,0 +1,101 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, records, structs, nested
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for nested records and multi-field structs
+
+type Vec2 is { x: Int, y: Int };
+type Rect is { x: Int, y: Int, w: Int, h: Int };
+
+fn vec2_new(x: Int, y: Int) -> Vec2 {
+    Vec2 { x: x, y: y }
+}
+
+fn vec2_add(a: Vec2, b: Vec2) -> Vec2 {
+    Vec2 { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn vec2_dot(a: Vec2, b: Vec2) -> Int {
+    a.x * b.x + a.y * b.y
+}
+
+fn vec2_manhattan(a: Vec2) -> Int {
+    let ax = if a.x < 0 { -a.x } else { a.x };
+    let ay = if a.y < 0 { -a.y } else { a.y };
+    ax + ay
+}
+
+fn rect_new(x: Int, y: Int, w: Int, h: Int) -> Rect {
+    Rect { x: x, y: y, w: w, h: h }
+}
+
+fn rect_area(r: Rect) -> Int {
+    r.w * r.h
+}
+
+fn rect_perimeter(r: Rect) -> Int {
+    2 * (r.w + r.h)
+}
+
+fn rect_contains_point(r: Rect, px: Int, py: Int) -> Bool {
+    px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h
+}
+
+fn rect_right(r: Rect) -> Int { r.x + r.w }
+fn rect_bottom(r: Rect) -> Int { r.y + r.h }
+
+fn rects_overlap(a: Rect, b: Rect) -> Bool {
+    let a_right = rect_right(a);
+    let a_bottom = rect_bottom(a);
+    let b_right = rect_right(b);
+    let b_bottom = rect_bottom(b);
+    a.x < b_right && a_right > b.x && a.y < b_bottom && a_bottom > b.y
+}
+
+fn main() -> Int {
+    // Vec2 operations
+    let v1 = vec2_new(3, 4);
+    assert_eq(v1.x, 3);
+    assert_eq(v1.y, 4);
+
+    let v2 = vec2_new(1, 2);
+    let v3 = vec2_add(v1, v2);
+    assert_eq(v3.x, 4);
+    assert_eq(v3.y, 6);
+
+    assert_eq(vec2_dot(v1, v2), 11);  // 3*1 + 4*2
+
+    let v4 = vec2_new(-3, 5);
+    assert_eq(vec2_manhattan(v4), 8);
+
+    // Rect operations
+    let r1 = rect_new(10, 20, 30, 40);
+    assert_eq(r1.x, 10);
+    assert_eq(r1.w, 30);
+    assert_eq(rect_area(r1), 1200);
+    assert_eq(rect_perimeter(r1), 140);
+
+    // Contains point
+    assert_eq(rect_contains_point(r1, 15, 25), true);
+    assert_eq(rect_contains_point(r1, 10, 20), true);  // inclusive start
+    assert_eq(rect_contains_point(r1, 40, 60), false);  // exclusive end
+    assert_eq(rect_contains_point(r1, 0, 0), false);
+
+    // Overlap
+    let r2 = rect_new(20, 30, 50, 50);
+    assert_eq(rects_overlap(r1, r2), true);
+
+    let r3 = rect_new(100, 100, 10, 10);
+    assert_eq(rects_overlap(r1, r3), false);
+
+    // Zero-size rect
+    let r4 = rect_new(0, 0, 0, 0);
+    assert_eq(rect_area(r4), 0);
+    assert_eq(rect_perimeter(r4), 0);
+
+    print("[OK] 184_nested_records_aot");
+    0
+}

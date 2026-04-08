@@ -1,0 +1,195 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, functions, where-clause
+// @description: Test function where clause parsing with all variations
+
+// Generic where clause - basic
+fn process<T>(items: List<T>) -> List<T>
+    where type T: Clone
+{
+    items.map(|x| x.clone())
+}
+
+// Multiple type constraints
+fn combine<A, B>(a: A, b: B) -> (A, B)
+    where type A: Clone + Debug,
+          type B: Clone + Debug
+{
+    (a.clone(), b.clone())
+}
+
+// Associated type constraint
+fn iterate<I>(iter: I) -> List<I.Item>
+    where type I: Iterator,
+          type I.Item: Clone
+{
+    iter.collect()
+}
+
+// Type equality constraint
+fn convert<A, B>(value: A) -> B
+    where type A: Into<B>
+{
+    value.into()
+}
+
+// Multiple type bounds
+fn serialize<T>(value: T) -> Text
+    where type T: Show + Clone
+{
+    value.show()
+}
+
+// Where clause with complex bound
+fn compare<T>(a: T, b: T) -> Bool
+    where type T: Eq + Ord
+{
+    a == b
+}
+
+// Generic function with multiple type parameters
+fn zip<A, B, C>(a: List<A>, b: List<B>, f: fn(A, B) -> C) -> List<C>
+    where type A: Clone,
+          type B: Clone
+{
+    a.zip(b).map(|(x, y)| f(x, y))
+}
+
+// Associated type equality
+fn assoc_equality<I>(iter: I) -> List<Int>
+    where type I: Iterator,
+          type I.Item = Int
+{
+    iter.collect()
+}
+
+// Complex where clause with multiple predicates
+fn complex_where<T, U, V>(t: T, u: U, v: V)
+    where type T: Clone + Debug,
+          type U: Display + Into<V>,
+          type V: Default
+{
+    // Implementation
+}
+
+// Meta where clause (compile-time constraint)
+fn sized_array<const N: Int>() -> [Int; N]
+    where meta N > 0
+{
+    [0; N]
+}
+
+// Combined type and meta constraints
+fn bounded_array<T, const N: Int>(value: T) -> [T; N]
+    where type T: Clone,
+          meta N > 0,
+          meta N <= 1024
+{
+    [value; N]
+}
+
+// Value refinement where clause
+fn positive(n: Int) -> Int
+    where n > 0
+{
+    n * 2
+}
+
+// Function with ensures clause in where position
+fn sqrt(x: Float) -> Float
+    where ensures result >= 0.0
+{
+    x.sqrt()
+}
+
+// Combined predicates with ensures
+fn divide(a: Int, b: Int) -> Int
+    where b != 0,
+          ensures result * b <= a
+{
+    a / b
+}
+
+// Where clause with HKT bounds
+fn monad_bind<M<_>, A, B>(ma: M<A>, f: fn(A) -> M<B>) -> M<B>
+    where type M<_>: Monad
+{
+    ma.flat_map(f)
+}
+
+// Multiple HKT constraints
+fn bimap<F<_, _>, A, B, C, D>(fab: F<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> F<C, D>
+    where type F<_, _>: Bifunctor
+{
+    fab.bimap(f, g)
+}
+
+// Negative bounds in where clause
+fn thread_safe<T>(value: T)
+    where type T: Send,
+          type T: !Sync
+{
+    // Can send but not share
+}
+
+// Complex nested constraints
+fn nested_constraints<K, V, M: Map<K, V>>(map: M)
+    where type K: Hash + Eq + Clone,
+          type V: Clone + Default,
+          type M: IntoIterator<Item = (K, V)>
+{
+    // Implementation
+}
+
+// Generic with constraint (no defaults in generics)
+fn with_default<T, C>(items: C) -> C
+    where type T: Clone,
+          type C: Collection<T> + Default
+{
+    C.default()
+}
+
+// Self type in where clause
+fn self_eq<T>(a: T, b: T) -> Bool
+    where type T: PartialEq<T>
+{
+    a == b
+}
+
+// Recursive bound in where clause
+fn sort<T>(items: List<T>) -> List<T>
+    where type T: Ord<T>
+{
+    items.sorted()
+}
+
+// Where clause with type constraint
+fn refined<T>(value: T) -> T
+    where type T: Valid
+{
+    value
+}
+
+// Multiple ensures clauses
+fn bounded_result(x: Int) -> Int
+    where ensures result >= 0,
+          ensures result <= 100
+{
+    x.clamp(0, 100)
+}
+
+// Combined type where and value where
+fn constrained_division<T: Num>(a: T, b: T) -> T
+    where type T: Div,
+          b != T.zero()
+{
+    a / b
+}
+
+// Where with protocol associated types
+fn sum_items<C>(collection: C) -> C.Item
+    where type C: Collection,
+          type C.Item: Add + Default
+{
+    collection.fold(C.Item.default(), |acc, x| acc + x)
+}

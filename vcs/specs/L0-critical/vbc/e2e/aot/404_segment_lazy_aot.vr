@@ -1,0 +1,242 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, segment-tree, lazy-propagation, range-query, range-update
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for segment tree with lazy propagation.
+// Supports range update (add value to range) and range query (sum over range).
+// Array size up to 8, segment tree size up to 32 nodes (4*8).
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Segment tree needs 4*n nodes. For n=8, we need 32 nodes.
+// Use 4 Arr8 blocks = 32 slots.
+
+type Seg32 is { b0: Arr8, b1: Arr8, b2: Arr8, b3: Arr8 };
+
+fn s32_zero() -> Seg32 {
+    let z = a8_zero();
+    Seg32 { b0: z, b1: z, b2: z, b3: z }
+}
+
+fn s32_get(s: Seg32, i: Int) -> Int {
+    if i < 8 { a8_get(s.b0, i) }
+    else if i < 16 { a8_get(s.b1, i - 8) }
+    else if i < 24 { a8_get(s.b2, i - 16) }
+    else { a8_get(s.b3, i - 24) }
+}
+
+fn s32_set(s: Seg32, i: Int, v: Int) -> Seg32 {
+    if i < 8 {
+        Seg32 { b0: a8_set(s.b0, i, v), b1: s.b1, b2: s.b2, b3: s.b3 }
+    } else if i < 16 {
+        Seg32 { b0: s.b0, b1: a8_set(s.b1, i - 8, v), b2: s.b2, b3: s.b3 }
+    } else if i < 24 {
+        Seg32 { b0: s.b0, b1: s.b1, b2: a8_set(s.b2, i - 16, v), b3: s.b3 }
+    } else {
+        Seg32 { b0: s.b0, b1: s.b1, b2: s.b2, b3: a8_set(s.b3, i - 24, v) }
+    }
+}
+
+// Segment tree with lazy propagation
+// tree[]: sum of range
+// lazy[]: pending add operations
+type SegTree is { tree: Seg32, lazy: Seg32, n: Int };
+
+fn segtree_new(n: Int) -> SegTree {
+    SegTree { tree: s32_zero(), lazy: s32_zero(), n: n }
+}
+
+// Build from array (recursive emulated iteratively)
+// For simplicity, build by inserting elements one by one
+
+@allow(unbounded_recursion)
+fn st_build_leaf(st: SegTree, node: Int, lo: Int, hi: Int, arr: Arr8) -> SegTree {
+    if lo == hi {
+        let t = s32_set(st.tree, node, a8_get(arr, lo));
+        return SegTree { tree: t, lazy: st.lazy, n: st.n };
+    }
+    let mid = (lo + hi) / 2;
+    let st1 = st_build_leaf(st, 2 * node, lo, mid, arr);
+    let st2 = st_build_leaf(st1, 2 * node + 1, mid + 1, hi, arr);
+    let sum = s32_get(st2.tree, 2 * node) + s32_get(st2.tree, 2 * node + 1);
+    let t = s32_set(st2.tree, node, sum);
+    SegTree { tree: t, lazy: st2.lazy, n: st2.n }
+}
+
+@allow(unbounded_recursion)
+fn st_build(arr: Arr8, n: Int) -> SegTree {
+    let st = segtree_new(n);
+    st_build_leaf(st, 1, 0, n - 1, arr)
+}
+
+// Push lazy value down to children
+fn st_push_down(st: SegTree, node: Int, lo: Int, hi: Int) -> SegTree {
+    let lz = s32_get(st.lazy, node);
+    if lz == 0 { return st; }
+    let mid = (lo + hi) / 2;
+    let left = 2 * node;
+    let right = 2 * node + 1;
+    // Update left child
+    let lt = s32_get(st.tree, left) + lz * (mid - lo + 1);
+    let rt = s32_get(st.tree, right) + lz * (hi - mid);
+    let mut t = s32_set(st.tree, left, lt);
+    t = s32_set(t, right, rt);
+    // Propagate lazy
+    let ll = s32_get(st.lazy, left) + lz;
+    let rl = s32_get(st.lazy, right) + lz;
+    let mut lzy = s32_set(st.lazy, left, ll);
+    lzy = s32_set(lzy, right, rl);
+    // Clear current node's lazy
+    lzy = s32_set(lzy, node, 0);
+    SegTree { tree: t, lazy: lzy, n: st.n }
+}
+
+// Range update: add val to all elements in [ql, qr]
+@allow(unbounded_recursion)
+fn st_update(st: SegTree, node: Int, lo: Int, hi: Int, ql: Int, qr: Int, val: Int) -> SegTree {
+    if ql > hi { return st; }
+    if qr < lo { return st; }
+    if ql <= lo {
+        if hi <= qr {
+            // Fully covered
+            let new_sum = s32_get(st.tree, node) + val * (hi - lo + 1);
+            let t = s32_set(st.tree, node, new_sum);
+            let lz = s32_get(st.lazy, node) + val;
+            let l = s32_set(st.lazy, node, lz);
+            return SegTree { tree: t, lazy: l, n: st.n };
+        }
+    }
+    let mid = (lo + hi) / 2;
+    let st1 = st_push_down(st, node, lo, hi);
+    let st2 = st_update(st1, 2 * node, lo, mid, ql, qr, val);
+    let st3 = st_update(st2, 2 * node + 1, mid + 1, hi, ql, qr, val);
+    let sum = s32_get(st3.tree, 2 * node) + s32_get(st3.tree, 2 * node + 1);
+    let t = s32_set(st3.tree, node, sum);
+    SegTree { tree: t, lazy: st3.lazy, n: st3.n }
+}
+
+// Range query: sum of [ql, qr]
+@allow(unbounded_recursion)
+fn st_query(st: SegTree, node: Int, lo: Int, hi: Int, ql: Int, qr: Int) -> Int {
+    if ql > hi { return 0; }
+    if qr < lo { return 0; }
+    if ql <= lo {
+        if hi <= qr {
+            return s32_get(st.tree, node);
+        }
+    }
+    // Need to handle lazy before going to children
+    // Since we can't mutate st in query easily, we account for lazy inline
+    let lz = s32_get(st.lazy, node);
+    let mid = (lo + hi) / 2;
+    // Push lazy conceptually for query
+    let st2 = st_push_down(st, node, lo, hi);
+    let left_sum = st_query(st2, 2 * node, lo, mid, ql, qr);
+    let right_sum = st_query(st2, 2 * node + 1, mid + 1, hi, ql, qr);
+    left_sum + right_sum
+}
+
+fn test_build_and_query() -> Int {
+    // Array: [1, 2, 3, 4, 5, 6, 7, 8]
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let st = st_build(arr, 8);
+    // Total sum [0,7] = 36
+    assert_eq(st_query(st, 1, 0, 7, 0, 7), 36);
+    // Sum [0,3] = 1+2+3+4 = 10
+    assert_eq(st_query(st, 1, 0, 7, 0, 3), 10);
+    // Sum [4,7] = 5+6+7+8 = 26
+    assert_eq(st_query(st, 1, 0, 7, 4, 7), 26);
+    0
+}
+
+fn test_single_elements() -> Int {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let st = st_build(arr, 8);
+    assert_eq(st_query(st, 1, 0, 7, 0, 0), 1);
+    assert_eq(st_query(st, 1, 0, 7, 3, 3), 4);
+    assert_eq(st_query(st, 1, 0, 7, 7, 7), 8);
+    assert_eq(st_query(st, 1, 0, 7, 2, 5), 18);
+    0
+}
+
+fn test_range_update() -> Int {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let st = st_build(arr, 8);
+    // Add 10 to [2, 5]: array becomes [1, 2, 13, 14, 15, 16, 7, 8]
+    let st2 = st_update(st, 1, 0, 7, 2, 5, 10);
+    assert_eq(st_query(st2, 1, 0, 7, 0, 7), 76);  // 36 + 4*10 = 76
+    assert_eq(st_query(st2, 1, 0, 7, 2, 5), 58);   // 13+14+15+16 = 58
+    assert_eq(st_query(st2, 1, 0, 7, 0, 1), 3);    // unchanged
+    0
+}
+
+fn test_multiple_updates() -> Int {
+    let arr = a8_zero();
+    let st = st_build(arr, 8);
+    // Add 5 to [0, 3]: [5,5,5,5,0,0,0,0]
+    let st2 = st_update(st, 1, 0, 7, 0, 3, 5);
+    assert_eq(st_query(st2, 1, 0, 7, 0, 7), 20);
+    // Add 3 to [2, 6]: [5,5,8,8,3,3,3,0]
+    let st3 = st_update(st2, 1, 0, 7, 2, 6, 3);
+    assert_eq(st_query(st3, 1, 0, 7, 0, 7), 35);  // 20 + 5*3 = 35
+    assert_eq(st_query(st3, 1, 0, 7, 2, 2), 8);    // 5 + 3 = 8
+    0
+}
+
+fn test_overlapping_updates() -> Int {
+    let arr = Arr8 { a0: 1, a1: 1, a2: 1, a3: 1, a4: 1, a5: 1, a6: 1, a7: 1 };
+    let st = st_build(arr, 8);
+    // Add 10 to [0, 7] (whole range)
+    let st2 = st_update(st, 1, 0, 7, 0, 7, 10);
+    assert_eq(st_query(st2, 1, 0, 7, 0, 7), 88);  // 8*11 = 88
+    // Add 5 to [3, 5]
+    let st3 = st_update(st2, 1, 0, 7, 3, 5, 5);
+    assert_eq(st_query(st3, 1, 0, 7, 3, 5), 48);   // 3*16 = 48
+    assert_eq(st_query(st3, 1, 0, 7, 0, 7), 103);  // 88 + 15 = 103
+    0
+}
+
+fn test_update_single_element() -> Int {
+    let arr = Arr8 { a0: 10, a1: 20, a2: 30, a3: 40, a4: 50, a5: 60, a6: 70, a7: 80 };
+    let st = st_build(arr, 8);
+    // Add 100 to just element [4]
+    let st2 = st_update(st, 1, 0, 7, 4, 4, 100);
+    assert_eq(st_query(st2, 1, 0, 7, 4, 4), 150);
+    assert_eq(st_query(st2, 1, 0, 7, 0, 7), 460);  // 360 + 100 = 460
+    assert_eq(st_query(st2, 1, 0, 7, 0, 3), 100);  // unchanged: 10+20+30+40
+    0
+}
+
+fn main() -> Int {
+    test_build_and_query();
+    test_single_elements();
+    test_range_update();
+    test_multiple_updates();
+    test_overlapping_updates();
+    test_update_single_element();
+    print("All segment tree lazy propagation tests passed!");
+    0
+}

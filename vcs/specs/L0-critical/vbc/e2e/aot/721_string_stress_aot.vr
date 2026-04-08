@@ -1,0 +1,41 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, stress
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test many string variables
+    let s1 = "hello";
+    let s2 = "world";
+    let s3 = "foo";
+    let s4 = "bar";
+    let s5 = "baz";
+    let s6 = "qux";
+    let s7 = "quux";
+    let s8 = "corge";
+    let s9 = "grault";
+    let s10 = "garply";
+
+    // String concatenation stress
+    let mut result = "start";
+    let mut i = 0;
+    while (i < 50) {
+        let msg = f"[{i}]";
+        i = i + 1;
+    }
+
+    // Many format strings
+    let a = 42;
+    let b = 99;
+    let m1 = f"a={a}";
+    let m2 = f"b={b}";
+    let m3 = f"a+b={a + b}";
+    print(m3);
+
+    // Print to verify string integrity
+    print(s1);
+    print(s10);
+
+    0
+}

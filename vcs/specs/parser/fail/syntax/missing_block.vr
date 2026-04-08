@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, syntax, block, error
+// @description: Test missing block after control flow
+// @expected-error: E018
+
+fn test_missing_block() {
+    if true
+        let x = 1;
+
+    while cond
+        do_something();
+}

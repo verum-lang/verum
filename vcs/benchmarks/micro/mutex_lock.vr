@@ -1,0 +1,243 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 25ns uncontended, < 1us contended
+// @tags: synchronization, mutex, performance
+
+/// Benchmark for Mutex lock acquisition
+///
+/// Tests mutex performance under various conditions:
+/// - Uncontended (single thread)
+/// - Low contention
+/// - High contention
+/// - Lock/unlock cycles
+
+module benchmarks.micro.mutex_lock
+
+using [Benchmark, Sync]
+
+/// Uncontended mutex lock (single thread)
+fn benchmark_mutex_uncontended() {
+    let mutex = Mutex.new(0);
+
+    for _ in 0..1_000_000 {
+        let mut guard = mutex.lock();
+        *guard += 1;
+        // Guard dropped, mutex unlocked
+    }
+}
+
+/// Try lock (non-blocking)
+fn benchmark_mutex_try_lock() {
+    let mutex = Mutex.new(0);
+
+    for _ in 0..1_000_000 {
+        if let Some(mut guard) = mutex.try_lock() {
+            *guard += 1;
+        }
+    }
+}
+
+/// Lock/unlock cycle measurement
+fn benchmark_mutex_lock_unlock_cycle() {
+    let mutex = Mutex.new(0);
+
+    for _ in 0..2_000_000 {
+        let guard = mutex.lock();
+        drop(guard);  // Explicit unlock
+    }
+}
+
+/// Low contention (2 threads)
+fn benchmark_mutex_low_contention() {
+    let mutex = Shared.new(Mutex.new(0));
+    let iterations = 500_000;
+
+    let handles = (0..2).map(|_| {
+        let mutex = mutex.clone();
+        spawn_thread(|| {
+            for _ in 0..iterations {
+                let mut guard = mutex.lock();
+                *guard += 1;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Medium contention (4 threads)
+fn benchmark_mutex_medium_contention() {
+    let mutex = Shared.new(Mutex.new(0));
+    let iterations = 250_000;
+
+    let handles = (0..4).map(|_| {
+        let mutex = mutex.clone();
+        spawn_thread(|| {
+            for _ in 0..iterations {
+                let mut guard = mutex.lock();
+                *guard += 1;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// High contention (8 threads)
+fn benchmark_mutex_high_contention() {
+    let mutex = Shared.new(Mutex.new(0));
+    let iterations = 125_000;
+
+    let handles = (0..8).map(|_| {
+        let mutex = mutex.clone();
+        spawn_thread(|| {
+            for _ in 0..iterations {
+                let mut guard = mutex.lock();
+                *guard += 1;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Mutex with work inside critical section
+fn benchmark_mutex_with_work() {
+    let mutex = Shared.new(Mutex.new(list![0; 100]));
+
+    let handles = (0..4).map(|_| {
+        let mutex = mutex.clone();
+        spawn_thread(|| {
+            for _ in 0..10_000 {
+                let mut guard = mutex.lock();
+                // Do some work
+                for i in 0..guard.len() {
+                    guard[i] += 1;
+                }
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Recursive mutex
+fn benchmark_mutex_recursive() {
+    let mutex = RecursiveMutex.new(0);
+
+    fn recursive_lock(mutex: &RecursiveMutex<Int>, depth: Int) {
+        let mut guard = mutex.lock();
+        *guard += 1;
+        if depth > 0 {
+            recursive_lock(mutex, depth - 1);
+        }
+    }
+
+    for _ in 0..100_000 {
+        recursive_lock(&mutex, 5);
+    }
+}
+
+/// Fair mutex (FIFO ordering)
+fn benchmark_mutex_fair() {
+    let mutex = Shared.new(FairMutex.new(0));
+
+    let handles = (0..4).map(|_| {
+        let mutex = mutex.clone();
+        spawn_thread(|| {
+            for _ in 0..100_000 {
+                let mut guard = mutex.lock();
+                *guard += 1;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Spin mutex (busy-wait)
+fn benchmark_mutex_spin() {
+    let mutex = SpinMutex.new(0);
+
+    for _ in 0..1_000_000 {
+        let mut guard = mutex.lock();
+        *guard += 1;
+    }
+}
+
+/// Adaptive mutex (spin then sleep)
+fn benchmark_mutex_adaptive() {
+    let mutex = Shared.new(AdaptiveMutex.new(0));
+
+    let handles = (0..4).map(|_| {
+        let mutex = mutex.clone();
+        spawn_thread(|| {
+            for _ in 0..250_000 {
+                let mut guard = mutex.lock();
+                *guard += 1;
+            }
+        })
+    }).collect();
+
+    for handle in handles {
+        handle.join();
+    }
+}
+
+/// Lock with timeout
+fn benchmark_mutex_lock_timeout() {
+    let mutex = Shared.new(Mutex.new(0));
+
+    // One thread holds lock
+    let holder = {
+        let mutex = mutex.clone();
+        spawn_thread(|| {
+            let _guard = mutex.lock();
+            sleep(Duration.from_millis(100));
+        })
+    };
+
+    // Try to acquire with timeout
+    sleep(Duration.from_millis(10));  // Ensure holder has lock
+
+    for _ in 0..1_000 {
+        let _ = mutex.try_lock_for(Duration.from_micros(10));
+    }
+
+    holder.join();
+}
+
+/// Poison detection
+fn benchmark_mutex_poison_check() {
+    let mutex = Mutex.new(0);
+
+    for _ in 0..1_000_000 {
+        match mutex.lock() {
+            Ok(guard) => { let _ = *guard; },
+            Err(PoisonError(guard)) => { let _ = *guard.into_inner(); },
+        }
+    }
+}
+
+/// Lock multiple mutexes (avoiding deadlock)
+fn benchmark_mutex_lock_multiple() {
+    let mutex1 = Mutex.new(0);
+    let mutex2 = Mutex.new(0);
+
+    for _ in 0..500_000 {
+        // Always lock in consistent order to avoid deadlock
+        let (guard1, guard2) = Mutex.lock_both(&mutex1, &mutex2);
+        let _ = *guard1 + *guard2;
+    }
+}

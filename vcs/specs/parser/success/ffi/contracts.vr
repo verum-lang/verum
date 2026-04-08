@@ -1,0 +1,678 @@
+// @test: parse-pass
+// @tier: 0
+// @category: ffi
+// @level: L0
+// @tags: parser, ffi, contracts, ffi_requires_clause, ffi_ensures_clause
+// @description: Comprehensive test for ffi_requires_clause and ffi_ensures_clause grammar productions
+
+// ============================================================
+// GRAMMAR: ffi_requires_clause = 'requires' , expression , ';' ;
+// GRAMMAR: ffi_ensures_clause = 'ensures' , expression , ';' ;
+// ============================================================
+
+// Type definitions for contract tests
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_void is ();
+type size_t is usize;
+type ssize_t is isize;
+
+// ------------------------------------------------------------
+// Basic requires clauses
+// ------------------------------------------------------------
+
+ffi BasicRequires {
+    @extern("C")
+    fn not_null_param(ptr: *const c_void) -> c_int;
+
+    requires ptr != null;
+}
+
+ffi RequiresNotNull {
+    @extern("C")
+    fn process_buffer(buf: *const u8, len: size_t) -> c_int;
+
+    requires buf != null;
+}
+
+ffi RequiresPositive {
+    @extern("C")
+    fn allocate(size: size_t) -> *mut c_void;
+
+    requires size > 0;
+}
+
+ffi RequiresBounds {
+    @extern("C")
+    fn array_get(arr: *const c_int, index: size_t, len: size_t) -> c_int;
+
+    requires index < len;
+}
+
+ffi RequiresRange {
+    @extern("C")
+    fn clamp(value: c_int, min: c_int, max: c_int) -> c_int;
+
+    requires min <= max;
+}
+
+// ------------------------------------------------------------
+// Basic ensures clauses
+// ------------------------------------------------------------
+
+ffi BasicEnsures {
+    @extern("C")
+    fn create_object() -> *mut Object;
+
+    ensures result != null;
+}
+
+@opaque
+type Object is ();
+
+ffi EnsuresPositive {
+    @extern("C")
+    fn absolute(x: c_int) -> c_int;
+
+    ensures result >= 0;
+}
+
+ffi EnsuresBounds {
+    @extern("C")
+    fn safe_index(arr: *const c_int, len: size_t) -> size_t;
+
+    ensures result < len;
+}
+
+ffi EnsuresValidPointer {
+    @extern("C")
+    fn allocate_buffer(size: size_t) -> *mut u8;
+
+    ensures result != null;
+}
+
+ffi EnsuresNonEmpty {
+    @extern("C")
+    fn create_buffer() -> Buffer;
+
+    ensures result.len > 0;
+}
+
+@repr(C)
+type Buffer is {
+    data: *mut u8,
+    len: size_t,
+    capacity: size_t,
+};
+
+// ------------------------------------------------------------
+// Combined requires and ensures
+// ------------------------------------------------------------
+
+ffi RequiresAndEnsures {
+    @extern("C")
+    fn divide(a: c_int, b: c_int) -> c_int;
+
+    requires b != 0;
+    ensures result * b + (a % b) == a;
+}
+
+ffi BothClauses {
+    @extern("C")
+    fn safe_copy(src: *const u8, dest: *mut u8, len: size_t) -> c_int;
+
+    requires src != null;
+    requires dest != null;
+    requires len > 0;
+    ensures result == 0;
+}
+
+ffi FullyContracted {
+    @extern("C")
+    fn binary_search(
+        arr: *const c_int,
+        len: size_t,
+        target: c_int
+    ) -> ssize_t;
+
+    requires arr != null;
+    requires len > 0;
+    ensures result >= -1;
+    ensures result < len;
+}
+
+ffi CompleteContract {
+    @extern("C")
+    fn safe_realloc(ptr: *mut c_void, old_size: size_t, new_size: size_t) -> *mut c_void;
+
+    requires new_size > 0;
+    ensures result != null;
+}
+
+// ------------------------------------------------------------
+// Complex requires expressions
+// ------------------------------------------------------------
+
+ffi ComplexRequires {
+    @extern("C")
+    fn process_range(
+        arr: *const c_int,
+        start: size_t,
+        end: size_t,
+        len: size_t
+    ) -> c_int;
+
+    requires start <= end;
+    requires end <= len;
+    requires arr != null;
+}
+
+ffi RequiresLogicalAnd {
+    @extern("C")
+    fn safe_operation(ptr: *const c_void, size: size_t) -> c_int;
+
+    requires ptr != null && size > 0;
+}
+
+ffi RequiresLogicalOr {
+    @extern("C")
+    fn flexible_operation(ptr: *const c_void, fallback: *const c_void) -> c_int;
+
+    requires ptr != null || fallback != null;
+}
+
+ffi RequiresNegation {
+    @extern("C")
+    fn must_be_empty(buffer: *const Buffer) -> c_int;
+
+    requires !(buffer.len > 0);
+}
+
+ffi RequiresComparison {
+    @extern("C")
+    fn bounded_value(x: c_int, lower: c_int, upper: c_int) -> c_int;
+
+    requires lower <= x && x <= upper;
+}
+
+ffi RequiresEquality {
+    @extern("C")
+    fn must_match(a: c_int, b: c_int) -> c_int;
+
+    requires a == b;
+}
+
+ffi RequiresInequality {
+    @extern("C")
+    fn must_differ(a: c_int, b: c_int) -> c_int;
+
+    requires a != b;
+}
+
+// ------------------------------------------------------------
+// Complex ensures expressions
+// ------------------------------------------------------------
+
+ffi ComplexEnsures {
+    @extern("C")
+    fn create_valid_buffer(size: size_t) -> Buffer;
+
+    ensures result.data != null;
+    ensures result.len == size;
+    ensures result.capacity >= size;
+}
+
+ffi EnsuresLogicalAnd {
+    @extern("C")
+    fn create_initialized() -> *mut Data;
+
+    ensures result != null && result.initialized;
+}
+
+@repr(C)
+type Data is {
+    value: c_int,
+    initialized: bool,
+};
+
+ffi EnsuresRelational {
+    @extern("C")
+    fn shrink_buffer(buf: *mut Buffer, new_size: size_t);
+
+    ensures buf.len <= new_size;
+    ensures buf.capacity >= buf.len;
+}
+
+ffi EnsuresArithmetic {
+    @extern("C")
+    fn compute(a: c_int, b: c_int) -> c_int;
+
+    ensures result >= a || result >= b;
+}
+
+// ------------------------------------------------------------
+// Multiple requires clauses
+// ------------------------------------------------------------
+
+ffi MultipleRequires {
+    @extern("C")
+    fn complex_operation(
+        src: *const u8,
+        dest: *mut u8,
+        src_len: size_t,
+        dest_len: size_t,
+        offset: size_t
+    ) -> c_int;
+
+    requires src != null;
+    requires dest != null;
+    requires src_len > 0;
+    requires dest_len >= src_len;
+    requires offset < dest_len;
+}
+
+ffi ManyRequires {
+    @extern("C")
+    fn validate_config(config: *const Config) -> c_int;
+
+    requires config != null;
+    requires config.size > 0;
+    requires config.flags != 0;
+    requires config.timeout > 0;
+    requires config.max_retries > 0;
+}
+
+@repr(C)
+type Config is {
+    size: size_t,
+    flags: c_uint,
+    timeout: c_int,
+    max_retries: c_int,
+};
+
+// ------------------------------------------------------------
+// Multiple ensures clauses
+// ------------------------------------------------------------
+
+ffi MultipleEnsures {
+    @extern("C")
+    fn create_handle() -> *mut Handle;
+
+    ensures result != null;
+    ensures result.valid;
+    ensures result.refcount == 1;
+}
+
+@repr(C)
+type Handle is {
+    id: c_int,
+    valid: bool,
+    refcount: c_int,
+};
+
+ffi ManyEnsures {
+    @extern("C")
+    fn initialize_buffer(size: size_t) -> Buffer;
+
+    ensures result.data != null;
+    ensures result.len == 0;
+    ensures result.capacity == size;
+}
+
+// ------------------------------------------------------------
+// Requires with field access
+// ------------------------------------------------------------
+
+ffi RequiresFieldAccess {
+    @extern("C")
+    fn validate_point(p: *const Point) -> c_int;
+
+    requires p.x >= 0;
+    requires p.y >= 0;
+}
+
+@repr(C)
+type Point is {
+    x: c_int,
+    y: c_int,
+};
+
+ffi RequiresNestedField {
+    @extern("C")
+    fn process_rect(r: *const Rect) -> c_int;
+
+    requires r.top_left.x <= r.bottom_right.x;
+    requires r.top_left.y <= r.bottom_right.y;
+}
+
+@repr(C)
+type Rect is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+// ------------------------------------------------------------
+// Ensures with old() for postconditions
+// ------------------------------------------------------------
+
+ffi EnsuresWithOld {
+    @extern("C")
+    fn increment(counter: *mut c_int);
+
+    ensures *counter == old(*counter) + 1;
+}
+
+ffi EnsuresOldRelation {
+    @extern("C")
+    fn double_value(value: *mut c_int);
+
+    ensures *value == old(*value) * 2;
+}
+
+ffi EnsuresOldComparison {
+    @extern("C")
+    fn increase_capacity(buf: *mut Buffer);
+
+    ensures buf.capacity >= old(buf.capacity);
+}
+
+// ------------------------------------------------------------
+// Quantified contracts
+// ------------------------------------------------------------
+
+ffi RequiresForall {
+    @extern("C")
+    fn all_positive(arr: *const c_int, len: size_t) -> bool;
+
+    // forall i: size_t . (i >= len || arr[i] >= 0)
+    // Using dot syntax per grammar: forall_expr = 'forall' , quantifier_binding , '.' , expression ;
+    requires forall i: size_t . (i >= len || arr[i] >= 0);
+}
+
+ffi EnsuresForall {
+    @extern("C")
+    fn zero_buffer(buf: *mut u8, len: size_t);
+
+    ensures forall i: size_t . (i >= len || buf[i] == 0);
+}
+
+ffi RequiresExists {
+    @extern("C")
+    fn find_nonzero(arr: *const c_int, len: size_t) -> ssize_t;
+
+    requires exists i: size_t . (i < len && arr[i] != 0);
+}
+
+ffi EnsuresExists {
+    @extern("C")
+    fn insert_value(arr: *mut c_int, len: size_t, value: c_int) -> size_t;
+
+    ensures exists i: size_t . (i < len && arr[i] == value);
+}
+
+// ------------------------------------------------------------
+// Contracts with function calls
+// ------------------------------------------------------------
+
+ffi RequiresFunctionCall {
+    @extern("C")
+    fn process_valid(obj: *const Object) -> c_int;
+
+    requires is_valid(obj);
+}
+
+ffi EnsuresFunctionCall {
+    @extern("C")
+    fn create_validated() -> *mut Object;
+
+    ensures is_valid(result);
+}
+
+// Helper function declaration
+fn is_valid(obj: *const Object) -> bool;
+
+// ------------------------------------------------------------
+// Contracts with type-specific predicates
+// ------------------------------------------------------------
+
+ffi ContractsWithPredicates {
+    @extern("C")
+    fn process_ascii(s: *const i8, len: size_t) -> c_int;
+
+    requires is_ascii(s, len);
+}
+
+ffi EnsuresPredicates {
+    @extern("C")
+    fn to_lowercase(s: *mut i8, len: size_t);
+
+    ensures is_lowercase(s, len);
+}
+
+fn is_ascii(s: *const i8, len: size_t) -> bool;
+fn is_lowercase(s: *const i8, len: size_t) -> bool;
+
+// ------------------------------------------------------------
+// Contracts with all FFI annotations
+// ------------------------------------------------------------
+
+ffi FullyAnnotatedWithContracts {
+    @extern("C")
+    @ownership(borrow)
+    fn fully_annotated_read(data: *const Data, len: size_t) -> c_int;
+
+    requires data != null;
+    requires len > 0;
+    ensures result >= 0;
+    memory_effects = Reads(data);
+    thread_safe = true;
+}
+
+ffi AllAnnotations {
+    @extern("C")
+    @ownership(transfer_from = "callee")
+    fn create_with_contracts(size: size_t) -> *mut Buffer;
+
+    requires size > 0;
+    ensures result != null;
+    ensures result.capacity >= size;
+    memory_effects = Allocates;
+    thread_safe = true;
+    errors_via = ReturnValue(null);
+}
+
+// ------------------------------------------------------------
+// Contracts in extended FFI blocks
+// ------------------------------------------------------------
+
+ffi BaseWithContracts {
+    @extern("C")
+    fn base_safe_read(ptr: *const c_int) -> c_int;
+
+    requires ptr != null;
+}
+
+ffi ExtendedWithContracts extends BaseWithContracts {
+    @extern("C")
+    fn extended_safe_read(ptr: *const c_int, offset: size_t) -> c_int;
+
+    requires ptr != null;
+    requires offset < 100;
+}
+
+// ------------------------------------------------------------
+// Contracts with visibility
+// ------------------------------------------------------------
+
+pub ffi PublicWithContracts {
+    @extern("C")
+    fn public_operation(x: c_int) -> c_int;
+
+    requires x >= 0;
+    ensures result >= x;
+}
+
+internal ffi InternalWithContracts {
+    @extern("C")
+    fn internal_operation(x: c_int) -> c_int;
+
+    requires x > 0;
+    ensures result > 0;
+}
+
+// ------------------------------------------------------------
+// Contracts with arithmetic expressions
+// ------------------------------------------------------------
+
+ffi ArithmeticContracts {
+    @extern("C")
+    fn safe_add(a: c_int, b: c_int) -> c_int;
+
+    requires a >= 0 && b >= 0;
+    requires a + b <= 2147483647;
+    ensures result == a + b;
+}
+
+ffi SubtractionContract {
+    @extern("C")
+    fn safe_subtract(a: c_int, b: c_int) -> c_int;
+
+    requires a >= b;
+    ensures result == a - b;
+    ensures result >= 0;
+}
+
+ffi MultiplicationContract {
+    @extern("C")
+    fn safe_multiply(a: c_int, b: c_int) -> c_int;
+
+    requires a >= 0 && b >= 0;
+    ensures result >= 0;
+}
+
+// ------------------------------------------------------------
+// Contracts with bitwise expressions
+// ------------------------------------------------------------
+
+ffi BitwiseContracts {
+    @extern("C")
+    fn check_flag(flags: c_uint, flag: c_uint) -> bool;
+
+    requires flag != 0;
+    requires (flag & (flag - 1)) == 0;  // flag is power of 2
+    ensures result == ((flags & flag) != 0);
+}
+
+ffi MaskContract {
+    @extern("C")
+    fn apply_mask(value: c_uint, mask: c_uint) -> c_uint;
+
+    ensures result == (value & mask);
+    ensures result <= value;
+}
+
+// ------------------------------------------------------------
+// Error handling contracts
+// ------------------------------------------------------------
+
+ffi ErrorContracts {
+    @extern("C")
+    fn failable_operation(input: c_int) -> c_int;
+
+    requires input >= 0;
+    ensures result >= -1;  // -1 is error code
+    errors_via = ReturnCode(-1);
+}
+
+ffi NullErrorContracts {
+    @extern("C")
+    fn get_resource(id: c_int) -> *mut Resource;
+
+    requires id > 0;
+    // result is null on error
+    errors_via = ReturnValue(null);
+}
+
+@opaque
+type Resource is ();
+
+// ------------------------------------------------------------
+// String operation contracts
+// ------------------------------------------------------------
+
+ffi StringContracts {
+    @extern("C")
+    fn safe_strlen(s: *const i8) -> size_t;
+
+    requires s != null;
+    ensures result >= 0;
+}
+
+ffi StringCopyContracts {
+    @extern("C")
+    fn safe_strcpy(dest: *mut i8, src: *const i8, dest_size: size_t) -> c_int;
+
+    requires dest != null;
+    requires src != null;
+    requires dest_size > 0;
+    ensures result == 0 || result == -1;
+}
+
+ffi StringConcatContracts {
+    @extern("C")
+    fn safe_strcat(
+        dest: *mut i8,
+        dest_len: size_t,
+        dest_capacity: size_t,
+        src: *const i8,
+        src_len: size_t
+    ) -> c_int;
+
+    requires dest != null;
+    requires src != null;
+    requires dest_len < dest_capacity;
+    requires dest_len + src_len < dest_capacity;
+    ensures result == 0 || result == -1;
+}
+
+// ------------------------------------------------------------
+// Memory operation contracts
+// ------------------------------------------------------------
+
+ffi MemoryContracts {
+    @extern("C")
+    fn safe_memcpy(
+        dest: *mut u8,
+        src: *const u8,
+        len: size_t
+    ) -> *mut u8;
+
+    requires dest != null;
+    requires src != null;
+    requires len > 0;
+    ensures result == dest;
+}
+
+ffi MemsetContracts {
+    @extern("C")
+    fn safe_memset(dest: *mut u8, value: u8, len: size_t) -> *mut u8;
+
+    requires dest != null;
+    requires len > 0;
+    ensures result == dest;
+    ensures forall i: size_t . (i >= len || dest[i] == value);
+}
+
+ffi MemcmpContracts {
+    @extern("C")
+    fn safe_memcmp(
+        s1: *const u8,
+        s2: *const u8,
+        len: size_t
+    ) -> c_int;
+
+    requires s1 != null;
+    requires s2 != null;
+    ensures result >= -1 && result <= 1;
+}

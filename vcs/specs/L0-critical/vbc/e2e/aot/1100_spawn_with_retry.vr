@@ -1,0 +1,171 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: spawn, retry, parallel, circuit-breaker
+// @expect: pass
+
+// Test execute_with_retry and parallel_map logic
+
+fn execute_with_retry<T>(
+    f: fn() -> Result<T, Text>,
+    max_attempts: Int,
+    backoff_ms: Int
+) -> Result<T, Text> {
+    let mut attempts = 0;
+    let mut last_error = "";
+    while attempts < max_attempts {
+        match f() {
+            Ok(val) => return Ok(val),
+            Err(e) => {
+                last_error = e;
+                attempts = attempts + 1;
+            }
+        }
+    }
+    Err(last_error)
+}
+
+fn parallel_map<T, U>(
+    items: List<T>,
+    worker_count: Int,
+    f: fn(T) -> U
+) -> List<U> {
+    let mut results = [];
+    let mut i = 0;
+    let n = items.len();
+    while i < n {
+        results.push(f(items[i]));
+        i = i + 1;
+    }
+    results
+}
+
+// --- Circuit breaker state ---
+type CircuitState is Closed | Open | HalfOpen;
+
+type CircuitBreaker is {
+    failure_threshold: Int,
+    state: CircuitState,
+    failure_count: Int,
+};
+
+implement CircuitBreaker {
+    fn new(threshold: Int) -> CircuitBreaker {
+        CircuitBreaker {
+            failure_threshold: threshold,
+            state: Closed,
+            failure_count: 0,
+        }
+    }
+
+    fn record_success(&mut self) {
+        self.failure_count = 0;
+        self.state = Closed;
+    }
+
+    fn record_failure(&mut self) {
+        self.failure_count = self.failure_count + 1;
+        if self.failure_count >= self.failure_threshold {
+            self.state = Open;
+        }
+    }
+
+    fn is_call_allowed(&self) -> Bool {
+        match self.state {
+            Closed => true,
+            HalfOpen => true,
+            Open => false,
+        }
+    }
+}
+
+// --- Test helpers ---
+
+fn test_retry_succeeds_first_try() -> Int {
+    let result = execute_with_retry(|| Ok(42), 3, 0);
+    match result {
+        Ok(v) => {
+            assert_eq(v, 42);
+            0
+        },
+        Err(_) => 1,
+    }
+}
+
+fn test_retry_always_fails() -> Int {
+    let result = execute_with_retry(|| Err("fail"), 3, 0);
+    match result {
+        Ok(_) => 1,
+        Err(e) => {
+            assert_eq(e, "fail");
+            0
+        },
+    }
+}
+
+fn test_parallel_map_double() -> Int {
+    let items = [1, 2, 3, 4, 5];
+    let doubled = parallel_map(items, 2, |x| x * 2);
+    assert_eq(doubled.len(), 5);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[1], 4);
+    assert_eq(doubled[2], 6);
+    assert_eq(doubled[3], 8);
+    assert_eq(doubled[4], 10);
+    0
+}
+
+fn test_parallel_map_empty() -> Int {
+    let items: List<Int> = [];
+    let result = parallel_map(items, 4, |x| x + 1);
+    assert_eq(result.len(), 0);
+    0
+}
+
+fn test_circuit_breaker_closed() -> Int {
+    let mut cb = CircuitBreaker.new(3);
+    assert(cb.is_call_allowed());
+    cb.record_failure();
+    assert(cb.is_call_allowed());
+    cb.record_failure();
+    assert(cb.is_call_allowed());
+    0
+}
+
+fn test_circuit_breaker_opens() -> Int {
+    let mut cb = CircuitBreaker.new(3);
+    cb.record_failure();
+    cb.record_failure();
+    cb.record_failure();
+    assert(!cb.is_call_allowed());
+    0
+}
+
+fn test_circuit_breaker_resets_on_success() -> Int {
+    let mut cb = CircuitBreaker.new(3);
+    cb.record_failure();
+    cb.record_failure();
+    cb.record_success();
+    assert(cb.is_call_allowed());
+    assert_eq(cb.failure_count, 0);
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+
+    failures = failures + test_retry_succeeds_first_try();
+    failures = failures + test_retry_always_fails();
+    failures = failures + test_parallel_map_double();
+    failures = failures + test_parallel_map_empty();
+    failures = failures + test_circuit_breaker_closed();
+    failures = failures + test_circuit_breaker_opens();
+    failures = failures + test_circuit_breaker_resets_on_success();
+
+    if failures == 0 {
+        print("All 7 tests passed");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

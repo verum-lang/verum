@@ -1,0 +1,223 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, bignum, addition, arbitrary-precision
+// @timeout: 30000
+
+// Big number addition using digit arrays (base 1000)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// BigNum: digits stored in base 1000, least significant first
+// digits[0] = ones place (0-999), digits[1] = thousands place, etc.
+// len = number of used digits
+type BigNum is { digits: Arr8, len: Int };
+
+fn bn_zero() -> BigNum { BigNum { digits: zeros(), len: 0 } }
+
+fn bn_from(n: Int) -> BigNum {
+    if n == 0 { return bn_zero(); }
+    let mut d = zeros();
+    let mut val = n;
+    let mut i = 0;
+    while val > 0 {
+        d = set8(d, i, val % 1000);
+        val = val / 1000;
+        i = i + 1;
+    }
+    BigNum { digits: d, len: i }
+}
+
+fn bn_to_int(b: BigNum) -> Int {
+    let mut result = 0;
+    let mut mul = 1;
+    let mut i = 0;
+    while i < b.len {
+        result = result + get8(b.digits, i) * mul;
+        mul = mul * 1000;
+        i = i + 1;
+    }
+    result
+}
+
+fn max2(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+fn bn_add(a: BigNum, b: BigNum) -> BigNum {
+    let mut result = zeros();
+    let mut carry = 0;
+    let n = max2(a.len, b.len);
+    let mut i = 0;
+    while i < n {
+        let da = if i < a.len { get8(a.digits, i) } else { 0 };
+        let db = if i < b.len { get8(b.digits, i) } else { 0 };
+        let sum = da + db + carry;
+        result = set8(result, i, sum % 1000);
+        carry = sum / 1000;
+        i = i + 1;
+    }
+    let mut rlen = n;
+    if carry > 0 {
+        result = set8(result, rlen, carry);
+        rlen = rlen + 1;
+    }
+    BigNum { digits: result, len: rlen }
+}
+
+fn bn_mul_scalar(a: BigNum, k: Int) -> BigNum {
+    let mut result = zeros();
+    let mut carry = 0;
+    let mut i = 0;
+    while i < a.len {
+        let prod = get8(a.digits, i) * k + carry;
+        result = set8(result, i, prod % 1000);
+        carry = prod / 1000;
+        i = i + 1;
+    }
+    let mut rlen = a.len;
+    if carry > 0 {
+        result = set8(result, rlen, carry);
+        rlen = rlen + 1;
+    }
+    BigNum { digits: result, len: rlen }
+}
+
+// Compare: -1 if a<b, 0 if a==b, 1 if a>b
+fn bn_cmp(a: BigNum, b: BigNum) -> Int {
+    if a.len != b.len {
+        return if a.len > b.len { 1 } else { -1 };
+    }
+    let mut i = a.len - 1;
+    while i >= 0 {
+        let da = get8(a.digits, i);
+        let db = get8(b.digits, i);
+        if da > db { return 1; }
+        if da < db { return -1; }
+        i = i - 1;
+    }
+    0
+}
+
+fn bn_is_zero(b: BigNum) -> Int {
+    if b.len == 0 { return 1; }
+    0
+}
+
+fn test_basic() -> Int {
+    let a = bn_from(123);
+    assert_eq(bn_to_int(a), 123);
+    assert_eq(a.len, 1); // fits in one base-1000 digit
+
+    let b = bn_from(1234);
+    assert_eq(bn_to_int(b), 1234);
+    assert_eq(b.len, 2); // 234 + 1*1000
+
+    let c = bn_from(0);
+    assert_eq(bn_is_zero(c), 1);
+    1
+}
+
+fn test_add_small() -> Int {
+    let a = bn_from(123);
+    let b = bn_from(456);
+    let sum = bn_add(a, b);
+    assert_eq(bn_to_int(sum), 579);
+    1
+}
+
+fn test_add_carry() -> Int {
+    let a = bn_from(999);
+    let b = bn_from(1);
+    let sum = bn_add(a, b);
+    assert_eq(bn_to_int(sum), 1000);
+    assert_eq(sum.len, 2);
+    1
+}
+
+fn test_add_large() -> Int {
+    let a = bn_from(999999);
+    let b = bn_from(1);
+    let sum = bn_add(a, b);
+    assert_eq(bn_to_int(sum), 1000000);
+    assert_eq(sum.len, 3);
+    1
+}
+
+fn test_mul_scalar() -> Int {
+    let a = bn_from(500);
+    let prod = bn_mul_scalar(a, 3);
+    assert_eq(bn_to_int(prod), 1500);
+
+    let b = bn_from(12345);
+    let prod2 = bn_mul_scalar(b, 2);
+    assert_eq(bn_to_int(prod2), 24690);
+    1
+}
+
+fn test_compare() -> Int {
+    let a = bn_from(100);
+    let b = bn_from(200);
+    let c = bn_from(100);
+    assert_eq(bn_cmp(a, b), -1);
+    assert_eq(bn_cmp(b, a), 1);
+    assert_eq(bn_cmp(a, c), 0);
+    1
+}
+
+fn test_factorial() -> Int {
+    // 10! = 3628800
+    let mut f = bn_from(1);
+    let mut i = 2;
+    while i <= 10 {
+        f = bn_mul_scalar(f, i);
+        i = i + 1;
+    }
+    assert_eq(bn_to_int(f), 3628800);
+    1
+}
+
+fn test_add_identity() -> Int {
+    let a = bn_from(42);
+    let z = bn_zero();
+    let sum = bn_add(a, z);
+    assert_eq(bn_to_int(sum), 42);
+
+    // Commutativity
+    let b = bn_from(100);
+    let s1 = bn_add(a, b);
+    let s2 = bn_add(b, a);
+    assert_eq(bn_to_int(s1), bn_to_int(s2));
+    1
+}
+
+fn main() -> Int {
+    test_basic();
+    test_add_small();
+    test_add_carry();
+    test_add_large();
+    test_mul_scalar();
+    test_compare();
+    test_factorial();
+    test_add_identity();
+    print("[OK] 522_bignum_add_aot");
+    0
+}

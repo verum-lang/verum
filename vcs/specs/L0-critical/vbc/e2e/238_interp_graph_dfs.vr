@@ -1,0 +1,371 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, dfs, data-structure
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: DFS on a graph (adjacency matrix).
+// Tests traversal, cycle detection, connected component counting.
+// Uses iterative DFS with explicit stack to avoid deep recursion.
+
+// =============================================================================
+// Array utilities
+// =============================================================================
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int,
+               v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn a8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { val } else { a.v0 },
+        v1: if i == 1 { val } else { a.v1 },
+        v2: if i == 2 { val } else { a.v2 },
+        v3: if i == 3 { val } else { a.v3 },
+        v4: if i == 4 { val } else { a.v4 },
+        v5: if i == 5 { val } else { a.v5 },
+        v6: if i == 6 { val } else { a.v6 },
+        v7: if i == 7 { val } else { a.v7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 }
+}
+
+// Stack for DFS (capacity 16)
+type Arr16 is { v0: Int, v1: Int, v2: Int, v3: Int,
+                v4: Int, v5: Int, v6: Int, v7: Int,
+                v8: Int, v9: Int, v10: Int, v11: Int,
+                v12: Int, v13: Int, v14: Int, v15: Int };
+
+fn s16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 }
+    else if i == 2 { a.v2 } else if i == 3 { a.v3 }
+    else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else if i == 7 { a.v7 }
+    else if i == 8 { a.v8 } else if i == 9 { a.v9 }
+    else if i == 10 { a.v10 } else if i == 11 { a.v11 }
+    else if i == 12 { a.v12 } else if i == 13 { a.v13 }
+    else if i == 14 { a.v14 } else { a.v15 }
+}
+
+fn s16_set(a: Arr16, i: Int, val: Int) -> Arr16 {
+    Arr16 {
+        v0: if i == 0 { val } else { a.v0 },
+        v1: if i == 1 { val } else { a.v1 },
+        v2: if i == 2 { val } else { a.v2 },
+        v3: if i == 3 { val } else { a.v3 },
+        v4: if i == 4 { val } else { a.v4 },
+        v5: if i == 5 { val } else { a.v5 },
+        v6: if i == 6 { val } else { a.v6 },
+        v7: if i == 7 { val } else { a.v7 },
+        v8: if i == 8 { val } else { a.v8 },
+        v9: if i == 9 { val } else { a.v9 },
+        v10: if i == 10 { val } else { a.v10 },
+        v11: if i == 11 { val } else { a.v11 },
+        v12: if i == 12 { val } else { a.v12 },
+        v13: if i == 13 { val } else { a.v13 },
+        v14: if i == 14 { val } else { a.v14 },
+        v15: if i == 15 { val } else { a.v15 }
+    }
+}
+
+fn s16_zeros() -> Arr16 {
+    Arr16 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0,
+            v8: 0, v9: 0, v10: 0, v11: 0, v12: 0, v13: 0, v14: 0, v15: 0 }
+}
+
+// Graph: 8 rows of Arr8
+type Graph8 is {
+    r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8,
+    r4: Arr8, r5: Arr8, r6: Arr8, r7: Arr8,
+    num_nodes: Int
+};
+
+fn graph_edge(g: Graph8, from: Int, to: Int) -> Int {
+    if from == 0 { a8_get(g.r0, to) }
+    else if from == 1 { a8_get(g.r1, to) }
+    else if from == 2 { a8_get(g.r2, to) }
+    else if from == 3 { a8_get(g.r3, to) }
+    else if from == 4 { a8_get(g.r4, to) }
+    else if from == 5 { a8_get(g.r5, to) }
+    else if from == 6 { a8_get(g.r6, to) }
+    else { a8_get(g.r7, to) }
+}
+
+// =============================================================================
+// Iterative DFS: returns visited array and count of visited nodes
+// =============================================================================
+
+// DFS from source, returns visited array (1 = visited, 0 = not)
+fn dfs_visited(g: Graph8, source: Int) -> Arr8 {
+    let mut visited = a8_zeros();
+    let mut stk = s16_zeros();
+    let mut top = 0;
+
+    // Push source
+    stk = s16_set(stk, top, source);
+    top = top + 1;
+
+    while top > 0 {
+        // Pop
+        top = top - 1;
+        let node = s16_get(stk, top);
+
+        if a8_get(visited, node) == 0 {
+            visited = a8_set(visited, node, 1);
+
+            // Push neighbors (in reverse order for consistent traversal)
+            let mut nb = g.num_nodes - 1;
+            while nb >= 0 {
+                if graph_edge(g, node, nb) == 1 {
+                    if a8_get(visited, nb) == 0 {
+                        stk = s16_set(stk, top, nb);
+                        top = top + 1;
+                    }
+                }
+                nb = nb - 1;
+            }
+        }
+    }
+    visited
+}
+
+// Count nodes visited from source
+fn dfs_count(g: Graph8, source: Int) -> Int {
+    let visited = dfs_visited(g, source);
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < g.num_nodes {
+        if a8_get(visited, i) == 1 {
+            cnt = cnt + 1;
+        }
+        i = i + 1;
+    }
+    cnt
+}
+
+// =============================================================================
+// Connected components (for undirected graphs)
+// =============================================================================
+
+fn count_components(g: Graph8) -> Int {
+    let mut global_visited = a8_zeros();
+    let mut components = 0;
+    let mut node = 0;
+    while node < g.num_nodes {
+        if a8_get(global_visited, node) == 0 {
+            // New component found, DFS from this node
+            components = components + 1;
+            let comp_visited = dfs_visited(g, node);
+            // Merge visited arrays
+            let mut k = 0;
+            while k < g.num_nodes {
+                if a8_get(comp_visited, k) == 1 {
+                    global_visited = a8_set(global_visited, k, 1);
+                }
+                k = k + 1;
+            }
+        }
+        node = node + 1;
+    }
+    components
+}
+
+// =============================================================================
+// Cycle detection in directed graph
+// Uses DFS coloring: 0=white (unvisited), 1=gray (in stack), 2=black (done)
+// A back edge (to a gray node) indicates a cycle
+// =============================================================================
+
+fn has_cycle_directed(g: Graph8) -> Bool {
+    let mut color = a8_zeros();  // All white
+    // We need a recursive-like approach; use iterative with parent tracking
+    // Simplified: try DFS from each unvisited node
+    let mut start = 0;
+    while start < g.num_nodes {
+        if a8_get(color, start) == 0 {
+            // DFS using stack of (node, neighbor_index) pairs encoded as node*8+nb_idx
+            let mut stk = s16_zeros();
+            let mut top = 0;
+            color = a8_set(color, start, 1);  // Gray
+            stk = s16_set(stk, top, start * 8);  // Push (start, 0)
+            top = top + 1;
+
+            while top > 0 {
+                top = top - 1;
+                let encoded = s16_get(stk, top);
+                let node = encoded / 8;
+                let nb_idx = encoded % 8;
+
+                if nb_idx < g.num_nodes {
+                    // Re-push with next neighbor index
+                    stk = s16_set(stk, top, node * 8 + nb_idx + 1);
+                    top = top + 1;
+
+                    if graph_edge(g, node, nb_idx) == 1 {
+                        let nb_color = a8_get(color, nb_idx);
+                        if nb_color == 1 {
+                            return true;  // Back edge = cycle
+                        }
+                        if nb_color == 0 {
+                            color = a8_set(color, nb_idx, 1);  // Gray
+                            stk = s16_set(stk, top, nb_idx * 8);
+                            top = top + 1;
+                        }
+                    }
+                } else {
+                    // All neighbors explored, mark black
+                    color = a8_set(color, node, 2);
+                }
+            }
+        }
+        start = start + 1;
+    }
+    false
+}
+
+// =============================================================================
+// Test graphs
+// =============================================================================
+
+// Graph 1: Simple directed tree (no cycles)
+//   0 -> 1, 0 -> 2, 1 -> 3, 2 -> 4
+fn make_tree_graph() -> Graph8 {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r1 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r2 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 1, v5: 0, v6: 0, v7: 0 };
+    Graph8 { r0: r0, r1: r1, r2: r2, r3: z, r4: z, r5: z, r6: z, r7: z, num_nodes: 5 }
+}
+
+// Graph 2: Directed cycle 0 -> 1 -> 2 -> 0
+fn make_cycle_graph() -> Graph8 {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r1 = Arr8 { v0: 0, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r2 = Arr8 { v0: 1, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    Graph8 { r0: r0, r1: r1, r2: r2, r3: z, r4: z, r5: z, r6: z, r7: z, num_nodes: 3 }
+}
+
+// Graph 3: Undirected disconnected — {0-1-2}, {3-4}, {5}
+fn make_three_components() -> Graph8 {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r1 = Arr8 { v0: 1, v1: 0, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r2 = Arr8 { v0: 0, v1: 1, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r3 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 1, v5: 0, v6: 0, v7: 0 };
+    let r4 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    Graph8 { r0: r0, r1: r1, r2: r2, r3: r3, r4: r4, r5: z, r6: z, r7: z, num_nodes: 6 }
+}
+
+// Graph 4: Complete graph on 4 nodes (undirected)
+fn make_complete4() -> Graph8 {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 1, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r1 = Arr8 { v0: 1, v1: 0, v2: 1, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r2 = Arr8 { v0: 1, v1: 1, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r3 = Arr8 { v0: 1, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    Graph8 { r0: r0, r1: r1, r2: r2, r3: r3, r4: z, r5: z, r6: z, r7: z, num_nodes: 4 }
+}
+
+// Graph 5: DAG with no cycles
+//   0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3
+fn make_dag() -> Graph8 {
+    let z = a8_zeros();
+    let r0 = Arr8 { v0: 0, v1: 1, v2: 1, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r1 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let r2 = Arr8 { v0: 0, v1: 0, v2: 0, v3: 1, v4: 0, v5: 0, v6: 0, v7: 0 };
+    Graph8 { r0: r0, r1: r1, r2: r2, r3: z, r4: z, r5: z, r6: z, r7: z, num_nodes: 4 }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_tree_dfs() {
+    let g = make_tree_graph();
+    // DFS from 0 should visit all 5 nodes
+    assert_eq(dfs_count(g, 0), 5);
+    let visited = dfs_visited(g, 0);
+    assert_eq(a8_get(visited, 0), 1);
+    assert_eq(a8_get(visited, 1), 1);
+    assert_eq(a8_get(visited, 2), 1);
+    assert_eq(a8_get(visited, 3), 1);
+    assert_eq(a8_get(visited, 4), 1);
+}
+
+fn test_tree_dfs_from_leaf() {
+    let g = make_tree_graph();
+    // DFS from leaf 3 — no outgoing edges, only visits 3
+    assert_eq(dfs_count(g, 3), 1);
+}
+
+fn test_cycle_dfs() {
+    let g = make_cycle_graph();
+    // DFS from 0 visits all 3 nodes
+    assert_eq(dfs_count(g, 0), 3);
+}
+
+fn test_components() {
+    let g = make_three_components();
+    assert_eq(count_components(g), 3);
+    // Component sizes
+    assert_eq(dfs_count(g, 0), 3);  // {0, 1, 2}
+    assert_eq(dfs_count(g, 3), 2);  // {3, 4}
+    assert_eq(dfs_count(g, 5), 1);  // {5}
+}
+
+fn test_complete_graph_dfs() {
+    let g = make_complete4();
+    // From any node, should visit all 4
+    assert_eq(dfs_count(g, 0), 4);
+    assert_eq(dfs_count(g, 3), 4);
+    assert_eq(count_components(g), 1);
+}
+
+fn test_cycle_detection_no_cycle() {
+    let g = make_tree_graph();
+    assert_eq(has_cycle_directed(g), false);
+}
+
+fn test_cycle_detection_has_cycle() {
+    let g = make_cycle_graph();
+    assert_eq(has_cycle_directed(g), true);
+}
+
+fn test_dag_no_cycle() {
+    let g = make_dag();
+    assert_eq(has_cycle_directed(g), false);
+    assert_eq(dfs_count(g, 0), 4);
+}
+
+fn test_single_node() {
+    let z = a8_zeros();
+    let g = Graph8 { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z, r6: z, r7: z, num_nodes: 1 };
+    assert_eq(dfs_count(g, 0), 1);
+    assert_eq(count_components(g), 1);
+    assert_eq(has_cycle_directed(g), false);
+}
+
+fn main() -> Int {
+    test_tree_dfs();
+    test_tree_dfs_from_leaf();
+    test_cycle_dfs();
+    test_components();
+    test_complete_graph_dfs();
+    test_cycle_detection_no_cycle();
+    test_cycle_detection_has_cycle();
+    test_dag_no_cycle();
+    test_single_node();
+    print("[OK] 238_interp_graph_dfs");
+    0
+}

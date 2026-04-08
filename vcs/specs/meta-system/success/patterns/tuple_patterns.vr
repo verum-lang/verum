@@ -1,0 +1,122 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, patterns, matching, tuple, destructuring
+// @description: Test tuple pattern matching in meta functions
+
+// =============================================================================
+// BASIC TUPLE PATTERNS
+// =============================================================================
+
+meta fn test_tuple_pair() -> Int {
+    match (10, 20) {
+        (a, b) => a + b,
+    }
+}
+
+meta fn test_tuple_triple() -> Int {
+    match (1, 2, 3) {
+        (x, y, z) => x * y * z,
+    }
+}
+
+meta fn test_tuple_quad() -> Int {
+    match (1, 2, 3, 4) {
+        (a, b, c, d) => a + b + c + d,
+    }
+}
+
+// =============================================================================
+// TUPLE PATTERNS WITH LITERALS
+// =============================================================================
+
+meta fn test_tuple_with_literal_first() -> Text {
+    match (0, "hello") {
+        (0, msg) => msg,
+        (_, _) => "default",
+    }
+}
+
+meta fn test_tuple_with_literal_second() -> Int {
+    match (42, true) {
+        (n, true) => n,
+        (n, false) => 0 - n,
+    }
+}
+
+meta fn test_tuple_all_literals() -> Bool {
+    match (1, 2, 3) {
+        (1, 2, 3) => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// NESTED TUPLE PATTERNS
+// =============================================================================
+
+meta fn test_nested_tuple() -> Int {
+    match ((1, 2), (3, 4)) {
+        ((a, b), (c, d)) => a + b + c + d,
+    }
+}
+
+meta fn test_deeply_nested_tuple() -> Int {
+    match (((1, 2), 3), 4) {
+        (((a, b), c), d) => a * b + c + d,
+    }
+}
+
+meta fn test_mixed_nested_tuple() -> Int {
+    match (1, (2, (3, 4))) {
+        (a, (b, (c, d))) => a + b + c + d,
+    }
+}
+
+// =============================================================================
+// TUPLE PATTERNS WITH WILDCARD
+// =============================================================================
+
+meta fn test_tuple_with_wildcard_first() -> Int {
+    match (100, 200) {
+        (_, b) => b,
+    }
+}
+
+meta fn test_tuple_with_wildcard_second() -> Int {
+    match (100, 200) {
+        (a, _) => a,
+    }
+}
+
+meta fn test_tuple_with_multiple_wildcards() -> Int {
+    match (1, 2, 3, 4, 5) {
+        (first, _, middle, _, last) => first + middle + last,
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Basic tuple tests
+    @const assert_eq(test_tuple_pair(), 30);
+    @const assert_eq(test_tuple_triple(), 6);
+    @const assert_eq(test_tuple_quad(), 10);
+
+    // Tuple with literals
+    @const assert_eq(test_tuple_with_literal_first(), "hello");
+    @const assert_eq(test_tuple_with_literal_second(), 42);
+    @const assert(test_tuple_all_literals());
+
+    // Nested tuples
+    @const assert_eq(test_nested_tuple(), 10);
+    @const assert_eq(test_deeply_nested_tuple(), 9);
+    @const assert_eq(test_mixed_nested_tuple(), 10);
+
+    // Wildcards in tuples
+    @const assert_eq(test_tuple_with_wildcard_first(), 200);
+    @const assert_eq(test_tuple_with_wildcard_second(), 100);
+    @const assert_eq(test_tuple_with_multiple_wildcards(), 9);
+}

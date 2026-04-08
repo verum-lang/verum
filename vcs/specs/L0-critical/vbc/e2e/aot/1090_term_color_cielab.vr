@@ -1,0 +1,275 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, color, cielab, perceptual, ansi256
+// @expected-exit: 0
+// @description: CIELAB perceptual color distance and Ansi256 downscaling via sRGB->linear->XYZ->Lab
+
+type Rgb is { r: Int, g: Int, b: Int };
+type Lab is { l: Float, a: Float, b_val: Float };
+
+// sRGB to linear (simplified piecewise with fixed-point approximation)
+// Full formula: if v <= 0.04045 then v/12.92 else ((v+0.055)/1.055)^2.4
+// We use a cubic approximation: linear ~ (v/255)^2.2 ~ (v/255)^2 * (v/255)^0.2
+// Simplified: linear = (v/255.0)^2.0 as reasonable approximation
+fn srgb_to_linear(v: Int) -> Float {
+    let normalized = (v as Float) / 255.0;
+    // Using square approximation (gamma ~2.0 instead of 2.2 for simplicity)
+    normalized * normalized
+}
+
+// Linear RGB to XYZ (D65 illuminant)
+fn rgb_to_xyz(rgb: Rgb) -> List<Float> {
+    let r = srgb_to_linear(rgb.r);
+    let g = srgb_to_linear(rgb.g);
+    let b = srgb_to_linear(rgb.b);
+
+    // sRGB to XYZ matrix (scaled by 100)
+    let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) * 100.0;
+    let y = (0.2126 * r + 0.7152 * g + 0.0722 * b) * 100.0;
+    let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) * 100.0;
+
+    let mut result: List<Float> = [];
+    result.push(x);
+    result.push(y);
+    result.push(z);
+    result
+}
+
+// CIE Lab f(t) function
+// f(t) = t^(1/3) if t > (6/29)^3 else t/(3*(6/29)^2) + 4/29
+// (6/29)^3 = 0.008856
+// Using cube root approximation via Newton's method
+fn cube_root(x: Float) -> Float {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    // Newton's method for cube root: y = y - (y^3 - x) / (3*y^2)
+    let mut y = x;
+    if x > 1.0 { y = x / 3.0; }
+    let mut i = 0;
+    while i < 20 {
+        let y2 = y * y;
+        let y3 = y2 * y;
+        y = y - (y3 - x) / (3.0 * y2);
+        i = i + 1;
+    }
+    y
+}
+
+fn lab_f(t: Float) -> Float {
+    if t > 0.008856 {
+        cube_root(t)
+    } else {
+        t * 903.3 / 100.0 + 16.0 / 116.0
+    }
+}
+
+// D65 reference white point
+fn ref_x() -> Float { 95.047 }
+fn ref_y() -> Float { 100.0 }
+fn ref_z() -> Float { 108.883 }
+
+fn xyz_to_lab(xyz: List<Float>) -> Lab {
+    let fx = lab_f(xyz[0] / ref_x());
+    let fy = lab_f(xyz[1] / ref_y());
+    let fz = lab_f(xyz[2] / ref_z());
+
+    let l = 116.0 * fy - 16.0;
+    let a = 500.0 * (fx - fy);
+    let b = 200.0 * (fy - fz);
+
+    Lab { l: l, a: a, b_val: b }
+}
+
+fn rgb_to_lab(rgb: Rgb) -> Lab {
+    let xyz = rgb_to_xyz(rgb);
+    xyz_to_lab(xyz)
+}
+
+fn sqrt_approx(x: Float) -> Float {
+    if x <= 0.0 { return 0.0; }
+    let mut y = x;
+    let mut i = 0;
+    while i < 30 {
+        y = (y + x / y) / 2.0;
+        i = i + 1;
+    }
+    y
+}
+
+// CIE76 Delta E
+fn delta_e(lab1: Lab, lab2: Lab) -> Float {
+    let dl = lab1.l - lab2.l;
+    let da = lab1.a - lab2.a;
+    let db = lab1.b_val - lab2.b_val;
+    sqrt_approx(dl * dl + da * da + db * db)
+}
+
+fn abs_float(x: Float) -> Float {
+    if x < 0.0 { -x } else { x }
+}
+
+// Basic ANSI 256 color cube: colors 16-231 map to 6x6x6 RGB cube
+// Each axis: 0, 95, 135, 175, 215, 255 (indices 0-5)
+fn ansi_cube_value(idx: Int) -> Int {
+    if idx == 0 { return 0; }
+    55 + idx * 40
+}
+
+// Find closest ANSI 256 cube color (16-231) to an RGB value
+fn to_ansi256_cube(rgb: Rgb) -> Int {
+    let mut best_idx = 16;
+    let mut best_dist = 999999;
+
+    let mut ri = 0;
+    while ri < 6 {
+        let mut gi = 0;
+        while gi < 6 {
+            let mut bi = 0;
+            while bi < 6 {
+                let cr = ansi_cube_value(ri);
+                let cg = ansi_cube_value(gi);
+                let cb = ansi_cube_value(bi);
+                let dr = rgb.r - cr;
+                let dg = rgb.g - cg;
+                let db = rgb.b - cb;
+                let dist = dr * dr + dg * dg + db * db;
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = 16 + 36 * ri + 6 * gi + bi;
+                }
+                bi = bi + 1;
+            }
+            gi = gi + 1;
+        }
+        ri = ri + 1;
+    }
+    best_idx
+}
+
+fn test_cube_root() -> Int {
+    let cr = cube_root(27.0);
+    if abs_float(cr - 3.0) > 0.001 {
+        print(f"FAIL cube_root(27): {cr}");
+        return 1;
+    }
+    let cr8 = cube_root(8.0);
+    if abs_float(cr8 - 2.0) > 0.001 {
+        print(f"FAIL cube_root(8): {cr8}");
+        return 1;
+    }
+    let cr1 = cube_root(1.0);
+    if abs_float(cr1 - 1.0) > 0.001 {
+        print(f"FAIL cube_root(1): {cr1}");
+        return 1;
+    }
+    0
+}
+
+fn test_black_white_distance() -> Int {
+    let black = rgb_to_lab(Rgb { r: 0, g: 0, b: 0 });
+    let white = rgb_to_lab(Rgb { r: 255, g: 255, b: 255 });
+
+    // L* of black should be ~0, white should be ~100
+    if abs_float(black.l) > 1.0 {
+        print(f"FAIL black L: {black.l}");
+        return 1;
+    }
+    if abs_float(white.l - 100.0) > 5.0 {
+        print(f"FAIL white L: {white.l}");
+        return 1;
+    }
+
+    // Delta E between black and white should be large (>90)
+    let de = delta_e(black, white);
+    if de < 90.0 {
+        print(f"FAIL black-white delta_e: {de}");
+        return 1;
+    }
+    0
+}
+
+fn test_similar_colors() -> Int {
+    // Two similar greens should have small delta E
+    let green1 = rgb_to_lab(Rgb { r: 0, g: 128, b: 0 });
+    let green2 = rgb_to_lab(Rgb { r: 0, g: 140, b: 0 });
+    let de_similar = delta_e(green1, green2);
+
+    // Two very different colors
+    let red = rgb_to_lab(Rgb { r: 255, g: 0, b: 0 });
+    let blue = rgb_to_lab(Rgb { r: 0, g: 0, b: 255 });
+    let de_different = delta_e(red, blue);
+
+    // Similar colors should have much smaller delta E
+    if de_similar >= de_different {
+        print(f"FAIL similar ({de_similar}) >= different ({de_different})");
+        return 1;
+    }
+    // Similar greens should have delta E < 15
+    if de_similar > 15.0 {
+        print(f"FAIL similar greens too far: {de_similar}");
+        return 1;
+    }
+    0
+}
+
+fn test_ansi256_pure_colors() -> Int {
+    // Pure red (255,0,0) should map to ANSI cube index 196 (5,0,0)
+    let red_idx = to_ansi256_cube(Rgb { r: 255, g: 0, b: 0 });
+    // Index = 16 + 36*5 + 6*0 + 0 = 196
+    if red_idx != 196 {
+        print(f"FAIL red ansi256: {red_idx}");
+        return 1;
+    }
+
+    // Pure green (0,255,0) should map to ANSI cube index 46 (0,5,0)
+    let green_idx = to_ansi256_cube(Rgb { r: 0, g: 255, b: 0 });
+    // Index = 16 + 36*0 + 6*5 + 0 = 46
+    if green_idx != 46 {
+        print(f"FAIL green ansi256: {green_idx}");
+        return 1;
+    }
+
+    // Pure blue (0,0,255) should map to ANSI cube index 21 (0,0,5)
+    let blue_idx = to_ansi256_cube(Rgb { r: 0, g: 0, b: 255 });
+    // Index = 16 + 36*0 + 6*0 + 5 = 21
+    if blue_idx != 21 {
+        print(f"FAIL blue ansi256: {blue_idx}");
+        return 1;
+    }
+
+    // Black (0,0,0) should map to index 16 (0,0,0)
+    let black_idx = to_ansi256_cube(Rgb { r: 0, g: 0, b: 0 });
+    if black_idx != 16 {
+        print(f"FAIL black ansi256: {black_idx}");
+        return 1;
+    }
+    0
+}
+
+fn test_ansi256_mid_color() -> Int {
+    // Mid grey (128,128,128) should map near the middle of the cube
+    let grey_idx = to_ansi256_cube(Rgb { r: 128, g: 128, b: 128 });
+    // Closest cube value to 128 is 135 (index 2), so expect (2,2,2) = 16 + 72 + 12 + 2 = 102
+    if grey_idx != 102 {
+        print(f"FAIL grey ansi256: {grey_idx}");
+        return 1;
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_cube_root();
+    if r1 != 0 { return r1; }
+    let r2 = test_black_white_distance();
+    if r2 != 0 { return r2; }
+    let r3 = test_similar_colors();
+    if r3 != 0 { return r3; }
+    let r4 = test_ansi256_pure_colors();
+    if r4 != 0 { return r4; }
+    let r5 = test_ansi256_mid_color();
+    if r5 != 0 { return r5; }
+    print("PASS: term_color_cielab");
+    0
+}

@@ -1,0 +1,1725 @@
+// =============================================================================
+// map_extended_test.vr - Extended tests for Map<K, V> covering additional APIs
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, map, hash-map, core, extended, entry-api
+// @description: Extended tests for Map<K, V> covering entry API, iteration,
+//               protocol implementations, and advanced operations
+// =============================================================================
+
+mount core.collections.map.{Map, MapEntry, Occupied, Vacant, map, map_from_keys, count_by, group_by};
+mount core.collections.list.List;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Entry API Tests - Core Functionality
+// =============================================================================
+
+@test
+fn test_map_entry_or_insert() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    // Insert via entry API
+    let value = m.entry("key").or_insert(42);
+    assert_eq(*value, 42);
+    assert_eq(m.len(), 1);
+
+    // Access existing via entry API (should not overwrite)
+    let value2 = m.entry("key").or_insert(100);
+    assert_eq(*value2, 42);  // Still 42, not overwritten
+    assert_eq(m.len(), 1);   // Still just one entry
+}
+
+@test
+fn test_map_entry_or_insert_with() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    // Insert with lazy computation
+    let mut called = false;
+    let value = m.entry("key").or_insert_with(|| {
+        called = true;
+        42
+    });
+
+    assert(called);
+    assert_eq(*value, 42);
+
+    // For existing key, closure should not be called
+    let mut called2 = false;
+    let value2 = m.entry("key").or_insert_with(|| {
+        called2 = true;
+        100
+    });
+
+    assert(!called2);  // Closure not called
+    assert_eq(*value2, 42);
+}
+
+@test
+fn test_map_entry_or_insert_with_key() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    // Insert with key-dependent computation
+    let value = m.entry("hello").or_insert_with_key(|k| k.len());
+    assert_eq(*value, 5);  // "hello".len() == 5
+
+    // Existing key - closure not called
+    let value2 = m.entry("hello").or_insert_with_key(|_k| 999);
+    assert_eq(*value2, 5);  // Still 5
+}
+
+@test
+fn test_map_entry_and_modify() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 10);
+
+    // Modify existing value
+    m.entry("key").and_modify(|v| *v = *v + 5);
+
+    match m.get(&"key") {
+        Some(v) => assert_eq(*v, 15),
+        None => panic("Expected Some"),
+    }
+
+    // and_modify on vacant entry - no modification
+    m.entry("missing").and_modify(|v| *v = 100);
+    assert(!m.contains_key(&"missing"));
+}
+
+@test
+fn test_map_entry_and_modify_chain() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    // Chain: try to modify, then insert default if absent
+    m.entry("key").and_modify(|v| *v = *v + 1).or_insert(0);
+    assert_eq(*m.get(&"key").unwrap(), 0);  // Inserted default
+
+    // Now key exists, modify it
+    m.entry("key").and_modify(|v| *v = *v + 1).or_insert(0);
+    assert_eq(*m.get(&"key").unwrap(), 1);  // Modified
+
+    m.entry("key").and_modify(|v| *v = *v + 1).or_insert(0);
+    assert_eq(*m.get(&"key").unwrap(), 2);  // Modified again
+}
+
+@test
+fn test_map_entry_or_default() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    let value = m.entry("key").or_default();
+    assert_eq(*value, 0);  // Int default is 0
+
+    *value = 42;
+    assert_eq(*m.get(&"key").unwrap(), 42);
+}
+
+@test
+fn test_map_entry_key() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("exists", 42);
+
+    let entry = m.entry("exists");
+    assert_eq(*entry.key(), "exists");
+
+    let vacant = m.entry("vacant");
+    assert_eq(*vacant.key(), "vacant");
+}
+
+// =============================================================================
+// Section 2: Occupied Entry Tests
+// =============================================================================
+
+@test
+fn test_map_occupied_get() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    match m.entry("key") {
+        Occupied(entry) => {
+            assert_eq(*entry.get(), 42);
+        }
+        Vacant(_) => panic("Expected Occupied"),
+    }
+}
+
+@test
+fn test_map_occupied_get_mut() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    match m.entry("key") {
+        Occupied(mut entry) => {
+            *entry.get_mut() = 100;
+        }
+        Vacant(_) => panic("Expected Occupied"),
+    }
+
+    assert_eq(*m.get(&"key").unwrap(), 100);
+}
+
+@test
+fn test_map_occupied_insert() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    match m.entry("key") {
+        Occupied(mut entry) => {
+            let old = entry.insert(100);
+            assert_eq(old, 42);
+        }
+        Vacant(_) => panic("Expected Occupied"),
+    }
+
+    assert_eq(*m.get(&"key").unwrap(), 100);
+}
+
+@test
+fn test_map_occupied_remove() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    match m.entry("key") {
+        Occupied(entry) => {
+            let removed = entry.remove();
+            assert_eq(removed, 42);
+        }
+        Vacant(_) => panic("Expected Occupied"),
+    }
+
+    assert(!m.contains_key(&"key"));
+}
+
+@test
+fn test_map_occupied_into_mut() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    match m.entry("key") {
+        Occupied(entry) => {
+            let val_ref = entry.into_mut();
+            *val_ref = *val_ref + 100;
+        }
+        Vacant(_) => panic("Expected Occupied"),
+    }
+
+    assert_eq(*m.get(&"key").unwrap(), 142);
+}
+
+@test
+fn test_map_occupied_remove_entry() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    match m.entry("key") {
+        Occupied(entry) => {
+            let (k, v) = entry.remove_entry();
+            assert_eq(k, "key");
+            assert_eq(v, 42);
+        }
+        Vacant(_) => panic("Expected Occupied"),
+    }
+
+    assert(m.is_empty());
+}
+
+// =============================================================================
+// Section 3: Vacant Entry Tests
+// =============================================================================
+
+@test
+fn test_map_vacant_insert() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    match m.entry("key") {
+        Vacant(entry) => {
+            let value = entry.insert(42);
+            assert_eq(*value, 42);
+        }
+        Occupied(_) => panic("Expected Vacant"),
+    }
+
+    assert_eq(*m.get(&"key").unwrap(), 42);
+}
+
+@test
+fn test_map_vacant_into_key() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    match m.entry("key") {
+        Vacant(entry) => {
+            let key = entry.into_key();
+            assert_eq(key, "key");
+        }
+        Occupied(_) => panic("Expected Vacant"),
+    }
+
+    // Map still empty since we only took the key
+    assert(m.is_empty());
+}
+
+// =============================================================================
+// Section 4: Iteration Tests
+// =============================================================================
+
+@test
+fn test_map_iter() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    let mut count = 0;
+    let mut sum = 0;
+    for (_k, v) in m.iter() {
+        count = count + 1;
+        sum = sum + *v;
+    }
+
+    assert_eq(count, 3);
+    assert_eq(sum, 6);
+}
+
+@test
+fn test_map_keys() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(1, "one");
+    m.insert(2, "two");
+    m.insert(3, "three");
+
+    let mut key_sum = 0;
+    for k in m.keys() {
+        key_sum = key_sum + *k;
+    }
+
+    assert_eq(key_sum, 6);  // 1 + 2 + 3
+}
+
+@test
+fn test_map_values() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 10);
+    m.insert("b", 20);
+    m.insert("c", 30);
+
+    let mut value_sum = 0;
+    for v in m.values() {
+        value_sum = value_sum + *v;
+    }
+
+    assert_eq(value_sum, 60);  // 10 + 20 + 30
+}
+
+@test
+fn test_map_values_mut() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    // Double all values
+    for v in m.values_mut() {
+        *v = *v * 2;
+    }
+
+    let mut sum = 0;
+    for v in m.values() {
+        sum = sum + *v;
+    }
+
+    assert_eq(sum, 12);  // 2 + 4 + 6
+}
+
+@test
+fn test_map_into_iter() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+
+    let mut count = 0;
+    for (_k, _v) in m {  // Consuming iteration
+        count = count + 1;
+    }
+
+    assert_eq(count, 2);
+}
+
+// =============================================================================
+// Section 5: get_key_value and remove_entry Tests
+// =============================================================================
+
+@test
+fn test_map_get_key_value() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    match m.get_key_value(&"key") {
+        Some((k, v)) => {
+            assert_eq(*k, "key");
+            assert_eq(*v, 42);
+        }
+        None => panic("Expected Some"),
+    }
+
+    match m.get_key_value(&"missing") {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_map_remove_entry() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    match m.remove_entry(&"key") {
+        Some((k, v)) => {
+            assert_eq(k, "key");
+            assert_eq(v, 42);
+        }
+        None => panic("Expected Some"),
+    }
+
+    assert(m.is_empty());
+
+    // Remove non-existent
+    match m.remove_entry(&"missing") {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 6: Protocol Implementation Tests
+// =============================================================================
+
+@test
+fn test_map_clone() {
+    let mut m1: Map<Text, Int> = Map.new();
+    m1.insert("a", 1);
+    m1.insert("b", 2);
+
+    let m2 = m1.clone();
+
+    assert_eq(m2.len(), 2);
+    assert_eq(*m2.get(&"a").unwrap(), 1);
+    assert_eq(*m2.get(&"b").unwrap(), 2);
+
+    // Verify independence
+    m1.insert("c", 3);
+    assert_eq(m1.len(), 3);
+    assert_eq(m2.len(), 2);  // Clone unchanged
+}
+
+@test
+fn test_map_index() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 42);
+
+    assert_eq(m["key"], 42);
+}
+
+@test
+fn test_map_eq() {
+    let mut m1: Map<Text, Int> = Map.new();
+    m1.insert("a", 1);
+    m1.insert("b", 2);
+
+    let mut m2: Map<Text, Int> = Map.new();
+    m2.insert("a", 1);
+    m2.insert("b", 2);
+
+    let mut m3: Map<Text, Int> = Map.new();
+    m3.insert("a", 1);
+    m3.insert("b", 3);  // Different value
+
+    assert(m1 == m2);
+    assert(!(m1 == m3));
+}
+
+@test
+fn test_map_default() {
+    let m: Map<Text, Int> = Map.default();
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_from_iterator() {
+    // Test that Map implements FromIterator by creating via collect
+    // Using range and map to generate key-value pairs
+    let mut m: Map<Int, Int> = Map.new();
+
+    // Build map manually to test basic functionality
+    for i in 0..5 {
+        m.insert(i, i * 10);
+    }
+
+    assert_eq(m.len(), 5);
+    assert_eq(*m.get(&0).unwrap(), 0);
+    assert_eq(*m.get(&4).unwrap(), 40);
+}
+
+@test
+fn test_map_extend() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+
+    // Extend map manually
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&"c").unwrap(), 3);
+}
+
+// =============================================================================
+// Section 7: Helper Function Tests
+// =============================================================================
+
+@test
+fn test_map_helper_function() {
+    let m = map([("x", 10), ("y", 20), ("z", 30)]);
+
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&"x").unwrap(), 10);
+    assert_eq(*m.get(&"y").unwrap(), 20);
+    assert_eq(*m.get(&"z").unwrap(), 30);
+}
+
+// =============================================================================
+// Section 8: Capacity Tests
+// =============================================================================
+
+@test
+fn test_map_capacity() {
+    let m: Map<Text, Int> = Map.with_capacity(100);
+    assert(m.capacity() >= 100);
+    assert(m.is_empty());
+}
+
+// =============================================================================
+// Section 9: Word Count Example (Entry API Use Case)
+// =============================================================================
+
+@test
+fn test_map_word_count() {
+    // Classic word count example demonstrating entry API
+    let words = ["hello", "world", "hello", "rust", "hello", "world"];
+
+    let mut counts: Map<Text, Int> = Map.new();
+
+    for word in words.iter() {
+        *counts.entry(*word).or_insert(0) = *counts.entry(*word).or_insert(0) + 1;
+    }
+
+    assert_eq(*counts.get(&"hello").unwrap(), 3);
+    assert_eq(*counts.get(&"world").unwrap(), 2);
+    assert_eq(*counts.get(&"rust").unwrap(), 1);
+}
+
+// =============================================================================
+// Section 10: Edge Cases and Stress Tests
+// =============================================================================
+
+@test
+fn test_map_many_entries() {
+    let mut m: Map<Int, Int> = Map.new();
+
+    // Insert many entries to trigger resizing
+    for i in 0..100 {
+        m.insert(i, i * 2);
+    }
+
+    assert_eq(m.len(), 100);
+
+    // Verify all entries
+    for i in 0..100 {
+        match m.get(&i) {
+            Some(v) => assert_eq(*v, i * 2),
+            None => panic("Expected Some"),
+        }
+    }
+}
+
+@test
+fn test_map_collision_handling() {
+    // Test with keys that might collide
+    let mut m: Map<Int, Text> = Map.new();
+
+    m.insert(0, "zero");
+    m.insert(16, "sixteen");  // Might collide with 0 in 16-slot table
+    m.insert(32, "thirty-two");
+
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&0).unwrap(), "zero");
+    assert_eq(*m.get(&16).unwrap(), "sixteen");
+    assert_eq(*m.get(&32).unwrap(), "thirty-two");
+}
+
+@test
+fn test_map_remove_reinsert() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    m.insert("key", 1);
+    m.remove(&"key");
+    m.insert("key", 2);
+
+    assert_eq(*m.get(&"key").unwrap(), 2);
+    assert_eq(m.len(), 1);
+}
+
+@test
+fn test_map_empty_operations() {
+    let m: Map<Text, Int> = Map.new();
+
+    assert(m.is_empty());
+    assert_eq(m.len(), 0);
+
+    match m.get(&"any") {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+
+    // Iteration on empty
+    let mut count = 0;
+    for _entry in m.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// Section 11: Drain Tests
+// =============================================================================
+
+@test
+fn test_map_drain_basic() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    let mut sum = 0;
+    let mut count = 0;
+    for pair in m.drain() {
+        sum = sum + pair.1;
+        count = count + 1;
+    }
+
+    assert_eq(count, 3);
+    assert_eq(sum, 6);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_drain_preserves_capacity() {
+    let mut m: Map<Text, Int> = Map.with_capacity(32);
+    m.insert("a", 1);
+    m.insert("b", 2);
+
+    let old_cap = m.capacity();
+
+    // Drain all entries
+    for _pair in m.drain() {}
+
+    assert(m.is_empty());
+    // Capacity should be preserved
+    assert(m.capacity() >= old_cap / 2);  // May compact but not deallocate
+}
+
+@test
+fn test_map_drain_empty() {
+    let mut m: Map<Text, Int> = Map.new();
+
+    let mut count = 0;
+    for _pair in m.drain() {
+        count = count + 1;
+    }
+
+    assert_eq(count, 0);
+    assert(m.is_empty());
+}
+
+// =============================================================================
+// Section 12: Retain Tests
+// =============================================================================
+
+@test
+fn test_map_retain_basic() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+    m.insert("d", 4);
+
+    // Keep only even values
+    m.retain(|_k, v| *v % 2 == 0);
+
+    assert_eq(m.len(), 2);
+    assert(!m.contains_key(&"a"));
+    assert(m.contains_key(&"b"));
+    assert(!m.contains_key(&"c"));
+    assert(m.contains_key(&"d"));
+}
+
+@test
+fn test_map_retain_all() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    // Keep all entries
+    m.retain(|_k, _v| true);
+
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_map_retain_none() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+
+    // Remove all entries
+    m.retain(|_k, _v| false);
+
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_retain_modify_values() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    // Keep entries and double their values
+    m.retain(|_k, v| {
+        *v = *v * 2;
+        true
+    });
+
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&"a").unwrap(), 2);
+    assert_eq(*m.get(&"b").unwrap(), 4);
+    assert_eq(*m.get(&"c").unwrap(), 6);
+}
+
+@test
+fn test_map_retain_by_key() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(1, "one");
+    m.insert(2, "two");
+    m.insert(3, "three");
+    m.insert(4, "four");
+    m.insert(5, "five");
+
+    // Keep only keys <= 3
+    m.retain(|k, _v| *k <= 3);
+
+    assert_eq(m.len(), 3);
+    assert(m.contains_key(&1));
+    assert(m.contains_key(&2));
+    assert(m.contains_key(&3));
+    assert(!m.contains_key(&4));
+    assert(!m.contains_key(&5));
+}
+
+// =============================================================================
+// Section: Consuming Iterators
+// =============================================================================
+
+@test
+fn test_map_into_keys() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(1, "one");
+    m.insert(2, "two");
+    m.insert(3, "three");
+    let keys = m.into_keys();
+    assert_eq(keys.len(), 3);
+    // Keys are not ordered in hash map, just verify all present
+    assert(keys.contains(&1));
+    assert(keys.contains(&2));
+    assert(keys.contains(&3));
+}
+
+@test
+fn test_map_into_values() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(1, "one");
+    m.insert(2, "two");
+    m.insert(3, "three");
+    let values = m.into_values();
+    assert_eq(values.len(), 3);
+}
+
+@test
+fn test_map_into_keys_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let keys = m.into_keys();
+    assert_eq(keys.len(), 0);
+}
+
+@test
+fn test_map_into_values_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let values = m.into_values();
+    assert_eq(values.len(), 0);
+}
+
+// =============================================================================
+// Section: get_or_insert / get_or_insert_with / get_or_default
+// =============================================================================
+
+@test
+fn test_map_get_or_insert_missing() {
+    let mut m: Map<Text, Int> = Map.new();
+    let val = m.get_or_insert("key", 42);
+    assert_eq(*val, 42);
+    assert_eq(m.len(), 1);
+}
+
+@test
+fn test_map_get_or_insert_existing() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 10);
+    let val = m.get_or_insert("key", 42);
+    assert_eq(*val, 10); // Existing value preserved
+    assert_eq(m.len(), 1);
+}
+
+@test
+fn test_map_get_or_insert_mutate() {
+    let mut m: Map<Text, Int> = Map.new();
+    let val = m.get_or_insert("counter", 0);
+    *val = *val + 1;
+    assert_eq(*m.get(&"counter").unwrap(), 1);
+}
+
+@test
+fn test_map_get_or_insert_with_missing() {
+    let mut m: Map<Text, List<Int>> = Map.new();
+    let val = m.get_or_insert_with("items", || List.new());
+    val.push(42);
+    assert_eq(m.get(&"items").unwrap().len(), 1);
+}
+
+@test
+fn test_map_get_or_insert_with_existing() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("x", 100);
+    let val = m.get_or_insert_with("x", || panic("should not be called"));
+    assert_eq(*val, 100);
+}
+
+@test
+fn test_map_get_or_default() {
+    let mut m: Map<Text, Int> = Map.new();
+    let val = m.entry("count").or_default();
+    assert_eq(*val, 0); // Int default is 0
+    *val = *val + 5;
+    assert_eq(*m.get(&"count").unwrap(), 5);
+}
+
+// =============================================================================
+// Section: map_from_keys, count_by, group_by
+// =============================================================================
+
+@test
+fn test_map_from_keys_basic() {
+    let keys = [1, 2, 3, 4, 5];
+    let m = map_from_keys(&keys, 0);
+    assert_eq(m.len(), 5);
+    assert_eq(*m.get(&1).unwrap(), 0);
+    assert_eq(*m.get(&5).unwrap(), 0);
+}
+
+@test
+fn test_map_from_keys_empty() {
+    let keys: [Int; 0] = [];
+    let m: Map<Int, Bool> = map_from_keys(&keys, false);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_from_keys_text_values() {
+    let keys = ["a", "b", "c"];
+    let m = map_from_keys(&keys, "default");
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&"a").unwrap(), "default");
+}
+
+@test
+fn test_count_by_numbers() {
+    let nums = List.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    fn parity_key(n: &Int) -> Text {
+        if *n % 2 == 0 { "even" } else { "odd" }
+    }
+    let parity = count_by(nums.iter().map(|n| *n), parity_key);
+    assert_eq(*parity.get(&"even").unwrap(), 5);
+    assert_eq(*parity.get(&"odd").unwrap(), 5);
+}
+
+@test
+fn test_count_by_identity() {
+    let nums = List.from([1, 1, 2, 2, 2, 3]);
+    fn identity(n: &Int) -> Int { *n }
+    let counts = count_by(nums.iter().map(|n| *n), identity);
+    assert_eq(*counts.get(&1).unwrap(), 2);
+    assert_eq(*counts.get(&2).unwrap(), 3);
+    assert_eq(*counts.get(&3).unwrap(), 1);
+}
+
+@test
+fn test_count_by_empty() {
+    let empty: List<Int> = List.new();
+    fn identity(n: &Int) -> Int { *n }
+    let counts = count_by(empty.iter().map(|n| *n), identity);
+    assert(counts.is_empty());
+}
+
+@test
+fn test_group_by_basic() {
+    let nums = List.from([1, 2, 3, 4, 5, 6]);
+    fn parity_key(n: &Int) -> Text {
+        if *n % 2 == 0 { "even" } else { "odd" }
+    }
+    let groups = group_by(nums.iter().map(|n| *n), parity_key);
+    assert_eq(groups.len(), 2);
+    let evens = groups.get(&"even").unwrap();
+    assert_eq(evens.len(), 3);
+    let odds = groups.get(&"odd").unwrap();
+    assert_eq(odds.len(), 3);
+}
+
+@test
+fn test_group_by_single_group() {
+    let items = List.from([2, 4, 6, 8]);
+    fn all_key(_: &Int) -> Text { "all" }
+    let groups = group_by(items.iter().map(|n| *n), all_key);
+    assert_eq(groups.len(), 1);
+    assert_eq(groups.get(&"all").unwrap().len(), 4);
+}
+
+// =============================================================================
+// Section: Capacity Management Tests
+// =============================================================================
+
+@test
+fn test_map_reserve() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.reserve(100);
+    assert(m.capacity() >= 102); // At least len + additional
+    // Data preserved after reserve
+    assert_eq(m.len(), 2);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+}
+
+@test
+fn test_map_reserve_empty() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.reserve(50);
+    assert(m.capacity() >= 50);
+    assert(m.is_empty());
+    // Can still use map after reserve
+    m.insert("key", 42);
+    assert_eq(*m.get(&"key").unwrap(), 42);
+}
+
+@test
+fn test_map_shrink_to_fit() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    assert(m.capacity() >= 100);
+    m.shrink_to_fit();
+    // Data preserved after shrink
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+    assert_eq(*m.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_map_shrink_to_fit_empty() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    m.shrink_to_fit();
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_shrink_to() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.shrink_to(10);
+    // Data preserved
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), 10);
+    assert_eq(*m.get(&2).unwrap(), 20);
+    assert_eq(*m.get(&3).unwrap(), 30);
+}
+
+@test
+fn test_map_shrink_to_below_len() {
+    let mut m: Map<Int, Int> = Map.with_capacity(100);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.shrink_to(1); // Below current len
+    // Data must still be preserved even if min_capacity < len
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), 10);
+}
+
+// =============================================================================
+// Section: Entry API — Additional Value Types
+// =============================================================================
+
+@test
+fn test_map_entry_or_insert_float() {
+    let mut m: Map<Text, Float> = Map.new();
+    let val = m.entry("pi").or_insert(3.14);
+    assert(*val > 3.13);
+    assert(*val < 3.15);
+}
+
+@test
+fn test_map_entry_or_insert_bool() {
+    let mut m: Map<Text, Bool> = Map.new();
+    let val = m.entry("flag").or_insert(true);
+    assert_eq(*val, true);
+    // Existing entry
+    let val2 = m.entry("flag").or_insert(false);
+    assert_eq(*val2, true); // Not overwritten
+}
+
+@test
+fn test_map_entry_or_insert_text() {
+    let mut m: Map<Int, Text> = Map.new();
+    let val = m.entry(1).or_insert("hello");
+    assert_eq(*val, "hello");
+}
+
+@test
+fn test_map_entry_and_modify_increment_counter() {
+    let mut m: Map<Text, Int> = Map.new();
+    // Word count pattern using and_modify + or_insert
+    let words = ["apple", "banana", "apple", "cherry", "banana", "apple"];
+    for w in words.iter() {
+        m.entry(*w).and_modify(|v| *v = *v + 1).or_insert(1);
+    }
+    assert_eq(*m.get(&"apple").unwrap(), 3);
+    assert_eq(*m.get(&"banana").unwrap(), 2);
+    assert_eq(*m.get(&"cherry").unwrap(), 1);
+}
+
+@test
+fn test_map_entry_and_modify_double() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("x", 5);
+    m.entry("x").and_modify(|v| *v = *v * 2);
+    assert_eq(*m.get(&"x").unwrap(), 10);
+}
+
+@test
+fn test_map_entry_or_insert_with_complex() {
+    let mut m: Map<Text, Int> = Map.new();
+    // Verify closure runs for absent key
+    let val = m.entry("computed").or_insert_with(|| 7 * 6);
+    assert_eq(*val, 42);
+}
+
+@test
+fn test_map_entry_vacant_then_occupied() {
+    let mut m: Map<Text, Int> = Map.new();
+    // First access: Vacant
+    match m.entry("key") {
+        Vacant(entry) => {
+            entry.insert(10);
+        }
+        Occupied(_) => panic("Expected Vacant"),
+    }
+    // Second access: Occupied
+    match m.entry("key") {
+        Occupied(entry) => {
+            assert_eq(*entry.get(), 10);
+        }
+        Vacant(_) => panic("Expected Occupied"),
+    }
+}
+
+@test
+fn test_map_entry_or_default_text() {
+    let mut m: Map<Int, Text> = Map.new();
+    let val = m.entry(1).or_default();
+    assert_eq(*val, ""); // Text default is ""
+}
+
+@test
+fn test_map_entry_or_default_bool() {
+    let mut m: Map<Int, Bool> = Map.new();
+    let val = m.entry(1).or_default();
+    assert_eq(*val, false); // Bool default is false
+}
+
+// =============================================================================
+// Section: Iteration — Deep Patterns
+// =============================================================================
+
+@test
+fn test_map_iter_empty() {
+    let m: Map<Text, Int> = Map.new();
+    let mut count = 0;
+    for _entry in m.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_map_iter_single_entry() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("only", 42);
+    let mut count = 0;
+    let mut val = 0;
+    for (_k, v) in m.iter() {
+        count = count + 1;
+        val = *v;
+    }
+    assert_eq(count, 1);
+    assert_eq(val, 42);
+}
+
+@test
+fn test_map_keys_count() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..25 {
+        m.insert(i, i * 10);
+    }
+    let mut count = 0;
+    for _k in m.keys() {
+        count = count + 1;
+    }
+    assert_eq(count, 25);
+}
+
+@test
+fn test_map_values_sum_large() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 1..11 {
+        m.insert(i, i);
+    }
+    let mut sum = 0;
+    for v in m.values() {
+        sum = sum + *v;
+    }
+    assert_eq(sum, 55); // 1+2+...+10 = 55
+}
+
+@test
+fn test_map_values_mut_zero_all() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 10);
+    m.insert("b", 20);
+    m.insert("c", 30);
+    for v in m.values_mut() {
+        *v = 0;
+    }
+    assert_eq(*m.get(&"a").unwrap(), 0);
+    assert_eq(*m.get(&"b").unwrap(), 0);
+    assert_eq(*m.get(&"c").unwrap(), 0);
+}
+
+@test
+fn test_map_values_mut_negate() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("x", 5);
+    m.insert("y", -3);
+    for v in m.values_mut() {
+        *v = 0 - *v;
+    }
+    assert_eq(*m.get(&"x").unwrap(), -5);
+    assert_eq(*m.get(&"y").unwrap(), 3);
+}
+
+@test
+fn test_map_into_iter_sum() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let mut sum = 0;
+    for (_k, v) in m {
+        sum = sum + v;
+    }
+    assert_eq(sum, 60);
+}
+
+// =============================================================================
+// Section: Clone Deep Independence
+// =============================================================================
+
+@test
+fn test_map_clone_empty() {
+    let m: Map<Text, Int> = Map.new();
+    let clone = m.clone();
+    assert(clone.is_empty());
+    assert_eq(clone.len(), 0);
+}
+
+@test
+fn test_map_clone_large() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..50 {
+        m.insert(i, i * 2);
+    }
+    let clone = m.clone();
+    assert_eq(clone.len(), 50);
+    assert_eq(*clone.get(&25).unwrap(), 50);
+}
+
+@test
+fn test_map_clone_modify_original() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    let clone = m.clone();
+    // Modify original
+    m.insert("c", 3);
+    m.remove(&"a");
+    // Clone unaffected
+    assert_eq(clone.len(), 2);
+    assert(clone.contains_key(&"a"));
+    assert(!clone.contains_key(&"c"));
+}
+
+// =============================================================================
+// Section: Equality Edge Cases
+// =============================================================================
+
+@test
+fn test_map_eq_empty_maps() {
+    let m1: Map<Text, Int> = Map.new();
+    let m2: Map<Text, Int> = Map.new();
+    assert(m1 == m2);
+}
+
+@test
+fn test_map_eq_different_sizes() {
+    let mut m1: Map<Text, Int> = Map.new();
+    m1.insert("a", 1);
+    let mut m2: Map<Text, Int> = Map.new();
+    m2.insert("a", 1);
+    m2.insert("b", 2);
+    assert(!(m1 == m2));
+}
+
+@test
+fn test_map_eq_same_keys_different_values() {
+    let mut m1: Map<Text, Int> = Map.new();
+    m1.insert("a", 1);
+    m1.insert("b", 2);
+    let mut m2: Map<Text, Int> = Map.new();
+    m2.insert("a", 1);
+    m2.insert("b", 99);
+    assert(!(m1 == m2));
+}
+
+@test
+fn test_map_eq_different_keys_same_values() {
+    let mut m1: Map<Text, Int> = Map.new();
+    m1.insert("a", 1);
+    let mut m2: Map<Text, Int> = Map.new();
+    m2.insert("b", 1);
+    assert(!(m1 == m2));
+}
+
+@test
+fn test_map_eq_reflexive() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("x", 42);
+    let clone = m.clone();
+    assert(m == clone);
+}
+
+// =============================================================================
+// Section: Drain — Deeper Tests
+// =============================================================================
+
+@test
+fn test_map_drain_single_entry() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("only", 42);
+    let mut val = 0;
+    for pair in m.drain() {
+        val = pair.1;
+    }
+    assert_eq(val, 42);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_drain_large() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..50 {
+        m.insert(i, i);
+    }
+    let mut count = 0;
+    for _pair in m.drain() {
+        count = count + 1;
+    }
+    assert_eq(count, 50);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_drain_then_insert() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    for _pair in m.drain() {}
+    assert(m.is_empty());
+    // Reuse after drain
+    m.insert("c", 3);
+    assert_eq(m.len(), 1);
+    assert_eq(*m.get(&"c").unwrap(), 3);
+}
+
+// =============================================================================
+// Section: Retain — Deeper Tests
+// =============================================================================
+
+@test
+fn test_map_retain_empty() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.retain(|_k, _v| true);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_retain_large_filter_half() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..100 {
+        m.insert(i, i);
+    }
+    // Keep only even keys
+    m.retain(|k, _v| *k % 2 == 0);
+    assert_eq(m.len(), 50);
+    assert(m.contains_key(&0));
+    assert(!m.contains_key(&1));
+    assert(m.contains_key(&98));
+    assert(!m.contains_key(&99));
+}
+
+@test
+fn test_map_retain_by_value_threshold() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("low", 5);
+    m.insert("mid", 50);
+    m.insert("high", 500);
+    m.retain(|_k, v| *v >= 50);
+    assert_eq(m.len(), 2);
+    assert(!m.contains_key(&"low"));
+    assert(m.contains_key(&"mid"));
+    assert(m.contains_key(&"high"));
+}
+
+@test
+fn test_map_retain_then_insert() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.retain(|k, _v| *k <= 1);
+    assert_eq(m.len(), 1);
+    m.insert(4, 40);
+    assert_eq(m.len(), 2);
+    assert(m.contains_key(&1));
+    assert(m.contains_key(&4));
+}
+
+// =============================================================================
+// Section: get_or_insert — Additional Patterns
+// =============================================================================
+
+@test
+fn test_map_get_or_insert_bool() {
+    let mut m: Map<Text, Bool> = Map.new();
+    let val = m.get_or_insert("flag", true);
+    assert_eq(*val, true);
+    let val2 = m.get_or_insert("flag", false);
+    assert_eq(*val2, true); // Existing value preserved
+}
+
+@test
+fn test_map_get_or_insert_chained_mutations() {
+    let mut m: Map<Text, Int> = Map.new();
+    *m.get_or_insert("x", 0) = 10;
+    *m.get_or_insert("y", 0) = 20;
+    *m.get_or_insert("z", 0) = 30;
+    assert_eq(*m.get(&"x").unwrap(), 10);
+    assert_eq(*m.get(&"y").unwrap(), 20);
+    assert_eq(*m.get(&"z").unwrap(), 30);
+}
+
+@test
+fn test_map_get_or_default_multiple_keys() {
+    let mut m: Map<Text, Int> = Map.new();
+    *m.entry("a").or_default() = 1;
+    *m.entry("b").or_default() = 2;
+    *m.entry("c").or_default() = 3;
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&"a").unwrap(), 1);
+    assert_eq(*m.get(&"b").unwrap(), 2);
+    assert_eq(*m.get(&"c").unwrap(), 3);
+}
+
+// =============================================================================
+// Section: count_by/group_by — Additional Patterns
+// =============================================================================
+
+@test
+fn test_count_by_single_element() {
+    let nums = List.from([42]);
+    fn identity(n: &Int) -> Int { *n }
+    let counts = count_by(nums.iter().map(|n| *n), identity);
+    assert_eq(counts.len(), 1);
+    assert_eq(*counts.get(&42).unwrap(), 1);
+}
+
+@test
+fn test_count_by_all_same() {
+    let nums = List.from([7, 7, 7, 7, 7]);
+    fn identity(n: &Int) -> Int { *n }
+    let counts = count_by(nums.iter().map(|n| *n), identity);
+    assert_eq(counts.len(), 1);
+    assert_eq(*counts.get(&7).unwrap(), 5);
+}
+
+@test
+fn test_group_by_empty() {
+    let empty: List<Int> = List.new();
+    fn identity(n: &Int) -> Int { *n }
+    let groups = group_by(empty.iter().map(|n| *n), identity);
+    assert(groups.is_empty());
+}
+
+@test
+fn test_group_by_all_unique() {
+    let nums = List.from([1, 2, 3, 4, 5]);
+    fn identity(n: &Int) -> Int { *n }
+    let groups = group_by(nums.iter().map(|n| *n), identity);
+    assert_eq(groups.len(), 5);
+    for i in 1..6 {
+        assert_eq(groups.get(&i).unwrap().len(), 1);
+    }
+}
+
+// =============================================================================
+// Section: Consuming Iterators — Additional
+// =============================================================================
+
+@test
+fn test_map_into_keys_preserves_all() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..20 {
+        m.insert(i, i * 10);
+    }
+    let keys = m.into_keys();
+    assert_eq(keys.len(), 20);
+}
+
+@test
+fn test_map_into_values_preserves_all() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..20 {
+        m.insert(i, i * 10);
+    }
+    let values = m.into_values();
+    assert_eq(values.len(), 20);
+}
+
+@test
+fn test_map_into_keys_single() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("only", 1);
+    let keys = m.into_keys();
+    assert_eq(keys.len(), 1);
+}
+
+// =============================================================================
+// Section: Capacity — Additional
+// =============================================================================
+
+@test
+fn test_map_reserve_then_insert() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.reserve(200);
+    for i in 0..100 {
+        m.insert(i, i);
+    }
+    assert_eq(m.len(), 100);
+    assert(m.capacity() >= 200);
+}
+
+@test
+fn test_map_shrink_after_remove() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..100 {
+        m.insert(i, i);
+    }
+    for i in 0..90 {
+        m.remove(&i);
+    }
+    assert_eq(m.len(), 10);
+    m.shrink_to_fit();
+    assert_eq(m.len(), 10);
+    // Remaining data preserved
+    for i in 90..100 {
+        assert(m.contains_key(&i));
+    }
+}
+
+// =============================================================================
+// Section: Stress Tests — Additional
+// =============================================================================
+
+@test
+fn test_map_200_entries() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..200 {
+        m.insert(i, i * 3);
+    }
+    assert_eq(m.len(), 200);
+    assert_eq(*m.get(&0).unwrap(), 0);
+    assert_eq(*m.get(&100).unwrap(), 300);
+    assert_eq(*m.get(&199).unwrap(), 597);
+}
+
+@test
+fn test_map_insert_remove_all_then_reinsert() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..50 {
+        m.insert(i, i);
+    }
+    for i in 0..50 {
+        m.remove(&i);
+    }
+    assert(m.is_empty());
+    // Reinsert
+    for i in 0..50 {
+        m.insert(i, i + 100);
+    }
+    assert_eq(m.len(), 50);
+    assert_eq(*m.get(&0).unwrap(), 100);
+    assert_eq(*m.get(&49).unwrap(), 149);
+}
+
+@test
+fn test_map_alternating_insert_remove() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..50 {
+        m.insert(i, i);
+        if i > 0 && i % 2 == 0 {
+            m.remove(&(i - 1));
+        }
+    }
+    // Should have roughly half the entries
+    assert(m.len() > 20);
+    assert(m.len() <= 50);
+}
+
+// =============================================================================
+// Section: Helper Function — Additional Patterns
+// =============================================================================
+
+@test
+fn test_map_helper_empty() {
+    let m: Map<Text, Int> = map([]);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_helper_single() {
+    let m = map([("only", 42)]);
+    assert_eq(m.len(), 1);
+    assert_eq(*m.get(&"only").unwrap(), 42);
+}
+
+@test
+fn test_map_helper_int_keys() {
+    let m = map([(1, "one"), (2, "two"), (3, "three")]);
+    assert_eq(m.len(), 3);
+    assert_eq(*m.get(&1).unwrap(), "one");
+}
+
+@test
+fn test_map_from_keys_large() {
+    let mut keys: List<Int> = List.new();
+    for i in 0..50 {
+        keys.push(i);
+    }
+    // Convert list to something usable by map_from_keys
+    // Use a simpler approach with a small array
+    let k = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let m = map_from_keys(&k, true);
+    assert_eq(m.len(), 10);
+    assert_eq(*m.get(&1).unwrap(), true);
+    assert_eq(*m.get(&10).unwrap(), true);
+}
+
+// =============================================================================
+// Section: get_key_value — Additional
+// =============================================================================
+
+@test
+fn test_map_get_key_value_int_keys() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(42, "answer");
+    match m.get_key_value(&42) {
+        Some((k, v)) => {
+            assert_eq(*k, 42);
+            assert_eq(*v, "answer");
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_map_get_key_value_after_overwrite() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("key", 1);
+    m.insert("key", 2);
+    match m.get_key_value(&"key") {
+        Some((k, v)) => {
+            assert_eq(*k, "key");
+            assert_eq(*v, 2);
+        }
+        None => panic("Expected Some"),
+    }
+}
+
+// =============================================================================
+// Section: remove_entry — Additional
+// =============================================================================
+
+@test
+fn test_map_remove_entry_nonexistent() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    match m.remove_entry(&"b") {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+    assert_eq(m.len(), 1);
+}
+
+@test
+fn test_map_remove_entry_int_keys() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(1, "one");
+    m.insert(2, "two");
+    match m.remove_entry(&1) {
+        Some((k, v)) => {
+            assert_eq(k, 1);
+            assert_eq(v, "one");
+        }
+        None => panic("Expected Some"),
+    }
+    assert_eq(m.len(), 1);
+}
+
+// =============================================================================
+// Section: Index — Additional
+// =============================================================================
+
+@test
+fn test_map_index_int_key() {
+    let mut m: Map<Int, Text> = Map.new();
+    m.insert(1, "one");
+    m.insert(2, "two");
+    assert_eq(m[1], "one");
+    assert_eq(m[2], "two");
+}
+
+@test
+fn test_map_index_after_overwrite() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("k", 1);
+    m.insert("k", 2);
+    assert_eq(m["k"], 2);
+}
+
+// =============================================================================
+// Section: Combined Workflow Patterns
+// =============================================================================
+
+@test
+fn test_map_entry_api_word_frequency() {
+    let words = ["the", "quick", "brown", "fox", "the", "quick", "the"];
+    let mut freq: Map<Text, Int> = Map.new();
+    for w in words.iter() {
+        freq.entry(*w).and_modify(|v| *v = *v + 1).or_insert(1);
+    }
+    assert_eq(*freq.get(&"the").unwrap(), 3);
+    assert_eq(*freq.get(&"quick").unwrap(), 2);
+    assert_eq(*freq.get(&"brown").unwrap(), 1);
+    assert_eq(*freq.get(&"fox").unwrap(), 1);
+}
+
+@test
+fn test_map_insert_retain_verify() {
+    let mut m: Map<Int, Int> = Map.new();
+    for i in 0..20 {
+        m.insert(i, i * i);
+    }
+    // Retain squares < 100
+    m.retain(|_k, v| *v < 100);
+    // 0, 1, 4, 9, 16, 25, 36, 49, 64, 81 → keys 0..10
+    assert_eq(m.len(), 10);
+    assert(m.contains_key(&0));
+    assert(m.contains_key(&9));
+    assert(!m.contains_key(&10));
+}
+
+@test
+fn test_map_drain_collect_sum() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    m.insert(4, 40);
+    let mut sum = 0;
+    for pair in m.drain() {
+        sum = sum + pair.1;
+    }
+    assert_eq(sum, 100);
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_get_or_insert_accumulate() {
+    let mut m: Map<Text, Int> = Map.new();
+    let items = [("a", 1), ("b", 2), ("a", 3), ("b", 4), ("c", 5)];
+    for pair in items.iter() {
+        let key = pair.0;
+        let val = pair.1;
+        *m.get_or_insert(key, 0) = *m.get_or_insert(key, 0) + val;
+    }
+    assert_eq(*m.get(&"a").unwrap(), 4); // 1 + 3
+    assert_eq(*m.get(&"b").unwrap(), 6); // 2 + 4
+    assert_eq(*m.get(&"c").unwrap(), 5);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

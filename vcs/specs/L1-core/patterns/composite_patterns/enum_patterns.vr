@@ -1,0 +1,395 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, enums, variants, composite
+//
+// Tests enum (variant) patterns for matching and destructuring algebraic data types.
+// Enum patterns allow matching specific variants and extracting their payloads.
+
+//------------------------------------------------------------------------------
+// Basic Enum Definitions
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type Color is
+    | Red
+    | Green
+    | Blue
+    | Custom(Int, Int, Int);
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+type Tree<T> is
+    | Leaf(T)
+    | Node(Tree<T>, T, Tree<T>);
+
+type Message is
+    | TextMsg { content: Text }
+    | Image { url: Text, width: Int, height: Int }
+    | Video { url: Text, duration: Int };
+
+//------------------------------------------------------------------------------
+// Basic Variant Matching
+//------------------------------------------------------------------------------
+
+/// Match simple option variants.
+fn match_maybe(m: Maybe<Int>) -> Int {
+    match m {
+        Some(x) => x,
+        None => 0,
+    }
+}
+
+/// Match result variants.
+fn match_result(r: Result<Int, Text>) -> Int {
+    match r {
+        Ok(value) => value,
+        Err(msg) => msg.len(),
+    }
+}
+
+/// Match unit variants (no payload).
+fn match_color_basic(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+        Custom(_, _, _) => "custom",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Variant Pattern with Payload Destructuring
+//------------------------------------------------------------------------------
+
+/// Destructure tuple-like variant.
+fn destructure_custom(c: Color) -> Int {
+    match c {
+        Custom(r, g, b) => r + g + b,
+        _ => 0,
+    }
+}
+
+/// Destructure struct-like variant.
+fn destructure_message(m: Message) -> Text {
+    match m {
+        TextMsg { content } => content,
+        Image { url, width, height } => f"{url} ({width}x{height})",
+        Video { url, duration } => f"{url} ({duration}s)",
+    }
+}
+
+/// Partial destructure with rest.
+fn message_url(m: Message) -> Text {
+    match m {
+        TextMsg { content } => "no url",
+        Image { url, .. } => url,
+        Video { url, .. } => url,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Enum Patterns
+//------------------------------------------------------------------------------
+
+/// Match nested maybe.
+fn nested_maybe(mm: Maybe<Maybe<Int>>) -> Int {
+    match mm {
+        Some(Some(x)) => x,
+        Some(None) => -1,
+        None => -2,
+    }
+}
+
+/// Match result containing maybe.
+fn result_maybe(r: Result<Maybe<Int>, Text>) -> Int {
+    match r {
+        Ok(Some(x)) => x,
+        Ok(None) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Match list patterns.
+fn list_head<T>(list: ConsList<T>) -> Maybe<T> {
+    match list {
+        Cons(head, _) => Some(head),
+        Nil => None,
+    }
+}
+
+/// Match recursive structure.
+fn tree_value<T>(tree: Tree<T>) -> T {
+    match tree {
+        Leaf(value) => value,
+        Node(_, value, _) => value,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Variant Patterns with Literals
+//------------------------------------------------------------------------------
+
+/// Match specific values in variant payload.
+fn specific_maybe(m: Maybe<Int>) -> Text {
+    match m {
+        Some(0) => "zero",
+        Some(1) => "one",
+        Some(n) if n > 0 => "positive",
+        Some(_) => "negative",
+        None => "none",
+    }
+}
+
+/// Match color with specific RGB.
+fn specific_color(c: Color) -> Text {
+    match c {
+        Custom(255, 0, 0) => "pure red",
+        Custom(0, 255, 0) => "pure green",
+        Custom(0, 0, 255) => "pure blue",
+        Custom(0, 0, 0) => "black",
+        Custom(255, 255, 255) => "white",
+        Custom(r, g, b) if r == g && g == b => "gray",
+        Custom(_, _, _) => "mixed",
+        Red => "basic red",
+        Green => "basic green",
+        Blue => "basic blue",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Variant Patterns with Guards
+//------------------------------------------------------------------------------
+
+/// Guard on variant payload.
+fn maybe_with_guard(m: Maybe<Int>) -> Text {
+    match m {
+        Some(x) if x > 100 => "large",
+        Some(x) if x > 10 => "medium",
+        Some(x) if x > 0 => "small",
+        Some(x) if x == 0 => "zero",
+        Some(_) => "negative",
+        None => "none",
+    }
+}
+
+/// Complex guard on struct variant.
+fn message_guard(m: Message) -> Text {
+    match m {
+        Image { width, height, .. } if width > 1920 && height > 1080 => "4K+",
+        Image { width, height, .. } if width >= 1920 && height >= 1080 => "Full HD",
+        Image { width, height, .. } if width >= 1280 && height >= 720 => "HD",
+        Image { .. } => "SD",
+        Video { duration, .. } if duration > 3600 => "long video",
+        Video { duration, .. } if duration > 60 => "medium video",
+        Video { .. } => "short video",
+        TextMsg { content } if content.len() > 1000 => "long text",
+        TextMsg { .. } => "short text",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Variant Patterns with Or (|)
+//------------------------------------------------------------------------------
+
+/// Or-pattern with unit variants.
+fn is_primary(c: Color) -> Bool {
+    match c {
+        Red | Blue => true,
+        Green | Custom(_, _, _) => false,
+    }
+}
+
+/// Or-pattern with wildcards.
+fn has_value<T>(m: Maybe<T>) -> Bool {
+    match m {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Variant Patterns with Bindings (@)
+//------------------------------------------------------------------------------
+
+/// Bind whole variant while destructuring.
+fn maybe_at_binding(m: Maybe<Int>) -> (Maybe<Int>, Int) {
+    match m {
+        opt @ Some(x) => (opt, x),
+        opt @ None => (opt, 0),
+    }
+}
+
+/// Bind nested part.
+fn nested_at_binding(mm: Maybe<Maybe<Int>>) -> (Maybe<Int>, Int) {
+    match mm {
+        Some(inner @ Some(x)) => (inner, x),
+        Some(inner @ None) => (inner, 0),
+        None => (None, -1),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Generic Enum Patterns
+//------------------------------------------------------------------------------
+
+/// Generic function matching Maybe.
+fn unwrap_or<T>(m: Maybe<T>, default: T) -> T {
+    match m {
+        Some(x) => x,
+        None => default,
+    }
+}
+
+/// Generic function matching Result.
+fn ok_or_default<T, E>(r: Result<T, E>, default: T) -> T {
+    match r {
+        Ok(x) => x,
+        Err(_) => default,
+    }
+}
+
+/// Map over Maybe.
+fn map_maybe<A, B>(m: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    match m {
+        Some(x) => Some(f(x)),
+        None => None,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Variant Patterns in Different Contexts
+//------------------------------------------------------------------------------
+
+/// Variant in if-let.
+fn if_let_some(m: Maybe<Int>) -> Int {
+    if let Some(x) = m {
+        x
+    } else {
+        0
+    }
+}
+
+/// Variant in while-let.
+fn while_let_cons(list: ConsList<Int>) -> Int {
+    let mut sum = 0;
+    let mut current = list;
+    while let Cons(head, tail) = current {
+        sum = sum + head;
+        current = tail;
+    }
+    sum
+}
+
+/// Variant in let-else.
+fn let_else_ok(r: Result<Int, Text>) -> Int {
+    let Ok(value) = r else {
+        return -1;
+    };
+    value
+}
+
+//------------------------------------------------------------------------------
+// Recursive Enum Pattern Matching
+//------------------------------------------------------------------------------
+
+/// Calculate list length with pattern matching.
+@allow(unbounded_recursion)
+fn list_length<T>(list: ConsList<T>) -> Int {
+    match list {
+        Nil => 0,
+        Cons(_, tail) => 1 + list_length(tail),
+    }
+}
+
+/// Sum tree values.
+@allow(unbounded_recursion)
+fn tree_sum(tree: Tree<Int>) -> Int {
+    match tree {
+        Leaf(x) => x,
+        Node(left, x, right) => tree_sum(left) + x + tree_sum(right),
+    }
+}
+
+/// Find in tree.
+@allow(unbounded_recursion)
+fn tree_contains(tree: Tree<Int>, target: Int) -> Bool {
+    match tree {
+        Leaf(x) if x == target => true,
+        Leaf(_) => false,
+        Node(left, x, right) if x == target => true,
+        Node(left, _, right) => tree_contains(left, target) || tree_contains(right, target),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Basic maybe
+    assert(match_maybe(Some(42)) == 42);
+    assert(match_maybe(None) == 0);
+
+    // Basic result
+    assert(match_result(Ok(42)) == 42);
+    assert(match_result(Err("oops")) == 4);
+
+    // Color
+    assert(match_color_basic(Red) == "red");
+    assert(match_color_basic(Custom(100, 100, 100)) == "custom");
+
+    // Destructure
+    assert(destructure_custom(Custom(10, 20, 30)) == 60);
+
+    // Nested
+    assert(nested_maybe(Some(Some(42))) == 42);
+    assert(nested_maybe(Some(None)) == -1);
+    assert(nested_maybe(None) == -2);
+
+    // Specific values
+    assert(specific_maybe(Some(0)) == "zero");
+    assert(specific_maybe(Some(1)) == "one");
+    assert(specific_maybe(Some(42)) == "positive");
+    assert(specific_maybe(None) == "none");
+
+    // Color specifics
+    assert(specific_color(Custom(255, 0, 0)) == "pure red");
+    assert(specific_color(Custom(128, 128, 128)) == "gray");
+    assert(specific_color(Red) == "basic red");
+
+    // Guards
+    assert(maybe_with_guard(Some(500)) == "large");
+    assert(maybe_with_guard(Some(50)) == "medium");
+    assert(maybe_with_guard(Some(5)) == "small");
+    assert(maybe_with_guard(None) == "none");
+
+    // Or-pattern
+    assert(is_primary(Red) == true);
+    assert(is_primary(Blue) == true);
+    assert(is_primary(Green) == false);
+
+    // If-let
+    assert(if_let_some(Some(42)) == 42);
+    assert(if_let_some(None) == 0);
+
+    // List operations
+    let list = Cons(1, Cons(2, Cons(3, Nil)));
+    assert(list_length(list) == 3);
+    assert(while_let_cons(Cons(1, Cons(2, Cons(3, Nil)))) == 6);
+
+    // Tree
+    let tree = Node(Leaf(1), 2, Leaf(3));
+    assert(tree_sum(tree) == 6);
+    assert(tree_contains(Node(Leaf(1), 2, Leaf(3)), 2) == true);
+    assert(tree_contains(Node(Leaf(1), 2, Leaf(3)), 5) == false);
+}

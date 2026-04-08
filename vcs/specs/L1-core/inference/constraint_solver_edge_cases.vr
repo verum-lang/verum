@@ -1,0 +1,277 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, inference, constraints, edge-cases, solver
+// @description: Edge cases for the type constraint solver
+
+/// Edge cases for the type constraint solver.
+/// Tests corner cases in type inference that exercise the constraint
+/// solver's ability to handle complex, ambiguous, or unusual scenarios.
+
+// ============================================================================
+// Functions for edge case testing
+// ============================================================================
+
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |x: A| g(f(x))
+}
+
+fn mutual_a<T>(x: T) -> T {
+    mutual_b(x)
+}
+
+fn mutual_b<T>(x: T) -> T {
+    x
+}
+
+fn id<T>(x: T) -> T { x }
+
+fn apply<T, U>(f: fn(T) -> U, x: T) -> U { f(x) }
+
+fn apply_twice<T>(f: fn(T) -> T, x: T) -> T { f(f(x)) }
+
+fn pair<A, B>(a: A, b: B) -> (A, B) { (a, b) }
+
+fn map_list<A, B>(items: List<A>, f: fn(A) -> B) -> List<B> {
+    let mut result: List<B> = [];
+    for item in items {
+        result.push(f(item));
+    }
+    result
+}
+
+fn fold_list<T, A>(items: List<T>, init: A, f: fn(A, T) -> A) -> A {
+    let mut acc = init;
+    for item in items {
+        acc = f(acc, item);
+    }
+    acc
+}
+
+// ============================================================================
+// Edge case: circular but resolvable composition
+// ============================================================================
+
+fn double_int(x: Int) -> Int { x * 2 }
+fn int_to_text(x: Int) -> Text { f"{x}" }
+fn text_to_int(s: Text) -> Int { s.len() }
+
+// ============================================================================
+// Edge case: same function called with different types
+// ============================================================================
+
+fn wrap<T>(x: T) -> Maybe<T> { Some(x) }
+
+fn unwrap_or<T>(opt: Maybe<T>, def: T) -> T {
+    match opt {
+        Some(v) => v,
+        None => def,
+    }
+}
+
+// ============================================================================
+// Edge case: type flows in unusual directions
+// ============================================================================
+
+fn select_first<T>(items: List<T>, pred: fn(T) -> Bool) -> Maybe<T> {
+    for item in items {
+        if pred(item) {
+            return Some(item);
+        }
+    }
+    None
+}
+
+fn select_last<T: Clone>(items: List<T>, pred: fn(T) -> Bool) -> Maybe<T> {
+    let mut last: Maybe<T> = None;
+    for item in items {
+        if pred(item.clone()) {
+            last = Some(item);
+        }
+    }
+    last
+}
+
+// ============================================================================
+// Edge case: deeply nested generic types
+// ============================================================================
+
+fn nest_maybe<T>(x: T) -> Maybe<Maybe<T>> {
+    Some(Some(x))
+}
+
+fn flatten_maybe<T>(x: Maybe<Maybe<T>>) -> Maybe<T> {
+    match x {
+        Some(Some(v)) => Some(v),
+        _ => None,
+    }
+}
+
+fn map_maybe<T, U>(opt: Maybe<T>, f: fn(T) -> U) -> Maybe<U> {
+    match opt {
+        Some(v) => Some(f(v)),
+        None => None,
+    }
+}
+
+// ============================================================================
+// Edge case: generic constraints flow through multiple functions
+// ============================================================================
+
+type Processable is protocol {
+    fn process(&self) -> Int;
+};
+
+type Score is { value: Int };
+
+implement Processable for Score {
+    fn process(&self) -> Int {
+        self.value * 2
+    }
+}
+
+fn sum_processed<T: Processable>(items: List<T>) -> Int {
+    let mut total = 0;
+    for item in items {
+        total += item.process();
+    }
+    total
+}
+
+// ============================================================================
+// Edge case: type variable appears multiple times
+// ============================================================================
+
+fn swap<A, B>(p: (A, B)) -> (B, A) {
+    (p.1, p.0)
+}
+
+fn swap_twice<A, B>(p: (A, B)) -> (A, B) {
+    let swapped: (B, A) = swap(p);
+    swap(swapped)
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Circular but resolvable: Int -> Int -> Text -> Int
+    let double_to_text = compose(double_int, int_to_text);  // fn(Int) -> Text
+    let to_text_to_len = compose(int_to_text, text_to_int); // fn(Int) -> Int
+
+    assert(double_to_text(21) == "42");
+    assert(to_text_to_len(123) == 3);  // "123".len() = 3
+
+    // Mutually recursive with different instantiations
+    let int_result: Int = mutual_a(42);
+    let text_result: Text = mutual_a("hello");
+    assert(int_result == 42);
+    assert(text_result == "hello");
+
+    // Same function, different types (edge case: polymorphic use)
+    let int_id = id(42);
+    let text_id = id("verum");
+    let bool_id = id(true);
+    assert(int_id == 42);
+    assert(text_id == "verum");
+    assert(bool_id == true);
+
+    // Wrap/unwrap with different type arguments
+    let w_int: Maybe<Int> = wrap(10);
+    let w_text: Maybe<Text> = wrap("hi");
+    let w_bool: Maybe<Bool> = wrap(true);
+    assert(w_int == Some(10));
+    assert(w_text == Some("hi"));
+    assert(w_bool == Some(true));
+
+    // Unwrap with type propagation
+    assert(unwrap_or(w_int, 0) == 10);
+    assert(unwrap_or(None, 99) == 99);
+
+    // Deeply nested: Maybe<Maybe<Int>>
+    let nested = nest_maybe(42);
+    let flat = flatten_maybe(nested);
+    assert(flat == Some(42));
+
+    // Edge case: nested maps
+    let mapped_twice: Maybe<Int> = map_maybe(
+        map_maybe(Some(5), |x: Int| x * 2),
+        |y: Int| y + 1,
+    );
+    assert(mapped_twice == Some(11));  // (5*2)+1 = 11
+
+    // None propagation
+    assert(flatten_maybe(None) == None);
+    assert(flatten_maybe(Some(None)) == None);
+
+    // select_first: type inferred from List and predicate
+    let first_even = select_first(
+        [1, 3, 5, 4, 7, 8],
+        |x: Int| x % 2 == 0,
+    );
+    assert(first_even == Some(4));
+
+    let first_long = select_first(
+        ["a", "bb", "ccc", "dd"],
+        |s: Text| s.len() > 2,
+    );
+    assert(first_long == Some("ccc"));
+
+    // select_last: type inferred
+    let last_even = select_last(
+        [1, 2, 3, 4, 5, 6],
+        |x: Int| x % 2 == 0,
+    );
+    assert(last_even == Some(6));
+
+    // Generic constraint flow
+    let scores = [Score { value: 5 }, Score { value: 10 }, Score { value: 3 }];
+    let total = sum_processed(scores);
+    assert(total == 36);  // (5+10+3) * 2 = 36
+
+    // Type variable appears twice: A=Int, B=Text
+    let swapped = swap((1, "hello"));
+    assert(swapped.0 == "hello");
+    assert(swapped.1 == 1);
+
+    // swap_twice should restore original
+    let original = (42, "world");
+    let double_swapped = swap_twice(original);
+    assert(double_swapped.0 == 42);
+    assert(double_swapped.1 == "world");
+
+    // Edge case: apply_twice with closure - T=Int
+    let quad = apply_twice(|x: Int| x * 2, 3);
+    assert(quad == 12);  // 3*2*2
+
+    // Edge case: compose chain of 3
+    let add1 = |x: Int| x + 1;
+    let times2 = |x: Int| x * 2;
+    let to_str = |n: Int| f"v={n}";
+
+    let add1_times2 = compose(add1, times2);
+    let add1_times2_str = compose(add1_times2, to_str);
+    assert(add1_times2_str(4) == "v=10");  // ((4+1)*2)=10 -> "v=10"
+
+    // Edge case: fold with type from initial value
+    let product: Int = fold_list([1, 2, 3, 4, 5], 1, |acc: Int, x: Int| acc * x);
+    assert(product == 120);
+
+    let concat_strs: Text = fold_list(
+        [1, 2, 3],
+        "",
+        |acc: Text, x: Int| f"{acc}{x}",
+    );
+    assert(concat_strs == "123");
+
+    // map_list with complex type inference
+    let pairs: List<(Int, Int)> = map_list(
+        [1, 2, 3, 4],
+        |x: Int| (x, x * x),
+    );
+    assert(pairs[0] == (1, 1));
+    assert(pairs[3] == (4, 16));
+
+    print("Constraint solver edge case tests passed!");
+}

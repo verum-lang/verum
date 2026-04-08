@@ -1,0 +1,51 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, file-io, read, write
+// @expected-exit: 0
+
+// Test: file write and read-back.
+// Writes a string to a temp file, reads it back, and compares.
+
+fn __file_read_to_string_raw(path: Text) -> Text {
+    @intrinsic("file_read_to_string")
+}
+
+fn __file_write_string_raw(path: Text, content: Text) -> Int {
+    @intrinsic("file_write_string")
+}
+
+fn main() -> Int {
+    let path = "/tmp/verum_test_878.txt";
+    let content = "Hello from Verum AOT!";
+
+    // Write
+    let written = __file_write_string_raw(path, content);
+    if (written == 0) {
+        print("FAIL: write returned 0");
+        return 1;
+    }
+
+    // Read back
+    let read_back = __file_read_to_string_raw(path);
+    if (read_back != content) {
+        print(f"FAIL: read_back='{read_back}', expected='{content}'");
+        return 1;
+    }
+
+    // Write longer content
+    let long_content = "Line1\nLine2\nLine3\nEnd";
+    let written2 = __file_write_string_raw(path, long_content);
+    if (written2 == 0) {
+        print("FAIL: write2 returned 0");
+        return 1;
+    }
+    let read2 = __file_read_to_string_raw(path);
+    if (read2 != long_content) {
+        print(f"FAIL: read2 mismatch");
+        return 1;
+    }
+
+    print("878_file_io: PASS");
+    0
+}

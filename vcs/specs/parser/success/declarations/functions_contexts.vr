@@ -1,0 +1,199 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, functions, contexts, using
+// @description: Test function context clause parsing with all variations
+
+// Single context - no brackets
+fn query_db() -> Data using Database {
+    Database.query("SELECT *")
+}
+
+// Single context - with brackets
+fn query_db_brackets() -> Data using [Database] {
+    Database.query("SELECT *")
+}
+
+// Multiple contexts
+fn process_with_logging() -> Result using [Database, Logger] {
+    Logger.info("Processing");
+    Database.query("SELECT *")
+}
+
+// Many contexts
+fn complex_service() using [Database, Logger, Cache, MetricsCollector, Tracer] {
+    Tracer.span("operation");
+    Logger.info("Processing");
+    let data = Database.query("SELECT *");
+    Cache.set("key", data);
+    MetricsCollector.increment("queries");
+}
+
+// Context with alias
+fn dual_db() using [Database as primary, Database as replica] {
+    let data = primary.read();
+    replica.write(data);
+}
+
+// Multiple aliased contexts
+fn triple_db() using [
+    Database as primary,
+    Database as replica,
+    Database as analytics
+] {
+    let data = primary.read();
+    replica.write(data);
+    analytics.log_query();
+}
+
+// Negative context (excluded)
+fn pure_computation() using [!IO] {
+    compute(42)
+}
+
+// Multiple negative contexts
+fn truly_pure() using [!IO, !Database, !Network, !FileSystem] {
+    42 + 42
+}
+
+// Conditional context
+fn maybe_analytics() using [Analytics if cfg.analytics_enabled] {
+    Analytics.track("event");
+}
+
+// Multiple conditional contexts
+fn conditional_multiple() using [
+    Analytics if cfg.analytics,
+    Logger if cfg.debug,
+    Tracer if cfg.tracing
+] {
+    // Conditionally available
+}
+
+// Platform-specific contexts
+fn platform_specific() using [
+    WindowsRegistry if platform.windows,
+    PosixSignals if platform.unix,
+    MacOSKeychain if platform.macos
+] {
+    // Platform-specific code
+}
+
+// Transformed context - simple
+fn transactional_op() using [Database.transactional()] {
+    Database.execute("INSERT ...");
+}
+
+// Transformed context - with arguments
+fn scoped_cache() using [Cache.scoped(request_id, 300)] {
+    Cache.set("key", value);
+}
+
+// Multiple transforms
+fn multi_transform() using [
+    Database.transactional().read_only(),
+    Cache.scoped().compressed()
+] {
+    // Multiple transformations
+}
+
+// Named context with colon syntax
+fn named_contexts() using [db: Database, log: Logger] {
+    log.info("Querying");
+    db.query("SELECT *")
+}
+
+// Named context with as syntax
+fn aliased_contexts() using [Database as db, Logger as log] {
+    log.info("Querying");
+    db.query("SELECT *")
+}
+
+// Context with type arguments
+fn generic_context<T>() using [Repository<T>] {
+    Repository.find_all()
+}
+
+// Multiple generic contexts
+fn multi_generic<T, U>() using [Repository<T>, Repository<U>, Cache<T>] {
+    // Generic context handling
+}
+
+// Combined context patterns
+fn complex_contexts() using [
+    Database.transactional() as tx,
+    Cache.scoped(),
+    Logger,
+    !Network
+] {
+    tx.execute("...");
+}
+
+// Context with async function
+async fn async_with_context() -> Response using [HttpClient, Logger] {
+    Logger.info("Fetching");
+    HttpClient.get("https://api.example.com").await
+}
+
+// Context with throws clause
+fn fallible_with_context() throws(DatabaseError) -> Data using [Database] {
+    Database.query("SELECT *")
+}
+
+// Combined async, throws, and context
+async fn full_combination()
+    throws(NetworkError | DatabaseError)
+    -> Result
+    using [HttpClient, Database, Logger]
+{
+    Logger.info("Starting");
+    let response = HttpClient.fetch().await;
+    Database.save(response)
+}
+
+// Context polymorphism in generic functions
+fn map_with_context<T, U, using C>(
+    items: List<T>,
+    f: fn(T) -> U using C
+) -> List<U> using C {
+    items.map(f)
+}
+
+// Higher-order function with context propagation
+fn with_transaction<T>(f: fn() -> T using [Database]) -> T using [Database] {
+    Database.begin_transaction();
+    let result = f();
+    Database.commit();
+    result
+}
+
+// Context with return type on same line
+fn inline_context() -> Int using [Logger] { 42 }
+
+// Context without return type
+fn void_context() using [Logger] {
+    Logger.info("No return type");
+}
+
+// Visibility with context
+pub fn public_with_context() using [Database] {}
+internal fn internal_with_context() using [Logger] {}
+protected fn protected_with_context() using [Cache] {}
+
+// Combined with where clause
+fn context_and_where<T>(x: T) -> T
+    using [Logger]
+    where type T: Clone
+{
+    Logger.info("Cloning");
+    x.clone()
+}
+
+// Context after generics and before where
+fn full_signature<T, U>(a: T, b: U) -> (T, U)
+    using [Database, Logger]
+    where type T: Clone,
+          type U: Display
+{
+    Logger.info(f"Processing {b}");
+    (a.clone(), b)
+}

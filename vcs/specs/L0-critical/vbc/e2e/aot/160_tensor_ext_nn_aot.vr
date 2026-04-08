@@ -1,0 +1,95 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, nn
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT TensorExt NN ops — RMS norm and attention simulation
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn sqrt_approx(x: Float) -> Float {
+    // Newton's method for sqrt
+    if x <= 0.0 { 0.0 } else {
+        let mut guess = x / 2.0;
+        let mut i = 0;
+        while i < 20 {
+            guess = (guess + x / guess) / 2.0;
+            i = i + 1;
+        }
+        guess
+    }
+}
+
+fn exp_approx(x: Float) -> Float {
+    // Taylor series approximation
+    let mut result = 1.0;
+    let mut term = 1.0;
+    let mut n = 1.0;
+    while n < 20.0 {
+        term = term * x / n;
+        result = result + term;
+        n = n + 1.0;
+    }
+    result
+}
+
+fn test_rms_norm() {
+    let x0 = 1.0; let x1 = 2.0; let x2 = 3.0; let x3 = 4.0;
+    let eps = 0.00001;
+    let mean_sq = (x0 * x0 + x1 * x1 + x2 * x2 + x3 * x3) / 4.0;
+    let rms = sqrt_approx(mean_sq + eps);
+    let normed = x0 / rms;
+    // mean_sq = (1+4+9+16)/4 = 7.5, rms ≈ 2.7386
+    // normed ≈ 0.3651
+    assert_eq(abs_f(normed - 0.3651) < 0.01, true);
+    print("test_rms_norm passed");
+}
+
+fn test_rms_norm_uniform() {
+    let val = 5.0;
+    let mean_sq = val * val;
+    let rms = sqrt_approx(mean_sq + 0.0001);
+    let normed = val / rms;
+    assert_eq(abs_f(normed - 1.0) < 0.01, true);
+    print("test_rms_norm_uniform passed");
+}
+
+fn test_softmax_2() {
+    let s0 = 1.0;
+    let s1 = 2.0;
+    let max_v = if s0 > s1 { s0 } else { s1 };
+    let e0 = exp_approx(s0 - max_v);
+    let e1 = exp_approx(s1 - max_v);
+    let sum = e0 + e1;
+    let p0 = e0 / sum;
+    let p1 = e1 / sum;
+    assert_eq(abs_f(p0 + p1 - 1.0) < 0.001, true);
+    assert_eq(p1 > p0, true);
+    print("test_softmax_2 passed");
+}
+
+fn test_attention_score() {
+    // Dot-product attention: score = Q . K / sqrt(d_k)
+    let q0 = 1.0; let q1 = 0.5; let q2 = 0.3; let q3 = 0.8;
+    let k0 = 0.2; let k1 = 0.9; let k2 = 0.4; let k3 = 0.6;
+    let dot = q0 * k0 + q1 * k1 + q2 * k2 + q3 * k3;
+    // dot = 0.2 + 0.45 + 0.12 + 0.48 = 1.25
+    let d_k = 4.0;
+    let scale = sqrt_approx(d_k);
+    let score = dot / scale;
+    // score = 1.25 / 2.0 = 0.625
+    assert_eq(abs_f(score - 0.625) < 0.01, true);
+    print("test_attention_score passed");
+}
+
+fn main() -> Int {
+    test_rms_norm();
+    test_rms_norm_uniform();
+    test_softmax_2();
+    test_attention_score();
+    print("ALL PASSED");
+    0
+}

@@ -1,0 +1,223 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L2
+// @tags: differential, edge_cases
+
+/// Edge cases that must behave identically across implementations
+
+fn main() {
+    // ===== Integer edge cases =====
+    println("=== Integer Edge Cases ===");
+
+    // Min/Max values
+    let int_max = Int.MAX;
+    let int_min = Int.MIN;
+    println(f"Int.MAX = {int_max}");
+    println(f"Int.MIN = {int_min}");
+
+    // Operations near bounds
+    println(f"Int.MAX - 1 = {int_max - 1}");
+    println(f"Int.MIN + 1 = {int_min + 1}");
+
+    // Overflow behavior (should be consistent)
+    // Note: depends on language semantics - may panic or wrap
+    // let overflow = int_max + 1;
+
+    // Division edge cases
+    println(f"7 / 3 = {7 / 3}");
+    println(f"-7 / 3 = {-7 / 3}");
+    println(f"7 / -3 = {7 / -3}");
+    println(f"-7 / -3 = {-7 / -3}");
+
+    // Modulo edge cases
+    println(f"7 % 3 = {7 % 3}");
+    println(f"-7 % 3 = {-7 % 3}");
+    println(f"7 % -3 = {7 % -3}");
+    println(f"-7 % -3 = {-7 % -3}");
+
+    // ===== Float edge cases =====
+    println("\n=== Float Edge Cases ===");
+
+    let inf = Float.INFINITY;
+    let neg_inf = Float.NEG_INFINITY;
+    let nan = Float.NAN;
+
+    println(f"INFINITY = {inf}");
+    println(f"NEG_INFINITY = {neg_inf}");
+    println(f"NAN = {nan}");
+
+    // NaN comparisons (all should be false)
+    println(f"NAN == NAN = {nan == nan}");
+    println(f"NAN < 0 = {nan < 0.0}");
+    println(f"NAN.is_nan() = {nan.is_nan()}");
+
+    // Infinity arithmetic
+    println(f"INFINITY + 1 = {inf + 1.0}");
+    println(f"INFINITY - INFINITY = {inf - inf}");  // NaN
+    println(f"1 / 0.0 = {1.0 / 0.0}");              // Infinity
+    println(f"-1 / 0.0 = {-1.0 / 0.0}");            // -Infinity
+    println(f"0 / 0.0 = {0.0 / 0.0}");              // NaN
+
+    // Very small numbers
+    let epsilon = Float.EPSILON;
+    println(f"EPSILON = {epsilon}");
+    println(f"1.0 + EPSILON == 1.0: {1.0 + epsilon == 1.0}");
+    println(f"1.0 + EPSILON/2 == 1.0: {1.0 + epsilon/2.0 == 1.0}");
+
+    // Subnormal numbers
+    let min_positive = Float.MIN_POSITIVE;
+    println(f"MIN_POSITIVE = {min_positive}");
+    println(f"MIN_POSITIVE / 2 = {min_positive / 2.0}");
+
+    // ===== Empty collections =====
+    println("\n=== Empty Collections ===");
+
+    let empty_list: List<Int> = [];
+    println(f"[].len() = {empty_list.len()}");
+    println(f"[].is_empty() = {empty_list.is_empty()}");
+    println(f"[].first() = {empty_list.first()}");
+    println(f"[].last() = {empty_list.last()}");
+    println(f"[].sum() = {empty_list.fold(0, |a, b| a + b)}");
+
+    let empty_map: Map<Text, Int> = {};
+    println(f"{{}}}.len() = {empty_map.len()}");
+    println(f"{{}}}.get(\"x\") = {empty_map.get(\"x\")}");
+
+    let empty_set: Set<Int> = {};
+    println(f"Set{{}}.len() = {empty_set.len()}");
+    println(f"Set{{}}.contains(0) = {empty_set.contains(0)}");
+
+    // ===== Single element collections =====
+    println("\n=== Single Element ===");
+
+    let single = [42];
+    println(f"[42].first() = {single.first()}");
+    println(f"[42].last() = {single.last()}");
+    println(f"[42][0..0] = {single[0..0]}");  // Empty slice
+    println(f"[42][0..1] = {single[0..1]}");  // Full slice
+
+    // ===== String edge cases =====
+    println("\n=== String Edge Cases ===");
+
+    let empty_str = "";
+    println(f"\"\".len() = {empty_str.len()}");
+    println(f"\"\".is_empty() = {empty_str.is_empty()}");
+    println(f"\"\".chars() = {empty_str.chars()}");
+
+    // Null character
+    let with_null = "before\0after";
+    println(f"string with null len = {with_null.len()}");
+
+    // Very long string
+    let long_str = "x".repeat(10000);
+    println(f"\"x\".repeat(10000).len() = {long_str.len()}");
+
+    // ===== Unicode edge cases =====
+    println("\n=== Unicode Edge Cases ===");
+
+    // Zero-width characters
+    let zwj = "👨‍👩‍👧";  // Family emoji with ZWJ
+    println(f"family emoji len = {zwj.len()}");
+    println(f"family emoji chars = {zwj.chars().len()}");
+
+    // Combining characters
+    let combining = "e\u{0301}";  // e + combining acute accent
+    let precomposed = "é";
+    println(f"combining len = {combining.len()}");
+    println(f"precomposed len = {precomposed.len()}");
+    println(f"combining == precomposed: {combining == precomposed}");
+
+    // Right-to-left
+    let rtl = "مرحبا";  // Arabic
+    println(f"RTL string len = {rtl.len()}");
+
+    // ===== Recursion limits =====
+    println("\n=== Recursion Limits ===");
+
+    fn deep_recursion(n: Int) -> Int {
+        if n == 0 { 0 } else { deep_recursion(n - 1) + 1 }
+    }
+
+    // Should not stack overflow for reasonable depths
+    let depth = 1000;
+    println(f"deep_recursion({depth}) = {deep_recursion(depth)}");
+
+    // ===== Closure edge cases =====
+    println("\n=== Closure Edge Cases ===");
+
+    // Closure returning closure
+    let make_adder = |x| |y| x + y;
+    let add_5 = make_adder(5);
+    println(f"make_adder(5)(3) = {add_5(3)}");
+
+    // Closure in loop (capture semantics)
+    let mut closures = [];
+    for i in 0..5 {
+        closures.push(|| i);
+    }
+    // What value does each closure capture?
+    for (idx, f) in closures.enumerate() {
+        println(f"closures[{idx}]() = {f()}");
+    }
+
+    // ===== Pattern matching edge cases =====
+    println("\n=== Pattern Matching Edge Cases ===");
+
+    // Overlapping patterns
+    fn classify(n: Int) -> Text {
+        match n {
+            0 => "zero",
+            x if x < 0 => "negative",
+            x if x > 0 => "positive",
+            _ => "unreachable",  // Should never match
+        }
+    }
+    println(f"classify(0) = {classify(0)}");
+    println(f"classify(-5) = {classify(-5)}");
+    println(f"classify(5) = {classify(5)}");
+
+    // Nested Maybe
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+    match nested {
+        Some(Some(x)) => println(f"Some(Some({x}))"),
+        Some(None) => println("Some(None)"),
+        None => println("None"),
+    }
+
+    let nested2: Maybe<Maybe<Int>> = Some(None);
+    match nested2 {
+        Some(Some(x)) => println(f"Some(Some({x}))"),
+        Some(None) => println("Some(None)"),
+        None => println("None"),
+    }
+
+    // ===== Equality edge cases =====
+    println("\n=== Equality Edge Cases ===");
+
+    // Reference equality vs structural equality
+    let a = [1, 2, 3];
+    let b = [1, 2, 3];
+    let c = a;
+    println(f"a == b (structural): {a == b}");
+    println(f"a === c (reference): {a === c}");
+
+    // Floating point equality
+    println(f"0.1 + 0.2 == 0.3: {0.1 + 0.2 == 0.3}");
+    println(f"0.1 + 0.2 = {0.1 + 0.2}");
+
+    // ===== Mutation edge cases =====
+    println("\n=== Mutation Edge Cases ===");
+
+    let mut list = [1, 2, 3];
+    // Aliasing during iteration
+    for item in list.iter() {
+        println(f"iterating: {item}");
+        // list.push(4);  // Would this work? Should be caught
+    }
+
+    // Swap using tuple
+    let mut x = 1;
+    let mut y = 2;
+    (x, y) = (y, x);
+    println(f"after swap: x={x}, y={y}");
+}

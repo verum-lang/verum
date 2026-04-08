@@ -1,0 +1,338 @@
+// @test: typecheck-fail
+// @tier: 1
+// @level: L1
+// @tags: negative-bounds, violation, errors, advanced-type-syntax
+// @expect: error(E0403)
+// @expected-error: E0403 "Type implements forbidden protocol"
+// @description: Tests for negative bound violations - type implements protocol it shouldn't
+// @spec: 03-type-system.md Section 13. 3.5.3
+
+// =============================================================================
+// ERROR 1: Type implements forbidden protocol
+// =============================================================================
+
+protocol Copy: Clone {}
+protocol Clone { fn clone(&self) -> Self; }
+protocol Send {}
+protocol Sync {}
+
+fn local_only<T: Send + !Sync>(value: T) {
+    // Accepts types that are Send but NOT Sync
+}
+
+type SafeInt is Int;
+
+implement Copy for SafeInt {}
+implement Clone for SafeInt { fn clone(&self) -> Self { *self } }
+implement Send for SafeInt {}
+implement Sync for SafeInt {}  // SafeInt is Sync
+
+fn bad_call_local_only() {
+    let x = SafeInt.from(42);
+    // E0403: SafeInt implements Sync, but !Sync is required
+    local_only(x);  // ERROR: SafeInt: Sync violates !Sync bound
+}
+
+// =============================================================================
+// ERROR 2: Copy type used where !Copy expected
+// =============================================================================
+
+type DeepClone is protocol {
+    fn deep_clone(&self) -> Self;
+};
+
+// Only for types that need deep cloning (NOT Copy)
+implement<T: Clone + !Copy> DeepClone for T {
+    fn deep_clone(&self) -> Self {
+        self.clone()
+    }
+}
+
+fn bad_deep_clone_copy_type() {
+    let x: Int = 42;  // Int is Copy
+    // E0403: Int implements Copy, but !Copy is required for DeepClone
+    x.deep_clone();  // ERROR: No DeepClone implementation for Copy types
+}
+
+// =============================================================================
+// ERROR 3: Conflicting bounds in function call
+// =============================================================================
+
+fn require_copy<T: Copy>(x: T) -> T {
+    x
+}
+
+fn require_not_copy<T: !Copy>(x: T) {
+    // Use x by move
+}
+
+fn bad_conflicting_call<T: !Copy>(x: T) {
+    // E0403: T is !Copy, but require_copy needs Copy
+    require_copy(x);  // ERROR: T: !Copy conflicts with T: Copy
+}
+
+// =============================================================================
+// ERROR 4: Implementing trait with conflicting negative bound
+// =============================================================================
+
+type Exclusive is protocol {
+    fn exclusive_op(&self);
+};
+
+// Only for non-Clone types
+implement<T: !Clone> Exclusive for Container<T> {
+    fn exclusive_op(&self) {
+        // Unique ownership operations
+    }
+}
+
+type Container<T> is { value: T };
+
+fn bad_use_exclusive_with_clone() {
+    let container = Container { value: [1, 2, 3] };  // List is Clone
+    // E0403: List<Int> implements Clone, but Container<!Clone> is required
+    container.exclusive_op();  // ERROR
+}
+
+// =============================================================================
+// ERROR 5: Negative bound in where clause violated
+// =============================================================================
+
+fn process_non_default<T>(make: fn() -> T)
+    where type T: !Default
+{
+    // T cannot have a default, must use provided make function
+    let value = make();
+}
+
+fn bad_call_with_defaultable() {
+    // E0403: Int implements Default, but !Default is required
+    process_non_default<Int>(|| 42);  // ERROR: Int has Default
+}
+
+// =============================================================================
+// ERROR 6: Associated type violates negative bound
+// =============================================================================
+
+type SafeIterator is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+type Error is protocol { fn message(&self) -> Text; };
+
+type ParseError is { msg: Text };
+implement Error for ParseError { fn message(&self) -> Text { self.msg.clone() } }
+
+type ErrorIterator is {
+    errors: List<ParseError>,
+    pos: Int,
+};
+
+// E0403: ParseError implements Error, but !Error is required for Item
+implement SafeIterator for ErrorIterator {
+    type Item is ParseError;  // ERROR: ParseError: Error violates !Error
+
+    fn next(&mut self) -> Maybe<ParseError> {
+        if self.pos < self.errors.len() {
+            let e = self.errors.get(self.pos).clone();
+            self.pos += 1;
+            Some(e)
+        } else {
+            None
+        }
+    }
+}
+
+// =============================================================================
+// ERROR 7: Nested negative bound violation
+// =============================================================================
+
+type SafeWrapper<T: !Error> is {
+    value: T,
+};
+
+fn bad_wrap_error() {
+    // E0403: ParseError implements Error, but SafeWrapper requires !Error
+    let wrapper: SafeWrapper<ParseError> = SafeWrapper { value: ParseError { msg: "oops" } };  // ERROR
+}
+
+// =============================================================================
+// ERROR 8: Blanket impl with negative bound conflict
+// =============================================================================
+
+type AutoSerialize is protocol {
+    fn auto_serialize(&self) -> Bytes;
+};
+
+// Auto-implement for types without custom serialization
+implement<T: !CustomSerialize> AutoSerialize for T {
+    fn auto_serialize(&self) -> Bytes {
+        Bytes.empty()
+    }
+}
+
+type CustomSerialize is protocol {
+    fn custom_serialize(&self) -> Bytes;
+};
+
+type MyData is { x: Int };
+implement CustomSerialize for MyData {
+    fn custom_serialize(&self) -> Bytes {
+        Bytes.from(self.x)
+    }
+}
+
+fn bad_auto_serialize_custom() {
+    let data = MyData { x: 42 };
+    // E0403: MyData implements CustomSerialize, but AutoSerialize requires !CustomSerialize
+    data.auto_serialize();  // ERROR: No AutoSerialize for CustomSerialize types
+}
+
+// =============================================================================
+// ERROR 9: Multiple negative bound violations
+// =============================================================================
+
+fn strictly_local<T: !Send + !Sync + !Clone>(value: T) {
+    // Value cannot be sent, shared, or cloned
+}
+
+type ShareableData is { x: Int };
+implement Send for ShareableData {}
+implement Sync for ShareableData {}
+implement Clone for ShareableData { fn clone(&self) -> Self { ShareableData { x: self.x } } }
+
+fn bad_call_strictly_local() {
+    let data = ShareableData { x: 42 };
+    // E0403: ShareableData implements Send, Sync, and Clone, all violate negative bounds
+    strictly_local(data);  // ERROR: Multiple violations
+}
+
+// =============================================================================
+// ERROR 10: Transitive negative bound violation
+// =============================================================================
+
+type Marker is protocol {};
+
+implement Marker for Int {}
+
+fn no_marker<T: !Marker>() {}
+
+fn bad_transitive<T: Marker>() {
+    // E0403: T: Marker conflicts with !Marker requirement
+    no_marker<T>();  // ERROR: T has Marker bound
+}
+
+// =============================================================================
+// ERROR 11: Specialization with incorrect negative bound
+// =============================================================================
+
+type Display is protocol { fn display(&self) -> Text; };
+type Debug is protocol { fn debug(&self) -> Text; };
+
+// Base impl
+implement<T> Formatter for T {
+    default fn format(&self) -> Text { "<unknown>" }
+}
+
+// This specialized impl should not match Display types
+@specialize
+implement<T: Debug + !Display> Formatter for T {
+    fn format(&self) -> Text { self.debug() }
+}
+
+type Formatter is protocol { fn format(&self) -> Text; };
+
+type BothTraits is { value: Int };
+implement Display for BothTraits { fn display(&self) -> Text { f"{self.value}" } }
+implement Debug for BothTraits { fn debug(&self) -> Text { f"BothTraits({self.value})" } }
+
+fn test_formatter() {
+    let x = BothTraits { value: 42 };
+    // x has both Debug AND Display, so the !Display specialization doesn't apply
+    // Falls through to base impl
+    let formatted = x.format();  // Should use base impl, not specialized
+}
+
+// =============================================================================
+// ERROR 12: Generic bound conflict at instantiation
+// =============================================================================
+
+fn generic_conflict<T: Clone, U: !Clone>(t: T, u: U) {
+    // T and U have opposite bounds on Clone
+}
+
+fn bad_same_type_conflict() {
+    // E0403: Cannot call with same type that is Clone for both T and U
+    generic_conflict<Int, Int>(42, 42);  // ERROR: Int: Clone violates U: !Clone
+}
+
+// =============================================================================
+// ERROR 13: Protocol inheritance negative bound violation
+// =============================================================================
+
+type SubSync is protocol extends Sync {
+    fn sub_sync_op(&self);
+};
+
+fn reject_subsync<T: !Sync>(value: T) {
+    // Rejects Sync and anything that extends Sync
+}
+
+type SyncThing is { x: Int };
+implement Sync for SyncThing {}
+implement SubSync for SyncThing { fn sub_sync_op(&self) {} }
+
+fn bad_call_with_subsync() {
+    let thing = SyncThing { x: 42 };
+    // E0403: SyncThing implements SubSync (which extends Sync), violates !Sync
+    reject_subsync(thing);  // ERROR: SubSync implies Sync
+}
+
+// =============================================================================
+// ERROR 14: Negative bound on Self type
+// =============================================================================
+
+type NonRecursive is protocol
+    where type Self: !Recursive
+{
+    fn process(&self);
+};
+
+type Recursive is protocol {
+    fn recurse(&self);
+};
+
+type RecursiveThing is { depth: Int };
+implement Recursive for RecursiveThing {
+    fn recurse(&self) {
+        if self.depth > 0 {
+            RecursiveThing { depth: self.depth - 1 }.recurse();
+        }
+    }
+}
+
+// E0403: RecursiveThing implements Recursive, cannot implement NonRecursive
+implement NonRecursive for RecursiveThing {  // ERROR at impl declaration
+    fn process(&self) {
+        print(f"Processing at depth {self.depth}");
+    }
+}
+
+// Helper types
+type Bytes is { data: List<Byte> };
+implement Bytes {
+    fn empty() -> Self { Bytes { data: [] } }
+    fn from(_x: Int) -> Self { Bytes.empty() }
+}
+
+implement SafeInt {
+    fn from(x: Int) -> Self { x }
+}
+
+protocol Default { fn default() -> Self; }
+implement Default for Int { fn default() -> Int { 0 } }
+
+fn main() {
+    // All above examples should produce E0403 negative bound violation errors
+}

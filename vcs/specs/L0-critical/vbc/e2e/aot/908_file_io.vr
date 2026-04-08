@@ -1,0 +1,58 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, file-io, read, write
+// @expected-exit: 0
+
+// Test: File I/O — write text to file, read back, verify content.
+
+fn __file_write_string_raw(path: Text, content: Text) -> Int {
+    0
+}
+
+fn __file_read_to_string_raw(path: Text) -> Text {
+    ""
+}
+
+fn main() -> Int {
+    let path = "/tmp/verum_test_908.txt";
+    let content = "Hello from Verum AOT!";
+
+    // Test 1: write to file
+    let bytes_written = __file_write_string_raw(path, content);
+    if (bytes_written == 0) {
+        print("FAIL test1: write returned 0 bytes");
+        return 1;
+    }
+
+    // Test 2: read back
+    let read_content = __file_read_to_string_raw(path);
+    if (read_content != content) {
+        print(f"FAIL test2: read='{read_content}', expected='{content}'");
+        return 1;
+    }
+
+    // Test 3: overwrite with different content
+    let new_content = "Updated content 12345";
+    let w2 = __file_write_string_raw(path, new_content);
+    if (w2 == 0) {
+        print("FAIL test3a: second write returned 0");
+        return 1;
+    }
+    let r2 = __file_read_to_string_raw(path);
+    if (r2 != new_content) {
+        print(f"FAIL test3b: read='{r2}'");
+        return 1;
+    }
+
+    // Test 4: write empty string
+    let w3 = __file_write_string_raw(path, "");
+    let r3 = __file_read_to_string_raw(path);
+    if (r3 != "") {
+        print(f"FAIL test4: read after empty write='{r3}'");
+        return 1;
+    }
+
+    print("908_file_io: PASS");
+    0
+}

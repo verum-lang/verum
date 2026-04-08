@@ -1,0 +1,339 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, comprehensive, string-processing
+// @timeout: 30000
+
+// Milestone 570: String/integer encoding and processing algorithms
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// 1. Run-length encoding: encode array as (value, count) pairs
+type RLEResult is { data: Arr8, len: Int };
+
+fn rle_encode(arr: Arr8, n: Int) -> RLEResult {
+    let mut out = zeros();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < n {
+        let val = get8(arr, i);
+        let mut run = 1;
+        while i + run < n {
+            if get8(arr, i + run) == val { run = run + 1; }
+            else { i = i + n; } // break trick
+        }
+        if i >= n { i = i - n; }
+        if out_idx + 1 < 8 {
+            out = set8(out, out_idx, val);
+            out = set8(out, out_idx + 1, run);
+            out_idx = out_idx + 2;
+        }
+        i = i + run;
+    }
+    RLEResult { data: out, len: out_idx }
+}
+
+fn rle_decode(encoded: Arr8, n: Int) -> RLEResult {
+    let mut out = zeros();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i + 1 < n {
+        let val = get8(encoded, i);
+        let count = get8(encoded, i + 1);
+        let mut j = 0;
+        while j < count {
+            if out_idx < 8 { out = set8(out, out_idx, val); out_idx = out_idx + 1; }
+            j = j + 1;
+        }
+        i = i + 2;
+    }
+    RLEResult { data: out, len: out_idx }
+}
+
+// 2. Hamming distance between two encoded integers
+fn hamming_distance(a: Int, b: Int) -> Int {
+    let xor = a - b; // XOR approximation for small values
+    // Count differing bits using XOR
+    let mut diff = 0;
+    let x = if a > b { a - b } else { b - a };
+    // For simple cases, compute bit differences
+    let mut val = a;
+    let mut val2 = b;
+    let mut i = 0;
+    while i < 8 {
+        if val % 2 != val2 % 2 { diff = diff + 1; }
+        val = val / 2;
+        val2 = val2 / 2;
+        i = i + 1;
+    }
+    diff
+}
+
+// 3. Gray code conversion
+fn to_gray(n: Int) -> Int {
+    // Gray code: n XOR (n >> 1)
+    // Simulate XOR bit by bit
+    let mut result = 0;
+    let mut power = 1;
+    let mut a = n;
+    let mut b = n / 2;
+    let mut i = 0;
+    while i < 16 {
+        let bit_a = a % 2;
+        let bit_b = b % 2;
+        let xor_bit = if bit_a == bit_b { 0 } else { 1 };
+        result = result + xor_bit * power;
+        power = power * 2;
+        a = a / 2;
+        b = b / 2;
+        i = i + 1;
+    }
+    result
+}
+
+fn from_gray(gray: Int) -> Int {
+    // Inverse Gray code: iteratively XOR shifted versions
+    let mut n = gray;
+    let mut mask = gray / 2;
+    while mask > 0 {
+        // n = n XOR mask (bit by bit)
+        let mut new_n = 0;
+        let mut power = 1;
+        let mut a = n;
+        let mut b = mask;
+        let mut i = 0;
+        while i < 16 {
+            let bit_a = a % 2;
+            let bit_b = b % 2;
+            let xor_bit = if bit_a == bit_b { 0 } else { 1 };
+            new_n = new_n + xor_bit * power;
+            power = power * 2;
+            a = a / 2;
+            b = b / 2;
+            i = i + 1;
+        }
+        n = new_n;
+        mask = mask / 2;
+    }
+    n
+}
+
+// 4. Integer square root (floor)
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+// 5. Digit manipulation
+fn reverse_digits(n: Int) -> Int {
+    let mut val = abs_val(n);
+    let mut result = 0;
+    while val > 0 {
+        result = result * 10 + val % 10;
+        val = val / 10;
+    }
+    if n < 0 { 0 - result } else { result }
+}
+
+fn count_digits(n: Int) -> Int {
+    if n == 0 { return 1; }
+    let mut val = abs_val(n);
+    let mut count = 0;
+    while val > 0 { count = count + 1; val = val / 10; }
+    count
+}
+
+fn digit_sum(n: Int) -> Int {
+    let mut val = abs_val(n);
+    let mut sum = 0;
+    while val > 0 { sum = sum + val % 10; val = val / 10; }
+    sum
+}
+
+fn is_palindrome_num(n: Int) -> Int {
+    if n < 0 { return 0; }
+    if n == reverse_digits(n) { 1 } else { 0 }
+}
+
+// 6. Power set size (2^n)
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// 7. Popcount (number of 1 bits)
+fn popcount(n: Int) -> Int {
+    let mut val = n;
+    let mut count = 0;
+    while val > 0 {
+        if val % 2 == 1 { count = count + 1; }
+        val = val / 2;
+    }
+    count
+}
+
+fn test_rle() -> Int {
+    // [1, 1, 1, 2, 2, 3] -> [(1,3), (2,2), (3,1)]
+    let arr = Arr8 { v0: 1, v1: 1, v2: 1, v3: 2, v4: 2, v5: 3, v6: 0, v7: 0 };
+    let enc = rle_encode(arr, 6);
+    assert_eq(enc.len, 6); // 3 pairs = 6 entries
+    assert_eq(get8(enc.data, 0), 1); // value
+    assert_eq(get8(enc.data, 1), 3); // count
+    assert_eq(get8(enc.data, 2), 2);
+    assert_eq(get8(enc.data, 3), 2);
+    assert_eq(get8(enc.data, 4), 3);
+    assert_eq(get8(enc.data, 5), 1);
+
+    // Decode back
+    let dec = rle_decode(enc.data, enc.len);
+    assert_eq(dec.len, 6);
+    assert_eq(get8(dec.data, 0), 1);
+    assert_eq(get8(dec.data, 1), 1);
+    assert_eq(get8(dec.data, 2), 1);
+    assert_eq(get8(dec.data, 3), 2);
+    assert_eq(get8(dec.data, 4), 2);
+    assert_eq(get8(dec.data, 5), 3);
+    1
+}
+
+fn test_hamming() -> Int {
+    // 0 vs 0 = 0
+    assert_eq(hamming_distance(0, 0), 0);
+    // 0b0000 vs 0b1111 = 4
+    assert_eq(hamming_distance(0, 15), 4);
+    // 0b1010 vs 0b0101 = 4 (10 vs 5)
+    assert_eq(hamming_distance(10, 5), 4);
+    // 7 (111) vs 0 (000) = 3
+    assert_eq(hamming_distance(7, 0), 3);
+    // 1 vs 3 = 1 (01 vs 11)
+    assert_eq(hamming_distance(1, 3), 1);
+    1
+}
+
+fn test_gray_code() -> Int {
+    // Gray code properties: consecutive codes differ by 1 bit
+    assert_eq(to_gray(0), 0);
+    assert_eq(to_gray(1), 1);
+    assert_eq(to_gray(2), 3);
+    assert_eq(to_gray(3), 2);
+    assert_eq(to_gray(4), 6);
+    assert_eq(to_gray(5), 7);
+    assert_eq(to_gray(6), 5);
+    assert_eq(to_gray(7), 4);
+
+    // Roundtrip
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(from_gray(to_gray(i)), i);
+        i = i + 1;
+    }
+
+    // Adjacent Gray codes differ by exactly 1 bit
+    let mut i2 = 0;
+    while i2 < 7 {
+        assert_eq(hamming_distance(to_gray(i2), to_gray(i2 + 1)), 1);
+        i2 = i2 + 1;
+    }
+    1
+}
+
+fn test_isqrt() -> Int {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(25), 5);
+    assert_eq(isqrt(100), 10);
+    // Non-perfect squares
+    assert_eq(isqrt(2), 1);
+    assert_eq(isqrt(3), 1);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(99), 9);
+    assert_eq(isqrt(101), 10);
+    1
+}
+
+fn test_digit_ops() -> Int {
+    assert_eq(reverse_digits(123), 321);
+    assert_eq(reverse_digits(1000), 1);
+    assert_eq(reverse_digits(12321), 12321); // palindrome
+
+    assert_eq(count_digits(0), 1);
+    assert_eq(count_digits(9), 1);
+    assert_eq(count_digits(10), 2);
+    assert_eq(count_digits(999), 3);
+    assert_eq(count_digits(1000), 4);
+
+    assert_eq(digit_sum(0), 0);
+    assert_eq(digit_sum(123), 6);
+    assert_eq(digit_sum(999), 27);
+
+    assert_eq(is_palindrome_num(121), 1);
+    assert_eq(is_palindrome_num(12321), 1);
+    assert_eq(is_palindrome_num(123), 0);
+    assert_eq(is_palindrome_num(0), 1);
+    1
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);   // 111
+    assert_eq(popcount(255), 8); // 11111111
+    assert_eq(popcount(128), 1); // 10000000
+    assert_eq(popcount(170), 4); // 10101010
+    1
+}
+
+fn test_pow2() -> Int {
+    assert_eq(pow2(0), 1);
+    assert_eq(pow2(1), 2);
+    assert_eq(pow2(8), 256);
+    assert_eq(pow2(10), 1024);
+    // Relationship: popcount(pow2(n) - 1) == n
+    assert_eq(popcount(pow2(4) - 1), 4); // 15 = 1111
+    assert_eq(popcount(pow2(8) - 1), 8); // 255 = 11111111
+    1
+}
+
+fn main() -> Int {
+    test_rle();
+    test_hamming();
+    test_gray_code();
+    test_isqrt();
+    test_digit_ops();
+    test_popcount();
+    test_pow2();
+    print("[OK] 570_milestone_aot");
+    0
+}

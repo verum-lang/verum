@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, union, syntax, error
+// @description: Test detection of double pipe in union type
+// @expected-error: E048
+
+// Double pipe is not valid in union type
+type Result is A | | B;

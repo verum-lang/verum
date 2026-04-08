@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, let-else, block, error
+// @description: Test let-else statement with missing else block
+// @expected-error: E040
+
+fn test() {
+    let Some(x) = value else;
+}

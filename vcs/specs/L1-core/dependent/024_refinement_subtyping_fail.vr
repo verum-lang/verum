@@ -1,0 +1,16 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: dependent-types, refinement, subtyping, negative
+// @expected-error: E400
+
+/// Type errors in refinement type contexts.
+/// Assigning incompatible types to refined type variables.
+
+type Positive is Int{> 0};
+
+fn takes_positive(n: Positive) -> Int { n }
+
+fn main() {
+    // ERROR E400: Text cannot be assigned where Int{>0} expected
+    let result = takes_positive("not a number");
+}

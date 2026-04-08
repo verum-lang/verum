@@ -1,0 +1,26 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Float64 type constants (MIN, MAX, BITS, EPSILON)
+
+fn main() {
+    // Test Float64.BITS
+    assert_eq(Float64.BITS(), 64);
+
+    // Test f64 alias (FFI compatibility)
+    assert_eq(f64.BITS(), 64);
+
+    // Test Float (which is Float64)
+    assert(Float.max_value() > 1.0e+307);
+    assert(Float.epsilon() < 1.0e-15);
+
+    // Test special values
+    assert(Float64.infinity().is_infinite());
+    assert(Float64.neg_infinity().is_infinite());
+    assert(Float64.nan().is_nan());
+
+    // Test f64 special values
+    assert(f64.infinity().is_infinite());
+    assert(f64.nan().is_nan());
+}

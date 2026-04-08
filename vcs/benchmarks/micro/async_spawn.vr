@@ -1,0 +1,196 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: < 500ns per spawn
+// @tags: async, concurrency, performance
+
+/// Benchmark for async task spawn overhead
+///
+/// Measures the cost of spawning async tasks including:
+/// - Task allocation
+/// - Executor scheduling
+/// - Future creation
+/// - Work-stealing queue operations
+
+module benchmarks.micro.async_spawn
+
+using [Benchmark, Async]
+
+/// Simple async spawn with immediate completion
+fn benchmark_spawn_immediate() async {
+    for _ in 0..100_000 {
+        let handle = spawn async {
+            42  // Immediate return
+        };
+        let _ = handle.await;
+    }
+}
+
+/// Spawn without await (fire-and-forget)
+fn benchmark_spawn_detached() async {
+    for _ in 0..500_000 {
+        spawn async {
+            // Fire and forget
+            let _ = 1 + 1;
+        };
+    }
+    // Wait for all to complete
+    Async.yield_now().await;
+}
+
+/// Spawn with captured variables
+fn benchmark_spawn_with_capture() async {
+    let data = list![1, 2, 3, 4, 5];
+    let multiplier = 10;
+
+    for _ in 0..100_000 {
+        let handle = spawn async move {
+            data.iter().map(|x| x * multiplier).sum()
+        };
+        let _ = handle.await;
+    }
+}
+
+/// Nested spawns
+fn benchmark_spawn_nested() async {
+    for _ in 0..10_000 {
+        let handle = spawn async {
+            let inner = spawn async {
+                spawn async {
+                    42
+                }.await
+            }.await;
+            inner
+        };
+        let _ = handle.await;
+    }
+}
+
+/// Spawn many tasks concurrently
+fn benchmark_spawn_concurrent() async {
+    for _ in 0..100 {
+        let handles: List<TaskHandle<Int>> = list![];
+
+        for i in 0..1_000 {
+            handles.push(spawn async move {
+                i * 2
+            });
+        }
+
+        // Await all
+        for handle in handles {
+            let _ = handle.await;
+        }
+    }
+}
+
+/// Spawn on specific executor
+fn benchmark_spawn_on_executor() async {
+    let executor = Executor.new(4);  // 4 worker threads
+
+    for _ in 0..100_000 {
+        let handle = executor.spawn(async {
+            42
+        });
+        let _ = handle.await;
+    }
+}
+
+/// Spawn with priority
+fn benchmark_spawn_with_priority() async {
+    for _ in 0..50_000 {
+        let high = spawn_with_priority(Priority.High, async { 1 });
+        let low = spawn_with_priority(Priority.Low, async { 2 });
+
+        let _ = high.await;
+        let _ = low.await;
+    }
+}
+
+/// Local spawn (single-threaded executor)
+fn benchmark_spawn_local() async {
+    for _ in 0..200_000 {
+        let handle = spawn_local async {
+            42
+        };
+        let _ = handle.await;
+    }
+}
+
+/// Spawn with timeout
+fn benchmark_spawn_with_timeout() async {
+    for _ in 0..50_000 {
+        let handle = spawn_with_timeout(Duration.from_millis(100), async {
+            42
+        });
+        let _ = handle.await;
+    }
+}
+
+/// Measure task allocation overhead
+fn benchmark_spawn_allocation() async {
+    type LargeCapture is {
+        data: [Int; 1024],
+    };
+
+    for _ in 0..10_000 {
+        let large = LargeCapture { data: [0; 1024] };
+        let handle = spawn async move {
+            large.data[0]
+        };
+        let _ = handle.await;
+    }
+}
+
+/// Work-stealing queue benchmark
+fn benchmark_spawn_work_stealing() async {
+    // Create imbalanced load
+    let handles: List<TaskHandle<Int>> = list![];
+
+    // Heavy tasks on one "thread"
+    for i in 0..100 {
+        handles.push(spawn async move {
+            // Simulate heavy work
+            let mut sum = 0;
+            for j in 0..1000 {
+                sum += j;
+            }
+            sum
+        });
+    }
+
+    // Light tasks
+    for i in 0..1000 {
+        handles.push(spawn async move {
+            i
+        });
+    }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+}
+
+/// Join multiple tasks
+fn benchmark_spawn_join_all() async {
+    for _ in 0..1_000 {
+        let tasks = (0..100).map(|i| spawn async move { i * 2 }).collect();
+        let results = join_all(tasks).await;
+        assert(results.len() == 100);
+    }
+}
+
+/// Select first completing task
+fn benchmark_spawn_select() async {
+    for _ in 0..10_000 {
+        let task1 = spawn async { 1 };
+        let task2 = spawn async { 2 };
+        let task3 = spawn async { 3 };
+
+        let first = select {
+            v = task1 => v,
+            v = task2 => v,
+            v = task3 => v,
+        };
+    }
+}

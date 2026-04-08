@@ -1,0 +1,103 @@
+// @test: typecheck-fail
+// @expected-error: undefined context
+// @tier: 0
+// @level: L2
+// @tags: contexts, groups, invalid, error
+// @description: Tests detection of invalid using definitions
+//
+// Context groups must only reference contexts that are defined.
+// Referencing undefined contexts or creating circular group references
+// should be caught at compile time.
+
+// Valid context declarations
+context async Database {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context Logger {
+    fn info(message: Text);
+    fn error(message: Text);
+}
+
+context Config {
+    fn get(key: Text) -> Maybe<Text>;
+}
+
+// Type definitions
+type Row is Map<Text, Text>;
+type DbError is Failed(Text);
+
+// ERROR: Context group references undefined context
+// E811: Invalid context group: Context 'UndefinedCache' is not defined
+using InvalidGroup1 = [Database, Logger, UndefinedCache];
+
+// ERROR: Multiple undefined contexts
+// E811: Invalid context group: Contexts 'Metrics', 'EventBus' are not defined
+using InvalidGroup2 = [Database, Metrics, EventBus];
+
+// ERROR: Empty using is invalid
+// E811: Invalid context group: Empty group is not allowed
+using EmptyGroup = [];
+
+// ERROR: Context group referencing another undefined group
+// E811: Invalid context group: Group 'UndefinedGroup' is not defined
+using ChainedInvalidGroup = [Database, UndefinedGroup];
+
+// ERROR: Self-referential context group
+// E811: Invalid context group: 'SelfReferential' cannot reference itself
+using SelfReferential = [Database, SelfReferential];
+
+// ERROR: Circular using reference
+// E811: Invalid context group: Circular reference detected: GroupA -> GroupB -> GroupA
+using GroupA = [Database, GroupB];
+using GroupB = [Logger, GroupA];
+
+// ERROR: Typo in context name
+// E811: Invalid context group: Context 'Databas' is not defined
+//       Did you mean 'Database'?
+using TypoGroup = [Databas, Logger];
+
+// ERROR: Using type name instead of context name
+// E811: Invalid context group: 'Row' is a type, not a context
+using WrongKindGroup = [Database, Row];
+
+// ERROR: Using protocol name instead of context name
+type Serializable is protocol {};
+// E811: Invalid context group: 'Serializable' is a trait, not a context
+using TraitGroup = [Database, Serializable];
+
+// Valid context groups for comparison
+using ValidGroup1 = [Database, Logger];
+using ValidGroup2 = [Database, Logger, Config];
+using ValidGroup3 = [ValidGroup1, Config];  // OK: Group includes another group
+
+// Function using valid group
+async fn use_valid_group() using ValidGroup1 {
+    Logger.info("Querying database");
+    let _ = Database.query("SELECT 1").await;
+}
+
+// ERROR: Using invalid group in function signature
+// E811: Invalid context group: 'InvalidGroup1' contains undefined context 'UndefinedCache'
+async fn use_invalid_group() using InvalidGroup1 {
+    Logger.info("This should not compile");
+}
+
+// ERROR: Inline invalid group reference
+// E811: Invalid context group: Context 'NonExistentContext' is not defined
+async fn inline_invalid() using [Database, NonExistentContext] {
+    let _ = Database.query("SELECT 1").await;
+}
+
+// ERROR: Provide for undefined context
+fn provide_undefined() {
+    // E811: Cannot provide undefined context 'UndefinedLogger'
+    provide UndefinedLogger = SomeValue {};
+}
+
+type SomeValue is {};
+
+fn main() {
+    // This code should not compile due to invalid using definitions
+}

@@ -1,0 +1,59 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, proof-scripts, list, reverse
+// @timeout: 30000
+
+/// List reverse is involutive: reverse(reverse(xs)) == xs
+
+fn list_reverse<T>(xs: List<T>) -> List<T>;
+
+/// Reverse of empty is empty
+lemma reverse_nil<T>(): list_reverse(Nil) == Nil {
+    proof by definition
+}
+
+/// Reverse distributes over append
+lemma reverse_append<T>(xs: List<T>, ys: List<T>):
+    list_reverse(xs ++ ys) == list_reverse(ys) ++ list_reverse(xs)
+{
+    proof by induction on xs
+}
+
+/// Reverse of singleton
+lemma reverse_singleton<T>(x: T): list_reverse(Cons(x, Nil)) == Cons(x, Nil) {
+    proof by definition
+}
+
+/// Main theorem: reverse is involutive
+theorem reverse_involutive<T>(xs: List<T>): list_reverse(list_reverse(xs)) == xs {
+    proof by induction on xs {
+        case Nil => {
+            trivial
+        }
+        case Cons(h, t) => {
+            have ih: list_reverse(list_reverse(t)) == t;
+            conclude by auto
+        }
+    }
+}
+
+/// Reverse preserves length
+theorem reverse_length<T>(xs: List<T>): len(list_reverse(xs)) == len(xs) {
+    proof by induction on xs {
+        case Nil => { trivial }
+        case Cons(h, t) => {
+            have ih: len(list_reverse(t)) == len(t);
+            conclude by auto
+        }
+    }
+}
+
+/// Reverse preserves membership
+theorem reverse_membership<T: Eq>(xs: List<T>, x: T):
+    x in xs <-> x in list_reverse(xs)
+{
+    proof by induction on xs
+}
+
+fn main() {}

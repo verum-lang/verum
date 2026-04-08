@@ -1,0 +1,84 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: production, router, map, closures
+// @expect: pass
+
+// Production pattern: mini HTTP router with path matching.
+
+type Response is {
+    status: Int,
+    body: Text,
+};
+
+fn ok(body: Text) -> Response {
+    Response { status: 200, body: body }
+}
+
+fn not_found() -> Response {
+    Response { status: 404, body: "Not Found" }
+}
+
+type Route is {
+    path: Text,
+    handler: fn(Text) -> Response,
+};
+
+fn new_route(path: Text, handler: fn(Text) -> Response) -> Route {
+    Route { path: path, handler: handler }
+}
+
+fn match_route(routes: List<Route>, request_path: Text) -> Response {
+    let mut i = 0;
+    while i < routes.len() {
+        if routes[i].path == request_path {
+            let handler = routes[i].handler;
+            return handler(request_path);
+        }
+        i = i + 1;
+    }
+    not_found()
+}
+
+fn main() -> Int {
+    // Define routes
+    let mut routes = List.new();
+
+    let home_handler = |path: Text| -> Response { ok(f"Welcome home! Path: {path}") };
+    let api_handler = |path: Text| -> Response { ok(f"API response for {path}") };
+    let health_handler = |_path: Text| -> Response { ok("OK") };
+
+    routes.push(new_route("/", home_handler));
+    routes.push(new_route("/api/data", api_handler));
+    routes.push(new_route("/health", health_handler));
+
+    // Test routing
+    let r1 = match_route(routes, "/");
+    if r1.status != 200 {
+        print(f"FAIL: / status = {r1.status}");
+        return 1;
+    }
+    print(f"GET /: {r1.body}");
+
+    let r2 = match_route(routes, "/api/data");
+    if r2.status != 200 {
+        print(f"FAIL: /api/data status = {r2.status}");
+        return 1;
+    }
+    print(f"GET /api/data: {r2.body}");
+
+    let r3 = match_route(routes, "/health");
+    if r3.status != 200 {
+        print(f"FAIL: /health status = {r3.status}");
+        return 1;
+    }
+
+    let r4 = match_route(routes, "/unknown");
+    if r4.status != 404 {
+        print(f"FAIL: /unknown status = {r4.status}");
+        return 1;
+    }
+
+    print("PASS: mini router works");
+    0
+}

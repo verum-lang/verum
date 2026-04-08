@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: verification, hybrid, contracts
+// @description: Hybrid verification - combines static and runtime checking
+
+/// @verify(hybrid) - some contracts checked statically, others at runtime
+/// Static: Refinement type constraints
+/// Runtime: Complex predicates requiring SMT or dynamic values
+
+@verify(hybrid)
+fn process_bounded_list(list: List<Int>{len > 0, len <= 100}) -> Int {
+    contract#"
+        // Statically verified via refinement types
+        requires list.len() > 0;
+        requires list.len() <= 100;
+
+        // Runtime verified - complex computation
+        ensures result == list.iter().sum();
+    ";
+    list.iter().sum()
+}
+
+@verify(hybrid)
+fn safe_index<T>(arr: List<T>{len > 0}, idx: Int{>= 0}) -> Maybe<T> {
+    contract#"
+        // Static: idx >= 0 (refinement type)
+        // Runtime: idx < arr.len() (dynamic check needed)
+        ensures idx < arr.len() implies result.is_some();
+        ensures idx >= arr.len() implies result.is_none();
+    ";
+    if idx < arr.len() {
+        Some(arr[idx])
+    } else {
+        None
+    }
+}
+
+/// Hybrid with ownership tracking
+@verify(hybrid)
+fn transfer_ownership<T>(mut source: List<T>, dest: &mut List<T>) -> Int {
+    contract#"
+        // Static: ownership and borrowing rules
+        // Runtime: ensures about final state
+        ensures source.is_empty();
+        ensures dest.len() >= old(dest.len());
+    ";
+    let count = source.len();
+    while let Some(item) = source.pop() {
+        dest.push(item);
+    }
+    count
+}
+
+/// Complex hybrid verification with multiple levels
+type OrderedList is {
+    items: List<Int>,
+    // Invariant partially static (type-level), partially runtime
+    invariant items.windows(2).all(|w| w[0] <= w[1]),
+};
+
+@verify(hybrid)
+implement OrderedList {
+    fn insert(mut self, value: Int) {
+        contract#"
+            // Runtime: maintains ordering
+            ensures self.items.windows(2).all(|w| w[0] <= w[1]);
+            ensures self.items.len() == old(self.items.len()) + 1;
+            ensures self.items.contains(&value);
+        ";
+        let pos = self.items.iter()
+            .position(|&x| x >= value)
+            .unwrap_or(self.items.len());
+        self.items.insert(pos, value);
+    }
+
+    fn remove_min(mut self) -> Maybe<Int> {
+        contract#"
+            requires self.items.len() > 0;
+            ensures self.items.len() == old(self.items.len()) - 1;
+            // Static: return type is Maybe<Int>
+            // Runtime: result is minimum
+            ensures result.is_some() implies
+                old(self.items).iter().all(|&x| x >= result.unwrap());
+        ";
+        if self.items.is_empty() {
+            None
+        } else {
+            Some(self.items.remove(0))
+        }
+    }
+}
+
+/// Hybrid verification with quantifiers
+@verify(hybrid)
+fn all_positive(list: List<Int>) -> Bool {
+    contract#"
+        // Static: return type is Bool
+        // Runtime: quantified predicate
+        ensures result == forall i in 0..list.len() => list[i] > 0;
+    ";
+    list.iter().all(|&x| x > 0)
+}
+
+fn main() {
+    let list = [1, 2, 3, 4, 5];
+    let sum = process_bounded_list(list);
+    assert(sum == 15);
+}

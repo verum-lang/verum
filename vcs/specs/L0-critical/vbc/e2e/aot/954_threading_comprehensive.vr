@@ -1,0 +1,71 @@
+// @test: run
+// @level: L0
+// @description: Comprehensive threading: spawn/join, captured values
+// @expected-exit: 0
+
+fn main() -> Int {
+    // Test 1: Basic thread spawn + join
+    let handle = spawn { 42 };
+    let result = handle.await;
+    if (result != 42) {
+        print(f"FAIL test1: expected 42, got {result}");
+        return 1;
+    }
+    print("Test 1 PASS: spawn + await = 42");
+
+    // Test 2: Multiple spawns with await
+    let h1 = spawn { 10 };
+    let h2 = spawn { 20 };
+    let h3 = spawn { 30 };
+    let v1 = h1.await;
+    let v2 = h2.await;
+    let v3 = h3.await;
+    let sum = v1 + v2 + v3;
+    if (sum != 60) {
+        print(f"FAIL test2: expected 60, got {sum}");
+        return 1;
+    }
+    print(f"Test 2 PASS: 3 threads sum = {sum}");
+
+    // Test 3: Thread with computation
+    let h4 = spawn {
+        let mut s = 0;
+        let mut i = 1;
+        while (i <= 100) {
+            s = s + i;
+            i = i + 1;
+        }
+        s
+    };
+    let computed = h4.await;
+    if (computed != 5050) {
+        print(f"FAIL test3: expected 5050, got {computed}");
+        return 1;
+    }
+    print(f"Test 3 PASS: threaded computation = {computed}");
+
+    // Test 4: Spawn with captured value
+    let base = 1000;
+    let h5 = spawn { base + 5 };
+    let v5 = h5.await;
+    if (v5 != 1005) {
+        print(f"FAIL test4: expected 1005, got {v5}");
+        return 1;
+    }
+    print(f"Test 4 PASS: captured value = {v5}");
+
+    // Test 5: Thread returning boolean result
+    let h6 = spawn {
+        let x = 7;
+        if (x > 5) { 1 } else { 0 }
+    };
+    let v6 = h6.await;
+    if (v6 != 1) {
+        print(f"FAIL test5: expected 1, got {v6}");
+        return 1;
+    }
+    print(f"Test 5 PASS: thread bool result = {v6}");
+
+    print("All threading tests passed");
+    0
+}

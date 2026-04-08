@@ -1,0 +1,488 @@
+// =============================================================================
+// format_traits_test.vr - Tests for LowerHex, UpperHex, Binary, Octal,
+//                         LowerExp, UpperExp protocols
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, format, hex, binary, octal, exponential
+// @description: Tests for specialized format protocols: LowerHex, UpperHex,
+//               Binary, Octal, LowerExp, UpperExp. Verifies protocol
+//               definitions, Int implementations, Float implementations,
+//               and formatting functions.
+// =============================================================================
+
+mount core.text.format.{
+    Formatter, FormatSpec,
+    LowerHex, UpperHex, Binary, Octal, LowerExp, UpperExp,
+    format_hex, format_binary, format_octal,
+    format_lower_exp, format_upper_exp,
+};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.protocols.{FormatError};
+
+// =============================================================================
+// Section 1: LowerHex protocol
+// =============================================================================
+
+@test
+fn test_lower_hex_zero() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 0;
+    let result = val.fmt_lower_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "0");
+}
+
+@test
+fn test_lower_hex_ten() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 10;
+    let result = val.fmt_lower_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "a");
+}
+
+@test
+fn test_lower_hex_255() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 255;
+    let result = val.fmt_lower_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "ff");
+}
+
+@test
+fn test_lower_hex_256() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 256;
+    let result = val.fmt_lower_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "100");
+}
+
+@test
+fn test_lower_hex_one() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 1;
+    let result = val.fmt_lower_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "1");
+}
+
+@test
+fn test_lower_hex_sixteen() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 16;
+    let result = val.fmt_lower_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "10");
+}
+
+// =============================================================================
+// Section 2: UpperHex protocol
+// =============================================================================
+
+@test
+fn test_upper_hex_zero() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 0;
+    let result = val.fmt_upper_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "0");
+}
+
+@test
+fn test_upper_hex_255() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 255;
+    let result = val.fmt_upper_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "FF");
+}
+
+@test
+fn test_upper_hex_171() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 171;  // 0xAB
+    let result = val.fmt_upper_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "AB");
+}
+
+@test
+fn test_upper_hex_large() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 4096; // 0x1000
+    let result = val.fmt_upper_hex(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "1000");
+}
+
+// =============================================================================
+// Section 3: Binary protocol
+// =============================================================================
+
+@test
+fn test_binary_zero() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 0;
+    let result = val.fmt_binary(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "0");
+}
+
+@test
+fn test_binary_one() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 1;
+    let result = val.fmt_binary(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "1");
+}
+
+@test
+fn test_binary_ten() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 10;
+    let result = val.fmt_binary(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "1010");
+}
+
+@test
+fn test_binary_255() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 255;
+    let result = val.fmt_binary(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "11111111");
+}
+
+@test
+fn test_binary_power_of_two() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 8;
+    let result = val.fmt_binary(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "1000");
+}
+
+@test
+fn test_binary_two() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 2;
+    let result = val.fmt_binary(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "10");
+}
+
+// =============================================================================
+// Section 4: Octal protocol
+// =============================================================================
+
+@test
+fn test_octal_zero() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 0;
+    let result = val.fmt_octal(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "0");
+}
+
+@test
+fn test_octal_seven() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 7;
+    let result = val.fmt_octal(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "7");
+}
+
+@test
+fn test_octal_eight() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 8;
+    let result = val.fmt_octal(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "10");
+}
+
+@test
+fn test_octal_255() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 255;
+    let result = val.fmt_octal(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "377");
+}
+
+@test
+fn test_octal_64() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 64;
+    let result = val.fmt_octal(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "100");
+}
+
+// =============================================================================
+// Section 5: Convenience functions
+// =============================================================================
+
+@test
+fn test_format_hex_255() {
+    let val: Int = 255;
+    let result = format_hex(&val);
+    assert_eq(result, "ff");
+}
+
+@test
+fn test_format_hex_zero() {
+    let val: Int = 0;
+    let result = format_hex(&val);
+    assert_eq(result, "0");
+}
+
+@test
+fn test_format_binary_10() {
+    let val: Int = 10;
+    let result = format_binary(&val);
+    assert_eq(result, "1010");
+}
+
+@test
+fn test_format_binary_zero() {
+    let val: Int = 0;
+    let result = format_binary(&val);
+    assert_eq(result, "0");
+}
+
+@test
+fn test_format_octal_255() {
+    let val: Int = 255;
+    let result = format_octal(&val);
+    assert_eq(result, "377");
+}
+
+@test
+fn test_format_octal_zero() {
+    let val: Int = 0;
+    let result = format_octal(&val);
+    assert_eq(result, "0");
+}
+
+// =============================================================================
+// Section 6: Protocol existence verification
+// =============================================================================
+
+@test
+fn test_lower_exp_protocol_exists() {
+    // LowerExp protocol is defined
+    assert(!false); // Compile-time check: protocol exists
+}
+
+@test
+fn test_upper_exp_protocol_exists() {
+    // UpperExp protocol is defined
+    assert(!false); // Compile-time check: protocol exists
+}
+
+// =============================================================================
+// Section 7: Edge cases
+// =============================================================================
+
+@test
+fn test_hex_negative() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = -1;
+    let result = val.fmt_lower_hex(&mut fmt);
+    assert(result is Ok);
+    assert(buf.len() > 0);
+}
+
+@test
+fn test_binary_large() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 1023;
+    let result = val.fmt_binary(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "1111111111");
+}
+
+@test
+fn test_octal_large() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Int = 511;
+    let result = val.fmt_octal(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "777");
+}
+
+@test
+fn test_hex_and_binary_consistency() {
+    // 15 in hex is "f", in binary is "1111"
+    let val: Int = 15;
+    let mut hex_buf = "";
+    let mut hex_fmt = Formatter.new(&mut hex_buf);
+    let _ = val.fmt_lower_hex(&mut hex_fmt);
+
+    let mut bin_buf = "";
+    let mut bin_fmt = Formatter.new(&mut bin_buf);
+    let _ = val.fmt_binary(&mut bin_fmt);
+
+    assert_eq(hex_buf, "f");
+    assert_eq(bin_buf, "1111");
+}
+
+// =============================================================================
+// Section 6: LowerExp protocol
+// =============================================================================
+
+@test
+fn test_lower_exp_one() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Float = 1.0;
+    let result = val.fmt_lower_exp(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "1.000000e0");
+}
+
+@test
+fn test_lower_exp_large() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Float = 1500.0;
+    let result = val.fmt_lower_exp(&mut fmt);
+    assert(result is Ok);
+    assert(buf.starts_with("1."));
+    assert(buf.contains("e3"));
+}
+
+@test
+fn test_lower_exp_small() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Float = 0.005;
+    let result = val.fmt_lower_exp(&mut fmt);
+    assert(result is Ok);
+    assert(buf.starts_with("5."));
+    assert(buf.contains("e-3"));
+}
+
+@test
+fn test_lower_exp_negative() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Float = -42.5;
+    let result = val.fmt_lower_exp(&mut fmt);
+    assert(result is Ok);
+    assert(buf.starts_with("-4."));
+    assert(buf.contains("e1"));
+}
+
+@test
+fn test_lower_exp_zero() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Float = 0.0;
+    let result = val.fmt_lower_exp(&mut fmt);
+    assert(result is Ok);
+    assert(buf.contains("0."));
+    assert(buf.contains("e0"));
+}
+
+// =============================================================================
+// Section 7: UpperExp protocol
+// =============================================================================
+
+@test
+fn test_upper_exp_one() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Float = 1.0;
+    let result = val.fmt_upper_exp(&mut fmt);
+    assert(result is Ok);
+    assert_eq(buf, "1.000000E0");
+}
+
+@test
+fn test_upper_exp_large() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Float = 2500.0;
+    let result = val.fmt_upper_exp(&mut fmt);
+    assert(result is Ok);
+    assert(buf.starts_with("2."));
+    assert(buf.contains("E3"));
+}
+
+@test
+fn test_upper_exp_negative() {
+    let mut buf = "";
+    let mut fmt = Formatter.new(&mut buf);
+    let val: Float = -0.001;
+    let result = val.fmt_upper_exp(&mut fmt);
+    assert(result is Ok);
+    assert(buf.starts_with("-1."));
+    assert(buf.contains("E-3"));
+}
+
+// =============================================================================
+// Section 8: Convenience functions for exponential
+// =============================================================================
+
+@test
+fn test_format_lower_exp_convenience() {
+    let val: Float = 42.0;
+    let s = format_lower_exp(&val);
+    assert(s.starts_with("4."));
+    assert(s.contains("e1"));
+}
+
+@test
+fn test_format_upper_exp_convenience() {
+    let val: Float = 42.0;
+    let s = format_upper_exp(&val);
+    assert(s.starts_with("4."));
+    assert(s.contains("E1"));
+}
+
+@test
+fn test_lower_exp_vs_upper_exp() {
+    let val: Float = 100.0;
+    let lower = format_lower_exp(&val);
+    let upper = format_upper_exp(&val);
+    // Both should have the same digits, different e/E
+    assert(lower.contains("e"));
+    assert(upper.contains("E"));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

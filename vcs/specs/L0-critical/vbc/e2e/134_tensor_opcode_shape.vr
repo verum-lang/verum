@@ -1,0 +1,196 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, shape
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Tensor shape operations — reshape, transpose, slice on flat arrays
+
+// ============================================================================
+// Tensor8: Fixed-size flat tensor of 8 Ints with shape
+// ============================================================================
+
+type Tensor8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    len: Int, rows: Int, cols: Int
+};
+
+fn t_get(t: Tensor8, i: Int) -> Int {
+    if i == 0 { t.d0 } else if i == 1 { t.d1 } else if i == 2 { t.d2 }
+    else if i == 3 { t.d3 } else if i == 4 { t.d4 } else if i == 5 { t.d5 }
+    else if i == 6 { t.d6 } else { t.d7 }
+}
+
+fn t_set(t: Tensor8, i: Int, v: Int) -> Tensor8 {
+    Tensor8 {
+        d0: if i == 0 { v } else { t.d0 },
+        d1: if i == 1 { v } else { t.d1 },
+        d2: if i == 2 { v } else { t.d2 },
+        d3: if i == 3 { v } else { t.d3 },
+        d4: if i == 4 { v } else { t.d4 },
+        d5: if i == 5 { v } else { t.d5 },
+        d6: if i == 6 { v } else { t.d6 },
+        d7: if i == 7 { v } else { t.d7 },
+        len: t.len, rows: t.rows, cols: t.cols
+    }
+}
+
+// Get element at (row, col) in row-major order
+fn t_get_rc(t: Tensor8, r: Int, c: Int) -> Int {
+    t_get(t, r * t.cols + c)
+}
+
+// Reshape: same data, different dimensions
+fn tensor_reshape(t: Tensor8, new_rows: Int, new_cols: Int) -> Tensor8 {
+    Tensor8 {
+        d0: t.d0, d1: t.d1, d2: t.d2, d3: t.d3,
+        d4: t.d4, d5: t.d5, d6: t.d6, d7: t.d7,
+        len: t.len, rows: new_rows, cols: new_cols
+    }
+}
+
+// Transpose 2x3 -> 3x2 (or any shape where rows*cols <= 8)
+fn tensor_transpose(t: Tensor8) -> Tensor8 {
+    let mut result = Tensor8 {
+        d0: 0, d1: 0, d2: 0, d3: 0,
+        d4: 0, d5: 0, d6: 0, d7: 0,
+        len: t.len, rows: t.cols, cols: t.rows
+    };
+    let mut r = 0;
+    while r < t.rows {
+        let mut c = 0;
+        while c < t.cols {
+            let src_idx = r * t.cols + c;
+            let dst_idx = c * t.rows + r;
+            let val = t_get(t, src_idx);
+            result = t_set(result, dst_idx, val);
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+    result
+}
+
+// Slice: extract row as 1D tensor
+fn tensor_slice_row(t: Tensor8, row: Int) -> Tensor8 {
+    let start = row * t.cols;
+    let mut result = Tensor8 {
+        d0: 0, d1: 0, d2: 0, d3: 0,
+        d4: 0, d5: 0, d6: 0, d7: 0,
+        len: t.cols, rows: 1, cols: t.cols
+    };
+    let mut i = 0;
+    while i < t.cols {
+        let val = t_get(t, start + i);
+        result = t_set(result, i, val);
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Test 1: Reshape 1x6 -> 2x3
+// ============================================================================
+
+@test
+fn test_reshape() {
+    let t = Tensor8 {
+        d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 6, d6: 0, d7: 0,
+        len: 6, rows: 1, cols: 6
+    };
+    let r = tensor_reshape(t, 2, 3);
+    assert_eq(r.rows, 2);
+    assert_eq(r.cols, 3);
+    // Data unchanged
+    assert_eq(t_get(r, 0), 1);
+    assert_eq(t_get(r, 5), 6);
+    // Access as 2D: row 0 = [1,2,3], row 1 = [4,5,6]
+    assert_eq(t_get_rc(r, 0, 0), 1);
+    assert_eq(t_get_rc(r, 0, 2), 3);
+    assert_eq(t_get_rc(r, 1, 0), 4);
+    assert_eq(t_get_rc(r, 1, 2), 6);
+    print("  test_reshape: ok");
+}
+
+// ============================================================================
+// Test 2: Transpose 2x3 -> 3x2
+// ============================================================================
+
+@test
+fn test_transpose() {
+    // [1 2 3]  -> [1 4]
+    // [4 5 6]     [2 5]
+    //             [3 6]
+    let t = Tensor8 {
+        d0: 1, d1: 2, d2: 3, d3: 4, d4: 5, d5: 6, d6: 0, d7: 0,
+        len: 6, rows: 2, cols: 3
+    };
+    let tr = tensor_transpose(t);
+    assert_eq(tr.rows, 3);
+    assert_eq(tr.cols, 2);
+    assert_eq(t_get_rc(tr, 0, 0), 1);
+    assert_eq(t_get_rc(tr, 0, 1), 4);
+    assert_eq(t_get_rc(tr, 1, 0), 2);
+    assert_eq(t_get_rc(tr, 1, 1), 5);
+    assert_eq(t_get_rc(tr, 2, 0), 3);
+    assert_eq(t_get_rc(tr, 2, 1), 6);
+    print("  test_transpose: ok");
+}
+
+// ============================================================================
+// Test 3: Slice row
+// ============================================================================
+
+@test
+fn test_slice_row() {
+    // 2x3 matrix [10,20,30; 40,50,60]
+    let t = Tensor8 {
+        d0: 10, d1: 20, d2: 30, d3: 40, d4: 50, d5: 60, d6: 0, d7: 0,
+        len: 6, rows: 2, cols: 3
+    };
+    let row0 = tensor_slice_row(t, 0);
+    assert_eq(row0.len, 3);
+    assert_eq(t_get(row0, 0), 10);
+    assert_eq(t_get(row0, 1), 20);
+    assert_eq(t_get(row0, 2), 30);
+
+    let row1 = tensor_slice_row(t, 1);
+    assert_eq(t_get(row1, 0), 40);
+    assert_eq(t_get(row1, 1), 50);
+    assert_eq(t_get(row1, 2), 60);
+    print("  test_slice_row: ok");
+}
+
+// ============================================================================
+// Test 4: Transpose is self-inverse
+// ============================================================================
+
+@test
+fn test_transpose_inverse() {
+    let t = Tensor8 {
+        d0: 7, d1: 8, d2: 9, d3: 10, d4: 0, d5: 0, d6: 0, d7: 0,
+        len: 4, rows: 2, cols: 2
+    };
+    let tt = tensor_transpose(tensor_transpose(t));
+    assert_eq(t_get(tt, 0), 7);
+    assert_eq(t_get(tt, 1), 8);
+    assert_eq(t_get(tt, 2), 9);
+    assert_eq(t_get(tt, 3), 10);
+    assert_eq(tt.rows, 2);
+    assert_eq(tt.cols, 2);
+    print("  test_transpose_inverse: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_reshape();
+    test_transpose();
+    test_slice_row();
+    test_transpose_inverse();
+    print("[OK] 134_tensor_opcode_shape");
+    0
+}

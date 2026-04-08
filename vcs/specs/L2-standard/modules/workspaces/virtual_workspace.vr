@@ -1,0 +1,225 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, workspace, virtual
+// @description: Virtual workspace without root package
+
+/// Virtual workspace - no root package, just coordinates members
+
+// Workspace manifest would be:
+// [workspace]
+// members = ["core", "cli", "server", "client"]
+// resolver = "2"
+//
+// [workspace.dependencies]
+// verum_std = "1.0"
+// serde = { version = "1.0", features = ["derive"] }
+
+// Core package - shared types and logic
+public module core {
+    // Shared dependencies defined at workspace level
+    mount workspace_deps.serde.{Serialize, Deserialize};
+
+    @derive(Serialize, Deserialize, Clone, Debug)
+    public type Message is {
+        id: Text,
+        content: Text,
+        timestamp: Int,
+    };
+
+    @derive(Serialize, Deserialize, Clone, Debug)
+    public type Request is {
+        method: Text,
+        path: Text,
+        body: Maybe<Message>,
+    };
+
+    @derive(Serialize, Deserialize, Clone, Debug)
+    public type Response is {
+        status: Int,
+        body: Maybe<Message>,
+    };
+
+    public type Protocol is protocol {
+        async fn handle_request(req: Request) -> Response;
+    };
+}
+
+// CLI package - command line interface
+public module cli {
+    mount workspace.core.{Message, Request, Response};
+
+    public type CliConfig is {
+        server_url: Text,
+        timeout_ms: Int,
+        verbose: Bool,
+    };
+
+    public fn parse_args(args: List<Text>) -> Result<CliConfig, Text> {
+        // Parse command line arguments
+        let mut config = CliConfig {
+            server_url: "http://localhost:8080",
+            timeout_ms: 5000,
+            verbose: false,
+        };
+
+        let mut i = 0;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--server" | "-s" => {
+                    i += 1;
+                    config.server_url = args.get(i)
+                        .ok_or("Missing server URL")?
+                        .clone();
+                }
+                "--timeout" | "-t" => {
+                    i += 1;
+                    let val = match args.get(i) {
+                        Some(v) => v,
+                        None => return Err("Missing timeout value"),
+                    };
+                    config.timeout_ms = match val.parse() {
+                        Some(n) => n,
+                        None => return Err("Invalid timeout"),
+                    };
+                }
+                "--verbose" | "-v" => {
+                    config.verbose = true;
+                }
+                _ => return Err(f"Unknown argument: {args[i]}"),
+            }
+            i += 1;
+        }
+
+        Ok(config)
+    }
+
+    public async fn run(config: CliConfig) -> Result<(), Text> {
+        if config.verbose {
+            println(f"Connecting to {config.server_url}");
+        }
+
+        // Implementation
+        Ok(())
+    }
+}
+
+// Server package - HTTP server
+public module server {
+    mount workspace.core.{Message, Request, Response, Protocol};
+
+    public type ServerConfig is {
+        host: Text,
+        port: Int,
+        max_connections: Int,
+    };
+
+    public type Server is {
+        config: ServerConfig,
+        handlers: Map<Text, fn(Request) -> Response>,
+    };
+
+    implement Server {
+        public fn new(config: ServerConfig) -> Self {
+            Self { config, handlers: {} }
+        }
+
+        public fn route(&mut self, path: Text, handler: fn(Request) -> Response) {
+            self.handlers.insert(path, handler);
+        }
+
+        public async fn start(&self) -> Result<(), Text> {
+            println(f"Server starting on {self.config.host}:{self.config.port}");
+            // Start listening
+            Ok(())
+        }
+    }
+}
+
+// Client package - HTTP client
+public module client {
+    mount workspace.core.{Message, Request, Response};
+
+    public type ClientConfig is {
+        base_url: Text,
+        timeout: Duration,
+        retry_count: Int,
+    };
+
+    public type Client is {
+        config: ClientConfig,
+    };
+
+    implement Client {
+        public fn new(base_url: Text) -> Self {
+            Self {
+                config: ClientConfig {
+                    base_url,
+                    timeout: Duration.from_secs(30),
+                    retry_count: 3,
+                }
+            }
+        }
+
+        public fn with_timeout(self, timeout: Duration) -> Self {
+            Self {
+                config: ClientConfig { timeout, ..self.config }
+            }
+        }
+
+        public async fn send(&self, request: Request) -> Result<Response, Text> {
+            let url = f"{self.config.base_url}{request.path}";
+
+            let mut attempts = 0;
+            loop {
+                match self.do_request(&url, &request).await {
+                    Ok(response) => return Ok(response),
+                    Err(e) if attempts < self.config.retry_count => {
+                        attempts += 1;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        async fn do_request(&self, url: &Text, request: &Request) -> Result<Response, Text> {
+            // HTTP implementation
+            Ok(Response { status: 200, body: None })
+        }
+    }
+}
+
+// Integration tests can access all workspace members
+@cfg(test)
+module integration_tests {
+    mount super.core.{Message, Request, Response};
+    mount super.server.{Server, ServerConfig};
+    mount super.client.{Client};
+
+    @test
+    async fn test_client_server_integration() {
+        // Start server
+        let server_config = ServerConfig {
+            host: "127.0.0.1",
+            port: 0,
+            max_connections: 10,
+        };
+
+        let srv = Server.new(server_config);
+
+        // Create client
+        let cli = Client.new("http://127.0.0.1:8080");
+
+        // Create a message
+        let msg = Message {
+            id: "1",
+            content: "Hello",
+            timestamp: 0,
+        };
+    }
+}
+
+fn main() {
+    // Virtual workspace example
+}

@@ -1,0 +1,231 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, binding, at
+//
+// Tests binding patterns with `x @ Pattern` for capturing while matching.
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Range is {
+    start: Int,
+    end: Int,
+};
+
+// Basic @ binding with literal
+fn is_special(n: Int) -> Maybe<Int> {
+    match n {
+        x @ 42 => Some(x),
+        x @ 0 => Some(x),
+        _ => None,
+    }
+}
+
+// @ binding with guard
+fn classify_positive(n: Int) -> Text {
+    match n {
+        x @ _ if x > 100 => f"large: {x}",
+        x @ _ if x > 10 => f"medium: {x}",
+        x @ _ if x > 0 => f"small: {x}",
+        0 => "zero",
+        x => f"negative: {x}",
+    }
+}
+
+// @ binding with enum variant
+fn describe_maybe(m: Maybe<Int>) -> Text {
+    match m {
+        opt @ Some(42) => "special some containing 42",
+        opt @ Some(x) if x > 0 => "positive some",
+        opt @ Some(_) => "some with non-positive",
+        opt @ None => "nothing here",
+    }
+}
+
+// @ binding capturing entire enum value
+fn transform_result(r: Result<Int, Text>) -> Result<Int, Text> {
+    match r {
+        result @ Ok(x) if x > 100 => result,  // Return unchanged if > 100
+        Ok(x) => Ok(x * 2),                   // Double if <= 100
+        err @ Err(_) => err,                  // Return error unchanged
+    }
+}
+
+// @ binding with tuple
+fn process_pair(pair: (Int, Int)) -> (Int, (Int, Int)) {
+    match pair {
+        p @ (a, b) => (a + b, p),  // Return sum and original pair
+    }
+}
+
+// @ binding with nested tuple
+fn analyze_nested(data: ((Int, Int), Int)) -> Text {
+    match data {
+        outer @ ((a, b), c) if a + b == c => f"sum property: {a}",
+        outer @ ((a, _), _) if a == 0 => "starts with zero",
+        _ => "other",
+    }
+}
+
+// @ binding with struct
+fn shift_point(p: Point) -> (Point, Point) {
+    match p {
+        original @ Point { x, y } => (original, Point { x: x + 1, y: y + 1 }),
+    }
+}
+
+// @ binding preserving matched value
+fn validate_range(r: Range) -> Result<Range, Text> {
+    match r {
+        valid @ Range { start, end } if start <= end => Ok(valid),
+        Range { start, end } => Err("Invalid: start > end"),
+    }
+}
+
+// @ binding in list patterns
+fn first_positive(list: ConsList<Int>) -> Maybe<(Int, ConsList<Int>)> {
+    match list {
+        Nil => None,
+        full @ Cons(head, _) if head > 0 => Some((head, full)),
+        Cons(_, tail) => first_positive(tail),
+    }
+}
+
+// @ binding with or-patterns (binds same in all alternatives)
+fn extract_int(r: Result<Int, Int>) -> (Text, Int) {
+    match r {
+        x @ Ok(n) => ("ok", n),
+        x @ Err(n) => ("err", n),
+    }
+}
+
+// @ binding with complex nested pattern
+fn find_origin_adjacent(points: ConsList<Point>) -> Maybe<Point> {
+    match points {
+        Nil => None,
+        Cons(p @ Point { x: 0, y }, _) if y == 1 || y == -1 => Some(p),
+        Cons(p @ Point { x, y: 0 }, _) if x == 1 || x == -1 => Some(p),
+        Cons(p @ Point { x: 0, y: 0 }, _) => Some(p),
+        Cons(_, rest) => find_origin_adjacent(rest),
+    }
+}
+
+// Multiple @ bindings in same pattern
+fn decompose_tuple(data: ((Int, Int), (Int, Int))) -> Text {
+    match data {
+        (left @ (a, b), right @ (c, d)) if a + b == c + d =>
+            "equal sums",
+        (left @ (a, _), right @ (_, d)) if a == d =>
+            "outer equal",
+        _ => "other",
+    }
+}
+
+// @ binding with range patterns
+fn classify_char(c: Char) -> Text {
+    match c {
+        ch @ 'a'..='z' => f"lowercase: {ch}",
+        ch @ 'A'..='Z' => f"uppercase: {ch}",
+        ch @ '0'..='9' => f"digit: {ch}",
+        ch => f"other: {ch}",
+    }
+}
+
+// @ binding for value preservation
+fn first_even_alt(list: ConsList<Int>) -> Maybe<Int> {
+    match list {
+        Nil => None,
+        whole @ Cons(head, _) if head % 2 == 0 => Some(head),
+        Cons(_, tail) => first_even_alt(tail),
+    }
+}
+
+// @ binding in deeply nested structures
+type Tree<T> is
+    | Leaf(T)
+    | Node(Tree<T>, Tree<T>);
+
+fn find_leaf_pair(tree: Tree<Int>) -> Maybe<(Int, Int)> {
+    match tree {
+        Node(left @ Leaf(a), right @ Leaf(b)) => Some((a, b)),
+        Node(left, right) => {
+            match find_leaf_pair(left) {
+                Some(pair) => Some(pair),
+                None => find_leaf_pair(right),
+            }
+        }
+        Leaf(_) => None,
+    }
+}
+
+fn main() {
+    // Special values
+    assert(is_special(42) == Some(42));
+    assert(is_special(0) == Some(0));
+    assert(is_special(10) == None);
+
+    // Classification
+    assert(classify_positive(200) == "large: 200");
+    assert(classify_positive(50) == "medium: 50");
+    assert(classify_positive(5) == "small: 5");
+    assert(classify_positive(0) == "zero");
+    assert(classify_positive(-5) == "negative: -5");
+
+    // Maybe description
+    assert(describe_maybe(Some(42)) == "special some containing 42");
+    assert(describe_maybe(Some(10)) == "positive some");
+    assert(describe_maybe(Some(-5)) == "some with non-positive");
+    assert(describe_maybe(None) == "nothing here");
+
+    // Result transformation
+    let r1: Result<Int, Text> = Ok(200);
+    let r2: Result<Int, Text> = Ok(50);
+    assert(transform_result(r1) == Ok(200));
+    assert(transform_result(r2) == Ok(100));
+
+    // Pair processing
+    let (sum, orig) = process_pair((3, 4));
+    assert(sum == 7);
+    assert(orig == (3, 4));
+
+    // Point shifting
+    let p = Point { x: 1, y: 2 };
+    let (orig_p, shifted) = shift_point(p);
+    assert(orig_p.x == 1 && orig_p.y == 2);
+    assert(shifted.x == 2 && shifted.y == 3);
+
+    // Extract int from result
+    let (tag1, val1) = extract_int(Ok(42));
+    let (tag2, val2) = extract_int(Err(99));
+    assert(tag1 == "ok" && val1 == 42);
+    assert(tag2 == "err" && val2 == 99);
+
+    // Decompose tuple
+    assert(decompose_tuple(((1, 2), (2, 1))) == "equal sums");
+    assert(decompose_tuple(((5, 2), (3, 5))) == "outer equal");
+    assert(decompose_tuple(((1, 2), (3, 4))) == "other");
+
+    // Character classification
+    assert(classify_char('a') == "lowercase: a");
+    assert(classify_char('Z') == "uppercase: Z");
+    assert(classify_char('5') == "digit: 5");
+
+    // Tree leaf pair
+    let tree = Node(Leaf(1), Node(Leaf(2), Leaf(3)));
+    assert(find_leaf_pair(tree) == Some((2, 3)));
+}

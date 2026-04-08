@@ -1,0 +1,171 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: text, string, operations, methods
+// @description: Text type operations - concat, length, format, comparison
+
+fn test_text_concat() -> Int {
+    let a = "Hello";
+    let b = " World";
+    let c = a + b;
+    if c != "Hello World" {
+        print(f"FAIL concat: got {c}");
+        return 1;
+    }
+    print("  text_concat: OK");
+    0
+}
+
+fn test_text_length() -> Int {
+    let s = "abcdef";
+    if s.len() != 6 {
+        print(f"FAIL length: expected 6, got {s.len()}");
+        return 1;
+    }
+    let empty = "";
+    if empty.len() != 0 {
+        print(f"FAIL empty length: expected 0, got {empty.len()}");
+        return 1;
+    }
+    print("  text_length: OK");
+    0
+}
+
+fn test_text_comparison() -> Int {
+    let a = "abc";
+    let b = "abc";
+    let c = "xyz";
+    if a != b {
+        print("FAIL comparison: a should equal b");
+        return 1;
+    }
+    if a == c {
+        print("FAIL comparison: a should not equal c");
+        return 1;
+    }
+    print("  text_comparison: OK");
+    0
+}
+
+fn test_fstring() -> Int {
+    let x = 42;
+    let y = 100;
+    let msg = f"x={x}, y={y}, sum={x + y}";
+    if msg != "x=42, y=100, sum=142" {
+        print(f"FAIL fstring: got {msg}");
+        return 1;
+    }
+    print("  fstring: OK");
+    0
+}
+
+fn test_text_contains() -> Int {
+    let s = "hello world";
+    if !s.contains("world") {
+        print("FAIL contains: should contain 'world'");
+        return 1;
+    }
+    if s.contains("xyz") {
+        print("FAIL contains: should not contain 'xyz'");
+        return 1;
+    }
+    print("  text_contains: OK");
+    0
+}
+
+fn test_text_starts_ends() -> Int {
+    let s = "hello world";
+    if !s.starts_with("hello") {
+        print("FAIL starts_with");
+        return 1;
+    }
+    if !s.ends_with("world") {
+        print("FAIL ends_with");
+        return 1;
+    }
+    if s.starts_with("world") {
+        print("FAIL starts_with negative");
+        return 1;
+    }
+    print("  text_starts_ends: OK");
+    0
+}
+
+fn test_text_trim() -> Int {
+    let s = "  hello  ";
+    let trimmed = s.trim();
+    if trimmed != "hello" {
+        print(f"FAIL trim: got '{trimmed}'");
+        return 1;
+    }
+    print("  text_trim: OK");
+    0
+}
+
+fn test_text_to_upper_lower() -> Int {
+    let s = "Hello World";
+    let upper = s.to_upper();
+    let lower = s.to_lower();
+    if upper != "HELLO WORLD" {
+        print(f"FAIL to_upper: got '{upper}'");
+        return 1;
+    }
+    if lower != "hello world" {
+        print(f"FAIL to_lower: got '{lower}'");
+        return 1;
+    }
+    print("  text_upper_lower: OK");
+    0
+}
+
+fn test_text_split() -> Int {
+    let s = "a,b,c,d";
+    let parts = s.split(",");
+    if parts.len() != 4 {
+        print(f"FAIL split len: expected 4, got {parts.len()}");
+        return 1;
+    }
+    if parts[0] != "a" {
+        print(f"FAIL split[0]: expected 'a', got '{parts[0]}'");
+        return 1;
+    }
+    if parts[3] != "d" {
+        print(f"FAIL split[3]: expected 'd', got '{parts[3]}'");
+        return 1;
+    }
+    print("  text_split: OK");
+    0
+}
+
+fn test_text_replace() -> Int {
+    let s = "hello world hello";
+    let r = s.replace("hello", "hi");
+    if r != "hi world hi" {
+        print(f"FAIL replace: got '{r}'");
+        return 1;
+    }
+    print("  text_replace: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Text Operation Tests:");
+    let mut failures = 0;
+    failures = failures + test_text_concat();
+    failures = failures + test_text_length();
+    failures = failures + test_text_comparison();
+    failures = failures + test_fstring();
+    failures = failures + test_text_contains();
+    failures = failures + test_text_starts_ends();
+    failures = failures + test_text_trim();
+    failures = failures + test_text_to_upper_lower();
+    failures = failures + test_text_split();
+    failures = failures + test_text_replace();
+
+    if failures == 0 {
+        print("All text operation tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

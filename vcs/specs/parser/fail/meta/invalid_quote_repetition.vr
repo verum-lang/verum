@@ -1,0 +1,14 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, meta, quote, repetition, patterns, error
+// @description: Test invalid quote repetition - unclosed bracket
+// @expected-error: E011
+
+// Unclosed bracket in repetition
+meta fn unclosed_repetition(items: List<Text>) -> TokenStream {
+    quote {
+        $[for item in items {  // ERROR: unclosed bracket
+            let $item = 0;
+        }
+    }
+}

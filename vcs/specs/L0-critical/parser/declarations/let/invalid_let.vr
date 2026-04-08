@@ -1,0 +1,86 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, let, binding, invalid, error
+
+// ERROR: Missing identifier
+let = 5;
+
+// ERROR: Missing equals sign
+let x 5;
+
+// ERROR: Missing expression
+let y =;
+
+// ERROR: Missing semicolon
+let z = 10
+
+// ERROR: Invalid pattern in let binding
+let 123 = value;
+
+// ERROR: Duplicate mut keyword
+let mut mut x = 5;
+
+// ERROR: mut after const
+let const mut x = 5;
+
+// ERROR: Invalid type annotation syntax
+let x: = 5;
+
+// ERROR: Unclosed type generic
+let list: List<Int = [];
+
+// ERROR: Invalid destructuring pattern
+let (a,, b) = tuple;
+
+// ERROR: Invalid let-else (missing else block)
+let Some(x) = maybe else;
+
+// ERROR: Invalid let-else (missing pattern)
+let = maybe else { return; };
+
+// ERROR: Empty destructuring
+let () = unit;
+let {} = record;
+
+// ERROR: Invalid keyword as identifier
+let fn = 5;
+let type = 10;
+let if = 20;
+
+// ERROR: Invalid expression on right side
+let x = +;
+let y = *;
+let z = /;
+
+// ERROR: Multiple equals signs
+let x == 5;
+let y = = 5;
+
+// ERROR: Expression on left side
+let x + 1 = 5;
+let f(x) = 5;
+
+// ERROR: Invalid operator in binding
+let x + y = 10;
+let a.b = 10;
+
+// ERROR: Incomplete type annotation
+let x: List<> = [];
+let y: Map<,> = {};
+
+// ERROR: Invalid const with mut
+let const mut x = 5;
+let mut const y = 10;
+
+// ERROR: Double let keyword
+let let x = 5;
+
+// ERROR: Missing value after equals
+let x =
+let y = 10;
+
+// ERROR: Invalid character in identifier
+let x$ = 5;
+let @name = 10;
+let #value = 20;

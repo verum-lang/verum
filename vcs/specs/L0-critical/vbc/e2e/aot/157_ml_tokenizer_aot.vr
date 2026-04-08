@@ -1,0 +1,339 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, ml, tokenizer
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT ML tokenizer concepts — vocabulary, encoding, decoding
+
+// ============================================================================
+// Fixed-size vocabulary (16 entries) mapping token IDs to conceptual tokens
+// Simulates a small vocabulary using integer token IDs.
+// Tokens: 0=PAD, 1=UNK, 2=BOS, 3=EOS, 4="hello", 5="world",
+//         6="the", 7="cat", 8="sat", 9="on", 10="mat", 11="a",
+//         12="dog", 13="ran", 14="fast", 15="is"
+// ============================================================================
+
+type Vocab is {
+    size: Int,
+    pad_id: Int,
+    unk_id: Int,
+    bos_id: Int,
+    eos_id: Int
+};
+
+fn vocab_new() -> Vocab {
+    Vocab { size: 16, pad_id: 0, unk_id: 1, bos_id: 2, eos_id: 3 }
+}
+
+// ============================================================================
+// Token sequence (max 8 tokens)
+// ============================================================================
+
+type TokenSeq is {
+    t0: Int, t1: Int, t2: Int, t3: Int,
+    t4: Int, t5: Int, t6: Int, t7: Int,
+    len: Int
+};
+
+fn seq_empty() -> TokenSeq {
+    TokenSeq { t0: 0, t1: 0, t2: 0, t3: 0, t4: 0, t5: 0, t6: 0, t7: 0, len: 0 }
+}
+
+fn seq_get(s: TokenSeq, i: Int) -> Int {
+    if i == 0 { s.t0 } else if i == 1 { s.t1 } else if i == 2 { s.t2 }
+    else if i == 3 { s.t3 } else if i == 4 { s.t4 } else if i == 5 { s.t5 }
+    else if i == 6 { s.t6 } else { s.t7 }
+}
+
+fn seq_set(s: TokenSeq, i: Int, v: Int) -> TokenSeq {
+    TokenSeq {
+        t0: if i == 0 { v } else { s.t0 },
+        t1: if i == 1 { v } else { s.t1 },
+        t2: if i == 2 { v } else { s.t2 },
+        t3: if i == 3 { v } else { s.t3 },
+        t4: if i == 4 { v } else { s.t4 },
+        t5: if i == 5 { v } else { s.t5 },
+        t6: if i == 6 { v } else { s.t6 },
+        t7: if i == 7 { v } else { s.t7 },
+        len: s.len
+    }
+}
+
+fn seq_push(s: TokenSeq, v: Int) -> TokenSeq {
+    let idx = s.len;
+    let mut out = seq_set(s, idx, v);
+    out = TokenSeq {
+        t0: out.t0, t1: out.t1, t2: out.t2, t3: out.t3,
+        t4: out.t4, t5: out.t5, t6: out.t6, t7: out.t7,
+        len: s.len + 1
+    };
+    out
+}
+
+// ============================================================================
+// BPE merge pair type
+// Represents a merge: when token pair (first, second) is found,
+// replace with merged_id
+// ============================================================================
+
+type MergePair is { first: Int, second: Int, merged_id: Int };
+
+// Apply a single BPE merge to a sequence
+fn apply_merge(s: TokenSeq, merge: MergePair) -> TokenSeq {
+    let mut out = seq_empty();
+    let mut i = 0;
+    let mut out_len = 0;
+    while i < s.len {
+        if i + 1 < s.len && seq_get(s, i) == merge.first && seq_get(s, i + 1) == merge.second {
+            out = seq_set(out, out_len, merge.merged_id);
+            out_len = out_len + 1;
+            i = i + 2;
+        } else {
+            out = seq_set(out, out_len, seq_get(s, i));
+            out_len = out_len + 1;
+            i = i + 1;
+        }
+    }
+    TokenSeq {
+        t0: out.t0, t1: out.t1, t2: out.t2, t3: out.t3,
+        t4: out.t4, t5: out.t5, t6: out.t6, t7: out.t7,
+        len: out_len
+    }
+}
+
+// ============================================================================
+// Encode: wrap a token sequence with BOS and EOS, pad to fixed length
+// ============================================================================
+
+fn encode_with_special(tokens: TokenSeq, v: Vocab, max_len: Int) -> TokenSeq {
+    let mut out = seq_empty();
+    // BOS
+    out = seq_push(out, v.bos_id);
+    // Tokens
+    let mut i = 0;
+    while i < tokens.len && out.len < max_len - 1 {
+        out = seq_push(out, seq_get(tokens, i));
+        i = i + 1;
+    }
+    // EOS
+    out = seq_push(out, v.eos_id);
+    // Pad remaining
+    while out.len < max_len {
+        out = seq_push(out, v.pad_id);
+    }
+    out
+}
+
+// Decode: strip BOS, EOS, and PAD tokens
+fn decode_strip_special(tokens: TokenSeq, v: Vocab) -> TokenSeq {
+    let mut out = seq_empty();
+    let mut i = 0;
+    while i < tokens.len {
+        let tok = seq_get(tokens, i);
+        if tok != v.pad_id && tok != v.bos_id && tok != v.eos_id {
+            out = seq_push(out, tok);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// ============================================================================
+// Test 1: vocabulary lookup and special tokens
+// ============================================================================
+
+fn test_vocab_lookup() {
+    let v = vocab_new();
+    assert_eq(v.size, 16);
+    assert_eq(v.pad_id, 0);
+    assert_eq(v.unk_id, 1);
+    assert_eq(v.bos_id, 2);
+    assert_eq(v.eos_id, 3);
+
+    // Token IDs are distinct
+    let pad_ok = if v.pad_id == v.unk_id { 0 } else { 1 };
+    assert_eq(pad_ok, 1);
+    let bos_ok = if v.bos_id == v.eos_id { 0 } else { 1 };
+    assert_eq(bos_ok, 1);
+
+    // All special tokens are < 4
+    assert(v.pad_id < 4);
+    assert(v.unk_id < 4);
+    assert(v.bos_id < 4);
+    assert(v.eos_id < 4);
+
+    print("test_vocab_lookup passed");
+}
+
+// ============================================================================
+// Test 2: encode and decode round-trip
+// ============================================================================
+
+fn test_encode_decode() {
+    let v = vocab_new();
+
+    // Sentence: "the cat sat on a mat" -> [6, 7, 8, 9, 11, 10]
+    let mut tokens = seq_empty();
+    tokens = seq_push(tokens, 6);   // the
+    tokens = seq_push(tokens, 7);   // cat
+    tokens = seq_push(tokens, 8);   // sat
+    tokens = seq_push(tokens, 9);   // on
+    tokens = seq_push(tokens, 11);  // a
+    tokens = seq_push(tokens, 10);  // mat
+    assert_eq(tokens.len, 6);
+
+    // Encode with BOS/EOS and pad to 8: all 6 tokens fit
+    // Layout: [BOS, the, cat, sat, on, a, mat, EOS]
+    let encoded = encode_with_special(tokens, v, 8);
+    assert_eq(encoded.len, 8);
+    assert_eq(seq_get(encoded, 0), 2);  // BOS
+    assert_eq(seq_get(encoded, 1), 6);  // the
+    assert_eq(seq_get(encoded, 2), 7);  // cat
+    assert_eq(seq_get(encoded, 3), 8);  // sat
+    assert_eq(seq_get(encoded, 4), 9);  // on
+    assert_eq(seq_get(encoded, 5), 11); // a
+    assert_eq(seq_get(encoded, 6), 10); // mat
+    assert_eq(seq_get(encoded, 7), 3);  // EOS
+
+    // Decode: strip special tokens, should recover all 6 content tokens
+    let decoded = decode_strip_special(encoded, v);
+    assert_eq(decoded.len, 6);
+    assert_eq(seq_get(decoded, 0), 6);   // the
+    assert_eq(seq_get(decoded, 1), 7);   // cat
+    assert_eq(seq_get(decoded, 2), 8);   // sat
+    assert_eq(seq_get(decoded, 3), 9);   // on
+    assert_eq(seq_get(decoded, 4), 11);  // a
+    assert_eq(seq_get(decoded, 5), 10);  // mat
+
+    // Test truncation: encode with max_len=6 (only room for 4 content tokens)
+    // Layout: [BOS, the, cat, sat, on, EOS]
+    let short = encode_with_special(tokens, v, 6);
+    assert_eq(short.len, 6);
+    assert_eq(seq_get(short, 0), 2);  // BOS
+    assert_eq(seq_get(short, 1), 6);  // the
+    assert_eq(seq_get(short, 2), 7);  // cat
+    assert_eq(seq_get(short, 3), 8);  // sat
+    assert_eq(seq_get(short, 4), 9);  // on
+    assert_eq(seq_get(short, 5), 3);  // EOS (truncated: a, mat dropped)
+
+    let short_dec = decode_strip_special(short, v);
+    assert_eq(short_dec.len, 4);
+
+    print("test_encode_decode passed");
+}
+
+// ============================================================================
+// Test 3: BPE merge
+// ============================================================================
+
+fn test_bpe_merge() {
+    // Simulate character-level tokens that get merged:
+    // Tokens: [4, 5, 4, 5, 6] representing "ab ab c"
+    // Merge rule: (4, 5) -> 10 (merge "a"+"b" into "ab")
+    let mut seq = seq_empty();
+    seq = seq_push(seq, 4);
+    seq = seq_push(seq, 5);
+    seq = seq_push(seq, 4);
+    seq = seq_push(seq, 5);
+    seq = seq_push(seq, 6);
+    assert_eq(seq.len, 5);
+
+    let merge = MergePair { first: 4, second: 5, merged_id: 10 };
+    let merged = apply_merge(seq, merge);
+    // After merge: [10, 10, 6] — both "ab" pairs merged
+    assert_eq(merged.len, 3);
+    assert_eq(seq_get(merged, 0), 10);
+    assert_eq(seq_get(merged, 1), 10);
+    assert_eq(seq_get(merged, 2), 6);
+
+    // No merge when pair not present
+    let merge2 = MergePair { first: 7, second: 8, merged_id: 11 };
+    let no_change = apply_merge(merged, merge2);
+    assert_eq(no_change.len, 3);
+    assert_eq(seq_get(no_change, 0), 10);
+    assert_eq(seq_get(no_change, 1), 10);
+    assert_eq(seq_get(no_change, 2), 6);
+
+    // Chain two merges: first (4,5)->10, then (10,6)->12
+    let mut seq2 = seq_empty();
+    seq2 = seq_push(seq2, 4);
+    seq2 = seq_push(seq2, 5);
+    seq2 = seq_push(seq2, 6);
+    let after1 = apply_merge(seq2, merge);
+    // [10, 6]
+    assert_eq(after1.len, 2);
+    let merge3 = MergePair { first: 10, second: 6, merged_id: 12 };
+    let after2 = apply_merge(after1, merge3);
+    // [12]
+    assert_eq(after2.len, 1);
+    assert_eq(seq_get(after2, 0), 12);
+
+    print("test_bpe_merge passed");
+}
+
+// ============================================================================
+// Test 4: special token handling and padding
+// ============================================================================
+
+fn test_special_tokens() {
+    let v = vocab_new();
+
+    // Empty input: encode should produce [BOS, EOS, PAD, PAD, ...]
+    let empty = seq_empty();
+    let enc = encode_with_special(empty, v, 4);
+    assert_eq(enc.len, 4);
+    assert_eq(seq_get(enc, 0), 2);  // BOS
+    assert_eq(seq_get(enc, 1), 3);  // EOS
+    assert_eq(seq_get(enc, 2), 0);  // PAD
+    assert_eq(seq_get(enc, 3), 0);  // PAD
+
+    // Decode empty: should get empty
+    let dec = decode_strip_special(enc, v);
+    assert_eq(dec.len, 0);
+
+    // Single token: [4]
+    let mut single = seq_empty();
+    single = seq_push(single, 4);
+    let enc2 = encode_with_special(single, v, 4);
+    assert_eq(enc2.len, 4);
+    assert_eq(seq_get(enc2, 0), 2);  // BOS
+    assert_eq(seq_get(enc2, 1), 4);  // hello
+    assert_eq(seq_get(enc2, 2), 3);  // EOS
+    assert_eq(seq_get(enc2, 3), 0);  // PAD
+
+    let dec2 = decode_strip_special(enc2, v);
+    assert_eq(dec2.len, 1);
+    assert_eq(seq_get(dec2, 0), 4);
+
+    // UNK token: unknown words become unk_id
+    let mut with_unk = seq_empty();
+    with_unk = seq_push(with_unk, 6);   // the
+    with_unk = seq_push(with_unk, 1);   // UNK (unknown word)
+    with_unk = seq_push(with_unk, 7);   // cat
+    let enc3 = encode_with_special(with_unk, v, 6);
+    assert_eq(seq_get(enc3, 0), 2);  // BOS
+    assert_eq(seq_get(enc3, 1), 6);  // the
+    assert_eq(seq_get(enc3, 2), 1);  // UNK
+    assert_eq(seq_get(enc3, 3), 7);  // cat
+    assert_eq(seq_get(enc3, 4), 3);  // EOS
+    assert_eq(seq_get(enc3, 5), 0);  // PAD
+
+    // Decode strips UNK too? No — UNK is a valid content token
+    let dec3 = decode_strip_special(enc3, v);
+    assert_eq(dec3.len, 3);
+    assert_eq(seq_get(dec3, 0), 6);  // the
+    assert_eq(seq_get(dec3, 1), 1);  // UNK preserved
+    assert_eq(seq_get(dec3, 2), 7);  // cat
+
+    print("test_special_tokens passed");
+}
+
+fn main() -> Int {
+    test_vocab_lookup();
+    test_encode_decode();
+    test_bpe_merge();
+    test_special_tokens();
+    print("ALL PASSED");
+    0
+}

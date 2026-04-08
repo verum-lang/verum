@@ -1,0 +1,231 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, protocols, basic
+// @description: Basic protocol definitions and implementations
+
+/// Test for basic protocol definitions.
+/// Protocols define interfaces that types can implement.
+
+// ============================================================================
+// Basic protocol with single method
+// ============================================================================
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Debug is protocol {
+    fn debug(&self) -> Text;
+};
+
+// ============================================================================
+// Protocol with multiple methods
+// ============================================================================
+
+type Serialize is protocol {
+    fn serialize(&self) -> List<Int>;
+    fn size_hint(&self) -> Int;
+};
+
+type Counter is protocol {
+    fn count(&self) -> Int;
+    fn increment(&mut self);
+    fn reset(&mut self);
+};
+
+type Buffer is protocol {
+    fn write(&mut self, data: Int);
+    fn read(&self) -> Int;
+    fn clear(&mut self);
+};
+
+// ============================================================================
+// Empty protocol (marker protocol)
+// ============================================================================
+
+type Marker is protocol {};
+
+type Send is protocol {};
+
+type Sync is protocol {};
+
+// ============================================================================
+// Implementations of basic protocols
+// ============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+implement Display for Point {
+    fn display(&self) -> Text {
+        f"Point({self.x}, {self.y})"
+    }
+}
+
+implement Debug for Point {
+    fn debug(&self) -> Text {
+        f"Point {{ x: {self.x}, y: {self.y} }}"
+    }
+}
+
+implement Serialize for Point {
+    fn serialize(&self) -> List<Int> {
+        [self.x, self.y]
+    }
+
+    fn size_hint(&self) -> Int {
+        2
+    }
+}
+
+type SimpleCounter is {
+    value: Int,
+};
+
+implement Counter for SimpleCounter {
+    fn count(&self) -> Int {
+        self.value
+    }
+
+    fn increment(&mut self) {
+        self.value += 1;
+    }
+
+    fn reset(&mut self) {
+        self.value = 0;
+    }
+}
+
+type SimpleBuffer is {
+    data: Int,
+};
+
+implement Buffer for SimpleBuffer {
+    fn write(&mut self, data: Int) {
+        self.data = data;
+    }
+
+    fn read(&self) -> Int {
+        self.data
+    }
+
+    fn clear(&mut self) {
+        self.data = 0;
+    }
+}
+
+// ============================================================================
+// Using protocols as bounds
+// ============================================================================
+
+fn print_display<T: Display>(item: &T) {
+    print(item.display());
+}
+
+fn debug_item<T: Debug>(item: &T) -> Text {
+    item.debug()
+}
+
+fn serialize_item<T: Serialize>(item: &T) -> List<Int> {
+    item.serialize()
+}
+
+fn increment_counter<T: Counter>(counter: &mut T) {
+    counter.increment();
+    counter.increment();
+}
+
+// ============================================================================
+// Generic type implementing protocol
+// ============================================================================
+
+type Wrapper<T> is {
+    inner: T,
+};
+
+implement<T: Display> Display for Wrapper<T> {
+    fn display(&self) -> Text {
+        f"Wrapper({self.inner.display()})"
+    }
+}
+
+implement<T: Debug> Debug for Wrapper<T> {
+    fn debug(&self) -> Text {
+        f"Wrapper {{ inner: {self.inner.debug()} }}"
+    }
+}
+
+// ============================================================================
+// Multiple protocol implementation
+// ============================================================================
+
+type Named is {
+    name: Text,
+    id: Int,
+};
+
+implement Display for Named {
+    fn display(&self) -> Text {
+        f"{self.name}#{self.id}"
+    }
+}
+
+implement Debug for Named {
+    fn debug(&self) -> Text {
+        f"Named {{ name: \"{self.name}\", id: {self.id} }}"
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    let mut counter = SimpleCounter { value: 0 };
+    let mut buf = SimpleBuffer { data: 0 };
+
+    // Use Display protocol
+    let display_text: Text = p.display();
+    print_display(&p);
+
+    // Use Debug protocol
+    let debug_text: Text = p.debug();
+    let debug_via_fn: Text = debug_item(&p);
+
+    // Use Serialize protocol
+    let serialized: List<Int> = serialize_item(&p);
+    assert(serialized[0] == 1);
+    assert(serialized[1] == 2);
+    assert(p.size_hint() == 2);
+
+    // Use Counter protocol
+    assert(counter.count() == 0);
+    increment_counter(&mut counter);
+    assert(counter.count() == 2);
+    counter.reset();
+    assert(counter.count() == 0);
+
+    // Use Buffer protocol
+    buf.write(42);
+    assert(buf.read() == 42);
+    buf.clear();
+    assert(buf.read() == 0);
+
+    // Wrapped type with protocol
+    let wrapped = Wrapper { inner: Point { x: 3, y: 4 } };
+    let wrapped_display = wrapped.display();
+    let wrapped_debug = wrapped.debug();
+
+    // Named type
+    let n = Named { name: "Alice", id: 99 };
+    assert(n.display() == "Alice#99");
+
+    // Assertions
+    assert(display_text == "Point(1, 2)");
+    assert(debug_text == "Point { x: 1, y: 2 }");
+    assert(debug_via_fn == "Point { x: 1, y: 2 }");
+}

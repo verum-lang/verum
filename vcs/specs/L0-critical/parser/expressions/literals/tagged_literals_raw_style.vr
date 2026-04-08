@@ -1,0 +1,16 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, literals, tagged, raw, deprecated, error
+//
+// Tests that the deprecated tag#r#"..."# raw tagged literal syntax is rejected.
+// Per simplified literal architecture v6.0:
+//   - The tag#r#"..."# syntax has been REMOVED
+//   - Use tag#"""...""" (triple-quoted tagged) instead
+//
+// @expected-error: E010
+
+fn test_deprecated_tagged_raw_syntax() {
+    // tag#r#"..."# is no longer valid — use tag#"""...""" instead
+    let invalid = rx#r#"\d{3}-\d{4}"#;
+}

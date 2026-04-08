@@ -1,0 +1,201 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, identifier, binding, wildcard
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int };
+type List<T> is Cons(T, Heap<List<T>>) | Nil;
+
+// Helper functions
+fn use<T>(x: T) { }
+fn compute() -> Int { 42 }
+fn process_val() -> Int { 0 }
+fn get_value() -> Int { 0 }
+fn handle_error() { }
+fn get_name() -> Text { "Alice" }
+fn compute_side_effect() -> Int { 0 }
+fn intermediate() -> Int { 0 }
+fn get_next() -> Int { 0 }
+fn small<T>(x: T) { }
+fn medium<T>(x: T) { }
+fn large<T>(x: T) { }
+fn nothing() { }
+fn default() { }
+
+fn test_simple_identifier_pattern() {
+    let value = 42;
+
+    // Simple identifier pattern (binds value)
+    match value {
+        x => use(x),
+    };
+}
+
+fn test_identifier_in_let_binding() {
+    // Identifier in let binding
+    let x = compute();
+    let result = process_val();
+    let my_value = get_value();
+}
+
+fn test_wildcard_pattern() {
+    let value = 42;
+
+    // Wildcard pattern (ignores value)
+    match value {
+        _ => "ignored",
+    };
+}
+
+fn test_multiple_wildcards() {
+    let triple = (1, 2, 3);
+
+    // Multiple wildcards
+    match triple {
+        (_, _, _) => "any triple",
+    };
+
+    match triple {
+        (x, _, _) => "first is x",
+    };
+
+    match triple {
+        (_, y, _) => "second is y",
+    };
+}
+
+fn test_identifier_vs_wildcard() {
+    let result: Result<Int, Text> = Ok(42);
+
+    // Identifier vs wildcard
+    match result {
+        Ok(value) => use(value),
+        Err(_) => handle_error(),
+    };
+}
+
+fn test_multiple_identifiers_in_tuple() {
+    let triple = (1, 2, 3);
+    let pair = (10, 20);
+
+    // Multiple identifiers in tuple
+    let (a, b, c) = triple;
+    let (first, second) = pair;
+}
+
+fn test_identifier_in_struct_pattern() {
+    let point = Point { x: 10, y: 20 };
+    let person = Person { name: "Alice", age: 30 };
+
+    // Identifier in struct pattern
+    let Point { x, y } = point;
+    let Person { name, age } = person;
+}
+
+fn test_mutable_identifier_pattern() {
+    // Mutable identifier pattern
+    let mut counter = 0;
+    let mut buffer = [1, 2, 3];
+}
+
+fn test_identifier_with_type_annotation() {
+    let value = 42;
+
+    // Identifier with type annotation
+    let x: Int = value;
+    let name: Text = get_name();
+}
+
+fn test_reference_pattern_with_identifier() {
+    let reference = &42;
+    let mut mutable_ref = &mut 10;
+
+    // Reference pattern with identifier
+    let &x = reference;
+}
+
+fn test_underscore_prefix_for_unused() {
+    // Underscore prefix for unused
+    let _unused = compute_side_effect();
+    let _temp = intermediate();
+}
+
+fn test_identifier_shadowing() {
+    // Identifier shadowing
+    let x = 1;
+    let x = x + 1;
+}
+
+// Identifier in function parameters
+fn process(x: Int, y: Int) -> Int {
+    x + y
+}
+
+fn test_identifier_in_closure_parameters() {
+    // Identifier in closure parameters
+    let f = |x| x * 2;
+    let g = |a, b| a + b;
+}
+
+fn test_identifier_in_for_loop() {
+    let collection: List<Int> = Nil;
+
+    // Identifier in for loop
+    for item in collection {
+        use(item);
+    }
+}
+
+fn test_identifier_in_while_let() {
+    // Identifier in while-let
+    while let value = get_next() {
+        use(value);
+    }
+}
+
+fn test_identifier_with_at_binding() {
+    let value = 5;
+
+    // Identifier with @ binding
+    match value {
+        x @ 1..=10 => small(x),
+        x @ 11..=100 => medium(x),
+        x => large(x),
+    };
+}
+
+fn test_nested_identifier_patterns() {
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+    let default_val = 0;
+
+    // Nested identifier patterns
+    match nested {
+        Some(Some(x)) => x,
+        Some(None) => default_val,
+        None => default_val,
+    };
+}
+
+fn test_identifier_in_enum_variant() {
+    let option: Maybe<Int> = Some(42);
+
+    // Identifier in enum variant
+    match option {
+        Some(inner) => use(inner),
+        None => nothing(),
+    };
+}
+
+fn test_mixed_identifiers_and_wildcards() {
+    let complex = (1, 2, 3, 4, 5);
+
+    // Mixed identifiers and wildcards
+    match complex {
+        (a, _, c, _, e) => use(a),
+        _ => default(),
+    };
+}

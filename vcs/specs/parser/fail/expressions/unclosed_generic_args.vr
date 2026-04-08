@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, generics, unclosed, error
+// @description: Generic type arguments with unclosed angle bracket
+// @expected-error: E010
+
+fn test() {
+    let x = foo::<Int(arg);  // Missing closing >
+}

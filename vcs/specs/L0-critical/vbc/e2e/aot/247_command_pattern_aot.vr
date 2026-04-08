@@ -1,0 +1,180 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, command, pattern, undo
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for command pattern with undo/redo
+
+// State: integer accumulator
+type State is { value: Int };
+
+// Command: op=0 add, 1 sub, 2 mul, 3 set; amount=operand
+type Command is { op: Int, amount: Int };
+
+fn cmd_add(n: Int) -> Command { Command { op: 0, amount: n } }
+fn cmd_sub(n: Int) -> Command { Command { op: 1, amount: n } }
+fn cmd_mul(n: Int) -> Command { Command { op: 2, amount: n } }
+fn cmd_set(n: Int) -> Command { Command { op: 3, amount: n } }
+
+fn execute(s: State, c: Command) -> State {
+    if c.op == 0 { State { value: s.value + c.amount } }
+    else if c.op == 1 { State { value: s.value - c.amount } }
+    else if c.op == 2 { State { value: s.value * c.amount } }
+    else { State { value: c.amount } }
+}
+
+// Undo: reverse the command (for add/sub; mul/set need snapshot)
+fn undo_cmd(c: Command) -> Command {
+    if c.op == 0 { cmd_sub(c.amount) }
+    else if c.op == 1 { cmd_add(c.amount) }
+    else { c }  // mul/set not trivially reversible
+}
+
+// Command history (8 slots)
+type History is {
+    c0: Command, c1: Command, c2: Command, c3: Command,
+    c4: Command, c5: Command, c6: Command, c7: Command,
+    count: Int
+};
+
+fn hist_new() -> History {
+    let empty = Command { op: -1, amount: 0 };
+    History {
+        c0: empty, c1: empty, c2: empty, c3: empty,
+        c4: empty, c5: empty, c6: empty, c7: empty,
+        count: 0
+    }
+}
+
+fn hist_get(h: History, i: Int) -> Command {
+    if i == 0 { h.c0 } else if i == 1 { h.c1 }
+    else if i == 2 { h.c2 } else if i == 3 { h.c3 }
+    else if i == 4 { h.c4 } else if i == 5 { h.c5 }
+    else if i == 6 { h.c6 } else if i == 7 { h.c7 }
+    else { Command { op: -1, amount: 0 } }
+}
+
+fn hist_push(h: History, c: Command) -> History {
+    let i = h.count;
+    History {
+        c0: if i == 0 { c } else { h.c0 }, c1: if i == 1 { c } else { h.c1 },
+        c2: if i == 2 { c } else { h.c2 }, c3: if i == 3 { c } else { h.c3 },
+        c4: if i == 4 { c } else { h.c4 }, c5: if i == 5 { c } else { h.c5 },
+        c6: if i == 6 { c } else { h.c6 }, c7: if i == 7 { c } else { h.c7 },
+        count: if i < 8 { i + 1 } else { h.count }
+    }
+}
+
+// Execute and record
+type System is { state: State, history: History };
+
+fn sys_new() -> System {
+    System { state: State { value: 0 }, history: hist_new() }
+}
+
+fn sys_execute(sys: System, c: Command) -> System {
+    System {
+        state: execute(sys.state, c),
+        history: hist_push(sys.history, c)
+    }
+}
+
+// Undo last N add/sub commands
+fn sys_undo(sys: System, n: Int) -> System {
+    let mut s = sys.state;
+    let mut count = n;
+    let mut idx = sys.history.count - 1;
+    while count > 0 && idx >= 0 {
+        let cmd = hist_get(sys.history, idx);
+        if cmd.op == 0 || cmd.op == 1 {
+            s = execute(s, undo_cmd(cmd));
+            count = count - 1;
+        }
+        idx = idx - 1;
+    }
+    System { state: s, history: sys.history }
+}
+
+// Replay all commands from scratch
+fn sys_replay(h: History) -> State {
+    let mut s = State { value: 0 };
+    let mut i = 0;
+    while i < h.count {
+        s = execute(s, hist_get(h, i));
+        i = i + 1;
+    }
+    s
+}
+
+fn test_basic_commands() {
+    let mut sys = sys_new();
+    sys = sys_execute(sys, cmd_add(10));
+    assert_eq(sys.state.value, 10);
+    sys = sys_execute(sys, cmd_add(5));
+    assert_eq(sys.state.value, 15);
+    sys = sys_execute(sys, cmd_sub(3));
+    assert_eq(sys.state.value, 12);
+}
+
+fn test_undo() {
+    let mut sys = sys_new();
+    sys = sys_execute(sys, cmd_add(10));
+    sys = sys_execute(sys, cmd_add(20));
+    sys = sys_execute(sys, cmd_sub(5));
+    assert_eq(sys.state.value, 25);
+
+    // Undo last 2 add/sub
+    sys = sys_undo(sys, 2);
+    assert_eq(sys.state.value, 10);
+}
+
+fn test_replay() {
+    let mut sys = sys_new();
+    sys = sys_execute(sys, cmd_add(100));
+    sys = sys_execute(sys, cmd_sub(30));
+    sys = sys_execute(sys, cmd_add(15));
+    assert_eq(sys.state.value, 85);
+
+    // Replay from scratch should give same result
+    let replayed = sys_replay(sys.history);
+    assert_eq(replayed.value, 85);
+}
+
+fn test_multiply() {
+    let mut s = State { value: 5 };
+    s = execute(s, cmd_mul(3));
+    assert_eq(s.value, 15);
+    s = execute(s, cmd_add(5));
+    assert_eq(s.value, 20);
+}
+
+fn test_set() {
+    let mut s = State { value: 100 };
+    s = execute(s, cmd_set(42));
+    assert_eq(s.value, 42);
+}
+
+fn test_many_commands() {
+    let mut sys = sys_new();
+    let mut i = 1;
+    while i <= 5 {
+        sys = sys_execute(sys, cmd_add(i));
+        i = i + 1;
+    }
+    // 1+2+3+4+5 = 15
+    assert_eq(sys.state.value, 15);
+    assert_eq(sys.history.count, 5);
+}
+
+fn main() -> Int {
+    test_basic_commands();
+    test_undo();
+    test_replay();
+    test_multiply();
+    test_set();
+    test_many_commands();
+    print("[OK] 247_command_pattern_aot");
+    0
+}

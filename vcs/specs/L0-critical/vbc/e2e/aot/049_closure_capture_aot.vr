@@ -1,0 +1,122 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, closures, capture, multi-capture, nested
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT closure capture patterns (multi-capture, nested, chains)
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply2(f: fn(Int, Int) -> Int, a: Int, b: Int) -> Int {
+    f(a, b)
+}
+
+fn make_offset_scaler(offset: Int, scale: Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { (x + offset) * scale }
+}
+
+fn make_range_checker(lo: Int, hi: Int) -> fn(Int) -> Bool {
+    |x: Int| -> Bool { x >= lo && x <= hi }
+}
+
+fn make_accumulator(init: Int) -> fn(Int) -> Int {
+    // Returns closure capturing init; each call adds arg to init
+    // Note: closures can't mutate captures, so this just adds
+    |x: Int| -> Int { init + x }
+}
+
+fn fold_with(start: Int, end_val: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end_val {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Single capture
+    let offset = 10;
+    let add_offset = |x: Int| -> Int { x + offset };
+    assert_eq(apply(add_offset, 5), 15);
+    assert_eq(apply(add_offset, 0), 10);
+
+    // Two captures
+    let a = 3;
+    let b = 7;
+    let weighted = |x: Int| -> Int { a * x + b };
+    assert_eq(apply(weighted, 0), 7);
+    assert_eq(apply(weighted, 1), 10);
+    assert_eq(apply(weighted, 10), 37);
+
+    // Three captures
+    let p = 2;
+    let q = 3;
+    let r = 5;
+    let quadratic = |x: Int| -> Int { p * x * x + q * x + r };
+    assert_eq(apply(quadratic, 0), 5);     // 0+0+5
+    assert_eq(apply(quadratic, 1), 10);    // 2+3+5
+    assert_eq(apply(quadratic, 2), 19);    // 8+6+5
+    assert_eq(apply(quadratic, 3), 32);    // 18+9+5
+
+    // Returned multi-capture closures
+    let os1 = make_offset_scaler(5, 3);
+    assert_eq(os1(0), 15);   // (0+5)*3
+    assert_eq(os1(10), 45);  // (10+5)*3
+
+    let os2 = make_offset_scaler(-2, 4);
+    assert_eq(os2(5), 12);   // (5-2)*4
+    assert_eq(os2(2), 0);    // (2-2)*4
+
+    // Bool-returning closures with captures
+    let in_range = make_range_checker(10, 20);
+    assert(in_range(10));
+    assert(in_range(15));
+    assert(in_range(20));
+    assert(!in_range(9));
+    assert(!in_range(21));
+
+    // Accumulator pattern
+    let acc = make_accumulator(100);
+    assert_eq(acc(0), 100);
+    assert_eq(acc(5), 105);
+    assert_eq(acc(50), 150);
+
+    // Closure as fold function with captures
+    let factor = 2;
+    let sum_scaled = fold_with(1, 6, 0, |acc: Int, x: Int| -> Int { acc + x * factor });
+    assert_eq(sum_scaled, 30);  // 2+4+6+8+10
+
+    // Nested closure creation
+    let base = 100;
+    let f1 = |x: Int| -> Int { base + x };
+    let f2 = |x: Int| -> Int { base - x };
+    assert_eq(apply(f1, 50), 150);
+    assert_eq(apply(f2, 50), 50);
+
+    // Multiple closures sharing the same captures
+    let k = 7;
+    let add_k = |x: Int| -> Int { x + k };
+    let mul_k = |x: Int| -> Int { x * k };
+    let sub_k = |x: Int| -> Int { x - k };
+    assert_eq(apply(add_k, 3), 10);
+    assert_eq(apply(mul_k, 3), 21);
+    assert_eq(apply(sub_k, 3), -4);
+
+    // Closure over loop variable snapshot
+    let mut closures_sum = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let captured_i = i;
+        let f = |x: Int| -> Int { x + captured_i };
+        closures_sum = closures_sum + f(0);
+        i = i + 1;
+    }
+    assert_eq(closures_sum, 15);  // 1+2+3+4+5
+
+    0
+}

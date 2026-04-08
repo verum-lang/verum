@@ -1,0 +1,98 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, memory, ownership
+// @description: Tests ownership transfer across FFI boundaries
+
+type c_int is i32;
+type c_void is ();
+type size_t is usize;
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: size_t) -> *mut c_void;
+    @extern("C")
+    fn free(ptr: *mut c_void);
+}
+
+ffi c_api {
+    @extern("C")
+    fn take_buffer(ptr: *mut u8, len: size_t, cap: size_t);
+    @extern("C")
+    fn give_buffer(out_ptr: *mut *mut u8, out_len: *mut size_t);
+}
+
+/// Owned pointer from C (Verum takes ownership)
+type COwned<T> is { ptr: *mut T };
+
+implement<T> COwned<T> {
+    fn from_raw(ptr: *mut T) -> Maybe<COwned<T>> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(COwned { ptr })
+        }
+    }
+
+    fn as_ref(&self) -> &T {
+        unsafe { &*self.ptr }
+    }
+
+    fn into_raw(self) -> *mut T {
+        self.ptr
+    }
+}
+
+implement<T> Drop for COwned<T> {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { libc.free(self.ptr as *mut c_void); }
+        }
+    }
+}
+
+/// Transfer Verum-owned data to C
+fn give_to_c(data: List<u8>) {
+    let ptr = data.as_ptr() as *mut u8;
+    let len = data.len();
+    let cap = data.capacity();
+    // C now owns this memory
+    unsafe {
+        c_api.take_buffer(ptr, len, cap);
+    }
+}
+
+/// Receive C-owned data into Verum
+fn take_from_c() -> Maybe<COwned<u8>> {
+    let mut ptr: *mut u8 = 0 as *mut u8;
+    let mut len: size_t = 0;
+    unsafe {
+        c_api.give_buffer(&mut ptr, &mut len);
+    }
+    COwned.from_raw(ptr)
+}
+
+/// Borrowed FFI pointer (no ownership transfer)
+type CBorrowed<T> is {
+    ptr: *const T,
+    // lifetime is bounded by the caller
+};
+
+implement<T> CBorrowed<T> {
+    fn from_ptr(ptr: *const T) -> Maybe<CBorrowed<T>> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(CBorrowed { ptr })
+        }
+    }
+
+    fn as_ref(&self) -> &T {
+        unsafe { &*self.ptr }
+    }
+}
+
+fn main() {
+    // Ownership crossing test
+    let data = take_from_c();
+}

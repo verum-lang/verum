@@ -1,0 +1,100 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, tensor, real-opcode, factory
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests REAL tensor factory and utility operations through VBC interpreter.
+// Exercises tensor_clone, tensor_fill, and validates tensor independence.
+
+fn check_val(t: Int, idx: Int, expected_val: Int) -> Int {
+    let e = tensor_fill(1, expected_val, 1);
+    let diff = tensor_binop(t, e, 1);
+    let val = tensor_get_scalar(diff, idx);
+    if val == 0 { 0 } else { 1 }
+}
+
+fn main() -> Int {
+    let mut errors = 0;
+
+    // --- Test 1: tensor_fill with various values ---
+    let zeros = tensor_fill(5, 0, 1);
+    errors = errors + check_val(zeros, 0, 0);
+    errors = errors + check_val(zeros, 4, 0);
+
+    let ones = tensor_fill(5, 1, 1);
+    errors = errors + check_val(ones, 0, 1);
+    errors = errors + check_val(ones, 4, 1);
+
+    let neg = tensor_fill(3, -7, 1);
+    errors = errors + check_val(neg, 0, -7);
+    errors = errors + check_val(neg, 2, -7);
+
+    // --- Test 2: Large fill value ---
+    let big = tensor_fill(2, 1000000, 1);
+    errors = errors + check_val(big, 0, 1000000);
+    errors = errors + check_val(big, 1, 1000000);
+
+    // --- Test 3: Fill + set_scalar creates modified copy pattern ---
+    let base = tensor_fill(4, 10, 1);
+    let modified = tensor_set_scalar(base, 2, 99);
+    // base should still have 10 at index 2 (set_scalar returns NEW tensor)
+    errors = errors + check_val(base, 2, 10);
+    errors = errors + check_val(modified, 2, 99);
+    errors = errors + check_val(modified, 0, 10);
+    errors = errors + check_val(modified, 3, 10);
+
+    // --- Test 4: Multiple independent tensors ---
+    let t1 = tensor_fill(3, 1, 1);
+    let t2 = tensor_fill(3, 2, 1);
+    let t3 = tensor_fill(3, 3, 1);
+    let t4 = tensor_fill(3, 4, 1);
+    let t5 = tensor_fill(3, 5, 1);
+
+    errors = errors + check_val(t1, 0, 1);
+    errors = errors + check_val(t2, 0, 2);
+    errors = errors + check_val(t3, 0, 3);
+    errors = errors + check_val(t4, 0, 4);
+    errors = errors + check_val(t5, 0, 5);
+
+    // --- Test 5: Arithmetic on factory tensors ---
+    // ones * ones = ones
+    let prod = tensor_binop(ones, ones, 2);
+    errors = errors + check_val(prod, 0, 1);
+    errors = errors + check_val(prod, 4, 1);
+
+    // zeros + anything = anything
+    let sum = tensor_binop(zeros, ones, 0);
+    errors = errors + check_val(sum, 0, 1);
+    errors = errors + check_val(sum, 4, 1);
+
+    // --- Test 6: Larger tensors ---
+    let large = tensor_fill(1000, 42, 1);
+    errors = errors + check_val(large, 0, 42);
+    errors = errors + check_val(large, 500, 42);
+    errors = errors + check_val(large, 999, 42);
+
+    // --- Test 7: Set many elements ---
+    let t = tensor_new(10, 1);
+    let t = tensor_set_scalar(t, 0, 0);
+    let t = tensor_set_scalar(t, 1, 1);
+    let t = tensor_set_scalar(t, 2, 4);
+    let t = tensor_set_scalar(t, 3, 9);
+    let t = tensor_set_scalar(t, 4, 16);
+    let t = tensor_set_scalar(t, 5, 25);
+    let t = tensor_set_scalar(t, 6, 36);
+    let t = tensor_set_scalar(t, 7, 49);
+    let t = tensor_set_scalar(t, 8, 64);
+    let t = tensor_set_scalar(t, 9, 81);
+    // Perfect squares: i^2
+    errors = errors + check_val(t, 0, 0);
+    errors = errors + check_val(t, 3, 9);
+    errors = errors + check_val(t, 9, 81);
+
+    // Sum of 0^2 + 1^2 + ... + 9^2 = 285
+    let sum_sq = tensor_reduce(t, 0, 0);
+    errors = errors + check_val(sum_sq, 0, 285);
+
+    errors
+}

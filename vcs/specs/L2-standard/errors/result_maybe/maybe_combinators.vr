@@ -1,0 +1,394 @@
+// @test: run
+// @expected-stdout: Mapped: 84\nChained: 126\nAlternative: 42\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, maybe, combinators, functional
+// @description: Maybe combinators - map, and_then, or_else and more
+
+/// Maybe combinators - functional optional value handling.
+/// Chainable operations for transforming and composing Maybe values.
+
+type User is {
+    id: Int,
+    name: Text,
+    email: Maybe<Text>,
+    age: Maybe<Int>
+};
+
+type Config is {
+    database_url: Maybe<Text>,
+    port: Maybe<Int>,
+    max_retries: Maybe<Int>
+};
+
+/// map - transform Some value, preserve None
+fn map_examples() {
+    let maybe: Maybe<Int> = Some(42);
+
+    // Simple map
+    let doubled = maybe.map(|n| n * 2);
+    assert_eq(doubled.unwrap(), 84);
+
+    // Map to different type
+    let as_string = maybe.map(|n| format("Value: {}", n));
+    assert_eq(as_string.unwrap(), "Value: 42");
+
+    // Map preserves None
+    let absent: Maybe<Int> = None;
+    let still_none = absent.map(|n| n * 2);
+    assert(still_none.is_none());
+
+    // Chained maps
+    let processed = Some(10)
+        .map(|n| n + 5)
+        .map(|n| n * 2)
+        .map(|n| n.to_text());
+    assert_eq(processed.unwrap(), "30");
+
+    // Map with complex types
+    let user = Some(User {
+        id: 1,
+        name: "Alice",
+        email: Some("alice@example.com"),
+        age: Some(30)
+    });
+
+    let email = user.map(|u| u.email).flatten();
+    assert_eq(email.unwrap(), "alice@example.com");
+}
+
+/// map_or - map with default value
+fn map_or_examples() {
+    let present: Maybe<Int> = Some(42);
+    let absent: Maybe<Int> = None;
+
+    // map_or applies function to Some, returns default for None
+    let doubled = present.map_or(0, |n| n * 2);
+    assert_eq(doubled, 84);
+
+    let default_used = absent.map_or(0, |n| n * 2);
+    assert_eq(default_used, 0);
+
+    // map_or_else for lazy default
+    let computed = absent.map_or_else(
+        || expensive_default(),  // Called for None
+        |n| n * 2  // Called for Some
+    );
+    assert_eq(computed, 100);
+}
+
+fn expensive_default() -> Int {
+    100
+}
+
+/// and_then - chain Maybe-returning operations
+fn and_then_examples() {
+    fn double(n: Int) -> Maybe<Int> {
+        Some(n * 2)
+    }
+
+    fn positive_only(n: Int) -> Maybe<Int> {
+        if n > 0 { Some(n) } else { None }
+    }
+
+    fn bounded(n: Int, max: Int) -> Maybe<Int> {
+        if n <= max { Some(n) } else { None }
+    }
+
+    // Chain operations
+    let result = Some(21)
+        .and_then(|n| double(n))
+        .and_then(|n| positive_only(n))
+        .and_then(|n| bounded(n, 100));
+    assert_eq(result.unwrap(), 42);
+
+    // Chain stops at first None
+    let stops_early = Some(-5)
+        .and_then(|n| positive_only(n))  // Returns None
+        .and_then(|n| double(n));  // Never called
+    assert(stops_early.is_none());
+
+    // None propagates through
+    let none: Maybe<Int> = None;
+    let still_none = none.and_then(|n| double(n));
+    assert(still_none.is_none());
+
+    // Practical: optional field access
+    fn get_user_email_domain(user: Maybe<User>) -> Maybe<Text> {
+        user.and_then(|u| u.email)
+            .and_then(|e| e.split('@').last().map(|s| s.to_text()))
+    }
+}
+
+/// or_else - provide alternative on None
+fn or_else_examples() {
+    fn compute_fallback() -> Maybe<Int> {
+        Some(42)
+    }
+
+    // Recovery from None
+    let absent: Maybe<Int> = None;
+    let recovered = absent.or_else(compute_fallback);
+    assert_eq(recovered.unwrap(), 42);
+
+    // Some passes through
+    let present: Maybe<Int> = Some(100);
+    let still_present = present.or_else(compute_fallback);
+    assert_eq(still_present.unwrap(), 100);
+
+    // Chain fallbacks
+    fn try_cache() -> Maybe<Int> { None }
+    fn try_database() -> Maybe<Int> { None }
+    fn try_default() -> Maybe<Int> { Some(42) }
+
+    let result = try_cache()
+        .or_else(try_database)
+        .or_else(try_default);
+    assert_eq(result.unwrap(), 42);
+}
+
+/// or - provide alternative Maybe
+fn or_examples() {
+    let primary: Maybe<Int> = None;
+    let backup: Maybe<Int> = Some(42);
+
+    // Use backup on None
+    let result = primary.or(backup);
+    assert_eq(result.unwrap(), 42);
+
+    // First Some wins
+    let first_some: Maybe<Int> = Some(1);
+    let second_some: Maybe<Int> = Some(2);
+    let result = first_some.or(second_some);
+    assert_eq(result.unwrap(), 1);
+
+    // Chain multiple alternatives
+    let a: Maybe<Int> = None;
+    let b: Maybe<Int> = None;
+    let c: Maybe<Int> = Some(42);
+    let result = a.or(b).or(c);
+    assert_eq(result.unwrap(), 42);
+}
+
+/// and - require both to be Some
+fn and_examples() {
+    let first: Maybe<Int> = Some(1);
+    let second: Maybe<Text> = Some("two");
+
+    // Both must be Some, returns second
+    let result = first.and(second);
+    assert_eq(result.unwrap(), "two");
+
+    // First None stops evaluation
+    let none: Maybe<Int> = None;
+    let some: Maybe<Text> = Some("value");
+    let result = none.and(some);
+    assert(result.is_none());
+
+    // Second None also fails
+    let first_some: Maybe<Int> = Some(1);
+    let second_none: Maybe<Text> = None;
+    let result = first_some.and(second_none);
+    assert(result.is_none());
+}
+
+/// filter - keep Some if predicate is true
+fn filter_examples() {
+    let value: Maybe<Int> = Some(42);
+
+    // Keep if predicate true
+    let kept = value.filter(|n| *n > 0);
+    assert_eq(kept.unwrap(), 42);
+
+    // Discard if predicate false
+    let discarded = value.filter(|n| *n > 100);
+    assert(discarded.is_none());
+
+    // None stays None
+    let none: Maybe<Int> = None;
+    let still_none = none.filter(|n| *n > 0);
+    assert(still_none.is_none());
+
+    // Practical: validation
+    let username = Some("alice")
+        .filter(|s| s.len() >= 3)
+        .filter(|s| s.chars().all(|c| c.is_alphanumeric()));
+    assert_eq(username.unwrap(), "alice");
+}
+
+/// flatten - unwrap nested Maybe
+fn flatten_examples() {
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+    let flat = nested.flatten();
+    assert_eq(flat.unwrap(), 42);
+
+    // Outer Some, inner None
+    let inner_none: Maybe<Maybe<Int>> = Some(None);
+    let flat = inner_none.flatten();
+    assert(flat.is_none());
+
+    // Outer None
+    let outer_none: Maybe<Maybe<Int>> = None;
+    let flat = outer_none.flatten();
+    assert(flat.is_none());
+
+    // Practical: nested optional access
+    fn get_nested(data: &Map<Text, Maybe<Int>>) -> Maybe<Int> {
+        data.get("key").cloned().flatten()
+    }
+}
+
+/// zip - combine two Maybes
+fn zip_examples() {
+    let a: Maybe<Int> = Some(1);
+    let b: Maybe<Text> = Some("two");
+
+    // Zip creates tuple
+    let zipped = a.zip(b);
+    assert_eq(zipped, Some((1, "two")));
+
+    // Either None produces None
+    let none: Maybe<Int> = None;
+    let some: Maybe<Text> = Some("value");
+    let result = none.zip(some);
+    assert(result.is_none());
+
+    // zip_with applies function
+    let x: Maybe<Int> = Some(10);
+    let y: Maybe<Int> = Some(20);
+    let summed = x.zip_with(y, |a, b| a + b);
+    assert_eq(summed, Some(30));
+}
+
+/// unzip - split tuple Maybe
+fn unzip_examples() {
+    let paired: Maybe<(Int, Text)> = Some((42, "hello"));
+    let (a, b) = paired.unzip();
+    assert_eq(a, Some(42));
+    assert_eq(b, Some("hello"));
+
+    let none_pair: Maybe<(Int, Text)> = None;
+    let (a, b) = none_pair.unzip();
+    assert(a.is_none());
+    assert(b.is_none());
+}
+
+// transpose - swap Maybe<Result> to Result<Maybe>
+// Commented out: .transpose() not yet implemented in stdlib
+// fn transpose_examples() {
+//     let some_ok: Maybe<Result<Int, Text>> = Some(Ok(42));
+//     let transposed = some_ok.transpose();
+//     assert_eq(transposed, Ok(Some(42)));
+//
+//     let some_err: Maybe<Result<Int, Text>> = Some(Err("error"));
+//     let transposed = some_err.transpose();
+//     assert_eq(transposed, Err("error"));
+//
+//     let none_result: Maybe<Result<Int, Text>> = None;
+//     let transposed = none_result.transpose();
+//     assert_eq(transposed, Ok(None));
+// }
+
+/// Practical combinator patterns
+fn practical_patterns() {
+    // Config loading with defaults
+    fn load_config() -> Config {
+        Config {
+            database_url: std.env.var("DATABASE_URL").ok(),
+            port: std.env.var("PORT").ok().and_then(|s| s.parse().ok()),
+            max_retries: Some(3)
+        }
+    }
+
+    fn get_port(config: &Config) -> Int {
+        config.port
+            .filter(|p| *p > 0 && *p < 65536)
+            .unwrap_or(8080)
+    }
+
+    // Data transformation pipeline
+    fn process_user(id: Int) -> Maybe<Text> {
+        find_user(id)
+            .filter(|u| u.age.map_or(false, |a| a >= 18))
+            .and_then(|u| u.email)
+            .map(|e| e.to_lowercase())
+    }
+
+    fn find_user(id: Int) -> Maybe<User> {
+        if id == 1 {
+            Some(User {
+                id: 1,
+                name: "Alice",
+                email: Some("ALICE@EXAMPLE.COM"),
+                age: Some(25)
+            })
+        } else {
+            None
+        }
+    }
+
+    // Optional chaining simulation
+    fn get_nested_value(data: &Map<Text, Map<Text, Int>>) -> Maybe<Int> {
+        data.get("outer")
+            .and_then(|inner| inner.get("key"))
+            .cloned()
+    }
+
+    // Combining multiple optional sources
+    fn get_best_value(
+        primary: Maybe<Int>,
+        secondary: Maybe<Int>,
+        default: Int
+    ) -> Int {
+        primary
+            .filter(|v| *v > 0)  // Must be positive
+            .or(secondary.filter(|v| *v > 0))
+            .unwrap_or(default)
+    }
+}
+
+/// Combining with iteration
+fn iteration_combinators() {
+    let items: List<Maybe<Int>> = [Some(1), None, Some(2), None, Some(3)];
+
+    // Filter out Nones
+    let values: List<Int> = items.into_iter()
+        .flatten()  // Flatten removes Nones
+        .collect();
+    assert_eq(values, [1, 2, 3]);
+
+    // Map and flatten
+    fn lookup(id: Int) -> Maybe<User> {
+        if id > 0 {
+            Some(User { id, name: format("User{}", id), email: None, age: None })
+        } else {
+            None
+        }
+    }
+
+    let ids = [1, -1, 2, 0, 3];
+    let users: List<User> = ids.into_iter()
+        .map(lookup)
+        .flatten()
+        .collect();
+    assert_eq(users.len(), 3);
+}
+
+fn main() {
+    // map example
+    let mapped = Some(42).map(|n| n * 2);
+    println(format("Mapped: {}", mapped.unwrap()));
+
+    // and_then example
+    let chained = Some(42)
+        .and_then(|n| Some(n * 2))
+        .and_then(|n| Some(n + 42));
+    println(format("Chained: {}", chained.unwrap()));
+
+    // or_else example
+    let alternative: Maybe<Int> = None;
+    let with_alt = alternative.or_else(|| Some(42));
+    println(format("Alternative: {}", with_alt.unwrap()));
+
+    println("Operation completed");
+}

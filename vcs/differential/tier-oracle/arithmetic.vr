@@ -1,0 +1,52 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, arithmetic
+
+/// Арифметические операции должны давать идентичные результаты
+/// в интерпретаторе (Tier 0) и AOT (Tier 3)
+
+fn main() {
+    // Integer arithmetic
+    let a = 42 + 17;
+    let b = 100 - 58;
+    let c = 6 * 7;
+    let d = 84 / 2;
+    let e = 47 % 5;
+
+    println(f"{a} {b} {c} {d} {e}");
+
+    // Float arithmetic
+    let f = 3.14 + 2.86;
+    let g = 10.0 / 3.0;
+
+    println(f"{f} {g}");
+
+    // Negative numbers
+    let h = -10 + 5;
+    let i = -3 * -4;
+
+    println(f"{h} {i}");
+
+    // Mixed operations
+    let j = (10 + 5) * 2 - 3;
+    let k = 100 / (5 + 5);
+
+    println(f"{j} {k}");
+
+    // Power operations (if supported)
+    let l = 2 ** 10;
+    let m = 3 ** 3;
+
+    println(f"{l} {m}");
+
+    // Bitwise operations
+    let n = 0b1010 & 0b1100;
+    let o = 0b1010 | 0b0101;
+    let p = 0b1010 ^ 0b1100;
+    let q = ~0b1010;
+    let r = 1 << 4;
+    let s = 16 >> 2;
+
+    println(f"{n} {o} {p} {q} {r} {s}");
+}

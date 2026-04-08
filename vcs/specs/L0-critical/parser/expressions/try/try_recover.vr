@@ -1,0 +1,124 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, try, recover, error-handling
+
+// Simple try-recover
+fn test_simple_try_recover() {
+    try {
+        risky_operation()
+    } recover |e| handle_error(e)
+}
+
+// Try-recover with question mark
+fn test_question_mark() {
+    try {
+        let a = operation_a()?;
+        let b = operation_b(a)?;
+        Ok(b)
+    } recover |e| Err(wrap_error(e))
+}
+
+// Try-recover as expression
+fn test_as_expression() {
+    let result = try {
+        parse(input)?
+    } recover |_| default_value;
+}
+
+// Try-recover with specific error type
+fn test_specific_error() {
+    try {
+        file.read()?
+    } recover |e: IoError| {
+        log_io_error(e);
+        empty_content()
+    }
+}
+
+// Try-recover with multiple operations
+fn test_multiple_ops() {
+    try {
+        let conn = connect()?;
+        let data = fetch(conn)?;
+        let parsed = parse(data)?;
+        validate(parsed)?
+    } recover |e| {
+        log_error(e);
+        fallback()
+    }
+}
+
+// Try-recover with pattern matching in recover
+fn test_pattern_matching() {
+    try {
+        risky()
+    } recover {
+        Error.NotFound => default(),
+        Error.Timeout => retry(),
+        Error.Fatal(msg) => panic(msg),
+    }
+}
+
+// Try-recover returning Result
+fn safe_operation() -> Result<Data, Error> {
+    try {
+        Ok(dangerous()?)
+    } recover {
+        e if e.is_recoverable() => Ok(recovery()),
+        e => Err(e),
+    }
+}
+
+// Nested try-recover
+fn test_nested() {
+    try {
+        try {
+            inner_risky()
+        } recover |e| partial_recovery(e)?
+    } recover |e| complete_recovery(e)
+}
+
+// Try-recover with block expression
+fn test_block_expr() {
+    try {
+        let x = compute();
+        let y = transform(x);
+        finalize(y)
+    } recover |e| {
+        let logged = log_and_wrap(e);
+        safe_default(logged)
+    }
+}
+
+// Try-recover with early return in recover
+fn process() -> Result<Int, Error> {
+    try {
+        risky_computation()?
+    } recover {
+        e if e.is_fatal() => Err(e),
+        _ => Ok(fallback_value()),
+    }
+}
+
+// Try-recover with type annotation
+fn test_type_annotation() {
+    let value: Int = try {
+        parse_int(input)?
+    } recover |_| 0;
+}
+
+// Try-recover capturing ctx
+fn test_capturing_ctx() {
+    let ctx = get_context();
+    try {
+        operation_with_context(ctx)?
+    } recover |e| handle_with_context(e, ctx)
+}
+
+// Try-recover with async
+async fn async_try() -> Data {
+    try {
+        risky_async().await?
+    } recover |e| recover_async(e).await
+}

@@ -1,0 +1,206 @@
+// @test: typecheck-pass
+// @tier: 2
+// @level: L1
+// @tags: types, protocols, generic-instantiation, T.method()
+// @description: Tests T.method() pattern for type parameter static method calls
+
+// ============================================================================
+// Protocol definitions
+// ============================================================================
+
+type Default is protocol {
+    fn default() -> Self;
+};
+
+type Factory is protocol {
+    fn create() -> Self;
+};
+
+// ============================================================================
+// Simple types
+// ============================================================================
+
+type Person is {
+    name: Text,
+    age: Int,
+};
+
+type Temperature is {
+    celsius: Float,
+};
+
+type Widget is {
+    id: Int,
+};
+
+// ============================================================================
+// Generic wrapper types
+// ============================================================================
+
+type Wrapper<T> is {
+    value: T,
+};
+
+type Box<T> is {
+    content: T,
+};
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+type Container<T> is {
+    item: T,
+    count: Int,
+};
+
+// ============================================================================
+// Protocol implementations for simple types
+// ============================================================================
+
+implement Default for Person {
+    fn default() -> Person {
+        Person { name: "", age: 0 }
+    }
+}
+
+implement Default for Temperature {
+    fn default() -> Temperature {
+        Temperature { celsius: 0.0 }
+    }
+}
+
+implement Default for Widget {
+    fn default() -> Widget {
+        Widget { id: 0 }
+    }
+}
+
+implement Factory for Widget {
+    fn create() -> Widget {
+        Widget { id: 0 }
+    }
+}
+
+// ============================================================================
+// Generic protocol implementations using T.method() pattern
+// ============================================================================
+
+// Single type parameter: T.default()
+implement<T: Default> Default for Wrapper<T> {
+    fn default() -> Wrapper<T> {
+        Wrapper { value: T.default() }
+    }
+}
+
+// Single type parameter: T.default()
+implement<T: Default> Default for Box<T> {
+    fn default() -> Box<T> {
+        Box { content: T.default() }
+    }
+}
+
+// Multiple type parameters: A.default() and B.default()
+implement<A: Default, B: Default> Default for Pair<A, B> {
+    fn default() -> Pair<A, B> {
+        Pair { first: A.default(), second: B.default() }
+    }
+}
+
+// Single type parameter with other fields
+implement<T: Default> Default for Container<T> {
+    fn default() -> Container<T> {
+        Container { item: T.default(), count: 0 }
+    }
+}
+
+// Factory protocol with T.create()
+implement<T: Factory> Factory for Wrapper<T> {
+    fn create() -> Wrapper<T> {
+        Wrapper { value: T.create() }
+    }
+}
+
+// ============================================================================
+// Generic functions using T.method() in body
+// ============================================================================
+
+fn get_default<T: Default>() -> T {
+    T.default()
+}
+
+fn make_default_pair<X: Default, Y: Default>() -> (X, Y) {
+    (X.default(), Y.default())
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn main() {
+    // Test 1: TypeExpr.method() - direct static call
+    let p = Person.default();
+    assert(p.name == "");
+    assert(p.age == 0);
+    print("Test 1: Person.default() passed");
+
+    // Test 2: Generic TypeExpr.method() - Wrapper<Person>.default()
+    let w = Wrapper<Person>.default();
+    assert(w.value.name == "");
+    print("Test 2: Wrapper<Person>.default() passed");
+
+    // Test 3: Chained field access
+    let name = Wrapper<Person>.default().value.name;
+    assert(name == "");
+    print("Test 3: Chained field access passed");
+
+    // Test 4: Box<T>.default()
+    let b = Box<Person>.default();
+    assert(b.content.name == "");
+    print("Test 4: Box<Person>.default() passed");
+
+    // Test 5: Multiple type parameters - Pair<A, B>.default()
+    let pair = Pair<Person, Temperature>.default();
+    assert(pair.first.name == "");
+    assert(pair.second.celsius == 0.0);
+    print("Test 5: Pair<Person, Temperature>.default() passed");
+
+    // Test 6: Container<T>.default()
+    let container = Container<Person>.default();
+    assert(container.item.name == "");
+    assert(container.count == 0);
+    print("Test 6: Container<Person>.default() passed");
+
+    // Test 7: Nested generics - Container<Box<Person>>.default()
+    let nested = Container<Box<Person>>.default();
+    assert(nested.item.content.name == "");
+    assert(nested.count == 0);
+    print("Test 7: Nested generics passed");
+
+    // Test 8: Generic function call - get_default<Person>()
+    let default_person = get_default<Person>();
+    assert(default_person.name == "");
+    print("Test 8: get_default<Person>() passed");
+
+    // Test 9: Multiple type param generic function - make_default_pair<X, Y>()
+    let (dp, dt) = make_default_pair<Person, Temperature>();
+    assert(dp.name == "");
+    assert(dt.celsius == 0.0);
+    print("Test 9: make_default_pair<Person, Temperature>() passed");
+
+    // Test 10: Factory protocol with T.create()
+    let widget = Widget.create();
+    assert(widget.id == 0);
+    let wrapped_widget = Wrapper<Widget>.create();
+    assert(wrapped_widget.value.id == 0);
+    print("Test 10: Factory protocol passed");
+
+    // Test 11: Intermediate variable
+    let wrapper = Wrapper<Person>.default();
+    let person = wrapper.value;
+    assert(person.name == "");
+    print("Test 11: Intermediate variable passed");
+
+    print("All T.method() pattern tests passed!");
+}

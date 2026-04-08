@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, narrowing, conditional
+
+/// Conditional type narrowing -- after a condition check, the
+/// type system narrows the variable's refinement in the true branch.
+
+type Natural is Int{>= 0};
+type Positive is Int{> 0};
+type NonZero is Int{!= 0};
+
+// Simple conditional narrowing
+fn process(x: Int) -> Text {
+    if x > 0 {
+        // x narrowed to Int{> 0} (Positive)
+        let p: Positive = x;
+        f"positive: {p}"
+    } else if x == 0 {
+        // x narrowed to Int{== 0}
+        "zero"
+    } else {
+        // x narrowed to Int{< 0}
+        f"negative: {x}"
+    }
+}
+
+// Narrowing through assertion
+fn assert_and_use(x: Int) -> Positive {
+    assert(x > 0, "must be positive");
+    // x narrowed to Positive after assertion
+    x
+}
+
+// Narrowing through early return
+fn ensure_natural(x: Int) -> Natural {
+    if x < 0 {
+        return 0;
+    }
+    // x narrowed to Int{>= 0} (Natural) -- negative case eliminated
+    x
+}
+
+// Narrowing in loop condition
+fn count_down(start: Int) -> List<Positive> {
+    let mut result: List<Positive> = [];
+    let mut n = start;
+    while n > 0 {
+        // n narrowed to Positive inside loop body
+        result.push(n);
+        n = n - 1;
+    }
+    result
+}
+
+// Narrowing through logical AND
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b != 0 {
+        // b narrowed to NonZero
+        Some(a / b)
+    } else {
+        None
+    }
+}
+
+// Narrowing with compound conditions
+fn in_range(x: Int, lo: Int, hi: Int) -> Maybe<Int{>= 0}> {
+    if x >= lo && x <= hi && x >= 0 {
+        // x narrowed to Int{>= lo, <= hi, >= 0}
+        Some(x)
+    } else {
+        None
+    }
+}
+
+// Narrowing through null check (Maybe)
+fn double_if_present(m: Maybe<Int>) -> Maybe<Int> {
+    match m {
+        Some(v) => Some(v * 2),  // v is known non-null
+        None => None,
+    }
+}
+
+// Progressive narrowing through sequential checks
+fn validate(x: Int) -> Maybe<Int{> 0, <= 100}> {
+    if x <= 0 { return None; }
+    // x: Int{> 0}
+    if x > 100 { return None; }
+    // x: Int{> 0, <= 100}
+    Some(x)
+}
+
+fn main() {
+    assert(process(5) == "positive: 5");
+    assert(process(0) == "zero");
+    assert(process(-3) == "negative: -3");
+
+    let p = assert_and_use(10);
+    assert(p == 10);
+
+    let n = ensure_natural(-5);
+    assert(n == 0);
+    let n2 = ensure_natural(7);
+    assert(n2 == 7);
+
+    let countdown = count_down(3);
+    assert(countdown == [3, 2, 1]);
+
+    assert(safe_divide(10, 3) == Some(3));
+    assert(safe_divide(10, 0) == None);
+
+    assert(validate(50) == Some(50));
+    assert(validate(-1) == None);
+    assert(validate(200) == None);
+}

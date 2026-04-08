@@ -1,0 +1,43 @@
+fn main() -> Int {
+    let mut d = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    let len = d.len();
+    print(f"len={len}");
+    if (len != 3) {
+        print(f"FAIL: len={len}, expected 3");
+        return 1;
+    }
+
+    let front = match d.pop_front() {
+        Some(v) => v,
+        None => -1,
+    };
+    print(f"pop_front={front}");
+    if (front != 10) {
+        print(f"FAIL: pop_front={front}, expected 10");
+        return 1;
+    }
+
+    let back = match d.pop_back() {
+        Some(v) => v,
+        None => -1,
+    };
+    print(f"pop_back={back}");
+    if (back != 30) {
+        print(f"FAIL: pop_back={back}, expected 30");
+        return 1;
+    }
+
+    let len2 = d.len();
+    print(f"len after pops={len2}");
+    if (len2 != 1) {
+        print(f"FAIL: len={len2}, expected 1");
+        return 1;
+    }
+
+    print("973_deque_basic: PASS");
+    0
+}

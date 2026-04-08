@@ -1,0 +1,72 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function, parameters
+
+// Single parameter
+fn single_param(x: Int) { }
+
+// Two parameters
+fn two_params(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Multiple parameters of different types
+fn multi_params(name: Text, age: Int, active: Bool) {
+    print(name);
+}
+
+// Parameter with generic type
+fn generic_param(list: List<Int>) {
+    process(list);
+}
+
+// Parameter with complex generic type
+fn complex_param(map: Map<Text, List<Int>>) { }
+
+// Parameter with tuple type
+fn tuple_param(pair: (Int, Int)) {
+    let (a, b) = pair;
+}
+
+// Parameter with function type
+fn higher_order(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+// Parameter with reference type
+fn ref_param(data: &Int) {
+    print(*data);
+}
+
+// Parameter with mutable reference
+fn mut_ref_param(data: &mut Int) {
+    *data = 10;
+}
+
+// Parameter with checked reference
+fn checked_ref_param(data: &checked Int) { }
+
+// Parameter with Maybe type
+fn optional_param(maybe: Maybe<Int>) -> Int {
+    match maybe {
+        Some(x) => x,
+        None => 0,
+    }
+}
+
+// Trailing comma in parameters
+fn trailing_comma(
+    a: Int,
+    b: Int,
+    c: Int,
+) { }
+
+// Default parameter values ARE supported in Verum grammar.
+// Spec: Grammar default_value in function_param
+fn default_param(x: Int, y: Int = 0) -> Int { x + y }
+
+// Alternative using Maybe (also valid):
+fn with_optional(x: Int, y: Maybe<Int>) -> Int {
+    x + y.unwrap_or(0)
+}

@@ -1,0 +1,588 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: compilation, incremental, cache, speed
+// @description: Incremental compilation performance benchmark (target: < 100ms rebuild)
+
+/// Incremental Compilation Performance Benchmark
+///
+/// This benchmark measures the effectiveness of incremental compilation.
+/// Incremental compilation avoids recompiling unchanged modules.
+///
+/// Target: < 100ms for incremental rebuild after small change
+///
+/// Incremental compilation features:
+/// - Fine-grained dependency tracking
+/// - Hash-based change detection
+/// - Module-level parallelism
+/// - Persistent compilation cache
+///
+/// Spec reference: docs/detailed/28-implementation-roadmap.md
+
+const PROJECT_SIZE_LOC: Int = 50_000;
+const MODULE_COUNT: Int = 100;
+const WARMUP_BUILDS: Int = 3;
+
+fn main() {
+    let results = BenchmarkResults.new("Incremental Compilation Performance");
+
+    // Initialize project for benchmarks
+    let project = setup_benchmark_project();
+
+    // Incremental rebuild scenarios
+    results.add(benchmark_no_change_rebuild(&project));
+    results.add(benchmark_single_function_change(&project));
+    results.add(benchmark_single_module_change(&project));
+    results.add(benchmark_signature_change(&project));
+    results.add(benchmark_type_definition_change(&project));
+
+    // Cache effectiveness
+    results.add(benchmark_cache_hit_rate(&project));
+    results.add(benchmark_cache_invalidation(&project));
+
+    // Dependency tracking
+    results.add(benchmark_dependency_analysis(&project));
+    results.add(benchmark_reverse_dependency_lookup(&project));
+
+    // Parallel incremental
+    results.add(benchmark_parallel_incremental(&project));
+
+    results.report();
+    assert(results.all_pass(), "Incremental compilation below target");
+}
+
+/// Create a benchmark project with multiple modules
+fn setup_benchmark_project() -> BenchmarkProject {
+    let mut modules: List<ModuleSource> = List.new();
+
+    // Create shared types module
+    let types_source = Text.from("
+module types;
+
+pub type User is {
+    id: Int,
+    name: Text,
+    email: Text,
+};
+
+pub type Order is {
+    id: Int,
+    user_id: Int,
+    total: Float,
+    items: List<OrderItem>,
+};
+
+pub type OrderItem is {
+    product_id: Int,
+    quantity: Int,
+    price: Float,
+};
+
+pub protocol Repository<T> {
+    fn find(id: Int) -> Maybe<T>;
+    fn save(item: T) -> Result<T, Error>;
+    fn delete(id: Int) -> Result<(), Error>;
+}
+");
+
+    modules.push(ModuleSource {
+        name: "types",
+        source: types_source,
+        dependencies: [],
+    });
+
+    // Create utility modules
+    for i in 0..10 {
+        let util_source = format("
+module util_{i};
+
+mount types.*;
+
+pub fn process_{}(x: Int) -> Int {{
+    x * 2 + {}
+}}
+
+pub fn transform_{}(s: Text) -> Text {{
+    s.to_uppercase()
+}}
+
+pub fn validate_{}(user: &User) -> Bool {{
+    user.name.len() > 0 && user.email.contains(\"@\")
+}}
+", i, i, i, i);
+
+        modules.push(ModuleSource {
+            name: format("util_{}", i),
+            source: util_source,
+            dependencies: ["types"],
+        });
+    }
+
+    // Create service modules (depend on utils)
+    for i in 0..20 {
+        let util_dep = format("util_{}", i % 10);
+        let service_source = format("
+module service_{i};
+
+mount types.*;
+mount {util_dep}.*;
+
+pub fn service_operation_{}(user: User) -> Result<Order, Error> {{
+    if !validate_{}(&user) {{
+        return Err(Error.new(\"Invalid user\"));
+    }}
+
+    let processed = process_{}(user.id);
+    Ok(Order {{
+        id: processed,
+        user_id: user.id,
+        total: 0.0,
+        items: [],
+    }})
+}}
+", i, i % 10, i % 10);
+
+        modules.push(ModuleSource {
+            name: format("service_{}", i),
+            source: service_source,
+            dependencies: ["types", util_dep],
+        });
+    }
+
+    // Create additional modules to reach target LOC
+    let remaining_modules = MODULE_COUNT - modules.len();
+    let loc_per_module = (PROJECT_SIZE_LOC - 2000) / remaining_modules;
+
+    for i in 0..remaining_modules {
+        let functions_per_module = loc_per_module / 10;
+        let mut module_source = format("module extra_{};\n\n", i);
+
+        for j in 0..functions_per_module {
+            module_source.push_str(&format("
+fn compute_{}_{}(x: Int, y: Int) -> Int {{
+    let a = x + y;
+    let b = x * y;
+    let c = a - b;
+    if c > 0 {{ a + b }} else {{ a * b }}
+}}
+", i, j));
+        }
+
+        modules.push(ModuleSource {
+            name: format("extra_{}", i),
+            source: module_source,
+            dependencies: [],
+        });
+    }
+
+    BenchmarkProject.new(modules)
+}
+
+/// Benchmark: Rebuild with no changes (pure cache hit)
+fn benchmark_no_change_rebuild(project: &BenchmarkProject) -> BenchmarkResult {
+    // Initial full build
+    project.full_build();
+
+    // Warmup incremental builds
+    for _ in 0..WARMUP_BUILDS {
+        project.incremental_build();
+    }
+
+    let iterations = 20;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        project.incremental_build();
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // No-change rebuild should be very fast
+    let target = 10.0;
+
+    BenchmarkResult {
+        name: "no_change_rebuild",
+        metric: "ms",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Benchmark: Rebuild after single function body change
+fn benchmark_single_function_change(project: &BenchmarkProject) -> BenchmarkResult {
+    project.full_build();
+
+    let iterations = 10;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        // Modify a single function body
+        project.modify_function_body("util_0", "process_0", i);
+        project.incremental_build();
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // Function body change should be fast
+    let target = 50.0;
+
+    BenchmarkResult {
+        name: "single_function_change",
+        metric: "ms",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Benchmark: Rebuild after single module change
+fn benchmark_single_module_change(project: &BenchmarkProject) -> BenchmarkResult {
+    project.full_build();
+
+    let iterations = 10;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        // Modify entire module (but not exports)
+        project.modify_module_internal("extra_0", i);
+        project.incremental_build();
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // Module internal change - only recompile that module
+    let target = 100.0;
+
+    BenchmarkResult {
+        name: "single_module_change",
+        metric: "ms",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Benchmark: Rebuild after function signature change
+fn benchmark_signature_change(project: &BenchmarkProject) -> BenchmarkResult {
+    project.full_build();
+
+    let iterations = 5;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        // Change a function signature - triggers dependent rebuilds
+        project.modify_function_signature("util_0", "process_0", i);
+        project.incremental_build();
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // Signature change cascades to dependents
+    let target = 200.0;
+
+    BenchmarkResult {
+        name: "signature_change",
+        metric: "ms",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Benchmark: Rebuild after type definition change
+fn benchmark_type_definition_change(project: &BenchmarkProject) -> BenchmarkResult {
+    project.full_build();
+
+    let iterations = 3;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        // Change a widely-used type - cascades to many modules
+        project.modify_type_definition("types", "User", i);
+        project.incremental_build();
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // Type change has widest impact but should still be incremental
+    let target = 500.0;
+
+    BenchmarkResult {
+        name: "type_definition_change",
+        metric: "ms",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Benchmark: Cache hit rate effectiveness
+fn benchmark_cache_hit_rate(project: &BenchmarkProject) -> BenchmarkResult {
+    project.full_build();
+
+    // Make small change
+    project.modify_function_body("extra_50", "compute_50_0", 999);
+
+    let stats = project.incremental_build_with_stats();
+
+    let hit_rate = stats.cache_hits as Float /
+                   (stats.cache_hits + stats.cache_misses) as Float;
+
+    // Should have very high cache hit rate
+    let target = 0.95;  // 95% cache hit rate
+
+    BenchmarkResult {
+        name: "cache_hit_rate",
+        metric: "ratio",
+        value: hit_rate,
+        target: target,
+        passed: hit_rate > target,
+    }
+}
+
+/// Benchmark: Cache invalidation precision
+fn benchmark_cache_invalidation(project: &BenchmarkProject) -> BenchmarkResult {
+    project.full_build();
+
+    // Change a leaf module (no dependents)
+    project.modify_module_internal("extra_99", 1);
+
+    let stats = project.incremental_build_with_stats();
+
+    // Only one module should be invalidated
+    let invalidated = stats.cache_misses;
+
+    // Precise invalidation - only changed module + type check
+    let target = 2.0;
+
+    BenchmarkResult {
+        name: "cache_invalidation_precision",
+        metric: "modules",
+        value: invalidated as Float,
+        target: target,
+        passed: invalidated as Float <= target,
+    }
+}
+
+/// Benchmark: Dependency analysis speed
+fn benchmark_dependency_analysis(project: &BenchmarkProject) -> BenchmarkResult {
+    let iterations = 100;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..iterations {
+        black_box(project.analyze_dependencies());
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_ms = elapsed_ms as Float / iterations as Float;
+
+    // Dependency analysis should be fast
+    let target = 5.0;
+
+    BenchmarkResult {
+        name: "dependency_analysis",
+        metric: "ms",
+        value: avg_ms,
+        target: target,
+        passed: avg_ms < target,
+    }
+}
+
+/// Benchmark: Reverse dependency lookup speed
+fn benchmark_reverse_dependency_lookup(project: &BenchmarkProject) -> BenchmarkResult {
+    let iterations = 1000;
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..iterations {
+        let module_name = format("util_{}", i % 10);
+        black_box(project.get_reverse_dependencies(&module_name));
+    }
+
+    let elapsed_ms = timer.elapsed_ms();
+    let avg_us = (elapsed_ms as Float / iterations as Float) * 1000.0;
+
+    // Reverse lookup should be sub-millisecond
+    let target = 100.0;  // 100 microseconds
+
+    BenchmarkResult {
+        name: "reverse_dependency_lookup",
+        metric: "us",
+        value: avg_us,
+        target: target,
+        passed: avg_us < target,
+    }
+}
+
+/// Benchmark: Parallel incremental compilation
+fn benchmark_parallel_incremental(project: &BenchmarkProject) -> BenchmarkResult {
+    project.full_build();
+
+    // Modify multiple independent modules
+    for i in 0..10 {
+        project.modify_module_internal(&format("extra_{}", i * 10), 1);
+    }
+
+    // Sequential rebuild
+    let seq_timer = Timer.new();
+    seq_timer.start();
+    project.incremental_build_sequential();
+    let seq_ms = seq_timer.elapsed_ms();
+
+    // Reset
+    project.full_build();
+    for i in 0..10 {
+        project.modify_module_internal(&format("extra_{}", i * 10), 1);
+    }
+
+    // Parallel rebuild
+    let par_timer = Timer.new();
+    par_timer.start();
+    project.incremental_build_parallel(num_cpus());
+    let par_ms = par_timer.elapsed_ms();
+
+    let speedup = seq_ms as Float / par_ms as Float;
+    let expected_speedup = (num_cpus() as Float * 0.6).min(8.0);
+
+    BenchmarkResult {
+        name: "parallel_incremental",
+        metric: "speedup",
+        value: speedup,
+        target: expected_speedup,
+        passed: speedup > expected_speedup,
+    }
+}
+
+type ModuleSource is {
+    name: Text,
+    source: Text,
+    dependencies: List<Text>,
+};
+
+type BuildStats is {
+    cache_hits: Int,
+    cache_misses: Int,
+    modules_recompiled: Int,
+    total_time_ms: Int,
+};
+
+type BenchmarkProject is {
+    modules: List<ModuleSource>,
+    build_cache: BuildCache,
+};
+
+implement BenchmarkProject {
+    fn new(modules: List<ModuleSource>) -> Self {
+        Self {
+            modules: modules,
+            build_cache: BuildCache.new(),
+        }
+    }
+
+    fn full_build(mut self) {
+        self.build_cache.clear();
+        compiler.build_project(&self.modules, &mut self.build_cache);
+    }
+
+    fn incremental_build(self) {
+        compiler.incremental_build(&self.modules, &self.build_cache);
+    }
+
+    fn incremental_build_with_stats(self) -> BuildStats {
+        compiler.incremental_build_stats(&self.modules, &self.build_cache)
+    }
+
+    fn incremental_build_sequential(self) {
+        compiler.incremental_build_seq(&self.modules, &self.build_cache);
+    }
+
+    fn incremental_build_parallel(self, threads: Int) {
+        compiler.incremental_build_par(&self.modules, &self.build_cache, threads);
+    }
+
+    fn modify_function_body(mut self, mod_ref: &Text, func: &Text, seed: Int) {
+        // Modify function body without changing signature
+    }
+
+    fn modify_function_signature(mut self, mod_ref: &Text, func: &Text, seed: Int) {
+        // Modify function signature
+    }
+
+    fn modify_module_internal(mut self, mod_ref: &Text, seed: Int) {
+        // Modify module internal implementation
+    }
+
+    fn modify_type_definition(mut self, mod_ref: &Text, type_name: &Text, seed: Int) {
+        // Modify type definition
+    }
+
+    fn analyze_dependencies(self) -> DependencyGraph {
+        compiler.analyze_deps(&self.modules)
+    }
+
+    fn get_reverse_dependencies(self, mod_ref: &Text) -> List<Text> {
+        compiler.reverse_deps(&self.modules, mod_ref)
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    metric: Text,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            println("[{}] {}: {:.2} {} (target: {:.2})",
+                    status, result.name, result.value, result.metric, result.target);
+        }
+
+        println("");
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+}

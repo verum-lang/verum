@@ -1,0 +1,62 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, performance, matrix_multiply
+// @expected-exit: 0
+
+// Performance: 64x64 matrix multiply using flat arrays
+
+fn mat_mul(a: List<Int>, b: List<Int>, n: Int) -> List<Int> {
+    let mut c: List<Int> = [];
+    let mut idx = 0;
+    while (idx < n * n) {
+        c.push(0);
+        idx = idx + 1;
+    }
+
+    let mut i = 0;
+    while (i < n) {
+        let mut j = 0;
+        while (j < n) {
+            let mut sum = 0;
+            let mut k = 0;
+            while (k < n) {
+                sum = sum + a[i * n + k] * b[k * n + j];
+                k = k + 1;
+            }
+            c[i * n + j] = sum;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    c
+}
+
+fn make_matrix(n: Int) -> List<Int> {
+    let mut m: List<Int> = [];
+    let mut i = 0;
+    while (i < n * n) {
+        m.push((i * 7 + 3) % 100);
+        i = i + 1;
+    }
+    m
+}
+
+fn main() -> Int {
+    let n = 64;
+    let a = make_matrix(n);
+    let b = make_matrix(n);
+    let c = mat_mul(a, b, n);
+
+    // Verify a few elements
+    // c[0] = sum(a[0..64] * b[col0]) - computed deterministically
+    let c0 = c[0];
+    let c_last = c[n * n - 1];
+    // Just verify non-zero and computation completed
+    if (c0 == 0) {
+        print(f"FAIL: c[0]={c0} should be non-zero");
+        return 1;
+    }
+    print(f"OK: mat_64x64 c[0]={c0} c[last]={c_last}");
+    0
+}

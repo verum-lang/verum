@@ -1,0 +1,150 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, concurrent, pipeline, channel, spawn
+// @timeout: 15000
+// @expected-exit: 0
+
+// Concurrent pipeline: producer → transformer → consumer via channels.
+// Tests: Channel.new, send, recv, spawn, await, multi-stage pipeline.
+
+mount core.sync.atomic.MemoryOrdering;
+
+fn producer(out_ch: Channel<Int>, count: Int) -> Int {
+    let mut i = 0;
+    while i < count {
+        out_ch.send(i * 10);
+        i = i + 1;
+    }
+    out_ch.close();
+    0
+}
+
+fn transformer(in_ch: Channel<Int>, out_ch: Channel<Int>) -> Int {
+    let mut done = false;
+    while !done {
+        match in_ch.recv() {
+            Some(val) => { out_ch.send(val + 1); }
+            None => { done = true; }
+        }
+    }
+    out_ch.close();
+    0
+}
+
+fn consumer(in_ch: Channel<Int>) -> Int {
+    let mut sum = 0;
+    let mut done = false;
+    while !done {
+        match in_ch.recv() {
+            Some(val) => { sum = sum + val; }
+            None => { done = true; }
+        }
+    }
+    sum
+}
+
+fn main() -> Int {
+    let mut pass = 0;
+
+    // Test 1: 3-stage pipeline — producer → transformer → consumer
+    let ch1 = Channel.new(16);
+    let ch2 = Channel.new(16);
+
+    let p = spawn producer(ch1, 5);
+    let t = spawn transformer(ch1, ch2);
+    let c = spawn consumer(ch2);
+
+    let _ = p.await;
+    let _ = t.await;
+    let total = c.await;
+
+    // producer sends 0,10,20,30,40
+    // transformer adds 1: 1,11,21,31,41
+    // consumer sums: 1+11+21+31+41 = 105
+    print(f"pipeline sum: {total}");
+    if total == 105 { pass = pass + 1; }
+
+    // Test 2: Fan-out with shared counter
+    let counter = AtomicInt.new(0);
+    let result_ch = Channel.new(4);
+
+    let w1 = spawn {
+        let mut s = 0;
+        let mut i = 0;
+        while i < 100 {
+            s = s + 1;
+            i = i + 1;
+        }
+        counter.fetch_add(s, Ordering.Relaxed);
+        result_ch.send(s);
+        0
+    };
+    let w2 = spawn {
+        let mut s = 0;
+        let mut i = 0;
+        while i < 100 {
+            s = s + 1;
+            i = i + 1;
+        }
+        counter.fetch_add(s, Ordering.Relaxed);
+        result_ch.send(s);
+        0
+    };
+
+    let _ = w1.await;
+    let _ = w2.await;
+
+    let mut r1 = 0;
+    let mut r2 = 0;
+    match result_ch.recv() {
+        Some(v) => { r1 = v; }
+        None => {}
+    }
+    match result_ch.recv() {
+        Some(v) => { r2 = v; }
+        None => {}
+    }
+    let atomic_total = counter.load(Ordering.Acquire);
+
+    print(f"fan-out: r1={r1}, r2={r2}, atomic={atomic_total}");
+    if atomic_total == 200 { pass = pass + 1; }
+
+    // Test 3: Ping-pong between two threads
+    let ping_ch = Channel.new(1);
+    let pong_ch = Channel.new(1);
+
+    let ping_thread = spawn {
+        ping_ch.send(1);
+        let mut reply = 0;
+        match pong_ch.recv() {
+            Some(v) => { reply = v; }
+            None => {}
+        }
+        let result = reply + 10;
+        result
+    };
+
+    let pong_thread = spawn {
+        let mut msg = 0;
+        match ping_ch.recv() {
+            Some(v) => { msg = v; }
+            None => {}
+        }
+        pong_ch.send(msg + 100);
+        0
+    };
+
+    let ping_result = ping_thread.await;
+    let _ = pong_thread.await;
+    // ping sends 1, pong receives 1, sends 101, ping receives 101, returns 111
+    print(f"ping-pong: {ping_result}");
+    if ping_result == 111 { pass = pass + 1; }
+
+    print(f"pass = {pass}/3");
+    if pass == 3 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

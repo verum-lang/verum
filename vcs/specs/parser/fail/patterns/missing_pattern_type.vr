@@ -1,0 +1,65 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, type, missing, error
+// @description: Test missing type after colon in pattern type annotation
+// @expected-error: E081
+
+type Option<T> is None | Some(T);
+type Point is { x: Int, y: Int };
+
+fn test_let_missing_type() {
+    // Invalid: colon without type in let statement
+    let x: = 42;
+}
+
+fn test_let_colon_semicolon() {
+    // Invalid: colon followed directly by semicolon
+    let x:;
+}
+
+fn test_match_pattern_missing_type() {
+    let opt: Option<Int> = Some(42);
+
+    // Invalid: colon without type in match pattern
+    match opt {
+        Some(value:) => print("missing"),
+        None => print("none"),
+    }
+}
+
+fn test_tuple_pattern_missing_type() {
+    let pair = (1, 2);
+
+    // Invalid: colon without type in tuple element
+    match pair {
+        (a:, b) => print("missing in tuple"),
+        _ => print("other"),
+    }
+}
+
+fn test_record_pattern_missing_type() {
+    let p = Point { x: 1, y: 2 };
+
+    // Invalid: type annotation without type in field pattern
+    // Note: field_pattern uses : for binding, not type
+    match p {
+        Point { x: val:, y } => print("double colon field"),
+        _ => print("other"),
+    }
+}
+
+fn test_for_pattern_missing_type() {
+    let items = [1, 2, 3];
+
+    // Invalid: type annotation without type in for pattern
+    for item: in items {
+        print(item);
+    }
+}
+
+fn test_function_param_missing_type() {
+    // Invalid: parameter with colon but no type
+    fn broken(x:) {
+        print(x);
+    }
+}

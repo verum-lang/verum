@@ -1,0 +1,191 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, iterators, for-in, range, pipeline
+// @timeout: 5000
+// @expect: pass
+//
+// End-to-end pipeline test: .vr source -> parse -> typecheck -> VBC codegen -> interpreter
+// Verifies for-in loops, range iteration, and iterator patterns through the full pipeline
+
+// =============================================================================
+// For-in with ranges
+// =============================================================================
+
+@test
+fn test_range_sum() {
+    let mut sum = 0;
+    for i in 0..5 {
+        sum = sum + i;
+    }
+    // 0+1+2+3+4 = 10
+    assert_eq(sum, 10);
+}
+
+@test
+fn test_range_count() {
+    let mut count = 0;
+    for _ in 0..10 {
+        count = count + 1;
+    }
+    assert_eq(count, 10);
+}
+
+@test
+fn test_range_product() {
+    let mut product = 1;
+    for i in 1..6 {
+        product = product * i;
+    }
+    // 1*2*3*4*5 = 120
+    assert_eq(product, 120);
+}
+
+@test
+fn test_empty_range() {
+    let mut count = 0;
+    for _ in 5..5 {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+// =============================================================================
+// For-in with arrays
+// =============================================================================
+
+@test
+fn test_iterate_array() {
+    let arr = [10, 20, 30, 40, 50];
+    let mut sum = 0;
+    for val in arr {
+        sum = sum + val;
+    }
+    assert_eq(sum, 150);
+}
+
+@test
+fn test_iterate_array_count() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut count = 0;
+    for _ in arr {
+        count = count + 1;
+    }
+    assert_eq(count, 10);
+}
+
+// =============================================================================
+// Nested loops
+// =============================================================================
+
+@test
+fn test_nested_loops() {
+    let mut sum = 0;
+    for i in 0..3 {
+        for j in 0..3 {
+            sum = sum + i * 3 + j;
+        }
+    }
+    // (0+1+2) + (3+4+5) + (6+7+8) = 36
+    assert_eq(sum, 36);
+}
+
+@test
+fn test_nested_loop_multiplication_table() {
+    let mut sum = 0;
+    for i in 1..4 {
+        for j in 1..4 {
+            sum = sum + i * j;
+        }
+    }
+    // 1*1+1*2+1*3 + 2*1+2*2+2*3 + 3*1+3*2+3*3
+    // = 6 + 12 + 18 = 36
+    assert_eq(sum, 36);
+}
+
+// =============================================================================
+// While loops with iterator-like patterns
+// =============================================================================
+
+@test
+fn test_while_countdown() {
+    let mut n = 10;
+    let mut steps = 0;
+    while n > 0 {
+        n = n - 1;
+        steps = steps + 1;
+    }
+    assert_eq(steps, 10);
+    assert_eq(n, 0);
+}
+
+@test
+fn test_while_accumulate() {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 100 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    // sum of 1..100 = 5050
+    assert_eq(sum, 5050);
+}
+
+// =============================================================================
+// Break and continue
+// =============================================================================
+
+@test
+fn test_break_in_loop() {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 100 {
+        if i >= 5 {
+            break;
+        }
+        sum = sum + i;
+        i = i + 1;
+    }
+    assert_eq(sum, 10);
+}
+
+@test
+fn test_continue_in_loop() {
+    let mut sum = 0;
+    for i in 0..10 {
+        if i % 2 == 0 {
+            continue;
+        }
+        sum = sum + i;
+    }
+    // 1+3+5+7+9 = 25
+    assert_eq(sum, 25);
+}
+
+// =============================================================================
+// Complex iteration patterns
+// =============================================================================
+
+@test
+fn test_fibonacci_iteration() {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < 10 {
+        let temp = b;
+        b = a + b;
+        a = temp;
+        i = i + 1;
+    }
+    // fib(10) = 55
+    assert_eq(a, 55);
+}
+
+@test
+fn test_powers_of_two() {
+    let mut result = 1;
+    for _ in 0..10 {
+        result = result * 2;
+    }
+    assert_eq(result, 1024);
+}

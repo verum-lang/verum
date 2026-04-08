@@ -1,0 +1,91 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, text, string
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests text creation, concatenation, format strings, and text in data structures.
+
+fn greet(name: Text) -> Text {
+    f"Hello, {name}!"
+}
+
+fn test_text_basics() {
+    let s = "hello";
+    let t = "world";
+    print(s);
+    print(t);
+    print("text_basics: ok");
+}
+
+fn test_format_strings() {
+    let x = 42;
+    let msg = f"value={x}";
+    print(msg);
+
+    let a = 10;
+    let b = 20;
+    let sum = a + b;
+    let result = f"{a}+{b}={sum}";
+    print(result);
+    print("format_strings: ok");
+}
+
+fn test_text_function() {
+    let g = greet("Verum");
+    print(g);
+    let g2 = greet("World");
+    print(g2);
+    print("text_function: ok");
+}
+
+fn test_text_concat() {
+    let a = "foo";
+    let b = "bar";
+    let c = a + b;
+    print(c);
+
+    // Build string in loop
+    let mut result = "";
+    let mut i = 0;
+    while i < 5 {
+        result = result + "x";
+        i = i + 1;
+    }
+    print(result);
+    print("text_concat: ok");
+}
+
+fn test_format_in_loop() {
+    let mut i = 0;
+    while i < 3 {
+        let msg = f"item_{i}";
+        print(msg);
+        i = i + 1;
+    }
+    print("format_in_loop: ok");
+}
+
+fn test_text_with_numbers() {
+    let pi_approx = 355;
+    let denom = 113;
+    let msg = f"pi ~ {pi_approx}/{denom}";
+    print(msg);
+
+    let negative = -42;
+    let neg_msg = f"neg={negative}";
+    print(neg_msg);
+    print("text_with_numbers: ok");
+}
+
+fn main() -> Int {
+    test_text_basics();
+    test_format_strings();
+    test_text_function();
+    test_text_concat();
+    test_format_in_loop();
+    test_text_with_numbers();
+    print("[OK] 402_interp_text_operations");
+    0
+}

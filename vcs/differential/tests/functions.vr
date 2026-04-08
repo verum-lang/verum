@@ -1,0 +1,223 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, functions
+// @timeout: 10000
+
+/// Function call semantics for differential testing.
+/// Tests recursion, higher-order functions, default parameters.
+
+fn main() {
+    test_basic_functions();
+    test_recursion();
+    test_mutual_recursion();
+    test_higher_order();
+    test_variadic_simulation();
+    test_return_values();
+}
+
+/// Basic function calls
+fn test_basic_functions() {
+    println("=== Basic Functions ===");
+
+    fn add(a: Int, b: Int) -> Int {
+        a + b
+    }
+
+    fn multiply(a: Int, b: Int) -> Int {
+        a * b
+    }
+
+    fn greet(name: Text) -> Text {
+        f"Hello, {name}!"
+    }
+
+    println(f"add(2, 3) = {add(2, 3)}");
+    println(f"multiply(4, 5) = {multiply(4, 5)}");
+    println(f"greet('World') = {greet('World')}");
+
+    // Nested calls
+    let result = add(multiply(2, 3), multiply(4, 5));
+    println(f"nested: {result}");
+
+    // Expression body
+    fn square(x: Int) -> Int = x * x;
+    fn cube(x: Int) -> Int = x * x * x;
+
+    println(f"square(5) = {square(5)}");
+    println(f"cube(3) = {cube(3)}");
+}
+
+/// Recursive functions
+fn test_recursion() {
+    println("\n=== Recursion ===");
+
+    fn factorial(n: Int) -> Int {
+        if n <= 1 { 1 } else { n * factorial(n - 1) }
+    }
+
+    fn fibonacci(n: Int) -> Int {
+        if n <= 1 { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
+    }
+
+    fn sum_to(n: Int) -> Int {
+        if n <= 0 { 0 } else { n + sum_to(n - 1) }
+    }
+
+    for i in [0, 1, 5, 10] {
+        println(f"factorial({i}) = {factorial(i)}");
+    }
+
+    for i in [0, 1, 2, 5, 10] {
+        println(f"fibonacci({i}) = {fibonacci(i)}");
+    }
+
+    println(f"sum_to(10) = {sum_to(10)}");
+
+    // Deep recursion (tail-call-like)
+    fn count_down(n: Int, acc: Int) -> Int {
+        if n <= 0 { acc } else { count_down(n - 1, acc + 1) }
+    }
+
+    println(f"count_down(100) = {count_down(100, 0)}");
+}
+
+/// Mutual recursion
+fn test_mutual_recursion() {
+    println("\n=== Mutual Recursion ===");
+
+    fn is_even(n: Int) -> Bool {
+        if n == 0 { true } else { is_odd(n - 1) }
+    }
+
+    fn is_odd(n: Int) -> Bool {
+        if n == 0 { false } else { is_even(n - 1) }
+    }
+
+    for i in [0, 1, 2, 5, 10, 15] {
+        println(f"is_even({i}) = {is_even(i)}");
+        println(f"is_odd({i}) = {is_odd(i)}");
+    }
+
+    // Ping-pong pattern
+    fn ping(n: Int) -> Text {
+        if n <= 0 { "done" } else { f"ping-{pong(n - 1)}" }
+    }
+
+    fn pong(n: Int) -> Text {
+        if n <= 0 { "done" } else { f"pong-{ping(n - 1)}" }
+    }
+
+    println(f"ping(5) = {ping(5)}");
+}
+
+/// Higher-order functions
+fn test_higher_order() {
+    println("\n=== Higher-Order Functions ===");
+
+    fn apply(f: Fn(Int) -> Int, x: Int) -> Int {
+        f(x)
+    }
+
+    fn apply_twice(f: Fn(Int) -> Int, x: Int) -> Int {
+        f(f(x))
+    }
+
+    fn compose<A, B, C>(f: Fn(B) -> C, g: Fn(A) -> B) -> Fn(A) -> C {
+        |x| f(g(x))
+    }
+
+    fn double(x: Int) -> Int { x * 2 }
+    fn increment(x: Int) -> Int { x + 1 }
+
+    println(f"apply(double, 5) = {apply(double, 5)}");
+    println(f"apply(increment, 5) = {apply(increment, 5)}");
+    println(f"apply_twice(double, 5) = {apply_twice(double, 5)}");
+
+    let double_then_inc = compose(increment, double);
+    let inc_then_double = compose(double, increment);
+
+    println(f"double_then_inc(5) = {double_then_inc(5)}");
+    println(f"inc_then_double(5) = {inc_then_double(5)}");
+
+    // Function returning function
+    fn make_adder(n: Int) -> Fn(Int) -> Int {
+        |x| x + n
+    }
+
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+
+    println(f"add5(3) = {add5(3)}");
+    println(f"add10(3) = {add10(3)}");
+}
+
+/// Simulating variadic with list
+fn test_variadic_simulation() {
+    println("\n=== Variadic Simulation ===");
+
+    fn sum_all(nums: List<Int>) -> Int {
+        nums.fold(0, |acc, n| acc + n)
+    }
+
+    fn max_all(nums: List<Int>) -> Maybe<Int> {
+        if nums.is_empty() {
+            None
+        } else {
+            Some(nums.fold(nums[0], |max, n| if n > max { n } else { max }))
+        }
+    }
+
+    fn join_all(strings: List<Text>, sep: Text) -> Text {
+        if strings.is_empty() {
+            ""
+        } else {
+            strings.skip(1).fold(strings[0], |acc, s| f"{acc}{sep}{s}")
+        }
+    }
+
+    println(f"sum_all([1, 2, 3, 4, 5]) = {sum_all([1, 2, 3, 4, 5])}");
+    println(f"max_all([3, 1, 4, 1, 5]) = {max_all([3, 1, 4, 1, 5])}");
+    println(f"join_all(['a', 'b', 'c'], '-') = {join_all(['a', 'b', 'c'], '-')}");
+}
+
+/// Return value semantics
+fn test_return_values() {
+    println("\n=== Return Values ===");
+
+    // Early return
+    fn find_first_even(nums: List<Int>) -> Maybe<Int> {
+        for n in nums {
+            if n % 2 == 0 {
+                return Some(n);
+            }
+        }
+        None
+    }
+
+    println(f"find_first_even([1, 3, 5, 4, 6]) = {find_first_even([1, 3, 5, 4, 6])}");
+    println(f"find_first_even([1, 3, 5, 7]) = {find_first_even([1, 3, 5, 7])}");
+
+    // Return in nested blocks
+    fn nested_return(x: Int) -> Int {
+        if x > 0 {
+            if x > 10 {
+                return x * 2;
+            }
+            return x + 1;
+        }
+        0
+    }
+
+    println(f"nested_return(-5) = {nested_return(-5)}");
+    println(f"nested_return(5) = {nested_return(5)}");
+    println(f"nested_return(15) = {nested_return(15)}");
+
+    // Implicit return
+    fn implicit_return(x: Int) -> Int {
+        let y = x * 2;
+        y + 1
+    }
+
+    println(f"implicit_return(5) = {implicit_return(5)}");
+}

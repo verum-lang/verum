@@ -1,0 +1,420 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @description: Comprehensive parser tests for compound type productions
+// Grammar: tuple_type = '(' , type_expr , { ',' , type_expr } , ')' ;
+//          array_type = '[' , type_expr , ';' , expression , ']' ;
+//          slice_type = '[' , type_expr , ']' ;
+
+// =============================================================================
+// Section 1: Tuple Types - Basic
+// =============================================================================
+
+// Grammar: tuple_type = '(' , type_expr , { ',' , type_expr } , ')' ;
+
+fn test_basic_tuples() {
+    // Two-element tuples (pairs)
+    let pair: (Int, Int) = (1, 2);
+    let int_text: (Int, Text) = (42, "hello");
+    let bool_float: (Bool, Float) = (true, 3.14);
+
+    // Three-element tuples (triples)
+    let triple: (Int, Text, Bool) = (1, "a", true);
+
+    // Four-element tuples (quadruples)
+    let quad: (Int, Int, Int, Int) = (1, 2, 3, 4);
+
+    // Many elements
+    let many: (Int, Int, Int, Int, Int, Int, Int, Int) = (1, 2, 3, 4, 5, 6, 7, 8);
+}
+
+fn test_single_element_tuple() {
+    // Single-element tuple (trailing comma required)
+    let single: (Int,) = (42,);
+    let single_text: (Text,) = ("hello",);
+    let single_bool: (Bool,) = (true,);
+}
+
+fn test_unit_type() {
+    // Unit type (empty tuple)
+    let unit: () = ();
+
+    // Unit in various positions
+    fn returns_unit() -> () { () }
+    fn takes_unit(u: ()) { }
+}
+
+// =============================================================================
+// Section 2: Nested Tuple Types
+// =============================================================================
+
+fn test_nested_tuples() {
+    // Nested pairs
+    let nested: ((Int, Int), Text) = ((1, 2), "hello");
+    let nested2: (Int, (Text, Bool)) = (42, ("a", true));
+
+    // Deeply nested
+    let deep: ((Int, Int), (Text, Text)) = ((1, 2), ("a", "b"));
+    let deeper: (((Int, Int), Int), Int) = (((1, 2), 3), 4);
+
+    // Triple nesting
+    let triple_nested: (((Int,),),) = (((42,),),);
+}
+
+// =============================================================================
+// Section 3: Tuple Types with Complex Elements
+// =============================================================================
+
+fn test_tuples_with_generics() {
+    // Tuples containing generic types
+    let list_pair: (List<Int>, List<Text>) = (List.new(), List.new());
+    let map_tuple: (Map<Text, Int>, Set<Int>) = (Map.new(), Set.new());
+    let result_pair: (Result<Int, Error>, Maybe<Text>) = (Ok(42), None);
+}
+
+fn test_tuples_with_references() {
+    // Tuples containing references
+    let ref_pair: (&Int, &Text) = (&42, &"hello");
+    let mut_ref_pair: (&mut Int, &mut Text) = (&mut 42, &mut "hello");
+    let mixed_refs: (&Int, &mut Text) = (&42, &mut "hello");
+}
+
+fn test_tuples_with_arrays() {
+    // Tuples containing arrays
+    let array_pair: ([Int; 3], [Text; 2]) = ([1, 2, 3], ["a", "b"]);
+    let nested_array_tuple: (([Int; 2], [Int; 2]), [Int; 4]) = (([1, 2], [3, 4]), [5, 6, 7, 8]);
+}
+
+fn test_tuples_with_functions() {
+    // Tuples containing function types
+    let fn_pair: (fn(Int) -> Int, fn(Text) -> Text) = (identity_int, identity_text);
+    let fn_triple: (fn() -> Int, fn(Int), fn(Int) -> Bool) = (get_int, use_int, is_positive);
+}
+
+fn identity_int(x: Int) -> Int { x }
+fn identity_text(x: Text) -> Text { x }
+fn get_int() -> Int { 42 }
+fn use_int(x: Int) { }
+fn is_positive(x: Int) -> Bool { x > 0 }
+
+type Error is { message: Text };
+
+// =============================================================================
+// Section 4: Array Types - Fixed Size
+// =============================================================================
+
+// Grammar: array_type = '[' , type_expr , ';' , expression , ']' ;
+
+fn test_basic_arrays() {
+    // Simple fixed-size arrays
+    let arr3: [Int; 3] = [1, 2, 3];
+    let arr5: [Int; 5] = [0; 5];  // Repeat syntax
+    let arr10: [Text; 10] = [""; 10];
+
+    // Different element types
+    let int_arr: [Int; 5] = [1, 2, 3, 4, 5];
+    let float_arr: [Float; 3] = [1.0, 2.0, 3.0];
+    let bool_arr: [Bool; 4] = [true, false, true, false];
+    let char_arr: [Char; 3] = ['a', 'b', 'c'];
+    let text_arr: [Text; 2] = ["hello", "world"];
+}
+
+fn test_array_with_const_size() {
+    // Arrays with const generic size
+    let generic_arr: [Int; N] = make_array();
+    let computed_arr: [Int; SIZE] = make_sized_array();
+}
+
+const N: Int = 10;
+const SIZE: Int = 100;
+
+fn make_array<const N: Int>() -> [Int; N] { [0; N] }
+fn make_sized_array() -> [Int; SIZE] { [0; SIZE] }
+
+fn test_array_with_computed_size() {
+    // Arrays with compile-time computed sizes
+    let sum_arr: [Int; N + M] = [0; N + M];
+    let double_arr: [Int; N * 2] = [0; N * 2];
+    let complex_arr: [Int; (N + 1) * 2] = [0; (N + 1) * 2];
+}
+
+const M: Int = 5;
+
+// =============================================================================
+// Section 5: Nested Array Types (Multi-dimensional)
+// =============================================================================
+
+fn test_nested_arrays() {
+    // 2D arrays (matrix)
+    let matrix: [[Int; 3]; 4] = [[0; 3]; 4];  // 4 rows, 3 columns
+    let matrix2: [[Float; 4]; 3] = [[0.0; 4]; 3];
+
+    // 3D arrays (cube)
+    let cube: [[[Int; 2]; 3]; 4] = [[[0; 2]; 3]; 4];
+
+    // 4D arrays
+    let hyper: [[[[Int; 2]; 2]; 2]; 2] = [[[[0; 2]; 2]; 2]; 2];
+}
+
+fn test_array_of_complex_types() {
+    // Array of tuples
+    let tuple_arr: [(Int, Text); 3] = [(1, "a"), (2, "b"), (3, "c")];
+
+    // Array of references
+    let ref_arr: [&Int; 5] = [&1, &2, &3, &4, &5];
+
+    // Array of generics
+    let list_arr: [List<Int>; 3] = [List.new(), List.new(), List.new()];
+    let maybe_arr: [Maybe<Int>; 4] = [Some(1), None, Some(3), None];
+
+    // Array of arrays in generic
+    let array_list: List<[Int; 3]> = List.new();
+}
+
+// =============================================================================
+// Section 6: Slice Types
+// =============================================================================
+
+// Grammar: slice_type = '[' , type_expr , ']' ;
+
+fn test_basic_slices() {
+    // Simple slice types
+    let int_slice: [Int] = get_slice();
+    let float_slice: [Float] = get_float_slice();
+    let text_slice: [Text] = get_text_slice();
+    let bool_slice: [Bool] = get_bool_slice();
+}
+
+fn get_slice() -> [Int] { [1, 2, 3] }
+fn get_float_slice() -> [Float] { [1.0, 2.0] }
+fn get_text_slice() -> [Text] { ["a", "b"] }
+fn get_bool_slice() -> [Bool] { [true, false] }
+
+fn test_slice_references() {
+    // Slice references (most common usage)
+    let borrowed_slice: &[Int] = &[1, 2, 3];
+    let mut_borrowed_slice: &mut [Int] = &mut [1, 2, 3];
+
+    // Checked slice references
+    let checked_slice: &checked [Int] = &checked [1, 2, 3];
+
+    // Unsafe slice references
+    let unsafe_slice: &unsafe [Int] = &unsafe [1, 2, 3];
+}
+
+fn test_nested_slices() {
+    // Slice of slices
+    let nested_slice: [[Int]] = get_nested_slice();
+
+    // Slice of arrays
+    let slice_of_arrays: [[Int; 3]] = get_slice_of_arrays();
+
+    // Array of slices
+    let arrays_of_slices: [[Int]; 3] = get_arrays_of_slices();
+}
+
+fn get_nested_slice() -> [[Int]] { [[1, 2], [3, 4]] }
+fn get_slice_of_arrays() -> [[Int; 3]] { [[1, 2, 3], [4, 5, 6]] }
+fn get_arrays_of_slices() -> [[Int]; 3] { [[1], [2, 3], [4, 5, 6]] }
+
+fn test_slice_of_complex_types() {
+    // Slice of tuples
+    let tuple_slice: [(Int, Text)] = get_tuple_slice();
+
+    // Slice of generics
+    let generic_slice: [List<Int>] = get_generic_slice();
+
+    // Slice of references
+    let ref_slice: [&Int] = get_ref_slice();
+}
+
+fn get_tuple_slice() -> [(Int, Text)] { [(1, "a"), (2, "b")] }
+fn get_generic_slice() -> [List<Int>] { [List.new(), List.new()] }
+fn get_ref_slice() -> [&Int] { [&1, &2, &3] }
+
+// =============================================================================
+// Section 7: Compound Types in Type Definitions
+// =============================================================================
+
+// Tuple types in type aliases
+type Point2D is (Float, Float);
+type Point3D is (Float, Float, Float);
+type NameAge is (Text, Int);
+
+// Array types in type aliases
+type Matrix3x3 is [[Float; 3]; 3];
+type Vector4 is [Float; 4];
+type ByteBuffer is [Byte; 1024];
+
+// Slice types in type aliases
+type IntSlice is [Int];
+type TextSlice is [Text];
+
+// Combined compound types
+type ComplexType is (List<Int>, [Text; 3], [Float]);
+
+fn test_type_aliases() {
+    let point: Point2D = (1.0, 2.0);
+    let matrix: Matrix3x3 = [[0.0; 3]; 3];
+    let buffer: ByteBuffer = [0; 1024];
+}
+
+// =============================================================================
+// Section 8: Compound Types in Record Fields
+// =============================================================================
+
+type Rectangle is {
+    corners: [(Float, Float); 4],
+    color: (Int, Int, Int),
+    name: Text
+};
+
+type DataSet is {
+    values: [Float],
+    dimensions: (Int, Int),
+    metadata: Map<Text, Text>
+};
+
+type Grid<T, const ROWS: Int, const COLS: Int> is {
+    cells: [[T; COLS]; ROWS],
+    size: (Int, Int)
+};
+
+// =============================================================================
+// Section 9: Compound Types in Function Signatures
+// =============================================================================
+
+fn takes_tuple(t: (Int, Text)) -> Bool {
+    t.0 > 0
+}
+
+fn returns_tuple() -> (Int, Text, Bool) {
+    (42, "hello", true)
+}
+
+fn takes_array(arr: [Int; 5]) -> Int {
+    arr[0]
+}
+
+fn returns_array() -> [Int; 3] {
+    [1, 2, 3]
+}
+
+fn takes_slice(s: &[Int]) -> Int {
+    s.len()
+}
+
+fn takes_nested(matrix: [[Int; 3]; 3]) -> Int {
+    matrix[0][0]
+}
+
+fn swap_tuple<A, B>(t: (A, B)) -> (B, A) {
+    let (a, b) = t;
+    (b, a)
+}
+
+fn flatten<T, const M: Int, const N: Int>(matrix: [[T; N]; M]) -> [T; M * N] {
+    // Implementation
+    [T.default(); M * N]
+}
+
+// =============================================================================
+// Section 10: Compound Types in Generic Contexts
+// =============================================================================
+
+fn test_compound_generics() {
+    // Generic over tuple
+    let wrapped_tuple: Wrapper<(Int, Text)> = Wrapper.new((42, "hello"));
+
+    // Generic over array
+    let wrapped_array: Wrapper<[Int; 5]> = Wrapper.new([1, 2, 3, 4, 5]);
+
+    // Generic over slice
+    let wrapped_slice: Wrapper<[Int]> = Wrapper.new([1, 2, 3]);
+
+    // Nested compound in generic
+    let complex: List<(Int, [Text; 3])> = List.new();
+}
+
+type Wrapper<T> is { value: T };
+
+implement<T> Wrapper<T> {
+    fn new(value: T) -> Wrapper<T> {
+        Wrapper { value: value }
+    }
+}
+
+// =============================================================================
+// Section 11: Compound Types with Where Clauses
+// =============================================================================
+
+// Note: Inline refinement syntax with curly braces is not supported for tuples
+// Use where clause syntax for constraints
+type NonNegativePair is (Int, Int);  // Refinement would be expressed differently
+
+// Array type with const generic constraint
+type NonEmptyArray<const N: Int> is [Int; N] where N > 0;
+
+// Record with slice field
+type NonEmptySlice is { data: [Int], len: Int };
+
+// =============================================================================
+// Section 12: Edge Cases and Corner Cases
+// =============================================================================
+
+fn test_edge_cases() {
+    // Empty array (size 0)
+    let empty: [Int; 0] = [];
+
+    // Large array
+    let large: [Int; 10000] = [0; 10000];
+
+    // Very nested tuple
+    let deeply_nested: ((((Int,),),),) = ((((42,),),),);
+
+    // Mixed compound types
+    let mixed: ([Int; 3], [Text], (Bool, Float)) = ([1, 2, 3], ["a"], (true, 3.14));
+
+    // Unit in tuple
+    let with_unit: (Int, (), Text) = (42, (), "hello");
+
+    // Tuple of arrays of tuples
+    let complex: ([(Int, Text); 2], [(Bool, Float); 3]) = (
+        [(1, "a"), (2, "b")],
+        [(true, 1.0), (false, 2.0), (true, 3.0)]
+    );
+}
+
+// =============================================================================
+// Section 13: Compound Types in Pattern Matching
+// =============================================================================
+
+fn test_tuple_patterns() {
+    let pair: (Int, Text) = (42, "hello");
+
+    match pair {
+        (0, s) => print(f"zero with {s}"),
+        (n, "hello") => print(f"n={n} says hello"),
+        (n, s) => print(f"n={n}, s={s}")
+    }
+}
+
+fn test_array_patterns() {
+    let arr: [Int; 3] = [1, 2, 3];
+
+    match arr {
+        [0, _, _] => print("starts with zero"),
+        [a, b, c] => print(f"{a}, {b}, {c}"),
+    }
+}
+
+fn test_slice_patterns() {
+    let slice: [Int] = [1, 2, 3, 4, 5];
+
+    match slice {
+        [] => print("empty"),
+        [x] => print(f"single: {x}"),
+        [first, ..rest] => print(f"first: {first}"),
+        [first, second, ..rest] => print(f"first two: {first}, {second}")
+    }
+}

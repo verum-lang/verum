@@ -1,0 +1,257 @@
+// @test: run
+// @expected-stdout: Step 1\nStep 2\nStep 3\nChained: 100\nConditional: 42\nLoop sum: 55\nParallel: (10, 20)\nMatch result: found\nMethod chain: 8
+// @tier: 0
+// @level: L2
+// @tags: async, await, expression
+// @description: Comprehensive await expression patterns and semantics
+
+// Basic async functions for testing
+async fn step1() -> Int {
+    println("Step 1");
+    10
+}
+
+async fn step2(x: Int) -> Int {
+    println("Step 2");
+    x * 2
+}
+
+async fn step3(x: Int) -> Int {
+    println("Step 3");
+    x + 80
+}
+
+// Sequential chained await
+async fn chained_await() -> Int {
+    let a = step1().await;       // 10
+    let b = step2(a).await;      // 20
+    let c = step3(b).await;      // 100
+    c
+}
+
+// Await in conditional branches
+async fn conditional_await(use_fast_path: Bool) -> Int {
+    if use_fast_path {
+        step1().await
+    } else {
+        step2(21).await
+    }
+}
+
+// Await in loop
+async fn loop_await() -> Int {
+    let mut sum = 0;
+    for i in 1..=10 {
+        let value = async_identity(i).await;
+        sum += value;
+    }
+    sum
+}
+
+async fn async_identity(x: Int) -> Int {
+    x
+}
+
+// Await with ? operator for error propagation
+async fn await_with_error() -> Result<Int, Error> {
+    let a = fallible_operation(false).await?;
+    let b = fallible_operation(false).await?;
+    Ok(a + b)
+}
+
+async fn fallible_operation(should_fail: Bool) -> Result<Int, Error> {
+    if should_fail {
+        Err(Error.new("operation failed"))
+    } else {
+        Ok(21)
+    }
+}
+
+// Parallel await - run sequentially for simplicity
+async fn parallel_await() -> (Int, Int) {
+    let a = step1().await;
+    let b = step2(10).await;
+    (a, b)
+}
+
+// Await in match expression
+async fn match_await(key: Text) -> Text {
+    match key {
+        "a" => lookup_a().await,
+        "b" => lookup_b().await,
+        _ => "not found",
+    }
+}
+
+async fn lookup_a() -> Text { "found" }
+async fn lookup_b() -> Text { "also found" }
+
+// Await on method call chains
+type DataFetcher is {
+    base_value: Int,
+};
+
+implement DataFetcher {
+    async fn fetch(self) -> Int {
+        self.base_value
+    }
+
+    async fn transform(self, x: Int) -> Int {
+        x * 2
+    }
+}
+
+async fn method_chain_await() -> Int {
+    let fetcher = DataFetcher { base_value: 4 };
+    let value = fetcher.fetch().await;
+    fetcher.transform(value).await
+}
+
+// Await with tuple destructuring
+async fn tuple_await() -> (Int, Text) {
+    let num = (async { 42 }).await;
+    let text = (async { "hello" }).await;
+    (num, text)
+}
+
+// Await in while let
+async fn stream_await(stream: AsyncStream<Int>) -> Int {
+    let mut sum = 0;
+    while let Some(value) = stream.next().await {
+        sum += value;
+    }
+    sum
+}
+
+// Await on field access
+type Container is {
+    fetcher: DataFetcher,
+};
+
+async fn field_await() -> Int {
+    let container = Container {
+        fetcher: DataFetcher { base_value: 10 },
+    };
+    container.fetcher.fetch().await
+}
+
+// Await in nested async blocks
+async fn nested_await() -> Int {
+    let outer_value = step1().await;
+
+    let inner_result = async {
+        let inner_value = step2(outer_value).await;
+        step3(inner_value).await
+    }.await;
+
+    inner_result
+}
+
+// Await with select (first to complete)
+async fn select_await() -> Int {
+    select {
+        result = fast_operation().await => result,
+        result = slow_operation().await => result,
+    }
+}
+
+async fn fast_operation() -> Int { 1 }
+async fn slow_operation() -> Int {
+    sleep(Duration.from_secs(10)).await;
+    2
+}
+
+// Await with timeout
+async fn timeout_await() -> Result<Int, TimeoutError> {
+    // Simplified: timeout wrapper
+    let value = step1().await;
+    Ok(value)
+}
+
+// Postfix await vs prefix
+async fn postfix_vs_prefix() -> Int {
+    // Postfix (standard)
+    let a = step1().await;
+
+    // Can chain with postfix
+    let b = step1()
+        .await
+        .saturating_add(10);
+
+    a + b
+}
+
+// Await preserves evaluation order
+async fn evaluation_order() -> List<Int> {
+    let mut order = [];
+
+    let a = async {
+        order.push(1);
+        10
+    }.await;
+
+    let b = async {
+        order.push(2);
+        20
+    }.await;
+
+    let c = async {
+        order.push(3);
+        30
+    }.await;
+
+    order // Should be [1, 2, 3]
+}
+
+// Await in closure
+async fn closure_await() -> Int {
+    let compute = async |x: Int| -> Int {
+        step2(x).await
+    };
+
+    compute(5).await
+}
+
+// Async stream type (simplified)
+type AsyncStream<T> is {
+    items: List<T>,
+    index: Int,
+};
+
+implement AsyncStream<T> {
+    async fn next(self) -> Maybe<T> {
+        if self.index < self.items.len() {
+            let item = self.items[self.index];
+            self.index += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
+async fn main() {
+    // Sequential chaining
+    let chained = chained_await().await;
+    println(f"Chained: {chained}");
+
+    // Conditional
+    let cond = conditional_await(true).await;
+    println(f"Conditional: {cond}");
+
+    // Loop
+    let loop_result = loop_await().await;
+    println(f"Loop sum: {loop_result}");
+
+    // Parallel
+    let parallel = parallel_await().await;
+    println(f"Parallel: {parallel}");
+
+    // Match
+    let match_result = match_await("a").await;
+    println(f"Match result: {match_result}");
+
+    // Method chain
+    let method_result = method_chain_await().await;
+    println(f"Method chain: {method_result}");
+}

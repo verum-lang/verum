@@ -1,0 +1,282 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, text, substring, index, char, repeat, lines
+// @description: Test advanced text operations (substring, index_of, char_at, repeat, is_empty, lines)
+
+// =============================================================================
+// TEXT_SUBSTRING TESTS
+// =============================================================================
+
+// Test text_substring basic
+meta fn test_text_substring_basic() -> Text {
+    text_substring("hello world", 0, 5)  // Should be "hello"
+}
+
+// Test text_substring middle
+meta fn test_text_substring_middle() -> Text {
+    text_substring("hello world", 6, 11)  // Should be "world"
+}
+
+// Test text_substring single char
+meta fn test_text_substring_single() -> Text {
+    text_substring("hello", 2, 3)  // Should be "l"
+}
+
+// Test text_substring empty range
+meta fn test_text_substring_empty() -> Text {
+    text_substring("hello", 2, 2)  // Should be ""
+}
+
+// Test text_substring full string
+meta fn test_text_substring_full() -> Text {
+    text_substring("hello", 0, 5)  // Should be "hello"
+}
+
+// =============================================================================
+// TEXT_INDEX_OF TESTS
+// =============================================================================
+
+// Test text_index_of found at start
+meta fn test_text_index_of_start() -> Int {
+    text_index_of("hello world", "hello")  // Should be 0
+}
+
+// Test text_index_of found at middle
+meta fn test_text_index_of_middle() -> Int {
+    text_index_of("hello world", "lo wo")  // Should be 3
+}
+
+// Test text_index_of found at end
+meta fn test_text_index_of_end() -> Int {
+    text_index_of("hello world", "world")  // Should be 6
+}
+
+// Test text_index_of not found
+meta fn test_text_index_of_not_found() -> Int {
+    text_index_of("hello world", "xyz")  // Should be -1
+}
+
+// Test text_index_of single char
+meta fn test_text_index_of_single() -> Int {
+    text_index_of("hello", "l")  // Should be 2 (first l)
+}
+
+// Test text_index_of empty pattern
+meta fn test_text_index_of_empty() -> Int {
+    text_index_of("hello", "")  // Should be 0
+}
+
+// Test text_index_of in empty string
+meta fn test_text_index_of_empty_haystack() -> Int {
+    text_index_of("", "x")  // Should be -1
+}
+
+// =============================================================================
+// TEXT_CHAR_AT TESTS
+// =============================================================================
+
+// Test text_char_at first char
+meta fn test_text_char_at_first() -> Char {
+    text_char_at("hello", 0)  // Should be 'h'
+}
+
+// Test text_char_at last char
+meta fn test_text_char_at_last() -> Char {
+    text_char_at("hello", 4)  // Should be 'o'
+}
+
+// Test text_char_at middle
+meta fn test_text_char_at_middle() -> Char {
+    text_char_at("hello", 2)  // Should be 'l'
+}
+
+// Test char_at alias
+meta fn test_char_at_alias() -> Char {
+    char_at("world", 0)  // Should be 'w'
+}
+
+// =============================================================================
+// TEXT_REPEAT TESTS
+// =============================================================================
+
+// Test text_repeat basic
+meta fn test_text_repeat_basic() -> Text {
+    text_repeat("ab", 3)  // Should be "ababab"
+}
+
+// Test text_repeat single char
+meta fn test_text_repeat_single() -> Text {
+    text_repeat("x", 5)  // Should be "xxxxx"
+}
+
+// Test text_repeat zero times
+meta fn test_text_repeat_zero() -> Text {
+    text_repeat("hello", 0)  // Should be ""
+}
+
+// Test text_repeat once
+meta fn test_text_repeat_once() -> Text {
+    text_repeat("hello", 1)  // Should be "hello"
+}
+
+// Test text_repeat empty string
+meta fn test_text_repeat_empty() -> Text {
+    text_repeat("", 10)  // Should be ""
+}
+
+// Test text_repeat with spaces
+meta fn test_text_repeat_spaces() -> Text {
+    text_repeat("- ", 3)  // Should be "- - - "
+}
+
+// =============================================================================
+// TEXT_IS_EMPTY TESTS
+// =============================================================================
+
+// Test text_is_empty true
+meta fn test_text_is_empty_true() -> Bool {
+    text_is_empty("")  // Should be true
+}
+
+// Test text_is_empty false
+meta fn test_text_is_empty_false() -> Bool {
+    text_is_empty("hello")  // Should be false
+}
+
+// Test text_is_empty whitespace
+meta fn test_text_is_empty_whitespace() -> Bool {
+    text_is_empty("   ")  // Should be false (whitespace is not empty)
+}
+
+// Test text_is_empty single char
+meta fn test_text_is_empty_single() -> Bool {
+    text_is_empty("a")  // Should be false
+}
+
+// =============================================================================
+// TEXT_LINES TESTS
+// =============================================================================
+
+// Test text_lines basic
+meta fn test_text_lines_basic() -> Int {
+    let lines = text_lines("line1\nline2\nline3");
+    list_len(lines)  // Should be 3
+}
+
+// Test text_lines get content
+meta fn test_text_lines_content() -> Maybe<Text> {
+    let lines = text_lines("first\nsecond\nthird");
+    list_get(lines, 1)  // Should be Some("second")
+}
+
+// Test text_lines single line
+meta fn test_text_lines_single() -> Int {
+    let lines = text_lines("no newlines here");
+    list_len(lines)  // Should be 1
+}
+
+// Test text_lines empty
+meta fn test_text_lines_empty() -> Int {
+    let lines = text_lines("");
+    list_len(lines)  // Should be 0 (or 1 depending on implementation)
+}
+
+// Test text_lines with CRLF
+meta fn test_text_lines_crlf() -> Int {
+    let lines = text_lines("a\r\nb\r\nc");
+    list_len(lines)  // Should be 3
+}
+
+// Test text_lines trailing newline
+meta fn test_text_lines_trailing() -> Int {
+    let lines = text_lines("a\nb\n");
+    list_len(lines)  // Should be 2
+}
+
+// =============================================================================
+// COMBINED TESTS
+// =============================================================================
+
+// Test substring then len
+meta fn test_substring_then_len() -> Int {
+    let sub = text_substring("hello world", 0, 5);
+    text_len(sub)  // Should be 5
+}
+
+// Test index_of then substring
+meta fn test_index_then_substring() -> Text {
+    let idx = text_index_of("hello world", "world");
+    text_substring("hello world", idx, idx + 5)  // Should be "world"
+}
+
+// Test repeat then len
+meta fn test_repeat_then_len() -> Int {
+    let s = text_repeat("ab", 4);
+    text_len(s)  // Should be 8
+}
+
+// Test lines then join
+meta fn test_lines_then_join() -> Text {
+    let lines = text_lines("a\nb\nc");
+    text_join(lines, "-")  // Should be "a-b-c"
+}
+
+// Test char_at with computed index
+meta fn test_char_at_computed() -> Char {
+    let s = "hello";
+    let idx = text_len(s) - 1;
+    text_char_at(s, idx)  // Should be 'o'
+}
+
+// Main test function
+fn main() {
+    // substring tests
+    assert_eq(@const(test_text_substring_basic()), "hello");
+    assert_eq(@const(test_text_substring_middle()), "world");
+    assert_eq(@const(test_text_substring_single()), "l");
+    assert_eq(@const(test_text_substring_empty()), "");
+    assert_eq(@const(test_text_substring_full()), "hello");
+
+    // index_of tests
+    assert_eq(@const(test_text_index_of_start()), 0);
+    assert_eq(@const(test_text_index_of_middle()), 3);
+    assert_eq(@const(test_text_index_of_end()), 6);
+    assert_eq(@const(test_text_index_of_not_found()), -1);
+    assert_eq(@const(test_text_index_of_single()), 2);
+    assert_eq(@const(test_text_index_of_empty()), 0);
+    assert_eq(@const(test_text_index_of_empty_haystack()), -1);
+
+    // char_at tests
+    assert_eq(@const(test_text_char_at_first()), 'h');
+    assert_eq(@const(test_text_char_at_last()), 'o');
+    assert_eq(@const(test_text_char_at_middle()), 'l');
+    assert_eq(@const(test_char_at_alias()), 'w');
+
+    // repeat tests
+    assert_eq(@const(test_text_repeat_basic()), "ababab");
+    assert_eq(@const(test_text_repeat_single()), "xxxxx");
+    assert_eq(@const(test_text_repeat_zero()), "");
+    assert_eq(@const(test_text_repeat_once()), "hello");
+    assert_eq(@const(test_text_repeat_empty()), "");
+    assert_eq(@const(test_text_repeat_spaces()), "- - - ");
+
+    // is_empty tests
+    assert(@const(test_text_is_empty_true()));
+    assert(!@const(test_text_is_empty_false()));
+    assert(!@const(test_text_is_empty_whitespace()));
+    assert(!@const(test_text_is_empty_single()));
+
+    // lines tests
+    assert_eq(@const(test_text_lines_basic()), 3);
+    assert_eq(@const(test_text_lines_content()), Some("second"));
+    assert_eq(@const(test_text_lines_single()), 1);
+    assert_eq(@const(test_text_lines_crlf()), 3);
+
+    // combined tests
+    assert_eq(@const(test_substring_then_len()), 5);
+    assert_eq(@const(test_index_then_substring()), "world");
+    assert_eq(@const(test_repeat_then_len()), 8);
+    assert_eq(@const(test_lines_then_join()), "a-b-c");
+    assert_eq(@const(test_char_at_computed()), 'o');
+}

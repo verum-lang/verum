@@ -1,0 +1,299 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: autodiff, gradient, computation
+
+fn main() {
+    // Basic element-wise operations
+    test_elementwise_grads();
+
+    // Reduction operations
+    test_reduction_grads();
+
+    // Matrix operations
+    test_matrix_grads();
+
+    // Activation functions
+    test_activation_grads();
+
+    // Loss functions
+    test_loss_grads();
+
+    // Complex compositions
+    test_composed_grads();
+}
+
+fn test_elementwise_grads() {
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<4>f32{1.0, 2.0, 3.0, 4.0});
+
+    // Addition: d(x + c)/dx = 1
+    let add_result = x + 5.0;
+    let add_grads = tape.gradient(add_result.sum(), [x]);
+    assert((add_grads[x][0] - 1.0).abs() < 1e-5);
+
+    // Multiplication: d(x * c)/dx = c
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<4>f32{1.0, 2.0, 3.0, 4.0});
+    let mul_result = x * 3.0;
+    let mul_grads = tape.gradient(mul_result.sum(), [x]);
+    assert((mul_grads[x][0] - 3.0).abs() < 1e-5);
+
+    // Power: d(x^n)/dx = n * x^(n-1)
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<4>f32{1.0, 2.0, 3.0, 4.0});
+    let pow_result = x.pow(3);  // x^3
+    let pow_grads = tape.gradient(pow_result.sum(), [x]);
+    // 3 * x^2 = [3, 12, 27, 48]
+    assert((pow_grads[x][0] - 3.0).abs() < 1e-5);
+    assert((pow_grads[x][1] - 12.0).abs() < 1e-5);
+
+    // Exp: d(e^x)/dx = e^x
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<2>f32{0.0, 1.0});
+    let exp_result = x.exp();
+    let exp_grads = tape.gradient(exp_result.sum(), [x]);
+    assert((exp_grads[x][0] - 1.0).abs() < 1e-5);  // e^0 = 1
+    assert((exp_grads[x][1] - 2.718281828).abs() < 1e-4);
+
+    // Log: d(ln(x))/dx = 1/x
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<3>f32{1.0, 2.0, 4.0});
+    let log_result = x.log();
+    let log_grads = tape.gradient(log_result.sum(), [x]);
+    assert((log_grads[x][0] - 1.0).abs() < 1e-5);
+    assert((log_grads[x][1] - 0.5).abs() < 1e-5);
+    assert((log_grads[x][2] - 0.25).abs() < 1e-5);
+
+    // Sin: d(sin(x))/dx = cos(x)
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<3>f32{0.0, 3.14159/2.0, 3.14159});
+    let sin_result = x.sin();
+    let sin_grads = tape.gradient(sin_result.sum(), [x]);
+    assert((sin_grads[x][0] - 1.0).abs() < 1e-5);  // cos(0) = 1
+    assert(sin_grads[x][1].abs() < 1e-4);           // cos(pi/2) = 0
+
+    // Cos: d(cos(x))/dx = -sin(x)
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<2>f32{0.0, 3.14159/2.0});
+    let cos_result = x.cos();
+    let cos_grads = tape.gradient(cos_result.sum(), [x]);
+    assert(cos_grads[x][0].abs() < 1e-5);          // -sin(0) = 0
+    assert((cos_grads[x][1] + 1.0).abs() < 1e-4);  // -sin(pi/2) = -1
+
+    // Sqrt: d(sqrt(x))/dx = 1/(2*sqrt(x))
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<3>f32{1.0, 4.0, 9.0});
+    let sqrt_result = x.sqrt();
+    let sqrt_grads = tape.gradient(sqrt_result.sum(), [x]);
+    assert((sqrt_grads[x][0] - 0.5).abs() < 1e-5);    // 1/(2*1)
+    assert((sqrt_grads[x][1] - 0.25).abs() < 1e-5);   // 1/(2*2)
+    assert((sqrt_grads[x][2] - 1.0/6.0).abs() < 1e-5); // 1/(2*3)
+}
+
+fn test_reduction_grads() {
+    // Sum: d(sum(x))/dx[i] = 1
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<5>f32{1.0, 2.0, 3.0, 4.0, 5.0});
+    let sum_result = x.sum();
+    let sum_grads = tape.gradient(sum_result, [x]);
+    for i in 0..5 {
+        assert((sum_grads[x][i] - 1.0).abs() < 1e-5);
+    }
+
+    // Mean: d(mean(x))/dx[i] = 1/n
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<4>f32{1.0, 2.0, 3.0, 4.0});
+    let mean_result = x.mean();
+    let mean_grads = tape.gradient(mean_result, [x]);
+    for i in 0..4 {
+        assert((mean_grads[x][i] - 0.25).abs() < 1e-5);
+    }
+
+    // Max: gradient is 1 for max element, 0 otherwise
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<4>f32{1.0, 4.0, 2.0, 3.0});
+    let max_result = x.max();
+    let max_grads = tape.gradient(max_result, [x]);
+    assert(max_grads[x][0] == 0.0);
+    assert(max_grads[x][1] == 1.0);  // Max at index 1
+    assert(max_grads[x][2] == 0.0);
+    assert(max_grads[x][3] == 0.0);
+
+    // Reduce along axis
+    let tape = GradientTape.new();
+    let m = tape.variable(tensor<2, 3>f32{
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0}
+    });
+    let row_sum = m.reduce_sum(axis: 1);  // [6, 15]
+    let total = row_sum.sum();
+    let reduce_grads = tape.gradient(total, [m]);
+    // All elements contribute equally
+    for i in 0..2 {
+        for j in 0..3 {
+            assert((reduce_grads[m][i, j] - 1.0).abs() < 1e-5);
+        }
+    }
+}
+
+fn test_matrix_grads() {
+    // Matrix multiply: d(A @ B)/dA = grad @ B^T, d(A @ B)/dB = A^T @ grad
+    let tape = GradientTape.new();
+    let a = tape.variable(tensor<2, 3>f32{
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0}
+    });
+    let b = tape.variable(tensor<3, 2>f32{
+        {1.0, 2.0},
+        {3.0, 4.0},
+        {5.0, 6.0}
+    });
+
+    let c = matmul(a, b);
+    let loss = c.sum();
+    let matmul_grads = tape.gradient(loss, [a, b]);
+
+    // grad_a = ones(2,2) @ b.T = [[3, 7, 11], [3, 7, 11]]
+    assert((matmul_grads[a][0, 0] - 3.0).abs() < 1e-5);
+    assert((matmul_grads[a][0, 1] - 7.0).abs() < 1e-5);
+    assert((matmul_grads[a][0, 2] - 11.0).abs() < 1e-5);
+
+    // grad_b = a.T @ ones(2,2) = [[5, 5], [7, 7], [9, 9]]
+    assert((matmul_grads[b][0, 0] - 5.0).abs() < 1e-5);
+    assert((matmul_grads[b][1, 0] - 7.0).abs() < 1e-5);
+    assert((matmul_grads[b][2, 0] - 9.0).abs() < 1e-5);
+
+    // Transpose: gradient flows through transpose
+    let tape = GradientTape.new();
+    let m = tape.variable(tensor<2, 3>f32{
+        {1.0, 2.0, 3.0},
+        {4.0, 5.0, 6.0}
+    });
+    let mt = m.T;  // 3x2
+    let loss = mt.sum();
+    let trans_grads = tape.gradient(loss, [m]);
+    // All gradients are 1
+    for i in 0..2 {
+        for j in 0..3 {
+            assert((trans_grads[m][i, j] - 1.0).abs() < 1e-5);
+        }
+    }
+}
+
+fn test_activation_grads() {
+    // ReLU: d(relu(x))/dx = 1 if x > 0 else 0
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<4>f32{-2.0, -1.0, 1.0, 2.0});
+    let relu_result = x.relu();
+    let relu_grads = tape.gradient(relu_result.sum(), [x]);
+    assert(relu_grads[x][0] == 0.0);  // x < 0
+    assert(relu_grads[x][1] == 0.0);  // x < 0
+    assert(relu_grads[x][2] == 1.0);  // x > 0
+    assert(relu_grads[x][3] == 1.0);  // x > 0
+
+    // Sigmoid: d(sigmoid(x))/dx = sigmoid(x) * (1 - sigmoid(x))
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<2>f32{0.0, 1.0});
+    let sig_result = x.sigmoid();
+    let sig_grads = tape.gradient(sig_result.sum(), [x]);
+    // At x=0: sigmoid(0) = 0.5, grad = 0.5 * 0.5 = 0.25
+    assert((sig_grads[x][0] - 0.25).abs() < 1e-5);
+
+    // Tanh: d(tanh(x))/dx = 1 - tanh(x)^2
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<2>f32{0.0, 1.0});
+    let tanh_result = x.tanh();
+    let tanh_grads = tape.gradient(tanh_result.sum(), [x]);
+    // At x=0: tanh(0) = 0, grad = 1 - 0 = 1
+    assert((tanh_grads[x][0] - 1.0).abs() < 1e-5);
+
+    // Softmax: complex gradient involving Jacobian
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<3>f32{1.0, 2.0, 3.0});
+    let soft = x.softmax();
+    // For softmax, d(soft[i])/dx[j] = soft[i] * (delta_ij - soft[j])
+    let loss = soft[0];  // Just gradient of first output
+    let soft_grads = tape.gradient(loss, [x]);
+    // Gradient should sum to 0
+    let grad_sum: f32 = soft_grads[x].sum();
+    assert(grad_sum.abs() < 1e-5);
+
+    // LeakyReLU
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<4>f32{-2.0, -1.0, 1.0, 2.0});
+    let leaky = x.leaky_relu(alpha: 0.01);
+    let leaky_grads = tape.gradient(leaky.sum(), [x]);
+    assert((leaky_grads[x][0] - 0.01).abs() < 1e-5);  // x < 0: alpha
+    assert((leaky_grads[x][2] - 1.0).abs() < 1e-5);   // x > 0: 1
+
+    // GELU (Gaussian Error Linear Unit)
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<2>f32{0.0, 1.0});
+    let gelu = x.gelu();
+    let gelu_grads = tape.gradient(gelu.sum(), [x]);
+    // At x=0: GELU(0) = 0, grad = 0.5
+    assert((gelu_grads[x][0] - 0.5).abs() < 1e-4);
+}
+
+fn test_loss_grads() {
+    // MSE Loss
+    let tape = GradientTape.new();
+    let pred = tape.variable(tensor<4>f32{1.0, 2.0, 3.0, 4.0});
+    let target = tape.constant(tensor<4>f32{1.5, 2.5, 3.5, 4.5});
+    let mse = (pred - target).pow(2).mean();
+    let mse_grads = tape.gradient(mse, [pred]);
+    // d(MSE)/d(pred) = 2 * (pred - target) / n = 2 * [-0.5, -0.5, -0.5, -0.5] / 4
+    assert((mse_grads[pred][0] - (-0.25)).abs() < 1e-5);
+
+    // Cross Entropy Loss
+    let tape = GradientTape.new();
+    let logits = tape.variable(tensor<3>f32{1.0, 2.0, 3.0});
+    let target = tape.constant(tensor<3>f32{0.0, 0.0, 1.0});  // One-hot
+    let probs = logits.softmax();
+    let ce = -(target * probs.log()).sum();
+    let ce_grads = tape.gradient(ce, [logits]);
+    // grad = softmax(logits) - target
+    let expected_grad = logits.softmax().value() - target.value();
+    for i in 0..3 {
+        assert((ce_grads[logits][i] - expected_grad[i]).abs() < 1e-5);
+    }
+
+    // Binary Cross Entropy
+    let tape = GradientTape.new();
+    let pred = tape.variable(tensor<4>f32{0.2, 0.4, 0.6, 0.8});
+    let target = tape.constant(tensor<4>f32{0.0, 0.0, 1.0, 1.0});
+    let bce = -(target * pred.log() + (1.0 - target) * (1.0 - pred).log()).mean();
+    let bce_grads = tape.gradient(bce, [pred]);
+    // d(BCE)/d(pred) = (pred - target) / (pred * (1 - pred)) / n
+}
+
+fn test_composed_grads() {
+    // Complex expression: f(x) = sum((x^2 + 1).log().exp())
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<3>f32{1.0, 2.0, 3.0});
+    let result = (x.pow(2) + 1.0).log().exp().sum();
+    let grads = tape.gradient(result, [x]);
+
+    // Chain rule: df/dx = exp(log(x^2+1)) * (1/(x^2+1)) * 2x
+    //                   = (x^2+1) * (1/(x^2+1)) * 2x = 2x
+    assert((grads[x][0] - 2.0).abs() < 1e-5);
+    assert((grads[x][1] - 4.0).abs() < 1e-5);
+    assert((grads[x][2] - 6.0).abs() < 1e-5);
+
+    // Branching: max(x, y)
+    let tape = GradientTape.new();
+    let x = tape.variable(tensor<3>f32{1.0, 5.0, 3.0});
+    let y = tape.variable(tensor<3>f32{2.0, 4.0, 3.0});
+    let max_xy = x.max(y);
+    let loss = max_xy.sum();
+    let max_grads = tape.gradient(loss, [x, y]);
+
+    // grad flows to whichever is larger
+    assert(max_grads[x][0] == 0.0);  // y[0] > x[0]
+    assert(max_grads[y][0] == 1.0);
+    assert(max_grads[x][1] == 1.0);  // x[1] > y[1]
+    assert(max_grads[y][1] == 0.0);
+    // When equal, gradient split (or one gets it depending on implementation)
+}

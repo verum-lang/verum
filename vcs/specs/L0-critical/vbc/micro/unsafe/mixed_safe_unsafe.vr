@@ -1,0 +1,18 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, mixed, safe
+// @description: Mixed safe and unsafe code in same function
+fn safe_add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+unsafe fn unsafe_multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn main() {
+    let x: Int = safe_add(10, 20);
+    let y: Int = unsafe { unsafe_multiply(x, 2) };
+    let z: Int = safe_add(y, 2);
+    assert_eq(z, 62);
+}

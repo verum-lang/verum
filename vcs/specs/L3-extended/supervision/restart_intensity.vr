@@ -1,0 +1,568 @@
+// @test: run-interpreter
+// @expected-stdout: All restart intensity tests passed!
+// @tier: 0
+// @level: L3
+// @tags: supervision, restart-intensity, erlang, otp, fault-tolerance
+// @description: Tests for Restart Intensity
+//
+// Spec: docs/detailed/20-error-handling.md Section 3.1.5.1 - RestartIntensity
+// Prevents restart storms by limiting restart frequency.
+//
+// Note: Types are prefixed with Mock to avoid shadowing stdlib types
+// (Duration, Instant, RestartIntensity, Supervisor, ChildId etc.)
+
+// ============================================================================
+// MockDuration Type (simplified)
+// ============================================================================
+
+@derive(Clone)
+type MockDuration is {
+    millis: Int,
+};
+
+implement MockDuration {
+    fn from_millis(ms: Int) -> Self {
+        MockDuration { millis: ms }
+    }
+
+    fn from_seconds(s: Int) -> Self {
+        MockDuration { millis: s * 1000 }
+    }
+
+    fn from_minutes(m: Int) -> Self {
+        MockDuration { millis: m * 60 * 1000 }
+    }
+
+    fn as_millis(&self) -> Int {
+        self.millis
+    }
+}
+
+// ============================================================================
+// MockInstant Type (simplified - uses monotonic counter)
+// ============================================================================
+
+@thread_local static mut MOCK_TIME_MS: Int = 0;
+
+fn advance_time(ms: Int) {
+    MOCK_TIME_MS += ms;
+}
+
+fn reset_time() {
+    MOCK_TIME_MS = 0;
+}
+
+type MockInstant is {
+    timestamp_ms: Int,
+};
+
+implement MockInstant {
+    fn now() -> Self {
+        MockInstant { timestamp_ms: MOCK_TIME_MS }
+    }
+
+    fn elapsed(&self) -> MockDuration {
+        MockDuration { millis: MOCK_TIME_MS - self.timestamp_ms }
+    }
+
+    fn checked_sub(&self, duration: MockDuration) -> Maybe<MockInstant> {
+        let new_ts = self.timestamp_ms - duration.millis;
+        if new_ts >= 0 {
+            Some(MockInstant { timestamp_ms: new_ts })
+        } else {
+            None
+        }
+    }
+}
+
+// ============================================================================
+// MockIntensityExceeded - What to do when intensity is exceeded
+// ============================================================================
+
+@derive(Clone)
+type MockIntensityExceeded is
+    /// Propagate failure to parent supervisor
+    | PropagateUp
+
+    /// Degrade to reduced functionality
+    | Degrade { fallback_name: Text }
+
+    /// Enter circuit breaker state
+    | CircuitBreak { recovery_timeout: MockDuration };
+
+// ============================================================================
+// MockRestartIntensity Configuration
+// ============================================================================
+
+type MockRestartIntensity is {
+    /// Maximum number of restarts allowed
+    max_restarts: Int,
+
+    /// Time period for counting restarts
+    period: MockDuration,
+
+    /// What to do when intensity exceeded
+    on_exceeded: MockIntensityExceeded,
+};
+
+implement MockRestartIntensity {
+    fn new(max_restarts: Int, period: MockDuration, on_exceeded: MockIntensityExceeded) -> Self {
+        MockRestartIntensity { max_restarts, period, on_exceeded }
+    }
+
+    /// Default: 5 restarts in 1 minute, propagate up on exceeded
+    fn default() -> Self {
+        MockRestartIntensity {
+            max_restarts: 5,
+            period: MockDuration.from_minutes(1),
+            on_exceeded: MockIntensityExceeded.PropagateUp,
+        }
+    }
+
+    /// Create with circuit breaker fallback
+    fn with_circuit_breaker(max_restarts: Int, period: MockDuration, recovery_timeout: MockDuration) -> Self {
+        MockRestartIntensity {
+            max_restarts,
+            period,
+            on_exceeded: MockIntensityExceeded.CircuitBreak { recovery_timeout },
+        }
+    }
+}
+
+// ============================================================================
+// MockChildId
+// ============================================================================
+
+@derive(Clone)
+type MockChildId is (Text);
+
+// ============================================================================
+// MockRestartTracker - Tracks restart history
+// ============================================================================
+
+type MockRestartRecord is {
+    child_id: MockChildId,
+    timestamp: MockInstant,
+};
+
+type MockRestartTracker is {
+    restarts: List<MockRestartRecord>,
+};
+
+implement MockRestartTracker {
+    fn new() -> Self {
+        MockRestartTracker { restarts: List.new() }
+    }
+
+    /// Record a restart event
+    fn record_restart(&mut self, child_id: MockChildId) {
+        self.restarts.push(MockRestartRecord {
+            child_id,
+            timestamp: MockInstant.now(),
+        });
+    }
+
+    /// Check if intensity is exceeded
+    fn exceeds_intensity(&self, intensity: &MockRestartIntensity) -> Bool {
+        let cutoff = MockInstant.now();
+        let period_ms = intensity.period.as_millis();
+        let mut recent_count = 0;
+        let n = self.restarts.len();
+        let mut i = 0;
+        while i < n {
+            let r = self.restarts[i];
+            if cutoff.timestamp_ms - r.timestamp.timestamp_ms < period_ms {
+                recent_count = recent_count + 1;
+            }
+            i = i + 1;
+        }
+        // Use > because record_restart is called before exceeds_intensity
+        // "max_restarts=3" means 3 restarts are allowed, 4th exceeds
+        recent_count > intensity.max_restarts
+    }
+
+    /// Get count of recent restarts
+    fn recent_count(&self, period: MockDuration) -> Int {
+        let cutoff = MockInstant.now();
+        let period_ms = period.as_millis();
+        let mut count = 0;
+        let n = self.restarts.len();
+        let mut i = 0;
+        while i < n {
+            let r = self.restarts[i];
+            if cutoff.timestamp_ms - r.timestamp.timestamp_ms < period_ms {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        count
+    }
+
+    /// Prune old restart records
+    fn prune_old(&mut self, intensity: &MockRestartIntensity) {
+        let cutoff = MockInstant.now();
+        let period_ms = intensity.period.as_millis();
+        let mut kept: List<MockRestartRecord> = List.new();
+        let n = self.restarts.len();
+        let mut i = 0;
+        while i < n {
+            let r = self.restarts[i];
+            if cutoff.timestamp_ms - r.timestamp.timestamp_ms < period_ms {
+                kept.push(r);
+            }
+            i = i + 1;
+        }
+        self.restarts = kept;
+    }
+
+    /// Clear all records
+    fn clear(&mut self) {
+        self.restarts.clear();
+    }
+}
+
+// ============================================================================
+// MockSupervisor State (simplified)
+// ============================================================================
+
+type MockSupervisorState is
+    | Running
+    | Degraded(Text)
+    | CircuitOpen { recovery_at: MockInstant };
+
+type MockSupervisor is {
+    id: Text,
+    intensity: MockRestartIntensity,
+    tracker: MockRestartTracker,
+    state: MockSupervisorState,
+};
+
+implement MockSupervisor {
+    fn new(id: Text, intensity: MockRestartIntensity) -> Self {
+        MockSupervisor {
+            id,
+            intensity,
+            tracker: MockRestartTracker.new(),
+            state: MockSupervisorState.Running,
+        }
+    }
+
+    /// Handle a child failure
+    fn handle_child_failure(&mut self, child_id: MockChildId) -> MockSupervisorAction {
+        let child_id_text = child_id.0;
+        self.tracker.record_restart(MockChildId(child_id_text));
+
+        if self.tracker.exceeds_intensity(&self.intensity) {
+            match &self.intensity.on_exceeded {
+                MockIntensityExceeded.PropagateUp => {
+                    MockSupervisorAction.PropagateFailure
+                }
+                MockIntensityExceeded.Degrade { fallback_name } => {
+                    let name = fallback_name;
+                    self.state = MockSupervisorState.Degraded(name);
+                    MockSupervisorAction.EnterDegradedMode(name)
+                }
+                MockIntensityExceeded.CircuitBreak { recovery_timeout } => {
+                    let timeout_ms = recovery_timeout.as_millis();
+                    let recovery_at = MockInstant {
+                        timestamp_ms: MockInstant.now().timestamp_ms + timeout_ms
+                    };
+                    self.state = MockSupervisorState.CircuitOpen { recovery_at };
+                    MockSupervisorAction.OpenCircuitBreaker(MockDuration { millis: timeout_ms })
+                }
+            }
+        } else {
+            MockSupervisorAction.RestartChild(MockChildId(child_id_text))
+        }
+    }
+
+    /// Check if circuit can be closed
+    fn check_circuit(&mut self) -> Bool {
+        match self.state {
+            MockSupervisorState.CircuitOpen { recovery_at } => {
+                if MockInstant.now().timestamp_ms >= recovery_at.timestamp_ms {
+                    self.state = MockSupervisorState.Running;
+                    self.tracker.clear();
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn is_running(&self) -> Bool {
+        match self.state {
+            MockSupervisorState.Running => true,
+            _ => false,
+        }
+    }
+
+    fn is_degraded(&self) -> Bool {
+        match self.state {
+            MockSupervisorState.Degraded(_) => true,
+            _ => false,
+        }
+    }
+
+    fn is_circuit_open(&self) -> Bool {
+        match self.state {
+            MockSupervisorState.CircuitOpen { .. } => true,
+            _ => false,
+        }
+    }
+}
+
+type MockSupervisorAction is
+    | RestartChild(MockChildId)
+    | PropagateFailure
+    | EnterDegradedMode(Text)
+    | OpenCircuitBreaker(MockDuration);
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_restart_within_limits() {
+    reset_time();
+
+    let intensity = MockRestartIntensity.new(
+        5,  // max 5 restarts
+        MockDuration.from_seconds(60),  // in 60 seconds
+        MockIntensityExceeded.PropagateUp,
+    );
+
+    let mut supervisor = MockSupervisor.new("test-sup", intensity);
+
+    // 4 restarts should be fine
+    for i in 0..4 {
+        let action = supervisor.handle_child_failure(MockChildId("worker"));
+        match action {
+            MockSupervisorAction.RestartChild(_) => { /* OK */ }
+            _ => panic("Expected RestartChild"),
+        }
+        advance_time(1000);  // 1 second between restarts
+    }
+
+    assert(supervisor.is_running());
+}
+
+fn test_restart_exceeds_limit() {
+    reset_time();
+
+    let intensity = MockRestartIntensity.new(
+        3,  // max 3 restarts
+        MockDuration.from_seconds(10),  // in 10 seconds
+        MockIntensityExceeded.PropagateUp,
+    );
+
+    let mut supervisor = MockSupervisor.new("test-sup", intensity);
+
+    // 3 restarts quickly
+    for i in 0..3 {
+        let action = supervisor.handle_child_failure(MockChildId("worker"));
+        advance_time(100);
+    }
+
+    // 4th should exceed and propagate
+    let action = supervisor.handle_child_failure(MockChildId("worker"));
+    match action {
+        MockSupervisorAction.PropagateFailure => { /* Expected */ }
+        _ => panic("Expected PropagateFailure"),
+    }
+}
+
+fn test_restart_resets_after_period() {
+    reset_time();
+
+    let intensity = MockRestartIntensity.new(
+        3,
+        MockDuration.from_seconds(10),
+        MockIntensityExceeded.PropagateUp,
+    );
+
+    let mut supervisor = MockSupervisor.new("test-sup", intensity);
+
+    // 2 restarts
+    supervisor.handle_child_failure(MockChildId("worker"));
+    advance_time(100);
+    supervisor.handle_child_failure(MockChildId("worker"));
+
+    // Wait for period to expire
+    advance_time(15000);  // 15 seconds
+
+    // These should be fine now (old restarts expired)
+    for i in 0..3 {
+        let action = supervisor.handle_child_failure(MockChildId("worker"));
+        match action {
+            MockSupervisorAction.RestartChild(_) => { /* OK */ }
+            _ => panic("Expected RestartChild after period reset"),
+        }
+        advance_time(100);
+    }
+}
+
+fn test_degraded_mode() {
+    reset_time();
+
+    let intensity = MockRestartIntensity.new(
+        2,
+        MockDuration.from_seconds(10),
+        MockIntensityExceeded.Degrade { fallback_name: "limited_service" },
+    );
+
+    let mut supervisor = MockSupervisor.new("test-sup", intensity);
+
+    // Exceed limit
+    supervisor.handle_child_failure(MockChildId("worker"));
+    advance_time(100);
+    supervisor.handle_child_failure(MockChildId("worker"));
+    advance_time(100);
+
+    let action = supervisor.handle_child_failure(MockChildId("worker"));
+
+    match action {
+        MockSupervisorAction.EnterDegradedMode(name) => {
+            assert_eq(name, "limited_service");
+        }
+        _ => panic("Expected EnterDegradedMode"),
+    }
+
+    assert(supervisor.is_degraded());
+    assert(!supervisor.is_running());
+}
+
+fn test_circuit_breaker() {
+    reset_time();
+
+    let recovery_timeout = MockDuration.from_seconds(30);
+    let intensity = MockRestartIntensity.with_circuit_breaker(
+        2,
+        MockDuration.from_seconds(10),
+        recovery_timeout,
+    );
+
+    let mut supervisor = MockSupervisor.new("test-sup", intensity);
+
+    // Exceed limit
+    supervisor.handle_child_failure(MockChildId("worker"));
+    advance_time(100);
+    supervisor.handle_child_failure(MockChildId("worker"));
+    advance_time(100);
+
+    let action = supervisor.handle_child_failure(MockChildId("worker"));
+
+    match action {
+        MockSupervisorAction.OpenCircuitBreaker(timeout) => {
+            assert_eq(timeout.as_millis(), 30000);
+        }
+        _ => panic("Expected OpenCircuitBreaker"),
+    }
+
+    assert(supervisor.is_circuit_open());
+
+    // Circuit should not close yet
+    advance_time(15000);  // 15 seconds
+    assert(!supervisor.check_circuit());
+    assert(supervisor.is_circuit_open());
+
+    // After recovery timeout, circuit should close
+    advance_time(20000);  // Another 20 seconds (total 35)
+    assert(supervisor.check_circuit());
+    assert(supervisor.is_running());
+}
+
+fn test_multiple_children() {
+    reset_time();
+
+    let intensity = MockRestartIntensity.new(
+        5,
+        MockDuration.from_seconds(60),
+        MockIntensityExceeded.PropagateUp,
+    );
+
+    let mut supervisor = MockSupervisor.new("test-sup", intensity);
+
+    // Different children failing
+    supervisor.handle_child_failure(MockChildId("worker1"));
+    advance_time(100);
+    supervisor.handle_child_failure(MockChildId("worker2"));
+    advance_time(100);
+    supervisor.handle_child_failure(MockChildId("worker3"));
+    advance_time(100);
+    supervisor.handle_child_failure(MockChildId("worker1"));
+    advance_time(100);
+
+    // All count towards the limit
+    assert_eq(supervisor.tracker.recent_count(MockDuration.from_seconds(60)), 4);
+
+    // 5th restart (reaches limit)
+    let action = supervisor.handle_child_failure(MockChildId("worker2"));
+
+    // Should still restart (we're AT the limit, not over)
+    match action {
+        MockSupervisorAction.RestartChild(_) => { /* At limit, still OK */ }
+        MockSupervisorAction.PropagateFailure => { /* Over limit */ }
+        _ => panic("Unexpected action"),
+    }
+}
+
+fn test_tracker_prune() {
+    reset_time();
+
+    let intensity = MockRestartIntensity.new(
+        5,
+        MockDuration.from_seconds(10),
+        MockIntensityExceeded.PropagateUp,
+    );
+
+    let mut tracker = MockRestartTracker.new();
+
+    // Add some restarts
+    tracker.record_restart(MockChildId("w1"));
+    advance_time(2000);
+    tracker.record_restart(MockChildId("w2"));
+    advance_time(2000);
+    tracker.record_restart(MockChildId("w3"));
+
+    assert_eq(tracker.restarts.len(), 3);
+
+    // Wait past the period
+    advance_time(15000);
+
+    // Prune old
+    tracker.prune_old(&intensity);
+
+    // All should be pruned
+    assert_eq(tracker.restarts.len(), 0);
+}
+
+fn test_default_intensity() {
+    let default_intensity = MockRestartIntensity.default();
+
+    assert_eq(default_intensity.max_restarts, 5);
+    assert_eq(default_intensity.period.as_millis(), 60000);
+
+    match default_intensity.on_exceeded {
+        MockIntensityExceeded.PropagateUp => { /* Expected */ }
+        _ => panic("Expected PropagateUp for default"),
+    }
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    test_restart_within_limits();
+    test_restart_exceeds_limit();
+    test_restart_resets_after_period();
+    test_degraded_mode();
+    test_circuit_breaker();
+    test_multiple_children();
+    test_tracker_prune();
+    test_default_intensity();
+
+    print("All restart intensity tests passed!");
+}

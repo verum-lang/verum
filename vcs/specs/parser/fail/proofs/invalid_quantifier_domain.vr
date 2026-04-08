@@ -1,0 +1,130 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, proofs, quantifiers, domain, in, error
+// @description: Test invalid quantifier domain syntax with 'in' keyword
+// @expected-error: E018
+
+// ============================================================================
+// Invalid: Malformed 'in' domain expression
+// ============================================================================
+
+fn test_in_comma_instead_of_dot() {
+    let items = [1, 2, 3];
+    // Invalid: comma starts a new binding, but 'x > 0' is not a valid binding
+    let invalid = forall x in items, x > 0;
+}
+
+fn test_in_colon_instead_of_dot() {
+    let items = [1, 2, 3];
+    // Invalid: colon instead of dot before body
+    let invalid = forall x in items: x > 0;
+}
+
+// ============================================================================
+// Invalid: Domain with incomplete expressions
+// ============================================================================
+
+fn test_domain_unclosed_array() {
+    // Invalid: unclosed array literal
+    let invalid = forall x in [1, 2, 3 . x > 0;
+}
+
+fn test_domain_unclosed_method() {
+    let items = [1, 2, 3];
+    // Invalid: unclosed method call
+    let invalid = forall x in items.filter(|n| n > 0 . x > 0;
+}
+
+// ============================================================================
+// Invalid: 'in' used incorrectly
+// ============================================================================
+
+fn test_in_without_binding() {
+    let items = [1, 2, 3];
+    // Invalid: 'in' without preceding binding pattern
+    let invalid = forall in items . true;
+}
+
+fn test_in_after_body() {
+    let items = [1, 2, 3];
+    // Invalid: 'in' after the body expression
+    let invalid = forall x: Int . x > 0 in items;
+}
+
+fn test_multiple_in_single_binding() {
+    let a = [1, 2];
+    let b = [3, 4];
+    // Invalid: cannot have multiple 'in' on single binding
+    let invalid = forall x in a in b . x > 0;
+}
+
+// ============================================================================
+// Invalid: Complex domain expression errors
+// ============================================================================
+
+fn test_domain_operator_confusion() {
+    // Invalid: unexpected operator in domain position
+    let invalid = forall x in + 5 . x > 0;
+}
+
+fn test_domain_double_dot() {
+    // Invalid: double dot confusion
+    let invalid = forall x in 1..10 .. x > 0;
+}
+
+// ============================================================================
+// Invalid: Exists with domain errors
+// ============================================================================
+
+fn test_exists_in_empty_domain() {
+    // Invalid: 'in' without domain expression
+    let invalid = exists x in . x == 42;
+}
+
+fn test_exists_in_keyword_only() {
+    // Invalid: 'in' with nothing after
+    let invalid = exists n in;
+}
+
+fn test_exists_domain_no_body() {
+    let items = [1, 2, 3];
+    // Invalid: domain without body (missing body separator and body)
+    let invalid = exists x in items;
+}
+
+// ============================================================================
+// Invalid: Mixed binding errors with domain
+// ============================================================================
+
+fn test_mixed_binding_missing_separator() {
+    let items = [1, 2, 3];
+    // Invalid: missing comma between bindings
+    let invalid = forall x in items y: Int . x + y > 0;
+}
+
+fn test_type_domain_no_colon() {
+    let items = [1, 2, 3];
+    // Invalid: type annotation without colon
+    let invalid = forall x Int in items . x > 0;
+}
+
+fn test_domain_before_pattern() {
+    let items = [1, 2, 3];
+    // Invalid: 'in' before pattern
+    let invalid = forall in items x . x > 0;
+}
+
+// ============================================================================
+// Invalid: Parenthesization errors
+// ============================================================================
+
+fn test_unclosed_paren_in_domain() {
+    // Invalid: unclosed parenthesis
+    let invalid = forall x in (1, 2, 3 . x > 0;
+}
+
+fn test_extra_paren_after_in() {
+    let items = [1, 2, 3];
+    // Invalid: extra closing parenthesis
+    let invalid = forall x in items) . x > 0;
+}

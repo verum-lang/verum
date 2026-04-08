@@ -1,0 +1,53 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: maybe, unwrap, list, compiled-modules
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Test Maybe<&T> unwrap from compiled list.get()
+
+fn main() -> Int {
+    let list = [10, 20, 30, 40, 50];
+
+    // Test 1: list.get with valid index returns Some
+    let maybe_val = list.get(2);
+    if maybe_val.is_some() {
+        let val = maybe_val.unwrap();
+        print(f"Got value: {val}");
+        if val != 30 {
+            print("FAIL: expected 30");
+            return 1;
+        }
+    } else {
+        print("FAIL: expected Some for index 2");
+        return 1;
+    }
+
+    // Test 2: list.get with invalid index returns None
+    let maybe_none = list.get(10);
+    if maybe_none.is_none() {
+        print("None for out-of-bounds: correct");
+    } else {
+        print("FAIL: expected None for index 10");
+        return 1;
+    }
+
+    // Test 3: unwrap_or with valid value
+    let val3 = list.get(0).unwrap_or(99);
+    print(f"unwrap_or valid: {val3}");
+    if val3 != 10 {
+        print("FAIL: expected 10 from unwrap_or");
+        return 1;
+    }
+
+    // Test 4: unwrap_or with invalid index
+    let val4 = list.get(100).unwrap_or(99);
+    print(f"unwrap_or invalid: {val4}");
+    if val4 != 99 {
+        print("FAIL: expected 99 from unwrap_or");
+        return 1;
+    }
+
+    print("All Maybe<&T> tests passed");
+    0
+}

@@ -1,0 +1,192 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, deque, double-ended, queue
+// @timeout: 30000
+
+// Double-ended queue (deque) implementation
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// Deque using circular array of capacity 8
+type Deque is { data: Arr8, front: Int, back: Int, count: Int };
+
+fn new_deque() -> Deque {
+    Deque { data: zeros(), front: 0, back: 0, count: 0 }
+}
+
+fn deque_is_empty(d: Deque) -> Int { if d.count == 0 { 1 } else { 0 } }
+fn deque_size(d: Deque) -> Int { d.count }
+
+fn deque_push_back(d: Deque, val: Int) -> Deque {
+    let new_data = set8(d.data, d.back, val);
+    Deque { data: new_data, front: d.front, back: (d.back + 1) % 8, count: d.count + 1 }
+}
+
+fn deque_push_front(d: Deque, val: Int) -> Deque {
+    let new_front = (d.front + 7) % 8; // front - 1 mod 8
+    let new_data = set8(d.data, new_front, val);
+    Deque { data: new_data, front: new_front, back: d.back, count: d.count + 1 }
+}
+
+type DequePopResult is { value: Int, deque: Deque };
+
+fn deque_pop_front(d: Deque) -> DequePopResult {
+    if d.count == 0 { return DequePopResult { value: -1, deque: d }; }
+    let val = get8(d.data, d.front);
+    DequePopResult {
+        value: val,
+        deque: Deque { data: d.data, front: (d.front + 1) % 8, back: d.back, count: d.count - 1 }
+    }
+}
+
+fn deque_pop_back(d: Deque) -> DequePopResult {
+    if d.count == 0 { return DequePopResult { value: -1, deque: d }; }
+    let new_back = (d.back + 7) % 8;
+    let val = get8(d.data, new_back);
+    DequePopResult {
+        value: val,
+        deque: Deque { data: d.data, front: d.front, back: new_back, count: d.count - 1 }
+    }
+}
+
+fn deque_peek_front(d: Deque) -> Int {
+    if d.count == 0 { return -1; }
+    get8(d.data, d.front)
+}
+
+fn deque_peek_back(d: Deque) -> Int {
+    if d.count == 0 { return -1; }
+    get8(d.data, (d.back + 7) % 8)
+}
+
+fn test_push_pop_back() -> Int {
+    let mut d = new_deque();
+    d = deque_push_back(d, 10);
+    d = deque_push_back(d, 20);
+    d = deque_push_back(d, 30);
+    assert_eq(deque_size(d), 3);
+
+    let r1 = deque_pop_back(d);
+    assert_eq(r1.value, 30);
+    d = r1.deque;
+
+    let r2 = deque_pop_back(d);
+    assert_eq(r2.value, 20);
+    d = r2.deque;
+
+    let r3 = deque_pop_back(d);
+    assert_eq(r3.value, 10);
+    d = r3.deque;
+    assert_eq(deque_is_empty(d), 1);
+    1
+}
+
+fn test_push_pop_front() -> Int {
+    let mut d = new_deque();
+    d = deque_push_front(d, 10);
+    d = deque_push_front(d, 20);
+    d = deque_push_front(d, 30);
+
+    let r1 = deque_pop_front(d);
+    assert_eq(r1.value, 30); // LIFO from front
+    d = r1.deque;
+
+    let r2 = deque_pop_front(d);
+    assert_eq(r2.value, 20);
+    1
+}
+
+fn test_mixed() -> Int {
+    let mut d = new_deque();
+    d = deque_push_back(d, 1);
+    d = deque_push_back(d, 2);
+    d = deque_push_front(d, 0);
+    // Deque: [0, 1, 2]
+
+    assert_eq(deque_peek_front(d), 0);
+    assert_eq(deque_peek_back(d), 2);
+    assert_eq(deque_size(d), 3);
+
+    let r1 = deque_pop_front(d);
+    assert_eq(r1.value, 0);
+    d = r1.deque;
+
+    let r2 = deque_pop_back(d);
+    assert_eq(r2.value, 2);
+    d = r2.deque;
+
+    let r3 = deque_pop_front(d);
+    assert_eq(r3.value, 1);
+    1
+}
+
+fn test_as_stack() -> Int {
+    // Use deque as stack (push/pop from back)
+    let mut d = new_deque();
+    d = deque_push_back(d, 10);
+    d = deque_push_back(d, 20);
+    d = deque_push_back(d, 30);
+
+    let r1 = deque_pop_back(d);
+    assert_eq(r1.value, 30);
+    d = r1.deque;
+    let r2 = deque_pop_back(d);
+    assert_eq(r2.value, 20);
+    1
+}
+
+fn test_as_queue() -> Int {
+    // Use deque as queue (push back, pop front)
+    let mut d = new_deque();
+    d = deque_push_back(d, 10);
+    d = deque_push_back(d, 20);
+    d = deque_push_back(d, 30);
+
+    let r1 = deque_pop_front(d);
+    assert_eq(r1.value, 10); // FIFO
+    d = r1.deque;
+    let r2 = deque_pop_front(d);
+    assert_eq(r2.value, 20);
+    1
+}
+
+fn test_empty_pop() -> Int {
+    let d = new_deque();
+    let r1 = deque_pop_front(d);
+    assert_eq(r1.value, -1);
+    let r2 = deque_pop_back(d);
+    assert_eq(r2.value, -1);
+    1
+}
+
+fn main() -> Int {
+    test_push_pop_back();
+    test_push_pop_front();
+    test_mixed();
+    test_as_stack();
+    test_as_queue();
+    test_empty_pop();
+    print("[OK] 568_deque_aot");
+    0
+}

@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, constrained, type-alias
+
+/// Constrained type aliases -- type aliases with parameter constraints.
+/// Grammar: constrained_type_alias = 'type' identifier '<' constrained_params '>'
+///          '=' type_expr [ type_alias_where ] ';' ;
+
+type Numeric is protocol {
+    fn zero() -> Self;
+    fn add(&self, other: &Self) -> Self;
+    fn mul(&self, other: &Self) -> Self;
+};
+
+type Hashable is protocol {
+    fn hash(&self) -> Int;
+};
+
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+// Constrained type alias: requires Numeric bound
+type NumList<T: Numeric> = List<T>;
+type NumPair<T: Numeric> = (T, T);
+
+// Constrained with multiple bounds
+type PrintableMap<K: Hashable + Display, V: Display> = Map<K, V>;
+
+// Constrained with where clause
+type SortedSet<T: Ord> = List<T> where is_sorted;
+
+// Constrained alias for matrix operations
+type NumMatrix<T: Numeric> = List<List<T>>;
+
+// Higher-kinded constrained alias
+type Container<T: Clone> = List<T>;
+type UniqueContainer<T: Eq + Hash> = Set<T>;
+
+// Functions using constrained aliases
+fn sum_list<T: Numeric>(xs: NumList<T>) -> T {
+    let mut acc = T.zero();
+    for x in xs {
+        acc = acc.add(&x);
+    }
+    acc
+}
+
+fn dot_product<T: Numeric>(a: NumList<T>, b: NumList<T>) -> T {
+    let mut acc = T.zero();
+    let n = min(a.len(), b.len());
+    let mut i = 0;
+    while i < n {
+        acc = acc.add(&a[i].mul(&b[i]));
+        i = i + 1;
+    }
+    acc
+}
+
+fn print_map<K: Hashable + Display, V: Display>(m: PrintableMap<K, V>) -> Text {
+    let mut parts: List<Text> = [];
+    for (k, v) in m {
+        parts.push(f"{k.display()}: {v.display()}");
+    }
+    f"{{{parts.join(\", \")}}}"
+}
+
+fn min(a: Int, b: Int) -> Int {
+    if a <= b { a } else { b }
+}
+
+fn main() {
+    let nums: NumList<Int> = [1, 2, 3, 4, 5];
+    let total = sum_list(nums);
+    assert(total == 15);
+
+    let a: NumList<Float> = [1.0, 2.0, 3.0];
+    let b: NumList<Float> = [4.0, 5.0, 6.0];
+    let dp = dot_product(a, b);
+    assert(dp == 32.0);
+}

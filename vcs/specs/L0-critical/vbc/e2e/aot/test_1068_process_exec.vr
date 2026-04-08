@@ -1,0 +1,63 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: process, exec, spawn, system
+// @description: Test process execution and exit codes
+
+fn __process_exec_raw(program: Text, args: List<Text>) -> Int { -1 }
+
+fn test_echo() -> Int {
+    let args = List.new();
+    let exit = __process_exec_raw("/bin/echo", args);
+    if exit < 0 {
+        print(f"FAIL echo: exit={exit}");
+        return 1;
+    }
+    print("  echo: OK");
+    0
+}
+
+fn test_true_false() -> Int {
+    let args = List.new();
+    let exit_true = __process_exec_raw("/usr/bin/true", args);
+    if exit_true != 0 {
+        print(f"FAIL true: exit={exit_true}, expected 0");
+        return 1;
+    }
+    let exit_false = __process_exec_raw("/usr/bin/false", args);
+    if exit_false != 1 {
+        print(f"FAIL false: exit={exit_false}, expected 1");
+        return 1;
+    }
+    print("  true_false: OK");
+    0
+}
+
+fn test_shell_command() -> Int {
+    // Run a shell command
+    let mut args = List.new();
+    args.push("-c");
+    args.push("exit 42");
+    let exit = __process_exec_raw("/bin/sh", args);
+    if exit != 42 {
+        print(f"FAIL shell: exit={exit}, expected 42");
+        return 1;
+    }
+    print("  shell_command: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Process Exec Tests:");
+    let mut failures = 0;
+    failures = failures + test_echo();
+    failures = failures + test_true_false();
+    failures = failures + test_shell_command();
+
+    if failures == 0 {
+        print("All process exec tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

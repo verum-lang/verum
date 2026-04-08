@@ -1,0 +1,58 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: parallel, map-reduce, spawn, channel, runtime
+// @description: Test parallel map-reduce with channels and threads
+
+fn partial_sum(start: Int, end: Int) -> Int {
+    let mut sum = 0;
+    let mut i = start;
+    while i < end {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_parallel_sum() -> Int {
+    let total = 10000;
+    let ch = Channel.new(10);
+
+    // Spawn 4 workers computing partial sums
+    let h1 = spawn { ch.send(partial_sum(0, 2500)); 0 };
+    let h2 = spawn { ch.send(partial_sum(2500, 5000)); 0 };
+    let h3 = spawn { ch.send(partial_sum(5000, 7500)); 0 };
+    let h4 = spawn { ch.send(partial_sum(7500, 10000)); 0 };
+
+    // Collect results
+    let mut total_sum = 0;
+    let mut i = 0;
+    while i < 4 {
+        total_sum = total_sum + match ch.recv() { Some(v) => v, None => 0 };
+        i = i + 1;
+    }
+
+    h1.await;
+    h2.await;
+    h3.await;
+    h4.await;
+
+    // Sum of 0..9999 = 49995000
+    let expected = 49995000;
+    if total_sum != expected {
+        print(f"FAIL: expected {expected}, got {total_sum}");
+        return 1;
+    }
+    print("  parallel_sum: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_parallel_sum();
+
+    if failures == 0 {
+        print("All parallel map-reduce tests passed");
+    }
+    failures
+}

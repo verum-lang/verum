@@ -1,0 +1,91 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, tcp, networking, echo, multimessage
+// @expected-exit: 0
+
+// Test: TCP echo with multiple messages — server echoes 3 messages back.
+
+mount core.*;
+
+fn tcp_listen(port: Int) -> Int { 0 }
+fn tcp_accept(listen_fd: Int) -> Int { 0 }
+fn tcp_connect(host: Text, port: Int) -> Int { 0 }
+fn tcp_send(fd: Int, data: Text) -> Int { 0 }
+fn tcp_recv(fd: Int) -> Text { "" }
+fn tcp_close(fd: Int) -> Int { 0 }
+fn __time_sleep_nanos_raw(nanos: Int) -> Int { 0 }
+
+fn echo_server_multi(port: Int) -> Int {
+    let listen_fd = tcp_listen(port);
+    if listen_fd < 0 {
+        return 1;
+    }
+
+    let client_fd = tcp_accept(listen_fd);
+    if client_fd < 0 {
+        tcp_close(listen_fd);
+        return 1;
+    }
+
+    // Echo 3 messages
+    let mut count = 0;
+    while count < 3 {
+        let data = tcp_recv(client_fd);
+        if data == "" {
+            tcp_close(client_fd);
+            tcp_close(listen_fd);
+            return 1;
+        }
+        tcp_send(client_fd, data);
+        count = count + 1;
+    }
+
+    tcp_close(client_fd);
+    tcp_close(listen_fd);
+    0
+}
+
+fn main() -> Int {
+    let port = 19942;
+
+    let server = spawn echo_server_multi(port);
+    __time_sleep_nanos_raw(200000000);
+
+    let fd = tcp_connect("127.0.0.1", port);
+    if fd < 0 {
+        print(f"FAIL: tcp_connect returned {fd}");
+        return 1;
+    }
+
+    let messages = ["First", "Second", "Third message!"];
+    let mut failures = 0;
+    let mut idx = 0;
+    while idx < 3 {
+        let msg = messages[idx];
+        tcp_send(fd, msg);
+        __time_sleep_nanos_raw(50000000);
+        let response = tcp_recv(fd);
+        if response != msg {
+            print(f"FAIL msg {idx}: expected '{msg}', got '{response}'");
+            failures = failures + 1;
+        }
+        idx = idx + 1;
+    }
+
+    tcp_close(fd);
+
+    let server_result = server.await;
+    if server_result != 0 {
+        print(f"FAIL: server returned {server_result}");
+        return 1;
+    }
+
+    if failures == 0 {
+        print("942_tcp_echo: PASS");
+        0
+    } else {
+        print(f"FAIL: {failures} message(s) failed");
+        1
+    }
+}

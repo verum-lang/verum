@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, induction
+// @description: Induction tactics for various data types
+
+/// Nat induction
+theorem nat_induction_basic(n: Nat): n + 0 == n {
+    proof by induction on n {
+        case 0 => { trivial }
+        case succ(k) => { have ih: k + 0 == k; conclude by auto }
+    }
+}
+
+/// List induction
+theorem list_induction_basic<T>(xs: List<T>): len(xs) >= 0 {
+    proof by induction on xs {
+        case Nil => { trivial }
+        case Cons(h, t) => { have ih: len(t) >= 0; conclude by arithmetic }
+    }
+}
+
+/// Strong induction
+theorem strong_ind(n: Nat)
+    requires n >= 2
+    ensures true
+{
+    proof by strong_induction on n {
+        case n => { trivial }
+    }
+}
+
+type Tree<T> is
+    | Leaf
+    | Node(T, Tree<T>, Tree<T>);
+
+/// Tree induction
+theorem tree_induction_basic<T>(t: Tree<T>): tree_depth(t) >= 0 {
+    proof by induction on t {
+        case Leaf => { trivial }
+        case Node(v, l, r) => {
+            have ih_l: tree_depth(l) >= 0;
+            have ih_r: tree_depth(r) >= 0;
+            conclude by arithmetic
+        }
+    }
+}
+
+fn tree_depth<T>(t: Tree<T>) -> Nat;
+
+/// Well-founded induction
+theorem wf_ind(m: Nat, n: Nat): ack_val(m, n) >= 0 {
+    proof by well_founded_induction on (m, n) ordered_by lex_lt {
+        case (0, n) => { conclude by arithmetic }
+        case (succ(mp), 0) => { conclude by auto }
+        case (succ(mp), succ(np)) => { conclude by auto }
+    }
+}
+
+fn ack_val(m: Nat, n: Nat) -> Nat;
+
+/// Induction with multiple base cases
+theorem fib_nonneg(n: Nat): fib_val(n) >= 0 {
+    proof by strong_induction on n {
+        case n => { conclude by auto }
+    }
+}
+
+fn fib_val(n: Nat) -> Nat;
+
+fn main() {}

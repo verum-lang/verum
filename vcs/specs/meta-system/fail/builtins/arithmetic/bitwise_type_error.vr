@@ -1,0 +1,35 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, arithmetic, bitwise, type, error
+// @description: Test that bitwise operations require integer arguments
+// @expected-error: type
+
+// =============================================================================
+// BITWISE TYPE ERROR TESTS
+// =============================================================================
+
+// Test bitwise_and with float
+meta fn test_bitwise_and_float() -> Int {
+    bitwise_and(1.5, 2)  // ERROR: expected Int, got Float
+}
+
+// Test bitwise_or with text
+meta fn test_bitwise_or_text() -> Int {
+    bitwise_or("hello", 2)  // ERROR: expected Int, got Text
+}
+
+// Test bitwise_xor with bool
+meta fn test_bitwise_xor_bool() -> Int {
+    bitwise_xor(true, false)  // ERROR: expected Int, got Bool
+}
+
+// Test shift_left with float amount
+meta fn test_shift_float() -> Int {
+    shift_left(1, 2.5)  // ERROR: shift amount must be Int
+}
+
+// Test shift_right with negative amount
+meta fn test_shift_negative() -> Int {
+    shift_right(16, -2)  // ERROR: shift amount must be non-negative
+}

@@ -1,0 +1,231 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, dependency-injection, advanced, self-hosting-critical
+// @description: Advanced context system patterns for self-hosting verification
+
+// =============================================================================
+// BASIC CONTEXT DEFINITIONS
+// =============================================================================
+
+// Simple context type - methods are signatures only
+context Logger {
+    fn log(level: LogLevel, message: Text);
+    fn debug(message: Text);
+    fn info(message: Text);
+    fn error(message: Text);
+}
+
+// Context with generic parameter
+context Database<T: Entity> {
+    fn find(id: Id) -> Maybe<T>;
+    fn save(entity: T) -> Result<(), DbError>;
+    fn delete(id: Id) -> Result<(), DbError>;
+}
+
+// Context with generic parameters (instead of associated types)
+context Cache<K: Hash + Eq, V> {
+    fn get(key: K) -> Maybe<V>;
+    fn set(key: K, value: V);
+    fn invalidate(key: K);
+}
+
+// =============================================================================
+// FUNCTIONS WITH MULTIPLE CONTEXT REQUIREMENTS
+// Context clause comes AFTER return type per grammar specification
+// =============================================================================
+
+// Function requiring multiple contexts
+fn process_order(order: Order) -> Result<(), Error> using [Database<Order>, Logger, Cache<Id, Order>] {
+    Logger.info(f"Processing order {order.id}");
+
+    let cached = Cache.get(order.id);
+    if cached is Some(result) {
+        return Ok(result);
+    }
+
+    let saved = Database.save(order)?;
+    Cache.set(order.id, saved);
+
+    Ok(())
+}
+
+// =============================================================================
+// CONTEXT ALIASES IN FUNCTION SIGNATURES
+// =============================================================================
+
+// Named contexts with alias syntax
+fn with_named_contexts(user_id: UserId) -> Maybe<User> using [
+    db: Database<User>,
+    log: Logger,
+    cache: Cache<UserId, User>
+] {
+    log.debug(f"Looking up user {user_id}");
+
+    if let Some(user) = cache.get(user_id) {
+        return Some(user);
+    }
+
+    let user = db.find(user_id)?;
+    cache.set(user_id, user.clone());
+    Some(user)
+}
+
+// =============================================================================
+// CONTEXT GROUPS
+// =============================================================================
+
+// Define a context group (using alias)
+using WebContext = [
+    Database<Session>,
+    Cache<Text, Session>,
+    Logger,
+];
+
+// Function with multiple contexts
+fn handle_request(req: Request) -> Response using [Database<Session>, Logger] {
+    Logger.info(f"Handling {req.method} {req.path}");
+    Response.ok()
+}
+
+// =============================================================================
+// PROVIDE EXPRESSIONS
+// =============================================================================
+
+// Simple provide with in-block
+fn with_logger() {
+    provide Logger = ConsoleLogger.new() in {
+        Logger.info("Hello");
+    }
+}
+
+// Nested provides
+fn with_multiple() {
+    provide Logger = ConsoleLogger.new() in {
+        provide Database = PostgresDb.connect(url) in {
+            process_order(order);
+        }
+    }
+}
+
+// =============================================================================
+// CONTEXT TRANSFORMATIONS
+// =============================================================================
+
+// Scoped context
+fn with_scoped_cache() using [Cache<Text, Text>] {
+    provide Cache = Cache.scoped("user-data") in {
+        Cache.set("key", "value");
+    }
+}
+
+// Transactional context
+fn with_transaction() -> Result<(), Error> using [Database<User>] {
+    provide Database = Database.transactional() in {
+        Database.save(user1)?;
+        Database.save(user2)?;
+    };
+    Ok(())
+}
+
+// =============================================================================
+// CONTEXT BOUNDS IN GENERICS
+// =============================================================================
+
+// Generic with context bounds
+fn generic_with_context<T: Entity>() -> List<T> using [Database<T>, Logger] {
+    Logger.debug("Fetching all entities");
+    Database.find_all()
+}
+
+// Generic function propagating contexts
+fn map_with_context<A, B>(
+    items: List<A>,
+    f: fn(A) -> B
+) -> List<B> using [Logger] {
+    items.iter().map(|item| {
+        Logger.debug("Processing item");
+        f(item)
+    }).collect()
+}
+
+// =============================================================================
+// CONTEXT IN PROTOCOLS
+// =============================================================================
+
+// Protocol with context requirements on methods
+type Repository<T: Entity> is protocol {
+    fn save(entity: T) -> Result<(), Error> using [Database<T>, Logger];
+    fn find(id: Id) -> Maybe<T> using [Database<T>];
+    fn delete(id: Id) -> Result<(), Error> using [Database<T>, Logger];
+};
+
+// Implementation with contexts
+implement Repository<User> for UserRepository {
+    fn save(user: User) -> Result<(), Error> using [Database<User>, Logger] {
+        Logger.info(f"Saving user {user.id}");
+        Database.save(user)
+    }
+
+    fn find(id: Id) -> Maybe<User> using [Database<User>] {
+        Database.find(id)
+    }
+
+    fn delete(id: Id) -> Result<(), Error> using [Database<User>, Logger] {
+        Logger.info(f"Deleting user {id}");
+        Database.delete(id)
+    }
+}
+
+// =============================================================================
+// CONTEXT DELEGATION
+// =============================================================================
+
+// Delegate context to inner function
+fn outer() using [Logger, Database<User>] {
+    Logger.info("In outer");
+    inner();
+}
+
+fn inner() using [Logger, Database<User>] {
+    Logger.info("In inner");
+    let user = Database.find(id);
+}
+
+// =============================================================================
+// ASYNC CONTEXTS
+// =============================================================================
+
+// Async function with contexts
+async fn async_with_context() -> Result<User, Error> using [Database<User>, Logger] {
+    Logger.info("Starting async operation");
+
+    let user = Database.find(id).await?;
+
+    Logger.info(f"Found user: {user.name}");
+    Ok(user)
+}
+
+// =============================================================================
+// CONTEXT INHERITANCE (Protocol Extension)
+// =============================================================================
+
+// Base context protocol
+type BaseLogger is protocol {
+    fn log(message: Text);
+};
+
+// Extended context protocol
+type StructuredLogger is protocol extends BaseLogger {
+    fn log_structured(fields: Map<Text, Text>);
+};
+
+// =============================================================================
+// SIMPLE CONTEXT USAGE
+// =============================================================================
+
+// Context with simple function
+fn use_allocator() using [Allocator] {
+    let ptr = Allocator.allocate(1024);
+    Allocator.deallocate(ptr);
+}

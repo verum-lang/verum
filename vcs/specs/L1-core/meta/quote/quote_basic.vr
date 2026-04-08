@@ -1,0 +1,45 @@
+// @test: parse
+// @level: L1
+// @tags: meta, quote, staged-metaprogramming
+// @timeout: 5000
+
+/// Basic quote expressions for code generation.
+/// Grammar: quote_expr = 'quote' [quote_stage] '{' token_tree '}'
+///          quote_stage = '(' stage_level ')'
+
+// Meta function generating code with quote
+meta fn generate_add() {
+    quote {
+        fn add(a: Int, b: Int) -> Int {
+            a + b
+        }
+    }
+}
+
+// Quote with interpolation
+meta fn generate_getter(field_name: Text, field_type: Text) {
+    quote {
+        fn $field_name(&self) -> $field_type {
+            self.$field_name
+        }
+    }
+}
+
+// Quote with expression interpolation
+meta fn generate_constant(name: Text, value: Int) {
+    quote {
+        const $name: Int = ${value};
+    }
+}
+
+// Basic quote with no stage (defaults to stage N-1)
+meta fn simple_quote() {
+    quote {
+        let x = 42;
+        print(f"x = {x}");
+    }
+}
+
+fn main() {
+    print("Quote basic tests parsed");
+}

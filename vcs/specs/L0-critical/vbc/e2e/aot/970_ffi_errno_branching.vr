@@ -1,0 +1,51 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, errno, branching, error-handling
+// @description: Tests errno-based error detection with real syscalls
+// @expected-exit: 0
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn getpid() -> Int;
+    fn close(fd: Int) -> Int;
+    fn dup(fd: Int) -> Int;
+}
+
+fn main() {
+    // Test 1: getpid always succeeds
+    let pid = getpid();
+    assert(pid > 0);
+    print(f"Test 1 PASS: pid={pid}");
+
+    // Test 2: dup(0) duplicates stdin — should succeed
+    let fd = dup(0);
+    assert(fd >= 0);
+    print(f"Test 2 PASS: dup(0) = {fd}");
+
+    // Test 3: close the duplicated fd — should succeed
+    let rc = close(fd);
+    assert(rc == 0);
+    print(f"Test 3 PASS: close({fd}) = {rc}");
+
+    // Test 4: close invalid fd — returns -1 (EBADF)
+    let rc2 = close(99999);
+    assert(rc2 == -1);
+    print(f"Test 4 PASS: close(99999) = {rc2}");
+
+    // Test 5: dup of invalid fd — returns -1
+    let fd2 = dup(-1);
+    assert(fd2 == -1);
+    print(f"Test 5 PASS: dup(-1) = {fd2}");
+
+    // Test 6: Multiple successful operations
+    let fd3 = dup(1); // stdout
+    assert(fd3 >= 0);
+    let fd4 = dup(2); // stderr
+    assert(fd4 >= 0);
+    close(fd3);
+    close(fd4);
+    print("Test 6 PASS: multiple dup+close");
+
+    print("All errno branching tests passed");
+}

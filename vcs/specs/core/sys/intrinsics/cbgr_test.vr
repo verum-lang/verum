@@ -1,0 +1,313 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/cbgr_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, cbgr, memory-safety, references
+// @description: Comprehensive tests for CBGR (Capability-Based Garbage-collected
+//               References) intrinsics that form the foundation of memory safety.
+//
+// Coverage:
+// - cbgr_validate: Check if a reference is valid (generation + epoch)
+// - cbgr_current_epoch: Get the current epoch value
+// - cbgr_advance_epoch: Advance to next epoch (invalidates old references)
+// - cbgr_get_generation: Get generation counter from reference header
+//
+// Test Strategy:
+// - Valid reference validation
+// - Epoch monotonicity
+// - Generation checks
+// - Reference invalidation after epoch advance
+// - Multi-reference scenarios
+//
+// Note: Full CBGR testing requires allocation and deallocation which may
+// be tested in mem/allocator tests. These tests focus on the intrinsic
+// operations themselves.
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.cbgr_test;
+
+mount core.intrinsics.{
+    cbgr_validate, cbgr_current_epoch, cbgr_advance_epoch,
+    cbgr_get_generation,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Current Epoch Tests
+// =============================================================================
+
+@test
+fn test_cbgr_current_epoch() {
+    // Get current epoch
+    let epoch1 = cbgr_current_epoch();
+
+    // Epoch should be a reasonable value (not zero in production runtime)
+    // In a fresh runtime, epoch might start at 0 or 1
+    // We just verify we can call it without crashing
+
+    // Multiple calls should return same value (no automatic advance)
+    let epoch2 = cbgr_current_epoch();
+    let epoch3 = cbgr_current_epoch();
+
+    assert(epoch1 == epoch2);
+    assert(epoch2 == epoch3);
+
+    print(f"Current CBGR epoch: {epoch1}");
+}
+
+// =============================================================================
+// Epoch Monotonicity Tests
+// =============================================================================
+
+@test
+fn test_cbgr_epoch_monotonicity() {
+    let epoch_before = cbgr_current_epoch();
+
+    // Advance epoch
+    cbgr_advance_epoch();
+
+    let epoch_after = cbgr_current_epoch();
+
+    // Epoch should have advanced
+    assert(epoch_after > epoch_before);
+
+    // Should advance by exactly 1 (typical behavior)
+    assert(epoch_after == epoch_before + 1);
+
+    // Multiple advances
+    let mut prev = epoch_after;
+    for i in 0..5 {
+        cbgr_advance_epoch();
+        let curr = cbgr_current_epoch();
+        assert(curr > prev);
+        prev = curr;
+    }
+
+    print("Epoch monotonicity tests passed");
+}
+
+// =============================================================================
+// Validate Stack References Tests
+// =============================================================================
+
+@test
+fn test_cbgr_validate_stack() {
+    // Stack-allocated values should always be valid
+    let value: Int = 42;
+    let reference: &Int = &value;
+
+    // Validate should return true for stack reference
+    let valid = cbgr_validate(reference);
+    assert(valid);
+
+    // Multiple stack values
+    let a: Int = 1;
+    let b: Float = 2.0;
+    let c: Bool = true;
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+
+    assert(cbgr_validate(&a));
+    assert(cbgr_validate(&b));
+    assert(cbgr_validate(&c));
+    assert(cbgr_validate(&arr));
+
+    // Nested structures
+    type Point is { x: Int, y: Int };
+    let point = Point { x: 10, y: 20 };
+    assert(cbgr_validate(&point));
+    assert(cbgr_validate(&point.x));
+    assert(cbgr_validate(&point.y));
+
+    // Reference to array element
+    let ref_elem: &Int = &arr[2];
+    assert(cbgr_validate(ref_elem));
+
+    print("Stack reference validation tests passed");
+}
+
+// =============================================================================
+// Generation Tests
+// =============================================================================
+
+@test
+fn test_cbgr_generation() {
+    // Get generation from stack-allocated value
+    let value: Int = 42;
+    let ptr = &value as *const Int as *const Byte;
+
+    unsafe {
+        let gen = cbgr_get_generation(ptr);
+
+        // Generation for stack values is implementation-defined
+        // but should be consistent for same address
+
+        let gen2 = cbgr_get_generation(ptr);
+        assert(gen == gen2);
+    }
+
+    // Different stack slots may have different generations
+    // (or same if freshly allocated in same epoch)
+    let other: Int = 99;
+    let other_ptr = &other as *const Int as *const Byte;
+
+    unsafe {
+        let gen_other = cbgr_get_generation(other_ptr);
+        // We can't assert gen == gen_other or gen != gen_other
+        // as both are valid depending on implementation
+        print(f"Generation values: {cbgr_get_generation(ptr)}, {gen_other}");
+    }
+
+    print("Generation tests passed");
+}
+
+// =============================================================================
+// Epoch Advance Effect Tests
+// =============================================================================
+
+@test
+fn test_epoch_advance_effect() {
+    // This test verifies the semantic effect of epoch advance
+    // References created before an epoch advance may become invalid
+    // in a full CBGR implementation with heap allocation
+
+    let epoch1 = cbgr_current_epoch();
+
+    // Create a stack reference
+    let value: Int = 42;
+    let ref_before: &Int = &value;
+
+    // Stack references should remain valid even after epoch advance
+    // (only heap references are invalidated)
+    cbgr_advance_epoch();
+
+    let epoch2 = cbgr_current_epoch();
+    assert(epoch2 > epoch1);
+
+    // Stack reference should still be valid
+    assert(cbgr_validate(ref_before));
+    assert(*ref_before == 42);
+
+    // Create reference after epoch advance
+    let value2: Int = 100;
+    let ref_after: &Int = &value2;
+    assert(cbgr_validate(ref_after));
+
+    print("Epoch advance effect tests passed");
+}
+
+// =============================================================================
+// Multi-Reference Scenario Tests
+// =============================================================================
+
+@test
+fn test_multi_reference_scenario() {
+    // Multiple references to same value
+    let value: Int = 42;
+    let ref1: &Int = &value;
+    let ref2: &Int = &value;
+    let ref3: &Int = &value;
+
+    assert(cbgr_validate(ref1));
+    assert(cbgr_validate(ref2));
+    assert(cbgr_validate(ref3));
+
+    // All point to same value
+    assert(*ref1 == *ref2);
+    assert(*ref2 == *ref3);
+
+    // References to different values
+    let vals: [Int; 3] = [10, 20, 30];
+    let refs: [&Int; 3] = [&vals[0], &vals[1], &vals[2]];
+
+    for i in 0..3 {
+        assert(cbgr_validate(refs[i]));
+        assert(*refs[i] == vals[i]);
+    }
+
+    print("Multi-reference scenario tests passed");
+}
+
+// =============================================================================
+// CBGR with Different Types
+// =============================================================================
+
+@test
+fn test_cbgr_different_types() {
+    // Test CBGR validation with various types
+
+    // Primitives
+    let int_val: Int = 42;
+    let float_val: Float = 3.14;
+    let bool_val: Bool = true;
+    let byte_val: Byte = 0xFF;
+
+    assert(cbgr_validate(&int_val));
+    assert(cbgr_validate(&float_val));
+    assert(cbgr_validate(&bool_val));
+    assert(cbgr_validate(&byte_val));
+
+    // Arrays
+    let arr_int: [Int; 3] = [1, 2, 3];
+    let arr_float: [Float; 2] = [1.0, 2.0];
+
+    assert(cbgr_validate(&arr_int));
+    assert(cbgr_validate(&arr_float));
+
+    // Compound types
+    type Color is { r: Byte, g: Byte, b: Byte, a: Byte };
+    let color = Color { r: 255, g: 128, b: 64, a: 255 };
+    assert(cbgr_validate(&color));
+
+    // Nested types
+    type Rect is { top_left: Point, bottom_right: Point };
+    type Point is { x: Int, y: Int };
+
+    let rect = Rect {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: Point { x: 100, y: 100 },
+    };
+    assert(cbgr_validate(&rect));
+    assert(cbgr_validate(&rect.top_left));
+    assert(cbgr_validate(&rect.bottom_right));
+
+    print("CBGR different types tests passed");
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_cbgr_edge_cases() {
+    // Very large stack allocation
+    let large: [Int; 1000] = [0; 1000];
+    assert(cbgr_validate(&large));
+    assert(cbgr_validate(&large[0]));
+    assert(cbgr_validate(&large[999]));
+
+    // Reference to temporary (if allowed)
+    // This depends on language semantics
+
+    // Rapid epoch advances
+    let start_epoch = cbgr_current_epoch();
+    for i in 0..100 {
+        cbgr_advance_epoch();
+    }
+    let end_epoch = cbgr_current_epoch();
+    assert(end_epoch == start_epoch + 100);
+
+    // Verify stack references still valid after many epoch advances
+    let value: Int = 42;
+    assert(cbgr_validate(&value));
+
+    print("CBGR edge case tests passed");
+}

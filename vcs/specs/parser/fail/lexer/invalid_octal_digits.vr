@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, numbers, octal, error
+// @description: Test invalid octal digit detection
+// @expected-error: E003
+
+fn test_invalid_octal() {
+    let a = 0o89;
+    let b = 0o999;
+}

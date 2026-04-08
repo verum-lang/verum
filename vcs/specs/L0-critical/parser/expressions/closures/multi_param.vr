@@ -1,0 +1,84 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, closures, lambda, parameters
+
+// Test closures with two parameters
+fn test_two_params() {
+    let add = |x, y| x + y;
+    let subtract = |a, b| a - b;
+    let multiply = |m, n| m * n;
+}
+
+// Test closures with three or more parameters
+fn test_three_plus_params() {
+    // Three parameters
+    let sum3 = |a, b, c| a + b + c;
+    let clamp = |value, min, max| {
+        if value < min { min }
+        else if value > max { max }
+        else { value }
+    };
+
+    // Four parameters
+    let sum4 = |a, b, c, d| a + b + c + d;
+
+    // Many parameters
+    let many = |a, b, c, d, e, f| a + b + c + d + e + f;
+}
+
+// Test multi-param with types
+fn test_typed_multi_param() {
+    let typed_add = |a: Int, b: Int| a + b;
+    let typed_mix = |name: Text, age: Int, active: Bool| {
+        Person { name, age, active }
+    };
+
+    // Multi-param with return type
+    let compute = |x: Int, y: Int| -> Int {
+        x * y + x - y
+    };
+}
+
+// Test multi-param in fold/reduce
+fn test_multi_param_in_higher_order() {
+    let list = [1, 2, 3, 4, 5];
+
+    list.fold(0, |acc, x| acc + x);
+    list.reduce(|a, b| if a > b { a } else { b });
+
+    // Multi-param for comparison
+    list.sort_by(|a, b| a.compare(b));
+
+    let items = [1, 2, 3];
+    items.max_by(|x, y| x.compare(y));
+}
+
+// Test multi-param for zipping
+fn test_multi_param_zip() {
+    let list1 = [1, 2, 3];
+    let list2 = [4, 5, 6];
+    zip(list1, list2).map(|(a, b)| a + b);
+}
+
+// Test single tuple destructuring in closure
+fn test_single_tuple_destructuring() {
+    let sum_pair = |(x, y)| x + y;
+    let get_first = |(a, _)| a;
+}
+
+// Test multi-param returning tuple
+fn test_multi_param_return_tuple() {
+    let swap = |a, b| (b, a);
+    let duplicate = |x, y| (x, x, y, y);
+}
+
+// Test complex multi-param closure
+fn test_complex_multi_param() {
+    let process = |input: List<Int>, transform: fn(Int) -> Int, filter: fn(Int) -> Bool| {
+        input
+            .map(transform)
+            .filter(filter)
+            .collect()
+    };
+}

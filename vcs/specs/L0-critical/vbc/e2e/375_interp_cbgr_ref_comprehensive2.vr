@@ -1,0 +1,733 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, edge, comprehensive, stress
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Second comprehensive CBGR test.
+// Exercises all working reference patterns: many refs, deep nesting,
+// loops, recursion, functions, state machines, functional patterns.
+// 100+ assertions validating CBGR interpreter implementation.
+
+// =============================================================================
+// Record types at various nesting depths
+// =============================================================================
+
+type Pair is { fst: Int, snd: Int };
+type Triple is { a: Int, b: Int, c: Int };
+type Box4 is { v0: Int, v1: Int, v2: Int, v3: Int };
+type Nested is { inner: Pair, tag: Int };
+type DeepNest is { content: Nested, priority: Int };
+
+// Array record
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// Basic reference helpers
+// =============================================================================
+
+fn read_ref(r: &Int) -> Int { *r }
+fn set_ref(r: &mut Int, v: Int) { *r = v; }
+fn add_ref(r: &mut Int, v: Int) { *r = *r + v; }
+fn mul_ref(r: &mut Int, v: Int) { *r = *r * v; }
+fn inc_ref(r: &mut Int) { *r = *r + 1; }
+fn dec_ref(r: &mut Int) { *r = *r - 1; }
+fn double_ref(r: &mut Int) { *r = *r * 2; }
+fn negate_ref(r: &mut Int) { *r = 0 - *r; }
+
+fn swap_refs(a: &mut Int, b: &mut Int) {
+    let tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+fn add_two_refs(a: &Int, b: &Int) -> Int {
+    *a + *b
+}
+
+// =============================================================================
+// Recursive helpers (with @allow)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+@allow(unbounded_recursion)
+fn fibonacci(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+@allow(unbounded_recursion)
+fn sum_range(lo: Int, hi: Int) -> Int {
+    if lo > hi { 0 } else { lo + sum_range(lo + 1, hi) }
+}
+
+// =============================================================================
+// Section A: Many refs stress (from test 371 pattern)
+// =============================================================================
+
+fn test_section_a_many_refs() {
+    // A1: Simultaneous immutable borrows
+    let val = 99;
+    let r1 = &val; let r2 = &val; let r3 = &val;
+    let r4 = &val; let r5 = &val;
+    assert_eq(*r1 + *r2 + *r3 + *r4 + *r5, 495);   // assert 1
+
+    // A2: Sequential mutable borrows in loop
+    let mut acc = 0;
+    let mut i = 0;
+    while i < 50 {
+        add_ref(&mut acc, i);
+        i = i + 1;
+    }
+    assert_eq(acc, 1225);  // Sum 0..49                // assert 2
+
+    // A3: Many variables with refs
+    let mut v1 = 1; let mut v2 = 2; let mut v3 = 3;
+    let mut v4 = 4; let mut v5 = 5;
+    double_ref(&mut v1); double_ref(&mut v2);
+    double_ref(&mut v3); double_ref(&mut v4); double_ref(&mut v5);
+    assert_eq(v1, 2);                                  // assert 3
+    assert_eq(v2, 4);                                  // assert 4
+    assert_eq(v3, 6);                                  // assert 5
+    assert_eq(v4, 8);                                  // assert 6
+    assert_eq(v5, 10);                                 // assert 7
+
+    // A4: Ref creation stress in loop
+    let mut total = 0;
+    let mut j = 0;
+    while j < 100 {
+        let x = j * j;
+        let r = &x;
+        total = total + *r;
+        j = j + 1;
+    }
+    assert_eq(total, 328350);  // Sum of i^2 for 0..99   // assert 8
+
+    // A5: Multi-var swap chain
+    let mut a = 10; let mut b = 20; let mut c = 30;
+    swap_refs(&mut a, &mut b);
+    swap_refs(&mut b, &mut c);
+    assert_eq(a, 20);                                  // assert 9
+    assert_eq(b, 30);                                  // assert 10
+    assert_eq(c, 10);                                  // assert 11
+}
+
+// =============================================================================
+// Section B: Deep records (from test 372 pattern)
+// =============================================================================
+
+fn test_section_b_deep_records() {
+    // B1: 3-level nesting
+    let deep = DeepNest {
+        content: Nested {
+            inner: Pair { fst: 42, snd: 99 },
+            tag: 7
+        },
+        priority: 3
+    };
+    assert_eq(deep.content.inner.fst, 42);             // assert 12
+    assert_eq(deep.content.inner.snd, 99);             // assert 13
+    assert_eq(deep.content.tag, 7);                    // assert 14
+    assert_eq(deep.priority, 3);                       // assert 15
+
+    // B2: Refs to deep values
+    let fst_val = deep.content.inner.fst;
+    let snd_val = deep.content.inner.snd;
+    assert_eq(read_ref(&fst_val), 42);                 // assert 16
+    assert_eq(add_two_refs(&fst_val, &snd_val), 141);  // assert 17
+
+    // B3: Mutable deep record
+    let mut p = Pair { fst: 0, snd: 0 };
+    let mut k = 0;
+    while k < 10 {
+        p.fst = p.fst + 1;
+        p.snd = p.snd + 2;
+        k = k + 1;
+    }
+    assert_eq(p.fst, 10);                              // assert 18
+    assert_eq(p.snd, 20);                              // assert 19
+
+    // B4: Wide record access
+    let t = Triple { a: 100, b: 200, c: 300 };
+    assert_eq(t.a + t.b + t.c, 600);                   // assert 20
+
+    // B5: Box4 record
+    let b4 = Box4 { v0: 1, v1: 2, v2: 3, v3: 4 };
+    assert_eq(b4.v0 + b4.v1 + b4.v2 + b4.v3, 10);     // assert 21
+
+    // B6: Nested construction and return
+    let n = Nested { inner: Pair { fst: -5, snd: 5 }, tag: 0 };
+    assert_eq(n.inner.fst + n.inner.snd, 0);           // assert 22
+}
+
+// =============================================================================
+// Section C: Functional patterns (from test 373 pattern)
+// =============================================================================
+
+fn map_double_arr(src: Arr8, len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        result = arr8_set(result, i, arr8_get(src, i) * 2);
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_positive_arr(src: Arr8, src_len: Int, dst: &mut Arr8) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < src_len {
+        let v = arr8_get(src, i);
+        if v > 0 {
+            *dst = arr8_set(*dst, count, v);
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn reduce_sum_arr(src: Arr8, len: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < len {
+        sum = sum + arr8_get(src, i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn test_section_c_functional() {
+    // C1: Map double
+    let mut arr = arr8_zeros();
+    arr = arr8_set(arr, 0, 1);
+    arr = arr8_set(arr, 1, 2);
+    arr = arr8_set(arr, 2, 3);
+    arr = arr8_set(arr, 3, 4);
+    let doubled = map_double_arr(arr, 4);
+    assert_eq(arr8_get(doubled, 0), 2);                 // assert 23
+    assert_eq(arr8_get(doubled, 1), 4);                 // assert 24
+    assert_eq(arr8_get(doubled, 2), 6);                 // assert 25
+    assert_eq(arr8_get(doubled, 3), 8);                 // assert 26
+
+    // C2: Reduce sum
+    assert_eq(reduce_sum_arr(arr, 4), 10);              // assert 27
+    assert_eq(reduce_sum_arr(doubled, 4), 20);          // assert 28
+
+    // C3: Filter positive
+    let mut mixed = arr8_zeros();
+    mixed = arr8_set(mixed, 0, -3);
+    mixed = arr8_set(mixed, 1, 5);
+    mixed = arr8_set(mixed, 2, -1);
+    mixed = arr8_set(mixed, 3, 7);
+    mixed = arr8_set(mixed, 4, 0);
+    mixed = arr8_set(mixed, 5, 2);
+
+    let mut result_arr = arr8_zeros();
+    let count = filter_positive_arr(mixed, 6, &mut result_arr);
+    assert_eq(count, 3);                                // assert 29
+    assert_eq(arr8_get(result_arr, 0), 5);              // assert 30
+    assert_eq(arr8_get(result_arr, 1), 7);              // assert 31
+    assert_eq(arr8_get(result_arr, 2), 2);              // assert 32
+
+    // C4: Chain map -> reduce
+    let mapped = map_double_arr(arr, 4);
+    let chain_sum = reduce_sum_arr(mapped, 4);
+    assert_eq(chain_sum, 20);                           // assert 33
+
+    // C5: Chain map -> filter -> reduce
+    let mut neg_arr = arr8_zeros();
+    neg_arr = arr8_set(neg_arr, 0, -2);
+    neg_arr = arr8_set(neg_arr, 1, 3);
+    neg_arr = arr8_set(neg_arr, 2, -4);
+    neg_arr = arr8_set(neg_arr, 3, 5);
+    neg_arr = arr8_set(neg_arr, 4, 6);
+
+    let doubled2 = map_double_arr(neg_arr, 5);
+    // [-4, 6, -8, 10, 12]
+    let mut pos_out = arr8_zeros();
+    let pos_count = filter_positive_arr(doubled2, 5, &mut pos_out);
+    assert_eq(pos_count, 3);                            // assert 34
+    let pos_sum = reduce_sum_arr(pos_out, pos_count);
+    assert_eq(pos_sum, 28);  // 6+10+12                 // assert 35
+}
+
+// =============================================================================
+// Section D: State machine (from test 374 pattern)
+// =============================================================================
+
+type MiniState is { val: Int, steps: Int };
+
+fn mini_new() -> MiniState {
+    MiniState { val: 0, steps: 0 }
+}
+
+fn mini_step(s: &mut MiniState, op: Int) {
+    if op == 0 {
+        // Add 1
+        *s = MiniState { val: (*s).val + 1, steps: (*s).steps + 1 };
+    } else if op == 1 {
+        // Double
+        *s = MiniState { val: (*s).val * 2, steps: (*s).steps + 1 };
+    } else if op == 2 {
+        // Negate
+        *s = MiniState { val: 0 - (*s).val, steps: (*s).steps + 1 };
+    } else {
+        // Reset
+        *s = MiniState { val: 0, steps: (*s).steps + 1 };
+    }
+}
+
+fn test_section_d_state_machine() {
+    let mut sm = mini_new();
+
+    // D1: Basic transitions
+    mini_step(&mut sm, 0);  // +1 => 1
+    assert_eq(sm.val, 1);                              // assert 36
+    mini_step(&mut sm, 0);  // +1 => 2
+    assert_eq(sm.val, 2);                              // assert 37
+    mini_step(&mut sm, 1);  // *2 => 4
+    assert_eq(sm.val, 4);                              // assert 38
+    mini_step(&mut sm, 0);  // +1 => 5
+    assert_eq(sm.val, 5);                              // assert 39
+    mini_step(&mut sm, 1);  // *2 => 10
+    assert_eq(sm.val, 10);                             // assert 40
+    assert_eq(sm.steps, 5);                            // assert 41
+
+    // D2: Negate
+    mini_step(&mut sm, 2);
+    assert_eq(sm.val, -10);                            // assert 42
+
+    // D3: Reset
+    mini_step(&mut sm, 3);
+    assert_eq(sm.val, 0);                              // assert 43
+
+    // D4: Long sequence
+    let mut i = 0;
+    while i < 20 {
+        mini_step(&mut sm, 0);
+        i = i + 1;
+    }
+    assert_eq(sm.val, 20);                             // assert 44
+    assert_eq(sm.steps, 27);                           // assert 45
+
+    // D5: Build up complex value: (((1+1)*2+1)*2+1)*2 = ((2*2+1)*2+1)*2 = (5*2+1)*2 = 11*2 = 22
+    mini_step(&mut sm, 3);  // reset to 0
+    mini_step(&mut sm, 0);  // 1
+    mini_step(&mut sm, 0);  // 2
+    mini_step(&mut sm, 1);  // 4
+    mini_step(&mut sm, 0);  // 5
+    mini_step(&mut sm, 1);  // 10
+    mini_step(&mut sm, 0);  // 11
+    mini_step(&mut sm, 1);  // 22
+    assert_eq(sm.val, 22);                             // assert 46
+}
+
+// =============================================================================
+// Section E: Recursion combined with refs
+// =============================================================================
+
+fn test_section_e_recursion() {
+    // E1: Factorial
+    assert_eq(factorial(0), 1);                        // assert 47
+    assert_eq(factorial(1), 1);                        // assert 48
+    assert_eq(factorial(5), 120);                      // assert 49
+    assert_eq(factorial(10), 3628800);                 // assert 50
+
+    // E2: Fibonacci
+    assert_eq(fibonacci(0), 0);                        // assert 51
+    assert_eq(fibonacci(1), 1);                        // assert 52
+    assert_eq(fibonacci(10), 55);                      // assert 53
+
+    // E3: Recursive sum range
+    assert_eq(sum_range(1, 10), 55);                   // assert 54
+    assert_eq(sum_range(1, 100), 5050);                // assert 55
+
+    // E4: Store recursive results through refs
+    let mut results = arr8_zeros();
+    let mut i = 0;
+    while i < 8 {
+        results = arr8_set(results, i, factorial(i));
+        i = i + 1;
+    }
+    assert_eq(arr8_get(results, 0), 1);                // assert 56 (0!)
+    assert_eq(arr8_get(results, 1), 1);                // assert 57 (1!)
+    assert_eq(arr8_get(results, 2), 2);                // assert 58 (2!)
+    assert_eq(arr8_get(results, 3), 6);                // assert 59 (3!)
+    assert_eq(arr8_get(results, 4), 24);               // assert 60 (4!)
+    assert_eq(arr8_get(results, 5), 120);              // assert 61 (5!)
+    assert_eq(arr8_get(results, 6), 720);              // assert 62 (6!)
+    assert_eq(arr8_get(results, 7), 5040);             // assert 63 (7!)
+
+    // E5: Accumulate fibonacci via ref
+    let mut fib_sum = 0;
+    let mut j = 0;
+    while j < 10 {
+        add_ref(&mut fib_sum, fibonacci(j));
+        j = j + 1;
+    }
+    // fib(0..9) = 0,1,1,2,3,5,8,13,21,34 => sum = 88
+    assert_eq(fib_sum, 88);                            // assert 64
+}
+
+// =============================================================================
+// Section F: Complex data flow with refs
+// =============================================================================
+
+fn compute_and_store(out: &mut Int, a: Int, b: Int) {
+    *out = a * a + b * b;
+}
+
+fn conditional_update(r: &mut Int, cond: Bool, if_true: Int, if_false: Int) {
+    if cond {
+        *r = if_true;
+    } else {
+        *r = if_false;
+    }
+}
+
+fn clamp_ref(r: &mut Int, lo: Int, hi: Int) {
+    if *r < lo { *r = lo; }
+    if *r > hi { *r = hi; }
+}
+
+fn test_section_f_data_flow() {
+    // F1: Compute and store via ref
+    let mut result = 0;
+    compute_and_store(&mut result, 3, 4);
+    assert_eq(result, 25);                             // assert 65
+
+    compute_and_store(&mut result, 5, 12);
+    assert_eq(result, 169);                            // assert 66
+
+    // F2: Conditional update
+    let mut x = 0;
+    conditional_update(&mut x, true, 42, -1);
+    assert_eq(x, 42);                                  // assert 67
+    conditional_update(&mut x, false, 100, -100);
+    assert_eq(x, -100);                                // assert 68
+
+    // F3: Clamp
+    let mut v = 50;
+    clamp_ref(&mut v, 0, 100);
+    assert_eq(v, 50);                                  // assert 69
+
+    v = 150;
+    clamp_ref(&mut v, 0, 100);
+    assert_eq(v, 100);                                 // assert 70
+
+    v = -20;
+    clamp_ref(&mut v, 0, 100);
+    assert_eq(v, 0);                                   // assert 71
+
+    // F4: Complex pipeline via refs
+    let mut a = 5;
+    let mut b = 10;
+    add_ref(&mut a, 15);     // a = 20
+    mul_ref(&mut b, 3);      // b = 30
+    swap_refs(&mut a, &mut b); // a = 30, b = 20
+    double_ref(&mut a);       // a = 60
+    dec_ref(&mut b);          // b = 19
+    assert_eq(a, 60);                                  // assert 72
+    assert_eq(b, 19);                                  // assert 73
+    assert_eq(add_two_refs(&a, &b), 79);               // assert 74
+}
+
+// =============================================================================
+// Section G: Loops with mixed operations
+// =============================================================================
+
+fn test_section_g_loops() {
+    // G1: Collatz-like iteration via ref
+    let mut n = 27;
+    let mut steps = 0;
+    while n != 1 {
+        if n % 2 == 0 {
+            set_ref(&mut n, n / 2);
+        } else {
+            set_ref(&mut n, n * 3 + 1);
+        }
+        inc_ref(&mut steps);
+    }
+    assert_eq(n, 1);                                   // assert 75
+    assert_eq(steps, 111);                             // assert 76 (Collatz 27 = 111 steps)
+
+    // G2: Sieve-like prime counting to 30
+    let mut count = 0;
+    let mut num = 2;
+    while num <= 30 {
+        let mut is_prime = true;
+        let mut d = 2;
+        while d * d <= num {
+            if num % d == 0 {
+                is_prime = false;
+            }
+            d = d + 1;
+        }
+        if is_prime {
+            inc_ref(&mut count);
+        }
+        num = num + 1;
+    }
+    assert_eq(count, 10);  // primes up to 30          // assert 77
+
+    // G3: Nested loop accumulation
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 5 {
+        let mut j = 1;
+        while j <= 5 {
+            add_ref(&mut total, i * j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Sum of i*j for i,j in 1..5 = (1+2+3+4+5)^2 = 225
+    assert_eq(total, 225);                             // assert 78
+
+    // G4: GCD via subtraction
+    let mut ga = 48;
+    let mut gb = 18;
+    while ga != gb {
+        if ga > gb {
+            add_ref(&mut ga, 0 - gb);
+        } else {
+            add_ref(&mut gb, 0 - ga);
+        }
+    }
+    assert_eq(ga, 6);                                  // assert 79
+}
+
+// =============================================================================
+// Section H: Mixed ref patterns stress
+// =============================================================================
+
+fn test_section_h_mixed() {
+    // H1: Build array, then process
+    let mut arr = arr8_zeros();
+    let mut i = 0;
+    while i < 8 {
+        arr = arr8_set(arr, i, (i + 1) * (i + 1));
+        i = i + 1;
+    }
+    // arr = [1, 4, 9, 16, 25, 36, 49, 64]
+    let sum = reduce_sum_arr(arr, 8);
+    assert_eq(sum, 204);  // 1+4+9+16+25+36+49+64      // assert 80
+
+    // H2: Read each through ref
+    let v0 = arr8_get(arr, 0); let v7 = arr8_get(arr, 7);
+    assert_eq(read_ref(&v0), 1);                       // assert 81
+    assert_eq(read_ref(&v7), 64);                      // assert 82
+    assert_eq(add_two_refs(&v0, &v7), 65);             // assert 83
+
+    // H3: Transform and verify
+    let doubled = map_double_arr(arr, 8);
+    assert_eq(arr8_get(doubled, 0), 2);                // assert 84
+    assert_eq(arr8_get(doubled, 7), 128);              // assert 85
+    assert_eq(reduce_sum_arr(doubled, 8), 408);        // assert 86
+
+    // H4: Counter pattern with refs
+    let mut counters = arr8_zeros();
+    let mut j = 0;
+    while j < 40 {
+        let bucket = j % 8;
+        counters = arr8_set(counters, bucket, arr8_get(counters, bucket) + 1);
+        j = j + 1;
+    }
+    // Each bucket gets 40/8 = 5 increments
+    assert_eq(arr8_get(counters, 0), 5);               // assert 87
+    assert_eq(arr8_get(counters, 7), 5);               // assert 88
+    assert_eq(reduce_sum_arr(counters, 8), 40);        // assert 89
+
+    // H5: Nested record via ref pattern
+    let deep = DeepNest {
+        content: Nested {
+            inner: Pair { fst: 100, snd: 200 },
+            tag: 42
+        },
+        priority: 1
+    };
+    let fst = deep.content.inner.fst;
+    let snd = deep.content.inner.snd;
+    let r_fst = &fst;
+    let r_snd = &snd;
+    assert_eq(*r_fst + *r_snd, 300);                  // assert 90
+    assert_eq(deep.content.tag, 42);                   // assert 91
+}
+
+// =============================================================================
+// Section I: Edge cases and boundary conditions
+// =============================================================================
+
+fn test_section_i_edge_cases() {
+    // I1: Zero values through refs
+    let mut z = 0;
+    let r = &z;
+    assert_eq(*r, 0);                                  // assert 92
+    add_ref(&mut z, 0);
+    assert_eq(z, 0);                                   // assert 93
+    mul_ref(&mut z, 1000);
+    assert_eq(z, 0);                                   // assert 94
+
+    // I2: Negative values
+    let mut neg = -100;
+    negate_ref(&mut neg);
+    assert_eq(neg, 100);                               // assert 95
+    negate_ref(&mut neg);
+    assert_eq(neg, -100);                              // assert 96
+
+    // I3: Large values
+    let mut big = 1;
+    let mut i = 0;
+    while i < 20 {
+        double_ref(&mut big);
+        i = i + 1;
+    }
+    assert_eq(big, 1048576);  // 2^20                   // assert 97
+
+    // I4: Swap back and forth
+    let mut x = 111;
+    let mut y = 222;
+    let mut j = 0;
+    while j < 100 {
+        swap_refs(&mut x, &mut y);
+        j = j + 1;
+    }
+    // 100 swaps (even) => back to original
+    assert_eq(x, 111);                                 // assert 98
+    assert_eq(y, 222);                                 // assert 99
+
+    // I5: Ref to function return value
+    let fac = factorial(6);
+    let r_fac = &fac;
+    assert_eq(*r_fac, 720);                            // assert 100
+
+    // I6: Conditional through ref
+    let cond_val = true;
+    let r_cond = &cond_val;
+    let out = if *r_cond { 1 } else { 0 };
+    assert_eq(out, 1);                                 // assert 101
+
+    // I7: Chain of single refs
+    let a1 = 10;
+    let r1 = &a1;
+    let val1 = *r1;
+    let r2 = &val1;
+    let val2 = *r2;
+    let r3 = &val2;
+    assert_eq(*r3, 10);                                // assert 102
+
+    // I8: Multiple operations between ref reads
+    let mut target = 1;
+    inc_ref(&mut target);    // 2
+    double_ref(&mut target); // 4
+    inc_ref(&mut target);    // 5
+    mul_ref(&mut target, 3); // 15
+    dec_ref(&mut target);    // 14
+    assert_eq(target, 14);                             // assert 103
+}
+
+// =============================================================================
+// Section J: Final validation — integration of all patterns
+// =============================================================================
+
+fn test_section_j_final() {
+    // J1: Fibonacci stored in array, summed, verified
+    let mut fibs = arr8_zeros();
+    let mut i = 0;
+    while i < 8 {
+        fibs = arr8_set(fibs, i, fibonacci(i));
+        i = i + 1;
+    }
+    // fib: 0,1,1,2,3,5,8,13
+    let fib_sum = reduce_sum_arr(fibs, 8);
+    assert_eq(fib_sum, 33);                            // assert 104
+
+    // J2: State machine building value stored via ref
+    let mut sm_val = 0;
+    // Build 42: ((1*2+1)*2)*2*2+1+1 ... simpler: just iterate
+    let mut k = 0;
+    while k < 42 {
+        inc_ref(&mut sm_val);
+        k = k + 1;
+    }
+    assert_eq(sm_val, 42);                             // assert 105
+
+    // J3: Records + refs + computation
+    let p = Pair { fst: 7, snd: 11 };
+    let dist_sq = p.fst * p.fst + p.snd * p.snd;
+    let r = &dist_sq;
+    assert_eq(*r, 170);  // 49 + 121                   // assert 106
+
+    // J4: Verify all basic ref functions work
+    let mut v = 10;
+    set_ref(&mut v, 5);
+    assert_eq(v, 5);                                   // assert 107
+    add_ref(&mut v, 3);
+    assert_eq(v, 8);                                   // assert 108
+    mul_ref(&mut v, 4);
+    assert_eq(v, 32);                                  // assert 109
+    inc_ref(&mut v);
+    assert_eq(v, 33);                                  // assert 110
+    dec_ref(&mut v);
+    assert_eq(v, 32);                                  // assert 111
+    double_ref(&mut v);
+    assert_eq(v, 64);                                  // assert 112
+    negate_ref(&mut v);
+    assert_eq(v, -64);                                 // assert 113
+
+    // J5: Cross-section verification
+    let fact = factorial(5);
+    let fib_val = fibonacci(7);
+    let sum_r = sum_range(1, 10);
+    assert_eq(fact, 120);                              // assert 114
+    assert_eq(fib_val, 13);                            // assert 115
+    assert_eq(sum_r, 55);                              // assert 116
+    assert_eq(fact + fib_val + sum_r, 188);            // assert 117
+}
+
+fn main() -> Int {
+    test_section_a_many_refs();
+    test_section_b_deep_records();
+    test_section_c_functional();
+    test_section_d_state_machine();
+    test_section_e_recursion();
+    test_section_f_data_flow();
+    test_section_g_loops();
+    test_section_h_mixed();
+    test_section_i_edge_cases();
+    test_section_j_final();
+    print("[OK] 375_interp_cbgr_ref_comprehensive2");
+    0
+}

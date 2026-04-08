@@ -1,0 +1,114 @@
+// @test: typecheck-fail
+// @expected-error: E100
+// @tier: 0
+// @level: L2
+// @tags: modules, coherence, overlap
+// @description: Overlapping trait implementations detection
+
+/// E0600: Overlapping implementations
+/// Two implementations overlap when a type could match both.
+
+type Display is protocol {
+    fn display(&self) -> Text;
+}
+
+/// Generic implementation for all T
+implement Display for T {
+    fn display(&self) -> Text {
+        format("{:?}", self)
+    }
+}
+
+/// Specific implementation for Text
+/// E0600: Overlaps with the generic implementation above
+implement Display for Text {
+    fn display(&self) -> Text {
+        self.clone()
+    }
+}
+
+// Error: conflicting implementations of trait `Display` for type `Text`:
+//   --> overlap_detection.vr:19:1
+//    |
+// 12 | impl Display for T {
+//    | ------------------ first implementation here
+// ...
+// 19 | impl Display for Text {
+//    | ^^^^^^^^^^^^^^^^^^^^^ conflicting implementation for `Text`
+
+/// Protocol with associated type
+type Container is protocol {
+    type Item;
+    fn get(&self, idx: Int) -> Maybe<Self.Item>;
+}
+
+/// Implementation for List<T>
+implement Container for List<T> {
+    type Item = T;
+    fn get(&self, idx: Int) -> Maybe<T> {
+        self.get(idx).cloned()
+    }
+}
+
+/// Another implementation for List<Int> specifically
+/// E0600: Overlaps - List<Int> matches both impls
+implement Container for List<Int> {
+    type Item = Int;
+    fn get(&self, idx: Int) -> Maybe<Int> {
+        self.get(idx).cloned()
+    }
+}
+
+/// Negative overlap - these don't overlap
+type Serialize is protocol {
+    fn serialize(&self) -> Bytes;
+}
+
+/// Only for types that implement Clone
+implement Serialize for T where T: Clone {
+    fn serialize(&self) -> Bytes {
+        // serialize cloneable types
+        Bytes.new()
+    }
+}
+
+/// Only for types that DON'T implement Clone (exclusive)
+implement Serialize for T where T: !Clone {
+    fn serialize(&self) -> Bytes {
+        // different serialization for non-cloneable
+        Bytes.new()
+    }
+}
+// These two impls are mutually exclusive and don't overlap
+
+/// Lattice overlap - needs specialization to resolve
+type Default is protocol {
+    fn default() -> Self;
+}
+
+implement Default for T where T: Clone + Zero {
+    fn default() -> T {
+        T.zero()
+    }
+}
+
+implement Default for T where T: Clone {
+    fn default() -> T {
+        // Needs specialization: which implement for T: Clone + Zero?
+        panic("no default")
+    }
+}
+
+// Without specialization, this is E0600
+// With specialization, more specific impl (Clone + Zero) wins
+
+type Bytes is List<u8>;
+implement Bytes { fn new() -> Self { List.new() } }
+
+type Zero is protocol {
+    fn zero() -> Self;
+}
+
+fn main() {
+    // This file should not compile
+}

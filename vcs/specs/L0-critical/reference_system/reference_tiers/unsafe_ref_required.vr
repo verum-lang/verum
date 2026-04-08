@@ -1,0 +1,25 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, reference-tiers, unsafe, negative-test
+// @description: Verifies that &unsafe references require explicit unsafe block (E312)
+
+/// Test that unsafe references require explicit unsafe block.
+/// Tier 2 (unsafe) references bypass all CBGR runtime safety checks.
+/// Programmer must explicitly opt into unsafety with an unsafe block.
+/// This is a COMPILE-TIME check - not a borrow checker, but a safety gate.
+/// Spec: 26-cbgr-implementation.md#unsafe-references
+///
+/// Note: E312 is a CBGR tier system error, not a borrow checker error.
+/// Verum has no compile-time borrow checker, but DOES require explicit
+/// opt-in for unsafe operations.
+
+fn main() {
+    let value = 42;
+
+    // Cannot create unsafe ref without unsafe block
+    // This is a compile-time safety gate, not borrow checking
+    let unsafe_ref: &unsafe Int = &unsafe value;  // ERROR: E312 requires unsafe block
+
+    print(*unsafe_ref);
+}

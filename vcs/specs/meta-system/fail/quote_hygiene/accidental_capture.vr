@@ -1,0 +1,52 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M402
+// @tags: meta, quote, hygiene, capture, violation, transparent
+// @description: Tests detection of accidental variable capture in @transparent macros
+
+// =============================================================================
+// ACCIDENTAL CAPTURE IN TRANSPARENT MACROS
+// =============================================================================
+//
+// When a meta function is marked @transparent, hygienic identifier renaming
+// is disabled. This allows intentional capture from the expansion site, but
+// it also means bare identifiers that aren't defined locally may accidentally
+// capture variables from the caller's scope.
+//
+// M402 is emitted for bare identifiers in @transparent macros that:
+// - Are not defined locally within the quote
+// - Are not built-in literals (true, false, null)
+// - Are not function calls
+// - Are not spliced with $var or lift()
+//
+
+// Transparent macro that accidentally uses a bare identifier
+@transparent
+meta fn capture_caller_x() -> TokenStream {
+    // In transparent mode, 'x' will capture from caller's scope
+    // This is dangerous and should trigger M402
+    quote {
+        x + 1  // ERROR: M402 - bare 'x' in transparent macro could capture caller's variable
+    }
+}
+
+// Contrast: proper way to intentionally capture using splice
+@transparent
+meta fn proper_capture(x_binding: Ident) -> TokenStream {
+    quote {
+        $x_binding + 1  // OK: explicitly spliced identifier
+    }
+}
+
+// Test function that has 'x' in scope
+fn test_capture() {
+    let x = 42;
+    // When this macro expands, 'x' would capture from this scope
+    // But M402 should catch this at compile time
+    let result = @capture_caller_x();
+}
+
+fn main() {
+    test_capture();
+}

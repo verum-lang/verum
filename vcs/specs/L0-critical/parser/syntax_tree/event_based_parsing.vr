@@ -1,0 +1,288 @@
+// @test: parser
+// @tier: 0
+// @level: L0
+// @tags: parser, events, lossless, markers, event-builder
+// @expect: pass
+// @description: Test event-based parser infrastructure including markers, precede pattern, and error handling
+// Note: This is a parse-only test - it exercises parser event emission, not type checking
+
+// ============================================================================
+// SECTION 1: Basic Event Emission
+// ============================================================================
+
+// Test that basic function parsing emits correct events
+// Expected events: Start(FN_DEF), Token(FN_KW), Token(IDENT), etc.
+fn basic_event_emission() { }
+
+// Test that let statements emit proper event sequences
+// Expected events: Start(LET_STMT), Token(LET_KW), Token(IDENT), Token(EQ), ...
+fn let_event_emission() {
+    let x = 1;
+}
+
+// Test multiple statements generate independent event sequences
+fn multi_statement_events() {
+    let a = 1;
+    let b = 2;
+    let c = a + b;
+}
+
+// ============================================================================
+// SECTION 2: Marker Complete/Abandon Pattern
+// ============================================================================
+
+// Test that markers are properly completed for function definitions
+fn marker_complete_fn() {
+    // Marker started at fn, completed with FN_DEF kind
+}
+
+// Test that markers are properly completed for blocks
+fn marker_complete_block() {
+    {
+        let inner = 1;
+    }
+}
+
+// Test nested marker completion (function > block > statement)
+fn nested_marker_complete() {
+    {
+        {
+            let deeply = 1;
+        }
+    }
+}
+
+// ============================================================================
+// SECTION 3: Precede Pattern for Binary Expressions
+// ============================================================================
+
+// Test precede pattern: 1 + 2
+// Parser first parses 1 as LITERAL_EXPR, then uses precede to wrap in BINARY_EXPR
+fn precede_simple_binary() {
+    let x = 1 + 2;
+}
+
+// Test chained binary expressions with left-associativity
+// 1 + 2 + 3 should use precede twice
+fn precede_chained_binary() {
+    let x = 1 + 2 + 3;
+}
+
+// Test mixed precedence requiring multiple precede calls
+// 1 + 2 * 3 should parse as 1 + (2 * 3)
+fn precede_mixed_precedence() {
+    let x = 1 + 2 * 3;
+    let y = 2 * 3 + 4;
+}
+
+// Test deeply nested expressions with many precede operations
+fn precede_deeply_nested() {
+    let x = 1 + 2 * 3 - 4 / 5 + 6 * 7;
+}
+
+// Test precede with parentheses (affects precedence grouping)
+fn precede_with_parens() {
+    let x = (1 + 2) * 3;
+    let y = 1 * (2 + 3);
+    let z = ((1 + 2) * (3 + 4));
+}
+
+// ============================================================================
+// SECTION 4: Precede Pattern for Postfix Expressions
+// ============================================================================
+
+// Test precede for field access: expr.field
+fn precede_field_access() {
+    let x = value.field;
+}
+
+// Test precede for method calls: expr.method()
+fn precede_method_call() {
+    let x = value.method();
+}
+
+// Test chained postfix operations
+fn precede_chained_postfix() {
+    let x = value.field.method().another;
+}
+
+// Test precede for index access: expr[index]
+fn precede_index_access() {
+    let x = list[0];
+    let y = matrix[i][j];
+}
+
+// Test precede for call expressions: expr(args)
+fn precede_call_expr() {
+    let x = func();
+    let y = func(1, 2, 3);
+}
+
+// ============================================================================
+// SECTION 5: Error Event Emission
+// ============================================================================
+
+// This section contains valid code that exercises error recovery paths
+// when parsing partially correct constructs
+
+// Test that error events are recorded with messages
+fn error_recovery_context() {
+    // Parser should emit Error events when encountering unexpected tokens
+    let valid = 1;
+}
+
+// Test error recovery preserves subsequent valid parsing
+fn error_followed_by_valid() {
+    let first = 1;
+    let second = 2;
+    let third = first + second;
+}
+
+// ============================================================================
+// SECTION 6: Event Reordering (forward_parent handling)
+// ============================================================================
+
+// Test that forward_parent links are resolved during event processing
+fn forward_parent_simple() {
+    let x = 1 + 2;  // LITERAL_EXPR gets wrapped by BINARY_EXPR via forward_parent
+}
+
+// Test multiple forward_parent links in nested expressions
+fn forward_parent_nested() {
+    let x = a.b + c.d;  // Multiple forward_parent resolutions
+}
+
+// Test forward_parent with prefix operators
+fn forward_parent_prefix() {
+    let x = -a + b;
+    let y = !a && b;
+}
+
+// ============================================================================
+// SECTION 7: Token Event Handling
+// ============================================================================
+
+// Test single-token events
+fn token_event_single() {
+    let identifier = 42;
+}
+
+// Test multi-token events (for composite tokens)
+fn token_event_multi() {
+    let range = 0..10;  // Range operator might be multi-token
+    let range_eq = 0..=10;  // Range inclusive
+}
+
+// Test token events for all literal types
+fn token_event_literals() {
+    let int_lit = 42;
+    let float_lit = 3.14;
+    let str_lit = "hello";
+    let char_lit = 'x';
+    let bool_lit = true;
+}
+
+// ============================================================================
+// SECTION 8: Tombstone Filtering
+// ============================================================================
+
+// Test that abandoned markers become tombstones and are filtered out
+fn tombstone_filtering() {
+    // Speculative parsing might start markers that are later abandoned
+    let x = 1;
+    let y = 2;
+}
+
+// Test that tombstones don't affect final event count
+fn tombstone_no_effect() {
+    let a = 1 + 2 + 3;  // Multiple potential tombstones from lookahead
+}
+
+// ============================================================================
+// SECTION 9: Event Builder API
+// ============================================================================
+
+// Test event builder capacity preallocation
+fn event_builder_capacity() {
+    // Large function to test capacity handling
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+    let h = 8;
+    let i = 9;
+    let j = 10;
+}
+
+// Test event builder len/is_empty during parsing
+fn event_builder_state() {
+    let x = 1;
+}
+
+// ============================================================================
+// SECTION 10: Complex Event Sequences
+// ============================================================================
+
+// Test complex match expression event sequence
+fn complex_match_events(x: Maybe<Int>) -> Int {
+    match x {
+        Some(n) => n * 2,
+        None => 0,
+    }
+}
+
+// Test if-else event sequence
+fn complex_if_events(x: Int) -> Int {
+    if x > 0 {
+        x
+    } else if x < 0 {
+        -x
+    } else {
+        0
+    }
+}
+
+// Test loop event sequences
+fn complex_loop_events() {
+    for i in 0..10 {
+        let doubled = i * 2;
+    }
+
+    while true {
+        break;
+    }
+
+    loop {
+        break;
+    }
+}
+
+// Test type definition event sequence
+type EventTestRecord is {
+    name: Text,
+    value: Int,
+    enabled: Bool,
+};
+
+// Test sum type event sequence
+type EventTestVariant is
+    | Empty
+    | Single(Int)
+    | Multiple { x: Int, y: Int };
+
+// Test protocol event sequence
+type EventTestProtocol is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// Test implementation block event sequence
+implement EventTestProtocol for EventTestRecord {
+    type Item is Int;
+    fn next(&mut self) -> Maybe<Int> {
+        None
+    }
+}

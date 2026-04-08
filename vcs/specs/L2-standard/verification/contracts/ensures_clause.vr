@@ -1,0 +1,132 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: contracts, ensures
+// @timeout: 5000
+
+/// Tests for ensures clauses in contracts
+/// Postconditions that must hold when a function returns
+
+@verify(proof)
+fn double(x: Int) -> Int {
+    contract#"
+        ensures result == x * 2;
+    ";
+    x * 2
+}
+
+@verify(proof)
+fn absolute(x: Int) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures result == x || result == -x;
+    ";
+    if x >= 0 { x } else { -x }
+}
+
+@verify(proof)
+fn clamp(value: Int, min: Int, max: Int) -> Int {
+    contract#"
+        requires min <= max;
+        ensures result >= min;
+        ensures result <= max;
+        ensures result == value || result == min || result == max;
+    ";
+    if value < min { min }
+    else if value > max { max }
+    else { value }
+}
+
+/// Ensures with multiple return paths
+@verify(proof)
+fn sign(x: Int) -> Int {
+    contract#"
+        ensures result == -1 || result == 0 || result == 1;
+        ensures x > 0 implies result == 1;
+        ensures x < 0 implies result == -1;
+        ensures x == 0 implies result == 0;
+    ";
+    if x > 0 { 1 }
+    else if x < 0 { -1 }
+    else { 0 }
+}
+
+/// Ensures relating input and output
+@verify(proof)
+fn increment(x: Int) -> Int {
+    contract#"
+        ensures result == x + 1;
+        ensures result > x;
+    ";
+    x + 1
+}
+
+/// Ensures with collections
+@verify(proof)
+fn append<T>(mut list: List<T>, item: T) -> List<T> {
+    contract#"
+        ensures result.len() == old(list).len() + 1;
+    ";
+    list.push(item);
+    list
+}
+
+/// Ensures preserving properties
+@verify(proof)
+fn sorted_insert(sorted_list: &List<Int>, value: Int) -> List<Int> {
+    contract#"
+        requires forall i: Int, j: Int. 0 <= i < j < sorted_list.len() implies sorted_list[i] <= sorted_list[j];
+        ensures result.len() == sorted_list.len() + 1;
+        ensures forall i: Int, j: Int. 0 <= i < j < result.len() implies result[i] <= result[j];
+        ensures exists i: Int. 0 <= i < result.len() && result[i] == value;
+    ";
+    let mut result = sorted_list.clone();
+    let mut pos = 0;
+    while pos < result.len() && result[pos] < value {
+        pos += 1;
+    }
+    result.insert(pos, value);
+    result
+}
+
+/// Ensures with conditional postconditions
+@verify(proof)
+fn find<T: Eq>(list: &List<T>, target: &T) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => idx >= 0 && idx < list.len() && list[idx] == *target,
+            None => forall i: Int. 0 <= i < list.len() implies list[i] != *target
+        };
+    ";
+    for i in 0..list.len() {
+        if list[i] == *target {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Ensures with arithmetic properties
+@verify(proof)
+fn sum_to_n(n: Int{>= 0}) -> Int {
+    contract#"
+        ensures result == n * (n + 1) / 2;
+        ensures result >= 0;
+    ";
+    let mut sum = 0;
+    for i in 1..=n {
+        sum += i;
+    }
+    sum
+}
+
+/// Ensures idempotency
+@verify(proof)
+fn normalize_path(path: Text) -> Text {
+    contract#"""
+        ensures normalize_path(result) == result;
+        ensures !result.contains("//");
+        ensures !result.ends_with("/") || result == "/";
+    """;
+    path.replace("//", "/").trim_end_matches("/").to_text()
+}

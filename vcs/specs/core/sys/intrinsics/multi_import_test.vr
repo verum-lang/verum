@@ -1,0 +1,27 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, minimal
+// @description: Test multiple float intrinsic imports
+
+module test.stdlib.sys.intrinsics.multi_import_test;
+
+mount core.intrinsics.{
+    sqrt_f64, abs_f64, floor_f64, ceil_f64, round_f64, trunc_f64,
+};
+
+fn main() {
+    let x: Float64 = 4.0;
+    let sqrt_result = sqrt_f64(x);
+    print(f"sqrt(4.0) = {sqrt_result}");
+
+    let y: Float64 = -5.0;
+    let abs_result = abs_f64(y);
+    print(f"abs(-5.0) = {abs_result}");
+
+    let z: Float64 = 3.7;
+    let floor_result = floor_f64(z);
+    print(f"floor(3.7) = {floor_result}");
+
+    print("All intrinsics work!");
+}

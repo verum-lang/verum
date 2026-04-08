@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, partial-move
+
+/// Test valid operations with partial moves (affine types only).
+/// In Verum, regular types are Copy, so partial moves only apply to affine fields.
+/// After partial move of an affine field, remaining non-affine fields are still accessible.
+/// Spec: 04-memory-model.md#affine-partial-move
+
+// Affine resource type
+type affine Resource is {
+    id: Int,
+};
+
+// Container with one affine field and regular fields
+type Container is {
+    resource: Resource,
+    name: Text,
+    count: Int,
+};
+
+fn main() {
+    test_partial_move_affine();
+    test_copy_fields_still_accessible();
+    test_reinitialize_affine_field();
+}
+
+/// Test that partial move works for affine fields
+fn test_partial_move_affine() {
+    let mut container = Container {
+        resource: Resource { id: 42 },
+        name: Text.from("my container"),
+        count: 100,
+    };
+
+    // Move out the affine field
+    let res = container.resource;
+
+    // Cannot access the moved affine field
+    // print(container.resource.id);  // Would panic
+
+    // But CAN access non-affine fields (they are Copy)
+    print(container.name);
+    assert(container.count == 100);
+}
+
+/// Test that non-affine fields remain accessible after affine field move
+fn test_copy_fields_still_accessible() {
+    type MixedContainer is {
+        handle: Resource,  // affine
+        value: Text,       // Copy
+        data: List<Int>,   // Copy
+    };
+
+    let container = MixedContainer {
+        handle: Resource { id: 1 },
+        value: Text.from("important"),
+        data: [1, 2, 3],
+    };
+
+    // Move out the affine field
+    let handle = container.handle;
+
+    // Non-affine fields are still accessible (Copy semantics)
+    assert(container.value == "important");
+    assert(container.data.len() == 3);
+
+    // Use the moved handle
+    assert(handle.id == 1);
+}
+
+/// Test that affine field can be reinitialized
+fn test_reinitialize_affine_field() {
+    let mut container = Container {
+        resource: Resource { id: 42 },
+        name: Text.from("container"),
+        count: 10,
+    };
+
+    // Move out affine field
+    let old_res = container.resource;
+
+    // Can reinitialize the moved affine field
+    container.resource = Resource { id: 99 };
+
+    // Now struct is whole again, can be used
+    assert(container.resource.id == 99);
+    assert(container.name == "container");
+    assert(container.count == 10);
+}

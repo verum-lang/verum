@@ -1,0 +1,142 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, if, else, conditional
+
+fn test_simple_if() {
+    // Simple if expression
+    if condition {
+        do_something();
+    }
+}
+
+fn test_if_else() {
+    // If-else expression
+    if condition {
+        a
+    } else {
+        b
+    }
+}
+
+fn test_if_else_with_blocks() {
+    // If-else with blocks
+    if condition {
+        let x = compute();
+        x * 2
+    } else {
+        default_value
+    }
+}
+
+fn test_if_else_as_expression() {
+    // If-else as expression (assigning result)
+    let result = if condition { a } else { b };
+    let value = if x > 0 { "positive" } else { "non-positive" };
+}
+
+fn test_chained_if_else_if() {
+    // Chained if-else-if
+    if condition1 {
+        action1()
+    } else if condition2 {
+        action2()
+    } else if condition3 {
+        action3()
+    } else {
+        default_action()
+    }
+}
+
+fn test_nested_if_else() {
+    // Nested if-else
+    if outer {
+        if inner {
+            both_true()
+        } else {
+            only_outer()
+        }
+    } else {
+        outer_false()
+    }
+}
+
+fn test_if_complex_condition() {
+    // If with complex condition
+    if a && b || c {
+        result
+    }
+}
+
+fn test_if_comparison() {
+    // If with comparison
+    if x > 10 && x < 100 {
+        in_range
+    }
+}
+
+fn test_if_function_call_condition() {
+    // If with function call condition
+    if is_valid(input) {
+        process(input)
+    }
+}
+
+fn test_if_method_call_condition() {
+    // If with method call condition
+    if obj.is_ready() {
+        obj.execute()
+    }
+}
+
+fn test_if_let_binding() {
+    // If with let binding (pattern matching)
+    if let Some(x) = maybe {
+        use_x(x)
+    }
+}
+
+fn test_if_let_with_else() {
+    // If let with else
+    if let Some(value) = option {
+        process(value)
+    } else {
+        handle_none()
+    }
+}
+
+fn test_if_let_chain() {
+    // If let chain
+    if let Some(a) = opt_a && let Some(b) = opt_b {
+        combine(a, b)
+    }
+}
+
+fn test_if_with_negation() {
+    // If with negation
+    if !condition {
+        when_false
+    }
+}
+
+fn test_if_in_expression_context() {
+    // If in expression context
+    let doubled = if positive { x * 2 } else { -x * 2 };
+    let selected = items[if forward { i } else { len - i - 1 }];
+}
+
+fn test_ternary_style_if() {
+    // Ternary-style if
+    let min = if a < b { a } else { b };
+    let max = if a > b { a } else { b };
+    let abs = if x < 0 { -x } else { x };
+}
+
+fn test_if_with_multiple_statements() {
+    // If with block containing multiple statements
+    if ready {
+        prepare();
+        execute();
+        cleanup();
+    }
+}

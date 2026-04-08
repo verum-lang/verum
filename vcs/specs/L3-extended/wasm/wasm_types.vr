@@ -1,0 +1,82 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, types, structs, variants, cross-compilation
+
+// @expected-exit: 0
+// @description: Record types, sum types, and newtypes under WASM
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Color is Red | Green | Blue;
+
+type Shape is
+    Circle(Int)
+    | Rectangle { width: Int, height: Int };
+
+type Meters is (Int);
+
+implement Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn manhattan_distance(&self, other: &Point) -> Int {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        let abs_dx = if dx < 0 { -dx } else { dx };
+        let abs_dy = if dy < 0 { -dy } else { dy };
+        abs_dx + abs_dy
+    }
+
+    fn translate(&self, dx: Int, dy: Int) -> Point {
+        Point { x: self.x + dx, y: self.y + dy }
+    }
+}
+
+fn area(shape: Shape) -> Int {
+    match shape {
+        Circle(r) => r * r * 3,
+        Rectangle { width, height } => width * height,
+    }
+}
+
+fn color_value(c: Color) -> Int {
+    match c {
+        Red => 1,
+        Green => 2,
+        Blue => 3,
+    }
+}
+
+fn main() -> Int {
+    // Record type
+    let p1 = Point.new(3, 4);
+    let p2 = Point.new(6, 8);
+    assert_eq(p1.x, 3);
+    assert_eq(p1.y, 4);
+    assert_eq(p1.manhattan_distance(&p2), 7);
+
+    let p3 = p1.translate(10, 20);
+    assert_eq(p3.x, 13);
+    assert_eq(p3.y, 24);
+
+    // Sum type (variant)
+    let c = Circle(5);
+    let r = Rectangle { width: 4, height: 7 };
+    assert_eq(area(c), 75);
+    assert_eq(area(r), 28);
+
+    // Enum-like variant
+    assert_eq(color_value(Red), 1);
+    assert_eq(color_value(Green), 2);
+    assert_eq(color_value(Blue), 3);
+
+    // Newtype
+    let distance = Meters(100);
+
+    0
+}

@@ -1,0 +1,234 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, protocols
+
+/// Test for generic protocols (protocols with type parameters).
+/// Generic protocols enable highly reusable abstractions.
+/// Note: Only zero-extra-arg protocol methods work in generic function context.
+
+// ============================================================================
+// Generic protocol definitions
+// ============================================================================
+
+// Protocol with no type params, just &self (zero-extra-arg)
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+type Measurable is protocol {
+    fn measure(&self) -> Float;
+};
+
+type Invertible is protocol {
+    fn invert(&self) -> Self;
+};
+
+type Identifiable is protocol {
+    fn id_text(&self) -> Text;
+};
+
+// ============================================================================
+// Generic implementations of protocols
+// ============================================================================
+
+type Container<T> is {
+    value: T,
+};
+
+implement<T> Container<T> {
+    fn new(value: T) -> Container<T> {
+        Container { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+
+    fn into_inner(self) -> T {
+        self.value
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> Container<U> {
+        Container { value: f(self.value) }
+    }
+}
+
+// Container<Int> implements Describable
+implement Describable for Container<Int> {
+    fn describe(&self) -> Text {
+        f"Container({self.value})"
+    }
+}
+
+// Container<Text> implements Describable
+implement Describable for Container<Text> {
+    fn describe(&self) -> Text {
+        f"Container(\"{self.value}\")"
+    }
+}
+
+// ============================================================================
+// Pair type implementing multiple protocols
+// ============================================================================
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+implement<A, B> Pair<A, B> {
+    fn new(first: A, second: B) -> Pair<A, B> {
+        Pair { first, second }
+    }
+
+    fn swap(self) -> Pair<B, A> {
+        Pair { first: self.second, second: self.first }
+    }
+}
+
+implement Describable for Pair<Int, Int> {
+    fn describe(&self) -> Text {
+        f"({self.first}, {self.second})"
+    }
+}
+
+implement Measurable for Pair<Int, Int> {
+    fn measure(&self) -> Float {
+        ((self.first * self.first + self.second * self.second) as Float).abs()
+    }
+}
+
+implement Describable for Pair<Text, Text> {
+    fn describe(&self) -> Text {
+        f"({self.first}, {self.second})"
+    }
+}
+
+// ============================================================================
+// Stack: generic type implementing Describable
+// ============================================================================
+
+type Stack<T> is {
+    items: List<T>,
+};
+
+implement<T> Stack<T> {
+    fn push(mut self, item: T) -> Stack<T> {
+        self.items.push(item);
+        self
+    }
+
+    fn size(&self) -> Int {
+        self.items.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.items.len() == 0
+    }
+}
+
+implement Describable for Stack<Int> {
+    fn describe(&self) -> Text {
+        let n = self.items.len();
+        f"Stack(size={n})"
+    }
+}
+
+// ============================================================================
+// Generic functions using protocol bounds (zero-extra-arg methods only)
+// ============================================================================
+
+fn display_item<T: Describable>(item: &T) -> Text {
+    item.describe()
+}
+
+fn is_larger<T: Measurable>(a: &T, b: &T) -> Bool {
+    a.measure() > b.measure()
+}
+
+fn collect_descriptions<T: Describable>(items: List<T>) -> List<Text> {
+    let mut result: List<Text> = [];
+    let mut i = 0;
+    while i < items.len() {
+        result.push(items[i].describe());
+        i += 1;
+    }
+    result
+}
+
+fn max_by_measure<T: Measurable + Clone>(a: T, b: T) -> T {
+    if a.measure() >= b.measure() { a } else { b }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Container<Int>
+    let ci = Container.new(42);
+    assert(*ci.get() == 42);
+    assert(display_item(&ci) == "Container(42)");
+
+    // Container<Text>
+    let ct = Container.new("hello");
+    assert(*ct.get() == "hello");
+    assert(display_item(&ct) == "Container(\"hello\")");
+
+    // Container.map
+    let c1 = Container.new(10);
+    let c2 = c1.map(|x: Int| x * 3);
+    assert(c2.into_inner() == 30);
+
+    // Pair<Int, Int> - use direct struct construction
+    let p1 = Pair { first: 3, second: 4 };
+    assert(p1.first == 3);
+    assert(p1.second == 4);
+    assert(display_item(&p1) == "(3, 4)");
+
+    let m1 = p1.measure();
+    assert(m1 == 25.0);  // 3^2 + 4^2 = 25
+
+    let p2 = Pair { first: 1, second: 1 };
+    let p3 = Pair { first: 3, second: 4 };
+    assert(is_larger(&p3, &p2));
+    assert(!is_larger(&p2, &p3));
+
+    // max_by_measure
+    let max_p = max_by_measure(p2, p3);
+    assert(max_p.first == 3 && max_p.second == 4);
+
+    // Pair<Text, Text>
+    let pt1 = Pair { first: "hello", second: "world" };
+    assert(display_item(&pt1) == "(hello, world)");
+
+    // Pair.swap
+    let p_mixed = Pair { first: 42, second: "answer" };
+    let swapped = p_mixed.swap();
+    assert(swapped.first == "answer");
+    assert(swapped.second == 42);
+
+    // Stack - use direct struct construction
+    let s0: Stack<Int> = Stack { items: [] };
+    assert(s0.is_empty());
+
+    let s1 = s0.push(1).push(2).push(3);
+    assert(s1.size() == 3);
+    assert(!s1.is_empty());
+    assert(display_item(&s1) == "Stack(size=3)");
+
+    // collect_descriptions
+    let pairs: List<Pair<Int, Int>> = [
+        Pair { first: 0, second: 0 },
+        Pair { first: 1, second: 2 },
+        Pair { first: 3, second: 4 },
+    ];
+    let descs = collect_descriptions(pairs);
+    assert(descs[0] == "(0, 0)");
+    assert(descs[1] == "(1, 2)");
+    assert(descs[2] == "(3, 4)");
+    assert(descs.len() == 3);
+
+    print("Generic protocol tests passed!");
+}

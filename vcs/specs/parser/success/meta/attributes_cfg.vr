@@ -1,0 +1,381 @@
+// @test: parse-pass
+// @tier: 0
+// @category: meta
+// @level: L0
+// @tags: parser, meta, attributes, cfg, conditional
+// @description: Test @cfg conditional compilation attributes - grammar: compile_time_condition
+
+// ============================================================================
+// BASIC @cfg ATTRIBUTES
+// Grammar: config_condition = 'cfg' '.' identifier
+// ============================================================================
+
+@cfg(debug)
+fn debug_only() {
+    print("Debug mode");
+}
+
+@cfg(release)
+fn release_only() {
+    // Optimized path
+}
+
+@cfg(test)
+fn test_only() {
+    assert(true);
+}
+
+@cfg(feature = "async")
+fn async_feature() {}
+
+@cfg(feature = "serde")
+fn serde_feature() {}
+
+// ============================================================================
+// @cfg WITH NAMED ARGUMENTS
+// ============================================================================
+
+@cfg(target_os = "linux")
+fn linux_specific() {}
+
+@cfg(target_os = "windows")
+fn windows_specific() {}
+
+@cfg(target_os = "macos")
+fn macos_specific() {}
+
+@cfg(target_arch = "x86_64")
+fn x64_specific() {}
+
+@cfg(target_arch = "aarch64")
+fn arm64_specific() {}
+
+@cfg(target_family = "unix")
+fn unix_family() {}
+
+@cfg(target_family = "windows")
+fn windows_family() {}
+
+@cfg(target_env = "gnu")
+fn gnu_env() {}
+
+@cfg(target_env = "musl")
+fn musl_env() {}
+
+// ============================================================================
+// BOOLEAN COMBINATORS: all, any, not
+// ============================================================================
+
+// all - all conditions must be true
+@cfg(all(debug, feature = "logging"))
+fn debug_with_logging() {}
+
+@cfg(all(target_os = "linux", target_arch = "x86_64"))
+fn linux_x64() {}
+
+@cfg(all(feature = "async", feature = "tokio"))
+fn async_tokio() {}
+
+@cfg(all(test, feature = "mock"))
+fn test_with_mocks() {}
+
+// any - at least one condition must be true
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn unix_like() {}
+
+@cfg(any(debug, test))
+fn debug_or_test() {}
+
+@cfg(any(feature = "serde", feature = "json"))
+fn serialization_available() {}
+
+// not - condition must be false
+@cfg(not(debug))
+fn not_debug() {}
+
+@cfg(not(test))
+fn not_test() {}
+
+@cfg(not(feature = "deprecated"))
+fn without_deprecated() {}
+
+// ============================================================================
+// NESTED BOOLEAN COMBINATORS
+// ============================================================================
+
+@cfg(all(any(target_os = "linux", target_os = "macos"), not(test)))
+fn production_unix() {}
+
+@cfg(any(all(debug, feature = "verbose"), feature = "trace"))
+fn verbose_or_trace() {}
+
+@cfg(not(any(target_os = "windows", target_arch = "wasm32")))
+fn not_windows_or_wasm() {}
+
+@cfg(all(not(debug), not(test), feature = "production"))
+fn strict_production() {}
+
+@cfg(any(all(target_os = "linux", feature = "epoll"),
+         all(target_os = "macos", feature = "kqueue"),
+         all(target_os = "windows", feature = "iocp")))
+fn platform_specific_io() {}
+
+// ============================================================================
+// @cfg ON DIFFERENT ITEM TYPES
+// ============================================================================
+
+// On types
+@cfg(feature = "extended")
+type ExtendedFeature is { extra_data: Text };
+
+@cfg(target_os = "linux")
+type LinuxHandle is { fd: i32 };
+
+@cfg(target_os = "windows")
+type WindowsHandle is { handle: usize };
+
+// On sum types
+@cfg(feature = "errors")
+type ExtendedError is
+    | IoError(Text)
+    | NetworkError(Text)
+    | @cfg(feature = "database") DatabaseError(Text);
+
+// On constants
+@cfg(debug)
+const DEBUG_LEVEL: Int = 3;
+
+@cfg(release)
+const DEBUG_LEVEL: Int = 0;
+
+@cfg(target_pointer_width = "64")
+const POINTER_SIZE: Int = 8;
+
+@cfg(target_pointer_width = "32")
+const POINTER_SIZE: Int = 4;
+
+// On statics
+@cfg(feature = "metrics")
+static METRIC_COUNTER: AtomicInt = AtomicInt.new(0);
+
+// On modules
+@cfg(feature = "extra_modules")
+module extras;
+
+@cfg(test)
+module tests;
+
+@cfg(target_os = "linux")
+module linux_impl;
+
+// ============================================================================
+// @cfg ON PROTOCOL ITEMS
+// ============================================================================
+
+type PlatformApi is protocol {
+    fn common_method(&self);
+
+    @cfg(target_os = "linux")
+    fn linux_method(&self);
+
+    @cfg(target_os = "windows")
+    fn windows_method(&self);
+
+    @cfg(feature = "advanced")
+    fn advanced_method(&self);
+};
+
+// ============================================================================
+// @cfg ON IMPLEMENT BLOCKS
+// ============================================================================
+
+@cfg(target_os = "linux")
+implement PlatformApi for LinuxImpl {
+    fn common_method(&self) {}
+    fn linux_method(&self) {}
+}
+
+@cfg(target_os = "windows")
+implement PlatformApi for WindowsImpl {
+    fn common_method(&self) {}
+    fn windows_method(&self) {}
+}
+
+@cfg(feature = "serde")
+implement Serialize for MyType {
+    fn serialize(&self) -> Text {
+        // Serialization logic
+        ""
+    }
+}
+
+// ============================================================================
+// @cfg ON FIELDS
+// ============================================================================
+
+type ConfigurableStruct is {
+    base_field: Int,
+
+    @cfg(feature = "extended")
+    extended_field: Text,
+
+    @cfg(debug)
+    debug_info: DebugData,
+
+    @cfg(target_os = "linux")
+    linux_specific: i32,
+
+    @cfg(target_os = "windows")
+    windows_specific: usize
+};
+
+// ============================================================================
+// @cfg ON VARIANTS
+// ============================================================================
+
+type Event is
+    | Click { x: Int, y: Int }
+    | @cfg(feature = "keyboard") KeyPress { key: Text }
+    | @cfg(feature = "touch") Touch { x: Int, y: Int, pressure: Float }
+    | @cfg(feature = "gamepad") GamepadButton { button: Int };
+
+// ============================================================================
+// @cfg ON FUNCTION PARAMETERS (conditional parameters)
+// ============================================================================
+
+fn configurable_function(
+    required: Int,
+    @cfg(debug) debug_callback: fn() -> (),
+    @cfg(feature = "metrics") metrics: &mut MetricsCollector
+) {}
+
+// ============================================================================
+// @cfg ON MATCH ARMS
+// ============================================================================
+
+fn platform_path(path: &Text) -> Text {
+    match get_platform() {
+        @cfg(target_os = "linux") Platform.Linux => path.replace("\\", "/"),
+        @cfg(target_os = "windows") Platform.Windows => path.replace("/", "\\"),
+        @cfg(target_os = "macos") Platform.MacOS => path.replace("\\", "/"),
+        _ => path.clone()
+    }
+}
+
+// ============================================================================
+// @cfg WITH COMPILE-TIME CONDITIONS
+// Grammar: compile_time_condition (multiple forms)
+// ============================================================================
+
+// config_condition
+@cfg(cfg.debug_assertions)
+fn with_debug_assertions() {}
+
+// const_condition (identifier referencing const)
+@cfg(ENABLE_FEATURE)
+fn enabled_by_const() {}
+
+// platform_condition
+@cfg(platform.is_unix)
+fn platform_is_unix() {}
+
+@cfg(platform.is_windows)
+fn platform_is_windows() {}
+
+// ============================================================================
+// @cfg COMBINED WITH OTHER ATTRIBUTES
+// ============================================================================
+
+@cfg(feature = "async")
+@derive(Clone, Debug)
+type AsyncHandle is { id: Int };
+
+@cfg(debug)
+@inline(never)
+fn debug_never_inline() {}
+
+@cfg(test)
+@must_use
+fn test_must_use() -> Result<(), Error> {
+    Ok(())
+}
+
+@cfg(feature = "verify")
+@verify(formal)
+fn cfg_verified(x: Int) -> Int
+    requires x > 0
+{
+    x
+}
+
+@cfg(target_os = "linux")
+@repr(C)
+type LinuxCStruct is { fd: i32 };
+
+// ============================================================================
+// @const COMPILE-TIME EVALUATION
+// Grammar: meta_function with 'const'
+// ============================================================================
+
+@const
+fn compile_time_constant() -> Int {
+    42
+}
+
+@const
+fn computed_at_compile_time(n: Int) -> Int {
+    n * n
+}
+
+@const
+fn const_factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * const_factorial(n - 1) }
+}
+
+// Use @const in expressions
+const COMPUTED: Int = @const { 10 * 10 };
+const TABLE_SIZE: Int = @const { 1 << 10 };
+
+fn uses_const_eval() {
+    let size = @const { Int.size * 8 };
+    let aligned = @const { (size + 15) / 16 * 16 };
+}
+
+// ============================================================================
+// CONDITIONAL COMPILATION GUARDS
+// ============================================================================
+
+@cfg(all(feature = "unstable", not(release)))
+type UnstableApi is protocol {
+    @cfg(feature = "experimental")
+    fn experimental_method(&self);
+};
+
+// Feature flags with version requirements
+@cfg(all(feature = "v2", version >= "2.0"))
+fn v2_api() {}
+
+// Complex multi-platform support
+@cfg(any(
+    all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_arch = "x86_64")
+))
+fn supported_platforms() {}
+
+// ============================================================================
+// @cfg_attr - Conditional attributes
+// ============================================================================
+
+@cfg_attr(debug, derive(Debug))
+type ConditionalDebug is { value: Int };
+
+@cfg_attr(feature = "serde", derive(Serialize, Deserialize))
+type ConditionalSerde is { data: Text };
+
+@cfg_attr(release, inline(always))
+@cfg_attr(debug, inline(never))
+fn conditional_inline() {}
+
+@cfg_attr(test, must_use)
+fn conditional_must_use() -> Int { 42 }

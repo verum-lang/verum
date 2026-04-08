@@ -1,0 +1,359 @@
+// CBGR (Checked Borrow with Generational References) patterns
+// Tests all three reference tiers and memory safety patterns
+
+use verum_core.base.{List, Text, Maybe}
+use verum_std.memory.{Heap, Arena, Pool}
+use verum_std.cbgr.{Managed, Checked, ThinRef, FatRef}
+
+fn main() {
+    test_tier0_managed();
+    test_tier1_checked();
+    test_tier2_unsafe();
+    test_tier_conversions();
+    test_reference_patterns();
+    test_lifetime_patterns();
+    test_memory_allocation();
+}
+
+// Tier 0: Managed references (~15ns overhead, full CBGR protection)
+fn test_tier0_managed() {
+    // Basic managed reference
+    let value = 42;
+    let r: &Int = &value;
+    assert *r == 42;
+
+    // Mutable managed reference
+    let mut mutable = 10;
+    let mr: &mut Int = &mut mutable;
+    *mr = 20;
+    assert mutable == 20;
+
+    // Reference to heap-allocated
+    let boxed = Heap(100);
+    let br: &Int = &*boxed;
+    assert *br == 100;
+
+    // Reference chain
+    let a = 1;
+    let b = &a;
+    let c: &&Int = &b;
+    assert **c == 1;
+
+    // Reference in struct
+    type Container<'a> is {
+        data: &'a Int,
+    };
+
+    let val = 42;
+    let container = Container { data: &val };
+    assert *container.data == 42;
+
+    // Reference to collection element
+    let list = [1, 2, 3, 4, 5];
+    let elem: &Int = &list[2];
+    assert *elem == 3;
+
+    // Fat reference (slice)
+    let slice: &[Int] = &list[1..4];
+    assert len(slice) == 3;
+
+    // Generation validation example
+    fn validate_reference() {
+        let mut heap = Heap();
+        let ptr1 = heap.alloc(42);
+        let r1: &Int = &*ptr1;
+
+        // Use reference
+        assert *r1 == 42;
+
+        // Deallocate
+        drop(ptr1);
+
+        // Reference is now invalid - CBGR would catch this at runtime
+        // let _ = *r1; // PANIC: generation mismatch
+    }
+}
+
+// Tier 1: Checked references (0ns overhead, compiler-proven safe)
+fn test_tier1_checked() {
+    // Compiler can prove this reference is always valid
+    let value = 42;
+    let r: &checked Int = &value;
+    assert *r == 42;
+
+    // Checked reference from local scope
+    fn local_scope() -> Int {
+        let x = 10;
+        let r: &checked Int = &x;  // Compiler knows x outlives r
+        *r * 2
+    }
+
+    // Checked reference with clear lifetime
+    type LocalRef<'a> is {
+        data: &'a checked Int,
+    };
+
+    fn use_local_ref() {
+        let x = 42;
+        let lr = LocalRef { data: &x };
+        assert *lr.data == 42;
+    }
+
+    // Promotion from Tier 0 to Tier 1
+    fn promote_to_checked(r: &Int) -> &checked Int
+        where compiler_can_prove_safety(r)
+    {
+        r.to_checked()
+    }
+
+    // Checked references in simple patterns
+    fn simple_access(list: &checked List<Int>, idx: Int) -> Int
+        where 0 <= idx && idx < len(list)
+    {
+        list[idx]  // Compiler proves this is safe
+    }
+}
+
+// Tier 2: Unsafe references (0ns overhead, manual safety proof)
+fn test_tier2_unsafe() {
+    // Unsafe reference requires SAFETY comment
+    let value = 42;
+    // SAFETY: value is on the stack and this reference doesn't escape
+    let r: &unsafe Int = unsafe { &value };
+    assert *r == 42;
+
+    // Unsafe for FFI
+    fn ffi_example() {
+        extern "C" {
+            fn external_function(ptr: *const Int) -> Int;
+        }
+
+        let data = 42;
+        // SAFETY: external_function only reads the value, doesn't store the pointer
+        let result = unsafe {
+            external_function(&data as *const Int)
+        };
+    }
+
+    // Unsafe for self-referential structures
+    type SelfRef is {
+        value: Int,
+        // SAFETY: ptr always points to value in the same struct
+        ptr: &unsafe Int,
+    };
+
+    // Unsafe for interior mutability patterns
+    type UnsafeCell<T> is {
+        // SAFETY: single-threaded access only
+        value: &unsafe mut T,
+    };
+
+    // Transmuting references
+    fn transmute_ref() {
+        let bytes: [Byte; 4] = [0, 0, 0, 42];
+        // SAFETY: bytes is properly aligned and sized for Int
+        let int_ref: &unsafe Int = unsafe {
+            transmute(&bytes)
+        };
+    }
+}
+
+// Tier conversions
+fn test_tier_conversions() {
+    let value = 42;
+
+    // Tier 0 (default)
+    let managed: &Int = &value;
+
+    // Tier 0 -> Tier 1 (when provably safe)
+    let checked: &checked Int = managed.to_checked();
+
+    // Tier 1 -> Tier 0 (always valid)
+    let back_to_managed: &Int = checked.to_managed();
+
+    // Tier 0 -> Tier 2 (explicit unsafe)
+    // SAFETY: we know the reference is valid
+    let unsafe_ref: &unsafe Int = unsafe { managed.to_unsafe() };
+
+    // Tier 2 -> Tier 0 (wraps with CBGR protection)
+    // SAFETY: the underlying reference is still valid
+    let rewrapped: &Int = unsafe { unsafe_ref.to_managed() };
+
+    // Function accepting any tier
+    fn accepts_any_tier<'a, T: RefTier>(r: &'a T Int) -> Int {
+        *r
+    }
+
+    // Implicit coercion (higher tier to lower)
+    fn takes_managed(r: &Int) -> Int { *r }
+
+    let checked: &checked Int = &value;
+    let result = takes_managed(checked);  // Tier 1 coerces to Tier 0
+}
+
+// Reference patterns
+fn test_reference_patterns() {
+    // Reborrowing
+    fn reborrow() {
+        let mut value = 42;
+        let r1: &mut Int = &mut value;
+        let r2: &Int = &*r1;  // Reborrow as immutable
+        assert *r2 == 42;
+        // r1 is "frozen" while r2 exists
+        // *r1 = 100; // Error: r1 is borrowed
+    }
+
+    // Multiple immutable borrows
+    fn multiple_immutable() {
+        let value = 42;
+        let r1: &Int = &value;
+        let r2: &Int = &value;
+        let r3: &Int = &value;
+        assert *r1 == *r2 && *r2 == *r3;
+    }
+
+    // Exclusive mutable borrow
+    fn exclusive_mutable() {
+        let mut value = 42;
+        let r: &mut Int = &mut value;
+        // let r2: &Int = &value; // Error: already mutably borrowed
+        *r = 100;
+        assert value == 100;
+    }
+
+    // Split borrows
+    fn split_borrow() {
+        type Pair is {
+            a: Int,
+            b: Int,
+        };
+
+        let mut pair = Pair { a: 1, b: 2 };
+        let ra: &mut Int = &mut pair.a;
+        let rb: &mut Int = &mut pair.b;  // OK: disjoint fields
+        *ra = 10;
+        *rb = 20;
+    }
+
+    // Temporary lifetime extension
+    fn lifetime_extension() {
+        let r: &Int = &(1 + 2);  // Temporary extended to match r's lifetime
+        assert *r == 3;
+    }
+
+    // Pattern matching with references
+    fn pattern_refs() {
+        let maybe: Maybe<Int> = Some(42);
+        if let Some(ref value) = maybe {
+            assert *value == 42;
+        }
+
+        let list = [1, 2, 3];
+        for ref item in list {
+            let _: &Int = item;
+        }
+    }
+}
+
+// Lifetime patterns
+fn test_lifetime_patterns() {
+    // Explicit lifetime annotation
+    fn longest<'a>(a: &'a Text, b: &'a Text) -> &'a Text {
+        if len(a) > len(b) { a } else { b }
+    }
+
+    let s1 = "hello";
+    let s2 = "world!";
+    let result = longest(s1, s2);
+
+    // Multiple lifetimes
+    fn multi_lifetime<'a, 'b>(a: &'a Int, b: &'b Int) -> (&'a Int, &'b Int) {
+        (a, b)
+    }
+
+    // Lifetime bounds
+    fn bounded<'a, 'b: 'a>(long: &'b Int, short: &'a Int) -> &'a Int {
+        // 'b outlives 'a, so we can return either
+        long
+    }
+
+    // Struct with lifetime
+    type RefHolder<'a> is {
+        reference: &'a Int,
+    };
+
+    implement<'a> RefHolder<'a> {
+        fn new(r: &'a Int) -> Self {
+            RefHolder { reference: r }
+        }
+
+        fn get(&self) -> &'a Int {
+            self.reference
+        }
+    }
+
+    // Static lifetime
+    fn static_ref() -> &'static Text {
+        "I live forever"
+    }
+
+    // Lifetime elision
+    fn elided(s: &Text) -> &Text {
+        s  // Input lifetime = output lifetime
+    }
+}
+
+// Memory allocation patterns
+fn test_memory_allocation() {
+    // Stack allocation (default)
+    let stack_val = 42;
+    let stack_ref: &Int = &stack_val;
+
+    // Heap allocation
+    let heap_val = Heap(42);
+    let heap_ref: &Int = &*heap_val;
+
+    // Arena allocation
+    let arena = Arena.new(1024);  // 1KB arena
+    let arena_val = arena.alloc(42);
+    let arena_ref: &Int = &*arena_val;
+
+    // Arena batch allocation
+    let mut items = [];
+    for i in 0..100 {
+        items.push(arena.alloc(i));
+    }
+    // All items freed when arena is dropped
+
+    // Pool allocation
+    let pool = Pool<Node.new(100);  // Pool of 100 Nodes
+    let node = pool.alloc(Node { value: 42, next: None });
+
+    // Reference counting (Rc)
+    let shared = Rc.new(42);
+    let r1 = shared.clone();
+    let r2 = shared.clone();
+    assert *r1 == *r2;
+
+    // Atomic reference counting (Arc)
+    let atomic = Arc.new(42);
+    let t1 = atomic.clone();
+    spawn(move || {
+        assert *t1 == 42;
+    });
+
+    // ThinRef (16 bytes: ptr + generation + epoch_caps)
+    let thin: ThinRef<Int> = ThinRef.new(&stack_val);
+    assert thin.get() == 42;
+
+    // FatRef (24 bytes: ptr + generation + epoch_caps + len)
+    let list = [1, 2, 3, 4, 5];
+    let fat: FatRef<[Int]> = FatRef.new(&list[..]);
+    assert fat.len() == 5;
+}
+
+// Helper structures
+type Node is {
+    value: Int,
+    next: Maybe<Heap<Node>>,
+};

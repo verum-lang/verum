@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, indexed-types, state-machine, phantom-types
+// @timeout: 5000
+
+/// Typed state machines with phantom types
+
+/// Connection states
+type Idle is ();
+type Active is ();
+type Done is ();
+
+/// Typed connection
+type TypedConn<S> is {
+    id: Int,
+    state: S,
+};
+
+/// Create idle connection
+fn new_conn() -> TypedConn<Idle> {
+    TypedConn { id: 1, state: () }
+}
+
+/// Activate connection (Idle -> Active)
+fn activate(c: TypedConn<Idle>) -> TypedConn<Active> {
+    TypedConn { id: c.id, state: () }
+}
+
+/// Process data (only on Active)
+fn process(c: &TypedConn<Active>, data: List<Int>) -> Int {
+    data.len()
+}
+
+/// Finish connection (Active -> Done)
+fn finish(c: TypedConn<Active>) -> TypedConn<Done> {
+    TypedConn { id: c.id, state: () }
+}
+
+/// Resource lifecycle
+type Unacquired is ();
+type Acquired is ();
+type Released is ();
+
+type Resource<S> is {
+    name: Text,
+    state: S,
+};
+
+fn acquire(name: Text) -> Resource<Acquired> {
+    Resource { name, state: () }
+}
+
+fn use_resource(r: &Resource<Acquired>) -> Text {
+    r.name
+}
+
+fn release(r: Resource<Acquired>) -> Resource<Released> {
+    Resource { name: r.name, state: () }
+}
+
+/// Protocol state machine
+type Initial is ();
+type Handshake is ();
+type Ready is ();
+type Closed is ();
+
+type Protocol<S> is {
+    version: Int,
+    state: S,
+};
+
+fn proto_new() -> Protocol<Initial> {
+    Protocol { version: 1, state: () }
+}
+
+fn proto_handshake(p: Protocol<Initial>) -> Protocol<Handshake> {
+    Protocol { version: p.version, state: () }
+}
+
+fn proto_ready(p: Protocol<Handshake>) -> Protocol<Ready> {
+    Protocol { version: p.version, state: () }
+}
+
+fn proto_send(p: &Protocol<Ready>, msg: Text) -> Bool {
+    true
+}
+
+fn proto_close(p: Protocol<Ready>) -> Protocol<Closed> {
+    Protocol { version: p.version, state: () }
+}
+
+fn main() {
+    // Connection lifecycle
+    let conn = new_conn();
+    let active = activate(conn);
+    let processed = process(&active, [1, 2, 3]);
+    assert(processed == 3);
+    let done = finish(active);
+
+    // Resource lifecycle
+    let res = acquire("database");
+    let name = use_resource(&res);
+    assert(name == "database");
+    let released = release(res);
+
+    // Protocol lifecycle
+    let p = proto_new();
+    let p = proto_handshake(p);
+    let p = proto_ready(p);
+    let _ = proto_send(&p, "hello");
+    let p = proto_close(p);
+}

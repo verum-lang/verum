@@ -1,0 +1,93 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, fn, function
+
+// Simplest function - empty body
+fn simple() { }
+
+// Function with single statement
+fn greet() {
+    print("Hello");
+}
+
+// Function with multiple statements
+fn multi_statement() {
+    let x = 1;
+    let y = 2;
+    print(x + y);
+}
+
+// Function with expression body (implicit return)
+fn answer() {
+    42
+}
+
+// Function with explicit return
+fn explicit_return() {
+    return 42;
+}
+
+// Multiple simple functions
+fn first() { }
+fn second() { }
+fn third() { }
+
+// Function with block containing only expression
+fn expression_only() {
+    compute()
+}
+
+// Function with nested blocks
+fn nested_blocks() {
+    {
+        let x = 1;
+        {
+            let y = 2;
+        }
+    }
+}
+
+// Function with trailing expression (implicit return)
+fn trailing_expr() {
+    let a = 1;
+    let b = 2;
+    a + b
+}
+
+// Function with single expression
+fn single_expr() { 42 }
+
+// Function with empty block
+fn empty_function() {}
+
+// Function with only comments
+fn only_comments() {
+    // This is a comment
+    // Another comment
+}
+
+// Function with semicolon-terminated expression
+fn stmt_expr() {
+    compute();
+    process();
+}
+
+// Function with mixed statements and expressions
+fn mixed() {
+    let x = 1;
+    println(x);
+    let y = 2;
+    x + y
+}
+
+// Function names with underscores
+fn _private_function() { }
+fn __double_underscore() { }
+fn function_with_long_name() { }
+
+// Function with doc comment (if supported)
+/// This function does something.
+/// @param None
+/// @returns Nothing
+fn documented() { }

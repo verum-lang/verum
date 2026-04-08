@@ -1,0 +1,905 @@
+// =============================================================================
+// addr_test.vr - Tests for network address types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: net, address, ipv4, ipv6, socket, core
+// @description: Comprehensive tests for IP addresses, socket addresses, and parsing
+//
+// KNOWN ISSUES with VBC interpreter:
+// 1. Methods using `match *self` on sum types return wrong variants.
+//    Affected: IpAddr.is_ipv4(), is_ipv6(), SocketAddr.port(), etc.
+// 2. Methods called on values extracted from pattern matching access wrong self data.
+//    Example: `match ip_addr { V6(ipv6) => ipv6.is_loopback() }` fails even though
+//    direct `Ipv6Addr.localhost().is_loopback()` works.
+// Tests affected by these bugs are commented out.
+// =============================================================================
+
+mount core.net.{
+    Ipv4Addr, Ipv6Addr, IpAddr, V4, V6,
+    SocketAddrV4, SocketAddrV6, SocketAddr,
+};
+mount core.net.addr.{AddrParseError, InvalidFormat, InvalidOctet, InvalidPort};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Ipv4Addr Construction
+// =============================================================================
+
+@test
+fn test_ipv4_new() {
+    let addr: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let octets: (Byte, Byte, Byte, Byte) = addr.octets();
+    assert_eq(octets.0, 192 as Byte);
+    assert_eq(octets.1, 168 as Byte);
+    assert_eq(octets.2, 1 as Byte);
+    assert_eq(octets.3, 1 as Byte);
+}
+
+@test
+fn test_ipv4_localhost() {
+    let addr: Ipv4Addr = Ipv4Addr.localhost();
+    let octets: (Byte, Byte, Byte, Byte) = addr.octets();
+    assert_eq(octets.0, 127 as Byte);
+    assert_eq(octets.1, 0 as Byte);
+    assert_eq(octets.2, 0 as Byte);
+    assert_eq(octets.3, 1 as Byte);
+}
+
+@test
+fn test_ipv4_unspecified() {
+    let addr: Ipv4Addr = Ipv4Addr.unspecified();
+    let octets: (Byte, Byte, Byte, Byte) = addr.octets();
+    assert_eq(octets.0, 0 as Byte);
+    assert_eq(octets.1, 0 as Byte);
+    assert_eq(octets.2, 0 as Byte);
+    assert_eq(octets.3, 0 as Byte);
+}
+
+@test
+fn test_ipv4_broadcast() {
+    let addr: Ipv4Addr = Ipv4Addr.broadcast();
+    let octets: (Byte, Byte, Byte, Byte) = addr.octets();
+    assert_eq(octets.0, 255 as Byte);
+    assert_eq(octets.1, 255 as Byte);
+    assert_eq(octets.2, 255 as Byte);
+    assert_eq(octets.3, 255 as Byte);
+}
+
+// =============================================================================
+// Section 2: Ipv4Addr Properties
+// =============================================================================
+
+@test
+fn test_ipv4_is_loopback() {
+    let localhost: Ipv4Addr = Ipv4Addr.localhost();
+    assert(localhost.is_loopback());
+
+    let loopback_127_0_0_2: Ipv4Addr = Ipv4Addr.new(127, 0, 0, 2);
+    assert(loopback_127_0_0_2.is_loopback());
+
+    let regular: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    assert(!regular.is_loopback());
+}
+
+@test
+fn test_ipv4_is_unspecified() {
+    let unspecified: Ipv4Addr = Ipv4Addr.unspecified();
+    assert(unspecified.is_unspecified());
+
+    let specified: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    assert(!specified.is_unspecified());
+}
+
+@test
+fn test_ipv4_is_private_10_range() {
+    // 10.0.0.0/8
+    let addr: Ipv4Addr = Ipv4Addr.new(10, 0, 0, 1);
+    assert(addr.is_private());
+
+    let addr2: Ipv4Addr = Ipv4Addr.new(10, 255, 255, 255);
+    assert(addr2.is_private());
+}
+
+@test
+fn test_ipv4_is_private_172_range() {
+    // 172.16.0.0/12
+    let addr: Ipv4Addr = Ipv4Addr.new(172, 16, 0, 1);
+    assert(addr.is_private());
+
+    let addr2: Ipv4Addr = Ipv4Addr.new(172, 31, 255, 255);
+    assert(addr2.is_private());
+
+    // 172.15.x.x is NOT private
+    let addr3: Ipv4Addr = Ipv4Addr.new(172, 15, 0, 1);
+    assert(!addr3.is_private());
+
+    // 172.32.x.x is NOT private
+    let addr4: Ipv4Addr = Ipv4Addr.new(172, 32, 0, 1);
+    assert(!addr4.is_private());
+}
+
+@test
+fn test_ipv4_is_private_192_168_range() {
+    // 192.168.0.0/16
+    let addr: Ipv4Addr = Ipv4Addr.new(192, 168, 0, 1);
+    assert(addr.is_private());
+
+    let addr2: Ipv4Addr = Ipv4Addr.new(192, 168, 255, 255);
+    assert(addr2.is_private());
+
+    // 192.169.x.x is NOT private
+    let addr3: Ipv4Addr = Ipv4Addr.new(192, 169, 0, 1);
+    assert(!addr3.is_private());
+}
+
+@test
+fn test_ipv4_is_multicast() {
+    // 224.0.0.0/4 (224.0.0.0 - 239.255.255.255)
+    let addr: Ipv4Addr = Ipv4Addr.new(224, 0, 0, 1);
+    assert(addr.is_multicast());
+
+    let addr2: Ipv4Addr = Ipv4Addr.new(239, 255, 255, 255);
+    assert(addr2.is_multicast());
+
+    // 223.x.x.x is NOT multicast
+    let addr3: Ipv4Addr = Ipv4Addr.new(223, 255, 255, 255);
+    assert(!addr3.is_multicast());
+
+    // 240.x.x.x is NOT multicast
+    let addr4: Ipv4Addr = Ipv4Addr.new(240, 0, 0, 1);
+    assert(!addr4.is_multicast());
+}
+
+@test
+fn test_ipv4_is_broadcast() {
+    let broadcast: Ipv4Addr = Ipv4Addr.broadcast();
+    assert(broadcast.is_broadcast());
+
+    let not_broadcast: Ipv4Addr = Ipv4Addr.new(255, 255, 255, 254);
+    assert(!not_broadcast.is_broadcast());
+}
+
+// =============================================================================
+// Section 3: Ipv4Addr Conversion
+// =============================================================================
+
+@test
+fn test_ipv4_to_u32() {
+    let addr: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let bits: Int = addr.to_u32();
+    // 192 << 24 | 168 << 16 | 1 << 8 | 1 = 3232235777
+    assert_eq(bits, 3232235777);
+}
+
+@test
+fn test_ipv4_to_u32_localhost() {
+    let addr: Ipv4Addr = Ipv4Addr.localhost();
+    let bits: Int = addr.to_u32();
+    // 127 << 24 | 0 << 16 | 0 << 8 | 1 = 2130706433
+    assert_eq(bits, 2130706433);
+}
+
+@test
+fn test_ipv4_from_u32() {
+    let addr: Ipv4Addr = Ipv4Addr.from_u32(3232235777);
+    let octets: (Byte, Byte, Byte, Byte) = addr.octets();
+    assert_eq(octets.0, 192 as Byte);
+    assert_eq(octets.1, 168 as Byte);
+    assert_eq(octets.2, 1 as Byte);
+    assert_eq(octets.3, 1 as Byte);
+}
+
+@test
+fn test_ipv4_roundtrip_u32() {
+    let original: Ipv4Addr = Ipv4Addr.new(10, 20, 30, 40);
+    let bits: Int = original.to_u32();
+    let restored: Ipv4Addr = Ipv4Addr.from_u32(bits);
+    assert_eq(original.octets(), restored.octets());
+}
+
+// =============================================================================
+// Section 4: Ipv4Addr Equality
+// =============================================================================
+
+@test
+fn test_ipv4_equality() {
+    let addr1: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let addr2: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    assert(addr1 == addr2);
+}
+
+@test
+fn test_ipv4_inequality() {
+    let addr1: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let addr2: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 2);
+    assert(addr1 != addr2);
+}
+
+// =============================================================================
+// Section 5: Ipv6Addr Construction
+// =============================================================================
+
+@test
+fn test_ipv6_new() {
+    let addr: Ipv6Addr = Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+    let segments: (Int, Int, Int, Int, Int, Int, Int, Int) = addr.segments();
+    assert_eq(segments.0, 0x2001);
+    assert_eq(segments.1, 0x0db8);
+    assert_eq(segments.7, 1);
+}
+
+@test
+fn test_ipv6_localhost() {
+    let addr: Ipv6Addr = Ipv6Addr.localhost();
+    let segments: (Int, Int, Int, Int, Int, Int, Int, Int) = addr.segments();
+    assert_eq(segments.0, 0);
+    assert_eq(segments.1, 0);
+    assert_eq(segments.2, 0);
+    assert_eq(segments.3, 0);
+    assert_eq(segments.4, 0);
+    assert_eq(segments.5, 0);
+    assert_eq(segments.6, 0);
+    assert_eq(segments.7, 1);
+}
+
+@test
+fn test_ipv6_unspecified() {
+    let addr: Ipv6Addr = Ipv6Addr.unspecified();
+    let segments: (Int, Int, Int, Int, Int, Int, Int, Int) = addr.segments();
+    assert_eq(segments.0, 0);
+    assert_eq(segments.7, 0);
+}
+
+// =============================================================================
+// Section 6: Ipv6Addr Properties
+// =============================================================================
+
+@test
+fn test_ipv6_is_loopback() {
+    let localhost: Ipv6Addr = Ipv6Addr.localhost();
+    assert(localhost.is_loopback());
+
+    let not_loopback: Ipv6Addr = Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+    assert(!not_loopback.is_loopback());
+}
+
+@test
+fn test_ipv6_is_unspecified() {
+    let unspecified: Ipv6Addr = Ipv6Addr.unspecified();
+    assert(unspecified.is_unspecified());
+
+    let specified: Ipv6Addr = Ipv6Addr.localhost();
+    assert(!specified.is_unspecified());
+}
+
+@test
+fn test_ipv6_is_multicast() {
+    // ff00::/8
+    let multicast: Ipv6Addr = Ipv6Addr.new(0xFF00, 0, 0, 0, 0, 0, 0, 1);
+    assert(multicast.is_multicast());
+
+    let not_multicast: Ipv6Addr = Ipv6Addr.localhost();
+    assert(!not_multicast.is_multicast());
+}
+
+@test
+fn test_ipv6_is_link_local() {
+    // fe80::/10
+    let link_local: Ipv6Addr = Ipv6Addr.new(0xFE80, 0, 0, 0, 0, 0, 0, 1);
+    assert(link_local.is_link_local());
+
+    let not_link_local: Ipv6Addr = Ipv6Addr.localhost();
+    assert(!not_link_local.is_link_local());
+}
+
+@test
+fn test_ipv6_is_unique_local() {
+    // fc00::/7
+    let unique_local: Ipv6Addr = Ipv6Addr.new(0xFC00, 0, 0, 0, 0, 0, 0, 1);
+    assert(unique_local.is_unique_local());
+
+    let unique_local2: Ipv6Addr = Ipv6Addr.new(0xFD00, 0, 0, 0, 0, 0, 0, 1);
+    assert(unique_local2.is_unique_local());
+
+    let not_unique: Ipv6Addr = Ipv6Addr.localhost();
+    assert(!not_unique.is_unique_local());
+}
+
+// =============================================================================
+// Section 7: Ipv6Addr Equality
+// =============================================================================
+
+@test
+fn test_ipv6_equality() {
+    let addr1: Ipv6Addr = Ipv6Addr.localhost();
+    let addr2: Ipv6Addr = Ipv6Addr.localhost();
+    assert(addr1 == addr2);
+}
+
+@test
+fn test_ipv6_inequality() {
+    let addr1: Ipv6Addr = Ipv6Addr.localhost();
+    let addr2: Ipv6Addr = Ipv6Addr.unspecified();
+    assert(addr1 != addr2);
+}
+
+// =============================================================================
+// Section 8: IpAddr Variants
+// =============================================================================
+
+@test
+fn test_ip_addr_v4() {
+    let addr: IpAddr = IpAddr.v4(192, 168, 1, 1);
+    assert(addr is V4);
+    assert(!(addr is V6));
+    // VBC Bug #1 fixed - is_ipv4/is_ipv6 now work correctly
+    assert(addr.is_ipv4());
+    assert(!addr.is_ipv6());
+}
+
+@test
+fn test_ip_addr_v6() {
+    let addr: IpAddr = IpAddr.v6(0, 0, 0, 0, 0, 0, 0, 1);
+    assert(addr is V6);
+    assert(!(addr is V4));
+    // VBC Bug #1 fixed - is_ipv4/is_ipv6 now work correctly
+    assert(addr.is_ipv6());
+    assert(!addr.is_ipv4());
+}
+
+@test
+fn test_ip_addr_is_loopback_v4() {
+    let addr: IpAddr = IpAddr.v4(127, 0, 0, 1);
+    match addr {
+        V4(ipv4) => assert(ipv4.is_loopback()),
+        V6(_) => panic("Expected V4"),
+    }
+}
+
+@test
+fn test_ip_addr_is_loopback_v6() {
+    let addr: IpAddr = IpAddr.v6(0, 0, 0, 0, 0, 0, 0, 1);
+    match addr {
+        V4(_) => panic("Expected V6"),
+        V6(ipv6) => assert(ipv6.is_loopback()),
+    }
+}
+
+@test
+fn test_ip_addr_is_unspecified_v4() {
+    let addr: IpAddr = IpAddr.v4(0, 0, 0, 0);
+    match addr {
+        V4(ipv4) => assert(ipv4.is_unspecified()),
+        V6(_) => panic("Expected V4"),
+    }
+}
+
+@test
+fn test_ip_addr_is_unspecified_v6() {
+    let addr: IpAddr = IpAddr.v6(0, 0, 0, 0, 0, 0, 0, 0);
+    match addr {
+        V4(_) => panic("Expected V6"),
+        V6(ipv6) => assert(ipv6.is_unspecified()),
+    }
+}
+
+@test
+fn test_ip_addr_is_multicast_v4() {
+    let addr: IpAddr = IpAddr.v4(224, 0, 0, 1);
+    match addr {
+        V4(ipv4) => assert(ipv4.is_multicast()),
+        V6(_) => panic("Expected V4"),
+    }
+}
+
+@test
+fn test_ip_addr_is_multicast_v6() {
+    let addr: IpAddr = IpAddr.v6(0xFF00, 0, 0, 0, 0, 0, 0, 1);
+    match addr {
+        V4(_) => panic("Expected V6"),
+        V6(ipv6) => assert(ipv6.is_multicast()),
+    }
+}
+
+@test
+fn test_ip_addr_match_v4() {
+    let addr: IpAddr = IpAddr.v4(192, 168, 1, 1);
+    match addr {
+        V4(ipv4) => {
+            assert(ipv4.is_private());
+        }
+        V6(_) => panic("Expected V4"),
+    }
+}
+
+@test
+fn test_ip_addr_match_v6() {
+    let addr: IpAddr = IpAddr.v6(0xFE80, 0, 0, 0, 0, 0, 0, 1);
+    match addr {
+        V4(_) => panic("Expected V6"),
+        V6(ipv6) => {
+            assert(ipv6.is_link_local());
+        }
+    }
+}
+
+// =============================================================================
+// Section 9: SocketAddrV4
+// =============================================================================
+
+@test
+fn test_socket_addr_v4_new() {
+    let ip: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let addr: SocketAddrV4 = SocketAddrV4.new(ip, 8080);
+    assert_eq(addr.port(), 8080);
+}
+
+@test
+fn test_socket_addr_v4_ip() {
+    let ip: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let addr: SocketAddrV4 = SocketAddrV4.new(ip, 8080);
+    let returned_ip: &Ipv4Addr = addr.ip();
+    assert_eq(returned_ip.octets(), ip.octets());
+}
+
+@test
+fn test_socket_addr_v4_set_port() {
+    let ip: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let mut addr: SocketAddrV4 = SocketAddrV4.new(ip, 8080);
+    addr.set_port(9090);
+    assert_eq(addr.port(), 9090);
+}
+
+// =============================================================================
+// Section 10: SocketAddrV6
+// =============================================================================
+
+@test
+fn test_socket_addr_v6_new() {
+    let ip: Ipv6Addr = Ipv6Addr.localhost();
+    let addr: SocketAddrV6 = SocketAddrV6.new(ip, 8080, 0, 0);
+    assert_eq(addr.port(), 8080);
+}
+
+@test
+fn test_socket_addr_v6_ip() {
+    let ip: Ipv6Addr = Ipv6Addr.localhost();
+    let addr: SocketAddrV6 = SocketAddrV6.new(ip, 8080, 0, 0);
+    let returned_ip: &Ipv6Addr = addr.ip();
+    assert(returned_ip.is_loopback());
+}
+
+// =============================================================================
+// Section 11: SocketAddr Variants
+// =============================================================================
+
+@test
+fn test_socket_addr_new_v4() {
+    let ip: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let addr: SocketAddr = SocketAddr.new_v4(ip, 8080);
+    // VBC Bug #1 fixed - SocketAddr methods now work correctly
+    assert(addr.is_ipv4());
+    assert(!addr.is_ipv6());
+    assert_eq(addr.port(), 8080);
+    // Also verify via pattern matching:
+    match addr {
+        V4(v4) => assert_eq(v4.port(), 8080),
+        V6(_) => panic("Expected V4"),
+    }
+}
+
+@test
+fn test_socket_addr_new_v6() {
+    let ip: Ipv6Addr = Ipv6Addr.localhost();
+    let addr: SocketAddr = SocketAddr.new_v6(ip, 8080);
+    // VBC Bug #1 fixed - SocketAddr methods now work correctly
+    assert(addr.is_ipv6());
+    assert(!addr.is_ipv4());
+    assert_eq(addr.port(), 8080);
+    // Also verify via pattern matching:
+    match addr {
+        V4(_) => panic("Expected V6"),
+        V6(v6) => assert_eq(v6.port(), 8080),
+    }
+}
+
+@test
+fn test_socket_addr_match_v4() {
+    let ip: Ipv4Addr = Ipv4Addr.new(192, 168, 1, 1);
+    let addr: SocketAddr = SocketAddr.new_v4(ip, 8080);
+    match addr {
+        V4(v4_addr) => {
+            assert_eq(v4_addr.port(), 8080);
+        }
+        V6(_) => panic("Expected V4"),
+    }
+}
+
+@test
+fn test_socket_addr_match_v6() {
+    let ip: Ipv6Addr = Ipv6Addr.localhost();
+    let addr: SocketAddr = SocketAddr.new_v6(ip, 8080);
+    match addr {
+        V4(_) => panic("Expected V6"),
+        V6(v6_addr) => {
+            assert_eq(v6_addr.port(), 8080);
+        }
+    }
+}
+
+// =============================================================================
+// Section 12: AddrParseError Variants
+// =============================================================================
+
+@test
+fn test_addr_parse_error_invalid_format() {
+    let err: AddrParseError = InvalidFormat;
+    assert(err is InvalidFormat);
+}
+
+@test
+fn test_addr_parse_error_invalid_octet() {
+    let err: AddrParseError = InvalidOctet;
+    assert(err is InvalidOctet);
+}
+
+@test
+fn test_addr_parse_error_invalid_port() {
+    let err: AddrParseError = InvalidPort;
+    assert(err is InvalidPort);
+}
+
+@test
+fn test_addr_parse_error_match() {
+    let err1: AddrParseError = InvalidFormat;
+    let err2: AddrParseError = InvalidOctet;
+    let err3: AddrParseError = InvalidPort;
+
+    match err1 {
+        InvalidFormat => {}
+        InvalidOctet => panic("Unexpected InvalidOctet"),
+        InvalidPort => panic("Unexpected InvalidPort"),
+    }
+
+    match err2 {
+        InvalidFormat => panic("Unexpected InvalidFormat"),
+        InvalidOctet => {}
+        InvalidPort => panic("Unexpected InvalidPort"),
+    }
+
+    match err3 {
+        InvalidFormat => panic("Unexpected InvalidFormat"),
+        InvalidOctet => panic("Unexpected InvalidOctet"),
+        InvalidPort => {}
+    }
+}
+
+// =============================================================================
+// Section 13: Edge Cases
+// =============================================================================
+
+@test
+fn test_ipv4_all_zeros() {
+    let addr: Ipv4Addr = Ipv4Addr.new(0, 0, 0, 0);
+    assert(addr.is_unspecified());
+    assert(!addr.is_loopback());
+    assert(!addr.is_private());
+    assert(!addr.is_multicast());
+    assert(!addr.is_broadcast());
+}
+
+@test
+fn test_ipv4_all_ones() {
+    let addr: Ipv4Addr = Ipv4Addr.new(255, 255, 255, 255);
+    assert(addr.is_broadcast());
+    assert(!addr.is_unspecified());
+}
+
+@test
+fn test_ipv6_all_zeros() {
+    let addr: Ipv6Addr = Ipv6Addr.new(0, 0, 0, 0, 0, 0, 0, 0);
+    assert(addr.is_unspecified());
+    assert(!addr.is_loopback());
+}
+
+@test
+fn test_socket_addr_port_zero() {
+    let ip: Ipv4Addr = Ipv4Addr.localhost();
+    let addr: SocketAddrV4 = SocketAddrV4.new(ip, 0);
+    assert_eq(addr.port(), 0);
+}
+
+@test
+fn test_socket_addr_port_max() {
+    let ip: Ipv4Addr = Ipv4Addr.localhost();
+    let addr: SocketAddrV4 = SocketAddrV4.new(ip, 65535);
+    assert_eq(addr.port(), 65535);
+}
+
+// =============================================================================
+// Section 14: IPv6 Parsing Tests
+// =============================================================================
+
+@test
+fn test_ipv6_parse_full() {
+    // Full 8-group format
+    let result = Ipv6Addr.parse("2001:0db8:0000:0000:0000:0000:0000:0001");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert_eq(addr.segments().0, 0x2001);
+    assert_eq(addr.segments().1, 0x0db8);
+    assert_eq(addr.segments().7, 0x0001);
+}
+
+@test
+fn test_ipv6_parse_abbreviated() {
+    // :: abbreviation for zeros in the middle
+    let result = Ipv6Addr.parse("2001:db8::1");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert_eq(addr.segments().0, 0x2001);
+    assert_eq(addr.segments().1, 0x0db8);
+    // Middle segments should be 0
+    assert_eq(addr.segments().2, 0);
+    assert_eq(addr.segments().3, 0);
+    assert_eq(addr.segments().4, 0);
+    assert_eq(addr.segments().5, 0);
+    assert_eq(addr.segments().6, 0);
+    assert_eq(addr.segments().7, 1);
+}
+
+@test
+fn test_ipv6_parse_loopback() {
+    let result = Ipv6Addr.parse("::1");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert(addr.is_loopback());
+}
+
+@test
+fn test_ipv6_parse_unspecified() {
+    let result = Ipv6Addr.parse("::");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert(addr.is_unspecified());
+}
+
+@test
+fn test_ipv6_parse_link_local() {
+    let result = Ipv6Addr.parse("fe80::1");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert(addr.is_link_local());
+}
+
+@test
+fn test_ipv6_parse_empty_error() {
+    let result = Ipv6Addr.parse("");
+    assert(result.is_err());
+}
+
+@test
+fn test_ipv6_parse_too_many_groups() {
+    // 9 groups is invalid
+    let result = Ipv6Addr.parse("1:2:3:4:5:6:7:8:9");
+    assert(result.is_err());
+}
+
+@test
+fn test_ipv6_parse_too_few_groups() {
+    // Only 7 groups without :: is invalid
+    let result = Ipv6Addr.parse("1:2:3:4:5:6:7");
+    assert(result.is_err());
+}
+
+@test
+fn test_ipv6_parse_trailing_double_colon() {
+    let result = Ipv6Addr.parse("2001:db8::");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert_eq(addr.segments().0, 0x2001);
+    assert_eq(addr.segments().1, 0x0db8);
+    assert_eq(addr.segments().7, 0);
+}
+
+@test
+fn test_ipv6_parse_all_groups_max() {
+    let result = Ipv6Addr.parse("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert_eq(addr.segments().0, 0xFFFF);
+    assert_eq(addr.segments().7, 0xFFFF);
+}
+
+// =============================================================================
+// Section 15: Ipv4Addr.parse() Tests
+// =============================================================================
+
+@test
+fn test_ipv4_parse_basic() {
+    let result = Ipv4Addr.parse("192.168.1.1");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    let octets = addr.octets();
+    assert_eq(octets.0, 192 as Byte);
+    assert_eq(octets.1, 168 as Byte);
+    assert_eq(octets.2, 1 as Byte);
+    assert_eq(octets.3, 1 as Byte);
+}
+
+@test
+fn test_ipv4_parse_localhost() {
+    let result = Ipv4Addr.parse("127.0.0.1");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert(addr.is_loopback());
+}
+
+@test
+fn test_ipv4_parse_zeros() {
+    let result = Ipv4Addr.parse("0.0.0.0");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert(addr.is_unspecified());
+}
+
+@test
+fn test_ipv4_parse_broadcast() {
+    let result = Ipv4Addr.parse("255.255.255.255");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert(addr.is_broadcast());
+}
+
+@test
+fn test_ipv4_parse_invalid_format() {
+    let result = Ipv4Addr.parse("not.an.ip");
+    assert(result.is_err());
+}
+
+@test
+fn test_ipv4_parse_too_few_octets() {
+    let result = Ipv4Addr.parse("192.168.1");
+    assert(result.is_err());
+}
+
+@test
+fn test_ipv4_parse_too_many_octets() {
+    let result = Ipv4Addr.parse("192.168.1.1.1");
+    assert(result.is_err());
+}
+
+@test
+fn test_ipv4_parse_empty() {
+    let result = Ipv4Addr.parse("");
+    assert(result.is_err());
+}
+
+@test
+fn test_ipv4_parse_roundtrip() {
+    let original = Ipv4Addr.new(10, 20, 30, 40);
+    // Can't test display→parse roundtrip without to_text,
+    // but verify parse produces correct values
+    let parsed = Ipv4Addr.parse("10.20.30.40");
+    assert(parsed.is_ok());
+    assert_eq(original.octets(), parsed.unwrap().octets());
+}
+
+// =============================================================================
+// Section 16: Ipv6Addr.octets() Tests
+// =============================================================================
+
+@test
+fn test_ipv6_octets_localhost() {
+    let addr = Ipv6Addr.localhost(); // ::1
+    let octets = addr.octets();
+    // ::1 = all zeros except last byte = 1
+    assert_eq(octets[0], 0 as Byte);
+    assert_eq(octets[1], 0 as Byte);
+    assert_eq(octets[14], 0 as Byte);
+    assert_eq(octets[15], 1 as Byte);
+}
+
+@test
+fn test_ipv6_octets_unspecified() {
+    let addr = Ipv6Addr.unspecified();
+    let octets = addr.octets();
+    // All zeros
+    let mut i = 0;
+    while i < 16 {
+        assert_eq(octets[i], 0 as Byte);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_ipv6_octets_segments_match() {
+    let addr = Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+    let octets = addr.octets();
+    // First segment 0x2001 = bytes 0x20, 0x01
+    assert_eq(octets[0], 0x20 as Byte);
+    assert_eq(octets[1], 0x01 as Byte);
+    // Second segment 0x0db8 = bytes 0x0d, 0xb8
+    assert_eq(octets[2], 0x0d as Byte);
+    assert_eq(octets[3], 0xb8 as Byte);
+    // Last segment 0x0001 = bytes 0x00, 0x01
+    assert_eq(octets[14], 0x00 as Byte);
+    assert_eq(octets[15], 0x01 as Byte);
+}
+
+// =============================================================================
+// Section 17: SocketAddr.ip() Tests
+// =============================================================================
+
+@test
+fn test_socket_addr_ip_v4() {
+    let ip = Ipv4Addr.new(192, 168, 1, 1);
+    let addr = SocketAddr.new_v4(ip, 8080);
+    let extracted_ip = addr.ip();
+    assert(extracted_ip.is_ipv4());
+}
+
+@test
+fn test_socket_addr_ip_v6() {
+    let ip = Ipv6Addr.localhost();
+    let addr = SocketAddr.new_v6(ip, 443);
+    let extracted_ip = addr.ip();
+    assert(extracted_ip.is_ipv6());
+}
+
+// =============================================================================
+// Section 18: SocketAddr.parse() Tests
+// =============================================================================
+
+@test
+fn test_socket_addr_parse_v4() {
+    let result = SocketAddr.parse("192.168.1.1:8080");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert(addr.is_ipv4());
+    assert_eq(addr.port(), 8080);
+}
+
+@test
+fn test_socket_addr_parse_v4_port_zero() {
+    let result = SocketAddr.parse("127.0.0.1:0");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert_eq(addr.port(), 0);
+}
+
+@test
+fn test_socket_addr_parse_v4_port_max() {
+    let result = SocketAddr.parse("10.0.0.1:65535");
+    assert(result.is_ok());
+    let addr = result.unwrap();
+    assert_eq(addr.port(), 65535);
+}
+
+@test
+fn test_socket_addr_parse_no_port() {
+    let result = SocketAddr.parse("192.168.1.1");
+    assert(result.is_err());
+}
+
+@test
+fn test_socket_addr_parse_empty() {
+    let result = SocketAddr.parse("");
+    assert(result.is_err());
+}
+
+@test
+fn test_socket_addr_parse_invalid_ip() {
+    let result = SocketAddr.parse("not.valid:8080");
+    assert(result.is_err());
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,341 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, linker, attributes, naked, link_name, noreturn, no_mangle
+// @description: Tests linker control attributes for low-level code generation
+
+/// ============================================================
+/// LINKER CONTROL ATTRIBUTES
+/// ============================================================
+///
+/// These attributes control how functions are compiled and linked,
+/// enabling low-level control for FFI, embedded systems, and
+/// performance-critical code.
+
+// ------------------------------------------------------------
+// @no_mangle - Preserve exact symbol name
+// ------------------------------------------------------------
+
+/// Prevent name mangling for C interop
+@no_mangle
+fn exported_function() -> i32 {
+    42
+}
+
+/// No mangle with explicit C calling convention
+@no_mangle
+@extern("C")
+fn c_callable_entry() -> i32 {
+    100
+}
+
+/// Export for FFI consumption
+@no_mangle
+@export
+fn verum_init() -> i32 {
+    // Initialize Verum runtime
+    0
+}
+
+// ------------------------------------------------------------
+// @link_name - Custom symbol name
+// ------------------------------------------------------------
+
+/// Alias to different symbol name
+@link_name("_custom_symbol")
+fn aliased_function() -> i32 {
+    1
+}
+
+/// Platform-specific symbol naming
+@cfg(target_os = "windows")
+@link_name("_MyWinFunction@8")
+fn platform_function(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+@cfg(target_os = "linux")
+@link_name("my_linux_function")
+fn platform_function(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+/// Declare extern with custom name
+ffi custom_lib {
+    @extern("C")
+    @link_name("__real_malloc")
+    fn custom_malloc(size: usize) -> *mut u8;
+}
+
+// ------------------------------------------------------------
+// @noreturn - Functions that never return
+// ------------------------------------------------------------
+
+/// Abort function - never returns
+@noreturn
+fn abort_execution() {
+    panic("Fatal error: aborting execution");
+}
+
+/// Exit function with code
+@noreturn
+fn exit_with_code(code: i32) {
+    // In real implementation, calls OS exit
+    panic(f"Exiting with code: {code}");
+}
+
+/// Infinite loop - also noreturn
+@noreturn
+fn run_forever() {
+    loop {
+        // Process events
+    }
+}
+
+/// Noreturn extern
+ffi libc {
+    @extern("C")
+    @noreturn
+    fn abort();
+
+    @extern("C")
+    @noreturn
+    fn exit(status: c_int);
+
+    @extern("C")
+    @noreturn
+    fn _Exit(status: c_int);
+}
+
+/// Noreturn enables better optimization
+fn process_or_die(value: Maybe<i32>) -> i32 {
+    match value {
+        Some(v) => v,
+        None => {
+            // Compiler knows this branch never returns
+            abort_execution();
+            // Unreachable, but needed for type
+            0
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// @naked - No prologue/epilogue
+// ------------------------------------------------------------
+
+/// Naked function for assembly implementation
+@naked
+fn naked_entry_point() {
+    // Function body is pure assembly
+    asm! {
+        "mov rax, 42",
+        "ret"
+    }
+}
+
+/// Naked interrupt handler
+@naked
+@interrupt
+fn naked_interrupt_handler() {
+    asm! {
+        "push rax",
+        "push rbx",
+        "push rcx",
+        // ... handle interrupt
+        "pop rcx",
+        "pop rbx",
+        "pop rax",
+        "iretq"
+    }
+}
+
+/// Naked trampoline for custom calling convention
+@naked
+fn trampoline_to_rust() {
+    asm! {
+        // Save non-volatile registers
+        "push rbp",
+        "push rbx",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+
+        // Call actual implementation
+        "call {real_impl}",
+
+        // Restore registers
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop rbx",
+        "pop rbp",
+        "ret",
+
+        real_impl = sym actual_implementation
+    }
+}
+
+fn actual_implementation() {
+    // Regular Verum code
+}
+
+/// Naked function for context switching
+@naked
+@no_mangle
+fn switch_context(old_stack: *mut *mut u8, new_stack: *mut u8) {
+    asm! {
+        // Save old context
+        "push rbp",
+        "push rbx",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+
+        // Save old stack pointer
+        "mov [rdi], rsp",
+
+        // Load new stack pointer
+        "mov rsp, rsi",
+
+        // Restore new context
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop rbx",
+        "pop rbp",
+
+        "ret"
+    }
+}
+
+// ------------------------------------------------------------
+// Combined Attributes
+// ------------------------------------------------------------
+
+/// Entry point with multiple attributes
+@no_mangle
+@naked
+@noreturn
+fn kernel_entry() {
+    asm! {
+        // Set up kernel environment
+        "cli",                    // Disable interrupts
+        "cld",                    // Clear direction flag
+        "xor rbp, rbp",          // Clear frame pointer
+        "call kernel_main",      // Call Verum kernel main
+        "hlt"                    // Halt (should never reach here)
+    }
+}
+
+/// Custom-named exported noreturn
+@no_mangle
+@link_name("__verum_panic")
+@noreturn
+fn verum_panic_handler(msg: *const u8, len: usize) {
+    // Handle panic
+    loop {}
+}
+
+/// Naked FFI bridge
+@naked
+@no_mangle
+@extern("C")
+fn ffi_bridge(a: i64, b: i64) -> i64 {
+    asm! {
+        // Custom register handling
+        "add rdi, rsi",
+        "mov rax, rdi",
+        "ret"
+    }
+}
+
+// ------------------------------------------------------------
+// Embedded Systems Patterns
+// ------------------------------------------------------------
+
+/// Reset vector for embedded target
+@no_mangle
+@link_name("_reset")
+@naked
+fn reset_handler() {
+    asm! {
+        // Initialize stack pointer
+        "ldr sp, =_stack_top",
+
+        // Zero BSS section
+        "ldr r0, =_bss_start",
+        "ldr r1, =_bss_end",
+        "mov r2, #0",
+        "1:",
+        "cmp r0, r1",
+        "strlt r2, [r0], #4",
+        "blt 1b",
+
+        // Copy data section
+        "ldr r0, =_data_start",
+        "ldr r1, =_data_end",
+        "ldr r2, =_data_load",
+        "2:",
+        "cmp r0, r1",
+        "ldrlt r3, [r2], #4",
+        "strlt r3, [r0], #4",
+        "blt 2b",
+
+        // Call main
+        "bl main",
+
+        // Infinite loop if main returns
+        "b ."
+    }
+}
+
+/// Hard fault handler
+@no_mangle
+@link_name("HardFault_Handler")
+@naked
+fn hard_fault_handler() {
+    asm! {
+        // Save fault context
+        "tst lr, #4",
+        "ite eq",
+        "mrseq r0, msp",
+        "mrsne r0, psp",
+        "b hard_fault_handler_c"
+    }
+}
+
+fn hard_fault_handler_c(stack_frame: *const u32) {
+    // Handle hard fault in safe Verum code
+    panic("Hard fault occurred");
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_int is i32;
+type c_void is ();
+
+fn main() {
+    // Test no_mangle function
+    let r1 = exported_function();
+    assert(r1 == 42);
+
+    // Test aliased function
+    let r2 = aliased_function();
+    assert(r2 == 1);
+
+    // Test platform function
+    let r3 = platform_function(10, 20);
+    assert(r3 == 30);
+
+    // Test noreturn in match (optimization benefit)
+    let maybe_val = Some(100);
+    let val = process_or_die(maybe_val);
+    assert(val == 100);
+}

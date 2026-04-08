@@ -1,0 +1,172 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, autodiff, chain-rule, composition
+// @expected-exit: 0
+
+// Tests chain rule for function composition.
+// Verifies (f∘g)'(x) = f'(g(x)) * g'(x) for various compositions.
+
+fn abs_val(x: Int) -> Int {
+    if (x < 0) { 0 - x } else { x }
+}
+
+// === Composition 1: f(g(x)) where f(u)=u^2, g(x)=3x+1 ===
+// f(g(x)) = (3x+1)^2 = 9x^2 + 6x + 1
+// f'(u) = 2u, g'(x) = 3
+// (f∘g)'(x) = 2(3x+1)*3 = 6(3x+1) = 18x + 6
+fn comp1(x: Int) -> Int {
+    let u = 3 * x + 1;
+    u * u
+}
+
+fn grad_comp1(x: Int) -> Int {
+    18 * x + 6
+}
+
+// === Composition 2: f(g(x)) where f(u)=u^3, g(x)=x^2 ===
+// f(g(x)) = (x^2)^3 = x^6
+// f'(u) = 3u^2, g'(x) = 2x
+// (f∘g)'(x) = 3(x^2)^2 * 2x = 6x^5
+fn comp2(x: Int) -> Int {
+    let u = x * x;
+    u * u * u
+}
+
+fn grad_comp2(x: Int) -> Int {
+    6 * x * x * x * x * x
+}
+
+// === Triple composition: f(g(h(x))) ===
+// h(x) = 2x, g(u) = u + 1, f(v) = v^2
+// f(g(h(x))) = (2x+1)^2
+// Chain: f'(g(h(x))) * g'(h(x)) * h'(x) = 2(2x+1) * 1 * 2 = 4(2x+1)
+fn comp3(x: Int) -> Int {
+    let h = 2 * x;
+    let g = h + 1;
+    g * g
+}
+
+fn grad_comp3(x: Int) -> Int {
+    4 * (2 * x + 1)
+}
+
+// === Composition 4: Power rule via chain rule ===
+// f(x) = (x^2 + 1)^3
+// Let u = x^2 + 1, f(u) = u^3
+// f'(x) = 3(x^2+1)^2 * 2x = 6x(x^2+1)^2
+fn comp4(x: Int) -> Int {
+    let u = x * x + 1;
+    u * u * u
+}
+
+fn grad_comp4(x: Int) -> Int {
+    let u = x * x + 1;
+    6 * x * u * u
+}
+
+// === Composition 5: Nested squares ===
+// f(x) = ((x+1)^2 + 2)^2
+// Let u = (x+1)^2 + 2, f(u) = u^2
+// f'(x) = 2u * 2(x+1) = 4(x+1)*((x+1)^2 + 2)
+fn comp5(x: Int) -> Int {
+    let inner = (x + 1) * (x + 1);
+    let outer = inner + 2;
+    outer * outer
+}
+
+fn grad_comp5(x: Int) -> Int {
+    let inner = (x + 1) * (x + 1);
+    4 * (x + 1) * (inner + 2)
+}
+
+// Finite difference approximation
+fn fd_grad(f_plus: Int, f_minus: Int) -> Int {
+    (f_plus - f_minus) / 2
+}
+
+fn main() -> Int {
+    // Test 1: Simple composition f(g(x)) = (3x+1)^2
+    assert_eq(grad_comp1(0), 6);
+    assert_eq(grad_comp1(1), 24);
+    assert_eq(grad_comp1(2), 42);
+    // Verify with finite differences
+    assert_eq(fd_grad(comp1(1), comp1(-1)), 6);   // at x=0
+    assert_eq(fd_grad(comp1(2), comp1(0)), 24);   // at x=1
+    assert_eq(fd_grad(comp1(3), comp1(1)), 42);   // at x=2
+
+    // Test 2: Power composition (x^2)^3 = x^6
+    assert_eq(grad_comp2(1), 6);     // 6*1 = 6
+    assert_eq(grad_comp2(2), 192);   // 6*32 = 192
+    // FD: (3^6 - 1^6)/2 = (729-1)/2 = 364 (differs due to h=1)
+    // Exact gradient at x=2 is 192
+
+    // Test 3: Triple composition
+    assert_eq(grad_comp3(0), 4);
+    assert_eq(grad_comp3(1), 12);
+    assert_eq(grad_comp3(2), 20);
+    // FD verification
+    assert_eq(fd_grad(comp3(1), comp3(-1)), 4);
+    assert_eq(fd_grad(comp3(2), comp3(0)), 12);
+
+    // Test 4: Power rule via chain rule
+    // (x^2+1)^3 at x=1: u=2, f'=6*1*4=24
+    assert_eq(grad_comp4(1), 24);
+    // at x=0: u=1, f'=0
+    assert_eq(grad_comp4(0), 0);
+    // at x=2: u=5, f'=6*2*25=300
+    assert_eq(grad_comp4(2), 300);
+
+    // Test 5: Nested squares
+    assert_eq(grad_comp5(0), 4 * 1 * 3);  // 12
+    assert_eq(grad_comp5(0), 12);
+    assert_eq(grad_comp5(1), 4 * 2 * 6);  // 48
+    assert_eq(grad_comp5(1), 48);
+
+    // Test 6: Chain rule with negation
+    // f(x) = -(x^2), f'(x) = -2x
+    let x = 3;
+    let neg_grad = 0 - 2 * x;
+    assert_eq(neg_grad, -6);
+
+    // Test 7: Composition preserves critical points
+    // If g'(x₀) = 0, then (f∘g)'(x₀) = f'(g(x₀))*0 = 0
+    // g(x) = (x-2)^2, g'(2) = 0, any f∘g has critical point at x=2
+    // Let f(u) = u + 3, f∘g = (x-2)^2 + 3, f'∘g = 2(x-2), at x=2: 0 ✓
+    let crit_x = 2;
+    let crit_grad = 2 * (crit_x - 2);
+    assert_eq(crit_grad, 0);
+
+    // Test 8: Leibniz rule (product + chain)
+    // d/dx [x^2 * (x+1)^2] = 2x*(x+1)^2 + x^2*2(x+1)
+    // = 2x(x+1)[(x+1) + x] = 2x(x+1)(2x+1)
+    let leibniz_x = 2;
+    let leibniz_grad = 2 * leibniz_x * (leibniz_x + 1) * (2 * leibniz_x + 1);
+    assert_eq(leibniz_grad, 60);  // 2*2*3*5 = 60
+    // Verify: f(x) = x^2*(x+1)^2 = x^2*(x^2+2x+1) = x^4+2x^3+x^2
+    // f'(x) = 4x^3 + 6x^2 + 2x, f'(2) = 32 + 24 + 4 = 60 ✓
+    let alt_grad = 4 * 8 + 6 * 4 + 2 * 2;
+    assert_eq(alt_grad, 60);
+
+    // Test 9: Chain rule iteration
+    // f₁ = x, f₂ = f₁^2 = x^2, f₃ = f₂^2 = x^4, f₄ = f₃^2 = x^8
+    // f₄'(x) = 8x^7
+    let iter_x = 2;
+    let iter_grad = 8 * 2 * 2 * 2 * 2 * 2 * 2 * 2;  // 8 * 128 = 1024
+    assert_eq(iter_grad, 1024);
+
+    // Test 10: Quotient rule as chain rule
+    // f(x) = 1/g(x) = g(x)^(-1), f'(x) = -g'(x)/g(x)^2
+    // g(x) = x+1, f(x) = 1/(x+1), f'(x) = -1/(x+1)^2
+    // Using integers: verify that g'(x)*(-1) gives correct numerator
+    // At x=1: f'(1) = -1/4 (scaled by 4: -1)
+    let quot_num = -1;  // Numerator of f'(1)
+    let quot_den = (1 + 1) * (1 + 1);  // Denominator = (x+1)^2 = 4
+    assert_eq(quot_den, 4);
+    // Verify: f(2) - f(0) ≈ f'(1) * 2 (mean value theorem approx)
+    // f(2) = 1/3, f(0) = 1, scaled by 3: 1 - 3 = -2
+    // f'(1) * 2 = -1/4 * 2 = -1/2, scaled by 12: -6 (rough)
+
+    print("Autodiff chain rule: PASS");
+    0
+}

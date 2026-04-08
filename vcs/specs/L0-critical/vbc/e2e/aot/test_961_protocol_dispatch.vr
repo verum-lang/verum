@@ -1,0 +1,100 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: protocol, dispatch, vtable, implement
+// @description: Test protocol method dispatch through concrete types
+
+type Shape is protocol {
+    fn area(&self) -> Int;
+    fn name(&self) -> Text;
+};
+
+type Circle is { radius: Int };
+type Rect is { w: Int, h: Int };
+
+implement Shape for Circle {
+    fn area(&self) -> Int { self.radius * self.radius * 3 }
+    fn name(&self) -> Text { "circle" }
+}
+
+implement Shape for Rect {
+    fn area(&self) -> Int { self.w * self.h }
+    fn name(&self) -> Text { "rect" }
+}
+
+// Static dispatch - concrete types known at call site
+fn test_static_dispatch() -> Int {
+    let c = Circle { radius: 5 };
+    let r = Rect { w: 4, h: 3 };
+
+    if c.area() != 75 {
+        print(f"FAIL static circle: expected 75, got {c.area()}");
+        return 1;
+    }
+    if r.area() != 12 {
+        print(f"FAIL static rect: expected 12, got {r.area()}");
+        return 1;
+    }
+    if c.name() != "circle" {
+        print(f"FAIL static circle name: expected circle, got {c.name()}");
+        return 1;
+    }
+    if r.name() != "rect" {
+        print(f"FAIL static rect name: expected rect, got {r.name()}");
+        return 1;
+    }
+    print("  static_dispatch: OK");
+    0
+}
+
+// Dynamic dispatch through protocol reference
+fn get_area(shape: &dyn Shape) -> Int {
+    shape.area()
+}
+
+fn get_name(shape: &dyn Shape) -> Text {
+    shape.name()
+}
+
+fn test_dynamic_dispatch() -> Int {
+    let c = Circle { radius: 5 };
+    let r = Rect { w: 4, h: 3 };
+
+    let ca = get_area(&c);
+    if ca != 75 {
+        print(f"FAIL dynamic circle area: expected 75, got {ca}");
+        return 1;
+    }
+    let ra = get_area(&r);
+    if ra != 12 {
+        print(f"FAIL dynamic rect area: expected 12, got {ra}");
+        return 1;
+    }
+    let cn = get_name(&c);
+    if cn != "circle" {
+        print(f"FAIL dynamic circle name: expected circle, got {cn}");
+        return 1;
+    }
+    let rn = get_name(&r);
+    if rn != "rect" {
+        print(f"FAIL dynamic rect name: expected rect, got {rn}");
+        return 1;
+    }
+    print("  dynamic_dispatch: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Protocol Dispatch Tests:");
+
+    let mut failures = 0;
+    failures = failures + test_static_dispatch();
+    failures = failures + test_dynamic_dispatch();
+
+    if failures == 0 {
+        print("All protocol dispatch tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

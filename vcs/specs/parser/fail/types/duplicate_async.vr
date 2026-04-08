@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, function, async, error
+// @description: Test detection of duplicate async keyword
+// @expected-error: E018
+
+// async keyword cannot be duplicated
+type Callback is async async fn() -> Int;

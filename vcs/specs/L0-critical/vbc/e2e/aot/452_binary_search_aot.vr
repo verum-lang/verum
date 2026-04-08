@@ -1,0 +1,139 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, binary-search, search
+// @timeout: 30000
+
+// Binary search variants on sorted arrays
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+// Standard binary search: returns index or -1
+fn binary_search(arr: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let v = get8(arr, mid);
+        if v == target { return mid; }
+        if v < target { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    -1
+}
+
+// Lower bound: first index where arr[i] >= target
+fn lower_bound(arr: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if get8(arr, mid) < target { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+// Upper bound: first index where arr[i] > target
+fn upper_bound(arr: Arr8, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if get8(arr, mid) <= target { lo = mid + 1; }
+        else { hi = mid; }
+    }
+    lo
+}
+
+// Count occurrences of target in sorted array
+fn count_occurrences(arr: Arr8, n: Int, target: Int) -> Int {
+    upper_bound(arr, n, target) - lower_bound(arr, n, target)
+}
+
+// Binary search on answer: find smallest x in [lo, hi] where f(x) >= threshold
+// Using: sum of 1..x = x*(x+1)/2
+fn find_min_sum_ge(threshold: Int) -> Int {
+    let mut lo = 1;
+    let mut hi = 100;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let sum = mid * (mid + 1) / 2;
+        if sum >= threshold { hi = mid; }
+        else { lo = mid + 1; }
+    }
+    lo
+}
+
+// Find peak element in bitonic array
+fn find_peak(arr: Arr8, n: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if get8(arr, mid) < get8(arr, mid + 1) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+fn test_binary_search() -> Int {
+    let arr = Arr8 { v0: 2, v1: 5, v2: 8, v3: 12, v4: 16, v5: 23, v6: 38, v7: 56 };
+    assert_eq(binary_search(arr, 8, 8), 2);
+    assert_eq(binary_search(arr, 8, 2), 0);
+    assert_eq(binary_search(arr, 8, 56), 7);
+    assert_eq(binary_search(arr, 8, 10), -1);
+    assert_eq(binary_search(arr, 8, 0), -1);
+    1
+}
+
+fn test_bounds() -> Int {
+    // Array with duplicates
+    let arr = Arr8 { v0: 1, v1: 2, v2: 2, v3: 2, v4: 3, v5: 5, v6: 5, v7: 8 };
+    assert_eq(lower_bound(arr, 8, 2), 1);
+    assert_eq(upper_bound(arr, 8, 2), 4);
+    assert_eq(count_occurrences(arr, 8, 2), 3);
+    assert_eq(count_occurrences(arr, 8, 5), 2);
+    assert_eq(count_occurrences(arr, 8, 4), 0);
+
+    assert_eq(lower_bound(arr, 8, 0), 0);  // before all
+    assert_eq(lower_bound(arr, 8, 10), 8); // after all
+    1
+}
+
+fn test_binary_search_on_answer() -> Int {
+    // Find smallest x where 1+2+...+x >= 10 → x=4 (sum=10)
+    assert_eq(find_min_sum_ge(10), 4);
+    // Find smallest x where sum >= 15 → x=5 (sum=15)
+    assert_eq(find_min_sum_ge(15), 5);
+    // Find smallest x where sum >= 1 → x=1
+    assert_eq(find_min_sum_ge(1), 1);
+    1
+}
+
+fn test_peak() -> Int {
+    // Bitonic: increases then decreases
+    let arr = Arr8 { v0: 1, v1: 3, v2: 5, v3: 7, v4: 6, v5: 4, v6: 2, v7: 0 };
+    assert_eq(find_peak(arr, 8), 3); // peak at index 3 (value 7)
+
+    let arr2 = Arr8 { v0: 1, v1: 10, v2: 8, v3: 5, v4: 3, v5: 2, v6: 1, v7: 0 };
+    assert_eq(find_peak(arr2, 8), 1); // peak at index 1
+    1
+}
+
+fn main() -> Int {
+    test_binary_search();
+    test_bounds();
+    test_binary_search_on_answer();
+    test_peak();
+    print("[OK] 452_binary_search_aot");
+    0
+}

@@ -1,0 +1,149 @@
+// Tricky syntax edge cases
+// Tests parser edge cases and ambiguous constructs
+
+fn main() {
+    // Operator precedence
+    let a = 1 + 2 * 3;        // Should be 7, not 9
+    let b = 1 * 2 + 3;        // Should be 5
+    let c = 1 - 2 - 3;        // Should be -4 (left associative)
+    let d = 2 ** 3 ** 2;      // Exponentiation (if supported)
+
+    // Comparison chains
+    let cmp1 = 1 < 2;
+    let cmp2 = 1 <= 1;
+    let cmp3 = 2 > 1;
+    let cmp4 = 2 >= 2;
+    let cmp5 = 1 == 1;
+    let cmp6 = 1 != 2;
+
+    // Boolean operators
+    let bool1 = true && false || true;  // && has higher precedence
+    let bool2 = true || false && false; // Should be true
+    let bool3 = !true && false;
+    let bool4 = !(true && false);
+
+    // Unary minus ambiguity
+    let neg1 = -1;
+    let neg2 = --1;     // Double negation (if allowed)
+    let neg3 = 1 - -1;  // Subtraction of negative
+    let neg4 = 1--1;    // Same as above
+
+    // Tuple vs grouping
+    let group = (1 + 2) * 3;     // Grouping: 9
+    let tuple1 = (1,);           // Single-element tuple
+    let tuple2 = (1, 2);         // Two-element tuple
+    let unit = ();               // Unit
+
+    // Array vs index
+    let arr = [1, 2, 3];
+    let idx = arr[0];
+    let nested = [[1, 2], [3, 4]];
+    let nested_idx = nested[0][1];
+
+    // Method chain
+    let chain = "hello".to_upper().to_lower().len();
+
+    // Range expressions
+    let range1 = 0..10;
+    let range2 = 0..=10;    // Inclusive (if supported)
+    let range3 = ..10;      // From start
+    let range4 = 0..;       // To end
+
+    // Closure ambiguity
+    let closure1 = |x| x + 1;
+    let closure2 = |x, y| x + y;
+    let closure3 = || 42;
+    let closure4 = |x: Int| -> Int { x + 1 };
+
+    // If-else expression
+    let if1 = if true { 1 } else { 2 };
+    let if2 = if true { 1 } else if false { 2 } else { 3 };
+    let if3 = if a > 0 { if b > 0 { 1 } else { 2 } } else { 3 };
+
+    // Match expression
+    let match1 = match 1 {
+        0 => "zero",
+        1 => "one",
+        _ => "other",
+    };
+
+    // Match with guards
+    let match2 = match a {
+        x if x > 0 => "positive",
+        x if x < 0 => "negative",
+        _ => "zero",
+    };
+
+    // Match with bindings
+    let match3 = match (1, 2) {
+        (0, y) => y,
+        (x, 0) => x,
+        (x, y) => x + y,
+    };
+
+    // Block expressions
+    let block1 = { 42 };
+    let block2 = {
+        let x = 1;
+        let y = 2;
+        x + y
+    };
+
+    // Semicolon handling
+    let semi1 = { 1; 2; 3 };    // Returns 3
+    let semi2 = { 1; 2; };      // Returns unit
+
+    // String escapes
+    let str1 = "hello\nworld";
+    let str2 = "tab\there";
+    let str3 = "quote\"here";
+    let str4 = "backslash\\here";
+    let str5 = "\x41\x42\x43";  // Hex escapes
+    let str6 = "\u{1F600}";     // Unicode escape
+
+    // Raw strings (if supported)
+    // let raw = r"no\nescape";
+    // let raw_delim = r#"can use "quotes""#;
+
+    // Type annotations in various positions
+    let typed1: Int = 42;
+    let typed2: List<Int> = [1, 2, 3];
+    let typed3: function(Int) -> Int = |x| x + 1;
+    let typed4: (Int, Bool) = (1, true);
+
+    // Assert various results
+    assert a == 7;
+    assert b == 5;
+    assert c == -4;
+}
+
+// Function with complex signature
+fn complex<T: Clone + Debug, U>(
+    a: T,
+    b: &T,
+    c: &mut U,
+    d: function(T) -> U,
+) -> Result<T, Error>
+where
+    U: Default,
+{
+    Ok(a)
+}
+
+// Implement block (if supported)
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+implement Point {
+    fn new(x: Float, y: Float) -> Self {
+        Point { x, y }
+    }
+
+    fn distance(&self, other: &Point) -> Float {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+}

@@ -1,0 +1,269 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress, integration
+// @timeout: 60000
+// @expected-exit: 0
+
+// Integration test: combines recursion, variants, records, loops, f-strings, arithmetic
+
+// --- VARIANT TYPES ---
+type Shape is Circle(Int) | Rect(Int, Int) | Triangle(Int, Int);
+type MaybeV is NoneV | SomeV(Int);
+type Ordering is Lt | Eq | Gt;
+type OpKind is OpAdd | OpSub | OpMul | OpDiv;
+
+// --- RECORDS ---
+type Vec2 is { x: Int, y: Int };
+type Mat2 is { a: Int, b: Int, c: Int, d: Int };
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+type Stats is { cnt: Int, total: Int, mn: Int, mx: Int };
+
+// --- VARIANT FUNCTIONS ---
+fn shape_area_x100(s: Shape) -> Int {
+    match s { Circle(r) => 314 * r * r, Rect(w, h) => 100 * w * h, Triangle(b, h) => 50 * b * h }
+}
+
+fn maybe_or(m: MaybeV, def: Int) -> Int { match m { NoneV => def, SomeV(v) => v } }
+fn maybe_map_add(m: MaybeV, delta: Int) -> MaybeV {
+    match m { NoneV => NoneV, SomeV(v) => SomeV(v + delta) }
+}
+
+fn cmp_val(a: Int, b: Int) -> Ordering { if (a < b) { Lt } else { if (a == b) { Eq } else { Gt } } }
+fn ord_to_int(o: Ordering) -> Int { match o { Lt => -1, Eq => 0, Gt => 1 } }
+
+fn apply_op(op: OpKind, a: Int, b: Int) -> Int {
+    match op { OpAdd => a + b, OpSub => a - b, OpMul => a * b, OpDiv => if (b != 0) { a / b } else { 0 } }
+}
+
+// --- RECORD FUNCTIONS ---
+fn vec2_add(a: Vec2, b: Vec2) -> Vec2 { Vec2 { x: a.x + b.x, y: a.y + b.y } }
+fn vec2_dot(a: Vec2, b: Vec2) -> Int { a.x * b.x + a.y * b.y }
+fn vec2_scale(v: Vec2, s: Int) -> Vec2 { Vec2 { x: v.x * s, y: v.y * s } }
+
+fn mat2_mul(a: Mat2, b: Mat2) -> Mat2 {
+    Mat2 { a: a.a*b.a + a.b*b.c, b: a.a*b.b + a.b*b.d,
+           c: a.c*b.a + a.d*b.c, d: a.c*b.b + a.d*b.d }
+}
+fn mat2_det(m: Mat2) -> Int { m.a * m.d - m.b * m.c }
+
+fn a8_zeros() -> Arr8 { Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 } }
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if (i == 0) { return a.e0; }  if (i == 1) { return a.e1; }
+    if (i == 2) { return a.e2; }  if (i == 3) { return a.e3; }
+    if (i == 4) { return a.e4; }  if (i == 5) { return a.e5; }
+    if (i == 6) { return a.e6; }  a.e7
+}
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if (i == 0) { v } else { a.e0 }, e1: if (i == 1) { v } else { a.e1 },
+        e2: if (i == 2) { v } else { a.e2 }, e3: if (i == 3) { v } else { a.e3 },
+        e4: if (i == 4) { v } else { a.e4 }, e5: if (i == 5) { v } else { a.e5 },
+        e6: if (i == 6) { v } else { a.e6 }, e7: if (i == 7) { v } else { a.e7 }
+    }
+}
+fn a8_sum(a: Arr8) -> Int { a.e0 + a.e1 + a.e2 + a.e3 + a.e4 + a.e5 + a.e6 + a.e7 }
+
+fn stats_update(s: Stats, v: Int) -> Stats {
+    let new_mn = if (v < s.mn) { v } else { s.mn };
+    let new_mx = if (v > s.mx) { v } else { s.mx };
+    Stats { cnt: s.cnt + 1, total: s.total + v, mn: new_mn, mx: new_mx }
+}
+
+// --- RECURSIVE FUNCTIONS ---
+@allow(unbounded_recursion)
+fn fib(n: Int) -> Int { if (n <= 1) { return n; } fib(n - 1) + fib(n - 2) }
+
+@allow(unbounded_recursion)
+fn rec_sum(n: Int, acc: Int) -> Int { if (n <= 0) { return acc; } rec_sum(n - 1, acc + n) }
+
+@allow(unbounded_recursion)
+fn gcd(a: Int, b: Int) -> Int { if (b == 0) { return a; } gcd(b, a % b) }
+
+@allow(unbounded_recursion)
+fn fast_pow(base: Int, exp: Int) -> Int {
+    if (exp == 0) { return 1; }
+    if (exp % 2 == 0) { let h = fast_pow(base, exp / 2); return h * h; }
+    base * fast_pow(base, exp - 1)
+}
+
+// --- UTILITY ---
+fn abs_v(x: Int) -> Int { if (x < 0) { 0 - x } else { x } }
+fn max_v(a: Int, b: Int) -> Int { if (a > b) { a } else { b } }
+fn min_v(a: Int, b: Int) -> Int { if (a < b) { a } else { b } }
+fn popcount(n: Int) -> Int {
+    let mut v = n; let mut c = 0;
+    while (v > 0) { c = c + (v % 2); v = v / 2; }
+    c
+}
+fn digit_sum(n: Int) -> Int {
+    let mut v = abs_v(n); let mut s = 0;
+    while (v > 0) { s = s + v % 10; v = v / 10; }
+    s
+}
+fn collatz(start: Int) -> Int {
+    let mut n = start; let mut steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) { n = n / 2; } else { n = n * 3 + 1; }
+        steps = steps + 1; if (steps > 2000) { return -1; }
+    }
+    steps
+}
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    let mut acc = 1; let mut b = base % m; let mut e = exp;
+    while (e > 0) {
+        if (e % 2 == 1) { acc = (acc * b) % m; }
+        e = e / 2; b = (b * b) % m;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // --- SECTION 1: Recursion ---
+    assert_eq(fib(10), 55);
+    assert_eq(fib(20), 6765);
+    assert_eq(rec_sum(100, 0), 5050);
+    assert_eq(rec_sum(500, 0), 125250);
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(gcd(12345, 6789), 3);
+    assert_eq(fast_pow(2, 10), 1024);
+    assert_eq(fast_pow(3, 7), 2187);
+
+    // --- SECTION 2: Variants ---
+    assert_eq(shape_area_x100(Circle(5)), 7850);
+    assert_eq(shape_area_x100(Rect(3, 4)), 1200);
+    assert_eq(shape_area_x100(Triangle(6, 8)), 2400);
+    assert_eq(maybe_or(SomeV(42), 0), 42);
+    assert_eq(maybe_or(NoneV, -1), -1);
+    let m2 = maybe_map_add(SomeV(10), 5);
+    assert_eq(maybe_or(m2, 0), 15);
+    assert_eq(ord_to_int(cmp_val(1, 2)), -1);
+    assert_eq(ord_to_int(cmp_val(5, 5)), 0);
+    assert_eq(apply_op(OpMul, 6, 7), 42);
+    assert_eq(apply_op(OpDiv, 100, 4), 25);
+
+    // --- SECTION 3: Records ---
+    let v1 = Vec2 { x: 3, y: 4 };
+    let v2 = Vec2 { x: 1, y: 2 };
+    assert_eq(vec2_add(v1, v2).x, 4);
+    assert_eq(vec2_dot(v1, v2), 11);
+    assert_eq(vec2_scale(v1, 3).y, 12);
+
+    let ma = Mat2 { a: 1, b: 2, c: 3, d: 4 };
+    let mb = Mat2 { a: 5, b: 6, c: 7, d: 8 };
+    let mc = mat2_mul(ma, mb);
+    assert_eq(mc.a, 19);
+    assert_eq(mc.d, 50);
+    assert_eq(mat2_det(ma), -2);
+
+    // Fibonacci matrix
+    let fm = Mat2 { a: 1, b: 1, c: 1, d: 0 };
+    let f2 = mat2_mul(fm, fm);
+    let f4 = mat2_mul(f2, f2);
+    let f8 = mat2_mul(f4, f4);
+    assert_eq(f8.a, 34);   // fib(9)
+    assert_eq(f8.b, 21);   // fib(8)
+
+    // Array operations
+    let mut arr = a8_zeros();
+    let mut i = 0;
+    while (i < 8) { arr = a8_set(arr, i, (i + 1) * 10); i = i + 1; }
+    assert_eq(a8_sum(arr), 360);
+    assert_eq(a8_get(arr, 0), 10);
+    assert_eq(a8_get(arr, 7), 80);
+
+    // Stats
+    let mut st = Stats { cnt: 0, total: 0, mn: 999999, mx: -999999 };
+    st = stats_update(st, 10);
+    st = stats_update(st, 5);
+    st = stats_update(st, 20);
+    st = stats_update(st, 3);
+    st = stats_update(st, 15);
+    assert_eq(st.cnt, 5);
+    assert_eq(st.total, 53);
+    assert_eq(st.mn, 3);
+    assert_eq(st.mx, 20);
+
+    // --- SECTION 4: Loops + computation ---
+    assert_eq(popcount(255), 8);
+    assert_eq(digit_sum(12345), 15);
+    assert_eq(collatz(27), 111);
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    assert_eq(mod_pow(2, 12, 13), 1);
+
+    // Deep nesting
+    let mut deep = 0;
+    let mut a = 0;
+    while (a < 5) {
+        let mut b = 0;
+        while (b < 5) {
+            let mut c = 0;
+            while (c < 5) {
+                if (a + b + c < 8) {
+                    if (a * b * c > 0) { deep = deep + a + b + c; }
+                }
+                c = c + 1;
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    assert(deep > 0);
+
+    // --- SECTION 5: Strings ---
+    assert_eq(f"fib(10)={fib(10)}", "fib(10)=55");
+    assert_eq(f"gcd={gcd(48,18)}", "gcd=6");
+    assert_eq(f"vec=({v1.x},{v1.y})", "vec=(3,4)");
+    let circle_area = shape_area_x100(Circle(3));
+    assert_eq(f"area={circle_area}", "area=2826");
+
+    // --- SECTION 6: Register pressure ---
+    let r01 = 1;  let r02 = 2;  let r03 = 3;  let r04 = 4;  let r05 = 5;
+    let r06 = 6;  let r07 = 7;  let r08 = 8;  let r09 = 9;  let r10 = 10;
+    let r11 = 11; let r12 = 12; let r13 = 13; let r14 = 14; let r15 = 15;
+    let r16 = 16; let r17 = 17; let r18 = 18; let r19 = 19; let r20 = 20;
+    let rsum = r01+r02+r03+r04+r05+r06+r07+r08+r09+r10+r11+r12+r13+r14+r15+r16+r17+r18+r19+r20;
+    assert_eq(rsum, 210);
+
+    // --- SECTION 7: Combined stress loop ---
+    let mut big_acc = 0;
+    let mut li = 0;
+    while (li < 200) {
+        let sq = li * li;
+        let ds = digit_sum(sq);
+        let pc = popcount(li);
+        let cmp = ord_to_int(cmp_val(ds, pc));
+        big_acc = big_acc + ds + pc + cmp;
+        li = li + 1;
+    }
+    let mut big_acc2 = 0;
+    let mut li2 = 0;
+    while (li2 < 200) {
+        let sq2 = li2 * li2;
+        let ds2 = digit_sum(sq2);
+        let pc2 = popcount(li2);
+        let cmp2 = ord_to_int(cmp_val(ds2, pc2));
+        big_acc2 = big_acc2 + ds2 + pc2 + cmp2;
+        li2 = li2 + 1;
+    }
+    assert_eq(big_acc, big_acc2);
+    assert(big_acc > 0);
+
+    // --- SECTION 8: All operations interleaved ---
+    let mut final_check = 0;
+    final_check = final_check + fib(10);                       // 55
+    final_check = final_check + shape_area_x100(Rect(1, 1));  // 100
+    final_check = final_check + vec2_dot(v1, v2);             // 11
+    final_check = final_check + mat2_det(ma);                  // -2
+    final_check = final_check + a8_sum(arr);                   // 360
+    final_check = final_check + collatz(7);                    // 16
+    final_check = final_check + mod_pow(2, 8, 1000);          // 256
+    final_check = final_check + fast_pow(2, 8);                // 256
+    final_check = final_check + gcd(100, 75);                  // 25
+    final_check = final_check + rec_sum(10, 0);                // 55
+    // total = 55 + 100 + 11 + (-2) + 360 + 16 + 256 + 256 + 25 + 55 = 1132
+    assert_eq(final_check, 1132);
+
+    print("850_stress_integration: PASS");
+    0
+}

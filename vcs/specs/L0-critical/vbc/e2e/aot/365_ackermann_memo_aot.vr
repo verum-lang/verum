@@ -1,0 +1,253 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, ackermann, memoization, recursion
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for the Ackermann function with memoization.
+// The Ackermann function grows extremely fast:
+//   A(0, n) = n + 1
+//   A(m, 0) = A(m-1, 1)
+//   A(m, n) = A(m-1, A(m, n-1))
+// We memoize small values using a table (m=0..3, n=0..7).
+// Also tests direct (non-memo) computation for small cases.
+
+// Memo table: 4 rows (m=0..3) x 8 cols (n=0..7)
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn a8_fill(v: Int) -> Arr8 {
+    Arr8 { a0: v, a1: v, a2: v, a3: v, a4: v, a5: v, a6: v, a7: v }
+}
+
+// Memo table: rows for m=0,1,2,3; -1 means not computed
+type MemoTable is { r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8 };
+
+fn memo_get_row(t: MemoTable, m: Int) -> Arr8 {
+    if m == 0 { t.r0 } else if m == 1 { t.r1 }
+    else if m == 2 { t.r2 } else { t.r3 }
+}
+
+fn memo_set_row(t: MemoTable, m: Int, row: Arr8) -> MemoTable {
+    MemoTable {
+        r0: if m == 0 { row } else { t.r0 },
+        r1: if m == 1 { row } else { t.r1 },
+        r2: if m == 2 { row } else { t.r2 },
+        r3: if m == 3 { row } else { t.r3 }
+    }
+}
+
+fn memo_get(t: MemoTable, m: Int, n: Int) -> Int {
+    a8_get(memo_get_row(t, m), n)
+}
+
+fn memo_set(t: MemoTable, m: Int, n: Int, v: Int) -> MemoTable {
+    let row = memo_get_row(t, m);
+    let new_row = a8_set(row, n, v);
+    memo_set_row(t, m, new_row)
+}
+
+fn memo_empty() -> MemoTable {
+    let neg = a8_fill(-1);
+    MemoTable { r0: neg, r1: neg, r2: neg, r3: neg }
+}
+
+// Non-recursive Ackermann using known closed forms:
+//   A(0, n) = n + 1
+//   A(1, n) = n + 2
+//   A(2, n) = 2n + 3
+//   A(3, n) = 2^(n+3) - 3
+fn ack_closed(m: Int, n: Int) -> Int {
+    if m == 0 {
+        n + 1
+    } else if m == 1 {
+        n + 2
+    } else if m == 2 {
+        2 * n + 3
+    } else {
+        // A(3, n) = 2^(n+3) - 3
+        let mut result = 1;
+        let mut i = 0;
+        while i < n + 3 {
+            result = result * 2;
+            i = i + 1;
+        }
+        result - 3
+    }
+}
+
+// Build full memo table using closed-form formulas
+fn build_memo() -> MemoTable {
+    let mut t = memo_empty();
+    let mut m = 0;
+    while m <= 3 {
+        let mut n = 0;
+        while n <= 7 {
+            t = memo_set(t, m, n, ack_closed(m, n));
+            n = n + 1;
+        }
+        m = m + 1;
+    }
+    t
+}
+
+// Recursive Ackermann (only safe for small m, n)
+@allow(unbounded_recursion)
+fn ack_recursive(m: Int, n: Int) -> Int {
+    if m == 0 {
+        n + 1
+    } else if n == 0 {
+        ack_recursive(m - 1, 1)
+    } else {
+        ack_recursive(m - 1, ack_recursive(m, n - 1))
+    }
+}
+
+// --- Tests ---
+
+fn test_ack_m0() {
+    // A(0, n) = n + 1
+    assert_eq(ack_closed(0, 0), 1);
+    assert_eq(ack_closed(0, 1), 2);
+    assert_eq(ack_closed(0, 5), 6);
+    assert_eq(ack_closed(0, 7), 8);
+}
+
+fn test_ack_m1() {
+    // A(1, n) = n + 2
+    assert_eq(ack_closed(1, 0), 2);
+    assert_eq(ack_closed(1, 1), 3);
+    assert_eq(ack_closed(1, 5), 7);
+    assert_eq(ack_closed(1, 7), 9);
+}
+
+fn test_ack_m2() {
+    // A(2, n) = 2n + 3
+    assert_eq(ack_closed(2, 0), 3);
+    assert_eq(ack_closed(2, 1), 5);
+    assert_eq(ack_closed(2, 2), 7);
+    assert_eq(ack_closed(2, 5), 13);
+}
+
+fn test_ack_m3() {
+    // A(3, n) = 2^(n+3) - 3
+    assert_eq(ack_closed(3, 0), 5);     // 2^3 - 3 = 5
+    assert_eq(ack_closed(3, 1), 13);    // 2^4 - 3 = 13
+    assert_eq(ack_closed(3, 2), 29);    // 2^5 - 3 = 29
+    assert_eq(ack_closed(3, 3), 61);    // 2^6 - 3 = 61
+    assert_eq(ack_closed(3, 4), 125);   // 2^7 - 3 = 125
+    assert_eq(ack_closed(3, 5), 253);   // 2^8 - 3 = 253
+    assert_eq(ack_closed(3, 7), 1021);  // 2^10 - 3 = 1021
+}
+
+fn test_ack_recursive_small() {
+    // Verify recursive matches closed form for small values
+    assert_eq(ack_recursive(0, 0), ack_closed(0, 0));
+    assert_eq(ack_recursive(0, 5), ack_closed(0, 5));
+    assert_eq(ack_recursive(1, 0), ack_closed(1, 0));
+    assert_eq(ack_recursive(1, 3), ack_closed(1, 3));
+    assert_eq(ack_recursive(2, 0), ack_closed(2, 0));
+    assert_eq(ack_recursive(2, 3), ack_closed(2, 3));
+    assert_eq(ack_recursive(3, 0), ack_closed(3, 0));
+    assert_eq(ack_recursive(3, 1), ack_closed(3, 1));
+    assert_eq(ack_recursive(3, 2), ack_closed(3, 2));
+}
+
+fn test_memo_table() {
+    let t = build_memo();
+    // Verify all memo entries match closed-form
+    let mut m = 0;
+    while m <= 3 {
+        let mut n = 0;
+        while n <= 7 {
+            assert_eq(memo_get(t, m, n), ack_closed(m, n));
+            n = n + 1;
+        }
+        m = m + 1;
+    }
+}
+
+fn test_memo_lookup_vs_compute() {
+    let t = build_memo();
+    // Lookup from memo and verify with recursive computation
+    assert_eq(memo_get(t, 0, 3), 4);
+    assert_eq(memo_get(t, 1, 4), 6);
+    assert_eq(memo_get(t, 2, 3), 9);
+    assert_eq(memo_get(t, 3, 2), 29);
+}
+
+fn test_ack_growth_rate() {
+    // Verify that A grows with both arguments
+    let mut n = 0;
+    while n < 7 {
+        // A(m, n) < A(m, n+1) for all m, n
+        assert(ack_closed(0, n) < ack_closed(0, n + 1));
+        assert(ack_closed(1, n) < ack_closed(1, n + 1));
+        assert(ack_closed(2, n) < ack_closed(2, n + 1));
+        assert(ack_closed(3, n) < ack_closed(3, n + 1));
+        n = n + 1;
+    }
+
+    // A(m, n) < A(m+1, n) for m < 3
+    let mut n2 = 0;
+    while n2 <= 7 {
+        assert(ack_closed(0, n2) < ack_closed(1, n2));
+        assert(ack_closed(1, n2) < ack_closed(2, n2));
+        assert(ack_closed(2, n2) < ack_closed(3, n2));
+        n2 = n2 + 1;
+    }
+}
+
+fn test_ack_identity() {
+    // A(1, n) = A(0, A(1, n-1)) = A(1, n-1) + 1
+    // So A(1, n) = n + 2 (base case A(1, 0) = A(0, 1) = 2)
+    let mut n = 1;
+    while n <= 7 {
+        assert_eq(ack_closed(1, n), ack_closed(0, ack_closed(1, n - 1)));
+        n = n + 1;
+    }
+}
+
+fn test_inverse_ackermann_concept() {
+    // The inverse Ackermann alpha(n) is the smallest m such that A(m, m) >= n
+    // A(0,0) = 1, A(1,1) = 3, A(2,2) = 7, A(3,3) = 61
+    assert_eq(ack_closed(0, 0), 1);
+    assert_eq(ack_closed(1, 1), 3);
+    assert_eq(ack_closed(2, 2), 7);
+    assert_eq(ack_closed(3, 3), 61);
+}
+
+fn main() -> Int {
+    test_ack_m0();
+    test_ack_m1();
+    test_ack_m2();
+    test_ack_m3();
+    test_ack_recursive_small();
+    test_memo_table();
+    test_memo_lookup_vs_compute();
+    test_ack_growth_rate();
+    test_ack_identity();
+    test_inverse_ackermann_concept();
+    print("[OK] 365_ackermann_memo_aot");
+    0
+}

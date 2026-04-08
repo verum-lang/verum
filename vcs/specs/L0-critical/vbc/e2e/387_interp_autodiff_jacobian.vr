@@ -1,0 +1,268 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, autodiff, jacobian, matrix, multivariate
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Jacobian matrix computation
+// For f: R^2 -> R^2, the Jacobian J is a 2x2 matrix:
+// J = [[df1/dx, df1/dy],
+//      [df2/dx, df2/dy]]
+// Uses both analytical and numerical differentiation.
+// Integer-scaled arithmetic (scale=1000).
+
+fn scale() -> Int { 1000 }
+
+fn smul(a: Int, b: Int) -> Int {
+    (a * b) / scale()
+}
+
+fn sdiv(a: Int, b: Int) -> Int {
+    (a * scale()) / b
+}
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn within_tol(actual: Int, expected: Int, tol: Int) -> Int {
+    if abs_val(actual - expected) <= tol { 1 } else { 0 }
+}
+
+// =============================================================================
+// 2x2 matrix type
+// =============================================================================
+
+type Mat2 is { m00: Int, m01: Int, m10: Int, m11: Int };
+
+fn mat2_det(m: Mat2) -> Int {
+    smul(m.m00, m.m11) - smul(m.m01, m.m10)
+}
+
+fn mat2_trace(m: Mat2) -> Int {
+    m.m00 + m.m11
+}
+
+// Matrix-vector multiply: [m00 m01; m10 m11] * [x; y]
+type Vec2 is { x: Int, y: Int };
+
+fn mat2_vec_mul(m: Mat2, v: Vec2) -> Vec2 {
+    Vec2 {
+        x: smul(m.m00, v.x) + smul(m.m01, v.y),
+        y: smul(m.m10, v.x) + smul(m.m11, v.y)
+    }
+}
+
+// =============================================================================
+// Example 1: Linear mapping f(x,y) = (2x + 3y, x - y)
+// Jacobian: [[2, 3], [1, -1]] — constant
+// =============================================================================
+
+fn f1_comp1(x: Int, y: Int) -> Int { 2 * x + 3 * y }
+fn f1_comp2(x: Int, y: Int) -> Int { x - y }
+
+fn jacobian_f1() -> Mat2 {
+    Mat2 { m00: 2 * scale(), m01: 3 * scale(), m10: scale(), m11: -1 * scale() }
+}
+
+// =============================================================================
+// Example 2: Nonlinear f(x,y) = (x^2 + y, x*y)
+// df1/dx = 2x, df1/dy = 1
+// df2/dx = y,  df2/dy = x
+// =============================================================================
+
+fn f2_comp1(x: Int, y: Int) -> Int { smul(x, x) + y }
+fn f2_comp2(x: Int, y: Int) -> Int { smul(x, y) }
+
+fn jacobian_f2(x: Int, y: Int) -> Mat2 {
+    Mat2 { m00: 2 * x, m01: scale(), m10: y, m11: x }
+}
+
+// =============================================================================
+// Example 3: Rotation-like f(x,y) = (x-y, x+y) (scaled by sqrt(2))
+// Jacobian: [[1, -1], [1, 1]]
+// =============================================================================
+
+fn f3_comp1(x: Int, y: Int) -> Int { x - y }
+fn f3_comp2(x: Int, y: Int) -> Int { x + y }
+
+fn jacobian_f3() -> Mat2 {
+    Mat2 { m00: scale(), m01: -1 * scale(), m10: scale(), m11: scale() }
+}
+
+// =============================================================================
+// Numerical Jacobian computation
+// =============================================================================
+
+fn num_jacobian_f2(x: Int, y: Int, h: Int) -> Mat2 {
+    // df1/dx ≈ (f1(x+h,y) - f1(x-h,y)) / 2h
+    let df1dx = sdiv(f2_comp1(x + h, y) - f2_comp1(x - h, y), 2 * h);
+    // df1/dy ≈ (f1(x,y+h) - f1(x,y-h)) / 2h
+    let df1dy = sdiv(f2_comp1(x, y + h) - f2_comp1(x, y - h), 2 * h);
+    // df2/dx
+    let df2dx = sdiv(f2_comp2(x + h, y) - f2_comp2(x - h, y), 2 * h);
+    // df2/dy
+    let df2dy = sdiv(f2_comp2(x, y + h) - f2_comp2(x, y - h), 2 * h);
+
+    Mat2 { m00: df1dx, m01: df1dy, m10: df2dx, m11: df2dy }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_linear_jacobian() {
+    let j = jacobian_f1();
+    assert_eq(j.m00, 2 * scale());
+    assert_eq(j.m01, 3 * scale());
+    assert_eq(j.m10, scale());
+    assert_eq(j.m11, -1 * scale());
+
+    // Determinant: 2*(-1) - 3*1 = -5
+    assert_eq(mat2_det(j), -5 * scale());
+
+    // Trace: 2 + (-1) = 1
+    assert_eq(mat2_trace(j), scale());
+}
+
+fn test_linear_jacobian_apply() {
+    // J * [1; 0] should give [2; 1] (first column)
+    let j = jacobian_f1();
+    let v1 = mat2_vec_mul(j, Vec2 { x: scale(), y: 0 });
+    assert_eq(v1.x, 2 * scale());
+    assert_eq(v1.y, scale());
+
+    // J * [0; 1] should give [3; -1] (second column)
+    let v2 = mat2_vec_mul(j, Vec2 { x: 0, y: scale() });
+    assert_eq(v2.x, 3 * scale());
+    assert_eq(v2.y, -1 * scale());
+}
+
+fn test_nonlinear_jacobian_at_point() {
+    // f(x,y) = (x^2+y, xy) at (2,3)
+    let x = 2 * scale();
+    let y = 3 * scale();
+    let j = jacobian_f2(x, y);
+
+    assert_eq(j.m00, 4 * scale());  // df1/dx = 2x = 4
+    assert_eq(j.m01, scale());      // df1/dy = 1
+    assert_eq(j.m10, 3 * scale());  // df2/dx = y = 3
+    assert_eq(j.m11, 2 * scale());  // df2/dy = x = 2
+
+    // Determinant: 4*2 - 1*3 = 5
+    assert_eq(mat2_det(j), 5 * scale());
+}
+
+fn test_nonlinear_jacobian_at_origin() {
+    let j = jacobian_f2(0, 0);
+    assert_eq(j.m00, 0);       // df1/dx = 0
+    assert_eq(j.m01, scale()); // df1/dy = 1
+    assert_eq(j.m10, 0);       // df2/dx = 0
+    assert_eq(j.m11, 0);       // df2/dy = 0
+
+    // Determinant: 0
+    assert_eq(mat2_det(j), 0);
+}
+
+fn test_numerical_vs_analytical() {
+    let x = 3 * scale();
+    let y = 2 * scale();
+    let h = 1; // very small step
+
+    let ana = jacobian_f2(x, y);
+    let num = num_jacobian_f2(x, y, h);
+
+    assert_eq(within_tol(num.m00, ana.m00, 10), 1);
+    assert_eq(within_tol(num.m01, ana.m01, 10), 1);
+    assert_eq(within_tol(num.m10, ana.m10, 10), 1);
+    assert_eq(within_tol(num.m11, ana.m11, 10), 1);
+}
+
+fn test_rotation_jacobian() {
+    let j = jacobian_f3();
+    // Determinant: 1*1 - (-1)*1 = 2
+    assert_eq(mat2_det(j), 2 * scale());
+
+    // Apply to vector (1,0): should give (1, 1)
+    let v = mat2_vec_mul(j, Vec2 { x: scale(), y: 0 });
+    assert_eq(v.x, scale());
+    assert_eq(v.y, scale());
+}
+
+fn test_jacobian_at_multiple_points() {
+    // f(x,y) = (x^2+y, xy)
+    // Check Jacobian changes with x,y
+
+    let j1 = jacobian_f2(scale(), scale());    // (1,1): [[2,1],[1,1]]
+    assert_eq(j1.m00, 2 * scale());
+    assert_eq(j1.m11, scale());
+    assert_eq(mat2_det(j1), scale()); // 2*1 - 1*1 = 1
+
+    let j2 = jacobian_f2(2 * scale(), 0);     // (2,0): [[4,1],[0,2]]
+    assert_eq(j2.m00, 4 * scale());
+    assert_eq(j2.m10, 0);
+    assert_eq(mat2_det(j2), 8 * scale()); // 4*2 - 1*0 = 8
+
+    let j3 = jacobian_f2(0, scale());         // (0,1): [[0,1],[1,0]]
+    assert_eq(j3.m00, 0);
+    assert_eq(j3.m01, scale());
+    assert_eq(j3.m10, scale());
+    assert_eq(j3.m11, 0);
+    assert_eq(mat2_det(j3), -1 * scale()); // 0*0 - 1*1 = -1
+}
+
+fn test_jacobian_chain_rule() {
+    // If g = f3(f2(x,y)), then J_g = J_f3 * J_f2
+    // Since f3 is linear, J_f3 = [[1,-1],[1,1]]
+    // At (1,1): J_f2 = [[2,1],[1,1]]
+    // J_g = [[2-1, 1-1], [2+1, 1+1]] = [[1,0],[3,2]]
+    let j_f2 = jacobian_f2(scale(), scale());
+    let j_f3 = jacobian_f3();
+
+    // Matrix multiply: j_f3 * j_f2
+    let j_comp = Mat2 {
+        m00: smul(j_f3.m00, j_f2.m00) + smul(j_f3.m01, j_f2.m10),
+        m01: smul(j_f3.m00, j_f2.m01) + smul(j_f3.m01, j_f2.m11),
+        m10: smul(j_f3.m10, j_f2.m00) + smul(j_f3.m11, j_f2.m10),
+        m11: smul(j_f3.m10, j_f2.m01) + smul(j_f3.m11, j_f2.m11)
+    };
+
+    assert_eq(j_comp.m00, scale());     // 2-1 = 1
+    assert_eq(j_comp.m01, 0);           // 1-1 = 0
+    assert_eq(j_comp.m10, 3 * scale()); // 2+1 = 3
+    assert_eq(j_comp.m11, 2 * scale()); // 1+1 = 2
+}
+
+fn test_determinant_product() {
+    // det(A*B) = det(A) * det(B)
+    let j_f2 = jacobian_f2(scale(), scale()); // det = 1
+    let j_f3 = jacobian_f3();                  // det = 2
+
+    // Product Jacobian
+    let j_comp = Mat2 {
+        m00: smul(j_f3.m00, j_f2.m00) + smul(j_f3.m01, j_f2.m10),
+        m01: smul(j_f3.m00, j_f2.m01) + smul(j_f3.m01, j_f2.m11),
+        m10: smul(j_f3.m10, j_f2.m00) + smul(j_f3.m11, j_f2.m10),
+        m11: smul(j_f3.m10, j_f2.m01) + smul(j_f3.m11, j_f2.m11)
+    };
+
+    let det_f2 = mat2_det(j_f2);      // 1000
+    let det_f3 = mat2_det(j_f3);      // 2000
+    let det_comp = mat2_det(j_comp);   // should be det_f2 * det_f3 / scale = 2000
+    assert_eq(det_comp, smul(det_f2, det_f3));
+}
+
+fn main() -> Int {
+    test_linear_jacobian();
+    test_linear_jacobian_apply();
+    test_nonlinear_jacobian_at_point();
+    test_nonlinear_jacobian_at_origin();
+    test_numerical_vs_analytical();
+    test_rotation_jacobian();
+    test_jacobian_at_multiple_points();
+    test_jacobian_chain_rule();
+    test_determinant_product();
+    print("[OK] 387_interp_autodiff_jacobian");
+    0
+}

@@ -1,0 +1,102 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: float, arithmetic, conversion, math
+// @description: Test floating point arithmetic and int/float conversion
+
+fn test_float_basic() -> Int {
+    let a = 3.14;
+    let b = 2.0;
+    let sum = a + b;
+    // 3.14 + 2.0 = 5.14
+    if sum < 5.13 || sum > 5.15 {
+        print(f"FAIL float_basic: sum={sum}");
+        return 1;
+    }
+    let product = a * b;
+    if product < 6.27 || product > 6.29 {
+        print(f"FAIL float_basic: product={product}");
+        return 1;
+    }
+    print("  float_basic: OK");
+    0
+}
+
+fn test_float_comparison() -> Int {
+    let a = 1.5;
+    let b = 2.5;
+    if !(a < b) {
+        print("FAIL float_cmp: 1.5 < 2.5");
+        return 1;
+    }
+    if !(b > a) {
+        print("FAIL float_cmp: 2.5 > 1.5");
+        return 1;
+    }
+    let c = 3.0;
+    let d = 3.0;
+    if c != d {
+        print("FAIL float_cmp: 3.0 == 3.0");
+        return 1;
+    }
+    print("  float_comparison: OK");
+    0
+}
+
+fn test_float_division() -> Int {
+    let a = 10.0;
+    let b = 3.0;
+    let result = a / b;
+    // 10/3 ≈ 3.333...
+    if result < 3.33 || result > 3.34 {
+        print(f"FAIL float_div: {result}");
+        return 1;
+    }
+    print("  float_division: OK");
+    0
+}
+
+fn test_float_negative() -> Int {
+    let a = -5.5;
+    let b = 2.0;
+    let sum = a + b;
+    if sum < -3.51 || sum > -3.49 {
+        print(f"FAIL float_neg: sum={sum}");
+        return 1;
+    }
+    let product = a * b;
+    if product < -11.01 || product > -10.99 {
+        print(f"FAIL float_neg: product={product}");
+        return 1;
+    }
+    print("  float_negative: OK");
+    0
+}
+
+fn test_int_to_float() -> Int {
+    let i = 42;
+    let f = i as Float;
+    if f < 41.99 || f > 42.01 {
+        print(f"FAIL int_to_float: {f}");
+        return 1;
+    }
+    print("  int_to_float: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Float Arithmetic Tests:");
+    let mut failures = 0;
+    failures = failures + test_float_basic();
+    failures = failures + test_float_comparison();
+    failures = failures + test_float_division();
+    failures = failures + test_float_negative();
+    failures = failures + test_int_to_float();
+
+    if failures == 0 {
+        print("All float arithmetic tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

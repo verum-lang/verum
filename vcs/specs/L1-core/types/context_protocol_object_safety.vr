@@ -1,0 +1,13 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: context, protocol, object_safety
+// @expected-error: not object-safe
+// @description: Context protocol with Self return type should fail object safety check
+
+context protocol Factory {
+    fn create() -> Self;
+}
+
+fn main() -> Int {
+    0
+}

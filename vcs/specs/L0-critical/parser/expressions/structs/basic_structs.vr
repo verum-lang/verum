@@ -1,0 +1,168 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, structs, basic
+
+// Basic struct literal expressions
+
+// Simple struct type
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// Nested struct
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+// Complex struct
+type Person is {
+    name: Text,
+    age: Int,
+    email: Maybe<Text>,
+    active: Bool,
+};
+
+// Struct with generic type
+type Container<T> is {
+    value: T,
+    count: Int,
+};
+
+// Struct with lifetime (if applicable)
+type Borrowed<'a> is {
+    data: &'a Text,
+    len: Int,
+};
+
+// Test basic struct literal
+fn test_basic_struct_literal() {
+    let origin = Point { x: 0, y: 0 };
+    let point = Point { x: 10, y: 20 };
+}
+
+// Test struct with computed fields
+fn test_struct_computed_fields() {
+    fn calculate_x() -> Int { 5 }
+    fn calculate_y() -> Int { 10 }
+
+    let computed = Point {
+        x: calculate_x(),
+        y: calculate_y(),
+    };
+}
+
+// Test struct with expressions
+fn test_struct_expressions() {
+    let expr_struct = Point {
+        x: 5 + 5,
+        y: 10 * 2,
+    };
+}
+
+// Test struct field shorthand
+fn test_struct_shorthand() {
+    let x = 10;
+    let y = 20;
+    let shorthand = Point { x, y };  // Same as Point { x: x, y: y }
+}
+
+// Test struct with trailing comma
+fn test_struct_trailing_comma() {
+    let trailing = Point {
+        x: 1,
+        y: 2,
+    };
+}
+
+// Test multi-line struct
+fn test_multiline_struct() {
+    let multiline = Point {
+        x: 100,
+        y: 200,
+    };
+}
+
+// Test nested struct
+fn test_nested_struct() {
+    let rect = Rectangle {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: Point { x: 100, y: 50 },
+    };
+}
+
+// Test struct update syntax
+fn test_struct_update() {
+    let base = Point { x: 10, y: 20 };
+    let updated = Point { x: 30, ..base };  // y comes from base
+    let partial = Point { ..base };  // Copy all fields
+}
+
+// Test complex struct
+fn test_complex_struct() {
+    let person = Person {
+        name: "Alice",
+        age: 30,
+        email: Some("alice@example.com"),
+        active: true,
+    };
+}
+
+// Test struct with default values (if supported)
+fn test_struct_defaults() {
+    let with_defaults = Person {
+        name: "Bob",
+        age: 25,
+        ..Person.default()
+    };
+}
+
+// Struct in function parameter
+fn distance(p: Point) -> Float {
+    ((p.x * p.x + p.y * p.y) as Float).sqrt()
+}
+
+// Struct returned from function
+fn origin() -> Point {
+    Point { x: 0, y: 0 }
+}
+
+fn make_point(x: Int, y: Int) -> Point {
+    Point { x, y }  // Shorthand
+}
+
+// Test struct in function parameter
+fn test_struct_in_parameter() {
+    let d = distance(Point { x: 3, y: 4 });
+}
+
+// Test struct in array
+fn test_struct_in_array() {
+    let points = [
+        Point { x: 0, y: 0 },
+        Point { x: 1, y: 1 },
+        Point { x: 2, y: 2 },
+    ];
+}
+
+// Test struct field access
+fn test_struct_field_access() {
+    let p = Point { x: 10, y: 20 };
+    let px = p.x;
+    let py = p.y;
+}
+
+// Test mutable struct field update
+fn test_mutable_struct() {
+    let mut mutable_point = Point { x: 0, y: 0 };
+    mutable_point.x = 10;
+    mutable_point.y = 20;
+}
+
+// Test generic struct
+fn test_generic_struct() {
+    let int_container = Container { value: 42, count: 1 };
+    let str_container = Container { value: "hello", count: 1 };
+}

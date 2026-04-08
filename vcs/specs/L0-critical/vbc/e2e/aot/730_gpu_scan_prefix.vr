@@ -1,0 +1,99 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, gpu, scan, prefix-sum
+// @expected-exit: 0
+
+// GPU prefix sum (scan) simulation.
+// Tests exclusive and inclusive scan via functions returning List<Int>.
+
+fn inclusive_scan(data: List<Int>, n: Int) -> List<Int> {
+    // Hillis-Steele inclusive scan
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut i = 0;
+    while (i < n) {
+        buf[i] = data[i];
+        i = i + 1;
+    }
+
+    let mut stride = 1;
+    while (stride < n) {
+        let mut tmp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut tid = 0;
+        while (tid < n) {
+            if (tid >= stride) {
+                tmp[tid] = buf[tid] + buf[tid - stride];
+            } else {
+                tmp[tid] = buf[tid];
+            }
+            tid = tid + 1;
+        }
+        let mut j = 0;
+        while (j < n) {
+            buf[j] = tmp[j];
+            j = j + 1;
+        }
+        stride = stride * 2;
+    }
+    buf
+}
+
+fn exclusive_scan(data: List<Int>, n: Int) -> List<Int> {
+    // Exclusive scan: shift inclusive scan right, insert 0
+    let inc = inclusive_scan(data, n);
+    let mut result = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    result[0] = 0;
+    let mut i = 1;
+    while (i < n) {
+        result[i] = inc[i - 1];
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: Inclusive scan of [1, 2, 3, 4] = [1, 3, 6, 10]
+    let data = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let inc = inclusive_scan(data, 4);
+    assert_eq(inc[0], 1);
+    assert_eq(inc[1], 3);
+    assert_eq(inc[2], 6);
+    assert_eq(inc[3], 10);
+
+    // Test 2: Exclusive scan of [1, 2, 3, 4] = [0, 1, 3, 6]
+    let exc = exclusive_scan(data, 4);
+    assert_eq(exc[0], 0);
+    assert_eq(exc[1], 1);
+    assert_eq(exc[2], 3);
+    assert_eq(exc[3], 6);
+
+    // Test 3: Inclusive scan of 8 elements [3,1,4,1,5,9,2,6]
+    let data2 = [3, 1, 4, 1, 5, 9, 2, 6, 0, 0, 0, 0, 0, 0, 0, 0];
+    let inc2 = inclusive_scan(data2, 8);
+    assert_eq(inc2[0], 3);
+    assert_eq(inc2[1], 4);
+    assert_eq(inc2[2], 8);
+    assert_eq(inc2[3], 9);
+    assert_eq(inc2[4], 14);
+    assert_eq(inc2[5], 23);
+    assert_eq(inc2[6], 25);
+    assert_eq(inc2[7], 31);
+
+    // Test 4: Scan of all ones = counting [1,2,3,...,8]
+    let ones = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+    let inc3 = inclusive_scan(ones, 8);
+    assert_eq(inc3[0], 1);
+    assert_eq(inc3[4], 5);
+    assert_eq(inc3[7], 8);
+
+    // Test 5: Property: exc[i] + data[i] == inc[i]
+    let exc2 = exclusive_scan(data2, 8);
+    let mut k = 0;
+    while (k < 8) {
+        assert_eq(exc2[k] + data2[k], inc2[k]);
+        k = k + 1;
+    }
+
+    print("GPU scan prefix: PASS");
+    0
+}

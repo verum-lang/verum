@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, ensures, postcondition
+
+/// Ensures clauses on function return types.
+/// Grammar: ensures_clause = 'where' ensures_item { ',' ensures_item } ;
+///          ensures_item = 'ensures' expression ;
+
+// Simple ensures: return value is non-negative
+fn absolute(x: Int) -> Int
+    where ensures result >= 0
+{
+    if x >= 0 { x } else { -x }
+}
+
+// Multiple ensures items
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+    where ensures result >= lo, ensures result <= hi
+{
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+// Ensures with relationship to input
+fn increment(x: Int) -> Int
+    where ensures result > x
+{
+    x + 1
+}
+
+// Ensures on list operations
+fn sorted_insert(xs: List<Int>, x: Int) -> List<Int>
+    where ensures len(result) == len(xs) + 1
+{
+    let mut result = xs;
+    result.push(x);
+    result.sort();
+    result
+}
+
+// Ensures preserves property
+fn double_positive(x: Int{> 0}) -> Int
+    where ensures result > 0, ensures result == x * 2
+{
+    x * 2
+}
+
+// Ensures with float precision
+fn normalize(x: Float, min: Float, max: Float) -> Float
+    where ensures result >= 0.0, ensures result <= 1.0
+{
+    let clamped = if x < min { min } else if x > max { max } else { x };
+    (clamped - min) / (max - min)
+}
+
+fn main() {
+    let a = absolute(-10);
+    assert(a == 10);
+    assert(a >= 0);
+
+    let c = clamp(150, 0, 100);
+    assert(c == 100);
+    assert(c >= 0 && c <= 100);
+
+    let inc = increment(5);
+    assert(inc == 6);
+    assert(inc > 5);
+
+    let d = double_positive(7);
+    assert(d == 14);
+
+    let n = normalize(75.0, 0.0, 100.0);
+    assert(n >= 0.0 && n <= 1.0);
+}

@@ -1,0 +1,199 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, convex_hull, geometry, graham_scan, sorting
+// @timeout: 15000
+// @expected-exit: 0
+//
+// 2D convex hull via Graham scan on integer point arrays.
+//
+// Algorithm:
+//   1. Find the lowest (then leftmost) point as pivot.
+//   2. Sort remaining points by polar angle relative to pivot
+//      using cross-product comparisons (no floating point).
+//   3. Sweep through sorted points maintaining a CCW stack.
+//
+// Cross product of vectors (b-a) x (c-a):
+//   cross = (b.x - a.x)*(c.y - a.y) - (b.y - a.y)*(c.x - a.x)
+//   > 0 => left turn (CCW), == 0 => collinear, < 0 => right turn (CW)
+//
+// All arithmetic is integer; results are exact.
+
+// Cross product of OA x OB where O is the pivot
+fn cross(ox: Int, oy: Int, ax: Int, ay: Int, bx: Int, b_y: Int) -> Int {
+    (ax - ox) * (b_y - oy) - (ay - oy) * (bx - ox)
+}
+
+// Sort points by polar angle w.r.t. (px, py) using selection sort.
+// Points stored in xs[]/ys[] indices idx[0..n-1].
+// Sorts idx[] in place.
+fn sort_by_angle(
+    xs:  [Int; 16],
+    ys:  [Int; 16],
+    idx: [Int; 16],
+    n:   Int,
+    px:  Int,
+    py:  Int
+) {
+    let mut i = 0;
+    while i < n - 1 {
+        let mut best = i;
+        let mut j = i + 1;
+        while j < n {
+            let bi = idx[best];
+            let ji = idx[j];
+            let c = cross(px, py, xs[bi], ys[bi], xs[ji], ys[ji]);
+            // ji comes before bi in CCW order (or equal angle but closer)
+            if c < 0 {
+                best = j;
+            } else if c == 0 {
+                // collinear: keep the farther point later (closer first)
+                let d_best = (xs[bi] - px) * (xs[bi] - px) + (ys[bi] - py) * (ys[bi] - py);
+                let d_j    = (xs[ji] - px) * (xs[ji] - px) + (ys[ji] - py) * (ys[ji] - py);
+                if d_j < d_best { best = j; }
+            }
+            j = j + 1;
+        }
+        // swap idx[i] and idx[best]
+        let tmp = idx[i];
+        idx[i] = idx[best];
+        idx[best] = tmp;
+        i = i + 1;
+    }
+}
+
+// Graham scan: returns the hull size; hull_idx[] gets the indices.
+fn graham_hull(
+    xs:      [Int; 16],
+    ys:      [Int; 16],
+    n:       Int,
+    hull:    [Int; 16]
+) -> Int {
+    if n < 3 { return n; }
+
+    // Step 1: find lowest-y (then leftmost-x) point
+    let mut pivot = 0;
+    let mut i = 1;
+    while i < n {
+        if ys[i] < ys[pivot] || (ys[i] == ys[pivot] && xs[i] < xs[pivot]) {
+            pivot = i;
+        }
+        i = i + 1;
+    }
+
+    // Step 2: build idx[] = all indices except pivot
+    let mut idx = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut cnt = 0;
+    let mut k = 0;
+    while k < n {
+        if k != pivot { idx[cnt] = k; cnt = cnt + 1; }
+        k = k + 1;
+    }
+
+    // Step 3: sort by polar angle
+    sort_by_angle(xs, ys, idx, cnt, xs[pivot], ys[pivot]);
+
+    // Step 4: Graham scan
+    // stack[] holds indices into the original points array
+    let mut stack = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut sz = 0;
+    stack[0] = pivot; sz = 1;
+    stack[1] = idx[0]; sz = 2;
+
+    let mut j = 1;
+    while j < cnt {
+        let p = idx[j];
+        // pop while right turn or collinear
+        while sz >= 2 {
+            let top1 = stack[sz - 1];
+            let top2 = stack[sz - 2];
+            let c = cross(xs[top2], ys[top2], xs[top1], ys[top1], xs[p], ys[p]);
+            if c <= 0 { sz = sz - 1; } else { break; }
+        }
+        stack[sz] = p;
+        sz = sz + 1;
+        j = j + 1;
+    }
+
+    // copy to hull
+    let mut h = 0;
+    while h < sz { hull[h] = stack[h]; h = h + 1; }
+    sz
+}
+
+fn test_square() {
+    // 4 corners of a square + 1 interior point -> hull = 4
+    let xs = [0, 4, 4, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ys = [0, 0, 4, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut hull = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sz = graham_hull(xs, ys, 5, hull);
+    assert_eq(sz, 4);
+    print("convex_hull_square: ok");
+}
+
+fn test_triangle() {
+    // 3 points forming a triangle + 1 interior -> hull = 3
+    let xs = [0, 6, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ys = [0, 0, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut hull = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sz = graham_hull(xs, ys, 4, hull);
+    assert_eq(sz, 3);
+    print("convex_hull_triangle: ok");
+}
+
+fn test_collinear() {
+    // 5 collinear points on x-axis -> hull = 2 (only endpoints survive)
+    let xs = [0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ys = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut hull = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sz = graham_hull(xs, ys, 5, hull);
+    // degenerate: all collinear, scan yields 2 points
+    assert_eq(sz, 2);
+    print("convex_hull_collinear: ok");
+}
+
+fn test_hull_area() {
+    // Rectangle (0,0),(8,0),(8,5),(0,5) + interior (4,2): hull = 4 corners
+    // Shoelace area = 8*5 = 40 (2*area = 80)
+    let xs = [0, 8, 8, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ys = [0, 0, 5, 5, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut hull = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sz = graham_hull(xs, ys, 5, hull);
+    assert_eq(sz, 4);
+
+    // Shoelace formula: 2*area = |sum of cross products around hull|
+    let mut twice_area = 0;
+    let mut i = 0;
+    while i < sz {
+        let j = (i + 1) % sz;
+        let hi = hull[i];
+        let hj = hull[j];
+        twice_area = twice_area + xs[hi] * ys[hj] - xs[hj] * ys[hi];
+        i = i + 1;
+    }
+    if twice_area < 0 { twice_area = 0 - twice_area; }
+    assert_eq(twice_area, 80);
+    print(f"convex_hull_area: twice_area={twice_area}");
+}
+
+fn test_hexagon() {
+    // Regular-ish hexagon (6 hull + 1 interior)
+    // Vertices at: (4,0),(7,2),(7,6),(4,8),(1,6),(1,2) -> 6 hull vertices
+    // Interior: (4,4)
+    let xs = [4, 7, 7, 4, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let ys = [0, 2, 6, 8, 6, 2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut hull = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let sz = graham_hull(xs, ys, 7, hull);
+    assert_eq(sz, 6);
+    print("convex_hull_hexagon: ok");
+}
+
+fn main() -> Int {
+    test_square();
+    test_triangle();
+    test_collinear();
+    test_hull_area();
+    test_hexagon();
+    print("[OK] 501_interp_2d_convex_hull");
+    0
+}

@@ -1,0 +1,162 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, debugging, trace, tier0
+// @description: Basic tests for meta_trace_* debugging builtins
+
+// =============================================================================
+// TRACE ON/OFF TESTS
+// =============================================================================
+
+// Test that tracing can be enabled and disabled
+meta fn test_trace_toggle() -> Bool {
+    meta_trace_off();
+    let before = meta_trace_is_enabled();
+    meta_trace_on();
+    let during = meta_trace_is_enabled();
+    meta_trace_off();
+    let after = meta_trace_is_enabled();
+
+    !before && during && !after
+}
+
+// Test that tracing starts off by default
+meta fn test_trace_default_state() -> Bool {
+    // Clear any previous state
+    meta_trace_off();
+    meta_trace_clear();
+
+    !meta_trace_is_enabled()
+}
+
+// =============================================================================
+// TRACE LOG TESTS
+// =============================================================================
+
+// Test that logging works when tracing is enabled
+meta fn test_trace_log_enabled() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_log("test message");
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "test message")
+}
+
+// Test that logging is ignored when tracing is disabled
+meta fn test_trace_log_disabled() -> Bool {
+    meta_trace_off();
+    meta_trace_clear();
+    meta_trace_log("should not appear");
+
+    let output = meta_trace_dump();
+    text_len(output) == 0
+}
+
+// Test multiple log messages
+meta fn test_trace_multiple_logs() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_log("first");
+    meta_trace_log("second");
+    meta_trace_log("third");
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    text_contains(output, "first") &&
+    text_contains(output, "second") &&
+    text_contains(output, "third")
+}
+
+// =============================================================================
+// TRACE DUMP AND LINES TESTS
+// =============================================================================
+
+// Test trace_dump returns joined output
+meta fn test_trace_dump() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_log("line1");
+    meta_trace_log("line2");
+    meta_trace_off();
+
+    let dump = meta_trace_dump();
+    text_contains(dump, "line1") && text_contains(dump, "line2")
+}
+
+// Test trace_lines returns list of lines
+meta fn test_trace_lines() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_log("a");
+    meta_trace_log("b");
+    meta_trace_log("c");
+    meta_trace_off();
+
+    let lines = meta_trace_lines();
+    list_len(lines) == 3
+}
+
+// =============================================================================
+// TRACE CLEAR TESTS
+// =============================================================================
+
+// Test clearing the trace buffer
+meta fn test_trace_clear() -> Bool {
+    meta_trace_clear();
+    meta_trace_on();
+    meta_trace_log("will be cleared");
+    meta_trace_clear();
+    meta_trace_log("only this remains");
+    meta_trace_off();
+
+    let output = meta_trace_dump();
+    !text_contains(output, "will be cleared") &&
+    text_contains(output, "only this remains")
+}
+
+// Test that clear works on empty buffer
+meta fn test_trace_clear_empty() -> Bool {
+    meta_trace_off();
+    meta_trace_clear();
+    meta_trace_clear();  // Double clear should be fine
+
+    let output = meta_trace_dump();
+    text_len(output) == 0
+}
+
+// =============================================================================
+// TRACE DEPTH TESTS
+// =============================================================================
+
+// Test initial trace depth is 0
+meta fn test_trace_depth_initial() -> Bool {
+    meta_trace_depth() >= 0
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Toggle tests
+    @const assert(test_trace_toggle());
+    @const assert(test_trace_default_state());
+
+    // Log tests
+    @const assert(test_trace_log_enabled());
+    @const assert(test_trace_log_disabled());
+    @const assert(test_trace_multiple_logs());
+
+    // Dump and lines tests
+    @const assert(test_trace_dump());
+    @const assert(test_trace_lines());
+
+    // Clear tests
+    @const assert(test_trace_clear());
+    @const assert(test_trace_clear_empty());
+
+    // Depth tests
+    @const assert(test_trace_depth_initial());
+}

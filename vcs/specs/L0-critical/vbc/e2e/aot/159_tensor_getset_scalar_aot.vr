@@ -1,0 +1,324 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, tensor, scalar
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT tensor get/set scalar — element access and mutation
+
+// ============================================================================
+// 8-element flat tensor with shape metadata
+// ============================================================================
+
+type Tensor8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    rows: Int, cols: Int
+};
+
+fn t8_get(t: Tensor8, i: Int) -> Int {
+    if i == 0 { t.e0 } else if i == 1 { t.e1 } else if i == 2 { t.e2 }
+    else if i == 3 { t.e3 } else if i == 4 { t.e4 } else if i == 5 { t.e5 }
+    else if i == 6 { t.e6 } else { t.e7 }
+}
+
+fn t8_set(t: Tensor8, i: Int, v: Int) -> Tensor8 {
+    Tensor8 {
+        e0: if i == 0 { v } else { t.e0 },
+        e1: if i == 1 { v } else { t.e1 },
+        e2: if i == 2 { v } else { t.e2 },
+        e3: if i == 3 { v } else { t.e3 },
+        e4: if i == 4 { v } else { t.e4 },
+        e5: if i == 5 { v } else { t.e5 },
+        e6: if i == 6 { v } else { t.e6 },
+        e7: if i == 7 { v } else { t.e7 },
+        rows: t.rows, cols: t.cols
+    }
+}
+
+fn t8_get2d(t: Tensor8, r: Int, c: Int) -> Int {
+    t8_get(t, r * t.cols + c)
+}
+
+fn t8_set2d(t: Tensor8, r: Int, c: Int, v: Int) -> Tensor8 {
+    t8_set(t, r * t.cols + c, v)
+}
+
+fn t8_zeros(rows: Int, cols: Int) -> Tensor8 {
+    Tensor8 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        rows: rows, cols: cols
+    }
+}
+
+fn t8_arange(n: Int) -> Tensor8 {
+    let mut t = t8_zeros(1, n);
+    let mut i = 0;
+    while i < n && i < 8 {
+        t = t8_set(t, i, i);
+        i = i + 1;
+    }
+    t
+}
+
+// Select a row from a 2D tensor, return as 1D tensor
+fn t8_select_row(t: Tensor8, row: Int) -> Tensor8 {
+    let mut out = t8_zeros(1, t.cols);
+    let mut c = 0;
+    while c < t.cols && c < 8 {
+        out = t8_set(out, c, t8_get2d(t, row, c));
+        c = c + 1;
+    }
+    out
+}
+
+// Select a column from a 2D tensor, return as 1D tensor
+fn t8_select_col(t: Tensor8, col: Int) -> Tensor8 {
+    let mut out = t8_zeros(1, t.rows);
+    let mut r = 0;
+    while r < t.rows && r < 8 {
+        out = t8_set(out, r, t8_get2d(t, r, col));
+        r = r + 1;
+    }
+    out
+}
+
+// Leaky ReLU: if x > 0 then x else x * alpha / 100
+// (alpha is an integer representing alpha * 100, e.g., 10 = 0.10)
+fn leaky_relu(x: Int, alpha: Int) -> Int {
+    if x > 0 { x } else { x * alpha / 100 }
+}
+
+fn t8_leaky_relu(t: Tensor8, alpha: Int) -> Tensor8 {
+    Tensor8 {
+        e0: leaky_relu(t.e0, alpha),
+        e1: leaky_relu(t.e1, alpha),
+        e2: leaky_relu(t.e2, alpha),
+        e3: leaky_relu(t.e3, alpha),
+        e4: leaky_relu(t.e4, alpha),
+        e5: leaky_relu(t.e5, alpha),
+        e6: leaky_relu(t.e6, alpha),
+        e7: leaky_relu(t.e7, alpha),
+        rows: t.rows, cols: t.cols
+    }
+}
+
+// ============================================================================
+// Test 1: get scalar by index
+// ============================================================================
+
+fn test_get_scalar() {
+    // 1D tensor [10, 20, 30, 40, 50, 60, 70, 80]
+    let t = Tensor8 {
+        e0: 10, e1: 20, e2: 30, e3: 40,
+        e4: 50, e5: 60, e6: 70, e7: 80,
+        rows: 1, cols: 8
+    };
+
+    // Access each element
+    assert_eq(t8_get(t, 0), 10);
+    assert_eq(t8_get(t, 1), 20);
+    assert_eq(t8_get(t, 2), 30);
+    assert_eq(t8_get(t, 3), 40);
+    assert_eq(t8_get(t, 4), 50);
+    assert_eq(t8_get(t, 5), 60);
+    assert_eq(t8_get(t, 6), 70);
+    assert_eq(t8_get(t, 7), 80);
+
+    // 2D access: 2x4 matrix
+    let m = Tensor8 {
+        e0: 1, e1: 2, e2: 3, e3: 4,
+        e4: 5, e5: 6, e6: 7, e7: 8,
+        rows: 2, cols: 4
+    };
+    // Row 0: [1, 2, 3, 4]
+    assert_eq(t8_get2d(m, 0, 0), 1);
+    assert_eq(t8_get2d(m, 0, 1), 2);
+    assert_eq(t8_get2d(m, 0, 2), 3);
+    assert_eq(t8_get2d(m, 0, 3), 4);
+    // Row 1: [5, 6, 7, 8]
+    assert_eq(t8_get2d(m, 1, 0), 5);
+    assert_eq(t8_get2d(m, 1, 1), 6);
+    assert_eq(t8_get2d(m, 1, 2), 7);
+    assert_eq(t8_get2d(m, 1, 3), 8);
+
+    // Arange creates [0, 1, 2, ..., n-1]
+    let ar = t8_arange(6);
+    assert_eq(t8_get(ar, 0), 0);
+    assert_eq(t8_get(ar, 1), 1);
+    assert_eq(t8_get(ar, 2), 2);
+    assert_eq(t8_get(ar, 3), 3);
+    assert_eq(t8_get(ar, 4), 4);
+    assert_eq(t8_get(ar, 5), 5);
+
+    print("test_get_scalar passed");
+}
+
+// ============================================================================
+// Test 2: set scalar and mutation
+// ============================================================================
+
+fn test_set_scalar() {
+    // Start with zeros, set individual elements
+    let mut t = t8_zeros(2, 4);
+    assert_eq(t8_get(t, 0), 0);
+    assert_eq(t8_get(t, 7), 0);
+
+    // Set element at flat index 3
+    t = t8_set(t, 3, 99);
+    assert_eq(t8_get(t, 3), 99);
+    assert_eq(t8_get(t, 0), 0);  // Others unchanged
+    assert_eq(t8_get(t, 4), 0);
+
+    // Set via 2D index
+    t = t8_set2d(t, 1, 2, 42);
+    // Row 1, col 2 -> flat index = 1*4+2 = 6
+    assert_eq(t8_get(t, 6), 42);
+    assert_eq(t8_get2d(t, 1, 2), 42);
+
+    // Overwrite existing value
+    t = t8_set(t, 3, 77);
+    assert_eq(t8_get(t, 3), 77);
+
+    // Fill entire tensor via loop
+    let mut filled = t8_zeros(1, 8);
+    let mut i = 0;
+    while i < 8 {
+        filled = t8_set(filled, i, (i + 1) * 10);
+        i = i + 1;
+    }
+    assert_eq(t8_get(filled, 0), 10);
+    assert_eq(t8_get(filled, 3), 40);
+    assert_eq(t8_get(filled, 7), 80);
+
+    // Verify shape is preserved after set
+    assert_eq(t.rows, 2);
+    assert_eq(t.cols, 4);
+
+    print("test_set_scalar passed");
+}
+
+// ============================================================================
+// Test 3: index select (row/column selection)
+// ============================================================================
+
+fn test_index_select() {
+    // 2x4 matrix:
+    // [10, 20, 30, 40]
+    // [50, 60, 70, 80]
+    let m = Tensor8 {
+        e0: 10, e1: 20, e2: 30, e3: 40,
+        e4: 50, e5: 60, e6: 70, e7: 80,
+        rows: 2, cols: 4
+    };
+
+    // Select row 0
+    let row0 = t8_select_row(m, 0);
+    assert_eq(t8_get(row0, 0), 10);
+    assert_eq(t8_get(row0, 1), 20);
+    assert_eq(t8_get(row0, 2), 30);
+    assert_eq(t8_get(row0, 3), 40);
+
+    // Select row 1
+    let row1 = t8_select_row(m, 1);
+    assert_eq(t8_get(row1, 0), 50);
+    assert_eq(t8_get(row1, 1), 60);
+    assert_eq(t8_get(row1, 2), 70);
+    assert_eq(t8_get(row1, 3), 80);
+
+    // Select column 0
+    let col0 = t8_select_col(m, 0);
+    assert_eq(t8_get(col0, 0), 10);
+    assert_eq(t8_get(col0, 1), 50);
+
+    // Select column 2
+    let col2 = t8_select_col(m, 2);
+    assert_eq(t8_get(col2, 0), 30);
+    assert_eq(t8_get(col2, 1), 70);
+
+    // Select column 3
+    let col3 = t8_select_col(m, 3);
+    assert_eq(t8_get(col3, 0), 40);
+    assert_eq(t8_get(col3, 1), 80);
+
+    // Row sum verification
+    let row0_sum = t8_get(row0, 0) + t8_get(row0, 1) + t8_get(row0, 2) + t8_get(row0, 3);
+    assert_eq(row0_sum, 100);  // 10+20+30+40
+
+    let row1_sum = t8_get(row1, 0) + t8_get(row1, 1) + t8_get(row1, 2) + t8_get(row1, 3);
+    assert_eq(row1_sum, 260);  // 50+60+70+80
+
+    print("test_index_select passed");
+}
+
+// ============================================================================
+// Test 4: leaky ReLU activation
+// ============================================================================
+
+fn test_leaky_relu() {
+    // Tensor with mix of positive and negative values
+    let t = Tensor8 {
+        e0: 100, e1: -200, e2: 50, e3: -300,
+        e4: 0, e5: 400, e6: -100, e7: 250,
+        rows: 1, cols: 8
+    };
+
+    // Leaky ReLU with alpha=10 (= 0.10)
+    // Positive: unchanged. Negative: x * 10 / 100 = x / 10
+    let out = t8_leaky_relu(t, 10);
+    assert_eq(t8_get(out, 0), 100);    // positive: unchanged
+    assert_eq(t8_get(out, 1), -20);    // -200 * 10 / 100 = -20
+    assert_eq(t8_get(out, 2), 50);     // positive: unchanged
+    assert_eq(t8_get(out, 3), -30);    // -300 * 10 / 100 = -30
+    assert_eq(t8_get(out, 4), 0);      // zero: 0 * 10 / 100 = 0
+    assert_eq(t8_get(out, 5), 400);    // positive: unchanged
+    assert_eq(t8_get(out, 6), -10);    // -100 * 10 / 100 = -10
+    assert_eq(t8_get(out, 7), 250);    // positive: unchanged
+
+    // Leaky ReLU with alpha=1 (= 0.01)
+    let out2 = t8_leaky_relu(t, 1);
+    assert_eq(t8_get(out2, 0), 100);   // positive: unchanged
+    assert_eq(t8_get(out2, 1), -2);    // -200 * 1 / 100 = -2
+    assert_eq(t8_get(out2, 3), -3);    // -300 * 1 / 100 = -3
+    assert_eq(t8_get(out2, 6), -1);    // -100 * 1 / 100 = -1
+
+    // Leaky ReLU with alpha=50 (= 0.50)
+    let out3 = t8_leaky_relu(t, 50);
+    assert_eq(t8_get(out3, 1), -100);  // -200 * 50 / 100 = -100
+    assert_eq(t8_get(out3, 3), -150);  // -300 * 50 / 100 = -150
+    assert_eq(t8_get(out3, 6), -50);   // -100 * 50 / 100 = -50
+
+    // All positive tensor: leaky ReLU is identity
+    let pos = Tensor8 {
+        e0: 1, e1: 2, e2: 3, e3: 4,
+        e4: 5, e5: 6, e6: 7, e7: 8,
+        rows: 1, cols: 8
+    };
+    let pos_out = t8_leaky_relu(pos, 10);
+    assert_eq(t8_get(pos_out, 0), 1);
+    assert_eq(t8_get(pos_out, 7), 8);
+
+    // All negative tensor
+    let neg = Tensor8 {
+        e0: -1000, e1: -500, e2: -200, e3: -100,
+        e4: -50, e5: -20, e6: -10, e7: -1,
+        rows: 1, cols: 8
+    };
+    let neg_out = t8_leaky_relu(neg, 10);
+    assert_eq(t8_get(neg_out, 0), -100);  // -1000 * 10 / 100
+    assert_eq(t8_get(neg_out, 1), -50);   // -500 * 10 / 100
+    assert_eq(t8_get(neg_out, 2), -20);   // -200 * 10 / 100
+    assert_eq(t8_get(neg_out, 3), -10);   // -100 * 10 / 100
+
+    print("test_leaky_relu passed");
+}
+
+fn main() -> Int {
+    test_get_scalar();
+    test_set_scalar();
+    test_index_select();
+    test_leaky_relu();
+    print("ALL PASSED");
+    0
+}

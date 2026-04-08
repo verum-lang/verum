@@ -1,0 +1,154 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, copy-semantics, affine, patterns
+
+/// Test copy and affine semantics through pattern matching.
+/// Pattern matching copies values from containers (for Copy types).
+/// Affine types are moved during destructuring.
+/// Spec: 04-memory-model.md#pattern-matching
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Maybe<T> is Some(T) | None;
+
+type Pair<A, B> is {
+    first: A,
+    second: B,
+};
+
+// Affine type
+type affine Handle is {
+    fd: Int,
+};
+
+// Maybe wrapper for Handle (affine type)
+type MaybeHandle is Some(Handle) | None;
+
+fn main() {
+    test_copy_through_match();
+    test_copy_through_option();
+    test_copy_through_tuple();
+    test_copy_through_struct();
+    test_copy_nested_patterns();
+    test_affine_pattern_match();
+}
+
+/// Copy through match on enum (Copy type)
+fn test_copy_through_match() {
+    let result: Result<Text, Text> = Result.Ok(Text.from("success"));
+    match result {
+        Result.Ok(value) => {
+            // value is copied out of result (Text is Copy)
+            print(value);
+        },
+        Result.Err(error) => {
+            print(error);
+        },
+    }
+    // result is STILL valid (Result<Text, Text> is Copy)
+    match result {
+        Result.Ok(v) => assert(v == "success"),
+        Result.Err(_) => panic("Expected Ok"),
+    }
+}
+
+/// Copy through Option pattern
+fn test_copy_through_option() {
+    let opt = Maybe.Some(Text.from("contained"));
+    if let Maybe.Some(inner) = opt {
+        // inner is copied out of opt (Text is Copy)
+        print(inner);
+    }
+    // opt is STILL valid
+    assert(opt == Maybe.Some(Text.from("contained")));
+}
+
+/// Copy through tuple destructuring
+fn test_copy_through_tuple() {
+    let tuple = (Text.from("first"), Text.from("second"), 42);
+    let (a, b, c) = tuple;
+    // tuple is STILL valid (all elements are Copy)
+    print(a);
+    print(b);
+    assert(c == 42);
+    assert(tuple.0 == "first");
+    assert(tuple.1 == "second");
+    assert(tuple.2 == 42);
+}
+
+/// Copy through struct destructuring
+fn test_copy_through_struct() {
+    let pair = Pair {
+        first: Text.from("left"),
+        second: Text.from("right"),
+    };
+    let Pair { first, second } = pair;
+    // pair is STILL valid (Pair<Text, Text> is Copy)
+    print(first);
+    print(second);
+    assert(pair.first == "left");
+    assert(pair.second == "right");
+}
+
+/// Copy through nested patterns
+fn test_copy_nested_patterns() {
+    let nested = Maybe.Some(Result.Ok(Text.from("deep")));
+    match nested {
+        Maybe.Some(Result.Ok(value)) => {
+            print(value);
+        },
+        Maybe.Some(Result.Err(e)) => {
+            print(e);
+        },
+        Maybe.None => (),
+    }
+    // nested is STILL valid
+    match nested {
+        Maybe.Some(Result.Ok(v)) => assert(v == "deep"),
+        _ => panic("Expected Some(Ok(_))"),
+    }
+}
+
+/// Copy in list patterns
+fn test_copy_list_patterns() {
+    let items = [Text.from("a"), Text.from("b"), Text.from("c")];
+    if let [first, rest @ ..] = items {
+        print(first);
+        for item in rest {
+            print(item);
+        }
+    }
+    // items is STILL valid (List<Text> is Copy)
+    assert(items.len() == 3);
+}
+
+/// Copy with guards
+fn test_copy_with_guards() {
+    let value = Maybe.Some(Text.from("guarded"));
+    match value {
+        Maybe.Some(s) if s.len() > 0 => {
+            print(s);
+        },
+        Maybe.Some(s) => {
+            print(s);
+        },
+        Maybe.None => (),
+    }
+    // value is STILL valid
+    assert(value == Maybe.Some(Text.from("guarded")));
+}
+
+/// Affine types are MOVED during pattern matching
+fn test_affine_pattern_match() {
+    let opt = MaybeHandle.Some(Handle { fd: 42 });
+    match opt {
+        MaybeHandle.Some(h) => {
+            // h is moved out (Handle is affine)
+            assert(h.fd == 42);
+        },
+        MaybeHandle.None => (),
+    }
+    // opt is NO LONGER valid (Handle was moved out)
+    // Using opt here would panic
+}

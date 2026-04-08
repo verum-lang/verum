@@ -1,0 +1,114 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, bitfield, bit-packing, flags
+// @timeout: 10000
+
+// Bitfield operations: pack/unpack multiple values into single int
+// Simulate flags and small packed values
+
+fn set_flag(flags: Int, bit: Int) -> Int {
+    let mut mask = 1;
+    let mut i = 0;
+    while i < bit { mask = mask * 2; i = i + 1; }
+    // Check if already set
+    let mut check = flags;
+    let mut j = 0;
+    while j < bit { check = check / 2; j = j + 1; }
+    if check % 2 == 1 { flags }
+    else { flags + mask }
+}
+
+fn clear_flag(flags: Int, bit: Int) -> Int {
+    let mut mask = 1;
+    let mut i = 0;
+    while i < bit { mask = mask * 2; i = i + 1; }
+    let mut check = flags;
+    let mut j = 0;
+    while j < bit { check = check / 2; j = j + 1; }
+    if check % 2 == 0 { flags }
+    else { flags - mask }
+}
+
+fn get_flag(flags: Int, bit: Int) -> Int {
+    let mut v = flags;
+    let mut i = 0;
+    while i < bit { v = v / 2; i = i + 1; }
+    v % 2
+}
+
+fn count_flags(flags: Int) -> Int {
+    let mut count = 0;
+    let mut v = flags;
+    while v > 0 { count = count + v % 2; v = v / 2; }
+    count
+}
+
+// Pack two 4-bit values into one 8-bit value
+fn pack_4_4(a: Int, b: Int) -> Int {
+    a + b * 16
+}
+
+fn unpack_lo4(packed: Int) -> Int {
+    packed % 16
+}
+
+fn unpack_hi4(packed: Int) -> Int {
+    (packed / 16) % 16
+}
+
+fn test_flags() -> Int {
+    let mut f = 0;
+    f = set_flag(f, 0);
+    assert_eq(get_flag(f, 0), 1);
+    assert_eq(get_flag(f, 1), 0);
+    f = set_flag(f, 3);
+    assert_eq(get_flag(f, 3), 1);
+    assert_eq(count_flags(f), 2);
+    1
+}
+
+fn test_clear() -> Int {
+    let mut f = 0;
+    f = set_flag(f, 0);
+    f = set_flag(f, 1);
+    f = set_flag(f, 2);
+    assert_eq(count_flags(f), 3);
+    f = clear_flag(f, 1);
+    assert_eq(count_flags(f), 2);
+    assert_eq(get_flag(f, 1), 0);
+    assert_eq(get_flag(f, 0), 1);
+    1
+}
+
+fn test_idempotent() -> Int {
+    let mut f = 0;
+    f = set_flag(f, 5);
+    let f2 = set_flag(f, 5);
+    assert_eq(f, f2);
+    let f3 = clear_flag(f2, 5);
+    let f4 = clear_flag(f3, 5);
+    assert_eq(f3, f4);
+    assert_eq(get_flag(f3, 5), 0);
+    1
+}
+
+fn test_packing() -> Int {
+    let packed = pack_4_4(5, 11);
+    assert_eq(unpack_lo4(packed), 5);
+    assert_eq(unpack_hi4(packed), 11);
+    let p2 = pack_4_4(0, 15);
+    assert_eq(unpack_lo4(p2), 0);
+    assert_eq(unpack_hi4(p2), 15);
+    1
+}
+
+fn main() -> Int {
+    test_flags();
+    test_clear();
+    test_idempotent();
+    test_packing();
+    print("DIFF_OK: bitfield");
+    0
+}

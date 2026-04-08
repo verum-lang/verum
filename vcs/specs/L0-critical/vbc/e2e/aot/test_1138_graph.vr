@@ -1,0 +1,196 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: graph, adjacency-matrix, connectivity
+// @description: Test graph representation using adjacency matrix
+
+// Graph as adjacency matrix (flat list)
+// Matrix stored as row-major: adj[i * n + j] = 1 if edge i->j
+fn create_adj_matrix(n: Int) -> List<Int> {
+    let mut matrix = List.new();
+    let mut i = 0;
+    while i < n * n {
+        matrix.push(0);
+        i = i + 1;
+    }
+    matrix
+}
+
+fn add_edge_matrix(matrix: List<Int>, n: Int, from: Int, to: Int) {
+    matrix[from * n + to] = 1;
+    matrix[to * n + from] = 1;
+}
+
+fn has_edge(matrix: List<Int>, n: Int, from: Int, to: Int) -> Bool {
+    matrix[from * n + to] == 1
+}
+
+fn degree_of(matrix: List<Int>, n: Int, v: Int) -> Int {
+    let mut count = 0;
+    let mut j = 0;
+    while j < n {
+        if matrix[v * n + j] == 1 {
+            count = count + 1;
+        }
+        j = j + 1;
+    }
+    count
+}
+
+fn test_adj_matrix() -> Int {
+    let n = 5;
+    let matrix = create_adj_matrix(n);
+    add_edge_matrix(matrix, n, 0, 1);
+    add_edge_matrix(matrix, n, 0, 2);
+    add_edge_matrix(matrix, n, 1, 3);
+    add_edge_matrix(matrix, n, 2, 4);
+
+    if !has_edge(matrix, n, 0, 1) {
+        print("FAIL: edge 0-1");
+        return 1;
+    }
+    if !has_edge(matrix, n, 1, 0) {
+        print("FAIL: edge 1-0 (symmetric)");
+        return 1;
+    }
+    if has_edge(matrix, n, 0, 3) {
+        print("FAIL: no edge 0-3");
+        return 1;
+    }
+    if degree_of(matrix, n, 0) != 2 {
+        print(f"FAIL degree(0)={degree_of(matrix, n, 0)}");
+        return 1;
+    }
+    print("  adj_matrix: OK");
+    0
+}
+
+// BFS using adjacency matrix
+fn bfs_matrix(matrix: List<Int>, n: Int, start_v: Int) -> Int {
+    let mut visited = List.new();
+    let mut i = 0;
+    while i < n {
+        visited.push(0);
+        i = i + 1;
+    }
+
+    let mut queue = List.new();
+    queue.push(start_v);
+    visited[start_v] = 1;
+    let mut count = 0;
+
+    while queue.len() > 0 {
+        let current = queue[0];
+        // Shift queue
+        let mut new_q = List.new();
+        let mut qi = 1;
+        while qi < queue.len() {
+            new_q.push(queue[qi]);
+            qi = qi + 1;
+        }
+        queue = new_q;
+
+        count = count + 1;
+
+        let mut j = 0;
+        while j < n {
+            if matrix[current * n + j] == 1 && visited[j] == 0 {
+                visited[j] = 1;
+                queue.push(j);
+            }
+            j = j + 1;
+        }
+    }
+    count
+}
+
+fn test_bfs() -> Int {
+    let n = 6;
+    let matrix = create_adj_matrix(n);
+    add_edge_matrix(matrix, n, 0, 1);
+    add_edge_matrix(matrix, n, 0, 2);
+    add_edge_matrix(matrix, n, 1, 3);
+    add_edge_matrix(matrix, n, 2, 4);
+    add_edge_matrix(matrix, n, 3, 5);
+
+    let visited_count = bfs_matrix(matrix, n, 0);
+    if visited_count != 6 {
+        print(f"FAIL bfs: visited {visited_count}, expected 6");
+        return 1;
+    }
+    print("  bfs: OK");
+    0
+}
+
+fn test_components() -> Int {
+    let n = 6;
+    let matrix = create_adj_matrix(n);
+    // Component 1: 0-1-2
+    add_edge_matrix(matrix, n, 0, 1);
+    add_edge_matrix(matrix, n, 1, 2);
+    // Component 2: 3-4
+    add_edge_matrix(matrix, n, 3, 4);
+    // Component 3: 5 (isolated)
+
+    // Count components
+    let mut visited = List.new();
+    let mut i = 0;
+    while i < n {
+        visited.push(0);
+        i = i + 1;
+    }
+
+    let mut components = 0;
+    let mut v = 0;
+    while v < n {
+        if visited[v] == 0 {
+            components = components + 1;
+            // BFS to mark component
+            let mut queue = List.new();
+            queue.push(v);
+            visited[v] = 1;
+            while queue.len() > 0 {
+                let curr = queue[0];
+                let mut nq = List.new();
+                let mut qi = 1;
+                while qi < queue.len() {
+                    nq.push(queue[qi]);
+                    qi = qi + 1;
+                }
+                queue = nq;
+
+                let mut j = 0;
+                while j < n {
+                    if matrix[curr * n + j] == 1 && visited[j] == 0 {
+                        visited[j] = 1;
+                        queue.push(j);
+                    }
+                    j = j + 1;
+                }
+            }
+        }
+        v = v + 1;
+    }
+
+    if components != 3 {
+        print(f"FAIL components: {components}, expected 3");
+        return 1;
+    }
+    print("  components: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Graph Tests:");
+    let mut failures = 0;
+    failures = failures + test_adj_matrix();
+    failures = failures + test_bfs();
+    failures = failures + test_components();
+
+    if failures == 0 {
+        print("All graph tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

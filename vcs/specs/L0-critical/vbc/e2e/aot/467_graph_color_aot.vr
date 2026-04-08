@@ -1,0 +1,183 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, graph-coloring, greedy
+// @timeout: 30000
+
+// Graph coloring using greedy algorithm on small graphs
+// Adjacency stored as bitmask per node
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn bit_test(mask: Int, pos: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < pos { b = b * 2; i = i + 1; }
+    (mask / b) % 2
+}
+
+fn bit_set(mask: Int, pos: Int) -> Int {
+    let mut b = 1;
+    let mut i = 0;
+    while i < pos { b = b * 2; i = i + 1; }
+    if (mask / b) % 2 == 0 { mask + b } else { mask }
+}
+
+// Greedy graph coloring
+// adj[i] = bitmask of neighbors of node i
+// Returns colors array where color[i] is the color of node i (0-indexed)
+fn greedy_color(adj: Arr8, n: Int) -> Arr8 {
+    let mut colors = Arr8 { v0: -1, v1: -1, v2: -1, v3: -1, v4: -1, v5: -1, v6: -1, v7: -1 };
+    let mut node = 0;
+    while node < n {
+        // Find colors used by neighbors
+        let mut used = 0; // bitmask of used colors
+        let neighbors = get8(adj, node);
+        let mut j = 0;
+        while j < n {
+            if bit_test(neighbors, j) == 1 {
+                let c = get8(colors, j);
+                if c >= 0 {
+                    used = bit_set(used, c);
+                }
+            }
+            j = j + 1;
+        }
+        // Find smallest unused color
+        let mut c = 0;
+        while bit_test(used, c) == 1 { c = c + 1; }
+        colors = set8(colors, node, c);
+        node = node + 1;
+    }
+    colors
+}
+
+// Count distinct colors used
+fn count_colors(colors: Arr8, n: Int) -> Int {
+    let mut max_c = 0;
+    let mut i = 0;
+    while i < n {
+        let c = get8(colors, i);
+        if c > max_c { max_c = c; }
+        i = i + 1;
+    }
+    max_c + 1
+}
+
+// Verify coloring is valid: no two adjacent nodes share a color
+fn valid_coloring(adj: Arr8, colors: Arr8, n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            if bit_test(get8(adj, i), j) == 1 {
+                if get8(colors, i) == get8(colors, j) { return 0; }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+// Max degree of graph
+fn max_degree(adj: Arr8, n: Int) -> Int {
+    let mut max_d = 0;
+    let mut i = 0;
+    while i < n {
+        let mut deg = 0;
+        let mut m = get8(adj, i);
+        while m > 0 {
+            deg = deg + m % 2;
+            m = m / 2;
+        }
+        if deg > max_d { max_d = deg; }
+        i = i + 1;
+    }
+    max_d
+}
+
+fn test_triangle() -> Int {
+    // Triangle: 0-1, 1-2, 0-2
+    // adj[0] = 110 = 6, adj[1] = 101 = 5, adj[2] = 011 = 3
+    let adj = Arr8 { v0: 6, v1: 5, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let colors = greedy_color(adj, 3);
+    assert_eq(valid_coloring(adj, colors, 3), 1);
+    assert_eq(count_colors(colors, 3), 3); // Triangle needs 3 colors
+    1
+}
+
+fn test_bipartite() -> Int {
+    // K2,2: 0-2, 0-3, 1-2, 1-3
+    // adj[0] = 1100 = 12, adj[1] = 1100 = 12, adj[2] = 0011 = 3, adj[3] = 0011 = 3
+    let adj = Arr8 { v0: 12, v1: 12, v2: 3, v3: 3, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let colors = greedy_color(adj, 4);
+    assert_eq(valid_coloring(adj, colors, 4), 1);
+    assert_eq(count_colors(colors, 4), 2); // Bipartite = 2-colorable
+    1
+}
+
+fn test_path() -> Int {
+    // Path: 0-1-2-3-4
+    // adj[0]=2, adj[1]=5, adj[2]=10, adj[3]=20, adj[4]=8
+    // Actually: 0-1: adj[0] has bit 1, adj[1] has bit 0
+    // 1-2: adj[1] has bit 2, adj[2] has bit 1
+    // 2-3: adj[2] has bit 3, adj[3] has bit 2
+    // 3-4: adj[3] has bit 4, adj[4] has bit 3
+    let adj = Arr8 { v0: 2, v1: 5, v2: 10, v3: 20, v4: 8, v5: 0, v6: 0, v7: 0 };
+    let colors = greedy_color(adj, 5);
+    assert_eq(valid_coloring(adj, colors, 5), 1);
+    assert_eq(count_colors(colors, 5), 2); // Path is bipartite
+    1
+}
+
+fn test_star() -> Int {
+    // Star: center=0 connected to 1,2,3,4
+    // adj[0] = 11110 = 30, adj[1]=1, adj[2]=1, adj[3]=1, adj[4]=1
+    let adj = Arr8 { v0: 30, v1: 1, v2: 1, v3: 1, v4: 1, v5: 0, v6: 0, v7: 0 };
+    let colors = greedy_color(adj, 5);
+    assert_eq(valid_coloring(adj, colors, 5), 1);
+    assert_eq(count_colors(colors, 5), 2); // Star is 2-colorable
+    assert_eq(max_degree(adj, 5), 4);
+    1
+}
+
+fn test_complete4() -> Int {
+    // K4: all pairs connected
+    // adj[0]=14, adj[1]=13, adj[2]=11, adj[3]=7
+    let adj = Arr8 { v0: 14, v1: 13, v2: 11, v3: 7, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let colors = greedy_color(adj, 4);
+    assert_eq(valid_coloring(adj, colors, 4), 1);
+    assert_eq(count_colors(colors, 4), 4); // K4 needs 4 colors
+    1
+}
+
+fn main() -> Int {
+    test_triangle();
+    test_bipartite();
+    test_path();
+    test_star();
+    test_complete4();
+    print("[OK] 467_graph_color_aot");
+    0
+}

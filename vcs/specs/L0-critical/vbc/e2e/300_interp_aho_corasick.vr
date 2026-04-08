@@ -1,0 +1,452 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, aho-corasick, multi-pattern, string-matching
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Simplified Aho-Corasick multi-pattern matching.
+// Uses a trie with failure links for searching multiple patterns simultaneously.
+// Alphabet size 4 (values 0-3), up to 16 trie nodes, up to 4 patterns.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn arr16_fill(v: Int) -> Arr16 {
+    Arr16 {
+        e0: v, e1: v, e2: v, e3: v,
+        e4: v, e5: v, e6: v, e7: v,
+        e8: v, e9: v, e10: v, e11: v,
+        e12: v, e13: v, e14: v, e15: v
+    }
+}
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else { a.e3 }
+}
+
+fn arr4_set(a: Arr4, i: Int, v: Int) -> Arr4 {
+    Arr4 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 }
+    }
+}
+
+fn arr4_zeros() -> Arr4 {
+    Arr4 { e0: 0, e1: 0, e2: 0, e3: 0 }
+}
+
+// =============================================================================
+// Aho-Corasick automaton
+// child_c[node] = child index for character c (-1 if none)
+// fail[node] = failure link (longest proper suffix that is a prefix in trie)
+// output[node] = bitmask of patterns ending at this node (bit i for pattern i)
+// =============================================================================
+
+type ACAuto is {
+    child0: Arr16,
+    child1: Arr16,
+    child2: Arr16,
+    child3: Arr16,
+    fail: Arr16,
+    out: Arr16,
+    count: Int
+};
+
+fn ac_new() -> ACAuto {
+    ACAuto {
+        child0: arr16_fill(-1),
+        child1: arr16_fill(-1),
+        child2: arr16_fill(-1),
+        child3: arr16_fill(-1),
+        fail: arr16_fill(0),
+        out: arr16_fill(0),
+        count: 1  // root = node 0
+    }
+}
+
+fn ac_get_child(ac: ACAuto, node: Int, ch: Int) -> Int {
+    if ch == 0 { arr16_get(ac.child0, node) }
+    else if ch == 1 { arr16_get(ac.child1, node) }
+    else if ch == 2 { arr16_get(ac.child2, node) }
+    else { arr16_get(ac.child3, node) }
+}
+
+fn ac_set_child(ac: ACAuto, node: Int, ch: Int, val: Int) -> ACAuto {
+    if ch == 0 {
+        ACAuto { child0: arr16_set(ac.child0, node, val), child1: ac.child1, child2: ac.child2, child3: ac.child3, fail: ac.fail, out: ac.out, count: ac.count }
+    } else if ch == 1 {
+        ACAuto { child0: ac.child0, child1: arr16_set(ac.child1, node, val), child2: ac.child2, child3: ac.child3, fail: ac.fail, out: ac.out, count: ac.count }
+    } else if ch == 2 {
+        ACAuto { child0: ac.child0, child1: ac.child1, child2: arr16_set(ac.child2, node, val), child3: ac.child3, fail: ac.fail, out: ac.out, count: ac.count }
+    } else {
+        ACAuto { child0: ac.child0, child1: ac.child1, child2: ac.child2, child3: arr16_set(ac.child3, node, val), fail: ac.fail, out: ac.out, count: ac.count }
+    }
+}
+
+// =============================================================================
+// Insert a pattern into the trie
+// =============================================================================
+
+fn ac_insert(ac: ACAuto, pattern: Arr8, plen: Int, pat_id: Int) -> ACAuto {
+    let mut cur = 0;
+    let mut a = ac;
+    let mut i = 0;
+    while i < plen {
+        let ch = arr8_get(pattern, i);
+        let child = ac_get_child(a, cur, ch);
+        if child == -1 {
+            let new_node = a.count;
+            if new_node >= 15 { return a; }
+            a = ac_set_child(a, cur, ch, new_node);
+            a = ACAuto { child0: a.child0, child1: a.child1, child2: a.child2, child3: a.child3, fail: a.fail, out: a.out, count: a.count + 1 };
+            cur = new_node;
+        } else {
+            cur = child;
+        }
+        i = i + 1;
+    }
+    // Mark pattern output at this node
+    let old_out = arr16_get(a.out, cur);
+    let bit = 1;
+    let mut shifted = bit;
+    let mut s = 0;
+    while s < pat_id {
+        shifted = shifted * 2;
+        s = s + 1;
+    }
+    ACAuto { child0: a.child0, child1: a.child1, child2: a.child2, child3: a.child3, fail: a.fail, out: arr16_set(a.out, cur, old_out | shifted), count: a.count }
+}
+
+// =============================================================================
+// Build failure links using BFS
+// We use an Arr16 as a queue.
+// =============================================================================
+
+fn ac_build_fail(ac: ACAuto) -> ACAuto {
+    let mut a = ac;
+    // BFS queue
+    let mut queue = arr16_fill(0);
+    let mut qfront = 0;
+    let mut qback = 0;
+
+    // Enqueue children of root
+    let mut ch = 0;
+    while ch < 4 {
+        let child = ac_get_child(a, 0, ch);
+        if child != -1 {
+            a = ACAuto { child0: a.child0, child1: a.child1, child2: a.child2, child3: a.child3, fail: arr16_set(a.fail, child, 0), out: a.out, count: a.count };
+            queue = arr16_set(queue, qback, child);
+            qback = qback + 1;
+        }
+        ch = ch + 1;
+    }
+
+    // BFS
+    let mut iters = 0;
+    while qfront < qback && iters < 50 {
+        let node = arr16_get(queue, qfront);
+        qfront = qfront + 1;
+
+        let mut c = 0;
+        while c < 4 {
+            let child = ac_get_child(a, node, c);
+            if child != -1 {
+                // Find failure link for child
+                let mut f = arr16_get(a.fail, node);
+                let mut found = 0;
+                let mut guard = 0;
+                while found == 0 && guard < 20 {
+                    let fc = ac_get_child(a, f, c);
+                    if fc != -1 {
+                        a = ACAuto { child0: a.child0, child1: a.child1, child2: a.child2, child3: a.child3, fail: arr16_set(a.fail, child, fc), out: a.out, count: a.count };
+                        // Merge output from failure link
+                        let merged = arr16_get(a.out, child) | arr16_get(a.out, fc);
+                        a = ACAuto { child0: a.child0, child1: a.child1, child2: a.child2, child3: a.child3, fail: a.fail, out: arr16_set(a.out, child, merged), count: a.count };
+                        found = 1;
+                    } else if f == 0 {
+                        a = ACAuto { child0: a.child0, child1: a.child1, child2: a.child2, child3: a.child3, fail: arr16_set(a.fail, child, 0), out: a.out, count: a.count };
+                        found = 1;
+                    } else {
+                        f = arr16_get(a.fail, f);
+                    }
+                    guard = guard + 1;
+                }
+                if qback < 16 {
+                    queue = arr16_set(queue, qback, child);
+                    qback = qback + 1;
+                }
+            }
+            c = c + 1;
+        }
+        iters = iters + 1;
+    }
+    a
+}
+
+// =============================================================================
+// Search text for all pattern matches
+// Returns match counts per pattern (up to 4 patterns)
+// =============================================================================
+
+fn ac_search(ac: ACAuto, text: Arr16, tlen: Int) -> Arr4 {
+    let mut counts = arr4_zeros();
+    let mut state = 0;
+    let mut i = 0;
+    while i < tlen {
+        let ch = arr16_get(text, i);
+
+        // Follow failure links until we find a match or reach root
+        let mut guard = 0;
+        let mut found = 0;
+        while found == 0 && guard < 20 {
+            let child = ac_get_child(ac, state, ch);
+            if child != -1 {
+                state = child;
+                found = 1;
+            } else if state == 0 {
+                found = 1;
+            } else {
+                state = arr16_get(ac.fail, state);
+            }
+            guard = guard + 1;
+        }
+
+        // Collect outputs at current state
+        // (outputs already merged via fail links during ac_build_fail)
+        let out_bits = arr16_get(ac.out, state);
+        if out_bits & 1 != 0 { counts = arr4_set(counts, 0, arr4_get(counts, 0) + 1); }
+        if out_bits & 2 != 0 { counts = arr4_set(counts, 1, arr4_get(counts, 1) + 1); }
+        if out_bits & 4 != 0 { counts = arr4_set(counts, 2, arr4_get(counts, 2) + 1); }
+        if out_bits & 8 != 0 { counts = arr4_set(counts, 3, arr4_get(counts, 3) + 1); }
+
+        i = i + 1;
+    }
+    counts
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_single_pattern() {
+    // Pattern: "ab" = [0, 1]
+    let pat = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut ac = ac_new();
+    ac = ac_insert(ac, pat, 2, 0);
+    ac = ac_build_fail(ac);
+
+    // Text: "aababc" = [0, 0, 1, 0, 1, 2]
+    let text = Arr16 {
+        e0: 0, e1: 0, e2: 1, e3: 0, e4: 1, e5: 2, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let counts = ac_search(ac, text, 6);
+    // "ab" found at positions 1 and 3 -> count = 2
+    assert_eq(arr4_get(counts, 0), 2);
+}
+
+fn test_two_patterns() {
+    // Pattern 0: "ab" = [0, 1]
+    // Pattern 1: "bc" = [1, 2]
+    let p0 = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let p1 = Arr8 { e0: 1, e1: 2, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut ac = ac_new();
+    ac = ac_insert(ac, p0, 2, 0);
+    ac = ac_insert(ac, p1, 2, 1);
+    ac = ac_build_fail(ac);
+
+    // Text: "abc" = [0, 1, 2]
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 2, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let counts = ac_search(ac, text, 3);
+    assert_eq(arr4_get(counts, 0), 1);  // "ab" at pos 0
+    assert_eq(arr4_get(counts, 1), 1);  // "bc" at pos 1
+}
+
+fn test_overlapping_patterns() {
+    // Pattern 0: "a" = [0]
+    // Pattern 1: "ab" = [0, 1]
+    let p0 = Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let p1 = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut ac = ac_new();
+    ac = ac_insert(ac, p0, 1, 0);
+    ac = ac_insert(ac, p1, 2, 1);
+    ac = ac_build_fail(ac);
+
+    // Text: "ab" = [0, 1]
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let counts = ac_search(ac, text, 2);
+    assert_eq(arr4_get(counts, 0), 1);  // "a" found at pos 0
+    assert_eq(arr4_get(counts, 1), 1);  // "ab" found at pos 0
+}
+
+fn test_no_match() {
+    let p0 = Arr8 { e0: 3, e1: 3, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut ac = ac_new();
+    ac = ac_insert(ac, p0, 2, 0);
+    ac = ac_build_fail(ac);
+
+    // Text: "abab" = [0, 1, 0, 1]
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 0, e3: 1, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let counts = ac_search(ac, text, 4);
+    assert_eq(arr4_get(counts, 0), 0);
+}
+
+fn test_repeated_pattern_in_text() {
+    // Pattern: "aba" = [0, 1, 0]
+    let p0 = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut ac = ac_new();
+    ac = ac_insert(ac, p0, 3, 0);
+    ac = ac_build_fail(ac);
+
+    // Text: "abababa" = [0,1,0,1,0,1,0]
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 0, e3: 1, e4: 0, e5: 1, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let counts = ac_search(ac, text, 7);
+    // "aba" matches at positions 0, 2, 4 -> 3 overlapping matches
+    assert_eq(arr4_get(counts, 0), 3);
+}
+
+fn test_failure_link_basic() {
+    // Test that failure links work correctly
+    // Pattern 0: "abc" = [0,1,2]
+    // Pattern 1: "bc" = [1,2]
+    let p0 = Arr8 { e0: 0, e1: 1, e2: 2, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let p1 = Arr8 { e0: 1, e1: 2, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut ac = ac_new();
+    ac = ac_insert(ac, p0, 3, 0);
+    ac = ac_insert(ac, p1, 2, 1);
+    ac = ac_build_fail(ac);
+
+    // Text: "abc" = [0,1,2]
+    // When matching "abc", at position 2 we match pattern 0 ("abc").
+    // The failure link from the "c" node of "abc" should point to the "c" node of "bc",
+    // so "bc" is also detected.
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 2, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let counts = ac_search(ac, text, 3);
+    assert_eq(arr4_get(counts, 0), 1);  // "abc"
+    assert_eq(arr4_get(counts, 1), 1);  // "bc" (via failure link)
+}
+
+fn test_empty_text() {
+    let p0 = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let mut ac = ac_new();
+    ac = ac_insert(ac, p0, 2, 0);
+    ac = ac_build_fail(ac);
+
+    let text = arr16_fill(0);
+    let counts = ac_search(ac, text, 0);
+    assert_eq(arr4_get(counts, 0), 0);
+}
+
+fn test_node_count() {
+    let mut ac = ac_new();
+    assert_eq(ac.count, 1);
+
+    let p0 = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    ac = ac_insert(ac, p0, 2, 0);
+    assert_eq(ac.count, 3);  // root + a + b
+
+    let p1 = Arr8 { e0: 0, e1: 2, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    ac = ac_insert(ac, p1, 2, 1);
+    assert_eq(ac.count, 4);  // shared "a" node, new "c" node
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_single_pattern();
+    test_two_patterns();
+    test_overlapping_patterns();
+    test_no_match();
+    test_repeated_pattern_in_text();
+    test_failure_link_basic();
+    test_empty_text();
+    test_node_count();
+    print("[OK] 300_interp_aho_corasick");
+    0
+}

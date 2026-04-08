@@ -1,0 +1,500 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, embedding, plugins
+// @description: Tests plugin architecture using Verum FFI
+
+/// ============================================================
+/// PLUGIN SYSTEM ARCHITECTURE
+/// ============================================================
+///
+/// A plugin architecture allows dynamically loading and unloading
+/// Verum modules at runtime, enabling extensible applications.
+
+// ------------------------------------------------------------
+// Plugin Interface
+// ------------------------------------------------------------
+
+/// Plugin metadata
+@repr(C)
+type PluginMetadata is {
+    name: *const c_char,
+    version_major: u32,
+    version_minor: u32,
+    version_patch: u32,
+    description: *const c_char,
+    author: *const c_char,
+    license: *const c_char,
+};
+
+/// Plugin lifecycle callbacks
+@repr(C)
+type PluginCallbacks is {
+    /// Called when plugin is loaded
+    on_load: extern "C" fn(*mut PluginContext) -> c_int,
+    /// Called when plugin is about to unload
+    on_unload: extern "C" fn(*mut PluginContext),
+    /// Called each application tick (if plugin requests it)
+    on_tick: Maybe<extern "C" fn(*mut PluginContext, f64)>,
+    /// Called on application events
+    on_event: Maybe<extern "C" fn(*mut PluginContext, *const Event) -> c_int>,
+};
+
+/// Plugin context provided by host
+@repr(C)
+type PluginContext is {
+    host_api: *const HostAPI,
+    plugin_data: *mut c_void,
+    flags: u32,
+};
+
+/// Host API exposed to plugins
+@repr(C)
+type HostAPI is {
+    /// Get host version
+    get_version: extern "C" fn(*mut u32, *mut u32, *mut u32),
+    /// Log message
+    log: extern "C" fn(c_int, *const c_char),
+    /// Register command
+    register_command: extern "C" fn(*const c_char, CommandCallback, *mut c_void) -> c_int,
+    /// Unregister command
+    unregister_command: extern "C" fn(*const c_char) -> c_int,
+    /// Subscribe to events
+    subscribe_event: extern "C" fn(*const c_char, EventCallback, *mut c_void) -> c_int,
+    /// Unsubscribe from events
+    unsubscribe_event: extern "C" fn(c_int) -> c_int,
+    /// Get configuration value
+    get_config: extern "C" fn(*const c_char, *mut *mut c_char) -> c_int,
+    /// Set configuration value
+    set_config: extern "C" fn(*const c_char, *const c_char) -> c_int,
+    /// Allocate memory (host-managed)
+    alloc: extern "C" fn(usize) -> *mut c_void,
+    /// Free memory
+    free: extern "C" fn(*mut c_void),
+};
+
+type CommandCallback is extern "C" fn(
+    argc: c_int,
+    argv: *const *const c_char,
+    user_data: *mut c_void
+) -> c_int;
+
+type EventCallback is extern "C" fn(
+    event: *const Event,
+    user_data: *mut c_void
+) -> c_int;
+
+/// Event structure
+@repr(C)
+type Event is {
+    event_type: u32,
+    timestamp: u64,
+    data: *const c_void,
+    data_size: usize,
+};
+
+// ------------------------------------------------------------
+// Plugin Manager
+// ------------------------------------------------------------
+
+type PluginHandle is u32;
+const INVALID_PLUGIN_HANDLE: PluginHandle = 0;
+
+type PluginManager is {
+    plugins: Map<PluginHandle, LoadedPlugin>,
+    next_handle: PluginHandle,
+    host_api: HostAPI,
+    search_paths: List<Text>,
+};
+
+type LoadedPlugin is {
+    handle: PluginHandle,
+    library: *mut c_void,  // dlopen handle
+    metadata: PluginMetadata,
+    callbacks: PluginCallbacks,
+    context: PluginContext,
+    state: PluginState,
+};
+
+type PluginState is
+    | Loaded
+    | Initialized
+    | Running
+    | Paused
+    | Error;
+
+implement PluginManager {
+    fn new() -> PluginManager {
+        PluginManager {
+            plugins: Map.new(),
+            next_handle: 1,
+            host_api: create_host_api(),
+            search_paths: List.new(),
+        }
+    }
+
+    fn add_search_path(&mut self, path: &str) {
+        self.search_paths.push(path.to_owned());
+    }
+
+    fn load_plugin(&mut self, path: &str) -> Result<PluginHandle, PluginError> {
+        // Load shared library
+        let lib = unsafe { dlopen(path.as_ptr() as *const c_char, RTLD_NOW) };
+        if lib.is_null() {
+            return Err(LoadFailed);
+        }
+
+        // Get required symbols
+        let metadata = unsafe {
+            let sym = dlsym(lib, "plugin_metadata\0".as_ptr() as *const c_char);
+            if sym.is_null() {
+                dlclose(lib);
+                return Err(MissingSymbol("plugin_metadata"));
+            }
+            *(sym as *const PluginMetadata)
+        };
+
+        let callbacks = unsafe {
+            let sym = dlsym(lib, "plugin_callbacks\0".as_ptr() as *const c_char);
+            if sym.is_null() {
+                dlclose(lib);
+                return Err(MissingSymbol("plugin_callbacks"));
+            }
+            *(sym as *const PluginCallbacks)
+        };
+
+        // Create handle
+        let handle = self.next_handle;
+        self.next_handle += 1;
+
+        // Create context
+        let context = PluginContext {
+            host_api: &self.host_api,
+            plugin_data: std.ptr.null as *mut c_void,
+            flags: 0,
+        };
+
+        let plugin = LoadedPlugin {
+            handle,
+            library: lib,
+            metadata,
+            callbacks,
+            context,
+            state: Loaded,
+        };
+
+        self.plugins.insert(handle, plugin);
+        Ok(handle)
+    }
+
+    fn initialize_plugin(&mut self, handle: PluginHandle) -> Result<(), PluginError> {
+        // Placeholder: real impl looks up plugin by handle and initializes
+        Ok(())
+    }
+
+    fn unload_plugin(&mut self, handle: PluginHandle) -> Result<(), PluginError> {
+        // Placeholder: real impl removes plugin and calls unload callback
+        Ok(())
+    }
+
+    fn tick(&mut self, delta_time: f64) {
+        // Placeholder: real impl iterates plugins and calls on_tick
+    }
+
+    fn dispatch_event(&mut self, event: &Event) {
+        // Placeholder: real impl iterates plugins and calls on_event
+    }
+}
+
+// ------------------------------------------------------------
+// Plugin Export Macros (conceptual)
+// ------------------------------------------------------------
+
+/// Example plugin implementation
+module example_plugin {
+    /// Plugin metadata export
+    @export("C")
+    @no_mangle
+    static plugin_metadata: PluginMetadata = PluginMetadata {
+        name: "Example Plugin\0".as_ptr() as *const c_char,
+        version_major: 1,
+        version_minor: 0,
+        version_patch: 0,
+        description: "An example plugin\0".as_ptr() as *const c_char,
+        author: "Verum Team\0".as_ptr() as *const c_char,
+        license: "MIT\0".as_ptr() as *const c_char,
+    };
+
+    /// Plugin callbacks export
+    @export("C")
+    @no_mangle
+    static plugin_callbacks: PluginCallbacks = PluginCallbacks {
+        on_load: example_on_load,
+        on_unload: example_on_unload,
+        on_tick: Some(example_on_tick),
+        on_event: Some(example_on_event),
+    };
+
+    @extern("C")
+fn example_on_load(ctx: *mut PluginContext) -> c_int {
+        // Initialize plugin
+        unsafe {
+            let api = &*(*ctx).host_api;
+            (api.log)(0, "Plugin loaded\0".as_ptr() as *const c_char);
+        }
+        0
+    }
+
+    @extern("C")
+fn example_on_unload(ctx: *mut PluginContext) {
+        // Cleanup
+        unsafe {
+            let api = &*(*ctx).host_api;
+            (api.log)(0, "Plugin unloaded\0".as_ptr() as *const c_char);
+        }
+    }
+
+    @extern("C")
+fn example_on_tick(ctx: *mut PluginContext, delta: f64) {
+        // Update logic
+    }
+
+    @extern("C")
+fn example_on_event(ctx: *mut PluginContext, event: *const Event) -> c_int {
+        // Handle event
+        0
+    }
+}
+
+// ------------------------------------------------------------
+// C API Exports
+// ------------------------------------------------------------
+
+/// Create plugin manager
+@export("C")
+@no_mangle
+@extern("C")
+fn plugin_manager_create() -> *mut PluginManager {
+    Heap.into_raw(Heap(PluginManager.new()))
+}
+
+/// Destroy plugin manager
+@export("C")
+@no_mangle
+@extern("C")
+fn plugin_manager_destroy(manager: *mut PluginManager) {
+    if !manager.is_null() {
+        // Reconstruct the Heap allocation so it gets freed when going out of scope
+        let _owned: Heap<PluginManager> = unsafe { Heap.from_raw(manager) };
+    }
+}
+
+/// Load plugin
+@export("C")
+@no_mangle
+@extern("C")
+fn plugin_manager_load(
+    manager: *mut PluginManager,
+    path: *const c_char
+) -> PluginHandle {
+    if manager.is_null() || path.is_null() {
+        return INVALID_PLUGIN_HANDLE;
+    }
+
+    unsafe {
+        let m = &mut *manager;
+        let cstr = CStr.from_ptr(path);
+        match m.load_plugin(cstr.to_str().unwrap_or("")) {
+            Ok(handle) => handle,
+            Err(_) => INVALID_PLUGIN_HANDLE,
+        }
+    }
+}
+
+/// Initialize plugin
+@export("C")
+@no_mangle
+@extern("C")
+fn plugin_manager_init(
+    manager: *mut PluginManager,
+    handle: PluginHandle
+) -> c_int {
+    if manager.is_null() {
+        return -1;
+    }
+
+    unsafe {
+        let m = &mut *manager;
+        match m.initialize_plugin(handle) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    }
+}
+
+/// Unload plugin
+@export("C")
+@no_mangle
+@extern("C")
+fn plugin_manager_unload(
+    manager: *mut PluginManager,
+    handle: PluginHandle
+) -> c_int {
+    if manager.is_null() {
+        return -1;
+    }
+
+    unsafe {
+        let m = &mut *manager;
+        match m.unload_plugin(handle) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    }
+}
+
+/// Tick all plugins
+@export("C")
+@no_mangle
+@extern("C")
+fn plugin_manager_tick(manager: *mut PluginManager, delta_time: f64) {
+    if !manager.is_null() {
+        unsafe { (*manager).tick(delta_time) };
+    }
+}
+
+// ------------------------------------------------------------
+// Dynamic Linking FFI
+// ------------------------------------------------------------
+
+const RTLD_NOW: c_int = 2;
+const RTLD_LAZY: c_int = 1;
+
+ffi dl {
+    @extern("C")
+    fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+
+    @extern("C")
+    fn dlclose(handle: *mut c_void) -> c_int;
+
+    @extern("C")
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+
+    @extern("C")
+    fn dlerror() -> *const c_char;
+}
+
+fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void {
+    unsafe { dl.dlopen(filename, flags) }
+}
+
+fn dlclose(handle: *mut c_void) -> c_int {
+    unsafe { dl.dlclose(handle) }
+}
+
+fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void {
+    unsafe { dl.dlsym(handle, symbol) }
+}
+
+// ------------------------------------------------------------
+// Helper Functions
+// ------------------------------------------------------------
+
+fn create_host_api() -> HostAPI {
+    @extern("C")
+fn get_version(major: *mut u32, minor: *mut u32, patch: *mut u32) {
+        unsafe {
+            if !major.is_null() { *major = 1; }
+            if !minor.is_null() { *minor = 0; }
+            if !patch.is_null() { *patch = 0; }
+        }
+    }
+
+    @extern("C")
+fn log(level: c_int, message: *const c_char) {
+        // Log implementation
+    }
+
+    @extern("C")
+fn register_command(
+        name: *const c_char,
+        callback: CommandCallback,
+        user_data: *mut c_void
+    ) -> c_int { 0 }
+
+    @extern("C")
+fn unregister_command(name: *const c_char) -> c_int { 0 }
+
+    @extern("C")
+fn subscribe_event(
+        event_type: *const c_char,
+        callback: EventCallback,
+        user_data: *mut c_void
+    ) -> c_int { 0 }
+
+    @extern("C")
+fn unsubscribe_event(subscription_id: c_int) -> c_int { 0 }
+
+    @extern("C")
+fn get_config(key: *const c_char, value: *mut *mut c_char) -> c_int { 0 }
+
+    @extern("C")
+fn set_config(key: *const c_char, value: *const c_char) -> c_int { 0 }
+
+    @extern("C")
+fn alloc(size: usize) -> *mut c_void {
+        // Placeholder: real impl calls C malloc
+        null as *mut c_void
+    }
+
+    @extern("C")
+fn dealloc(ptr: *mut c_void) {
+        // Placeholder: real impl calls C free
+    }
+
+    HostAPI {
+        get_version,
+        log,
+        register_command,
+        unregister_command,
+        subscribe_event,
+        unsubscribe_event,
+        get_config,
+        set_config,
+        alloc,
+        free: dealloc,
+    }
+}
+
+// ------------------------------------------------------------
+// Type Definitions
+// ------------------------------------------------------------
+
+type c_char is i8;
+type c_int is i32;
+type c_void is ();
+
+type PluginError is
+    | LoadFailed
+    | MissingSymbol(&str)
+    | InvalidHandle
+    | InvalidState
+    | InitFailed;
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: usize) -> *mut c_void;
+
+    @extern("C")
+    fn free(ptr: *mut c_void);
+}
+
+type CStr is { ptr: *const c_char };
+implement CStr {
+    unsafe fn from_ptr(ptr: *const c_char) -> CStr { CStr { ptr } }
+    fn to_str(&self) -> Result<&str, ()> { Ok("") }
+}
+
+fn main() {
+    // Plugin system test
+}

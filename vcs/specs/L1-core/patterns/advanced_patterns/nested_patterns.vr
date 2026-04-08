@@ -1,0 +1,378 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: patterns, nested, deep, advanced
+//
+// Tests deeply nested pattern matching combining multiple pattern types.
+// Complex patterns are essential for matching recursive and compound data structures.
+
+//------------------------------------------------------------------------------
+// Basic Nested Patterns
+//------------------------------------------------------------------------------
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+type Result<T, E> is
+    | Ok(T)
+    | Err(E);
+
+/// Nested Maybe patterns.
+fn nested_maybe(mm: Maybe<Maybe<Int>>) -> Int {
+    match mm {
+        Some(Some(x)) => x,
+        Some(None) => -1,
+        None => -2,
+    }
+}
+
+/// Nested Result patterns.
+fn nested_result(rr: Result<Result<Int, Text>, Text>) -> Int {
+    match rr {
+        Ok(Ok(x)) => x,
+        Ok(Err(_)) => -1,
+        Err(_) => -2,
+    }
+}
+
+/// Triple nesting.
+fn triple_nested(mmm: Maybe<Maybe<Maybe<Int>>>) -> Int {
+    match mmm {
+        Some(Some(Some(x))) => x,
+        Some(Some(None)) => -1,
+        Some(None) => -2,
+        None => -3,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Tuple Patterns
+//------------------------------------------------------------------------------
+
+/// Nested tuples.
+fn nested_tuple(data: ((Int, Int), (Int, Int))) -> Int {
+    match data {
+        ((a, b), (c, d)) => a + b + c + d,
+    }
+}
+
+/// Deeply nested tuples.
+fn deep_tuple(data: (((Int, Int), Int), ((Int, Int), Int))) -> Int {
+    match data {
+        (((a, b), c), ((d, e), f)) => a + b + c + d + e + f,
+    }
+}
+
+/// Tuple with enum inside.
+fn tuple_enum(data: (Maybe<Int>, Maybe<Int>)) -> Int {
+    match data {
+        (Some(a), Some(b)) => a + b,
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => 0,
+    }
+}
+
+/// Enum with tuple inside.
+fn enum_tuple(m: Maybe<(Int, Int)>) -> Int {
+    match m {
+        Some((a, b)) => a + b,
+        None => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Struct Patterns
+//------------------------------------------------------------------------------
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+type Rectangle is {
+    top_left: Point,
+    bottom_right: Point,
+};
+
+type Container is {
+    data: Maybe<Rectangle>,
+    label: Text,
+};
+
+/// Nested struct destructuring.
+fn nested_struct(r: Rectangle) -> Int {
+    match r {
+        Rectangle {
+            top_left: Point { x: x1, y: y1 },
+            bottom_right: Point { x: x2, y: y2 }
+        } => (x2 - x1) * (y2 - y1),
+    }
+}
+
+/// Struct containing enum containing struct.
+fn struct_enum_struct(c: Container) -> Int {
+    match c {
+        Container {
+            data: Some(Rectangle {
+                top_left: Point { x: x1, .. },
+                bottom_right: Point { x: x2, .. }
+            }),
+            ..
+        } => x2 - x1,
+        Container { data: None, .. } => 0,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested List Patterns
+//------------------------------------------------------------------------------
+
+/// List of tuples.
+fn list_tuples(arr: List<(Int, Int)>) -> Int {
+    match arr {
+        [(a1, b1), (a2, b2), (a3, b3)] => a1 + b1 + a2 + b2 + a3 + b3,
+        _ => 0,
+    }
+}
+
+/// List with nested patterns.
+fn list_nested(lst: List<Maybe<Int>>) -> Int {
+    match lst {
+        [Some(a), Some(b), ..] => a + b,
+        [Some(a), None, ..] => a,
+        [None, Some(b), ..] => b,
+        _ => 0,
+    }
+}
+
+/// List of lists (2D).
+fn matrix_nested(matrix: List<List<Int>>) -> Text {
+    match matrix {
+        [[1, 0], [0, 1]] => "identity",
+        [[a, b], [c, d]] if a * d - b * c != 0 => "invertible",
+        _ => "singular",
+    }
+}
+
+/// List inside Maybe inside tuple.
+fn complex_list(data: (Maybe<List<Int>>, Int)) -> Int {
+    match data {
+        (Some([a, b, c]), d) => a + b + c + d,
+        (None, d) => d,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Recursive Data Structures
+//------------------------------------------------------------------------------
+
+type ConsList<T> is
+    | Cons(T, ConsList<T>)
+    | Nil;
+
+// Use a simplified non-recursive tree for testing
+type SimpleTree is
+    | Leaf(Int)
+    | Branch(Int, Int, Int);
+
+/// Simple tree pattern matching (non-recursive).
+fn simple_tree_patterns(tree: SimpleTree) -> Int {
+    match tree {
+        Leaf(x) => x,
+        Branch(l, v, r) => l + v + r,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Mixed Pattern Types
+//------------------------------------------------------------------------------
+
+/// Tuple with struct with enum.
+fn mixed_1(data: (Point, Maybe<Int>)) -> Int {
+    match data {
+        (Point { x, y }, Some(z)) => x + y + z,
+        (Point { x, y }, None) => x + y,
+    }
+}
+
+/// Enum with tuple with struct.
+fn mixed_2(m: Maybe<(Int, Point)>) -> Int {
+    match m {
+        Some((n, Point { x, y })) => n + x + y,
+        None => 0,
+    }
+}
+
+/// Result with tuple with list.
+fn mixed_3(r: Result<(Int, List<Int>), Text>) -> Int {
+    match r {
+        Ok((x, [a, b])) => x + a + b,
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Patterns with Literals and Ranges
+//------------------------------------------------------------------------------
+
+/// Nested with literal matching.
+fn nested_literals(data: (Maybe<Int>, Maybe<Int>)) -> Text {
+    match data {
+        (Some(0), Some(0)) => "both zero",
+        (Some(0), Some(_)) => "first zero",
+        (Some(_), Some(0)) => "second zero",
+        (Some(a), Some(b)) if a == b => "equal",
+        (Some(_), Some(_)) => "different",
+        _ => "has none",
+    }
+}
+
+/// Nested with ranges.
+fn nested_ranges(data: (Maybe<Int>, Maybe<Int>)) -> Text {
+    match data {
+        (Some(1..=10), Some(1..=10)) => "both small",
+        (Some(1..=10), Some(11..=100)) => "first small",
+        (Some(11..=100), Some(1..=10)) => "second small",
+        (Some(_), Some(_)) => "both present",
+        _ => "has none",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Patterns with Or
+//------------------------------------------------------------------------------
+
+/// Or inside nested pattern.
+fn nested_or(data: Maybe<(Int, Int)>) -> Text {
+    match data {
+        Some((0 | 1, 0 | 1)) => "binary pair",
+        Some((0 | 1, _)) => "binary first",
+        Some((_, 0 | 1)) => "binary second",
+        Some(_) => "other pair",
+        None => "none",
+    }
+}
+
+/// Or at multiple levels.
+fn multi_level_or(mm: Maybe<Maybe<Int>>) -> Text {
+    match mm {
+        Some(Some(0 | 1)) | Some(None) | None => "special",
+        Some(Some(_)) => "normal",
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Patterns with Guards
+//------------------------------------------------------------------------------
+
+/// Guard on nested structure.
+fn nested_guard(data: (Point, Point)) -> Text {
+    match data {
+        (Point { x: x1, y: y1 }, Point { x: x2, y: y2 })
+            if x1 == x2 && y1 == y2 => "same point",
+        (Point { x: x1, y: y1 }, Point { x: x2, y: y2 })
+            if (x1 - x2).abs() + (y1 - y2).abs() <= 1 => "adjacent",
+        _ => "far apart",
+    }
+}
+
+/// Complex guard with nested bindings.
+fn complex_guard(m: Maybe<(Int, Int, Int)>) -> Bool {
+    match m {
+        Some((a, b, c)) if a > 0 && b > 0 && c > 0 && a + b > c && b + c > a && a + c > b => true,
+        _ => false,
+    }
+}
+
+//------------------------------------------------------------------------------
+// Nested Patterns with @
+//------------------------------------------------------------------------------
+
+/// @ binding in nested context.
+fn nested_at(mm: Maybe<Maybe<Int>>) -> (Maybe<Int>, Int) {
+    match mm {
+        Some(inner @ Some(x)) => (inner, x),
+        Some(inner @ None) => (inner, 0),
+        None => (None, -1),
+    }
+}
+
+/// Multiple @ in nested structure.
+fn multi_at(data: (Maybe<Int>, Maybe<Int>)) -> ((Maybe<Int>, Maybe<Int>), Int) {
+    match data {
+        pair @ (Some(a), Some(b)) => (pair, a + b),
+        pair @ (Some(a), None) => (pair, a),
+        pair @ (None, Some(b)) => (pair, b),
+        pair @ (None, None) => (pair, 0),
+    }
+}
+
+//------------------------------------------------------------------------------
+// Tests
+//------------------------------------------------------------------------------
+
+fn main() {
+    // Nested Maybe
+    assert(nested_maybe(Some(Some(42))) == 42);
+    assert(nested_maybe(Some(None)) == -1);
+    assert(nested_maybe(None) == -2);
+
+    // Triple nested
+    assert(triple_nested(Some(Some(Some(42)))) == 42);
+    assert(triple_nested(Some(Some(None))) == -1);
+    assert(triple_nested(Some(None)) == -2);
+    assert(triple_nested(None) == -3);
+
+    // Nested tuples
+    assert(nested_tuple(((1, 2), (3, 4))) == 10);
+    assert(deep_tuple((((1, 2), 3), ((4, 5), 6))) == 21);
+
+    // Tuple with enum
+    assert(tuple_enum((Some(3), Some(4))) == 7);
+    assert(tuple_enum((Some(3), None)) == 3);
+    assert(tuple_enum((None, None)) == 0);
+
+    // Nested struct
+    let rect = Rectangle {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: Point { x: 10, y: 5 }
+    };
+    assert(nested_struct(rect) == 50);
+
+    // List of tuples
+    assert(list_tuples([(1, 2), (3, 4), (5, 6)]) == 21);
+
+    // Matrix
+    assert(matrix_nested([[1, 0], [0, 1]]) == "identity");
+    assert(matrix_nested([[1, 2], [3, 4]]) == "invertible");
+    assert(matrix_nested([[1, 2], [2, 4]]) == "singular");
+
+    // Simple tree patterns
+    assert(simple_tree_patterns(Leaf(42)) == 42);
+    assert(simple_tree_patterns(Branch(1, 2, 3)) == 6);
+
+    // Mixed patterns
+    assert(mixed_1((Point { x: 1, y: 2 }, Some(3))) == 6);
+    assert(mixed_1((Point { x: 1, y: 2 }, None)) == 3);
+
+    // Nested literals
+    assert(nested_literals((Some(0), Some(0))) == "both zero");
+    assert(nested_literals((Some(5), Some(5))) == "equal");
+
+    // Nested or
+    assert(nested_or(Some((0, 1))) == "binary pair");
+    assert(nested_or(Some((5, 0))) == "binary second");
+
+    // Nested guard
+    let p1 = Point { x: 0, y: 0 };
+    let p2 = Point { x: 0, y: 1 };
+    assert(nested_guard((p1, p1)) == "same point");
+    assert(nested_guard((p1, p2)) == "adjacent");
+
+    // Nested @
+    let (inner, x) = nested_at(Some(Some(42)));
+    assert(x == 42);
+}

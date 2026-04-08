@@ -1,0 +1,237 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: modules, imports, error, ambiguous
+// @expected-error: E401
+
+/// Ambiguous mount test - name collision from multiple imports.
+/// This test verifies the compiler correctly detects and reports
+/// ambiguous imports where the same name refers to multiple items.
+
+// Both modules export 'Error' type
+mount core.io.Error;      // First Error link
+mount core.fmt.Error;     // Second Error mount - AMBIGUOUS! E202
+
+// Both modules export 'Result' type
+mount database.Result;
+mount network.Result;    // AMBIGUOUS! E202
+
+// Glob imports can also cause ambiguity
+mount utils.helpers.*;
+mount utils.extensions.*; // If both export 'format', ambiguous
+
+// Module definitions demonstrating the collision
+module std {
+    pub module io {
+        pub type Error is
+            | NotFound
+            | PermissionDenied
+            | ConnectionReset
+            | UnexpectedEof
+            | Other(Text);
+
+        pub type Result<T> = core.Result<T, Error>;
+
+        pub fn read(path: &Text) -> Result<Bytes> {
+            Err(Error.NotFound)
+        }
+    }
+
+    pub module fmt {
+        pub type Error is
+            | FormatError
+            | InvalidTemplate
+            | EncodingError;
+
+        pub type Result<T> = core.Result<T, Error>;
+
+        pub fn format(template: &Text) -> Result<Text> {
+            Err(Error.FormatError)
+        }
+    }
+
+    pub module core {
+        pub type Result<T, E> is
+            | Ok(T)
+            | Err(E);
+    }
+}
+
+module database {
+    pub type Result is
+        | Success(Row)
+        | NotFound
+        | Error(DatabaseError);
+
+    pub type Row is {
+        columns: Map<Text, Any>
+    };
+
+    pub type DatabaseError is
+        | ConnectionFailed
+        | QueryFailed(Text)
+        | Timeout;
+}
+
+module network {
+    pub type Result is
+        | Success(Response)
+        | Failure(NetworkError);
+
+    pub type Response is {
+        status: Int,
+        body: Bytes
+    };
+
+    pub type NetworkError is
+        | Timeout
+        | DnsError
+        | TlsError;
+}
+
+module utils {
+    pub module helpers {
+        pub fn format(value: &Text) -> Text {
+            value.clone()
+        }
+
+        pub fn trim(value: &Text) -> Text {
+            value.clone()
+        }
+
+        pub fn uppercase(value: &Text) -> Text {
+            value.clone()
+        }
+    }
+
+    pub module extensions {
+        pub fn format(value: &Int) -> Text {
+            // Different signature but same name
+            value.to_text()
+        }
+
+        pub fn lowercase(value: &Text) -> Text {
+            value.clone()
+        }
+    }
+}
+
+fn main() {
+    // This would be ambiguous - which Error?
+    let err: Error = unreachable();  // Compiler cannot resolve
+
+    // This would also be ambiguous - which Result?
+    let result: Result = unreachable();  // Compiler cannot resolve
+
+    // If glob imports brought in 'format' from both modules:
+    let formatted = format("test");  // Which format function?
+}
+
+// ============================================================================
+// SOLUTION: Use explicit imports with rename to resolve ambiguity
+// ============================================================================
+//
+// // Renamed imports - no ambiguity
+// mount std.io.Error as IoError;
+// mount std.fmt.Error as FmtError;
+// mount database.Result as DbResult;
+// mount network.Result as NetResult;
+//
+// fn main_fixed() {
+//     let io_err: IoError = IoError.NotFound;
+//     let fmt_err: FmtError = FmtError.FormatError;
+//
+//     let db_result: DbResult = DbResult.NotFound;
+//     let net_result: NetResult = NetResult.Failure(NetworkError.Timeout);
+// }
+//
+// ============================================================================
+
+// ============================================================================
+// Alternative solutions
+// ============================================================================
+
+module solutions {
+    // Solution 1: Qualified imports (no direct link)
+    fn with_qualified_access() {
+        let io_err = std.io.Error.NotFound;
+        let fmt_err = std.fmt.Error.FormatError;
+    }
+
+    // Solution 2: Import module with self
+    mount std.io.{self as io};
+    mount std.fmt.{self as fmt};
+
+    fn with_module_alias() {
+        let io_err = io.Error.NotFound;
+        let fmt_err = fmt.Error.FormatError;
+    }
+
+    // Solution 3: Import only what you need
+    mount std.io.Error as IoError;
+    mount std.fmt.format;  // Only mount the function, not Error
+
+    fn with_selective_imports() {
+        let io_err: IoError = IoError.NotFound;
+        let formatted = format("template");
+    }
+}
+
+// ============================================================================
+// Additional ambiguity scenarios
+// ============================================================================
+
+module more_ambiguity {
+    // Trait method ambiguity
+    mount traits.display.Display;
+    mount traits.debug.Display;  // Same name, different trait - AMBIGUOUS
+
+    // Constant ambiguity
+    mount config.dev.TIMEOUT;
+    mount config.prod.TIMEOUT;  // Same name - AMBIGUOUS
+
+    // Function ambiguity
+    mount handlers.v1.handle_request;
+    mount handlers.v2.handle_request;  // Same name - AMBIGUOUS
+}
+
+module traits {
+    pub module display {
+        pub type Display is protocol {
+            fn display(&self) -> Text;
+        }
+    }
+
+    pub module debug {
+        pub type Display is protocol {  // Intentionally same name for test
+            fn display(&self) -> Text;
+        }
+    }
+}
+
+module config {
+    pub module dev {
+        pub const TIMEOUT: Int = 5000;
+    }
+
+    pub module prod {
+        pub const TIMEOUT: Int = 30000;
+    }
+}
+
+module handlers {
+    pub module v1 {
+        pub fn handle_request(req: &Request) -> Response {
+            Response { status: 200 }
+        }
+    }
+
+    pub module v2 {
+        pub fn handle_request(req: &Request) -> Response {
+            Response { status: 200 }
+        }
+    }
+}
+
+type Request is { path: Text };
+type Response is { status: Int };

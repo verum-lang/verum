@@ -1,0 +1,146 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, incremental, edge-cases, boundary
+// @description: Tests edge cases for incremental parsing including empty edits,
+//              boundary conditions, and unusual edit patterns.
+
+// ============================================================================
+// Edge cases that stress the incremental parsing implementation.
+// ============================================================================
+
+// Test 1: Empty edit (no change)
+// Edit: Replace range [0,0] with ""
+// Expected: Tree unchanged, no reparsing needed
+fn empty_edit_test() -> Int {
+    42
+}
+
+// Test 2: Edit at position 0 (start of file)
+// Edit: Insert "// comment\n" at position 0
+// Expected: File starts with comment
+fn at_file_start() -> Int {
+    1
+}
+
+// Test 3: Edit at end of file
+// Edit: Append "\nfn new_fn() { }" at end
+// Expected: New function added without affecting existing
+fn before_file_end() -> Int {
+    2
+}
+
+// Test 4: Delete entire file content
+// Edit: Delete all content
+// Expected: Empty source file
+fn entire_file_delete() -> Int {
+    3
+}
+
+// Test 5: Replace entire file content
+// Edit: Replace all with "fn replaced() -> Int { 0 }"
+// Expected: Full reparse (optimization: no incremental benefit)
+fn entire_file_replace() -> Int {
+    4
+}
+
+// Test 6: Edit spanning multiple lines
+// Edit: Replace multiple lines at once
+fn multi_line_edit() -> Int {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    a + b + c
+}
+
+// Test 7: Edit at newline boundary
+// Edit: Delete or insert at newline position
+fn newline_boundary() -> Int {
+    let x = 1;
+    let y = 2;
+    x + y
+}
+
+// Test 8: Edit in whitespace-only region
+// Edit: Add/remove spaces between tokens
+fn whitespace_edit()   ->   Int {
+    42
+}
+
+// Test 9: Edit in comment region
+// Comment edit should not affect AST
+// This is a comment that might be edited
+fn comment_edit() -> Int {
+    // Inner comment
+    42
+}
+
+// Test 10: Edit creates syntax error then fixes it
+// Two-phase edit test
+fn error_then_fix() -> Int {
+    let x = 42;
+    x
+}
+
+// Test 11: Very small edit (single character)
+fn tiny_edit() -> Int {
+    42
+}
+
+// Test 12: Very large edit (insert large block)
+fn large_insertion_target() -> Int {
+    0
+}
+
+// Test 13: Edit at delimiter boundary
+fn delimiter_boundary() -> Int {
+    let x = (1 + 2);
+    x
+}
+
+// Test 14: Edit changes token type
+// Edit: Change identifier to keyword-like (but still valid identifier)
+fn token_type_change() -> Int {
+    let normal = 42;
+    normal
+}
+
+// Test 15: Edit splits token
+// Edit: Insert character in middle of identifier
+fn token_split() -> Int {
+    let identifier = 1;
+    identifier
+}
+
+// Test 16: Edit merges tokens
+// Edit: Delete space between tokens
+fn token_merge() -> Int {
+    let a = 1;
+    a
+}
+
+// Test 17: Consecutive edits
+// Multiple rapid edits should batch correctly
+fn consecutive_edits() -> Int {
+    let step1 = 1;
+    let step2 = 2;
+    let step3 = 3;
+    step1 + step2 + step3
+}
+
+// Test 18: Edit affects cached parse state
+// Tests interaction with parser state caching
+fn cache_invalidation() -> Int {
+    let cached = 42;
+    cached
+}
+
+// Test 19: Edit in nested structure
+fn deeply_nested() -> Int {
+    {{{{{ let deep = 42; deep }}}}}
+}
+
+// Test 20: Edit at EOF without trailing newline
+fn at_eof() -> Int {
+    42
+}

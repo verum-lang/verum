@@ -1,0 +1,161 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, formal-verification, induction
+// @timeout: 15000
+
+/// Formal verification via induction proofs
+
+/// Sum formula
+theorem gauss_sum(n: Nat): sum_to(n) == n * (n + 1) / 2 {
+    proof by induction on n {
+        case 0 => trivial
+        case succ(k) => {
+            have ih: sum_to(k) == k * (k + 1) / 2;
+            conclude by auto
+        }
+    }
+}
+
+fn sum_to(n: Nat) -> Nat;
+
+/// Factorial positive
+theorem factorial_positive(n: Nat): factorial(n) > 0 {
+    proof by induction on n {
+        case 0 => trivial
+        case succ(k) => {
+            have ih: factorial(k) > 0;
+            conclude by auto
+        }
+    }
+}
+
+fn factorial(n: Nat) -> Nat;
+
+/// Every natural >= 2 has a prime divisor
+theorem prime_divisor_exists(n: Nat)
+    requires n >= 2
+    ensures exists p: Nat. is_prime(p) && divides(p, n)
+{
+    proof by strong_induction on n {
+        case n => {
+            conclude by auto
+        }
+    }
+}
+
+fn is_prime(n: Nat) -> Bool;
+fn divides(a: Nat, b: Nat) -> Bool;
+
+/// List append length
+theorem append_length<T>(xs: List<T>, ys: List<T>):
+    len(xs ++ ys) == len(xs) + len(ys)
+{
+    proof by induction on xs {
+        case Nil => {
+            calc {
+                len(Nil ++ ys)
+                == { by definition } len(ys)
+                == { by arithmetic } 0 + len(ys)
+            }
+        }
+        case Cons(h, t) => {
+            have ih: len(t ++ ys) == len(t) + len(ys);
+            conclude by auto
+        }
+    }
+}
+
+/// List reverse length
+theorem reverse_length<T>(xs: List<T>): len(reverse(xs)) == len(xs) {
+    proof by induction on xs
+}
+
+fn reverse<T>(xs: List<T>) -> List<T>;
+
+/// Tree size non-negative
+type Tree<T> is
+    | Leaf
+    | Node(T, Tree<T>, Tree<T>);
+
+theorem tree_size_nonneg<T>(t: Tree<T>): tree_size(t) >= 0 {
+    proof by induction on t {
+        case Leaf => trivial
+        case Node(v, l, r) => {
+            have ih_l: tree_size(l) >= 0;
+            have ih_r: tree_size(r) >= 0;
+            conclude by arithmetic
+        }
+    }
+}
+
+fn tree_size<T>(t: Tree<T>) -> Nat;
+
+/// Power of 2 is positive
+theorem pow2_positive(n: Nat): pow(2, n) > 0 {
+    proof by induction on n {
+        case 0 => trivial
+        case succ(k) => {
+            have ih: pow(2, k) > 0;
+            conclude by arithmetic
+        }
+    }
+}
+
+fn pow(base: Nat, exp: Nat) -> Nat;
+
+/// Even or odd
+theorem even_or_odd(n: Nat): n % 2 == 0 || n % 2 == 1 {
+    proof by auto
+}
+
+/// Well-founded induction: Ackermann terminates
+theorem ackermann_terminates(m: Nat, n: Nat): ack(m, n) >= 0 {
+    proof by well_founded_induction on (m, n) ordered_by lex_lt {
+        case (0, n) => {
+            conclude by arithmetic
+        }
+        case (succ(mp), 0) => {
+            conclude by auto
+        }
+        case (succ(mp), succ(np)) => {
+            conclude by auto
+        }
+    }
+}
+
+fn ack(m: Nat, n: Nat) -> Nat;
+
+/// Structural induction on expressions
+type Expr is
+    | Lit(Int)
+    | Add(Expr, Expr)
+    | Mul(Expr, Expr);
+
+theorem eval_nonneg_positive(e: Expr)
+    requires all_positive(e)
+    ensures eval(e) > 0
+{
+    proof by induction on e {
+        case Lit(n) => {
+            conclude by auto
+        }
+        case Add(l, r) => {
+            have ih_l: eval(l) > 0;
+            have ih_r: eval(r) > 0;
+            conclude by arithmetic
+        }
+        case Mul(l, r) => {
+            have ih_l: eval(l) > 0;
+            have ih_r: eval(r) > 0;
+            conclude by arithmetic
+        }
+    }
+}
+
+fn eval(e: Expr) -> Int;
+fn all_positive(e: Expr) -> Bool;
+
+fn main() {
+    // Induction verification tests
+}

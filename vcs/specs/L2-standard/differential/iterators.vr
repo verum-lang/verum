@@ -1,0 +1,340 @@
+// @test: differential
+// @tier: 0
+// @level: L2
+// @tags: differential, iterators
+// @timeout: 10000
+// @expected-exit: 0
+
+/// L2-Standard: Iterators
+///
+/// This test verifies that manual iteration via while loops, sum
+/// accumulation, min/max finding, and count-matching produce identical
+/// results across interpreter (Tier 0) and AOT compiler (Tier 3).
+
+// ============================================================================
+// 8-element flat array helper
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int
+};
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, val: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { val } else { a.e0 },
+        e1: if i == 1 { val } else { a.e1 },
+        e2: if i == 2 { val } else { a.e2 },
+        e3: if i == 3 { val } else { a.e3 },
+        e4: if i == 4 { val } else { a.e4 },
+        e5: if i == 5 { val } else { a.e5 },
+        e6: if i == 6 { val } else { a.e6 },
+        e7: if i == 7 { val } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// ============================================================================
+// Iteration: sum accumulation
+// ============================================================================
+
+fn arr8_sum(a: Arr8, len: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < len {
+        total = total + arr8_get(a, i);
+        i = i + 1;
+    }
+    total
+}
+
+fn arr8_product(a: Arr8, len: Int) -> Int {
+    let mut prod = 1;
+    let mut i = 0;
+    while i < len {
+        prod = prod * arr8_get(a, i);
+        i = i + 1;
+    }
+    prod
+}
+
+// ============================================================================
+// Iteration: min / max
+// ============================================================================
+
+fn arr8_min(a: Arr8, len: Int) -> Int {
+    let mut mn = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v < mn { mn = v; }
+        i = i + 1;
+    }
+    mn
+}
+
+fn arr8_max(a: Arr8, len: Int) -> Int {
+    let mut mx = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v > mx { mx = v; }
+        i = i + 1;
+    }
+    mx
+}
+
+// ============================================================================
+// Count matching elements
+// ============================================================================
+
+fn count_positive(a: Arr8, len: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < len {
+        if arr8_get(a, i) > 0 { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+fn count_even(a: Arr8, len: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < len {
+        if arr8_get(a, i) % 2 == 0 { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+fn count_in_range(a: Arr8, len: Int, lo: Int, hi: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v >= lo && v <= hi { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+// ============================================================================
+// Map / transform
+// ============================================================================
+
+fn arr8_map_double(a: Arr8, len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        result = arr8_set(result, i, arr8_get(a, i) * 2);
+        i = i + 1;
+    }
+    result
+}
+
+fn arr8_map_abs(a: Arr8, len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        let v = arr8_get(a, i);
+        result = arr8_set(result, i, if v < 0 { -v } else { v });
+        i = i + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Filter / select
+// ============================================================================
+
+fn arr8_filter_positive(a: Arr8, len: Int) -> Arr8 {
+    let mut result = arr8_zeros();
+    let mut j = 0;
+    let mut i = 0;
+    while i < len {
+        if arr8_get(a, i) > 0 {
+            result = arr8_set(result, j, arr8_get(a, i));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Returns the count of elements placed in result
+fn filter_positive_count(a: Arr8, len: Int) -> Int {
+    let mut c = 0;
+    let mut i = 0;
+    while i < len {
+        if arr8_get(a, i) > 0 { c = c + 1; }
+        i = i + 1;
+    }
+    c
+}
+
+// ============================================================================
+// Fold / reduce
+// ============================================================================
+
+fn arr8_fold_max(a: Arr8, len: Int) -> Int {
+    let mut best = arr8_get(a, 0);
+    let mut i = 1;
+    while i < len {
+        let v = arr8_get(a, i);
+        if v > best { best = v; }
+        i = i + 1;
+    }
+    best
+}
+
+fn arr8_fold_sum_of_squares(a: Arr8, len: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < len {
+        let v = arr8_get(a, i);
+        total = total + v * v;
+        i = i + 1;
+    }
+    total
+}
+
+// ============================================================================
+// Index-based iteration: enumerate-like
+// ============================================================================
+
+fn weighted_sum(a: Arr8, len: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < len {
+        total = total + i * arr8_get(a, i);
+        i = i + 1;
+    }
+    total
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_sum_and_product() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let s = arr8_sum(a, 8);
+    assert_eq(s, 36);
+    print("iter_sum=36");
+
+    let b = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let p = arr8_product(b, 5);
+    assert_eq(p, 120);
+    print("iter_product=120");
+
+    // Partial sum
+    let partial = arr8_sum(a, 4);
+    assert_eq(partial, 10);
+    print("iter_partial_sum=10");
+}
+
+fn test_min_max() {
+    let a = Arr8 { e0: 5, e1: -3, e2: 8, e3: 1, e4: -7, e5: 4, e6: 9, e7: -2 };
+    let mn = arr8_min(a, 8);
+    let mx = arr8_max(a, 8);
+    assert_eq(mn, -7);
+    assert_eq(mx, 9);
+    print("iter_min=-7");
+    print("iter_max=9");
+
+    // All same
+    let b = Arr8 { e0: 42, e1: 42, e2: 42, e3: 42, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(arr8_min(b, 4), 42);
+    assert_eq(arr8_max(b, 4), 42);
+    print("iter_same_min_max=42");
+}
+
+fn test_count() {
+    let a = Arr8 { e0: -3, e1: 5, e2: 0, e3: 7, e4: -1, e5: 2, e6: 8, e7: -4 };
+    let pos = count_positive(a, 8);
+    assert_eq(pos, 4);
+    print("iter_count_positive=4");
+
+    let evens = count_even(a, 8);
+    assert_eq(evens, 4);  // 0, -4, 2, 8
+    print("iter_count_even=4");
+
+    let in_range = count_in_range(a, 8, 0, 5);
+    assert_eq(in_range, 3);  // 0, 5, 2
+    print("iter_count_range=3");
+}
+
+fn test_map_transform() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let doubled = arr8_map_double(a, 4);
+    assert_eq(arr8_get(doubled, 0), 2);
+    assert_eq(arr8_get(doubled, 1), 4);
+    assert_eq(arr8_get(doubled, 2), 6);
+    assert_eq(arr8_get(doubled, 3), 8);
+    let dsum = arr8_sum(doubled, 4);
+    assert_eq(dsum, 20);
+    print("iter_map_double_sum=20");
+
+    let b = Arr8 { e0: -3, e1: 5, e2: -1, e3: 7, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let absed = arr8_map_abs(b, 4);
+    assert_eq(arr8_get(absed, 0), 3);
+    assert_eq(arr8_get(absed, 1), 5);
+    assert_eq(arr8_get(absed, 2), 1);
+    assert_eq(arr8_get(absed, 3), 7);
+    print("iter_map_abs_sum=16");
+}
+
+fn test_filter() {
+    let a = Arr8 { e0: -3, e1: 5, e2: -1, e3: 7, e4: -4, e5: 2, e6: 0, e7: 0 };
+    let filtered = arr8_filter_positive(a, 6);
+    // Positive values: 5, 7, 2
+    assert_eq(arr8_get(filtered, 0), 5);
+    assert_eq(arr8_get(filtered, 1), 7);
+    assert_eq(arr8_get(filtered, 2), 2);
+    let fc = filter_positive_count(a, 6);
+    assert_eq(fc, 3);
+    print("iter_filter_count=3");
+}
+
+fn test_fold() {
+    let a = Arr8 { e0: 3, e1: 1, e2: 4, e3: 1, e4: 5, e5: 9, e6: 2, e7: 6 };
+    let mx = arr8_fold_max(a, 8);
+    assert_eq(mx, 9);
+    print("iter_fold_max=9");
+
+    let ssq = arr8_fold_sum_of_squares(a, 8);
+    // 9+1+16+1+25+81+4+36 = 173
+    assert_eq(ssq, 173);
+    print("iter_fold_sumsq=173");
+}
+
+fn test_weighted_sum() {
+    let a = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let ws = weighted_sum(a, 4);
+    // 0*10 + 1*20 + 2*30 + 3*40 = 0+20+60+120 = 200
+    assert_eq(ws, 200);
+    print("iter_weighted_sum=200");
+}
+
+fn main() -> Int {
+    test_sum_and_product();
+    test_min_max();
+    test_count();
+    test_map_transform();
+    test_filter();
+    test_fold();
+    test_weighted_sum();
+    print("PASS: iterators");
+    0
+}

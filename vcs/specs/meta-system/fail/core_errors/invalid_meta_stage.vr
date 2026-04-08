@@ -1,0 +1,19 @@
+// @test: meta-fail
+// @level: L1
+// @expected-error: M006
+// @description: Tests detection of invalid meta stage specification
+// @tags: meta-system, core, staging
+
+// M006 is triggered when a stage level is invalid (negative or out of bounds)
+// This tests validation of the stage parameter itself
+
+// ERROR M006: Stage level cannot be negative
+// The stage parameter must be a positive integer >= 1
+meta(-1) fn invalid_negative_stage() -> TokenStream {
+    quote {
+        let x = 42;
+    }
+}
+
+fn main() {}
+

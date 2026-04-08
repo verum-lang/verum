@@ -1,0 +1,50 @@
+// @test: parse-pass
+// @tier: 0
+// @category: syntax
+
+fn test_literals() {
+    // Integer literals
+    let dec = 42;
+    let hex = 0xFF;
+    let oct = 0o77;
+    let bin = 0b1010;
+    let with_sep = 1_000_000;
+
+    // Float literals
+    let f1 = 3.14;
+    let f2 = 2.5e10;
+    let f3 = 1.0e-5;
+    let f4 = 0.5;
+
+    // String literals
+    let s1 = "hello world";
+    let s2 = "with\nescapes\t";
+    let s3 = "unicode: \u{1F600}";
+
+    // Raw strings
+    let raw = r#"no escapes \n here"#;
+    let raw2 = r##"can contain "# inside"##;
+
+    // Multi-line strings
+    let multi = """
+        This is a
+        multi-line string
+    """;
+
+    // Interpolated strings
+    let name = "world";
+    let greeting = f"Hello, {name}!";
+    let computed = f"Result: {1 + 2 * 3}";
+
+    // Char literals
+    let c1 = 'a';
+    let c2 = '\n';
+    let c3 = '\u{1F600}';
+
+    // Boolean literals
+    let t = true;
+    let f = false;
+
+    // Unit literal
+    let unit = ();
+}

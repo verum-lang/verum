@@ -1,0 +1,55 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, integer-overflow, overflowing
+// @description: Tests overflowing arithmetic that returns overflow flag
+
+fn main() {
+    let max_int = 9223372036854775807;  // Int.MAX
+    let min_int = -9223372036854775807 - 1;  // Int.MIN
+
+    // Overflowing add returns (result, overflowed)
+    match max_int.overflowing_add(1) {
+        (result1, overflowed1) => {
+            assert(overflowed1 == true);
+            assert(result1 == min_int);  // Wrapped to MIN
+        }
+    }
+
+    // No overflow case
+    match 100.overflowing_add(50) {
+        (result2, overflowed2) => {
+            assert(overflowed2 == false);
+            assert(result2 == 150);
+        }
+    }
+
+    // Overflowing subtraction
+    match min_int.overflowing_sub(1) {
+        (result3, overflowed3) => {
+            assert(overflowed3 == true);
+            assert(result3 == max_int);  // Wrapped to MAX
+        }
+    }
+
+    // Overflowing multiplication
+    let large = 9223372036854775807;
+    match large.overflowing_mul(2) {
+        (result4, overflowed4) => {
+            assert(overflowed4 == true);
+        }
+    }
+
+    // Check overflow before operation
+    let a = 1000000000000;
+    let b = 10000000;
+    match a.overflowing_mul(b) {
+        (_, would_overflow) => {
+            if would_overflow {
+                println("Would overflow - using alternative algorithm");
+            }
+        }
+    }
+
+    println("Overflowing arithmetic test passed");
+}

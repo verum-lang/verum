@@ -1,0 +1,49 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @expected-error: M408
+// @tags: meta, quote, hygiene, capture, undeclared
+// @description: Tests detection of undefined variable references in quotes
+
+// =============================================================================
+// UNDECLARED VARIABLE REFERENCE
+// =============================================================================
+
+// Reference to variable not in scope and not spliced
+meta fn undeclared_reference() -> TokenStream {
+    quote {
+        // 'external_var' is not defined anywhere
+        let x = external_var + 1;  // ERROR: M408 - Undefined variable
+    }
+}
+
+// Reference to meta variable without proper splice
+meta fn missing_splice() -> TokenStream {
+    let meta_value = 42;  // Meta-level variable
+
+    quote {
+        // 'meta_value' is a meta-level binding, not available in quote
+        // Should use $meta_value or lift(meta_value) instead
+        let x = meta_value + 1;  // ERROR: M408 - Cannot access meta-level binding
+    }
+}
+
+// Reference to out-of-scope binding
+meta fn out_of_scope() -> TokenStream {
+    quote {
+        {
+            let inner = 42;
+        }
+        // 'inner' went out of scope
+        inner  // ERROR: M408 - Variable not in scope
+    }
+}
+
+fn test_undeclared() {
+    // This invocation should fail with M408
+    let result = @undeclared_reference();
+}
+
+fn main() {
+    test_undeclared();
+}

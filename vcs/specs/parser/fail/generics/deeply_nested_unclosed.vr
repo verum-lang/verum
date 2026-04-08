@@ -1,0 +1,7 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, nesting, unclosed, error
+// @description: Test deeply nested generic with unclosed brackets
+// @expected-error: E081
+
+type Data is Map<Text, List<Set<Option<Int>>>;

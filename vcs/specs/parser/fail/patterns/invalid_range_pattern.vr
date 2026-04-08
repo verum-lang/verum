@@ -1,0 +1,55 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, range, error
+// @description: Test invalid range pattern syntax (incomplete range)
+// @expected-error: E082
+
+fn test_range_missing_end() {
+    let value = 5;
+
+    // Invalid: range pattern with missing end (not allowed in patterns)
+    match value {
+        1.. => print("open end"),
+        _ => print("other"),
+    }
+}
+
+fn test_range_only_dots() {
+    let value = 5;
+
+    // Invalid: just the range operator with no bounds
+    match value {
+        .. => print("unbounded"),
+        _ => print("other"),
+    }
+}
+
+fn test_exclusive_range_missing_end() {
+    let value = 5;
+
+    // Invalid: exclusive range without end bound
+    match value {
+        1..< => print("exclusive open"),
+        _ => print("other"),
+    }
+}
+
+fn test_triple_dot_range() {
+    let value = 5;
+
+    // Invalid: triple dot instead of double
+    match value {
+        1...10 => print("triple dot"),
+        _ => print("other"),
+    }
+}
+
+fn test_reversed_range_syntax() {
+    let value = 5;
+
+    // Invalid: reversed inclusive range syntax
+    match value {
+        10=..1 => print("reversed"),
+        _ => print("other"),
+    }
+}

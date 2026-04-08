@@ -1,0 +1,132 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, dynamic-programming, knapsack, optimization
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+
+// 0/1 Knapsack with n items, capacity cap
+// weights in w[0..n-1], values in v[0..n-1]
+// Returns max value achievable
+fn knapsack_01(w: Arr8, v: Arr8, n: Int, cap: Int) -> Int {
+    // dp[j] = max value with capacity j, iterate over items
+    // Since we need Arr8, limit capacity to 7
+    let mut dp = Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let mut i = 0;
+    while i < n {
+        let wi = get(w, i);
+        let vi = get(v, i);
+        // Iterate capacity backwards for 0/1 knapsack
+        let mut j = cap;
+        while j >= wi {
+            let old = get(dp, j);
+            let with_item = get(dp, j - wi) + vi;
+            if with_item > old {
+                dp = Arr8 {
+                    d0: if j == 0 { with_item } else { dp.d0 },
+                    d1: if j == 1 { with_item } else { dp.d1 },
+                    d2: if j == 2 { with_item } else { dp.d2 },
+                    d3: if j == 3 { with_item } else { dp.d3 },
+                    d4: if j == 4 { with_item } else { dp.d4 },
+                    d5: if j == 5 { with_item } else { dp.d5 },
+                    d6: if j == 6 { with_item } else { dp.d6 },
+                    d7: if j == 7 { with_item } else { dp.d7 }
+                };
+            }
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+    get(dp, cap)
+}
+
+// Coin change: min coins to make amount (unbounded)
+fn coin_change(coins: Arr8, n_coins: Int, amount: Int) -> Int {
+    // dp[j] = min coins to make j, -1 = impossible
+    let mut dp = Arr8 { d0: 0, d1: 99, d2: 99, d3: 99, d4: 99, d5: 99, d6: 99, d7: 99 };
+    let mut j = 1;
+    while j <= amount {
+        let mut best = 99;
+        let mut c = 0;
+        while c < n_coins {
+            let cv = get(coins, c);
+            if cv <= j {
+                let prev = get(dp, j - cv);
+                if prev < 99 {
+                    let v = prev + 1;
+                    if v < best { best = v; }
+                }
+            }
+            c = c + 1;
+        }
+        dp = Arr8 {
+            d0: if j == 0 { best } else { dp.d0 },
+            d1: if j == 1 { best } else { dp.d1 },
+            d2: if j == 2 { best } else { dp.d2 },
+            d3: if j == 3 { best } else { dp.d3 },
+            d4: if j == 4 { best } else { dp.d4 },
+            d5: if j == 5 { best } else { dp.d5 },
+            d6: if j == 6 { best } else { dp.d6 },
+            d7: if j == 7 { best } else { dp.d7 }
+        };
+        j = j + 1;
+    }
+    let r = get(dp, amount);
+    if r >= 99 { -1 } else { r }
+}
+
+fn test_knapsack() -> Int {
+    // Items: weights [2,3,4,5], values [3,4,5,6], capacity 7
+    let w = Arr8 { d0: 2, d1: 3, d2: 4, d3: 5, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let v = Arr8 { d0: 3, d1: 4, d2: 5, d3: 6, d4: 0, d5: 0, d6: 0, d7: 0 };
+    // Best: items 0+1 (w=5, v=7) or items 0+2 (w=6, v=8) -> 8? No, check:
+    // w=2,v=3 + w=3,v=4 = w=5,v=7
+    // w=2,v=3 + w=4,v=5 = w=6,v=8
+    // w=3,v=4 + w=4,v=5 = w=7,v=9
+    assert_eq(knapsack_01(w, v, 4, 7), 9);
+    // Capacity 4: best is item 2 alone (w=4, v=5) or items 0 (w=2, v=3) only?
+    // item 0 + item 1 = w=5 > 4, so item 0 alone (3) or item 1 alone (4) or item 2 alone (5)
+    assert_eq(knapsack_01(w, v, 4, 4), 5);
+    1
+}
+
+fn test_knapsack_edge() -> Int {
+    let w = Arr8 { d0: 2, d1: 3, d2: 4, d3: 5, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let v = Arr8 { d0: 3, d1: 4, d2: 5, d3: 6, d4: 0, d5: 0, d6: 0, d7: 0 };
+    // Capacity 0: nothing fits
+    assert_eq(knapsack_01(w, v, 4, 0), 0);
+    // Capacity 1: nothing fits
+    assert_eq(knapsack_01(w, v, 4, 1), 0);
+    // Capacity 2: item 0 fits
+    assert_eq(knapsack_01(w, v, 4, 2), 3);
+    1
+}
+
+fn test_coin_change() -> Int {
+    // Coins [1, 3, 4]
+    let coins = Arr8 { d0: 1, d1: 3, d2: 4, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    assert_eq(coin_change(coins, 3, 0), 0);
+    assert_eq(coin_change(coins, 3, 1), 1);
+    assert_eq(coin_change(coins, 3, 6), 2);  // 3+3
+    assert_eq(coin_change(coins, 3, 7), 2);  // 3+4
+    1
+}
+
+fn main() -> Int {
+    test_knapsack();
+    test_knapsack_edge();
+    test_coin_change();
+    print("DIFF_OK: dp_knapsack");
+    0
+}

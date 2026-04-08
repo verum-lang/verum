@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, constraint, missing, error
+// @description: Test detection of missing constraint after colon
+// @expected-error: E050
+
+// Type parameter with colon but no constraint
+fn test<T:>(x: T) {}

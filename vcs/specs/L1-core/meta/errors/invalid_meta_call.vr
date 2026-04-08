@@ -1,0 +1,15 @@
+// @test: parse-fail
+// @level: L1
+// @tags: meta, macros, errors
+// @timeout: 5000
+
+/// Tests that invalid meta call syntax is rejected.
+
+// Empty @ with no identifier
+fn bad_at() {
+    let x = @;
+}
+
+fn main() {
+    print("Invalid meta call error tests");
+}

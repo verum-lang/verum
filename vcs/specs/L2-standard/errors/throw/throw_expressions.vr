@@ -1,0 +1,388 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: errors, throw, throws, error-boundaries
+// @description: Tests throw expressions with typed error boundaries
+//
+// The throw expression is used in functions with throws clause to raise
+// typed errors. Unlike panic, throw is for recoverable errors with
+// explicit type boundaries.
+//
+// Grammar:
+//   throw_expr = 'throw' , expression ;
+//   throws_clause = 'throws' , '(' , error_type_list , ')' ;
+//   error_type_list = type_expr , { '|' , type_expr } ;
+
+// ============================================================================
+// Error type definitions
+// ============================================================================
+
+type ParseError is
+    | UnexpectedToken(Text)
+    | UnexpectedEof
+    | InvalidSyntax { line: Int, message: Text };
+
+type ValidationError is
+    | Empty
+    | TooLong(Int)
+    | InvalidFormat(Text)
+    | OutOfRange { min: Int, max: Int, actual: Int };
+
+type IoError is
+    | NotFound(Text)
+    | PermissionDenied
+    | Timeout;
+
+type NetworkError is
+    | ConnectionFailed(Text)
+    | Timeout
+    | InvalidResponse;
+
+// ============================================================================
+// Basic throw expressions
+// ============================================================================
+
+// Function with single error type in throws clause
+fn parse_number(input: Text) throws(ParseError) -> Int {
+    if input.is_empty() {
+        throw ParseError.UnexpectedEof;
+    }
+
+    // Simplified digit validation
+    let parsed = input.parse_int();
+    match parsed {
+        Ok(n) => n,
+        Err(_) => throw ParseError.UnexpectedToken(f"Expected number, got '{input}'"),
+    }
+}
+
+// Throw with struct variant
+fn validate_length(s: Text, max: Int) throws(ValidationError) -> Text {
+    if s.is_empty() {
+        throw ValidationError.Empty;
+    }
+    if s.len() > max {
+        throw ValidationError.TooLong(s.len());
+    }
+    s
+}
+
+// ============================================================================
+// Union error types in throws clause
+// ============================================================================
+
+// Multiple error types using union
+fn parse_and_validate(input: Text) throws(ParseError | ValidationError) -> Int {
+    if input.is_empty() {
+        throw ValidationError.Empty;
+    }
+
+    let trimmed = input.trim();
+    if trimmed.len() > 10 {
+        throw ValidationError.TooLong(trimmed.len());
+    }
+
+    if trimmed.is_empty() {
+        throw ParseError.InvalidSyntax {
+            line: 1,
+            message: "Empty input after trimming"
+        };
+    }
+
+    trimmed.parse_int().unwrap()
+}
+
+// Three or more error types
+fn complex_operation(data: Text) throws(ParseError | ValidationError | IoError) -> Int {
+    if data.starts_with("file:") {
+        throw IoError.NotFound(data);
+    }
+
+    if data.is_empty() {
+        throw ValidationError.Empty;
+    }
+
+    if data.is_empty() {
+        throw ParseError.InvalidSyntax { line: 1, message: "Invalid characters" };
+    }
+
+    data.len()
+}
+
+// ============================================================================
+// Throw in control flow
+// ============================================================================
+
+fn process_value(value: Int) throws(ValidationError) -> Int {
+    // Throw in if expression
+    if value < 0 {
+        throw ValidationError.OutOfRange { min: 0, max: 100, actual: value };
+    }
+
+    // Throw in else branch
+    if value <= 100 {
+        value * 2
+    } else {
+        throw ValidationError.OutOfRange { min: 0, max: 100, actual: value }
+    }
+}
+
+fn process_match(input: Maybe<Text>) throws(ValidationError) -> Text {
+    // Throw in match arms
+    match input {
+        Some(s) if s.is_empty() => throw ValidationError.Empty,
+        Some(s) if s.len() > 100 => throw ValidationError.TooLong(s.len()),
+        Some(s) => s,
+        None => throw ValidationError.Empty,
+    }
+}
+
+fn process_loop(items: List<Int>) throws(ValidationError) -> Int {
+    let mut sum = 0;
+
+    for item in items {
+        // Throw inside loop
+        if item < 0 {
+            throw ValidationError.OutOfRange { min: 0, max: 1000, actual: item };
+        }
+        sum += item;
+
+        if sum > 1000 {
+            throw ValidationError.OutOfRange { min: 0, max: 1000, actual: sum };
+        }
+    }
+
+    sum
+}
+
+// ============================================================================
+// Throw with complex expressions
+// ============================================================================
+
+fn throw_computed_error(kind: Text, value: Int) throws(ValidationError) -> Int {
+    // Throw with computed error value
+    let error = if kind == "empty" {
+        ValidationError.Empty
+    } else if kind == "long" {
+        ValidationError.TooLong(value)
+    } else {
+        ValidationError.InvalidFormat(kind)
+    };
+
+    throw error
+}
+
+fn throw_from_closure() throws(ValidationError) -> Int {
+    let validate = |x: Int| -> Result<Int, ValidationError> {
+        if x < 0 {
+            Err(ValidationError.OutOfRange { min: 0, max: 100, actual: x })
+        } else {
+            Ok(x)
+        }
+    };
+
+    // Propagate error from closure result
+    match validate(-5) {
+        Ok(v) => v,
+        Err(e) => throw e,
+    }
+}
+
+// ============================================================================
+// Throw with error construction
+// ============================================================================
+
+fn validate_range(value: Int, min: Int, max: Int) throws(ValidationError) -> Int {
+    if value < min || value > max {
+        // Throw with struct construction
+        throw ValidationError.OutOfRange {
+            min: min,
+            max: max,
+            actual: value
+        };
+    }
+    value
+}
+
+fn validate_format(s: Text, pattern: Text) throws(ValidationError) -> Text {
+    if s.is_empty() {
+        // Throw with tuple variant
+        throw ValidationError.InvalidFormat(f"'{s}' does not match pattern '{pattern}'");
+    }
+    s
+}
+
+// ============================================================================
+// Calling functions with throws
+// ============================================================================
+
+fn caller_propagates(input: Text) throws(ParseError | ValidationError) -> Int {
+    // Call function that throws - use ? to propagate errors
+    let validated = validate_length(input, 50)?;
+    let number = parse_number(validated)?;
+    number
+}
+
+fn caller_catches(input: Text) -> Result<Int, Text> {
+    // Catch thrown errors
+    try {
+        let result = parse_and_validate(input);
+        Ok(result)
+    } recover |error| {
+        match error {
+            ParseError.UnexpectedEof => Err("Unexpected end of input"),
+            ParseError.UnexpectedToken(t) => Err(f"Unexpected token: {t}"),
+            ParseError.InvalidSyntax { message, .. } => Err(message),
+            ValidationError.Empty => Err("Input is empty"),
+            ValidationError.TooLong(n) => Err(f"Input too long: {n}"),
+            ValidationError.InvalidFormat(fmt) => Err(f"Invalid format: {fmt}"),
+            ValidationError.OutOfRange { actual, .. } => Err(f"Out of range: {actual}"),
+        }
+    }
+}
+
+// ============================================================================
+// Throw in async functions
+// ============================================================================
+
+async fn async_validate(data: Text) throws(ValidationError) -> Text {
+    // Simulate async operation
+    let result = async { data.trim() }.await;
+
+    if result.is_empty() {
+        throw ValidationError.Empty;
+    }
+
+    result
+}
+
+async fn async_fetch_and_parse(url: Text) throws(NetworkError | ParseError) -> Int {
+    if url.is_empty() {
+        throw NetworkError.InvalidResponse;
+    }
+
+    // Simulate network fetch
+    let response = async { "42" }.await;
+
+    if response.is_empty() {
+        throw ParseError.UnexpectedEof;
+    }
+
+    response.parse_int().unwrap_or_else(|_| {
+        // Can't throw from closure, return default
+        0
+    })
+}
+
+// ============================================================================
+// Throw in generators
+// ============================================================================
+
+fn* generate_validated(items: List<Int>) throws(ValidationError) -> Int {
+    for item in items {
+        if item < 0 {
+            throw ValidationError.OutOfRange { min: 0, max: 1000, actual: item };
+        }
+        yield item;
+    }
+}
+
+// ============================================================================
+// Throw vs return distinction
+// ============================================================================
+
+fn throw_vs_return(condition: Bool) throws(ValidationError) -> Int {
+    if condition {
+        // throw is for errors
+        throw ValidationError.Empty;
+    }
+    // return is for success values
+    return 42;
+}
+
+// ============================================================================
+// Type checking: throw must match throws clause
+// ============================================================================
+
+// This demonstrates that throw expressions must produce values
+// compatible with the throws clause type
+
+fn type_checked_throw(kind: Int) throws(ValidationError) -> Int {
+    match kind {
+        0 => throw ValidationError.Empty,
+        1 => throw ValidationError.TooLong(100),
+        2 => throw ValidationError.InvalidFormat("bad"),
+        3 => throw ValidationError.OutOfRange { min: 0, max: 10, actual: 50 },
+        _ => 0,
+    }
+}
+
+// ============================================================================
+// Early throw pattern
+// ============================================================================
+
+fn early_throw_validation(
+    name: Text,
+    age: Int,
+    email: Text
+) throws(ValidationError) -> User {
+    // Validate all inputs with early throws
+    if name.is_empty() {
+        throw ValidationError.Empty;
+    }
+    if name.len() > 100 {
+        throw ValidationError.TooLong(name.len());
+    }
+    if age < 0 || age > 150 {
+        throw ValidationError.OutOfRange { min: 0, max: 150, actual: age };
+    }
+    if email.is_empty() {
+        throw ValidationError.InvalidFormat("Email must contain @");
+    }
+
+    User { name, age, email }
+}
+
+type User is {
+    name: Text,
+    age: Int,
+    email: Text,
+};
+
+// ============================================================================
+// Test entry point
+// ============================================================================
+
+fn main() {
+    // Test basic throw
+    try {
+        let _ = parse_number("");
+    } recover |e| {
+        assert(e is ParseError.UnexpectedEof);
+    }
+
+    // Test validation throw
+    try {
+        let _ = validate_length("", 10);
+    } recover |e| {
+        assert(e is ValidationError.Empty);
+    }
+
+    // Test union error types
+    try {
+        let _ = parse_and_validate("abc");
+    } recover |e| {
+        assert(e is ParseError.InvalidSyntax { .. });
+    }
+
+    // Test successful path (no throw)
+    let result = try {
+        parse_number("42")
+    } recover |_| {
+        -1
+    };
+
+    assert_eq(result, 42);
+
+    print("All throw expression tests passed!");
+}

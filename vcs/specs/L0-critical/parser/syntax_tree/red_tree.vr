@@ -1,0 +1,178 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, syntax-tree, red-tree, navigation, events, lossless
+// @description: Test red tree navigation (parent, sibling, token traversal) and event integration
+
+// ============================================================================
+// SECTION 1: Parent Navigation
+// ============================================================================
+
+// Test parent navigation
+fn parent_nav() {
+    let x = 1;  // x's parent is LET_STMT, grandparent is BLOCK
+}
+
+// Test grandparent navigation
+fn grandparent_nav() {
+    {
+        let x = 1;  // x's grandparent is inner BLOCK, great-grandparent is outer BLOCK
+    }
+}
+
+// Test root navigation
+fn root_nav() {
+    let x = 1;  // Traversing up should reach SOURCE_FILE
+}
+
+// ============================================================================
+// SECTION 2: Sibling Navigation
+// ============================================================================
+
+// Test sibling navigation
+fn sibling_nav(a: Int, b: Int, c: Int) {
+    // a, b, c are siblings in PARAM_LIST
+}
+
+// Test next_sibling and prev_sibling
+fn sibling_next_prev() {
+    let first = 1;
+    let second = 2;
+    let third = 3;
+    // first.next_sibling() -> second, second.prev_sibling() -> first
+}
+
+// ============================================================================
+// SECTION 3: Token Traversal
+// ============================================================================
+
+// Test token traversal
+fn token_nav() {
+    let first = 1;
+    let second = 2;
+    let third = 3;
+    // Tokens should traverse: let -> first -> = -> 1 -> ; -> let -> ...
+}
+
+// Test token traversal includes trivia
+fn token_nav_trivia() {
+    let x = 1;  // Comment
+    let y = 2;
+    // Trivia tokens should be included in traversal
+}
+
+// ============================================================================
+// SECTION 4: Offset Queries
+// ============================================================================
+
+// Test offset queries
+fn offset_query() {
+    let at_offset_10 = 1;
+    let at_offset_30 = 2;
+    // token_at_offset should return correct token
+}
+
+// Test offset at boundary
+fn offset_boundary() {
+    let x = 1;  // Test offset at token boundaries
+}
+
+// ============================================================================
+// SECTION 5: Range Queries
+// ============================================================================
+
+// Test range queries
+fn range_query() {
+    let covered_by_range = 1;
+    // covering_element should return smallest node containing range
+}
+
+// Test range spanning multiple nodes
+fn range_spanning() {
+    let a = 1;
+    let b = 2;
+    // Range covering both statements returns their common parent
+}
+
+// ============================================================================
+// SECTION 6: Red Tree from Events
+// ============================================================================
+
+// Test red tree wraps green tree from events
+fn red_from_events() {
+    let x = 1;  // Events -> GreenTree -> RedTree
+}
+
+// Test red tree preserves event-based structure
+fn red_preserves_structure() {
+    {
+        {
+            let deep = 1;
+        }
+    }
+}
+
+// ============================================================================
+// SECTION 7: Red Tree Offset Calculation
+// ============================================================================
+
+// Test absolute offset calculation
+fn red_absolute_offset() {
+    let first = 1;
+    let second = 2;  // second has offset relative to file start
+}
+
+// Test relative offset within parent
+fn red_relative_offset() {
+    {
+        let child = 1;  // child has offset relative to block
+    }
+}
+
+// ============================================================================
+// SECTION 8: Red Tree Span Information
+// ============================================================================
+
+// Test text_range includes trivia
+fn red_text_range() {
+    /* leading */ let x = 1; /* trailing */
+}
+
+// Test syntax_range excludes trivia
+fn red_syntax_range() {
+    /* leading */ let x = 1; /* trailing */
+}
+
+// ============================================================================
+// SECTION 9: Ancestors and Descendants
+// ============================================================================
+
+// Test ancestors iteration
+fn ancestors_iteration() {
+    {
+        {
+            let deep = 1;  // ancestors: LET_STMT, BLOCK, BLOCK, FN_DEF, SOURCE_FILE
+        }
+    }
+}
+
+// Test descendants iteration
+fn descendants_iteration(a: Int, b: Int) -> Int {
+    a + b  // descendants includes all child nodes
+}
+
+// ============================================================================
+// SECTION 10: Red Tree with Event Errors
+// ============================================================================
+
+// Test red tree handles error events gracefully
+fn red_with_errors() {
+    let valid = 1;
+    let also_valid = 2;
+}
+
+// Test navigation around error nodes
+fn red_navigate_errors() {
+    let before = 1;
+    let after = 2;
+}

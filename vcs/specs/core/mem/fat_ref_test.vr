@@ -1,0 +1,1088 @@
+// =============================================================================
+// VCS Test Suite: stdlib/mem/fat_ref.vr - FatRef<T> Tests
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: mem, cbgr, fat_ref, slice, unsized, validation
+// @timeout: 30000
+// =============================================================================
+//
+// Tests for FatRef<T>, the 32-byte generational reference for unsized types
+// (slices, trait objects). Extends ThinRef with metadata for length/vtable
+// and supports offset tracking for subslice views.
+//
+// =============================================================================
+
+mount core.mem.fat_ref.{
+    FatRef, fat_ref_from_heap, empty_slice,
+};
+mount core.mem.header.{
+    AllocationHeader, HEADER_SIZE, GEN_INITIAL, GEN_UNALLOCATED,
+};
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE, CAP_OWNED,
+    CAP_BORROW_SHARED, CAP_READ_WRITE,
+};
+mount core.mem.{UseAfterFreeError, RevocationError};
+
+mount core.intrinsics.{ptr_offset, ptr_write};
+
+// =============================================================================
+// Layout Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_size_is_32_bytes() {
+    // FatRef must be exactly 32 bytes (half cache line)
+    assert_eq(FatRef<[Int]>.size, 32);
+}
+
+@test
+fn test_fat_ref_alignment_is_8() {
+    // Must be 8-byte aligned
+    assert_eq(FatRef<[Int]>.align, 8);
+}
+
+// =============================================================================
+// Construction Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_new_slice() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_OWNED, 10, 0)
+    };
+
+    assert_eq(fat.generation(), 1);
+    assert_eq(fat.epoch(), 0);
+    assert_eq(fat.len(), 10);
+    assert_eq(fat.offset_from_base(), 0);
+    assert(!fat.is_null());
+}
+
+@test
+fn test_fat_ref_new_dyn() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let vtable_ptr = 0x12345678 as Int;  // Fake vtable
+
+    let fat = unsafe {
+        FatRef.new_dyn(ptr, 1, 0, CAP_READ, vtable_ptr)
+    };
+
+    assert_eq(fat.metadata(), vtable_ptr);
+    assert(!fat.is_null());
+}
+
+@test
+fn test_fat_ref_null() {
+    let fat: FatRef<[Int]> = unsafe { FatRef.null() };
+
+    assert(fat.is_null());
+    assert_eq(fat.generation(), GEN_UNALLOCATED);
+    assert_eq(fat.len(), 0);
+}
+
+@test
+fn test_empty_slice_function() {
+    let fat: FatRef<[Int]> = empty_slice();
+
+    assert(fat.is_null());
+    assert(fat.is_empty());
+    assert_eq(fat.len(), 0);
+}
+
+@test
+fn test_fat_ref_from_header() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 5, CAP_READ)
+    };
+
+    assert_eq(fat.generation(), GEN_INITIAL);
+    assert_eq(fat.len(), 5);
+    assert(!fat.is_null());
+}
+
+// =============================================================================
+// Accessor Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_as_ptr() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 10, 0)
+    };
+
+    assert_eq(fat.as_ptr() as Int, ptr as Int);
+}
+
+@test
+fn test_fat_ref_generation() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 42, 0, CAP_READ, 10, 0)
+    };
+
+    assert_eq(fat.generation(), 42);
+}
+
+@test
+fn test_fat_ref_epoch() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 7, CAP_READ, 10, 0)
+    };
+
+    assert_eq(fat.epoch(), 7);
+}
+
+@test
+fn test_fat_ref_capabilities() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ | CAP_WRITE, 10, 0)
+    };
+
+    assert_eq(fat.capabilities(), CAP_READ | CAP_WRITE);
+}
+
+@test
+fn test_fat_ref_len() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 25, 0)
+    };
+
+    assert_eq(fat.len(), 25);
+}
+
+@test
+fn test_fat_ref_is_empty() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let empty = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 0, 0)
+    };
+
+    let non_empty = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 1, 0)
+    };
+
+    assert(empty.is_empty());
+    assert(!non_empty.is_empty());
+}
+
+@test
+fn test_fat_ref_offset_from_base() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 10, 64)
+    };
+
+    assert_eq(fat.offset_from_base(), 64);
+}
+
+// =============================================================================
+// Capability Check Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_has_capability() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ | CAP_WRITE, 10, 0)
+    };
+
+    assert(fat.has_capability(CAP_READ));
+    assert(fat.has_capability(CAP_WRITE));
+    assert(!fat.has_capability(CAP_REVOKE));
+}
+
+@test
+fn test_fat_ref_can_read() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let readable = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 10, 0)
+    };
+
+    assert(readable.can_read());
+}
+
+@test
+fn test_fat_ref_can_write() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let writable = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_WRITE | CAP_MUTABLE, 10, 0)
+    };
+
+    let readonly = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 10, 0)
+    };
+
+    assert(writable.can_write());
+    assert(!readonly.can_write());
+}
+
+// =============================================================================
+// Validation Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_validate_null_fails() {
+    let fat: FatRef<[Int]> = unsafe { FatRef.null() };
+
+    let result = fat.validate();
+    assert(result.is_err());
+}
+
+@test
+fn test_fat_ref_validate_success() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    let result = fat.validate();
+    assert(result.is_ok());
+}
+
+@test
+fn test_fat_ref_validate_generation_mismatch() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    // Create FatRef with wrong generation
+    let fat = unsafe {
+        FatRef.new_slice(user_ptr, 999, 0, CAP_READ, 10, 0)
+    };
+
+    let result = fat.validate();
+    assert(result.is_err());
+}
+
+@test
+fn test_fat_ref_is_valid() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    assert(fat.is_valid());
+}
+
+@test
+fn test_fat_ref_is_valid_after_free() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    // Simulate deallocation
+    unsafe {
+        header_ptr.increment_generation();
+    }
+
+    assert(!fat.is_valid());
+}
+
+// =============================================================================
+// Element Access Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_get_success() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+
+        // Write some values
+        let data_ptr = &buffer[HEADER_SIZE] as &unsafe mut Int;
+        ptr_write(data_ptr, 10);
+        ptr_write(ptr_offset(data_ptr as &unsafe Byte, 8) as &unsafe mut Int, 20);
+        ptr_write(ptr_offset(data_ptr as &unsafe Byte, 16) as &unsafe mut Int, 30);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 3, CAP_READ)
+    };
+
+    let elem0: Result<&Int, UseAfterFreeError> = fat.get(0);
+    let elem1: Result<&Int, UseAfterFreeError> = fat.get(1);
+    let elem2: Result<&Int, UseAfterFreeError> = fat.get(2);
+
+    assert(elem0.is_ok());
+    assert(elem1.is_ok());
+    assert(elem2.is_ok());
+
+    assert_eq(*elem0.unwrap(), 10);
+    assert_eq(*elem1.unwrap(), 20);
+    assert_eq(*elem2.unwrap(), 30);
+}
+
+@test
+fn test_fat_ref_get_bounds_check() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 5, CAP_READ)
+    };
+
+    // Index 5 is out of bounds (length is 5, valid indices are 0-4)
+    let result: Result<&Int, UseAfterFreeError> = fat.get(5);
+    assert(result.is_err());
+
+    // Negative index
+    let result_neg: Result<&Int, UseAfterFreeError> = fat.get(-1);
+    assert(result_neg.is_err());
+}
+
+@test
+fn test_fat_ref_get_no_read_capability() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    // No READ capability
+    let fat = unsafe {
+        FatRef.new_slice(user_ptr, GEN_INITIAL, 0, CAP_WRITE, 5, 0)
+    };
+
+    let result: Result<&Int, UseAfterFreeError> = fat.get(0);
+    assert(result.is_err());
+}
+
+@test
+fn test_fat_ref_get_mut_success() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let mut fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 5, CAP_OWNED)
+    };
+
+    let elem: Result<&mut Int, UseAfterFreeError> = fat.get_mut(0);
+    assert(elem.is_ok());
+
+    *elem.unwrap() = 42;
+
+    // Verify write
+    let read_result: Result<&Int, UseAfterFreeError> = fat.get(0);
+    assert_eq(*read_result.unwrap(), 42);
+}
+
+@test
+fn test_fat_ref_first() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+
+        let data_ptr = &buffer[HEADER_SIZE] as &unsafe mut Int;
+        ptr_write(data_ptr, 100);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 3, CAP_READ)
+    };
+
+    let first: Result<&Int, UseAfterFreeError> = fat.first();
+    assert(first.is_ok());
+    assert_eq(*first.unwrap(), 100);
+}
+
+@test
+fn test_fat_ref_first_empty() {
+    let fat: FatRef<[Int]> = empty_slice();
+
+    let result: Result<&Int, UseAfterFreeError> = fat.first();
+    assert(result.is_err());
+}
+
+@test
+fn test_fat_ref_last() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+
+        let data_ptr = &buffer[HEADER_SIZE] as &unsafe mut Int;
+        ptr_write(ptr_offset(data_ptr as &unsafe Byte, 16) as &unsafe mut Int, 300);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 3, CAP_READ)
+    };
+
+    let last: Result<&Int, UseAfterFreeError> = fat.last();
+    assert(last.is_ok());
+    assert_eq(*last.unwrap(), 300);
+}
+
+// =============================================================================
+// Slicing Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_slice_view() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    // Create subslice view [2..7) = 5 elements
+    let subslice: Result<FatRef<[Int]>, UseAfterFreeError> = fat.slice_view(2, 5);
+
+    assert(subslice.is_ok());
+    let sub = subslice.unwrap();
+    assert_eq(sub.len(), 5);
+}
+
+@test
+fn test_fat_ref_slice_view_preserves_generation() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    let subslice = fat.slice_view<Int>(0, 5).unwrap();
+
+    assert_eq(subslice.generation(), fat.generation());
+    assert_eq(subslice.epoch(), fat.epoch());
+}
+
+@test
+fn test_fat_ref_slice_view_tracks_offset() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    // Element size is Int (8 bytes), start at index 2
+    let subslice = fat.slice_view<Int>(2, 5).unwrap();
+
+    // Offset should be 2 * 8 = 16 bytes
+    assert_eq(subslice.offset_from_base(), 16);
+}
+
+@test
+fn test_fat_ref_slice_view_bounds_check() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    // Start + length exceeds total length
+    let result: Result<FatRef<[Int]>, UseAfterFreeError> = fat.slice_view(8, 5);
+    assert(result.is_err());
+}
+
+@test
+fn test_fat_ref_slice_view_negative_start() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    let result: Result<FatRef<[Int]>, UseAfterFreeError> = fat.slice_view(-1, 5);
+    assert(result.is_err());
+}
+
+@test
+fn test_fat_ref_split_at() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    let result: Result<(FatRef<[Int]>, FatRef<[Int]>), UseAfterFreeError> =
+        fat.split_at(3);
+
+    assert(result.is_ok());
+    let (left, right) = result.unwrap();
+
+    assert_eq(left.len(), 3);
+    assert_eq(right.len(), 7);
+}
+
+@test
+fn test_fat_ref_split_at_start() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    let (left, right) = fat.split_at<Int>(0).unwrap();
+
+    assert_eq(left.len(), 0);
+    assert_eq(right.len(), 10);
+}
+
+@test
+fn test_fat_ref_split_at_end() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    let (left, right) = fat.split_at<Int>(10).unwrap();
+
+    assert_eq(left.len(), 10);
+    assert_eq(right.len(), 0);
+}
+
+// =============================================================================
+// Subslice Validation Tests
+// =============================================================================
+
+@test
+fn test_subslice_invalidated_when_base_freed() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    let subslice = fat.slice_view<Int>(2, 5).unwrap();
+
+    // Both valid initially
+    assert(fat.is_valid());
+    assert(subslice.is_valid());
+
+    // Free base allocation
+    unsafe {
+        header_ptr.increment_generation();
+    }
+
+    // Both should now be invalid
+    assert(!fat.is_valid());
+    assert(!subslice.is_valid());
+}
+
+@test
+fn test_nested_subslices_share_generation() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 20, CAP_READ)
+    };
+
+    let sub1 = fat.slice_view<Int>(5, 10).unwrap();
+    let sub2 = sub1.slice_view<Int>(2, 5).unwrap();
+
+    // All share same generation
+    assert_eq(fat.generation(), sub1.generation());
+    assert_eq(sub1.generation(), sub2.generation());
+
+    // Free invalidates all
+    unsafe {
+        header_ptr.increment_generation();
+    }
+
+    assert(!fat.is_valid());
+    assert(!sub1.is_valid());
+    assert(!sub2.is_valid());
+}
+
+// =============================================================================
+// Reference Operations Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_clone_ref() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 42, 7, CAP_OWNED, 10, 16)
+    };
+
+    let cloned = fat.clone_ref();
+
+    assert_eq(cloned.generation(), fat.generation());
+    assert_eq(cloned.epoch(), fat.epoch());
+    assert_eq(cloned.len(), fat.len());
+    assert_eq(cloned.offset_from_base(), fat.offset_from_base());
+}
+
+@test
+fn test_fat_ref_as_readonly() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_OWNED, 10, 0)
+    };
+
+    let readonly = fat.as_readonly();
+
+    assert(readonly.has_capability(CAP_READ));
+    assert(!readonly.has_capability(CAP_WRITE));
+    assert(!readonly.has_capability(CAP_MUTABLE));
+}
+
+@test
+fn test_fat_ref_attenuate() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_OWNED, 10, 0)
+    };
+
+    let attenuated = fat.attenuate(CAP_READ);
+
+    assert_eq(attenuated.capabilities(), CAP_READ);
+}
+
+// =============================================================================
+// Revocation Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_revoke_null_fails() {
+    let fat: FatRef<[Int]> = unsafe { FatRef.null() };
+
+    let result = fat.revoke();
+    assert(result.is_err());
+}
+
+@test
+fn test_fat_ref_revoke_success() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_OWNED)
+    };
+
+    let result = fat.revoke();
+    assert(result.is_ok());
+
+    assert(!fat.is_valid());
+}
+
+@test
+fn test_fat_ref_revoke_invalidates_subslices() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_OWNED)
+    };
+
+    let subslice = fat.slice_view<Int>(2, 5).unwrap();
+
+    // Revoke from base
+    fat.revoke();
+
+    // Subslice should also be invalid
+    assert(!subslice.is_valid());
+}
+
+// =============================================================================
+// Trait Implementation Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_copy() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat1 = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 10, 0)
+    };
+
+    let fat2 = fat1;  // Copy
+
+    assert_eq(fat1.generation(), fat2.generation());
+    assert_eq(fat1.len(), fat2.len());
+}
+
+@test
+fn test_fat_ref_clone() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat1 = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 10, 0)
+    };
+
+    let fat2 = fat1.clone();
+
+    assert_eq(fat1.generation(), fat2.generation());
+}
+
+// =============================================================================
+// Unchecked Access Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_get_unchecked() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+
+        let data_ptr = &buffer[HEADER_SIZE] as &unsafe mut Int;
+        ptr_write(data_ptr, 42);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_READ)
+    };
+
+    let value: &Int = unsafe { fat.get_unchecked(0) };
+    assert_eq(*value, 42);
+}
+
+@test
+fn test_fat_ref_get_unchecked_mut() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let mut fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 10, CAP_OWNED)
+    };
+
+    unsafe {
+        let elem: &mut Int = fat.get_unchecked_mut(0);
+        *elem = 999;
+    }
+
+    let read: &Int = unsafe { fat.get_unchecked(0) };
+    assert_eq(*read, 999);
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+@test
+fn test_fat_ref_max_generation() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 0xFFFFFFFF as UInt32, 0, CAP_READ, 10, 0)
+    };
+
+    assert_eq(fat.generation(), 0xFFFFFFFF as UInt32);
+}
+
+@test
+fn test_fat_ref_max_epoch() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0xFFFF as UInt16, CAP_READ, 10, 0)
+    };
+
+    assert_eq(fat.epoch(), 0xFFFF as UInt16);
+}
+
+@test
+fn test_fat_ref_zero_length_operations() {
+    let buffer: [Byte; 256] = [0; 256];
+    let header_ptr = &buffer[0] as &unsafe mut AllocationHeader;
+
+    unsafe {
+        *header_ptr = AllocationHeader.new(200, 8, 0, CAP_READ_WRITE);
+    }
+
+    let user_ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+
+    let fat = unsafe {
+        FatRef.from_header(user_ptr, header_ptr, 0, CAP_READ)
+    };
+
+    assert(fat.is_empty());
+
+    // Operations on empty slice
+    let first: Result<&Int, UseAfterFreeError> = fat.first();
+    assert(first.is_err());
+
+    let last: Result<&Int, UseAfterFreeError> = fat.last();
+    assert(last.is_err());
+
+    // slice_view of empty slice
+    let sub: Result<FatRef<[Int]>, UseAfterFreeError> = fat.slice_view(0, 0);
+    assert(sub.is_ok());
+    assert(sub.unwrap().is_empty());
+}
+
+// =============================================================================
+// Additional FatRef Tests
+// =============================================================================
+
+@test
+fn test_fat_ref_generation_zero() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 0 as UInt32, 0, CAP_READ, 5, 0)
+    };
+    assert_eq(fat.generation(), 0 as UInt32);
+}
+
+@test
+fn test_fat_ref_epoch_zero() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 5, 0)
+    };
+    assert_eq(fat.epoch(), 0 as UInt16);
+}
+
+@test
+fn test_fat_ref_len_matches() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 42, 0)
+    };
+    assert_eq(fat.len(), 42);
+}
+
+@test
+fn test_fat_ref_capabilities_read() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 5, 0)
+    };
+    assert(fat.can_read());
+}
+
+@test
+fn test_fat_ref_capabilities_read_write() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ_WRITE, 5, 0)
+    };
+    assert(fat.can_read());
+    assert(fat.can_write());
+}
+
+@test
+fn test_fat_ref_not_empty() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 10, 0)
+    };
+    assert(!fat.is_empty());
+}
+
+@test
+fn test_fat_ref_is_empty_zero_len() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 0, 0)
+    };
+    assert(fat.is_empty());
+}
+
+@test
+fn test_fat_ref_offset_value() {
+    let buffer: [Byte; 256] = [0; 256];
+    let ptr = &buffer[HEADER_SIZE] as &unsafe Byte;
+    let fat = unsafe {
+        FatRef.new_slice(ptr, 1, 0, CAP_READ, 5, 10)
+    };
+    assert_eq(fat.offset_from_base(), 10);
+}

@@ -1,0 +1,190 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, lifetime, capture
+// @description: Context capture in closures and async blocks
+
+/// Rules for capturing contexts in closures and async blocks
+
+// Context declarations
+context Logger { fn log(&self, msg: Text); }
+context Config { fn get(&self, key: Text) -> Maybe<Text>; }
+type Rows is { data: List<Map<Text, Text>> };
+context async Database { async fn query(&self, sql: Text) -> Result<Rows, Error>; }
+
+// Closure capturing context - explicit
+fn make_logger_closure() -> fn(Text) using [Logger] {
+    // Logger context is available via using clause on return type
+    move |msg| {
+        println(msg);
+    }
+}
+
+// Closure with context bounds in signature
+type LoggerCallback is fn(Text) using [Logger];
+
+fn register_callback(callback: LoggerCallback) using [Logger] {
+    callback("Registration message");
+}
+
+// Async block capturing context
+async fn async_with_context() -> Result<Int, Error> using [Database] {
+    // Database context captured by async block
+    // Database context captured by async block
+    let result = Database.query("SELECT COUNT(*) FROM items").await;
+    match result {
+        Ok(rows) => Ok(0),
+        Err(e) => Err(e),
+    }
+}
+
+// Context capture rules
+// 1. Move closure - context is moved into closure
+fn move_capture() using [Logger] {
+    let closure = move || {
+        Logger.log("Inside closure");
+        // Logger is now owned by closure
+    };
+
+    closure();
+    // Logger no longer available here after move
+}
+
+// 2. Borrow closure - context is borrowed
+fn borrow_capture() using [Logger] {
+    let closure = || {
+        Logger.log("Borrowed");
+    };
+
+    closure();
+    closure();  // Can call multiple times
+    Logger.log("After closure");  // Still available
+}
+
+// 3. Explicit capture
+fn explicit_capture() using [Logger, Config] {
+    // Only capture Logger, not Config
+    let log_only = move |msg| using [Logger] {
+        Logger.log(msg);
+    };
+
+    // Only capture Config
+    let config_only = move |key| using [Config] -> Maybe<Text> {
+        Config.get(key)
+    };
+}
+
+// Capturing in spawn
+async fn spawn_with_context() using [Logger] {
+    // Context must be Send to cross spawn boundary
+    spawn using [Logger] {
+        Logger.log("In spawned task");
+    };
+
+    // Or explicitly clone/share
+    spawn using [Logger] {
+        Logger.log("With cloned logger");
+    };
+}
+
+// Context in higher-order functions
+fn map_with_context<T, U, F: Fn(T) -> U>(items: List<T>, f: F) -> List<U>
+    using [Logger]
+{
+    let mut result = [];
+    for item in items {
+        Logger.log(f"Processing item");
+        result.push(f(item));
+    }
+    result
+}
+
+// Returning closures with context
+fn make_processor() -> fn(Text) -> Text using [Config, Logger] {
+    move |input| {
+        // Context variables available via using clause on the returned fn type
+        let prefix = "default";
+        f"{prefix}: {input}"
+    }
+}
+
+// Async closure with context
+fn make_async_processor() -> impl async Fn(Int) -> Result<Data, Error> using [Database] {
+    async move |id| {
+        Database.query(f"SELECT * FROM items WHERE id = {id}").await
+    }
+}
+
+// Context escaping prevention
+fn prevent_escape() using [Logger] {
+    // This would be a compile error - context escaping its scope
+    // let escaped: fn(Text) = make_logger_closure();
+    // return escaped;
+
+    // Safe - closure used within scope
+    let local = make_logger_closure();
+    local("Safe usage");
+}
+
+// Nested captures
+fn nested_capture() using [Logger, Config] {
+    let outer = || {
+        Logger.log("Outer");
+
+        let inner = || {
+            Config.get("key");
+            Logger.log("Inner");
+        };
+
+        inner();
+    };
+
+    outer();
+}
+
+// Capture in match arms
+fn match_with_context(opt: Maybe<Int>) using [Logger] {
+    match opt {
+        Some(value) => {
+            Logger.log(f"Got value: {value}");
+        }
+        None => {
+            Logger.log("No value");
+        }
+    }
+}
+
+// Context in iterator adapters
+fn iterator_context() using [Logger] {
+    let numbers = [1, 2, 3, 4, 5];
+
+    numbers.iter()
+        .inspect(|n| Logger.log(f"Saw: {n}"))
+        .filter(|n| {
+            Logger.log(f"Filtering: {n}");
+            *n % 2 == 0
+        })
+        .for_each(|n| {
+            Logger.log(f"Final: {n}");
+        });
+}
+
+type ConsoleLogger is {};
+type FileConfig is {};
+
+implement ConsoleLogger {
+    fn log(&self, msg: Text) { println(msg); }
+}
+
+implement FileConfig {
+    fn load(path: Text) -> Self { FileConfig {} }
+    fn get(&self, key: Text) -> Maybe<Text> { None }
+}
+
+fn main() {
+    provide Logger = ConsoleLogger {};
+    provide Config = FileConfig.load("config.toml");
+
+    let processor = make_processor();
+    let result = processor("input");
+}

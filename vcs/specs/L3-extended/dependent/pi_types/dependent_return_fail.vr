@@ -1,0 +1,41 @@
+// @test: typecheck-fail
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, pi-types, error
+// @expected-error: E400 "Type mismatch"
+
+/// Pi types - failure cases for dependent return types
+///
+/// These tests verify that the type checker correctly rejects
+/// programs where the return type does not match the expected
+/// dependent type.
+
+/// ERROR: Return type length does not match parameter
+fn replicate_wrong<T>(n: Nat, value: T) -> List<T, 5> {
+    // Should be List<T, n> - length depends on n, not constant 5
+    List.fill(n, value)  // ERROR: Cannot unify 'n' with '5'
+}
+
+/// ERROR: Concatenation produces wrong length
+fn concat_wrong<T, M: meta Nat, N: meta Nat>(
+    xs: List<T, M>,
+    ys: List<T, N>
+) -> List<T, M> {
+    // Should be List<T, plus(M, N)> - concat adds lengths
+    xs ++ ys  // ERROR: Cannot unify 'plus(M, N)' with 'M'
+}
+
+/// ERROR: Map claims wrong return length
+fn map_wrong<T, U, N: meta Nat>(
+    xs: List<T, N>,
+    f: fn(T) -> U
+) -> List<U, 0> {
+    // Should be List<U, N> - map preserves length
+    xs.map(f)  // ERROR: Cannot unify 'N' with '0'
+}
+
+fn main() {
+    // These calls will fail type checking
+    let wrong1 = replicate_wrong(3, 0);
+    let wrong2 = concat_wrong([1, 2], [3, 4, 5]);
+}

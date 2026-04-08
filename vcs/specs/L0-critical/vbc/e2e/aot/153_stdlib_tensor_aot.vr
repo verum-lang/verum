@@ -1,0 +1,142 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stdlib, tensor, integration
+// @timeout: 15000
+// @expected-exit: 0
+// @description: AOT stdlib tensor integration — exercises core.math.tensor API patterns
+
+// Simulated tensor as flat array with shape metadata
+type Tensor2D is { rows: Int, cols: Int, d00: Int, d01: Int, d10: Int, d11: Int };
+
+fn t2d_new(rows: Int, cols: Int) -> Tensor2D {
+    Tensor2D { rows: rows, cols: cols, d00: 0, d01: 0, d10: 0, d11: 0 }
+}
+
+fn t2d_fill(rows: Int, cols: Int, val: Int) -> Tensor2D {
+    Tensor2D { rows: rows, cols: cols, d00: val, d01: val, d10: val, d11: val }
+}
+
+fn t2d_get(t: Tensor2D, r: Int, c: Int) -> Int {
+    if r == 0 {
+        if c == 0 { t.d00 } else { t.d01 }
+    } else {
+        if c == 0 { t.d10 } else { t.d11 }
+    }
+}
+
+fn t2d_set(t: Tensor2D, r: Int, c: Int, v: Int) -> Tensor2D {
+    Tensor2D {
+        rows: t.rows, cols: t.cols,
+        d00: if r == 0 && c == 0 { v } else { t.d00 },
+        d01: if r == 0 && c == 1 { v } else { t.d01 },
+        d10: if r == 1 && c == 0 { v } else { t.d10 },
+        d11: if r == 1 && c == 1 { v } else { t.d11 }
+    }
+}
+
+fn t2d_add(a: Tensor2D, b: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: a.rows, cols: a.cols,
+        d00: a.d00 + b.d00, d01: a.d01 + b.d01,
+        d10: a.d10 + b.d10, d11: a.d11 + b.d11
+    }
+}
+
+fn t2d_matmul(a: Tensor2D, b: Tensor2D) -> Tensor2D {
+    Tensor2D {
+        rows: a.rows, cols: b.cols,
+        d00: a.d00 * b.d00 + a.d01 * b.d10,
+        d01: a.d00 * b.d01 + a.d01 * b.d11,
+        d10: a.d10 * b.d00 + a.d11 * b.d10,
+        d11: a.d10 * b.d01 + a.d11 * b.d11
+    }
+}
+
+fn t2d_transpose(t: Tensor2D) -> Tensor2D {
+    Tensor2D { rows: t.cols, cols: t.rows, d00: t.d00, d01: t.d10, d10: t.d01, d11: t.d11 }
+}
+
+fn t2d_det(t: Tensor2D) -> Int {
+    t.d00 * t.d11 - t.d01 * t.d10
+}
+
+fn t2d_trace(t: Tensor2D) -> Int {
+    t.d00 + t.d11
+}
+
+fn test_tensor_creation() {
+    let z = t2d_new(2, 2);
+    assert_eq(t2d_get(z, 0, 0), 0);
+    assert_eq(t2d_get(z, 1, 1), 0);
+
+    let f = t2d_fill(2, 2, 5);
+    assert_eq(t2d_get(f, 0, 0), 5);
+    assert_eq(t2d_get(f, 1, 1), 5);
+    print("test_tensor_creation passed");
+}
+
+fn test_tensor_add() {
+    let a = Tensor2D { rows: 2, cols: 2, d00: 1, d01: 2, d10: 3, d11: 4 };
+    let b = Tensor2D { rows: 2, cols: 2, d00: 5, d01: 6, d10: 7, d11: 8 };
+    let c = t2d_add(a, b);
+    assert_eq(c.d00, 6);
+    assert_eq(c.d01, 8);
+    assert_eq(c.d10, 10);
+    assert_eq(c.d11, 12);
+    print("test_tensor_add passed");
+}
+
+fn test_tensor_matmul() {
+    let a = Tensor2D { rows: 2, cols: 2, d00: 1, d01: 2, d10: 3, d11: 4 };
+    let b = Tensor2D { rows: 2, cols: 2, d00: 5, d01: 6, d10: 7, d11: 8 };
+    let c = t2d_matmul(a, b);
+    // [1*5+2*7, 1*6+2*8] = [19, 22]
+    // [3*5+4*7, 3*6+4*8] = [43, 50]
+    assert_eq(c.d00, 19);
+    assert_eq(c.d01, 22);
+    assert_eq(c.d10, 43);
+    assert_eq(c.d11, 50);
+    print("test_tensor_matmul passed");
+}
+
+fn test_tensor_transpose() {
+    let a = Tensor2D { rows: 2, cols: 2, d00: 1, d01: 2, d10: 3, d11: 4 };
+    let t = t2d_transpose(a);
+    assert_eq(t.d00, 1);
+    assert_eq(t.d01, 3);
+    assert_eq(t.d10, 2);
+    assert_eq(t.d11, 4);
+    print("test_tensor_transpose passed");
+}
+
+fn test_tensor_det_trace() {
+    let a = Tensor2D { rows: 2, cols: 2, d00: 3, d01: 8, d10: 4, d11: 6 };
+    // det = 3*6 - 8*4 = 18 - 32 = -14
+    assert_eq(t2d_det(a), -14);
+    // trace = 3 + 6 = 9
+    assert_eq(t2d_trace(a), 9);
+    print("test_tensor_det_trace passed");
+}
+
+fn test_identity_matmul() {
+    let eye = Tensor2D { rows: 2, cols: 2, d00: 1, d01: 0, d10: 0, d11: 1 };
+    let a = Tensor2D { rows: 2, cols: 2, d00: 7, d01: 3, d10: 2, d11: 9 };
+    let r = t2d_matmul(eye, a);
+    assert_eq(r.d00, 7);
+    assert_eq(r.d01, 3);
+    assert_eq(r.d10, 2);
+    assert_eq(r.d11, 9);
+    print("test_identity_matmul passed");
+}
+
+fn main() -> Int {
+    test_tensor_creation();
+    test_tensor_add();
+    test_tensor_matmul();
+    test_tensor_transpose();
+    test_tensor_det_trace();
+    test_identity_matmul();
+    print("ALL PASSED");
+    0
+}

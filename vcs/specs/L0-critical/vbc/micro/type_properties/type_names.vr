@@ -1,0 +1,35 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test type name properties
+
+fn main() {
+    // Test semantic type names
+    assert_eq(Int8.name, "Int8");
+    assert_eq(Int16.name, "Int16");
+    assert_eq(Int32.name, "Int32");
+    assert_eq(Int64.name, "Int64");
+    assert_eq(Int128.name, "Int128");
+
+    assert_eq(UInt8.name, "UInt8");
+    assert_eq(UInt16.name, "UInt16");
+    assert_eq(UInt32.name, "UInt32");
+    assert_eq(UInt64.name, "UInt64");
+    assert_eq(UInt128.name, "UInt128");
+
+    // Test Float types
+    assert_eq(Float32.name, "Float32");
+    assert_eq(Float64.name, "Float64");
+
+    // Test size types
+    assert_eq(IntSize.name, "IntSize");
+    assert_eq(UIntSize.name, "UIntSize");
+
+    // Test built-in types
+    assert_eq(Int.name, "Int");
+    assert_eq(Float.name, "Float");
+    assert_eq(Bool.name, "Bool");
+    assert_eq(Byte.name, "Byte");
+    assert_eq(Char.name, "Char");
+}

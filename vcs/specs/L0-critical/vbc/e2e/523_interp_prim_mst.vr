@@ -1,0 +1,174 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, prim, minimum_spanning_tree, greedy, graph
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Prim's minimum spanning tree algorithm on a 5-node graph.
+// Adjacency matrix stored as a flat 25-element array (5x5).
+// 0 means no edge. Algorithm builds MST by greedily adding minimum-weight edges.
+
+fn mat5_get(m: [Int; 25], r: Int, c: Int) -> Int {
+    m[r * 5 + c]
+}
+
+// Prim's algorithm: returns total MST weight for n-node graph.
+// Tracks which nodes are in MST (in_mst[]) and best key[] values.
+fn prim_mst_weight(adj: [Int; 25], n: Int) -> Int {
+    let mut in_mst = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut key    = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let inf = 999999;
+    let mut i = 0;
+    while i < n {
+        key[i] = inf;
+        i = i + 1;
+    }
+    key[0] = 0;
+
+    let mut total = 0;
+    let mut count = 0;
+    while count < n {
+        let mut u = -1;
+        let mut min_key = inf + 1;
+        let mut v = 0;
+        while v < n {
+            if in_mst[v] == 0 && key[v] < min_key {
+                min_key = key[v];
+                u = v;
+            }
+            v = v + 1;
+        }
+        if u == -1 { return total; }
+        in_mst[u] = 1;
+        total = total + key[u];
+        let mut w = 0;
+        while w < n {
+            let wt = mat5_get(adj, u, w);
+            if wt > 0 && in_mst[w] == 0 && wt < key[w] {
+                key[w] = wt;
+            }
+            w = w + 1;
+        }
+        count = count + 1;
+    }
+    total
+}
+
+// Prim's with edge tracking: records parent of each node in MST.
+fn prim_mst_parents(adj: [Int; 25], n: Int, parent: [Int; 25]) {
+    let mut in_mst = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut key    = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let inf = 999999;
+    let mut i = 0;
+    while i < n {
+        key[i] = inf;
+        parent[i] = -1;
+        i = i + 1;
+    }
+    key[0] = 0;
+
+    let mut count = 0;
+    while count < n {
+        let mut u = -1;
+        let mut min_key = inf + 1;
+        let mut v = 0;
+        while v < n {
+            if in_mst[v] == 0 && key[v] < min_key {
+                min_key = key[v];
+                u = v;
+            }
+            v = v + 1;
+        }
+        if u == -1 { return; }
+        in_mst[u] = 1;
+        let mut w = 0;
+        while w < n {
+            let wt = mat5_get(adj, u, w);
+            if wt > 0 && in_mst[w] == 0 && wt < key[w] {
+                key[w] = wt;
+                parent[w] = u;
+            }
+            w = w + 1;
+        }
+        count = count + 1;
+    }
+}
+
+fn test_basic_mst() {
+    // 5-node undirected weighted graph:
+    //   0-1:2, 0-3:6, 1-2:3, 1-3:8, 1-4:5, 2-4:7, 3-4:9
+    let mut adj = [0, 2, 0, 6, 0,
+                   2, 0, 3, 8, 5,
+                   0, 3, 0, 0, 7,
+                   6, 8, 0, 0, 9,
+                   0, 5, 7, 9, 0];
+    // MST edges: 0-1(2), 1-2(3), 1-4(5), 0-3(6) = weight 16
+    let w = prim_mst_weight(adj, 5);
+    assert_eq(w, 16);
+    print("basic_mst: ok");
+}
+
+fn test_complete_graph_mst() {
+    // K4 (4-node complete graph).
+    // Edges: 0-1:1, 0-2:4, 0-3:3, 1-2:2, 1-3:5, 2-3:6
+    let mut adj = [0, 1, 4, 3, 0,
+                   1, 0, 2, 5, 0,
+                   4, 2, 0, 6, 0,
+                   3, 5, 6, 0, 0,
+                   0, 0, 0, 0, 0];
+    // MST: 0-1(1), 1-2(2), 0-3(3) = weight 6
+    let w = prim_mst_weight(adj, 4);
+    assert_eq(w, 6);
+    print("complete_graph_mst: ok");
+}
+
+fn test_linear_chain_mst() {
+    // Linear chain: 0-1(5), 1-2(3), 2-3(4) — only one spanning tree.
+    let mut adj = [0, 5, 0, 0, 0,
+                   5, 0, 3, 0, 0,
+                   0, 3, 0, 4, 0,
+                   0, 0, 4, 0, 0,
+                   0, 0, 0, 0, 0];
+    // MST weight = 5+3+4 = 12
+    let w = prim_mst_weight(adj, 4);
+    assert_eq(w, 12);
+    print("linear_chain_mst: ok");
+}
+
+fn test_mst_parents() {
+    // Same graph as test_basic_mst.
+    let mut adj = [0, 2, 0, 6, 0,
+                   2, 0, 3, 8, 5,
+                   0, 3, 0, 0, 7,
+                   6, 8, 0, 0, 9,
+                   0, 5, 7, 9, 0];
+    let mut par = [0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0,
+                   0, 0, 0, 0, 0];
+    prim_mst_parents(adj, 5, par);
+    // Parent of vertex 1 is 0 (edge 0-1 weight 2).
+    assert_eq(par[1], 0);
+    // Parent of vertex 2 is 1 (edge 1-2 weight 3).
+    assert_eq(par[2], 1);
+    // Parent of vertex 4 is 1 (edge 1-4 weight 5).
+    assert_eq(par[4], 1);
+    // Parent of vertex 3 is 0 (edge 0-3 weight 6 < 8 from 1).
+    assert_eq(par[3], 0);
+    print("mst_parents: ok");
+}
+
+fn main() -> Int {
+    test_basic_mst();
+    test_complete_graph_mst();
+    test_linear_chain_mst();
+    test_mst_parents();
+    print("[OK] 523_interp_prim_mst");
+    0
+}

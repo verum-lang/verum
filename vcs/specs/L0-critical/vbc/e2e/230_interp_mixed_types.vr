@@ -1,0 +1,210 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, mixed-types, int, float, bool, text
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: mixed Int/Float/Bool/Text operations,
+// type-specific behavior
+
+// =============================================================================
+// Int and Bool interplay
+// =============================================================================
+
+fn test_bool_from_comparison() {
+    let x = 10;
+    let is_positive = x > 0;
+    assert_eq(is_positive, true);
+    let is_negative = x < 0;
+    assert_eq(is_negative, false);
+}
+
+fn test_bool_in_arithmetic_context() {
+    // Bool coerces to Int (true=1, false=0)
+    let t = true;
+    let f = false;
+    assert_eq(t, 1);
+    assert_eq(f, 0);
+}
+
+fn test_conditional_on_comparison() {
+    let a = 5;
+    let b = 10;
+    let bigger = if a > b { a } else { b };
+    assert_eq(bigger, 10);
+    let smaller = if a < b { a } else { b };
+    assert_eq(smaller, 5);
+}
+
+// =============================================================================
+// Int and Float separate paths
+// =============================================================================
+
+fn test_parallel_computation() {
+    // Same computation in Int and Float
+    let int_val = 2 * 3 + 4;
+    let float_val: Float = 2.0 * 3.0 + 4.0;
+    assert_eq(int_val, 10);
+    assert_eq(float_val, 10.0);
+}
+
+fn test_int_float_separate_accum() {
+    let mut isum = 0;
+    let mut fsum: Float = 0.0;
+    let mut i = 1;
+    let mut fi: Float = 1.0;
+    while i <= 5 {
+        isum = isum + i;
+        fsum = fsum + fi;
+        i = i + 1;
+        fi = fi + 1.0;
+    }
+    assert_eq(isum, 15);
+    assert_eq(fsum, 15.0);
+}
+
+// =============================================================================
+// Text with Int interpolation
+// =============================================================================
+
+fn test_int_in_text() {
+    let x = 42;
+    let msg = f"The answer is {x}";
+    assert_eq(msg, "The answer is 42");
+}
+
+fn test_computation_in_text() {
+    let a = 3;
+    let b = 4;
+    let s = f"{a} + {b} = {a + b}";
+    assert_eq(s, "3 + 4 = 7");
+}
+
+fn test_bool_result_in_text() {
+    let x = 10;
+    let cmp = x > 5;
+    let s = f"x > 5 is {cmp}";
+    // Bool displays as true/false
+    assert_eq(s, "x > 5 is true");
+}
+
+// =============================================================================
+// Functions returning different types
+// =============================================================================
+
+fn get_int() -> Int {
+    42
+}
+
+fn get_float() -> Float {
+    3.14
+}
+
+fn get_bool() -> Bool {
+    true
+}
+
+fn get_text() -> Text {
+    "hello"
+}
+
+fn test_different_return_types() {
+    assert_eq(get_int(), 42);
+    assert_eq(get_float(), 3.14);
+    assert_eq(get_bool(), true);
+    assert_eq(get_text(), "hello");
+}
+
+// =============================================================================
+// Mixed type decisions
+// =============================================================================
+
+fn describe_sign(n: Int) -> Text {
+    if n > 0 {
+        "positive"
+    } else if n < 0 {
+        "negative"
+    } else {
+        "zero"
+    }
+}
+
+fn test_int_to_text_decision() {
+    assert_eq(describe_sign(5), "positive");
+    assert_eq(describe_sign(-3), "negative");
+    assert_eq(describe_sign(0), "zero");
+}
+
+fn test_loop_with_mixed_types() {
+    let mut count = 0;
+    let mut sum: Float = 0.0;
+    let mut fi: Float = 1.0;
+    let mut i = 1;
+    while i <= 4 {
+        count = count + 1;
+        sum = sum + fi;
+        fi = fi + 1.0;
+        i = i + 1;
+    }
+    assert_eq(count, 4);
+    assert_eq(sum, 10.0);
+}
+
+// =============================================================================
+// Type-specific behavior
+// =============================================================================
+
+fn test_int_division_truncates() {
+    assert_eq(7 / 2, 3);
+    assert_eq(-7 / 2, -3);
+}
+
+fn test_float_division_precise() {
+    assert_eq(7.0 / 2.0, 3.5);
+    assert_eq(-7.0 / 2.0, -3.5);
+}
+
+fn test_text_concat_vs_int_add() {
+    let int_result = 1 + 2;
+    assert_eq(int_result, 3);
+    let text_result = "1" + "2";
+    assert_eq(text_result, "12");
+}
+
+fn test_combined_pipeline() {
+    // Compute something, format it, verify the text
+    let n = 6;
+    let factorial = {
+        let mut f = 1;
+        let mut i = 1;
+        while i <= n {
+            f = f * i;
+            i = i + 1;
+        }
+        f
+    };
+    assert_eq(factorial, 720);
+    let msg = f"{n}! = {factorial}";
+    assert_eq(msg, "6! = 720");
+}
+
+fn main() -> Int {
+    test_bool_from_comparison();
+    test_bool_in_arithmetic_context();
+    test_conditional_on_comparison();
+    test_parallel_computation();
+    test_int_float_separate_accum();
+    test_int_in_text();
+    test_computation_in_text();
+    test_bool_result_in_text();
+    test_different_return_types();
+    test_int_to_text_decision();
+    test_loop_with_mixed_types();
+    test_int_division_truncates();
+    test_float_division_precise();
+    test_text_concat_vs_int_add();
+    test_combined_pipeline();
+    print("[OK] 230_interp_mixed_types");
+    0
+}

@@ -1,0 +1,102 @@
+// =============================================================================
+// duration_comparison_protocol_test.vr - Duration/Time use Ord protocol for comparison
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: time, duration, protocol, ord, comparison
+// @description: Verifies Duration and Instant comparisons work via Ord protocol
+//   dispatch rather than hardcoded type-name checks in the compiler.
+// =============================================================================
+
+mount core.time.Duration;
+mount core.time.Instant;
+
+// =============================================================================
+// Section 1: Duration comparison via Ord protocol
+// =============================================================================
+
+@test
+fn test_duration_less_than() {
+    let a = Duration.secs(1);
+    let b = Duration.secs(2);
+    assert(a < b);
+}
+
+@test
+fn test_duration_greater_than() {
+    let a = Duration.secs(5);
+    let b = Duration.secs(3);
+    assert(a > b);
+}
+
+@test
+fn test_duration_less_equal() {
+    let a = Duration.secs(3);
+    let b = Duration.secs(3);
+    assert(a <= b);
+}
+
+@test
+fn test_duration_greater_equal() {
+    let a = Duration.secs(3);
+    let b = Duration.secs(3);
+    assert(a >= b);
+}
+
+@test
+fn test_duration_equality() {
+    let a = Duration.millis(1_000);
+    let b = Duration.secs(1);
+    assert_eq(a, b);
+}
+
+@test
+fn test_duration_inequality() {
+    let a = Duration.secs(1);
+    let b = Duration.secs(2);
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 2: Instant comparison via Ord protocol
+// =============================================================================
+
+@test
+fn test_instant_comparison_basic() {
+    // Instants should be comparable via Ord protocol
+    let a = Instant.now();
+    // a <= a should always hold (reflexive)
+    assert(a <= a);
+    assert(a >= a);
+}
+
+@test
+fn test_instant_equality() {
+    let a = Instant.now();
+    assert_eq(a, a);
+}
+
+// =============================================================================
+// Section 3: Duration comparison chains (protocol dispatch must handle these)
+// =============================================================================
+
+@test
+fn test_duration_transitivity() {
+    let a = Duration.secs(1);
+    let b = Duration.secs(2);
+    let c = Duration.secs(3);
+    // a < b && b < c => a < c
+    assert(a < b);
+    assert(b < c);
+    assert(a < c);
+}
+
+@test
+fn test_duration_zero_comparisons() {
+    let zero = Duration.zero();
+    let one_nano = Duration.nanos(1);
+    assert(zero < one_nano);
+    assert(one_nano > zero);
+    assert(zero <= zero);
+}

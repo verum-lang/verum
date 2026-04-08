@@ -1,0 +1,407 @@
+// @test: parse-pass
+// @tier: 0
+// @category: proofs
+// @level: L0
+// @tags: parser, proofs, quantifiers, forall, exists, domain, where, in
+// @description: Comprehensive tests for enhanced quantifier binding syntax with 'in' domain and 'where' guard
+
+// ============================================================================
+// Section 1: Domain-Based Quantification (forall x in collection . P(x))
+// ============================================================================
+
+fn test_forall_in_list() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Basic domain quantification
+    let all_positive = forall x in numbers . x > 0;
+
+    // With complex predicate
+    let all_valid = forall n in numbers . n >= 1 && n <= 5;
+
+    // Nested expression in body
+    let all_square_positive = forall x in numbers . x * x > 0;
+}
+
+fn test_forall_in_range() {
+    // Range domain
+    let positive_range = forall i in 1..10 . i > 0;
+
+    // Inclusive range
+    let inclusive_range = forall n in 1..=100 . n >= 1;
+
+    // Arithmetic in body
+    let sum_invariant = forall i in 0..10 . i + (10 - i) == 10;
+}
+
+fn test_forall_in_set() {
+    let primes = Set.from([2, 3, 5, 7, 11]);
+
+    // Set domain
+    let all_primes_positive = forall p in primes . p > 1;
+
+    // Property over set
+    let primes_odd_or_two = forall n in primes . n == 2 || n % 2 == 1;
+}
+
+fn test_forall_in_iterator() {
+    let items = [1, 2, 3];
+
+    // Iterator domain
+    let all_enumerated = forall (i, v) in items.enumerate() . i >= 0;
+
+    // Filter iterator
+    let filtered_valid = forall x in items.filter(|n| n > 0) . x > 0;
+
+    // Map iterator
+    let doubled_positive = forall d in items.map(|n| n * 2) . d > 0;
+}
+
+fn test_exists_in_collection() {
+    let numbers = [1, 2, 3, 4, 5];
+
+    // Basic existential over collection
+    let has_even = exists n in numbers . n % 2 == 0;
+
+    // Compound predicate
+    let has_large_prime = exists p in numbers . p > 3 && is_prime(p);
+}
+
+fn test_exists_in_range() {
+    // Range domain existential
+    let has_square = exists n in 1..100 . is_perfect_square(n);
+
+    // Bounded search
+    let has_divisible = exists i in 1..=50 . i % 7 == 0;
+}
+
+// ============================================================================
+// Section 2: Combined Type and Domain (forall x: T in collection . P(x))
+// ============================================================================
+
+fn test_forall_type_and_domain() {
+    let numbers: List<Int> = [1, 2, 3];
+
+    // Explicit type with domain
+    let typed_domain = forall x: Int in numbers . x > 0;
+
+    // Generic type with domain
+    let generic_domain = forall elem: Int in numbers . elem >= 0;
+}
+
+fn test_forall_refined_type_and_domain() {
+    let positive_numbers: List<Int> = [1, 2, 3];
+
+    // Refinement type with domain (double constraint)
+    let refined = forall n: Int in positive_numbers . n > 0;
+}
+
+fn test_exists_type_and_domain() {
+    let items = ["hello", "world", "foo"];
+
+    // Type annotation with domain
+    let has_long = exists s: Text in items . s.len() > 4;
+
+    // With method call
+    let has_prefix = exists t: Text in items . t.starts_with("h");
+}
+
+// ============================================================================
+// Section 3: Guard Clauses (forall x: T where guard . P(x))
+// ============================================================================
+
+fn test_forall_where_guard() {
+    // Type with guard (no domain)
+    let pos_square = forall x: Int where x > 0 . x * x > 0;
+
+    // Multiple conditions in guard
+    let bounded = forall n: Int where n > 0 && n < 100 . n >= 1;
+
+    // Guard with function call
+    let valid_only = forall x: Int where is_valid(x) . process(x) > 0;
+}
+
+fn test_exists_where_guard() {
+    // Existential with guard
+    let guarded_exists = exists n: Int where n > 0 . n * n == 16;
+
+    // Complex guard
+    let compound = exists x: Int where x >= 0 && x <= 100 . x == 42;
+}
+
+fn test_where_guard_with_method() {
+    // Guard using method call
+    let string_guard = forall s: Text where s.len() > 0 . s.is_empty() == false;
+
+    // Guard with complex expression
+    let math_guard = forall n: Int where abs(n) < 1000 . n + (-n) == 0;
+}
+
+// ============================================================================
+// Section 4: Full Syntax (forall x: T in collection where guard . P(x))
+// ============================================================================
+
+fn test_forall_type_domain_guard() {
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Type + domain + guard
+    let even_positive = forall n: Int in numbers where n % 2 == 0 . n > 0;
+
+    // All three with complex predicate
+    let bounded_valid = forall x: Int in numbers where x >= 0 && x <= 10 . x * x <= 100;
+}
+
+fn test_exists_type_domain_guard() {
+    let data = [-5, -3, 0, 2, 4, 6];
+
+    // Full syntax existential
+    let has_pos_even = exists n: Int in data where n > 0 . n % 2 == 0;
+
+    // Complex guard and body
+    let found = exists x: Int in data where abs(x) < 10 . x * x == 4;
+}
+
+fn test_full_syntax_with_methods() {
+    let items = ["apple", "banana", "cherry", "date"];
+
+    // Methods in domain, guard, and body
+    let filtered = forall s: Text in items where s.len() > 3 . s.is_ascii();
+
+    // Chained methods
+    let complex = forall t: Text in items.filter(|s| s.len() > 4) where t.starts_with("b") . t.ends_with("a");
+}
+
+// ============================================================================
+// Section 5: Multiple Bindings
+// ============================================================================
+
+fn test_forall_multiple_bindings() {
+    // Two bindings with types
+    let comm = forall x: Int, y: Int . x + y == y + x;
+
+    // Three bindings
+    let assoc = forall a: Int, b: Int, c: Int . (a + b) + c == a + (b + c);
+
+    // Four bindings
+    let quad = forall w: Int, x: Int, y: Int, z: Int . w + x + y + z == z + y + x + w;
+}
+
+fn test_exists_multiple_bindings() {
+    // Two bindings
+    let has_sum = exists x: Int, y: Int . x + y == 10;
+
+    // Three bindings
+    let pyth = exists a: Int, b: Int, c: Int . a*a + b*b == c*c;
+}
+
+fn test_multiple_bindings_with_domain() {
+    let nums = [1, 2, 3];
+    let other = [4, 5, 6];
+
+    // Two domains
+    let cross = forall x in nums, y in other . x < y;
+
+    // Mixed type and domain bindings
+    let mixed = forall n: Int, x in nums . n == 0 || x > 0;
+}
+
+fn test_multiple_bindings_with_guard() {
+    // Guards on individual bindings
+    let guarded = forall x: Int where x > 0, y: Int where y > 0 . x + y > 0;
+
+    // Shared predicate over multiple bindings
+    let bounded = forall a: Int where a < 100, b: Int where b < 100 . a + b < 200;
+}
+
+fn test_multiple_bindings_full_syntax() {
+    let xs = [1, 2, 3];
+    let ys = [4, 5, 6];
+
+    // Multiple bindings with type, domain, and guard
+    let full = forall x: Int in xs where x > 0, y: Int in ys where y > 0 . x < y;
+}
+
+// ============================================================================
+// Section 6: Nested Quantifiers with Enhanced Syntax
+// ============================================================================
+
+fn test_nested_forall_in() {
+    let matrix: List<List<Int>> = [[1, 2], [3, 4]];
+
+    // Nested quantifiers over domains
+    let all_positive = forall row in matrix . forall elem in row . elem > 0;
+}
+
+fn test_nested_mixed_quantifiers() {
+    let items = [1, 2, 3, 4, 5];
+
+    // Forall with nested exists over domain
+    let has_double = forall x in items . exists y in items . y == x * 2 || x >= 3;
+
+    // Exists with nested forall
+    let exists_bound = exists n: Int . forall x in items . x <= n;
+}
+
+fn test_nested_with_guards() {
+    // Nested with guards
+    let nested_guarded = forall x: Int where x > 0 .
+        forall y: Int where y > x .
+            y - x > 0;
+}
+
+// ============================================================================
+// Section 7: Quantifiers in Specifications
+// ============================================================================
+
+fn process_all(items: List<Int>) -> Int
+    requires forall x in items . x >= 0
+    ensures result >= 0
+{
+    items.sum()
+}
+
+fn find_first_positive(items: List<Int>) -> Maybe<Int>
+    requires items.len() > 0
+    ensures result is Some || forall x in items . x <= 0
+{
+    items.find(|x| x > 0)
+}
+
+fn sorted_invariant<T: Ord>(list: List<T>) -> Bool
+    ensures forall i in 0..(list.len() - 1) . list[i] <= list[i + 1]
+{
+    for i in 0..(list.len() - 1) {
+        if list[i] > list[i + 1] {
+            return false;
+        }
+    }
+    true
+}
+
+// ============================================================================
+// Section 8: Quantifiers in Theorems and Lemmas
+// ============================================================================
+
+theorem sum_preserves_bounds(xs: List<Int>)
+    requires forall x in xs . x >= 0 && x <= 100
+    ensures xs.sum() >= 0
+proof by induction(xs)
+
+lemma domain_subset<T>(small: Set<T>, large: Set<T>)
+    requires forall x in small . large.contains(x)
+    ensures small.is_subset_of(large)
+proof by auto
+
+theorem element_bound(arr: List<Int>, bound: Int)
+    requires forall i in 0..arr.len() . arr[i] <= bound
+    ensures arr.max() is None || arr.max() is Some(m) && m <= bound
+proof by auto
+
+// ============================================================================
+// Section 9: Complex Domain Expressions
+// ============================================================================
+
+fn test_complex_domain_expressions() {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Chained iterators as domain
+    let filtered_mapped = forall x in data.filter(|n| n > 5).map(|n| n * 2) . x > 10;
+
+    // Slice as domain
+    let slice_domain = forall x in data[2..5] . x >= 3 && x <= 5;
+
+    // Method call returning iterator
+    let enumerated = forall (i, v) in data.enumerate() . i < data.len();
+}
+
+fn test_domain_with_generics<T: Eq>(items: List<T>, target: T) -> Bool {
+    // Generic domain quantification
+    exists x in items . x == target
+}
+
+// ============================================================================
+// Section 10: Edge Cases and Special Forms
+// ============================================================================
+
+fn test_parenthesized_binding() {
+    // Parenthesized pattern in binding
+    let paren = forall (x): Int . x == x;
+
+    // Tuple pattern binding
+    let tuple = forall (a, b): (Int, Int) . a + b >= a;
+}
+
+fn test_domain_only_binding() {
+    let items = [1, 2, 3];
+
+    // Domain-only (type inferred from collection)
+    let inferred = forall x in items . x > 0;
+
+    // With complex collection expression
+    let computed = forall n in (1..10).collect() . n >= 1;
+}
+
+fn test_guard_only_with_type() {
+    // Guard without domain
+    let guarded_type = forall x: Int where x != 0 . x * x > 0;
+
+    // Negative guard
+    let neg_guard = forall n: Int where !(n == 0) . n != 0;
+}
+
+fn test_empty_collection_vacuous() {
+    let empty: List<Int> = [];
+
+    // Vacuously true over empty domain
+    let vacuous = forall x in empty . false;
+}
+
+fn test_singleton_collection() {
+    let single = [42];
+
+    // Quantifier over singleton
+    let single_check = forall x in single . x == 42;
+    let single_exists = exists x in single . x == 42;
+}
+
+// ============================================================================
+// Section 11: Quantifiers with Pattern Matching
+// ============================================================================
+
+type Maybe<T> is None | Some(T);
+type Result<T, E> is Ok(T) | Err(E);
+
+fn test_pattern_in_binding() {
+    let options: List<Maybe<Int>> = [Some(1), Some(2), None, Some(3)];
+
+    // Pattern in quantifier binding
+    let all_some_positive = forall Some(x) in options.filter_map(|o| o) . x > 0;
+}
+
+fn test_destructuring_in_domain() {
+    let pairs = [(1, "a"), (2, "b"), (3, "c")];
+
+    // Destructure in binding
+    let all_valid = forall (n, s) in pairs . n > 0 && s.len() > 0;
+
+    // Nested destructuring
+    let nested_pairs = [((1, 2), "x"), ((3, 4), "y")];
+    let nested_valid = forall ((a, b), s) in nested_pairs . a + b > 0;
+}
+
+// Helper functions for test predicates
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { return false; }
+    for i in 2..n {
+        if n % i == 0 { return false; }
+    }
+    true
+}
+
+fn is_perfect_square(n: Int) -> Bool {
+    let sqrt = n.sqrt();
+    sqrt * sqrt == n
+}
+
+fn is_valid(x: Int) -> Bool { x >= 0 }
+fn process(x: Int) -> Int { x * 2 }
+fn abs(x: Int) -> Int { if x < 0 { -x } else { x } }

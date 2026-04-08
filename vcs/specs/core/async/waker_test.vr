@@ -1,0 +1,783 @@
+// =============================================================================
+// waker_test.vr - Comprehensive tests for Waker and Context
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: async, waker, context, rawwaker, vtable, core
+// @description: Comprehensive tests for Waker, Context, RawWaker, RawWakerVTable,
+//               noop_waker, noop_context, will_wake, clone, wake_by_ref
+// =============================================================================
+
+mount core.async.waker.{
+    Waker, Context, RawWaker, RawWakerVTable,
+    noop_waker, noop_context,
+};
+mount core.base.memory.null_ptr;
+
+// =============================================================================
+// Section 1: noop_waker() - No-Op Waker
+// =============================================================================
+
+@test
+fn test_noop_waker_creation() {
+    let waker: Waker = noop_waker();
+    // Noop waker should self-identify
+    assert(waker.will_wake(&waker));
+}
+
+@test
+fn test_noop_waker_wake_by_ref() {
+    let waker: Waker = noop_waker();
+    waker.wake_by_ref();
+    // wake_by_ref does nothing but should not panic; waker still usable
+    assert(waker.will_wake(&waker));
+}
+
+@test
+fn test_noop_waker_clone() {
+    let waker1: Waker = noop_waker();
+    let waker2: Waker = waker1.clone();
+    // Clone creates another noop waker that wakes same task
+    assert(waker1.will_wake(&waker2));
+}
+
+@test
+fn test_noop_waker_will_wake() {
+    let waker1: Waker = noop_waker();
+    let waker2: Waker = waker1.clone();
+    // Cloned wakers should wake the same task
+    assert(waker1.will_wake(&waker2));
+}
+
+@test
+fn test_noop_waker_will_wake_independent() {
+    let waker1: Waker = noop_waker();
+    let waker2: Waker = noop_waker();
+    // Two independently created noop wakers share same vtable and null data ptr
+    assert(waker1.will_wake(&waker2));
+}
+
+// =============================================================================
+// Section 2: Context - Polling Context
+// =============================================================================
+
+@test
+fn test_context_from_waker() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+    // Context should provide the same waker
+    assert(cx.waker().will_wake(&waker));
+}
+
+@test
+fn test_context_waker_method() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+    let retrieved_waker: &Waker = cx.waker();
+    assert(retrieved_waker.will_wake(&waker));
+}
+
+@test
+fn test_context_waker_wake_by_ref() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+    cx.waker().wake_by_ref();
+    // Still usable after wake_by_ref
+    assert(cx.waker().will_wake(&waker));
+}
+
+// =============================================================================
+// Section 3: noop_context() - Convenience Function
+// =============================================================================
+
+@test
+fn test_noop_context_creation() {
+    let cx: Context = noop_context();
+    // noop_context should have a valid waker
+    let waker_ref: &Waker = cx.waker();
+    waker_ref.wake_by_ref();
+    assert(waker_ref.will_wake(waker_ref));
+}
+
+@test
+fn test_noop_context_waker() {
+    let cx: Context = noop_context();
+    let waker: &Waker = cx.waker();
+    waker.wake_by_ref();
+    assert(waker.will_wake(waker));
+}
+
+// =============================================================================
+// Section 4: RawWakerVTable
+// =============================================================================
+
+@test
+fn test_raw_waker_vtable_through_noop() {
+    // VTable is tested indirectly through noop_waker operations
+    let w1: Waker = noop_waker();
+    let w2: Waker = w1.clone();  // tests vtable.clone
+    w2.wake_by_ref();             // tests vtable.wake_by_ref
+    assert(w1.will_wake(&w2));
+    // w1, w2 drop tests vtable.drop
+}
+
+// =============================================================================
+// Section 5: Waker Methods
+// =============================================================================
+
+@test
+fn test_waker_wake_by_ref_multiple_times() {
+    let waker: Waker = noop_waker();
+    waker.wake_by_ref();
+    waker.wake_by_ref();
+    waker.wake_by_ref();
+    // Still valid after multiple wake_by_ref calls
+    assert(waker.will_wake(&waker));
+}
+
+@test
+fn test_waker_clone_chain() {
+    let waker1: Waker = noop_waker();
+    let waker2: Waker = waker1.clone();
+    let waker3: Waker = waker2.clone();
+    waker1.wake_by_ref();
+    waker2.wake_by_ref();
+    waker3.wake_by_ref();
+    // All clones wake the same task
+    assert(waker1.will_wake(&waker3));
+}
+
+@test
+fn test_waker_clone_will_wake_chain() {
+    let waker1: Waker = noop_waker();
+    let waker2: Waker = waker1.clone();
+    let waker3: Waker = waker2.clone();
+
+    assert(waker1.will_wake(&waker2));
+    assert(waker2.will_wake(&waker3));
+    assert(waker1.will_wake(&waker3));
+}
+
+// =============================================================================
+// Section 6: Context Usage Patterns
+// =============================================================================
+
+@test
+fn test_context_usage_in_poll_pattern() {
+    let waker: Waker = noop_waker();
+    let mut cx: Context = Context.from_waker(&waker);
+
+    let waker_ref: &Waker = cx.waker();
+    waker_ref.wake_by_ref();
+    // Waker retrieved from context should match original
+    assert(waker_ref.will_wake(&waker));
+}
+
+@test
+fn test_context_multiple_waker_access() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+
+    let w1: &Waker = cx.waker();
+    let w2: &Waker = cx.waker();
+    w1.wake_by_ref();
+    w2.wake_by_ref();
+    // Both references should point to same waker
+    assert(w1.will_wake(w2));
+}
+
+// =============================================================================
+// Section 7: Waker Identity
+// =============================================================================
+
+@test
+fn test_waker_will_wake_self() {
+    let waker: Waker = noop_waker();
+    assert(waker.will_wake(&waker));
+}
+
+@test
+fn test_waker_will_wake_clone_symmetric() {
+    let waker1: Waker = noop_waker();
+    let waker2: Waker = waker1.clone();
+
+    // Symmetric: if a.will_wake(b) then b.will_wake(a)
+    assert(waker1.will_wake(&waker2) == waker2.will_wake(&waker1));
+}
+
+// =============================================================================
+// Section 8: Edge Cases
+// =============================================================================
+
+@test
+fn test_context_with_noop_context() {
+    let cx: Context = noop_context();
+    cx.waker().wake_by_ref();
+    // waker from noop_context should be self-consistent
+    assert(cx.waker().will_wake(cx.waker()));
+}
+
+@test
+fn test_multiple_noop_wakers() {
+    let w1: Waker = noop_waker();
+    let w2: Waker = noop_waker();
+    let w3: Waker = noop_waker();
+    let w4: Waker = noop_waker();
+    let w5: Waker = noop_waker();
+
+    w1.wake_by_ref();
+    w2.wake_by_ref();
+    w3.wake_by_ref();
+    w4.wake_by_ref();
+    w5.wake_by_ref();
+    // All noop wakers share same vtable and null data
+    assert(w1.will_wake(&w5));
+    assert(w2.will_wake(&w4));
+}
+
+@test
+fn test_context_from_multiple_wakers() {
+    let waker1: Waker = noop_waker();
+    let waker2: Waker = noop_waker();
+
+    let cx1: Context = Context.from_waker(&waker1);
+    let cx2: Context = Context.from_waker(&waker2);
+
+    cx1.waker().wake_by_ref();
+    cx2.waker().wake_by_ref();
+    // Both contexts' wakers should be compatible (both noop)
+    assert(cx1.waker().will_wake(cx2.waker()));
+}
+
+// =============================================================================
+// Section 9: Waker Cloning Preserves Identity
+// =============================================================================
+
+@test
+fn test_clone_preserves_will_wake_transitivity() {
+    let w1: Waker = noop_waker();
+    let w2: Waker = w1.clone();
+    let w3: Waker = w2.clone();
+    let w4: Waker = w3.clone();
+
+    // Transitive: w1 ~ w2, w2 ~ w3, w3 ~ w4 => w1 ~ w4
+    assert(w1.will_wake(&w4));
+    assert(w4.will_wake(&w1));
+}
+
+@test
+fn test_clone_and_wake_independence() {
+    let w1: Waker = noop_waker();
+    let w2: Waker = w1.clone();
+
+    // Waking one should not affect the other
+    w1.wake_by_ref();
+    assert(w2.will_wake(&w1));
+    w2.wake_by_ref();
+    assert(w1.will_wake(&w2));
+}
+
+// =============================================================================
+// Section 10: Context Waker Round-Trip
+// =============================================================================
+
+@test
+fn test_context_waker_round_trip() {
+    let original: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&original);
+    let retrieved: &Waker = cx.waker();
+    // Round-trip: original -> context -> waker should match
+    assert(retrieved.will_wake(&original));
+}
+
+@test
+fn test_context_waker_clone_from_context() {
+    let original: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&original);
+    let cloned: Waker = cx.waker().clone();
+    // Cloned from context should match original
+    assert(cloned.will_wake(&original));
+}
+
+// =============================================================================
+// Section 11: RawWaker Type Existence
+// =============================================================================
+
+mount core.async.waker.{RawWaker, RawWakerVTable};
+
+@test
+fn test_raw_waker_type_exists() {
+    // Verify RawWaker type is accessible
+    let w: Waker = noop_waker();
+    let raw: &RawWaker = &w.raw;
+    // raw has data and vtable fields
+    let _data_ptr = raw.data;
+    let _vtable_ptr = raw.vtable;
+}
+
+@test
+fn test_raw_waker_vtable_type_exists() {
+    // RawWakerVTable is accessible through waker
+    let w: Waker = noop_waker();
+    let vtable: &RawWakerVTable = w.raw.vtable;
+    // VTable has four function pointers: clone, wake, wake_by_ref, drop
+    let _ = vtable.clone;
+    let _ = vtable.wake;
+    let _ = vtable.wake_by_ref;
+    let _ = vtable.drop;
+}
+
+// =============================================================================
+// Section 12: Context Waker Stability
+// =============================================================================
+
+@test
+fn test_context_waker_stable_across_accesses() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+
+    // Multiple accesses should return consistent waker
+    let w1: &Waker = cx.waker();
+    let w2: &Waker = cx.waker();
+    let w3: &Waker = cx.waker();
+    assert(w1.will_wake(w2));
+    assert(w2.will_wake(w3));
+    assert(w1.will_wake(w3));
+}
+
+@test
+fn test_noop_waker_wake_by_ref_many() {
+    let waker: Waker = noop_waker();
+    // Calling wake_by_ref many times should be harmless
+    let mut i = 0;
+    while i < 10 {
+        waker.wake_by_ref();
+        i = i + 1;
+    }
+    assert(waker.will_wake(&waker));
+}
+
+@test
+fn test_noop_waker_deep_clone_chain() {
+    let w1: Waker = noop_waker();
+    let w2: Waker = w1.clone();
+    let w3: Waker = w2.clone();
+    let w4: Waker = w3.clone();
+    let w5: Waker = w4.clone();
+
+    // Deep clone chain preserves identity
+    assert(w1.will_wake(&w5));
+    assert(w5.will_wake(&w1));
+}
+
+// =============================================================================
+// Section 13: Context Construction Patterns
+// =============================================================================
+
+@test
+fn test_context_from_cloned_waker() {
+    let original: Waker = noop_waker();
+    let cloned: Waker = original.clone();
+    let cx: Context = Context.from_waker(&cloned);
+    // Context from cloned waker should still match original
+    assert(cx.waker().will_wake(&original));
+}
+
+@test
+fn test_two_contexts_same_waker() {
+    let waker: Waker = noop_waker();
+    let cx1: Context = Context.from_waker(&waker);
+    let cx2: Context = Context.from_waker(&waker);
+    // Both contexts share the same waker
+    assert(cx1.waker().will_wake(cx2.waker()));
+}
+
+@test
+fn test_context_waker_clone_round_trip() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+    let cloned_from_ctx: Waker = cx.waker().clone();
+    let cx2: Context = Context.from_waker(&cloned_from_ctx);
+    // Round trip: waker -> context -> clone -> context should match
+    assert(cx2.waker().will_wake(&waker));
+}
+
+// =============================================================================
+// Section 14: Waker Wake then Clone
+// =============================================================================
+
+@test
+fn test_waker_wake_then_clone() {
+    let waker: Waker = noop_waker();
+    waker.wake_by_ref();
+    let cloned: Waker = waker.clone();
+    // Clone after wake should still work
+    assert(cloned.will_wake(&waker));
+}
+
+@test
+fn test_waker_clone_then_wake_original() {
+    let waker: Waker = noop_waker();
+    let cloned: Waker = waker.clone();
+    waker.wake_by_ref();
+    // Clone should be unaffected by waking original
+    assert(cloned.will_wake(&waker));
+    cloned.wake_by_ref();
+}
+
+// =============================================================================
+// Section 15: Context Double Construction
+// =============================================================================
+
+@test
+fn test_context_sequential_wakers() {
+    let w1: Waker = noop_waker();
+    let cx1: Context = Context.from_waker(&w1);
+    let retrieved1: &Waker = cx1.waker();
+
+    let w2: Waker = noop_waker();
+    let cx2: Context = Context.from_waker(&w2);
+    let retrieved2: &Waker = cx2.waker();
+
+    // Both contexts are valid simultaneously
+    assert(retrieved1.will_wake(retrieved2));
+}
+
+@test
+fn test_context_waker_ref_stability() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+
+    // Get waker ref multiple times and use them
+    let r1 = cx.waker();
+    r1.wake_by_ref();
+    let r2 = cx.waker();
+    r2.wake_by_ref();
+
+    assert(r1.will_wake(r2));
+    assert(r2.will_wake(&waker));
+}
+
+// =============================================================================
+// Section 16: Noop Waker Many Clones
+// =============================================================================
+
+@test
+fn test_noop_waker_ten_clones() {
+    let original: Waker = noop_waker();
+    let mut wakers: List<Waker> = List.new();
+    let mut i = 0;
+    while i < 10 {
+        wakers.push(original.clone());
+        i = i + 1;
+    }
+    assert_eq(wakers.len(), 10);
+    // All clones should wake same task as original
+    assert(wakers[0].will_wake(&original));
+    assert(wakers[9].will_wake(&original));
+}
+
+// =============================================================================
+// Section 17: Waker from Context Clone Round Trip
+// =============================================================================
+
+@test
+fn test_context_clone_waker_wake_round_trip() {
+    let original: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&original);
+    let cloned: Waker = cx.waker().clone();
+    cloned.wake_by_ref();
+    let cx2: Context = Context.from_waker(&cloned);
+    // Full round trip preserves identity
+    assert(cx2.waker().will_wake(&original));
+}
+
+@test
+fn test_multiple_contexts_all_consistent() {
+    let waker: Waker = noop_waker();
+    let cx1: Context = Context.from_waker(&waker);
+    let cx2: Context = Context.from_waker(&waker);
+    let cx3: Context = Context.from_waker(&waker);
+    // All contexts provide wakers that wake same task
+    assert(cx1.waker().will_wake(cx2.waker()));
+    assert(cx2.waker().will_wake(cx3.waker()));
+    assert(cx1.waker().will_wake(cx3.waker()));
+}
+
+@test
+fn test_noop_context_waker_matches_noop_waker() {
+    let cx: Context = noop_context();
+    let standalone: Waker = noop_waker();
+    // noop_context's waker should be equivalent to noop_waker
+    assert(cx.waker().will_wake(&standalone));
+}
+
+@test
+fn test_wake_by_ref_preserves_will_wake() {
+    let w1: Waker = noop_waker();
+    let w2: Waker = w1.clone();
+    assert(w1.will_wake(&w2));
+    w1.wake_by_ref();
+    w2.wake_by_ref();
+    // will_wake still holds after both have been woken
+    assert(w1.will_wake(&w2));
+}
+
+@test
+fn test_context_from_waker_explicit_type() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+    let waker_ref: &Waker = cx.waker();
+    let _: &Waker = waker_ref;
+    assert(waker_ref.will_wake(&waker));
+}
+
+@test
+fn test_six_deep_clone_chain() {
+    let w1: Waker = noop_waker();
+    let w2: Waker = w1.clone();
+    let w3: Waker = w2.clone();
+    let w4: Waker = w3.clone();
+    let w5: Waker = w4.clone();
+    let w6: Waker = w5.clone();
+    assert(w1.will_wake(&w6));
+    assert(w6.will_wake(&w1));
+    w6.wake_by_ref();
+}
+
+@test
+fn test_noop_waker_will_wake_reflexive() {
+    let w: Waker = noop_waker();
+    // Reflexive: always wakes itself
+    assert(w.will_wake(&w));
+    assert(w.will_wake(&w));
+    assert(w.will_wake(&w));
+}
+
+@test
+fn test_context_waker_after_multiple_wakes() {
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+    // Wake via context multiple times
+    cx.waker().wake_by_ref();
+    cx.waker().wake_by_ref();
+    cx.waker().wake_by_ref();
+    cx.waker().wake_by_ref();
+    cx.waker().wake_by_ref();
+    // Still consistent
+    assert(cx.waker().will_wake(&waker));
+}
+
+// =============================================================================
+// Section 18: Additional Type Annotation Tests
+// =============================================================================
+
+@test
+fn test_noop_waker_type_annotation() {
+    let w: Waker = noop_waker();
+    let _: Waker = w;
+}
+
+@test
+fn test_context_from_waker_type_annotation() {
+    let w: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&w);
+    let _: Context = cx;
+}
+
+@test
+fn test_waker_clone_wake_interleaved() {
+    let w1: Waker = noop_waker();
+    w1.wake_by_ref();
+    let w2 = w1.clone();
+    w2.wake_by_ref();
+    let w3 = w2.clone();
+    w3.wake_by_ref();
+    assert(w1.will_wake(&w3));
+}
+
+@test
+fn test_context_consistent_after_waker_wake() {
+    let w: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&w);
+    w.wake_by_ref();
+    // Context's waker should still match
+    assert(cx.waker().will_wake(&w));
+}
+
+@test
+fn test_noop_context_waker_type() {
+    let cx: Context = noop_context();
+    let waker_ref: &Waker = cx.waker();
+    let _: &Waker = waker_ref;
+}
+
+@test
+fn test_waker_will_wake_after_many_clones() {
+    let original: Waker = noop_waker();
+    let mut current = original.clone();
+    let mut i = 0;
+    while i < 20 {
+        current = current.clone();
+        i = i + 1;
+    }
+    assert(current.will_wake(&original));
+}
+
+@test
+fn test_context_from_different_noop_wakers() {
+    let w1: Waker = noop_waker();
+    let w2: Waker = noop_waker();
+    let cx1: Context = Context.from_waker(&w1);
+    let cx2: Context = Context.from_waker(&w2);
+    // Both noop, so they should be compatible
+    assert(cx1.waker().will_wake(cx2.waker()));
+}
+
+@test
+fn test_noop_waker_stable_identity() {
+    let w: Waker = noop_waker();
+    // Multiple will_wake calls should be stable
+    assert(w.will_wake(&w));
+    assert(w.will_wake(&w));
+    assert(w.will_wake(&w));
+}
+
+// =============================================================================
+// Section 19: RawWaker and RawWakerVTable Construction
+// =============================================================================
+
+@test
+fn test_raw_waker_vtable_new_constructor() {
+    // Test RawWakerVTable.new() constructor by creating custom vtable
+    fn test_clone(data: &unsafe Byte) -> RawWaker {
+        RawWaker.new(data, null_ptr())
+    }
+    fn test_wake(_data: &unsafe Byte) {}
+    fn test_wake_by_ref(_data: &unsafe Byte) {}
+    fn test_drop(_data: &unsafe Byte) {}
+
+    let vtable: RawWakerVTable = RawWakerVTable.new(
+        test_clone,
+        test_wake,
+        test_wake_by_ref,
+        test_drop,
+    );
+    // Verify fields are accessible
+    let _ = vtable.clone;
+    let _ = vtable.wake;
+    let _ = vtable.wake_by_ref;
+    let _ = vtable.drop;
+}
+
+@test
+fn test_raw_waker_new_constructor() {
+    // Test RawWaker.new() constructor
+    let data_ptr: &unsafe Byte = null_ptr();
+    // Create a minimal vtable for testing
+    fn dummy_clone(data: &unsafe Byte) -> RawWaker {
+        RawWaker.new(data, null_ptr())
+    }
+    fn dummy_wake(_data: &unsafe Byte) {}
+    fn dummy_wake_by_ref(_data: &unsafe Byte) {}
+    fn dummy_drop(_data: &unsafe Byte) {}
+
+    let vtable: RawWakerVTable = RawWakerVTable.new(
+        dummy_clone,
+        dummy_wake,
+        dummy_wake_by_ref,
+        dummy_drop,
+    );
+    let raw: RawWaker = RawWaker.new(data_ptr, &vtable);
+    // Verify fields are accessible
+    let _data = raw.data;
+    let _vtable = raw.vtable;
+}
+
+@test
+fn test_waker_from_raw_indirect() {
+    // Test that waker created via noop_waker uses from_raw internally
+    // We verify this by testing the raw field is accessible
+    let waker: Waker = noop_waker();
+    let raw_ref: &RawWaker = &waker.raw;
+    // Verify raw waker has expected structure
+    let _data = raw_ref.data;
+    let _vtable = raw_ref.vtable;
+    assert(waker.will_wake(&waker));
+}
+
+// =============================================================================
+// Section 20: Waker.wake() Consuming Method
+// =============================================================================
+
+@test
+fn test_waker_wake_consumes() {
+    // wake() consumes the waker (can't use after)
+    let waker: Waker = noop_waker();
+    let cloned: Waker = waker.clone();
+    // wake() takes ownership and consumes
+    waker.wake();
+    // cloned is still valid
+    assert(cloned.will_wake(&cloned));
+}
+
+@test
+fn test_waker_wake_on_cloned() {
+    // Test wake() on a cloned waker
+    let original: Waker = noop_waker();
+    let cloned1: Waker = original.clone();
+    let cloned2: Waker = original.clone();
+    // Consume cloned1
+    cloned1.wake();
+    // original and cloned2 still usable
+    assert(original.will_wake(&cloned2));
+}
+
+// =============================================================================
+// Section 21: Debug Trait and Formatting
+// =============================================================================
+
+@test
+fn test_waker_debug_trait() {
+    // Waker implements Debug for debugging output
+    let waker: Waker = noop_waker();
+    // Debug trait is implemented (verifiable by type system)
+    let _: &Waker = &waker;
+    // Format output would be "Waker { .. }" but we can't test runtime output
+    waker.wake_by_ref();
+}
+
+// =============================================================================
+// Section 22: Context and Waker Lifetime Patterns
+// =============================================================================
+
+@test
+fn test_context_outlives_waker_ref() {
+    // Context holds reference to waker
+    let waker: Waker = noop_waker();
+    let cx: Context = Context.from_waker(&waker);
+    // Access waker through context multiple times
+    let w1 = cx.waker();
+    let w2 = cx.waker();
+    let w3 = cx.waker();
+    // All should be the same waker
+    assert(w1.will_wake(w2));
+    assert(w2.will_wake(w3));
+}
+
+@test
+fn test_noop_context_independent_calls() {
+    // Multiple calls to noop_context() create independent contexts
+    let cx1: Context = noop_context();
+    let cx2: Context = noop_context();
+    let cx3: Context = noop_context();
+    // All use noop wakers which are compatible
+    assert(cx1.waker().will_wake(cx2.waker()));
+    assert(cx2.waker().will_wake(cx3.waker()));
+    assert(cx1.waker().will_wake(cx3.waker()));
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

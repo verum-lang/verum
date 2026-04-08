@@ -1,0 +1,37 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: heap, recursive, method
+// @expect: pass
+
+type Node is {
+    value: Int,
+    children: List<Heap<Node>>,
+};
+
+implement Node {
+    fn total(&self) -> Int {
+        let mut sum = self.value;
+        let kids = self.children;
+        let n = kids.len();
+        let mut i = 0;
+        while i < n {
+            let child = kids[i];
+            let node = *child;
+            let child_total = node.total();
+            sum = sum + child_total;
+            i = i + 1;
+        }
+        sum
+    }
+}
+
+fn main() -> Int {
+    let leaf1 = Node { value: 10, children: [] };
+    let leaf2 = Node { value: 20, children: [] };
+    let root = Node { value: 5, children: [Heap(leaf1), Heap(leaf2)] };
+    let v = root.total();
+    print(f"total = {v}");
+    assert_eq(v, 35);
+    0
+}

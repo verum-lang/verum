@@ -1,0 +1,62 @@
+// @test: parse
+// @level: L1
+// @tags: meta, deprecated, attributes, warnings
+// @timeout: 5000
+
+/// @deprecated attribute for marking obsolete items.
+
+// Deprecated function with message
+@deprecated("Use new_function instead")
+fn old_function(x: Int) -> Int {
+    x + 1
+}
+
+// Deprecated type
+@deprecated("Use UserV2 instead")
+type UserV1 is {
+    name: Text,
+};
+
+// New replacement type
+type UserV2 is {
+    name: Text,
+    email: Text,
+};
+
+// Deprecated variant
+type Status is
+    | Active
+    | @deprecated("Use Suspended instead") Inactive
+    | Suspended { reason: Text };
+
+// Deprecated constant
+@deprecated("Use MAX_SIZE_V2")
+const MAX_SIZE: Int = 1024;
+
+const MAX_SIZE_V2: Int = 4096;
+
+// Deprecated method in implement block
+type OldApi is {
+    data: Text,
+};
+
+implement OldApi {
+    @deprecated("Use process_v2 instead")
+    fn process(&self) -> Text {
+        self.data
+    }
+
+    fn process_v2(&self) -> Text {
+        f"processed: {self.data}"
+    }
+}
+
+fn new_function(x: Int) -> Int {
+    x + 2
+}
+
+fn main() {
+    let r = new_function(5);
+    assert_eq(r, 7);
+    print("Deprecated attribute tests parsed");
+}

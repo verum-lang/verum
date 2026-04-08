@@ -1,0 +1,180 @@
+// @test: parse
+// @level: L0
+// @tags: parser, declarations, patterns, active-patterns
+// @description: Test active pattern definition parsing
+
+// Simple active pattern - checks if number is even
+pattern Even(n: Int) -> Bool = n % 2 == 0;
+
+// Active pattern for odd numbers
+pattern Odd(n: Int) -> Bool = n % 2 == 1;
+
+// Active pattern for positive numbers
+pattern Positive(n: Int) -> Bool = n > 0;
+
+// Active pattern for negative numbers
+pattern Negative(n: Int) -> Bool = n < 0;
+
+// Active pattern for zero
+pattern Zero(n: Int) -> Bool = n == 0;
+
+// Parameterized active pattern - checks range
+pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n && n <= hi;
+
+// Parameterized pattern with single param
+pattern GreaterThan(threshold: Int)(n: Int) -> Bool = n > threshold;
+
+pattern LessThan(threshold: Int)(n: Int) -> Bool = n < threshold;
+
+// Parameterized pattern for divisibility
+pattern DivisibleBy(d: Int)(n: Int) -> Bool = n % d == 0;
+
+// Parameterized pattern for multiple of
+pattern MultipleOf(m: Int)(n: Int) -> Bool = n % m == 0;
+
+// Active pattern returning Maybe (partial pattern)
+pattern ParseInt(s: Text) -> Maybe<Int> = s.parse_int();
+
+pattern ParseFloat(s: Text) -> Maybe<Float> = s.parse_float();
+
+// Partial pattern for head of list
+pattern Head<T>(list: List<T>) -> Maybe<T> = list.first();
+
+// Partial pattern for last of list
+pattern Last<T>(list: List<T>) -> Maybe<T> = list.last();
+
+// Generic active pattern
+pattern NonEmpty<T>(list: List<T>) -> Bool = !list.is_empty();
+
+pattern Empty<T>(list: List<T>) -> Bool = list.is_empty();
+
+// Generic parameterized pattern
+pattern Contains<T: Eq>(elem: T)(list: List<T>) -> Bool = list.contains(elem);
+
+// Active pattern for string patterns
+pattern StartsWith(prefix: Text)(s: Text) -> Bool = s.starts_with(prefix);
+
+pattern EndsWith(suffix: Text)(s: Text) -> Bool = s.ends_with(suffix);
+
+pattern Matches(regex: Text)(s: Text) -> Bool = s.matches(regex);
+
+// Active pattern with multiple input parameters
+pattern Between(min: Float, max: Float)(x: Float) -> Bool = min <= x && x <= max;
+
+// Active pattern for type checking
+pattern IsInt(value: unknown) -> Bool = value is Int;
+
+pattern IsText(value: unknown) -> Bool = value is Text;
+
+// Extracting active pattern
+pattern ExtractDigits(s: Text) -> Maybe<List<Int>> = {
+    let digits = s.chars().filter(|c| c.is_digit()).map(|c| c.to_digit());
+    if digits.is_empty() { None } else { Some(digits) }
+};
+
+// Complex active pattern with logic
+pattern Prime(n: Int) -> Bool = {
+    if n <= 1 { return false; }
+    if n <= 3 { return true; }
+    if n % 2 == 0 || n % 3 == 0 { return false; }
+    let i = 5;
+    while i * i <= n {
+        if n % i == 0 || n % (i + 2) == 0 { return false; }
+        i = i + 6;
+    }
+    true
+};
+
+// Active pattern for power of two
+pattern PowerOfTwo(n: Int) -> Bool = n > 0 && (n & (n - 1)) == 0;
+
+// Active pattern with float comparisons
+pattern ApproxEqual(expected: Float, epsilon: Float)(actual: Float) -> Bool =
+    (actual - expected).abs() < epsilon;
+
+// Public active pattern
+pub pattern PublicPattern(x: Int) -> Bool = x > 0;
+
+// Internal active pattern
+internal pattern InternalPattern(x: Int) -> Bool = x < 0;
+
+// Protected active pattern
+protected pattern ProtectedPattern(x: Int) -> Bool = x == 0;
+
+// Active pattern for option unwrapping
+pattern IsSome<T>(opt: Maybe<T>) -> Bool = opt.is_some();
+
+pattern IsNone<T>(opt: Maybe<T>) -> Bool = opt.is_none();
+
+// Active pattern for result types
+pattern IsOk<T, E>(result: Result<T, E>) -> Bool = result.is_ok();
+
+pattern IsErr<T, E>(result: Result<T, E>) -> Bool = result.is_err();
+
+// Parameterized partial pattern
+pattern GetAt<T>(index: Int)(list: List<T>) -> Maybe<T> = list.get(index);
+
+// Active pattern for map access
+pattern HasKey<K: Eq + Hash, V>(key: K)(map: Map<K, V>) -> Bool = map.contains_key(key);
+
+// Active pattern for JSON-like structures
+pattern IsObject(json: Json) -> Bool = json.is_object();
+
+pattern IsArray(json: Json) -> Bool = json.is_array();
+
+pattern IsString(json: Json) -> Bool = json.is_string();
+
+pattern IsNumber(json: Json) -> Bool = json.is_number();
+
+// Complex parameterized pattern
+pattern MatchesSchema(schema: Schema)(value: Json) -> Bool = schema.validate(value);
+
+// Active pattern with type bounds
+pattern Sorted<T: Ord>(list: List<T>) -> Bool = list.is_sorted();
+
+// Active pattern for checking bounds
+pattern WithinBounds<T: Ord>(min: T, max: T)(value: T) -> Bool =
+    value >= min && value <= max;
+
+// Active pattern for sequence patterns
+pattern Ascending<T: Ord>(list: List<T>) -> Bool = list.windows(2).all(|w| w[0] <= w[1]);
+
+pattern Descending<T: Ord>(list: List<T>) -> Bool = list.windows(2).all(|w| w[0] >= w[1]);
+
+// Active pattern for character classes
+pattern Alpha(c: Char) -> Bool = c.is_alphabetic();
+
+pattern Digit(c: Char) -> Bool = c.is_digit(10);
+
+pattern Whitespace(c: Char) -> Bool = c.is_whitespace();
+
+pattern Alphanumeric(c: Char) -> Bool = c.is_alphanumeric();
+
+// Active pattern with complex expression body
+pattern ValidEmail(s: Text) -> Bool = {
+    let parts = s.split("@");
+    parts.len() == 2 &&
+    !parts[0].is_empty() &&
+    !parts[1].is_empty() &&
+    parts[1].contains(".")
+};
+
+// Active pattern for URL validation
+pattern ValidUrl(s: Text) -> Bool =
+    s.starts_with("http://") || s.starts_with("https://");
+
+// Usage examples in match expressions would be:
+// match n {
+//     Even() => "even",
+//     Odd() => "odd",
+// }
+//
+// match n {
+//     InRange(0, 100)() => "in range",
+//     _ => "out of range",
+// }
+//
+// match text {
+//     ParseInt() @ value => f"parsed: {value}",
+//     _ => "not a number",
+// }

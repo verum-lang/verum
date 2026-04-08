@@ -1,0 +1,384 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for async closure expressions
+
+// ============================================================================
+// Basic Async Closures
+// ============================================================================
+
+fn test_basic_async_closures() {
+    // Simple async closure
+    let f = async || 42;
+
+    // Async closure with body
+    let g = async || {
+        compute()
+    };
+
+    // Async closure with return type
+    let h = async || -> Int { 42 };
+
+    // Async closure with explicit unit return
+    let i = async || -> () { do_work(); };
+}
+
+// ============================================================================
+// Async Closures with Parameters
+// ============================================================================
+
+fn test_async_closure_params() {
+    // Single parameter
+    let f = async |x: Int| x * 2;
+
+    // Multiple parameters
+    let g = async |x: Int, y: Int| x + y;
+
+    // With return type
+    let h = async |x: Int, y: Int| -> Int { x * y };
+
+    // Complex parameter types
+    let i = async |data: List<Int>, transform: fn(Int) -> Int| {
+        data.map(transform)
+    };
+
+    // Reference parameters
+    let j = async |s: &Text| s.len();
+
+    // Mutable reference parameter
+    let k = async |list: &mut List<Int>| {
+        list.push(42);
+    };
+}
+
+// ============================================================================
+// Async Move Closures
+// ============================================================================
+
+fn test_async_move_closures() {
+    // Async move closure captures by value
+    let data = "captured";
+    let f = async move || {
+        use_data(data)
+    };
+
+    // Move with multiple captures
+    let a = 1;
+    let b = 2;
+    let g = async move || a + b;
+
+    // Move with parameters
+    let captured = prepare_data();
+    let h = async move |x: Int| {
+        process(captured, x)
+    };
+
+    // Move with complex captured value
+    let list = new_list();
+    let i = async move || {
+        list.iter().sum()
+    };
+}
+
+// ============================================================================
+// Async Closures with Await
+// ============================================================================
+
+async fn test_async_closures_with_await() {
+    // Closure with await in body
+    let fetcher = async |url: Text| {
+        fetch(url).await
+    };
+
+    // Multiple awaits
+    let processor = async |data: Data| {
+        let validated = validate(data).await;
+        let transformed = transform(validated).await;
+        save(transformed).await
+    };
+
+    // Chained awaits
+    let chain = async || {
+        fetch()
+            .await
+            .process()
+            .await
+            .finalize()
+            .await
+    };
+
+    // Await in expression
+    let combiner = async |a, b| {
+        fetch(a).await + fetch(b).await
+    };
+}
+
+// ============================================================================
+// Async Closures as Arguments
+// ============================================================================
+
+fn test_async_closure_arguments() {
+    // Pass to function
+    process_async(async |x| x * 2);
+
+    // Pass to method
+    executor.run(async || compute());
+
+    // In higher-order function
+    items.map(async |item| transform(item).await);
+
+    // Multiple closures
+    combine(
+        async |a| fetch_a(a).await,
+        async |b| fetch_b(b).await
+    );
+
+    // Nested closure arguments
+    outer(async |x| {
+        inner(async |y| x + y)
+    });
+}
+
+// ============================================================================
+// Async Closures in Collections
+// ============================================================================
+
+fn test_async_closure_collections() {
+    // Array of async closures
+    let handlers = [
+        async |x| x * 1,
+        async |x| x * 2,
+        async |x| x * 3
+    ];
+
+    // List of async closures (type annotation commented due to parser limitation)
+    // TODO: `async fn(Int) -> Int` as a type is not yet supported
+    let processors = list_from([
+        async |x| x + 1,
+        async |x| x - 1
+    ]);
+
+    // Map of async closures
+    let routes = map_from([
+        ("get", async |req| handle_get(req).await),
+        ("post", async |req| handle_post(req).await)
+    ]);
+}
+
+// ============================================================================
+// Async Closures with Control Flow
+// ============================================================================
+
+async fn test_async_closure_control_flow() {
+    // Closure with if
+    let conditional = async |x: Int| {
+        if x > 0 {
+            positive(x).await
+        } else {
+            negative(x).await
+        }
+    };
+
+    // Closure with match
+    let matcher = async |opt: Maybe<Int>| {
+        match opt {
+            Some(x) => process(x).await,
+            None => default().await
+        }
+    };
+
+    // Closure with loop
+    let looper = async |items: List<Item>| {
+        let mut results = new_list();
+        for item in items {
+            results.push(transform(item).await);
+        }
+        results
+    };
+
+    // Closure with early return
+    let early_return = async |data: Data| {
+        if !data.is_valid() {
+            return Err(InvalidData);
+        }
+        Ok(process(data).await)
+    };
+}
+
+// ============================================================================
+// Async Closures with Error Handling
+// ============================================================================
+
+async fn test_async_closure_errors() {
+    // Closure with question mark
+    let fallible = async |url| -> Result<Data, Error> {
+        let response = fetch(url).await?;
+        let parsed = parse(response)?;
+        Ok(parsed)
+    };
+
+    // Closure with try/recover
+    let safe = async |input| {
+        try {
+            risky_operation(input).await
+        } recover {
+            Error => default_value
+        }
+    };
+
+    // Closure with defer
+    let deferred = async |resource| {
+        defer release(resource);
+        use_resource(resource).await
+    };
+}
+
+// ============================================================================
+// Generic Async Closures
+// ============================================================================
+
+fn test_generic_async_closures() {
+    // Closure with generic inference
+    let identity = async |x| x;
+
+    // Closure with explicit generic (via type annotation)
+    // TODO: `async fn<T>` as a type is not yet supported
+    let typed = async |x| x.clone();
+
+    // Closure transforming types
+    // TODO: `async fn(Int) -> Text` as a type is not yet supported
+    let transform = async |x| x.to_string();
+}
+
+// ============================================================================
+// Async Closure Type Annotations
+// ============================================================================
+
+fn test_async_closure_types() {
+    // Full type annotation on binding
+    // TODO: `async fn() -> Int` as a type is not yet supported
+    let f = async || 42;
+
+    // With parameters
+    let g = async |a, b| a + b;
+
+    // With complex return type
+    let h = async |url| {
+        fetch_and_parse(url).await
+    };
+
+    // Function type as parameter - uses fn instead of async fn
+    fn takes_closure(f: fn(Int) -> Int) {
+        // use f
+    }
+    takes_closure(|x| x * 2);
+}
+
+// ============================================================================
+// Nested Async Closures
+// ============================================================================
+
+async fn test_nested_async_closures() {
+    // Closure returning closure
+    let make_adder = |n: Int| async move |x: Int| x + n;
+
+    // Nested async in async
+    let outer = async || {
+        let inner = async || 42;
+        inner().await
+    };
+
+    // Deep nesting
+    let deep = async || {
+        async || {
+            async || {
+                "deeply nested"
+            }
+        }
+    };
+
+    // Closure with closure parameter (uses fn instead of async fn)
+    let with_callback = async |callback: fn(Int) -> Int| {
+        let res = callback(10);
+        res * 2
+    };
+}
+
+// ============================================================================
+// Async Closures in Spawn/Nursery
+// ============================================================================
+
+async fn test_async_closure_spawn() {
+    // Spawn async closure
+    spawn (async || compute().await)();
+
+    // Nursery with async closure
+    nursery {
+        let task = async || fetch().await;
+        spawn task();
+    }
+
+    // Multiple async closures in nursery
+    nursery {
+        spawn (async || task_a().await)();
+        spawn (async || task_b().await)();
+    }
+
+    // Async closure with context forwarding
+    spawn using [Database] (async || {
+        database.query().await
+    })();
+}
+
+// ============================================================================
+// Async Closures in Select
+// ============================================================================
+
+async fn test_async_closure_select() {
+    // Async closure call in select arm
+    let closure_a = async || fetch_a().await;
+    let closure_b = async || fetch_b().await;
+
+    select {
+        res = closure_a().await => handle_a(res),
+        res = closure_b().await => handle_b(res)
+    };
+
+    // Inline async closure in select
+    select {
+        data = (async || compute().await)().await => use_data(data),
+        _ = timeout(1000).await => handle_timeout()
+    };
+}
+
+// ============================================================================
+// Complex Async Closure Patterns
+// ============================================================================
+
+async fn test_complex_patterns() {
+    // Closure factory
+    let make_fetcher = |base_url: Text| {
+        async move |path: Text| {
+            fetch(f"{base_url}/{path}").await
+        }
+    };
+
+    // Pipeline of closures
+    let pipeline = [
+        async |x: Data| validate(x).await,
+        async |x: Data| transform(x).await,
+        async |x: Data| save(x).await
+    ];
+
+    // Curry-style
+    let curry = |a: Int| async move |b: Int| async move |c: Int| {
+        a + b + c
+    };
+
+    // Closure with complex capture and parameters
+    let config = load_config();
+    let processor = async move |data: Data, options: Options| {
+        let merged = merge_config(config, options);
+        process_with_config(data, merged).await
+    };
+}

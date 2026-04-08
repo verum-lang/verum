@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: mmio, barrier, memory-ordering, systems
+// @timeout: 5000
+// @description: Verify memory barrier operations compile correctly.
+
+mount sys.mmio;
+
+/// Test different barrier types.
+fn test_barriers() {
+    // Compiler-only barrier (prevents compiler reordering)
+    barrier(BarrierKind.Compiler);
+
+    // Acquire barrier (load barrier)
+    barrier(BarrierKind.Acquire);
+
+    // Release barrier (store barrier)
+    barrier(BarrierKind.Release);
+
+    // Acquire-release barrier
+    barrier(BarrierKind.AcqRel);
+
+    // Full sequential consistency
+    barrier(BarrierKind.SeqCst);
+}
+
+/// Test convenience barrier functions.
+fn test_convenience_barriers() {
+    // Compiler barrier shorthand
+    compiler_barrier();
+
+    // DMB (data memory barrier - ARM terminology)
+    dmb();
+
+    // DSB (data synchronization barrier)
+    dsb();
+
+    // ISB (instruction synchronization barrier)
+    isb();
+}
+
+/// Test barrier usage pattern for device initialization.
+fn test_device_init_pattern() {
+    let ctrl: Register<UInt32, ReadWrite> = Register.at(0x4000_0000);
+    let data: Register<UInt32, WriteOnly> = Register.at(0x4000_0004);
+
+    // Configure the device
+    ctrl.write(0x0001);
+
+    // Ensure configuration is complete before data access
+    barrier(BarrierKind.Release);
+
+    // Now write data
+    data.write(0xDEAD_BEEF);
+}
+
+/// Test volatile load with acquire semantics.
+fn test_acquire_load() {
+    let value: UInt32 = 0x42;
+    let ptr: *volatile UInt32 = &value as *volatile UInt32;
+
+    // Load with acquire semantics
+    let loaded = volatile_load_acquire(ptr);
+
+    assert(loaded == 0x42);
+}
+
+/// Test volatile store with release semantics.
+fn test_release_store() {
+    let mut value: UInt32 = 0;
+    let ptr: *volatile mut UInt32 = &mut value as *volatile mut UInt32;
+
+    // Store with release semantics
+    volatile_store_release(ptr, 0x42);
+
+    assert(value == 0x42);
+}
+
+fn main() -> Int {
+    test_barriers();
+    test_convenience_barriers();
+    test_device_init_pattern();
+    test_acquire_load();
+    test_release_store();
+    0
+}

@@ -1,0 +1,401 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, channel, bounded-buffer, fifo, send, recv
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Channel simulation — bounded buffer with send/recv,
+// FIFO ordering, blocking semantics tracked via counters.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn a8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Channel: ring buffer with FIFO semantics
+// =============================================================================
+
+type Channel is {
+    buf: Arr8,
+    head: Int,
+    tail: Int,
+    count: Int,
+    capacity: Int,
+    send_blocked: Int,
+    recv_blocked: Int,
+    total_sent: Int,
+    total_recv: Int
+};
+
+fn chan_new(cap: Int) -> Channel {
+    Channel {
+        buf: a8_zeros(),
+        head: 0, tail: 0, count: 0,
+        capacity: cap,
+        send_blocked: 0, recv_blocked: 0,
+        total_sent: 0, total_recv: 0
+    }
+}
+
+type SendResult is { chan: Channel, ok: Int };
+type RecvResult is { chan: Channel, value: Int, ok: Int };
+
+fn chan_send(ch: Channel, val: Int) -> SendResult {
+    if ch.count >= ch.capacity {
+        return SendResult {
+            chan: Channel {
+                buf: ch.buf, head: ch.head, tail: ch.tail,
+                count: ch.count, capacity: ch.capacity,
+                send_blocked: ch.send_blocked + 1,
+                recv_blocked: ch.recv_blocked,
+                total_sent: ch.total_sent,
+                total_recv: ch.total_recv
+            },
+            ok: 0
+        };
+    }
+    let new_buf = a8_set(ch.buf, ch.tail, val);
+    let new_tail = (ch.tail + 1) % ch.capacity;
+    SendResult {
+        chan: Channel {
+            buf: new_buf, head: ch.head, tail: new_tail,
+            count: ch.count + 1, capacity: ch.capacity,
+            send_blocked: ch.send_blocked,
+            recv_blocked: ch.recv_blocked,
+            total_sent: ch.total_sent + 1,
+            total_recv: ch.total_recv
+        },
+        ok: 1
+    }
+}
+
+fn chan_recv(ch: Channel) -> RecvResult {
+    if ch.count <= 0 {
+        return RecvResult {
+            chan: Channel {
+                buf: ch.buf, head: ch.head, tail: ch.tail,
+                count: ch.count, capacity: ch.capacity,
+                send_blocked: ch.send_blocked,
+                recv_blocked: ch.recv_blocked + 1,
+                total_sent: ch.total_sent,
+                total_recv: ch.total_recv
+            },
+            value: 0, ok: 0
+        };
+    }
+    let val = a8_get(ch.buf, ch.head);
+    let new_head = (ch.head + 1) % ch.capacity;
+    RecvResult {
+        chan: Channel {
+            buf: ch.buf, head: new_head, tail: ch.tail,
+            count: ch.count - 1, capacity: ch.capacity,
+            send_blocked: ch.send_blocked,
+            recv_blocked: ch.recv_blocked,
+            total_sent: ch.total_sent,
+            total_recv: ch.total_recv + 1
+        },
+        value: val, ok: 1
+    }
+}
+
+fn chan_is_empty(ch: Channel) -> Int {
+    if ch.count == 0 { 1 } else { 0 }
+}
+
+fn chan_is_full(ch: Channel) -> Int {
+    if ch.count >= ch.capacity { 1 } else { 0 }
+}
+
+fn chan_len(ch: Channel) -> Int { ch.count }
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_send_recv_basic() {
+    let mut ch = chan_new(4);
+
+    let r1 = chan_send(ch, 10);
+    assert_eq(r1.ok, 1);
+    ch = r1.chan;
+    assert_eq(chan_len(ch), 1);
+
+    let r2 = chan_send(ch, 20);
+    assert_eq(r2.ok, 1);
+    ch = r2.chan;
+    assert_eq(chan_len(ch), 2);
+
+    let r3 = chan_recv(ch);
+    assert_eq(r3.ok, 1);
+    assert_eq(r3.value, 10);  // FIFO: first in, first out
+    ch = r3.chan;
+
+    let r4 = chan_recv(ch);
+    assert_eq(r4.ok, 1);
+    assert_eq(r4.value, 20);
+    ch = r4.chan;
+
+    assert_eq(chan_is_empty(ch), 1);
+}
+
+fn test_fifo_ordering() {
+    let mut ch = chan_new(5);
+
+    // Send 1,2,3,4,5
+    let mut i = 1;
+    while i <= 5 {
+        let r = chan_send(ch, i);
+        ch = r.chan;
+        i = i + 1;
+    }
+
+    // Recv should get 1,2,3,4,5 in order
+    let r1 = chan_recv(ch);
+    assert_eq(r1.value, 1);
+    ch = r1.chan;
+
+    let r2 = chan_recv(ch);
+    assert_eq(r2.value, 2);
+    ch = r2.chan;
+
+    let r3 = chan_recv(ch);
+    assert_eq(r3.value, 3);
+    ch = r3.chan;
+
+    let r4 = chan_recv(ch);
+    assert_eq(r4.value, 4);
+    ch = r4.chan;
+
+    let r5 = chan_recv(ch);
+    assert_eq(r5.value, 5);
+    ch = r5.chan;
+
+    assert_eq(chan_is_empty(ch), 1);
+}
+
+fn test_bounded_blocking() {
+    let mut ch = chan_new(2);
+
+    let r1 = chan_send(ch, 10);
+    ch = r1.chan;
+    let r2 = chan_send(ch, 20);
+    ch = r2.chan;
+
+    assert_eq(chan_is_full(ch), 1);
+
+    // Third send should be blocked
+    let r3 = chan_send(ch, 30);
+    assert_eq(r3.ok, 0);
+    ch = r3.chan;
+    assert_eq(ch.send_blocked, 1);
+    assert_eq(chan_len(ch), 2);  // still 2
+}
+
+fn test_recv_empty_blocking() {
+    let ch = chan_new(4);
+
+    let r = chan_recv(ch);
+    assert_eq(r.ok, 0);
+    assert_eq(r.chan.recv_blocked, 1);
+}
+
+fn test_wraparound() {
+    let mut ch = chan_new(3);
+
+    // Fill: [10, 20, 30]
+    let s1 = chan_send(ch, 10); ch = s1.chan;
+    let s2 = chan_send(ch, 20); ch = s2.chan;
+    let s3 = chan_send(ch, 30); ch = s3.chan;
+
+    // Recv two: should get 10, 20
+    let r1 = chan_recv(ch); ch = r1.chan;
+    assert_eq(r1.value, 10);
+    let r2 = chan_recv(ch); ch = r2.chan;
+    assert_eq(r2.value, 20);
+
+    // Send two more (wraps around)
+    let s4 = chan_send(ch, 40); ch = s4.chan;
+    let s5 = chan_send(ch, 50); ch = s5.chan;
+
+    // Recv all three: 30, 40, 50
+    let r3 = chan_recv(ch); ch = r3.chan;
+    assert_eq(r3.value, 30);
+    let r4 = chan_recv(ch); ch = r4.chan;
+    assert_eq(r4.value, 40);
+    let r5 = chan_recv(ch); ch = r5.chan;
+    assert_eq(r5.value, 50);
+
+    assert_eq(chan_is_empty(ch), 1);
+}
+
+fn test_interleaved_send_recv() {
+    let mut ch = chan_new(2);
+    let mut sum = 0;
+
+    // Interleave: send, recv, send, recv, ...
+    let mut i = 1;
+    while i <= 10 {
+        let sr = chan_send(ch, i);
+        ch = sr.chan;
+        let rr = chan_recv(ch);
+        ch = rr.chan;
+        sum = sum + rr.value;
+        i = i + 1;
+    }
+    assert_eq(sum, 55);  // 1+2+3+...+10
+    assert_eq(ch.total_sent, 10);
+    assert_eq(ch.total_recv, 10);
+}
+
+fn test_statistics() {
+    let mut ch = chan_new(3);
+
+    // Send 5 items (buffer only holds 3, so 2 will be blocked)
+    let mut i = 1;
+    while i <= 5 {
+        let r = chan_send(ch, i);
+        ch = r.chan;
+        i = i + 1;
+    }
+    assert_eq(ch.total_sent, 3);
+    assert_eq(ch.send_blocked, 2);
+
+    // Recv 5 items (only 3 available, so 2 will be blocked)
+    i = 1;
+    while i <= 5 {
+        let r = chan_recv(ch);
+        ch = r.chan;
+        i = i + 1;
+    }
+    assert_eq(ch.total_recv, 3);
+    assert_eq(ch.recv_blocked, 2);
+}
+
+fn test_capacity_one() {
+    let mut ch = chan_new(1);
+
+    // Send one
+    let s1 = chan_send(ch, 42);
+    assert_eq(s1.ok, 1);
+    ch = s1.chan;
+
+    // Channel full
+    assert_eq(chan_is_full(ch), 1);
+
+    // Send blocked
+    let s2 = chan_send(ch, 99);
+    assert_eq(s2.ok, 0);
+    ch = s2.chan;
+
+    // Recv
+    let r1 = chan_recv(ch);
+    assert_eq(r1.value, 42);
+    ch = r1.chan;
+
+    // Now empty
+    assert_eq(chan_is_empty(ch), 1);
+}
+
+fn test_producer_consumer_pattern() {
+    // Producer sends 1..6, consumer receives after each 2 sends
+    let mut ch = chan_new(4);
+    let mut produced = 0;
+    let mut consumed_sum = 0;
+
+    // Produce 2
+    let s1 = chan_send(ch, 1); ch = s1.chan; produced = produced + 1;
+    let s2 = chan_send(ch, 2); ch = s2.chan; produced = produced + 1;
+
+    // Consume 1
+    let r1 = chan_recv(ch); ch = r1.chan;
+    consumed_sum = consumed_sum + r1.value;
+
+    // Produce 2 more
+    let s3 = chan_send(ch, 3); ch = s3.chan; produced = produced + 1;
+    let s4 = chan_send(ch, 4); ch = s4.chan; produced = produced + 1;
+
+    // Consume 1
+    let r2 = chan_recv(ch); ch = r2.chan;
+    consumed_sum = consumed_sum + r2.value;
+
+    // Produce 2 more
+    let s5 = chan_send(ch, 5); ch = s5.chan; produced = produced + 1;
+    let s6 = chan_send(ch, 6); ch = s6.chan; produced = produced + 1;
+
+    // Drain all remaining
+    let mut cont = 1;
+    while cont == 1 {
+        let r = chan_recv(ch);
+        if r.ok == 1 {
+            ch = r.chan;
+            consumed_sum = consumed_sum + r.value;
+        } else {
+            ch = r.chan;
+            cont = 0;
+        }
+    }
+
+    assert_eq(produced, 6);
+    assert_eq(consumed_sum, 21);  // 1+2+3+4+5+6
+}
+
+fn test_many_wraparounds() {
+    let mut ch = chan_new(2);
+    let mut recv_sum = 0;
+
+    // Do 20 send+recv cycles on a size-2 buffer to stress wraparound
+    let mut i = 1;
+    while i <= 20 {
+        let s = chan_send(ch, i);
+        ch = s.chan;
+        let r = chan_recv(ch);
+        ch = r.chan;
+        recv_sum = recv_sum + r.value;
+        i = i + 1;
+    }
+    assert_eq(recv_sum, 210);  // 1+2+...+20
+    assert_eq(ch.send_blocked, 0);
+    assert_eq(ch.recv_blocked, 0);
+}
+
+fn main() -> Int {
+    test_send_recv_basic();
+    test_fifo_ordering();
+    test_bounded_blocking();
+    test_recv_empty_blocking();
+    test_wraparound();
+    test_interleaved_send_recv();
+    test_statistics();
+    test_capacity_one();
+    test_producer_consumer_pattern();
+    test_many_wraparounds();
+    print("[OK] 348_interp_channel_sim");
+    0
+}

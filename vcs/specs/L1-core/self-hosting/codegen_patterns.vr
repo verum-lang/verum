@@ -1,0 +1,300 @@
+// @test: run
+// @level: L1
+// @tier: 0
+// @tags: self-hosting, codegen, code-generation, text-builder, instruction
+// @description: Code generation patterns for self-hosting compiler backend
+
+// Opcode represented as tag + operand (flat encoding)
+// Tags: 0=LoadImm, 1=LoadVar, 2=StoreVar, 3=Add, 4=Sub, 5=Mul, 6=Div,
+//       7=CmpEq, 8=CmpLt, 9=Jump, 10=JumpIfFalse, 11=Call, 12=Ret, 13=Nop
+
+fn opcode_name(tag: Int, ival: Int, sval: Text) -> Text {
+    if tag == 0 { f"LOAD_IMM {ival}" }
+    else if tag == 1 { f"LOAD_VAR {sval}" }
+    else if tag == 2 { f"STORE_VAR {sval}" }
+    else if tag == 3 { "ADD" }
+    else if tag == 4 { "SUB" }
+    else if tag == 5 { "MUL" }
+    else if tag == 6 { "DIV" }
+    else if tag == 7 { "CMP_EQ" }
+    else if tag == 8 { "CMP_LT" }
+    else if tag == 9 { f"JUMP {ival}" }
+    else if tag == 10 { f"JUMP_IF_FALSE {ival}" }
+    else if tag == 11 { f"CALL {sval} {ival}" }
+    else if tag == 12 { "RET" }
+    else { "NOP" }
+}
+
+// Code blocks: each block has a label, and a range of instructions
+// Instructions stored in flat parallel arrays
+
+fn emit_asm(labels: List<Text>, block_starts: List<Int>, block_counts: List<Int>,
+            tags: List<Int>, ivals: List<Int>, svals: List<Text>) -> Text {
+    let mut out = "";
+    let mut bi = 0;
+    while bi < labels.len() {
+        out = out + labels[bi] + ":\n";
+        let start = block_starts[bi];
+        let count = block_counts[bi];
+        let mut ii = 0;
+        while ii < count {
+            let idx = start + ii;
+            out = out + "    " + opcode_name(tags[idx], ivals[idx], svals[idx]) + "\n";
+            ii = ii + 1;
+        }
+        bi = bi + 1;
+    }
+    out
+}
+
+fn test_basic_emit() -> Int {
+    let mut tags = List.new();
+    let mut ivals = List.new();
+    let mut svals = List.new();
+
+    // LoadImm(42), StoreVar("x"), Ret
+    tags.push(0); ivals.push(42); svals.push("");
+    tags.push(2); ivals.push(0); svals.push("x");
+    tags.push(12); ivals.push(0); svals.push("");
+
+    if tags.len() != 3 {
+        print(f"FAIL basic_emit: expected 3 instrs, got {tags.len()}");
+        return 1;
+    }
+    print("  basic_emit: OK");
+    0
+}
+
+fn test_expression_codegen() -> Int {
+    let mut tags = List.new();
+    let mut ivals = List.new();
+    let mut svals = List.new();
+
+    // Generate code for: x = 3 + 4 * 2
+    // 4 * 2
+    tags.push(0); ivals.push(4); svals.push("");
+    tags.push(0); ivals.push(2); svals.push("");
+    tags.push(5); ivals.push(0); svals.push("");
+    // 3 + result
+    tags.push(0); ivals.push(3); svals.push("");
+    tags.push(3); ivals.push(0); svals.push("");
+    // store
+    tags.push(2); ivals.push(0); svals.push("x");
+
+    if tags.len() != 6 {
+        print(f"FAIL expr: expected 6 instrs, got {tags.len()}");
+        return 1;
+    }
+
+    let name0 = opcode_name(tags[0], ivals[0], svals[0]);
+    if name0 != "LOAD_IMM 4" {
+        print(f"FAIL expr: instr[0] expected 'LOAD_IMM 4', got '{name0}'");
+        return 1;
+    }
+    print("  expression_codegen: OK");
+    0
+}
+
+fn test_control_flow_codegen() -> Int {
+    let mut tags = List.new();
+    let mut ivals = List.new();
+    let mut svals = List.new();
+    let mut labels = List.new();
+    let mut block_starts = List.new();
+    let mut block_counts = List.new();
+
+    // cond block
+    labels.push("cond");
+    block_starts.push(0);
+    tags.push(1); ivals.push(0); svals.push("x");      // LoadVar x
+    tags.push(0); ivals.push(10); svals.push("");       // LoadImm 10
+    tags.push(8); ivals.push(0); svals.push("");        // CmpLt
+    tags.push(10); ivals.push(2); svals.push("");       // JumpIfFalse 2
+    block_counts.push(4);
+
+    // then block
+    labels.push("then");
+    block_starts.push(4);
+    tags.push(0); ivals.push(1); svals.push("");        // LoadImm 1
+    tags.push(2); ivals.push(0); svals.push("y");       // StoreVar y
+    tags.push(9); ivals.push(3); svals.push("");        // Jump 3
+    block_counts.push(3);
+
+    // else block
+    labels.push("else");
+    block_starts.push(7);
+    tags.push(0); ivals.push(2); svals.push("");        // LoadImm 2
+    tags.push(2); ivals.push(0); svals.push("y");       // StoreVar y
+    block_counts.push(2);
+
+    if labels.len() != 3 {
+        print(f"FAIL control: expected 3 blocks, got {labels.len()}");
+        return 1;
+    }
+
+    let asm = emit_asm(labels, block_starts, block_counts, tags, ivals, svals);
+    if !asm.contains("cond:") || !asm.contains("then:") || !asm.contains("else:") {
+        print("FAIL control: missing block labels");
+        return 1;
+    }
+    if !asm.contains("CMP_LT") {
+        print("FAIL control: missing CMP_LT");
+        return 1;
+    }
+    if !asm.contains("JUMP_IF_FALSE") {
+        print("FAIL control: missing JUMP_IF_FALSE");
+        return 1;
+    }
+    print("  control_flow_codegen: OK");
+    0
+}
+
+fn test_function_call_codegen() -> Int {
+    let mut tags = List.new();
+    let mut ivals = List.new();
+    let mut svals = List.new();
+    let mut labels = List.new();
+    let mut block_starts = List.new();
+    let mut block_counts = List.new();
+
+    labels.push("call_site");
+    block_starts.push(0);
+    tags.push(0); ivals.push(10); svals.push("");       // LoadImm 10
+    tags.push(0); ivals.push(20); svals.push("");       // LoadImm 20
+    tags.push(11); ivals.push(2); svals.push("add");    // Call("add", 2)
+    tags.push(2); ivals.push(0); svals.push("result");  // StoreVar result
+    block_counts.push(4);
+
+    let asm = emit_asm(labels, block_starts, block_counts, tags, ivals, svals);
+    if !asm.contains("CALL add 2") {
+        print(f"FAIL call: missing 'CALL add 2'");
+        return 1;
+    }
+    print("  function_call_codegen: OK");
+    0
+}
+
+// Register allocator using parallel lists (Map<Text,Int>.get is unreliable with Text keys)
+fn ra_lookup(names: List<Text>, regs: List<Int>, name: Text) -> Int {
+    let mut i = 0;
+    while i < names.len() {
+        if names[i] == name {
+            return regs[i];
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn test_register_allocator() -> Int {
+    let mut next_reg = 0;
+    let mut var_names = List.new();
+    let mut var_regs = List.new();
+
+    // Allocate 3 registers
+    let r0 = next_reg;
+    next_reg = next_reg + 1;
+    let r1 = next_reg;
+    next_reg = next_reg + 1;
+    let r2 = next_reg;
+    next_reg = next_reg + 1;
+
+    if r0 != 0 || r1 != 1 || r2 != 2 {
+        print(f"FAIL regalloc: r0={r0}, r1={r1}, r2={r2}");
+        return 1;
+    }
+
+    var_names.push("x"); var_regs.push(r0);
+    var_names.push("y"); var_regs.push(r1);
+
+    let rx = ra_lookup(var_names, var_regs, "x");
+    if rx != 0 {
+        print(f"FAIL regalloc: x expected r0, got r{rx}");
+        return 1;
+    }
+    let ry = ra_lookup(var_names, var_regs, "y");
+    if ry != 1 {
+        print(f"FAIL regalloc: y expected r1, got r{ry}");
+        return 1;
+    }
+    let rz = ra_lookup(var_names, var_regs, "z");
+    if rz != -1 {
+        print(f"FAIL regalloc: z expected -1, got {rz}");
+        return 1;
+    }
+    print("  register_allocator: OK");
+    0
+}
+
+fn test_multi_block_asm() -> Int {
+    let mut tags = List.new();
+    let mut ivals = List.new();
+    let mut svals = List.new();
+    let mut labels = List.new();
+    let mut block_starts = List.new();
+    let mut block_counts = List.new();
+
+    // entry block
+    labels.push("entry");
+    block_starts.push(0);
+    tags.push(0); ivals.push(0); svals.push("");        // LoadImm 0
+    tags.push(2); ivals.push(0); svals.push("i");       // StoreVar i
+    block_counts.push(2);
+
+    // loop block
+    labels.push("loop");
+    block_starts.push(2);
+    tags.push(1); ivals.push(0); svals.push("i");       // LoadVar i
+    tags.push(0); ivals.push(10); svals.push("");       // LoadImm 10
+    tags.push(8); ivals.push(0); svals.push("");        // CmpLt
+    tags.push(10); ivals.push(3); svals.push("");       // JumpIfFalse 3
+    block_counts.push(4);
+
+    // body block
+    labels.push("body");
+    block_starts.push(6);
+    tags.push(1); ivals.push(0); svals.push("i");       // LoadVar i
+    tags.push(0); ivals.push(1); svals.push("");        // LoadImm 1
+    tags.push(3); ivals.push(0); svals.push("");        // Add
+    tags.push(2); ivals.push(0); svals.push("i");       // StoreVar i
+    tags.push(9); ivals.push(1); svals.push("");        // Jump 1
+    block_counts.push(5);
+
+    // exit block
+    labels.push("exit");
+    block_starts.push(11);
+    tags.push(1); ivals.push(0); svals.push("i");       // LoadVar i
+    tags.push(12); ivals.push(0); svals.push("");       // Ret
+    block_counts.push(2);
+
+    let asm = emit_asm(labels, block_starts, block_counts, tags, ivals, svals);
+    if !asm.contains("entry:") {
+        print("FAIL multi: missing entry");
+        return 1;
+    }
+    if !asm.contains("loop:") {
+        print("FAIL multi: missing loop");
+        return 1;
+    }
+    if !asm.contains("exit:") {
+        print("FAIL multi: missing exit");
+        return 1;
+    }
+    print("  multi_block_asm: OK");
+    0
+}
+
+fn main() {
+    let mut failures = 0;
+    failures = failures + test_basic_emit();
+    failures = failures + test_expression_codegen();
+    failures = failures + test_control_flow_codegen();
+    failures = failures + test_function_call_codegen();
+    failures = failures + test_register_allocator();
+    failures = failures + test_multi_block_asm();
+
+    if failures == 0 {
+        print("All codegen pattern tests passed");
+    }
+    assert(failures == 0);
+}

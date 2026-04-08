@@ -1,0 +1,37 @@
+// @test: verify-fail
+// @level: L1
+// @tags: proofs, verification, errors, invariant
+// @timeout: 5000
+
+/// Tests that loop invariant violations are detected.
+
+// Loop invariant is violated — i could exceed n
+fn bad_loop(n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i <= n
+        invariant i <= n  // violated when i == n + 1 at check
+    {
+        total = total + i;
+        i = i + 1;
+    }
+    total
+}
+
+// Decreases clause violated — not strictly decreasing
+fn non_terminating(n: Int) -> Int {
+    let mut x = n;
+    while x > 0
+        decreases x
+    {
+        // Bug: x never decreases when x == 1
+        if x > 1 {
+            x = x - 1;
+        }
+    }
+    x
+}
+
+fn main() {
+    print("Invariant violation error tests");
+}

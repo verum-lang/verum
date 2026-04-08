@@ -1,0 +1,18 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, multiple-mut, negative-test
+
+/// Test that multiple mutable references cause compile-time error.
+/// Only one mutable reference allowed at a time.
+/// Verum detects this at COMPILE-TIME via borrow checking.
+/// Spec: 04-memory-model.md#aliasing-rules
+
+fn main() {
+    let mut value = 42;
+
+    let ref1 = &mut value;  // First mutable reference - acquires exclusive epoch capability
+    let ref2 = &mut value;  // Second mutable reference - CBGR epoch violation at runtime
+    *ref1 = 100;  // PANIC: epoch violation detected when using ref1
+}

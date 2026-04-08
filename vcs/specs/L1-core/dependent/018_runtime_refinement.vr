@@ -1,0 +1,107 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: dependent-types, runtime, refinement-check
+
+/// Runtime refinement checking -- when refinement types cannot be
+/// verified statically, runtime checks are inserted. Functions
+/// that construct refined types from unrefined inputs.
+
+type Positive is Int{> 0};
+type Natural is Int{>= 0};
+type Percentage is Int{>= 0, <= 100};
+type NonEmpty is Text{len(it) > 0};
+
+// Runtime check via Maybe
+fn try_positive(x: Int) -> Maybe<Positive> {
+    if x > 0 { Some(x) } else { None }
+}
+
+fn try_percentage(x: Int) -> Maybe<Percentage> {
+    if x >= 0 && x <= 100 { Some(x) } else { None }
+}
+
+fn try_nonempty(s: Text) -> Maybe<NonEmpty> {
+    if s.len() > 0 { Some(s) } else { None }
+}
+
+// Runtime check via panic
+fn require_positive(x: Int) -> Positive {
+    if x > 0 { x }
+    else { panic(f"expected positive, got {x}") }
+}
+
+// Runtime check via Result
+type RefinementError is {
+    expected: Text,
+    actual: Text,
+};
+
+fn validate_percentage(x: Int) -> Result<Percentage, RefinementError> {
+    if x >= 0 && x <= 100 {
+        Ok(x)
+    } else {
+        Err(RefinementError {
+            expected: "0..100",
+            actual: f"{x}",
+        })
+    }
+}
+
+// Parsing + validation combined
+fn parse_positive(s: Text) -> Maybe<Positive> {
+    match s.parse_int() {
+        Ok(n) if n > 0 => Some(n),
+        _ => None,
+    }
+}
+
+// Bulk validation: filter to only valid elements
+fn filter_positives(xs: List<Int>) -> List<Positive> {
+    let mut result: List<Positive> = [];
+    for x in xs {
+        if x > 0 {
+            result.push(x);
+        }
+    }
+    result
+}
+
+// Runtime assertion that narrows type
+fn assert_positive(x: Int, msg: Text) -> Positive {
+    assert(x > 0, msg);
+    x  // After assert, x is known > 0
+}
+
+fn main() {
+    // Maybe-based validation
+    assert(try_positive(5) == Some(5));
+    assert(try_positive(-1) == None);
+    assert(try_percentage(50) == Some(50));
+    assert(try_percentage(200) == None);
+    assert(try_nonempty("hi") == Some("hi"));
+    assert(try_nonempty("") == None);
+
+    // Panic-based validation
+    let p = require_positive(42);
+    assert(p == 42);
+
+    // Result-based validation
+    match validate_percentage(75) {
+        Ok(pct) => assert(pct == 75),
+        Err(_) => panic("should be valid"),
+    }
+    match validate_percentage(-5) {
+        Ok(_) => panic("should be invalid"),
+        Err(e) => assert(e.expected == "0..100"),
+    }
+
+    // Parsing
+    assert(parse_positive("42") == Some(42));
+    assert(parse_positive("-1") == None);
+    assert(parse_positive("abc") == None);
+
+    // Filtering
+    let filtered = filter_positives([-2, -1, 0, 1, 2, 3]);
+    assert(filtered.len() == 3);
+    assert(filtered[0] == 1);
+}

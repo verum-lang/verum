@@ -1,0 +1,145 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L1
+// @tags: types, subtyping, protocols
+
+/// Test for protocol-based subtyping.
+/// Types implementing a protocol are subtypes of that protocol.
+
+// Basic protocol
+type Printable is protocol {
+    fn to_string(&self) -> Text;
+}
+
+// Protocol with multiple methods
+type Comparable is protocol {
+    fn compare(&self, other: &Self) -> Ordering;
+    fn equals(&self, other: &Self) -> Bool;
+}
+
+// Protocol inheritance (sub-protocol)
+type Ordered is protocol extends Comparable  {
+    fn less_than(&self, other: &Self) -> Bool;
+    fn greater_than(&self, other: &Self) -> Bool;
+}
+
+// Implementations
+type Point is {
+    x: Float,
+    y: Float,
+};
+
+implement Printable for Point {
+    fn to_string(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+implement Printable for Int {
+    fn to_string(&self) -> Text {
+        f"{self}"
+    }
+}
+
+implement Printable for Text {
+    fn to_string(&self) -> Text {
+        self.clone()
+    }
+}
+
+implement Comparable for Int {
+    fn compare(&self, other: &Int) -> Ordering {
+        if *self < *other { Ordering.Less }
+        else if *self > *other { Ordering.Greater }
+        else { Ordering.Equal }
+    }
+
+    fn equals(&self, other: &Int) -> Bool {
+        *self == *other
+    }
+}
+
+implement Ordered for Int {
+    fn less_than(&self, other: &Int) -> Bool {
+        *self < *other
+    }
+
+    fn greater_than(&self, other: &Int) -> Bool {
+        *self > *other
+    }
+}
+
+fn main() {
+    // Protocol as type: concrete types are subtypes
+    fn print_it(p: &Printable) {
+        print(p.to_string());
+    }
+
+    let point = Point { x: 1.0, y: 2.0 };
+    let number: Int = 42;
+    let text: Text = "hello";
+
+    print_it(&point);   // Point <: Printable
+    print_it(&number);  // Int <: Printable
+    print_it(&text);    // Text <: Printable
+
+    // Protocol inheritance: Ordered <: Comparable
+    fn compare_items(a: &Comparable, b: &Comparable) -> Bool {
+        a.equals(b)
+    }
+
+    fn order_items(a: &Ordered, b: &Ordered) -> Bool {
+        a.less_than(b)
+    }
+
+    let x: Int = 10;
+    let y: Int = 20;
+
+    // Int implements Ordered, which extends Comparable
+    compare_items(&x, &y);  // Works: Int <: Comparable (via Ordered)
+    order_items(&x, &y);    // Works: Int <: Ordered
+
+    // Collection of protocol objects
+    let printables: List<&Printable> = [
+        &point as &Printable,
+        &number as &Printable,
+        &text as &Printable,
+    ];
+
+    for p in printables {
+        print(p.to_string());
+    }
+
+    // Generic function with protocol bound
+    fn stringify<T: Printable>(items: &List<T>) -> List<Text> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
+    let points: List<Point> = [
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 1.0, y: 1.0 },
+    ];
+    let strings: List<Text> = stringify(&points);
+
+    // Protocol bound implies subtyping relationship
+    fn max<T: Ordered>(a: T, b: T) -> T {
+        if a.greater_than(&b) { a } else { b }
+    }
+
+    let maximum: Int = max(10, 20);  // Int <: Ordered
+
+    // Multiple protocol bounds
+    fn print_max<T: Printable + Ordered>(a: T, b: T) {
+        let m = if a.greater_than(&b) { &a } else { &b };
+        print(f"Max: {m.to_string()}");
+    }
+
+    print_max(5, 10);  // Int <: Printable + Ordered
+
+    // Assertions
+    assert(point.to_string() == "(1, 2)");
+    assert(number.to_string() == "42");
+    assert(x.less_than(&y) == true);
+    assert(maximum == 20);
+    assert(strings.len() == 2);
+}

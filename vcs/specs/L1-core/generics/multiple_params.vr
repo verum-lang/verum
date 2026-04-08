@@ -1,0 +1,236 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, multiple-parameters, swap, polymorphism
+//
+// Tests generic functions and types with multiple type parameters.
+
+// =============================================================================
+// SECTION 1: Functions with Two Type Parameters
+// =============================================================================
+
+/// Swap the elements of a pair
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
+    let (a, b) = pair;
+    (b, a)
+}
+
+/// Create a pair from two separate values
+fn make_pair<A, B>(a: A, b: B) -> (A, B) {
+    (a, b)
+}
+
+/// Apply a function to transform a pair
+fn map_fst<A, B, C>(pair: (A, B), f: fn(A) -> C) -> (C, B) {
+    let (a, b) = pair;
+    (f(a), b)
+}
+
+fn map_snd<A, B, C>(pair: (A, B), f: fn(B) -> C) -> (A, C) {
+    let (a, b) = pair;
+    (a, f(b))
+}
+
+// =============================================================================
+// SECTION 2: Functions with Three Type Parameters
+// =============================================================================
+
+/// Apply a binary function to two values
+fn apply2<A, B, C>(f: fn(A, B) -> C, a: A, b: B) -> C {
+    f(a, b)
+}
+
+/// Compose two functions
+fn compose<A, B, C>(f: fn(A) -> B, g: fn(B) -> C) -> fn(A) -> C {
+    |a| g(f(a))
+}
+
+/// Flip the arguments of a binary function
+fn flip<A, B, C>(f: fn(A, B) -> C) -> fn(B, A) -> C {
+    |b, a| f(a, b)
+}
+
+// =============================================================================
+// SECTION 3: Generic Structs with Multiple Parameters
+// =============================================================================
+
+/// Either type - left or right value
+type Either<L, R> is {
+    left: Maybe<L>,
+    right: Maybe<R>,
+};
+
+implement<L, R> Either<L, R> {
+    fn make_left(value: L) -> Either<L, R> {
+        Either { left: Some(value), right: None }
+    }
+
+    fn make_right(value: R) -> Either<L, R> {
+        Either { left: None, right: Some(value) }
+    }
+
+    fn is_left(&self) -> Bool {
+        match self.left {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    fn is_right(&self) -> Bool {
+        match self.right {
+            Some(_) => true,
+            None => false,
+        }
+    }
+}
+
+/// Triple - three different types
+type Triple<A, B, C> is {
+    first: A,
+    second: B,
+    third: C,
+};
+
+implement<A, B, C> Triple<A, B, C> {
+    fn new(first: A, second: B, third: C) -> Triple<A, B, C> {
+        Triple { first, second, third }
+    }
+
+    fn into_tuple(self) -> (A, B, C) {
+        (self.first, self.second, self.third)
+    }
+}
+
+// =============================================================================
+// SECTION 4: Generic Enums with Multiple Parameters
+// =============================================================================
+
+/// Result type - success or error
+type MyResult<T, E> is
+    | MyOk(T)
+    | MyErr(E);
+
+implement<T, E> MyResult<T, E> {
+    fn is_ok(&self) -> Bool {
+        match self {
+            MyOk(_) => true,
+            MyErr(_) => false,
+        }
+    }
+
+    fn unwrap_ok(self) -> T {
+        match self {
+            MyOk(t) => t,
+            MyErr(_) => panic("called unwrap_ok on MyErr"),
+        }
+    }
+
+    fn map<U>(self, f: fn(T) -> U) -> MyResult<U, E> {
+        match self {
+            MyOk(t) => MyOk(f(t)),
+            MyErr(e) => MyErr(e),
+        }
+    }
+}
+
+// =============================================================================
+// SECTION 5: Complex Multi-Parameter Functions
+// =============================================================================
+
+/// Prepend an element to a list (helper to avoid spread-in-expression)
+fn cons<T>(head: T, tail: List<T>) -> List<T> {
+    let mut result: List<T> = [];
+    result.push(head);
+    let mut t = tail;
+    result.append(&mut t);
+    result
+}
+
+/// Zip two lists together
+@allow(unbounded_recursion)
+fn zip<A, B>(list_a: List<A>, list_b: List<B>) -> List<(A, B)> {
+    match (list_a, list_b) {
+        ([x, ..xs], [y, ..ys]) => cons((x, y), zip(xs, ys)),
+        _ => [],
+    }
+}
+
+/// Map over both elements of a pair
+fn bimap<A, B, C, D>(pair: (A, B), f: fn(A) -> C, g: fn(B) -> D) -> (C, D) {
+    let (a, b) = pair;
+    (f(a), g(b))
+}
+
+// =============================================================================
+// SECTION 6: Main Test Cases
+// =============================================================================
+
+fn main() {
+    // Test swap
+    let (t, i) = swap((42, "hello"));
+    assert(t == "hello" && i == 42);
+
+    // Test make_pair
+    let pair = make_pair(42, "answer");
+    assert(pair == (42, "answer"));
+
+    // Test map_fst and map_snd
+    let (n2, s) = map_fst((21, "hello"), |x| x * 2);
+    assert(n2 == 42 && s == "hello");
+
+    let (n3, n4) = map_snd((42, 21), |x| x * 2);
+    assert(n3 == 42 && n4 == 42);
+
+    // Test apply2
+    let sum = apply2(|a, b| a + b, 10, 20);
+    assert(sum == 30);
+
+    let concat = apply2(|a, b| a + b, "Hello, ", "World!");
+    assert(concat == "Hello, World!");
+
+    // Test compose
+    let double = |x: Int| x * 2;
+    let add_one = |x: Int| x + 1;
+    let double_then_add = compose(double, add_one);
+    assert(double_then_add(5) == 11);
+
+    // Test flip
+    let subtract = |a: Int, b: Int| a - b;
+    let flipped_subtract = flip(subtract);
+    assert(subtract(10, 3) == 7);
+    assert(flipped_subtract(3, 10) == 7);
+
+    // Test Either
+    let left_val: Either<Int, Text> = Either.make_left(42);
+    let right_val: Either<Int, Text> = Either.make_right("error");
+    assert(left_val.is_left());
+    assert(!left_val.is_right());
+    assert(right_val.is_right());
+    assert(!right_val.is_left());
+
+    // Test Triple
+    let triple = Triple.new(1, "two", true);
+    assert(triple.first == 1);
+    assert(triple.second == "two");
+    assert(triple.third == true);
+
+    let tup = triple.into_tuple();
+    assert(tup == (1, "two", true));
+
+    // Test MyResult
+    let ok_result: MyResult<Int, Text> = MyOk(42);
+    let err_result: MyResult<Int, Text> = MyErr("failed");
+    assert(ok_result.is_ok());
+    assert(!err_result.is_ok());
+    assert(MyOk(21).map(|x| x * 2).unwrap_ok() == 42);
+
+    // Test zip
+    let zipped = zip([1, 2, 3], ["a", "b", "c"]);
+    assert(zipped == [(1, "a"), (2, "b"), (3, "c")]);
+    assert(zip([], [1, 2, 3]).len() == 0);
+
+    // Test bimap
+    let (s2, n5) = bimap((42, "hello"), |n| f"number: {n}", |s| s.len());
+    assert(s2 == "number: 42");
+    assert(n5 == 5);
+}

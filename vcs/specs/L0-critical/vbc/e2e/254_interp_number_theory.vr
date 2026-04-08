@@ -1,0 +1,351 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, number-theory, modular-arithmetic
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: number theory algorithms (mod exp, totient, mod inverse, CRT)
+
+// =============================================================================
+// Absolute value
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// =============================================================================
+// GCD (Euclidean)
+// =============================================================================
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 {
+        let tmp = y;
+        y = x % y;
+        x = tmp;
+    }
+    x
+}
+
+// =============================================================================
+// Extended GCD: returns (g, x, y) such that a*x + b*y = g
+// =============================================================================
+
+type ExtGcd is { g: Int, x: Int, y: Int };
+
+@allow(unbounded_recursion)
+fn ext_gcd(a: Int, b: Int) -> ExtGcd {
+    if b == 0 {
+        ExtGcd { g: a, x: 1, y: 0 }
+    } else {
+        let r = ext_gcd(b, a % b);
+        ExtGcd { g: r.g, x: r.y, y: r.x - (a / b) * r.y }
+    }
+}
+
+// =============================================================================
+// Modular exponentiation: base^exp mod m (using repeated squaring)
+// =============================================================================
+
+fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
+    if m == 1 {
+        return 0;
+    }
+    let mut result = 1;
+    let mut b = base % m;
+    let mut e = exp;
+    while e > 0 {
+        if (e & 1) == 1 {
+            result = (result * b) % m;
+        }
+        e = e >> 1;
+        b = (b * b) % m;
+    }
+    result
+}
+
+// =============================================================================
+// Euler's totient function phi(n)
+// Number of integers in [1..n] coprime to n
+// =============================================================================
+
+fn euler_totient(n: Int) -> Int {
+    if n <= 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    let mut result = n;
+    let mut p = 2;
+    let mut m = n;
+    while p * p <= m {
+        if m % p == 0 {
+            // Remove all factors of p
+            while m % p == 0 {
+                m = m / p;
+            }
+            // result = result * (1 - 1/p) = result - result/p
+            result = result - result / p;
+        }
+        p = p + 1;
+    }
+    // If m > 1, then m is a prime factor
+    if m > 1 {
+        result = result - result / m;
+    }
+    result
+}
+
+// =============================================================================
+// Modular inverse: a^(-1) mod m (exists iff gcd(a,m) = 1)
+// Returns the inverse, or -1 if it doesn't exist
+// =============================================================================
+
+fn mod_inverse(a: Int, m: Int) -> Int {
+    let r = ext_gcd(a, m);
+    if r.g != 1 {
+        return -1; // No inverse
+    }
+    // Make sure result is positive
+    let mut inv = r.x % m;
+    if inv < 0 {
+        inv = inv + m;
+    }
+    inv
+}
+
+// =============================================================================
+// Chinese Remainder Theorem for 2 congruences
+// x ≡ r1 (mod m1), x ≡ r2 (mod m2)
+// Requires gcd(m1, m2) = 1
+// Returns x in [0, m1*m2)
+// =============================================================================
+
+fn crt2(r1: Int, m1: Int, r2: Int, m2: Int) -> Int {
+    // x = r1 + m1 * ((r2 - r1) * m1_inv mod m2)
+    let m1_inv = mod_inverse(m1, m2);
+    let mut diff = (r2 - r1) % m2;
+    if diff < 0 {
+        diff = diff + m2;
+    }
+    let mut x = r1 + m1 * ((diff * m1_inv) % m2);
+    let product = m1 * m2;
+    x = x % product;
+    if x < 0 {
+        x = x + product;
+    }
+    x
+}
+
+// =============================================================================
+// Tests — Modular exponentiation
+// =============================================================================
+
+fn test_mod_pow_basic() {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    assert_eq(mod_pow(2, 10, 1000), 24);
+    // 3^4 mod 5 = 81 mod 5 = 1
+    assert_eq(mod_pow(3, 4, 5), 1);
+    // 2^0 mod 7 = 1
+    assert_eq(mod_pow(2, 0, 7), 1);
+    // Any base mod 1 = 0
+    assert_eq(mod_pow(5, 3, 1), 0);
+    // 7^2 mod 13 = 49 mod 13 = 10
+    assert_eq(mod_pow(7, 2, 13), 10);
+}
+
+fn test_mod_pow_large() {
+    // 2^20 = 1048576, mod 1000 = 576
+    assert_eq(mod_pow(2, 20, 1000), 576);
+    // Fermat's little theorem: a^(p-1) ≡ 1 (mod p) for prime p
+    assert_eq(mod_pow(2, 12, 13), 1);
+    assert_eq(mod_pow(3, 6, 7), 1);
+    assert_eq(mod_pow(5, 10, 11), 1);
+    assert_eq(mod_pow(7, 16, 17), 1);
+}
+
+fn test_mod_pow_identity() {
+    // a^1 mod m = a mod m
+    assert_eq(mod_pow(10, 1, 7), 3);
+    assert_eq(mod_pow(15, 1, 4), 3);
+}
+
+// =============================================================================
+// Tests — Euler's totient
+// =============================================================================
+
+fn test_totient_primes() {
+    // For prime p, phi(p) = p - 1
+    assert_eq(euler_totient(2), 1);
+    assert_eq(euler_totient(3), 2);
+    assert_eq(euler_totient(5), 4);
+    assert_eq(euler_totient(7), 6);
+    assert_eq(euler_totient(11), 10);
+    assert_eq(euler_totient(13), 12);
+    assert_eq(euler_totient(17), 16);
+}
+
+fn test_totient_prime_powers() {
+    // phi(p^k) = p^k - p^(k-1) = p^(k-1) * (p-1)
+    // phi(4) = phi(2^2) = 2
+    assert_eq(euler_totient(4), 2);
+    // phi(8) = phi(2^3) = 4
+    assert_eq(euler_totient(8), 4);
+    // phi(9) = phi(3^2) = 6
+    assert_eq(euler_totient(9), 6);
+    // phi(27) = phi(3^3) = 18
+    assert_eq(euler_totient(27), 18);
+}
+
+fn test_totient_composite() {
+    // phi(6) = phi(2*3) = 1*2 = 2
+    assert_eq(euler_totient(6), 2);
+    // phi(10) = phi(2*5) = 1*4 = 4
+    assert_eq(euler_totient(10), 4);
+    // phi(12) = phi(4*3) = 12*(1-1/2)*(1-1/3) = 12*1/2*2/3 = 4
+    assert_eq(euler_totient(12), 4);
+    // phi(15) = phi(3*5) = 15*(1-1/3)*(1-1/5) = 15*2/3*4/5 = 8
+    assert_eq(euler_totient(15), 8);
+    // phi(20) = phi(4*5) = 20*(1-1/2)*(1-1/5) = 20*1/2*4/5 = 8
+    assert_eq(euler_totient(20), 8);
+    // phi(1) = 1
+    assert_eq(euler_totient(1), 1);
+}
+
+fn test_totient_euler_theorem() {
+    // Euler's theorem: a^phi(m) ≡ 1 (mod m) when gcd(a,m) = 1
+    // Test with m=12, phi(12)=4, a=5 (gcd(5,12)=1)
+    assert_eq(mod_pow(5, euler_totient(12), 12), 1);
+    // m=15, phi(15)=8, a=7
+    assert_eq(mod_pow(7, euler_totient(15), 15), 1);
+    // m=20, phi(20)=8, a=3
+    assert_eq(mod_pow(3, euler_totient(20), 20), 1);
+}
+
+// =============================================================================
+// Tests — Modular inverse
+// =============================================================================
+
+fn test_mod_inverse_basic() {
+    // 3 * x ≡ 1 (mod 7) => x = 5 (since 3*5=15, 15%7=1)
+    assert_eq(mod_inverse(3, 7), 5);
+    // 2 * x ≡ 1 (mod 5) => x = 3 (since 2*3=6, 6%5=1)
+    assert_eq(mod_inverse(2, 5), 3);
+    // Verify: a * a_inv ≡ 1 (mod m)
+    let inv = mod_inverse(3, 11);
+    assert_eq((3 * inv) % 11, 1);
+}
+
+fn test_mod_inverse_no_inverse() {
+    // gcd(2, 4) = 2 ≠ 1, so no inverse
+    assert_eq(mod_inverse(2, 4), -1);
+    // gcd(6, 9) = 3 ≠ 1
+    assert_eq(mod_inverse(6, 9), -1);
+}
+
+fn test_mod_inverse_one() {
+    // 1 is always its own inverse
+    assert_eq(mod_inverse(1, 7), 1);
+    assert_eq(mod_inverse(1, 13), 1);
+}
+
+fn test_mod_inverse_verify() {
+    // For all a coprime to m, verify a * inv(a) ≡ 1 (mod m)
+    let m = 11;
+    let mut a = 1;
+    while a < m {
+        let inv = mod_inverse(a, m);
+        assert(inv >= 0);
+        assert_eq((a * inv) % m, 1);
+        a = a + 1;
+    }
+}
+
+// =============================================================================
+// Tests — Chinese Remainder Theorem
+// =============================================================================
+
+fn test_crt_basic() {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5) => x = 8 (mod 15)
+    let x = crt2(2, 3, 3, 5);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 5, 3);
+    assert_eq(x, 8);
+}
+
+fn test_crt_another() {
+    // x ≡ 1 (mod 3), x ≡ 2 (mod 7) => x = ? (mod 21)
+    let x = crt2(1, 3, 2, 7);
+    assert_eq(x % 3, 1);
+    assert_eq(x % 7, 2);
+    // x should be in [0, 21)
+    assert(x >= 0);
+    assert(x < 21);
+    // 16 % 3 = 1, 16 % 7 = 2, so x = 16
+    assert_eq(x, 16);
+}
+
+fn test_crt_zero() {
+    // x ≡ 0 (mod 3), x ≡ 0 (mod 5) => x = 0 (mod 15)
+    let x = crt2(0, 3, 0, 5);
+    assert_eq(x, 0);
+}
+
+fn test_crt_coprime_moduli() {
+    // x ≡ 3 (mod 4), x ≡ 5 (mod 7) => x = ? (mod 28)
+    let x = crt2(3, 4, 5, 7);
+    assert_eq(x % 4, 3);
+    assert_eq(x % 7, 5);
+    assert(x >= 0);
+    assert(x < 28);
+    // 19 % 4 = 3, 19 % 7 = 5
+    assert_eq(x, 19);
+}
+
+fn test_crt_larger() {
+    // x ≡ 1 (mod 5), x ≡ 3 (mod 11) => x = ? (mod 55)
+    let x = crt2(1, 5, 3, 11);
+    assert_eq(x % 5, 1);
+    assert_eq(x % 11, 3);
+    assert(x >= 0);
+    assert(x < 55);
+}
+
+fn test_crt_verify_uniqueness() {
+    // CRT guarantees unique solution mod m1*m2
+    // x ≡ 2 (mod 3), x ≡ 1 (mod 4)
+    let x = crt2(2, 3, 1, 4);
+    assert_eq(x % 3, 2);
+    assert_eq(x % 4, 1);
+    // Should be 5: 5%3=2, 5%4=1
+    assert_eq(x, 5);
+    // Adding m1*m2=12 also satisfies: 17%3=2, 17%4=1
+    assert_eq((x + 12) % 3, 2);
+    assert_eq((x + 12) % 4, 1);
+}
+
+fn main() -> Int {
+    test_mod_pow_basic();
+    test_mod_pow_large();
+    test_mod_pow_identity();
+    test_totient_primes();
+    test_totient_prime_powers();
+    test_totient_composite();
+    test_totient_euler_theorem();
+    test_mod_inverse_basic();
+    test_mod_inverse_no_inverse();
+    test_mod_inverse_one();
+    test_mod_inverse_verify();
+    test_crt_basic();
+    test_crt_another();
+    test_crt_zero();
+    test_crt_coprime_moduli();
+    test_crt_larger();
+    test_crt_verify_uniqueness();
+    print("[OK] 254_interp_number_theory");
+    0
+}

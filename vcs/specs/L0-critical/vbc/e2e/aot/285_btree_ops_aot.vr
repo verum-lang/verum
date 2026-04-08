@@ -1,0 +1,319 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, btree, search, sorted-node
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for simplified B-tree operations: sorted node search, insert, split
+
+// A B-tree node with max 5 keys (order 6 / min-degree 3)
+// keys: sorted values, num_keys: current count
+type BNode is {
+    k0: Int, k1: Int, k2: Int, k3: Int, k4: Int,
+    num_keys: Int
+};
+
+fn bnode_new() -> BNode {
+    BNode { k0: 0, k1: 0, k2: 0, k3: 0, k4: 0, num_keys: 0 }
+}
+
+fn bnode_get(n: BNode, i: Int) -> Int {
+    if i == 0 { n.k0 } else if i == 1 { n.k1 }
+    else if i == 2 { n.k2 } else if i == 3 { n.k3 }
+    else { n.k4 }
+}
+
+fn bnode_set(n: BNode, i: Int, v: Int) -> BNode {
+    BNode {
+        k0: if i == 0 { v } else { n.k0 }, k1: if i == 1 { v } else { n.k1 },
+        k2: if i == 2 { v } else { n.k2 }, k3: if i == 3 { v } else { n.k3 },
+        k4: if i == 4 { v } else { n.k4 },
+        num_keys: n.num_keys
+    }
+}
+
+fn bnode_set_len(n: BNode, len: Int) -> BNode {
+    BNode { k0: n.k0, k1: n.k1, k2: n.k2, k3: n.k3, k4: n.k4, num_keys: len }
+}
+
+// Binary search in a sorted node: returns index of key, or -1 if not found
+fn bnode_search(n: BNode, key: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n.num_keys - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let val = bnode_get(n, mid);
+        if val == key { return mid; }
+        if val < key { lo = mid + 1; } else { hi = mid - 1; }
+    }
+    -1
+}
+
+// Find insertion position (first index where key <= node[i])
+fn bnode_find_pos(n: BNode, key: Int) -> Int {
+    let mut pos = 0;
+    while pos < n.num_keys && bnode_get(n, pos) < key {
+        pos = pos + 1;
+    }
+    pos
+}
+
+// Insert key into sorted node (returns updated node)
+// Assumes node has capacity (num_keys < 5)
+fn bnode_insert(n: BNode, key: Int) -> BNode {
+    if n.num_keys >= 5 { return n; }
+    // Check for duplicates
+    if bnode_search(n, key) >= 0 { return n; }
+
+    let pos = bnode_find_pos(n, key);
+
+    // Shift right
+    let mut result = n;
+    let mut j = n.num_keys;
+    while j > pos {
+        result = bnode_set(result, j, bnode_get(result, j - 1));
+        j = j - 1;
+    }
+    result = bnode_set(result, pos, key);
+    bnode_set_len(result, n.num_keys + 1)
+}
+
+// Delete key from sorted node
+fn bnode_delete(n: BNode, key: Int) -> BNode {
+    let idx = bnode_search(n, key);
+    if idx == -1 { return n; }
+
+    // Shift left
+    let mut result = n;
+    let mut j = idx;
+    while j < n.num_keys - 1 {
+        result = bnode_set(result, j, bnode_get(result, j + 1));
+        j = j + 1;
+    }
+    bnode_set_len(result, n.num_keys - 1)
+}
+
+// Split a full node (5 keys) into two: left gets keys[0..1], right gets keys[3..4]
+// Median (keys[2]) is returned separately
+type SplitResult is { left: BNode, right: BNode, median: Int };
+
+fn bnode_split(n: BNode) -> SplitResult {
+    // Left: first 2 keys
+    let mut left = bnode_new();
+    left = bnode_set(left, 0, bnode_get(n, 0));
+    left = bnode_set(left, 1, bnode_get(n, 1));
+    left = bnode_set_len(left, 2);
+
+    // Median
+    let med = bnode_get(n, 2);
+
+    // Right: last 2 keys
+    let mut right = bnode_new();
+    right = bnode_set(right, 0, bnode_get(n, 3));
+    right = bnode_set(right, 1, bnode_get(n, 4));
+    right = bnode_set_len(right, 2);
+
+    SplitResult { left: left, right: right, median: med }
+}
+
+// Merge two nodes with a separator key
+fn bnode_merge(left: BNode, sep: Int, right: BNode) -> BNode {
+    let mut result = bnode_new();
+    let mut i = 0;
+    while i < left.num_keys {
+        result = bnode_set(result, i, bnode_get(left, i));
+        i = i + 1;
+    }
+    result = bnode_set(result, left.num_keys, sep);
+    let mut j = 0;
+    while j < right.num_keys {
+        result = bnode_set(result, left.num_keys + 1 + j, bnode_get(right, j));
+        j = j + 1;
+    }
+    bnode_set_len(result, left.num_keys + 1 + right.num_keys)
+}
+
+// Check if node is sorted
+fn bnode_is_sorted(n: BNode) -> Bool {
+    let mut i = 1;
+    while i < n.num_keys {
+        if bnode_get(n, i) <= bnode_get(n, i - 1) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Min and max of a node
+fn bnode_min(n: BNode) -> Int { bnode_get(n, 0) }
+fn bnode_max(n: BNode) -> Int { bnode_get(n, n.num_keys - 1) }
+
+// === Simulated 2-level B-tree with 3 leaf nodes ===
+type BTree is { root: BNode, leaf0: BNode, leaf1: BNode, leaf2: BNode, num_leaves: Int };
+
+fn btree_new() -> BTree {
+    BTree { root: bnode_new(), leaf0: bnode_new(), leaf1: bnode_new(), leaf2: bnode_new(), num_leaves: 1 }
+}
+
+// Search in 2-level B-tree
+fn btree_search(t: BTree, key: Int) -> Bool {
+    if t.num_leaves == 1 {
+        return bnode_search(t.leaf0, key) >= 0;
+    }
+    // Find which leaf to search
+    let mut leaf_idx = 0;
+    let mut i = 0;
+    while i < t.root.num_keys {
+        if key > bnode_get(t.root, i) { leaf_idx = i + 1; }
+        i = i + 1;
+    }
+    if leaf_idx == 0 { bnode_search(t.leaf0, key) >= 0 }
+    else if leaf_idx == 1 { bnode_search(t.leaf1, key) >= 0 }
+    else { bnode_search(t.leaf2, key) >= 0 }
+}
+
+fn test_bnode_search() {
+    let mut n = bnode_new();
+    n = bnode_set(n, 0, 10);
+    n = bnode_set(n, 1, 20);
+    n = bnode_set(n, 2, 30);
+    n = bnode_set(n, 3, 40);
+    n = bnode_set(n, 4, 50);
+    n = bnode_set_len(n, 5);
+
+    assert_eq(bnode_search(n, 10), 0);
+    assert_eq(bnode_search(n, 30), 2);
+    assert_eq(bnode_search(n, 50), 4);
+    assert_eq(bnode_search(n, 25), -1);
+    assert_eq(bnode_search(n, 5), -1);
+    assert_eq(bnode_search(n, 55), -1);
+}
+
+fn test_bnode_insert() {
+    let mut n = bnode_new();
+    n = bnode_insert(n, 30);
+    n = bnode_insert(n, 10);
+    n = bnode_insert(n, 50);
+    n = bnode_insert(n, 20);
+    n = bnode_insert(n, 40);
+
+    assert_eq(n.num_keys, 5);
+    assert_eq(bnode_is_sorted(n), true);
+    assert_eq(bnode_get(n, 0), 10);
+    assert_eq(bnode_get(n, 1), 20);
+    assert_eq(bnode_get(n, 2), 30);
+    assert_eq(bnode_get(n, 3), 40);
+    assert_eq(bnode_get(n, 4), 50);
+}
+
+fn test_bnode_insert_duplicate() {
+    let mut n = bnode_new();
+    n = bnode_insert(n, 10);
+    n = bnode_insert(n, 20);
+    n = bnode_insert(n, 10);  // duplicate
+    assert_eq(n.num_keys, 2);
+}
+
+fn test_bnode_delete() {
+    let mut n = bnode_new();
+    n = bnode_insert(n, 10);
+    n = bnode_insert(n, 20);
+    n = bnode_insert(n, 30);
+    n = bnode_insert(n, 40);
+    assert_eq(n.num_keys, 4);
+
+    n = bnode_delete(n, 20);
+    assert_eq(n.num_keys, 3);
+    assert_eq(bnode_search(n, 20), -1);
+    assert_eq(bnode_search(n, 10), 0);
+    assert_eq(bnode_search(n, 30), 1);
+    assert_eq(bnode_search(n, 40), 2);
+    assert_eq(bnode_is_sorted(n), true);
+}
+
+fn test_bnode_split() {
+    let mut n = bnode_new();
+    n = bnode_insert(n, 10);
+    n = bnode_insert(n, 20);
+    n = bnode_insert(n, 30);
+    n = bnode_insert(n, 40);
+    n = bnode_insert(n, 50);
+
+    let sp = bnode_split(n);
+    assert_eq(sp.median, 30);
+    assert_eq(sp.left.num_keys, 2);
+    assert_eq(sp.right.num_keys, 2);
+    assert_eq(bnode_get(sp.left, 0), 10);
+    assert_eq(bnode_get(sp.left, 1), 20);
+    assert_eq(bnode_get(sp.right, 0), 40);
+    assert_eq(bnode_get(sp.right, 1), 50);
+}
+
+fn test_bnode_merge() {
+    let mut left = bnode_new();
+    left = bnode_insert(left, 10);
+    left = bnode_insert(left, 20);
+
+    let mut right = bnode_new();
+    right = bnode_insert(right, 40);
+    right = bnode_insert(right, 50);
+
+    let merged = bnode_merge(left, 30, right);
+    assert_eq(merged.num_keys, 5);
+    assert_eq(bnode_is_sorted(merged), true);
+    assert_eq(bnode_get(merged, 2), 30);
+}
+
+fn test_split_then_merge() {
+    // Split and merge should reconstruct the original
+    let mut n = bnode_new();
+    n = bnode_insert(n, 5);
+    n = bnode_insert(n, 15);
+    n = bnode_insert(n, 25);
+    n = bnode_insert(n, 35);
+    n = bnode_insert(n, 45);
+
+    let sp = bnode_split(n);
+    let remerged = bnode_merge(sp.left, sp.median, sp.right);
+    assert_eq(remerged.num_keys, 5);
+    assert_eq(bnode_get(remerged, 0), 5);
+    assert_eq(bnode_get(remerged, 4), 45);
+}
+
+fn test_btree_search() {
+    // Build a 2-level B-tree manually
+    // root: [30]
+    // leaf0: [10, 20], leaf1: [40, 50]
+    let mut root = bnode_new();
+    root = bnode_insert(root, 30);
+
+    let mut leaf0 = bnode_new();
+    leaf0 = bnode_insert(leaf0, 10);
+    leaf0 = bnode_insert(leaf0, 20);
+
+    let mut leaf1 = bnode_new();
+    leaf1 = bnode_insert(leaf1, 40);
+    leaf1 = bnode_insert(leaf1, 50);
+
+    let t = BTree { root: root, leaf0: leaf0, leaf1: leaf1, leaf2: bnode_new(), num_leaves: 2 };
+
+    assert_eq(btree_search(t, 10), true);
+    assert_eq(btree_search(t, 20), true);
+    assert_eq(btree_search(t, 40), true);
+    assert_eq(btree_search(t, 50), true);
+    assert_eq(btree_search(t, 30), false);  // 30 is in root, not leaves
+    assert_eq(btree_search(t, 25), false);
+}
+
+fn main() -> Int {
+    test_bnode_search();
+    test_bnode_insert();
+    test_bnode_insert_duplicate();
+    test_bnode_delete();
+    test_bnode_split();
+    test_bnode_merge();
+    test_split_then_merge();
+    test_btree_search();
+    print("[OK] 285_btree_ops_aot");
+    0
+}

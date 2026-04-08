@@ -1,0 +1,828 @@
+// =============================================================================
+// checked_test.vr - Tests for overflow-checked arithmetic
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, checked, overflow, saturating, wrapping, core
+// @note: checked.vr uses LLVM intrinsics — typecheck-pass tests verify type signatures
+// @description: Comprehensive tests for checked, saturating, and wrapping arithmetic
+// =============================================================================
+
+mount core.math.checked.{
+    CheckedResult,
+    checked_add, checked_sub, checked_mul, checked_div, checked_neg, checked_abs,
+    checked_add_u, checked_sub_u, checked_mul_u, checked_div_u,
+    checked_add_i32, checked_mul_i32, checked_add_u32,
+    saturating_add, saturating_sub, saturating_mul, saturating_neg, saturating_abs,
+    saturating_add_u, saturating_sub_u, saturating_mul_u,
+    wrapping_add, wrapping_sub, wrapping_mul, wrapping_neg,
+    wrapping_add_u, wrapping_sub_u, wrapping_mul_u,
+    would_add_overflow, would_sub_overflow, would_mul_overflow,
+    adc, sbb,
+};
+
+// Helper to check if result is Ok
+fn is_ok<T>(result: CheckedResult<T>) -> Bool {
+    match result {
+        CheckedResult.Ok(_) => true,
+        CheckedResult.Overflow => false,
+    }
+}
+
+// Helper to unwrap Ok value (panics on Overflow)
+fn unwrap<T>(result: CheckedResult<T>) -> T {
+    match result {
+        CheckedResult.Ok(v) => v,
+        CheckedResult.Overflow => panic("Unexpected overflow"),
+    }
+}
+
+// =============================================================================
+// SECTION 1: Checked Addition (Int64)
+// =============================================================================
+
+@test
+fn test_checked_add_normal() {
+    let result = checked_add(10 as Int64, 20 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 30 as Int64);
+}
+
+@test
+fn test_checked_add_negative() {
+    let result = checked_add(-10 as Int64, 20 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 10 as Int64);
+}
+
+@test
+fn test_checked_add_zero() {
+    let result = checked_add(42 as Int64, 0 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 42 as Int64);
+}
+
+@test
+fn test_checked_add_overflow_positive() {
+    let result = checked_add(Int64.MAX, 1 as Int64);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_add_overflow_negative() {
+    let result = checked_add(Int64.MIN, -1 as Int64);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_add_near_max() {
+    let result = checked_add(Int64.MAX - 1, 1 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), Int64.MAX);
+}
+
+// =============================================================================
+// SECTION 2: Checked Subtraction (Int64)
+// =============================================================================
+
+@test
+fn test_checked_sub_normal() {
+    let result = checked_sub(30 as Int64, 10 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 20 as Int64);
+}
+
+@test
+fn test_checked_sub_negative_result() {
+    let result = checked_sub(10 as Int64, 30 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), -20 as Int64);
+}
+
+@test
+fn test_checked_sub_zero() {
+    let result = checked_sub(42 as Int64, 0 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 42 as Int64);
+}
+
+@test
+fn test_checked_sub_overflow_positive() {
+    let result = checked_sub(Int64.MIN, 1 as Int64);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_sub_overflow_negative() {
+    let result = checked_sub(Int64.MAX, -1 as Int64);
+    assert(!is_ok(result));
+}
+
+// =============================================================================
+// SECTION 3: Checked Multiplication (Int64)
+// =============================================================================
+
+@test
+fn test_checked_mul_normal() {
+    let result = checked_mul(7 as Int64, 6 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 42 as Int64);
+}
+
+@test
+fn test_checked_mul_negative() {
+    let result = checked_mul(-7 as Int64, 6 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), -42 as Int64);
+}
+
+@test
+fn test_checked_mul_zero() {
+    let result = checked_mul(Int64.MAX, 0 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 0 as Int64);
+}
+
+@test
+fn test_checked_mul_one() {
+    let result = checked_mul(Int64.MAX, 1 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), Int64.MAX);
+}
+
+@test
+fn test_checked_mul_overflow() {
+    let result = checked_mul(Int64.MAX, 2 as Int64);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_mul_overflow_negative() {
+    let result = checked_mul(Int64.MIN, -1 as Int64);
+    assert(!is_ok(result));  // -MIN overflows
+}
+
+// =============================================================================
+// SECTION 4: Checked Division (Int64)
+// =============================================================================
+
+@test
+fn test_checked_div_normal() {
+    let result = checked_div(42 as Int64, 6 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 7 as Int64);
+}
+
+@test
+fn test_checked_div_negative() {
+    let result = checked_div(-42 as Int64, 6 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), -7 as Int64);
+}
+
+@test
+fn test_checked_div_by_zero() {
+    let result = checked_div(42 as Int64, 0 as Int64);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_div_min_by_neg_one() {
+    // MIN / -1 = -MIN which overflows
+    let result = checked_div(Int64.MIN, -1 as Int64);
+    assert(!is_ok(result));
+}
+
+// =============================================================================
+// SECTION 5: Checked Negation and Absolute Value
+// =============================================================================
+
+@test
+fn test_checked_neg_normal() {
+    let result = checked_neg(42 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), -42 as Int64);
+}
+
+@test
+fn test_checked_neg_zero() {
+    let result = checked_neg(0 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 0 as Int64);
+}
+
+@test
+fn test_checked_neg_min_overflow() {
+    // -MIN overflows
+    let result = checked_neg(Int64.MIN);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_abs_positive() {
+    let result = checked_abs(42 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 42 as Int64);
+}
+
+@test
+fn test_checked_abs_negative() {
+    let result = checked_abs(-42 as Int64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 42 as Int64);
+}
+
+@test
+fn test_checked_abs_min_overflow() {
+    let result = checked_abs(Int64.MIN);
+    assert(!is_ok(result));
+}
+
+// =============================================================================
+// SECTION 6: Checked Unsigned Operations
+// =============================================================================
+
+@test
+fn test_checked_add_u_normal() {
+    let result = checked_add_u(10 as UInt64, 20 as UInt64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 30 as UInt64);
+}
+
+@test
+fn test_checked_add_u_overflow() {
+    let result = checked_add_u(UInt64.MAX, 1 as UInt64);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_sub_u_normal() {
+    let result = checked_sub_u(30 as UInt64, 10 as UInt64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 20 as UInt64);
+}
+
+@test
+fn test_checked_sub_u_underflow() {
+    let result = checked_sub_u(10 as UInt64, 30 as UInt64);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_mul_u_normal() {
+    let result = checked_mul_u(7 as UInt64, 6 as UInt64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 42 as UInt64);
+}
+
+@test
+fn test_checked_mul_u_overflow() {
+    let result = checked_mul_u(UInt64.MAX, 2 as UInt64);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_div_u_normal() {
+    let result = checked_div_u(42 as UInt64, 6 as UInt64);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 7 as UInt64);
+}
+
+@test
+fn test_checked_div_u_by_zero() {
+    let result = checked_div_u(42 as UInt64, 0 as UInt64);
+    assert(!is_ok(result));
+}
+
+// =============================================================================
+// SECTION 7: Saturating Operations (Int64)
+// =============================================================================
+
+@test
+fn test_saturating_add_normal() {
+    assert_eq(saturating_add(10 as Int64, 20 as Int64), 30 as Int64);
+}
+
+@test
+fn test_saturating_add_overflow_max() {
+    assert_eq(saturating_add(Int64.MAX, 1 as Int64), Int64.MAX);
+    assert_eq(saturating_add(Int64.MAX, 100 as Int64), Int64.MAX);
+}
+
+@test
+fn test_saturating_add_overflow_min() {
+    assert_eq(saturating_add(Int64.MIN, -1 as Int64), Int64.MIN);
+    assert_eq(saturating_add(Int64.MIN, -100 as Int64), Int64.MIN);
+}
+
+@test
+fn test_saturating_sub_normal() {
+    assert_eq(saturating_sub(30 as Int64, 10 as Int64), 20 as Int64);
+}
+
+@test
+fn test_saturating_sub_overflow_min() {
+    assert_eq(saturating_sub(Int64.MIN, 1 as Int64), Int64.MIN);
+}
+
+@test
+fn test_saturating_sub_overflow_max() {
+    assert_eq(saturating_sub(Int64.MAX, -1 as Int64), Int64.MAX);
+}
+
+@test
+fn test_saturating_mul_normal() {
+    assert_eq(saturating_mul(7 as Int64, 6 as Int64), 42 as Int64);
+}
+
+@test
+fn test_saturating_mul_overflow_positive() {
+    assert_eq(saturating_mul(Int64.MAX, 2 as Int64), Int64.MAX);
+}
+
+@test
+fn test_saturating_mul_overflow_negative() {
+    assert_eq(saturating_mul(Int64.MAX, -2 as Int64), Int64.MIN);
+}
+
+@test
+fn test_saturating_neg_normal() {
+    assert_eq(saturating_neg(42 as Int64), -42 as Int64);
+}
+
+@test
+fn test_saturating_neg_min() {
+    assert_eq(saturating_neg(Int64.MIN), Int64.MAX);
+}
+
+@test
+fn test_saturating_abs_normal() {
+    assert_eq(saturating_abs(-42 as Int64), 42 as Int64);
+}
+
+@test
+fn test_saturating_abs_min() {
+    assert_eq(saturating_abs(Int64.MIN), Int64.MAX);
+}
+
+// =============================================================================
+// SECTION 8: Saturating Unsigned Operations
+// =============================================================================
+
+@test
+fn test_saturating_add_u_normal() {
+    assert_eq(saturating_add_u(10 as UInt64, 20 as UInt64), 30 as UInt64);
+}
+
+@test
+fn test_saturating_add_u_overflow() {
+    assert_eq(saturating_add_u(UInt64.MAX, 1 as UInt64), UInt64.MAX);
+}
+
+@test
+fn test_saturating_sub_u_normal() {
+    assert_eq(saturating_sub_u(30 as UInt64, 10 as UInt64), 20 as UInt64);
+}
+
+@test
+fn test_saturating_sub_u_underflow() {
+    assert_eq(saturating_sub_u(10 as UInt64, 30 as UInt64), 0 as UInt64);
+}
+
+@test
+fn test_saturating_mul_u_normal() {
+    assert_eq(saturating_mul_u(7 as UInt64, 6 as UInt64), 42 as UInt64);
+}
+
+@test
+fn test_saturating_mul_u_overflow() {
+    assert_eq(saturating_mul_u(UInt64.MAX, 2 as UInt64), UInt64.MAX);
+}
+
+// =============================================================================
+// SECTION 9: Wrapping Operations
+// =============================================================================
+
+@test
+fn test_wrapping_add_normal() {
+    assert_eq(wrapping_add(10 as Int64, 20 as Int64), 30 as Int64);
+}
+
+@test
+fn test_wrapping_add_overflow() {
+    // MAX + 1 wraps to MIN
+    assert_eq(wrapping_add(Int64.MAX, 1 as Int64), Int64.MIN);
+}
+
+@test
+fn test_wrapping_sub_normal() {
+    assert_eq(wrapping_sub(30 as Int64, 10 as Int64), 20 as Int64);
+}
+
+@test
+fn test_wrapping_sub_underflow() {
+    // MIN - 1 wraps to MAX
+    assert_eq(wrapping_sub(Int64.MIN, 1 as Int64), Int64.MAX);
+}
+
+@test
+fn test_wrapping_mul_normal() {
+    assert_eq(wrapping_mul(7 as Int64, 6 as Int64), 42 as Int64);
+}
+
+@test
+fn test_wrapping_neg_normal() {
+    assert_eq(wrapping_neg(42 as Int64), -42 as Int64);
+}
+
+@test
+fn test_wrapping_neg_min() {
+    // -MIN wraps back to MIN
+    assert_eq(wrapping_neg(Int64.MIN), Int64.MIN);
+}
+
+// =============================================================================
+// SECTION 10: Wrapping Unsigned Operations
+// =============================================================================
+
+@test
+fn test_wrapping_add_u_normal() {
+    assert_eq(wrapping_add_u(10 as UInt64, 20 as UInt64), 30 as UInt64);
+}
+
+@test
+fn test_wrapping_add_u_overflow() {
+    // MAX + 1 wraps to 0
+    assert_eq(wrapping_add_u(UInt64.MAX, 1 as UInt64), 0 as UInt64);
+}
+
+@test
+fn test_wrapping_sub_u_normal() {
+    assert_eq(wrapping_sub_u(30 as UInt64, 10 as UInt64), 20 as UInt64);
+}
+
+@test
+fn test_wrapping_sub_u_underflow() {
+    // 0 - 1 wraps to MAX
+    assert_eq(wrapping_sub_u(0 as UInt64, 1 as UInt64), UInt64.MAX);
+}
+
+@test
+fn test_wrapping_mul_u_normal() {
+    assert_eq(wrapping_mul_u(7 as UInt64, 6 as UInt64), 42 as UInt64);
+}
+
+// =============================================================================
+// SECTION 11: Overflow Detection
+// =============================================================================
+
+@test
+fn test_would_add_overflow_false() {
+    assert(!would_add_overflow(10 as Int64, 20 as Int64));
+}
+
+@test
+fn test_would_add_overflow_true() {
+    assert(would_add_overflow(Int64.MAX, 1 as Int64));
+}
+
+@test
+fn test_would_sub_overflow_false() {
+    assert(!would_sub_overflow(30 as Int64, 10 as Int64));
+}
+
+@test
+fn test_would_sub_overflow_true() {
+    assert(would_sub_overflow(Int64.MIN, 1 as Int64));
+}
+
+@test
+fn test_would_mul_overflow_false() {
+    assert(!would_mul_overflow(7 as Int64, 6 as Int64));
+}
+
+@test
+fn test_would_mul_overflow_true() {
+    assert(would_mul_overflow(Int64.MAX, 2 as Int64));
+}
+
+// =============================================================================
+// SECTION 12: Add/Subtract with Carry/Borrow
+// =============================================================================
+
+@test
+fn test_adc_no_carry_in() {
+    let (result, carry_out) = adc(10 as UInt64, 20 as UInt64, false);
+    assert_eq(result, 30 as UInt64);
+    assert(!carry_out);
+}
+
+@test
+fn test_adc_with_carry_in() {
+    let (result, carry_out) = adc(10 as UInt64, 20 as UInt64, true);
+    assert_eq(result, 31 as UInt64);
+    assert(!carry_out);
+}
+
+@test
+fn test_adc_overflow() {
+    let (result, carry_out) = adc(UInt64.MAX, 1 as UInt64, false);
+    assert_eq(result, 0 as UInt64);
+    assert(carry_out);
+}
+
+@test
+fn test_sbb_no_borrow_in() {
+    let (result, borrow_out) = sbb(30 as UInt64, 10 as UInt64, false);
+    assert_eq(result, 20 as UInt64);
+    assert(!borrow_out);
+}
+
+@test
+fn test_sbb_with_borrow_in() {
+    let (result, borrow_out) = sbb(30 as UInt64, 10 as UInt64, true);
+    assert_eq(result, 19 as UInt64);
+    assert(!borrow_out);
+}
+
+@test
+fn test_sbb_underflow() {
+    let (_, borrow_out) = sbb(10 as UInt64, 20 as UInt64, false);
+    assert(borrow_out);
+}
+
+// =============================================================================
+// SECTION 13: 32-bit Operations
+// =============================================================================
+
+@test
+fn test_checked_add_i32_normal() {
+    let result = checked_add_i32(10 as Int32, 20 as Int32);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 30 as Int32);
+}
+
+@test
+fn test_checked_add_i32_overflow() {
+    let result = checked_add_i32(Int32.MAX, 1 as Int32);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_mul_i32_normal() {
+    let result = checked_mul_i32(7 as Int32, 6 as Int32);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 42 as Int32);
+}
+
+@test
+fn test_checked_mul_i32_overflow() {
+    let result = checked_mul_i32(Int32.MAX, 2 as Int32);
+    assert(!is_ok(result));
+}
+
+@test
+fn test_checked_add_u32_normal() {
+    let result = checked_add_u32(10 as UInt32, 20 as UInt32);
+    assert(is_ok(result));
+    assert_eq(unwrap(result), 30 as UInt32);
+}
+
+@test
+fn test_checked_add_u32_overflow() {
+    let result = checked_add_u32(UInt32.MAX, 1 as UInt32);
+    assert(!is_ok(result));
+}
+
+// =============================================================================
+// SECTION: CheckedResult Method Tests
+// =============================================================================
+
+@test
+fn test_checked_result_is_ok() {
+    let ok_result = checked_add(1 as Int64, 2 as Int64);
+    assert(ok_result.is_ok());
+    assert(!ok_result.is_overflow());
+}
+
+@test
+fn test_checked_result_is_overflow() {
+    let overflow_result = checked_add(Int64.MAX, 1 as Int64);
+    assert(!overflow_result.is_ok());
+    assert(overflow_result.is_overflow());
+}
+
+@test
+fn test_checked_result_unwrap_ok() {
+    let result = checked_add(10 as Int64, 20 as Int64);
+    assert_eq(result.unwrap(), 30 as Int64);
+}
+
+@test
+fn test_checked_result_expect_ok() {
+    let result = checked_add(5 as Int64, 7 as Int64);
+    assert_eq(result.expect("should not overflow"), 12 as Int64);
+}
+
+@test
+fn test_checked_result_unwrap_or_ok() {
+    let result = checked_add(3 as Int64, 4 as Int64);
+    assert_eq(result.unwrap_or(0 as Int64), 7 as Int64);
+}
+
+@test
+fn test_checked_result_unwrap_or_overflow() {
+    let result = checked_add(Int64.MAX, 1 as Int64);
+    assert_eq(result.unwrap_or(0 as Int64), 0 as Int64);
+}
+
+fn make_fallback() -> Int64 {
+    -1 as Int64
+}
+
+@test
+fn test_checked_result_unwrap_or_else_ok() {
+    let result = checked_add(1 as Int64, 1 as Int64);
+    assert_eq(result.unwrap_or_else(make_fallback), 2 as Int64);
+}
+
+@test
+fn test_checked_result_unwrap_or_else_overflow() {
+    let result = checked_add(Int64.MAX, 1 as Int64);
+    assert_eq(result.unwrap_or_else(make_fallback), -1 as Int64);
+}
+
+fn double_val(x: Int64) -> Int64 {
+    x * 2
+}
+
+@test
+fn test_checked_result_map_ok() {
+    let result = checked_add(3 as Int64, 4 as Int64);
+    let mapped = result.map(double_val);
+    assert(mapped.is_ok());
+    assert_eq(mapped.unwrap(), 14 as Int64);
+}
+
+@test
+fn test_checked_result_map_overflow() {
+    let result = checked_add(Int64.MAX, 1 as Int64);
+    let mapped = result.map(double_val);
+    assert(mapped.is_overflow());
+}
+
+fn add_ten_checked(x: Int64) -> CheckedResult<Int64> {
+    checked_add(x, 10 as Int64)
+}
+
+@test
+fn test_checked_result_and_then_ok() {
+    let result = checked_add(5 as Int64, 3 as Int64);
+    let chained = result.and_then(add_ten_checked);
+    assert(chained.is_ok());
+    assert_eq(chained.unwrap(), 18 as Int64);
+}
+
+@test
+fn test_checked_result_and_then_first_overflow() {
+    let result = checked_add(Int64.MAX, 1 as Int64);
+    let chained = result.and_then(add_ten_checked);
+    assert(chained.is_overflow());
+}
+
+@test
+fn test_checked_result_and_then_second_overflow() {
+    let result = checked_add(Int64.MAX - 5, 3 as Int64);
+    // Result is Int64.MAX - 2, then add 10 should overflow
+    let chained = result.and_then(add_ten_checked);
+    assert(chained.is_overflow());
+}
+
+@test
+fn test_checked_result_and_ok() {
+    let a = checked_add(1 as Int64, 2 as Int64);
+    let b = checked_mul(3 as Int64, 4 as Int64);
+    let result = a.and(b);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 12 as Int64);
+}
+
+@test
+fn test_checked_result_and_first_overflow() {
+    let a = checked_add(Int64.MAX, 1 as Int64);
+    let b = checked_mul(3 as Int64, 4 as Int64);
+    let result = a.and(b);
+    assert(result.is_overflow());
+}
+
+@test
+fn test_checked_result_or_ok() {
+    let a = checked_add(1 as Int64, 2 as Int64);
+    let b = checked_mul(3 as Int64, 4 as Int64);
+    let result = a.or(b);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 3 as Int64);
+}
+
+@test
+fn test_checked_result_or_first_overflow() {
+    let a = checked_add(Int64.MAX, 1 as Int64);
+    let b = checked_mul(3 as Int64, 4 as Int64);
+    let result = a.or(b);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 12 as Int64);
+}
+
+@test
+fn test_checked_result_ok_conversion() {
+    let result = checked_add(1 as Int64, 2 as Int64);
+    let maybe_val = result.ok();
+    assert(maybe_val.is_some());
+}
+
+@test
+fn test_checked_result_ok_conversion_overflow() {
+    let result = checked_add(Int64.MAX, 1 as Int64);
+    let maybe_val = result.ok();
+    assert(maybe_val.is_none());
+}
+
+// =============================================================================
+// SECTION: Try Protocol Tests
+// =============================================================================
+
+/// Test that CheckedResult implements Try — chain operations with ?
+fn chain_add_mul(a: Int64, b: Int64, c: Int64) -> CheckedResult<Int64> {
+    let sum = checked_add(a, b).unwrap_or(0 as Int64);
+    checked_mul(sum, c)
+}
+
+@test
+fn test_try_protocol_chain_ok() {
+    // (3 + 4) * 5 = 35
+    let result = chain_add_mul(3 as Int64, 4 as Int64, 5 as Int64);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 35 as Int64);
+}
+
+@test
+fn test_try_protocol_chain_mul_overflow() {
+    // (MAX/2 + MAX/2) * 2 should overflow on mul
+    let result = chain_add_mul(Int64.MAX / 2, Int64.MAX / 2, 3 as Int64);
+    // MAX/2 + MAX/2 = MAX - 1 (or MAX depending on rounding), * 3 overflows
+    assert(result.is_overflow());
+}
+
+/// Multiple chained operations
+fn triple_add(a: Int64, b: Int64, c: Int64) -> CheckedResult<Int64> {
+    let ab = checked_add(a, b);
+    match ab {
+        CheckedResult.Ok(sum) => checked_add(sum, c),
+        CheckedResult.Overflow => CheckedResult.Overflow,
+    }
+}
+
+@test
+fn test_triple_add_ok() {
+    let result = triple_add(10 as Int64, 20 as Int64, 30 as Int64);
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 60 as Int64);
+}
+
+@test
+fn test_triple_add_overflow_first() {
+    let result = triple_add(Int64.MAX, 1 as Int64, 1 as Int64);
+    assert(result.is_overflow());
+}
+
+@test
+fn test_triple_add_overflow_second() {
+    let result = triple_add(Int64.MAX - 1, 1 as Int64, 1 as Int64);
+    // MAX - 1 + 1 = MAX, then MAX + 1 overflows
+    assert(result.is_overflow());
+}
+
+/// Test and_then chaining pattern
+@test
+fn test_and_then_chain() {
+    let result = checked_add(10 as Int64, 20 as Int64)
+        .and_then(|sum| checked_mul(sum, 3 as Int64));
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 90 as Int64);
+}
+
+@test
+fn test_and_then_chain_overflow() {
+    let result = checked_add(Int64.MAX, 1 as Int64)
+        .and_then(|sum| checked_mul(sum, 3 as Int64));
+    assert(result.is_overflow());
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

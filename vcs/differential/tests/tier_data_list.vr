@@ -1,0 +1,133 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, data-structure, list
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Fixed-size list push/pop/get operations, verify state
+
+fn main() -> Int {
+    test_push_and_get();
+    test_pop_operations();
+    test_insert_remove();
+    test_list_reverse();
+    0
+}
+
+/// Simulate push onto a fixed-size stack
+fn test_push_and_get() {
+    let mut stack = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut top = 0;
+
+    // Push values
+    stack[top] = 10; top = top + 1;
+    stack[top] = 20; top = top + 1;
+    stack[top] = 30; top = top + 1;
+    stack[top] = 40; top = top + 1;
+    stack[top] = 50; top = top + 1;
+
+    assert_eq(top, 5);
+    assert_eq(stack[0], 10);
+    assert_eq(stack[2], 30);
+    assert_eq(stack[4], 50);
+    print("push_and_get: pass\n");
+}
+
+/// Pop operations and verify state after pops
+fn test_pop_operations() {
+    let mut stack = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut top = 0;
+
+    stack[top] = 100; top = top + 1;
+    stack[top] = 200; top = top + 1;
+    stack[top] = 300; top = top + 1;
+
+    // Pop last element
+    top = top - 1;
+    let popped1 = stack[top];
+    assert_eq(popped1, 300);
+
+    // Pop next
+    top = top - 1;
+    let popped2 = stack[top];
+    assert_eq(popped2, 200);
+
+    assert_eq(top, 1);
+    assert_eq(stack[0], 100);
+
+    // Push again after pops
+    stack[top] = 999; top = top + 1;
+    assert_eq(stack[1], 999);
+    assert_eq(top, 2);
+    print("pop_operations: pass\n");
+}
+
+/// Simulate insert at index and remove at index
+fn test_insert_remove() {
+    let mut arr = [0, 0, 0, 0, 0, 0];
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 30;
+    arr[3] = 40;
+    let mut len = 4;
+
+    // Insert 25 at index 2: shift right
+    let mut i = len;
+    while i > 2 {
+        arr[i] = arr[i - 1];
+        i = i - 1;
+    }
+    arr[2] = 25;
+    len = len + 1;
+
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 25);
+    assert_eq(arr[3], 30);
+    assert_eq(arr[4], 40);
+    assert_eq(len, 5);
+
+    // Remove at index 1: shift left
+    let mut j = 1;
+    while j < len - 1 {
+        arr[j] = arr[j + 1];
+        j = j + 1;
+    }
+    len = len - 1;
+
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 25);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 40);
+    assert_eq(len, 4);
+    print("insert_remove: pass\n");
+}
+
+/// In-place array reversal
+fn test_list_reverse() {
+    let mut arr = [0, 0, 0, 0, 0, 0];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    arr[5] = 6;
+    let n = 6;
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo < hi {
+        let tmp = arr[lo];
+        arr[lo] = arr[hi];
+        arr[hi] = tmp;
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+    assert_eq(arr[0], 6);
+    assert_eq(arr[1], 5);
+    assert_eq(arr[2], 4);
+    assert_eq(arr[3], 3);
+    assert_eq(arr[4], 2);
+    assert_eq(arr[5], 1);
+    print("list_reverse: pass\n");
+}

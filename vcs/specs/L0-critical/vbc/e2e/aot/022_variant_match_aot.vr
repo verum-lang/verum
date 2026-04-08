@@ -1,0 +1,105 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, variants, pattern-matching, is-operator
+// @timeout: 5000
+// @expected-exit: 0
+// @description: AOT variant matching with payloads, is-operator, and nested patterns
+
+type Shape is Circle(Int) | Rectangle(Int, Int) | Triangle(Int, Int, Int);
+
+fn area_x100(s: Shape) -> Int {
+    match s {
+        Circle(r) => 314 * r * r,
+        Rectangle(w, h) => 100 * w * h,
+        Triangle(a, b, c) => {
+            // Heron's formula approximation for integer math
+            let s2 = a + b + c;  // 2*s
+            // For simplicity, just use base*height/2 approximation
+            100 * a * b / 2
+        },
+    }
+}
+
+fn is_circle(s: Shape) -> Bool {
+    s is Circle
+}
+
+fn perimeter(s: Shape) -> Int {
+    match s {
+        Circle(r) => 628 * r / 100,  // 2*pi*r approx
+        Rectangle(w, h) => 2 * (w + h),
+        Triangle(a, b, c) => a + b + c,
+    }
+}
+
+type Tree is Leaf(Int) | Branch(Int);
+
+fn tree_value(t: Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Branch(v) => v,
+    }
+}
+
+type Maybe is Nothing | Just(Int);
+
+fn maybe_map(m: Maybe, f: fn(Int) -> Int) -> Maybe {
+    match m {
+        Nothing => Nothing,
+        Just(v) => Just(f(v)),
+    }
+}
+
+fn maybe_unwrap(m: Maybe, default: Int) -> Int {
+    match m {
+        Nothing => default,
+        Just(v) => v,
+    }
+}
+
+fn maybe_is_just(m: Maybe) -> Bool {
+    m is Just
+}
+
+fn main() -> Int {
+    // Shape matching
+    let c = Circle(5);
+    let r = Rectangle(3, 4);
+    let t = Triangle(3, 4, 5);
+
+    assert_eq(area_x100(c), 314 * 25);   // 7850
+    assert_eq(area_x100(r), 1200);        // 100 * 3 * 4
+    assert_eq(area_x100(t), 600);         // 100 * 3 * 4 / 2
+
+    assert(is_circle(c));
+    assert(!is_circle(r));
+    assert(!is_circle(t));
+
+    assert_eq(perimeter(c), 31);   // 628 * 5 / 100 = 31
+    assert_eq(perimeter(r), 14);   // 2 * (3 + 4)
+    assert_eq(perimeter(t), 12);   // 3 + 4 + 5
+
+    // Tree
+    assert_eq(tree_value(Leaf(42)), 42);
+    assert_eq(tree_value(Branch(100)), 100);
+
+    // Maybe with closures
+    let j = Just(10);
+    let n = Nothing;
+
+    assert(maybe_is_just(j));
+    assert(!maybe_is_just(n));
+
+    let doubled = maybe_map(j, |x| x * 2);
+    assert_eq(maybe_unwrap(doubled, 0), 20);
+
+    let mapped_nothing = maybe_map(n, |x| x * 2);
+    assert_eq(maybe_unwrap(mapped_nothing, -1), -1);
+
+    // Chain operations
+    let result = maybe_map(maybe_map(Just(5), |x| x + 3), |x| x * 2);
+    assert_eq(maybe_unwrap(result, 0), 16);  // (5 + 3) * 2
+
+    0
+}

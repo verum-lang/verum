@@ -1,0 +1,191 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, tensor, extended, get-scalar, set-scalar, index, leaky-relu
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Extended tensor ops — GetScalar, SetScalar, Index, LeakyRelu
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn leaky_relu(x: Float, alpha: Float) -> Float {
+    if x >= 0.0 { x } else { alpha * x }
+}
+
+// =============================================================================
+// GetScalar tests
+// =============================================================================
+
+type Arr4 is { d0: Float, d1: Float, d2: Float, d3: Float };
+
+fn arr4_get_val(d0: Float, d1: Float, d2: Float, d3: Float, idx: Int) -> Float {
+    if idx == 0 { d0 }
+    else if idx == 1 { d1 }
+    else if idx == 2 { d2 }
+    else { d3 }
+}
+
+@test
+fn test_get_scalar_first() {
+    let arr = Arr4 { d0: 10.0, d1: 20.0, d2: 30.0, d3: 40.0 };
+    assert_eq(arr.d0, 10.0);
+    print("  test_get_scalar_first: ok");
+}
+
+@test
+fn test_get_scalar_last() {
+    let arr = Arr4 { d0: 10.0, d1: 20.0, d2: 30.0, d3: 40.0 };
+    assert_eq(arr.d3, 40.0);
+    print("  test_get_scalar_last: ok");
+}
+
+@test
+fn test_get_scalar_middle() {
+    let arr = Arr4 { d0: 5.0, d1: 15.0, d2: 25.0, d3: 35.0 };
+    assert_eq(arr.d1, 15.0);
+    assert_eq(arr.d2, 25.0);
+    print("  test_get_scalar_middle: ok");
+}
+
+// =============================================================================
+// SetScalar tests
+// =============================================================================
+
+@test
+fn test_set_scalar_single() {
+    let mut arr = Arr4 { d0: 0.0, d1: 0.0, d2: 0.0, d3: 0.0 };
+    arr.d2 = 99.0;
+
+    assert_eq(arr.d0, 0.0);
+    assert_eq(arr.d1, 0.0);
+    assert_eq(arr.d2, 99.0);
+    assert_eq(arr.d3, 0.0);
+    print("  test_set_scalar_single: ok");
+}
+
+@test
+fn test_set_scalar_multiple() {
+    let mut arr = Arr4 { d0: 0.0, d1: 0.0, d2: 0.0, d3: 0.0 };
+    arr.d0 = 1.0;
+    arr.d1 = 2.0;
+    arr.d2 = 3.0;
+    arr.d3 = 4.0;
+
+    assert_eq(arr.d0, 1.0);
+    assert_eq(arr.d1, 2.0);
+    assert_eq(arr.d2, 3.0);
+    assert_eq(arr.d3, 4.0);
+
+    // Overwrite one element and verify others unchanged
+    arr.d1 = 200.0;
+
+    assert_eq(arr.d0, 1.0);
+    assert_eq(arr.d1, 200.0);
+    assert_eq(arr.d2, 3.0);
+    assert_eq(arr.d3, 4.0);
+    print("  test_set_scalar_multiple: ok");
+}
+
+// =============================================================================
+// Index (select by index array) tests
+// =============================================================================
+
+@test
+fn test_index_select() {
+    // Source array: [100, 200, 300, 400]
+    let src = Arr4 { d0: 100.0, d1: 200.0, d2: 300.0, d3: 400.0 };
+
+    // Select elements at indices [3, 0, 2, 1] into a new array
+    let indices = [3, 0, 2, 1];
+    let r0 = arr4_get_val(src.d0, src.d1, src.d2, src.d3, indices[0]);
+    let r1 = arr4_get_val(src.d0, src.d1, src.d2, src.d3, indices[1]);
+    let r2 = arr4_get_val(src.d0, src.d1, src.d2, src.d3, indices[2]);
+    let r3 = arr4_get_val(src.d0, src.d1, src.d2, src.d3, indices[3]);
+
+    assert_eq(r0, 400.0);
+    assert_eq(r1, 100.0);
+    assert_eq(r2, 300.0);
+    assert_eq(r3, 200.0);
+    print("  test_index_select: ok");
+}
+
+// =============================================================================
+// LeakyRelu tests
+// =============================================================================
+
+@test
+fn test_leaky_relu_positive() {
+    let alpha = 0.01;
+    assert_eq(leaky_relu(1.0, alpha), 1.0);
+    assert_eq(leaky_relu(5.0, alpha), 5.0);
+    assert_eq(leaky_relu(100.0, alpha), 100.0);
+    assert_eq(leaky_relu(0.0, alpha), 0.0);
+    print("  test_leaky_relu_positive: ok");
+}
+
+@test
+fn test_leaky_relu_negative() {
+    let alpha = 0.1;
+    let r0 = leaky_relu(-10.0, alpha);
+    let r1 = leaky_relu(-20.0, alpha);
+    let r2 = leaky_relu(-100.0, alpha);
+
+    // -10.0 * 0.1 = -1.0
+    assert(abs_f(r0 - (-1.0)) < 0.0001);
+    // -20.0 * 0.1 = -2.0
+    assert(abs_f(r1 - (-2.0)) < 0.0001);
+    // -100.0 * 0.1 = -10.0
+    assert(abs_f(r2 - (-10.0)) < 0.0001);
+    print("  test_leaky_relu_negative: ok");
+}
+
+@test
+fn test_leaky_relu_mixed() {
+    let alpha = 0.1;
+    // Apply leaky relu to each value
+    let a0 = leaky_relu(3.0, alpha);
+    let a1 = leaky_relu(-2.0, alpha);
+    let a2 = leaky_relu(0.0, alpha);
+    let a3 = leaky_relu(-5.0, alpha);
+
+    // 3.0 >= 0 -> 3.0
+    assert_eq(a0, 3.0);
+    // -2.0 < 0 -> 0.1 * -2.0 = -0.2
+    assert(abs_f(a1 - (-0.2)) < 0.0001);
+    // 0.0 >= 0 -> 0.0
+    assert_eq(a2, 0.0);
+    // -5.0 < 0 -> 0.1 * -5.0 = -0.5
+    assert(abs_f(a3 - (-0.5)) < 0.0001);
+
+    // Verify using integer-scaled comparison
+    let scaled_1 = a1 * 10.0;  // -0.2 * 10 = -2.0
+    assert(abs_f(scaled_1 - (-2.0)) < 0.001);
+    let scaled_3 = a3 * 10.0;  // -0.5 * 10 = -5.0
+    assert(abs_f(scaled_3 - (-5.0)) < 0.001);
+    print("  test_leaky_relu_mixed: ok");
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_get_scalar_first();
+    test_get_scalar_last();
+    test_get_scalar_middle();
+    test_set_scalar_single();
+    test_set_scalar_multiple();
+    test_index_select();
+    test_leaky_relu_positive();
+    test_leaky_relu_negative();
+    test_leaky_relu_mixed();
+
+    print("[OK] 008_extended_ops");
+    0
+}

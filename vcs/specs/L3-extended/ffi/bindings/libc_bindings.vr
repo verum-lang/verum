@@ -1,0 +1,597 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, bindings, libc, unsafe
+// @description: Tests comprehensive libc bindings for standard C library functions
+
+/// ============================================================
+/// LIBC BINDINGS
+/// ============================================================
+///
+/// Complete bindings for the standard C library (libc).
+/// These functions form the foundation of system interaction.
+
+// ============================================================
+// STANDARD I/O
+// ============================================================
+
+ffi libc_stdio {
+    // ------------------------------------------------------------
+    // File Operations
+    // ------------------------------------------------------------
+
+    @extern("C")
+    fn fopen(pathname: *const c_char, mode: *const c_char) -> *mut FILE;
+        //; // requires pathname != null && mode != null
+        // errors_via = ReturnValue(null) with Errno;
+
+    @extern("C")
+    fn freopen(
+        pathname: *const c_char,
+        mode: *const c_char,
+        stream: *mut FILE
+    ) -> *mut FILE;
+        //; // requires mode != null && stream != null
+
+    @extern("C")
+    fn fclose(stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+        // errors_via = ReturnCode(== 0);
+
+    @extern("C")
+    fn fflush(stream: *mut FILE) -> c_int;
+        // errors_via = ReturnCode(== 0);
+
+    // ------------------------------------------------------------
+    // Character I/O
+    // ------------------------------------------------------------
+
+    @extern("C")
+    fn fgetc(stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+        // errors_via = ReturnValue(EOF);
+
+    @extern("C")
+    fn fputc(c: c_int, stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+        // errors_via = ReturnValue(EOF);
+
+    @extern("C")
+    fn getc(stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+
+    @extern("C")
+    fn putc(c: c_int, stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+
+    @extern("C")
+    fn getchar() -> c_int;
+        // errors_via = ReturnValue(EOF);
+
+    @extern("C")
+    fn putchar(c: c_int) -> c_int;
+
+    @extern("C")
+    fn ungetc(c: c_int, stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+
+    // ------------------------------------------------------------
+    // Text I/O
+    // ------------------------------------------------------------
+
+    @extern("C")
+    fn fgets(s: *mut c_char, size: c_int, stream: *mut FILE) -> *mut c_char;
+        //; // requires s != null && size > 0 && stream != null
+        // errors_via = ReturnValue(null);
+
+    @extern("C")
+    fn fputs(s: *const c_char, stream: *mut FILE) -> c_int;
+        //; // requires s != null && stream != null
+        // errors_via = ReturnValue(EOF);
+
+    @extern("C")
+    fn gets(s: *mut c_char) -> *mut c_char;  // Deprecated, dangerous!
+        //; // requires s != null
+
+    @extern("C")
+    fn puts(s: *const c_char) -> c_int;
+        //; // requires s != null
+
+    // ------------------------------------------------------------
+    // Binary I/O
+    // ------------------------------------------------------------
+
+    @extern("C")
+    fn fread(
+        ptr: *mut c_void,
+        size: c_size_t,
+        nmemb: c_size_t,
+        stream: *mut FILE
+    ) -> c_size_t;
+        //; // requires ptr != null && stream != null
+
+    @extern("C")
+    fn fwrite(
+        ptr: *const c_void,
+        size: c_size_t,
+        nmemb: c_size_t,
+        stream: *mut FILE
+    ) -> c_size_t;
+        //; // requires ptr != null && stream != null
+
+    // ------------------------------------------------------------
+    // Formatted I/O
+    // ------------------------------------------------------------
+
+    @extern("C")
+    @variadic
+    fn printf(format: *const c_char, ...) -> c_int;
+        // requires: format != null;
+
+    @extern("C")
+    @variadic
+    fn fprintf(stream: *mut FILE, format: *const c_char, ...) -> c_int;
+        // requires: stream != null && format != null;
+
+    @extern("C")
+    @variadic
+    fn sprintf(str: *mut c_char, format: *const c_char, ...) -> c_int;
+        // requires: str != null && format != null;
+
+    @extern("C")
+    @variadic
+    fn snprintf(
+        str: *mut c_char,
+        size: c_size_t,
+        format: *const c_char,
+        ...
+    ) -> c_int;
+        //; // requires format != null
+
+    @extern("C")
+    @variadic
+    fn scanf(format: *const c_char, ...) -> c_int;
+        // requires: format != null;
+
+    @extern("C")
+    @variadic
+    fn fscanf(stream: *mut FILE, format: *const c_char, ...) -> c_int;
+        // requires: stream != null && format != null;
+
+    @extern("C")
+    @variadic
+    fn sscanf(str: *const c_char, format: *const c_char, ...) -> c_int;
+        // requires: str != null && format != null;
+
+    // va_list versions
+    @extern("C")
+    fn vprintf(format: *const c_char, ap: va_list) -> c_int;
+
+    @extern("C")
+    fn vfprintf(stream: *mut FILE, format: *const c_char, ap: va_list) -> c_int;
+
+    @extern("C")
+    fn vsprintf(str: *mut c_char, format: *const c_char, ap: va_list) -> c_int;
+
+    @extern("C")
+    fn vsnprintf(
+        str: *mut c_char,
+        size: c_size_t,
+        format: *const c_char,
+        ap: va_list
+    ) -> c_int;
+
+    // ------------------------------------------------------------
+    // File Positioning
+    // ------------------------------------------------------------
+
+    @extern("C")
+    fn fseek(stream: *mut FILE, offset: c_long, whence: c_int) -> c_int;
+        //; // requires stream != null
+        // errors_via = ReturnCode(== 0);
+
+    @extern("C")
+    fn ftell(stream: *mut FILE) -> c_long;
+        //; // requires stream != null
+        // errors_via = ReturnValue(-1);
+
+    @extern("C")
+    fn rewind(stream: *mut FILE);
+        // requires: stream != null;
+
+    @extern("C")
+    fn fgetpos(stream: *mut FILE, pos: *mut fpos_t) -> c_int;
+        //; // requires stream != null && pos != null
+
+    @extern("C")
+    fn fsetpos(stream: *mut FILE, pos: *const fpos_t) -> c_int;
+        //; // requires stream != null && pos != null
+
+    // ------------------------------------------------------------
+    // Error Handling
+    // ------------------------------------------------------------
+
+    @extern("C")
+    fn clearerr(stream: *mut FILE);
+        // requires: stream != null;
+
+    @extern("C")
+    fn feof(stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+
+    @extern("C")
+    fn ferror(stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+
+    @extern("C")
+    fn perror(s: *const c_char);
+
+    // ------------------------------------------------------------
+    // File Descriptor Interface
+    // ------------------------------------------------------------
+
+    @extern("C")
+    fn fileno(stream: *mut FILE) -> c_int;
+        //; // requires stream != null
+
+    @extern("C")
+    fn fdopen(fd: c_int, mode: *const c_char) -> *mut FILE;
+        //; // requires mode != null
+}
+
+// ============================================================
+// MEMORY ALLOCATION
+// ============================================================
+
+ffi libc_stdlib {
+    @extern("C")
+    fn malloc(size: c_size_t) -> *mut c_void;
+        //; // requires size > 0
+        //; // ensures result == null || is_valid_heap_ptr(result, size)
+        // memory_effects = Allocates;
+
+    @extern("C")
+    fn calloc(nmemb: c_size_t, size: c_size_t) -> *mut c_void;
+        //; // ensures result == null || is_zeroed(result, nmemb * size)
+        // memory_effects = Allocates;
+
+    @extern("C")
+    fn realloc(ptr: *mut c_void, size: c_size_t) -> *mut c_void;
+        // memory_effects = Allocates, Deallocates(ptr);
+
+    @extern("C")
+    fn free(ptr: *mut c_void);
+        // memory_effects = Deallocates(ptr);
+
+    @extern("C")
+    fn aligned_alloc(alignment: c_size_t, size: c_size_t) -> *mut c_void;
+        //; // requires is_power_of_two(alignment)
+        //; // requires size % alignment == 0
+
+    // Process control
+    @extern("C")
+    @noreturn
+    fn exit(status: c_int) -> !;
+
+    @extern("C")
+    @noreturn
+    fn abort() -> !;
+
+    @extern("C")
+    @noreturn
+    fn _Exit(status: c_int) -> !;
+
+    @extern("C")
+    fn atexit(func: extern "C" fn()) -> c_int;
+
+    // Environment
+    @extern("C")
+    fn getenv(name: *const c_char) -> *const c_char;
+        //; // requires name != null
+
+    @extern("C")
+    fn system(command: *const c_char) -> c_int;
+
+    // Conversion
+    @extern("C")
+    fn atoi(nptr: *const c_char) -> c_int;
+        //; // requires nptr != null
+
+    @extern("C")
+    fn atol(nptr: *const c_char) -> c_long;
+        //; // requires nptr != null
+
+    @extern("C")
+    fn atof(nptr: *const c_char) -> c_double;
+        //; // requires nptr != null
+
+    @extern("C")
+    fn strtol(
+        nptr: *const c_char,
+        endptr: *mut *mut c_char,
+        base: c_int
+    ) -> c_long;
+        //; // requires nptr != null
+
+    @extern("C")
+    fn strtoul(
+        nptr: *const c_char,
+        endptr: *mut *mut c_char,
+        base: c_int
+    ) -> c_ulong;
+        //; // requires nptr != null
+
+    @extern("C")
+    fn strtod(nptr: *const c_char, endptr: *mut *mut c_char) -> c_double;
+        //; // requires nptr != null
+
+    // Random numbers
+    @extern("C")
+    fn rand() -> c_int;
+        // thread_safe = false;
+
+    @extern("C")
+    fn srand(seed: c_uint);
+        // thread_safe = false;
+
+    // Searching and sorting
+    @extern("C")
+    fn qsort(
+        base: *mut c_void,
+        nmemb: c_size_t,
+        size: c_size_t,
+        compar: extern "C" fn(*const c_void, *const c_void) -> c_int
+    );
+        //; // requires base != null && size > 0
+
+    @extern("C")
+    fn bsearch(
+        key: *const c_void,
+        base: *const c_void,
+        nmemb: c_size_t,
+        size: c_size_t,
+        compar: extern "C" fn(*const c_void, *const c_void) -> c_int
+    ) -> *const c_void;
+        //; // requires key != null && base != null
+
+    // Integer arithmetic
+    @extern("C")
+    fn abs(j: c_int) -> c_int;
+
+    @extern("C")
+    fn labs(j: c_long) -> c_long;
+
+    @extern("C")
+    fn div(numer: c_int, denom: c_int) -> div_t;
+        //; // requires denom != 0
+
+    @extern("C")
+    fn ldiv(numer: c_long, denom: c_long) -> ldiv_t;
+        //; // requires denom != 0
+}
+
+// ============================================================
+// STRING HANDLING
+// ============================================================
+
+ffi libc_string {
+    // Copying
+    @extern("C")
+    fn memcpy(dest: *mut c_void, src: *const c_void, n: c_size_t) -> *mut c_void;
+        //; // requires dest != null && src != null
+        //; // requires !overlaps(dest, src, n)
+        // memory_effects = Writes(dest), Reads(src);
+
+    @extern("C")
+    fn memmove(dest: *mut c_void, src: *const c_void, n: c_size_t) -> *mut c_void;
+        //; // requires dest != null && src != null
+        // memory_effects = Writes(dest), Reads(src);
+
+    @extern("C")
+    fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+        //; // requires dest != null && src != null
+
+    @extern("C")
+    fn strncpy(
+        dest: *mut c_char,
+        src: *const c_char,
+        n: c_size_t
+    ) -> *mut c_char;
+        //; // requires dest != null && src != null
+
+    // Concatenation
+    @extern("C")
+    fn strcat(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+        //; // requires dest != null && src != null
+
+    @extern("C")
+    fn strncat(dest: *mut c_char, src: *const c_char, n: c_size_t) -> *mut c_char;
+        //; // requires dest != null && src != null
+
+    // Comparison
+    @extern("C")
+    fn memcmp(s1: *const c_void, s2: *const c_void, n: c_size_t) -> c_int;
+        //; // requires s1 != null && s2 != null
+        // memory_effects = Reads(s1, s2);
+
+    @extern("C")
+    fn strcmp(s1: *const c_char, s2: *const c_char) -> c_int;
+        //; // requires s1 != null && s2 != null
+
+    @extern("C")
+    fn strncmp(s1: *const c_char, s2: *const c_char, n: c_size_t) -> c_int;
+        //; // requires s1 != null && s2 != null
+
+    @extern("C")
+    fn strcoll(s1: *const c_char, s2: *const c_char) -> c_int;
+        //; // requires s1 != null && s2 != null
+
+    // Searching
+    @extern("C")
+    fn memchr(s: *const c_void, c: c_int, n: c_size_t) -> *const c_void;
+        //; // requires s != null
+
+    @extern("C")
+    fn strchr(s: *const c_char, c: c_int) -> *const c_char;
+        //; // requires s != null
+
+    @extern("C")
+    fn strrchr(s: *const c_char, c: c_int) -> *const c_char;
+        //; // requires s != null
+
+    @extern("C")
+    fn strstr(haystack: *const c_char, needle: *const c_char) -> *const c_char;
+        //; // requires haystack != null && needle != null
+
+    @extern("C")
+    fn strpbrk(s: *const c_char, accept: *const c_char) -> *const c_char;
+        //; // requires s != null && accept != null
+
+    @extern("C")
+    fn strspn(s: *const c_char, accept: *const c_char) -> c_size_t;
+        //; // requires s != null && accept != null
+
+    @extern("C")
+    fn strcspn(s: *const c_char, reject: *const c_char) -> c_size_t;
+        //; // requires s != null && reject != null
+
+    @extern("C")
+    fn strtok(s: *mut c_char, delim: *const c_char) -> *mut c_char;
+        //; // requires delim != null
+        // thread_safe = false;
+
+    @extern("C")
+    fn strtok_r(
+        s: *mut c_char,
+        delim: *const c_char,
+        saveptr: *mut *mut c_char
+    ) -> *mut c_char;
+        //; // requires delim != null && saveptr != null
+        // thread_safe = true;
+
+    // Miscellaneous
+    @extern("C")
+    fn memset(s: *mut c_void, c: c_int, n: c_size_t) -> *mut c_void;
+        //; // requires s != null
+        // memory_effects = Writes(s);
+
+    @extern("C")
+    fn strlen(s: *const c_char) -> c_size_t;
+        //; // requires s != null
+        // memory_effects = Reads(s);
+
+    @extern("C")
+    fn strerror(errnum: c_int) -> *const c_char;
+
+    @extern("C")
+    fn strdup(s: *const c_char) -> *mut c_char;
+        //; // requires s != null
+        // memory_effects = Allocates;
+
+    @extern("C")
+    fn strndup(s: *const c_char, n: c_size_t) -> *mut c_char;
+        //; // requires s != null
+        // memory_effects = Allocates;
+}
+
+// ============================================================
+// MATHEMATICS
+// ============================================================
+
+ffi libc_math {
+    // Trigonometric
+    @extern("C") @pure fn sin(x: c_double) -> c_double;
+    @extern("C") @pure fn cos(x: c_double) -> c_double;
+    @extern("C") @pure fn tan(x: c_double) -> c_double;
+    @extern("C") @pure fn asin(x: c_double) -> c_double; // requires x >= -1.0 && x <= 1.0
+    @extern("C") @pure fn acos(x: c_double) -> c_double; // requires x >= -1.0 && x <= 1.0
+    @extern("C") @pure fn atan(x: c_double) -> c_double;
+    @extern("C") @pure fn atan2(y: c_double, x: c_double) -> c_double;
+
+    // Hyperbolic
+    @extern("C") @pure fn sinh(x: c_double) -> c_double;
+    @extern("C") @pure fn cosh(x: c_double) -> c_double;
+    @extern("C") @pure fn tanh(x: c_double) -> c_double;
+
+    // Exponential and logarithmic
+    @extern("C") @pure fn exp(x: c_double) -> c_double;
+    @extern("C") @pure fn log(x: c_double) -> c_double; // requires x > 0.0
+    @extern("C") @pure fn log10(x: c_double) -> c_double; // requires x > 0.0
+    @extern("C") @pure fn log2(x: c_double) -> c_double; // requires x > 0.0
+    @extern("C") @pure fn exp2(x: c_double) -> c_double;
+    @extern("C") @pure fn expm1(x: c_double) -> c_double;
+    @extern("C") @pure fn log1p(x: c_double) -> c_double; // requires x > -1.0
+
+    // Power
+    @extern("C") @pure fn pow(x: c_double, y: c_double) -> c_double;
+    @extern("C") @pure fn sqrt(x: c_double) -> c_double; // requires x >= 0.0
+    @extern("C") @pure fn cbrt(x: c_double) -> c_double;
+    @extern("C") @pure fn hypot(x: c_double, y: c_double) -> c_double;
+
+    // Rounding
+    @extern("C") @pure fn ceil(x: c_double) -> c_double;
+    @extern("C") @pure fn floor(x: c_double) -> c_double;
+    @extern("C") @pure fn trunc(x: c_double) -> c_double;
+    @extern("C") @pure fn round(x: c_double) -> c_double;
+    @extern("C") @pure fn nearbyint(x: c_double) -> c_double;
+    @extern("C") @pure fn rint(x: c_double) -> c_double;
+
+    // Misc
+    @extern("C") @pure fn fabs(x: c_double) -> c_double; // ensures result >= 0.0
+    @extern("C") @pure fn fmod(x: c_double, y: c_double) -> c_double; // requires y != 0.0
+    @extern("C") @pure fn remainder(x: c_double, y: c_double) -> c_double;
+    @extern("C") fn frexp(x: c_double, exp: *mut c_int) -> c_double;
+    @extern("C") @pure fn ldexp(x: c_double, exp: c_int) -> c_double;
+    @extern("C") fn modf(x: c_double, iptr: *mut c_double) -> c_double;
+
+    // Float versions
+    @extern("C") @pure fn sinf(x: c_float) -> c_float;
+    @extern("C") @pure fn cosf(x: c_float) -> c_float;
+    @extern("C") @pure fn sqrtf(x: c_float) -> c_float; // requires x >= 0.0
+    @extern("C") @pure fn fabsf(x: c_float) -> c_float;
+}
+
+// ============================================================
+// TYPE DEFINITIONS
+// ============================================================
+
+type c_char is i8;
+type c_int is i32;
+type c_uint is u32;
+type c_long is i64;
+type c_ulong is u64;
+type c_float is f32;
+type c_double is f64;
+type c_size_t is usize;
+type c_ssize_t is isize;
+type c_void is ();
+type va_list is *mut c_void;
+
+@extern type FILE is ();
+@extern type fpos_t is ();
+
+@repr(C)
+type div_t is {
+    quot: c_int,
+    rem: c_int,
+};
+
+@repr(C)
+type ldiv_t is {
+    quot: c_long,
+    rem: c_long,
+};
+
+const EOF: c_int = -1;
+const SEEK_SET: c_int = 0;
+const SEEK_CUR: c_int = 1;
+const SEEK_END: c_int = 2;
+
+@spec fn is_valid_heap_ptr<T>(ptr: *mut T, size: c_size_t) -> Bool;
+@spec fn is_zeroed<T>(ptr: *mut T, size: c_size_t) -> Bool;
+@spec fn overlaps(a: *mut c_void, b: *const c_void, n: c_size_t) -> Bool;
+@spec fn is_power_of_two(n: c_size_t) -> Bool;
+
+fn main() {
+    // libc bindings tests
+}

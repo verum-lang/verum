@@ -1,0 +1,12 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, match, arm, error
+// @description: Malformed match arm with invalid pattern syntax
+// @expected-error: E087
+
+fn test(x: Int) {
+    match x {
+        1 2 => "one or two",  // Missing | between patterns
+        _ => "other"
+    }
+}

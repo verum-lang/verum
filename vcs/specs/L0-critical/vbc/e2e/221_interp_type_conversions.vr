@@ -1,0 +1,155 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, type-conversion, int, float, bool
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: type behavior differences between Int, Float, Bool.
+// Verum has NO implicit Int<->Float coercion. Tests verify type-specific
+// arithmetic and Bool<->Int coercion.
+
+// =============================================================================
+// Int arithmetic properties
+// =============================================================================
+
+fn test_int_division_truncates() {
+    // Integer division always truncates toward zero
+    assert_eq(7 / 2, 3);
+    assert_eq(9 / 4, 2);
+    assert_eq(-7 / 2, -3);
+    assert_eq(99 / 100, 0);
+    assert_eq(1 / 3, 0);
+}
+
+fn test_int_modulo() {
+    // Remainder after integer division
+    assert_eq(7 % 2, 1);
+    assert_eq(10 % 3, 1);
+    assert_eq(100 % 10, 0);
+    // Division-modulo relationship: (a/b)*b + (a%b) == a
+    let a = 47;
+    let b = 5;
+    assert_eq((a / b) * b + (a % b), a);
+}
+
+// =============================================================================
+// Float arithmetic properties
+// =============================================================================
+
+fn test_float_division_precise() {
+    // Float division gives precise fractional results
+    assert_eq(7.0 / 2.0, 3.5);
+    assert_eq(1.0 / 4.0, 0.25);
+    assert_eq(3.0 / 4.0, 0.75);
+    assert_eq(1.0 / 8.0, 0.125);
+    assert_eq(-7.0 / 2.0, -3.5);
+}
+
+fn test_float_small_differences() {
+    // Float handles small values
+    let a: Float = 0.001;
+    let b: Float = 0.002;
+    assert(a < b);
+    assert(b - a > 0.0009);
+    assert(b - a < 0.0011);
+}
+
+fn test_float_accumulation() {
+    // Float accumulation
+    let mut total: Float = 0.0;
+    let mut i = 0;
+    while i < 10 {
+        total = total + 0.5;
+        i = i + 1;
+    }
+    assert_eq(total, 5.0);
+}
+
+// =============================================================================
+// Bool to Int coercion
+// =============================================================================
+
+fn test_bool_to_int() {
+    // Boolean values coerce to Int: true=1, false=0
+    assert_eq(true, 1);
+    assert_eq(false, 0);
+}
+
+fn test_bool_comparison_results() {
+    // Comparison results are boolean, coerce to int
+    let x = 10;
+    let gt = x > 5;
+    assert_eq(gt, true);
+    assert_eq(gt, 1);
+    let lt = x < 5;
+    assert_eq(lt, false);
+    assert_eq(lt, 0);
+}
+
+fn test_bool_negation() {
+    assert_eq(!true, false);
+    assert_eq(!false, true);
+    assert_eq(!true, 0);
+    assert_eq(!false, 1);
+}
+
+// =============================================================================
+// Type-specific function dispatch
+// =============================================================================
+
+fn int_square(n: Int) -> Int {
+    n * n
+}
+
+fn float_square(x: Float) -> Float {
+    x * x
+}
+
+fn test_type_specific_functions() {
+    assert_eq(int_square(5), 25);
+    assert_eq(int_square(-3), 9);
+    assert_eq(float_square(2.5), 6.25);
+    assert_eq(float_square(0.5), 0.25);
+}
+
+// =============================================================================
+// Separate Int and Float pipelines
+// =============================================================================
+
+fn test_parallel_pipelines() {
+    // Compute sum 1+2+3+4+5 in both types
+    let int_sum = 1 + 2 + 3 + 4 + 5;
+    let float_sum: Float = 1.0 + 2.0 + 3.0 + 4.0 + 5.0;
+    assert_eq(int_sum, 15);
+    assert_eq(float_sum, 15.0);
+}
+
+fn test_int_float_parallel_loop() {
+    let mut icount = 0;
+    let mut fcount: Float = 0.0;
+    let mut i = 0;
+    while i < 5 {
+        icount = icount + 1;
+        fcount = fcount + 1.0;
+        i = i + 1;
+    }
+    assert_eq(icount, 5);
+    assert_eq(fcount, 5.0);
+}
+
+fn main() -> Int {
+    test_int_division_truncates();
+    test_int_modulo();
+    test_float_division_precise();
+    test_float_small_differences();
+    test_float_accumulation();
+    test_bool_to_int();
+    test_bool_comparison_results();
+    test_bool_negation();
+    test_type_specific_functions();
+    test_parallel_pipelines();
+    test_int_float_parallel_loop();
+    print("[OK] 221_interp_type_conversions");
+    0
+}

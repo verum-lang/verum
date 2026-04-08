@@ -1,0 +1,188 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, closures, higher-order, patterns
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests advanced language patterns: higher-order functions, closure factories,
+// accumulator patterns, iterative algorithms, and complex control flow.
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn double(x: Int) -> Int { x * 2 }
+fn increment(x: Int) -> Int { x + 1 }
+fn square(x: Int) -> Int { x * x }
+fn negate(x: Int) -> Int { 0 - x }
+
+fn test_higher_order() {
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(increment, 5), 6);
+    assert_eq(apply(square, 5), 25);
+    assert_eq(apply(negate, 5), -5);
+    print("higher_order: ok");
+}
+
+fn test_composition() {
+    // compose(f, g, x) = f(g(x))
+    assert_eq(compose(double, increment, 5), 12);    // double(increment(5)) = double(6) = 12
+    assert_eq(compose(increment, double, 5), 11);    // increment(double(5)) = increment(10) = 11
+    assert_eq(compose(square, increment, 3), 16);    // square(increment(3)) = square(4) = 16
+    assert_eq(compose(increment, square, 3), 10);    // increment(square(3)) = increment(9) = 10
+    print("composition: ok");
+}
+
+fn fold_range(start: Int, end_excl: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end_excl {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn add_fn(a: Int, b: Int) -> Int { a + b }
+fn mul_fn(a: Int, b: Int) -> Int { a * b }
+
+fn test_fold() {
+    // Sum 0..5 = 10
+    let sum = fold_range(0, 5, 0, add_fn);
+    assert_eq(sum, 10);
+
+    // Product 1..6 = 120 (5!)
+    let product = fold_range(1, 6, 1, mul_fn);
+    assert_eq(product, 120);
+
+    // Sum of squares: 1² + 2² + 3² + 4² = 30
+    let mut total = 0;
+    let mut i = 1;
+    while i <= 4 {
+        total = total + apply(square, i);
+        i = i + 1;
+    }
+    assert_eq(total, 30);
+
+    print("fold: ok");
+}
+
+fn test_newton_sqrt() {
+    // Newton's method for integer square root
+    let n = 256;
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    assert_eq(x, 16);
+
+    let n2 = 10000;
+    let mut x2 = n2;
+    let mut y2 = (x2 + 1) / 2;
+    while y2 < x2 {
+        x2 = y2;
+        y2 = (x2 + n2 / x2) / 2;
+    }
+    assert_eq(x2, 100);
+
+    print("newton_sqrt: ok");
+}
+
+fn test_gcd_euclidean() {
+    // Euclidean GCD
+    let mut a = 252;
+    let mut b = 105;
+    while b != 0 {
+        let temp = b;
+        b = a % b;
+        a = temp;
+    }
+    assert_eq(a, 21);
+
+    let mut a2 = 1071;
+    let mut b2 = 462;
+    while b2 != 0 {
+        let temp = b2;
+        b2 = a2 % b2;
+        a2 = temp;
+    }
+    assert_eq(a2, 21);
+
+    print("gcd_euclidean: ok");
+}
+
+fn test_collatz() {
+    // Count steps in Collatz sequence starting from 27
+    let mut n = 27;
+    let mut steps = 0;
+    while n != 1 {
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    assert_eq(steps, 111);
+    print("collatz: ok");
+}
+
+fn test_sieve_primes() {
+    // Count primes up to 50 using trial division
+    let mut count = 0;
+    let mut n = 2;
+    while n <= 50 {
+        let mut is_prime = 1;
+        let mut d = 2;
+        while d * d <= n {
+            if n % d == 0 {
+                is_prime = 0;
+            }
+            d = d + 1;
+        }
+        if is_prime == 1 {
+            count = count + 1;
+        }
+        n = n + 1;
+    }
+    // Primes up to 50: 2,3,5,7,11,13,17,19,23,29,31,37,41,43,47 = 15
+    assert_eq(count, 15);
+    print("sieve_primes: ok");
+}
+
+fn test_fibonacci_memo() {
+    // Iterative fibonacci to avoid stack issues
+    let target = 20;
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < target {
+        let temp = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    // fib(20) = 6765
+    assert_eq(a, 6765);
+    print("fibonacci_memo: ok");
+}
+
+fn main() -> Int {
+    test_higher_order();
+    test_composition();
+    test_fold();
+    test_newton_sqrt();
+    test_gcd_euclidean();
+    test_collatz();
+    test_sieve_primes();
+    test_fibonacci_memo();
+    print("[OK] 394_interp_advanced_patterns");
+    0
+}

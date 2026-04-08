@@ -1,0 +1,85 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: generics, container, implement, production
+// @expect: pass
+
+// Production pattern: generic container with methods.
+
+type Stack<T> is {
+    data: List<T>,
+};
+
+implement<T> Stack<T> {
+    fn new() -> Stack<T> {
+        Stack { data: List.new() }
+    }
+
+    fn push(&mut self, val: T) {
+        self.data.push(val);
+    }
+
+    fn pop(&mut self) -> Maybe<T> {
+        self.data.pop()
+    }
+
+    fn peek(&self) -> Maybe<T> {
+        if self.data.len() == 0 {
+            None
+        } else {
+            Some(self.data[self.data.len() - 1])
+        }
+    }
+
+    fn len(&self) -> Int {
+        self.data.len()
+    }
+
+    fn is_empty(&self) -> Bool {
+        self.data.len() == 0
+    }
+}
+
+fn main() -> Int {
+    // Test with Int
+    let mut int_stack = Stack.new();
+    int_stack.push(10);
+    int_stack.push(20);
+    int_stack.push(30);
+
+    if int_stack.len() != 3 {
+        print(f"FAIL: len = {int_stack.len()}");
+        return 1;
+    }
+
+    match int_stack.pop() {
+        Some(v) => {
+            if v != 30 {
+                print(f"FAIL: pop = {v}, expected 30");
+                return 1;
+            }
+        },
+        None => {
+            print("FAIL: pop returned None");
+            return 1;
+        }
+    }
+
+    if int_stack.len() != 2 {
+        print(f"FAIL: len after pop = {int_stack.len()}");
+        return 1;
+    }
+
+    // Test with Text
+    let mut text_stack = Stack.new();
+    text_stack.push("hello");
+    text_stack.push("world");
+
+    if text_stack.len() != 2 {
+        print(f"FAIL: text stack len = {text_stack.len()}");
+        return 1;
+    }
+
+    print("PASS: generic container works");
+    0
+}

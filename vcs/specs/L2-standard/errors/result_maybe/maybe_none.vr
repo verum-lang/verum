@@ -1,0 +1,349 @@
+// @test: run
+// @expected-stdout: No value found\nDefault: 0\nAlternative: 42\nOperation completed
+// @tier: 0
+// @level: L2
+// @tags: errors, maybe, none, optional
+// @description: Maybe.None handling patterns
+
+/// Maybe.None handling - working with absent optional values.
+/// Demonstrates various patterns for handling missing values.
+
+type User is {
+    id: Int,
+    name: Text,
+    email: Maybe<Text>,
+    phone: Maybe<Text>
+};
+
+type SearchResult is {
+    query: Text,
+    result: Maybe<Int>
+};
+
+/// Basic None creation
+fn create_none_values() {
+    // Direct None construction
+    let none_int: Maybe<Int> = None;
+    let none_text: Maybe<Text> = None;
+    let none_list: Maybe<List<Int>> = None;
+
+    // Type annotation often required for None
+    let needs_type: Maybe<Int> = None;
+
+    // None as return value
+    fn find_nothing() -> Maybe<Int> {
+        None
+    }
+}
+
+/// Checking if Maybe is None
+fn check_none_status() {
+    let present: Maybe<Int> = Some(42);
+    let absent: Maybe<Int> = None;
+
+    // is_none() method
+    assert(absent.is_none());
+    assert(!present.is_none());
+
+    // is_some() method (opposite)
+    assert(!absent.is_some());
+    assert(present.is_some());
+
+    // Pattern for checking absence
+    if absent.is_none() {
+        println("Value is missing");
+    }
+}
+
+/// Handling None with defaults
+fn handle_none_with_defaults() {
+    let absent: Maybe<Int> = None;
+
+    // unwrap_or() - static default
+    let with_default = absent.unwrap_or(42);
+    assert_eq(with_default, 42);
+
+    // unwrap_or_else() - computed default
+    let with_computed = absent.unwrap_or_else(|| expensive_default());
+    assert_eq(with_computed, 100);
+
+    // unwrap_or_default() - Default trait
+    let with_trait_default = absent.unwrap_or_default();
+    assert_eq(with_trait_default, 0);  // Int.default() is 0
+
+    // get_or_insert() - insert and return default
+    let mut maybe: Maybe<Int> = None;
+    let value = maybe.get_or_insert(42);
+    assert_eq(*value, 42);
+    assert_eq(maybe, Some(42));
+
+    // get_or_insert_with() - lazy insertion
+    let mut maybe: Maybe<Int> = None;
+    let value = maybe.get_or_insert_with(|| expensive_default());
+    assert_eq(*value, 100);
+}
+
+fn expensive_default() -> Int {
+    // Simulated expensive computation
+    100
+}
+
+/// Pattern matching on None
+fn match_none_patterns() {
+    let maybe: Maybe<Int> = None;
+
+    // Basic match
+    let message = match maybe {
+        Some(n) => format("Got number: {}", n),
+        None => "No value available"
+    };
+    assert_eq(message, "No value available");
+
+    // Match with None handling first
+    fn describe(value: Maybe<Int>) -> Text {
+        match value {
+            None => "missing",
+            Some(0) => "zero",
+            Some(n) if n > 0 => "positive",
+            Some(_) => "negative"
+        }
+    }
+
+    assert_eq(describe(None), "missing");
+    assert_eq(describe(Some(0)), "zero");
+}
+
+/// If-let with else for None
+fn if_let_none_patterns() {
+    let absent: Maybe<Int> = None;
+
+    // Handle None in else branch
+    if let Some(n) = absent {
+        println(format("Got: {}", n));
+    } else {
+        println("Value is missing, using default");
+    }
+
+    // let-else pattern (if supported)
+    // let Some(n) = absent else {
+    //     return handle_missing();
+    // };
+}
+
+/// None alternatives with or and or_else
+fn none_alternatives() {
+    let primary: Maybe<Int> = None;
+    let backup: Maybe<Int> = Some(42);
+
+    // or() - provide alternative Maybe
+    let with_backup = primary.or(backup);
+    assert_eq(with_backup.unwrap(), 42);
+
+    // or_else() - lazy alternative
+    let with_lazy = primary.or_else(|| compute_alternative());
+    assert_eq(with_lazy.unwrap(), 100);
+
+    // Chain alternatives
+    fn try_cache() -> Maybe<Int> { None }
+    fn try_database() -> Maybe<Int> { None }
+    fn try_remote() -> Maybe<Int> { Some(42) }
+
+    let result = try_cache()
+        .or_else(try_database)
+        .or_else(try_remote);
+    assert_eq(result.unwrap(), 42);
+}
+
+fn compute_alternative() -> Maybe<Int> {
+    Some(100)
+}
+
+/// Converting None to Result
+fn none_to_result() {
+    let absent: Maybe<Int> = None;
+
+    // ok_or - convert None to Err
+    let result = absent.ok_or("Value not found");
+    assert_eq(result.unwrap_err(), "Value not found");
+
+    // ok_or_else - lazy error creation
+    let result = absent.ok_or_else(|| {
+        format("Missing value at timestamp {}", now())
+    });
+    assert(result.is_err());
+}
+
+fn now() -> Int { 0 }
+
+/// None propagation with ?
+fn none_propagation() -> Maybe<Int> {
+    fn lookup(id: Int) -> Maybe<User> {
+        if id == 1 {
+            Some(User {
+                id: 1,
+                name: "Alice",
+                email: Some("alice@example.com"),
+                phone: None
+            })
+        } else {
+            None
+        }
+    }
+
+    // ? returns None early
+    fn get_phone(id: Int) -> Maybe<Text> {
+        let user = lookup(id)?;  // Returns None if user not found
+        let phone = user.phone.clone()?;  // Returns None if phone is None
+        Some(phone)
+    }
+
+    // This will return None because phone is None
+    get_phone(1)
+}
+
+/// None in collections
+fn none_in_collections() {
+    let maybes: List<Maybe<Int>> = [
+        Some(1),
+        None,
+        Some(2),
+        None,
+        Some(3)
+    ];
+
+    // Count Nones
+    let none_count = maybes.iter().filter(|m| m.is_none()).count();
+    assert_eq(none_count, 2);
+
+    // Replace None with default
+    let filled: List<Int> = maybes.iter()
+        .map(|m| m.unwrap_or(0))
+        .collect();
+    assert_eq(filled, [1, 0, 2, 0, 3]);
+
+    // Skip Nones
+    let only_somes: List<Int> = maybes.iter()
+        .filter_map(|m| m.clone())
+        .collect();
+    assert_eq(only_somes, [1, 2, 3]);
+}
+
+/// None as sentinel/signal
+fn none_as_sentinel() {
+    type Cache<K, V> is {
+        data: Map<K, V>
+    };
+
+    implement<K: Hash + Eq, V> Cache<K, V> {
+        fn contains(&self, key: &K) -> Bool {
+            self.data.contains_key(key)
+        }
+
+        // None means "not in cache"
+        fn lookup_with_miss_tracking(&self, key: &K) -> Bool {
+            // Cache hit/miss tracking
+            self.data.contains_key(key)
+        }
+    }
+
+    // Using None to signal end of iteration
+    type Iterator<T> is protocol {
+        fn next(&mut self) -> Maybe<T>;
+    };
+}
+
+/// Practical None handling patterns
+fn practical_patterns() {
+    // Configuration with fallbacks
+    fn get_port(config: &Map<Text, Int>) -> Int {
+        config.get("port")
+            .cloned()
+            .or_else(|| std.env.var("PORT").ok().and_then(|s| s.parse().ok()))
+            .unwrap_or(8080)
+    }
+
+    // Optional field handling
+    fn display_user(user: &User) -> Text {
+        let email = user.email.clone().unwrap_or_else(|| "no email");
+        let phone = user.phone.clone().unwrap_or_else(|| "no phone");
+        format("{}: {} / {}", user.name, email, phone)
+    }
+
+    // Search with empty result
+    fn search(items: &List<Int>, target: Int) -> SearchResult {
+        let found = items.iter()
+            .position(|&x| x == target)
+            .map(|i| i as Int);
+
+        SearchResult {
+            query: format("find {}", target),
+            result: found
+        }
+    }
+
+    // Graceful degradation
+    fn get_data_gracefully() -> Int {
+        try_primary_source()
+            .or_else(try_backup_source)
+            .or_else(try_default_source)
+            .unwrap_or(0)  // Ultimate fallback
+    }
+
+    fn try_primary_source() -> Maybe<Int> { None }
+    fn try_backup_source() -> Maybe<Int> { None }
+    fn try_default_source() -> Maybe<Int> { Some(42) }
+}
+
+/// None in error context
+fn none_error_context() {
+    // Convert None to descriptive error
+    fn require_value(maybe: Maybe<Int>, context: &Text) -> Result<Int, Text> {
+        maybe.ok_or_else(|| format("Required {} was not provided", context))
+    }
+
+    let result = require_value(None, "user_id");
+    assert_eq(result.unwrap_err(), "Required user_id was not provided");
+
+    // Chain with context
+    fn get_nested_value(data: &Map<Text, Map<Text, Int>>) -> Result<Int, Text> {
+        data.get("outer")
+            .ok_or("outer key not found")?
+            .get("inner")
+            .ok_or("inner key not found")
+            .cloned()
+    }
+}
+
+/// Replacing None values
+fn replace_none() {
+    // replace - replace value, return old
+    let mut maybe: Maybe<Int> = None;
+    let old = maybe.replace(42);
+    assert_eq(old, None);
+    assert_eq(maybe, Some(42));
+
+    // take - take value out, leave None
+    let mut maybe: Maybe<Int> = Some(42);
+    let taken = maybe.take();
+    assert_eq(taken, Some(42));
+    assert_eq(maybe, None);
+}
+
+fn main() {
+    // Basic None handling
+    let absent: Maybe<Int> = None;
+    match absent {
+        Some(n) => println(format("Value: {}", n)),
+        None => println("No value found")
+    }
+
+    // With default
+    let defaulted = absent.unwrap_or(0);
+    println(format("Default: {}", defaulted));
+
+    // Alternative value
+    let alternative = absent.or(Some(42));
+    println(format("Alternative: {}", alternative.unwrap()));
+
+    println("Operation completed");
+}

@@ -1,0 +1,341 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: parser, declarations, comprehensive
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// All Declarations - Parser Declaration Test Seed
+// Tests all declaration forms for correct parsing
+// =============================================================================
+
+// ----------------------------------------------------------------------------
+// Module declarations
+// ----------------------------------------------------------------------------
+
+module OuterModule {
+    module InnerModule {
+        fn nested_fn() {}
+    }
+}
+
+// Module with semicolon (external module)
+module ExternalModule;
+
+// ----------------------------------------------------------------------------
+// Import declarations
+// ----------------------------------------------------------------------------
+
+link std.collections;
+link std.collections.List;
+link std.collections.{Map, Set};
+link std.collections.*;
+link std.io as io;
+
+// ----------------------------------------------------------------------------
+// Type definitions - Record types
+// ----------------------------------------------------------------------------
+
+type EmptyRecord is {};
+
+type SimpleRecord is {
+    field: Int,
+};
+
+type MultiFieldRecord is {
+    x: Int,
+    y: Int,
+    z: Int,
+};
+
+type RecordWithVisibility is {
+    pub public_field: Int,
+    internal_field: Int,
+};
+
+type GenericRecord<T> is {
+    value: T,
+};
+
+type MultiGenericRecord<T, U, V> is {
+    first: T,
+    second: U,
+    third: V,
+};
+
+type BoundedGenericRecord<T> where type T: Clone is {
+    value: T,
+};
+
+// ----------------------------------------------------------------------------
+// Type definitions - Sum types (variants)
+// ----------------------------------------------------------------------------
+
+type SimpleVariant is A | B | C;
+
+type VariantWithData is
+    | Empty
+    | Single(Int)
+    | Pair(Int, Text)
+    | Named { x: Int, y: Int };
+
+type Maybe<T> is None | Some(T);
+
+type Result<T, E> is Ok(T) | Err(E);
+
+type Tree<T> is
+    | Leaf(T)
+    | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
+
+// ----------------------------------------------------------------------------
+// Type definitions - Newtypes
+// ----------------------------------------------------------------------------
+
+type UserId is (Int);
+type Email is (Text);
+type Wrapper<T> is (T);
+
+// ----------------------------------------------------------------------------
+// Type definitions - Unit types
+// ----------------------------------------------------------------------------
+
+type Marker is ();
+type Token is ();
+
+// ----------------------------------------------------------------------------
+// Type definitions - Protocols
+// ----------------------------------------------------------------------------
+
+type EmptyProtocol is protocol {};
+
+type SimpleProtocol is protocol {
+    fn method(&self);
+};
+
+type ProtocolWithTypes is protocol {
+    type Item;
+    type Container<T>;
+    fn get(&self) -> Self.Item;
+};
+
+type ProtocolWithConsts is protocol {
+    const SIZE: Int;
+    fn size(&self) -> Int;
+};
+
+type ProtocolWithDefaults is protocol {
+    fn required(&self);
+    fn optional(&self) -> Int { 42 }
+};
+
+type ExtendingProtocol is protocol extends SimpleProtocol {
+    fn additional(&self);
+};
+
+type MultiExtendProtocol is protocol extends Clone + Debug {
+    fn method(&self);
+};
+
+type AsyncProtocol is protocol {
+    async fn async_method(&self) -> Int;
+};
+
+type ProtocolWithGAT is protocol {
+    type Item<T>;
+    fn wrap<T>(value: T) -> Self.Item<T>;
+};
+
+type ProtocolWithRefinement is protocol {
+    fn positive(&self) -> Int {>= 0};
+};
+
+// ----------------------------------------------------------------------------
+// Type definitions - Affine types
+// ----------------------------------------------------------------------------
+
+type affine LinearResource is {
+    handle: Int,
+};
+
+// ----------------------------------------------------------------------------
+// Function definitions
+// ----------------------------------------------------------------------------
+
+fn simple_function() {}
+
+fn with_params(a: Int, b: Text, c: Bool) {}
+
+fn with_return() -> Int { 42 }
+
+fn with_generics<T>(value: T) -> T { value }
+
+fn with_bounds<T>(value: T) -> T where type T: Clone { value.clone() }
+
+fn with_meta<N: meta Int>(arr: [Int; N]) {}
+
+fn with_context() using [Logger] {}
+
+fn with_multi_context() using [Logger, Database, FileSystem] {}
+
+async fn async_function() -> Int { 42 }
+
+unsafe fn unsafe_function() {}
+
+pub fn public_function() {}
+
+internal fn internal_function() {}
+
+fn with_self_param(&self) {}
+
+fn with_mut_self(&mut self) {}
+
+fn with_ensures(x: Int) -> Int where ensures result >= 0 { x.abs() }
+
+meta fn compile_time_function() -> Int { 42 }
+
+// Arrow function body
+fn arrow_body(x: Int) -> Int = x * 2;
+
+// ----------------------------------------------------------------------------
+// Implementation blocks
+// ----------------------------------------------------------------------------
+
+implement SimpleRecord {
+    fn new() -> Self {
+        SimpleRecord { field: 0 }
+    }
+
+    fn get_field(&self) -> Int {
+        self.field
+    }
+}
+
+implement<T> GenericRecord<T> {
+    fn get(&self) -> &T {
+        &self.value
+    }
+}
+
+implement SimpleProtocol for SimpleRecord {
+    fn method(&self) {}
+}
+
+implement<T> Clone for GenericRecord<T> where type T: Clone {
+    fn clone(&self) -> Self {
+        GenericRecord { value: self.value.clone() }
+    }
+}
+
+// Specialization
+@specialize
+implement Display for List<Text> {
+    fn display(&self) -> Text {
+        self.join(", ")
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Context definitions
+// ----------------------------------------------------------------------------
+
+context Logger {
+    fn log(&self, message: Text);
+    fn debug(&self, message: Text);
+    fn error(&self, message: Text);
+}
+
+context Database {
+    type Connection;
+    fn query(&self, sql: Text) -> List<Row>;
+    const MAX_CONNECTIONS: Int;
+}
+
+context FileSystem {
+    fn read(&self, path: Text) -> Maybe<Text>;
+    fn write(&self, path: Text, content: Text) -> Result<(), Error>;
+}
+
+// Context group
+using AllContexts = [Logger, Database, FileSystem];
+
+// ----------------------------------------------------------------------------
+// Constant and static definitions
+// ----------------------------------------------------------------------------
+
+const PI: Float = 3.14159265358979;
+const MAX_SIZE: Int = 1024;
+const EMPTY_TEXT: Text = "";
+
+static mut COUNTER: Int = 0;
+static CONFIG: Config = Config.default();
+
+pub const PUBLIC_CONST: Int = 100;
+internal const INTERNAL_CONST: Int = 50;
+
+// ----------------------------------------------------------------------------
+// FFI declarations
+// ----------------------------------------------------------------------------
+
+ffi LibC {
+    @extern("c")
+    fn malloc(size: Int) -> *mut ();
+
+    @extern("c")
+    fn free(ptr: *mut ());
+
+    @extern("c", calling_convention = "cdecl")
+    fn printf(format: *const Char, ...) -> Int;
+
+    memory_effects = Pure;
+    thread_safe = false;
+    errors_via = Errno;
+}
+
+ffi LibMath extends LibC {
+    @extern("c")
+    fn sin(x: Float) -> Float;
+
+    @extern("c")
+    fn cos(x: Float) -> Float;
+
+    requires true;
+    ensures result >= -1.0 && result <= 1.0;
+}
+
+// ----------------------------------------------------------------------------
+// Meta definitions
+// ----------------------------------------------------------------------------
+
+meta vec(items: expr) {
+    items => List.from([items])
+}
+
+meta debug(expr: expr) {
+    expr => {
+        let result = expr;
+        println(f"{stringify(expr)} = {result}");
+        result
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Attributed items
+// ----------------------------------------------------------------------------
+
+@derive(Clone, Debug, PartialEq)
+type DerivedRecord is {
+    x: Int,
+    y: Int,
+};
+
+@verify(static)
+fn verified_function(x: Int) -> Int {
+    x + 1
+}
+
+@inline
+fn inlined_function() -> Int { 42 }
+
+@cold
+fn rarely_called() {}

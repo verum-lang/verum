@@ -1,0 +1,175 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, bitset, set-operations
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for bitset operations (set represented as single Int bitmask)
+
+fn bnot(x: Int) -> Int { !x }
+
+// Bitset operations (supports elements 0-19)
+fn bs_empty() -> Int { 0 }
+fn bs_singleton(x: Int) -> Int { 1 << x }
+fn bs_add(s: Int, x: Int) -> Int { s | (1 << x) }
+fn bs_remove(s: Int, x: Int) -> Int { s & bnot(1 << x) }
+fn bs_contains(s: Int, x: Int) -> Bool { ((s >> x) & 1) == 1 }
+fn bs_union(a: Int, b: Int) -> Int { a | b }
+fn bs_intersection(a: Int, b: Int) -> Int { a & b }
+fn bs_difference(a: Int, b: Int) -> Int { a & bnot(b) }
+fn bs_symmetric_diff(a: Int, b: Int) -> Int { a ^ b }
+fn bs_is_subset(a: Int, b: Int) -> Bool { (a & b) == a }
+fn bs_is_empty(s: Int) -> Bool { s == 0 }
+
+fn bs_size(s: Int) -> Int {
+    let mut x = s;
+    let mut count = 0;
+    while x > 0 {
+        count = count + (x & 1);
+        x = x >> 1;
+    }
+    count
+}
+
+fn bs_min(s: Int) -> Int {
+    // Find lowest set bit position
+    if s == 0 { return -1; }
+    let mut i = 0;
+    while i < 20 {
+        if bs_contains(s, i) { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+fn bs_max(s: Int) -> Int {
+    // Find highest set bit position
+    if s == 0 { return -1; }
+    let mut i = 19;
+    while i >= 0 {
+        if bs_contains(s, i) { return i; }
+        i = i - 1;
+    }
+    -1
+}
+
+fn test_basic() {
+    let mut s = bs_empty();
+    assert_eq(bs_is_empty(s), true);
+    assert_eq(bs_size(s), 0);
+
+    s = bs_add(s, 3);
+    s = bs_add(s, 7);
+    s = bs_add(s, 11);
+    assert_eq(bs_size(s), 3);
+    assert_eq(bs_contains(s, 3), true);
+    assert_eq(bs_contains(s, 7), true);
+    assert_eq(bs_contains(s, 5), false);
+
+    s = bs_remove(s, 7);
+    assert_eq(bs_contains(s, 7), false);
+    assert_eq(bs_size(s), 2);
+}
+
+fn test_set_operations() {
+    // A = {1, 2, 3, 4}
+    let mut a = bs_empty();
+    a = bs_add(a, 1);
+    a = bs_add(a, 2);
+    a = bs_add(a, 3);
+    a = bs_add(a, 4);
+
+    // B = {3, 4, 5, 6}
+    let mut b = bs_empty();
+    b = bs_add(b, 3);
+    b = bs_add(b, 4);
+    b = bs_add(b, 5);
+    b = bs_add(b, 6);
+
+    // Union = {1,2,3,4,5,6}
+    let u = bs_union(a, b);
+    assert_eq(bs_size(u), 6);
+
+    // Intersection = {3,4}
+    let inter = bs_intersection(a, b);
+    assert_eq(bs_size(inter), 2);
+    assert_eq(bs_contains(inter, 3), true);
+    assert_eq(bs_contains(inter, 4), true);
+    assert_eq(bs_contains(inter, 1), false);
+
+    // A - B = {1,2}
+    let diff = bs_difference(a, b);
+    assert_eq(bs_size(diff), 2);
+    assert_eq(bs_contains(diff, 1), true);
+    assert_eq(bs_contains(diff, 2), true);
+
+    // B - A = {5,6}
+    let diff2 = bs_difference(b, a);
+    assert_eq(bs_size(diff2), 2);
+    assert_eq(bs_contains(diff2, 5), true);
+
+    // Symmetric difference = {1,2,5,6}
+    let sd = bs_symmetric_diff(a, b);
+    assert_eq(bs_size(sd), 4);
+}
+
+fn test_subset() {
+    let mut a = bs_empty();
+    a = bs_add(a, 1);
+    a = bs_add(a, 2);
+
+    let mut b = bs_empty();
+    b = bs_add(b, 1);
+    b = bs_add(b, 2);
+    b = bs_add(b, 3);
+
+    assert_eq(bs_is_subset(a, b), true);
+    assert_eq(bs_is_subset(b, a), false);
+    assert_eq(bs_is_subset(a, a), true);
+    assert_eq(bs_is_subset(bs_empty(), a), true);
+}
+
+fn test_min_max() {
+    let mut s = bs_empty();
+    s = bs_add(s, 3);
+    s = bs_add(s, 7);
+    s = bs_add(s, 15);
+
+    assert_eq(bs_min(s), 3);
+    assert_eq(bs_max(s), 15);
+    assert_eq(bs_min(bs_empty()), -1);
+    assert_eq(bs_max(bs_empty()), -1);
+    assert_eq(bs_min(bs_singleton(5)), 5);
+    assert_eq(bs_max(bs_singleton(5)), 5);
+}
+
+fn test_identities() {
+    let mut a = bs_empty();
+    a = bs_add(a, 1);
+    a = bs_add(a, 3);
+    a = bs_add(a, 5);
+
+    // A union empty = A
+    assert_eq(bs_union(a, bs_empty()), a);
+    // A intersection empty = empty
+    assert_eq(bs_intersection(a, bs_empty()), 0);
+    // A union A = A
+    assert_eq(bs_union(a, a), a);
+    // A intersection A = A
+    assert_eq(bs_intersection(a, a), a);
+    // A - A = empty
+    assert_eq(bs_difference(a, a), 0);
+    // A ^ A = empty
+    assert_eq(bs_symmetric_diff(a, a), 0);
+}
+
+fn main() -> Int {
+    test_basic();
+    test_set_operations();
+    test_subset();
+    test_min_max();
+    test_identities();
+    print("[OK] 224_bitset_aot");
+    0
+}

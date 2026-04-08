@@ -1,0 +1,170 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L2
+// @tags: lsp, diagnostics, error-nodes, incremental
+// @description: Tests incremental diagnostics from ERROR nodes in syntax tree.
+//              Verifies diagnostics are correctly generated and updated on edits.
+
+// ============================================================================
+// This file contains intentional syntax errors to test diagnostic generation.
+// Each test case documents expected diagnostics.
+// ============================================================================
+
+// Test 1: Simple syntax error - missing semicolon
+// Expected diagnostic: "expected ';'" at end of let statement
+fn test_missing_semicolon() {
+    let x = 42
+    let y = 10;
+    x + y
+}
+
+// Test 2: Multiple diagnostics in same function
+// Expected: Multiple "expected ';'" diagnostics
+fn test_multiple_errors() {
+    let a = 1
+    let b = 2
+    let c = 3
+    a + b + c
+}
+
+// Test 3: Unclosed delimiter diagnostic
+// Expected: "unclosed '('" or "expected ')'"
+fn test_unclosed_paren() {
+    let x = (1 + 2;
+    x
+}
+
+// Test 4: Mismatched delimiter diagnostic
+// Expected: "mismatched delimiter" or "expected ')' but found ']'"
+fn test_mismatched() {
+    let x = (1 + 2];
+    x
+}
+
+// Test 5: Invalid token diagnostic
+// Expected: "unexpected token" for invalid characters
+fn test_invalid_token() {
+    let x = @#$;
+    x
+}
+
+// Test 6: Incomplete expression diagnostic
+// Expected: "expected expression" after operator
+fn test_incomplete_expr() {
+    let x = 1 +;
+    x
+}
+
+// Test 7: Missing type annotation diagnostic
+// Expected: "expected ':'" or "expected type"
+fn test_missing_type(x) -> Int {
+    x
+}
+
+// Test 8: Invalid type syntax diagnostic
+// Expected: "expected type" or "invalid type syntax"
+fn test_invalid_type() {
+    let x: @#$ = 42;
+    x
+}
+
+// Test 9: Diagnostic range accuracy
+// Expected: Diagnostic spans exactly the problematic region
+fn test_diagnostic_range() {
+    // The error should point exactly to the missing semicolon location
+    let precisely_here = 42
+    let next = 10;
+    precisely_here
+}
+
+// Test 10: Diagnostic after incremental edit
+// When 'x' is changed to 'y', only that change should be re-diagnosed
+fn test_incremental_update() {
+    let x = 42;
+    let result = x + 1;
+    result
+}
+
+// Test 11: Diagnostic clears after fix
+// After adding semicolon, diagnostic should disappear
+fn test_diagnostic_clear() {
+    let fixable = 42
+    fixable
+}
+
+// Test 12: Nested error diagnostics
+// Errors in nested contexts should have correct spans
+fn test_nested_errors() {
+    if true {
+        let inner = 1
+        if false {
+            let deeper = 2
+            deeper
+        }
+        inner
+    }
+}
+
+// Test 13: Error in type definition
+// Expected diagnostic at type level
+type ErrorType is {
+    field_without_type,
+};
+
+// Test 14: Error in match expression
+// Expected diagnostic for incomplete match arm
+fn test_match_error(opt: Maybe<Int>) -> Int {
+    match opt {
+        Some(x) =>
+        None => 0,
+    }
+}
+
+// Test 15: Multiple error types
+// Different error kinds in same file
+fn test_mixed_errors() {
+    let missing_semi = 1
+    let unclosed = (2;
+    let invalid = @@@;
+    1
+}
+
+// Test 16: Error recovery diagnostics
+// Parser should recover and report further errors
+fn test_recovery_diagnostics() {
+    @@@
+    let valid_after = 42;
+    $$$
+    let another_valid = 10;
+    valid_after
+}
+
+// Test 17: Diagnostic severity levels
+// Different errors might have different severities
+fn test_severity() {
+    // Error: syntax error
+    let error_level = 1
+    // Warning might be for unused variable
+    let unused = 42;
+    error_level
+}
+
+// ============================================================================
+// Valid code section - should produce no diagnostics
+// ============================================================================
+
+fn completely_valid() -> Int {
+    let x = 42;
+    let y = x + 1;
+    y
+}
+
+type ValidType is {
+    field: Int,
+};
+
+implement ValidType {
+    fn get(self) -> Int {
+        self.field
+    }
+}

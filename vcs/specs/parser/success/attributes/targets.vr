@@ -1,0 +1,82 @@
+// @test: parse
+// @level: L0
+// @tags: parser, attributes, targets
+// @description: Test attributes on different targets
+
+// On functions
+@inline
+@hot
+pub fn hot_function() {}
+
+// On types
+@derive(Clone, Debug)
+@repr(C)
+type FFIStruct is {
+    @align(8)
+    field1: i64,
+
+    @used
+    field2: i32
+};
+
+// On variants
+type Status is
+    | @default Active
+    | @deprecated Inactive
+    | Error(Text);
+
+// On fields
+type Config is {
+    @serialize(rename = "host_name")
+    host: Text,
+
+    @serialize(skip)
+    internal_cache: Map<Text, Value>,
+
+    @validate(min = 1, max = 65535)
+    port: Int
+};
+
+// On parameters
+fn process(
+    @unused _context: Context,
+    @must_use data: &Data
+) -> Result {}
+
+// On impl blocks
+@specialize
+implement Display for List<Text> {
+    fn display(&self) -> Text {
+        self.join(", ")
+    }
+}
+
+// On match arms
+fn handle(msg: Message) {
+    match msg {
+        @cold Error(e) => log_error(e),
+        @hot Data(d) => process(d),
+        _ => ignore()
+    }
+}
+
+// On field initializers
+fn create_config() -> Config {
+    Config {
+        @cfg(debug) debug_mode: true,
+        @cfg(release) debug_mode: false,
+        ..Default.default()
+    }
+}
+
+// On modules
+@cfg(test)
+module tests {
+    fn test_something() {}
+}
+
+// On extern functions
+extern "C" {
+    @link_name("c_function_name")
+    fn verum_function();
+}

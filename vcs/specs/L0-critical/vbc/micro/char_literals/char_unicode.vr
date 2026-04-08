@@ -1,0 +1,17 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    // Unicode characters beyond ASCII
+    let euro = '€';
+    assert_eq(euro as Int, 8364);
+
+    // Chinese character
+    let zhong = '中';
+    assert_eq(zhong as Int, 20013);
+
+    // Emoji
+    let heart = '❤';
+    assert_eq(heart as Int, 10084);
+}

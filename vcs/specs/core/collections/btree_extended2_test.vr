@@ -1,0 +1,457 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: btree, map, set, into_keys, into_values, try_insert, take, replace, extract_if
+// @description: Tests for new BTreeMap/BTreeSet methods: into_keys, into_values, try_insert, extract_if, get, take, replace, strict subset/superset
+
+mount core.collections.btree.{BTreeMap, BTreeSet};
+mount core.collections.list.{List};
+
+// =============================================================================
+// BTreeMap — into_keys / into_values
+// =============================================================================
+
+@test
+fn test_btreemap_into_keys_basic() {
+    let mut map = BTreeMap.new();
+    map.insert(3, "three");
+    map.insert(1, "one");
+    map.insert(2, "two");
+    let keys = map.into_keys();
+    // Keys should be in sorted order
+    assert_eq(keys.len(), 3);
+    assert_eq(keys[0], 1);
+    assert_eq(keys[1], 2);
+    assert_eq(keys[2], 3);
+}
+
+@test
+fn test_btreemap_into_keys_empty() {
+    let map: BTreeMap<Int, Text> = BTreeMap.new();
+    let keys = map.into_keys();
+    assert_eq(keys.len(), 0);
+}
+
+@test
+fn test_btreemap_into_keys_single() {
+    let mut map = BTreeMap.new();
+    map.insert(42, "answer");
+    let keys = map.into_keys();
+    assert_eq(keys.len(), 1);
+    assert_eq(keys[0], 42);
+}
+
+@test
+fn test_btreemap_into_values_basic() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    map.insert(3, "c");
+    let vals = map.into_values();
+    assert_eq(vals.len(), 3);
+    // Values should be in key-sorted order
+    assert_eq(vals[0], "a");
+    assert_eq(vals[1], "b");
+    assert_eq(vals[2], "c");
+}
+
+@test
+fn test_btreemap_into_values_empty() {
+    let map: BTreeMap<Int, Text> = BTreeMap.new();
+    let vals = map.into_values();
+    assert_eq(vals.len(), 0);
+}
+
+@test
+fn test_btreemap_into_values_single() {
+    let mut map = BTreeMap.new();
+    map.insert(1, 99);
+    let vals = map.into_values();
+    assert_eq(vals.len(), 1);
+    assert_eq(vals[0], 99);
+}
+
+// =============================================================================
+// BTreeMap — try_insert
+// =============================================================================
+
+@test
+fn test_btreemap_try_insert_vacant() {
+    let mut map = BTreeMap.new();
+    let result = map.try_insert(1, "one");
+    assert(result.is_ok());
+    assert_eq(map.len(), 1);
+    assert_eq(map.get(&1), Some(&"one"));
+}
+
+@test
+fn test_btreemap_try_insert_occupied() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "one");
+    let result = map.try_insert(1, "ONE");
+    assert(result.is_err());
+    // Original value should be unchanged
+    assert_eq(map.get(&1), Some(&"one"));
+    assert_eq(map.len(), 1);
+}
+
+@test
+fn test_btreemap_try_insert_multiple() {
+    let mut map = BTreeMap.new();
+    assert(map.try_insert(1, "a").is_ok());
+    assert(map.try_insert(2, "b").is_ok());
+    assert(map.try_insert(3, "c").is_ok());
+    assert(map.try_insert(2, "B").is_err());
+    assert_eq(map.len(), 3);
+}
+
+@test
+fn test_btreemap_try_insert_empty() {
+    let mut map: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(map.try_insert(1, 10).is_ok());
+    assert_eq(map.len(), 1);
+}
+
+// =============================================================================
+// BTreeMap — extract_if
+// =============================================================================
+
+@test
+fn test_btreemap_extract_if_basic() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    map.insert(3, "c");
+    map.insert(4, "d");
+    let extracted = map.extract_if(|k, _v| *k > 2);
+    assert_eq(extracted.len(), 2);
+    assert_eq(map.len(), 2);
+    assert(map.contains_key(&1));
+    assert(map.contains_key(&2));
+    assert(!map.contains_key(&3));
+    assert(!map.contains_key(&4));
+}
+
+@test
+fn test_btreemap_extract_if_none() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let extracted = map.extract_if(|_k, _v| false);
+    assert_eq(extracted.len(), 0);
+    assert_eq(map.len(), 2);
+}
+
+@test
+fn test_btreemap_extract_if_all() {
+    let mut map = BTreeMap.new();
+    map.insert(1, "a");
+    map.insert(2, "b");
+    let extracted = map.extract_if(|_k, _v| true);
+    assert_eq(extracted.len(), 2);
+    assert(map.is_empty());
+}
+
+@test
+fn test_btreemap_extract_if_empty() {
+    let mut map: BTreeMap<Int, Text> = BTreeMap.new();
+    let extracted = map.extract_if(|_k, _v| true);
+    assert_eq(extracted.len(), 0);
+}
+
+// =============================================================================
+// BTreeSet — get
+// =============================================================================
+
+@test
+fn test_btreeset_get_found() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    let result = set.get(&2);
+    assert(result.is_some());
+    assert_eq(*result.unwrap(), 2);
+}
+
+@test
+fn test_btreeset_get_not_found() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    let result = set.get(&99);
+    assert(result.is_none());
+}
+
+@test
+fn test_btreeset_get_empty() {
+    let set: BTreeSet<Int> = BTreeSet.new();
+    let result = set.get(&1);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// BTreeSet — take
+// =============================================================================
+
+@test
+fn test_btreeset_take_found() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    let taken = set.take(&2);
+    assert_eq(taken, Some(2));
+    assert_eq(set.len(), 2);
+    assert(!set.contains(&2));
+}
+
+@test
+fn test_btreeset_take_not_found() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    let taken = set.take(&99);
+    assert(taken.is_none());
+    assert_eq(set.len(), 1);
+}
+
+@test
+fn test_btreeset_take_empty() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    let taken = set.take(&1);
+    assert(taken.is_none());
+}
+
+@test
+fn test_btreeset_take_all_elements() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    assert_eq(set.take(&1), Some(1));
+    assert_eq(set.take(&2), Some(2));
+    assert_eq(set.take(&3), Some(3));
+    assert(set.is_empty());
+}
+
+// =============================================================================
+// BTreeSet — replace
+// =============================================================================
+
+@test
+fn test_btreeset_replace_existing() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    let old = set.replace(2);
+    assert_eq(old, Some(2));
+    assert_eq(set.len(), 2);
+    assert(set.contains(&2));
+}
+
+@test
+fn test_btreeset_replace_new() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    let old = set.replace(5);
+    assert(old.is_none());
+    assert_eq(set.len(), 2);
+    assert(set.contains(&5));
+}
+
+@test
+fn test_btreeset_replace_empty() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    let old = set.replace(1);
+    assert(old.is_none());
+    assert_eq(set.len(), 1);
+    assert(set.contains(&1));
+}
+
+// =============================================================================
+// BTreeSet — strict subset/superset
+// =============================================================================
+
+@test
+fn test_btreeset_is_strict_subset_true() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+    assert(a.is_strict_subset(&b));
+}
+
+@test
+fn test_btreeset_is_strict_subset_equal_sets() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    // Equal sets are NOT strict subsets
+    assert(!a.is_strict_subset(&b));
+}
+
+@test
+fn test_btreeset_is_strict_subset_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    assert(a.is_strict_subset(&b));
+}
+
+@test
+fn test_btreeset_is_strict_subset_both_empty() {
+    let a: BTreeSet<Int> = BTreeSet.new();
+    let b: BTreeSet<Int> = BTreeSet.new();
+    assert(!a.is_strict_subset(&b));
+}
+
+@test
+fn test_btreeset_is_strict_superset_true() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    assert(a.is_strict_superset(&b));
+}
+
+@test
+fn test_btreeset_is_strict_superset_equal_sets() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = BTreeSet.new();
+    b.insert(1);
+    b.insert(2);
+    assert(!a.is_strict_superset(&b));
+}
+
+@test
+fn test_btreeset_is_strict_superset_empty_other() {
+    let mut a = BTreeSet.new();
+    a.insert(1);
+    let b: BTreeSet<Int> = BTreeSet.new();
+    assert(a.is_strict_superset(&b));
+}
+
+// =============================================================================
+// BTreeSet — extract_if
+// =============================================================================
+
+@test
+fn test_btreeset_extract_if_basic() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    set.insert(4);
+    set.insert(5);
+    let extracted = set.extract_if(|x| *x % 2 == 0);
+    assert_eq(extracted.len(), 2);
+    assert_eq(set.len(), 3);
+    assert(extracted.contains(&2));
+    assert(extracted.contains(&4));
+    assert(set.contains(&1));
+    assert(set.contains(&3));
+    assert(set.contains(&5));
+}
+
+@test
+fn test_btreeset_extract_if_none() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(3);
+    let extracted = set.extract_if(|x| *x % 2 == 0);
+    assert_eq(extracted.len(), 0);
+    assert_eq(set.len(), 2);
+}
+
+@test
+fn test_btreeset_extract_if_all() {
+    let mut set = BTreeSet.new();
+    set.insert(2);
+    set.insert(4);
+    let extracted = set.extract_if(|_x| true);
+    assert_eq(extracted.len(), 2);
+    assert(set.is_empty());
+}
+
+@test
+fn test_btreeset_extract_if_empty() {
+    let mut set: BTreeSet<Int> = BTreeSet.new();
+    let extracted = set.extract_if(|_x| true);
+    assert_eq(extracted.len(), 0);
+}
+
+// =============================================================================
+// Integration tests
+// =============================================================================
+
+@test
+fn test_btreemap_into_keys_large() {
+    let mut map = BTreeMap.new();
+    for i in range(0, 50) {
+        map.insert(i, i * 10);
+    }
+    let keys = map.into_keys();
+    assert_eq(keys.len(), 50);
+    // Verify sorted order
+    for i in range(0, 50) {
+        assert_eq(keys[i], i);
+    }
+}
+
+@test
+fn test_btreemap_into_values_large() {
+    let mut map = BTreeMap.new();
+    for i in range(0, 50) {
+        map.insert(i, i * 10);
+    }
+    let vals = map.into_values();
+    assert_eq(vals.len(), 50);
+    // Values in key-sorted order
+    for i in range(0, 50) {
+        assert_eq(vals[i], i * 10);
+    }
+}
+
+@test
+fn test_btreeset_take_then_reinsert() {
+    let mut set = BTreeSet.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    let taken = set.take(&2);
+    assert_eq(taken, Some(2));
+    assert_eq(set.len(), 2);
+
+    // Reinsert
+    set.insert(2);
+    assert_eq(set.len(), 3);
+    assert(set.contains(&2));
+}
+
+@test
+fn test_btreemap_extract_if_preserves_order() {
+    let mut map = BTreeMap.new();
+    for i in range(0, 20) {
+        map.insert(i, i);
+    }
+    let extracted = map.extract_if(|k, _v| *k % 2 == 0);
+    // Remaining should be odd numbers in order
+    let mut prev = -1;
+    for (k, _v) in map.iter() {
+        assert(*k > prev);
+        assert(*k % 2 != 0);
+        prev = *k;
+    }
+    assert_eq(map.len(), 10);
+    assert_eq(extracted.len(), 10);
+}

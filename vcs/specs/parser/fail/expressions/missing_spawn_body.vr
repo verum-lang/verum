@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, spawn, body, error
+// @description: Spawn without expression to execute
+// @expected-error: E048
+
+async fn test() {
+    let handle = spawn;  // Missing spawn body
+}

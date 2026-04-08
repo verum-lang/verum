@@ -1,0 +1,57 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, code_gen, compile_error, compile_warning, context, error
+// @description: Test that compile_error and compile_warning require CompileDiag context
+// @expected-error: M201
+
+// =============================================================================
+// COMPILE_ERROR WITHOUT CONTEXT
+// =============================================================================
+
+// ERROR: compile_error requires CompileDiag context
+meta fn test_compile_error_no_context() {
+    compile_error("This should fail - no CompileDiag context");
+}
+
+// =============================================================================
+// COMPILE_WARNING WITHOUT CONTEXT
+// =============================================================================
+
+// ERROR: compile_warning requires CompileDiag context
+meta fn test_compile_warning_no_context() {
+    compile_warning("This should fail - no CompileDiag context");
+}
+
+// =============================================================================
+// WRONG CONTEXT
+// =============================================================================
+
+// ERROR: MetaTypes is not CompileDiag
+meta fn test_with_wrong_context() using [MetaTypes] {
+    compile_error("MetaTypes doesn't provide CompileDiag");
+}
+
+// ERROR: MetaRuntime is not CompileDiag
+meta fn test_with_metaruntime() using [MetaRuntime] {
+    compile_warning("MetaRuntime doesn't provide CompileDiag");
+}
+
+// =============================================================================
+// NESTED CONTEXT MISSING
+// =============================================================================
+
+// Inner function without context
+meta fn inner_diagnostic() {
+    compile_warning("No context in inner function");
+}
+
+// Outer function has context but doesn't propagate
+meta fn outer_with_context() using [CompileDiag] {
+    inner_diagnostic();  // ERROR: inner function lacks context
+}
+
+fn main() {
+    // All these should cause compilation errors
+    @const test_compile_error_no_context();
+}

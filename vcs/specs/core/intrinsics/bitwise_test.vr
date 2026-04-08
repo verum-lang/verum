@@ -1,0 +1,494 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/bitwise_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, bitwise, bits, shifts, rotation
+// @description: Comprehensive tests for bitwise operation intrinsics.
+//
+// Coverage:
+// - Logical: bitand, bitor, bitxor, bitnot
+// - Shifts: shl, shr, lshr, ashr
+// - Rotations: rotl, rotr, fshl, fshr
+// - Bit counting: clz, ctz, popcnt, leading_ones, trailing_ones
+// - Type-specific counting: clz_u32, ctz_u32, popcnt_u32, clz_u64, ctz_u64, popcnt_u64
+// - Manipulation: bswap, bitreverse, byte_swap_bits
+//
+// Test Strategy:
+// - Test with known bit patterns
+// - Test edge cases: zero, all ones, single bit
+// - Test type-specific variants (UInt32, UInt64)
+// - Break tests into focused @test functions
+// =============================================================================
+
+module test.stdlib.intrinsics.bitwise_test;
+
+mount core.intrinsics.bitwise.{
+    // Logical
+    bitand, bitor, bitxor, bitnot,
+    // Shifts
+    shl, shr, lshr, ashr,
+    // Rotations
+    rotl, rotr, fshl, fshr,
+    // Bit counting
+    clz, ctz, popcnt, leading_ones, trailing_ones,
+    clz_u32, ctz_u32, popcnt_u32,
+    clz_u64, ctz_u64, popcnt_u64,
+    // Manipulation
+    bswap, bitreverse, byte_swap_bits,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Logical — AND
+// =============================================================================
+
+@test
+fn test_bitand_basic() {
+    assert(bitand(0b1100, 0b1010) == 0b1000);
+    assert(bitand(0xFF, 0x0F) == 0x0F);
+}
+
+@test
+fn test_bitand_edge() {
+    assert(bitand(0, 0xFFFF) == 0);
+    assert(bitand(-1, 0xFF) == 0xFF);
+    assert(bitand(-1, -1) == -1);
+}
+
+// =============================================================================
+// Logical — OR
+// =============================================================================
+
+@test
+fn test_bitor_basic() {
+    assert(bitor(0b1100, 0b1010) == 0b1110);
+    assert(bitor(0xF0, 0x0F) == 0xFF);
+}
+
+@test
+fn test_bitor_edge() {
+    assert(bitor(0, 0) == 0);
+    assert(bitor(0, 0xFF) == 0xFF);
+    assert(bitor(-1, 0) == -1);
+}
+
+// =============================================================================
+// Logical — XOR
+// =============================================================================
+
+@test
+fn test_bitxor_basic() {
+    assert(bitxor(0b1100, 0b1010) == 0b0110);
+    assert(bitxor(0xAA, 0x55) == 0xFF);
+}
+
+@test
+fn test_bitxor_self_inverse() {
+    let x = 12345;
+    assert(bitxor(bitxor(x, 0xAAAA), 0xAAAA) == x);
+    assert(bitxor(0xFF, 0xFF) == 0);
+}
+
+@test
+fn test_bitxor_edge() {
+    assert(bitxor(0, 0xFF) == 0xFF);
+    assert(bitxor(0, 0) == 0);
+}
+
+// =============================================================================
+// Logical — NOT
+// =============================================================================
+
+@test
+fn test_bitnot_basic() {
+    assert(bitnot(0) == -1);
+    assert(bitnot(-1) == 0);
+}
+
+@test
+fn test_bitnot_double() {
+    let x = 42;
+    assert(bitnot(bitnot(x)) == x);
+}
+
+// =============================================================================
+// Shift — Left Shift
+// =============================================================================
+
+@test
+fn test_shl_powers() {
+    assert(shl(1, 0 as UInt32) == 1);
+    assert(shl(1, 1 as UInt32) == 2);
+    assert(shl(1, 2 as UInt32) == 4);
+    assert(shl(1, 3 as UInt32) == 8);
+    assert(shl(1, 4 as UInt32) == 16);
+}
+
+@test
+fn test_shl_pattern() {
+    assert(shl(0b1010, 2 as UInt32) == 0b101000);
+    assert(shl(42, 0 as UInt32) == 42);
+}
+
+// =============================================================================
+// Shift — Right Shift
+// =============================================================================
+
+@test
+fn test_shr_basic() {
+    assert(shr(8, 1 as UInt32) == 4);
+    assert(shr(8, 2 as UInt32) == 2);
+    assert(shr(8, 3 as UInt32) == 1);
+    assert(shr(16, 4 as UInt32) == 1);
+}
+
+@test
+fn test_shr_identity() {
+    assert(shr(42, 0 as UInt32) == 42);
+    assert(shr(0b1010, 1 as UInt32) == 0b101);
+}
+
+// =============================================================================
+// Shift — Logical/Arithmetic Right Shift
+// =============================================================================
+
+@test
+fn test_lshr_basic() {
+    assert(lshr(8, 1 as UInt32) == 4);
+    assert(lshr(16, 2 as UInt32) == 4);
+}
+
+@test
+fn test_ashr_signed() {
+    assert(ashr(8, 1 as UInt32) == 4);
+    assert(ashr(-8, 1 as UInt32) == -4);
+}
+
+// =============================================================================
+// Rotation
+// =============================================================================
+
+@test
+fn test_rotl_identity() {
+    let val: UInt32 = 0x12345678 as UInt32;
+    assert(rotl(val, 0 as UInt32) == val);
+}
+
+@test
+fn test_rotr_identity() {
+    let val: UInt32 = 0x12345678 as UInt32;
+    assert(rotr(val, 0 as UInt32) == val);
+}
+
+@test
+fn test_rotl_wrap() {
+    let high_bit: UInt32 = 0x80000000 as UInt32;
+    let one: UInt32 = 1 as UInt32;
+    assert(rotl(high_bit, 1 as UInt32) == one);
+}
+
+@test
+fn test_rotr_wrap() {
+    let one: UInt32 = 1 as UInt32;
+    let high_bit: UInt32 = 0x80000000 as UInt32;
+    assert(rotr(one, 1 as UInt32) == high_bit);
+}
+
+@test
+fn test_rot_roundtrip() {
+    let x: UInt32 = 0xDEADBEEF as UInt32;
+    assert(rotr(rotl(x, 7 as UInt32), 7 as UInt32) == x);
+    assert(rotl(rotr(x, 13 as UInt32), 13 as UInt32) == x);
+}
+
+@test
+fn test_fshl_fshr_import() {
+    let _ = fshl;
+    let _ = fshr;
+}
+
+// =============================================================================
+// Bit Counting — CLZ
+// =============================================================================
+
+@test
+fn test_clz_powers() {
+    assert(clz(1) == 63);
+    assert(clz(2) == 62);
+    assert(clz(4) == 61);
+    assert(clz(0x100) == 55);
+}
+
+// =============================================================================
+// Bit Counting — CTZ
+// =============================================================================
+
+@test
+fn test_ctz_powers() {
+    assert(ctz(1) == 0);
+    assert(ctz(2) == 1);
+    assert(ctz(4) == 2);
+    assert(ctz(8) == 3);
+    assert(ctz(0x100) == 8);
+}
+
+// =============================================================================
+// Bit Counting — Popcount
+// =============================================================================
+
+@test
+fn test_popcnt_basic() {
+    assert(popcnt(0) == 0);
+    assert(popcnt(1) == 1);
+    assert(popcnt(0b111) == 3);
+    assert(popcnt(0b10101010) == 4);
+}
+
+@test
+fn test_popcnt_bytes() {
+    assert(popcnt(0xFF) == 8);
+    assert(popcnt(0xFFFF) == 16);
+}
+
+// =============================================================================
+// Bit Counting — Type-specific UInt32
+// =============================================================================
+
+@test
+fn test_clz_u32() {
+    let u32_one: UInt32 = 1 as UInt32;
+    assert(clz_u32(u32_one) == 31);
+}
+
+@test
+fn test_ctz_u32() {
+    let u32_one: UInt32 = 1 as UInt32;
+    assert(ctz_u32(u32_one) == 0);
+}
+
+@test
+fn test_popcnt_u32() {
+    let u32_one: UInt32 = 1 as UInt32;
+    assert(popcnt_u32(u32_one) == 1);
+    let u32_pattern: UInt32 = 0xF0F0F0F0 as UInt32;
+    assert(popcnt_u32(u32_pattern) == 16);
+}
+
+// =============================================================================
+// Bit Counting — Type-specific UInt64
+// =============================================================================
+
+@test
+fn test_clz_u64() {
+    let u64_one: UInt64 = 1 as UInt64;
+    assert(clz_u64(u64_one) == 63);
+}
+
+@test
+fn test_ctz_u64() {
+    let u64_one: UInt64 = 1 as UInt64;
+    assert(ctz_u64(u64_one) == 0);
+}
+
+@test
+fn test_popcnt_u64() {
+    let u64_one: UInt64 = 1 as UInt64;
+    assert(popcnt_u64(u64_one) == 1);
+}
+
+// =============================================================================
+// Bit Counting — Leading/Trailing Ones
+// =============================================================================
+
+@test
+fn test_leading_ones() {
+    assert(leading_ones(-1) == 64);
+    assert(leading_ones(0) == 0);
+}
+
+@test
+fn test_trailing_ones() {
+    assert(trailing_ones(0) == 0);
+    assert(trailing_ones(1) == 1);
+    assert(trailing_ones(0b111) == 3);
+    assert(trailing_ones(0b1110) == 0);
+}
+
+// =============================================================================
+// Bit Manipulation — Byte Swap
+// =============================================================================
+
+@test
+fn test_bswap_u32() {
+    let val: UInt32 = 0x12345678 as UInt32;
+    let swapped: UInt32 = 0x78563412 as UInt32;
+    assert(bswap(val) == swapped);
+}
+
+@test
+fn test_bswap_self_inverse() {
+    let val: UInt32 = 0x12345678 as UInt32;
+    assert(bswap(bswap(val)) == val);
+}
+
+@test
+fn test_bswap_zero() {
+    let zero: UInt32 = 0 as UInt32;
+    assert(bswap(zero) == zero);
+}
+
+// =============================================================================
+// Bit Manipulation — Bit Reverse
+// =============================================================================
+
+@test
+fn test_bitreverse_high_low() {
+    let high_bit: UInt32 = 0x80000000 as UInt32;
+    let low_bit: UInt32 = 0x00000001 as UInt32;
+    assert(bitreverse(high_bit) == low_bit);
+    assert(bitreverse(low_bit) == high_bit);
+}
+
+@test
+fn test_bitreverse_self_inverse() {
+    let val: UInt32 = 0x12345678 as UInt32;
+    assert(bitreverse(bitreverse(val)) == val);
+}
+
+@test
+fn test_bitreverse_edge() {
+    let zero: UInt32 = 0 as UInt32;
+    assert(bitreverse(zero) == zero);
+    let all_ones: UInt32 = 0xFFFFFFFF as UInt32;
+    assert(bitreverse(all_ones) == all_ones);
+}
+
+@test
+fn test_byte_swap_bits_import() {
+    let _ = byte_swap_bits;
+}
+
+// =============================================================================
+// Additional Bit Counting Tests
+// =============================================================================
+
+@test
+fn test_clz_max_int() {
+    // All bits set for Int (64-bit), clz should be 0
+    assert(clz(-1) == 0);
+}
+
+@test
+fn test_ctz_zero() {
+    // ctz(0) is typically 64 (all bits zero)
+    assert(ctz(0) == 64);
+}
+
+@test
+fn test_clz_zero() {
+    // clz(0) is 64 (all bits zero)
+    assert(clz(0) == 64);
+}
+
+@test
+fn test_popcnt_all_64_bits() {
+    // -1 is all ones in two's complement (64 bits)
+    assert(popcnt(-1) == 64);
+}
+
+@test
+fn test_popcnt_alternating() {
+    // 0x5555 = 0101 0101 0101 0101 (8 ones in 16 bits)
+    assert(popcnt(0x5555) == 8);
+}
+
+// =============================================================================
+// Additional Logical Tests
+// =============================================================================
+
+@test
+fn test_bitand_idempotent() {
+    let x = 12345;
+    assert(bitand(x, x) == x);
+}
+
+@test
+fn test_bitor_idempotent() {
+    let x = 12345;
+    assert(bitor(x, x) == x);
+}
+
+@test
+fn test_bitxor_zero_identity() {
+    let x = 42;
+    assert(bitxor(x, 0) == x);
+}
+
+// =============================================================================
+// Additional Shift Tests
+// =============================================================================
+
+@test
+fn test_shl_then_shr_roundtrip() {
+    let x = 42;
+    assert(shr(shl(x, 3 as UInt32), 3 as UInt32) == x);
+}
+
+@test
+fn test_shl_zero() {
+    assert(shl(0, 10 as UInt32) == 0);
+}
+
+@test
+fn test_shr_zero() {
+    assert(shr(0, 10 as UInt32) == 0);
+}
+
+// =============================================================================
+// Additional Type-Specific Tests
+// =============================================================================
+
+@test
+fn test_clz_u32_zero() {
+    let zero: UInt32 = 0 as UInt32;
+    assert(clz_u32(zero) == 32);
+}
+
+@test
+fn test_ctz_u32_zero() {
+    let zero: UInt32 = 0 as UInt32;
+    assert(ctz_u32(zero) == 32);
+}
+
+@test
+fn test_popcnt_u32_all_ones() {
+    let all_ones: UInt32 = 0xFFFFFFFF as UInt32;
+    assert(popcnt_u32(all_ones) == 32);
+}
+
+@test
+fn test_clz_u64_zero() {
+    let zero: UInt64 = 0 as UInt64;
+    assert(clz_u64(zero) == 64);
+}
+
+@test
+fn test_ctz_u64_zero() {
+    let zero: UInt64 = 0 as UInt64;
+    assert(ctz_u64(zero) == 64);
+}
+
+@test
+fn test_popcnt_u64_all_ones() {
+    let all_ones: UInt64 = 0xFFFFFFFFFFFFFFFF as UInt64;
+    assert(popcnt_u64(all_ones) == 64);
+}

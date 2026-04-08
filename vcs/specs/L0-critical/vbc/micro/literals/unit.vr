@@ -1,0 +1,5 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() { assert_eq((), ()); }

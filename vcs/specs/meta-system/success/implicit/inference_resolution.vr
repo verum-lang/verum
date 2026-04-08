@@ -1,0 +1,242 @@
+// @test: meta-pass
+// @level: L2
+// @tier: 0
+// @tags: meta, implicit, inference, resolution, type_class
+// @description: Tests type inference and resolution patterns in meta-system
+
+// =============================================================================
+// TYPE-BASED DISPATCH (simulating type class resolution)
+// =============================================================================
+
+// Equality functions for different types
+meta fn eq_dispatch(tag: Text, a: Int, b: Int) -> Bool {
+    if text_eq(tag, "Int") { a == b }
+    else if text_eq(tag, "UInt") { a == b }
+    else { false }
+}
+
+// Show/stringify dispatch
+meta fn show_dispatch(tag: Text, value: Int) -> Text {
+    if text_eq(tag, "Int") {
+        int_to_text(value)
+    } else if text_eq(tag, "Bool") {
+        if value == 0 { "false" } else { "true" }
+    } else {
+        "unknown"
+    }
+}
+
+// =============================================================================
+// DERIVED INSTANCE PATTERNS
+// =============================================================================
+
+// Show for optional values (Some/None pattern)
+meta fn show_maybe(has_value: Bool, value: Int) -> Text {
+    if has_value {
+        text_concat("Some(", text_concat(int_to_text(value), ")"))
+    } else {
+        "None"
+    }
+}
+
+// Show for pairs
+meta fn show_pair(a: Int, b: Int) -> Text {
+    text_concat("(", text_concat(int_to_text(a), text_concat(", ", text_concat(int_to_text(b), ")"))))
+}
+
+// Show for list (simplified)
+meta fn show_list(items: List<Int>) -> Text {
+    let mut result = "[";
+    let mut i = 0;
+    while i < list_len(items) {
+        if i > 0 {
+            result = text_concat(result, ", ");
+        }
+        result = text_concat(result, int_to_text(maybe_unwrap(list_get(items, i))));
+        i = i + 1;
+    }
+    text_concat(result, "]")
+}
+
+// =============================================================================
+// MONOID PATTERNS
+// =============================================================================
+
+// Monoid empty for different types
+meta fn monoid_empty(tag: Text) -> Int {
+    if text_eq(tag, "add") { 0 }      // Additive monoid
+    else if text_eq(tag, "mul") { 1 }  // Multiplicative monoid
+    else if text_eq(tag, "max") { -999999 }  // Max monoid (min sentinel)
+    else if text_eq(tag, "min") { 999999 }   // Min monoid (max sentinel)
+    else { 0 }
+}
+
+// Monoid combine for different types
+meta fn monoid_combine(tag: Text, a: Int, b: Int) -> Int {
+    if text_eq(tag, "add") { a + b }
+    else if text_eq(tag, "mul") { a * b }
+    else if text_eq(tag, "max") { if a > b { a } else { b } }
+    else if text_eq(tag, "min") { if a < b { a } else { b } }
+    else { a }
+}
+
+// Fold using monoid
+meta fn fold_monoid(items: List<Int>, tag: Text) -> Int {
+    let mut result = monoid_empty(tag);
+    let mut i = 0;
+    while i < list_len(items) {
+        result = monoid_combine(tag, result, maybe_unwrap(list_get(items, i)));
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// FUNCTOR PATTERNS
+// =============================================================================
+
+// Map over optional
+meta fn map_maybe(has_value: Bool, value: Int, op: Text) -> (Bool, Int) {
+    if has_value {
+        let mapped = if text_eq(op, "double") { value * 2 }
+                     else if text_eq(op, "inc") { value + 1 }
+                     else if text_eq(op, "square") { value * value }
+                     else { value };
+        (true, mapped)
+    } else {
+        (false, 0)
+    }
+}
+
+// Map over list
+meta fn map_list(items: List<Int>, op: Text) -> List<Int> {
+    let mut result = [];
+    let mut i = 0;
+    while i < list_len(items) {
+        let item = maybe_unwrap(list_get(items, i));
+        let mapped = if text_eq(op, "double") { item * 2 }
+                     else if text_eq(op, "inc") { item + 1 }
+                     else if text_eq(op, "square") { item * item }
+                     else { item };
+        result = list_push(result, mapped);
+        i = i + 1;
+    }
+    result
+}
+
+// =============================================================================
+// CONSTRAINT RESOLUTION PATTERNS
+// =============================================================================
+
+// Check if a value satisfies a constraint
+meta fn satisfies_positive(value: Int) -> Bool {
+    value > 0
+}
+
+meta fn satisfies_bounded(value: Int, low: Int, high: Int) -> Bool {
+    value >= low && value <= high
+}
+
+// Safe operations with constraint checking
+meta fn safe_divide(a: Int, b: Int) -> (Bool, Int) {
+    if b != 0 {
+        (true, a / b)
+    } else {
+        (false, 0)
+    }
+}
+
+meta fn safe_sqrt_approx(x: Int) -> (Bool, Int) {
+    if x >= 0 {
+        // Simple integer square root approximation
+        let mut result = 0;
+        while (result + 1) * (result + 1) <= x {
+            result = result + 1;
+        }
+        (true, result)
+    } else {
+        (false, 0)
+    }
+}
+
+// =============================================================================
+// PRIORITY/COHERENCE PATTERNS
+// =============================================================================
+
+// More specific instance wins (simulating instance priority)
+meta fn resolve_instance(tag1: Text, tag2: Text, value: Int) -> Text {
+    // More specific: if both tags match, use combined behavior
+    if text_eq(tag1, "Show") && text_eq(tag2, "Eq") {
+        // Has both Show and Eq
+        text_concat("Showable: ", int_to_text(value))
+    } else if text_eq(tag1, "Show") {
+        // Just Show
+        int_to_text(value)
+    } else if text_eq(tag2, "Eq") {
+        // Just Eq - show as comparable
+        text_concat("Comparable(", text_concat(int_to_text(value), ")"))
+    } else {
+        "unknown"
+    }
+}
+
+// =============================================================================
+// MAIN TEST FUNCTION
+// =============================================================================
+
+fn main() {
+    // Test type-based dispatch
+    @const assert(eq_dispatch("Int", 5, 5));
+    @const assert(!eq_dispatch("Int", 5, 6));
+    @const assert_eq(show_dispatch("Int", 42), "42");
+    @const assert_eq(show_dispatch("Bool", 1), "true");
+    @const assert_eq(show_dispatch("Bool", 0), "false");
+
+    // Test derived instances
+    @const assert_eq(show_maybe(true, 42), "Some(42)");
+    @const assert_eq(show_maybe(false, 0), "None");
+    @const assert_eq(show_pair(1, 2), "(1, 2)");
+    @const assert_eq(show_list([1, 2, 3]), "[1, 2, 3]");
+
+    // Test monoid patterns
+    @const assert_eq(monoid_empty("add"), 0);
+    @const assert_eq(monoid_empty("mul"), 1);
+    @const assert_eq(monoid_combine("add", 3, 5), 8);
+    @const assert_eq(monoid_combine("mul", 3, 5), 15);
+    @const assert_eq(fold_monoid([1, 2, 3, 4, 5], "add"), 15);
+    @const assert_eq(fold_monoid([1, 2, 3, 4, 5], "mul"), 120);
+    @const assert_eq(fold_monoid([3, 1, 4, 1, 5], "max"), 5);
+    @const assert_eq(fold_monoid([3, 1, 4, 1, 5], "min"), 1);
+
+    // Test functor patterns
+    let some_5 = (true, 5);
+    let none = (false, 0);
+    @const assert_eq(map_maybe(some_5.0, some_5.1, "double").1, 10);
+    @const assert(!map_maybe(none.0, none.1, "double").0);
+    @const assert_eq(list_get(map_list([1, 2, 3], "double"), 0), Some(2));
+    @const assert_eq(list_get(map_list([1, 2, 3], "square"), 2), Some(9));
+
+    // Test constraint resolution
+    @const assert(satisfies_positive(5));
+    @const assert(!satisfies_positive(-5));
+    @const assert(satisfies_bounded(5, 0, 10));
+    @const assert(!satisfies_bounded(15, 0, 10));
+
+    // Test safe operations
+    let div_ok = safe_divide(10, 2);
+    @const assert(div_ok.0);
+    @const assert_eq(div_ok.1, 5);
+    let div_fail = safe_divide(10, 0);
+    @const assert(!div_fail.0);
+
+    let sqrt_16 = safe_sqrt_approx(16);
+    @const assert(sqrt_16.0);
+    @const assert_eq(sqrt_16.1, 4);
+    let sqrt_neg = safe_sqrt_approx(-1);
+    @const assert(!sqrt_neg.0);
+
+    // Test instance priority
+    @const assert_eq(resolve_instance("Show", "Eq", 42), "Showable: 42");
+    @const assert_eq(resolve_instance("Show", "", 42), "42");
+    @const assert_eq(resolve_instance("", "Eq", 42), "Comparable(42)");
+}

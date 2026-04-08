@@ -1,0 +1,315 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, cbgr, clone, drop, drop_ref, memory
+// @timeout: 5000
+// @expect: pass
+//
+// Test: CLONE, DROP_REF operations
+// Verifies cloning and dropping semantics
+
+type Point is { x: Float, y: Float };
+type DeepStruct is { a: Point, b: Point, c: List<Int> };
+type CustomDrop is { id: Int, dropped: &mut Bool };
+
+implement Drop for CustomDrop {
+    fn drop(&mut self) {
+        *self.dropped = true;
+    }
+}
+
+// =============================================================================
+// Clone tests
+// =============================================================================
+
+fn test_clone_primitive() {
+    let x: Int = 42;
+    let y: Int = x.clone();
+
+    assert_eq(x, y);
+    assert_eq(y, 42);
+}
+
+fn test_clone_struct() {
+    let p1 = Point { x: 1.0, y: 2.0 };
+    let p2 = p1.clone();
+
+    // Independent copies
+    assert_eq(p2.x, 1.0);
+    assert_eq(p2.y, 2.0);
+}
+
+fn test_clone_deep_struct() {
+    let d1 = DeepStruct {
+        a: Point { x: 1.0, y: 2.0 },
+        b: Point { x: 3.0, y: 4.0 },
+        c: [1, 2, 3, 4, 5]
+    };
+
+    let d2 = d1.clone();
+
+    // All fields cloned
+    assert_eq(d2.a.x, 1.0);
+    assert_eq(d2.b.y, 4.0);
+    assert_eq(d2.c[0], 1);
+    assert_eq(d2.c.len(), 5);
+}
+
+fn test_clone_independence() {
+    let mut p1 = Point { x: 1.0, y: 2.0 };
+    let mut p2 = p1.clone();
+
+    // Modify original
+    p1.x = 100.0;
+
+    // Clone is independent
+    assert_eq(p2.x, 1.0);
+
+    // Modify clone
+    p2.y = 200.0;
+
+    // Original is independent
+    assert_eq(p1.y, 2.0);
+}
+
+fn test_clone_heap_object() {
+    let h1 = Heap(Point { x: 1.0, y: 2.0 });
+    let h2 = h1.clone();
+
+    // Two separate heap allocations
+    assert_eq(h1.x, h2.x);
+    assert_eq(h1.y, h2.y);
+
+    // But different objects
+    assert(!@ref_eq(&*h1, &*h2));
+}
+
+fn test_clone_list() {
+    let l1 = [1, 2, 3, 4, 5];
+    let mut l2 = l1.clone();
+
+    // Same content
+    assert_eq(l1.len(), l2.len());
+    for i in 0..l1.len() {
+        assert_eq(l1[i], l2[i]);
+    }
+
+    // Independent - modifying l2 doesn't affect l1
+    l2.push(6);
+    assert_eq(l1.len(), 5);
+    assert_eq(l2.len(), 6);
+}
+
+fn test_clone_map() {
+    let mut m1: Map<Text, Int> = {};
+    m1["a"] = 1;
+    m1["b"] = 2;
+
+    let mut m2 = m1.clone();
+
+    // Same content
+    assert_eq(m2["a"], 1);
+    assert_eq(m2["b"], 2);
+
+    // Independent
+    m2["c"] = 3;
+    assert(!m1.contains_key("c"));
+}
+
+fn test_clone_with_references() {
+    // Cloning should deep-copy, not share references
+    type WithRef<'a> is { value: Int, ptr: Maybe<&'a Int> };
+
+    let x: Int = 42;
+    let w1 = WithRef { value: 100, ptr: Some(&x) };
+    let w2 = w1.clone();
+
+    // Value cloned
+    assert_eq(w2.value, 100);
+    // Reference cloned (points to same x)
+    assert_eq(*@unwrap(w2.ptr), 42);
+}
+
+// =============================================================================
+// Drop tests
+// =============================================================================
+
+fn test_drop_at_scope_end() {
+    let mut dropped: Bool = false;
+
+    {
+        let c = CustomDrop { id: 1, dropped: &mut dropped };
+        assert(!dropped);
+    }  // c dropped here
+
+    assert(dropped);
+}
+
+fn test_drop_explicit() {
+    let mut dropped: Bool = false;
+
+    let c = CustomDrop { id: 1, dropped: &mut dropped };
+    assert(!dropped);
+
+    drop(c);
+
+    assert(dropped);
+}
+
+fn test_drop_order() {
+    let mut order: List<Int> = [];
+
+    type OrderTracker is { id: Int, order: &mut List<Int> };
+
+    implement Drop for OrderTracker {
+        fn drop(&mut self) {
+            self.order.push(self.id);
+        }
+    }
+
+    {
+        let a = OrderTracker { id: 1, order: &mut order };
+        let b = OrderTracker { id: 2, order: &mut order };
+        let c = OrderTracker { id: 3, order: &mut order };
+        // Dropped in reverse order: c, b, a
+    }
+
+    assert_eq(order.len(), 3);
+    assert_eq(order[0], 3);
+    assert_eq(order[1], 2);
+    assert_eq(order[2], 1);
+}
+
+fn test_drop_nested() {
+    let mut outer_dropped: Bool = false;
+    let mut inner_dropped: Bool = false;
+
+    type Outer is { inner: Inner, dropped: &mut Bool };
+    type Inner is { dropped: &mut Bool };
+
+    implement Drop for Outer {
+        fn drop(&mut self) {
+            *self.dropped = true;
+        }
+    }
+
+    implement Drop for Inner {
+        fn drop(&mut self) {
+            *self.dropped = true;
+        }
+    }
+
+    {
+        let outer = Outer {
+            inner: Inner { dropped: &mut inner_dropped },
+            dropped: &mut outer_dropped
+        };
+    }
+
+    // Both should be dropped
+    assert(outer_dropped);
+    assert(inner_dropped);
+}
+
+fn test_drop_heap() {
+    let mut dropped: Bool = false;
+
+    {
+        let h = Heap(CustomDrop { id: 1, dropped: &mut dropped });
+    }
+
+    assert(dropped);
+}
+
+fn test_drop_in_collection() {
+    let mut count: Int = 0;
+
+    type Counter is { count: &mut Int };
+
+    implement Drop for Counter {
+        fn drop(&mut self) {
+            *self.count = *self.count + 1;
+        }
+    }
+
+    {
+        let mut list: List<Counter> = [];
+        for _ in 0..5 {
+            list.push(Counter { count: &mut count });
+        }
+    }
+
+    // All 5 items dropped
+    assert_eq(count, 5);
+}
+
+// test_drop_with_panic: skipped — requires @catch(fn() {...}) anonymous closure syntax
+
+fn test_drop_ref() {
+    // DROP_REF opcode releases reference
+    let x: Int = 42;
+
+    {
+        let r: &Int = &x;
+        assert_eq(*r, 42);
+        // r dropped here (DROP_REF)
+    }
+
+    // x still valid
+    assert_eq(x, 42);
+}
+
+fn test_partial_drop() {
+    // When moving out of struct, remaining fields still drop
+    let mut dropped_a: Bool = false;
+    let mut dropped_b: Bool = false;
+
+    type TwoFields is {
+        a: CustomDrop,
+        b: CustomDrop
+    };
+
+    {
+        let t = TwoFields {
+            a: CustomDrop { id: 1, dropped: &mut dropped_a },
+            b: CustomDrop { id: 2, dropped: &mut dropped_b }
+        };
+
+        // Move out a
+        let _moved = t.a;
+
+        // t.b should still drop
+    }
+
+    // Both should be dropped (a moved then dropped, b dropped with t)
+    assert(dropped_a);
+    assert(dropped_b);
+}
+
+// test_forget: skipped — requires @forget macro (not yet implemented)
+
+fn main() {
+    // Clone tests
+    test_clone_primitive();
+    test_clone_struct();
+    test_clone_deep_struct();
+    test_clone_independence();
+    test_clone_heap_object();
+    test_clone_list();
+    test_clone_map();
+    test_clone_with_references();
+
+    // Drop tests
+    test_drop_at_scope_end();
+    test_drop_explicit();
+    test_drop_order();
+    test_drop_nested();
+    test_drop_heap();
+    test_drop_in_collection();
+    // test_drop_with_panic: skipped (requires @catch)
+    test_drop_ref();
+    test_partial_drop();
+    // test_forget: skipped (requires @forget)
+
+    print("004_clone_drop: PASSED");
+}

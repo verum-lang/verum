@@ -1,0 +1,300 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, advanced
+// @timeout: 15000
+// @expected-exit: 0
+//
+// CBGR advanced reference test: Multiple immutable refs to different
+// variables, cross-referencing, reading multiple refs simultaneously,
+// and computing derived values from cross-referenced data.
+
+// ============================================================================
+// Type definitions
+// ============================================================================
+
+type Sensor is { id: Int, reading: Int, calibration: Int };
+type Bounds is { lo: Int, hi: Int };
+type Account is { balance: Int, pending: Int, overdraft_limit: Int };
+
+// ============================================================================
+// Multi-ref read functions
+// ============================================================================
+
+fn read_ref(r: &Int) -> Int { *r }
+
+fn sum_two(a: &Int, b: &Int) -> Int {
+    *a + *b
+}
+
+fn sum_three(a: &Int, b: &Int, c: &Int) -> Int {
+    *a + *b + *c
+}
+
+fn max_two(a: &Int, b: &Int) -> Int {
+    if *a > *b { *a } else { *b }
+}
+
+fn min_two(a: &Int, b: &Int) -> Int {
+    if *a < *b { *a } else { *b }
+}
+
+fn max_three(a: &Int, b: &Int, c: &Int) -> Int {
+    let m = max_two(a, b);
+    if *c > m { *c } else { m }
+}
+
+fn min_three(a: &Int, b: &Int, c: &Int) -> Int {
+    let m = min_two(a, b);
+    if *c < m { *c } else { m }
+}
+
+fn weighted_avg_two(a: &Int, wa: Int, b: &Int, wb: Int) -> Int {
+    (*a * wa + *b * wb) / (wa + wb)
+}
+
+fn in_range(val: &Int, lo: &Int, hi: &Int) -> Bool {
+    *val >= *lo && *val <= *hi
+}
+
+// ============================================================================
+// Sensor cross-referencing
+// ============================================================================
+
+fn sensor_adjusted(s: &Sensor) -> Int {
+    (*s).reading + (*s).calibration
+}
+
+fn sensor_avg_two(a: &Sensor, b: &Sensor) -> Int {
+    (sensor_adjusted(a) + sensor_adjusted(b)) / 2
+}
+
+fn sensor_diff(a: &Sensor, b: &Sensor) -> Int {
+    let va = sensor_adjusted(a);
+    let vb = sensor_adjusted(b);
+    if va > vb { va - vb } else { vb - va }
+}
+
+fn sensor_max_reading(a: &Sensor, b: &Sensor, c: &Sensor) -> Int {
+    let va = sensor_adjusted(a);
+    let vb = sensor_adjusted(b);
+    let vc = sensor_adjusted(c);
+    let m = if va > vb { va } else { vb };
+    if vc > m { vc } else { m }
+}
+
+// ============================================================================
+// Bounds checking via refs
+// ============================================================================
+
+fn bounds_width(b: &Bounds) -> Int {
+    (*b).hi - (*b).lo
+}
+
+fn bounds_contains(b: &Bounds, val: Int) -> Bool {
+    val >= (*b).lo && val <= (*b).hi
+}
+
+fn bounds_overlap(a: &Bounds, b: &Bounds) -> Bool {
+    (*a).lo <= (*b).hi && (*b).lo <= (*a).hi
+}
+
+fn bounds_intersection_width(a: &Bounds, b: &Bounds) -> Int {
+    if !bounds_overlap(a, b) { return 0; }
+    let lo = if (*a).lo > (*b).lo { (*a).lo } else { (*b).lo };
+    let hi = if (*a).hi < (*b).hi { (*a).hi } else { (*b).hi };
+    hi - lo
+}
+
+// ============================================================================
+// Account cross-ref
+// ============================================================================
+
+fn account_available(a: &Account) -> Int {
+    (*a).balance - (*a).pending + (*a).overdraft_limit
+}
+
+fn account_net(a: &Account) -> Int {
+    (*a).balance - (*a).pending
+}
+
+fn accounts_total_balance(a: &Account, b: &Account) -> Int {
+    account_net(a) + account_net(b)
+}
+
+fn account_can_transfer(src: &Account, amount: Int) -> Bool {
+    account_available(src) >= amount
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_sum_two_refs() {
+    let a = 30;
+    let b = 70;
+    assert_eq(sum_two(&a, &b), 100);
+}
+
+fn test_sum_three_refs() {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    assert_eq(sum_three(&a, &b, &c), 60);
+}
+
+fn test_max_min_two() {
+    let a = 15;
+    let b = 25;
+    assert_eq(max_two(&a, &b), 25);
+    assert_eq(min_two(&a, &b), 15);
+}
+
+fn test_max_min_three() {
+    let a = 10;
+    let b = 30;
+    let c = 20;
+    assert_eq(max_three(&a, &b, &c), 30);
+    assert_eq(min_three(&a, &b, &c), 10);
+}
+
+fn test_weighted_avg() {
+    let a = 80;
+    let b = 60;
+    // (80*3 + 60*1) / 4 = (240+60)/4 = 75
+    assert_eq(weighted_avg_two(&a, 3, &b, 1), 75);
+}
+
+fn test_in_range() {
+    let val1 = 5;
+    let val2 = 15;
+    let val3 = 25;
+    let lo = 10;
+    let hi = 20;
+    assert_eq(in_range(&val1, &lo, &hi), false);
+    assert_eq(in_range(&val2, &lo, &hi), true);
+    assert_eq(in_range(&val3, &lo, &hi), false);
+}
+
+fn test_same_var_two_refs() {
+    let x = 50;
+    assert_eq(sum_two(&x, &x), 100);
+    assert_eq(max_two(&x, &x), 50);
+    assert_eq(min_two(&x, &x), 50);
+}
+
+fn test_sensor_cross_ref() {
+    let s1 = Sensor { id: 1, reading: 100, calibration: 5 };
+    let s2 = Sensor { id: 2, reading: 95, calibration: 10 };
+    assert_eq(sensor_adjusted(&s1), 105);
+    assert_eq(sensor_adjusted(&s2), 105);
+    assert_eq(sensor_avg_two(&s1, &s2), 105);
+    assert_eq(sensor_diff(&s1, &s2), 0);
+}
+
+fn test_sensor_three() {
+    let s1 = Sensor { id: 1, reading: 80, calibration: 0 };
+    let s2 = Sensor { id: 2, reading: 90, calibration: 5 };
+    let s3 = Sensor { id: 3, reading: 70, calibration: 10 };
+    assert_eq(sensor_max_reading(&s1, &s2, &s3), 95);
+}
+
+fn test_sensor_diff() {
+    let s1 = Sensor { id: 1, reading: 100, calibration: 0 };
+    let s2 = Sensor { id: 2, reading: 80, calibration: 0 };
+    assert_eq(sensor_diff(&s1, &s2), 20);
+}
+
+fn test_bounds_basic() {
+    let b = Bounds { lo: 10, hi: 50 };
+    assert_eq(bounds_width(&b), 40);
+    assert_eq(bounds_contains(&b, 30), true);
+    assert_eq(bounds_contains(&b, 5), false);
+    assert_eq(bounds_contains(&b, 55), false);
+}
+
+fn test_bounds_overlap() {
+    let a = Bounds { lo: 10, hi: 30 };
+    let b = Bounds { lo: 20, hi: 40 };
+    let c = Bounds { lo: 35, hi: 50 };
+    assert_eq(bounds_overlap(&a, &b), true);
+    assert_eq(bounds_overlap(&a, &c), false);
+    assert_eq(bounds_overlap(&b, &c), true);
+}
+
+fn test_bounds_intersection() {
+    let a = Bounds { lo: 10, hi: 30 };
+    let b = Bounds { lo: 20, hi: 40 };
+    assert_eq(bounds_intersection_width(&a, &b), 10); // [20,30]
+}
+
+fn test_bounds_no_intersection() {
+    let a = Bounds { lo: 10, hi: 20 };
+    let b = Bounds { lo: 30, hi: 40 };
+    assert_eq(bounds_intersection_width(&a, &b), 0);
+}
+
+fn test_account_basic() {
+    let acct = Account { balance: 1000, pending: 200, overdraft_limit: 500 };
+    assert_eq(account_net(&acct), 800);
+    assert_eq(account_available(&acct), 1300);
+    assert_eq(account_can_transfer(&acct, 1000), true);
+    assert_eq(account_can_transfer(&acct, 1500), false);
+}
+
+fn test_accounts_total() {
+    let a1 = Account { balance: 500, pending: 100, overdraft_limit: 0 };
+    let a2 = Account { balance: 300, pending: 50, overdraft_limit: 0 };
+    assert_eq(accounts_total_balance(&a1, &a2), 650);
+}
+
+fn test_many_immut_refs() {
+    let v1 = 10;
+    let v2 = 20;
+    let v3 = 30;
+    let v4 = 40;
+    let v5 = 50;
+    let r1 = &v1;
+    let r2 = &v2;
+    let r3 = &v3;
+    let r4 = &v4;
+    let r5 = &v5;
+    assert_eq(*r1 + *r2 + *r3 + *r4 + *r5, 150);
+}
+
+fn test_cross_ref_loop() {
+    let base = 10;
+    let multiplier = 3;
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let contrib = read_ref(&base) * read_ref(&multiplier) + i;
+        total = total + contrib;
+        i = i + 1;
+    }
+    // Each iteration: 30 + i, sum = 30*5 + (0+1+2+3+4) = 150 + 10 = 160
+    assert_eq(total, 160);
+}
+
+fn main() -> Int {
+    test_sum_two_refs();
+    test_sum_three_refs();
+    test_max_min_two();
+    test_max_min_three();
+    test_weighted_avg();
+    test_in_range();
+    test_same_var_two_refs();
+    test_sensor_cross_ref();
+    test_sensor_three();
+    test_sensor_diff();
+    test_bounds_basic();
+    test_bounds_overlap();
+    test_bounds_intersection();
+    test_bounds_no_intersection();
+    test_account_basic();
+    test_accounts_total();
+    test_many_immut_refs();
+    test_cross_ref_loop();
+    print("[OK] 365_interp_cbgr_ref_fold");
+    0
+}

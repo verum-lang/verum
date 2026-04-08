@@ -1,0 +1,130 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, polymorphism, variants, records, type-dispatch
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT simulated polymorphism using variants with different payloads
+
+// Shape type with different data for each variant
+type Shape is
+    Circle(Int)  // radius
+  | Rect { w: Int, h: Int }
+  | Triangle { base: Int, height: Int }
+  | Square(Int);  // side
+
+fn area(s: Shape) -> Int {
+    match s {
+        Circle(r) => 314 * r * r / 100,  // approximate pi*r^2 as 314/100
+        Rect { w, h } => w * h,
+        Triangle { base, height } => base * height / 2,
+        Square(side) => side * side,
+    }
+}
+
+fn perimeter(s: Shape) -> Int {
+    match s {
+        Circle(r) => 628 * r / 100,  // approximate 2*pi*r
+        Rect { w, h } => 2 * (w + h),
+        Triangle { base, height } => {
+            // Approximate: assume isoceles with given base and height
+            // sides = sqrt(height^2 + (base/2)^2), approximate as height + base/2
+            let side = height + base / 2;
+            base + 2 * side
+        },
+        Square(side) => 4 * side,
+    }
+}
+
+fn is_regular(s: Shape) -> Bool {
+    match s {
+        Circle(_) => true,
+        Rect { w, h } => w == h,
+        Triangle { base, height } => base == height,
+        Square(_) => true,
+    }
+}
+
+// Shape collection as linked list
+type ShapeList is SNil | SCons { shape: Shape, tail: ShapeList };
+
+fn total_area(list: ShapeList) -> Int {
+    match list {
+        SNil => 0,
+        SCons { shape, tail } => area(shape) + total_area(tail),
+    }
+}
+
+fn count_shapes(list: ShapeList) -> Int {
+    match list {
+        SNil => 0,
+        SCons { shape: _, tail } => 1 + count_shapes(tail),
+    }
+}
+
+fn count_regular(list: ShapeList) -> Int {
+    match list {
+        SNil => 0,
+        SCons { shape, tail } => {
+            let add = if is_regular(shape) { 1 } else { 0 };
+            add + count_regular(tail)
+        },
+    }
+}
+
+fn main() -> Int {
+    // Individual shapes
+    let c = Circle(10);
+    assert_eq(area(c), 314);  // 314*100/100
+
+    let r = Rect { w: 5, h: 10 };
+    assert_eq(area(r), 50);
+    assert_eq(perimeter(r), 30);
+    assert(!is_regular(r));
+
+    let sq = Square(7);
+    assert_eq(area(sq), 49);
+    assert_eq(perimeter(sq), 28);
+    assert(is_regular(sq));
+
+    let t = Triangle { base: 6, height: 4 };
+    assert_eq(area(t), 12);  // 6*4/2
+
+    // Square rect is "regular"
+    let sqr = Rect { w: 5, h: 5 };
+    assert(is_regular(sqr));
+
+    // Shape list
+    let shapes = SCons {
+        shape: Circle(10),
+        tail: SCons {
+            shape: Rect { w: 5, h: 10 },
+            tail: SCons {
+                shape: Square(7),
+                tail: SCons {
+                    shape: Triangle { base: 6, height: 4 },
+                    tail: SNil,
+                },
+            },
+        },
+    };
+
+    assert_eq(count_shapes(shapes), 4);
+    // total_area = 314 + 50 + 49 + 12 = 425
+    assert_eq(total_area(shapes), 425);
+    // regular: Circle, Square = 2 out of 4
+    assert_eq(count_regular(shapes), 2);
+
+    // Build shape list imperatively
+    let mut list = SNil;
+    let mut i = 1;
+    while i <= 5 {
+        list = SCons { shape: Square(i), tail: list };
+        i = i + 1;
+    }
+    assert_eq(count_shapes(list), 5);
+    // total_area = 25 + 16 + 9 + 4 + 1 = 55
+    assert_eq(total_area(list), 55);
+
+    0
+}

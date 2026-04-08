@@ -1,0 +1,1107 @@
+// =============================================================================
+// mutex_test.vr - Tests for Mutex<T> and related types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, mutex, lock, concurrency, core
+// @description: Comprehensive tests for Mutex<T>, MutexGuard, and lock operations
+// =============================================================================
+
+mount core.sync.mutex.{Mutex, MutexGuard, LockResult, TryLockResult, PoisonError, TryLockError};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Mutex Construction Tests
+// =============================================================================
+
+@test
+fn test_mutex_new_int() {
+    let m: Mutex<Int> = Mutex.new(42);
+    let result: TryLockResult<MutexGuard<Int>> = m.try_lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 42);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_new_text() {
+    let m: Mutex<Text> = Mutex.new("hello");
+    let result: TryLockResult<MutexGuard<Text>> = m.try_lock();
+    match result {
+        Ok(guard) => {
+            let val: &Text = guard.data();
+            assert_eq(*val, "hello");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_new_bool() {
+    let m: Mutex<Bool> = Mutex.new(true);
+    let result: TryLockResult<MutexGuard<Bool>> = m.try_lock();
+    match result {
+        Ok(guard) => {
+            let val: &Bool = guard.data();
+            assert_eq(*val, true);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_default() {
+    let m: Mutex<Int> = Mutex.default();
+    let result: TryLockResult<MutexGuard<Int>> = m.try_lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 0); // Int default is 0
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 2: Mutex Lock Operations
+// =============================================================================
+
+@test
+fn test_mutex_lock() {
+    let m: Mutex<Int> = Mutex.new(10);
+
+    let result: LockResult<MutexGuard<Int>> = m.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 10);
+            // Guard released when scope ends
+        }
+        Err(_) => panic("Expected Ok for lock"),
+    }
+}
+
+@test
+fn test_mutex_try_lock_uncontended() {
+    let m: Mutex<Int> = Mutex.new(20);
+
+    let result: TryLockResult<MutexGuard<Int>> = m.try_lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 20);
+        }
+        Err(_) => panic("Expected Ok for try_lock"),
+    }
+}
+
+@test
+fn test_mutex_try_lock_already_locked() {
+    let m: Mutex<Int> = Mutex.new(30);
+
+    // Acquire lock via match
+    let lock_result: LockResult<MutexGuard<Int>> = m.lock();
+    match lock_result {
+        Ok(guard1) => {
+            // Try to acquire again - should fail
+            let try_result: TryLockResult<MutexGuard<Int>> = m.try_lock();
+            match try_result {
+                Err(TryLockError.WouldBlock) => {} // Expected
+                Ok(_) => panic("Expected WouldBlock"),
+                Err(_) => panic("Expected WouldBlock"),
+            }
+            // guard1 released at end of match arm
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+
+    // Now try_lock should succeed
+    let result: TryLockResult<MutexGuard<Int>> = m.try_lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 30);
+        }
+        Err(_) => panic("Expected Ok after release"),
+    }
+}
+
+// =============================================================================
+// Section 3: MutexGuard Operations
+// =============================================================================
+
+@test
+fn test_mutex_guard_data() {
+    let m: Mutex<Int> = Mutex.new(100);
+    let result: LockResult<MutexGuard<Int>> = m.lock();
+    match result {
+        Ok(guard) => {
+            // Test data() - read the value
+            let value: &Int = guard.data();
+            assert_eq(*value, 100);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_guard_data_mut() {
+    let m: Mutex<Int> = Mutex.new(100);
+    let result: LockResult<MutexGuard<Int>> = m.lock();
+    match result {
+        Ok(mut guard) => {
+            // Test data_mut() - modify the value
+            let data: &mut Int = guard.data_mut();
+            *data = 200;
+
+            let val: &Int = guard.data();
+            assert_eq(*val, 200);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_guard_modify_complex() {
+    let m: Mutex<Int> = Mutex.new(0);
+
+    {
+        let result: LockResult<MutexGuard<Int>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = *data + 10;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    {
+        let result: LockResult<MutexGuard<Int>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = *data + 20;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let result: LockResult<MutexGuard<Int>> = m.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 30);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 4: Mutex get_mut and into_inner
+// =============================================================================
+
+@test
+fn test_mutex_get_mut() {
+    let mut m: Mutex<Int> = Mutex.new(50);
+
+    // get_mut doesn't require locking (exclusive ownership)
+    let result: LockResult<&mut Int> = m.get_mut();
+    match result {
+        Ok(data) => {
+            *data = 100;
+        }
+        Err(_) => panic("Expected Ok for get_mut"),
+    }
+
+    let lock_result: LockResult<MutexGuard<Int>> = m.lock();
+    match lock_result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 100);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_into_inner() {
+    let m: Mutex<Int> = Mutex.new(77);
+
+    let result: LockResult<Int> = m.into_inner();
+    match result {
+        Ok(data) => assert_eq(data, 77),
+        Err(_) => panic("Expected Ok for into_inner"),
+    }
+}
+
+// =============================================================================
+// Section 5: Mutex Poison State
+// =============================================================================
+
+@test
+fn test_mutex_not_poisoned_initially() {
+    let m: Mutex<Int> = Mutex.new(0);
+    assert(!m.is_poisoned());
+}
+
+@test
+fn test_mutex_clear_poison() {
+    let m: Mutex<Int> = Mutex.new(0);
+    // Manually set poison for testing (would normally be set by panic)
+    // Since we can't easily trigger panic in test, just verify clear works
+    m.clear_poison();
+    assert(!m.is_poisoned());
+}
+
+// =============================================================================
+// Section 6: PoisonError Operations
+// =============================================================================
+
+@test
+fn test_poison_error_get_ref() {
+    let guard_data = 42;
+    let err: PoisonError<Int> = PoisonError.new(guard_data);
+
+    let ref_data = err.get_ref();
+    assert_eq(*ref_data, 42);
+}
+
+@test
+fn test_poison_error_get_mut() {
+    let guard_data = 42;
+    let mut err: PoisonError<Int> = PoisonError.new(guard_data);
+
+    let mut_data = err.get_mut();
+    *mut_data = 100;
+    assert_eq(*err.get_ref(), 100);
+}
+
+@test
+fn test_poison_error_into_inner() {
+    let guard_data = 42;
+    let err: PoisonError<Int> = PoisonError.new(guard_data);
+
+    let data = err.into_inner();
+    assert_eq(data, 42);
+}
+
+// =============================================================================
+// Section 7: TryLockError Operations
+// =============================================================================
+
+@test
+fn test_try_lock_error_would_block() {
+    let m: Mutex<Int> = Mutex.new(0);
+
+    // Hold the lock
+    let result: LockResult<MutexGuard<Int>> = m.lock();
+    match result {
+        Ok(_guard) => {
+            // Try to lock - should get WouldBlock
+            let try_result: TryLockResult<MutexGuard<Int>> = m.try_lock();
+            match try_result {
+                Err(TryLockError.WouldBlock) => {} // Expected
+                _ => panic("Expected WouldBlock"),
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 8: Multiple Lock/Unlock Cycles
+// =============================================================================
+
+@test
+fn test_mutex_multiple_cycles() {
+    let m: Mutex<Int> = Mutex.new(0);
+
+    for i in 0..10 {
+        let result: LockResult<MutexGuard<Int>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = *data + 1;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let result: LockResult<MutexGuard<Int>> = m.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 10);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_nested_scopes() {
+    let m: Mutex<Int> = Mutex.new(0);
+
+    {
+        let result: LockResult<MutexGuard<Int>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = 1;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    {
+        let result: LockResult<MutexGuard<Int>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let val: &Int = guard.data();
+                assert_eq(*val, 1);
+                let data = guard.data_mut();
+                *data = 2;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    {
+        let result: LockResult<MutexGuard<Int>> = m.lock();
+        match result {
+            Ok(guard) => {
+                let val: &Int = guard.data();
+                assert_eq(*val, 2);
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+}
+
+// =============================================================================
+// Section 9: Type-Specific Tests
+// =============================================================================
+
+@test
+fn test_mutex_with_list() {
+    mount core.collections.list.List;
+
+    let m: Mutex<List<Int>> = Mutex.new(List.new());
+
+    {
+        let result: LockResult<MutexGuard<List<Int>>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let list: &mut List<Int> = guard.data_mut();
+                list.push(1);
+                list.push(2);
+                list.push(3);
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let result: LockResult<MutexGuard<List<Int>>> = m.lock();
+    match result {
+        Ok(guard) => {
+            let list: &List<Int> = guard.data();
+            assert_eq(list.len(), 3);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_with_option() {
+    mount core.maybe.{Maybe, Some, None};
+
+    let m: Mutex<Maybe<Int>> = Mutex.new(None);
+
+    {
+        let result: LockResult<MutexGuard<Maybe<Int>>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let opt: &mut Maybe<Int> = guard.data_mut();
+                *opt = Some(42);
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let result: LockResult<MutexGuard<Maybe<Int>>> = m.lock();
+    match result {
+        Ok(guard) => {
+            let opt: &Maybe<Int> = guard.data();
+            match *opt {
+                Some(v) => assert_eq(v, 42),
+                None => panic("Expected Some"),
+            }
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 10: Edge Cases
+// =============================================================================
+
+@test
+fn test_mutex_zero_sized_type() {
+    let m: Mutex<()> = Mutex.new(());
+
+    let result: LockResult<MutexGuard<()>> = m.lock();
+    match result {
+        Ok(guard) => {
+            let _: &() = guard.data();
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_immediate_drop() {
+    let m: Mutex<Int> = Mutex.new(100);
+
+    // Lock and immediately release
+    {
+        let _: LockResult<MutexGuard<Int>> = m.lock();
+    }
+    {
+        let _: LockResult<MutexGuard<Int>> = m.lock();
+    }
+    {
+        let _: LockResult<MutexGuard<Int>> = m.lock();
+    }
+
+    // Should still work
+    let result: LockResult<MutexGuard<Int>> = m.lock();
+    match result {
+        Ok(guard) => {
+            let val: &Int = guard.data();
+            assert_eq(*val, 100);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 11: into_inner Extended Tests
+// =============================================================================
+
+@test
+fn test_mutex_into_inner_text() {
+    let m: Mutex<Text> = Mutex.new("goodbye");
+
+    let result: LockResult<Text> = m.into_inner();
+    match result {
+        Ok(data) => assert_eq(data, "goodbye"),
+        Err(_) => panic("Expected Ok for into_inner"),
+    }
+}
+
+@test
+fn test_mutex_into_inner_bool() {
+    let m: Mutex<Bool> = Mutex.new(false);
+
+    let result: LockResult<Bool> = m.into_inner();
+    match result {
+        Ok(data) => assert(!data),
+        Err(_) => panic("Expected Ok for into_inner"),
+    }
+}
+
+@test
+fn test_mutex_into_inner_float() {
+    let m: Mutex<Float> = Mutex.new(3.14);
+
+    let result: LockResult<Float> = m.into_inner();
+    match result {
+        Ok(data) => assert(data > 3.13 && data < 3.15),
+        Err(_) => panic("Expected Ok for into_inner"),
+    }
+}
+
+// =============================================================================
+// Section 12: get_mut Extended Tests
+// =============================================================================
+
+@test
+fn test_mutex_get_mut_text() {
+    let mut m: Mutex<Text> = Mutex.new("original");
+
+    let result: LockResult<&mut Text> = m.get_mut();
+    match result {
+        Ok(data) => {
+            *data = "modified";
+        }
+        Err(_) => panic("Expected Ok for get_mut"),
+    }
+
+    let lock_result: LockResult<MutexGuard<Text>> = m.lock();
+    match lock_result {
+        Ok(guard) => {
+            let val: &Text = guard.data();
+            assert_eq(*val, "modified");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_get_mut_multiple_times() {
+    let mut m: Mutex<Int> = Mutex.new(0);
+
+    {
+        let result: LockResult<&mut Int> = m.get_mut();
+        match result {
+            Ok(data) => { *data = 10; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    {
+        let result: LockResult<&mut Int> = m.get_mut();
+        match result {
+            Ok(data) => { *data = 20; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let lock_result: LockResult<MutexGuard<Int>> = m.lock();
+    match lock_result {
+        Ok(guard) => {
+            assert_eq(*guard.data(), 20);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 13: TryLockError.Poisoned Test
+// =============================================================================
+
+@test
+fn test_try_lock_error_poisoned_construction() {
+    let poison: PoisonError<Int> = PoisonError.new(42);
+    let err: TryLockError<Int> = TryLockError.Poisoned(poison);
+
+    match err {
+        TryLockError.Poisoned(pe) => {
+            assert_eq(*pe.get_ref(), 42);
+        }
+        TryLockError.WouldBlock => panic("Expected Poisoned"),
+    }
+}
+
+// =============================================================================
+// Section 14: Mutex with Tuple and Float Types
+// =============================================================================
+
+@test
+fn test_mutex_with_float() {
+    let m: Mutex<Float> = Mutex.new(0.0);
+
+    {
+        let result: LockResult<MutexGuard<Float>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = 2.718;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    let result: LockResult<MutexGuard<Float>> = m.lock();
+    match result {
+        Ok(guard) => {
+            assert(*guard.data() > 2.71 && *guard.data() < 2.72);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_with_tuple() {
+    let m: Mutex<(Int, Text)> = Mutex.new((0, "start"));
+
+    let result: LockResult<MutexGuard<(Int, Text)>> = m.lock();
+    match result {
+        Ok(guard) => {
+            let data: &(Int, Text) = guard.data();
+            assert_eq(data.0, 0);
+            assert_eq(data.1, "start");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_lock_release_try_lock() {
+    let m: Mutex<Int> = Mutex.new(5);
+
+    // Lock, modify, release
+    {
+        let result: LockResult<MutexGuard<Int>> = m.lock();
+        match result {
+            Ok(mut guard) => {
+                let data = guard.data_mut();
+                *data = 10;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+
+    // try_lock should succeed now
+    let result: TryLockResult<MutexGuard<Int>> = m.try_lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(*guard.data(), 10);
+        }
+        Err(_) => panic("Expected Ok after release"),
+    }
+}
+
+// =============================================================================
+// Section 15: Lock-Modify-Verify Patterns
+// =============================================================================
+
+@test
+fn test_mutex_lock_modify_verify() {
+    let m: Mutex<Int> = Mutex.new(0);
+    // Modify via lock
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => {
+                *guard.data_mut() = 42;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    // Verify via try_lock
+    let result = m.try_lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), 42),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_lock_increment_many() {
+    let m: Mutex<Int> = Mutex.new(0);
+    for _i in 0..50 {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => {
+                *guard.data_mut() = *guard.data() + 1;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    let result = m.lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), 50),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_lock_set_negative() {
+    let m: Mutex<Int> = Mutex.new(100);
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => {
+                *guard.data_mut() = -50;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    let result = m.lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), -50),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 16: try_lock Patterns
+// =============================================================================
+
+@test
+fn test_mutex_try_lock_success_then_modify() {
+    let m: Mutex<Int> = Mutex.new(10);
+    let result = m.try_lock();
+    match result {
+        Ok(mut guard) => {
+            *guard.data_mut() = 20;
+            assert_eq(*guard.data(), 20);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_try_lock_multiple_success() {
+    let m: Mutex<Int> = Mutex.new(0);
+    for i in 0..5 {
+        let result = m.try_lock();
+        match result {
+            Ok(mut guard) => {
+                *guard.data_mut() = i;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    let result = m.try_lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), 4),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 17: Guard Data Access Patterns
+// =============================================================================
+
+@test
+fn test_mutex_guard_data_read_only() {
+    let m: Mutex<Text> = Mutex.new("immutable");
+    let result = m.lock();
+    match result {
+        Ok(guard) => {
+            assert_eq(*guard.data(), "immutable");
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_guard_data_mut_text() {
+    let m: Mutex<Text> = Mutex.new("original");
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => {
+                *guard.data_mut() = "modified";
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    let result = m.lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), "modified"),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_guard_data_mut_bool() {
+    let m: Mutex<Bool> = Mutex.new(false);
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => {
+                *guard.data_mut() = true;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    let result = m.lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), true),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 18: Poison State Deeper
+// =============================================================================
+
+@test
+fn test_mutex_not_poisoned_after_normal_use() {
+    let m: Mutex<Int> = Mutex.new(0);
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => {
+                *guard.data_mut() = 42;
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    assert(!m.is_poisoned());
+}
+
+@test
+fn test_mutex_clear_poison_idempotent() {
+    let m: Mutex<Int> = Mutex.new(0);
+    m.clear_poison();
+    m.clear_poison();
+    m.clear_poison();
+    assert(!m.is_poisoned());
+}
+
+// =============================================================================
+// Section 19: PoisonError Deeper
+// =============================================================================
+
+@test
+fn test_poison_error_text_type() {
+    let err: PoisonError<Text> = PoisonError.new("error data");
+    assert_eq(*err.get_ref(), "error data");
+}
+
+@test
+fn test_poison_error_bool_type() {
+    let err: PoisonError<Bool> = PoisonError.new(true);
+    assert_eq(*err.get_ref(), true);
+}
+
+@test
+fn test_poison_error_into_inner_text() {
+    let err: PoisonError<Text> = PoisonError.new("recover");
+    let data = err.into_inner();
+    assert_eq(data, "recover");
+}
+
+@test
+fn test_poison_error_get_mut_modify() {
+    let mut err: PoisonError<Int> = PoisonError.new(0);
+    *err.get_mut() = 100;
+    assert_eq(*err.get_ref(), 100);
+    *err.get_mut() = 200;
+    assert_eq(*err.get_ref(), 200);
+}
+
+// =============================================================================
+// Section 20: TryLockError Deeper
+// =============================================================================
+
+@test
+fn test_try_lock_error_would_block_construction() {
+    let err: TryLockError<Int> = TryLockError.WouldBlock;
+    match err {
+        TryLockError.WouldBlock => {} // Expected
+        TryLockError.Poisoned(_) => panic("Expected WouldBlock"),
+    }
+}
+
+@test
+fn test_try_lock_error_poisoned_int() {
+    let pe: PoisonError<Int> = PoisonError.new(99);
+    let err: TryLockError<Int> = TryLockError.Poisoned(pe);
+    match err {
+        TryLockError.Poisoned(pe) => {
+            assert_eq(pe.into_inner(), 99);
+        }
+        TryLockError.WouldBlock => panic("Expected Poisoned"),
+    }
+}
+
+@test
+fn test_try_lock_error_poisoned_text() {
+    let pe: PoisonError<Text> = PoisonError.new("oops");
+    let err: TryLockError<Text> = TryLockError.Poisoned(pe);
+    match err {
+        TryLockError.Poisoned(pe) => {
+            assert_eq(*pe.get_ref(), "oops");
+        }
+        TryLockError.WouldBlock => panic("Expected Poisoned"),
+    }
+}
+
+// =============================================================================
+// Section 21: into_inner Additional Types
+// =============================================================================
+
+@test
+fn test_mutex_into_inner_list() {
+    mount core.collections.list.List;
+    let m: Mutex<List<Int>> = Mutex.new(List.new());
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => {
+                guard.data_mut().push(1);
+                guard.data_mut().push(2);
+                guard.data_mut().push(3);
+            }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    let result = m.into_inner();
+    match result {
+        Ok(list) => assert_eq(list.len(), 3),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_into_inner_tuple() {
+    let m: Mutex<(Int, Bool)> = Mutex.new((42, true));
+    let result = m.into_inner();
+    match result {
+        Ok(data) => {
+            assert_eq(data.0, 42);
+            assert_eq(data.1, true);
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 22: get_mut Additional Types
+// =============================================================================
+
+@test
+fn test_mutex_get_mut_bool() {
+    let mut m: Mutex<Bool> = Mutex.new(false);
+    let result = m.get_mut();
+    match result {
+        Ok(data) => {
+            *data = true;
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+    let lock_result = m.lock();
+    match lock_result {
+        Ok(guard) => assert_eq(*guard.data(), true),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_get_mut_float() {
+    let mut m: Mutex<Float> = Mutex.new(0.0);
+    let result = m.get_mut();
+    match result {
+        Ok(data) => {
+            *data = 3.14;
+        }
+        Err(_) => panic("Expected Ok"),
+    }
+    let lock_result = m.lock();
+    match lock_result {
+        Ok(guard) => assert(*guard.data() > 3.13),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Section 23: Combined Patterns
+// =============================================================================
+
+@test
+fn test_mutex_lock_try_lock_alternating() {
+    let m: Mutex<Int> = Mutex.new(0);
+    // lock, modify, release, try_lock, modify, release...
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => { *guard.data_mut() = 1; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    {
+        let result = m.try_lock();
+        match result {
+            Ok(mut guard) => { *guard.data_mut() = 2; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => { *guard.data_mut() = 3; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    let result = m.try_lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), 3),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_modify_then_get_mut() {
+    let mut m: Mutex<Int> = Mutex.new(0);
+    // First modify via lock
+    {
+        let result = m.lock();
+        match result {
+            Ok(mut guard) => { *guard.data_mut() = 10; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    // Then modify via get_mut
+    {
+        let result = m.get_mut();
+        match result {
+            Ok(data) => { *data = 20; }
+            Err(_) => panic("Expected Ok"),
+        }
+    }
+    // Verify
+    let result = m.lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), 20),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_default_types() {
+    // Int default
+    let m1: Mutex<Int> = Mutex.default();
+    match m1.try_lock() {
+        Ok(g) => assert_eq(*g.data(), 0),
+        Err(_) => panic("Expected Ok"),
+    }
+    // Bool default
+    let m2: Mutex<Bool> = Mutex.default();
+    match m2.try_lock() {
+        Ok(g) => assert_eq(*g.data(), false),
+        Err(_) => panic("Expected Ok"),
+    }
+    // Text default
+    let m3: Mutex<Text> = Mutex.default();
+    match m3.try_lock() {
+        Ok(g) => assert_eq(*g.data(), ""),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_large_value_type() {
+    let m: Mutex<Int> = Mutex.new(999999999);
+    let result = m.lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), 999999999),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+@test
+fn test_mutex_negative_value() {
+    let m: Mutex<Int> = Mutex.new(-1);
+    let result = m.lock();
+    match result {
+        Ok(guard) => assert_eq(*guard.data(), -1),
+        Err(_) => panic("Expected Ok"),
+    }
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

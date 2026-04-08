@@ -1,0 +1,19 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: modules, type-error
+// @expected-error: E400
+
+/// Module-level type errors: accessing fields with wrong types.
+
+module inner {
+    type Config is { port: Int, host: Text };
+}
+
+fn takes_int(n: Int) -> Int { n }
+
+fn main() {
+    let c = inner.Config { port: 8080, host: "localhost" };
+    // ERROR E400: Cannot pass Config where Int is expected
+    let result = takes_int(c);
+}

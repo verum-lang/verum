@@ -1,0 +1,458 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, functional, higher-order
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: functional programming patterns — map-like, filter-like,
+// fold/reduce, function composition chains, currying-style patterns.
+
+// =============================================================================
+// Array record infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+// =============================================================================
+// Map-like: apply function to each element of array
+// =============================================================================
+
+fn map_arr8(a: Arr8, len: Int, f: fn(Int) -> Int) -> Arr8 {
+    let mut out = a;
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, f(arr8_get(a, i)));
+        i = i + 1;
+    }
+    out
+}
+
+fn test_map_double() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let doubled = map_arr8(a, 5, |x: Int| -> Int { x * 2 });
+    assert_eq(arr8_get(doubled, 0), 2);
+    assert_eq(arr8_get(doubled, 1), 4);
+    assert_eq(arr8_get(doubled, 2), 6);
+    assert_eq(arr8_get(doubled, 3), 8);
+    assert_eq(arr8_get(doubled, 4), 10);
+}
+
+fn test_map_square() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let squared = map_arr8(a, 8, |x: Int| -> Int { x * x });
+    assert_eq(arr8_get(squared, 0), 1);
+    assert_eq(arr8_get(squared, 1), 4);
+    assert_eq(arr8_get(squared, 2), 9);
+    assert_eq(arr8_get(squared, 3), 16);
+    assert_eq(arr8_get(squared, 4), 25);
+    assert_eq(arr8_get(squared, 5), 36);
+    assert_eq(arr8_get(squared, 6), 49);
+    assert_eq(arr8_get(squared, 7), 64);
+}
+
+fn test_map_negate() {
+    let a = Arr8 { e0: 5, e1: -3, e2: 0, e3: 7, e4: -1, e5: 0, e6: 0, e7: 0 };
+    let negated = map_arr8(a, 5, |x: Int| -> Int { -x });
+    assert_eq(arr8_get(negated, 0), -5);
+    assert_eq(arr8_get(negated, 1), 3);
+    assert_eq(arr8_get(negated, 2), 0);
+    assert_eq(arr8_get(negated, 3), -7);
+    assert_eq(arr8_get(negated, 4), 1);
+}
+
+fn test_map_abs() {
+    let a = Arr8 { e0: -5, e1: 3, e2: -7, e3: 0, e4: 12, e5: -1, e6: 0, e7: 0 };
+    let abs_arr = map_arr8(a, 6, |x: Int| -> Int { if x < 0 { -x } else { x } });
+    assert_eq(arr8_get(abs_arr, 0), 5);
+    assert_eq(arr8_get(abs_arr, 1), 3);
+    assert_eq(arr8_get(abs_arr, 2), 7);
+    assert_eq(arr8_get(abs_arr, 3), 0);
+    assert_eq(arr8_get(abs_arr, 4), 12);
+    assert_eq(arr8_get(abs_arr, 5), 1);
+}
+
+// =============================================================================
+// Filter-like: collect elements matching predicate
+// =============================================================================
+
+// Returns (filtered_arr, filtered_count)
+type FilterResult is { arr: Arr8, count: Int };
+
+fn filter_arr8(a: Arr8, len: Int, pred: fn(Int) -> Int) -> FilterResult {
+    let mut out = arr8_zeros();
+    let mut out_idx = 0;
+    let mut i = 0;
+    while i < len {
+        let val = arr8_get(a, i);
+        if pred(val) != 0 {
+            out = arr8_set(out, out_idx, val);
+            out_idx = out_idx + 1;
+        }
+        i = i + 1;
+    }
+    FilterResult { arr: out, count: out_idx }
+}
+
+fn test_filter_positive() {
+    let a = Arr8 { e0: -3, e1: 5, e2: -1, e3: 7, e4: 0, e5: 2, e6: -4, e7: 8 };
+    let r = filter_arr8(a, 8, |x: Int| -> Int { if x > 0 { 1 } else { 0 } });
+    assert_eq(r.count, 4);
+    assert_eq(arr8_get(r.arr, 0), 5);
+    assert_eq(arr8_get(r.arr, 1), 7);
+    assert_eq(arr8_get(r.arr, 2), 2);
+    assert_eq(arr8_get(r.arr, 3), 8);
+}
+
+fn test_filter_even() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let r = filter_arr8(a, 8, |x: Int| -> Int { if x % 2 == 0 { 1 } else { 0 } });
+    assert_eq(r.count, 4);
+    assert_eq(arr8_get(r.arr, 0), 2);
+    assert_eq(arr8_get(r.arr, 1), 4);
+    assert_eq(arr8_get(r.arr, 2), 6);
+    assert_eq(arr8_get(r.arr, 3), 8);
+}
+
+fn test_filter_greater_than() {
+    let a = Arr8 { e0: 10, e1: 25, e2: 3, e3: 42, e4: 7, e5: 100, e6: 1, e7: 50 };
+    let threshold = 20;
+    let r = filter_arr8(a, 8, |x: Int| -> Int { if x > threshold { 1 } else { 0 } });
+    assert_eq(r.count, 4);
+    assert_eq(arr8_get(r.arr, 0), 25);
+    assert_eq(arr8_get(r.arr, 1), 42);
+    assert_eq(arr8_get(r.arr, 2), 100);
+    assert_eq(arr8_get(r.arr, 3), 50);
+}
+
+// =============================================================================
+// Fold / reduce: accumulate with function
+// =============================================================================
+
+fn fold_arr8(a: Arr8, len: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < len {
+        acc = f(acc, arr8_get(a, i));
+        i = i + 1;
+    }
+    acc
+}
+
+fn test_fold_sum() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let sum = fold_arr8(a, 8, 0, |acc: Int, x: Int| -> Int { acc + x });
+    assert_eq(sum, 36);
+}
+
+fn test_fold_product() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let product = fold_arr8(a, 5, 1, |acc: Int, x: Int| -> Int { acc * x });
+    assert_eq(product, 120);
+}
+
+fn test_fold_max() {
+    let a = Arr8 { e0: 3, e1: 7, e2: 1, e3: 9, e4: 2, e5: 8, e6: 4, e7: 6 };
+    let max_val = fold_arr8(a, 8, -1, |acc: Int, x: Int| -> Int { if x > acc { x } else { acc } });
+    assert_eq(max_val, 9);
+}
+
+fn test_fold_min() {
+    let a = Arr8 { e0: 3, e1: 7, e2: 1, e3: 9, e4: 2, e5: 8, e6: 4, e7: 6 };
+    let min_val = fold_arr8(a, 8, 999, |acc: Int, x: Int| -> Int { if x < acc { x } else { acc } });
+    assert_eq(min_val, 1);
+}
+
+fn test_fold_count_matching() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+    let even_count = fold_arr8(a, 8, 0, |acc: Int, x: Int| -> Int {
+        if x % 2 == 0 { acc + 1 } else { acc }
+    });
+    assert_eq(even_count, 4);
+}
+
+fn test_fold_sum_of_squares() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let sum_sq = fold_arr8(a, 4, 0, |acc: Int, x: Int| -> Int { acc + x * x });
+    // 1 + 4 + 9 + 16 = 30
+    assert_eq(sum_sq, 30);
+}
+
+// =============================================================================
+// Function composition chains
+// =============================================================================
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
+    |x: Int| -> Int { f(g(x)) }
+}
+
+fn test_compose_two() {
+    let add1 = |x: Int| -> Int { x + 1 };
+    let double = |x: Int| -> Int { x * 2 };
+
+    // double after add1: add1(5)=6, double(6)=12
+    let f = compose(double, add1);
+    assert_eq(f(5), 12);
+
+    // add1 after double: double(5)=10, add1(10)=11
+    let g = compose(add1, double);
+    assert_eq(g(5), 11);
+}
+
+fn test_compose_three() {
+    let add1 = |x: Int| -> Int { x + 1 };
+    let mul3 = |x: Int| -> Int { x * 3 };
+    let sub2 = |x: Int| -> Int { x - 2 };
+
+    // sub2(mul3(add1(x))): x=4 -> 5 -> 15 -> 13
+    let f = compose(sub2, compose(mul3, add1));
+    assert_eq(f(4), 13);
+    assert_eq(f(0), 1);
+    assert_eq(f(10), 31);
+}
+
+fn test_compose_four() {
+    let add1 = |x: Int| -> Int { x + 1 };
+    let mul2 = |x: Int| -> Int { x * 2 };
+    let sub3 = |x: Int| -> Int { x - 3 };
+    let sq = |x: Int| -> Int { x * x };
+
+    // sq(sub3(mul2(add1(x)))): x=5 -> 6 -> 12 -> 9 -> 81
+    let pipeline = compose(sq, compose(sub3, compose(mul2, add1)));
+    assert_eq(pipeline(5), 81);
+}
+
+// =============================================================================
+// Map + filter + fold pipeline
+// =============================================================================
+
+fn test_map_filter_fold_pipeline() {
+    // Start: [1, 2, 3, 4, 5, 6, 7, 8]
+    // Map: square each
+    // Filter: keep those > 10
+    // Fold: sum
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+
+    // Step 1: map (square)
+    let mapped = map_arr8(a, 8, |x: Int| -> Int { x * x });
+    // [1, 4, 9, 16, 25, 36, 49, 64]
+
+    // Step 2: filter (> 10)
+    let filtered = filter_arr8(mapped, 8, |x: Int| -> Int { if x > 10 { 1 } else { 0 } });
+    // [16, 25, 36, 49, 64], count=5
+    assert_eq(filtered.count, 5);
+
+    // Step 3: fold (sum)
+    let total = fold_arr8(filtered.arr, filtered.count, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // 16 + 25 + 36 + 49 + 64 = 190
+    assert_eq(total, 190);
+}
+
+fn test_filter_map_fold_pipeline() {
+    // Start: [1, 2, 3, 4, 5, 6, 7, 8]
+    // Filter: keep odd numbers
+    // Map: triple each
+    // Fold: sum
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 6, e6: 7, e7: 8 };
+
+    // Step 1: filter odd
+    let filtered = filter_arr8(a, 8, |x: Int| -> Int { if x % 2 != 0 { 1 } else { 0 } });
+    // [1, 3, 5, 7], count=4
+    assert_eq(filtered.count, 4);
+
+    // Step 2: map (triple)
+    let mapped = map_arr8(filtered.arr, filtered.count, |x: Int| -> Int { x * 3 });
+    // [3, 9, 15, 21]
+
+    // Step 3: fold (sum)
+    let total = fold_arr8(mapped, filtered.count, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // 3 + 9 + 15 + 21 = 48
+    assert_eq(total, 48);
+}
+
+// =============================================================================
+// Zip-like: combine two arrays elementwise
+// =============================================================================
+
+fn zip_with(a: Arr8, b: Arr8, len: Int, f: fn(Int, Int) -> Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut i = 0;
+    while i < len {
+        out = arr8_set(out, i, f(arr8_get(a, i), arr8_get(b, i)));
+        i = i + 1;
+    }
+    out
+}
+
+fn test_zip_add() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 10, e1: 20, e2: 30, e3: 40, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let c = zip_with(a, b, 4, |x: Int, y: Int| -> Int { x + y });
+    assert_eq(arr8_get(c, 0), 11);
+    assert_eq(arr8_get(c, 1), 22);
+    assert_eq(arr8_get(c, 2), 33);
+    assert_eq(arr8_get(c, 3), 44);
+}
+
+fn test_zip_multiply() {
+    let a = Arr8 { e0: 2, e1: 3, e2: 4, e3: 5, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 10, e1: 10, e2: 10, e3: 10, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let c = zip_with(a, b, 4, |x: Int, y: Int| -> Int { x * y });
+    assert_eq(arr8_get(c, 0), 20);
+    assert_eq(arr8_get(c, 1), 30);
+    assert_eq(arr8_get(c, 2), 40);
+    assert_eq(arr8_get(c, 3), 50);
+}
+
+fn test_dot_product() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let b = Arr8 { e0: 5, e1: 6, e2: 7, e3: 8, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let products = zip_with(a, b, 4, |x: Int, y: Int| -> Int { x * y });
+    let dot = fold_arr8(products, 4, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // 1*5 + 2*6 + 3*7 + 4*8 = 5 + 12 + 21 + 32 = 70
+    assert_eq(dot, 70);
+}
+
+// =============================================================================
+// Any / All (short-circuit-like via fold)
+// =============================================================================
+
+fn any_arr8(a: Arr8, len: Int, pred: fn(Int) -> Int) -> Int {
+    let mut i = 0;
+    while i < len {
+        if pred(arr8_get(a, i)) != 0 {
+            return 1;
+        }
+        i = i + 1;
+    }
+    0
+}
+
+fn all_arr8(a: Arr8, len: Int, pred: fn(Int) -> Int) -> Int {
+    let mut i = 0;
+    while i < len {
+        if pred(arr8_get(a, i)) == 0 {
+            return 0;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_any() {
+    let a = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 8, e5: 0, e6: 0, e7: 0 };
+    let is_even = |x: Int| -> Int { if x % 2 == 0 { 1 } else { 0 } };
+    assert_eq(any_arr8(a, 5, is_even), 1);
+
+    let b = Arr8 { e0: 1, e1: 3, e2: 5, e3: 7, e4: 9, e5: 0, e6: 0, e7: 0 };
+    assert_eq(any_arr8(b, 5, is_even), 0);
+}
+
+fn test_all() {
+    let a = Arr8 { e0: 2, e1: 4, e2: 6, e3: 8, e4: 10, e5: 0, e6: 0, e7: 0 };
+    let is_even = |x: Int| -> Int { if x % 2 == 0 { 1 } else { 0 } };
+    assert_eq(all_arr8(a, 5, is_even), 1);
+
+    let b = Arr8 { e0: 2, e1: 4, e2: 5, e3: 8, e4: 10, e5: 0, e6: 0, e7: 0 };
+    assert_eq(all_arr8(b, 5, is_even), 0);
+}
+
+// =============================================================================
+// Scan (prefix fold)
+// =============================================================================
+
+fn scan_arr8(a: Arr8, len: Int, init: Int, f: fn(Int, Int) -> Int) -> Arr8 {
+    let mut out = arr8_zeros();
+    let mut acc = init;
+    let mut i = 0;
+    while i < len {
+        acc = f(acc, arr8_get(a, i));
+        out = arr8_set(out, i, acc);
+        i = i + 1;
+    }
+    out
+}
+
+fn test_scan_sum() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let prefix_sums = scan_arr8(a, 5, 0, |acc: Int, x: Int| -> Int { acc + x });
+    // [1, 3, 6, 10, 15]
+    assert_eq(arr8_get(prefix_sums, 0), 1);
+    assert_eq(arr8_get(prefix_sums, 1), 3);
+    assert_eq(arr8_get(prefix_sums, 2), 6);
+    assert_eq(arr8_get(prefix_sums, 3), 10);
+    assert_eq(arr8_get(prefix_sums, 4), 15);
+}
+
+fn test_scan_product() {
+    let a = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    let prefix_prods = scan_arr8(a, 5, 1, |acc: Int, x: Int| -> Int { acc * x });
+    // [1, 2, 6, 24, 120]
+    assert_eq(arr8_get(prefix_prods, 0), 1);
+    assert_eq(arr8_get(prefix_prods, 1), 2);
+    assert_eq(arr8_get(prefix_prods, 2), 6);
+    assert_eq(arr8_get(prefix_prods, 3), 24);
+    assert_eq(arr8_get(prefix_prods, 4), 120);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_map_double();
+    test_map_square();
+    test_map_negate();
+    test_map_abs();
+    test_filter_positive();
+    test_filter_even();
+    test_filter_greater_than();
+    test_fold_sum();
+    test_fold_product();
+    test_fold_max();
+    test_fold_min();
+    test_fold_count_matching();
+    test_fold_sum_of_squares();
+    test_compose_two();
+    test_compose_three();
+    test_compose_four();
+    test_map_filter_fold_pipeline();
+    test_filter_map_fold_pipeline();
+    test_zip_add();
+    test_zip_multiply();
+    test_dot_product();
+    test_any();
+    test_all();
+    test_scan_sum();
+    test_scan_product();
+    print("[OK] 284_interp_functional_patterns");
+    0
+}

@@ -1,0 +1,276 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, recursion, hanoi
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Tower of Hanoi solver
+// Count moves for n disks (should be 2^n - 1).
+// Record the sequence of moves for n=3 (7 moves). Verify correctness.
+
+// =============================================================================
+// Count moves for n disks (iterative 2^n - 1)
+// =============================================================================
+
+fn hanoi_move_count(n: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < n {
+        result = result * 2;
+        i = i + 1;
+    }
+    result - 1
+}
+
+fn test_move_count() {
+    assert_eq(hanoi_move_count(1), 1);
+    assert_eq(hanoi_move_count(2), 3);
+    assert_eq(hanoi_move_count(3), 7);
+    assert_eq(hanoi_move_count(4), 15);
+    assert_eq(hanoi_move_count(5), 31);
+    assert_eq(hanoi_move_count(10), 1023);
+}
+
+// =============================================================================
+// Recursive Hanoi solver — counts moves
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn hanoi_count(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        // Move n-1 disks from source to aux, move disk n, move n-1 from aux to dest
+        hanoi_count(n - 1) + 1 + hanoi_count(n - 1)
+    }
+}
+
+fn test_hanoi_count_recursive() {
+    assert_eq(hanoi_count(0), 0);
+    assert_eq(hanoi_count(1), 1);
+    assert_eq(hanoi_count(2), 3);
+    assert_eq(hanoi_count(3), 7);
+    assert_eq(hanoi_count(4), 15);
+    // Should match iterative
+    let mut i = 1;
+    while i <= 10 {
+        assert_eq(hanoi_count(i), hanoi_move_count(i));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Record moves for n=3 in an array
+// Moves stored as: from_peg * 10 + to_peg (pegs are 1, 2, 3)
+// For n=3, source=1, dest=3, aux=2:
+//   Move 1: 1->3  => 13
+//   Move 2: 1->2  => 12
+//   Move 3: 3->2  => 32
+//   Move 4: 1->3  => 13
+//   Move 5: 2->1  => 21
+//   Move 6: 2->3  => 23
+//   Move 7: 1->3  => 13
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// State for recording moves: the move array and current index
+type HanoiState is { moves: Arr8, idx: Int };
+
+@allow(unbounded_recursion)
+fn hanoi_solve(n: Int, src: Int, dst: Int, aux: Int, st: HanoiState) -> HanoiState {
+    if n <= 0 {
+        st
+    } else if n == 1 {
+        let move_code = src * 10 + dst;
+        let new_moves = arr8_set(st.moves, st.idx, move_code);
+        HanoiState { moves: new_moves, idx: st.idx + 1 }
+    } else {
+        // Move n-1 from src to aux using dst
+        let st1 = hanoi_solve(n - 1, src, aux, dst, st);
+        // Move disk n from src to dst
+        let move_code = src * 10 + dst;
+        let new_moves = arr8_set(st1.moves, st1.idx, move_code);
+        let st2 = HanoiState { moves: new_moves, idx: st1.idx + 1 };
+        // Move n-1 from aux to dst using src
+        hanoi_solve(n - 1, aux, dst, src, st2)
+    }
+}
+
+fn test_hanoi_moves_n3() {
+    let init = HanoiState { moves: arr8_new(), idx: 0 };
+    let final_st = hanoi_solve(3, 1, 3, 2, init);
+
+    // Should have 7 moves
+    assert_eq(final_st.idx, 7);
+
+    // Expected moves: 1->3, 1->2, 3->2, 1->3, 2->1, 2->3, 1->3
+    assert_eq(arr8_get(final_st.moves, 0), 13);
+    assert_eq(arr8_get(final_st.moves, 1), 12);
+    assert_eq(arr8_get(final_st.moves, 2), 32);
+    assert_eq(arr8_get(final_st.moves, 3), 13);
+    assert_eq(arr8_get(final_st.moves, 4), 21);
+    assert_eq(arr8_get(final_st.moves, 5), 23);
+    assert_eq(arr8_get(final_st.moves, 6), 13);
+}
+
+fn test_hanoi_moves_n1() {
+    let init = HanoiState { moves: arr8_new(), idx: 0 };
+    let final_st = hanoi_solve(1, 1, 3, 2, init);
+    assert_eq(final_st.idx, 1);
+    assert_eq(arr8_get(final_st.moves, 0), 13);
+}
+
+fn test_hanoi_moves_n2() {
+    let init = HanoiState { moves: arr8_new(), idx: 0 };
+    let final_st = hanoi_solve(2, 1, 3, 2, init);
+    assert_eq(final_st.idx, 3);
+    // 1->2, 1->3, 2->3
+    assert_eq(arr8_get(final_st.moves, 0), 12);
+    assert_eq(arr8_get(final_st.moves, 1), 13);
+    assert_eq(arr8_get(final_st.moves, 2), 23);
+}
+
+// =============================================================================
+// Simulate disk stacks to verify correctness for n=3
+// Each peg represented as a record with top elements and size
+// Pegs: 1, 2, 3
+// =============================================================================
+
+// Stack of up to 4 disks (enough for n=3 test)
+type Stack4 is { s0: Int, s1: Int, s2: Int, s3: Int, top: Int };
+
+fn stack4_new() -> Stack4 {
+    Stack4 { s0: 0, s1: 0, s2: 0, s3: 0, top: 0 }
+}
+
+fn stack4_push(s: Stack4, v: Int) -> Stack4 {
+    let idx = s.top;
+    Stack4 {
+        s0: if idx == 0 { v } else { s.s0 },
+        s1: if idx == 1 { v } else { s.s1 },
+        s2: if idx == 2 { v } else { s.s2 },
+        s3: if idx == 3 { v } else { s.s3 },
+        top: s.top + 1
+    }
+}
+
+fn stack4_pop(s: Stack4) -> Stack4 {
+    Stack4 {
+        s0: s.s0, s1: s.s1, s2: s.s2, s3: s.s3,
+        top: s.top - 1
+    }
+}
+
+fn stack4_peek(s: Stack4) -> Int {
+    let idx = s.top - 1;
+    if idx == 0 { s.s0 }
+    else if idx == 1 { s.s1 }
+    else if idx == 2 { s.s2 }
+    else { s.s3 }
+}
+
+// Three pegs state
+type Pegs is { p1: Stack4, p2: Stack4, p3: Stack4 };
+
+fn get_peg(pegs: Pegs, peg: Int) -> Stack4 {
+    if peg == 1 { pegs.p1 }
+    else if peg == 2 { pegs.p2 }
+    else { pegs.p3 }
+}
+
+fn set_peg(pegs: Pegs, peg: Int, s: Stack4) -> Pegs {
+    Pegs {
+        p1: if peg == 1 { s } else { pegs.p1 },
+        p2: if peg == 2 { s } else { pegs.p2 },
+        p3: if peg == 3 { s } else { pegs.p3 }
+    }
+}
+
+fn apply_move(pegs: Pegs, move_code: Int) -> Pegs {
+    let from_peg = move_code / 10;
+    let to_peg = move_code % 10;
+    let src = get_peg(pegs, from_peg);
+    let disk = stack4_peek(src);
+    let new_src = stack4_pop(src);
+    let dst = get_peg(pegs, to_peg);
+    let new_dst = stack4_push(dst, disk);
+    let pegs2 = set_peg(pegs, from_peg, new_src);
+    set_peg(pegs2, to_peg, new_dst)
+}
+
+fn test_simulation_n3() {
+    // Initialize: peg 1 has disks 3, 2, 1 (bottom to top)
+    let mut p1 = stack4_new();
+    p1 = stack4_push(p1, 3);
+    p1 = stack4_push(p1, 2);
+    p1 = stack4_push(p1, 1);
+    let pegs = Pegs { p1: p1, p2: stack4_new(), p3: stack4_new() };
+
+    // Get moves
+    let init = HanoiState { moves: arr8_new(), idx: 0 };
+    let result = hanoi_solve(3, 1, 3, 2, init);
+
+    // Apply all 7 moves
+    let mut state = pegs;
+    let mut i = 0;
+    while i < result.idx {
+        state = apply_move(state, arr8_get(result.moves, i));
+        i = i + 1;
+    }
+
+    // Verify: peg 1 and 2 empty, peg 3 has all 3 disks
+    assert_eq(state.p1.top, 0);
+    assert_eq(state.p2.top, 0);
+    assert_eq(state.p3.top, 3);
+    // Bottom to top: 3, 2, 1
+    assert_eq(state.p3.s0, 3);
+    assert_eq(state.p3.s1, 2);
+    assert_eq(state.p3.s2, 1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_move_count();
+    test_hanoi_count_recursive();
+    test_hanoi_moves_n1();
+    test_hanoi_moves_n2();
+    test_hanoi_moves_n3();
+    test_simulation_n3();
+    print("[OK] 271_interp_tower_of_hanoi");
+    0
+}

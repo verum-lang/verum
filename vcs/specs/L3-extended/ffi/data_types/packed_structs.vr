@@ -1,0 +1,138 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, data-types, packed, struct-layout
+// @timeout: 10000
+// @description: Tests @packed struct layout for compact binary data
+
+type c_int is i32;
+type c_char is i8;
+type c_void is ();
+type size_t is usize;
+
+/// Network packet header (packed, no padding)
+@repr(C, packed)
+type PacketHeader is {
+    magic: u16,
+    version: u8,
+    flags: u8,
+    length: u32,
+    checksum: u16,
+};
+
+/// Binary file header
+@repr(C, packed)
+type BinaryHeader is {
+    signature: [u8; 4],
+    version_major: u16,
+    version_minor: u16,
+    data_offset: u32,
+    data_size: u64,
+};
+
+/// Network address (packed)
+@repr(C, packed)
+type Ipv4Addr is {
+    octets: [u8; 4],
+};
+
+@repr(C, packed)
+type Ipv6Addr is {
+    segments: [u16; 8],
+};
+
+@repr(C, packed)
+type SocketAddr is {
+    family: u16,
+    port: u16,
+    addr: Ipv4Addr,
+    zero: [u8; 8],
+};
+
+/// ELF header (partial)
+@repr(C, packed)
+type ElfIdent is {
+    magic: [u8; 4],
+    class: u8,
+    data: u8,
+    version: u8,
+    os_abi: u8,
+    abi_version: u8,
+    padding: [u8; 7],
+};
+
+/// USB descriptor header
+@repr(C, packed)
+type UsbDescriptor is {
+    length: u8,
+    descriptor_type: u8,
+};
+
+/// DNS header
+@repr(C, packed)
+type DnsHeader is {
+    id: u16,
+    flags: u16,
+    qdcount: u16,
+    ancount: u16,
+    nscount: u16,
+    arcount: u16,
+};
+
+/// Packed struct reading
+fn read_packet_header(data: &[u8]) -> Maybe<&PacketHeader> {
+    if data.len() < PacketHeader.size {
+        None
+    } else {
+        Some(unsafe { &*(data.as_ptr() as *const PacketHeader) })
+    }
+}
+
+/// Packed struct writing
+fn write_packet_header(buf: &mut [u8], header: &PacketHeader) -> Bool {
+    if buf.len() < PacketHeader.size {
+        false
+    } else {
+        unsafe {
+            let src = header as *const PacketHeader as *const u8;
+            let dst = buf.as_mut_ptr();
+            for i in 0..PacketHeader.size {
+                *dst.add(i) = *src.add(i);
+            }
+        }
+        true
+    }
+}
+
+/// IP address operations
+implement Ipv4Addr {
+    fn new(a: u8, b: u8, c: u8, d: u8) -> Ipv4Addr {
+        Ipv4Addr { octets: [a, b, c, d] }
+    }
+
+    fn is_loopback(&self) -> Bool {
+        self.octets[0] == 127
+    }
+
+    fn is_private(&self) -> Bool {
+        self.octets[0] == 10 ||
+        (self.octets[0] == 172 && self.octets[1] >= 16 && self.octets[1] <= 31) ||
+        (self.octets[0] == 192 && self.octets[1] == 168)
+    }
+}
+
+fn main() {
+    let header = PacketHeader {
+        magic: 0xCAFE,
+        version: 1,
+        flags: 0,
+        length: 100,
+        checksum: 0xABCD,
+    };
+
+    let addr = Ipv4Addr.new(127, 0, 0, 1);
+    assert(addr.is_loopback());
+
+    let private_addr = Ipv4Addr.new(192, 168, 1, 1);
+    assert(private_addr.is_private());
+}

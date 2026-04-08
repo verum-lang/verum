@@ -1,0 +1,24 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: coercion, implicit, int_to_float
+// @expect: pass
+
+// Test implicit Int→Float coercion in function calls.
+
+fn square(x: Float) -> Float {
+    x * x
+}
+
+fn main() -> Int {
+    // This should implicitly coerce Int 5 to Float 5.0
+    let result = square(5);
+    let r = result as Int;
+    if r != 25 {
+        print(f"FAIL: square(5) = {r}, expected 25");
+        return 1;
+    }
+
+    print(f"PASS: implicit Int→Float coercion works, square(5)={r}");
+    0
+}

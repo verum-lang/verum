@@ -1,0 +1,194 @@
+// @test: compile-only
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, memory-layout, fat-ref
+
+/// Test FatRef memory layout: 24 bytes.
+/// FatRef is used for references to dynamically-sized types (DST).
+/// Layout: ptr (8) + generation (4) + epoch_caps (4) + len/vtable (8)
+
+fn main() {
+    verify_slice_ref_size();
+    verify_trait_object_ref_size();
+    verify_fat_ref_layout();
+    verify_alignment();
+}
+
+/// Verify slice references are 24 bytes (FatRef)
+fn verify_slice_ref_size() {
+    // Slice references need length metadata
+    assert((&[Int]).size == 24);
+    assert((&[u8]).size == 24);
+    assert((&[Point]).size == 24);
+
+    // String slice (Text slice)
+    assert((&Text).size == 24);
+
+    // Mutable slice refs same size
+    assert((&mut [Int]).size == 24);
+    assert((&mut [u8]).size == 24);
+}
+
+/// Verify protocol object references are 24 bytes (FatRef)
+fn verify_trait_object_ref_size() {
+    // Protocol object references need vtable pointer
+    assert((&Display).size == 24);
+    assert((&Clone).size == 24);
+
+    // Mutable protocol object refs same size
+    assert((&mut Display).size == 24);
+    assert((&mut Write).size == 24);
+}
+
+/// Verify internal layout of FatRef
+fn verify_fat_ref_layout() {
+    let array = [1, 2, 3, 4, 5];
+    let slice_ref: &[Int] = &array;
+
+    // FatRef layout is defined by @repr(C) struct:
+    // - ptr: 8 bytes (pointer)
+    // - generation: 4 bytes (u32)
+    // - epoch_caps: 4 bytes (u32)
+    // - metadata: 8 bytes (Int, stores length or vtable)
+    // Total: 8 + 4 + 4 + 8 = 24 bytes
+
+    // Verify total FatRef size
+    assert((&[Int]).size == 24);
+
+    // Verify individual component sizes
+    assert(Int.size == 8);  // Pointer and metadata are Int-sized
+}
+
+/// Raw pointer type alias (8 bytes on 64-bit) - define before use
+type RawPtr is Int;
+
+/// Raw representation of FatRef
+@repr(C)
+type FatRefRaw is {
+    ptr: RawPtr,            // 8 bytes: pointer to data
+    generation: u32,        // 4 bytes: allocation generation
+    epoch_caps: u32,        // 4 bytes: epoch + capabilities
+    metadata: Int,          // 8 bytes: length (slice) or vtable (trait object)
+};
+
+// Type alias for array of slice refs (used for size calculations)
+type FatRefArray4 is [&[Int]; 4];
+
+/// Verify FatRef alignment
+fn verify_alignment() {
+    // FatRef aligned to pointer alignment (8 bytes)
+    assert((&[Int]).alignment == 8);
+    assert((&Display).alignment == 8);
+
+    // Array of FatRefs is tightly packed
+    let slice_refs: [&[Int]; 4] = [&[], &[], &[], &[]];
+    assert(FatRefArray4.size == 96);  // 4 * 24 = 96
+}
+
+/// Show metadata usage for slices
+fn slice_metadata() {
+    let array = [1, 2, 3, 4, 5];
+    let slice: &[Int] = &array;
+
+    // Metadata is the length - use type annotation
+    let raw: FatRefRaw = transmute(slice);
+    assert(raw.metadata == 5);  // Length of slice
+
+    // Different slices, different metadata
+    let slice2: &[Int] = &array[1..4];
+    let raw2: FatRefRaw = transmute(slice2);
+    assert(raw2.metadata == 3);  // Length is 3
+
+    // Empty slice
+    let empty: &[Int] = &[];
+    let raw_empty: FatRefRaw = transmute(empty);
+    assert(raw_empty.metadata == 0);
+}
+
+/// Show metadata usage for protocol objects
+/// NOTE: Protocol object coercion is advanced and requires runtime support
+fn trait_object_metadata() {
+    // Protocol object coercion requires concrete implementation
+    // For now, we test FatRef layout properties directly
+
+    // Protocol object references are 24 bytes
+    assert((&Display).size == 24);
+
+    // Different protocol object types have same size
+    assert((&Clone).size == 24);
+    assert((&Write).size == 24);
+}
+
+// Type aliases for fixed-size array comparisons
+type FixedArray10 is [Int; 10];
+type RefFixedArray10 is &FixedArray10;
+
+/// Comparison: ThinRef vs FatRef
+fn compare_ref_sizes() {
+    // ThinRef for sized types: 16 bytes
+    assert((&Int).size == 16);
+    assert((&Point).size == 16);
+
+    // Fixed-size array reference
+    assert(RefFixedArray10.size == 16);  // Fixed-size array ref is ThinRef
+
+    // FatRef for unsized types: 24 bytes
+    assert((&[Int]).size == 24);      // Slice
+    assert((&Display).size == 24); // Protocol object
+
+    // Overhead compared to raw pointers:
+    // ThinRef: +8 bytes (generation + epoch_caps)
+    // FatRef: +8 bytes (same metadata, just more base)
+
+    // Raw fat pointer (slice/trait object): 16 bytes (ptr + len/vtable)
+    // FatRef: 24 bytes (ptr + gen + epoch + len/vtable)
+}
+
+/// Memory efficiency considerations
+fn memory_efficiency() {
+    // For slice-heavy code, 50% overhead vs raw pointers
+    // 24 bytes vs 16 bytes
+
+    // But provides:
+    // - Use-after-free detection (generation)
+    // - Epoch-based invalidation (epoch_caps)
+    // - Bounds checking metadata (length)
+
+    // Trade-off is worth it for safety
+
+    // Can opt out with &checked or &unsafe for hot paths
+    assert((&checked [Int]).size == 16);  // Just ptr + len
+    assert((&unsafe [Int]).size == 16);   // Just ptr + len
+}
+
+// Protocols used in tests
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type Clone is protocol {
+    fn clone(&self) -> Self;
+};
+
+type Write is protocol {
+    fn write(&mut self, data: &[u8]) -> Result<Int, Error>;
+};
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+// Implement Display for Int
+implement Display for Int {
+    fn display(&self) -> Text {
+        self.to_string()
+    }
+}
+
+// Implement Display for Text
+implement Display for Text {
+    fn display(&self) -> Text {
+        *self
+    }
+}

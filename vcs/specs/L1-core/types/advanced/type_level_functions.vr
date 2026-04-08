@@ -1,0 +1,128 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: type-level, functions, computation, advanced-type-syntax
+// @description: Type-level function tests using protocols and associated types
+
+// Test 1: Type-level conditional via protocol dispatch
+type True is ();
+type False is ();
+
+type IfResult is protocol {
+    type Result;
+};
+
+implement<Then, Else> IfResult for (True, Then, Else) {
+    type Result is Then;
+}
+
+implement<Then, Else> IfResult for (False, Then, Else) {
+    type Result is Else;
+}
+
+// Test 2: Type-level list operations
+type TNil is ();
+type TCons<Head, Tail> is ();
+
+// Head type function via protocol
+type HeadOf is protocol {
+    type Result;
+};
+
+implement<T, Tail> HeadOf for TCons<T, Tail> {
+    type Result is T;
+}
+
+// Tail type function via protocol
+type TailOf is protocol {
+    type Result;
+};
+
+implement<T, Rest> TailOf for TCons<T, Rest> {
+    type Result is Rest;
+}
+
+// Test 3: Type-level append via protocol
+type AppendResult is protocol {
+    type Result;
+};
+
+implement<B> AppendResult for (TNil, B) {
+    type Result is B;
+}
+
+// Test 4: Practical example - Tuple operations
+type FlattenResult is protocol {
+    type Result;
+};
+
+implement<A, B> FlattenResult for (A, B) {
+    type Result is (A, B);
+}
+
+// Test 5: Type-level Maybe operations
+type UnwrapOrResult is protocol {
+    type Result;
+};
+
+implement<T, D> UnwrapOrResult for (MySome<T>, D) {
+    type Result is T;
+}
+
+implement<D> UnwrapOrResult for (MyNone, D) {
+    type Result is D;
+}
+
+type MySome<T> is (T);
+type MyNone is ();
+
+// Test 6: Type-level identity
+type Id<T> is T;
+
+// Test 7: Simple type aliases
+type MaybeInt is Maybe<Int>;
+type ListText is List<Text>;
+
+fn test_type_aliases() {
+    let x: MaybeInt = Some(42);
+    let y: ListText = ["hello", "world"];
+
+    assert(x.is_some());
+    assert(y.len() == 2);
+}
+
+// Test 8: Const type computation via protocol
+type SizeOf is protocol {
+    type Size;
+};
+
+implement SizeOf for Int {
+    type Size is Int;
+}
+
+implement SizeOf for Bool {
+    type Size is Bool;
+}
+
+implement SizeOf for Text {
+    type Size is Text;
+}
+
+fn main() {
+    test_type_aliases();
+
+    // Type-level functions are evaluated at compile time
+    let a: Id<Int> = 42;
+    assert(a == 42);
+
+    let b: Id<Text> = "hello";
+    assert(b == "hello");
+
+    // MaybeInt is Maybe<Int>
+    let mi: MaybeInt = Some(100);
+    assert(mi == Some(100));
+
+    // ListText is List<Text>
+    let lt: ListText = ["a", "b"];
+    assert(lt.len() == 2);
+}

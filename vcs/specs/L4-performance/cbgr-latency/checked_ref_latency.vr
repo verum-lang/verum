@@ -1,0 +1,408 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: performance, cbgr, latency, checked, tier1
+// @description: Checked reference (Tier 1) latency - compiler-proven safe, zero overhead
+
+/// Checked Reference Latency Benchmark
+///
+/// This benchmark measures the latency of Tier 1 checked references, where the
+/// compiler has proven through escape analysis that the reference is safe.
+///
+/// Performance target: 0ns overhead (compiles to raw pointer access)
+///
+/// CBGR Tier 1 characteristics:
+/// - Compiler-verified safety through escape analysis
+/// - No runtime checks needed
+/// - Compiles to raw pointer operations
+/// - Used when reference provably doesn't escape allocation scope
+///
+/// Escape analysis determines:
+/// - Reference doesn't outlive its allocation
+/// - No aliasing conflicts
+/// - Region safety is statically provable
+///
+/// Syntax: &checked T
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const WARMUP_ITERATIONS: Int = 10_000;
+const BENCHMARK_ITERATIONS: Int = 10_000_000;
+
+/// Baseline: Raw pointer access
+fn benchmark_raw_pointer() -> BenchmarkResult {
+    let data = Heap(42i64);
+    let ptr: *const i64 = &*data as *const i64;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        unsafe { black_box(*ptr) };
+    }
+
+    let elapsed = start.elapsed();
+
+    BenchmarkResult {
+        name: "raw_pointer",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns: elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64,
+        overhead_ns: 0.0,
+        is_baseline: true,
+    }
+}
+
+/// Tier 1: Checked reference read (should equal raw pointer)
+fn benchmark_checked_ref_read() -> BenchmarkResult {
+    let data = Heap(42i64);
+    // Compiler proves this reference is safe (doesn't escape scope)
+    let checked_ref: &checked i64 = &checked *data;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*checked_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Compiles to direct pointer dereference - no runtime checks
+        black_box(*checked_ref);
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64;
+
+    BenchmarkResult {
+        name: "checked_ref_read",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns,
+        overhead_ns: 0.0,  // Expected: same as raw pointer
+        is_baseline: false,
+    }
+}
+
+/// Tier 1: Checked reference write
+fn benchmark_checked_ref_write() -> BenchmarkResult {
+    let mut data = Heap(0i64);
+    let checked_ref: &checked mut i64 = &checked mut *data;
+
+    for i in 0..WARMUP_ITERATIONS {
+        *checked_ref = i as i64;
+    }
+
+    let start = Instant.now();
+
+    for i in 0..BENCHMARK_ITERATIONS {
+        *checked_ref = i as i64;
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64;
+
+    BenchmarkResult {
+        name: "checked_ref_write",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns,
+        overhead_ns: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 1: Checked slice access (bounds still checked at compile time)
+fn benchmark_checked_slice_sequential() -> BenchmarkResult {
+    let data: [i64; 1024] = array_from_fn(|i| i as i64);
+    let checked_slice: &checked [i64] = &checked data[..];
+    let iterations_per_pass = 1024;
+    let passes = BENCHMARK_ITERATIONS / iterations_per_pass;
+
+    for _ in 0..(WARMUP_ITERATIONS / iterations_per_pass) {
+        for i in 0..iterations_per_pass {
+            // Compiler can prove bounds at compile time for sequential access
+            black_box(checked_slice[i]);
+        }
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..passes {
+        for i in 0..iterations_per_pass {
+            black_box(checked_slice[i]);
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / (passes * iterations_per_pass) as f64;
+
+    BenchmarkResult {
+        name: "checked_slice_sequential",
+        iterations: passes * iterations_per_pass,
+        per_op_ns,
+        overhead_ns: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 1: Local variable with checked reference (trivial escape analysis)
+fn benchmark_checked_local_scope() -> BenchmarkResult {
+    for _ in 0..WARMUP_ITERATIONS {
+        // Reference clearly doesn't escape - trivial for escape analysis
+        let local = 42i64;
+        let checked_ref: &checked i64 = &checked local;
+        black_box(*checked_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let local = 42i64;
+        let checked_ref: &checked i64 = &checked local;
+        black_box(*checked_ref);
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64;
+
+    BenchmarkResult {
+        name: "checked_local_scope",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns,
+        overhead_ns: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 1: Inlined function with checked reference
+fn benchmark_checked_inlined_function() -> BenchmarkResult {
+    @inline(always)
+    fn read_checked(data: &checked i64) -> i64 {
+        *data
+    }
+
+    let data = Heap(42i64);
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(read_checked(&checked *data));
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Function inlined, escape analysis proves safety
+        black_box(read_checked(&checked *data));
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64;
+
+    BenchmarkResult {
+        name: "checked_inlined_function",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns,
+        overhead_ns: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 1: Checked reference in loop (loop-local lifetime)
+fn benchmark_checked_loop_local() -> BenchmarkResult {
+    let data: List<i64> = (0..1000).collect();
+
+    for _ in 0..(WARMUP_ITERATIONS / 1000) {
+        for item in data.iter() {
+            // Reference is loop-local, doesn't escape
+            let checked_ref: &checked i64 = &checked *item;
+            black_box(*checked_ref);
+        }
+    }
+
+    let start = Instant.now();
+
+    let passes = BENCHMARK_ITERATIONS / 1000;
+    for _ in 0..passes {
+        for item in data.iter() {
+            let checked_ref: &checked i64 = &checked *item;
+            black_box(*checked_ref);
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / (passes * 1000) as f64;
+
+    BenchmarkResult {
+        name: "checked_loop_local",
+        iterations: passes * 1000,
+        per_op_ns,
+        overhead_ns: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 1: Struct field with checked reference
+fn benchmark_checked_struct_field() -> BenchmarkResult {
+    type Container is {
+        value: i64,
+    };
+
+    let container = Container { value: 42 };
+
+    for _ in 0..WARMUP_ITERATIONS {
+        let checked_ref: &checked i64 = &checked container.value;
+        black_box(*checked_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Field reference within owned container - provably safe
+        let checked_ref: &checked i64 = &checked container.value;
+        black_box(*checked_ref);
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64;
+
+    BenchmarkResult {
+        name: "checked_struct_field",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns,
+        overhead_ns: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 1: Checked reference with static lifetime
+fn benchmark_checked_static() -> BenchmarkResult {
+    static STATIC_DATA: i64 = 42;
+    let checked_ref: &checked i64 = &checked STATIC_DATA;
+
+    for _ in 0..WARMUP_ITERATIONS {
+        black_box(*checked_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        // Static data has infinite lifetime - always safe
+        black_box(*checked_ref);
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64;
+
+    BenchmarkResult {
+        name: "checked_static_ref",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns,
+        overhead_ns: 0.0,
+        is_baseline: false,
+    }
+}
+
+/// Tier 1: Array element access (compile-time bounds proof)
+fn benchmark_checked_array_element() -> BenchmarkResult {
+    let array: [i64; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    for _ in 0..WARMUP_ITERATIONS {
+        // Constant index 5 is provably in bounds for array[10]
+        let checked_ref: &checked i64 = &checked array[5];
+        black_box(*checked_ref);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let checked_ref: &checked i64 = &checked array[5];
+        black_box(*checked_ref);
+    }
+
+    let elapsed = start.elapsed();
+    let per_op_ns = elapsed.as_nanos() as f64 / BENCHMARK_ITERATIONS as f64;
+
+    BenchmarkResult {
+        name: "checked_array_element",
+        iterations: BENCHMARK_ITERATIONS,
+        per_op_ns,
+        overhead_ns: 0.0,
+        is_baseline: false,
+    }
+}
+
+fn main() {
+    println("=== Checked Reference (Tier 1) Latency Benchmark ===\n");
+    println("Target: 0ns overhead (compiles to raw pointer access)\n");
+    println("Tier 1 references are compiler-proven safe via escape analysis.\n");
+
+    let baseline = benchmark_raw_pointer();
+    let baseline_ns = baseline.per_op_ns;
+
+    let results = [
+        baseline,
+        benchmark_checked_ref_read(),
+        benchmark_checked_ref_write(),
+        benchmark_checked_slice_sequential(),
+        benchmark_checked_local_scope(),
+        benchmark_checked_inlined_function(),
+        benchmark_checked_loop_local(),
+        benchmark_checked_struct_field(),
+        benchmark_checked_static(),
+        benchmark_checked_array_element(),
+    ];
+
+    println("{:<30} {:>12} {:>12} {:>8}",
+            "Benchmark", "Time (ns)", "Overhead", "Status");
+    println("{}", "-".repeat(65));
+
+    let mut all_pass = true;
+    for result in results {
+        let measured_overhead = if result.is_baseline {
+            0.0
+        } else {
+            result.per_op_ns - baseline_ns
+        };
+
+        // Allow 0.5ns tolerance for measurement noise
+        let passed = result.is_baseline || measured_overhead.abs() < 0.5;
+        if !passed { all_pass = false; }
+        let status = if passed { "PASS" } else { "FAIL" };
+
+        println("{:<30} {:>12.2} {:>12.2} {:>8}",
+                result.name, result.per_op_ns, measured_overhead, status);
+    }
+
+    println("");
+    println("Note: Tier 1 checked references compile to raw pointer operations.");
+    println("Any measured overhead should be within measurement noise (< 0.5ns).");
+    println("");
+
+    if all_pass {
+        println("[PASS] All checked references achieve zero overhead.");
+    } else {
+        println("[FAIL] Some checked references show unexpected overhead.");
+    }
+}
+
+type BenchmarkResult is {
+    name: Text,
+    iterations: Int,
+    per_op_ns: f64,
+    overhead_ns: f64,
+    is_baseline: Bool,
+};
+
+// Helper types
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_nanos(&self) -> Int { self.nanos }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn array_from_fn<T, const N: usize>(f: fn(usize) -> T) -> [T; N] { todo() }

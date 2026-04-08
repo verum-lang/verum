@@ -1,0 +1,22 @@
+// @test: verify-fail
+// @level: L1
+// @tags: proofs, verification, errors, contracts
+// @timeout: 5000
+
+/// Tests that contract violations are detected.
+
+// Function claims result > 0 but can return 0
+fn bad_abs(x: Int) -> Int where ensures result > 0 {
+    if x < 0 { -x } else { x }  // x == 0 violates ensures
+}
+
+// Function claims sorted output but does not sort
+fn fake_sort(lst: List<Int>) -> List<Int>
+    where ensures result.len() == lst.len()
+{
+    lst  // This may satisfy len but not sorting
+}
+
+fn main() {
+    print("Contract violation error tests");
+}

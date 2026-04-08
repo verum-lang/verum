@@ -1,0 +1,382 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, type-safety, comprehensive, static-analysis
+// @description: Comprehensive type safety tests demonstrating Verum's strong type system
+
+/// Comprehensive Type Safety Test Suite
+///
+/// This test demonstrates Verum's strong type system that prevents:
+///
+/// 1. Type confusion through distinct nominal types
+/// 2. Invalid numeric operations
+/// 3. Unsafe reference coercions
+/// 4. Generic type parameter violations
+/// 5. Sum type (variant) access safety
+///
+/// All type safety is enforced at compile time with zero runtime overhead.
+///
+/// Spec: 03-type-system.md#type-safety
+
+// ============================================================================
+// TEST 1: Nominal Type Safety
+// ============================================================================
+// Types with the same structure are NOT interchangeable unless explicitly converted.
+
+type UserId is {
+    value: Int,
+};
+
+type ProductId is {
+    value: Int,
+};
+
+fn test_nominal_type_safety() {
+    let user_id = UserId { value: 42 };
+    let product_id = ProductId { value: 42 };
+
+    // Both contain Int, but are distinct types
+    process_user_id(user_id);
+    process_product_id(product_id);
+
+    // Cannot pass ProductId where UserId is expected (compile-time error):
+    // process_user_id(product_id);  // ERROR: Type mismatch
+
+    // Can access the inner value through the field
+    let extracted: Int = user_id.value;
+    let new_product_id = ProductId { value: extracted };
+}
+
+fn process_user_id(id: UserId) {
+    assert(id.value >= 0);
+}
+
+fn process_product_id(id: ProductId) {
+    assert(id.value >= 0);
+}
+
+// ============================================================================
+// TEST 2: Struct Type Safety
+// ============================================================================
+// Structs with identical fields are still distinct types.
+
+type Point2D is {
+    x: Int,
+    y: Int,
+};
+
+type Size is {
+    x: Int,  // width
+    y: Int,  // height
+};
+
+fn test_struct_type_safety() {
+    let point = Point2D { x: 10, y: 20 };
+    let size = Size { x: 100, y: 200 };
+
+    // Same field names, same field types, but NOT interchangeable
+    draw_at_point(point);
+    create_with_size(size);
+
+    // Cannot pass Size where Point2D is expected:
+    // draw_at_point(size);  // ERROR: Type mismatch
+}
+
+fn draw_at_point(p: Point2D) {
+    assert(p.x >= 0);
+}
+
+fn create_with_size(s: Size) {
+    assert(s.x > 0);
+}
+
+// ============================================================================
+// TEST 3: Generic Type Parameter Safety
+// ============================================================================
+// Generic containers enforce their type parameters.
+
+fn test_generic_type_safety() {
+    let int_list = [1, 2, 3, 4, 5];
+    let bool_list = [true, false, true];
+
+    // Type parameters are preserved through operations
+    let first_int = int_list[0];
+    let first_bool = bool_list[0];
+
+    // Operations respect types
+    let sum = first_int + 10;  // Int + Int -> Int
+    let negated = !first_bool;  // !Bool -> Bool
+
+    assert(sum == 11);
+    assert(negated == false);
+}
+
+fn test_generic_function_safety() {
+    let result_int = identity(42);
+    let result_bool = identity(true);
+
+    // Return types match input types
+    assert(result_int == 42);
+    assert(result_bool == true);
+}
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// ============================================================================
+// TEST 4: Sum Type (Variant) Safety
+// ============================================================================
+// Accessing variant data requires pattern matching.
+
+type Result<T, E> is Ok(T) | Err(E);
+
+fn test_sum_type_safety() {
+    let success: Result<Int, Text> = Result.Ok(42);
+    let failure: Result<Int, Text> = Result.Err("error");
+
+    // Must pattern match to access inner data
+    let value = match success {
+        Result.Ok(v) => v,
+        Result.Err(_) => 0,
+    };
+    assert(value == 42);
+
+    // Cannot directly access .0 on sum type:
+    // let bad = success.0;  // ERROR: Sum types require pattern matching
+}
+
+fn test_exhaustive_matching() {
+    let status = get_status();
+
+    // Match must be exhaustive
+    let code = match status {
+        Status.Active => 1,
+        Status.Inactive => 0,
+        Status.Pending => 2,
+    };
+
+    assert(code >= 0);
+}
+
+type Status is Active | Inactive | Pending;
+
+fn get_status() -> Status {
+    Status.Active
+}
+
+// ============================================================================
+// TEST 5: Reference Type Safety
+// ============================================================================
+// Reference mutability is part of the type.
+
+fn test_reference_type_safety() {
+    let value = 42;
+    let mut mutable = 100;
+
+    // Immutable reference
+    let immut_ref: &Int = &value;
+
+    // Mutable reference
+    let mut_ref: &mut Int = &mut mutable;
+
+    // Can read from both
+    assert(*immut_ref == 42);
+    assert(*mut_ref == 100);
+
+    // Can only write through mutable reference
+    *mut_ref = 200;
+    assert(*mut_ref == 200);
+
+    // Cannot assign mutable ref to immutable ref variable that expects different behavior
+    // The types are compatible for reading but enforce different constraints
+}
+
+fn test_reference_parameter_safety() {
+    let value = 42;
+    let mut mutable = 100;
+
+    // Functions declare whether they need mutable access
+    read_value(&value);
+
+    // Can read from mutable variable
+    {
+        let r = &mutable;
+        assert(*r == 100);
+    }
+
+    // Then modify
+    modify_value(&mut mutable);
+    assert(mutable == 101);
+}
+
+fn read_value(v: &Int) {
+    assert(*v >= 0);
+}
+
+fn modify_value(v: &mut Int) {
+    *v += 1;
+}
+
+// ============================================================================
+// TEST 6: Numeric Type Safety
+// ============================================================================
+// Numeric operations respect type boundaries.
+
+fn test_numeric_type_safety() {
+    let int_val: Int = 42;
+    let float_val: Float = 3.14;
+
+    // Same-type operations
+    let int_result = int_val + 10;
+    let float_result = float_val + 1.0;
+
+    assert(int_result == 52);
+    assert(float_result > 4.0);
+
+    // Cannot mix Int and Float without explicit conversion
+    // let mixed = int_val + float_val;  // ERROR: Type mismatch
+}
+
+fn test_comparison_type_safety() {
+    let a = 10;
+    let b = 20;
+
+    // Comparisons produce Bool
+    let less: Bool = a < b;
+    let equal: Bool = a == b;
+    let greater: Bool = a > b;
+
+    assert(less == true);
+    assert(equal == false);
+    assert(greater == false);
+}
+
+// ============================================================================
+// TEST 7: Function Type Safety
+// ============================================================================
+// Function types must match exactly.
+
+fn test_function_type_safety() {
+    // Higher-order function expects specific signature
+    let result = apply_twice(increment, 0);
+    assert(result == 2);
+
+    let result2 = apply_twice(double, 1);
+    assert(result2 == 4);
+}
+
+fn increment(x: Int) -> Int {
+    x + 1
+}
+
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+// ============================================================================
+// TEST 8: Tuple Type Safety
+// ============================================================================
+// Tuple types are ordered and distinct.
+
+fn test_tuple_type_safety() {
+    let pair: (Int, Bool) = (42, true);
+    let reversed: (Bool, Int) = (true, 42);
+
+    // Access by position
+    let first: Int = pair.0;
+    let second: Bool = pair.1;
+
+    assert(first == 42);
+    assert(second == true);
+
+    // Cannot swap order - different types:
+    // let bad: (Int, Bool) = reversed;  // ERROR: Type mismatch
+}
+
+fn test_tuple_function_return() {
+    let result = divide_with_remainder(17, 5);
+
+    let quotient = result.0;
+    let remainder = result.1;
+
+    assert(quotient == 3);
+    assert(remainder == 2);
+}
+
+fn divide_with_remainder(a: Int, b: Int) -> (Int, Int) {
+    (a / b, a % b)
+}
+
+// ============================================================================
+// TEST 9: Array Type Safety
+// ============================================================================
+// Arrays enforce element type uniformity.
+
+fn test_array_type_safety() {
+    let int_array = [1, 2, 3, 4, 5];
+    let bool_array = [true, false, true];
+
+    // Element access returns the element type
+    let elem: Int = int_array[0];
+    let flag: Bool = bool_array[0];
+
+    assert(elem == 1);
+    assert(flag == true);
+
+    // Cannot mix types in array:
+    // let mixed = [1, true, 3];  // ERROR: Array elements must have same type
+}
+
+fn test_array_modification_safety() {
+    let mut arr = [1, 2, 3];
+
+    // Can only assign same type
+    arr[0] = 100;  // Int -> Int: OK
+    // arr[0] = true;  // ERROR: Type mismatch
+
+    assert(arr[0] == 100);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Nominal type safety
+    test_nominal_type_safety();
+
+    // Struct type safety
+    test_struct_type_safety();
+
+    // Generic type safety
+    test_generic_type_safety();
+    test_generic_function_safety();
+
+    // Sum type safety
+    test_sum_type_safety();
+    test_exhaustive_matching();
+
+    // Reference type safety
+    test_reference_type_safety();
+    test_reference_parameter_safety();
+
+    // Numeric type safety
+    test_numeric_type_safety();
+    test_comparison_type_safety();
+
+    // Function type safety
+    test_function_type_safety();
+
+    // Tuple type safety
+    test_tuple_type_safety();
+    test_tuple_function_return();
+
+    // Array type safety
+    test_array_type_safety();
+    test_array_modification_safety();
+}

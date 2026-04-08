@@ -1,0 +1,155 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @category: comprehensions
+// @tags: parser, comprehensions, clauses, errors
+// @description: Invalid comprehension clause syntax (applies to all comprehension types)
+
+// ============================================================================
+// INVALID 'for' CLAUSES
+// ============================================================================
+
+fn test_for_clause_double_in() {
+    // ERROR: Double 'in' keyword
+    let bad = [x for x in in items];
+}
+
+fn test_for_clause_double_for() {
+    // ERROR: 'for for' without proper structure
+    let bad = [x for for x in items];
+}
+
+fn test_for_clause_missing_binding() {
+    // ERROR: No binding between 'for' and 'in'
+    let bad = [x for in items];
+}
+
+fn test_for_clause_expression_as_pattern() {
+    // ERROR: Expression instead of pattern
+    let bad = [x for x + 1 in items];
+}
+
+// ============================================================================
+// INVALID 'if' CLAUSES
+// ============================================================================
+
+fn test_if_clause_empty() {
+    // ERROR: 'if' without condition
+    let bad = [x for x in items if];
+}
+
+fn test_if_clause_double_if() {
+    // ERROR: 'if if' without expression between
+    let bad = [x for x in items if if x > 0];
+}
+
+fn test_if_clause_else_branch() {
+    // ERROR: 'if-else' in comprehension filter (not valid)
+    let bad = [x for x in items if x > 0 else 0];
+}
+
+fn test_if_clause_block() {
+    // ERROR: Block instead of expression
+    let bad = [x for x in items if { x > 0 }];
+}
+
+// ============================================================================
+// INVALID 'let' CLAUSES
+// ============================================================================
+
+fn test_let_clause_no_initializer() {
+    // ERROR: 'let' without '= value'
+    let bad = [y for x in items let y];
+}
+
+fn test_let_clause_colon_only() {
+    // ERROR: 'let' with type but no value
+    let bad = [y for x in items let y: Int];
+}
+
+fn test_let_clause_arrow_instead_of_equals() {
+    // ERROR: Using -> instead of =
+    let bad = [y for x in items let y -> x * 2];
+}
+
+fn test_let_clause_double_equals() {
+    // ERROR: Using == instead of =
+    let bad = [y for x in items let y == x * 2];
+}
+
+fn test_let_clause_var_keyword() {
+    // ERROR: Using 'var' instead of 'let'
+    let bad = [y for x in items var y = x * 2];
+}
+
+fn test_let_clause_const_keyword() {
+    // ERROR: Using 'const' instead of 'let'
+    let bad = [y for x in items const y = x * 2];
+}
+
+// ============================================================================
+// CLAUSE ORDERING ERRORS
+// ============================================================================
+
+fn test_if_before_for() {
+    // ERROR: 'if' cannot come before first 'for'
+    let bad = [x if x > 0 for x in items];
+}
+
+fn test_let_before_for() {
+    // ERROR: 'let' cannot come before first 'for'
+    let bad = [y let y = 1 for x in items];
+}
+
+fn test_in_without_for() {
+    // ERROR: 'in' without preceding 'for'
+    let bad = [x in items];
+}
+
+// ============================================================================
+// MIXED INVALID SYNTAX
+// ============================================================================
+
+fn test_python_style_comprehension() {
+    // ERROR: Python-style without brackets
+    let bad = x for x in items;
+}
+
+fn test_sql_style_select() {
+    // ERROR: SQL-style syntax
+    let bad = [select x from items where x > 0];
+}
+
+fn test_foreach_keyword() {
+    // ERROR: 'foreach' is not valid, use 'for'
+    let bad = [x foreach x in items];
+}
+
+fn test_range_as_keyword() {
+    // ERROR: Using 'range' instead of range syntax
+    let bad = [x for x in range(10)];  // range() is not a Verum keyword
+}
+
+// ============================================================================
+// LIST COMPREHENSION SPECIFIC ERRORS
+// ============================================================================
+
+fn test_list_using_braces() {
+    // ERROR: List comprehension uses brackets, not braces
+    let bad = {x for x in items};  // This is map syntax without :
+}
+
+fn test_list_colon_separator() {
+    // ERROR: Using colon in list comprehension (map syntax)
+    let bad = [k: v for (k, v) in pairs];
+}
+
+fn test_list_semicolon_separator() {
+    // ERROR: Using semicolon to separate clauses
+    let bad = [x for x in items; if x > 0];
+}
+
+fn test_list_comma_between_clauses() {
+    // ERROR: Using comma between clauses
+    let bad = [x for x in items, if x > 0];
+}

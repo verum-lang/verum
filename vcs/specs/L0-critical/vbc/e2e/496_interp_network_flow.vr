@@ -1,0 +1,270 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, network_flow, ford_fulkerson, bfs, max_flow, residual_graph
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Max flow / Ford-Fulkerson on small graphs using BFS augmenting paths.
+//
+// Graph representation:
+//   - Up to 8 nodes.
+//   - cap[u * 8 + v] = capacity of edge u->v (0 = no edge).
+//   - flow[u * 8 + v] = current flow on edge u->v.
+//   - Residual capacity: res[u][v] = cap[u][v] - flow[u][v] + flow[v][u].
+//
+// Ford-Fulkerson with BFS (Edmonds-Karp):
+//   Repeatedly find shortest augmenting path in residual graph via BFS.
+//   Augment flow along that path by the bottleneck capacity.
+//   Stop when no augmenting path exists.
+
+fn residual(
+    cap:  [Int; 64],
+    flow: [Int; 64],
+    u:    Int,
+    v:    Int
+) -> Int {
+    cap[u * 8 + v] - flow[u * 8 + v] + flow[v * 8 + u]
+}
+
+// BFS to find augmenting path from src to sink.
+// parent[v] = predecessor of v in the BFS tree (-1 if not visited).
+// Returns 1 if sink is reachable, 0 otherwise.
+fn bfs_path(
+    cap:    [Int; 64],
+    flow:   [Int; 64],
+    n:      Int,
+    src:    Int,
+    sink:   Int,
+    parent: [Int; 8]
+) -> Int {
+    // Initialize parent to -1
+    let mut i = 0;
+    while i < n { parent[i] = 0 - 1; i = i + 1; }
+    parent[src] = src;
+
+    // BFS queue (circular array)
+    let mut queue = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut head_q = 0;
+    let mut tail_q = 0;
+    queue[tail_q] = src;
+    tail_q = tail_q + 1;
+
+    while head_q < tail_q {
+        let u = queue[head_q];
+        head_q = head_q + 1;
+        let mut v = 0;
+        while v < n {
+            if parent[v] < 0 && residual(cap, flow, u, v) > 0 {
+                parent[v] = u;
+                if v == sink { return 1; }
+                queue[tail_q] = v;
+                tail_q = tail_q + 1;
+            }
+            v = v + 1;
+        }
+    }
+    0
+}
+
+// Trace path from sink back to src using parent[], return bottleneck flow.
+fn path_bottleneck(
+    cap:    [Int; 64],
+    flow:   [Int; 64],
+    sink:   Int,
+    src:    Int,
+    parent: [Int; 8]
+) -> Int {
+    let mut min_res = 2147483647;
+    let mut v = sink;
+    while v != src {
+        let u = parent[v];
+        let r = residual(cap, flow, u, v);
+        if r < min_res { min_res = r; }
+        v = u;
+    }
+    min_res
+}
+
+// Augment flow along the path.
+fn augment_path(
+    cap:    [Int; 64],
+    flow:   [Int; 64],
+    sink:   Int,
+    src:    Int,
+    parent: [Int; 8],
+    amount: Int
+) {
+    let mut v = sink;
+    while v != src {
+        let u = parent[v];
+        // Forward flow: add to flow[u][v] up to cap[u][v]
+        // Backward flow (reverse): subtract from flow[v][u]
+        // We use the standard residual approach: just add to flow[u][v].
+        // For reverse edges (where cap[u][v]=0), we subtract from flow[v][u].
+        let forward_cap = cap[u * 8 + v];
+        if forward_cap > 0 {
+            flow[u * 8 + v] = flow[u * 8 + v] + amount;
+        } else {
+            flow[v * 8 + u] = flow[v * 8 + u] - amount;
+        }
+        v = u;
+    }
+}
+
+// Compute max flow from src to sink using Edmonds-Karp (BFS Ford-Fulkerson).
+fn max_flow(
+    cap:  [Int; 64],
+    flow: [Int; 64],
+    n:    Int,
+    src:  Int,
+    sink: Int
+) -> Int {
+    let mut total = 0;
+    let mut parent = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut iters = 0;
+    while iters < 100 {
+        if bfs_path(cap, flow, n, src, sink, parent) == 0 { return total; }
+        let bn = path_bottleneck(cap, flow, sink, src, parent);
+        augment_path(cap, flow, sink, src, parent, bn);
+        total = total + bn;
+        iters = iters + 1;
+    }
+    total
+}
+
+fn init_flow(flow: [Int; 64]) {
+    let mut i = 0;
+    while i < 64 { flow[i] = 0; i = i + 1; }
+}
+
+fn test_flow_simple_triangle() {
+    // Simple 3-node graph: 0->1 cap=10, 0->2 cap=10, 1->2 cap=5.
+    // Max flow 0->2: path 0->2 (cap=10) + path 0->1->2 (cap=5) = 15.
+    let n = 3;
+    let mut cap  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut flow = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_flow(flow);
+    // cap[u*8+v]
+    cap[0 * 8 + 1] = 10;
+    cap[0 * 8 + 2] = 10;
+    cap[1 * 8 + 2] = 5;
+
+    let mf = max_flow(cap, flow, n, 0, 2);
+    assert_eq(mf, 15);
+    print("flow_simple_triangle: ok");
+}
+
+fn test_flow_bottleneck() {
+    // Graph: 0->1 cap=5, 1->3 cap=3, 0->2 cap=4, 2->3 cap=4.
+    // Paths: 0->1->3 (cap=min(5,3)=3) and 0->2->3 (cap=min(4,4)=4).
+    // Max flow = 3+4 = 7.
+    let n = 4;
+    let mut cap  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut flow = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_flow(flow);
+    cap[0 * 8 + 1] = 5;
+    cap[0 * 8 + 2] = 4;
+    cap[1 * 8 + 3] = 3;
+    cap[2 * 8 + 3] = 4;
+
+    let mf = max_flow(cap, flow, n, 0, 3);
+    assert_eq(mf, 7);
+    print("flow_bottleneck: ok");
+}
+
+fn test_flow_classic_graph() {
+    // Classic max-flow example with 6 nodes (s=0, t=5):
+    //   0->1 cap=16, 0->2 cap=13
+    //   1->2 cap=10, 1->3 cap=12
+    //   2->1 cap=4,  2->4 cap=14
+    //   3->2 cap=9,  3->5 cap=20
+    //   4->3 cap=7,  4->5 cap=4
+    // Known max flow s->t = 23.
+    let n = 6;
+    let mut cap  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut flow = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_flow(flow);
+    cap[0 * 8 + 1] = 16;
+    cap[0 * 8 + 2] = 13;
+    cap[1 * 8 + 2] = 10;
+    cap[1 * 8 + 3] = 12;
+    cap[2 * 8 + 1] = 4;
+    cap[2 * 8 + 4] = 14;
+    cap[3 * 8 + 2] = 9;
+    cap[3 * 8 + 5] = 20;
+    cap[4 * 8 + 3] = 7;
+    cap[4 * 8 + 5] = 4;
+
+    let mf = max_flow(cap, flow, n, 0, 5);
+    assert_eq(mf, 23);
+    print("flow_classic_graph: ok");
+}
+
+fn test_flow_disconnected() {
+    // No path from src to sink: max flow = 0.
+    let n = 4;
+    let mut cap  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut flow = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_flow(flow);
+    // Only edges in component {0,1}, sink=3 unreachable
+    cap[0 * 8 + 1] = 10;
+    cap[2 * 8 + 3] = 10;
+
+    let mf = max_flow(cap, flow, n, 0, 3);
+    assert_eq(mf, 0);
+    print("flow_disconnected: ok");
+}
+
+fn test_flow_single_edge() {
+    // Single edge: 0->1 cap=7. Max flow = 7.
+    let n = 2;
+    let mut cap  = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut flow = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    init_flow(flow);
+    cap[0 * 8 + 1] = 7;
+
+    let mf = max_flow(cap, flow, n, 0, 1);
+    assert_eq(mf, 7);
+    print("flow_single_edge: ok");
+}
+
+fn main() -> Int {
+    test_flow_simple_triangle();
+    test_flow_bottleneck();
+    test_flow_classic_graph();
+    test_flow_disconnected();
+    test_flow_single_edge();
+    print("[OK] 496_interp_network_flow");
+    0
+}

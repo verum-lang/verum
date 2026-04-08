@@ -1,0 +1,136 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, 420
+// @timeout: 30000
+
+// Milestone test 420: comprehensive integer math
+
+fn factorial(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 2;
+    while i <= n {
+        r = r * i;
+        i = i + 1;
+    }
+    r
+}
+
+fn fib(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    a
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    x
+}
+
+fn is_prime(n: Int) -> Int {
+    if n < 2 { return 0; }
+    if n < 4 { return 1; }
+    if n % 2 == 0 { return 0; }
+    let mut i = 3;
+    while i * i <= n {
+        if n % i == 0 { return 0; }
+        i = i + 2;
+    }
+    1
+}
+
+fn count_divisors(n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 1;
+    while i * i <= n {
+        if n % i == 0 {
+            count = count + 1;
+            if i != n / i { count = count + 1; }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn digit_sum(n: Int) -> Int {
+    let mut s = 0;
+    let mut v = n;
+    while v > 0 {
+        s = s + v % 10;
+        v = v / 10;
+    }
+    s
+}
+
+fn ipow(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut b = base;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = result * b; }
+        b = b * b;
+        e = e / 2;
+    }
+    result
+}
+
+fn test_basics() -> Int {
+    assert_eq(factorial(10), 3628800);
+    assert_eq(fib(20), 6765);
+    assert_eq(gcd(48, 18), 6);
+    assert_eq(gcd(100, 75), 25);
+    1
+}
+
+fn test_primes() -> Int {
+    assert_eq(is_prime(2), 1);
+    assert_eq(is_prime(97), 1);
+    assert_eq(is_prime(100), 0);
+    assert_eq(is_prime(127), 1);
+    1
+}
+
+fn test_divisors() -> Int {
+    assert_eq(count_divisors(1), 1);
+    assert_eq(count_divisors(12), 6);   // 1,2,3,4,6,12
+    assert_eq(count_divisors(28), 6);   // 1,2,4,7,14,28
+    assert_eq(count_divisors(100), 9);  // 1,2,4,5,10,20,25,50,100
+    1
+}
+
+fn test_digit_sum() -> Int {
+    assert_eq(digit_sum(123), 6);
+    assert_eq(digit_sum(999), 27);
+    assert_eq(digit_sum(10000), 1);
+    1
+}
+
+fn test_ipow() -> Int {
+    assert_eq(ipow(2, 10), 1024);
+    assert_eq(ipow(3, 5), 243);
+    assert_eq(ipow(7, 4), 2401);
+    assert_eq(ipow(10, 6), 1000000);
+    1
+}
+
+fn main() -> Int {
+    test_basics();
+    test_primes();
+    test_divisors();
+    test_digit_sum();
+    test_ipow();
+    print("[OK] 420_milestone_aot");
+    0
+}

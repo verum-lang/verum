@@ -1,0 +1,482 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L3
+// @tags: vbc, gpu, ml
+// @timeout: 50000
+// @expected-exit: 0
+// @description: GPU ML operations — quantized matmul, attention, KV cache concepts
+
+// ============================================================================
+// Helper types
+// ============================================================================
+
+type KVEntry is { key0: Float, key1: Float, val0: Float, val1: Float };
+
+// ============================================================================
+// Utility functions
+// ============================================================================
+
+fn abs_f(x: Float) -> Float {
+    if x < 0.0 { 0.0 - x } else { x }
+}
+
+fn assert_near(actual: Float, expected: Float, tol: Float) {
+    let diff = abs_f(actual - expected);
+    assert(diff < tol);
+}
+
+// Float square root via Newtonps method
+fn fsqrt(x: Float) -> Float {
+    if x <= 0.0 { 0.0 }
+    else {
+        let mut guess = x / 2.0;
+        let mut i = 0;
+        while i < 30 {
+            guess = (guess + x / guess) / 2.0;
+            i = i + 1;
+        }
+        guess
+    }
+}
+
+// Simple exp approximation: e^x ~ 1 + x + x^2/2 + x^3/6 + x^4/24
+fn exp_approx(x: Float) -> Float {
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x4 = x3 * x;
+    1.0 + x + x2 / 2.0 + x3 / 6.0 + x4 / 24.0
+}
+
+// ============================================================================
+// Quantization helpers: simulate INT8 quantization
+// ============================================================================
+
+fn quantize(x: Float, scale: Float) -> Int {
+    let q_f = x / scale;
+    let mut q = if q_f >= 0.0 { (q_f + 0.5) as Int } else { (q_f - 0.5) as Int };
+    if q < -128 { q = -128; }
+    if q > 127 { q = 127; }
+    q
+}
+
+fn dequantize(q: Int, scale: Float) -> Float {
+    let q_f = if q >= 0 { q as Float } else { 0.0 - ((0 - q) as Float) };
+    q_f * scale
+}
+
+// ============================================================================
+// Test 1: Quantized Matrix Multiplication
+// ============================================================================
+
+fn test_quantized_matmul() {
+    // Matrix A = [[1.0, 2.0], [3.0, 4.0]]
+    // Matrix B = [[5.0, 6.0], [7.0, 8.0]]
+    // Expected A*B = [[19.0, 22.0], [43.0, 50.0]]
+
+    let scale_a = 0.1;
+    let scale_b = 0.1;
+
+    // Quantize A elements
+    let qa00 = quantize(1.0, scale_a);  // 10
+    let qa01 = quantize(2.0, scale_a);  // 20
+    let qa10 = quantize(3.0, scale_a);  // 30
+    let qa11 = quantize(4.0, scale_a);  // 40
+
+    // Quantize B elements
+    let qb00 = quantize(5.0, scale_b);  // 50
+    let qb01 = quantize(6.0, scale_b);  // 60
+    let qb10 = quantize(7.0, scale_b);  // 70
+    let qb11 = quantize(8.0, scale_b);  // 80
+
+    // Integer matmul in quantized space: C_ij = sum_k A_ik * B_kj
+    let qc00 = qa00 * qb00 + qa01 * qb10;
+    let qc01 = qa00 * qb01 + qa01 * qb11;
+    let qc10 = qa10 * qb00 + qa11 * qb10;
+    let qc11 = qa10 * qb01 + qa11 * qb11;
+
+    // Dequantize result: scale_out = scale_a * scale_b
+    let scale_out = scale_a * scale_b;  // 0.01
+    let c00 = dequantize(qc00, scale_out);
+    let c01 = dequantize(qc01, scale_out);
+    let c10 = dequantize(qc10, scale_out);
+    let c11 = dequantize(qc11, scale_out);
+
+    assert_near(c00, 19.0, 0.01);
+    assert_near(c01, 22.0, 0.01);
+    assert_near(c10, 43.0, 0.01);
+    assert_near(c11, 50.0, 0.01);
+
+    // Verify quantization values
+    assert_eq(qa00, 10);
+    assert_eq(qa11, 40);
+    assert_eq(qc00, 1900);
+    assert_eq(qc11, 5000);
+
+    print("  test_quantized_matmul: ok");
+}
+
+// ============================================================================
+// Test 2: Attention Score Computation
+// ============================================================================
+
+fn test_attention_score() {
+    // Q = [[1.0, 0.0], [0.0, 1.0]]  (identity-like queries)
+    // K = [[1.0, 0.5], [0.5, 1.0]]  (key vectors)
+    // d_k = 2 (dimension of keys)
+
+    // Q matrix
+    let q00 = 1.0;
+    let q01 = 0.0;
+    let q10 = 0.0;
+    let q11 = 1.0;
+
+    // K matrix
+    let k00 = 1.0;
+    let k01 = 0.5;
+    let k10 = 0.5;
+    let k11 = 1.0;
+
+    // K^T: swap k01 and k10
+    let kt00 = k00;
+    let kt01 = k10;
+    let kt10 = k01;
+    let kt11 = k11;
+
+    let d_k = 2.0;
+    let scale = fsqrt(d_k);  // sqrt(2) ~ 1.4142
+
+    // Verify sqrt(2) approximation
+    assert_near(scale, 1.4142, 0.001);
+
+    // Q * K^T  (inline matmul)
+    let qk00 = q00 * kt00 + q01 * kt10;
+    let qk01 = q00 * kt01 + q01 * kt11;
+    let qk10 = q10 * kt00 + q11 * kt10;
+    let qk11 = q10 * kt01 + q11 * kt11;
+
+    // Q*K^T = [[1*1+0*0.5, 1*0.5+0*1], [0*1+1*0.5, 0*0.5+1*1]]
+    //       = [[1.0, 0.5], [0.5, 1.0]]
+    assert_near(qk00, 1.0, 0.001);
+    assert_near(qk01, 0.5, 0.001);
+    assert_near(qk10, 0.5, 0.001);
+    assert_near(qk11, 1.0, 0.001);
+
+    // Scale by 1/sqrt(d_k)
+    let s00 = qk00 / scale;
+    let s01 = qk01 / scale;
+    let s10 = qk10 / scale;
+    let s11 = qk11 / scale;
+
+    // Apply softmax-like normalization per row
+    // Row 0: [s00, s01] => softmax
+    let e00 = exp_approx(s00);
+    let e01 = exp_approx(s01);
+    let row0_sum = e00 + e01;
+    let attn00 = e00 / row0_sum;
+    let attn01 = e01 / row0_sum;
+
+    // Row 1: [s10, s11] => softmax
+    let e10 = exp_approx(s10);
+    let e11 = exp_approx(s11);
+    let row1_sum = e10 + e11;
+    let attn10 = e10 / row1_sum;
+    let attn11 = e11 / row1_sum;
+
+    // Softmax outputs should sum to 1.0 per row
+    assert_near(attn00 + attn01, 1.0, 0.001);
+    assert_near(attn10 + attn11, 1.0, 0.001);
+
+    // Since s00 > s01, higher scores get higher attention
+    assert(attn00 > attn01);
+    assert(attn11 > attn10);
+
+    // Verify symmetry: attn00 should equal attn11, attn01 should equal attn10
+    assert_near(attn00, attn11, 0.001);
+    assert_near(attn01, attn10, 0.001);
+
+    print("  test_attention_score: ok");
+}
+
+// ============================================================================
+// Test 3: KV Cache Append and Retrieval
+// ============================================================================
+
+fn test_kv_cache_append() {
+    // Simulate a 4-slot KV cache using flat arrays of floats
+    // Each slot has: key0, key1, val0, val1
+
+    // Slot 0
+    let mut s0_k0 = 0.0;
+    let mut s0_k1 = 0.0;
+    let mut s0_v0 = 0.0;
+    let mut s0_v1 = 0.0;
+
+    // Slot 1
+    let mut s1_k0 = 0.0;
+    let mut s1_k1 = 0.0;
+    let mut s1_v0 = 0.0;
+    let mut s1_v1 = 0.0;
+
+    // Slot 2
+    let mut s2_k0 = 0.0;
+    let mut s2_k1 = 0.0;
+    let mut s2_v0 = 0.0;
+    let mut s2_v1 = 0.0;
+
+    // Slot 3
+    let mut s3_k0 = 0.0;
+    let mut s3_k1 = 0.0;
+    let mut s3_v0 = 0.0;
+    let mut s3_v1 = 0.0;
+
+    let mut cache_len = 0;
+
+    // Append entry 0: key=[1.0, 0.5], val=[0.1, 0.2]
+    s0_k0 = 1.0;
+    s0_k1 = 0.5;
+    s0_v0 = 0.1;
+    s0_v1 = 0.2;
+    cache_len = 1;
+
+    assert_eq(cache_len, 1);
+    assert_eq(s0_k0, 1.0);
+    assert_eq(s0_k1, 0.5);
+    assert_eq(s0_v0, 0.1);
+    assert_eq(s0_v1, 0.2);
+
+    // Append entry 1: key=[2.0, 1.5], val=[0.3, 0.4]
+    s1_k0 = 2.0;
+    s1_k1 = 1.5;
+    s1_v0 = 0.3;
+    s1_v1 = 0.4;
+    cache_len = 2;
+
+    // Verify first entry still intact
+    assert_eq(s0_k0, 1.0);
+    assert_eq(s0_v0, 0.1);
+
+    // Verify second entry
+    assert_eq(s1_k0, 2.0);
+    assert_eq(s1_k1, 1.5);
+    assert_eq(s1_v0, 0.3);
+
+    // Append entry 2 and 3
+    s2_k0 = 3.0;
+    s2_k1 = 2.5;
+    s2_v0 = 0.5;
+    s2_v1 = 0.6;
+
+    s3_k0 = 4.0;
+    s3_k1 = 3.5;
+    s3_v0 = 0.7;
+    s3_v1 = 0.8;
+    cache_len = 4;
+
+    assert_eq(cache_len, 4);
+
+    // Dot-product attention lookup: query = [3.0, 2.5]
+    let query0 = 3.0;
+    let query1 = 2.5;
+
+    let score0 = query0 * s0_k0 + query1 * s0_k1;
+    let score1 = query0 * s1_k0 + query1 * s1_k1;
+    let score2 = query0 * s2_k0 + query1 * s2_k1;
+    let score3 = query0 * s3_k0 + query1 * s3_k1;
+
+    // score0 = 3*1 + 2.5*0.5 = 3 + 1.25 = 4.25
+    // score1 = 3*2 + 2.5*1.5 = 6 + 3.75 = 9.75
+    // score2 = 3*3 + 2.5*2.5 = 9 + 6.25 = 15.25
+    // score3 = 3*4 + 2.5*3.5 = 12 + 8.75 = 20.75
+    assert_near(score0, 4.25, 0.01);
+    assert_near(score1, 9.75, 0.01);
+    assert_near(score2, 15.25, 0.01);
+    assert_near(score3, 20.75, 0.01);
+
+    // Find best match (highest dot product)
+    let mut best_idx = 0;
+    let mut best_score = score0;
+    if score1 > best_score { best_score = score1; best_idx = 1; }
+    if score2 > best_score { best_score = score2; best_idx = 2; }
+    if score3 > best_score { best_score = score3; best_idx = 3; }
+
+    assert_eq(best_idx, 3);
+    assert_near(best_score, 20.75, 0.01);
+
+    // Retrieve value from best slot (slot 3)
+    assert_eq(s3_v0, 0.7);
+    assert_eq(s3_v1, 0.8);
+
+    print("  test_kv_cache_append: ok");
+}
+
+// ============================================================================
+// Test 4: Flash Attention Block (tiled attention computation)
+// ============================================================================
+
+fn test_flash_attention_block() {
+    // Simulate flash attention by computing attention in 2x2 tiles
+    // Full Q, K, V are 4-element vectors; process in tiles of size 2
+
+    // Q = [1.0, 0.5, 0.8, 0.3]
+    // K = [0.5, 1.0, 0.3, 0.8]
+    // V = [1.0, 2.0, 3.0, 4.0]
+
+    // --- Tile 0: Q=[1.0, 0.5], K=[0.5, 1.0] ---
+    // Score matrix S0: S0[i,j] = Q[i] * K[j]
+    let s0_00 = 1.0 * 0.5;
+    let s0_01 = 1.0 * 1.0;
+    let s0_10 = 0.5 * 0.5;
+    let s0_11 = 0.5 * 1.0;
+
+    assert_near(s0_00, 0.5, 0.001);
+    assert_near(s0_01, 1.0, 0.001);
+    assert_near(s0_10, 0.25, 0.001);
+    assert_near(s0_11, 0.5, 0.001);
+
+    // Apply exp for softmax numerators (tile 0)
+    let e0_00 = exp_approx(s0_00);
+    let e0_01 = exp_approx(s0_01);
+    let e0_10 = exp_approx(s0_10);
+    let e0_11 = exp_approx(s0_11);
+
+    // Row sums for tile 0
+    let rowsum0_0 = e0_00 + e0_01;
+    let rowsum0_1 = e0_10 + e0_11;
+
+    // Weighted values for tile 0: V = [1.0, 2.0]
+    let out0_r0 = e0_00 * 1.0 + e0_01 * 2.0;
+    let out0_r1 = e0_10 * 1.0 + e0_11 * 2.0;
+
+    // --- Tile 1: Q=[1.0, 0.5], K=[0.3, 0.8] ---
+    let s1_00 = 1.0 * 0.3;
+    let s1_01 = 1.0 * 0.8;
+    let s1_10 = 0.5 * 0.3;
+    let s1_11 = 0.5 * 0.8;
+
+    let e1_00 = exp_approx(s1_00);
+    let e1_01 = exp_approx(s1_01);
+    let e1_10 = exp_approx(s1_10);
+    let e1_11 = exp_approx(s1_11);
+
+    let rowsum1_0 = e1_00 + e1_01;
+    let rowsum1_1 = e1_10 + e1_11;
+
+    // Weighted values for tile 1: V = [3.0, 4.0]
+    let out1_r0 = e1_00 * 3.0 + e1_01 * 4.0;
+    let out1_r1 = e1_10 * 3.0 + e1_11 * 4.0;
+
+    // --- Combine tiles using flash attention merging ---
+    let total_sum_r0 = rowsum0_0 + rowsum1_0;
+    let total_sum_r1 = rowsum0_1 + rowsum1_1;
+    let final_r0 = (out0_r0 + out1_r0) / total_sum_r0;
+    let final_r1 = (out0_r1 + out1_r1) / total_sum_r1;
+
+    // Outputs should be weighted averages of V values [1,2,3,4]
+    assert(final_r0 > 1.0);
+    assert(final_r0 < 4.0);
+    assert(final_r1 > 1.0);
+    assert(final_r1 < 4.0);
+
+    // Both rows should give reasonable weighted average ~2.5
+    assert_near(final_r0, 2.5, 1.0);
+    assert_near(final_r1, 2.5, 1.0);
+
+    // Verify row sums are positive
+    assert(total_sum_r0 > 0.0);
+    assert(total_sum_r1 > 0.0);
+
+    print("  test_flash_attention_block: ok");
+}
+
+// ============================================================================
+// Test 5: Layer Normalization
+// ============================================================================
+
+fn test_layer_norm() {
+    // Layer norm: y = (x - mean) / sqrt(var + eps) * gamma + beta
+    // Input: x = [2.0, 4.0, 6.0, 8.0]
+
+    let x0 = 2.0;
+    let x1 = 4.0;
+    let x2 = 6.0;
+    let x3 = 8.0;
+    let n = 4.0;
+    let gamma = 1.0;
+    let beta = 0.0;
+    let eps = 0.00001;
+
+    // Compute mean
+    let mean = (x0 + x1 + x2 + x3) / n;
+    assert_near(mean, 5.0, 0.001);
+
+    // Compute variance: var = mean((x - mean)^2)
+    let d0 = x0 - mean;  // -3.0
+    let d1 = x1 - mean;  // -1.0
+    let d2 = x2 - mean;  //  1.0
+    let d3 = x3 - mean;  //  3.0
+    let variance = (d0 * d0 + d1 * d1 + d2 * d2 + d3 * d3) / n;
+    // var = (9 + 1 + 1 + 9) / 4 = 20 / 4 = 5.0
+    assert_near(variance, 5.0, 0.001);
+
+    // Compute normalization factor
+    let sqrt_var = fsqrt(variance + eps);
+    assert_near(sqrt_var, 2.2360, 0.01);
+    let inv_std = 1.0 / sqrt_var;
+
+    // Normalize each element
+    let y0 = (x0 - mean) * inv_std * gamma + beta;
+    let y1 = (x1 - mean) * inv_std * gamma + beta;
+    let y2 = (x2 - mean) * inv_std * gamma + beta;
+    let y3 = (x3 - mean) * inv_std * gamma + beta;
+
+    // Expected: y = [-3/sqrt(5), -1/sqrt(5), 1/sqrt(5), 3/sqrt(5)]
+    assert_near(y0, 0.0 - 1.3416, 0.01);
+    assert_near(y1, 0.0 - 0.4472, 0.01);
+    assert_near(y2, 0.4472, 0.01);
+    assert_near(y3, 1.3416, 0.01);
+
+    // Verify: normalized values should have mean ~ 0 and variance ~ 1
+    let norm_mean = (y0 + y1 + y2 + y3) / n;
+    assert_near(norm_mean, 0.0, 0.01);
+
+    let nm0 = y0 - norm_mean;
+    let nm1 = y1 - norm_mean;
+    let nm2 = y2 - norm_mean;
+    let nm3 = y3 - norm_mean;
+    let norm_var = (nm0 * nm0 + nm1 * nm1 + nm2 * nm2 + nm3 * nm3) / n;
+    assert_near(norm_var, 1.0, 0.01);
+
+    // Test with non-trivial gamma and beta
+    let gamma2 = 2.0;
+    let beta2 = 0.5;
+    let z0 = (x0 - mean) * inv_std * gamma2 + beta2;
+    let z1 = (x1 - mean) * inv_std * gamma2 + beta2;
+    let z2 = (x2 - mean) * inv_std * gamma2 + beta2;
+    let z3 = (x3 - mean) * inv_std * gamma2 + beta2;
+
+    // z = 2 * y + 0.5
+    assert_near(z0, 2.0 * y0 + 0.5, 0.01);
+    assert_near(z1, 2.0 * y1 + 0.5, 0.01);
+    assert_near(z2, 2.0 * y2 + 0.5, 0.01);
+    assert_near(z3, 2.0 * y3 + 0.5, 0.01);
+
+    // Mean of z should be beta2 = 0.5 (since mean of y ~ 0)
+    let z_mean = (z0 + z1 + z2 + z3) / n;
+    assert_near(z_mean, 0.5, 0.01);
+
+    print("  test_layer_norm: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_quantized_matmul();
+    test_attention_score();
+    test_kv_cache_append();
+    test_flash_attention_block();
+    test_layer_norm();
+    print("[OK] 006_ml_ops");
+    0
+}

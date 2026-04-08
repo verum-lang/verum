@@ -1,0 +1,231 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, deque, double_ended_queue, circular_buffer, data_structures
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Double-ended queue (deque) operations: push/pop front and back,
+// implemented as a circular buffer over a fixed-size array.
+//
+// Layout:
+//   buf[0..15]  — the backing array (capacity 16)
+//   head        — index of the first element
+//   tail        — index one past the last element
+//   size        — number of elements
+//
+// Invariant: tail = (head + size) % 16
+//
+// We encode the deque state using separate arrays for state:
+//   state[0] = head, state[1] = tail, state[2] = size
+//
+// push_back:  buf[tail] = v;  tail = (tail+1)%16;  size++
+// push_front: head = (head+15)%16;  buf[head] = v;  size++
+// pop_back:   tail = (tail+15)%16;  return buf[tail];  size--
+// pop_front:  v = buf[head];  head = (head+1)%16;  size--;  return v
+
+fn deque_push_back(buf: [Int; 16], st: [Int; 4], v: Int) {
+    let tail = st[1];
+    buf[tail] = v;
+    st[1] = (tail + 1) % 16;
+    st[2] = st[2] + 1;
+}
+
+fn deque_push_front(buf: [Int; 16], st: [Int; 4], v: Int) {
+    let new_head = (st[0] + 15) % 16;
+    buf[new_head] = v;
+    st[0] = new_head;
+    st[2] = st[2] + 1;
+}
+
+fn deque_pop_front(buf: [Int; 16], st: [Int; 4]) -> Int {
+    let head = st[0];
+    let v = buf[head];
+    st[0] = (head + 1) % 16;
+    st[2] = st[2] - 1;
+    v
+}
+
+fn deque_pop_back(buf: [Int; 16], st: [Int; 4]) -> Int {
+    let new_tail = (st[1] + 15) % 16;
+    st[1] = new_tail;
+    st[2] = st[2] - 1;
+    buf[new_tail]
+}
+
+fn deque_peek_front(buf: [Int; 16], st: [Int; 4]) -> Int {
+    buf[st[0]]
+}
+
+fn deque_peek_back(buf: [Int; 16], st: [Int; 4]) -> Int {
+    buf[(st[1] + 15) % 16]
+}
+
+fn test_push_pop_back() {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut st = [0, 0, 0, 0]; // head=0, tail=0, size=0, unused=0
+    assert_eq(st[2], 0); // empty
+
+    deque_push_back(buf, st, 10);
+    deque_push_back(buf, st, 20);
+    deque_push_back(buf, st, 30);
+    assert_eq(st[2], 3);
+    assert_eq(deque_peek_front(buf, st), 10);
+    assert_eq(deque_peek_back(buf, st), 30);
+
+    // Pop from back: 30, 20, 10
+    assert_eq(deque_pop_back(buf, st), 30);
+    assert_eq(deque_pop_back(buf, st), 20);
+    assert_eq(deque_pop_back(buf, st), 10);
+    assert_eq(st[2], 0); // empty again
+
+    print("deque_push_pop_back: ok");
+}
+
+fn test_push_front_pop_front() {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut st = [0, 0, 0, 0];
+
+    deque_push_front(buf, st, 10);
+    deque_push_front(buf, st, 20);
+    deque_push_front(buf, st, 30);
+    // deque from front: [30, 20, 10]
+    assert_eq(st[2], 3);
+    assert_eq(deque_peek_front(buf, st), 30);
+    assert_eq(deque_peek_back(buf, st), 10);
+
+    // Pop from front: 30, 20, 10
+    assert_eq(deque_pop_front(buf, st), 30);
+    assert_eq(deque_pop_front(buf, st), 20);
+    assert_eq(deque_pop_front(buf, st), 10);
+    assert_eq(st[2], 0);
+
+    print("deque_push_front_pop_front: ok");
+}
+
+fn test_mixed_operations() {
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut st = [0, 0, 0, 0];
+
+    // push_back: [1,2,3]
+    deque_push_back(buf, st, 1);
+    deque_push_back(buf, st, 2);
+    deque_push_back(buf, st, 3);
+
+    // push_front: [0,1,2,3]
+    deque_push_front(buf, st, 0);
+    assert_eq(st[2], 4);
+    assert_eq(deque_peek_front(buf, st), 0);
+    assert_eq(deque_peek_back(buf, st), 3);
+
+    // pop_front -> 0; deque: [1,2,3]
+    assert_eq(deque_pop_front(buf, st), 0);
+
+    // pop_back -> 3; deque: [1,2]
+    assert_eq(deque_pop_back(buf, st), 3);
+
+    // push_front 99: [99,1,2]
+    deque_push_front(buf, st, 99);
+    assert_eq(st[2], 3);
+    assert_eq(deque_peek_front(buf, st), 99);
+    assert_eq(deque_peek_back(buf, st), 2);
+
+    // Pop all from front: 99, 1, 2
+    assert_eq(deque_pop_front(buf, st), 99);
+    assert_eq(deque_pop_front(buf, st), 1);
+    assert_eq(deque_pop_front(buf, st), 2);
+    assert_eq(st[2], 0);
+
+    print("deque_mixed_operations: ok");
+}
+
+fn test_circular_wrap() {
+    // Test wrap-around: push near end of buffer, pop, push again.
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut st = [0, 0, 0, 0];
+
+    // Fill to 14 elements from back
+    let mut i = 0;
+    while i < 14 {
+        deque_push_back(buf, st, i * 10);
+        i = i + 1;
+    }
+    assert_eq(st[2], 14);
+    assert_eq(deque_peek_front(buf, st), 0);
+    assert_eq(deque_peek_back(buf, st), 130);
+
+    // Pop 6 from front
+    let mut j = 0;
+    while j < 6 {
+        let _ = deque_pop_front(buf, st);
+        j = j + 1;
+    }
+    // Now front element should be 60 (was index 6)
+    assert_eq(deque_peek_front(buf, st), 60);
+    assert_eq(st[2], 8);
+
+    // Push 4 more from back -> wraps in circular buffer
+    deque_push_back(buf, st, 200);
+    deque_push_back(buf, st, 210);
+    deque_push_back(buf, st, 220);
+    deque_push_back(buf, st, 230);
+    assert_eq(st[2], 12);
+    assert_eq(deque_peek_back(buf, st), 230);
+
+    // Pop from front, verifying the sequence
+    assert_eq(deque_pop_front(buf, st), 60);
+    assert_eq(deque_pop_front(buf, st), 70);
+
+    print("deque_circular_wrap: ok");
+}
+
+fn test_palindrome_check() {
+    // Use deque to check if a sequence is a palindrome
+    // [1,2,3,2,1] -> palindrome
+    let vals = [1, 2, 3, 2, 1];
+    let n = 5;
+    let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut st = [0, 0, 0, 0];
+    let mut i = 0;
+    while i < n {
+        deque_push_back(buf, st, vals[i]);
+        i = i + 1;
+    }
+
+    let mut is_pal = 1;
+    while st[2] > 1 {
+        let front = deque_pop_front(buf, st);
+        let back = deque_pop_back(buf, st);
+        if front != back { is_pal = 0; }
+    }
+    assert_eq(is_pal, 1);
+
+    // [1,2,3,4,5] -> not palindrome
+    let vals2 = [1, 2, 3, 4, 5];
+    let mut buf2 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut st2 = [0, 0, 0, 0];
+    let mut k = 0;
+    while k < 5 {
+        deque_push_back(buf2, st2, vals2[k]);
+        k = k + 1;
+    }
+    let mut is_pal2 = 1;
+    while st2[2] > 1 {
+        let f = deque_pop_front(buf2, st2);
+        let b = deque_pop_back(buf2, st2);
+        if f != b { is_pal2 = 0; }
+    }
+    assert_eq(is_pal2, 0);
+
+    print("deque_palindrome_check: ok");
+}
+
+fn main() -> Int {
+    test_push_pop_back();
+    test_push_front_pop_front();
+    test_mixed_operations();
+    test_circular_wrap();
+    test_palindrome_check();
+    print("[OK] 505_interp_deque_ops");
+    0
+}

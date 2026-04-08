@@ -1,0 +1,180 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, probability, counting
+// @timeout: 30000
+
+// Milestone 695: Probability and counting problems
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Factorial
+fn fact(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 2;
+    while i <= n { r = r * i; i = i + 1; }
+    r
+}
+
+// Binomial coefficient
+fn binom(n: Int, k: Int) -> Int {
+    if k > n { 0 }
+    else if k == 0 { 1 }
+    else {
+        let kk = if k > n - k { n - k } else { k };
+        let mut result = 1;
+        let mut i = 0;
+        while i < kk {
+            result = result * (n - i) / (i + 1);
+            i = i + 1;
+        }
+        result
+    }
+}
+
+// Permutations P(n,k) = n! / (n-k)!
+fn perm(n: Int, k: Int) -> Int {
+    let mut result = 1;
+    let mut i = 0;
+    while i < k {
+        result = result * (n - i);
+        i = i + 1;
+    }
+    result
+}
+
+// Multinomial coefficient: n! / (k1! * k2! * ... )
+// For two groups: n! / (k1! * k2!) where k1+k2=n
+fn multinom2(n: Int, k1: Int, k2: Int) -> Int {
+    fact(n) / (fact(k1) * fact(k2))
+}
+
+// Stars and bars: ways to put n identical balls into k distinct bins
+fn stars_and_bars(n: Int, k: Int) -> Int {
+    binom(n + k - 1, k - 1)
+}
+
+// GCD for simplifying fractions
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+// Probability as fraction: numerator/denominator
+// Probability of drawing k successes from n total with m successes (hypergeometric)
+// P = C(m,k) * C(n-m, s-k) / C(n, s) where s = sample size
+fn hypergeometric_num(n: Int, m: Int, s: Int, k: Int) -> Int {
+    binom(m, k) * binom(n - m, s - k)
+}
+
+fn hypergeometric_den(n: Int, s: Int) -> Int {
+    binom(n, s)
+}
+
+// Birthday problem: probability of collision in group of n from 365 options
+// P(collision) = 1 - 365!/((365-n)! * 365^n)
+// For small n, compute 365*364*...*(365-n+1) / 365^n
+// Store as fraction (num, den) in simplified form
+
+// Expected value of geometric distribution: 1/p
+// If probability = a/b, then E[X] = b/a
+
+fn test_factorial() -> Int {
+    assert_eq(fact(0), 1);
+    assert_eq(fact(1), 1);
+    assert_eq(fact(5), 120);
+    assert_eq(fact(6), 720);
+    assert_eq(fact(8), 40320);
+    1
+}
+
+fn test_binomial() -> Int {
+    assert_eq(binom(5, 2), 10);
+    assert_eq(binom(10, 3), 120);
+    // Symmetry: C(n,k) = C(n,n-k)
+    assert_eq(binom(7, 2), binom(7, 5));
+    // Pascal's rule
+    assert_eq(binom(6, 3), binom(5, 2) + binom(5, 3));
+    // Sum of row: C(n,0)+...+C(n,n) = 2^n
+    let sum = binom(5, 0) + binom(5, 1) + binom(5, 2) + binom(5, 3) + binom(5, 4) + binom(5, 5);
+    assert_eq(sum, 32);
+    1
+}
+
+fn test_permutations() -> Int {
+    assert_eq(perm(5, 2), 20);   // 5*4
+    assert_eq(perm(5, 5), 120);  // 5!
+    assert_eq(perm(5, 0), 1);
+    assert_eq(perm(5, 1), 5);
+    // P(n,k) = k! * C(n,k)
+    assert_eq(perm(6, 3), fact(3) * binom(6, 3));
+    1
+}
+
+fn test_multinomial() -> Int {
+    // Ways to arrange "AABB": 4!/(2!*2!) = 6
+    assert_eq(multinom2(4, 2, 2), 6);
+    // Ways to arrange "AAAB": 4!/(3!*1!) = 4
+    assert_eq(multinom2(4, 3, 1), 4);
+    // Ways to arrange "ABCD": 4!/(1!*1!) = 24 (not quite, but 4!/1^4)
+    // Just verify formula
+    assert_eq(multinom2(5, 3, 2), 10);
+    1
+}
+
+fn test_stars_bars() -> Int {
+    // Ways to put 3 balls into 2 bins: C(4,1) = 4
+    // (3,0),(2,1),(1,2),(0,3)
+    assert_eq(stars_and_bars(3, 2), 4);
+    // 5 balls into 3 bins: C(7,2) = 21
+    assert_eq(stars_and_bars(5, 3), 21);
+    // 0 balls into k bins: 1 way
+    assert_eq(stars_and_bars(0, 5), 1);
+    1
+}
+
+fn test_hypergeometric() -> Int {
+    // Deck of 52 cards, 13 hearts, draw 5
+    // P(exactly 2 hearts) = C(13,2)*C(39,3) / C(52,5)
+    let num = hypergeometric_num(52, 13, 5, 2);
+    let den = hypergeometric_den(52, 5);
+    // Just verify positive and < denominator
+    assert_eq(num > 0, 1);
+    assert_eq(num < den, 1);
+    // P(0 successes from 5 with 3 marked out of 10)
+    // = C(3,0)*C(7,5)/C(10,5) = 1*21/252 = 21/252 = 1/12
+    let n2 = hypergeometric_num(10, 3, 5, 0);
+    let d2 = hypergeometric_den(10, 5);
+    assert_eq(n2, 21);
+    assert_eq(d2, 252);
+    let g = gcd(n2, d2);
+    assert_eq(n2 / g, 1);
+    assert_eq(d2 / g, 12);
+    1
+}
+
+fn test_counting_identities() -> Int {
+    // Hockey stick: C(r,r) + C(r+1,r) + ... + C(n,r) = C(n+1,r+1)
+    // For r=2: C(2,2)+C(3,2)+C(4,2)+C(5,2) = C(6,3)
+    let sum = binom(2, 2) + binom(3, 2) + binom(4, 2) + binom(5, 2);
+    assert_eq(sum, binom(6, 3)); // 1+3+6+10 = 20 = C(6,3)
+    // Vandermonde: C(m+n, r) = sum C(m,k)*C(n,r-k)
+    // C(3+4, 3) = C(7,3) = 35
+    let vand = binom(3, 0) * binom(4, 3) + binom(3, 1) * binom(4, 2) +
+               binom(3, 2) * binom(4, 1) + binom(3, 3) * binom(4, 0);
+    assert_eq(vand, binom(7, 3));
+    1
+}
+
+fn main() -> Int {
+    test_factorial();
+    test_binomial();
+    test_permutations();
+    test_multinomial();
+    test_stars_bars();
+    test_hypergeometric();
+    test_counting_identities();
+    print("[OK] 695_milestone_aot");
+    0
+}

@@ -1,0 +1,72 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: low-level, inline-assembly, asm-options
+// @description: Test inline assembly options
+
+/// Test volatile option - assembly has side effects
+fn test_volatile_asm() {
+    @asm("nop", options(volatile));
+}
+
+/// Test nomem + readonly option - assembly has no side effects, doesn't write memory
+fn test_readonly_nomem_asm(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(nomem));
+    res
+}
+
+/// Test nomem option - assembly doesn't access memory
+fn test_nomem_asm(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(nomem));
+    res
+}
+
+/// Test readonly option - assembly only reads memory
+fn test_readonly_asm(ptr: &Int) -> Int {
+    let res: Int = 0;
+    @asm("ldr {res}, [{ptr}]", options(readonly));
+    res
+}
+
+/// Test preserves_flags option - assembly preserves flags
+fn test_preserves_flags_asm(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(preserves_flags));
+    res
+}
+
+/// Test nostack option - assembly doesn't use stack
+fn test_nostack_asm(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(nostack));
+    res
+}
+
+/// Test combined options
+fn test_combined_options(x: Int) -> Int {
+    let res: Int = 0;
+    @asm("mov {res}, {x}", options(nomem, nostack, preserves_flags));
+    res
+}
+
+/// Test noreturn option - assembly diverges
+fn test_noreturn_asm() {
+    @asm("ud2", options(noreturn));
+}
+
+/// Test may_unwind option - assembly can unwind
+fn test_may_unwind_asm() {
+    @asm("call some_throwing_fn", options(may_unwind));
+}
+
+fn main() {
+    test_volatile_asm();
+
+    let x = test_readonly_nomem_asm(42);
+    assert(x == 42);
+
+    let y = test_nomem_asm(100);
+    assert(y == 100);
+}

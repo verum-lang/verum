@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, array, repeat, error
+// @description: Array repeat expression with missing count
+// @expected-error: E018
+
+fn test() {
+    let arr = [0; ];  // Missing repeat count
+}

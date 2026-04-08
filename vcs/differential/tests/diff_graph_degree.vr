@@ -1,0 +1,297 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, graph, degree, sequence, analysis
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Adjacency matrix (up to 6 nodes)
+type Graph6 is { r0: Arr8, r1: Arr8, r2: Arr8, r3: Arr8, r4: Arr8, r5: Arr8 };
+
+fn get_row(g: Graph6, r: Int) -> Arr8 {
+    if r == 0 { g.r0 } else if r == 1 { g.r1 } else if r == 2 { g.r2 }
+    else if r == 3 { g.r3 } else if r == 4 { g.r4 } else { g.r5 }
+}
+
+fn edge(g: Graph6, u: Int, v: Int) -> Int {
+    get(get_row(g, u), v)
+}
+
+// Compute degree of vertex v
+fn degree(g: Graph6, n: Int, v: Int) -> Int {
+    let mut deg = 0;
+    let mut u = 0;
+    while u < n {
+        if edge(g, v, u) == 1 { deg = deg + 1; }
+        u = u + 1;
+    }
+    deg
+}
+
+// Get degree sequence (sorted ascending)
+fn degree_sequence(g: Graph6, n: Int) -> Arr8 {
+    let mut seq = zeros();
+    let mut i = 0;
+    while i < n {
+        seq = set(seq, i, degree(g, n, i));
+        i = i + 1;
+    }
+    // Selection sort
+    let mut i2 = 0;
+    while i2 < n - 1 {
+        let mut min_j = i2;
+        let mut j = i2 + 1;
+        while j < n {
+            if get(seq, j) < get(seq, min_j) { min_j = j; }
+            j = j + 1;
+        }
+        if min_j != i2 {
+            let tmp = get(seq, i2);
+            seq = set(seq, i2, get(seq, min_j));
+            seq = set(seq, min_j, tmp);
+        }
+        i2 = i2 + 1;
+    }
+    seq
+}
+
+// Sum of all degrees = 2 * edges (handshaking lemma)
+fn sum_degrees(g: Graph6, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        total = total + degree(g, n, i);
+        i = i + 1;
+    }
+    total
+}
+
+// Count edges
+fn count_edges(g: Graph6, n: Int) -> Int {
+    let mut count = 0;
+    let mut u = 0;
+    while u < n {
+        let mut v = u + 1;
+        while v < n {
+            if edge(g, u, v) == 1 { count = count + 1; }
+            v = v + 1;
+        }
+        u = u + 1;
+    }
+    count
+}
+
+// Check if graph is regular (all vertices have same degree)
+fn is_regular(g: Graph6, n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let d0 = degree(g, n, 0);
+    let mut i = 1;
+    while i < n {
+        if degree(g, n, i) != d0 { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Max degree
+fn max_degree(g: Graph6, n: Int) -> Int {
+    let mut mx = 0;
+    let mut i = 0;
+    while i < n {
+        let d = degree(g, n, i);
+        if d > mx { mx = d; }
+        i = i + 1;
+    }
+    mx
+}
+
+// Min degree
+fn min_degree(g: Graph6, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut mn = n;
+    let mut i = 0;
+    while i < n {
+        let d = degree(g, n, i);
+        if d < mn { mn = d; }
+        i = i + 1;
+    }
+    mn
+}
+
+// Count vertices with specific degree
+fn count_with_degree(g: Graph6, n: Int, target: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if degree(g, n, i) == target { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_complete_k4() -> Int {
+    let z = zeros();
+    // K4: complete graph on 4 vertices
+    let k4 = Graph6 {
+        r0: Arr8 { d0: 0, d1: 1, d2: 1, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 1, d1: 0, d2: 1, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 1, d1: 1, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 1, d1: 1, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r4: z, r5: z
+    };
+    assert_eq(degree(k4, 4, 0), 3);
+    assert_eq(degree(k4, 4, 3), 3);
+    assert_eq(is_regular(k4, 4), 1);
+    assert_eq(count_edges(k4, 4), 6);
+    // Handshaking: 4*3 = 12 = 2*6
+    assert_eq(sum_degrees(k4, 4), 12);
+    0
+}
+
+fn test_path_p5() -> Int {
+    let z = zeros();
+    // Path P5: 0-1-2-3-4
+    let p5 = Graph6 {
+        r0: Arr8 { d0: 0, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 1, d1: 0, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 0, d1: 1, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 0, d1: 0, d2: 1, d3: 0, d4: 1, d5: 0, d6: 0, d7: 0 },
+        r4: Arr8 { d0: 0, d1: 0, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r5: z
+    };
+    // Endpoints have degree 1, interior degree 2
+    assert_eq(degree(p5, 5, 0), 1);
+    assert_eq(degree(p5, 5, 2), 2);
+    assert_eq(degree(p5, 5, 4), 1);
+    assert_eq(is_regular(p5, 5), 0);
+    assert_eq(count_edges(p5, 5), 4);
+    assert_eq(sum_degrees(p5, 5), 8);
+    0
+}
+
+fn test_degree_sequence_p5() -> Int {
+    let z = zeros();
+    let p5 = Graph6 {
+        r0: Arr8 { d0: 0, d1: 1, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 1, d1: 0, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 0, d1: 1, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 0, d1: 0, d2: 1, d3: 0, d4: 1, d5: 0, d6: 0, d7: 0 },
+        r4: Arr8 { d0: 0, d1: 0, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r5: z
+    };
+    // Degree sequence: [1, 1, 2, 2, 2]
+    let ds = degree_sequence(p5, 5);
+    assert_eq(get(ds, 0), 1);
+    assert_eq(get(ds, 1), 1);
+    assert_eq(get(ds, 2), 2);
+    assert_eq(get(ds, 3), 2);
+    assert_eq(get(ds, 4), 2);
+
+    assert_eq(count_with_degree(p5, 5, 1), 2);
+    assert_eq(count_with_degree(p5, 5, 2), 3);
+    0
+}
+
+fn test_star() -> Int {
+    let z = zeros();
+    // Star S4: center 0 connected to 1,2,3,4
+    let star = Graph6 {
+        r0: Arr8 { d0: 0, d1: 1, d2: 1, d3: 1, d4: 1, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r4: Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r5: z
+    };
+    assert_eq(degree(star, 5, 0), 4);
+    assert_eq(degree(star, 5, 1), 1);
+    assert_eq(max_degree(star, 5), 4);
+    assert_eq(min_degree(star, 5), 1);
+    assert_eq(is_regular(star, 5), 0);
+    assert_eq(count_edges(star, 5), 4);
+    0
+}
+
+fn test_star_handshaking() -> Int {
+    let z = zeros();
+    let star = Graph6 {
+        r0: Arr8 { d0: 0, d1: 1, d2: 1, d3: 1, d4: 1, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r4: Arr8 { d0: 1, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r5: z
+    };
+    // Handshaking: sum_degrees = 4 + 4*1 = 8 = 2*4
+    assert_eq(sum_degrees(star, 5), 8);
+
+    // Degree sequence: [1,1,1,1,4]
+    let ds = degree_sequence(star, 5);
+    assert_eq(get(ds, 0), 1);
+    assert_eq(get(ds, 3), 1);
+    assert_eq(get(ds, 4), 4);
+    0
+}
+
+fn test_cycle_c5() -> Int {
+    let z = zeros();
+    // Cycle C5: 0-1-2-3-4-0
+    let c5 = Graph6 {
+        r0: Arr8 { d0: 0, d1: 1, d2: 0, d3: 0, d4: 1, d5: 0, d6: 0, d7: 0 },
+        r1: Arr8 { d0: 1, d1: 0, d2: 1, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r2: Arr8 { d0: 0, d1: 1, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r3: Arr8 { d0: 0, d1: 0, d2: 1, d3: 0, d4: 1, d5: 0, d6: 0, d7: 0 },
+        r4: Arr8 { d0: 1, d1: 0, d2: 0, d3: 1, d4: 0, d5: 0, d6: 0, d7: 0 },
+        r5: z
+    };
+    // All degree 2: 2-regular
+    assert_eq(is_regular(c5, 5), 1);
+    assert_eq(degree(c5, 5, 0), 2);
+    assert_eq(max_degree(c5, 5), 2);
+    assert_eq(min_degree(c5, 5), 2);
+    assert_eq(count_edges(c5, 5), 5);
+    assert_eq(sum_degrees(c5, 5), 10);
+    0
+}
+
+fn test_empty() -> Int {
+    let z = zeros();
+    // Empty graph on 4 vertices
+    let empty = Graph6 { r0: z, r1: z, r2: z, r3: z, r4: z, r5: z };
+    assert_eq(is_regular(empty, 4), 1);
+    assert_eq(max_degree(empty, 4), 0);
+    assert_eq(min_degree(empty, 4), 0);
+    assert_eq(count_edges(empty, 4), 0);
+    assert_eq(sum_degrees(empty, 4), 0);
+    0
+}
+
+fn main() -> Int {
+    test_complete_k4();
+    test_path_p5();
+    test_degree_sequence_p5();
+    test_star();
+    test_star_handshaking();
+    test_cycle_c5();
+    test_empty();
+    print("DIFF_OK: graph_degree");
+    0
+}

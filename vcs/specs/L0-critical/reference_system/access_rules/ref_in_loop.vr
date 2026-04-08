@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, access_rules, loops
+
+/// Test borrowing semantics within loops.
+/// Borrows must be properly scoped within loop iterations.
+/// Each iteration can create new borrows that don't outlive the iteration.
+
+fn main() {
+    // Immutable reference in for loop - iterate by value
+    let numbers = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for n in numbers {
+        sum = sum + n;
+    }
+    assert(sum == 15);
+
+    // Mutable borrow using index-based loop
+    let mut values = [1, 2, 3, 4, 5];
+    for i in 0..5 {
+        values[i] = values[i] * 2;
+    }
+    assert(values[0] == 2);
+    assert(values[4] == 10);
+
+    // While loop with borrows
+    let data = 42;
+    let mut count = 0;
+    let mut while_sum = 0;
+    while count < 3 {
+        let ref_data = &data;
+        while_sum = while_sum + *ref_data;
+        count = count + 1;
+    }
+    assert(while_sum == 126);
+
+    // Nested loops with borrows
+    let matrix = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+    ];
+    let mut matrix_sum = 0;
+    for i in 0..3 {
+        for j in 0..3 {
+            matrix_sum = matrix_sum + matrix[i][j];
+        }
+    }
+    assert(matrix_sum == 45);
+
+    // Loop with conditional borrowing
+    let mut cond_values = [1, 2, 3, 4, 5];
+    for i in 0..5 {
+        if i % 2 == 0 {
+            cond_values[i] = 0;
+        }
+    }
+    assert(cond_values[0] == 0);
+    assert(cond_values[1] == 2);
+    assert(cond_values[2] == 0);
+
+    // Loop with break
+    let items = [1, 2, 3, 4, 5];
+    let mut found_value = 0;
+    for i in 0..5 {
+        if items[i] == 3 {
+            found_value = items[i];
+            break;
+        }
+    }
+    assert(found_value == 3);
+
+    // Loop with continue
+    let skip_list = [1, 2, 3, 4, 5];
+    let mut odd_sum = 0;
+    for i in 0..5 {
+        if skip_list[i] % 2 == 0 {
+            continue;
+        }
+        odd_sum = odd_sum + skip_list[i];
+    }
+    assert(odd_sum == 9);  // 1 + 3 + 5 = 9
+
+    // Borrow released after loop
+    let mut reusable = [10, 20, 30];
+    for i in 0..3 {
+        let ref_val = &reusable[i];
+        print(*ref_val);
+    }
+    // Can mutate after loop ends
+    reusable[0] = 100;
+    assert(reusable[0] == 100);
+}

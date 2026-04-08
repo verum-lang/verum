@@ -1,0 +1,26 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, comparison
+// @description: Test comparison operator parsing
+
+fn test_comparison_operators() {
+    let a = 1 == 2;
+    let b = 1 != 2;
+    let c = 1 < 2;
+    let d = 1 > 2;
+    let e = 1 <= 2;
+    let f = 1 >= 2;
+
+    // Chained comparisons (if supported)
+    let g = x == y;
+    let h = x != y;
+
+    // In expressions
+    let i = (a == b) && (c != d);
+    let j = x < y && y < z;
+
+    // With arithmetic
+    let k = 1 + 2 == 3;
+    let l = x * 2 < y + 1;
+    let m = a - b >= c / d;
+}

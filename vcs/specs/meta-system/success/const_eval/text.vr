@@ -1,0 +1,107 @@
+// @test: meta-pass
+// @level: L0
+// @tier: 0
+// @tags: meta, const_eval, text, string
+// @description: Test constant evaluation of text/string operations
+
+// =============================================================================
+// BASIC TEXT OPERATIONS
+// =============================================================================
+
+meta fn const_text_len() -> Int {
+    text_len("hello world")
+}
+
+meta fn const_empty_text_len() -> Int {
+    text_len("")
+}
+
+meta fn const_text_concat() -> Text {
+    "hello" + " " + "world"
+}
+
+// =============================================================================
+// TEXT INDEXING AND SLICING
+// =============================================================================
+
+meta fn const_text_char_at() -> Char {
+    text_char_at("hello", 1)
+}
+
+meta fn const_text_substring() -> Text {
+    text_substring("hello world", 0, 5)
+}
+
+// =============================================================================
+// TEXT TRANSFORMATIONS
+// =============================================================================
+
+meta fn const_text_upper() -> Text {
+    text_upper("hello")
+}
+
+meta fn const_text_lower() -> Text {
+    text_lower("HELLO")
+}
+
+meta fn const_text_trim() -> Text {
+    text_trim("  hello  ")
+}
+
+// =============================================================================
+// TEXT PREDICATES
+// =============================================================================
+
+meta fn const_text_starts_with() -> Bool {
+    text_starts_with("hello world", "hello")
+}
+
+meta fn const_text_ends_with() -> Bool {
+    text_ends_with("hello world", "world")
+}
+
+meta fn const_text_contains() -> Bool {
+    text_contains("hello world", "o w")
+}
+
+// =============================================================================
+// TEXT BUILDING
+// =============================================================================
+
+meta fn const_build_text() -> Text {
+    let prefix = "hello";
+    let suffix = "world";
+    prefix + " " + suffix
+}
+
+meta fn const_repeat_text() -> Int {
+    let base = "ab";
+    let result = base + base + base;
+    text_len(result)
+}
+
+// Main test function
+fn main() {
+    // Basic operations
+    @const assert_eq(const_text_len(), 11);
+    @const assert_eq(const_empty_text_len(), 0);
+    @const assert_eq(const_text_concat(), "hello world");
+
+    // Indexing and slicing
+    @const assert_eq(const_text_char_at(), 'e');
+    @const assert_eq(const_text_substring(), "hello");
+
+    // Transformations
+    @const assert_eq(const_text_upper(), "HELLO");
+    @const assert_eq(const_text_lower(), "hello");
+    @const assert_eq(const_text_trim(), "hello");
+
+    // Predicates
+    @const assert(const_text_starts_with());
+    @const assert(const_text_ends_with());
+    @const assert(const_text_contains());
+
+    // Building
+    @const assert_eq(const_build_text(), "hello world");
+    @const assert_eq(const_repeat_text(), 6);
+}

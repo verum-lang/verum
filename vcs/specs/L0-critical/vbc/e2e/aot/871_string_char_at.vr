@@ -1,0 +1,95 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, string, comparison, text
+// @expected-exit: 0
+
+// Test: string comparison operators via CmpI with strcmp dispatch
+// Uses inline comparisons to ensure string_register tracking.
+
+fn test_equality() -> Int {
+    let a = "hello";
+    let b = "hello";
+    let c = "world";
+    assert(a == b);
+    assert(a != c);
+    assert(!(a == c));
+    assert(!(a != b));
+    print("equality: ok");
+    0
+}
+
+fn test_less_than() -> Int {
+    let a = "apple";
+    let b = "banana";
+    assert(a < b);
+    assert(a <= b);
+    assert(!(b < a));
+    assert(!(b <= a));
+    assert(!(a < a));
+    assert(a <= a);
+    print("less_than: ok");
+    0
+}
+
+fn test_greater_than() -> Int {
+    let a = "zebra";
+    let b = "apple";
+    assert(a > b);
+    assert(a >= b);
+    assert(!(b > a));
+    assert(!(b >= a));
+    assert(!(a > a));
+    assert(a >= a);
+    print("greater_than: ok");
+    0
+}
+
+fn test_empty() -> Int {
+    let empty = "";
+    let nonempty = "x";
+    assert(empty < nonempty);
+    assert(empty <= nonempty);
+    assert(nonempty > empty);
+    assert(nonempty >= empty);
+    assert(empty == "");
+    assert(empty != nonempty);
+    print("empty: ok");
+    0
+}
+
+fn test_prefix() -> Int {
+    let short = "ab";
+    let longer = "abc";
+    assert(short < longer);
+    assert(short <= longer);
+    assert(longer > short);
+    assert(longer >= short);
+    assert(short != longer);
+    print("prefix: ok");
+    0
+}
+
+fn test_ordering() -> Int {
+    let s1 = "abc";
+    let s2 = "abd";
+    let s3 = "abe";
+    assert(s1 < s2);
+    assert(s2 < s3);
+    assert(s1 < s3);
+    assert(s3 > s1);
+    assert(s3 > s2);
+    print("ordering: ok");
+    0
+}
+
+fn main() -> Int {
+    test_equality();
+    test_less_than();
+    test_greater_than();
+    test_empty();
+    test_prefix();
+    test_ordering();
+    print("All string comparison tests passed!");
+    0
+}

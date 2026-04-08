@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, if, body, error
+// @description: If expression missing then block
+// @expected-error: E018
+
+fn test() {
+    if x > 0
+    else { 0 }
+}

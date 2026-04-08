@@ -1,0 +1,50 @@
+// @test: meta-fail
+// @level: L1
+// @tier: 0
+// @tags: meta, builtins, reflection, generics, type_error
+// @description: Type mismatch and arity errors for generic introspection
+// @expected-error: Type mismatch
+// @contexts: MetaTypes
+
+// =============================================================================
+// TYPE MISMATCH ERRORS
+// =============================================================================
+
+// Test generics_of with non-type argument
+meta fn test_generics_of_non_type() -> List<Type> using [MetaTypes] {
+    generics_of(42)  // ERROR: M102 - expected Type, got Int
+}
+
+// Test inner_type_of with non-type argument
+meta fn test_inner_type_of_non_type() -> Maybe<Type> using [MetaTypes] {
+    inner_type_of("not a type")  // ERROR: M102 - expected Type, got Text
+}
+
+// Test element_type_of with non-type argument
+meta fn test_element_type_of_non_type() -> Maybe<Type> using [MetaTypes] {
+    element_type_of([1, 2, 3])  // ERROR: M102 - expected Type, got Array
+}
+
+// Test key_value_types_of with non-type argument
+meta fn test_key_value_types_of_non_type() -> Maybe<(Type, Type)> using [MetaTypes] {
+    key_value_types_of(true)  // ERROR: M102 - expected Type, got Bool
+}
+
+// Test simple_name_of with non-type argument
+meta fn test_simple_name_of_non_type() -> Text using [MetaTypes] {
+    simple_name_of(3.14)  // ERROR: M102 - expected Type, got Float
+}
+
+// Test module_of with non-type argument
+meta fn test_module_of_non_type() -> Text using [MetaTypes] {
+    module_of([])  // ERROR: M102 - expected Type, got Array
+}
+
+// Test bounds_of with non-type argument
+meta fn test_bounds_of_non_type() -> List<Bound> using [MetaTypes] {
+    bounds_of("text")  // ERROR: M102 - expected Type, got Text
+}
+
+fn main() {
+    test_generics_of_non_type();
+}

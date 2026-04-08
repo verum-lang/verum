@@ -1,0 +1,193 @@
+// @test: compile-only
+// @tier: 0
+// @level: L0
+// @tags: reference_system, cbgr, performance, locality, cache
+
+/// Test cache effects on CBGR reference access.
+/// Sequential access should be faster than random.
+/// Spec: 26-cbgr-implementation.md#cache-optimization
+
+fn main() {
+    test_sequential_access();
+    test_random_access();
+    test_strided_access();
+    compare_access_patterns();
+}
+
+/// Test sequential memory access pattern
+fn test_sequential_access() {
+    let size = 10_000;
+    let data: List<Heap<Int>> = (0..size)
+        .map(|i| Heap.new(i))
+        .collect();
+
+    let iterations = 100;
+    let start = Time.now();
+
+    for _ in 0..iterations {
+        let mut sum = 0;
+        for item in &data {
+            let ref_val = &**item;
+            sum += *ref_val;
+        }
+    }
+
+    let elapsed = Time.now() - start;
+    let ns_per_access = elapsed.as_nanos() / (size * iterations);
+
+    print("Sequential access: " + ns_per_access.to_string() + "ns/access");
+}
+
+/// Test random memory access pattern
+fn test_random_access() {
+    let size = 10_000;
+    let data: List<Heap<Int>> = (0..size)
+        .map(|i| Heap.new(i))
+        .collect();
+
+    // Create random access order
+    let mut indices: List<Int> = (0..size).collect();
+    shuffle(&mut indices);
+
+    let iterations = 100;
+    let start = Time.now();
+
+    for _ in 0..iterations {
+        let mut sum = 0;
+        for idx in &indices {
+            let ref_val = &*data[*idx];
+            sum += *ref_val;
+        }
+    }
+
+    let elapsed = Time.now() - start;
+    let ns_per_access = elapsed.as_nanos() / (size * iterations);
+
+    print("Random access: " + ns_per_access.to_string() + "ns/access");
+}
+
+/// Test strided access pattern
+fn test_strided_access() {
+    let size = 10_000;
+    let stride = 64;  // Cache line sized stride
+    let data: List<Heap<Int>> = (0..size)
+        .map(|i| Heap.new(i))
+        .collect();
+
+    let iterations = 100;
+    let start = Time.now();
+
+    for _ in 0..iterations {
+        let mut sum = 0;
+        let mut idx = 0;
+        while idx < size {
+            let ref_val = &*data[idx];
+            sum += *ref_val;
+            idx += stride;
+        }
+    }
+
+    let elapsed = Time.now() - start;
+    let accesses_per_iter = size / stride;
+    let ns_per_access = elapsed.as_nanos() / (accesses_per_iter * iterations);
+
+    print("Strided access (stride=" + stride.to_string() + "): " + ns_per_access.to_string() + "ns/access");
+}
+
+/// Compare all access patterns
+fn compare_access_patterns() {
+    let size = 5_000;
+    let data: List<Heap<Int>> = (0..size)
+        .map(|i| Heap.new(i))
+        .collect();
+
+    let mut indices: List<Int> = (0..size).collect();
+    shuffle(&mut indices);
+
+    let iterations = 50;
+
+    // Sequential
+    let start_seq = Time.now();
+    for _ in 0..iterations {
+        for item in &data {
+            let _ = *&**item;
+        }
+    }
+    let time_seq = Time.now() - start_seq;
+
+    // Random
+    let start_rand = Time.now();
+    for _ in 0..iterations {
+        for idx in &indices {
+            let _ = *&*data[*idx];
+        }
+    }
+    let time_rand = Time.now() - start_rand;
+
+    print("Comparison:");
+    print("  Sequential: " + time_seq.as_micros().to_string() + "us");
+    print("  Random:     " + time_rand.as_micros().to_string() + "us");
+    print("  Ratio:      " + (time_rand.as_nanos() / time_seq.as_nanos()).to_string() + "x");
+
+    // Random should be notably slower due to cache misses
+    assert(time_rand > time_seq);
+}
+
+/// Test prefetching benefits
+fn test_prefetch_optimization() {
+    let size = 10_000;
+    let data: List<Heap<Int>> = (0..size)
+        .map(|i| Heap.new(i))
+        .collect();
+
+    let iterations = 100;
+
+    // Without prefetch hint
+    let start1 = Time.now();
+    for _ in 0..iterations {
+        let mut sum = 0;
+        for i in 0..size {
+            sum += *&*data[i];
+        }
+    }
+    let time1 = Time.now() - start1;
+
+    // With prefetch hint (if supported)
+    let start2 = Time.now();
+    for _ in 0..iterations {
+        let mut sum = 0;
+        for i in 0..size {
+            if i + 16 < size {
+                prefetch(&*data[i + 16]);
+            }
+            sum += *&*data[i];
+        }
+    }
+    let time2 = Time.now() - start2;
+
+    print("Without prefetch: " + time1.as_micros().to_string() + "us");
+    print("With prefetch:    " + time2.as_micros().to_string() + "us");
+}
+
+// Helper functions
+
+fn shuffle<T>(list: &mut List<T>) {
+    let len = list.len();
+    for i in (1..len).rev() {
+        let j = random_Int() % (i + 1);
+        list.swap(i, j);
+    }
+}
+
+fn random_Int() -> Int {
+    // Simple LCG for testing
+    static mut SEED: Int = 12345;
+    unsafe {
+        SEED = SEED.wrapping_mul(1103515245).wrapping_add(12345);
+        SEED
+    }
+}
+
+fn prefetch<T>(_value: &T) {
+    // Compiler intrinsic for prefetching (stub - intrinsic.prefetch would be inserted here)
+}

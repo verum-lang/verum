@@ -1,0 +1,321 @@
+// @test: parse-pass
+// @tier: 0
+// @category: async
+// @description: Comprehensive tests for spawn expressions
+
+// ============================================================================
+// Basic Spawn Expressions
+// ============================================================================
+
+async fn test_basic_spawn() {
+    // Spawn function call
+    spawn task();
+
+    // Spawn with result binding
+    let handle = spawn compute();
+
+    // Spawn with arguments
+    spawn process(data);
+
+    // Spawn method call
+    spawn processor.run();
+
+    // Spawn returning unit
+    spawn notify_all();
+}
+
+// ============================================================================
+// Spawn with Async Blocks
+// ============================================================================
+
+async fn test_spawn_async_block() {
+    // Simple spawn with async block
+    spawn async {
+        process_data()
+    };
+
+    // Spawn async block with await
+    spawn async {
+        let data = fetch().await;
+        process(data)
+    };
+
+    // Spawn async move block
+    let captured = "data";
+    spawn async move {
+        use_captured(captured)
+    };
+
+    // Spawn complex async block
+    spawn async {
+        let a = fetch_a().await;
+        let b = fetch_b().await;
+        combine(a, b)
+    };
+}
+
+// ============================================================================
+// Spawn with Context Forwarding
+// ============================================================================
+
+async fn test_spawn_with_context() using [Database, Logger] {
+    // Spawn with explicit context forwarding
+    spawn using [Database] async {
+        db_operation().await
+    };
+
+    // Spawn with multiple contexts
+    spawn using [Database, Logger] async {
+        log("Starting operation");
+        let result = query().await;
+        log("Completed");
+        result
+    };
+
+    // Spawn with single context (no brackets needed for single)
+    spawn using [Logger] async {
+        log("Background task")
+    };
+
+    // Chain of spawns with contexts
+    spawn using [Database] async {
+        spawn using [Logger] async {
+            nested_task()
+        }
+    };
+}
+
+// ============================================================================
+// Spawn in Nursery Context
+// ============================================================================
+
+async fn test_spawn_in_nursery() {
+    // Basic nursery spawn
+    nursery {
+        spawn task1();
+        spawn task2();
+    }
+
+    // Nursery with result collection
+    nursery {
+        let a = spawn fetch_a();
+        let b = spawn fetch_b();
+        let c = spawn fetch_c();
+    }
+
+    // Nursery with loop spawn
+    nursery {
+        for i in 0..10 {
+            spawn process(i);
+        }
+    }
+
+    // Nursery with conditional spawn
+    nursery {
+        if need_fast {
+            spawn fast_task();
+        } else {
+            spawn slow_task();
+        }
+    }
+
+    // Nested nursery with spawns
+    nursery {
+        spawn async {
+            nursery {
+                spawn subtask1();
+                spawn subtask2();
+            }
+        };
+    }
+}
+
+// ============================================================================
+// Spawn with Complex Expressions
+// ============================================================================
+
+async fn test_spawn_complex() {
+    // Spawn closure call
+    spawn (|| compute())();
+
+    // Spawn async closure
+    spawn (async || fetch().await)();
+
+    // Spawn with chained calls
+    spawn factory.create().execute();
+
+    // Spawn generic call
+    spawn process<Data>(input);
+
+    // Spawn with tuple destructuring result
+    let (handle1, handle2) = (spawn task1(), spawn task2());
+
+    // Spawn in array
+    let handles = [
+        spawn worker(1),
+        spawn worker(2),
+        spawn worker(3)
+    ];
+
+    // Spawn in struct
+    let task_set = TaskSet {
+        main: spawn main_task(),
+        cleanup: spawn cleanup_task()
+    };
+}
+
+// ============================================================================
+// Spawn with Error Handling
+// ============================================================================
+
+async fn test_spawn_error_handling() {
+    // Spawn with try block inside
+    spawn async {
+        try {
+            risky_operation().await
+        } recover {
+            Error => log_and_continue()
+        }
+    };
+
+    // Spawn with error propagation
+    spawn async {
+        let result = operation().await?;
+        process(result)
+    };
+
+    // Spawn with defer
+    spawn async {
+        defer cleanup();
+        work().await
+    };
+
+    // Spawn with errdefer
+    spawn async {
+        errdefer rollback();
+        transaction().await
+    };
+}
+
+// ============================================================================
+// Spawn as Expression
+// ============================================================================
+
+async fn test_spawn_as_expression() {
+    // Spawn in let
+    let handle = spawn background_task();
+
+    // Spawn in function argument
+    register(spawn worker());
+
+    // Spawn in method argument
+    manager.add_task(spawn compute());
+
+    // Spawn in conditional
+    let task = if high_priority {
+        spawn urgent_task()
+    } else {
+        spawn normal_task()
+    };
+
+    // Spawn in match
+    let handle = match mode {
+        Mode.Fast => spawn fast_worker(),
+        Mode.Slow => spawn slow_worker()
+    };
+}
+
+// ============================================================================
+// Multiple Spawns
+// ============================================================================
+
+async fn test_multiple_spawns() {
+    // Sequential spawns
+    spawn task1();
+    spawn task2();
+    spawn task3();
+
+    // Spawn in comprehension
+    let handles = [spawn process(i) for i in 0..10];
+
+    // Parallel spawns with join
+    let results = join(
+        spawn fetch_a(),
+        spawn fetch_b(),
+        spawn fetch_c()
+    );
+
+    // Spawn fan-out
+    for url in urls {
+        spawn fetch_url(url);
+    }
+}
+
+// ============================================================================
+// Spawn with Type Annotations
+// ============================================================================
+
+async fn test_spawn_types() {
+    // Explicit handle type
+    let handle: TaskHandle<Int> = spawn compute();
+
+    // Generic spawn
+    let handle: TaskHandle<List<Data>> = spawn fetch_all();
+
+    // Spawn with result type
+    let handle: TaskHandle<Result<Data, Error>> = spawn try_fetch();
+}
+
+// ============================================================================
+// Spawn with Closures
+// ============================================================================
+
+async fn test_spawn_closures() {
+    // Spawn regular closure
+    let closure = || heavy_computation();
+    spawn closure();
+
+    // Spawn async closure
+    let async_closure = async || fetch().await;
+    spawn async_closure();
+
+    // Spawn with closure call
+    let data = prepare_data();
+    let closure = || process(data);
+    spawn closure();
+
+    // Spawn inline async closure call
+    let async_fn = async |x| transform(x).await;
+    spawn async_fn(input);
+}
+
+// ============================================================================
+// Spawn Edge Cases
+// ============================================================================
+
+async fn test_spawn_edge_cases() {
+    // Spawn of spawn (nested spawn expressions)
+    spawn async {
+        let inner = spawn nested_task();
+        inner.await
+    };
+
+    // Spawn with immediate await (unusual but valid)
+    let result = spawn compute().await;
+
+    // Empty spawn body (async block that does nothing)
+    spawn async {};
+
+    // Spawn with return value
+    spawn async {
+        return 42;
+    };
+
+    // Spawn with early return
+    spawn async {
+        if done {
+            return;
+        }
+        work()
+    };
+}

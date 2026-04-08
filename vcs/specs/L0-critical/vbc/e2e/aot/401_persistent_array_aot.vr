@@ -1,0 +1,242 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, persistent, functional, copy-on-write, array
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for persistent (functional) array via copy-on-write simulation.
+// Each "update" returns a new version while the old version remains intact.
+// We store up to 4 versions of an 8-element array.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// ========== Persistent Array ==========
+// Each version is a full copy (simple copy-on-write).
+// We track versions explicitly.
+
+// "set" returns a new array (the old one is unchanged)
+fn pa_set(arr: Arr8, idx: Int, val: Int) -> Arr8 {
+    a8_set(arr, idx, val)
+}
+
+// "get" from a specific version
+fn pa_get(arr: Arr8, idx: Int) -> Int {
+    a8_get(arr, idx)
+}
+
+fn test_basic_persistence() -> Int {
+    let v0 = Arr8 { a0: 10, a1: 20, a2: 30, a3: 40, a4: 50, a5: 60, a6: 70, a7: 80 };
+    // Create v1 by updating index 2 to 999
+    let v1 = pa_set(v0, 2, 999);
+    // v0 unchanged
+    assert_eq(pa_get(v0, 2), 30);
+    // v1 has new value
+    assert_eq(pa_get(v1, 2), 999);
+    // Other elements same in both
+    assert_eq(pa_get(v0, 0), 10);
+    assert_eq(pa_get(v1, 0), 10);
+    0
+}
+
+fn test_chain_updates() -> Int {
+    let v0 = a8_zero();
+    let v1 = pa_set(v0, 0, 100);
+    let v2 = pa_set(v1, 1, 200);
+    let v3 = pa_set(v2, 2, 300);
+    // Each version is independent
+    assert_eq(pa_get(v0, 0), 0);
+    assert_eq(pa_get(v1, 0), 100);
+    assert_eq(pa_get(v1, 1), 0);
+    assert_eq(pa_get(v2, 1), 200);
+    assert_eq(pa_get(v3, 2), 300);
+    0
+}
+
+fn test_branch_versions() -> Int {
+    // v0 -> v1a (update idx 0)
+    //     -> v1b (update idx 1)
+    let v0 = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let v1a = pa_set(v0, 0, 100);
+    let v1b = pa_set(v0, 1, 200);
+    // v1a and v1b are independent branches
+    assert_eq(pa_get(v1a, 0), 100);
+    assert_eq(pa_get(v1a, 1), 2);
+    assert_eq(pa_get(v1b, 0), 1);
+    assert_eq(pa_get(v1b, 1), 200);
+    0
+}
+
+fn test_deep_branch() -> Int {
+    // v0 -> v1 -> v2a (branch A)
+    //          -> v2b (branch B)
+    let v0 = a8_zero();
+    let v1 = pa_set(v0, 3, 42);
+    let v2a = pa_set(v1, 4, 100);
+    let v2b = pa_set(v1, 4, 200);
+    assert_eq(pa_get(v1, 3), 42);
+    assert_eq(pa_get(v1, 4), 0);
+    assert_eq(pa_get(v2a, 3), 42);
+    assert_eq(pa_get(v2a, 4), 100);
+    assert_eq(pa_get(v2b, 3), 42);
+    assert_eq(pa_get(v2b, 4), 200);
+    0
+}
+
+// ========== Persistent Array with History ==========
+// Track a log of operations: (version_from, index, old_value, new_value)
+// Stored in parallel arrays
+
+type OpLog is {
+    ver_from: Arr8,
+    indices: Arr8,
+    old_vals: Arr8,
+    new_vals: Arr8,
+    count: Int
+};
+
+fn oplog_new() -> OpLog {
+    OpLog { ver_from: a8_zero(), indices: a8_zero(), old_vals: a8_zero(), new_vals: a8_zero(), count: 0 }
+}
+
+fn oplog_add(log: OpLog, ver: Int, idx: Int, old_v: Int, new_v: Int) -> OpLog {
+    let c = log.count;
+    OpLog {
+        ver_from: a8_set(log.ver_from, c, ver),
+        indices: a8_set(log.indices, c, idx),
+        old_vals: a8_set(log.old_vals, c, old_v),
+        new_vals: a8_set(log.new_vals, c, new_v),
+        count: c + 1
+    }
+}
+
+fn test_operation_log() -> Int {
+    let v0 = Arr8 { a0: 10, a1: 20, a2: 30, a3: 40, a4: 50, a5: 60, a6: 70, a7: 80 };
+    let mut log = oplog_new();
+    // Update idx 2: 30 -> 99
+    let old_val = pa_get(v0, 2);
+    let v1 = pa_set(v0, 2, 99);
+    log = oplog_add(log, 0, 2, old_val, 99);
+    // Update idx 5: 60 -> 77
+    let old_val2 = pa_get(v1, 5);
+    let v2 = pa_set(v1, 5, 77);
+    log = oplog_add(log, 1, 5, old_val2, 77);
+    assert_eq(log.count, 2);
+    assert_eq(a8_get(log.old_vals, 0), 30);
+    assert_eq(a8_get(log.new_vals, 0), 99);
+    assert_eq(a8_get(log.old_vals, 1), 60);
+    assert_eq(a8_get(log.new_vals, 1), 77);
+    0
+}
+
+// ========== Undo operation ==========
+fn pa_undo(current: Arr8, log: OpLog, op_idx: Int) -> Arr8 {
+    let idx = a8_get(log.indices, op_idx);
+    let old_v = a8_get(log.old_vals, op_idx);
+    pa_set(current, idx, old_v)
+}
+
+fn test_undo() -> Int {
+    let v0 = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let mut log = oplog_new();
+    let old0 = pa_get(v0, 0);
+    let v1 = pa_set(v0, 0, 100);
+    log = oplog_add(log, 0, 0, old0, 100);
+    let old3 = pa_get(v1, 3);
+    let v2 = pa_set(v1, 3, 400);
+    log = oplog_add(log, 1, 3, old3, 400);
+    assert_eq(pa_get(v2, 0), 100);
+    assert_eq(pa_get(v2, 3), 400);
+    // Undo last operation (op 1: index 3)
+    let v_undo1 = pa_undo(v2, log, 1);
+    assert_eq(pa_get(v_undo1, 3), 4);  // restored
+    assert_eq(pa_get(v_undo1, 0), 100); // unchanged
+    0
+}
+
+// ========== Bulk operations ==========
+
+fn pa_fill(arr: Arr8, n: Int, val: Int) -> Arr8 {
+    let mut a = arr;
+    let mut i = 0;
+    while i < n {
+        a = pa_set(a, i, val);
+        i = i + 1;
+    }
+    a
+}
+
+fn pa_sum(arr: Arr8, n: Int) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < n {
+        s = s + pa_get(arr, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn test_bulk_ops() -> Int {
+    let v0 = pa_fill(a8_zero(), 8, 5);
+    assert_eq(pa_sum(v0, 8), 40);
+    // Update half the array
+    let mut v1 = v0;
+    let mut i = 0;
+    while i < 4 {
+        v1 = pa_set(v1, i, 10);
+        i = i + 1;
+    }
+    assert_eq(pa_sum(v1, 8), 60);  // 4*10 + 4*5 = 60
+    // v0 unchanged
+    assert_eq(pa_sum(v0, 8), 40);
+    0
+}
+
+fn test_map_operation() -> Int {
+    // "map": create new version where each element is doubled
+    let v0 = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 6, a6: 7, a7: 8 };
+    let mut v1 = a8_zero();
+    let mut i = 0;
+    while i < 8 {
+        v1 = pa_set(v1, i, pa_get(v0, i) * 2);
+        i = i + 1;
+    }
+    assert_eq(pa_sum(v0, 8), 36);
+    assert_eq(pa_sum(v1, 8), 72);
+    assert_eq(pa_get(v1, 3), 8);
+    assert_eq(pa_get(v0, 3), 4);
+    0
+}
+
+fn main() -> Int {
+    test_basic_persistence();
+    test_chain_updates();
+    test_branch_versions();
+    test_deep_branch();
+    test_operation_log();
+    test_undo();
+    test_bulk_ops();
+    test_map_operation();
+    print("All persistent array tests passed!");
+    0
+}

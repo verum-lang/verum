@@ -1,0 +1,154 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, generics, associated-types
+
+/// Test for associated types in protocols.
+/// Associated types provide a way to define placeholder types within protocols.
+
+// Protocol with associated type
+type Iterator is protocol {
+    type Item;
+
+    fn next(&mut self) -> Maybe<Self.Item>;
+}
+
+// Protocol with multiple associated types
+type Container is protocol {
+    type Element;
+    type Index;
+
+    fn get(&self, index: Self.Index) -> Maybe<&Self.Element>;
+    fn len(&self) -> Int;
+}
+
+// Protocol with associated type and bounds
+type Graph is protocol {
+    type Node: Eq + Hash;
+    type Edge: Clone;
+
+    fn nodes(&self) -> List<Self.Node>;
+    fn edges(&self, from: &Self.Node) -> List<Self.Edge>;
+}
+
+// Implementation with concrete associated types
+type RangeIterator is {
+    current: Int,
+    end: Int,
+};
+
+implement Iterator for RangeIterator {
+    type Item is Int;
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end {
+            let value = self.current;
+            self.current += 1;
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+// Another implementation with different associated type
+type TextCharsIterator is {
+    text: Text,
+    position: Int,
+};
+
+implement Iterator for TextCharsIterator {
+    type Item is Char;
+
+    fn next(&mut self) -> Maybe<Char> {
+        if self.position < self.text.len() {
+            let ch: Maybe<Char> = self.text.char_at(self.position);
+            self.position += 1;
+            ch
+        } else {
+            None
+        }
+    }
+}
+
+// Container implementation
+type IndexedList<T> is {
+    items: List<T>,
+};
+
+implement Container for IndexedList<T>  {
+    type Element is T;
+    type Index is Int;
+
+    fn get(&self, index: Int) -> Maybe<&T> {
+        self.items.get(index)
+    }
+
+    fn len(&self) -> Int {
+        self.items.len()
+    }
+}
+
+// Function using associated types
+fn collect_all<I: Iterator>(mut iter: I) -> List<I.Item> {
+    let mut result: List<I.Item> = List.new();
+    while let Some(item) = iter.next() {
+        result.push(item);
+    }
+    result
+}
+
+// Function with associated type constraints
+fn sum_iterator<I>(mut iter: I) -> I.Item
+where
+    I: Iterator,
+    I.Item: Add<Output = I.Item> + Default,
+{
+    let mut total = I.Item.default();
+    while let Some(item) = iter.next() {
+        total = total + item;
+    }
+    total
+}
+
+// Associated type in return position (existential type syntax)
+fn make_iterator<C: Container>(container: &C) -> some I: Iterator<Item = &C.Element> {
+    container.iter()
+}
+
+// Associated type equality constraint (existential type syntax)
+fn zip_equal<A, B>(a: A, b: B) -> some Z: Iterator<Item = (A.Item, B.Item)>
+where
+    A: Iterator,
+    B: Iterator,
+{
+    ZipIterator { a, b }
+}
+
+fn main() {
+    // Using RangeIterator
+    let range_iter = RangeIterator { current: 0, end: 5 };
+    let numbers: List<Int> = collect_all(range_iter);
+
+    // Using TextCharsIterator
+    let char_iter = TextCharsIterator { text: "hello", position: 0 };
+    let chars: List<Char> = collect_all(char_iter);
+
+    // Using sum with associated types
+    let sum_iter = RangeIterator { current: 1, end: 6 };
+    let total: Int = sum_iterator(sum_iter);
+
+    // Using Container
+    let indexed: IndexedList<Text> = IndexedList {
+        items: ["a", "b", "c"],
+    };
+    let first: Maybe<&Text> = indexed.get(0);
+    let length: Int = indexed.len();
+
+    // Assertions
+    assert(numbers == [0, 1, 2, 3, 4]);
+    assert(chars == ['h', 'e', 'l', 'l', 'o']);
+    assert(total == 15);  // 1 + 2 + 3 + 4 + 5
+    assert(*first.unwrap() == "a");
+    assert(length == 3);
+}

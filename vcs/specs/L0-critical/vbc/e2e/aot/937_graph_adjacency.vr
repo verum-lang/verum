@@ -1,0 +1,50 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @expected-exit: 0
+
+// Graph adjacency list using Map<Int, List<Int>>
+// Tests push on map-retrieved lists (in-place mutation)
+
+fn add_edge(adj: Map<Int, List<Int>>, from: Int, to: Int) {
+    if (adj.contains_key(from) != true) {
+        adj.insert(from, []);
+    }
+    let neighbors = adj.get(from);
+    neighbors.push(to);
+}
+
+fn main() -> Int {
+    let mut adj = Map.new();
+
+    // Build graph: 0->1, 0->2, 1->3, 2->3
+    add_edge(adj, 0, 1);
+    add_edge(adj, 0, 2);
+    add_edge(adj, 1, 3);
+    add_edge(adj, 2, 3);
+
+    // Node 0 should have 2 neighbors
+    let n0 = adj.get(0);
+    assert_eq(n0.len(), 2);
+    assert_eq(n0[0], 1);
+    assert_eq(n0[1], 2);
+
+    // Node 1 should have 1 neighbor
+    let n1 = adj.get(1);
+    assert_eq(n1.len(), 1);
+    assert_eq(n1[0], 3);
+
+    // Node 2 should have 1 neighbor
+    let n2 = adj.get(2);
+    assert_eq(n2.len(), 1);
+    assert_eq(n2[0], 3);
+
+    // Test push on existing list (add another edge: 0->4)
+    add_edge(adj, 0, 4);
+    let n0b = adj.get(0);
+    assert_eq(n0b.len(), 3);
+    assert_eq(n0b[2], 4);
+
+    print("graph adjacency: PASS");
+    0
+}

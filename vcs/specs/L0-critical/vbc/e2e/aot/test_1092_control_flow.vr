@@ -1,0 +1,144 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: control-flow, if-else, while, loop, break, continue, for-in
+// @description: Test control flow constructs
+
+fn test_if_else_chain() -> Int {
+    let x = 42;
+    let result = if x > 100 {
+        3
+    } else if x > 50 {
+        2
+    } else if x > 10 {
+        1
+    } else {
+        0
+    };
+    if result != 1 {
+        print(f"FAIL if_chain: result={result}, expected 1");
+        return 1;
+    }
+    print("  if_else_chain: OK");
+    0
+}
+
+fn test_while_loop() -> Int {
+    let mut sum = 0;
+    let mut i = 1;
+    while i <= 100 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    if sum != 5050 {
+        print(f"FAIL while: sum={sum}, expected 5050");
+        return 1;
+    }
+    print("  while_loop: OK");
+    0
+}
+
+fn test_loop_break() -> Int {
+    let mut i = 0;
+    let mut last = 0;
+    loop {
+        if i >= 10 { break; }
+        last = i;
+        i = i + 1;
+    }
+    if last != 9 {
+        print(f"FAIL loop_break: last={last}, expected 9");
+        return 1;
+    }
+    print("  loop_break: OK");
+    0
+}
+
+fn test_nested_loops() -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < 5 {
+        let mut j = 0;
+        while j < 5 {
+            if i + j > 6 { break; }
+            count = count + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // i=0: j=0..5 (5), i=1: j=0..5 (5), i=2: j=0..4 (5), i=3: j=0..3 (4), i=4: j=0..2 (3)
+    if count != 22 {
+        print(f"FAIL nested: count={count}, expected 22");
+        return 1;
+    }
+    print("  nested_loops: OK");
+    0
+}
+
+fn test_for_in_range() -> Int {
+    let mut sum = 0;
+    for i in 1..11 {
+        sum = sum + i;
+    }
+    if sum != 55 {
+        print(f"FAIL for_range: sum={sum}, expected 55");
+        return 1;
+    }
+    print("  for_in_range: OK");
+    0
+}
+
+fn test_for_in_list() -> Int {
+    let items = [10, 20, 30, 40, 50];
+    let mut sum = 0;
+    for val in items {
+        sum = sum + val;
+    }
+    if sum != 150 {
+        print(f"FAIL for_list: sum={sum}, expected 150");
+        return 1;
+    }
+    print("  for_in_list: OK");
+    0
+}
+
+fn test_early_return() -> Int {
+    let result = find_first_over(50);
+    if result != 72 {
+        print(f"FAIL early_return: result={result}, expected 72");
+        return 1;
+    }
+    print("  early_return: OK");
+    0
+}
+
+fn find_first_over(threshold: Int) -> Int {
+    let items = [12, 35, 48, 72, 90];
+    let mut i = 0;
+    while i < items.len() {
+        if items[i] > threshold {
+            return items[i];
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+fn main() -> Int {
+    print("Control Flow Tests:");
+    let mut failures = 0;
+    failures = failures + test_if_else_chain();
+    failures = failures + test_while_loop();
+    failures = failures + test_loop_break();
+    failures = failures + test_nested_loops();
+    failures = failures + test_for_in_range();
+    failures = failures + test_for_in_list();
+    failures = failures + test_early_return();
+
+    if failures == 0 {
+        print("All control flow tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

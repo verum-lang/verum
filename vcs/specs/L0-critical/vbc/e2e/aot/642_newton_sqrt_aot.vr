@@ -1,0 +1,205 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, newton, sqrt, approximation
+// @timeout: 30000
+
+// Integer square root using Newton's method and related algorithms
+
+fn abs_val(x: Int) -> Int { if x < 0 { 0 - x } else { x } }
+
+// Integer square root: largest k such that k*k <= n
+fn isqrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        // Newton's method: x_{n+1} = (x_n + n/x_n) / 2
+        let mut x = n;
+        let mut prev = 0;
+        let mut i = 0;
+        while i < 40 { // safety limit
+            let next = (x + n / x) / 2;
+            if next >= x { i = 40; } // converged
+            else { x = next; }
+            i = i + 1;
+        }
+        // Make sure we have floor(sqrt(n))
+        while x * x > n { x = x - 1; }
+        while (x + 1) * (x + 1) <= n { x = x + 1; }
+        x
+    }
+}
+
+// Is perfect square?
+fn is_perfect_square(n: Int) -> Int {
+    let s = isqrt(n);
+    if s * s == n { 1 } else { 0 }
+}
+
+// Integer cube root (floor)
+fn icbrt(n: Int) -> Int {
+    if n <= 0 { 0 }
+    else if n == 1 { 1 }
+    else {
+        // Binary search
+        let mut lo = 1;
+        let mut hi = n;
+        if hi > 2000 { hi = 2000; } // prevent overflow
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2;
+            if mid * mid * mid <= n { lo = mid; }
+            else { hi = mid - 1; }
+        }
+        lo
+    }
+}
+
+// GCD
+fn gcd(a: Int, b: Int) -> Int {
+    let mut x = abs_val(a);
+    let mut y = abs_val(b);
+    while y != 0 { let t = y; y = x % y; x = t; }
+    x
+}
+
+// Integer log base 2 (floor)
+fn ilog2(n: Int) -> Int {
+    if n <= 0 { 0 - 1 }
+    else {
+        let mut x = n;
+        let mut log = 0;
+        while x > 1 { x = x / 2; log = log + 1; }
+        log
+    }
+}
+
+// Power
+fn ipow(base: Int, exp: Int) -> Int {
+    let mut result = 1;
+    let mut b = base;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 { result = result * b; }
+        b = b * b;
+        e = e / 2;
+    }
+    result
+}
+
+// Pythagorean triple check: a^2 + b^2 == c^2
+fn is_pythagorean(a: Int, b: Int, c: Int) -> Int {
+    if a * a + b * b == c * c { 1 } else { 0 }
+}
+
+// Count perfect squares up to n
+fn count_squares(n: Int) -> Int {
+    isqrt(n)
+}
+
+fn test_isqrt() -> Int {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(25), 5);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(144), 12);
+    assert_eq(isqrt(10000), 100);
+    // Non-perfect squares
+    assert_eq(isqrt(2), 1);
+    assert_eq(isqrt(3), 1);
+    assert_eq(isqrt(5), 2);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(10), 3);
+    assert_eq(isqrt(99), 9);
+    assert_eq(isqrt(101), 10);
+    1
+}
+
+fn test_perfect_square() -> Int {
+    assert_eq(is_perfect_square(0), 1);
+    assert_eq(is_perfect_square(1), 1);
+    assert_eq(is_perfect_square(4), 1);
+    assert_eq(is_perfect_square(9), 1);
+    assert_eq(is_perfect_square(2), 0);
+    assert_eq(is_perfect_square(3), 0);
+    assert_eq(is_perfect_square(5), 0);
+    assert_eq(is_perfect_square(10), 0);
+    assert_eq(is_perfect_square(10000), 1);
+    assert_eq(is_perfect_square(9999), 0);
+    1
+}
+
+fn test_icbrt() -> Int {
+    assert_eq(icbrt(0), 0);
+    assert_eq(icbrt(1), 1);
+    assert_eq(icbrt(8), 2);
+    assert_eq(icbrt(27), 3);
+    assert_eq(icbrt(64), 4);
+    assert_eq(icbrt(125), 5);
+    assert_eq(icbrt(1000), 10);
+    // Non-perfect cubes
+    assert_eq(icbrt(7), 1);
+    assert_eq(icbrt(9), 2);
+    assert_eq(icbrt(26), 2);
+    assert_eq(icbrt(28), 3);
+    1
+}
+
+fn test_ilog2() -> Int {
+    assert_eq(ilog2(1), 0);
+    assert_eq(ilog2(2), 1);
+    assert_eq(ilog2(4), 2);
+    assert_eq(ilog2(8), 3);
+    assert_eq(ilog2(16), 4);
+    assert_eq(ilog2(1024), 10);
+    // Non-powers: floor
+    assert_eq(ilog2(3), 1);
+    assert_eq(ilog2(5), 2);
+    assert_eq(ilog2(7), 2);
+    assert_eq(ilog2(15), 3);
+    1
+}
+
+fn test_pythagorean() -> Int {
+    assert_eq(is_pythagorean(3, 4, 5), 1);
+    assert_eq(is_pythagorean(5, 12, 13), 1);
+    assert_eq(is_pythagorean(8, 15, 17), 1);
+    assert_eq(is_pythagorean(3, 4, 6), 0);
+    assert_eq(is_pythagorean(1, 1, 1), 0);
+    1
+}
+
+fn test_count_squares() -> Int {
+    assert_eq(count_squares(1), 1);   // {1}
+    assert_eq(count_squares(4), 2);   // {1, 4}
+    assert_eq(count_squares(10), 3);  // {1, 4, 9}
+    assert_eq(count_squares(100), 10);
+    1
+}
+
+fn test_isqrt_property() -> Int {
+    // For all n: isqrt(n)^2 <= n < (isqrt(n)+1)^2
+    let mut n = 0;
+    let mut ok = 1;
+    while n <= 50 {
+        let s = isqrt(n);
+        if s * s > n { ok = 0; }
+        if (s + 1) * (s + 1) <= n { ok = 0; }
+        n = n + 1;
+    }
+    assert_eq(ok, 1);
+    1
+}
+
+fn main() -> Int {
+    test_isqrt();
+    test_perfect_square();
+    test_icbrt();
+    test_ilog2();
+    test_pythagorean();
+    test_count_squares();
+    test_isqrt_property();
+    print("[OK] 642_newton_sqrt_aot");
+    0
+}

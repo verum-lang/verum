@@ -1,0 +1,141 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: ffi, memory, allocation
+// @description: Tests memory allocation across FFI boundaries
+
+/// ============================================================
+/// FFI MEMORY ALLOCATION
+/// ============================================================
+///
+/// Memory allocation across FFI boundaries requires careful handling
+/// of allocator compatibility, layout, and ownership.
+
+type c_size is usize;
+type c_void is ();
+
+// ------------------------------------------------------------
+// C Allocator Interface
+// ------------------------------------------------------------
+
+ffi libc {
+    @extern("C")
+    fn malloc(size: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn calloc(nmemb: c_size, size: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn realloc(ptr: *mut c_void, size: c_size) -> *mut c_void;
+
+    @extern("C")
+    fn free(ptr: *mut c_void);
+
+    @extern("C")
+    fn aligned_alloc(alignment: c_size, size: c_size) -> *mut c_void;
+}
+
+// ------------------------------------------------------------
+// Allocation Error Type
+// ------------------------------------------------------------
+
+type AllocError is
+    | SizeOverflow
+    | OutOfMemory
+    | PoolExhausted
+    | CallbackFailed;
+
+// ------------------------------------------------------------
+// RAII Wrapper for FFI Allocations
+// ------------------------------------------------------------
+
+/// Owned pointer from C allocator
+type CHeap is {
+    ptr: *mut u8,
+    size: usize,
+};
+
+implement CHeap {
+    /// Allocate new heap value
+    fn new_with_size(size: usize) -> CHeap {
+        CHeap { ptr: null as *mut u8, size }
+    }
+
+    /// From raw pointer (takes ownership) - UNSAFE: caller must ensure ptr is valid
+    fn from_raw(ptr: *mut u8, size: usize) -> CHeap {
+        CHeap { ptr, size }
+    }
+
+    /// Into raw pointer (releases ownership)
+    fn into_raw(&self) -> *mut u8 {
+        self.ptr
+    }
+
+    /// Get pointer
+    fn as_ptr(&self) -> *const u8 {
+        self.ptr as *const u8
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.ptr
+    }
+
+    fn get_size(&self) -> usize {
+        self.size
+    }
+
+    fn is_null(&self) -> Bool {
+        self.ptr == null
+    }
+}
+
+// ------------------------------------------------------------
+// Memory Pool for FFI
+// ------------------------------------------------------------
+
+/// Simple memory pool for FFI
+type MemoryPool is {
+    base: *mut u8,
+    size: usize,
+    offset: usize,
+};
+
+implement MemoryPool {
+    /// Create pool with given size
+    fn new_with_size(size: usize) -> MemoryPool {
+        MemoryPool { base: null as *mut u8, size, offset: 0 }
+    }
+
+    /// Reset pool (free all allocations)
+    fn reset(&mut self) {
+        self.offset = 0;
+    }
+
+    fn remaining(&self) -> usize {
+        self.size - self.offset
+    }
+
+    fn is_valid(&self) -> Bool {
+        self.base != null
+    }
+}
+
+// ------------------------------------------------------------
+// Custom Allocator Protocol
+// ------------------------------------------------------------
+
+/// Protocol for FFI-compatible allocators
+type FfiAllocator is protocol {
+    fn allocate(&self, size: usize, align: usize) -> *mut u8;
+    fn deallocate(&self, ptr: *mut u8, size: usize, align: usize);
+};
+
+fn main() {
+    // FFI allocation test
+    let heap = CHeap { ptr: null as *mut u8, size: 1024 };
+    assert(heap.size == 1024);
+
+    let pool = MemoryPool { base: null as *mut u8, size: 4096, offset: 0 };
+    assert(pool.remaining() == 4096);
+    assert(!pool.is_valid());
+}

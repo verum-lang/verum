@@ -1,0 +1,13 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, where-clause, error
+// @description: Test invalid where clause syntax detection
+// @expected-error: E038
+
+fn missing_constraint<T>() where {}
+
+fn missing_type_keyword<T>() where T: {}
+
+fn invalid_bound<T>() where type T: 123 {}
+
+fn double_where<T>() where type T: Clone where type T: Debug {}

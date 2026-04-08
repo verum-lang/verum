@@ -1,0 +1,442 @@
+// =============================================================================
+// vcs/specs/core/sys/intrinsics/tokenizer_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: core, sys, intrinsics, tokenizer, bpe, sentencepiece, nlp
+// @description: Tests for tokenizer intrinsics covering BPE (Byte Pair Encoding)
+//               and SentencePiece tokenizers used for NLP text processing.
+//
+// Coverage:
+// - BPE tokenizer: load, encode, decode
+// - SentencePiece tokenizer: load, encode, decode
+// - Pretrained model loading (HuggingFace format)
+// - Special token handling
+// - Round-trip encoding/decoding
+//
+// Note: This test uses typecheck-pass because tokenizer intrinsics are
+// currently stub implementations in the interpreter. Once full tokenizer
+// integration is implemented, this should become a runtime test.
+// =============================================================================
+
+module test.core.sys.intrinsics.tokenizer_test;
+
+mount core.collections.{List, Map};
+mount core.io.Path;
+mount core.text.Text;
+
+// =============================================================================
+// Tokenizer Protocol
+// =============================================================================
+
+/// Common interface for all tokenizers
+public type Tokenizer is protocol {
+    /// Encode text to token IDs
+    fn encode(&self, text: &Text) -> List<U32>;
+
+    /// Decode token IDs back to text
+    fn decode(&self, tokens: &[U32]) -> Text;
+
+    /// Get vocabulary size
+    fn vocab_size(&self) -> USize;
+};
+
+// =============================================================================
+// BPE Tokenizer
+// =============================================================================
+
+/// Byte Pair Encoding tokenizer (GPT-2 style)
+///
+/// BPE iteratively merges the most frequent character pairs:
+/// 1. Start with character-level tokens
+/// 2. Count pair frequencies: ("l", "o") -> 5000
+/// 3. Merge most frequent: "lo" becomes single token
+/// 4. Repeat until vocab size reached
+///
+/// Example: "lowest" -> ["low", "est"] (if "low" and "est" are in vocab)
+public type BPETokenizer is {
+    vocab: Map<Text, U32>,
+    merges: List<(Text, Text)>,
+    special_tokens: Map<Text, U32>,
+};
+
+implement BPETokenizer {
+    /// Load BPE tokenizer from vocabulary and merges files
+    ///
+    /// vocab.json: {"word": 0, "another": 1, ...}
+    /// merges.txt: "l o\nlo w\n..." (pairs to merge)
+    public fn from_file(vocab_path: &Path, merges_path: &Path) -> Self {
+        @vbc(TOKENIZER_LOAD_BPE, vocab_path, merges_path)
+    }
+
+    /// Load from HuggingFace model hub format
+    /// Example: "gpt2", "openai-community/gpt2-medium"
+    public fn from_pretrained(model_name: &Text) -> Self {
+        @vbc(TOKENIZER_LOAD_PRETRAINED, model_name)
+    }
+
+    /// Add special token to vocabulary
+    /// Common special tokens: <|endoftext|>, <|pad|>, <|unk|>
+    public fn add_special_token(&mut self, token: Text, id: U32) {
+        self.special_tokens.insert(token, id);
+    }
+
+    /// Check if token is a special token
+    public fn is_special_token(&self, token_id: U32) -> Bool {
+        for (_, id) in self.special_tokens.iter() {
+            if id == token_id {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get token ID for a special token by name
+    public fn get_special_token_id(&self, name: &Text) -> Maybe<U32> {
+        self.special_tokens.get(name)
+    }
+}
+
+implement Tokenizer for BPETokenizer {
+    fn encode(&self, text: &Text) -> List<U32> {
+        @vbc(TOKENIZER_ENCODE, self, text)
+    }
+
+    fn decode(&self, tokens: &[U32]) -> Text {
+        @vbc(TOKENIZER_DECODE, self, tokens)
+    }
+
+    fn vocab_size(&self) -> USize {
+        self.vocab.len() + self.special_tokens.len()
+    }
+}
+
+// =============================================================================
+// SentencePiece Tokenizer
+// =============================================================================
+
+/// SentencePiece tokenizer (LLaMA, T5 style)
+///
+/// SentencePiece uses a unigram language model or BPE variant:
+/// - Subword units learned from raw text
+/// - Language-agnostic (works for any language)
+/// - Handles whitespace specially (▁ prefix)
+///
+/// Example: "Hello World" -> ["▁Hello", "▁World"]
+public type SentencePieceTokenizer is {
+    model_path: Path,
+    vocab_size: USize,
+};
+
+implement SentencePieceTokenizer {
+    /// Load SentencePiece model from .model file
+    public fn from_file(model_path: &Path) -> Self {
+        @vbc(TOKENIZER_LOAD_SPM, model_path)
+    }
+}
+
+implement Tokenizer for SentencePieceTokenizer {
+    fn encode(&self, text: &Text) -> List<U32> {
+        @vbc(TOKENIZER_SPM_ENCODE, self, text)
+    }
+
+    fn decode(&self, tokens: &[U32]) -> Text {
+        @vbc(TOKENIZER_SPM_DECODE, self, tokens)
+    }
+
+    fn vocab_size(&self) -> USize {
+        self.vocab_size
+    }
+}
+
+// =============================================================================
+// BPE Tokenizer Tests
+// =============================================================================
+
+@test
+fn test_bpe_tokenizer_loading() {
+    // Test 1: Load from file paths
+    let vocab_path = Path.from("tokenizers/gpt2/vocab.json");
+    let merges_path = Path.from("tokenizers/gpt2/merges.txt");
+
+    // This would load the tokenizer (currently stub returns placeholder)
+    let tokenizer = BPETokenizer.from_file(&vocab_path, &merges_path);
+
+    // Verify vocab is populated
+    assert(tokenizer.vocab_size() > 0);
+}
+
+@test
+fn test_bpe_tokenizer_pretrained() {
+    // Test 2: Load from HuggingFace model name
+    let model_name = "gpt2";
+    let tokenizer = BPETokenizer.from_pretrained(&model_name);
+
+    // GPT-2 has 50257 tokens
+    // assert(tokenizer.vocab_size() == 50257);
+    assert(tokenizer.vocab_size() > 0);
+}
+
+@test
+fn test_bpe_encoding() {
+    // Test basic encoding
+    let tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    // Encode simple text
+    let text = "Hello, world!";
+    let tokens = tokenizer.encode(&text);
+
+    // Should produce multiple tokens
+    assert(tokens.len() > 0);
+
+    // Common subwords should be recognized
+    // "Hello" typically encodes as [15496] in GPT-2
+    // ", world!" typically encodes as [11, 995, 0]
+}
+
+@test
+fn test_bpe_decoding() {
+    // Test basic decoding
+    let tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    // GPT-2 token IDs for "Hello"
+    let tokens = [15496_u32];  // "Hello" in GPT-2
+    let decoded = tokenizer.decode(&tokens);
+
+    // Should decode back to "Hello"
+    // assert(decoded == "Hello");
+}
+
+@test
+fn test_bpe_round_trip() {
+    // Encode then decode should recover original text
+    let tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    let original = "The quick brown fox jumps over the lazy dog.";
+    let tokens = tokenizer.encode(&original);
+    let recovered = tokenizer.decode(&tokens[..]);
+
+    // Round-trip should be lossless for ASCII text
+    // assert(recovered == original);
+}
+
+@test
+fn test_bpe_special_tokens() {
+    // Test special token handling
+    let mut tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    // Add custom special tokens
+    tokenizer.add_special_token("<|start|>", 50257);
+    tokenizer.add_special_token("<|end|>", 50258);
+
+    // Verify special tokens are tracked
+    assert(tokenizer.is_special_token(50257));
+    assert(tokenizer.is_special_token(50258));
+    assert(!tokenizer.is_special_token(0));
+
+    // Get special token ID
+    let start_id = tokenizer.get_special_token_id(&"<|start|>");
+    match start_id {
+        Some(id) => assert(id == 50257),
+        None => panic("Special token not found"),
+    }
+}
+
+@test
+fn test_bpe_empty_input() {
+    // Test empty string handling
+    let tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    let empty = "";
+    let tokens = tokenizer.encode(&empty);
+
+    // Empty string should produce empty token list
+    assert(tokens.len() == 0);
+}
+
+@test
+fn test_bpe_unicode() {
+    // Test Unicode handling
+    let tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    // Chinese text
+    let chinese = "你好世界";
+    let tokens_zh = tokenizer.encode(&chinese);
+    // assert(tokens_zh.len() > 0);
+
+    // Emoji
+    let emoji = "Hello 🌍!";
+    let tokens_emoji = tokenizer.encode(&emoji);
+    // assert(tokens_emoji.len() > 0);
+
+    // Japanese
+    let japanese = "こんにちは";
+    let tokens_jp = tokenizer.encode(&japanese);
+    // assert(tokens_jp.len() > 0);
+}
+
+// =============================================================================
+// SentencePiece Tokenizer Tests
+// =============================================================================
+
+@test
+fn test_spm_tokenizer_loading() {
+    // Test loading SentencePiece model
+    let model_path = Path.from("tokenizers/llama/tokenizer.model");
+    let tokenizer = SentencePieceTokenizer.from_file(&model_path);
+
+    // LLaMA tokenizer has 32000 tokens
+    assert(tokenizer.vocab_size() > 0);
+}
+
+@test
+fn test_spm_encoding() {
+    // Test SentencePiece encoding
+    let model_path = Path.from("tokenizers/llama/tokenizer.model");
+    let tokenizer = SentencePieceTokenizer.from_file(&model_path);
+
+    let text = "Hello, world!";
+    let tokens = tokenizer.encode(&text);
+
+    // Should produce tokens
+    assert(tokens.len() > 0);
+}
+
+@test
+fn test_spm_decoding() {
+    // Test SentencePiece decoding
+    let model_path = Path.from("tokenizers/llama/tokenizer.model");
+    let tokenizer = SentencePieceTokenizer.from_file(&model_path);
+
+    // Token IDs
+    let tokens = [1_u32, 15043, 29892, 3186, 29991];  // Example tokens
+    let decoded = tokenizer.decode(&tokens);
+
+    // Should produce text
+    assert(decoded.len() > 0);
+}
+
+@test
+fn test_spm_round_trip() {
+    // Encode then decode should recover original text
+    let model_path = Path.from("tokenizers/llama/tokenizer.model");
+    let tokenizer = SentencePieceTokenizer.from_file(&model_path);
+
+    let original = "The quick brown fox jumps over the lazy dog.";
+    let tokens = tokenizer.encode(&original);
+    let recovered = tokenizer.decode(&tokens[..]);
+
+    // Round-trip should be lossless
+    // assert(recovered == original);
+}
+
+@test
+fn test_spm_whitespace_handling() {
+    // SentencePiece uses ▁ (underscore) for word boundaries
+    let model_path = Path.from("tokenizers/llama/tokenizer.model");
+    let tokenizer = SentencePieceTokenizer.from_file(&model_path);
+
+    // Text with multiple spaces
+    let text = "Hello   World";  // Multiple spaces
+    let tokens = tokenizer.encode(&text);
+
+    // Should handle whitespace correctly
+    assert(tokens.len() > 0);
+}
+
+// =============================================================================
+// Cross-Tokenizer Tests
+// =============================================================================
+
+@test
+fn test_tokenizer_protocol() {
+    // Test that both tokenizers implement the Tokenizer protocol
+
+    fn tokenize<T: Tokenizer>(tokenizer: &T, text: &Text) -> List<U32> {
+        tokenizer.encode(text)
+    }
+
+    fn detokenize<T: Tokenizer>(tokenizer: &T, tokens: &[U32]) -> Text {
+        tokenizer.decode(tokens)
+    }
+
+    // BPE tokenizer
+    let bpe = BPETokenizer.from_pretrained(&"gpt2");
+    let bpe_tokens = tokenize(&bpe, &"Hello");
+    let bpe_text = detokenize(&bpe, &bpe_tokens[..]);
+
+    // SentencePiece tokenizer
+    let spm = SentencePieceTokenizer.from_file(&Path.from("tokenizer.model"));
+    let spm_tokens = tokenize(&spm, &"Hello");
+    let spm_text = detokenize(&spm, &spm_tokens[..]);
+}
+
+@test
+fn test_batch_encoding() {
+    // Test encoding multiple texts (batch processing)
+    let tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    let texts = [
+        "First sentence.",
+        "Second sentence with more words.",
+        "Third.",
+    ];
+
+    let mut all_tokens: List<List<U32>> = List.new();
+
+    for text in texts {
+        let tokens = tokenizer.encode(&text);
+        all_tokens.push(tokens);
+    }
+
+    // Should have 3 encoded sequences
+    assert(all_tokens.len() == 3);
+
+    // Longer sentences should have more tokens
+    // assert(all_tokens[1].len() > all_tokens[0].len());
+}
+
+// =============================================================================
+// Performance Considerations
+// =============================================================================
+
+@test
+fn test_tokenizer_caching() {
+    // Tokenizers should cache vocabulary lookups for performance
+    let tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    // First encoding (cold cache)
+    let tokens1 = tokenizer.encode(&"Hello, world!");
+
+    // Second encoding (warm cache - should be faster)
+    let tokens2 = tokenizer.encode(&"Hello, world!");
+
+    // Results should be identical
+    assert(tokens1.len() == tokens2.len());
+}
+
+@test
+fn test_long_text_encoding() {
+    // Test encoding of longer texts (context window considerations)
+    let tokenizer = BPETokenizer.from_pretrained(&"gpt2");
+
+    // Generate long text
+    let mut long_text = Text.new();
+    for _ in 0..100 {
+        long_text.push_str("This is a sentence. ");
+    }
+
+    let tokens = tokenizer.encode(&long_text);
+
+    // Should produce many tokens
+    assert(tokens.len() > 100);
+}
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

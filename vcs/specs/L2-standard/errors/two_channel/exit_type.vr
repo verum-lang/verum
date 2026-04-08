@@ -1,0 +1,550 @@
+// @test: run
+// @expected-stdout: All Exit two-channel error tests passed!
+// @tier: 0
+// @level: L2
+// @tags: errors, exit, two-channel, expected, defect, cause
+// @description: Tests for Two-Channel Error Model
+//
+// Spec: docs/detailed/20-error-handling.md Section 2.5.1-2.5.2 - Two-Channel Error Model
+// Separates business errors (Expected<E>) from programmer bugs (Defect).
+
+// ============================================================================
+// Source Location Type (for tracking error origins)
+// ============================================================================
+
+type SourceLocation is {
+    file: Text,
+    line: Int,
+    column: Int,
+};
+
+implement SourceLocation {
+    fn here() -> Self {
+        // In real implementation, this would be a compiler intrinsic
+        SourceLocation { file: "test.vr", line: 0, column: 0 }
+    }
+
+    fn to_string(&self) -> Text {
+        f"{self.file}:{self.line}:{self.column}"
+    }
+}
+
+// ============================================================================
+// Stack Frame Type (for defect stack traces)
+// ============================================================================
+
+type StackFrame is {
+    function_name: Text,
+    location: SourceLocation,
+};
+
+// ============================================================================
+// Expected Error Type - Typed, recoverable business errors
+// ============================================================================
+
+type Expected<E> is {
+    error: E,
+    context: List<Text>,
+    location: SourceLocation,
+};
+
+implement<E> Expected<E> {
+    fn new(error: E) -> Self {
+        Expected {
+            error,
+            context: List.new(),
+            location: SourceLocation.here(),
+        }
+    }
+
+    fn with_context(mut self, ctx: Text) -> Self {
+        self.context.push(ctx);
+        self
+    }
+
+    fn error(&self) -> &E {
+        &self.error
+    }
+}
+
+// ============================================================================
+// Defect Type - Unexpected bugs that should crash
+// ============================================================================
+
+type Defect is {
+    message: Text,
+    stack_trace: List<StackFrame>,
+    location: SourceLocation,
+};
+
+implement Defect {
+    fn new(message: Text) -> Self {
+        Defect {
+            message,
+            stack_trace: List.new(),
+            location: SourceLocation.here(),
+        }
+    }
+}
+
+// ============================================================================
+// Fiber ID for interrupt tracking
+// ============================================================================
+
+type FiberId is (Int);
+
+// ============================================================================
+// Interrupt Reason
+// ============================================================================
+
+type InterruptReason is
+    | UserCancel
+    | Timeout
+    | ParentExited
+    | ShutdownRequested;
+
+// ============================================================================
+// Cause Type - Lossless cause chain preserving error structure
+// ============================================================================
+
+type Cause<E> is
+    /// Expected typed error
+    | Fail(Expected<E>)
+
+    /// Unexpected defect (bug)
+    | Die(Defect)
+
+    /// Task was interrupted
+    | Interrupt {
+        fiber_id: FiberId,
+        reason: InterruptReason,
+    }
+
+    /// Two errors occurred in parallel (both branches failed)
+    | Both(Heap<Cause<E>>, Heap<Cause<E>>)
+
+    /// Sequential error chain (first caused second)
+    | Then(Heap<Cause<E>>, Heap<Cause<E>>);
+
+implement<E: Clone> Cause<E> {
+    /// Collect all failures (flattening parallel structure)
+    fn failures(&self) -> List<E> {
+        match self {
+            Cause.Fail(expected) => [expected.error.clone()],
+            Cause.Die(_) => List.new(),
+            Cause.Interrupt { .. } => List.new(),
+            Cause.Both(left, right) => {
+                let left_cause: &Cause<E> = &*left;
+                let right_cause: &Cause<E> = &*right;
+                let mut result: List<E> = left_cause.failures();
+                result.extend(right_cause.failures());
+                result
+            }
+            Cause.Then(first, second) => {
+                let first_cause: &Cause<E> = &*first;
+                let second_cause: &Cause<E> = &*second;
+                let mut result: List<E> = first_cause.failures();
+                result.extend(second_cause.failures());
+                result
+            }
+        }
+    }
+
+    /// Check if cause contains an interrupt
+    fn is_interrupted(&self) -> Bool {
+        match self {
+            Cause.Interrupt { .. } => true,
+            Cause.Both(left, right) => left.is_interrupted() || right.is_interrupted(),
+            Cause.Then(first, second) => first.is_interrupted() || second.is_interrupted(),
+            _ => false,
+        }
+    }
+
+    /// Check if cause contains a defect
+    fn has_defect(&self) -> Bool {
+        match self {
+            Cause.Die(_) => true,
+            Cause.Both(left, right) => left.has_defect() || right.has_defect(),
+            Cause.Then(first, second) => first.has_defect() || second.has_defect(),
+            _ => false,
+        }
+    }
+
+    /// Get all defects
+    fn defects(&self) -> List<Defect> {
+        match self {
+            Cause.Fail(_) => List.new(),
+            Cause.Die(defect) => [defect.clone()],
+            Cause.Interrupt { .. } => List.new(),
+            Cause.Both(left, right) => {
+                let mut result = left.defects();
+                result.extend(right.defects());
+                result
+            }
+            Cause.Then(first, second) => {
+                let mut result = first.defects();
+                result.extend(second.defects());
+                result
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Exit Type - Two-channel error representation
+// ============================================================================
+
+type Exit<E, A> is
+    | Success(A)
+    | Failure(Cause<E>);
+
+implement<E: Clone, A> Exit<E, A> {
+    /// Create a successful exit
+    fn succeed(value: A) -> Self {
+        Exit.Success(value)
+    }
+
+    /// Create a failed exit from an expected error
+    fn fail(error: E) -> Self {
+        Exit.Failure(Cause.Fail(Expected.new(error)))
+    }
+
+    /// Create a failed exit from a defect (bug)
+    fn die(message: Text) -> Self {
+        Exit.Failure(Cause.Die(Defect.new(message)))
+    }
+
+    /// Create an interrupted exit
+    fn interrupt(fiber_id: FiberId, reason: InterruptReason) -> Self {
+        Exit.Failure(Cause.Interrupt { fiber_id, reason })
+    }
+
+    /// Check if exit is successful
+    fn is_success(&self) -> Bool {
+        match self {
+            Exit.Success(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Check if exit is a failure
+    fn is_failure(&self) -> Bool {
+        !self.is_success()
+    }
+
+    /// Map over success value
+    fn map<B>(self, f: fn(A) -> B) -> Exit<E, B> {
+        match self {
+            Exit.Success(a) => Exit.Success(f(a)),
+            Exit.Failure(cause) => Exit.Failure(cause),
+        }
+    }
+
+    /// Map over error type
+    fn map_error<E2>(self, f: fn(E) -> E2) -> Exit<E2, A> where E2: Clone {
+        match self {
+            Exit.Success(a) => Exit.Success(a),
+            Exit.Failure(cause) => Exit.Failure(map_cause(cause, f)),
+        }
+    }
+
+    /// Get the success value or panic
+    fn unwrap(self) -> A {
+        match self {
+            Exit.Success(a) => a,
+            Exit.Failure(_) => panic("called unwrap on Failure"),
+        }
+    }
+
+    /// Convert to Result (loses cause structure)
+    fn to_result(self) -> Result<A, List<E>> {
+        match self {
+            Exit.Success(a) => Ok(a),
+            Exit.Failure(cause) => Err(cause.failures()),
+        }
+    }
+}
+
+/// Map a function over all errors in a cause chain
+fn map_cause<E: Clone, E2: Clone>(cause: Cause<E>, f: fn(E) -> E2) -> Cause<E2> {
+    match cause {
+        Cause.Fail(expected) => Cause.Fail(Expected {
+            error: f(expected.error),
+            context: expected.context,
+            location: expected.location,
+        }),
+        Cause.Die(defect) => Cause.Die(defect),
+        Cause.Interrupt { fiber_id, reason } => Cause.Interrupt { fiber_id, reason },
+        Cause.Both(left, right) => Cause.Both(
+            Heap(map_cause(*left, f)),
+            Heap(map_cause(*right, f)),
+        ),
+        Cause.Then(first, second) => Cause.Then(
+            Heap(map_cause(*first, f)),
+            Heap(map_cause(*second, f)),
+        ),
+    }
+}
+
+// ============================================================================
+// Application Error Types
+// ============================================================================
+
+type ConfigError is
+    | NotFound(Text)
+    | ParseError(Text)
+    | ValidationError(Text);
+
+type DatabaseError is
+    | ConnectionFailed(Text)
+    | QueryFailed(Text)
+    | TransactionAborted;
+
+// ============================================================================
+// Test: Basic Exit operations
+// ============================================================================
+
+fn test_basic_exit() {
+    let success: Exit<Text, Int> = Exit.succeed(42);
+    assert(success.is_success());
+    assert(!success.is_failure());
+    assert_eq(success.unwrap(), 42);
+
+    let failure: Exit<Text, Int> = Exit.fail("error");
+    assert(!failure.is_success());
+    assert(failure.is_failure());
+}
+
+// ============================================================================
+// Test: Exit with expected errors
+// ============================================================================
+
+fn test_expected_errors() {
+    fn parse_config(content: Text) -> Exit<ConfigError, Text> {
+        if content.is_empty() {
+            Exit.fail(ConfigError.NotFound("config.toml"))
+        } else if !content.contains("=") {
+            Exit.fail(ConfigError.ParseError("Invalid format"))
+        } else {
+            Exit.succeed(content)
+        }
+    }
+
+    let result1 = parse_config("");
+    assert(result1.is_failure());
+
+    let result2 = parse_config("key=value");
+    assert(result2.is_success());
+
+    let result3 = parse_config("invalid content");
+    assert(result3.is_failure());
+}
+
+// ============================================================================
+// Test: Exit with defects (bugs)
+// ============================================================================
+
+fn test_defects() {
+    fn dangerous_operation(x: Int) -> Exit<Text, Int> {
+        if x < 0 {
+            // This is a bug - should never receive negative
+            Exit.die("Invariant violation: x must be non-negative")
+        } else {
+            Exit.succeed(x * 2)
+        }
+    }
+
+    let ok = dangerous_operation(5);
+    assert(ok.is_success());
+
+    let defect = dangerous_operation(-1);
+    assert(defect.is_failure());
+
+    match defect {
+        Exit.Failure(cause) => {
+            assert(cause.has_defect());
+            let defects = cause.defects();
+            assert_eq(defects.len(), 1);
+        }
+        _ => panic("Expected Failure"),
+    }
+}
+
+// ============================================================================
+// Test: Cause chain for parallel errors
+// ============================================================================
+
+fn test_parallel_cause() {
+    // Simulate two parallel operations both failing
+    let cause1: Cause<Text> = Cause.Fail(Expected.new("error1"));
+    let cause2: Cause<Text> = Cause.Fail(Expected.new("error2"));
+
+    // Both failed in parallel
+    let both_cause: Cause<Text> = Cause.Both(Heap(cause1), Heap(cause2));
+
+    let failures = both_cause.failures();
+    assert_eq(failures.len(), 2);
+    assert_eq(failures[0], "error1");
+    assert_eq(failures[1], "error2");
+}
+
+// ============================================================================
+// Test: Cause chain for sequential errors
+// ============================================================================
+
+fn test_sequential_cause() {
+    // First error caused second error
+    let cause1: Cause<Text> = Cause.Fail(Expected.new("initial failure"));
+    let cause2: Cause<Text> = Cause.Fail(Expected.new("cascading failure"));
+
+    let then_cause: Cause<Text> = Cause.Then(Heap(cause1), Heap(cause2));
+
+    let failures = then_cause.failures();
+    assert_eq(failures.len(), 2);
+    assert_eq(failures[0], "initial failure");
+    assert_eq(failures[1], "cascading failure");
+}
+
+// ============================================================================
+// Test: Interrupt handling
+// ============================================================================
+
+fn test_interrupt() {
+    let interrupted: Exit<Text, Int> = Exit.interrupt(
+        FiberId(42),
+        InterruptReason.Timeout
+    );
+
+    assert(interrupted.is_failure());
+
+    match interrupted {
+        Exit.Failure(cause) => {
+            assert(cause.is_interrupted());
+            assert(!cause.has_defect());
+        }
+        _ => panic("Expected Failure"),
+    }
+}
+
+// ============================================================================
+// Test: Exit map operations
+// ============================================================================
+
+fn test_exit_map() {
+    let success: Exit<Text, Int> = Exit.succeed(21);
+    let mapped = success.map(|x| x * 2);
+    assert_eq(mapped.unwrap(), 42);
+
+    let failure: Exit<Text, Int> = Exit.fail("oops");
+    let mapped_failure = failure.map(|x| x * 2);
+    assert(mapped_failure.is_failure());
+}
+
+// ============================================================================
+// Test: Exit map_error
+// ============================================================================
+
+fn test_exit_map_error() {
+    let failure: Exit<Text, Int> = Exit.fail("error");
+    let mapped = failure.map_error(|e| f"wrapped: {e}");
+
+    match mapped {
+        Exit.Failure(cause) => {
+            let failures = cause.failures();
+            assert_eq(failures[0], "wrapped: error");
+        }
+        _ => panic("Expected Failure"),
+    }
+}
+
+// ============================================================================
+// Test: Expected error with context
+// ============================================================================
+
+fn test_expected_with_context() {
+    let expected = Expected.new(ConfigError.NotFound("app.toml"))
+        .with_context("Loading application config")
+        .with_context("Initializing service");
+
+    assert_eq(expected.context.len(), 2);
+    assert_eq(expected.context[0], "Loading application config");
+    assert_eq(expected.context[1], "Initializing service");
+}
+
+// ============================================================================
+// Test: Convert Exit to Result
+// ============================================================================
+
+fn test_exit_to_result() {
+    let success: Exit<Text, Int> = Exit.succeed(42);
+    let result = success.to_result();
+    assert_eq(result, Ok(42));
+
+    let failure: Exit<Text, Int> = Exit.fail("error");
+    let result_err = failure.to_result();
+    match result_err {
+        Err(errors) => {
+            assert_eq(errors.len(), 1);
+            assert_eq(errors[0], "error");
+        }
+        _ => panic("Expected Err"),
+    }
+}
+
+// ============================================================================
+// Test: Complex nested cause
+// ============================================================================
+
+fn test_complex_cause() {
+    // Build a complex cause tree:
+    // Both(
+    //   Fail("a"),
+    //   Then(
+    //     Fail("b"),
+    //     Both(
+    //       Die("bug"),
+    //       Fail("c")
+    //     )
+    //   )
+    // )
+
+    let fail_a: Cause<Text> = Cause.Fail(Expected.new("a"));
+    let fail_b: Cause<Text> = Cause.Fail(Expected.new("b"));
+    let fail_c: Cause<Text> = Cause.Fail(Expected.new("c"));
+    let die_bug: Cause<Text> = Cause.Die(Defect.new("invariant violated"));
+
+    let inner_both = Cause.Both(Heap(die_bug), Heap(fail_c));
+    let then_part = Cause.Then(Heap(fail_b), Heap(inner_both));
+    let complex_cause = Cause.Both(Heap(fail_a), Heap(then_part));
+
+    // Should collect all failures
+    let failures = complex_cause.failures();
+    assert_eq(failures.len(), 3);  // a, b, c
+
+    // Should detect defect
+    assert(complex_cause.has_defect());
+
+    // Should have one defect
+    let defects = complex_cause.defects();
+    assert_eq(defects.len(), 1);
+}
+
+// ============================================================================
+// Main test runner
+// ============================================================================
+
+fn main() {
+    test_basic_exit();
+    test_expected_errors();
+    test_defects();
+    test_parallel_cause();
+    test_sequential_cause();
+    test_interrupt();
+    test_exit_map();
+    test_exit_map_error();
+    test_expected_with_context();
+    test_exit_to_result();
+    test_complex_cause();
+
+    print("All Exit two-channel error tests passed!");
+}

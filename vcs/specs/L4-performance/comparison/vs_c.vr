@@ -1,0 +1,839 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: comparison, c, performance, native, baseline
+// @description: Verum vs C performance comparison (target: 0.85-0.95x native C)
+
+/// Verum vs C Performance Comparison
+///
+/// This benchmark compares Verum's performance against optimized C code.
+/// C represents the theoretical performance ceiling for native code.
+///
+/// Target: 0.85-0.95x C performance
+///
+/// Key differences:
+/// - C: No safety guarantees, manual memory management
+/// - Verum: CBGR safety with ~15ns overhead per reference access
+/// - C: No bounds checking
+/// - Verum: Runtime bounds checking on array access
+///
+/// This represents the "cost of safety" - Verum aims to minimize
+/// this cost while providing memory safety guarantees.
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const ITERATIONS: Int = 100_000_000;
+const DATA_SIZE: Int = 10_000_000;
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs C Performance");
+
+    // Pure compute (should be near 1:1)
+    results.add(benchmark_arithmetic());
+    results.add(benchmark_loop_overhead());
+    results.add(benchmark_branch_prediction());
+
+    // Array operations (bounds checking overhead)
+    results.add(benchmark_array_sequential());
+    results.add(benchmark_array_random());
+    results.add(benchmark_array_stride());
+
+    // Memory operations
+    results.add(benchmark_memcpy());
+    results.add(benchmark_memset());
+    results.add(benchmark_pointer_arithmetic());
+
+    // Struct/record operations
+    results.add(benchmark_struct_access());
+    results.add(benchmark_struct_copy());
+
+    // Function calls
+    results.add(benchmark_function_call());
+    results.add(benchmark_indirect_call());
+
+    // Real algorithms
+    results.add(benchmark_quicksort());
+    results.add(benchmark_matrix_multiply());
+    results.add(benchmark_hash_compute());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_c.json");
+
+    // Check that average is in target range
+    let avg_ratio = results.results.iter()
+        .map(|r| r.value)
+        .sum.<Float>() / results.results.len() as Float;
+
+    assert(avg_ratio >= 0.85 && avg_ratio <= 1.05,
+           "Performance outside 0.85-1.05x C range");
+}
+
+/// C baseline times (measured from equivalent C code)
+/// These should be measured on the same hardware
+module c_baselines {
+    /// C 100M arithmetic ops in milliseconds
+    pub const ARITHMETIC_MS: Float = 50.0;
+
+    /// C loop overhead 100M iterations in milliseconds
+    pub const LOOP_MS: Float = 30.0;
+
+    /// C branch test 100M iterations in milliseconds
+    pub const BRANCH_MS: Float = 40.0;
+
+    /// C sequential array access 10M elements in milliseconds
+    pub const ARRAY_SEQ_MS: Float = 10.0;
+
+    /// C random array access 10M elements in milliseconds
+    pub const ARRAY_RAND_MS: Float = 100.0;
+
+    /// C strided array access 10M elements in milliseconds
+    pub const ARRAY_STRIDE_MS: Float = 50.0;
+
+    /// C memcpy 1GB in milliseconds
+    pub const MEMCPY_1GB_MS: Float = 200.0;
+
+    /// C memset 1GB in milliseconds
+    pub const MEMSET_1GB_MS: Float = 100.0;
+
+    /// C pointer arithmetic 100M ops in milliseconds
+    pub const PTR_ARITH_MS: Float = 25.0;
+
+    /// C struct field access 100M in milliseconds
+    pub const STRUCT_ACCESS_MS: Float = 20.0;
+
+    /// C struct copy 10M in milliseconds
+    pub const STRUCT_COPY_MS: Float = 80.0;
+
+    /// C function call 100M in milliseconds
+    pub const FUNC_CALL_MS: Float = 150.0;
+
+    /// C indirect call 10M in milliseconds
+    pub const INDIRECT_CALL_MS: Float = 50.0;
+
+    /// C quicksort 10M elements in milliseconds
+    pub const QUICKSORT_MS: Float = 800.0;
+
+    /// C matrix multiply 1000x1000 in milliseconds
+    pub const MATRIX_MS: Float = 600.0;
+
+    /// C hash compute 10M in milliseconds
+    pub const HASH_MS: Float = 150.0;
+}
+
+/// Benchmark: Pure arithmetic (should match C)
+fn benchmark_arithmetic() -> BenchmarkResult {
+    let mut x = 0i64;
+    let mut y = 1i64;
+
+    // Warmup
+    for _ in 0..1_000_000 {
+        x = x.wrapping_add(y);
+        y = y.wrapping_mul(3).wrapping_add(1);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        x = x.wrapping_add(y);
+        y = y.wrapping_mul(3).wrapping_add(1);
+        x ^= y;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.ARITHMETIC_MS;
+
+    black_box(x);
+    black_box(y);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "arithmetic_100m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.95,  // Should be very close to C
+        passed: ratio >= 0.95,
+    }
+}
+
+/// Benchmark: Loop overhead
+fn benchmark_loop_overhead() -> BenchmarkResult {
+    let mut sum = 0i64;
+
+    // Warmup
+    for i in 0..1_000_000 {
+        sum = sum.wrapping_add(i);
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..ITERATIONS {
+        sum = sum.wrapping_add(i as i64);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.LOOP_MS;
+
+    black_box(sum);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "loop_overhead_100m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.95,
+        passed: ratio >= 0.95,
+    }
+}
+
+/// Benchmark: Branch prediction
+fn benchmark_branch_prediction() -> BenchmarkResult {
+    let mut count = 0i64;
+    let mut rng = Random.with_seed(42);
+
+    // Generate predictable pattern
+    let pattern: List<Bool> = (0..ITERATIONS)
+        .map(|i| i % 100 < 80)  // 80% true
+        .collect();
+
+    // Warmup
+    for &b in pattern.iter().take(1_000_000) {
+        if b { count += 1; }
+    }
+    black_box(count);
+
+    count = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for &b in pattern.iter() {
+        if b {
+            count += 1;
+        }
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.BRANCH_MS;
+
+    black_box(count);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "branch_prediction_100m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.95,
+        passed: ratio >= 0.95,
+    }
+}
+
+/// Benchmark: Sequential array access (tests bounds check overhead)
+fn benchmark_array_sequential() -> BenchmarkResult {
+    let data: List<i64> = (0..DATA_SIZE as i64).collect();
+    let mut sum = 0i64;
+
+    // Warmup
+    for i in 0..1_000_000 {
+        sum = sum.wrapping_add(data[i]);
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        sum = sum.wrapping_add(data[i]);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.ARRAY_SEQ_MS;
+
+    black_box(sum);
+
+    let ratio = c_ms / verum_ms;
+
+    // Bounds checking adds some overhead
+    BenchmarkResult {
+        name: "array_sequential_10m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Benchmark: Random array access (cache-unfriendly)
+fn benchmark_array_random() -> BenchmarkResult {
+    let data: List<i64> = (0..DATA_SIZE as i64).collect();
+    let mut rng = Random.with_seed(123);
+    let indices: List<Int> = (0..DATA_SIZE)
+        .map(|_| rng.gen_range(0, DATA_SIZE))
+        .collect();
+
+    let mut sum = 0i64;
+
+    // Warmup
+    for &idx in indices.iter().take(100_000) {
+        sum = sum.wrapping_add(data[idx]);
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for &idx in indices.iter() {
+        sum = sum.wrapping_add(data[idx]);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.ARRAY_RAND_MS;
+
+    black_box(sum);
+
+    let ratio = c_ms / verum_ms;
+
+    // Random access is memory-bound, bounds check less visible
+    BenchmarkResult {
+        name: "array_random_10m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.90,
+        passed: ratio >= 0.90,
+    }
+}
+
+/// Benchmark: Strided array access
+fn benchmark_array_stride() -> BenchmarkResult {
+    let data: List<i64> = (0..DATA_SIZE as i64).collect();
+    let stride = 64;  // Typical cache line
+    let mut sum = 0i64;
+
+    // Warmup
+    for i in (0..DATA_SIZE).step_by(stride).take(10_000) {
+        sum = sum.wrapping_add(data[i]);
+    }
+    black_box(sum);
+
+    sum = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for i in (0..DATA_SIZE).step_by(stride) {
+        sum = sum.wrapping_add(data[i]);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.ARRAY_STRIDE_MS;
+
+    black_box(sum);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "array_stride_10m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Benchmark: Memory copy (memcpy equivalent)
+fn benchmark_memcpy() -> BenchmarkResult {
+    let size = 1024 * 1024 * 1024;  // 1GB
+    let src = [0u8; size];
+    let mut dst = [0u8; size];
+
+    // Warmup
+    dst[..1_000_000].copy_from_slice(&src[..1_000_000]);
+
+    let timer = Timer.new();
+    timer.start();
+
+    dst.copy_from_slice(&src);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.MEMCPY_1GB_MS;
+
+    black_box(&dst);
+
+    let ratio = c_ms / verum_ms;
+
+    // memcpy should be equally fast (memory bound)
+    BenchmarkResult {
+        name: "memcpy_1gb",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.95,
+        passed: ratio >= 0.95,
+    }
+}
+
+/// Benchmark: Memory set (memset equivalent)
+fn benchmark_memset() -> BenchmarkResult {
+    let size = 1024 * 1024 * 1024;  // 1GB
+    let mut data = [0u8; size];
+
+    // Warmup
+    data[..1_000_000].fill(42);
+
+    let timer = Timer.new();
+    timer.start();
+
+    data.fill(42);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.MEMSET_1GB_MS;
+
+    black_box(&data);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "memset_1gb",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.95,
+        passed: ratio >= 0.95,
+    }
+}
+
+/// Benchmark: Pointer arithmetic simulation
+fn benchmark_pointer_arithmetic() -> BenchmarkResult {
+    let data: List<i64> = (0..DATA_SIZE as i64).collect();
+    let mut sum = 0i64;
+
+    // Warmup
+    let mut ptr = 0;
+    for _ in 0..1_000_000 {
+        sum = sum.wrapping_add(data[ptr]);
+        ptr = (ptr + 1) % DATA_SIZE;
+    }
+    black_box(sum);
+
+    sum = 0;
+    ptr = 0;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        sum = sum.wrapping_add(data[ptr]);
+        ptr = (ptr + 1) % DATA_SIZE;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.PTR_ARITH_MS;
+
+    black_box(sum);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "pointer_arithmetic_100m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+/// Test struct for benchmarking
+type Point is {
+    x: Float,
+    y: Float,
+    z: Float,
+    w: Float,
+};
+
+/// Benchmark: Struct field access
+fn benchmark_struct_access() -> BenchmarkResult {
+    let point = Point { x: 1.0, y: 2.0, z: 3.0, w: 4.0 };
+    let mut sum = 0.0;
+
+    // Warmup
+    for _ in 0..1_000_000 {
+        sum += point.x + point.y + point.z + point.w;
+    }
+    black_box(sum);
+
+    sum = 0.0;
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        sum += point.x + point.y + point.z + point.w;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.STRUCT_ACCESS_MS;
+
+    black_box(sum);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "struct_access_100m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.95,
+        passed: ratio >= 0.95,
+    }
+}
+
+/// Benchmark: Struct copy
+fn benchmark_struct_copy() -> BenchmarkResult {
+    let count = 10_000_000;
+    let src = Point { x: 1.0, y: 2.0, z: 3.0, w: 4.0 };
+    let mut dst = Point { x: 0.0, y: 0.0, z: 0.0, w: 0.0 };
+
+    // Warmup
+    for _ in 0..100_000 {
+        dst = src;
+    }
+    black_box(dst);
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..count {
+        dst = src;
+        black_box(&dst);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.STRUCT_COPY_MS;
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "struct_copy_10m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.90,
+        passed: ratio >= 0.90,
+    }
+}
+
+/// Benchmark: Function call overhead
+fn benchmark_function_call() -> BenchmarkResult {
+    // Warmup
+    for _ in 0..1_000_000 {
+        black_box(noop_function());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        black_box(noop_function());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.FUNC_CALL_MS;
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "function_call_100m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.90,
+        passed: ratio >= 0.90,
+    }
+}
+
+@inline(never)
+fn noop_function() -> Int {
+    0
+}
+
+/// Benchmark: Indirect function call
+fn benchmark_indirect_call() -> BenchmarkResult {
+    let count = 10_000_000;
+    let func: fn() -> Int = noop_function;
+
+    // Warmup
+    for _ in 0..100_000 {
+        black_box(func());
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..count {
+        black_box(func());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.INDIRECT_CALL_MS;
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "indirect_call_10m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.90,
+        passed: ratio >= 0.90,
+    }
+}
+
+/// Benchmark: Quicksort implementation
+fn benchmark_quicksort() -> BenchmarkResult {
+    let mut rng = Random.with_seed(456);
+    let data: List<i64> = (0..DATA_SIZE)
+        .map(|_| rng.gen())
+        .collect();
+
+    // Warmup
+    let mut small = data[..100_000].to_vec();
+    quicksort(&mut small);
+    black_box(small);
+
+    let mut to_sort = data.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    quicksort(&mut to_sort);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.QUICKSORT_MS;
+
+    black_box(to_sort);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "quicksort_10m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+fn quicksort(data: &mut [i64]) {
+    if data.len() <= 1 {
+        return;
+    }
+
+    let pivot_idx = partition(data);
+    quicksort(&mut data[..pivot_idx]);
+    quicksort(&mut data[pivot_idx + 1..]);
+}
+
+fn partition(data: &mut [i64]) -> Int {
+    let len = data.len();
+    let pivot = data[len - 1];
+    let mut i = 0;
+
+    for j in 0..len - 1 {
+        if data[j] <= pivot {
+            data.swap(i, j);
+            i += 1;
+        }
+    }
+
+    data.swap(i, len - 1);
+    i
+}
+
+/// Benchmark: Matrix multiply
+fn benchmark_matrix_multiply() -> BenchmarkResult {
+    let size = 1000;
+    let a: List<List<Float>> = create_matrix(size, 1.0);
+    let b: List<List<Float>> = create_matrix(size, 2.0);
+
+    // Warmup with small matrix
+    let small_a = create_matrix(100, 1.0);
+    let small_b = create_matrix(100, 2.0);
+    black_box(matmul(&small_a, &small_b));
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result = matmul(&a, &b);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.MATRIX_MS;
+
+    black_box(result);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "matrix_multiply_1000",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.85,
+        passed: ratio >= 0.85,
+    }
+}
+
+fn create_matrix(size: Int, value: Float) -> List<List<Float>> {
+    (0..size).map(|_| {
+        (0..size).map(|_| value).collect()
+    }).collect()
+}
+
+fn matmul(a: &List<List<Float>>, b: &List<List<Float>>) -> List<List<Float>> {
+    let n = a.len();
+    let mut c = create_matrix(n, 0.0);
+
+    for i in 0..n {
+        for k in 0..n {
+            let a_ik = a[i][k];
+            for j in 0..n {
+                c[i][j] += a_ik * b[k][j];
+            }
+        }
+    }
+
+    c
+}
+
+/// Benchmark: Hash computation
+fn benchmark_hash_compute() -> BenchmarkResult {
+    let count = 10_000_000;
+    let data: List<i64> = (0..count as i64).collect();
+
+    // Warmup
+    for &x in data.iter().take(100_000) {
+        black_box(fnv_hash(x));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut total_hash = 0u64;
+    for &x in data.iter() {
+        total_hash ^= fnv_hash(x);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let c_ms = c_baselines.HASH_MS;
+
+    black_box(total_hash);
+
+    let ratio = c_ms / verum_ms;
+
+    BenchmarkResult {
+        name: "hash_compute_10m",
+        verum_ms: verum_ms,
+        c_ms: c_ms,
+        value: ratio,
+        target: 0.90,
+        passed: ratio >= 0.90,
+    }
+}
+
+fn fnv_hash(x: i64) -> u64 {
+    let mut hash = 14695981039346656037u64;
+    let bytes = x.to_le_bytes();
+    for byte in bytes {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    hash
+}
+
+type BenchmarkResult is {
+    name: Text,
+    verum_ms: Float,
+    c_ms: Float,
+    value: Float,
+    target: Float,
+    passed: Bool,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<BenchmarkResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+
+    fn all_pass(self) -> Bool {
+        self.results.iter().all(|r| r.passed)
+    }
+
+    fn report(self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<25} {:>12} {:>12} {:>10} {:>8}",
+                "Benchmark", "Verum (ms)", "C (ms)", "Ratio", "Status");
+        println("{}", "-".repeat(70));
+
+        for result in self.results {
+            let status = if result.passed { "PASS" } else { "FAIL" };
+            let ratio_pct = result.value * 100.0;
+            println("{:<25} {:>12.2} {:>12.2} {:>9.1}% {:>8}",
+                    result.name, result.verum_ms, result.c_ms,
+                    ratio_pct, status);
+        }
+
+        println("");
+        let avg_ratio = self.results.iter()
+            .map(|r| r.value)
+            .sum.<Float>() / self.results.len() as Float;
+        println("Average performance: {:.1}% of C", avg_ratio * 100.0);
+        println("Target range: 85-95% of C (0.85-0.95x)");
+
+        let passed = self.results.iter().filter(|r| r.passed).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+
+    fn export_comparison(self, path: Text) {
+        let json = Json.object();
+        json.set("suite", self.suite_name);
+        json.set("comparison", "c");
+        json.set("target_range", "0.85-0.95");
+
+        let results_json = Json.array();
+        for result in self.results {
+            let r = Json.object();
+            r.set("name", result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("c_ms", result.c_ms);
+            r.set("ratio", result.value);
+            r.set("target", result.target);
+            r.set("passed", result.passed);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+    }
+}

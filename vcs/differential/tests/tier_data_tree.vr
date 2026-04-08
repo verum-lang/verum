@@ -1,0 +1,197 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, data-structure, tree, bst
+// @timeout: 10000
+// @expected-exit: 0
+// @description: BST insert/search simulation with record arrays, verify search results
+
+// Simulated fixed-size array of 8 elements
+type A8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn a8_get(a: A8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn a8_set(a: A8, i: Int, v: Int) -> A8 {
+    A8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+    }
+}
+
+/// BST stored as three A8 arrays: keys, left child, right child + count
+type BST is { keys: A8, left: A8, right: A8, count: Int };
+
+fn bst_new() -> BST {
+    BST {
+        keys: A8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 },
+        left: A8 { e0: -1, e1: -1, e2: -1, e3: -1, e4: -1, e5: -1, e6: -1, e7: -1 },
+        right: A8 { e0: -1, e1: -1, e2: -1, e3: -1, e4: -1, e5: -1, e6: -1, e7: -1 },
+        count: 0,
+    }
+}
+
+/// Insert a value into BST, returns new BST
+fn bst_insert(bst: BST, val: Int) -> BST {
+    let mut k = bst.keys;
+    let mut l = bst.left;
+    let mut r = bst.right;
+    let mut cnt = bst.count;
+    if cnt == 0 {
+        k = a8_set(k, 0, val);
+        cnt = 1;
+    } else {
+        let mut cur = 0;
+        let mut placed = false;
+        while placed == false {
+            let cur_key = a8_get(k, cur);
+            if val < cur_key {
+                let lc = a8_get(l, cur);
+                if lc == -1 {
+                    k = a8_set(k, cnt, val);
+                    l = a8_set(l, cur, cnt);
+                    cnt = cnt + 1;
+                    placed = true;
+                } else {
+                    cur = lc;
+                }
+            } else {
+                let rc = a8_get(r, cur);
+                if rc == -1 {
+                    k = a8_set(k, cnt, val);
+                    r = a8_set(r, cur, cnt);
+                    cnt = cnt + 1;
+                    placed = true;
+                } else {
+                    cur = rc;
+                }
+            }
+        }
+    }
+    BST { keys: k, left: l, right: r, count: cnt }
+}
+
+/// Search returns 1 if found, 0 if not found
+fn bst_search(bst: BST, val: Int) -> Int {
+    let mut cur = 0;
+    let mut found = 0;
+    let mut done = false;
+    while done == false {
+        if cur < 0 {
+            done = true;
+        } else {
+            if cur >= bst.count {
+                done = true;
+            } else {
+                let cur_key = a8_get(bst.keys, cur);
+                if val == cur_key {
+                    found = 1;
+                    done = true;
+                } else {
+                    if val < cur_key {
+                        cur = a8_get(bst.left, cur);
+                    } else {
+                        cur = a8_get(bst.right, cur);
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Find min: go left until leaf, return key
+fn bst_min(bst: BST) -> Int {
+    let mut cur = 0;
+    let mut lc = a8_get(bst.left, cur);
+    while lc != -1 {
+        cur = lc;
+        lc = a8_get(bst.left, cur);
+    }
+    a8_get(bst.keys, cur)
+}
+
+/// Find max: go right until leaf, return key
+fn bst_max(bst: BST) -> Int {
+    let mut cur = 0;
+    let mut rc = a8_get(bst.right, cur);
+    while rc != -1 {
+        cur = rc;
+        rc = a8_get(bst.right, cur);
+    }
+    a8_get(bst.keys, cur)
+}
+
+fn test_bst_insert_search() {
+    let mut bst = bst_new();
+    bst = bst_insert(bst, 50);
+    bst = bst_insert(bst, 30);
+    bst = bst_insert(bst, 70);
+    bst = bst_insert(bst, 20);
+    bst = bst_insert(bst, 40);
+    bst = bst_insert(bst, 60);
+
+    assert_eq(bst.count, 6);
+    assert_eq(bst_search(bst, 50), 1);
+    assert_eq(bst_search(bst, 30), 1);
+    assert_eq(bst_search(bst, 70), 1);
+    assert_eq(bst_search(bst, 20), 1);
+    assert_eq(bst_search(bst, 60), 1);
+    assert_eq(bst_search(bst, 99), 0);
+    assert_eq(bst_search(bst, 5), 0);
+    print("bst_insert_search: pass\n");
+}
+
+fn test_bst_min_max() {
+    let mut bst = bst_new();
+    bst = bst_insert(bst, 50);
+    bst = bst_insert(bst, 25);
+    bst = bst_insert(bst, 75);
+    bst = bst_insert(bst, 10);
+    bst = bst_insert(bst, 90);
+
+    assert_eq(bst_min(bst), 10);
+    assert_eq(bst_max(bst), 90);
+    print("bst_min_max: pass\n");
+}
+
+fn test_bst_count_nodes() {
+    let mut bst = bst_new();
+    assert_eq(bst.count, 0);
+    bst = bst_insert(bst, 100);
+    assert_eq(bst.count, 1);
+    bst = bst_insert(bst, 50);
+    bst = bst_insert(bst, 150);
+    assert_eq(bst.count, 3);
+    bst = bst_insert(bst, 25);
+    bst = bst_insert(bst, 75);
+    bst = bst_insert(bst, 125);
+    bst = bst_insert(bst, 175);
+    assert_eq(bst.count, 7);
+    assert_eq(bst_search(bst, 100), 1);
+    assert_eq(bst_search(bst, 175), 1);
+    assert_eq(bst_search(bst, 25), 1);
+    print("bst_count_nodes: pass\n");
+}
+
+fn main() -> Int {
+    test_bst_insert_search();
+    test_bst_min_max();
+    test_bst_count_nodes();
+    0
+}

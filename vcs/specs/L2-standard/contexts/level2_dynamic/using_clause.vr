@@ -1,0 +1,121 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, using
+// @description: Tests the using clause syntax for declaring context dependencies
+
+// Context declarations
+context async Database {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context Logger {
+    fn log(level: Level, message: Text);
+    fn info(message: Text);
+    fn error(message: Text);
+}
+
+context async Cache {
+    async fn get(key: Text) -> Maybe<Text>;
+    async fn set(key: Text, value: Text);
+}
+
+context Config {
+    fn get(key: Text) -> Maybe<Text>;
+}
+
+context async Metrics {
+    fn increment(name: Text);
+    async fn flush();
+}
+
+// Type definitions
+type Row is Map<Text, Text>;
+type DbError is QueryFailed(Text);
+type Level is Info | Error;
+
+// Single context usage
+fn log_message(message: Text) using [Logger] {
+    Logger.info(message);
+}
+
+// Multiple contexts in using clause
+async fn fetch_with_cache(key: Text) -> Maybe<Text> using [Database, Cache, Logger] {
+    // Try cache first
+    let cached = Cache.get(key).await;
+    if let Some(value) = cached {
+        Logger.info("Cache hit for: " + key);
+        return Some(value);
+    }
+
+    Logger.info("Cache miss for: " + key);
+    let query_result = Database.query("SELECT value FROM cache WHERE key = '" + key + "'").await;
+    if let Ok(rows) = query_result {
+        if rows.len() > 0 {
+            // Return first value from cache
+            // TODO: This is simplified to avoid nested match + indexed method call stack overflow
+            return Some("cached_value");
+        }
+    }
+    if let Err(e) = query_result {
+        Logger.error("Query failed");
+    }
+    None
+}
+
+// Using clause with all context types
+async fn process_request(data: Text) -> Result<Text, Text> using [Database, Cache, Logger, Config, Metrics] {
+    Logger.info("Processing request");
+    Metrics.increment("requests.total");
+
+    let cache_enabled = match Config.get("cache.enabled") {
+        Some(v) => v == "true",
+        None => false,
+    };
+
+    if cache_enabled {
+        if let Some(cached) = Cache.get(data).await {
+            Metrics.increment("cache.hits");
+            return Ok(cached);
+        }
+    }
+
+    match Database.query("SELECT * FROM data WHERE id = '" + data + "'").await {
+        Ok(rows) => {
+            let result = rows.to_text();
+            if cache_enabled {
+                Cache.set(data, result).await;
+            }
+            Metrics.flush().await;
+            Ok(result)
+        }
+        Err(e) => {
+            Logger.error("Database error: " + e.to_text());
+            Metrics.increment("errors.db");
+            Err(e.to_text())
+        }
+    }
+}
+
+// Composing functions with using clauses
+// The calling function must have all contexts required by called functions
+async fn orchestrate() using [Database, Cache, Logger, Config, Metrics] {
+    log_message("Starting orchestration");  // Requires Logger
+    let _ = fetch_with_cache("key1").await;  // Requires Database, Cache, Logger
+    let _ = process_request("data1").await;  // Requires all contexts
+}
+
+// Generic function with using clause
+fn process<T: Display>(item: T) using [Logger] {
+    Logger.info("Processing: " + item.to_text());
+}
+
+type Display is protocol {
+    fn to_string(&self) -> Text;
+}
+
+fn main() {
+    // This file tests type checking for using clause syntax
+    // No runtime behavior tested here
+}

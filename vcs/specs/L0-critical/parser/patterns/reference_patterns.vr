@@ -1,0 +1,330 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, reference, deref, borrow
+
+// Helper types
+type Maybe<T> is None | Some(T);
+type Point is { x: Int, y: Int };
+type Container is { field: Int };
+type Inner is { value: Int };
+type Config is { port: Int };
+type Arc is { inner: Int };
+type Rc is { inner: Int };
+
+// Helper functions
+fn use<T>(x: T) { }
+fn process<T>(x: T) { }
+fn combine<A, B>(a: A, b: B) { }
+fn empty() { }
+fn default() { }
+fn log<T>(x: T) { }
+fn positive<T>(x: T) { }
+fn negative<T>(x: T) { }
+fn zero() { }
+fn unreachable() { }
+fn compute(x: Int, y: Int) { }
+fn read<T>(x: T) { }
+fn modify<T>(x: T) { }
+fn handle_rest<T>(x: T) { }
+fn insert<K, V>(k: K, v: V) { }
+fn safe_use<T>(x: T) { }
+fn unsafe_use<T>(x: T) { }
+fn single_digit() { }
+fn double_digit() { }
+fn many_digits<T>(x: T) { }
+fn http_handler() { }
+fn https_handler() { }
+fn default_handler<T>(x: T) { }
+fn found<T>(x: T) { }
+fn partial() { }
+fn use_borrowed<T>(x: T) { }
+
+fn test_basic_reference_pattern_in_match() {
+    let value = 42;
+
+    // Basic reference pattern in match
+    match &value {
+        &x => use(x),
+    };
+}
+
+fn test_reference_pattern_with_mutable() {
+    let mut value = 42;
+
+    // Reference pattern with mutable
+    match &mut value {
+        &mut x => {
+            x += 1;
+        },
+    };
+}
+
+fn test_reference_pattern_with_struct() {
+    let point = Point { x: 10, y: 20 };
+
+    // Reference pattern with struct
+    match &point {
+        &Point { x, y } => {
+            process(x);
+            process(y);
+        },
+    };
+}
+
+fn test_reference_pattern_with_tuple() {
+    let pair = (1, 2);
+
+    // Reference pattern with tuple
+    match &pair {
+        &(a, b) => {
+            combine(a, b);
+        },
+    };
+}
+
+fn test_reference_pattern_with_variant() {
+    let maybe: Maybe<Int> = Some(42);
+
+    // Reference pattern with variant
+    match &maybe {
+        &Some(value) => use(value),
+        &None => default(),
+    };
+}
+
+fn test_ref_binding_in_let() {
+    let value = 42;
+    let mut mutable = 10;
+
+    // Ref binding in let (using ref keyword, not & pattern)
+    let ref borrowed = value;
+    let ref mut mutable_borrow = mutable;
+    use(borrowed);
+    use(mutable_borrow);
+}
+
+fn test_ref_binding_in_match() {
+    let container = Container { field: 42 };
+
+    // Ref binding in match - use explicit field: pattern syntax
+    match container {
+        Container { field: ref f } => {
+            read(f);
+        },
+    };
+}
+
+fn test_dereference_in_pattern_matching() {
+    let boxed = Heap(42);
+
+    // Dereference in pattern matching
+    match *boxed {
+        value => use(value),
+    };
+}
+
+fn test_heap_pattern() {
+    let heap_value = Heap(42);
+
+    // Heap pattern - Verum uses Heap<T> instead of Rust's Box<T>
+    match heap_value {
+        Heap(inner) => use(inner),
+    };
+}
+
+fn test_reference_pattern_with_or_pattern() {
+    type Result<T, E> is Ok(T) | Err(E);
+    let result: Result<Int, Int> = Ok(42);
+
+    // Reference pattern with or-pattern
+    match &result {
+        &Ok(value) | &Err(value) => log(value),
+    };
+}
+
+fn test_reference_pattern_with_guard() {
+    let number = 5;
+
+    // Reference pattern with guard
+    match &number {
+        &n if n > 0 => positive(n),
+        &n if n < 0 => negative(n),
+        &0 => zero(),
+        _ => unreachable(),
+    };
+}
+
+fn test_nested_reference_and_heap_patterns() {
+    let boxed = Heap(42);
+
+    // Nested reference and Heap patterns
+    // NOTE: Verum uses Heap<T> instead of Rust's Box<T>
+    match &boxed {
+        &Heap(inner) => use(inner),
+    };
+}
+
+// Reference binding in function parameter - use ref keyword
+fn process_point(ref point: Point) {
+    compute(point.x, point.y);
+}
+
+fn modify_container(ref mut container: Container) {
+    modify(container.field);
+}
+
+fn test_reference_pattern_in_for_loop() {
+    let items = [1, 2, 3, 4, 5];
+    let entries = [(1, 2), (3, 4)];
+
+    // Reference pattern in for loop
+    for &item in &items {
+        process(item);
+    }
+
+    for &(key, value) in &entries {
+        insert(key, value);
+    }
+}
+
+fn test_reference_pattern_with_at_binding() {
+    let value = 42;
+
+    // At-binding then use inner reference
+    match &value {
+        whole @ _ => {
+            log(whole);
+        },
+    };
+}
+
+fn test_reference_pattern_in_closure() {
+    // Reference pattern in closure
+    let f = |&x| x * 2;
+    let g = |&(a, b)| a + b;
+}
+
+fn test_reference_pattern_matching_on_reference_types() {
+    let reference = &42;
+
+    // Reference pattern matching on reference types
+    match reference {
+        &x => safe_use(x),
+    };
+}
+
+fn test_complex_reference_pattern_matching() {
+    let complex_ref = Container { field: 42 };
+
+    // Complex reference pattern matching using ref binding
+    match complex_ref {
+        Container {
+            field: ref f,
+        } => {
+            read(f);
+        },
+    };
+}
+
+fn test_reference_pattern_in_match_with_multiple_arms() {
+    let option: Maybe<Int> = Some(5);
+
+    // Reference pattern in match with multiple arms
+    match &option {
+        &Some(x) if x > 0 => positive(x),
+        &Some(x) if x < 0 => negative(x),
+        &Some(0) => zero(),
+        &None => default(),
+    };
+}
+
+fn test_reference_pattern_with_range() {
+    let number = 5;
+
+    // Reference pattern with range
+    match &number {
+        &(0..=9) => single_digit(),
+        &(10..=99) => double_digit(),
+        &n => many_digits(n),
+    };
+}
+
+fn test_reference_pattern_in_while_let() {
+    let iter: Maybe<Int> = Some(42);
+
+    // Reference pattern in while-let
+    while let Some(item) = iter {
+        process(item);
+        break;
+    }
+}
+
+fn test_reference_pattern_in_if_let() {
+    let optional: Maybe<Int> = Some(42);
+
+    // Reference pattern in if-let
+    if let Some(value) = optional {
+        use(value);
+    }
+}
+
+fn test_reference_pattern_with_struct_update() {
+    let config = Config { port: 80 };
+
+    // Reference pattern with struct update
+    match &config {
+        &Config { port: 80, .. } => http_handler(),
+        &Config { port: 443, .. } => https_handler(),
+        &c => default_handler(c),
+    };
+}
+
+fn test_reference_pattern_with_nested_options() {
+    let nested: Maybe<Maybe<Int>> = Some(Some(42));
+
+    // Reference pattern with nested options
+    match &nested {
+        &Some(Some(value)) => found(value),
+        &Some(None) => partial(),
+        &None => empty(),
+    };
+}
+
+fn test_reference_pattern_for_smart_pointers() {
+    let arc_value = Arc { inner: 42 };
+    let rc_value = Rc { inner: 42 };
+
+    // Reference pattern for smart pointers
+    match &arc_value {
+        &Arc { inner } => use(inner),
+    };
+
+    match &rc_value {
+        &Rc { inner } => use(inner),
+    };
+}
+
+fn test_reference_pattern_in_let_else() {
+    let optional: Maybe<Int> = Some(42);
+
+    // Reference pattern in let-else
+    let Some(value) = optional else {
+        return;
+    };
+    use(value);
+}
+
+fn test_mutable_reference_pattern_variations() {
+    let mut container = Container { field: 42 };
+
+    // Mutable reference pattern variations
+    match &mut container {
+        &mut Container { field: inner } => {
+            modify(inner);
+        },
+    };
+}
+
+// Helper Result type
+type Result<T, E> is Ok(T) | Err(E);

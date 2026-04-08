@@ -1,0 +1,312 @@
+// @test: unit
+// @tier: 2
+// @level: L3
+// @tags: proofs, calc, chain, calculational
+// @description: Tests calculational proof chains (calc blocks)
+// @expect: pass
+
+// =============================================================================
+// CALCULATIONAL PROOF CHAINS
+// =============================================================================
+//
+// Calc blocks provide a structured way to write equational reasoning proofs,
+// similar to Lean/Dafny calc blocks. Each step relates two expressions with
+// a justification.
+//
+// Syntax:
+//   calc {
+//       expr1
+//       == { by justification } expr2
+//       == { by justification } expr3
+//       ...
+//   }
+
+// -----------------------------------------------------------------------------
+// Section 1: Basic Calc Chains with Equality
+// -----------------------------------------------------------------------------
+
+fn test_basic_calc_equality() {
+    // Simple arithmetic calc chain
+    let x = 5;
+    let y = 3;
+
+    calc {
+        (x + y) * 2
+        == { by distributivity } x * 2 + y * 2
+        == { by substitution } 5 * 2 + 3 * 2
+        == { by arithmetic } 10 + 6
+        == { by arithmetic } 16
+    }
+}
+
+fn test_calc_with_let_bindings() {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+
+    calc {
+        a + b + c
+        == { by associativity } (a + b) + c
+        == { by substitution } 30 + 30
+        == { by arithmetic } 60
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 2: Calc Chains with Inequalities
+// -----------------------------------------------------------------------------
+
+fn test_calc_less_than() {
+    let n = 5;
+
+    calc {
+        n
+        < { by auto } n + 1
+        < { by auto } n + 2
+        <= { by trivial } n + 2
+    }
+}
+
+fn test_calc_greater_than() {
+    let x = 100;
+
+    calc {
+        x * 2
+        > { by auto } x
+        >= { by trivial } x
+        > { by auto } x - 1
+    }
+}
+
+fn test_calc_less_equal() {
+    let a = 5;
+    let b = 10;
+
+    calc {
+        a
+        <= { by auto } b
+        <= { by auto } b * 2
+        == { by arithmetic } 20
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 3: Calc Chains with Mixed Relations
+// -----------------------------------------------------------------------------
+
+fn test_calc_mixed_relations() {
+    let x = 3;
+    let y = 5;
+
+    calc {
+        x
+        < { by auto } y
+        == { by definition } 5
+        <= { by auto } 10
+        < { by auto } 100
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 4: Calc Chains in Theorems and Lemmas
+// -----------------------------------------------------------------------------
+
+theorem sum_of_first_n(n: Int)
+    requires n >= 0
+    ensures result == n * (n + 1) / 2
+{
+    proof by induction on n {
+        case 0 =>
+            calc {
+                sum(0)
+                == { by definition } 0
+                == { by arithmetic } 0 * (0 + 1) / 2
+            }
+        case succ(k) =>
+            calc {
+                sum(succ(k))
+                == { by definition } sum(k) + succ(k)
+                == { by IH } k * (k + 1) / 2 + succ(k)
+                == { by auto } succ(k) * (succ(k) + 1) / 2
+            }
+    }
+}
+
+lemma square_expansion(a: Int, b: Int)
+    ensures (a + b) * (a + b) == a*a + 2*a*b + b*b
+{
+    calc {
+        (a + b) * (a + b)
+        == { by distributivity } (a + b) * a + (a + b) * b
+        == { by distributivity } a*a + b*a + a*b + b*b
+        == { by commutativity } a*a + a*b + a*b + b*b
+        == { by arithmetic } a*a + 2*a*b + b*b
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 5: Calc Chains with Tactic Justifications
+// -----------------------------------------------------------------------------
+
+theorem power_of_two_positive(n: Int)
+    requires n >= 0
+    ensures pow(2, n) > 0
+{
+    calc {
+        pow(2, n)
+        > { by auto } 0
+    }
+}
+
+lemma transitivity_example(a: Int, b: Int, c: Int)
+    requires a < b
+    requires b < c
+    ensures a < c
+{
+    calc {
+        a
+        < { by assumption } b
+        < { by assumption } c
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 6: Calc Chains with Custom Justifications
+// -----------------------------------------------------------------------------
+
+lemma helper()
+    ensures 2 + 2 == 4
+{
+    proof by trivial
+}
+
+fn defined_lemma_usage() {
+    calc {
+        1 + 1 + 2
+        == { by arithmetic } 2 + 2
+        == { by helper } 4
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 7: Nested Calc Chains
+// -----------------------------------------------------------------------------
+
+fn test_nested_calc() {
+    let x = 2;
+    let y = 3;
+
+    // Simplified nested calc: use tactic justifications
+    calc {
+        x * y + x * y
+        == { by auto } 6 + 6
+        == { by arithmetic } 12
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 8: Calc Chains with Function Applications
+// -----------------------------------------------------------------------------
+
+fn square(x: Int) -> Int { x * x }
+
+fn test_calc_with_functions() {
+    calc {
+        square(3) + square(4)
+        == { by unfold } 3 * 3 + 4 * 4
+        == { by arithmetic } 9 + 16
+        == { by arithmetic } 25
+        == { by unfold } square(5)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 9: Calc Chains with Quantifiers
+// -----------------------------------------------------------------------------
+
+theorem forall_calc_example()
+    ensures forall x: Int. x + 0 == x
+{
+    proof by auto
+}
+
+// -----------------------------------------------------------------------------
+// Section 10: Calc Chain Edge Cases
+// -----------------------------------------------------------------------------
+
+fn test_single_step_calc() {
+    // Single step calc (trivial)
+    calc {
+        5
+        == { by reflexivity } 5
+    }
+}
+
+fn test_long_calc_chain() {
+    let n = 1;
+
+    calc {
+        n
+        == { by definition } 1
+        == { by arithmetic } 2 - 1
+        == { by arithmetic } 3 - 2
+        == { by arithmetic } 4 - 3
+        == { by arithmetic } 5 - 4
+        == { by arithmetic } 6 - 5
+        == { by arithmetic } 7 - 6
+        == { by arithmetic } 8 - 7
+        == { by arithmetic } 9 - 8
+        == { by arithmetic } 10 - 9
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 11: Calc Chains with Type Conversions
+// -----------------------------------------------------------------------------
+
+fn test_calc_with_types() {
+    let x: Float = 3.0;
+    let y: Float = 4.0;
+
+    calc {
+        x * x + y * y
+        == { by substitution } 9.0 + 16.0
+        == { by arithmetic } 25.0
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 12: Error Cases (Compile-Fail Tests)
+// -----------------------------------------------------------------------------
+
+// @expect: compile-fail
+// fn test_invalid_calc_wrong_relation() {
+//     calc {
+//         5
+//         < { by wrong } 3  // Error: 5 is not < 3
+//     }
+// }
+
+// @expect: compile-fail
+// fn test_invalid_calc_broken_chain() {
+//     calc {
+//         1
+//         == { by arithmetic } 2  // Error: 1 != 2
+//         == { by arithmetic } 3
+//     }
+// }
+
+fn main() {
+    test_basic_calc_equality();
+    test_calc_with_let_bindings();
+    test_calc_less_than();
+    test_calc_greater_than();
+    test_calc_less_equal();
+    test_calc_mixed_relations();
+    test_calc_with_functions();
+    test_single_step_calc();
+    test_long_calc_chain();
+    test_calc_with_types();
+
+    print("All calc chain tests passed!");
+}

@@ -1,0 +1,214 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, maze, pathfinding, bfs
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for maze solving on a 4x4 grid using BFS
+
+// 4x4 maze: 0=open, 1=wall, stored as 16-bit integer
+fn maze_get(maze: Int, row: Int, col: Int) -> Int {
+    (maze >> (row * 4 + col)) & 1
+}
+
+fn maze_set(maze: Int, row: Int, col: Int) -> Int {
+    maze | (1 << (row * 4 + col))
+}
+
+fn maze_is_open(maze: Int, row: Int, col: Int) -> Bool {
+    if row < 0 || row >= 4 || col < 0 || col >= 4 { return false; }
+    ((maze >> (row * 4 + col)) & 1) == 0
+}
+
+// BFS queue stored in record (max 16 entries)
+type BFSState is {
+    // Queue of (row, col) packed as row*4+col
+    q0: Int, q1: Int, q2: Int, q3: Int,
+    q4: Int, q5: Int, q6: Int, q7: Int,
+    q8: Int, q9: Int, q10: Int, q11: Int,
+    q12: Int, q13: Int, q14: Int, q15: Int,
+    head: Int, tail: Int,
+    visited: Int  // 16-bit bitmask
+};
+
+fn bfs_new() -> BFSState {
+    BFSState {
+        q0: 0, q1: 0, q2: 0, q3: 0,
+        q4: 0, q5: 0, q6: 0, q7: 0,
+        q8: 0, q9: 0, q10: 0, q11: 0,
+        q12: 0, q13: 0, q14: 0, q15: 0,
+        head: 0, tail: 0, visited: 0
+    }
+}
+
+fn bfs_get_q(s: BFSState, i: Int) -> Int {
+    if i == 0 { s.q0 } else if i == 1 { s.q1 }
+    else if i == 2 { s.q2 } else if i == 3 { s.q3 }
+    else if i == 4 { s.q4 } else if i == 5 { s.q5 }
+    else if i == 6 { s.q6 } else if i == 7 { s.q7 }
+    else if i == 8 { s.q8 } else if i == 9 { s.q9 }
+    else if i == 10 { s.q10 } else if i == 11 { s.q11 }
+    else if i == 12 { s.q12 } else if i == 13 { s.q13 }
+    else if i == 14 { s.q14 } else { s.q15 }
+}
+
+// Check if position is reachable using iterative flood fill
+fn is_reachable(maze: Int, sr: Int, sc: Int, er: Int, ec: Int) -> Bool {
+    let start = sr * 4 + sc;
+    let end_cell = er * 4 + ec;
+
+    // Visited bitmask, start with source
+    let mut visited = 1 << start;
+    let mut changed = true;
+
+    // Iterate until stable (max 16 rounds)
+    let mut round = 0;
+    while round < 16 && changed {
+        changed = false;
+        let mut r = 0;
+        while r < 4 {
+            let mut c = 0;
+            while c < 4 {
+                let cell = r * 4 + c;
+                if ((visited >> cell) & 1) == 1 {
+                    // Try all 4 neighbors
+                    // Up
+                    if r > 0 && maze_is_open(maze, r - 1, c) {
+                        let n = (r - 1) * 4 + c;
+                        if ((visited >> n) & 1) == 0 {
+                            visited = visited | (1 << n);
+                            changed = true;
+                        }
+                    }
+                    // Down
+                    if r < 3 && maze_is_open(maze, r + 1, c) {
+                        let n = (r + 1) * 4 + c;
+                        if ((visited >> n) & 1) == 0 {
+                            visited = visited | (1 << n);
+                            changed = true;
+                        }
+                    }
+                    // Left
+                    if c > 0 && maze_is_open(maze, r, c - 1) {
+                        let n = r * 4 + (c - 1);
+                        if ((visited >> n) & 1) == 0 {
+                            visited = visited | (1 << n);
+                            changed = true;
+                        }
+                    }
+                    // Right
+                    if c < 3 && maze_is_open(maze, r, c + 1) {
+                        let n = r * 4 + (c + 1);
+                        if ((visited >> n) & 1) == 0 {
+                            visited = visited | (1 << n);
+                            changed = true;
+                        }
+                    }
+                }
+                c = c + 1;
+            }
+            r = r + 1;
+        }
+        round = round + 1;
+    }
+
+    ((visited >> end_cell) & 1) == 1
+}
+
+fn count_reachable(maze: Int, sr: Int, sc: Int) -> Int {
+    let start = sr * 4 + sc;
+    let mut visited = 1 << start;
+
+    let mut round = 0;
+    while round < 16 {
+        let mut r = 0;
+        while r < 4 {
+            let mut c = 0;
+            while c < 4 {
+                let cell = r * 4 + c;
+                if ((visited >> cell) & 1) == 1 {
+                    if r > 0 && maze_is_open(maze, r - 1, c) { visited = visited | (1 << ((r - 1) * 4 + c)); }
+                    if r < 3 && maze_is_open(maze, r + 1, c) { visited = visited | (1 << ((r + 1) * 4 + c)); }
+                    if c > 0 && maze_is_open(maze, r, c - 1) { visited = visited | (1 << (r * 4 + (c - 1))); }
+                    if c < 3 && maze_is_open(maze, r, c + 1) { visited = visited | (1 << (r * 4 + (c + 1))); }
+                }
+                c = c + 1;
+            }
+            r = r + 1;
+        }
+        round = round + 1;
+    }
+
+    // Count set bits
+    let mut count = 0;
+    let mut i = 0;
+    while i < 16 {
+        count = count + ((visited >> i) & 1);
+        i = i + 1;
+    }
+    count
+}
+
+fn test_open_maze() {
+    // All open (maze = 0)
+    assert_eq(is_reachable(0, 0, 0, 3, 3), true);
+    assert_eq(count_reachable(0, 0, 0), 16);
+}
+
+fn test_walled_maze() {
+    // Wall separating left/right halves
+    // Col 2 is all walls
+    let mut maze = 0;
+    maze = maze_set(maze, 0, 2);
+    maze = maze_set(maze, 1, 2);
+    maze = maze_set(maze, 2, 2);
+    maze = maze_set(maze, 3, 2);
+
+    // (0,0) cannot reach (0,3) — wall blocks
+    assert_eq(is_reachable(maze, 0, 0, 0, 3), false);
+    // (0,0) can reach (3,1) — same side
+    assert_eq(is_reachable(maze, 0, 0, 3, 1), true);
+    // Left side has 8 cells
+    assert_eq(count_reachable(maze, 0, 0), 8);
+}
+
+fn test_corridor() {
+    // Corridor: only row 0 and row 3 are open, cols 0-3
+    // Walls at rows 1-2 except (1,0) and (2,3) for connection
+    let mut maze = 0;
+    // Wall row 1 except col 0
+    maze = maze_set(maze, 1, 1);
+    maze = maze_set(maze, 1, 2);
+    maze = maze_set(maze, 1, 3);
+    // Wall row 2 except col 3
+    maze = maze_set(maze, 2, 0);
+    maze = maze_set(maze, 2, 1);
+    maze = maze_set(maze, 2, 2);
+
+    // Path: (0,0) -> (1,0) -> ... but (2,0) is walled
+    // Let's just check reachability
+    assert_eq(is_reachable(maze, 0, 0, 0, 3), true);  // Row 0 is open
+}
+
+fn test_isolated_cell() {
+    // (1,1) surrounded by walls
+    let mut maze = 0;
+    maze = maze_set(maze, 0, 1);
+    maze = maze_set(maze, 1, 0);
+    maze = maze_set(maze, 1, 2);
+    maze = maze_set(maze, 2, 1);
+
+    // (1,1) is open but surrounded
+    assert_eq(count_reachable(maze, 1, 1), 1);
+    assert_eq(is_reachable(maze, 1, 1, 0, 0), false);
+}
+
+fn main() -> Int {
+    test_open_maze();
+    test_walled_maze();
+    test_corridor();
+    test_isolated_cell();
+    print("[OK] 235_maze_solver_aot");
+    0
+}

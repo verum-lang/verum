@@ -1,0 +1,199 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, delimiters, comments, documentation
+
+// Documentation comment tests
+
+/// Single-line doc comment for a function
+fn documented_function() {
+    // Regular comment inside
+}
+
+/// Multi-line doc comment
+/// that spans several lines
+/// with useful information
+fn multi_line_doc() {}
+
+/// Doc comment with markdown formatting
+///
+/// # Header
+///
+/// This is a paragraph with **bold** and *italic* text.
+///
+/// - List item 1
+/// - List item 2
+/// - List item 3
+///
+/// ## Code Example
+///
+/// ```verum
+/// let x = 42
+/// ```
+fn markdown_doc() {}
+
+/// Doc comment with code blocks
+///
+/// ```
+/// fn example() {
+///     let x = 1
+/// }
+/// ```
+fn code_block_doc() {}
+
+/// Parameters and return documentation
+///
+/// # Arguments
+///
+/// * `x` - The first operand
+/// * `y` - The second operand
+///
+/// # Returns
+///
+/// The sum of x and y
+fn add(x: Int, y: Int) -> Int {
+    x + y
+}
+
+/// Type documentation
+///
+/// Represents a point in 2D space.
+type Point is {
+    /// The x coordinate
+    x: Float,
+    /// The y coordinate
+    y: Float,
+};
+
+/// Enum/variant documentation
+///
+/// Represents the result of an operation.
+type Result<T, E> is
+    /// The operation succeeded
+    Ok(T)
+    | /// The operation failed
+    Err(E);
+
+/// Module-level documentation
+///
+/// This module provides utilities for...
+module utils {
+    /// Inner function documentation
+    fn helper() {}
+}
+
+/// Constant documentation
+///
+/// The mathematical constant pi
+const PI: Float = 3.14159265358979;
+
+/// Documentation with special characters
+///
+/// Handles: <, >, &, ", '
+fn special_chars() {}
+
+/// Documentation with unicode
+///
+/// Supports: [emoji], [heart], mathematical symbols like [pi] and [sum]
+fn unicode_doc() {}
+
+/// Documentation with links
+///
+/// See [Point] for the coordinate type.
+/// External: <https://example.com>
+fn linked_doc() {}
+
+/// Documentation with tables
+///
+/// | Column A | Column B |
+/// |----------|----------|
+/// | Value 1  | Value 2  |
+/// | Value 3  | Value 4  |
+fn table_doc() {}
+
+/// Documentation with notes and warnings
+///
+/// # Note
+///
+/// This function is experimental.
+///
+/// # Warning
+///
+/// This may panic on invalid input.
+///
+/// # Safety
+///
+/// This is unsafe because...
+fn annotated_doc() {}
+
+/// Generic type documentation
+///
+/// # Type Parameters
+///
+/// * `T` - The element type, must implement Clone
+/// * `N` - The capacity (compile-time constant)
+type FixedArray<T, N: meta usize> is {
+    data: [T; N],
+};
+
+/// Protocol documentation
+///
+/// Defines equality comparison.
+type Eq is protocol {
+    /// Compares two values for equality
+    fn eq(&self, other: &Self) -> Bool;
+
+    /// Compares two values for inequality
+    fn ne(&self, other: &Self) -> Bool {
+        !self.eq(other)
+    }
+};
+
+/// Error type documentation
+///
+/// # Variants
+///
+/// * `NotFound` - The resource was not found
+/// * `InvalidInput` - The input was invalid
+/// * `Timeout` - The operation timed out
+type Error is
+    NotFound(Text)
+    | InvalidInput { field: Text, reason: Text }
+    | Timeout { after: Duration };
+
+/// Implementation documentation
+implement Display for Point {
+    /// Formats the point for display
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        write(f, "({}, {})", self.x, self.y)
+    }
+}
+
+/// Inner doc comments (//!)
+module inner_documented {
+    //! This module provides...
+    //!
+    //! # Examples
+    //!
+    //! ```
+    //! use inner_documented.foo
+    //! ```
+
+    /// Function in documented module
+    fn foo() {}
+}
+
+/// Doc comment edge cases
+///
+///
+/// Multiple blank lines above
+fn blank_lines() {}
+
+///No space after slashes
+fn no_space() {}
+
+/// Trailing whitespace
+fn trailing_ws() {}
+
+/// Very long line that goes on and on and on and on and on and on and on and on and on and on and on and on
+fn long_line() {}

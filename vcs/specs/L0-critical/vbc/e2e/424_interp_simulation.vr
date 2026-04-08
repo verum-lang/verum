@@ -1,0 +1,148 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, simulation
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests simulation patterns: cellular automata, population dynamics.
+
+fn test_game_of_life_step() {
+    // 6x6 Game of Life board
+    // Initial: blinker at (2,1)-(2,3)
+    let mut board = [
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
+        0, 1, 1, 1, 0, 0,
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0
+    ];
+    let rows = 6;
+    let cols = 6;
+
+    let mut next = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    // One step
+    let mut r = 0;
+    while r < rows {
+        let mut c = 0;
+        while c < cols {
+            // Count neighbors
+            let mut neighbors = 0;
+            let mut dr = -1;
+            while dr <= 1 {
+                let mut dc = -1;
+                while dc <= 1 {
+                    if dr != 0 || dc != 0 {
+                        let nr = r + dr;
+                        let nc = c + dc;
+                        if nr >= 0 && nr < rows && nc >= 0 && nc < cols {
+                            neighbors = neighbors + board[nr * cols + nc];
+                        }
+                    }
+                    dc = dc + 1;
+                }
+                dr = dr + 1;
+            }
+
+            let alive = board[r * cols + c];
+            if alive == 1 {
+                // Survive with 2 or 3 neighbors
+                if neighbors == 2 || neighbors == 3 {
+                    next[r * cols + c] = 1;
+                }
+            } else {
+                // Born with exactly 3 neighbors
+                if neighbors == 3 {
+                    next[r * cols + c] = 1;
+                }
+            }
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+
+    // After one step, blinker should rotate to vertical at (1,2)-(3,2)
+    assert_eq(next[1 * 6 + 2], 1); // (1,2)
+    assert_eq(next[2 * 6 + 2], 1); // (2,2)
+    assert_eq(next[3 * 6 + 2], 1); // (3,2)
+    // Original horizontal should be dead except center
+    assert_eq(next[2 * 6 + 1], 0); // (2,1) dead
+    assert_eq(next[2 * 6 + 3], 0); // (2,3) dead
+
+    // Count total alive
+    let mut alive_count = 0;
+    let mut i = 0;
+    while i < 36 {
+        alive_count = alive_count + next[i];
+        i = i + 1;
+    }
+    assert_eq(alive_count, 3); // Still 3 cells alive
+    print("game_of_life_step: ok");
+}
+
+fn test_population_growth() {
+    // Logistic growth simulation
+    // P(n+1) = P(n) + r * P(n) * (1 - P(n)/K)
+    // Using integers: P*1000, K*1000
+    let k_scaled = 1000; // Carrying capacity (1.0 * 1000)
+    let r_scaled = 100;  // Growth rate 0.1 (* 1000)
+    let mut pop = 100;    // Initial population 0.1 (* 1000)
+
+    let mut steps = 0;
+    while steps < 50 {
+        let growth = r_scaled * pop * (k_scaled - pop) / (k_scaled * 1000);
+        pop = pop + growth;
+        if pop > k_scaled { pop = k_scaled; }
+        if pop < 0 { pop = 0; }
+        steps = steps + 1;
+    }
+
+    // Population should approach carrying capacity
+    assert(pop > 900);
+    assert(pop <= 1000);
+    print("population_growth: ok");
+}
+
+fn test_particle_simulation() {
+    // 5 particles with position and velocity (1D)
+    let mut pos = [0, 100, 200, 300, 400];
+    let vel = [10, -5, 3, -8, 6];
+    let n = 5;
+
+    // Simulate 10 steps
+    let mut step = 0;
+    while step < 10 {
+        let mut i = 0;
+        while i < n {
+            pos[i] = pos[i] + vel[i];
+            // Bounce off walls at 0 and 500
+            if pos[i] < 0 { pos[i] = 0 - pos[i]; }
+            if pos[i] > 500 { pos[i] = 1000 - pos[i]; }
+            i = i + 1;
+        }
+        step = step + 1;
+    }
+
+    // After 10 steps:
+    // p0: 0 + 10*10 = 100
+    // p1: 100 - 5*10 = 50
+    // p2: 200 + 3*10 = 230
+    // p3: 300 - 8*10 = 220
+    // p4: 400 + 6*10 = 460
+    assert_eq(pos[0], 100);
+    assert_eq(pos[1], 50);
+    assert_eq(pos[2], 230);
+    assert_eq(pos[3], 220);
+    assert_eq(pos[4], 460);
+    print("particle_simulation: ok");
+}
+
+fn main() -> Int {
+    test_game_of_life_step();
+    test_population_growth();
+    test_particle_simulation();
+    print("[OK] 424_interp_simulation");
+    0
+}

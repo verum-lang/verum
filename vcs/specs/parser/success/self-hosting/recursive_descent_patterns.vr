@@ -1,0 +1,1282 @@
+// @test: parse
+// @level: L0
+// @tags: parser, self-hosting, recursive-descent, parser-patterns
+// @description: Parser constructs needed to self-host verum_fast_parser in Verum
+//
+// This file tests ALL language constructs that would be needed to implement
+// the verum_fast_parser recursive descent parser in Verum itself.
+
+// =============================================================================
+// Section 1: Token Stream Management
+// =============================================================================
+
+// Parser state type with mutable internal state
+// NOTE: Verum uses CBGR instead of Rust-style lifetimes ('a)
+type TokenStream is {
+    tokens: &[Token],
+    position: Int,
+    pending_star: Bool,
+    pending_ampersand: Bool
+};
+
+implement TokenStream {
+    fn new(tokens: &[Token]) -> TokenStream {
+        TokenStream {
+            tokens,
+            position: 0,
+            pending_star: false,
+            pending_ampersand: false
+        }
+    }
+
+    // Peek at current token without consuming
+    fn peek(&self) -> Maybe<&Token> {
+        if self.position < self.tokens.len() {
+            Some(&self.tokens[self.position])
+        } else {
+            None
+        }
+    }
+
+    // Peek at token kind
+    fn peek_kind(&self) -> Maybe<&TokenKind> {
+        self.peek().map(|t| &t.kind)
+    }
+
+    // Check if current token matches kind
+    fn check(&self, kind: &TokenKind) -> Bool {
+        self.peek_kind().map(|k| k == kind) ?? false
+    }
+
+    // Advance to next token
+    fn advance(&mut self) {
+        if self.position < self.tokens.len() {
+            self.position += 1;
+        }
+    }
+
+    // Consume token if it matches
+    fn consume(&mut self, kind: &TokenKind) -> Maybe<Token> {
+        if self.check(kind) {
+            let token = self.tokens[self.position].clone();
+            self.advance();
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    // Expect token or return error
+    fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
+        if self.check(&kind) {
+            let token = self.tokens[self.position].clone();
+            self.advance();
+            Ok(token)
+        } else {
+            Err(ParseError.unexpected(&[kind], self.peek()))
+        }
+    }
+
+    fn at_end(&self) -> Bool {
+        self.position >= self.tokens.len()
+    }
+
+    fn position(&self) -> Int {
+        self.position
+    }
+
+    fn current_span(&self) -> Span {
+        self.peek().map(|t| t.span) ?? Span.default()
+    }
+
+    fn make_span(&self, start: Int) -> Span {
+        let end_pos = if self.position > 0 {
+            self.position - 1
+        } else {
+            0
+        };
+        Span.from_positions(start, end_pos)
+    }
+}
+
+// =============================================================================
+// Section 2: Token and AST Types (Recursive Enums)
+// =============================================================================
+
+type TokenKind is
+    // Literals
+    | Ident(Text)
+    | IntLit(Int)
+    | FloatLit(Float)
+    | StringLit(Text)
+    | CharLit(Char)
+    // Punctuation
+    | LParen | RParen
+    | LBracket | RBracket
+    | LBrace | RBrace
+    | Comma | Semicolon | Colon
+    | Dot | DotDot | DotDotEq
+    // Operators
+    | Plus | Minus | Star | Slash | Percent
+    | StarStar
+    | Eq | EqEq | BangEq
+    | Lt | Gt | LtEq | GtEq
+    | Ampersand | AmpersandAmpersand
+    | Pipe | PipePipe
+    | Bang | Tilde | Caret
+    | Question | QuestionDot | QuestionQuestion
+    | PipeGt
+    | Arrow | FatArrow
+    // Keywords
+    | Let | Fn | Is | Type
+    | If | Else | Match | While | For | Loop
+    | Return | Break | Continue
+    | True | False
+    | Pub | Mut | Const | Unsafe | Async | Await
+    | Where | Implement | Protocol
+    | As
+    | Eof;
+
+type Token is {
+    kind: TokenKind,
+    span: Span
+};
+
+implement Token {
+    fn new(kind: TokenKind, span: Span) -> Token {
+        Token { kind, span }
+    }
+
+    fn starts_expr(&self) -> Bool {
+        match self.kind {
+            Ident(_) | IntLit(_) | FloatLit(_) | StringLit(_) | CharLit(_) => true,
+            LParen | LBracket | LBrace => true,
+            If | Match | Loop | While | For => true,
+            True | False => true,
+            Minus | Bang | Ampersand | Star => true,
+            _ => false
+        }
+    }
+}
+
+type Span is {
+    start: Int,
+    end: Int,
+    file_id: Int
+};
+
+implement Span {
+    fn new(start: Int, end: Int, file_id: Int) -> Span {
+        Span { start, end, file_id }
+    }
+
+    fn default() -> Span {
+        Span { start: 0, end: 0, file_id: 0 }
+    }
+
+    fn merge(self, other: Span) -> Span {
+        Span {
+            start: if self.start < other.start { self.start } else { other.start },
+            end: if self.end > other.end { self.end } else { other.end },
+            file_id: self.file_id
+        }
+    }
+
+    fn from_positions(start: Int, end: Int) -> Span {
+        Span { start, end, file_id: 0 }
+    }
+}
+
+// Recursive AST types using Heap for indirection
+type Expr is {
+    kind: ExprKind,
+    span: Span
+};
+
+type ExprKind is
+    | Literal(Literal)
+    | Path(Path)
+    | Binary { op: BinOp, left: Heap<Expr>, right: Heap<Expr> }
+    | Unary { op: UnOp, operand: Heap<Expr> }
+    | Call { func: Heap<Expr>, args: List<Expr> }
+    | Index { base: Heap<Expr>, index: Heap<Expr> }
+    | FieldAccess { base: Heap<Expr>, name: Ident }
+    | If { cond: Heap<Expr>, then_branch: Block, else_branch: Maybe<Block> }
+    | Match { scrutinee: Heap<Expr>, arms: List<MatchArm> }
+    | Block(Block)
+    | Return(Maybe<Heap<Expr>>)
+    | Break(Maybe<Heap<Expr>>)
+    | Continue
+    | Closure { params: List<Param>, body: Heap<Expr> }
+    | Pipeline { left: Heap<Expr>, right: Heap<Expr> }
+    | NullCoalesce { left: Heap<Expr>, right: Heap<Expr> }
+    | Range { start: Maybe<Heap<Expr>>, end: Maybe<Heap<Expr>>, inclusive: Bool }
+    | Cast { expr: Heap<Expr>, ty: Type }
+    | Is { expr: Heap<Expr>, pattern: Pattern, negated: Bool }
+    | Try(Heap<Expr>)
+    | Await(Heap<Expr>)
+    | TupleIndex { base: Heap<Expr>, index: Int };
+
+type Literal is
+    | IntLiteral { value: Int, span: Span }
+    | FloatLiteral { value: Float, span: Span }
+    | StringLiteral { value: Text, span: Span }
+    | CharLiteral { value: Char, span: Span }
+    | BoolLiteral { value: Bool, span: Span };
+
+implement Literal {
+    fn bool(value: Bool, span: Span) -> Literal {
+        BoolLiteral { value, span }
+    }
+}
+
+type BinOp is
+    Add | Sub | Mul | Div | Mod | Pow
+  | Eq | Ne | Lt | Gt | Le | Ge
+  | And | Or
+  | BitAnd | BitOr | BitXor | Shl | Shr
+  | Assign | AddAssign | SubAssign | MulAssign | DivAssign | ModAssign;
+
+implement BinOp {
+    fn is_assignment(&self) -> Bool {
+        match self {
+            Assign | AddAssign | SubAssign | MulAssign | DivAssign | ModAssign => true,
+            _ => false
+        }
+    }
+}
+
+type UnOp is
+    Neg | Not | BitNot | Deref | Ref | RefMut
+  | RefChecked | RefCheckedMut | RefUnsafe | RefUnsafeMut
+  | Own | OwnMut;
+
+type Block is {
+    statements: List<Stmt>,
+    expr: Maybe<Heap<Expr>>,
+    span: Span
+};
+
+type Stmt is
+    | Let { pattern: Pattern, ty: Maybe<Type>, value: Maybe<Expr>, span: Span }
+    | Expr { expr: Expr, has_semi: Bool }
+    | Item(Item);
+
+type MatchArm is {
+    pattern: Pattern,
+    guard: Maybe<Expr>,
+    body: Expr,
+    span: Span
+};
+
+// =============================================================================
+// Section 3: Pattern Types for Match Expressions
+// =============================================================================
+
+type Pattern is {
+    kind: PatternKind,
+    span: Span
+};
+
+type PatternKind is
+    | Wildcard
+    | Identifier { name: Text, mutable: Bool }
+    | Literal(Literal)
+    | Tuple(List<Pattern>)
+    | Array(List<Pattern>)
+    | Record { path: Path, fields: List<FieldPattern>, rest: Bool }
+    | Variant { path: Path, payload: Maybe<Heap<Pattern>> }
+    | Ref { mutable: Bool, pattern: Heap<Pattern> }
+    | Or(List<Pattern>)
+    | Rest;
+
+type FieldPattern is {
+    name: Ident,
+    pattern: Maybe<Pattern>
+};
+
+// =============================================================================
+// Section 4: Type AST for Type Parsing
+// =============================================================================
+
+type Type is {
+    kind: TypeKind,
+    span: Span
+};
+
+type TypeKind is
+    | Named { path: Path, args: List<Type> }
+    | Tuple(List<Type>)
+    | Array { elem: Heap<Type>, size: Maybe<Heap<Expr>> }
+    | Slice(Heap<Type>)
+    | Reference { mutable: Bool, inner: Heap<Type> }
+    | Pointer { mutable: Bool, inner: Heap<Type> }
+    | Function { params: List<Type>, ret: Heap<Type>, is_async: Bool }
+    | Inferred
+    | Never
+    | Unit;
+
+// =============================================================================
+// Section 5: Path and Identifier Types
+// =============================================================================
+
+type Path is {
+    segments: List<PathSegment>,
+    span: Span
+};
+
+type PathSegment is {
+    ident: Ident,
+    args: Maybe<List<Type>>
+};
+
+type Ident is {
+    name: Text,
+    span: Span
+};
+
+implement Ident {
+    fn new(name: Text, span: Span) -> Ident {
+        Ident { name, span }
+    }
+}
+
+// =============================================================================
+// Section 6: Item and Declaration Types
+// =============================================================================
+
+type Item is {
+    kind: ItemKind,
+    span: Span
+};
+
+implement Item {
+    fn new(kind: ItemKind, span: Span) -> Item {
+        Item { kind, span }
+    }
+}
+
+type ItemKind is
+    | Function(FunctionDef)
+    | TypeDef(TypeDefinition)
+    | Impl(ImplBlock)
+    | Const(ConstDef)
+    | Static(StaticDef)
+    | Module(ModuleDef);
+
+type FunctionDef is {
+    name: Ident,
+    generics: List<GenericParam>,
+    params: List<Param>,
+    return_type: Maybe<Type>,
+    body: Maybe<Block>,
+    is_async: Bool,
+    is_unsafe: Bool,
+    is_pure: Bool,
+    span: Span
+};
+
+type Param is {
+    pattern: Pattern,
+    ty: Type,
+    span: Span
+};
+
+type GenericParam is {
+    name: Ident,
+    bounds: List<TypeBound>,
+    default: Maybe<Type>
+};
+
+type TypeBound is {
+    path: Path,
+    span: Span
+};
+
+type TypeDefinition is {
+    name: Ident,
+    generics: List<GenericParam>,
+    kind: TypeDefKind,
+    span: Span
+};
+
+type TypeDefKind is
+    | Record { fields: List<Field> }
+    | Variant { variants: List<VariantDef> }
+    | Protocol { items: List<ProtocolItem> }
+    | Alias(Type)
+    | Newtype(Type)
+    | Unit;
+
+type Field is {
+    name: Ident,
+    ty: Type,
+    default: Maybe<Expr>,
+    visibility: Visibility
+};
+
+type VariantDef is {
+    name: Ident,
+    payload: VariantPayload
+};
+
+type VariantPayload is
+    | Unit
+    | Tuple(List<Type>)
+    | Record(List<Field>);
+
+type Visibility is Public | Internal | Protected | Private;
+
+type ProtocolItem is
+    | Method(FunctionDef)
+    | AssociatedType { name: Ident, bounds: List<TypeBound>, default: Maybe<Type> }
+    | AssociatedConst { name: Ident, ty: Type };
+
+type ImplBlock is {
+    generics: List<GenericParam>,
+    self_type: Type,
+    protocol: Maybe<Path>,
+    items: List<ImplItem>,
+    span: Span
+};
+
+type ImplItem is {
+    kind: ImplItemKind,
+    visibility: Visibility,
+    span: Span
+};
+
+type ImplItemKind is
+    | Method(FunctionDef)
+    | TypeAlias { name: Ident, ty: Type }
+    | Const { name: Ident, ty: Type, value: Expr };
+
+type ConstDef is { name: Ident, ty: Type, value: Expr, span: Span };
+type StaticDef is { name: Ident, ty: Type, value: Expr, mutable: Bool, span: Span };
+type ModuleDef is { name: Ident, items: List<Item>, span: Span };
+
+// =============================================================================
+// Section 7: Error Types for Parser Errors
+// =============================================================================
+
+type ParseError is {
+    kind: ParseErrorKind,
+    span: Span,
+    help: Maybe<Text>
+};
+
+type ParseErrorKind is
+    | UnexpectedToken { expected: List<TokenKind>, found: Maybe<Token> }
+    | UnexpectedEof { expected: List<TokenKind> }
+    | InvalidSyntax { message: Text }
+    | MissingRequired { what: Text }
+    | DuplicateItem { name: Text }
+    | InvalidPattern { message: Text };
+
+implement ParseError {
+    fn unexpected(expected: &[TokenKind], found: Maybe<Token>) -> ParseError {
+        ParseError {
+            kind: UnexpectedToken {
+                expected: expected.to_list(),
+                found
+            },
+            span: found.map(|t| t.span) ?? Span.default(),
+            help: None
+        }
+    }
+
+    fn unexpected_eof(expected: &[TokenKind], span: Span) -> ParseError {
+        ParseError {
+            kind: UnexpectedEof { expected: expected.to_list() },
+            span,
+            help: None
+        }
+    }
+
+    fn with_help(self, help: Text) -> ParseError {
+        ParseError { help: Some(help), ..self }
+    }
+
+    fn invalid_syntax(message: Text, span: Span) -> ParseError {
+        ParseError {
+            kind: InvalidSyntax { message },
+            span,
+            help: None
+        }
+    }
+
+    fn missing_theorem_name(span: Span) -> ParseError {
+        ParseError {
+            kind: MissingRequired { what: "theorem name".to_text() },
+            span,
+            help: None
+        }
+    }
+
+    fn invalid_theorem(message: Text, span: Span) -> ParseError {
+        ParseError.invalid_syntax(message, span)
+    }
+
+    fn invalid_lemma(message: Text, span: Span) -> ParseError {
+        ParseError.invalid_syntax(message, span)
+    }
+
+    fn assignment_invalid(message: Text, span: Span) -> ParseError {
+        ParseError.invalid_syntax(message, span)
+    }
+
+    fn compound_assign_invalid(message: Text, span: Span) -> ParseError {
+        ParseError.invalid_syntax(message, span)
+    }
+
+    fn let_missing_value(span: Span) -> ParseError {
+        ParseError {
+            kind: MissingRequired { what: "value".to_text() },
+            span,
+            help: None
+        }
+    }
+}
+
+// =============================================================================
+// Section 8: Parser Result Type
+// =============================================================================
+
+type ParseResult<T> is Result<T, ParseError>;
+
+// =============================================================================
+// Section 9: Recursive Descent Parser
+// =============================================================================
+
+type RecursiveParser is {
+    stream: TokenStream,
+    tick_count: Int,
+    abort_flag: Bool,
+    pending_star: Bool,
+    pending_ampersand: Bool
+};
+
+implement RecursiveParser {
+    fn new(tokens: &[Token]) -> RecursiveParser {
+        RecursiveParser {
+            stream: TokenStream.new(tokens),
+            tick_count: 0,
+            abort_flag: false,
+            pending_star: false,
+            pending_ampersand: false
+        }
+    }
+
+    // Safety tick to prevent infinite loops
+    fn tick(&mut self) -> Bool {
+        self.tick_count += 1;
+        self.tick_count < 1000000
+    }
+
+    fn is_aborted(&self) -> Bool {
+        self.abort_flag
+    }
+
+    // Consume identifier
+    fn consume_ident(&mut self) -> ParseResult<Text> {
+        match self.stream.peek() {
+            Some(Token { kind: Ident(name), .. }) => {
+                self.stream.advance();
+                Ok(name.clone())
+            },
+            Some(token) => Err(ParseError.unexpected(&[TokenKind.Ident("".to_text())], Some(token.clone()))),
+            None => Err(ParseError.unexpected_eof(&[TokenKind.Ident("".to_text())], self.stream.current_span()))
+        }
+    }
+
+    // ==========================================================================
+    // Expression Parsing with Pratt/Precedence Climbing
+    // ==========================================================================
+
+    fn parse_expr(&mut self) -> ParseResult<Expr> {
+        self.parse_expr_bp(0)
+    }
+
+    fn parse_expr_bp(&mut self, min_bp: Int) -> ParseResult<Expr> {
+        let start_pos = self.stream.position();
+
+        // Parse prefix/primary expression
+        let mut lhs = self.parse_prefix_expr()?;
+
+        // Parse infix and postfix operators
+        loop {
+            if !self.tick() || self.is_aborted() {
+                break;
+            }
+
+            // Handle postfix operators
+            let (new_lhs, found_postfix) = self.try_parse_postfix(lhs)?;
+            lhs = new_lhs;
+            if found_postfix {
+                continue;
+            }
+
+            // Check for infix operators
+            let op_kind = match self.stream.peek_kind() {
+                Some(kind) => kind.clone(),
+                None => break
+            };
+
+            // Get binding power for operator
+            let (left_bp, right_bp) = match self.infix_binding_power(&op_kind) {
+                Some(bp) => bp,
+                None => break
+            };
+
+            if left_bp < min_bp {
+                break;
+            }
+
+            self.stream.advance();
+
+            // Handle special operators (pipeline, null coalesce, etc.)
+            if op_kind == TokenKind.PipeGt {
+                let rhs = self.parse_expr_bp(right_bp)?;
+                let span = lhs.span.merge(rhs.span);
+                lhs = Expr {
+                    kind: Pipeline { left: Heap.new(lhs), right: Heap.new(rhs) },
+                    span
+                };
+                continue;
+            }
+
+            if op_kind == TokenKind.QuestionQuestion {
+                let rhs = self.parse_expr_bp(right_bp)?;
+                let span = lhs.span.merge(rhs.span);
+                lhs = Expr {
+                    kind: NullCoalesce { left: Heap.new(lhs), right: Heap.new(rhs) },
+                    span
+                };
+                continue;
+            }
+
+            // Standard binary operator
+            let bin_op = self.token_to_binop(&op_kind)?;
+            let rhs = self.parse_expr_bp(right_bp)?;
+            let span = lhs.span.merge(rhs.span);
+            lhs = Expr {
+                kind: Binary {
+                    op: bin_op,
+                    left: Heap.new(lhs),
+                    right: Heap.new(rhs)
+                },
+                span
+            };
+        }
+
+        Ok(lhs)
+    }
+
+    fn parse_prefix_expr(&mut self) -> ParseResult<Expr> {
+        let start_pos = self.stream.position();
+
+        // Check for unary operators
+        match self.stream.peek_kind() {
+            Some(TokenKind.Bang) => {
+                self.stream.advance();
+                let operand = self.parse_prefix_expr()?;
+                let span = self.stream.make_span(start_pos);
+                Ok(Expr {
+                    kind: Unary { op: UnOp.Not, operand: Heap.new(operand) },
+                    span
+                })
+            },
+            Some(TokenKind.Minus) => {
+                self.stream.advance();
+                let operand = self.parse_prefix_expr()?;
+                let span = self.stream.make_span(start_pos);
+                Ok(Expr {
+                    kind: Unary { op: UnOp.Neg, operand: Heap.new(operand) },
+                    span
+                })
+            },
+            Some(TokenKind.Ampersand) => {
+                self.stream.advance();
+                let mutable = self.stream.consume(&TokenKind.Mut).is_some();
+                let operand = self.parse_prefix_expr()?;
+                let span = self.stream.make_span(start_pos);
+                let op = if mutable { UnOp.RefMut } else { UnOp.Ref };
+                Ok(Expr {
+                    kind: Unary { op, operand: Heap.new(operand) },
+                    span
+                })
+            },
+            Some(TokenKind.Star) => {
+                self.stream.advance();
+                let operand = self.parse_prefix_expr()?;
+                let span = self.stream.make_span(start_pos);
+                Ok(Expr {
+                    kind: Unary { op: UnOp.Deref, operand: Heap.new(operand) },
+                    span
+                })
+            },
+            _ => self.parse_primary_expr()
+        }
+    }
+
+    fn parse_primary_expr(&mut self) -> ParseResult<Expr> {
+        let start_pos = self.stream.position();
+
+        match self.stream.peek() {
+            Some(Token { kind: IntLit(n), span }) => {
+                let value = *n;
+                let s = *span;
+                self.stream.advance();
+                Ok(Expr {
+                    kind: Literal(IntLiteral { value, span: s }),
+                    span: s
+                })
+            },
+            Some(Token { kind: Ident(name), span }) => {
+                let n = name.clone();
+                let s = *span;
+                self.stream.advance();
+                Ok(Expr {
+                    kind: Path(Path {
+                        segments: List.of(PathSegment {
+                            ident: Ident.new(n, s),
+                            args: None
+                        }),
+                        span: s
+                    }),
+                    span: s
+                })
+            },
+            Some(Token { kind: LParen, .. }) => {
+                self.stream.advance();
+                if self.stream.check(&TokenKind.RParen) {
+                    // Unit expression
+                    self.stream.advance();
+                    let span = self.stream.make_span(start_pos);
+                    Ok(Expr { kind: Literal(IntLiteral { value: 0, span }), span })
+                } else {
+                    let expr = self.parse_expr()?;
+                    self.stream.expect(TokenKind.RParen)?;
+                    Ok(expr)
+                }
+            },
+            Some(Token { kind: If, .. }) => self.parse_if_expr(),
+            Some(Token { kind: Match, .. }) => self.parse_match_expr(),
+            Some(Token { kind: LBrace, .. }) => self.parse_block_expr(),
+            _ => {
+                let found = self.stream.peek().map(|t| t.clone());
+                Err(ParseError.unexpected(&[], found))
+            }
+        }
+    }
+
+    fn try_parse_postfix(&mut self, expr: Expr) -> ParseResult<(Expr, Bool)> {
+        match self.stream.peek_kind() {
+            Some(TokenKind.Dot) => {
+                self.stream.advance();
+                let field_name = self.consume_ident()?;
+                let span = expr.span.merge(self.stream.current_span());
+                Ok((Expr {
+                    kind: FieldAccess { base: Heap.new(expr), name: Ident.new(field_name, span) },
+                    span
+                }, true))
+            },
+            Some(TokenKind.LParen) => {
+                self.stream.advance();
+                let args = self.parse_arg_list()?;
+                self.stream.expect(TokenKind.RParen)?;
+                let span = expr.span.merge(self.stream.current_span());
+                Ok((Expr {
+                    kind: Call { func: Heap.new(expr), args },
+                    span
+                }, true))
+            },
+            Some(TokenKind.LBracket) => {
+                self.stream.advance();
+                let index = self.parse_expr()?;
+                self.stream.expect(TokenKind.RBracket)?;
+                let span = expr.span.merge(self.stream.current_span());
+                Ok((Expr {
+                    kind: Index { base: Heap.new(expr), index: Heap.new(index) },
+                    span
+                }, true))
+            },
+            Some(TokenKind.Question) => {
+                self.stream.advance();
+                let span = expr.span.merge(self.stream.current_span());
+                Ok((Expr {
+                    kind: Try(Heap.new(expr)),
+                    span
+                }, true))
+            },
+            _ => Ok((expr, false))
+        }
+    }
+
+    fn parse_arg_list(&mut self) -> ParseResult<List<Expr>> {
+        let mut args = List.new();
+        if !self.stream.check(&TokenKind.RParen) {
+            args.push(self.parse_expr()?);
+            while self.stream.consume(&TokenKind.Comma).is_some() {
+                if self.stream.check(&TokenKind.RParen) {
+                    break;
+                }
+                args.push(self.parse_expr()?);
+            }
+        }
+        Ok(args)
+    }
+
+    fn parse_if_expr(&mut self) -> ParseResult<Expr> {
+        let start_pos = self.stream.position();
+        self.stream.expect(TokenKind.If)?;
+
+        let cond = self.parse_expr()?;
+        let then_branch = self.parse_block()?;
+
+        let else_branch = if self.stream.consume(&TokenKind.Else).is_some() {
+            if self.stream.check(&TokenKind.If) {
+                // else if -> recursively parse as if expression wrapped in block
+                let if_expr = self.parse_if_expr()?;
+                Some(Block {
+                    statements: List.new(),
+                    expr: Some(Heap.new(if_expr)),
+                    span: if_expr.span
+                })
+            } else {
+                Some(self.parse_block()?)
+            }
+        } else {
+            None
+        };
+
+        let span = self.stream.make_span(start_pos);
+        Ok(Expr {
+            kind: If {
+                cond: Heap.new(cond),
+                then_branch,
+                else_branch
+            },
+            span
+        })
+    }
+
+    fn parse_match_expr(&mut self) -> ParseResult<Expr> {
+        let start_pos = self.stream.position();
+        self.stream.expect(TokenKind.Match)?;
+
+        let scrutinee = self.parse_expr()?;
+        self.stream.expect(TokenKind.LBrace)?;
+
+        let mut arms = List.new();
+        while !self.stream.check(&TokenKind.RBrace) && !self.stream.at_end() {
+            arms.push(self.parse_match_arm()?);
+            // Optional comma between arms
+            self.stream.consume(&TokenKind.Comma);
+        }
+
+        self.stream.expect(TokenKind.RBrace)?;
+        let span = self.stream.make_span(start_pos);
+
+        Ok(Expr {
+            kind: Match { scrutinee: Heap.new(scrutinee), arms },
+            span
+        })
+    }
+
+    fn parse_match_arm(&mut self) -> ParseResult<MatchArm> {
+        let start_pos = self.stream.position();
+        let pattern = self.parse_pattern()?;
+
+        // Optional guard: if expr or where expr
+        let guard = if self.stream.consume(&TokenKind.If).is_some() {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        self.stream.expect(TokenKind.FatArrow)?;
+        let body = self.parse_expr()?;
+
+        let span = self.stream.make_span(start_pos);
+        Ok(MatchArm { pattern, guard, body, span })
+    }
+
+    fn parse_block(&mut self) -> ParseResult<Block> {
+        let start_pos = self.stream.position();
+        self.stream.expect(TokenKind.LBrace)?;
+
+        let mut statements = List.new();
+        let mut final_expr: Maybe<Heap<Expr>> = None;
+
+        while !self.stream.check(&TokenKind.RBrace) && !self.stream.at_end() {
+            // Try to parse a statement
+            if self.stream.check(&TokenKind.Let) {
+                statements.push(self.parse_let_stmt()?);
+            } else {
+                let expr = self.parse_expr()?;
+                if self.stream.consume(&TokenKind.Semicolon).is_some() {
+                    statements.push(Stmt.Expr { expr, has_semi: true });
+                } else if self.stream.check(&TokenKind.RBrace) {
+                    final_expr = Some(Heap.new(expr));
+                } else {
+                    statements.push(Stmt.Expr { expr, has_semi: false });
+                }
+            }
+        }
+
+        self.stream.expect(TokenKind.RBrace)?;
+        let span = self.stream.make_span(start_pos);
+
+        Ok(Block { statements, expr: final_expr, span })
+    }
+
+    fn parse_block_expr(&mut self) -> ParseResult<Expr> {
+        let block = self.parse_block()?;
+        Ok(Expr {
+            kind: Block(block),
+            span: block.span
+        })
+    }
+
+    // ==========================================================================
+    // Pattern Parsing
+    // ==========================================================================
+
+    fn parse_pattern(&mut self) -> ParseResult<Pattern> {
+        let start_pos = self.stream.position();
+
+        match self.stream.peek() {
+            Some(Token { kind: TokenKind.Ident(name), span }) => {
+                let n = name.clone();
+                let s = *span;
+                self.stream.advance();
+                let span = self.stream.make_span(start_pos);
+                Ok(Pattern {
+                    kind: Identifier { name: n, mutable: false },
+                    span
+                })
+            },
+            Some(Token { kind: IntLit(n), span }) => {
+                let value = *n;
+                let s = *span;
+                self.stream.advance();
+                Ok(Pattern {
+                    kind: Literal(IntLiteral { value, span: s }),
+                    span: s
+                })
+            },
+            Some(Token { kind: TokenKind.LParen, .. }) => {
+                self.stream.advance();
+                if self.stream.check(&TokenKind.RParen) {
+                    self.stream.advance();
+                    let span = self.stream.make_span(start_pos);
+                    Ok(Pattern { kind: Tuple(List.new()), span })
+                } else {
+                    let mut patterns = List.new();
+                    patterns.push(self.parse_pattern()?);
+                    while self.stream.consume(&TokenKind.Comma).is_some() {
+                        if self.stream.check(&TokenKind.RParen) {
+                            break;
+                        }
+                        patterns.push(self.parse_pattern()?);
+                    }
+                    self.stream.expect(TokenKind.RParen)?;
+                    let span = self.stream.make_span(start_pos);
+                    Ok(Pattern { kind: Tuple(patterns), span })
+                }
+            },
+            _ => {
+                let span = self.stream.current_span();
+                Ok(Pattern { kind: Wildcard, span })
+            }
+        }
+    }
+
+    fn parse_pattern_no_struct(&mut self) -> ParseResult<Pattern> {
+        // Same as parse_pattern but doesn't consume { } as record pattern
+        self.parse_pattern()
+    }
+
+    // ==========================================================================
+    // Statement Parsing
+    // ==========================================================================
+
+    fn parse_let_stmt(&mut self) -> ParseResult<Stmt> {
+        let start_pos = self.stream.position();
+        self.stream.expect(TokenKind.Let)?;
+
+        let mutable = self.stream.consume(&TokenKind.Mut).is_some();
+        let pattern = self.parse_pattern()?;
+
+        let ty = if self.stream.consume(&TokenKind.Colon).is_some() {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        let value = if self.stream.consume(&TokenKind.Eq).is_some() {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        self.stream.expect(TokenKind.Semicolon)?;
+        let span = self.stream.make_span(start_pos);
+
+        Ok(Stmt.Let { pattern, ty, value, span })
+    }
+
+    // ==========================================================================
+    // Type Parsing
+    // ==========================================================================
+
+    fn parse_type(&mut self) -> ParseResult<Type> {
+        self.parse_type_inner(true)
+    }
+
+    fn parse_type_no_refinement(&mut self) -> ParseResult<Type> {
+        self.parse_type_inner(false)
+    }
+
+    fn parse_type_inner(&mut self, allow_refinement: Bool) -> ParseResult<Type> {
+        let start_pos = self.stream.position();
+
+        match self.stream.peek() {
+            Some(Token { kind: TokenKind.Ident(name), span }) => {
+                let n = name.clone();
+                let s = *span;
+                self.stream.advance();
+
+                // Check for generic arguments
+                let args = if self.stream.check(&TokenKind.Lt) {
+                    self.parse_type_args()?
+                } else {
+                    List.new()
+                };
+
+                let span = self.stream.make_span(start_pos);
+                Ok(Type {
+                    kind: Named {
+                        path: Path {
+                            segments: List.of(PathSegment {
+                                ident: Ident.new(n, s),
+                                args: if args.is_empty() { None } else { Some(args) }
+                            }),
+                            span: s
+                        },
+                        args: List.new()
+                    },
+                    span
+                })
+            },
+            Some(Token { kind: TokenKind.Ampersand, .. }) => {
+                self.stream.advance();
+                let mutable = self.stream.consume(&TokenKind.Mut).is_some();
+                let inner = self.parse_type()?;
+                let span = self.stream.make_span(start_pos);
+                Ok(Type {
+                    kind: Reference { mutable, inner: Heap.new(inner) },
+                    span
+                })
+            },
+            Some(Token { kind: TokenKind.LParen, .. }) => {
+                self.stream.advance();
+                if self.stream.check(&TokenKind.RParen) {
+                    self.stream.advance();
+                    let span = self.stream.make_span(start_pos);
+                    Ok(Type { kind: Unit, span })
+                } else {
+                    let mut types = List.new();
+                    types.push(self.parse_type()?);
+                    while self.stream.consume(&TokenKind.Comma).is_some() {
+                        if self.stream.check(&TokenKind.RParen) {
+                            break;
+                        }
+                        types.push(self.parse_type()?);
+                    }
+                    self.stream.expect(TokenKind.RParen)?;
+                    let span = self.stream.make_span(start_pos);
+                    Ok(Type { kind: Tuple(types), span })
+                }
+            },
+            _ => {
+                let found = self.stream.peek().map(|t| t.clone());
+                Err(ParseError.unexpected(&[], found))
+            }
+        }
+    }
+
+    fn parse_type_args(&mut self) -> ParseResult<List<Type>> {
+        self.stream.expect(TokenKind.Lt)?;
+        let mut args = List.new();
+        if !self.stream.check(&TokenKind.Gt) {
+            args.push(self.parse_type()?);
+            while self.stream.consume(&TokenKind.Comma).is_some() {
+                if self.stream.check(&TokenKind.Gt) {
+                    break;
+                }
+                args.push(self.parse_type()?);
+            }
+        }
+        self.stream.expect(TokenKind.Gt)?;
+        Ok(args)
+    }
+
+    // ==========================================================================
+    // Helper Methods
+    // ==========================================================================
+
+    fn infix_binding_power(&self, kind: &TokenKind) -> Maybe<(Int, Int)> {
+        match kind {
+            TokenKind.PipeGt => Some((1, 2)),           // Pipeline
+            TokenKind.QuestionQuestion => Some((2, 1)), // Null coalesce (right assoc)
+            TokenKind.Eq => Some((3, 2)),               // Assignment (right assoc)
+            TokenKind.PipePipe => Some((4, 5)),         // Logical OR
+            TokenKind.AmpersandAmpersand => Some((6, 7)), // Logical AND
+            TokenKind.EqEq | TokenKind.BangEq => Some((8, 9)), // Equality
+            TokenKind.Lt | TokenKind.Gt | TokenKind.LtEq | TokenKind.GtEq => Some((10, 11)),
+            TokenKind.Pipe => Some((12, 13)),           // Bitwise OR
+            TokenKind.Caret => Some((14, 15)),          // Bitwise XOR
+            TokenKind.Ampersand => Some((16, 17)),      // Bitwise AND
+            TokenKind.Plus | TokenKind.Minus => Some((20, 21)),
+            TokenKind.Star | TokenKind.Slash | TokenKind.Percent => Some((22, 23)),
+            TokenKind.StarStar => Some((25, 24)),       // Exponent (right assoc)
+            _ => None
+        }
+    }
+
+    fn token_to_binop(&self, kind: &TokenKind) -> ParseResult<BinOp> {
+        match kind {
+            TokenKind.Plus => Ok(BinOp.Add),
+            TokenKind.Minus => Ok(BinOp.Sub),
+            TokenKind.Star => Ok(BinOp.Mul),
+            TokenKind.Slash => Ok(BinOp.Div),
+            TokenKind.Percent => Ok(BinOp.Mod),
+            TokenKind.StarStar => Ok(BinOp.Pow),
+            TokenKind.EqEq => Ok(BinOp.Eq),
+            TokenKind.BangEq => Ok(BinOp.Ne),
+            TokenKind.Lt => Ok(BinOp.Lt),
+            TokenKind.Gt => Ok(BinOp.Gt),
+            TokenKind.LtEq => Ok(BinOp.Le),
+            TokenKind.GtEq => Ok(BinOp.Ge),
+            TokenKind.AmpersandAmpersand => Ok(BinOp.And),
+            TokenKind.PipePipe => Ok(BinOp.Or),
+            TokenKind.Ampersand => Ok(BinOp.BitAnd),
+            TokenKind.Pipe => Ok(BinOp.BitOr),
+            TokenKind.Caret => Ok(BinOp.BitXor),
+            TokenKind.Eq => Ok(BinOp.Assign),
+            _ => Err(ParseError.invalid_syntax(f"unexpected operator: {kind}", Span.default()))
+        }
+    }
+
+    // ==========================================================================
+    // Declaration Parsing
+    // ==========================================================================
+
+    fn parse_function_params(&mut self) -> ParseResult<List<Param>> {
+        self.stream.expect(TokenKind.LParen)?;
+        let mut params = List.new();
+        if !self.stream.check(&TokenKind.RParen) {
+            params.push(self.parse_param()?);
+            while self.stream.consume(&TokenKind.Comma).is_some() {
+                if self.stream.check(&TokenKind.RParen) {
+                    break;
+                }
+                params.push(self.parse_param()?);
+            }
+        }
+        self.stream.expect(TokenKind.RParen)?;
+        Ok(params)
+    }
+
+    fn parse_param(&mut self) -> ParseResult<Param> {
+        let start_pos = self.stream.position();
+        let pattern = self.parse_pattern()?;
+        self.stream.expect(TokenKind.Colon)?;
+        let ty = self.parse_type()?;
+        let span = self.stream.make_span(start_pos);
+        Ok(Param { pattern, ty, span })
+    }
+
+    fn parse_generic_params(&mut self) -> ParseResult<List<GenericParam>> {
+        self.stream.expect(TokenKind.Lt)?;
+        let mut params = List.new();
+        if !self.stream.check(&TokenKind.Gt) {
+            params.push(self.parse_generic_param()?);
+            while self.stream.consume(&TokenKind.Comma).is_some() {
+                if self.stream.check(&TokenKind.Gt) {
+                    break;
+                }
+                params.push(self.parse_generic_param()?);
+            }
+        }
+        self.stream.expect(TokenKind.Gt)?;
+        Ok(params)
+    }
+
+    fn parse_generic_param(&mut self) -> ParseResult<GenericParam> {
+        let name_text = self.consume_ident()?;
+        let name = Ident.new(name_text, self.stream.current_span());
+
+        let bounds = if self.stream.consume(&TokenKind.Colon).is_some() {
+            self.parse_bounds()?
+        } else {
+            List.new()
+        };
+
+        let default = if self.stream.consume(&TokenKind.Eq).is_some() {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        Ok(GenericParam { name, bounds, default })
+    }
+
+    fn parse_bounds(&mut self) -> ParseResult<List<TypeBound>> {
+        let mut bounds = List.new();
+        bounds.push(self.parse_type_bound()?);
+        while self.stream.consume(&TokenKind.Plus).is_some() {
+            bounds.push(self.parse_type_bound()?);
+        }
+        Ok(bounds)
+    }
+
+    fn parse_type_bound(&mut self) -> ParseResult<TypeBound> {
+        let start_pos = self.stream.position();
+        let name = self.consume_ident()?;
+        let span = self.stream.make_span(start_pos);
+        Ok(TypeBound {
+            path: Path {
+                segments: List.of(PathSegment {
+                    ident: Ident.new(name, span),
+                    args: None
+                }),
+                span
+            },
+            span
+        })
+    }
+}
+
+// =============================================================================
+// Section 10: Entry Point and Test Functions
+// =============================================================================
+
+fn parse(source: Text) -> ParseResult<List<Item>> {
+    // Would call lexer first, then parser
+    let tokens = List.new(); // placeholder
+    let mut parser = RecursiveParser.new(&tokens);
+    // Parse top-level items
+    Ok(List.new())
+}
+
+fn main() {
+    // Test that all parser constructs compile
+    let result = parse("fn main() {}");
+    match result {
+        Ok(items) => print(f"Parsed {items.len()} items"),
+        Err(e) => print(f"Parse error: {e.kind}")
+    }
+}

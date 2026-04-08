@@ -1,0 +1,15 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, collections, map, errors, arity
+// @expected-error: Expected 0 arguments
+// @description: Test map_new with arguments produces arity error
+
+// map_new should take no arguments
+meta fn test_map_new_arity_error() {
+    map_new(42)  // ERROR: Expected 0 arguments, got 1
+}
+
+fn main() {
+    let _ = @const(test_map_new_arity_error());
+}

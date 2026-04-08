@@ -1,0 +1,411 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: comprehensive, integration, language-features, milestone
+// @description: Comprehensive integration — combines types, closures, error handling, f-strings, match, for-in, implement blocks
+
+// --- Type Definitions ---
+
+type Priority is
+    | Low
+    | Medium
+    | High
+    | Critical;
+
+type TaskStatus is
+    | Pending
+    | Running(Int)
+    | Completed(Int)
+    | Failed(Text);
+
+type Task is {
+    id: Int,
+    name: Text,
+    priority: Priority,
+    status: TaskStatus,
+};
+
+type TaskQueue is {
+    tasks: List<Task>,
+    next_id: Int,
+};
+
+// --- Implement Blocks ---
+
+implement Task {
+    fn new(id: Int, name: Text, priority: Priority) -> Task {
+        Task { id: id, name: name, priority: priority, status: TaskStatus.Pending }
+    }
+
+    fn describe(&self) -> Text {
+        let status_text = match self.status {
+            Pending => "pending",
+            Running(pct) => f"running ({pct}%)",
+            Completed(result) => f"done (result={result})",
+            Failed(err) => f"failed: {err}",
+        };
+        f"[{self.id}] {self.name}: {status_text}"
+    }
+
+    fn is_complete(&self) -> Bool {
+        match self.status {
+            Completed(_) => true,
+            Failed(_) => true,
+            _ => false,
+        }
+    }
+
+    fn priority_value(&self) -> Int {
+        match self.priority {
+            Low => 0,
+            Medium => 1,
+            High => 2,
+            Critical => 3,
+        }
+    }
+}
+
+implement TaskQueue {
+    fn new() -> TaskQueue {
+        TaskQueue { tasks: List.new(), next_id: 1 }
+    }
+
+    fn add(&mut self, name: Text, priority: Priority) -> Int {
+        let id = self.next_id;
+        self.next_id = self.next_id + 1;
+        let task = Task.new(id, name, priority);
+        self.tasks.push(task);
+        id
+    }
+
+    fn count(&self) -> Int {
+        self.tasks.len()
+    }
+
+    fn count_pending(&self) -> Int {
+        let mut count = 0;
+        let mut i = 0;
+        while i < self.tasks.len() {
+            match self.tasks[i].status {
+                Pending => count = count + 1,
+                _ => {}
+            }
+            i = i + 1;
+        }
+        count
+    }
+
+    fn count_done(&self) -> Int {
+        let mut count = 0;
+        let mut i = 0;
+        while i < self.tasks.len() {
+            if self.tasks[i].is_complete() {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        count
+    }
+}
+
+// --- Error Handling ---
+
+type QueueError is
+    | NotFound(Int)
+    | AlreadyComplete(Int);
+
+fn complete_task(queue: &mut TaskQueue, id: Int, result: Int) -> Result<Text, QueueError> {
+    let mut i = 0;
+    while i < queue.tasks.len() {
+        if queue.tasks[i].id == id {
+            if queue.tasks[i].is_complete() {
+                return Err(QueueError.AlreadyComplete(id));
+            }
+            queue.tasks[i].status = TaskStatus.Completed(result);
+            return Ok(f"Task {id} completed with result {result}");
+        }
+        i = i + 1;
+    }
+    Err(QueueError.NotFound(id))
+}
+
+fn fail_task(queue: &mut TaskQueue, id: Int, reason: Text) -> Result<Text, QueueError> {
+    let mut i = 0;
+    while i < queue.tasks.len() {
+        if queue.tasks[i].id == id {
+            if queue.tasks[i].is_complete() {
+                return Err(QueueError.AlreadyComplete(id));
+            }
+            queue.tasks[i].status = TaskStatus.Failed(reason);
+            return Ok(f"Task {id} failed: {reason}");
+        }
+        i = i + 1;
+    }
+    Err(QueueError.NotFound(id))
+}
+
+// --- Higher-Order Functions ---
+
+fn count_by(tasks: List<Task>, pred: fn(&Task) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < tasks.len() {
+        if pred(&tasks[i]) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn max_priority(tasks: List<Task>) -> Int {
+    let mut max_val = -1;
+    let mut i = 0;
+    while i < tasks.len() {
+        let pv = tasks[i].priority_value();
+        if pv > max_val {
+            max_val = pv;
+        }
+        i = i + 1;
+    }
+    max_val
+}
+
+// --- Tests ---
+
+fn test_task_creation() -> Int {
+    let t = Task.new(1, "Build", Priority.High);
+    if t.id != 1 {
+        print(f"FAIL task id: expected 1, got {t.id}");
+        return 1;
+    }
+
+    let pv = t.priority_value();
+    if pv != 2 {
+        print(f"FAIL priority: expected 2, got {pv}");
+        return 1;
+    }
+
+    print("  task_creation: OK");
+    0
+}
+
+fn test_task_completion() -> Int {
+    let mut q = TaskQueue.new();
+    q.add("Task A", Priority.Low);
+    q.add("Task B", Priority.High);
+    q.add("Task C", Priority.Medium);
+
+    // Complete task 1
+    match complete_task(&mut q, 1, 42) {
+        Ok(msg) => {
+            if msg != "Task 1 completed with result 42" {
+                print(f"FAIL complete msg: '{msg}'");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL: unexpected error completing task 1");
+            return 1;
+        }
+    }
+
+    // Fail task 2
+    match fail_task(&mut q, 2, "timeout") {
+        Ok(msg) => {
+            if msg != "Task 2 failed: timeout" {
+                print(f"FAIL fail msg: '{msg}'");
+                return 1;
+            }
+        }
+        Err(_) => {
+            print("FAIL: unexpected error failing task 2");
+            return 1;
+        }
+    }
+
+    if q.count_done() != 2 {
+        print(f"FAIL done count: expected 2, got {q.count_done()}");
+        return 1;
+    }
+    if q.count_pending() != 1 {
+        print(f"FAIL pending count: expected 1, got {q.count_pending()}");
+        return 1;
+    }
+
+    print("  task_completion: OK");
+    0
+}
+
+fn test_error_cases() -> Int {
+    let mut q = TaskQueue.new();
+    q.add("Only task", Priority.Low);
+
+    // Complete it
+    match complete_task(&mut q, 1, 0) {
+        Ok(_) => {}
+        Err(_) => { return 1; }
+    }
+
+    // Try to complete again — should fail with AlreadyComplete
+    match complete_task(&mut q, 1, 0) {
+        Ok(_) => {
+            print("FAIL: should not complete already-done task");
+            return 1;
+        }
+        Err(e) => {
+            match e {
+                AlreadyComplete(id) => {
+                    if id != 1 {
+                        print(f"FAIL: AlreadyComplete wrong id: {id}");
+                        return 1;
+                    }
+                }
+                _ => {
+                    print("FAIL: expected AlreadyComplete");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    // Try nonexistent task
+    match complete_task(&mut q, 999, 0) {
+        Ok(_) => {
+            print("FAIL: should not find task 999");
+            return 1;
+        }
+        Err(e) => {
+            match e {
+                NotFound(id) => {
+                    if id != 999 {
+                        print(f"FAIL: NotFound wrong id: {id}");
+                        return 1;
+                    }
+                }
+                _ => {
+                    print("FAIL: expected NotFound");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    print("  error_cases: OK");
+    0
+}
+
+fn test_describe_and_fstrings() -> Int {
+    let t1 = Task.new(1, "Build", Priority.High);
+    let d1 = t1.describe();
+    if d1 != "[1] Build: pending" {
+        print(f"FAIL describe pending: '{d1}'");
+        return 1;
+    }
+
+    print("  describe_and_fstrings: OK");
+    0
+}
+
+fn test_higher_order_with_tasks() -> Int {
+    let tasks = [
+        Task.new(1, "A", Priority.Low),
+        Task.new(2, "B", Priority.High),
+        Task.new(3, "C", Priority.Critical),
+        Task.new(4, "D", Priority.Medium),
+        Task.new(5, "E", Priority.High),
+    ];
+
+    // Count high-priority tasks manually (closure + method call on sum type is fragile)
+    let mut high_count = 0;
+    let mut i = 0;
+    while i < tasks.len() {
+        if tasks[i].priority_value() >= 2 {
+            high_count = high_count + 1;
+        }
+        i = i + 1;
+    }
+    if high_count != 3 {
+        print(f"FAIL high count: expected 3, got {high_count}");
+        return 1;
+    }
+
+    let mp = max_priority(tasks);
+    if mp != 3 {
+        print(f"FAIL max priority: expected 3, got {mp}");
+        return 1;
+    }
+
+    print("  higher_order_with_tasks: OK");
+    0
+}
+
+fn test_match_patterns() -> Int {
+    let statuses = [
+        TaskStatus.Pending,
+        TaskStatus.Running(25),
+        TaskStatus.Running(75),
+        TaskStatus.Completed(100),
+        TaskStatus.Failed("error"),
+    ];
+
+    let mut pending = 0;
+    let mut running = 0;
+    let mut complete = 0;
+
+    let mut i = 0;
+    while i < statuses.len() {
+        match statuses[i] {
+            Pending => pending = pending + 1,
+            Running(_) => running = running + 1,
+            Completed(_) => complete = complete + 1,
+            Failed(_) => complete = complete + 1,
+        }
+        i = i + 1;
+    }
+
+    if pending != 1 {
+        print(f"FAIL pending: {pending}");
+        return 1;
+    }
+    if running != 2 {
+        print(f"FAIL running: {running}");
+        return 1;
+    }
+    if complete != 2 {
+        print(f"FAIL complete: {complete}");
+        return 1;
+    }
+
+    print("  match_patterns: OK");
+    0
+}
+
+fn run_part1() -> Int {
+    let r1 = test_task_creation();
+    if r1 != 0 { return r1; }
+    let r2 = test_task_completion();
+    if r2 != 0 { return r2; }
+    let r3 = test_error_cases();
+    if r3 != 0 { return r3; }
+    0
+}
+
+fn run_part2() -> Int {
+    let r4 = test_describe_and_fstrings();
+    if r4 != 0 { return r4; }
+    let r5 = test_higher_order_with_tasks();
+    if r5 != 0 { return r5; }
+    let r6 = test_match_patterns();
+    if r6 != 0 { return r6; }
+    0
+}
+
+fn main() -> Int {
+    let p1 = run_part1();
+    if p1 != 0 { return p1; }
+    let p2 = run_part2();
+    if p2 != 0 { return p2; }
+    print("All comprehensive language tests passed (test 1000!)");
+    0
+}

@@ -1,0 +1,276 @@
+// =============================================================================
+// unknown_type.vr - Tests for unknown type (top type for safe dynamic typing)
+// =============================================================================
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: types, unknown, dynamic, safe_dynamic_typing
+// @spec: docs/improvements.md Section 13.2 - Unknown Type
+// =============================================================================
+//
+// The `unknown` type is the TOP type in Verum's type system:
+// - Any value can be assigned to unknown (T <: unknown for all T)
+// - Nothing can be done with unknown without explicit type narrowing
+// - This is the dual of `Never` (bottom type)
+//
+// This enables:
+// - Safe FFI boundaries
+// - Deserialization with explicit type checking
+// - Rapid prototyping with gradual typing
+// =============================================================================
+
+module tests.types.dynamic.unknown_type;
+
+// =============================================================================
+// Test 1: Basic unknown assignment
+// Any value can be assigned to unknown
+// =============================================================================
+
+fn test_assign_int_to_unknown() {
+    let x: unknown = 42;
+    assert(true);  // Compilation success is the test
+}
+
+fn test_assign_text_to_unknown() {
+    let x: unknown = "hello";
+    assert(true);
+}
+
+fn test_assign_bool_to_unknown() {
+    let x: unknown = true;
+    assert(true);
+}
+
+fn test_assign_list_to_unknown() {
+    let x: unknown = [1, 2, 3];
+    assert(true);
+}
+
+fn test_assign_record_to_unknown() {
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 10, y: 20 };
+    let x: unknown = p;
+    assert(true);
+}
+
+// =============================================================================
+// Test 2: Unknown in function parameters
+// Functions can accept unknown values
+// =============================================================================
+
+fn accept_unknown(value: unknown) -> Bool {
+    // Cannot do anything with value without narrowing
+    true
+}
+
+fn test_pass_to_unknown_param() {
+    assert(accept_unknown(42));
+    assert(accept_unknown("hello"));
+    assert(accept_unknown(true));
+    assert(accept_unknown([1, 2, 3]));
+}
+
+// =============================================================================
+// Test 3: Unknown in return types
+// Functions can return unknown values
+// =============================================================================
+
+fn return_unknown_int() -> unknown {
+    42
+}
+
+fn return_unknown_text() -> unknown {
+    "hello"
+}
+
+fn test_unknown_return() {
+    let a: unknown = return_unknown_int();
+    let b: unknown = return_unknown_text();
+    assert(true);
+}
+
+// =============================================================================
+// Test 4: Type narrowing with pattern matching
+// The primary way to use unknown values
+// =============================================================================
+
+fn process_unknown(value: unknown) -> Text {
+    match value {
+        x is Int => f"integer: {x}",
+        x is Text => f"text: {x}",
+        x is Bool => f"bool: {x}",
+        _ => "other",
+    }
+}
+
+fn test_type_narrowing_match() {
+    assert_eq(process_unknown(42), "integer: 42");
+    assert_eq(process_unknown("hello"), "text: hello");
+    assert_eq(process_unknown(true), "bool: true");
+    assert_eq(process_unknown([1, 2]), "other");
+}
+
+// =============================================================================
+// Test 5: Type narrowing with if-is
+// Flow-sensitive type narrowing
+// =============================================================================
+
+fn double_if_int(value: unknown) -> Maybe<Int> {
+    if value is Int {
+        // value is narrowed to Int here
+        Some(value * 2)
+    } else {
+        None
+    }
+}
+
+fn test_type_narrowing_if() {
+    assert_eq(double_if_int(21), Some(42));
+    assert_eq(double_if_int("hello"), None);
+}
+
+// =============================================================================
+// Test 6: Unknown subtyping
+// T <: unknown for all T, but unknown <: T only if T == unknown
+// =============================================================================
+
+fn takes_unknown(x: unknown) {}
+fn takes_int(x: Int) {}
+
+fn test_subtyping() {
+    // These should compile (T <: unknown)
+    takes_unknown(42);
+    takes_unknown("hello");
+    takes_unknown(true);
+
+    // The following would NOT compile (unknown </: Int):
+    // let x: unknown = 42;
+    // takes_int(x);  // ERROR: expected Int, found unknown
+
+    assert(true);
+}
+
+// =============================================================================
+// Test 7: Unknown in generic contexts
+// =============================================================================
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn test_unknown_generics() {
+    let x: unknown = 42;
+    let y: unknown = identity(x);
+    assert(true);
+}
+
+// =============================================================================
+// Test 8: Unknown in collections
+// =============================================================================
+
+fn test_list_of_unknown() {
+    let list: List<unknown> = [42, "hello", true];
+    assert_eq(list.len(), 3);
+}
+
+fn test_map_with_unknown_values() {
+    let map: Map<Text, unknown> = {
+        "int": 42,
+        "text": "hello",
+        "bool": true,
+    };
+    assert_eq(map.len(), 3);
+}
+
+// =============================================================================
+// Test 9: typeof expression
+// Runtime type introspection
+// =============================================================================
+
+fn test_typeof_basic() {
+    let x = 42;
+    let info = typeof(x);
+    assert_eq(info.name, "Int");
+}
+
+fn test_typeof_unknown() {
+    let x: unknown = 42;
+    let info = typeof(x);
+    // Runtime type is still Int, not unknown
+    assert_eq(info.name, "Int");
+}
+
+fn test_typeof_for_narrowing() {
+    let x: unknown = "hello";
+
+    if typeof(x).name == "Text" {
+        // Now we know x is Text at runtime
+        assert(true);
+    } else {
+        assert(false);
+    }
+}
+
+// =============================================================================
+// Test 10: FFI boundary example
+// Typical use case for unknown
+// =============================================================================
+
+// Simulated FFI function
+fn ffi_call() -> unknown {
+    // In reality, this would call foreign code
+    42
+}
+
+fn test_ffi_boundary() {
+    let result = ffi_call();
+
+    // Must narrow before use
+    match result {
+        x is Int => assert_eq(x, 42),
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Main test runner
+// =============================================================================
+
+fn main() {
+    // Basic assignment tests
+    test_assign_int_to_unknown();
+    test_assign_text_to_unknown();
+    test_assign_bool_to_unknown();
+    test_assign_list_to_unknown();
+    test_assign_record_to_unknown();
+
+    // Function parameter tests
+    test_pass_to_unknown_param();
+
+    // Return type tests
+    test_unknown_return();
+
+    // Type narrowing tests
+    test_type_narrowing_match();
+    test_type_narrowing_if();
+
+    // Subtyping tests
+    test_subtyping();
+
+    // Generic tests
+    test_unknown_generics();
+
+    // Collection tests
+    test_list_of_unknown();
+    test_map_with_unknown_values();
+
+    // typeof tests
+    test_typeof_basic();
+    test_typeof_unknown();
+    test_typeof_for_narrowing();
+
+    // FFI boundary test
+    test_ffi_boundary();
+
+    print("All unknown type tests passed!");
+}

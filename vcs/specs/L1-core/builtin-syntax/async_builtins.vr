@@ -1,0 +1,51 @@
+// @test: parse-pass
+// @tier: 1
+// @level: L1
+// @tags: builtin-syntax, async, join
+// @timeout: 10000
+//
+// Tests async built-in functions called without ! suffix.
+// Spec: grammar/verum.ebnf Section 2.20.1 - builtin_async
+
+async fn fetch_data(id: Int) -> Int {
+    // Simulate async operation
+    id * 2
+}
+
+async fn process_item(item: Int) -> Int {
+    item + 1
+}
+
+async fn main_async() -> Int {
+    // join - concurrent execution (NOT join!)
+    let (a, b, c) = join(
+        fetch_data(1),
+        fetch_data(2),
+        fetch_data(3)
+    ).await;
+
+    assert_eq(a, 2);
+    assert_eq(b, 4);
+    assert_eq(c, 6);
+
+    // try_join - concurrent execution with error handling (NOT try_join!)
+    let result = try_join(
+        fetch_data(10),
+        fetch_data(20)
+    ).await;
+
+    match result {
+        Ok((x, y)) => {
+            assert_eq(x, 20);
+            assert_eq(y, 40);
+        }
+        Err(e) => panic(f"Unexpected error: {e}"),
+    }
+
+    0
+}
+
+fn main() -> Int {
+    // Run async main
+    0
+}

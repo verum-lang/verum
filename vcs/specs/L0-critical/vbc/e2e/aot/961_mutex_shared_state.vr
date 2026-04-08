@@ -1,0 +1,76 @@
+// @test: run
+// @level: L0
+// @description: Mutex-protected shared state across threads using channels
+// @expected-exit: 0
+
+fn __mutex_new_raw() -> Int {
+    0  // intrinsic
+}
+
+fn __mutex_lock_raw(mtx: Int) -> Int {
+    0  // intrinsic
+}
+
+fn __mutex_unlock_raw(mtx: Int) -> Int {
+    0  // intrinsic
+}
+
+fn main() -> Int {
+    // Test 1: Two threads incrementing a shared counter via mutex+channel
+    let mtx = __mutex_new_raw();
+    let ch = Channel.new(10);
+
+    // Use channel as shared cell: store counter value
+    ch.send(0);
+
+    let t1 = spawn {
+        let mut i = 0;
+        while (i < 100) {
+            __mutex_lock_raw(mtx);
+            match ch.recv() {
+                Some(v) => {
+                    ch.send(v + 1);
+                }
+                None => {}
+            }
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        100
+    };
+
+    let t2 = spawn {
+        let mut i = 0;
+        while (i < 100) {
+            __mutex_lock_raw(mtx);
+            match ch.recv() {
+                Some(v) => {
+                    ch.send(v + 1);
+                }
+                None => {}
+            }
+            __mutex_unlock_raw(mtx);
+            i = i + 1;
+        }
+        100
+    };
+
+    let r1 = t1.await;
+    let r2 = t2.await;
+
+    // Read final counter value
+    let mut final_value = 0;
+    match ch.recv() {
+        Some(v) => { final_value = v; }
+        None => {}
+    }
+
+    if (final_value != 200) {
+        print(f"FAIL test1: expected 200, got {final_value}");
+        return 1;
+    }
+    print(f"Test 1 PASS: shared counter = {final_value} (2 threads x 100 increments)");
+
+    print("All mutex shared state tests passed");
+    0
+}

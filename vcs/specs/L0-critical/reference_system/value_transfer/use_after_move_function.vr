@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, functions, negative-test
+// @expect: error(MovedValueUsed)
+// NOTE: When affine types are implemented, should produce: E302 "type not found: handle"
+
+/// Test use after move when affine value is moved into function at compile time.
+/// When an affine value is passed by value to a function, ownership transfers.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-types
+
+// Affine type representing a file handle
+type affine FileHandle is {
+    fd: Int,
+    path: Text,
+};
+
+fn take_ownership(h: FileHandle) {
+    print(h.path);
+}
+
+fn main() {
+    let handle = FileHandle { fd: 42, path: Text.from("/tmp/file.txt") };
+    take_ownership(handle);  // handle moved into function (FileHandle is affine)
+    print(handle.path);      // COMPILE ERROR: type not found: handle
+}

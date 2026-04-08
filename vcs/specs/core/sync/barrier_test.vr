@@ -1,0 +1,630 @@
+// =============================================================================
+// barrier_test.vr - Tests for Barrier and related types
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: sync, barrier, phaser, latch, concurrency, core
+// @description: Comprehensive tests for Barrier, BarrierWaitResult, Phaser, CountDownLatch
+// =============================================================================
+
+mount core.sync.barrier.{Barrier, BarrierWaitResult, Phaser, CountDownLatch};
+
+// =============================================================================
+// Section 1: Barrier Construction Tests
+// =============================================================================
+
+@test
+fn test_barrier_new() {
+    let bar: Barrier = Barrier.new(3);
+    assert_eq(bar.num_threads(), 3);
+}
+
+@test
+fn test_barrier_new_one() {
+    let bar: Barrier = Barrier.new(1);
+    assert_eq(bar.num_threads(), 1);
+}
+
+@test
+fn test_barrier_new_large() {
+    let bar: Barrier = Barrier.new(100);
+    assert_eq(bar.num_threads(), 100);
+}
+
+// =============================================================================
+// Section 2: Barrier State Tests
+// =============================================================================
+
+@test
+fn test_barrier_initial_waiting_count() {
+    let bar: Barrier = Barrier.new(5);
+    assert_eq(bar.waiting_count(), 0);
+}
+
+@test
+fn test_barrier_initial_generation() {
+    let bar: Barrier = Barrier.new(3);
+    assert_eq(bar.generation(), 0);
+}
+
+@test
+fn test_barrier_num_threads() {
+    let bar: Barrier = Barrier.new(7);
+    assert_eq(bar.num_threads(), 7);
+}
+
+// =============================================================================
+// Section 3: Barrier Wait (Single Thread - Trivial Case)
+// =============================================================================
+
+@test
+fn test_barrier_wait_single_thread() {
+    let bar: Barrier = Barrier.new(1);
+
+    // With only 1 thread, wait should immediately complete
+    let result: BarrierWaitResult = bar.wait();
+
+    // Single thread is always the leader
+    assert(result.is_leader());
+}
+
+@test
+fn test_barrier_wait_single_thread_multiple_times() {
+    let bar: Barrier = Barrier.new(1);
+
+    // First wait
+    let result1: BarrierWaitResult = bar.wait();
+    assert(result1.is_leader());
+    assert_eq(bar.generation(), 1);
+
+    // Second wait (new generation)
+    let result2: BarrierWaitResult = bar.wait();
+    assert(result2.is_leader());
+    assert_eq(bar.generation(), 2);
+
+    // Third wait
+    let result3: BarrierWaitResult = bar.wait();
+    assert(result3.is_leader());
+    assert_eq(bar.generation(), 3);
+}
+
+// =============================================================================
+// Section 4: BarrierWaitResult Tests
+// =============================================================================
+
+@test
+fn test_barrier_wait_result_is_leader_true() {
+    let result: BarrierWaitResult = BarrierWaitResult { is_leader: true };
+    assert(result.is_leader());
+}
+
+@test
+fn test_barrier_wait_result_is_leader_false() {
+    let result: BarrierWaitResult = BarrierWaitResult { is_leader: false };
+    assert(!result.is_leader());
+}
+
+@test
+fn test_barrier_wait_result_default() {
+    let result: BarrierWaitResult = BarrierWaitResult.default();
+    assert(!result.is_leader());  // Default is not leader
+}
+
+// =============================================================================
+// Section 5: Phaser Construction Tests
+// =============================================================================
+
+@test
+fn test_phaser_new_zero() {
+    let phaser: Phaser = Phaser.new(0);
+    assert_eq(phaser.get_registered_parties(), 0);
+    assert_eq(phaser.get_phase(), 0);
+}
+
+@test
+fn test_phaser_new_with_parties() {
+    let phaser: Phaser = Phaser.new(3);
+    assert_eq(phaser.get_registered_parties(), 3);
+    assert_eq(phaser.get_phase(), 0);
+}
+
+@test
+fn test_phaser_initial_state() {
+    let phaser: Phaser = Phaser.new(5);
+    assert_eq(phaser.get_registered_parties(), 5);
+    assert_eq(phaser.get_arrived_parties(), 0);
+    assert_eq(phaser.get_phase(), 0);
+    assert(!phaser.is_terminated());
+}
+
+// =============================================================================
+// Section 6: Phaser Registration Tests
+// =============================================================================
+
+@test
+fn test_phaser_register() {
+    let phaser: Phaser = Phaser.new(0);
+    assert_eq(phaser.get_registered_parties(), 0);
+
+    let phase: Int = phaser.register();
+    assert_eq(phase, 0);
+    assert_eq(phaser.get_registered_parties(), 1);
+}
+
+@test
+fn test_phaser_register_multiple() {
+    let phaser: Phaser = Phaser.new(0);
+
+    phaser.register();
+    phaser.register();
+    phaser.register();
+
+    assert_eq(phaser.get_registered_parties(), 3);
+}
+
+@test
+fn test_phaser_register_with_initial() {
+    let phaser: Phaser = Phaser.new(2);
+    assert_eq(phaser.get_registered_parties(), 2);
+
+    phaser.register();
+    assert_eq(phaser.get_registered_parties(), 3);
+}
+
+// =============================================================================
+// Section 7: Phaser Termination Tests
+// =============================================================================
+
+@test
+fn test_phaser_terminate() {
+    let phaser: Phaser = Phaser.new(3);
+    assert(!phaser.is_terminated());
+
+    phaser.terminate();
+    assert(phaser.is_terminated());
+}
+
+@test
+fn test_phaser_is_terminated_initially_false() {
+    let phaser: Phaser = Phaser.new(5);
+    assert(!phaser.is_terminated());
+}
+
+// =============================================================================
+// Section 8: CountDownLatch Construction Tests
+// =============================================================================
+
+@test
+fn test_countdown_latch_new() {
+    let latch: CountDownLatch = CountDownLatch.new(5);
+    assert_eq(latch.get_count(), 5);
+}
+
+@test
+fn test_countdown_latch_new_zero() {
+    let latch: CountDownLatch = CountDownLatch.new(0);
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_countdown_latch_new_one() {
+    let latch: CountDownLatch = CountDownLatch.new(1);
+    assert_eq(latch.get_count(), 1);
+}
+
+// =============================================================================
+// Section 9: CountDownLatch count_down Tests
+// =============================================================================
+
+@test
+fn test_countdown_latch_count_down() {
+    let latch: CountDownLatch = CountDownLatch.new(3);
+    assert_eq(latch.get_count(), 3);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 2);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 1);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_countdown_latch_count_down_to_zero() {
+    let latch: CountDownLatch = CountDownLatch.new(1);
+    assert_eq(latch.get_count(), 1);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 0);
+}
+
+// =============================================================================
+// Section 10: CountDownLatch await Tests (Single Thread)
+// NOTE: Tests for latch.await() are skipped because 'await' is a reserved keyword.
+// The method exists but cannot be called using standard syntax.
+// =============================================================================
+
+// Tests removed due to keyword conflict with 'await'
+
+// =============================================================================
+// Section 11: Edge Cases
+// =============================================================================
+
+@test
+fn test_barrier_generation_increments() {
+    let bar: Barrier = Barrier.new(1);
+
+    for _ in 0..10 {
+        bar.wait();
+    }
+
+    assert_eq(bar.generation(), 10);
+}
+
+@test
+fn test_countdown_latch_multiple_count_downs() {
+    let latch: CountDownLatch = CountDownLatch.new(10);
+
+    for _ in 0..10 {
+        latch.count_down();
+    }
+
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_phaser_phase_starts_at_zero() {
+    let phaser: Phaser = Phaser.new(1);
+    assert_eq(phaser.get_phase(), 0);
+}
+
+// =============================================================================
+// Section 12: Barrier Construction Extended
+// =============================================================================
+
+@test
+fn test_barrier_new_two() {
+    let bar: Barrier = Barrier.new(2);
+    assert_eq(bar.num_threads(), 2);
+}
+
+@test
+fn test_barrier_new_five() {
+    let bar: Barrier = Barrier.new(5);
+    assert_eq(bar.num_threads(), 5);
+}
+
+@test
+fn test_barrier_new_ten() {
+    let bar: Barrier = Barrier.new(10);
+    assert_eq(bar.num_threads(), 10);
+}
+
+@test
+fn test_barrier_new_fifty() {
+    let bar: Barrier = Barrier.new(50);
+    assert_eq(bar.num_threads(), 50);
+    assert_eq(bar.waiting_count(), 0);
+    assert_eq(bar.generation(), 0);
+}
+
+// =============================================================================
+// Section 13: BarrierWaitResult Extended
+// =============================================================================
+
+@test
+fn test_barrier_wait_result_constructed_leader() {
+    let result: BarrierWaitResult = BarrierWaitResult { is_leader: true };
+    assert_eq(result.is_leader(), true);
+}
+
+@test
+fn test_barrier_wait_result_constructed_not_leader() {
+    let result: BarrierWaitResult = BarrierWaitResult { is_leader: false };
+    assert_eq(result.is_leader(), false);
+}
+
+@test
+fn test_barrier_wait_result_default_is_not_leader() {
+    let result: BarrierWaitResult = BarrierWaitResult.default();
+    assert_eq(result.is_leader(), false);
+}
+
+@test
+fn test_barrier_wait_result_conditional_on_leader() {
+    let leader: BarrierWaitResult = BarrierWaitResult { is_leader: true };
+    let follower: BarrierWaitResult = BarrierWaitResult { is_leader: false };
+
+    let leader_val: Int = if leader.is_leader() { 1 } else { 0 };
+    let follower_val: Int = if follower.is_leader() { 1 } else { 0 };
+
+    assert_eq(leader_val, 1);
+    assert_eq(follower_val, 0);
+}
+
+@test
+fn test_barrier_wait_result_two_defaults() {
+    let r1: BarrierWaitResult = BarrierWaitResult.default();
+    let r2: BarrierWaitResult = BarrierWaitResult.default();
+    assert(!r1.is_leader());
+    assert(!r2.is_leader());
+}
+
+// =============================================================================
+// Section 14: Barrier Wait Single-Thread Extended
+// =============================================================================
+
+@test
+fn test_barrier_wait_returns_result() {
+    let bar: Barrier = Barrier.new(1);
+    let result: BarrierWaitResult = bar.wait();
+    // Single thread always gets a result
+    let _: Bool = result.is_leader();
+}
+
+@test
+fn test_barrier_generation_after_single_wait() {
+    let bar: Barrier = Barrier.new(1);
+    assert_eq(bar.generation(), 0);
+    let _: BarrierWaitResult = bar.wait();
+    assert_eq(bar.generation(), 1);
+}
+
+@test
+fn test_barrier_repeated_wait_five_cycles() {
+    let bar: Barrier = Barrier.new(1);
+
+    for _ in 0..5 {
+        let result: BarrierWaitResult = bar.wait();
+        assert(result.is_leader());
+    }
+
+    assert_eq(bar.generation(), 5);
+}
+
+@test
+fn test_barrier_waiting_count_resets_after_wait() {
+    let bar: Barrier = Barrier.new(1);
+    assert_eq(bar.waiting_count(), 0);
+    let _: BarrierWaitResult = bar.wait();
+    // After all threads pass, waiting count resets to 0
+    assert_eq(bar.waiting_count(), 0);
+}
+
+@test
+fn test_barrier_num_threads_unchanged_after_wait() {
+    let bar: Barrier = Barrier.new(1);
+    let _: BarrierWaitResult = bar.wait();
+    let _: BarrierWaitResult = bar.wait();
+    // num_threads is immutable after construction
+    assert_eq(bar.num_threads(), 1);
+}
+
+// =============================================================================
+// Section 15: Phaser Extended
+// =============================================================================
+
+@test
+fn test_phaser_register_deregister_cycle() {
+    let phaser: Phaser = Phaser.new(0);
+    assert_eq(phaser.get_registered_parties(), 0);
+
+    phaser.register();
+    assert_eq(phaser.get_registered_parties(), 1);
+
+    phaser.register();
+    assert_eq(phaser.get_registered_parties(), 2);
+}
+
+@test
+fn test_phaser_parties_tracking_after_register() {
+    let phaser: Phaser = Phaser.new(3);
+    assert_eq(phaser.get_registered_parties(), 3);
+
+    phaser.register();
+    assert_eq(phaser.get_registered_parties(), 4);
+
+    phaser.register();
+    assert_eq(phaser.get_registered_parties(), 5);
+}
+
+@test
+fn test_phaser_terminate_then_check_state() {
+    let phaser: Phaser = Phaser.new(4);
+    assert(!phaser.is_terminated());
+    assert_eq(phaser.get_registered_parties(), 4);
+
+    phaser.terminate();
+    assert(phaser.is_terminated());
+    // Parties count is still accessible after termination
+    let _: Int = phaser.get_registered_parties();
+}
+
+@test
+fn test_phaser_large_initial_parties() {
+    let phaser: Phaser = Phaser.new(100);
+    assert_eq(phaser.get_registered_parties(), 100);
+    assert_eq(phaser.get_phase(), 0);
+    assert(!phaser.is_terminated());
+}
+
+@test
+fn test_phaser_register_from_zero_multiple() {
+    let phaser: Phaser = Phaser.new(0);
+
+    for _ in 0..5 {
+        phaser.register();
+    }
+
+    assert_eq(phaser.get_registered_parties(), 5);
+    assert_eq(phaser.get_phase(), 0);
+}
+
+@test
+fn test_phaser_zero_parties_initial_state() {
+    let phaser: Phaser = Phaser.new(0);
+    assert_eq(phaser.get_registered_parties(), 0);
+    assert_eq(phaser.get_arrived_parties(), 0);
+    assert_eq(phaser.get_phase(), 0);
+    assert(!phaser.is_terminated());
+}
+
+@test
+fn test_phaser_zero_parties_then_register_one() {
+    let phaser: Phaser = Phaser.new(0);
+    assert_eq(phaser.get_registered_parties(), 0);
+
+    let phase: Int = phaser.register();
+    assert_eq(phase, 0);
+    assert_eq(phaser.get_registered_parties(), 1);
+}
+
+@test
+fn test_phaser_terminate_zero_parties() {
+    let phaser: Phaser = Phaser.new(0);
+    assert(!phaser.is_terminated());
+
+    phaser.terminate();
+    assert(phaser.is_terminated());
+}
+
+@test
+fn test_phaser_phase_initial_is_zero_various_sizes() {
+    let p1: Phaser = Phaser.new(1);
+    let p2: Phaser = Phaser.new(10);
+    let p3: Phaser = Phaser.new(50);
+
+    assert_eq(p1.get_phase(), 0);
+    assert_eq(p2.get_phase(), 0);
+    assert_eq(p3.get_phase(), 0);
+}
+
+@test
+fn test_phaser_arrived_parties_initially_zero() {
+    let phaser: Phaser = Phaser.new(5);
+    assert_eq(phaser.get_arrived_parties(), 0);
+}
+
+// =============================================================================
+// Section 16: CountDownLatch Extended
+// =============================================================================
+
+@test
+fn test_countdown_latch_new_five() {
+    let latch: CountDownLatch = CountDownLatch.new(5);
+    assert_eq(latch.get_count(), 5);
+}
+
+@test
+fn test_countdown_latch_new_ten() {
+    let latch: CountDownLatch = CountDownLatch.new(10);
+    assert_eq(latch.get_count(), 10);
+}
+
+@test
+fn test_countdown_latch_new_large() {
+    let latch: CountDownLatch = CountDownLatch.new(1000);
+    assert_eq(latch.get_count(), 1000);
+}
+
+@test
+fn test_countdown_latch_count_down_from_five() {
+    let latch: CountDownLatch = CountDownLatch.new(5);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 4);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 3);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 2);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 1);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_countdown_latch_count_tracking_from_ten() {
+    let latch: CountDownLatch = CountDownLatch.new(10);
+
+    for _ in 0..5 {
+        latch.count_down();
+    }
+
+    assert_eq(latch.get_count(), 5);
+
+    for _ in 0..5 {
+        latch.count_down();
+    }
+
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_countdown_latch_count_down_from_one() {
+    let latch: CountDownLatch = CountDownLatch.new(1);
+    assert_eq(latch.get_count(), 1);
+
+    latch.count_down();
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_countdown_latch_count_down_to_exactly_zero() {
+    let latch: CountDownLatch = CountDownLatch.new(3);
+    latch.count_down();
+    latch.count_down();
+    latch.count_down();
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_countdown_latch_interleaved_count_and_check() {
+    let latch: CountDownLatch = CountDownLatch.new(4);
+
+    assert_eq(latch.get_count(), 4);
+    latch.count_down();
+    assert_eq(latch.get_count(), 3);
+    latch.count_down();
+    assert_eq(latch.get_count(), 2);
+    latch.count_down();
+    assert_eq(latch.get_count(), 1);
+    latch.count_down();
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_countdown_latch_zero_initial_get_count() {
+    let latch: CountDownLatch = CountDownLatch.new(0);
+    // Already at zero
+    assert_eq(latch.get_count(), 0);
+}
+
+@test
+fn test_countdown_latch_multiple_latches_independent() {
+    let latch_a: CountDownLatch = CountDownLatch.new(3);
+    let latch_b: CountDownLatch = CountDownLatch.new(5);
+
+    latch_a.count_down();
+    assert_eq(latch_a.get_count(), 2);
+    assert_eq(latch_b.get_count(), 5);
+
+    latch_b.count_down();
+    assert_eq(latch_a.get_count(), 2);
+    assert_eq(latch_b.get_count(), 4);
+}
+
+// =============================================================================
+// Main - Run all tests
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,45 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: reference_system, cbgr, affine, move-semantics, partial-move, negative-test
+
+// Partial move tracking now implemented
+
+/// Test that partial moves are properly detected at compile time for affine types.
+/// When an affine field is moved out of a struct, the entire struct becomes
+/// partially moved and cannot be used as a whole.
+/// The type checker catches this and reports "type not found".
+/// NOTE: Regular types use COPY semantics in Verum. Only affine types move.
+/// Spec: 04-memory-model.md#affine-partial-move
+
+// Affine resource type
+type affine Resource is {
+    id: Int,
+};
+
+// Container with affine field
+type Container is {
+    resource: Resource,
+    value: Text,
+    data: List<Int>,
+};
+
+fn main() {
+    let container = Container {
+        resource: Resource { id: 42 },
+        value: Text.from("important value"),
+        data: [1, 2, 3],
+    };
+
+    // Move out the affine field - marks struct as partially moved
+    let res = container.resource;
+
+    // Cannot use container as a whole after partial move of affine field
+    let copy = container;  // COMPILE ERROR: type not found: container (partially moved)
+
+    // Also cannot access the moved affine field:
+    // print(container.resource.id);   // Would also fail typecheck
+
+    // But CAN access non-affine fields:
+    // print(container.value);  // This would work - Text is Copy
+}

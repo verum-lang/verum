@@ -1,0 +1,289 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/memory_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, memory, pointers, slices, copy, swap
+// @description: Comprehensive tests for memory operation intrinsics.
+//
+// Coverage:
+// - Pointer creation: null_ptr, null_ptr_mut
+// - Memory operations: copy, swap, replace, forget, transmute
+// - Pointer read/write: ptr_read, ptr_write, ptr_read_volatile, ptr_write_volatile
+// - Pointer utilities: ptr_is_null, ptr_is_aligned, ptr_offset, ptr_add, ptr_sub
+// - Slice operations: slice_len, slice_subslice, slice_split_at
+// - Initialization: uninit, zeroed
+//
+// Test Strategy:
+// - Test pointer creation for various types
+// - Verify function imports resolve correctly
+// - Test with Int, Float, Bool, UInt32, UInt64 pointer types
+// =============================================================================
+
+module test.stdlib.intrinsics.memory_test;
+
+mount core.intrinsics.memory.{
+    // Pointer operations
+    null_ptr, null_ptr_mut,
+    // Memory operations
+    copy, swap, replace, forget, transmute,
+    // Pointer read/write
+    ptr_read, ptr_write,
+    ptr_read_volatile, ptr_write_volatile,
+    ptr_read_unaligned, ptr_write_unaligned,
+    // Pointer utilities
+    ptr_is_null, ptr_is_aligned, ptr_offset, ptr_add, ptr_sub,
+    // Slice operations
+    slice_len, slice_subslice, slice_split_at,
+    // Initialization
+    uninit, zeroed,
+    // Memory operations
+    memmove, memcpy, memset, memcmp,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Null Pointer Tests
+// =============================================================================
+
+@test
+fn test_null_ptr_int() {
+    let p: *const Int = null_ptr();
+    let _: *const Int = p;
+}
+
+@test
+fn test_null_ptr_mut_int() {
+    let p: *mut Int = null_ptr_mut();
+    let _: *mut Int = p;
+}
+
+@test
+fn test_null_ptr_float() {
+    let p: *const Float = null_ptr();
+    let _: *const Float = p;
+}
+
+@test
+fn test_null_ptr_bool() {
+    let p: *const Bool = null_ptr();
+    let _: *const Bool = p;
+}
+
+@test
+fn test_null_ptr_uint32() {
+    let p: *const UInt32 = null_ptr();
+    let _: *const UInt32 = p;
+}
+
+@test
+fn test_null_ptr_uint64() {
+    let p: *const UInt64 = null_ptr();
+    let _: *const UInt64 = p;
+}
+
+@test
+fn test_null_ptr_mut_float() {
+    let p: *mut Float = null_ptr_mut();
+    let _: *mut Float = p;
+}
+
+@test
+fn test_null_ptr_byte() {
+    let p: *const Byte = null_ptr();
+    let _: *const Byte = p;
+}
+
+// =============================================================================
+// Function Import Verification
+// =============================================================================
+
+@test
+fn test_memory_ops_import() {
+    // Verify all memory operation functions resolve
+    let _ = copy;
+    let _ = swap;
+    let _ = replace;
+    let _ = forget;
+    let _ = transmute;
+}
+
+@test
+fn test_ptr_ops_import() {
+    // Verify pointer operation functions resolve
+    let _ = ptr_read;
+    let _ = ptr_write;
+    let _ = ptr_read_volatile;
+    let _ = ptr_write_volatile;
+    let _ = ptr_read_unaligned;
+    let _ = ptr_write_unaligned;
+}
+
+@test
+fn test_ptr_util_import() {
+    // Verify pointer utility functions resolve
+    let _ = ptr_is_null;
+    let _ = ptr_is_aligned;
+    let _ = ptr_offset;
+    let _ = ptr_add;
+    let _ = ptr_sub;
+}
+
+@test
+fn test_slice_ops_import() {
+    // Verify slice operation functions resolve
+    let _ = slice_len;
+    let _ = slice_subslice;
+    let _ = slice_split_at;
+}
+
+@test
+fn test_init_ops_import() {
+    // Verify initialization functions resolve
+    let _ = uninit;
+    let _ = zeroed;
+}
+
+@test
+fn test_mem_ops_import() {
+    // Verify low-level memory functions resolve
+    let _ = memmove;
+    let _ = memcpy;
+    let _ = memset;
+    let _ = memcmp;
+}
+
+@test
+fn test_null_ptr_multiple_types() {
+    // Create null pointers for various types to verify generics work
+    let p1: *const Int = null_ptr();
+    let p2: *const Float = null_ptr();
+    let p3: *const Bool = null_ptr();
+    let p4: *const Byte = null_ptr();
+    let p5: *const UInt32 = null_ptr();
+    let p6: *const UInt64 = null_ptr();
+    let p7: *const Int32 = null_ptr();
+    let p8: *const Int64 = null_ptr();
+
+    let _ = p1;
+    let _ = p2;
+    let _ = p3;
+    let _ = p4;
+    let _ = p5;
+    let _ = p6;
+    let _ = p7;
+    let _ = p8;
+}
+
+@test
+fn test_null_ptr_mut_multiple_types() {
+    let p1: *mut Int = null_ptr_mut();
+    let p2: *mut Float = null_ptr_mut();
+    let p3: *mut Bool = null_ptr_mut();
+    let p4: *mut Byte = null_ptr_mut();
+    let p5: *mut UInt32 = null_ptr_mut();
+    let p6: *mut UInt64 = null_ptr_mut();
+
+    let _ = p1;
+    let _ = p2;
+    let _ = p3;
+    let _ = p4;
+    let _ = p5;
+    let _ = p6;
+}
+
+// =============================================================================
+// Additional Null Pointer Tests
+// =============================================================================
+
+@test
+fn test_null_ptr_int16() {
+    let p: *const Int16 = null_ptr();
+    let _: *const Int16 = p;
+}
+
+@test
+fn test_null_ptr_mut_int16() {
+    let p: *mut Int16 = null_ptr_mut();
+    let _: *mut Int16 = p;
+}
+
+@test
+fn test_null_ptr_int8() {
+    let p: *const Int8 = null_ptr();
+    let _: *const Int8 = p;
+}
+
+@test
+fn test_null_ptr_mut_byte() {
+    let p: *mut Byte = null_ptr_mut();
+    let _: *mut Byte = p;
+}
+
+// =============================================================================
+// Additional Import Verification
+// =============================================================================
+
+@test
+fn test_all_memory_ops_separate() {
+    let _ = copy;
+    let _ = swap;
+    let _ = replace;
+    let _ = forget;
+    let _ = transmute;
+    let _ = memmove;
+    let _ = memcpy;
+    let _ = memset;
+    let _ = memcmp;
+}
+
+@test
+fn test_all_ptr_read_write_ops() {
+    let _ = ptr_read;
+    let _ = ptr_write;
+    let _ = ptr_read_volatile;
+    let _ = ptr_write_volatile;
+    let _ = ptr_read_unaligned;
+    let _ = ptr_write_unaligned;
+}
+
+@test
+fn test_null_ptr_const_mut_same_type() {
+    // Both const and mut null pointers for same type
+    let pc: *const Int = null_ptr();
+    let pm: *mut Int = null_ptr_mut();
+    let _: *const Int = pc;
+    let _: *mut Int = pm;
+}
+
+@test
+fn test_null_ptr_float32() {
+    let p: *const Float32 = null_ptr();
+    let _: *const Float32 = p;
+}
+
+@test
+fn test_null_ptr_mut_float32() {
+    let p: *mut Float32 = null_ptr_mut();
+    let _: *mut Float32 = p;
+}
+
+@test
+fn test_null_ptr_mut_uint32() {
+    let p: *mut UInt32 = null_ptr_mut();
+    let _: *mut UInt32 = p;
+}
+
+@test
+fn test_null_ptr_mut_uint64() {
+    let p: *mut UInt64 = null_ptr_mut();
+    let _: *mut UInt64 = p;
+}

@@ -1,0 +1,36 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, range
+// @description: Test range operator parsing
+
+fn test_range_operators() {
+    // Exclusive range
+    let a = 0..10;
+    let b = start..end;
+    let c = 1..n;
+
+    // Inclusive range
+    let d = 0..=10;
+    let e = start..=end;
+    let f = 1..=n;
+
+    // Open ranges
+    let g = ..10;
+    let h = ..=10;
+    let i = 0..;
+
+    // In for loops
+    for i in 0..10 { }
+    for j in 1..=100 { }
+    for k in start..end { }
+
+    // In slicing
+    let slice1 = array[0..5];
+    let slice2 = array[..5];
+    let slice3 = array[5..];
+    let slice4 = array[..];
+
+    // With expressions
+    let m = (a + 1)..(b - 1);
+    let n = 0..(len - 1);
+}

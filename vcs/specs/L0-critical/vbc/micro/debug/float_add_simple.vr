@@ -1,0 +1,10 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+fn main() {
+    let a = 1.0;
+    let b = 2.0;
+    let c = a + b;
+    assert_eq(c, 3.0);
+}

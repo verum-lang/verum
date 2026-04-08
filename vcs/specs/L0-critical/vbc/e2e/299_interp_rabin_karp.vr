@@ -1,0 +1,356 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, rabin-karp, string-matching, rolling-hash
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Rabin-Karp string matching with rolling hash.
+// Uses polynomial rolling hash for efficient substring matching.
+// Strings encoded as integer arrays.
+
+// =============================================================================
+// Array infrastructure
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn arr8_zeros() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 }
+    else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 }
+    else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+// =============================================================================
+// Hash constants and helpers
+// =============================================================================
+
+// Using a prime modulus and base for polynomial hashing
+// MOD = 1000000007, BASE = 31
+
+fn hmod(x: Int) -> Int {
+    let m = 1000000007;
+    let r = x % m;
+    if r < 0 { r + m } else { r }
+}
+
+// Compute BASE^exp mod MOD
+fn pow_mod(exp: Int) -> Int {
+    let base = 31;
+    let m = 1000000007;
+    let mut p = 1;
+    let mut b = base;
+    let mut e = exp;
+    while e > 0 {
+        if e % 2 == 1 {
+            p = hmod(p * b);
+        }
+        b = hmod(b * b);
+        e = e / 2;
+    }
+    p
+}
+
+// Compute hash of pattern (Arr8)
+fn hash_pattern(pattern: Arr8, plen: Int) -> Int {
+    let mut h = 0;
+    let mut i = 0;
+    while i < plen {
+        h = hmod(h * 31 + arr8_get(pattern, i) + 1);
+        i = i + 1;
+    }
+    h
+}
+
+// Compute hash of text substring [start, start+len) (Arr16)
+fn hash_text_sub(text: Arr16, start: Int, sublen: Int) -> Int {
+    let mut h = 0;
+    let mut i = 0;
+    while i < sublen {
+        h = hmod(h * 31 + arr16_get(text, start + i) + 1);
+        i = i + 1;
+    }
+    h
+}
+
+// Verify match by character comparison
+fn verify_match(text: Arr16, start: Int, pattern: Arr8, plen: Int) -> Int {
+    let mut i = 0;
+    while i < plen {
+        if arr16_get(text, start + i) != arr8_get(pattern, i) {
+            return 0;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+// =============================================================================
+// Rabin-Karp search: find first occurrence
+// =============================================================================
+
+fn rk_search_first(text: Arr16, tlen: Int, pattern: Arr8, plen: Int) -> Int {
+    if plen == 0 { return 0; }
+    if plen > tlen { return -1; }
+
+    let pat_hash = hash_pattern(pattern, plen);
+    let highest_pow = pow_mod(plen - 1);
+
+    // Compute initial hash of first window
+    let mut win_hash = hash_text_sub(text, 0, plen);
+
+    if win_hash == pat_hash {
+        if verify_match(text, 0, pattern, plen) == 1 {
+            return 0;
+        }
+    }
+
+    // Slide window
+    let mut i = 1;
+    while i <= tlen - plen {
+        // Rolling hash: remove leftmost char, add rightmost char
+        let old_char = arr16_get(text, i - 1) + 1;
+        let new_char = arr16_get(text, i + plen - 1) + 1;
+        win_hash = hmod(win_hash - hmod(old_char * highest_pow));
+        win_hash = hmod(win_hash * 31 + new_char);
+
+        if win_hash == pat_hash {
+            if verify_match(text, i, pattern, plen) == 1 {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// =============================================================================
+// Rabin-Karp: count all occurrences
+// =============================================================================
+
+fn rk_count_all(text: Arr16, tlen: Int, pattern: Arr8, plen: Int) -> Int {
+    if plen == 0 { return 0; }
+    if plen > tlen { return 0; }
+
+    let pat_hash = hash_pattern(pattern, plen);
+    let highest_pow = pow_mod(plen - 1);
+    let mut count = 0;
+
+    let mut win_hash = hash_text_sub(text, 0, plen);
+    if win_hash == pat_hash && verify_match(text, 0, pattern, plen) == 1 {
+        count = count + 1;
+    }
+
+    let mut i = 1;
+    while i <= tlen - plen {
+        let old_char = arr16_get(text, i - 1) + 1;
+        let new_char = arr16_get(text, i + plen - 1) + 1;
+        win_hash = hmod(win_hash - hmod(old_char * highest_pow));
+        win_hash = hmod(win_hash * 31 + new_char);
+
+        if win_hash == pat_hash {
+            if verify_match(text, i, pattern, plen) == 1 {
+                count = count + 1;
+            }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_hash_deterministic() {
+    let pat = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let h1 = hash_pattern(pat, 3);
+    let h2 = hash_pattern(pat, 3);
+    assert_eq(h1, h2);
+}
+
+fn test_hash_different_patterns() {
+    let p1 = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let p2 = Arr8 { e0: 3, e1: 2, e2: 1, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let h1 = hash_pattern(p1, 3);
+    let h2 = hash_pattern(p2, 3);
+    assert(h1 != h2);
+}
+
+fn test_pow_mod() {
+    assert_eq(pow_mod(0), 1);
+    assert_eq(pow_mod(1), 31);
+    assert_eq(pow_mod(2), hmod(31 * 31));
+}
+
+fn test_search_found_simple() {
+    // Text: "abcabc" = [0,1,2,0,1,2]
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 2, e3: 0, e4: 1, e5: 2, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    // Pattern: "cab" = [2,0,1]
+    let pat = Arr8 { e0: 2, e1: 0, e2: 1, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let pos = rk_search_first(text, 6, pat, 3);
+    assert_eq(pos, 2);
+}
+
+fn test_search_not_found() {
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 2, e3: 0, e4: 1, e5: 2, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 5, e1: 6, e2: 7, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let pos = rk_search_first(text, 6, pat, 3);
+    assert_eq(pos, -1);
+}
+
+fn test_search_at_start() {
+    let text = Arr16 {
+        e0: 3, e1: 4, e2: 5, e3: 6, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 3, e1: 4, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(rk_search_first(text, 4, pat, 2), 0);
+}
+
+fn test_search_at_end() {
+    let text = Arr16 {
+        e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 4, e1: 5, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(rk_search_first(text, 5, pat, 2), 3);
+}
+
+fn test_count_multiple_matches() {
+    // Text: "abababab" pattern "ab" -> 4 matches (non-overlapping at 0,2,4,6)
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 0, e3: 1, e4: 0, e5: 1, e6: 0, e7: 1,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 0, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let count = rk_count_all(text, 8, pat, 2);
+    assert_eq(count, 4);
+}
+
+fn test_count_overlapping() {
+    // Text: "aaa" pattern "aa" -> 2 overlapping matches
+    let text = Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    let count = rk_count_all(text, 3, pat, 2);
+    assert_eq(count, 2);
+}
+
+fn test_count_no_match() {
+    let text = Arr16 {
+        e0: 1, e1: 1, e2: 1, e3: 1, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 2, e1: 2, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(rk_count_all(text, 4, pat, 2), 0);
+}
+
+fn test_single_char_pattern() {
+    // Text: "abacaba" = [0,1,0,2,0,1,0], count 'a'(=0) => 4
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 0, e3: 2, e4: 0, e5: 1, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(rk_count_all(text, 7, pat, 1), 4);
+    assert_eq(rk_search_first(text, 7, pat, 1), 0);
+}
+
+fn test_pattern_longer_than_text() {
+    let text = Arr16 {
+        e0: 1, e1: 2, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 1, e1: 2, e2: 3, e3: 4, e4: 5, e5: 0, e6: 0, e7: 0 };
+    assert_eq(rk_search_first(text, 2, pat, 5), -1);
+    assert_eq(rk_count_all(text, 2, pat, 5), 0);
+}
+
+fn test_verify_match_correct() {
+    let text = Arr16 {
+        e0: 0, e1: 1, e2: 2, e3: 3, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    };
+    let pat = Arr8 { e0: 1, e1: 2, e2: 3, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 };
+    assert_eq(verify_match(text, 1, pat, 3), 1);
+    assert_eq(verify_match(text, 0, pat, 3), 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_hash_deterministic();
+    test_hash_different_patterns();
+    test_pow_mod();
+    test_search_found_simple();
+    test_search_not_found();
+    test_search_at_start();
+    test_search_at_end();
+    test_count_multiple_matches();
+    test_count_overlapping();
+    test_count_no_match();
+    test_single_char_pattern();
+    test_pattern_longer_than_text();
+    test_verify_match_correct();
+    print("[OK] 299_interp_rabin_karp");
+    0
+}

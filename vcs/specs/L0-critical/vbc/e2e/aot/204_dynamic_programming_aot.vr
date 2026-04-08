@@ -1,0 +1,172 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, dynamic-programming, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for dynamic programming patterns
+
+fn min(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn max(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+// Fibonacci with memoization (iterative DP)
+fn fib_dp(n: Int) -> Int {
+    if n <= 1 { return n; }
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 2;
+    while i <= n {
+        let t = a + b;
+        a = b;
+        b = t;
+        i = i + 1;
+    }
+    b
+}
+
+// Catalan numbers: C(n) = sum(C(i)*C(n-1-i)) for i=0..n-1
+// But iterative DP is better
+fn catalan(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    // Use binomial: C(n) = C(2n,n)/(n+1)
+    // But we'll use iterative DP with stored values (limited to small n)
+    // C(0)=1, C(1)=1, C(2)=2, C(3)=5, C(4)=14, C(5)=42
+    let mut c0 = 1;
+    let mut c1 = 1;
+    let mut c2 = 0;
+    let mut c3 = 0;
+    let mut c4 = 0;
+    let mut c5 = 0;
+
+    if n >= 2 { c2 = c0*c1 + c1*c0; }       // C(2) = C(0)*C(1) + C(1)*C(0) = 2
+    if n >= 3 { c3 = c0*c2 + c1*c1 + c2*c0; }  // C(3) = 5
+    if n >= 4 { c4 = c0*c3 + c1*c2 + c2*c1 + c3*c0; }  // C(4) = 14
+    if n >= 5 { c5 = c0*c4 + c1*c3 + c2*c2 + c3*c1 + c4*c0; }  // C(5) = 42
+
+    if n == 0 { c0 }
+    else if n == 1 { c1 }
+    else if n == 2 { c2 }
+    else if n == 3 { c3 }
+    else if n == 4 { c4 }
+    else { c5 }
+}
+
+// Maximum subarray sum (Kadane's algorithm)
+// Using a flat record for the array
+type Arr10 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int,
+    a5: Int, a6: Int, a7: Int, a8: Int, a9: Int
+};
+
+fn arr10_get(a: Arr10, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 }
+    else if i == 8 { a.a8 } else { a.a9 }
+}
+
+fn kadane(a: Arr10, n: Int) -> Int {
+    let mut max_ending_here = arr10_get(a, 0);
+    let mut max_so_far = arr10_get(a, 0);
+    let mut i = 1;
+    while i < n {
+        let val = arr10_get(a, i);
+        max_ending_here = max(val, max_ending_here + val);
+        max_so_far = max(max_so_far, max_ending_here);
+        i = i + 1;
+    }
+    max_so_far
+}
+
+// Coin change: minimum coins to make amount
+// Coins: 1, 5, 10 (fixed)
+fn min_coins(amount: Int) -> Int {
+    if amount == 0 { return 0; }
+    let tens = amount / 10;
+    let rem_after_tens = amount - tens * 10;
+    let fives = rem_after_tens / 5;
+    let ones = rem_after_tens - fives * 5;
+    tens + fives + ones
+}
+
+// Staircase: number of ways to climb n stairs (1 or 2 steps)
+fn staircase_ways(n: Int) -> Int {
+    if n <= 1 { return 1; }
+    let mut a = 1;  // ways(0)
+    let mut b = 1;  // ways(1)
+    let mut i = 2;
+    while i <= n {
+        let t = a + b;
+        a = b;
+        b = t;
+        i = i + 1;
+    }
+    b
+}
+
+fn test_fibonacci() {
+    assert_eq(fib_dp(0), 0);
+    assert_eq(fib_dp(1), 1);
+    assert_eq(fib_dp(2), 1);
+    assert_eq(fib_dp(10), 55);
+    assert_eq(fib_dp(20), 6765);
+}
+
+fn test_catalan() {
+    assert_eq(catalan(0), 1);
+    assert_eq(catalan(1), 1);
+    assert_eq(catalan(2), 2);
+    assert_eq(catalan(3), 5);
+    assert_eq(catalan(4), 14);
+    assert_eq(catalan(5), 42);
+}
+
+fn test_kadane() {
+    // [-2, 1, -3, 4, -1, 2, 1, -5, 4, 0]
+    let a = Arr10 { a0: -2, a1: 1, a2: -3, a3: 4, a4: -1,
+                     a5: 2, a6: 1, a7: -5, a8: 4, a9: 0 };
+    // Max subarray: [4, -1, 2, 1] = 6
+    assert_eq(kadane(a, 10), 6);
+
+    // All positive
+    let b = Arr10 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5,
+                     a5: 0, a6: 0, a7: 0, a8: 0, a9: 0 };
+    assert_eq(kadane(b, 5), 15);
+
+    // All negative
+    let c = Arr10 { a0: -5, a1: -3, a2: -8, a3: -1, a4: -7,
+                     a5: 0, a6: 0, a7: 0, a8: 0, a9: 0 };
+    assert_eq(kadane(c, 5), -1);
+}
+
+fn test_coin_change() {
+    assert_eq(min_coins(0), 0);
+    assert_eq(min_coins(1), 1);
+    assert_eq(min_coins(5), 1);
+    assert_eq(min_coins(10), 1);
+    assert_eq(min_coins(11), 2);   // 10 + 1
+    assert_eq(min_coins(15), 2);   // 10 + 5
+    assert_eq(min_coins(27), 5);   // 10 + 10 + 5 + 1 + 1 = 5 coins
+}
+
+fn test_staircase() {
+    assert_eq(staircase_ways(0), 1);
+    assert_eq(staircase_ways(1), 1);
+    assert_eq(staircase_ways(2), 2);
+    assert_eq(staircase_ways(3), 3);
+    assert_eq(staircase_ways(4), 5);
+    assert_eq(staircase_ways(5), 8);
+    assert_eq(staircase_ways(10), 89);
+}
+
+fn main() -> Int {
+    test_fibonacci();
+    test_catalan();
+    test_kadane();
+    test_coin_change();
+    test_staircase();
+    print("[OK] 204_dynamic_programming_aot");
+    0
+}

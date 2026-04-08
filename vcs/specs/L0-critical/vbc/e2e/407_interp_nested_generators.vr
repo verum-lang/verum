@@ -1,0 +1,154 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, generators, nested, yield
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Tests nested generators, generator composition, and complex yield patterns.
+
+fn* range(start: Int, end_excl: Int) -> Int {
+    let mut i = start;
+    while i < end_excl {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn* squares(n: Int) -> Int {
+    let mut i = 0;
+    while i < n {
+        yield i * i;
+        i = i + 1;
+    }
+}
+
+fn* evens(limit: Int) -> Int {
+    let mut i = 0;
+    while i < limit {
+        yield i * 2;
+        i = i + 1;
+    }
+}
+
+fn* fibonacci_gen(n: Int) -> Int {
+    let mut a = 0;
+    let mut b = 1;
+    let mut i = 0;
+    while i < n {
+        yield a;
+        let c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+}
+
+fn* countdown(from: Int) -> Int {
+    let mut i = from;
+    while i >= 0 {
+        yield i;
+        i = i - 1;
+    }
+}
+
+fn test_range_generator() {
+    let mut sum = 0;
+    for i in range(1, 11) {
+        sum = sum + i;
+    }
+    assert_eq(sum, 55);
+    print("range_generator: ok");
+}
+
+fn test_squares_generator() {
+    let mut sum = 0;
+    for s in squares(5) {
+        sum = sum + s;
+    }
+    // 0 + 1 + 4 + 9 + 16 = 30
+    assert_eq(sum, 30);
+    print("squares_generator: ok");
+}
+
+fn test_fibonacci_generator() {
+    let mut last = 0;
+    let mut count = 0;
+    for f in fibonacci_gen(10) {
+        last = f;
+        count = count + 1;
+    }
+    assert_eq(count, 10);
+    // fib(9) = 34 (0-indexed)
+    assert_eq(last, 34);
+    print("fibonacci_generator: ok");
+}
+
+fn test_multiple_generators() {
+    // Use two generators in sequence
+    let mut total = 0;
+    for i in range(1, 4) {
+        total = total + i;
+    }
+    for s in squares(3) {
+        total = total + s;
+    }
+    // range: 1+2+3=6, squares: 0+1+4=5, total=11
+    assert_eq(total, 11);
+    print("multiple_generators: ok");
+}
+
+fn test_generator_with_condition() {
+    // Filter pattern: sum only even values from range
+    let mut sum_even = 0;
+    for i in range(1, 21) {
+        if i % 2 == 0 {
+            sum_even = sum_even + i;
+        }
+    }
+    // 2+4+6+8+10+12+14+16+18+20 = 110
+    assert_eq(sum_even, 110);
+    print("generator_with_condition: ok");
+}
+
+fn test_countdown_generator() {
+    let mut first = -1;
+    let mut last = -1;
+    let mut count = 0;
+    for i in countdown(5) {
+        if count == 0 { first = i; }
+        last = i;
+        count = count + 1;
+    }
+    assert_eq(first, 5);
+    assert_eq(last, 0);
+    assert_eq(count, 6);
+    print("countdown_generator: ok");
+}
+
+fn test_generator_nested_loop() {
+    // Outer range × inner computation
+    let mut total = 0;
+    for i in range(1, 4) {
+        let mut inner_sum = 0;
+        for j in range(1, i + 1) {
+            inner_sum = inner_sum + j;
+        }
+        total = total + inner_sum;
+    }
+    // i=1: sum(1)=1, i=2: sum(1,2)=3, i=3: sum(1,2,3)=6 → total=10
+    assert_eq(total, 10);
+    print("generator_nested_loop: ok");
+}
+
+fn main() -> Int {
+    test_range_generator();
+    test_squares_generator();
+    test_fibonacci_generator();
+    test_multiple_generators();
+    test_generator_with_condition();
+    test_countdown_generator();
+    test_generator_nested_loop();
+    print("[OK] 407_interp_nested_generators");
+    0
+}

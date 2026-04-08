@@ -1,0 +1,30 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: ffi, extern, type-safety
+// @description: Basic FFI extern block validation — &T refs in extern treated as raw pointers
+// @expected-exit: 0
+
+// Extern block with POSIX functions — uses &Byte (implicit raw pointer)
+@ffi("libSystem.B.dylib")
+extern {
+    fn getpid() -> Int;
+    fn getuid() -> Int;
+}
+
+fn main() {
+    // getpid/getuid should work through FFI validation
+    let pid = getpid();
+    let uid = getuid();
+
+    // Validate we got real values (not zero/error)
+    assert(pid > 0);
+    assert(uid >= 0);
+    print(f"PID={pid}, UID={uid}");
+
+    // Basic arithmetic to verify no codegen regression
+    let sum = pid + uid;
+    assert(sum >= pid);
+
+    print("FFI extern basic: PASS");
+}

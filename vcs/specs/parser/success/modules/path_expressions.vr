@@ -1,0 +1,23 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+fn test_paths() {
+    // Type path with field access
+    let list = std.collections.List.new();
+
+    // Relative path
+    let helper = super.utils.helper();
+
+    // Cog root path - use crate keyword
+    let config = crate.config.load();
+
+    // Path with generics
+    let map: std.collections.Map<Text, Int> = Map.new();
+
+    // Path in type position
+    let result: super.types.Result<Int, Error> = Ok(42);
+
+    // Associated function call via path
+    let instance = mymod.submod.Type.create();
+}

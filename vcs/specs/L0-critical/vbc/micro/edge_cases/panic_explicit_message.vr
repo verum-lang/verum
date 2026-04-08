@@ -1,0 +1,10 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, panic, explicit
+// @timeout: 5000
+// @expected-panic: custom error message
+
+fn main() {
+    panic("custom error message");
+}

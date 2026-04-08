@@ -1,0 +1,66 @@
+// =============================================================================
+// transitive_import_test.vr - Test transitive type dependency resolution
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: core, imports, transitive, dependencies, regression
+// @description: Verifies that importing types automatically resolves dependent types
+// =============================================================================
+
+// This test verifies the critical issue: when we link Validated<E, A>,
+// its dependency on List<E> (via Invalid variant) should be automatically resolved.
+
+mount core.base.result.{Validated, Valid, Invalid};
+mount core.collections.list.List;
+
+// Test 1: Basic Validated usage with List
+@test
+fn test_validated_needs_list() {
+    // Invalid variant needs List<E>
+    let invalid: Validated<Text, Int> = Invalid(List.from(["error1", "error2"]));
+    let valid: Validated<Text, Int> = Valid(42);
+
+    match invalid {
+        Invalid(errors) => {
+            // errors should be List<Text>
+            let _: List<Text> = errors;
+        }
+        Valid(_) => {}
+    }
+}
+
+// Test 2: Validated methods that return List
+@test
+fn test_validated_errors_method() {
+    let invalid: Validated<Text, Int> = Invalid(List.from(["err"]));
+
+    // errors() method returns List<E> directly (empty list for Valid)
+    let errs: List<Text> = invalid.errors();
+    assert(errs.len() >= 0);  // Just ensure we got a List
+}
+
+// Test 3: Validated.validate_all needs List both input and output
+@test
+fn test_validate_all_uses_list() {
+    let items: List<Validated<Text, Int>> = List.from([
+        Valid(1),
+        Valid(2),
+        Invalid(List.from(["error"])),
+    ]);
+
+    let result: Validated<Text, List<Int>> = Validated.validate_all(items);
+
+    match result {
+        Valid(values) => {
+            let _: List<Int> = values;
+        }
+        Invalid(errors) => {
+            let _: List<Text> = errors;
+        }
+    }
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, async, function, modifier, error
+// @description: Test invalid async modifier position
+// @expected-error: E031
+
+// Async must come before fn, not after
+fn async broken() {
+    // This is invalid - async is not a valid position after fn
+}

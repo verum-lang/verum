@@ -1,0 +1,311 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, lru-cache, data-structure, simulation
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for LRU (Least Recently Used) cache simulation.
+// Uses fixed-size parallel arrays for keys, values, and usage timestamps.
+// Supports get, put, and eviction of least recently used entry.
+
+// Cache entry arrays: key, value, timestamp, and valid flag
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// LRU cache with max capacity. Uses parallel arrays.
+// keys[i], values[i], timestamps[i], valid[i] (1=occupied, 0=empty)
+type LRUCache is {
+    keys: Arr8,
+    values: Arr8,
+    timestamps: Arr8,
+    valid: Arr8,
+    capacity: Int,
+    size: Int,
+    clock: Int
+};
+
+fn lru_new(cap: Int) -> LRUCache {
+    LRUCache {
+        keys: a8_zero(),
+        values: a8_zero(),
+        timestamps: a8_zero(),
+        valid: a8_zero(),
+        capacity: cap,
+        size: 0,
+        clock: 0
+    }
+}
+
+// Find index of key in cache, or -1 if not found
+fn lru_find(cache: LRUCache, key: Int) -> Int {
+    let mut i = 0;
+    while i < cache.capacity {
+        if a8_get(cache.valid, i) == 1 {
+            if a8_get(cache.keys, i) == key {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Get value for key. Returns -1 if not found. Updates timestamp on hit.
+fn lru_get_val(cache: LRUCache, key: Int) -> Int {
+    let idx = lru_find(cache, key);
+    if idx == -1 { return -1; }
+    a8_get(cache.values, idx)
+}
+
+// Get updated cache after a get (updates timestamp)
+fn lru_get_cache(cache: LRUCache, key: Int) -> LRUCache {
+    let idx = lru_find(cache, key);
+    if idx == -1 { return cache; }
+    let new_clock = cache.clock + 1;
+    LRUCache {
+        keys: cache.keys,
+        values: cache.values,
+        timestamps: a8_set(cache.timestamps, idx, new_clock),
+        valid: cache.valid,
+        capacity: cache.capacity,
+        size: cache.size,
+        clock: new_clock
+    }
+}
+
+// Find the LRU slot (smallest timestamp among valid entries)
+fn lru_find_evict(cache: LRUCache) -> Int {
+    let mut min_ts = 999999999;
+    let mut min_idx = 0;
+    let mut i = 0;
+    while i < cache.capacity {
+        if a8_get(cache.valid, i) == 1 {
+            if a8_get(cache.timestamps, i) < min_ts {
+                min_ts = a8_get(cache.timestamps, i);
+                min_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    min_idx
+}
+
+// Find an empty slot, or -1 if full
+fn lru_find_empty(cache: LRUCache) -> Int {
+    let mut i = 0;
+    while i < cache.capacity {
+        if a8_get(cache.valid, i) == 0 {
+            return i;
+        }
+        i = i + 1;
+    }
+    -1
+}
+
+// Put key-value pair into cache. Returns updated cache.
+fn lru_put(cache: LRUCache, key: Int, value: Int) -> LRUCache {
+    let new_clock = cache.clock + 1;
+    // Check if key already exists
+    let existing = lru_find(cache, key);
+    if existing != -1 {
+        // Update existing entry
+        return LRUCache {
+            keys: cache.keys,
+            values: a8_set(cache.values, existing, value),
+            timestamps: a8_set(cache.timestamps, existing, new_clock),
+            valid: cache.valid,
+            capacity: cache.capacity,
+            size: cache.size,
+            clock: new_clock
+        };
+    }
+    // Find a slot
+    let slot = lru_find_empty(cache);
+    if slot != -1 {
+        // Use empty slot
+        return LRUCache {
+            keys: a8_set(cache.keys, slot, key),
+            values: a8_set(cache.values, slot, value),
+            timestamps: a8_set(cache.timestamps, slot, new_clock),
+            valid: a8_set(cache.valid, slot, 1),
+            capacity: cache.capacity,
+            size: cache.size + 1,
+            clock: new_clock
+        };
+    }
+    // Evict LRU entry
+    let evict_idx = lru_find_evict(cache);
+    LRUCache {
+        keys: a8_set(cache.keys, evict_idx, key),
+        values: a8_set(cache.values, evict_idx, value),
+        timestamps: a8_set(cache.timestamps, evict_idx, new_clock),
+        valid: cache.valid,
+        capacity: cache.capacity,
+        size: cache.size,
+        clock: new_clock
+    }
+}
+
+// ---- Tests ----
+
+fn test_empty_cache() {
+    let cache = lru_new(3);
+    assert_eq(lru_get_val(cache, 1), -1);
+    assert_eq(lru_get_val(cache, 42), -1);
+    assert_eq(cache.size, 0);
+}
+
+fn test_put_and_get() {
+    let mut cache = lru_new(3);
+    cache = lru_put(cache, 1, 100);
+    cache = lru_put(cache, 2, 200);
+    cache = lru_put(cache, 3, 300);
+    assert_eq(lru_get_val(cache, 1), 100);
+    assert_eq(lru_get_val(cache, 2), 200);
+    assert_eq(lru_get_val(cache, 3), 300);
+}
+
+fn test_update_value() {
+    let mut cache = lru_new(3);
+    cache = lru_put(cache, 1, 100);
+    cache = lru_put(cache, 1, 999);
+    assert_eq(lru_get_val(cache, 1), 999);
+    assert_eq(cache.size, 1);
+}
+
+fn test_eviction_basic() {
+    // Capacity 2. Put 3 items, first should be evicted.
+    let mut cache = lru_new(2);
+    cache = lru_put(cache, 1, 10);
+    cache = lru_put(cache, 2, 20);
+    // Cache is full: {1:10, 2:20}
+    cache = lru_put(cache, 3, 30);
+    // Key 1 was LRU, should be evicted
+    assert_eq(lru_get_val(cache, 1), -1);
+    assert_eq(lru_get_val(cache, 2), 20);
+    assert_eq(lru_get_val(cache, 3), 30);
+}
+
+fn test_eviction_with_access() {
+    // Capacity 2. Access key 1 to make key 2 the LRU.
+    let mut cache = lru_new(2);
+    cache = lru_put(cache, 1, 10);
+    cache = lru_put(cache, 2, 20);
+    // Access key 1 to refresh its timestamp
+    cache = lru_get_cache(cache, 1);
+    // Now key 2 is LRU
+    cache = lru_put(cache, 3, 30);
+    // Key 2 should be evicted (it was LRU)
+    assert_eq(lru_get_val(cache, 2), -1);
+    assert_eq(lru_get_val(cache, 1), 10);
+    assert_eq(lru_get_val(cache, 3), 30);
+}
+
+fn test_eviction_sequence() {
+    // Capacity 3, put 5 items sequentially
+    let mut cache = lru_new(3);
+    cache = lru_put(cache, 1, 10);
+    cache = lru_put(cache, 2, 20);
+    cache = lru_put(cache, 3, 30);
+    // Full: {1, 2, 3}
+    cache = lru_put(cache, 4, 40);
+    // 1 evicted. Now {2, 3, 4}
+    assert_eq(lru_get_val(cache, 1), -1);
+    cache = lru_put(cache, 5, 50);
+    // 2 evicted. Now {3, 4, 5}
+    assert_eq(lru_get_val(cache, 2), -1);
+    assert_eq(lru_get_val(cache, 3), 30);
+    assert_eq(lru_get_val(cache, 4), 40);
+    assert_eq(lru_get_val(cache, 5), 50);
+}
+
+fn test_update_prevents_eviction() {
+    // Capacity 2. Update key 1 to refresh, then add key 3.
+    let mut cache = lru_new(2);
+    cache = lru_put(cache, 1, 10);
+    cache = lru_put(cache, 2, 20);
+    // Update key 1 with new value (refreshes timestamp)
+    cache = lru_put(cache, 1, 15);
+    // Now key 2 is LRU
+    cache = lru_put(cache, 3, 30);
+    // Key 2 evicted
+    assert_eq(lru_get_val(cache, 2), -1);
+    assert_eq(lru_get_val(cache, 1), 15);
+    assert_eq(lru_get_val(cache, 3), 30);
+}
+
+fn test_capacity_one() {
+    let mut cache = lru_new(1);
+    cache = lru_put(cache, 1, 100);
+    assert_eq(lru_get_val(cache, 1), 100);
+    cache = lru_put(cache, 2, 200);
+    assert_eq(lru_get_val(cache, 1), -1);
+    assert_eq(lru_get_val(cache, 2), 200);
+}
+
+fn test_repeated_access_pattern() {
+    // Capacity 3. Access pattern: put 1,2,3; get 1; put 4; get 2 should miss
+    let mut cache = lru_new(3);
+    cache = lru_put(cache, 10, 1);
+    cache = lru_put(cache, 20, 2);
+    cache = lru_put(cache, 30, 3);
+    // Access key 10
+    cache = lru_get_cache(cache, 10);
+    // Put new key 40 -> evicts LRU (key 20)
+    cache = lru_put(cache, 40, 4);
+    assert_eq(lru_get_val(cache, 20), -1); // evicted
+    assert_eq(lru_get_val(cache, 10), 1);
+    assert_eq(lru_get_val(cache, 30), 3);
+    assert_eq(lru_get_val(cache, 40), 4);
+}
+
+fn test_leetcode_example() {
+    // LeetCode 146 example: capacity=2
+    // put(1,1), put(2,2), get(1)=1, put(3,3), get(2)=-1, put(4,4), get(1)=-1, get(3)=3, get(4)=4
+    let mut cache = lru_new(2);
+    cache = lru_put(cache, 1, 1);
+    cache = lru_put(cache, 2, 2);
+    assert_eq(lru_get_val(cache, 1), 1);
+    cache = lru_get_cache(cache, 1); // refresh timestamp of key 1
+    cache = lru_put(cache, 3, 3); // evicts key 2
+    assert_eq(lru_get_val(cache, 2), -1);
+    cache = lru_put(cache, 4, 4); // evicts key 1
+    assert_eq(lru_get_val(cache, 1), -1);
+    assert_eq(lru_get_val(cache, 3), 3);
+    assert_eq(lru_get_val(cache, 4), 4);
+}
+
+fn main() -> Int {
+    test_empty_cache();
+    test_put_and_get();
+    test_update_value();
+    test_eviction_basic();
+    test_eviction_with_access();
+    test_eviction_sequence();
+    test_update_prevents_eviction();
+    test_capacity_one();
+    test_repeated_access_pattern();
+    test_leetcode_example();
+    print("[OK] 383_lru_cache_aot");
+    0
+}

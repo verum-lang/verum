@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, references, modifiers, error
+// @description: Test detection of conflicting reference modifiers (checked and unsafe)
+// @expected-error: E089
+
+// Cannot have both checked and unsafe on a reference
+fn test(x: &checked unsafe T) {}

@@ -1,0 +1,163 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, partition, number-theory, dynamic-programming
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Number of partitions of n (ways to write n as sum of positive integers)
+// Using rolling DP: dp[j] = number of partitions of j using parts up to current k
+fn partition_count(n: Int) -> Int {
+    if n <= 0 { return 1; } // empty partition
+    let mut dp = zeros();
+    dp = set(dp, 0, 1); // base: one way to partition 0
+
+    let mut k = 1;
+    while k <= n {
+        let mut j = k;
+        while j <= n {
+            dp = set(dp, j, get(dp, j) + get(dp, j - k));
+            j = j + 1;
+        }
+        k = k + 1;
+    }
+    get(dp, n)
+}
+
+// Number of partitions into distinct parts
+fn distinct_partition_count(n: Int) -> Int {
+    if n <= 0 { return 1; }
+    let mut dp = zeros();
+    dp = set(dp, 0, 1);
+
+    let mut k = 1;
+    while k <= n {
+        // Process in reverse to ensure each part used at most once
+        let mut j = n;
+        while j >= k {
+            dp = set(dp, j, get(dp, j) + get(dp, j - k));
+            j = j - 1;
+        }
+        k = k + 1;
+    }
+    get(dp, n)
+}
+
+// Number of partitions into at most k parts
+fn partition_at_most_k(n: Int, k: Int) -> Int {
+    if n <= 0 { return 1; }
+    // This equals partitions with parts <= k
+    let mut dp = zeros();
+    dp = set(dp, 0, 1);
+
+    let mut part = 1;
+    while part <= k {
+        let mut j = part;
+        while j <= n {
+            dp = set(dp, j, get(dp, j) + get(dp, j - part));
+            j = j + 1;
+        }
+        part = part + 1;
+    }
+    get(dp, n)
+}
+
+// Coin change: number of ways to make n cents with coins [1, 2, 5]
+fn coin_change(n: Int) -> Int {
+    let mut dp = zeros();
+    dp = set(dp, 0, 1);
+
+    // Coin 1
+    let mut j = 1;
+    while j <= n {
+        dp = set(dp, j, get(dp, j) + get(dp, j - 1));
+        j = j + 1;
+    }
+    // Coin 2
+    let mut j2 = 2;
+    while j2 <= n {
+        dp = set(dp, j2, get(dp, j2) + get(dp, j2 - 2));
+        j2 = j2 + 1;
+    }
+    // Coin 5
+    let mut j5 = 5;
+    while j5 <= n {
+        dp = set(dp, j5, get(dp, j5) + get(dp, j5 - 5));
+        j5 = j5 + 1;
+    }
+    get(dp, n)
+}
+
+fn main() -> Int {
+    // p(0) = 1 (empty partition)
+    assert_eq(partition_count(0), 1);
+
+    // p(1) = 1: {1}
+    assert_eq(partition_count(1), 1);
+
+    // p(2) = 2: {2}, {1,1}
+    assert_eq(partition_count(2), 2);
+
+    // p(3) = 3: {3}, {2,1}, {1,1,1}
+    assert_eq(partition_count(3), 3);
+
+    // p(4) = 5: {4}, {3,1}, {2,2}, {2,1,1}, {1,1,1,1}
+    assert_eq(partition_count(4), 5);
+
+    // p(5) = 7
+    assert_eq(partition_count(5), 7);
+
+    // p(6) = 11
+    assert_eq(partition_count(6), 11);
+
+    // p(7) = 15
+    assert_eq(partition_count(7), 15);
+
+    // Distinct partitions: q(n)
+    assert_eq(distinct_partition_count(1), 1); // {1}
+    assert_eq(distinct_partition_count(2), 1); // {2}
+    assert_eq(distinct_partition_count(3), 2); // {3}, {2+1}
+    assert_eq(distinct_partition_count(4), 2); // {4}, {3+1}
+    assert_eq(distinct_partition_count(5), 3); // {5}, {4+1}, {3+2}
+    assert_eq(distinct_partition_count(6), 4); // {6}, {5+1}, {4+2}, {3+2+1}
+    assert_eq(distinct_partition_count(7), 5); // {7}, {6+1}, {5+2}, {4+3}, {4+2+1}
+
+    // Partitions with at most k parts
+    // At most 1 part: always 1 way (n itself)
+    assert_eq(partition_at_most_k(5, 1), 1);
+
+    // At most 2 parts for n=5: {5}, {4+1}, {3+2} = 3
+    assert_eq(partition_at_most_k(5, 2), 3);
+
+    // At most n parts = p(n)
+    assert_eq(partition_at_most_k(5, 5), partition_count(5));
+    assert_eq(partition_at_most_k(7, 7), partition_count(7));
+
+    // Coin change with {1,2,5}
+    assert_eq(coin_change(1), 1);  // {1}
+    assert_eq(coin_change(2), 2);  // {2}, {1+1}
+    assert_eq(coin_change(3), 2);  // {2+1}, {1+1+1}
+    assert_eq(coin_change(5), 4);  // {5}, {2+2+1}, {2+1+1+1}, {1*5}
+    assert_eq(coin_change(6), 5);
+
+    print("DIFF_OK: integer_partition");
+    0
+}

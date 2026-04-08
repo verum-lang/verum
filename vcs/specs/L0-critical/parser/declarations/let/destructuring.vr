@@ -1,0 +1,83 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, declarations, let, binding, destructuring, pattern
+
+// Type definitions for testing
+type Point is { x: Int, y: Int };
+type Person is { name: Text, age: Int, address: Address };
+type Address is { city: Text, country: Text };
+type Config is { port: Int, host: Text };
+type Node is { value: Int, children: (Int, Int) };
+
+// Helper functions for testing
+fn compute_pair() -> (Int, Int) { (1, 2) }
+fn create_point() -> Point { Point { x: 0, y: 0 } }
+
+fn test_tuple_destructuring(tuple: (Int, Int), triple: (Int, Int, Int)) {
+    // Tuple destructuring
+    let (a, b) = tuple;
+    let (x, y, z) = triple;
+}
+
+fn test_tuple_destructuring_with_types(pair: (Int, Int)) {
+    // Tuple destructuring with types
+    let (first, second): (Int, Int) = pair;
+}
+
+fn test_nested_tuple_destructuring(nested_tuple: ((Int, Int), Int), another_nested: (Int, (Int, Int))) {
+    // Nested tuple destructuring
+    let ((a, b), c) = nested_tuple;
+    let (x, (y, z)) = another_nested;
+}
+
+fn test_struct_destructuring(point: Point, person: Person) {
+    // Struct/Record destructuring
+    let Point { x, y } = point;
+    let Person { name, age, .. } = person;
+}
+
+fn test_struct_destructuring_rename(point: Point, config: Config) {
+    // Struct destructuring with rename
+    let Point { x: px, y: py } = point;
+    let Config { port: server_port, host: server_host } = config;
+}
+
+fn test_struct_destructuring_partial(point: Point, person: Person) {
+    // Struct destructuring with partial fields
+    let Point { x, .. } = point;
+    let Person { name, .. } = person;
+}
+
+fn test_variant_destructuring(maybe: Maybe<Int>, operation: Result<Int, Text>) {
+    // Enum/Variant destructuring
+    let Some(value) = maybe else { return; };
+    let Ok(result) = operation else { return; };
+}
+
+fn test_destructuring_with_type_annotation() {
+    // Destructuring with type annotation
+    let (a, b): (Int, Int) = compute_pair();
+    let Point { x, y }: Point = create_point();
+}
+
+fn test_destructuring_mutable(initial_pair: (Int, Int), start_point: Point) {
+    // Destructuring in mutable binding
+    let (mut a, mut b) = initial_pair;
+    // Struct destructuring with separate mutable bindings
+    let Point { x: mut px, y: mut py } = start_point;
+    a = 1;
+    px = 2;
+}
+
+fn test_array_destructuring(list: List<Int>, items: List<Int>) {
+    // Array/List destructuring
+    let [first, second, ..rest] = list else { return; };
+    let [head, ..tail] = items else { return; };
+}
+
+fn test_complex_nested_destructuring(person: Person, tree_node: Node) {
+    // Complex nested destructuring
+    let Person { name, address: Address { city, country } } = person;
+    let Node { value, children: (left, right) } = tree_node;
+}

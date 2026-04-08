@@ -1,0 +1,198 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, stress
+// @timeout: 60000
+// @expected-exit: 0
+
+// Large record operations: records with 20+ fields, nested records, record-based arrays
+
+type BigRec is {
+    f01: Int, f02: Int, f03: Int, f04: Int, f05: Int,
+    f06: Int, f07: Int, f08: Int, f09: Int, f10: Int,
+    f11: Int, f12: Int, f13: Int, f14: Int, f15: Int,
+    f16: Int, f17: Int, f18: Int, f19: Int, f20: Int,
+    f21: Int, f22: Int, f23: Int, f24: Int, f25: Int
+};
+
+fn make_big(base: Int) -> BigRec {
+    BigRec {
+        f01: base + 1,  f02: base + 2,  f03: base + 3,  f04: base + 4,  f05: base + 5,
+        f06: base + 6,  f07: base + 7,  f08: base + 8,  f09: base + 9,  f10: base + 10,
+        f11: base + 11, f12: base + 12, f13: base + 13, f14: base + 14, f15: base + 15,
+        f16: base + 16, f17: base + 17, f18: base + 18, f19: base + 19, f20: base + 20,
+        f21: base + 21, f22: base + 22, f23: base + 23, f24: base + 24, f25: base + 25
+    }
+}
+
+fn big_sum(r: BigRec) -> Int {
+    r.f01 + r.f02 + r.f03 + r.f04 + r.f05 +
+    r.f06 + r.f07 + r.f08 + r.f09 + r.f10 +
+    r.f11 + r.f12 + r.f13 + r.f14 + r.f15 +
+    r.f16 + r.f17 + r.f18 + r.f19 + r.f20 +
+    r.f21 + r.f22 + r.f23 + r.f24 + r.f25
+}
+
+fn big_dot(a: BigRec, b: BigRec) -> Int {
+    a.f01*b.f01 + a.f02*b.f02 + a.f03*b.f03 + a.f04*b.f04 + a.f05*b.f05 +
+    a.f06*b.f06 + a.f07*b.f07 + a.f08*b.f08 + a.f09*b.f09 + a.f10*b.f10 +
+    a.f11*b.f11 + a.f12*b.f12 + a.f13*b.f13 + a.f14*b.f14 + a.f15*b.f15 +
+    a.f16*b.f16 + a.f17*b.f17 + a.f18*b.f18 + a.f19*b.f19 + a.f20*b.f20 +
+    a.f21*b.f21 + a.f22*b.f22 + a.f23*b.f23 + a.f24*b.f24 + a.f25*b.f25
+}
+
+// Nested records: 3 levels deep
+type Vec3 is { x: Int, y: Int, z: Int };
+type Segment is { start: Vec3, end_pt: Vec3, tag: Int };
+type Scene is { seg1: Segment, seg2: Segment, count: Int };
+
+fn make_vec3(x: Int, y: Int, z: Int) -> Vec3 { Vec3 { x: x, y: y, z: z } }
+fn vec3_sum(v: Vec3) -> Int { v.x + v.y + v.z }
+fn vec3_dot(a: Vec3, b: Vec3) -> Int { a.x * b.x + a.y * b.y + a.z * b.z }
+fn vec3_add(a: Vec3, b: Vec3) -> Vec3 { Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z } }
+fn vec3_scale(v: Vec3, s: Int) -> Vec3 { Vec3 { x: v.x * s, y: v.y * s, z: v.z * s } }
+
+fn make_segment(s: Vec3, e: Vec3, t: Int) -> Segment { Segment { start: s, end_pt: e, tag: t } }
+fn seg_length_sq(s: Segment) -> Int {
+    let dx = s.end_pt.x - s.start.x;
+    let dy = s.end_pt.y - s.start.y;
+    let dz = s.end_pt.z - s.start.z;
+    dx * dx + dy * dy + dz * dz
+}
+
+fn make_scene(s1: Segment, s2: Segment, cnt: Int) -> Scene { Scene { seg1: s1, seg2: s2, count: cnt } }
+fn scene_total(sc: Scene) -> Int {
+    vec3_sum(sc.seg1.start) + vec3_sum(sc.seg1.end_pt) +
+    vec3_sum(sc.seg2.start) + vec3_sum(sc.seg2.end_pt) +
+    sc.seg1.tag + sc.seg2.tag + sc.count
+}
+
+// Record-based 10-element array
+type Arr10 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int, e8: Int, e9: Int };
+
+fn arr10_zeros() -> Arr10 { Arr10 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, e8: 0, e9: 0 } }
+
+fn arr10_get(a: Arr10, i: Int) -> Int {
+    if (i == 0) { return a.e0; }  if (i == 1) { return a.e1; }
+    if (i == 2) { return a.e2; }  if (i == 3) { return a.e3; }
+    if (i == 4) { return a.e4; }  if (i == 5) { return a.e5; }
+    if (i == 6) { return a.e6; }  if (i == 7) { return a.e7; }
+    if (i == 8) { return a.e8; }  a.e9
+}
+
+fn arr10_set(a: Arr10, i: Int, v: Int) -> Arr10 {
+    Arr10 {
+        e0: if (i == 0) { v } else { a.e0 },
+        e1: if (i == 1) { v } else { a.e1 },
+        e2: if (i == 2) { v } else { a.e2 },
+        e3: if (i == 3) { v } else { a.e3 },
+        e4: if (i == 4) { v } else { a.e4 },
+        e5: if (i == 5) { v } else { a.e5 },
+        e6: if (i == 6) { v } else { a.e6 },
+        e7: if (i == 7) { v } else { a.e7 },
+        e8: if (i == 8) { v } else { a.e8 },
+        e9: if (i == 9) { v } else { a.e9 }
+    }
+}
+
+fn arr10_sum(a: Arr10) -> Int { a.e0 + a.e1 + a.e2 + a.e3 + a.e4 + a.e5 + a.e6 + a.e7 + a.e8 + a.e9 }
+
+// 4x4 matrix
+type Mat4 is {
+    m00: Int, m01: Int, m02: Int, m03: Int,
+    m10: Int, m11: Int, m12: Int, m13: Int,
+    m20: Int, m21: Int, m22: Int, m23: Int,
+    m30: Int, m31: Int, m32: Int, m33: Int
+};
+
+fn mat4_identity() -> Mat4 {
+    Mat4 {
+        m00: 1, m01: 0, m02: 0, m03: 0,
+        m10: 0, m11: 1, m12: 0, m13: 0,
+        m20: 0, m21: 0, m22: 1, m23: 0,
+        m30: 0, m31: 0, m32: 0, m33: 1
+    }
+}
+
+fn mat4_trace(m: Mat4) -> Int { m.m00 + m.m11 + m.m22 + m.m33 }
+fn mat4_sum(m: Mat4) -> Int {
+    m.m00 + m.m01 + m.m02 + m.m03 + m.m10 + m.m11 + m.m12 + m.m13 +
+    m.m20 + m.m21 + m.m22 + m.m23 + m.m30 + m.m31 + m.m32 + m.m33
+}
+
+fn main() -> Int {
+    // BigRec: sum of 1..25 = 325
+    let r1 = make_big(0);
+    assert_eq(r1.f01, 1);
+    assert_eq(r1.f25, 25);
+    assert_eq(big_sum(r1), 325);
+
+    // BigRec with offset 100: sum = 25*100 + 325 = 2825
+    let r2 = make_big(100);
+    assert_eq(big_sum(r2), 2825);
+
+    // Dot product: sum(i^2 for i=1..25) = 25*26*51/6 = 5525
+    assert_eq(big_dot(r1, r1), 5525);
+
+    // Nested records: Vec3
+    let v1 = make_vec3(1, 2, 3);
+    let v2 = make_vec3(4, 5, 6);
+    assert_eq(vec3_sum(v1), 6);
+    assert_eq(vec3_dot(v1, v2), 32);   // 1*4+2*5+3*6=4+10+18=32
+    let v3 = vec3_add(v1, v2);
+    assert_eq(v3.x, 5);
+    assert_eq(v3.y, 7);
+    assert_eq(v3.z, 9);
+    let v4 = vec3_scale(v1, 3);
+    assert_eq(v4.x, 3);
+    assert_eq(v4.y, 6);
+    assert_eq(v4.z, 9);
+
+    // Segments
+    let s1 = make_segment(v1, v2, 10);
+    assert_eq(seg_length_sq(s1), 27);  // (4-1)^2+(5-2)^2+(6-3)^2 = 9+9+9=27
+
+    // Scene (3 levels deep)
+    let s2 = make_segment(make_vec3(0, 0, 0), make_vec3(10, 10, 10), 20);
+    let sc = make_scene(s1, s2, 99);
+    // scene_total = 6 + 15 + 0 + 30 + 10 + 20 + 99 = 180
+    assert_eq(scene_total(sc), 180);
+
+    // Arr10 operations
+    let mut arr = arr10_zeros();
+    let mut idx = 0;
+    while (idx < 10) {
+        arr = arr10_set(arr, idx, (idx + 1) * 10);
+        idx = idx + 1;
+    }
+    assert_eq(arr10_sum(arr), 550);
+    assert_eq(arr10_get(arr, 0), 10);
+    assert_eq(arr10_get(arr, 9), 100);
+
+    // Mat4 identity
+    let eye = mat4_identity();
+    assert_eq(mat4_trace(eye), 4);
+    assert_eq(mat4_sum(eye), 4);
+
+    // Custom Mat4
+    let m = Mat4 {
+        m00: 1, m01: 2, m02: 3, m03: 4,
+        m10: 5, m11: 6, m12: 7, m13: 8,
+        m20: 9, m21: 10, m22: 11, m23: 12,
+        m30: 13, m31: 14, m32: 15, m33: 16
+    };
+    assert_eq(mat4_trace(m), 34);
+    assert_eq(mat4_sum(m), 136);
+
+    // Deep nested record construction and access
+    let deep_sc = make_scene(
+        make_segment(make_vec3(100, 200, 300), make_vec3(10, 20, 30), 50),
+        make_segment(make_vec3(1, 2, 3), make_vec3(4, 5, 6), 7),
+        1
+    );
+    // total = 600 + 60 + 6 + 15 + 50 + 7 + 1 = 739
+    assert_eq(scene_total(deep_sc), 739);
+
+    print("836_stress_large_record: PASS");
+    0
+}

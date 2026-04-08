@@ -1,0 +1,148 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, crc, checksum, hashing
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for CRC and checksum computations
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+// Simple XOR checksum
+fn xor_checksum(data: Arr8, n: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < n {
+        // XOR via bit manipulation
+        let a = result;
+        let b = a8_get(data, i);
+        let mut xor_val = 0;
+        let mut bit = 1;
+        let mut aa = a;
+        let mut bb = b;
+        let mut j = 0;
+        while j < 16 {
+            let ab = aa % 2;
+            let bbit = bb % 2;
+            let xb = if ab == bbit { 0 } else { 1 };
+            xor_val = xor_val + xb * bit;
+            aa = aa / 2;
+            bb = bb / 2;
+            bit = bit * 2;
+            j = j + 1;
+        }
+        result = xor_val;
+        i = i + 1;
+    }
+    result
+}
+
+// Additive checksum (mod 256)
+fn add_checksum(data: Arr8, n: Int) -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < n {
+        sum = (sum + a8_get(data, i)) % 256;
+        i = i + 1;
+    }
+    sum
+}
+
+// Fletcher-like checksum
+fn fletcher_checksum(data: Arr8, n: Int) -> Int {
+    let mut sum1 = 0;
+    let mut sum2 = 0;
+    let mut i = 0;
+    while i < n {
+        sum1 = (sum1 + a8_get(data, i)) % 255;
+        sum2 = (sum2 + sum1) % 255;
+        i = i + 1;
+    }
+    sum2 * 256 + sum1
+}
+
+// Adler-like checksum
+fn adler_checksum(data: Arr8, n: Int) -> Int {
+    let mut a = 1;
+    let mut b = 0;
+    let mut i = 0;
+    while i < n {
+        a = (a + a8_get(data, i)) % 65521;
+        b = (b + a) % 65521;
+        i = i + 1;
+    }
+    b * 65536 + a
+}
+
+// Simple polynomial hash
+fn poly_hash(data: Arr8, n: Int, base: Int, modulus: Int) -> Int {
+    let mut h = 0;
+    let mut i = 0;
+    while i < n {
+        h = (h * base + a8_get(data, i)) % modulus;
+        i = i + 1;
+    }
+    h
+}
+
+fn main() -> Int {
+    let data = Arr8 { d0: 72, d1: 101, d2: 108, d3: 108, d4: 111, d5: 0, d6: 0, d7: 0 };
+    let n = 5;  // "Hello" in ASCII
+
+    // XOR checksum of small values
+    let small = Arr8 { d0: 5, d1: 3, d2: 6, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let xc_small = xor_checksum(small, 3);
+    // 5 XOR 3 = 6, 6 XOR 6 = 0
+    assert_eq(xc_small, 0);
+
+    let small2 = Arr8 { d0: 1, d1: 2, d2: 4, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 };
+    let xc_s2 = xor_checksum(small2, 3);
+    // 1 XOR 2 = 3, 3 XOR 4 = 7
+    assert_eq(xc_s2, 7);
+
+    // Additive checksum
+    let ac = add_checksum(data, n);
+    // (72+101+108+108+111) % 256 = 500 % 256 = 244
+    assert_eq(ac, 244);
+
+    // Fletcher checksum
+    let fc = fletcher_checksum(data, n);
+    // sum1: 72, 173, 26 (281%255), 134 (389%255), 245 (500%255)
+    // sum2: 72, 245 (72+173), 16 (245+26)%255, 150 (16+134), 140 (150+245)%255
+    assert_eq(fc % 256, 245);  // sum1 = 245
+    assert_eq(fc / 256, 140);  // sum2 = 140
+
+    // Adler checksum
+    let adc = adler_checksum(data, n);
+    // a: 1+72=73, +101=174, +108=282, +108=390, +111=501
+    // b: 0+73=73, +174=247, +282=529, +390=919, +501=1420
+    assert_eq(adc % 65536, 501);
+    assert_eq(adc / 65536, 1420);
+
+    // Polynomial hash
+    let ph = poly_hash(data, n, 31, 1000000007);
+    assert_eq(ph > 0, true);
+
+    // Different data should give different hash
+    let data2 = Arr8 { d0: 87, d1: 111, d2: 114, d3: 108, d4: 100, d5: 0, d6: 0, d7: 0 };
+    let ph2 = poly_hash(data2, n, 31, 1000000007);
+    assert_eq(ph != ph2, true);
+
+    // Same data gives same hash
+    let ph3 = poly_hash(data, n, 31, 1000000007);
+    assert_eq(ph, ph3);
+
+    // Empty data
+    assert_eq(add_checksum(data, 0), 0);
+    assert_eq(poly_hash(data, 0, 31, 1000000007), 0);
+
+    print("[OK] 299_crc_checksum_aot");
+    0
+}

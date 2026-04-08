@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @expected-exit: 0
+// @description: Test Int8 type constants (MIN, MAX, BITS)
+
+fn main() {
+    // Test Int8.MIN (-2^7)
+    assert_eq(Int8.MIN(), -128);
+
+    // Test Int8.MAX (2^7 - 1)
+    assert_eq(Int8.MAX(), 127);
+
+    // Test Int8.BITS
+    assert_eq(Int8.BITS(), 8);
+
+    // Test i8 alias (FFI compatibility)
+    assert_eq(i8.MIN(), -128);
+    assert_eq(i8.MAX(), 127);
+    assert_eq(i8.BITS(), 8);
+}

@@ -1,0 +1,208 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: dependent-types, sigma-types, construction
+
+/// Sigma type construction - building dependent pairs
+///
+/// Demonstrates various ways to construct dependent pairs,
+/// including smart constructors and validation.
+
+/// Dependent pair: a value together with an associated datum
+type DepPair<A, B> is {
+    fst: A,
+    snd: B,
+};
+
+/// Direct construction with explicit values
+fn direct_construction() -> DepPair<Int, List<Int>> {
+    DepPair {
+        fst: 3,
+        snd: [1, 2, 3],
+    }
+}
+
+/// Smart constructor for non-empty list
+fn mk_nonempty<T>(xs: List<T>) -> Maybe<DepPair<List<T>, Int>> {
+    if xs.len() > 0 {
+        Some(DepPair { fst: xs, snd: xs.len() })
+    } else {
+        None
+    }
+}
+
+/// Positive number type
+type Positive is {
+    value: Int,
+};
+
+fn mk_positive(n: Int) -> Maybe<Positive> {
+    if n > 0 {
+        Some(Positive { value: n })
+    } else {
+        None
+    }
+}
+
+/// Bounded value type
+type Bounded is {
+    value: Int,
+    lo: Int,
+    hi: Int,
+};
+
+fn mk_bounded(value: Int, lo: Int, hi: Int) -> Maybe<Bounded> {
+    if value >= lo && value <= hi {
+        Some(Bounded { value, lo, hi })
+    } else {
+        None
+    }
+}
+
+/// Clamp to bounds
+fn clamp_bounded(value: Int, lo: Int, hi: Int) -> Bounded {
+    let clamped = if value < lo { lo }
+                  else if value > hi { hi }
+                  else { value };
+    Bounded { value: clamped, lo, hi }
+}
+
+/// Even number construction
+type Even is {
+    value: Int,
+};
+
+fn double_to_even(n: Int) -> Even {
+    Even { value: n * 2 }
+}
+
+fn sum_evens(a: Even, b: Even) -> Even {
+    Even { value: a.value + b.value }
+}
+
+/// Sorted list construction
+type SortedList<T> is {
+    data: List<T>,
+};
+
+fn mk_sorted_empty<T>() -> SortedList<T> {
+    SortedList { data: [] }
+}
+
+fn mk_sorted_singleton<T>(x: T) -> SortedList<T> {
+    SortedList { data: [x] }
+}
+
+fn mk_sorted_from_list<T>(xs: List<T>) -> SortedList<T> {
+    let mut sorted = xs;
+    sorted.sort();
+    SortedList { data: sorted }
+}
+
+/// Matrix construction
+type Matrix<T, Rows: meta Int, Cols: meta Int> is {
+    data: [T; Rows * Cols],
+};
+
+fn mat_zeros<R: meta Int, C: meta Int>() -> Matrix<Float, R, C> {
+    Matrix { data: [0.0; R * C] }
+}
+
+/// Valid user construction with multiple checks
+type ValidUser is {
+    name: Text,
+    age: Int,
+    email: Text,
+};
+
+fn mk_valid_user(name: Text, age: Int, email: Text) -> Maybe<ValidUser> {
+    if name.len() == 0 {
+        return None;
+    }
+    if age < 18 {
+        return None;
+    }
+    Some(ValidUser { name, age, email })
+}
+
+/// Sized collection
+type SizedVec<T> is {
+    len: Int,
+    data: List<T>,
+};
+
+fn mk_sized<T>(data: List<T>) -> SizedVec<T> {
+    SizedVec { len: data.len(), data }
+}
+
+fn sv_empty<T>() -> SizedVec<T> {
+    SizedVec { len: 0, data: [] }
+}
+
+fn sv_singleton<T>(x: T) -> SizedVec<T> {
+    SizedVec { len: 1, data: [x] }
+}
+
+fn sv_push<T>(sv: SizedVec<T>, x: T) -> SizedVec<T> {
+    let mut data = sv.data;
+    data.push(x);
+    SizedVec { len: sv.len + 1, data }
+}
+
+fn main() {
+    // Direct construction
+    let sized = direct_construction();
+    assert(sized.fst == 3);
+    assert(sized.snd.len() == 3);
+
+    // Smart constructor
+    let ne = mk_nonempty([1, 2, 3]);
+    assert(ne.is_some());
+
+    let empty = mk_nonempty([]);
+    assert(empty.is_none());
+
+    // Positive construction
+    let pos = mk_positive(42);
+    assert(pos.is_some());
+
+    let neg = mk_positive(-5);
+    assert(neg.is_none());
+
+    // Bounded construction
+    let bounded = mk_bounded(50, 0, 100);
+    assert(bounded.is_some());
+
+    let out = mk_bounded(150, 0, 100);
+    assert(out.is_none());
+
+    // Even construction
+    let e1 = double_to_even(21);
+    assert(e1.value == 42);
+
+    let e2 = double_to_even(5);
+    let e3 = sum_evens(e1, e2);
+    assert(e3.value == 52);
+
+    // Sorted list
+    let sorted = mk_sorted_from_list([3, 1, 4, 1, 5]);
+    assert(sorted.data.len() == 5);
+
+    // Matrix construction
+    let zeros: Matrix<Float, 3, 4> = mat_zeros();
+    assert(zeros.data.len() == 12);
+
+    // User construction
+    let user = mk_valid_user("Alice", 25, "alice@example.com");
+    assert(user.is_some());
+
+    let invalid = mk_valid_user("", 25, "alice@example.com");
+    assert(invalid.is_none());
+
+    // Sized vector
+    let sv = sv_empty.<Int>();
+    let sv = sv_push(sv, 1);
+    let sv = sv_push(sv, 2);
+    assert(sv.len == 2);
+    assert(sv.data.len() == 2);
+}

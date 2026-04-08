@@ -1,0 +1,43 @@
+// @test: meta-fail
+// @level: L2
+// @tier: 0
+// @expected-error: M406
+// @tags: meta, quote, hygiene, lift, type
+// @description: Tests detection of lift type mismatches (unliftable types)
+
+// =============================================================================
+// LIFT TYPE MISMATCH - UNLIFTABLE TYPES
+// =============================================================================
+
+// Closures cannot be lifted (they're not representable as syntax)
+meta fn lift_closure() -> TokenStream {
+    let f = |x: Int| x * 2;  // Closure type
+
+    quote {
+        let func = lift(f);  // ERROR: M406 - Cannot lift closure type
+    }
+}
+
+// Mutable references cannot be lifted
+meta fn lift_mut_ref() -> TokenStream {
+    let mut value = 42;
+    let r = &mut value;
+
+    quote {
+        let ref_val = lift(r);  // ERROR: M406 - Cannot lift &mut reference
+    }
+}
+
+// Opaque/extern types cannot be lifted
+@extern
+type OpaqueHandle is ();
+
+meta fn lift_opaque(handle: OpaqueHandle) -> TokenStream {
+    quote {
+        let h = lift(handle);  // ERROR: M406 - Cannot lift opaque type
+    }
+}
+
+fn main() {
+    @const assert(true);
+}

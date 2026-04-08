@@ -1,0 +1,113 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, map
+
+@test
+fn test_map_insert_get() {
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    let val = m.get("a");
+    assert_eq(val, 1);
+}
+
+@test
+fn test_map_len() {
+    let mut m = Map.new();
+    m.insert("x", 10);
+    m.insert("y", 20);
+    assert_eq(m.len(), 2);
+}
+
+@test
+fn test_map_is_empty() {
+    let m = Map.new();
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_contains_key() {
+    let mut m = Map.new();
+    m.insert("key", 42);
+    assert(m.contains_key("key"));
+    assert(!m.contains_key("other"));
+}
+
+@test
+fn test_map_remove() {
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    let old = m.remove("a");
+    assert_eq(old, 1);
+    assert_eq(m.len(), 1);
+}
+
+@test
+fn test_map_keys() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    let ks = m.keys();
+    assert_eq(ks.len(), 3);
+}
+
+@test
+fn test_map_values() {
+    let mut m = Map.new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    let vs = m.values();
+    assert_eq(vs.len(), 2);
+}
+
+@test
+fn test_map_entries() {
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    let es = m.entries();
+    assert_eq(es.len(), 2);
+}
+
+@test
+fn test_map_clear() {
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.clear();
+    assert(m.is_empty());
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn test_map_get_or_insert() {
+    let mut m = Map.new();
+    let v1 = m.get_or_insert("key", 42);
+    assert_eq(v1, 42);
+    let v2 = m.get_or_insert("key", 99);
+    assert_eq(v2, 42);
+}
+
+@test
+fn test_map_overwrite() {
+    let mut m = Map.new();
+    m.insert("a", 1);
+    m.insert("a", 2);
+    let val = m.get("a");
+    assert_eq(val, 2);
+}
+
+@test
+fn test_map_many_entries() {
+    let mut m = Map.new();
+    let mut i = 0;
+    while i < 50 {
+        m.insert(i, i * 10);
+        i = i + 1;
+    }
+    assert_eq(m.len(), 50);
+    assert(m.contains_key(25));
+}

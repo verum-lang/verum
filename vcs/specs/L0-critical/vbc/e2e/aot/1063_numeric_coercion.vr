@@ -1,0 +1,89 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: numeric, coercion, float, int
+// @expect: pass
+
+// Test numeric operations and coercions.
+
+fn main() -> Int {
+    // Int to Float conversion
+    let x = 42;
+    let f = x as Float;
+    if f != 42.0 {
+        print("FAIL: int to float");
+        return 1;
+    }
+
+    // Float to Int conversion
+    let g = 3.14;
+    let i = g as Int;
+    if i != 3 {
+        print(f"FAIL: float to int = {i}");
+        return 1;
+    }
+
+    // Mixed arithmetic (should work with explicit cast)
+    let result = (x as Float) * 2.5;
+    // 42 * 2.5 = 105.0
+    let r_int = result as Int;
+    if r_int != 105 {
+        print(f"FAIL: mixed arithmetic = {r_int}");
+        return 1;
+    }
+
+    // Float comparison
+    let a = 1.0 / 3.0;
+    let b = 0.333333;
+    // These are close but not equal
+    let diff = a - b;
+    if diff < 0.0 {
+        // Make positive
+        if -diff > 0.001 {
+            print("FAIL: float comparison");
+            return 1;
+        }
+    } else {
+        if diff > 0.001 {
+            print("FAIL: float comparison");
+            return 1;
+        }
+    }
+
+    // Integer division
+    let div = 17 / 5;
+    if div != 3 {
+        print(f"FAIL: int division = {div}");
+        return 1;
+    }
+
+    // Integer modulo
+    let modulo = 17 % 5;
+    if modulo != 2 {
+        print(f"FAIL: modulo = {modulo}");
+        return 1;
+    }
+
+    // Bitwise operations
+    let bits = 0xFF;
+    let shifted = bits >> 4;
+    if shifted != 0x0F {
+        print(f"FAIL: shift = {shifted}");
+        return 1;
+    }
+
+    let anded = bits & 0x0F;
+    if anded != 0x0F {
+        print(f"FAIL: and = {anded}");
+        return 1;
+    }
+
+    let ored = 0xF0 | 0x0F;
+    if ored != 0xFF {
+        print(f"FAIL: or = {ored}");
+        return 1;
+    }
+
+    print("PASS: numeric operations work");
+    0
+}

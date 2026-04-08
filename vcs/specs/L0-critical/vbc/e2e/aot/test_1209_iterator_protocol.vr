@@ -1,0 +1,141 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: iterator, protocol, for-in, e2e
+// @description: Test custom iterator protocol with for-in loops
+
+type MyRange is { start: Int, end_val: Int, current: Int };
+
+implement MyRange {
+    fn new(start: Int, end_val: Int) -> MyRange {
+        MyRange { start: start, end_val: end_val, current: start }
+    }
+
+    fn has_next(&self) -> Bool {
+        self.current < self.end_val
+    }
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end_val {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+}
+
+type StepRange is { start: Int, end_val: Int, step: Int, current: Int };
+
+implement StepRange {
+    fn new(start: Int, end_val: Int, step: Int) -> StepRange {
+        StepRange { start: start, end_val: end_val, step: step, current: start }
+    }
+
+    fn has_next(&self) -> Bool {
+        self.current < self.end_val
+    }
+
+    fn next(&mut self) -> Maybe<Int> {
+        if self.current < self.end_val {
+            let val = self.current;
+            self.current = self.current + self.step;
+            Some(val)
+        } else {
+            None
+        }
+    }
+}
+
+fn sum_range(start: Int, end_val: Int) -> Int {
+    let mut r = MyRange.new(start, end_val);
+    let mut sum = 0;
+    while r.has_next() {
+        match r.next() {
+            Some(v) => { sum = sum + v; }
+            None => {}
+        }
+    }
+    sum
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Basic range iteration
+    let s1 = sum_range(1, 6);
+    if s1 != 15 {
+        print(f"FAIL 1: sum 1..6 = {s1}");
+        f = f + 1;
+    } else {
+        print("  range_sum: OK");
+    }
+
+    // Test 2: Step range
+    let mut sr = StepRange.new(0, 20, 5);
+    let mut sum2 = 0;
+    let mut count2 = 0;
+    while sr.has_next() {
+        match sr.next() {
+            Some(v) => {
+                sum2 = sum2 + v;
+                count2 = count2 + 1;
+            }
+            None => {}
+        }
+    }
+    // 0 + 5 + 10 + 15 = 30
+    if sum2 != 30 {
+        print(f"FAIL 2: step sum = {sum2}");
+        f = f + 1;
+    } else {
+        print("  step_range: OK");
+    }
+    if count2 != 4 {
+        print(f"FAIL 2b: step count = {count2}");
+        f = f + 1;
+    }
+
+    // Test 3: Empty range
+    let s3 = sum_range(5, 5);
+    if s3 != 0 {
+        print(f"FAIL 3: empty range = {s3}");
+        f = f + 1;
+    } else {
+        print("  empty_range: OK");
+    }
+
+    // Test 4: for-in with built-in range
+    let mut sum4 = 0;
+    for i in 1..11 {
+        sum4 = sum4 + i;
+    }
+    if sum4 != 55 {
+        print(f"FAIL 4: for-in sum = {sum4}");
+        f = f + 1;
+    } else {
+        print("  for_in_range: OK");
+    }
+
+    // Test 5: for-in with list
+    let items = List.new();
+    items.push(10);
+    items.push(20);
+    items.push(30);
+    let mut sum5 = 0;
+    for item in items {
+        sum5 = sum5 + item;
+    }
+    if sum5 != 60 {
+        print(f"FAIL 5: for-in list = {sum5}");
+        f = f + 1;
+    } else {
+        print("  for_in_list: OK");
+    }
+
+    if f == 0 {
+        print("All iterator protocol tests passed");
+    }
+    f
+}

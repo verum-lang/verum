@@ -1,0 +1,53 @@
+// @test: parse
+// @level: L1
+// @tags: meta, cfg, target, platform
+// @timeout: 5000
+
+/// @cfg for target-specific conditional compilation.
+
+// OS-specific implementations
+@cfg(target_os = "linux")
+fn get_page_size() -> Int {
+    4096
+}
+
+@cfg(target_os = "macos")
+fn get_page_size() -> Int {
+    16384
+}
+
+@cfg(target_os = "windows")
+fn get_page_size() -> Int {
+    4096
+}
+
+// Architecture-specific
+@cfg(target_arch = "x86_64")
+fn has_simd() -> Bool {
+    true
+}
+
+@cfg(target_arch = "aarch64")
+fn has_simd() -> Bool {
+    true
+}
+
+// Combined conditions
+@cfg(target_os = "linux")
+@cfg(target_arch = "x86_64")
+fn linux_x64_specific() {
+    print("Linux x86_64");
+}
+
+// Feature and target combined
+@cfg(feature = "gpu")
+@cfg(target_os = "linux")
+fn gpu_compute() {
+    print("GPU compute on Linux");
+}
+
+fn main() {
+    let page = get_page_size();
+    print(f"Page size: {page}");
+    print("Cfg target tests parsed");
+}

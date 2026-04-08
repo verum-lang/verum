@@ -1,0 +1,75 @@
+// @test: run
+// @level: L3
+// @tier: 2
+// @tags: wasm, closures, higher-order, cross-compilation
+// @expected-exit: 0
+// @description: Closures and higher-order patterns under WASM
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    |x| x + n
+}
+
+fn make_multiplier(n: Int) -> fn(Int) -> Int {
+    |x| x * n
+}
+
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn count_if(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Basic closures
+    let double = |x: Int| -> Int { x * 2 };
+    let square = |x: Int| -> Int { x * x };
+    assert_eq(double(21), 42);
+    assert_eq(square(7), 49);
+
+    // apply_twice
+    assert_eq(apply_twice(double, 3), 12);
+    assert_eq(apply_twice(|x| x + 1, 0), 2);
+
+    // Closure factories
+    let add5 = make_adder(5);
+    let mul3 = make_multiplier(3);
+    assert_eq(add5(37), 42);
+    assert_eq(mul3(14), 42);
+
+    // Fold (sum 1..10)
+    let sum = fold_range(1, 11, 0, |acc, x| acc + x);
+    assert_eq(sum, 55);
+
+    // Fold (product 1..6 = 5!)
+    let product = fold_range(1, 6, 1, |acc, x| acc * x);
+    assert_eq(product, 120);
+
+    // Count with predicate
+    let evens = count_if(1, 21, |x| x % 2 == 0);
+    assert_eq(evens, 10);
+
+    let multiples_of_3 = count_if(1, 31, |x| x % 3 == 0);
+    assert_eq(multiples_of_3, 10);
+
+    0
+}

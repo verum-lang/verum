@@ -1,0 +1,211 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, calls, method, receiver, self
+
+fn test_simple_identifier_receiver() {
+    // Method call on simple identifier
+    let length = text.len();
+    let upper = name.to_upper();
+    let result = value.compute();
+}
+
+fn test_literal_receiver() {
+    // Method call on literal
+    let len = "hello".len();
+    let doubled = 42.double();
+    let formatted = 3.14.format();
+}
+
+fn test_parenthesized_receiver() {
+    // Method call on parenthesized expression
+    let result = (a + b).abs();
+    let length = (first + second).len();
+    let computed = (x * y).sqrt();
+}
+
+fn test_tuple_field_receiver() {
+    // Method call on tuple field access
+    let first_len = pair.0.len();
+    let second_val = triple.1.get();
+}
+
+fn test_struct_field_receiver() {
+    // Method call on struct field access
+    let name_len = person.name.len();
+    let city_upper = address.city.to_upper();
+    let nested = outer.inner.field.method();
+}
+
+fn test_array_element_receiver() {
+    // Method call on array element
+    let item_len = items[0].len();
+    let element_val = matrix[i][j].get();
+}
+
+fn test_function_result_receiver() {
+    // Method call on function result
+    let parsed_len = parse(input).len();
+    let computed_abs = compute(x, y).abs();
+}
+
+fn test_closure_result_receiver() {
+    // Method call on closure result
+    let closure_result = (|| 42)().double();
+    let applied = make_fn()(arg).process();
+}
+
+fn test_if_expression_receiver() {
+    // Method call on if expression result
+    let conditional = if x > 0 { x } else { -x }.abs();
+    let selected = (if flag { a } else { b }).compute();
+}
+
+fn test_match_expression_receiver() {
+    // Method call on match expression result
+    let matched = match opt {
+        Some(x) => x,
+        None => 0,
+    }.double();
+}
+
+fn test_block_expression_receiver() {
+    // Method call on block expression result
+    let from_block = {
+        let x = compute();
+        x * 2
+    }.sqrt();
+}
+
+fn test_try_expression_receiver() {
+    // Method call on try expression result
+    let tried = try { risky_op() }?.process();
+}
+
+fn test_chained_receiver() {
+    // Chained method calls on various receivers
+    let chained = items
+        .iter()
+        .filter(|x| x > 0)
+        .map(|x| x * 2)
+        .collect();
+}
+
+fn test_self_mutation() {
+    // Method call with self mutations
+    value.increment();
+    counter.add(5);
+    list.push(item);
+    map.insert(key, value);
+}
+
+fn test_reference_receiver() {
+    // Method call with reference receivers
+    let ref_result = (&value).method();
+    let mut_ref = (&mut data).modify();
+}
+
+// NOTE: &checked expr syntax may not be supported as a single expression
+// fn test_checked_reference_receiver() {
+//     let checked = (&checked value).safe_access();
+// }
+
+fn test_dereference_receiver() {
+    // Method call on dereference
+    let deref_method = (*boxed).method();
+    let ptr_method = (*pointer).call();
+}
+
+fn test_range_receiver() {
+    // Method call on range
+    let range_iter = (0..10).map(|x| x * 2);
+    let inclusive = (1..=100).sum();
+}
+
+fn test_optional_chain_receiver() {
+    // Method call on option chain
+    let maybe_len = maybe_text?.len();
+    let safe_compute = optional?.field?.method();
+}
+
+fn test_await_receiver() {
+    // Method call after await
+    let async_result = fetch(url).await.parse();
+    let awaited = async_fn().await.process();
+}
+
+fn test_spawn_receiver() {
+    // Method call on spawn result
+    let spawned = spawn task().get();
+}
+
+fn test_pipeline_receiver() {
+    // Method call with pipeline operator
+    let piped = data |> transform |> result.finalize();
+}
+
+fn test_record_literal_receiver() {
+    // Method call on record literal
+    let literal_method = Point { x: 0, y: 0 }.distance();
+    let config_method = Config { port: 8080, host: "localhost" }.validate();
+}
+
+fn test_array_literal_receiver() {
+    // Method call on array literal
+    let array_method = [1, 2, 3, 4, 5].iter();
+    let list_method = [a, b, c].first();
+}
+
+fn test_tuple_literal_receiver() {
+    // Method call on tuple literal
+    let tuple_method = (1, 2, 3).into_array();
+}
+
+fn test_map_literal_receiver() {
+    // Method call on map literal
+    let map_method = { "key": value }.get("key");
+}
+
+fn test_type_ascription_receiver() {
+    // Method call with type ascription
+    let typed = (value as Interface).method();
+    let casted = (item as Display).display();
+}
+
+fn test_complex_receiver() {
+    // Complex receiver expressions
+    let complex = outer
+        .get_inner()
+        .unwrap()
+        .field
+        .sub_field
+        [index]
+        .method()
+        .chain();
+}
+
+// NOTE: Type<Arg>.method() syntax may not be supported
+// fn test_generic_instantiation_receiver() {
+//     let generic = Container<Int>.new().method();
+// }
+
+fn test_module_path_receiver() {
+    // Method call on module path (without generics)
+    let module_result = std.collections.Map.new().insert(k, v);
+}
+
+// Method call on impl self
+implement MyType {
+    fn process(&self) {
+        self.helper();
+        self.field.method();
+    }
+}
+
+// Method call with explicit self
+implement Counter {
+    fn increment(self: &mut Self) {
+        Self.helper(&mut self);
+        self.value += 1;
+    }
+}

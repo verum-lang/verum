@@ -1,0 +1,27 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, control-flow, stress
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    let x: Int = 5;
+    let mut result: Int = 0;
+
+    if x > 0 {
+        if x > 1 {
+            if x > 2 {
+                if x > 3 {
+                    if x > 4 {
+                        if x == 5 {
+                            result = 6;  // reached deepest level
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq(result, 6);
+}

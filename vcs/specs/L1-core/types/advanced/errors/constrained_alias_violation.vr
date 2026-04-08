@@ -1,0 +1,16 @@
+// @test: unit
+// @tier: 1
+// @level: L1
+// @tags: error, constrained-alias, advanced-type-syntax
+// @expect: error(ConstraintViolation)
+// @description: Error test for constrained type alias violation
+// @spec: 03-type-system.md Section 13. 3.6
+
+// Constrained type alias requires Num bound
+type NumList<T: Num> is List<T> is ();
+
+fn test_constraint_violation() {
+    // Text does not implement Num
+    let texts: NumList<Text> = ["a", "b"];
+    // ERROR: Text: !Num
+}

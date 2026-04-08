@@ -1,0 +1,247 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, polynomial, horner, recursive, variants
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT polynomial evaluation using Horner's method with recursive variant types
+
+// Polynomial represented as a linked list of coefficients (lowest degree first)
+// PZero = the zero polynomial
+// PCoeff { coeff: c, rest: p } = c + x * p
+// Example: 1 + 3x + 2x^2 = PCoeff { coeff: 1, rest: PCoeff { coeff: 3, rest: PCoeff { coeff: 2, rest: PZero } } }
+type Poly is PZero | PCoeff { coeff: Int, rest: Poly };
+
+// Evaluate polynomial at x using Horner's method (iterative unwinding via recursion)
+// p(x) = c0 + x * (c1 + x * (c2 + ... ))
+fn poly_eval(p: Poly, x: Int) -> Int {
+    match p {
+        PZero => 0,
+        PCoeff { coeff, rest } => coeff + x * poly_eval(rest, x),
+    }
+}
+
+// Add two polynomials coefficient-wise
+fn poly_add(p: Poly, q: Poly) -> Poly {
+    match p {
+        PZero => q,
+        PCoeff { coeff: pc, rest: pr } => {
+            match q {
+                PZero => p,
+                PCoeff { coeff: qc, rest: qr } => {
+                    PCoeff { coeff: pc + qc, rest: poly_add(pr, qr) }
+                },
+            }
+        },
+    }
+}
+
+// Degree of polynomial (-1 for zero polynomial)
+fn poly_degree(p: Poly) -> Int {
+    match p {
+        PZero => 0 - 1,
+        PCoeff { coeff: _, rest } => {
+            let rd = poly_degree(rest);
+            if rd < 0 { 0 } else { 1 + rd }
+        },
+    }
+}
+
+// Scale polynomial by a constant: k * p(x)
+fn poly_scale(p: Poly, k: Int) -> Poly {
+    match p {
+        PZero => PZero,
+        PCoeff { coeff, rest } => PCoeff { coeff: coeff * k, rest: poly_scale(rest, k) },
+    }
+}
+
+// Multiply polynomial by x: shifts all coefficients up by one degree
+fn poly_shift(p: Poly) -> Poly {
+    match p {
+        PZero => PZero,
+        _ => PCoeff { coeff: 0, rest: p },
+    }
+}
+
+// Multiply two polynomials: p * q
+// p(x) * q(x) = (c0 + x*rest) * q = c0*q + x*(rest*q)
+fn poly_mul(p: Poly, q: Poly) -> Poly {
+    match p {
+        PZero => PZero,
+        PCoeff { coeff, rest } => {
+            let term = poly_scale(q, coeff);
+            let higher = poly_shift(poly_mul(rest, q));
+            poly_add(term, higher)
+        },
+    }
+}
+
+// Sum of all coefficients (= p(1))
+fn poly_coeff_sum(p: Poly) -> Int {
+    poly_eval(p, 1)
+}
+
+// Leading coefficient (highest degree)
+fn poly_leading(p: Poly) -> Int {
+    match p {
+        PZero => 0,
+        PCoeff { coeff, rest } => {
+            match rest {
+                PZero => coeff,
+                _ => poly_leading(rest),
+            }
+        },
+    }
+}
+
+// Count number of nonzero terms
+fn poly_count_terms(p: Poly) -> Int {
+    match p {
+        PZero => 0,
+        PCoeff { coeff, rest } => {
+            let rest_count = poly_count_terms(rest);
+            if coeff != 0 { 1 + rest_count } else { rest_count }
+        },
+    }
+}
+
+// Helper: make constant polynomial
+fn poly_const(c: Int) -> Poly {
+    if c == 0 { PZero }
+    else { PCoeff { coeff: c, rest: PZero } }
+}
+
+// Helper: make polynomial c0 + c1*x
+fn poly_linear(c0: Int, c1: Int) -> Poly {
+    PCoeff { coeff: c0, rest: PCoeff { coeff: c1, rest: PZero } }
+}
+
+// Helper: make polynomial c0 + c1*x + c2*x^2
+fn poly_quadratic(c0: Int, c1: Int, c2: Int) -> Poly {
+    PCoeff { coeff: c0, rest: PCoeff { coeff: c1, rest: PCoeff { coeff: c2, rest: PZero } } }
+}
+
+fn main() -> Int {
+    // === Basic polynomial evaluation ===
+    // p(x) = 1 + 3x + 2x^2
+    let p = poly_quadratic(1, 3, 2);
+
+    // p(0) = 1
+    assert_eq(poly_eval(p, 0), 1);
+    // p(1) = 1 + 3 + 2 = 6
+    assert_eq(poly_eval(p, 1), 6);
+    // p(2) = 1 + 6 + 8 = 15
+    assert_eq(poly_eval(p, 2), 15);
+    // p(5) = 1 + 15 + 50 = 66
+    assert_eq(poly_eval(p, 5), 66);
+    // p(-1) = 1 - 3 + 2 = 0
+    assert_eq(poly_eval(p, 0 - 1), 0);
+    // p(10) = 1 + 30 + 200 = 231
+    assert_eq(poly_eval(p, 10), 231);
+
+    // === Degree ===
+    assert_eq(poly_degree(PZero), 0 - 1);
+    assert_eq(poly_degree(poly_const(5)), 0);
+    assert_eq(poly_degree(poly_linear(1, 2)), 1);
+    assert_eq(poly_degree(p), 2);
+
+    // === Leading coefficient ===
+    assert_eq(poly_leading(p), 2);
+    assert_eq(poly_leading(poly_linear(3, 7)), 7);
+    assert_eq(poly_leading(poly_const(42)), 42);
+
+    // === Count terms ===
+    assert_eq(poly_count_terms(p), 3);
+    assert_eq(poly_count_terms(PZero), 0);
+    assert_eq(poly_count_terms(poly_const(5)), 1);
+
+    // Polynomial with a zero coefficient: 1 + 0*x + 5*x^2
+    let sparse = poly_quadratic(1, 0, 5);
+    assert_eq(poly_count_terms(sparse), 2);
+    assert_eq(poly_eval(sparse, 3), 1 + 0 + 45);
+
+    // === Polynomial addition ===
+    // q(x) = 2 + x
+    let q = poly_linear(2, 1);
+    // p + q = (1+2) + (3+1)x + 2x^2 = 3 + 4x + 2x^2
+    let sum = poly_add(p, q);
+    assert_eq(poly_eval(sum, 0), 3);
+    assert_eq(poly_eval(sum, 1), 9);   // 3 + 4 + 2
+    assert_eq(poly_eval(sum, 2), 19);  // 3 + 8 + 8
+
+    // Addition with zero
+    let p_plus_zero = poly_add(p, PZero);
+    assert_eq(poly_eval(p_plus_zero, 5), poly_eval(p, 5));
+
+    // Commutativity of addition: p + q = q + p
+    let sum2 = poly_add(q, p);
+    assert_eq(poly_eval(sum, 3), poly_eval(sum2, 3));
+    assert_eq(poly_eval(sum, 7), poly_eval(sum2, 7));
+
+    // === Scaling ===
+    // 3 * p(x) = 3 + 9x + 6x^2
+    let sp = poly_scale(p, 3);
+    assert_eq(poly_eval(sp, 0), 3);
+    assert_eq(poly_eval(sp, 1), 18);  // 3 + 9 + 6
+    assert_eq(poly_eval(sp, 2), 45);  // 3 + 18 + 24
+    // scale(p, k) evaluated at x should equal k * p(x)
+    assert_eq(poly_eval(sp, 4), 3 * poly_eval(p, 4));
+
+    // Scale by 0 gives zero polynomial behavior
+    let sz = poly_scale(p, 0);
+    assert_eq(poly_eval(sz, 100), 0);
+
+    // === Polynomial multiplication ===
+    // (1 + x) * (1 + x) = 1 + 2x + x^2
+    let one_plus_x = poly_linear(1, 1);
+    let squared = poly_mul(one_plus_x, one_plus_x);
+    assert_eq(poly_eval(squared, 0), 1);
+    assert_eq(poly_eval(squared, 1), 4);   // 1 + 2 + 1
+    assert_eq(poly_eval(squared, 2), 9);   // 1 + 4 + 4
+    assert_eq(poly_eval(squared, 3), 16);  // 1 + 6 + 9
+    assert_eq(poly_eval(squared, 5), 36);  // (1+5)^2
+
+    // (2 + 3x) * (1 + x + x^2)
+    // = 2 + 2x + 2x^2 + 3x + 3x^2 + 3x^3
+    // = 2 + 5x + 5x^2 + 3x^3
+    let r = poly_linear(2, 3);
+    let s = poly_quadratic(1, 1, 1);
+    let product = poly_mul(r, s);
+    assert_eq(poly_eval(product, 0), 2);
+    assert_eq(poly_eval(product, 1), 15);  // 2 + 5 + 5 + 3
+    assert_eq(poly_eval(product, 2), 56);  // 2 + 5*2 + 5*4 + 3*8 = 2+10+20+24 = 56
+
+    // Verify via direct evaluation: r(x)*s(x) should equal product(x)
+    assert_eq(poly_eval(product, 3), poly_eval(r, 3) * poly_eval(s, 3));
+    assert_eq(poly_eval(product, 4), poly_eval(r, 4) * poly_eval(s, 4));
+    assert_eq(poly_eval(product, 7), poly_eval(r, 7) * poly_eval(s, 7));
+
+    // === Multiply by zero ===
+    let mul_zero = poly_mul(PZero, p);
+    assert_eq(poly_eval(mul_zero, 100), 0);
+
+    // === Coeff sum = p(1) ===
+    assert_eq(poly_coeff_sum(p), poly_eval(p, 1));
+    assert_eq(poly_coeff_sum(q), poly_eval(q, 1));
+
+    // === Shift (multiply by x) ===
+    // x * (1 + 3x + 2x^2) = x + 3x^2 + 2x^3
+    let shifted = poly_shift(p);
+    assert_eq(poly_eval(shifted, 0), 0);
+    assert_eq(poly_eval(shifted, 1), poly_eval(p, 1));  // same as p(1) since x=1
+    assert_eq(poly_eval(shifted, 2), 2 * poly_eval(p, 2));  // x*p(x) at x=2
+    assert_eq(poly_eval(shifted, 3), 3 * poly_eval(p, 3));
+
+    // === Polynomial identity: (a+b)^2 = a^2 + 2ab + b^2 ===
+    // Let a = x, b = 2 (i.e., a(x)=x, b(x)=2)
+    let ax = poly_linear(0, 1);   // x
+    let bx = poly_const(2);       // 2
+    let a_plus_b = poly_add(ax, bx);  // x + 2
+    let lhs = poly_mul(a_plus_b, a_plus_b);  // (x+2)^2
+    // (x+2)^2 at x=3 should be 25
+    assert_eq(poly_eval(lhs, 3), 25);
+    // (x+2)^2 at x=10 should be 144
+    assert_eq(poly_eval(lhs, 10), 144);
+
+    0
+}

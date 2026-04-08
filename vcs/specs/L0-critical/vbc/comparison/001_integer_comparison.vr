@@ -1,0 +1,202 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, comparison, integer, eq, ne, lt, le, gt, ge
+// @timeout: 5000
+// @expect: pass
+//
+// Test: EQ_I, NE_I, LT_I, LE_I, GT_I, GE_I
+// Verifies integer comparison operations
+
+fn test_eq() {
+    assert(0 == 0);
+    assert(1 == 1);
+    assert(-1 == -1);
+    assert(42 == 42);
+    assert(1000000 == 1000000);
+
+    // Not equal
+    assert(!(0 == 1));
+    assert(!(1 == -1));
+    assert(!(42 == 43));
+}
+
+fn test_ne() {
+    assert(0 != 1);
+    assert(1 != -1);
+    assert(42 != 43);
+    assert(-100 != 100);
+
+    // Equal
+    assert(!(0 != 0));
+    assert(!(42 != 42));
+}
+
+fn test_lt() {
+    assert(0 < 1);
+    assert(-1 < 0);
+    assert(-1 < 1);
+    assert(42 < 43);
+    assert(-100 < -99);
+    assert(-100 < 100);
+
+    // Not less than
+    assert(!(0 < 0));
+    assert(!(1 < 0));
+    assert(!(1 < 1));
+    assert(!(43 < 42));
+}
+
+fn test_le() {
+    assert(0 <= 0);
+    assert(0 <= 1);
+    assert(-1 <= 0);
+    assert(-1 <= -1);
+    assert(42 <= 42);
+    assert(42 <= 43);
+
+    // Not less than or equal
+    assert(!(1 <= 0));
+    assert(!(43 <= 42));
+}
+
+fn test_gt() {
+    assert(1 > 0);
+    assert(0 > -1);
+    assert(1 > -1);
+    assert(43 > 42);
+    assert(-99 > -100);
+    assert(100 > -100);
+
+    // Not greater than
+    assert(!(0 > 0));
+    assert(!(0 > 1));
+    assert(!(1 > 1));
+    assert(!(42 > 43));
+}
+
+fn test_ge() {
+    assert(0 >= 0);
+    assert(1 >= 0);
+    assert(0 >= -1);
+    assert(-1 >= -1);
+    assert(42 >= 42);
+    assert(43 >= 42);
+
+    // Not greater than or equal
+    assert(!(0 >= 1));
+    assert(!(42 >= 43));
+}
+
+fn test_boundary_values() {
+    let max_48: Int = 140737488355327;
+    let min_48: Int = -140737488355328;
+
+    assert(max_48 == max_48);
+    assert(min_48 == min_48);
+    assert(max_48 != min_48);
+    assert(min_48 < max_48);
+    assert(max_48 > min_48);
+    assert(min_48 <= max_48);
+    assert(max_48 >= min_48);
+
+    assert(max_48 - 1 < max_48);
+    assert(min_48 + 1 > min_48);
+}
+
+fn test_transitivity() {
+    let a: Int = 10;
+    let b: Int = 20;
+    let c: Int = 30;
+
+    // If a < b and b < c, then a < c
+    assert(a < b);
+    assert(b < c);
+    assert(a < c);
+
+    // If a <= b and b <= c, then a <= c
+    assert(a <= b);
+    assert(b <= c);
+    assert(a <= c);
+}
+
+fn test_reflexivity() {
+    let values = [0, 1, -1, 42, -42, 1000000, -1000000];
+
+    // == is reflexive
+    assert(values[0] == values[0]);
+    assert(values[1] == values[1]);
+    assert(values[2] == values[2]);
+
+    // <= and >= are reflexive
+    assert(values[0] <= values[0]);
+    assert(values[0] >= values[0]);
+}
+
+fn test_antisymmetry() {
+    let a: Int = 10;
+    let b: Int = 20;
+
+    // If a < b, then !(b < a)
+    assert(a < b);
+    assert(!(b < a));
+
+    // If a <= b and b <= a, then a == b
+    let c: Int = 10;
+    assert(a <= c);
+    assert(c <= a);
+    assert(a == c);
+}
+
+fn test_trichotomy() {
+    // For any two integers, exactly one of <, ==, > is true
+    fn check_trichotomy(a: Int, b: Int) -> Bool {
+        let lt = a < b;
+        let eq = a == b;
+        let gt = a > b;
+
+        // Exactly one is true
+        (lt && !eq && !gt) ||
+        (!lt && eq && !gt) ||
+        (!lt && !eq && gt)
+    }
+
+    assert(check_trichotomy(0, 0));
+    assert(check_trichotomy(0, 1));
+    assert(check_trichotomy(1, 0));
+    assert(check_trichotomy(-5, 5));
+    assert(check_trichotomy(42, -42));
+}
+
+fn test_comparison_with_zero() {
+    // Positive numbers
+    assert(1 > 0);
+    assert(42 > 0);
+    assert(1000000 > 0);
+
+    // Negative numbers
+    assert(-1 < 0);
+    assert(-42 < 0);
+    assert(-1000000 < 0);
+
+    // Zero
+    assert(0 == 0);
+    assert(!(0 > 0));
+    assert(!(0 < 0));
+}
+
+fn main() {
+    test_eq();
+    test_ne();
+    test_lt();
+    test_le();
+    test_gt();
+    test_ge();
+    test_boundary_values();
+    test_transitivity();
+    test_reflexivity();
+    test_antisymmetry();
+    test_trichotomy();
+    test_comparison_with_zero();
+    print("001_integer_comparison: PASSED");
+}

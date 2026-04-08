@@ -1,0 +1,22 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: dependent-types, sigma-types, negative
+// @expected-error: E500
+
+/// Sigma type constraint violations -- the type checker should reject
+/// values that violate sigma binding where-clauses.
+
+type Natural is n: Int where n >= 0;
+type Positive is n: Int where n > 0;
+type BoundedPair is lo: Int, hi: Int where hi >= lo;
+
+fn main() {
+    // ERROR: -5 violates n >= 0
+    let bad_nat: Natural = -5;
+
+    // ERROR: 0 violates n > 0
+    let bad_pos: Positive = 0;
+
+    // ERROR: hi < lo violates hi >= lo
+    let bad_pair: BoundedPair = BoundedPair { lo: 10, hi: 5 };
+}

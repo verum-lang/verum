@@ -1,0 +1,696 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: parser, generators, fn-star, declarations
+// @timeout: 10000
+//
+// Parser tests for generator function declarations (fn* and async fn*)
+// Verifies correct parsing of generator syntax per grammar/verum.ebnf v2.10
+// Spec: docs/detailed/10-concurrency-model.md Section 12 - Async Generators
+
+// =============================================================================
+// Section 1: Basic Sync Generator Declarations
+// =============================================================================
+
+// Simplest sync generator - empty body
+fn* empty_generator() -> Int {
+}
+
+// Sync generator with single yield
+fn* single_yield() -> Int {
+    yield 42;
+}
+
+// Sync generator with multiple yields
+fn* multi_yield() -> Int {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+// Sync generator with loop
+fn* range(start: Int, end: Int) -> Int {
+    let mut i = start;
+    while i < end {
+        yield i;
+        i += 1;
+    }
+}
+
+// Sync generator with for loop
+fn* range_for(n: Int) -> Int {
+    for i in 0..n {
+        yield i;
+    }
+}
+
+// Sync generator with inclusive range
+fn* inclusive_range(start: Int, end: Int) -> Int {
+    for i in start..=end {
+        yield i;
+    }
+}
+
+// Sync generator with conditional yields
+fn* conditional_yields(flag: Bool) -> Int {
+    if flag {
+        yield 1;
+        yield 2;
+    } else {
+        yield 10;
+        yield 20;
+    }
+}
+
+// Sync generator with match expression
+fn* match_generator(choice: Choice) -> Text {
+    match choice {
+        Choice.A => {
+            yield "first-a";
+            yield "second-a";
+        }
+        Choice.B => {
+            yield "only-b";
+        }
+        Choice.C => {
+            yield "c1";
+            yield "c2";
+            yield "c3";
+        }
+    }
+}
+
+// Sync generator with early return (bare return to finish)
+fn* early_exit(items: List<Int>) -> Int {
+    for item in items {
+        if item < 0 {
+            return;  // Early exit - no more values
+        }
+        yield item;
+    }
+}
+
+// Sync generator with break in loop
+fn* break_generator(limit: Int) -> Int {
+    let mut i = 0;
+    loop {
+        if i >= limit {
+            break;
+        }
+        yield i;
+        i += 1;
+    }
+}
+
+// Sync generator with continue
+fn* skip_odds(n: Int) -> Int {
+    for i in 0..n {
+        if i % 2 != 0 {
+            continue;
+        }
+        yield i;
+    }
+}
+
+// =============================================================================
+// Section 2: Basic Async Generator Declarations
+// =============================================================================
+
+// Simplest async generator
+async fn* async_empty() -> Int {
+}
+
+// Async generator with single yield
+async fn* async_single() -> Int {
+    yield 42;
+}
+
+// Async generator with await and yield
+async fn* fetch_items(urls: List<Text>) -> Data {
+    for url in urls {
+        let data = http_get(url).await;
+        yield data;
+    }
+}
+
+// Async generator with multiple awaits
+async fn* multi_await() -> Chunk {
+    let conn = connect().await;
+    while conn.is_connected() {
+        let chunk = conn.read_chunk().await;
+        yield chunk;
+    }
+    conn.close().await;
+}
+
+// Async generator with loop and break
+async fn* poll_until_done() -> Status {
+    loop {
+        let status = check_status().await;
+        yield status;
+        if status.is_complete() {
+            break;
+        }
+        sleep(Duration.from_millis(100)).await;
+    }
+}
+
+// Async generator with conditional await
+async fn* conditional_fetch(use_cache: Bool) -> Data {
+    if use_cache {
+        let cached = cache_lookup().await;
+        if let Maybe.Some(data) = cached {
+            yield data;
+            return;
+        }
+    }
+    let fresh = fetch_fresh().await;
+    yield fresh;
+}
+
+// Async generator with nested async blocks
+async fn* nested_async() -> Result {
+    let outer = fetch_outer().await;
+    yield outer;
+
+    let inner = async {
+        let data = fetch_inner().await;
+        process(data).await
+    }.await;
+    yield inner;
+}
+
+// =============================================================================
+// Section 3: Generators with Return Types
+// =============================================================================
+
+// Generator returning simple type
+fn* ints() -> Int {
+    yield 1;
+    yield 2;
+}
+
+// Generator returning tuple
+fn* tuples() -> (Int, Text) {
+    yield (1, "one");
+    yield (2, "two");
+    yield (3, "three");
+}
+
+// Generator returning generic type
+fn* maybes() -> Maybe<Int> {
+    yield Maybe.Some(1);
+    yield Maybe.None;
+    yield Maybe.Some(2);
+}
+
+// Generator returning result type
+fn* results() -> Result<Data, Error> {
+    yield Result.Ok(Data.new());
+    yield Result.Err(Error.NotFound);
+}
+
+// Generator returning reference
+fn* refs(items: &List<Int>) -> &Int {
+    for item in items {
+        yield item;
+    }
+}
+
+// Generator returning mutable reference
+fn* mut_refs(items: &mut List<Int>) -> &mut Int {
+    for item in items.iter_mut() {
+        yield item;
+    }
+}
+
+// Generator returning complex nested type
+fn* complex_return() -> Map<Text, List<Result<Data, Error>>> {
+    yield Map.new();
+}
+
+// =============================================================================
+// Section 4: Generators with Parameters
+// =============================================================================
+
+// Generator with single parameter
+fn* with_param(count: Int) -> Int {
+    for i in 0..count {
+        yield i;
+    }
+}
+
+// Generator with multiple parameters
+fn* with_multi_params(start: Int, end: Int, step: Int) -> Int {
+    let mut i = start;
+    while i < end {
+        yield i;
+        i += step;
+    }
+}
+
+// Generator with reference parameter
+fn* with_ref_param(data: &List<Int>) -> Int {
+    for item in data {
+        yield *item;
+    }
+}
+
+// Generator with mutable reference parameter
+fn* with_mut_param(data: &mut List<Int>) -> Int {
+    for item in data.drain() {
+        yield item;
+    }
+}
+
+// Generator with generic parameter
+fn* generic_gen<T: Clone>(items: List<T>) -> T {
+    for item in items {
+        yield item.clone();
+    }
+}
+
+// Generator with multiple generic parameters
+fn* multi_generic<K, V>(map: Map<K, V>) -> (K, V) {
+    for (k, v) in map {
+        yield (k, v);
+    }
+}
+
+// Generator with bounded generic
+fn* bounded_generic<T: Display + Clone>(items: List<T>) -> T {
+    for item in items {
+        yield item;
+    }
+}
+
+// Generator with where clause
+fn* where_clause<T>(items: List<T>) -> T
+where type T: Iterator + Clone
+{
+    for item in items {
+        yield item;
+    }
+}
+
+// =============================================================================
+// Section 5: Generators with Context System
+// =============================================================================
+
+// Async generator with single context
+async fn* with_context() -> Data using Database {
+    let items = Database.query_all().await;
+    for item in items {
+        yield item;
+    }
+}
+
+// Async generator with multiple contexts
+async fn* multi_context() -> Response using [Http, Logger] {
+    Logger.info("Starting fetch");
+    let response = Http.get("/api/data").await;
+    Logger.info("Fetch complete");
+    yield response;
+}
+
+// Async generator with bracket context syntax
+async fn* bracket_context() -> Page using [Http, Cache, Metrics] {
+    let mut page = 1;
+    loop {
+        Metrics.record_page_fetch(page);
+        let cached = Cache.get(f"page-{page}").await;
+        let data = match cached {
+            Maybe.Some(d) => d,
+            Maybe.None => {
+                let fresh = Http.get(f"/pages/{page}").await;
+                Cache.set(f"page-{page}", fresh).await;
+                fresh
+            }
+        };
+        yield data;
+        if !data.has_next {
+            break;
+        }
+        page += 1;
+    }
+}
+
+// Async generator with generic context
+async fn* generic_context<C: DataSource>() -> Item using C {
+    for item in C.fetch_all().await {
+        yield item;
+    }
+}
+
+// =============================================================================
+// Section 6: Generators with Visibility Modifiers
+// =============================================================================
+
+// Public sync generator
+public fn* pub_generator() -> Int {
+    yield 1;
+}
+
+// Public async generator
+public async fn* pub_async_gen() -> Int {
+    yield 1;
+}
+
+// Internal generator
+internal fn* internal_gen() -> Int {
+    yield 1;
+}
+
+// Protected generator
+protected fn* protected_gen() -> Int {
+    yield 1;
+}
+
+// =============================================================================
+// Section 7: Generators with Throws Clause (Error Handling)
+// =============================================================================
+
+// Async generator with throws clause
+async fn* safe_fetch() throws(NetworkError) -> Data using [Http] {
+    let conn = Http.connect().await?;
+    while let Maybe.Some(chunk) = conn.read().await? {
+        yield chunk;
+    }
+}
+
+// Async generator with multiple error types
+async fn* multi_error() throws(ParseError | IoError) -> ParsedData using [FileSystem] {
+    let file = FileSystem.open("data.txt").await?;
+    for line in file.lines().await? {
+        let parsed = parse_line(line)?;
+        yield parsed;
+    }
+}
+
+// Async generator with errdefer
+async fn* with_errdefer() throws(StreamError) -> Data using [Http] {
+    let conn = Http.connect().await?;
+    errdefer conn.abort().await;
+
+    while let Maybe.Some(chunk) = conn.read().await? {
+        yield chunk;
+    }
+
+    conn.close_gracefully().await?;
+}
+
+// Async generator with try-recover
+async fn* with_recover() throws(FatalError) -> Data using [Http] {
+    try {
+        let data = Http.fetch().await?;
+        yield data;
+    } recover |e| {
+        Logger.warn(f"Fetch failed: {e}");
+        yield fallback_data();
+    }
+}
+
+// Async generator with defer
+async fn* with_defer() -> Data using [Database] {
+    let conn = Database.connect().await;
+    defer conn.release().await;
+
+    for item in conn.stream().await {
+        yield item;
+    }
+}
+
+// =============================================================================
+// Section 8: Complex Generator Bodies
+// =============================================================================
+
+// Generator with nested loops
+fn* nested_loops(matrix: List<List<Int>>) -> Int {
+    for row in matrix {
+        for cell in row {
+            yield cell;
+        }
+    }
+}
+
+// Generator with nested conditionals
+fn* nested_conditionals(items: List<Item>) -> Processed {
+    for item in items {
+        if item.is_valid() {
+            if item.needs_processing() {
+                let processed = process(item);
+                yield processed;
+            } else {
+                yield item.as_processed();
+            }
+        }
+    }
+}
+
+// Generator with complex match
+fn* complex_match(events: List<Event>) -> Action {
+    for event in events {
+        match event {
+            Event.Click { x, y } if x > 0 && y > 0 => {
+                yield Action.Move(x, y);
+            }
+            Event.KeyPress { key: Key.Enter, .. } => {
+                yield Action.Submit;
+            }
+            Event.KeyPress { key: Key.Escape, .. } => {
+                yield Action.Cancel;
+                return;
+            }
+            _ => {
+                yield Action.Ignore;
+            }
+        }
+    }
+}
+
+// Generator with let-else
+fn* with_let_else(items: List<Maybe<Int>>) -> Int {
+    for item in items {
+        let Maybe.Some(value) = item else {
+            continue;
+        };
+        yield value;
+    }
+}
+
+// Generator with multiple blocks
+fn* multi_block() -> Int {
+    {
+        let x = 1;
+        yield x;
+    }
+    {
+        let y = 2;
+        yield y;
+    }
+    {
+        let z = 3;
+        yield z;
+    }
+}
+
+// Async generator with select expression
+async fn* with_select() -> Message using [NetworkA, NetworkB] {
+    loop {
+        let msg = select {
+            a = NetworkA.receive().await => Message.FromA(a),
+            b = NetworkB.receive().await => Message.FromB(b),
+        };
+        yield msg;
+    }
+}
+
+// =============================================================================
+// Section 9: Generator Edge Cases
+// =============================================================================
+
+// Generator with empty loop (infinite but controlled externally)
+fn* infinite_gen() -> Int {
+    let mut i = 0;
+    loop {
+        yield i;
+        i += 1;
+    }
+}
+
+// Generator yielding unit type
+fn* unit_generator() -> () {
+    yield ();
+    yield ();
+}
+
+// Generator with immediately returning
+fn* immediate_return() -> Int {
+    return;
+}
+
+// Generator with yield in expression position
+fn* yield_expr() -> Int {
+    let _ = if true { yield 1 } else { yield 2 };
+    yield 3;
+}
+
+// Generator with trailing yield (no semicolon for expression)
+fn* trailing_yield() -> Int {
+    let x = 1;
+    yield x
+}
+
+// Generator with block expression after yield
+fn* block_yield() -> Int {
+    yield {
+        let x = 1;
+        let y = 2;
+        x + y
+    };
+    yield 3;
+}
+
+// =============================================================================
+// Section 10: Async Generator with Full Feature Set
+// =============================================================================
+
+// Comprehensive async generator combining multiple features
+public async fn* paginate_all<T: Deserialize, E: Error>(
+    base_url: Text,
+    batch_size: Int,
+) throws(E) -> T
+using [Http, Cache, Logger, Metrics]
+where type T: Clone + Display
+{
+    Metrics.start_pagination();
+    defer Metrics.end_pagination();
+
+    let mut page = 1;
+    let mut total_items = 0;
+
+    loop {
+        Logger.debug(f"Fetching page {page}");
+
+        // Try cache first
+        let cache_key = f"{base_url}:page:{page}";
+        let cached = Cache.get<List<T>>(cache_key).await;
+
+        let items = match cached {
+            Maybe.Some(data) => {
+                Logger.debug("Cache hit");
+                Metrics.record_cache_hit();
+                data
+            }
+            Maybe.None => {
+                Logger.debug("Cache miss, fetching from HTTP");
+                Metrics.record_cache_miss();
+
+                let url = f"{base_url}?page={page}&limit={batch_size}";
+                let response = Http.get(url).await?;
+
+                errdefer Logger.error(f"Failed to parse response for page {page}");
+
+                let data: List<T> = response.json()?;
+                Cache.set(cache_key, data.clone(), Duration.from_secs(300)).await;
+                data
+            }
+        };
+
+        if items.is_empty() {
+            Logger.info(f"Pagination complete. Total items: {total_items}");
+            break;
+        }
+
+        for item in items {
+            total_items += 1;
+            yield item;
+        }
+
+        page += 1;
+
+        // Rate limiting
+        sleep(Duration.from_millis(50)).await;
+    }
+}
+
+// =============================================================================
+// Section 11: Generator Function Signatures (No Body)
+// =============================================================================
+
+// These test that the parser accepts generator signatures in protocol contexts
+// (The implementations would be provided elsewhere)
+
+type PageIterator is protocol {
+    type Item;
+    fn* pages(&self) -> Self.Item;
+    async fn* async_pages(&self) -> Self.Item using [Http];
+};
+
+type StreamProcessor is protocol {
+    async fn* process_stream(&mut self) throws(ProcessError) -> Output using [Input, Output];
+};
+
+// =============================================================================
+// Section 12: Generators in Implementation Blocks
+// =============================================================================
+
+type NumberRange is {
+    start: Int,
+    end: Int,
+};
+
+implement NumberRange {
+    // Method generator
+    fn* iter(&self) -> Int {
+        for i in self.start..self.end {
+            yield i;
+        }
+    }
+
+    // Static generator
+    fn* zero_to(n: Int) -> Int {
+        for i in 0..n {
+            yield i;
+        }
+    }
+}
+
+type AsyncDataSource is {
+    url: Text,
+};
+
+implement AsyncDataSource {
+    // Async method generator
+    async fn* fetch_all(&self) -> Data using [Http] {
+        let mut page = 1;
+        loop {
+            let data = Http.get(f"{self.url}?page={page}").await;
+            yield data;
+            if !data.has_more {
+                break;
+            }
+            page += 1;
+        }
+    }
+
+    // Async generator with error handling
+    async fn* safe_fetch(&self) throws(FetchError) -> Data using [Http] {
+        let conn = Http.connect(self.url).await?;
+        errdefer conn.abort().await;
+
+        while let Maybe.Some(chunk) = conn.next_chunk().await? {
+            yield chunk;
+        }
+    }
+}
+
+// =============================================================================
+// Main function (entry point for parse test)
+// =============================================================================
+
+fn main() {
+    // This file tests parser acceptance of generator syntax
+    // No runtime execution needed for parse-pass test
+    let _ = 0;
+}

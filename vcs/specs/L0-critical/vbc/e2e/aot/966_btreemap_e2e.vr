@@ -1,0 +1,93 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, btreemap, collections
+// @timeout: 50000
+// @expected-exit: 0
+//
+// E2E test for stdlib BTreeMap API.
+// Split into helper functions to avoid register pressure in main.
+
+fn test_basic_ops() -> Int {
+    let mut pass = 0;
+    let mut m = BTreeMap.new();
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    if m.len() == 3 { pass = pass + 1; }
+
+    let k1 = 2;
+    if m.contains_key(&k1) { pass = pass + 1; }
+    let k4 = 99;
+    if !m.contains_key(&k4) { pass = pass + 1; }
+
+    let k2 = 1;
+    match m.get(&k2) {
+        Some(v) => {
+            if v == 10 { pass = pass + 1; }
+        },
+        None => {},
+    }
+
+    let k_3 = 3;
+    match m.get(&k_3) {
+        Some(v) => {
+            if v == 30 { pass = pass + 1; }
+        },
+        None => {},
+    }
+
+    let k5 = 100;
+    match m.get(&k5) {
+        Some(_) => {},
+        None => { pass = pass + 1; },
+    }
+    pass
+}
+
+fn test_remove() -> Int {
+    let mut pass = 0;
+    let mut m = BTreeMap.new();
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    let k3 = 2;
+    m.remove(&k3);
+    if m.len() == 2 { pass = pass + 1; }
+    if !m.contains_key(&k3) { pass = pass + 1; }
+    pass
+}
+
+fn test_dup_insert() -> Int {
+    let mut pass = 0;
+    let mut m = BTreeMap.new();
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+
+    m.insert(1, 99);
+    if m.len() == 3 { pass = pass + 1; }
+
+    let k_1 = 1;
+    match m.get(&k_1) {
+        Some(v) => {
+            if v == 99 { pass = pass + 1; }
+        },
+        None => {},
+    }
+    pass
+}
+
+fn main() -> Int {
+    let p1 = test_basic_ops();
+    let p2 = test_remove();
+    let p3 = test_dup_insert();
+    let total = p1 + p2 + p3;
+    print(f"pass = {total}/10");
+    if total == 10 {
+        print("ALL OK");
+        return 0;
+    }
+    return 1;
+}

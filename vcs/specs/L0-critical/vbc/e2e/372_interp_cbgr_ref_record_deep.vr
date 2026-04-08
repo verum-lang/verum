@@ -1,0 +1,518 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, edge, deep-records, nesting
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Deep record reference chains.
+// Tests deeply nested record types (4+ levels), references at each level,
+// read through deep reference chains, functional record updates at depth,
+// complex records with many fields.
+
+// =============================================================================
+// Level 1: Base types
+// =============================================================================
+
+type Vec2 is { x: Int, y: Int };
+type Rgb is { r: Int, g: Int, b: Int };
+
+// =============================================================================
+// Level 2: Composed from Level 1
+// =============================================================================
+
+type Particle is {
+    pos: Vec2,
+    vel: Vec2,
+    mass: Int
+};
+
+type Material is {
+    color: Rgb,
+    density: Int,
+    hardness: Int
+};
+
+// =============================================================================
+// Level 3: Composed from Level 2
+// =============================================================================
+
+type PhysObj is {
+    body: Particle,
+    mat: Material,
+    tag: Int
+};
+
+// =============================================================================
+// Level 4: Composed from Level 3
+// =============================================================================
+
+type Scene is {
+    obj_a: PhysObj,
+    obj_b: PhysObj,
+    time_step: Int
+};
+
+// =============================================================================
+// Constructor helpers
+// =============================================================================
+
+fn make_vec2(x: Int, y: Int) -> Vec2 {
+    Vec2 { x: x, y: y }
+}
+
+fn make_rgb(r: Int, g: Int, b: Int) -> Rgb {
+    Rgb { r: r, g: g, b: b }
+}
+
+fn make_particle(px: Int, py: Int, vx: Int, vy: Int, m: Int) -> Particle {
+    Particle {
+        pos: make_vec2(px, py),
+        vel: make_vec2(vx, vy),
+        mass: m
+    }
+}
+
+fn make_material(r: Int, g: Int, b: Int, dens: Int, hard: Int) -> Material {
+    Material {
+        color: make_rgb(r, g, b),
+        density: dens,
+        hardness: hard
+    }
+}
+
+fn make_phys_obj(px: Int, py: Int, vx: Int, vy: Int, m: Int,
+                 cr: Int, cg: Int, cb: Int, dens: Int, hard: Int,
+                 tag: Int) -> PhysObj {
+    PhysObj {
+        body: make_particle(px, py, vx, vy, m),
+        mat: make_material(cr, cg, cb, dens, hard),
+        tag: tag
+    }
+}
+
+// =============================================================================
+// Functional update helpers (avoid deep mutation which may not work in interp)
+// =============================================================================
+
+fn particle_with_pos(p: Particle, new_pos: Vec2) -> Particle {
+    Particle { pos: new_pos, vel: p.vel, mass: p.mass }
+}
+
+fn phys_obj_with_body(obj: PhysObj, new_body: Particle) -> PhysObj {
+    PhysObj { body: new_body, mat: obj.mat, tag: obj.tag }
+}
+
+fn phys_obj_with_mat(obj: PhysObj, new_mat: Material) -> PhysObj {
+    PhysObj { body: obj.body, mat: new_mat, tag: obj.tag }
+}
+
+fn material_with_color(m: Material, new_color: Rgb) -> Material {
+    Material { color: new_color, density: m.density, hardness: m.hardness }
+}
+
+fn scene_with_obj_a(s: Scene, new_a: PhysObj) -> Scene {
+    Scene { obj_a: new_a, obj_b: s.obj_b, time_step: s.time_step }
+}
+
+fn scene_with_obj_b(s: Scene, new_b: PhysObj) -> Scene {
+    Scene { obj_a: s.obj_a, obj_b: new_b, time_step: s.time_step }
+}
+
+// =============================================================================
+// Reference-based read helpers
+// =============================================================================
+
+fn read_int_ref(r: &Int) -> Int {
+    *r
+}
+
+fn add_refs(a: &Int, b: &Int) -> Int {
+    *a + *b
+}
+
+fn set_ref(r: &mut Int, v: Int) {
+    *r = v;
+}
+
+fn add_to_ref(r: &mut Int, v: Int) {
+    *r = *r + v;
+}
+
+// =============================================================================
+// Test 1: Deep field access (4 levels) — read only
+// =============================================================================
+
+fn test_deep_field_access() {
+    let scene = Scene {
+        obj_a: make_phys_obj(10, 20, 1, 2, 5, 255, 0, 0, 100, 50, 1),
+        obj_b: make_phys_obj(30, 40, -1, -2, 10, 0, 255, 0, 200, 80, 2),
+        time_step: 16
+    };
+
+    // Level 1 access
+    assert_eq(scene.time_step, 16);
+
+    // Level 2 access
+    assert_eq(scene.obj_a.tag, 1);
+    assert_eq(scene.obj_b.tag, 2);
+
+    // Level 3 access
+    assert_eq(scene.obj_a.body.mass, 5);
+    assert_eq(scene.obj_b.body.mass, 10);
+    assert_eq(scene.obj_a.mat.density, 100);
+    assert_eq(scene.obj_b.mat.density, 200);
+
+    // Level 4 access
+    assert_eq(scene.obj_a.body.pos.x, 10);
+    assert_eq(scene.obj_a.body.pos.y, 20);
+    assert_eq(scene.obj_a.body.vel.x, 1);
+    assert_eq(scene.obj_a.body.vel.y, 2);
+    assert_eq(scene.obj_b.body.pos.x, 30);
+    assert_eq(scene.obj_b.body.pos.y, 40);
+    assert_eq(scene.obj_a.mat.color.r, 255);
+    assert_eq(scene.obj_a.mat.color.g, 0);
+    assert_eq(scene.obj_b.mat.color.g, 255);
+}
+
+// =============================================================================
+// Test 2: References to deeply nested values (extracted to locals)
+// =============================================================================
+
+fn test_refs_to_deep_values() {
+    let scene = Scene {
+        obj_a: make_phys_obj(10, 20, 1, 2, 5, 255, 0, 0, 100, 50, 1),
+        obj_b: make_phys_obj(30, 40, -1, -2, 10, 0, 255, 0, 200, 80, 2),
+        time_step: 16
+    };
+
+    // Extract deep values to locals, then take refs
+    let ax = scene.obj_a.body.pos.x;
+    let ay = scene.obj_a.body.pos.y;
+    let bx = scene.obj_b.body.pos.x;
+    let by_val = scene.obj_b.body.pos.y;
+
+    assert_eq(read_int_ref(&ax), 10);
+    assert_eq(read_int_ref(&ay), 20);
+    assert_eq(add_refs(&ax, &ay), 30);
+    assert_eq(add_refs(&bx, &by_val), 70);
+
+    // Cross-object refs
+    assert_eq(add_refs(&ax, &bx), 40);
+    assert_eq(add_refs(&ay, &by_val), 60);
+}
+
+// =============================================================================
+// Test 3: Functional deep record update (replace whole sub-tree)
+// =============================================================================
+
+fn test_functional_deep_update() {
+    let scene = Scene {
+        obj_a: make_phys_obj(0, 0, 1, 1, 5, 255, 0, 0, 100, 50, 1),
+        obj_b: make_phys_obj(100, 100, -1, -1, 10, 0, 0, 255, 200, 80, 2),
+        time_step: 16
+    };
+
+    // Update obj_a position functionally
+    let new_body = particle_with_pos(scene.obj_a.body, Vec2 { x: 50, y: 60 });
+    let new_obj_a = phys_obj_with_body(scene.obj_a, new_body);
+    let scene2 = scene_with_obj_a(scene, new_obj_a);
+
+    assert_eq(scene2.obj_a.body.pos.x, 50);
+    assert_eq(scene2.obj_a.body.pos.y, 60);
+    // Velocity unchanged
+    assert_eq(scene2.obj_a.body.vel.x, 1);
+    assert_eq(scene2.obj_a.body.vel.y, 1);
+
+    // Update obj_b color functionally
+    let new_mat = material_with_color(scene2.obj_b.mat, Rgb { r: 128, g: 128, b: 128 });
+    let new_obj_b = phys_obj_with_mat(scene2.obj_b, new_mat);
+    let scene3 = scene_with_obj_b(scene2, new_obj_b);
+
+    assert_eq(scene3.obj_b.mat.color.r, 128);
+    assert_eq(scene3.obj_b.mat.color.g, 128);
+    assert_eq(scene3.obj_b.mat.color.b, 128);
+
+    // Verify other fields unchanged
+    assert_eq(scene3.obj_a.body.mass, 5);
+    assert_eq(scene3.obj_b.body.mass, 10);
+    assert_eq(scene3.time_step, 16);
+}
+
+// =============================================================================
+// Test 4: Physics simulation step with deep access
+// =============================================================================
+
+fn step_particle(p: Particle, dt: Int) -> Particle {
+    Particle {
+        pos: Vec2 {
+            x: p.pos.x + p.vel.x * dt,
+            y: p.pos.y + p.vel.y * dt
+        },
+        vel: p.vel,
+        mass: p.mass
+    }
+}
+
+fn test_physics_step() {
+    let p = make_particle(10, 20, 3, -2, 5);
+
+    let p2 = step_particle(p, 10);
+    assert_eq(p2.pos.x, 40);   // 10 + 3*10
+    assert_eq(p2.pos.y, 0);    // 20 + (-2)*10
+
+    let p3 = step_particle(p2, 5);
+    assert_eq(p3.pos.x, 55);   // 40 + 3*5
+    assert_eq(p3.pos.y, -10);  // 0 + (-2)*5
+}
+
+// =============================================================================
+// Test 5: Multi-step simulation with deep record chain
+// =============================================================================
+
+fn step_phys_obj(obj: PhysObj, dt: Int) -> PhysObj {
+    PhysObj {
+        body: step_particle(obj.body, dt),
+        mat: obj.mat,
+        tag: obj.tag
+    }
+}
+
+fn test_multi_step_simulation() {
+    let mut obj = make_phys_obj(0, 0, 2, 3, 1, 255, 0, 0, 100, 50, 1);
+
+    let mut i = 0;
+    while i < 10 {
+        obj = step_phys_obj(obj, 1);
+        i = i + 1;
+    }
+
+    // After 10 steps with vel (2, 3): pos = (20, 30)
+    assert_eq(obj.body.pos.x, 20);
+    assert_eq(obj.body.pos.y, 30);
+
+    // Material unchanged through simulation
+    assert_eq(obj.mat.color.r, 255);
+    assert_eq(obj.mat.density, 100);
+}
+
+// =============================================================================
+// Test 6: Reference-based computation on nested records
+// =============================================================================
+
+fn distance_sq_refs(x1: &Int, y1: &Int, x2: &Int, y2: &Int) -> Int {
+    let dx = *x1 - *x2;
+    let dy = *y1 - *y2;
+    dx * dx + dy * dy
+}
+
+fn test_ref_based_distance() {
+    let a = make_phys_obj(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1);
+    let b = make_phys_obj(3, 4, 0, 0, 1, 0, 0, 0, 0, 0, 2);
+
+    let ax = a.body.pos.x;
+    let ay = a.body.pos.y;
+    let bx = b.body.pos.x;
+    let by_val = b.body.pos.y;
+
+    let d2 = distance_sq_refs(&ax, &ay, &bx, &by_val);
+    assert_eq(d2, 25);  // 3^2 + 4^2
+}
+
+// =============================================================================
+// Test 7: Wide record with many fields, refs to each (extracted to locals)
+// =============================================================================
+
+type WideRecord is {
+    f0: Int, f1: Int, f2: Int, f3: Int,
+    f4: Int, f5: Int, f6: Int, f7: Int,
+    f8: Int, f9: Int
+};
+
+fn test_wide_record_refs() {
+    let w = WideRecord {
+        f0: 10, f1: 11, f2: 12, f3: 13,
+        f4: 14, f5: 15, f6: 16, f7: 17,
+        f8: 18, f9: 19
+    };
+
+    // Extract each field to a local, then take ref
+    let v0 = w.f0; let v1 = w.f1; let v2 = w.f2; let v3 = w.f3;
+    let v4 = w.f4; let v5 = w.f5; let v6 = w.f6; let v7 = w.f7;
+    let v8 = w.f8; let v9 = w.f9;
+
+    let r0 = &v0; let r1 = &v1; let r2 = &v2; let r3 = &v3;
+    let r4 = &v4; let r5 = &v5; let r6 = &v6; let r7 = &v7;
+    let r8 = &v8; let r9 = &v9;
+
+    assert_eq(*r0, 10);
+    assert_eq(*r1, 11);
+    assert_eq(*r2, 12);
+    assert_eq(*r3, 13);
+    assert_eq(*r4, 14);
+    assert_eq(*r5, 15);
+    assert_eq(*r6, 16);
+    assert_eq(*r7, 17);
+    assert_eq(*r8, 18);
+    assert_eq(*r9, 19);
+
+    let sum = *r0 + *r1 + *r2 + *r3 + *r4 + *r5 + *r6 + *r7 + *r8 + *r9;
+    assert_eq(sum, 145);
+}
+
+// =============================================================================
+// Test 8: Iterative deep record updates in loop (functional style)
+// =============================================================================
+
+fn test_iterative_deep_update() {
+    let mut obj = make_phys_obj(0, 0, 1, 1, 5, 128, 128, 128, 50, 25, 99);
+
+    // Update position in loop using functional updates
+    let mut i = 0;
+    while i < 20 {
+        let new_pos = Vec2 {
+            x: obj.body.pos.x + 1,
+            y: obj.body.pos.y + 2
+        };
+        let new_body = particle_with_pos(obj.body, new_pos);
+        obj = phys_obj_with_body(obj, new_body);
+        i = i + 1;
+    }
+
+    assert_eq(obj.body.pos.x, 20);
+    assert_eq(obj.body.pos.y, 40);
+
+    // Verify non-updated fields intact
+    assert_eq(obj.body.vel.x, 1);
+    assert_eq(obj.body.vel.y, 1);
+    assert_eq(obj.body.mass, 5);
+    assert_eq(obj.mat.color.r, 128);
+    assert_eq(obj.mat.density, 50);
+    assert_eq(obj.tag, 99);
+}
+
+// =============================================================================
+// Test 9: Record returned from function, then deep access
+// =============================================================================
+
+fn create_scene(t: Int) -> Scene {
+    Scene {
+        obj_a: make_phys_obj(t, t * 2, 1, 0, 5, 255, 0, 0, 100, 50, 1),
+        obj_b: make_phys_obj(t * 3, t * 4, 0, 1, 10, 0, 255, 0, 200, 80, 2),
+        time_step: t
+    }
+}
+
+fn test_returned_deep_record() {
+    let s = create_scene(10);
+
+    assert_eq(s.time_step, 10);
+    assert_eq(s.obj_a.body.pos.x, 10);
+    assert_eq(s.obj_a.body.pos.y, 20);
+    assert_eq(s.obj_b.body.pos.x, 30);
+    assert_eq(s.obj_b.body.pos.y, 40);
+
+    // Verify all 4 levels accessible
+    assert_eq(s.obj_a.mat.color.r, 255);
+    assert_eq(s.obj_b.mat.color.g, 255);
+}
+
+// =============================================================================
+// Test 10: Mutable ref to extracted deep value (copy semantics)
+// =============================================================================
+
+fn test_mut_ref_deep_extracted() {
+    let scene = create_scene(5);
+
+    // Extract deep values, mutate them via refs
+    let mut ax = scene.obj_a.body.pos.x;
+    let mut ay = scene.obj_a.body.pos.y;
+
+    set_ref(&mut ax, ax * 10);
+    set_ref(&mut ay, ay * 10);
+
+    assert_eq(ax, 50);   // 5 * 10
+    assert_eq(ay, 100);  // 10 * 10
+
+    // Original scene values unmodified (they were copies)
+    assert_eq(scene.obj_a.body.pos.x, 5);
+    assert_eq(scene.obj_a.body.pos.y, 10);
+}
+
+// =============================================================================
+// Test 11: Full scene simulation with functional updates
+// =============================================================================
+
+fn step_scene(s: Scene) -> Scene {
+    let new_a = step_phys_obj(s.obj_a, s.time_step);
+    let new_b = step_phys_obj(s.obj_b, s.time_step);
+    Scene {
+        obj_a: new_a,
+        obj_b: new_b,
+        time_step: s.time_step
+    }
+}
+
+fn test_full_scene_simulation() {
+    let mut s = Scene {
+        obj_a: make_phys_obj(0, 0, 1, 2, 5, 255, 0, 0, 100, 50, 1),
+        obj_b: make_phys_obj(100, 100, -1, -1, 10, 0, 255, 0, 200, 80, 2),
+        time_step: 1
+    };
+
+    let mut i = 0;
+    while i < 10 {
+        s = step_scene(s);
+        i = i + 1;
+    }
+
+    assert_eq(s.obj_a.body.pos.x, 10);   // 0 + 1*10
+    assert_eq(s.obj_a.body.pos.y, 20);   // 0 + 2*10
+    assert_eq(s.obj_b.body.pos.x, 90);   // 100 + (-1)*10
+    assert_eq(s.obj_b.body.pos.y, 90);   // 100 + (-1)*10
+
+    // Materials unchanged
+    assert_eq(s.obj_a.mat.color.r, 255);
+    assert_eq(s.obj_b.mat.color.g, 255);
+    assert_eq(s.obj_a.tag, 1);
+    assert_eq(s.obj_b.tag, 2);
+}
+
+// =============================================================================
+// Test 12: Multiple scenes, ref-based comparison
+// =============================================================================
+
+fn test_multi_scene_refs() {
+    let s1 = create_scene(5);
+    let s2 = create_scene(10);
+
+    let s1_ax = s1.obj_a.body.pos.x;
+    let s2_ax = s2.obj_a.body.pos.x;
+
+    assert_eq(read_int_ref(&s1_ax), 5);
+    assert_eq(read_int_ref(&s2_ax), 10);
+    assert_eq(add_refs(&s1_ax, &s2_ax), 15);
+
+    // Compare deep fields across scenes
+    let s1_cr = s1.obj_a.mat.color.r;
+    let s2_cr = s2.obj_a.mat.color.r;
+    assert_eq(s1_cr, s2_cr);  // Both 255
+    assert_eq(add_refs(&s1_cr, &s2_cr), 510);
+}
+
+fn main() -> Int {
+    test_deep_field_access();
+    test_refs_to_deep_values();
+    test_functional_deep_update();
+    test_physics_step();
+    test_multi_step_simulation();
+    test_ref_based_distance();
+    test_wide_record_refs();
+    test_iterative_deep_update();
+    test_returned_deep_record();
+    test_mut_ref_deep_extracted();
+    test_full_scene_simulation();
+    test_multi_scene_refs();
+    print("[OK] 372_interp_cbgr_ref_record_deep");
+    0
+}

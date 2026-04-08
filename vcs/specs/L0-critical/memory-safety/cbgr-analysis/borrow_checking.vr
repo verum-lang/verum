@@ -1,0 +1,284 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, borrow-checking, lifetimes, cbgr
+// @active: testing borrow checker patterns
+// @description: CBGR borrow checker validates reference safety at compile time
+
+/// Borrow Checking Compile-Time Tests
+///
+/// These tests validate that the CBGR borrow checker correctly enforces:
+/// 1. No aliasing of mutable references
+/// 2. No mutable reference while immutable references exist
+/// 3. References don't outlive their referent
+///
+/// Spec: docs/detailed/26-cbgr-implementation.md#borrow-checking
+
+// ============================================================================
+// TEST 1: Single mutable reference
+// ============================================================================
+
+fn test_single_mutable_ref() {
+    let mut data = 42;
+
+    {
+        let r = &mut data;
+        *r = 100;
+    }
+
+    assert(data == 100);
+}
+
+// ============================================================================
+// TEST 2: Mutable reference scope ends before reuse
+// ============================================================================
+
+fn test_mut_ref_scope() {
+    let mut data = [1, 2, 3];
+
+    {
+        let r = &mut data;
+        r[0] = 100;
+    }  // r goes out of scope
+
+    // Now we can create new reference
+    let r2 = &data;
+    assert(r2[0] == 100);
+}
+
+// ============================================================================
+// TEST 3: Multiple immutable references
+// ============================================================================
+
+fn test_multiple_immutable_refs() {
+    let data = [10, 20, 30];
+
+    let r1 = &data;
+    let r2 = &data;
+    let r3 = &data;
+
+    // All can be read simultaneously
+    assert(r1[0] == r2[0]);
+    assert(r2[1] == r3[1]);
+    assert(r1[2] == 30);
+}
+
+// ============================================================================
+// TEST 4: Reference through function call (explicit scoping)
+// ============================================================================
+
+fn read_first(arr: &[Int; 3]) -> Int {
+    arr[0]
+}
+
+fn modify_first(arr: &mut [Int; 3]) {
+    arr[0] = 999;
+}
+
+fn test_ref_through_function() {
+    let mut data = [1, 2, 3];
+
+    // Immutable borrow in explicit block
+    let first = {
+        read_first(&data)
+    };
+    assert(first == 1);
+
+    // Mutable borrow - works because previous block ended
+    modify_first(&mut data);
+    assert(data[0] == 999);
+}
+
+// ============================================================================
+// TEST 5: Reborrowing
+// ============================================================================
+
+fn reborrow_helper(r: &mut Int) {
+    *r += 10;
+}
+
+fn test_reborrowing() {
+    let mut x = 5;
+    let r = &mut x;
+
+    // Reborrow passes a reference to reference
+    reborrow_helper(r);
+
+    // Original mutable reference still valid after reborrow returns
+    *r += 1;
+
+    assert(*r == 16);  // 5 + 10 + 1
+}
+
+// ============================================================================
+// TEST 6: Reference to struct field
+// ============================================================================
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+fn test_field_reference() {
+    let mut point = Point { x: 10, y: 20 };
+
+    // Reference to field - Copy type, so no borrow conflict
+    let x_val = point.x;
+    assert(x_val == 10);
+
+    // Mutate another field
+    {
+        let y_ref = &mut point.y;
+        *y_ref = 100;
+    }
+
+    assert(point.y == 100);
+}
+
+// ============================================================================
+// TEST 7: Non-lexical lifetimes (NLL) with explicit blocks
+// ============================================================================
+
+fn test_nll_basic() {
+    let mut data = [1, 2, 3];
+
+    let val = {
+        let r = &data[0];
+        *r  // Return value before block ends
+    };
+
+    // After block, mutation allowed
+    data[0] = 100;
+
+    assert(val == 1);
+    assert(data[0] == 100);
+}
+
+// ============================================================================
+// TEST 8: Reference in conditionals
+// ============================================================================
+
+fn test_ref_in_conditional() {
+    let mut data = 42;
+
+    if true {
+        let r = &mut data;
+        *r = 100;
+    }
+
+    // After conditional, reference is gone
+    let r2 = &data;
+    assert(*r2 == 100);
+}
+
+// ============================================================================
+// TEST 9: Reference in loop
+// ============================================================================
+
+fn test_ref_in_loop() {
+    let mut sum = 0;
+    let data = [1, 2, 3, 4, 5];
+
+    for i in 0..5 {
+        let r = &data[i];  // New reference each iteration
+        sum += *r;
+    }
+
+    assert(sum == 15);
+}
+
+// ============================================================================
+// TEST 10: Two-phase borrows (method calls)
+// ============================================================================
+
+type Counter is {
+    value: Int,
+};
+
+implement Counter {
+    fn increment(&mut self) {
+        self.value += 1;
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+}
+
+fn test_two_phase_borrow() {
+    let mut counter = Counter { value: 0 };
+
+    // Method calls create temporary borrow
+    counter.increment();
+    counter.increment();
+    counter.increment();
+
+    let val = counter.get();
+    assert(val == 3);
+}
+
+// ============================================================================
+// TEST 11: Shared and mutable refs in sequence
+// ============================================================================
+
+fn test_sequential_borrows() {
+    let mut x = 10;
+
+    // First: shared borrow
+    let val1 = {
+        let r = &x;
+        *r
+    };
+
+    // Then: mutable borrow
+    {
+        let r = &mut x;
+        *r = 20;
+    }
+
+    // Then: shared borrow again
+    let val2 = {
+        let r = &x;
+        *r
+    };
+
+    assert(val1 == 10);
+    assert(val2 == 20);
+}
+
+// ============================================================================
+// TEST 12: Reference lifetime in return position
+// ============================================================================
+
+fn get_ref(arr: &[Int; 3], idx: Int) -> Int {
+    // Return value, not reference - avoids lifetime complexity
+    arr[idx]
+}
+
+fn test_returned_value() {
+    let data = [100, 200, 300];
+
+    let val = get_ref(&data, 1);
+
+    // Value valid because it's a copy, not a reference
+    assert(val == 200);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    test_single_mutable_ref();
+    test_mut_ref_scope();
+    test_multiple_immutable_refs();
+    test_ref_through_function();
+    test_reborrowing();
+    test_field_reference();
+    test_nll_basic();
+    test_ref_in_conditional();
+    test_ref_in_loop();
+    test_two_phase_borrow();
+    test_sequential_borrows();
+    test_returned_value();
+}

@@ -1,0 +1,294 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, escape-analysis, cbgr, concurrent-escape
+// @timeout: 5000
+// @description: Tests escape analysis patterns relevant to concurrent code
+
+/// Concurrent escape analysis patterns.
+/// This file tests escape analysis patterns that are important for
+/// concurrent code, without requiring actual thread primitives.
+/// Focus on data flow patterns that would require Send/Sync bounds.
+
+// =============================================================================
+// Data structures that would require Send
+// =============================================================================
+
+/// Wrapper for data that could be sent to another thread
+type SendableData is { value: Int, tag: Int };
+
+fn create_sendable(value: Int) -> SendableData {
+    // Data escapes function - if sent to thread, must be Send
+    SendableData { value: value, tag: 0 }
+}
+
+fn transform_sendable(data: SendableData, f: fn(Int) -> Int) -> SendableData {
+    SendableData { value: f(data.value), tag: data.tag + 1 }
+}
+
+// =============================================================================
+// Channel-like message patterns
+// =============================================================================
+
+type Message is
+    | Data { payload: Int }
+    | Command { code: Int }
+    | Done;
+
+fn create_data_message(value: Int) -> Message {
+    Message.Data { payload: value }
+}
+
+fn create_command_message(code: Int) -> Message {
+    Message.Command { code: code }
+}
+
+fn process_message(msg: Message) -> Int {
+    match msg {
+        Message.Data { payload } => payload * 2,
+        Message.Command { code } => code,
+        Message.Done => 0,
+    }
+}
+
+// =============================================================================
+// Shared state patterns (without actual synchronization)
+// =============================================================================
+
+type SharedState is { value: Int, version: Int };
+
+fn read_state(state: &SharedState) -> Int {
+    // Read from shared state - would need Sync
+    state.value
+}
+
+fn copy_state(state: &SharedState) -> SharedState {
+    // Copy state for exclusive use
+    SharedState { value: state.value, version: state.version }
+}
+
+// =============================================================================
+// Work item patterns
+// =============================================================================
+
+type WorkItem is {
+    id: Int,
+    data: [Int; 4],
+    priority: Int,
+};
+
+fn create_work_item(id: Int, data: [Int; 4]) -> WorkItem {
+    WorkItem { id: id, data: data, priority: 0 }
+}
+
+fn process_work_item(item: WorkItem) -> Int {
+    // Process and return result
+    item.data[0] + item.data[1] + item.data[2] + item.data[3]
+}
+
+// =============================================================================
+// Batch processing patterns
+// =============================================================================
+
+fn process_batch(items: [WorkItem; 4]) -> [Int; 4] {
+    // Process multiple items - could be parallelized
+    let mut results: [Int; 4] = [0; 4];
+    let mut i: Int = 0;
+    while i < 4 {
+        results[i] = process_work_item(items[i]);
+        i = i + 1;
+    }
+    results
+}
+
+fn sum_results(results: [Int; 4]) -> Int {
+    results[0] + results[1] + results[2] + results[3]
+}
+
+// =============================================================================
+// Producer-consumer patterns
+// =============================================================================
+
+type Buffer is { data: [Int; 8], write_idx: Int, read_idx: Int };
+
+fn buffer_new() -> Buffer {
+    Buffer { data: [0; 8], write_idx: 0, read_idx: 0 }
+}
+
+fn buffer_push(buf: &mut Buffer, value: Int) {
+    let idx = buf.write_idx % 8;
+    buf.data[idx] = value;
+    buf.write_idx = buf.write_idx + 1;
+}
+
+fn buffer_pop(buf: &mut Buffer) -> Int {
+    let idx = buf.read_idx % 8;
+    let value = buf.data[idx];
+    buf.read_idx = buf.read_idx + 1;
+    value
+}
+
+fn buffer_is_empty(buf: &Buffer) -> Bool {
+    buf.read_idx == buf.write_idx
+}
+
+// =============================================================================
+// Split data patterns
+// =============================================================================
+
+fn split_array(arr: [Int; 8]) -> ([Int; 4], [Int; 4]) {
+    // Split array for parallel processing
+    let left = [arr[0], arr[1], arr[2], arr[3]];
+    let right = [arr[4], arr[5], arr[6], arr[7]];
+    (left, right)
+}
+
+fn merge_arrays(left: [Int; 4], right: [Int; 4]) -> [Int; 8] {
+    [left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3]]
+}
+
+fn parallel_sum_pattern(arr: [Int; 8]) -> Int {
+    // Pattern for parallel reduction
+    let (left, right) = split_array(arr);
+    let left_sum = left[0] + left[1] + left[2] + left[3];
+    let right_sum = right[0] + right[1] + right[2] + right[3];
+    left_sum + right_sum
+}
+
+// =============================================================================
+// Task-like patterns
+// =============================================================================
+
+type Task is { id: Int, compute: fn(Int) -> Int };
+
+fn create_task(id: Int, f: fn(Int) -> Int) -> Task {
+    Task { id: id, compute: f }
+}
+
+fn execute_task(task: Task, input: Int) -> Int {
+    (task.compute)(input)
+}
+
+fn execute_tasks(tasks: [Task; 3], inputs: [Int; 3]) -> [Int; 3] {
+    let mut results: [Int; 3] = [0; 3];
+    let mut i: Int = 0;
+    while i < 3 {
+        results[i] = execute_task(tasks[i], inputs[i]);
+        i = i + 1;
+    }
+    results
+}
+
+// =============================================================================
+// Reference containment for concurrent patterns
+// =============================================================================
+
+fn process_ref_array(refs: [&Int; 4]) -> Int {
+    // Process array of references - must track all escapes
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 4 {
+        sum = sum + *refs[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn create_ref_array(a: &Int, b: &Int, c: &Int, d: &Int) -> [&Int; 4] {
+    // All references escape via array
+    [a, b, c, d]
+}
+
+// =============================================================================
+// Move semantics patterns
+// =============================================================================
+
+type MoveOnly is { data: [Int; 10] };
+
+fn consume_move_only(item: MoveOnly) -> Int {
+    // Item is moved and consumed
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 10 {
+        sum = sum + item.data[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn transfer_ownership(item: MoveOnly) -> MoveOnly {
+    // Ownership transferred
+    item
+}
+
+// =============================================================================
+// Main - validation
+// =============================================================================
+
+fn main() {
+    // Sendable data
+    let data = create_sendable(42);
+    let transformed = transform_sendable(data, |x| x * 2);
+    assert(transformed.value == 84);
+
+    // Messages
+    let msg1 = create_data_message(100);
+    assert(process_message(msg1) == 200);
+
+    let msg2 = create_command_message(50);
+    assert(process_message(msg2) == 50);
+
+    // Shared state
+    let state = SharedState { value: 42, version: 1 };
+    assert(read_state(&state) == 42);
+    let copied = copy_state(&state);
+    assert(copied.value == 42);
+
+    // Work items
+    let item = create_work_item(1, [1, 2, 3, 4]);
+    assert(process_work_item(item) == 10);
+
+    // Batch processing
+    let items = [
+        create_work_item(1, [1, 1, 1, 1]),
+        create_work_item(2, [2, 2, 2, 2]),
+        create_work_item(3, [3, 3, 3, 3]),
+        create_work_item(4, [4, 4, 4, 4])
+    ];
+    let results = process_batch(items);
+    assert(sum_results(results) == 40);
+
+    // Buffer operations
+    let mut buf = buffer_new();
+    buffer_push(&mut buf, 10);
+    buffer_push(&mut buf, 20);
+    assert(buffer_pop(&mut buf) == 10);
+    assert(buffer_pop(&mut buf) == 20);
+
+    // Split/merge
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8];
+    assert(parallel_sum_pattern(arr) == 36);
+
+    // Tasks
+    let tasks = [
+        create_task(1, |x| x + 1),
+        create_task(2, |x| x * 2),
+        create_task(3, |x| x - 1)
+    ];
+    let task_results = execute_tasks(tasks, [10, 10, 10]);
+    assert(task_results[0] == 11);
+    assert(task_results[1] == 20);
+    assert(task_results[2] == 9);
+
+    // Reference array
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let d = 40;
+    let refs = create_ref_array(&a, &b, &c, &d);
+    assert(process_ref_array(refs) == 100);
+
+    // Move semantics
+    let move_item = MoveOnly { data: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };
+    assert(consume_move_only(move_item) == 55);
+}

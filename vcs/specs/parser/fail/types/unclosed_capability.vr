@@ -1,0 +1,8 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, types, capability, brackets, error
+// @description: Test detection of unclosed capability list
+// @expected-error: E075
+
+// Capability list missing closing bracket
+fn test(db: Database with [Read) {}

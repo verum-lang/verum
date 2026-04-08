@@ -1,0 +1,36 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: debug, duration
+
+module test.debug.duration_sat2;
+
+mount core.sys.io_engine.{Duration};
+
+fn main() {
+    print("Testing with intermediate variable");
+
+    let max = Duration.MAX;
+    let one_sec = Duration.from_secs(1);
+
+    // Use intermediate variables
+    let max_nanos: UInt64 = max.as_nanos();
+    let one_nanos: UInt64 = one_sec.as_nanos();
+
+    print(f"max_nanos = {max_nanos as Int}");
+    print(f"one_nanos = {one_nanos as Int}");
+
+    // Test checked_add with intermediate variable
+    let result = max_nanos.checked_add(one_nanos);
+    match result {
+        Some(v) => {
+            print(f"checked_add returned Some({v as Int}) - should be None!");
+            assert(false);
+        }
+        None => {
+            print("checked_add returned None - CORRECT!");
+        }
+    }
+
+    print("Test passed!");
+}

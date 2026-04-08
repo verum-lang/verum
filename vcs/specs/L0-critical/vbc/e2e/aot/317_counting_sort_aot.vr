@@ -1,0 +1,201 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, counting-sort, sorting, algorithm
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for counting sort on values in range [0, 7]
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int, len: Int };
+
+fn arr8_new(n: Int) -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: n }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        len: a.len
+    }
+}
+
+// Count frequencies of values 0-7 in the input array
+fn count_frequencies(a: Arr8) -> Arr8 {
+    let mut freq = arr8_new(8);
+    let mut i = 0;
+    while i < a.len {
+        let val = arr8_get(a, i);
+        let old_count = arr8_get(freq, val);
+        freq = arr8_set(freq, val, old_count + 1);
+        i = i + 1;
+    }
+    freq
+}
+
+// Reconstruct sorted array from frequency counts
+fn reconstruct_sorted(freq: Arr8, total_len: Int) -> Arr8 {
+    let mut result = arr8_new(total_len);
+    let mut pos = 0;
+    let mut val = 0;
+    while val < 8 {
+        let cnt = arr8_get(freq, val);
+        let mut j = 0;
+        while j < cnt {
+            result = arr8_set(result, pos, val);
+            pos = pos + 1;
+            j = j + 1;
+        }
+        val = val + 1;
+    }
+    result
+}
+
+// Counting sort: count frequencies then reconstruct
+fn counting_sort(a: Arr8) -> Arr8 {
+    let freq = count_frequencies(a);
+    reconstruct_sorted(freq, a.len)
+}
+
+fn is_sorted(a: Arr8) -> Int {
+    let mut i = 1;
+    while i < a.len {
+        if arr8_get(a, i) < arr8_get(a, i - 1) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Check that sorted array has the same elements (same frequency counts)
+fn same_elements(a: Arr8, b: Arr8) -> Int {
+    if a.len != b.len { return 0; }
+    let fa = count_frequencies(a);
+    let fb = count_frequencies(b);
+    let mut i = 0;
+    while i < 8 {
+        if arr8_get(fa, i) != arr8_get(fb, i) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+fn test_basic_sort() {
+    let a = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sorted = counting_sort(a);
+    assert_eq(is_sorted(sorted), 1);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 1), 1);
+    assert_eq(arr8_get(sorted, 2), 3);
+    assert_eq(arr8_get(sorted, 3), 4);
+    assert_eq(arr8_get(sorted, 4), 5);
+    assert_eq(same_elements(a, sorted), 1);
+}
+
+fn test_all_same() {
+    let a = Arr8 { a0: 3, a1: 3, a2: 3, a3: 3, a4: 0, a5: 0, a6: 0, a7: 0, len: 4 };
+    let sorted = counting_sort(a);
+    assert_eq(is_sorted(sorted), 1);
+    assert_eq(arr8_get(sorted, 0), 3);
+    assert_eq(arr8_get(sorted, 3), 3);
+}
+
+fn test_already_sorted() {
+    let a = Arr8 { a0: 0, a1: 1, a2: 2, a3: 3, a4: 4, a5: 5, a6: 6, a7: 7, len: 8 };
+    let sorted = counting_sort(a);
+    assert_eq(is_sorted(sorted), 1);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(arr8_get(sorted, i), i);
+        i = i + 1;
+    }
+}
+
+fn test_reverse_order() {
+    let a = Arr8 { a0: 7, a1: 6, a2: 5, a3: 4, a4: 3, a5: 2, a6: 1, a7: 0, len: 8 };
+    let sorted = counting_sort(a);
+    assert_eq(is_sorted(sorted), 1);
+    assert_eq(arr8_get(sorted, 0), 0);
+    assert_eq(arr8_get(sorted, 7), 7);
+    assert_eq(same_elements(a, sorted), 1);
+}
+
+fn test_single_element() {
+    let a = Arr8 { a0: 5, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 1 };
+    let sorted = counting_sort(a);
+    assert_eq(arr8_get(sorted, 0), 5);
+}
+
+fn test_two_elements() {
+    let a = Arr8 { a0: 7, a1: 2, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 2 };
+    let sorted = counting_sort(a);
+    assert_eq(arr8_get(sorted, 0), 2);
+    assert_eq(arr8_get(sorted, 1), 7);
+}
+
+fn test_frequency_counts() {
+    // 3 zeros, 2 ones, 1 two
+    let a = Arr8 { a0: 0, a1: 1, a2: 0, a3: 2, a4: 1, a5: 0, a6: 0, a7: 0, len: 6 };
+    let freq = count_frequencies(a);
+    assert_eq(arr8_get(freq, 0), 3);
+    assert_eq(arr8_get(freq, 1), 2);
+    assert_eq(arr8_get(freq, 2), 1);
+    assert_eq(arr8_get(freq, 3), 0);
+}
+
+fn test_all_zeros() {
+    let a = Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0, len: 8 };
+    let sorted = counting_sort(a);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(arr8_get(sorted, i), 0);
+        i = i + 1;
+    }
+}
+
+fn test_stability_property() {
+    // Counting sort preserves relative order of equal elements
+    // We verify that the total count of each value is preserved
+    let a = Arr8 { a0: 2, a1: 3, a2: 1, a3: 2, a4: 3, a5: 1, a6: 0, a7: 0, len: 6 };
+    let sorted = counting_sort(a);
+    assert_eq(is_sorted(sorted), 1);
+    assert_eq(same_elements(a, sorted), 1);
+    // Specific positions
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 1), 1);
+    assert_eq(arr8_get(sorted, 2), 2);
+    assert_eq(arr8_get(sorted, 3), 2);
+    assert_eq(arr8_get(sorted, 4), 3);
+    assert_eq(arr8_get(sorted, 5), 3);
+}
+
+fn test_max_values() {
+    let a = Arr8 { a0: 7, a1: 7, a2: 7, a3: 7, a4: 7, a5: 0, a6: 0, a7: 0, len: 5 };
+    let sorted = counting_sort(a);
+    assert_eq(arr8_get(sorted, 0), 7);
+    assert_eq(arr8_get(sorted, 4), 7);
+}
+
+fn main() -> Int {
+    test_basic_sort();
+    test_all_same();
+    test_already_sorted();
+    test_reverse_order();
+    test_single_element();
+    test_two_elements();
+    test_frequency_counts();
+    test_all_zeros();
+    test_stability_property();
+    test_max_values();
+    print("[OK] 317_counting_sort_aot");
+    0
+}

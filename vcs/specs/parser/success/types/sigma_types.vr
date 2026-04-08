@@ -1,0 +1,134 @@
+// @test: parse-pass
+// @tier: 0
+// @category: types
+// @level: L0
+// @tags: parser, types, sigma, dependent-types, bindings
+// @description: Comprehensive tests for sigma type bindings
+
+// ============================================================================
+// Basic Sigma Types
+// Grammar: sigma_bindings = sigma_binding , { ',' , sigma_binding }
+// Grammar: sigma_binding = identifier , ':' , type_expr , [ 'where' , expression ]
+// ============================================================================
+
+// Single sigma binding
+type Natural is n: Int where n >= 0;
+
+type PositiveInt is n: Int where n > 0;
+
+type NonZero is n: Int where n != 0;
+
+// ============================================================================
+// Multi-Binding Sigma Types
+// ============================================================================
+
+// Pair of dependent values
+type SizedVec is n: Int, data: [Int; n];
+
+// Triple binding
+type Matrix is rows: Int, cols: Int, data: [[Float; cols]; rows];
+
+// With constraints on all bindings
+type ValidRange is lo: Int where lo >= 0, hi: Int where hi > lo, values: [Int; hi - lo];
+
+// ============================================================================
+// Sigma Types with Complex Constraints
+// ============================================================================
+
+// Constraint referencing previous binding
+type IndexedArray is n: Int where n > 0, arr: [Int; n], idx: Int where idx >= 0 && idx < n;
+
+// Logical combination
+type BoundedMatrix is
+    rows: Int where rows > 0 && rows <= 1000,
+    cols: Int where cols > 0 && cols <= 1000,
+    data: [[Float; cols]; rows];
+
+// ============================================================================
+// Sigma Types with Generic Parameters
+// ============================================================================
+
+type SizedList<T> is n: Int where n >= 0, data: List<T> where data.len() == n;
+
+type Pair<A, B> is first: A, second: B;
+
+type Triple<A, B, C> is a: A, b: B, c: C;
+
+// ============================================================================
+// Sigma Types in Function Signatures
+// ============================================================================
+
+fn takes_sized_vec(vec: (n: Int, data: [Int; n])) -> Int {
+    data.sum()
+}
+
+fn returns_sigma() -> (n: Int where n > 0, arr: [Int; n]) {
+    let arr = [1, 2, 3];
+    (3, arr)
+}
+
+fn generic_sigma<T>(input: (len: Int, items: List<T> where items.len() == len)) -> T {
+    items[0]
+}
+
+// ============================================================================
+// Nested Sigma Types
+// ============================================================================
+
+type NestedSigma is
+    outer: Int where outer > 0,
+    inner: (n: Int where n < outer, data: [Int; n]);
+
+type DeepNesting is
+    level1: Int,
+    level2: (a: Int, b: Int where b > a),
+    level3: (x: Int, y: Int, z: Int where z == x + y);
+
+// ============================================================================
+// Sigma Types with Function Types
+// ============================================================================
+
+type FunctionWithSize is
+    n: Int where n > 0,
+    processor: fn([Int; n]) -> Int;
+
+type CallbackPair is
+    before: fn() -> (),
+    after: fn() -> ();
+
+// ============================================================================
+// Sigma Types in Protocol Definitions
+// ============================================================================
+
+type SizedContainer is protocol {
+    type Element;
+
+    fn size(&self) -> (n: Int where n >= 0);
+
+    fn get(&self, idx: Int) -> Maybe<Self.Element>
+        requires idx >= 0;
+};
+
+// ============================================================================
+// Sigma Types with Existential Constraints
+// ============================================================================
+
+type ExistentialSigma is
+    witness: Int where exists k: Int . k > 0 && witness == k * k,
+    value: Int;
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Single binding without constraint
+type UnconstrainedPair is a: Int, b: Int;
+
+// Empty constraint (always true)
+type TrivialConstraint is n: Int where true;
+
+// Self-referential constraint
+type SelfRef is n: Int where n == n;
+
+// Multiple constraints on same binding via &&
+type MultiConstraint is n: Int where n > 0 && n < 100 && n % 2 == 0;

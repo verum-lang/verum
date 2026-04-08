@@ -1,0 +1,194 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, bitfield, bit-manipulation, encoding
+// @timeout: 30000
+
+// Bit manipulation and packed integer encoding
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+// Bit operations (simulated)
+fn get_bit(val: Int, pos: Int) -> Int {
+    (val / pow2(pos)) % 2
+}
+
+fn set_bit(val: Int, pos: Int) -> Int {
+    if get_bit(val, pos) == 1 { val }
+    else { val + pow2(pos) }
+}
+
+fn clear_bit(val: Int, pos: Int) -> Int {
+    if get_bit(val, pos) == 0 { val }
+    else { val - pow2(pos) }
+}
+
+fn toggle_bit(val: Int, pos: Int) -> Int {
+    if get_bit(val, pos) == 1 { val - pow2(pos) }
+    else { val + pow2(pos) }
+}
+
+fn popcount(val: Int) -> Int {
+    let mut v = val;
+    let mut count = 0;
+    while v > 0 {
+        if v % 2 == 1 { count = count + 1; }
+        v = v / 2;
+    }
+    count
+}
+
+// Highest set bit position (-1 if val is 0)
+fn highest_bit(val: Int) -> Int {
+    if val == 0 { return 0 - 1; }
+    let mut pos = 0;
+    let mut v = val;
+    while v > 1 { v = v / 2; pos = pos + 1; }
+    pos
+}
+
+// Lowest set bit position (-1 if val is 0)
+fn lowest_bit(val: Int) -> Int {
+    if val == 0 { return 0 - 1; }
+    let mut pos = 0;
+    let mut v = val;
+    while v % 2 == 0 { v = v / 2; pos = pos + 1; }
+    pos
+}
+
+// Check if power of 2
+fn is_power_of_2(val: Int) -> Int {
+    if val <= 0 { return 0; }
+    if popcount(val) == 1 { 1 } else { 0 }
+}
+
+// Bit reverse (8-bit)
+fn reverse_bits_8(val: Int) -> Int {
+    let mut result = 0;
+    let mut i = 0;
+    while i < 8 {
+        if get_bit(val, i) == 1 {
+            result = result + pow2(7 - i);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Pack/unpack: store 4 values (0-15 each) into a single integer
+fn pack4(a: Int, b: Int, c: Int, d: Int) -> Int {
+    a + b * 16 + c * 256 + d * 4096
+}
+
+fn unpack4_0(packed: Int) -> Int { packed % 16 }
+fn unpack4_1(packed: Int) -> Int { (packed / 16) % 16 }
+fn unpack4_2(packed: Int) -> Int { (packed / 256) % 16 }
+fn unpack4_3(packed: Int) -> Int { (packed / 4096) % 16 }
+
+fn test_bit_ops() -> Int {
+    assert_eq(get_bit(0, 0), 0);
+    assert_eq(get_bit(1, 0), 1);
+    assert_eq(get_bit(5, 0), 1); // 101
+    assert_eq(get_bit(5, 1), 0);
+    assert_eq(get_bit(5, 2), 1);
+
+    assert_eq(set_bit(0, 3), 8);
+    assert_eq(set_bit(5, 1), 7); // 101 → 111 = 7
+    assert_eq(clear_bit(7, 1), 5); // 111 → 101 = 5
+    assert_eq(toggle_bit(5, 1), 7);
+    assert_eq(toggle_bit(7, 1), 5);
+    1
+}
+
+fn test_popcount() -> Int {
+    assert_eq(popcount(0), 0);
+    assert_eq(popcount(1), 1);
+    assert_eq(popcount(7), 3);
+    assert_eq(popcount(255), 8);
+    assert_eq(popcount(256), 1);
+    1
+}
+
+fn test_highest_lowest() -> Int {
+    assert_eq(highest_bit(1), 0);
+    assert_eq(highest_bit(8), 3);
+    assert_eq(highest_bit(255), 7);
+    assert_eq(lowest_bit(8), 3);
+    assert_eq(lowest_bit(12), 2); // 1100
+    assert_eq(lowest_bit(1), 0);
+    1
+}
+
+fn test_power_of_2() -> Int {
+    assert_eq(is_power_of_2(1), 1);
+    assert_eq(is_power_of_2(2), 1);
+    assert_eq(is_power_of_2(4), 1);
+    assert_eq(is_power_of_2(8), 1);
+    assert_eq(is_power_of_2(3), 0);
+    assert_eq(is_power_of_2(6), 0);
+    assert_eq(is_power_of_2(0), 0);
+    1
+}
+
+fn test_reverse_bits() -> Int {
+    assert_eq(reverse_bits_8(1), 128);   // 00000001 → 10000000
+    assert_eq(reverse_bits_8(128), 1);   // 10000000 → 00000001
+    assert_eq(reverse_bits_8(255), 255); // 11111111 → 11111111
+    assert_eq(reverse_bits_8(0), 0);
+    assert_eq(reverse_bits_8(170), 85);  // 10101010 → 01010101
+    1
+}
+
+fn test_pack_unpack() -> Int {
+    let packed = pack4(3, 7, 11, 15);
+    assert_eq(unpack4_0(packed), 3);
+    assert_eq(unpack4_1(packed), 7);
+    assert_eq(unpack4_2(packed), 11);
+    assert_eq(unpack4_3(packed), 15);
+
+    // Roundtrip
+    let packed2 = pack4(0, 0, 0, 0);
+    assert_eq(packed2, 0);
+    let packed3 = pack4(15, 15, 15, 15);
+    assert_eq(unpack4_0(packed3), 15);
+    assert_eq(unpack4_3(packed3), 15);
+    1
+}
+
+fn main() -> Int {
+    test_bit_ops();
+    test_popcount();
+    test_highest_lowest();
+    test_power_of_2();
+    test_reverse_bits();
+    test_pack_unpack();
+    print("[OK] 576_bitfield_aot");
+    0
+}

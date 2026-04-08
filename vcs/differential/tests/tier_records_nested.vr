@@ -1,0 +1,166 @@
+// @test: differential
+
+// @tier: 0, 3
+// @level: L0
+// @tags: differential, records, nested
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Nested record field access and update, verify after modifications
+
+fn main() -> Int {
+    test_simple_record();
+    test_nested_record();
+    test_record_array();
+    0
+}
+
+type Point is { x: Int, y: Int };
+
+type Rect is { x1: Int, y1: Int, x2: Int, y2: Int };
+
+fn make_point(px: Int, py: Int) -> Point {
+    Point { x: px, y: py }
+}
+
+fn point_sum(p: Point) -> Int {
+    p.x + p.y
+}
+
+/// Simple record creation and field access
+fn test_simple_record() {
+    let p1 = make_point(3, 4);
+    assert_eq(p1.x, 3);
+    assert_eq(p1.y, 4);
+    assert_eq(point_sum(p1), 7);
+
+    let p2 = make_point(10, 20);
+    assert_eq(p2.x, 10);
+    assert_eq(p2.y, 20);
+
+    // Distance squared between two points
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    let dist_sq = dx * dx + dy * dy;
+    assert_eq(dist_sq, 305); // 7^2 + 16^2 = 49 + 256
+
+    println("simple_record: pass");
+}
+
+fn make_rect(rx1: Int, ry1: Int, rx2: Int, ry2: Int) -> Rect {
+    Rect { x1: rx1, y1: ry1, x2: rx2, y2: ry2 }
+}
+
+fn rect_width(r: Rect) -> Int {
+    let w = r.x2 - r.x1;
+    if w < 0 { -w } else { w }
+}
+
+fn rect_height(r: Rect) -> Int {
+    let h = r.y2 - r.y1;
+    if h < 0 { -h } else { h }
+}
+
+fn rect_width_val(rx1: Int, rx2: Int) -> Int {
+    let w = rx2 - rx1;
+    if w < 0 { -w } else { w }
+}
+
+fn rect_height_val(ry1: Int, ry2: Int) -> Int {
+    let h = ry2 - ry1;
+    if h < 0 { -h } else { h }
+}
+
+fn rect_area(r: Rect) -> Int {
+    rect_width_val(r.x1, r.x2) * rect_height_val(r.y1, r.y2)
+}
+
+/// Nested record operations (rect contains points)
+fn test_nested_record() {
+    let r1 = make_rect(0, 0, 10, 5);
+    assert_eq(rect_width_val(r1.x1, r1.x2), 10);
+    assert_eq(rect_height_val(r1.y1, r1.y2), 5);
+    assert_eq(rect_area(r1), 50);
+
+    let r2 = make_rect(2, 3, 8, 9);
+    assert_eq(rect_width_val(r2.x1, r2.x2), 6);
+    assert_eq(rect_height_val(r2.y1, r2.y2), 6);
+    assert_eq(rect_area(r2), 36);
+
+    // Center point
+    let r2b = make_rect(2, 3, 8, 9);
+    let cx = (r2b.x1 + r2b.x2) / 2;
+    let cy = (r2b.y1 + r2b.y2) / 2;
+    assert_eq(cx, 5);
+    assert_eq(cy, 6);
+
+    // Perimeter
+    let r1b = make_rect(0, 0, 10, 5);
+    let perim = 2 * (rect_width_val(r1b.x1, r1b.x2) + rect_height_val(r1b.y1, r1b.y2));
+    assert_eq(perim, 30);
+
+    println("nested_record: pass");
+}
+
+type Entry is { key: Int, val: Int };
+
+fn make_entry(k: Int, v: Int) -> Entry {
+    Entry { key: k, val: v }
+}
+
+fn entry_key(e: Entry) -> Int {
+    e.key
+}
+
+fn entry_val(e: Entry) -> Int {
+    e.val
+}
+
+/// Records: simulate a small key-value store using individual variables
+fn test_record_array() {
+    let e0 = make_entry(1, 100);
+    let e1 = make_entry(2, 200);
+    let e2 = make_entry(3, 300);
+    let e3 = make_entry(4, 400);
+
+    // Verify field access
+    assert_eq(entry_key(e0), 1);
+    assert_eq(entry_val(e0), 100);
+    assert_eq(entry_key(e1), 2);
+    assert_eq(entry_val(e1), 200);
+    assert_eq(entry_key(e2), 3);
+    assert_eq(entry_val(e2), 300);
+    assert_eq(entry_key(e3), 4);
+    assert_eq(entry_val(e3), 400);
+
+    // Lookup key 3 using conditionals
+    let k0 = e0.key;
+    let k1 = e1.key;
+    let k2 = e2.key;
+    let k3 = e3.key;
+    let v0 = e0.val;
+    let v1 = e1.val;
+    let v2 = e2.val;
+    let v3 = e3.val;
+
+    let mut found_val = -1;
+    if k0 == 3 { found_val = v0; }
+    if k1 == 3 { found_val = v1; }
+    if k2 == 3 { found_val = v2; }
+    if k3 == 3 { found_val = v3; }
+    assert_eq(found_val, 300);
+
+    // Sum all values
+    let total = v0 + v1 + v2 + v3;
+    assert_eq(total, 1000);
+
+    // Find max value entry
+    let mut max_val = v0;
+    let mut max_key = k0;
+    if v1 > max_val { max_val = v1; max_key = k1; }
+    if v2 > max_val { max_val = v2; max_key = k2; }
+    if v3 > max_val { max_val = v3; max_key = k3; }
+    assert_eq(max_key, 4);
+    assert_eq(max_val, 400);
+
+    println("record_array: pass");
+}

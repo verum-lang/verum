@@ -1,0 +1,99 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, integration, file-io, time, mutex, map
+// @expected-exit: 0
+
+// Test: Integration of multiple runtime features together.
+
+fn __file_write_string_raw(path: Text, content: Text) -> Int {
+    0
+}
+
+fn __file_read_to_string_raw(path: Text) -> Text {
+    ""
+}
+
+fn __time_monotonic_nanos_raw() -> Int {
+    0
+}
+
+fn __mutex_new_raw() -> Int {
+    0
+}
+
+fn __mutex_lock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn __mutex_unlock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn main() -> Int {
+    // Test 1: Timed map operations
+    let t_start = __time_monotonic_nanos_raw();
+    let mut m = Map.new();
+    let mut i = 0;
+    while (i < 1000) {
+        m.insert(i, i * i);
+        i = i + 1;
+    }
+    let t_end = __time_monotonic_nanos_raw();
+    let elapsed_us = (t_end - t_start) / 1000;
+    print(f"1000 map inserts: {elapsed_us}us");
+
+    // Verify some values
+    if (m.get(500) != 250000) {
+        print(f"FAIL test1: get(500)={m.get(500)}");
+        return 1;
+    }
+    if (m.len() != 1000) {
+        print(f"FAIL test1b: len={m.len()}");
+        return 1;
+    }
+
+    // Test 2: Mutex-protected map write then file output
+    let mtx = __mutex_new_raw();
+    __mutex_lock_raw(mtx);
+    let mut result = Map.new();
+    result.insert(1, m.get(10));
+    result.insert(2, m.get(20));
+    result.insert(3, m.get(30));
+    __mutex_unlock_raw(mtx);
+
+    // Verify map contents
+    if (result.get(1) != 100) {
+        print(f"FAIL test2a: result[1]={result.get(1)}");
+        return 1;
+    }
+    if (result.get(2) != 400) {
+        print(f"FAIL test2b: result[2]={result.get(2)}");
+        return 1;
+    }
+    if (result.get(3) != 900) {
+        print(f"FAIL test2c: result[3]={result.get(3)}");
+        return 1;
+    }
+
+    // Test 3: Write results to file and read back
+    let path = "/tmp/verum_test_911.txt";
+    let output = f"results: {result.get(1)},{result.get(2)},{result.get(3)}";
+    __file_write_string_raw(path, output);
+    let read_back = __file_read_to_string_raw(path);
+    if (read_back != output) {
+        print(f"FAIL test3: file content mismatch");
+        return 1;
+    }
+
+    // Test 4: Map aggregate — sum squares from map
+    let sum = m.get(10) + m.get(20) + m.get(30) + m.get(40) + m.get(50);
+    // 100 + 400 + 900 + 1600 + 2500 = 5500
+    if (sum != 5500) {
+        print(f"FAIL test4: sum={sum}");
+        return 1;
+    }
+
+    print("911_runtime_integration: PASS");
+    0
+}

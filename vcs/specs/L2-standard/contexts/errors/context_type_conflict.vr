@@ -1,0 +1,206 @@
+// @test: typecheck-fail
+// @expected-error: "type not found"
+// @tier: 0
+// @level: L2
+// @tags: contexts, conflict, type, error
+// @description: Tests detection of conflicting context type requirements in call chains
+//
+// Context type conflicts occur when a function's context requirements
+// are incompatible with the provided context types, or when multiple
+// functions have conflicting requirements for the same context name.
+
+// Two contexts with same name but incompatible types
+context async Database {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context Cache {
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
+}
+
+type Row is Map<Text, Text>;
+type DbError is Failed(Text) | NotFound;
+
+// Implementations
+type PostgresDb is { conn: Text };
+
+implement Database for PostgresDb {
+    async fn query(sql: Text) -> Result<List<Row>, DbError> {
+        Ok(List.new())
+    }
+
+    async fn execute(sql: Text) -> Result<Int, DbError> {
+        Ok(0)
+    }
+}
+
+type RedisCache is { host: Text };
+
+implement Cache for RedisCache {
+    fn get(key: Text) -> Maybe<Text> {
+        None
+    }
+
+    fn set(key: Text, value: Text) {
+        // Store in Redis
+    }
+}
+
+// ERROR: Function expects Database but tries to use Cache methods
+fn wrong_context_usage() using [Database] {
+    // E0305: Context type conflict: Cannot call 'get' on context 'Database'
+    // 'get' is not a method of context 'Database', did you mean to use 'Cache'?
+    Database.get("key");  // ERROR: Database has no 'get' method
+}
+
+// ERROR: Conflicting async/sync requirements
+async fn async_sync_conflict() using [Database] {
+    // OK: Database is async
+    Database.query("SELECT 1").await;
+}
+
+fn sync_with_async_database() using [Database] {
+    // E0305: Context type conflict: Cannot use async context 'Database' in sync function
+    // Either make this function async or use a sync-compatible context
+    Database.query("SELECT 1");  // ERROR: async method in sync context
+}
+
+// ERROR: Generic context type conflict
+context Repository<T> {
+    fn find(id: Int) -> Maybe<T>;
+    fn save(item: T) -> Result<Int, DbError>;
+}
+
+type User is { id: Int, name: Text };
+type Order is { id: Int, total: Float };
+
+type UserRepo is {};
+
+implement Repository<User> for UserRepo {
+    fn find(id: Int) -> Maybe<User> {
+        Some(User { id, name: "Alice" })
+    }
+
+    fn save(item: User) -> Result<Int, DbError> {
+        Ok(item.id)
+    }
+}
+
+fn uses_user_repo() using [Repository<User>] {
+    Repository<User>.find(1);
+}
+
+fn uses_order_repo() using [Repository<Order>] {
+    Repository<Order>.find(1);
+}
+
+// ERROR: Providing wrong generic type
+fn generic_type_conflict() {
+    let user_repo = UserRepo {};
+
+    // OK: UserRepo implements Repository<User>
+    provide UserRepository = user_repo;
+    uses_user_repo();
+
+    // E0305: Context type conflict: 'UserRepo' implements 'Repository<User>'
+    // but 'Repository<Order>' was required
+    uses_order_repo();  // ERROR: Repository<Order> not provided
+}
+
+// ERROR: Multiple conflicting context requirements in call chain
+fn requires_database() using [Database] {
+    Database.execute("UPDATE table SET x = 1");
+}
+
+fn requires_cache() using [Cache] {
+    Cache.set("key", "value");
+}
+
+// Function that calls both but only provides partial contexts
+fn partial_context_provision() {
+    let db = PostgresDb { conn: "postgres://..." };
+    // Missing Cache provision
+
+    provide Database = PostgresDb { conn: "postgres://..." };
+    requires_database();  // OK
+
+    // E0305: Context type conflict: Function 'requires_cache' requires
+    // context 'Cache' but only 'Database' is provided
+    requires_cache();  // ERROR: Cache not provided
+}
+
+// ERROR: Incompatible context method signatures
+context CustomLogger {
+    fn log(message: Text);  // Single argument
+}
+
+context DetailedLogger {
+    fn log(level: Level, message: Text);  // Two arguments
+}
+
+type Level is Info | Warn | Error;
+
+type SimpleLog is {};
+implement CustomLogger for SimpleLog {
+    fn log(message: Text) {
+        println(message);
+    }
+}
+
+fn expects_detailed_logger() using [DetailedLogger] {
+    // Expects two-argument log
+    DetailedLogger.log(Level.Info, "message");
+}
+
+fn method_signature_conflict() {
+    // E0305: Context type conflict: 'SimpleLog' implements 'CustomLogger'
+    // but 'DetailedLogger' requires method 'log(Level, Text)'
+    // SimpleLog.log has signature 'log(Text)', incompatible with 'log(Level, Text)'
+    provide DetailedLogger = SimpleLog {};  // ERROR: wrong interface
+    expects_detailed_logger();
+}
+
+// ERROR: Context self-conflict (context depends on itself in incompatible way)
+context DataSource {
+    fn read() -> Text;
+}
+
+context DataSink {
+    fn write(data: Text);
+}
+
+type Bidirectional is {};
+
+implement DataSource for Bidirectional {
+    fn read() -> Text {
+        "data"
+    }
+}
+
+implement DataSink for Bidirectional {
+    fn write(data: Text) {
+        println(data);
+    }
+}
+
+// This is fine - same type can implement multiple contexts
+fn bidirectional_usage() {
+    provide DataSource = Bidirectional {};
+    provide DataSink = Bidirectional {};
+    // OK: Both contexts provided by same instance
+    let data = DataSource.read();
+    DataSink.write(data);
+}
+
+// ERROR: But cannot use one context as another
+fn context_substitution_error() using [DataSource] {
+    // E0305: Context type conflict: 'DataSource' does not have method 'write'
+    // Did you mean to use 'DataSink'?
+    DataSource.write("data");  // ERROR: wrong context
+}
+
+fn main() {
+    // This code should not compile due to context type conflicts
+}

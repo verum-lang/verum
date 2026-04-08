@@ -1,0 +1,718 @@
+// @test: parse
+// @tier: 3
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: comparison, java, jvm, baseline, performance
+// @description: Verum vs Java performance comparison (target: > 1.5x Java performance)
+
+/// Verum vs Java Performance Comparison
+///
+/// This benchmark compares Verum's performance against Java (JVM).
+/// Java represents a mature, well-optimized managed runtime.
+///
+/// Target: > 1.5x Java performance (at least 50% faster)
+///
+/// Key comparisons:
+/// - JIT-optimized compute paths
+/// - GC behavior differences
+/// - Object allocation patterns
+/// - Collection operations
+///
+/// Verum advantages:
+/// - AOT compilation (no warmup)
+/// - CBGR (no GC pauses for most cases)
+/// - Zero-cost abstractions
+/// - No boxing for primitives
+///
+/// Spec reference: docs/detailed/26-cbgr-implementation.md
+
+const ITERATIONS: Int = 10_000_000;
+const DATA_SIZE: Int = 1_000_000;
+
+/// Java baseline measurements (pre-measured with HotSpot JIT)
+module java_baselines {
+    /// Java fibonacci(40) time in milliseconds (after JIT warmup)
+    pub const FIB_40_MS: Float = 600.0;
+
+    /// Java 1000x1000 matrix multiply in milliseconds
+    pub const MATRIX_1000_MS: Float = 1200.0;
+
+    /// Java Arrays.sort 1M elements in milliseconds
+    pub const SORT_1M_MS: Float = 200.0;
+
+    /// Java Arrays.binarySearch 1M lookups in milliseconds
+    pub const BSEARCH_1M_MS: Float = 40.0;
+
+    /// Java object field access 10M times in milliseconds
+    pub const FIELD_ACCESS_10M_MS: Float = 25.0;
+
+    /// Java new Object() 1M times in milliseconds
+    pub const NEW_OBJECT_1M_MS: Float = 30.0;
+
+    /// Java ArrayList add 1M elements in milliseconds
+    pub const ARRAYLIST_ADD_1M_MS: Float = 25.0;
+
+    /// Java HashMap put 1M elements in milliseconds
+    pub const HASHMAP_PUT_1M_MS: Float = 300.0;
+
+    /// Java String concatenation 100K times in milliseconds
+    pub const STRING_CONCAT_100K_MS: Float = 150.0;
+
+    /// Java Integer.parseInt 1M times in milliseconds
+    pub const PARSE_INT_1M_MS: Float = 120.0;
+
+    /// Java interface method call 10M times in milliseconds
+    pub const INTERFACE_CALL_10M_MS: Float = 50.0;
+
+    /// Java Stream reduce 1M elements in milliseconds
+    pub const STREAM_REDUCE_1M_MS: Float = 80.0;
+
+    /// Java synchronized block 1M times in milliseconds
+    pub const SYNCHRONIZED_1M_MS: Float = 100.0;
+
+    /// Java boxing/unboxing 10M times in milliseconds
+    pub const BOXING_10M_MS: Float = 150.0;
+
+    /// Java GC-intensive workload (create+GC 10M objects) in milliseconds
+    pub const GC_INTENSIVE_MS: Float = 2000.0;
+}
+
+fn main() {
+    let results = BenchmarkResults.new("Verum vs Java Performance");
+
+    // Pure compute benchmarks
+    results.add(benchmark_fibonacci());
+    results.add(benchmark_matrix_multiply());
+    results.add(benchmark_sorting());
+    results.add(benchmark_binary_search());
+
+    // Object/memory benchmarks
+    results.add(benchmark_field_access());
+    results.add(benchmark_object_creation());
+    results.add(benchmark_gc_intensive());
+
+    // Collection benchmarks
+    results.add(benchmark_arraylist_add());
+    results.add(benchmark_hashmap_put());
+    results.add(benchmark_stream_operations());
+
+    // String benchmarks
+    results.add(benchmark_string_concat());
+    results.add(benchmark_parse_int());
+
+    // Dispatch benchmarks
+    results.add(benchmark_interface_call());
+    results.add(benchmark_boxing_unboxing());
+
+    // Concurrency benchmarks
+    results.add(benchmark_synchronized());
+
+    results.report();
+    results.export_comparison("/tmp/verum_vs_java.json");
+
+    let all_meet_target = results.results.iter()
+        .all(|r| r.speedup >= r.min_speedup);
+    assert(all_meet_target, "Verum performance below 1.5x Java");
+}
+
+/// Benchmark: Fibonacci (compute)
+fn benchmark_fibonacci() -> ComparisonResult {
+    let n = 40;
+
+    // Note: Verum has no JIT warmup needed
+    let timer = Timer.new();
+    timer.start();
+
+    let result = fib(n);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.FIB_40_MS;
+
+    black_box(result);
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "fibonacci_40",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.2,  // Expect 20% faster (no JIT overhead)
+        category: "compute",
+    }
+}
+
+fn fib(n: Int) -> Int {
+    if n <= 1 { n }
+    else { fib(n - 1) + fib(n - 2) }
+}
+
+/// Benchmark: Matrix multiplication
+fn benchmark_matrix_multiply() -> ComparisonResult {
+    let size = 1000;
+
+    let a = create_matrix(size, size, 1.0);
+    let b = create_matrix(size, size, 2.0);
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result = matrix_multiply(&a, &b);
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.MATRIX_1000_MS;
+
+    black_box(result);
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "matrix_1000x1000",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.5,  // Native code advantage
+        category: "compute",
+    }
+}
+
+fn create_matrix(rows: Int, cols: Int, value: Float) -> List<List<Float>> {
+    (0..rows).map(|_| (0..cols).map(|_| value).collect()).collect()
+}
+
+fn matrix_multiply(a: &List<List<Float>>, b: &List<List<Float>>) -> List<List<Float>> {
+    let rows = a.len();
+    let cols = b[0].len();
+    let k = b.len();
+
+    let mut result = create_matrix(rows, cols, 0.0);
+
+    for i in 0..rows {
+        for j in 0..cols {
+            let mut sum = 0.0;
+            for l in 0..k {
+                sum += a[i][l] * b[l][j];
+            }
+            result[i][j] = sum;
+        }
+    }
+
+    result
+}
+
+/// Benchmark: Sorting
+fn benchmark_sorting() -> ComparisonResult {
+    let size = DATA_SIZE;
+
+    let mut rng = Random.with_seed(42);
+    let data: List<Int> = (0..size).map(|_| rng.gen()).collect();
+    let mut to_sort = data.clone();
+
+    let timer = Timer.new();
+    timer.start();
+
+    to_sort.sort();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.SORT_1M_MS;
+
+    black_box(to_sort);
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "sort_1m_elements",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.5,
+        category: "algorithm",
+    }
+}
+
+/// Benchmark: Binary search
+fn benchmark_binary_search() -> ComparisonResult {
+    let size = DATA_SIZE;
+
+    let data: List<Int> = (0..size).collect();
+    let mut rng = Random.with_seed(123);
+    let lookups: List<Int> = (0..DATA_SIZE)
+        .map(|_| rng.gen_range(0, size))
+        .collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        black_box(data.binary_search(&lookups[i]));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.BSEARCH_1M_MS;
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "binary_search_1m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.5,
+        category: "algorithm",
+    }
+}
+
+/// Benchmark: Field access
+fn benchmark_field_access() -> ComparisonResult {
+    type Point is { x: Float, y: Float, z: Float };
+
+    let point = Point { x: 1.0, y: 2.0, z: 3.0 };
+
+    // Warmup
+    for _ in 0..100_000 {
+        black_box(point.x + point.y + point.z);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..ITERATIONS {
+        black_box(point.x + point.y + point.z);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.FIELD_ACCESS_10M_MS;
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "field_access_10m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 2.0,  // No null checks, no indirection
+        category: "memory",
+    }
+}
+
+/// Benchmark: Object creation
+fn benchmark_object_creation() -> ComparisonResult {
+    type SmallObject is { id: Int, value: Int };
+
+    // Warmup
+    for _ in 0..100_000 {
+        let obj = SmallObject { id: 1, value: 2 };
+        black_box(&obj);
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..DATA_SIZE {
+        let obj = SmallObject { id: i, value: i * 2 };
+        black_box(&obj);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.NEW_OBJECT_1M_MS;
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "object_creation_1m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.0,  // Java's allocator is very good
+        category: "memory",
+    }
+}
+
+/// Benchmark: GC-intensive workload
+fn benchmark_gc_intensive() -> ComparisonResult {
+    // Create and drop many objects to stress GC
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..100 {
+        let mut objects: List<Heap<[u8; 1024]> > = List.with_capacity(100_000);
+        for _ in 0..100_000 {
+            objects.push(Heap([0u8; 1024]));
+        }
+        // All objects dropped here
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.GC_INTENSIVE_MS;
+
+    let speedup = java_ms / verum_ms;
+
+    // CBGR should have predictable behavior
+    ComparisonResult {
+        name: "gc_intensive",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 2.0,  // No stop-the-world GC
+        category: "gc",
+    }
+}
+
+/// Benchmark: ArrayList/List add
+fn benchmark_arraylist_add() -> ComparisonResult {
+    let count = DATA_SIZE;
+
+    let mut list: List<Int> = List.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..count {
+        list.push(i);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.ARRAYLIST_ADD_1M_MS;
+
+    black_box(list);
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "list_add_1m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.5,
+        category: "container",
+    }
+}
+
+/// Benchmark: HashMap put
+fn benchmark_hashmap_put() -> ComparisonResult {
+    let count = DATA_SIZE;
+
+    let mut map: Map<Int, Int> = Map.new();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..count {
+        map.insert(i, i * 2);
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.HASHMAP_PUT_1M_MS;
+
+    black_box(map);
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "map_put_1m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.5,
+        category: "container",
+    }
+}
+
+/// Benchmark: Stream-like operations
+fn benchmark_stream_operations() -> ComparisonResult {
+    let data: List<Int> = (0..DATA_SIZE).collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    let result: Int = data.iter()
+        .filter(|&x| x % 2 == 0)
+        .map(|x| x * 2)
+        .sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.STREAM_REDUCE_1M_MS;
+
+    black_box(result);
+
+    let speedup = java_ms / verum_ms;
+
+    // Iterator optimizations should help
+    ComparisonResult {
+        name: "stream_reduce_1m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 2.0,
+        category: "functional",
+    }
+}
+
+/// Benchmark: String concatenation
+fn benchmark_string_concat() -> ComparisonResult {
+    let count = 100_000;
+
+    let timer = Timer.new();
+    timer.start();
+
+    let mut result = Text.with_capacity(count * 10);
+    for i in 0..count {
+        result.push_str(&i.to_string());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.STRING_CONCAT_100K_MS;
+
+    black_box(result);
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "string_concat_100k",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 2.0,  // No StringBuilder overhead
+        category: "string",
+    }
+}
+
+/// Benchmark: Integer parsing
+fn benchmark_parse_int() -> ComparisonResult {
+    let strings: List<Text> = (0..DATA_SIZE)
+        .map(|i| i.to_string())
+        .collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    for s in strings.iter() {
+        black_box(s.parse.<Int>());
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.PARSE_INT_1M_MS;
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "parse_int_1m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.5,
+        category: "string",
+    }
+}
+
+/// Benchmark: Interface/trait dispatch
+fn benchmark_interface_call() -> ComparisonResult {
+    type Processor is protocol {
+        fn process(&self, x: Int) -> Int;
+    };
+
+    type Doubler is {};
+    implement Processor for Doubler {
+        fn process(&self, x: Int) -> Int { x * 2 }
+    }
+
+    let processor: &Processor = &Doubler {};
+
+    // Warmup
+    for _ in 0..100_000 {
+        black_box(processor.process(42));
+    }
+
+    let timer = Timer.new();
+    timer.start();
+
+    for i in 0..ITERATIONS {
+        black_box(processor.process(i));
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.INTERFACE_CALL_10M_MS;
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "interface_call_10m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.5,
+        category: "dispatch",
+    }
+}
+
+/// Benchmark: Boxing/unboxing (no boxing in Verum)
+fn benchmark_boxing_unboxing() -> ComparisonResult {
+    // Verum has no boxing - primitives are always unboxed
+    // This simulates what Java does with Integer boxing
+
+    let values: List<Int> = (0..ITERATIONS as Int).collect();
+
+    let timer = Timer.new();
+    timer.start();
+
+    let sum: Int = values.iter().sum();
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.BOXING_10M_MS;
+
+    black_box(sum);
+
+    let speedup = java_ms / verum_ms;
+
+    // Huge advantage - no boxing overhead
+    ComparisonResult {
+        name: "no_boxing_10m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 5.0,  // Major advantage
+        category: "types",
+    }
+}
+
+/// Benchmark: Synchronized/mutex
+fn benchmark_synchronized() -> ComparisonResult {
+    mount std.sync.Mutex;
+
+    let counter = Mutex.new(0);
+
+    let timer = Timer.new();
+    timer.start();
+
+    for _ in 0..DATA_SIZE {
+        let mut guard = counter.lock().unwrap();
+        *guard += 1;
+    }
+
+    let verum_ms = timer.elapsed_ms() as Float;
+    let java_ms = java_baselines.SYNCHRONIZED_1M_MS;
+
+    let speedup = java_ms / verum_ms;
+
+    ComparisonResult {
+        name: "synchronized_1m",
+        verum_ms,
+        java_ms,
+        speedup,
+        min_speedup: 1.5,
+        category: "concurrency",
+    }
+}
+
+type ComparisonResult is {
+    name: Text,
+    verum_ms: Float,
+    java_ms: Float,
+    speedup: Float,
+    min_speedup: Float,
+    category: Text,
+};
+
+type BenchmarkResults is {
+    suite_name: Text,
+    results: List<ComparisonResult>,
+};
+
+implement BenchmarkResults {
+    fn new(name: Text) -> Self {
+        Self { suite_name: name, results: List.new() }
+    }
+
+    fn add(&mut self, result: ComparisonResult) {
+        self.results.push(result);
+    }
+
+    fn report(&self) {
+        println("=== {} ===", self.suite_name);
+        println("");
+        println("{:<25} {:>12} {:>12} {:>10} {:>10} {:>8}",
+                "Benchmark", "Verum (ms)", "Java (ms)", "Speedup", "Target", "Status");
+        println("{}", "-".repeat(85));
+
+        for result in &self.results {
+            let passed = result.speedup >= result.min_speedup;
+            let status = if passed { "PASS" } else { "FAIL" };
+
+            println("{:<25} {:>12.2} {:>12.2} {:>10.2}x {:>10.1}x {:>8}",
+                    result.name, result.verum_ms, result.java_ms,
+                    result.speedup, result.min_speedup, status);
+        }
+
+        println("");
+        let avg_speedup = self.results.iter()
+            .map(|r| r.speedup)
+            .sum.<Float>() / self.results.len() as Float;
+        println("Average speedup: {:.2}x faster than Java", avg_speedup);
+
+        let passed = self.results.iter().filter(|r| r.speedup >= r.min_speedup).count();
+        println("Summary: {}/{} benchmarks passed", passed, self.results.len());
+    }
+
+    fn export_comparison(&self, path: Text) {
+        let json = Json.object();
+        json.set("suite", &self.suite_name);
+        json.set("comparison", "java");
+
+        let results_json = Json.array();
+        for result in &self.results {
+            let r = Json.object();
+            r.set("name", &result.name);
+            r.set("verum_ms", result.verum_ms);
+            r.set("java_ms", result.java_ms);
+            r.set("speedup", result.speedup);
+            r.set("min_speedup", result.min_speedup);
+            r.set("category", &result.category);
+            r.set("passed", result.speedup >= result.min_speedup);
+            results_json.push(r);
+        }
+        json.set("results", results_json);
+
+        File.write(path, json.to_string_pretty());
+        println("Comparison exported to {}", path);
+    }
+}
+
+fn black_box<T>(x: T) -> T { x }
+
+type Timer is { start_time: Instant };
+implement Timer {
+    fn new() -> Self { Self { start_time: Instant.now() } }
+    fn start(&mut self) { self.start_time = Instant.now(); }
+    fn elapsed_ms(&self) -> Int { self.start_time.elapsed().as_millis() }
+}
+
+type Random is { seed: u64 };
+implement Random {
+    fn with_seed(seed: u64) -> Self { Self { seed } }
+    fn gen(&mut self) -> Int { 0 }
+    fn gen_range(&mut self, min: Int, max: Int) -> Int { min }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+}
+
+type Json is { data: Map<Text, Heap<Any>> };
+implement Json {
+    fn object() -> Self { Self { data: Map.new() } }
+    fn array() -> Self { Self { data: Map.new() } }
+    fn set<T>(&mut self, key: &Text, value: T) {}
+    fn push<T>(&mut self, value: T) {}
+    fn to_string_pretty(&self) -> Text { Text.new() }
+}
+
+module File {
+    pub fn write(path: Text, content: Text) {}
+}

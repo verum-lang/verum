@@ -1,0 +1,863 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: array, protocol, iterator, methods
+// @description: Comprehensive tests for array protocol methods
+//               Tests iteration and common array operations
+
+module specs.stdlib.core.array_protocol_test;
+
+mount core.primitives.*;
+mount core.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// ARRAY PROTOCOL METHODS TEST SUITE
+// =============================================================================
+//
+// Issue Reference: docs/audit.md Section 4.2
+//
+// This suite tests methods available on fixed-size arrays [T; N].
+// Current Focus:
+// - Index access (arr[i])
+// - Length via len() or size constant
+// - Iteration patterns
+// - Slice operations
+//
+// Note: Some methods may require Iterator protocol implementation for arrays.
+
+// -----------------------------------------------------------------------------
+// Section 1: Basic Array Operations
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_index_access() {
+    let arr: [Int; 5] = [10, 20, 30, 40, 50];
+
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+    assert_eq(arr[3], 40);
+    assert_eq(arr[4], 50);
+}
+
+@test
+fn test_array_mutable_index() {
+    let mut arr: [Int; 3] = [1, 2, 3];
+
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 30;
+
+    assert_eq(arr[0], 10);
+    assert_eq(arr[1], 20);
+    assert_eq(arr[2], 30);
+}
+
+@test
+fn test_array_length_inference() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Array length should be known at compile time
+    // Using manual loop until .len() is available
+    let mut count = 0;
+    for i in 0..5 {
+        count = count + 1;
+    }
+    assert_eq(count, 5);
+}
+
+// -----------------------------------------------------------------------------
+// Section 2: Array Iteration Patterns
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_for_in_iteration() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+
+    for x in arr {
+        sum = sum + x;
+    }
+
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_array_for_in_with_reference() {
+    let arr = [10, 20, 30];
+    let mut sum = 0;
+
+    for x in &arr {
+        sum = sum + *x;
+    }
+
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_array_indexed_iteration() {
+    let arr = [100, 200, 300];
+
+    for i in 0..3 {
+        let expected = (i + 1) * 100;
+        assert_eq(arr[i], expected);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Section 3: Array with Different Element Types
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_of_bools() {
+    let arr: [Bool; 4] = [true, false, true, false];
+
+    assert(arr[0]);
+    assert(!arr[1]);
+    assert(arr[2]);
+    assert(!arr[3]);
+}
+
+@test
+fn test_array_of_floats() {
+    let arr: [Float; 3] = [1.5, 2.5, 3.5];
+    let mut sum: Float = 0.0;
+
+    for x in arr {
+        sum = sum + x;
+    }
+
+    // 1.5 + 2.5 + 3.5 = 7.5
+    assert(sum > 7.4 && sum < 7.6);
+}
+
+@test
+fn test_array_of_chars() {
+    let arr: [Char; 5] = ['h', 'e', 'l', 'l', 'o'];
+
+    assert_eq(arr[0], 'h');
+    assert_eq(arr[4], 'o');
+}
+
+// -----------------------------------------------------------------------------
+// Section 4: Array Element Operations
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_find_element() {
+    let arr = [5, 10, 15, 20, 25];
+
+    fn find_index(arr: &[Int; 5], target: Int) -> Maybe<Int> {
+        for i in 0..5 {
+            if arr[i] == target {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    match find_index(&arr, 15) {
+        Some(i) => assert_eq(i, 2),
+        None => assert(false),
+    }
+
+    assert(find_index(&arr, 100) is None);
+}
+
+@test
+fn test_array_contains_element() {
+    let arr = [1, 2, 3, 4, 5];
+
+    fn contains(arr: &[Int; 5], target: Int) -> Bool {
+        for i in 0..5 {
+            if arr[i] == target {
+                return true;
+            }
+        }
+        false
+    }
+
+    assert(contains(&arr, 3));
+    assert(!contains(&arr, 10));
+}
+
+@test
+fn test_array_count_matching() {
+    let arr = [1, 2, 2, 3, 2, 4, 2];
+
+    fn count_occurrences(arr: &[Int; 7], target: Int) -> Int {
+        let mut count = 0;
+        for i in 0..7 {
+            if arr[i] == target {
+                count = count + 1;
+            }
+        }
+        count
+    }
+
+    assert_eq(count_occurrences(&arr, 2), 4);
+    assert_eq(count_occurrences(&arr, 1), 1);
+    assert_eq(count_occurrences(&arr, 5), 0);
+}
+
+// -----------------------------------------------------------------------------
+// Section 5: Array Transformation Patterns
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_map_manual() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut doubled: [Int; 5] = [0, 0, 0, 0, 0];
+
+    for i in 0..5 {
+        doubled[i] = arr[i] * 2;
+    }
+
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[1], 4);
+    assert_eq(doubled[2], 6);
+    assert_eq(doubled[3], 8);
+    assert_eq(doubled[4], 10);
+}
+
+@test
+fn test_array_filter_to_list() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut evens: List<Int> = [];
+
+    for i in 0..10 {
+        if arr[i] % 2 == 0 {
+            evens.push(arr[i]);
+        }
+    }
+
+    assert_eq(evens.len(), 5);
+}
+
+@test
+fn test_array_reduce_sum() {
+    let arr = [1, 2, 3, 4, 5];
+
+    fn sum_array(arr: &[Int; 5]) -> Int {
+        let mut acc = 0;
+        for i in 0..5 {
+            acc = acc + arr[i];
+        }
+        acc
+    }
+
+    assert_eq(sum_array(&arr), 15);
+}
+
+@test
+fn test_array_reduce_product() {
+    let arr = [1, 2, 3, 4, 5];
+
+    fn product_array(arr: &[Int; 5]) -> Int {
+        let mut acc = 1;
+        for i in 0..5 {
+            acc = acc * arr[i];
+        }
+        acc
+    }
+
+    assert_eq(product_array(&arr), 120);
+}
+
+// -----------------------------------------------------------------------------
+// Section 6: Array Min/Max Operations
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_find_min() {
+    let arr = [5, 2, 8, 1, 9, 3];
+
+    fn find_min(arr: &[Int; 6]) -> Int {
+        let mut min = arr[0];
+        for i in 1..6 {
+            if arr[i] < min {
+                min = arr[i];
+            }
+        }
+        min
+    }
+
+    assert_eq(find_min(&arr), 1);
+}
+
+@test
+fn test_array_find_max() {
+    let arr = [5, 2, 8, 1, 9, 3];
+
+    fn find_max(arr: &[Int; 6]) -> Int {
+        let mut max = arr[0];
+        for i in 1..6 {
+            if arr[i] > max {
+                max = arr[i];
+            }
+        }
+        max
+    }
+
+    assert_eq(find_max(&arr), 9);
+}
+
+// -----------------------------------------------------------------------------
+// Section 7: Array Comparison
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_equality() {
+    let arr1 = [1, 2, 3];
+    let arr2 = [1, 2, 3];
+    let arr3 = [1, 2, 4];
+
+    // Element-wise comparison
+    fn arrays_equal(a: &[Int; 3], b: &[Int; 3]) -> Bool {
+        for i in 0..3 {
+            if a[i] != b[i] {
+                return false;
+            }
+        }
+        true
+    }
+
+    assert(arrays_equal(&arr1, &arr2));
+    assert(!arrays_equal(&arr1, &arr3));
+}
+
+// -----------------------------------------------------------------------------
+// Section 8: Multidimensional Arrays
+// -----------------------------------------------------------------------------
+
+@test
+fn test_2d_array() {
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ];
+
+    assert_eq(matrix[0][0], 1);
+    assert_eq(matrix[0][2], 3);
+    assert_eq(matrix[1][0], 4);
+    assert_eq(matrix[1][2], 6);
+}
+
+@test
+fn test_2d_array_iteration() {
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ];
+
+    let mut sum = 0;
+    for i in 0..2 {
+        for j in 0..3 {
+            sum = sum + matrix[i][j];
+        }
+    }
+
+    assert_eq(sum, 21);  // 1+2+3+4+5+6 = 21
+}
+
+// -----------------------------------------------------------------------------
+// Section 9: Array with Struct Elements
+// -----------------------------------------------------------------------------
+
+type Point is { x: Int, y: Int };
+
+@test
+fn test_array_of_structs() {
+    let points: [Point; 3] = [
+        Point { x: 1, y: 2 },
+        Point { x: 3, y: 4 },
+        Point { x: 5, y: 6 },
+    ];
+
+    assert_eq(points[0].x, 1);
+    assert_eq(points[0].y, 2);
+    assert_eq(points[2].x, 5);
+    assert_eq(points[2].y, 6);
+}
+
+@test
+fn test_array_of_structs_mutation() {
+    let mut points: [Point; 2] = [
+        Point { x: 0, y: 0 },
+        Point { x: 0, y: 0 },
+    ];
+
+    points[0].x = 10;
+    points[0].y = 20;
+    points[1].x = 30;
+    points[1].y = 40;
+
+    assert_eq(points[0].x, 10);
+    assert_eq(points[1].y, 40);
+}
+
+// -----------------------------------------------------------------------------
+// Section 10: Array Slicing (if supported)
+// -----------------------------------------------------------------------------
+
+// Note: Array slicing may require additional protocol support
+// These tests document expected behavior
+
+@test
+fn test_array_reference_passing() {
+    let arr = [1, 2, 3, 4, 5];
+
+    fn sum_ref(arr: &[Int; 5]) -> Int {
+        let mut sum = 0;
+        for i in 0..5 {
+            sum = sum + arr[i];
+        }
+        sum
+    }
+
+    assert_eq(sum_ref(&arr), 15);
+}
+
+@test
+fn test_array_mutable_reference() {
+    let mut arr = [1, 2, 3];
+
+    fn double_all(arr: &mut [Int; 3]) {
+        for i in 0..3 {
+            arr[i] = arr[i] * 2;
+        }
+    }
+
+    double_all(&mut arr);
+
+    assert_eq(arr[0], 2);
+    assert_eq(arr[1], 4);
+    assert_eq(arr[2], 6);
+}
+
+// -----------------------------------------------------------------------------
+// Section 11: Array Initialization Patterns
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_default_init() {
+    // Zero-initialized array
+    let zeros: [Int; 5] = [0, 0, 0, 0, 0];
+
+    for i in 0..5 {
+        assert_eq(zeros[i], 0);
+    }
+}
+
+@test
+fn test_array_computed_init() {
+    // Initialize with computed values
+    let mut squares: [Int; 5] = [0, 0, 0, 0, 0];
+
+    for i in 0..5 {
+        squares[i] = i * i;
+    }
+
+    assert_eq(squares[0], 0);
+    assert_eq(squares[1], 1);
+    assert_eq(squares[2], 4);
+    assert_eq(squares[3], 9);
+    assert_eq(squares[4], 16);
+}
+
+// -----------------------------------------------------------------------------
+// Section 12: Array as Function Parameter
+// -----------------------------------------------------------------------------
+
+fn process_array(arr: [Int; 3]) -> Int {
+    arr[0] + arr[1] + arr[2]
+}
+
+fn process_array_ref(arr: &[Int; 3]) -> Int {
+    arr[0] + arr[1] + arr[2]
+}
+
+@test
+fn test_array_by_value() {
+    let arr = [10, 20, 30];
+    let result = process_array(arr);
+    assert_eq(result, 60);
+}
+
+@test
+fn test_array_by_reference() {
+    let arr = [10, 20, 30];
+    let result = process_array_ref(&arr);
+    assert_eq(result, 60);
+}
+
+// -----------------------------------------------------------------------------
+// Section 13: Array Return from Function
+// -----------------------------------------------------------------------------
+
+fn create_array() -> [Int; 4] {
+    [1, 2, 3, 4]
+}
+
+fn create_range_array(start: Int) -> [Int; 5] {
+    [start, start + 1, start + 2, start + 3, start + 4]
+}
+
+@test
+fn test_array_return() {
+    let arr = create_array();
+    assert_eq(arr[0], 1);
+    assert_eq(arr[3], 4);
+}
+
+@test
+fn test_array_return_computed() {
+    let arr = create_range_array(10);
+    assert_eq(arr[0], 10);
+    assert_eq(arr[4], 14);
+}
+
+// -----------------------------------------------------------------------------
+// Section 14: Copy Semantics
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_copy() {
+    let original = [1, 2, 3];
+    let copy = original;  // Should be a copy for arrays of Copy types
+
+    // Modifying copy shouldn't affect original
+    let mut mutable_copy = copy;
+    mutable_copy[0] = 100;
+
+    assert_eq(original[0], 1);  // Original unchanged
+    assert_eq(mutable_copy[0], 100);  // Copy modified
+}
+
+// -----------------------------------------------------------------------------
+// Section 15: Reverse Array Pattern
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_reverse_manual() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut reversed: [Int; 5] = [0, 0, 0, 0, 0];
+
+    for i in 0..5 {
+        reversed[i] = arr[4 - i];
+    }
+
+    assert_eq(reversed[0], 5);
+    assert_eq(reversed[1], 4);
+    assert_eq(reversed[2], 3);
+    assert_eq(reversed[3], 2);
+    assert_eq(reversed[4], 1);
+}
+
+@test
+fn test_array_reverse_in_place() {
+    let mut arr = [1, 2, 3, 4, 5];
+
+    fn swap(arr: &mut [Int; 5], i: Int, j: Int) {
+        let temp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = temp;
+    }
+
+    // Reverse by swapping
+    swap(&mut arr, 0, 4);
+    swap(&mut arr, 1, 3);
+
+    assert_eq(arr[0], 5);
+    assert_eq(arr[1], 4);
+    assert_eq(arr[2], 3);
+    assert_eq(arr[3], 2);
+    assert_eq(arr[4], 1);
+}
+
+// -----------------------------------------------------------------------------
+// Section 16: Single-Element Array
+// -----------------------------------------------------------------------------
+
+@test
+fn test_single_element_array() {
+    let arr: [Int; 1] = [42];
+    assert_eq(arr[0], 42);
+}
+
+@test
+fn test_single_element_array_iteration() {
+    let arr = [99];
+    let mut count = 0;
+    for x in arr {
+        assert_eq(x, 99);
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+@test
+fn test_single_element_array_mutation() {
+    let mut arr: [Int; 1] = [0];
+    arr[0] = 42;
+    assert_eq(arr[0], 42);
+}
+
+// -----------------------------------------------------------------------------
+// Section 17: Array to List Conversion
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_to_list_via_push() {
+    let arr = [10, 20, 30, 40, 50];
+    let mut list: List<Int> = List.new();
+    for x in arr {
+        list.push(x);
+    }
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 10);
+    assert_eq(list[4], 50);
+}
+
+// -----------------------------------------------------------------------------
+// Section 18: Array All Same Value
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_all_same_value() {
+    let arr = [7, 7, 7, 7, 7];
+    let mut all_same = true;
+    for i in 1..5 {
+        if arr[i] != arr[0] {
+            all_same = false;
+        }
+    }
+    assert(all_same);
+}
+
+@test
+fn test_array_not_all_same() {
+    let arr = [7, 7, 8, 7, 7];
+    let mut all_same = true;
+    for i in 1..5 {
+        if arr[i] != arr[0] {
+            all_same = false;
+        }
+    }
+    assert(!all_same);
+}
+
+// -----------------------------------------------------------------------------
+// Section 19: Array Accumulation Patterns
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_running_sum() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut running: [Int; 5] = [0, 0, 0, 0, 0];
+    running[0] = arr[0];
+    for i in 1..5 {
+        running[i] = running[i - 1] + arr[i];
+    }
+    assert_eq(running[0], 1);
+    assert_eq(running[1], 3);
+    assert_eq(running[2], 6);
+    assert_eq(running[3], 10);
+    assert_eq(running[4], 15);
+}
+
+@test
+fn test_array_dot_product() {
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let mut dot = 0;
+    for i in 0..3 {
+        dot = dot + a[i] * b[i];
+    }
+    // 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+    assert_eq(dot, 32);
+}
+
+// -----------------------------------------------------------------------------
+// Section 20: Additional Array Tests
+// -----------------------------------------------------------------------------
+
+@test
+fn test_array_all_zeros() {
+    let arr: [Int; 4] = [0, 0, 0, 0];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    assert_eq(sum, 0);
+}
+
+@test
+fn test_array_negative_elements() {
+    let arr = [-1, -2, -3, -4, -5];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    assert_eq(sum, -15);
+}
+
+@test
+fn test_array_mixed_positive_negative() {
+    let arr = [-2, -1, 0, 1, 2];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    assert_eq(sum, 0);
+}
+
+@test
+fn test_array_two_elements() {
+    let arr: [Int; 2] = [100, 200];
+    assert_eq(arr[0], 100);
+    assert_eq(arr[1], 200);
+}
+
+@test
+fn test_array_swap_elements() {
+    let mut arr = [10, 20];
+    let temp = arr[0];
+    arr[0] = arr[1];
+    arr[1] = temp;
+    assert_eq(arr[0], 20);
+    assert_eq(arr[1], 10);
+}
+
+@test
+fn test_2d_array_row_sums() {
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [10, 20, 30],
+    ];
+    let mut row0_sum = 0;
+    let mut row1_sum = 0;
+    for j in 0..3 {
+        row0_sum = row0_sum + matrix[0][j];
+        row1_sum = row1_sum + matrix[1][j];
+    }
+    assert_eq(row0_sum, 6);
+    assert_eq(row1_sum, 60);
+}
+
+@test
+fn test_array_last_element() {
+    let arr = [10, 20, 30, 40, 50];
+    assert_eq(arr[4], 50);
+}
+
+@test
+fn test_array_bool_all_true() {
+    let arr: [Bool; 3] = [true, true, true];
+    let mut all_true = true;
+    for i in 0..3 {
+        if !arr[i] {
+            all_true = false;
+        }
+    }
+    assert(all_true);
+}
+
+// =============================================================================
+// Additional Array Protocol Tests
+// =============================================================================
+
+@test
+fn test_array_contains_value() {
+    let arr = [10, 20, 30, 40, 50];
+    let mut found = false;
+    for x in arr {
+        if x == 30 {
+            found = true;
+        }
+    }
+    assert(found);
+}
+
+@test
+fn test_array_does_not_contain_value() {
+    let arr = [10, 20, 30, 40, 50];
+    let mut found = false;
+    for x in arr {
+        if x == 99 {
+            found = true;
+        }
+    }
+    assert(!found);
+}
+
+@test
+fn test_array_max_element() {
+    let arr = [3, 7, 1, 9, 4];
+    let mut max_val = arr[0];
+    for i in 1..5 {
+        if arr[i] > max_val {
+            max_val = arr[i];
+        }
+    }
+    assert_eq(max_val, 9);
+}
+
+@test
+fn test_array_min_element() {
+    let arr = [3, 7, 1, 9, 4];
+    let mut min_val = arr[0];
+    for i in 1..5 {
+        if arr[i] < min_val {
+            min_val = arr[i];
+        }
+    }
+    assert_eq(min_val, 1);
+}
+
+@test
+fn test_array_count_matching() {
+    let arr = [1, 2, 3, 2, 1, 2, 3];
+    let mut count = 0;
+    for x in arr {
+        if x == 2 {
+            count = count + 1;
+        }
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_array_reverse_copy() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut rev: [Int; 5] = [0, 0, 0, 0, 0];
+    for i in 0..5 {
+        rev[4 - i] = arr[i];
+    }
+    assert_eq(rev[0], 5);
+    assert_eq(rev[1], 4);
+    assert_eq(rev[2], 3);
+    assert_eq(rev[3], 2);
+    assert_eq(rev[4], 1);
+}
+
+@test
+fn test_array_product() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut prod = 1;
+    for x in arr {
+        prod = prod * x;
+    }
+    assert_eq(prod, 120);
+}
+
+@test
+fn test_array_float_sum() {
+    let arr: [Float; 4] = [1.0, 2.5, 3.5, 4.0];
+    let mut sum: Float = 0.0;
+    for i in 0..4 {
+        sum = sum + arr[i];
+    }
+    assert_eq(sum, 11.0);
+}

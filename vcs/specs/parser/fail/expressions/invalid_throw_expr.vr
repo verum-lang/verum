@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, throw, error
+// @description: Throw without expression
+// @expected-error: E048
+
+fn test() throws(MyError) {
+    throw;  // Throw requires an expression
+}

@@ -1,0 +1,31 @@
+// @test: run
+// @level: L0
+// @expected-exit: 0
+
+fn main() -> Int {
+    let s = "hello world";
+    let n = "world";
+
+    let self_bytes = s.as_bytes();
+    let needle_bytes = n.as_bytes();
+
+    let slen = self_bytes.len();
+    let nlen = needle_bytes.len();
+    let end = slen - nlen + 1;
+
+    let mut result = -1;
+    for i in range(0, end) {
+        let mut found = true;
+        for j in range(0, nlen) {
+            if self_bytes[i + j] != needle_bytes[j] {
+                found = false;
+            }
+        }
+        if found {
+            result = i;
+        }
+    }
+    print(f"result={result}");
+
+    0
+}

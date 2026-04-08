@@ -1,0 +1,143 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Basic super import
+module parent {
+    type ParentType is { value: Int };
+
+    module child {
+        mount super.ParentType;
+
+        fn use_parent() -> ParentType {
+            ParentType { value: 42 }
+        }
+    }
+}
+
+// Multiple levels of super
+module level1 {
+    type Level1Type is { a: Int };
+
+    module level2 {
+        type Level2Type is { b: Int };
+
+        module level3 {
+            // Go up one level
+            mount super.Level2Type;
+
+            // Go up two levels
+            mount super.super.Level1Type;
+
+            fn make() -> Level1Type {
+                Level1Type { a: 1 }
+            }
+        }
+    }
+}
+
+// Super with nested path
+module root {
+    module utils {
+        type Helper is { name: Text };
+    }
+
+    module services {
+        // Super then into sibling
+        mount super.utils.Helper;
+
+        fn get_helper() -> Helper {
+            Helper { name: "service" }
+        }
+    }
+}
+
+// Super with group import
+module grouped {
+    type A is { a: Int };
+    type B is { b: Int };
+    type C is { c: Int };
+
+    module inner {
+        mount super.{A, B, C};
+    }
+}
+
+// Super with glob
+module globbed {
+    type X is { x: Int };
+    type Y is { y: Int };
+
+    module nested {
+        mount super.*;
+    }
+}
+
+// Super with alias
+module aliased {
+    type OriginalName is { data: Text };
+
+    module consumer {
+        mount super.OriginalName as Renamed;
+
+        fn make() -> Renamed {
+            Renamed { data: "test" }
+        }
+    }
+}
+
+// Complex super navigation
+module project {
+    module core {
+        type CoreType is { core: Int };
+
+        module internal {
+            type InternalType is { internal: Int };
+        }
+    }
+
+    module features {
+        module feature1 {
+            // Navigate to sibling module's types
+            mount super.super.core.CoreType;
+            mount super.super.core.internal.InternalType;
+        }
+    }
+}
+
+// Super in deeply nested structure
+module deep {
+    type RootType is ();
+
+    module a {
+        type AType is ();
+
+        module b {
+            type BType is ();
+
+            module c {
+                type CType is ();
+
+                module d {
+                    // All super levels
+                    mount super.CType;
+                    mount super.super.BType;
+                    mount super.super.super.AType;
+                    mount super.super.super.super.RootType;
+                }
+            }
+        }
+    }
+}
+
+// Super mixed with self
+module mixed {
+    type SharedType is { shared: Int };
+
+    module sub {
+        type LocalType is { local: Int };
+
+        mount self.LocalType;
+        mount super.SharedType;
+    }
+}

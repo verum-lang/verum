@@ -1,0 +1,108 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: scoping, shadowing, blocks, variables
+// @description: Test variable scoping and shadowing
+
+fn test_block_scope() -> Int {
+    let x = 10;
+    let y = {
+        let x = 20; // shadows outer x
+        x + 5
+    };
+    // Outer x unchanged
+    if x != 10 {
+        print(f"FAIL block_scope: outer x={x}");
+        return 1;
+    }
+    if y != 25 {
+        print(f"FAIL block_scope: y={y}");
+        return 1;
+    }
+    print("  block_scope: OK");
+    0
+}
+
+fn test_loop_scope() -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 5 {
+        let val = i * 10; // new binding each iteration
+        total = total + val;
+        i = i + 1;
+    }
+    // 0+10+20+30+40 = 100
+    if total != 100 {
+        print(f"FAIL loop_scope: total={total}");
+        return 1;
+    }
+    print("  loop_scope: OK");
+    0
+}
+
+fn test_if_scope() -> Int {
+    let x = 42;
+    let result = if x > 0 {
+        let sign = 1;
+        x * sign
+    } else {
+        let sign = -1;
+        x * sign
+    };
+    if result != 42 {
+        print(f"FAIL if_scope: result={result}");
+        return 1;
+    }
+    print("  if_scope: OK");
+    0
+}
+
+fn test_shadowing_chain() -> Int {
+    let x = 1;
+    let x = x + 1; // 2
+    let x = x * 3; // 6
+    let x = x + 4; // 10
+    if x != 10 {
+        print(f"FAIL shadow_chain: x={x}");
+        return 1;
+    }
+    print("  shadowing_chain: OK");
+    0
+}
+
+fn test_nested_function_scope() -> Int {
+    let x = 100;
+    let result = helper_fn(x);
+    if result != 200 {
+        print(f"FAIL fn_scope: result={result}");
+        return 1;
+    }
+    // x should be unmodified
+    if x != 100 {
+        print(f"FAIL fn_scope: x changed to {x}");
+        return 1;
+    }
+    print("  fn_scope: OK");
+    0
+}
+
+fn helper_fn(x: Int) -> Int {
+    x * 2
+}
+
+fn main() -> Int {
+    print("Scoping Tests:");
+    let mut failures = 0;
+    failures = failures + test_block_scope();
+    failures = failures + test_loop_scope();
+    failures = failures + test_if_scope();
+    failures = failures + test_shadowing_chain();
+    failures = failures + test_nested_function_scope();
+
+    if failures == 0 {
+        print("All scoping tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

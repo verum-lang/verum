@@ -1,0 +1,166 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, keywords, contextual, soft-keywords
+
+// Contextual (soft) keywords - valid as identifiers in some contexts
+// Note: Only 3 keywords are truly reserved: let, fn, is
+
+// 'self' and 'Self' in method context
+type Counter is {
+    value: Int,
+};
+
+implement Counter {
+    fn new() -> Self {
+        Self { value: 0 }
+    }
+
+    fn increment(&mut self) {
+        self.value = self.value + 1;
+    }
+
+    fn get(&self) -> Int {
+        self.value
+    }
+
+    fn with_value(self, new_value: Int) -> Self {
+        Self { value: new_value }
+    }
+}
+
+// 'super' in module paths
+module parent {
+    pub fn parent_function() -> Int { 42 }
+
+    module child {
+        fn call_parent() -> Int {
+            super.parent_function()
+        }
+    }
+}
+
+// 'cog' for cog-level paths
+fn use_cog_path() {
+    cog.module.function();
+}
+
+// 'as' for type casting and renaming
+fn casting_examples() {
+    let x: Int = 42;
+    let y = x as Float;
+    let z = x as i32;
+}
+
+mount core.collections.Map as LocalMap;
+mount core.io.Result as IoResult;
+
+// 'in' for iteration context
+fn iteration_context() {
+    for item in collection {
+        process(item);
+    }
+
+    for (key, value) in map {
+        print(f"{key}: {value}");
+    }
+
+    for i in 0..10 {
+        print(i);
+    }
+}
+
+// 'from' in imports
+mount core.convert.FromInt;
+
+implement FromInt for MyType {
+    fn from_int(value: Int) -> Self {
+        MyType { value: value }
+    }
+}
+
+// Protocol objects (no 'dyn' keyword in Verum)
+fn take_protocol_object(item: &Display) {
+    print(item.display());
+}
+
+type Callback is Heap<Fn>;
+
+// Protocol definition using 'type ... is protocol'
+type Display is protocol {
+    fn display(&self) -> Text;
+};
+
+type IteratorProtocol is protocol {
+    type Item;
+    fn next(&mut self) -> Maybe<Self.Item>;
+};
+
+// 'implement' for implementations
+implement Display for Counter {
+    fn display(&self) -> Text {
+        f"Counter({self.value})"
+    }
+}
+
+// 'module' for modules
+module submodule {
+    pub fn exported() {}
+    fn internal_fn() {}
+}
+
+// 'link' for imports
+mount core.io.Read;
+mount core.io.Write;
+mount core.collections.*;
+
+// 'ref' in patterns
+fn pattern_with_ref(opt: Maybe<BigData>) {
+    match opt {
+        Some(ref data) => use_borrowed(data),
+        None => {},
+    }
+}
+
+// closures
+fn closure_example() {
+    let data = [1, 2, 3];
+    let closure = || {
+        data.iter().sum()
+    };
+}
+
+// 'static' in declarations
+static GLOBAL: Int = 42;
+
+// 'where' in constraints
+fn generic_where<T>(x: T) -> T
+where type T: Clone + Debug
+{
+    x.clone()
+}
+
+// 'true' and 'false' as literals
+const TRUE_VALUE: Bool = true;
+const FALSE_VALUE: Bool = false;
+
+fn boolean_context() {
+    if true {
+        print("always");
+    }
+
+    if false {
+        print("never");
+    }
+}
+
+// Algebraic types (NOT enum keyword)
+type MyResult<T, E> is Ok(T) | Err(E);
+type TraditionalVariant is A | B | C;
+
+// Using soft keywords as identifiers (where context allows)
+fn soft_keyword_as_identifier() {
+    // Some soft keywords usable directly
+    let end_val = 10;
+    let step = 2;
+}

@@ -1,0 +1,456 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, gpu, simulation, device, stream, event
+// @timeout: 50000
+// @expected-exit: 0
+//
+// End-to-end GPU simulation tests through VBC interpreter.
+// In interpreter mode, GPU operations use CPU fallback stubs.
+// This test validates the logical GPU programming model:
+// device management, stream lifecycle, event timing, memory operations,
+// and kernel launch patterns -- all with CPU-fallback semantics.
+
+// ============================================================================
+// GPU Device simulation
+// ============================================================================
+
+type GpuDevice is {
+    device_id: Int,
+    total_mem_mb: Int,
+    free_mem_mb: Int,
+    compute_major: Int,
+    compute_minor: Int,
+    multiprocessors: Int,
+    max_threads_per_block: Int,
+    warp_size: Int,
+    has_tensor_cores: Bool
+};
+
+fn make_cpu_fallback_device() -> GpuDevice {
+    GpuDevice {
+        device_id: -1,
+        total_mem_mb: 0,
+        free_mem_mb: 0,
+        compute_major: 0,
+        compute_minor: 0,
+        multiprocessors: 0,
+        max_threads_per_block: 0,
+        warp_size: 0,
+        has_tensor_cores: false
+    }
+}
+
+fn make_simulated_device(dev_id: Int, mem_mb: Int, sm_count: Int) -> GpuDevice {
+    GpuDevice {
+        device_id: dev_id,
+        total_mem_mb: mem_mb,
+        free_mem_mb: mem_mb,
+        compute_major: 8,
+        compute_minor: 6,
+        multiprocessors: sm_count,
+        max_threads_per_block: 1024,
+        warp_size: 32,
+        has_tensor_cores: true
+    }
+}
+
+// ============================================================================
+// Stream management simulation
+// ============================================================================
+
+type StreamState is {
+    stream_id: Int,
+    priority: Int,
+    is_active: Bool,
+    pending_ops: Int
+};
+
+fn stream_create(sid: Int, prio: Int) -> StreamState {
+    StreamState {
+        stream_id: sid,
+        priority: prio,
+        is_active: true,
+        pending_ops: 0
+    }
+}
+
+fn stream_submit(s: StreamState) -> StreamState {
+    StreamState {
+        stream_id: s.stream_id,
+        priority: s.priority,
+        is_active: s.is_active,
+        pending_ops: s.pending_ops + 1
+    }
+}
+
+fn stream_sync(s: StreamState) -> StreamState {
+    // CPU fallback: sync is immediate, all ops complete
+    StreamState {
+        stream_id: s.stream_id,
+        priority: s.priority,
+        is_active: s.is_active,
+        pending_ops: 0
+    }
+}
+
+fn stream_destroy(s: StreamState) -> StreamState {
+    StreamState {
+        stream_id: s.stream_id,
+        priority: s.priority,
+        is_active: false,
+        pending_ops: 0
+    }
+}
+
+// ============================================================================
+// Event management simulation
+// ============================================================================
+
+type EventState is {
+    event_id: Int,
+    recorded: Bool,
+    synchronized: Bool,
+    timestamp_ns: Int
+};
+
+fn event_create(eid: Int) -> EventState {
+    EventState {
+        event_id: eid,
+        recorded: false,
+        synchronized: false,
+        timestamp_ns: 0
+    }
+}
+
+fn event_record(e: EventState, ts: Int) -> EventState {
+    EventState {
+        event_id: e.event_id,
+        recorded: true,
+        synchronized: false,
+        timestamp_ns: ts
+    }
+}
+
+fn event_synchronize(e: EventState) -> EventState {
+    EventState {
+        event_id: e.event_id,
+        recorded: e.recorded,
+        synchronized: true,
+        timestamp_ns: e.timestamp_ns
+    }
+}
+
+fn event_elapsed(start: EventState, end: EventState) -> Int {
+    if start.recorded && end.recorded {
+        end.timestamp_ns - start.timestamp_ns
+    } else {
+        -1
+    }
+}
+
+// ============================================================================
+// GPU Memory simulation
+// ============================================================================
+
+type GpuMemBlock is {
+    ptr_id: Int,
+    size_bytes: Int,
+    is_device: Bool,
+    is_pinned: Bool,
+    is_managed: Bool
+};
+
+fn gpu_malloc(block_id: Int, size: Int) -> GpuMemBlock {
+    GpuMemBlock {
+        ptr_id: block_id,
+        size_bytes: size,
+        is_device: true,
+        is_pinned: false,
+        is_managed: false
+    }
+}
+
+fn gpu_malloc_managed(block_id: Int, size: Int) -> GpuMemBlock {
+    GpuMemBlock {
+        ptr_id: block_id,
+        size_bytes: size,
+        is_device: true,
+        is_pinned: false,
+        is_managed: true
+    }
+}
+
+fn gpu_pin_memory(blk: GpuMemBlock) -> GpuMemBlock {
+    GpuMemBlock {
+        ptr_id: blk.ptr_id,
+        size_bytes: blk.size_bytes,
+        is_device: blk.is_device,
+        is_pinned: true,
+        is_managed: blk.is_managed
+    }
+}
+
+fn gpu_free(blk: GpuMemBlock) -> GpuMemBlock {
+    GpuMemBlock {
+        ptr_id: 0,
+        size_bytes: 0,
+        is_device: false,
+        is_pinned: false,
+        is_managed: false
+    }
+}
+
+// ============================================================================
+// Kernel launch simulation
+// ============================================================================
+
+type KernelConfig is {
+    grid_x: Int, grid_y: Int, grid_z: Int,
+    block_x: Int, block_y: Int, block_z: Int,
+    shared_mem_bytes: Int,
+    stream_id: Int
+};
+
+fn make_kernel_config(gx: Int, gy: Int, bx: Int, blk_y: Int) -> KernelConfig {
+    KernelConfig {
+        grid_x: gx, grid_y: gy, grid_z: 1,
+        block_x: bx, block_y: blk_y, block_z: 1,
+        shared_mem_bytes: 0,
+        stream_id: 0
+    }
+}
+
+fn total_threads(cfg: KernelConfig) -> Int {
+    cfg.grid_x * cfg.grid_y * cfg.grid_z *
+    cfg.block_x * cfg.block_y * cfg.block_z
+}
+
+fn global_thread_id(cfg: KernelConfig, block_id: Int, thread_id: Int) -> Int {
+    block_id * cfg.block_x + thread_id
+}
+
+// CPU fallback: simulate kernel execution sequentially
+fn simulate_vector_add(size: Int) -> Int {
+    // Simulate adding [0,1,...,size-1] + [size-1,...,1,0]
+    // Each element should be size-1
+    let mut result_sum = 0;
+    let mut i = 0;
+    while i < size {
+        let a_i = i;
+        let b_i = size - 1 - i;
+        result_sum = result_sum + (a_i + b_i);
+        i = i + 1;
+    }
+    result_sum
+}
+
+// ============================================================================
+// GPU Graph simulation
+// ============================================================================
+
+type GpuGraph is {
+    graph_id: Int,
+    is_capturing: Bool,
+    num_nodes: Int,
+    is_instantiated: Bool
+};
+
+fn graph_create(gid: Int) -> GpuGraph {
+    GpuGraph {
+        graph_id: gid,
+        is_capturing: false,
+        num_nodes: 0,
+        is_instantiated: false
+    }
+}
+
+fn graph_begin_capture(g: GpuGraph) -> GpuGraph {
+    GpuGraph {
+        graph_id: g.graph_id,
+        is_capturing: true,
+        num_nodes: 0,
+        is_instantiated: false
+    }
+}
+
+fn graph_add_node(g: GpuGraph) -> GpuGraph {
+    GpuGraph {
+        graph_id: g.graph_id,
+        is_capturing: g.is_capturing,
+        num_nodes: g.num_nodes + 1,
+        is_instantiated: g.is_instantiated
+    }
+}
+
+fn graph_end_capture(g: GpuGraph) -> GpuGraph {
+    GpuGraph {
+        graph_id: g.graph_id,
+        is_capturing: false,
+        num_nodes: g.num_nodes,
+        is_instantiated: false
+    }
+}
+
+fn graph_instantiate(g: GpuGraph) -> GpuGraph {
+    GpuGraph {
+        graph_id: g.graph_id,
+        is_capturing: false,
+        num_nodes: g.num_nodes,
+        is_instantiated: true
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn main() -> Int {
+    // ---- Device management ----
+    let cpu_dev = make_cpu_fallback_device();
+    assert_eq(cpu_dev.device_id, -1);
+    assert_eq(cpu_dev.total_mem_mb, 0);
+    assert_eq(cpu_dev.has_tensor_cores, false);
+
+    let sim_dev = make_simulated_device(0, 24576, 108);
+    assert_eq(sim_dev.device_id, 0);
+    assert_eq(sim_dev.total_mem_mb, 24576);
+    assert_eq(sim_dev.free_mem_mb, 24576);
+    assert_eq(sim_dev.compute_major, 8);
+    assert_eq(sim_dev.compute_minor, 6);
+    assert_eq(sim_dev.multiprocessors, 108);
+    assert_eq(sim_dev.max_threads_per_block, 1024);
+    assert_eq(sim_dev.warp_size, 32);
+    assert_eq(sim_dev.has_tensor_cores, true);
+
+    // ---- Stream lifecycle ----
+    let s0 = stream_create(1, 0);
+    assert_eq(s0.stream_id, 1);
+    assert_eq(s0.is_active, true);
+    assert_eq(s0.pending_ops, 0);
+
+    let s1 = stream_submit(s0);
+    assert_eq(s1.pending_ops, 1);
+    let s2 = stream_submit(s1);
+    assert_eq(s2.pending_ops, 2);
+    let s3 = stream_sync(s2);
+    assert_eq(s3.pending_ops, 0);
+    let s4 = stream_destroy(s3);
+    assert_eq(s4.is_active, false);
+
+    // Stream priority ordering
+    let hi = stream_create(10, 0);
+    let lo = stream_create(11, 7);
+    assert_eq(hi.priority, 0);
+    assert_eq(lo.priority, 7);
+
+    // ---- Event timing ----
+    let e1 = event_create(1);
+    assert_eq(e1.recorded, false);
+    assert_eq(e1.synchronized, false);
+
+    let e1r = event_record(e1, 1000);
+    assert_eq(e1r.recorded, true);
+    assert_eq(e1r.timestamp_ns, 1000);
+
+    let e2 = event_create(2);
+    let e2r = event_record(e2, 5000);
+
+    let elapsed = event_elapsed(e1r, e2r);
+    assert_eq(elapsed, 4000);
+
+    // Unrecorded event returns -1
+    let e3 = event_create(3);
+    let bad_elapsed = event_elapsed(e3, e2r);
+    assert_eq(bad_elapsed, -1);
+
+    let e1s = event_synchronize(e1r);
+    assert_eq(e1s.synchronized, true);
+
+    // ---- GPU Memory ----
+    let blk1 = gpu_malloc(100, 4096);
+    assert_eq(blk1.ptr_id, 100);
+    assert_eq(blk1.size_bytes, 4096);
+    assert_eq(blk1.is_device, true);
+    assert_eq(blk1.is_pinned, false);
+    assert_eq(blk1.is_managed, false);
+
+    let blk2 = gpu_malloc_managed(101, 8192);
+    assert_eq(blk2.is_managed, true);
+    assert_eq(blk2.is_device, true);
+
+    let blk3 = gpu_pin_memory(blk1);
+    assert_eq(blk3.is_pinned, true);
+    assert_eq(blk3.size_bytes, 4096);
+
+    let freed = gpu_free(blk2);
+    assert_eq(freed.ptr_id, 0);
+    assert_eq(freed.size_bytes, 0);
+    assert_eq(freed.is_device, false);
+
+    // ---- Kernel launch configuration ----
+    let cfg1 = make_kernel_config(128, 1, 256, 1);
+    assert_eq(total_threads(cfg1), 32768);
+
+    let cfg2 = make_kernel_config(16, 16, 32, 32);
+    assert_eq(total_threads(cfg2), 262144);
+
+    // Thread indexing
+    assert_eq(global_thread_id(cfg1, 0, 0), 0);
+    assert_eq(global_thread_id(cfg1, 0, 255), 255);
+    assert_eq(global_thread_id(cfg1, 1, 0), 256);
+    assert_eq(global_thread_id(cfg1, 127, 255), 32768 - 1);
+
+    // ---- Vector add simulation ----
+    // Each pair a[i] + b[i] = i + (size-1-i) = size-1
+    // Sum of all = size * (size - 1)
+    let sum8 = simulate_vector_add(8);
+    assert_eq(sum8, 56);  // 8 * 7
+
+    let sum16 = simulate_vector_add(16);
+    assert_eq(sum16, 240);  // 16 * 15
+
+    let sum100 = simulate_vector_add(100);
+    assert_eq(sum100, 9900);  // 100 * 99
+
+    // ---- GPU Graph ----
+    let g = graph_create(1);
+    assert_eq(g.is_capturing, false);
+    assert_eq(g.num_nodes, 0);
+
+    let g1 = graph_begin_capture(g);
+    assert_eq(g1.is_capturing, true);
+
+    let g2 = graph_add_node(g1);
+    let g3 = graph_add_node(g2);
+    let g4 = graph_add_node(g3);
+    assert_eq(g4.num_nodes, 3);
+
+    let g5 = graph_end_capture(g4);
+    assert_eq(g5.is_capturing, false);
+    assert_eq(g5.num_nodes, 3);
+
+    let g6 = graph_instantiate(g5);
+    assert_eq(g6.is_instantiated, true);
+    assert_eq(g6.num_nodes, 3);
+
+    // ---- Multi-device simulation ----
+    let dev0 = make_simulated_device(0, 24576, 108);
+    let dev1 = make_simulated_device(1, 16384, 84);
+    // Verify different devices
+    assert_eq(dev0.device_id, 0);
+    assert_eq(dev1.device_id, 1);
+    assert_eq(dev0.total_mem_mb, 24576);
+    assert_eq(dev1.total_mem_mb, 16384);
+
+    // Select device with most memory
+    let best_id = if dev0.total_mem_mb > dev1.total_mem_mb {
+        dev0.device_id
+    } else {
+        dev1.device_id
+    };
+    assert_eq(best_id, 0);
+
+    print("[OK] 188_interp_gpu_sim");
+    0
+}

@@ -1,0 +1,138 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, control-flow, invalid, error
+
+// ERROR: If without condition
+if {
+    do_something();
+}
+
+// ERROR: If without block
+if condition;
+
+// ERROR: If with expression but no block
+if condition do_something();
+
+// ERROR: Else without if
+else {
+    handle();
+}
+
+// ERROR: Else if without prior if
+else if condition {
+    handle();
+}
+
+// ERROR: Multiple else blocks
+if a {
+    1
+} else {
+    2
+} else {
+    3
+}
+
+// ERROR: If-let with invalid pattern
+if let 1 + 2 = value {
+    use(value);
+}
+
+// ERROR: If-let without pattern
+if let = value {
+    use(value);
+}
+
+// ERROR: For without iterator expression
+for x in {
+    process(x);
+}
+
+// ERROR: For without block
+for x in items;
+
+// ERROR: For without pattern
+for in items {
+    process(x);
+}
+
+// ERROR: While without condition
+while {
+    loop_body();
+}
+
+// ERROR: While without block
+while condition;
+
+// ERROR: While-let without pattern
+while let = iter.next() {
+    process();
+}
+
+// ERROR: Loop with condition (should be while)
+loop condition {
+    body();
+}
+
+// ERROR: Break outside loop
+fn not_in_loop() {
+    break;
+}
+
+// ERROR: Continue outside loop
+fn not_in_loop2() {
+    continue;
+}
+
+// ERROR: Break with value in while (if not expression)
+while condition {
+    break 42;  // May be invalid depending on semantics
+}
+
+// ERROR: Labeled break without label defined
+break 'undefined;
+
+// ERROR: Invalid label syntax
+'123: loop { }
+'@invalid: loop { }
+
+// ERROR: Return with expression in unit function
+fn unit_fn() {
+    return 42;  // Type error, but might be parse error
+}
+
+// ERROR: Return outside function
+return 42;
+
+// ERROR: Nested if missing braces
+if a if b {
+    body();
+}
+
+// ERROR: For with multiple iterators without zip
+for x, y in items {
+    use(x, y);
+}
+
+// ERROR: Invalid for range syntax
+for i in 0 to 10 {  // Should be 0..10
+    use(i);
+}
+
+// ERROR: Missing loop body
+for i in 0..10
+
+// ERROR: While with let but invalid assignment
+while let mut x = value {
+    modify(x);
+}
+
+// ERROR: Loop with break without value when value expected
+fn returns_from_loop() -> Int {
+    loop {
+        break;  // Missing value
+    }
+}
+
+// ERROR: Dangling else
+if a { } b { } else { }

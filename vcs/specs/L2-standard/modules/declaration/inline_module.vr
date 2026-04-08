@@ -1,0 +1,73 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, declaration
+
+/// Inline module declaration - module body defined within the same file.
+/// This is the most common form for small, self-contained modules.
+
+module network {
+    pub type SocketAddr is {
+        host: Text,
+        port: Int
+    };
+
+    pub type TcpStream is {
+        fd: Int,
+        addr: SocketAddr
+    };
+
+    /// Creates a new TCP connection to the specified address.
+    pub fn connect(addr: &Text) -> Maybe<TcpStream> {
+        let parsed = parse_address(addr);
+        match parsed {
+            Some(socket_addr) => {
+                // Implementation would create actual connection
+                Some(TcpStream { fd: 42, addr: socket_addr })
+            },
+            None => None
+        }
+    }
+
+    /// Private helper function - not visible outside this module.
+    fn parse_address(addr: &Text) -> Maybe<SocketAddr> {
+        // Simplified parsing logic
+        Some(SocketAddr { host: "localhost", port: 8080 })
+    }
+
+    /// Nested inline module for protocol-specific handling.
+    module protocols {
+        pub type HttpRequest is {
+            method: Text,
+            path: Text,
+            headers: Map<Text, Text>
+        };
+
+        pub fn create_request(method: Text, path: Text) -> HttpRequest {
+            HttpRequest {
+                method: method,
+                path: path,
+                headers: Map.new()
+            }
+        }
+    }
+}
+
+fn main() -> Int {
+    // Access public items from inline module
+    let conn = network.connect("localhost:8080");
+
+    // Access nested module items
+    let request = network.protocols.create_request("GET", "/api/data");
+
+    match conn {
+        Some(s) => {
+            // Use the connection
+            let _ = s.fd;
+        },
+        None => {
+            // Handle connection failure
+        }
+    }
+    0
+}

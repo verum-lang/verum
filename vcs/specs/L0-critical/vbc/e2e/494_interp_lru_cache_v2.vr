@@ -1,0 +1,293 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, lru_cache, hash_map, open_addressing, eviction
+// @timeout: 15000
+// @expected-exit: 0
+//
+// LRU cache with hash-based lookup (open addressing) and access-time ordering.
+//
+// Implementation:
+//   - Open-addressing hash table for O(1) key->slot lookup.
+//   - Access-time array: each cache slot records the "time" of last access.
+//   - Eviction: when full, evict the slot with the smallest access time (LRU).
+//   - Capacity = 8, key space = integers, value space = integers.
+//
+// Arrays:
+//   ht_key[i]   = key stored in hash table slot i (-1 = empty)
+//   ht_val[i]   = value stored in hash table slot i
+//   ht_time[i]  = time of last access for slot i (0 = empty/unused)
+//   ht_cap      = 8 (hash table size, must be power of 2)
+
+fn lru_hash(key: Int, cap: Int) -> Int {
+    // Simple hash: abs(key) % cap
+    let k = if key < 0 { 0 - key } else { key };
+    k % cap
+}
+
+// Find slot for key (existing slot or empty slot for insertion).
+// Returns slot index or -1 if not found (and table not full for that probe).
+fn lru_find_slot(
+    ht_key: [Int; 8],
+    key:    Int,
+    cap:    Int
+) -> Int {
+    let start = lru_hash(key, cap);
+    let mut i = 0;
+    while i < cap {
+        let slot = (start + i) % cap;
+        if ht_key[slot] == key    { return slot; }
+        if ht_key[slot] == 0 - 1 { return slot; }  // empty
+        i = i + 1;
+    }
+    0 - 1  // table full, no match
+}
+
+// Count occupied slots.
+fn lru_count(ht_key: [Int; 8], cap: Int) -> Int {
+    let mut cnt = 0;
+    let mut i = 0;
+    while i < cap {
+        if ht_key[i] != 0 - 1 { cnt = cnt + 1; }
+        i = i + 1;
+    }
+    cnt
+}
+
+// Find the LRU slot (minimum access time among occupied slots).
+fn lru_evict_slot(
+    ht_key:  [Int; 8],
+    ht_time: [Int; 8],
+    cap:     Int
+) -> Int {
+    let mut min_time = 2147483647; // large sentinel
+    let mut min_slot = 0 - 1;
+    let mut i = 0;
+    while i < cap {
+        if ht_key[i] != 0 - 1 {
+            if ht_time[i] < min_time {
+                min_time = ht_time[i];
+                min_slot = i;
+            }
+        }
+        i = i + 1;
+    }
+    min_slot
+}
+
+// Put key->value into cache. Returns evicted key (-1 if no eviction needed).
+fn lru_put(
+    ht_key:  [Int; 8],
+    ht_val:  [Int; 8],
+    ht_time: [Int; 8],
+    cap:     Int,
+    key:     Int,
+    val:     Int,
+    clock:   [Int; 1]
+) -> Int {
+    clock[0] = clock[0] + 1;
+    let slot = lru_find_slot(ht_key, key, cap);
+    if slot >= 0 && (ht_key[slot] == key || ht_key[slot] == 0 - 1) {
+        ht_key[slot]  = key;
+        ht_val[slot]  = val;
+        ht_time[slot] = clock[0];
+        return 0 - 1; // no eviction
+    }
+    // Table full: evict LRU slot
+    let evict = lru_evict_slot(ht_key, ht_time, cap);
+    let evicted_key = ht_key[evict];
+    ht_key[evict]  = key;
+    ht_val[evict]  = val;
+    ht_time[evict] = clock[0];
+    evicted_key
+}
+
+// Get value for key. Returns value or -1 if miss. Updates access time.
+fn lru_get(
+    ht_key:  [Int; 8],
+    ht_val:  [Int; 8],
+    ht_time: [Int; 8],
+    cap:     Int,
+    key:     Int,
+    clock:   [Int; 1]
+) -> Int {
+    let start = lru_hash(key, cap);
+    let mut i = 0;
+    while i < cap {
+        let slot = (start + i) % cap;
+        if ht_key[slot] == key {
+            clock[0] = clock[0] + 1;
+            ht_time[slot] = clock[0];
+            return ht_val[slot];
+        }
+        if ht_key[slot] == 0 - 1 { return 0 - 1; } // empty slot, miss
+        i = i + 1;
+    }
+    0 - 1
+}
+
+fn init_cache(ht_key: [Int; 8], ht_val: [Int; 8], ht_time: [Int; 8], cap: Int) {
+    let mut i = 0;
+    while i < cap {
+        ht_key[i]  = 0 - 1;
+        ht_val[i]  = 0;
+        ht_time[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn test_lru_basic_put_get() {
+    let cap = 8;
+    let mut ht_key  = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ht_val  = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ht_time = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut clock   = [0];
+    init_cache(ht_key, ht_val, ht_time, cap);
+
+    // Insert keys 10->100, 20->200, 30->300
+    lru_put(ht_key, ht_val, ht_time, cap, 10, 100, clock);
+    lru_put(ht_key, ht_val, ht_time, cap, 20, 200, clock);
+    lru_put(ht_key, ht_val, ht_time, cap, 30, 300, clock);
+
+    assert_eq(lru_count(ht_key, cap), 3);
+
+    // Get existing keys
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 10, clock), 100);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 20, clock), 200);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 30, clock), 300);
+
+    // Get non-existing key
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 99, clock), 0 - 1);
+
+    // Update existing key
+    lru_put(ht_key, ht_val, ht_time, cap, 20, 999, clock);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 20, clock), 999);
+    assert_eq(lru_count(ht_key, cap), 3); // still 3 entries
+
+    print("lru_basic_put_get: ok");
+}
+
+fn test_lru_eviction() {
+    // Fill cache (cap=4 for easier testing); verify LRU eviction.
+    // We'll use cap=4 but store in an 8-element array (only use first 4 slots via hash).
+    // Use keys that hash to distinct slots with cap=4: 0,1,2,3,4(->0),5(->1),...
+    // Actually lru_hash(key,4) = key%4. Keys 0,1,2,3 hash to slots 0,1,2,3.
+    // Then key=4 hashes to slot 0 which is occupied -> probe slot 1 (occupied) -> 2 -> 3 -> full -> evict.
+    // To simplify: fill with keys 100,200,300,400 (all hash to different slots mod 4:
+    // 100%4=0, 200%4=0 (collision), 300%4=0 (collision), 400%4=0 (collision)
+    // Actually let's use keys 0,1,2,3 for slots 0,1,2,3 cleanly.
+    let cap = 4;
+    let mut ht_key  = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ht_val  = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ht_time = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut clock   = [0];
+    init_cache(ht_key, ht_val, ht_time, cap);
+
+    // Insert 4 items to fill the cache: keys 0,1,2,3 (times 1,2,3,4)
+    lru_put(ht_key, ht_val, ht_time, cap, 0, 10, clock); // time=1, slot=0
+    lru_put(ht_key, ht_val, ht_time, cap, 1, 11, clock); // time=2, slot=1
+    lru_put(ht_key, ht_val, ht_time, cap, 2, 12, clock); // time=3, slot=2
+    lru_put(ht_key, ht_val, ht_time, cap, 3, 13, clock); // time=4, slot=3
+    assert_eq(lru_count(ht_key, cap), 4);
+
+    // Access key 0 to refresh it (time becomes 5)
+    lru_get(ht_key, ht_val, ht_time, cap, 0, clock);
+
+    // Now LRU is key=1 (time=2). Insert key=4 -> evict key=1.
+    // key=4 hashes to 4%4=0 (occupied), probe slot 1 (occupied), slot 2, slot 3 -> all full
+    // -> evict LRU (key=1, time=2)
+    let evicted = lru_put(ht_key, ht_val, ht_time, cap, 4, 14, clock);
+    assert_eq(evicted, 1); // key=1 was LRU
+
+    // key=1 is gone, key=4 is present
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 1, clock), 0 - 1);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 4, clock), 14);
+    assert_eq(lru_count(ht_key, cap), 4); // still full
+
+    print("lru_eviction: ok");
+}
+
+fn test_lru_access_order() {
+    // Verify access order tracking: repeatedly get an item to make it most recently used.
+    let cap = 4;
+    let mut ht_key  = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ht_val  = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ht_time = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut clock   = [0];
+    init_cache(ht_key, ht_val, ht_time, cap);
+
+    // Insert 4 items (keys 0,1,2,3)
+    lru_put(ht_key, ht_val, ht_time, cap, 0, 10, clock); // time=1
+    lru_put(ht_key, ht_val, ht_time, cap, 1, 11, clock); // time=2
+    lru_put(ht_key, ht_val, ht_time, cap, 2, 12, clock); // time=3
+    lru_put(ht_key, ht_val, ht_time, cap, 3, 13, clock); // time=4
+
+    // Access key=0 three times to make it most recent
+    lru_get(ht_key, ht_val, ht_time, cap, 0, clock); // time=5
+    lru_get(ht_key, ht_val, ht_time, cap, 0, clock); // time=6
+    lru_get(ht_key, ht_val, ht_time, cap, 0, clock); // time=7
+    // Access key=2 to refresh it
+    lru_get(ht_key, ht_val, ht_time, cap, 2, clock); // time=8
+
+    // LRU now = key=1 (time=2). Insert key=5 -> evict key=1.
+    let ev2 = lru_put(ht_key, ht_val, ht_time, cap, 5, 15, clock);
+    assert_eq(ev2, 1);
+
+    // key=1 gone, key=5 present
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 5, clock), 15);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 1, clock), 0 - 1);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 0, clock), 10); // still present
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 2, clock), 12); // still present
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 3, clock), 13); // still present
+
+    print("lru_access_order: ok");
+}
+
+fn test_lru_repeated_evictions() {
+    // Insert many items, verifying sequential LRU evictions.
+    // Cap=4. Insert 0,1,2,3 (fills). Then insert 4,5,6 (three evictions).
+    // After filling: LRU=0,then 1, then 2.
+    let cap = 4;
+    let mut ht_key  = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ht_val  = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ht_time = [0, 0, 0, 0, 0, 0, 0, 0];
+    let mut clock   = [0];
+    init_cache(ht_key, ht_val, ht_time, cap);
+
+    lru_put(ht_key, ht_val, ht_time, cap, 0, 10, clock); // time=1
+    lru_put(ht_key, ht_val, ht_time, cap, 1, 11, clock); // time=2
+    lru_put(ht_key, ht_val, ht_time, cap, 2, 12, clock); // time=3
+    lru_put(ht_key, ht_val, ht_time, cap, 3, 13, clock); // time=4
+
+    // Evict 0 (LRU)
+    let ev0 = lru_put(ht_key, ht_val, ht_time, cap, 4, 14, clock);
+    assert_eq(ev0, 0);
+
+    // Evict 1 (next LRU, time=2)
+    let ev1 = lru_put(ht_key, ht_val, ht_time, cap, 5, 15, clock);
+    assert_eq(ev1, 1);
+
+    // Evict 2 (next LRU, time=3)
+    let ev2 = lru_put(ht_key, ht_val, ht_time, cap, 6, 16, clock);
+    assert_eq(ev2, 2);
+
+    // Cache now contains keys 3,4,5,6
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 3, clock), 13);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 4, clock), 14);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 5, clock), 15);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 6, clock), 16);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 0, clock), 0 - 1);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 1, clock), 0 - 1);
+    assert_eq(lru_get(ht_key, ht_val, ht_time, cap, 2, clock), 0 - 1);
+
+    print("lru_repeated_evictions: ok");
+}
+
+fn main() -> Int {
+    test_lru_basic_put_get();
+    test_lru_eviction();
+    test_lru_access_order();
+    test_lru_repeated_evictions();
+    print("[OK] 494_interp_lru_cache_v2");
+    0
+}

@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: exhaustiveness, stream-pattern, pattern-matching
+// @description: Stream pattern exhaustiveness checking with Nil/Cons semantics
+
+type Maybe<T> is None | Some(T);
+
+// Stream type with Nil/Cons constructors (lazy sequence)
+type Stream<T> is Nil | Cons(T, Heap<Stream<T>>);
+
+// Basic stream exhaustiveness - covering Nil and Cons
+fn stream_head<T>(s: Stream<T>, default: T) -> T =
+    match s {
+        Nil => default,
+        Cons(x, _) => x
+    };
+
+// Stream pattern syntax: Cons(head, tail)
+fn stream_length<T>(s: Stream<T>) -> Int =
+    match s {
+        Nil => 0,
+        Cons(_, tail) => 1 + stream_length(*tail)
+    };
+
+// Multiple head elements with stream pattern
+fn take_two<T>(s: Stream<T>) -> Maybe<(T, T)> =
+    match s {
+        Cons(a, tail) => match *tail {
+            Cons(b, _) => Some((a, b)),
+            Nil => None,
+        },
+        Nil => None
+    };
+
+// Deep stream decomposition
+fn take_three<T>(s: Stream<T>) -> Maybe<(T, T, T)> =
+    match s {
+        Cons(a, tail1) => match *tail1 {
+            Cons(b, tail2) => match *tail2 {
+                Cons(c, _) => Some((a, b, c)),
+                Nil => None,
+            },
+            Nil => None,
+        },
+        Nil => None
+    };
+
+// Stream pattern with tail binding
+fn stream_tail<T>(s: Stream<T>) -> Maybe<Stream<T>> =
+    match s {
+        Nil => None,
+        Cons(_, rest) => Some(*rest)
+    };
+
+// Exhaustive match with stream patterns using wildcard
+fn stream_is_empty<T>(s: Stream<T>) -> Bool =
+    match s {
+        Nil => true,
+        Cons(_, _) => false
+    };
+
+// Stream fold with pattern matching
+@allow(unbounded_recursion)
+fn stream_sum(s: Stream<Int>) -> Int =
+    match s {
+        Nil => 0,
+        Cons(x, rest) => x + stream_sum(*rest)
+    };
+
+// Nested stream pattern
+@allow(unbounded_recursion)
+fn stream_map<T, U>(s: Stream<T>, f: fn(T) -> U) -> Stream<U> =
+    match s {
+        Nil => Nil,
+        Cons(x, rest) => Cons(f(x), Heap(stream_map(*rest, f)))
+    };
+
+// Stream filter with exhaustive matching
+@allow(unbounded_recursion)
+fn stream_filter<T>(s: Stream<T>, pred: fn(T) -> Bool) -> Stream<T> =
+    match s {
+        Nil => Nil,
+        Cons(x, rest) where pred(x) => Cons(x, Heap(stream_filter(*rest, pred))),
+        Cons(_, rest) => stream_filter(*rest, pred)
+    };
+
+// List type (finite sequence) with same Nil/Cons structure
+type MyList<T> is LNil | LCons(T, Heap<MyList<T>>);
+
+// List pattern exhaustiveness
+fn list_head_opt<T>(xs: MyList<T>) -> Maybe<T> =
+    match xs {
+        LNil => None,
+        LCons(x, _) => Some(x)
+    };
+
+// List length
+@allow(unbounded_recursion)
+fn list_length<T>(xs: MyList<T>) -> Int =
+    match xs {
+        LNil => 0,
+        LCons(_, rest) => 1 + list_length(*rest)
+    };
+
+// Combined Nil/Cons patterns
+fn last_two<T>(xs: MyList<T>) -> Maybe<(T, T)> =
+    match xs {
+        LNil => None,
+        LCons(_, rest) => match *rest {
+            LNil => None,
+            LCons(_, _) => None,
+        },
+    };
+
+fn main() {
+    // Stream tests
+    let empty: Stream<Int> = Nil;
+    let s1 = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+
+    assert(stream_head(empty, 0) == 0);
+    assert(stream_head(s1, 0) == 1);
+    assert(stream_length(empty) == 0);
+    assert(stream_length(s1) == 3);
+    assert(stream_is_empty(empty));
+    assert(!stream_is_empty(s1));
+    assert(stream_sum(s1) == 6);
+
+    // List tests
+    let empty_list: MyList<Int> = LNil;
+    let l1 = LCons(1, Heap(LCons(2, Heap(LNil))));
+
+    assert(list_head_opt(empty_list) == None);
+    assert(list_head_opt(l1) == Some(1));
+    assert(list_length(l1) == 2);
+}

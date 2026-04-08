@@ -1,0 +1,44 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, runtime, context, error
+// @description: Test that target info functions require MetaRuntime context
+// @expected-error: requires
+
+// =============================================================================
+// TARGET INFO MISSING CONTEXT TESTS
+// =============================================================================
+
+// target_os requires MetaRuntime context
+meta fn test_target_os_no_context() -> Text {
+    target_os()  // ERROR: requires MetaRuntime context
+}
+
+// target_arch requires MetaRuntime context
+meta fn test_target_arch_no_context() -> Text {
+    target_arch()  // ERROR: requires MetaRuntime context
+}
+
+// target_triple requires MetaRuntime context
+meta fn test_target_triple_no_context() -> Text {
+    target_triple()  // ERROR: requires MetaRuntime context
+}
+
+// target_pointer_width requires MetaRuntime context
+meta fn test_target_pointer_width_no_context() -> Int {
+    target_pointer_width()  // ERROR: requires MetaRuntime context
+}
+
+// target_endian requires MetaRuntime context
+meta fn test_target_endian_no_context() -> Text {
+    target_endian()  // ERROR: requires MetaRuntime context
+}
+
+// target_has_feature requires MetaRuntime context
+meta fn test_target_has_feature_no_context() -> Bool {
+    target_has_feature("sse2")  // ERROR: requires MetaRuntime context
+}
+
+fn main() {
+    @const assert(text_len(test_target_os_no_context()) > 0);
+}

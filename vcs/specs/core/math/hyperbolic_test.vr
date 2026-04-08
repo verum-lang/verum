@@ -1,0 +1,809 @@
+// =============================================================================
+// hyperbolic_test.vr - Tests for hyperbolic functions
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: math, hyperbolic, sinh, cosh, tanh, asinh, acosh, atanh, core
+// @description: Comprehensive tests for hyperbolic trigonometric functions
+// =============================================================================
+
+mount core.math.hyperbolic.{
+    sinh, cosh, tanh, sech, csch, coth,
+    asinh, acosh, atanh, acosh_safe, atanh_safe,
+    asech, acsch, acoth,
+    gudermannian, inverse_gudermannian,
+};
+mount core.math.elementary.{abs, exp, log, sqrt, sin, tan};
+mount core.math.constants.{PI, FRAC_PI_2, FRAC_PI_4, E, EPSILON, LN2};
+mount core.base.maybe.{Maybe, Some, None};
+
+// Helper for approximate equality
+fn approx_eq(a: Float, b: Float, tolerance: Float) -> Bool {
+    if a == b { return true; }
+    let diff = abs(a - b);
+    diff < tolerance
+}
+
+const TOLERANCE: Float = 1e-10;
+
+// =============================================================================
+// SECTION 1: Hyperbolic Sine (sinh)
+// =============================================================================
+
+@test
+fn test_sinh_zero() {
+    assert(approx_eq(sinh(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_sinh_one() {
+    // sinh(1) = (e - 1/e) / 2 ≈ 1.1752
+    let expected = (E - 1.0 / E) / 2.0;
+    assert(approx_eq(sinh(1.0), expected, TOLERANCE));
+}
+
+@test
+fn test_sinh_negative() {
+    // sinh(-x) = -sinh(x) (odd function)
+    assert(approx_eq(sinh(-1.0), -sinh(1.0), TOLERANCE));
+    assert(approx_eq(sinh(-2.0), -sinh(2.0), TOLERANCE));
+}
+
+@test
+fn test_sinh_small() {
+    // For small x, sinh(x) ≈ x
+    let x = 1e-15;
+    assert(approx_eq(sinh(x), x, 1e-20));
+}
+
+@test
+fn test_sinh_ln2() {
+    // sinh(ln(2)) = (2 - 1/2) / 2 = 3/4
+    assert(approx_eq(sinh(LN2), 0.75, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 2: Hyperbolic Cosine (cosh)
+// =============================================================================
+
+@test
+fn test_cosh_zero() {
+    assert(approx_eq(cosh(0.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_cosh_one() {
+    // cosh(1) = (e + 1/e) / 2 ≈ 1.5431
+    let expected = (E + 1.0 / E) / 2.0;
+    assert(approx_eq(cosh(1.0), expected, TOLERANCE));
+}
+
+@test
+fn test_cosh_symmetric() {
+    // cosh(-x) = cosh(x) (even function)
+    assert(approx_eq(cosh(-1.0), cosh(1.0), TOLERANCE));
+    assert(approx_eq(cosh(-2.0), cosh(2.0), TOLERANCE));
+}
+
+@test
+fn test_cosh_always_ge_one() {
+    // cosh(x) >= 1 for all x
+    let values = [-10.0, -1.0, 0.0, 1.0, 10.0];
+    for v in values.iter() {
+        let result: Float = cosh(*v);
+        assert(result >= 1.0);
+    }
+}
+
+@test
+fn test_cosh_ln2() {
+    // cosh(ln(2)) = (2 + 1/2) / 2 = 5/4
+    assert(approx_eq(cosh(LN2), 1.25, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 3: Hyperbolic Tangent (tanh)
+// =============================================================================
+
+@test
+fn test_tanh_zero() {
+    assert(approx_eq(tanh(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_tanh_bounds() {
+    // -1 < tanh(x) < 1 for all x
+    let values = [-10.0, -1.0, 0.0, 1.0, 10.0];
+    for v in values.iter() {
+        let result: Float = tanh(*v);
+        assert(result > -1.0);
+        assert(result < 1.0);
+    }
+}
+
+@test
+fn test_tanh_odd() {
+    // tanh(-x) = -tanh(x)
+    let t1: Float = tanh(1.0);
+    let t2: Float = tanh(2.0);
+    assert(approx_eq(tanh(-1.0), -t1, TOLERANCE));
+    assert(approx_eq(tanh(-2.0), -t2, TOLERANCE));
+}
+
+@test
+fn test_tanh_asymptotes() {
+    // tanh(x) → 1 as x → ∞
+    assert(approx_eq(tanh(20.0), 1.0, 1e-8));
+    // tanh(x) → -1 as x → -∞
+    assert(approx_eq(tanh(-20.0), -1.0, 1e-8));
+}
+
+@test
+fn test_tanh_small() {
+    // For small x, tanh(x) ≈ x
+    let x = 1e-15;
+    assert(approx_eq(tanh(x), x, 1e-20));
+}
+
+// =============================================================================
+// SECTION 4: Hyperbolic Secant (sech)
+// =============================================================================
+
+@test
+fn test_sech_zero() {
+    // sech(0) = 1/cosh(0) = 1
+    assert(approx_eq(sech(0.0), 1.0, TOLERANCE));
+}
+
+@test
+fn test_sech_bounds() {
+    // 0 < sech(x) <= 1
+    let values = [-5.0, -1.0, 0.0, 1.0, 5.0];
+    for v in values.iter() {
+        let result: Float = sech(*v);
+        assert(result > 0.0);
+        assert(result <= 1.0 + TOLERANCE);
+    }
+}
+
+@test
+fn test_sech_symmetric() {
+    // sech(-x) = sech(x) (even function)
+    assert(approx_eq(sech(-1.0), sech(1.0), TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 5: Inverse Hyperbolic Sine (asinh)
+// =============================================================================
+
+@test
+fn test_asinh_zero() {
+    assert(approx_eq(asinh(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_asinh_one() {
+    // asinh(1) = ln(1 + √2) ≈ 0.8814
+    let expected = log(1.0 + sqrt(2.0));
+    assert(approx_eq(asinh(1.0), expected, TOLERANCE));
+}
+
+@test
+fn test_asinh_odd() {
+    // asinh(-x) = -asinh(x)
+    assert(approx_eq(asinh(-1.0), -asinh(1.0), TOLERANCE));
+    assert(approx_eq(asinh(-2.0), -asinh(2.0), TOLERANCE));
+}
+
+@test
+fn test_asinh_sinh_inverse() {
+    // asinh(sinh(x)) = x
+    let values = [-2.0, -1.0, 0.0, 1.0, 2.0];
+    for v in values.iter() {
+        assert(approx_eq(asinh(sinh(*v)), *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_sinh_asinh_inverse() {
+    // sinh(asinh(x)) = x
+    let values = [-10.0, -1.0, 0.0, 1.0, 10.0];
+    for v in values.iter() {
+        assert(approx_eq(sinh(asinh(*v)), *v, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// SECTION 6: Inverse Hyperbolic Cosine (acosh)
+// =============================================================================
+
+@test
+fn test_acosh_one() {
+    // acosh(1) = 0
+    assert(approx_eq(acosh(1.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_acosh_two() {
+    // acosh(2) = ln(2 + √3) ≈ 1.3169
+    let expected = log(2.0 + sqrt(3.0));
+    assert(approx_eq(acosh(2.0), expected, TOLERANCE));
+}
+
+@test
+fn test_acosh_cosh_inverse() {
+    // acosh(cosh(x)) = |x|
+    let values = [1.0, 2.0, 3.0];
+    for v in values.iter() {
+        let cosh_val: Float = cosh(*v);
+        assert(approx_eq(acosh(cosh_val), *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_cosh_acosh_inverse() {
+    // cosh(acosh(x)) = x for x >= 1
+    let values = [1.0, 1.5, 2.0, 5.0, 10.0];
+    for v in values.iter() {
+        let acosh_val: Float = acosh(*v);
+        let result: Float = cosh(acosh_val);
+        assert(approx_eq(result, *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_acosh_safe_valid() {
+    let result = acosh_safe(2.0);
+    assert(result.is_some());
+}
+
+@test
+fn test_acosh_safe_invalid() {
+    let result = acosh_safe(0.5);
+    assert(result.is_none());
+}
+
+// =============================================================================
+// SECTION 7: Inverse Hyperbolic Tangent (atanh)
+// =============================================================================
+
+@test
+fn test_atanh_zero() {
+    assert(approx_eq(atanh(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_atanh_half() {
+    // atanh(0.5) = 0.5 * ln(3) ≈ 0.5493
+    let expected = 0.5 * log(3.0);
+    assert(approx_eq(atanh(0.5), expected, TOLERANCE));
+}
+
+@test
+fn test_atanh_odd() {
+    // atanh(-x) = -atanh(x)
+    assert(approx_eq(atanh(-0.5), -atanh(0.5), TOLERANCE));
+}
+
+@test
+fn test_atanh_tanh_inverse() {
+    // atanh(tanh(x)) = x
+    let values = [-0.9, -0.5, 0.0, 0.5, 0.9];
+    for v in values.iter() {
+        let tanh_val: Float = tanh(*v);
+        assert(approx_eq(atanh(tanh_val), *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_tanh_atanh_inverse() {
+    // tanh(atanh(x)) = x for |x| < 1
+    let values = [-0.9, -0.5, 0.0, 0.5, 0.9];
+    for v in values.iter() {
+        let atanh_val: Float = atanh(*v);
+        let result: Float = tanh(atanh_val);
+        assert(approx_eq(result, *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_atanh_safe_valid() {
+    let result = atanh_safe(0.5);
+    assert(result.is_some());
+}
+
+@test
+fn test_atanh_safe_invalid() {
+    let result1 = atanh_safe(1.0);
+    assert(result1.is_none());
+    let result2 = atanh_safe(-1.0);
+    assert(result2.is_none());
+    let result3 = atanh_safe(2.0);
+    assert(result3.is_none());
+}
+
+// =============================================================================
+// SECTION 8: Mathematical Identities
+// =============================================================================
+
+@test
+fn test_hyperbolic_pythagorean_identity() {
+    // cosh²(x) - sinh²(x) = 1
+    let values = [-2.0, -1.0, 0.0, 1.0, 2.0];
+    for v in values.iter() {
+        let sh = sinh(*v);
+        let ch: Float = cosh(*v);
+        assert(approx_eq(ch * ch - sh * sh, 1.0, TOLERANCE));
+    }
+}
+
+@test
+fn test_tanh_definition() {
+    // tanh(x) = sinh(x) / cosh(x)
+    let values = [-2.0, -1.0, 0.5, 1.0, 2.0];
+    for v in values.iter() {
+        let sh = sinh(*v);
+        let ch: Float = cosh(*v);
+        let expected = sh / ch;
+        let actual: Float = tanh(*v);
+        assert(approx_eq(actual, expected, TOLERANCE));
+    }
+}
+
+@test
+fn test_sech_definition() {
+    // sech(x) = 1 / cosh(x)
+    let values = [-2.0, -1.0, 0.0, 1.0, 2.0];
+    for v in values.iter() {
+        let ch: Float = cosh(*v);
+        let expected = 1.0 / ch;
+        let actual: Float = sech(*v);
+        assert(approx_eq(actual, expected, TOLERANCE));
+    }
+}
+
+@test
+fn test_sinh_double_angle() {
+    // sinh(2x) = 2 * sinh(x) * cosh(x)
+    let x = 1.5;
+    let lhs = sinh(2.0 * x);
+    let ch: Float = cosh(x);
+    let rhs = 2.0 * sinh(x) * ch;
+    assert(approx_eq(lhs, rhs, TOLERANCE));
+}
+
+@test
+fn test_cosh_double_angle() {
+    // cosh(2x) = cosh²(x) + sinh²(x)
+    let x = 1.5;
+    let lhs: Float = cosh(2.0 * x);
+    let ch: Float = cosh(x);
+    let sh = sinh(x);
+    let rhs = ch * ch + sh * sh;
+    assert(approx_eq(lhs, rhs, TOLERANCE));
+}
+
+// =============================================================================
+// SECTION 9: Gudermannian Function
+// =============================================================================
+
+@test
+fn test_gudermannian_zero() {
+    assert(approx_eq(gudermannian(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_gudermannian_bounds() {
+    // gd(x) ∈ (-π/2, π/2)
+    let values = [-10.0, -1.0, 0.0, 1.0, 10.0];
+    for v in values.iter() {
+        let result = gudermannian(*v);
+        assert(result > -FRAC_PI_2);
+        assert(result < FRAC_PI_2);
+    }
+}
+
+@test
+fn test_gudermannian_inverse_roundtrip() {
+    // inverse_gudermannian(gudermannian(x)) = x
+    let values = [-2.0, -1.0, 0.0, 1.0, 2.0];
+    for v in values.iter() {
+        let gd_val = gudermannian(*v);
+        let recovered = inverse_gudermannian(gd_val);
+        assert(approx_eq(recovered, *v, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// SECTION 10: Hyperbolic Cosecant (csch)
+// =============================================================================
+
+@test
+fn test_csch_one() {
+    // csch(1) = 1 / sinh(1)
+    let expected = 1.0 / sinh(1.0);
+    assert(approx_eq(csch(1.0), expected, TOLERANCE));
+}
+
+@test
+fn test_csch_negative() {
+    // csch(-x) = -csch(x) (odd function)
+    assert(approx_eq(csch(-1.0), -csch(1.0), TOLERANCE));
+}
+
+@test
+fn test_csch_definition() {
+    // csch(x) = 1 / sinh(x)
+    let values = [-3.0, -1.0, 0.5, 1.0, 3.0];
+    for v in values.iter() {
+        let expected = 1.0 / sinh(*v);
+        assert(approx_eq(csch(*v), expected, TOLERANCE));
+    }
+}
+
+@test
+fn test_csch_large_value() {
+    // csch(x) approaches 0 for large |x|
+    assert(approx_eq(csch(20.0), 0.0, 1e-8));
+}
+
+// =============================================================================
+// SECTION 11: Hyperbolic Cotangent (coth)
+// =============================================================================
+
+@test
+fn test_coth_one() {
+    // coth(1) = cosh(1) / sinh(1)
+    let ch: Float = cosh(1.0);
+    let sh = sinh(1.0);
+    let expected = ch / sh;
+    assert(approx_eq(coth(1.0), expected, TOLERANCE));
+}
+
+@test
+fn test_coth_negative() {
+    // coth(-x) = -coth(x) (odd function)
+    assert(approx_eq(coth(-1.0), -coth(1.0), TOLERANCE));
+}
+
+@test
+fn test_coth_definition() {
+    // coth(x) = cosh(x) / sinh(x)
+    let values = [-3.0, -1.0, 0.5, 1.0, 3.0];
+    for v in values.iter() {
+        let ch: Float = cosh(*v);
+        let sh = sinh(*v);
+        let expected = ch / sh;
+        assert(approx_eq(coth(*v), expected, TOLERANCE));
+    }
+}
+
+@test
+fn test_coth_large_positive() {
+    // coth(x) approaches 1 for large positive x
+    assert(approx_eq(coth(20.0), 1.0, 1e-8));
+}
+
+@test
+fn test_coth_large_negative() {
+    // coth(x) approaches -1 for large negative x
+    assert(approx_eq(coth(-20.0), -1.0, 1e-8));
+}
+
+@test
+fn test_coth_reciprocal_tanh() {
+    // coth(x) = 1 / tanh(x) for nonzero x
+    let values = [-2.0, -1.0, 0.5, 1.0, 2.0];
+    for v in values.iter() {
+        let th: Float = tanh(*v);
+        let expected: Float = 1.0 / th;
+        assert(approx_eq(coth(*v), expected, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// SECTION 12: Inverse Hyperbolic Secant (asech)
+// =============================================================================
+
+@test
+fn test_asech_one() {
+    // asech(1) = acosh(1/1) = acosh(1) = 0
+    let result: Float = asech(1.0);
+    assert(approx_eq(result, 0.0, TOLERANCE));
+}
+
+@test
+fn test_asech_half() {
+    // asech(0.5) = acosh(2.0)
+    let expected: Float = acosh(2.0);
+    let result: Float = asech(0.5);
+    assert(approx_eq(result, expected, TOLERANCE));
+}
+
+@test
+fn test_asech_sech_roundtrip() {
+    // asech(sech(x)) = |x| for x >= 0
+    let values = [0.0, 0.5, 1.0, 2.0, 3.0];
+    for v in values.iter() {
+        let s: Float = sech(*v);
+        let recovered: Float = asech(s);
+        assert(approx_eq(recovered, *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_sech_asech_roundtrip() {
+    // sech(asech(x)) = x for x in (0, 1]
+    let values = [0.1, 0.3, 0.5, 0.7, 1.0];
+    for v in values.iter() {
+        let a: Float = asech(*v);
+        let result: Float = sech(a);
+        assert(approx_eq(result, *v, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// SECTION 13: Inverse Hyperbolic Cosecant (acsch)
+// =============================================================================
+
+@test
+fn test_acsch_one() {
+    // acsch(1) = asinh(1)
+    let expected = asinh(1.0);
+    assert(approx_eq(acsch(1.0), expected, TOLERANCE));
+}
+
+@test
+fn test_acsch_negative() {
+    // acsch(-x) = -acsch(x) (odd function)
+    assert(approx_eq(acsch(-1.0), -acsch(1.0), TOLERANCE));
+}
+
+@test
+fn test_acsch_csch_roundtrip() {
+    // acsch(csch(x)) = x for nonzero x
+    let values = [-3.0, -1.0, 0.5, 1.0, 3.0];
+    for v in values.iter() {
+        let c = csch(*v);
+        let recovered = acsch(c);
+        assert(approx_eq(recovered, *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_csch_acsch_roundtrip() {
+    // csch(acsch(x)) = x for nonzero x
+    let values = [-5.0, -2.0, -0.5, 0.5, 2.0, 5.0];
+    for v in values.iter() {
+        let a = acsch(*v);
+        let result = csch(a);
+        assert(approx_eq(result, *v, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// SECTION 14: Inverse Hyperbolic Cotangent (acoth)
+// =============================================================================
+
+@test
+fn test_acoth_two() {
+    // acoth(2) = 0.5 * ln(3/1) = 0.5 * ln(3)
+    let expected = 0.5 * log(3.0);
+    assert(approx_eq(acoth(2.0), expected, TOLERANCE));
+}
+
+@test
+fn test_acoth_negative() {
+    // acoth(-x) = -acoth(x) (odd function)
+    assert(approx_eq(acoth(-2.0), -acoth(2.0), TOLERANCE));
+}
+
+@test
+fn test_acoth_coth_roundtrip() {
+    // acoth(coth(x)) = x for nonzero x
+    let values = [-3.0, -1.0, 0.5, 1.0, 3.0];
+    for v in values.iter() {
+        let c = coth(*v);
+        let recovered = acoth(c);
+        assert(approx_eq(recovered, *v, TOLERANCE));
+    }
+}
+
+@test
+fn test_coth_acoth_roundtrip() {
+    // coth(acoth(x)) = x for |x| > 1
+    let values = [-5.0, -2.0, 2.0, 5.0, 10.0];
+    for v in values.iter() {
+        let a = acoth(*v);
+        let result = coth(a);
+        assert(approx_eq(result, *v, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// SECTION 15: Additional Mathematical Identities
+// =============================================================================
+
+@test
+fn test_sinh_addition() {
+    // sinh(a+b) = sinh(a)*cosh(b) + cosh(a)*sinh(b)
+    let a = 1.0;
+    let b = 0.7;
+    let lhs = sinh(a + b);
+    let ch_a: Float = cosh(a);
+    let ch_b: Float = cosh(b);
+    let sh_a = sinh(a);
+    let sh_b = sinh(b);
+    let rhs: Float = sh_a * ch_b + ch_a * sh_b;
+    assert(approx_eq(lhs, rhs, TOLERANCE));
+}
+
+@test
+fn test_cosh_addition() {
+    // cosh(a+b) = cosh(a)*cosh(b) + sinh(a)*sinh(b)
+    let a = 1.0;
+    let b = 0.7;
+    let lhs: Float = cosh(a + b);
+    let ch_a: Float = cosh(a);
+    let ch_b: Float = cosh(b);
+    let sh_a = sinh(a);
+    let sh_b = sinh(b);
+    let rhs: Float = ch_a * ch_b + sh_a * sh_b;
+    assert(approx_eq(lhs, rhs, TOLERANCE));
+}
+
+@test
+fn test_tanh_addition() {
+    // tanh(a+b) = (tanh(a) + tanh(b)) / (1 + tanh(a)*tanh(b))
+    let a = 0.5;
+    let b = 0.3;
+    let ta: Float = tanh(a);
+    let tb: Float = tanh(b);
+    let lhs: Float = tanh(a + b);
+    let rhs: Float = (ta + tb) / (1.0 + ta * tb);
+    assert(approx_eq(lhs, rhs, TOLERANCE));
+}
+
+@test
+fn test_cosh_half_angle() {
+    // cosh²(x) = (cosh(2x) + 1) / 2
+    let x = 1.2;
+    let ch: Float = cosh(x);
+    let lhs: Float = ch * ch;
+    let ch2x: Float = cosh(2.0 * x);
+    let rhs: Float = (ch2x + 1.0) / 2.0;
+    assert(approx_eq(lhs, rhs, TOLERANCE));
+}
+
+@test
+fn test_sinh_half_angle() {
+    // sinh²(x) = (cosh(2x) - 1) / 2
+    let x = 1.2;
+    let sh = sinh(x);
+    let lhs: Float = sh * sh;
+    let ch2x: Float = cosh(2.0 * x);
+    let rhs: Float = (ch2x - 1.0) / 2.0;
+    assert(approx_eq(lhs, rhs, TOLERANCE));
+}
+
+@test
+fn test_sinh_exp_definition() {
+    // sinh(x) = (e^x - e^(-x)) / 2
+    let x = 2.0;
+    let ep: Float = exp(x);
+    let en: Float = exp(-x);
+    let diff: Float = ep - en;
+    let expected: Float = diff / 2.0;
+    assert(approx_eq(sinh(x), expected, TOLERANCE));
+}
+
+@test
+fn test_cosh_exp_definition() {
+    // cosh(x) = (e^x + e^(-x)) / 2
+    let x = 2.0;
+    let ep: Float = exp(x);
+    let en: Float = exp(-x);
+    let sum: Float = ep + en;
+    let expected: Float = sum / 2.0;
+    let result: Float = cosh(x);
+    assert(approx_eq(result, expected, TOLERANCE));
+}
+
+@test
+fn test_sech_large_value() {
+    // sech(x) approaches 0 for large |x|
+    let result: Float = sech(20.0);
+    assert(result < 1e-8);
+    assert(result > 0.0);
+}
+
+@test
+fn test_sech_squared_identity() {
+    // 1 - tanh²(x) = sech²(x)
+    let values = [-2.0, -1.0, 0.0, 1.0, 2.0];
+    for v in values.iter() {
+        let th: Float = tanh(*v);
+        let se: Float = sech(*v);
+        let lhs: Float = 1.0 - th * th;
+        let rhs: Float = se * se;
+        assert(approx_eq(lhs, rhs, TOLERANCE));
+    }
+}
+
+@test
+fn test_csch_squared_identity() {
+    // coth²(x) - 1 = csch²(x) for nonzero x
+    let values = [-3.0, -1.0, 0.5, 1.0, 3.0];
+    for v in values.iter() {
+        let co = coth(*v);
+        let cs = csch(*v);
+        let lhs: Float = co * co - 1.0;
+        let rhs: Float = cs * cs;
+        assert(approx_eq(lhs, rhs, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// SECTION 16: Extended Gudermannian Properties
+// =============================================================================
+
+@test
+fn test_gudermannian_sin_property() {
+    // sin(gd(x)) = tanh(x)
+    let values = [-2.0, -1.0, 0.0, 0.5, 1.0, 2.0];
+    for v in values.iter() {
+        let gd_val = gudermannian(*v);
+        let lhs: Float = sin(gd_val);
+        let rhs: Float = tanh(*v);
+        assert(approx_eq(lhs, rhs, TOLERANCE));
+    }
+}
+
+@test
+fn test_gudermannian_tan_property() {
+    // tan(gd(x)) = sinh(x)
+    let values = [-2.0, -1.0, 0.0, 0.5, 1.0, 2.0];
+    for v in values.iter() {
+        let gd_val = gudermannian(*v);
+        let lhs: Float = tan(gd_val);
+        let rhs = sinh(*v);
+        assert(approx_eq(lhs, rhs, TOLERANCE));
+    }
+}
+
+@test
+fn test_inverse_gudermannian_zero() {
+    // gd⁻¹(0) = 0
+    assert(approx_eq(inverse_gudermannian(0.0), 0.0, TOLERANCE));
+}
+
+@test
+fn test_gudermannian_odd() {
+    // gd(-x) = -gd(x) (odd function)
+    let values = [0.5, 1.0, 2.0, 3.0];
+    for v in values.iter() {
+        let gd_pos = gudermannian(*v);
+        let gd_neg = gudermannian(-*v);
+        assert(approx_eq(gd_neg, -gd_pos, TOLERANCE));
+    }
+}
+
+@test
+fn test_inverse_gudermannian_roundtrip() {
+    // gd(gd⁻¹(x)) = x for x in (-π/2, π/2)
+    let values = [-1.0, -0.5, 0.0, 0.5, 1.0];
+    for v in values.iter() {
+        let inv_gd = inverse_gudermannian(*v);
+        let recovered = gudermannian(inv_gd);
+        assert(approx_eq(recovered, *v, TOLERANCE));
+    }
+}
+
+// =============================================================================
+// Main function
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

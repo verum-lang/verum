@@ -1,0 +1,1826 @@
+// =============================================================================
+// set_test.vr - Comprehensive tests for Set<T> collection
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, set, hash-set, core
+// @description: Comprehensive tests for Set<T> type and methods
+// =============================================================================
+
+mount core.collections.set.{Set, set};
+mount core.collections.list.List;
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Construction Tests
+// =============================================================================
+
+@test
+fn test_set_new() {
+    let empty: Set<Int> = Set.new();
+    assert(empty.is_empty());
+    assert_eq(empty.len(), 0);
+}
+
+@test
+fn test_set_with_capacity() {
+    let set: Set<Int> = Set.with_capacity(10);
+    assert(set.is_empty());
+}
+
+// =============================================================================
+// Section 2: Insert and Contains Tests
+// =============================================================================
+
+@test
+fn test_set_insert() {
+    let mut set: Set<Int> = Set.new();
+
+    assert(set.insert(1));   // New element, returns true
+    assert(set.insert(2));   // New element, returns true
+    assert(!set.insert(1));  // Duplicate, returns false
+
+    assert_eq(set.len(), 2);
+}
+
+@test
+fn test_set_contains() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(42);
+    set.insert(100);
+
+    assert(set.contains(&42));
+    assert(set.contains(&100));
+    assert(!set.contains(&0));
+    assert(!set.contains(&999));
+}
+
+// =============================================================================
+// Section 3: Remove Tests
+// =============================================================================
+
+@test
+fn test_set_remove() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    assert(set.remove(&2));   // Existed, returns true
+    assert(!set.remove(&2));  // Already removed, returns false
+    assert(!set.remove(&99)); // Never existed, returns false
+
+    assert_eq(set.len(), 2);
+    assert(!set.contains(&2));
+}
+
+@test
+fn test_set_clear() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    set.clear();
+
+    assert(set.is_empty());
+    assert_eq(set.len(), 0);
+}
+
+// =============================================================================
+// Section 4: Set Operations Tests
+// =============================================================================
+
+@test
+fn test_set_union() {
+    let mut set1: Set<Int> = Set.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+
+    let mut set2: Set<Int> = Set.new();
+    set2.insert(2);
+    set2.insert(3);
+    set2.insert(4);
+
+    let union = set1.union(&set2);
+
+    assert_eq(union.len(), 4);  // {1, 2, 3, 4}
+    assert(union.contains(&1));
+    assert(union.contains(&2));
+    assert(union.contains(&3));
+    assert(union.contains(&4));
+}
+
+@test
+fn test_set_intersection() {
+    let mut set1: Set<Int> = Set.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+
+    let mut set2: Set<Int> = Set.new();
+    set2.insert(2);
+    set2.insert(3);
+    set2.insert(4);
+
+    let intersection = set1.intersection(&set2);
+
+    assert_eq(intersection.len(), 2);  // {2, 3}
+    assert(!intersection.contains(&1));
+    assert(intersection.contains(&2));
+    assert(intersection.contains(&3));
+    assert(!intersection.contains(&4));
+}
+
+@test
+fn test_set_difference() {
+    let mut set1: Set<Int> = Set.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+
+    let mut set2: Set<Int> = Set.new();
+    set2.insert(2);
+    set2.insert(3);
+    set2.insert(4);
+
+    let diff = set1.difference(&set2);
+
+    assert_eq(diff.len(), 1);  // {1}
+    assert(diff.contains(&1));
+    assert(!diff.contains(&2));
+    assert(!diff.contains(&3));
+}
+
+@test
+fn test_set_symmetric_difference() {
+    let mut set1: Set<Int> = Set.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+
+    let mut set2: Set<Int> = Set.new();
+    set2.insert(2);
+    set2.insert(3);
+    set2.insert(4);
+
+    let sym_diff = set1.symmetric_difference(&set2);
+
+    assert_eq(sym_diff.len(), 2);  // {1, 4}
+    assert(sym_diff.contains(&1));
+    assert(!sym_diff.contains(&2));
+    assert(!sym_diff.contains(&3));
+    assert(sym_diff.contains(&4));
+}
+
+// =============================================================================
+// Section 5: Subset/Superset Tests
+// =============================================================================
+
+@test
+fn test_set_is_subset() {
+    let mut small: Set<Int> = Set.new();
+    small.insert(1);
+    small.insert(2);
+
+    let mut large: Set<Int> = Set.new();
+    large.insert(1);
+    large.insert(2);
+    large.insert(3);
+
+    assert(small.is_subset(&large));
+    assert(!large.is_subset(&small));
+    assert(small.is_subset(&small));  // Set is subset of itself
+}
+
+@test
+fn test_set_is_superset() {
+    let mut small: Set<Int> = Set.new();
+    small.insert(1);
+    small.insert(2);
+
+    let mut large: Set<Int> = Set.new();
+    large.insert(1);
+    large.insert(2);
+    large.insert(3);
+
+    assert(large.is_superset(&small));
+    assert(!small.is_superset(&large));
+}
+
+@test
+fn test_set_is_disjoint() {
+    let mut set1: Set<Int> = Set.new();
+    set1.insert(1);
+    set1.insert(2);
+
+    let mut set2: Set<Int> = Set.new();
+    set2.insert(3);
+    set2.insert(4);
+
+    let mut set3: Set<Int> = Set.new();
+    set3.insert(2);
+    set3.insert(3);
+
+    assert(set1.is_disjoint(&set2));  // No common elements
+    assert(!set1.is_disjoint(&set3)); // Share element 2
+}
+
+// =============================================================================
+// Section 6: Additional Contains Tests
+// =============================================================================
+
+@test
+fn test_set_contains_multiple() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(10);
+    set.insert(20);
+    set.insert(30);
+
+    assert(set.contains(&10));
+    assert(set.contains(&20));
+    assert(set.contains(&30));
+    assert(!set.contains(&15));
+    assert(!set.contains(&25));
+}
+
+// =============================================================================
+// Section 7: Text Set Tests
+// =============================================================================
+
+@test
+fn test_set_text() {
+    let mut set: Set<Text> = Set.new();
+
+    set.insert("hello");
+    set.insert("world");
+    set.insert("hello");  // Duplicate
+
+    assert_eq(set.len(), 2);
+    assert(set.contains(&"hello"));
+    assert(set.contains(&"world"));
+}
+
+// =============================================================================
+// Section 8: Edge Cases
+// =============================================================================
+
+@test
+fn test_set_empty_operations() {
+    let empty: Set<Int> = Set.new();
+
+    assert(empty.is_empty());
+    assert(!empty.contains(&0));
+
+    let also_empty: Set<Int> = Set.new();
+    assert(empty.is_subset(&also_empty));
+    assert(empty.is_disjoint(&also_empty));
+}
+
+@test
+fn test_set_single_element() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(42);
+
+    assert_eq(set.len(), 1);
+    assert(set.contains(&42));
+
+    set.remove(&42);
+    assert(set.is_empty());
+}
+
+// =============================================================================
+// Section 9: Capacity Tests
+// =============================================================================
+
+@test
+fn test_set_capacity() {
+    let set: Set<Int> = Set.with_capacity(100);
+    assert(set.capacity() >= 100);
+    assert(set.is_empty());
+}
+
+// =============================================================================
+// Section 10: Take and Get Tests
+// =============================================================================
+
+@test
+fn test_set_take() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(42);
+    set.insert(100);
+
+    // Take removes and returns the value
+    match set.take(&42) {
+        Some(v) => assert_eq(v, 42),
+        None => panic("Expected Some"),
+    }
+
+    // Value is removed
+    assert(!set.contains(&42));
+    assert_eq(set.len(), 1);
+
+    // Taking non-existent value returns None
+    match set.take(&999) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+@test
+fn test_set_get() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(42);
+
+    // Get returns reference to the value
+    match set.get(&42) {
+        Some(v) => assert_eq(*v, 42),
+        None => panic("Expected Some"),
+    }
+
+    // Get on non-existent value returns None
+    match set.get(&999) {
+        None => {} // Expected
+        Some(_) => panic("Expected None"),
+    }
+}
+
+// =============================================================================
+// Section 11: Iteration Tests
+// =============================================================================
+
+@test
+fn test_set_iter() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    let mut count = 0;
+    let mut sum = 0;
+    let mut iter = set.iter();
+    loop {
+        match iter.next() {
+            Some(value) => {
+                count = count + 1;
+                sum = sum + value;
+            }
+            None => break,
+        }
+    }
+
+    assert_eq(count, 3);
+    assert_eq(sum, 6); // 1 + 2 + 3
+}
+
+@test
+fn test_set_drain() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+
+    let mut count = 0;
+    let mut drain = set.drain();
+    loop {
+        match drain.next() {
+            Some(_) => count = count + 1,
+            None => break,
+        }
+    }
+
+    assert_eq(count, 3);
+    assert(set.is_empty()); // Drain empties the set
+}
+
+// =============================================================================
+// Section 12: Retain Tests
+// =============================================================================
+
+@test
+fn test_set_retain() {
+    let mut set: Set<Int> = Set.new();
+    set.insert(1);
+    set.insert(2);
+    set.insert(3);
+    set.insert(4);
+    set.insert(5);
+
+    // Keep only even numbers
+    set.retain(|x| *x % 2 == 0);
+
+    assert_eq(set.len(), 2);
+    assert(!set.contains(&1));
+    assert(set.contains(&2));
+    assert(!set.contains(&3));
+    assert(set.contains(&4));
+    assert(!set.contains(&5));
+}
+
+// =============================================================================
+// Section 13: Set Modification Operations
+// =============================================================================
+
+@test
+fn test_set_extend_from_set() {
+    let mut set1: Set<Int> = Set.new();
+    set1.insert(1);
+    set1.insert(2);
+
+    let mut set2: Set<Int> = Set.new();
+    set2.insert(3);
+    set2.insert(4);
+
+    set1.extend_from_set(&set2);
+
+    assert_eq(set1.len(), 4);
+    assert(set1.contains(&1));
+    assert(set1.contains(&2));
+    assert(set1.contains(&3));
+    assert(set1.contains(&4));
+}
+
+@test
+fn test_set_retain_from_set() {
+    let mut set1: Set<Int> = Set.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+    set1.insert(4);
+
+    let mut set2: Set<Int> = Set.new();
+    set2.insert(2);
+    set2.insert(4);
+
+    // Keep only elements that are in set2 (intersection in-place)
+    set1.retain_from_set(&set2);
+
+    assert_eq(set1.len(), 2);
+    assert(!set1.contains(&1));
+    assert(set1.contains(&2));
+    assert(!set1.contains(&3));
+    assert(set1.contains(&4));
+}
+
+@test
+fn test_set_remove_from_set() {
+    let mut set1: Set<Int> = Set.new();
+    set1.insert(1);
+    set1.insert(2);
+    set1.insert(3);
+    set1.insert(4);
+
+    let mut set2: Set<Int> = Set.new();
+    set2.insert(2);
+    set2.insert(3);
+
+    // Remove elements that are in set2 (difference in-place)
+    set1.remove_from_set(&set2);
+
+    assert_eq(set1.len(), 2);
+    assert(set1.contains(&1));
+    assert(!set1.contains(&2));
+    assert(!set1.contains(&3));
+    assert(set1.contains(&4));
+}
+
+// =============================================================================
+// Edge Case Tests — Set Operations
+// =============================================================================
+
+@test
+fn test_set_union_disjoint() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = Set.new();
+    b.insert(3);
+    b.insert(4);
+    let u = a.union(&b);
+    assert_eq(u.len(), 4);
+    assert(u.contains(&1));
+    assert(u.contains(&4));
+}
+
+@test
+fn test_set_union_overlapping() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    let u = a.union(&b);
+    assert_eq(u.len(), 4); // {1,2,3,4}
+}
+
+@test
+fn test_set_intersection_overlapping() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    let inter = a.intersection(&b);
+    assert_eq(inter.len(), 2); // {2,3}
+    assert(inter.contains(&2));
+    assert(inter.contains(&3));
+    assert(!inter.contains(&1));
+}
+
+@test
+fn test_set_intersection_disjoint() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = Set.new();
+    b.insert(3);
+    b.insert(4);
+    let inter = a.intersection(&b);
+    assert_eq(inter.len(), 0);
+}
+
+@test
+fn test_set_difference_basic() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(4);
+    let diff = a.difference(&b);
+    assert_eq(diff.len(), 2); // {1,3}
+    assert(diff.contains(&1));
+    assert(diff.contains(&3));
+    assert(!diff.contains(&2));
+}
+
+@test
+fn test_set_symmetric_difference_basic() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b = Set.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    let sym_diff = a.symmetric_difference(&b);
+    assert_eq(sym_diff.len(), 2); // {1,4}
+    assert(sym_diff.contains(&1));
+    assert(sym_diff.contains(&4));
+    assert(!sym_diff.contains(&2));
+}
+
+@test
+fn test_set_subset_superset_comprehensive() {
+    let mut small = Set.new();
+    small.insert(1);
+    small.insert(2);
+    let mut large = Set.new();
+    large.insert(1);
+    large.insert(2);
+    large.insert(3);
+
+    assert(small.is_subset(&large));
+    assert(!large.is_subset(&small));
+    assert(large.is_superset(&small));
+    assert(!small.is_superset(&large));
+
+    // A set is subset/superset of itself
+    assert(small.is_subset(&small));
+    assert(small.is_superset(&small));
+}
+
+@test
+fn test_set_disjoint_basic() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = Set.new();
+    b.insert(3);
+    b.insert(4);
+    assert(a.is_disjoint(&b));
+    assert(b.is_disjoint(&a));
+}
+
+@test
+fn test_set_disjoint_overlap() {
+    let mut a = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b = Set.new();
+    b.insert(1);
+    b.insert(3);
+    assert(!a.is_disjoint(&b));
+}
+
+@test
+fn test_set_disjoint_empty() {
+    let empty: Set<Int> = Set.new();
+    let mut s = Set.new();
+    s.insert(1);
+    assert(empty.is_disjoint(&s));
+    assert(s.is_disjoint(&empty));
+}
+
+@test
+fn test_set_empty_set_operations() {
+    let empty: Set<Int> = Set.new();
+    let mut s = Set.new();
+    s.insert(1);
+    s.insert(2);
+
+    // Union with empty = original
+    let u = s.union(&empty);
+    assert_eq(u.len(), 2);
+
+    // Intersection with empty = empty
+    let inter = s.intersection(&empty);
+    assert_eq(inter.len(), 0);
+
+    // Difference with empty = original
+    let diff = s.difference(&empty);
+    assert_eq(diff.len(), 2);
+
+    // Symmetric difference with empty = original
+    let sym = s.symmetric_difference(&empty);
+    assert_eq(sym.len(), 2);
+}
+
+@test
+fn test_set_large_insert() {
+    let mut s = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        s.insert(i);
+        i = i + 1;
+    }
+    assert_eq(s.len(), 100);
+
+    // Verify a sample of elements present
+    assert(s.contains(&0));
+    assert(s.contains(&50));
+    assert(s.contains(&99));
+    assert(!s.contains(&100));
+}
+
+@test
+fn test_set_large_remove() {
+    let mut s = Set.new();
+    let mut i = 0;
+    while i < 100 {
+        s.insert(i);
+        i = i + 1;
+    }
+
+    // Remove first half by value
+    s.remove(&0);
+    s.remove(&1);
+    s.remove(&2);
+    s.remove(&3);
+    s.remove(&4);
+    s.remove(&5);
+    s.remove(&6);
+    s.remove(&7);
+    s.remove(&8);
+    s.remove(&9);
+    s.remove(&10);
+    s.remove(&11);
+    s.remove(&12);
+    s.remove(&13);
+    s.remove(&14);
+    s.remove(&15);
+    s.remove(&16);
+    s.remove(&17);
+    s.remove(&18);
+    s.remove(&19);
+    s.remove(&20);
+    s.remove(&21);
+    s.remove(&22);
+    s.remove(&23);
+    s.remove(&24);
+    s.remove(&25);
+    s.remove(&26);
+    s.remove(&27);
+    s.remove(&28);
+    s.remove(&29);
+    s.remove(&30);
+    s.remove(&31);
+    s.remove(&32);
+    s.remove(&33);
+    s.remove(&34);
+    s.remove(&35);
+    s.remove(&36);
+    s.remove(&37);
+    s.remove(&38);
+    s.remove(&39);
+    s.remove(&40);
+    s.remove(&41);
+    s.remove(&42);
+    s.remove(&43);
+    s.remove(&44);
+    s.remove(&45);
+    s.remove(&46);
+    s.remove(&47);
+    s.remove(&48);
+    s.remove(&49);
+    assert_eq(s.len(), 50);
+    assert(!s.contains(&0));
+    assert(!s.contains(&49));
+    assert(s.contains(&50));
+    assert(s.contains(&99));
+}
+
+@test
+fn test_set_insert_duplicates() {
+    let mut s = Set.new();
+    assert(s.insert(1));   // First insert returns true
+    assert(!s.insert(1));  // Duplicate returns false
+    assert_eq(s.len(), 1); // Still only one element
+
+    assert(s.insert(2));
+    assert(!s.insert(2));
+    assert_eq(s.len(), 2);
+}
+
+@test
+fn test_set_iter_completeness() {
+    let mut s = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+
+    let mut sum = 0;
+    let mut count = 0;
+    let mut iter = s.iter();
+    loop {
+        match iter.next() {
+            Some(v) => {
+                sum = sum + v;
+                count = count + 1;
+            },
+            None => break,
+        }
+    }
+    assert_eq(count, 3);
+    assert_eq(sum, 60);
+}
+
+// =============================================================================
+// Section: Convenience Function and Replace Tests
+// =============================================================================
+
+@test
+fn test_set_convenience_function() {
+    let s = set(&[1, 2, 3, 4, 5]);
+    assert_eq(s.len(), 5);
+    assert(s.contains(&1));
+    assert(s.contains(&5));
+    assert(!s.contains(&6));
+}
+
+@test
+fn test_set_convenience_function_deduplicates() {
+    let s = set(&[1, 2, 2, 3, 3, 3]);
+    assert_eq(s.len(), 3);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+}
+
+@test
+fn test_set_convenience_function_empty() {
+    let s: Set<Int> = set(&[]);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_replace() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(42);
+
+    // Replace existing value
+    let old = s.replace(42);
+    assert(old.is_some());
+    assert_eq(old.unwrap(), 42);
+    assert_eq(s.len(), 1);
+
+    // Replace non-existing value (inserts)
+    let old2 = s.replace(100);
+    assert(old2.is_none());
+    assert_eq(s.len(), 2);
+    assert(s.contains(&100));
+}
+
+@test
+fn test_set_shrink_to() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    assert(s.capacity() >= 100);
+    s.shrink_to(10);
+    // Capacity should be reduced but data preserved
+    assert_eq(s.len(), 3);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+}
+
+// =============================================================================
+// Section: Capacity Management Tests
+// =============================================================================
+
+@test
+fn test_set_shrink_to_fit() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    assert(s.capacity() >= 100);
+    s.shrink_to_fit();
+    // Data preserved after shrink
+    assert_eq(s.len(), 3);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+}
+
+@test
+fn test_set_shrink_to_fit_empty() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    s.shrink_to_fit();
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_reserve() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.reserve(100);
+    assert(s.capacity() >= 101); // At least len + additional
+    // Data preserved
+    assert(s.contains(&1));
+    // Can still add elements
+    s.insert(2);
+    assert_eq(s.len(), 2);
+}
+
+// =============================================================================
+// Section: Text Set — Extended Tests
+// =============================================================================
+
+@test
+fn test_set_text_union() {
+    let mut a: Set<Text> = Set.new();
+    a.insert("hello");
+    a.insert("world");
+    let mut b: Set<Text> = Set.new();
+    b.insert("world");
+    b.insert("verum");
+    let u = a.union(&b);
+    assert_eq(u.len(), 3);
+    assert(u.contains(&"hello"));
+    assert(u.contains(&"world"));
+    assert(u.contains(&"verum"));
+}
+
+@test
+fn test_set_text_intersection() {
+    let mut a: Set<Text> = Set.new();
+    a.insert("apple");
+    a.insert("banana");
+    a.insert("cherry");
+    let mut b: Set<Text> = Set.new();
+    b.insert("banana");
+    b.insert("cherry");
+    b.insert("date");
+    let inter = a.intersection(&b);
+    assert_eq(inter.len(), 2);
+    assert(inter.contains(&"banana"));
+    assert(inter.contains(&"cherry"));
+}
+
+@test
+fn test_set_text_difference() {
+    let mut a: Set<Text> = Set.new();
+    a.insert("x");
+    a.insert("y");
+    a.insert("z");
+    let mut b: Set<Text> = Set.new();
+    b.insert("y");
+    let diff = a.difference(&b);
+    assert_eq(diff.len(), 2);
+    assert(diff.contains(&"x"));
+    assert(diff.contains(&"z"));
+}
+
+@test
+fn test_set_text_symmetric_difference() {
+    let mut a: Set<Text> = Set.new();
+    a.insert("a");
+    a.insert("b");
+    let mut b: Set<Text> = Set.new();
+    b.insert("b");
+    b.insert("c");
+    let sym = a.symmetric_difference(&b);
+    assert_eq(sym.len(), 2);
+    assert(sym.contains(&"a"));
+    assert(sym.contains(&"c"));
+}
+
+// =============================================================================
+// Section: Retain — Extended Tests
+// =============================================================================
+
+@test
+fn test_set_retain_all() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.retain(|_x| true);
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_set_retain_none() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    s.retain(|_x| false);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_retain_by_threshold() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..20 {
+        s.insert(i);
+    }
+    s.retain(|x| *x >= 10);
+    assert_eq(s.len(), 10);
+    assert(!s.contains(&9));
+    assert(s.contains(&10));
+    assert(s.contains(&19));
+}
+
+@test
+fn test_set_retain_empty() {
+    let mut s: Set<Int> = Set.new();
+    s.retain(|_x| true);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_retain_odd_numbers() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..10 {
+        s.insert(i);
+    }
+    s.retain(|x| *x % 2 == 1);
+    assert_eq(s.len(), 5);
+    assert(s.contains(&1));
+    assert(s.contains(&3));
+    assert(s.contains(&5));
+    assert(s.contains(&7));
+    assert(s.contains(&9));
+    assert(!s.contains(&0));
+    assert(!s.contains(&2));
+}
+
+// =============================================================================
+// Section: Drain — Extended Tests
+// =============================================================================
+
+@test
+fn test_set_drain_empty() {
+    let mut s: Set<Int> = Set.new();
+    let mut count = 0;
+    let mut drain = s.drain();
+    loop {
+        match drain.next() {
+            Some(_) => count = count + 1,
+            None => break,
+        }
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_set_drain_single() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(42);
+    let mut val = 0;
+    let mut drain = s.drain();
+    loop {
+        match drain.next() {
+            Some(v) => val = v,
+            None => break,
+        }
+    }
+    assert_eq(val, 42);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_drain_then_insert() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    let mut drain = s.drain();
+    loop {
+        match drain.next() {
+            Some(_) => {}
+            None => break,
+        }
+    }
+    assert(s.is_empty());
+    // Reuse after drain
+    s.insert(10);
+    s.insert(20);
+    assert_eq(s.len(), 2);
+    assert(s.contains(&10));
+}
+
+@test
+fn test_set_drain_sum() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    let mut sum = 0;
+    let mut drain = s.drain();
+    loop {
+        match drain.next() {
+            Some(v) => sum = sum + v,
+            None => break,
+        }
+    }
+    assert_eq(sum, 60);
+}
+
+// =============================================================================
+// Section: Take — Extended Tests
+// =============================================================================
+
+@test
+fn test_set_take_all_elements() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    assert_eq(s.take(&1).unwrap(), 1);
+    assert_eq(s.take(&2).unwrap(), 2);
+    assert_eq(s.take(&3).unwrap(), 3);
+    assert(s.is_empty());
+}
+
+@test
+fn test_set_take_nonexistent() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    assert(s.take(&99).is_none());
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_take_text() {
+    let mut s: Set<Text> = Set.new();
+    s.insert("hello");
+    s.insert("world");
+    assert_eq(s.take(&"hello").unwrap(), "hello");
+    assert_eq(s.len(), 1);
+    assert(!s.contains(&"hello"));
+    assert(s.contains(&"world"));
+}
+
+// =============================================================================
+// Section: Get — Extended Tests
+// =============================================================================
+
+@test
+fn test_set_get_text() {
+    let mut s: Set<Text> = Set.new();
+    s.insert("test");
+    match s.get(&"test") {
+        Some(v) => assert_eq(*v, "test"),
+        None => panic("Expected Some"),
+    }
+}
+
+@test
+fn test_set_get_after_remove() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(42);
+    s.remove(&42);
+    assert(s.get(&42).is_none());
+}
+
+@test
+fn test_set_get_empty() {
+    let s: Set<Int> = Set.new();
+    assert(s.get(&1).is_none());
+}
+
+// =============================================================================
+// Section: Replace — Extended Tests
+// =============================================================================
+
+@test
+fn test_set_replace_text() {
+    let mut s: Set<Text> = Set.new();
+    s.insert("hello");
+    let old = s.replace("hello");
+    assert_eq(old.unwrap(), "hello");
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_replace_nonexistent_inserts() {
+    let mut s: Set<Int> = Set.new();
+    let old = s.replace(42);
+    assert(old.is_none());
+    assert_eq(s.len(), 1);
+    assert(s.contains(&42));
+}
+
+// =============================================================================
+// Section: In-Place Modifications — Extended
+// =============================================================================
+
+@test
+fn test_set_extend_from_set_overlapping() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+    a.extend_from_set(&b);
+    assert_eq(a.len(), 4);
+    assert(a.contains(&1));
+    assert(a.contains(&4));
+}
+
+@test
+fn test_set_extend_from_empty() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    let empty: Set<Int> = Set.new();
+    a.extend_from_set(&empty);
+    assert_eq(a.len(), 1);
+}
+
+@test
+fn test_set_extend_empty_from_set() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    b.insert(1);
+    b.insert(2);
+    a.extend_from_set(&b);
+    assert_eq(a.len(), 2);
+    assert(a.contains(&1));
+    assert(a.contains(&2));
+}
+
+@test
+fn test_set_retain_from_set_disjoint() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    b.insert(3);
+    b.insert(4);
+    a.retain_from_set(&b);
+    assert(a.is_empty());
+}
+
+@test
+fn test_set_retain_from_set_all() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+    a.retain_from_set(&b);
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_set_remove_from_set_all() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    b.insert(1);
+    b.insert(2);
+    a.remove_from_set(&b);
+    assert(a.is_empty());
+}
+
+@test
+fn test_set_remove_from_set_none() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    b.insert(3);
+    b.insert(4);
+    a.remove_from_set(&b);
+    assert_eq(a.len(), 2);
+}
+
+@test
+fn test_set_remove_from_empty() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    let empty: Set<Int> = Set.new();
+    a.remove_from_set(&empty);
+    assert_eq(a.len(), 1);
+}
+
+// =============================================================================
+// Section: Set Algebra — Self Operations
+// =============================================================================
+
+@test
+fn test_set_union_with_self() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    let u = s.union(&s);
+    assert_eq(u.len(), 3);
+}
+
+@test
+fn test_set_intersection_with_self() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    let inter = s.intersection(&s);
+    assert_eq(inter.len(), 3);
+}
+
+@test
+fn test_set_difference_with_self() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    let diff = s.difference(&s);
+    assert(diff.is_empty());
+}
+
+@test
+fn test_set_symmetric_difference_with_self() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    let sym = s.symmetric_difference(&s);
+    assert(sym.is_empty());
+}
+
+// =============================================================================
+// Section: Set Algebra — Empty Set Identity
+// =============================================================================
+
+@test
+fn test_set_union_identity() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    let empty: Set<Int> = Set.new();
+    let u1 = s.union(&empty);
+    let u2 = empty.union(&s);
+    assert_eq(u1.len(), 2);
+    assert_eq(u2.len(), 2);
+}
+
+@test
+fn test_set_intersection_with_empty() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    let empty: Set<Int> = Set.new();
+    let inter1 = s.intersection(&empty);
+    let inter2 = empty.intersection(&s);
+    assert(inter1.is_empty());
+    assert(inter2.is_empty());
+}
+
+@test
+fn test_set_difference_from_empty() {
+    let empty: Set<Int> = Set.new();
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    let diff = empty.difference(&s);
+    assert(diff.is_empty());
+}
+
+// =============================================================================
+// Section: Subset/Superset — Extended
+// =============================================================================
+
+@test
+fn test_set_empty_subset_of_all() {
+    let empty: Set<Int> = Set.new();
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    assert(empty.is_subset(&s));
+    assert(empty.is_subset(&empty));
+}
+
+@test
+fn test_set_equal_sets_subset() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    b.insert(1);
+    b.insert(2);
+    assert(a.is_subset(&b));
+    assert(b.is_subset(&a));
+    assert(a.is_superset(&b));
+    assert(b.is_superset(&a));
+}
+
+@test
+fn test_set_not_subset_when_extra_element() {
+    let mut a: Set<Int> = Set.new();
+    a.insert(1);
+    a.insert(2);
+    a.insert(99);
+    let mut b: Set<Int> = Set.new();
+    b.insert(1);
+    b.insert(2);
+    b.insert(3);
+    assert(!a.is_subset(&b)); // a has 99, which is not in b
+}
+
+// =============================================================================
+// Section: Iterator — Extended
+// =============================================================================
+
+@test
+fn test_set_iter_empty() {
+    let s: Set<Int> = Set.new();
+    let mut count = 0;
+    let mut iter = s.iter();
+    loop {
+        match iter.next() {
+            Some(_) => count = count + 1,
+            None => break,
+        }
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_set_iter_single() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(42);
+    let mut count = 0;
+    let mut val = 0;
+    let mut iter = s.iter();
+    loop {
+        match iter.next() {
+            Some(v) => {
+                count = count + 1;
+                val = *v;
+            }
+            None => break,
+        }
+    }
+    assert_eq(count, 1);
+    assert_eq(val, 42);
+}
+
+@test
+fn test_set_iter_large() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..50 {
+        s.insert(i);
+    }
+    let mut count = 0;
+    let mut iter = s.iter();
+    loop {
+        match iter.next() {
+            Some(_) => count = count + 1,
+            None => break,
+        }
+    }
+    assert_eq(count, 50);
+}
+
+// =============================================================================
+// Section: Capacity — Extended
+// =============================================================================
+
+@test
+fn test_set_capacity_grows() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..100 {
+        s.insert(i);
+    }
+    assert(s.capacity() >= 100);
+}
+
+@test
+fn test_set_reserve_then_insert() {
+    let mut s: Set<Int> = Set.new();
+    s.reserve(200);
+    for i in 0..100 {
+        s.insert(i);
+    }
+    assert_eq(s.len(), 100);
+    assert(s.capacity() >= 200);
+}
+
+@test
+fn test_set_shrink_after_remove() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..100 {
+        s.insert(i);
+    }
+    for i in 0..90 {
+        s.remove(&i);
+    }
+    s.shrink_to_fit();
+    assert_eq(s.len(), 10);
+    for i in 90..100 {
+        assert(s.contains(&i));
+    }
+}
+
+@test
+fn test_set_shrink_to_min() {
+    let mut s: Set<Int> = Set.with_capacity(100);
+    s.insert(1);
+    s.insert(2);
+    s.shrink_to(5);
+    assert_eq(s.len(), 2);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+}
+
+// =============================================================================
+// Section: Stress Tests — Extended
+// =============================================================================
+
+@test
+fn test_set_insert_200() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..200 {
+        s.insert(i);
+    }
+    assert_eq(s.len(), 200);
+    assert(s.contains(&0));
+    assert(s.contains(&100));
+    assert(s.contains(&199));
+}
+
+@test
+fn test_set_insert_remove_cycle() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..50 {
+        s.insert(i);
+    }
+    for i in 0..25 {
+        s.remove(&i);
+    }
+    assert_eq(s.len(), 25);
+    for i in 25..50 {
+        assert(s.contains(&i));
+    }
+    for i in 0..25 {
+        assert(!s.contains(&i));
+    }
+}
+
+@test
+fn test_set_clear_and_reuse() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..20 {
+        s.insert(i);
+    }
+    s.clear();
+    assert(s.is_empty());
+    for i in 100..110 {
+        s.insert(i);
+    }
+    assert_eq(s.len(), 10);
+    assert(s.contains(&100));
+    assert(!s.contains(&0));
+}
+
+@test
+fn test_set_repeated_clear_insert() {
+    let mut s: Set<Int> = Set.new();
+    for round in 0..5 {
+        for i in 0..10 {
+            s.insert(round * 10 + i);
+        }
+        s.clear();
+        assert(s.is_empty());
+    }
+}
+
+@test
+fn test_set_alternating_operations() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    assert(s.contains(&1));
+    s.remove(&1);
+    assert(!s.contains(&1));
+    s.insert(1);
+    assert(s.contains(&1));
+    s.insert(2);
+    s.remove(&1);
+    assert(!s.contains(&1));
+    assert(s.contains(&2));
+}
+
+// =============================================================================
+// Section: Negative/Zero Values
+// =============================================================================
+
+@test
+fn test_set_negative_values() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(-1);
+    s.insert(-2);
+    s.insert(-3);
+    assert_eq(s.len(), 3);
+    assert(s.contains(&-1));
+    assert(s.contains(&-2));
+    assert(s.contains(&-3));
+}
+
+@test
+fn test_set_zero_value() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(0);
+    assert(s.contains(&0));
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_mixed_positive_negative() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(-5);
+    s.insert(0);
+    s.insert(5);
+    assert_eq(s.len(), 3);
+    assert(s.contains(&-5));
+    assert(s.contains(&0));
+    assert(s.contains(&5));
+}
+
+// =============================================================================
+// Section: Bool Set Tests
+// =============================================================================
+
+@test
+fn test_set_bool() {
+    let mut s: Set<Bool> = Set.new();
+    s.insert(true);
+    s.insert(false);
+    assert_eq(s.len(), 2);
+    assert(s.contains(&true));
+    assert(s.contains(&false));
+    s.insert(true); // Duplicate
+    assert_eq(s.len(), 2);
+}
+
+// =============================================================================
+// Section: Convenience Function — Extended
+// =============================================================================
+
+@test
+fn test_set_convenience_large() {
+    let s = set(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert_eq(s.len(), 10);
+    for i in 1..11 {
+        assert(s.contains(&i));
+    }
+}
+
+@test
+fn test_set_convenience_single() {
+    let s = set(&[42]);
+    assert_eq(s.len(), 1);
+    assert(s.contains(&42));
+}
+
+@test
+fn test_set_convenience_all_duplicates() {
+    let s = set(&[5, 5, 5, 5]);
+    assert_eq(s.len(), 1);
+    assert(s.contains(&5));
+}
+
+// =============================================================================
+// Section: Set Algebra — Large Sets
+// =============================================================================
+
+@test
+fn test_set_union_large() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    for i in 0..50 {
+        a.insert(i);
+    }
+    for i in 25..75 {
+        b.insert(i);
+    }
+    let u = a.union(&b);
+    assert_eq(u.len(), 75); // 0..75
+}
+
+@test
+fn test_set_intersection_large() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    for i in 0..50 {
+        a.insert(i);
+    }
+    for i in 25..75 {
+        b.insert(i);
+    }
+    let inter = a.intersection(&b);
+    assert_eq(inter.len(), 25); // 25..50
+}
+
+@test
+fn test_set_difference_large() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    for i in 0..50 {
+        a.insert(i);
+    }
+    for i in 25..75 {
+        b.insert(i);
+    }
+    let diff = a.difference(&b);
+    assert_eq(diff.len(), 25); // 0..25
+}
+
+@test
+fn test_set_symmetric_difference_large() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    for i in 0..50 {
+        a.insert(i);
+    }
+    for i in 25..75 {
+        b.insert(i);
+    }
+    let sym = a.symmetric_difference(&b);
+    assert_eq(sym.len(), 50); // 0..25 + 50..75
+}
+
+// =============================================================================
+// Section: Combined Workflow Patterns
+// =============================================================================
+
+@test
+fn test_set_build_union_check_membership() {
+    let mut evens: Set<Int> = Set.new();
+    let mut odds: Set<Int> = Set.new();
+    for i in 0..20 {
+        if i % 2 == 0 {
+            evens.insert(i);
+        } else {
+            odds.insert(i);
+        }
+    }
+    let all = evens.union(&odds);
+    assert_eq(all.len(), 20);
+    for i in 0..20 {
+        assert(all.contains(&i));
+    }
+}
+
+@test
+fn test_set_build_difference_verify() {
+    let mut all: Set<Int> = Set.new();
+    let mut remove_set: Set<Int> = Set.new();
+    for i in 0..20 {
+        all.insert(i);
+    }
+    for i in 5..15 {
+        remove_set.insert(i);
+    }
+    let remaining = all.difference(&remove_set);
+    assert_eq(remaining.len(), 10);
+    for i in 0..5 {
+        assert(remaining.contains(&i));
+    }
+    for i in 15..20 {
+        assert(remaining.contains(&i));
+    }
+}
+
+@test
+fn test_set_retain_then_union() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    for i in 0..10 {
+        a.insert(i);
+        b.insert(i + 5);
+    }
+    a.retain(|x| *x < 5);
+    let u = a.union(&b);
+    assert_eq(a.len(), 5); // 0..5
+    assert_eq(u.len(), 15); // 0..5 + 5..15
+}
+
+@test
+fn test_set_extend_then_retain() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(1);
+    s.insert(2);
+    let mut more: Set<Int> = Set.new();
+    more.insert(3);
+    more.insert(4);
+    more.insert(5);
+    s.extend_from_set(&more);
+    assert_eq(s.len(), 5);
+    s.retain(|x| *x > 2);
+    assert_eq(s.len(), 3);
+    assert(s.contains(&3));
+    assert(s.contains(&4));
+    assert(s.contains(&5));
+}
+
+@test
+fn test_set_remove_from_set_then_check() {
+    let mut s: Set<Int> = Set.new();
+    for i in 0..10 {
+        s.insert(i);
+    }
+    let mut to_remove: Set<Int> = Set.new();
+    to_remove.insert(0);
+    to_remove.insert(5);
+    to_remove.insert(9);
+    s.remove_from_set(&to_remove);
+    assert_eq(s.len(), 7);
+    assert(!s.contains(&0));
+    assert(!s.contains(&5));
+    assert(!s.contains(&9));
+    assert(s.contains(&1));
+    assert(s.contains(&8));
+}
+
+// =============================================================================
+// Section: Len/is_empty Tracking
+// =============================================================================
+
+@test
+fn test_set_len_tracking() {
+    let mut s: Set<Int> = Set.new();
+    assert_eq(s.len(), 0);
+    s.insert(1);
+    assert_eq(s.len(), 1);
+    s.insert(2);
+    assert_eq(s.len(), 2);
+    s.insert(2); // Duplicate
+    assert_eq(s.len(), 2);
+    s.remove(&1);
+    assert_eq(s.len(), 1);
+    s.remove(&2);
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_set_is_empty_transitions() {
+    let mut s: Set<Int> = Set.new();
+    assert(s.is_empty());
+    s.insert(1);
+    assert(!s.is_empty());
+    s.remove(&1);
+    assert(s.is_empty());
+}
+
+fn main() {
+    // Tests run via @test annotations
+}

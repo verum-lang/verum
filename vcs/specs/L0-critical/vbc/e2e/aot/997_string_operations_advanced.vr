@@ -1,0 +1,122 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: text, string, interpolation, methods
+// @description: Advanced string operations and f-string edge cases
+
+fn repeat_str(s: Text, n: Int) -> Text {
+    let mut result = "";
+    let mut i = 0;
+    while (i < n) {
+        result = f"{result}{s}";
+        i = i + 1;
+    }
+    result
+}
+
+fn join_with(items: List<Int>, sep: Text) -> Text {
+    let len = items.len();
+    let mut result = "";
+    let mut i = 0;
+    while (i < len) {
+        if (i > 0) {
+            result = f"{result}{sep}{items[i]}";
+        } else {
+            result = f"{items[i]}";
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Test 1: basic f-string with expressions
+    let x = 10;
+    let y = 20;
+    let s1 = f"{x} + {y} = {x + y}";
+    if (s1 != "10 + 20 = 30") {
+        print(f"FAIL test1: got '{s1}'");
+        return 1;
+    }
+
+    // Test 2: f-string with function calls
+    let nums = [1, 2, 3, 4, 5];
+    let s2 = f"len={nums.len()}";
+    if (s2 != "len=5") {
+        print(f"FAIL test2: got '{s2}'");
+        return 1;
+    }
+
+    // Test 3: repeat_str
+    let s3 = repeat_str("ab", 3);
+    if (s3 != "ababab") {
+        print(f"FAIL test3: got '{s3}'");
+        return 1;
+    }
+
+    // Test 4: join with separator
+    let items = [1, 2, 3, 4, 5];
+    let s4 = join_with(items, ", ");
+    if (s4 != "1, 2, 3, 4, 5") {
+        print(f"FAIL test4: got '{s4}'");
+        return 1;
+    }
+
+    // Test 5: string comparison
+    let a = "hello";
+    let b = "hello";
+    let c = "world";
+    if (a != b) {
+        print("FAIL test5a");
+        return 1;
+    }
+    if (a == c) {
+        print("FAIL test5b");
+        return 1;
+    }
+
+    // Test 6: f-string with boolean expression (booleans render as 1/0 in AOT)
+    let flag = true;
+    let s6 = f"flag={flag}";
+    if (s6 != "flag=1" && s6 != "flag=true") {
+        print(f"FAIL test6: got '{s6}'");
+        return 1;
+    }
+
+    // Test 7: multi-line content via \n
+    let multiline = "line1\nline2\nline3";
+    let lines_count = 1; // count newlines would need string iteration
+    // Just verify it contains newline
+    if (multiline == "line1line2line3") {
+        print("FAIL test7: newlines stripped");
+        return 1;
+    }
+
+    // Test 8: empty string operations
+    let empty = "";
+    let s8 = f"[{empty}]";
+    if (s8 != "[]") {
+        print(f"FAIL test8: got '{s8}'");
+        return 1;
+    }
+
+    // Test 9: f-string with negative numbers
+    let neg = -42;
+    let s9 = f"value={neg}";
+    if (s9 != "value=-42") {
+        print(f"FAIL test9: got '{s9}'");
+        return 1;
+    }
+
+    // Test 10: concatenation via f-strings
+    let first = "Hello";
+    let second = "World";
+    let s10 = f"{first}, {second}!";
+    if (s10 != "Hello, World!") {
+        print(f"FAIL test10: got '{s10}'");
+        return 1;
+    }
+
+    print("997_string_operations_advanced: PASS");
+    0
+}

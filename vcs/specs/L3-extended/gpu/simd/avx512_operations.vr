@@ -1,0 +1,373 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU/SIMD/tensor parser support now implemented
+// @tags: simd, avx512, intrinsics, x86
+
+/// AVX-512 SIMD operations including 512-bit vectors, mask registers,
+/// and advanced instructions for maximum throughput computation.
+
+mount std.simd.avx512.*;
+
+fn main() {
+    if !cpu_has_feature(CpuFeature.AVX512F) {
+        return;  // Skip on non-AVX-512 systems
+    }
+
+    test_basic_512();
+    test_mask_operations();
+    test_gather_scatter();
+    test_permute();
+    test_ternary_logic();
+    test_conflict_detection();
+    test_compress_expand();
+}
+
+fn test_basic_512() {
+    // 16x f32 operations
+    let a: f32x16 = f32x16.splat(1.0);
+    let b: f32x16 = f32x16.from_array([
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+        9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0
+    ]);
+
+    let sum = a + b;
+    let prod = a * b;
+    let diff = b - a;
+
+    // FMA: a * b + c
+    let c: f32x16 = f32x16.splat(10.0);
+    let fma = a.mul_add(b, c);
+
+    // Horizontal reductions
+    let total = b.reduce_sum();  // 1+2+...+16 = 136
+    assert((total - 136.0).abs() < 1e-4);
+
+    let max_val = b.reduce_max();  // 16
+    assert(max_val == 16.0);
+
+    let min_val = b.reduce_min();  // 1
+    assert(min_val == 1.0);
+
+    // 8x f64 operations
+    let da: f64x8 = f64x8.splat(1.0);
+    let db: f64x8 = f64x8.from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+
+    let dsum = da + db;
+    let dprod = da * db;
+
+    // 16x i32 operations
+    let ia: i32x16 = i32x16.splat(1);
+    let ib: i32x16 = i32x16.from_array([
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
+    ]);
+
+    let isum = ia + ib;
+    let iprod = ia * ib;
+
+    // 64x i8 operations (for int8 inference)
+    let bytes: i8x64 = i8x64.splat(1);
+}
+
+fn test_mask_operations() {
+    // AVX-512 uses dedicated mask registers (k0-k7)
+    let a: f32x16 = f32x16.from_array([
+        1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0,
+        9.0, -10.0, 11.0, -12.0, 13.0, -14.0, 15.0, -16.0
+    ]);
+
+    // Comparison produces 16-bit mask
+    let positive: mask16 = a.simd_gt(f32x16.splat(0.0));
+
+    // Count set bits
+    let count = positive.count_ones();  // 8 positive values
+    assert(count == 8);
+
+    // Use mask for blending
+    let zeros: f32x16 = f32x16.splat(0.0);
+    let clamped = positive.select(a, zeros);  // Keep only positive
+
+    // Mask to bitmask
+    let bits: u16 = positive.to_bitmask();
+    // bits = 0b0101_0101_0101_0101 (alternating positive)
+
+    // Bitmask to mask
+    let from_bits: mask16 = mask16.from_bitmask(0xFF00);
+
+    // Mask operations
+    let m1: mask16 = mask16.from_bitmask(0xF0F0);
+    let m2: mask16 = mask16.from_bitmask(0x0F0F);
+
+    let m_and = m1 & m2;
+    let m_or = m1 | m2;
+    let m_xor = m1 ^ m2;
+    let m_not = !m1;
+
+    // Masked load
+    let data: [f32; 16] = [1.0; 16];
+    let loaded = f32x16.load_masked(&data[0], positive, f32x16.splat(-1.0));
+    // Loads where mask is true, else uses default
+
+    // Masked store
+    let mut output: [f32; 16] = [0.0; 16];
+    a.store_masked(&mut output[0], positive);
+    // Stores only where mask is true
+
+    // Zero-masked operations
+    let zero_masked = a.and_mask(positive);  // Zero where mask is false
+}
+
+fn test_gather_scatter() {
+    // Gather from non-contiguous memory locations
+    let table: [f32; 32] = [
+        0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0,
+        8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
+        16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0,
+        24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0
+    ];
+
+    let indices: i32x16 = i32x16.from_array([
+        0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30
+    ]);
+
+    // Gather even-indexed elements
+    let gathered: f32x16 = f32x16.gather(&table[0], indices, scale: 4);
+    // Result: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30]
+
+    // Masked gather
+    let mask: mask16 = mask16.from_bitmask(0xFF00);  // Upper 8 only
+    let default: f32x16 = f32x16.splat(-1.0);
+    let masked_gather = f32x16.gather_masked(&table[0], indices, scale: 4, mask, default);
+    // Upper 8 gathered, lower 8 are -1.0
+
+    // Scatter to non-contiguous memory locations
+    let mut output: [f32; 32] = [0.0; 32];
+    let values: f32x16 = f32x16.from_array([
+        100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0,
+        108.0, 109.0, 110.0, 111.0, 112.0, 113.0, 114.0, 115.0
+    ]);
+
+    values.scatter(&mut output[0], indices, scale: 4);
+    // output[0] = 100, output[2] = 101, etc.
+
+    // Masked scatter
+    values.scatter_masked(&mut output[0], indices, scale: 4, mask);
+    // Only upper 8 values scattered
+}
+
+fn test_permute() {
+    let a: f32x16 = f32x16.from_array([
+        0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0,
+        8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0
+    ]);
+
+    // Full permute using indices
+    let perm_indices: i32x16 = i32x16.from_array([
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+    ]);
+    let reversed = a.permutexvar(perm_indices);
+
+    // Cross-lane permute (different from 128-bit lanes)
+    let shuffled = a.permute_f32x4.<0b01_00_11_10>();  // Permute 4x128-bit lanes
+
+    // Shuffle within lanes
+    let in_lane = a.shuffle_f32.<0b11_10_01_00>();  // Within each 128-bit lane
+
+    // Two-source permute
+    let b: f32x16 = f32x16.from_array([
+        16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0,
+        24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0
+    ]);
+
+    let perm2_indices: i32x16 = i32x16.from_array([
+        0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23
+    ]);
+    let interleaved = a.permutex2var(b, perm2_indices);
+
+    // Broadcast
+    let broadcast = f32x16.broadcast_ss(&a[0]);
+}
+
+fn test_ternary_logic() {
+    // AVX-512 ternary logic: 256 possible 3-input boolean functions
+    let a: i32x16 = i32x16.splat(0xFF00FF00_u32 as i32);
+    let b: i32x16 = i32x16.splat(0xF0F0F0F0_u32 as i32);
+    let c: i32x16 = i32x16.splat(0xCCCCCCCC_u32 as i32);
+
+    // Ternary logic with immediate selector
+    // imm8 encodes the truth table
+
+    // Common operations encoded as ternary:
+    // AND: a & b & c -> 0x80
+    let and_result = a.ternarylogic.<0x80>(b, c);
+
+    // OR: a | b | c -> 0xFE
+    let or_result = a.ternarylogic.<0xFE>(b, c);
+
+    // XOR: a ^ b ^ c -> 0x96
+    let xor_result = a.ternarylogic.<0x96>(b, c);
+
+    // (a & b) | (~a & c) -> blend/select -> 0xCA
+    let select_result = a.ternarylogic.<0xCA>(b, c);
+
+    // Majority: (a & b) | (b & c) | (a & c) -> 0xE8
+    let majority = a.ternarylogic.<0xE8>(b, c);
+}
+
+fn test_conflict_detection() {
+    // Detect conflicts in indices for histogram/scatter
+    let indices: i32x16 = i32x16.from_array([
+        0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+    ]);
+
+    // Returns mask of conflicting elements
+    let conflicts: i32x16 = indices.vpconflictd();
+    // conflicts[4] has bit 0 set (conflicts with lane 0)
+    // conflicts[5] has bit 1 set (conflicts with lane 1)
+    // etc.
+
+    // Use conflicts for serializing histogram updates
+    @kernel
+    fn histogram_avx512(data: &[u8], bins: &mut [u32]) {
+        let chunk = data[..16];  // Process 16 elements at a time
+
+        // Load indices
+        let indices = i32x16.gather_from_bytes(chunk);
+
+        // Detect conflicts
+        let conflicts = indices.vpconflictd();
+
+        // Process lanes without conflicts first
+        let mut processed = mask16.from_bitmask(0);
+
+        while !processed.all() {
+            // Find lanes without conflicts with already processed
+            let safe_mask = !processed & (conflicts == i32x16.splat(0));
+
+            // Atomic scatter-add for safe lanes
+            // bins.scatter_add(values, indices, safe_mask);
+
+            processed = processed | safe_mask;
+        }
+    }
+}
+
+fn test_compress_expand() {
+    // Compress: pack selected elements to beginning
+    let a: f32x16 = f32x16.from_array([
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+        9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0
+    ]);
+
+    let mask: mask16 = mask16.from_bitmask(0b1010_1010_1010_1010);
+    // Select every other element starting from 1
+
+    let compressed = a.compress(mask);
+    // Result: [2, 4, 6, 8, 10, 12, 14, 16, ?, ?, ?, ?, ?, ?, ?, ?]
+    // First 8 elements are the selected values, rest undefined
+
+    // Store compressed values
+    let mut output: [f32; 8] = [0.0; 8];
+    a.compressstoreu(&mut output[0], mask);
+    // Only stores 8 values (popcount of mask)
+
+    // Expand: unpack from beginning to masked positions
+    let packed: f32x16 = f32x16.from_array([
+        100.0, 200.0, 300.0, 400.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    ]);
+
+    let expand_mask: mask16 = mask16.from_bitmask(0b0000_0000_0000_1111);
+    let destination: f32x16 = f32x16.splat(-1.0);
+
+    let expanded = packed.expand(expand_mask, destination);
+    // Result: [100, 200, 300, 400, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
+
+    // Load expanded from memory
+    let src: [f32; 8] = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
+    let loaded = f32x16.expandloadu(&src[0], mask, f32x16.splat(0.0));
+}
+
+// AVX-512 type definitions
+type f32x16 is { data: [f32; 16] };
+type f64x8 is { data: [f64; 8] };
+type i32x16 is { data: [i32; 16] };
+type i8x64 is { data: [i8; 64] };
+type mask16 is { bits: u16 };
+
+implement f32x16 {
+    fn splat(v: f32) -> Self { Self { data: [v; 16] } }
+    fn from_array(arr: [f32; 16]) -> Self { Self { data: arr } }
+    fn reduce_sum(&self) -> f32 { self.data.iter().sum() }
+    fn reduce_max(&self) -> f32 { self.data.iter().copied().fold(f32.NEG_INFINITY, f32.max) }
+    fn reduce_min(&self) -> f32 { self.data.iter().copied().fold(f32.INFINITY, f32.min) }
+    fn simd_gt(&self, other: Self) -> mask16 { unreachable() }
+    fn mul_add(&self, b: Self, c: Self) -> Self { unreachable() }
+    fn gather(base: *const f32, idx: i32x16, scale: usize) -> Self { unreachable() }
+    fn gather_masked(base: *const f32, idx: i32x16, scale: usize, mask: mask16, default: Self) -> Self { unreachable() }
+    fn scatter(&self, base: *mut f32, idx: i32x16, scale: usize) { unreachable() }
+    fn scatter_masked(&self, base: *mut f32, idx: i32x16, scale: usize, mask: mask16) { unreachable() }
+    fn load_masked(ptr: *const f32, mask: mask16, default: Self) -> Self { unreachable() }
+    fn store_masked(&self, ptr: *mut f32, mask: mask16) { unreachable() }
+    fn and_mask(&self, mask: mask16) -> Self { unreachable() }
+    fn permutexvar(&self, idx: i32x16) -> Self { unreachable() }
+    fn permute_f32x4<const IMM: u8>(&self) -> Self { unreachable() }
+    fn shuffle_f32<const IMM: u8>(&self) -> Self { unreachable() }
+    fn permutex2var(&self, b: Self, idx: i32x16) -> Self { unreachable() }
+    fn broadcast_ss(v: *const f32) -> Self { unreachable() }
+    fn compress(&self, mask: mask16) -> Self { unreachable() }
+    fn compressstoreu(&self, ptr: *mut f32, mask: mask16) { unreachable() }
+    fn expand(&self, mask: mask16, src: Self) -> Self { unreachable() }
+    fn expandloadu(ptr: *const f32, mask: mask16, src: Self) -> Self { unreachable() }
+}
+
+implement i32x16 {
+    fn splat(v: i32) -> Self { Self { data: [v; 16] } }
+    fn from_array(arr: [i32; 16]) -> Self { Self { data: arr } }
+    fn ternarylogic<const IMM: u8>(&self, b: Self, c: Self) -> Self { unreachable() }
+    fn vpconflictd(&self) -> Self { unreachable() }
+    fn gather_from_bytes(data: &[u8]) -> Self { unreachable() }
+}
+
+implement mask16 {
+    fn from_bitmask(bits: u16) -> Self { Self { bits } }
+    fn to_bitmask(&self) -> u16 { self.bits }
+    fn count_ones(&self) -> u32 { self.bits.count_ones() }
+    fn all(&self) -> bool { self.bits == 0xFFFF }
+    fn select(&self, a: f32x16, b: f32x16) -> f32x16 { unreachable() }
+}
+
+implement BitAnd for mask16 {
+    type Output is Self;
+    fn bitand(self, rhs: Self) -> Self { Self { bits: self.bits & rhs.bits } }
+}
+
+implement BitOr for mask16 {
+    type Output is Self;
+    fn bitor(self, rhs: Self) -> Self { Self { bits: self.bits | rhs.bits } }
+}
+
+implement BitXor for mask16 {
+    type Output is Self;
+    fn bitxor(self, rhs: Self) -> Self { Self { bits: self.bits ^ rhs.bits } }
+}
+
+implement Not for mask16 {
+    type Output is Self;
+    fn not(self) -> Self { Self { bits: !self.bits } }
+}
+
+implement Add for f32x16 {
+    type Output is Self;
+    fn add(self, rhs: Self) -> Self { unreachable() }
+}
+
+implement Mul for f32x16 {
+    type Output is Self;
+    fn mul(self, rhs: Self) -> Self { unreachable() }
+}
+
+implement Sub for f32x16 {
+    type Output is Self;
+    fn sub(self, rhs: Self) -> Self { unreachable() }
+}

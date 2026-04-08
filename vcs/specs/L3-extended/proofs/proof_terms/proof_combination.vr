@@ -1,0 +1,92 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, proof-terms, combination
+// @timeout: 15000
+
+/// Proof combination: combining multiple proofs
+
+/// Conjunction combination
+theorem and_combine<P: Prop, Q: Prop>()
+    requires P
+    requires Q
+    ensures P && Q
+{
+    proof by auto
+}
+
+/// Disjunction from left
+theorem or_intro_left<P: Prop, Q: Prop>()
+    requires P
+    ensures P || Q
+{
+    proof by auto
+}
+
+/// Disjunction from right
+theorem or_intro_right<P: Prop, Q: Prop>()
+    requires Q
+    ensures P || Q
+{
+    proof by auto
+}
+
+/// Modus ponens combination
+theorem modus_ponens<P: Prop, Q: Prop>()
+    requires P
+    requires P -> Q
+    ensures Q
+{
+    proof by auto
+}
+
+/// Transitivity combination
+theorem transitivity_proof(a: Int, b: Int, c: Int)
+    requires a == b
+    requires b == c
+    ensures a == c
+{
+    proof by auto
+}
+
+/// Chain of inequalities
+theorem inequality_chain(a: Int, b: Int, c: Int, d: Int)
+    requires a < b
+    requires b <= c
+    requires c < d
+    ensures a < d
+{
+    proof by omega
+}
+
+/// Combining arithmetic facts
+theorem arith_combination(x: Int, y: Int)
+    requires x > 0
+    requires y > 0
+    ensures x + y > 0 && x * y > 0
+{
+    proof by smt
+}
+
+/// Proof by forward chaining
+theorem forward_chain(n: Nat)
+    requires n >= 10
+    ensures n >= 5 && n >= 1 && n >= 0
+{
+    proof by omega
+}
+
+/// Combining induction results
+theorem combined_induction(n: Nat): n + 0 == n && 0 + n == n {
+    proof by auto
+}
+
+/// Weakening and strengthening
+theorem weaken(x: Int)
+    requires x > 5
+    ensures x > 0
+{
+    proof by omega
+}
+
+fn main() {}

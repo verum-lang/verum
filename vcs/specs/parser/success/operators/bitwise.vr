@@ -1,0 +1,36 @@
+// @test: parse
+// @level: L0
+// @tags: parser, operators, bitwise
+// @description: Test bitwise operator parsing
+
+fn test_bitwise_operators() {
+    let a = 0xFF & 0x0F;
+    let b = 0xF0 | 0x0F;
+    let c = 0xFF ^ 0x0F;
+    let d = ~0xFF;
+
+    // Shift operators
+    let e = 1 << 4;
+    let f = 16 >> 2;
+    let g = x << 8;
+    let h = y >> 4;
+
+    // Chained
+    let i = a & b & c;
+    let j = a | b | c;
+    let k = a ^ b ^ c;
+    let l = x << 2 << 1;
+    let m = y >> 1 >> 2;
+
+    // Mixed
+    let n = (a & b) | c;
+    let o = a & (b | c);
+    let p = ~a & b;
+    let q = a | ~b;
+    let r = (a ^ b) & ~c;
+
+    // With arithmetic
+    let s = (x + 1) << 2;
+    let t = x & 0xFF + 1;
+    let u = (a | b) * 2;
+}

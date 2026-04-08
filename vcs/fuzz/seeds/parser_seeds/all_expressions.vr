@@ -1,0 +1,374 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: parser, expressions, comprehensive
+// @timeout: 5000
+// @expect: pass
+
+// =============================================================================
+// All Expressions - Parser Expression Test Seed
+// Tests all expression forms for correct parsing
+// =============================================================================
+
+fn literal_expressions() {
+    // Integer literals
+    let int1 = 0;
+    let int2 = 42;
+    let int3 = 0xFF;
+    let int4 = 0o77;
+    let int5 = 0b1010;
+
+    // Float literals
+    let f1 = 0.0;
+    let f2 = 3.14;
+    let f3 = 1e10;
+
+    // String literals
+    let s1 = "hello";
+    let s2 = """multiline""";
+    let s3 = r#"raw"#;
+
+    // Char literals
+    let c1 = 'a';
+    let c2 = '\n';
+
+    // Boolean literals
+    let b1 = true;
+    let b2 = false;
+
+    // Semantic literals
+    let sql = sql#"SELECT *"#;
+    let rx = rx#"\d+"#;
+}
+
+fn path_expressions() {
+    let simple = value;
+    let qualified = module.value;
+    let deep = a.b.c.d.e;
+    let self_ref = self.field;
+    let super_ref = super.value;
+    let crate_ref = crate.module.item;
+}
+
+fn tuple_expressions() {
+    let unit = ();
+    let single = (1,);
+    let pair = (1, 2);
+    let triple = (1, "two", 3.0);
+    let nested = ((1, 2), (3, 4));
+    let trailing = (1, 2, 3,);
+}
+
+fn array_expressions() {
+    let empty: [Int; 0] = [];
+    let single = [1];
+    let multi = [1, 2, 3, 4, 5];
+    let repeated = [0; 100];
+    let nested = [[1, 2], [3, 4]];
+    let trailing = [1, 2, 3,];
+}
+
+fn map_expressions() {
+    let empty_map: Map<Int, Int> = {};
+    let simple_map = { "key": "value" };
+    let multi_map = {
+        "a": 1,
+        "b": 2,
+        "c": 3,
+    };
+    let computed_key = { (key_expr): value_expr };
+}
+
+fn set_expressions() {
+    let empty_set: Set<Int> = {};
+    let simple_set = { 1, 2, 3 };
+    let trailing_set = { 1, 2, 3, };
+}
+
+fn record_expressions() {
+    let simple = Point { x: 1, y: 2 };
+    let shorthand = Point { x, y };
+    let spread = Point { x: 10, ..other };
+    let nested = Outer { inner: Inner { value: 42 } };
+    let qualified = module.Point { x: 1, y: 2 };
+    let generic = Container<Int> { value: 42 };
+}
+
+fn block_expressions() {
+    let simple = { 42 };
+    let with_stmts = {
+        let x = 1;
+        let y = 2;
+        x + y
+    };
+    let nested = {
+        {
+            {
+                42
+            }
+        }
+    };
+    let empty = {};
+}
+
+fn if_expressions() {
+    let simple = if true { 1 } else { 2 };
+    let no_else = if condition { action(); };
+    let chain = if a { 1 } else if b { 2 } else { 3 };
+    let nested = if a { if b { 1 } else { 2 } } else { 3 };
+    let complex_cond = if a && b || c { 1 } else { 2 };
+    let let_cond = if let Some(x) = maybe { x } else { 0 };
+    let multi_let = if let Some(x) = a && let Some(y) = b { x + y } else { 0 };
+}
+
+fn match_expressions() {
+    let simple = match x {
+        1 => "one",
+        2 => "two",
+        _ => "other",
+    };
+
+    let with_guards = match x {
+        n if n > 0 => "positive",
+        n if n < 0 => "negative",
+        _ => "zero",
+    };
+
+    let with_where_guards = match x {
+        n where n > 0 => "positive",
+        n where n < 0 => "negative",
+        _ => "zero",
+    };
+
+    let destructuring = match point {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x, y } => f"({x}, {y})",
+    };
+
+    let nested = match outer {
+        Outer { inner: Inner { value } } => value,
+        _ => 0,
+    };
+
+    let method_style = x.match {
+        1 => "one",
+        _ => "other",
+    };
+}
+
+fn loop_expressions() {
+    // Infinite loop
+    let infinite = loop {
+        if done {
+            break result;
+        }
+    };
+
+    // While loop
+    let while_val = while condition {
+        process();
+    };
+
+    // While with invariant
+    while x > 0 invariant x >= 0 decreases x {
+        x = x - 1;
+    }
+
+    // For loop
+    for item in items {
+        process(item);
+    }
+
+    // For with pattern
+    for (key, value) in pairs {
+        use(key, value);
+    }
+
+    // For with invariant
+    for i in 0..n invariant i >= 0 decreases n - i {
+        process(i);
+    }
+}
+
+fn closure_expressions() {
+    let no_params = || 42;
+    let one_param = |x| x * 2;
+    let multi_params = |x, y, z| x + y + z;
+    let typed = |x: Int, y: Int| -> Int { x + y };
+    let with_block = |x| {
+        let doubled = x * 2;
+        doubled + 1
+    };
+    let async_closure = async |x| {
+        await fetch(x)
+    };
+    let capturing = |x| x + captured_var;
+}
+
+fn async_expressions() {
+    let async_block = async {
+        let data = await fetch_data();
+        process(data)
+    };
+
+    let spawn_expr = spawn long_running_task();
+
+    let await_expr = future.await;
+
+    let yield_expr = yield value;
+}
+
+fn try_expressions() {
+    let simple_try = try {
+        fallible_operation()?;
+        more_work()
+    };
+
+    let with_recover = try {
+        dangerous()
+    } recover {
+        IoError(e) => handle_io(e),
+        ParseError(e) => handle_parse(e),
+        _ => default_value,
+    };
+
+    let with_finally = try {
+        acquire_resource()
+    } finally {
+        release_resource();
+    };
+
+    let full = try {
+        work()
+    } recover {
+        e => handle(e),
+    } finally {
+        cleanup();
+    };
+}
+
+fn unsafe_expressions() {
+    let unsafe_block = unsafe {
+        raw_pointer_deref()
+    };
+}
+
+fn meta_expressions() {
+    let meta_block = meta {
+        compile_time_computation()
+    };
+}
+
+fn arithmetic_expressions() {
+    let add = a + b;
+    let sub = a - b;
+    let mul = a * b;
+    let div = a / b;
+    let rem = a % b;
+    let pow = a ** b;
+    let neg = -a;
+    let complex = (a + b) * (c - d) / (e % f);
+    let precedence = a + b * c - d / e % f ** g;
+}
+
+fn comparison_expressions() {
+    let eq = a == b;
+    let ne = a != b;
+    let lt = a < b;
+    let gt = a > b;
+    let le = a <= b;
+    let ge = a >= b;
+    let chained = a < b && b < c;
+}
+
+fn logical_expressions() {
+    let and = a && b;
+    let or = a || b;
+    let not = !a;
+    let complex = (a && b) || (c && !d);
+    let short_circuit = expensive() && cheap();
+}
+
+fn bitwise_expressions() {
+    let band = a & b;
+    let bor = a | b;
+    let xor = a ^ b;
+    let shl = a << b;
+    let shr = a >> b;
+    let bnot = ~a;
+    let mask = (a & 0xFF) | ((b << 8) & 0xFF00);
+}
+
+fn range_expressions() {
+    let exclusive = 0..10;
+    let inclusive = 0..=10;
+    let from = 5..;
+    let to = ..10;
+    let to_inclusive = ..=10;
+    let full = ..;
+}
+
+fn pipeline_expressions() {
+    let simple = data |> transform;
+    let chained = data
+        |> step1
+        |> step2
+        |> step3;
+    let with_args = data
+        |> map(double)
+        |> filter(positive)
+        |> fold(0, add);
+}
+
+fn null_coalesce_expressions() {
+    let simple = maybe ?? default;
+    let chained = a ?? b ?? c ?? d;
+    let with_optional = obj?.field ?? default;
+}
+
+fn postfix_expressions() {
+    let method = obj.method();
+    let field = obj.field;
+    let index = arr[0];
+    let call = func(arg1, arg2);
+    let optional = maybe?.field;
+    let await_post = future.await;
+    let tuple_idx = tuple.0;
+    let cast = value as Int;
+    let chain = obj.method().field[0].await;
+}
+
+fn reference_expressions() {
+    let shared_ref = &value;
+    let mut_ref = &mut value;
+    let checked_ref = &checked value;
+    let checked_mut = &checked mut value;
+    let unsafe_ref = &unsafe value;
+    let unsafe_mut = &unsafe mut value;
+    let deref = *ptr;
+}
+
+fn comprehension_expressions() {
+    let list_comp = [x * 2 for x in items];
+    let filtered = [x for x in items if x > 0];
+    let nested = [(x, y) for x in xs for y in ys];
+    let complex = [f(x, y) for x in xs if x > 0 for y in ys if y < 10];
+}
+
+fn stream_expressions() {
+    let stream_comp = stream[x * 2 for x in items];
+    let stream_filtered = stream[x for x in items if predicate(x)];
+    let stream_let = stream[result for x in items let y = transform(x) if valid(y)];
+}
+
+fn tensor_expressions() {
+    let simple = tensor<2, 3> Float { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
+    let nested = tensor<2, 2> Int { {1, 2}, {3, 4} };
+}
+
+fn return_break_continue() {
+    let ret = return 42;
+    let brk = break;
+    let brk_val = break 42;
+    let cont = continue;
+}

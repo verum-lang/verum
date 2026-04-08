@@ -1,0 +1,56 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: vbc, differential, closures, higher-order
+// @timeout: 10000
+// @expected-exit: 0
+//
+// Differential test: closures and higher-order functions
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn fold(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let square = |x: Int| -> Int { x * x };
+
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(inc, 5), 6);
+    assert_eq(apply(square, 5), 25);
+
+    assert_eq(apply_twice(double, 3), 12);
+    assert_eq(apply_twice(inc, 5), 7);
+
+    assert_eq(compose(double, inc, 5), 12);
+    assert_eq(compose(inc, double, 5), 11);
+
+    let add = |acc: Int, x: Int| -> Int { acc + x };
+    assert_eq(fold(0, 10, 0, add), 45);
+
+    let mul = |acc: Int, x: Int| -> Int { acc * x };
+    assert_eq(fold(1, 6, 1, mul), 120);
+
+    print("differential closures ok");
+    0
+}

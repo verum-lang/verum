@@ -1,0 +1,141 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, generics, polymorphism
+// @timeout: 50000
+// @expected-exit: 0
+
+// =============================================================================
+// Generic container
+// =============================================================================
+
+type Wrapper<T> is { inner: T };
+
+implement<T> Wrapper<T> {
+    fn new(val: T) -> Wrapper<T> { Wrapper { inner: val } }
+    fn unwrap(self) -> T { self.inner }
+}
+
+fn test_generic_wrapper() {
+    let w1 = Wrapper.new(42);
+    assert_eq(w1.unwrap(), 42);
+
+    let w2 = Wrapper.new("hello");
+    assert_eq(w2.unwrap(), "hello");
+
+    let w3 = Wrapper.new(true);
+    assert_eq(w3.unwrap(), true);
+    print("  test_generic_wrapper: ok");
+}
+
+// =============================================================================
+// Generic pair
+// =============================================================================
+
+type IntPair is { first: Int, second: Int };
+
+implement IntPair {
+    fn new(a: Int, b: Int) -> IntPair { IntPair { first: a, second: b } }
+    fn sum(self) -> Int { self.first + self.second }
+    fn swap_pair(self) -> IntPair { IntPair { first: self.second, second: self.first } }
+    fn map_first(self, f: fn(Int) -> Int) -> IntPair {
+        IntPair { first: f(self.first), second: self.second }
+    }
+    fn map_second(self, f: fn(Int) -> Int) -> IntPair {
+        IntPair { first: self.first, second: f(self.second) }
+    }
+}
+
+fn double(x: Int) -> Int { x * 2 }
+fn negate(x: Int) -> Int { 0 - x }
+
+fn test_pair_operations() {
+    let p = IntPair.new(3, 7);
+    assert_eq(p.sum(), 10);
+
+    let swapped = p.swap_pair();
+    assert_eq(swapped.first, 7);
+    assert_eq(swapped.second, 3);
+
+    let doubled = p.map_first(double);
+    assert_eq(doubled.first, 6);
+    assert_eq(doubled.second, 7);
+
+    let negated = p.map_second(negate);
+    assert_eq(negated.first, 3);
+    assert_eq(negated.second, -7);
+    print("  test_pair_operations: ok");
+}
+
+// =============================================================================
+// Generic stack
+// =============================================================================
+
+fn test_generic_stack() {
+    // Stack via List.push() and index access
+    let mut stack: List<Int> = [];
+
+    stack.push(10);
+    assert_eq(stack.len(), 1);
+    assert_eq(stack[0], 10);
+
+    stack.push(20);
+    assert_eq(stack.len(), 2);
+    assert_eq(stack[stack.len() - 1], 20);
+
+    stack.push(30);
+    assert_eq(stack.len(), 3);
+    assert_eq(stack[stack.len() - 1], 30);
+
+    // Verify all elements
+    assert_eq(stack[0], 10);
+    assert_eq(stack[1], 20);
+    assert_eq(stack[2], 30);
+    print("  test_generic_stack: ok");
+}
+
+// =============================================================================
+// Builder pattern with generics
+// =============================================================================
+
+type HttpReq is { method_code: Int, path: Text, body: Text, timeout_ms: Int };
+
+implement HttpReq {
+    fn get(path: Text) -> HttpReq {
+        HttpReq { method_code: 0, path: path, body: "", timeout_ms: 30000 }
+    }
+    fn post(path: Text) -> HttpReq {
+        HttpReq { method_code: 1, path: path, body: "", timeout_ms: 30000 }
+    }
+    fn with_body(self, body: Text) -> HttpReq {
+        HttpReq { method_code: self.method_code, path: self.path, body: body, timeout_ms: self.timeout_ms }
+    }
+    fn with_timeout(self, ms: Int) -> HttpReq {
+        HttpReq { method_code: self.method_code, path: self.path, body: self.body, timeout_ms: ms }
+    }
+}
+
+fn test_builder_generics() {
+    let req = HttpReq.get("/api/users")
+        .with_timeout(5000);
+    assert_eq(req.method_code, 0);
+    assert_eq(req.path, "/api/users");
+    assert_eq(req.timeout_ms, 5000);
+
+    let post = HttpReq.post("/api/data")
+        .with_body("hello")
+        .with_timeout(10000);
+    assert_eq(post.method_code, 1);
+    assert_eq(post.body, "hello");
+    assert_eq(post.timeout_ms, 10000);
+    print("  test_builder_generics: ok");
+}
+
+fn main() -> Int {
+    test_generic_wrapper();
+    test_pair_operations();
+    test_generic_stack();
+    test_builder_generics();
+    print("[OK] 621_interp_generic_functions");
+    0
+}

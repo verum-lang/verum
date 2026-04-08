@@ -1,0 +1,495 @@
+// @test: compile-only
+// @tier: 3
+// @level: L3
+// @tags: ffi, c-interop, type-mapping, abi
+// @timeout: 10000
+// @description: Tests Verum to C type mappings for FFI interoperability
+
+/// ============================================================
+/// TYPE MAPPING: VERUM TO C
+/// ============================================================
+///
+/// This file defines the mapping between Verum types and C types,
+/// ensuring correct ABI compatibility for FFI calls.
+
+// ============================================================
+// PRIMITIVE TYPE MAPPINGS
+// ============================================================
+
+// ------------------------------------------------------------
+// Integer Types
+// ------------------------------------------------------------
+
+/// Signed integer types
+type c_char is i8;           // signed char
+type c_schar is i8;          // signed char (explicit)
+type c_short is i16;         // short
+type c_int is i32;           // int
+type c_long is i64;          // long (64-bit on 64-bit systems)
+type c_longlong is i64;      // long long
+
+/// Unsigned integer types
+type c_uchar is u8;          // unsigned char
+type c_ushort is u16;        // unsigned short
+type c_uint is u32;          // unsigned int
+type c_ulong is u64;         // unsigned long
+type c_ulonglong is u64;     // unsigned long long
+
+/// Size and pointer-width types
+type size_t is usize;        // size_t (pointer-width unsigned)
+type ssize_t is isize;       // ssize_t (POSIX, pointer-width signed)
+type ptrdiff_t is isize;     // ptrdiff_t (pointer difference)
+type intptr_t is isize;      // intptr_t (pointer-width signed)
+type uintptr_t is usize;     // uintptr_t (pointer-width unsigned)
+
+/// Fixed-width integer types (from stdint.h)
+type int8_t is i8;
+type int16_t is i16;
+type int32_t is i32;
+type int64_t is i64;
+type uint8_t is u8;
+type uint16_t is u16;
+type uint32_t is u32;
+type uint64_t is u64;
+
+// ------------------------------------------------------------
+// Floating-Point Types
+// ------------------------------------------------------------
+
+type c_float is f32;         // float
+type c_double is f64;        // double
+// Note: long double not directly supported (platform-specific)
+
+// ------------------------------------------------------------
+// Boolean Type
+// ------------------------------------------------------------
+
+type c_bool is u8;           // _Bool (C99) or bool
+// Note: C _Bool is 1 byte, unlike Verumps Bool which may differ
+
+// ------------------------------------------------------------
+// Void Type
+// ------------------------------------------------------------
+
+type c_void is ();           // void (as type parameter)
+// Note: *const c_void and *mut c_void for void pointers
+
+// ============================================================
+// POINTER TYPES
+// ============================================================
+
+/// Raw pointer mappings
+/// *const T -> const T*
+/// *mut T   -> T*
+
+/// Null-terminated string
+type CStr is *const c_char;
+type CStrMut is *mut c_char;
+
+/// Generic pointers
+type VoidPtr is *mut c_void;
+type ConstVoidPtr is *const c_void;
+
+/// Function pointers
+type CFn is extern "C" fn();
+type CFnWithArgs is extern "C" fn(c_int, c_int) -> c_int;
+
+// ============================================================
+// STRUCT LAYOUTS
+// ============================================================
+
+// ------------------------------------------------------------
+// @repr(C) - C-compatible layout
+// ------------------------------------------------------------
+
+/// Standard C struct layout
+/// - Fields in declaration order
+/// - Padding for alignment
+/// - sizeof and offsetof match C
+@repr(C)
+type CPoint is {
+    x: c_int,
+    y: c_int,
+};
+
+/// Verify layout matches C
+const _: () = {
+    static_assert(CPoint.size == 8);        // sizeof(CPoint)
+    static_assert(CPoint.alignment == 4);   // alignof(CPoint)
+};
+
+@repr(C)
+type CRect is {
+    left: c_int,
+    top: c_int,
+    right: c_int,
+    bottom: c_int,
+};
+
+const _: () = {
+    static_assert(CRect.size == 16);
+    static_assert(CRect.alignment == 4);
+};
+
+// ------------------------------------------------------------
+// Alignment and Padding
+// ------------------------------------------------------------
+
+/// Structure with padding for alignment
+@repr(C)
+type PaddedStruct is {
+    a: c_char,      // offset 0, size 1
+    // 3 bytes padding
+    b: c_int,       // offset 4, size 4
+    c: c_char,      // offset 8, size 1
+    // 7 bytes padding
+    d: c_double,    // offset 16, size 8
+};
+
+const _: () = {
+    static_assert(PaddedStruct.size == 24);
+    static_assert(PaddedStruct.alignment == 8);
+};
+
+/// Forcing specific alignment
+@repr(C, align(16))
+type AlignedStruct is {
+    data: [u8; 12],
+};
+
+const _: () = {
+    static_assert(AlignedStruct.alignment == 16);
+    static_assert(AlignedStruct.size == 16);  // Padded to alignment
+};
+
+// ------------------------------------------------------------
+// Packed Structs
+// ------------------------------------------------------------
+
+/// Packed struct - no padding
+@repr(C, packed)
+type PackedStruct is {
+    a: c_char,      // offset 0
+    b: c_int,       // offset 1 (unaligned!)
+    c: c_char,      // offset 5
+    d: c_double,    // offset 6 (unaligned!)
+};
+
+const _: () = {
+    static_assert(PackedStruct.size == 14);
+    static_assert(PackedStruct.alignment == 1);
+};
+
+/// Partially packed (specific alignment)
+@repr(C, packed(2))
+type PartiallyPacked is {
+    a: c_char,      // offset 0
+    b: c_int,       // offset 2 (2-byte aligned)
+    c: c_char,      // offset 6
+    d: c_short,     // offset 8 (2-byte aligned)
+};
+
+const _: () = {
+    static_assert(PartiallyPacked.size == 10);
+    static_assert(PartiallyPacked.alignment == 2);
+};
+
+// ============================================================
+// UNION TYPES
+// ============================================================
+
+/// C union equivalent
+@repr(C)
+type CUnion is union {
+    i: c_int,
+    f: c_float,
+    bytes: [u8; 4],
+};
+
+const _: () = {
+    static_assert(CUnion.size == 4);
+    static_assert(CUnion.alignment == 4);
+};
+
+/// Union with different-sized members
+@repr(C)
+type MixedUnion is union {
+    small: c_char,
+    medium: c_int,
+    large: c_double,
+};
+
+const _: () = {
+    static_assert(MixedUnion.size == 8);     // Size of largest member
+    static_assert(MixedUnion.alignment == 8); // Alignment of most-aligned member
+};
+
+// ============================================================
+// ENUM TYPES
+// ============================================================
+
+/// C-style enum (integer values)
+@repr(C)
+type CEnum is
+    | Zero       // = 0
+    | One        // = 1
+    | Two        // = 2
+    | Ten = 10  // = 10
+    | Eleven;    // = 11
+
+const _: () = {
+    static_assert(CEnum.size == 4);  // Default int size
+};
+
+/// Enum with explicit size
+@repr(C, u8)
+type SmallEnum is
+    | A  // = 0
+    | B  // = 1
+    | C; // = 2
+
+const _: () = {
+    static_assert(SmallEnum.size == 1);
+};
+
+/// Enum with explicit values
+@repr(C, i32)
+type ExplicitEnum is
+    | Success = 0
+    | NotFound = -1
+    | PermissionDenied = -2
+    | IoError = -3;
+
+// ============================================================
+// OPAQUE TYPES
+// ============================================================
+
+/// Opaque types (forward declarations in C)
+@opaque
+type FILE is ();
+
+@opaque
+type DIR is ();
+
+@opaque
+type SSL_CTX is ();
+
+/// Using opaque types
+ffi stdio {
+    @extern("C")
+    fn fopen(filename: *const c_char, mode: *const c_char) -> *mut FILE;
+
+    @extern("C")
+    fn fclose(stream: *mut FILE) -> c_int;
+}
+
+// ============================================================
+// FUNCTION POINTER TYPES
+// ============================================================
+
+/// Simple callback
+type SimpleCallback is extern "C" fn(c_int) -> c_int;
+
+/// Callback with user data
+type UserDataCallback is extern "C" fn(*mut c_void, c_int) -> c_int;
+
+/// Comparison function (for qsort)
+type CompareFn is extern "C" fn(*const c_void, *const c_void) -> c_int;
+
+/// Signal handler
+type SignalHandler is extern "C" fn(c_int);
+
+/// Thread function
+type ThreadFn is extern "C" fn(*mut c_void) -> *mut c_void;
+
+// ============================================================
+// COMPLEX TYPE MAPPINGS
+// ============================================================
+
+// ------------------------------------------------------------
+// Strings
+// ------------------------------------------------------------
+
+/// Null-terminated C string
+fn verum_to_c_string(s: &Text) -> CString {
+    // CString is heap-allocated null-terminated string
+    CString.new(s)
+}
+
+fn c_to_verum_string(s: *const c_char) -> Text {
+    // Placeholder: real impl converts C string to Verum Text
+    ""
+}
+
+/// Text with length (not null-terminated)
+@repr(C)
+type StringView is {
+    data: *const c_char,
+    len: size_t,
+};
+
+// ------------------------------------------------------------
+// Arrays
+// ------------------------------------------------------------
+
+/// Fixed-size array (directly compatible)
+type CArray10 is [c_int; 10];
+
+/// Flexible array member (C99)
+@repr(C)
+type FlexibleArray is {
+    count: size_t,
+    items: [c_int; 0],  // Flexible array member
+};
+
+// Note: Access flexible array via pointer arithmetic
+fn get_flex_item(arr: *const FlexibleArray, index: size_t) -> c_int {
+    unsafe {
+        let items_ptr = arr.add(1) as *const c_int;
+        *items_ptr.add(index)
+    }
+}
+
+// ------------------------------------------------------------
+// Option/Nullable Types
+// ------------------------------------------------------------
+
+/// Nullable pointer (Maybe<*mut T> with FFI compatibility)
+@repr(C)
+type NullableHandle is *mut c_void;  // null = None
+
+/// Converting Maybe<T> to nullable pointer
+fn maybe_to_ptr<T>(opt: Maybe<&T>) -> *const T {
+    opt.match {
+        Some(ref r) => r as *const T,
+        None => null as *const T,
+    }
+}
+
+// ============================================================
+// PLATFORM-SPECIFIC TYPES
+// ============================================================
+
+// ------------------------------------------------------------
+// Windows Types
+// ------------------------------------------------------------
+
+@cfg(target_os = "windows")
+module windows_types {
+    pub type BOOL is c_int;
+    pub type BYTE is u8;
+    pub type WORD is u16;
+    pub type DWORD is u32;
+    pub type QWORD is u64;
+    pub type HANDLE is *mut c_void;
+    pub type HWND is *mut c_void;
+    pub type HINSTANCE is *mut c_void;
+    pub type LPARAM is isize;
+    pub type WPARAM is usize;
+    pub type LRESULT is isize;
+    pub type LPSTR is *mut c_char;
+    pub type LPCSTR is *const c_char;
+    pub type LPWSTR is *mut u16;  // Wide string
+    pub type LPCWSTR is *const u16;
+
+    @repr(C)
+    pub type GUID is {
+        data1: u32,
+        data2: u16,
+        data3: u16,
+        data4: [u8; 8],
+    };
+
+    const _: () = {
+        static_assert(GUID.size == 16);
+    };
+}
+
+// ------------------------------------------------------------
+// POSIX Types
+// ------------------------------------------------------------
+
+@cfg(unix)
+module posix_types {
+    pub type pid_t is i32;
+    pub type uid_t is u32;
+    pub type gid_t is u32;
+    pub type off_t is i64;
+    pub type mode_t is u32;
+    pub type dev_t is u64;
+    pub type ino_t is u64;
+    pub type nlink_t is u64;
+    pub type blksize_t is i64;
+    pub type blkcnt_t is i64;
+    pub type time_t is i64;
+    pub type suseconds_t is i64;
+
+    @repr(C)
+    pub type timeval is {
+        tv_sec: time_t,
+        tv_usec: suseconds_t,
+    };
+
+    @repr(C)
+    pub type timespec is {
+        tv_sec: time_t,
+        tv_nsec: c_long,
+    };
+
+    @repr(C)
+    pub type stat is {
+        st_dev: dev_t,
+        st_ino: ino_t,
+        st_nlink: nlink_t,
+        st_mode: mode_t,
+        st_uid: uid_t,
+        st_gid: gid_t,
+        __pad0: c_int,
+        st_rdev: dev_t,
+        st_size: off_t,
+        st_blksize: blksize_t,
+        st_blocks: blkcnt_t,
+        st_atime: timespec,
+        st_mtime: timespec,
+        st_ctime: timespec,
+        __unused: [c_long; 3],
+    };
+}
+
+// ============================================================
+// TYPE CONVERSION UTILITIES
+// ============================================================
+
+/// Safe type conversions
+implement c_int {
+    fn from_bool(b: Bool) -> c_int {
+        if b { 1 } else { 0 }
+    }
+
+    fn to_bool(self) -> Bool {
+        self != 0
+    }
+}
+
+/// Pointer utilities
+fn null<T>() -> *const T {
+    0 as *const T
+}
+
+fn null_mut<T>() -> *mut T {
+    0 as *mut T
+}
+
+fn is_null<T>(ptr: *const T) -> Bool {
+    ptr == null
+}
+
+fn main() {
+    // Type mapping verification
+    let p = CPoint { x: 10, y: 20 };
+    let r = CRect { left: 0, top: 0, right: 100, bottom: 100 };
+
+    // Union access requires unsafe
+    // Verify size calculations
+    assert(CPoint.size == 8);
+}

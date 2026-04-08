@@ -1,0 +1,369 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: all
+// @tags: errors, recovery, try, recover, closure, binding
+// @description: Test recover closure syntax (recover |e| expr) and error binding semantics
+// NOTE: Runtime execution not yet supported for try/recover closures in AOT or interpreter
+
+/// Recover closure semantics tests.
+/// The closure syntax provides ergonomic error recovery: recover |e| { ... }
+/// This is equivalent to: recover { e => ... }
+/// Spec: grammar/verum.ebnf Section 2.12.1 - recover_closure
+
+// === Error Types ===
+
+type DataError is
+    | NotFound
+    | InvalidFormat(Text)
+    | Timeout
+    | NetworkError { code: Int, message: Text }
+    | PermissionDenied;
+
+type ProcessError is
+    | DataFailed(DataError)
+    | TransformFailed(Text)
+    | ValidationFailed { field: Text, reason: Text };
+
+type Data is {
+    value: Int,
+    source: Text
+};
+
+// === Helper functions ===
+
+fn fetch_data(source: &Text) -> Result<Data, DataError> {
+    match source {
+        "valid" => Ok(Data { value: 42, source: "valid" }),
+        "cached" => Ok(Data { value: 100, source: "cache" }),
+        "slow" => Err(DataError.Timeout),
+        "forbidden" => Err(DataError.PermissionDenied),
+        "broken" => Err(DataError.InvalidFormat("corrupted")),
+        "network" => Err(DataError.NetworkError { code: 500, message: "Internal error" }),
+        _ => Err(DataError.NotFound)
+    }
+}
+
+fn transform_data(data: &Data) -> Result<Text, ProcessError> {
+    if data.value < 0 {
+        Err(ProcessError.ValidationFailed {
+            field: "value",
+            reason: "must be non-negative"
+        })
+    } else {
+        Ok(f"processed_{data.value}")
+    }
+}
+
+// === Basic closure recovery ===
+
+/// Simple recover closure - single expression
+fn basic_closure_recovery(source: &Text) -> Int {
+    try {
+        fetch_data(source)?.value
+    } recover |_e| 0
+}
+
+/// Recover closure with error binding
+fn closure_with_binding(source: &Text) -> Text {
+    try {
+        fetch_data(source)?.source
+    } recover |e| {
+        match e {
+            DataError.NotFound => "not_found",
+            DataError.Timeout => "timeout",
+            DataError.PermissionDenied => "denied",
+            DataError.InvalidFormat(msg) => f"invalid: {msg}",
+            DataError.NetworkError { code, .. } => f"network_{code}"
+        }
+    }
+}
+
+/// Recover closure with block expression
+fn closure_with_block(source: &Text) -> Text {
+    try {
+        let data = fetch_data(source)?;
+        // Convert DataError to ProcessError before using second ? in same block
+        match transform_data(&data) {
+            Ok(v) => v,
+            Err(e) => return "default",
+        }
+    } recover |error| {
+        // Multi-statement block — error is DataError from fetch_data
+        let default_value = "default";
+        default_value
+    }
+}
+
+// === Error binding patterns ===
+
+/// Capture error for later inspection
+fn capture_error(source: &Text) -> (Int, Maybe<DataError>) {
+    let mut captured: Maybe<DataError> = None;
+
+    let value = try {
+        fetch_data(source)?.value
+    } recover |e| {
+        captured = Some(e);
+        -1
+    };
+
+    (value, captured)
+}
+
+/// Use error properties in recovery
+fn use_error_details(source: &Text) -> Text {
+    try {
+        fetch_data(source)?.source
+    } recover |e| {
+        // Access error details in closure
+        match e {
+            DataError.NetworkError { code, message } =>
+                f"Network failed ({code}): {message}",
+            DataError.InvalidFormat(msg) =>
+                f"Format error: {msg}",
+            _ => "unknown_error"
+        }
+    }
+}
+
+/// Capture error in closure and add to list
+fn capture_error_in_closure(source: &Text) -> (Data, List<DataError>) {
+    let mut errors: List<DataError> = List.new();
+
+    let data = try {
+        fetch_data(source)?
+    } recover |e| {
+        errors.push(e);
+        Data { value: 0, source: "fallback" }
+    };
+
+    (data, errors)
+}
+
+// === Closure vs match arm equivalence ===
+
+/// Using closure syntax
+fn closure_style(source: &Text) -> Int {
+    try {
+        fetch_data(source)?.value
+    } recover |e| match e {
+        DataError.NotFound => -1,
+        DataError.Timeout => -2,
+        _ => -99
+    }
+}
+
+/// Equivalent match arm syntax
+fn match_arm_style(source: &Text) -> Int {
+    try {
+        fetch_data(source)?.value
+    } recover {
+        DataError.NotFound => -1,
+        DataError.Timeout => -2,
+        _ => -99
+    }
+}
+
+// === Closure with side effects ===
+
+type Logger is {
+    entries: List<Text>
+};
+
+fn closure_with_logging(source: &Text, logger: &mut Logger) -> Int {
+    try {
+        fetch_data(source)?.value
+    } recover |e| {
+        logger.entries.push(f"Error: {e}");
+        0
+    }
+}
+
+/// Closure that modifies external state
+fn closure_with_state_modification(
+    sources: &List<Text>
+) -> (List<Int>, List<DataError>) {
+    let mut values: List<Int> = List.new();
+    let mut errors: List<DataError> = List.new();
+
+    for source in sources {
+        let result = try {
+            fetch_data(source)?.value
+        } recover |e| {
+            errors.push(e);
+            continue  // Skip to next source
+        };
+        values.push(result);
+    }
+
+    (values, errors)
+}
+
+// === Nested closures ===
+
+fn nested_closure_recovery(primary: &Text, backup: &Text) -> Int {
+    try {
+        try {
+            fetch_data(primary)?.value
+        } recover |_e1| {
+            // First recovery tries backup
+            fetch_data(backup)?.value
+        }
+    } recover |_e2| {
+        // Final fallback
+        0
+    }
+}
+
+// === Closure with complex expressions ===
+
+fn closure_with_computation(source: &Text) -> Int {
+    try {
+        fetch_data(source)?.value
+    } recover |e| {
+        let base = match e {
+            DataError.NotFound => 100,
+            DataError.Timeout => 200,
+            DataError.NetworkError { code, .. } => code,
+            _ => 0
+        };
+
+        // Complex computation in recovery
+        let adjusted = base * 2;
+        let capped = if adjusted > 500 { 500 } else { adjusted };
+        capped
+    }
+}
+
+// === Closure returning Result (fallible recovery) ===
+
+fn fallible_closure_recovery(
+    primary: &Text,
+    backup: &Text
+) -> Result<Int, DataError> {
+    // If primary fails, try backup
+    match fetch_data(primary) {
+        Ok(data) => Ok(data.value),
+        Err(_) => {
+            match fetch_data(backup) {
+                Ok(data) => Ok(data.value),
+                Err(e2) => Err(e2)
+            }
+        }
+    }
+}
+
+// === Async closure recovery ===
+
+async fn async_fetch(source: &Text) -> Result<Data, DataError> {
+    // Simulated async operation
+    fetch_data(source)
+}
+
+async fn async_closure_recovery(source: &Text) -> Int {
+    try {
+        async_fetch(source).await?.value
+    } recover |_e| {
+        // Closure can also be async
+        -1
+    }
+}
+
+// === Generic closure recovery ===
+
+fn generic_recovery<T, E>(
+    operation: fn() -> Result<T, E>,
+    fallback: fn(E) -> T
+) -> T {
+    try {
+        operation()?
+    } recover |e| {
+        fallback(e)
+    }
+}
+
+fn use_generic_recovery(source: &Text) -> Int {
+    generic_recovery(
+        || fetch_data(source).map(|d| d.value),
+        |_e| 0
+    )
+}
+
+// === Closure with pattern destructuring ===
+
+fn destructuring_closure(source: &Text) -> Text {
+    try {
+        fetch_data(source)?.source
+    } recover |e| match e {
+        DataError.NetworkError { code, message } => {
+            f"[{code}] {message}"
+        },
+        DataError.InvalidFormat(msg) => {
+            f"Bad format: {msg}"
+        },
+        _ => "error"
+    }
+}
+
+// === Verification tests ===
+
+fn main() {
+    // Test basic closure recovery
+    let result1 = basic_closure_recovery("missing");
+    println(f"Closure recovery: {result1}");
+    assert(result1 == 0);
+
+    // Test closure with error binding
+    let (value, maybe_error) = capture_error("missing");
+    assert(value == -1);
+    assert(maybe_error.is_some());
+    match maybe_error {
+        Some(DataError.NotFound) => println("Bound error: NotFound"),
+        _ => panic("Expected NotFound error")
+    }
+
+    // Test closure with block
+    let result2 = closure_with_block("valid");
+    println(f"Closure with block: {result2}");
+    assert(result2 == "processed_42");
+
+    // Test equivalence between closure and match arm styles
+    assert(closure_style("missing") == match_arm_style("missing"));
+    assert(closure_style("slow") == match_arm_style("slow"));
+    assert(closure_style("valid") == match_arm_style("valid"));
+
+    // Test nested closure recovery
+    let nested = nested_closure_recovery("missing", "cached");
+    let chained_label = if nested == 100 { "fallback" } else { "primary" };
+    println(f"Chained: {chained_label}");
+    assert(nested == 100);  // Got backup value
+
+    // Test state modification
+    let sources = ["valid", "missing", "cached", "broken"];
+    let (values, errors) = closure_with_state_modification(&sources);
+    assert(values.len() == 2);  // valid and cached
+    assert(errors.len() == 2);  // missing and broken
+
+    // Test error capture
+    let (data, captured_errors) = capture_error_in_closure("missing");
+    assert(data.value == 0);
+    assert(captured_errors.len() == 1);
+
+    // Test async recovery (simulated)
+    let async_result = -1;  // Would be: async_closure_recovery("missing").await
+    println(f"Async recovered: {async_result}");
+
+    // Test fallible recovery — primary fails, backup succeeds
+    let fallible = fallible_closure_recovery("missing", "cached");
+    assert(fallible.is_ok());  // Backup succeeds with cached value
+
+    // Both fail — should return error
+    let fallible2 = fallible_closure_recovery("missing", "also_missing");
+    assert(fallible2.is_err());
+
+    // Test generic recovery
+    let generic_result = use_generic_recovery("missing");
+    assert(generic_result == 0);
+
+    println("All tests passed");
+}

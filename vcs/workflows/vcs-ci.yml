@@ -1,0 +1,852 @@
+# =============================================================================
+# Verum Compliance Suite - CI/CD Pipeline
+# =============================================================================
+#
+# Production-grade CI/CD for VCS testing infrastructure.
+#
+# Workflow Architecture:
+#   1. critical-tests   -> L0/L1 tests (100% required) - BLOCKING
+#   2. standard-tests   -> L2 tests (95%+ required) - BLOCKING
+#   3. differential     -> Tier 0 vs Tier 3 semantic equivalence - BLOCKING
+#   4. extended-tests   -> L3-L4 tests (nightly/manual)
+#   5. fuzz-tests       -> Fuzzing (nightly/manual)
+#   6. benchmarks       -> Performance benchmarks
+#   7. coverage         -> Code coverage report
+#   8. generate-report  -> Consolidated HTML report
+#
+# CI Scripts (vcs/scripts/ci/):
+#   - run_all_tests.sh    Full test suite
+#   - run_quick_tests.sh  Fast L0 tests only
+#   - run_nightly.sh      Nightly extended suite
+#   - check_regressions.sh Regression detection
+#
+# Reference: VCS Spec Section 23 - CI/CD Integration
+# =============================================================================
+
+name: VCS Conformance
+
+on:
+  push:
+    branches: [main, develop, 'release/**']
+    paths:
+      - 'vcs/**'
+      - 'crates/**'
+      - 'grammar/**'
+      - '.github/workflows/vcs-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'vcs/**'
+      - 'crates/**'
+      - 'grammar/**'
+  schedule:
+    # Nightly at 2:00 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_level:
+        description: 'Test levels to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - 'L0'
+          - 'L0,L1'
+          - 'L0,L1,L2'
+          - 'all'
+      fuzz_duration:
+        description: 'Fuzzing duration'
+        required: false
+        default: '30m'
+        type: choice
+        options:
+          - '10m'
+          - '30m'
+          - '1h'
+          - '2h'
+      run_benchmarks:
+        description: 'Run performance benchmarks'
+        required: false
+        type: boolean
+        default: false
+      run_coverage:
+        description: 'Generate coverage report'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  VCS_PARALLEL: 8
+  VCS_TIMEOUT_DEFAULT: 30000
+  VCS_TIMEOUT_EXTENDED: 600000
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================================================
+  # Level 0 & 1: Critical Tests - Must pass on every commit
+  # ==========================================================================
+  critical-tests:
+    name: L0/L1 Critical Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      l0_passed: ${{ steps.l0.outputs.passed }}
+      l1_passed: ${{ steps.l1.outputs.passed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            vcs/runner/vtest -> target
+            vcs/runner/vbench -> target
+            vcs/runner/vfuzz -> target
+
+      - name: Build VCS tools
+        run: |
+          cd vcs/runner/vtest && cargo build --release
+          cd ../vbench && cargo build --release
+          cd ../vfuzz && cargo build --release
+
+      - name: Run L0 Critical Tests
+        id: l0
+        run: |
+          cd vcs
+          ../vcs/runner/vtest/target/release/vtest run \
+            --level L0 \
+            --parallel $VCS_PARALLEL \
+            --format junit \
+            --output l0-results.xml \
+            --config config/vcs.toml
+
+          # Check for 100% pass rate (required)
+          if grep -q 'failures="0"' l0-results.xml; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+            echo "::error::L0 Critical tests have failures - merge blocked"
+            exit 1
+          fi
+
+      - name: Run L1 Core Tests
+        id: l1
+        run: |
+          cd vcs
+          ../vcs/runner/vtest/target/release/vtest run \
+            --level L1 \
+            --parallel $VCS_PARALLEL \
+            --format junit \
+            --output l1-results.xml \
+            --config config/vcs.toml
+
+          # Check for 100% pass rate (required)
+          if grep -q 'failures="0"' l1-results.xml; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+            echo "::error::L1 Core tests have failures - merge blocked"
+            exit 1
+          fi
+
+      - name: Upload L0/L1 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: critical-test-results
+          path: |
+            vcs/l0-results.xml
+            vcs/l1-results.xml
+          retention-days: 30
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: 'vcs/l*-results.xml'
+          fail_on_failure: true
+          require_tests: true
+          check_name: 'VCS Critical Tests'
+
+  # ==========================================================================
+  # Level 2: Standard Tests - 95%+ pass rate required
+  # ==========================================================================
+  standard-tests:
+    name: L2 Standard Tests
+    runs-on: ubuntu-latest
+    needs: critical-tests
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            vcs/runner/vtest -> target
+
+      - name: Build vtest
+        run: cd vcs/runner/vtest && cargo build --release
+
+      - name: Run L2 Standard Tests
+        id: l2
+        run: |
+          cd vcs
+          ../vcs/runner/vtest/target/release/vtest run \
+            --level L2 \
+            --parallel $VCS_PARALLEL \
+            --format json \
+            --output l2-results.json \
+            --config config/vcs.toml
+
+          # Check for 95%+ pass rate
+          PASS_RATE=$(jq '.summary.pass_percentage' l2-results.json)
+          echo "L2 Pass Rate: ${PASS_RATE}%"
+
+          if (( $(echo "$PASS_RATE < 95.0" | bc -l) )); then
+            echo "::error::L2 Standard tests below 95% threshold (${PASS_RATE}%)"
+            exit 1
+          fi
+
+      - name: Upload L2 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: standard-test-results
+          path: vcs/l2-results.json
+          retention-days: 30
+
+  # ==========================================================================
+  # Differential Testing - Cross-tier semantic equivalence
+  # ==========================================================================
+  differential-tests:
+    name: Differential Tests (Tier 0 vs Tier 3)
+    runs-on: ubuntu-latest
+    needs: critical-tests
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            vcs/runner/vtest -> target
+
+      - name: Build vtest
+        run: cd vcs/runner/vtest && cargo build --release
+
+      - name: Run Differential Tests
+        run: |
+          cd vcs
+          ../vcs/runner/vtest/target/release/vtest run \
+            differential/ \
+            --tier 0,3 \
+            --format junit \
+            --output differential-results.xml \
+            --config config/vcs.toml
+
+          # Differential tests must have 100% semantic equivalence
+          if ! grep -q 'failures="0"' differential-results.xml; then
+            echo "::error::Differential tests failed - Tier 0 and Tier 3 produce different results"
+            exit 1
+          fi
+
+      - name: Upload Differential Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: differential-test-results
+          path: vcs/differential-results.xml
+          retention-days: 30
+
+  # ==========================================================================
+  # Extended Tests (L3) - Nightly or on-demand
+  # ==========================================================================
+  extended-tests:
+    name: L3 Extended Tests
+    runs-on: ubuntu-latest
+    needs: standard-tests
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[full-test]')
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            vcs/runner/vtest -> target
+
+      - name: Build vtest
+        run: cd vcs/runner/vtest && cargo build --release
+
+      - name: Run L3 Extended Tests
+        id: l3
+        continue-on-error: true
+        run: |
+          cd vcs
+          ../vcs/runner/vtest/target/release/vtest run \
+            --level L3 \
+            --parallel $VCS_PARALLEL \
+            --timeout 600000 \
+            --format json \
+            --output l3-results.json \
+            --config config/vcs.toml
+
+          # Check for 90%+ pass rate (warn if below)
+          PASS_RATE=$(jq '.summary.pass_percentage' l3-results.json)
+          echo "L3 Pass Rate: ${PASS_RATE}%"
+
+          if (( $(echo "$PASS_RATE < 90.0" | bc -l) )); then
+            echo "::warning::L3 Extended tests below 90% threshold (${PASS_RATE}%)"
+          fi
+
+      - name: Upload L3 Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: extended-test-results
+          path: vcs/l3-results.json
+          retention-days: 30
+
+  # ==========================================================================
+  # Fuzz Testing - 1 hour on CI (nightly or manual)
+  # ==========================================================================
+  fuzz-tests:
+    name: Fuzz Testing
+    runs-on: ubuntu-latest
+    needs: critical-tests
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            vcs/runner/vfuzz -> target
+            vcs/fuzz -> target
+
+      - name: Build vfuzz
+        run: cd vcs/runner/vfuzz && cargo build --release
+
+      - name: Determine fuzz duration
+        id: duration
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "duration=${{ github.event.inputs.fuzz_duration || '1h' }}" >> $GITHUB_OUTPUT
+          else
+            echo "duration=1h" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run VCS Fuzzer
+        run: |
+          cd vcs
+          ../vcs/runner/vfuzz/target/release/vfuzz \
+            --duration ${{ steps.duration.outputs.duration }} \
+            --parallel 4 \
+            --corpus fuzz/seeds/ \
+            --crashes fuzz/crashes/ \
+            --config config/vcs.toml
+        continue-on-error: true
+
+      - name: Run CBGR Fuzz Targets
+        run: |
+          cd vcs/fuzz
+          cargo +nightly fuzz run cbgr_fuzz -- -max_total_time=1800 || true
+          cargo +nightly fuzz run lexer_fuzz -- -max_total_time=600 || true
+          cargo +nightly fuzz run parser_fuzz -- -max_total_time=600 || true
+        continue-on-error: true
+
+      - name: Upload Crash Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-crashes
+          path: |
+            vcs/fuzz/crashes/
+            vcs/fuzz/artifacts/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Check for Crashes
+        run: |
+          if [ -d "vcs/fuzz/crashes" ] && [ "$(ls -A vcs/fuzz/crashes)" ]; then
+            echo "::warning::Fuzzing discovered crashes - see artifacts"
+            ls -la vcs/fuzz/crashes/
+          fi
+
+  # ==========================================================================
+  # Performance Benchmarks - Compare to baselines
+  # ==========================================================================
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: critical-tests
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_benchmarks == 'true')
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            vcs/runner/vbench -> target
+
+      - name: Build vbench
+        run: cd vcs/runner/vbench && cargo build --release
+
+      - name: Download baseline (if exists)
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: vcs-ci.yml
+          branch: main
+          name: benchmark-baseline
+          path: vcs/baselines/
+        continue-on-error: true
+
+      - name: Run Benchmarks
+        run: |
+          cd vcs
+          ../vcs/runner/vbench/target/release/vbench run \
+            --config config/vcs.toml \
+            --format json \
+            --output benchmark-results.json
+
+      - name: Compare to Baseline
+        id: compare
+        run: |
+          cd vcs
+          if [ -f "baselines/benchmark-baseline.json" ]; then
+            ../vcs/runner/vbench/target/release/vbench compare \
+              --current benchmark-results.json \
+              --baseline baselines/benchmark-baseline.json \
+              --threshold 10.0 \
+              --format markdown \
+              --output benchmark-comparison.md
+
+            # Check for >10% regression
+            if grep -q "REGRESSION" benchmark-comparison.md; then
+              echo "::warning::Performance regression detected (>10%)"
+              echo "regression=true" >> $GITHUB_OUTPUT
+            else
+              echo "regression=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No baseline found - establishing new baseline"
+            echo "regression=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-baseline
+          path: vcs/benchmark-results.json
+          retention-days: 90
+
+      - name: Upload Comparison Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-comparison
+          path: vcs/benchmark-comparison.md
+          retention-days: 30
+
+      - name: Post PR Comment with Benchmark Results
+        if: github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'customSmallerIsBetter'
+          output-file-path: vcs/benchmark-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment-on-alert: true
+          alert-threshold: '110%'
+          fail-on-alert: false
+
+  # ==========================================================================
+  # L4 Performance Tests - Timing characteristics
+  # ==========================================================================
+  performance-tests:
+    name: L4 Performance Tests
+    runs-on: ubuntu-latest
+    needs: benchmarks
+    if: github.event_name == 'schedule'
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            vcs/runner/vtest -> target
+
+      - name: Build vtest
+        run: cd vcs/runner/vtest && cargo build --release
+
+      - name: Run L4 Performance Tests
+        run: |
+          cd vcs
+          ../vcs/runner/vtest/target/release/vtest run \
+            --level L4 \
+            --parallel 4 \
+            --format json \
+            --output l4-results.json \
+            --config config/vcs.toml
+
+          echo "L4 Performance test results (advisory):"
+          jq '.summary' l4-results.json
+
+      - name: Upload L4 Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-test-results
+          path: vcs/l4-results.json
+          retention-days: 30
+
+  # ==========================================================================
+  # Coverage Report Generation
+  # ==========================================================================
+  coverage:
+    name: Generate Coverage Report
+    runs-on: ubuntu-latest
+    needs: [critical-tests, standard-tests]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate Coverage Data
+        run: |
+          cargo llvm-cov --all-features --workspace \
+            --lcov --output-path lcov.info \
+            -- --test-threads=4
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Generate HTML Coverage Report
+        run: |
+          cargo llvm-cov --all-features --workspace \
+            --html --output-dir coverage-html
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-html/
+          retention-days: 30
+
+  # ==========================================================================
+  # Syntax Validation
+  # ==========================================================================
+  validate-syntax:
+    name: Validate Verum Syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate .vr file syntax
+        run: |
+          cd vcs
+          chmod +x scripts/maintenance/validate_syntax.sh
+          ./scripts/maintenance/validate_syntax.sh \
+            --report reports/syntax-validation.json \
+            --format json || true
+
+      - name: Upload Validation Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: syntax-validation
+          path: vcs/reports/syntax-validation.json
+          retention-days: 7
+
+  # ==========================================================================
+  # Generate Consolidated Report
+  # ==========================================================================
+  generate-report:
+    name: Generate Report
+    runs-on: ubuntu-latest
+    needs: [critical-tests, standard-tests, differential-tests]
+    if: always()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Consolidate results
+        run: |
+          mkdir -p vcs/reports
+          find artifacts/ -name '*.xml' -exec cp {} vcs/reports/ \; 2>/dev/null || true
+          find artifacts/ -name '*.json' -exec cp {} vcs/reports/ \; 2>/dev/null || true
+
+      - name: Generate HTML Report
+        run: |
+          cd vcs
+          python3 scripts/reporting/generate_report.py \
+            --input reports/ \
+            --output reports/vcs-consolidated-report.html \
+            --title "VCS CI Report - $(date +%Y-%m-%d)" \
+            --format html
+
+      - name: Generate Markdown Report
+        run: |
+          cd vcs
+          python3 scripts/reporting/generate_report.py \
+            --input reports/ \
+            --output reports/vcs-summary.md \
+            --title "VCS CI Summary" \
+            --format markdown
+
+      - name: Upload Consolidated Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: consolidated-report
+          path: |
+            vcs/reports/vcs-consolidated-report.html
+            vcs/reports/vcs-summary.md
+          retention-days: 30
+
+  # ==========================================================================
+  # Regression Check
+  # ==========================================================================
+  check-regressions:
+    name: Check Regressions
+    runs-on: ubuntu-latest
+    needs: [critical-tests, standard-tests]
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download current results
+        uses: actions/download-artifact@v4
+        with:
+          name: standard-test-results
+          path: vcs/reports/current/
+
+      - name: Download baseline
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: vcs-ci.yml
+          branch: main
+          name: standard-test-results
+          path: vcs/reports/baseline/
+        continue-on-error: true
+
+      - name: Run regression check
+        run: |
+          cd vcs
+          chmod +x scripts/ci/check_regressions.sh
+
+          if [ -f reports/baseline/l2-results.json ]; then
+            ./scripts/ci/check_regressions.sh \
+              --current reports/current/l2-results.json \
+              --baseline reports/baseline/l2-results.json \
+              --threshold 0 \
+              --output reports/regression-report.md \
+              --verbose || true
+          else
+            echo "No baseline found - skipping regression check"
+          fi
+
+      - name: Comment on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'vcs/reports/regression-report.md';
+
+            if (fs.existsSync(reportPath)) {
+              const report = fs.readFileSync(reportPath, 'utf8');
+              github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: '## VCS Regression Check\n\n' + report
+              });
+            }
+
+  # ==========================================================================
+  # Notify on Failures
+  # ==========================================================================
+  notify-failures:
+    name: Notify Failures
+    runs-on: ubuntu-latest
+    needs: [critical-tests, standard-tests, differential-tests]
+    if: failure() && github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Send failure notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          cd vcs
+          chmod +x scripts/reporting/notify_failures.sh
+
+          # Create a dummy results file for notification
+          echo '{"summary": {"total": 0, "passed": 0, "failed": 1}}' > /tmp/failed.json
+
+          ./scripts/reporting/notify_failures.sh \
+            --results /tmp/failed.json \
+            --channels slack,discord \
+            --title "VCS CI Pipeline Failed" \
+            --context "${{ github.ref_name }}" \
+            --url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+
+  # ==========================================================================
+  # Final Status Gate
+  # ==========================================================================
+  vcs-gate:
+    name: VCS Gate
+    runs-on: ubuntu-latest
+    needs: [critical-tests, standard-tests, differential-tests]
+    if: always()
+
+    steps:
+      - name: Check All Required Tests
+        run: |
+          echo "=============================================="
+          echo "         VCS Gate Status Check"
+          echo "=============================================="
+          echo ""
+
+          FAILED=0
+
+          if [ "${{ needs.critical-tests.result }}" != "success" ]; then
+            echo "::error::L0/L1 Critical tests failed or skipped"
+            FAILED=1
+          else
+            echo "L0/L1 Critical: PASSED"
+          fi
+
+          if [ "${{ needs.standard-tests.result }}" != "success" ]; then
+            echo "::error::L2 Standard tests failed or skipped"
+            FAILED=1
+          else
+            echo "L2 Standard: PASSED"
+          fi
+
+          if [ "${{ needs.differential-tests.result }}" != "success" ]; then
+            echo "::error::Differential tests failed or skipped"
+            FAILED=1
+          else
+            echo "Differential: PASSED"
+          fi
+
+          echo ""
+          echo "=============================================="
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::VCS Gate FAILED - Merge blocked"
+            exit 1
+          fi
+
+          echo "::notice::VCS Gate PASSED - All required tests successful"

@@ -1,0 +1,233 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, milestone, comprehensive, crypto
+// @timeout: 30000
+
+// Milestone 555: Simple cryptographic primitives
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn pow2(n: Int) -> Int {
+    let mut r = 1;
+    let mut i = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+fn has_bit(x: Int, k: Int) -> Int { (x / pow2(k)) % 2 }
+
+fn xor_int(a: Int, b: Int) -> Int {
+    let mut result = 0;
+    let mut k = 0;
+    while k < 16 {
+        let ba = has_bit(a, k);
+        let bb = has_bit(b, k);
+        if ba != bb { result = result + pow2(k); }
+        k = k + 1;
+    }
+    result
+}
+
+// 1. Caesar cipher
+fn caesar_encrypt(data: Arr8, n: Int, shift: Int) -> Arr8 {
+    let mut result = data;
+    let mut i = 0;
+    while i < n {
+        let v = get8(data, i);
+        result = set8(result, i, (v + shift) % 256);
+        i = i + 1;
+    }
+    result
+}
+
+fn caesar_decrypt(data: Arr8, n: Int, shift: Int) -> Arr8 {
+    let mut result = data;
+    let mut i = 0;
+    while i < n {
+        let v = get8(data, i);
+        result = set8(result, i, (v - shift + 256) % 256);
+        i = i + 1;
+    }
+    result
+}
+
+// 2. Vigenere cipher (XOR-based)
+fn vigenere_xor(data: Arr8, n: Int, key: Arr8, klen: Int) -> Arr8 {
+    let mut result = data;
+    let mut i = 0;
+    while i < n {
+        let d = get8(data, i);
+        let k = get8(key, i % klen);
+        result = set8(result, i, xor_int(d, k));
+        i = i + 1;
+    }
+    result
+}
+
+// 3. Simple hash function (DJB2-like)
+fn simple_hash(data: Arr8, n: Int) -> Int {
+    let mut hash = 5381;
+    let mut i = 0;
+    while i < n {
+        // hash = hash * 33 + data[i]
+        hash = hash * 33 + get8(data, i);
+        // Keep in 16-bit range
+        hash = hash % 65536;
+        i = i + 1;
+    }
+    hash
+}
+
+// 4. Linear congruential generator (LCG) - pseudo-random
+fn lcg_next(seed: Int) -> Int {
+    (seed * 1103515245 + 12345) % 65536
+}
+
+fn lcg_sequence(seed: Int, n: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut s = seed;
+    let mut i = 0;
+    while i < n {
+        s = lcg_next(s);
+        result = set8(result, i, s);
+        i = i + 1;
+    }
+    result
+}
+
+// 5. One-time pad (XOR with random key)
+fn otp_encrypt(data: Arr8, n: Int, key: Arr8) -> Arr8 {
+    let mut result = zeros();
+    let mut i = 0;
+    while i < n {
+        result = set8(result, i, xor_int(get8(data, i), get8(key, i)));
+        i = i + 1;
+    }
+    result
+}
+
+fn test_caesar() -> Int {
+    let data = Arr8 { v0: 72, v1: 69, v2: 76, v3: 76, v4: 79, v5: 0, v6: 0, v7: 0 }; // HELLO
+    let enc = caesar_encrypt(data, 5, 3);
+    // Each shifted by 3
+    assert_eq(get8(enc, 0), 75);
+    assert_eq(get8(enc, 1), 72);
+
+    let dec = caesar_decrypt(enc, 5, 3);
+    assert_eq(get8(dec, 0), 72);
+    assert_eq(get8(dec, 1), 69);
+    assert_eq(get8(dec, 4), 79);
+    1
+}
+
+fn test_caesar_roundtrip() -> Int {
+    let data = Arr8 { v0: 100, v1: 200, v2: 50, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let enc = caesar_encrypt(data, 3, 42);
+    let dec = caesar_decrypt(enc, 3, 42);
+    assert_eq(get8(dec, 0), 100);
+    assert_eq(get8(dec, 1), 200);
+    assert_eq(get8(dec, 2), 50);
+    1
+}
+
+fn test_vigenere_roundtrip() -> Int {
+    let data = Arr8 { v0: 10, v1: 20, v2: 30, v3: 40, v4: 50, v5: 0, v6: 0, v7: 0 };
+    let key = Arr8 { v0: 7, v1: 13, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let enc = vigenere_xor(data, 5, key, 2);
+    let dec = vigenere_xor(enc, 5, key, 2);
+    // XOR twice = identity
+    assert_eq(get8(dec, 0), 10);
+    assert_eq(get8(dec, 1), 20);
+    assert_eq(get8(dec, 2), 30);
+    assert_eq(get8(dec, 3), 40);
+    assert_eq(get8(dec, 4), 50);
+    1
+}
+
+fn test_hash_consistency() -> Int {
+    let data = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let h1 = simple_hash(data, 3);
+    let h2 = simple_hash(data, 3);
+    assert_eq(h1, h2); // Same input → same hash
+
+    // Different data → different hash
+    let data2 = Arr8 { v0: 1, v1: 2, v2: 4, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let h3 = simple_hash(data2, 3);
+    // h1 != h3 (very likely for a decent hash)
+    let ne1 = if h1 == h3 { 0 } else { 1 };
+    assert_eq(ne1, 1);
+    1
+}
+
+fn test_lcg_deterministic() -> Int {
+    let s1 = lcg_sequence(42, 4);
+    let s2 = lcg_sequence(42, 4);
+    // Same seed → same sequence
+    assert_eq(get8(s1, 0), get8(s2, 0));
+    assert_eq(get8(s1, 1), get8(s2, 1));
+    assert_eq(get8(s1, 2), get8(s2, 2));
+    assert_eq(get8(s1, 3), get8(s2, 3));
+
+    // Different seed → different sequence
+    let s3 = lcg_sequence(99, 4);
+    // First elements should differ
+    let ne2 = if get8(s1, 0) == get8(s3, 0) { 0 } else { 1 };
+    assert_eq(ne2, 1);
+    1
+}
+
+fn test_otp_roundtrip() -> Int {
+    let data = Arr8 { v0: 42, v1: 137, v2: 255, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let key = Arr8 { v0: 88, v1: 99, v2: 111, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let enc = otp_encrypt(data, 3, key);
+    let dec = otp_encrypt(enc, 3, key); // decrypt = encrypt with same key
+    assert_eq(get8(dec, 0), 42);
+    assert_eq(get8(dec, 1), 137);
+    assert_eq(get8(dec, 2), 255);
+    1
+}
+
+fn test_xor_properties() -> Int {
+    // XOR is commutative
+    assert_eq(xor_int(5, 3), xor_int(3, 5));
+    // XOR with self = 0
+    assert_eq(xor_int(42, 42), 0);
+    // XOR with 0 = identity
+    assert_eq(xor_int(42, 0), 42);
+    // XOR is associative
+    assert_eq(xor_int(xor_int(1, 2), 3), xor_int(1, xor_int(2, 3)));
+    1
+}
+
+fn main() -> Int {
+    test_caesar();
+    test_caesar_roundtrip();
+    test_vigenere_roundtrip();
+    test_hash_consistency();
+    test_lcg_deterministic();
+    test_otp_roundtrip();
+    test_xor_properties();
+    print("[OK] 555_milestone_aot");
+    0
+}

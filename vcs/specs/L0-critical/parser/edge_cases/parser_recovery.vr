@@ -1,0 +1,118 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, edge-cases, recovery, error, resilience
+
+// This file tests parser error recovery capabilities.
+// The parser should be able to continue after encountering errors
+// and report multiple diagnostics rather than stopping at the first error.
+
+// ERROR 1: Missing semicolon - parser should recover
+let x = 5
+let y = 10;  // This line should still parse
+
+// ERROR 2: Missing closing brace - parser should recover
+fn broken_function() {
+    let a = 1;
+    // Missing closing brace
+
+fn next_function() {
+    // This function should still be found
+    let b = 2;
+}
+
+// ERROR 3: Invalid token in expression
+let invalid = 5 @ 3;  // @ is not a valid operator
+let valid = 5 + 3;    // Should still parse
+
+// ERROR 4: Missing expression
+let incomplete = ;
+let complete = 42;
+
+// ERROR 5: Mismatched parentheses
+let mismatched = (1 + 2;
+let correct = (3 + 4);
+
+// ERROR 6: Invalid type annotation
+let bad_type: ???;
+let good_type: Int = 5;
+
+// ERROR 7: Invalid pattern
+let 123invalid = 5;
+let valid_binding = 10;
+
+// ERROR 8: Unclosed string
+let unclosed = "hello
+let closed = "world";
+
+// ERROR 9: Invalid match arm
+match x {
+    => broken,
+    A => valid,
+}
+
+// ERROR 10: Missing match body
+match value
+
+// ERROR 11: Invalid generic syntax
+fn bad_generic<>() { }
+fn good_generic<T>() { }
+
+// ERROR 12: Double operators
+let double = 5 ++ 3;
+let single = 5 + 3;
+
+// ERROR 13: Invalid struct field
+type BadStruct is {
+    ,
+    valid_field: Int,
+};
+
+// ERROR 14: Missing variant name
+type BadEnum is
+    | (Int)
+    | Valid(Int);
+
+// ERROR 15: Invalid parameter
+fn bad_params(, x: Int) { }
+fn good_params(x: Int) { }
+
+// ERROR 16: Unexpected token
+let surprise = fn;
+let normal = 42;
+
+// ERROR 17: Invalid link syntax
+use ;
+use valid.module;
+
+// ERROR 18: Malformed attribute
+@
+type Attributed is { };
+
+// ERROR 19: Invalid closure
+let bad_closure = |;
+let good_closure = || 42;
+
+// ERROR 20: Nested errors with recovery
+fn complex_errors() {
+    let a = 5
+    let b =
+    let c = 10;
+    if {
+        action();
+    }
+    for in items { }
+    let d = 20;
+}
+
+// After all errors, this should still be parseable
+fn after_errors() -> Int {
+    42
+}
+
+// Final valid code to ensure parser recovered
+type FinalType is {
+    value: Int,
+};
+
+let final_binding = FinalType { value: 100 };

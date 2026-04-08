@@ -1,0 +1,45 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, quantifiers, forall
+// @timeout: 5000
+
+/// Universal quantifier (forall) in various contexts.
+/// Grammar: forall_expr = 'forall' quantifier_binding { ',' quantifier_binding } '.' expression
+///          quantifier_binding = pattern [':' type_expr] ['in' expression] ['where' expression]
+
+// Type-based forall
+fn test_forall_typed() {
+    let p = forall x: Int . x + 0 == x;
+    let q = forall x: Int, y: Int . x + y == y + x;
+}
+
+// Collection-based forall
+fn test_forall_collection() {
+    let nums: List<Int> = [1, 2, 3, 4, 5];
+    let all_positive = forall x in nums . x > 0;
+}
+
+// Forall with guard (where clause)
+fn test_forall_guarded() {
+    let items: List<Int> = [-2, -1, 0, 1, 2];
+    let positive_are_small = forall x in items where x > 0 . x <= 10;
+}
+
+// Combined type and collection
+fn test_forall_combined() {
+    let range_check = forall i: Int in 0..100 . i >= 0;
+}
+
+// Nested forall
+fn test_forall_nested() {
+    let commutative = forall a: Int . forall b: Int . a + b == b + a;
+}
+
+fn main() {
+    test_forall_typed();
+    test_forall_collection();
+    test_forall_guarded();
+    test_forall_combined();
+    test_forall_nested();
+    print("Forall quantifier tests parsed");
+}

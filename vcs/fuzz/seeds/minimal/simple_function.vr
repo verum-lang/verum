@@ -1,0 +1,8 @@
+// Minimal: Simple function
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn main() {
+    let result = add(1, 2);
+}

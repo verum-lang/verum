@@ -1,0 +1,86 @@
+// @test: parse-recover
+// @tier: 0
+// @level: L0
+// @tags: parser, error-recovery, mixed, stress-test
+// @description: Stress test for parser recovery with interleaved valid and invalid code.
+//              Ensures the parser can extract maximum valid AST from partially broken input.
+
+// Valid function 1
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+// Invalid: missing closing paren and brace
+fn broken_1(x: Int {
+    x * 2
+
+// Valid function 2
+fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+// Invalid: bad type definition
+type = { };
+
+// Valid type
+type Color is Red | Green | Blue;
+
+// Invalid: wrong keyword order
+is type Backwards { x: Int };
+
+// Valid implement
+implement Color {
+    fn name(self) -> Text {
+        match self {
+            Red => "red",
+            Green => "green",
+            Blue => "blue",
+        }
+    }
+}
+
+// Invalid: expression at top level
+5 + 3;
+
+// Valid function 3
+fn subtract(a: Int, b: Int) -> Int {
+    a - b
+}
+
+// Invalid: incomplete match
+fn broken_match(x: Int) -> Int {
+    match x {
+        1 =>
+        2 => 20,
+    }
+}
+
+// Valid function 4
+fn divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+// Invalid: duplicate arrows
+fn broken_fn() -> -> Int {
+    42
+}
+
+// Valid generic function
+fn identity<T>(x: T) -> T {
+    x
+}
+
+// Invalid: unclosed string in type annotation
+type Bad is { name: " };
+
+// Valid final function to confirm recovery
+fn final_check() -> Int {
+    let a = add(1, 2);
+    let b = multiply(3, 4);
+    let c = subtract(10, 5);
+    a + b + c
+}

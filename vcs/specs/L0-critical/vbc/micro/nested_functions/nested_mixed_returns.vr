@@ -1,0 +1,64 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, mixed-returns
+// @timeout: 5000
+// @expected-exit: 0
+
+fn main() {
+    // Function returning Int
+    fn get_int() -> Int {
+        return 42;
+    }
+
+    // Function returning Float
+    fn get_float() -> Float {
+        return 3.14;
+    }
+
+    // Function returning Bool
+    fn get_bool(x: Int) -> Bool {
+        return x > 0;
+    }
+
+    // Function with nested function inside
+    fn outer(x: Int) -> Int {
+        fn inner(y: Int) -> Int {
+            return y * 2;
+        }
+        return inner(x) + 10;
+    }
+
+    // Multiple nested functions with different return types
+    fn multi_return(n: Int) -> Int {
+        fn return_int(a: Int) -> Int {
+            return a * 10;
+        }
+        fn return_bool(a: Int) -> Bool {
+            return a > 5;
+        }
+        fn conditional(a: Int) -> Int {
+            if return_bool(a) {
+                return return_int(a);
+            }
+            return 0;
+        }
+        return conditional(n);
+    }
+
+    // Test all functions
+    assert_eq(get_int(), 42);
+
+    let f = get_float();
+    assert(f > 3.0);
+    assert(f < 4.0);
+
+    assert_eq(get_bool(5), true);
+    assert_eq(get_bool(-5), false);
+
+    assert_eq(outer(5), 20);
+    assert_eq(outer(10), 30);
+
+    assert_eq(multi_return(3), 0);   // 3 <= 5 so returns 0
+    assert_eq(multi_return(7), 70);  // 7 > 5 so returns 7*10=70
+}

@@ -1,0 +1,329 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/darwin/errno_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, darwin, errno, bsd
+// @description: Tests for BSD errno constants on macOS.
+//
+// Coverage:
+// - Common errors (EPERM, ENOENT, EINTR, etc.)
+// - Non-blocking errors (EAGAIN, EWOULDBLOCK, etc.)
+// - Socket errors (ECONNREFUSED, ECONNRESET, etc.)
+// - Network errors (ENETDOWN, ENETUNREACH, etc.)
+// - File system errors (ELOOP, ENAMETOOLONG, etc.)
+// - Helper functions (is_retryable, is_connection_error, etc.)
+// - errno_name, errno_short_name
+//
+// Test Strategy:
+// - Verify errno values match BSD definitions
+// - Test categorization functions
+// - Verify error name lookup
+//
+// Platform: macOS (BSD errno values)
+// =============================================================================
+
+@cfg(target_os = "macos")
+module test.stdlib.sys.darwin.errno_test;
+
+mount core.sys.darwin.errno.{
+    // Common errors
+    EPERM, ENOENT, ESRCH, EINTR, EIO, ENXIO, E2BIG, ENOEXEC,
+    EBADF, ECHILD, EDEADLK, ENOMEM, EACCES, EFAULT, EBUSY,
+    EEXIST, EXDEV, ENODEV, ENOTDIR, EISDIR, EINVAL, ENFILE,
+    EMFILE, ENOTTY, ETXTBSY, EFBIG, ENOSPC, ESPIPE, EROFS,
+    EMLINK, EPIPE, EDOM, ERANGE,
+
+    // Non-blocking
+    EAGAIN, EWOULDBLOCK, EINPROGRESS, EALREADY,
+
+    // Socket errors
+    ENOTSOCK, EDESTADDRREQ, EMSGSIZE, EPROTOTYPE, ENOPROTOOPT,
+    EPROTONOSUPPORT, ESOCKTNOSUPPORT, ENOTSUP, EPFNOSUPPORT,
+    EAFNOSUPPORT, EADDRINUSE, EADDRNOTAVAIL,
+
+    // Network errors
+    ENETDOWN, ENETUNREACH, ENETRESET, ECONNABORTED, ECONNRESET,
+    ENOBUFS, EISCONN, ENOTCONN, ESHUTDOWN, ETIMEDOUT, ECONNREFUSED,
+    EHOSTDOWN, EHOSTUNREACH,
+
+    // File system errors
+    ELOOP, ENAMETOOLONG, ENOTEMPTY, EDQUOT, ESTALE,
+    ENOLCK, ENOSYS, EOVERFLOW, ECANCELED,
+
+    // Helper functions
+    is_retryable,
+    is_connection_error,
+    is_permission_error,
+    is_not_found,
+    is_resource_exhausted,
+    is_would_block,
+    errno_name,
+    errno_short_name,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Common Errno Values Tests
+// =============================================================================
+
+@test
+fn test_common_errno_values() {
+    // BSD errno values
+    assert(EPERM == 1);
+    assert(ENOENT == 2);
+    assert(ESRCH == 3);
+    assert(EINTR == 4);
+    assert(EIO == 5);
+    assert(ENXIO == 6);
+    assert(E2BIG == 7);
+    assert(ENOEXEC == 8);
+    assert(EBADF == 9);
+    assert(ECHILD == 10);
+    assert(EDEADLK == 11);
+    assert(ENOMEM == 12);
+    assert(EACCES == 13);
+    assert(EFAULT == 14);
+    assert(EBUSY == 16);
+    assert(EEXIST == 17);
+    assert(EINVAL == 22);
+
+    print("Common errno values tests passed");
+}
+
+// =============================================================================
+// Non-blocking Errno Values Tests
+// =============================================================================
+
+@test
+fn test_nonblocking_errno_values() {
+    // EAGAIN and EWOULDBLOCK
+    assert(EAGAIN == 35);
+    assert(EWOULDBLOCK == EAGAIN);  // Same on BSD
+
+    // In-progress operations
+    assert(EINPROGRESS == 36);
+    assert(EALREADY == 37);
+
+    print("Non-blocking errno values tests passed");
+}
+
+// =============================================================================
+// Socket Errno Values Tests
+// =============================================================================
+
+@test
+fn test_socket_errno_values() {
+    // Socket-specific errors (BSD values)
+    assert(ENOTSOCK == 38);
+    assert(EDESTADDRREQ == 39);
+    assert(EMSGSIZE == 40);
+    assert(EPROTOTYPE == 41);
+    assert(ENOPROTOOPT == 42);
+    assert(EPROTONOSUPPORT == 43);
+    assert(ESOCKTNOSUPPORT == 44);
+    assert(ENOTSUP == 45);
+    assert(EPFNOSUPPORT == 46);
+    assert(EAFNOSUPPORT == 47);
+    assert(EADDRINUSE == 48);
+    assert(EADDRNOTAVAIL == 49);
+
+    print("Socket errno values tests passed");
+}
+
+// =============================================================================
+// Network Errno Values Tests
+// =============================================================================
+
+@test
+fn test_network_errno_values() {
+    // Network-specific errors
+    assert(ENETDOWN == 50);
+    assert(ENETUNREACH == 51);
+    assert(ENETRESET == 52);
+    assert(ECONNABORTED == 53);
+    assert(ECONNRESET == 54);
+    assert(ENOBUFS == 55);
+    assert(EISCONN == 56);
+    assert(ENOTCONN == 57);
+    assert(ESHUTDOWN == 58);
+    assert(ETIMEDOUT == 60);
+    assert(ECONNREFUSED == 61);
+    assert(EHOSTDOWN == 64);
+    assert(EHOSTUNREACH == 65);
+
+    print("Network errno values tests passed");
+}
+
+// =============================================================================
+// Filesystem Errno Values Tests
+// =============================================================================
+
+@test
+fn test_filesystem_errno_values() {
+    // Filesystem-specific errors
+    assert(ELOOP == 62);
+    assert(ENAMETOOLONG == 63);
+    assert(ENOTEMPTY == 66);
+    assert(EDQUOT == 69);
+    assert(ESTALE == 70);
+    assert(ENOLCK == 77);
+    assert(ENOSYS == 78);
+    assert(EOVERFLOW == 84);
+    assert(ECANCELED == 89);
+
+    print("Filesystem errno values tests passed");
+}
+
+// =============================================================================
+// is_retryable Tests
+// =============================================================================
+
+@test
+fn test_is_retryable() {
+    // Retryable errors
+    assert(is_retryable(EAGAIN));
+    assert(is_retryable(EWOULDBLOCK));
+    assert(is_retryable(EINTR));
+
+    // Non-retryable
+    assert(!is_retryable(EPERM));
+    assert(!is_retryable(ENOENT));
+    assert(!is_retryable(EINVAL));
+    assert(!is_retryable(ECONNREFUSED));
+
+    print("is_retryable tests passed");
+}
+
+// =============================================================================
+// is_connection_error Tests
+// =============================================================================
+
+@test
+fn test_is_connection_error() {
+    // Connection errors
+    assert(is_connection_error(ECONNREFUSED));
+    assert(is_connection_error(ECONNRESET));
+    assert(is_connection_error(ECONNABORTED));
+    assert(is_connection_error(ETIMEDOUT));
+    assert(is_connection_error(ENETUNREACH));
+    assert(is_connection_error(EHOSTUNREACH));
+
+    // Non-connection errors
+    assert(!is_connection_error(EPERM));
+    assert(!is_connection_error(ENOENT));
+    assert(!is_connection_error(EAGAIN));
+
+    print("is_connection_error tests passed");
+}
+
+// =============================================================================
+// is_permission_error Tests
+// =============================================================================
+
+@test
+fn test_is_permission_error() {
+    // Permission errors
+    assert(is_permission_error(EPERM));
+    assert(is_permission_error(EACCES));
+
+    // Non-permission errors
+    assert(!is_permission_error(ENOENT));
+    assert(!is_permission_error(EAGAIN));
+    assert(!is_permission_error(EINVAL));
+
+    print("is_permission_error tests passed");
+}
+
+// =============================================================================
+// is_not_found Tests
+// =============================================================================
+
+@test
+fn test_is_not_found() {
+    // Not found errors
+    assert(is_not_found(ENOENT));
+    assert(is_not_found(ESRCH));
+
+    // Found errors
+    assert(!is_not_found(EPERM));
+    assert(!is_not_found(EEXIST));
+
+    print("is_not_found tests passed");
+}
+
+// =============================================================================
+// is_would_block Tests
+// =============================================================================
+
+@test
+fn test_is_would_block() {
+    // Would block errors
+    assert(is_would_block(EAGAIN));
+    assert(is_would_block(EWOULDBLOCK));
+
+    // Non-blocking errors
+    assert(!is_would_block(EPERM));
+    assert(!is_would_block(EINTR));
+
+    print("is_would_block tests passed");
+}
+
+// =============================================================================
+// errno_name Tests
+// =============================================================================
+
+@test
+fn test_errno_name() {
+    // Common error names (errno_name returns full descriptive name)
+    assert(errno_name(EPERM) == "EPERM: Operation not permitted");
+    assert(errno_name(ENOENT) == "ENOENT: No such file or directory");
+    assert(errno_name(ESRCH) == "ESRCH: No such process");
+    assert(errno_name(EINTR) == "EINTR: Interrupted system call");
+    assert(errno_name(EIO) == "EIO: Input/output error");
+    assert(errno_name(EAGAIN) == "EAGAIN: Resource temporarily unavailable");
+    assert(errno_name(ENOMEM) == "ENOMEM: Cannot allocate memory");
+    assert(errno_name(EACCES) == "EACCES: Permission denied");
+    assert(errno_name(EINVAL) == "EINVAL: Invalid argument");
+
+    // Network error names
+    assert(errno_name(ECONNREFUSED) == "ECONNREFUSED: Connection refused");
+    assert(errno_name(ECONNRESET) == "ECONNRESET: Connection reset by peer");
+    assert(errno_name(ETIMEDOUT) == "ETIMEDOUT: Operation timed out");
+
+    // Short names (errno_short_name returns just the constant name)
+    let short_perm = errno_short_name(EPERM);
+    assert(short_perm == "EPERM");
+    assert(errno_short_name(ENOENT) == "ENOENT");
+    assert(errno_short_name(EAGAIN) == "EAGAIN");
+
+    print("errno_name tests passed");
+}
+
+// =============================================================================
+// is_resource_exhausted Tests
+// =============================================================================
+
+@test
+fn test_is_resource_exhausted() {
+    // Resource exhaustion errors
+    assert(is_resource_exhausted(ENOMEM));
+    assert(is_resource_exhausted(ENOSPC));
+    assert(is_resource_exhausted(EMFILE));
+    assert(is_resource_exhausted(ENFILE));
+    assert(is_resource_exhausted(ENOBUFS));
+
+    // Non-exhaustion errors
+    assert(!is_resource_exhausted(EPERM));
+    assert(!is_resource_exhausted(ENOENT));
+
+    print("is_resource_exhausted tests passed");
+}

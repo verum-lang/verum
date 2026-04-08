@@ -1,0 +1,29 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: module, multi_file, impl, methods
+// @expect: pass
+
+// Multi-file: import type with implement block and call methods.
+// Simplified to isolate the bug.
+
+mount module_stack.{Stack, stack_new};
+
+fn main() -> Int {
+    let mut s = stack_new();
+    s.push(10);
+
+    let sz = s.len();
+    print(f"len = {sz}");
+
+    let top = s.pop();
+    print(f"pop = {top}");
+
+    if top != 10 {
+        print(f"FAIL: pop = {top}, expected 10");
+        return 1;
+    }
+
+    print("PASS: multi-file impl methods work");
+    0
+}

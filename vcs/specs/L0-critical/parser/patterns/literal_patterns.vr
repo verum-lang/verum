@@ -1,0 +1,188 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, patterns, literal
+
+// Helper types
+type Maybe<T> is None | Some(T);
+
+// Helper functions
+fn start() { }
+fn stop() { }
+fn pause() { }
+fn resume() { }
+fn empty_handler() { }
+fn unknown_command() { }
+fn always_zero() -> Int { 0 }
+fn is_enabled() -> Bool { true }
+fn found_answer() { }
+fn compute() -> Int { 42 }
+
+fn test_integer_literal_patterns() {
+    let number = 42;
+
+    // Integer literal patterns
+    // Note: Negative literals as patterns require parentheses or guard
+    match number {
+        0 => "zero",
+        1 => "one",
+        42 => "answer",
+        n if n == -1 => "negative one",
+        1000000 => "million",
+        _ => "other",
+    };
+}
+
+fn test_float_literal_patterns() {
+    let value = 3.14;
+
+    // Float literal patterns
+    // Note: Negative literals as patterns require guards
+    match value {
+        0.0 => "zero",
+        1.0 => "one",
+        3.14 => "pi approx",
+        v if v == -273.15 => "absolute zero",
+        _ => "other",
+    };
+}
+
+fn test_boolean_literal_patterns() {
+    let flag = true;
+
+    // Boolean literal patterns
+    match flag {
+        true => "yes",
+        false => "no",
+    };
+}
+
+fn test_string_literal_patterns() {
+    let command = "start";
+
+    // String literal patterns
+    match command {
+        "start" => start(),
+        "stop" => stop(),
+        "pause" => pause(),
+        "resume" => resume(),
+        "" => empty_handler(),
+        _ => unknown_command(),
+    };
+}
+
+fn test_character_literal_patterns() {
+    let char_val = 'a';
+
+    // Character literal patterns
+    match char_val {
+        'a' => "letter a",
+        'A' => "capital A",
+        '0' => "digit zero",
+        ' ' => "space",
+        '\n' => "newline",
+        '\t' => "tab",
+        '\\' => "backslash",
+        '\'' => "single quote",
+        _ => "other char",
+    };
+}
+
+fn test_none_literal_pattern() {
+    let maybe: Maybe<Int> = None;
+
+    // None literal pattern (nil replaced with None)
+    match maybe {
+        None => "nothing",
+        Some(x) => "something",
+    };
+}
+
+fn test_byte_literal_patterns() {
+    let byte = 0x0A;
+
+    // Byte literal patterns (if supported)
+    match byte {
+        0x00 => "null byte",
+        0xFF => "max byte",
+        0x0A => "newline byte",
+        _ => "other byte",
+    };
+}
+
+fn test_binary_literal_patterns() {
+    let bits = 0b1010;
+
+    // Binary literal patterns (if supported)
+    match bits {
+        0b0000 => "all zeros",
+        0b1111 => "all ones",
+        0b1010 => "alternating",
+        _ => "other",
+    };
+}
+
+fn test_octal_literal_patterns() {
+    let octal = 0o777;
+
+    // Octal literal patterns (if supported)
+    match octal {
+        0o777 => "full permissions",
+        0o644 => "file permissions",
+        0o755 => "executable permissions",
+        _ => "other",
+    };
+}
+
+fn test_multiple_literals_with_or_pattern() {
+    let char_val = 'a';
+
+    // Multiple literals with or-pattern
+    match char_val {
+        'a' | 'e' | 'i' | 'o' | 'u' => "vowel",
+        '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => "digit",
+        _ => "other",
+    };
+}
+
+fn test_literal_in_match_binding() {
+    // Literal patterns in match expressions (let literal patterns are advanced)
+    match always_zero() {
+        0 => { },
+        _ => { },
+    };
+    match is_enabled() {
+        true => { },
+        false => { },
+    };
+}
+
+// Literal in function parameter (if supported)
+fn handle_zero(n: Int) {
+    if n == 0 {
+        println("Got zero");
+    }
+}
+
+fn test_literal_in_match_expr() {
+    // Literal patterns work in match
+    match compute() {
+        42 => found_answer(),
+        _ => { },
+    };
+}
+
+fn test_scientific_notation_literals() {
+    let sci_value = 1e10;
+
+    // Scientific notation literals (if supported)
+    // Note: Negative exponent literals in patterns require guards
+    match sci_value {
+        v if v == 1e10 => "ten billion",
+        v if v == 1.5e-3 => "small",
+        _ => "other",
+    };
+}
+
+// Helper function
+fn println<T>(x: T) { }

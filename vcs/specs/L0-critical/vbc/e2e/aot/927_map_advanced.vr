@@ -1,0 +1,87 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @expected-exit: 0
+
+fn sum_values(m: Map<Text, Int>, keys: List<Text>) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while (i < keys.len()) {
+        total = total + m.get(keys[i]);
+        i = i + 1;
+    }
+    total
+}
+
+fn max_value(m: Map<Text, Int>, keys: List<Text>) -> Int {
+    let mut best = m.get(keys[0]);
+    let mut i = 1;
+    while (i < keys.len()) {
+        let v = m.get(keys[i]);
+        if (v > best) {
+            best = v;
+        }
+        i = i + 1;
+    }
+    best
+}
+
+fn main() -> Int {
+    // Test 1: Map.get in function parameters
+    let mut scores = Map.new();
+    scores.insert("alice", 95);
+    scores.insert("bob", 87);
+    scores.insert("carol", 92);
+
+    let keys = ["alice", "bob", "carol"];
+    let total = sum_values(scores, keys);
+    if (total != 274) {
+        print(f"FAIL sum: {total}");
+        return 1;
+    }
+
+    // Test 2: Map.get in comparisons
+    let best = max_value(scores, keys);
+    if (best != 95) {
+        print(f"FAIL max: {best}");
+        return 1;
+    }
+
+    // Test 3: Map.get with integer keys
+    let mut counts = Map.new();
+    counts.insert(1, 100);
+    counts.insert(2, 200);
+    counts.insert(3, 300);
+
+    let sum = counts.get(1) + counts.get(2) + counts.get(3);
+    if (sum != 600) {
+        print(f"FAIL int_keys: {sum}");
+        return 1;
+    }
+
+    // Test 4: Map.remove returns value
+    let removed = counts.remove(2);
+    if (removed != 200) {
+        print(f"FAIL remove: {removed}");
+        return 1;
+    }
+
+    // Test 5: Map.contains_key
+    if (counts.contains_key(2) == true) {
+        print("FAIL contains_key: should be false after remove");
+        return 1;
+    }
+    if (counts.contains_key(1) != true) {
+        print("FAIL contains_key: should be true for existing key");
+        return 1;
+    }
+
+    // Test 6: Map.len
+    if (counts.len() != 2) {
+        print(f"FAIL len: {counts.len()}");
+        return 1;
+    }
+
+    print("927_map_advanced: PASS");
+    0
+}

@@ -1,0 +1,78 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: closure, mutable, capture, counter, e2e
+// @description: Test closures that capture and mutate variables
+
+fn make_counter() -> fn() -> Int {
+    let mut count = 0;
+    || -> Int {
+        count = count + 1;
+        count
+    }
+}
+
+fn make_accumulator(init: Int) -> fn(Int) -> Int {
+    let mut total = init;
+    |x: Int| -> Int {
+        total = total + x;
+        total
+    }
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Counter
+    let counter = make_counter();
+    let c1 = counter();
+    let c2 = counter();
+    let c3 = counter();
+    if c1 != 1 {
+        print(f"FAIL 1: c1 = {c1}");
+        f = f + 1;
+    } else if c2 != 2 {
+        print(f"FAIL 1: c2 = {c2}");
+        f = f + 1;
+    } else if c3 != 3 {
+        print(f"FAIL 1: c3 = {c3}");
+        f = f + 1;
+    } else {
+        print("  counter: OK");
+    }
+
+    // Test 2: Independent counters
+    let counter_a = make_counter();
+    let counter_b = make_counter();
+    counter_a();
+    counter_a();
+    counter_b();
+    let a3 = counter_a();
+    let b2 = counter_b();
+    if a3 != 3 {
+        print(f"FAIL 2: a3 = {a3}");
+        f = f + 1;
+    } else if b2 != 2 {
+        print(f"FAIL 2: b2 = {b2}");
+        f = f + 1;
+    } else {
+        print("  independent: OK");
+    }
+
+    // Test 3: Accumulator
+    let acc = make_accumulator(100);
+    acc(10);
+    acc(20);
+    let result = acc(30);
+    if result != 160 {
+        print(f"FAIL 3: acc = {result}");
+        f = f + 1;
+    } else {
+        print("  accumulator: OK");
+    }
+
+    if f == 0 {
+        print("All mutable closure tests passed");
+    }
+    f
+}

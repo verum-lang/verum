@@ -1,0 +1,215 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, trie, insert, search, prefix, integer_keys
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Trie operations using integer-encoded keys over a 4-symbol alphabet (0-3).
+// Keys are sequences of symbols 0-3, stored in [Int; 16] with a length.
+//
+// Trie represented as a flat node array with ALPHA=4 children per node:
+//   children[node * 4 + d] = child node index (0 = no child)
+//   is_end[node]           = 1 if this node marks end of inserted key
+// Max 16 nodes; root = node 0; node count stored in a shared [Int; 16] working buffer.
+// children: [Int; 64] (16 nodes * 4 symbols)
+// is_end:   [Int; 16] (16 nodes)
+
+// Initialize trie storage.
+fn trie_init(children: [Int; 64], is_end: [Int; 16]) {
+    let mut i = 0;
+    while i < 64 { children[i] = 0; i = i + 1; }
+    let mut j = 0;
+    while j < 16 { is_end[j] = 0; j = j + 1; }
+}
+
+// Insert key[0..klen) using a mutable node counter (passed by array ref trick).
+// nc[0] = next available node id; starts at 1 (root = 0 is pre-allocated).
+fn trie_insert(children: [Int; 64], is_end: [Int; 16], nc: [Int; 16],
+               key: [Int; 16], klen: Int) {
+    let mut node = 0;
+    let mut i = 0;
+    while i < klen {
+        let d = key[i];
+        let slot = node * 4 + d;
+        if children[slot] == 0 {
+            children[slot] = nc[0];
+            nc[0] = nc[0] + 1;
+        }
+        node = children[slot];
+        i = i + 1;
+    }
+    is_end[node] = 1;
+}
+
+// Exact key search: returns 1 if key exists in trie.
+fn trie_search(children: [Int; 64], is_end: [Int; 16],
+               key: [Int; 16], klen: Int) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    while i < klen {
+        let d = key[i];
+        let slot = node * 4 + d;
+        if children[slot] == 0 { return 0; }
+        node = children[slot];
+        i = i + 1;
+    }
+    is_end[node]
+}
+
+// Prefix search: returns 1 if any inserted key starts with prefix[0..plen).
+fn trie_starts_with(children: [Int; 64],
+                    prefix: [Int; 16], plen: Int) -> Int {
+    let mut node = 0;
+    let mut i = 0;
+    while i < plen {
+        let d = prefix[i];
+        let slot = node * 4 + d;
+        if children[slot] == 0 { return 0; }
+        node = children[slot];
+        i = i + 1;
+    }
+    1
+}
+
+fn test_basic_insert_search() {
+    let mut ch = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ie = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nc = [1, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Insert [0, 1, 2] and [0, 1, 3] and [2, 3]
+    let mut k1 = [0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut k2 = [0, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut k3 = [2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    trie_insert(ch, ie, nc, k1, 3);
+    trie_insert(ch, ie, nc, k2, 3);
+    trie_insert(ch, ie, nc, k3, 2);
+
+    assert_eq(trie_search(ch, ie, k1, 3), 1);
+    assert_eq(trie_search(ch, ie, k2, 3), 1);
+    assert_eq(trie_search(ch, ie, k3, 2), 1);
+
+    // [0, 1] exists as prefix but is not inserted as a key
+    let mut kp = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(trie_search(ch, ie, kp, 2), 0);
+
+    // [3, 0] not inserted
+    let mut km = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(trie_search(ch, ie, km, 2), 0);
+    print("basic_insert_search: ok");
+}
+
+fn test_prefix_queries() {
+    let mut ch = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ie = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nc = [1, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Insert [1, 2, 3, 0] and [1, 2, 1]
+    let mut ka = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut kb = [1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    trie_insert(ch, ie, nc, ka, 4);
+    trie_insert(ch, ie, nc, kb, 3);
+
+    // [1, 2] is a prefix of both
+    let mut px = [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(trie_starts_with(ch, px, 2), 1);
+
+    // [1, 2, 3] is prefix of [1,2,3,0] but not a key itself
+    let mut py = [1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(trie_starts_with(ch, py, 3), 1);
+    assert_eq(trie_search(ch, ie, py, 3), 0);
+
+    // [3] not a prefix of anything
+    let mut pz = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(trie_starts_with(ch, pz, 1), 0);
+    print("prefix_queries: ok");
+}
+
+fn test_duplicate_and_node_count() {
+    let mut ch = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ie = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nc = [1, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Insert [2, 1] twice: only 2 extra nodes created (node for 2, node for 1)
+    let mut key = [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    trie_insert(ch, ie, nc, key, 2);
+    trie_insert(ch, ie, nc, key, 2);
+    assert_eq(trie_search(ch, ie, key, 2), 1);
+    // nc[0] = 3: root(0), node for digit 2 at root (1), node for digit 1 (2), next=3
+    assert_eq(nc[0], 3);
+
+    // Insert sibling [2, 0]: shares first node (symbol 2 from root)
+    let mut sib = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    trie_insert(ch, ie, nc, sib, 2);
+    assert_eq(trie_search(ch, ie, sib, 2), 1);
+    // One new node added for symbol 0 from the shared node: nc[0] = 4
+    assert_eq(nc[0], 4);
+    print("duplicate_and_node_count: ok");
+}
+
+fn test_empty_and_single() {
+    let mut ch = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+    let mut ie = [0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+    let mut nc = [1, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0];
+
+    // Nothing inserted: search returns 0, prefix returns 0
+    let mut k = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(trie_search(ch, ie, k, 2), 0);
+    assert_eq(trie_starts_with(ch, k, 1), 0);
+
+    // Insert a single 1-symbol key [3]
+    let mut k1 = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    trie_insert(ch, ie, nc, k1, 1);
+    assert_eq(trie_search(ch, ie, k1, 1), 1);
+    // Prefix [3] exists and also matches exact
+    assert_eq(trie_starts_with(ch, k1, 1), 1);
+    // [3, 0] was not inserted
+    let mut k2 = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(trie_search(ch, ie, k2, 2), 0);
+    print("empty_and_single: ok");
+}
+
+fn main() -> Int {
+    test_basic_insert_search();
+    test_prefix_queries();
+    test_duplicate_and_node_count();
+    test_empty_and_single();
+    print("[OK] 555_interp_trie_ops");
+    0
+}

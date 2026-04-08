@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: all
+// @level: L1
+// @tags: types, subtyping, variance
+
+/// Test for type variance rules.
+/// Variance determines how subtyping works with generic types.
+
+// For reference:
+// Covariant: if A <: B, then F<A> <: F<B>  (output position)
+// Contravariant: if A <: B, then F<B> <: F<A>  (input position)
+// Invariant: F<A> and F<B> are unrelated  (both input and output)
+
+// Types for demonstration
+type Animal is { name: Text };
+type Dog is { name: Text, breed: Text };
+type Cat is { name: Text, color: Text };
+
+// Dog and Cat are subtypes of Animal (structurally or via protocol)
+type IsAnimal is protocol {
+    fn name(&self) -> Text;
+};
+
+implement IsAnimal for Animal {
+    fn name(&self) -> Text { self.name.clone() }
+}
+
+implement IsAnimal for Dog {
+    fn name(&self) -> Text { self.name.clone() }
+}
+
+implement IsAnimal for Cat {
+    fn name(&self) -> Text { self.name.clone() }
+}
+
+fn main() {
+    // Covariance: immutable references are covariant
+    let dog: Dog = Dog { name: "Buddy", breed: "Labrador" };
+    let dog_ref: &Dog = &dog;
+    let animal_ref: &IsAnimal = dog_ref;  // &Dog <: &Animal (covariant)
+
+    // Covariance: Box/Heap in read position
+    let boxed_dog: Heap<Dog> = Heap.new(Dog { name: "Max", breed: "Beagle" });
+    fn read_animal(h: &Heap<IsAnimal>) {
+        print(h.name());
+    }
+    // read_animal(&boxed_dog);  // Works if Heap is covariant in reading
+
+    // Covariance: return types
+    fn get_dog() -> Dog {
+        Dog { name: "Rex", breed: "Shepherd" }
+    }
+    fn get_animal() -> IsAnimal {
+        get_dog()  // Dog <: Animal, so this is valid
+    }
+
+    // Contravariance: function parameters
+    fn feed_animal(animal: &IsAnimal) {
+        print(f"Feeding {animal.name()}");
+    }
+    fn feed_dog(dog: &Dog) {
+        feed_animal(dog);  // OK: Dog <: Animal
+    }
+
+    // Contravariance in function types
+    type AnimalHandler is fn(&IsAnimal);
+    type DogHandler is fn(&Dog);
+
+    let animal_handler: AnimalHandler = |a| print(f"Handling animal: {a.name()}");
+    // AnimalHandler can be used where DogHandler is expected (contravariant parameter)
+    let dog_handler: DogHandler = animal_handler;  // fn(&Animal) <: fn(&Dog)
+
+    // Invariance: mutable references
+    let mut dog2 = Dog { name: "Spot", breed: "Dalmatian" };
+    let dog_mut: &mut Dog = &mut dog2;
+    // let animal_mut: &mut IsAnimal = dog_mut;  // ERROR: &mut is invariant
+    // Because: could write Cat into &mut Animal that points to Dog
+
+    // Invariance: List (in general position)
+    let dogs: List<Dog> = [
+        Dog { name: "Fido", breed: "Poodle" },
+        Dog { name: "Luna", breed: "Husky" },
+    ];
+    // let animals: List<Animal> = dogs;  // ERROR: List is invariant
+    // Because: could push Cat into List<Animal> that is actually List<Dog>
+
+    // Safe covariant access patterns
+    fn count_animals<T: IsAnimal>(animals: &List<T>) -> Int {
+        animals.len()
+    }
+    let count = count_animals(&dogs);  // OK: read-only access
+
+    // Covariance with iterators (producing values)
+    let dog_iter = dogs.iter();  // Iterator<Item = &Dog>
+    // Can use where Iterator<Item = &Animal> expected (for reading)
+
+    // Contravariance with consumers
+    fn print_animals(printer: fn(&IsAnimal)) {
+        let cat = Cat { name: "Whiskers", color: "Orange" };
+        printer(&cat);
+    }
+    print_animals(|a| print(a.name()));
+
+    // Bivariance example (phantom types have no variance constraints)
+    type Marker<T> is ();  // T is phantom, so Marker<Dog> = Marker<Cat>
+
+    // Assertions
+    assert(dog.name == "Buddy");
+    assert(animal_ref.name() == "Buddy");
+    assert(count == 2);
+}

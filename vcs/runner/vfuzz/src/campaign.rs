@@ -34,7 +34,6 @@
 //! runner.run().await?;
 //! ```
 
-use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1749,7 +1748,7 @@ mod extended_tests {
         assert_eq!(scheduler.len(), 2);
 
         // Selection should work
-        let mut rng = rand::rng();
+        let mut rng = rand::thread_rng();
         let selected = scheduler.select(&mut rng);
         assert!(selected.is_some());
     }

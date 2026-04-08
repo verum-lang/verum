@@ -1,0 +1,126 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, booleans, expressions
+
+// Boolean expressions with literals
+
+fn expensive_call() -> Bool { true }
+fn validate(input: Text) -> Bool { true }
+fn is_ready() -> Bool { true }
+fn is_connected() -> Bool { true }
+
+fn test_short_circuit() {
+    // Short-circuit evaluation
+    let short_and = false && expensive_call();
+    let short_or = true || expensive_call();
+}
+
+fn test_boolean_algebra() {
+    let x = true;
+    let a = true;
+    let b = false;
+
+    // Boolean algebra identities
+    let identity_and = x && true;
+    let identity_or = x || false;
+    let absorb_and = x && false;
+    let absorb_or = x || true;
+
+    // De Morgan's laws
+    let demorgan1 = !(a && b);
+    let demorgan2 = !(a || b);
+}
+
+fn test_chained_operations() {
+    let a = true;
+    let b = false;
+    let c = true;
+    let d = false;
+
+    // Chained logical operations
+    let chain_and = a && b && c && d;
+    let chain_or = a || b || c || d;
+    let mixed = a && b || c && d;
+    let complex = (a || b) && (c || d);
+}
+
+fn test_comparisons() {
+    // Comparison producing boolean
+    let gt = 5 > 3;
+    let lt = 5 < 3;
+    let ge = 5 >= 5;
+    let le = 5 <= 5;
+    let eq = 5 == 5;
+    let ne = 5 != 5;
+
+    // Chained comparisons
+    let x = 50;
+    let in_range = 0 <= x && x < 100;
+}
+
+fn test_function_results() {
+    let input = "test";
+
+    // Boolean from function calls
+    let valid = validate(input);
+    let ready = is_ready() && is_connected();
+}
+
+// Boolean with require/ensure
+fn process(data: Int) -> Int
+    requires data > 0
+    ensures result >= 0
+{
+    data
+}
+
+fn test_coercion() {
+    // Boolean coercion
+    let from_int = 1 != 0;
+}
+
+fn test_pattern_guards() {
+    let value = Some(50);
+
+    // Boolean in pattern guards
+    match value {
+        Some(x) if x > 0 && x < 100 => x
+        Some(x) if x == 0 => 0
+        Some(_) => -1
+        None => -2
+    };
+}
+
+fn test_accumulation() {
+    let items = [1, 2, 3];
+
+    // Boolean accumulation
+    let mut all_pass = true;
+    for item in items {
+        all_pass = all_pass && (item > 0);
+    }
+
+    let mut any_pass = false;
+    for item in items {
+        any_pass = any_pass || (item > 2);
+    }
+}
+
+fn test_null_coalescing() {
+    let enabled: Maybe<Bool> = Some(true);
+    let debug: Maybe<Bool> = None;
+
+    // Boolean with null coalescing
+    let is_enabled = enabled ?? true;
+    let is_debug = debug ?? false;
+}
+
+fn test_conditional_expressions() {
+    let is_active = true;
+    let success = false;
+
+    // Boolean in ternary-style expressions
+    let status = if is_active { "active" } else { "inactive" };
+    let code = if success { 0 } else { 1 };
+}

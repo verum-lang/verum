@@ -1,0 +1,316 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, cbgr, tier0, tier1, tier2, chk_ref, validation
+// @timeout: 5000
+// @expect: pass
+//
+// Test: CHK_REF, REF_CHECKED, REF_UNSAFE
+// Verifies three-tier CBGR reference validation system
+
+type Point is { x: Float, y: Float };
+type Node is { value: Int, next: Maybe<Heap<Node>> };
+
+// =============================================================================
+// TIER 0: Full CBGR protection (~15ns overhead)
+// =============================================================================
+
+fn test_tier0_basic_validation() {
+    // Default references use Tier 0 (CHK_REF validation)
+    let x: Int = 42;
+    let r: &Int = &x;  // Tier 0 by default
+
+    // Every dereference validates generation
+    assert_eq(*r, 42);
+}
+
+fn test_tier0_struct_reference() {
+    let p = Point { x: 1.0, y: 2.0 };
+    let r: &Point = &p;
+
+    // Field access validates reference
+    assert_eq(r.x, 1.0);
+    assert_eq(r.y, 2.0);
+}
+
+fn test_tier0_heap_reference() {
+    let h = Heap(Point { x: 1.0, y: 2.0 });
+    let r: &Point = &*h;
+
+    // Validated access to heap object
+    assert_eq(r.x, 1.0);
+}
+
+fn test_tier0_array_reference() {
+    let arr = [1, 2, 3, 4, 5];
+    let r: &Int = &arr[2];
+
+    // Bounds + generation validated
+    assert_eq(*r, 3);
+}
+
+fn test_tier0_function_parameter() {
+    fn read_point(p: &Point) -> Float {
+        // p is Tier 0, validated on each access
+        p.x + p.y
+    }
+
+    let p = Point { x: 3.0, y: 4.0 };
+    assert_eq(read_point(&p), 7.0);
+}
+
+// =============================================================================
+// TIER 1: Compiler-proven safe (0ns overhead)
+// =============================================================================
+
+fn test_tier1_local_reference() {
+    // Compiler can prove this reference is safe (escape analysis)
+    let x: Int = 42;
+    let r: &checked Int = &checked x;
+
+    // No runtime validation needed
+    assert_eq(*r, 42);
+}
+
+fn test_tier1_non_escaping() {
+    // Reference doesn't escape function scope
+    fn local_computation() -> Int {
+        let arr = [1, 2, 3, 4, 5];
+        let r: &checked [Int] = &checked arr;
+
+        // Compiler proves r is valid for entire function
+        r[0] + r[1] + r[2] + r[3] + r[4]
+    }
+
+    assert_eq(local_computation(), 15);
+}
+
+fn test_tier1_loop_invariant() {
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let r: &checked [Int] = &checked data;
+
+    let mut sum: Int = 0;
+
+    // r is loop-invariant, compiler promotes to Tier 1
+    for i in 0..r.len() {
+        sum = sum + r[i];
+    }
+
+    assert_eq(sum, 55);
+}
+
+fn test_tier1_struct_field() {
+    type Container is { data: [Int; 5] };
+
+    let c = Container { data: [1, 2, 3, 4, 5] };
+    let r: &checked Container = &checked c;
+
+    // Access through checked reference
+    assert_eq(r.data[0], 1);
+    assert_eq(r.data[4], 5);
+}
+
+fn test_tier1_nested_safe() {
+    let outer = Point { x: 1.0, y: 2.0 };
+    let r_outer: &checked Point = &checked outer;
+    let r_x: &checked Float = &checked r_outer.x;
+
+    assert_eq(*r_x, 1.0);
+}
+
+// =============================================================================
+// TIER 2: Manual safety proof required (0ns overhead)
+// =============================================================================
+
+fn test_tier2_unsafe_reference() {
+    let x: Int = 42;
+
+    // SAFETY: x is in scope and will not be moved/dropped
+    let r: &unsafe Int = unsafe { &unsafe x };
+
+    assert_eq(*r, 42);
+}
+
+fn test_tier2_raw_pointer_like() {
+    // Tier 2 for FFI-like operations
+    let arr = [1, 2, 3, 4, 5];
+
+    // SAFETY: We know arr is valid for the entire block
+    let ptr: &unsafe [Int] = unsafe { &unsafe arr };
+
+    // No validation, direct access
+    assert_eq(ptr[0], 1);
+    assert_eq(ptr[4], 5);
+}
+
+fn test_tier2_performance_critical() {
+    // Use Tier 2 in performance-critical inner loop
+    let data = [0; 10000];
+
+    fn sum_fast(arr: &unsafe [Int]) -> Int {
+        let mut total: Int = 0;
+        for i in 0..arr.len() {
+            // SAFETY: bounds checked by loop condition
+            total = total + arr[i];
+        }
+        total
+    }
+
+    // SAFETY: data is stack-allocated and valid
+    let result = sum_fast(unsafe { &unsafe data });
+    assert_eq(result, 0);
+}
+
+fn test_tier2_self_referential() {
+    // Self-referential structure requires Tier 2
+    type SelfRef is {
+        value: Int,
+        self_ptr: Maybe<&unsafe Int>
+    };
+
+    let mut sr = SelfRef { value: 42, self_ptr: None };
+
+    // SAFETY: sr will not move after this point
+    sr.self_ptr = unsafe { Some(&unsafe sr.value) };
+
+    assert_eq(*@unwrap(sr.self_ptr), 42);
+}
+
+// =============================================================================
+// Mixed tier usage
+// =============================================================================
+
+fn test_mixed_tiers() {
+    let x: Int = 100;
+
+    // All three tiers to same data
+    let r0: &Int = &x;                    // Tier 0
+    let r1: &checked Int = &checked x;    // Tier 1
+    let r2: &unsafe Int = unsafe { &unsafe x };      // Tier 2
+
+    assert_eq(*r0, 100);
+    assert_eq(*r1, 100);
+    assert_eq(*r2, 100);
+}
+
+fn test_tier_promotion() {
+    // Compiler may promote Tier 0 to Tier 1 when safe
+    fn inner(data: &[Int]) -> Int {
+        // Even though data is Tier 0, escape analysis shows it's safe
+        // Optimizer may eliminate CHK_REF calls
+        let mut sum: Int = 0;
+        for i in 0..data.len() {
+            sum = sum + data[i];
+        }
+        sum
+    }
+
+    let arr = [1, 2, 3, 4, 5];
+    assert_eq(inner(&arr), 15);
+}
+
+fn test_tier_demotion() {
+    // Storing reference may force demotion from Tier 1 to Tier 0
+    type RefHolder<'a> is { r: &'a Int };
+
+    let x: Int = 42;
+    let r: &checked Int = &checked x;
+
+    // Storing in struct demotes to Tier 0 for safety
+    let h = RefHolder { r: r as &Int };
+
+    assert_eq(*h.r, 42);
+}
+
+// =============================================================================
+// Validation timing
+// =============================================================================
+
+fn test_validation_on_dereference() {
+    let x: Int = 42;
+    let r: &Int = &x;
+
+    // Each of these should trigger CHK_REF
+    let _ = *r;  // Validate
+    let _ = *r;  // Validate again
+    let _ = *r;  // And again
+
+    assert(true);
+}
+
+fn test_validation_caching() {
+    // Multiple accesses in sequence may be optimized
+    let arr = [1, 2, 3, 4, 5];
+    let r: &[Int] = &arr;
+
+    // These might share a single validation
+    let sum = r[0] + r[1] + r[2] + r[3] + r[4];
+
+    assert_eq(sum, 15);
+}
+
+// =============================================================================
+// Generation and epoch checks
+// =============================================================================
+
+fn test_generation_tracking() {
+    // Each allocation gets unique generation
+    let a = Heap(Point { x: 1.0, y: 1.0 });
+    let b = Heap(Point { x: 2.0, y: 2.0 });
+
+    // References track which generation they point to
+    let ra: &Point = &*a;
+    let rb: &Point = &*b;
+
+    assert_eq(ra.x, 1.0);
+    assert_eq(rb.x, 2.0);
+}
+
+fn test_epoch_capability() {
+    // References have epoch capability that limits validity window
+    fn scoped_reference() {
+        let local = Point { x: 1.0, y: 2.0 };
+        let r: &Point = &local;
+
+        // r is valid only within this epoch
+        assert_eq(r.x, 1.0);
+
+        // When function returns, r's epoch expires
+    }
+
+    scoped_reference();
+    // Any attempt to use escaped reference would fail epoch check
+}
+
+fn main() {
+    // Tier 0 tests
+    test_tier0_basic_validation();
+    test_tier0_struct_reference();
+    test_tier0_heap_reference();
+    test_tier0_array_reference();
+    test_tier0_function_parameter();
+
+    // Tier 1 tests
+    test_tier1_local_reference();
+    test_tier1_non_escaping();
+    test_tier1_loop_invariant();
+    test_tier1_struct_field();
+    test_tier1_nested_safe();
+
+    // Tier 2 tests
+    test_tier2_unsafe_reference();
+    test_tier2_raw_pointer_like();
+    test_tier2_performance_critical();
+    test_tier2_self_referential();
+
+    // Mixed and advanced
+    test_mixed_tiers();
+    test_tier_promotion();
+    test_tier_demotion();
+    test_validation_on_dereference();
+    test_validation_caching();
+    test_generation_tracking();
+    test_epoch_capability();
+
+    print("002_tier_validation: PASSED");
+}

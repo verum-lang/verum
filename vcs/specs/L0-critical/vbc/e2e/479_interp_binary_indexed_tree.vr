@@ -1,0 +1,229 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, binary_indexed_tree, fenwick_tree, prefix_sum, point_update
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Binary Indexed Tree (Fenwick Tree) supporting:
+//   - Point update: add a delta to element at index i (1-indexed)
+//   - Prefix sum query: sum of elements[1..i]
+//   - Range sum query: sum of elements[l..r]
+//
+// The tree array is 1-indexed; tree[0] is unused.
+// Size: up to 32 elements.
+
+// Lowest set bit: i & (-i).
+fn lsb(i: Int) -> Int {
+    i & (0 - i)
+}
+
+// Initialize BIT: all zeros.
+fn bit_init(tree: [Int; 33], n: Int) {
+    let mut i = 0;
+    while i <= n { tree[i] = 0; i = i + 1; }
+}
+
+// Point update: add delta to position i (1-indexed).
+fn bit_update(tree: [Int; 33], n: Int, i: Int, delta: Int) {
+    let mut idx = i;
+    while idx <= n {
+        tree[idx] = tree[idx] + delta;
+        idx = idx + lsb(idx);
+    }
+}
+
+// Prefix sum query: sum of elements[1..i] (1-indexed).
+fn bit_query(tree: [Int; 33], i: Int) -> Int {
+    let mut s = 0;
+    let mut idx = i;
+    while idx > 0 {
+        s = s + tree[idx];
+        idx = idx - lsb(idx);
+    }
+    s
+}
+
+// Range sum: sum of elements[l..r] (1-indexed, inclusive).
+fn bit_range(tree: [Int; 33], l: Int, r: Int) -> Int {
+    if l == 1 {
+        bit_query(tree, r)
+    } else {
+        bit_query(tree, r) - bit_query(tree, l - 1)
+    }
+}
+
+// Build BIT from array data[1..n] (1-indexed).
+fn bit_build(tree: [Int; 33], data: [Int; 33], n: Int) {
+    bit_init(tree, n);
+    let mut i = 1;
+    while i <= n {
+        bit_update(tree, n, i, data[i]);
+        i = i + 1;
+    }
+}
+
+fn test_bit_basic() {
+    // data = [_, 3, 2, -1, 6, 5, 4, -3, 3, 7, 2] (1-indexed, index 0 unused)
+    // prefix sums: 3, 5, 4, 10, 15, 19, 16, 19, 26, 28
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut data = [0, 3, 2, -1, 6, 5, 4, -3, 3, 7, 2,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 10;
+    bit_build(tree, data, n);
+
+    // prefix sum queries
+    assert_eq(bit_query(tree, 1), 3);
+    assert_eq(bit_query(tree, 2), 5);   // 3+2
+    assert_eq(bit_query(tree, 3), 4);   // 3+2-1
+    assert_eq(bit_query(tree, 4), 10);  // 3+2-1+6
+    assert_eq(bit_query(tree, 5), 15);  // +5
+    assert_eq(bit_query(tree, 6), 19);  // +4
+    assert_eq(bit_query(tree, 7), 16);  // -3
+    assert_eq(bit_query(tree, 8), 19);  // +3
+    assert_eq(bit_query(tree, 9), 26);  // +7
+    assert_eq(bit_query(tree, 10), 28); // +2
+
+    print("bit_basic: ok");
+}
+
+fn test_bit_point_update() {
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    bit_init(tree, n);
+
+    // Start with all zeros; add values one by one
+    bit_update(tree, n, 3, 5);  // data[3] = 5
+    assert_eq(bit_query(tree, 3), 5);
+    assert_eq(bit_query(tree, 2), 0);
+    assert_eq(bit_query(tree, 4), 5);
+    assert_eq(bit_query(tree, 8), 5);
+
+    bit_update(tree, n, 1, 10); // data[1] = 10
+    assert_eq(bit_query(tree, 1), 10);
+    assert_eq(bit_query(tree, 3), 15); // 10 + 5
+    assert_eq(bit_query(tree, 8), 15);
+
+    bit_update(tree, n, 5, 3);  // data[5] = 3
+    assert_eq(bit_query(tree, 4), 15);
+    assert_eq(bit_query(tree, 5), 18); // 10+0+5+0+3
+    assert_eq(bit_query(tree, 8), 18);
+
+    // Update: add 2 more to position 3: data[3] = 7
+    bit_update(tree, n, 3, 2);
+    assert_eq(bit_query(tree, 3), 17); // 10+0+7
+    assert_eq(bit_query(tree, 8), 20); // total = 10+0+7+0+3+0+0+0=20
+
+    print("bit_point_update: ok");
+}
+
+fn test_bit_range_queries() {
+    // data = [_, 1, 2, 3, 4, 5, 6, 7, 8] (n=8)
+    // prefix: 1, 3, 6, 10, 15, 21, 28, 36
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut data = [0, 1, 2, 3, 4, 5, 6, 7, 8,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    bit_build(tree, data, n);
+
+    // Range [1,1] = 1
+    assert_eq(bit_range(tree, 1, 1), 1);
+    // Range [1,4] = 1+2+3+4 = 10
+    assert_eq(bit_range(tree, 1, 4), 10);
+    // Range [3,6] = 3+4+5+6 = 18
+    assert_eq(bit_range(tree, 3, 6), 18);
+    // Range [5,8] = 5+6+7+8 = 26
+    assert_eq(bit_range(tree, 5, 8), 26);
+    // Range [2,7] = 2+3+4+5+6+7 = 27
+    assert_eq(bit_range(tree, 2, 7), 27);
+    // Range [1,8] = 36 (full sum)
+    assert_eq(bit_range(tree, 1, 8), 36);
+    // Range [4,4] = 4
+    assert_eq(bit_range(tree, 4, 4), 4);
+
+    print("bit_range_queries: ok");
+}
+
+fn test_bit_negative_values() {
+    // BIT works correctly with negative values.
+    // data = [_, 10, -3, 5, -7, 2, 8, -1, 4] (n=8)
+    // prefix: 10, 7, 12, 5, 7, 15, 14, 18
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut data = [0, 10, -3, 5, -7, 2, 8, -1, 4,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 8;
+    bit_build(tree, data, n);
+
+    assert_eq(bit_query(tree, 1), 10);
+    assert_eq(bit_query(tree, 2), 7);   // 10-3
+    assert_eq(bit_query(tree, 3), 12);  // 10-3+5
+    assert_eq(bit_query(tree, 4), 5);   // 10-3+5-7
+    assert_eq(bit_query(tree, 5), 7);   // +2
+    assert_eq(bit_query(tree, 6), 15);  // +8
+    assert_eq(bit_query(tree, 7), 14);  // -1
+    assert_eq(bit_query(tree, 8), 18);  // +4
+
+    // Range [3,6] = 5 + (-7) + 2 + 8 = 8
+    assert_eq(bit_range(tree, 3, 6), 8);
+
+    print("bit_negative_values: ok");
+}
+
+fn test_bit_large_updates() {
+    // Build BIT for n=16, fill with squares 1^2..16^2, verify total.
+    // Sum of squares 1..16 = 16*17*33/6 = 1496
+    let mut tree = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let n = 16;
+    bit_init(tree, n);
+    let mut i = 1;
+    while i <= n {
+        bit_update(tree, n, i, i * i);
+        i = i + 1;
+    }
+
+    // Total sum = bit_query(tree, 16) = 1+4+9+16+25+36+49+64+81+100+121+144+169+196+225+256
+    // = 1496
+    assert_eq(bit_query(tree, 16), 1496);
+
+    // Prefix sum of first 4: 1+4+9+16 = 30
+    assert_eq(bit_query(tree, 4), 30);
+
+    // Range [5,8]: 25+36+49+64 = 174
+    assert_eq(bit_range(tree, 5, 8), 174);
+
+    // Range [9,16]: 81+100+121+144+169+196+225+256 = 1292
+    assert_eq(bit_range(tree, 9, 16), 1292);
+
+    // Update: subtract 100 from position 10 (was 100, now 0)
+    // New total = 1496 - 100 = 1396
+    bit_update(tree, n, 10, -100);
+    assert_eq(bit_query(tree, 16), 1396);
+    assert_eq(bit_query(tree, 10), 1496 - 100 - 121 - 144 - 169 - 196 - 225 - 256);
+    // bit_query(tree, 10) = sum[1..10] = 1+4+9+16+25+36+49+64+81+0 = 285
+    assert_eq(bit_query(tree, 10), 285);
+
+    print(f"bit_large_updates: total=1496 after_update=1396 ok");
+}
+
+fn main() -> Int {
+    test_bit_basic();
+    test_bit_point_update();
+    test_bit_range_queries();
+    test_bit_negative_values();
+    test_bit_large_updates();
+    print("[OK] 479_interp_binary_indexed_tree");
+    0
+}

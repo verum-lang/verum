@@ -1,0 +1,92 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: file-io, read, write, filesystem
+// @description: File I/O operations using built-in file_read/file_write
+
+fn test_write_and_read() -> Int {
+    let path = "/tmp/verum_test_1052.txt";
+    let content = "Hello from Verum!";
+
+    file_write(path, content);
+    let data = file_read(path);
+    if data != content {
+        print(f"FAIL write_read: expected '{content}', got '{data}'");
+        return 1;
+    }
+    print("  write_and_read: OK");
+    0
+}
+
+fn test_multiline() -> Int {
+    let path = "/tmp/verum_test_1052_multi.txt";
+    let content = "line1\nline2\nline3";
+    file_write(path, content);
+    let data = file_read(path);
+    if data != content {
+        print("FAIL multiline: content mismatch");
+        return 1;
+    }
+    print("  multiline: OK");
+    0
+}
+
+fn test_overwrite() -> Int {
+    let path = "/tmp/verum_test_1052_overwrite.txt";
+    file_write(path, "first");
+    file_write(path, "second");
+    let data = file_read(path);
+    if data != "second" {
+        print(f"FAIL overwrite: expected 'second', got '{data}'");
+        return 1;
+    }
+    print("  overwrite: OK");
+    0
+}
+
+fn test_empty_file() -> Int {
+    let path = "/tmp/verum_test_1052_empty.txt";
+    file_write(path, "");
+    let data = file_read(path);
+    if data != "" {
+        print(f"FAIL empty_file: expected empty, got '{data}'");
+        return 1;
+    }
+    print("  empty_file: OK");
+    0
+}
+
+fn test_large_content() -> Int {
+    let path = "/tmp/verum_test_1052_large.txt";
+    let mut content = "";
+    let mut i = 0;
+    while i < 100 {
+        content = content + "abcdefghij";
+        i = i + 1;
+    }
+    file_write(path, content);
+    let data = file_read(path);
+    if data.len() != 1000 {
+        print(f"FAIL large: expected len 1000, got {data.len()}");
+        return 1;
+    }
+    print("  large_content: OK");
+    0
+}
+
+fn main() -> Int {
+    print("File I/O Tests:");
+    let mut failures = 0;
+    failures = failures + test_write_and_read();
+    failures = failures + test_multiline();
+    failures = failures + test_overwrite();
+    failures = failures + test_empty_file();
+    failures = failures + test_large_content();
+
+    if failures == 0 {
+        print("All file I/O tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

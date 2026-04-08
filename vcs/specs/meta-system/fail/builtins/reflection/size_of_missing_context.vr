@@ -1,0 +1,34 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, reflection, context, error
+// @description: Test that size_of requires MetaTypes context
+// @expected-error: E100
+
+// =============================================================================
+// SIZE_OF MISSING CONTEXT TESTS
+// =============================================================================
+
+// size_of requires MetaTypes context
+meta fn test_size_of_no_context() -> Int {
+    size_of(Int)  // ERROR: requires MetaTypes context
+}
+
+// align_of requires MetaTypes context
+meta fn test_align_of_no_context() -> Int {
+    align_of(Int)  // ERROR: requires MetaTypes context
+}
+
+// stride_of requires MetaTypes context
+meta fn test_stride_of_no_context() -> Int {
+    stride_of(Int)  // ERROR: requires MetaTypes context
+}
+
+// type_bits requires MetaTypes context
+meta fn test_type_bits_no_context() -> Int {
+    type_bits(Int)  // ERROR: requires MetaTypes context
+}
+
+fn main() {
+    @const assert(test_size_of_no_context() > 0);
+}

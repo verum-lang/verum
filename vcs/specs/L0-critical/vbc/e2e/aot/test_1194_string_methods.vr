@@ -1,0 +1,85 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: text, string, methods, e2e
+// @description: Test Text type method calls (len, contains, starts_with, etc.)
+
+fn main() -> Int {
+    let mut f = 0;
+
+    let s = "Hello, World!";
+
+    // Test 1: Text.len()
+    if s.len() != 13 {
+        print(f"FAIL 1: len = {s.len()}");
+        f = f + 1;
+    } else {
+        print("  text_len: OK");
+    }
+
+    // Test 2: Text.contains()
+    if !s.contains("World") {
+        print("FAIL 2: contains failed");
+        f = f + 1;
+    } else {
+        print("  text_contains: OK");
+    }
+
+    // Test 3: Text.starts_with()
+    if !s.starts_with("Hello") {
+        print("FAIL 3: starts_with failed");
+        f = f + 1;
+    } else {
+        print("  text_starts_with: OK");
+    }
+
+    // Test 4: Text.ends_with()
+    if !s.ends_with("!") {
+        print("FAIL 4: ends_with failed");
+        f = f + 1;
+    } else {
+        print("  text_ends_with: OK");
+    }
+
+    // Test 5: Text.to_uppercase()
+    let upper = s.to_uppercase();
+    if upper != "HELLO, WORLD!" {
+        print(f"FAIL 5: to_uppercase = '{upper}'");
+        f = f + 1;
+    } else {
+        print("  text_uppercase: OK");
+    }
+
+    // Test 6: Text.to_lowercase()
+    let lower = s.to_lowercase();
+    if lower != "hello, world!" {
+        print(f"FAIL 6: to_lowercase = '{lower}'");
+        f = f + 1;
+    } else {
+        print("  text_lowercase: OK");
+    }
+
+    // Test 7: Text.trim()
+    let padded = "  hello  ";
+    let trimmed = padded.trim();
+    if trimmed != "hello" {
+        print(f"FAIL 7: trim = '{trimmed}'");
+        f = f + 1;
+    } else {
+        print("  text_trim: OK");
+    }
+
+    // Test 8: Text concatenation with +
+    let greeting = "Hi" + " " + "there";
+    if greeting != "Hi there" {
+        print(f"FAIL 8: concat = '{greeting}'");
+        f = f + 1;
+    } else {
+        print("  text_concat: OK");
+    }
+
+    if f == 0 {
+        print("All string method tests passed");
+    }
+    f
+}

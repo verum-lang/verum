@@ -1,0 +1,193 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: contracts, inheritance, error
+// @timeout: 5000
+// @expected-error: E010
+
+/// Tests for contract inheritance violations
+/// Behavioral subtyping violations (LSP)
+
+/// Base protocol with contracts
+type Container<T> is protocol {
+    @verify(proof)
+    fn len(&self) -> Int {
+        contract#"
+            ensures result >= 0;
+        ";
+    }
+
+    @verify(proof)
+    fn add(&mut self, item: T) {
+        contract#"
+            ensures self.len() == old(self.len()) + 1;
+        ";
+    }
+
+    @verify(proof)
+    fn get(&self, index: Int) -> Maybe<&T> {
+        contract#"
+            requires index >= 0;
+            ensures match result {
+                Some(_) => index < self.len(),
+                None => index >= self.len()
+            };
+        ";
+    }
+}
+
+/// ERROR: Strengthened precondition (violates LSP)
+type RestrictedList<T> is {
+    data: List<T>,
+    max_size: Int,
+};
+
+implement Container<T> for RestrictedList<T> {
+    fn len(&self) -> Int {
+        self.data.len()
+    }
+
+    @verify(proof)
+    fn add(&mut self, item: T) {
+        contract#"
+            // ERROR: Stronger precondition than base
+            requires self.len() < self.max_size;
+            ensures self.len() == old(self.len()) + 1;
+        ";
+        self.data.push(item);
+    }
+
+    fn get(&self, index: Int) -> Maybe<&T> {
+        if index < self.data.len() {
+            Some(&self.data[index])
+        } else {
+            None
+        }
+    }
+}
+
+/// ERROR: Weakened postcondition (violates LSP)
+type Comparable is protocol {
+    @verify(proof)
+    fn compare(&self, other: &Self) -> Ordering {
+        contract#"
+            ensures result == Ordering.Equal implies self.equals(other);
+            ensures result == Ordering.Less implies other.greater_than(self);
+        ";
+    }
+
+    fn equals(&self, other: &Self) -> Bool;
+    fn greater_than(&self, other: &Self) -> Bool;
+}
+
+type BrokenComparable is {
+    value: Int,
+};
+
+implement Comparable for BrokenComparable {
+    @verify(proof)
+    fn compare(&self, other: &Self) -> Ordering {
+        contract#"
+            // ERROR: Doesn't guarantee equals implies result.Equal
+            ensures result == Ordering.Less || result == Ordering.Greater;
+        ";
+        if self.value < other.value {
+            Ordering.Less
+        } else {
+            Ordering.Greater  // Returns Greater even when equal!
+        }
+    }
+
+    fn equals(&self, other: &Self) -> Bool {
+        self.value == other.value
+    }
+
+    fn greater_than(&self, other: &Self) -> Bool {
+        self.value > other.value
+    }
+}
+
+/// ERROR: Invariant not preserved by subtype
+type InvariantHolder is protocol {
+    @verify(proof)
+    fn invariant_method(&self) -> Bool {
+        contract#"
+            ensures result implies self.is_consistent();
+        ";
+    }
+
+    fn is_consistent(&self) -> Bool;
+}
+
+type InconsistentImpl is {
+    state: Int,
+};
+
+implement InvariantHolder for InconsistentImpl {
+    @verify(proof)
+    fn invariant_method(&self) -> Bool {
+        contract#"
+            // ERROR: Doesn't check is_consistent
+            ensures result;
+        ";
+        true  // Returns true without checking consistency
+    }
+
+    fn is_consistent(&self) -> Bool {
+        self.state >= 0
+    }
+}
+
+/// ERROR: Abstract method contract not honored
+type Monoid<T> is protocol {
+    fn empty() -> T {
+        contract#"
+            ensures forall x: T. combine(empty(), x) == x;  // Left identity
+            ensures forall x: T. combine(x, empty()) == x;  // Right identity
+        ";
+    }
+
+    fn combine(a: T, b: T) -> T {
+        contract#"
+            // Associativity
+            ensures forall x, y, z: T.
+                combine(combine(x, y), z) == combine(x, combine(y, z));
+        ";
+    }
+}
+
+type BrokenMonoid is {};
+
+implement Monoid<Int> for BrokenMonoid {
+    fn empty() -> Int {
+        // ERROR: Returns 1, but 1 is identity for multiplication, not addition
+        1  // combine uses addition, so empty should be 0
+    }
+
+    fn combine(a: Int, b: Int) -> Int {
+        a + b  // Addition, so identity should be 0
+    }
+}
+
+/// ERROR: Covariant return type violates contract
+type Factory<T> is protocol {
+    @verify(proof)
+    fn create(&self) -> T {
+        contract#"
+            ensures result.is_valid();
+        ";
+    }
+}
+
+type InvalidFactory is {};
+
+implement Factory<Maybe<Int>> for InvalidFactory {
+    @verify(proof)
+    fn create(&self) -> Maybe<Int> {
+        contract#"
+            // ERROR: Might return None which isn't "valid" per base contract
+            ensures result == None;
+        ";
+        None
+    }
+}

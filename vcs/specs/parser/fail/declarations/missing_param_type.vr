@@ -1,0 +1,11 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, function, parameters, error
+// @description: Test missing parameter type detection
+// @expected-error: E036
+
+fn missing_type(x) {}
+
+fn missing_type_multi(a, b, c) {}
+
+fn partial_missing(x: Int, y, z: Text) {}

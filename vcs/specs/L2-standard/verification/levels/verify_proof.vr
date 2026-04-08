@@ -1,0 +1,119 @@
+// @test: verify-pass
+// @timeout: 5000
+// @tier: 0
+// @level: L2
+// @tags: verification, proof, smt
+
+/// @verify(proof) - full SMT-based verification
+/// Contracts are verified using Z3 or other SMT solvers
+
+@verify(proof)
+fn abs(x: Int) -> Int{>= 0} {
+    contract#"
+        ensures result >= 0;
+        ensures result == x || result == -x;
+        ensures result >= x && result >= -x;
+    ";
+    if x >= 0 { x } else { -x }
+}
+
+@verify(proof)
+fn max(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result >= a && result >= b;
+        ensures result == a || result == b;
+    ";
+    if a >= b { a } else { b }
+}
+
+@verify(proof)
+fn min(a: Int, b: Int) -> Int {
+    contract#"
+        ensures result <= a && result <= b;
+        ensures result == a || result == b;
+    ";
+    if a <= b { a } else { b }
+}
+
+@verify(proof)
+fn clamp(value: Int, lower: Int, upper: Int) -> Int {
+    contract#"
+        requires lower <= upper;
+        ensures result >= lower && result <= upper;
+        ensures value < lower implies result == lower;
+        ensures value > upper implies result == upper;
+        ensures value >= lower && value <= upper implies result == value;
+    ";
+    if value < lower {
+        lower
+    } else if value > upper {
+        upper
+    } else {
+        value
+    }
+}
+
+@verify(proof)
+fn gcd(a: Int{> 0}, b: Int{> 0}) -> Int{> 0} {
+    contract#"
+        requires a > 0 && b > 0;
+        ensures result > 0;
+        ensures a % result == 0 && b % result == 0;
+    ";
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        contract#"invariant 
+            x > 0 && y >= 0;
+            gcd(x, y) == gcd(a, b);
+        ";
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+    x
+}
+
+@verify(proof)
+fn binary_search(arr: &List<Int>, target: Int) -> Maybe<Int{>= 0}> {
+    contract#"
+        requires forall i: Int, j: Int. 0 <= i < j < arr.len() implies arr[i] <= arr[j];
+        ensures match result {
+            Some(idx) => arr[idx] == target && idx >= 0 && idx < arr.len(),
+            None => forall i: Int. 0 <= i < arr.len() implies arr[i] != target
+        };
+    ";
+    let mut low = 0;
+    let mut high = arr.len() as Int - 1;
+
+    while low <= high {
+        contract#"invariant 
+            0 <= low && high < arr.len() as Int;
+            forall i: Int. 0 <= i < low implies arr[i] < target;
+            forall i: Int. high < i < arr.len() as Int implies arr[i] > target;
+        ";
+        let mid = low + (high - low) / 2;
+        if arr[mid] == target {
+            return Some(mid);
+        } else if arr[mid] < target {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    None
+}
+
+/// Proof verification with lemmas
+@verify(proof)
+fn is_sorted(arr: &List<Int>) -> Bool {
+    contract#"
+        ensures result == forall i: Int, j: Int. 0 <= i < j < arr.len() implies arr[i] <= arr[j];
+    ";
+    for i in 0..arr.len() - 1 {
+        if arr[i] > arr[i + 1] {
+            return false;
+        }
+    }
+    true
+}

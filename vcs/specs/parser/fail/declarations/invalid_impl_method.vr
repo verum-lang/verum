@@ -1,0 +1,22 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, declarations, impl, method, error
+// @description: Test invalid impl method syntax detection
+// @expected-error: E056
+
+implement Point {
+    fn;
+}
+
+implement Display for Point {
+    fn show(&self) -> Text
+}
+
+implement Clone for User {
+    fn clone 123
+}
+
+implement Iterator for Range {
+    type Item = Int
+    fn next(&mut self) -> Maybe<Int>;
+}

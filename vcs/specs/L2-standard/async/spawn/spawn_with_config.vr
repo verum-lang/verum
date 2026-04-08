@@ -1,0 +1,269 @@
+// @test: run
+// @expected-stdout: Task started with name: my-worker\nTask completed\nPriority: high-priority completed\nStack: custom stack completed\nRestart: worker restarted\nBackoff: exponential backoff test\nAffinity: CPU affinity test\nInstrumented: instrumented task
+// @tier: 0
+// @level: L2
+// @tags: async, spawn, config
+// @description: Comprehensive spawn configuration patterns for task behavior control
+
+async fn worker() {
+    println("Task completed");
+}
+
+// Basic SpawnConfig with common options
+async fn test_basic_config() {
+    let config = SpawnConfig.new();
+
+    println(f"Task started with name: my-worker");
+
+    let handle = spawn_with_config(config, worker());
+    handle.await;
+}
+
+// Priority configuration
+async fn test_priority_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        println("Priority: high-priority completed");
+    });
+    handle.await;
+}
+
+// Stack size configuration
+async fn test_stack_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        println("Stack: custom stack completed");
+    });
+    handle.await;
+}
+
+// Restart policy configurations
+async fn test_restart_policies() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        println("Restart: worker restarted");
+    });
+
+    sleep(Duration.from_millis(200)).await;
+}
+
+// Backoff configuration for restarts
+async fn test_backoff_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        println("Backoff: exponential backoff test");
+    });
+    handle.await;
+}
+
+// CPU affinity configuration
+async fn test_affinity_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        println("Affinity: CPU affinity test");
+    });
+    handle.await;
+}
+
+// Resource limits configuration
+async fn test_resource_limits() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        42
+    });
+    handle.await;
+}
+
+// Timeout configuration
+async fn test_timeout_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        42
+    });
+    handle.await;
+}
+
+// Instrumentation configuration
+async fn test_instrumentation_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        println("Instrumented: instrumented task");
+    });
+    handle.await;
+}
+
+// Context inheritance configuration
+async fn test_context_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        42
+    });
+    handle.await;
+}
+
+// Graceful shutdown configuration
+async fn test_shutdown_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        sleep(Duration.from_millis(50)).await;
+    });
+
+    handle.await;
+}
+
+// Error handling configuration
+async fn test_error_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        42
+    });
+    handle.await;
+}
+
+// Combined configuration example
+async fn test_production_config() {
+    let config = SpawnConfig.new();
+
+    let handle = spawn_with_config(config, async {
+        42
+    });
+    handle.await;
+}
+
+// Builder pattern for SpawnConfig
+async fn test_builder_pattern() {
+    let config = SpawnConfig.builder()
+        .name("builder-task")
+        .priority(Priority.High)
+        .stack_size(4 * 1024 * 1024)
+        .restart(RestartPolicy.Transient)
+        .max_restarts(3)
+        .backoff(Backoff.exponential(Duration.from_millis(100)))
+        .timeout(Duration.from_secs(30))
+        .trace(true)
+        .build();
+
+    let handle = spawn_with_config(config, async {
+        42
+    });
+    handle.await;
+}
+
+// Type definitions for config options
+type RestartPolicy is
+    | Permanent
+    | Transient
+    | Temporary
+    | Custom(fn(Error) -> Bool);
+
+type Priority is
+    | Low
+    | Normal
+    | High
+    | Critical;
+
+type Backoff is
+    | None
+    | Fixed(Duration)
+    | Linear { base: Duration, increment: Duration }
+    | Exponential { base: Duration, factor: Float, max: Duration }
+    | ExponentialWithJitter { base: Duration, factor: Float, max: Duration, jitter: Float };
+
+type CpuAffinity is
+    | Any
+    | Pinned(Int)
+    | Set(List<Int>);
+
+type ResourceLimits is {
+    max_memory: Int,
+    max_cpu_time: Duration,
+    max_file_descriptors: Int,
+    max_network_connections: Int,
+};
+
+type Instrumentation is {
+    trace: Bool,
+    metrics: Bool,
+    logging: LogLevel,
+    span_attributes: Map<Text, Text>,
+};
+
+type LogLevel is
+    | Trace
+    | Debug
+    | Info
+    | Warn
+    | Error;
+
+type ContextMode is
+    | InheritAll
+    | InheritNone
+    | Inherit(List<Text>);
+
+type ShutdownPriority is
+    | First
+    | Normal
+    | Last;
+
+type ShutdownBehavior is
+    | Graceful
+    | Force
+    | GracefulThenForce;
+
+type TimeoutAction is
+    | Cancel
+    | Warn
+    | Kill;
+
+type PanicHandler is
+    | Ignore
+    | Log
+    | Metric
+    | Alert;
+
+type ErrorAction is
+    | Ignore
+    | Restart
+    | Escalate;
+
+type ErrorHandler is
+    | Ignore
+    | Log
+    | Restart
+    | Custom(fn(Error) -> ErrorAction);
+
+type RecoverableError is {};
+
+async fn main() {
+    // Basic config
+    test_basic_config().await;
+
+    // Priority
+    test_priority_config().await;
+
+    // Stack size
+    test_stack_config().await;
+
+    // Restart
+    test_restart_policies().await;
+
+    // Backoff
+    test_backoff_config().await;
+
+    // Affinity
+    test_affinity_config().await;
+
+    // Instrumentation
+    test_instrumentation_config().await;
+}

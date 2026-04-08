@@ -1,0 +1,191 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, reduce
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Tensor reductions — sum, max, min, mean (scaled) on flat arrays
+
+// ============================================================================
+// Tensor8: Fixed-size flat tensor of 8 Ints
+// ============================================================================
+
+type Tensor8 is {
+    d0: Int, d1: Int, d2: Int, d3: Int,
+    d4: Int, d5: Int, d6: Int, d7: Int,
+    len: Int
+};
+
+fn t_get(t: Tensor8, i: Int) -> Int {
+    if i == 0 { t.d0 } else if i == 1 { t.d1 } else if i == 2 { t.d2 }
+    else if i == 3 { t.d3 } else if i == 4 { t.d4 } else if i == 5 { t.d5 }
+    else if i == 6 { t.d6 } else { t.d7 }
+}
+
+fn t_from4(a: Int, b: Int, c: Int, d: Int) -> Tensor8 {
+    Tensor8 { d0: a, d1: b, d2: c, d3: d, d4: 0, d5: 0, d6: 0, d7: 0, len: 4 }
+}
+
+fn t_from6(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Tensor8 {
+    Tensor8 { d0: a, d1: b, d2: c, d3: d, d4: e, d5: f, d6: 0, d7: 0, len: 6 }
+}
+
+fn tensor_sum(t: Tensor8) -> Int {
+    let mut s = 0;
+    let mut i = 0;
+    while i < t.len {
+        s = s + t_get(t, i);
+        i = i + 1;
+    }
+    s
+}
+
+fn tensor_max(t: Tensor8) -> Int {
+    let mut m = t_get(t, 0);
+    let mut i = 1;
+    while i < t.len {
+        let v = t_get(t, i);
+        if v > m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+fn tensor_min(t: Tensor8) -> Int {
+    let mut m = t_get(t, 0);
+    let mut i = 1;
+    while i < t.len {
+        let v = t_get(t, i);
+        if v < m { m = v; }
+        i = i + 1;
+    }
+    m
+}
+
+// mean * 1000 for integer precision
+fn tensor_mean_x1000(t: Tensor8) -> Int {
+    let s = tensor_sum(t);
+    (s * 1000) / t.len
+}
+
+fn tensor_product(t: Tensor8) -> Int {
+    let mut p = 1;
+    let mut i = 0;
+    while i < t.len {
+        p = p * t_get(t, i);
+        i = i + 1;
+    }
+    p
+}
+
+// ============================================================================
+// Test 1: Sum reduction
+// ============================================================================
+
+@test
+fn test_tensor_sum() {
+    let t = t_from4(1, 2, 3, 4);
+    assert_eq(tensor_sum(t), 10);
+
+    let t2 = t_from6(10, 20, 30, 40, 50, 60);
+    assert_eq(tensor_sum(t2), 210);
+
+    // Negative values
+    let t3 = t_from4(-5, 10, -3, 8);
+    assert_eq(tensor_sum(t3), 10);
+    print("  test_tensor_sum: ok");
+}
+
+// ============================================================================
+// Test 2: Max and min reduction
+// ============================================================================
+
+@test
+fn test_tensor_max_min() {
+    let t = t_from4(1, 2, 3, 4);
+    assert_eq(tensor_max(t), 4);
+    assert_eq(tensor_min(t), 1);
+
+    let t2 = t_from6(50, 10, 80, 20, 70, 30);
+    assert_eq(tensor_max(t2), 80);
+    assert_eq(tensor_min(t2), 10);
+
+    // All same
+    let t3 = t_from4(7, 7, 7, 7);
+    assert_eq(tensor_max(t3), 7);
+    assert_eq(tensor_min(t3), 7);
+    print("  test_tensor_max_min: ok");
+}
+
+// ============================================================================
+// Test 3: Mean (scaled by 1000)
+// ============================================================================
+
+@test
+fn test_tensor_mean() {
+    // [1,2,3,4] mean = 2.5, x1000 = 2500
+    let t = t_from4(1, 2, 3, 4);
+    assert_eq(tensor_mean_x1000(t), 2500);
+
+    // [10, 20, 30] mean = 20.0, x1000 = 20000
+    let t2 = Tensor8 {
+        d0: 10, d1: 20, d2: 30, d3: 0,
+        d4: 0, d5: 0, d6: 0, d7: 0, len: 3
+    };
+    assert_eq(tensor_mean_x1000(t2), 20000);
+
+    // [100] mean = 100, x1000 = 100000
+    let t3 = Tensor8 {
+        d0: 100, d1: 0, d2: 0, d3: 0,
+        d4: 0, d5: 0, d6: 0, d7: 0, len: 1
+    };
+    assert_eq(tensor_mean_x1000(t3), 100000);
+    print("  test_tensor_mean: ok");
+}
+
+// ============================================================================
+// Test 4: Product reduction
+// ============================================================================
+
+@test
+fn test_tensor_product() {
+    let t = t_from4(1, 2, 3, 4);
+    assert_eq(tensor_product(t), 24);
+
+    let t2 = t_from4(2, 2, 2, 2);
+    assert_eq(tensor_product(t2), 16);
+
+    // Contains zero
+    let t3 = t_from4(5, 0, 3, 7);
+    assert_eq(tensor_product(t3), 0);
+    print("  test_tensor_product: ok");
+}
+
+// ============================================================================
+// Test 5: Multiple reductions on same tensor
+// ============================================================================
+
+@test
+fn test_multi_reduce() {
+    let t = t_from6(3, 1, 4, 1, 5, 9);
+    assert_eq(tensor_sum(t), 23);
+    assert_eq(tensor_max(t), 9);
+    assert_eq(tensor_min(t), 1);
+    // mean = 23/6 = 3.833..., x1000 = 3833
+    assert_eq(tensor_mean_x1000(t), 3833);
+    print("  test_multi_reduce: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_tensor_sum();
+    test_tensor_max_min();
+    test_tensor_mean();
+    test_tensor_product();
+    test_multi_reduce();
+    print("[OK] 133_tensor_opcode_reduce");
+    0
+}

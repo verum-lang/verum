@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, generics, hkt, higher-kinded, error
+// @description: Test malformed higher-kinded type syntax
+// @expected-error: E081
+
+fn map<F<_, _: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa.map(f)
+}

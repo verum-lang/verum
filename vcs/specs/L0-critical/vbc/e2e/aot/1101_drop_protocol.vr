@@ -1,0 +1,76 @@
+// @test: unit
+// @tier: 0
+// @level: L0
+// @tags: drop, protocol, destructor, resource-cleanup
+// @expect: pass
+
+// Test: Drop protocol - basic API definition and manual invocation.
+//
+// This test verifies that:
+//   1. The Drop protocol can be implemented for user types
+//   2. drop(&mut self) can be called manually
+//   3. State changes from drop are observable
+//
+// NOTE: Automatic drop-on-scope-exit is not yet implemented in AOT.
+// This test exercises the protocol definition and manual drop path only.
+
+type Resource is {
+    id: Int,
+    active: Bool,
+};
+
+implement Resource {
+    fn new(id: Int) -> Resource {
+        Resource { id: id, active: true }
+    }
+
+    fn is_active(&self) -> Bool {
+        self.active
+    }
+}
+
+implement Drop for Resource {
+    fn drop(&mut self) {
+        self.active = false;
+    }
+}
+
+fn test_manual_drop() -> Int {
+    let mut r1 = Resource.new(1);
+    let mut r2 = Resource.new(2);
+    let mut r3 = Resource.new(3);
+    let mut drop_count = 0;
+
+    // All resources should be active
+    assert(r1.is_active());
+    assert(r2.is_active());
+    assert(r3.is_active());
+
+    // Manually call drop on r1 and r2
+    r1.drop();
+    drop_count = drop_count + 1;
+    r2.drop();
+    drop_count = drop_count + 1;
+
+    // r1 and r2 should now be inactive
+    assert(!r1.is_active());
+    assert(!r2.is_active());
+    // r3 should still be active
+    assert(r3.is_active());
+
+    assert_eq(drop_count, 2);
+
+    // Drop r3
+    r3.drop();
+    drop_count = drop_count + 1;
+    assert_eq(drop_count, 3);
+    assert(!r3.is_active());
+
+    drop_count
+}
+
+fn main() {
+    let count = test_manual_drop();
+    assert_eq(count, 3);
+    print(f"Drop protocol test passed: {count} drops executed");
+}

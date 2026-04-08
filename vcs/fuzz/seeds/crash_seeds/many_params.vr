@@ -1,0 +1,13 @@
+// Crash seed: Many function parameters
+fn many_params(
+    a: Int, b: Int, c: Int, d: Int, e: Int,
+    f: Int, g: Int, h: Int, i: Int, j: Int,
+    k: Int, l: Int, m: Int, n: Int, o: Int,
+    p: Int, q: Int, r: Int, s: Int, t: Int
+) -> Int {
+    a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p + q + r + s + t
+}
+
+fn main() {
+    let result = many_params(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20);
+}

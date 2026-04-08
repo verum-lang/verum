@@ -1,0 +1,31 @@
+// @test: parse-pass
+// @tier: 0
+// @category: modules
+
+// Module declaration
+module utils {
+    pub fn helper() -> Int {
+        42
+    }
+
+    fn private_helper() -> Int {
+        0
+    }
+}
+
+// Nested modules
+module outer {
+    module inner {
+        pub type Data is { value: Int };
+    }
+
+    pub fn use_inner() -> inner.Data {
+        inner.Data { value: 1 }
+    }
+}
+
+// Module with visibility modifiers
+pub module public_api {
+    pub type Request is { url: Text };
+    pub fn fetch(req: Request) -> Response { todo() }
+}

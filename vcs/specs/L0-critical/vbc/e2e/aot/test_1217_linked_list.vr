@@ -1,0 +1,96 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: linked-list, recursive, heap, unit-variant, e2e
+// @description: Test linked list with unit variant (Empty) and recursive Heap types
+
+type Node is Empty | Cons(Int, Heap<Node>);
+
+@allow(unbounded_recursion)
+fn length(list: Node) -> Int {
+    match list {
+        Node.Empty => 0,
+        Node.Cons(_, rest) => 1 + length(*rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn sum_list(list: Node) -> Int {
+    match list {
+        Node.Empty => 0,
+        Node.Cons(val, rest) => val + sum_list(*rest),
+    }
+}
+
+@allow(unbounded_recursion)
+fn contains(list: Node, target: Int) -> Bool {
+    match list {
+        Node.Empty => false,
+        Node.Cons(val, rest) => {
+            if val == target {
+                true
+            } else {
+                contains(*rest, target)
+            }
+        }
+    }
+}
+
+fn prepend(list: Node, val: Int) -> Node {
+    Node.Cons(val, Heap(list))
+}
+
+fn main() -> Int {
+    let mut f = 0;
+
+    // Test 1: Empty list
+    let empty = Node.Empty;
+    if length(empty) != 0 {
+        print("FAIL 1: empty length");
+        f = f + 1;
+    } else {
+        print("  empty: OK");
+    }
+
+    // Test 2: Single element
+    let one = Node.Cons(42, Heap(Node.Empty));
+    if length(one) != 1 {
+        print(f"FAIL 2: length = {length(one)}");
+        f = f + 1;
+    } else {
+        print("  single: OK");
+    }
+
+    // Test 3: Sum of three elements
+    let three = Node.Cons(10, Heap(Node.Cons(20, Heap(Node.Cons(30, Heap(Node.Empty))))));
+    let s = sum_list(three);
+    if s != 60 {
+        print(f"FAIL 3: sum = {s}");
+        f = f + 1;
+    } else {
+        print("  sum: OK");
+    }
+
+    // Test 4: Contains
+    let list = Node.Cons(5, Heap(Node.Cons(10, Heap(Node.Cons(15, Heap(Node.Empty))))));
+    if !contains(list, 10) {
+        print("FAIL 4: should contain 10");
+        f = f + 1;
+    } else {
+        print("  contains: OK");
+    }
+
+    // Test 5: Prepend
+    let built = prepend(prepend(Node.Empty, 3), 1);
+    if length(built) != 2 {
+        print(f"FAIL 5: prepend length = {length(built)}");
+        f = f + 1;
+    } else {
+        print("  prepend: OK");
+    }
+
+    if f == 0 {
+        print("All linked list tests passed");
+    }
+    f
+}

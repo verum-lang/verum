@@ -1,0 +1,210 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, escape-analysis, cbgr, tier-promotion
+// @timeout: 5000
+// @description: Tests escape analysis for non-escaping references (Tier 1 promotion candidates)
+
+/// Non-escaping reference analysis.
+/// References that don't escape their scope can be promoted from Tier 0 to Tier 1,
+/// eliminating runtime CBGR validation overhead.
+
+// =============================================================================
+// Local references that don't escape
+// =============================================================================
+
+fn local_reference_no_escape() -> Int {
+    let x: Int = 42;
+    let r: &Int = &x;
+    // r is used only within this scope, doesn't escape
+    *r + 10
+}
+
+fn reference_used_in_block() -> Int {
+    let outer: Int = 100;
+    let result = {
+        let r: &Int = &outer;
+        // r is confined to this block
+        *r * 2
+    };
+    result
+}
+
+// =============================================================================
+// Loop-local references (using while)
+// =============================================================================
+
+fn sum_with_reference(arr: [Int; 5]) -> Int {
+    let mut sum: Int = 0;
+    let mut i: Int = 0;
+    while i < 5 {
+        let elem: Int = arr[i];
+        let elem_ref: &Int = &elem;
+        // elem_ref doesn't escape the loop iteration
+        sum = sum + *elem_ref;
+        i = i + 1;
+    }
+    sum
+}
+
+fn max_with_reference(arr: [Int; 5]) -> Int {
+    let mut max: Int = arr[0];
+    let mut i: Int = 1;
+    while i < 5 {
+        let elem: Int = arr[i];
+        let elem_ref: &Int = &elem;
+        // elem_ref is loop-local
+        if *elem_ref > max {
+            max = *elem_ref;
+        }
+        i = i + 1;
+    }
+    max
+}
+
+// =============================================================================
+// Struct field access without escape
+// =============================================================================
+
+type Point is { x: Float, y: Float };
+
+fn point_magnitude_squared(p: Point) -> Float {
+    let rx: &Float = &p.x;
+    let ry: &Float = &p.y;
+    // Both references are function-local
+    (*rx * *rx) + (*ry * *ry)
+}
+
+fn point_distance_squared(a: Point, b: Point) -> Float {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    let rdx: &Float = &dx;
+    let rdy: &Float = &dy;
+    // References to local computations
+    (*rdx * *rdx) + (*rdy * *rdy)
+}
+
+// =============================================================================
+// Temporary references
+// =============================================================================
+
+fn compute_with_temp() -> Int {
+    let a: Int = 10;
+    let b: Int = 20;
+
+    // Temporary reference to computation result
+    let sum = a + b;
+    let r: &Int = &sum;
+
+    *r * 2
+}
+
+fn chain_operations(x: Int) -> Int {
+    let step1 = x * 2;
+    let step2 = step1 + 10;
+    let step3 = step2 / 2;
+    let r: &Int = &step3;
+    *r
+}
+
+// =============================================================================
+// Multiple non-escaping references
+// =============================================================================
+
+fn multi_ref_no_escape(a: Int, b: Int, c: Int) -> Int {
+    let ra: &Int = &a;
+    let rb: &Int = &b;
+    let rc: &Int = &c;
+    // All references are function-local
+    *ra + *rb + *rc
+}
+
+// =============================================================================
+// Conditional reference without escape
+// =============================================================================
+
+fn conditional_ref(flag: Bool, a: Int, b: Int) -> Int {
+    let r: &Int = if flag {
+        &a
+    } else {
+        &b
+    };
+    // Reference created conditionally but doesn't escape
+    *r * 2
+}
+
+fn match_ref(val: Int) -> Int {
+    let result = val * 2;
+    let r: &Int = &result;
+    *r
+}
+
+// =============================================================================
+// Array element reference without escape
+// =============================================================================
+
+fn array_ref_no_escape(arr: [Int; 5], idx: Int) -> Int {
+    let elem = arr[idx];
+    let r: &Int = &elem;
+    // Reference to array element copy, used locally
+    *r + 1
+}
+
+fn array_multi_ref(arr: [Int; 3]) -> Int {
+    let e0 = arr[0];
+    let e1 = arr[1];
+    let e2 = arr[2];
+    let r0: &Int = &e0;
+    let r1: &Int = &e1;
+    let r2: &Int = &e2;
+    *r0 + *r1 + *r2
+}
+
+// =============================================================================
+// Helper function call (non-escaping)
+// =============================================================================
+
+fn get_ref_value(r: &Int) -> Int {
+    // Function that just reads reference
+    *r + 1
+}
+
+fn test_inline_ref_usage() -> Int {
+    let x: Int = 42;
+    let r: &Int = &x;
+    // Reference passed but function is inlineable
+    get_ref_value(r)
+}
+
+// =============================================================================
+// Main - basic validation
+// =============================================================================
+
+fn main() {
+    // Basic non-escaping
+    assert(local_reference_no_escape() == 52);
+    assert(reference_used_in_block() == 200);
+
+    // Loop-local
+    let arr: [Int; 5] = [1, 2, 3, 4, 5];
+    assert(sum_with_reference(arr) == 15);
+    assert(max_with_reference(arr) == 5);
+
+    // Struct references
+    let p = Point { x: 3.0, y: 4.0 };
+    assert(point_magnitude_squared(p) == 25.0);
+
+    // Multiple references
+    assert(multi_ref_no_escape(1, 2, 3) == 6);
+
+    // Conditional
+    assert(conditional_ref(true, 10, 20) == 20);
+    assert(conditional_ref(false, 10, 20) == 40);
+
+    // Array element
+    assert(array_ref_no_escape(arr, 2) == 4);
+    assert(array_multi_ref([10, 20, 30]) == 60);
+
+    // Inline ref usage
+    assert(test_inline_ref_usage() == 43);
+}

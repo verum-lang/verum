@@ -1,0 +1,17 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, list, function-parameter
+// @expected-exit: 0
+
+fn first(xs: List<Int>) -> Int {
+    xs[0]
+}
+
+fn main() -> Int {
+    let arr = [10, 20, 30];
+    let v = first(arr);
+    print(v);
+    assert_eq(v, 10);
+    0
+}

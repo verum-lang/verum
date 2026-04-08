@@ -1,0 +1,174 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, levenshtein, edit-distance, dp
+// @timeout: 30000
+
+// Levenshtein edit distance between integer sequences stored in Arr8
+// DP matrix stored as flat array in two Arr8s (prev row and curr row)
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+fn min2(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn min3(a: Int, b: Int, c: Int) -> Int { min2(min2(a, b), c) }
+
+// Levenshtein distance between s1[0..n1] and s2[0..n2]
+// Uses two-row DP (prev and curr), max string length 7 (cols 0..7 in Arr8)
+fn levenshtein(s1: Arr8, n1: Int, s2: Arr8, n2: Int) -> Int {
+    // prev = DP row for i-1
+    // Initialize prev = [0, 1, 2, ..., n2]
+    let mut prev = zeros();
+    let mut j = 0;
+    while j <= n2 {
+        prev = set8(prev, j, j);
+        j = j + 1;
+    }
+    let mut i = 1;
+    while i <= n1 {
+        let mut curr = zeros();
+        curr = set8(curr, 0, i); // deletion cost
+        let mut jj = 1;
+        while jj <= n2 {
+            let cost = if get8(s1, i - 1) == get8(s2, jj - 1) { 0 } else { 1 };
+            let del = get8(prev, jj) + 1;
+            let ins = get8(curr, jj - 1) + 1;
+            let sub = get8(prev, jj - 1) + cost;
+            curr = set8(curr, jj, min3(del, ins, sub));
+            jj = jj + 1;
+        }
+        prev = curr;
+        i = i + 1;
+    }
+    get8(prev, n2)
+}
+
+// Hamming distance: count positions where sequences differ
+fn hamming(s1: Arr8, s2: Arr8, n: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < n {
+        if get8(s1, i) != get8(s2, i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Longest common prefix length
+// Returns the number of matching elements from the start
+fn lcp(s1: Arr8, n1: Int, s2: Arr8, n2: Int) -> Int {
+    let min_len = min2(n1, n2);
+    let mut i = 0;
+    let mut result = 0;
+    let mut done = 0;
+    while i < min_len {
+        if done == 0 {
+            if get8(s1, i) != get8(s2, i) {
+                result = i;
+                done = 1;
+            }
+        }
+        i = i + 1;
+    }
+    if done == 0 { min_len } else { result }
+}
+
+fn test_identical() -> Int {
+    let s = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(levenshtein(s, 3, s, 3), 0);
+    assert_eq(hamming(s, s, 3), 0);
+    1
+}
+
+fn test_empty() -> Int {
+    let s = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let empty = zeros();
+    assert_eq(levenshtein(s, 3, empty, 0), 3); // 3 deletions
+    assert_eq(levenshtein(empty, 0, s, 3), 3); // 3 insertions
+    assert_eq(levenshtein(empty, 0, empty, 0), 0);
+    1
+}
+
+fn test_substitution() -> Int {
+    // "abc" vs "axc" — 1 substitution
+    let s1 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let s2 = Arr8 { v0: 1, v1: 9, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(levenshtein(s1, 3, s2, 3), 1);
+    assert_eq(hamming(s1, s2, 3), 1);
+    1
+}
+
+fn test_insertion() -> Int {
+    // "ac" vs "abc" — 1 insertion
+    let s1 = Arr8 { v0: 1, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let s2 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(levenshtein(s1, 2, s2, 3), 1);
+    1
+}
+
+fn test_deletion() -> Int {
+    // "abc" vs "ac" — 1 deletion
+    let s1 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let s2 = Arr8 { v0: 1, v1: 3, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(levenshtein(s1, 3, s2, 2), 1);
+    1
+}
+
+fn test_completely_different() -> Int {
+    // "abc" vs "xyz" — 3 substitutions
+    let s1 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let s2 = Arr8 { v0: 7, v1: 8, v2: 9, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(levenshtein(s1, 3, s2, 3), 3);
+    assert_eq(hamming(s1, s2, 3), 3);
+    1
+}
+
+fn test_lcp() -> Int {
+    let s1 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 0, v5: 0, v6: 0, v7: 0 };
+    let s2 = Arr8 { v0: 1, v1: 2, v2: 9, v3: 9, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcp(s1, 4, s2, 4), 2);
+    let s3 = Arr8 { v0: 9, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(lcp(s1, 4, s3, 1), 0);
+    assert_eq(lcp(s1, 4, s1, 4), 4);
+    1
+}
+
+fn test_symmetry() -> Int {
+    // Levenshtein is symmetric: d(a,b) = d(b,a)
+    let s1 = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 0, v6: 0, v7: 0 };
+    let s2 = Arr8 { v0: 2, v1: 3, v2: 5, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 };
+    assert_eq(levenshtein(s1, 5, s2, 3), levenshtein(s2, 3, s1, 5));
+    1
+}
+
+fn main() -> Int {
+    test_identical();
+    test_empty();
+    test_substitution();
+    test_insertion();
+    test_deletion();
+    test_completely_different();
+    test_lcp();
+    test_symmetry();
+    print("[OK] 644_levenshtein_aot");
+    0
+}

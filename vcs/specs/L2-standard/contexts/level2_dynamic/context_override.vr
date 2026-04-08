@@ -1,0 +1,134 @@
+// @test: run
+// @expected-stdout: Production mode: RealPaymentProcessor
+// Processing payment: $100.00
+// Payment successful: txn_123
+// Test mode: MockPaymentProcessor
+// Mock payment: $50.00
+// Mock transaction: mock_txn_001
+// @tier: 0
+// @level: L2
+// @tags: contexts, override, testing
+// @description: Tests context override for testing and environment switching
+//
+// Context override is particularly useful for:
+// - Unit testing with mocks
+// - Switching between environments (dev/staging/prod)
+// - Feature flags and A/B testing
+
+context async PaymentProcessor {
+    async fn process_payment(amount: Float) -> Result<Text, PaymentError>;
+    fn name() -> Text;
+}
+
+type PaymentError is
+    | Declined(Text)
+    | NetworkError(Text)
+    | InvalidAmount;
+
+// Production implementation
+type RealPaymentProcessor is {
+    api_key: Text,
+};
+
+implement RealPaymentProcessor {
+    fn new(api_key: Text) -> Self {
+        Self { api_key }
+    }
+}
+
+implement PaymentProcessor for RealPaymentProcessor {
+    async fn process_payment(amount: Float) -> Result<Text, PaymentError> {
+        println("Processing payment: $" + amount.to_text());
+        // In real implementation, would call payment API
+        Ok("txn_123")
+    }
+
+    fn name() -> Text {
+        "RealPaymentProcessor"
+    }
+}
+
+// Mock implementation for testing
+type MockPaymentProcessor is {
+    should_fail: Bool,
+    next_txn_id: Text,
+};
+
+implement MockPaymentProcessor {
+    fn new() -> Self {
+        Self {
+            should_fail: false,
+            next_txn_id: "mock_txn_001",
+        }
+    }
+
+    fn with_failure() -> Self {
+        Self {
+            should_fail: true,
+            next_txn_id: "mock_txn_fail",
+        }
+    }
+}
+
+implement PaymentProcessor for MockPaymentProcessor {
+    async fn process_payment(&self, amount: Float) -> Result<Text, PaymentError> {
+        println("Mock payment: $" + amount.to_text());
+        if self.should_fail {
+            Err(PaymentError.Declined("Mock failure"))
+        } else {
+            Ok(self.next_txn_id)
+        }
+    }
+
+    fn name() -> Text {
+        "MockPaymentProcessor"
+    }
+}
+
+// Business logic that uses PaymentProcessor context
+async fn checkout(cart_total: Float) -> Result<Text, PaymentError> using [PaymentProcessor] {
+    if cart_total <= 0.0 {
+        return Err(PaymentError.InvalidAmount);
+    }
+
+    match PaymentProcessor.process_payment(cart_total).await {
+        Ok(txn_id) => Ok(txn_id),
+        Err(e) => Err(e),
+    }
+}
+
+// Function to demonstrate current context
+fn show_processor_mode() -> () using [PaymentProcessor] {
+    println("Current processor: " + PaymentProcessor.name());
+}
+
+async fn run_production_mode() {
+    println("Production mode: RealPaymentProcessor");
+
+    provide PaymentProcessor = RealPaymentProcessor.new("prod_api_key_xxx");
+
+    match checkout(100.00).await {
+        Ok(txn_id) => println("Payment successful: " + txn_id),
+        Err(e) => println("Payment failed: " + e.to_text()),
+    }
+}
+
+async fn run_test_mode() {
+    println("Test mode: MockPaymentProcessor");
+
+    // Override with mock for testing
+    provide PaymentProcessor = MockPaymentProcessor.new();
+
+    match checkout(50.00).await {
+        Ok(txn_id) => println("Mock transaction: " + txn_id),
+        Err(e) => println("Mock failure: " + e.to_text()),
+    }
+}
+
+async fn main() {
+    // Run in production mode
+    run_production_mode().await;
+
+    // Run in test mode with overridden context
+    run_test_mode().await;
+}

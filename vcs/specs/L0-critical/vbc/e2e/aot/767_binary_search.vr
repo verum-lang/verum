@@ -1,0 +1,114 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, binary-search, lower-bound, upper-bound, sorted-array
+// @expected-exit: 0
+
+// Binary search: returns index of target in sorted arr[0..n), or -1 if not found
+fn bin_search(arr: List<Int>, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n - 1;
+    let mut result = -1;
+    while (lo <= hi) {
+        let mid = lo + (hi - lo) / 2;
+        if (arr[mid] == target) {
+            result = mid;
+            lo = hi + 1; // break
+        } else if (arr[mid] < target) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    result
+}
+
+// Lower bound: first index i where arr[i] >= target
+fn lower_bound(arr: List<Int>, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while (lo < hi) {
+        let mid = lo + (hi - lo) / 2;
+        if (arr[mid] < target) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+// Upper bound: first index i where arr[i] > target
+fn upper_bound(arr: List<Int>, n: Int, target: Int) -> Int {
+    let mut lo = 0;
+    let mut hi = n;
+    while (lo < hi) {
+        let mid = lo + (hi - lo) / 2;
+        if (arr[mid] <= target) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+// Count occurrences of target in sorted array
+fn count_occurrences(arr: List<Int>, n: Int, target: Int) -> Int {
+    upper_bound(arr, n, target) - lower_bound(arr, n, target)
+}
+
+fn main() -> Int {
+    // Sorted array: [2, 4, 4, 6, 8, 10, 10, 10, 12, 14, 0, 0, 0, 0, 0, 0]
+    let arr = [2, 4, 4, 6, 8, 10, 10, 10, 12, 14, 0, 0, 0, 0, 0, 0];
+    let n = 10;
+
+    // Test 1: Binary search - find existing element
+    // arr[0]=2, arr[1]=4, arr[2]=4, arr[3]=6, arr[4]=8, arr[5]=10, ...
+    // Search for 8: mid=4, arr[4]=8, found at index 4
+    let idx1 = bin_search(arr, n, 8);
+    assert_eq(idx1, 4);
+
+    // Test 2: Binary search - find first element
+    let idx2 = bin_search(arr, n, 2);
+    assert_eq(idx2, 0);
+
+    // Test 3: Binary search - find last element
+    let idx3 = bin_search(arr, n, 14);
+    assert_eq(idx3, 9);
+
+    // Test 4: Binary search - element not found
+    let idx4 = bin_search(arr, n, 5);
+    assert_eq(idx4, -1);
+
+    // Test 5: Lower bound for 4 -> first index where arr[i] >= 4 -> index 1
+    // arr[0]=2 < 4, arr[1]=4 >= 4 -> 1
+    let lb = lower_bound(arr, n, 4);
+    assert_eq(lb, 1);
+
+    // Test 6: Upper bound for 4 -> first index where arr[i] > 4 -> index 3
+    // arr[2]=4 <= 4, arr[3]=6 > 4 -> 3
+    let ub = upper_bound(arr, n, 4);
+    assert_eq(ub, 3);
+
+    // Test 7: Count occurrences of 10 -> indices 5,6,7 -> 3 occurrences
+    let cnt10 = count_occurrences(arr, n, 10);
+    assert_eq(cnt10, 3);
+
+    // Test 8: Count occurrences of 4 -> indices 1,2 -> 2 occurrences
+    let cnt4 = count_occurrences(arr, n, 4);
+    assert_eq(cnt4, 2);
+
+    // Test 9: Lower bound for value beyond all elements (15)
+    // All elements < 15, so lower_bound returns n=10
+    let lb_beyond = lower_bound(arr, n, 15);
+    assert_eq(lb_beyond, 10);
+
+    // Test 10: Lower bound for value before all elements (1)
+    // arr[0]=2 >= 1, so lower_bound returns 0
+    let lb_before = lower_bound(arr, n, 1);
+    assert_eq(lb_before, 0);
+
+    print("Binary search: PASS");
+    0
+}

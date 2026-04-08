@@ -1,0 +1,233 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, mst, kruskal, union-find
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Kruskal's minimum spanning tree with union-find.
+// Edges stored as (src, dst, weight) in separate Arr8 arrays (up to 8 edges).
+
+// =============================================================================
+// Arr8 for parent/rank/edge data
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_new() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0 }
+}
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// Edge list with separate arrays
+type EdgeList is { src: Arr8, dst: Arr8, wt: Arr8, count: Int };
+
+fn el_new() -> EdgeList {
+    EdgeList { src: arr8_new(), dst: arr8_new(), wt: arr8_new(), count: 0 }
+}
+
+fn el_add(el: EdgeList, s: Int, d: Int, w: Int) -> EdgeList {
+    let idx = el.count;
+    EdgeList {
+        src: arr8_set(el.src, idx, s),
+        dst: arr8_set(el.dst, idx, d),
+        wt: arr8_set(el.wt, idx, w),
+        count: idx + 1
+    }
+}
+
+// =============================================================================
+// Sort edges by weight (insertion sort)
+// =============================================================================
+
+fn sort_edges(el: EdgeList) -> EdgeList {
+    let mut s = el.src;
+    let mut d = el.dst;
+    let mut w = el.wt;
+    let n = el.count;
+    let mut i = 1;
+    while i < n {
+        let ks = arr8_get(s, i);
+        let kd = arr8_get(d, i);
+        let kw = arr8_get(w, i);
+        let mut j = i - 1;
+        let mut done = 0;
+        while j >= 0 && done == 0 {
+            if arr8_get(w, j) > kw {
+                s = arr8_set(s, j + 1, arr8_get(s, j));
+                d = arr8_set(d, j + 1, arr8_get(d, j));
+                w = arr8_set(w, j + 1, arr8_get(w, j));
+                j = j - 1;
+            } else {
+                done = 1;
+            }
+        }
+        s = arr8_set(s, j + 1, ks);
+        d = arr8_set(d, j + 1, kd);
+        w = arr8_set(w, j + 1, kw);
+        i = i + 1;
+    }
+    EdgeList { src: s, dst: d, wt: w, count: n }
+}
+
+// =============================================================================
+// Union-Find
+// =============================================================================
+
+type UF is { parent: Arr8, rnk: Arr8 };
+
+fn uf_new(n: Int) -> UF {
+    let mut p = arr8_new();
+    let mut i = 0;
+    while i < n { p = arr8_set(p, i, i); i = i + 1; }
+    UF { parent: p, rnk: arr8_new() }
+}
+
+fn uf_find(uf: UF, x: Int) -> Int {
+    let mut r = x;
+    while arr8_get(uf.parent, r) != r { r = arr8_get(uf.parent, r); }
+    r
+}
+
+fn uf_union(uf: UF, x: Int, y: Int) -> UF {
+    let rx = uf_find(uf, x);
+    let ry = uf_find(uf, y);
+    if rx == ry { return uf; }
+    let rank_x = arr8_get(uf.rnk, rx);
+    let rank_y = arr8_get(uf.rnk, ry);
+    if rank_x < rank_y {
+        UF { parent: arr8_set(uf.parent, rx, ry), rnk: uf.rnk }
+    } else if rank_x > rank_y {
+        UF { parent: arr8_set(uf.parent, ry, rx), rnk: uf.rnk }
+    } else {
+        UF { parent: arr8_set(uf.parent, ry, rx), rnk: arr8_set(uf.rnk, rx, rank_x + 1) }
+    }
+}
+
+// =============================================================================
+// Kruskal
+// =============================================================================
+
+type MSTResult is { total_weight: Int, edge_count: Int };
+
+fn kruskal(el: EdgeList, num_nodes: Int) -> MSTResult {
+    let sorted = sort_edges(el);
+    let mut uf = uf_new(num_nodes);
+    let mut total_w = 0;
+    let mut mst_edges = 0;
+    let mut i = 0;
+    while i < sorted.count {
+        let u = arr8_get(sorted.src, i);
+        let v = arr8_get(sorted.dst, i);
+        let w = arr8_get(sorted.wt, i);
+        if uf_find(uf, u) != uf_find(uf, v) {
+            uf = uf_union(uf, u, v);
+            total_w = total_w + w;
+            mst_edges = mst_edges + 1;
+        }
+        i = i + 1;
+    }
+    MSTResult { total_weight: total_w, edge_count: mst_edges }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_triangle() {
+    let mut e = el_new();
+    e = el_add(e, 0, 1, 1);
+    e = el_add(e, 1, 2, 2);
+    e = el_add(e, 0, 2, 3);
+    let mst = kruskal(e, 3);
+    assert_eq(mst.total_weight, 3);
+    assert_eq(mst.edge_count, 2);
+}
+
+fn test_square_diagonal() {
+    let mut e = el_new();
+    e = el_add(e, 0, 1, 1);
+    e = el_add(e, 1, 2, 2);
+    e = el_add(e, 2, 3, 5);
+    e = el_add(e, 0, 3, 4);
+    e = el_add(e, 1, 3, 3);
+    let mst = kruskal(e, 4);
+    assert_eq(mst.total_weight, 6);
+    assert_eq(mst.edge_count, 3);
+}
+
+fn test_forest() {
+    let mut e = el_new();
+    e = el_add(e, 0, 1, 2);
+    e = el_add(e, 2, 3, 3);
+    let mst = kruskal(e, 4);
+    assert_eq(mst.total_weight, 5);
+    assert_eq(mst.edge_count, 2);
+}
+
+fn test_single_edge() {
+    let mut e = el_new();
+    e = el_add(e, 0, 1, 42);
+    let mst = kruskal(e, 2);
+    assert_eq(mst.total_weight, 42);
+    assert_eq(mst.edge_count, 1);
+}
+
+fn test_equal_weights() {
+    let mut e = el_new();
+    e = el_add(e, 0, 1, 1);
+    e = el_add(e, 0, 2, 1);
+    e = el_add(e, 0, 3, 1);
+    e = el_add(e, 1, 2, 1);
+    e = el_add(e, 1, 3, 1);
+    e = el_add(e, 2, 3, 1);
+    let mst = kruskal(e, 4);
+    assert_eq(mst.total_weight, 3);
+    assert_eq(mst.edge_count, 3);
+}
+
+fn test_five_nodes() {
+    // 0-1:4, 0-2:8, 1-2:2, 1-3:6, 2-3:3, 2-4:9, 3-4:5
+    // Sorted: (1,2,2), (2,3,3), (0,1,4), (3,4,5), (1,3,6), (0,2,8), (2,4,9)
+    // Pick: (1,2,2), (2,3,3), (0,1,4), (3,4,5) = 14
+    let mut e = el_new();
+    e = el_add(e, 0, 1, 4);
+    e = el_add(e, 0, 2, 8);
+    e = el_add(e, 1, 2, 2);
+    e = el_add(e, 1, 3, 6);
+    e = el_add(e, 2, 3, 3);
+    e = el_add(e, 2, 4, 9);
+    e = el_add(e, 3, 4, 5);
+    let mst = kruskal(e, 5);
+    assert_eq(mst.total_weight, 14);
+    assert_eq(mst.edge_count, 4);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_triangle();
+    test_square_diagonal();
+    test_forest();
+    test_single_edge();
+    test_equal_weights();
+    test_five_nodes();
+    print("[OK] 326_interp_minimum_spanning");
+    0
+}

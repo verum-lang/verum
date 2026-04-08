@@ -1,0 +1,503 @@
+// =============================================================================
+// vcs/specs/core/intrinsics/conversion_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, conversion, cast, endianness, bytes, bitcast
+// @description: Comprehensive tests for type conversion intrinsics.
+//
+// Coverage:
+// - Integer/Float conversions: int_to_float, float_to_int, uint_to_float, float_to_uint
+// - Precision changes: fpext, fptrunc, sext, zext, itrunc
+// - Bit reinterpretation: bitcast, f32_to_bits, f64_to_bits, f32_from_bits, f64_from_bits
+// - Byte conversions: to_le_bytes_*, to_be_bytes_*, from_le_bytes_*, from_be_bytes_*
+// - Endianness: to_le, to_be, from_le, from_be
+//
+// Test Strategy:
+// - Test with known values and round-trips
+// - Test edge cases (zero, negative, max values)
+// - Break into focused @test functions
+// =============================================================================
+
+module test.stdlib.intrinsics.conversion_test;
+
+mount core.intrinsics.conversion.{
+    // Integer/Float
+    int_to_float, uint_to_float, float_to_int, float_to_uint,
+    // Precision
+    fpext, fptrunc, sext, zext, itrunc,
+    // Bit reinterpretation
+    bitcast, f32_to_bits, f32_from_bits, f64_to_bits, f64_from_bits,
+    // Byte conversions - sized
+    to_le_bytes_4, to_le_bytes_8,
+    to_be_bytes_4, to_be_bytes_8,
+    from_le_bytes_4, from_le_bytes_8,
+    from_be_bytes_4, from_be_bytes_8,
+    to_le_bytes_2, to_be_bytes_2,
+    from_le_bytes_2, from_be_bytes_2,
+    // Endianness
+    to_le, to_be, from_le, from_be,
+    // Alias
+    int_to_bytes,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// Integer to Float
+// =============================================================================
+
+@test
+fn test_int_to_float_positive() {
+    let f: Float64 = int_to_float<Int, Float64>(42);
+    assert(f == 42.0);
+}
+
+@test
+fn test_int_to_float_negative() {
+    let f: Float64 = int_to_float<Int, Float64>(-100);
+    assert(f == -100.0);
+}
+
+@test
+fn test_int_to_float_zero() {
+    assert(int_to_float<Int, Float64>(0) == 0.0);
+}
+
+@test
+fn test_int_to_float_large() {
+    let large: Int = 1000000;
+    let f: Float64 = int_to_float<Int, Float64>(large);
+    assert(f == 1000000.0);
+}
+
+// =============================================================================
+// Float to Integer
+// =============================================================================
+
+@test
+fn test_float_to_int_truncates() {
+    let i: Int = float_to_int<Float64, Int>(3.7);
+    assert(i == 3);
+}
+
+@test
+fn test_float_to_int_negative() {
+    let i: Int = float_to_int<Float64, Int>(-3.7);
+    assert(i == -3);
+}
+
+@test
+fn test_float_to_int_zero() {
+    assert(float_to_int<Float64, Int>(0.0) == 0);
+}
+
+@test
+fn test_float_to_int_exact() {
+    assert(float_to_int<Float64, Int>(42.0) == 42);
+    assert(float_to_int<Float64, Int>(-42.0) == -42);
+}
+
+// =============================================================================
+// Float32 Bit Cast
+// =============================================================================
+
+@test
+fn test_f32_to_bits_one() {
+    let f32: Float32 = 1.0;
+    let bits: UInt32 = f32_to_bits(f32);
+    assert(bits == (0x3F800000 as UInt32));
+}
+
+@test
+fn test_f32_from_bits_roundtrip() {
+    let f32: Float32 = 1.0;
+    let bits: UInt32 = f32_to_bits(f32);
+    let f32_back: Float32 = f32_from_bits(bits);
+    assert(f32_back == 1.0);
+}
+
+@test
+fn test_f32_to_bits_zero() {
+    let bits: UInt32 = f32_to_bits(0.0);
+    assert(bits == (0 as UInt32));
+}
+
+@test
+fn test_f32_roundtrip_pi() {
+    let pi32: Float32 = 3.14159265;
+    assert(f32_from_bits(f32_to_bits(pi32)) == pi32);
+}
+
+// =============================================================================
+// Float64 Bit Cast
+// =============================================================================
+
+@test
+fn test_f64_to_bits_one() {
+    let f64: Float64 = 1.0;
+    let bits: UInt64 = f64_to_bits(f64);
+    assert(bits == (0x3FF0000000000000 as UInt64));
+}
+
+@test
+fn test_f64_from_bits_roundtrip() {
+    let f64: Float64 = 1.0;
+    let bits: UInt64 = f64_to_bits(f64);
+    let f64_back: Float64 = f64_from_bits(bits);
+    assert(f64_back == 1.0);
+}
+
+@test
+fn test_f64_to_bits_zero() {
+    let bits: UInt64 = f64_to_bits(0.0);
+    assert(bits == (0 as UInt64));
+}
+
+@test
+fn test_f64_roundtrip_pi() {
+    let pi64: Float64 = 3.14159265358979;
+    assert(f64_from_bits(f64_to_bits(pi64)) == pi64);
+}
+
+// =============================================================================
+// Byte Conversions — Little Endian 4 bytes
+// =============================================================================
+
+@test
+fn test_to_le_bytes_4_basic() {
+    let val: Int = 0x12345678;
+    let le4: [Byte; 4] = to_le_bytes_4(val);
+    assert(le4[0] == (0x78 as Byte));
+    assert(le4[1] == (0x56 as Byte));
+    assert(le4[2] == (0x34 as Byte));
+    assert(le4[3] == (0x12 as Byte));
+}
+
+@test
+fn test_le_bytes_4_roundtrip() {
+    let val: Int = 0x12345678;
+    let le4: [Byte; 4] = to_le_bytes_4(val);
+    assert(from_le_bytes_4(le4) == val);
+}
+
+@test
+fn test_to_le_bytes_4_zero() {
+    let zero_le: [Byte; 4] = to_le_bytes_4(0);
+    assert(zero_le[0] == (0 as Byte));
+    assert(zero_le[1] == (0 as Byte));
+    assert(zero_le[2] == (0 as Byte));
+    assert(zero_le[3] == (0 as Byte));
+}
+
+// =============================================================================
+// Byte Conversions — Big Endian 4 bytes
+// =============================================================================
+
+@test
+fn test_to_be_bytes_4_basic() {
+    let val: Int = 0x12345678;
+    let be4: [Byte; 4] = to_be_bytes_4(val);
+    assert(be4[0] == (0x12 as Byte));
+    assert(be4[1] == (0x34 as Byte));
+    assert(be4[2] == (0x56 as Byte));
+    assert(be4[3] == (0x78 as Byte));
+}
+
+@test
+fn test_be_bytes_4_roundtrip() {
+    let val: Int = 0x12345678;
+    let be4: [Byte; 4] = to_be_bytes_4(val);
+    assert(from_be_bytes_4(be4) == val);
+}
+
+// =============================================================================
+// Byte Conversions — 8 bytes
+// =============================================================================
+
+@test
+fn test_to_le_bytes_8_basic() {
+    let val: Int = 0x123456789ABCDEF0;
+    let le8: [Byte; 8] = to_le_bytes_8(val);
+    assert(le8[0] == (0xF0 as Byte));
+    assert(le8[7] == (0x12 as Byte));
+}
+
+@test
+fn test_le_bytes_8_roundtrip() {
+    let val: Int = 0x123456789ABCDEF0;
+    let le8: [Byte; 8] = to_le_bytes_8(val);
+    assert(from_le_bytes_8(le8) == val);
+}
+
+@test
+fn test_to_be_bytes_8_basic() {
+    let val: Int = 0x123456789ABCDEF0;
+    let be8: [Byte; 8] = to_be_bytes_8(val);
+    assert(be8[0] == (0x12 as Byte));
+    assert(be8[7] == (0xF0 as Byte));
+}
+
+@test
+fn test_be_bytes_8_roundtrip() {
+    let val: Int = 0x123456789ABCDEF0;
+    let be8: [Byte; 8] = to_be_bytes_8(val);
+    assert(from_be_bytes_8(be8) == val);
+}
+
+// =============================================================================
+// Byte Conversions — 2 bytes
+// =============================================================================
+
+@test
+fn test_le_bytes_2_roundtrip() {
+    let val: Int = 0x1234;
+    let le2: [Byte; 2] = to_le_bytes_2(val);
+    assert(from_le_bytes_2(le2) == val);
+}
+
+@test
+fn test_be_bytes_2_roundtrip() {
+    let val: Int = 0x1234;
+    let be2: [Byte; 2] = to_be_bytes_2(val);
+    assert(from_be_bytes_2(be2) == val);
+}
+
+// =============================================================================
+// Endianness — UInt32 Round-trips
+// =============================================================================
+
+@test
+fn test_endian_le_roundtrip_u32() {
+    let val: UInt32 = 0x12345678 as UInt32;
+    let back: UInt32 = from_le(to_le(val));
+    assert(back == val);
+}
+
+@test
+fn test_endian_be_roundtrip_u32() {
+    let val: UInt32 = 0x12345678 as UInt32;
+    let back: UInt32 = from_be(to_be(val));
+    assert(back == val);
+}
+
+// =============================================================================
+// Endianness — UInt64 Round-trips
+// =============================================================================
+
+@test
+fn test_endian_le_roundtrip_u64() {
+    let val: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
+    assert(from_le(to_le(val)) == val);
+}
+
+@test
+fn test_endian_be_roundtrip_u64() {
+    let val: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
+    assert(from_be(to_be(val)) == val);
+}
+
+// =============================================================================
+// Endianness — UInt16 Round-trips
+// =============================================================================
+
+@test
+fn test_endian_le_roundtrip_u16() {
+    let val: UInt16 = 0xABCD as UInt16;
+    assert(from_le(to_le(val)) == val);
+}
+
+@test
+fn test_endian_be_roundtrip_u16() {
+    let val: UInt16 = 0xABCD as UInt16;
+    assert(from_be(to_be(val)) == val);
+}
+
+// =============================================================================
+// Precision/Width Function Imports
+// =============================================================================
+
+@test
+fn test_precision_imports() {
+    let _ = fpext;
+    let _ = fptrunc;
+    let _ = sext;
+    let _ = zext;
+    let _ = itrunc;
+}
+
+@test
+fn test_bitcast_import() {
+    let _ = bitcast;
+}
+
+@test
+fn test_int_to_bytes_import() {
+    let _ = int_to_bytes;
+}
+
+// =============================================================================
+// Unsigned Int/Float Conversions
+// =============================================================================
+
+@test
+fn test_uint_to_float_import() {
+    let _ = uint_to_float;
+}
+
+@test
+fn test_float_to_uint_import() {
+    let _ = float_to_uint;
+}
+
+// =============================================================================
+// Additional Int/Float Conversion Tests
+// =============================================================================
+
+@test
+fn test_int_to_float_one() {
+    assert(int_to_float<Int, Float64>(1) == 1.0);
+}
+
+@test
+fn test_int_to_float_negative_one() {
+    assert(int_to_float<Int, Float64>(-1) == -1.0);
+}
+
+@test
+fn test_float_to_int_positive_half() {
+    // 0.5 should truncate to 0
+    assert(float_to_int<Float64, Int>(0.5) == 0);
+}
+
+@test
+fn test_float_to_int_negative_half() {
+    // -0.5 should truncate toward zero
+    assert(float_to_int<Float64, Int>(-0.5) == 0);
+}
+
+// =============================================================================
+// Additional Bit Cast Tests
+// =============================================================================
+
+@test
+fn test_f32_to_bits_negative_one() {
+    let f32: Float32 = -1.0;
+    let bits: UInt32 = f32_to_bits(f32);
+    assert(bits == (0xBF800000 as UInt32));
+}
+
+@test
+fn test_f64_to_bits_negative_one() {
+    let f64: Float64 = -1.0;
+    let bits: UInt64 = f64_to_bits(f64);
+    assert(bits == (0xBFF0000000000000 as UInt64));
+}
+
+@test
+fn test_f32_roundtrip_negative() {
+    let f: Float32 = -42.5;
+    assert(f32_from_bits(f32_to_bits(f)) == f);
+}
+
+@test
+fn test_f64_roundtrip_negative() {
+    let f: Float64 = -42.5;
+    assert(f64_from_bits(f64_to_bits(f)) == f);
+}
+
+// =============================================================================
+// Additional Byte/Endian Tests
+// =============================================================================
+
+@test
+fn test_to_le_bytes_4_one() {
+    let le4: [Byte; 4] = to_le_bytes_4(1);
+    assert(le4[0] == (1 as Byte));
+    assert(le4[1] == (0 as Byte));
+    assert(le4[2] == (0 as Byte));
+    assert(le4[3] == (0 as Byte));
+}
+
+@test
+fn test_to_be_bytes_4_one() {
+    let be4: [Byte; 4] = to_be_bytes_4(1);
+    assert(be4[0] == (0 as Byte));
+    assert(be4[1] == (0 as Byte));
+    assert(be4[2] == (0 as Byte));
+    assert(be4[3] == (1 as Byte));
+}
+
+@test
+fn test_endian_le_roundtrip_zero_u32() {
+    let val: UInt32 = 0 as UInt32;
+    assert(from_le(to_le(val)) == val);
+}
+
+@test
+fn test_endian_be_roundtrip_zero_u64() {
+    let val: UInt64 = 0 as UInt64;
+    assert(from_be(to_be(val)) == val);
+}
+
+// =============================================================================
+// Additional Conversion Tests
+// =============================================================================
+
+@test
+fn test_int_to_float_zero() {
+    let result: Float64 = int_to_float<Int, Float64>(0);
+    assert(result == 0.0);
+}
+
+@test
+fn test_uint_to_float_zero() {
+    let result: Float64 = uint_to_float<UInt64, Float64>(0 as UInt64);
+    assert(result == 0.0);
+}
+
+@test
+fn test_float_to_int_zero() {
+    let result: Int = float_to_int<Float64, Int>(0.0);
+    assert(result == 0);
+}
+
+@test
+fn test_float_to_uint_zero() {
+    let result: UInt64 = float_to_uint<Float64, UInt64>(0.0);
+    assert(result == (0 as UInt64));
+}
+
+@test
+fn test_f32_bits_zero() {
+    let f: Float32 = 0.0;
+    let bits = f32_to_bits(f);
+    assert(bits == (0 as UInt32));
+}
+
+@test
+fn test_f64_bits_zero() {
+    let f: Float64 = 0.0;
+    let bits = f64_to_bits(f);
+    assert(bits == (0 as UInt64));
+}
+
+@test
+fn test_int_to_float_negative() {
+    let result: Float64 = int_to_float<Int, Float64>(-100);
+    assert(result == -100.0);
+}
+
+@test
+fn test_float_to_int_truncation() {
+    // 3.9 should truncate to 3
+    let result: Int = float_to_int<Float64, Int>(3.9);
+    assert(result == 3);
+}

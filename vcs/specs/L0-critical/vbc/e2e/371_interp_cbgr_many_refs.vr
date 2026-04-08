@@ -1,0 +1,413 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, edge, stress, many-refs
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: CBGR stress test with many references.
+// Creates 50+ references in loops, tests simultaneous immutable borrows,
+// sequential mutable borrows, and validates correctness under reference pressure.
+
+// =============================================================================
+// Helper: simulated array via record (Arr16)
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn arr16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0,
+        e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0,
+        e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn arr16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 } else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 }
+    else if i == 8 { a.e8 } else if i == 9 { a.e9 }
+    else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 }
+    else if i == 14 { a.e14 } else { a.e15 }
+}
+
+fn arr16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 },
+        e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 },
+        e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 },
+        e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 },
+        e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+// =============================================================================
+// Read through immutable reference
+// =============================================================================
+
+fn read_ref(r: &Int) -> Int {
+    *r
+}
+
+fn read_and_add(a: &Int, b: &Int) -> Int {
+    *a + *b
+}
+
+// =============================================================================
+// Write through mutable reference
+// =============================================================================
+
+fn set_via_ref(r: &mut Int, val: Int) {
+    *r = val;
+}
+
+fn increment_ref(r: &mut Int) {
+    *r = *r + 1;
+}
+
+fn double_ref(r: &mut Int) {
+    *r = *r * 2;
+}
+
+// =============================================================================
+// Test 1: Many immutable references to different variables
+// =============================================================================
+
+fn test_many_immutable_refs() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    let d = 4;
+    let e = 5;
+    let f = 6;
+    let g = 7;
+    let h = 8;
+
+    // Multiple simultaneous immutable borrows of the same variable
+    let r1 = &a;
+    let r2 = &a;
+    let r3 = &a;
+    assert_eq(*r1, 1);
+    assert_eq(*r2, 1);
+    assert_eq(*r3, 1);
+
+    // References to different variables simultaneously
+    let rb = &b;
+    let rc = &c;
+    let rd = &d;
+    let re = &e;
+    let rf = &f;
+    let rg = &g;
+    let rh = &h;
+
+    assert_eq(*rb, 2);
+    assert_eq(*rc, 3);
+    assert_eq(*rd, 4);
+    assert_eq(*re, 5);
+    assert_eq(*rf, 6);
+    assert_eq(*rg, 7);
+    assert_eq(*rh, 8);
+
+    // Use refs in computation
+    let sum = *r1 + *rb + *rc + *rd + *re + *rf + *rg + *rh;
+    assert_eq(sum, 36);
+}
+
+// =============================================================================
+// Test 2: Many refs created in a loop
+// =============================================================================
+
+fn test_refs_in_loop() {
+    // Create references in a tight loop, reading values
+    let mut total = 0;
+    let mut i = 0;
+    while i < 50 {
+        let val = i * 3 + 1;
+        let r = &val;
+        total = total + *r;
+        i = i + 1;
+    }
+    // Sum of (3*i + 1) for i in 0..49 = 3*(0+1+...+49) + 50 = 3*1225 + 50 = 3725
+    assert_eq(total, 3725);
+}
+
+// =============================================================================
+// Test 3: Sequential mutable borrows in a loop
+// =============================================================================
+
+fn test_sequential_mut_refs() {
+    let mut val = 0;
+
+    // 50 sequential mutable borrows
+    let mut i = 0;
+    while i < 50 {
+        let r = &mut val;
+        *r = *r + 2;
+        i = i + 1;
+    }
+    assert_eq(val, 100);
+
+    // Another round of sequential mutable borrows
+    let mut j = 0;
+    while j < 25 {
+        let r = &mut val;
+        *r = *r - 1;
+        j = j + 1;
+    }
+    assert_eq(val, 75);
+}
+
+// =============================================================================
+// Test 4: Multiple variables with sequential mutable refs
+// =============================================================================
+
+fn test_multi_var_mut_refs() {
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    let mut d = 0;
+
+    let mut i = 0;
+    while i < 20 {
+        // Each iteration mutably borrows a different variable
+        if i % 4 == 0 {
+            increment_ref(&mut a);
+        } else if i % 4 == 1 {
+            increment_ref(&mut b);
+        } else if i % 4 == 2 {
+            increment_ref(&mut c);
+        } else {
+            increment_ref(&mut d);
+        }
+        i = i + 1;
+    }
+
+    assert_eq(a, 5);
+    assert_eq(b, 5);
+    assert_eq(c, 5);
+    assert_eq(d, 5);
+}
+
+// =============================================================================
+// Test 5: Refs with function calls under pressure
+// =============================================================================
+
+fn test_ref_function_pressure() {
+    let mut x = 1;
+
+    // Chain of increments via ref
+    let mut i = 0;
+    while i < 30 {
+        increment_ref(&mut x);
+        i = i + 1;
+    }
+    assert_eq(x, 31);
+
+    // Double it multiple times via ref
+    let mut j = 0;
+    while j < 5 {
+        double_ref(&mut x);
+        j = j + 1;
+    }
+    // 31 * 2^5 = 31 * 32 = 992
+    assert_eq(x, 992);
+
+    // Set to specific value via ref
+    set_via_ref(&mut x, 42);
+    assert_eq(x, 42);
+}
+
+// =============================================================================
+// Test 6: Mixed ref reads and writes
+// =============================================================================
+
+fn test_mixed_ref_ops() {
+    let mut src = 100;
+    let mut dst = 0;
+
+    // Read from src via immutable ref, write to dst via mutable ref
+    let mut i = 0;
+    while i < 10 {
+        let r_src = &src;
+        let val = *r_src;
+        set_via_ref(&mut dst, val + i);
+        i = i + 1;
+    }
+    // Last iteration: dst = 100 + 9 = 109
+    assert_eq(dst, 109);
+    assert_eq(src, 100);
+}
+
+// =============================================================================
+// Test 7: Accumulating sum through ref
+// =============================================================================
+
+fn add_to_ref(r: &mut Int, val: Int) {
+    *r = *r + val;
+}
+
+fn test_accumulate_many() {
+    let mut acc = 0;
+
+    let mut i = 1;
+    while i <= 100 {
+        add_to_ref(&mut acc, i);
+        i = i + 1;
+    }
+    // Sum of 1..100 = 5050
+    assert_eq(acc, 5050);
+}
+
+// =============================================================================
+// Test 8: Two-pointer swap pattern many times
+// =============================================================================
+
+fn swap_ints(a: &mut Int, b: &mut Int) {
+    let tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+fn test_many_swaps() {
+    let mut x = 1;
+    let mut y = 2;
+
+    let mut i = 0;
+    while i < 50 {
+        swap_ints(&mut x, &mut y);
+        i = i + 1;
+    }
+    // 50 swaps (even): back to original
+    assert_eq(x, 1);
+    assert_eq(y, 2);
+
+    // 51 swaps (odd): swapped
+    swap_ints(&mut x, &mut y);
+    assert_eq(x, 2);
+    assert_eq(y, 1);
+}
+
+// =============================================================================
+// Test 9: Ref to record fields (simulated via copies)
+// =============================================================================
+
+fn test_ref_to_values_from_records() {
+    let mut arr = arr16_zeros();
+    let mut i = 0;
+    while i < 16 {
+        arr = arr16_set(arr, i, (i + 1) * 10);
+        i = i + 1;
+    }
+
+    // Read each element through a ref
+    let mut sum = 0;
+    let mut j = 0;
+    while j < 16 {
+        let val = arr16_get(arr, j);
+        let r = &val;
+        sum = sum + *r;
+        j = j + 1;
+    }
+    // Sum of 10+20+...+160 = 10*(1+2+...+16) = 10*136 = 1360
+    assert_eq(sum, 1360);
+}
+
+// =============================================================================
+// Test 10: Stress — many ref creations and immediate use
+// =============================================================================
+
+fn test_ref_creation_stress() {
+    let mut total = 0;
+
+    let mut i = 0;
+    while i < 100 {
+        let val = i * i;
+        let r = &val;
+        total = total + read_ref(r);
+        i = i + 1;
+    }
+    // Sum of i^2 for i in 0..99 = 99*100*199/6 = 328350
+    assert_eq(total, 328350);
+}
+
+// =============================================================================
+// Test 11: Refs passed to multiple functions
+// =============================================================================
+
+fn triple_ref(r: &mut Int) {
+    *r = *r * 3;
+}
+
+fn test_ref_function_chain() {
+    let mut x = 1;
+
+    // increment -> double -> triple -> increment -> double
+    increment_ref(&mut x);  // 2
+    double_ref(&mut x);     // 4
+    triple_ref(&mut x);     // 12
+    increment_ref(&mut x);  // 13
+    double_ref(&mut x);     // 26
+    assert_eq(x, 26);
+}
+
+// =============================================================================
+// Test 12: Simultaneous immutable borrows — many at once
+// =============================================================================
+
+fn test_many_simultaneous_immut() {
+    let val = 42;
+    let r1 = &val;
+    let r2 = &val;
+    let r3 = &val;
+    let r4 = &val;
+    let r5 = &val;
+    let r6 = &val;
+    let r7 = &val;
+    let r8 = &val;
+    let r9 = &val;
+    let r10 = &val;
+
+    let sum = *r1 + *r2 + *r3 + *r4 + *r5 + *r6 + *r7 + *r8 + *r9 + *r10;
+    assert_eq(sum, 420);
+
+    // Verify all still valid
+    assert_eq(*r1, 42);
+    assert_eq(*r10, 42);
+}
+
+fn main() -> Int {
+    test_many_immutable_refs();
+    test_refs_in_loop();
+    test_sequential_mut_refs();
+    test_multi_var_mut_refs();
+    test_ref_function_pressure();
+    test_mixed_ref_ops();
+    test_accumulate_many();
+    test_many_swaps();
+    test_ref_to_values_from_records();
+    test_ref_creation_stress();
+    test_ref_function_chain();
+    test_many_simultaneous_immut();
+    print("[OK] 371_interp_cbgr_many_refs");
+    0
+}

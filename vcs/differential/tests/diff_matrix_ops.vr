@@ -1,0 +1,116 @@
+// @test: differential
+
+// @tier: 0
+// @level: L0
+// @tags: differential, matrix, linear-algebra, determinant
+// @timeout: 10000
+
+// 3x3 matrix stored as 9 fields
+type Mat3 is { m00: Int, m01: Int, m02: Int, m10: Int, m11: Int, m12: Int, m20: Int, m21: Int, m22: Int };
+
+fn mat_identity() -> Mat3 {
+    Mat3 { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0, m20: 0, m21: 0, m22: 1 }
+}
+
+fn mat_mul(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        m00: a.m00*b.m00 + a.m01*b.m10 + a.m02*b.m20,
+        m01: a.m00*b.m01 + a.m01*b.m11 + a.m02*b.m21,
+        m02: a.m00*b.m02 + a.m01*b.m12 + a.m02*b.m22,
+        m10: a.m10*b.m00 + a.m11*b.m10 + a.m12*b.m20,
+        m11: a.m10*b.m01 + a.m11*b.m11 + a.m12*b.m21,
+        m12: a.m10*b.m02 + a.m11*b.m12 + a.m12*b.m22,
+        m20: a.m20*b.m00 + a.m21*b.m10 + a.m22*b.m20,
+        m21: a.m20*b.m01 + a.m21*b.m11 + a.m22*b.m21,
+        m22: a.m20*b.m02 + a.m21*b.m12 + a.m22*b.m22
+    }
+}
+
+fn mat_det(m: Mat3) -> Int {
+    m.m00 * (m.m11*m.m22 - m.m12*m.m21)
+    - m.m01 * (m.m10*m.m22 - m.m12*m.m20)
+    + m.m02 * (m.m10*m.m21 - m.m11*m.m20)
+}
+
+fn mat_trace(m: Mat3) -> Int {
+    m.m00 + m.m11 + m.m22
+}
+
+fn mat_transpose(m: Mat3) -> Mat3 {
+    Mat3 {
+        m00: m.m00, m01: m.m10, m02: m.m20,
+        m10: m.m01, m11: m.m11, m12: m.m21,
+        m20: m.m02, m21: m.m12, m22: m.m22
+    }
+}
+
+fn mat_scale(m: Mat3, s: Int) -> Mat3 {
+    Mat3 {
+        m00: m.m00*s, m01: m.m01*s, m02: m.m02*s,
+        m10: m.m10*s, m11: m.m11*s, m12: m.m12*s,
+        m20: m.m20*s, m21: m.m21*s, m22: m.m22*s
+    }
+}
+
+fn test_identity() -> Int {
+    let i = mat_identity();
+    assert_eq(mat_det(i), 1);
+    assert_eq(mat_trace(i), 3);
+    let ii = mat_mul(i, i);
+    assert_eq(mat_det(ii), 1);
+    assert_eq(mat_trace(ii), 3);
+    1
+}
+
+fn test_determinant() -> Int {
+    let s = Mat3 { m00: 1, m01: 2, m02: 3, m10: 4, m11: 5, m12: 6, m20: 7, m21: 8, m22: 9 };
+    assert_eq(mat_det(s), 0);
+    let d = Mat3 { m00: 2, m01: 0, m02: 0, m10: 0, m11: 3, m12: 0, m20: 0, m21: 0, m22: 5 };
+    assert_eq(mat_det(d), 30);
+    assert_eq(mat_trace(d), 10);
+    1
+}
+
+fn test_multiply() -> Int {
+    let a = Mat3 { m00: 1, m01: 2, m02: 0, m10: 0, m11: 1, m12: 3, m20: 1, m21: 0, m22: 1 };
+    let i = mat_identity();
+    let ai = mat_mul(a, i);
+    assert_eq(ai.m00, 1);
+    assert_eq(ai.m01, 2);
+    assert_eq(ai.m12, 3);
+    let ia = mat_mul(i, a);
+    assert_eq(ia.m00, 1);
+    assert_eq(ia.m10, 0);
+    1
+}
+
+fn test_transpose() -> Int {
+    let a = Mat3 { m00: 1, m01: 2, m02: 3, m10: 4, m11: 5, m12: 6, m20: 7, m21: 8, m22: 9 };
+    let t = mat_transpose(a);
+    assert_eq(t.m01, 4);
+    assert_eq(t.m10, 2);
+    assert_eq(mat_trace(a), mat_trace(t));
+    assert_eq(mat_det(a), mat_det(t));
+    1
+}
+
+fn test_scale() -> Int {
+    let a = Mat3 { m00: 1, m01: 0, m02: 0, m10: 0, m11: 2, m12: 0, m20: 0, m21: 0, m22: 3 };
+    let s = mat_scale(a, 2);
+    assert_eq(s.m00, 2);
+    assert_eq(s.m11, 4);
+    assert_eq(s.m22, 6);
+    assert_eq(mat_det(a), 6);
+    assert_eq(mat_det(s), 48);
+    1
+}
+
+fn main() -> Int {
+    test_identity();
+    test_determinant();
+    test_multiply();
+    test_transpose();
+    test_scale();
+    print("DIFF_OK: matrix_ops");
+    0
+}

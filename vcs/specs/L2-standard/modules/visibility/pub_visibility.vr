@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: modules, visibility, public
+
+/// Public visibility - items accessible from anywhere.
+/// The `pub` keyword makes items visible to all code that can access the module.
+
+module library {
+    /// Public type - visible everywhere
+    pub type PublicType is {
+        name: Text,
+        value: Int
+    };
+
+    /// Public constant - visible everywhere
+    pub const PUBLIC_CONST: Int = 42;
+
+    /// Public function - callable from anywhere
+    pub fn public_function(x: Int) -> Int {
+        x * 2
+    }
+
+    /// Public trait - implementable anywhere (subject to orphan rules)
+    pub type PublicTrait is protocol {
+        fn required_method(&self) -> Text;
+
+        fn default_method(&self) -> Int {
+            0
+        }
+    }
+
+    /// Public enum - variants are implicitly public when enum is public
+    pub type PublicEnum is
+    | VariantA
+    | VariantB(Int)
+    | VariantC { x: Int, y: Int };
+
+    /// Public struct with public fields
+    pub type PublicStruct is {
+        pub field1: Text,
+        pub field2: Int,
+        // Private field - only accessible within this module
+        internal_field: Bool
+    };
+
+    /// Implementation of public trait for public type
+    implement PublicTrait for PublicType {
+        fn required_method(&self) -> Text {
+            self.name.clone()
+        }
+    }
+
+    /// Public module - submodules are visible
+    pub module submodule {
+        pub type SubType is {
+            data: List<Int>
+        };
+
+        pub fn sub_function() -> SubType {
+            SubType { data: List.new() }
+        }
+    }
+}
+
+module consumer {
+    // Can mount public items from library
+    mount library.{
+        PublicType,
+        PUBLIC_CONST,
+        public_function,
+        PublicTrait,
+        PublicEnum,
+        PublicStruct
+    };
+    mount library.submodule.{SubType, sub_function};
+
+    pub fn use_library() {
+        // Create public type
+        let pt = PublicType { name: "test", value: 10 };
+
+        // Use public constant
+        let x = PUBLIC_CONST + 1;
+
+        // Call public function
+        let doubled = public_function(x);
+
+        // Use public trait method
+        let name = pt.required_method();
+
+        // Create public enum variants
+        let a = PublicEnum.VariantA;
+        let b = PublicEnum.VariantB(42);
+        let c = PublicEnum.VariantC { x: 1, y: 2 };
+
+        // Create public struct (only public fields accessible for construction)
+        // Note: internal_field cannot be set from outside library module
+        // This would typically require a constructor function
+
+        // Use submodule items
+        let sub = sub_function();
+    }
+}
+
+fn main() {
+    mount library.PublicType;
+    mount consumer.use_library;
+
+    use_library();
+
+    let pt = PublicType { name: "main", value: 100 };
+}

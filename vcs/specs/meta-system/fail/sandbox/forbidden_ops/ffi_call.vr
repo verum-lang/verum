@@ -1,0 +1,19 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, sandbox, forbidden, ffi
+// @description: Test that FFI calls are forbidden in meta functions
+// @expected-error: M301
+
+extern "C" fn external_function() -> Int;
+
+// FFI calls are security risks in meta context
+meta fn test_ffi_call() -> Int {
+    // Attempting FFI call should fail
+    external_function()
+}
+
+fn main() {
+    // Call meta function at compile time
+    @const assert(test_ffi_call() >= 0);
+}

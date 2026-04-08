@@ -1,0 +1,65 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, patterns, rest, binding, error
+// @description: Test invalid rest pattern binding syntax
+// @expected-error: E079
+
+fn test_rest_with_two_identifiers() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Invalid: rest with two identifiers (should be single binding)
+    match arr {
+        [first, ..x y, last] => print("two identifiers"),
+        _ => print("other"),
+    }
+}
+
+fn test_rest_with_type_annotation() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Invalid: rest with inline type annotation
+    match arr {
+        [first, ..rest: [Int], last] => print("typed rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_rest_with_pattern() {
+    let arr = [[1, 2], [3, 4], [5, 6]];
+
+    // Invalid: rest with nested pattern
+    match arr {
+        [first, ..[a, b], last] => print("nested rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_rest_with_at_binding() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Invalid: rest with @ binding
+    match arr {
+        [first, rest @ .., last] => print("at rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_rest_with_ref() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Invalid: rest with ref modifier
+    match arr {
+        [first, ref ..rest, last] => print("ref rest"),
+        _ => print("other"),
+    }
+}
+
+fn test_rest_with_mut() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Invalid: rest with mut modifier
+    match arr {
+        [first, mut ..rest, last] => print("mut rest"),
+        _ => print("other"),
+    }
+}

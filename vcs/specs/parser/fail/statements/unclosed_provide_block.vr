@@ -1,0 +1,10 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, statements, provide, block, unclosed, error
+// @description: Test provide statement with unclosed in block
+// @expected-error: E011
+
+fn test() {
+    provide Database = db in {
+        query();
+}

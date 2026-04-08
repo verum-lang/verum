@@ -1,0 +1,280 @@
+// @test: parse
+// @tier: 3
+// @level: L3
+// @skip-disabled: GPU tests downgraded to parse-only
+// @tags: gpu, multi_gpu, collective
+
+fn main() {
+    let devices = Device.all_gpus();
+    let num_devices = devices.len();
+
+    if num_devices < 2 {
+        // Skip multi-GPU collective tests
+        return;
+    }
+
+    // Initialize NCCL (or equivalent) communicator
+    let comm = Communicator.new(devices);
+
+    // Allocate tensors on each device
+    let mut tensors: List<Tensor<f32, [1000]> > = devices.iter()
+        .enumerate()
+        .map(|(i, d)| Tensor.full((i + 1) as f32).to(*d))
+        .collect();
+
+    // Device 0: all 1.0, Device 1: all 2.0, etc.
+
+    // ========== ALL-REDUCE ==========
+    // Sum across all devices, result on all devices
+
+    let mut reduce_tensors = tensors.clone();
+    comm.all_reduce(&mut reduce_tensors, ReduceOp.Sum);
+
+    // All devices now have the sum
+    for i in 0..num_devices {
+        let expected_sum = (1..=num_devices).sum<usize>() as f32;  // 1 + 2 + ... + n
+        let result = reduce_tensors[i].to_host();
+        assert(result[0] == expected_sum);
+    }
+
+    // All-reduce with different operations
+    let mut max_tensors = tensors.clone();
+    comm.all_reduce(&mut max_tensors, ReduceOp.Max);
+
+    for i in 0..num_devices {
+        let result = max_tensors[i].to_host();
+        assert(result[0] == num_devices as f32);  // Max is n
+    }
+
+    let mut min_tensors = tensors.clone();
+    comm.all_reduce(&mut min_tensors, ReduceOp.Min);
+
+    for i in 0..num_devices {
+        let result = min_tensors[i].to_host();
+        assert(result[0] == 1.0);  // Min is 1
+    }
+
+    let mut prod_tensors = tensors.clone();
+    comm.all_reduce(&mut prod_tensors, ReduceOp.Prod);
+
+    for i in 0..num_devices {
+        let result = prod_tensors[i].to_host();
+        // Product: 1 * 2 * ... * n = n!
+        let expected = (1..=num_devices).product<usize>() as f32;
+        assert(result[0] == expected);
+    }
+
+    // ========== BROADCAST ==========
+    // Send from root to all devices
+
+    let mut bcast_tensors: List<Tensor<f32, [1000]> > = devices.iter()
+        .map(|d| Tensor.zeros().to(*d))
+        .collect();
+
+    // Set source data on root (device 0)
+    bcast_tensors[0] = Tensor.full(42.0).to(devices[0]);
+
+    comm.broadcast(&mut bcast_tensors, root: 0);
+
+    // All devices now have 42.0
+    for i in 0..num_devices {
+        let result = bcast_tensors[i].to_host();
+        assert(result[0] == 42.0);
+    }
+
+    // ========== REDUCE ==========
+    // Reduce to single device (root)
+
+    let reduce_only: List<Tensor<f32, [1000]> > = tensors.clone();
+    let mut reduced: Tensor<f32, [1000]> = Tensor.zeros().to(devices[0]);
+
+    comm.reduce(&reduce_only, &mut reduced, root: 0, ReduceOp.Sum);
+
+    // Only root has result
+    let root_result = reduced.to_host();
+    let expected_sum = (1..=num_devices).sum<usize>() as f32;
+    assert(root_result[0] == expected_sum);
+
+    // ========== SCATTER ==========
+    // Distribute from root to all devices
+
+    // Source on root: chunks for each device
+    let scatter_source: Tensor<f32, [_]> = Tensor.arange(0.0, (num_devices * 1000) as f32, 1.0)
+        .to(devices[0]);
+
+    let mut scatter_targets: List<Tensor<f32, [1000]> > = devices.iter()
+        .map(|d| Tensor.zeros().to(*d))
+        .collect();
+
+    comm.scatter(&scatter_source, &mut scatter_targets, root: 0);
+
+    // Device i has values [i*1000, (i+1)*1000)
+    for i in 0..num_devices {
+        let result = scatter_targets[i].to_host();
+        assert(result[0] == (i * 1000) as f32);
+        assert(result[999] == (i * 1000 + 999) as f32);
+    }
+
+    // ========== GATHER ==========
+    // Collect from all devices to root
+
+    let gather_sources: List<Tensor<f32, [1000]> > = devices.iter()
+        .enumerate()
+        .map(|(i, d)| Tensor.full((i * 10) as f32).to(*d))
+        .collect();
+
+    let mut gathered: Tensor<f32, [_]> = Tensor.zeros_with_size(num_devices * 1000)
+        .to(devices[0]);
+
+    comm.gather(&gather_sources, &mut gathered, root: 0);
+
+    // Root has all data
+    let gathered_host = gathered.to_host();
+    for i in 0..num_devices {
+        assert(gathered_host[i * 1000] == (i * 10) as f32);
+    }
+
+    // ========== ALL-GATHER ==========
+    // Gather to all devices
+
+    let all_gather_sources: List<Tensor<f32, [100]> > = devices.iter()
+        .enumerate()
+        .map(|(i, d)| Tensor.full(i as f32).to(*d))
+        .collect();
+
+    let mut all_gathered: List<Tensor<f32, [_]> > = devices.iter()
+        .map(|d| Tensor.zeros_with_size(num_devices * 100).to(*d))
+        .collect();
+
+    comm.all_gather(&all_gather_sources, &mut all_gathered);
+
+    // All devices have same complete data
+    for i in 0..num_devices {
+        let result = all_gathered[i].to_host();
+        for j in 0..num_devices {
+            assert(result[j * 100] == j as f32);
+        }
+    }
+
+    // ========== REDUCE-SCATTER ==========
+    // Reduce and scatter (each device gets part of result)
+
+    let reduce_scatter_sources: List<Tensor<f32, [_]> > = devices.iter()
+        .map(|d| Tensor.ones_with_size(num_devices * 100).to(*d))
+        .collect();
+
+    let mut reduce_scatter_results: List<Tensor<f32, [100]> > = devices.iter()
+        .map(|d| Tensor.zeros().to(*d))
+        .collect();
+
+    comm.reduce_scatter(&reduce_scatter_sources, &mut reduce_scatter_results, ReduceOp.Sum);
+
+    // Each device has 1/n of the reduced result
+    for i in 0..num_devices {
+        let result = reduce_scatter_results[i].to_host();
+        assert(result[0] == num_devices as f32);  // Sum of n ones
+    }
+
+    // ========== ALL-TO-ALL ==========
+    // Each device sends different data to each other device
+
+    let all_to_all_sources: List<Tensor<f32, [_]> > = devices.iter()
+        .enumerate()
+        .map(|(i, d)| {
+            // Device i sends chunk j to device j
+            Tensor.from_fn(num_devices * 100, |idx| {
+                let target_device = idx / 100;
+                (i * num_devices + target_device) as f32
+            }).to(*d)
+        })
+        .collect();
+
+    let mut all_to_all_targets: List<Tensor<f32, [_]> > = devices.iter()
+        .map(|d| Tensor.zeros_with_size(num_devices * 100).to(*d))
+        .collect();
+
+    comm.all_to_all(&all_to_all_sources, &mut all_to_all_targets);
+
+    // Device i receives data from all devices intended for i
+    for i in 0..num_devices {
+        let result = all_to_all_targets[i].to_host();
+        for j in 0..num_devices {
+            // Device i received chunk from device j
+            assert(result[j * 100] == (j * num_devices + i) as f32);
+        }
+    }
+
+    // ========== ASYNC COLLECTIVES ==========
+
+    let stream = Stream.new(devices[0]);
+
+    let mut async_tensors = tensors.clone();
+    comm.all_reduce_async(&mut async_tensors, ReduceOp.Sum, stream);
+
+    // Can do other work while collective is in progress
+    // ...
+
+    stream.synchronize();
+
+    // ========== RING ALL-REDUCE IMPLEMENTATION ==========
+    // For understanding; library implementation is optimized
+
+    fn ring_all_reduce(
+        tensors: &mut List<Tensor<f32, [N]> >,
+        devices: &List<Device>,
+        op: ReduceOp
+    ) {
+        let n = devices.len();
+        let chunk_size = tensors[0].len() / n;
+
+        // Phase 1: Reduce-scatter via ring
+        for step in 0..n-1 {
+            for i in 0..n {
+                let send_idx = (i + n - step) % n;
+                let recv_idx = (i + n - step - 1) % n;
+                let next = (i + 1) % n;
+                let prev = (i + n - 1) % n;
+
+                // Send chunk to next, receive from prev, reduce
+                let send_chunk = tensors[i][send_idx * chunk_size..(send_idx + 1) * chunk_size];
+                let recv_chunk = &mut tensors[i][recv_idx * chunk_size..(recv_idx + 1) * chunk_size];
+
+                // Peer transfer and reduce
+                // (simplified - actual implementation uses streams)
+            }
+        }
+
+        // Phase 2: All-gather via ring
+        for step in 0..n-1 {
+            for i in 0..n {
+                let send_idx = (i + n - step + 1) % n;
+                let next = (i + 1) % n;
+
+                // Send reduced chunk to next
+            }
+        }
+    }
+
+    // ========== GROUPED COLLECTIVES ==========
+
+    // Multiple collectives can be grouped for efficiency
+    comm.group_start();
+
+    let mut group_tensor1: List<Tensor<f32, [1000]> > = tensors.clone();
+    let mut group_tensor2: List<Tensor<f32, [500]> > = devices.iter()
+        .map(|d| Tensor.ones().to(*d))
+        .collect();
+
+    comm.all_reduce(&mut group_tensor1, ReduceOp.Sum);
+    comm.all_reduce(&mut group_tensor2, ReduceOp.Sum);
+
+    comm.group_end();  // Execute all grouped operations
+
+    // Verify
+    for i in 0..num_devices {
+        let r1 = group_tensor1[i].to_host();
+        let r2 = group_tensor2[i].to_host();
+        assert(r1[0] == (1..=num_devices).sum<usize>() as f32);
+        assert(r2[0] == num_devices as f32);
+    }
+}

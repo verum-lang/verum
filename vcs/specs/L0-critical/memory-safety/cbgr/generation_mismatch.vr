@@ -1,0 +1,19 @@
+// @test: typecheck-fail
+// @expected-error: E310
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, generation
+// @description: Tests compile-time borrow checking detects aliasing violation
+
+fn main() {
+    let mut slot = Heap.new(42);
+
+    // Create a reference - captures current generation
+    let old_ref = &slot;
+
+    // Reassign slot - increments generation
+    slot = Heap.new(100);
+
+    // Access with old generation - detected by CBGR
+    let _ = *old_ref;  // Panic: CBGR generation mismatch
+}

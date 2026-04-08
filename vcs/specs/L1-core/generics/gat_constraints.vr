@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, gat, associated-types, constraints, protocols
+// @timeout: 15000
+
+/// Test for Generic Associated Types (GATs) with constraints.
+/// GATs allow associated types to have their own type parameters.
+
+// Basic GAT protocol
+type Container is protocol {
+    type Item<T>;
+
+    fn wrap<T>(&self, value: T) -> Self.Item<T>;
+};
+
+// Maybe-based container
+type MaybeContainer is ();
+
+implement Container for MaybeContainer {
+    type Item<T> = Maybe<T>;
+
+    fn wrap<T>(&self, value: T) -> Maybe<T> {
+        Some(value)
+    }
+}
+
+// GAT with constraints
+type BoundedContainer is protocol {
+    type Item<T: Clone>;
+
+    fn store<T: Clone>(&self, value: T) -> Self.Item<T>;
+};
+
+// Implement with List
+type ListStore is ();
+
+implement BoundedContainer for ListStore {
+    type Item<T: Clone> = List<T>;
+
+    fn store<T: Clone>(&self, value: T) -> List<T> {
+        [value]
+    }
+}
+
+// Multiple GATs in same protocol
+type Transformer is protocol {
+    type Input<A>;
+    type Output<B>;
+
+    fn transform<A, B>(&self, input: Self.Input<A>) -> Self.Output<B>;
+};
+
+fn main() {
+    let mc = MaybeContainer;
+    let wrapped = mc.wrap(42);
+    assert(wrapped == Some(42));
+
+    let ls = ListStore;
+    let stored = ls.store(42);
+    assert(stored.len() == 1);
+
+    assert(true);
+}

@@ -1,0 +1,113 @@
+// @test: meta-pass
+// @level: L1
+// @tier: 0
+// @tags: meta, hygiene, param, types
+// @description: Test meta parameter types for meta functions
+
+// =============================================================================
+// BASIC META PARAMETER TYPES
+// =============================================================================
+
+// Meta function with Int parameter
+meta fn with_int_param(n: Int) -> Int {
+    n * 2
+}
+
+// Meta function with Bool parameter
+meta fn with_bool_param(flag: Bool) -> Int {
+    if flag { 1 } else { 0 }
+}
+
+// Meta function with Text parameter
+meta fn with_text_param(msg: Text) -> Text {
+    concat_idents(msg, "_suffix")
+}
+
+// =============================================================================
+// MULTIPLE PARAMETERS
+// =============================================================================
+
+meta fn multiple_params(a: Int, b: Int, flag: Bool) -> Int {
+    if flag {
+        a + b
+    } else {
+        a * b
+    }
+}
+
+// =============================================================================
+// LIST PARAMETERS
+// =============================================================================
+
+meta fn list_param(items: List<Int>) -> Int {
+    let mut sum = 0;
+    for item in items {
+        sum = sum + item;
+    }
+    sum
+}
+
+// =============================================================================
+// TYPE PARAMETERS
+// =============================================================================
+
+meta fn type_param<T>(default_val: T) -> TokenStream {
+    quote {
+        fn get_default() -> $T {
+            $default_val
+        }
+    }
+}
+
+// =============================================================================
+// TOKEN STREAM PARAMETERS
+// =============================================================================
+
+meta fn wrap_in_block(code: TokenStream) -> TokenStream {
+    quote {
+        {
+            $code
+        }
+    }
+}
+
+// =============================================================================
+// IDENT PARAMETERS
+// =============================================================================
+
+meta fn make_function(name: Ident, body: TokenStream) -> TokenStream {
+    quote {
+        fn $name() {
+            $body
+        }
+    }
+}
+
+// =============================================================================
+// VERIFICATION
+// =============================================================================
+
+fn test_int_param() {
+    @const assert_eq(with_int_param(5), 10);
+}
+
+fn test_bool_param() {
+    @const assert_eq(with_bool_param(true), 1);
+    @const assert_eq(with_bool_param(false), 0);
+}
+
+fn test_multiple_params() {
+    @const assert_eq(multiple_params(3, 4, true), 7);
+    @const assert_eq(multiple_params(3, 4, false), 12);
+}
+
+fn test_list_param() {
+    @const assert_eq(list_param([1, 2, 3, 4]), 10);
+}
+
+fn main() {
+    test_int_param();
+    test_bool_param();
+    test_multiple_params();
+    test_list_param();
+}

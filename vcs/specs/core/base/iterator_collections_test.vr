@@ -1,0 +1,709 @@
+// =============================================================================
+// iterator_collections_test.vr - Tests for iterator-collection integration
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: core, base, iterator, collections, extend, collect
+// @description: Tests for collect(), Extend, and for-loop iteration
+//               across all collection types.
+//
+// Coverage:
+// - collect(): slice iter -> List (with adapters: map, filter, take, skip)
+// - Extend: List, Set, Deque, BinaryHeap (via .extend with direct iterators)
+// - for-loop iteration on arrays and collections
+// - Iterator adapter chains with collect
+//
+// Note: FromIterator's from_iter static method and collect() to non-List
+//       types have generic resolution limitations in the current type checker.
+//       Use Extend + manual construction as the working pattern.
+// =============================================================================
+
+module specs.core.base.iterator_collections_test;
+
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+mount core.collections.set.Set;
+mount core.collections.deque.Deque;
+mount core.collections.btree.{BTreeMap, BTreeSet};
+mount core.collections.heap.BinaryHeap;
+
+// =============================================================================
+// Section 1: collect() to List
+// =============================================================================
+
+@test
+fn test_collect_to_list() {
+    let arr = [1, 2, 3, 4, 5];
+    let list: List<Int> = arr.iter().map(|x| *x).collect();
+    assert_eq(list.len(), 5);
+    assert_eq(list[0], 1);
+    assert_eq(list[4], 5);
+}
+
+@test
+fn test_collect_empty_to_list() {
+    let arr: [Int; 0] = [];
+    let list: List<Int> = arr.iter().map(|x| *x).collect();
+    assert_eq(list.len(), 0);
+    assert(list.is_empty());
+}
+
+@test
+fn test_collect_single_to_list() {
+    let arr = [42];
+    let list: List<Int> = arr.iter().map(|x| *x).collect();
+    assert_eq(list.len(), 1);
+    assert_eq(list[0], 42);
+}
+
+@test
+fn test_collect_with_map_adapter() {
+    let arr = [1, 2, 3, 4, 5];
+    let doubled: List<Int> = arr.iter().map(|x| *x * 2).collect();
+    assert_eq(doubled.len(), 5);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[2], 6);
+    assert_eq(doubled[4], 10);
+}
+
+@test
+fn test_collect_with_filter_adapter() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8];
+    let evens: List<Int> = arr.iter().filter(|x| *x % 2 == 0).map(|x| *x).collect();
+    assert_eq(evens.len(), 4);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[3], 8);
+}
+
+@test
+fn test_collect_chain_adapters() {
+    let arr = [1, 2, 3, 4, 5];
+    let result: List<Int> = arr.iter()
+        .filter(|x| *x % 2 == 1)  // odd: 1, 3, 5
+        .map(|x| *x * 10)          // 10, 30, 50
+        .collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 10);
+    assert_eq(result[1], 30);
+    assert_eq(result[2], 50);
+}
+
+@test
+fn test_collect_take() {
+    let arr = [1, 2, 3, 4, 5];
+    let result: List<Int> = arr.iter().take(3).map(|x| *x).collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 1);
+    assert_eq(result[2], 3);
+}
+
+@test
+fn test_collect_skip() {
+    let arr = [1, 2, 3, 4, 5];
+    let result: List<Int> = arr.iter().skip(2).map(|x| *x).collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 3);
+    assert_eq(result[2], 5);
+}
+
+@test
+fn test_collect_squares() {
+    let arr = [1, 2, 3, 4, 5];
+    let squares: List<Int> = arr.iter().map(|x| *x * *x).collect();
+    assert_eq(squares[0], 1);
+    assert_eq(squares[1], 4);
+    assert_eq(squares[2], 9);
+    assert_eq(squares[3], 16);
+    assert_eq(squares[4], 25);
+}
+
+// =============================================================================
+// Section 1b: collect() to Set, Deque, Map (bidirectional type inference)
+// =============================================================================
+
+@test
+fn test_collect_to_set() {
+    let items = [1, 2, 3, 2, 1];
+    let s: Set<Int> = items.iter().map(|x| *x).collect();
+    assert_eq(s.len(), 3);
+    assert(s.contains(&1));
+    assert(s.contains(&2));
+    assert(s.contains(&3));
+}
+
+@test
+fn test_collect_to_deque() {
+    let items = [1, 2, 3];
+    let d: Deque<Int> = items.iter().map(|x| *x).collect();
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_collect_to_btreeset() {
+    let items = [5, 3, 1, 4, 2, 3, 1];
+    let s: BTreeSet<Int> = items.iter().map(|x| *x).collect();
+    assert_eq(s.len(), 5);
+    assert(s.contains(&1));
+    assert(s.contains(&5));
+}
+
+// =============================================================================
+// Section 2: Extend for List
+// =============================================================================
+
+@test
+fn test_list_extend_from_list_iter() {
+    let mut list1: List<Int> = List.from([1, 2, 3]);
+    let list2: List<Int> = List.from([4, 5, 6]);
+
+    list1.extend(list2.iter());
+
+    assert_eq(list1.len(), 6);
+    assert_eq(list1[3], 4);
+    assert_eq(list1[5], 6);
+}
+
+@test
+fn test_list_extend_empty_source() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    let empty: List<Int> = List.new();
+
+    list.extend(empty.iter());
+
+    assert_eq(list.len(), 3);
+}
+
+@test
+fn test_list_extend_into_empty() {
+    let mut list: List<Int> = List.new();
+    let source: List<Int> = List.from([10, 20, 30]);
+
+    list.extend(source.iter());
+
+    assert_eq(list.len(), 3);
+}
+
+@test
+fn test_list_extend_multiple_times() {
+    let mut list: List<Int> = List.new();
+
+    let a: List<Int> = List.from([1, 2]);
+    let b: List<Int> = List.from([3, 4]);
+    let c: List<Int> = List.from([5]);
+
+    list.extend(a.iter());
+    list.extend(b.iter());
+    list.extend(c.iter());
+
+    assert_eq(list.len(), 5);
+}
+
+@test
+fn test_list_extend_from_slice() {
+    let mut list: List<Int> = List.from([1, 2]);
+    let arr = [3, 4, 5];
+    list.extend(arr.iter());
+    assert_eq(list.len(), 5);
+}
+
+// =============================================================================
+// Section 3: Set Construction from Iterables
+// =============================================================================
+
+@test
+fn test_set_extend_from_slice() {
+    let mut set = Set.new();
+    set.insert(1);
+    set.insert(2);
+
+    let arr = [3, 4, 5];
+    set.extend(arr.iter());
+
+    assert_eq(set.len(), 5);
+    assert(set.contains(&3));
+    assert(set.contains(&5));
+}
+
+@test
+fn test_set_extend_deduplicates() {
+    let mut set = Set.new();
+    set.insert(1);
+    set.insert(2);
+
+    let arr = [2, 3, 3, 4];
+    set.extend(arr.iter());
+
+    // 1, 2, 3, 4 - duplicates merged
+    assert_eq(set.len(), 4);
+    assert(set.contains(&1));
+    assert(set.contains(&4));
+}
+
+@test
+fn test_set_extend_from_list() {
+    let mut set = Set.new();
+    let source: List<Int> = List.from([10, 20, 30, 20, 10]);
+    set.extend(source.iter());
+    assert_eq(set.len(), 3);
+}
+
+// =============================================================================
+// Section 4: Extend for Deque
+// =============================================================================
+
+@test
+fn test_deque_extend_from_slice() {
+    let mut deque = Deque.new();
+    deque.push_back(1);
+    deque.push_back(2);
+
+    let arr = [3, 4, 5];
+    deque.extend(arr.iter());
+
+    assert_eq(deque.len(), 5);
+    assert_eq(deque[4], 5);
+}
+
+@test
+fn test_deque_extend_into_empty() {
+    let mut deque: Deque<Int> = Deque.new();
+    let arr = [10, 20, 30];
+    deque.extend(arr.iter());
+
+    assert_eq(deque.len(), 3);
+    assert_eq(deque[0], 10);
+    assert_eq(deque[2], 30);
+}
+
+// =============================================================================
+// Section 5: Extend for BinaryHeap
+// =============================================================================
+
+@test
+fn test_heap_extend_from_slice() {
+    let mut heap = BinaryHeap.new();
+    heap.push(1);
+    heap.push(3);
+
+    let arr = [5, 2, 4];
+    heap.extend(arr.iter());
+
+    assert_eq(heap.len(), 5);
+    assert_eq(*heap.peek().unwrap(), 5);
+}
+
+@test
+fn test_heap_extend_into_empty() {
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    heap.extend(arr.iter());
+
+    assert_eq(heap.len(), 8);
+    assert_eq(*heap.peek().unwrap(), 9);
+}
+
+// =============================================================================
+// Section 6: Manual FromIterator Pattern (workaround)
+// =============================================================================
+// Since from_iter() has generic resolution issues, the idiomatic workaround
+// is: create empty + extend, or use for-loop construction.
+
+@test
+fn test_set_from_array_via_extend() {
+    let arr = [5, 3, 1, 4, 2, 3, 1];
+    let mut set = Set.new();
+    for x in arr {
+        set.insert(x);
+    }
+    assert_eq(set.len(), 5);
+    assert(set.contains(&1));
+    assert(set.contains(&5));
+}
+
+@test
+fn test_deque_from_array_via_loop() {
+    let arr = [10, 20, 30, 40, 50];
+    let mut deque: Deque<Int> = Deque.new();
+    for x in arr {
+        deque.push_back(x);
+    }
+    assert_eq(deque.len(), 5);
+    assert_eq(deque[0], 10);
+    assert_eq(deque[4], 50);
+}
+
+@test
+fn test_btreeset_from_array_via_loop() {
+    let arr = [5, 3, 1, 4, 2];
+    let mut bset = BTreeSet.new();
+    for x in arr {
+        bset.insert(x);
+    }
+    assert_eq(bset.len(), 5);
+    assert(bset.contains(&1));
+    assert(bset.contains(&5));
+
+    // Verify sorted iteration
+    let mut iter = bset.iter();
+    let one = 1;
+    let two = 2;
+    let three = 3;
+    assert_eq(iter.next(), Some(&one));
+    assert_eq(iter.next(), Some(&two));
+    assert_eq(iter.next(), Some(&three));
+}
+
+@test
+fn test_heap_from_array_via_loop() {
+    let arr = [5, 3, 1, 4, 2];
+    let mut heap: BinaryHeap<Int> = BinaryHeap.new();
+    for x in arr {
+        heap.push(x);
+    }
+    assert_eq(heap.len(), 5);
+    assert_eq(*heap.peek().unwrap(), 5);
+}
+
+@test
+fn test_btreemap_from_pairs_via_loop() {
+    let keys = [3, 1, 4, 1, 5];
+    let vals = [30, 10, 40, 11, 50];
+    let mut btm = BTreeMap.new();
+    let mut i = 0;
+    while i < 5 {
+        btm.insert(keys[i], vals[i]);
+        i = i + 1;
+    }
+    // Key 1 was inserted twice, last value wins
+    assert_eq(btm.len(), 4); // keys: 1, 3, 4, 5
+    assert_eq(*btm.get(&1).unwrap(), 11);
+    assert_eq(*btm.get(&5).unwrap(), 50);
+}
+
+// =============================================================================
+// Section 7: for-loop Iteration
+// =============================================================================
+
+@test
+fn test_for_loop_array_sum() {
+    let arr = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for x in arr {
+        sum = sum + x;
+    }
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_for_loop_list_iter() {
+    let list: List<Int> = List.from([10, 20, 30]);
+    let mut sum = 0;
+    for x in list.iter() {
+        sum = sum + *x;
+    }
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_for_loop_nested() {
+    let outer = [1, 2, 3];
+    let inner = [10, 100];
+    let mut total = 0;
+    for x in outer {
+        for y in inner {
+            total = total + x * y;
+        }
+    }
+    // (1*10+1*100) + (2*10+2*100) + (3*10+3*100) = 110+220+330 = 660
+    assert_eq(total, 660);
+}
+
+// =============================================================================
+// Section 8: Iterator fold/reduce with collections
+// =============================================================================
+
+@test
+fn test_list_iter_fold() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    let sum = list.iter().fold(0, |acc, x| acc + *x);
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_list_iter_fold_product() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    let product = list.iter().fold(1, |acc, x| acc * *x);
+    assert_eq(product, 120);
+}
+
+@test
+fn test_list_iter_count() {
+    let list: List<Int> = List.from([10, 20, 30, 40]);
+    let count = list.iter().count();
+    assert_eq(count, 4);
+}
+
+@test
+fn test_list_iter_all() {
+    let list: List<Int> = List.from([2, 4, 6, 8]);
+    assert(list.iter().all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_list_iter_any() {
+    let list: List<Int> = List.from([1, 3, 5, 6, 7]);
+    assert(list.iter().any(|x| *x % 2 == 0));
+}
+
+// =============================================================================
+// Section 9: Large Data Operations
+// =============================================================================
+
+@test
+fn test_collect_large_to_list() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+               11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let list: List<Int> = arr.iter().map(|x| *x).collect();
+    assert_eq(list.len(), 20);
+    assert_eq(list[0], 1);
+    assert_eq(list[19], 20);
+
+    let sum = list.iter().fold(0, |acc, x| acc + *x);
+    assert_eq(sum, 210);
+}
+
+@test
+fn test_set_large_via_loop() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+               11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let mut set = Set.new();
+    for x in arr {
+        set.insert(x);
+    }
+    assert_eq(set.len(), 20);
+    assert(set.contains(&1));
+    assert(set.contains(&20));
+}
+
+// =============================================================================
+// Section 10: collect with enumerate
+// =============================================================================
+
+@test
+fn test_collect_enumerate() {
+    let arr = [10, 20, 30];
+    let indexed: List<(Int, Int)> = arr.iter().enumerate().map(|pair| (pair.0, *pair.1)).collect();
+    assert_eq(indexed.len(), 3);
+    assert_eq(indexed[0].0, 0);
+    assert_eq(indexed[0].1, 10);
+    assert_eq(indexed[2].0, 2);
+    assert_eq(indexed[2].1, 30);
+}
+
+// =============================================================================
+// Section 11: collect with take_while / skip_while
+// =============================================================================
+
+@test
+fn test_collect_take_while() {
+    let arr = [1, 2, 3, 10, 4, 5];
+    let result: List<Int> = arr.iter().take_while(|x| *x < 5).map(|x| *x).collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 1);
+    assert_eq(result[2], 3);
+}
+
+@test
+fn test_collect_skip_while() {
+    let arr = [1, 2, 3, 10, 4, 5];
+    let result: List<Int> = arr.iter().skip_while(|x| *x < 5).map(|x| *x).collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 10);
+    assert_eq(result[2], 5);
+}
+
+// =============================================================================
+// Section 12: for-loop with accumulation patterns
+// =============================================================================
+
+@test
+fn test_for_loop_max() {
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    let mut max_val = arr[0];
+    for x in arr {
+        if x > max_val {
+            max_val = x;
+        }
+    }
+    assert_eq(max_val, 9);
+}
+
+@test
+fn test_for_loop_min() {
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6];
+    let mut min_val = arr[0];
+    for x in arr {
+        if x < min_val {
+            min_val = x;
+        }
+    }
+    assert_eq(min_val, 1);
+}
+
+@test
+fn test_for_loop_count_predicate() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut count = 0;
+    for x in arr {
+        if x % 2 == 0 {
+            count = count + 1;
+        }
+    }
+    assert_eq(count, 5);
+}
+
+// =============================================================================
+// Section 13: Extend with mapped iterators
+// =============================================================================
+
+@test
+fn test_list_extend_from_mapped_iter() {
+    let mut list: List<Int> = List.from([1, 2, 3]);
+    let arr = [10, 20, 30];
+    list.extend(arr.iter().map(|x| *x * 2));
+    assert_eq(list.len(), 6);
+    assert_eq(list[3], 20);
+    assert_eq(list[5], 60);
+}
+
+@test
+fn test_set_extend_from_filtered_iter() {
+    let mut set: Set<Int> = Set.new();
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8];
+    set.extend(arr.iter().filter(|x| *x % 2 == 0));
+    assert_eq(set.len(), 4);
+    assert(set.contains(&2));
+    assert(set.contains(&8));
+    assert(!set.contains(&1));
+}
+
+// =============================================================================
+// Section 14: Iterator find/position on collections
+// =============================================================================
+
+@test
+fn test_list_iter_find() {
+    let list: List<Int> = List.from([10, 20, 30, 40, 50]);
+    let found = list.iter().find(|x| *x > 25);
+    assert(found.is_some());
+    assert_eq(*found.unwrap(), 30);
+}
+
+@test
+fn test_list_iter_position() {
+    let list: List<Int> = List.from([10, 20, 30, 40, 50]);
+    let pos = list.iter().position(|x| *x == 30);
+    assert(pos.is_some());
+    assert_eq(pos.unwrap(), 2);
+}
+
+// =============================================================================
+// Section 15: Additional Iterator-Collection Tests
+// =============================================================================
+
+@test
+fn test_collect_with_zip() {
+    let keys = [1, 2, 3];
+    let vals = [10, 20, 30];
+    let pairs: List<(Int, Int)> = keys.iter().zip(vals.iter()).map(|p| (*p.0, *p.1)).collect();
+    assert_eq(pairs.len(), 3);
+    assert_eq(pairs[0].0, 1);
+    assert_eq(pairs[0].1, 10);
+    assert_eq(pairs[2].0, 3);
+    assert_eq(pairs[2].1, 30);
+}
+
+@test
+fn test_list_iter_sum() {
+    let list: List<Int> = List.from([1, 2, 3, 4, 5]);
+    let total: Int = list.iter().map(|x| *x).sum();
+    assert_eq(total, 15);
+}
+
+@test
+fn test_list_extend_from_take() {
+    let mut list: List<Int> = List.from([1, 2]);
+    let arr = [10, 20, 30, 40, 50];
+    list.extend(arr.iter().take(3));
+    assert_eq(list.len(), 5);
+    assert_eq(list[2], 10);
+    assert_eq(list[4], 30);
+}
+
+@test
+fn test_collect_filter_map() {
+    let arr = [1, 2, 3, 4, 5, 6];
+    let result: List<Int> = arr.iter()
+        .filter(|x| *x % 2 == 0)
+        .map(|x| *x * *x)
+        .collect();
+    assert_eq(result.len(), 3);
+    assert_eq(result[0], 4);
+    assert_eq(result[1], 16);
+    assert_eq(result[2], 36);
+}
+
+@test
+fn test_for_loop_with_early_break() {
+    let arr = [1, 2, 3, 4, 5, 6, 7, 8];
+    let mut sum = 0;
+    for x in arr {
+        if x > 5 {
+            break;
+        }
+        sum = sum + x;
+    }
+    assert_eq(sum, 15);
+}
+
+@test
+fn test_deque_extend_multiple_sources() {
+    let mut deque: Deque<Int> = Deque.new();
+    let a = [1, 2];
+    let b = [3, 4];
+    let c = [5, 6];
+    deque.extend(a.iter());
+    deque.extend(b.iter());
+    deque.extend(c.iter());
+    assert_eq(deque.len(), 6);
+    assert_eq(deque[0], 1);
+    assert_eq(deque[5], 6);
+}
+
+@test
+fn test_collect_chain() {
+    let a = [1, 2, 3];
+    let b = [4, 5, 6];
+    let combined: List<Int> = a.iter().chain(b.iter()).map(|x| *x).collect();
+    assert_eq(combined.len(), 6);
+    assert_eq(combined[0], 1);
+    assert_eq(combined[5], 6);
+}
+
+@test
+fn test_list_iter_last() {
+    let list: List<Int> = List.from([10, 20, 30, 40, 50]);
+    let last_val = list.iter().last();
+    assert(last_val.is_some());
+    assert_eq(*last_val.unwrap(), 50);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

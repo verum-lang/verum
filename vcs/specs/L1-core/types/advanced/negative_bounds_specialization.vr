@@ -1,0 +1,213 @@
+// @test: typecheck-pass
+// @tier: 1
+// @level: L1
+// @tags: negative-bounds, specialization, advanced-type-syntax
+// @description: Negative bounds with specialization pattern tests
+
+// =============================================================================
+// Test 1: Negative bounds in type constraints
+// =============================================================================
+
+// Protocol declarations
+type DeepClone is protocol {
+    fn deep_clone(&self) -> Self;
+};
+
+type ThreadLocal is protocol {
+    fn local_only(&self);
+};
+
+type StrictlyLocal is protocol {
+    fn use_locally(&self);
+};
+
+type SafeContainer is protocol {
+    fn safe_access(&self);
+};
+
+type UnsafeMarker is protocol {};
+
+type Readable is protocol {
+    fn read(&self) -> Text;
+};
+
+type Writable is protocol {
+    fn write(&mut self, data: Text);
+};
+
+type ReadOnlyAccess is protocol { fn access(&self) -> Text; };
+type WriteOnlyAccess is protocol { fn access(&mut self, data: Text); };
+type ReadWriteAccess is protocol {
+    fn read_access(&self) -> Text;
+    fn write_access(&mut self, data: Text);
+};
+
+// =============================================================================
+// Test 2: Negative bounds in where clauses
+// =============================================================================
+fn process_non_async<F, R>(f: F) -> R
+    where type F: fn() -> R
+{
+    f()
+}
+
+// =============================================================================
+// Test 3: Unwrap with different Default/!Default behavior
+// =============================================================================
+fn unwrap_or_default<T: Default>(opt: Maybe<T>) -> T {
+    match opt {
+        Some(value) => value,
+        None => T.default(),
+    }
+}
+
+fn unwrap_or_panic<T>(opt: Maybe<T>, msg: Text) -> T {
+    match opt {
+        Some(value) => value,
+        None => panic(msg),
+    }
+}
+
+// =============================================================================
+// Test 4: Concrete specialization (no overlap)
+// =============================================================================
+
+type Serializer is protocol {
+    fn serialize(&self) -> List<Int>;
+};
+
+implement Serializer for Int {
+    fn serialize(&self) -> List<Int> {
+        [*self]
+    }
+}
+
+implement Serializer for Text {
+    fn serialize(&self) -> List<Int> {
+        [self.len()]
+    }
+}
+
+implement Serializer for Bool {
+    fn serialize(&self) -> List<Int> {
+        if *self { [1] } else { [0] }
+    }
+}
+
+// =============================================================================
+// Test 5: Protocol exclusion pattern simulation
+// =============================================================================
+type Container<T> is {
+    data: T,
+};
+
+implement<T> Container<T> {
+    fn get(&self) -> &T {
+        &self.data
+    }
+}
+
+// =============================================================================
+// Test 6: Mutually exclusive implementations (non-overlapping)
+// =============================================================================
+type ReadOnly<T> is { value: T };
+type WriteOnly<T> is { value: T };
+
+implement<T: Clone> Readable for ReadOnly<T> {
+    fn read(&self) -> Text {
+        "readonly"
+    }
+}
+
+implement<T> Writable for WriteOnly<T> {
+    fn write(&mut self, data: Text) {
+        // write operation
+    }
+}
+
+// =============================================================================
+// Test 7: Concrete Deep Clone implementations (no overlap)
+// =============================================================================
+type Point is { x: Float, y: Float };
+
+implement DeepClone for Point {
+    fn deep_clone(&self) -> Self {
+        Point { x: self.x, y: self.y }
+    }
+}
+
+type Line is { start: Point, end: Point };
+
+implement DeepClone for Line {
+    fn deep_clone(&self) -> Self {
+        Line {
+            start: self.start.deep_clone(),
+            end: self.end.deep_clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Test 8: Helper declarations
+// =============================================================================
+protocol Clone { fn clone(&self) -> Self; }
+protocol Copy: Clone {}
+protocol Send {}
+protocol Sync {}
+protocol Debug { fn fmt(&self) -> Text; }
+protocol Display { fn display(&self) -> Text; }
+protocol Default { fn default() -> Self; }
+
+// =============================================================================
+// Test 9: Formatter with concrete types (no blanket overlap)
+// =============================================================================
+type Formatter is protocol {
+    fn format(&self) -> Text;
+};
+
+implement Formatter for Int {
+    fn format(&self) -> Text {
+        f"{*self}"
+    }
+}
+
+implement Formatter for Text {
+    fn format(&self) -> Text {
+        *self
+    }
+}
+
+implement Formatter for Bool {
+    fn format(&self) -> Text {
+        if *self { "true" } else { "false" }
+    }
+}
+
+fn main() {
+    // Test serializer
+    let bytes = 42.serialize();
+    assert(bytes == [42]);
+
+    let bool_bytes = true.serialize();
+    assert(bool_bytes == [1]);
+
+    // Test container
+    let c = Container { data: 42 };
+    assert(*c.get() == 42);
+
+    // Test deep clone
+    let p = Point { x: 1.0, y: 2.0 };
+    let p2 = p.deep_clone();
+    assert(p2.x == 1.0);
+    assert(p2.y == 2.0);
+
+    // Test formatter
+    assert(42.format() == "42");
+    assert(true.format() == "true");
+
+    // Test unwrap
+    let x: Maybe<Int> = Some(10);
+    assert(unwrap_or_panic(x, "failed") == 10);
+
+    assert(true);
+}

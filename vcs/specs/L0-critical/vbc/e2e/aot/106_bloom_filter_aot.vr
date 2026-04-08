@@ -1,0 +1,293 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, bloom-filter, hashing, bitwise, probabilistic
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT bloom filter simulation using multiple hash functions on flat bit arrays
+
+// Flat array of 16 Ints, each holding up to 64 bits (we use bits 0..63)
+// Total capacity: 16 * 64 = 1024 bits
+type BitArr is {
+    a0: Int, a1: Int, a2: Int, a3: Int,
+    a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int,
+    a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn bit_arr_new() -> BitArr {
+    BitArr {
+        a0: 0, a1: 0, a2: 0, a3: 0,
+        a4: 0, a5: 0, a6: 0, a7: 0,
+        a8: 0, a9: 0, a10: 0, a11: 0,
+        a12: 0, a13: 0, a14: 0, a15: 0
+    }
+}
+
+fn bit_arr_get_word(b: BitArr, i: Int) -> Int {
+    if i == 0 { b.a0 } else if i == 1 { b.a1 }
+    else if i == 2 { b.a2 } else if i == 3 { b.a3 }
+    else if i == 4 { b.a4 } else if i == 5 { b.a5 }
+    else if i == 6 { b.a6 } else if i == 7 { b.a7 }
+    else if i == 8 { b.a8 } else if i == 9 { b.a9 }
+    else if i == 10 { b.a10 } else if i == 11 { b.a11 }
+    else if i == 12 { b.a12 } else if i == 13 { b.a13 }
+    else if i == 14 { b.a14 } else { b.a15 }
+}
+
+fn bit_arr_set_word(b: BitArr, i: Int, v: Int) -> BitArr {
+    BitArr {
+        a0: if i == 0 { v } else { b.a0 },
+        a1: if i == 1 { v } else { b.a1 },
+        a2: if i == 2 { v } else { b.a2 },
+        a3: if i == 3 { v } else { b.a3 },
+        a4: if i == 4 { v } else { b.a4 },
+        a5: if i == 5 { v } else { b.a5 },
+        a6: if i == 6 { v } else { b.a6 },
+        a7: if i == 7 { v } else { b.a7 },
+        a8: if i == 8 { v } else { b.a8 },
+        a9: if i == 9 { v } else { b.a9 },
+        a10: if i == 10 { v } else { b.a10 },
+        a11: if i == 11 { v } else { b.a11 },
+        a12: if i == 12 { v } else { b.a12 },
+        a13: if i == 13 { v } else { b.a13 },
+        a14: if i == 14 { v } else { b.a14 },
+        a15: if i == 15 { v } else { b.a15 }
+    }
+}
+
+fn abs_val(n: Int) -> Int {
+    if n < 0 { 0 - n } else { n }
+}
+
+// Set bit at position pos (0..1023)
+fn bit_set(b: BitArr, pos: Int) -> BitArr {
+    let word_idx = pos / 64;
+    let bit_idx = pos % 64;
+    let old_word = bit_arr_get_word(b, word_idx);
+    let new_word = old_word | (1 << bit_idx);
+    bit_arr_set_word(b, word_idx, new_word)
+}
+
+// Test bit at position pos (0..1023)
+fn bit_test(b: BitArr, pos: Int) -> Bool {
+    let word_idx = pos / 64;
+    let bit_idx = pos % 64;
+    let word = bit_arr_get_word(b, word_idx);
+    (word >> bit_idx) & 1 == 1
+}
+
+// Count total set bits across all words
+fn bit_popcount_word(w: Int) -> Int {
+    let mut v = w;
+    let mut count = 0;
+    let mut i = 0;
+    while i < 64 {
+        count = count + (v & 1);
+        v = v >> 1;
+        i = i + 1;
+    }
+    count
+}
+
+fn bit_popcount(b: BitArr) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 16 {
+        total = total + bit_popcount_word(bit_arr_get_word(b, i));
+        i = i + 1;
+    }
+    total
+}
+
+// Bloom filter uses NUM_BITS = 256 bits (indices 0..255)
+// with K = 3 hash functions
+fn bloom_num_bits() -> Int { 256 }
+
+// Hash functions: simple multiplicative hashing
+// hash1(x) = abs((x * 7 + 13) % NUM_BITS)
+fn hash1(x: Int) -> Int {
+    abs_val((x * 7 + 13) % bloom_num_bits())
+}
+
+// hash2(x) = abs((x * 13 + 29) % NUM_BITS)
+fn hash2(x: Int) -> Int {
+    abs_val((x * 13 + 29) % bloom_num_bits())
+}
+
+// hash3(x) = abs((x * 31 + 47) % NUM_BITS)
+fn hash3(x: Int) -> Int {
+    abs_val((x * 31 + 47) % bloom_num_bits())
+}
+
+// Insert into bloom filter
+fn bloom_insert(b: BitArr, val: Int) -> BitArr {
+    let b1 = bit_set(b, hash1(val));
+    let b2 = bit_set(b1, hash2(val));
+    bit_set(b2, hash3(val))
+}
+
+// Query bloom filter (true = maybe present, false = definitely absent)
+fn bloom_query(b: BitArr, val: Int) -> Bool {
+    bit_test(b, hash1(val)) && bit_test(b, hash2(val)) && bit_test(b, hash3(val))
+}
+
+// Insert multiple values using a loop
+fn bloom_insert_range(b: BitArr, start: Int, count: Int) -> BitArr {
+    let mut result = b;
+    let mut i = 0;
+    while i < count {
+        result = bloom_insert(result, start + i);
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // === Test 1: Empty bloom filter has no bits set ===
+    let empty = bit_arr_new();
+    assert_eq(bit_popcount(empty), 0);
+
+    // === Test 2: Query on empty always returns false ===
+    assert(!bloom_query(empty, 0));
+    assert(!bloom_query(empty, 42));
+    assert(!bloom_query(empty, 100));
+
+    // === Test 3: Insert single element, query returns true ===
+    let b1 = bloom_insert(empty, 42);
+    assert(bloom_query(b1, 42));
+
+    // === Test 4: Up to 3 bits set after one insert ===
+    let pop1 = bit_popcount(b1);
+    assert(pop1 >= 1 && pop1 <= 3);
+
+    // === Test 5: Hash functions produce distinct values for some inputs ===
+    let h1 = hash1(42);
+    let h2 = hash2(42);
+    let h3 = hash3(42);
+    assert(h1 >= 0 && h1 < 256);
+    assert(h2 >= 0 && h2 < 256);
+    assert(h3 >= 0 && h3 < 256);
+
+    // === Test 6: The specific hash bits are set ===
+    assert(bit_test(b1, h1));
+    assert(bit_test(b1, h2));
+    assert(bit_test(b1, h3));
+
+    // === Test 7: Insert multiple elements ===
+    let mut bf = bit_arr_new();
+    bf = bloom_insert(bf, 10);
+    bf = bloom_insert(bf, 20);
+    bf = bloom_insert(bf, 30);
+    assert(bloom_query(bf, 10));
+    assert(bloom_query(bf, 20));
+    assert(bloom_query(bf, 30));
+
+    // === Test 8: Elements not inserted are likely absent ===
+    // (probabilistic, but with only 3 elements in 256 bits, false positive rate is very low)
+    let mut false_positives = 0;
+    let mut test_val = 1000;
+    while test_val < 1020 {
+        if bloom_query(bf, test_val) {
+            false_positives = false_positives + 1;
+        }
+        test_val = test_val + 1;
+    }
+    // With k=3 and m=256, 3 elements -> ~0.3% FP rate, expect 0 out of 20
+    assert(false_positives < 5);
+
+    // === Test 9: Insert is idempotent ===
+    let bf_before = bf;
+    let bf_after = bloom_insert(bf, 10);
+    // Same bits should be set
+    assert(bloom_query(bf_after, 10));
+    assert(bloom_query(bf_after, 20));
+    assert(bloom_query(bf_after, 30));
+    // Popcount should not increase (since bits already set)
+    assert_eq(bit_popcount(bf_after), bit_popcount(bf_before));
+
+    // === Test 10: Insert range and verify all present ===
+    let bf_range = bloom_insert_range(bit_arr_new(), 100, 10);
+    let mut k = 0;
+    while k < 10 {
+        assert(bloom_query(bf_range, 100 + k));
+        k = k + 1;
+    }
+
+    // === Test 11: Popcount increases with more inserts ===
+    let p_empty = bit_popcount(bit_arr_new());
+    let p_one = bit_popcount(bloom_insert(bit_arr_new(), 1));
+    let p_two = bit_popcount(bloom_insert(bloom_insert(bit_arr_new(), 1), 2));
+    assert_eq(p_empty, 0);
+    assert(p_one > 0);
+    assert(p_two >= p_one);
+
+    // === Test 12: Individual bit set/test ===
+    let mut bits = bit_arr_new();
+    bits = bit_set(bits, 0);
+    bits = bit_set(bits, 63);
+    bits = bit_set(bits, 64);
+    bits = bit_set(bits, 127);
+    bits = bit_set(bits, 200);
+    assert(bit_test(bits, 0));
+    assert(bit_test(bits, 63));
+    assert(bit_test(bits, 64));
+    assert(bit_test(bits, 127));
+    assert(bit_test(bits, 200));
+    assert(!bit_test(bits, 1));
+    assert(!bit_test(bits, 62));
+    assert(!bit_test(bits, 65));
+    assert(!bit_test(bits, 199));
+    assert_eq(bit_popcount(bits), 5);
+
+    // === Test 13: Hash distribution check ===
+    // Different inputs should produce different hash1 values (for small inputs)
+    let h_0 = hash1(0);
+    let h_1 = hash1(1);
+    let h_2 = hash1(2);
+    assert(h_0 != h_1 || h_0 != h_2);
+
+    // === Test 14: Large value insertion ===
+    let bf_large = bloom_insert(bit_arr_new(), 999999);
+    assert(bloom_query(bf_large, 999999));
+    assert(!bloom_query(bf_large, 0));
+
+    // === Test 15: Negative value insertion ===
+    let bf_neg = bloom_insert(bit_arr_new(), 0 - 42);
+    assert(bloom_query(bf_neg, 0 - 42));
+
+    // === Test 16: Union property - inserting into same filter accumulates ===
+    let mut bf_union = bit_arr_new();
+    bf_union = bloom_insert(bf_union, 1);
+    bf_union = bloom_insert(bf_union, 2);
+    bf_union = bloom_insert(bf_union, 3);
+    bf_union = bloom_insert(bf_union, 4);
+    bf_union = bloom_insert(bf_union, 5);
+    assert(bloom_query(bf_union, 1));
+    assert(bloom_query(bf_union, 2));
+    assert(bloom_query(bf_union, 3));
+    assert(bloom_query(bf_union, 4));
+    assert(bloom_query(bf_union, 5));
+
+    // === Test 17: Verify hash functions stay in range for many values ===
+    let mut j = 0;
+    while j < 50 {
+        let hv1 = hash1(j);
+        let hv2 = hash2(j);
+        let hv3 = hash3(j);
+        assert(hv1 >= 0 && hv1 < 256);
+        assert(hv2 >= 0 && hv2 < 256);
+        assert(hv3 >= 0 && hv3 < 256);
+        j = j + 1;
+    }
+
+    // === Test 18: Popcount of single word ===
+    assert_eq(bit_popcount_word(0), 0);
+    assert_eq(bit_popcount_word(1), 1);
+    assert_eq(bit_popcount_word(3), 2);
+    assert_eq(bit_popcount_word(7), 3);
+    assert_eq(bit_popcount_word(15), 4);
+    assert_eq(bit_popcount_word(255), 8);
+
+    0
+}

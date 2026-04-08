@@ -1,0 +1,193 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: conversion, from, numeric, widening, primitives
+// @description: Tests for widening From conversions between numeric types
+
+mount core.*;
+
+// =============================================================================
+// Section 1: Signed integer widening chain (Int8 -> Int16 -> Int32 -> Int64)
+// =============================================================================
+
+@test
+fn test_int8_to_int16() {
+    let small: Int8 = 42 as Int8;
+    let big: Int16 = Int16.from(small);
+    assert_eq(big, 42 as Int16);
+}
+
+@test
+fn test_int8_to_int16_negative() {
+    let small: Int8 = -100 as Int8;
+    let big: Int16 = Int16.from(small);
+    assert_eq(big, -100 as Int16);
+}
+
+@test
+fn test_int8_to_int16_zero() {
+    let small: Int8 = 0 as Int8;
+    let big: Int16 = Int16.from(small);
+    assert_eq(big, 0 as Int16);
+}
+
+@test
+fn test_int8_to_int16_max() {
+    let small: Int8 = 127 as Int8;
+    let big: Int16 = Int16.from(small);
+    assert_eq(big, 127 as Int16);
+}
+
+@test
+fn test_int16_to_int32() {
+    let small: Int16 = 1000 as Int16;
+    let big: Int32 = Int32.from(small);
+    assert_eq(big, 1000 as Int32);
+}
+
+@test
+fn test_int16_to_int32_negative() {
+    let small: Int16 = -5000 as Int16;
+    let big: Int32 = Int32.from(small);
+    assert_eq(big, -5000 as Int32);
+}
+
+@test
+fn test_int32_to_int64() {
+    let small: Int32 = 100000 as Int32;
+    let big: Int64 = Int64.from(small);
+    assert_eq(big, 100000 as Int64);
+}
+
+@test
+fn test_int32_to_int64_negative() {
+    let small: Int32 = -100000 as Int32;
+    let big: Int64 = Int64.from(small);
+    assert_eq(big, -100000 as Int64);
+}
+
+// =============================================================================
+// Section 2: Unsigned integer widening chain (UInt8 -> UInt16 -> UInt32 -> UInt64)
+// =============================================================================
+
+@test
+fn test_uint8_to_uint16() {
+    let small: UInt8 = 200 as UInt8;
+    let big: UInt16 = UInt16.from(small);
+    assert_eq(big, 200 as UInt16);
+}
+
+@test
+fn test_uint8_to_uint16_zero() {
+    let small: UInt8 = 0 as UInt8;
+    let big: UInt16 = UInt16.from(small);
+    assert_eq(big, 0 as UInt16);
+}
+
+@test
+fn test_uint8_to_uint16_max() {
+    let small: UInt8 = 255 as UInt8;
+    let big: UInt16 = UInt16.from(small);
+    assert_eq(big, 255 as UInt16);
+}
+
+@test
+fn test_uint16_to_uint32() {
+    let small: UInt16 = 50000 as UInt16;
+    let big: UInt32 = UInt32.from(small);
+    assert_eq(big, 50000 as UInt32);
+}
+
+@test
+fn test_uint32_to_uint64() {
+    let small: UInt32 = 4000000000 as UInt32;
+    let big: UInt64 = UInt64.from(small);
+    assert_eq(big, 4000000000 as UInt64);
+}
+
+@test
+fn test_uint32_to_uint64_zero() {
+    let small: UInt32 = 0 as UInt32;
+    let big: UInt64 = UInt64.from(small);
+    assert_eq(big, 0 as UInt64);
+}
+
+// =============================================================================
+// Section 3: Float widening (Float32 -> Float)
+// =============================================================================
+
+@test
+fn test_float32_to_float() {
+    let small: Float32 = 3.14 as Float32;
+    let big: Float = Float.from(small);
+    assert(big > 3.0);
+    assert(big < 4.0);
+}
+
+@test
+fn test_float32_to_float_zero() {
+    let small: Float32 = 0.0 as Float32;
+    let big: Float = Float.from(small);
+    assert_eq(big, 0.0);
+}
+
+@test
+fn test_float32_to_float_negative() {
+    let small: Float32 = -1.5 as Float32;
+    let big: Float = Float.from(small);
+    assert(big < 0.0);
+}
+
+// =============================================================================
+// Section 4: Chained widening
+// =============================================================================
+
+@test
+fn test_int8_chain_to_int32() {
+    let a: Int8 = 10 as Int8;
+    let b: Int16 = Int16.from(a);
+    let c: Int32 = Int32.from(b);
+    assert_eq(c, 10 as Int32);
+}
+
+@test
+fn test_uint8_chain_to_uint32() {
+    let a: UInt8 = 42 as UInt8;
+    let b: UInt16 = UInt16.from(a);
+    let c: UInt32 = UInt32.from(b);
+    assert_eq(c, 42 as UInt32);
+}
+
+@test
+fn test_int8_full_chain() {
+    let a: Int8 = 5 as Int8;
+    let b: Int16 = Int16.from(a);
+    let c: Int32 = Int32.from(b);
+    let d: Int64 = Int64.from(c);
+    assert_eq(d, 5 as Int64);
+}
+
+// =============================================================================
+// Section 5: Conversion preserves values at boundaries
+// =============================================================================
+
+@test
+fn test_int8_min_to_int16() {
+    let small: Int8 = -128 as Int8;
+    let big: Int16 = Int16.from(small);
+    assert_eq(big, -128 as Int16);
+}
+
+@test
+fn test_uint8_max_to_uint16() {
+    let small: UInt8 = 255 as UInt8;
+    let big: UInt16 = UInt16.from(small);
+    assert_eq(big, 255 as UInt16);
+}
+
+@test
+fn test_uint16_max_to_uint32() {
+    let small: UInt16 = 65535 as UInt16;
+    let big: UInt32 = UInt32.from(small);
+    assert_eq(big, 65535 as UInt32);
+}

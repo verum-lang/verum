@@ -1,0 +1,231 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, closures
+// @timeout: 10000
+
+/// Closure semantics for differential testing.
+/// Tests capture modes, nested closures, and closure in collections.
+
+fn main() {
+    test_basic_closures();
+    test_capturing();
+    test_nested_closures();
+    test_closures_in_collections();
+    test_closure_composition();
+    test_mutable_capture();
+}
+
+/// Basic closure syntax and semantics
+fn test_basic_closures() {
+    println("=== Basic Closures ===");
+
+    // Simple closure
+    let add = |a, b| a + b;
+    println(f"add(2, 3) = {add(2, 3)}");
+
+    // With explicit types
+    let multiply: Fn(Int, Int) -> Int = |a, b| a * b;
+    println(f"multiply(4, 5) = {multiply(4, 5)}");
+
+    // No parameters
+    let greeting = || "Hello, World!";
+    println(f"greeting() = {greeting()}");
+
+    // Single parameter
+    let double = |x| x * 2;
+    let square = |x| x * x;
+    println(f"double(5) = {double(5)}");
+    println(f"square(5) = {square(5)}");
+
+    // Immediately invoked
+    let result = (|x, y| x + y)(10, 20);
+    println(f"immediate: {result}");
+}
+
+/// Capturing environment
+fn test_capturing() {
+    println("\n=== Capturing ===");
+
+    let x = 10;
+    let y = 20;
+
+    // Capture single value
+    let add_x = |n| n + x;
+    println(f"add_x(5) = {add_x(5)}");
+
+    // Capture multiple values
+    let add_xy = |n| n + x + y;
+    println(f"add_xy(5) = {add_xy(5)}");
+
+    // Capture in nested scope
+    {
+        let z = 30;
+        let add_xyz = |n| n + x + y + z;
+        println(f"add_xyz(5) = {add_xyz(5)}");
+    }
+
+    // Capture struct
+    type Point is { x: Int, y: Int };
+    let p = Point { x: 3, y: 4 };
+    let distance = || (p.x * p.x + p.y * p.y).sqrt();
+    println(f"distance = {distance()}");
+
+    // Capture list
+    let nums = [1, 2, 3, 4, 5];
+    let sum_nums = || nums.fold(0, |acc, n| acc + n);
+    println(f"sum_nums() = {sum_nums()}");
+}
+
+/// Nested closures
+fn test_nested_closures() {
+    println("\n=== Nested Closures ===");
+
+    // Closure returning closure
+    let make_adder = |n| {
+        |x| x + n
+    };
+
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    println(f"add5(3) = {add5(3)}");
+    println(f"add10(3) = {add10(3)}");
+
+    // Deep nesting
+    let outer = |a| {
+        let middle = |b| {
+            let inner = |c| a + b + c;
+            inner
+        };
+        middle
+    };
+
+    let step1 = outer(1);
+    let step2 = step1(2);
+    let result = step2(3);
+    println(f"deeply nested: {result}");
+
+    // Currying
+    let curry_add = |a| |b| |c| a + b + c;
+    println(f"curried: {curry_add(1)(2)(3)}");
+
+    // Partial application
+    let partial = curry_add(10);
+    let more_partial = partial(20);
+    println(f"partial(30) = {more_partial(30)}");
+}
+
+/// Closures with collection operations
+fn test_closures_in_collections() {
+    println("\n=== Closures in Collections ===");
+
+    let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Map
+    let doubled = nums.map(|n| n * 2);
+    println(f"doubled: {doubled}");
+
+    // Filter
+    let evens = nums.filter(|n| n % 2 == 0);
+    println(f"evens: {evens}");
+
+    // Fold
+    let sum = nums.fold(0, |acc, n| acc + n);
+    let product = nums.fold(1, |acc, n| acc * n);
+    println(f"sum: {sum}");
+    println(f"product: {product}");
+
+    // Chaining
+    let result = nums
+        .filter(|n| n % 2 == 0)
+        .map(|n| n * n)
+        .fold(0, |acc, n| acc + n);
+    println(f"sum of squares of evens: {result}");
+
+    // With capture
+    let threshold = 5;
+    let above_threshold = nums.filter(|n| n > threshold);
+    println(f"above {threshold}: {above_threshold}");
+
+    // Find
+    let first_even = nums.find(|n| n % 2 == 0);
+    println(f"first_even: {first_even}");
+
+    // All/Any
+    let all_positive = nums.all(|n| n > 0);
+    let any_even = nums.any(|n| n % 2 == 0);
+    println(f"all_positive: {all_positive}");
+    println(f"any_even: {any_even}");
+}
+
+/// Closure composition
+fn test_closure_composition() {
+    println("\n=== Closure Composition ===");
+
+    // Compose two functions
+    fn compose<A, B, C>(f: Fn(B) -> C, g: Fn(A) -> B) -> Fn(A) -> C {
+        |x| f(g(x))
+    }
+
+    let double = |x| x * 2;
+    let increment = |x| x + 1;
+
+    let double_then_inc = compose(increment, double);
+    let inc_then_double = compose(double, increment);
+
+    println(f"double_then_inc(5) = {double_then_inc(5)}");
+    println(f"inc_then_double(5) = {inc_then_double(5)}");
+
+    // Pipe operator
+    let result = 5 |> double |> increment |> double;
+    println(f"piped: {result}");
+
+    // Point-free style
+    let pipeline = |x| x |> double |> increment |> double;
+    println(f"pipeline(3) = {pipeline(3)}");
+}
+
+/// Mutable capture
+fn test_mutable_capture() {
+    println("\n=== Mutable Capture ===");
+
+    // Counter
+    let mut count = 0;
+    let increment = || {
+        count = count + 1;
+        count
+    };
+
+    println(f"count 1: {increment()}");
+    println(f"count 2: {increment()}");
+    println(f"count 3: {increment()}");
+
+    // Accumulator
+    let mut total = 0;
+    let add_to_total = |n| {
+        total = total + n;
+        total
+    };
+
+    println(f"add 10: {add_to_total(10)}");
+    println(f"add 20: {add_to_total(20)}");
+    println(f"add 30: {add_to_total(30)}");
+
+    // Generator-like
+    let mut state = 0;
+    let fib_next = || {
+        let (a, b) = if state == 0 {
+            (0, 1)
+        } else {
+            // This is simplified - real impl would track a, b
+            (state, state)
+        };
+        state = a + b;
+        a
+    };
+
+    println("First 5 Fibonacci-like:");
+    for _ in 0..5 {
+        println(f"  {fib_next()}");
+    }
+}

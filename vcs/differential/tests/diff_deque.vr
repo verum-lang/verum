@@ -1,0 +1,119 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, deque, double-ended-queue
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+// Circular deque with capacity 8
+// head points to first element, tail points to next free slot
+// size tracks element count
+type Deque is { data: Arr8, head: Int, tail: Int, size: Int };
+
+fn deque_new() -> Deque { Deque { data: zeros(), head: 0, tail: 0, size: 0 } }
+
+fn deque_wrap(i: Int) -> Int { (i + 8) % 8 }
+
+fn deque_push_back(d: Deque, v: Int) -> Deque {
+    let new_data = set(d.data, d.tail, v);
+    Deque { data: new_data, head: d.head, tail: deque_wrap(d.tail + 1), size: d.size + 1 }
+}
+
+fn deque_push_front(d: Deque, v: Int) -> Deque {
+    let new_head = deque_wrap(d.head - 1);
+    let new_data = set(d.data, new_head, v);
+    Deque { data: new_data, head: new_head, tail: d.tail, size: d.size + 1 }
+}
+
+fn deque_front(d: Deque) -> Int { get(d.data, d.head) }
+
+fn deque_back(d: Deque) -> Int { get(d.data, deque_wrap(d.tail - 1)) }
+
+fn deque_pop_front(d: Deque) -> Deque {
+    Deque { data: d.data, head: deque_wrap(d.head + 1), tail: d.tail, size: d.size - 1 }
+}
+
+fn deque_pop_back(d: Deque) -> Deque {
+    Deque { data: d.data, head: d.head, tail: deque_wrap(d.tail - 1), size: d.size - 1 }
+}
+
+fn main() -> Int {
+    let mut dq = deque_new();
+    assert_eq(dq.size, 0);
+
+    // Push back: [1, 2, 3]
+    dq = deque_push_back(dq, 1);
+    dq = deque_push_back(dq, 2);
+    dq = deque_push_back(dq, 3);
+    assert_eq(dq.size, 3);
+    assert_eq(deque_front(dq), 1);
+    assert_eq(deque_back(dq), 3);
+
+    // Push front: [0, 1, 2, 3]
+    dq = deque_push_front(dq, 0);
+    assert_eq(dq.size, 4);
+    assert_eq(deque_front(dq), 0);
+    assert_eq(deque_back(dq), 3);
+
+    // Pop front: [1, 2, 3]
+    dq = deque_pop_front(dq);
+    assert_eq(dq.size, 3);
+    assert_eq(deque_front(dq), 1);
+
+    // Pop back: [1, 2]
+    dq = deque_pop_back(dq);
+    assert_eq(dq.size, 2);
+    assert_eq(deque_back(dq), 2);
+
+    // Use as stack (LIFO): push back, pop back
+    let mut stk = deque_new();
+    stk = deque_push_back(stk, 10);
+    stk = deque_push_back(stk, 20);
+    stk = deque_push_back(stk, 30);
+    assert_eq(deque_back(stk), 30);
+    stk = deque_pop_back(stk);
+    assert_eq(deque_back(stk), 20);
+
+    // Use as queue (FIFO): push back, pop front
+    let mut q = deque_new();
+    q = deque_push_back(q, 100);
+    q = deque_push_back(q, 200);
+    q = deque_push_back(q, 300);
+    assert_eq(deque_front(q), 100);
+    q = deque_pop_front(q);
+    assert_eq(deque_front(q), 200);
+    q = deque_pop_front(q);
+    assert_eq(deque_front(q), 300);
+
+    // Circular wrap-around: push front many times
+    let mut dq2 = deque_new();
+    dq2 = deque_push_front(dq2, 5);
+    dq2 = deque_push_front(dq2, 4);
+    dq2 = deque_push_front(dq2, 3);
+    dq2 = deque_push_front(dq2, 2);
+    dq2 = deque_push_front(dq2, 1);
+    assert_eq(dq2.size, 5);
+    assert_eq(deque_front(dq2), 1);
+    assert_eq(deque_back(dq2), 5);
+
+    print("DIFF_OK: deque");
+    0
+}

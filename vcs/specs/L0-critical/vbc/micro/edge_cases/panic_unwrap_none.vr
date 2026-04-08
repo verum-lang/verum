@@ -1,0 +1,12 @@
+// @test: run-panic
+// @level: L0
+// @tier: 0
+// @tags: vbc, edge-case, panic, unwrap, maybe
+// @timeout: 5000
+// @expected-panic: unwrap
+
+fn main() {
+    let x: Maybe<Int> = None;
+    let val = x.unwrap();
+    print(f"{val}");
+}

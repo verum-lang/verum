@@ -1,0 +1,108 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: spawn, channel, concurrency, threading
+// @description: Test spawn + channel communication patterns
+
+fn test_basic_channel() -> Int {
+    let ch = Channel.new(10);
+    ch.send(42);
+    ch.send(100);
+
+    let a = match ch.recv() {
+        Some(v) => v,
+        None => -1,
+    };
+    let b = match ch.recv() {
+        Some(v) => v,
+        None => -1,
+    };
+
+    if a != 42 || b != 100 {
+        print(f"FAIL basic_chan: a={a}, b={b}");
+        return 1;
+    }
+    print("  basic_channel: OK");
+    0
+}
+
+fn test_spawn_send() -> Int {
+    let ch = Channel.new(10);
+
+    spawn {
+        let mut i = 0;
+        while i < 5 {
+            ch.send(i * 10);
+            i = i + 1;
+        }
+    };
+
+    // Small delay to let spawned thread complete
+    let mut sum = 0;
+    let mut received = 0;
+    while received < 5 {
+        let val = match ch.recv() {
+            Some(v) => v,
+            None => -1,
+        };
+        if val >= 0 {
+            sum = sum + val;
+            received = received + 1;
+        }
+    }
+    // 0 + 10 + 20 + 30 + 40 = 100
+    if sum != 100 {
+        print(f"FAIL spawn_send: sum={sum}, expected 100");
+        return 1;
+    }
+    print("  spawn_send: OK");
+    0
+}
+
+fn test_channel_close() -> Int {
+    let ch = Channel.new(5);
+    ch.send(1);
+    ch.send(2);
+    ch.close();
+
+    // Can still receive queued values
+    let a = match ch.recv() {
+        Some(v) => v,
+        None => -1,
+    };
+    let b = match ch.recv() {
+        Some(v) => v,
+        None => -1,
+    };
+    // After drain, should get None
+    let c = match ch.recv() {
+        Some(v) => v,
+        None => -999,
+    };
+
+    if a != 1 || b != 2 {
+        print(f"FAIL chan_close: a={a}, b={b}");
+        return 1;
+    }
+    if c != -999 {
+        print(f"FAIL chan_close_empty: c={c}, expected -999");
+        return 1;
+    }
+    print("  channel_close: OK");
+    0
+}
+
+fn main() -> Int {
+    print("Spawn/Channel Tests:");
+    let mut failures = 0;
+    failures = failures + test_basic_channel();
+    failures = failures + test_spawn_send();
+    failures = failures + test_channel_close();
+
+    if failures == 0 {
+        print("All spawn/channel tests passed!");
+    } else {
+        print(f"{failures} test(s) failed");
+    }
+    failures
+}

@@ -1,0 +1,219 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @was-skip: FIXED
+// @tags: parser, attributes, extended, fields, variants, params, match-arms
+// @description: Extended attribute positions (Grammar v2.7)
+// @spec: docs/detailed/05-syntax-grammar.md Section 2.7
+
+// =============================================================================
+// Test 1: Field-level attributes
+// Grammar: field = { attribute } , [ visibility ] , identifier , ':' , type_expr ;
+// =============================================================================
+
+// Helper type for field tests
+type CacheEntry is { key: Text, value: Int };
+
+type User is {
+    @serialize(rename = "user_id")
+    id: Int,
+
+    @validate(min_length = 1, max_length = 100)
+    @serialize(skip_if = "is_empty")
+    name: Text,
+
+    @deprecated(since = "2.0", reason = "Use display_name instead")
+    legacy_name: Text,
+
+    internal_cache: Maybe<CacheEntry>,
+
+    // Multiple attributes on one field
+    @serialize(rename = "e")
+    @validate(pattern = """^[\w.-]+@[\w.-]+\.\w+$""")
+    @doc("User's primary email address")
+    email: Text,
+};
+
+// =============================================================================
+// Test 2: Variant-level attributes
+// Grammar: variant = { attribute } , identifier , [ variant_data ] ;
+// =============================================================================
+
+type Result<T, E> is
+    @default
+    Ok(T)
+    | @doc("Error case with diagnostic info")
+      Error(E);
+
+type HttpStatus is
+    @serialize(value = 200)
+    @doc("Successful response")
+    Ok
+    | @serialize(value = 404)
+      NotFound
+    | @serialize(value = 500)
+      @deprecated(since = "3.0", reason = "Use InternalError")
+      ServerError
+    | @serialize(value = 500)
+      InternalError(Text);
+
+type State is
+    @default
+    @serialize(rename = "initial")
+    Initial
+    | @cold
+      Error(Text)
+    | @hot
+      Running;
+
+// =============================================================================
+// Test 3: Parameter-level attributes
+// Grammar: param_pattern = { attribute } , pattern , ':' , type_expr ;
+// =============================================================================
+
+// Helper types for parameter tests
+type Context is ();
+type Buffer is { data: List<Int> };
+type Data is { value: Int };
+
+fn process_data(
+    @unused x: Int,
+    @must_use y: Int,
+) -> Int {
+    y
+}
+
+fn with_optimization_hint(
+    @nonnull
+    data: Int,
+    @inline_hint
+    multiplier: Int,
+) -> Int {
+    data * multiplier
+}
+
+fn callback_handler(
+    @allow(unused)
+    _unused_param: Int,
+    @doc("The main input value")
+    value: Int,
+) -> Int {
+    value * 2
+}
+
+// Self parameter with attributes
+type Processor is { data: Int };
+
+implement Processor {
+    fn process(
+        @inline
+        &mut self,
+        @unused _ctx: Int,
+    ) -> Int {
+        self.data
+    }
+}
+
+// =============================================================================
+// Test 4: Match arm attributes
+// Grammar: match_arm = { attribute } , pattern , [ guard ] , '=>' , expression ;
+// =============================================================================
+
+// Event type for match arm tests
+type Event is
+    EventData(Int)
+    | EventError(Text)
+    | EventValue(Int)
+    | EventNever;
+
+fn log_error(e: Text) {}
+fn handle_recovery() -> Int { 0 }
+fn process_event(d: Int) -> Int { d }
+
+fn handle_event(event: Event) -> Int {
+    match event {
+        @hot
+        @likely
+        EventData(d) => process_event(d),
+
+        @cold
+        @unlikely
+        EventError(e) => {
+            log_error(e);
+            handle_recovery()
+        },
+
+        @unreachable
+        @cold
+        EventNever => panic("Invalid state"),
+
+        // Guard with attribute
+        @hot
+        EventValue(v) if v > 0 => v * 2,
+
+        // Default case
+        @cold
+        _ => 0,
+    }
+}
+
+fn match_with_where_guard(x: Int) -> Int {
+    match x {
+        @hot
+        n where n > 100 => n * 2,
+
+        @cold
+        n where n < 0 => 0,
+
+        @default
+        n => n,
+    }
+}
+
+// =============================================================================
+// Test 5: Combined extended attributes
+// =============================================================================
+
+// Helper functions
+fn process_high(id: Int) {}
+fn handle_zero() {}
+fn process_normal(id: Int) {}
+
+@derive(Clone, Debug)
+type ComplexType is {
+    @serialize(rename = "id")
+    @validate(min = 1)
+    identifier: Int,
+
+    @deprecated
+    old_field: Maybe<Text>,
+};
+
+fn complex_function(
+    @unused _ctx: &Context,
+    @must_use result: &mut ComplexType,
+) {
+    match result.identifier {
+        @hot
+        id if id > 1000 => process_high(id),
+
+        @cold
+        0 => handle_zero(),
+
+        @default
+        id => process_normal(id),
+    }
+}
+
+fn main() {
+    // Basic usage verification
+    let user = User {
+        id: 1,
+        name: "Test",
+        legacy_name: "Old",
+        internal_cache: Maybe.None,
+        email: "test@example.com",
+    };
+
+    assert(user.id == 1);
+}

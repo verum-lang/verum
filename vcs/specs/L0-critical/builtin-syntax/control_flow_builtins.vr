@@ -1,0 +1,45 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: builtin-syntax, control-flow, panic
+// @timeout: 5000
+//
+// Tests that control flow builtins are called without ! suffix.
+// Spec: grammar/verum.ebnf Section 2.20.1 - builtin_control_flow
+
+type State is Active | Inactive | Unknown;
+
+fn handle_state(state: State) -> Int {
+    match state {
+        State.Active => 1,
+        State.Inactive => 0,
+        State.Unknown => {
+            // unreachable (NOT unreachable!)
+            unreachable()
+        }
+    }
+}
+
+fn future_feature() -> Int {
+    // unimplemented (NOT unimplemented!)
+    unimplemented()
+}
+
+fn work_in_progress() -> Int {
+    // todo (NOT todo!)
+    todo("Implement this feature")
+}
+
+fn validate(x: Int) -> Int {
+    if x < 0 {
+        // panic (NOT panic!)
+        panic("x must be non-negative");
+    }
+    x
+}
+
+fn main() -> Int {
+    let result = handle_state(State.Active);
+    assert_eq(result, 1);
+    0
+}

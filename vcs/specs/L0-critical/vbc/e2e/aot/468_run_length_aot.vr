@@ -1,0 +1,202 @@
+// @test: run
+// @level: L0
+// @tags: aot, e2e, run-length-encoding, compression
+// @timeout: 30000
+
+// Run-length encoding/decoding on integer arrays
+
+type Arr8 is { v0: Int, v1: Int, v2: Int, v3: Int, v4: Int, v5: Int, v6: Int, v7: Int };
+
+fn get8(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.v0 } else if i == 1 { a.v1 } else if i == 2 { a.v2 }
+    else if i == 3 { a.v3 } else if i == 4 { a.v4 } else if i == 5 { a.v5 }
+    else if i == 6 { a.v6 } else { a.v7 }
+}
+
+fn set8(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        v0: if i == 0 { v } else { a.v0 },
+        v1: if i == 1 { v } else { a.v1 },
+        v2: if i == 2 { v } else { a.v2 },
+        v3: if i == 3 { v } else { a.v3 },
+        v4: if i == 4 { v } else { a.v4 },
+        v5: if i == 5 { v } else { a.v5 },
+        v6: if i == 6 { v } else { a.v6 },
+        v7: if i == 7 { v } else { a.v7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { v0: 0, v1: 0, v2: 0, v3: 0, v4: 0, v5: 0, v6: 0, v7: 0 } }
+
+// RLE encode: stores (value, count) pairs
+// Returns count of RLE pairs (values in vals, counts in cnts)
+fn rle_encode_count(arr: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut pairs = 1;
+    let mut i = 1;
+    while i < n {
+        if get8(arr, i) != get8(arr, i - 1) {
+            pairs = pairs + 1;
+        }
+        i = i + 1;
+    }
+    pairs
+}
+
+// Compute RLE values and counts arrays
+fn rle_values(arr: Arr8, n: Int) -> Arr8 {
+    let mut vals = zeros();
+    if n == 0 { return vals; }
+    vals = set8(vals, 0, get8(arr, 0));
+    let mut vi = 0;
+    let mut i = 1;
+    while i < n {
+        if get8(arr, i) != get8(arr, i - 1) {
+            vi = vi + 1;
+            vals = set8(vals, vi, get8(arr, i));
+        }
+        i = i + 1;
+    }
+    vals
+}
+
+fn rle_counts(arr: Arr8, n: Int) -> Arr8 {
+    let mut cnts = zeros();
+    if n == 0 { return cnts; }
+    cnts = set8(cnts, 0, 1);
+    let mut ci = 0;
+    let mut i = 1;
+    while i < n {
+        if get8(arr, i) != get8(arr, i - 1) {
+            ci = ci + 1;
+            cnts = set8(cnts, ci, 1);
+        } else {
+            cnts = set8(cnts, ci, get8(cnts, ci) + 1);
+        }
+        i = i + 1;
+    }
+    cnts
+}
+
+// RLE decode: expand (values, counts, npairs) back to array
+// Returns decoded length
+fn rle_decode_len(cnts: Arr8, npairs: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < npairs {
+        total = total + get8(cnts, i);
+        i = i + 1;
+    }
+    total
+}
+
+fn rle_decode(vals: Arr8, cnts: Arr8, npairs: Int) -> Arr8 {
+    let mut result = zeros();
+    let mut pos = 0;
+    let mut i = 0;
+    while i < npairs {
+        let v = get8(vals, i);
+        let c = get8(cnts, i);
+        let mut j = 0;
+        while j < c {
+            result = set8(result, pos, v);
+            pos = pos + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Compression ratio: original_len / rle_pair_count
+// Higher = better compression
+fn compression_ratio_x100(orig_len: Int, npairs: Int) -> Int {
+    orig_len * 100 / npairs
+}
+
+fn test_basic_rle() -> Int {
+    // [1,1,1,2,2,3,3,3]
+    let arr = Arr8 { v0: 1, v1: 1, v2: 1, v3: 2, v4: 2, v5: 3, v6: 3, v7: 3 };
+    assert_eq(rle_encode_count(arr, 8), 3);
+
+    let vals = rle_values(arr, 8);
+    assert_eq(get8(vals, 0), 1);
+    assert_eq(get8(vals, 1), 2);
+    assert_eq(get8(vals, 2), 3);
+
+    let cnts = rle_counts(arr, 8);
+    assert_eq(get8(cnts, 0), 3);
+    assert_eq(get8(cnts, 1), 2);
+    assert_eq(get8(cnts, 2), 3);
+
+    // Decode back
+    let decoded = rle_decode(vals, cnts, 3);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(get8(decoded, i), get8(arr, i));
+        i = i + 1;
+    }
+    1
+}
+
+fn test_no_runs() -> Int {
+    // All different: [1,2,3,4,5,6,7,8]
+    let arr = Arr8 { v0: 1, v1: 2, v2: 3, v3: 4, v4: 5, v5: 6, v6: 7, v7: 8 };
+    assert_eq(rle_encode_count(arr, 8), 8); // No compression
+
+    let cnts = rle_counts(arr, 8);
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(get8(cnts, i), 1);
+        i = i + 1;
+    }
+    1
+}
+
+fn test_single_run() -> Int {
+    // All same: [5,5,5,5,5,5,5,5]
+    let arr = Arr8 { v0: 5, v1: 5, v2: 5, v3: 5, v4: 5, v5: 5, v6: 5, v7: 5 };
+    assert_eq(rle_encode_count(arr, 8), 1); // Max compression
+
+    let vals = rle_values(arr, 8);
+    assert_eq(get8(vals, 0), 5);
+    let cnts = rle_counts(arr, 8);
+    assert_eq(get8(cnts, 0), 8);
+    assert_eq(rle_decode_len(cnts, 1), 8);
+    1
+}
+
+fn test_alternating() -> Int {
+    // [1,2,1,2,1,2,1,2]
+    let arr = Arr8 { v0: 1, v1: 2, v2: 1, v3: 2, v4: 1, v5: 2, v6: 1, v7: 2 };
+    assert_eq(rle_encode_count(arr, 8), 8); // Worst case
+    1
+}
+
+fn test_roundtrip_small() -> Int {
+    // [3,3,7,7,7]
+    let arr = Arr8 { v0: 3, v1: 3, v2: 7, v3: 7, v4: 7, v5: 0, v6: 0, v7: 0 };
+    let npairs = rle_encode_count(arr, 5);
+    assert_eq(npairs, 2);
+
+    let vals = rle_values(arr, 5);
+    let cnts = rle_counts(arr, 5);
+    assert_eq(rle_decode_len(cnts, npairs), 5);
+
+    let decoded = rle_decode(vals, cnts, npairs);
+    assert_eq(get8(decoded, 0), 3);
+    assert_eq(get8(decoded, 1), 3);
+    assert_eq(get8(decoded, 2), 7);
+    assert_eq(get8(decoded, 4), 7);
+    1
+}
+
+fn main() -> Int {
+    test_basic_rle();
+    test_no_runs();
+    test_single_run();
+    test_alternating();
+    test_roundtrip_small();
+    print("[OK] 468_run_length_aot");
+    0
+}

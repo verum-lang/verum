@@ -1,0 +1,104 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, aot, closures, higher-order
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for advanced closures: higher-order functions, closure capture
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    f(x)
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = start;
+    while i < end {
+        acc = f(acc, i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn map_range(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
+    // Sum the mapped values (since we can't return arrays)
+    let mut total = 0;
+    let mut i = start;
+    while i < end {
+        total = total + f(i);
+        i = i + 1;
+    }
+    total
+}
+
+fn count_range(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
+    let mut count = 0;
+    let mut i = start;
+    while i < end {
+        if pred(i) { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() -> Int {
+    // Basic apply
+    let double = |x: Int| -> Int { x * 2 };
+    let inc = |x: Int| -> Int { x + 1 };
+    let square = |x: Int| -> Int { x * x };
+
+    assert_eq(apply(double, 5), 10);
+    assert_eq(apply(inc, 5), 6);
+    assert_eq(apply(square, 5), 25);
+
+    // Apply twice
+    assert_eq(apply_twice(double, 3), 12);  // 3*2*2
+    assert_eq(apply_twice(inc, 5), 7);      // 5+1+1
+    assert_eq(apply_twice(square, 2), 16);  // (2^2)^2
+
+    // Compose
+    assert_eq(compose(double, inc, 5), 12);   // double(inc(5)) = 12
+    assert_eq(compose(inc, double, 5), 11);   // inc(double(5)) = 11
+    assert_eq(compose(square, inc, 3), 16);   // square(inc(3)) = 16
+
+    // Fold (sum 0..10 = 45)
+    let add = |acc: Int, x: Int| -> Int { acc + x };
+    assert_eq(fold_range(0, 10, 0, add), 45);
+
+    // Fold (product 1..6 = 120)
+    let mul = |acc: Int, x: Int| -> Int { acc * x };
+    assert_eq(fold_range(1, 6, 1, mul), 120);
+
+    // Map range sum (sum of squares 0..5 = 0+1+4+9+16 = 30)
+    assert_eq(map_range(0, 5, square), 30);
+
+    // Count range (even numbers in 0..10 = 5)
+    let is_even = |x: Int| -> Bool { x % 2 == 0 };
+    assert_eq(count_range(0, 10, is_even), 5);
+
+    // Count range (primes in 2..20)
+    let is_prime = |n: Int| -> Bool {
+        if n < 2 { return false; }
+        if n < 4 { return true; }
+        if n % 2 == 0 { return false; }
+        let mut d = 3;
+        while d * d <= n {
+            if n % d == 0 { return false; }
+            d = d + 2;
+        }
+        true
+    };
+    assert_eq(count_range(2, 20, is_prime), 8);  // 2,3,5,7,11,13,17,19
+
+    print("[OK] 181_closures_advanced_aot");
+    0
+}

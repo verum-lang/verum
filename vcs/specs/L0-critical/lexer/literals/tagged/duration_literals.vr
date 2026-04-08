@@ -1,0 +1,206 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: lexer, literals, tagged, duration, time
+
+// Duration and time-span literal syntax
+
+fn test_basic_duration_formats() {
+    // Basic duration formats
+    let one_second = dur#"1s";
+    let one_minute = dur#"1m";
+    let one_hour = dur#"1h";
+    let one_day = dur#"1d";
+    let one_week = dur#"1w";
+}
+
+fn test_numeric_variations() {
+    // Numeric variations
+    let ten_seconds = dur#"10s";
+    let thirty_minutes = dur#"30m";
+    let twenty_four_hours = dur#"24h";
+    let seven_days = dur#"7d";
+    let two_weeks = dur#"2w";
+}
+
+fn test_sub_second_durations() {
+    // Sub-second durations
+    let one_millisecond = dur#"1ms";
+    let one_microsecond = dur#"1us";
+    let one_nanosecond = dur#"1ns";
+    let hundred_millis = dur#"100ms";
+    let fifty_micros = dur#"50us";
+}
+
+fn test_combined_durations() {
+    // Combined durations (compound format)
+    let hour_and_half = dur#"1h30m";
+    let minute_and_seconds = dur#"2m30s";
+    let full_time = dur#"1h30m45s";
+    let with_millis = dur#"1s500ms";
+    let complex_duration = dur#"1d2h30m45s100ms";
+}
+
+fn test_iso_8601_duration_format() {
+    // ISO 8601 duration format
+    let iso_one_hour = dur#"PT1H";
+    let iso_one_day = dur#"P1D";
+    let iso_complex = dur#"P1DT2H30M";
+    let iso_with_seconds = dur#"PT1H30M45S";
+    let iso_fractional = dur#"PT1.5H";
+}
+
+fn test_duration_arithmetic() {
+    // Duration arithmetic
+    let base = dur#"1h";
+    let doubled = base * 2;
+    let halved = base / 2;
+    let combined = dur#"30m" + dur#"45m";
+}
+
+fn test_duration_in_comparisons() {
+    // Duration in comparisons
+    let shorter = dur#"30m";
+    let longer = dur#"2h";
+    let is_shorter = shorter < longer;
+    let is_equal = dur#"60m" == dur#"1h";
+}
+
+fn test_negative_durations() {
+    // Negative durations
+    let neg_hour = dur#"-1h";
+    let neg_day = dur#"-1d";
+}
+
+fn test_zero_duration() {
+    // Zero duration
+    let zero_dur = dur#"0s";
+    let zero_millis = dur#"0ms";
+}
+
+fn test_duration_from_numbers() {
+    // Duration from numbers
+    let from_seconds = Duration.from_secs(60);
+    let from_millis = Duration.from_millis(1000);
+    let from_micros = Duration.from_micros(1000000);
+    let from_nanos = Duration.from_nanos(1000000000);
+}
+
+fn test_duration_to_components() {
+    // Duration to components
+    let duration = dur#"1h30m45s";
+    let hours = duration.hours();
+    let minutes = duration.minutes();
+    let seconds = duration.seconds();
+    let total_seconds = duration.total_seconds();
+}
+
+// Duration in function parameters
+fn wait(duration: Duration) {
+    sleep(duration)
+}
+
+fn timeout_after(dur: Duration) {
+    set_timeout(dur)
+}
+
+// Duration in structs
+type Task is {
+    name: Text,
+    estimated_time: Duration,
+    actual_time: Duration,
+};
+
+fn test_duration_in_structs() {
+    let task = Task {
+        name: "Build project",
+        estimated_time: dur#"5m",
+        actual_time: dur#"4m30s",
+    };
+}
+
+fn test_duration_in_arrays() {
+    // Duration in arrays
+    let intervals = [
+        dur#"1s",
+        dur#"5s",
+        dur#"30s",
+        dur#"1m",
+        dur#"5m",
+    ];
+}
+
+fn test_duration_for_timeouts() {
+    // Duration for timeouts
+    let connect_timeout = dur#"5s";
+    let read_timeout = dur#"30s";
+    let idle_timeout = dur#"5m";
+    let session_timeout = dur#"24h";
+}
+
+fn test_duration_for_caching() {
+    // Duration for caching
+    let cache_ttl = dur#"1h";
+    let short_cache = dur#"5m";
+    let long_cache = dur#"7d";
+}
+
+fn test_duration_in_config() {
+    // Duration in config
+    type ServerConfig is {
+        request_timeout: Duration,
+        keepalive: Duration,
+        max_idle: Duration,
+    };
+
+    let config = ServerConfig {
+        request_timeout: dur#"30s",
+        keepalive: dur#"60s",
+        max_idle: dur#"10m",
+    };
+}
+
+fn test_duration_formatting() {
+    // Duration formatting
+    let formatted = dur#"1h30m".format();  // "1:30:00"
+    let human_readable = dur#"90m".humanize();  // "1 hour 30 minutes"
+}
+
+fn test_duration_with_date_arithmetic() {
+    // Duration with date arithmetic
+    let now = Date.now();
+    let one_week_later = now + dur#"7d";
+    let one_hour_ago = now - dur#"1h";
+}
+
+fn test_very_long_durations() {
+    // Very long durations
+    let one_year_approx = dur#"365d";
+    let one_month_approx = dur#"30d";
+    let century = dur#"36500d";
+}
+
+fn test_very_short_durations() {
+    // Very short durations
+    let tenth_second = dur#"100ms";
+    let frame_time = dur#"16ms";  // ~60fps
+    let tick = dur#"1us";
+}
+
+// Duration matching
+fn categorize_duration(d: Duration) -> Text {
+    match d {
+        d if d < dur#"1s" => "instant"
+        d if d < dur#"1m" => "quick"
+        d if d < dur#"1h" => "moderate"
+        d if d < dur#"1d" => "long"
+        _ => "very long"
+    }
+}
+
+fn test_duration_constants() {
+    // Duration constants
+    const TIMEOUT: Duration = dur#"30s";
+    const POLL_INTERVAL: Duration = dur#"100ms";
+    const MAX_DURATION: Duration = dur#"7d";
+}

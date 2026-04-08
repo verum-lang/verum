@@ -1,0 +1,75 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, theorems, corollaries
+// @timeout: 15000
+
+/// Corollary derivation from established theorems
+
+/// Base theorems
+theorem add_comm_base<T: Ring>(a: T, b: T): a + b == b + a { proof by ring }
+theorem mul_comm_base<T: Ring>(a: T, b: T): a * b == b * a { proof by ring }
+theorem add_assoc_base<T: Ring>(a: T, b: T, c: T): (a + b) + c == a + (b + c) { proof by ring }
+
+/// Corollary: addition is left-commutative
+theorem corollary_add_left_comm<T: Ring>(a: T, b: T, c: T): a + (b + c) == b + (a + c) {
+    proof by ring
+}
+
+/// Corollary: double is addition with itself
+theorem corollary_double<T: Ring>(a: T): a + a == 2 * a {
+    proof by ring
+}
+
+/// Corollary: square expansion
+theorem corollary_square<T: Ring>(a: T, b: T): (a + b) * (a + b) == a*a + 2*a*b + b*b {
+    proof by ring
+}
+
+/// Corollary from ordering
+theorem base_le_trans(a: Int, b: Int, c: Int) requires a <= b requires b <= c ensures a <= c { proof by omega }
+
+theorem corollary_le_chain(a: Int, b: Int, c: Int, d: Int)
+    requires a <= b requires b <= c requires c <= d ensures a <= d
+{
+    proof {
+        have h1: a <= c by base_le_trans;
+        conclude by base_le_trans
+    }
+}
+
+/// Corollary from list theorems
+lemma base_append_length<T>(xs: List<T>, ys: List<T>): len(xs ++ ys) == len(xs) + len(ys) {
+    proof by induction on xs
+}
+
+theorem corollary_triple_length<T>(xs: List<T>, ys: List<T>, zs: List<T>):
+    len(xs ++ ys ++ zs) == len(xs) + len(ys) + len(zs)
+{
+    proof by auto
+}
+
+/// Corollary: empty append
+theorem corollary_nil_append<T>(xs: List<T>): [] ++ xs == xs { proof by definition }
+theorem corollary_append_nil<T>(xs: List<T>): xs ++ [] == xs { proof by induction on xs }
+
+/// Corollary from prime theorem
+theorem base_prime_exists(): exists p: Nat. is_prime(p) { proof { witness 2; conclude by auto } }
+
+fn is_prime(n: Nat) -> Bool;
+
+theorem corollary_prime_gt_1(): exists p: Nat. is_prime(p) && p > 1 {
+    proof by auto
+}
+
+/// Immediate corollary
+theorem corollary_immediate(x: Int) requires x > 10 ensures x > 0 { proof by omega }
+
+/// Corollary by specialization
+theorem base_generic<T: Eq>(x: T, y: T) requires x == y ensures y == x { proof by auto }
+
+theorem corollary_int_sym(a: Int, b: Int) requires a == b ensures b == a {
+    proof by base_generic
+}
+
+fn main() {}

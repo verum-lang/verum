@@ -1,0 +1,70 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, nested-functions, deep-nesting, tuples
+// @timeout: 3000
+// @expected-exit: 0
+
+fn main() {
+    fn deep_tuple(a: Int, b: Int) -> (Int, Int, Int) {
+        fn level2(x: Int, y: Int) -> (Int, Int, Int) {
+            fn level3(m: Int, n: Int) -> (Int, Int, Int) {
+                fn level4(p: Int, q: Int) -> (Int, Int, Int) {
+                    fn level5(r: Int, s: Int) -> (Int, Int, Int) {
+                        fn level6(u: Int, v: Int) -> (Int, Int, Int) {
+                            fn level7(i: Int, j: Int) -> (Int, Int, Int) {
+                                fn level8(k: Int, l: Int) -> (Int, Int, Int) {
+                                    // Base case: return tuple
+                                    return (k + l, k - l, k * l);
+                                }
+                                let (sum, diff, prod) = level8(i, j);
+                                return (sum + 1, diff + 1, prod);
+                            }
+                            let (sum, diff, prod) = level7(u, v);
+                            return (sum + 2, diff + 2, prod);
+                        }
+                        let (sum, diff, prod) = level6(r, s);
+                        return (sum + 4, diff + 4, prod);
+                    }
+                    let (sum, diff, prod) = level5(p, q);
+                    return (sum + 8, diff + 8, prod);
+                }
+                let (sum, diff, prod) = level4(m, n);
+                return (sum + 16, diff + 16, prod);
+            }
+            let (sum, diff, prod) = level3(x, y);
+            return (sum + 32, diff + 32, prod);
+        }
+        let (sum, diff, prod) = level2(a, b);
+        return (sum + 64, diff + 64, prod);
+    }
+
+    // deep_tuple(10, 3):
+    // level8: (13, 7, 30)
+    // level7: (14, 8, 30)
+    // level6: (16, 10, 30)
+    // level5: (20, 14, 30)
+    // level4: (28, 22, 30)
+    // level3: (44, 38, 30)
+    // level2: (76, 70, 30)
+    // final:  (140, 134, 30)
+    let (r1, r2, r3) = deep_tuple(10, 3);
+    assert_eq(r1, 140);
+    assert_eq(r2, 134);
+    assert_eq(r3, 30);
+
+    // Test with different input
+    // deep_tuple(5, 2):
+    // level8: (7, 3, 10)
+    // level7: (8, 4, 10)
+    // level6: (10, 6, 10)
+    // level5: (14, 10, 10)
+    // level4: (22, 18, 10)
+    // level3: (38, 34, 10)
+    // level2: (70, 66, 10)
+    // final:  (134, 130, 10)
+    let (s1, s2, s3) = deep_tuple(5, 2);
+    assert_eq(s1, 134);
+    assert_eq(s2, 130);
+    assert_eq(s3, 10);
+}

@@ -1,0 +1,382 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, comprehensive, guarantees, static-analysis
+// @description: Comprehensive memory safety guarantees demonstration
+
+/// Memory Safety Guarantees Test Suite
+///
+/// This test demonstrates that Verum provides memory safety guarantees
+/// equivalent to or exceeding those of Rust, including:
+///
+/// 1. No null pointer dereferences (Maybe<T> instead of null)
+/// 2. No buffer overflows (bounds checking on all collections)
+/// 3. No use-after-free (ownership + borrow checking)
+/// 4. No double-free (single ownership + drop semantics)
+/// 5. No data races (aliasing rules + exclusive mutable access)
+/// 6. No uninitialized memory access (definite initialization)
+///
+/// All guarantees are enforced at compile time where possible,
+/// with runtime checks only where necessary (bounds checking).
+///
+/// Spec: 04-memory-model.md#memory-safety-guarantees
+
+// ============================================================================
+// GUARANTEE 1: No Null Pointer Dereferences
+// ============================================================================
+// Verum has no null value. Use Maybe<T> for optional values.
+
+fn test_no_null() {
+    // Maybe<T> explicitly represents presence or absence
+    let present: Maybe<Int> = Maybe.Some(42);
+    let absent: Maybe<Int> = Maybe.None;
+
+    // Must handle both cases
+    let value = match present {
+        Maybe.Some(v) => v,
+        Maybe.None => 0,
+    };
+    assert(value == 42);
+
+    let default_value = match absent {
+        Maybe.Some(v) => v,
+        Maybe.None => -1,
+    };
+    assert(default_value == -1);
+}
+
+fn test_maybe_propagation() {
+    // Functions returning Maybe signal possibility of absence
+    let result = find_positive(&[-1, -2, -3]);
+
+    match result {
+        Maybe.Some(v) => assert(false),  // Should not find positive
+        Maybe.None => assert(true),       // Correctly returns None
+    }
+
+    let result2 = find_positive(&[1, 2, 3]);
+    match result2 {
+        Maybe.Some(v) => assert(v == 1),
+        Maybe.None => assert(false),
+    }
+}
+
+fn find_positive(arr: &[Int; 3]) -> Maybe<Int> {
+    for i in 0..3 {
+        if arr[i] > 0 {
+            return Maybe.Some(arr[i]);
+        }
+    }
+    Maybe.None
+}
+
+// ============================================================================
+// GUARANTEE 2: No Buffer Overflows
+// ============================================================================
+// All array/collection accesses are bounds-checked.
+
+fn test_bounds_checking() {
+    let arr = [10, 20, 30, 40, 50];
+
+    // Safe access through bounds-checked indexing
+    assert(arr[0] == 10);
+    assert(arr[4] == 50);
+
+    // Out-of-bounds access would panic at runtime, not corrupt memory
+    // arr[100]  // Would panic: "Index out of bounds"
+
+    // Safe alternative with Maybe
+    let safe_access = arr.get(2);
+    match safe_access {
+        Maybe.Some(v) => assert(v == 30),
+        Maybe.None => assert(false),
+    }
+
+    let out_of_bounds = arr.get(100);
+    match out_of_bounds {
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
+    }
+}
+
+fn test_slice_safety() {
+    let data = [1, 2, 3, 4, 5];
+
+    // Iteration is bounds-safe
+    let mut sum = 0;
+    for i in 0..5 {
+        sum += data[i];
+    }
+    assert(sum == 15);
+}
+
+// ============================================================================
+// GUARANTEE 3: No Use-After-Free
+// ============================================================================
+// Ownership system prevents accessing freed memory.
+
+fn test_ownership_prevents_uaf() {
+    let data = create_data();
+
+    // data is owned here
+    let result = use_data(&data);
+    assert(result == 42);
+
+    // After scope ends, data is automatically dropped
+    // No way to access it after
+
+    // If we moved data, we can't use it anymore
+    let moved = consume_data(data);
+    // let bad = data[0];  // ERROR: use of moved value
+}
+
+fn create_data() -> [Int; 3] {
+    [42, 43, 44]
+}
+
+fn use_data(d: &[Int; 3]) -> Int {
+    d[0]
+}
+
+fn consume_data(d: [Int; 3]) -> Int {
+    d[0] + d[1] + d[2]
+}
+
+fn test_borrow_prevents_uaf() {
+    let mut data = [1, 2, 3];
+
+    // Take a reference
+    let r = &data[0];
+    assert(*r == 1);
+
+    // Cannot mutate while borrowed
+    // data[0] = 100;  // ERROR: cannot assign while borrowed
+
+    // Reference goes out of scope here
+    // Now mutation is safe
+}
+
+// ============================================================================
+// GUARANTEE 4: No Double-Free
+// ============================================================================
+// Single ownership means exactly one drop.
+
+fn test_single_ownership() {
+    let resource = acquire_resource();
+
+    // Only one owner
+    let new_owner = resource;
+    // resource is moved, not copied
+
+    // new_owner will be dropped exactly once at scope end
+    use_resource(&new_owner);
+}
+
+fn acquire_resource() -> Int {
+    42
+}
+
+fn use_resource(r: &Int) {
+    assert(*r == 42);
+}
+
+fn test_explicit_drop() {
+    let resource = acquire_resource();
+
+    // Can explicitly drop
+    drop(resource);
+
+    // Cannot use after drop
+    // let _ = resource;  // ERROR: use of moved value
+
+    // Cannot drop again - already dropped
+    // drop(resource);  // ERROR: use of moved value
+}
+
+// ============================================================================
+// GUARANTEE 5: No Data Races
+// ============================================================================
+// Aliasing rules prevent concurrent mutable access.
+
+fn test_aliasing_rules() {
+    let mut data = 42;
+
+    // Either multiple immutable references...
+    {
+        let r1 = &data;
+        let r2 = &data;
+        let r3 = &data;
+        assert(*r1 == *r2);
+        assert(*r2 == *r3);
+    }
+
+    // ...or exactly one mutable reference
+    {
+        let r_mut = &mut data;
+        *r_mut = 100;
+    }
+
+    assert(data == 100);
+}
+
+fn test_exclusive_mutation() {
+    let mut counter = 0;
+
+    // Only one mutable reference at a time
+    increment(&mut counter);
+    increment(&mut counter);
+    increment(&mut counter);
+
+    assert(counter == 3);
+}
+
+fn increment(c: &mut Int) {
+    *c += 1;
+}
+
+// ============================================================================
+// GUARANTEE 6: No Uninitialized Memory Access
+// ============================================================================
+// All variables must be initialized before use.
+
+fn test_definite_initialization() {
+    // All variables initialized at declaration
+    let x: Int = 42;
+    let y = 100;  // Type inferred
+    let arr = [1, 2, 3];
+
+    assert(x == 42);
+    assert(y == 100);
+    assert(arr[0] == 1);
+}
+
+fn test_struct_initialization() {
+    // Structs must have all fields initialized
+    let point = Point { x: 10, y: 20 };
+
+    // Cannot create partial struct
+    // let bad = Point { x: 10 };  // ERROR: missing field 'y'
+
+    assert(point.x == 10);
+    assert(point.y == 20);
+}
+
+type Point is {
+    x: Int,
+    y: Int,
+};
+
+fn test_conditional_initialization() {
+    let value: Int;
+
+    // All paths must initialize
+    if true {
+        value = 42;
+    } else {
+        value = 0;
+    }
+
+    // Now value is definitely initialized
+    assert(value == 42);
+}
+
+// ============================================================================
+// COMBINED SAFETY DEMONSTRATION
+// ============================================================================
+
+fn test_combined_safety() {
+    // Create owned data
+    let mut data = SafeContainer { values: [1, 2, 3, 4, 5], count: 5 };
+
+    // Safe modification through exclusive reference
+    {
+        let r = &mut data;
+        r.values[0] = 100;
+        r.count = 5;
+    }
+
+    // Safe reading through shared references
+    {
+        let r1 = &data;
+        let r2 = &data;
+        assert(r1.values[0] == 100);
+        assert(r2.count == 5);
+    }
+
+    // Safe optional access
+    let elem = data.get_safe(2);
+    match elem {
+        Maybe.Some(v) => assert(v == 3),
+        Maybe.None => assert(false),
+    }
+
+    // Out of bounds returns None, not crash
+    let bad_elem = data.get_safe(100);
+    match bad_elem {
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
+    }
+}
+
+type SafeContainer is {
+    values: [Int; 5],
+    count: Int,
+};
+
+fn get_safe_impl(container: &SafeContainer, idx: Int) -> Maybe<Int> {
+    if idx >= 0 && idx < container.count {
+        Maybe.Some(container.values[idx])
+    } else {
+        Maybe.None
+    }
+}
+
+// Helper method simulation
+fn container_get_safe(c: &SafeContainer, idx: Int) -> Maybe<Int> {
+    get_safe_impl(c, idx)
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+fn main() {
+    // Guarantee 1: No null pointer dereferences
+    test_no_null();
+    test_maybe_propagation();
+
+    // Guarantee 2: No buffer overflows
+    test_bounds_checking();
+    test_slice_safety();
+
+    // Guarantee 3: No use-after-free
+    test_ownership_prevents_uaf();
+    test_borrow_prevents_uaf();
+
+    // Guarantee 4: No double-free
+    test_single_ownership();
+    test_explicit_drop();
+
+    // Guarantee 5: No data races
+    test_aliasing_rules();
+    test_exclusive_mutation();
+
+    // Guarantee 6: No uninitialized memory
+    test_definite_initialization();
+    test_struct_initialization();
+    test_conditional_initialization();
+
+    // Combined demonstration
+    test_combined_safety();
+}
+
+// Extension method simulation for SafeContainer
+implement SafeContainer {
+    fn get_safe(&self, idx: Int) -> Maybe<Int> {
+        if idx >= 0 && idx < self.count {
+            Maybe.Some(self.values[idx])
+        } else {
+            Maybe.None
+        }
+    }
+}

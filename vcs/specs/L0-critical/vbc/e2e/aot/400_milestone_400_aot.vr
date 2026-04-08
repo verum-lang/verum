@@ -1,0 +1,286 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, milestone, fibonacci, kmp, matrix, determinant
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Milestone 400 integration test combining:
+// 1. Fibonacci with memoization (Arr16)
+// 2. String matching (KMP failure function)
+// 3. Matrix determinant (3x3)
+
+type Arr16 is {
+    a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int,
+    a8: Int, a9: Int, a10: Int, a11: Int, a12: Int, a13: Int, a14: Int, a15: Int
+};
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 } else if i == 2 { a.a2 }
+    else if i == 3 { a.a3 } else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else if i == 7 { a.a7 } else if i == 8 { a.a8 }
+    else if i == 9 { a.a9 } else if i == 10 { a.a10 } else if i == 11 { a.a11 }
+    else if i == 12 { a.a12 } else if i == 13 { a.a13 } else if i == 14 { a.a14 }
+    else { a.a15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 },
+        a8: if i == 8 { v } else { a.a8 }, a9: if i == 9 { v } else { a.a9 },
+        a10: if i == 10 { v } else { a.a10 }, a11: if i == 11 { v } else { a.a11 },
+        a12: if i == 12 { v } else { a.a12 }, a13: if i == 13 { v } else { a.a13 },
+        a14: if i == 14 { v } else { a.a14 }, a15: if i == 15 { v } else { a.a15 }
+    }
+}
+
+fn a16_zero() -> Arr16 {
+    Arr16 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0,
+            a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 }
+}
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// ========== Part 1: Fibonacci with memoization ==========
+// Uses Arr16 as memo table: memo[i] = fib(i), -1 = not computed
+
+fn fib_memo(n: Int, memo: Arr16) -> Arr16 {
+    // Bottom-up DP approach
+    let mut m = memo;
+    m = a16_set(m, 0, 0);
+    m = a16_set(m, 1, 1);
+    let mut i = 2;
+    while i <= n {
+        let val = a16_get(m, i - 1) + a16_get(m, i - 2);
+        m = a16_set(m, i, val);
+        i = i + 1;
+    }
+    m
+}
+
+fn test_fibonacci() -> Int {
+    let memo = fib_memo(15, a16_zero());
+    assert_eq(a16_get(memo, 0), 0);
+    assert_eq(a16_get(memo, 1), 1);
+    assert_eq(a16_get(memo, 2), 1);
+    assert_eq(a16_get(memo, 5), 5);
+    assert_eq(a16_get(memo, 10), 55);
+    0
+}
+
+fn test_fibonacci_larger() -> Int {
+    let memo = fib_memo(15, a16_zero());
+    assert_eq(a16_get(memo, 12), 144);
+    assert_eq(a16_get(memo, 13), 233);
+    assert_eq(a16_get(memo, 14), 377);
+    assert_eq(a16_get(memo, 15), 610);
+    0
+}
+
+// ========== Part 2: KMP failure function ==========
+// pattern stored as integers in Arr8, length up to 8
+// failure[i] = length of longest proper prefix of pattern[0..=i] that is also a suffix
+
+fn kmp_failure(pat: Arr8, pat_len: Int) -> Arr8 {
+    let mut fail = a8_zero();
+    // fail[0] = 0 always
+    let mut i = 1;
+    let mut j = 0;
+    while i < pat_len {
+        let mut done = 0;
+        while done == 0 {
+            if a8_get(pat, i) == a8_get(pat, j) {
+                j = j + 1;
+                fail = a8_set(fail, i, j);
+                done = 1;
+            } else if j > 0 {
+                j = a8_get(fail, j - 1);
+            } else {
+                fail = a8_set(fail, i, 0);
+                done = 1;
+            }
+        }
+        i = i + 1;
+    }
+    fail
+}
+
+// KMP search: count occurrences of pattern in text
+// text in Arr16, pattern in Arr8
+fn kmp_search(text: Arr16, text_len: Int, pat: Arr8, pat_len: Int) -> Int {
+    let fail = kmp_failure(pat, pat_len);
+    let mut count = 0;
+    let mut i = 0;
+    let mut j = 0;
+    while i < text_len {
+        let mut done = 0;
+        while done == 0 {
+            if a16_get(text, i) == a8_get(pat, j) {
+                j = j + 1;
+                if j == pat_len {
+                    count = count + 1;
+                    j = a8_get(fail, j - 1);
+                }
+                done = 1;
+            } else if j > 0 {
+                j = a8_get(fail, j - 1);
+            } else {
+                done = 1;
+            }
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn test_kmp_failure() -> Int {
+    // Pattern: A B A B A C = [1,2,1,2,1,3]
+    let pat = Arr8 { a0: 1, a1: 2, a2: 1, a3: 2, a4: 1, a5: 3, a6: 0, a7: 0 };
+    let fail = kmp_failure(pat, 6);
+    // fail = [0, 0, 1, 2, 3, 0]
+    assert_eq(a8_get(fail, 0), 0);
+    assert_eq(a8_get(fail, 1), 0);
+    assert_eq(a8_get(fail, 2), 1);
+    assert_eq(a8_get(fail, 3), 2);
+    assert_eq(a8_get(fail, 4), 3);
+    assert_eq(a8_get(fail, 5), 0);
+    0
+}
+
+fn test_kmp_search() -> Int {
+    // Text: A B A B A B A C = [1,2,1,2,1,2,1,3] (len 8, stored in Arr16)
+    let text = Arr16 { a0: 1, a1: 2, a2: 1, a3: 2, a4: 1, a5: 2, a6: 1, a7: 3,
+                        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    // Pattern: A B A = [1,2,1]
+    let pat = Arr8 { a0: 1, a1: 2, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let cnt = kmp_search(text, 8, pat, 3);
+    // Occurrences at positions 0, 2, 4 => 3 matches
+    assert_eq(cnt, 3);
+    0
+}
+
+fn test_kmp_no_match() -> Int {
+    let text = Arr16 { a0: 1, a1: 1, a2: 1, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0,
+                        a8: 0, a9: 0, a10: 0, a11: 0, a12: 0, a13: 0, a14: 0, a15: 0 };
+    let pat = Arr8 { a0: 2, a1: 3, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(kmp_search(text, 4, pat, 2), 0);
+    0
+}
+
+// ========== Part 3: 3x3 Matrix Determinant ==========
+// Store 3x3 matrix in 9 fields of a record. Flat row-major: m[r*3+c]
+
+type Mat3 is {
+    m0: Int, m1: Int, m2: Int,
+    m3: Int, m4: Int, m5: Int,
+    m6: Int, m7: Int, m8: Int
+};
+
+fn mat3_get(m: Mat3, r: Int, c: Int) -> Int {
+    let idx = r * 3 + c;
+    if idx == 0 { m.m0 } else if idx == 1 { m.m1 } else if idx == 2 { m.m2 }
+    else if idx == 3 { m.m3 } else if idx == 4 { m.m4 } else if idx == 5 { m.m5 }
+    else if idx == 6 { m.m6 } else if idx == 7 { m.m7 } else { m.m8 }
+}
+
+fn mat3_det(m: Mat3) -> Int {
+    // det = a(ei-fh) - b(di-fg) + c(dh-eg)
+    let a = m.m0; let b = m.m1; let c = m.m2;
+    let d = m.m3; let e = m.m4; let f = m.m5;
+    let g = m.m6; let h = m.m7; let ii = m.m8;
+    a * (e * ii - f * h) - b * (d * ii - f * g) + c * (d * h - e * g)
+}
+
+fn mat3_mul(a: Mat3, bm: Mat3) -> Mat3 {
+    // C[i][j] = sum_k A[i][k]*B[k][j]
+    Mat3 {
+        m0: a.m0*bm.m0 + a.m1*bm.m3 + a.m2*bm.m6,
+        m1: a.m0*bm.m1 + a.m1*bm.m4 + a.m2*bm.m7,
+        m2: a.m0*bm.m2 + a.m1*bm.m5 + a.m2*bm.m8,
+        m3: a.m3*bm.m0 + a.m4*bm.m3 + a.m5*bm.m6,
+        m4: a.m3*bm.m1 + a.m4*bm.m4 + a.m5*bm.m7,
+        m5: a.m3*bm.m2 + a.m4*bm.m5 + a.m5*bm.m8,
+        m6: a.m6*bm.m0 + a.m7*bm.m3 + a.m8*bm.m6,
+        m7: a.m6*bm.m1 + a.m7*bm.m4 + a.m8*bm.m7,
+        m8: a.m6*bm.m2 + a.m7*bm.m5 + a.m8*bm.m8
+    }
+}
+
+fn test_det_identity() -> Int {
+    let id = Mat3 { m0: 1, m1: 0, m2: 0, m3: 0, m4: 1, m5: 0, m6: 0, m7: 0, m8: 1 };
+    assert_eq(mat3_det(id), 1);
+    0
+}
+
+fn test_det_general() -> Int {
+    // | 1  2  3 |
+    // | 4  5  6 | => det = 1*(5*9-6*8) - 2*(4*9-6*7) + 3*(4*8-5*7)
+    // | 7  8  9 |       = 1*(45-48) - 2*(36-42) + 3*(32-35) = -3+12-9 = 0
+    let m = Mat3 { m0: 1, m1: 2, m2: 3, m3: 4, m4: 5, m5: 6, m6: 7, m7: 8, m8: 9 };
+    assert_eq(mat3_det(m), 0);
+    // | 2  1  0 |
+    // | 0  3  1 | => det = 2*(3*2-1*0) - 1*(0*2-1*(-1)) + 0 = 2*6 - 1*(0+1) = 12-1 = 11
+    // |-1  0  2 |
+    let m2 = Mat3 { m0: 2, m1: 1, m2: 0, m3: 0, m4: 3, m5: 1, m6: 0-1, m7: 0, m8: 2 };
+    assert_eq(mat3_det(m2), 11);
+    0
+}
+
+fn test_det_negative() -> Int {
+    // | 3  0  2 |
+    // | 2  0 -2 | => det = 3*(0*1-(-2)*4) - 0 + 2*(2*4-0*1) = 3*8 + 2*8 = 24+16 = 40
+    // | 0  4  1 |       wait: 3*(0-(-8)) - 0*(2-0) + 2*(8-0) = 3*8 + 2*8 = 40 -- WRONG
+    //   Actually: 3*(0*1 - (-2)*4) - 0*(2*1 - (-2)*0) + 2*(2*4 - 0*0) = 3*8 - 0 + 2*8 = 40
+    let m = Mat3 { m0: 3, m1: 0, m2: 2, m3: 2, m4: 0, m5: 0-2, m6: 0, m7: 4, m8: 1 };
+    assert_eq(mat3_det(m), 40);
+    0
+}
+
+fn test_mat_mul_det() -> Int {
+    // det(A*B) = det(A)*det(B)
+    let a = Mat3 { m0: 2, m1: 1, m2: 0, m3: 0, m4: 3, m5: 1, m6: 0-1, m7: 0, m8: 2 };
+    let bm = Mat3 { m0: 1, m1: 0, m2: 2, m3: 0, m4: 1, m5: 0-1, m6: 3, m7: 0, m8: 1 };
+    let c = mat3_mul(a, bm);
+    let det_a = mat3_det(a);
+    let det_b = mat3_det(bm);
+    let det_c = mat3_det(c);
+    assert_eq(det_c, det_a * det_b);
+    0
+}
+
+fn main() -> Int {
+    test_fibonacci();
+    test_fibonacci_larger();
+    test_kmp_failure();
+    test_kmp_search();
+    test_kmp_no_match();
+    test_det_identity();
+    test_det_general();
+    test_det_negative();
+    test_mat_mul_det();
+    print("Milestone 400 - All integration tests passed!");
+    0
+}

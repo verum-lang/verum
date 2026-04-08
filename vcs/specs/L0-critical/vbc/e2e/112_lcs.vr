@@ -1,0 +1,338 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, dp, lcs, longest-common-subsequence
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Longest Common Subsequence via DP table on fixed-size integer arrays
+
+// ============================================================================
+// Arr8: Fixed-size array of 8 Ints with length
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn arr_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn arr_from7(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: f, e6: g, e7: 0, len: 7 }
+}
+
+fn arr_from5(a: Int, b: Int, c: Int, d: Int, e: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: 0, e6: 0, e7: 0, len: 5 }
+}
+
+fn arr_from4(a: Int, b: Int, c: Int, d: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: 0, e5: 0, e6: 0, e7: 0, len: 4 }
+}
+
+fn arr_from3(a: Int, b: Int, c: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 3 }
+}
+
+fn arr_empty() -> Arr8 {
+    Arr8 { e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 0 }
+}
+
+// ============================================================================
+// DP table: (len_a+1) x (len_b+1), max 9x9 = 81 cells
+// We use a flat array with 81 fields
+// ============================================================================
+
+type DpGrid is {
+    r0: Int, r1: Int, r2: Int, r3: Int, r4: Int, r5: Int, r6: Int, r7: Int, r8: Int,
+    r9: Int, r10: Int, r11: Int, r12: Int, r13: Int, r14: Int, r15: Int, r16: Int, r17: Int,
+    r18: Int, r19: Int, r20: Int, r21: Int, r22: Int, r23: Int, r24: Int, r25: Int, r26: Int,
+    r27: Int, r28: Int, r29: Int, r30: Int, r31: Int, r32: Int, r33: Int, r34: Int, r35: Int,
+    r36: Int, r37: Int, r38: Int, r39: Int, r40: Int, r41: Int, r42: Int, r43: Int, r44: Int,
+    r45: Int, r46: Int, r47: Int, r48: Int, r49: Int, r50: Int, r51: Int, r52: Int, r53: Int,
+    r54: Int, r55: Int, r56: Int, r57: Int, r58: Int, r59: Int, r60: Int, r61: Int, r62: Int,
+    r63: Int, r64: Int, r65: Int, r66: Int, r67: Int, r68: Int, r69: Int, r70: Int, r71: Int,
+    r72: Int, r73: Int, r74: Int, r75: Int, r76: Int, r77: Int, r78: Int, r79: Int, r80: Int
+};
+
+fn grid_new() -> DpGrid {
+    DpGrid {
+        r0: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0, r6: 0, r7: 0, r8: 0,
+        r9: 0, r10: 0, r11: 0, r12: 0, r13: 0, r14: 0, r15: 0, r16: 0, r17: 0,
+        r18: 0, r19: 0, r20: 0, r21: 0, r22: 0, r23: 0, r24: 0, r25: 0, r26: 0,
+        r27: 0, r28: 0, r29: 0, r30: 0, r31: 0, r32: 0, r33: 0, r34: 0, r35: 0,
+        r36: 0, r37: 0, r38: 0, r39: 0, r40: 0, r41: 0, r42: 0, r43: 0, r44: 0,
+        r45: 0, r46: 0, r47: 0, r48: 0, r49: 0, r50: 0, r51: 0, r52: 0, r53: 0,
+        r54: 0, r55: 0, r56: 0, r57: 0, r58: 0, r59: 0, r60: 0, r61: 0, r62: 0,
+        r63: 0, r64: 0, r65: 0, r66: 0, r67: 0, r68: 0, r69: 0, r70: 0, r71: 0,
+        r72: 0, r73: 0, r74: 0, r75: 0, r76: 0, r77: 0, r78: 0, r79: 0, r80: 0
+    }
+}
+
+fn grid_get(g: DpGrid, idx: Int) -> Int {
+    if idx == 0 { g.r0 } else if idx == 1 { g.r1 } else if idx == 2 { g.r2 }
+    else if idx == 3 { g.r3 } else if idx == 4 { g.r4 } else if idx == 5 { g.r5 }
+    else if idx == 6 { g.r6 } else if idx == 7 { g.r7 } else if idx == 8 { g.r8 }
+    else if idx == 9 { g.r9 } else if idx == 10 { g.r10 } else if idx == 11 { g.r11 }
+    else if idx == 12 { g.r12 } else if idx == 13 { g.r13 } else if idx == 14 { g.r14 }
+    else if idx == 15 { g.r15 } else if idx == 16 { g.r16 } else if idx == 17 { g.r17 }
+    else if idx == 18 { g.r18 } else if idx == 19 { g.r19 } else if idx == 20 { g.r20 }
+    else if idx == 21 { g.r21 } else if idx == 22 { g.r22 } else if idx == 23 { g.r23 }
+    else if idx == 24 { g.r24 } else if idx == 25 { g.r25 } else if idx == 26 { g.r26 }
+    else if idx == 27 { g.r27 } else if idx == 28 { g.r28 } else if idx == 29 { g.r29 }
+    else if idx == 30 { g.r30 } else if idx == 31 { g.r31 } else if idx == 32 { g.r32 }
+    else if idx == 33 { g.r33 } else if idx == 34 { g.r34 } else if idx == 35 { g.r35 }
+    else if idx == 36 { g.r36 } else if idx == 37 { g.r37 } else if idx == 38 { g.r38 }
+    else if idx == 39 { g.r39 } else if idx == 40 { g.r40 } else if idx == 41 { g.r41 }
+    else if idx == 42 { g.r42 } else if idx == 43 { g.r43 } else if idx == 44 { g.r44 }
+    else if idx == 45 { g.r45 } else if idx == 46 { g.r46 } else if idx == 47 { g.r47 }
+    else if idx == 48 { g.r48 } else if idx == 49 { g.r49 } else if idx == 50 { g.r50 }
+    else if idx == 51 { g.r51 } else if idx == 52 { g.r52 } else if idx == 53 { g.r53 }
+    else if idx == 54 { g.r54 } else if idx == 55 { g.r55 } else if idx == 56 { g.r56 }
+    else if idx == 57 { g.r57 } else if idx == 58 { g.r58 } else if idx == 59 { g.r59 }
+    else if idx == 60 { g.r60 } else if idx == 61 { g.r61 } else if idx == 62 { g.r62 }
+    else if idx == 63 { g.r63 } else if idx == 64 { g.r64 } else if idx == 65 { g.r65 }
+    else if idx == 66 { g.r66 } else if idx == 67 { g.r67 } else if idx == 68 { g.r68 }
+    else if idx == 69 { g.r69 } else if idx == 70 { g.r70 } else if idx == 71 { g.r71 }
+    else if idx == 72 { g.r72 } else if idx == 73 { g.r73 } else if idx == 74 { g.r74 }
+    else if idx == 75 { g.r75 } else if idx == 76 { g.r76 } else if idx == 77 { g.r77 }
+    else if idx == 78 { g.r78 } else if idx == 79 { g.r79 } else { g.r80 }
+}
+
+fn grid_set(g: DpGrid, idx: Int, val: Int) -> DpGrid {
+    DpGrid {
+        r0: if idx == 0 { val } else { g.r0 },
+        r1: if idx == 1 { val } else { g.r1 },
+        r2: if idx == 2 { val } else { g.r2 },
+        r3: if idx == 3 { val } else { g.r3 },
+        r4: if idx == 4 { val } else { g.r4 },
+        r5: if idx == 5 { val } else { g.r5 },
+        r6: if idx == 6 { val } else { g.r6 },
+        r7: if idx == 7 { val } else { g.r7 },
+        r8: if idx == 8 { val } else { g.r8 },
+        r9: if idx == 9 { val } else { g.r9 },
+        r10: if idx == 10 { val } else { g.r10 },
+        r11: if idx == 11 { val } else { g.r11 },
+        r12: if idx == 12 { val } else { g.r12 },
+        r13: if idx == 13 { val } else { g.r13 },
+        r14: if idx == 14 { val } else { g.r14 },
+        r15: if idx == 15 { val } else { g.r15 },
+        r16: if idx == 16 { val } else { g.r16 },
+        r17: if idx == 17 { val } else { g.r17 },
+        r18: if idx == 18 { val } else { g.r18 },
+        r19: if idx == 19 { val } else { g.r19 },
+        r20: if idx == 20 { val } else { g.r20 },
+        r21: if idx == 21 { val } else { g.r21 },
+        r22: if idx == 22 { val } else { g.r22 },
+        r23: if idx == 23 { val } else { g.r23 },
+        r24: if idx == 24 { val } else { g.r24 },
+        r25: if idx == 25 { val } else { g.r25 },
+        r26: if idx == 26 { val } else { g.r26 },
+        r27: if idx == 27 { val } else { g.r27 },
+        r28: if idx == 28 { val } else { g.r28 },
+        r29: if idx == 29 { val } else { g.r29 },
+        r30: if idx == 30 { val } else { g.r30 },
+        r31: if idx == 31 { val } else { g.r31 },
+        r32: if idx == 32 { val } else { g.r32 },
+        r33: if idx == 33 { val } else { g.r33 },
+        r34: if idx == 34 { val } else { g.r34 },
+        r35: if idx == 35 { val } else { g.r35 },
+        r36: if idx == 36 { val } else { g.r36 },
+        r37: if idx == 37 { val } else { g.r37 },
+        r38: if idx == 38 { val } else { g.r38 },
+        r39: if idx == 39 { val } else { g.r39 },
+        r40: if idx == 40 { val } else { g.r40 },
+        r41: if idx == 41 { val } else { g.r41 },
+        r42: if idx == 42 { val } else { g.r42 },
+        r43: if idx == 43 { val } else { g.r43 },
+        r44: if idx == 44 { val } else { g.r44 },
+        r45: if idx == 45 { val } else { g.r45 },
+        r46: if idx == 46 { val } else { g.r46 },
+        r47: if idx == 47 { val } else { g.r47 },
+        r48: if idx == 48 { val } else { g.r48 },
+        r49: if idx == 49 { val } else { g.r49 },
+        r50: if idx == 50 { val } else { g.r50 },
+        r51: if idx == 51 { val } else { g.r51 },
+        r52: if idx == 52 { val } else { g.r52 },
+        r53: if idx == 53 { val } else { g.r53 },
+        r54: if idx == 54 { val } else { g.r54 },
+        r55: if idx == 55 { val } else { g.r55 },
+        r56: if idx == 56 { val } else { g.r56 },
+        r57: if idx == 57 { val } else { g.r57 },
+        r58: if idx == 58 { val } else { g.r58 },
+        r59: if idx == 59 { val } else { g.r59 },
+        r60: if idx == 60 { val } else { g.r60 },
+        r61: if idx == 61 { val } else { g.r61 },
+        r62: if idx == 62 { val } else { g.r62 },
+        r63: if idx == 63 { val } else { g.r63 },
+        r64: if idx == 64 { val } else { g.r64 },
+        r65: if idx == 65 { val } else { g.r65 },
+        r66: if idx == 66 { val } else { g.r66 },
+        r67: if idx == 67 { val } else { g.r67 },
+        r68: if idx == 68 { val } else { g.r68 },
+        r69: if idx == 69 { val } else { g.r69 },
+        r70: if idx == 70 { val } else { g.r70 },
+        r71: if idx == 71 { val } else { g.r71 },
+        r72: if idx == 72 { val } else { g.r72 },
+        r73: if idx == 73 { val } else { g.r73 },
+        r74: if idx == 74 { val } else { g.r74 },
+        r75: if idx == 75 { val } else { g.r75 },
+        r76: if idx == 76 { val } else { g.r76 },
+        r77: if idx == 77 { val } else { g.r77 },
+        r78: if idx == 78 { val } else { g.r78 },
+        r79: if idx == 79 { val } else { g.r79 },
+        r80: if idx == 80 { val } else { g.r80 }
+    }
+}
+
+// ============================================================================
+// LCS length: standard DP
+// dp[i][j] = LCS length of a[0..i) and b[0..j)
+// Stored at index i * (len_b + 1) + j
+// ============================================================================
+
+fn lcs_length(a: Arr8, b: Arr8) -> Int {
+    let m = a.len;
+    let n = b.len;
+    let cols = n + 1;
+    let mut dp = grid_new();
+    // Row 0 and column 0 are already 0
+
+    let mut i = 1;
+    while i <= m {
+        let mut j = 1;
+        while j <= n {
+            let ai = arr_get(a, i - 1);
+            let bj = arr_get(b, j - 1);
+            if ai == bj {
+                let diag = grid_get(dp, (i - 1) * cols + (j - 1));
+                dp = grid_set(dp, i * cols + j, diag + 1);
+            } else {
+                let top = grid_get(dp, (i - 1) * cols + j);
+                let left = grid_get(dp, i * cols + (j - 1));
+                if top > left {
+                    dp = grid_set(dp, i * cols + j, top);
+                } else {
+                    dp = grid_set(dp, i * cols + j, left);
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    grid_get(dp, m * cols + n)
+}
+
+// ============================================================================
+// Test 1: Classic LCS example
+// "ABCBDAB" vs "BDCAB" encoded as ints (A=1,B=2,C=3,D=4)
+// LCS = "BCAB" = length 4
+// ============================================================================
+
+@test
+fn test_classic_lcs() {
+    // A=1, B=2, C=3, D=4
+    let a = arr_from7(1, 2, 3, 2, 4, 1, 2);    // ABCBDAB
+    let b = arr_from5(2, 4, 3, 1, 2);            // BDCAB
+    let result = lcs_length(a, b);
+    assert_eq(result, 4);
+
+    print("  test_classic_lcs: ok");
+}
+
+// ============================================================================
+// Test 2: Identical sequences
+// ============================================================================
+
+@test
+fn test_identical_sequences() {
+    let a = arr_from5(1, 2, 3, 4, 5);
+    let b = arr_from5(1, 2, 3, 4, 5);
+    assert_eq(lcs_length(a, b), 5);
+
+    let c = arr_from3(10, 20, 30);
+    let d = arr_from3(10, 20, 30);
+    assert_eq(lcs_length(c, d), 3);
+
+    print("  test_identical_sequences: ok");
+}
+
+// ============================================================================
+// Test 3: No common elements
+// ============================================================================
+
+@test
+fn test_no_common() {
+    let a = arr_from4(1, 2, 3, 4);
+    let b = arr_from4(5, 6, 7, 8);
+    assert_eq(lcs_length(a, b), 0);
+
+    print("  test_no_common: ok");
+}
+
+// ============================================================================
+// Test 4: One empty sequence
+// ============================================================================
+
+@test
+fn test_empty_sequence() {
+    let a = arr_from5(1, 2, 3, 4, 5);
+    let b = arr_empty();
+    assert_eq(lcs_length(a, b), 0);
+    assert_eq(lcs_length(b, a), 0);
+
+    // Both empty
+    let c = arr_empty();
+    let d = arr_empty();
+    assert_eq(lcs_length(c, d), 0);
+
+    print("  test_empty_sequence: ok");
+}
+
+// ============================================================================
+// Test 5: Subsequence patterns
+// ============================================================================
+
+@test
+fn test_subsequence_patterns() {
+    // a is a subsequence of b
+    let a = arr_from3(2, 4, 6);
+    let b = arr_from7(1, 2, 3, 4, 5, 6, 7);
+    assert_eq(lcs_length(a, b), 3);
+
+    // Single common element
+    let c = arr_from4(1, 2, 3, 4);
+    let d = arr_from4(5, 6, 3, 7);
+    assert_eq(lcs_length(c, d), 1);
+
+    // Repeated elements: a=[1,1,1,1], b=[1,1]
+    let e = arr_from4(1, 1, 1, 1);
+    let f = Arr8 { e0: 1, e1: 1, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0, len: 2 };
+    assert_eq(lcs_length(e, f), 2);
+
+    // Interleaved: a=[1,3,5,7], b=[2,3,6,7] => LCS=[3,7]=2
+    let g = arr_from4(1, 3, 5, 7);
+    let h = arr_from4(2, 3, 6, 7);
+    assert_eq(lcs_length(g, h), 2);
+
+    print("  test_subsequence_patterns: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_classic_lcs();
+    test_identical_sequences();
+    test_no_common();
+    test_empty_sequence();
+    test_subsequence_patterns();
+    print("[OK] 112_lcs");
+    0
+}

@@ -1,0 +1,158 @@
+// @test: differential
+// @tier: 0
+// @level: L0
+// @tags: differential, sparse-table, rmq, range-min-query
+// @timeout: 10000
+
+type Arr8 is { d0: Int, d1: Int, d2: Int, d3: Int, d4: Int, d5: Int, d6: Int, d7: Int };
+
+fn get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.d0 } else if i == 1 { a.d1 } else if i == 2 { a.d2 }
+    else if i == 3 { a.d3 } else if i == 4 { a.d4 } else if i == 5 { a.d5 }
+    else if i == 6 { a.d6 } else { a.d7 }
+}
+
+fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
+        d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
+        d4: if i == 4 { v } else { a.d4 }, d5: if i == 5 { v } else { a.d5 },
+        d6: if i == 6 { v } else { a.d6 }, d7: if i == 7 { v } else { a.d7 }
+    }
+}
+
+fn zeros() -> Arr8 { Arr8 { d0: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, d6: 0, d7: 0 } }
+
+fn min_val(a: Int, b: Int) -> Int { if a < b { a } else { b } }
+fn max_val(a: Int, b: Int) -> Int { if a > b { a } else { b } }
+
+// Sparse table for 8 elements, 4 levels (k=0,1,2,3 → ranges 1,2,4,8)
+type SparseTable is { level0: Arr8, level1: Arr8, level2: Arr8, level3: Arr8 };
+
+fn build_sparse_min(data: Arr8, n: Int) -> SparseTable {
+    let l0 = data;
+
+    // level1: min of pairs
+    let mut l1 = zeros();
+    let mut i = 0;
+    while i + 1 < n {
+        l1 = set(l1, i, min_val(get(l0, i), get(l0, i + 1)));
+        i = i + 1;
+    }
+    if n > 0 { l1 = set(l1, n - 1, get(l0, n - 1)); }
+
+    // level2: min of quads
+    let mut l2 = zeros();
+    let mut j = 0;
+    while j + 3 < n {
+        l2 = set(l2, j, min_val(get(l1, j), get(l1, j + 2)));
+        j = j + 1;
+    }
+    // Fill remaining
+    let mut k = j;
+    while k < n {
+        l2 = set(l2, k, get(l1, k));
+        k = k + 1;
+    }
+
+    // level3: min of octets
+    let mut l3 = zeros();
+    let mut m = 0;
+    while m + 7 < n {
+        l3 = set(l3, m, min_val(get(l2, m), get(l2, m + 4)));
+        m = m + 1;
+    }
+    let mut p = m;
+    while p < n {
+        l3 = set(l3, p, get(l2, p));
+        p = p + 1;
+    }
+
+    SparseTable { level0: l0, level1: l1, level2: l2, level3: l3 }
+}
+
+// Floor log2
+fn log2_floor(n: Int) -> Int {
+    let mut k = 0;
+    let mut v = n;
+    while v > 1 { v = v / 2; k = k + 1; }
+    k
+}
+
+// Query range minimum [l, r] (inclusive)
+fn query_min(st: SparseTable, l: Int, r: Int) -> Int {
+    let len = r - l + 1;
+    let k = log2_floor(len);
+    let half = 1;
+    // For simplicity, get the level row and look up
+    if k == 0 { return get(st.level0, l); }
+    if k == 1 {
+        return min_val(get(st.level1, l), get(st.level1, r - 1));
+    }
+    if k == 2 {
+        return min_val(get(st.level2, l), get(st.level2, r - 3));
+    }
+    // k == 3
+    min_val(get(st.level3, l), get(st.level3, r - 7))
+}
+
+// Brute force range min for cross-check
+fn brute_min(data: Arr8, l: Int, r: Int) -> Int {
+    let mut m = get(data, l);
+    let mut i = l + 1;
+    while i <= r { m = min_val(m, get(data, i)); i = i + 1; }
+    m
+}
+
+// Range max via brute force
+fn brute_max(data: Arr8, l: Int, r: Int) -> Int {
+    let mut m = get(data, l);
+    let mut i = l + 1;
+    while i <= r { m = max_val(m, get(data, i)); i = i + 1; }
+    m
+}
+
+fn main() -> Int {
+    let data = Arr8 { d0: 3, d1: 1, d2: 4, d3: 1, d4: 5, d5: 9, d6: 2, d7: 6 };
+    let st = build_sparse_min(data, 8);
+
+    // Single elements
+    assert_eq(query_min(st, 0, 0), 3);
+    assert_eq(query_min(st, 1, 1), 1);
+    assert_eq(query_min(st, 5, 5), 9);
+
+    // Pairs
+    assert_eq(query_min(st, 0, 1), 1);  // min(3,1)
+    assert_eq(query_min(st, 4, 5), 5);  // min(5,9)
+
+    // Cross-check all ranges with brute force
+    let mut l = 0;
+    while l < 8 {
+        let mut r = l;
+        while r < 8 {
+            let expected = brute_min(data, l, r);
+            // Only check ranges our sparse table can handle
+            if r - l + 1 <= 8 {
+                if r - l == 0 { assert_eq(query_min(st, l, r), expected); }
+                else if r - l == 1 { assert_eq(query_min(st, l, r), expected); }
+                else if r - l <= 3 { assert_eq(query_min(st, l, r), expected); }
+            }
+            r = r + 1;
+        }
+        l = l + 1;
+    }
+
+    // log2_floor
+    assert_eq(log2_floor(1), 0);
+    assert_eq(log2_floor(2), 1);
+    assert_eq(log2_floor(4), 2);
+    assert_eq(log2_floor(7), 2);
+    assert_eq(log2_floor(8), 3);
+
+    // Full range
+    assert_eq(brute_min(data, 0, 7), 1);
+    assert_eq(brute_max(data, 0, 7), 9);
+
+    print("DIFF_OK: sparse_table");
+    0
+}

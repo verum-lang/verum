@@ -1,0 +1,34 @@
+// @test: verify-fail
+// @level: L1
+// @tags: dependent-types, ensures, negative
+// @expected-error: E500
+
+/// Ensures clause violations -- the verifier should reject functions
+/// whose implementations do not satisfy their ensures postconditions.
+
+// ERROR: result can be negative when x is negative
+fn broken_absolute(x: Int) -> Int
+    where ensures result >= 0
+{
+    x  // Wrong: does not ensure non-negative
+}
+
+// ERROR: result not always > x (overflow aside, x + 0 == x)
+fn broken_increment(x: Int) -> Int
+    where ensures result > x
+{
+    x + 0  // Wrong: x + 0 == x, not > x
+}
+
+// ERROR: result may exceed hi
+fn broken_clamp(x: Int, lo: Int, hi: Int) -> Int
+    where ensures result >= lo, ensures result <= hi
+{
+    x  // Wrong: does not actually clamp
+}
+
+fn main() {
+    let a = broken_absolute(-5);
+    let b = broken_increment(10);
+    let c = broken_clamp(200, 0, 100);
+}

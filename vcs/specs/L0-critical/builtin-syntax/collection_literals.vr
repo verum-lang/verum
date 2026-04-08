@@ -1,0 +1,38 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @tags: builtin-syntax, collection-literals, arrays
+// @timeout: 5000
+//
+// Tests native collection literal syntax (replaces [] and similar macros).
+// Spec: grammar/verum.ebnf Section 2.20.7 - Collection Literals
+
+fn main() -> Int {
+    // Array literal (NOT [1, 2, 3])
+    let arr: [Int; 3] = [1, 2, 3];
+    assert_eq(arr[0], 1);
+    assert_eq(arr[1], 2);
+    assert_eq(arr[2], 3);
+
+    // Repeat literal (NOT [0; 100])
+    let zeros: [Int; 5] = [0; 5];
+    assert_eq(zeros[0], 0);
+    assert_eq(zeros[4], 0);
+
+    // Empty array
+    let empty: [Int; 0] = [];
+
+    // Nested arrays
+    let matrix: [[Int; 2]; 2] = [[1, 2], [3, 4]];
+    assert_eq(matrix[0][0], 1);
+    assert_eq(matrix[1][1], 4);
+
+    // Array with expressions
+    let x: Int = 10;
+    let computed: [Int; 3] = [x, x + 1, x + 2];
+    assert_eq(computed[0], 10);
+    assert_eq(computed[1], 11);
+    assert_eq(computed[2], 12);
+
+    0
+}

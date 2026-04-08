@@ -1,0 +1,200 @@
+// =============================================================================
+// deque_retain_mut_test.vr - Tests for Deque.retain_mut()
+// =============================================================================
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: collections, deque, retain-mut
+// @description: Tests for Deque.retain_mut() - retains elements where predicate on mutable ref returns true
+// =============================================================================
+
+mount core.collections.deque.{Deque};
+
+// =============================================================================
+// PART 1: Basic retain_mut operations
+// =============================================================================
+
+@test
+fn test_retain_mut_keep_even() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.push_back(6);
+
+    d.retain_mut(|x| *x % 2 == 0);
+
+    assert_eq(d.len(), 3);
+    assert_eq(*d.front().unwrap(), 2);
+    assert_eq(*d.back().unwrap(), 6);
+    assert_eq(d[1], 4);
+}
+
+@test
+fn test_retain_mut_modify_elements() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+
+    // Double values that are even, keep only those
+    d.retain_mut(|x| {
+        if *x % 2 == 0 {
+            *x = *x * 2;
+            true
+        } else {
+            false
+        }
+    });
+
+    assert_eq(d.len(), 2);
+    assert_eq(d[0], 4);   // 2 * 2
+    assert_eq(d[1], 8);   // 4 * 2
+}
+
+@test
+fn test_retain_mut_keep_all() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+
+    d.retain_mut(|_x| true);
+
+    assert_eq(d.len(), 3);
+    assert_eq(d[0], 10);
+    assert_eq(d[1], 20);
+    assert_eq(d[2], 30);
+}
+
+@test
+fn test_retain_mut_remove_all() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+
+    d.retain_mut(|_x| false);
+
+    assert_eq(d.len(), 0);
+    assert(d.is_empty());
+}
+
+@test
+fn test_retain_mut_empty_deque() {
+    let mut d: Deque<Int> = Deque.new();
+
+    d.retain_mut(|x| *x > 0);
+
+    assert_eq(d.len(), 0);
+    assert(d.is_empty());
+}
+
+@test
+fn test_retain_mut_single_element_kept() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+
+    d.retain_mut(|x| *x == 42);
+
+    assert_eq(d.len(), 1);
+    assert_eq(d[0], 42);
+}
+
+// =============================================================================
+// PART 2: Order and complex predicates
+// =============================================================================
+
+@test
+fn test_retain_mut_preserves_order() {
+    let mut d: Deque<Int> = Deque.new();
+    // Mix front and back pushes to wrap the ring buffer
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+    d.push_front(2);
+    d.push_front(1);
+
+    // Keep odd numbers only
+    d.retain_mut(|x| *x % 2 != 0);
+
+    assert_eq(d.len(), 3);
+    assert_eq(d[0], 1);
+    assert_eq(d[1], 3);
+    assert_eq(d[2], 5);
+}
+
+@test
+fn test_retain_mut_modify_and_filter() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.push_back(4);
+    d.push_back(5);
+
+    // Add 10 to each, keep only those > 12
+    d.retain_mut(|x| {
+        *x = *x + 10;
+        *x > 12
+    });
+
+    assert_eq(d.len(), 3);
+    assert_eq(d[0], 13);  // 3 + 10
+    assert_eq(d[1], 14);  // 4 + 10
+    assert_eq(d[2], 15);  // 5 + 10
+}
+
+@test
+fn test_retain_mut_complex_predicate() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(25);
+    d.push_back(30);
+    d.push_back(15);
+    d.push_back(40);
+    d.push_back(5);
+
+    // Keep elements divisible by 5 AND greater than 10
+    d.retain_mut(|x| *x % 5 == 0 && *x > 10);
+
+    assert_eq(d.len(), 4);
+    assert_eq(d[0], 25);
+    assert_eq(d[1], 30);
+    assert_eq(d[2], 15);
+    assert_eq(d[3], 40);
+}
+
+@test
+fn test_retain_mut_vs_retain_equivalence() {
+    // When retain_mut doesn't modify, it should behave identically to retain
+    let mut d1: Deque<Int> = Deque.new();
+    let mut d2: Deque<Int> = Deque.new();
+
+    d1.push_back(1);
+    d1.push_back(2);
+    d1.push_back(3);
+    d1.push_back(4);
+    d1.push_back(5);
+
+    d2.push_back(1);
+    d2.push_back(2);
+    d2.push_back(3);
+    d2.push_back(4);
+    d2.push_back(5);
+
+    // retain_mut without mutation
+    d1.retain_mut(|x| *x % 2 == 0);
+    // retain
+    d2.retain(|x| *x % 2 == 0);
+
+    assert_eq(d1.len(), d2.len());
+    let mut i = 0;
+    while i < d1.len() {
+        assert_eq(d1[i], d2[i]);
+        i = i + 1;
+    }
+}

@@ -1,0 +1,130 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: aot, context, threads, concurrency
+// @expected-exit: 0
+
+// Test: Thread coordination with mutex-protected shared computation.
+// Exercises mutex, threads, and timer together in a real scenario.
+
+fn __mutex_new_raw() -> Int {
+    0
+}
+
+fn __mutex_lock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn __mutex_unlock_raw(mtx: Int) -> Int {
+    0
+}
+
+fn __time_monotonic_nanos_raw() -> Int {
+    0
+}
+
+fn compute_hash(seed: Int) -> Int {
+    // Simple hash: multiply, xor, shift
+    let mut h = seed;
+    h = h * 2654435761;
+    // Simulate xor with addition/subtraction pattern
+    let shifted = h / 16;
+    h = h + shifted;
+    h = h * 31;
+    // Return positive result
+    if (h < 0) {
+        0 - h
+    } else {
+        h
+    }
+}
+
+fn worker_hashes(start: Int, count: Int) -> Int {
+    // Compute sum of hashes for a range of seeds
+    let mut acc = 0;
+    let mut i = start;
+    while (i < start + count) {
+        acc = acc + compute_hash(i);
+        i = i + 1;
+    }
+    acc
+}
+
+fn main() -> Int {
+    // Test 1: Sequential hash computation for verification
+    let h1 = compute_hash(42);
+    let h2 = compute_hash(42);
+    if (h1 != h2) {
+        print(f"FAIL test1: hash not deterministic h1={h1} h2={h2}");
+        return 1;
+    }
+
+    // Test 2: Parallel hash computation with mutex timing
+    let mtx = __mutex_new_raw();
+    let t_start = __time_monotonic_nanos_raw();
+
+    // Spawn 4 workers each computing hashes over different ranges
+    let w1 = spawn worker_hashes(0, 250);
+    let w2 = spawn worker_hashes(250, 250);
+    let w3 = spawn worker_hashes(500, 250);
+    let w4 = spawn worker_hashes(750, 250);
+
+    let r1 = w1.await;
+    let r2 = w2.await;
+    let r3 = w3.await;
+    let r4 = w4.await;
+    let parallel_total = r1 + r2 + r3 + r4;
+
+    let t_end = __time_monotonic_nanos_raw();
+    let elapsed = t_end - t_start;
+
+    if (elapsed <= 0) {
+        print(f"FAIL test2a: elapsed={elapsed}");
+        return 1;
+    }
+
+    // Test 3: Sequential computation of same range for verification
+    let sequential_total = worker_hashes(0, 1000);
+    if (parallel_total != sequential_total) {
+        print(f"FAIL test3: parallel={parallel_total} sequential={sequential_total}");
+        return 1;
+    }
+
+    // Test 4: Mutex protects a critical section between operations
+    __mutex_lock_raw(mtx);
+    let protected_result = compute_hash(999);
+    __mutex_unlock_raw(mtx);
+    let unprotected_result = compute_hash(999);
+    if (protected_result != unprotected_result) {
+        print(f"FAIL test4: results differ");
+        return 1;
+    }
+
+    // Test 5: Channel communication with computed values
+    let ch = Channel.new(8);
+    ch.send(compute_hash(1));
+    ch.send(compute_hash(2));
+    ch.send(compute_hash(3));
+    let mut v1 = 0;
+    let mut v2 = 0;
+    let mut v3 = 0;
+    match ch.recv() { Some(v) => { v1 = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { v2 = v; } None => { return 1; } }
+    match ch.recv() { Some(v) => { v3 = v; } None => { return 1; } }
+    if (v1 != compute_hash(1)) {
+        print(f"FAIL test5a: v1={v1}");
+        return 1;
+    }
+    if (v2 != compute_hash(2)) {
+        print(f"FAIL test5b: v2={v2}");
+        return 1;
+    }
+    if (v3 != compute_hash(3)) {
+        print(f"FAIL test5c: v3={v3}");
+        return 1;
+    }
+    ch.close();
+
+    print("933_context_threads: PASS");
+    0
+}

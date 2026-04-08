@@ -1,0 +1,346 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: e2e, aot, rope, string-simulation, concat, substring
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Rope/string data structure simulation. Arr32 stores characters as integers.
+// Supports concatenation (append), substring, character count, find character,
+// reverse, and equality comparison.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+// Arr32: 32 slots
+type Arr32 is { b0: Arr8, b1: Arr8, b2: Arr8, b3: Arr8 };
+
+fn a32_zero() -> Arr32 {
+    Arr32 { b0: a8_zero(), b1: a8_zero(), b2: a8_zero(), b3: a8_zero() }
+}
+
+fn a32_get(a: Arr32, i: Int) -> Int {
+    if i < 8 { a8_get(a.b0, i) }
+    else if i < 16 { a8_get(a.b1, i - 8) }
+    else if i < 24 { a8_get(a.b2, i - 16) }
+    else { a8_get(a.b3, i - 24) }
+}
+
+fn a32_set(a: Arr32, i: Int, v: Int) -> Arr32 {
+    if i < 8 {
+        Arr32 { b0: a8_set(a.b0, i, v), b1: a.b1, b2: a.b2, b3: a.b3 }
+    } else if i < 16 {
+        Arr32 { b0: a.b0, b1: a8_set(a.b1, i - 8, v), b2: a.b2, b3: a.b3 }
+    } else if i < 24 {
+        Arr32 { b0: a.b0, b1: a.b1, b2: a8_set(a.b2, i - 16, v), b3: a.b3 }
+    } else {
+        Arr32 { b0: a.b0, b1: a.b1, b2: a.b2, b3: a8_set(a.b3, i - 24, v) }
+    }
+}
+
+// RopeStr: characters stored in Arr32, with length
+type RopeStr is { data: Arr32, len: Int };
+
+fn rs_new() -> RopeStr {
+    RopeStr { data: a32_zero(), len: 0 }
+}
+
+fn rs_from(arr: Arr32, n: Int) -> RopeStr {
+    RopeStr { data: arr, len: n }
+}
+
+fn rs_get(s: RopeStr, i: Int) -> Int {
+    a32_get(s.data, i)
+}
+
+fn rs_set(s: RopeStr, i: Int, v: Int) -> RopeStr {
+    RopeStr { data: a32_set(s.data, i, v), len: s.len }
+}
+
+// Append character
+fn rs_push(s: RopeStr, ch: Int) -> RopeStr {
+    if s.len >= 32 { return s; }
+    RopeStr { data: a32_set(s.data, s.len, ch), len: s.len + 1 }
+}
+
+// Concatenate two RopeStrs
+fn rs_concat(a: RopeStr, bstr: RopeStr) -> RopeStr {
+    let mut result = a;
+    let mut i = 0;
+    while i < bstr.len {
+        if result.len < 32 {
+            result = rs_push(result, rs_get(bstr, i));
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Substring [start, start+slen)
+fn rs_substr(s: RopeStr, start: Int, slen: Int) -> RopeStr {
+    let mut result = rs_new();
+    let mut i = 0;
+    while i < slen {
+        if start + i < s.len {
+            result = rs_push(result, rs_get(s, start + i));
+        }
+        i = i + 1;
+    }
+    result
+}
+
+// Count occurrences of character ch
+fn rs_count_char(s: RopeStr, ch: Int) -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < s.len {
+        if rs_get(s, i) == ch { count = count + 1; }
+        i = i + 1;
+    }
+    count
+}
+
+// Find first occurrence of ch, return index or -1
+fn rs_find(s: RopeStr, ch: Int) -> Int {
+    let mut i = 0;
+    while i < s.len {
+        if rs_get(s, i) == ch { return i; }
+        i = i + 1;
+    }
+    0 - 1
+}
+
+// Reverse
+fn rs_reverse(s: RopeStr) -> RopeStr {
+    let mut result = rs_new();
+    let mut i = s.len - 1;
+    let mut done = 0;
+    while done == 0 {
+        result = rs_push(result, rs_get(s, i));
+        if i == 0 { done = 1; } else { i = i - 1; }
+    }
+    result
+}
+
+// Equality check
+fn rs_equal(a: RopeStr, bstr: RopeStr) -> Int {
+    if a.len != bstr.len { return 0; }
+    let mut i = 0;
+    while i < a.len {
+        if rs_get(a, i) != rs_get(bstr, i) { return 0; }
+        i = i + 1;
+    }
+    1
+}
+
+// Replace first occurrence of old_ch with new_ch
+fn rs_replace_first(s: RopeStr, old_ch: Int, new_ch: Int) -> RopeStr {
+    let mut i = 0;
+    while i < s.len {
+        if rs_get(s, i) == old_ch {
+            return rs_set(s, i, new_ch);
+        }
+        i = i + 1;
+    }
+    s
+}
+
+// ========== Tests ==========
+
+fn test_empty() -> Int {
+    let s = rs_new();
+    assert_eq(s.len, 0);
+    assert_eq(rs_count_char(s, 65), 0);
+    assert_eq(rs_find(s, 65), 0 - 1);
+    0
+}
+
+fn test_push_and_get() -> Int {
+    let mut s = rs_new();
+    // Push ASCII: H=72, e=101, l=108, l=108, o=111
+    s = rs_push(s, 72);
+    s = rs_push(s, 101);
+    s = rs_push(s, 108);
+    s = rs_push(s, 108);
+    s = rs_push(s, 111);
+    assert_eq(s.len, 5);
+    assert_eq(rs_get(s, 0), 72);
+    assert_eq(rs_get(s, 4), 111);
+    0
+}
+
+fn test_concat() -> Int {
+    let mut a = rs_new();
+    a = rs_push(a, 1);
+    a = rs_push(a, 2);
+    a = rs_push(a, 3);
+    let mut bstr = rs_new();
+    bstr = rs_push(bstr, 4);
+    bstr = rs_push(bstr, 5);
+    let c = rs_concat(a, bstr);
+    assert_eq(c.len, 5);
+    assert_eq(rs_get(c, 0), 1);
+    assert_eq(rs_get(c, 2), 3);
+    assert_eq(rs_get(c, 3), 4);
+    assert_eq(rs_get(c, 4), 5);
+    0
+}
+
+fn test_substr() -> Int {
+    let mut s = rs_new();
+    let mut i = 0;
+    while i < 10 {
+        s = rs_push(s, i + 65);  // A=65, B=66, ...
+        i = i + 1;
+    }
+    // Substring [2, 5) = C, D, E
+    let sub = rs_substr(s, 2, 3);
+    assert_eq(sub.len, 3);
+    assert_eq(rs_get(sub, 0), 67);  // C
+    assert_eq(rs_get(sub, 1), 68);  // D
+    assert_eq(rs_get(sub, 2), 69);  // E
+    0
+}
+
+fn test_count() -> Int {
+    let mut s = rs_new();
+    s = rs_push(s, 1);
+    s = rs_push(s, 2);
+    s = rs_push(s, 1);
+    s = rs_push(s, 3);
+    s = rs_push(s, 1);
+    assert_eq(rs_count_char(s, 1), 3);
+    assert_eq(rs_count_char(s, 2), 1);
+    assert_eq(rs_count_char(s, 4), 0);
+    0
+}
+
+fn test_find() -> Int {
+    let mut s = rs_new();
+    s = rs_push(s, 10);
+    s = rs_push(s, 20);
+    s = rs_push(s, 30);
+    s = rs_push(s, 20);
+    assert_eq(rs_find(s, 10), 0);
+    assert_eq(rs_find(s, 20), 1);
+    assert_eq(rs_find(s, 30), 2);
+    assert_eq(rs_find(s, 99), 0 - 1);
+    0
+}
+
+fn test_reverse() -> Int {
+    let mut s = rs_new();
+    s = rs_push(s, 1);
+    s = rs_push(s, 2);
+    s = rs_push(s, 3);
+    s = rs_push(s, 4);
+    let rev = rs_reverse(s);
+    assert_eq(rev.len, 4);
+    assert_eq(rs_get(rev, 0), 4);
+    assert_eq(rs_get(rev, 1), 3);
+    assert_eq(rs_get(rev, 2), 2);
+    assert_eq(rs_get(rev, 3), 1);
+    0
+}
+
+fn test_equal() -> Int {
+    let mut a = rs_new();
+    a = rs_push(a, 1);
+    a = rs_push(a, 2);
+    a = rs_push(a, 3);
+    let mut bstr = rs_new();
+    bstr = rs_push(bstr, 1);
+    bstr = rs_push(bstr, 2);
+    bstr = rs_push(bstr, 3);
+    assert_eq(rs_equal(a, bstr), 1);
+    let mut c = rs_new();
+    c = rs_push(c, 1);
+    c = rs_push(c, 2);
+    assert_eq(rs_equal(a, c), 0);
+    0
+}
+
+fn test_replace() -> Int {
+    let mut s = rs_new();
+    s = rs_push(s, 1);
+    s = rs_push(s, 2);
+    s = rs_push(s, 3);
+    s = rs_push(s, 2);
+    let replaced = rs_replace_first(s, 2, 99);
+    assert_eq(rs_get(replaced, 0), 1);
+    assert_eq(rs_get(replaced, 1), 99);
+    assert_eq(rs_get(replaced, 2), 3);
+    assert_eq(rs_get(replaced, 3), 2);  // Only first replaced
+    0
+}
+
+fn test_concat_then_reverse() -> Int {
+    let mut a = rs_new();
+    a = rs_push(a, 1);
+    a = rs_push(a, 2);
+    let mut bstr = rs_new();
+    bstr = rs_push(bstr, 3);
+    bstr = rs_push(bstr, 4);
+    let c = rs_concat(a, bstr);
+    let rev = rs_reverse(c);
+    assert_eq(rs_get(rev, 0), 4);
+    assert_eq(rs_get(rev, 1), 3);
+    assert_eq(rs_get(rev, 2), 2);
+    assert_eq(rs_get(rev, 3), 1);
+    0
+}
+
+fn test_palindrome() -> Int {
+    // Check if string is a palindrome: compare with its reverse
+    let mut s = rs_new();
+    s = rs_push(s, 1);
+    s = rs_push(s, 2);
+    s = rs_push(s, 3);
+    s = rs_push(s, 2);
+    s = rs_push(s, 1);
+    let rev = rs_reverse(s);
+    assert_eq(rs_equal(s, rev), 1);
+    // Non-palindrome
+    let mut s2 = rs_new();
+    s2 = rs_push(s2, 1);
+    s2 = rs_push(s2, 2);
+    s2 = rs_push(s2, 3);
+    let rev2 = rs_reverse(s2);
+    assert_eq(rs_equal(s2, rev2), 0);
+    0
+}
+
+fn main() -> Int {
+    test_empty();
+    test_push_and_get();
+    test_concat();
+    test_substr();
+    test_count();
+    test_find();
+    test_reverse();
+    test_equal();
+    test_replace();
+    test_concat_then_reverse();
+    test_palindrome();
+    print("[OK] 403_rope_sim_aot");
+    0
+}

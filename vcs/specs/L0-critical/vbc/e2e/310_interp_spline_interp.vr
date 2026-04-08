@@ -1,0 +1,289 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, numerical, interpolation, spline
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Linear interpolation, Lagrange interpolation,
+// nearest-neighbor, and divided differences. Uses plain integers where
+// possible, scaled arithmetic (1000) where needed. Simplified for speed.
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn abs_val(x: Int) -> Int {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn assert_near(actual: Int, expected: Int, tolerance: Int) {
+    let diff = abs_val(actual - expected);
+    assert(diff <= tolerance);
+}
+
+// =============================================================================
+// Linear interpolation between two points (scaled by 1000)
+// =============================================================================
+
+fn lerp(x0: Int, y0: Int, x1: Int, y1: Int, x: Int) -> Int {
+    if x1 == x0 { return y0; }
+    y0 + ((y1 - y0) * (x - x0)) / (x1 - x0)
+}
+
+fn test_lerp_basic() {
+    // (0,0) to (10000,10000): identity line
+    assert_eq(lerp(0, 0, 10000, 10000, 5000), 5000);
+    assert_eq(lerp(0, 0, 10000, 10000, 0), 0);
+    assert_eq(lerp(0, 0, 10000, 10000, 10000), 10000);
+    assert_eq(lerp(0, 0, 10000, 10000, 2500), 2500);
+
+    // (1000, 2000) to (3000, 6000): slope = 2
+    assert_eq(lerp(1000, 2000, 3000, 6000, 1000), 2000);
+    assert_eq(lerp(1000, 2000, 3000, 6000, 2000), 4000);
+    assert_eq(lerp(1000, 2000, 3000, 6000, 3000), 6000);
+}
+
+fn test_lerp_horizontal() {
+    assert_eq(lerp(0, 5000, 10000, 5000, 3000), 5000);
+    assert_eq(lerp(0, 5000, 10000, 5000, 7500), 5000);
+}
+
+fn test_lerp_negative() {
+    // (0, 10000) to (10000, 0): decreasing
+    assert_eq(lerp(0, 10000, 10000, 0, 5000), 5000);
+    assert_eq(lerp(0, 10000, 10000, 0, 2500), 7500);
+}
+
+fn test_lerp_extrapolation() {
+    // (0, 0) to (2000, 4000): slope 2, extrapolate to x=3000
+    assert_eq(lerp(0, 0, 2000, 4000, 3000), 6000);
+}
+
+// =============================================================================
+// Piecewise linear interpolation with 4 points
+// Hardcoded for 4 data points to avoid array loops
+// =============================================================================
+
+fn pw_lerp4(x0: Int, y0: Int, x1: Int, y1: Int,
+            x2: Int, y2: Int, x3: Int, y3: Int, x: Int) -> Int {
+    if x <= x0 { return y0; }
+    if x >= x3 { return y3; }
+    if x <= x1 {
+        return lerp(x0, y0, x1, y1, x);
+    }
+    if x <= x2 {
+        return lerp(x1, y1, x2, y2, x);
+    }
+    lerp(x2, y2, x3, y3, x)
+}
+
+fn test_piecewise_lerp() {
+    // Data: (0,0), (1000,1000), (2000,4000), (3000,9000)
+    // At data points
+    assert_eq(pw_lerp4(0, 0, 1000, 1000, 2000, 4000, 3000, 9000, 0), 0);
+    assert_eq(pw_lerp4(0, 0, 1000, 1000, 2000, 4000, 3000, 9000, 1000), 1000);
+    assert_eq(pw_lerp4(0, 0, 1000, 1000, 2000, 4000, 3000, 9000, 2000), 4000);
+    assert_eq(pw_lerp4(0, 0, 1000, 1000, 2000, 4000, 3000, 9000, 3000), 9000);
+
+    // Between points
+    assert_eq(pw_lerp4(0, 0, 1000, 1000, 2000, 4000, 3000, 9000, 500), 500);
+    assert_eq(pw_lerp4(0, 0, 1000, 1000, 2000, 4000, 3000, 9000, 1500), 2500);
+    assert_eq(pw_lerp4(0, 0, 1000, 1000, 2000, 4000, 3000, 9000, 2500), 6500);
+}
+
+fn test_piecewise_clamping() {
+    // Before first: clamp
+    assert_eq(pw_lerp4(1000, 100, 2000, 200, 3000, 300, 4000, 400, 0), 100);
+    // After last: clamp
+    assert_eq(pw_lerp4(1000, 100, 2000, 200, 3000, 300, 4000, 400, 5000), 400);
+}
+
+// =============================================================================
+// Lagrange interpolation (for small n, no arrays)
+// =============================================================================
+
+// 2-point Lagrange (linear through 2 points)
+fn lagrange2(x0: Int, y0: Int, x1: Int, y1: Int, x: Int) -> Int {
+    let l0 = (x - x1);
+    let d0 = (x0 - x1);
+    let l1 = (x - x0);
+    let d1 = (x1 - x0);
+    (y0 * l0) / d0 + (y1 * l1) / d1
+}
+
+// 3-point Lagrange (quadratic through 3 points)
+fn lagrange3(x0: Int, y0: Int, x1: Int, y1: Int,
+             x2: Int, y2: Int, x: Int) -> Int {
+    let l0_n = (x - x1) * (x - x2);
+    let l0_d = (x0 - x1) * (x0 - x2);
+    let l1_n = (x - x0) * (x - x2);
+    let l1_d = (x1 - x0) * (x1 - x2);
+    let l2_n = (x - x0) * (x - x1);
+    let l2_d = (x2 - x0) * (x2 - x1);
+    (y0 * l0_n) / l0_d + (y1 * l1_n) / l1_d + (y2 * l2_n) / l2_d
+}
+
+// 4-point Lagrange (cubic through 4 points)
+fn lagrange4(x0: Int, y0: Int, x1: Int, y1: Int,
+             x2: Int, y2: Int, x3: Int, y3: Int, x: Int) -> Int {
+    let l0_n = (x - x1) * (x - x2) / 1 * (x - x3);
+    let l0_d = (x0 - x1) * (x0 - x2) / 1 * (x0 - x3);
+    let l1_n = (x - x0) * (x - x2) / 1 * (x - x3);
+    let l1_d = (x1 - x0) * (x1 - x2) / 1 * (x1 - x3);
+    let l2_n = (x - x0) * (x - x1) / 1 * (x - x3);
+    let l2_d = (x2 - x0) * (x2 - x1) / 1 * (x2 - x3);
+    let l3_n = (x - x0) * (x - x1) / 1 * (x - x2);
+    let l3_d = (x3 - x0) * (x3 - x1) / 1 * (x3 - x2);
+    (y0 * l0_n) / l0_d + (y1 * l1_n) / l1_d
+    + (y2 * l2_n) / l2_d + (y3 * l3_n) / l3_d
+}
+
+fn test_lagrange_linear() {
+    // (0, 0), (10, 20) => y = 2x
+    assert_eq(lagrange2(0, 0, 10, 20, 0), 0);
+    assert_eq(lagrange2(0, 0, 10, 20, 5), 10);
+    assert_eq(lagrange2(0, 0, 10, 20, 10), 20);
+}
+
+fn test_lagrange_quadratic() {
+    // (0,0), (1,1), (2,4) from y = x^2
+    assert_eq(lagrange3(0, 0, 1, 1, 2, 4, 0), 0);
+    assert_eq(lagrange3(0, 0, 1, 1, 2, 4, 1), 1);
+    assert_eq(lagrange3(0, 0, 1, 1, 2, 4, 2), 4);
+    assert_eq(lagrange3(0, 0, 1, 1, 2, 4, 3), 9);
+    assert_eq(lagrange3(0, 0, 1, 1, 2, 4, 4), 16);
+    assert_eq(lagrange3(0, 0, 1, 1, 2, 4, -1), 1);
+}
+
+fn test_lagrange_cubic() {
+    // (0,0), (1,1), (2,8), (3,27) from y = x^3
+    assert_eq(lagrange4(0, 0, 1, 1, 2, 8, 3, 27, 0), 0);
+    assert_eq(lagrange4(0, 0, 1, 1, 2, 8, 3, 27, 1), 1);
+    assert_eq(lagrange4(0, 0, 1, 1, 2, 8, 3, 27, 2), 8);
+    assert_eq(lagrange4(0, 0, 1, 1, 2, 8, 3, 27, 3), 27);
+    assert_eq(lagrange4(0, 0, 1, 1, 2, 8, 3, 27, 4), 64);
+    assert_eq(lagrange4(0, 0, 1, 1, 2, 8, 3, 27, -1), -1);
+}
+
+fn test_lagrange_at_data() {
+    // Arbitrary data: exact at data points
+    assert_eq(lagrange4(1, 10, 3, 30, 5, 20, 7, 50, 1), 10);
+    assert_eq(lagrange4(1, 10, 3, 30, 5, 20, 7, 50, 3), 30);
+    assert_eq(lagrange4(1, 10, 3, 30, 5, 20, 7, 50, 5), 20);
+    assert_eq(lagrange4(1, 10, 3, 30, 5, 20, 7, 50, 7), 50);
+}
+
+// =============================================================================
+// Nearest-neighbor interpolation
+// =============================================================================
+
+fn nearest4(x0: Int, y0: Int, x1: Int, y1: Int,
+            x2: Int, y2: Int, x3: Int, y3: Int, x: Int) -> Int {
+    let d0 = abs_val(x - x0);
+    let d1 = abs_val(x - x1);
+    let d2 = abs_val(x - x2);
+    let d3 = abs_val(x - x3);
+    // Find minimum distance without mutable state
+    let min01_d = if d0 <= d1 { d0 } else { d1 };
+    let min01_y = if d0 <= d1 { y0 } else { y1 };
+    let min23_d = if d2 <= d3 { d2 } else { d3 };
+    let min23_y = if d2 <= d3 { y2 } else { y3 };
+    if min01_d <= min23_d { min01_y } else { min23_y }
+}
+
+fn test_nearest() {
+    // At data points
+    assert_eq(nearest4(0, 100, 10, 200, 20, 300, 30, 400, 0), 100);
+    assert_eq(nearest4(0, 100, 10, 200, 20, 300, 30, 400, 10), 200);
+    assert_eq(nearest4(0, 100, 10, 200, 20, 300, 30, 400, 20), 300);
+    assert_eq(nearest4(0, 100, 10, 200, 20, 300, 30, 400, 30), 400);
+
+    // Between points
+    assert_eq(nearest4(0, 100, 10, 200, 20, 300, 30, 400, 3), 100);  // d=3,7,17,27
+    assert_eq(nearest4(0, 100, 10, 200, 20, 300, 30, 400, 7), 200);  // d=7,3,13,23
+    assert_eq(nearest4(0, 100, 10, 200, 20, 300, 30, 400, 14), 200); // d=14,4,6,16
+    assert_eq(nearest4(0, 100, 10, 200, 20, 300, 30, 400, 26), 400); // d=26,16,6,4
+}
+
+// =============================================================================
+// Divided differences
+// =============================================================================
+
+fn divided_diff_01(x0: Int, y0: Int, x1: Int, y1: Int) -> Int {
+    (y1 - y0) / (x1 - x0)
+}
+
+fn divided_diff_012(x0: Int, y0: Int, x1: Int, y1: Int,
+                    x2: Int, y2: Int) -> Int {
+    let f01 = (y1 - y0) / (x1 - x0);
+    let f12 = (y2 - y1) / (x2 - x1);
+    (f12 - f01) / (x2 - x0)
+}
+
+fn test_divided_differences() {
+    // y = x^2: (1,1), (2,4), (3,9)
+    // f[1,2] = (4-1)/(2-1) = 3
+    assert_eq(divided_diff_01(1, 1, 2, 4), 3);
+
+    // f[1,2,3] = (f[2,3]-f[1,2])/(3-1) = (5-3)/2 = 1
+    assert_eq(divided_diff_012(1, 1, 2, 4, 3, 9), 1);
+
+    // For y = x^2, second divided difference = coefficient of x^2 = 1
+    // Newton form: p(x) = 1 + 3*(x-1) + 1*(x-1)*(x-2)
+    // p(4) = 1 + 3*3 + 1*3*2 = 1 + 9 + 6 = 16 = 4^2 correct!
+    let p4 = 1 + 3 * (4 - 1) + 1 * (4 - 1) * (4 - 2);
+    assert_eq(p4, 16);
+
+    // y = 2x + 1: (0,1), (2,5)
+    // f[0,2] = (5-1)/(2-0) = 2
+    assert_eq(divided_diff_01(0, 1, 2, 5), 2);
+}
+
+// =============================================================================
+// Method comparison on y = x^2
+// =============================================================================
+
+fn test_compare_methods() {
+    // Data from y = x^2: (0,0), (2,4), (4,16), (6,36)
+    // At x = 3: exact = 9
+
+    // Lagrange (cubic): should be exact for quadratic
+    let lg = lagrange4(0, 0, 2, 4, 4, 16, 6, 36, 3);
+    assert_eq(lg, 9);
+
+    // Piecewise linear: between (2,4) and (4,16)
+    let pw = lerp(2, 4, 4, 16, 3);
+    assert_eq(pw, 10); // Overestimates by 1
+
+    // Nearest neighbor: nearest to x=3 is x=2 (y=4) or x=4 (y=16)
+    let nn = nearest4(0, 0, 2, 4, 4, 16, 6, 36, 3);
+    assert_eq(nn, 4); // Underestimates
+
+    // Lagrange is most accurate
+    assert_eq(abs_val(lg - 9), 0);
+    assert(abs_val(pw - 9) > 0);
+    assert(abs_val(nn - 9) > 0);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_lerp_basic();
+    test_lerp_horizontal();
+    test_lerp_negative();
+    test_lerp_extrapolation();
+    test_piecewise_lerp();
+    test_piecewise_clamping();
+    test_lagrange_linear();
+    test_lagrange_quadratic();
+    test_lagrange_cubic();
+    test_lagrange_at_data();
+    test_nearest();
+    test_divided_differences();
+    test_compare_methods();
+    print("[OK] 310_interp_spline_interp");
+    0
+}

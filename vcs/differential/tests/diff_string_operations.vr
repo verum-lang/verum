@@ -1,0 +1,228 @@
+// @test: differential
+// @tier: 0, 3
+// @level: L1
+// @tags: differential, tier-oracle, text, string, unicode
+// @timeout: 10000
+// @description: Text operations must produce identical results across tiers
+
+/// Text operations differential test.
+/// Concat, split, contains, replace, f-string interpolation, unicode handling.
+
+fn main() -> Int {
+    test_basic_concat();
+    test_split_and_join();
+    test_contains_and_find();
+    test_replace();
+    test_fstring_interpolation();
+    test_case_operations();
+    test_trim_and_pad();
+    test_substring();
+    test_char_operations();
+    0
+}
+
+/// Basic concatenation
+fn test_basic_concat() {
+    print("=== Basic Concat ===");
+
+    let a = "Hello";
+    let b = " ";
+    let c = "World";
+
+    let result = a + b + c;
+    print(f"concat = {result}");
+    print(f"len = {result.len()}");
+
+    // Repeated concat
+    let mut s = "";
+    let mut i = 0;
+    while i < 5 {
+        s = s + f"{i}";
+        i = i + 1;
+    }
+    print(f"repeated = {s}");
+
+    // Empty concat
+    let empty = "" + "" + "";
+    print(f"empty concat len = {empty.len()}");
+    print(f"empty + text = {'prefix' + ''}");
+}
+
+/// Split and join
+fn test_split_and_join() {
+    print("\n=== Split and Join ===");
+
+    let csv = "apple,banana,cherry,date";
+    let parts = csv.split(",");
+    print(f"split count = {parts.len()}");
+
+    let mut i = 0;
+    while i < parts.len() {
+        print(f"  part[{i}] = {parts[i]}");
+        i = i + 1;
+    }
+
+    // Rejoin with different separator
+    let rejoined = parts.join(" | ");
+    print(f"rejoined = {rejoined}");
+
+    // Split with spaces
+    let words = "the quick brown fox".split(" ");
+    print(f"word count = {words.len()}");
+
+    // Split empty string
+    let empty_parts = "".split(",");
+    print(f"empty split count = {empty_parts.len()}");
+
+    // Split with no matches
+    let no_match = "hello".split(",");
+    print(f"no match split count = {no_match.len()}");
+    print(f"no match split[0] = {no_match[0]}");
+}
+
+/// Contains and find operations
+fn test_contains_and_find() {
+    print("\n=== Contains and Find ===");
+
+    let text = "Hello, World! Hello, Verum!";
+
+    print(f"contains 'World' = {text.contains('World')}");
+    print(f"contains 'world' = {text.contains('world')}");
+    print(f"contains 'Hello' = {text.contains('Hello')}");
+    print(f"contains '' = {text.contains('')}");
+    print(f"contains 'xyz' = {text.contains('xyz')}");
+
+    // Starts/ends with
+    print(f"starts_with 'Hello' = {text.starts_with('Hello')}");
+    print(f"starts_with 'World' = {text.starts_with('World')}");
+    print(f"ends_with 'Verum!' = {text.ends_with('Verum!')}");
+    print(f"ends_with 'World' = {text.ends_with('World')}");
+}
+
+/// Replace operations
+fn test_replace() {
+    print("\n=== Replace ===");
+
+    let text = "aabbccaabbcc";
+
+    // Replace all
+    let replaced = text.replace("aa", "XX");
+    print(f"replace aa->XX = {replaced}");
+
+    // Replace with empty
+    let removed = text.replace("bb", "");
+    print(f"remove bb = {removed}");
+
+    // Replace with longer
+    let longer = text.replace("cc", "CCCC");
+    print(f"replace cc->CCCC = {longer}");
+
+    // No match
+    let same = text.replace("zz", "YY");
+    print(f"no match replace = {same}");
+
+    // Chain replacements
+    let chain = "hello world".replace("hello", "hi").replace("world", "earth");
+    print(f"chain replace = {chain}");
+}
+
+/// F-string interpolation
+fn test_fstring_interpolation() {
+    print("\n=== F-String Interpolation ===");
+
+    let name = "Verum";
+    let version = 1;
+    let pi = 3;
+
+    print(f"name = {name}");
+    print(f"version = {version}");
+    print(f"pi approx = {pi}");
+    print(f"expr = {2 + 3}");
+    print(f"nested = {f'inner {name}'}");
+
+    // Multiple interpolations
+    let x = 10;
+    let y = 20;
+    print(f"{x} + {y} = {x + y}");
+    print(f"{x} * {y} = {x * y}");
+
+    // Empty and edge cases
+    print(f"empty interp = {''}");
+    print(f"just text no interp");
+}
+
+/// Case conversion
+fn test_case_operations() {
+    print("\n=== Case Operations ===");
+
+    let text = "Hello, World!";
+    print(f"upper = {text.to_uppercase()}");
+    print(f"lower = {text.to_lowercase()}");
+
+    let mixed = "hElLo WoRlD";
+    print(f"mixed upper = {mixed.to_uppercase()}");
+    print(f"mixed lower = {mixed.to_lowercase()}");
+
+    // Empty string
+    print(f"empty upper = {''.to_uppercase()}");
+    print(f"empty lower = {''.to_lowercase()}");
+}
+
+/// Trim and padding
+fn test_trim_and_pad() {
+    print("\n=== Trim and Pad ===");
+
+    let padded = "  hello  ";
+    print(f"trim = '{padded.trim()}'");
+    print(f"trim_start = '{padded.trim_start()}'");
+    print(f"trim_end = '{padded.trim_end()}'");
+
+    // Already trimmed
+    let clean = "hello";
+    print(f"clean trim = '{clean.trim()}'");
+
+    // All whitespace
+    let spaces = "   ";
+    print(f"spaces trim = '{spaces.trim()}'");
+    print(f"spaces trim len = {spaces.trim().len()}");
+}
+
+/// Substring and slicing
+fn test_substring() {
+    print("\n=== Substring ===");
+
+    let text = "Hello, World!";
+    print(f"len = {text.len()}");
+
+    // Chars
+    let chars = text.chars();
+    print(f"char count = {chars.len()}");
+    print(f"first char = {chars[0]}");
+    print(f"last char = {chars[chars.len() - 1]}");
+}
+
+/// Character-level operations
+fn test_char_operations() {
+    print("\n=== Char Operations ===");
+
+    let text = "abcdef";
+    let chars = text.chars();
+
+    // Check specific chars
+    print(f"chars[0] = {chars[0]}");
+    print(f"chars[2] = {chars[2]}");
+    print(f"chars[5] = {chars[5]}");
+
+    // Build string from chars
+    let mut built = "";
+    let mut i = 0;
+    while i < chars.len() {
+        built = built + chars[i];
+        i = i + 2;
+    }
+    print(f"every other char = {built}");
+
+    // Reverse
+    let reversed = text.chars().reverse().join("");
+    print(f"reversed = {reversed}");
+}

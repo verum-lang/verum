@@ -1,0 +1,156 @@
+// @test: verify-fail
+// @timeout: 10000
+// @tier: 0
+// @level: L2
+// @tags: smt, quantifiers, instantiation, error
+// @expected-error: E504 "SMT quantifier instantiation failed"
+
+/// SMT verification failures related to quantifier handling
+/// Tests error detection in quantifier instantiation
+
+/// Missing trigger pattern leads to incompleteness
+@verify(proof)
+fn missing_trigger(arr: &List<Int>) -> Bool {
+    contract#"
+        // ERROR: No trigger pattern, solver can't instantiate
+        ensures result == forall i: Int. 0 <= i < arr.len() implies arr[i] >= 0;
+    ";
+    // Without trigger, SMT solver may not find counterexample
+    true  // Claims all positive, but might not be
+}
+
+/// Wrong trigger pattern
+@verify(proof)
+fn wrong_trigger(arr: &List<Int>, target: Int) -> Bool {
+    contract#"
+        // ERROR: Trigger on unrelated expression
+        ensures result == forall i: Int. {: target + 1 :}  // Wrong trigger
+            0 <= i < arr.len() implies arr[i] != target;
+    ";
+    !arr.contains(&target)
+}
+
+/// Quantifier alternation depth causes incompleteness
+@verify(proof)
+fn deep_alternation(matrix: &List<List<Int>>) -> Bool {
+    contract#"
+        // ERROR: forall-exists-forall is hard for SMT
+        ensures result == forall i: Int. 0 <= i < matrix.len() implies
+            exists j: Int. 0 <= j < matrix[i].len() &&
+                forall k: Int. 0 <= k < matrix.len() implies matrix[i][j] <= matrix[k][j];
+    ";
+    true  // Claim that each row has a column minimum
+}
+
+/// Quantifier over unbounded domain
+@verify(proof)
+fn unbounded_quantifier(x: Int) -> Bool {
+    contract#"
+        // ERROR: Quantifier over all integers
+        ensures result == forall n: Int. n > 0 implies x + n > x;
+    ";
+    true
+}
+
+/// Skolemization produces wrong witness
+@verify(proof)
+fn bad_witness(arr: &List<Int>) -> Maybe<Int> {
+    contract#"
+        ensures match result {
+            Some(idx) => arr[idx] > 0,
+            None => !exists i: Int. 0 <= i < arr.len() && arr[i] > 0
+        };
+    ";
+    // ERROR: Returns wrong index as witness
+    if arr.len() > 0 {
+        Some(0)  // First element might not be positive
+    } else {
+        None
+    }
+}
+
+/// Induction principle not properly applied
+@verify(proof)
+fn sum_induction(n: Int{>= 0}) -> Int {
+    contract#"
+        requires n >= 0;
+        // ERROR: Induction hypothesis not properly established
+        ensures forall k: Int. 0 <= k <= n implies sum_up_to(k) == k * (k + 1) / 2;
+    ";
+    if n == 0 { 0 } else { n + sum_induction(n - 1) }
+}
+
+fn sum_up_to(k: Int) -> Int {
+    if k <= 0 { 0 } else { k + sum_up_to(k - 1) }
+}
+
+/// Multi-pattern trigger conflict
+@verify(proof)
+fn conflicting_triggers(a: &List<Int>, b: &List<Int>) -> Bool {
+    contract#"
+        // ERROR: Conflicting trigger patterns
+        ensures result == forall i: Int. {: a[i] :} {: b[i] :}
+            0 <= i < min(a.len(), b.len()) implies a[i] == b[i];
+    ";
+    // Multiple triggers can cause exponential blowup or incompleteness
+    a == b
+}
+
+/// Quantifier splitting done incorrectly
+@verify(proof)
+fn wrong_split(arr: &List<Int>, min: Int, max: Int) -> Bool {
+    contract#"
+        requires min <= max;
+        // ERROR: Split quantifiers don't compose correctly
+        ensures result == (
+            forall i: Int. 0 <= i < arr.len() implies arr[i] >= min
+        ) && (
+            forall j: Int. 0 <= j < arr.len() implies arr[j] <= max + 1  // Wrong: max+1
+        );
+    ";
+    for x in arr {
+        if *x < min || *x > max {
+            return false;
+        }
+    }
+    true
+}
+
+/// Nested quantifier with wrong scope
+@verify(proof)
+fn scope_error(matrix: &List<List<Int>>) -> Bool {
+    contract#"
+        // ERROR: j's bound refers to wrong i
+        ensures result == forall i: Int, j: Int.
+            0 <= i < matrix.len() && 0 <= j < matrix[0].len()  // Should be matrix[i].len()
+            implies matrix[i][j] >= 0;
+    ";
+    for row in matrix {
+        for elem in row {
+            if *elem < 0 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Exists without constructive witness
+@verify(proof)
+fn non_constructive_exists(n: Int{> 0}) -> Bool {
+    contract#"
+        requires n > 0;
+        // ERROR: Classical reasoning, not constructive
+        ensures exists p: Int. p > 1 && p <= n && is_prime(p);
+    ";
+    // Claims every n > 0 has a prime <= n, but 1 doesn't have one
+    true
+}
+
+fn is_prime(x: Int) -> Bool {
+    if x < 2 { return false; }
+    for i in 2..x {
+        if x % i == 0 { return false; }
+    }
+    true
+}

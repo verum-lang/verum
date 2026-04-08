@@ -1,0 +1,35 @@
+// @test: parse-pass
+// @tier: 0
+// @category: syntax
+
+fn test_precedence() {
+    // Multiplication before addition
+    let a = 1 + 2 * 3;  // = 7
+
+    // Parentheses override
+    let b = (1 + 2) * 3;  // = 9
+
+    // Comparison lower than arithmetic
+    let c = 1 + 2 < 3 + 4;
+
+    // Logical AND before OR
+    let d = true || false && false;
+
+    // Method calls highest
+    let e = a.method() + b.other();
+
+    // Field access before method
+    let f = obj.field.method();
+
+    // Index before operators
+    let g = arr[0] + arr[1];
+
+    // Complex expression
+    let h = (a + b) * c.method() - arr[idx] / 2;
+
+    // Question mark after method chain
+    let i = obj.try_method()?.field;
+
+    // Await in chain
+    let j = obj.async_method().await.field;
+}

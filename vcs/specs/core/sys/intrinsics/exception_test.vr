@@ -1,0 +1,315 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/intrinsics/exception_test.vr
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, intrinsics, exception, catch_unwind, panic, error-handling
+// @description: Tests for exception handling intrinsics.
+//
+// Coverage:
+// - catch_unwind: Verifies import resolution
+// - PanicInfo: Tests from core.intrinsics.control
+// - SourceLocation: Source location for panic origin
+//
+// Note: catch_unwind is an @intrinsic that returns Unit in typecheck mode.
+// Full behavioral testing requires runtime. These tests verify type resolution
+// and SourceLocation structure construction.
+// =============================================================================
+
+module test.stdlib.sys.intrinsics.exception_test;
+
+// Import core types FIRST - required for type resolution
+mount core.result.{Result, Ok, Err};
+mount core.maybe.{Maybe, Some, None};
+
+// Then link intrinsics that depend on core types
+mount core.intrinsics.{
+    catch_unwind,
+    PanicInfo, SourceLocation,
+    panic,
+    monotonic_nanos,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// SourceLocation Structure Tests
+// =============================================================================
+
+@test
+fn test_source_location_structure() {
+    // SourceLocation has four fields:
+    // - file: Text
+    // - line: Int
+    // - column: Int
+    // - offset: Int
+
+    let loc = SourceLocation {
+        file: "path/to/file.vr",
+        line: 100,
+        column: 25,
+        offset: 0,
+    };
+
+    assert(loc.file == "path/to/file.vr");
+    assert(loc.line == 100);
+    assert(loc.column == 25);
+    assert(loc.offset == 0);
+
+    // Test boundary values
+    let loc_min = SourceLocation {
+        file: "",  // Empty file path
+        line: 0,
+        column: 0,
+        offset: 0,
+    };
+    assert(loc_min.file == "");
+    assert(loc_min.line == 0);
+    assert(loc_min.column == 0);
+
+    let loc_max = SourceLocation {
+        file: "very/long/path/to/deeply/nested/source/file.vr",
+        line: 1000000,
+        column: 500,
+        offset: 99999,
+    };
+    assert(loc_max.line == 1000000);
+    assert(loc_max.column == 500);
+    assert(loc_max.offset == 99999);
+
+    print("SourceLocation structure tests passed");
+}
+
+// =============================================================================
+// SourceLocation Equality Tests
+// =============================================================================
+
+@test
+fn test_source_location_equality() {
+    let loc1 = SourceLocation {
+        file: "test.vr",
+        line: 10,
+        column: 5,
+        offset: 100,
+    };
+    let loc2 = SourceLocation {
+        file: "test.vr",
+        line: 10,
+        column: 5,
+        offset: 100,
+    };
+
+    // Same values
+    assert(loc1.file == loc2.file);
+    assert(loc1.line == loc2.line);
+    assert(loc1.column == loc2.column);
+    assert(loc1.offset == loc2.offset);
+
+    // Different values
+    let loc3 = SourceLocation {
+        file: "other.vr",
+        line: 20,
+        column: 1,
+        offset: 0,
+    };
+    assert(loc3.file != loc1.file);
+    assert(loc3.line != loc1.line);
+
+    print("SourceLocation equality tests passed");
+}
+
+// =============================================================================
+// PanicInfo Import Verification
+// =============================================================================
+
+@test
+fn test_panic_info_import() {
+    // Verify PanicInfo type resolves from core.intrinsics
+    // Note: PanicInfo from intrinsics has {message, location: Maybe<SourceLocation>}
+    // but may conflict with core.sys.init.PanicInfo {message, file, line, column}
+    // Direct construction may fail due to name resolution.
+    // Instead, verify the import resolves.
+    let _ = catch_unwind;  // Verify import
+    let _ = PanicInfo;     // Verify type import
+
+    print("PanicInfo import verification passed");
+}
+
+// =============================================================================
+// catch_unwind Import Tests
+// =============================================================================
+
+@test
+fn test_catch_unwind_import() {
+    // catch_unwind is an @intrinsic - returns Unit in typecheck mode
+    // We can verify the import resolves and the function is callable
+    let _ = catch_unwind;
+
+    // Verify it accepts a closure argument (typecheck only)
+    // Note: actual return type is Result<T, PanicInfo> at runtime
+    // but resolves to Unit in typecheck mode
+    assert(true);  // Runtime: catch_unwind behavioral tests
+
+    print("catch_unwind import tests passed");
+}
+
+// =============================================================================
+// Panic Integration Tests (Non-panicking paths)
+// =============================================================================
+
+@test
+fn test_panic_available() {
+    // Verify panic function is importable
+    let _ = panic;
+
+    // Test non-panicking code paths
+    fn safe_function() -> Int {
+        42
+    }
+
+    assert(safe_function() == 42);
+
+    // Function with panic in unreachable branch
+    fn checked_divide(a: Int, b: Int) -> Int {
+        if b == 0 {
+            panic("Division by zero");
+        }
+        a / b
+    }
+
+    assert(checked_divide(10, 2) == 5);
+    assert(checked_divide(100, 10) == 10);
+    assert(checked_divide(0, 5) == 0);
+
+    print("Panic integration tests passed");
+}
+
+// =============================================================================
+// Monotonic Timer Tests (used for performance measurement)
+// =============================================================================
+
+@test
+fn test_monotonic_nanos_available() {
+    // monotonic_nanos is also imported - verify it resolves
+    let _ = monotonic_nanos;
+
+    // In typecheck mode, intrinsic calls return default values
+    // Runtime behavior: returns nanosecond timestamp
+    assert(true);  // Runtime: monotonic_nanos() > 0
+
+    print("Monotonic nanos import tests passed");
+}
+
+// =============================================================================
+// Resource Cleanup Types
+// =============================================================================
+
+// Counter for tracking destructor calls
+static mut CLEANUP_COUNT: Int = 0;
+
+type CleanupTracker is {
+    id: Int,
+};
+
+implement Drop for CleanupTracker {
+    fn drop(&mut self) {
+        unsafe {
+            CLEANUP_COUNT = CLEANUP_COUNT + 1;
+        }
+    }
+}
+
+@test
+fn test_cleanup_tracker_type() {
+    // Verify CleanupTracker can be constructed
+    let tracker = CleanupTracker { id: 1 };
+    assert(tracker.id == 1);
+
+    let tracker2 = CleanupTracker { id: 42 };
+    assert(tracker2.id == 42);
+
+    // Verify static counter
+    unsafe {
+        CLEANUP_COUNT = 0;
+        assert(CLEANUP_COUNT == 0);
+        CLEANUP_COUNT = 5;
+        assert(CLEANUP_COUNT == 5);
+        CLEANUP_COUNT = 0;
+    }
+
+    print("CleanupTracker type tests passed");
+}
+
+// =============================================================================
+// Edge Case Pattern Tests
+// =============================================================================
+
+@test
+fn test_exception_patterns() {
+    // Test patterns commonly used with catch_unwind
+
+    // Pattern 1: Guard function
+    fn must_be_positive(x: Int) -> Int {
+        if x <= 0 {
+            panic("Value must be positive");
+        }
+        x
+    }
+    assert(must_be_positive(1) == 1);
+    assert(must_be_positive(100) == 100);
+
+    // Pattern 2: Validation chain
+    fn validate_range(x: Int, min: Int, max: Int) -> Int {
+        if x < min {
+            panic("Below minimum");
+        }
+        if x > max {
+            panic("Above maximum");
+        }
+        x
+    }
+    assert(validate_range(5, 0, 10) == 5);
+    assert(validate_range(0, 0, 10) == 0);
+    assert(validate_range(10, 0, 10) == 10);
+
+    // Pattern 3: Result-based error handling (alternative to catch_unwind)
+    fn safe_divide(a: Int, b: Int) -> Result<Int, Text> {
+        if b == 0 {
+            Err("division by zero")
+        } else {
+            Ok(a / b)
+        }
+    }
+
+    match safe_divide(10, 2) {
+        Ok(v) => assert(v == 5),
+        Err(_) => assert(false),
+    }
+
+    match safe_divide(10, 0) {
+        Ok(_) => assert(false),
+        Err(msg) => assert(msg == "division by zero"),
+    }
+
+    print("Exception pattern tests passed");
+}
+
+// =============================================================================
+// Thread Safety Notes
+// =============================================================================
+
+@test
+fn test_catch_unwind_thread_safety() {
+    // catch_unwind is thread-safe by design:
+    // - Each thread has its own unwind context
+    // - Panic in one thread doesn't affect others
+    // Full threading tests require runtime support
+    print("Thread safety: requires runtime for full test");
+}

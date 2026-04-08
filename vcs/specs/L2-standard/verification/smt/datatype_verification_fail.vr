@@ -1,0 +1,174 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L2
+// @tags: smt, datatypes, error
+// @timeout: 5000
+// @expected-error: Variant
+
+/// SMT verification failures for algebraic datatypes
+/// Tests error detection in ADT reasoning
+
+/// Option type - wrong mapping
+@verify(proof)
+fn map_option_wrong<A, B>(opt: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+    contract#"
+        ensures match (opt, result) {
+            (Some(a), Some(b)) => b == f(a),
+            (None, None) => true,
+            _ => false
+        };
+    ";
+    // ERROR: Doesn't apply function
+    match opt {
+        Some(a) => Some(a as B),  // Wrong: casts instead of applying f
+        None => None,
+    }
+}
+
+/// Result type - error case wrong
+@verify(proof)
+fn map_result_wrong<T, E, U>(res: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    contract#"
+        ensures match (res, result) {
+            (Ok(t), Ok(u)) => u == f(t),
+            (Err(e1), Err(e2)) => e1 == e2,
+            _ => false
+        };
+    ";
+    // ERROR: Maps error too
+    match res {
+        Ok(t) => Ok(f(t)),
+        Err(e) => Ok(f(e as T)),  // Wrong: should be Err(e)
+    }
+}
+
+/// List length computed incorrectly
+type ConsList<T> is Nil | Cons(T, Heap<ConsList<T>>);
+
+@verify(proof)
+fn list_length_wrong<T>(list: &ConsList<T>) -> Int {
+    contract#"
+        ensures result >= 0;
+        ensures match list {
+            Nil => result == 0,
+            Cons(_, tail) => result == 1 + list_length_wrong(tail)
+        };
+    ";
+    // ERROR: Counts Nil as 1
+    match list {
+        ConsList.Nil => 1,  // Should be 0
+        ConsList.Cons(_, tail) => 1 + list_length_wrong(tail),
+    }
+}
+
+/// Tree size - doesn't count leaves
+type Tree<T> is Leaf(T) | Node(Heap<Tree<T>>, Heap<Tree<T>>);
+
+@verify(proof)
+fn tree_size_wrong<T>(tree: &Tree<T>) -> Int {
+    contract#"
+        ensures result >= 1;
+        ensures match tree {
+            Leaf(_) => result == 1,
+            Node(left, right) => result == tree_size_wrong(left) + tree_size_wrong(right)
+        };
+    ";
+    // ERROR: Doesn't count leaves correctly
+    match tree {
+        Tree.Leaf(_) => 0,  // Should be 1
+        Tree.Node(left, right) => tree_size_wrong(left) + tree_size_wrong(right),
+    }
+}
+
+/// BST invariant not checked
+@verify(proof)
+fn is_bst_wrong(tree: &Tree<Int>) -> Bool {
+    contract#"
+        ensures result implies forall node in tree.nodes().
+            forall left_val in node.left.values(). left_val < node.value &&
+            forall right_val in node.right.values(). right_val > node.value;
+    ";
+    // ERROR: Only checks immediate children, not all descendants
+    match tree {
+        Tree.Leaf(_) => true,
+        Tree.Node(val, left, right) => {
+            match left {
+                Tree.Leaf(l) => *l < *val,
+                Tree.Node(lv, _, _) => *lv < *val,
+            } &&
+            match right {
+                Tree.Leaf(r) => *r > *val,
+                Tree.Node(rv, _, _) => *rv > *val,
+            }
+        }
+    }
+}
+
+/// Struct invariant violated
+type BoundedQueue<T> is {
+    data: List<T>,
+    capacity: Int,
+} { self.capacity > 0 && self.data.len() <= self.capacity };
+
+@verify(proof)
+fn queue_push_wrong<T>(queue: &mut BoundedQueue<T>, item: T) {
+    contract#"
+        requires queue.data.len() < queue.capacity;
+        ensures queue.data.len() == old(queue.data.len()) + 1;
+    ";
+    // ERROR: Doesn't respect capacity, could violate invariant
+    queue.data.push(item);
+    queue.data.push(item);  // Extra push violates invariant
+}
+
+/// Enum exhaustiveness not proven
+type TrafficLight is Red | Yellow | Green;
+
+@verify(proof)
+fn next_light(current: TrafficLight) -> TrafficLight {
+    contract#"
+        ensures match current {
+            Red => result == Green,
+            Yellow => result == Red,
+            Green => result == Yellow
+        };
+    ";
+    // ERROR: Wrong transition
+    match current {
+        TrafficLight.Red => TrafficLight.Yellow,  // Should be Green
+        TrafficLight.Yellow => TrafficLight.Red,
+        TrafficLight.Green => TrafficLight.Yellow,
+    }
+}
+
+/// Recursive datatype measure wrong
+@verify(proof)
+fn count_nodes<T>(tree: &Tree<T>) -> Int {
+    contract#"
+        ensures result > 0;
+        ensures match tree {
+            Leaf(_) => result == 1,
+            Node(left, right) => result == 1 + count_nodes(left) + count_nodes(right)
+        };
+        decreases tree;
+    ";
+    // ERROR: Node counts as 0, not 1
+    match tree {
+        Tree.Leaf(_) => 1,
+        Tree.Node(left, right) => count_nodes(left) + count_nodes(right),  // Missing +1
+    }
+}
+
+/// ADT equality wrong
+@verify(proof)
+fn option_equals<T: Eq>(a: Maybe<T>, b: Maybe<T>) -> Bool {
+    contract#"
+        ensures result == (a == b);
+    ";
+    // ERROR: Treats all Somes as equal
+    match (a, b) {
+        (None, None) => true,
+        (Some(_), Some(_)) => true,  // Should compare inner values
+        _ => false,
+    }
+}

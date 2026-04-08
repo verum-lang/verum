@@ -1,0 +1,231 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: aot, term, style, builder, color, modifier
+// @expected-exit: 0
+// @description: Terminal Style builder pattern with Modifier bitfield, Color variants, patch overlay
+
+// Modifier constants as bitfield
+fn mod_bold() -> Int { 1 }
+fn mod_italic() -> Int { 2 }
+fn mod_underline() -> Int { 4 }
+fn mod_reverse() -> Int { 8 }
+fn mod_strikethrough() -> Int { 16 }
+fn mod_dim() -> Int { 32 }
+
+type Modifier is { bits: Int };
+
+implement Modifier {
+    pub fn empty() -> Modifier { Modifier { bits: 0 } }
+    pub fn from_bits(b: Int) -> Modifier { Modifier { bits: b } }
+    pub fn union(&self, other: Modifier) -> Modifier { Modifier { bits: self.bits | other.bits } }
+    pub fn intersection(&self, other: Modifier) -> Modifier { Modifier { bits: self.bits & other.bits } }
+    pub fn contains(&self, flag: Int) -> Bool { (self.bits & flag) != 0 }
+    pub fn is_empty(&self) -> Bool { self.bits == 0 }
+}
+
+type Color is Reset | Red | Green | Blue | Yellow | Cyan | Rgb(Int, Int, Int) | Ansi256(Int);
+
+type Style is { fg: Maybe<Color>, bg: Maybe<Color>, mods: Modifier };
+
+implement Style {
+    pub fn new() -> Style {
+        Style { fg: None, bg: None, mods: Modifier.empty() }
+    }
+
+    pub fn set_fg(self, c: Color) -> Style {
+        Style { fg: Some(c), bg: self.bg, mods: self.mods }
+    }
+
+    pub fn set_bg(self, c: Color) -> Style {
+        Style { fg: self.fg, bg: Some(c), mods: self.mods }
+    }
+
+    pub fn bold(self) -> Style {
+        let m = self.mods.union(Modifier.from_bits(mod_bold()));
+        Style { fg: self.fg, bg: self.bg, mods: m }
+    }
+
+    pub fn italic(self) -> Style {
+        let m = self.mods.union(Modifier.from_bits(mod_italic()));
+        Style { fg: self.fg, bg: self.bg, mods: m }
+    }
+
+    pub fn underline(self) -> Style {
+        let m = self.mods.union(Modifier.from_bits(mod_underline()));
+        Style { fg: self.fg, bg: self.bg, mods: m }
+    }
+
+    pub fn dim(self) -> Style {
+        let m = self.mods.union(Modifier.from_bits(mod_dim()));
+        Style { fg: self.fg, bg: self.bg, mods: m }
+    }
+
+    pub fn patch(self, other: Style) -> Style {
+        // other overrides self for fg/bg if set, modifiers merge
+        let new_fg = match other.fg {
+            Some(c) => Some(c),
+            None => self.fg,
+        };
+        let new_bg = match other.bg {
+            Some(c) => Some(c),
+            None => self.bg,
+        };
+        let new_mods = self.mods.union(other.mods);
+        Style { fg: new_fg, bg: new_bg, mods: new_mods }
+    }
+}
+
+fn is_red(c: Maybe<Color>) -> Bool {
+    match c {
+        Some(col) => match col {
+            Red => true,
+            _ => false,
+        },
+        None => false,
+    }
+}
+
+fn is_blue(c: Maybe<Color>) -> Bool {
+    match c {
+        Some(col) => match col {
+            Blue => true,
+            _ => false,
+        },
+        None => false,
+    }
+}
+
+fn is_green(c: Maybe<Color>) -> Bool {
+    match c {
+        Some(col) => match col {
+            Green => true,
+            _ => false,
+        },
+        None => false,
+    }
+}
+
+fn test_modifier_ops() -> Int {
+    let m = Modifier.empty();
+    if !m.is_empty() {
+        print("FAIL empty modifier");
+        return 1;
+    }
+    let bold_italic = Modifier.from_bits(mod_bold()).union(Modifier.from_bits(mod_italic()));
+    if !bold_italic.contains(mod_bold()) {
+        print("FAIL contains bold");
+        return 1;
+    }
+    if !bold_italic.contains(mod_italic()) {
+        print("FAIL contains italic");
+        return 1;
+    }
+    if bold_italic.contains(mod_underline()) {
+        print("FAIL should not contain underline");
+        return 1;
+    }
+    // Intersection
+    let bold_only = Modifier.from_bits(mod_bold());
+    let inter = bold_italic.intersection(bold_only);
+    if !inter.contains(mod_bold()) {
+        print("FAIL intersection should have bold");
+        return 1;
+    }
+    if inter.contains(mod_italic()) {
+        print("FAIL intersection should not have italic");
+        return 1;
+    }
+    0
+}
+
+fn test_style_builder() -> Int {
+    let s = Style.new().set_fg(Red).bold().underline();
+    if !is_red(s.fg) {
+        print("FAIL style fg should be red");
+        return 1;
+    }
+    if !s.mods.contains(mod_bold()) {
+        print("FAIL style should be bold");
+        return 1;
+    }
+    if !s.mods.contains(mod_underline()) {
+        print("FAIL style should be underline");
+        return 1;
+    }
+    if s.mods.contains(mod_italic()) {
+        print("FAIL style should not be italic");
+        return 1;
+    }
+    0
+}
+
+fn test_style_patch() -> Int {
+    let base = Style.new().set_fg(Red).set_bg(Blue).bold();
+    let overlay = Style.new().set_fg(Green).italic();
+    let patched = base.patch(overlay);
+    // fg should be overridden to Green
+    if !is_green(patched.fg) {
+        print("FAIL patched fg should be green");
+        return 1;
+    }
+    // bg should stay Blue from base
+    if !is_blue(patched.bg) {
+        print("FAIL patched bg should be blue");
+        return 1;
+    }
+    // Modifiers should merge: bold + italic
+    if !patched.mods.contains(mod_bold()) {
+        print("FAIL patched should have bold");
+        return 1;
+    }
+    if !patched.mods.contains(mod_italic()) {
+        print("FAIL patched should have italic");
+        return 1;
+    }
+    0
+}
+
+fn test_rgb_color() -> Int {
+    let s = Style.new().set_fg(Rgb(128, 64, 255));
+    match s.fg {
+        Some(c) => match c {
+            Rgb(r, g, b) => {
+                if r != 128 {
+                    print(f"FAIL rgb r: {r}");
+                    return 1;
+                }
+                if g != 64 {
+                    print(f"FAIL rgb g: {g}");
+                    return 1;
+                }
+                if b != 255 {
+                    print(f"FAIL rgb b: {b}");
+                    return 1;
+                }
+            },
+            _ => {
+                print("FAIL expected Rgb");
+                return 1;
+            },
+        },
+        None => {
+            print("FAIL fg should be set");
+            return 1;
+        },
+    }
+    0
+}
+
+fn main() -> Int {
+    let r1 = test_modifier_ops();
+    if r1 != 0 { return r1; }
+    let r2 = test_style_builder();
+    if r2 != 0 { return r2; }
+    let r3 = test_style_patch();
+    if r3 != 0 { return r3; }
+    let r4 = test_rgb_color();
+    if r4 != 0 { return r4; }
+    print("PASS: term_style_builder");
+    0
+}

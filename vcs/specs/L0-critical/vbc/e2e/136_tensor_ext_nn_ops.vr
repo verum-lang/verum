@@ -1,0 +1,187 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, tensor, nn
+// @timeout: 50000
+// @expected-exit: 0
+// @description: Neural network ops simulation — ReLU, leaky ReLU, sigmoid approx, softmax ordering
+
+// ============================================================================
+// Arr8: Fixed-size array of 8 Ints with length
+// ============================================================================
+
+type Arr8 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    len: Int
+};
+
+fn a_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+
+fn a_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 },
+        len: a.len
+    }
+}
+
+fn a_from5(a: Int, b: Int, c: Int, d: Int, e: Int) -> Arr8 {
+    Arr8 { e0: a, e1: b, e2: c, e3: d, e4: e, e5: 0, e6: 0, e7: 0, len: 5 }
+}
+
+// ReLU: max(0, x)
+fn relu(a: Arr8) -> Arr8 {
+    let mut r = a;
+    let mut i = 0;
+    while i < a.len {
+        let v = a_get(a, i);
+        if v < 0 { r = a_set(r, i, 0); }
+        i = i + 1;
+    }
+    r
+}
+
+// Leaky ReLU: x if x >= 0, else x/10 (scaled integer)
+fn leaky_relu(a: Arr8) -> Arr8 {
+    let mut r = a;
+    let mut i = 0;
+    while i < a.len {
+        let v = a_get(a, i);
+        if v < 0 { r = a_set(r, i, v / 10); }
+        i = i + 1;
+    }
+    r
+}
+
+// Sigmoid approximation: maps x to [0, 1000] range
+// sig(x) ~ 500 + x*100 clamped to [0, 1000] for small |x|
+fn sigmoid_approx(x: Int) -> Int {
+    let raw = 500 + x * 100;
+    if raw < 0 { 0 }
+    else if raw > 1000 { 1000 }
+    else { raw }
+}
+
+fn apply_sigmoid(a: Arr8) -> Arr8 {
+    let mut r = a;
+    let mut i = 0;
+    while i < a.len {
+        r = a_set(r, i, sigmoid_approx(a_get(a, i)));
+        i = i + 1;
+    }
+    r
+}
+
+// Softmax ordering check: after softmax, relative order is preserved
+// We check that argmax is the same as argmax of input
+fn argmax(a: Arr8) -> Int {
+    let mut best_idx = 0;
+    let mut best_val = a_get(a, 0);
+    let mut i = 1;
+    while i < a.len {
+        let v = a_get(a, i);
+        if v > best_val {
+            best_val = v;
+            best_idx = i;
+        }
+        i = i + 1;
+    }
+    best_idx
+}
+
+// ============================================================================
+// Test 1: ReLU
+// ============================================================================
+
+@test
+fn test_relu() {
+    let data = a_from5(-3, -1, 0, 2, 5);
+    let result = relu(data);
+    assert_eq(a_get(result, 0), 0);
+    assert_eq(a_get(result, 1), 0);
+    assert_eq(a_get(result, 2), 0);
+    assert_eq(a_get(result, 3), 2);
+    assert_eq(a_get(result, 4), 5);
+    print("  test_relu: ok");
+}
+
+// ============================================================================
+// Test 2: Leaky ReLU
+// ============================================================================
+
+@test
+fn test_leaky_relu() {
+    let data = a_from5(-100, -50, 0, 30, 70);
+    let result = leaky_relu(data);
+    assert_eq(a_get(result, 0), -10);   // -100/10
+    assert_eq(a_get(result, 1), -5);    // -50/10
+    assert_eq(a_get(result, 2), 0);
+    assert_eq(a_get(result, 3), 30);
+    assert_eq(a_get(result, 4), 70);
+    print("  test_leaky_relu: ok");
+}
+
+// ============================================================================
+// Test 3: Sigmoid approximation bounds
+// ============================================================================
+
+@test
+fn test_sigmoid_bounds() {
+    // Very negative: should be 0
+    assert_eq(sigmoid_approx(-10), 0);
+    // Very positive: should be 1000
+    assert_eq(sigmoid_approx(10), 1000);
+    // Zero: should be 500 (midpoint)
+    assert_eq(sigmoid_approx(0), 500);
+    // Positive small: between 500 and 1000
+    let s1 = sigmoid_approx(2);
+    assert_eq(s1, 700);
+    // Negative small: between 0 and 500
+    let s2 = sigmoid_approx(-2);
+    assert_eq(s2, 300);
+    print("  test_sigmoid_bounds: ok");
+}
+
+// ============================================================================
+// Test 4: Softmax ordering preservation
+// ============================================================================
+
+@test
+fn test_softmax_ordering() {
+    let data = a_from5(1, 5, 3, 2, 4);
+    // Argmax of input is index 1 (value 5)
+    assert_eq(argmax(data), 1);
+
+    // After sigmoid, ordering should be preserved
+    let sig = apply_sigmoid(data);
+    assert_eq(argmax(sig), 1);
+
+    // After ReLU on all-positive, ordering preserved
+    let relu_data = relu(data);
+    assert_eq(argmax(relu_data), 1);
+    print("  test_softmax_ordering: ok");
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() -> Int {
+    test_relu();
+    test_leaky_relu();
+    test_sigmoid_bounds();
+    test_softmax_ordering();
+    print("[OK] 136_tensor_ext_nn_ops");
+    0
+}

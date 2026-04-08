@@ -1,0 +1,334 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, suffix-array, string, sorting
+// @timeout: 30000
+// @expected-exit: 0
+//
+// AOT test for suffix array construction using naive O(n^2 log n) approach.
+// A suffix array SA is a sorted array of all suffix start indices.
+// Also computes LCP (Longest Common Prefix) array between adjacent suffixes.
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn min_val(a: Int, bv: Int) -> Int { if a < bv { a } else { bv } }
+
+// Compare two suffixes starting at positions i and j in string s of length n.
+// Returns: -1 if suffix(i) < suffix(j), 0 if equal, 1 if suffix(i) > suffix(j)
+fn compare_suffixes(s: Arr8, n: Int, i: Int, j: Int) -> Int {
+    let mut ki = i;
+    let mut kj = j;
+    let mut done = 0;
+    let mut result = 0;
+    while done == 0 {
+        if ki >= n {
+            if kj >= n {
+                done = 1;
+                result = 0;
+            } else {
+                done = 1;
+                result = -1; // suffix(i) is shorter
+            }
+        } else if kj >= n {
+            done = 1;
+            result = 1; // suffix(j) is shorter
+        } else {
+            let ci = a8_get(s, ki);
+            let cj = a8_get(s, kj);
+            if ci < cj {
+                done = 1;
+                result = -1;
+            } else if ci > cj {
+                done = 1;
+                result = 1;
+            } else {
+                ki = ki + 1;
+                kj = kj + 1;
+            }
+        }
+    }
+    result
+}
+
+// Build suffix array using insertion sort (simple O(n^2 log n))
+fn build_suffix_array(s: Arr8, n: Int) -> Arr8 {
+    // Initialize SA = [0, 1, 2, ..., n-1]
+    let mut sa = a8_zero();
+    let mut i = 0;
+    while i < n {
+        sa = a8_set(sa, i, i);
+        i = i + 1;
+    }
+    // Insertion sort by suffix comparison
+    i = 1;
+    while i < n {
+        let key = a8_get(sa, i);
+        let mut j = i - 1;
+        let mut done = 0;
+        while done == 0 {
+            if j < 0 {
+                done = 1;
+            } else if compare_suffixes(s, n, a8_get(sa, j), key) > 0 {
+                sa = a8_set(sa, j + 1, a8_get(sa, j));
+                j = j - 1;
+            } else {
+                done = 1;
+            }
+        }
+        sa = a8_set(sa, j + 1, key);
+        i = i + 1;
+    }
+    sa
+}
+
+// Compute LCP (Longest Common Prefix) between suffix at position i and suffix at position j
+fn lcp_of(s: Arr8, n: Int, i: Int, j: Int) -> Int {
+    let mut len = 0;
+    let mut ki = i;
+    let mut kj = j;
+    let mut done = 0;
+    while done == 0 {
+        if ki >= n {
+            done = 1;
+        } else if kj >= n {
+            done = 1;
+        } else if a8_get(s, ki) == a8_get(s, kj) {
+            len = len + 1;
+            ki = ki + 1;
+            kj = kj + 1;
+        } else {
+            done = 1;
+        }
+    }
+    len
+}
+
+// Compute LCP array: lcp[i] = LCP of SA[i] and SA[i-1] (lcp[0] = 0)
+fn build_lcp_array(s: Arr8, n: Int, sa: Arr8) -> Arr8 {
+    let mut lcp = a8_zero();
+    let mut i = 1;
+    while i < n {
+        lcp = a8_set(lcp, i, lcp_of(s, n, a8_get(sa, i - 1), a8_get(sa, i)));
+        i = i + 1;
+    }
+    lcp
+}
+
+// Count distinct substrings using SA and LCP
+// Total substrings = n*(n+1)/2, minus sum of LCP values
+fn count_distinct_substrings(s: Arr8, n: Int) -> Int {
+    let sa = build_suffix_array(s, n);
+    let lcp = build_lcp_array(s, n, sa);
+    let total = n * (n + 1) / 2;
+    let mut lcp_sum = 0;
+    let mut i = 1;
+    while i < n {
+        lcp_sum = lcp_sum + a8_get(lcp, i);
+        i = i + 1;
+    }
+    total - lcp_sum
+}
+
+// Search for pattern in text using suffix array (binary search)
+fn sa_search(s: Arr8, n: Int, sa: Arr8, pattern: Arr8, m: Int) -> Int {
+    // Binary search in suffix array
+    let mut lo = 0;
+    let mut hi = n - 1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let suffix_start = a8_get(sa, mid);
+        // Compare pattern with suffix
+        let cmp = compare_pattern_suffix(s, n, suffix_start, pattern, m);
+        if cmp == 0 { return 1; } // found
+        if cmp < 0 {
+            hi = mid - 1;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    0
+}
+
+// Compare pattern with suffix: returns <0, 0, >0
+fn compare_pattern_suffix(s: Arr8, n: Int, suf_start: Int, pattern: Arr8, m: Int) -> Int {
+    let mut i = 0;
+    let mut done = 0;
+    let mut result = 0;
+    while done == 0 {
+        if i >= m {
+            done = 1;
+            result = 0; // pattern fully matched
+        } else if suf_start + i >= n {
+            done = 1;
+            result = 1; // suffix too short, pattern is "larger"
+        } else {
+            let cs = a8_get(s, suf_start + i);
+            let cp = a8_get(pattern, i);
+            if cp < cs {
+                done = 1;
+                result = -1;
+            } else if cp > cs {
+                done = 1;
+                result = 1;
+            } else {
+                i = i + 1;
+            }
+        }
+    }
+    result
+}
+
+// ========== Tests ==========
+
+fn test_suffix_array_banana() {
+    // "banana" = [2, 1, 14, 1, 14, 1] (b=2, a=1, n=14)
+    // Suffixes:
+    //   0: banana
+    //   1: anana
+    //   2: nana
+    //   3: ana
+    //   4: na
+    //   5: a
+    // Sorted: a(5), ana(3), anana(1), banana(0), na(4), nana(2)
+    // SA = [5, 3, 1, 0, 4, 2]
+    let s = Arr8 { a0: 2, a1: 1, a2: 14, a3: 1, a4: 14, a5: 1, a6: 0, a7: 0 };
+    let sa = build_suffix_array(s, 6);
+    assert_eq(a8_get(sa, 0), 5);
+    assert_eq(a8_get(sa, 1), 3);
+    assert_eq(a8_get(sa, 2), 1);
+    assert_eq(a8_get(sa, 3), 0);
+    assert_eq(a8_get(sa, 4), 4);
+    assert_eq(a8_get(sa, 5), 2);
+}
+
+fn test_lcp_banana() {
+    let s = Arr8 { a0: 2, a1: 1, a2: 14, a3: 1, a4: 14, a5: 1, a6: 0, a7: 0 };
+    let sa = build_suffix_array(s, 6);
+    let lcp = build_lcp_array(s, 6, sa);
+    // LCP array for banana:
+    // SA:  [5, 3, 1, 0, 4, 2]
+    // Suf: a, ana, anana, banana, na, nana
+    // LCP: [0, 1, 3, 0, 0, 2]
+    assert_eq(a8_get(lcp, 0), 0);
+    assert_eq(a8_get(lcp, 1), 1);
+    assert_eq(a8_get(lcp, 2), 3);
+    assert_eq(a8_get(lcp, 3), 0);
+    assert_eq(a8_get(lcp, 4), 0);
+    assert_eq(a8_get(lcp, 5), 2);
+}
+
+fn test_all_same() {
+    // "aaaa" = [1,1,1,1]
+    // SA = [3, 2, 1, 0]
+    let s = Arr8 { a0: 1, a1: 1, a2: 1, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let sa = build_suffix_array(s, 4);
+    assert_eq(a8_get(sa, 0), 3);
+    assert_eq(a8_get(sa, 1), 2);
+    assert_eq(a8_get(sa, 2), 1);
+    assert_eq(a8_get(sa, 3), 0);
+}
+
+fn test_all_different() {
+    // "dcba" = [4,3,2,1]
+    // SA = [3, 2, 1, 0] (a, b, c, d)
+    let s = Arr8 { a0: 4, a1: 3, a2: 2, a3: 1, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let sa = build_suffix_array(s, 4);
+    assert_eq(a8_get(sa, 0), 3); // "a"
+    assert_eq(a8_get(sa, 1), 2); // "ba"
+    assert_eq(a8_get(sa, 2), 1); // "cba"
+    assert_eq(a8_get(sa, 3), 0); // "dcba"
+}
+
+fn test_single_char() {
+    let s = Arr8 { a0: 42, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    let sa = build_suffix_array(s, 1);
+    assert_eq(a8_get(sa, 0), 0);
+}
+
+fn test_distinct_substrings_abc() {
+    // "abc" = [1,2,3]
+    // All substrings: a, ab, abc, b, bc, c = 6 distinct
+    // Formula: n*(n+1)/2 - sum(LCP) = 6 - 0 = 6
+    let s = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_distinct_substrings(s, 3), 6);
+}
+
+fn test_distinct_substrings_aab() {
+    // "aab" = [1,1,2]
+    // Substrings: a, aa, aab, a, ab, b -> distinct: a, aa, aab, ab, b = 5
+    // SA: [0,1,2] sorted by suffix: [1](ab), [0](aab), [2](b) -> wait
+    // Suffixes: aab(0), ab(1), b(2) -> SA = [0, 1, 2]
+    // Actually: a(=1) < a(=1) first chars equal, then ab(1) has 'b' but aab(0) has 'a', so aab < ab
+    // So SA = [0, 1, 2]
+    // LCP: [0, 1, 0] -> sum = 1
+    // Distinct = 3*4/2 - 1 = 6 - 1 = 5
+    let s = Arr8 { a0: 1, a1: 1, a2: 2, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(count_distinct_substrings(s, 3), 5);
+}
+
+fn test_search_found() {
+    // "banana" = [2,1,14,1,14,1]
+    let s = Arr8 { a0: 2, a1: 1, a2: 14, a3: 1, a4: 14, a5: 1, a6: 0, a7: 0 };
+    let sa = build_suffix_array(s, 6);
+    // Search for "ana" = [1, 14, 1]
+    let pat = Arr8 { a0: 1, a1: 14, a2: 1, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(sa_search(s, 6, sa, pat, 3), 1);
+}
+
+fn test_search_not_found() {
+    let s = Arr8 { a0: 2, a1: 1, a2: 14, a3: 1, a4: 14, a5: 1, a6: 0, a7: 0 };
+    let sa = build_suffix_array(s, 6);
+    // Search for "xyz" = [24, 25, 26]
+    let pat = Arr8 { a0: 24, a1: 25, a2: 26, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(sa_search(s, 6, sa, pat, 3), 0);
+}
+
+fn test_compare_suffixes() {
+    let s = Arr8 { a0: 1, a1: 2, a2: 3, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    // suffix(0) = "abc", suffix(1) = "bc", suffix(2) = "c"
+    assert_eq(compare_suffixes(s, 3, 0, 1), -1); // "abc" < "bc"
+    assert_eq(compare_suffixes(s, 3, 1, 0), 1);  // "bc" > "abc"
+    assert_eq(compare_suffixes(s, 3, 0, 0), 0);  // equal
+}
+
+fn test_lcp_of_direct() {
+    let s = Arr8 { a0: 1, a1: 2, a2: 1, a3: 2, a4: 3, a5: 0, a6: 0, a7: 0 };
+    // suffix(0) = [1,2,1,2,3], suffix(2) = [1,2,3]
+    assert_eq(lcp_of(s, 5, 0, 2), 2); // share "1,2" then differ (1 vs 3)
+}
+
+fn main() -> Int {
+    test_suffix_array_banana();
+    test_lcp_banana();
+    test_all_same();
+    test_all_different();
+    test_single_char();
+    test_distinct_substrings_abc();
+    test_distinct_substrings_aab();
+    test_search_found();
+    test_search_not_found();
+    test_compare_suffixes();
+    test_lcp_of_direct();
+    print("[OK] 395_suffix_array_aot");
+    0
+}

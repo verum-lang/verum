@@ -1,0 +1,253 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, algo, graph, euler, circuit, path
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Eulerian path/circuit detection and construction.
+// Uses Arr16 for 4x4 adjacency. Checks degree conditions and constructs
+// Eulerian circuit using Hierholzer's algorithm.
+
+// =============================================================================
+// Arr16 for 4x4 adjacency, Arr4 for degrees
+// =============================================================================
+
+type Arr16 is {
+    e0: Int, e1: Int, e2: Int, e3: Int,
+    e4: Int, e5: Int, e6: Int, e7: Int,
+    e8: Int, e9: Int, e10: Int, e11: Int,
+    e12: Int, e13: Int, e14: Int, e15: Int
+};
+
+fn a16_zeros() -> Arr16 {
+    Arr16 {
+        e0: 0, e1: 0, e2: 0, e3: 0, e4: 0, e5: 0, e6: 0, e7: 0,
+        e8: 0, e9: 0, e10: 0, e11: 0, e12: 0, e13: 0, e14: 0, e15: 0
+    }
+}
+
+fn a16_get(a: Arr16, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else if i == 7 { a.e7 } else if i == 8 { a.e8 }
+    else if i == 9 { a.e9 } else if i == 10 { a.e10 } else if i == 11 { a.e11 }
+    else if i == 12 { a.e12 } else if i == 13 { a.e13 } else if i == 14 { a.e14 }
+    else { a.e15 }
+}
+
+fn a16_set(a: Arr16, i: Int, v: Int) -> Arr16 {
+    Arr16 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 },
+        e8: if i == 8 { v } else { a.e8 }, e9: if i == 9 { v } else { a.e9 },
+        e10: if i == 10 { v } else { a.e10 }, e11: if i == 11 { v } else { a.e11 },
+        e12: if i == 12 { v } else { a.e12 }, e13: if i == 13 { v } else { a.e13 },
+        e14: if i == 14 { v } else { a.e14 }, e15: if i == 15 { v } else { a.e15 }
+    }
+}
+
+fn adj_get(m: Arr16, i: Int, j: Int) -> Int { a16_get(m, i * 4 + j) }
+fn adj_set(m: Arr16, i: Int, j: Int, v: Int) -> Arr16 { a16_set(m, i * 4 + j, v) }
+
+fn add_undir(m: Arr16, i: Int, j: Int) -> Arr16 {
+    let c1 = adj_get(m, i, j);
+    let c2 = adj_get(m, j, i);
+    let m1 = adj_set(m, i, j, c1 + 1);
+    adj_set(m1, j, i, c2 + 1)
+}
+
+type Arr4 is { e0: Int, e1: Int, e2: Int, e3: Int };
+fn arr4_fill(v: Int) -> Arr4 { Arr4 { e0: v, e1: v, e2: v, e3: v } }
+fn arr4_get(a: Arr4, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 } else { a.e3 }
+}
+
+// Arr8 for circuit path storage
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+fn arr8_fill(v: Int) -> Arr8 {
+    Arr8 { e0: v, e1: v, e2: v, e3: v, e4: v, e5: v, e6: v, e7: v }
+}
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 } else if i == 1 { a.e1 } else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 } else if i == 4 { a.e4 } else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 } else { a.e7 }
+}
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 }, e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 }, e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 }, e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 }, e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+// =============================================================================
+// Degree computation and Eulerian check
+// =============================================================================
+
+fn compute_degree(adj: Arr16, n: Int, node: Int) -> Int {
+    let mut deg = 0;
+    let mut j = 0;
+    while j < n { deg = deg + adj_get(adj, node, j); j = j + 1; }
+    deg
+}
+
+// Returns: 0=neither, 1=circuit, 2=path
+fn check_eulerian(adj: Arr16, n: Int) -> Int {
+    let mut odd_count = 0;
+    let mut i = 0;
+    while i < n {
+        if compute_degree(adj, n, i) % 2 != 0 { odd_count = odd_count + 1; }
+        i = i + 1;
+    }
+    if odd_count == 0 { 1 }
+    else if odd_count == 2 { 2 }
+    else { 0 }
+}
+
+fn total_edges(adj: Arr16, n: Int) -> Int {
+    let mut total = 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        while j < n { total = total + adj_get(adj, i, j); j = j + 1; }
+        i = i + 1;
+    }
+    total
+}
+
+// =============================================================================
+// Hierholzer's algorithm for Eulerian circuit
+// =============================================================================
+
+type CircuitResult is { path: Arr8, length: Int };
+
+fn find_euler_circuit(adj: Arr16, n: Int, start: Int) -> CircuitResult {
+    let mut g = adj;
+    let mut stk = arr8_fill(0);
+    let mut sp = 0;
+    let mut circuit = arr8_fill(0);
+    let mut ci = 0;
+
+    stk = arr8_set(stk, sp, start);
+    sp = sp + 1;
+
+    while sp > 0 {
+        let v = arr8_get(stk, sp - 1);
+        let mut found_edge = 0;
+        let mut nb = 0;
+        while nb < n && found_edge == 0 {
+            if adj_get(g, v, nb) > 0 {
+                g = adj_set(g, v, nb, adj_get(g, v, nb) - 1);
+                g = adj_set(g, nb, v, adj_get(g, nb, v) - 1);
+                stk = arr8_set(stk, sp, nb);
+                sp = sp + 1;
+                found_edge = 1;
+            }
+            nb = nb + 1;
+        }
+        if found_edge == 0 {
+            sp = sp - 1;
+            circuit = arr8_set(circuit, ci, v);
+            ci = ci + 1;
+        }
+    }
+    CircuitResult { path: circuit, length: ci }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+fn test_triangle_circuit() {
+    let mut adj = a16_zeros();
+    adj = add_undir(adj, 0, 1);
+    adj = add_undir(adj, 1, 2);
+    adj = add_undir(adj, 2, 0);
+    assert_eq(check_eulerian(adj, 3), 1);
+    assert_eq(total_edges(adj, 3), 3);
+    let cr = find_euler_circuit(adj, 3, 0);
+    assert_eq(cr.length, 4);
+    assert_eq(arr8_get(cr.path, 0), arr8_get(cr.path, 3));
+}
+
+fn test_square_circuit() {
+    let mut adj = a16_zeros();
+    adj = add_undir(adj, 0, 1);
+    adj = add_undir(adj, 1, 2);
+    adj = add_undir(adj, 2, 3);
+    adj = add_undir(adj, 3, 0);
+    assert_eq(check_eulerian(adj, 4), 1);
+    let cr = find_euler_circuit(adj, 4, 0);
+    assert_eq(cr.length, 5);
+    assert_eq(arr8_get(cr.path, 0), arr8_get(cr.path, 4));
+}
+
+fn test_no_euler() {
+    // Star: 0-1, 0-2, 0-3 (0 deg 3 odd, 1,2,3 deg 1 odd = 4 odd)
+    let mut adj = a16_zeros();
+    adj = add_undir(adj, 0, 1);
+    adj = add_undir(adj, 0, 2);
+    adj = add_undir(adj, 0, 3);
+    assert_eq(check_eulerian(adj, 4), 0);
+}
+
+fn test_euler_path() {
+    // Path: 0-1-2-3, degrees 1,2,2,1 => 2 odd => Euler path
+    let mut adj = a16_zeros();
+    adj = add_undir(adj, 0, 1);
+    adj = add_undir(adj, 1, 2);
+    adj = add_undir(adj, 2, 3);
+    assert_eq(check_eulerian(adj, 4), 2);
+}
+
+fn test_single_node() {
+    let adj = a16_zeros();
+    assert_eq(check_eulerian(adj, 1), 1);
+}
+
+fn test_k4_no_euler() {
+    // K4: all degrees 3 (odd), 4 odd vertices
+    let mut adj = a16_zeros();
+    adj = add_undir(adj, 0, 1); adj = add_undir(adj, 0, 2); adj = add_undir(adj, 0, 3);
+    adj = add_undir(adj, 1, 2); adj = add_undir(adj, 1, 3); adj = add_undir(adj, 2, 3);
+    assert_eq(check_eulerian(adj, 4), 0);
+}
+
+fn test_validity() {
+    let mut adj = a16_zeros();
+    adj = add_undir(adj, 0, 1);
+    adj = add_undir(adj, 1, 2);
+    adj = add_undir(adj, 2, 0);
+    let cr = find_euler_circuit(adj, 3, 0);
+    let mut edge_count = 0;
+    let mut i = 0;
+    while i < cr.length - 1 {
+        let u = arr8_get(cr.path, i);
+        let v = arr8_get(cr.path, i + 1);
+        assert(u >= 0); assert(u < 3);
+        assert(v >= 0); assert(v < 3);
+        edge_count = edge_count + 1;
+        i = i + 1;
+    }
+    assert_eq(edge_count, 3);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_triangle_circuit();
+    test_square_circuit();
+    test_no_euler();
+    test_euler_path();
+    test_single_node();
+    test_k4_no_euler();
+    test_validity();
+    print("[OK] 327_interp_euler_circuit");
+    0
+}

@@ -1,0 +1,8 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: unsafe, empty, block
+// @description: Empty unsafe block (returns unit)
+fn main() {
+    unsafe {};
+    let _: () = unsafe {};
+}

@@ -1,0 +1,54 @@
+// @test: run
+// @level: L0
+// @tier: 1
+// @tags: mut-self, methods, struct, loop
+// @description: &mut self methods in loops
+
+type Counter is { val: Int, max_val: Int };
+
+implement Counter {
+    fn new(max_val: Int) -> Counter {
+        Counter { val: 0, max_val: max_val }
+    }
+
+    fn get(&self) -> Int {
+        self.val
+    }
+
+    fn is_done(&self) -> Bool {
+        self.val >= self.max_val
+    }
+
+    fn increment(&mut self) {
+        self.val = self.val + 1;
+    }
+}
+
+fn main() -> Int {
+    print("Mut Self Tests:");
+
+    // Test 1: Simple increments
+    let mut c = Counter.new(5);
+    c.increment();
+    c.increment();
+    c.increment();
+    if c.get() != 3 {
+        print(f"FAIL simple: expected 3, got {c.get()}");
+        return 1;
+    }
+    print("  simple increment: OK");
+
+    // Test 2: Loop with &mut self
+    let mut c2 = Counter.new(5);
+    while !c2.is_done() {
+        c2.increment();
+    }
+    if c2.get() != 5 {
+        print(f"FAIL loop: expected 5, got {c2.get()}");
+        return 1;
+    }
+    print("  loop increment: OK");
+
+    print("All mut self tests passed!");
+    0
+}

@@ -1,0 +1,177 @@
+// @test: run
+// @level: L2
+// @tier: 0
+// @tags: self-hosting, verification, verify, annotation, contract
+// @description: Functions with @verify annotations — basic verification patterns
+
+// Verified function: absolute value always returns >= 0
+fn abs_val(x: Int) -> Int {
+    if x < 0 { -x } else { x }
+}
+
+// Verified: clamp always returns value in [lo, hi]
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+// Verified: max always returns the larger value
+fn max(a: Int, b: Int) -> Int {
+    if a >= b { a } else { b }
+}
+
+// Verified: min always returns the smaller value
+fn min(a: Int, b: Int) -> Int {
+    if a <= b { a } else { b }
+}
+
+// Safe division: never divides by zero
+fn safe_div(a: Int, b: Int) -> Int {
+    if b == 0 { 0 } else { a / b }
+}
+
+// Safe modulo: never modulos by zero
+fn safe_mod(a: Int, b: Int) -> Int {
+    if b == 0 { 0 } else { a % b }
+}
+
+// Bounded array access
+fn safe_get(arr: List<Int>, idx: Int) -> Int {
+    if idx < 0 || idx >= arr.len() {
+        -1
+    } else {
+        arr[idx]
+    }
+}
+
+fn test_abs_val() -> Int {
+    let cases = [-100, -1, 0, 1, 100];
+    let mut i = 0;
+    while i < cases.len() {
+        let result = abs_val(cases[i]);
+        if result < 0 {
+            print(f"FAIL abs: abs_val({cases[i]}) = {result} < 0");
+            return 1;
+        }
+        i = i + 1;
+    }
+    if abs_val(-5) != 5 {
+        print("FAIL abs: abs_val(-5) != 5");
+        return 1;
+    }
+    if abs_val(5) != 5 {
+        print("FAIL abs: abs_val(5) != 5");
+        return 1;
+    }
+    print("  abs_val: OK");
+    0
+}
+
+fn test_clamp() -> Int {
+    // Result should always be in [0, 10]
+    let inputs = [-5, 0, 5, 10, 15];
+    let expected = [0, 0, 5, 10, 10];
+    let mut i = 0;
+    while i < inputs.len() {
+        let result = clamp(inputs[i], 0, 10);
+        if result != expected[i] {
+            print(f"FAIL clamp: clamp({inputs[i]}, 0, 10) = {result}, expected {expected[i]}");
+            return 1;
+        }
+        if result < 0 || result > 10 {
+            print(f"FAIL clamp: result {result} out of [0, 10]");
+            return 1;
+        }
+        i = i + 1;
+    }
+    print("  clamp: OK");
+    0
+}
+
+fn test_max_min() -> Int {
+    if max(3, 5) != 5 { print("FAIL: max(3,5) != 5"); return 1; }
+    if max(5, 3) != 5 { print("FAIL: max(5,3) != 5"); return 1; }
+    if max(4, 4) != 4 { print("FAIL: max(4,4) != 4"); return 1; }
+
+    if min(3, 5) != 3 { print("FAIL: min(3,5) != 3"); return 1; }
+    if min(5, 3) != 3 { print("FAIL: min(5,3) != 3"); return 1; }
+    if min(4, 4) != 4 { print("FAIL: min(4,4) != 4"); return 1; }
+
+    // Verify: max(a,b) >= a && max(a,b) >= b
+    let a = 7;
+    let b = 12;
+    let m = max(a, b);
+    if m < a || m < b {
+        print(f"FAIL: max({a},{b})={m} violates >= both");
+        return 1;
+    }
+    // Verify: min(a,b) <= a && min(a,b) <= b
+    let n = min(a, b);
+    if n > a || n > b {
+        print(f"FAIL: min({a},{b})={n} violates <= both");
+        return 1;
+    }
+    print("  max_min: OK");
+    0
+}
+
+fn test_safe_division() -> Int {
+    if safe_div(10, 2) != 5 { print("FAIL: 10/2 != 5"); return 1; }
+    if safe_div(10, 0) != 0 { print("FAIL: 10/0 should return 0"); return 1; }
+    if safe_div(7, 3) != 2 { print("FAIL: 7/3 != 2"); return 1; }
+    if safe_mod(10, 3) != 1 { print("FAIL: 10%3 != 1"); return 1; }
+    if safe_mod(10, 0) != 0 { print("FAIL: 10%0 should return 0"); return 1; }
+    print("  safe_division: OK");
+    0
+}
+
+fn test_safe_get() -> Int {
+    let arr = [10, 20, 30, 40, 50];
+    if safe_get(arr, 0) != 10 { print("FAIL: arr[0] != 10"); return 1; }
+    if safe_get(arr, 4) != 50 { print("FAIL: arr[4] != 50"); return 1; }
+    if safe_get(arr, -1) != -1 { print("FAIL: arr[-1] should be -1"); return 1; }
+    if safe_get(arr, 5) != -1 { print("FAIL: arr[5] should be -1"); return 1; }
+    if safe_get(arr, 100) != -1 { print("FAIL: arr[100] should be -1"); return 1; }
+    print("  safe_get: OK");
+    0
+}
+
+fn test_combined_verification() -> Int {
+    // Combine: clamp an abs value, use as safe index
+    let data = [100, 200, 300, 400, 500];
+    let input = -3;
+    let idx = clamp(abs_val(input), 0, data.len() - 1);
+    let val = safe_get(data, idx);
+
+    if idx < 0 || idx >= data.len() {
+        print(f"FAIL combined: idx {idx} out of bounds");
+        return 1;
+    }
+    if val == -1 {
+        print("FAIL combined: safe_get returned -1 for valid index");
+        return 1;
+    }
+    // abs(-3) = 3, clamp(3, 0, 4) = 3, data[3] = 400
+    if val != 400 {
+        print(f"FAIL combined: expected 400, got {val}");
+        return 1;
+    }
+    print("  combined_verification: OK");
+    0
+}
+
+fn main() -> Int {
+    let mut failures = 0;
+    failures = failures + test_abs_val();
+    failures = failures + test_clamp();
+    failures = failures + test_max_min();
+    failures = failures + test_safe_division();
+    failures = failures + test_safe_get();
+    failures = failures + test_combined_verification();
+
+    if failures == 0 {
+        print("All verify basic tests passed");
+    }
+    failures
+}

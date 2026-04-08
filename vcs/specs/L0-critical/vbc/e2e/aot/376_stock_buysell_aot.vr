@@ -1,0 +1,289 @@
+// @test: run
+// @tier: 2
+// @level: L0
+// @tags: vbc, e2e, aot, stock, kadane, maximum-subarray, greedy
+// @timeout: 50000
+// @expected-exit: 0
+//
+// AOT test for stock buy/sell problems using Kadane's algorithm variant.
+// 1. Single transaction: max profit from one buy and one sell
+// 2. Multiple transactions: max profit from unlimited transactions
+// 3. Maximum subarray sum (Kadane's algorithm proper)
+// 4. Best time with cooldown (simplified)
+
+type Arr8 is { a0: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, a7: Int };
+
+fn a8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.a0 } else if i == 1 { a.a1 }
+    else if i == 2 { a.a2 } else if i == 3 { a.a3 }
+    else if i == 4 { a.a4 } else if i == 5 { a.a5 }
+    else if i == 6 { a.a6 } else { a.a7 }
+}
+
+fn a8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        a0: if i == 0 { v } else { a.a0 }, a1: if i == 1 { v } else { a.a1 },
+        a2: if i == 2 { v } else { a.a2 }, a3: if i == 3 { v } else { a.a3 },
+        a4: if i == 4 { v } else { a.a4 }, a5: if i == 5 { v } else { a.a5 },
+        a6: if i == 6 { v } else { a.a6 }, a7: if i == 7 { v } else { a.a7 }
+    }
+}
+
+fn a8_zero() -> Arr8 {
+    Arr8 { a0: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 }
+}
+
+fn max_val(a: Int, bv: Int) -> Int {
+    if a > bv { a } else { bv }
+}
+
+fn min_val(a: Int, bv: Int) -> Int {
+    if a < bv { a } else { bv }
+}
+
+// Single transaction: buy once and sell once for maximum profit
+// Returns max(prices[j] - prices[i]) for j > i, or 0 if no profit
+fn max_profit_single(prices: Arr8, n: Int) -> Int {
+    if n < 2 { return 0; }
+    let mut min_price = a8_get(prices, 0);
+    let mut best_profit = 0;
+    let mut i = 1;
+    while i < n {
+        let price = a8_get(prices, i);
+        let profit = price - min_price;
+        best_profit = max_val(best_profit, profit);
+        min_price = min_val(min_price, price);
+        i = i + 1;
+    }
+    best_profit
+}
+
+// Multiple transactions: buy/sell as many times as wanted (no cooldown)
+// Sum of all positive differences between consecutive days
+fn max_profit_multi(prices: Arr8, n: Int) -> Int {
+    if n < 2 { return 0; }
+    let mut total_profit = 0;
+    let mut i = 1;
+    while i < n {
+        let diff = a8_get(prices, i) - a8_get(prices, i - 1);
+        if diff > 0 {
+            total_profit = total_profit + diff;
+        }
+        i = i + 1;
+    }
+    total_profit
+}
+
+// Kadane's algorithm: maximum subarray sum
+// Returns the maximum sum of any contiguous subarray
+fn max_subarray_sum(arr: Arr8, n: Int) -> Int {
+    if n == 0 { return 0; }
+    let mut max_ending_here = a8_get(arr, 0);
+    let mut max_so_far = a8_get(arr, 0);
+    let mut i = 1;
+    while i < n {
+        let val = a8_get(arr, i);
+        max_ending_here = max_val(val, max_ending_here + val);
+        max_so_far = max_val(max_so_far, max_ending_here);
+        i = i + 1;
+    }
+    max_so_far
+}
+
+// Find the start and end indices of the maximum subarray
+type SubarrayInfo is { sum_val: Int, start_idx: Int, end_idx: Int };
+
+fn max_subarray_range(arr: Arr8, n: Int) -> SubarrayInfo {
+    if n == 0 { return SubarrayInfo { sum_val: 0, start_idx: 0, end_idx: 0 }; }
+    let mut max_ending_here = a8_get(arr, 0);
+    let mut max_so_far = a8_get(arr, 0);
+    let mut start = 0;
+    let mut end = 0;
+    let mut temp_start = 0;
+    let mut i = 1;
+    while i < n {
+        let val = a8_get(arr, i);
+        if val > max_ending_here + val {
+            max_ending_here = val;
+            temp_start = i;
+        } else {
+            max_ending_here = max_ending_here + val;
+        }
+        if max_ending_here > max_so_far {
+            max_so_far = max_ending_here;
+            start = temp_start;
+            end = i;
+        }
+        i = i + 1;
+    }
+    SubarrayInfo { sum_val: max_so_far, start_idx: start, end_idx: end }
+}
+
+// At most two transactions
+fn max_profit_two_txns(prices: Arr8, n: Int) -> Int {
+    if n < 2 { return 0; }
+    // Forward pass: best profit ending at or before each day
+    let mut fwd = a8_zero();
+    let mut min_price = a8_get(prices, 0);
+    let mut i = 1;
+    while i < n {
+        let price = a8_get(prices, i);
+        let prev = a8_get(fwd, i - 1);
+        let profit = price - min_price;
+        fwd = a8_set(fwd, i, max_val(prev, profit));
+        min_price = min_val(min_price, price);
+        i = i + 1;
+    }
+    // Backward pass: best profit starting at or after each day
+    let mut bwd = a8_zero();
+    let mut max_price = a8_get(prices, n - 1);
+    i = n - 2;
+    while i >= 0 {
+        let price = a8_get(prices, i);
+        let next = a8_get(bwd, i + 1);
+        let profit = max_price - price;
+        bwd = a8_set(bwd, i, max_val(next, profit));
+        max_price = max_val(max_price, price);
+        i = i - 1;
+    }
+    // Combine: max of fwd[i] + bwd[i] for all i
+    let mut best = 0;
+    i = 0;
+    while i < n {
+        best = max_val(best, a8_get(fwd, i) + a8_get(bwd, i));
+        i = i + 1;
+    }
+    best
+}
+
+// === Tests ===
+
+fn test_single_ascending() {
+    // Prices: [1, 2, 3, 4, 5]
+    let p = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_profit_single(p, 5), 4); // buy at 1, sell at 5
+}
+
+fn test_single_descending() {
+    // Prices: [5, 4, 3, 2, 1]
+    let p = Arr8 { a0: 5, a1: 4, a2: 3, a3: 2, a4: 1, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_profit_single(p, 5), 0); // no profit possible
+}
+
+fn test_single_valley() {
+    // Prices: [7, 1, 5, 3, 6, 4]
+    let p = Arr8 { a0: 7, a1: 1, a2: 5, a3: 3, a4: 6, a5: 4, a6: 0, a7: 0 };
+    assert_eq(max_profit_single(p, 6), 5); // buy at 1, sell at 6
+}
+
+fn test_single_one_element() {
+    let p = Arr8 { a0: 5, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_profit_single(p, 1), 0);
+}
+
+fn test_multi_ascending() {
+    // [1, 2, 3, 4, 5] -> profit = 4 (same as single)
+    let p = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_profit_multi(p, 5), 4);
+}
+
+fn test_multi_zigzag() {
+    // [1, 5, 2, 8] -> buy at 1 sell at 5 (+4), buy at 2 sell at 8 (+6) = 10
+    let p = Arr8 { a0: 1, a1: 5, a2: 2, a3: 8, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_profit_multi(p, 4), 10);
+}
+
+fn test_multi_descending() {
+    let p = Arr8 { a0: 5, a1: 4, a2: 3, a3: 2, a4: 1, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_profit_multi(p, 5), 0);
+}
+
+fn test_multi_vs_single() {
+    // Multi should always be >= single
+    let p = Arr8 { a0: 3, a1: 1, a2: 4, a3: 1, a4: 5, a5: 9, a6: 2, a7: 6 };
+    let single = max_profit_single(p, 8);
+    let multi = max_profit_multi(p, 8);
+    assert(multi >= single);
+}
+
+fn test_kadane_all_positive() {
+    let arr = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_subarray_sum(arr, 5), 15);
+}
+
+fn test_kadane_mixed() {
+    // [-2, 1, -3, 4, -1, 2, 1, -5] -> max subarray [4,-1,2,1] = 6
+    let arr = Arr8 { a0: -2, a1: 1, a2: -3, a3: 4, a4: -1, a5: 2, a6: 1, a7: -5 };
+    assert_eq(max_subarray_sum(arr, 8), 6);
+}
+
+fn test_kadane_all_negative() {
+    let arr = Arr8 { a0: -3, a1: -5, a2: -1, a3: -8, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_subarray_sum(arr, 4), -1); // single element -1
+}
+
+fn test_kadane_single() {
+    let arr = Arr8 { a0: 42, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_subarray_sum(arr, 1), 42);
+}
+
+fn test_kadane_range() {
+    let arr = Arr8 { a0: -2, a1: 1, a2: -3, a3: 4, a4: -1, a5: 2, a6: 1, a7: -5 };
+    let info = max_subarray_range(arr, 8);
+    assert_eq(info.sum_val, 6);
+    assert_eq(info.start_idx, 3);
+    assert_eq(info.end_idx, 6);
+    // Verify by summing
+    let sum = a8_get(arr, 3) + a8_get(arr, 4) + a8_get(arr, 5) + a8_get(arr, 6);
+    assert_eq(sum, 6);
+}
+
+fn test_two_txns_basic() {
+    // [3, 3, 5, 0, 0, 3, 1, 4]
+    // txn1: buy at 3, sell at 5 -> +2
+    // txn2: buy at 0, sell at 4 -> +4
+    // total: 6
+    let p = Arr8 { a0: 3, a1: 3, a2: 5, a3: 0, a4: 0, a5: 3, a6: 1, a7: 4 };
+    assert_eq(max_profit_two_txns(p, 8), 6);
+}
+
+fn test_two_txns_ascending() {
+    // [1, 2, 3, 4, 5] -> one txn is enough: +4
+    let p = Arr8 { a0: 1, a1: 2, a2: 3, a3: 4, a4: 5, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_profit_two_txns(p, 5), 4);
+}
+
+fn test_two_txns_descending() {
+    let p = Arr8 { a0: 5, a1: 4, a2: 3, a3: 2, a4: 1, a5: 0, a6: 0, a7: 0 };
+    assert_eq(max_profit_two_txns(p, 5), 0);
+}
+
+fn test_two_txns_vs_single() {
+    // Two transactions should always be >= single transaction
+    let p = Arr8 { a0: 1, a1: 5, a2: 2, a3: 8, a4: 3, a5: 7, a6: 1, a7: 6 };
+    let single = max_profit_single(p, 8);
+    let two = max_profit_two_txns(p, 8);
+    assert(two >= single);
+}
+
+fn main() -> Int {
+    test_single_ascending();
+    test_single_descending();
+    test_single_valley();
+    test_single_one_element();
+    test_multi_ascending();
+    test_multi_zigzag();
+    test_multi_descending();
+    test_multi_vs_single();
+    test_kadane_all_positive();
+    test_kadane_mixed();
+    test_kadane_all_negative();
+    test_kadane_single();
+    test_kadane_range();
+    test_two_txns_basic();
+    test_two_txns_ascending();
+    test_two_txns_descending();
+    test_two_txns_vs_single();
+    print("[OK] 376_stock_buysell_aot");
+    0
+}

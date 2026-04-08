@@ -1,0 +1,119 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: select, channels, concurrency, async
+// @description: Select expression — wait for first ready channel
+
+fn main() -> Int {
+    // Test 1: select between two channels, one sends first
+    let fast = Channel.new(1);
+    let slow = Channel.new(1);
+
+    let t1 = spawn {
+        fast.send(42);
+        1
+    };
+
+    let r1 = t1.await;
+
+    // Fast channel should have data
+    match fast.recv() {
+        Some(v) => {
+            if (v != 42) {
+                print(f"FAIL test1: got {v}");
+                return 1;
+            }
+        }
+        None => {
+            print("FAIL test1: no data");
+            return 1;
+        }
+    };
+
+    // Test 2: fan-out pattern — distribute work to multiple workers
+    let results = Channel.new(4);
+    let w1 = spawn { results.send(10 * 10); 1 };
+    let w2 = spawn { results.send(20 * 20); 1 };
+    let w3 = spawn { results.send(30 * 30); 1 };
+
+    let r_w1 = w1.await;
+    let r_w2 = w2.await;
+    let r_w3 = w3.await;
+
+    let mut sum = 0;
+    let mut i = 0;
+    while (i < 3) {
+        match results.recv() {
+            Some(v) => { sum = sum + v; }
+            None => {}
+        };
+        i = i + 1;
+    }
+    // 100 + 400 + 900 = 1400
+    if (sum != 1400) {
+        print(f"FAIL test2: sum={sum}, expected 1400");
+        return 1;
+    }
+
+    // Test 3: pipeline pattern — data flows through stages
+    let stage1_out = Channel.new(5);
+    let stage2_out = Channel.new(5);
+
+    // Stage 1: produce values
+    let s1 = spawn {
+        let mut j = 1;
+        while (j <= 5) {
+            stage1_out.send(j);
+            j = j + 1;
+        }
+        stage1_out.send(-1);
+        5
+    };
+
+    // Stage 2: double each value
+    let s2 = spawn {
+        let mut done = false;
+        while (!done) {
+            match stage1_out.recv() {
+                Some(v) => {
+                    if (v == -1) {
+                        stage2_out.send(-1);
+                        done = true;
+                    } else {
+                        stage2_out.send(v * 2);
+                    }
+                }
+                None => { done = true; }
+            };
+        }
+        1
+    };
+
+    // Stage 3 (main): collect doubled values
+    let mut pipeline_sum = 0;
+    let mut pipeline_done = false;
+    while (!pipeline_done) {
+        match stage2_out.recv() {
+            Some(v) => {
+                if (v == -1) {
+                    pipeline_done = true;
+                } else {
+                    pipeline_sum = pipeline_sum + v;
+                }
+            }
+            None => { pipeline_done = true; }
+        };
+    }
+
+    let rs1 = s1.await;
+    let rs2 = s2.await;
+
+    // 2+4+6+8+10 = 30
+    if (pipeline_sum != 30) {
+        print(f"FAIL test3: pipeline_sum={pipeline_sum}, expected 30");
+        return 1;
+    }
+
+    print("990_select_channels: PASS");
+    0
+}

@@ -1,0 +1,36 @@
+// @test: run-interpreter
+// @level: L0
+// @was-skip: FIXED - FFI CallFfiC handler implemented
+// @tier: 0
+// @expected-exit: 0
+// @tags: ffi, darwin, mach, time
+// @description: Test mach_absolute_time() for monotonic timing
+
+@ffi("libSystem.B.dylib")
+extern {
+    fn mach_absolute_time() -> u64;
+}
+
+fn main() {
+    // mach_absolute_time() returns monotonically increasing tick count
+    // It never fails
+
+    let t1 = mach_absolute_time();
+
+    // Do some work to let time pass
+    let mut sum = 0;
+    let mut i = 0;
+    while i < 1000 {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    let t2 = mach_absolute_time();
+
+    // t2 must be >= t1 (monotonic)
+    // In practice, some time has passed so t2 > t1
+    assert(t2 >= t1);
+
+    // Ensure the sum was computed (prevent optimizer from removing loop)
+    assert(sum == 499500);
+}

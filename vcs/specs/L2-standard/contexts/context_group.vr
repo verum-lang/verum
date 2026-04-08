@@ -1,0 +1,333 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: contexts, context-group, using, composition
+// @description: Tests using definition syntax and usage patterns
+//
+// Context groups allow defining aliases for common context combinations,
+// reducing boilerplate in function signatures. This tests the grammar production:
+//   context_group_def = 'using' , identifier , '=' , context_list_def , ';' ;
+//   context_list_def  = '[' , identifier , { ',' , identifier } , ']' | identifier ;
+
+// ============================================================================
+// Individual context declarations used in groups
+// ============================================================================
+
+context Database {
+    fn query(sql: Text) -> Result<List<Row>, DbError>;
+    fn execute(sql: Text) -> Result<Int, DbError>;
+    fn transaction<T>(f: fn() -> T) -> Result<T, DbError>;
+}
+
+context Logger {
+    fn info(message: Text);
+    fn warn(message: Text);
+    fn error(message: Text);
+    fn debug(message: Text);
+}
+
+context Cache {
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
+    fn delete(key: Text);
+    fn clear();
+}
+
+context FileSystem {
+    fn read(path: Text) -> Result<Text, IoError>;
+    fn write(path: Text, content: Text) -> Result<(), IoError>;
+    fn exists(path: Text) -> Bool;
+}
+
+context Network {
+    fn get(url: Text) -> Result<Response, NetworkError>;
+    fn post(url: Text, body: Text) -> Result<Response, NetworkError>;
+}
+
+context Config {
+    fn get(key: Text) -> Maybe<Text>;
+    fn require(key: Text) -> Text;
+}
+
+context Metrics {
+    fn increment(counter: Text);
+    fn gauge(name: Text, value: Float);
+    fn timer(name: Text) -> Timer;
+}
+
+// Type definitions for context methods
+type Row is Map<Text, Text>;
+type DbError is Failed(Text);
+type IoError is Failed(Text);
+type NetworkError is Failed(Text);
+type Response is { status: Int, body: Text };
+type Timer is { start_time: Int };
+
+// ============================================================================
+// Basic using definition
+// ============================================================================
+
+// Context group syntax: using GroupName = [Context1, Context2, ...];
+using WebServices = [Database, Logger, Cache];
+
+// Another using for I/O operations
+using IoServices = [FileSystem, Network];
+
+// Minimal context group
+using BasicService = [Logger, Config];
+
+// ============================================================================
+// Context group merging/composition
+// ============================================================================
+
+// Note: Nested groups (groups containing other groups) require manual expansion.
+// This is equivalent to what WebServices + IoServices would expand to:
+using AllServices = [Database, Logger, Cache, FileSystem, Network];
+
+// Full stack: all web + io services plus metrics and config
+using FullStack = [Database, Logger, Cache, FileSystem, Network, Metrics, Config];
+
+// ============================================================================
+// Functions using context groups
+// ============================================================================
+
+// Function using a simple context group
+fn log_and_query(table: Text) -> Result<List<Row>, DbError> using WebServices {
+    Logger.info(f"Querying table: {table}");
+
+    let cache_key = f"query:{table}";
+    if let Some(cached) = Cache.get(cache_key) {
+        Logger.debug("Cache hit");
+        // In real code, would deserialize cached
+        return Ok([]);
+    }
+
+    let result = Database.query(f"SELECT * FROM {table}");
+    match &result {
+        Ok(_) => Logger.info("Query successful"),
+        Err(e) => Logger.error(f"Query failed: {e}"),
+    }
+    result
+}
+
+// Function using IoServices group
+fn copy_file(src: Text, dst: Text) -> Result<(), IoError> using IoServices {
+    let content = match FileSystem.read(src) {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+    FileSystem.write(dst, content)
+}
+
+// Function using merged groups
+fn fetch_and_store(url: Text, table: Text) -> Result<Int, Text> using AllServices {
+    Logger.info(f"Fetching from {url}");
+
+    let response = match Network.get(url) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(e.to_text());
+        }
+    };
+
+    if response.status != 200 {
+        Logger.warn(f"Non-200 response: {response.status}");
+        return Err(f"HTTP {response.status}");
+    }
+
+    let rows_affected = match Database.execute(f"INSERT INTO {table} VALUES ('{response.body}')") {
+        Ok(n) => n,
+        Err(e) => {
+            return Err(e.to_text());
+        }
+    };
+
+    Cache.delete(f"query:{table}");
+    Logger.info(f"Inserted {rows_affected} rows");
+
+    Ok(rows_affected)
+}
+
+// ============================================================================
+// Combining contexts inline
+// ============================================================================
+
+// To combine a group with additional contexts, expand manually
+// BasicService = [Logger, Config] + Metrics
+fn monitored_operation(name: Text) using [Logger, Config, Metrics] {
+    let timer = Metrics.timer(name);
+    Logger.info(f"Starting operation: {name}");
+
+    let config_val = Config.get("operation.timeout");
+    let timeout_ms: Int = if config_val.is_ok() {
+        config_val.unwrap().parse_int().unwrap_or(5000)
+    } else {
+        5000
+    };
+
+    // Simulate operation...
+
+    Metrics.increment(f"{name}.completed");
+    Logger.info(f"Completed operation: {name}");
+}
+
+// Combining multiple groups inline: WebServices + IoServices + Metrics
+// WebServices = [Database, Logger, Cache], IoServices = [FileSystem, Network]
+fn complex_operation() using [Database, Logger, Cache, FileSystem, Network, Metrics] {
+    Logger.info("Starting complex operation");
+    Metrics.increment("complex_operation.started");
+
+    // Access all contexts from both groups
+    if let Ok(data) = FileSystem.read("/config/data.json") {
+        Cache.set("local_data", data);
+    }
+
+    if let Ok(response) = Network.get("http://api/health") {
+        if response.status == 200 {
+            let _ = Database.execute("UPDATE status SET healthy = true");
+        }
+    }
+
+    Metrics.increment("complex_operation.completed");
+}
+
+// ============================================================================
+// Extended using definitions
+// ============================================================================
+
+// Enterprise services: all services plus metrics (Metrics already in AllServices + explicit Config)
+using EnterpriseServices = [Database, Logger, Cache, FileSystem, Network, Metrics, Config];
+
+fn enterprise_handler(request_id: Text) -> Result<Text, Text> using EnterpriseServices {
+    let timer = Metrics.timer(f"request.{request_id}");
+    Logger.info(f"Handling enterprise request: {request_id}");
+
+    let api_url = Config.require("api.base_url");
+
+    let response = match Network.get(f"{api_url}/data") {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(e.to_text());
+        }
+    };
+
+    if response.status == 200 {
+        Cache.set(f"response:{request_id}", response.body);
+        let _ = Database.execute(f"INSERT INTO requests VALUES ('{request_id}')");
+        Metrics.increment("enterprise.success");
+        Ok(response.body)
+    } else {
+        Metrics.increment("enterprise.failure");
+        Err(f"API returned {response.status}")
+    }
+}
+
+// ============================================================================
+// Context group with single context (degenerate case)
+// ============================================================================
+
+// A group can contain just one context (useful for aliasing)
+using LoggingOnly = [Logger];
+
+fn simple_log(message: Text) using LoggingOnly {
+    Logger.info(message);
+}
+
+// ============================================================================
+// Using context groups in nested function calls
+// ============================================================================
+
+fn outer_function() using WebServices {
+    Logger.info("Outer function starting");
+
+    // Can call functions that require subset of our contexts
+    inner_function();
+
+    Logger.info("Outer function completed");
+}
+
+fn inner_function() using [Logger, Database] {
+    Logger.debug("Inner function executing");
+    let _ = Database.query("SELECT 1");
+}
+
+// ============================================================================
+// Context groups with async contexts
+// ============================================================================
+
+context async AsyncDatabase {
+    async fn query(sql: Text) -> Result<List<Row>, DbError>;
+    async fn execute(sql: Text) -> Result<Int, DbError>;
+}
+
+context async AsyncCache {
+    async fn get(key: Text) -> Maybe<Text>;
+    async fn set(key: Text, value: Text);
+}
+
+// Async context group
+using AsyncServices = [AsyncDatabase, AsyncCache, Logger];
+
+async fn async_operation(key: Text) -> Result<Text, DbError> using AsyncServices {
+    Logger.info(f"Async operation for key: {key}");
+
+    if let Some(cached) = AsyncCache.get(key).await {
+        return Ok(cached);
+    }
+
+    let rows = match AsyncDatabase.query(f"SELECT value FROM cache WHERE key = '{key}'").await {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    if !rows.is_empty() {
+        let value = rows[0].get("value");
+        AsyncCache.set(key, value).await;
+        Ok(value)
+    } else {
+        Ok("not_found")
+    }
+}
+
+// Mixed sync and async contexts in a group
+using MixedServices = [AsyncDatabase, Logger, Config];
+
+async fn mixed_operation() -> Result<Int, DbError> using MixedServices {
+    let table = Config.require("db.table");
+    Logger.info(f"Operating on table: {table}");
+
+    let result = match AsyncDatabase.execute(f"UPDATE {table} SET updated = NOW()").await {
+        Ok(n) => n,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+    Logger.info(f"Updated {result} rows");
+
+    Ok(result)
+}
+
+// ============================================================================
+// Error cases (these would fail type checking)
+// ============================================================================
+
+// Commented out: would fail because MissingContext is not defined
+// using InvalidGroup = [Database, MissingContext];
+
+// Commented out: would fail because function uses context not in group
+// fn missing_context_error() using BasicService {
+//     Database.query("SELECT 1"); // Error: Database not in BasicService
+// }
+
+// ============================================================================
+// Test entry point
+// ============================================================================
+
+fn main() {
+    // This file tests using type checking syntax only
+    // Runtime behavior would require actual context implementations
+}

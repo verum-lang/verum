@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, lexer, chars, error
+// @description: Test empty character literal detection
+// @expected-error: E004
+
+fn test_empty_char() {
+    let c = '';
+}

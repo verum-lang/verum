@@ -1,0 +1,499 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, advanced, recursion, algorithms
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: advanced recursion — Ackermann function (small values),
+// power set size, tower of powers, mutual recursion for expression evaluation.
+
+// =============================================================================
+// Ackermann function (small values only — grows FAST)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn ackermann(m: Int, n: Int) -> Int {
+    if m == 0 {
+        n + 1
+    } else if n == 0 {
+        ackermann(m - 1, 1)
+    } else {
+        ackermann(m - 1, ackermann(m, n - 1))
+    }
+}
+
+fn test_ackermann() {
+    // A(0, n) = n + 1
+    assert_eq(ackermann(0, 0), 1);
+    assert_eq(ackermann(0, 1), 2);
+    assert_eq(ackermann(0, 5), 6);
+
+    // A(1, n) = n + 2
+    assert_eq(ackermann(1, 0), 2);
+    assert_eq(ackermann(1, 1), 3);
+    assert_eq(ackermann(1, 5), 7);
+    assert_eq(ackermann(1, 10), 12);
+
+    // A(2, n) = 2n + 3
+    assert_eq(ackermann(2, 0), 3);
+    assert_eq(ackermann(2, 1), 5);
+    assert_eq(ackermann(2, 2), 7);
+    assert_eq(ackermann(2, 3), 9);
+    assert_eq(ackermann(2, 4), 11);
+
+    // A(3, n) = 2^(n+3) - 3
+    assert_eq(ackermann(3, 0), 5);     // 2^3 - 3 = 5
+    assert_eq(ackermann(3, 1), 13);    // 2^4 - 3 = 13
+    assert_eq(ackermann(3, 2), 29);    // 2^5 - 3 = 29
+    assert_eq(ackermann(3, 3), 61);    // 2^6 - 3 = 61
+    assert_eq(ackermann(3, 4), 125);   // 2^7 - 3 = 125
+}
+
+// =============================================================================
+// Power set size: 2^n via recursion
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn power_of_2(n: Int) -> Int {
+    if n == 0 {
+        1
+    } else {
+        2 * power_of_2(n - 1)
+    }
+}
+
+fn test_power_set_size() {
+    // |P(S)| = 2^|S|
+    assert_eq(power_of_2(0), 1);     // empty set has 1 subset
+    assert_eq(power_of_2(1), 2);     // {a} has {}, {a}
+    assert_eq(power_of_2(2), 4);
+    assert_eq(power_of_2(3), 8);
+    assert_eq(power_of_2(4), 16);
+    assert_eq(power_of_2(5), 32);
+    assert_eq(power_of_2(10), 1024);
+    assert_eq(power_of_2(16), 65536);
+    assert_eq(power_of_2(20), 1048576);
+}
+
+// =============================================================================
+// Tower of powers: a^(a^(a^...)) with n levels
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn int_pow(base: Int, exp: Int) -> Int {
+    if exp == 0 {
+        1
+    } else {
+        base * int_pow(base, exp - 1)
+    }
+}
+
+@allow(unbounded_recursion)
+fn tower(base: Int, levels: Int) -> Int {
+    // tower(a, 0) = 1
+    // tower(a, 1) = a
+    // tower(a, 2) = a^a
+    // tower(a, 3) = a^(a^a)
+    if levels == 0 {
+        1
+    } else {
+        int_pow(base, tower(base, levels - 1))
+    }
+}
+
+fn test_tower_of_powers() {
+    // tower(2, 0) = 1
+    assert_eq(tower(2, 0), 1);
+    // tower(2, 1) = 2^1 = 2
+    assert_eq(tower(2, 1), 2);
+    // tower(2, 2) = 2^2 = 4
+    assert_eq(tower(2, 2), 4);
+    // tower(2, 3) = 2^(2^2) = 2^4 = 16
+    assert_eq(tower(2, 3), 16);
+    // tower(2, 4) = 2^(2^(2^2)) = 2^(2^4) = 2^16 = 65536
+    assert_eq(tower(2, 4), 65536);
+
+    // tower(3, 0) = 1
+    assert_eq(tower(3, 0), 1);
+    // tower(3, 1) = 3
+    assert_eq(tower(3, 1), 3);
+    // tower(3, 2) = 3^3 = 27
+    assert_eq(tower(3, 2), 27);
+}
+
+// =============================================================================
+// Recursive integer square root (binary search)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn isqrt_helper(n: Int, lo: Int, hi: Int) -> Int {
+    if lo >= hi {
+        lo
+    } else {
+        let mid = (lo + hi + 1) / 2;
+        if mid * mid > n {
+            isqrt_helper(n, lo, mid - 1)
+        } else {
+            isqrt_helper(n, mid, hi)
+        }
+    }
+}
+
+fn isqrt(n: Int) -> Int {
+    if n <= 0 {
+        0
+    } else {
+        isqrt_helper(n, 0, n)
+    }
+}
+
+fn test_isqrt() {
+    assert_eq(isqrt(0), 0);
+    assert_eq(isqrt(1), 1);
+    assert_eq(isqrt(4), 2);
+    assert_eq(isqrt(9), 3);
+    assert_eq(isqrt(16), 4);
+    assert_eq(isqrt(25), 5);
+    assert_eq(isqrt(100), 10);
+    assert_eq(isqrt(144), 12);
+    // Non-perfect squares
+    assert_eq(isqrt(2), 1);
+    assert_eq(isqrt(3), 1);
+    assert_eq(isqrt(8), 2);
+    assert_eq(isqrt(10), 3);
+    assert_eq(isqrt(99), 9);
+    assert_eq(isqrt(101), 10);
+}
+
+// =============================================================================
+// Recursive Fibonacci with memoization table via array record
+// =============================================================================
+
+type FibTable is {
+    f0: Int, f1: Int, f2: Int, f3: Int,
+    f4: Int, f5: Int, f6: Int, f7: Int,
+    f8: Int, f9: Int, f10: Int, f11: Int,
+    f12: Int, f13: Int, f14: Int, f15: Int
+};
+
+fn ft_get(t: FibTable, i: Int) -> Int {
+    if i == 0 { t.f0 }
+    else if i == 1 { t.f1 }
+    else if i == 2 { t.f2 }
+    else if i == 3 { t.f3 }
+    else if i == 4 { t.f4 }
+    else if i == 5 { t.f5 }
+    else if i == 6 { t.f6 }
+    else if i == 7 { t.f7 }
+    else if i == 8 { t.f8 }
+    else if i == 9 { t.f9 }
+    else if i == 10 { t.f10 }
+    else if i == 11 { t.f11 }
+    else if i == 12 { t.f12 }
+    else if i == 13 { t.f13 }
+    else if i == 14 { t.f14 }
+    else { t.f15 }
+}
+
+fn ft_set(t: FibTable, i: Int, v: Int) -> FibTable {
+    FibTable {
+        f0: if i == 0 { v } else { t.f0 },
+        f1: if i == 1 { v } else { t.f1 },
+        f2: if i == 2 { v } else { t.f2 },
+        f3: if i == 3 { v } else { t.f3 },
+        f4: if i == 4 { v } else { t.f4 },
+        f5: if i == 5 { v } else { t.f5 },
+        f6: if i == 6 { v } else { t.f6 },
+        f7: if i == 7 { v } else { t.f7 },
+        f8: if i == 8 { v } else { t.f8 },
+        f9: if i == 9 { v } else { t.f9 },
+        f10: if i == 10 { v } else { t.f10 },
+        f11: if i == 11 { v } else { t.f11 },
+        f12: if i == 12 { v } else { t.f12 },
+        f13: if i == 13 { v } else { t.f13 },
+        f14: if i == 14 { v } else { t.f14 },
+        f15: if i == 15 { v } else { t.f15 }
+    }
+}
+
+fn fib_dp(n: Int) -> Int {
+    let mut table = FibTable {
+        f0: 0, f1: 1, f2: 0, f3: 0,
+        f4: 0, f5: 0, f6: 0, f7: 0,
+        f8: 0, f9: 0, f10: 0, f11: 0,
+        f12: 0, f13: 0, f14: 0, f15: 0
+    };
+    if n <= 1 {
+        return n;
+    }
+    let mut i = 2;
+    while i <= n {
+        let val = ft_get(table, i - 1) + ft_get(table, i - 2);
+        table = ft_set(table, i, val);
+        i = i + 1;
+    }
+    ft_get(table, n)
+}
+
+fn test_fib_dp() {
+    assert_eq(fib_dp(0), 0);
+    assert_eq(fib_dp(1), 1);
+    assert_eq(fib_dp(2), 1);
+    assert_eq(fib_dp(3), 2);
+    assert_eq(fib_dp(5), 5);
+    assert_eq(fib_dp(10), 55);
+    assert_eq(fib_dp(15), 610);
+}
+
+// =============================================================================
+// Mutual recursion for expression evaluation
+// Evaluates simple expressions encoded as integer arrays:
+//   encode: (op, left, right) where:
+//     op=0: literal (left is the value)
+//     op=1: add
+//     op=2: multiply
+// =============================================================================
+
+// We encode an expression tree in a flat array using indices
+// Node i uses slots i*3, i*3+1, i*3+2 for (op, left, right)
+
+type Expr16 is {
+    n0: Int, n1: Int, n2: Int, n3: Int,
+    n4: Int, n5: Int, n6: Int, n7: Int,
+    n8: Int, n9: Int, n10: Int, n11: Int,
+    n12: Int, n13: Int, n14: Int, n15: Int
+};
+
+fn expr_get(e: Expr16, i: Int) -> Int {
+    if i == 0 { e.n0 }
+    else if i == 1 { e.n1 }
+    else if i == 2 { e.n2 }
+    else if i == 3 { e.n3 }
+    else if i == 4 { e.n4 }
+    else if i == 5 { e.n5 }
+    else if i == 6 { e.n6 }
+    else if i == 7 { e.n7 }
+    else if i == 8 { e.n8 }
+    else if i == 9 { e.n9 }
+    else if i == 10 { e.n10 }
+    else if i == 11 { e.n11 }
+    else if i == 12 { e.n12 }
+    else if i == 13 { e.n13 }
+    else if i == 14 { e.n14 }
+    else { e.n15 }
+}
+
+@allow(unbounded_recursion)
+fn eval_expr(e: Expr16, node: Int) -> Int {
+    let base = node * 3;
+    let op = expr_get(e, base);
+    let left = expr_get(e, base + 1);
+    let right = expr_get(e, base + 2);
+    if op == 0 {
+        // Literal: value is in left
+        left
+    } else if op == 1 {
+        // Add: evaluate left and right children
+        eval_expr(e, left) + eval_expr(e, right)
+    } else {
+        // Multiply: evaluate left and right children
+        eval_expr(e, left) * eval_expr(e, right)
+    }
+}
+
+fn test_expr_eval_literal() {
+    // Node 0: literal 42
+    let e = Expr16 {
+        n0: 0, n1: 42, n2: 0, n3: 0,
+        n4: 0, n5: 0, n6: 0, n7: 0,
+        n8: 0, n9: 0, n10: 0, n11: 0,
+        n12: 0, n13: 0, n14: 0, n15: 0
+    };
+    assert_eq(eval_expr(e, 0), 42);
+}
+
+fn test_expr_eval_add() {
+    // Node 0: add(node1, node2)
+    // Node 1: literal 3
+    // Node 2: literal 4
+    let e = Expr16 {
+        n0: 1, n1: 1, n2: 2,    // node 0: add, left=node1, right=node2
+        n3: 0, n4: 3, n5: 0,    // node 1: literal 3
+        n6: 0, n7: 4, n8: 0,    // node 2: literal 4
+        n9: 0, n10: 0, n11: 0,
+        n12: 0, n13: 0, n14: 0, n15: 0
+    };
+    // 3 + 4 = 7
+    assert_eq(eval_expr(e, 0), 7);
+}
+
+fn test_expr_eval_nested() {
+    // Expression: (3 + 4) * 2
+    // Node 0: mul(node1, node2)
+    // Node 1: add(node3, node4)
+    // Node 2: literal 2
+    // Node 3: literal 3
+    // Node 4: literal 4
+    let e = Expr16 {
+        n0: 2, n1: 1, n2: 2,    // node 0: mul, left=node1, right=node2
+        n3: 1, n4: 3, n5: 4,    // node 1: add, left=node3, right=node4
+        n6: 0, n7: 2, n8: 0,    // node 2: literal 2
+        n9: 0, n10: 3, n11: 0,  // node 3: literal 3
+        n12: 0, n13: 4, n14: 0, // node 4: literal 4
+        n15: 0
+    };
+    // (3 + 4) * 2 = 14
+    assert_eq(eval_expr(e, 0), 14);
+}
+
+// =============================================================================
+// Recursive binary search
+// =============================================================================
+
+type Arr8 is { e0: Int, e1: Int, e2: Int, e3: Int, e4: Int, e5: Int, e6: Int, e7: Int };
+
+fn arr8_get(a: Arr8, i: Int) -> Int {
+    if i == 0 { a.e0 }
+    else if i == 1 { a.e1 }
+    else if i == 2 { a.e2 }
+    else if i == 3 { a.e3 }
+    else if i == 4 { a.e4 }
+    else if i == 5 { a.e5 }
+    else if i == 6 { a.e6 }
+    else { a.e7 }
+}
+
+@allow(unbounded_recursion)
+fn bsearch(arr: Arr8, lo: Int, hi: Int, target: Int) -> Int {
+    if lo > hi {
+        -1
+    } else {
+        let mid = (lo + hi) / 2;
+        let val = arr8_get(arr, mid);
+        if val == target {
+            mid
+        } else if val < target {
+            bsearch(arr, mid + 1, hi, target)
+        } else {
+            bsearch(arr, lo, mid - 1, target)
+        }
+    }
+}
+
+fn test_recursive_bsearch() {
+    let arr = Arr8 { e0: 2, e1: 5, e2: 8, e3: 12, e4: 16, e5: 23, e6: 38, e7: 56 };
+    assert_eq(bsearch(arr, 0, 7, 2), 0);
+    assert_eq(bsearch(arr, 0, 7, 8), 2);
+    assert_eq(bsearch(arr, 0, 7, 23), 5);
+    assert_eq(bsearch(arr, 0, 7, 56), 7);
+    assert_eq(bsearch(arr, 0, 7, 1), -1);
+    assert_eq(bsearch(arr, 0, 7, 10), -1);
+    assert_eq(bsearch(arr, 0, 7, 100), -1);
+}
+
+// =============================================================================
+// Recursive combinatorial: C(n, k) = n! / (k! * (n-k)!)
+// =============================================================================
+
+@allow(unbounded_recursion)
+fn choose(n: Int, k: Int) -> Int {
+    if k == 0 || k == n {
+        1
+    } else {
+        choose(n - 1, k - 1) + choose(n - 1, k)
+    }
+}
+
+fn test_choose() {
+    assert_eq(choose(0, 0), 1);
+    assert_eq(choose(1, 0), 1);
+    assert_eq(choose(1, 1), 1);
+    assert_eq(choose(4, 2), 6);
+    assert_eq(choose(5, 2), 10);
+    assert_eq(choose(5, 3), 10);
+    assert_eq(choose(6, 3), 20);
+    assert_eq(choose(10, 5), 252);
+}
+
+// =============================================================================
+// Recursive mergesort (using array records)
+// =============================================================================
+
+fn arr8_set(a: Arr8, i: Int, v: Int) -> Arr8 {
+    Arr8 {
+        e0: if i == 0 { v } else { a.e0 },
+        e1: if i == 1 { v } else { a.e1 },
+        e2: if i == 2 { v } else { a.e2 },
+        e3: if i == 3 { v } else { a.e3 },
+        e4: if i == 4 { v } else { a.e4 },
+        e5: if i == 5 { v } else { a.e5 },
+        e6: if i == 6 { v } else { a.e6 },
+        e7: if i == 7 { v } else { a.e7 }
+    }
+}
+
+fn merge(arr: Arr8, lo: Int, mid: Int, hi: Int) -> Arr8 {
+    // Simple insertion-sort-based merge for small arrays
+    let mut out = arr;
+    let mut i = lo;
+    while i < hi {
+        let mut j = i + 1;
+        while j <= hi {
+            let vi = arr8_get(out, i);
+            let vj = arr8_get(out, j);
+            if vj < vi {
+                out = arr8_set(out, i, vj);
+                out = arr8_set(out, j, vi);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+@allow(unbounded_recursion)
+fn mergesort(arr: Arr8, lo: Int, hi: Int) -> Arr8 {
+    if lo >= hi {
+        arr
+    } else {
+        let mid = (lo + hi) / 2;
+        let sorted_left = mergesort(arr, lo, mid);
+        let sorted_both = mergesort(sorted_left, mid + 1, hi);
+        merge(sorted_both, lo, mid, hi)
+    }
+}
+
+fn test_mergesort() {
+    let arr = Arr8 { e0: 38, e1: 27, e2: 43, e3: 3, e4: 9, e5: 82, e6: 10, e7: 1 };
+    let sorted = mergesort(arr, 0, 7);
+    assert_eq(arr8_get(sorted, 0), 1);
+    assert_eq(arr8_get(sorted, 1), 3);
+    assert_eq(arr8_get(sorted, 2), 9);
+    assert_eq(arr8_get(sorted, 3), 10);
+    assert_eq(arr8_get(sorted, 4), 27);
+    assert_eq(arr8_get(sorted, 5), 38);
+    assert_eq(arr8_get(sorted, 6), 43);
+    assert_eq(arr8_get(sorted, 7), 82);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_ackermann();
+    test_power_set_size();
+    test_tower_of_powers();
+    test_isqrt();
+    test_fib_dp();
+    test_expr_eval_literal();
+    test_expr_eval_add();
+    test_expr_eval_nested();
+    test_recursive_bsearch();
+    test_choose();
+    test_mergesort();
+    print("[OK] 283_interp_recursive_patterns");
+    0
+}

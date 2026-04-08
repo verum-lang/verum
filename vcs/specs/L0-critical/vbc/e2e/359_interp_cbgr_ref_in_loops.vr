@@ -1,0 +1,271 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, cbgr, memory, ref-loops, iteration
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Interpreter e2e test: Real CBGR references in loops.
+// Tests mutable references used as accumulators in while loops,
+// loop-carried state via refs, and iteration patterns with refs.
+
+// =============================================================================
+// Types
+// =============================================================================
+
+type Counter is { val: Int };
+type RunningStats is { n: Int, sum_val: Int, sum_sq: Int };
+type FibState is { curr: Int, prev: Int };
+type Poly is { c0: Int, c1: Int, c2: Int };
+
+// =============================================================================
+// Helper functions with refs
+// =============================================================================
+
+fn counter_inc(c: &mut Counter) {
+    (*c).val = (*c).val + 1;
+}
+
+fn counter_add(c: &mut Counter, n: Int) {
+    (*c).val = (*c).val + n;
+}
+
+fn counter_read(c: &Counter) -> Int {
+    (*c).val
+}
+
+fn rstats_push(s: &mut RunningStats, val: Int) {
+    (*s).n = (*s).n + 1;
+    (*s).sum_val = (*s).sum_val + val;
+    (*s).sum_sq = (*s).sum_sq + val * val;
+}
+
+fn rstats_mean(s: &RunningStats) -> Int {
+    if (*s).n == 0 { 0 } else { (*s).sum_val / (*s).n }
+}
+
+fn rstats_var_num(s: &RunningStats) -> Int {
+    // n * sum_sq - sum_val^2
+    (*s).n * (*s).sum_sq - (*s).sum_val * (*s).sum_val
+}
+
+fn fib_step(f: &mut FibState) {
+    let next = (*f).curr + (*f).prev;
+    (*f).prev = (*f).curr;
+    (*f).curr = next;
+}
+
+fn poly_eval(p: &Poly, x: Int) -> Int {
+    (*p).c0 + (*p).c1 * x + (*p).c2 * x * x
+}
+
+// =============================================================================
+// Test: Counter in loop
+// =============================================================================
+
+fn test_counter_loop() {
+    let mut c = Counter { val: 0 };
+    let r = &mut c;
+
+    let mut i = 0;
+    while i < 100 {
+        counter_inc(r);
+        i = i + 1;
+    }
+    assert_eq(c.val, 100);
+
+    // Add values in loop
+    let mut c2 = Counter { val: 0 };
+    let r2 = &mut c2;
+    let mut j = 1;
+    while j <= 10 {
+        counter_add(r2, j);
+        j = j + 1;
+    }
+    assert_eq(c2.val, 55);
+}
+
+// =============================================================================
+// Test: Running statistics in loop
+// =============================================================================
+
+fn test_running_stats() {
+    let mut stats = RunningStats { n: 0, sum_val: 0, sum_sq: 0 };
+    let sr = &mut stats;
+
+    // Push values 1..20
+    let mut i = 1;
+    while i <= 20 {
+        rstats_push(sr, i);
+        i = i + 1;
+    }
+
+    assert_eq(stats.n, 20);
+    assert_eq(stats.sum_val, 210); // 20*21/2
+    // Mean = sum_val / n = 210 / 20 = 10
+    assert_eq(stats.sum_val / stats.n, 10);
+
+    // sum_sq = 1+4+9+...+400 = 20*21*41/6 = 2870
+    assert_eq(stats.sum_sq, 2870);
+}
+
+// =============================================================================
+// Test: Fibonacci via mutable ref state
+// =============================================================================
+
+fn test_fib_loop() {
+    let mut fib = FibState { curr: 1, prev: 0 };
+    let fr = &mut fib;
+
+    // Step through fibonacci
+    fib_step(fr); // 1, 1
+    assert_eq(fib.curr, 1);
+
+    fib_step(fr); // 2, 1
+    assert_eq(fib.curr, 2);
+
+    fib_step(fr); // 3, 2
+    assert_eq(fib.curr, 3);
+
+    fib_step(fr); // 5, 3
+    assert_eq(fib.curr, 5);
+
+    fib_step(fr); // 8, 5
+    assert_eq(fib.curr, 8);
+
+    // Continue to fib(20)
+    let mut j = 0;
+    while j < 14 {
+        fib_step(fr);
+        j = j + 1;
+    }
+    // fib(20) = 6765
+    assert_eq(fib.curr, 6765);
+}
+
+// =============================================================================
+// Test: Ref-based accumulation with conditional
+// =============================================================================
+
+fn test_conditional_accum() {
+    let mut even_sum = Counter { val: 0 };
+    let mut odd_sum = Counter { val: 0 };
+    let er = &mut even_sum;
+    let or_ref = &mut odd_sum;
+
+    let mut i = 1;
+    while i <= 50 {
+        if i % 2 == 0 {
+            counter_add(er, i);
+        } else {
+            counter_add(or_ref, i);
+        }
+        i = i + 1;
+    }
+
+    // Even: 2+4+...+50 = 25*26 = 650
+    assert_eq(even_sum.val, 650);
+    // Odd: 1+3+...+49 = 25^2 = 625
+    assert_eq(odd_sum.val, 625);
+}
+
+// =============================================================================
+// Test: Polynomial evaluation in loop via ref
+// =============================================================================
+
+fn test_poly_eval_loop() {
+    // p(x) = 1 + 2x + 3x^2
+    let p = Poly { c0: 1, c1: 2, c2: 3 };
+
+    let mut total = Counter { val: 0 };
+    let tr = &mut total;
+
+    // Sum p(0) + p(1) + p(2) + ... + p(5)
+    let mut x = 0;
+    while x <= 5 {
+        counter_add(tr, poly_eval(&p, x));
+        x = x + 1;
+    }
+    // p(0)=1, p(1)=6, p(2)=17, p(3)=34, p(4)=57, p(5)=86 = 201
+    assert_eq(total.val, 201);
+}
+
+// =============================================================================
+// Test: Scalar ref in nested loops
+// =============================================================================
+
+fn test_nested_loop_ref() {
+    let mut total = 0;
+    let tr = &mut total;
+
+    let mut i = 1;
+    while i <= 10 {
+        let mut j = 1;
+        while j <= i {
+            *tr = *tr + j;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    // Sum of 1..1 + 1..2 + ... + 1..10
+    // = 1 + 3 + 6 + 10 + 15 + 21 + 28 + 36 + 45 + 55 = 220
+    assert_eq(total, 220);
+}
+
+// =============================================================================
+// Test: Multiple record refs updated in same loop
+// =============================================================================
+
+fn test_multi_ref_loop() {
+    let mut a = Counter { val: 0 };
+    let mut b = Counter { val: 1000 };
+    let ar = &mut a;
+    let br = &mut b;
+
+    let mut i = 0;
+    while i < 20 {
+        counter_inc(ar);
+        (*br).val = (*br).val - 1;
+        i = i + 1;
+    }
+
+    assert_eq(a.val, 20);
+    assert_eq(b.val, 980);
+}
+
+// =============================================================================
+// Test: While loop with ref-based termination
+// =============================================================================
+
+fn test_ref_termination() {
+    let mut c = Counter { val: 100 };
+    let cr = &mut c;
+
+    let mut steps = 0;
+    while (*cr).val > 1 {
+        (*cr).val = (*cr).val / 2;
+        steps = steps + 1;
+    }
+
+    // 100 -> 50 -> 25 -> 12 -> 6 -> 3 -> 1 = 6 steps
+    assert_eq(steps, 6);
+    assert_eq(c.val, 1);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+fn main() -> Int {
+    test_counter_loop();
+    test_running_stats();
+    test_fib_loop();
+    test_conditional_accum();
+    test_poly_eval_loop();
+    test_nested_loop_ref();
+    test_multi_ref_loop();
+    test_ref_termination();
+    print("ref_in_loops_ok");
+    0
+}

@@ -1,0 +1,182 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, e2e, interp, expression_parser, recursive_descent, arithmetic, parsing
+// @timeout: 15000
+// @expected-exit: 0
+//
+// Recursive descent expression parser for integer arithmetic expressions.
+// Supports: integers (single digit 0-9), +, -, *, / with standard precedence.
+// Grammar:
+//   expr   := term (('+' | '-') term)*
+//   term   := factor (('*' | '/') factor)*
+//   factor := digit | '(' expr ')'
+//
+// Tokens: 0-9 for digit values, 10='+', 11='-', 12='*', 13='/', 14='(', 15=')'
+// Parser state: [Int; 2] where [0]=position, [1]=length.
+//
+// To avoid circular calls without forward declarations, we encode operator
+// precedence levels explicitly and pass the current level down recursively
+// using a depth parameter. Level 0 = expr (lowest), Level 1 = term, Level 2 = factor.
+
+fn tok_peek(tokens: [Int; 32], state: [Int; 2]) -> Int {
+    if state[0] >= state[1] { return -1; }
+    tokens[state[0]]
+}
+
+fn tok_advance(state: [Int; 2]) {
+    state[0] = state[0] + 1;
+}
+
+// parse_level: parses at a given precedence level (0=expr, 1=term, 2=factor).
+// Returns parsed integer value. Mutates state[0] (position).
+@allow(unbounded_recursion)
+fn parse_level(tokens: [Int; 32], state: [Int; 2], level: Int) -> Int {
+    if level == 2 {
+        // Factor: digit or parenthesized expression.
+        let t = tok_peek(tokens, state);
+        if t == 14 {   // '('
+            tok_advance(state);
+            let val = parse_level(tokens, state, 0);
+            tok_advance(state);   // consume ')'
+            return val;
+        }
+        // Digit literal.
+        tok_advance(state);
+        return t;
+    }
+
+    if level == 1 {
+        // Term: factor ('*' | '/') factor ...
+        let mut val = parse_level(tokens, state, 2);
+        let mut go = 1;
+        while go == 1 {
+            let t = tok_peek(tokens, state);
+            if t == 12 {   // '*'
+                tok_advance(state);
+                let r = parse_level(tokens, state, 2);
+                val = val * r;
+            } else if t == 13 {   // '/'
+                tok_advance(state);
+                let r = parse_level(tokens, state, 2);
+                val = val / r;
+            } else {
+                go = 0;
+            }
+        }
+        return val;
+    }
+
+    // Level 0: expr = term ('+' | '-') term ...
+    let mut val = parse_level(tokens, state, 1);
+    let mut go = 1;
+    while go == 1 {
+        let t = tok_peek(tokens, state);
+        if t == 10 {   // '+'
+            tok_advance(state);
+            let r = parse_level(tokens, state, 1);
+            val = val + r;
+        } else if t == 11 {   // '-'
+            tok_advance(state);
+            let r = parse_level(tokens, state, 1);
+            val = val - r;
+        } else {
+            go = 0;
+        }
+    }
+    val
+}
+
+fn eval_tokens(tokens: [Int; 32], n: Int) -> Int {
+    let mut state = [0, 0];
+    state[1] = n;
+    parse_level(tokens, state, 0)
+}
+
+fn test_simple_addition() {
+    // 3 + 4 = 7
+    let mut t = [3, 10, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t, 3), 7);
+
+    // 1 + 2 + 3 = 6
+    let mut t2 = [1, 10, 2, 10, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t2, 5), 6);
+
+    // 9 - 4 = 5
+    let mut t3 = [9, 11, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t3, 3), 5);
+    print("simple_addition: ok");
+}
+
+fn test_multiplication_precedence() {
+    // 2 + 3 * 4 = 14 (not 20)
+    let mut t = [2, 10, 3, 12, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t, 5), 14);
+
+    // 6 / 2 * 3 = 9 (left-to-right)
+    let mut t2 = [6, 13, 2, 12, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t2, 5), 9);
+
+    // 2 * 3 + 4 * 5 = 6 + 20 = 26
+    let mut t3 = [2, 12, 3, 10, 4, 12, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t3, 7), 26);
+    print("multiplication_precedence: ok");
+}
+
+fn test_parentheses() {
+    // (2 + 3) * 4 = 20
+    let mut t = [14, 2, 10, 3, 15, 12, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t, 7), 20);
+
+    // (1 + 2) * (3 + 4) = 3 * 7 = 21
+    let mut t2 = [14, 1, 10, 2, 15, 12, 14, 3, 10, 4, 15, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t2, 11), 21);
+
+    // 8 / (2 + 2) = 2
+    let mut t3 = [8, 13, 14, 2, 10, 2, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t3, 7), 2);
+    print("parentheses: ok");
+}
+
+fn test_single_digit() {
+    let mut t0 = [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t0, 1), 7);
+
+    let mut t1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t1, 1), 0);
+
+    let mut t2 = [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t2, 1), 9);
+    print("single_digit: ok");
+}
+
+fn test_complex_expression() {
+    // 3 * (4 + 2) - 8 / 4 = 18 - 2 = 16
+    // Tokens: 3 12 14 4 10 2 15 11 8 13 4
+    let mut t = [3, 12, 14, 4, 10, 2, 15, 11, 8, 13, 4, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq(eval_tokens(t, 11), 16);
+    print("complex_expression: ok");
+}
+
+fn main() -> Int {
+    test_simple_addition();
+    test_multiplication_precedence();
+    test_parentheses();
+    test_single_digit();
+    test_complex_expression();
+    print("[OK] 528_interp_expression_parser");
+    0
+}

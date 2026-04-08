@@ -1,0 +1,59 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L1
+// @tags: builtin-syntax, async, select
+// @timeout: 10000
+//
+// Tests select expression (keyword, not macro).
+// Spec: grammar/verum.ebnf Section 2.20.5 - select_expr
+
+async fn task_a() -> Int { 1 }
+async fn task_b() -> Int { 2 }
+async fn task_c() -> Int { 3 }
+
+async fn race_tasks() -> Int {
+    // select is a keyword expression (NOT select!)
+    // Each arm requires pattern = await_expr syntax per grammar
+    let winner = select {
+        _ = task_a().await => 100,
+        _ = task_b().await => 200,
+        _ = task_c().await => 300,
+    };
+
+    winner
+}
+
+async fn select_with_biased() -> Int {
+    // Biased select for prioritized racing
+    // Each arm requires pattern = await_expr syntax per grammar
+    let result = select biased {
+        _ = task_a().await => {
+            print("Task A won (priority)");
+            1
+        },
+        _ = task_b().await => {
+            print("Task B won");
+            2
+        },
+    };
+
+    result
+}
+
+async fn select_with_guards() -> Int {
+    let should_try_a: Bool = true;
+    let should_try_b: Bool = false;
+
+    // Guards follow the await_expr: pattern = expr.await if guard => body
+    let result = select {
+        _ = task_a().await if should_try_a => 10,
+        _ = task_b().await if should_try_b => 20,
+        _ = task_c().await => 30,
+    };
+
+    result
+}
+
+fn main() -> Int {
+    0
+}

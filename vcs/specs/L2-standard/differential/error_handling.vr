@@ -1,0 +1,346 @@
+// @test: differential
+// @tier: 0
+// @level: L2
+// @tags: differential, errors
+// @timeout: 10000
+// @expected-exit: 0
+
+/// L2-Standard: Error Handling
+///
+/// This test verifies that tagged union Ok/Err simulation, error propagation,
+/// default-on-error, and unwrap-or patterns produce identical results across
+/// interpreter (Tier 0) and AOT compiler (Tier 3).
+
+// ============================================================================
+// Tagged union: Outcome = Ok(Int) | Err(Int)
+// We encode as: { tag: 0 = Ok, 1 = Err, value: Int }
+// ============================================================================
+
+type Outcome is { tag: Int, value: Int };
+
+fn ok(v: Int) -> Outcome { Outcome { tag: 0, value: v } }
+fn err(v: Int) -> Outcome { Outcome { tag: 1, value: v } }
+
+fn is_ok(o: Outcome) -> Bool { o.tag == 0 }
+fn is_err(o: Outcome) -> Bool { o.tag == 1 }
+
+fn unwrap(o: Outcome) -> Int {
+    if is_ok(o) { o.value } else { -99999 }
+}
+
+fn unwrap_or(o: Outcome, default: Int) -> Int {
+    if is_ok(o) { o.value } else { default }
+}
+
+fn unwrap_err(o: Outcome) -> Int {
+    if is_err(o) { o.value } else { -99999 }
+}
+
+// ============================================================================
+// Map / transform on Outcome
+// ============================================================================
+
+fn outcome_map(o: Outcome, add_val: Int) -> Outcome {
+    if is_ok(o) { ok(o.value + add_val) } else { o }
+}
+
+fn outcome_map_err(o: Outcome, add_val: Int) -> Outcome {
+    if is_err(o) { err(o.value + add_val) } else { o }
+}
+
+fn outcome_and_then(o: Outcome, divisor: Int) -> Outcome {
+    if is_err(o) { o }
+    else if divisor == 0 { err(1) }  // division by zero error
+    else { ok(o.value / divisor) }
+}
+
+fn outcome_or_else(o: Outcome, fallback: Int) -> Outcome {
+    if is_ok(o) { o } else { ok(fallback) }
+}
+
+// ============================================================================
+// Error propagation chain
+// ============================================================================
+
+fn safe_divide(a: Int, b: Int) -> Outcome {
+    if b == 0 { err(1) }  // error code 1 = division by zero
+    else { ok(a / b) }
+}
+
+fn safe_sqrt_int(n: Int) -> Outcome {
+    if n < 0 { err(2) }  // error code 2 = negative input
+    else {
+        let mut x = n / 2;
+        if x == 0 && n > 0 { x = 1; }
+        let mut iters = 0;
+        let mut done = false;
+        while !done && iters < 50 {
+            if x == 0 { done = true; }
+            else {
+                let next = (x + n / x) / 2;
+                if next >= x { done = true; }
+                else { x = next; }
+            }
+            iters = iters + 1;
+        }
+        ok(x)
+    }
+}
+
+fn chain_computation(a: Int, b: Int) -> Outcome {
+    // Compute: sqrt(a / b)
+    let step1 = safe_divide(a, b);
+    if is_err(step1) { step1 }
+    else {
+        let quotient = unwrap(step1);
+        safe_sqrt_int(quotient)
+    }
+}
+
+// ============================================================================
+// Multiple error sources with accumulation
+// ============================================================================
+
+fn validate_range(val: Int, lo: Int, hi: Int) -> Outcome {
+    if val < lo { err(10) }    // error: below range
+    else if val > hi { err(11) }  // error: above range
+    else { ok(val) }
+}
+
+fn validate_positive(val: Int) -> Outcome {
+    if val <= 0 { err(20) }  // error: not positive
+    else { ok(val) }
+}
+
+fn validate_even(val: Int) -> Outcome {
+    if val % 2 != 0 { err(30) }  // error: not even
+    else { ok(val) }
+}
+
+fn validate_all(val: Int) -> Outcome {
+    // Must be positive, even, and in range [2, 100]
+    let r1 = validate_positive(val);
+    if is_err(r1) { r1 }
+    else {
+        let r2 = validate_even(val);
+        if is_err(r2) { r2 }
+        else {
+            validate_range(val, 2, 100)
+        }
+    }
+}
+
+// ============================================================================
+// Retry pattern
+// ============================================================================
+
+fn flaky_operation(attempt: Int) -> Outcome {
+    // Fails on attempts 1 and 2, succeeds on attempt 3+
+    if attempt < 3 { err(attempt) }
+    else { ok(attempt * 10) }
+}
+
+fn retry(max_attempts: Int) -> Outcome {
+    let mut attempt = 1;
+    let mut result = err(0);
+    let mut done = false;
+    while attempt <= max_attempts && !done {
+        result = flaky_operation(attempt);
+        if is_ok(result) { done = true; }
+        attempt = attempt + 1;
+    }
+    result
+}
+
+// ============================================================================
+// Collecting results
+// ============================================================================
+
+fn count_successes(v0: Outcome, v1: Outcome, v2: Outcome, v3: Outcome) -> Int {
+    let mut c = 0;
+    if is_ok(v0) { c = c + 1; }
+    if is_ok(v1) { c = c + 1; }
+    if is_ok(v2) { c = c + 1; }
+    if is_ok(v3) { c = c + 1; }
+    c
+}
+
+fn sum_successes(v0: Outcome, v1: Outcome, v2: Outcome, v3: Outcome) -> Int {
+    let mut total = 0;
+    if is_ok(v0) { total = total + unwrap(v0); }
+    if is_ok(v1) { total = total + unwrap(v1); }
+    if is_ok(v2) { total = total + unwrap(v2); }
+    if is_ok(v3) { total = total + unwrap(v3); }
+    total
+}
+
+fn first_error(v0: Outcome, v1: Outcome, v2: Outcome, v3: Outcome) -> Outcome {
+    if is_err(v0) { v0 }
+    else if is_err(v1) { v1 }
+    else if is_err(v2) { v2 }
+    else if is_err(v3) { v3 }
+    else { ok(0) }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+fn test_basic_outcome() {
+    let o1 = ok(42);
+    let o2 = err(7);
+
+    assert(is_ok(o1));
+    assert(!is_err(o1));
+    assert(!is_ok(o2));
+    assert(is_err(o2));
+    assert_eq(unwrap(o1), 42);
+    assert_eq(unwrap_err(o2), 7);
+    print("outcome_ok=42");
+    print("outcome_err=7");
+
+    assert_eq(unwrap_or(o1, 0), 42);
+    assert_eq(unwrap_or(o2, 0), 0);
+    print("unwrap_or_ok=42");
+    print("unwrap_or_err=0");
+}
+
+fn test_map_operations() {
+    let o1 = ok(10);
+    let o2 = err(5);
+
+    let m1 = outcome_map(o1, 5);
+    assert_eq(unwrap(m1), 15);
+    print("map_ok=15");
+
+    let m2 = outcome_map(o2, 5);
+    assert(is_err(m2));
+    assert_eq(unwrap_err(m2), 5);
+    print("map_err_unchanged=5");
+
+    let me = outcome_map_err(o2, 100);
+    assert_eq(unwrap_err(me), 105);
+    print("map_err=105");
+}
+
+fn test_and_then() {
+    let o1 = ok(100);
+    let r1 = outcome_and_then(o1, 5);
+    assert_eq(unwrap(r1), 20);
+    print("and_then_ok=20");
+
+    let r2 = outcome_and_then(o1, 0);
+    assert(is_err(r2));
+    print("and_then_div_zero=err");
+
+    let o3 = err(99);
+    let r3 = outcome_and_then(o3, 5);
+    assert(is_err(r3));
+    assert_eq(unwrap_err(r3), 99);
+    print("and_then_propagate=99");
+}
+
+fn test_or_else() {
+    let o1 = ok(42);
+    let r1 = outcome_or_else(o1, 0);
+    assert_eq(unwrap(r1), 42);
+
+    let o2 = err(7);
+    let r2 = outcome_or_else(o2, 99);
+    assert_eq(unwrap(r2), 99);
+    print("or_else_fallback=99");
+}
+
+fn test_safe_divide() {
+    let r1 = safe_divide(10, 2);
+    assert_eq(unwrap(r1), 5);
+    print("safe_div=5");
+
+    let r2 = safe_divide(10, 0);
+    assert(is_err(r2));
+    assert_eq(unwrap_err(r2), 1);
+    print("safe_div_zero=err");
+
+    let r3 = safe_divide(7, 3);
+    assert_eq(unwrap(r3), 2);
+    print("safe_div_trunc=2");
+}
+
+fn test_chain() {
+    let r1 = chain_computation(100, 4);
+    // 100 / 4 = 25, sqrt(25) = 5
+    assert_eq(unwrap(r1), 5);
+    print("chain_ok=5");
+
+    let r2 = chain_computation(100, 0);
+    assert(is_err(r2));
+    print("chain_div_zero=err");
+
+    let r3 = chain_computation(-100, 1);
+    // -100 / 1 = -100, sqrt(-100) = err
+    assert(is_err(r3));
+    print("chain_neg_sqrt=err");
+}
+
+fn test_validation() {
+    let r1 = validate_all(42);
+    assert(is_ok(r1));
+    print("validate_42=ok");
+
+    let r2 = validate_all(-5);
+    assert(is_err(r2));
+    assert_eq(unwrap_err(r2), 20);
+    print("validate_neg=20");
+
+    let r3 = validate_all(7);
+    assert(is_err(r3));
+    assert_eq(unwrap_err(r3), 30);
+    print("validate_odd=30");
+
+    let r4 = validate_all(200);
+    assert(is_err(r4));
+    assert_eq(unwrap_err(r4), 11);
+    print("validate_range=11");
+}
+
+fn test_retry() {
+    let r1 = retry(5);
+    assert(is_ok(r1));
+    assert_eq(unwrap(r1), 30);
+    print("retry_ok=30");
+
+    let r2 = retry(2);
+    assert(is_err(r2));
+    print("retry_fail=err");
+}
+
+fn test_collecting() {
+    let v0 = ok(10);
+    let v1 = err(1);
+    let v2 = ok(20);
+    let v3 = ok(30);
+
+    assert_eq(count_successes(v0, v1, v2, v3), 3);
+    assert_eq(sum_successes(v0, v1, v2, v3), 60);
+    print("collect_count=3");
+    print("collect_sum=60");
+
+    let fe = first_error(v0, v1, v2, v3);
+    assert(is_err(fe));
+    assert_eq(unwrap_err(fe), 1);
+    print("first_error=1");
+}
+
+fn main() -> Int {
+    test_basic_outcome();
+    test_map_operations();
+    test_and_then();
+    test_or_else();
+    test_safe_divide();
+    test_chain();
+    test_validation();
+    test_retry();
+    test_collecting();
+    print("PASS: error_handling");
+    0
+}

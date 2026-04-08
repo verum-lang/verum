@@ -1,0 +1,137 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: vbc, arithmetic, unary, neg, not
+// @timeout: 5000
+// @expect: pass
+//
+// Test: NEG_I, NEG_F, NOT
+// Verifies unary arithmetic operations
+// Note: abs() and pow() intrinsics require proper import/implementation
+
+fn test_neg_integer() {
+    // Integer negation
+    assert_eq(-0, 0);
+    assert_eq(-1, -1);
+    assert_eq(-(-1), 1);
+    assert_eq(-42, -42);
+    assert_eq(-(-42), 42);
+
+    // Double negation = identity
+    let x: Int = 12345;
+    assert_eq(-(-x), x);
+
+    // Negation of various values
+    let near_min: Int = -140737488355327;
+    assert_eq(-near_min, 140737488355327);
+}
+
+fn test_neg_float() {
+    // Float negation
+    assert_eq(-0.0, -0.0);
+    assert_eq(-1.0, -1.0);
+    assert_eq(-(-1.0), 1.0);
+    assert_eq(-3.14159, -3.14159);
+    assert_eq(-(-3.14159), 3.14159);
+
+    // Negative zero
+    let nz: Float = -0.0;
+    assert_eq(nz, 0.0);       // Equal value
+    assert_eq(-nz, 0.0);      // Negating -0 gives +0
+
+    // Infinity negation
+    let pos_inf: Float = 1.0 / 0.0;
+    let neg_inf: Float = -pos_inf;
+    assert(neg_inf < 0.0);
+    assert_eq(-neg_inf, pos_inf);
+}
+
+fn test_not_boolean() {
+    assert_eq(!true, false);
+    assert_eq(!false, true);
+
+    // Double NOT = identity
+    assert_eq(!!true, true);
+    assert_eq(!!false, false);
+
+    // Chain of NOTs
+    assert_eq(!!!true, false);
+    assert_eq(!!!!true, true);
+}
+
+fn test_inc_dec() {
+    // Increment
+    let mut a: Int = 0;
+    a = a + 1;  // INC may be optimized
+    assert_eq(a, 1);
+
+    let mut b: Int = -1;
+    b = b + 1;
+    assert_eq(b, 0);
+
+    // Decrement
+    let mut c: Int = 1;
+    c = c - 1;  // DEC may be optimized
+    assert_eq(c, 0);
+
+    let mut d: Int = 0;
+    d = d - 1;
+    assert_eq(d, -1);
+}
+
+fn test_combined_negation() {
+    // Combining negation operations
+    let x: Int = -5;
+    assert_eq(-x, 5);
+    assert_eq(-(-x), -5);
+
+    let y: Int = 10;
+    assert_eq(-y, -10);
+    assert_eq(-(-(-y)), -10);
+
+    // Float negation chains
+    let f: Float = 3.14;
+    assert_eq(-f, -3.14);
+    assert_eq(-(-f), 3.14);
+    assert_eq(-(-(-f)), -3.14);
+}
+
+fn test_negation_properties() {
+    // -(a + b) = -a - b
+    let a: Int = 10;
+    let b: Int = 5;
+    assert_eq(-(a + b), -a - b);
+
+    // -(a - b) = b - a
+    assert_eq(-(a - b), b - a);
+
+    // -(a * b) = (-a) * b = a * (-b)
+    assert_eq(-(a * b), (-a) * b);
+    assert_eq(-(a * b), a * (-b));
+
+    // -(-a * -b) = -(a * b)
+    assert_eq(-(-a * -b), -(a * b));
+}
+
+fn test_not_with_comparisons() {
+    let x: Int = 5;
+
+    assert(!false);
+    assert(!!true);
+
+    assert(!(x < 3));     // 5 is not less than 3
+    assert(!(x > 10));    // 5 is not greater than 10
+    assert(!(x == 0));    // 5 is not equal to 0
+    assert(!!(x > 0));    // 5 is greater than 0 (double negation)
+}
+
+fn main() {
+    test_neg_integer();
+    test_neg_float();
+    test_not_boolean();
+    test_inc_dec();
+    test_combined_negation();
+    test_negation_properties();
+    test_not_with_comparisons();
+    print("005_unary_ops: PASSED");
+}

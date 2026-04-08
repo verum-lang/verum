@@ -1,0 +1,108 @@
+// @test: parse-fail
+// @tier: all
+// @level: L0
+// @tags: parser, expressions, try, error-handling, invalid, error
+
+// ERROR: Try without block
+try risky();
+
+// ERROR: Try with empty block
+try { }
+
+// ERROR: Recover without try
+recover { e => handle(e) }
+
+// ERROR: Finally without try
+finally { cleanup() }
+
+// ERROR: Try without recover or finally
+try {
+    risky();
+}
+// Need at least one of recover/finally
+
+// ERROR: Multiple recover blocks
+try {
+    risky();
+} recover {
+    e => handle1(e)
+} recover {
+    e => handle2(e)
+}
+
+// ERROR: Recover without pattern
+try {
+    risky();
+} recover {
+    handle()
+}
+
+// ERROR: Recover with invalid pattern (expression as pattern)
+try {
+    risky();
+} recover {
+    1 + 2 => handle()
+}
+
+// ERROR: Finally with pattern (shouldn't have one)
+try {
+    risky();
+} finally |x| {
+    cleanup(x)
+}
+
+// ERROR: Wrong order - finally before recover
+try {
+    risky();
+} finally {
+    cleanup()
+} recover {
+    e => handle(e)
+}
+
+// ERROR: Question mark on non-Result type
+let x: Int = 42?;
+
+// ERROR: Question mark without expression
+let x = ?;
+
+// ERROR: Multiple question marks without expression between
+let x = risky()??;  // Might be valid for nested Results
+
+// ERROR: Question mark in pattern position
+let ? = result;
+
+// ERROR: Try expression without braces
+try risky() recover { e => handle(e) };
+
+// ERROR: Nested try without proper braces
+try try { inner() } recover { _ => {} }
+
+// ERROR: Recover with typed pattern missing type
+try {
+    risky();
+} recover {
+    e: => handle(e)
+}
+
+// ERROR: Try-recover with expression instead of block (missing braces in arm)
+try {
+    risky();
+} recover e.to_string()
+
+// ERROR: Empty recover block
+try {
+    risky();
+} recover {
+}
+
+// ERROR: Try as incomplete statement
+try {
+    risky();
+} recover
+
+// ERROR: Mismatched braces in try
+try {
+    risky();
+} recover {
+    e => handle(e)

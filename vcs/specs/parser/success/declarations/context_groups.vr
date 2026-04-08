@@ -1,0 +1,113 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L0
+// @category: declarations
+// @description: Context group definitions with negation, transforms, and aliases
+// Grammar: context_group_def = 'using' , identifier , '=' , context_list_def , ';' ;
+//          context_list_def = '[' , context_spec , { ',' , context_spec } , ']' | context_spec ;
+
+// =============================================================================
+// CONTEXT NEGATION (! prefix)
+// =============================================================================
+
+// Pure computation: no IO, no State, no Random
+using Pure = [!IO, !State, !Random];
+
+// Read-only context: no mutable state
+using ReadOnly = [!MutableState, Database];
+
+// Single negation
+using NoIO = [!IO];
+
+// =============================================================================
+// CONTEXT GROUPS (positive)
+// =============================================================================
+
+using WebContext = [Database, Logger, Cache, Auth];
+
+using ServiceContext = [Database, Logger, Config];
+
+using TestContext = [MockDatabase, TestLogger];
+
+// =============================================================================
+// CONTEXT TRANSFORMS
+// =============================================================================
+
+// Transactional database, scoped cache
+using TransactionalWeb = [Database.transactional(), Cache.scoped(), Logger];
+
+// Multiple transforms on single context
+using AuditedDb = [Database.transactional().audited()];
+
+// Transform with arguments
+using TimedCache = [Cache.ttl(300), Database.pooled(10)];
+
+// =============================================================================
+// CONTEXT ALIASES
+// =============================================================================
+
+fn query_users() using [Database as db, Logger as log] {
+    log.info("Querying users");
+    db.query("SELECT * FROM users");
+}
+
+fn process_data() using [Database as primary_db, Cache as local_cache] {
+    let data = primary_db.fetch_all();
+    local_cache.store(data);
+}
+
+// =============================================================================
+// MIXED NEGATION AND POSITIVE
+// =============================================================================
+
+using SafeCompute = [!IO, !Network, MathLibrary, Logger];
+
+using Sandbox = [!FileSystem, !Network, !ProcessSpawn, Logger];
+
+// =============================================================================
+// CONTEXT GROUPS WITH TYPE PARAMETERS
+// =============================================================================
+
+using Stateful = [State<AppState>, Logger];
+
+using GenericRepo = [Repository<User>, Logger, Cache];
+
+// Negation with type parameter wildcard
+using NoState = [!State<_>];
+
+// =============================================================================
+// USING CONTEXT GROUPS IN FUNCTIONS
+// =============================================================================
+
+fn handle_request() using WebContext {
+    let user = Database.find_user(request.user_id);
+    Logger.info(f"Found user: {user.name}");
+    Cache.store(user);
+}
+
+fn pure_compute(x: Int, y: Int) -> Int using Pure {
+    x * y + 42
+}
+
+fn test_handler() using TestContext {
+    MockDatabase.seed_data();
+    let result = run_handler();
+    assert(result.is_ok());
+}
+
+// =============================================================================
+// CONDITIONAL CONTEXTS
+// =============================================================================
+
+fn maybe_log(msg: Text) using [Logger if debug_mode] {
+    Logger.info(msg);
+}
+
+// =============================================================================
+// CONTEXT GROUP COMPOSITION IN FUNCTIONS
+// =============================================================================
+
+fn full_service() using [WebContext, MetricsContext] {
+    handle_request();
+    Metrics.record_latency();
+}

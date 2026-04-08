@@ -1,0 +1,523 @@
+// @test: parse
+// @tier: all
+// @level: L4
+// @skip-disabled: benchmark tests can typecheck without runtime
+// @tags: macro, compression, gzip, zstd, real-world
+// @description: Compression benchmarks (target: > 100MB/s compress, > 300MB/s decompress)
+
+/// Compression Performance Benchmark
+///
+/// Measures compression and decompression performance for various algorithms.
+/// Compression is critical for storage efficiency and network transfer.
+///
+/// Performance targets:
+/// - Gzip compression:    > 100MB/sec
+/// - Gzip decompression:  > 300MB/sec
+/// - Zstd compression:    > 200MB/sec
+/// - Zstd decompression:  > 500MB/sec
+/// - LZ4 compression:     > 400MB/sec
+/// - LZ4 decompression:   > 1GB/sec
+///
+/// Test data types:
+/// - Text (high compression ratio)
+/// - Binary (mixed compressibility)
+/// - Random (incompressible)
+///
+/// Spec reference: docs/detailed/20-standard-library.md
+
+const WARMUP_ITERATIONS: Int = 10;
+const BENCHMARK_ITERATIONS: Int = 100;
+const DATA_SIZE: Int = 1_000_000;  // 1MB
+
+/// Generate compressible text data
+fn generate_text_data(size: Int) -> List<u8> {
+    let sample = "The quick brown fox jumps over the lazy dog. Lorem ipsum dolor sit amet. ";
+    let mut data = Text.with_capacity(size);
+
+    while data.len() < size {
+        data.push_str(sample);
+    }
+
+    data.truncate(size);
+    data.into_bytes()
+}
+
+/// Generate structured data (JSON-like)
+fn generate_structured_data(size: Int) -> List<u8> {
+    let mut data = Text.with_capacity(size);
+    data.push_str("[");
+
+    let entry_size = 80;
+    let entries = size / entry_size;
+
+    for i in 0..entries {
+        if i > 0 { data.push_str(","); }
+        data.push_str(&format(
+            r#"{{"id":{},"name":"item_{}","value":{}}}"#,
+            i, i, i * 42
+        ));
+    }
+
+    data.push_str("]");
+    data.into_bytes()
+}
+
+/// Generate binary data (mixed patterns)
+fn generate_binary_data(size: Int) -> List<u8> {
+    let mut data = List.with_capacity(size);
+
+    for i in 0..size {
+        // Mix of patterns
+        let byte = if i % 100 < 50 {
+            // Repetitive section
+            (i % 16) as u8
+        } else {
+            // Varied section
+            ((i * 7 + 13) % 256) as u8
+        };
+        data.push(byte);
+    }
+
+    data
+}
+
+/// Generate random data (incompressible)
+fn generate_random_data(size: Int) -> List<u8> {
+    let mut data = List.with_capacity(size);
+    let mut rng = Random.with_seed(42);
+
+    for _ in 0..size {
+        data.push((rng.next() % 256) as u8);
+    }
+
+    data
+}
+
+/// Benchmark: Gzip compression
+fn benchmark_gzip_compress() -> CompressionBenchmarkResult {
+    let data = generate_text_data(DATA_SIZE);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let compressed = gzip.compress(&data, CompressionLevel.Default);
+        black_box(compressed);
+    }
+
+    let start = Instant.now();
+    let mut total_compressed_size = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let compressed = gzip.compress(&data, CompressionLevel.Default);
+        total_compressed_size += compressed.len();
+        black_box(compressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "gzip_compress",
+        algorithm: "gzip",
+        operation: "compress",
+        input_bytes: total_bytes,
+        output_bytes: total_compressed_size,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: total_bytes as f64 / total_compressed_size as f64,
+        target_mb_per_sec: 100.0,
+    }
+}
+
+/// Benchmark: Gzip decompression
+fn benchmark_gzip_decompress() -> CompressionBenchmarkResult {
+    let data = generate_text_data(DATA_SIZE);
+    let compressed = gzip.compress(&data, CompressionLevel.Default);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let decompressed = gzip.decompress(&compressed);
+        black_box(decompressed);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let decompressed = gzip.decompress(&compressed);
+        black_box(decompressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "gzip_decompress",
+        algorithm: "gzip",
+        operation: "decompress",
+        input_bytes: compressed.len() * BENCHMARK_ITERATIONS,
+        output_bytes: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: 0.0,  // Not applicable for decompress
+        target_mb_per_sec: 300.0,
+    }
+}
+
+/// Benchmark: Zstd compression
+fn benchmark_zstd_compress() -> CompressionBenchmarkResult {
+    let data = generate_text_data(DATA_SIZE);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let compressed = zstd.compress(&data, 3);  // Level 3
+        black_box(compressed);
+    }
+
+    let start = Instant.now();
+    let mut total_compressed_size = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let compressed = zstd.compress(&data, 3);
+        total_compressed_size += compressed.len();
+        black_box(compressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "zstd_compress",
+        algorithm: "zstd",
+        operation: "compress",
+        input_bytes: total_bytes,
+        output_bytes: total_compressed_size,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: total_bytes as f64 / total_compressed_size as f64,
+        target_mb_per_sec: 200.0,
+    }
+}
+
+/// Benchmark: Zstd decompression
+fn benchmark_zstd_decompress() -> CompressionBenchmarkResult {
+    let data = generate_text_data(DATA_SIZE);
+    let compressed = zstd.compress(&data, 3);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let decompressed = zstd.decompress(&compressed);
+        black_box(decompressed);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let decompressed = zstd.decompress(&compressed);
+        black_box(decompressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "zstd_decompress",
+        algorithm: "zstd",
+        operation: "decompress",
+        input_bytes: compressed.len() * BENCHMARK_ITERATIONS,
+        output_bytes: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: 0.0,
+        target_mb_per_sec: 500.0,
+    }
+}
+
+/// Benchmark: LZ4 compression (fast mode)
+fn benchmark_lz4_compress() -> CompressionBenchmarkResult {
+    let data = generate_text_data(DATA_SIZE);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let compressed = lz4.compress(&data);
+        black_box(compressed);
+    }
+
+    let start = Instant.now();
+    let mut total_compressed_size = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let compressed = lz4.compress(&data);
+        total_compressed_size += compressed.len();
+        black_box(compressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "lz4_compress",
+        algorithm: "lz4",
+        operation: "compress",
+        input_bytes: total_bytes,
+        output_bytes: total_compressed_size,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: total_bytes as f64 / total_compressed_size as f64,
+        target_mb_per_sec: 400.0,
+    }
+}
+
+/// Benchmark: LZ4 decompression
+fn benchmark_lz4_decompress() -> CompressionBenchmarkResult {
+    let data = generate_text_data(DATA_SIZE);
+    let compressed = lz4.compress(&data);
+
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        let decompressed = lz4.decompress(&compressed, DATA_SIZE);
+        black_box(decompressed);
+    }
+
+    let start = Instant.now();
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let decompressed = lz4.decompress(&compressed, DATA_SIZE);
+        black_box(decompressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "lz4_decompress",
+        algorithm: "lz4",
+        operation: "decompress",
+        input_bytes: compressed.len() * BENCHMARK_ITERATIONS,
+        output_bytes: total_bytes,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: 0.0,
+        target_mb_per_sec: 1000.0,
+    }
+}
+
+/// Benchmark: Structured data compression
+fn benchmark_structured_compress() -> CompressionBenchmarkResult {
+    let data = generate_structured_data(DATA_SIZE);
+
+    let start = Instant.now();
+    let mut total_compressed_size = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let compressed = zstd.compress(&data, 3);
+        total_compressed_size += compressed.len();
+        black_box(compressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "structured_zstd",
+        algorithm: "zstd",
+        operation: "compress",
+        input_bytes: total_bytes,
+        output_bytes: total_compressed_size,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: total_bytes as f64 / total_compressed_size as f64,
+        target_mb_per_sec: 180.0,
+    }
+}
+
+/// Benchmark: Binary data compression
+fn benchmark_binary_compress() -> CompressionBenchmarkResult {
+    let data = generate_binary_data(DATA_SIZE);
+
+    let start = Instant.now();
+    let mut total_compressed_size = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let compressed = zstd.compress(&data, 3);
+        total_compressed_size += compressed.len();
+        black_box(compressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "binary_zstd",
+        algorithm: "zstd",
+        operation: "compress",
+        input_bytes: total_bytes,
+        output_bytes: total_compressed_size,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: total_bytes as f64 / total_compressed_size as f64,
+        target_mb_per_sec: 150.0,
+    }
+}
+
+/// Benchmark: Incompressible data
+fn benchmark_random_compress() -> CompressionBenchmarkResult {
+    let data = generate_random_data(DATA_SIZE);
+
+    let start = Instant.now();
+    let mut total_compressed_size = 0;
+
+    for _ in 0..BENCHMARK_ITERATIONS {
+        let compressed = zstd.compress(&data, 1);  // Fast mode
+        total_compressed_size += compressed.len();
+        black_box(compressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS;
+
+    CompressionBenchmarkResult {
+        name: "random_zstd",
+        algorithm: "zstd",
+        operation: "compress",
+        input_bytes: total_bytes,
+        output_bytes: total_compressed_size,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: total_bytes as f64 / total_compressed_size as f64,
+        target_mb_per_sec: 300.0,  // Fast fallback for incompressible
+    }
+}
+
+/// Benchmark: Streaming compression
+fn benchmark_streaming_compress() -> CompressionBenchmarkResult {
+    let data = generate_text_data(DATA_SIZE);
+    let chunk_size = 64 * 1024;  // 64KB chunks
+
+    let start = Instant.now();
+    let mut total_compressed_size = 0;
+
+    for _ in 0..(BENCHMARK_ITERATIONS / 2) {
+        let mut encoder = zstd.Encoder.new(3);
+        let mut compressed = List.new();
+
+        for chunk in data.chunks(chunk_size) {
+            compressed.extend(encoder.compress_chunk(chunk));
+        }
+        compressed.extend(encoder.finish());
+
+        total_compressed_size += compressed.len();
+        black_box(compressed);
+    }
+
+    let elapsed = start.elapsed();
+    let total_bytes = DATA_SIZE * BENCHMARK_ITERATIONS / 2;
+
+    CompressionBenchmarkResult {
+        name: "streaming_zstd",
+        algorithm: "zstd",
+        operation: "stream_compress",
+        input_bytes: total_bytes,
+        output_bytes: total_compressed_size,
+        elapsed_ms: elapsed.as_millis(),
+        mb_per_sec: (total_bytes as f64 / 1e6) / elapsed.as_secs_f64(),
+        compression_ratio: total_bytes as f64 / total_compressed_size as f64,
+        target_mb_per_sec: 150.0,
+    }
+}
+
+fn main() {
+    println("=== Compression Performance Benchmark ===\n");
+
+    let results = [
+        benchmark_gzip_compress(),
+        benchmark_gzip_decompress(),
+        benchmark_zstd_compress(),
+        benchmark_zstd_decompress(),
+        benchmark_lz4_compress(),
+        benchmark_lz4_decompress(),
+        benchmark_structured_compress(),
+        benchmark_binary_compress(),
+        benchmark_random_compress(),
+        benchmark_streaming_compress(),
+    ];
+
+    println("{:<25} {:>10} {:>12} {:>10} {:>12} {:>8}",
+            "Benchmark", "Algorithm", "MB/sec", "Ratio", "Target", "Status");
+    println("{}", "-".repeat(85));
+
+    for result in results {
+        let passed = result.mb_per_sec >= result.target_mb_per_sec;
+        let status = if passed { "PASS" } else { "FAIL" };
+        let ratio_str = if result.compression_ratio > 0.0 {
+            format("{:.2}x", result.compression_ratio)
+        } else {
+            "-".into()
+        };
+
+        println("{:<25} {:>10} {:>12.1} {:>10} {:>12.0} {:>8}",
+                result.name, result.algorithm, result.mb_per_sec, ratio_str,
+                result.target_mb_per_sec, status);
+    }
+
+    println("");
+    println("Compression Performance Targets:");
+    println("  - Gzip:   > 100 MB/sec compress, > 300 MB/sec decompress");
+    println("  - Zstd:   > 200 MB/sec compress, > 500 MB/sec decompress");
+    println("  - LZ4:    > 400 MB/sec compress, > 1 GB/sec decompress");
+}
+
+type CompressionBenchmarkResult is {
+    name: Text,
+    algorithm: Text,
+    operation: Text,
+    input_bytes: Int,
+    output_bytes: Int,
+    elapsed_ms: Int,
+    mb_per_sec: f64,
+    compression_ratio: f64,
+    target_mb_per_sec: f64,
+};
+
+type CompressionLevel is Fast | Default | Best;
+
+module gzip {
+    pub fn compress(data: &List<u8>, level: CompressionLevel) -> List<u8> { data.clone() }
+    pub fn decompress(data: &List<u8>) -> Result<List<u8>, Error> { Ok(List.new()) }
+}
+
+module zstd {
+    pub fn compress(data: &List<u8>, level: Int) -> List<u8> { data.clone() }
+    pub fn decompress(data: &List<u8>) -> Result<List<u8>, Error> { Ok(List.new()) }
+
+    pub type Encoder is { level: Int };
+    implement Encoder {
+        pub fn new(level: Int) -> Self { Self { level } }
+        pub fn compress_chunk(&mut self, chunk: &[u8]) -> List<u8> { chunk.to_vec() }
+        pub fn finish(&mut self) -> List<u8> { List.new() }
+    }
+}
+
+module lz4 {
+    pub fn compress(data: &List<u8>) -> List<u8> { data.clone() }
+    pub fn decompress(data: &List<u8>, expected_size: Int) -> Result<List<u8>, Error> { Ok(List.new()) }
+}
+
+type Random is { seed: u64 };
+implement Random {
+    fn with_seed(seed: u64) -> Self { Self { seed } }
+    fn next(&mut self) -> u64 { self.seed = self.seed.wrapping_mul(6364136223846793005).wrapping_add(1); self.seed }
+}
+
+type Instant is { nanos: Int };
+implement Instant {
+    fn now() -> Self { Self { nanos: 0 } }
+    fn elapsed(&self) -> Duration { Duration { nanos: 0 } }
+}
+
+type Duration is { nanos: Int };
+implement Duration {
+    fn as_millis(&self) -> Int { self.nanos / 1_000_000 }
+    fn as_secs_f64(&self) -> f64 { self.nanos as f64 / 1e9 }
+}
+
+fn black_box<T>(x: T) -> T { x }
+fn format(fmt: &Text, args: List<Text>) -> Text { Text.new() }

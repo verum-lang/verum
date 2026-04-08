@@ -1,0 +1,44 @@
+// @test: meta-fail
+// @level: L0
+// @tier: 0
+// @tags: meta, builtins, reflection, context, error
+// @description: Test that protocol checking functions require MetaTypes context
+// @expected-error: M201
+
+// =============================================================================
+// PROTOCOL CHECK MISSING CONTEXT TESTS
+// =============================================================================
+
+// is_copy requires MetaTypes context
+meta fn test_is_copy_no_context() -> Bool {
+    is_copy(Int)  // ERROR: requires MetaTypes context
+}
+
+// is_send requires MetaTypes context
+meta fn test_is_send_no_context() -> Bool {
+    is_send(Int)  // ERROR: requires MetaTypes context
+}
+
+// is_sync requires MetaTypes context
+meta fn test_is_sync_no_context() -> Bool {
+    is_sync(Int)  // ERROR: requires MetaTypes context
+}
+
+// is_sized requires MetaTypes context
+meta fn test_is_sized_no_context() -> Bool {
+    is_sized(Int)  // ERROR: requires MetaTypes context
+}
+
+// needs_drop requires MetaTypes context
+meta fn test_needs_drop_no_context() -> Bool {
+    needs_drop(Text)  // ERROR: requires MetaTypes context
+}
+
+// implements requires MetaTypes context
+meta fn test_implements_no_context() -> Bool {
+    implements(Int, Copy)  // ERROR: requires MetaTypes context
+}
+
+fn main() {
+    @const assert(test_is_copy_no_context());
+}

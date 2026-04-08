@@ -1,0 +1,159 @@
+// @test: typecheck-pass
+// @tier: 3
+// @level: L3
+// @tags: meta, tagged-literals, compile-time-parsing
+
+/// Compile-time парсинг tagged literals
+///
+/// Tagged literals используют синтаксис tag#"content" для
+/// форматно-специфичного контента с compile-time валидацией.
+/// Тест использует только базовые возможности языка без stdlib.
+
+// ============================================================
+// ОПРЕДЕЛЕНИЕ ТИПОВ
+// ============================================================
+
+/// JSON data container
+type JsonData is {
+    raw: Text,
+};
+
+/// SQL query container
+type SqlQuery is {
+    query: Text,
+};
+
+/// Regex pattern container
+type RegexPattern is {
+    pattern: Text,
+};
+
+/// URL container
+type UrlData is {
+    url: Text,
+};
+
+// ============================================================
+// TAGGED LITERAL USAGE (BUILT-IN TAGS)
+// ============================================================
+
+fn test_json_literals() {
+    // Simple JSON object (escaped quotes for inline)
+    let obj = json#"{\"name\": \"test\", \"value\": 42}";
+
+    // JSON array
+    let arr = json#"[1, 2, 3, 4, 5]";
+
+    // Nested JSON
+    let nested = json#"{\"outer\": {\"inner\": \"value\"}}";
+}
+
+fn test_sql_literals() {
+    // Simple SELECT
+    let select_query = sql#"SELECT * FROM users";
+
+    // SELECT with WHERE
+    let filtered = sql#"SELECT name, email FROM users WHERE active = true";
+
+    // INSERT statement
+    let insert = sql#"INSERT INTO users (name, email) VALUES ('testp, 'test@example.comp)";
+}
+
+fn test_regex_literals() {
+    // Email pattern
+    let email_pattern = rx#"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}";
+
+    // Phone pattern
+    let phone_pattern = rx#"\+?[1-9]\d{1,14}";
+
+    // Simple word match
+    let word_pattern = rx#"\w+";
+}
+
+fn test_url_literals() {
+    // HTTP URL
+    let http_url = url#"https://example.com/api/v1/users";
+
+    // URL with query params
+    let with_params = url#"https://api.example.com/search?q=test&limit=10";
+
+    // File URL
+    let file_url = url#"file:///home/user/document.txt";
+}
+
+fn test_xml_literals() {
+    // Simple XML element
+    let element = xml#"<item>value</item>";
+
+    // XML with attributes
+    let with_attrs = xml#"<user id=\"1\" active=\"true\">John</user>";
+
+    // Nested XML
+    let nested = xml#"<root><child><value>data</value></child></root>";
+}
+
+// ============================================================
+// MULTILINE TAGGED LITERALS
+// ============================================================
+
+fn test_multiline_literals() {
+    // Multiline JSON
+    let json_obj = json#"""
+    {
+        "users": [
+            {"id": 1, "name": "Alice"},
+            {"id": 2, "name": "Bob"}
+        ],
+        "total": 2
+    }
+    """;
+
+    // Multiline SQL
+    let complex_query = sql#"""
+    SELECT
+        u.id,
+        u.name,
+        COUNT(o.id) as order_count
+    FROM users u
+    LEFT JOIN orders o ON u.id = o.user_id
+    WHERE u.active = true
+    GROUP BY u.id
+    HAVING COUNT(o.id) > 0
+    ORDER BY order_count DESC
+    LIMIT 100
+    """;
+
+    // Multiline YAML
+    let yaml_config = yaml#"""
+    database:
+      host: localhost
+      port: 5432
+      name: myapp
+    server:
+      host: 0.0.0.0
+      port: 8080
+    """;
+}
+
+// ============================================================
+// COMPILE-TIME VALIDATION
+// ============================================================
+
+// Tagged literals are validated at compile time based on their tag:
+// - json#"..." must contain valid JSON
+// - sql#"..." must contain valid SQL syntax
+// - rx#"..." must contain valid regex pattern
+// - url#"..." must contain valid URL format
+// - xml#"..." must contain valid XML
+
+// Invalid content would cause a compile-time error, catching format
+// issues before the code ever runs.
+
+fn main() {
+    test_json_literals();
+    test_sql_literals();
+    test_regex_literals();
+    test_url_literals();
+    test_xml_literals();
+    test_multiline_literals();
+}

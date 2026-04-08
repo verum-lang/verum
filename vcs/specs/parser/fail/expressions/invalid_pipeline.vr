@@ -1,0 +1,9 @@
+// @test: parse-fail
+// @level: L0
+// @tags: parser, expressions, pipeline, error
+// @description: Pipeline operator without left operand
+// @expected-error: E018
+
+fn test() {
+    let x = |> foo();  // Missing left operand for pipeline
+}

@@ -1,0 +1,29 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, intrinsics, float, debug
+// @description: Simple for loop test
+
+module test.stdlib.sys.intrinsics.simple_loop_test;
+
+mount core.intrinsics.{sin_f64};
+
+fn main() {
+    print("Testing simple for loop...");
+
+    let angles: List<Float64> = [0.0, 0.5, 1.0];
+    for angle in angles {
+        print(f"angle = {angle}");
+    }
+
+    print("Loop done!");
+
+    // Now test calling sin inside loop
+    let angles2: List<Float64> = [0.0, 0.5];
+    for angle in angles2 {
+        let s = sin_f64(angle);
+        print(f"sin({angle}) = {s}");
+    }
+
+    print("All tests passed!");
+}

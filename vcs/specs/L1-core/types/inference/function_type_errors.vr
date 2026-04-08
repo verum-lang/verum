@@ -1,0 +1,187 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: types, inference, function, errors
+// @expected-error: E400
+// @description: Type error detection tests for function type expressions
+
+// =============================================================================
+// Section 1: Parameter Type Mismatches
+// =============================================================================
+
+/// ERROR: Argument type doesn't match parameter type
+fn test_param_type_mismatch() {
+    let f: fn(Int) -> Int = |x| x;
+    // ERROR: Expected Int, got Text
+    let result: Int = f("hello");
+}
+
+/// ERROR: Wrong number of arguments
+fn test_wrong_arity() {
+    let f: fn(Int, Int) -> Int = |a, b| a + b;
+    // ERROR: Expected 2 arguments, got 1
+    let result: Int = f(42);
+}
+
+// =============================================================================
+// Section 2: Return Type Mismatches
+// =============================================================================
+
+/// ERROR: Lambda body type doesn't match declared return
+fn test_return_type_mismatch() {
+    // ERROR: Lambda returns Text, declared return is Int
+    let f: fn(Int) -> Int = |x| "hello";
+}
+
+/// ERROR: Assigning function to incompatible type
+fn test_function_assignment_mismatch() {
+    let f: fn(Int) -> Int = |x| x;
+    // ERROR: Cannot assign fn(Int)->Int to fn(Int)->Text
+    let g: fn(Int) -> Text = f;
+}
+
+// =============================================================================
+// Section 3: Async Type Errors
+// =============================================================================
+
+/// ERROR: Non-async assigned to async type
+fn test_async_mismatch() {
+    // ERROR: Expected async fn, got sync fn
+    let f: async fn() -> Int = || 42;
+}
+
+/// ERROR: Async function result used synchronously
+fn test_async_result_mismatch() {
+    let f: async fn() -> Int = async || 42;
+    // ERROR: f() returns Future<Int>, not Int
+    let result: Int = f();
+}
+
+// =============================================================================
+// Section 4: Context Requirement Errors
+// =============================================================================
+
+context Database {
+    fn query(&self, sql: Text) -> Result<Data, Error>;
+}
+
+context Logger {
+    fn log(&self, message: Text);
+}
+
+type Data is { value: Text };
+type Error is { message: Text };
+
+/// ERROR: Missing context in function type
+fn test_missing_context() {
+    // f requires Database context
+    let f: fn() -> Int using [Database] = || 0;
+
+    // ERROR: Calling f without providing Database context
+    fn no_context() -> Int {
+        f()
+    }
+}
+
+/// ERROR: Context not satisfied
+fn test_context_not_provided() {
+    let f: fn() -> Int using [Database, Logger] = || 0;
+
+    // ERROR: Only Database provided, missing Logger
+    fn partial_context() -> Int using [Database] {
+        f()
+    }
+}
+
+// =============================================================================
+// Section 5: Rank-2 Type Errors
+// =============================================================================
+
+/// ERROR: Rank-2 function specialized incorrectly
+fn test_rank2_specialization_error() {
+    // Rank-2: must work for ALL types
+    let poly_id: fn<A>(A) -> A = |x| x;
+
+    // This is fine:
+    let n: Int = poly_id(42);
+
+    // But can't assign rank-2 to rank-1:
+    // ERROR: fn<A>(A) -> A cannot be assigned to fn(Int) -> Text
+    let specific: fn(Int) -> Text = poly_id;
+}
+
+/// ERROR: Bound not satisfied
+fn test_rank2_bound_error() {
+    // Requires Clone bound
+    let cloner: fn<T: Clone>(T) -> (T, T) = |x| (x.clone(), x);
+
+    // ERROR: NonCloneable doesn't implement Clone
+    type NonCloneable is { data: Int };
+    let nc: NonCloneable = NonCloneable { data: 42 };
+    let pair: (NonCloneable, NonCloneable) = cloner(nc);
+}
+
+// =============================================================================
+// Section 6: Higher-Order Function Errors
+// =============================================================================
+
+/// ERROR: Wrong function type passed to higher-order function
+fn test_higher_order_mismatch() {
+    fn apply<A, B>(f: fn(A) -> B, x: A) -> B {
+        f(x)
+    }
+
+    let to_text: fn(Int) -> Text = |n| f"{n}";
+
+    // ERROR: to_text is fn(Int)->Text, not fn(Text)->Int
+    let result: Int = apply(to_text, "hello");
+}
+
+/// ERROR: Nested function type mismatch
+fn test_nested_function_error() {
+    let make_adder: fn(Int) -> fn(Int) -> Int = |x| |y| x + y;
+
+    // ERROR: make_adder(5) returns fn(Int)->Int, not fn(Text)->Int
+    let add5: fn(Text) -> Int = make_adder(5);
+}
+
+// =============================================================================
+// Section 7: Transducer Type Errors
+// =============================================================================
+
+type Reducer<A, R> is fn(R, A) -> R;
+
+type Transducer<A, B> is {
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
+};
+
+/// ERROR: Transducer type parameter mismatch
+fn test_transducer_error() {
+    let int_to_text: Transducer<Int, Text> = Transducer {
+        transform: |reducer| |r, n| reducer(r, f"{n}")
+    };
+
+    // ERROR: Transducer<Int, Text> is not Transducer<Text, Int>
+    let wrong: Transducer<Text, Int> = int_to_text;
+}
+
+// =============================================================================
+// Section 8: Protocol Implementation Errors
+// =============================================================================
+
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+type Wrong<T> is { value: T };
+
+/// ERROR: Wrong return type in protocol implementation
+implement Functor for Wrong {
+    fn map<A, B>(self: Wrong<A>, f: fn(A) -> B) -> Wrong<B> {
+        // ERROR: Returning A, expected B
+        Wrong { value: self.value }
+    }
+}
+
+fn main() {
+    print("This should not compile due to type errors");
+}

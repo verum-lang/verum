@@ -1,0 +1,258 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: memory-safety, safety-guarantees, bounds-checking, critical
+// @description: Core safety guarantee - all array/slice accesses are bounds-checked
+
+/// SAFETY GUARANTEE: Bounds Checking
+///
+/// Verum prevents buffer overflows through:
+/// 1. Static bounds checking when indices are known at compile time
+/// 2. Runtime bounds checking for dynamic indices
+/// 3. Safe iteration patterns that avoid manual indexing
+/// 4. Slice types that carry length metadata
+/// 5. Refinement types for expressing index constraints
+///
+/// This prevents:
+/// - Buffer overread/overwrite vulnerabilities
+/// - Stack/heap buffer overflows
+/// - Out-of-bounds memory access
+
+fn main() {
+    test_static_bounds_checking();
+    test_runtime_bounds_checking();
+    test_safe_iteration();
+    test_slice_bounds();
+    test_get_methods();
+    test_refinement_indices();
+
+    print("All bounds checking tests passed!");
+}
+
+/// Static bounds checking with known indices
+fn test_static_bounds_checking() {
+    let arr: [Int; 5] = [10, 20, 30, 40, 50];
+
+    // Valid accesses - compiler knows bounds
+    assert(arr[0] == 10);
+    assert(arr[1] == 20);
+    assert(arr[2] == 30);
+    assert(arr[3] == 40);
+    assert(arr[4] == 50);
+
+    // Invalid access would be caught at compile time:
+    // let x = arr[5];  // ERROR: index 5 >= length 5
+    // let y = arr[10]; // ERROR: index 10 >= length 5
+    // let z = arr[-1]; // ERROR: negative index
+
+    // Computed constant indices are also checked
+    const IDX: Int = 2;
+    assert(arr[IDX] == 30);
+
+    // const BAD_IDX: Int = 10;
+    // arr[BAD_IDX]  // Would be compile-time error
+}
+
+/// Runtime bounds checking with dynamic indices
+fn test_runtime_bounds_checking() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // Dynamic index - checked at runtime
+    fn get_at(arr: &[Int], idx: Int) -> Int {
+        arr[idx]  // Runtime bounds check
+    }
+
+    // Valid dynamic access
+    assert(get_at(&arr, 0) == 1);
+    assert(get_at(&arr, 4) == 5);
+
+    // Invalid access would panic:
+    // get_at(&arr, 5)   // Runtime panic: index out of bounds
+    // get_at(&arr, 100) // Runtime panic: index out of bounds
+
+    // Loop with computed index
+    for i in 0..arr.len() {
+        let _ = arr[i];  // Always safe: i < len
+    }
+}
+
+/// Safe iteration patterns avoid manual indexing
+fn test_safe_iteration() {
+    let items = [10, 20, 30, 40, 50];
+
+    // Iterator pattern - no bounds checks needed
+    let mut sum = 0;
+    for item in &items {
+        sum += *item;
+    }
+    assert(sum == 150);
+
+    // Enumerate provides index safely
+    for (idx, item) in items.iter().enumerate() {
+        assert(*item == (idx + 1) * 10);
+    }
+
+    // Map/filter without manual indexing
+    let doubled: List<Int> = items.iter()
+        .map(|x| *x * 2)
+        .collect();
+    assert(doubled[0] == 20);
+    assert(doubled[4] == 100);
+
+    // Zip iterates in lockstep
+    let other = [1, 2, 3, 4, 5];
+    for (a, b) in items.iter().zip(other.iter()) {
+        let _ = *a + *b;  // No bounds concerns
+    }
+}
+
+/// Slice bounds are carried with the slice
+fn test_slice_bounds() {
+    let array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Slice creation with bounds
+    let slice: &[Int] = &array[2..7];  // Elements 3,4,5,6,7
+
+    assert(slice.len() == 5);
+    assert(slice[0] == 3);
+    assert(slice[4] == 7);
+
+    // Slice carries its own bounds
+    // slice[5] would be out of bounds for THIS slice
+
+    // Sub-slice also bounds-checked
+    let sub: &[Int] = &slice[1..3];
+    assert(sub.len() == 2);
+    assert(sub[0] == 4);
+    assert(sub[1] == 5);
+
+    // Empty slice is valid
+    let empty: &[Int] = &array[5..5];
+    assert(empty.len() == 0);
+    assert(empty.is_empty());
+
+    // Slice range checked at creation:
+    // let invalid = &array[5..15]; // Panic: range out of bounds
+}
+
+/// Safe get() methods return Maybe
+fn test_get_methods() {
+    let arr = [1, 2, 3, 4, 5];
+
+    // get() returns Maybe<&T> - never panics
+    match arr.get(0) {
+        Some(v) => assert(*v == 1),
+        None => panic("unexpected"),
+    }
+
+    match arr.get(4) {
+        Some(v) => assert(*v == 5),
+        None => panic("unexpected"),
+    }
+
+    // Out of bounds returns None instead of panic
+    match arr.get(10) {
+        Some(_) => panic("unexpected"),
+        None => {},  // Correct behavior
+    }
+
+    match arr.get(100) {
+        Some(_) => panic("unexpected"),
+        None => {},  // Correct behavior
+    }
+
+    // Mutable get
+    let mut arr2 = [1, 2, 3];
+    if let Some(elem) = arr2.get_mut(1) {
+        *elem = 20;
+    }
+    assert(arr2[1] == 20);
+
+    // first() and last() are always safe
+    let first = arr.first();
+    let last = arr.last();
+
+    assert(*first.unwrap() == 1);
+    assert(*last.unwrap() == 5);
+
+    let empty: [Int; 0] = [];
+    assert(empty.first().is_none());
+    assert(empty.last().is_none());
+}
+
+/// Refinement types express index constraints
+fn test_refinement_indices() {
+    let arr: [Int; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+    // Function with refined index parameter
+    fn get_safe(arr: &[Int; 10], idx: Int{>= 0 && < 10}) -> Int {
+        arr[idx]  // Compiler knows idx is in bounds
+    }
+
+    // Valid calls - index satisfies refinement
+    assert(get_safe(&arr, 0) == 0);
+    assert(get_safe(&arr, 5) == 5);
+    assert(get_safe(&arr, 9) == 9);
+
+    // Invalid call would be type error:
+    // get_safe(&arr, 10)  // ERROR: 10 doesn't satisfy {>= 0 && < 10}
+    // get_safe(&arr, -1)  // ERROR: -1 doesn't satisfy {>= 0 && < 10}
+
+    // Range-based refinement
+    fn sum_range(arr: &[Int; 10],
+                 start: Int{>= 0 && < 10},
+                 end: Int{> start && <= 10}) -> Int {
+        let mut sum = 0;
+        for i in start..end {
+            sum += arr[i];  // Always safe
+        }
+        sum
+    }
+
+    assert(sum_range(&arr, 0, 5) == 10);   // 0+1+2+3+4
+    assert(sum_range(&arr, 5, 10) == 35);  // 5+6+7+8+9
+}
+
+/// Multi-dimensional bounds checking
+fn test_multidim_bounds() {
+    let matrix: [[Int; 3]; 2] = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ];
+
+    // Both dimensions checked
+    assert(matrix[0][0] == 1);
+    assert(matrix[1][2] == 6);
+
+    // Invalid:
+    // matrix[2][0]  // First index out of bounds
+    // matrix[0][3]  // Second index out of bounds
+
+    // Safe iteration
+    for row in &matrix {
+        for cell in row {
+            let _ = *cell;
+        }
+    }
+}
+
+/// String/text bounds checking
+fn test_string_bounds() {
+    let text = Text.from("hello");
+
+    // Byte access is bounds-checked
+    assert(text.as_bytes()[0] == 'h' as Byte);
+    assert(text.as_bytes()[4] == 'o' as Byte);
+
+    // Char access through iteration
+    for ch in text.chars() {
+        let _ = ch;
+    }
+
+    // Substring with bounds
+    let sub = &text[1..4];  // "ell"
+    assert(sub.len() == 3);
+
+    // Invalid substring:
+    // let bad = &text[0..10];  // Panic: out of bounds
+}

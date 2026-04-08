@@ -1,0 +1,170 @@
+// =============================================================================
+// vcs/specs/stdlib/sys/darwin/tls_test.vr
+// =============================================================================
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: stdlib, sys, darwin, tls, thread-local
+// @description: Tests for macOS TLS and context system.
+//
+// Coverage:
+// - TlsError: Error types and variant matching
+// - Constants (MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, TCB_MAGIC)
+// - get_errno, set_errno: Thread-local errno
+// - is_tls_initialized: TLS state check
+//
+// Note: Context operations (ctx_get/set/push/pop) use opaque &unsafe Byte
+// pointers and require TLS to be initialized. They are tested separately
+// in integration tests that run with the full runtime.
+//
+// Platform: macOS (pthread-based TLS)
+// =============================================================================
+
+@cfg(target_os = "macos")
+module test.stdlib.sys.darwin.tls_test;
+
+mount core.sys.darwin.tls.{
+    TlsError,
+
+    is_tls_initialized,
+    get_errno,
+    set_errno,
+
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    TCB_MAGIC,
+};
+
+// =============================================================================
+// Test Entry Point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
+
+// =============================================================================
+// TLS Constants Tests
+// =============================================================================
+
+@test
+fn test_tls_constants() {
+    // Context slot limits
+    assert(MAX_CONTEXT_SLOTS == 256);
+    assert(CONTEXT_STACK_DEPTH == 8);
+
+    // TCB magic number should be non-zero
+    assert(TCB_MAGIC != 0);
+
+    print("TLS constants tests passed");
+}
+
+// =============================================================================
+// Errno Operations Tests
+// =============================================================================
+
+@test
+fn test_errno_operations() {
+    // Save original errno
+    let original = get_errno();
+
+    // Set errno to known value
+    set_errno(42);
+    assert(get_errno() == 42);
+
+    // Set to different value
+    set_errno(100);
+    assert(get_errno() == 100);
+
+    // Set to zero
+    set_errno(0);
+    assert(get_errno() == 0);
+
+    // Restore original
+    set_errno(original);
+    assert(get_errno() == original);
+
+    // Multiple reads should be consistent
+    set_errno(77);
+    let r1 = get_errno();
+    let r2 = get_errno();
+    let r3 = get_errno();
+    assert(r1 == 77);
+    assert(r2 == 77);
+    assert(r3 == 77);
+
+    // Restore
+    set_errno(original);
+
+    print("Errno operations tests passed");
+}
+
+// =============================================================================
+// TlsError Type Tests
+// =============================================================================
+
+@test
+fn test_tls_error_types() {
+    // Create TlsError variants matching actual API
+    let not_init = TlsError.NotInitialized;
+    let already_init = TlsError.AlreadyInitialized;
+    let alloc_err = TlsError.AllocationFailed { code: 12 };
+    let slot_err = TlsError.InvalidSlot { slot: 42 };
+    let overflow_err = TlsError.StackOverflow { slot: 10 };
+    let underflow_err = TlsError.StackUnderflow { slot: 10 };
+    let invalid_tcb = TlsError.InvalidTcb;
+    let pthread_err = TlsError.PthreadError { code: 22 };
+
+    // Pattern matching
+    match not_init {
+        TlsError.NotInitialized => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match already_init {
+        TlsError.AlreadyInitialized => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match alloc_err {
+        TlsError.AllocationFailed { code } => {
+            assert(code == 12);
+        }
+        _ => assert(false),
+    }
+
+    match slot_err {
+        TlsError.InvalidSlot { slot } => {
+            assert(slot == 42);
+        }
+        _ => assert(false),
+    }
+
+    match overflow_err {
+        TlsError.StackOverflow { slot } => {
+            assert(slot == 10);
+        }
+        _ => assert(false),
+    }
+
+    match underflow_err {
+        TlsError.StackUnderflow { slot } => {
+            assert(slot == 10);
+        }
+        _ => assert(false),
+    }
+
+    match invalid_tcb {
+        TlsError.InvalidTcb => { /* ok */ }
+        _ => assert(false),
+    }
+
+    match pthread_err {
+        TlsError.PthreadError { code } => {
+            assert(code == 22);
+        }
+        _ => assert(false),
+    }
+
+    print("TlsError type tests passed");
+}

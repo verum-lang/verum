@@ -1,0 +1,191 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: vbc, e2e, aot, math, matrix, records, algorithms
+// @timeout: 50000
+// @expected-exit: 0
+// @description: AOT matrix operations (3x3) using records
+
+// 3x3 matrix stored as flat record
+type Mat3 is {
+    m00: Int, m01: Int, m02: Int,
+    m10: Int, m11: Int, m12: Int,
+    m20: Int, m21: Int, m22: Int,
+};
+
+fn mat3_zero() -> Mat3 {
+    Mat3 { m00: 0, m01: 0, m02: 0, m10: 0, m11: 0, m12: 0, m20: 0, m21: 0, m22: 0 }
+}
+
+fn mat3_identity() -> Mat3 {
+    Mat3 { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0, m20: 0, m21: 0, m22: 1 }
+}
+
+fn mat3_scale(m: Mat3, s: Int) -> Mat3 {
+    Mat3 {
+        m00: m.m00 * s, m01: m.m01 * s, m02: m.m02 * s,
+        m10: m.m10 * s, m11: m.m11 * s, m12: m.m12 * s,
+        m20: m.m20 * s, m21: m.m21 * s, m22: m.m22 * s,
+    }
+}
+
+fn mat3_plus(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        m00: a.m00 + b.m00, m01: a.m01 + b.m01, m02: a.m02 + b.m02,
+        m10: a.m10 + b.m10, m11: a.m11 + b.m11, m12: a.m12 + b.m12,
+        m20: a.m20 + b.m20, m21: a.m21 + b.m21, m22: a.m22 + b.m22,
+    }
+}
+
+fn mat3_mul(a: Mat3, b: Mat3) -> Mat3 {
+    Mat3 {
+        m00: a.m00*b.m00 + a.m01*b.m10 + a.m02*b.m20,
+        m01: a.m00*b.m01 + a.m01*b.m11 + a.m02*b.m21,
+        m02: a.m00*b.m02 + a.m01*b.m12 + a.m02*b.m22,
+        m10: a.m10*b.m00 + a.m11*b.m10 + a.m12*b.m20,
+        m11: a.m10*b.m01 + a.m11*b.m11 + a.m12*b.m21,
+        m12: a.m10*b.m02 + a.m11*b.m12 + a.m12*b.m22,
+        m20: a.m20*b.m00 + a.m21*b.m10 + a.m22*b.m20,
+        m21: a.m20*b.m01 + a.m21*b.m11 + a.m22*b.m21,
+        m22: a.m20*b.m02 + a.m21*b.m12 + a.m22*b.m22,
+    }
+}
+
+fn mat3_transpose(m: Mat3) -> Mat3 {
+    Mat3 {
+        m00: m.m00, m01: m.m10, m02: m.m20,
+        m10: m.m01, m11: m.m11, m12: m.m21,
+        m20: m.m02, m21: m.m12, m22: m.m22,
+    }
+}
+
+fn mat3_trace(m: Mat3) -> Int {
+    m.m00 + m.m11 + m.m22
+}
+
+fn mat3_det(m: Mat3) -> Int {
+    m.m00 * (m.m11 * m.m22 - m.m12 * m.m21)
+    - m.m01 * (m.m10 * m.m22 - m.m12 * m.m20)
+    + m.m02 * (m.m10 * m.m21 - m.m11 * m.m20)
+}
+
+fn mat3_eq(a: Mat3, b: Mat3) -> Bool {
+    a.m00 == b.m00 && a.m01 == b.m01 && a.m02 == b.m02 &&
+    a.m10 == b.m10 && a.m11 == b.m11 && a.m12 == b.m12 &&
+    a.m20 == b.m20 && a.m21 == b.m21 && a.m22 == b.m22
+}
+
+// Matrix power by repeated multiplication
+fn mat3_pow(m: Mat3, n: Int) -> Mat3 {
+    let mut result = mat3_identity();
+    let mut i = 0;
+    while i < n {
+        result = mat3_mul(result, m);
+        i = i + 1;
+    }
+    result
+}
+
+fn main() -> Int {
+    // Identity matrix properties
+    let id = mat3_identity();
+    assert_eq(mat3_trace(id), 3);
+    assert_eq(mat3_det(id), 1);
+
+    // Zero matrix
+    let zero = mat3_zero();
+    assert_eq(mat3_trace(zero), 0);
+    assert_eq(mat3_det(zero), 0);
+
+    // Identity * anything = anything
+    let a = Mat3 {
+        m00: 1, m01: 2, m02: 3,
+        m10: 4, m11: 5, m12: 6,
+        m20: 7, m21: 8, m22: 9,
+    };
+    assert(mat3_eq(mat3_mul(id, a), a));
+    assert(mat3_eq(mat3_mul(a, id), a));
+
+    // Trace of a
+    assert_eq(mat3_trace(a), 15);  // 1+5+9
+
+    // Determinant of a (singular: rows are arithmetic progressions)
+    assert_eq(mat3_det(a), 0);
+
+    // Non-singular matrix
+    let b = Mat3 {
+        m00: 2, m01: 0, m02: 1,
+        m10: 0, m11: 3, m12: 0,
+        m20: 1, m21: 0, m22: 2,
+    };
+    // det(b) = 2*(3*2 - 0) - 0 + 1*(0 - 3*1) = 2*6 - 3 = 9
+    assert_eq(mat3_det(b), 9);
+    assert_eq(mat3_trace(b), 7);
+
+    // Transpose properties
+    let bt = mat3_transpose(b);
+    assert_eq(bt.m00, 2);
+    assert_eq(bt.m01, 0);
+    assert_eq(bt.m02, 1);
+    assert_eq(bt.m10, 0);
+    assert_eq(bt.m11, 3);
+    assert_eq(bt.m12, 0);
+    // Transpose of symmetric matrix is itself
+    assert(mat3_eq(b, bt));  // b is symmetric!
+
+    // Non-symmetric matrix transpose
+    let c = Mat3 {
+        m00: 1, m01: 2, m02: 3,
+        m10: 0, m11: 1, m12: 2,
+        m20: 0, m21: 0, m22: 1,
+    };
+    let ct = mat3_transpose(c);
+    assert_eq(ct.m10, 2);
+    assert_eq(ct.m20, 3);
+    assert_eq(ct.m01, 0);
+
+    // det(c) = 1*(1*1 - 2*0) - 2*(0*1 - 2*0) + 3*(0*0 - 1*0) = 1
+    assert_eq(mat3_det(c), 1);
+
+    // Matrix addition
+    let sum = mat3_plus(b, c);
+    assert_eq(sum.m00, 3);
+    assert_eq(sum.m11, 4);
+    assert_eq(sum.m22, 3);
+
+    // Scale
+    let scaled = mat3_scale(b, 3);
+    assert_eq(scaled.m00, 6);
+    assert_eq(scaled.m11, 9);
+    assert_eq(scaled.m22, 6);
+
+    // Matrix multiplication: c * c (upper triangular)
+    // [1 2 3]   [1 2 3]   [1  4  10]
+    // [0 1 2] * [0 1 2] = [0  1   4]
+    // [0 0 1]   [0 0 1]   [0  0   1]
+    let c2 = mat3_mul(c, c);
+    assert_eq(c2.m00, 1);
+    assert_eq(c2.m01, 4);
+    assert_eq(c2.m02, 10);
+    assert_eq(c2.m10, 0);
+    assert_eq(c2.m11, 1);
+    assert_eq(c2.m12, 4);
+    assert_eq(c2.m20, 0);
+    assert_eq(c2.m21, 0);
+    assert_eq(c2.m22, 1);
+
+    // Matrix power: c^3
+    let c3 = mat3_pow(c, 3);
+    let c3_expected = mat3_mul(c2, c);
+    assert(mat3_eq(c3, c3_expected));
+
+    // c^0 = identity
+    let c0 = mat3_pow(c, 0);
+    assert(mat3_eq(c0, id));
+
+    // det(A*B) = det(A) * det(B)
+    let bc = mat3_mul(b, c);
+    assert_eq(mat3_det(bc), mat3_det(b) * mat3_det(c));  // 9 * 1 = 9
+
+    0
+}
