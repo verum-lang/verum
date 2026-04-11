@@ -29,7 +29,8 @@ module core.math.examples;
 
 mount core.math.hott.{Equiv, IsContr, PathInt, refl_int};
 mount core.math.simplicial.{
-    Simplex, simplex_standard, simplex_zero, simplex_one,
+    Simplex, SimplicialSet, KanComplex, InfinityGroupoid, Nerve,
+    simplex_standard, simplex_zero, simplex_one,
     horn_2_1, horn_is_inner, horn_count_for,
 };
 mount core.math.infinity_category.{
@@ -1581,6 +1582,104 @@ implement InfSubobjectClassifier for TrivialInfSubobjectClassifier {
 /// Smart constructor for the trivial ∞-subobject classifier.
 public fn trivial_inf_subobject_classifier() -> TrivialInfSubobjectClassifier {
     TrivialInfSubobjectClassifier { marker: 0 }
+}
+
+// =============================================================================
+// 2.30. PointSimplicialSet — concrete `SimplicialSet → KanComplex → InfinityGroupoid`
+// =============================================================================
+
+/// The **point simplicial set** ∆[0]: every n-simplex collapses to
+/// the single 0-simplex, face and degeneracy are the identity.
+/// All simplicial identities hold trivially, every horn is filled
+/// by the point itself, so it is a Kan complex and therefore an
+/// ∞-groupoid. Concrete acid test for the full chain
+/// `SimplicialSet → KanComplex → InfinityGroupoid`.
+public type PointSimplicialSet is {
+    marker: Int,
+};
+
+implement SimplicialSet for PointSimplicialSet {
+    fn n_simplices(n: Int{>= 0}) -> List<Simplex> {
+        [Simplex { dim: 0, vertices: [0] }]
+    }
+
+    fn face(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn degeneracy(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn face_face_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn degeneracy_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn face_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+implement KanComplex for PointSimplicialSet {
+    fn fill_horn(h: &Horn) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+}
+
+implement InfinityGroupoid for PointSimplicialSet {}
+
+/// The point nerve — the nerve of the trivial category with one
+/// object and one (identity) morphism. Every inner horn has exactly
+/// one filler (the point 0-simplex). Concrete acid test for the
+/// `Nerve` protocol.
+public type PointNerve is {
+    marker: Int,
+};
+
+implement SimplicialSet for PointNerve {
+    fn n_simplices(n: Int{>= 0}) -> List<Simplex> {
+        [Simplex { dim: 0, vertices: [0] }]
+    }
+
+    fn face(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn degeneracy(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn face_face_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn degeneracy_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn face_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+implement Nerve for PointNerve {
+    fn inner_horn_unique_filler(h: &Horn) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the point simplicial set.
+public fn point_simplicial_set() -> PointSimplicialSet {
+    PointSimplicialSet { marker: 0 }
+}
+
+/// Smart constructor for the point nerve.
+public fn point_nerve() -> PointNerve {
+    PointNerve { marker: 0 }
 }
 
 // =============================================================================
