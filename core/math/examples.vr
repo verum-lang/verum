@@ -62,6 +62,7 @@ mount core.math.model_category.{
 mount core.math.operad.{
     Operad, AssociativeOperad, CommutativeOperad,
     Multicategory, AlgebraOverOperad,
+    InfOperad, EnOperad, InfAlgebra,
 };
 mount core.math.category.{
     Category, Functor, Endofunctor, FaithfulFunctor, FullFunctor, FullyFaithfulFunctor,
@@ -227,6 +228,36 @@ implement AlgebraOverOperad<TerminalOperad, TrivialMonoidal>
 /// Smart constructor for the trivial algebra over the terminal operad.
 public fn trivial_algebra_over_operad() -> TrivialAlgebraOverOperad {
     TrivialAlgebraOverOperad { marker: 0 }
+}
+
+// =============================================================================
+// 2.45. TrivialInfAlgebra — concrete `InfAlgebra<O, M>` instance
+// =============================================================================
+
+/// The **trivial ∞-algebra** over `PointSimplicialSet` (as an ∞-operad)
+/// in `PointSimplicialSet` (as an ∞-category). Carrier is 0,
+/// structure maps are identity, and coherence holds trivially.
+public type TrivialInfAlgebra is {
+    marker: Int,
+};
+
+implement InfAlgebra<PointSimplicialSet, PointSimplicialSet> for TrivialInfAlgebra {
+    fn carrier_inf(&self) -> Int {
+        0
+    }
+
+    fn structure_inf(f: &Int) -> Int {
+        *f
+    }
+
+    fn coherent_structure(f: &Int, gs: List<Int>) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial ∞-algebra.
+public fn trivial_inf_algebra() -> TrivialInfAlgebra {
+    TrivialInfAlgebra { marker: 0 }
 }
 
 // =============================================================================
@@ -2152,6 +2183,35 @@ implement SheafInfinityTopos<IntegerPathCategory> for PointSimplicialSet {
 
     fn sheafification_is_left_exact(p: &Int, q: &Int) -> Bool {
         true
+    }
+}
+
+// PointSimplicialSet is also trivially an ∞-operad: the space of
+// n-ary operations is always contractible (represented by the point
+// 0), composition is trivial, and the coherence axioms hold. Every
+// E_n operad lives on it as the same trivial structure. Closes the
+// InfinityCategory → InfOperad → EnOperad chain.
+implement InfOperad for PointSimplicialSet {
+    fn operations_space(n: Int{>= 0}) -> Int {
+        0
+    }
+
+    fn compose_inf(f: &Int, gs: List<Int>) -> Int {
+        *f
+    }
+
+    fn coherent_associativity(f: &Int, gs: List<Int>, hs: List<Int>) -> Bool {
+        true
+    }
+
+    fn coherent_equivariance(f: &Int, gs: List<Int>, sigma: &Int) -> Bool {
+        true
+    }
+}
+
+implement EnOperad<1> for PointSimplicialSet {
+    fn n_dimension(&self) -> Int {
+        1
     }
 }
 
