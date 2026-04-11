@@ -37,7 +37,11 @@ mount core.math.infinity_category.{
 };
 mount core.math.operad.{Operad};
 mount core.math.category.{
-    Category, Functor, Endofunctor, NaturalTransformation, Monad, Comonad, Adjunction,
+    Category, Functor, Endofunctor, FaithfulFunctor, FullFunctor, FullyFaithfulFunctor,
+    NaturalTransformation, NaturalIsomorphism,
+    Monad, Comonad, Adjunction,
+    Cone, Limit, Cocone, Colimit,
+    Presheaf, Sheaf,
 };
 mount core.math.algebra.{
     Magma, Semigroup, Monoid, Group, AbelianGroup,
@@ -217,6 +221,27 @@ implement Functor<IntegerPathCategory, IntegerPathCategory> for IdentityEndofunc
 
 implement Endofunctor<IntegerPathCategory> for IdentityEndofunctor {}
 
+// The identity endofunctor is also **fully faithful**: injective on
+// every hom-set (trivially, since it acts as the identity) and
+// surjective on every hom-set (every morphism in the target is hit
+// by itself in the source). Closes the full functor hierarchy at the
+// concrete-instance level.
+
+implement FaithfulFunctor<IntegerPathCategory, IntegerPathCategory> for IdentityEndofunctor {
+    fn faithful(f: &Int, g: &Int) -> Bool {
+        true
+    }
+}
+
+implement FullFunctor<IntegerPathCategory, IntegerPathCategory> for IdentityEndofunctor {
+    fn full(a: &Int, b: &Int, h: &Int) -> Bool {
+        true
+    }
+}
+
+implement FullyFaithfulFunctor<IntegerPathCategory, IntegerPathCategory>
+    for IdentityEndofunctor {}
+
 /// Smart constructor for the identity endofunctor.
 public fn identity_endofunctor() -> IdentityEndofunctor {
     IdentityEndofunctor { marker: 0 }
@@ -254,6 +279,30 @@ implement NaturalTransformation<
 /// Smart constructor for the identity natural transformation.
 public fn identity_nat_trans() -> IdentityNatTrans {
     IdentityNatTrans { marker: 0 }
+}
+
+// IdentityNatTrans is actually a natural *isomorphism*: the inverse
+// component at every object is again the identity, so both left and
+// right inverse laws hold trivially. This closes the protocol chain
+// `NaturalTransformation → NaturalIsomorphism` at the concrete level.
+
+implement NaturalIsomorphism<
+    IntegerPathCategory,
+    IntegerPathCategory,
+    IdentityEndofunctor,
+    IdentityEndofunctor,
+> for IdentityNatTrans {
+    fn inverse_component(a: &Int) -> Int {
+        *a
+    }
+
+    fn left_inverse(a: &Int) -> Bool {
+        true
+    }
+
+    fn right_inverse(a: &Int) -> Bool {
+        true
+    }
 }
 
 // =============================================================================
@@ -406,6 +455,135 @@ implement Comonad<IntegerPathCategory> for IdentityComonad {
 /// Smart constructor for the identity comonad.
 public fn identity_comonad() -> IdentityComonad {
     IdentityComonad { marker: 0 }
+}
+
+// =============================================================================
+// 2.10. TerminalCone / TerminalLimit — concrete `Limit` over an empty diagram
+// =============================================================================
+
+/// The **terminal cone** over the empty diagram in
+/// `IntegerPathCategory` — the limit of the empty diagram is the
+/// terminal object. Here the apex is `0`, there are no legs, and
+/// compatibility holds vacuously. This is the concrete acid test
+/// for the `Cone → Limit` protocol chain.
+public type TerminalCone is {
+    marker: Int,
+};
+
+implement Cone<IntegerPathCategory, IntegerPathCategory, Int> for TerminalCone {
+    fn apex() -> Int {
+        0
+    }
+
+    fn leg(i: &Int) -> Int {
+        *i
+    }
+
+    fn compatibility(i: &Int, j: &Int, f: &Int) -> Bool {
+        true
+    }
+}
+
+implement Limit<IntegerPathCategory, IntegerPathCategory> for TerminalCone {
+    fn mediate(other_apex: &Int, other_legs: &Int) -> Int {
+        *other_apex
+    }
+
+    fn uniqueness(other_apex: &Int, other_legs: &Int, m1: &Int, m2: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the terminal cone (empty limit).
+public fn terminal_cone() -> TerminalCone {
+    TerminalCone { marker: 0 }
+}
+
+// =============================================================================
+// 2.11. InitialCocone / InitialColimit — concrete `Colimit` dually
+// =============================================================================
+
+/// The **initial cocone** — dual of `TerminalCone`. The colimit of
+/// the empty diagram is the initial object. Closes the duality
+/// Cone ↔ Cocone at the concrete-instance level.
+public type InitialCocone is {
+    marker: Int,
+};
+
+implement Cocone<IntegerPathCategory, IntegerPathCategory, Int> for InitialCocone {
+    fn nadir() -> Int {
+        0
+    }
+
+    fn leg(i: &Int) -> Int {
+        *i
+    }
+
+    fn compatibility(i: &Int, j: &Int, f: &Int) -> Bool {
+        true
+    }
+}
+
+implement Colimit<IntegerPathCategory, IntegerPathCategory> for InitialCocone {
+    fn mediate(other_nadir: &Int, other_legs: &Int) -> Int {
+        *other_nadir
+    }
+
+    fn uniqueness(other_nadir: &Int, other_legs: &Int, m1: &Int, m2: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the initial cocone (empty colimit).
+public fn initial_cocone() -> InitialCocone {
+    InitialCocone { marker: 0 }
+}
+
+// =============================================================================
+// 2.12. ConstantPresheaf / ConstantSheaf — concrete `Presheaf → Sheaf` chain
+// =============================================================================
+
+/// The **constant presheaf** on `IntegerPathCategory` with value `0`
+/// at every object: sections are always `0`, restriction is the
+/// identity on the zero element. It trivially satisfies the
+/// presheaf axioms. Since every "covering" is uniquely resolved to
+/// the zero section, the constant presheaf is also a sheaf — which
+/// closes the `Presheaf → Sheaf` chain at the concrete level.
+public type ConstantPresheaf is {
+    marker: Int,
+};
+
+implement Presheaf<IntegerPathCategory> for ConstantPresheaf {
+    fn sections(u: &Int) -> Int {
+        0
+    }
+
+    fn restrict(f: &Int, s: &Int) -> Int {
+        *s
+    }
+
+    fn restrict_identity(u: &Int, s: &Int) -> Bool {
+        true
+    }
+
+    fn restrict_composition(f: &Int, g: &Int, s: &Int) -> Bool {
+        true
+    }
+}
+
+implement Sheaf<IntegerPathCategory> for ConstantPresheaf {
+    fn locality(u: &Int, s1: &Int, s2: &Int, cover: &Int) -> Bool {
+        true
+    }
+
+    fn gluing(u: &Int, cover: &Int, local_sections: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the constant presheaf/sheaf on value 0.
+public fn constant_presheaf() -> ConstantPresheaf {
+    ConstantPresheaf { marker: 0 }
 }
 
 // =============================================================================

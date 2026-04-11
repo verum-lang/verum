@@ -1,17 +1,22 @@
 // @test: typecheck-pass
 // @level: L1
 // @tier: 0
-// @tags: category, functor, natural-transformation, monad, adjunction, acid-test
+// @tags: category, functor, natural-transformation, monad, adjunction, limit, sheaf, acid-test
 // @timeout: 10000
-// @description: Concrete category-theoretic protocol instances — Category, Endofunctor, NaturalTransformation, Monad, Adjunction.
+// @description: Concrete category-theoretic protocol instances — full Category stack.
 
 /// Acid test for the full category-theoretic protocol chain:
 ///
 ///   * `IntegerPathCategory` implements `Category<Int, PathInt>`
-///   * `IdentityEndofunctor` implements `Functor<...>` and `Endofunctor<...>`
-///   * `IdentityNatTrans`    implements `NaturalTransformation<..., F, F>`
-///   * `IdentityMonad`       implements `Monad<IntegerPathCategory>`
-///   * `IdentityAdjunction`  implements `Adjunction<C, D, F, G>` with 4 generic params
+///   * `IdentityEndofunctor` implements `Functor + Endofunctor + FaithfulFunctor
+///     + FullFunctor + FullyFaithfulFunctor` (diamond inheritance)
+///   * `IdentityNatTrans`    implements `NaturalTransformation + NaturalIsomorphism`
+///   * `IdentityMonad`       implements `Monad<C>`
+///   * `IdentityComonad`     implements `Comonad<C>`
+///   * `IdentityAdjunction`  implements `Adjunction<C, D, F, G>` (4 generic params)
+///   * `TerminalCone`        implements `Cone + Limit` (limit of empty diagram)
+///   * `InitialCocone`       implements `Cocone + Colimit` (colimit of empty diagram)
+///   * `ConstantPresheaf`    implements `Presheaf + Sheaf`
 ///
 /// Every constructor, smart factory, and polymorphic protocol method
 /// is exercised so that a silent signature change in any generic
@@ -22,7 +27,11 @@ mount core.math.examples.{
     IdentityEndofunctor, identity_endofunctor,
     IdentityNatTrans, identity_nat_trans,
     IdentityMonad, identity_monad,
+    IdentityComonad, identity_comonad,
     IdentityAdjunction, identity_adjunction,
+    TerminalCone, terminal_cone,
+    InitialCocone, initial_cocone,
+    ConstantPresheaf, constant_presheaf,
     integer_path_id, integer_path_compose, integer_path_source, integer_path_target,
 };
 
@@ -39,11 +48,14 @@ fn exercise_category() {
 }
 
 fn exercise_endofunctor() {
+    // IdentityEndofunctor carries: Functor + Endofunctor +
+    // FaithfulFunctor + FullFunctor + FullyFaithfulFunctor.
     let f = identity_endofunctor();
     print(f.marker);
 }
 
 fn exercise_nat_trans() {
+    // IdentityNatTrans carries: NaturalTransformation + NaturalIsomorphism.
     let n = identity_nat_trans();
     print(n.marker);
 }
@@ -53,9 +65,26 @@ fn exercise_monad() {
     print(m.marker);
 }
 
+fn exercise_comonad() {
+    let w = identity_comonad();
+    print(w.marker);
+}
+
 fn exercise_adjunction() {
     let a = identity_adjunction();
     print(a.marker);
+}
+
+fn exercise_limit_colimit() {
+    let l = terminal_cone();
+    let cl = initial_cocone();
+    print(l.marker);
+    print(cl.marker);
+}
+
+fn exercise_sheaf() {
+    let p = constant_presheaf();
+    print(p.marker);
 }
 
 fn main() {
@@ -63,6 +92,9 @@ fn main() {
     exercise_endofunctor();
     exercise_nat_trans();
     exercise_monad();
+    exercise_comonad();
     exercise_adjunction();
-    print("category/functor/nat-trans/monad/adjunction acid test green");
+    exercise_limit_colimit();
+    exercise_sheaf();
+    print("category/functor/nat-trans/monad/adjunction/limit/sheaf acid test green");
 }

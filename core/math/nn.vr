@@ -1490,3 +1490,15 @@ type BinaryOp is Add | Sub | Mul | Div | Pow | Max | Min;
 
 // Comparison operation types (for VBC)
 type CompareOp is Eq | Ne | Lt | Le | Gt | Ge;
+
+// =============================================================================
+// Neural-network protocol inheritance theorems (SMT-discharged)
+// =============================================================================
+//
+// Lock in the `protocol extends` chain of the neural-network stack
+// at build time. These theorems catch accidental regressions in the
+// NN protocol graph during stdlib evolution.
+
+/// Every trainable module is a module (by `protocol extends Module`).
+theorem trainable_is_module()
+    proof by auto;
