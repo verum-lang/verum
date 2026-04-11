@@ -44,6 +44,8 @@ mount core.math.infinity_topos.{
 };
 mount core.math.fibration.{
     CartesianMorphism, CoCartesianMorphism, StraighteningEquivalence, BaseChange,
+    GrothendieckFibration, Opfibration, Bifibration,
+    LeftFibration, RightFibration,
 };
 mount core.math.model_category.{
     WeakEquivalenceClass, CofibrationClass, FibrationClass,
@@ -1728,6 +1730,64 @@ implement InfinityFunctor<PointSimplicialSet, PointSimplicialSet> for IdentityIn
 /// Smart constructor for the identity ∞-functor.
 public fn identity_infinity_functor() -> IdentityInfinityFunctor {
     IdentityInfinityFunctor { marker: 0 }
+}
+
+// =============================================================================
+// 2.32. Fibration chain — GrothendieckFibration / Opfibration / Bifibration
+// =============================================================================
+//
+// The IdentityInfinityFunctor is trivially a Grothendieck fibration
+// (every morphism is its own cartesian lift), an opfibration (dually),
+// and therefore a bifibration. It also satisfies the Kan-complex
+// fibre condition vacuously, so it is both a left and right fibration.
+// This closes the full fibration-hierarchy at the concrete-instance
+// level, exercising the deepest protocol chain in `fibration.vr`.
+
+implement GrothendieckFibration<PointSimplicialSet, PointSimplicialSet>
+    for IdentityInfinityFunctor {
+    fn cartesian_lift(f: &Int, y: &Int) -> Int {
+        *f
+    }
+
+    fn lift_is_cartesian(f: &Int, y: &Int) -> Bool {
+        true
+    }
+
+    fn lift_covers_base(f: &Int, y: &Int) -> Bool {
+        true
+    }
+}
+
+implement Opfibration<PointSimplicialSet, PointSimplicialSet>
+    for IdentityInfinityFunctor {
+    fn cocartesian_lift(f: &Int, y: &Int) -> Int {
+        *f
+    }
+
+    fn lift_is_cocartesian(f: &Int, y: &Int) -> Bool {
+        true
+    }
+
+    fn lift_covers_base(f: &Int, y: &Int) -> Bool {
+        true
+    }
+}
+
+implement Bifibration<PointSimplicialSet, PointSimplicialSet>
+    for IdentityInfinityFunctor {}
+
+implement LeftFibration<PointSimplicialSet, PointSimplicialSet>
+    for IdentityInfinityFunctor {
+    fn fibres_are_kan_complexes(b: &Int) -> Bool {
+        true
+    }
+}
+
+implement RightFibration<PointSimplicialSet, PointSimplicialSet>
+    for IdentityInfinityFunctor {
+    fn fibres_are_kan_complexes(b: &Int) -> Bool {
+        true
+    }
 }
 
 // =============================================================================
