@@ -1,0 +1,44 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: proof, corollary, generic, from, parser, regression
+// @timeout: 5000
+// @description: Corollary `from` clause works on generic theorems / corollaries.
+
+/// Stress the corollary parser combining generic parameters, where
+/// clauses, refinements, and the `from` provenance clause. Before the
+/// parser fix landed, any of these combinations broke the parser.
+
+theorem base_generic<T>(x: T, y: T)
+    requires x == y
+    proof by auto;
+
+corollary derived_generic<T>(x: T, y: T)
+    requires x == y
+    from base_generic
+    proof by auto;
+
+theorem base_refined(n: Int)
+    requires n >= 0
+    proof by auto;
+
+corollary derived_refined(n: Int{>= 0})
+    from base_refined
+    proof by auto;
+
+theorem base_multi(a: Int, b: Int, c: Int)
+    requires a > 0
+    requires b > 0
+    requires c > 0
+    proof by auto;
+
+corollary derived_multi(a: Int, b: Int, c: Int)
+    requires a > 0
+    from base_multi
+    requires b > 0
+    requires c > 0
+    proof by auto;
+
+fn main() {
+    print("corollary generic/refined/multi from-clause regression green");
+}

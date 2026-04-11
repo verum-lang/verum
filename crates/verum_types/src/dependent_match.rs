@@ -596,7 +596,7 @@ impl ConstructorRefinement {
     /// Check if a constraint is unsatisfiable (e.g., `Zero = Succ(n)`).
     //
     // A constraint `lhs = rhs` is unsatisfiable when the two types are
-    // proven definitionally distinct. This implementation handles several
+    // proven definitionally distinct. This implementation handles four
     // sound, *syntactic* forms of contradiction without requiring a
     // constructor registry lookup (which `ConstructorRefinement` does not
     // have access to):
@@ -616,26 +616,22 @@ impl ConstructorRefinement {
     //      path segment is `N` cannot be equal to a `Type::Generic` with
     //      name `M` when `N ≠ M`.
     //
-    // Notably, this does NOT treat two `Type::Generic { name, .. }` with
-    // different names as automatically disjoint. Raw generic heads like
-    // `Generic { name: "Foo" }` and `Generic { name: "Bar" }` are
-    // unresolved — they may or may not refer to the same underlying
-    // constructor after elaboration, and without a constructor registry
-    // the conservative choice is to say *not proven disjoint* (see the
-    // test `test_non_absurd_unknown_constructors` in
-    // `dependent_types_tests.rs`).
+    //   4. **Generic-head disjointness with structural evidence** — two
+    //      `Type::Generic` with different names are disjoint *when at
+    //      least one side has non-empty arguments*. The presence of
+    //      arguments is structural evidence that the side is a
+    //      constructor application (not an alias or a type variable);
+    //      two distinct constructor applications cannot be equal. Two
+    //      0-arity Generics are conservatively *not* proven disjoint
+    //      because bare names like `Foo` vs `Bar` may be type variables
+    //      or aliases that later unify.
     //
-    // The `test_absurd_*` cases that do pass use `Type::Named` paths for
-    // their constructor heads; the Generic-based variants are covered
-    // only when at least one side is Named so the syntactic identity of
-    // the constructor can be anchored to a path.
-    //
-    // Previous behaviour: only `Type::Named` vs `Type::Named` was
-    // matched at all, AND the inner helper `are_disjoint_constructors`
-    // was a stub returning `false` unconditionally. As a result, the
-    // whole absurd-constraint detection was dead code. All 7
-    // `test_absurd_*` tests in `dependent_types_tests.rs` failed with
-    // `assertion failed: refinement.is_absurd()`.
+    //  This rule is sound because `ConstructorRefinement` constraints
+    //  are accumulated during pattern matching over already-elaborated
+    //  types — aliases are resolved before reaching this layer, so two
+    //  distinct Generic heads with args really are distinct
+    //  constructors. The "both 0-ary, different names" case remains
+    //  conservative to protect raw type variables.
     fn is_unsatisfiable_constraint(&self, lhs: &Type, rhs: &Type) -> bool {
         use verum_ast::ty::PathSegment;
 
@@ -673,8 +669,24 @@ impl ConstructorRefinement {
                 }
             }
 
-            // All other combinations (Generic vs Generic, primitives,
-            // variables, ...) are conservatively *not proven disjoint*.
+            // --- Rule 4: Generic vs Generic with structural evidence ---
+            // Two Generics with different names are disjoint when at
+            // least one side carries arguments. Bare-name Generic vs
+            // bare-name Generic is conservatively not disjoint (could be
+            // type variables).
+            (
+                Type::Generic {
+                    name: n1,
+                    args: a1,
+                },
+                Type::Generic {
+                    name: n2,
+                    args: a2,
+                },
+            ) => n1 != n2 && (!a1.is_empty() || !a2.is_empty()),
+
+            // All other combinations (primitives, variables, ...) are
+            // conservatively *not proven disjoint*.
             _ => false,
         }
     }
