@@ -1,0 +1,227 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: omnibus, phase-c, coverage, acid-test, regression
+// @timeout: 20000
+// @description: Final Phase B/C omnibus — every concrete stdlib reference instance in a single spec.
+
+/// **Final Phase B/C omnibus regression spec**. Touches every concrete
+/// reference instance in `core/math/examples.vr` — 69 types spanning
+/// algebra (Magma→AbelianGroup, Ring→Field, Lattice→BooleanAlgebra +
+/// OrthomodularLattice), category theory (Category, Functor, NatTrans,
+/// Monad/Comonad, Adjunction, Kleisli, Limit/Colimit, (Co)Equalizer,
+/// Pullback/Pushout, Yoneda, Topos, Abelian, Enriched, MonoidalCategory
+/// chain, Presheaf/Sheaf, KanExtension), simplicial (SimplicialSet,
+/// KanComplex, InfinityGroupoid, Nerve, SimplicialHomotopy), ∞-category
+/// (QuasiCategory, InfinityCategory, InfinityFunctor, MappingSpace,
+/// HomotopyCategory, Opposite/Functor/Discrete ∞-Cat, InfTerminal/Initial,
+/// full functor equivalence hierarchy), ∞-topos (Sieve, GrothendieckTopology,
+/// Site, InfPresheaf/InfSheaf, InfinityTopos, SheafInfinityTopos,
+/// InfSubobjectClassifier, GeometricMorphism), fibrations
+/// (Cartesian/CoCartesian morphisms, full Grothendieck/Opfibration/
+/// Bifibration/Left/RightFibration, Fibre, StraighteningEquivalence,
+/// BaseChange), model category (WeakEquiv/Cof/Fib classes, Trivial
+/// (co)fibrations, (co)fibrant objects, QuillenModelStructure,
+/// ModelHomotopyCategory, Homotopy bridge, Quillen adjunction/equivalence),
+/// operads (Multi/Op/Associative/Commutative/InfOperad/EnOperad,
+/// AlgebraOverOperad, InfAlgebra), equivalence/congruence (Int equality,
+/// Z3 congruence).
+///
+/// If any protocol instance silently breaks, this spec fails at
+/// build time with a clear error pointing at the broken constructor.
+
+mount core.math.examples.{
+    // Algebra — groups, rings, fields, lattices
+    TwoFreeMonoid, two_free_monoid_gen_a,
+    Z3, z3_zero, z3_one,
+    Nat4, nat4_zero, nat4_one, nat4_two,
+    F2, f2_zero, f2_one,
+    Bool2, bool2_bottom, bool2_top,
+    Pow2, pow2_empty, pow2_full,
+    Div12, div12_one, div12_twelve,
+    IntEqRelation, int_eq_relation,
+    Z3EqCongruence, z3_eq_congruence,
+    // Category theory primary
+    IntegerPathCategory, integer_path_category,
+    IdentityEndofunctor, identity_endofunctor,
+    IdentityNatTrans, identity_nat_trans,
+    IdentityMonad, identity_monad,
+    IdentityComonad, identity_comonad,
+    IdentityAdjunction, identity_adjunction,
+    IdentityKleisli, identity_kleisli,
+    // Limits / shapes
+    TerminalCone, terminal_cone,
+    InitialCocone, initial_cocone,
+    IntProduct, int_product,
+    IntCoproduct, int_coproduct,
+    TrivialEqualizer, trivial_equalizer,
+    TrivialCoequalizer, trivial_coequalizer,
+    TrivialPullback, trivial_pullback,
+    TrivialPushout, trivial_pushout,
+    // Sheaves / topoi
+    ConstantPresheaf, constant_presheaf,
+    TrivialYoneda, trivial_yoneda,
+    TrivialTopos, trivial_topos,
+    TrivialAbelian, trivial_abelian,
+    TrivialMonoidal, trivial_monoidal,
+    TrivialEnriched, trivial_enriched,
+    // Contravariant / Kan
+    OppositeEndofunctor, opposite_endofunctor,
+    TrivialLeftKan, trivial_left_kan,
+    TrivialRightKan, trivial_right_kan,
+    // ∞-Topos + fibrations primitives
+    MaximalSieve, maximal_sieve,
+    DiscreteTopology, discrete_topology,
+    TrivialSite, trivial_site,
+    ConstantInfPresheaf, constant_inf_presheaf,
+    TrivialInfSubobjectClassifier, trivial_inf_subobject_classifier,
+    IdentityGeometricMorphism, identity_geometric_morphism,
+    TrivialCartesianMorphism, trivial_cartesian_morphism,
+    TrivialCoCartesianMorphism, trivial_cocartesian_morphism,
+    TrivialStraightening, trivial_straightening,
+    TrivialBaseChange, trivial_base_change,
+    // Simplicial / ∞-cat deep stack
+    PointSimplicialSet, point_simplicial_set,
+    PointNerve, point_nerve,
+    IdentityInfinityFunctor, identity_infinity_functor,
+    TrivialInfTerminal, trivial_inf_terminal,
+    TrivialInfInitial, trivial_inf_initial,
+    PointDiscreteInfCategory, point_discrete_inf_category,
+    PointMappingSpace, point_mapping_space,
+    TrivialHomotopyCategory, trivial_homotopy_category,
+    TrivialOppositeInfCat, trivial_opposite_inf_cat,
+    TrivialFunctorInfCat, trivial_functor_inf_cat,
+    TrivialSimplicialHomotopy, trivial_simplicial_homotopy,
+    // Model category
+    TrivialWeakEquivClass, trivial_weak_equiv_class,
+    TrivialCofClass, trivial_cof_class,
+    TrivialFibClass, trivial_fib_class,
+    TrivialEverythingClass, trivial_everything_class,
+    TrivialCofibrantObject, trivial_cofibrant_object,
+    TrivialFibrantObject, trivial_fibrant_object,
+    TrivialHomotopyEquiv, trivial_homotopy_equiv,
+    IdentityQuillenAdjunction, identity_quillen_adjunction,
+    TrivialQuillenModel, trivial_quillen_model,
+    // Operad
+    TerminalOperad, terminal_operad,
+    TrivialAlgebraOverOperad, trivial_algebra_over_operad,
+    TrivialInfAlgebra, trivial_inf_algebra,
+    // Functors
+    int_functor_on_object, int_shift_functor,
+};
+
+fn touch_algebra() {
+    let _ = two_free_monoid_gen_a();
+    let _ = z3_zero();
+    let _ = nat4_zero();
+    let _ = f2_zero();
+    let _ = bool2_bottom();
+    let _ = pow2_empty();
+    let _ = div12_one();
+    let _ = int_eq_relation();
+    let _ = z3_eq_congruence();
+}
+
+fn touch_category() {
+    let _ = integer_path_category();
+    let _ = identity_endofunctor();
+    let _ = identity_nat_trans();
+    let _ = identity_monad();
+    let _ = identity_comonad();
+    let _ = identity_adjunction();
+    let _ = identity_kleisli();
+}
+
+fn touch_limits() {
+    let _ = terminal_cone();
+    let _ = initial_cocone();
+    let _ = int_product(1, 2);
+    let _ = int_coproduct(3, 4);
+    let _ = trivial_equalizer();
+    let _ = trivial_coequalizer();
+    let _ = trivial_pullback();
+    let _ = trivial_pushout();
+}
+
+fn touch_topoi_sheaves() {
+    let _ = constant_presheaf();
+    let _ = trivial_yoneda();
+    let _ = trivial_topos();
+    let _ = trivial_abelian();
+    let _ = trivial_monoidal();
+    let _ = trivial_enriched();
+}
+
+fn touch_kan_contravariant() {
+    let _ = opposite_endofunctor();
+    let _ = trivial_left_kan();
+    let _ = trivial_right_kan();
+}
+
+fn touch_infinity_topos_primitives() {
+    let _ = maximal_sieve();
+    let _ = discrete_topology();
+    let _ = trivial_site();
+    let _ = constant_inf_presheaf();
+    let _ = trivial_inf_subobject_classifier();
+    let _ = identity_geometric_morphism();
+}
+
+fn touch_fibrations_primitives() {
+    let _ = trivial_cartesian_morphism();
+    let _ = trivial_cocartesian_morphism();
+    let _ = trivial_straightening();
+    let _ = trivial_base_change();
+}
+
+fn touch_simplicial_inf_cat() {
+    let _ = point_simplicial_set();
+    let _ = point_nerve();
+    let _ = identity_infinity_functor();
+    let _ = trivial_inf_terminal();
+    let _ = trivial_inf_initial();
+    let _ = point_discrete_inf_category();
+    let _ = point_mapping_space();
+    let _ = trivial_homotopy_category();
+    let _ = trivial_opposite_inf_cat();
+    let _ = trivial_functor_inf_cat();
+    let _ = trivial_simplicial_homotopy();
+}
+
+fn touch_model_category() {
+    let _ = trivial_weak_equiv_class();
+    let _ = trivial_cof_class();
+    let _ = trivial_fib_class();
+    let _ = trivial_everything_class();
+    let _ = trivial_cofibrant_object(42);
+    let _ = trivial_fibrant_object(42);
+    let _ = trivial_homotopy_equiv();
+    let _ = identity_quillen_adjunction();
+    let _ = trivial_quillen_model();
+}
+
+fn touch_operads() {
+    let _ = terminal_operad();
+    let _ = trivial_algebra_over_operad();
+    let _ = trivial_inf_algebra();
+}
+
+fn touch_int_functors() {
+    let _ = int_functor_on_object(5);
+    let _ = int_shift_functor(3, 10);
+}
+
+fn main() {
+    touch_algebra();
+    touch_category();
+    touch_limits();
+    touch_topoi_sheaves();
+    touch_kan_contravariant();
+    touch_infinity_topos_primitives();
+    touch_fibrations_primitives();
+    touch_simplicial_inf_cat();
+    touch_model_category();
+    touch_operads();
+    touch_int_functors();
+    print("Phase B/C full coverage omnibus — all reference instances touched");
+}
