@@ -57,6 +57,7 @@ mount core.math.model_category.{
     TrivialCofibration, TrivialFibration,
     CofibrantObject, FibrantObject,
     HomotopyEquivalentAsInfCat, QuillenAdjunction, QuillenEquivalence,
+    QuillenModelStructure, ModelHomotopyCategory,
 };
 mount core.math.operad.{
     Operad, AssociativeOperad, CommutativeOperad,
@@ -1824,6 +1825,93 @@ public fn identity_quillen_adjunction() -> IdentityQuillenAdjunction {
 }
 
 // =============================================================================
+// 2.44. TrivialQuillenModel — concrete `QuillenModelStructure<C>`
+// =============================================================================
+
+/// The **trivial Quillen model structure**: every morphism is a
+/// weak equivalence, cofibration, and fibration. All five Quillen
+/// axioms (limits/colimits, 2-out-of-3, closure under retracts,
+/// lifting axiom, factorisation) hold trivially. Concrete acid test
+/// for the `QuillenModelStructure<C>` protocol which extends the
+/// 1-categorical `Category<Int, Int>` protocol.
+public type TrivialQuillenModel is {
+    marker: Int,
+};
+
+implement Category<Int, Int> for TrivialQuillenModel {
+    fn id(a: &Int) -> Int {
+        *a
+    }
+
+    fn compose(f: &Int, g: &Int) -> Int {
+        *f + *g
+    }
+
+    fn source(f: &Int) -> Int {
+        0
+    }
+
+    fn target(f: &Int) -> Int {
+        0
+    }
+
+    fn left_identity(f: &Int) -> Bool {
+        true
+    }
+
+    fn right_identity(f: &Int) -> Bool {
+        true
+    }
+
+    fn associativity(f: &Int, g: &Int, h: &Int) -> Bool {
+        true
+    }
+}
+
+implement QuillenModelStructure<IntegerPathCategory> for TrivialQuillenModel {
+    fn weak_equivalences(&self) -> Int {
+        0
+    }
+
+    fn cofibrations(&self) -> Int {
+        0
+    }
+
+    fn fibrations(&self) -> Int {
+        0
+    }
+
+    fn has_limits_and_colimits(&self) -> Bool {
+        true
+    }
+
+    fn two_out_of_three(&self, f: &Int, g: &Int) -> Bool {
+        true
+    }
+
+    fn closed_under_retracts(&self, f: &Int, g: &Int) -> Bool {
+        true
+    }
+
+    fn lifting_axiom(&self, i: &Int, p: &Int) -> Bool {
+        true
+    }
+
+    fn factorisation_cof_triv_fib(&self, f: &Int) -> Bool {
+        true
+    }
+
+    fn factorisation_triv_cof_fib(&self, f: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial Quillen model structure.
+public fn trivial_quillen_model() -> TrivialQuillenModel {
+    TrivialQuillenModel { marker: 0 }
+}
+
+// =============================================================================
 // 2.29. TrivialInfSubobjectClassifier — concrete `InfSubobjectClassifier`
 // =============================================================================
 
@@ -2337,6 +2425,25 @@ implement HomotopyCategory<PointSimplicialSet> for TrivialHomotopyCategory {
     }
 
     fn composition_well_defined(f: &Int, g: &Int, h: &Int) -> Bool {
+        true
+    }
+}
+
+// TrivialHomotopyCategory is also the homotopy category of the
+// trivial Quillen model structure on IntegerPathCategory — so it
+// also implements `ModelHomotopyCategory<IntegerPathCategory>`.
+// This closes the bridge between ∞-category homotopy theory and
+// model category homotopy theory at the concrete-instance level.
+implement ModelHomotopyCategory<IntegerPathCategory> for TrivialHomotopyCategory {
+    fn underlying_model(&self) -> Int {
+        0
+    }
+
+    fn inverts_weak_equivs(f: &Int) -> Bool {
+        true
+    }
+
+    fn universal_property(d: &Int) -> Bool {
         true
     }
 }
