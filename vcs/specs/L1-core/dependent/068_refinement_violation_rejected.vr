@@ -1,0 +1,22 @@
+// @test: typecheck-fail
+// @level: L1
+// @tier: 0
+// @tags: refinement, dependent, violation, negative, regression
+// @timeout: 5000
+// @expected-error: E500
+// @description: Invalid concrete arguments to refined-parameter function are rejected.
+
+/// Negative regression: calling `bounded_index(10, 15)` violates the
+/// refinement `i < len` since `len = 10` and `i = 15`. The compiler
+/// should detect this via the call-site substitution path and emit
+/// a verification failure.
+
+fn bounded_index(len: Int, i: Int{>= 0, < len}) -> Int {
+    i
+}
+
+fn main() {
+    // VIOLATION: 15 is not < 10
+    let r = bounded_index(10, 15);
+    print(r);
+}

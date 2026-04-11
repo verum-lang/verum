@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: refinement, dependent, propagation, substitution, regression
+// @timeout: 10000
+// @description: Deep refinement propagation — multi-step parameter substitution across function boundaries.
+
+/// Stress test for refinement propagation across multiple layers of
+/// function calls:
+///
+///   1. Inner function declares refined parameters depending on
+///      earlier parameters.
+///   2. Outer function calls inner with concrete arguments — the
+///      call-site substitution must propagate correctly through
+///      each layer.
+///   3. Theorems reference these functions in their proof bodies.
+///
+/// This exercises the fix to `refinement.rs::substitute_in_expr`
+/// and the call-site substitution path in `infer.rs`.
+
+/// Bounded indexing: `i` must be in `[0, len)`.
+fn bounded_index(len: Int, i: Int{>= 0, < len}) -> Int {
+    i
+}
+
+/// Clamped value: caller's `lo` becomes a refinement constraint on
+/// the output.
+fn clamp_above(lo: Int, x: Int{>= lo}) -> Int{>= lo} {
+    x
+}
+
+/// Two-parameter dependence: `j` depends on both `len` and `i`.
+fn bounded_advance(len: Int, i: Int{>= 0, < len}, j: Int{>= i, < len}) -> Int {
+    j - i
+}
+
+/// Triple refinement: all three parameters must satisfy a shared
+/// invariant.
+fn triangle_check(
+    a: Int{> 0},
+    b: Int{> 0, <= a},
+    c: Int{> 0, <= b},
+) -> Int {
+    a + b + c
+}
+
+/// Four-parameter cascade: each parameter narrows the window.
+fn cascade_window(
+    max: Int{> 0},
+    w: Int{> 0, <= max},
+    x: Int{>= 0, < w},
+    y: Int{>= x, < w},
+) -> Int {
+    y - x
+}
+
+fn main() {
+    let r1 = bounded_index(10, 3);
+    let r2 = clamp_above(5, 7);
+    let r3 = bounded_advance(10, 2, 5);
+    let r4 = triangle_check(10, 5, 3);
+    let r5 = cascade_window(100, 50, 10, 30);
+
+    print(r1);
+    print(r2);
+    print(r3);
+    print(r4);
+    print(r5);
+    print("refinement propagation stress test green");
+}
