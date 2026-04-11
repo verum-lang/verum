@@ -58,7 +58,10 @@ mount core.math.model_category.{
     CofibrantObject, FibrantObject,
     HomotopyEquivalentAsInfCat, QuillenAdjunction, QuillenEquivalence,
 };
-mount core.math.operad.{Operad, AssociativeOperad, CommutativeOperad};
+mount core.math.operad.{
+    Operad, AssociativeOperad, CommutativeOperad,
+    Multicategory, AlgebraOverOperad,
+};
 mount core.math.category.{
     Category, Functor, Endofunctor, FaithfulFunctor, FullFunctor, FullyFaithfulFunctor,
     NaturalTransformation, NaturalIsomorphism,
@@ -154,6 +157,75 @@ implement CommutativeOperad for TerminalOperad {
     fn commutative_law() -> Bool {
         true
     }
+}
+
+// TerminalOperad is also trivially a multicategory — a one-object
+// multicategory is precisely an operad, and since TerminalOperad has
+// exactly one operation of every arity, the multicategory laws hold
+// trivially. Closes the Multicategory → Operad chain by showing the
+// converse direction explicitly.
+implement Multicategory for TerminalOperad {
+    fn compose(f: &Int, gs: List<Int>) -> Int {
+        0
+    }
+
+    fn id(c: &Int) -> Int {
+        0
+    }
+
+    fn unitality(f: &Int, c: &Int) -> Bool {
+        true
+    }
+
+    fn associativity(f: &Int, gs: List<Int>, hs: List<Int>) -> Bool {
+        true
+    }
+
+    fn equivariance(f: &Int, gs: List<Int>, sigma: &Int) -> Bool {
+        true
+    }
+}
+
+// =============================================================================
+// 2.43. TrivialAlgebraOverOperad — concrete `AlgebraOverOperad` instance
+// =============================================================================
+
+/// The **trivial algebra** over the terminal operad in an arbitrary
+/// monoidal category: the carrier is the unit object, the structure
+/// maps are all the identity morphism, and all three compatibility
+/// obligations (with composition, identity, symmetric action) hold
+/// trivially. Concrete acid test for the `AlgebraOverOperad<O, M>`
+/// protocol with two generic parameters.
+public type TrivialAlgebraOverOperad is {
+    marker: Int,
+};
+
+implement AlgebraOverOperad<TerminalOperad, TrivialMonoidal>
+    for TrivialAlgebraOverOperad {
+    fn carrier(&self) -> Int {
+        0
+    }
+
+    fn structure_map(f: &Int) -> Int {
+        *f
+    }
+
+    fn respects_composition(f: &Int, gs: List<Int>) -> Bool {
+        true
+    }
+
+    fn respects_identity() -> Bool {
+        true
+    }
+
+    fn respects_symmetric_action(f: &Int, sigma: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial algebra over the terminal operad.
+public fn trivial_algebra_over_operad() -> TrivialAlgebraOverOperad {
+    TrivialAlgebraOverOperad { marker: 0 }
 }
 
 // =============================================================================
