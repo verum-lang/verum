@@ -45,7 +45,7 @@ mount core.math.operad.{Operad, AssociativeOperad, CommutativeOperad};
 mount core.math.category.{
     Category, Functor, Endofunctor, FaithfulFunctor, FullFunctor, FullyFaithfulFunctor,
     NaturalTransformation, NaturalIsomorphism,
-    Monad, Comonad, Adjunction,
+    Monad, Comonad, Adjunction, KleisliCategory,
     Cone, Limit, Cocone, Colimit,
     Presheaf, Sheaf,
     MonoidalCategory, SymmetricMonoidalCategory, ClosedMonoidalCategory,
@@ -54,6 +54,8 @@ mount core.math.category.{
     YonedaEmbedding,
     SubobjectClassifier, Topos,
     AbelianCategory, EnrichedCategory,
+    LeftKanExtension, RightKanExtension,
+    ContravariantFunctor,
 };
 mount core.math.algebra.{
     Magma, Semigroup, Monoid, Group, AbelianGroup,
@@ -1333,6 +1335,150 @@ implement BaseChange<IntegerPathCategory, IntegerPathCategory> for TrivialBaseCh
 /// Smart constructor for the trivial base change witness.
 public fn trivial_base_change() -> TrivialBaseChange {
     TrivialBaseChange { marker: 0 }
+}
+
+// =============================================================================
+// 2.25. IdentityKleisli — concrete `KleisliCategory` for IdentityMonad
+// =============================================================================
+
+/// The **identity Kleisli category** on `IdentityMonad`: Kleisli
+/// composition is ordinary composition, bind is just function
+/// application. Concrete acid test for the `KleisliCategory<C, T>`
+/// protocol with two generic parameters.
+public type IdentityKleisli is {
+    marker: Int,
+};
+
+implement KleisliCategory<IntegerPathCategory, IdentityMonad> for IdentityKleisli {
+    fn kleisli_compose(f: &Int, g: &Int) -> Int {
+        *f + *g
+    }
+
+    fn bind(ta: &Int, f: &Int) -> Int {
+        *ta + *f
+    }
+}
+
+/// Smart constructor for the identity Kleisli category.
+public fn identity_kleisli() -> IdentityKleisli {
+    IdentityKleisli { marker: 0 }
+}
+
+// =============================================================================
+// 2.26. OppositeEndofunctor — concrete `ContravariantFunctor` instance
+// =============================================================================
+
+/// The **opposite endofunctor** on `IntegerPathCategory`: acts as the
+/// identity on objects but reverses the direction of every morphism.
+/// This is the concrete acid test for the `ContravariantFunctor<C, D>`
+/// protocol — note that `ContravariantFunctor` is a *distinct* protocol
+/// from `Functor` in `category.vr`, with `reverses_composition`
+/// instead of `preserves_composition`.
+public type OppositeEndofunctor is {
+    marker: Int,
+};
+
+implement ContravariantFunctor<IntegerPathCategory, IntegerPathCategory>
+    for OppositeEndofunctor {
+    fn map_obj(a: &Int) -> Int {
+        *a
+    }
+
+    fn map_mor(f: &Int) -> Int {
+        -(*f)
+    }
+
+    fn preserves_identity(a: &Int) -> Bool {
+        true
+    }
+
+    fn reverses_composition(f: &Int, g: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the opposite endofunctor.
+public fn opposite_endofunctor() -> OppositeEndofunctor {
+    OppositeEndofunctor { marker: 0 }
+}
+
+// =============================================================================
+// 2.27. TrivialLeftKan / TrivialRightKan — concrete Kan extensions
+// =============================================================================
+
+/// The **trivial left Kan extension** — identity on objects and
+/// morphisms, unit is identity, mediator is identity, uniqueness
+/// holds trivially. Concrete acid test for the
+/// `LeftKanExtension<C, D, E>` protocol with 3 generic parameters.
+public type TrivialLeftKan is {
+    marker: Int,
+};
+
+implement LeftKanExtension<
+    IntegerPathCategory,
+    IntegerPathCategory,
+    IntegerPathCategory,
+> for TrivialLeftKan {
+    fn lan_obj(d: &Int) -> Int {
+        *d
+    }
+
+    fn lan_mor(f: &Int) -> Int {
+        *f
+    }
+
+    fn lan_unit(c: &Int) -> Int {
+        *c
+    }
+
+    fn lan_mediate(h: &Int, alpha: &Int) -> Int {
+        *h + *alpha
+    }
+
+    fn lan_unique(h: &Int, alpha: &Int, beta1: &Int, beta2: &Int) -> Bool {
+        true
+    }
+}
+
+/// The **trivial right Kan extension** — dual of the above.
+public type TrivialRightKan is {
+    marker: Int,
+};
+
+implement RightKanExtension<
+    IntegerPathCategory,
+    IntegerPathCategory,
+    IntegerPathCategory,
+> for TrivialRightKan {
+    fn ran_obj(d: &Int) -> Int {
+        *d
+    }
+
+    fn ran_mor(f: &Int) -> Int {
+        *f
+    }
+
+    fn ran_counit(c: &Int) -> Int {
+        *c
+    }
+
+    fn ran_mediate(h: &Int, alpha: &Int) -> Int {
+        *h + *alpha
+    }
+
+    fn ran_unique(h: &Int, alpha: &Int, beta1: &Int, beta2: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial left Kan extension.
+public fn trivial_left_kan() -> TrivialLeftKan {
+    TrivialLeftKan { marker: 0 }
+}
+
+/// Smart constructor for the trivial right Kan extension.
+public fn trivial_right_kan() -> TrivialRightKan {
+    TrivialRightKan { marker: 0 }
 }
 
 // =============================================================================

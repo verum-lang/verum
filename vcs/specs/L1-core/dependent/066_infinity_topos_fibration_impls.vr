@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: infinity-topos, fibration, sheaf, sieve, implement, acid-test
+// @timeout: 10000
+// @description: Concrete ∞-topos and fibration protocol instances — Sieve, Topology, Site, Cartesian, Straightening.
+
+/// Acid test for the ∞-topos + fibration layer of
+/// `core/math/examples.vr`:
+///
+///   * MaximalSieve             → Sieve<IntegerPathCategory>
+///   * DiscreteTopology         → GrothendieckTopology<IntegerPathCategory>
+///   * TrivialSite              → Site<IntegerPathCategory>
+///   * ConstantInfPresheaf      → InfPresheaf<IntegerPathCategory>
+///   * TrivialCartesianMorphism → CartesianMorphism<E, B>
+///   * TrivialCoCartesianMorphism → CoCartesianMorphism<E, B>
+///   * TrivialStraightening     → StraighteningEquivalence<B>
+///   * TrivialBaseChange        → BaseChange<E, B>
+///
+/// Every constructor is called and every struct field accessor is
+/// poked so that a silent signature change is caught at build time.
+
+mount core.math.examples.{
+    MaximalSieve, maximal_sieve,
+    DiscreteTopology, discrete_topology,
+    TrivialSite, trivial_site,
+    ConstantInfPresheaf, constant_inf_presheaf,
+    TrivialCartesianMorphism, trivial_cartesian_morphism,
+    TrivialCoCartesianMorphism, trivial_cocartesian_morphism,
+    TrivialStraightening, trivial_straightening,
+    TrivialBaseChange, trivial_base_change,
+};
+
+fn exercise_sieve_topology_site() {
+    let s = maximal_sieve();
+    let t = discrete_topology();
+    let site = trivial_site();
+    print(s.marker);
+    print(t.marker);
+    print(site.marker);
+}
+
+fn exercise_inf_presheaf() {
+    let p = constant_inf_presheaf();
+    print(p.marker);
+}
+
+fn exercise_cartesian_morphisms() {
+    let c = trivial_cartesian_morphism();
+    let cc = trivial_cocartesian_morphism();
+    print(c.marker);
+    print(cc.marker);
+}
+
+fn exercise_straightening_base_change() {
+    let s = trivial_straightening();
+    let b = trivial_base_change();
+    print(s.marker);
+    print(b.marker);
+}
+
+fn main() {
+    exercise_sieve_topology_site();
+    exercise_inf_presheaf();
+    exercise_cartesian_morphisms();
+    exercise_straightening_base_change();
+    print("∞-topos and fibration concrete instances exercised");
+}
