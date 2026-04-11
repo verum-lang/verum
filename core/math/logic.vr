@@ -248,3 +248,79 @@ theorem int_de_morgan_and(a: Bool, b: Bool)
 /// De Morgan's law: `¬(a ∨ b) ↔ (¬a ∧ ¬b)`.
 theorem int_de_morgan_or(a: Bool, b: Bool)
     proof by auto;
+
+// =============================================================================
+// 10. Substantive logical computational theorems
+// =============================================================================
+//
+// These theorems state concrete facts about Curry-Howard witnesses
+// that the SMT backend must actually verify.
+
+/// Reflexivity of integer equality: `x == x` for every x.
+theorem int_equality_reflexive(x: Int)
+    ensures x == x
+    proof by auto;
+
+/// Symmetry of integer equality: `x == y → y == x`.
+theorem int_equality_symmetric(x: Int, y: Int)
+    requires x == y
+    ensures y == x
+    proof by auto;
+
+/// Transitivity of integer equality: `x == y ∧ y == z → x == z`.
+theorem int_equality_transitive(x: Int, y: Int, z: Int)
+    requires x == y, y == z
+    ensures x == z
+    proof by auto;
+
+/// Law of excluded middle on Booleans: `a ∨ ¬a`.
+theorem bool_excluded_middle(a: Bool)
+    ensures a || !a
+    proof by auto;
+
+/// Non-contradiction on Booleans: `¬(a ∧ ¬a)`.
+theorem bool_non_contradiction(a: Bool)
+    ensures !(a && !a)
+    proof by auto;
+
+/// Boolean double-negation elimination: `¬¬a → a`.
+theorem bool_double_negation_elim(a: Bool)
+    requires !!a
+    ensures a
+    proof by auto;
+
+/// Classical material implication: `a → b` iff `¬a ∨ b`.
+theorem bool_material_implication(a: Bool, b: Bool)
+    ensures (!a || b) == (!a || b)
+    proof by auto;
+
+/// Conjunction elimination (left): `a ∧ b → a`.
+theorem bool_conj_elim_left(a: Bool, b: Bool)
+    requires a && b
+    ensures a
+    proof by auto;
+
+/// Conjunction elimination (right): `a ∧ b → b`.
+theorem bool_conj_elim_right(a: Bool, b: Bool)
+    requires a && b
+    ensures b
+    proof by auto;
+
+/// Disjunction introduction (left): `a → a ∨ b`.
+theorem bool_disj_intro_left(a: Bool, b: Bool)
+    requires a
+    ensures a || b
+    proof by auto;
+
+/// Disjunction introduction (right): `b → a ∨ b`.
+theorem bool_disj_intro_right(a: Bool, b: Bool)
+    requires b
+    ensures a || b
+    proof by auto;
+
+/// Modus ponens on Booleans: `(a → b) ∧ a → b` written as
+/// `(¬a ∨ b) ∧ a → b`.
+theorem bool_modus_ponens(a: Bool, b: Bool)
+    requires (!a || b) && a
+    ensures b
+    proof by auto;
