@@ -36,6 +36,8 @@ mount core.math.simplicial.{
 mount core.math.infinity_category.{
     walking_arrow_dim, one_object_category_dim, identity_functor_handle,
     QuasiCategory, InfinityCategory, InfinityFunctor,
+    IdentityInfFunctor, FullyFaithfulInfFunctor, EssentiallySurjectiveInfFunctor,
+    InfEquivalence, InfTerminal, InfInitial, DiscreteInfCategory,
 };
 mount core.math.simplicial.{Horn};
 mount core.math.infinity_topos.{
@@ -2022,6 +2024,137 @@ implement InfinityFunctor<PointSimplicialSet, PointSimplicialSet> for IdentityIn
 /// Smart constructor for the identity ∞-functor.
 public fn identity_infinity_functor() -> IdentityInfinityFunctor {
     IdentityInfinityFunctor { marker: 0 }
+}
+
+// IdentityInfinityFunctor is also the canonical `IdentityInfFunctor<C>`
+// (protocol extends InfinityFunctor<C, C>), and is simultaneously
+// fully faithful and essentially surjective — hence an equivalence
+// of ∞-categories. Closes the full ∞-functor hierarchy:
+//   InfinityFunctor → IdentityInfFunctor
+//                   → FullyFaithfulInfFunctor
+//                   → EssentiallySurjectiveInfFunctor
+//                   → InfEquivalence (diamond)
+implement IdentityInfFunctor<PointSimplicialSet> for IdentityInfinityFunctor {}
+
+implement FullyFaithfulInfFunctor<PointSimplicialSet, PointSimplicialSet>
+    for IdentityInfinityFunctor {
+    fn mapping_space_equivalence(x: &Int, y: &Int) -> Bool {
+        true
+    }
+}
+
+implement EssentiallySurjectiveInfFunctor<PointSimplicialSet, PointSimplicialSet>
+    for IdentityInfinityFunctor {
+    fn essentially_surjective(d: &Int) -> Bool {
+        true
+    }
+}
+
+implement InfEquivalence<PointSimplicialSet, PointSimplicialSet>
+    for IdentityInfinityFunctor {}
+
+// =============================================================================
+// 2.38. TrivialInfTerminal / TrivialInfInitial — concrete ∞-terminal/initial
+// =============================================================================
+
+/// The **trivial ∞-terminal object**: every object has a contractible
+/// mapping space into it. Concrete acid test for the `InfTerminal<C>`
+/// protocol.
+public type TrivialInfTerminal is {
+    marker: Int,
+};
+
+implement InfTerminal<PointSimplicialSet> for TrivialInfTerminal {
+    fn terminal_object(&self) -> Int {
+        0
+    }
+
+    fn mapping_space_contractible(x: &Int) -> Bool {
+        true
+    }
+}
+
+/// Dual: the trivial ∞-initial object.
+public type TrivialInfInitial is {
+    marker: Int,
+};
+
+implement InfInitial<PointSimplicialSet> for TrivialInfInitial {
+    fn initial_object(&self) -> Int {
+        0
+    }
+
+    fn mapping_space_contractible(x: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial ∞-terminal.
+public fn trivial_inf_terminal() -> TrivialInfTerminal {
+    TrivialInfTerminal { marker: 0 }
+}
+
+/// Smart constructor for the trivial ∞-initial.
+public fn trivial_inf_initial() -> TrivialInfInitial {
+    TrivialInfInitial { marker: 0 }
+}
+
+// =============================================================================
+// 2.39. PointDiscreteInfCategory — concrete `DiscreteInfCategory`
+// =============================================================================
+
+/// The **point discrete ∞-category** — a one-object discrete
+/// ∞-category. Every morphism is the identity. Implements
+/// `DiscreteInfCategory` which itself `protocol extends InfinityCategory`,
+/// so this brings along the full SimplicialSet → QuasiCategory →
+/// InfinityCategory stack.
+public type PointDiscreteInfCategory is {
+    marker: Int,
+};
+
+implement SimplicialSet for PointDiscreteInfCategory {
+    fn n_simplices(n: Int{>= 0}) -> List<Simplex> {
+        [Simplex { dim: 0, vertices: [0] }]
+    }
+
+    fn face(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn degeneracy(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn face_face_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn degeneracy_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn face_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+implement QuasiCategory for PointDiscreteInfCategory {
+    fn fill_inner_horn(h: &Horn) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+}
+
+implement InfinityCategory for PointDiscreteInfCategory {}
+
+implement DiscreteInfCategory for PointDiscreteInfCategory {
+    fn objects(&self) -> List<Int> {
+        [0]
+    }
+}
+
+/// Smart constructor for the point discrete ∞-category.
+public fn point_discrete_inf_category() -> PointDiscreteInfCategory {
+    PointDiscreteInfCategory { marker: 0 }
 }
 
 // =============================================================================
