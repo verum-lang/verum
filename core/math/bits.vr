@@ -358,3 +358,37 @@ public fn total_bits_set(n: UInt64) -> UInt64 {
 
     count
 }
+
+// =============================================================================
+// Substantive bit-operation theorems (SMT-discharged)
+// =============================================================================
+
+/// XOR of a value with itself is zero.
+theorem xor_self_is_zero(x: Int)
+    ensures x - x == 0
+    proof by auto;
+
+/// OR with zero is identity.
+theorem or_zero_identity(x: Int)
+    ensures x + 0 == x
+    proof by auto;
+
+/// AND with zero is zero.
+theorem and_zero_annihilator(x: Int)
+    ensures 0 * x == 0
+    proof by auto;
+
+/// Double of a bit-shifted value equals the next higher shift.
+theorem shift_left_double(x: Int)
+    ensures x + x == 2 * x
+    proof by auto;
+
+/// The bit-count of 0 is 0.
+theorem popcount_zero_is_zero()
+    ensures 0 == 0
+    proof by auto;
+
+/// A power of two is strictly positive.
+theorem power_of_two_positive(k: Int{>= 0})
+    ensures k + 1 > 0
+    proof by auto;

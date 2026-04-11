@@ -428,3 +428,72 @@ public fn rising_factorial(n: Int, k: Int{>= 0}) -> Int {
     }
     result
 }
+
+// =============================================================================
+// Integer arithmetic theorems (SMT-discharged)
+// =============================================================================
+
+/// Integer addition commutes: `a + b == b + a`.
+theorem int_add_commutative(a: Int, b: Int)
+    ensures a + b == b + a
+    proof by auto;
+
+/// Integer addition is associative.
+theorem int_add_associative(a: Int, b: Int, c: Int)
+    ensures (a + b) + c == a + (b + c)
+    proof by auto;
+
+/// Zero is the additive identity.
+theorem int_zero_left_identity(a: Int)
+    ensures 0 + a == a
+    proof by auto;
+
+/// Integer multiplication commutes.
+theorem int_mul_commutative(a: Int, b: Int)
+    ensures a * b == b * a
+    proof by auto;
+
+/// Integer multiplication is associative.
+theorem int_mul_associative(a: Int, b: Int, c: Int)
+    ensures (a * b) * c == a * (b * c)
+    proof by auto;
+
+/// One is the multiplicative identity.
+theorem int_one_left_identity(a: Int)
+    ensures 1 * a == a
+    proof by auto;
+
+/// Distributivity of multiplication over addition.
+theorem int_distributive(a: Int, b: Int, c: Int)
+    ensures a * (b + c) == a * b + a * c
+    proof by auto;
+
+/// Zero annihilates under multiplication.
+theorem int_mul_zero(a: Int)
+    ensures 0 * a == 0
+    proof by auto;
+
+/// Additive inverse: `a + (-a) == 0`.
+theorem int_additive_inverse(a: Int)
+    ensures a + (-a) == 0
+    proof by auto;
+
+/// Double negation: `-(-a) == a`.
+theorem int_double_neg(a: Int)
+    ensures -(-a) == a
+    proof by auto;
+
+/// Subtraction is anti-commutative: `a - b == -(b - a)`.
+theorem int_sub_anti_commutative(a: Int, b: Int)
+    ensures a - b == -(b - a)
+    proof by auto;
+
+/// Square of an integer is non-negative.
+theorem int_square_non_negative(a: Int)
+    ensures a * a >= 0
+    proof by auto;
+
+/// Cube preserves sign: if a ≥ 0 then a³ ≥ 0.
+theorem int_cube_preserves_non_neg(a: Int{>= 0})
+    ensures a * a * a >= 0
+    proof by auto;
