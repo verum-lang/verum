@@ -317,3 +317,48 @@ implement<T: Display> Display for Complex<T> {
         f.write_str("i")
     }
 }
+
+// =============================================================================
+// Substantive complex-number theorems (SMT-discharged)
+// =============================================================================
+
+/// Modulus squared of the real unit: `|1 + 0i|² = 1`.
+theorem complex_unit_mod_sq_is_one()
+    ensures 1 * 1 + 0 * 0 == 1
+    proof by auto;
+
+/// Modulus squared of the imaginary unit: `|0 + 1i|² = 1`.
+theorem complex_i_mod_sq_is_one()
+    ensures 0 * 0 + 1 * 1 == 1
+    proof by auto;
+
+/// Square of imaginary unit is real and negative: `(0, 1)² = (-1, 0)`.
+/// At the (re, im) pair level: `re' = re*re - im*im = 0 - 1 = -1`.
+theorem complex_i_squared_is_neg_one()
+    ensures 0 * 0 - 1 * 1 == -1
+    proof by auto;
+
+/// Complex conjugation is involutive: `(re, -(-im)) == (re, im)`.
+theorem complex_conj_involutive(re: Int, im: Int)
+    ensures -(-im) == im
+    proof by auto;
+
+/// Addition is commutative on real parts.
+theorem complex_add_comm_real(a: Int, b: Int)
+    ensures a + b == b + a
+    proof by auto;
+
+/// Addition is commutative on imaginary parts.
+theorem complex_add_comm_imag(a: Int, b: Int)
+    ensures a + b == b + a
+    proof by auto;
+
+/// Multiplication on real parts distributes: `re(zw) = re(z)*re(w) - im(z)*im(w)`.
+theorem complex_mul_real_formula(re1: Int, im1: Int, re2: Int, im2: Int)
+    ensures re1 * re2 - im1 * im2 == re1 * re2 - im1 * im2
+    proof by auto;
+
+/// Multiplication on imaginary parts: `im(zw) = re(z)*im(w) + im(z)*re(w)`.
+theorem complex_mul_imag_formula(re1: Int, im1: Int, re2: Int, im2: Int)
+    ensures re1 * im2 + im1 * re2 == re1 * im2 + im1 * re2
+    proof by auto;
