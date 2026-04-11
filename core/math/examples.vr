@@ -41,6 +41,7 @@ mount core.math.simplicial.{Horn};
 mount core.math.infinity_topos.{
     Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
     InfSubobjectClassifier, GeometricMorphism,
+    InfinityTopos, SheafInfinityTopos,
 };
 mount core.math.fibration.{
     CartesianMorphism, CoCartesianMorphism, StraighteningEquivalence, BaseChange,
@@ -1939,6 +1940,53 @@ implement Fibre<PointSimplicialSet, PointSimplicialSet> for PointSimplicialSet {
     }
 
     fn inclusion_is_fully_faithful(x: &Int, y: &Int) -> Bool {
+        true
+    }
+}
+
+// PointSimplicialSet is also the simplest ∞-topos: it is the terminal
+// ∞-topos, with small colimits, finite limits, universal colimits,
+// disjoint coproducts, and effective groupoid objects all holding
+// trivially (there is a single point to begin with). Closes the
+// `InfinityCategory → InfinityTopos` chain at the concrete level.
+implement InfinityTopos for PointSimplicialSet {
+    fn has_small_colimits(&self) -> Bool {
+        true
+    }
+
+    fn has_finite_limits(&self) -> Bool {
+        true
+    }
+
+    fn colimits_universal(&self) -> Bool {
+        true
+    }
+
+    fn coproducts_disjoint(&self) -> Bool {
+        true
+    }
+
+    fn groupoid_objects_effective(&self) -> Bool {
+        true
+    }
+}
+
+// And, since the sheaves on the trivial site are equivalent to the
+// terminal ∞-topos itself, PointSimplicialSet is also a
+// `SheafInfinityTopos<IntegerPathCategory>`. The underlying site is
+// encoded as integer 0 (the discrete topology on a single object),
+// sheafification is the identity, and its left-exactness holds
+// trivially.
+implement SheafInfinityTopos<IntegerPathCategory> for PointSimplicialSet {
+    fn underlying_site(&self) -> Int {
+        0
+    }
+
+    fn sheafification(&self, p: &Int) -> Int {
+        *p
+    }
+
+    fn sheafification_is_left_exact(p: &Int, q: &Int) -> Bool {
         true
     }
 }
