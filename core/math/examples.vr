@@ -49,6 +49,9 @@ mount core.math.fibration.{
 };
 mount core.math.model_category.{
     WeakEquivalenceClass, CofibrationClass, FibrationClass,
+    TrivialCofibration, TrivialFibration,
+    CofibrantObject, FibrantObject,
+    HomotopyEquivalentAsInfCat, QuillenAdjunction, QuillenEquivalence,
 };
 mount core.math.operad.{Operad, AssociativeOperad, CommutativeOperad};
 mount core.math.category.{
@@ -1555,6 +1558,183 @@ public fn trivial_cof_class() -> TrivialCofClass {
 /// Smart constructor for the trivial fibration class witness.
 public fn trivial_fib_class() -> TrivialFibClass {
     TrivialFibClass { marker: 0 }
+}
+
+// =============================================================================
+// 2.33. Trivial (co)fibration diamond — TrivialCofibration + TrivialFibration
+// =============================================================================
+
+/// A **trivial-everything** morphism class — every morphism is a
+/// cofibration, fibration, and weak equivalence simultaneously.
+/// Closes the `TrivialCofibration` diamond (CofibrationClass +
+/// WeakEquivalenceClass) and the `TrivialFibration` diamond
+/// (FibrationClass + WeakEquivalenceClass).
+public type TrivialEverythingClass is {
+    marker: Int,
+};
+
+implement WeakEquivalenceClass<IntegerPathCategory> for TrivialEverythingClass {
+    fn is_weak_equiv(f: &Int) -> Bool {
+        true
+    }
+
+    fn two_out_of_three(f: &Int, g: &Int) -> Bool {
+        true
+    }
+}
+
+implement CofibrationClass<IntegerPathCategory> for TrivialEverythingClass {
+    fn is_cofibration(f: &Int) -> Bool {
+        true
+    }
+
+    fn llp_vs_trivial_fibrations(f: &Int, p: &Int) -> Bool {
+        true
+    }
+}
+
+implement FibrationClass<IntegerPathCategory> for TrivialEverythingClass {
+    fn is_fibration(f: &Int) -> Bool {
+        true
+    }
+
+    fn rlp_vs_trivial_cofibrations(f: &Int, i: &Int) -> Bool {
+        true
+    }
+}
+
+implement TrivialCofibration<IntegerPathCategory> for TrivialEverythingClass {}
+implement TrivialFibration<IntegerPathCategory> for TrivialEverythingClass {}
+
+/// Smart constructor for the trivial-everything class.
+public fn trivial_everything_class() -> TrivialEverythingClass {
+    TrivialEverythingClass { marker: 0 }
+}
+
+// =============================================================================
+// 2.34. TrivialCofibrant / TrivialFibrant — concrete (co)fibrant objects
+// =============================================================================
+
+/// Every object is cofibrant — `∅ → x` is a cofibration trivially.
+public type TrivialCofibrantObject is {
+    object_id: Int,
+};
+
+implement CofibrantObject<IntegerPathCategory> for TrivialCofibrantObject {
+    fn object(&self) -> Int {
+        self.object_id
+    }
+
+    fn initial_map_is_cof(&self) -> Bool {
+        true
+    }
+}
+
+/// Dual — every object is fibrant.
+public type TrivialFibrantObject is {
+    object_id: Int,
+};
+
+implement FibrantObject<IntegerPathCategory> for TrivialFibrantObject {
+    fn object(&self) -> Int {
+        self.object_id
+    }
+
+    fn terminal_map_is_fib(&self) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial cofibrant object.
+public fn trivial_cofibrant_object(id: Int) -> TrivialCofibrantObject {
+    TrivialCofibrantObject { object_id: id }
+}
+
+/// Smart constructor for the trivial fibrant object.
+public fn trivial_fibrant_object(id: Int) -> TrivialFibrantObject {
+    TrivialFibrantObject { object_id: id }
+}
+
+// =============================================================================
+// 2.35. TrivialHomotopyEquiv — concrete `HomotopyEquivalentAsInfCat`
+// =============================================================================
+
+/// The **trivial simplicial-localisation bridge**: identifies an
+/// IntegerPathCategory model structure with a PointSimplicialSet
+/// ∞-category via the identity equivalence. Concrete acid test for
+/// the `HomotopyEquivalentAsInfCat<C>` protocol.
+public type TrivialHomotopyEquiv is {
+    marker: Int,
+};
+
+implement HomotopyEquivalentAsInfCat<IntegerPathCategory> for TrivialHomotopyEquiv {
+    fn underlying_model(&self) -> Int {
+        0
+    }
+
+    fn underlying_infinity_category(&self) -> Int {
+        0
+    }
+
+    fn simplicial_localisation_equivalence() -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial homotopy equivalence bridge.
+public fn trivial_homotopy_equiv() -> TrivialHomotopyEquiv {
+    TrivialHomotopyEquiv { marker: 0 }
+}
+
+// =============================================================================
+// 2.36. IdentityQuillenAdjunction / IdentityQuillenEquivalence
+// =============================================================================
+
+/// The **identity Quillen adjunction** on a model category: both
+/// adjoints are the identity, both preserve (co)fibrations, and the
+/// adjunction unit/counit laws hold trivially.
+public type IdentityQuillenAdjunction is {
+    marker: Int,
+};
+
+implement QuillenAdjunction<IntegerPathCategory, IntegerPathCategory>
+    for IdentityQuillenAdjunction {
+    fn left(&self, x: &Int) -> Int {
+        *x
+    }
+
+    fn right(&self, y: &Int) -> Int {
+        *y
+    }
+
+    fn left_preserves_cof(x: &Int, y: &Int) -> Bool {
+        true
+    }
+
+    fn right_preserves_fib(x: &Int, y: &Int) -> Bool {
+        true
+    }
+
+    fn adjunction_unit_counit(x: &Int, y: &Int) -> Bool {
+        true
+    }
+}
+
+implement QuillenEquivalence<IntegerPathCategory, IntegerPathCategory>
+    for IdentityQuillenAdjunction {
+    fn derived_unit_is_weak_equiv(x: &Int) -> Bool {
+        true
+    }
+
+    fn derived_counit_is_weak_equiv(y: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the identity Quillen adjunction (= Quillen
+/// equivalence).
+public fn identity_quillen_adjunction() -> IdentityQuillenAdjunction {
+    IdentityQuillenAdjunction { marker: 0 }
 }
 
 // =============================================================================
