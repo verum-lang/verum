@@ -37,9 +37,13 @@ mount core.math.infinity_category.{
 };
 mount core.math.infinity_topos.{
     Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
+    InfSubobjectClassifier,
 };
 mount core.math.fibration.{
     CartesianMorphism, CoCartesianMorphism, StraighteningEquivalence, BaseChange,
+};
+mount core.math.model_category.{
+    WeakEquivalenceClass, CofibrationClass, FibrationClass,
 };
 mount core.math.operad.{Operad, AssociativeOperad, CommutativeOperad};
 mount core.math.category.{
@@ -1479,6 +1483,104 @@ public fn trivial_left_kan() -> TrivialLeftKan {
 /// Smart constructor for the trivial right Kan extension.
 public fn trivial_right_kan() -> TrivialRightKan {
     TrivialRightKan { marker: 0 }
+}
+
+// =============================================================================
+// 2.28. TrivialWeakEquivClass / TrivialCof / TrivialFib — model category classes
+// =============================================================================
+
+/// The **trivial weak equivalence class** — every morphism is a weak
+/// equivalence, so 2-out-of-3 holds trivially. Concrete acid test
+/// for the `WeakEquivalenceClass<C>` protocol.
+public type TrivialWeakEquivClass is {
+    marker: Int,
+};
+
+implement WeakEquivalenceClass<IntegerPathCategory> for TrivialWeakEquivClass {
+    fn is_weak_equiv(f: &Int) -> Bool {
+        true
+    }
+
+    fn two_out_of_three(f: &Int, g: &Int) -> Bool {
+        true
+    }
+}
+
+/// The **trivial cofibration class** — every morphism is a
+/// cofibration, lifting properties hold trivially.
+public type TrivialCofClass is {
+    marker: Int,
+};
+
+implement CofibrationClass<IntegerPathCategory> for TrivialCofClass {
+    fn is_cofibration(f: &Int) -> Bool {
+        true
+    }
+
+    fn llp_vs_trivial_fibrations(f: &Int, p: &Int) -> Bool {
+        true
+    }
+}
+
+/// The **trivial fibration class** — dual of TrivialCofClass.
+public type TrivialFibClass is {
+    marker: Int,
+};
+
+implement FibrationClass<IntegerPathCategory> for TrivialFibClass {
+    fn is_fibration(f: &Int) -> Bool {
+        true
+    }
+
+    fn rlp_vs_trivial_cofibrations(f: &Int, i: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial weak-equivalence class witness.
+public fn trivial_weak_equiv_class() -> TrivialWeakEquivClass {
+    TrivialWeakEquivClass { marker: 0 }
+}
+
+/// Smart constructor for the trivial cofibration class witness.
+public fn trivial_cof_class() -> TrivialCofClass {
+    TrivialCofClass { marker: 0 }
+}
+
+/// Smart constructor for the trivial fibration class witness.
+public fn trivial_fib_class() -> TrivialFibClass {
+    TrivialFibClass { marker: 0 }
+}
+
+// =============================================================================
+// 2.29. TrivialInfSubobjectClassifier — concrete `InfSubobjectClassifier`
+// =============================================================================
+
+/// The **trivial ∞-subobject classifier** Ω = 1: the classifying map
+/// of every monomorphism is itself, and the pullback-of-true
+/// condition holds trivially. Concrete acid test for the ∞-topos
+/// subobject classifier protocol.
+public type TrivialInfSubobjectClassifier is {
+    marker: Int,
+};
+
+implement InfSubobjectClassifier for TrivialInfSubobjectClassifier {
+    fn omega(&self) -> Int {
+        1
+    }
+
+    fn classify(m: &Int) -> Int {
+        *m
+    }
+
+    fn pullback_of_true_is_m(m: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial ∞-subobject classifier.
+public fn trivial_inf_subobject_classifier() -> TrivialInfSubobjectClassifier {
+    TrivialInfSubobjectClassifier { marker: 0 }
 }
 
 // =============================================================================
