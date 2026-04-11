@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: category, omnibus, protocol, implement, regression
+// @timeout: 15000
+// @description: Omnibus spec touching every concrete category-theoretic reference instance.
+
+/// Omnibus regression spec: every concrete reference instance of a
+/// category-theoretic protocol in `core/math/examples.vr` is
+/// constructed and touched in one compilation unit. If any silent
+/// signature change ever breaks any of these instances, this spec
+/// will fail at build time.
+///
+/// Coverage: Category, Functor, Endofunctor, FaithfulFunctor,
+/// FullFunctor, FullyFaithfulFunctor, NaturalTransformation,
+/// NaturalIsomorphism, Monad, Comonad, Adjunction, Cone, Limit,
+/// Cocone, Colimit, Presheaf, Sheaf, MonoidalCategory,
+/// SymmetricMonoidalCategory, ClosedMonoidalCategory, Product,
+/// Coproduct, Equalizer, Coequalizer, Pullback, Pushout,
+/// YonedaEmbedding, SubobjectClassifier, Topos, AbelianCategory,
+/// EnrichedCategory — 31 protocols total.
+
+mount core.math.examples.{
+    IntegerPathCategory, integer_path_category,
+    IdentityEndofunctor, identity_endofunctor,
+    IdentityNatTrans, identity_nat_trans,
+    IdentityMonad, identity_monad,
+    IdentityComonad, identity_comonad,
+    IdentityAdjunction, identity_adjunction,
+    TerminalCone, terminal_cone,
+    InitialCocone, initial_cocone,
+    ConstantPresheaf, constant_presheaf,
+    TrivialMonoidal, trivial_monoidal,
+    IntProduct, int_product,
+    IntCoproduct, int_coproduct,
+    TrivialEqualizer, trivial_equalizer,
+    TrivialCoequalizer, trivial_coequalizer,
+    TrivialPullback, trivial_pullback,
+    TrivialPushout, trivial_pushout,
+    TrivialYoneda, trivial_yoneda,
+    TrivialTopos, trivial_topos,
+    TrivialAbelian, trivial_abelian,
+    TrivialEnriched, trivial_enriched,
+};
+
+fn main() {
+    let cat = integer_path_category();
+    let ef = identity_endofunctor();
+    let nt = identity_nat_trans();
+    let md = identity_monad();
+    let cm = identity_comonad();
+    let adj = identity_adjunction();
+    let cone = terminal_cone();
+    let cocone = initial_cocone();
+    let psh = constant_presheaf();
+    let mon = trivial_monoidal();
+    let prod = int_product(3, 5);
+    let cop = int_coproduct(7, 11);
+    let eq = trivial_equalizer();
+    let coeq = trivial_coequalizer();
+    let pb = trivial_pullback();
+    let po = trivial_pushout();
+    let yon = trivial_yoneda();
+    let top = trivial_topos();
+    let ab = trivial_abelian();
+    let en = trivial_enriched();
+
+    print(cat.marker);
+    print(ef.marker);
+    print(nt.marker);
+    print(md.marker);
+    print(cm.marker);
+    print(adj.marker);
+    print(cone.marker);
+    print(cocone.marker);
+    print(psh.marker);
+    print(mon.marker);
+    print(prod.left + prod.right);
+    print(cop.left + cop.right);
+    print(eq.marker);
+    print(coeq.marker);
+    print(pb.marker);
+    print(po.marker);
+    print(yon.marker);
+    print(top.marker);
+    print(ab.marker);
+    print(en.marker);
+    print("all 20 concrete category-theoretic instances exercised");
+}

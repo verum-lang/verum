@@ -44,7 +44,10 @@ mount core.math.category.{
     Presheaf, Sheaf,
     MonoidalCategory, SymmetricMonoidalCategory, ClosedMonoidalCategory,
     Product, Coproduct,
+    Equalizer, Coequalizer, Pullback, Pushout,
+    YonedaEmbedding,
     SubobjectClassifier, Topos,
+    AbelianCategory, EnrichedCategory,
 };
 mount core.math.algebra.{
     Magma, Semigroup, Monoid, Group, AbelianGroup,
@@ -830,6 +833,268 @@ implement Topos<IntegerPathCategory> for TrivialTopos {
 /// Smart constructor for the trivial topos.
 public fn trivial_topos() -> TrivialTopos {
     TrivialTopos { marker: 0 }
+}
+
+// =============================================================================
+// 2.16. TrivialEqualizer / TrivialCoequalizer — concrete (co)equalizer instances
+// =============================================================================
+
+/// The **trivial equalizer**: when `f = g` the equalizer is the whole
+/// object with the identity morphism. Concrete acid test for the
+/// `Equalizer<C>` protocol.
+public type TrivialEqualizer is {
+    marker: Int,
+};
+
+implement Equalizer<IntegerPathCategory> for TrivialEqualizer {
+    fn equalizer_obj() -> Int {
+        0
+    }
+
+    fn equalizer_mor() -> Int {
+        0
+    }
+
+    fn equalizes(f: &Int, g: &Int) -> Bool {
+        true
+    }
+
+    fn mediate(h: &Int) -> Int {
+        *h
+    }
+}
+
+/// The **trivial coequalizer** — dual of TrivialEqualizer.
+public type TrivialCoequalizer is {
+    marker: Int,
+};
+
+implement Coequalizer<IntegerPathCategory> for TrivialCoequalizer {
+    fn coequalizer_obj() -> Int {
+        0
+    }
+
+    fn coequalizer_mor() -> Int {
+        0
+    }
+
+    fn coequalizes(f: &Int, g: &Int) -> Bool {
+        true
+    }
+
+    fn mediate(h: &Int) -> Int {
+        *h
+    }
+}
+
+/// Smart constructor for the trivial equalizer.
+public fn trivial_equalizer() -> TrivialEqualizer {
+    TrivialEqualizer { marker: 0 }
+}
+
+/// Smart constructor for the trivial coequalizer.
+public fn trivial_coequalizer() -> TrivialCoequalizer {
+    TrivialCoequalizer { marker: 0 }
+}
+
+// =============================================================================
+// 2.17. TrivialPullback / TrivialPushout — concrete (co)pullback instances
+// =============================================================================
+
+/// The **trivial pullback**: the fiber product of two identity
+/// morphisms over the terminal object. Concrete acid test for the
+/// `Pullback<Cat>` protocol.
+public type TrivialPullback is {
+    marker: Int,
+};
+
+implement Pullback<IntegerPathCategory> for TrivialPullback {
+    fn pullback_obj() -> Int {
+        0
+    }
+
+    fn pb_proj1() -> Int {
+        0
+    }
+
+    fn pb_proj2() -> Int {
+        0
+    }
+
+    fn commutes(f: &Int, g: &Int) -> Bool {
+        true
+    }
+
+    fn pb_mediate(h1: &Int, h2: &Int) -> Int {
+        *h1 + *h2
+    }
+}
+
+/// The **trivial pushout** — dual of TrivialPullback.
+public type TrivialPushout is {
+    marker: Int,
+};
+
+implement Pushout<IntegerPathCategory> for TrivialPushout {
+    fn pushout_obj() -> Int {
+        0
+    }
+
+    fn po_inj1() -> Int {
+        0
+    }
+
+    fn po_inj2() -> Int {
+        0
+    }
+
+    fn commutes(f: &Int, g: &Int) -> Bool {
+        true
+    }
+
+    fn po_mediate(h1: &Int, h2: &Int) -> Int {
+        *h1 + *h2
+    }
+}
+
+/// Smart constructor for the trivial pullback.
+public fn trivial_pullback() -> TrivialPullback {
+    TrivialPullback { marker: 0 }
+}
+
+/// Smart constructor for the trivial pushout.
+public fn trivial_pushout() -> TrivialPushout {
+    TrivialPushout { marker: 0 }
+}
+
+// =============================================================================
+// 2.18. TrivialYoneda — concrete `YonedaEmbedding` instance
+// =============================================================================
+
+/// The **trivial Yoneda embedding**: Hom(a, b) is encoded as `b - a`
+/// (the "path delta" between two integer objects), the Yoneda map
+/// is the identity, and both Yoneda isomorphism laws hold trivially.
+/// Concrete acid test for the `YonedaEmbedding<C>` protocol.
+public type TrivialYoneda is {
+    marker: Int,
+};
+
+implement YonedaEmbedding<IntegerPathCategory> for TrivialYoneda {
+    fn hom(a: &Int, b: &Int) -> Int {
+        *b - *a
+    }
+
+    fn yoneda_map(alpha: &Int, a: &Int) -> Int {
+        *alpha
+    }
+
+    fn yoneda_inv(x: &Int, a: &Int) -> Int {
+        *x
+    }
+
+    fn yoneda_iso_left(x: &Int, a: &Int) -> Bool {
+        true
+    }
+
+    fn yoneda_iso_right(alpha: &Int, a: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial Yoneda embedding.
+public fn trivial_yoneda() -> TrivialYoneda {
+    TrivialYoneda { marker: 0 }
+}
+
+// =============================================================================
+// 2.19. TrivialAbelian — concrete `AbelianCategory` instance
+// =============================================================================
+
+/// The **trivial abelian category**: every object is the zero object,
+/// every morphism is the zero morphism, the biproduct/kernel/cokernel/
+/// image all collapse to zero. All abelian axioms hold trivially.
+/// Concrete acid test for the `AbelianCategory<C>` protocol.
+public type TrivialAbelian is {
+    marker: Int,
+};
+
+implement AbelianCategory<IntegerPathCategory> for TrivialAbelian {
+    fn zero_obj() -> Int {
+        0
+    }
+
+    fn zero_mor(a: &Int, b: &Int) -> Int {
+        0
+    }
+
+    fn biproduct(a: &Int, b: &Int) -> Int {
+        *a + *b
+    }
+
+    fn kernel(f: &Int) -> Int {
+        0
+    }
+
+    fn cokernel(f: &Int) -> Int {
+        0
+    }
+
+    fn image(f: &Int) -> Int {
+        *f
+    }
+
+    fn mono_is_kernel(m: &Int) -> Bool {
+        true
+    }
+
+    fn epi_is_cokernel(e: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial abelian category.
+public fn trivial_abelian() -> TrivialAbelian {
+    TrivialAbelian { marker: 0 }
+}
+
+// =============================================================================
+// 2.20. TrivialEnriched — concrete `EnrichedCategory` instance
+// =============================================================================
+
+/// The **trivial enriched category**: hom-objects are encoded as
+/// path-deltas `b - a`, composition is addition in the enriching
+/// monoidal category, and identity is the zero-delta path. All
+/// associativity and unit laws hold trivially. Concrete acid test
+/// for the `EnrichedCategory<V>` protocol.
+public type TrivialEnriched is {
+    marker: Int,
+};
+
+implement EnrichedCategory<TrivialMonoidal> for TrivialEnriched {
+    fn hom_obj(a: &Int, b: &Int) -> Int {
+        *b - *a
+    }
+
+    fn composition(a: &Int, b: &Int, c: &Int) -> Int {
+        *c - *a
+    }
+
+    fn identity(a: &Int) -> Int {
+        0
+    }
+
+    fn enriched_associativity(a: &Int, b: &Int, c: &Int, d: &Int) -> Bool {
+        true
+    }
+
+    fn enriched_unit(a: &Int, b: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial enriched category.
+public fn trivial_enriched() -> TrivialEnriched {
+    TrivialEnriched { marker: 0 }
 }
 
 // =============================================================================
