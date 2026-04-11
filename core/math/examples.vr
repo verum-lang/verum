@@ -84,6 +84,8 @@ mount core.math.algebra.{
     Ring, CommutativeRing, IntegralDomain, Field,
     Lattice, BoundedLattice, DistributiveLattice,
     ComplementedLattice, BooleanAlgebra,
+    OrthomodularLattice, CommutingPair, BooleanSublattice,
+    EquivalenceRelation, Congruence,
 };
 
 // =============================================================================
@@ -258,6 +260,81 @@ implement InfAlgebra<PointSimplicialSet, PointSimplicialSet> for TrivialInfAlgeb
 /// Smart constructor for the trivial ∞-algebra.
 public fn trivial_inf_algebra() -> TrivialInfAlgebra {
     TrivialInfAlgebra { marker: 0 }
+}
+
+// =============================================================================
+// 2.46. IntEqRelation — concrete `EquivalenceRelation<Int>` instance
+// =============================================================================
+
+/// The **integer equality relation** — the canonical equivalence
+/// relation on Int, just integer equality. Reflexivity, symmetry,
+/// and transitivity hold trivially.
+public type IntEqRelation is {
+    marker: Int,
+};
+
+implement EquivalenceRelation<Int> for IntEqRelation {
+    fn equivalent(&self, a: &Int, b: &Int) -> Bool {
+        *a == *b
+    }
+
+    fn reflexivity(&self, a: &Int) -> Bool {
+        true
+    }
+
+    fn symmetry(&self, a: &Int, b: &Int) -> Bool {
+        true
+    }
+
+    fn transitivity(&self, a: &Int, b: &Int, c: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for integer equality as an equivalence relation.
+public fn int_eq_relation() -> IntEqRelation {
+    IntEqRelation { marker: 0 }
+}
+
+// =============================================================================
+// 2.47. Z3EqCongruence — concrete `Congruence<Z3>` instance
+// =============================================================================
+
+/// **Equality on Z/3Z as a congruence**: the reflexive, symmetric,
+/// transitive relation `==` is compatible with the group operation,
+/// so it is a congruence. Concrete acid test for the `Congruence<G>`
+/// protocol, which extends `EquivalenceRelation<G>`.
+public type Z3EqCongruence is {
+    marker: Int,
+};
+
+implement EquivalenceRelation<Z3> for Z3EqCongruence {
+    fn equivalent(&self, a: &Z3, b: &Z3) -> Bool {
+        a.value == b.value
+    }
+
+    fn reflexivity(&self, a: &Z3) -> Bool {
+        true
+    }
+
+    fn symmetry(&self, a: &Z3, b: &Z3) -> Bool {
+        true
+    }
+
+    fn transitivity(&self, a: &Z3, b: &Z3, c: &Z3) -> Bool {
+        true
+    }
+}
+
+implement Congruence<Z3> for Z3EqCongruence {
+    fn compatibility(&self, a: &Z3, b: &Z3, c: &Z3, d: &Z3) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for Z/3Z equality as a congruence.
+public fn z3_eq_congruence() -> Z3EqCongruence {
+    Z3EqCongruence { marker: 0 }
 }
 
 // =============================================================================
@@ -2997,6 +3074,32 @@ implement BooleanAlgebra for Bool2 {
     }
 }
 
+// Every Boolean algebra is also an orthomodular lattice — in the
+// Boolean case the orthomodular law reduces to the absorption law
+// which already holds in every lattice. Closes the BoundedLattice →
+// OrthomodularLattice direction on a concrete type.
+implement OrthomodularLattice for Bool2 {
+    fn ortho(&self) -> Bool2 {
+        Bool2 { value: !self.value }
+    }
+
+    fn involution(&self) -> Bool {
+        true
+    }
+
+    fn antitonicity(&self, other: &Bool2) -> Bool {
+        true
+    }
+
+    fn complement_laws(&self) -> Bool {
+        true
+    }
+
+    fn orthomodular_law(&self, other: &Bool2) -> Bool {
+        true
+    }
+}
+
 // =============================================================================
 // 7. Chain preorder (reference `Category` instance)
 // =============================================================================
@@ -3380,6 +3483,32 @@ implement BooleanAlgebra for Pow2 {
     }
 
     fn de_morgan_join(&self, other: &Pow2) -> Bool {
+        true
+    }
+}
+
+// Pow2 is also an orthomodular lattice via its Boolean structure.
+implement OrthomodularLattice for Pow2 {
+    fn ortho(&self) -> Pow2 {
+        Pow2 {
+            has_zero: !self.has_zero,
+            has_one: !self.has_one,
+        }
+    }
+
+    fn involution(&self) -> Bool {
+        true
+    }
+
+    fn antitonicity(&self, other: &Pow2) -> Bool {
+        true
+    }
+
+    fn complement_laws(&self) -> Bool {
+        true
+    }
+
+    fn orthomodular_law(&self, other: &Pow2) -> Bool {
         true
     }
 }
