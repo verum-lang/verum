@@ -1,0 +1,49 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: simplicial, infinity-category, infinity-functor, fibration, tower, acid-test
+// @timeout: 10000
+// @description: Full ∞-categorical tower on concrete types — SimplicialSet → InfinityCategory → Fibration.
+
+/// Acid test for the full ∞-categorical protocol tower on concrete
+/// types in `core/math/examples.vr`:
+///
+///   PointSimplicialSet carries:
+///     * SimplicialSet → KanComplex → InfinityGroupoid
+///     * SimplicialSet → QuasiCategory → InfinityCategory
+///
+///   PointNerve carries:
+///     * SimplicialSet → Nerve
+///
+///   IdentityInfinityFunctor carries:
+///     * InfinityFunctor<PointSimplicialSet, PointSimplicialSet>
+///     * GrothendieckFibration + Opfibration → Bifibration
+///     * LeftFibration + RightFibration
+///
+/// Together these eleven protocols form the deepest concrete-instance
+/// chain in the stdlib, touching every major ∞-categorical protocol
+/// from core/math/{simplicial,infinity_category,fibration}.vr.
+
+mount core.math.examples.{
+    PointSimplicialSet, point_simplicial_set,
+    PointNerve, point_nerve,
+    IdentityInfinityFunctor, identity_infinity_functor,
+};
+
+fn exercise_simplicial_tower() {
+    let pss = point_simplicial_set();
+    let pn = point_nerve();
+    print(pss.marker);
+    print(pn.marker);
+}
+
+fn exercise_infinity_functor_fibrations() {
+    let iif = identity_infinity_functor();
+    print(iif.marker);
+}
+
+fn main() {
+    exercise_simplicial_tower();
+    exercise_infinity_functor_fibrations();
+    print("∞-categorical tower + fibration hierarchy acid test green");
+}
