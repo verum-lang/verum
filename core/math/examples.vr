@@ -45,7 +45,7 @@ mount core.math.infinity_topos.{
 mount core.math.fibration.{
     CartesianMorphism, CoCartesianMorphism, StraighteningEquivalence, BaseChange,
     GrothendieckFibration, Opfibration, Bifibration,
-    LeftFibration, RightFibration,
+    LeftFibration, RightFibration, Fibre,
 };
 mount core.math.model_category.{
     WeakEquivalenceClass, CofibrationClass, FibrationClass,
@@ -1924,6 +1924,24 @@ implement QuasiCategory for PointSimplicialSet {
 }
 
 implement InfinityCategory for PointSimplicialSet {}
+
+// PointSimplicialSet is trivially a fibre of the identity fibration
+// over itself: the base object is 0, the inclusion is the identity,
+// and the fully-faithful property holds trivially because the whole
+// ∞-category has a single point.
+implement Fibre<PointSimplicialSet, PointSimplicialSet> for PointSimplicialSet {
+    fn base_object(&self) -> Int {
+        0
+    }
+
+    fn inclusion(&self, x: &Int) -> Int {
+        *x
+    }
+
+    fn inclusion_is_fully_faithful(x: &Int, y: &Int) -> Bool {
+        true
+    }
+}
 
 // =============================================================================
 // 2.31. IdentityInfinityFunctor — concrete `InfinityFunctor` on PointSimplicialSet
