@@ -35,6 +35,12 @@ mount core.math.simplicial.{
 mount core.math.infinity_category.{
     walking_arrow_dim, one_object_category_dim, identity_functor_handle,
 };
+mount core.math.infinity_topos.{
+    Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
+};
+mount core.math.fibration.{
+    CartesianMorphism, CoCartesianMorphism, StraighteningEquivalence, BaseChange,
+};
 mount core.math.operad.{Operad, AssociativeOperad, CommutativeOperad};
 mount core.math.category.{
     Category, Functor, Endofunctor, FaithfulFunctor, FullFunctor, FullyFaithfulFunctor,
@@ -1117,6 +1123,216 @@ implement EnrichedCategory<TrivialMonoidal> for TrivialEnriched {
 /// Smart constructor for the trivial enriched category.
 public fn trivial_enriched() -> TrivialEnriched {
     TrivialEnriched { marker: 0 }
+}
+
+// =============================================================================
+// 2.21. MaximalSieve / DiscreteTopology — concrete ∞-topos data
+// =============================================================================
+
+/// The **maximal sieve** on an ∞-category: contains every morphism.
+/// Trivially closed under precomposition. Concrete acid test for the
+/// `Sieve<C>` protocol.
+public type MaximalSieve is {
+    marker: Int,
+};
+
+implement Sieve<IntegerPathCategory> for MaximalSieve {
+    fn contains(f: &Int) -> Bool {
+        true
+    }
+
+    fn closed_under_precomposition(f: &Int, g: &Int) -> Bool {
+        true
+    }
+}
+
+/// The **discrete topology** on an ∞-category: every sieve is
+/// covering. All three Grothendieck axioms hold trivially (the
+/// pullback of a covering sieve is covering because all sieves are).
+/// Concrete acid test for the `GrothendieckTopology<C>` protocol.
+public type DiscreteTopology is {
+    marker: Int,
+};
+
+implement GrothendieckTopology<IntegerPathCategory> for DiscreteTopology {
+    fn is_covering(c: &Int, s: &Int) -> Bool {
+        true
+    }
+
+    fn maximality(c: &Int) -> Bool {
+        true
+    }
+
+    fn stability(c: &Int, c_prime: &Int, f: &Int, s: &Int) -> Bool {
+        true
+    }
+
+    fn transitivity(c: &Int, s: &Int, r: &Int) -> Bool {
+        true
+    }
+}
+
+/// The **trivial ∞-site** on `IntegerPathCategory` equipped with the
+/// discrete topology. Concrete acid test for the `Site<C>` protocol.
+public type TrivialSite is {
+    marker: Int,
+};
+
+implement Site<IntegerPathCategory> for TrivialSite {
+    fn underlying_category(&self) -> Int {
+        self.marker
+    }
+
+    fn topology(&self) -> Int {
+        0
+    }
+}
+
+/// Smart constructor for the maximal sieve.
+public fn maximal_sieve() -> MaximalSieve {
+    MaximalSieve { marker: 0 }
+}
+
+/// Smart constructor for the discrete topology.
+public fn discrete_topology() -> DiscreteTopology {
+    DiscreteTopology { marker: 0 }
+}
+
+/// Smart constructor for the trivial ∞-site.
+public fn trivial_site() -> TrivialSite {
+    TrivialSite { marker: 0 }
+}
+
+// =============================================================================
+// 2.22. ConstantInfPresheaf — concrete `InfPresheaf<C>` instance
+// =============================================================================
+
+/// The **constant ∞-presheaf** on `IntegerPathCategory` — sends every
+/// object to the same ∞-groupoid handle. Concrete acid test for the
+/// `InfPresheaf<C>` protocol.
+public type ConstantInfPresheaf is {
+    marker: Int,
+};
+
+implement InfPresheaf<IntegerPathCategory> for ConstantInfPresheaf {
+    fn apply(c: &Int) -> Int {
+        0
+    }
+}
+
+/// Smart constructor for the constant ∞-presheaf.
+public fn constant_inf_presheaf() -> ConstantInfPresheaf {
+    ConstantInfPresheaf { marker: 0 }
+}
+
+// =============================================================================
+// 2.23. TrivialCartesianMorphism / TrivialCoCartesian — concrete fibration
+// =============================================================================
+
+/// The **trivial cartesian morphism** — every morphism is cartesian,
+/// universal factorisation holds trivially. Concrete acid test for
+/// the `CartesianMorphism<E, B>` protocol.
+public type TrivialCartesianMorphism is {
+    marker: Int,
+};
+
+implement CartesianMorphism<IntegerPathCategory, IntegerPathCategory>
+    for TrivialCartesianMorphism {
+    fn is_cartesian(&self, f: &Int) -> Bool {
+        true
+    }
+
+    fn universal_factorisation(f: &Int, g: &Int) -> Bool {
+        true
+    }
+}
+
+/// The dual — every morphism is coCartesian.
+public type TrivialCoCartesianMorphism is {
+    marker: Int,
+};
+
+implement CoCartesianMorphism<IntegerPathCategory, IntegerPathCategory>
+    for TrivialCoCartesianMorphism {
+    fn is_cocartesian(&self, f: &Int) -> Bool {
+        true
+    }
+
+    fn universal_cofactorisation(f: &Int, g: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial cartesian morphism witness.
+public fn trivial_cartesian_morphism() -> TrivialCartesianMorphism {
+    TrivialCartesianMorphism { marker: 0 }
+}
+
+/// Smart constructor for the trivial coCartesian morphism witness.
+public fn trivial_cocartesian_morphism() -> TrivialCoCartesianMorphism {
+    TrivialCoCartesianMorphism { marker: 0 }
+}
+
+// =============================================================================
+// 2.24. TrivialStraightening / TrivialBaseChange — concrete fibration ops
+// =============================================================================
+
+/// The **trivial straightening equivalence** — sends every ∞-functor
+/// to itself and every fibration to itself, with both round-trip
+/// laws holding trivially. Concrete acid test for the
+/// `StraighteningEquivalence<B>` protocol.
+public type TrivialStraightening is {
+    marker: Int,
+};
+
+implement StraighteningEquivalence<IntegerPathCategory> for TrivialStraightening {
+    fn straighten(&self, f: &Int) -> Int {
+        *f
+    }
+
+    fn unstraighten(&self, p: &Int) -> Int {
+        *p
+    }
+
+    fn round_trip_straighten(f: &Int) -> Bool {
+        true
+    }
+
+    fn round_trip_unstraighten(p: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial straightening equivalence.
+public fn trivial_straightening() -> TrivialStraightening {
+    TrivialStraightening { marker: 0 }
+}
+
+/// The **trivial base change** — sends every (p, f) pair to the same
+/// handle and satisfies the base-change-is-fibration and fibre-
+/// preservation laws trivially. Concrete acid test for the
+/// `BaseChange<E, B>` protocol.
+public type TrivialBaseChange is {
+    marker: Int,
+};
+
+implement BaseChange<IntegerPathCategory, IntegerPathCategory> for TrivialBaseChange {
+    fn base_change(p: &Int, f: &Int) -> Int {
+        *p + *f
+    }
+
+    fn base_change_is_fibration(p: &Int, f: &Int) -> Bool {
+        true
+    }
+
+    fn base_change_preserves_fibres(p: &Int, f: &Int, b_prime: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial base change witness.
+public fn trivial_base_change() -> TrivialBaseChange {
+    TrivialBaseChange { marker: 0 }
 }
 
 // =============================================================================
