@@ -40,7 +40,7 @@ mount core.math.infinity_category.{
 mount core.math.simplicial.{Horn};
 mount core.math.infinity_topos.{
     Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
-    InfSubobjectClassifier,
+    InfSubobjectClassifier, GeometricMorphism,
 };
 mount core.math.fibration.{
     CartesianMorphism, CoCartesianMorphism, StraighteningEquivalence, BaseChange,
@@ -1234,6 +1234,15 @@ implement InfPresheaf<IntegerPathCategory> for ConstantInfPresheaf {
     }
 }
 
+// The constant ∞-presheaf is also an ∞-sheaf: the descent condition
+// holds trivially because every covering sieve maps to the constant
+// value, which is already a homotopy limit.
+implement InfSheaf<IntegerPathCategory> for ConstantInfPresheaf {
+    fn descent(c: &Int, s: &Int) -> Bool {
+        true
+    }
+}
+
 /// Smart constructor for the constant ∞-presheaf.
 public fn constant_inf_presheaf() -> ConstantInfPresheaf {
     ConstantInfPresheaf { marker: 0 }
@@ -1766,6 +1775,43 @@ implement InfSubobjectClassifier for TrivialInfSubobjectClassifier {
 /// Smart constructor for the trivial ∞-subobject classifier.
 public fn trivial_inf_subobject_classifier() -> TrivialInfSubobjectClassifier {
     TrivialInfSubobjectClassifier { marker: 0 }
+}
+
+// =============================================================================
+// 2.37. IdentityGeometricMorphism — concrete `GeometricMorphism` instance
+// =============================================================================
+
+/// The **identity geometric morphism** `id : X → X` of an ∞-topos:
+/// both inverse image and direct image are the identity functor,
+/// and the adjunction / left-exactness obligations hold trivially.
+/// Concrete acid test for the `GeometricMorphism<X, Y>` protocol —
+/// the morphisms of the ∞-category `Top_∞`.
+public type IdentityGeometricMorphism is {
+    marker: Int,
+};
+
+implement GeometricMorphism<PointSimplicialSet, PointSimplicialSet>
+    for IdentityGeometricMorphism {
+    fn inverse_image(&self, q: &Int) -> Int {
+        *q
+    }
+
+    fn direct_image(&self, p: &Int) -> Int {
+        *p
+    }
+
+    fn adjunction_unit_counit(p: &Int, q: &Int) -> Bool {
+        true
+    }
+
+    fn inverse_image_left_exact(p: &Int, q: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the identity geometric morphism.
+public fn identity_geometric_morphism() -> IdentityGeometricMorphism {
+    IdentityGeometricMorphism { marker: 0 }
 }
 
 // =============================================================================
