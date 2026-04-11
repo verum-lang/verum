@@ -30,6 +30,7 @@ module core.math.examples;
 mount core.math.hott.{Equiv, IsContr, PathInt, refl_int};
 mount core.math.simplicial.{
     Simplex, SimplicialSet, KanComplex, InfinityGroupoid, Nerve,
+    SimplicialHomotopy,
     simplex_standard, simplex_zero, simplex_one,
     horn_2_1, horn_is_inner, horn_count_for,
 };
@@ -38,6 +39,7 @@ mount core.math.infinity_category.{
     QuasiCategory, InfinityCategory, InfinityFunctor,
     IdentityInfFunctor, FullyFaithfulInfFunctor, EssentiallySurjectiveInfFunctor,
     InfEquivalence, InfTerminal, InfInitial, DiscreteInfCategory,
+    MappingSpace, HomotopyCategory, OppositeInfCategory, FunctorInfCategory,
 };
 mount core.math.simplicial.{Horn};
 mount core.math.infinity_topos.{
@@ -2155,6 +2157,265 @@ implement DiscreteInfCategory for PointDiscreteInfCategory {
 /// Smart constructor for the point discrete ∞-category.
 public fn point_discrete_inf_category() -> PointDiscreteInfCategory {
     PointDiscreteInfCategory { marker: 0 }
+}
+
+// =============================================================================
+// 2.40. PointMappingSpace — concrete `MappingSpace` instance
+// =============================================================================
+
+/// The **point mapping space** `Map_C(0, 0)`: a Kan complex with a
+/// single 0-simplex. Concrete acid test for the `MappingSpace<C>`
+/// protocol, which extends `KanComplex` (and hence `SimplicialSet`).
+public type PointMappingSpace is {
+    marker: Int,
+};
+
+implement SimplicialSet for PointMappingSpace {
+    fn n_simplices(n: Int{>= 0}) -> List<Simplex> {
+        [Simplex { dim: 0, vertices: [0] }]
+    }
+
+    fn face(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn degeneracy(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn face_face_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn degeneracy_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn face_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+implement KanComplex for PointMappingSpace {
+    fn fill_horn(h: &Horn) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+}
+
+implement MappingSpace<PointSimplicialSet> for PointMappingSpace {
+    fn source_object(&self) -> Int {
+        0
+    }
+
+    fn target_object(&self) -> Int {
+        0
+    }
+}
+
+/// Smart constructor for the point mapping space.
+public fn point_mapping_space() -> PointMappingSpace {
+    PointMappingSpace { marker: 0 }
+}
+
+// =============================================================================
+// 2.41. TrivialHomotopyCategory / TrivialOppositeInfCat / TrivialFunctorInfCat
+// =============================================================================
+
+/// The **trivial homotopy category** — the homotopy category of the
+/// point ∞-category is the one-object one-morphism 1-category.
+/// Extends `Category<Int, Int>`, so this stresses the protocol chain
+/// through `HomotopyCategory<C> → Category<Int, Int>`.
+public type TrivialHomotopyCategory is {
+    marker: Int,
+};
+
+implement Category<Int, Int> for TrivialHomotopyCategory {
+    fn id(a: &Int) -> Int {
+        *a
+    }
+
+    fn compose(f: &Int, g: &Int) -> Int {
+        *f + *g
+    }
+
+    fn source(f: &Int) -> Int {
+        0
+    }
+
+    fn target(f: &Int) -> Int {
+        0
+    }
+
+    fn left_identity(f: &Int) -> Bool {
+        true
+    }
+
+    fn right_identity(f: &Int) -> Bool {
+        true
+    }
+
+    fn associativity(f: &Int, g: &Int, h: &Int) -> Bool {
+        true
+    }
+}
+
+implement HomotopyCategory<PointSimplicialSet> for TrivialHomotopyCategory {
+    fn underlying(&self) -> Int {
+        0
+    }
+
+    fn composition_well_defined(f: &Int, g: &Int, h: &Int) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial homotopy category.
+public fn trivial_homotopy_category() -> TrivialHomotopyCategory {
+    TrivialHomotopyCategory { marker: 0 }
+}
+
+/// The **opposite ∞-category** of PointSimplicialSet — which is
+/// isomorphic to PointSimplicialSet itself since reversing
+/// simplices on a single point does nothing. Concrete acid test
+/// for `OppositeInfCategory<C>` which extends InfinityCategory.
+public type TrivialOppositeInfCat is {
+    marker: Int,
+};
+
+implement SimplicialSet for TrivialOppositeInfCat {
+    fn n_simplices(n: Int{>= 0}) -> List<Simplex> {
+        [Simplex { dim: 0, vertices: [0] }]
+    }
+
+    fn face(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn degeneracy(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn face_face_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn degeneracy_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn face_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+implement QuasiCategory for TrivialOppositeInfCat {
+    fn fill_inner_horn(h: &Horn) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+}
+
+implement InfinityCategory for TrivialOppositeInfCat {}
+
+implement OppositeInfCategory<PointSimplicialSet> for TrivialOppositeInfCat {
+    fn original(&self) -> Int {
+        0
+    }
+
+    fn face_reindex_correct(s: &Simplex, i: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial opposite ∞-category.
+public fn trivial_opposite_inf_cat() -> TrivialOppositeInfCat {
+    TrivialOppositeInfCat { marker: 0 }
+}
+
+/// The **trivial functor ∞-category** `Fun(Point, Point)` — also a
+/// single point. Concrete acid test for `FunctorInfCategory<C, D>`
+/// which extends InfinityCategory.
+public type TrivialFunctorInfCat is {
+    marker: Int,
+};
+
+implement SimplicialSet for TrivialFunctorInfCat {
+    fn n_simplices(n: Int{>= 0}) -> List<Simplex> {
+        [Simplex { dim: 0, vertices: [0] }]
+    }
+
+    fn face(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn degeneracy(s: &Simplex, i: Int{>= 0}) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn face_face_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn degeneracy_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn face_degeneracy_identity(s: &Simplex, i: Int{>= 0}, j: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+implement QuasiCategory for TrivialFunctorInfCat {
+    fn fill_inner_horn(h: &Horn) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+}
+
+implement InfinityCategory for TrivialFunctorInfCat {}
+
+implement FunctorInfCategory<PointSimplicialSet, PointSimplicialSet>
+    for TrivialFunctorInfCat {
+    fn source_cat(&self) -> Int {
+        0
+    }
+
+    fn target_cat(&self) -> Int {
+        0
+    }
+}
+
+/// Smart constructor for the trivial functor ∞-category.
+public fn trivial_functor_inf_cat() -> TrivialFunctorInfCat {
+    TrivialFunctorInfCat { marker: 0 }
+}
+
+// =============================================================================
+// 2.42. TrivialSimplicialHomotopy — concrete `SimplicialHomotopy`
+// =============================================================================
+
+/// The **trivial simplicial homotopy** — the constant homotopy
+/// sending every simplex to a fixed target. Concrete acid test for
+/// the `SimplicialHomotopy` protocol.
+public type TrivialSimplicialHomotopy is {
+    marker: Int,
+};
+
+implement SimplicialHomotopy for TrivialSimplicialHomotopy {
+    fn at_zero(s: &Simplex) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn at_one(s: &Simplex) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+
+    fn respects_faces(s: &Simplex, i: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the trivial simplicial homotopy.
+public fn trivial_simplicial_homotopy() -> TrivialSimplicialHomotopy {
+    TrivialSimplicialHomotopy { marker: 0 }
 }
 
 // =============================================================================
