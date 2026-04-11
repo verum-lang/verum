@@ -3229,9 +3229,23 @@ impl VbcCodegen {
             ItemKind::Meta(_) => {
                 // Macros should be expanded before codegen
             }
-            // Proof-related items are not compiled to bytecode
-            ItemKind::Theorem(_) | ItemKind::Lemma(_) | ItemKind::Axiom(_) => {
-                // Proofs are verified, not executed
+            // Proof-related items are not compiled to bytecode (proof erasure).
+            //
+            // Proofs are a purely compile-time phenomenon: they are verified by
+            // the proof_verification phase (see crates/verum_compiler/src/phases/
+            // proof_verification.rs) and then erased from the VBC codegen path.
+            // This enforces the VBC-first architecture invariant that runtime
+            // carries zero proof-term overhead.
+            //
+            // All 5 proof-item kinds MUST be listed explicitly here — relying on
+            // the catch-all `_ => {}` arm would silently ignore new proof kinds
+            // added to ItemKind in the future.
+            ItemKind::Theorem(_)
+            | ItemKind::Lemma(_)
+            | ItemKind::Corollary(_)
+            | ItemKind::Axiom(_)
+            | ItemKind::Tactic(_) => {
+                // Proofs are verified in the verification phase, not executed.
             }
             // Catch-all for any future item kinds
             #[allow(unreachable_patterns)]

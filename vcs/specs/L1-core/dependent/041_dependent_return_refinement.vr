@@ -1,0 +1,25 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: dependent, refinement, return-type, regression
+// @timeout: 5000
+// @description: Return type refinement references input parameters — Π-type return dependency.
+
+/// Dependent return types via refinements: the result bound references
+/// both `lo` and `hi` input parameters. Any value returned from `clamp`
+/// is guaranteed to satisfy `lo <= result <= hi`.
+///
+/// This is the canonical dependent-return pattern:
+///   (lo: Int) → (hi: Int) → Int{lo <= it <= hi}
+///
+/// Locking this in as a regression: the refinement checker MUST
+/// propagate `lo` and `hi` into the return type's predicate scope.
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int{>= lo, <= hi} {
+    if x < lo { lo } else if x > hi { hi } else { x }
+}
+
+fn main() {
+    let c = clamp(42, 0, 100);
+    print(c);
+}

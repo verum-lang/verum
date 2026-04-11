@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: category, functor, natural-transformation, monad, adjunction, acid-test
+// @timeout: 10000
+// @description: Concrete category-theoretic protocol instances — Category, Endofunctor, NaturalTransformation, Monad, Adjunction.
+
+/// Acid test for the full category-theoretic protocol chain:
+///
+///   * `IntegerPathCategory` implements `Category<Int, PathInt>`
+///   * `IdentityEndofunctor` implements `Functor<...>` and `Endofunctor<...>`
+///   * `IdentityNatTrans`    implements `NaturalTransformation<..., F, F>`
+///   * `IdentityMonad`       implements `Monad<IntegerPathCategory>`
+///   * `IdentityAdjunction`  implements `Adjunction<C, D, F, G>` with 4 generic params
+///
+/// Every constructor, smart factory, and polymorphic protocol method
+/// is exercised so that a silent signature change in any generic
+/// protocol type parameter is caught at build time.
+
+mount core.math.examples.{
+    IntegerPathCategory, integer_path_category,
+    IdentityEndofunctor, identity_endofunctor,
+    IdentityNatTrans, identity_nat_trans,
+    IdentityMonad, identity_monad,
+    IdentityAdjunction, identity_adjunction,
+    integer_path_id, integer_path_compose, integer_path_source, integer_path_target,
+};
+
+fn exercise_category() {
+    let c = integer_path_category();
+    let id_5 = integer_path_id(5);
+    let id_7 = integer_path_id(7);
+    let cp = integer_path_compose(id_5, id_7);
+    let s = integer_path_source(&cp);
+    let t = integer_path_target(&cp);
+    print(c.marker);
+    print(s);
+    print(t);
+}
+
+fn exercise_endofunctor() {
+    let f = identity_endofunctor();
+    print(f.marker);
+}
+
+fn exercise_nat_trans() {
+    let n = identity_nat_trans();
+    print(n.marker);
+}
+
+fn exercise_monad() {
+    let m = identity_monad();
+    print(m.marker);
+}
+
+fn exercise_adjunction() {
+    let a = identity_adjunction();
+    print(a.marker);
+}
+
+fn main() {
+    exercise_category();
+    exercise_endofunctor();
+    exercise_nat_trans();
+    exercise_monad();
+    exercise_adjunction();
+    print("category/functor/nat-trans/monad/adjunction acid test green");
+}

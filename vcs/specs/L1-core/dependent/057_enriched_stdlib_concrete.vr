@@ -1,0 +1,156 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: hott, simplicial, infinity-category, examples, stdlib, regression
+// @timeout: 10000
+// @description: Exercise enriched stdlib modules — constructors, algebra, examples.
+
+/// Regression guard for the enriched Phase B/C stdlib content:
+/// exercises concrete constructors, algebraic operations, and the
+/// reference implementations from `core/math/examples.vr`. Without
+/// this test, a silent signature change in any of the enriched
+/// modules would not be caught at build time.
+
+mount core.math.hott.{
+    PathInt, refl_int, path_trans, path_inv, path_source, path_target,
+    path_is_refl, unit_is_contr, unit_is_prop, bool_is_set,
+};
+mount core.math.simplicial.{
+    Simplex, Horn,
+    simplex_zero, simplex_one, simplex_two, simplex_three, simplex_standard,
+    horn_outer_start, horn_outer_end, horn_inner_at, horn_2_1,
+    simplex_dim, simplex_vertex_count, simplex_is_degenerate,
+    horn_count_for, inner_horn_count_for,
+    horn_is_inner, horn_is_outer,
+};
+mount core.math.infinity_category.{
+    walking_arrow_dim, one_object_category_dim,
+    identity_functor_handle, compose_functor_handles,
+    mapping_space_handle, endomorphism_space_handle,
+};
+mount core.math.examples.{
+    TerminalOperad, terminal_operad,
+    IntegerPathCategory,
+    integer_path_id, integer_path_compose, integer_path_source, integer_path_target,
+    DiscreteSimplicialSet, discrete_simplicial_set, discrete_n_simplex,
+    WalkingArrow, walking_arrow_source, walking_arrow_target, walking_arrow_morphism,
+};
+
+// ========================================================================
+// 1. HoTT path algebra: refl, trans, inv, source, target, is_refl
+// ========================================================================
+
+fn test_path_algebra() {
+    let r = refl_int(42);
+    let s = path_source(&r);
+    let t = path_target(&r);
+    let ir = path_is_refl(&r);
+
+    let p = refl_int(10);
+    let q = refl_int(10);
+    let pq = path_trans(p, q);
+    let p_inv = path_inv(refl_int(10));
+
+    print(s);
+    print(t);
+}
+
+// ========================================================================
+// 2. Truncation-level smart constructors
+// ========================================================================
+
+fn test_truncation_constructors() {
+    let c = unit_is_contr();
+    let p = unit_is_prop();
+    let bs = bool_is_set(true, false);
+    print(c.center);
+}
+
+// ========================================================================
+// 3. Standard simplex constructors and predicates
+// ========================================================================
+
+fn test_simplex_constructors() {
+    let s0 = simplex_zero();
+    let s1 = simplex_one();
+    let s2 = simplex_two();
+    let s3 = simplex_three();
+    let s5 = simplex_standard(5);
+
+    let d0 = simplex_dim(&s0);
+    let n1 = simplex_vertex_count(&s1);
+    let deg = simplex_is_degenerate(&s2);
+
+    print(d0);
+    print(n1);
+}
+
+// ========================================================================
+// 4. Horn constructors and classifiers
+// ========================================================================
+
+fn test_horn_ops() {
+    let lambda_2_0 = horn_outer_start(2);
+    let lambda_2_2 = horn_outer_end(2);
+    let lambda_2_1 = horn_inner_at(2, 1);
+    let canonical_inner = horn_2_1();
+
+    let is_inner = horn_is_inner(&lambda_2_1);
+    let is_outer = horn_is_outer(&lambda_2_0);
+
+    let total = horn_count_for(3);
+    let inner = inner_horn_count_for(3);
+
+    print(total);
+    print(inner);
+}
+
+// ========================================================================
+// 5. ∞-category utilities
+// ========================================================================
+
+fn test_inf_cat_utils() {
+    let walking = walking_arrow_dim();
+    let one_obj = one_object_category_dim();
+    let id_f = identity_functor_handle(42);
+    let composed = compose_functor_handles(1, 2);
+    let hom = mapping_space_handle(1, 2);
+    let end_x = endomorphism_space_handle(5);
+
+    print(walking);
+    print(one_obj);
+}
+
+// ========================================================================
+// 6. Concrete reference implementations from examples.vr
+// ========================================================================
+
+fn test_examples_module() {
+    let t = terminal_operad();
+
+    let src = walking_arrow_source();
+    let tgt = walking_arrow_target();
+    let arrow = walking_arrow_morphism();
+
+    let d = discrete_simplicial_set(7);
+    let d_simplex = discrete_n_simplex(&d, 3);
+
+    let id_path = integer_path_id(10);
+    let id_2 = integer_path_id(20);
+    let composed_path = integer_path_compose(id_path, id_2);
+    let src_of = integer_path_source(&composed_path);
+    let tgt_of = integer_path_target(&composed_path);
+
+    print(src_of);
+    print(tgt_of);
+}
+
+fn main() {
+    test_path_algebra();
+    test_truncation_constructors();
+    test_simplex_constructors();
+    test_horn_ops();
+    test_inf_cat_utils();
+    test_examples_module();
+    print("enriched stdlib exercise complete");
+}

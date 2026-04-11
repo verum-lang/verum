@@ -1,0 +1,128 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: algebra, protocol, implement, diamond, stress, regression
+// @timeout: 10000
+// @description: Stress test for diamond inheritance and multiple protocol instances coexisting.
+
+/// Stress test: every concrete algebraic reference instance in
+/// `core/math/examples.vr` is touched in a single compilation unit,
+/// exercising the full protocol graph simultaneously:
+///
+///   * `TwoFreeMonoid`  : Magma → Semigroup → Monoid
+///   * `Z3`             : Magma → Semigroup → Monoid → Group → AbelianGroup
+///   * `Nat4`           : Magma → Semigroup → Monoid → Group → AbelianGroup
+///   * `F2`             : Ring → CommutativeRing → IntegralDomain → Field
+///   * `Bool2`          : Lattice → BoundedLattice + DistributiveLattice → ComplementedLattice → BooleanAlgebra
+///   * `Pow2`           : Lattice → BoundedLattice + DistributiveLattice → ComplementedLattice → BooleanAlgebra
+///
+/// If the protocol resolver has a hidden ordering dependency or a
+/// diamond ambiguity, this spec will surface it — every public
+/// struct-field accessor is poked, every constructor is called, and
+/// every wrapper refinement type is instantiated at least once.
+
+mount core.math.examples.{
+    TwoFreeMonoid, Z3, Nat4, F2, Bool2, Pow2,
+    two_free_monoid_identity, two_free_monoid_gen_a, two_free_monoid_gen_b,
+    two_free_monoid_mul, two_free_monoid_length,
+    z3_zero, z3_one, z3_two, z3_add, z3_neg, z3_eq,
+    nat4_zero, nat4_one, nat4_two, nat4_three,
+    nat4_add, nat4_neg, nat4_double,
+    f2_zero, f2_one, f2_add, f2_mul, f2_neg, f2_inv_of_one, f2_eq,
+    bool2_bottom, bool2_top, bool2_join, bool2_meet, bool2_not, bool2_leq,
+    pow2_empty, pow2_just_zero, pow2_just_one, pow2_full,
+    pow2_join, pow2_meet, pow2_complement, pow2_subset,
+};
+
+fn touch_monoid() {
+    let e = two_free_monoid_identity();
+    let a = two_free_monoid_gen_a();
+    let b = two_free_monoid_gen_b();
+    let ab = two_free_monoid_mul(&a, &b);
+    let ba = two_free_monoid_mul(&b, &a);
+    let len = two_free_monoid_length(&ab);
+    print(e.count_a);
+    print(len);
+}
+
+fn touch_z3() {
+    let a = z3_zero();
+    let b = z3_one();
+    let c = z3_two();
+    let ab = z3_add(&a, &b);
+    let bc = z3_add(&b, &c);
+    let nb = z3_neg(&b);
+    let eq = z3_eq(&ab, &b);
+    print(ab.value);
+    print(nb.value);
+    print(eq);
+}
+
+fn touch_nat4() {
+    let a = nat4_zero();
+    let b = nat4_one();
+    let c = nat4_two();
+    let d = nat4_three();
+    let ab = nat4_add(&a, &b);
+    let bd = nat4_add(&b, &d);
+    let nd = nat4_neg(&d);
+    let dd = nat4_double(&b);
+    print(ab.value);
+    print(bd.value);
+    print(nd.value);
+    print(dd.value);
+}
+
+fn touch_f2() {
+    let z = f2_zero();
+    let o = f2_one();
+    let s = f2_add(&o, &o);
+    let p = f2_mul(&o, &o);
+    let n = f2_neg(&o);
+    let i = f2_inv_of_one();
+    let eq = f2_eq(&s, &z);
+    print(s.value);
+    print(p.value);
+    print(n.value);
+    print(i.value);
+    print(eq);
+}
+
+fn touch_bool2() {
+    let bot = bool2_bottom();
+    let top = bool2_top();
+    let j = bool2_join(&bot, &top);
+    let m = bool2_meet(&bot, &top);
+    let c = bool2_not(&bot);
+    let le = bool2_leq(&bot, &top);
+    print(j.value);
+    print(m.value);
+    print(c.value);
+    print(le);
+}
+
+fn touch_pow2() {
+    let e = pow2_empty();
+    let a = pow2_just_zero();
+    let b = pow2_just_one();
+    let f = pow2_full();
+    let j = pow2_join(&a, &b);
+    let m = pow2_meet(&a, &b);
+    let c = pow2_complement(&a);
+    let sub = pow2_subset(&e, &f);
+    print(j.has_zero);
+    print(j.has_one);
+    print(m.has_zero);
+    print(c.has_zero);
+    print(sub);
+}
+
+fn main() {
+    touch_monoid();
+    touch_z3();
+    touch_nat4();
+    touch_f2();
+    touch_bool2();
+    touch_pow2();
+    print("protocol inheritance stress test green");
+}

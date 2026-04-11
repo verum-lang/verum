@@ -1,0 +1,35 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: operad, algebra, stdlib, regression
+// @timeout: 10000
+// @description: The core.math.operad module loads and its types are usable.
+
+/// Regression guard: `core/math/operad.vr` must parse, type-check,
+/// and expose Multicategory, Operad, AssociativeOperad,
+/// CommutativeOperad, AlgebraOverOperad, InfOperad, EnOperad,
+/// InfAlgebra.
+
+mount core.math.operad.{
+    Multicategory,
+    Operad,
+    AssociativeOperad,
+    CommutativeOperad,
+    AlgebraOverOperad,
+    InfOperad,
+    EnOperad,
+    InfAlgebra,
+};
+
+fn use_multi<M: Multicategory>() -> Int { 0 }
+fn use_operad<O: Operad>() -> Int { 0 }
+fn use_assoc<O: AssociativeOperad>() -> Int { 0 }
+fn use_comm<O: CommutativeOperad>() -> Int { 0 }
+fn use_algebra<O, M, A: AlgebraOverOperad<O, M>>() -> Int { 0 }
+fn use_inf_operad<O: InfOperad>() -> Int { 0 }
+fn use_en<O: InfOperad>() -> Int { 0 }
+fn use_inf_algebra<O, M, A: InfAlgebra<O, M>>() -> Int { 0 }
+
+fn main() {
+    print("operad module loaded");
+}

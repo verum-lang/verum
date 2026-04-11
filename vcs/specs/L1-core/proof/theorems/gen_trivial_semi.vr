@@ -1,0 +1,7 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: test
+
+theorem foo<T>(x: T)
+    proof by trivial;

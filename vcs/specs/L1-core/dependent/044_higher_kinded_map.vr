@@ -1,0 +1,18 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: hkt, functor, regression
+// @timeout: 5000
+// @description: Higher-kinded F<_> type parameter — Functor signature.
+
+/// Higher-kinded types: `F<_>` binds a type constructor of arity 1.
+/// This is the canonical Functor signature and is the foundation for
+/// every monadic / applicative abstraction in `core/math/category.vr`.
+
+fn map<F<_>, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa
+}
+
+fn main() {
+    print("higher-kinded map parsed and type-checked");
+}

@@ -1,0 +1,8 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: proof, theorem, generic, parser
+// @timeout: 5000
+
+theorem generic_refl<A>(x: A)
+    proof by trivial;

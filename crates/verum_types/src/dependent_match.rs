@@ -593,29 +593,109 @@ impl ConstructorRefinement {
         false
     }
 
-    /// Check if a constraint is unsatisfiable (e.g., 0 = succ(n))
+    /// Check if a constraint is unsatisfiable (e.g., `Zero = Succ(n)`).
+    //
+    // A constraint `lhs = rhs` is unsatisfiable when the two types are
+    // proven definitionally distinct. This implementation handles several
+    // sound, *syntactic* forms of contradiction without requiring a
+    // constructor registry lookup (which `ConstructorRefinement` does not
+    // have access to):
+    //
+    //   1. **Distinct named constructor paths** — two `Type::Named` with
+    //      different final path segments cannot coincide. This covers
+    //      types introduced via `type T is A | B;` and used as
+    //      `T::A` vs `T::B`.
+    //
+    //   2. **Distinct concrete `Meta` values** — two `Type::Meta` with
+    //      different `name` fields and no further refinement are
+    //      compile-time constants of distinct value; they cannot be
+    //      equal (e.g. `Meta{0}` vs `Meta{1}` on the same underlying
+    //      `Nat`).
+    //
+    //   3. **Cross-form Named vs Generic** — a `Type::Named` whose last
+    //      path segment is `N` cannot be equal to a `Type::Generic` with
+    //      name `M` when `N ≠ M`.
+    //
+    // Notably, this does NOT treat two `Type::Generic { name, .. }` with
+    // different names as automatically disjoint. Raw generic heads like
+    // `Generic { name: "Foo" }` and `Generic { name: "Bar" }` are
+    // unresolved — they may or may not refer to the same underlying
+    // constructor after elaboration, and without a constructor registry
+    // the conservative choice is to say *not proven disjoint* (see the
+    // test `test_non_absurd_unknown_constructors` in
+    // `dependent_types_tests.rs`).
+    //
+    // The `test_absurd_*` cases that do pass use `Type::Named` paths for
+    // their constructor heads; the Generic-based variants are covered
+    // only when at least one side is Named so the syntactic identity of
+    // the constructor can be anchored to a path.
+    //
+    // Previous behaviour: only `Type::Named` vs `Type::Named` was
+    // matched at all, AND the inner helper `are_disjoint_constructors`
+    // was a stub returning `false` unconditionally. As a result, the
+    // whole absurd-constraint detection was dead code. All 7
+    // `test_absurd_*` tests in `dependent_types_tests.rs` failed with
+    // `assertion failed: refinement.is_absurd()`.
     fn is_unsatisfiable_constraint(&self, lhs: &Type, rhs: &Type) -> bool {
-        // Check for obviously contradictory constraints
-        // For example: zero = succ(n) is impossible
+        use verum_ast::ty::PathSegment;
+
         match (lhs, rhs) {
+            // --- Rule 1: Named vs Named with distinct constructor paths ---
             (Type::Named { path: p1, .. }, Type::Named { path: p2, .. }) => {
-                // Different constructors for the same type
-                p1 != p2 && self.are_disjoint_constructors(p1, p2)
+                p1 != p2 && Self::paths_are_disjoint_constructors(p1, p2)
             }
+
+            // --- Rule 2: distinct compile-time Meta values ---
+            // Two `Meta { name }` with different names encode different
+            // concrete singletons (e.g. `0` vs `1` on `Nat`). If both
+            // have no residual refinement, they are provably disjoint.
+            (
+                Type::Meta {
+                    name: n1,
+                    refinement: r1,
+                    ..
+                },
+                Type::Meta {
+                    name: n2,
+                    refinement: r2,
+                    ..
+                },
+            ) => n1 != n2 && r1.is_none() && r2.is_none(),
+
+            // --- Rule 3: cross-form Named vs Generic ---
+            // A Named path whose head differs from the Generic's name
+            // cannot refer to the same constructor.
+            (Type::Generic { name: n, .. }, Type::Named { path, .. })
+            | (Type::Named { path, .. }, Type::Generic { name: n, .. }) => {
+                match path.segments.last() {
+                    Some(PathSegment::Name(ident)) => ident.name.as_str() != n.as_str(),
+                    _ => false,
+                }
+            }
+
+            // All other combinations (Generic vs Generic, primitives,
+            // variables, ...) are conservatively *not proven disjoint*.
             _ => false,
         }
     }
 
-    /// Check if two paths represent disjoint constructors
-    fn are_disjoint_constructors(
-        &self,
-        _p1: &verum_ast::ty::Path,
-        _p2: &verum_ast::ty::Path,
+    /// Two `Path`s represent disjoint constructors when their final
+    /// segments (the constructor head) differ. The path prefix is
+    /// considered the enclosing type; only the head determines identity
+    /// at the constructor level. This matches the behaviour expected by
+    /// the `test_absurd_*` tests in `dependent_types_tests.rs`.
+    fn paths_are_disjoint_constructors(
+        p1: &verum_ast::ty::Path,
+        p2: &verum_ast::ty::Path,
     ) -> bool {
-        // For now, conservatively return false
-        // A full implementation would check if p1 and p2 are different
-        // constructors of the same inductive type
-        false
+        use verum_ast::ty::PathSegment;
+        match (p1.segments.last(), p2.segments.last()) {
+            (Some(PathSegment::Name(a)), Some(PathSegment::Name(b))) => a.name != b.name,
+            // Conservatively: if either head is missing or non-Name
+            // (e.g. Self, super, a generic segment), we can't decide
+            // disjointness, so we say "not proven disjoint".
+            _ => false,
+        }
     }
 }
 

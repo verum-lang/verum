@@ -1,0 +1,37 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: fibration, stdlib, regression
+// @timeout: 10000
+// @description: The core.math.fibration module loads and its types are usable.
+
+/// Regression guard: `core/math/fibration.vr` must parse, type-check,
+/// and expose all its Grothendieck fibration primitives.
+
+mount core.math.fibration.{
+    CartesianMorphism,
+    CoCartesianMorphism,
+    GrothendieckFibration,
+    Opfibration,
+    Bifibration,
+    Fibre,
+    StraighteningEquivalence,
+    BaseChange,
+    LeftFibration,
+    RightFibration,
+};
+
+fn use_cart<E, B, M: CartesianMorphism<E, B>>() -> Int { 0 }
+fn use_cocart<E, B, M: CoCartesianMorphism<E, B>>() -> Int { 0 }
+fn use_fib<E, B, P: GrothendieckFibration<E, B>>() -> Int { 0 }
+fn use_opfib<E, B, P: Opfibration<E, B>>() -> Int { 0 }
+fn use_bifib<E, B, P: Bifibration<E, B>>() -> Int { 0 }
+fn use_fibre<E, B, F: Fibre<E, B>>() -> Int { 0 }
+fn use_straight<B, S: StraighteningEquivalence<B>>() -> Int { 0 }
+fn use_base_change<E, B, BC: BaseChange<E, B>>() -> Int { 0 }
+fn use_left<E, B, L: LeftFibration<E, B>>() -> Int { 0 }
+fn use_right<E, B, R: RightFibration<E, B>>() -> Int { 0 }
+
+fn main() {
+    print("fibration module loaded");
+}

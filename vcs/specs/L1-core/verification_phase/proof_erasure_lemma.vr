@@ -1,0 +1,29 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, proof-erasure, lemma, vbc-codegen
+// @timeout: 5000
+// @description: Lemma declarations are verified and then erased before VBC codegen.
+
+/// Proof erasure regression: lemma declarations are syntactic siblings of
+/// theorems and must also be completely erased before VBC codegen.
+///
+/// See `crates/verum_vbc/src/codegen/mod.rs:3243-3249` for the explicit
+/// match that skips `ItemKind::Lemma`.
+
+lemma helper_monotone(a: Int, b: Int)
+    requires a <= b
+    proof by auto;
+
+lemma zero_is_minimum(n: Int)
+    requires n >= 0
+    proof by trivial;
+
+fn clamp_non_negative(x: Int) -> Int {
+    if x < 0 { 0 } else { x }
+}
+
+fn main() {
+    let r = clamp_non_negative(-5);
+    print(r);
+}

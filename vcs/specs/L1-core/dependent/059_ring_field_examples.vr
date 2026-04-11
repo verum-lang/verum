@@ -1,0 +1,139 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: algebra, ring, field, cyclic-group, examples, stdlib, regression
+// @timeout: 10000
+// @description: Exercise F2 (finite field) and Nat4 (Z/4Z) reference instances.
+
+/// Regression guard for the ring/field reference implementations in
+/// `core/math/examples.vr`: the 2-element finite field `F₂` and the
+/// cyclic group `Z/4Z`. Exercises every constructor, every operation,
+/// and checks that the refinement-typed invariants hold.
+
+mount core.math.examples.{
+    F2, f2_zero, f2_one, f2_add, f2_mul, f2_neg, f2_inv_of_one, f2_eq,
+    Nat4, nat4_zero, nat4_one, nat4_two, nat4_three,
+    nat4_add, nat4_neg, nat4_double,
+};
+
+// ========================================================================
+// 1. F₂ — smallest field
+// ========================================================================
+
+fn test_f2_elements() {
+    let z = f2_zero();
+    let o = f2_one();
+    print(z.value);
+    print(o.value);
+}
+
+fn test_f2_addition() {
+    let z = f2_zero();
+    let o = f2_one();
+
+    let z_plus_z = f2_add(&z, &z);
+    let z_plus_o = f2_add(&z, &o);
+    let o_plus_o = f2_add(&o, &o);
+
+    print(z_plus_z.value);
+    print(z_plus_o.value);
+    print(o_plus_o.value);
+}
+
+fn test_f2_multiplication() {
+    let z = f2_zero();
+    let o = f2_one();
+
+    let z_mul_z = f2_mul(&z, &z);
+    let z_mul_o = f2_mul(&z, &o);
+    let o_mul_o = f2_mul(&o, &o);
+
+    print(z_mul_z.value);
+    print(z_mul_o.value);
+    print(o_mul_o.value);
+}
+
+fn test_f2_negation() {
+    let o = f2_one();
+    let n = f2_neg(&o);
+    let inv = f2_inv_of_one();
+    let eq = f2_eq(&o, &n);
+
+    print(n.value);
+    print(inv.value);
+}
+
+// ========================================================================
+// 2. Z/4Z — composite-order cyclic group
+// ========================================================================
+
+fn test_nat4_elements() {
+    let a = nat4_zero();
+    let b = nat4_one();
+    let c = nat4_two();
+    let d = nat4_three();
+
+    print(a.value);
+    print(b.value);
+    print(c.value);
+    print(d.value);
+}
+
+fn test_nat4_addition() {
+    let one = nat4_one();
+    let two = nat4_two();
+    let three = nat4_three();
+
+    let one_plus_two = nat4_add(&one, &two);
+    let two_plus_two = nat4_add(&two, &two);
+    let three_plus_one = nat4_add(&three, &one);
+
+    print(one_plus_two.value);
+    print(two_plus_two.value);
+    print(three_plus_one.value);
+}
+
+fn test_nat4_inverses() {
+    let zero = nat4_zero();
+    let one = nat4_one();
+    let two = nat4_two();
+    let three = nat4_three();
+
+    let neg_zero = nat4_neg(&zero);
+    let neg_one = nat4_neg(&one);
+    let neg_two = nat4_neg(&two);
+    let neg_three = nat4_neg(&three);
+
+    print(neg_one.value);
+    print(neg_two.value);
+    print(neg_three.value);
+}
+
+fn test_nat4_doubling() {
+    let zero = nat4_zero();
+    let one = nat4_one();
+    let two = nat4_two();
+    let three = nat4_three();
+
+    let d0 = nat4_double(&zero);
+    let d1 = nat4_double(&one);
+    let d2 = nat4_double(&two);
+    let d3 = nat4_double(&three);
+
+    print(d0.value);
+    print(d1.value);
+    print(d2.value);
+    print(d3.value);
+}
+
+fn main() {
+    test_f2_elements();
+    test_f2_addition();
+    test_f2_multiplication();
+    test_f2_negation();
+    test_nat4_elements();
+    test_nat4_addition();
+    test_nat4_inverses();
+    test_nat4_doubling();
+    print("ring and field reference instances exercised");
+}

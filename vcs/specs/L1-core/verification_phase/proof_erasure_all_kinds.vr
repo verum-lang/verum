@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, proof-erasure, theorem, lemma, axiom, corollary, vbc-codegen
+// @timeout: 10000
+// @description: All proof item kinds in one module — full proof erasure regression.
+
+/// Proof erasure regression (full): this spec exercises ALL proof item
+/// kinds known to the compiler (Theorem, Lemma, Corollary, Axiom) in a
+/// single module, alongside runtime functions, and requires that
+/// compilation succeeds end-to-end.
+///
+/// If this file ever fails to type-check, it means the proof erasure
+/// barrier between the `proof_verification` phase and VBC codegen has
+/// been breached. Root cause should be investigated in:
+///   - `crates/verum_compiler/src/phases/proof_verification.rs`
+///   - `crates/verum_vbc/src/codegen/mod.rs:3243-3249` (explicit match)
+///   - `crates/verum_ast/src/decl.rs:90-105` (ItemKind variants)
+
+// =============================================================================
+// 1. Foundational axioms
+// =============================================================================
+
+axiom peano_zero_not_succ(n: Int) -> Bool;
+
+axiom extensionality(a: Int, b: Int) -> Bool;
+
+// =============================================================================
+// 2. Theorems built on axioms
+// =============================================================================
+
+theorem addition_commutative(a: Int, b: Int)
+    requires a >= 0, b >= 0
+    proof by auto;
+
+theorem multiplication_associative(a: Int, b: Int, c: Int)
+    requires a > 0, b > 0, c > 0
+    proof by auto;
+
+// =============================================================================
+// 3. Lemmas (helper theorems)
+// =============================================================================
+
+lemma addition_identity(n: Int)
+    requires n >= 0
+    proof by auto;
+
+lemma monotone_on_positives(a: Int, b: Int)
+    requires a > 0, b > 0, a <= b
+    proof by trivial;
+
+// =============================================================================
+// 4. Corollaries (consequences of theorems)
+// =============================================================================
+
+corollary swap_zero_non_negative(a: Int)
+    requires a >= 0
+    from addition_commutative
+    proof by auto;
+
+// =============================================================================
+// 5. Runtime functions — must compile alongside all proof items
+// =============================================================================
+
+fn factorial(n: Int) -> Int {
+    if n <= 1 { 1 } else { n * factorial(n - 1) }
+}
+
+fn sum_range(lo: Int, hi: Int) -> Int {
+    if lo > hi { 0 } else { lo + sum_range(lo + 1, hi) }
+}
+
+fn main() {
+    let f = factorial(5);
+    let s = sum_range(1, 10);
+    print(f);
+    print(s);
+}

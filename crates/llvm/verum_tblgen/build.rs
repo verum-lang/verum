@@ -222,8 +222,28 @@ fn build_c_library(llvm_config: &Path, include_dir: &Path) {
 
     // Treat warnings as errors on Unix but not on MSVC — LLVM 21 headers
     // generate benign warnings with VS 18 that would block the build.
+    //
+    // Additionally, modern clang (Apple clang 16+, upstream clang 19+) is
+    // stricter about `-Wunused-parameter` and flags several benign cases
+    // inside vendored LLVM 21 headers (Support/Allocator.h, Support/Error.h,
+    // Support/Casting.h, ADT/StringExtras.h, Support/Timer.h,
+    // Support/TrailingObjects.h, TableGen/Record.h, ...). These are not
+    // actionable in this project and would block the build entirely.
+    //
+    // The fix is minimal: enable -Werror but explicitly disable the few
+    // warning categories that LLVM headers trigger. We keep -Werror so
+    // that any warning *we* introduce in verum_tblgen C++ sources still
+    // fails the build, while LLVM header hygiene issues are tolerated.
     if !cfg!(target_env = "msvc") {
         build.flag("-Werror");
+        // Disable benign warnings from vendored LLVM 21 headers on
+        // modern clang. Each of these appeared as a -Werror failure on
+        // Apple clang 16 (macOS 26.x, LLVM 21 install).
+        build.flag("-Wno-unused-parameter");
+        build.flag("-Wno-unused-private-field");
+        build.flag("-Wno-unused-function");
+        build.flag("-Wno-deprecated-copy");
+        build.flag("-Wno-deprecated-declarations");
     }
 
     build.compile("CTableGen");

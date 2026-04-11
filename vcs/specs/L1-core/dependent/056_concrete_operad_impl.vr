@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: operad, concrete, implement, stdlib, regression
+// @timeout: 10000
+// @description: Concrete implementation of Operad on a user-defined type — acid test for Phase C protocols.
+
+/// Acid test: can a downstream user actually *implement* one of the
+/// Phase C protocols against a concrete user-defined type?
+///
+/// This file defines a trivial operad — the terminal operad `*`
+/// which has exactly one operation of every arity (the "do nothing"
+/// operation). The implementation below does not claim to be
+/// mathematically non-trivial; it is a compile-and-resolve smoke
+/// test showing that:
+///
+///   1. A user can `mount` a Phase C protocol.
+///   2. A user can declare a concrete record/struct type.
+///   3. A user can write `implement Protocol for MyType { ... }`.
+///   4. The type checker resolves the protocol methods, accepts
+///      refinement-typed parameters (`n: Int{>= 0}`), and type-checks
+///      the implementation body end-to-end.
+///
+/// If any link in this chain breaks, the implementer ergonomics for
+/// core.math.operad (and by transitivity the other Phase C modules)
+/// is broken too.
+
+mount core.math.operad.{Operad};
+
+/// The terminal operad `*` — one "unit" operation per arity.
+type TerminalOperad is {
+    /// Placeholder field; the mathematical content is carried by
+    /// the protocol methods below.
+    marker: Int,
+};
+
+implement Operad for TerminalOperad {
+    fn operations(n: Int{>= 0}) -> List<Int> {
+        // Exactly one operation of every arity.
+        [0]
+    }
+
+    fn identity() -> Int {
+        0
+    }
+
+    fn compose(f: &Int, gs: List<Int>) -> Int {
+        // Composing the unit operation with any family of unit
+        // operations yields the unit operation.
+        0
+    }
+
+    fn act(f: &Int, sigma: &Int) -> Int {
+        // Symmetric group action on a singleton is trivial.
+        0
+    }
+
+    fn unitality(f: &Int) -> Bool {
+        true
+    }
+
+    fn associativity(f: &Int, gs: List<Int>, hs: List<Int>) -> Bool {
+        true
+    }
+
+    fn equivariance(f: &Int, gs: List<Int>, sigma: &Int) -> Bool {
+        true
+    }
+}
+
+fn main() {
+    let t = TerminalOperad { marker: 0 };
+    print("terminal operad implemented");
+}

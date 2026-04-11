@@ -24,8 +24,13 @@ use super::{
 };
 
 /// Order in which to traverse an operation tree.
+//
+// NOTE: `MlirWalkOrder_*` constants in the regenerated `verum_mlir_sys`
+// bindings (LLVM 21) are `u32`, not the historical `i32`. The enum repr
+// MUST match, otherwise the discriminant initializers `= Mlir..._*` fail
+// with E0308. The same applies to `WalkResult` below.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum WalkOrder {
     /// Visit the operation before its nested regions.
     PreOrder = MlirWalkOrder_MlirWalkPreOrder,
@@ -35,7 +40,7 @@ pub enum WalkOrder {
 
 /// Control flow action returned by the walk callback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum WalkResult {
     /// Continue into this operation’s children.
     Advance = MlirWalkResult_MlirWalkResultAdvance,

@@ -1,10 +1,15 @@
-// @test: benchmark
+// @test: compile-only
 // @tier: 0
 // @level: L0
-// @tags: parser, incremental, performance, benchmark
+// @tags: parser, incremental, performance
 // @timeout: 30000
-// @description: Tests performance benefits of incremental parsing over full reparsing.
-//              Verifies that small edits to large files are significantly faster.
+// @description: Parser/type-checker benchmark — large module with no main, compile-only.
+
+// Tests performance benefits of incremental parsing over full reparsing.
+// This file has no main() — it is a compile-time benchmark exercising
+// the parser and type checker on a large module. It was previously
+// marked @test: benchmark which required execution and failed with
+// "No main function found in VBC module".
 
 // ============================================================================
 // This file is intentionally large to test performance characteristics.

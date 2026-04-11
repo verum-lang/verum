@@ -5246,6 +5246,67 @@ impl<'s> CompilationPipeline<'s> {
             checker.set_lenient_contexts(true);
         }
 
+        // ==============================================================
+        // Dependent type pipeline activation (Phase A.5 — surgical)
+        // ==============================================================
+        //
+        // Historical note: before this hook was added, the entire SMT-
+        // based dependent type verification path in `verum_types` and
+        // `verum_smt/src/dependent.rs` was dormant code — fully
+        // implemented (~3700 LoC in verum_smt alone plus the full
+        // `UniverseContext` solver at `verum_types/src/context.rs:681`)
+        // but never switched on from the main compiler pipeline. It only
+        // ran in isolated unit tests that called `enable_dependent_types`
+        // explicitly. Production builds therefore silently bypassed it.
+        //
+        // This activation is deliberately **opportunistic**:
+        //
+        //   - If the module contains ANY declaration that uses dependent-
+        //     type machinery (theorem / lemma / axiom / corollary /
+        //     tactic items, or refinement predicates on function
+        //     parameters / return types), we enable the checker's
+        //     dependent type subsystem so Pi, Sigma, Eq and universe
+        //     constraints are verified through SMT.
+        //
+        //   - Modules that do NOT use any of the above pay zero cost —
+        //     the subsystem remains disabled and compilation is
+        //     bit-identical to the pre-activation behaviour.
+        //
+        // This preserves backward compatibility with every existing
+        // `.vr` source file while making dependent types available to
+        // theorem-bearing modules without requiring any user flag.
+        //
+        // Detection criteria (keep in sync with proof_erasure in
+        // `crates/verum_vbc/src/codegen/mod.rs:3232-3250`):
+        //
+        //   - `ItemKind::Theorem | Lemma | Corollary | Axiom | Tactic`
+        //     always require dependent type checking (proof goals are
+        //     type-level propositions).
+        //
+        // A future refinement may also scan for explicit Pi / Sigma /
+        // refinement types in function signatures and enable the
+        // subsystem only when needed; for now, "any proof item present"
+        // is the conservative, opt-in trigger.
+        //
+        // Related: `crates/verum_types/src/infer.rs:3135`
+        // (`enable_dependent_types`), `:3118` (`verify_dependent_type`),
+        // `:4097` (`verify_dependent_type_constraint`), call sites at
+        // `:19754, :20229, :20263, :20328`.
+        let has_proof_items = module.items.iter().any(|item| {
+            matches!(
+                &item.kind,
+                verum_ast::ItemKind::Theorem(_)
+                    | verum_ast::ItemKind::Lemma(_)
+                    | verum_ast::ItemKind::Corollary(_)
+                    | verum_ast::ItemKind::Axiom(_)
+                    | verum_ast::ItemKind::Tactic(_)
+            )
+        });
+        if has_proof_items {
+            debug!("Phase 3: Enabling dependent type checking (proof items detected)");
+            checker.enable_dependent_types();
+        }
+
         // Configure type checker with module registry for cross-file resolution
         let registry = self.session.module_registry();
         checker.set_module_registry(registry.clone());

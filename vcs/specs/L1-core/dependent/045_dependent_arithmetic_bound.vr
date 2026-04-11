@@ -1,0 +1,36 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: dependent, refinement, arithmetic, constant-folding, regression
+// @timeout: 5000
+// @description: Dependent refinement with arithmetic bound — exercises constant folding after substitution.
+
+/// Dependent refinement with arithmetic in the predicate:
+/// `count <= src_len - offset` is a classical slice bound. After the
+/// refinement checker substitutes earlier arguments (`src_len = 10`,
+/// `offset = 2`), the predicate becomes `count <= 10 - 2`, which is
+/// then constant-folded to `count <= 8` before being compared against
+/// the third argument. This exercises the TypeChecker::const_fold_expr
+/// pass in crates/verum_types/src/infer.rs that runs after dependent
+/// refinement substitution.
+///
+/// The call `slice(10, 2, 5)` satisfies `5 <= 10 - 2 = 8`, so it must
+/// type-check. A paired negative case is in the Rust regression tests
+/// (`dependent_refinement_arithmetic_bound_rejected`).
+
+fn slice(
+    src_len: Int,
+    offset: Int{>= 0, < src_len},
+    count: Int{>= 0, <= src_len - offset}
+) -> Int {
+    count
+}
+
+fn main() {
+    let a = slice(10, 2, 5);
+    let b = slice(10, 0, 10);
+    let c = slice(100, 50, 25);
+    print(a);
+    print(b);
+    print(c);
+}

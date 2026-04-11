@@ -1,0 +1,39 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: quantum, orthomodular, density-matrix, stdlib, regression
+// @timeout: 10000
+// @description: Quantum extensions to algebra.vr and linalg.vr load and resolve.
+
+/// Regression guard: the in-place extensions to
+/// `core/math/algebra.vr` (orthomodular lattices, commuting pairs,
+/// Boolean sublattices) and `core/math/linalg.vr` (epistemic states,
+/// pure/mixed states, projective measurements, von Neumann entropy)
+/// must parse, type-check, and be importable.
+
+mount core.math.algebra.{
+    OrthomodularLattice,
+    CommutingPair,
+    BooleanSublattice,
+};
+mount core.math.linalg.{
+    EpistemicState,
+    PureState,
+    MixedState,
+    ProjectiveMeasurement,
+    VonNeumannEntropy,
+};
+
+fn use_ortho<L: OrthomodularLattice>() -> Int { 0 }
+fn use_commuting<L: OrthomodularLattice, C: CommutingPair<L>>() -> Int { 0 }
+fn use_bool_sub<L: OrthomodularLattice, S: BooleanSublattice<L>>() -> Int { 0 }
+
+fn use_epistemic<N: meta Int, S: EpistemicState<N>>() -> Int { 0 }
+fn use_pure<N: meta Int, S: PureState<N>>() -> Int { 0 }
+fn use_mixed<N: meta Int, S: MixedState<N>>() -> Int { 0 }
+fn use_measurement<N: meta Int, M: ProjectiveMeasurement<N>>() -> Int { 0 }
+fn use_entropy<N: meta Int, S: EpistemicState<N>, E: VonNeumannEntropy<N, S>>() -> Int { 0 }
+
+fn main() {
+    print("quantum extensions loaded");
+}

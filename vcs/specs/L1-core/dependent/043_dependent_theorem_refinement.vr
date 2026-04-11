@@ -1,0 +1,30 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: dependent, theorem, refinement, regression
+// @timeout: 5000
+// @description: Theorem with dependent refined parameters — Π-type inside proof signature.
+
+/// Theorem signatures support the same dependent refinement machinery
+/// as regular function signatures. The proof goal of `index_bounds`
+/// implicitly carries the hypothesis `i < len` from the refinement
+/// on `i`, which the SMT backend can discharge.
+///
+/// This is critical for writing dependently-typed proofs in `core/math/`
+/// and for the proof erasure pass at
+/// `crates/verum_vbc/src/codegen/mod.rs:3232-3250` to function correctly
+/// on proof-bearing modules.
+
+theorem index_bounds(len: Int{> 0}, i: Int{>= 0, < len})
+    proof by auto;
+
+theorem slice_length_non_negative(
+    src_len: Int{>= 0},
+    offset: Int{>= 0, <= src_len},
+    count: Int{>= 0, <= src_len - offset}
+)
+    proof by auto;
+
+fn main() {
+    print("dependent theorem parameters verified");
+}

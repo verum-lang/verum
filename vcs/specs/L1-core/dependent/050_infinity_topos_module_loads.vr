@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: infinity-topos, stdlib, regression
+// @timeout: 10000
+// @description: The core.math.infinity_topos module loads and its types are usable.
+
+/// Regression guard: `core/math/infinity_topos.vr` must parse,
+/// type-check, and expose `Sieve`, `GrothendieckTopology`, `Site`,
+/// `InfPresheaf`, `InfSheaf`, `InfinityTopos`, `SheafInfinityTopos`,
+/// `InfSubobjectClassifier`, `GeometricMorphism`.
+///
+/// This spec references each exported protocol as a type-parameter
+/// bound to verify that the embedded stdlib parses, registers, and
+/// resolves the full `core.math.infinity_topos` surface.
+
+mount core.math.infinity_topos.{
+    Sieve,
+    GrothendieckTopology,
+    Site,
+    InfPresheaf,
+    InfSheaf,
+    InfinityTopos,
+    SheafInfinityTopos,
+    InfSubobjectClassifier,
+    GeometricMorphism,
+};
+
+fn use_sieve<C, S: Sieve<C>>() -> Int { 0 }
+fn use_topology<C, T: GrothendieckTopology<C>>() -> Int { 0 }
+fn use_site<C, S: Site<C>>() -> Int { 0 }
+fn use_presheaf<C, P: InfPresheaf<C>>() -> Int { 0 }
+fn use_sheaf<C, S: InfSheaf<C>>() -> Int { 0 }
+fn use_inftopos<T: InfinityTopos>() -> Int { 0 }
+fn use_sheafinftopos<C, T: SheafInfinityTopos<C>>() -> Int { 0 }
+fn use_classifier<C: InfSubobjectClassifier>() -> Int { 0 }
+fn use_geomorphism<X, Y, F: GeometricMorphism<X, Y>>() -> Int { 0 }
+
+fn main() {
+    print("infinity_topos module loaded");
+}

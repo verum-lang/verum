@@ -1,0 +1,166 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: stdlib, concrete, tour, examples, regression
+// @timeout: 10000
+// @description: Comprehensive tour exercising every concrete reference type in core/math/examples.vr.
+
+/// End-to-end tour of the concrete reference implementations in
+/// `core/math/examples.vr`. This is the single most comprehensive
+/// regression guard for the Phase B/C stdlib surface — it exercises
+/// every public constructor, operation, and function across all
+/// reference instances.
+///
+/// Any silent signature change in any reference instance will break
+/// this file at build time, catching regressions before they land.
+
+mount core.math.examples.{
+    TerminalOperad, terminal_operad,
+    IntegerPathCategory, integer_path_id, integer_path_compose,
+    integer_path_source, integer_path_target,
+    DiscreteSimplicialSet, discrete_simplicial_set, discrete_n_simplex,
+    WalkingArrow, walking_arrow_source, walking_arrow_target, walking_arrow_morphism,
+    TwoFreeMonoid, two_free_monoid_identity,
+    two_free_monoid_gen_a, two_free_monoid_gen_b,
+    two_free_monoid_mul, two_free_monoid_length,
+    Bool2, bool2_bottom, bool2_top, bool2_join, bool2_meet, bool2_not, bool2_leq,
+    Chain3, chain3_zero, chain3_one, chain3_two,
+    chain3_has_morphism, chain3_id, chain3_compose,
+    Z3, z3_zero, z3_one, z3_two, z3_add, z3_neg, z3_eq,
+    Pow2, pow2_empty, pow2_just_zero, pow2_just_one, pow2_full,
+    pow2_join, pow2_meet, pow2_complement, pow2_subset,
+    F2, f2_zero, f2_one, f2_add, f2_mul, f2_neg, f2_inv_of_one, f2_eq,
+    Nat4, nat4_zero, nat4_one, nat4_two, nat4_three,
+    nat4_add, nat4_neg, nat4_double,
+    Div12, div12_one, div12_six, div12_twelve, div12_divides, div12_eq,
+    length_mod4, length_mod4_identity_maps_to_zero,
+    int_functor_on_object, int_functor_on_identity, int_functor_power,
+    int_shift_functor, int_shift_compose,
+};
+
+fn exercise_operad_and_category() {
+    let t = terminal_operad();
+
+    let src = walking_arrow_source();
+    let tgt = walking_arrow_target();
+    let arrow = walking_arrow_morphism();
+
+    let d = discrete_simplicial_set(7);
+    let d_simplex = discrete_n_simplex(&d, 3);
+
+    let p1 = integer_path_id(10);
+    let p2 = integer_path_id(20);
+    let pc = integer_path_compose(p1, p2);
+    let s = integer_path_source(&pc);
+    let e = integer_path_target(&pc);
+    print(s);
+    print(e);
+}
+
+fn exercise_monoid_and_lattice() {
+    let id = two_free_monoid_identity();
+    let a = two_free_monoid_gen_a();
+    let b = two_free_monoid_gen_b();
+    let ab = two_free_monoid_mul(&a, &b);
+    let len = two_free_monoid_length(&ab);
+
+    let bot = bool2_bottom();
+    let top = bool2_top();
+    let j = bool2_join(&bot, &top);
+    let m = bool2_meet(&bot, &top);
+    let n = bool2_not(&bot);
+    let leq = bool2_leq(&bot, &top);
+
+    let c0 = chain3_zero();
+    let c1 = chain3_one();
+    let c2 = chain3_two();
+    let has = chain3_has_morphism(&c0, &c2);
+    let idc = chain3_id(&c1);
+    let compc = chain3_compose(&c0, &c1, &c2);
+
+    print(len);
+    print(j.value);
+    print(has);
+}
+
+fn exercise_groups_and_rings() {
+    let z_zero = z3_zero();
+    let z_one = z3_one();
+    let z_two = z3_two();
+    let z_sum = z3_add(&z_one, &z_two);
+    let z_neg = z3_neg(&z_one);
+    let z_e = z3_eq(&z_sum, &z_zero);
+
+    let empty = pow2_empty();
+    let a = pow2_just_zero();
+    let b = pow2_just_one();
+    let full = pow2_full();
+    let pj = pow2_join(&a, &b);
+    let pm = pow2_meet(&a, &b);
+    let pc = pow2_complement(&a);
+    let ps = pow2_subset(&empty, &full);
+
+    let f_zero = f2_zero();
+    let f_one = f2_one();
+    let f_add = f2_add(&f_one, &f_one);
+    let f_mul = f2_mul(&f_one, &f_one);
+    let f_neg = f2_neg(&f_one);
+    let f_inv = f2_inv_of_one();
+    let f_e = f2_eq(&f_add, &f_zero);
+
+    let n4_0 = nat4_zero();
+    let n4_1 = nat4_one();
+    let n4_2 = nat4_two();
+    let n4_3 = nat4_three();
+    let n4_sum = nat4_add(&n4_2, &n4_2);
+    let n4_neg = nat4_neg(&n4_1);
+    let n4_dbl = nat4_double(&n4_1);
+
+    print(z_sum.value);
+    print(pj.has_zero);
+    print(f_add.value);
+    print(n4_sum.value);
+}
+
+fn exercise_preorder_and_homomorphism() {
+    let d1 = div12_one();
+    let d6 = div12_six();
+    let d12 = div12_twelve();
+    let div_6_12 = div12_divides(&d6, &d12);
+    let eq_6_6 = div12_eq(&d6, &d6);
+
+    let lmi = length_mod4_identity_maps_to_zero();
+    let gen_a = two_free_monoid_gen_a();
+    let lm_a = length_mod4(&gen_a);
+    let big = TwoFreeMonoid { count_a: 3, count_b: 2 };
+    let lm_big = length_mod4(&big);
+
+    print(div_6_12);
+    print(eq_6_6);
+    print(lmi.value);
+    print(lm_a.value);
+    print(lm_big.value);
+}
+
+fn exercise_int_functor() {
+    let s1 = int_functor_on_object(5);
+    let s2 = int_functor_on_identity(5);
+    let sn = int_functor_power(10, 3);
+    let t1 = int_shift_functor(2, 10);
+    let t_comp = int_shift_compose(1, 2, 10);
+
+    print(s1);
+    print(s2);
+    print(sn);
+    print(t1);
+    print(t_comp);
+}
+
+fn main() {
+    exercise_operad_and_category();
+    exercise_monoid_and_lattice();
+    exercise_groups_and_rings();
+    exercise_preorder_and_homomorphism();
+    exercise_int_functor();
+    print("comprehensive stdlib tour complete");
+}

@@ -128,6 +128,55 @@ public module analysis;
 // quantifiers, decidability, classical vs constructive logic
 public module logic;
 
+// Homotopy Type Theory: equivalences, truncation levels, fibres,
+// paths, univalence (axiomatic), function extensionality, HIT shapes
+// Thin layer over refinement types, meta parameters, and HKT.
+public module hott;
+
+// Simplicial sets and Kan complexes: Simplex, SimplicialSet, Horn,
+// KanComplex, InfinityGroupoid, Nerve. Combinatorial substrate for
+// ∞-categories and ∞-topoi.
+public module simplicial;
+
+// ∞-categories in the Joyal quasi-category model: QuasiCategory,
+// InfinityCategory, InfinityFunctor, MappingSpace, HomotopyCategory,
+// OppositeInfCategory, FunctorInfCategory, InfTerminal/InfInitial.
+public module infinity_category;
+
+// ∞-topoi: Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
+// InfinityTopos, SheafInfinityTopos, InfSubobjectClassifier,
+// GeometricMorphism. The centerpiece of Phase C — built on top of
+// infinity_category, simplicial, category, and hott.
+public module infinity_topos;
+
+// Grothendieck fibrations: CartesianMorphism, GrothendieckFibration,
+// Opfibration, Bifibration, Fibre, StraighteningEquivalence,
+// BaseChange, LeftFibration, RightFibration.
+public module fibration;
+
+// ∞-categorical Kan extensions: InfLeftKanExtension,
+// InfRightKanExtension, KanExtensionTriple, PointwiseKanExtension,
+// KanPreservingFunctor. Companion to the 1-categorical Kan
+// extensions in category.vr.
+public module kan_extension;
+
+// Quillen model categories: WeakEquivalenceClass, CofibrationClass,
+// FibrationClass, QuillenModelStructure, Trivial{Co}Fibration,
+// {Co}FibrantObject, ModelHomotopyCategory, Quillen{Adjunction,
+// Equivalence}, HomotopyEquivalentAsInfCat.
+public module model_category;
+
+// Operads, multicategories, algebras over operads, E_n operads,
+// ∞-operads. Controls algebraic operations of all arities with
+// coherent composition — from ordinary monoids to E_∞-rings.
+public module operad;
+
+// Reference implementations of Phase B/C protocols:
+// TerminalOperad, IntegerPathCategory, DiscreteSimplicialSet,
+// WalkingArrow. Concrete, usable starter kits with proven
+// correctness theorems. Doubles as documentation-by-example.
+public module examples;
+
 // Number theory: Peano naturals, primes, divisibility, modular arithmetic,
 // GCD/LCM, Euler/Fermat/FTA theorem statements
 public module number_theory;

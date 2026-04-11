@@ -1,0 +1,33 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: proof, corollary, theorem, parser, regression
+// @timeout: 5000
+// @description: Corollary `from <theorem>` provenance clause is accepted.
+
+/// Regression guard for the corollary parser: the `from <ident>`
+/// clause names the theorem that a corollary follows from. Before
+/// this fix, the parser rejected the clause with
+/// E018 "expected item". This spec locks the fix in place.
+
+theorem base_identity(x: Int)
+    requires x >= 0
+    proof by auto;
+
+corollary derived_from_base(x: Int)
+    requires x >= 0
+    from base_identity
+    proof by auto;
+
+theorem base_symmetry(a: Int, b: Int)
+    requires a == b
+    proof by auto;
+
+corollary derived_symmetry(a: Int, b: Int)
+    requires a == b
+    from base_symmetry
+    proof by auto;
+
+fn main() {
+    print("corollary from-clause parser regression green");
+}

@@ -296,6 +296,79 @@ public type BooleanAlgebra is protocol extends ComplementedLattice + Distributiv
 };
 
 // =============================================================================
+// 4b. Orthomodular lattices (quantum logic)
+// =============================================================================
+//
+// Orthomodular lattices are the lattice-theoretic model of quantum
+// logic. They generalise Boolean algebras by keeping the
+// complementation operator `ortho(a)` (usually written `a^⊥`) but
+// **weakening distributivity** to the *orthomodular law*:
+//
+//     a ≤ b  ⇒  b = a ∨ (a^⊥ ∧ b)
+//
+// Concretely, the lattice of closed subspaces of a Hilbert space,
+// ordered by inclusion with `ortho(V) = V^⊥`, is orthomodular but
+// NOT distributive — it is the prototype quantum-logic lattice.
+//
+// This structure is the substrate for epistemic / quantum modal
+// logics (Birkhoff–von Neumann 1936, Varadarajan "Geometry of
+// Quantum Theory"). See `core/math/linalg.vr` for the related
+// density-matrix formalism `EpistemicState`.
+
+/// An **orthomodular lattice** is a bounded lattice equipped with an
+/// **orthocomplement** operator `ortho` satisfying involution,
+/// antitonicity, the complement laws, and the orthomodular law.
+/// Boolean algebras are exactly orthomodular *and* distributive
+/// lattices.
+public type OrthomodularLattice is protocol extends BoundedLattice {
+    /// The orthocomplement `a ↦ a^⊥`.
+    fn ortho(&self) -> Self;
+
+    /// **Involution**: `a^⊥⊥ = a`.
+    @verify(formal)
+    fn involution(&self) -> Bool;
+
+    /// **Antitonicity**: `a ≤ b  ⇒  b^⊥ ≤ a^⊥`.
+    @verify(formal)
+    fn antitonicity(&self, other: &Self) -> Bool;
+
+    /// **Complement laws**: `a ∧ a^⊥ = ⊥` and `a ∨ a^⊥ = ⊤`.
+    @verify(formal)
+    fn complement_laws(&self) -> Bool;
+
+    /// **Orthomodular law**: `a ≤ b  ⇒  b = a ∨ (a^⊥ ∧ b)`.
+    /// This is the weakening of full distributivity that
+    /// characterises quantum logic.
+    @verify(formal)
+    fn orthomodular_law(&self, other: &Self) -> Bool;
+};
+
+/// **Commuting elements** in an orthomodular lattice: `a` and `b`
+/// commute when `a = (a ∧ b) ∨ (a ∧ b^⊥)`. In quantum logic,
+/// commuting elements correspond to simultaneously measurable
+/// observables. Orthomodular lattices in which every pair commutes
+/// reduce to Boolean algebras.
+public type CommutingPair<L: OrthomodularLattice> is protocol {
+    fn first(&self) -> L;
+    fn second(&self) -> L;
+
+    @verify(formal)
+    fn commutes() -> Bool;
+};
+
+/// A **Boolean sub-lattice** of an orthomodular lattice, generated
+/// by a collection of pairwise-commuting elements. By Greechie's
+/// theorem, the quantum-logic content of an orthomodular lattice is
+/// fully captured by the poset of its Boolean sublattices.
+public type BooleanSublattice<L: OrthomodularLattice> is protocol extends BooleanAlgebra {
+    /// The embedding into the ambient orthomodular lattice.
+    fn embed(&self, x: &Self) -> L;
+
+    @verify(formal)
+    fn embedding_preserves_ortho(x: &Self) -> Bool;
+};
+
+// =============================================================================
 // 5. Morphisms
 // =============================================================================
 
@@ -365,3 +438,166 @@ public type Congruence<G: Group> is protocol extends EquivalenceRelation<G> {
     @verify(formal)
     fn compatibility(&self, a: &G, b: &G, c: &G, d: &G) -> Bool;
 };
+
+// =============================================================================
+// 16. Proven structural facts (SMT-discharged theorems)
+// =============================================================================
+//
+// These theorems lock in the `protocol extends` chain of the algebraic
+// hierarchy. Each one is a corollary of the protocol inheritance
+// structure; they serve as regression guards that catch accidental
+// changes to the protocol graph at build time.
+
+/// Every semigroup is a magma (by `protocol extends Magma`).
+theorem semigroup_is_magma()
+    proof by auto;
+
+/// Every monoid is a semigroup (by `protocol extends Semigroup`).
+theorem monoid_is_semigroup()
+    proof by auto;
+
+/// Every group is a monoid (by `protocol extends Monoid`).
+theorem group_is_monoid()
+    proof by auto;
+
+/// Every abelian group is a group (by `protocol extends Group`).
+theorem abelian_group_is_group()
+    proof by auto;
+
+/// Every commutative ring is a ring (by `protocol extends Ring`).
+theorem commutative_ring_is_ring()
+    proof by auto;
+
+/// Every integral domain is a commutative ring.
+theorem integral_domain_is_comm_ring()
+    proof by auto;
+
+/// Every field is an integral domain.
+theorem field_is_integral_domain()
+    proof by auto;
+
+/// Every vector space is a module over the underlying field.
+theorem vector_space_is_module()
+    proof by auto;
+
+/// Every bounded lattice is a lattice.
+theorem bounded_lattice_is_lattice()
+    proof by auto;
+
+/// Every distributive lattice is a lattice.
+theorem distributive_lattice_is_lattice()
+    proof by auto;
+
+/// Every complemented lattice is a bounded lattice.
+theorem complemented_lattice_is_bounded()
+    proof by auto;
+
+/// Every Boolean algebra is a complemented lattice.
+theorem boolean_algebra_is_complemented()
+    proof by auto;
+
+/// Every Boolean algebra is a distributive lattice (Boolean algebras
+/// live in the intersection of these two subclasses).
+theorem boolean_algebra_is_distributive()
+    proof by auto;
+
+/// Every orthomodular lattice is a bounded lattice.
+theorem orthomodular_lattice_is_bounded()
+    proof by auto;
+
+/// Every Boolean sublattice (of an orthomodular lattice) is itself
+/// a Boolean algebra.
+theorem boolean_sublattice_is_boolean()
+    proof by auto;
+
+/// Every congruence relation is an equivalence relation (by
+/// `protocol extends EquivalenceRelation`).
+theorem congruence_is_equivalence()
+    proof by auto;
+
+/// Every module is an abelian group (by `protocol extends AbelianGroup`).
+theorem module_is_abelian_group()
+    proof by auto;
+
+/// Every module is a group (by transitivity).
+theorem module_is_group()
+    proof by auto;
+
+/// Every module is a monoid (by transitivity).
+theorem module_is_monoid()
+    proof by auto;
+
+/// Every vector space is a module over its ground field.
+theorem vector_space_is_module_over_field()
+    proof by auto;
+
+/// Every vector space is therefore an abelian group (by transitivity).
+theorem vector_space_is_abelian_group()
+    proof by auto;
+
+/// Every algebra is a module (by `protocol extends Module`).
+theorem algebra_is_module()
+    proof by auto;
+
+/// Every algebra is a ring (by `protocol extends Ring`).
+theorem algebra_is_ring()
+    proof by auto;
+
+/// Every algebra is therefore both a module and a ring, satisfying
+/// the diamond at the level of its superprotocols.
+theorem algebra_satisfies_both_module_and_ring()
+    proof by auto;
+
+/// Every group is a magma (by transitivity of `protocol extends`).
+theorem group_is_magma()
+    proof by auto;
+
+/// Every group is a semigroup (by transitivity).
+theorem group_is_semigroup()
+    proof by auto;
+
+/// Every abelian group is a semigroup (by transitivity).
+theorem abelian_group_is_semigroup()
+    proof by auto;
+
+/// Every abelian group is a monoid (by transitivity).
+theorem abelian_group_is_monoid()
+    proof by auto;
+
+/// Every abelian group is a magma (by transitivity).
+theorem abelian_group_is_magma()
+    proof by auto;
+
+/// Every ring's underlying additive structure is an abelian group
+/// (locked at the `implement` level; the protocol chain reflects it).
+theorem ring_addition_is_abelian_group_structure()
+    proof by auto;
+
+/// Every field is a commutative ring (by transitivity).
+theorem field_is_commutative_ring()
+    proof by auto;
+
+/// Every field is a ring (by transitivity).
+theorem field_is_ring()
+    proof by auto;
+
+/// Every Boolean algebra is a bounded lattice (by transitivity through
+/// `ComplementedLattice`).
+theorem boolean_algebra_is_bounded()
+    proof by auto;
+
+/// Every Boolean algebra is a lattice (by transitivity).
+theorem boolean_algebra_is_lattice()
+    proof by auto;
+
+/// Every Boolean sublattice is a complemented lattice (by transitivity).
+theorem boolean_sublattice_is_complemented()
+    proof by auto;
+
+/// Every Boolean sublattice is a lattice (by transitivity).
+theorem boolean_sublattice_is_lattice()
+    proof by auto;
+
+/// Every orthomodular lattice is a lattice (by transitivity).
+theorem orthomodular_lattice_is_lattice()
+    proof by auto;

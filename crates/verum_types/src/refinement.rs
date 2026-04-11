@@ -1282,7 +1282,21 @@ impl RefinementChecker {
     /// - Preserves free variables: FV(subst(e, x, v)) = (FV(e) - {x}) ∪ FV(v)
     /// - Avoids capture: If y ∈ FV(v) and y is bound in e, perform alpha-renaming
     /// - Preserves semantics: [[subst(e, x, v)]] = [[e]][x ↦ [[v]]]
-    fn substitute_in_expr(&self, expr: &Expr, var: &Text, value: &Expr) -> Expr {
+    ///
+    /// # Visibility note
+    ///
+    /// Exposed at `pub(crate)` so that `infer.rs` can substitute earlier
+    /// function arguments into subsequent parameters' refinement
+    /// predicates at call sites. This enables dependent refinement
+    /// enforcement: when calling `fn safe_get(len: Int, i: Int{< len}) -> Int`
+    /// with `safe_get(5, 10)`, the checker substitutes `len → 5` into the
+    /// predicate `i < len` before checking `10`, producing `10 < 5` which
+    /// the refinement checker correctly rejects.
+    ///
+    /// See `crates/verum_types/src/infer.rs` call-site loop around line
+    /// 10558 and `crates/verum_compiler/tests/dependent_patterns_regression.rs`
+    /// for the regression tests.
+    pub(crate) fn substitute_in_expr(&self, expr: &Expr, var: &Text, value: &Expr) -> Expr {
         use verum_ast::StmtKind;
         use verum_ast::expr::ArrayExpr;
 

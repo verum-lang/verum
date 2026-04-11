@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: simplicial, stdlib, regression
+// @timeout: 10000
+// @description: The core.math.simplicial module loads and its types are usable.
+
+/// Regression guard: `core/math/simplicial.vr` must parse, type-check,
+/// and expose `Simplex`, `SimplicialSet`, `Horn`, `KanComplex`,
+/// `InfinityGroupoid`, `Nerve`, and the `horn_is_inner`/`horn_is_outer`
+/// classifiers.
+
+mount core.math.simplicial.{Simplex, Horn, horn_is_inner, horn_is_outer};
+
+fn make_standard_simplex(n: Int) -> Simplex {
+    // Note: Verum's refinement checker requires n >= 0 for Simplex.dim;
+    // callers guarantee this at their own call sites.
+    Simplex { dim: n, vertices: [0] }
+}
+
+fn make_inner_horn() -> Horn {
+    // Λ^2_1 is the inner horn on the 2-simplex.
+    Horn { dim: 2, missing_face: 1 }
+}
+
+fn make_outer_horn() -> Horn {
+    // Λ^2_0 is an outer horn on the 2-simplex.
+    Horn { dim: 2, missing_face: 0 }
+}
+
+fn main() {
+    let s = make_standard_simplex(2);
+    let inner = make_inner_horn();
+    let outer = make_outer_horn();
+
+    let inner_is_inner = horn_is_inner(&inner);
+    let outer_is_outer = horn_is_outer(&outer);
+
+    print(s.dim);
+    print(inner.dim);
+    print(outer.dim);
+}

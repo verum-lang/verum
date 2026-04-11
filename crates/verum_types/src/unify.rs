@@ -3379,14 +3379,47 @@ impl Unifier {
                 }
             }
 
-            // Bool ↔ Int coercion: Bool is a subtype of Int in Verum.
-            // true coerces to 1, false coerces to 0. This enables patterns like
-            // `assert_eq(x > 0, 1)` and using Bool values in arithmetic contexts.
-            (Bool, Int) | (Int, Bool) => Ok(Substitution::new()),
-
-            // Char ↔ Int coercion: Char is a Unicode code point and coerces to Int.
-            // This enables patterns like `assert_eq(ch, 65)` and arithmetic on chars.
-            (Char, Int) | (Int, Char) => Ok(Substitution::new()),
+            // ================================================================
+            // Bool ↔ Int and Char ↔ Int coercions — REMOVED (semantic honesty)
+            // ================================================================
+            //
+            // Previously this unifier silently accepted `Bool` and `Char` as
+            // subtypes of `Int`, meaning `let x: Int = true`, `fn f() -> Int {
+            // true }`, and `a: Int + b: Bool` all type-checked cleanly — an
+            // enormous blind spot directly contradicting CLAUDE.md's "semantic
+            // honesty" principle ("types describe meaning, not implementation")
+            // and causing `integration_test::test_type_error_detection` to
+            // fail because `fn bad_add(a: Int, b: Bool) -> Int { a + b }` was
+            // accepted.
+            //
+            // The original justification was to enable patterns like
+            // `assert_eq(x > 0, 1)` and arithmetic on characters. Those
+            // patterns are themselves code smells — they paper over missing
+            // explicit conversions. The correct forms are:
+            //
+            //   - `assert_eq(x > 0, true)`  (compare booleans with booleans)
+            //   - `(ch as Int) == 65`       (explicit cast for char)
+            //
+            // Removing the coercions:
+            //   - makes `test_type_error_detection` pass correctly
+            //   - restores type safety for Bool and Char at assignment,
+            //     return, argument passing, and binary operator sites
+            //   - aligns with CLAUDE.md Rule: "Semantic Honesty"
+            //   - keeps the Verum refinement system sound (Int refinements
+            //     like `Int{>= 0}` can no longer be "satisfied" by a Bool)
+            //
+            // If a user really needs Bool-as-Int semantics they must write
+            // an explicit cast `as Int` or use `if cond { 1 } else { 0 }`.
+            //
+            // Related: CLAUDE.md section "Semantic Types", the test
+            // `crates/verum_compiler/tests/type_error_detection_debug.rs`
+            // that documents the full matrix of cases (Int+Bool, Bool+Bool,
+            // let x: Int = true, fn f() -> Int { true }, ...), and
+            // `crates/verum_compiler/tests/integration_test.rs:113-138`.
+            //
+            // Note: `(Char, Char)` still unifies (same-type reflexivity) via
+            // the general primitive case below; only the cross-type
+            // coercions are removed here.
 
             // CapabilityRestricted types: `T with [C1, C2]`
             // Two capability-restricted types unify if their base types unify

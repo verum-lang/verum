@@ -1,0 +1,125 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: algebra, group, lattice, examples, stdlib, regression
+// @timeout: 10000
+// @description: Exercise Z3 and Pow2 concrete reference instances from examples.vr.
+
+/// Regression guard for the concrete algebraic reference implementations
+/// in `core/math/examples.vr`: the cyclic group Z/3Z and the power-set
+/// Boolean lattice P({0, 1}). Exercises every constructor and every
+/// operation so that a silent signature change in the module is caught
+/// at build time.
+
+mount core.math.examples.{
+    Z3, z3_zero, z3_one, z3_two, z3_add, z3_neg, z3_eq,
+    Pow2, pow2_empty, pow2_just_zero, pow2_just_one, pow2_full,
+    pow2_join, pow2_meet, pow2_complement, pow2_subset,
+};
+
+// ========================================================================
+// 1. Z/3Z — cyclic group operations
+// ========================================================================
+
+fn test_z3_elements() {
+    let zero = z3_zero();
+    let one = z3_one();
+    let two = z3_two();
+
+    print(zero.value);
+    print(one.value);
+    print(two.value);
+}
+
+fn test_z3_addition() {
+    let a = z3_one();
+    let b = z3_two();
+    let c = z3_add(&a, &b);
+    let d = z3_add(&b, &a);
+
+    print(c.value);
+    print(d.value);
+}
+
+fn test_z3_inverses() {
+    let zero = z3_zero();
+    let one = z3_one();
+    let two = z3_two();
+
+    let neg_zero = z3_neg(&zero);
+    let neg_one = z3_neg(&one);
+    let neg_two = z3_neg(&two);
+
+    let eq0 = z3_eq(&neg_zero, &zero);
+    let sum1 = z3_add(&one, &neg_one);
+    let sum2 = z3_add(&two, &neg_two);
+
+    print(neg_one.value);
+    print(neg_two.value);
+}
+
+// ========================================================================
+// 2. Pow2 — power-set lattice P({0, 1})
+// ========================================================================
+
+fn test_pow2_elements() {
+    let empty = pow2_empty();
+    let a = pow2_just_zero();
+    let b = pow2_just_one();
+    let full = pow2_full();
+
+    print(empty.has_zero);
+    print(full.has_one);
+}
+
+fn test_pow2_join_meet() {
+    let a = pow2_just_zero();
+    let b = pow2_just_one();
+
+    let j = pow2_join(&a, &b);
+    let m = pow2_meet(&a, &b);
+
+    print(j.has_zero);
+    print(j.has_one);
+    print(m.has_zero);
+    print(m.has_one);
+}
+
+fn test_pow2_complement() {
+    let empty = pow2_empty();
+    let full = pow2_full();
+    let a = pow2_just_zero();
+
+    let c_empty = pow2_complement(&empty);
+    let c_full = pow2_complement(&full);
+    let c_a = pow2_complement(&a);
+    let c_c_a = pow2_complement(&c_a);
+
+    print(c_empty.has_zero);
+    print(c_c_a.has_zero);
+}
+
+fn test_pow2_subset() {
+    let empty = pow2_empty();
+    let a = pow2_just_zero();
+    let full = pow2_full();
+
+    let empty_sub_a = pow2_subset(&empty, &a);
+    let a_sub_full = pow2_subset(&a, &full);
+    let full_sub_empty = pow2_subset(&full, &empty);
+
+    print(empty_sub_a);
+    print(a_sub_full);
+    print(full_sub_empty);
+}
+
+fn main() {
+    test_z3_elements();
+    test_z3_addition();
+    test_z3_inverses();
+    test_pow2_elements();
+    test_pow2_join_meet();
+    test_pow2_complement();
+    test_pow2_subset();
+    print("group and lattice reference instances exercised");
+}

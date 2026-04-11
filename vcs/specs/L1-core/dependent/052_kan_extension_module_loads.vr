@@ -1,0 +1,28 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: kan-extension, stdlib, regression
+// @timeout: 10000
+// @description: The core.math.kan_extension module loads and its types are usable.
+
+/// Regression guard: `core/math/kan_extension.vr` must parse,
+/// type-check, and expose `InfLeftKanExtension`, `InfRightKanExtension`,
+/// `KanExtensionTriple`, `PointwiseKanExtension`, `KanPreservingFunctor`.
+
+mount core.math.kan_extension.{
+    InfLeftKanExtension,
+    InfRightKanExtension,
+    KanExtensionTriple,
+    PointwiseKanExtension,
+    KanPreservingFunctor,
+};
+
+fn use_lan<C, D, E, K: InfLeftKanExtension<C, D, E>>() -> Int { 0 }
+fn use_ran<C, D, E, K: InfRightKanExtension<C, D, E>>() -> Int { 0 }
+fn use_triple<C, D, E, T: KanExtensionTriple<C, D, E>>() -> Int { 0 }
+fn use_pointwise<C, D, E, P: PointwiseKanExtension<C, D, E>>() -> Int { 0 }
+fn use_preserving<C, D, E, DPrime, K: KanPreservingFunctor<C, D, E, DPrime>>() -> Int { 0 }
+
+fn main() {
+    print("kan_extension module loaded");
+}

@@ -1,0 +1,25 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: dependent, refinement, pi-type-surface, regression
+// @timeout: 5000
+// @description: Refinement predicate references earlier parameter — equivalent to Π-type.
+
+/// Dependent refinement types: the bound of `i` references `len`.
+///
+/// This is the canonical Π-type `(len: Int) → (i: Int{i < len}) → Int`
+/// expressed via Verum's refinement system. Any regression here breaks
+/// the foundational dependent typing pattern used by all indexed
+/// collection APIs, as well as downstream proofs in `core/math/`.
+///
+/// See `crates/verum_compiler/tests/dependent_patterns_regression.rs`
+/// for the full regression matrix.
+
+fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int {
+    i
+}
+
+fn main() {
+    let r = safe_get(10, 3);
+    print(r);
+}

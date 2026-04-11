@@ -1,0 +1,52 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: infinity-category, simplicial, stdlib, regression
+// @timeout: 10000
+// @description: The core.math.infinity_category module loads and its types are usable.
+
+/// Regression guard: `core/math/infinity_category.vr` must parse,
+/// type-check, and expose `QuasiCategory`, `InfinityCategory`,
+/// `InfinityFunctor`, `FullyFaithfulInfFunctor`,
+/// `EssentiallySurjectiveInfFunctor`, `InfEquivalence`, `MappingSpace`,
+/// `HomotopyCategory`, `OppositeInfCategory`, `FunctorInfCategory`,
+/// `InfTerminal`, `InfInitial`.
+///
+/// This test imports the module and references each exported protocol
+/// as a type parameter bound to verify name resolution from the
+/// embedded stdlib through to type-checker lookup.
+
+mount core.math.infinity_category.{
+    QuasiCategory,
+    InfinityCategory,
+    InfinityFunctor,
+    FullyFaithfulInfFunctor,
+    EssentiallySurjectiveInfFunctor,
+    InfEquivalence,
+    MappingSpace,
+    HomotopyCategory,
+    OppositeInfCategory,
+    FunctorInfCategory,
+    InfTerminal,
+    InfInitial,
+};
+
+// Generic stub functions that take each protocol bound. Any parse or
+// resolution failure on the stdlib module manifests as a type error
+// here.
+fn use_quasi<C: QuasiCategory>() -> Int { 0 }
+fn use_infcat<C: InfinityCategory>() -> Int { 0 }
+fn use_functor<C, D, F: InfinityFunctor<C, D>>() -> Int { 0 }
+fn use_ff<C, D, F: FullyFaithfulInfFunctor<C, D>>() -> Int { 0 }
+fn use_eso<C, D, F: EssentiallySurjectiveInfFunctor<C, D>>() -> Int { 0 }
+fn use_equiv<C, D, F: InfEquivalence<C, D>>() -> Int { 0 }
+fn use_mapping<C, M: MappingSpace<C>>() -> Int { 0 }
+fn use_ho<C, H: HomotopyCategory<C>>() -> Int { 0 }
+fn use_opp<C, O: OppositeInfCategory<C>>() -> Int { 0 }
+fn use_fun<C, D, F: FunctorInfCategory<C, D>>() -> Int { 0 }
+fn use_term<C, T: InfTerminal<C>>() -> Int { 0 }
+fn use_init<C, I: InfInitial<C>>() -> Int { 0 }
+
+fn main() {
+    print("infinity_category module loaded");
+}

@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: proof, corollary, theorem, parser, regression
+// @timeout: 5000
+// @description: Corollary `from` clause composes with requires/ensures in any order.
+
+/// Stress the corollary parser with multiple ordering combinations of
+/// `requires`, `ensures`, and `from`. The parser must accept the
+/// provenance clause anywhere inside the contract block without
+/// confusing it with an identifier in an ensures expression.
+
+theorem base_positive(n: Int)
+    requires n > 0
+    ensures n >= 1
+    proof by auto;
+
+/// from after requires
+corollary c1(n: Int)
+    requires n > 0
+    from base_positive
+    proof by auto;
+
+/// from between requires and ensures
+corollary c2(n: Int)
+    requires n > 0
+    from base_positive
+    ensures n >= 1
+    proof by auto;
+
+/// from after ensures
+corollary c3(n: Int)
+    requires n > 0
+    ensures n >= 1
+    from base_positive
+    proof by auto;
+
+/// Multiple requires with from in the middle
+corollary c4(n: Int, m: Int)
+    requires n > 0
+    requires m > 0
+    from base_positive
+    proof by auto;
+
+fn main() {
+    print("corollary from-clause multi-ordering parser regression green");
+}

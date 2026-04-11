@@ -1,0 +1,2 @@
+theorem trivial_true()
+    proof by auto;

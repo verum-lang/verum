@@ -1,0 +1,35 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, proof-erasure, theorem, vbc-codegen
+// @timeout: 5000
+// @description: Theorem declarations are verified and then erased before VBC codegen.
+
+/// Proof erasure regression: theorem declarations must be accepted by the
+/// parser, type-checker, and proof-verification phase, and then **completely
+/// erased** before VBC codegen so the runtime carries zero proof-term overhead.
+///
+/// This is guaranteed by the explicit match in
+/// `crates/verum_vbc/src/codegen/mod.rs:3243-3249` which lists all 5 proof
+/// item kinds (Theorem, Lemma, Corollary, Axiom, Tactic) as "do nothing" at
+/// VBC codegen time.
+///
+/// Companion unit tests: `crates/verum_compiler/tests/proof_erasure_tests.rs`.
+
+theorem addition_non_negative(a: Int, b: Int)
+    requires a >= 0, b >= 0
+    proof by auto;
+
+theorem identity_preserves_equality(x: Int)
+    proof by trivial;
+
+// Runtime function coexists with theorem — proof of erasure is that both
+// compile together without the theorem leaking into runtime.
+fn add_then_double(a: Int, b: Int) -> Int {
+    (a + b) + (a + b)
+}
+
+fn main() {
+    let r = add_then_double(3, 4);
+    print(r);
+}

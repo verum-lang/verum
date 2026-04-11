@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: model-category, quillen, stdlib, regression
+// @timeout: 10000
+// @description: The core.math.model_category module loads and its types are usable.
+
+/// Regression guard: `core/math/model_category.vr` must parse,
+/// type-check, and expose the full Quillen model structure API.
+
+mount core.math.model_category.{
+    WeakEquivalenceClass,
+    CofibrationClass,
+    FibrationClass,
+    QuillenModelStructure,
+    TrivialCofibration,
+    TrivialFibration,
+    CofibrantObject,
+    FibrantObject,
+    ModelHomotopyCategory,
+    HomotopyEquivalentAsInfCat,
+    QuillenAdjunction,
+    QuillenEquivalence,
+};
+
+fn use_weq<C, W: WeakEquivalenceClass<C>>() -> Int { 0 }
+fn use_cof<C, K: CofibrationClass<C>>() -> Int { 0 }
+fn use_fib<C, F: FibrationClass<C>>() -> Int { 0 }
+fn use_model<C, M: QuillenModelStructure<C>>() -> Int { 0 }
+fn use_trivcof<C, T: TrivialCofibration<C>>() -> Int { 0 }
+fn use_trivfib<C, T: TrivialFibration<C>>() -> Int { 0 }
+fn use_cofibrant<C, O: CofibrantObject<C>>() -> Int { 0 }
+fn use_fibrant<C, O: FibrantObject<C>>() -> Int { 0 }
+fn use_ho<C, H: ModelHomotopyCategory<C>>() -> Int { 0 }
+fn use_equiv<C, E: HomotopyEquivalentAsInfCat<C>>() -> Int { 0 }
+fn use_qadj<C, D, A: QuillenAdjunction<C, D>>() -> Int { 0 }
+fn use_qequiv<C, D, A: QuillenEquivalence<C, D>>() -> Int { 0 }
+
+fn main() {
+    print("model_category module loaded");
+}

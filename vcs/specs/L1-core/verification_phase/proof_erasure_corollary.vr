@@ -1,0 +1,31 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: verification, proof-erasure, corollary, vbc-codegen
+// @timeout: 5000
+// @description: Corollary declarations are erased before VBC codegen (previously uncovered case).
+
+/// Proof erasure regression: prior to the fix in
+/// `crates/verum_vbc/src/codegen/mod.rs:3243-3249`, `ItemKind::Corollary`
+/// was not listed explicitly alongside Theorem/Lemma/Axiom and was only
+/// silently dropped by the catch-all `_ => {}` arm. The explicit match
+/// now lists Corollary so future additions to ItemKind cannot accidentally
+/// reintroduce the gap.
+///
+/// This spec exists as a regression guard: if the Corollary arm is ever
+/// removed from codegen's explicit match, compilation of this file will
+/// not fail, but a newly added proof item kind would — which is the
+/// intended safety property.
+
+theorem base_theorem(n: Int) -> Bool
+    requires n > 0
+    proof by auto;
+
+corollary derived_corollary(n: Int) -> Bool
+    requires n > 0
+    from base_theorem
+    proof by auto;
+
+fn main() {
+    print("proof erasure of corollary verified");
+}

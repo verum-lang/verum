@@ -557,6 +557,26 @@ pub struct TypeChecker {
     /// Used to check preconditions at call sites and postconditions at returns.
     /// Function contracts: preconditions (requires) and postconditions (ensures)
     function_contracts: Map<Text, FunctionContract>,
+    /// Maps function names to the ordered list of their parameter names.
+    ///
+    /// Populated by `register_function_signature` for every function the
+    /// type checker sees. This is separate from `function_contracts` which
+    /// only stores entries for functions with explicit `requires`/`ensures`
+    /// clauses; here we keep parameter names for *every* function so that
+    /// dependent refinement enforcement (see the call-site loop around
+    /// line 10558) can substitute earlier argument values into subsequent
+    /// parameters' refinement predicates.
+    ///
+    /// Example: for `fn safe_get(len: Int, i: Int{< len}) -> Int`, this
+    /// stores `safe_get → [len, i]` so that at a call `safe_get(5, 10)`
+    /// the refinement checker can substitute `len → 5` into `i < len`
+    /// before checking the second argument against the predicate.
+    ///
+    /// Empty entries (functions where names couldn't be extracted —
+    /// e.g. destructuring patterns, or closures) are acceptable — the
+    /// enforcement path falls back to the pre-existing non-dependent
+    /// behaviour for those calls.
+    function_param_names: Map<Text, List<Text>>,
     /// Stdlib metadata loaded from stdlib.vbc.
     /// Contains type definitions, protocols, and methods for stdlib types.
     /// Used for type checking user code that uses stdlib types.
@@ -889,6 +909,7 @@ impl TypeChecker {
             termination_checker: crate::termination::TerminationChecker::new(),
             function_required_params: Map::new(),
             function_contracts: Map::new(),
+            function_param_names: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -1055,6 +1076,7 @@ impl TypeChecker {
             termination_checker: crate::termination::TerminationChecker::new(),
             function_required_params: Map::new(),
             function_contracts: Map::new(),
+            function_param_names: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -1603,6 +1625,7 @@ impl TypeChecker {
             termination_checker: crate::termination::TerminationChecker::new(),
             function_required_params: Map::new(),
             function_contracts: Map::new(),
+            function_param_names: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -1700,6 +1723,7 @@ impl TypeChecker {
             termination_checker: crate::termination::TerminationChecker::new(),
             function_required_params: Map::new(),
             function_contracts: Map::new(),
+            function_param_names: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -1798,6 +1822,7 @@ impl TypeChecker {
             termination_checker: crate::termination::TerminationChecker::new(),
             function_required_params: Map::new(),
             function_contracts: Map::new(),
+            function_param_names: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -3873,6 +3898,173 @@ impl TypeChecker {
                     }
                 }
             }
+        }
+    }
+
+    /// Recursively constant-fold a refinement predicate expression.
+    ///
+    /// Used by the dependent-refinement substitution path at call sites
+    /// (see the `Type::Function` arm of the Call handler). After
+    /// substituting earlier concrete arguments into a later parameter's
+    /// predicate, the result may contain pure integer arithmetic that
+    /// the syntactic refinement checker cannot decide without reduction
+    /// (e.g. `count <= 10 - 5`). This helper reduces such sub-terms to
+    /// literals so the resulting predicate is in the shape
+    /// `<variable> <op> <literal>`, which the syntactic checker can
+    /// trivially evaluate once `<variable>` is also substituted with a
+    /// literal at the check site.
+    ///
+    /// The folding is conservative: only integer arithmetic (+, -, *,
+    /// /, %, **) and comparisons (==, !=, <, <=, >, >=) with two
+    /// literal operands are reduced. Anything else — variables, calls,
+    /// paths, string ops, partially-known expressions — is returned
+    /// unchanged. This keeps the transformation sound: a folded
+    /// expression is semantically equivalent to the original.
+    ///
+    /// Division by zero produces the original expression (no panic).
+    /// Negation of `Int::MIN` is also preserved as-is to avoid overflow.
+    fn const_fold_expr(expr: &Expr) -> Expr {
+        use verum_ast::expr::{BinOp, UnOp};
+        use verum_ast::literal::{Literal, LiteralKind};
+
+        fn as_int_lit(e: &Expr) -> Option<i128> {
+            if let ExprKind::Literal(lit) = &e.kind {
+                if let LiteralKind::Int(int_lit) = &lit.kind {
+                    return Some(int_lit.value);
+                }
+            }
+            None
+        }
+
+        fn as_bool_lit(e: &Expr) -> Option<bool> {
+            if let ExprKind::Literal(lit) = &e.kind {
+                if let LiteralKind::Bool(b) = &lit.kind {
+                    return Some(*b);
+                }
+            }
+            None
+        }
+
+        fn make_int(value: i128, span: Span) -> Expr {
+            Expr::new(
+                ExprKind::Literal(Literal::new(
+                    LiteralKind::Int(verum_ast::literal::IntLit::new(value)),
+                    span,
+                )),
+                span,
+            )
+        }
+
+        fn make_bool(value: bool, span: Span) -> Expr {
+            Expr::new(
+                ExprKind::Literal(Literal::new(
+                    LiteralKind::Bool(value),
+                    span,
+                )),
+                span,
+            )
+        }
+
+        match &expr.kind {
+            // Binary operators: fold operands first, then try to
+            // evaluate the op if both are now literals.
+            ExprKind::Binary { op, left, right } => {
+                let l = TypeChecker::const_fold_expr(left);
+                let r = TypeChecker::const_fold_expr(right);
+
+                // Integer arithmetic + comparison
+                if let (Some(a), Some(b)) = (as_int_lit(&l), as_int_lit(&r)) {
+                    let result_int: Option<i128> = match op {
+                        BinOp::Add => a.checked_add(b),
+                        BinOp::Sub => a.checked_sub(b),
+                        BinOp::Mul => a.checked_mul(b),
+                        BinOp::Div if b != 0 => a.checked_div(b),
+                        BinOp::Rem if b != 0 => a.checked_rem(b),
+                        BinOp::Pow if b >= 0 && b <= u32::MAX as i128 => {
+                            a.checked_pow(b as u32)
+                        }
+                        _ => None,
+                    };
+                    if let Some(v) = result_int {
+                        return make_int(v, expr.span);
+                    }
+
+                    let result_bool: Option<bool> = match op {
+                        BinOp::Eq => Some(a == b),
+                        BinOp::Ne => Some(a != b),
+                        BinOp::Lt => Some(a < b),
+                        BinOp::Le => Some(a <= b),
+                        BinOp::Gt => Some(a > b),
+                        BinOp::Ge => Some(a >= b),
+                        _ => None,
+                    };
+                    if let Some(v) = result_bool {
+                        return make_bool(v, expr.span);
+                    }
+                }
+
+                // Boolean logical ops
+                if let (Some(a), Some(b)) = (as_bool_lit(&l), as_bool_lit(&r)) {
+                    let result_bool: Option<bool> = match op {
+                        BinOp::And => Some(a && b),
+                        BinOp::Or => Some(a || b),
+                        BinOp::Eq => Some(a == b),
+                        BinOp::Ne => Some(a != b),
+                        BinOp::Imply => Some(!a || b),
+                        BinOp::Iff => Some(a == b),
+                        _ => None,
+                    };
+                    if let Some(v) = result_bool {
+                        return make_bool(v, expr.span);
+                    }
+                }
+
+                // Not foldable — reconstruct with folded children.
+                Expr::new(
+                    ExprKind::Binary {
+                        op: *op,
+                        left: Box::new(l),
+                        right: Box::new(r),
+                    },
+                    expr.span,
+                )
+            }
+
+            // Unary operators on literals.
+            ExprKind::Unary { op, expr: inner } => {
+                let inner_folded = TypeChecker::const_fold_expr(inner);
+                match op {
+                    UnOp::Neg => {
+                        if let Some(v) = as_int_lit(&inner_folded) {
+                            // Preserve i128::MIN as-is; cannot negate without overflow.
+                            if let Some(neg) = v.checked_neg() {
+                                return make_int(neg, expr.span);
+                            }
+                        }
+                    }
+                    UnOp::Not => {
+                        if let Some(b) = as_bool_lit(&inner_folded) {
+                            return make_bool(!b, expr.span);
+                        }
+                    }
+                    _ => {}
+                }
+                Expr::new(
+                    ExprKind::Unary {
+                        op: *op,
+                        expr: Box::new(inner_folded),
+                    },
+                    expr.span,
+                )
+            }
+
+            // Parenthesised expressions are transparent.
+            ExprKind::Paren(inner) => TypeChecker::const_fold_expr(inner),
+
+            // Anything else is returned unchanged. Literals, paths,
+            // calls, string ops, etc. are not folded here — the
+            // substitution path has already done its job.
+            _ => expr.clone(),
         }
     }
 
@@ -10555,6 +10747,37 @@ impl TypeChecker {
                             self.in_call_arg_context = true;
                             #[cfg(debug_assertions)]
                             let is_assert_eq = func_name.as_ref().map(|n| n.as_str() == "assert_eq").unwrap_or(false);
+
+                            // ============================================================
+                            // Dependent refinement substitution (Phase A.5 activation)
+                            // ============================================================
+                            //
+                            // Look up the callee's parameter names so that refinement
+                            // predicates on later parameters can be specialised with the
+                            // concrete values of earlier arguments before being checked.
+                            // Without this, a signature like
+                            //
+                            //     fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int
+                            //
+                            // would leave `len` as a free variable in the predicate on
+                            // `i` at call sites, silently admitting out-of-bounds calls
+                            // like `safe_get(5, 10)`. With this substitution, the
+                            // predicate becomes `10 >= 0 && 10 < 5` at the second
+                            // argument check, which the refinement checker correctly
+                            // rejects.
+                            //
+                            // `dep_param_names` is the list of parameter names in
+                            // declaration order; empty strings stand in for positions
+                            // where the parameter uses a non-identifier pattern (those
+                            // positions skip substitution but don't break the loop).
+                            //
+                            // Guarded by `callee_name.is_some()` so closures and
+                            // anonymous function values don't pay the lookup cost.
+                            let dep_param_names: List<Text> = callee_name
+                                .as_ref()
+                                .and_then(|name| self.function_param_names.get(name).cloned())
+                                .unwrap_or_default();
+
                             for (i, (arg, param_ty)) in args.iter().zip(params.iter()).enumerate() {
                                 let resolved_param = self.unifier.apply(param_ty);
                                 // Normalize TypeApp nodes (GAT/HKT type application)
@@ -10564,12 +10787,62 @@ impl TypeChecker {
                                 } else {
                                     resolved_param
                                 };
+
+                                // Apply dependent refinement substitution: if this
+                                // parameter is `Type::Refined { base, predicate }`, and
+                                // we know the names of earlier parameters, substitute
+                                // each earlier argument into the predicate so that
+                                // references like `len` become the concrete constant
+                                // passed at the call site. Empty-string parameter
+                                // names (non-identifier patterns) are skipped.
+                                //
+                                // The base type and any wrapping refinement structure
+                                // is otherwise preserved, so this only ever tightens
+                                // the predicate with more information.
+                                let check_ty = if let Type::Refined { base, predicate } = &resolved_param {
+                                    if !dep_param_names.is_empty() && i > 0 {
+                                        let mut subst_pred = predicate.clone();
+                                        for j in 0..i {
+                                            let earlier_name = match dep_param_names.get(j) {
+                                                Some(n) if !n.as_str().is_empty() => n.clone(),
+                                                _ => continue,
+                                            };
+                                            let arg_expr = match args.get(j) {
+                                                Some(a) => a.clone(),
+                                                None => continue,
+                                            };
+                                            subst_pred.predicate = self
+                                                .refinement
+                                                .substitute_in_expr(&subst_pred.predicate, &earlier_name, &arg_expr);
+                                        }
+                                        // Constant-fold arithmetic that became pure after
+                                        // substitution. Without this, a predicate like
+                                        // `count <= src_len - offset` becomes
+                                        // `count <= 10 - 5` after substituting
+                                        // `src_len → 10, offset → 5`, and the syntactic
+                                        // refinement checker cannot decide it because it
+                                        // does not reduce `10 - 5` to `5`. Folding here
+                                        // produces `count <= 5`, which the checker can
+                                        // then decide against any concrete `count`.
+                                        subst_pred.predicate =
+                                            Self::const_fold_expr(&subst_pred.predicate);
+                                        Type::Refined {
+                                            base: base.clone(),
+                                            predicate: subst_pred,
+                                        }
+                                    } else {
+                                        resolved_param
+                                    }
+                                } else {
+                                    resolved_param
+                                };
+
                                 #[cfg(debug_assertions)]
                                 if is_assert_eq {
                                     // eprintln!("[DEBUG assert_eq] arg[{}]: param_ty={}, resolved_param={}, arg.span={:?}",
                                         // i, param_ty, resolved_param, arg.span);
                                 }
-                                self.check_expr(arg, &resolved_param)?;
+                                self.check_expr(arg, &check_ty)?;
                                 #[cfg(debug_assertions)]
                                 if is_assert_eq {
                                     let resolved_after = self.unifier.apply(param_ty);
@@ -47690,6 +47963,42 @@ impl TypeChecker {
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
         use verum_ast::decl::FunctionParamKind;
         use verum_common::Set;
+
+        // ================================================================
+        // Record parameter names for dependent refinement enforcement.
+        //
+        // This populates `function_param_names` with the ordered list of
+        // parameter names for this function. The call-site loop in the
+        // `Type::Function` arm of the Call handler (around line 10580)
+        // consults this map to substitute earlier concrete arguments into
+        // subsequent parameters' refinement predicates — enabling truly
+        // dependent refinement checking for signatures like
+        // `fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int`.
+        //
+        // Names that can't be extracted (e.g. because the parameter uses
+        // a destructuring pattern rather than a simple identifier) are
+        // stored as empty `Text` sentinels so the positional layout is
+        // preserved; the call-site loop skips substitution for those
+        // positions. This preserves backward compatibility: functions
+        // whose signatures don't use refinements behave identically.
+        // ================================================================
+        let mut collected_param_names: List<Text> = List::new();
+        for p in func.params.iter() {
+            let name_opt: Option<Text> = match &p.kind {
+                FunctionParamKind::Regular { pattern, .. } => {
+                    if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
+                        Some(name.name.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            collected_param_names.push(name_opt.unwrap_or_else(|| Text::from("")));
+        }
+        self.function_param_names
+            .insert(func.name.name.clone(), collected_param_names);
+
         // Register generic type parameters FIRST
         // Track both names AND TypeVars for explicit TypeScheme construction
         // This is critical for phantom type parameters (e.g., `fn foo<T>()` where T isn't used)

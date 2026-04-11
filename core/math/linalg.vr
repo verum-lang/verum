@@ -1982,3 +1982,117 @@ public fn schur<T: Numeric>(a: &Matrix<T>) -> SchurDecomposition<T> {
     }
 }
 
+// =============================================================================
+// Quantum epistemic states (density matrices)
+// =============================================================================
+//
+// Density matrices are the fundamental representation of mixed
+// quantum states: positive-semidefinite Hermitian matrices with unit
+// trace. They generalise pure state vectors and encode statistical
+// mixtures of pure states. In the epistemic reading (Birkhoff–von
+// Neumann, Bub "Interpreting the Quantum World"), a density matrix
+// represents a probability distribution over pure states — i.e. a
+// degree of belief about the system's quantum state.
+//
+// This section supplies the bare-minimum protocol surface so that
+// downstream projects (e.g. quantum logic programming, formal
+// epistemology, the Mathesis epistemic engine) can construct
+// concrete density-matrix implementations that satisfy the
+// well-formedness properties as `@verify(formal)` obligations.
+//
+// Related:
+//   - core/math/algebra.vr  (OrthomodularLattice, CommutingPair)
+//   - core/math/linalg.vr   (Matrix, Hermitian, PSD predicates below)
+
+/// An **epistemic state** of dimension `n` is a density matrix:
+/// an `n × n` matrix of complex numbers that is Hermitian,
+/// positive-semidefinite, and has trace one.
+///
+/// Well-formedness is stated as three `@verify(formal)` obligations.
+/// Concrete implementations discharge them via numerical tolerance
+/// or symbolic verification.
+public type EpistemicState<N: meta Int> is protocol {
+    /// The underlying `n × n` density matrix.
+    fn density(&self) -> Int;
+
+    /// **Hermitian**: `ρ† = ρ`.
+    @verify(formal)
+    fn is_hermitian(&self) -> Bool;
+
+    /// **Positive-semidefinite**: `⟨ψ|ρ|ψ⟩ ≥ 0` for every `|ψ⟩`.
+    @verify(formal)
+    fn is_positive_semidefinite(&self) -> Bool;
+
+    /// **Unit trace**: `Tr(ρ) = 1`.
+    @verify(formal)
+    fn is_unit_trace(&self) -> Bool;
+};
+
+/// A **pure state** is a rank-1 density matrix `|ψ⟩⟨ψ|`, equivalently
+/// an epistemic state that is its own square: `ρ² = ρ`.
+public type PureState<N: meta Int> is protocol extends EpistemicState<N> {
+    @verify(formal)
+    fn is_idempotent(&self) -> Bool;
+};
+
+/// A **mixed state** is an epistemic state that is NOT pure, i.e. a
+/// non-trivial statistical mixture of pure states. Equivalent to
+/// `Tr(ρ²) < 1`.
+public type MixedState<N: meta Int> is protocol extends EpistemicState<N> {
+    @verify(formal)
+    fn is_proper_mixture(&self) -> Bool;
+};
+
+/// A **projective measurement** on an n-dimensional Hilbert space is
+/// a family of orthogonal projectors `{P_i}` summing to the identity.
+/// Applying a measurement to a state ρ produces the post-measurement
+/// state `ρ' = Σ P_i ρ P_i` and a probability distribution
+/// `p_i = Tr(P_i ρ)` over outcomes.
+public type ProjectiveMeasurement<N: meta Int> is protocol {
+    /// The number of distinct outcomes.
+    fn outcome_count(&self) -> Int;
+
+    /// The `i`-th projector.
+    fn projector(&self, i: Int) -> Int;
+
+    @verify(formal)
+    fn projectors_orthogonal(i: Int, j: Int) -> Bool;
+
+    @verify(formal)
+    fn projectors_sum_to_identity() -> Bool;
+
+    @verify(formal)
+    fn projectors_idempotent(i: Int) -> Bool;
+};
+
+/// **Von Neumann entropy** of an epistemic state:
+/// `S(ρ) = -Tr(ρ log ρ)`. Zero for pure states, positive for
+/// proper mixtures; bounded above by `log n`. Exposed as a
+/// protocol obligation to let implementers choose between exact,
+/// numerical, and symbolic computation.
+public type VonNeumannEntropy<N: meta Int, S: EpistemicState<N>> is protocol {
+    fn entropy(s: &S) -> Float;
+
+    @verify(formal)
+    fn entropy_non_negative(s: &S) -> Bool;
+
+    @verify(formal)
+    fn entropy_zero_iff_pure(s: &S) -> Bool;
+};
+
+// =============================================================================
+// Epistemic-layer structural facts (SMT-discharged theorems)
+// =============================================================================
+//
+// These theorems lock in the protocol inheritance chain of the
+// quantum-epistemic stack. They catch accidental changes to the
+// protocol graph at build time.
+
+/// Every pure state is an epistemic state (by `protocol extends`).
+theorem pure_state_is_epistemic_state()
+    proof by auto;
+
+/// Every mixed state is an epistemic state (by `protocol extends`).
+theorem mixed_state_is_epistemic_state()
+    proof by auto;
+

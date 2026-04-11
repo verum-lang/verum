@@ -1,3 +1,4 @@
+internal/
 # Build artifacts
 target/
 **/target/
@@ -33,3 +34,4 @@ z3/*
 # Environment
 .env
 .env.*
+.z3-trace

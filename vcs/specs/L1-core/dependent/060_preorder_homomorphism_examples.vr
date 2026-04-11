@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: preorder, homomorphism, divisibility, examples, stdlib, regression
+// @timeout: 10000
+// @description: Exercise Div12 divisibility preorder and length_mod4 monoid homomorphism.
+
+/// Regression guard for the preorder / homomorphism reference
+/// implementations in `core/math/examples.vr`: the `Div12`
+/// divisibility preorder on `{1..12}` and the `length_mod4` monoid
+/// homomorphism `TwoFreeMonoid → Z/4Z`.
+
+mount core.math.examples.{
+    Div12, div12_one, div12_six, div12_twelve, div12_divides, div12_eq,
+    TwoFreeMonoid, two_free_monoid_identity, two_free_monoid_gen_a,
+    two_free_monoid_gen_b, two_free_monoid_mul,
+    Nat4, nat4_zero,
+    length_mod4, length_mod4_identity_maps_to_zero,
+};
+
+// ========================================================================
+// 1. Div12 preorder operations
+// ========================================================================
+
+fn test_div12_constants() {
+    let one = div12_one();
+    let six = div12_six();
+    let twelve = div12_twelve();
+
+    print(one.value);
+    print(six.value);
+    print(twelve.value);
+}
+
+fn test_div12_divides() {
+    let one = div12_one();
+    let six = div12_six();
+    let twelve = div12_twelve();
+
+    let one_div_twelve = div12_divides(&one, &twelve);
+    let six_div_twelve = div12_divides(&six, &twelve);
+    let twelve_div_six = div12_divides(&twelve, &six);
+
+    print(one_div_twelve);
+    print(six_div_twelve);
+    print(twelve_div_six);
+}
+
+fn test_div12_reflexive() {
+    let six = div12_six();
+    let self_div = div12_divides(&six, &six);
+    print(self_div);
+}
+
+fn test_div12_equality() {
+    let six_a = div12_six();
+    let six_b = div12_six();
+    let one = div12_one();
+
+    let eq1 = div12_eq(&six_a, &six_b);
+    let eq2 = div12_eq(&six_a, &one);
+
+    print(eq1);
+    print(eq2);
+}
+
+// ========================================================================
+// 2. length_mod4 monoid homomorphism
+// ========================================================================
+
+fn test_length_mod4_identity() {
+    let zero = length_mod4_identity_maps_to_zero();
+    print(zero.value);
+}
+
+fn test_length_mod4_generators() {
+    let a = two_free_monoid_gen_a();
+    let b = two_free_monoid_gen_b();
+
+    let la = length_mod4(&a);
+    let lb = length_mod4(&b);
+
+    print(la.value);
+    print(lb.value);
+}
+
+fn test_length_mod4_multiplication() {
+    let a = two_free_monoid_gen_a();
+    let b = two_free_monoid_gen_b();
+    let ab = two_free_monoid_mul(&a, &b);
+
+    let lab = length_mod4(&ab);
+    print(lab.value);
+}
+
+fn test_length_mod4_wraparound() {
+    // (3, 2) has total length 5, so length_mod4 should give 1.
+    let m = TwoFreeMonoid { count_a: 3, count_b: 2 };
+    let lm = length_mod4(&m);
+    print(lm.value);
+}
+
+fn main() {
+    test_div12_constants();
+    test_div12_divides();
+    test_div12_reflexive();
+    test_div12_equality();
+    test_length_mod4_identity();
+    test_length_mod4_generators();
+    test_length_mod4_multiplication();
+    test_length_mod4_wraparound();
+    print("preorder and homomorphism reference instances exercised");
+}

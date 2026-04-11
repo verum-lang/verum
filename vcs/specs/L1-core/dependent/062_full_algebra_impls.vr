@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: algebra, protocol, implement, acid-test, regression
+// @timeout: 10000
+// @description: Acid test for full protocol inheritance chains — Monoid/Group/Field/BooleanAlgebra.
+
+/// Acid test for the complete protocol inheritance chains in
+/// `core/math/examples.vr`:
+///
+///   * `TwoFreeMonoid`  implements `Magma → Semigroup → Monoid`
+///   * `Z3`             implements `Magma → Semigroup → Monoid → Group → AbelianGroup`
+///   * `F2`             implements `Ring → CommutativeRing → IntegralDomain → Field`
+///   * `Bool2`          implements `Lattice → BoundedLattice / DistributiveLattice → ComplementedLattice → BooleanAlgebra`
+///
+/// If any `protocol extends` edge or diamond resolution regresses,
+/// this file fails at build time with a clear error pointing at the
+/// broken constructor.
+
+mount core.math.examples.{
+    TwoFreeMonoid, Z3, F2, Bool2,
+    two_free_monoid_gen_a, two_free_monoid_gen_b, two_free_monoid_mul,
+    z3_zero, z3_one, z3_two, z3_add, z3_neg,
+    f2_zero, f2_one, f2_add, f2_mul, f2_neg,
+    bool2_bottom, bool2_top, bool2_join, bool2_meet, bool2_not,
+};
+
+// ========================================================================
+// 1. TwoFreeMonoid — Monoid chain
+// ========================================================================
+
+fn exercise_monoid() {
+    let a = two_free_monoid_gen_a();
+    let b = two_free_monoid_gen_b();
+    let ab = two_free_monoid_mul(&a, &b);
+
+    // Direct field access through the refined struct
+    print(ab.count_a);
+    print(ab.count_b);
+}
+
+// ========================================================================
+// 2. Z3 — AbelianGroup chain
+// ========================================================================
+
+fn exercise_abelian_group() {
+    let zero = z3_zero();
+    let one = z3_one();
+    let two = z3_two();
+    let sum = z3_add(&one, &two);
+    let neg = z3_neg(&one);
+
+    print(sum.value);
+    print(neg.value);
+}
+
+// ========================================================================
+// 3. F2 — Field chain
+// ========================================================================
+
+fn exercise_field() {
+    let zero = f2_zero();
+    let one = f2_one();
+    let s = f2_add(&one, &one);
+    let p = f2_mul(&one, &one);
+    let n = f2_neg(&one);
+
+    print(s.value);
+    print(p.value);
+    print(n.value);
+}
+
+// ========================================================================
+// 4. Bool2 — BooleanAlgebra chain (diamond inheritance)
+// ========================================================================
+
+fn exercise_boolean_algebra() {
+    let bot = bool2_bottom();
+    let top = bool2_top();
+    let j = bool2_join(&bot, &top);
+    let m = bool2_meet(&bot, &top);
+    let c = bool2_not(&bot);
+
+    print(j.value);
+    print(m.value);
+    print(c.value);
+}
+
+fn main() {
+    exercise_monoid();
+    exercise_abelian_group();
+    exercise_field();
+    exercise_boolean_algebra();
+    print("full protocol inheritance chain acid test green");
+}

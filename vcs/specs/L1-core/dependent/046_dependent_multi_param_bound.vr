@@ -1,0 +1,31 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: dependent, refinement, multi-param, regression
+// @timeout: 5000
+// @description: Multi-parameter dependent refinement — two earlier params in the predicate.
+
+/// Multi-parameter dependent refinement: the third parameter `x` has
+/// a predicate `x >= lo && x <= hi` that references BOTH earlier
+/// parameters. This exercises the substitution loop in
+/// crates/verum_types/src/infer.rs at the call-site argument check —
+/// each earlier parameter's concrete argument is substituted into the
+/// predicate in order, producing `x >= 5 && x <= 10` for the call
+/// `between(5, 10, 7)`.
+///
+/// Regression guard: if the substitution loop is ever weakened to
+/// handle only the immediately-previous parameter instead of all
+/// earlier ones, this test catches it.
+
+fn between(lo: Int, hi: Int, x: Int{>= lo, <= hi}) -> Int {
+    x
+}
+
+fn main() {
+    let a = between(0, 100, 50);
+    let b = between(5, 10, 7);
+    let c = between(-5, 5, 0);
+    print(a);
+    print(b);
+    print(c);
+}

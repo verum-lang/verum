@@ -14,3 +14,25 @@ rustflags = ["-C", "link-arg=/libpath:llvm/install/lib"]
 # Static CRT for the verum binary only (proc-macros are DLLs and need dynamic CRT).
 # Set via RUSTFLAGS or profile override; cargo config applies to all crate types.
 # Use: RUSTFLAGS="-C target-feature=+crt-static" cargo build --release -p verum_cli
+
+# ============================================================================
+# Test runner environment: use a larger Rust stack.
+#
+# Verum compiler phases (type inference, semantic analysis, module
+# resolution, stdlib bootstrap) perform deep recursive descent over the
+# AST and type graph. On stdlib-bearing sources the default 8 MB Rust
+# test thread stack overflows — even on a trivial `fn main() { }` —
+# because stdlib loading walks hundreds of recursively-nested types.
+#
+# `RUST_MIN_STACK=16777216` (16 MB) is the minimum that reliably runs
+# the full integration test suite (`cargo test -p verum_compiler`).
+# Without this, tests crash with `fatal runtime error: stack overflow`
+# inside `phase_type_check` / `load_stdlib_modules` before any user
+# code is even evaluated.
+#
+# This is a pre-existing characteristic of the compiler's recursive
+# design, not a regression. A longer-term fix is to convert the hot
+# recursive paths to explicit work-queue / stack-machine form so the
+# default stack suffices, but that is a substantial refactor.
+[env]
+RUST_MIN_STACK = "16777216"

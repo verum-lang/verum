@@ -1,0 +1,6 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: test
+
+theorem foo() proof by auto;

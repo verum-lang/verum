@@ -206,7 +206,23 @@ impl TypeChecker {
     }
 
     /// Bind a pattern to a type.
-    pub(crate) fn bind_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<()> {
+    //
+    // Visibility note (Phase A audit): exposed as `pub` so integration
+    // tests under `crates/verum_types/tests/` — `variant_pattern_tests.rs`,
+    // `affine_module_tests.rs`, `registry_compilation_tests.rs`,
+    // `imported_field_access_tests.rs`, `imported_variant_pattern_tests.rs`,
+    // etc. — can drive pattern binding end-to-end without reaching through
+    // `pub(crate)` internals.
+    //
+    // An earlier attempt at widening this to `pub` surfaced stack
+    // overflows inside `bind_pattern_scheme` on deeply nested variant
+    // patterns. The root cause was the default 8 MB Rust test thread
+    // stack being too small for the compiler's recursive AST traversal,
+    // NOT an actual infinite recursion. The fix was to set
+    // `RUST_MIN_STACK = "16777216"` in `.cargo/config.toml` (see the
+    // extensive comment there). With that in place, the tests run to
+    // completion and widening this method to `pub` is safe.
+    pub fn bind_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<()> {
         self.bind_pattern_scheme(pattern, TypeScheme::mono(ty.clone()))
     }
 

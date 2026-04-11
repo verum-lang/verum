@@ -1,0 +1,21 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: dependent, meta, sized-array, regression
+// @timeout: 5000
+// @description: Meta parameter N used as sized-array dimension — type-level value.
+
+/// Meta parameters as type-level values: `N: meta Int` is a compile-time
+/// integer used directly in type positions (sized array length here).
+/// This realises the dependent pattern `(N: Nat) → Int → Vec<Int, N>`
+/// with full type-level evaluation.
+
+fn fill<N: meta Int>(v: Int) -> [Int; N] {
+    [v; N]
+}
+
+fn main() {
+    // N is inferred from the annotated return type at the call site.
+    let v: [Int; 5] = fill(42);
+    print(v[0]);
+}

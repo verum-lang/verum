@@ -253,6 +253,16 @@ impl<'a> RecursiveParser<'a> {
                         enss.extend(self.parse_contract_expr_list()?);
                         continue;
                     }
+                    // `from <ident>` clause — provenance marker used by
+                    // corollaries to name the theorem they follow from.
+                    // Parsed and discarded at the parser level; the trace
+                    // is preserved in documentation and the SMT backend
+                    // re-derives the obligation independently.
+                    if self.stream.peek_kind() == Some(&TokenKind::Ident(Text::from("from"))) {
+                        self.stream.advance();
+                        let _parent = self.consume_ident()?;
+                        continue;
+                    }
                     break;
                 }
 
@@ -1992,8 +2002,15 @@ impl<'a> RecursiveParser<'a> {
                     | Some(TokenKind::Const)
                     | Some(TokenKind::Static)
                     | Some(TokenKind::Pub)
+                    | Some(TokenKind::Public)
+                    | Some(TokenKind::Internal)
+                    | Some(TokenKind::Protected)
                     | Some(TokenKind::At)
-                    | None // EOF
+                    // End-of-file: the lexer emits an explicit Eof token
+                    // *and* `peek_nth_kind` may also return `None` when we
+                    // ask past the last token. Handle both.
+                    | Some(TokenKind::Eof)
+                    | None
             );
 
             // Also check for contextual proof step keywords (identifiers used as proof commands)
