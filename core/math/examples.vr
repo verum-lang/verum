@@ -35,7 +35,7 @@ mount core.math.simplicial.{
 mount core.math.infinity_category.{
     walking_arrow_dim, one_object_category_dim, identity_functor_handle,
 };
-mount core.math.operad.{Operad};
+mount core.math.operad.{Operad, AssociativeOperad, CommutativeOperad};
 mount core.math.category.{
     Category, Functor, Endofunctor, FaithfulFunctor, FullFunctor, FullyFaithfulFunctor,
     NaturalTransformation, NaturalIsomorphism,
@@ -107,6 +107,28 @@ implement Operad for TerminalOperad {
 /// Smart constructor for `TerminalOperad`.
 public fn terminal_operad() -> TerminalOperad {
     TerminalOperad { marker: 0 }
+}
+
+// TerminalOperad is trivially associative and commutative: since
+// there is exactly one operation of every arity, any two parenthe-
+// sations and any permutation collapse to the same operation.
+// These blocks close the Operad → AssociativeOperad →
+// CommutativeOperad chain at the concrete-instance level.
+
+implement AssociativeOperad for TerminalOperad {
+    fn binary_op(&self) -> Int {
+        0
+    }
+
+    fn associative_law() -> Bool {
+        true
+    }
+}
+
+implement CommutativeOperad for TerminalOperad {
+    fn commutative_law() -> Bool {
+        true
+    }
 }
 
 // =============================================================================
