@@ -35,7 +35,9 @@ mount core.math.simplicial.{
 };
 mount core.math.infinity_category.{
     walking_arrow_dim, one_object_category_dim, identity_functor_handle,
+    QuasiCategory, InfinityCategory, InfinityFunctor,
 };
+mount core.math.simplicial.{Horn};
 mount core.math.infinity_topos.{
     Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
     InfSubobjectClassifier,
@@ -1680,6 +1682,52 @@ public fn point_simplicial_set() -> PointSimplicialSet {
 /// Smart constructor for the point nerve.
 public fn point_nerve() -> PointNerve {
     PointNerve { marker: 0 }
+}
+
+// A KanComplex fills *all* horns, including inner ones, so the
+// PointSimplicialSet is trivially a quasi-category — hence an
+// ∞-category. Closes the `SimplicialSet → QuasiCategory → ∞-Category`
+// chain at the concrete-instance level.
+
+implement QuasiCategory for PointSimplicialSet {
+    fn fill_inner_horn(h: &Horn) -> Simplex {
+        Simplex { dim: 0, vertices: [0] }
+    }
+}
+
+implement InfinityCategory for PointSimplicialSet {}
+
+// =============================================================================
+// 2.31. IdentityInfinityFunctor — concrete `InfinityFunctor` on PointSimplicialSet
+// =============================================================================
+
+/// The **identity ∞-functor** on `PointSimplicialSet`: sends every
+/// n-simplex to itself, preserves faces and degeneracies trivially.
+/// Concrete acid test for the `InfinityFunctor<C, D>` protocol with
+/// two generic parameters — and by composition this also gives a
+/// concrete `Endofunctor` in the ∞-categorical sense on a fully
+/// instantiated ∞-category.
+public type IdentityInfinityFunctor is {
+    marker: Int,
+};
+
+implement InfinityFunctor<PointSimplicialSet, PointSimplicialSet> for IdentityInfinityFunctor {
+    fn map_simplex(s: &Simplex) -> Simplex {
+        Simplex { dim: s.dim, vertices: s.vertices.clone() }
+    }
+
+    fn preserves_faces(s: &Simplex, i: Int{>= 0}) -> Bool {
+        true
+    }
+
+    fn preserves_degeneracies(s: &Simplex, i: Int{>= 0}) -> Bool {
+        true
+    }
+}
+
+/// Smart constructor for the identity ∞-functor.
+public fn identity_infinity_functor() -> IdentityInfinityFunctor {
+    IdentityInfinityFunctor { marker: 0 }
 }
 
 // =============================================================================
