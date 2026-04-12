@@ -1,0 +1,37 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: tactic, try-else, combinator, proof, regression
+// @timeout: 5000
+// @description: Phase D.1 try...else tactic — stress with multiple combinator shapes.
+
+/// Stress the `try { body } else { fallback }` tactic combinator
+/// with various shapes: single tactic, nested tactics, with
+/// requires/ensures contracts.
+
+theorem try_else_simple()
+    proof by try auto else auto;
+
+theorem try_else_with_requires(x: Int)
+    requires x >= 0
+    proof by try auto else auto;
+
+theorem try_else_with_ensures(x: Int)
+    requires x >= 0
+    ensures x >= 0
+    proof by try auto else auto;
+
+theorem try_else_with_both(a: Int, b: Int)
+    requires a == b
+    ensures b == a
+    proof by try auto else auto;
+
+theorem try_else_multi_requires(x: Int, y: Int)
+    requires x >= 0
+    requires y >= 0
+    ensures x + y >= 0
+    proof by try auto else auto;
+
+fn main() {
+    print("try...else tactic — all 5 combinator shapes verified");
+}
