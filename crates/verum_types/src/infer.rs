@@ -3078,6 +3078,15 @@ impl TypeChecker {
             self.check_item(item)?;
         }
 
+        // Phase 2.5: Solve universe constraints accumulated during
+        // type checking (Phase A.2). Any `Type(N)` usage or explicit
+        // universe polymorphism constraints are resolved here. Errors
+        // are logged but don't fail the whole pass — the individual
+        // dependent-type checks will report them at the source location.
+        if let Err(e) = self.ctx.solve_universe_constraints() {
+            tracing::debug!("Universe constraint solve produced diagnostics: {}", e);
+        }
+
         // Phase 3: Verify transitive negative context constraints
         // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
         self.verify_all_negative_contexts()

@@ -9511,6 +9511,23 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Compile AST module to VBC module
     fn compile_ast_to_vbc(&self, module: &Module) -> Result<std::sync::Arc<verum_vbc::module::VbcModule>> {
+        // Phase 4.5: Proof erasure — strip all proof-level items (theorem,
+        // lemma, corollary, axiom, tactic) before VBC codegen. This formally
+        // enforces the VBC-first architecture invariant that runtime carries
+        // zero proof-term overhead. The VBC codegen itself has a defensive
+        // skip for the same item kinds, but doing it upstream keeps the
+        // module in a canonical runtime-only form.
+        let (erased_module, erasure_stats) = crate::phases::proof_erasure::erase_proofs_from_module(
+            module.clone(),
+        );
+        if erasure_stats.total_erased() > 0 {
+            tracing::debug!(
+                "Proof erasure: {} proof items stripped before VBC codegen",
+                erasure_stats.total_erased()
+            );
+        }
+        let module = &erased_module;
+
         // Get profile from session and configure VBC codegen accordingly
         let profile = self.session.options().profile;
         let config = CodegenConfig {
