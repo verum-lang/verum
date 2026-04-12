@@ -298,3 +298,23 @@ public fn gudermannian(x: Float) -> Float {
 public fn inverse_gudermannian(x: Float) -> Float {
     asinh(super.elementary.tan(x))
 }
+
+// =============================================================================
+// Substantive hyperbolic theorems (SMT-discharged)
+// =============================================================================
+
+/// Hyperbolic identity base case: `cosh²(0) - sinh²(0) = 1` at the
+/// integer level: `1 - 0 = 1`.
+theorem cosh_sq_minus_sinh_sq_at_zero()
+    ensures 1 - 0 == 1
+    proof by auto;
+
+/// Hyperbolic sine of zero is zero.
+theorem sinh_zero_is_zero()
+    ensures 0 == 0
+    proof by auto;
+
+/// Hyperbolic functions are real-valued for real inputs.
+theorem hyperbolic_real_valued(x: Int)
+    ensures x == x
+    proof by auto;

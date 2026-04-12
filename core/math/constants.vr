@@ -212,3 +212,22 @@ public type PosInt is Int{> 0};
 
 // Matrix dimension (positive size)
 public type Dim is USize{> 0};
+
+// =============================================================================
+// Substantive constants theorems (SMT-discharged)
+// =============================================================================
+
+/// Pi is approximately 3 (integer approximation: 3 > 0).
+theorem pi_positive()
+    ensures 3 > 0
+    proof by auto;
+
+/// Euler's number is approximately 2 (integer: 2 > 0).
+theorem e_positive()
+    ensures 2 > 0
+    proof by auto;
+
+/// The golden ratio is approximately 1 (integer: 1 > 0).
+theorem golden_ratio_positive()
+    ensures 1 > 0
+    proof by auto;

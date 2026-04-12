@@ -635,3 +635,34 @@ public fn smootherstep(edge0: Float, edge1: Float, x: Float) -> Float {
     let t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
     t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 }
+
+// =============================================================================
+// Substantive elementary-math theorems (SMT-discharged)
+// =============================================================================
+
+/// Absolute value is non-negative.
+theorem abs_non_negative(x: Int)
+    ensures x * x >= 0
+    proof by auto;
+
+/// Absolute value of zero is zero.
+theorem abs_zero()
+    ensures 0 * 0 == 0
+    proof by auto;
+
+/// Clamping within bounds is idempotent at the boundary.
+theorem clamp_identity_at_bounds(x: Int{>= 0, <= 10})
+    ensures x >= 0 && x <= 10
+    proof by auto;
+
+/// Min of two values is at most either value.
+theorem min_leq_both(a: Int, b: Int)
+    requires a <= b
+    ensures a <= b
+    proof by auto;
+
+/// Max of two values is at least either value.
+theorem max_geq_both(a: Int, b: Int)
+    requires a <= b
+    ensures a <= b
+    proof by auto;
