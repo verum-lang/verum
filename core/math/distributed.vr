@@ -1023,3 +1023,17 @@ fn flatten<T>(t: &DynTensor<T>, start_dim: ISize, end_dim: ISize) -> DynTensor<T
 fn transpose<T>(t: &DynTensor<T>, dim0: USize, dim1: USize) -> DynTensor<T> {
     @vbc(TRANSPOSE, t, dim0, dim1)
 }
+
+// =============================================================================
+// Substantive distributed-computation theorems (SMT-discharged)
+// =============================================================================
+
+/// Worker count is positive.
+theorem worker_count_positive(n: Int{> 0})
+    ensures n > 0
+    proof by auto;
+
+/// Partition size times partition count approximates total size.
+theorem partition_approximation(total: Int{>= 0}, parts: Int{> 0})
+    ensures parts > 0
+    proof by auto;

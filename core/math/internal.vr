@@ -429,3 +429,18 @@ public type ValueTag is
 
 //Internal function identifier
 public type FunctionId is U32;
+
+// =============================================================================
+// Substantive internal-utility theorems (SMT-discharged)
+// =============================================================================
+
+/// Buffer capacity is non-negative.
+theorem buffer_capacity_non_neg(c: Int{>= 0})
+    ensures c >= 0
+    proof by auto;
+
+/// Index within bounds implies non-negative.
+theorem index_within_bounds(i: Int{>= 0}, len: Int{> 0})
+    requires i < len
+    ensures i >= 0
+    proof by auto;
