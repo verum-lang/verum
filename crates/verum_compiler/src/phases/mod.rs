@@ -57,6 +57,7 @@ pub mod meta_registry_phase;
 pub mod mir_lowering;
 pub mod optimization;
 pub mod phase0_stdlib;
+pub mod proof_erasure;
 pub mod proof_verification;
 pub mod semantic_analysis;
 pub mod send_sync_validation;
