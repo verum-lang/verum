@@ -37578,9 +37578,11 @@ impl TypeChecker {
                             ..
                         } = field_ty
                         {
-                            // Check argument count
-                            // Allow ±1 tolerance for self-param counting
-                            if params.len().abs_diff(args.len()) > 1 {
+                            // Check argument count — must match exactly.
+                            // Record-field functions have NO implicit self
+                            // parameter (unlike inherent methods), so the
+                            // arity check here must be strict.
+                            if params.len() != args.len() {
                                 return Err(TypeError::WrongArgCount {
                                     method: method.name.as_str().to_text(),
                                     expected: params.len(),
