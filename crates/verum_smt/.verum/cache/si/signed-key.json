@@ -2,10 +2,10 @@
   "key": "signed-key",
   "result": "Proved",
   "metadata": {
-    "cached_at": 1774659551,
+    "cached_at": 1776031292,
     "verum_version": "0.4.0",
-    "solver_version": "4.15.4.0",
-    "signature": "8d59fca42827d85910b6a866fe51af864dfa19937e34bc9869d49d8f0a0414ca26bcbf9f5dd36af3070165c3bff9f79f44cadcadb7e9c0111524107360977507",
+    "solver_version": "4.16.0.0",
+    "signature": "7eee1621f18b58ccfedb9c20d1bde026c460bdee3c606b304b3dd14c756165f5344ceb4c2590bf98f6281fc89dcab52cffb3e082b5d2fdac67d5739211ea720f",
     "original_time_ms": 500
   }
 }

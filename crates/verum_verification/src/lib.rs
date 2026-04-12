@@ -74,6 +74,7 @@ pub mod cbgr_elimination;
 pub mod context;
 pub mod contract;
 pub mod cost;
+pub mod dependent_verification;
 pub mod hoare_logic;
 pub mod integration;
 pub mod level;

@@ -1098,6 +1098,12 @@ impl Spanned for Variant {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum VariantData {
     /// Tuple variant: Some(T)
+    ///
+    /// Also represents HIT path-constructors at the AST level — the
+    /// parser accepts the `Foo(args) = from..to` syntax and stores
+    /// the args as the tuple payload. The path-endpoint metadata
+    /// is captured in a separate `PathConstructor` record attached
+    /// to the containing type declaration (see verum_types::ty).
     Tuple(List<Type>),
     /// Record variant: Error { code: Int, message: Text }
     Record(List<RecordField>),
