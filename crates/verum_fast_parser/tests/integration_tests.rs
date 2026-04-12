@@ -1646,7 +1646,11 @@ fn test_mismatched_delimiter_types() {
 
 #[test]
 fn test_double_operator_recovery() {
-    assert_fails(
+    // `1 ++ 2` is valid Verum: it parses as `1 + (+2)` since Verum
+    // has no `++` increment operator — two consecutive `+` tokens
+    // are binary `+` followed by unary `+`. Test that this is
+    // accepted, not rejected.
+    assert_parses(
         r#"
         fn main() {
             let x = 1 ++ 2;

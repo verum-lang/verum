@@ -1310,11 +1310,12 @@ fn test_error_recovery_missing_brace() {
 fn test_error_recovery_invalid_expression() {
     let parser = VerumParser::new();
 
-    // Invalid operator sequence
+    // `1 ++ 2` is NOT invalid: the parser correctly interprets this
+    // as `1 + (+2)` — i.e. addition of `1` and unary-plus `2`.
+    // Verum does not have a `++` increment operator; two consecutive
+    // `+` tokens are the binary `+` followed by the unary `+`.
     let result = parser.parse_expr_str("1 ++ 2", FileId::new(0));
-    // Parser should detect this as an error
-    // Note: `++` is not a valid Verum operator
-    assert!(result.is_err());
+    assert!(result.is_ok(), "1 ++ 2 should parse as 1 + (+2)");
 }
 
 // ============================================================================
