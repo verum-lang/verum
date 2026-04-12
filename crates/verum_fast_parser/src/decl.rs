@@ -3072,7 +3072,7 @@ impl<'a> RecursiveParser<'a> {
         // Parse variant data (tuple, record, or discriminant)
         let data;
 
-        // Tuple variant: Some(T)
+        // Tuple variant: Some(T), or HIT path constructor: Seg() = Zero..One
         if self.stream.check(&TokenKind::LParen) {
             self.stream.advance();
             let types = if self.stream.check(&TokenKind::RParen) {
@@ -3081,7 +3081,49 @@ impl<'a> RecursiveParser<'a> {
                 self.comma_separated(|p| p.parse_type())?
             };
             self.stream.expect(TokenKind::RParen)?;
-            data = Maybe::Some(VariantData::Tuple(types.into_iter().collect()));
+
+            // HIT path constructor: `Foo(args) = from..to`
+            //
+            // The parser accepts the path-endpoint syntax by consuming
+            // the tokens and producing a regular Tuple variant. The
+            // path-endpoint metadata (from, to) is currently dropped
+            // at the AST level — it's recoverable from the original
+            // source via spans and will be attached to the type
+            // declaration when HIT-aware type checking is activated
+            // in a future Phase B extension.
+            if self.stream.check(&TokenKind::Eq) {
+                let cp = self.stream.position();
+                self.stream.advance(); // consume `=`
+                // The expression parser treats `a..b` as a range
+                // expression. We catch that shape (Range with both
+                // endpoints) and treat it as a HIT path constructor.
+                if let Ok(expr) = self.parse_expr_no_struct() {
+                    let is_hit_path = matches!(
+                        &expr.kind,
+                        verum_ast::ExprKind::Range {
+                            start: verum_common::Maybe::Some(_),
+                            end: verum_common::Maybe::Some(_),
+                            ..
+                        }
+                    );
+                    if is_hit_path {
+                        // HIT path-constructor recognised. Data stored as
+                        // Tuple of the input types; endpoint metadata is
+                        // preserved in the source text and will be re-used
+                        // when HIT-aware type checking is activated.
+                        data = Maybe::Some(VariantData::Tuple(types.into_iter().collect()));
+                    } else {
+                        // Not a path constructor — restore and treat as tuple.
+                        self.stream.reset_to(cp);
+                        data = Maybe::Some(VariantData::Tuple(types.into_iter().collect()));
+                    }
+                } else {
+                    self.stream.reset_to(cp);
+                    data = Maybe::Some(VariantData::Tuple(types.into_iter().collect()));
+                }
+            } else {
+                data = Maybe::Some(VariantData::Tuple(types.into_iter().collect()));
+            }
         }
         // Record variant: Error { code: Int }
         else if self.stream.check(&TokenKind::LBrace) {

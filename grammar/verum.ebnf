@@ -488,8 +488,17 @@ sigma_type = sigma_bindings ;
 variant_list    = [ '|' ] , variant , { '|' , variant } ;
 (* Variants can have attributes for serialization, defaults, deprecation *)
 (* Example: @default Ok | @deprecated Legacy | Error(Text) *)
-variant         = { attribute } , identifier , [ variant_data ] ;
+(*                                                                        *)
+(* HIT path constructors (higher inductive types):                        *)
+(* A variant with `= endpoint_a .. endpoint_b` is a path constructor,     *)
+(* introducing a path from endpoint_a to endpoint_b at the type level.    *)
+(* Example (circle S¹):                                                   *)
+(*   type S1 is Base | Loop() = Base..Base;                               *)
+(* Example (interval):                                                    *)
+(*   type Interval is Zero | One | Seg() = Zero..One;                     *)
+variant         = { attribute } , identifier , [ variant_data ] , [ path_endpoints ] ;
 variant_data    = '{' , field_list , '}' | '(' , type_list , ')' ;
+path_endpoints  = '=' , expression , '..' , expression ;
 
 field_list      = [ field , { ',' , field } , [ ',' ] ] ;
 (* Fields can have attributes for serialization, validation, etc. *)
