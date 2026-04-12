@@ -4442,20 +4442,18 @@ impl<'a> RecursiveParser<'a> {
         };
 
         // Type annotation for const declarations:
-        // At item level (brace_depth == 0): `const FOO: Int = 42;` (type required per grammar)
-        // Inside function bodies (brace_depth > 0): `const FOO = expr;` (type inferred)
+        // `const FOO: Int = 42;` — explicit type
+        // `const FOO = 42;`      — inferred type (type-checker resolves)
+        // Both forms are accepted at any scope level. The type-checker
+        // infers the type from the initialiser when the annotation is
+        // omitted — this matches the test expectation
+        // `test_const_inferred_type` and the general Verum philosophy
+        // of minimal ceremony for simple declarations.
         let ty = if self.stream.check(&TokenKind::Colon) {
             self.stream.advance(); // consume ':'
             self.parse_type()?
-        } else if self.brace_depth > 0 {
-            // Inside a block/function body - allow inferred type
-            verum_ast::ty::Type::unknown(self.stream.current_span())
         } else {
-            // E065: Item-level const requires explicit type annotation
-            return Err(ParseError::invalid_syntax(
-                "const declaration requires a type annotation (e.g., `const X: Int = 5;`)",
-                self.stream.current_span(),
-            ));
+            verum_ast::ty::Type::unknown(self.stream.current_span())
         };
 
         // E066: Missing const value - check if ';' instead of '='
