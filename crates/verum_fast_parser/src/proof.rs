@@ -165,8 +165,10 @@ impl<'a> RecursiveParser<'a> {
             ));
         }
 
-        // Theorem name
-        let name = self.consume_ident()?;
+        // Theorem name — accept contextual keywords (e.g., `trivial`)
+        // as theorem identifiers so that `theorem trivial() proof by
+        // trivial;` is valid.
+        let name = self.consume_ident_or_any_keyword()?;
         let name_span = self.stream.current_span();
 
         // Optional generic parameters: <T, U>
