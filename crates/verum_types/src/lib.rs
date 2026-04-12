@@ -138,6 +138,7 @@ pub mod context;
 pub mod context_check;
 pub mod context_resolution; // Context group resolution for type checking
 pub mod contract_integration; // Phase 3a → Phase 4 contract integration
+pub mod universe_solver; // Phase A.2: Universe constraint solving
 pub mod contracts; // Precondition and postcondition validation
 pub mod control_flow; // Flow-sensitive analysis for @must_handle
 pub mod dependent_helpers; // Helper methods for dependent type checking

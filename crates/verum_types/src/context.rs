@@ -1171,6 +1171,11 @@ impl UniverseContext {
         ));
         Ok(())
     }
+
+    /// Get the current substitution (solved variable bindings).
+    pub fn substitution(&self) -> &UniverseSubstitution {
+        &self.substitution
+    }
 }
 
 impl Default for UniverseContext {
