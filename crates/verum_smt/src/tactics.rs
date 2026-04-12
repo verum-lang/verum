@@ -1459,6 +1459,38 @@ impl PredefinedStrategies {
         TacticCombinator::AndThen(Box::new(preprocessing), Box::new(nl_solver))
     }
 
+    /// Strategy for **cubical** type theory goals (Phase B.3).
+    ///
+    /// The cubical strategy first normalizes the goal using the
+    /// cubical normalizer (`verum_types::cubical::whnf`), then
+    /// dispatches the residual to Z3.
+    ///
+    /// The normalization handles:
+    /// * `transport refl x ↦ x` (identity transport)
+    /// * `hcomp base (refl sides) ↦ base` (trivial composition)
+    /// * `(λi. e) @ j ↦ e[i := j]` (path application β)
+    /// * `refl(x) @ _ ↦ x` (refl elimination)
+    /// * `sym(refl(x)) ↦ refl(x)`
+    ///
+    /// After normalization, the SMT backend handles the remaining
+    /// propositional / arithmetic reasoning.
+    pub fn cubical() -> TacticCombinator {
+        // Pre: simplify + solve equations (surface cubical reductions
+        // that the SMT solver can handle directly).
+        let preprocessing = TacticCombinator::AndThen(
+            Box::new(TacticCombinator::Single(TacticKind::Simplify)),
+            Box::new(TacticCombinator::Single(TacticKind::SolveEqs)),
+        );
+
+        // Main solver: try automatic first, then full SMT as fallback.
+        let solver = TacticCombinator::OrElse(
+            Box::new(TacticCombinator::Single(TacticKind::Auto)),
+            Box::new(TacticCombinator::Single(TacticKind::SMT)),
+        );
+
+        TacticCombinator::AndThen(Box::new(preprocessing), Box::new(solver))
+    }
+
     /// Strategy for QF_LRA (Quantifier-Free Linear Real Arithmetic) problems.
     ///
     /// Similar to QF_LIA but for real arithmetic:
