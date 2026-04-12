@@ -1848,6 +1848,14 @@ impl<'a> RecursiveParser<'a> {
             return Err(ParseError::empty_generic_args(self.stream.make_span(start_pos)));
         } else {
             self.comma_separated(|p| {
+                // Minimum binding power for expressions inside generic args.
+                // Must be > 10 to exclude shift operators `<<` (10) and
+                // `>>` (10) which would consume the closing `>>`/`>` as
+                // a right-shift operator.  Comparison operators `<`/`>`
+                // have BP 6, arithmetic has BP ≤ 13, so BP 11 is the
+                // sweet spot: allows +, -, *, /, % but blocks << and >>.
+                const GENERIC_ARG_MIN_BP: u8 = 11;
+
                 // Check for HKT placeholder: _
                 // This represents a type constructor hole in higher-kinded types
                 // Example: Functor<F<_>> where F is a type constructor
@@ -1883,7 +1891,7 @@ impl<'a> RecursiveParser<'a> {
                     // Parse as full const expression (handles 0 + n, 2 * k, etc.)
                     // Use bp=7 to stop before `>` and `>=` operators
                     let const_start = p.stream.position();
-                    let mut expr = p.parse_expr_bp(7)?;
+                    let mut expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                     // Comparison heuristic: if `>` follows and has an RHS before another `>`,
                     // treat as comparison (e.g., Proof<3 > 0>)
                     if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)) {
@@ -1896,7 +1904,7 @@ impl<'a> RecursiveParser<'a> {
                             | Some(TokenKind::True) | Some(TokenKind::False)
                             | Some(TokenKind::Minus) | Some(TokenKind::Bang));
                         if has_rhs {
-                            let rhs = p.parse_expr_bp(7)?;
+                            let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                             if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtGt)) || p.pending_gt {
                                 let op = match cmp_tok {
                                     Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
@@ -1959,7 +1967,7 @@ impl<'a> RecursiveParser<'a> {
                             // Reset and parse as const expression
                             p.stream.reset_to(checkpoint_before_type);
                             let arith_start = p.stream.position();
-                            let mut expr = p.parse_expr_bp(7)?;
+                            let mut expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                             // Comparison heuristic for expressions inside generic args
                             if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)) {
                                 let cmp_cp = p.stream.position();
@@ -1971,7 +1979,7 @@ impl<'a> RecursiveParser<'a> {
                                     | Some(TokenKind::True) | Some(TokenKind::False)
                                     | Some(TokenKind::Minus) | Some(TokenKind::Bang));
                                 if has_rhs {
-                                    let rhs = p.parse_expr_bp(7)?;
+                                    let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                                     if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtGt)) || p.pending_gt {
                                         let op = match cmp_tok { Some(TokenKind::Gt) => verum_ast::BinOp::Gt, Some(TokenKind::GtEq) => verum_ast::BinOp::Ge, Some(TokenKind::LtEq) => verum_ast::BinOp::Le, _ => verum_ast::BinOp::Gt };
                                         let span = p.stream.make_span(arith_start);
@@ -1993,7 +2001,7 @@ impl<'a> RecursiveParser<'a> {
                                     | Some(TokenKind::True) | Some(TokenKind::False)
                                     | Some(TokenKind::Minus) | Some(TokenKind::Bang));
                                 if has_rhs {
-                                    let rhs = p.parse_expr_bp(7)?;
+                                    let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                                     if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtGt)) || p.pending_gt {
                                         // Convert type to expression and build comparison
                                         let lhs = match &ty.kind {
@@ -2048,7 +2056,7 @@ impl<'a> RecursiveParser<'a> {
                             // Parse full expression, stopping before `>` operators
                             // This handles both direct quantifiers and parenthesized expressions
                             // E.g.: Proof<(exists x: Int . x > 10)>
-                            let expr = p.parse_expr_bp(7)?;
+                            let expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                             Ok(GenericArg::Const(expr))
                         } else if can_be_const {
                             // Parse as expression with binding power 7 to stop before `>` and `>=`
@@ -2057,7 +2065,7 @@ impl<'a> RecursiveParser<'a> {
                             // - Arithmetic: Vec<N + 1>, List<T, plus(M, N)>
                             // - Function calls: List<T, len(xs)>
                             // - Negation: Array<T, -1>
-                            let expr = p.parse_expr_bp(7)?;
+                            let expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                             Ok(GenericArg::Const(expr))
                         } else {
                             Err(ParseError::invalid_syntax(
