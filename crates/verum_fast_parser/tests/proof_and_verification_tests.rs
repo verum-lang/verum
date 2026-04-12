@@ -700,11 +700,13 @@ fn test_async_nursery_block() {
 
 #[test]
 fn test_async_select_with_arms() {
+    // Grammar: select_arm = pattern '=' await_expr '=>' expr
+    // The future expression must end with `.await`.
     assert_parses(r#"
         async fn race() {
             select {
-                result = fetch_a() => process(result),
-                result = fetch_b() => process(result),
+                result = fetch_a().await => process(result),
+                result = fetch_b().await => process(result),
             }
         }
     "#);
