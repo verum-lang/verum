@@ -1454,6 +1454,49 @@ impl Default for DependentTypeBackend {
     }
 }
 
+/// The kind of dependent-type goal to verify.
+#[derive(Debug, Clone)]
+pub enum DependentGoal {
+    /// Verify a Pi type `(x: A) -> B(x)`.
+    Pi(PiType),
+    /// Verify a Sigma type `(x: A, B(x))`.
+    Sigma(SigmaType),
+    /// Verify an equality type `a =_A b`.
+    Equality(EqualityType),
+    /// Verify a Fin type `Fin(n)` — bounded naturals. The value
+    /// and bound expressions are both AST expressions that will be
+    /// translated to SMT by the backend.
+    Fin { value: Expr, bound: Expr },
+}
+
+impl DependentTypeBackend {
+    /// Unified entry point for dependent-type verification.
+    ///
+    /// Dispatches to the appropriate verifier based on the goal kind:
+    /// - `DependentGoal::Pi`       → `verify_pi_type`
+    /// - `DependentGoal::Sigma`    → `verify_sigma_type`
+    /// - `DependentGoal::Equality` → `verify_equality`
+    /// - `DependentGoal::Fin`      → `verify_fin_type`
+    ///
+    /// This is the single entry point that downstream code (e.g.,
+    /// `verum_verification`) should call for dependent-type
+    /// verification goals.
+    pub fn verify_goal_dependent(
+        &mut self,
+        goal: &DependentGoal,
+        translator: &Translator<'_>,
+    ) -> VerificationResult {
+        match goal {
+            DependentGoal::Pi(pi) => self.verify_pi_type(pi, translator),
+            DependentGoal::Sigma(sigma) => self.verify_sigma_type(sigma, translator),
+            DependentGoal::Equality(eq) => self.verify_equality(eq, translator),
+            DependentGoal::Fin { value, bound } => {
+                self.verify_fin_type(value, bound, translator)
+            }
+        }
+    }
+}
+
 // ==================== Type Dependency Graph ====================
 
 /// Graph structure for tracking type dependencies
