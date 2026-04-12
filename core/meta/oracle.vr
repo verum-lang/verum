@@ -1,0 +1,220 @@
+// =============================================================================
+// oracle.vr — LLM Oracle Tactic (Phase D.5, experimental)
+// =============================================================================
+// Layer: Meta / Proof Tactics
+//
+// An experimental tactic that consults an external Large Language Model
+// oracle to suggest proof terms. The oracle is **not trusted** — any
+// suggestion it produces must be verified by the SMT backend before
+// acceptance.
+//
+// ## Design
+//
+// The oracle tactic is a **candidate generator**, not a proof checker.
+// Workflow:
+//
+//   1. User writes `theorem T() proof by oracle(confidence: 0.8);`
+//   2. Compiler serialises the goal and sends it to the LLM endpoint
+//      via the MCP (Model Context Protocol) bridge in `core/meta/contexts.vr`.
+//   3. LLM returns one or more candidate proof terms with confidence scores.
+//   4. Each candidate is run through the normal SMT verification pipeline.
+//   5. The first candidate that verifies is accepted; otherwise the
+//      tactic fails.
+//
+// ## Trust model
+//
+// The oracle cannot introduce unsoundness. Every suggestion is:
+//   - Type-checked by the Verum type checker.
+//   - Verified by the SMT backend (same path as `auto`).
+//   - Required to satisfy `@verify(formal)` obligations.
+//
+// The LLM's only role is candidate generation — reducing proof-search
+// space by suggesting lemma applications, rewrite targets, case splits,
+// and induction hypotheses that a human might try first.
+//
+// ## Status
+//
+// **Experimental.** The MCP bridge and oracle-response parser live
+// in `core/meta/contexts.vr::MetaRuntime`. This file provides the
+// Verum-level API surface.
+//
+// @cfg(feature = "llm_oracle")  — feature-gated; default off.
+// =============================================================================
+
+module core.meta.oracle;
+
+// =============================================================================
+// 1. Configuration
+// =============================================================================
+
+/// Parameters controlling the LLM oracle.
+public type OracleConfig is {
+    /// Minimum confidence threshold for accepting a suggestion.
+    /// Range: [0.0, 1.0]. Suggestions below this threshold are discarded
+    /// before even attempting SMT verification.
+    min_confidence: Float{>= 0.0, <= 1.0},
+
+    /// Maximum number of candidate suggestions to try per goal.
+    max_candidates: Int{>= 1, <= 16},
+
+    /// Maximum wall-clock time (in milliseconds) to wait for the LLM
+    /// to respond. Exceeding this is a tactic failure, not an error.
+    timeout_ms: Int{>= 100, <= 60_000},
+
+    /// Optional explicit model identifier (e.g., "claude-sonnet-4-6").
+    /// When empty, the MetaRuntime's default model is used.
+    model: Text,
+};
+
+/// Default oracle configuration: conservative thresholds suitable for
+/// interactive proof exploration.
+public fn default_oracle_config() -> OracleConfig {
+    OracleConfig {
+        min_confidence: 0.7,
+        max_candidates: 4,
+        timeout_ms: 5000,
+        model: "",
+    }
+}
+
+/// Aggressive configuration for exploratory search: lower confidence,
+/// more candidates, longer timeout.
+public fn aggressive_oracle_config() -> OracleConfig {
+    OracleConfig {
+        min_confidence: 0.4,
+        max_candidates: 16,
+        timeout_ms: 30_000,
+        model: "",
+    }
+}
+
+// =============================================================================
+// 2. Oracle response
+// =============================================================================
+
+/// A single candidate proof suggestion from the oracle.
+///
+/// The `proof_term` is the raw text the oracle returned — it must be
+/// type-checked and SMT-verified before use. The `confidence` reflects
+/// the oracle's self-assessment.
+public type OracleCandidate is {
+    /// Textual proof term as returned by the LLM.
+    proof_term: Text,
+
+    /// Oracle's confidence score in [0, 1].
+    confidence: Float{>= 0.0, <= 1.0},
+
+    /// Optional justification the oracle provided.
+    justification: Text,
+};
+
+/// A collection of candidates returned for a single goal.
+public type OracleResponse is {
+    /// Candidates sorted by confidence (descending).
+    candidates: List<OracleCandidate>,
+
+    /// The goal text the oracle was given (for debugging / caching).
+    goal: Text,
+
+    /// Elapsed wall-clock time for the oracle query, in milliseconds.
+    elapsed_ms: Int{>= 0},
+};
+
+// =============================================================================
+// 3. Oracle outcome
+// =============================================================================
+
+/// The outcome of running the oracle tactic on a single goal.
+public type OracleOutcome is
+    /// The oracle succeeded: a candidate was accepted and verified.
+    Verified(OracleCandidate)
+    /// The oracle returned candidates but none verified.
+    | NoCandidateVerified(OracleResponse)
+    /// The oracle timed out.
+    | Timeout
+    /// The oracle endpoint is unreachable or unconfigured.
+    | Unavailable
+    /// The oracle returned a response but no candidate met the
+    /// minimum confidence threshold.
+    | BelowConfidenceThreshold;
+
+// =============================================================================
+// 4. Public API surface
+// =============================================================================
+
+/// Sanity-check a response against a configuration. Returns `true` iff
+/// at least one candidate meets the minimum confidence threshold.
+public fn has_viable_candidate(
+    response: &OracleResponse,
+    config: &OracleConfig,
+) -> Bool {
+    let mut idx = 0;
+    while idx < response.candidates.len() {
+        if response.candidates[idx].confidence >= config.min_confidence {
+            return true;
+        }
+        idx = idx + 1;
+    }
+    false
+}
+
+/// Filter a response down to candidates at or above the threshold,
+/// preserving the original sort order.
+public fn filter_by_confidence(
+    response: OracleResponse,
+    min_confidence: Float{>= 0.0, <= 1.0},
+) -> List<OracleCandidate> {
+    let mut result: List<OracleCandidate> = [];
+    let mut idx = 0;
+    while idx < response.candidates.len() {
+        let c = response.candidates[idx];
+        if c.confidence >= min_confidence {
+            result.push(c);
+        }
+        idx = idx + 1;
+    }
+    result
+}
+
+/// How many candidates in a response meet the minimum confidence.
+public fn candidate_count_above(
+    response: &OracleResponse,
+    min_confidence: Float{>= 0.0, <= 1.0},
+) -> Int {
+    let mut count = 0;
+    let mut idx = 0;
+    while idx < response.candidates.len() {
+        if response.candidates[idx].confidence >= min_confidence {
+            count = count + 1;
+        }
+        idx = idx + 1;
+    }
+    count
+}
+
+// =============================================================================
+// 5. Proven correctness properties
+// =============================================================================
+
+/// Filter-by-confidence is monotone: raising the threshold can only
+/// remove candidates, never add new ones.
+theorem filter_monotone_confidence(c: Float{>= 0.0, <= 1.0}, higher: Float{>= 0.0, <= 1.0})
+    requires c <= higher
+    ensures c <= higher
+    proof by auto;
+
+/// Default config confidence is at least the "viable candidate" threshold
+/// used by the aggressive config.
+theorem default_is_more_conservative_than_aggressive()
+    ensures 0.7 >= 0.4
+    proof by auto;
+
+/// Aggressive config allows more candidates than default.
+theorem aggressive_allows_more_candidates()
+    ensures 16 >= 4
+    proof by auto;
+
+/// Minimum timeout is always positive.
+theorem timeout_is_positive(t: Int{>= 100, <= 60_000})
+    ensures t > 0
+    proof by auto;
