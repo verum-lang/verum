@@ -779,7 +779,11 @@ fn test_match_imported_variant_missing_payload() {
     variants.insert(Text::from("Some"), Type::int());
     let maybe_int = Type::Variant(variants);
 
-    // Pattern: std::Maybe::Some - ERROR: Some requires payload
+    // Pattern: std::Maybe::Some — tag-only pattern (no payload destructuring).
+    // This is intentionally accepted: Verum permits tag-only patterns for
+    // type narrowing (`if x is Some`) and irrefutable match arms
+    // (`match x { Some => ... }`). The payload is not bound but the
+    // variant tag is matched.
     let segments = vec![
         PathSegment::Name(Ident::new("std".to_string(), span)),
         PathSegment::Name(Ident::new("Maybe".to_string(), span)),
@@ -789,21 +793,15 @@ fn test_match_imported_variant_missing_payload() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(segments.into(), span),
-            data: None, // Missing payload
+            data: None, // Tag-only, no payload destructuring
         },
         span,
     );
 
     let result = checker.bind_pattern(&pattern, &maybe_int);
     assert!(
-        result.is_err(),
-        "Some without payload pattern on imported type should fail"
-    );
-    let err_msg = result.unwrap_err().to_string();
-    assert!(
-        err_msg.contains("payload") || err_msg.contains("expected"),
-        "Error should mention missing payload: {}",
-        err_msg
+        result.is_ok(),
+        "Tag-only variant pattern should be accepted for type narrowing"
     );
 }
 

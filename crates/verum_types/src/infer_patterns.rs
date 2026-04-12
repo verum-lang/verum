@@ -938,9 +938,11 @@ impl TypeChecker {
                                 }
                             } else if !matches!(variant_payload_ty, Type::Unit) {
                                 // No payload pattern provided but variant has a non-Unit payload.
-                                // This is valid for `is` pattern tests: `x is Some` checks the tag
-                                // without destructuring the payload. Just skip binding.
-                                // In full match arms this is still permitted (irrefutable tag check).
+                                // This is intentionally permitted for tag-only checks like
+                                // `if x is Some` and `match x { Some => ... }` — the pattern
+                                // tests the tag without destructuring the payload. The type
+                                // narrowing system handles giving the correct narrowed type
+                                // in the body of the match arm.
                             }
                             Ok(())
                         }
