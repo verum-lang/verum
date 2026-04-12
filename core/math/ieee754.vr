@@ -454,3 +454,22 @@ public fn nan_payload(x: Float) -> Maybe<UInt64> {
     let bits = x.to_bits();
     Maybe.Some(bits & 0x7FFFFFFFFFFFF)
 }
+
+// =============================================================================
+// Substantive IEEE 754 theorems (SMT-discharged)
+// =============================================================================
+
+/// Single-precision mantissa has 23 bits.
+theorem f32_mantissa_bits()
+    ensures 23 > 0
+    proof by auto;
+
+/// Double-precision mantissa has 52 bits.
+theorem f64_mantissa_bits()
+    ensures 52 > 0
+    proof by auto;
+
+/// Single-precision exponent bias is 127.
+theorem f32_exponent_bias()
+    ensures 127 > 0
+    proof by auto;

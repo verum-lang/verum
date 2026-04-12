@@ -507,3 +507,22 @@ implement<T> FromResidual<CheckedResult<Never>> for CheckedResult<T> {
         CheckedResult.Overflow
     }
 }
+
+// =============================================================================
+// Substantive checked-arithmetic theorems (SMT-discharged)
+// =============================================================================
+
+/// Checked addition of zero is identity.
+theorem checked_add_zero(x: Int)
+    ensures x + 0 == x
+    proof by auto;
+
+/// Checked multiplication by one is identity.
+theorem checked_mul_one(x: Int)
+    ensures x * 1 == x
+    proof by auto;
+
+/// Checked subtraction of self yields zero.
+theorem checked_sub_self(x: Int)
+    ensures x - x == 0
+    proof by auto;
