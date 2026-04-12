@@ -1,0 +1,23 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: tactic, try-else, proof, regression
+// @timeout: 5000
+// @description: Regression spec for `try { body } else { fallback }` tactic combinator.
+
+/// The `try...else` tactic combinator: attempt the body tactic, and
+/// if it fails, execute the fallback instead. This is the Verum
+/// equivalent of Lean 4's `try ... catch ...` or Coq's `tryif`.
+
+theorem t1(x: Int)
+    requires x >= 0
+    proof by try auto else auto;
+
+theorem t2(a: Int, b: Int)
+    requires a == b
+    ensures b == a
+    proof by try auto else auto;
+
+fn main() {
+    print("try...else tactic combinator works");
+}

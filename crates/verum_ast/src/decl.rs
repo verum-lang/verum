@@ -2366,6 +2366,13 @@ pub enum TacticExpr {
     /// Try tactic, continue if fails (`try tactic`)
     Try(Heap<TacticExpr>),
 
+    /// Try-else: attempt the body tactic; if it fails, execute the
+    /// else branch instead. Syntax: `try { body } else { fallback }`
+    TryElse {
+        body: Heap<TacticExpr>,
+        fallback: Heap<TacticExpr>,
+    },
+
     /// Repeat tactic until failure (`repeat tactic`)
     Repeat(Heap<TacticExpr>),
 

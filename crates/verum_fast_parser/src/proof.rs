@@ -2326,11 +2326,19 @@ impl<'a> RecursiveParser<'a> {
                 Ok(TacticExpr::Compute)
             }
 
-            // Try tactic
+            // Try tactic: `try tactic` or `try { body } else { fallback }`
             Some(TokenKind::Try) => {
                 self.stream.advance();
                 let inner = self.parse_tactic_primary()?;
-                Ok(TacticExpr::Try(Heap::new(inner)))
+                if self.stream.consume(&TokenKind::Else).is_some() {
+                    let fallback = self.parse_tactic_primary()?;
+                    Ok(TacticExpr::TryElse {
+                        body: Heap::new(inner),
+                        fallback: Heap::new(fallback),
+                    })
+                } else {
+                    Ok(TacticExpr::Try(Heap::new(inner)))
+                }
             }
 
             // Repeat tactic

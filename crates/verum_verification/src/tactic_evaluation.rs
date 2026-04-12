@@ -1389,6 +1389,12 @@ impl TacticEvaluator {
             TacticExpr::Seq(tactics) => self.apply_sequence(tactics),
             TacticExpr::Alt(tactics) => self.apply_alternative(tactics),
             TacticExpr::Try(inner) => self.apply_try(inner),
+            TacticExpr::TryElse { body, fallback } => {
+                match self.apply_try(body) {
+                    ok @ Ok(_) => ok,
+                    Err(_) => self.apply_tactic(fallback),
+                }
+            }
             TacticExpr::Repeat(inner) => self.apply_repeat(inner),
             TacticExpr::AllGoals(inner) => self.apply_all_goals(inner),
             TacticExpr::Focus(inner) => self.apply_focus(inner),
@@ -5073,6 +5079,14 @@ impl TacticEvaluator {
             TacticExpr::Try(inner) => {
                 let new_inner = self.instantiate_tactic_expr(inner, bindings)?;
                 Ok(TacticExpr::Try(Heap::new(new_inner)))
+            }
+            TacticExpr::TryElse { body, fallback } => {
+                let new_body = self.instantiate_tactic_expr(body, bindings)?;
+                let new_fallback = self.instantiate_tactic_expr(fallback, bindings)?;
+                Ok(TacticExpr::TryElse {
+                    body: Heap::new(new_body),
+                    fallback: Heap::new(new_fallback),
+                })
             }
             TacticExpr::Repeat(inner) => {
                 let new_inner = self.instantiate_tactic_expr(inner, bindings)?;

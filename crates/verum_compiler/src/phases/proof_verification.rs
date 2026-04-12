@@ -246,6 +246,13 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
 
         TacticExpr::Try(inner) => ProofTactic::Try(Heap::new(convert_tactic(inner))),
 
+        TacticExpr::TryElse { body, fallback } => {
+            ProofTactic::Alt(
+                Heap::new(convert_tactic(body)),
+                Heap::new(convert_tactic(fallback)),
+            )
+        }
+
         TacticExpr::Repeat(inner) => ProofTactic::Repeat(Heap::new(convert_tactic(inner))),
 
         TacticExpr::Seq(tactics) => {

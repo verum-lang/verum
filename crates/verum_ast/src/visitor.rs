@@ -2267,6 +2267,11 @@ pub fn walk_tactic_expr<V: Visitor>(visitor: &mut V, tactic_expr: &TacticExpr) {
             visit_child!(visitor, inner.as_ref(), TacticExpr);
         }
 
+        TacticExpr::TryElse { body, fallback } => {
+            visit_child!(visitor, body.as_ref(), TacticExpr);
+            visit_child!(visitor, fallback.as_ref(), TacticExpr);
+        }
+
         TacticExpr::Seq(tactics) | TacticExpr::Alt(tactics) => {
             for tactic in tactics {
                 visit_child!(visitor, tactic, TacticExpr);

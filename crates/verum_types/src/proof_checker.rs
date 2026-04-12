@@ -670,6 +670,11 @@ impl ProofChecker {
             // Combinators
             TacticExpr::Try(inner) => self.check_tactic(inner, goal, ctx, type_checker, span),
 
+            TacticExpr::TryElse { body, fallback } => {
+                self.check_tactic(body, goal, ctx, type_checker, span)
+                    .or_else(|_| self.check_tactic(fallback, goal, ctx, type_checker, span))
+            }
+
             TacticExpr::Repeat(inner) => self.check_tactic(inner, goal, ctx, type_checker, span),
 
             TacticExpr::Seq(tactics) => {
