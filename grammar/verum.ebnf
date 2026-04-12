@@ -985,6 +985,7 @@ type_expr       = simple_type , [ type_refinement ] ;
 simple_type     = primitive_type
                 | never_type
                 | unknown_type
+                | path_type_expr
                 | path_type
                 | tuple_type
                 | record_type
@@ -1029,7 +1030,15 @@ capability_name = 'Read' | 'Write' | 'ReadWrite' | 'Admin' | 'Transaction'
                 | identifier ;  (* Custom capabilities *)
 capability_or_expr = capability_name , '|' , capability_name , { '|' , capability_name } ;
 
-primitive_type  = 'Int' | 'Float' | 'Bool' | 'Char' | 'Text' | '()' ;
+primitive_type  = 'Int' | 'Float' | 'Bool' | 'Char' | 'Text' | '()' | 'Interval' ;
+
+(* Cubical type theory: Path types and interval endpoints.             *)
+(* Path<A>(a, b) represents a path from a to b in type A.             *)
+(* The interval I has two endpoints i0 and i1.                         *)
+(* transport p x moves x along a path p in the type family.            *)
+(* hcomp performs homogeneous composition of cubes.                     *)
+path_type_expr  = 'Path' , type_args , '(' , expression , ',' , expression , ')' ;
+interval_endpoint = 'i0' | 'i1' ;
 
 (* Never type: ! (bottom type) *)
 (* The type of expressions that never return (diverging expressions).           *)
