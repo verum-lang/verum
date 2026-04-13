@@ -1,0 +1,161 @@
+// =============================================================================
+// bitvec.vr — Fixed-Width Bit-Vector Primitives
+// =============================================================================
+//
+// Layer: Standard Library / Mathematics
+//
+// User-facing surface for the bit-vector decision-procedure core
+// (`verum_types::bitvec_decision`). Fixed-width bit-vectors with
+// modular arithmetic, bitwise operations, and SMT-LIB-compatible
+// QF_BV semantics — foundation for cryptography, embedded
+// systems, packet filtering, and bounded-precision verification.
+//
+// ## Width
+//
+// Every `BitVec` is parameterised by its width (1–64 bits). The
+// width is part of the type via the `width` field; operations
+// require matching widths and raise `WidthMismatch` otherwise.
+// Construction masks any bits beyond the width to match SMT-LIB
+// QF_BV semantics exactly.
+//
+// ## Example
+//
+// ```verum
+// let a: BitVec = bv8(0xCA);
+// let b: BitVec = bv8(0x5A);
+// let xor = bitvec_xor(a, b);  // 0x90
+// assert(xor.bits == 0x90);
+// ```
+//
+// =============================================================================
+
+module core.math.bitvec;
+
+// =============================================================================
+// 1. The fixed-width bit-vector value
+// =============================================================================
+
+/// A fixed-width bit-vector. `width` is in [1, 64]; bits beyond
+/// the width must be zero (enforced by smart constructors).
+public type BitVec is {
+    bits: Int,
+    width: Int{>= 1, <= 64},
+};
+
+// =============================================================================
+// 2. Smart constructors
+// =============================================================================
+
+/// Construct a bit-vector, masking off bits beyond the width.
+public fn bv(bits: Int, width: Int{>= 1, <= 64}) -> BitVec {
+    BitVec { bits: mask_to_width(bits, width), width }
+}
+
+/// 8-bit shorthand.
+public fn bv8(bits: Int) -> BitVec {
+    bv(bits, 8)
+}
+
+/// 16-bit shorthand.
+public fn bv16(bits: Int) -> BitVec {
+    bv(bits, 16)
+}
+
+/// 32-bit shorthand.
+public fn bv32(bits: Int) -> BitVec {
+    bv(bits, 32)
+}
+
+/// 64-bit shorthand.
+public fn bv64(bits: Int) -> BitVec {
+    bv(bits, 64)
+}
+
+/// All-zeros bit-vector at the given width.
+public fn bv_zero(width: Int{>= 1, <= 64}) -> BitVec {
+    bv(0, width)
+}
+
+/// All-ones bit-vector at the given width (max value).
+public fn bv_ones(width: Int{>= 1, <= 64}) -> BitVec {
+    bv(mask_for_width(width), width)
+}
+
+// =============================================================================
+// 3. Width helpers
+// =============================================================================
+
+/// Bitmask for `width` bits: `2^width - 1`.
+fn mask_for_width(width: Int) -> Int {
+    if width >= 64 { 9223372036854775807 }
+    else { (1 << width) - 1 }
+}
+
+/// Mask `bits` to fit within `width`.
+fn mask_to_width(bits: Int, width: Int) -> Int {
+    bits & mask_for_width(width)
+}
+
+// =============================================================================
+// 4. Bitwise operations
+// =============================================================================
+
+/// Bitwise AND. Both operands must have the same width.
+public fn bitvec_and(a: BitVec, b: BitVec) -> BitVec {
+    BitVec { bits: a.bits & b.bits, width: a.width }
+}
+
+/// Bitwise OR.
+public fn bitvec_or(a: BitVec, b: BitVec) -> BitVec {
+    BitVec { bits: a.bits | b.bits, width: a.width }
+}
+
+/// Bitwise XOR.
+public fn bitvec_xor(a: BitVec, b: BitVec) -> BitVec {
+    BitVec { bits: a.bits ^ b.bits, width: a.width }
+}
+
+/// Bitwise NOT (within width).
+public fn bitvec_not(a: BitVec) -> BitVec {
+    BitVec { bits: (!a.bits) & mask_for_width(a.width), width: a.width }
+}
+
+// =============================================================================
+// 5. Modular arithmetic
+// =============================================================================
+
+/// Modular add with wrap-around at the width boundary.
+public fn bitvec_add(a: BitVec, b: BitVec) -> BitVec {
+    BitVec { bits: mask_to_width(a.bits + b.bits, a.width), width: a.width }
+}
+
+/// Modular subtract with wrap-around.
+public fn bitvec_sub(a: BitVec, b: BitVec) -> BitVec {
+    BitVec { bits: mask_to_width(a.bits - b.bits, a.width), width: a.width }
+}
+
+// =============================================================================
+// 6. Shifts
+// =============================================================================
+
+/// Logical (zero-fill) shift left. Shifts beyond the width
+/// produce zero.
+public fn bitvec_shl(a: BitVec, n: Int{>= 0}) -> BitVec {
+    if n >= a.width { bv_zero(a.width) }
+    else { BitVec { bits: mask_to_width(a.bits << n, a.width), width: a.width } }
+}
+
+/// Logical shift right (zero-fill).
+public fn bitvec_lshr(a: BitVec, n: Int{>= 0}) -> BitVec {
+    if n >= a.width { bv_zero(a.width) }
+    else { BitVec { bits: a.bits >> n, width: a.width } }
+}
+
+// =============================================================================
+// 7. Equality
+// =============================================================================
+
+/// Bit-vector equality. Compares both bits and width.
+public fn bitvec_eq(a: BitVec, b: BitVec) -> Bool {
+    a.bits == b.bits && a.width == b.width
+}

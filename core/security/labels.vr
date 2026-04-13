@@ -1,0 +1,136 @@
+// =============================================================================
+// labels.vr — Security Labels for Information-Flow Control
+// =============================================================================
+//
+// Layer: Standard Library / Security
+//
+// User-facing surface for the modal-types analysis core
+// (`verum_types::modal_types`). Lattice-based security labels
+// classify values; the type system enforces that labeled values
+// only flow to contexts permitted by the lattice ordering, ruling
+// out information leaks at compile time.
+//
+// ## The canonical chain
+//
+// ```text
+//     Public ⊑ Internal ⊑ Secret ⊑ TopSecret
+// ```
+//
+// A `Public` value flows freely into a `Secret` context (it's
+// merely "more sensitive than necessary"), but a `Secret` value
+// may *not* flow into a `Public` context — that would leak the
+// secret.
+//
+// ## Example
+//
+// ```verum
+// let bank_balance: Labeled<Int> = labeled(Label.Secret, 5000);
+// let credit_score: Labeled<Int> = labeled(Label.Internal, 720);
+//
+// // Flow check before logging:
+// let log_label: Label = Label.Public;
+// assert(!flows_to(Label.Secret, log_label));
+// ```
+//
+// =============================================================================
+
+module core.security.labels;
+
+// =============================================================================
+// 1. The label lattice
+// =============================================================================
+
+/// Security label drawn from the canonical chain
+/// `Public ⊑ Internal ⊑ Secret ⊑ TopSecret`. Custom lattices can
+/// be modeled by extending this type or by using `Custom(Text)`.
+public type Label is
+    /// Freely shareable; lowest sensitivity.
+    | Public
+    /// Internal use only; not for external sharing.
+    | Internal
+    /// Restricted; sensitive personal/business data.
+    | Secret
+    /// Highly restricted; clearance required.
+    | TopSecret
+    /// User-defined label, identified by name; falls outside the
+    /// canonical chain. Custom labels never flow into chain
+    /// labels and vice versa unless the caller supplies an
+    /// explicit ordering predicate.
+    | Custom { name: Text };
+
+// =============================================================================
+// 2. Labeled values
+// =============================================================================
+
+/// A value paired with its security label. The type system
+/// tracks the label statically; only operations annotated to
+/// accept the label may unwrap the value.
+public type Labeled<T> is {
+    label: Label,
+    value: T,
+};
+
+/// Build a labeled value.
+public fn labeled<T>(label: Label, value: T) -> Labeled<T> {
+    Labeled { label, value }
+}
+
+// =============================================================================
+// 3. The flows-to predicate
+// =============================================================================
+
+/// `flows_to(lo, hi)` — true iff a value labeled `lo` may be used
+/// in a context expecting label `hi` (i.e., `lo ⊑ hi` in the
+/// lattice). Custom labels only flow to themselves.
+public fn flows_to(lo: Label, hi: Label) -> Bool {
+    match (lo, hi) {
+        // Reflexivity on every label.
+        (Label.Public,    Label.Public)    => true,
+        (Label.Internal,  Label.Internal)  => true,
+        (Label.Secret,    Label.Secret)    => true,
+        (Label.TopSecret, Label.TopSecret) => true,
+
+        // Public flows everywhere on the chain.
+        (Label.Public, Label.Internal)  => true,
+        (Label.Public, Label.Secret)    => true,
+        (Label.Public, Label.TopSecret) => true,
+
+        // Internal flows to anything more sensitive.
+        (Label.Internal, Label.Secret)    => true,
+        (Label.Internal, Label.TopSecret) => true,
+
+        // Secret flows only to TopSecret.
+        (Label.Secret, Label.TopSecret) => true,
+
+        // Custom labels: only reflexive flow on the same name.
+        (Label.Custom { name: a }, Label.Custom { name: b }) => a == b,
+
+        // Everything else is rejected (downward, cross-lattice).
+        (_, _) => false,
+    }
+}
+
+// =============================================================================
+// 4. Join (least upper bound)
+// =============================================================================
+
+/// `join(a, b)` — the more sensitive of two labels under the
+/// chain. For incompatible custom labels, falls back to `TopSecret`
+/// as a conservative upper bound.
+public fn join(a: Label, b: Label) -> Label {
+    if flows_to(a, b) { b }
+    else if flows_to(b, a) { a }
+    else { Label.TopSecret }
+}
+
+// =============================================================================
+// 5. Label arithmetic on labeled values
+// =============================================================================
+
+/// Combine two labeled values: the result label is the join.
+public fn combine<T, U>(a: Labeled<T>, b: Labeled<U>, op: fn(T, U) -> T) -> Labeled<T> {
+    Labeled {
+        label: join(a.label, b.label),
+        value: (op)(a.value, b.value),
+    }
+}

@@ -4047,6 +4047,24 @@ impl ProofSearchEngine {
 
         // Create solver and check
         let solver = context.solver();
+
+        // Inject reflected user-function axioms (refinement
+        // reflection). The registry is rendered as a single
+        // SMT-LIB block of declare-funs followed by foralls
+        // and parsed into the solver before the goal is asserted,
+        // so Z3 can unfold calls to user functions during proof
+        // search instead of treating them as uninterpreted symbols.
+        if !self.reflection_registry.is_empty() {
+            let block = self.reflection_registry.to_smtlib_block();
+            // `from_string` parses SMT-LIB2 and adds every
+            // declare/assert it contains to the solver. Unknown
+            // sorts in axiom bodies leave the corresponding
+            // assertions inert without raising an error, which
+            // is the desired conservative behaviour: an axiom we
+            // can't translate simply doesn't fire.
+            solver.from_string(block.as_str().to_string());
+        }
+
         solver.assert(&z3_bool);
 
         match solver.check() {
