@@ -1,0 +1,25 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: hit, higher-inductive, regression
+
+/// Regression: a variant declaration without `= from..to` endpoints
+/// must continue to behave as an ordinary tuple/unit variant — the
+/// HIT path-constructor metadata is purely additive and must not
+/// affect non-HIT types.
+
+type Color is
+    | Red
+    | Green
+    | Blue;
+
+type Maybe2<T> is
+    | Nothing
+    | Just(T);
+
+fn main() {
+    let r: Color = Red;
+    assert(r is Red);
+
+    let m: Maybe2<Int> = Just(42);
+    assert(m is Just(_));
+}

@@ -1,0 +1,36 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: hit, higher-inductive, path-constructor, cubical
+
+/// Higher Inductive Types (HIT) with path-constructor syntax.
+///
+/// The `Variant() = from..to` syntax declares a path constructor in
+/// a HIT. The endpoint expressions are captured by the parser into
+/// `Variant::path_endpoints` and registered on the type checker's
+/// `hit_path_constructors` side-channel for use by HIT-aware tactics
+/// (cubical, descent).
+///
+/// At the value level a HIT looks like an ordinary variant type;
+/// the path-constructor metadata is consumed only by formal
+/// verification (`@verify(formal)`).
+
+// The interval as a HIT: two point constructors and one path between them.
+type Interval is
+    | Zero
+    | One
+    | Seg() = Zero..One;
+
+// The circle S¹ as a HIT: one point and one self-loop path.
+type Circle is
+    | Base
+    | Loop() = Base..Base;
+
+fn main() {
+    let z: Interval = Zero;
+    let o: Interval = One;
+    let b: Circle = Base;
+
+    assert(z is Zero);
+    assert(o is One);
+    assert(b is Base);
+}

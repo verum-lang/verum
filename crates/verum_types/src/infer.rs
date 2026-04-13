@@ -43633,33 +43633,27 @@ impl TypeChecker {
 
                     // If this variant carries explicit path endpoints,
                     // record it as a HIT path-constructor. Endpoints are
-                    // captured as `EqTerm::Var` placeholders bearing the
-                    // pretty-printed expression text — the cubical
-                    // normalizer treats them opaquely until a more
-                    // structured EqTerm-from-Expr lowering exists.
+                    // lowered through the structured `expr_to_eqterm`
+                    // translator so the cubical normalizer sees real
+                    // term structure (Var/Const/App/Lambda) rather than
+                    // opaque debug strings.
                     if let verum_common::Maybe::Some((from_expr, to_expr)) =
                         &variant.path_endpoints
                     {
-                        let lhs_text = format!("{:?}", &from_expr.kind);
-                        let rhs_text = format!("{:?}", &to_expr.kind);
-                        let pc = crate::ty::PathConstructor::loop_at(
-                            variant_name.clone(),
-                            crate::ty::EqTerm::Var(Text::from(lhs_text.clone())),
-                            Type::Unknown,
+                        let lhs = crate::expr_to_eqterm::expr_to_eq_term(
+                            from_expr,
                         );
-                        // Override endpoints with the actual lhs/rhs.
+                        let rhs = crate::expr_to_eqterm::expr_to_eq_term(
+                            to_expr,
+                        );
                         let pc = crate::ty::PathConstructor {
-                            name: pc.name,
-                            type_params: pc.type_params,
-                            args: pc.args,
+                            name: variant_name.clone(),
+                            type_params: List::new(),
+                            args: List::new(),
                             path_type: crate::ty::PathEndpoints {
                                 ty: Box::new(Type::Unknown),
-                                lhs: Box::new(crate::ty::EqTerm::Var(
-                                    Text::from(lhs_text),
-                                )),
-                                rhs: Box::new(crate::ty::EqTerm::Var(
-                                    Text::from(rhs_text),
-                                )),
+                                lhs: Box::new(lhs),
+                                rhs: Box::new(rhs),
                             },
                         };
                         hit_constructors.push(pc);

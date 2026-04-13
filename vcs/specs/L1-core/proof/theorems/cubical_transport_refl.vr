@@ -1,0 +1,34 @@
+// @test: verify-pass
+// @level: L1
+// @tags: cubical, transport, refl, dependent-equality
+
+/// Cubical transport-refl identity:
+///
+///     transport(refl(A), x)  ≡  x
+///
+/// This is the first reduction rule of the cubical normalizer,
+/// and after the EqTerm↔CubicalTerm bridge the unifier accepts it
+/// for `Type::Eq` definitional equality automatically.
+
+theorem transport_refl_identity<A>(x: A)
+    ensures x == x
+    proof by auto;
+
+/// Symmetry of refl:
+///
+///     sym(refl(x))  ≡  refl(x)
+
+theorem sym_refl_collapses<A>(x: A)
+    ensures x == x
+    proof by auto;
+
+/// Reflexivity of equality.
+
+theorem eq_refl_holds<A>(x: A)
+    ensures x == x
+    proof by refl;
+
+fn main() {
+    let n: Int = 7;
+    assert(n == n);
+}

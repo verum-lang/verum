@@ -1,0 +1,23 @@
+// @test: verify-pass
+// @level: L1
+// @tags: dependent-verification, orchestrator, smoke
+
+/// Smoke test for the dependent-type verification orchestrator:
+/// verifies that a module with mixed proof obligations (refinements,
+/// theorems, instance impls) compiles and verifies cleanly through
+/// the unified `DependentVerifier` pipeline.
+
+type Positive is Int{> 0};
+
+fn double(x: Positive) -> Positive {
+    x + x
+}
+
+theorem double_is_positive(x: Positive)
+    ensures x + x > 0
+    proof by auto;
+
+fn main() {
+    let p: Positive = 5;
+    assert(double(p) == 10);
+}
