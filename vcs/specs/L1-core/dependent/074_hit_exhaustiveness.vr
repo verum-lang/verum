@@ -1,0 +1,45 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: hit, exhaustiveness, path-constructor, match
+
+/// HIT exhaustiveness: match on higher-inductive types with path
+/// constructors is already handled by the standard variant-type
+/// exhaustiveness mechanism. Path-constructors like `Loop()` are
+/// registered as regular Tuple variants at the AST level, so
+/// the exhaustiveness checker enumerates them alongside point
+/// constructors like `Base`.
+///
+/// `Loop(_)` covers the path-constructor's Unit payload. The
+/// wildcard `_` subsumes both interval endpoints (i0, i1) —
+/// which is sound because path constructors identify their
+/// endpoints by construction.
+
+type Circle is
+    | Base
+    | Loop() = Base..Base;
+
+type Interval2 is
+    | Zero
+    | One
+    | Seg() = Zero..One;
+
+fn describe_circle(c: Circle) -> Int {
+    match c {
+        Base => 0,
+        Loop(_) => 1,
+    }
+}
+
+fn describe_interval(i: Interval2) -> Int {
+    match i {
+        Zero => 0,
+        One => 1,
+        Seg(_) => 2,
+    }
+}
+
+fn main() {
+    assert(describe_circle(Base) == 0);
+    assert(describe_interval(Zero) == 0);
+    assert(describe_interval(One) == 1);
+}
