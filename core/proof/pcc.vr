@@ -1,0 +1,107 @@
+// =============================================================================
+// pcc.vr — Proof-Carrying Code Bundles
+// =============================================================================
+//
+// Layer: Standard Library / Proof
+//
+// Surface for `verum_smt::proof_carrying_code`. Necula-style PCC:
+// formal proof certificates bundled with bytecode, content-
+// addressed by goal hash, with audit-trail metadata.
+//
+// Trust relocates from the compiler pipeline to a small, auditable
+// proof checker. The recipient verifies proofs rather than
+// re-running analysis.
+//
+// =============================================================================
+
+module core.proof.pcc;
+
+/// A goal hash — content-addressed identifier of a verification
+/// obligation. Computed from the textual representation of the
+/// goal via a deterministic hash function.
+public type GoalHash is { digest: Text };
+
+public fn goal_hash(digest: Text) -> GoalHash {
+    GoalHash { digest }
+}
+
+/// A proof certificate for a single verification obligation.
+public type ProofCertificate is {
+    goal_text: Text,
+    solver: Text,
+    proof_object: Text,
+    duration_ms: Int{>= 0},
+    timestamp: Text,
+};
+
+public fn proof_certificate(
+    goal_text: Text,
+    solver: Text,
+    proof_object: Text,
+    duration_ms: Int{>= 0},
+    timestamp: Text,
+) -> ProofCertificate {
+    ProofCertificate { goal_text, solver, proof_object, duration_ms, timestamp }
+}
+
+/// Bundle metadata — audit trail for the whole compilation.
+public type BundleMetadata is {
+    compiler_version: Text,
+    source_path: Text,
+    certificate_count: Int{>= 0},
+    total_duration_ms: Int{>= 0},
+};
+
+/// A complete proof bundle: certificates keyed by goal hash.
+public type ProofBundle is {
+    certificates: List<BundleCert>,
+    metadata: BundleMetadata,
+};
+
+/// A certificate paired with its key.
+public type BundleCert is {
+    hash: GoalHash,
+    cert: ProofCertificate,
+};
+
+/// Build an empty proof bundle with initial metadata.
+public fn empty_bundle(compiler: Text, source: Text) -> ProofBundle {
+    ProofBundle {
+        certificates: [],
+        metadata: BundleMetadata {
+            compiler_version: compiler,
+            source_path: source,
+            certificate_count: 0,
+            total_duration_ms: 0,
+        },
+    }
+}
+
+/// Add a certificate to the bundle.
+public fn bundle_add(b: ProofBundle, h: GoalHash, c: ProofCertificate) -> ProofBundle {
+    let mut certs = b.certificates;
+    certs.push(BundleCert { hash: h, cert: c });
+    let new_count = b.metadata.certificate_count + 1;
+    let new_dur = b.metadata.total_duration_ms + c.duration_ms;
+    ProofBundle {
+        certificates: certs,
+        metadata: BundleMetadata {
+            compiler_version: b.metadata.compiler_version,
+            source_path: b.metadata.source_path,
+            certificate_count: new_count,
+            total_duration_ms: new_dur,
+        },
+    }
+}
+
+/// Look up a certificate by its goal hash digest.
+public fn bundle_lookup(b: ProofBundle, digest: Text) -> Maybe<ProofCertificate> {
+    let mut i: Int = 0;
+    while i < b.certificates.len() {
+        if b.certificates[i].hash.digest == digest {
+            return Some(b.certificates[i].cert);
+        }
+        i = i + 1;
+    }
+    None
+}

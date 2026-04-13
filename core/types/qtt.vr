@@ -1,0 +1,111 @@
+// =============================================================================
+// qtt.vr — Quantitative Type Theory Resource Tracking
+// =============================================================================
+//
+// Layer: Standard Library / Types
+//
+// Surface for `verum_types::qtt_usage` + `verum_types::qtt_walker`.
+// QTT assigns every binding a *quantity* describing how many
+// times it may be used. The type system enforces these counts
+// at compile time, preventing resource leaks (Linear used zero
+// times) and aliasing violations (Linear used twice).
+//
+// ## Quantities
+//
+//   * `Zero`     — erased; usable only at the type level
+//   * `One`      — linear; exactly once at runtime
+//   * `Many`     — unrestricted; any number of times
+//   * `AtMost(n)`— affine; at most n times
+//
+// =============================================================================
+
+module core.types.qtt;
+
+// =============================================================================
+// 1. Quantity algebra
+// =============================================================================
+
+/// The quantitative resource annotation on a binding.
+public type Quantity is
+    | Zero
+    | One
+    | Many
+    | AtMost { n: Int{>= 0} };
+
+/// Does this quantity allow `uses` runtime occurrences?
+public fn allows(q: Quantity, uses: Int{>= 0}) -> Bool {
+    match q {
+        Quantity.Zero => uses == 0,
+        Quantity.One => uses == 1,
+        Quantity.Many => true,
+        Quantity.AtMost { n } => uses <= n,
+    }
+}
+
+/// Additive composition (sequential composition).
+public fn add_quantity(a: Quantity, b: Quantity) -> Quantity {
+    match (a, b) {
+        (Quantity.Zero, q) => q,
+        (q, Quantity.Zero) => q,
+        (Quantity.Many, _) => Quantity.Many,
+        (_, Quantity.Many) => Quantity.Many,
+        (Quantity.One, Quantity.One) => Quantity.AtMost { n: 2 },
+        (Quantity.AtMost { n: na }, Quantity.AtMost { n: nb }) =>
+            Quantity.AtMost { n: na + nb },
+        (Quantity.One, Quantity.AtMost { n }) =>
+            Quantity.AtMost { n: n + 1 },
+        (Quantity.AtMost { n }, Quantity.One) =>
+            Quantity.AtMost { n: n + 1 },
+    }
+}
+
+// =============================================================================
+// 2. Usage tracking
+// =============================================================================
+
+/// Observed usage count for a single binding.
+public type UsageCount is { runtime: Int{>= 0} };
+
+/// A single usage-tracked binding and its declared quantity.
+public type TrackedBinding is {
+    name: Text,
+    declared: Quantity,
+};
+
+// =============================================================================
+// 3. Violation detection
+// =============================================================================
+
+/// A QTT violation: a binding used more (or fewer for Linear)
+/// times than its quantity allows.
+public type QttViolation is
+    /// Used more times than allowed.
+    | OverUse { binding: Text, observed: Int, declared: Quantity }
+    /// Linear binding used zero times (resource leak).
+    | UnderUse { binding: Text, declared: Quantity }
+    /// Erased binding referenced at runtime.
+    | ErasedUsedAtRuntime { binding: Text };
+
+/// Check a single binding against its observed usage.
+public fn check_binding(name: Text, declared: Quantity, observed: Int{>= 0}) -> Maybe<QttViolation> {
+    match declared {
+        Quantity.Zero => {
+            if observed > 0 {
+                Some(QttViolation.ErasedUsedAtRuntime { binding: name })
+            } else { None }
+        },
+        Quantity.One => {
+            if observed == 0 {
+                Some(QttViolation.UnderUse { binding: name, declared })
+            } else if observed > 1 {
+                Some(QttViolation.OverUse { binding: name, observed, declared })
+            } else { None }
+        },
+        Quantity.Many => None,
+        Quantity.AtMost { n } => {
+            if observed > n {
+                Some(QttViolation.OverUse { binding: name, observed, declared })
+            } else { None }
+        },
+    }
+}
