@@ -154,6 +154,8 @@ pub mod poly_kinds; // Polymorphic kinds: kind variables + unification
 pub mod contracts_old; // Dependent contracts with old(): pre-state references
 pub mod bitvec_decision; // Bit-vector decision procedure: finite-domain reasoning
 pub mod linear_logic; // Full linear logic: ⊗ ⅋ & ⊕ ! ? + de Morgan
+pub mod region_calculus; // Tofte-Talpin: regions, region sets, escape check
+pub mod pi_calculus; // π-calculus: process algebra with COMM reduction
 pub mod instance_search; // Phase D.4: Protocol instance search + coherence
 pub mod universe_solver; // Phase A.2: Universe constraint solving
 pub mod contracts; // Precondition and postcondition validation
