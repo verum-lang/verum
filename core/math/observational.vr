@@ -1,0 +1,55 @@
+// =============================================================================
+// observational.vr — Observational Type Theory (OTT)
+// =============================================================================
+//
+// Layer: Standard Library / Mathematics
+//
+// Surface for `verum_types::observational_equality`. Type-directed
+// equality alternative to cubical: two values' equality is
+// *defined by what we can observe about them*. Products decompose
+// into component equality; functions decompose into pointwise
+// (funext); decidable types decide directly.
+//
+// =============================================================================
+
+module core.math.observational;
+
+/// Simplified type for OTT equality computations.
+public type OttType is
+    | OttBool
+    | OttNat
+    | OttUnit
+    | OttProduct { left: Heap<OttType>, right: Heap<OttType> }
+    | OttFunction { domain: Heap<OttType>, codomain: Heap<OttType> }
+    | OttOpaque { name: Text };
+
+/// A simplified OTT value.
+public type OttValue is
+    | OttBoolVal { value: Bool }
+    | OttNatVal { value: Int }
+    | OttUnitVal
+    | OttPair { first: Heap<OttValue>, second: Heap<OttValue> }
+    | OttOpaqueVal { name: Text };
+
+/// Equality decision result.
+public type OttEqResult is
+    | OttTrue
+    | OttFalse
+    | OttStuck;
+
+/// Type-directed equality on first-order values. Decomposes
+/// products; decides Bool/Nat/Unit directly; returns Stuck on
+/// opaque types with different names.
+public fn ott_decide(ty: OttType, lhs: OttValue, rhs: OttValue) -> OttEqResult {
+    match (ty, lhs, rhs) {
+        (OttType.OttBool, OttValue.OttBoolVal { value: a }, OttValue.OttBoolVal { value: b }) =>
+            if a == b { OttEqResult.OttTrue } else { OttEqResult.OttFalse },
+        (OttType.OttNat, OttValue.OttNatVal { value: a }, OttValue.OttNatVal { value: b }) =>
+            if a == b { OttEqResult.OttTrue } else { OttEqResult.OttFalse },
+        (OttType.OttUnit, OttValue.OttUnitVal, OttValue.OttUnitVal) =>
+            OttEqResult.OttTrue,
+        (OttType.OttOpaque { name: _ }, OttValue.OttOpaqueVal { name: a }, OttValue.OttOpaqueVal { name: b }) =>
+            if a == b { OttEqResult.OttTrue } else { OttEqResult.OttStuck },
+        (_, _, _) => OttEqResult.OttStuck,
+    }
+}

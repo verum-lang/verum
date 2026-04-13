@@ -1,0 +1,54 @@
+// =============================================================================
+// poly_kinds.vr — Polymorphic Kinds
+// =============================================================================
+//
+// Layer: Standard Library / Types
+//
+// Surface for `verum_types::poly_kinds`. Kind-level Hindley-Milner:
+// kind variables, kind constructors (→, Type, Constraint), kind
+// unification.
+//
+// Practical use: heterogeneous containers, levitated functor
+// combinators, type-class hierarchies parameterised by kind.
+//
+// =============================================================================
+
+module core.types.poly_kinds;
+
+/// A kind in the polymorphic-kind algebra.
+public type Kind is
+    /// `Type` — the kind of value-level types.
+    | KType
+    /// `Constraint` — the kind of typeclass constraints.
+    | KConstraint
+    /// `K₁ → K₂` — a type constructor's kind.
+    | KArrow { domain: Heap<Kind>, codomain: Heap<Kind> }
+    /// `κ` — a kind variable, identified by name.
+    | KVar { name: Text };
+
+public fn k_type() -> Kind { Kind.KType }
+public fn k_constraint() -> Kind { Kind.KConstraint }
+public fn k_arrow(a: Kind, b: Kind) -> Kind {
+    Kind.KArrow { domain: Heap(a), codomain: Heap(b) }
+}
+public fn k_var(name: Text) -> Kind { Kind.KVar { name } }
+
+/// Does the named kind variable occur anywhere in this kind?
+/// Used for the occurs check during unification.
+public fn kind_occurs(k: Kind, var_name: Text) -> Bool {
+    match k {
+        Kind.KVar { name } => name == var_name,
+        Kind.KArrow { domain, codomain } =>
+            kind_occurs(*domain, var_name) || kind_occurs(*codomain, var_name),
+        _ => false,
+    }
+}
+
+/// Result of kind unification.
+public type KindUnifyResult is
+    /// Success — substitution captured as a list of (name, kind) bindings.
+    | KindOk { bindings: List<KindBinding> }
+    /// Failure — mismatch or occurs-check failure.
+    | KindError { reason: Text };
+
+public type KindBinding is { name: Text, kind: Kind };

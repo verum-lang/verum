@@ -1,0 +1,79 @@
+// =============================================================================
+// two_level.vr — Two-Level Type Theory (2LTT)
+// =============================================================================
+//
+// Layer: Standard Library / Types
+//
+// Surface for `verum_types::two_level`. Voevodsky/ACK stratification
+// of universes into fibrant (HoTT/cubical) and strict
+// (UIP-holding, decidable equality) layers.
+//
+// =============================================================================
+
+module core.types.two_level;
+
+/// The two universe layers of 2LTT.
+public type Layer is
+    /// **Fibrant** — supports HoTT/cubical. UIP does not hold.
+    | Fibrant
+    /// **Strict** — UIP holds, decidable equality, no path computation.
+    | Strict;
+
+/// `Fibrant ≼ Strict`: strictness is "more permissive" (every
+/// fibrant type is strict, not vice versa).
+public fn layer_flows_to(lo: Layer, hi: Layer) -> Bool {
+    match (lo, hi) {
+        (Layer.Fibrant, Layer.Fibrant) => true,
+        (Layer.Fibrant, Layer.Strict) => true,
+        (Layer.Strict, Layer.Strict) => true,
+        (Layer.Strict, Layer.Fibrant) => false,
+    }
+}
+
+/// Mix two layers: result is Strict if either is Strict.
+/// This is the **strictness contagion** rule.
+public fn layer_mix(a: Layer, b: Layer) -> Layer {
+    match (a, b) {
+        (Layer.Strict, _) => Layer.Strict,
+        (_, Layer.Strict) => Layer.Strict,
+        _ => Layer.Fibrant,
+    }
+}
+
+/// A stratified universe: a layer + a level (natural number).
+public type StratifiedUniverse is {
+    layer: Layer,
+    level: Int{>= 0},
+};
+
+public fn stratified_fibrant(level: Int{>= 0}) -> StratifiedUniverse {
+    StratifiedUniverse { layer: Layer.Fibrant, level }
+}
+
+public fn stratified_strict(level: Int{>= 0}) -> StratifiedUniverse {
+    StratifiedUniverse { layer: Layer.Strict, level }
+}
+
+/// `UFib_n ≼ UStrict_n` — coercion requires same level.
+public fn universe_coerces_to(from: StratifiedUniverse, to: StratifiedUniverse) -> Bool {
+    from.level == to.level && layer_flows_to(from.layer, to.layer)
+}
+
+/// Soundness gate: reject strict types in fibrant contexts.
+public type LayerVerdict is
+    | LayerOk
+    | StrictInFibrant { universe: StratifiedUniverse }
+    | LevelMismatch { from_level: Int, to_level: Int };
+
+public fn check_layer_flow(actual: StratifiedUniverse, expected: StratifiedUniverse) -> LayerVerdict {
+    if actual.level != expected.level {
+        return LayerVerdict.LevelMismatch {
+            from_level: actual.level,
+            to_level: expected.level,
+        };
+    }
+    match (actual.layer, expected.layer) {
+        (Layer.Strict, Layer.Fibrant) => LayerVerdict.StrictInFibrant { universe: actual },
+        _ => LayerVerdict.LayerOk,
+    }
+}
