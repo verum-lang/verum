@@ -23,7 +23,7 @@
 //
 // Operations use Verum's context system for:
 // - ComputeDevice: CPU/GPU placement
-// - RandomSource: PRNG for random tensors
+// - Random: PRNG for random tensors
 //
 // Spec: docs/architecture/math-spec.md Part V (L4)
 // =============================================================================
@@ -536,21 +536,21 @@ public fn from_list<T: Numeric>(data: &[T], shape: &[USize]) -> DynTensor<T>
 
 // Create random tensor from N(0, 1)
 public fn randn<T: Numeric>(shape: &[USize]) -> DynTensor<T>
-    using [RandomSource, ComputeDevice]
+    using [Random, ComputeDevice]
 {
-    @vbc(TENSOR_RANDN, shape, RandomSource.key(), ComputeDevice.device())
+    @vbc(TENSOR_RANDN, shape, Random.int(2147483647), ComputeDevice.device())
 }
 
 // Create random tensor from U[0, 1)
 public fn rand<T: Numeric>(shape: &[USize]) -> DynTensor<T>
-    using [RandomSource, ComputeDevice]
+    using [Random, ComputeDevice]
 {
-    @vbc(TENSOR_RAND, shape, RandomSource.key(), ComputeDevice.device())
+    @vbc(TENSOR_RAND, shape, Random.int(2147483647), ComputeDevice.device())
 }
 
 // Create random tensor from U[low, high)
 public fn rand_uniform<T: Numeric>(shape: &[USize], low: T, high: T) -> DynTensor<T>
-    using [RandomSource, ComputeDevice]
+    using [Random, ComputeDevice]
     where high > low
 {
     let r = rand<T>(shape);
@@ -559,9 +559,9 @@ public fn rand_uniform<T: Numeric>(shape: &[USize], low: T, high: T) -> DynTenso
 
 // Create random integer tensor
 public fn randint<T: Numeric>(shape: &[USize], low: T, high: T) -> DynTensor<T>
-    using [RandomSource, ComputeDevice]
+    using [Random, ComputeDevice]
 {
-    @vbc(TENSOR_RANDINT, shape, low, high, RandomSource.key(), ComputeDevice.device())
+    @vbc(TENSOR_RANDINT, shape, low, high, Random.int(2147483647), ComputeDevice.device())
 }
 
 // =============================================================================

@@ -39757,7 +39757,24 @@ impl TypeChecker {
                 });
             }
 
-            // Method not found
+            // Method not found — but if the receiver is a context
+            // type and we're in lenient mode (stdlib pre-registered
+            // contexts whose method types can't be fully resolved),
+            // return Unknown instead of erroring. The actual method
+            // will be resolved at VBC codegen time.
+            if self.context_checker.is_lenient() {
+                // Check if the receiver type name matches any
+                // registered context declaration (by bare name).
+                let recv_text = recv_ty.to_text();
+                let is_context = self.context_declarations.contains_key(&recv_text)
+                    || self.context_declarations.keys().any(|k| {
+                        recv_text.as_str().contains(k.as_str())
+                    });
+                if is_context {
+                    return Ok(InferResult::new(Type::Unknown));
+                }
+            }
+
             return Err(TypeError::MethodNotFound {
                 ty: recv_ty.to_text(),
                 method: method.name.as_str().to_text(),

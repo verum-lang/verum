@@ -526,6 +526,11 @@ impl ContextChecker {
     pub fn set_lenient(&mut self, lenient: bool) {
         self.lenient = lenient;
     }
+
+    /// Check if lenient mode is active.
+    pub fn is_lenient(&self) -> bool {
+        self.lenient
+    }
     pub fn register_context(&mut self, name: impl Into<Text>, decl: ContextDecl) {
         self.declarations.insert(name.into(), decl);
     }

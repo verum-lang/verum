@@ -1478,8 +1478,12 @@ public fn device_reset_device(device: DeviceId) {
 // ComputeDevice context for tensor operations
 // Used with `provide ComputeDevice = ...` syntax
 public context ComputeDevice {
-    // Get current device type
+    // Get current device identifier
     fn device_type() -> DeviceId;
+
+    // Alias for device_type() — used by tensor.vr and other stdlib
+    // modules that refer to the device by the shorter name.
+    fn device() -> DeviceId;
 
     // Get device info
     fn device_info() -> &DeviceInfo;
@@ -1493,6 +1497,10 @@ public type CPUDevice is ();
 
 implement ComputeDevice for CPUDevice {
     fn device_type() -> DeviceId {
+        DeviceId.cpu()
+    }
+
+    fn device() -> DeviceId {
         DeviceId.cpu()
     }
 
@@ -1548,6 +1556,10 @@ implement GPUDevice {
 
 implement ComputeDevice for GPUDevice {
     fn device_type() -> DeviceId {
+        self.device_id
+    }
+
+    fn device() -> DeviceId {
         self.device_id
     }
 
