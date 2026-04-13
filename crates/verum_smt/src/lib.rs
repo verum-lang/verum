@@ -102,6 +102,7 @@ pub mod context;
 pub mod cost;
 pub mod counterexample;
 pub mod domains; // Phase D.3: sheaf + epistemic domain encodings
+pub mod refinement_reflection; // Liquid-style: user fns as SMT axioms
 pub mod error_conversions; // Conversions to verum_error::VerumError
 pub mod solver;
 pub mod subsumption;
