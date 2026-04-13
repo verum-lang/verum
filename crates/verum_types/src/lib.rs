@@ -138,30 +138,49 @@ pub mod context;
 pub mod context_check;
 pub mod context_resolution; // Context group resolution for type checking
 pub mod contract_integration; // Phase 3a → Phase 4 contract integration
-pub mod cubical; // Phase B.2: Cubical type theory normalizer
-pub mod cubical_bridge; // Phase B.2: EqTerm ↔ CubicalTerm translator
-pub mod expr_to_eqterm; // Phase B.6: structured Expr → EqTerm lowering
-pub mod qtt_usage; // QTT: Linear/Affine/Omega usage tracker
-pub mod qtt_walker; // QTT: AST walker producing UsageMap
-pub mod session_types; // Session-typed channel protocols (π-calculus style)
-pub mod modal_types; // Modal types: security labels + information flow
+// =========================================================================
+// TYPE-CHECKER INFRASTRUCTURE
+// These modules are actively used by the type-checker pipeline
+// (infer.rs, unify.rs, pipeline.rs) during compilation.
+// =========================================================================
+pub mod cubical; // Cubical normalizer: WHNF for path types
+pub mod cubical_bridge; // EqTerm ↔ CubicalTerm translator (used by unifier)
+pub mod expr_to_eqterm; // AST Expr → EqTerm lowering (used by HIT metadata)
+pub mod qtt_usage; // QTT usage counting (used by check_function_qtt)
+pub mod qtt_walker; // QTT AST walker (used by check_function_qtt)
+pub mod instance_search; // Protocol instance search + coherence (used by DependentVerifier)
+pub mod universe_solver; // Universe constraint solving (used by Phase 2.5)
+
+// =========================================================================
+// THEORETICAL ANALYSIS LIBRARIES
+// Self-contained algebraic cores. Each is independently tested
+// and has a corresponding stdlib .vr surface module. They are
+// NOT called by the type-checker — they exist as reusable
+// libraries for tools, proofs, and future integration.
+//
+// Architectural note: these would ideally live in a separate
+// `verum_theory` crate. They are kept here to avoid a cargo
+// workspace restructure that would break existing dependency
+// graphs. The separation is documented; physical extraction is
+// a safe future cleanup.
+// =========================================================================
+pub mod session_types; // Session-typed channel protocols
+pub mod modal_types; // Security labels + information flow
 pub mod tactic_meta; // Tactic metaprogramming: quote/splice/reflect
-pub mod two_level; // Two-Level Type Theory: fibrant vs strict layers
-pub mod coinductive_analysis; // Productivity + bisimulation for greatest fixed points
-pub mod sdg; // Synthetic differential geometry: nilpotent infinitesimals
-pub mod observational_equality; // OTT: type-directed equality alternative to cubical
+pub mod two_level; // Two-Level Type Theory: fibrant vs strict
+pub mod coinductive_analysis; // Productivity + bisimulation
+pub mod sdg; // Synthetic differential geometry
+pub mod observational_equality; // OTT: type-directed equality
 pub mod poly_kinds; // Polymorphic kinds: kind variables + unification
-pub mod contracts_old; // Dependent contracts with old(): pre-state references
-pub mod bitvec_decision; // Bit-vector decision procedure: finite-domain reasoning
-pub mod linear_logic; // Full linear logic: ⊗ ⅋ & ⊕ ! ? + de Morgan
-pub mod region_calculus; // Tofte-Talpin: regions, region sets, escape check
-pub mod pi_calculus; // π-calculus: process algebra with COMM reduction
-pub mod kripke; // Kripke semantics: modal worlds + accessibility
-pub mod category_algebra; // Categorical morphisms + law verification
-pub mod continuation_calculus; // Delimited continuations: shift/reset
-pub mod cbpv; // Call-by-push-value: value/computation separation
-pub mod instance_search; // Phase D.4: Protocol instance search + coherence
-pub mod universe_solver; // Phase A.2: Universe constraint solving
+pub mod contracts_old; // Dependent contracts with old()
+pub mod bitvec_decision; // Bit-vector decision procedure
+pub mod linear_logic; // Full linear logic: ⊗ ⅋ & ⊕ ! ?
+pub mod region_calculus; // Tofte-Talpin region calculus
+pub mod pi_calculus; // π-calculus process algebra
+pub mod kripke; // Kripke semantics: modal worlds
+pub mod category_algebra; // Categorical morphism algebra
+pub mod continuation_calculus; // Delimited continuations
+pub mod cbpv; // Call-by-push-value
 pub mod contracts; // Precondition and postcondition validation
 pub mod control_flow; // Flow-sensitive analysis for @must_handle
 pub mod dependent_helpers; // Helper methods for dependent type checking
