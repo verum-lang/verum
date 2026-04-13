@@ -6936,14 +6936,47 @@ impl TypeChecker {
             .insert(name.clone(), decl.clone());
 
         // Step 2+3: build context type and register with resolver.
-        // If type building fails (unknown types in method sigs
-        // because the declaring module's types aren't registered
-        // yet), fall back to name-only registration. Method
-        // validation runs lazily in lenient mode.
-        if let Ok(context_type) = self.build_context_type_from_decl(&decl) {
-            self.context_resolver
-                .register_context_type(name.clone(), context_type);
-        }
+        // If full type building fails (unknown types in method
+        // sigs because the declaring module's types aren't
+        // registered yet), build a fallback Record with
+        // Type::Unknown return types. This enables method
+        // resolution to succeed (returning Unknown), which is
+        // correct for lenient stdlib mode — the actual types
+        // will be checked at VBC codegen time.
+        let context_type = match self.build_context_type_from_decl(&decl) {
+            Ok(ty) => ty,
+            Err(_) => {
+                // Fallback: Record with Unknown return types
+                let mut fields = indexmap::IndexMap::new();
+                for method in &decl.methods {
+                    let param_count = method.params.iter()
+                        .filter(|p| !matches!(p.kind,
+                            verum_ast::decl::FunctionParamKind::SelfRef
+                            | verum_ast::decl::FunctionParamKind::SelfRefMut
+                            | verum_ast::decl::FunctionParamKind::SelfValue
+                            | verum_ast::decl::FunctionParamKind::SelfValueMut
+                        ))
+                        .count();
+                    let params = (0..param_count)
+                        .map(|_| Type::Unknown)
+                        .collect();
+                    let method_type = Type::Function {
+                        params,
+                        return_type: Box::new(Type::Unknown),
+                        properties: None,
+                        contexts: None,
+                        type_params: verum_common::List::new(),
+                    };
+                    fields.insert(
+                        method.name.name.clone(),
+                        method_type,
+                    );
+                }
+                Type::Record(fields)
+            }
+        };
+        self.context_resolver
+            .register_context_type(name.clone(), context_type);
 
         // Step 3b: register as protocol-as-context for resolver
         self.context_resolver
@@ -36391,9 +36424,13 @@ impl TypeChecker {
             }
         }
 
-        // Step 1: Check for context method calls BEFORE synthesizing receiver
-        // This ensures proper error messages for unavailable contexts
-        // Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
+        // Step 1: Check for context method calls BEFORE synthesizing receiver.
+        // If the receiver is a context name (`ComputeDevice.method()`),
+        // retrieve its context type (a Record of method signatures) from
+        // the context resolver and use it directly as the receiver type.
+        // This bypasses `synth_expr` which would fail because context
+        // names are not in the variable environment.
+        let mut context_recv_ty: Option<Type> = None;
         if let ExprKind::Path(path) = &receiver.kind
             && path.segments.len() == 1
             && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
@@ -36413,15 +36450,22 @@ impl TypeChecker {
                         span,
                     });
                 }
+                // Retrieve the context type (Record of method signatures)
+                // from the resolver. This was built during context
+                // registration from the ContextDecl AST node.
+                if let verum_common::Maybe::Some(ctx_type) =
+                    self.context_resolver.get_context_type(&context_name_text)
+                {
+                    context_recv_ty = Some(ctx_type.clone());
+                }
             }
         }
 
-        // Step 2: Get receiver type (either pre-computed for iterative chains, or synthesize)
-        let recv_ty_raw = if let Some(precomputed) = precomputed_recv_ty {
-            // Use pre-computed type to avoid recursion in method chains
-            // Apply unifier to resolve any TypeVars that were unified since the type was computed.
-            // Example: Set.new() returns Set<TypeVar>, then set.insert(1) unifies TypeVar=Int,
-            // but the precomputed type still has Set<TypeVar> unless we apply the unifier here.
+        // Step 2: Get receiver type — either from context resolution
+        // (step 1), pre-computed chain, or synth_expr.
+        let recv_ty_raw = if let Some(ctx_ty) = context_recv_ty {
+            ctx_ty
+        } else if let Some(precomputed) = precomputed_recv_ty {
             self.unifier.apply(&precomputed)
         } else {
             // Normal case: synthesize receiver type
