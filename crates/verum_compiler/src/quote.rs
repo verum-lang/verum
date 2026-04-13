@@ -2220,6 +2220,19 @@ impl ToTokens for Type {
                 stream.push(Token::new(TokenKind::RBracket, self.span));
             }
 
+            // Path type: Path<carrier>(lhs, rhs) — propositional equality
+            TypeKind::PathType { carrier, lhs, rhs } => {
+                stream.push(Token::new(TokenKind::Ident("Path".into()), self.span));
+                stream.push(Token::new(TokenKind::Lt, self.span));
+                carrier.to_tokens(stream);
+                stream.push(Token::new(TokenKind::Gt, self.span));
+                stream.push(Token::new(TokenKind::LParen, self.span));
+                lhs.to_tokens(stream);
+                stream.push(Token::new(TokenKind::Comma, self.span));
+                rhs.to_tokens(stream);
+                stream.push(Token::new(TokenKind::RParen, self.span));
+            }
+
             // Unknown type - a safe top type
             TypeKind::Unknown => {
                 stream.push(Token::new(TokenKind::Ident("Unknown".into()), self.span));
@@ -2250,6 +2263,18 @@ impl ToTokens for Type {
             TypeKind::Meta { inner } => {
                 stream.push(Token::new(TokenKind::Meta, self.span));
                 inner.to_tokens(stream);
+            }
+
+            TypeKind::PathType { carrier, lhs, rhs } => {
+                stream.push(Token::new(TokenKind::Ident("Path".into()), self.span));
+                stream.push(Token::new(TokenKind::Lt, self.span));
+                carrier.to_tokens(stream);
+                stream.push(Token::new(TokenKind::Gt, self.span));
+                stream.push(Token::new(TokenKind::LParen, self.span));
+                lhs.to_tokens(stream);
+                stream.push(Token::new(TokenKind::Comma, self.span));
+                rhs.to_tokens(stream);
+                stream.push(Token::new(TokenKind::RParen, self.span));
             }
 
             TypeKind::TypeLambda { params, body } => {

@@ -640,6 +640,15 @@ impl PrettyPrinter {
             TypeKind::Char => self.write("Char"),
             TypeKind::Text => self.write("Text"),
             TypeKind::Path(path) => self.format_path(path),
+            TypeKind::PathType { carrier, lhs, rhs } => {
+                self.write("Path<");
+                self.format_type(carrier);
+                self.write(">(");
+                self.format_expr(lhs);
+                self.write(", ");
+                self.format_expr(rhs);
+                self.write(")");
+            }
             TypeKind::Tuple(types) => {
                 self.write("(");
                 let mut first = true;

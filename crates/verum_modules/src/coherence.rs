@@ -1585,6 +1585,11 @@ fn type_kind_to_string(kind: &verum_ast::TypeKind) -> Text {
             let param_strs: List<String> = params.iter().map(|p| p.name.to_string()).collect();
             Text::from(format!("|{}| {}", param_strs.join(", "), type_to_string(body)))
         }
+
+        // Path equality type: Path<A>(lhs, rhs)
+        TypeKind::PathType { carrier, lhs, rhs } => {
+            Text::from(format!("Path<{}>({:?}, {:?})", type_to_string(carrier), lhs, rhs))
+        }
     }
 }
 

@@ -353,6 +353,8 @@ pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
         TypeKind::Meta { inner } => compute_type_size(&inner.kind),
         // Type lambdas are compile-time only
         TypeKind::TypeLambda { .. } => Ok(0),
+        // PathType is a dependent propositional equality type — compile-time only (size 0)
+        TypeKind::PathType { .. } => Ok(0),
     }
 }
 
@@ -464,6 +466,8 @@ pub fn compute_type_alignment(ty: &TypeKind) -> Result<u64, MetaError> {
         TypeKind::Meta { inner } => compute_type_alignment(&inner.kind),
         // Type lambdas are compile-time only
         TypeKind::TypeLambda { .. } => Ok(1),
+        // PathType is a dependent propositional equality type — compile-time only (align 1)
+        TypeKind::PathType { .. } => Ok(1),
     }
 }
 

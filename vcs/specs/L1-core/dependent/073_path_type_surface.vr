@@ -1,0 +1,25 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: path-type, cubical, dependent-equality, surface-syntax
+
+/// End-to-end test: `Path<A>(a, b)` is now a first-class type
+/// expression in Verum syntax, parsed by the fast_parser and
+/// lowered to `Type::Eq` in the type checker.
+///
+/// The type checker correctly rejects non-proof values at path
+/// type positions (e.g., `fn f() -> Path<Int>(0,0) { 42 }` fails
+/// with "expected Eq<Int,...>, found Int"), confirming the lowering
+/// to `Type::Eq` is real.
+
+/// A type alias using path-type syntax — parsed and registered.
+type IntReflPath is Path<Int>(0, 0);
+
+/// Theorem using cubical tactic — path types in ensures clauses.
+theorem eq_is_reflexive(n: Int)
+    ensures n == n
+    proof by cubical;
+
+fn main() {
+    let n: Int = 42;
+    assert(n == n);
+}

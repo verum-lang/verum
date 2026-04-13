@@ -1833,6 +1833,11 @@ pub fn walk_type<V: Visitor>(visitor: &mut V, ty: &Type) {
         | TypeKind::Inferred
         | TypeKind::Unknown => {}
         TypeKind::Path(path) => visitor.visit_path(path),
+        TypeKind::PathType { carrier, lhs, rhs } => {
+            visit_child!(visitor, carrier.as_ref(), Type);
+            visit_child!(visitor, lhs.as_ref(), Expr);
+            visit_child!(visitor, rhs.as_ref(), Expr);
+        }
         TypeKind::Tuple(types) => {
             for ty in types.iter() {
                 visit_child!(visitor, ty, Type);

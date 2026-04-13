@@ -751,6 +751,8 @@ impl SpecializationVerifier {
             TypeKind::Meta { inner } => self.is_generic_with_context(inner.as_ref(), impl_idx),
             // Type lambdas - check body for genericity
             TypeKind::TypeLambda { body, .. } => self.is_generic_with_context(body.as_ref(), impl_idx),
+            // Path equality type: check carrier for genericity
+            TypeKind::PathType { carrier, .. } => self.is_generic_with_context(carrier.as_ref(), impl_idx),
         }
     }
 

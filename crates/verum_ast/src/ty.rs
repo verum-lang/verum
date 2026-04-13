@@ -148,6 +148,15 @@ pub enum TypeKind {
     /// Named type (identifier or path)
     Path(Path),
 
+    /// Path type: `Path<A>(a, b)` — propositional equality path from
+    /// `a` to `b` in carrier type `A`. Lowered to `Type::Eq` in the
+    /// type checker. Grammar: `path_type_expr` (verum.ebnf line 1049).
+    PathType {
+        carrier: Heap<Type>,
+        lhs: Heap<Expr>,
+        rhs: Heap<Expr>,
+    },
+
     /// Tuple type: (T1, T2, ...)
     Tuple(List<Type>),
 

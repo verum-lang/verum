@@ -152,6 +152,8 @@ pub fn type_to_sort(ty: &Type) -> Sort {
         // Meta types and type lambdas - modeled as uninterpreted
         TypeKind::Meta { .. } => Sort::uninterpreted(Symbol::String("Meta".to_string())),
         TypeKind::TypeLambda { .. } => Sort::uninterpreted(Symbol::String("TypeLambda".to_string())),
+        // Path equality type: use carrier type's sort
+        TypeKind::PathType { carrier, .. } => type_to_sort(carrier),
     }
 }
 

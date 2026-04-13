@@ -20303,6 +20303,18 @@ impl TypeChecker {
                 Ok(Type::unsafe_reference(*mutable, inner_ty))
             }
 
+            // Path type: Path<A>(a, b) → Type::Eq { ty: A, lhs, rhs }
+            TypeKind::PathType { carrier, lhs, rhs } => {
+                let carrier_ty = self.ast_to_type(carrier)?;
+                let lhs_eq = crate::expr_to_eqterm::expr_to_eq_term(lhs);
+                let rhs_eq = crate::expr_to_eqterm::expr_to_eq_term(rhs);
+                Ok(Type::Eq {
+                    ty: Box::new(carrier_ty),
+                    lhs: Box::new(lhs_eq),
+                    rhs: Box::new(rhs_eq),
+                })
+            }
+
             TypeKind::Path(path) => {
                 // Named type (user-defined type or type alias)
                 // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Cross-module type resolution
@@ -43439,6 +43451,7 @@ fn type_kind_description(kind: &verum_ast::ty::TypeKind) -> String {
         TypeKind::Text => WKT::Text.as_str().to_string(),
         TypeKind::Never => "never type !".to_string(),
         TypeKind::Path(path) => format!("path '{}'", path),
+        TypeKind::PathType { .. } => "path type Path<A>(a, b)".to_string(),
         TypeKind::Tuple(_) => "tuple type".to_string(),
         TypeKind::Array { .. } => "array type".to_string(),
         TypeKind::Slice(_) => "slice type".to_string(),

@@ -644,6 +644,16 @@ impl<'a> RecursiveParser<'a> {
             if name.as_str() == "some" {
                 return self.parse_existential_type();
             }
+            // Path type: Path<A>(a, b) — propositional equality path.
+            // Grammar: path_type_expr = 'Path' , type_args , '(' , expression , ',' , expression , ')' ;
+            // `Path` is NOT a keyword — it's a context-sensitive identifier,
+            // matching Verum's philosophy of 3 reserved keywords only.
+            if name.as_str() == "Path" {
+                if let Some(TokenKind::Lt) = self.stream.peek_nth(1).map(|t| t.kind.clone()) {
+                    return self.parse_path_type_expr(start_pos);
+                }
+            }
+
             // Universe type: Type, Type(0), Type(1), Type(u)
             // Grammar: universe_type = 'Type' , [ '(' , universe_level , ')' ] ;
             // `Type` alone is Type(0), `Type(N)` is a concrete universe level,
@@ -962,6 +972,36 @@ impl<'a> RecursiveParser<'a> {
 
         let span = self.stream.make_span(start_pos);
         Ok(Type::new(TypeKind::Universe { level }, span))
+    }
+
+    /// Parse path type expression: `Path<A>(a, b)`.
+    /// Grammar: `path_type_expr = 'Path' , type_args , '(' , expression , ',' , expression , ')' ;`
+    fn parse_path_type_expr(&mut self, start_pos: usize) -> ParseResult<Type> {
+        // Consume 'Path' identifier
+        let name = self.consume_ident()?;
+        debug_assert_eq!(name.as_str(), "Path");
+
+        // Parse type arguments: <A>
+        self.stream.expect(TokenKind::Lt)?;
+        let carrier = self.parse_type()?;
+        self.stream.expect(TokenKind::Gt)?;
+
+        // Parse endpoint expressions: (a, b)
+        self.stream.expect(TokenKind::LParen)?;
+        let lhs = self.parse_expr_no_struct()?;
+        self.stream.expect(TokenKind::Comma)?;
+        let rhs = self.parse_expr_no_struct()?;
+        self.stream.expect(TokenKind::RParen)?;
+
+        let span = self.stream.make_span(start_pos);
+        Ok(Type::new(
+            TypeKind::PathType {
+                carrier: verum_common::Heap::new(carrier),
+                lhs: verum_common::Heap::new(lhs),
+                rhs: verum_common::Heap::new(rhs),
+            },
+            span,
+        ))
     }
 
     /// Parse primitive types: Bool, Int, Float, Char, Text

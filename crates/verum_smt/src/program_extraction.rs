@@ -2393,6 +2393,19 @@ impl CodeGenerator {
                 let param_strs: Vec<String> = params.iter().map(|p| p.name.to_string()).collect();
                 format!("|{}| {}", param_strs.join(", "), self.format_type(body))
             }
+
+            // Path equality type: Path<A>(lhs, rhs)
+            TypeKind::PathType { carrier, lhs, rhs } => {
+                format!(
+                    "Path<{}>({})",
+                    self.format_type(carrier),
+                    format!(
+                        "{}, {}",
+                        self.format_expr(lhs),
+                        self.format_expr(rhs)
+                    )
+                )
+            }
         }
     }
 

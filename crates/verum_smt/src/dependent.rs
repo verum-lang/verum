@@ -196,6 +196,8 @@ impl PiType {
             TypeKind::Record { fields } => {
                 fields.iter().any(|f| self.type_references_name(&f.ty, name))
             }
+            // Path equality type: check the carrier type for name references
+            TypeKind::PathType { carrier, .. } => self.type_references_name(carrier, name),
             // Primitive types, inferred types, Never, and Unknown don't reference names
             TypeKind::Unit
             | TypeKind::Bool
@@ -985,6 +987,10 @@ impl DependentTypeBackend {
                 let var = Int::new_const(name);
                 Ok(Dynamic::from_ast(&var))
             }
+            TypeKind::PathType { carrier, .. } => {
+                // Path equality type - use carrier type for sort
+                self.create_fresh_var(name, carrier)
+            }
         }
     }
 
@@ -1018,6 +1024,8 @@ impl DependentTypeBackend {
                 // Full implementation would check type definitions
                 Ok(())
             }
+            // Path equality type: well-formed if carrier is well-formed
+            TypeKind::PathType { carrier, .. } => self.check_type_well_formed(carrier, translator),
             // All other type kinds are assumed well-formed for now
             TypeKind::Char
             | TypeKind::Text
@@ -1141,6 +1149,8 @@ impl DependentTypeBackend {
                 .map(|f| self.compute_quantifier_depth(&f.ty))
                 .max()
                 .unwrap_or(0),
+            // Path equality type: depth comes from carrier
+            TypeKind::PathType { carrier, .. } => self.compute_quantifier_depth(carrier),
             // Primitive types and inferred types have depth 0
             TypeKind::Unit
             | TypeKind::Bool
@@ -1429,6 +1439,10 @@ impl DependentTypeBackend {
                     Self::extract_type_names_recursive(&field.ty, names);
                 }
             }
+            // Path equality type: recurse into carrier type
+            TypeKind::PathType { carrier, .. } => {
+                Self::extract_type_names_recursive(carrier, names);
+            }
             // Primitives, inferred types, Never, Unknown, and Universe have no type dependencies
             TypeKind::Unit
             | TypeKind::Bool
@@ -1690,6 +1704,10 @@ impl TypeDependencyGraph {
                 for field in fields {
                     self.collect_dependencies_recursive(&field.ty, parent);
                 }
+            }
+            // Path equality type: recurse into carrier type
+            TypeKind::PathType { carrier, .. } => {
+                self.collect_dependencies_recursive(carrier, parent);
             }
             // Primitives, inferred types, Never, Unknown, and Universe have no dependencies
             TypeKind::Unit
@@ -3273,6 +3291,8 @@ impl InductiveType {
                 }
                 Ok(())
             }
+            // Path equality type: check carrier for positivity
+            TypeKind::PathType { carrier, .. } => self.check_positivity_in_type(carrier, positive),
             // DynProtocol, primitives, inferred, Never, Unknown, and Universe don't affect positivity
             TypeKind::DynProtocol { .. }
             | TypeKind::Unit
