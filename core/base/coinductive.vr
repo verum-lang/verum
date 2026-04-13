@@ -1,0 +1,153 @@
+// =============================================================================
+// coinductive.vr — Productivity & Bisimulation for Greatest Fixed Points
+// =============================================================================
+//
+// Layer: Standard Library / Base
+//
+// User-facing surface for the coinductive analysis core
+// (`verum_types::coinductive_analysis`). Coinductive types are
+// *greatest* fixed points — infinite objects defined by what we
+// can observe about them. Streams, infinite trees, processes are
+// the classic examples.
+//
+// ## Productivity
+//
+// A corecursive definition is **productive** iff every prefix of
+// its observable output is computed in finite time. The standard
+// syntactic check is *guarded corecursion*: every recursive
+// self-reference must occur immediately under a constructor of
+// the coinductive type, never inside another function call.
+//
+// ## Bisimulation
+//
+// Two coinductive values are bisimilar iff every observation we
+// can make about one we can make about the other, and the
+// results are themselves bisimilar. This module exposes
+// finite-depth bisimilarity — the limit as depth → ∞ is the
+// genuine relation, but for productivity-checked code a
+// bounded-depth check is sound for all observable contexts up
+// to that depth.
+//
+// =============================================================================
+
+module core.base.coinductive;
+
+// =============================================================================
+// 1. Productivity check
+// =============================================================================
+
+/// One self-reference site in a corecursive definition.
+/// `guard_depth = 0` means the call is at the top of the body —
+/// unguarded, hence non-productive.
+public type CorecursiveCall is {
+    callee: Text,
+    guard_depth: Int{>= 0},
+};
+
+public fn corec_call(callee: Text, guard_depth: Int{>= 0}) -> CorecursiveCall {
+    CorecursiveCall { callee, guard_depth }
+}
+
+public fn is_guarded(c: CorecursiveCall) -> Bool {
+    c.guard_depth >= 1
+}
+
+/// Productivity verdict from `check_productivity`.
+public type ProductivityResult is
+    /// All recursive calls are guarded.
+    | Productive
+    /// At least one recursive call is unguarded.
+    | NonProductive { unguarded: List<Text> };
+
+/// Check productivity by examining all self-reference sites.
+public fn check_productivity(calls: List<CorecursiveCall>) -> ProductivityResult {
+    let mut unguarded: List<Text> = [];
+    let mut i: Int = 0;
+    while i < calls.len() {
+        if !is_guarded(calls[i]) {
+            unguarded.push(calls[i].callee);
+        }
+        i = i + 1;
+    }
+    if unguarded.len() == 0 {
+        ProductivityResult.Productive
+    } else {
+        ProductivityResult.NonProductive { unguarded }
+    }
+}
+
+// =============================================================================
+// 2. Observation traces
+// =============================================================================
+
+/// A single observation: which destructor was applied + payload.
+public type Observation is {
+    label: Text,
+    payload: Text,
+};
+
+public fn observation(label: Text, payload: Text) -> Observation {
+    Observation { label, payload }
+}
+
+/// A finite trace of observations on a coinductive value.
+public type ObservationTrace is { steps: List<Observation> };
+
+public fn trace(steps: List<Observation>) -> ObservationTrace {
+    ObservationTrace { steps }
+}
+
+/// Take the first `n` observations of a trace.
+public fn trace_prefix(t: ObservationTrace, n: Int{>= 0}) -> ObservationTrace {
+    let mut out: List<Observation> = [];
+    let mut i: Int = 0;
+    let limit = if n < t.steps.len() { n } else { t.steps.len() };
+    while i < limit {
+        out.push(t.steps[i]);
+        i = i + 1;
+    }
+    trace(out)
+}
+
+// =============================================================================
+// 3. Bisimulation
+// =============================================================================
+
+/// Result of a depth-bounded bisimilarity check.
+public type BisimulationResult is
+    | Bisimilar { observed_depth: Int }
+    | Distinct { divergence_at: Int };
+
+public fn observations_equal(a: Observation, b: Observation) -> Bool {
+    a.label == b.label && a.payload == b.payload
+}
+
+/// Two traces are bisimilar up to `depth` iff their first `depth`
+/// observations agree pairwise.
+public fn bisimilar_up_to(
+    left: ObservationTrace,
+    right: ObservationTrace,
+    depth: Int{>= 0},
+) -> BisimulationResult {
+    let l = trace_prefix(left, depth);
+    let r = trace_prefix(right, depth);
+
+    if l.steps.len() != r.steps.len() {
+        let div = if l.steps.len() < r.steps.len() {
+            l.steps.len()
+        } else {
+            r.steps.len()
+        };
+        return BisimulationResult.Distinct { divergence_at: div };
+    }
+
+    let mut i: Int = 0;
+    while i < l.steps.len() {
+        if !observations_equal(l.steps[i], r.steps[i]) {
+            return BisimulationResult.Distinct { divergence_at: i };
+        }
+        i = i + 1;
+    }
+
+    BisimulationResult.Bisimilar { observed_depth: l.steps.len() }
+}

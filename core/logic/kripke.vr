@@ -1,0 +1,198 @@
+// =============================================================================
+// kripke.vr — Kripke Semantics for Modal Logic
+// =============================================================================
+//
+// Layer: Standard Library / Logic
+//
+// User-facing surface for the Kripke-semantics analysis core
+// (`verum_types::kripke`). A Kripke frame is a set of *worlds*
+// plus an *accessibility* relation; modal formulas `□φ` and `◇φ`
+// are evaluated over the frame.
+//
+// ## Frame classes
+//
+// Different modal logics correspond to constraints on
+// accessibility:
+//
+//   K    no constraints
+//   T    reflexive               (every world sees itself)
+//   B    symmetric
+//   4    transitive               (S4 = T + 4)
+//   5    Euclidean
+//   S5   equivalence              (refl + sym + trans)
+//
+// ## Example
+//
+// ```verum
+// // p holds at w1; w0 → w1, so □p holds at w0.
+// let f: KripkeFrame = ...;
+// let v: Valuation = ...;
+// assert(evaluate(modal_box(modal_atom("p")), f, v, world("0")));
+// ```
+//
+// =============================================================================
+
+module core.logic.kripke;
+
+// =============================================================================
+// 1. Worlds and frames
+// =============================================================================
+
+/// A world in a Kripke frame.
+public type World is { id: Text };
+
+public fn world(id: Text) -> World {
+    World { id }
+}
+
+/// An accessibility edge `from → to`.
+public type Edge is { from: World, to: World };
+
+public fn edge(from: World, to: World) -> Edge {
+    Edge { from, to }
+}
+
+/// A Kripke frame: worlds + accessibility edges.
+public type KripkeFrame is {
+    worlds: List<World>,
+    edges: List<Edge>,
+};
+
+public fn frame(worlds: List<World>, edges: List<Edge>) -> KripkeFrame {
+    KripkeFrame { worlds, edges }
+}
+
+/// Worlds accessible from `w` in the frame.
+public fn accessible(f: KripkeFrame, w: World) -> List<World> {
+    let mut out: List<World> = [];
+    let mut i: Int = 0;
+    while i < f.edges.len() {
+        if f.edges[i].from.id == w.id {
+            out.push(f.edges[i].to);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// 2. Valuation
+// =============================================================================
+
+/// A single fact: atom `name` holds at world `world` with value
+/// `truth`.
+public type WorldFact is {
+    world_id: Text,
+    atom: Text,
+    truth: Bool,
+};
+
+/// Truth-value assignment per (world, atom) pair.
+public type Valuation is { facts: List<WorldFact> };
+
+public fn valuation(facts: List<WorldFact>) -> Valuation {
+    Valuation { facts }
+}
+
+/// Look up the truth value of `atom` at `w`. Defaults to `false`
+/// if no entry is present.
+public fn lookup(v: Valuation, w: World, atom: Text) -> Bool {
+    let mut i: Int = 0;
+    while i < v.facts.len() {
+        let fact = v.facts[i];
+        if fact.world_id == w.id && fact.atom == atom {
+            return fact.truth;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+// =============================================================================
+// 3. Modal formulas
+// =============================================================================
+
+/// A modal-logic formula over Kripke frames.
+public type ModalForm is
+    | True
+    | False
+    | Atom { name: Text }
+    | Not { inner: Heap<ModalForm> }
+    | And { left: Heap<ModalForm>, right: Heap<ModalForm> }
+    | Or { left: Heap<ModalForm>, right: Heap<ModalForm> }
+    | Implies { left: Heap<ModalForm>, right: Heap<ModalForm> }
+    /// `□φ` — necessity (holds at every accessible world).
+    | Box { inner: Heap<ModalForm> }
+    /// `◇φ` — possibility (holds at some accessible world).
+    | Diamond { inner: Heap<ModalForm> };
+
+public fn modal_atom(name: Text) -> ModalForm {
+    ModalForm.Atom { name }
+}
+
+public fn modal_not(inner: ModalForm) -> ModalForm {
+    ModalForm.Not { inner: Heap(inner) }
+}
+
+public fn modal_and(a: ModalForm, b: ModalForm) -> ModalForm {
+    ModalForm.And { left: Heap(a), right: Heap(b) }
+}
+
+public fn modal_or(a: ModalForm, b: ModalForm) -> ModalForm {
+    ModalForm.Or { left: Heap(a), right: Heap(b) }
+}
+
+public fn modal_implies(a: ModalForm, b: ModalForm) -> ModalForm {
+    ModalForm.Implies { left: Heap(a), right: Heap(b) }
+}
+
+public fn modal_box(inner: ModalForm) -> ModalForm {
+    ModalForm.Box { inner: Heap(inner) }
+}
+
+public fn modal_diamond(inner: ModalForm) -> ModalForm {
+    ModalForm.Diamond { inner: Heap(inner) }
+}
+
+// =============================================================================
+// 4. Evaluator
+// =============================================================================
+
+/// Recursive modal-logic evaluator. Vacuous-truth for □ when
+/// no worlds are accessible; ◇ requires at least one witness.
+public fn evaluate(formula: ModalForm, f: KripkeFrame, v: Valuation, w: World) -> Bool {
+    match formula {
+        ModalForm.True => true,
+        ModalForm.False => false,
+        ModalForm.Atom { name } => lookup(v, w, name),
+        ModalForm.Not { inner } => !evaluate(*inner, f, v, w),
+        ModalForm.And { left, right } =>
+            evaluate(*left, f, v, w) && evaluate(*right, f, v, w),
+        ModalForm.Or { left, right } =>
+            evaluate(*left, f, v, w) || evaluate(*right, f, v, w),
+        ModalForm.Implies { left, right } =>
+            !evaluate(*left, f, v, w) || evaluate(*right, f, v, w),
+        ModalForm.Box { inner } => {
+            let succs = accessible(f, w);
+            let mut i: Int = 0;
+            while i < succs.len() {
+                if !evaluate(*inner, f, v, succs[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            true
+        },
+        ModalForm.Diamond { inner } => {
+            let succs = accessible(f, w);
+            let mut i: Int = 0;
+            while i < succs.len() {
+                if evaluate(*inner, f, v, succs[i]) {
+                    return true;
+                }
+                i = i + 1;
+            }
+            false
+        },
+    }
+}

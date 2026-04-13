@@ -1,0 +1,117 @@
+// =============================================================================
+// process.vr — π-calculus Process Algebra
+// =============================================================================
+//
+// Layer: Standard Library / Concurrency
+//
+// User-facing surface for the π-calculus analysis core
+// (`verum_types::pi_calculus`). Milner's π-calculus models mobile
+// concurrent processes where channels are first-class values that
+// can be sent over other channels — modelling dynamic network
+// topology, not just a fixed set of communication paths.
+//
+// Where `core/concurrency/session.vr` describes a *single channel's
+// protocol*, this module describes the *entire interaction
+// pattern* between concurrently executing parties.
+//
+// ## Syntax
+//
+// ```text
+//     P, Q ::= 0                  (terminated process)
+//            | P | Q              (parallel composition)
+//            | (νx) P             (restriction: x is fresh in P)
+//            | x⟨y⟩.P             (send y on x, continue as P)
+//            | x(y).P             (recv on x, bind to y, continue as P)
+//            | !P                 (replication: ∞ copies of P)
+// ```
+//
+// ## COMM rule
+//
+// ```text
+//     x⟨y⟩.P  |  x(z).Q   →   P  |  Q[y/z]
+// ```
+//
+// =============================================================================
+
+module core.concurrency.process;
+
+// =============================================================================
+// 1. The process algebra
+// =============================================================================
+
+/// A π-calculus process.
+public type Process is
+    /// `0` — terminated.
+    | Zero
+    /// `P | Q` — parallel composition.
+    | Par { left: Heap<Process>, right: Heap<Process> }
+    /// `(νx) P` — restriction; `x` is bound and fresh in `P`.
+    | Restrict { name: Text, body: Heap<Process> }
+    /// `x⟨y⟩.P` — send `message` on `channel`, continue as `cont`.
+    | Send { channel: Text, message: Text, cont: Heap<Process> }
+    /// `x(z).P` — receive on `channel`, bind to `binder`, continue.
+    | Recv { channel: Text, binder: Text, cont: Heap<Process> }
+    /// `!P` — replication.
+    | Replicate { inner: Heap<Process> };
+
+// =============================================================================
+// 2. Smart constructors
+// =============================================================================
+
+public fn proc_zero() -> Process {
+    Process.Zero
+}
+
+public fn proc_par(p: Process, q: Process) -> Process {
+    Process.Par { left: Heap(p), right: Heap(q) }
+}
+
+public fn proc_restrict(name: Text, body: Process) -> Process {
+    Process.Restrict { name, body: Heap(body) }
+}
+
+public fn proc_send(channel: Text, message: Text, cont: Process) -> Process {
+    Process.Send { channel, message, cont: Heap(cont) }
+}
+
+public fn proc_recv(channel: Text, binder: Text, cont: Process) -> Process {
+    Process.Recv { channel, binder, cont: Heap(cont) }
+}
+
+public fn proc_replicate(inner: Process) -> Process {
+    Process.Replicate { inner: Heap(inner) }
+}
+
+// =============================================================================
+// 3. Capture-avoiding substitution
+// =============================================================================
+
+/// Substitute `from` with `to` everywhere it appears free,
+/// respecting restriction and recv binders that shadow `from`.
+public fn substitute(p: Process, from: Text, to: Text) -> Process {
+    match p {
+        Process.Zero => Process.Zero,
+        Process.Par { left, right } => proc_par(
+            substitute(*left, from, to),
+            substitute(*right, from, to),
+        ),
+        Process.Restrict { name, body } => {
+            if name == from { p }
+            else { proc_restrict(name, substitute(*body, from, to)) }
+        },
+        Process.Send { channel, message, cont } => {
+            let new_ch = if channel == from { to } else { channel };
+            let new_msg = if message == from { to } else { message };
+            proc_send(new_ch, new_msg, substitute(*cont, from, to))
+        },
+        Process.Recv { channel, binder, cont } => {
+            let new_ch = if channel == from { to } else { channel };
+            if binder == from {
+                proc_recv(new_ch, binder, *cont)
+            } else {
+                proc_recv(new_ch, binder, substitute(*cont, from, to))
+            }
+        },
+        Process.Replicate { inner } => proc_replicate(substitute(*inner, from, to)),
+    }
+}
