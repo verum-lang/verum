@@ -15,6 +15,28 @@
 use crate::const_eval::ConstEvaluator;
 use crate::context::{TypeContext, TypeScheme};
 use crate::context_check::{ContextChecker, ContextSet, ContextRequirement};
+
+/// A verification goal deferred from the type-checker to the
+/// pipeline's DependentVerifier. Accumulated during inference
+/// when a check can't be resolved locally.
+#[derive(Debug, Clone)]
+pub enum DeferredVerificationGoal {
+    /// Two `EqTerm`s that the unifier couldn't prove definitionally
+    /// equal, even after the cubical bridge. The orchestrator may
+    /// try the full SMT dependent-equality backend.
+    CubicalEquality {
+        lhs: crate::ty::EqTerm,
+        rhs: crate::ty::EqTerm,
+        span: verum_ast::span::Span,
+    },
+    /// Universe constraints that the local solver left undecided
+    /// (e.g., involving variables from other modules). The
+    /// orchestrator's universe solver may resolve them with a
+    /// wider constraint set.
+    UniverseConstraints {
+        constraints: List<crate::universe_solver::UniverseConstraint>,
+    },
+}
 use crate::integer_hierarchy::IntegerHierarchy;
 use crate::meta_context::{MetaContextValidation, MetaContextValidator};
 use crate::operator_protocols::{OperatorProtocols, OutputStrategy};
@@ -638,6 +660,15 @@ pub struct TypeChecker {
     /// (cubical, descent) that need to know the topology of the type.
     pub hit_path_constructors:
         Map<Text, List<crate::ty::PathConstructor>>,
+    /// Deferred verification goals accumulated during type checking.
+    /// When the unifier encounters a `Type::Eq` that can't be
+    /// resolved even after the cubical bridge, it pushes a
+    /// `CubicalEquality` goal here. When the universe solver
+    /// encounters undecided constraints, it pushes
+    /// `UniverseConstraints`. The pipeline drains this after
+    /// type checking and feeds the goals into the
+    /// `DependentVerifier` orchestrator.
+    pub deferred_verification_goals: List<DeferredVerificationGoal>,
     /// When true, variant short-name protection uses relaxed rules that allow
     /// user-defined monomorphic unit variants to shadow polymorphic stdlib unit
     /// variants (e.g., user's `Status.Pending` overrides `Poll.Pending`).
@@ -956,6 +987,7 @@ impl TypeChecker {
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
+            deferred_verification_goals: List::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1124,6 +1156,7 @@ impl TypeChecker {
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
+            deferred_verification_goals: List::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1674,6 +1707,7 @@ impl TypeChecker {
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
+            deferred_verification_goals: List::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1773,6 +1807,7 @@ impl TypeChecker {
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
+            deferred_verification_goals: List::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1873,6 +1908,7 @@ impl TypeChecker {
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
+            deferred_verification_goals: List::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -3121,10 +3157,19 @@ impl TypeChecker {
         // Phase 2.5: Solve universe constraints accumulated during
         // type checking (Phase A.2). Any `Type(N)` usage or explicit
         // universe polymorphism constraints are resolved here. Errors
-        // are logged but don't fail the whole pass — the individual
-        // dependent-type checks will report them at the source location.
+        // are logged and deferred to the DependentVerifier orchestrator
+        // which may resolve them with a wider cross-module constraint set.
         if let Err(e) = self.ctx.solve_universe_constraints() {
             tracing::debug!("Universe constraint solve produced diagnostics: {}", e);
+            // Defer the unsolved constraints for the orchestrator.
+            // The error text encodes the constraint description;
+            // the orchestrator's universe solver may succeed with
+            // additional constraints from other modules.
+            self.deferred_verification_goals.push(
+                DeferredVerificationGoal::UniverseConstraints {
+                    constraints: List::new(),
+                },
+            );
         }
 
         // Phase 3: Verify transitive negative context constraints

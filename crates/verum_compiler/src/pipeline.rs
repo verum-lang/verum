@@ -626,6 +626,11 @@ pub struct CompilationPipeline<'s> {
     /// stdlib source, enabling fast compilation of user code.
     stdlib_metadata: Option<std::sync::Arc<verum_types::core_metadata::CoreMetadata>>,
 
+    /// Deferred verification goals drained from the type-checker
+    /// after Phase 5. Consumed by the DependentVerifier in
+    /// Phase 4.4 of compile_ast_to_vbc.
+    deferred_verification_goals: verum_common::List<verum_types::infer::DeferredVerificationGoal>,
+
     // =========================================================================
     // STDLIB BOOTSTRAP MODE FIELDS
     // =========================================================================
@@ -764,6 +769,7 @@ impl<'s> CompilationPipeline<'s> {
             collected_contexts: List::new(),
             type_registry: None,
             stdlib_metadata: None,
+            deferred_verification_goals: verum_common::List::new(),
             // Stdlib bootstrap mode fields - empty for normal mode
             stdlib_resolver: None,
             global_function_registry: std::collections::HashMap::new(),
@@ -831,7 +837,8 @@ impl<'s> CompilationPipeline<'s> {
             stdlib_artifacts: None,
             collected_contexts: List::new(),
             type_registry: None,
-            stdlib_metadata: None, // Not used in bootstrap mode
+            stdlib_metadata: None,
+            deferred_verification_goals: verum_common::List::new(), // Not used in bootstrap mode
             // Stdlib bootstrap mode fields - initialized
             stdlib_resolver: Some(resolver),
             global_function_registry: std::collections::HashMap::new(),
@@ -5702,6 +5709,20 @@ impl<'s> CompilationPipeline<'s> {
         }
         checker.clear_diagnostics();
 
+        // Drain deferred verification goals from the type-checker.
+        // These are Type::Eq failures that the cubical bridge couldn't
+        // resolve and universe constraints the local solver left
+        // undecided. Store them on the pipeline for the
+        // DependentVerifier phase (Phase 4.4) to consume.
+        let deferred_goals = std::mem::take(&mut checker.deferred_verification_goals);
+        if !deferred_goals.is_empty() {
+            tracing::debug!(
+                "Type checker deferred {} verification goal(s) for orchestrator",
+                deferred_goals.len()
+            );
+        }
+        self.deferred_verification_goals = deferred_goals;
+
         let elapsed = start.elapsed();
         let metrics = checker.metrics();
 
@@ -9575,6 +9596,35 @@ impl<'s> CompilationPipeline<'s> {
                                 type_name,
                             )
                             .at(location),
+                        );
+                    }
+                }
+            }
+
+            // Feed deferred verification goals from the type-checker
+            // into the orchestrator. These are Type::Eq failures that
+            // the cubical bridge couldn't resolve and universe
+            // constraints the local solver left undecided.
+            for goal in self.deferred_verification_goals.iter() {
+                match goal {
+                    verum_types::infer::DeferredVerificationGoal::CubicalEquality {
+                        lhs, rhs, ..
+                    } => {
+                        use verum_types::cubical_bridge::eq_to_cubical;
+                        verifier.add_goal(
+                            verum_verification::dependent_verification::DependentGoalKind::CubicalEquality {
+                                lhs: eq_to_cubical(lhs),
+                                rhs: eq_to_cubical(rhs),
+                            },
+                        );
+                    }
+                    verum_types::infer::DeferredVerificationGoal::UniverseConstraints {
+                        constraints,
+                    } => {
+                        verifier.add_goal(
+                            verum_verification::dependent_verification::DependentGoalKind::UniverseConstraints(
+                                constraints.clone(),
+                            ),
                         );
                     }
                 }
