@@ -5360,41 +5360,53 @@ impl<'s> CompilationPipeline<'s> {
                 .unwrap_or(false);
             if !has_metadata_contexts {
                 if let Some(archive) = crate::embedded_stdlib::get_embedded_stdlib() {
-                    let mut found_contexts: Vec<String> = Vec::new();
+                    // Enable lenient context checking during pre-registration.
+                    // Stdlib context method types may reference types from the
+                    // same module that aren't registered yet — lenient mode
+                    // defers method validation to call sites.
+                    checker.set_lenient_context_checking(true);
+                    let mut found_count = 0usize;
                     for path in archive.file_paths() {
-                        if path.ends_with(".vr") {
-                            let content = match archive.get_file(path) {
-                                Some(c) => c,
-                                None => continue,
-                            };
-                            for line in content.lines() {
-                                let trimmed = line.trim();
-                                if trimmed.starts_with("public context ") {
-                                    let rest = trimmed.strip_prefix("public context ").unwrap_or("");
-                                    let name = if rest.starts_with("protocol ") {
-                                        rest.strip_prefix("protocol ")
-                                            .and_then(|s| s.split_whitespace().next())
-                                    } else {
-                                        rest.split_whitespace().next()
-                                    };
-                                    if let Some(n) = name {
-                                        let clean = n.trim_end_matches('{').trim();
-                                        if !clean.is_empty() {
-                                            let ctx = verum_common::Text::from(clean);
-                                            found_contexts.push(clean.to_string());
-                                            if !self.collected_contexts.contains(&ctx) {
-                                                checker.register_stdlib_context(ctx);
-                                            }
+                        if !path.ends_with(".vr") {
+                            continue;
+                        }
+                        let content = match archive.get_file(path) {
+                            Some(c) => c,
+                            None => continue,
+                        };
+                        // Quick check: skip files without context declarations
+                        if !content.contains("public context ") {
+                            continue;
+                        }
+                        // Parse the file with the actual parser to get
+                        // full ContextDecl AST nodes with method signatures.
+                        let mut parser = verum_fast_parser::Parser::new(content);
+                        if let Ok(module) = parser.parse_module() {
+                            for item in &module.items {
+                                if let verum_ast::ItemKind::Context(ctx_decl) = &item.kind {
+                                    if ctx_decl.visibility == verum_ast::decl::Visibility::Public {
+                                        let ctx_name = verum_common::Text::from(
+                                            ctx_decl.name.name.as_str(),
+                                        );
+                                        if !self.collected_contexts.contains(&ctx_name) {
+                                            // Register with FULL method signatures
+                                            checker.register_stdlib_context_full(
+                                                ctx_name,
+                                                ctx_decl.clone(),
+                                            );
+                                            found_count += 1;
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    if !found_contexts.is_empty() {
+                    // Restore strict context checking for user code.
+                    checker.set_lenient_context_checking(false);
+                    if found_count > 0 {
                         tracing::debug!(
-                            "Stdlib context pre-registration: {} contexts from embedded archive: {:?}",
-                            found_contexts.len(), found_contexts
+                            "Stdlib context pre-registration: {} contexts with full signatures from embedded archive",
+                            found_count
                         );
                     }
                 }
@@ -5766,6 +5778,20 @@ impl<'s> CompilationPipeline<'s> {
         };
         if has_test_annotation {
             checker.context_resolver_mut().set_lenient_contexts(true);
+        }
+
+        // Enable lenient contexts for stdlib files (core/**/*.vr).
+        // Stdlib modules reference contexts from sibling modules that
+        // may not be fully loaded in single-file check mode. Lenient
+        // mode defers method-level validation to the call site where
+        // the context is `provide`d with a concrete implementation.
+        let is_stdlib_file = self.session.options().input
+            .to_str()
+            .map(|p| p.contains("/core/") || p.contains("\\core\\"))
+            .unwrap_or(false);
+        if is_stdlib_file {
+            checker.context_resolver_mut().set_lenient_contexts(true);
+            checker.set_lenient_context_checking(true);
         }
 
         // Pass 5: Type check all items (function bodies, impl blocks, etc.)

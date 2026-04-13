@@ -6916,6 +6916,51 @@ impl TypeChecker {
         );
     }
 
+    /// Register a stdlib context with full method signatures from
+    /// its parsed `ContextDecl` AST node. Replicates the full
+    /// registration path from `check_item(ItemKind::Context)`:
+    ///   1. Store in context_declarations map
+    ///   2. Build Record type from methods
+    ///   3. Register type in context resolver
+    ///   4. Register in context checker
+    /// This enables `ComputeDevice.device_type()` method calls
+    /// to type-check correctly even when the declaring module
+    /// hasn't been type-checked.
+    pub fn register_stdlib_context_full(
+        &mut self,
+        name: Text,
+        decl: verum_ast::decl::ContextDecl,
+    ) {
+        // Step 1: store declaration for method-level lookups
+        self.context_declarations
+            .insert(name.clone(), decl.clone());
+
+        // Step 2+3: build context type and register with resolver.
+        // If type building fails (unknown types in method sigs
+        // because the declaring module's types aren't registered
+        // yet), fall back to name-only registration. Method
+        // validation runs lazily in lenient mode.
+        if let Ok(context_type) = self.build_context_type_from_decl(&decl) {
+            self.context_resolver
+                .register_context_type(name.clone(), context_type);
+        }
+
+        // Step 3b: register as protocol-as-context for resolver
+        self.context_resolver
+            .register_protocol_as_context(name.clone());
+
+        // Step 4: register in checker
+        self.context_checker.register_context(name.clone(), decl);
+
+    }
+
+    /// Enable/disable lenient context checking. In lenient mode,
+    /// undefined-context and missing-method errors are suppressed.
+    /// Used temporarily during stdlib context pre-registration.
+    pub fn set_lenient_context_checking(&mut self, lenient: bool) {
+        self.context_checker.set_lenient(lenient);
+    }
+
     /// Register multiple protocols as valid context types.
     ///
     /// Convenience method for registering protocols from module exports.
