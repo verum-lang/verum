@@ -5518,6 +5518,20 @@ impl ProofSearchEngine {
             "omega" => self.try_omega(goal),
             "blast" => self.try_blast(goal),
             "auto" => self.try_auto(goal),
+            // `cubical` tactic — discharges path-equality goals via
+            // the EqTerm↔CubicalTerm bridge. The underlying engine
+            // is identical to `auto`: when the goal is a `Type::Eq`,
+            // the unifier already routes through the cubical
+            // normalizer (transport-refl, sym-refl, hcomp-collapse,
+            // path-lambda β). Naming the tactic `cubical` documents
+            // intent and exposes it from `proof by cubical;` syntax.
+            "cubical" => self.try_auto(goal),
+            // `descent` tactic — for sheaf descent goals (covering
+            // sieves with compatible local sections). Routes through
+            // auto; the structural reduction happens in the SMT
+            // domains/sheaf encoding when goals are appropriately
+            // shaped (covering family + compatibility witness).
+            "descent" => self.try_auto(goal),
             _ => Err(ProofError::TacticFailed(
                 format!("Unknown tactic: {}", name).into(),
             )),

@@ -1,0 +1,31 @@
+// @test: verify-pass
+// @level: L1
+// @tags: cubical, tactics, dependent-equality
+
+/// `proof by cubical;` — exercises the cubical tactic dispatch.
+///
+/// The tactic name `cubical` is registered in
+/// `verum_smt::proof_search::try_named_tactic` and routes path-equality
+/// goals through the EqTerm↔CubicalTerm bridge.
+///
+/// At the value level the goals here are simple equalities — the
+/// machinery becomes interesting once the goals involve `transport`,
+/// `hcomp`, or path-lambda β-reduction, which the unifier discharges
+/// through the bridge automatically.
+
+theorem path_refl_int(x: Int)
+    ensures x == x
+    proof by cubical;
+
+theorem path_refl_bool(b: Bool)
+    ensures b == b
+    proof by cubical;
+
+theorem descent_trivial_int(x: Int)
+    ensures x == x
+    proof by descent;
+
+fn main() {
+    let n: Int = 42;
+    assert(n == n);
+}

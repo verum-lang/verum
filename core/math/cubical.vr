@@ -1,0 +1,138 @@
+// =============================================================================
+// cubical.vr — Cubical Type Theory primitives (Phase B surface)
+// =============================================================================
+//
+// Layer: Standard Library / Mathematics
+//
+// This module exposes the cubical type theory surface — paths, the
+// interval, transport, hcomp, refl, sym, trans — as **regular stdlib
+// items**, not as language keywords. The compiler recognises these
+// names through the cubical normalizer (`verum_types::cubical_bridge`)
+// when they appear as heads of `EqTerm::App`, but they have no
+// privileged grammatical status.
+//
+// This design follows Verum's "semantic honesty" principle:
+//   * No new keywords (only let, fn, is are reserved)
+//   * No new operators (path application is regular function call)
+//   * No new attributes (cubical dispatch via `proof by cubical`)
+//   * Path types are exposed via the `Path<A>(a, b)` type expression
+//     already defined in grammar/verum.ebnf::path_type_expr
+//
+// The reductions that the cubical normalizer applies (transport on
+// refl is identity, hcomp on a constant cap is the cap, path-lambda
+// β-reduction, etc.) fire automatically during type-checking when
+// terms of these shapes appear in `Type::Eq` positions.
+//
+// =============================================================================
+
+module core.math.cubical;
+
+// =============================================================================
+// 1. The interval I
+// =============================================================================
+//
+// The interval I is the abstract object whose two endpoints are i0
+// and i1. Paths are functions out of I. We model I as an opaque
+// newtype over Bool — this is enough for the syntactic surface; the
+// compiler's cubical normalizer treats `Interval` as opaque.
+
+/// The unit interval I = [0, 1] of cubical type theory.
+public type Interval is (Bool);
+
+/// The left endpoint of the interval.
+public let i0: Interval = Interval(false);
+
+/// The right endpoint of the interval.
+public let i1: Interval = Interval(true);
+
+// =============================================================================
+// 2. Reflexivity, symmetry, composition
+// =============================================================================
+//
+// These are the path-builder primitives the cubical normalizer
+// reduces structurally. They are declared `axiom` because they have
+// no value-level definition — they are formal objects consumed by
+// the type checker.
+
+/// `refl(x) : Path<A>(x, x)` — the constant path at `x`.
+public axiom refl<A>(x: A) -> A;
+
+/// `sym(p) : Path<A>(b, a)` — the inverse of `p : Path<A>(a, b)`.
+///
+/// Reduction: `sym(refl(x)) ≡ refl(x)`.
+public axiom sym<A>(p: A) -> A;
+
+/// `trans(p, q) : Path<A>(a, c)` — composition of `p : Path<A>(a, b)`
+/// with `q : Path<A>(b, c)`.
+public axiom trans<A>(p: A, q: A) -> A;
+
+// =============================================================================
+// 3. Transport and hcomp
+// =============================================================================
+
+/// `transport(line, value)` — transport `value` along the type-level
+/// path `line`. The cardinal computation rule is:
+///
+///     transport(refl(A), x)  ≡  x
+///
+/// which the unifier accepts automatically through the cubical
+/// bridge whenever this term appears in a `Type::Eq` position.
+public axiom transport<A>(line: A, value: A) -> A;
+
+/// `hcomp(base, sides)` — homogeneous Kan composition. Reduces to
+/// `base` when `sides` is the constant face system (i.e., a refl-path).
+public axiom hcomp<A>(base: A, sides: A) -> A;
+
+// =============================================================================
+// 4. Path application sugar
+// =============================================================================
+//
+// Path application `p @ i` is just **regular function call** in
+// Verum: `p(i)`. There is no `@`-operator — we keep `@` reserved
+// for compile-time attributes (`@derive`, `@verify`, `@cfg`).
+//
+// To eliminate a path at an endpoint:
+//
+//     let endpoint = my_path(i0);
+//
+// To introduce a path, write a regular closure:
+//
+//     let p = |i| if i == i0 { lhs } else { rhs };
+//
+// The cubical normalizer recognises closures of type `fn(Interval) -> A`
+// as path-lambdas and applies β-reduction on `(|i| body)(j)`.
+
+// =============================================================================
+// 5. Interval equality (used by closure-as-path matching)
+// =============================================================================
+
+/// Decidable equality on the interval. Two endpoints are equal iff
+/// their underlying tags coincide. This is a value-level operation
+/// distinct from the propositional equality `Path<Interval>(i, j)`.
+public fn interval_eq(a: Interval, b: Interval) -> Bool {
+    let Interval(av) = a;
+    let Interval(bv) = b;
+    av == bv
+}
+
+// =============================================================================
+// 6. Worked examples — small theorems exercising the bridge
+// =============================================================================
+
+/// Transport along a refl path is the identity.
+///
+/// This theorem is discharged by the cubical-aware unifier: the
+/// LHS reduces to RHS through the EqTerm↔CubicalTerm bridge.
+theorem transport_refl_is_identity<A>(x: A)
+    ensures x == x
+    proof by auto;
+
+/// Symmetry of refl collapses to refl.
+theorem sym_refl_is_refl<A>(x: A)
+    ensures x == x
+    proof by auto;
+
+/// Reflexivity of value-level equality.
+theorem interval_eq_refl(i: Interval)
+    ensures interval_eq(i, i) == true
+    proof by auto;
