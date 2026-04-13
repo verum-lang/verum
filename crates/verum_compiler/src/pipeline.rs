@@ -6002,62 +6002,21 @@ impl<'s> CompilationPipeline<'s> {
         let hints_db = HintsDatabase::with_core();
         let mut proof_engine = ProofSearchEngine::with_hints(hints_db);
 
-        // Refinement reflection: scan the module for pure, total
-        // functions and reflect their definitions as SMT axioms
-        // into the proof engine. This enables `proof by auto` to
-        // unfold user-defined function calls via Z3 instead of
-        // treating them as uninterpreted symbols.
-        {
-            use verum_smt::refinement_reflection::{
-                ReflectedFunction, RefinementReflectionRegistry,
-            };
-            let mut registry = RefinementReflectionRegistry::new();
-            for item in &module.items {
-                if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                    // Reflect functions that are:
-                    //   1. Pure: no contexts (using []) declared
-                    //   2. Total: no @partial attribute
-                    //   3. Have a simple body (single return expression)
-                    // This is a conservative approximation; the
-                    // full reflection gate checks purity/totality
-                    // via the type checker's PropertySet analysis.
-                    let has_contexts = !func_decl.contexts.is_empty();
-                    let has_partial_attr = func_decl.attributes.iter().any(|a| {
-                        format!("{:?}", a).contains("partial")
-                    });
-                    if !has_contexts && !has_partial_attr && !func_decl.params.is_empty() {
-                        let fn_name = func_decl.name.name.as_str();
-                        let params: Vec<verum_common::Text> = func_decl
-                            .params
-                            .iter()
-                            .map(|p| verum_common::Text::from(format!("{:?}", p.kind)))
-                            .collect();
-                        let sorts: Vec<verum_common::Text> = params
-                            .iter()
-                            .map(|_| verum_common::Text::from("Int"))
-                            .collect();
-                        let body_text = verum_common::Text::from(
-                            format!("({})", fn_name),
-                        );
-                        let rf = ReflectedFunction {
-                            name: verum_common::Text::from(fn_name),
-                            parameters: params.into_iter().collect(),
-                            body_smtlib: body_text,
-                            return_sort: verum_common::Text::from("Int"),
-                            parameter_sorts: sorts.into_iter().collect(),
-                        };
-                        let _ = registry.register(rf);
-                    }
-                }
-            }
-            if !registry.is_empty() {
-                tracing::debug!(
-                    "Refinement reflection: {} function(s) reflected as SMT axioms",
-                    registry.len()
-                );
-                proof_engine.set_reflection_registry(registry);
-            }
-        }
+        // Refinement reflection: the registry is available on the
+        // proof engine for callers that populate it externally (via
+        // `set_reflection_registry`). Automatic collection from
+        // parsed function bodies requires a real Expr→SMT-LIB
+        // translator — which does not exist yet. Rather than emit
+        // fake axioms that claim to unfold function bodies but
+        // actually don't, we leave the registry empty here and let
+        // the infrastructure activate when the translator is ready.
+        //
+        // The manual path works today: users can build a
+        // RefinementReflectionRegistry in a `@meta` function and
+        // call `set_reflection_registry` on the engine via the
+        // MetaRuntime bridge. This is the honest, philosophy-
+        // aligned approach: no pretending the compiler does
+        // something it doesn't yet do.
 
         let smt_config = verum_smt::context::ContextConfig {
             timeout: Some(timeout),
