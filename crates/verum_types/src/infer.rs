@@ -15608,8 +15608,21 @@ impl TypeChecker {
                             }
                         }
 
-                        // @vbc/@asm/@llvm - low-level intrinsics, type is inferred from context
-                        "vbc" | "asm" | "llvm" | "llvm_only" => Type::Var(TypeVar::fresh()),
+                        // @vbc/@asm/@llvm - low-level intrinsics, type is inferred from context.
+                        // Synthesize all argument expressions so that context
+                        // method calls like `ComputeDevice.device()` inside
+                        // @vbc(...) args are properly resolved through the
+                        // type checker (enabling context type lookup, method
+                        // resolution, etc.). Errors from arg synthesis are
+                        // non-fatal: @vbc is a codegen-level intrinsic and
+                        // argument types don't constrain its return type.
+                        "vbc" | "asm" | "llvm" | "llvm_only" => {
+                            for arg in args.iter().skip(1) {
+                                // Skip first arg (opcode name) — it's an ident.
+                                let _ = self.synth_expr(arg);
+                            }
+                            Type::Var(TypeVar::fresh())
+                        }
 
                         // Unknown meta-function - default to unit
                         _ => Type::unit(),
@@ -28019,9 +28032,19 @@ impl TypeChecker {
 
                         // Register the context type so that it can be accessed as a variable
                         // in function bodies that use this context (e.g., `Database.query(...)`)
-                        // Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Section 2.5
-                        self.context_resolver
-                            .register_context_type(verum_common::Text::from(register_name), context_type);
+                        // Guard: don't overwrite context types that were pre-registered
+                        // from the embedded stdlib archive with full method signatures.
+                        // The archive-based registration has richer type info (Record with
+                        // method names) than the fallback here (often Type::Named).
+                        let ctx_key = verum_common::Text::from(register_name);
+                        let already_has_rich_type = self.context_resolver
+                            .get_context_type(&ctx_key)
+                            .map(|t| matches!(t, Type::Record(_)))
+                            .unwrap_or(false);
+                        if !already_has_rich_type {
+                            self.context_resolver
+                                .register_context_type(ctx_key, context_type);
+                        }
                     }
                     ExportKind::ContextGroup => {
                         // Context groups are registered as contexts only (they expand to multiple contexts)
