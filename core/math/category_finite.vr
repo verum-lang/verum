@@ -1,0 +1,172 @@
+// =============================================================================
+// category_finite.vr — Finite Category Presentation
+// =============================================================================
+//
+// Layer: Standard Library / Mathematics
+//
+// User-facing surface for the categorical-algebra analysis core
+// (`verum_types::category_algebra`). Concrete data structure for
+// finite category presentations, complementing the protocol-level
+// `core/math/category.vr` (which describes categories abstractly
+// via traits/protocols).
+//
+// Use this module when you need to:
+//   * Build a category as a value (objects, morphisms, identities,
+//     composition table) and verify the categorical laws hold
+//   * Implement diagram chasing or presheaf computations
+//   * Encode small categorical structures for SMT translation
+//
+// ## Categorical laws
+//
+// For all morphisms `f : A → B`, `g : B → C`, `h : C → D`:
+//
+//   * Left identity:  `id_B ∘ f = f`
+//   * Right identity: `f ∘ id_A = f`
+//   * Associativity:  `h ∘ (g ∘ f) = (h ∘ g) ∘ f`
+//
+// =============================================================================
+
+module core.math.category_finite;
+
+// =============================================================================
+// 1. Objects and morphisms
+// =============================================================================
+
+/// A categorical object — opaque, identified by name.
+public type CatObject is { name: Text };
+
+public fn cat_object(name: Text) -> CatObject {
+    CatObject { name }
+}
+
+/// A morphism with explicit source and target.
+public type CatMorphism is {
+    name: Text,
+    source: CatObject,
+    target: CatObject,
+};
+
+public fn cat_morphism(name: Text, source: CatObject, target: CatObject) -> CatMorphism {
+    CatMorphism { name, source, target }
+}
+
+// =============================================================================
+// 2. Composition and identity tables
+// =============================================================================
+
+/// Identity assignment: object name → identity-morphism name.
+public type IdentityEntry is { object_name: Text, identity_name: Text };
+
+/// Composition table entry: g_name ∘ f_name = result_name.
+public type CompositionEntry is {
+    g: Text,
+    f: Text,
+    result: Text,
+};
+
+// =============================================================================
+// 3. The finite category presentation
+// =============================================================================
+
+/// A finite category presentation.
+public type FiniteCategory is {
+    objects: List<CatObject>,
+    morphisms: List<CatMorphism>,
+    identities: List<IdentityEntry>,
+    composition_table: List<CompositionEntry>,
+};
+
+public fn empty_category() -> FiniteCategory {
+    FiniteCategory {
+        objects: [],
+        morphisms: [],
+        identities: [],
+        composition_table: [],
+    }
+}
+
+public fn add_morphism(c: FiniteCategory, m: CatMorphism) -> FiniteCategory {
+    let mut objs = c.objects;
+    let mut has_src = false;
+    let mut has_tgt = false;
+    let mut i: Int = 0;
+    while i < objs.len() {
+        if objs[i].name == m.source.name { has_src = true; }
+        if objs[i].name == m.target.name { has_tgt = true; }
+        i = i + 1;
+    }
+    if !has_src { objs.push(m.source); }
+    if !has_tgt { objs.push(m.target); }
+
+    let mut morphs = c.morphisms;
+    morphs.push(m);
+
+    FiniteCategory {
+        objects: objs,
+        morphisms: morphs,
+        identities: c.identities,
+        composition_table: c.composition_table,
+    }
+}
+
+public fn declare_identity(c: FiniteCategory, obj_name: Text, id_name: Text) -> FiniteCategory {
+    let mut ids = c.identities;
+    ids.push(IdentityEntry { object_name: obj_name, identity_name: id_name });
+    FiniteCategory {
+        objects: c.objects,
+        morphisms: c.morphisms,
+        identities: ids,
+        composition_table: c.composition_table,
+    }
+}
+
+public fn declare_composition(c: FiniteCategory, g: Text, f: Text, result: Text) -> FiniteCategory {
+    let mut table = c.composition_table;
+    table.push(CompositionEntry { g, f, result });
+    FiniteCategory {
+        objects: c.objects,
+        morphisms: c.morphisms,
+        identities: c.identities,
+        composition_table: table,
+    }
+}
+
+// =============================================================================
+// 4. Lookups
+// =============================================================================
+
+/// Look up `g ∘ f` in the composition table; returns empty Text
+/// if no entry is present.
+public fn lookup_composition(c: FiniteCategory, g: Text, f: Text) -> Text {
+    let mut i: Int = 0;
+    while i < c.composition_table.len() {
+        let e = c.composition_table[i];
+        if e.g == g && e.f == f {
+            return e.result;
+        }
+        i = i + 1;
+    }
+    ""
+}
+
+/// Look up the identity morphism for `obj_name`, or empty Text.
+public fn lookup_identity(c: FiniteCategory, obj_name: Text) -> Text {
+    let mut i: Int = 0;
+    while i < c.identities.len() {
+        if c.identities[i].object_name == obj_name {
+            return c.identities[i].identity_name;
+        }
+        i = i + 1;
+    }
+    ""
+}
+
+/// Number of objects in the category.
+public fn object_count(c: FiniteCategory) -> Int {
+    c.objects.len()
+}
+
+/// Number of morphisms in the category.
+public fn morphism_count(c: FiniteCategory) -> Int {
+    c.morphisms.len()
+}

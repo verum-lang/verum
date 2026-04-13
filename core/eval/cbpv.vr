@@ -1,0 +1,133 @@
+// =============================================================================
+// cbpv.vr — Call-by-Push-Value
+// =============================================================================
+//
+// Layer: Standard Library / Evaluation
+//
+// User-facing surface for the CBPV analysis core (`verum_types::
+// cbpv`). Levy's call-by-push-value separates *values* from
+// *computations*. Both call-by-value and call-by-name λ-calculi
+// embed into CBPV through systematic translations, and effects
+// gain a clean denotational semantics where they attach to
+// computations rather than values.
+//
+// CBPV is the canonical setting for monadic semantics, algebraic
+// effects research, and intermediate representations.
+//
+// ## Syntax
+//
+// ```text
+//     V ::= x | λx. C | thunk C       (values)
+//     C ::= return V                  (lift value to trivial computation)
+//         | V to x. C                 (sequence: bind producer's value)
+//         | force V
+//         | V₁ V₂                      (application — V₁ is a thunk-of-fn)
+// ```
+//
+// ## Reductions
+//
+// ```text
+//     force (thunk C)        ↦ C
+//     V₁ V₂  where  V₁ = λx. body  ↦  body[x := V₂]
+// ```
+//
+// ## Encoding note
+//
+// Verum's surface syntax requires explicit `Heap<T>` indirection
+// for self-referential ADTs, and mutual recursion between two
+// ADTs through Heap can be expensive to type-check. We collapse
+// both syntactic categories into a single tagged term type
+// `CbpvTerm` with a `kind` discriminator (`Value` / `Computation`)
+// — semantically identical, more friendly to the checker.
+//
+// =============================================================================
+
+module core.eval.cbpv;
+
+// =============================================================================
+// 1. The unified term language
+// =============================================================================
+
+/// Discriminator: is this term in the value or computation
+/// syntactic category?
+public type CbpvKind is
+    | Value
+    | Computation;
+
+/// A CBPV term tagged by syntactic category. The tag governs
+/// where the term may legally appear: `Value`-tagged terms in
+/// value positions, `Computation`-tagged terms in computation
+/// positions.
+public type CbpvTerm is
+    /// `x` — variable (value).
+    | Var { name: Text }
+    /// `λx. body` — lambda value; body is a computation.
+    | Lam { param: Text, body: Heap<CbpvTerm> }
+    /// `thunk C` — package a computation as a value.
+    | Thunk { inner: Heap<CbpvTerm> }
+    /// `return V` — lift a value into a trivial computation.
+    | Return { value: Heap<CbpvTerm> }
+    /// `V to x. C` — sequence; bind producer value to `binder`.
+    | SeqTo { producer: Heap<CbpvTerm>, binder: Text, body: Heap<CbpvTerm> }
+    /// `force V` — run a thunked computation.
+    | Force { value: Heap<CbpvTerm> }
+    /// `V₁ V₂` — application; func is a thunk-of-lambda value.
+    | App { func: Heap<CbpvTerm>, arg: Heap<CbpvTerm> };
+
+// =============================================================================
+// 2. Smart constructors
+// =============================================================================
+
+public fn cbpv_var(name: Text) -> CbpvTerm {
+    CbpvTerm.Var { name }
+}
+
+public fn cbpv_lam(param: Text, body: CbpvTerm) -> CbpvTerm {
+    CbpvTerm.Lam { param, body: Heap(body) }
+}
+
+public fn cbpv_thunk(c: CbpvTerm) -> CbpvTerm {
+    CbpvTerm.Thunk { inner: Heap(c) }
+}
+
+public fn cbpv_return(v: CbpvTerm) -> CbpvTerm {
+    CbpvTerm.Return { value: Heap(v) }
+}
+
+public fn cbpv_seq_to(producer: CbpvTerm, binder: Text, body: CbpvTerm) -> CbpvTerm {
+    CbpvTerm.SeqTo { producer: Heap(producer), binder, body: Heap(body) }
+}
+
+public fn cbpv_force(v: CbpvTerm) -> CbpvTerm {
+    CbpvTerm.Force { value: Heap(v) }
+}
+
+public fn cbpv_app(f: CbpvTerm, x: CbpvTerm) -> CbpvTerm {
+    CbpvTerm.App { func: Heap(f), arg: Heap(x) }
+}
+
+// =============================================================================
+// 3. Syntactic-category classification
+// =============================================================================
+
+/// Which syntactic category does this term inhabit?
+public fn cbpv_kind_of(t: CbpvTerm) -> CbpvKind {
+    match t {
+        CbpvTerm.Var { name: _ } => CbpvKind.Value,
+        CbpvTerm.Lam { param: _, body: _ } => CbpvKind.Value,
+        CbpvTerm.Thunk { inner: _ } => CbpvKind.Value,
+        CbpvTerm.Return { value: _ } => CbpvKind.Computation,
+        CbpvTerm.SeqTo { producer: _, binder: _, body: _ } => CbpvKind.Computation,
+        CbpvTerm.Force { value: _ } => CbpvKind.Computation,
+        CbpvTerm.App { func: _, arg: _ } => CbpvKind.Computation,
+    }
+}
+
+/// Is this a *canonical* value — Lam or Thunk (not just a Var)?
+public fn cbpv_is_canonical(t: CbpvTerm) -> Bool {
+    match t {
+        CbpvTerm.Lam { param: _, body: _ } => true,
+        CbpvTerm.Thunk { inner: _ } => true,
+        _ => false,
+    }
+}

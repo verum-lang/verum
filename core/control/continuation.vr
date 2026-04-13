@@ -1,0 +1,128 @@
+// =============================================================================
+// continuation.vr — Delimited Continuations (shift/reset)
+// =============================================================================
+//
+// Layer: Standard Library / Control
+//
+// User-facing surface for the continuation-calculus analysis core
+// (`verum_types::continuation_calculus`). Delimited control as a
+// first-class computational primitive: `reset { e }` installs a
+// prompt; `shift k. e` captures the surrounding computation up to
+// the nearest reset and binds it to `k`.
+//
+// With shift/reset, programmers can express coroutines,
+// non-deterministic search, backtracking, and full algebraic-
+// effect handlers as a library — without language-level effect
+// machinery.
+//
+// Verum chose contexts + specialized constructs (async / fn* /
+// Result) over general handlers. This module exposes the
+// continuation calculus as data structures + reduction so
+// callers that want to *model* handler-style code, prove
+// properties about it, or translate other languages with shift/
+// reset can do so within Verum.
+//
+// ## Reductions
+//
+// ```text
+//     (λx. M) N                  ↦  M[x := N]                (β)
+//     reset v                    ↦  v                         (reset-value)
+//     reset (shift k. M)         ↦  reset (M[k := λx. reset x])  (shift)
+// ```
+//
+// =============================================================================
+
+module core.control.continuation;
+
+// =============================================================================
+// 1. Continuation-calculus terms
+// =============================================================================
+
+/// A continuation-calculus term.
+public type CcTerm is
+    /// Opaque value-level constant.
+    | Const { payload: Text }
+    /// Variable reference.
+    | Var { name: Text }
+    /// `λx. body`.
+    | Lam { param: Text, body: Heap<CcTerm> }
+    /// `f arg`.
+    | App { func: Heap<CcTerm>, arg: Heap<CcTerm> }
+    /// `reset M` — install a delimiter.
+    | Reset { inner: Heap<CcTerm> }
+    /// `shift k. M` — capture the continuation up to the nearest reset.
+    | Shift { binder: Text, body: Heap<CcTerm> };
+
+// =============================================================================
+// 2. Smart constructors
+// =============================================================================
+
+public fn cc_const(payload: Text) -> CcTerm {
+    CcTerm.Const { payload }
+}
+
+public fn cc_var(name: Text) -> CcTerm {
+    CcTerm.Var { name }
+}
+
+public fn cc_lam(param: Text, body: CcTerm) -> CcTerm {
+    CcTerm.Lam { param, body: Heap(body) }
+}
+
+public fn cc_app(f: CcTerm, x: CcTerm) -> CcTerm {
+    CcTerm.App { func: Heap(f), arg: Heap(x) }
+}
+
+public fn cc_reset(m: CcTerm) -> CcTerm {
+    CcTerm.Reset { inner: Heap(m) }
+}
+
+public fn cc_shift(binder: Text, body: CcTerm) -> CcTerm {
+    CcTerm.Shift { binder, body: Heap(body) }
+}
+
+// =============================================================================
+// 3. Predicates
+// =============================================================================
+
+/// Constants and lambdas are values — they cannot reduce further
+/// on their own.
+public fn cc_is_value(t: CcTerm) -> Bool {
+    match t {
+        CcTerm.Const { payload: _ } => true,
+        CcTerm.Lam { param: _, body: _ } => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// 4. Capture-avoiding substitution
+// =============================================================================
+
+/// Substitute `from` with `to` everywhere it appears free.
+/// Skips bound-variable shadowing (Lam param, Shift binder).
+public fn cc_substitute(t: CcTerm, from: Text, to: CcTerm) -> CcTerm {
+    match t {
+        CcTerm.Const { payload } => CcTerm.Const { payload },
+        CcTerm.Var { name } => {
+            if name == from { to } else { CcTerm.Var { name } }
+        },
+        CcTerm.Lam { param, body } => {
+            if param == from {
+                CcTerm.Lam { param, body }
+            } else {
+                cc_lam(param, cc_substitute(*body, from, to))
+            }
+        },
+        CcTerm.App { func, arg } =>
+            cc_app(cc_substitute(*func, from, to), cc_substitute(*arg, from, to)),
+        CcTerm.Reset { inner } => cc_reset(cc_substitute(*inner, from, to)),
+        CcTerm.Shift { binder, body } => {
+            if binder == from {
+                CcTerm.Shift { binder, body }
+            } else {
+                cc_shift(binder, cc_substitute(*body, from, to))
+            }
+        },
+    }
+}
