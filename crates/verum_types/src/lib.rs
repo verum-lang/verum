@@ -139,6 +139,7 @@ pub mod context_check;
 pub mod context_resolution; // Context group resolution for type checking
 pub mod contract_integration; // Phase 3a → Phase 4 contract integration
 pub mod cubical; // Phase B.2: Cubical type theory normalizer
+pub mod cubical_bridge; // Phase B.2: EqTerm ↔ CubicalTerm translator
 pub mod instance_search; // Phase D.4: Protocol instance search + coherence
 pub mod universe_solver; // Phase A.2: Universe constraint solving
 pub mod contracts; // Precondition and postcondition validation

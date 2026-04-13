@@ -2880,8 +2880,14 @@ impl Unifier {
                 // Unify the carrier types
                 let subst = self.unify_inner(t1, t2, span)?;
 
-                // Check definitional equality of terms
-                if !Self::eq_terms_equal(l1, l2) {
+                // Check definitional equality of terms. Fast path is
+                // syntactic equality on EqTerm; fallback routes through
+                // the cubical normalizer so identities like
+                // `transport Refl x ≡ x` and `sym(refl(x)) ≡ refl(x)`
+                // are accepted.
+                if !Self::eq_terms_equal(l1, l2)
+                    && !crate::cubical_bridge::definitionally_equal_cubical(l1, l2)
+                {
                     return Err(TypeError::Mismatch {
                         expected: "Eq type with matching left-hand side".into(),
                         actual: "Eq type with different left-hand side".into(),
@@ -2889,7 +2895,9 @@ impl Unifier {
                     });
                 }
 
-                if !Self::eq_terms_equal(r1, r2) {
+                if !Self::eq_terms_equal(r1, r2)
+                    && !crate::cubical_bridge::definitionally_equal_cubical(r1, r2)
+                {
                     return Err(TypeError::Mismatch {
                         expected: "Eq type with matching right-hand side".into(),
                         actual: "Eq type with different right-hand side".into(),

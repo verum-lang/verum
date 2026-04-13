@@ -113,6 +113,18 @@ impl DependentVerifier {
         &self.instance_registry
     }
 
+    /// Replace the instance registry wholesale. Useful when a caller
+    /// has already populated a `ProtocolChecker` during type checking
+    /// and wants to route its coherence view through the orchestrator:
+    ///
+    /// ```ignore
+    /// let registry = protocol_checker.export_instance_registry();
+    /// verifier.set_instance_registry(registry);
+    /// ```
+    pub fn set_instance_registry(&mut self, registry: InstanceRegistry) {
+        self.instance_registry = registry;
+    }
+
     /// Number of accumulated goals.
     pub fn goal_count(&self) -> usize {
         self.goals.len()
@@ -226,7 +238,7 @@ impl VerificationReport {
 mod tests {
     use super::*;
     use verum_types::cubical::{CubicalTerm, IntervalEndpoint};
-    use verum_types::instance_search::InstanceCandidate;
+    use verum_types::instance_search::{InstanceCandidate, InstanceRegistry};
     use verum_types::universe_solver::UniverseLevel;
 
     #[test]
@@ -385,6 +397,20 @@ mod tests {
         assert_eq!(report.refuted_count(), 1);
         assert_eq!(report.undetermined_count(), 1);
         assert!(!report.is_all_good());
+    }
+
+    #[test]
+    fn set_instance_registry_replaces_previous_contents() {
+        let mut v = DependentVerifier::new();
+        v.instance_registry_mut()
+            .register(InstanceCandidate::new("Monoid", "Int").at("first.vr"));
+        assert_eq!(v.instance_registry().len(), 1);
+
+        let mut fresh = InstanceRegistry::new();
+        fresh.register(InstanceCandidate::new("Functor", "List").at("snd.vr"));
+        fresh.register(InstanceCandidate::new("Functor", "Maybe").at("snd.vr"));
+        v.set_instance_registry(fresh);
+        assert_eq!(v.instance_registry().len(), 2);
     }
 
     #[test]

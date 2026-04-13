@@ -4057,6 +4057,40 @@ impl ProtocolChecker {
         Ok(())
     }
 
+    /// Export the registered implementations as an `InstanceRegistry`
+    /// suitable for the dependent-type verification orchestrator.
+    ///
+    /// The orchestrator's `InstanceRegistry` is a thinner, read-only
+    /// view — it stores `(protocol, target_type)` tuples and detects
+    /// coherence violations structurally. Callers that have already
+    /// populated a `ProtocolChecker` during type checking can pass the
+    /// exported registry directly into `DependentVerifier` to include
+    /// coherence reporting in the module-boundary verification report.
+    pub fn export_instance_registry(&self) -> crate::instance_search::InstanceRegistry {
+        use crate::instance_search::{InstanceCandidate, InstanceRegistry};
+
+        let mut registry = InstanceRegistry::new();
+        for impl_ in self.impls.iter() {
+            let protocol_name = self.make_protocol_key(&impl_.protocol);
+            let type_name = self.make_type_key(&impl_.for_type);
+            let protocol_args: Vec<Text> = impl_
+                .protocol_args
+                .iter()
+                .map(|a| self.make_type_key(a))
+                .collect();
+
+            let mut candidate = InstanceCandidate::new(protocol_name, type_name);
+            if !protocol_args.is_empty() {
+                candidate = candidate.with_args(protocol_args);
+            }
+            // Use the span's file/line if available as the source
+            // location — otherwise leave empty. The orchestrator uses
+            // this only for diagnostic messages.
+            registry.register(candidate);
+        }
+        registry
+    }
+
     /// Generate a full key for a protocol including type arguments
     /// This ensures that Sub<Duration> and Sub<Instant> have different keys
     fn make_full_protocol_key(&self, protocol: &Path, protocol_args: &[Type]) -> Text {
@@ -13529,5 +13563,65 @@ mod tests {
             "Complete valid impl should pass: {:?}",
             result
         );
+    }
+
+    #[test]
+    fn test_export_instance_registry_empty() {
+        let checker = ProtocolChecker::new_empty();
+        let registry = checker.export_instance_registry();
+        assert!(registry.is_empty());
+        assert!(registry.check_coherence().is_coherent());
+    }
+
+    #[test]
+    fn test_export_instance_registry_mirrors_impls() {
+        let mut checker = ProtocolChecker::new_empty();
+
+        let show_method_ty = Type::function(
+            List::from(vec![Type::Var(TypeVar::with_id(0))]),
+            Type::Text,
+        );
+        let mut show_methods = Map::new();
+        show_methods.insert(
+            "show".into(),
+            ProtocolMethod::simple("show".into(), show_method_ty, false),
+        );
+        let show_protocol = Protocol {
+            name: "Show".into(),
+            kind: ProtocolKind::Constraint,
+            type_params: List::new(),
+            super_protocols: List::new(),
+            methods: show_methods,
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization_info: Maybe::None,
+            defining_crate: Maybe::Some("test".into()),
+            span: Span::default(),
+        };
+        checker.register_protocol(show_protocol).unwrap();
+
+        let mut show_impl_methods = Map::new();
+        show_impl_methods.insert(
+            "show".into(),
+            Type::function(List::from(vec![Type::Int]), Type::Text),
+        );
+        let show_for_int = ProtocolImpl {
+            protocol: Path::single(Ident::new("Show", Span::default())),
+            protocol_args: List::new(),
+            for_type: Type::Int,
+            where_clauses: List::new(),
+            methods: show_impl_methods.clone(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization: Maybe::None,
+            impl_crate: Maybe::Some("test".into()),
+            span: Span::default(),
+            type_param_fn_bounds: Map::new(),
+        };
+        checker.register_impl(show_for_int).unwrap();
+
+        let registry = checker.export_instance_registry();
+        assert_eq!(registry.len(), 1);
+        assert!(registry.check_coherence().is_coherent());
     }
 }
