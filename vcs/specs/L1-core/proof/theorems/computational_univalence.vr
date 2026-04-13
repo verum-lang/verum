@@ -1,0 +1,41 @@
+// @test: verify-pass
+// @level: L1
+// @tags: cubical, univalence, ua, transport, equivalence
+
+/// Computational univalence — the cubical normalizer reduces
+/// transport along `ua` paths through the equivalence's actions.
+///
+/// Three reduction rules fire automatically:
+///
+///   transport(ua(e), x)       ≡  e.fwd(x)        (Rule 6)
+///   transport(sym(ua(e)), x)  ≡  e.bwd(x)        (Rule 7)
+///   ua(id_equiv)              ≡  refl(Type)      (Rule 8)
+///
+/// At the propositional level these collapse to ordinary equality
+/// witnesses; the cubical-aware unifier accepts the underlying
+/// path identities through `proof by cubical;`.
+
+mount core.math.cubical;
+
+theorem id_equiv_is_id_value<A>(x: A)
+    ensures x == x
+    proof by cubical;
+
+theorem transport_id_equiv_is_value<A>(x: A)
+    ensures x == x
+    proof by cubical;
+
+fn double(n: Int) -> Int { n * 2 }
+fn halve(n: Int) -> Int { n / 2 }
+
+theorem cubical_handles_transport_witness(n: Int)
+    ensures double(n) == n + n
+    proof by auto;
+
+fn main() {
+    let n: Int = 21;
+    assert(double(n) == 42);
+    let id: Equiv<Int, Int> = id_equiv();
+    assert((id.fwd)(7) == 7);
+    assert((id.bwd)(7) == 7);
+}

@@ -105,6 +105,26 @@ pub enum CubicalTerm {
 
     /// Path composition: `trans(p, q)` — concatenates two paths.
     Trans(Box<CubicalTerm>, Box<CubicalTerm>),
+
+    /// `ua(e)` — the **univalence path** induced by an equivalence.
+    /// `ua : Equiv<A, B> → Path<Type>(A, B)`. Computational univalence
+    /// requires that `transport` along this path *computes* via the
+    /// equivalence, rather than remaining stuck.
+    Ua(Box<CubicalTerm>),
+
+    /// Forward action of an equivalence: `equiv.fwd(value)`.
+    /// Produced as the WHNF of `transport(ua(e), x)`.
+    EquivFwd {
+        equiv: Box<CubicalTerm>,
+        value: Box<CubicalTerm>,
+    },
+
+    /// Backward action of an equivalence: `equiv.bwd(value)`.
+    /// Produced as the WHNF of `transport(sym(ua(e)), x)`.
+    EquivBwd {
+        equiv: Box<CubicalTerm>,
+        value: Box<CubicalTerm>,
+    },
 }
 
 impl CubicalTerm {
@@ -143,6 +163,17 @@ impl CubicalTerm {
                 Box::new(p.subst_dim(var, endpoint)),
                 Box::new(q.subst_dim(var, endpoint)),
             ),
+            CubicalTerm::Ua(e) => {
+                CubicalTerm::Ua(Box::new(e.subst_dim(var, endpoint)))
+            }
+            CubicalTerm::EquivFwd { equiv, value } => CubicalTerm::EquivFwd {
+                equiv: Box::new(equiv.subst_dim(var, endpoint)),
+                value: Box::new(value.subst_dim(var, endpoint)),
+            },
+            CubicalTerm::EquivBwd { equiv, value } => CubicalTerm::EquivBwd {
+                equiv: Box::new(equiv.subst_dim(var, endpoint)),
+                value: Box::new(value.subst_dim(var, endpoint)),
+            },
         }
     }
 
@@ -161,6 +192,49 @@ impl CubicalTerm {
                 if matches!(line.as_ref(), CubicalTerm::Refl(_)) =>
             {
                 value.whnf()
+            }
+
+            // Rule 6 (computational univalence — forward):
+            //     transport(ua(e), x) ↦ e.fwd(x)
+            // The transport along the univalence path of an
+            // equivalence reduces to the forward action of that
+            // equivalence on the value. This is the key
+            // computational content of univalence — without it,
+            // `ua` would be axiomatic and `transport` would stay
+            // stuck on `ua` paths.
+            CubicalTerm::Transport { line, value }
+                if matches!(line.as_ref(), CubicalTerm::Ua(_)) =>
+            {
+                let equiv = match *line {
+                    CubicalTerm::Ua(e) => e,
+                    _ => unreachable!(),
+                };
+                CubicalTerm::EquivFwd {
+                    equiv,
+                    value: Box::new(value.whnf()),
+                }
+            }
+
+            // Rule 7 (computational univalence — backward):
+            //     transport(sym(ua(e)), x) ↦ e.bwd(x)
+            CubicalTerm::Transport { line, value }
+                if matches!(
+                    line.as_ref(),
+                    CubicalTerm::Sym(inner)
+                        if matches!(inner.as_ref(), CubicalTerm::Ua(_))
+                ) =>
+            {
+                let equiv = match *line {
+                    CubicalTerm::Sym(boxed) => match *boxed {
+                        CubicalTerm::Ua(e) => e,
+                        _ => unreachable!(),
+                    },
+                    _ => unreachable!(),
+                };
+                CubicalTerm::EquivBwd {
+                    equiv,
+                    value: Box::new(value.whnf()),
+                }
             }
 
             // Rule 2: hcomp base (refl sides) ↦ base
@@ -186,6 +260,24 @@ impl CubicalTerm {
             // Rule 5: sym(refl(x)) ↦ refl(x)
             CubicalTerm::Sym(inner) if matches!(inner.as_ref(), CubicalTerm::Refl(_)) => {
                 inner.whnf()
+            }
+
+            // Rule 8: ua of identity equivalence ↦ refl
+            //
+            // We model the identity equivalence opaquely by name:
+            // when `Ua(Value("id_equiv"))` appears, it reduces to a
+            // refl path at an opaque universe (we use Value("Type")
+            // as a placeholder — the actual carrier type does not
+            // affect equality through the WHNF compare).
+            CubicalTerm::Ua(inner)
+                if matches!(
+                    inner.as_ref(),
+                    CubicalTerm::Value(v) if v.as_str() == "id_equiv"
+                ) =>
+            {
+                CubicalTerm::Refl(Box::new(CubicalTerm::Value(Text::from(
+                    "Type",
+                ))))
             }
 
             // No reduction applies — already in WHNF
@@ -329,5 +421,72 @@ mod tests {
         let inner = transport(refl(val("A")), val("x"));
         let outer = transport(refl(val("B")), inner);
         assert_eq!(outer.whnf(), val("x"));
+    }
+
+    fn ua(equiv: CubicalTerm) -> CubicalTerm {
+        CubicalTerm::Ua(Box::new(equiv))
+    }
+
+    fn sym(p: CubicalTerm) -> CubicalTerm {
+        CubicalTerm::Sym(Box::new(p))
+    }
+
+    #[test]
+    fn test_transport_ua_reduces_to_fwd() {
+        // transport(ua(e), x) ↦ EquivFwd { equiv: e, value: x }
+        let term = transport(ua(val("my_equiv")), val("x"));
+        assert_eq!(
+            term.whnf(),
+            CubicalTerm::EquivFwd {
+                equiv: Box::new(val("my_equiv")),
+                value: Box::new(val("x")),
+            }
+        );
+    }
+
+    #[test]
+    fn test_transport_sym_ua_reduces_to_bwd() {
+        // transport(sym(ua(e)), x) ↦ EquivBwd { equiv: e, value: x }
+        let term = transport(sym(ua(val("my_equiv"))), val("x"));
+        assert_eq!(
+            term.whnf(),
+            CubicalTerm::EquivBwd {
+                equiv: Box::new(val("my_equiv")),
+                value: Box::new(val("x")),
+            }
+        );
+    }
+
+    #[test]
+    fn test_ua_id_equiv_reduces_to_refl() {
+        // ua(id_equiv) ↦ refl(Type)
+        let term = ua(val("id_equiv"));
+        assert_eq!(
+            term.whnf(),
+            CubicalTerm::Refl(Box::new(val("Type")))
+        );
+    }
+
+    #[test]
+    fn test_transport_ua_id_via_two_rules() {
+        // First Rule 8 reduces ua(id_equiv) to refl(Type),
+        // but the *outer* term `transport(ua(id_equiv), x)`
+        // matches Rule 6 (transport on ua) before reducing the
+        // line. Rule 6 fires first and yields EquivFwd.
+        let term = transport(ua(val("id_equiv")), val("x"));
+        assert_eq!(
+            term.whnf(),
+            CubicalTerm::EquivFwd {
+                equiv: Box::new(val("id_equiv")),
+                value: Box::new(val("x")),
+            }
+        );
+    }
+
+    #[test]
+    fn test_ua_subst_dim_preserves_structure() {
+        let term = ua(dim("i"));
+        let result = term.subst_dim(&DimVar::new("i"), IntervalEndpoint::I0);
+        assert_eq!(result, ua(i0()));
     }
 }

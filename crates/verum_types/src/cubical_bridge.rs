@@ -111,6 +111,23 @@ fn translate_app(func: &EqTerm, args: &verum_common::List<EqTerm>) -> CubicalTer
 
         (Some("refl"), 1) => CubicalTerm::Refl(Box::new(eq_to_cubical(&args[0]))),
 
+        // Computational univalence: `ua(e)` lifts to the cubical
+        // `Ua` constructor, enabling rules 6/7/8 in the normalizer.
+        (Some("ua"), 1) => CubicalTerm::Ua(Box::new(eq_to_cubical(&args[0]))),
+
+        // Forward / backward action of an equivalence — these are
+        // produced by the normalizer as the WHNF of
+        // `transport(ua(e), x)` and `transport(sym(ua(e)), x)`,
+        // and should round-trip if encountered in source.
+        (Some("equiv_fwd"), 2) => CubicalTerm::EquivFwd {
+            equiv: Box::new(eq_to_cubical(&args[0])),
+            value: Box::new(eq_to_cubical(&args[1])),
+        },
+        (Some("equiv_bwd"), 2) => CubicalTerm::EquivBwd {
+            equiv: Box::new(eq_to_cubical(&args[0])),
+            value: Box::new(eq_to_cubical(&args[1])),
+        },
+
         (Some("path"), 2) => {
             // `path(dim, body)` — dim is a variable, body is the path body.
             if let EqTerm::Var(dim_name) = &args[0] {

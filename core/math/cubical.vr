@@ -116,7 +116,47 @@ public fn interval_eq(a: Interval, b: Interval) -> Bool {
 }
 
 // =============================================================================
-// 6. Worked examples — small theorems exercising the bridge
+// 6. Computational univalence
+// =============================================================================
+//
+// Univalence states that an equivalence between types induces an
+// identity of types. With the cubical normalizer's reduction rules
+// for `ua`, this is no longer just an axiom — it computes:
+//
+//     transport(ua(e), x)        ≡  e.fwd(x)
+//     transport(sym(ua(e)), x)   ≡  e.bwd(x)
+//     ua(id_equiv)               ≡  refl(Type)
+//
+// All three are applied automatically by the cubical bridge during
+// `Type::Eq` unification.
+
+/// An equivalence between two types A and B is a forward map, a
+/// backward map, and witnesses that they are mutually inverse. For
+/// the surface stdlib we expose only the value-level structure;
+/// the path-witnesses live in the type checker.
+public type Equiv<A, B> is {
+    fwd: fn(A) -> B,
+    bwd: fn(B) -> A,
+};
+
+/// `ua` — the **univalence path**: every equivalence gives a path
+/// in the universe of types.
+///
+/// The cubical normalizer reduces transport along this path
+/// computationally, so users can write `transport(ua(e), x)` and
+/// the type checker will accept it as definitionally equal to
+/// `e.fwd(x)` without an explicit proof.
+public axiom ua<A, B>(e: Equiv<A, B>) -> A;
+
+/// The identity equivalence on any type. The cubical normalizer
+/// recognises `ua(id_equiv)` and reduces it to `refl`, completing
+/// the computational story.
+public fn id_equiv<A>() -> Equiv<A, A> {
+    Equiv { fwd: |x| x, bwd: |x| x }
+}
+
+// =============================================================================
+// 7. Worked examples — small theorems exercising the bridge
 // =============================================================================
 
 /// Transport along a refl path is the identity.
