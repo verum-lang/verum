@@ -147,6 +147,8 @@ pub mod session_types; // Session-typed channel protocols (π-calculus style)
 pub mod modal_types; // Modal types: security labels + information flow
 pub mod tactic_meta; // Tactic metaprogramming: quote/splice/reflect
 pub mod two_level; // Two-Level Type Theory: fibrant vs strict layers
+pub mod coinductive_analysis; // Productivity + bisimulation for greatest fixed points
+pub mod sdg; // Synthetic differential geometry: nilpotent infinitesimals
 pub mod instance_search; // Phase D.4: Protocol instance search + coherence
 pub mod universe_solver; // Phase A.2: Universe constraint solving
 pub mod contracts; // Precondition and postcondition validation
