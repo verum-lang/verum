@@ -33,6 +33,7 @@ module core.math.tensor;
 mount super.linalg.Numeric;
 mount super.elementary.{sqrt, exp, log, sin, cos, abs};
 mount super.random.{RandomKey};
+mount super.gpu.{ComputeDevice, DeviceId, DeviceInfo};
 
 // =============================================================================
 // Data Types

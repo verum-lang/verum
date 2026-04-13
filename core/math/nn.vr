@@ -31,6 +31,7 @@ module core.math.nn;
 
 mount super.tensor.{DynTensor, Tensor, zeros, ones, full, zeros_like, ones_like, full_like};
 mount super.tensor.{add, sub, mul, div, neg};
+mount super.gpu.{ComputeDevice};
 mount super.tensor.{tensor_pow, tensor_exp, tensor_log, tensor_sqrt, tensor_sin, tensor_cos, tensor_tanh};
 
 // Convenience aliases for tensor math ops
