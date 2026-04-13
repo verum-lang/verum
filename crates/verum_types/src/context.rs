@@ -688,6 +688,11 @@ pub struct UniverseContext {
 }
 
 impl UniverseContext {
+    /// Read-only access to the accumulated constraints.
+    pub fn constraints(&self) -> &List<UniverseConstraint> {
+        &self.constraints
+    }
+
     /// Create a new universe context
     pub fn new() -> Self {
         Self {

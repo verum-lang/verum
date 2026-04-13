@@ -3159,15 +3159,16 @@ impl TypeChecker {
         // universe polymorphism constraints are resolved here. Errors
         // are logged and deferred to the DependentVerifier orchestrator
         // which may resolve them with a wider cross-module constraint set.
+        // Snapshot the constraints before solving — if the solver
+        // fails, the orchestrator gets the actual undecided set.
+        let pre_solve_constraints: List<crate::universe_solver::UniverseConstraint> =
+            self.ctx.universe_ctx().constraints().iter().cloned().collect();
+
         if let Err(e) = self.ctx.solve_universe_constraints() {
             tracing::debug!("Universe constraint solve produced diagnostics: {}", e);
-            // Defer the unsolved constraints for the orchestrator.
-            // The error text encodes the constraint description;
-            // the orchestrator's universe solver may succeed with
-            // additional constraints from other modules.
             self.deferred_verification_goals.push(
                 DeferredVerificationGoal::UniverseConstraints {
-                    constraints: List::new(),
+                    constraints: pre_solve_constraints,
                 },
             );
         }
