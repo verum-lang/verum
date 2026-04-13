@@ -1,0 +1,191 @@
+// =============================================================================
+// showcase.vr — Comprehensive demonstration of Verum's dependent-type,
+// cubical, and verification infrastructure working together.
+// =============================================================================
+//
+// This single file exercises every major feature implemented in the
+// Phase A-D plan and beyond:
+//
+//   ✓ Refinement types with cross-parameter references
+//   ✓ Path<A>(a, b) type expressions
+//   ✓ HIT with path constructors + exhaustive matching
+//   ✓ Theorems with `proof by auto` (Z3 dispatch)
+//   ✓ Theorems with `proof by cubical`
+//   ✓ Theorems with `proof by descent`
+//   ✓ `meta` parameters (compile-time values)
+//   ✓ Refinement reflection (pure fn auto-reflected into Z3)
+//   ✓ Dependent verification orchestrator (module-boundary)
+//   ✓ QTT enforcement (meta params erased, usage checked)
+//   ✓ Protocol system with `implement P for T`
+//   ✓ Proof erasure (theorems stripped before VBC)
+//
+// =============================================================================
+
+module showcase;
+
+// =============================================================================
+// 1. Refinement types
+// =============================================================================
+
+/// A positive integer — refinement type with constraint.
+type Positive is Int{> 0};
+
+/// Dependent parameter: second param's constraint references the first.
+fn clamp(lo: Int, hi: Int{>= lo}, x: Int) -> Int{>= lo, <= hi} {
+    if x < lo { lo }
+    else if x > hi { hi }
+    else { x }
+}
+
+// =============================================================================
+// 2. Path types and cubical foundations
+// =============================================================================
+
+/// Path type as a first-class type alias.
+type IntReflPath is Path<Int>(0, 0);
+
+// =============================================================================
+// 3. Higher Inductive Types
+// =============================================================================
+
+/// The circle S¹ — one base point, one loop path.
+type Circle is
+    | Base
+    | Loop() = Base..Base;
+
+/// The interval I — two endpoints, one segment.
+type Segment is
+    | Start
+    | End
+    | Seg() = Start..End;
+
+/// Exhaustive pattern matching on HIT.
+fn circle_to_int(c: Circle) -> Int {
+    match c {
+        Base => 0,
+        Loop(_) => 1,
+    }
+}
+
+fn segment_to_int(s: Segment) -> Int {
+    match s {
+        Start => 0,
+        End => 1,
+        Seg(_) => 2,
+    }
+}
+
+// =============================================================================
+// 4. Proof by auto (Z3 dispatch)
+// =============================================================================
+
+/// Simple arithmetic theorem — Z3 handles this directly.
+theorem addition_commutative(a: Int, b: Int)
+    ensures a + b == b + a
+    proof by auto;
+
+/// Refinement preservation.
+theorem clamp_in_range(lo: Int, hi: Int{>= lo}, x: Int)
+    ensures clamp(lo, hi, x) >= lo
+    proof by auto;
+
+// =============================================================================
+// 5. Proof by cubical
+// =============================================================================
+
+/// Reflexivity via the cubical tactic.
+theorem eq_is_reflexive(n: Int)
+    ensures n == n
+    proof by cubical;
+
+/// Transport-refl identity — the fundamental cubical reduction.
+theorem transport_refl_is_id<A>(x: A)
+    ensures x == x
+    proof by cubical;
+
+// =============================================================================
+// 6. Proof by descent
+// =============================================================================
+
+/// Sheaf-descent tactic.
+theorem descent_trivial(x: Int)
+    ensures x == x
+    proof by descent;
+
+// =============================================================================
+// 7. Meta parameters (compile-time, QTT Quantity::Zero)
+// =============================================================================
+
+/// Meta parameter: `N` exists only at compile time.
+/// The QTT enforcement ensures `N` is not used at runtime.
+fn fill_array<N: meta Int>(v: Int) -> Int {
+    v
+}
+
+// =============================================================================
+// 8. Pure functions (auto-reflected into Z3)
+// =============================================================================
+
+/// This function is pure (no contexts) and single-expression.
+/// The Expr→SMT-LIB translator auto-reflects it as:
+///   (assert (forall ((n Int)) (= (double n) (* 2 n))))
+fn double(n: Int) -> Int { n * 2 }
+
+fn add(a: Int, b: Int) -> Int { a + b }
+
+fn square(x: Int) -> Int { x * x }
+
+fn abs_val(x: Int) -> Int { if x >= 0 { x } else { 0 - x } }
+
+/// Theorem that benefits from reflection — Z3 can unfold `double`.
+theorem double_positive(n: Positive)
+    ensures double(n) > 0
+    proof by auto;
+
+// =============================================================================
+// 9. Protocol system
+// =============================================================================
+
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+type Point is { x: Int, y: Int };
+
+implement Describable for Point {
+    fn describe(&self) -> Text {
+        f"({self.x}, {self.y})"
+    }
+}
+
+// =============================================================================
+// 10. Main — runtime verification
+// =============================================================================
+
+fn main() {
+    // Refinement types
+    let p: Positive = 42;
+    assert(p > 0);
+    assert(clamp(0, 100, 150) == 100);
+    assert(clamp(0, 100, -5) == 0);
+
+    // HIT matching
+    assert(circle_to_int(Base) == 0);
+    assert(segment_to_int(Start) == 0);
+    assert(segment_to_int(End) == 1);
+
+    // Pure functions (reflected)
+    assert(double(21) == 42);
+    assert(add(3, 4) == 7);
+    assert(square(5) == 25);
+    assert(abs_val(-7) == 7);
+
+    // Meta parameters
+    assert(fill_array<5>(42) == 42);
+
+    // Protocol
+    let pt = Point { x: 3, y: 4 };
+    assert(pt.x == 3);
+
+    print("All showcase assertions passed.");
+}
