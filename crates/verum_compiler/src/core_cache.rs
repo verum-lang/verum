@@ -168,6 +168,12 @@ pub struct CachedCoreMetadata {
     /// Module information
     pub modules: Vec<CachedModuleEntry>,
 
+    /// Context protocol names declared in stdlib (`context Name { ... }`
+    /// and `context protocol Name { ... }`). Pre-registered during
+    /// NormalBuild so `using [ComputeDevice]` etc. resolve without
+    /// requiring the declaring module to be loaded first.
+    pub context_declarations: Vec<String>,
+
     // =========================================================================
     // META-SYSTEM INFORMATION
     // =========================================================================
@@ -650,6 +656,7 @@ impl CoreCache {
         let mut cached_modules = Vec::new();
         let mut cached_types = Vec::new();
         let mut cached_functions = Vec::new();
+        let mut context_declarations = Vec::new();
 
         // Process each module
         for module in modules {
@@ -674,6 +681,31 @@ impl CoreCache {
                         &mut cached_types,
                         &mut cached_functions,
                     );
+
+                    // Extract context declarations:
+                    //   `public context Name {`
+                    //   `public context protocol Name {`
+                    // These are pre-registered during NormalBuild so
+                    // `using [ComputeDevice]` etc. resolve without
+                    // requiring module loading order.
+                    for line in content.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("public context ") {
+                            let rest = trimmed.strip_prefix("public context ").unwrap_or("");
+                            let name = if rest.starts_with("protocol ") {
+                                rest.strip_prefix("protocol ")
+                                    .and_then(|s| s.split_whitespace().next())
+                            } else {
+                                rest.split_whitespace().next()
+                            };
+                            if let Some(n) = name {
+                                let clean = n.trim_end_matches('{').trim().to_string();
+                                if !clean.is_empty() && !context_declarations.contains(&clean) {
+                                    context_declarations.push(clean);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -696,6 +728,14 @@ impl CoreCache {
             cached_derives.len()
         );
 
+        if !context_declarations.is_empty() {
+            tracing::debug!(
+                "Stdlib cache: extracted {} context declarations: {:?}",
+                context_declarations.len(),
+                context_declarations
+            );
+        }
+
         Ok(CachedCoreMetadata {
             types: cached_types,
             functions: cached_functions,
@@ -703,6 +743,7 @@ impl CoreCache {
             meta_functions: cached_meta_functions,
             macros: cached_macros,
             derives: cached_derives,
+            context_declarations,
         })
     }
 

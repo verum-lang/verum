@@ -1113,6 +1113,13 @@ impl<'s> CompilationPipeline<'s> {
         // Content hash is set to zeros - it will be validated by the cache layer
         metadata.content_hash = [0u8; 32];
 
+        // Convert context declarations from the cache
+        metadata.context_declarations = cached
+            .context_declarations
+            .iter()
+            .map(|s| verum_common::Text::from(s.as_str()))
+            .collect();
+
         metadata
     }
 
@@ -5326,6 +5333,72 @@ impl<'s> CompilationPipeline<'s> {
         // This enables `using [Database, Auth]` to work when these are defined elsewhere
         for context_name in &self.collected_contexts {
             checker.register_protocol_as_context(context_name.clone());
+        }
+
+        // Pre-register stdlib context declarations from CoreMetadata.
+        // This enables `using [ComputeDevice]` etc. to resolve even
+        // in single-file compilation where the declaring module
+        // (gpu.vr) isn't explicitly loaded. The context names were
+        // extracted during stdlib bootstrap and cached in the
+        // embedded stdlib archive.
+        if let Some(metadata) = &self.stdlib_metadata {
+            for ctx_name in &metadata.context_declarations {
+                if !self.collected_contexts.contains(ctx_name) {
+                    checker.register_protocol_as_context(ctx_name.clone());
+                }
+            }
+        }
+
+        // Fallback: if the metadata cache doesn't have contexts
+        // (e.g., old cache format), extract them directly from the
+        // embedded stdlib source archive. This scans for
+        // `public context Name {` patterns in .vr files.
+        {
+            let has_metadata_contexts = self.stdlib_metadata
+                .as_ref()
+                .map(|m| !m.context_declarations.is_empty())
+                .unwrap_or(false);
+            if !has_metadata_contexts {
+                if let Some(archive) = crate::embedded_stdlib::get_embedded_stdlib() {
+                    let mut found_contexts: Vec<String> = Vec::new();
+                    for path in archive.file_paths() {
+                        if path.ends_with(".vr") {
+                            let content = match archive.get_file(path) {
+                                Some(c) => c,
+                                None => continue,
+                            };
+                            for line in content.lines() {
+                                let trimmed = line.trim();
+                                if trimmed.starts_with("public context ") {
+                                    let rest = trimmed.strip_prefix("public context ").unwrap_or("");
+                                    let name = if rest.starts_with("protocol ") {
+                                        rest.strip_prefix("protocol ")
+                                            .and_then(|s| s.split_whitespace().next())
+                                    } else {
+                                        rest.split_whitespace().next()
+                                    };
+                                    if let Some(n) = name {
+                                        let clean = n.trim_end_matches('{').trim();
+                                        if !clean.is_empty() {
+                                            let ctx = verum_common::Text::from(clean);
+                                            found_contexts.push(clean.to_string());
+                                            if !self.collected_contexts.contains(&ctx) {
+                                                checker.register_stdlib_context(ctx);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !found_contexts.is_empty() {
+                        tracing::debug!(
+                            "Stdlib context pre-registration: {} contexts from embedded archive: {:?}",
+                            found_contexts.len(), found_contexts
+                        );
+                    }
+                }
+            }
         }
 
         // Compute the current module path for resolving relative imports (self, super)

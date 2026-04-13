@@ -38,6 +38,15 @@ pub struct CoreMetadata {
 
     /// Content hash for cache validation
     pub content_hash: [u8; 32],
+
+    /// Context protocol names declared in the stdlib.
+    /// These are registered as available contexts during
+    /// NormalBuild type-checking so that `using [ComputeDevice]`
+    /// etc. resolve without requiring the declaring module to
+    /// be loaded first. Populated during stdlib bootstrap
+    /// from `context Name { ... }` and `context protocol Name { ... }`
+    /// declarations.
+    pub context_declarations: List<Text>,
 }
 
 /// Descriptor for a type definition in stdlib

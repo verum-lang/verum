@@ -6902,6 +6902,20 @@ impl TypeChecker {
         self.context_resolver.register_protocol_as_context(name);
     }
 
+    /// Register a stdlib context in BOTH the resolver and the
+    /// context checker. This ensures `using [Name]` resolves at
+    /// both resolution and type-checking levels — required for
+    /// contexts extracted from the embedded stdlib archive where
+    /// the declaring module hasn't been type-checked yet.
+    pub fn register_stdlib_context(&mut self, name: Text) {
+        self.context_resolver
+            .register_protocol_as_context(name.clone());
+        self.context_checker.register_context(
+            name,
+            verum_ast::decl::ContextDecl::synthetic(),
+        );
+    }
+
     /// Register multiple protocols as valid context types.
     ///
     /// Convenience method for registering protocols from module exports.

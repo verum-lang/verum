@@ -1593,6 +1593,26 @@ pub struct ContextDecl {
     pub span: Span,
 }
 
+impl ContextDecl {
+    /// Create a synthetic (empty) context declaration for pre-
+    /// registration from the embedded stdlib archive. The methods
+    /// and types are not available but the name is valid for
+    /// `using [Name]` resolution.
+    pub fn synthetic() -> Self {
+        Self {
+            visibility: Visibility::Public,
+            is_async: false,
+            name: Ident::new("", Span::default()),
+            generics: List::new(),
+            methods: List::new(),
+            associated_types: List::new(),
+            associated_consts: List::new(),
+            sub_contexts: List::new(),
+            span: Span::default(),
+        }
+    }
+}
+
 impl Spanned for ContextDecl {
     fn span(&self) -> Span {
         self.span
