@@ -1311,3 +1311,28 @@ theorem autodiff_chain_rule_mul(a: Int, b: Int)
 theorem autodiff_sum_rule(a: Int, b: Int)
     ensures a + b == b + a
     proof by auto;
+
+// =============================================================================
+// GradientTape context — records operations for backward pass
+// =============================================================================
+
+/// The gradient tape context tracks tensor operations during the
+/// forward pass and provides the backward() call to compute
+/// gradients. Used via `using [GradientTape]` in functions that
+/// need autodiff support.
+public context GradientTape {
+    /// Record a tensor operation for later backward pass.
+    fn record_op(output_id: Int, op_name: Text, input_ids: List<Int>);
+
+    /// Compute gradients via backpropagation.
+    fn backward(loss_id: Int);
+
+    /// Get the gradient for a specific tensor.
+    fn grad(tensor_id: Int) -> Maybe<DynTensor<Float>>;
+
+    /// Check if the tape is recording.
+    fn is_recording() -> Bool;
+
+    /// Register a vector-Jacobian product (VJP) for a custom op.
+    fn register_vjp(op_name: Text, vjp_fn: fn(List<DynTensor<Float>>, DynTensor<Float>) -> List<DynTensor<Float>>);
+}

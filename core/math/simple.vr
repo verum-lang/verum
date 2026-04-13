@@ -107,13 +107,13 @@ public fn full(shape: &[USize], value: Float) -> Tensor {
 
 // Create a tensor with random normal values (mean=0, std=1)
 //
-// Uses default RandomSource context (seeded from thread-local RNG)
-public fn randn(shape: &[USize]) -> Tensor using [RandomSource] {
+// Uses default Random context (seeded from thread-local RNG)
+public fn randn(shape: &[USize]) -> Tensor using [Random] {
     tensor_randn(shape)
 }
 
 // Create a tensor with uniform random values in [0, 1)
-public fn rand(shape: &[USize]) -> Tensor using [RandomSource] {
+public fn rand(shape: &[USize]) -> Tensor using [Random] {
     tensor_rand(shape)
 }
 
@@ -302,7 +302,7 @@ public fn train<M: Module<Tensor, Tensor>>(
     model: &mut M,
     data: &DataLoader,
     epochs: USize,
-) using [GradientTape, RandomSource, ComputeDevice]
+) using [GradientTape, Random, ComputeDevice]
 {
     let mut optimizer = AdamW.default();
 
@@ -363,14 +363,14 @@ public fn evaluate<M: Module<Tensor, Tensor>>(
 // let output = layer.forward(&input);
 // ```
 public fn linear(in_features: USize, out_features: USize) -> Linear
-    using [RandomSource]
+    using [Random]
 {
     Linear.new(in_features, out_features, true)
 }
 
 // Create a linear layer without bias
 public fn linear_no_bias(in_features: USize, out_features: USize) -> Linear
-    using [RandomSource]
+    using [Random]
 {
     Linear.new(in_features, out_features, false)
 }

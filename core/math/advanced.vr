@@ -416,8 +416,9 @@ public type Precision is
     | Float16
     | BFloat16;
 
-// Precision mode context
-context PrecisionMode {
+// Precision mode context (public so it's discoverable by the
+// embedded archive scanner for single-file check mode)
+public context PrecisionMode {
     fn precision() -> Precision;
     fn allow_denormals() -> Bool;
     fn rounding_mode() -> RoundingMode;

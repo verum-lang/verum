@@ -266,7 +266,7 @@ implement Embedding {
     public fn with_padding(mut self, idx: USize) -> Self {
         self.padding_idx = Maybe.Some(idx);
         // Zero out padding embedding
-        let zeros_row = zeros<Float>(&[1, self.embedding_dim]);
+        let zeros_row = zeros(&[1, self.embedding_dim]);
         scatter(&mut self.weight.data, 0, &DynTensor.from_scalar(idx as USize), &zeros_row);
         self
     }
@@ -670,7 +670,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for Dropout {
         }
 
         // Generate random mask
-        let mask = tensor_gt(&rand<Float>(input.shape()), &full_like(&input, self.p));
+        let mask = tensor_gt(&rand(input.shape()), &full_like(&input, self.p));
         let scale = 1.0 / (1.0 - self.p);
 
         // Apply mask and scale
@@ -697,7 +697,7 @@ public fn dropout(
         return x.clone();
     }
 
-    let mask = tensor_gt(&rand<Float>(x.shape()), &full_like(x, p));
+    let mask = tensor_gt(&rand(x.shape()), &full_like(x, p));
     let scale = 1.0 / (1.0 - p);
     let mask_f: DynTensor<Float> = mask.cast();
     mul(&mul(x, &mask_f), &full_like(x, scale))
@@ -951,7 +951,7 @@ public type RoPE is {
 implement RoPE {
     public fn new(dim: USize, base: Float) -> Self {
         // Compute inverse frequencies: 1 / (base^(2i/dim))
-        let indices = arange<Float>(0.0, dim as Float, 2.0);
+        let indices = arange(0.0, dim as Float, 2.0);
         let inv_freq = div(
             &ones_like(&indices),
             &pow(&full_like(&indices, base), &div(&indices, &full_like(&indices, dim as Float))),
