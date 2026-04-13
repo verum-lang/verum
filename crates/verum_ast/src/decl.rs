@@ -1054,6 +1054,12 @@ pub struct Variant {
     /// E.g., `| IntLit(Int) where T == Int`
     pub where_clause: Maybe<crate::ty::WhereClause>,
     pub attributes: List<Attribute>,
+    /// HIT path-constructor endpoints. Populated when the parser sees
+    /// `Foo(args) = from..to` syntax; `None` for ordinary data-type
+    /// variants. When set, the lowering to `Type::HigherInductive`
+    /// emits a `PathConstructor` with these endpoints instead of a
+    /// regular `Constructor` record.
+    pub path_endpoints: Maybe<(Heap<crate::expr::Expr>, Heap<crate::expr::Expr>)>,
     pub span: Span,
 }
 
@@ -1066,6 +1072,7 @@ impl Variant {
             data,
             where_clause: Maybe::None,
             attributes: List::new(),
+            path_endpoints: Maybe::None,
             span,
         }
     }
@@ -1083,6 +1090,7 @@ impl Variant {
             data,
             where_clause: Maybe::None,
             attributes,
+            path_endpoints: Maybe::None,
             span,
         }
     }

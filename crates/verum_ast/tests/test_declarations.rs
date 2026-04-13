@@ -429,6 +429,7 @@ fn test_enum_declaration() {
                 )]))),
                 where_clause: Maybe::None,
                 attributes: List::new(),
+                path_endpoints: Maybe::None,
                 span,
             },
             Variant {
@@ -437,6 +438,7 @@ fn test_enum_declaration() {
                 data: None,
                 where_clause: Maybe::None,
                 attributes: List::new(),
+                path_endpoints: Maybe::None,
                 span,
             },
         ])),
@@ -1115,6 +1117,7 @@ fn test_enum_with_discriminants() {
                 data: None,
                 where_clause: Maybe::None,
                 attributes: List::new(),
+                path_endpoints: Maybe::None,
                 span,
             },
             Variant {
@@ -1123,6 +1126,7 @@ fn test_enum_with_discriminants() {
                 data: None,
                 where_clause: Maybe::None,
                 attributes: List::new(),
+                path_endpoints: Maybe::None,
                 span,
             },
             Variant {
@@ -1131,6 +1135,7 @@ fn test_enum_with_discriminants() {
                 data: None,
                 where_clause: Maybe::None,
                 attributes: List::new(),
+                path_endpoints: Maybe::None,
                 span,
             },
             Variant {
@@ -1139,6 +1144,7 @@ fn test_enum_with_discriminants() {
                 data: None,
                 where_clause: Maybe::None,
                 attributes: List::new(),
+                path_endpoints: Maybe::None,
                 span,
             },
         ])),
@@ -1421,6 +1427,7 @@ fn test_resource_modifier_affine_variant() {
                 )]))),
                 where_clause: Maybe::None,
                 attributes: List::new(),
+                path_endpoints: Maybe::None,
                 span,
             },
             Variant {
@@ -1432,6 +1439,7 @@ fn test_resource_modifier_affine_variant() {
                 )]))),
                 where_clause: Maybe::None,
                 attributes: List::new(),
+                path_endpoints: Maybe::None,
                 span,
             },
         ])),

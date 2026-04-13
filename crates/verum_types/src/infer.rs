@@ -630,6 +630,14 @@ pub struct TypeChecker {
     /// active pattern invocations in match arms.
     /// Spec: grammar/verum.ebnf line 1817 - pattern_def
     pub(crate) pattern_declarations: Map<Text, (List<Type>, Type)>,
+    /// HIT path-constructor metadata. Keyed by the higher-inductive
+    /// type name (e.g., `"Circle"`, `"Interval"`); each entry holds
+    /// the parsed path-constructors with their endpoint expressions.
+    /// Populated during type registration whenever a variant carries
+    /// `Variant::path_endpoints`. Consumed by HIT-aware tactics
+    /// (cubical, descent) that need to know the topology of the type.
+    pub hit_path_constructors:
+        Map<Text, List<crate::ty::PathConstructor>>,
     /// When true, variant short-name protection uses relaxed rules that allow
     /// user-defined monomorphic unit variants to shadow polymorphic stdlib unit
     /// variants (e.g., user's `Status.Pending` overrides `Poll.Pending`).
@@ -920,6 +928,7 @@ impl TypeChecker {
             implicit_context: crate::implicit::ImplicitContext::new(),
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
+            hit_path_constructors: Map::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1087,6 +1096,7 @@ impl TypeChecker {
             implicit_context: crate::implicit::ImplicitContext::new(),
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
+            hit_path_constructors: Map::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1636,6 +1646,7 @@ impl TypeChecker {
             implicit_context: crate::implicit::ImplicitContext::new(),
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
+            hit_path_constructors: Map::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1734,6 +1745,7 @@ impl TypeChecker {
             implicit_context: crate::implicit::ImplicitContext::new(),
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
+            hit_path_constructors: Map::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1833,6 +1845,7 @@ impl TypeChecker {
             implicit_context: crate::implicit::ImplicitContext::new(),
             mutable_bindings: std::collections::HashSet::new(),
             pattern_declarations: Map::new(),
+            hit_path_constructors: Map::new(),
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -43604,11 +43617,53 @@ impl TypeChecker {
                 self.ctx
                     .define_type(type_name.clone(), placeholder_type);
 
-                // Convert variant declarations to Type::Variant
+                // Convert variant declarations to Type::Variant.
+                // HIT path-constructors (variants with `path_endpoints`)
+                // are recorded in the side-channel `hit_path_constructors`
+                // map for use by HIT-aware tactics, while still emitting
+                // a regular `Type::Variant` entry so that downstream
+                // pattern-matching, exhaustiveness, and codegen continue
+                // to function unmodified.
                 let mut variant_map: IndexMap<Text, Type> = IndexMap::new();
+                let mut hit_constructors: List<crate::ty::PathConstructor> =
+                    List::new();
 
                 for variant in variants {
                     let variant_name: Text = variant.name.name.as_str().into();
+
+                    // If this variant carries explicit path endpoints,
+                    // record it as a HIT path-constructor. Endpoints are
+                    // captured as `EqTerm::Var` placeholders bearing the
+                    // pretty-printed expression text — the cubical
+                    // normalizer treats them opaquely until a more
+                    // structured EqTerm-from-Expr lowering exists.
+                    if let verum_common::Maybe::Some((from_expr, to_expr)) =
+                        &variant.path_endpoints
+                    {
+                        let lhs_text = format!("{:?}", &from_expr.kind);
+                        let rhs_text = format!("{:?}", &to_expr.kind);
+                        let pc = crate::ty::PathConstructor::loop_at(
+                            variant_name.clone(),
+                            crate::ty::EqTerm::Var(Text::from(lhs_text.clone())),
+                            Type::Unknown,
+                        );
+                        // Override endpoints with the actual lhs/rhs.
+                        let pc = crate::ty::PathConstructor {
+                            name: pc.name,
+                            type_params: pc.type_params,
+                            args: pc.args,
+                            path_type: crate::ty::PathEndpoints {
+                                ty: Box::new(Type::Unknown),
+                                lhs: Box::new(crate::ty::EqTerm::Var(
+                                    Text::from(lhs_text),
+                                )),
+                                rhs: Box::new(crate::ty::EqTerm::Var(
+                                    Text::from(rhs_text),
+                                )),
+                            },
+                        };
+                        hit_constructors.push(pc);
+                    }
 
                     // Convert variant data to type
                     let payload_type = match &variant.data {
@@ -43652,6 +43707,15 @@ impl TypeChecker {
                 let variant_type = Type::Variant(variant_map.clone());
                 self.ctx
                     .define_type(type_name.clone(), variant_type.clone());
+
+                // Register HIT path-constructor metadata (if any) for
+                // consumption by HIT-aware tactics like `cubical` and
+                // `descent`. The Type::Variant lowering above remains
+                // the primary representation for ordinary type checking.
+                if !hit_constructors.is_empty() {
+                    self.hit_path_constructors
+                        .insert(type_name.clone(), hit_constructors);
+                }
 
                 // Register variant constructors in the env for synth-mode resolution.
                 // This enables `Rect { w: 4, h: 6 }` to be resolved as Shape.Rect
