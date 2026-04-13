@@ -140,7 +140,7 @@ pub fn get_capabilities() -> &'static BackendCapabilities {
 }
 
 /// Minimum tensor size for GPU dispatch (elements)
-const _MIN_GPU_SIZE: usize = 4096;
+const MIN_GPU_SIZE: usize = 4096;
 
 // ============================================================================
 // PrecisionContext for Kernel Operations
