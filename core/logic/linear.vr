@@ -1,0 +1,134 @@
+// =============================================================================
+// linear.vr — Linear Logic Connectives
+// =============================================================================
+//
+// Layer: Standard Library / Logic
+//
+// User-facing surface for the linear-logic analysis core
+// (`verum_types::linear_logic`). Full Girard-style propositional
+// linear logic with multiplicative, additive, and exponential
+// connectives — a richer foundation than QTT alone for resource
+// reasoning.
+//
+// ## Connective summary
+//
+// ```text
+//     A ⊗ B    multiplicative conjunction (tensor)   "both, paired"
+//     A ⅋ B    multiplicative disjunction (par)      "both, parallel"
+//     A & B    additive conjunction (with)           "external choice"
+//     A ⊕ B    additive disjunction (plus)           "internal choice"
+//     A ⊸ B    linear function                       defined as A^⊥ ⅋ B
+//     !A       of-course / bang                       unrestricted use
+//     ?A       why-not                                weakenable
+//     1, ⊥, ⊤, 0    units                            (multiplicative + additive)
+//     A^⊥      linear negation (involutive)
+// ```
+//
+// ## Example
+//
+// ```verum
+// // (A ⊗ B)^⊥ ↦ A^⊥ ⅋ B^⊥  (de Morgan)
+// let f: LinForm = lin_tensor(lin_atom("A"), lin_atom("B"));
+// let neg: LinForm = lin_dual(f);
+// // After NNF, neg is A^⊥ ⅋ B^⊥
+// ```
+//
+// =============================================================================
+
+module core.logic.linear;
+
+// =============================================================================
+// 1. Linear logic formula
+// =============================================================================
+
+/// A linear logic formula. Constructed via the `lin_*` smart
+/// constructors below.
+public type LinForm is
+    /// Atomic proposition.
+    | Atom { name: Text }
+    /// `A ⊗ B` — multiplicative conjunction.
+    | Tensor { left: Heap<LinForm>, right: Heap<LinForm> }
+    /// `A ⅋ B` — multiplicative disjunction.
+    | Par { left: Heap<LinForm>, right: Heap<LinForm> }
+    /// `A & B` — additive conjunction.
+    | With { left: Heap<LinForm>, right: Heap<LinForm> }
+    /// `A ⊕ B` — additive disjunction.
+    | Plus { left: Heap<LinForm>, right: Heap<LinForm> }
+    /// `!A` — of-course (unrestricted use).
+    | OfCourse { inner: Heap<LinForm> }
+    /// `?A` — why-not (weakenable).
+    | WhyNot { inner: Heap<LinForm> }
+    /// `1` — multiplicative truth.
+    | One
+    /// `⊥` — multiplicative false.
+    | Bottom
+    /// `⊤` — additive truth.
+    | Top
+    /// `0` — additive false.
+    | Zero
+    /// `A^⊥` — linear negation.
+    | Dual { inner: Heap<LinForm> };
+
+// =============================================================================
+// 2. Smart constructors
+// =============================================================================
+
+public fn lin_atom(name: Text) -> LinForm {
+    LinForm.Atom { name }
+}
+
+public fn lin_tensor(a: LinForm, b: LinForm) -> LinForm {
+    LinForm.Tensor { left: Heap(a), right: Heap(b) }
+}
+
+public fn lin_par(a: LinForm, b: LinForm) -> LinForm {
+    LinForm.Par { left: Heap(a), right: Heap(b) }
+}
+
+public fn lin_with(a: LinForm, b: LinForm) -> LinForm {
+    LinForm.With { left: Heap(a), right: Heap(b) }
+}
+
+public fn lin_plus(a: LinForm, b: LinForm) -> LinForm {
+    LinForm.Plus { left: Heap(a), right: Heap(b) }
+}
+
+public fn lin_of_course(a: LinForm) -> LinForm {
+    LinForm.OfCourse { inner: Heap(a) }
+}
+
+public fn lin_why_not(a: LinForm) -> LinForm {
+    LinForm.WhyNot { inner: Heap(a) }
+}
+
+public fn lin_dual(a: LinForm) -> LinForm {
+    LinForm.Dual { inner: Heap(a) }
+}
+
+/// Linear implication `A ⊸ B := A^⊥ ⅋ B`.
+public fn lin_lolli(a: LinForm, b: LinForm) -> LinForm {
+    lin_par(lin_dual(a), b)
+}
+
+// =============================================================================
+// 3. Classification predicates
+// =============================================================================
+
+/// `!A` makes A unrestricted: usable any number of times.
+public fn is_unrestricted(f: LinForm) -> Bool {
+    match f {
+        LinForm.OfCourse { inner: _ } => true,
+        LinForm.One => true,
+        LinForm.Top => true,
+        _ => false,
+    }
+}
+
+/// `?A` makes A weakenable: discardable without use.
+public fn is_weakenable(f: LinForm) -> Bool {
+    match f {
+        LinForm.WhyNot { inner: _ } => true,
+        LinForm.Top => true,
+        _ => false,
+    }
+}

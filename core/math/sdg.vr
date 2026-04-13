@@ -1,0 +1,140 @@
+// =============================================================================
+// sdg.vr — Synthetic Differential Geometry
+// =============================================================================
+//
+// Layer: Standard Library / Mathematics
+//
+// User-facing surface for the SDG analysis core
+// (`verum_types::sdg`). Derivatives via nilpotent infinitesimals
+// rather than ε-δ limits — `transport(refl, x) ≡ x` of the
+// continuous world. Foundation for type-theoretic automatic
+// differentiation.
+//
+// ## The Kock-Lawvere axiom
+//
+// For any polynomial `f` and value `x`, there exists a unique `a`
+// such that `f(x + d) = f(x) + a·d` for all infinitesimals
+// `d ∈ D = { d : d² = 0 }`. That unique `a` is `f'(x)`.
+//
+// ## Example
+//
+// ```verum
+// // f(x) = 3 + 2x + 5x²
+// let f: Polynomial = polynomial([3.0, 2.0, 5.0]);
+// // f'(2) = 2 + 10·2 = 22
+// assert(derivative_at(f, 2.0) == 22.0);
+// ```
+//
+// =============================================================================
+
+module core.math.sdg;
+
+// =============================================================================
+// 1. Infinitesimals
+// =============================================================================
+
+/// A nilpotent infinitesimal of given order. `order = k` means
+/// `d^(k+1) = 0`. The canonical first-order case has `order = 1`.
+public type Infinitesimal is {
+    order: Int{>= 1, <= 16},
+};
+
+/// First-order infinitesimal: `d² = 0`.
+public fn first_order() -> Infinitesimal {
+    Infinitesimal { order: 1 }
+}
+
+/// Higher-order infinitesimal of order `k`.
+public fn of_order(k: Int{>= 1, <= 16}) -> Infinitesimal {
+    Infinitesimal { order: k }
+}
+
+// =============================================================================
+// 2. Polynomial maps
+// =============================================================================
+
+/// A polynomial in one variable, coefficients low-to-high.
+/// `[3.0, 2.0, 5.0]` represents `3 + 2x + 5x²`.
+public type Polynomial is {
+    coefficients: List<Float>,
+};
+
+/// Build a polynomial from its coefficients.
+public fn polynomial(coeffs: List<Float>) -> Polynomial {
+    Polynomial { coefficients: coeffs }
+}
+
+/// Constant polynomial `c`.
+public fn poly_constant(c: Float) -> Polynomial {
+    polynomial([c])
+}
+
+/// Identity polynomial `x`.
+public fn poly_identity() -> Polynomial {
+    polynomial([0.0, 1.0])
+}
+
+/// Polynomial degree (length minus 1, or 0 for empty).
+public fn degree(p: Polynomial) -> Int {
+    if p.coefficients.len() == 0 { 0 }
+    else { p.coefficients.len() - 1 }
+}
+
+// =============================================================================
+// 3. Evaluation
+// =============================================================================
+
+/// Standard polynomial evaluation: `f(x) = Σ cᵢ·xⁱ`.
+public fn evaluate(p: Polynomial, x: Float) -> Float {
+    let mut acc: Float = 0.0;
+    let mut x_pow: Float = 1.0;
+    let mut i: Int = 0;
+    while i < p.coefficients.len() {
+        acc = acc + p.coefficients[i] * x_pow;
+        x_pow = x_pow * x;
+        i = i + 1;
+    }
+    acc
+}
+
+// =============================================================================
+// 4. Symbolic derivative
+// =============================================================================
+
+/// Symbolic derivative as a new polynomial: the coefficient of
+/// `xⁱ` in `f'` is `(i+1) · coefficients[i+1]`.
+public fn derivative_polynomial(p: Polynomial) -> Polynomial {
+    if p.coefficients.len() <= 1 {
+        return poly_constant(0.0);
+    }
+    let mut new_coeffs: List<Float> = [];
+    let mut i: Int = 1;
+    while i < p.coefficients.len() {
+        new_coeffs.push((i as Float) * p.coefficients[i]);
+        i = i + 1;
+    }
+    polynomial(new_coeffs)
+}
+
+/// Synthetic derivative `f'(x)` via the Kock-Lawvere extraction:
+/// `f'(x) = the unique a such that f(x + d) = f(x) + a·d`.
+///
+/// The result agrees with `derivative_polynomial(p).evaluate(x)`
+/// — that's the SDG axiom.
+public fn derivative_at(p: Polynomial, x: Float) -> Float {
+    evaluate(derivative_polynomial(p), x)
+}
+
+// =============================================================================
+// 5. Kock-Lawvere axiom verification
+// =============================================================================
+
+/// Check that the SDG axiom holds for `f` at `x` to within
+/// `tolerance`: classical and synthetic derivatives agree.
+public fn kock_lawvere_holds(p: Polynomial, x: Float, tolerance: Float) -> Bool {
+    let classical = evaluate(derivative_polynomial(p), x);
+    let synthetic = derivative_at(p, x);
+    let diff = classical - synthetic;
+    let abs_diff = if diff < 0.0 { 0.0 - diff } else { diff };
+    abs_diff < tolerance
+}

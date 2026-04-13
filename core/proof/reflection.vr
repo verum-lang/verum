@@ -1,0 +1,143 @@
+// =============================================================================
+// reflection.vr — Refinement Reflection
+// =============================================================================
+//
+// Layer: Standard Library / Proof
+//
+// User-facing surface for the refinement-reflection analysis core
+// (`verum_smt::refinement_reflection`). Pure, total user functions
+// can be reflected into the Z3 context as universally-quantified
+// equality axioms, so downstream proofs may *unfold* calls to
+// `f(x)` instead of treating `f` as an uninterpreted symbol.
+//
+// This is the same technique Liquid Haskell calls *refinement
+// reflection*: it makes user definitions visible to the SMT
+// solver, dramatically expanding what auto-tactics can prove.
+//
+// ## Soundness gate
+//
+// A function may be reflected only if it is:
+//
+//   * **Pure** — no Mutates/IO/Async/Fallible properties
+//   * **Total** — terminates on every input, no panic/unreachable
+//   * **Closed** — body uses only its parameters and other already-
+//     reflected functions
+//
+// The gate `is_reflectable` returns the appropriate verdict.
+//
+// =============================================================================
+
+module core.proof.reflection;
+
+// =============================================================================
+// 1. A reflected function definition
+// =============================================================================
+
+/// A single reflected user function. The `body_smtlib` field
+/// carries the function body in SMT-LIB form, with parameters
+/// referenced as bare identifiers (so `(* 2 n)` for `2 * n` etc.).
+public type ReflectedFunction is {
+    name: Text,
+    parameters: List<Text>,
+    body_smtlib: Text,
+    return_sort: Text,
+    parameter_sorts: List<Text>,
+};
+
+/// Build a reflected function record.
+public fn reflected_fn(
+    name: Text,
+    parameters: List<Text>,
+    body_smtlib: Text,
+    return_sort: Text,
+    parameter_sorts: List<Text>,
+) -> ReflectedFunction {
+    ReflectedFunction {
+        name,
+        parameters,
+        body_smtlib,
+        return_sort,
+        parameter_sorts,
+    }
+}
+
+// =============================================================================
+// 2. The soundness gate
+// =============================================================================
+
+/// Verdict from `is_reflectable`.
+public type ReflectabilityVerdict is
+    /// Function passes all three soundness checks.
+    | Reflectable
+    /// Function failed a check; reason is human-readable text.
+    | NotReflectable { reason: Text };
+
+/// Decide whether a function may be reflected. Callers supply
+/// the three booleans derived from the type checker's analysis
+/// (purity, totality, closedness).
+public fn is_reflectable(
+    name: Text,
+    is_pure: Bool,
+    is_total: Bool,
+    is_closed: Bool,
+) -> ReflectabilityVerdict {
+    if !is_pure {
+        return ReflectabilityVerdict.NotReflectable {
+            reason: f"function `{name}` has side effects",
+        };
+    }
+    if !is_total {
+        return ReflectabilityVerdict.NotReflectable {
+            reason: f"function `{name}` is not provably total",
+        };
+    }
+    if !is_closed {
+        return ReflectabilityVerdict.NotReflectable {
+            reason: f"function `{name}` references unreflected symbols",
+        };
+    }
+    ReflectabilityVerdict.Reflectable
+}
+
+// =============================================================================
+// 3. SMT-LIB rendering
+// =============================================================================
+
+/// Render the universally-quantified axiom in SMT-LIB form:
+/// `(assert (forall ((x₁ S₁) ... (xₙ Sₙ)) (= (f x₁ ... xₙ) body)))`.
+///
+/// Nullary functions (no parameters) emit a plain equality
+/// without the forall binder.
+public fn to_smtlib_axiom(f: ReflectedFunction) -> Text {
+    if f.parameters.len() == 0 {
+        return f"(assert (= ({f.name}) {f.body_smtlib}))";
+    }
+    let mut out: Text = "(assert (forall (";
+    let mut i: Int = 0;
+    while i < f.parameters.len() {
+        if i > 0 { out = out + " "; }
+        out = out + f"({f.parameters[i]} {f.parameter_sorts[i]})";
+        i = i + 1;
+    }
+    out = out + ") (= (" + f.name;
+    let mut j: Int = 0;
+    while j < f.parameters.len() {
+        out = out + " " + f.parameters[j];
+        j = j + 1;
+    }
+    out = out + ") " + f.body_smtlib + ")))";
+    out
+}
+
+/// Render the function declaration: `(declare-fun f (S₁ … Sₙ) S)`.
+public fn to_smtlib_decl(f: ReflectedFunction) -> Text {
+    let mut out: Text = "(declare-fun " + f.name + " (";
+    let mut i: Int = 0;
+    while i < f.parameter_sorts.len() {
+        if i > 0 { out = out + " "; }
+        out = out + f.parameter_sorts[i];
+        i = i + 1;
+    }
+    out = out + ") " + f.return_sort + ")";
+    out
+}
