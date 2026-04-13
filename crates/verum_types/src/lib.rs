@@ -151,6 +151,8 @@ pub mod coinductive_analysis; // Productivity + bisimulation for greatest fixed 
 pub mod sdg; // Synthetic differential geometry: nilpotent infinitesimals
 pub mod observational_equality; // OTT: type-directed equality alternative to cubical
 pub mod poly_kinds; // Polymorphic kinds: kind variables + unification
+pub mod contracts_old; // Dependent contracts with old(): pre-state references
+pub mod bitvec_decision; // Bit-vector decision procedure: finite-domain reasoning
 pub mod instance_search; // Phase D.4: Protocol instance search + coherence
 pub mod universe_solver; // Phase A.2: Universe constraint solving
 pub mod contracts; // Precondition and postcondition validation
