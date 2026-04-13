@@ -158,6 +158,8 @@ pub mod region_calculus; // Tofte-Talpin: regions, region sets, escape check
 pub mod pi_calculus; // π-calculus: process algebra with COMM reduction
 pub mod kripke; // Kripke semantics: modal worlds + accessibility
 pub mod category_algebra; // Categorical morphisms + law verification
+pub mod continuation_calculus; // Delimited continuations: shift/reset
+pub mod cbpv; // Call-by-push-value: value/computation separation
 pub mod instance_search; // Phase D.4: Protocol instance search + coherence
 pub mod universe_solver; // Phase A.2: Universe constraint solving
 pub mod contracts; // Precondition and postcondition validation
