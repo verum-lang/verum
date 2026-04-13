@@ -141,6 +141,7 @@ pub mod contract_integration; // Phase 3a → Phase 4 contract integration
 pub mod cubical; // Phase B.2: Cubical type theory normalizer
 pub mod cubical_bridge; // Phase B.2: EqTerm ↔ CubicalTerm translator
 pub mod expr_to_eqterm; // Phase B.6: structured Expr → EqTerm lowering
+pub mod qtt_usage; // QTT: Linear/Affine/Omega usage tracker
 pub mod instance_search; // Phase D.4: Protocol instance search + coherence
 pub mod universe_solver; // Phase A.2: Universe constraint solving
 pub mod contracts; // Precondition and postcondition validation
