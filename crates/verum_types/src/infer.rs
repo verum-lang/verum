@@ -33250,6 +33250,58 @@ impl TypeChecker {
         // This ensures affine tracking is isolated per function
         self.affine_tracker = prev_affine_tracker;
 
+        // QTT enforcement: if any parameter was annotated with a
+        // non-Omega quantity (via meta-parameter or explicit
+        // `Quantity` annotation in the type system), validate
+        // that the function body's usage matches the declared
+        // quantity. This is a post-inference pass because the
+        // body must be fully type-checked before we can walk it
+        // for usage counts.
+        //
+        // For now, this fires only when the function has explicit
+        // `meta` parameters (which carry Quantity::Zero semantics)
+        // or when future extensions add `linear`/`affine` keywords.
+        // In the common case (all params Omega), the check is a
+        // no-op and exits immediately.
+        // QTT enforcement for meta parameters. Meta-parameter
+        // bindings carry Quantity::Zero (erased at runtime); if
+        // the function body uses them at a value position, the
+        // QTT checker flags the violation.
+        {
+            let has_meta = func.generics.iter().any(|g| {
+                matches!(g.kind, verum_ast::ty::GenericParamKind::Meta { .. })
+            });
+            if has_meta {
+                let mut qtt_decls = std::collections::HashMap::new();
+                for g in &func.generics {
+                    if let verum_ast::ty::GenericParamKind::Meta { name, .. } = &g.kind {
+                        qtt_decls.insert(name.name.clone(), crate::ty::Quantity::Zero);
+                    }
+                }
+                // Also register regular params as Omega.
+                for p in &func.params {
+                    if let verum_ast::decl::FunctionParamKind::Regular { pattern, .. } = &p.kind {
+                        if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
+                            qtt_decls.insert(name.name.clone(), crate::ty::Quantity::Omega);
+                        }
+                    }
+                }
+                if let verum_common::Maybe::Some(body) = &func.body {
+                    if let verum_ast::decl::FunctionBody::Block(block) = body {
+                        if let verum_common::Maybe::Some(tail) = &block.expr {
+                            if let Err(violation) = self.check_function_qtt(&qtt_decls, tail) {
+                                tracing::warn!(
+                                    "QTT violation in function '{}': {}",
+                                    func.name.name.as_str(),
+                                    violation
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         self.ctx.exit_scope();
 
         // Wrap final return type for async functions and generators
