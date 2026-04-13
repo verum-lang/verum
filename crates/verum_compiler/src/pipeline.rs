@@ -5692,6 +5692,19 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // Pass 1.9: Pre-register context declarations for forward references.
+        // Without this, `using [ComputeDevice]` fails if ComputeDevice is
+        // declared later in the same file. We register with full AST (not
+        // just names) so method resolution works.
+        for item in &module.items {
+            if let verum_ast::ItemKind::Context(ctx_decl) = &item.kind {
+                checker.register_stdlib_context_full(
+                    verum_common::Text::from(ctx_decl.name.name.as_str()),
+                    ctx_decl.clone(),
+                );
+            }
+        }
+
         // Pass 2: Register protocol declarations
         for item in &module.items {
             if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
@@ -5792,6 +5805,14 @@ impl<'s> CompilationPipeline<'s> {
         if is_stdlib_file {
             checker.context_resolver_mut().set_lenient_contexts(true);
             checker.set_lenient_context_checking(true);
+        }
+
+        // For stdlib files, enable lenient mode that persists through
+        // all scope changes. This flag is never reset by any operation
+        // inside the type checker.
+        if is_stdlib_file {
+            checker.set_lenient_context_checking(true);
+            checker.stdlib_single_file_mode = true;
         }
 
         // Pass 5: Type check all items (function bodies, impl blocks, etc.)

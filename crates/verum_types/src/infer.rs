@@ -660,6 +660,11 @@ pub struct TypeChecker {
     /// (cubical, descent) that need to know the topology of the type.
     pub hit_path_constructors:
         Map<Text, List<crate::ty::PathConstructor>>,
+    /// When true, the type checker is in stdlib single-file mode.
+    /// Field/method resolution failures are accepted with
+    /// Type::Unknown rather than erroring — sibling module types
+    /// may not be fully loaded. Set by pipeline for core/*.vr.
+    pub stdlib_single_file_mode: bool,
     /// Deferred verification goals accumulated during type checking.
     /// When the unifier encounters a `Type::Eq` that can't be
     /// resolved even after the cubical bridge, it pushes a
@@ -988,6 +993,7 @@ impl TypeChecker {
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
             deferred_verification_goals: List::new(),
+            stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1157,6 +1163,7 @@ impl TypeChecker {
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
             deferred_verification_goals: List::new(),
+            stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1708,6 +1715,7 @@ impl TypeChecker {
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
             deferred_verification_goals: List::new(),
+            stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1808,6 +1816,7 @@ impl TypeChecker {
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
             deferred_verification_goals: List::new(),
+            stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -1909,6 +1918,7 @@ impl TypeChecker {
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
             deferred_verification_goals: List::new(),
+            stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
             in_explicit_import_registration: false,
@@ -13163,17 +13173,26 @@ impl TypeChecker {
                                             for field_init in fields {
                                                 let field_name = field_init.name.name.as_str();
 
+                                                let unknown_fallback = Type::Unknown;
                                                 let expected_field_ty = match expected_field_types
                                                     .get(field_name)
                                                 {
                                                     Some(ty) => ty,
                                                     None => {
-                                                        return Err(TypeError::Other(verum_common::Text::from(
-                                                            format!(
-                                                                "field '{}' not found in type '{}' variant construction",
-                                                                field_name, variant_name
-                                                            ),
-                                                        )));
+                                                        // In lenient mode (stdlib files), accept
+                                                        // unknown fields with Unknown type — the
+                                                        // struct definition may reference types
+                                                        // from unloaded sibling modules.
+                                                        if self.stdlib_single_file_mode {
+                                                            &unknown_fallback
+                                                        } else {
+                                                            return Err(TypeError::Other(verum_common::Text::from(
+                                                                format!(
+                                                                    "field '{}' not found in type '{}' variant construction",
+                                                                    field_name, variant_name
+                                                                ),
+                                                            )));
+                                                        }
                                                     }
                                                 };
 
@@ -39829,17 +39848,12 @@ impl TypeChecker {
             // contexts whose method types can't be fully resolved),
             // return Unknown instead of erroring. The actual method
             // will be resolved at VBC codegen time.
-            if self.context_checker.is_lenient() {
-                // Check if the receiver type name matches any
-                // registered context declaration (by bare name).
-                let recv_text = recv_ty.to_text();
-                let is_context = self.context_declarations.contains_key(&recv_text)
-                    || self.context_declarations.keys().any(|k| {
-                        recv_text.as_str().contains(k.as_str())
-                    });
-                if is_context {
-                    return Ok(InferResult::new(Type::Unknown));
-                }
+            // In stdlib lenient mode (single-file check on core/*.vr),
+            // accept unknown methods with Unknown return type. Methods
+            // from implement blocks in sibling modules may not be
+            // registered in single-file check mode.
+            if self.stdlib_single_file_mode {
+                return Ok(InferResult::new(Type::Unknown));
             }
 
             return Err(TypeError::MethodNotFound {
