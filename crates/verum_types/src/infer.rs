@@ -810,6 +810,33 @@ impl Drop for InferenceDepthGuard {
 }
 
 impl TypeChecker {
+    /// QTT validation: walk a function body and confirm every
+    /// declared binding's runtime usage matches its declared
+    /// quantity. Returns `Ok(usage_map)` on success or the first
+    /// `QttViolation` encountered (alphabetically first, for
+    /// deterministic diagnostics).
+    ///
+    /// This is the integration entry point: callers (codegen,
+    /// LSP, `@verify(formal)` boundary) supply the per-binding
+    /// declared quantities (most often derived from explicit
+    /// `meta` / `&checked` annotations or function-signature
+    /// `Quantity` fields) plus the body, and the checker validates
+    /// them against the QTT calculus.
+    pub fn check_function_qtt(
+        &self,
+        declarations: &std::collections::HashMap<Text, crate::ty::Quantity>,
+        body: &verum_ast::expr::Expr,
+    ) -> std::result::Result<
+        crate::qtt_usage::UsageMap,
+        crate::qtt_usage::QttViolation,
+    > {
+        let tracked: std::collections::HashSet<Text> =
+            declarations.keys().cloned().collect();
+        let usage = crate::qtt_walker::walk_expr(&tracked, body);
+        crate::qtt_usage::check_usage(declarations, &usage)?;
+        Ok(usage)
+    }
+
     /// Increment the unified inference depth counter and return an RAII guard.
     /// The guard decrements the counter on drop, preventing stuck counters
     /// after panics or early returns.

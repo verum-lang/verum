@@ -2142,6 +2142,13 @@ pub struct ProofSearchEngine {
     /// Track incomplete proofs (goals accepted via Sorry tactic)
     /// Each entry contains the goal description and source location
     incomplete_proofs: List<IncompleteProof>,
+
+    /// Refinement-reflection registry. When non-empty, every
+    /// invocation of `try_auto` first injects the reflected
+    /// function axioms into the SMT context so the solver can
+    /// unfold user-defined functions during proof search.
+    /// See `crate::refinement_reflection`.
+    reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry,
 }
 
 /// Record of an incomplete proof (accepted via Sorry tactic)
@@ -2167,6 +2174,7 @@ impl ProofSearchEngine {
             current_depth: 0,
             backtrack_stack: List::new(),
             incomplete_proofs: List::new(),
+            reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
         }
     }
 
@@ -2181,6 +2189,7 @@ impl ProofSearchEngine {
             current_depth: 0,
             backtrack_stack: List::new(),
             incomplete_proofs: List::new(),
+            reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
         }
     }
 
@@ -2206,6 +2215,27 @@ impl ProofSearchEngine {
     /// Set maximum search depth
     pub fn set_max_depth(&mut self, depth: usize) {
         self.max_depth = depth;
+    }
+
+    /// Install a refinement-reflection registry. The reflected
+    /// function axioms become available to all subsequent proof
+    /// searches via `try_auto` and the `cubical`/`descent` named
+    /// tactics. Replacing the registry is idempotent for callers
+    /// that re-register the same definitions.
+    pub fn set_reflection_registry(
+        &mut self,
+        registry: crate::refinement_reflection::RefinementReflectionRegistry,
+    ) {
+        self.reflection_registry = registry;
+    }
+
+    /// Read-only access to the reflection registry, e.g. for
+    /// diagnostics or to count how many user functions are
+    /// available as Z3 axioms during this proof session.
+    pub fn reflection_registry(
+        &self,
+    ) -> &crate::refinement_reflection::RefinementReflectionRegistry {
+        &self.reflection_registry
     }
 
     /// Set global timeout
