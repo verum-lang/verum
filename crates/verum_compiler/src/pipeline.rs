@@ -6023,21 +6023,36 @@ impl<'s> CompilationPipeline<'s> {
         let hints_db = HintsDatabase::with_core();
         let mut proof_engine = ProofSearchEngine::with_hints(hints_db);
 
-        // Refinement reflection: the registry is available on the
-        // proof engine for callers that populate it externally (via
-        // `set_reflection_registry`). Automatic collection from
-        // parsed function bodies requires a real Expr→SMT-LIB
-        // translator — which does not exist yet. Rather than emit
-        // fake axioms that claim to unfold function bodies but
-        // actually don't, we leave the registry empty here and let
-        // the infrastructure activate when the translator is ready.
+        // Refinement reflection: scan the module for pure,
+        // single-expression functions and translate their bodies
+        // to SMT-LIB via the Expr→SMT-LIB translator. Successfully
+        // translated definitions are registered as axioms in the
+        // proof engine so `proof by auto` can unfold user function
+        // calls through Z3.
         //
-        // The manual path works today: users can build a
-        // RefinementReflectionRegistry in a `@meta` function and
-        // call `set_reflection_registry` on the engine via the
-        // MetaRuntime bridge. This is the honest, philosophy-
-        // aligned approach: no pretending the compiler does
-        // something it doesn't yet do.
+        // Conservative: functions that can't be translated (multi-
+        // statement bodies, unsupported operators, closures, etc.)
+        // are silently skipped — no incorrect axiom is ever emitted.
+        {
+            use verum_smt::refinement_reflection::RefinementReflectionRegistry;
+            use verum_smt::expr_to_smtlib::try_reflect_function;
+
+            let mut registry = RefinementReflectionRegistry::new();
+            for item in &module.items {
+                if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
+                    if let Some(rf) = try_reflect_function(func_decl) {
+                        let _ = registry.register(rf);
+                    }
+                }
+            }
+            if !registry.is_empty() {
+                tracing::debug!(
+                    "Refinement reflection: {} function(s) reflected as SMT axioms",
+                    registry.len()
+                );
+                proof_engine.set_reflection_registry(registry);
+            }
+        }
 
         let smt_config = verum_smt::context::ContextConfig {
             timeout: Some(timeout),
