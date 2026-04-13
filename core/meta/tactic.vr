@@ -1,0 +1,138 @@
+// =============================================================================
+// tactic.vr — Tactic Metaprogramming (quote / splice / reflect)
+// =============================================================================
+//
+// Layer: Standard Library / Meta
+//
+// User-facing surface for the tactic-metaprogramming analysis core
+// (`verum_types::tactic_meta`). Lean-4-style proof procedures
+// written *as Verum data*: quote expressions, splice them back,
+// reflect goals into inspectable values, register custom
+// elaborators that transform meta terms.
+//
+// Distinct from `core/meta/quote.vr` — that module exposes the
+// compiler's quasi-quotation operator on actual AST nodes; this
+// module exposes the abstract metaprogramming algebra over the
+// `MetaTerm` analysis type, suitable for *modeling* and
+// *reasoning about* tactic combinators.
+//
+// ## The metalanguage
+//
+// ```text
+//     M ::= ⌜e⌝          quote an expression as data
+//         | ▸M           splice data back to expression
+//         | reflect(g)   reify a goal as data
+//         | custom(F, M) invoke a registered elaborator
+//         | M₁ ; M₂      sequence
+//         | const(v)     opaque constant
+// ```
+//
+// ## Reductions
+//
+// ```text
+//     splice(quote(e))  ↦ quote(e)        (β-cancellation)
+//     custom(F, arg)    ↦ F(arg)          (when F registered)
+//     reflect(g)        ↦ cached(g)       (when cached)
+//     seq(M₁, M₂)       ↦ M₂              (after evaluating M₁)
+// ```
+//
+// =============================================================================
+
+module core.meta.tactic;
+
+// =============================================================================
+// 1. The meta-term algebra
+// =============================================================================
+
+/// A metaprogramming term — distinct from the object-level
+/// expression. Construct with the `meta_*` smart constructors.
+public type MetaTerm is
+    /// `⌜e⌝` — quoted expression payload.
+    | Quote { payload: Text }
+    /// `▸M` — splice; reduces if `M` is a Quote.
+    | Splice { inner: Heap<MetaTerm> }
+    /// `reflect(g)` — reify a goal name.
+    | Reflect { goal_name: Text }
+    /// `custom(F, arg)` — invoke registered elaborator `F`.
+    | Custom { name: Text, arg: Heap<MetaTerm> }
+    /// `M₁ ; M₂` — sequential composition; result is M₂.
+    | Seq { first: Heap<MetaTerm>, second: Heap<MetaTerm> }
+    /// Opaque constant.
+    | Const { payload: Text };
+
+// =============================================================================
+// 2. Smart constructors
+// =============================================================================
+
+public fn meta_quote(payload: Text) -> MetaTerm {
+    MetaTerm.Quote { payload }
+}
+
+public fn meta_splice(inner: MetaTerm) -> MetaTerm {
+    MetaTerm.Splice { inner: Heap(inner) }
+}
+
+public fn meta_reflect(goal_name: Text) -> MetaTerm {
+    MetaTerm.Reflect { goal_name }
+}
+
+public fn meta_custom(name: Text, arg: MetaTerm) -> MetaTerm {
+    MetaTerm.Custom { name, arg: Heap(arg) }
+}
+
+public fn meta_seq(first: MetaTerm, second: MetaTerm) -> MetaTerm {
+    MetaTerm.Seq { first: Heap(first), second: Heap(second) }
+}
+
+public fn meta_const(payload: Text) -> MetaTerm {
+    MetaTerm.Const { payload }
+}
+
+// =============================================================================
+// 3. Predicates
+// =============================================================================
+
+/// Is this term in normal form? Quotes and constants are values
+/// that don't reduce further at the outermost level.
+public fn is_meta_value(t: MetaTerm) -> Bool {
+    match t {
+        MetaTerm.Quote { payload: _ } => true,
+        MetaTerm.Const { payload: _ } => true,
+        _ => false,
+    }
+}
+
+/// Test whether a meta-term, when evaluated, would attempt to
+/// invoke a custom elaborator named `name`. The evaluator (in the
+/// analysis core) routes such calls to a registry; if the target
+/// elaborator is missing the term remains stuck.
+public fn references_elaborator(t: MetaTerm, name: Text) -> Bool {
+    match t {
+        MetaTerm.Custom { name: n, arg: a } =>
+            n == name || references_elaborator(*a, name),
+        MetaTerm.Splice { inner } => references_elaborator(*inner, name),
+        MetaTerm.Seq { first, second } =>
+            references_elaborator(*first, name)
+                || references_elaborator(*second, name),
+        _ => false,
+    }
+}
+
+// =============================================================================
+// 4. β-cancellation
+// =============================================================================
+
+/// Apply the splice/quote β-cancellation rule one level.
+/// `splice(quote(e)) ↦ quote(e)`; otherwise returns the input
+/// unchanged.
+public fn beta_cancel(t: MetaTerm) -> MetaTerm {
+    match t {
+        MetaTerm.Splice { inner } => {
+            match *inner {
+                MetaTerm.Quote { payload } => MetaTerm.Quote { payload },
+                _ => t,
+            }
+        },
+        _ => t,
+    }
+}

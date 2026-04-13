@@ -1,0 +1,161 @@
+// =============================================================================
+// regions.vr — Tofte-Talpin Region Calculus
+// =============================================================================
+//
+// Layer: Standard Library / Security
+//
+// User-facing surface for the region-calculus analysis core
+// (`verum_types::region_calculus`). Region-based memory: every
+// allocation is tagged with a *region* (named lifetime) and the
+// type system enforces that no value escapes its containing
+// region.
+//
+// Complements Verum's CBGR + lifetime system: regions give a
+// fully-static discipline (no run-time check, fully erased at
+// codegen) at the cost of stricter type discipline. Both
+// disciplines coexist via region-to-lifetime translation.
+//
+// ## Example
+//
+// ```verum
+// // letregion ρ in (allocate-into-ρ; use-locally; auto-deallocate)
+// let env: LifetimeEnv = region_env([region("ρ")]);
+// let returned: LifetimeType = region_type("List<Int>",
+//                                        region_set([region("ρ")]));
+// // Caller's env has ρ → no escape:
+// match check_no_escape(returned, env) {
+//     Verdict.Ok => print("safe"),
+//     Verdict.Escape { ... } => panic("region escape"),
+// }
+// ```
+//
+// =============================================================================
+
+module core.security.regions;
+
+// =============================================================================
+// 1. Lifetimes and region sets
+// =============================================================================
+
+/// A region — abstract memory lifetime named by a unique id.
+public type Lifetime is { name: Text };
+
+public fn region(name: Text) -> Lifetime {
+    Lifetime { name }
+}
+
+/// A set of regions (deterministic, encoded as a sorted list).
+public type LifetimeSet is { regions: List<Lifetime> };
+
+public fn region_set(regions: List<Lifetime>) -> LifetimeSet {
+    LifetimeSet { regions }
+}
+
+/// Empty region set — for region-free types.
+public fn region_set_empty() -> LifetimeSet {
+    region_set([])
+}
+
+/// Membership predicate.
+public fn region_set_contains(s: LifetimeSet, r: Lifetime) -> Bool {
+    let mut i: Int = 0;
+    while i < s.regions.len() {
+        if s.regions[i].name == r.name {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+/// Set union.
+public fn region_set_union(a: LifetimeSet, b: LifetimeSet) -> LifetimeSet {
+    let mut out: List<Lifetime> = a.regions;
+    let mut i: Int = 0;
+    while i < b.regions.len() {
+        if !region_set_contains(a, b.regions[i]) {
+            out.push(b.regions[i]);
+        }
+        i = i + 1;
+    }
+    region_set(out)
+}
+
+/// Subset check.
+public fn region_set_is_subset_of(a: LifetimeSet, b: LifetimeSet) -> Bool {
+    let mut i: Int = 0;
+    while i < a.regions.len() {
+        if !region_set_contains(b, a.regions[i]) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// 2. Lifetime environment
+// =============================================================================
+
+/// The regions in scope at a program point.
+public type LifetimeEnv is { in_scope: LifetimeSet };
+
+public fn region_env(regions: List<Lifetime>) -> LifetimeEnv {
+    LifetimeEnv { in_scope: region_set(regions) }
+}
+
+public fn region_env_empty() -> LifetimeEnv {
+    region_env([])
+}
+
+/// Push a region into scope (entering `letregion`).
+public fn region_env_push(env: LifetimeEnv, r: Lifetime) -> LifetimeEnv {
+    let mut new_set = env.in_scope;
+    if !region_set_contains(env.in_scope, r) {
+        new_set.regions.push(r);
+    }
+    LifetimeEnv { in_scope: new_set }
+}
+
+// =============================================================================
+// 3. Lifetime-typed values
+// =============================================================================
+
+/// A type paired with the regions it depends on.
+public type LifetimeType is {
+    payload: Text,
+    regions: LifetimeSet,
+};
+
+public fn region_type(payload: Text, regions: LifetimeSet) -> LifetimeType {
+    LifetimeType { payload, regions }
+}
+
+// =============================================================================
+// 4. Escape check (soundness gate)
+// =============================================================================
+
+/// Verdict from `check_no_escape`.
+public type EscapeVerdict is
+    /// All regions in the returned type are in the caller's scope.
+    | Ok
+    /// A region in the returned type is missing from the caller's
+    /// environment — value would dangle if the call returned.
+    | Escape { region: Lifetime, returned_type: Text };
+
+/// Soundness gate: a returned type's regions must all be in the
+/// caller's environment.
+public fn check_no_escape(returned: LifetimeType, env: LifetimeEnv) -> EscapeVerdict {
+    let mut i: Int = 0;
+    while i < returned.regions.regions.len() {
+        let r = returned.regions.regions[i];
+        if !region_set_contains(env.in_scope, r) {
+            return EscapeVerdict.Escape {
+                region: r,
+                returned_type: returned.payload,
+            };
+        }
+        i = i + 1;
+    }
+    EscapeVerdict.Ok
+}

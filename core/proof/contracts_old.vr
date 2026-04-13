@@ -1,0 +1,195 @@
+// =============================================================================
+// contracts_old.vr — Dependent Contracts with old() Pre-State References
+// =============================================================================
+//
+// Layer: Standard Library / Proof
+//
+// User-facing surface for the dependent-contracts analysis core
+// (`verum_types::contracts_old`). Postconditions in mutating
+// functions often need to refer to the *prior* value of state,
+// not the current value. Eiffel, JML, Dafny, and SPARK use
+// `old(expr)` for this.
+//
+// ## Example
+//
+// ```verum
+// fn increment(self: &mut Counter)
+//     ensures self.count == old(self.count) + 1
+// { self.count = self.count + 1; }
+// ```
+//
+// At verification time the analysis records which locations the
+// `old(...)` clauses reference, takes a snapshot of those locations
+// before the body runs, and substitutes the snapshot values into
+// the postcondition for evaluation.
+//
+// ## Frame property
+//
+// A function's *frame* is the set of locations it may modify.
+// A clean contract:
+//   * snapshots every location its postcondition references via
+//     `old(...)`
+//   * does not reference (via old) any location outside the frame
+//     (such references are tautologically the post-value)
+//
+// =============================================================================
+
+module core.proof.contracts_old;
+
+// =============================================================================
+// 1. Pre-state snapshot
+// =============================================================================
+
+/// A single snapshotted (location, value) pair. `value` is the
+/// pre-state value of `loc`, captured before the function body
+/// executed.
+public type SnapshotEntry is { loc: Text, value: Text };
+
+/// A pre-state snapshot.
+public type Snapshot is { entries: List<SnapshotEntry> };
+
+public fn snapshot_empty() -> Snapshot {
+    Snapshot { entries: [] }
+}
+
+/// Record that `loc` had value `value` before execution.
+public fn snapshot_record(s: Snapshot, loc: Text, value: Text) -> Snapshot {
+    let mut new_entries = s.entries;
+    new_entries.push(SnapshotEntry { loc, value });
+    Snapshot { entries: new_entries }
+}
+
+/// Look up a snapshotted value, defaulting to empty Text if absent.
+public fn snapshot_lookup(s: Snapshot, loc: Text) -> Text {
+    let mut i: Int = 0;
+    while i < s.entries.len() {
+        if s.entries[i].loc == loc {
+            return s.entries[i].value;
+        }
+        i = i + 1;
+    }
+    ""
+}
+
+// =============================================================================
+// 2. Postconditions and frames
+// =============================================================================
+
+/// Abstract `old(expr)` reference — only the location name is
+/// captured here; the full expression is opaque.
+public type OldExpr is { location: Text };
+
+public fn old_expr(location: Text) -> OldExpr {
+    OldExpr { location }
+}
+
+/// A postcondition: the locations it references via `old(...)`
+/// plus the locations it constrains in the post-state.
+public type Postcondition is {
+    old_refs: List<OldExpr>,
+    mentions_post: List<Text>,
+};
+
+public fn postcondition_empty() -> Postcondition {
+    Postcondition { old_refs: [], mentions_post: [] }
+}
+
+public fn postcondition_with_old(p: Postcondition, loc: Text) -> Postcondition {
+    let mut refs = p.old_refs;
+    refs.push(old_expr(loc));
+    Postcondition { old_refs: refs, mentions_post: p.mentions_post }
+}
+
+public fn postcondition_with_post(p: Postcondition, loc: Text) -> Postcondition {
+    let mut posts = p.mentions_post;
+    posts.push(loc);
+    Postcondition { old_refs: p.old_refs, mentions_post: posts }
+}
+
+/// A function's frame: the locations it may modify.
+public type Frame is { modifies: List<Text> };
+
+public fn frame_empty() -> Frame {
+    Frame { modifies: [] }
+}
+
+public fn frame_with(f: Frame, loc: Text) -> Frame {
+    let mut m = f.modifies;
+    m.push(loc);
+    Frame { modifies: m }
+}
+
+public fn frame_contains(f: Frame, loc: Text) -> Bool {
+    let mut i: Int = 0;
+    while i < f.modifies.len() {
+        if f.modifies[i] == loc {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+// =============================================================================
+// 3. Frame analysis
+// =============================================================================
+
+/// Result of frame-property analysis.
+public type FrameAnalysis is {
+    /// Locations that must be snapshot pre-execution.
+    locations_to_snapshot: List<Text>,
+    /// Modified locations not constrained by old(...) — soundness warning.
+    unconstrained_modifications: List<Text>,
+    /// old(...) refs to non-modified locations — redundant.
+    redundant_old_refs: List<Text>,
+};
+
+/// Compute snapshot obligations + soundness warnings from a
+/// postcondition and its declared frame.
+public fn compute_frame_obligations(p: Postcondition, f: Frame) -> FrameAnalysis {
+    let mut to_snap: List<Text> = [];
+    let mut i: Int = 0;
+    while i < p.old_refs.len() {
+        to_snap.push(p.old_refs[i].location);
+        i = i + 1;
+    }
+
+    let mut unconstrained: List<Text> = [];
+    let mut j: Int = 0;
+    while j < f.modifies.len() {
+        let loc = f.modifies[j];
+        let mut found = false;
+        let mut k: Int = 0;
+        while k < p.old_refs.len() {
+            if p.old_refs[k].location == loc {
+                found = true;
+            }
+            k = k + 1;
+        }
+        if !found {
+            unconstrained.push(loc);
+        }
+        j = j + 1;
+    }
+
+    let mut redundant: List<Text> = [];
+    let mut m: Int = 0;
+    while m < p.old_refs.len() {
+        let loc = p.old_refs[m].location;
+        if !frame_contains(f, loc) {
+            redundant.push(loc);
+        }
+        m = m + 1;
+    }
+
+    FrameAnalysis {
+        locations_to_snapshot: to_snap,
+        unconstrained_modifications: unconstrained,
+        redundant_old_refs: redundant,
+    }
+}
+
+/// Is the frame analysis clean (no warnings)?
+public fn analysis_is_clean(a: FrameAnalysis) -> Bool {
+    a.unconstrained_modifications.len() == 0 && a.redundant_old_refs.len() == 0
+}
