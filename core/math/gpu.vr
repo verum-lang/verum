@@ -73,7 +73,7 @@ module core.math.gpu;
 mount core.types.{USize, U8, U16, U32, U64, Int, Float, F64, Bool, Text};
 mount core.maybe.{Maybe, Some, None};
 mount core.list.List;
-mount core.ops.Drop;
+mount core.base.ops.Drop;
 mount core.protocols.{Ord, Eq};
 mount core.ordering.Ordering;
 
@@ -612,47 +612,79 @@ implement DeviceRegistry {
 
     // Select best available device based on capabilities
     public fn select_best_device(&self) -> DeviceId {
-        // Prefer GPU with most memory
-        self.devices.iter()
-            .filter(|(_, info)| info.is_gpu())
-            .max_by_key(|(_, info)| info.memory_bytes())
-            .map(|(id, _)| *id)
-            .unwrap_or(DeviceId.cpu())
+        // Prefer GPU with most memory. Use explicit iteration
+        // instead of closure tuple-destructuring (type checker
+        // doesn't infer tuple element types through iterator chains).
+        let mut best_id = DeviceId.cpu();
+        let mut best_mem: USize = 0;
+        let mut i: Int = 0;
+        while i < self.devices.len() {
+            let entry = self.devices[i];
+            let (id, info) = entry;
+            if info.is_gpu() && info.memory_bytes() > best_mem {
+                best_mem = info.memory_bytes();
+                best_id = id;
+            }
+            i = i + 1;
+        }
+        best_id
     }
 
     // Get device info by ID
     public fn get_device(&self, id: DeviceId) -> Maybe<&DeviceInfo> {
-        self.devices.iter()
-            .find(|(dev_id, _)| *dev_id == id)
-            .map(|(_, info)| info)
+        let mut i: Int = 0;
+        while i < self.devices.len() {
+            let entry = self.devices[i];
+            let (dev_id, info) = entry;
+            if dev_id == id {
+                return Some(info);
+            }
+            i = i + 1;
+        }
+        None
     }
 
     // Check if any GPU is available
     public fn has_gpu(&self) -> Bool {
-        self.devices.iter().any(|(_, info)| info.is_gpu())
+        let mut i: Int = 0;
+        while i < self.devices.len() {
+            let entry = self.devices[i];
+            let (_, info) = entry;
+            if info.is_gpu() { return true; }
+            i = i + 1;
+        }
+        false
     }
 
     // Get all GPU devices
     public fn gpus(&self) -> List<(DeviceId, &GpuInfo)> {
-        self.devices.iter()
-            .filter_map(|(id, info)| {
-                match info {
-                    DeviceInfo.Gpu(gpu) => Some((*id, gpu)),
-                    _ => None,
-                }
-            })
-            .collect()
+        let mut result: List<(DeviceId, &GpuInfo)> = [];
+        let mut i: Int = 0;
+        while i < self.devices.len() {
+            let entry = self.devices[i];
+            let (id, info) = entry;
+            match info {
+                DeviceInfo.Gpu(gpu) => result.push((id, gpu)),
+                _ => {},
+            }
+            i = i + 1;
+        }
+        result
     }
 
     // Get CPU device info
     public fn cpu(&self) -> Maybe<&CpuInfo> {
-        self.devices.iter()
-            .find_map(|(_, info)| {
-                match info {
-                    DeviceInfo.Cpu(cpu) => Some(cpu),
-                    _ => None,
-                }
-            })
+        let mut i: Int = 0;
+        while i < self.devices.len() {
+            let entry = self.devices[i];
+            let (_, info) = entry;
+            match info {
+                DeviceInfo.Cpu(cpu) => return Some(cpu),
+                _ => {},
+            }
+            i = i + 1;
+        }
+        None
     }
 
     // Get device count
@@ -662,7 +694,15 @@ implement DeviceRegistry {
 
     // Get GPU count
     public fn gpu_count(&self) -> USize {
-        self.devices.iter().filter(|(_, info)| info.is_gpu()).count()
+        let mut count: USize = 0;
+        let mut i: Int = 0;
+        while i < self.devices.len() {
+            let entry = self.devices[i];
+            let (_, info) = entry;
+            if info.is_gpu() { count = count + 1; }
+            i = i + 1;
+        }
+        count
     }
 }
 
@@ -910,9 +950,10 @@ implement<T> GPUBuffer<T> {
     // Free buffer memory
     public fn free(self) {
         if !self.ptr.is_null() {
-            with_device(self.device, || {
-                @vbc(GPU_FREE, self.ptr);
-            });
+            let old = current_device();
+            set_device(self.device);
+            @vbc(GPU_FREE, self.ptr);
+            set_device(old);
             @vbc(CBGR_INVALIDATE, self.generation);
         }
     }
@@ -921,9 +962,10 @@ implement<T> GPUBuffer<T> {
 implement<T> Drop for GPUBuffer<T> {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
-            with_device(self.device, || {
-                @vbc(GPU_FREE, self.ptr);
-            });
+            let old = current_device();
+            set_device(self.device);
+            @vbc(GPU_FREE, self.ptr);
+            set_device(old);
             @vbc(CBGR_INVALIDATE, self.generation);
         }
     }

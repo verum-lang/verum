@@ -229,3 +229,31 @@ public type Residual is protocol {
     /// The Try type that this residual came from.
     type TryType;
 };
+
+// =============================================================================
+// Drop — RAII resource cleanup protocol
+// =============================================================================
+
+/// The `Drop` protocol enables types to run cleanup code when a
+/// value goes out of scope. This is the foundation for RAII-style
+/// resource management (file handles, GPU buffers, locks, etc.).
+///
+/// When a value implementing `Drop` goes out of scope, its `drop()`
+/// method is called automatically by the CBGR runtime. The compiler
+/// guarantees that `drop()` is called exactly once for each owned
+/// value.
+///
+/// ```verum
+/// type FileHandle is { fd: Int };
+///
+/// implement Drop for FileHandle {
+///     fn drop(&mut self) {
+///         close(self.fd);
+///     }
+/// }
+/// ```
+public type Drop is protocol {
+    /// Called when the value goes out of scope. Implementations should
+    /// release all owned resources (close handles, free memory, etc.).
+    fn drop(&mut self);
+};
