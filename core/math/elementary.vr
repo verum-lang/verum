@@ -666,3 +666,8 @@ theorem max_geq_both(a: Int, b: Int)
     requires a <= b
     ensures a <= b
     proof by auto;
+
+/// Natural logarithm alias.
+public fn ln(x: Float{> 0.0}) -> Float {
+    log(x)
+}

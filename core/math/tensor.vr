@@ -1239,6 +1239,59 @@ fn dtype_of<T: Numeric>() -> DType {
 }
 
 // =============================================================================
+// Additional Tensor Operations (used by distributed, agent, ssm modules)
+// =============================================================================
+
+/// Scatter-add: accumulates values into `x` at `indices` along `axis`.
+public fn scatter_add<T: Numeric>(
+    x: &mut DynTensor<T>,
+    axis: ISize,
+    indices: &DynTensor<USize>,
+    src: &DynTensor<T>,
+) {
+    @vbc(TENSOR_SCATTER_ADD, x.data, axis, indices.data, src.data);
+}
+
+/// Assign `src` into a slice of `x`.
+public fn slice_assign<T: Numeric>(
+    x: &mut DynTensor<T>,
+    ranges: &[USize],
+    src: DynTensor<T>,
+) {
+    @vbc(TENSOR_SLICE_ASSIGN, x.data, ranges, src.data);
+}
+
+/// Element-wise maximum of two tensors.
+public fn max<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_MAX, x.data, y.data)
+}
+
+/// Element-wise minimum of two tensors.
+public fn min<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>) -> DynTensor<T> {
+    @vbc(TENSOR_MIN, x.data, y.data)
+}
+
+/// Top-k values along last axis.
+public fn topk<T: Numeric>(x: &DynTensor<T>, k: USize) -> (DynTensor<T>, DynTensor<USize>) {
+    @vbc(TENSOR_TOPK, x.data, k)
+}
+
+/// Concatenate tensors along an axis.
+public fn cat<T: Numeric>(tensors: &[DynTensor<T>], axis: ISize) -> DynTensor<T> {
+    @vbc(TENSOR_CAT, tensors, axis)
+}
+
+/// Create tensor from a slice of values.
+public fn from_slice<T: Numeric>(data: &[T]) -> DynTensor<T> {
+    @vbc(TENSOR_FROM_SLICE, data)
+}
+
+/// Natural logarithm (alias for tensor_log).
+public fn ln<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+    tensor_log(x)
+}
+
+// =============================================================================
 // Static Shape Operations (Compile-time Verified)
 // =============================================================================
 // NOTE: Static shape operations require const generics (meta generic params)
