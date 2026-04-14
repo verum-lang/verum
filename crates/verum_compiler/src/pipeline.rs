@@ -5800,7 +5800,10 @@ impl<'s> CompilationPipeline<'s> {
         // the context is `provide`d with a concrete implementation.
         let is_stdlib_file = self.session.options().input
             .to_str()
-            .map(|p| p.contains("/core/") || p.contains("\\core\\"))
+            .map(|p| {
+                p.contains("/core/") || p.contains("\\core\\")
+                    || p.starts_with("core/") || p.starts_with("core\\")
+            })
             .unwrap_or(false);
         if is_stdlib_file {
             checker.context_resolver_mut().set_lenient_contexts(true);
