@@ -50,8 +50,9 @@
 module context.standard;
 
 mount core.*;
-mount core.time.{Duration, SystemTime};
+mount core.time.{Duration};
 mount core.time.instant.{Instant};
+mount core.time.system_time.{SystemTime};
 mount core.io.{Read};
 mount core.io.protocols.{Write};
 

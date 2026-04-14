@@ -13,27 +13,6 @@ mount core.math.{sqrt, pow, abs};
 mount super.convert.{srgb_to_linear, linear_to_srgb, rgb_to_hsl, hsl_to_rgb, parse_hex_pair};
 
 // =============================================================================
-// Color — universal sum type supporting all terminal color levels
-// =============================================================================
-
-/// Color represents any terminal color at any fidelity level.
-/// Adaptive downscaling converts higher-fidelity colors to match the
-/// terminal's capabilities (True Color -> Ansi256 -> Base16 -> NoColor).
-public type Color is
-    | Reset
-    | Black | DarkGrey
-    | Red | DarkRed
-    | Green | DarkGreen
-    | Yellow | DarkYellow
-    | Blue | DarkBlue
-    | Magenta | DarkMagenta
-    | Cyan | DarkCyan
-    | White | Grey
-    | Ansi256(Int)
-    | Rgb(Rgb)
-    | Hsl(Hsl);
-
-// =============================================================================
 // Rgb — 24-bit true color
 // =============================================================================
 
@@ -54,6 +33,27 @@ public type Hsl is {
     s: Float,   // Saturation [0, 1]
     l: Float,   // Lightness [0, 1]
 };
+
+// =============================================================================
+// Color — universal sum type supporting all terminal color levels
+// =============================================================================
+
+/// Color represents any terminal color at any fidelity level.
+/// Adaptive downscaling converts higher-fidelity colors to match the
+/// terminal's capabilities (True Color -> Ansi256 -> Base16 -> NoColor).
+public type Color is
+    | Reset
+    | Black | DarkGrey
+    | Red | DarkRed
+    | Green | DarkGreen
+    | Yellow | DarkYellow
+    | Blue | DarkBlue
+    | Magenta | DarkMagenta
+    | Cyan | DarkCyan
+    | White | Grey
+    | Ansi256(Int)
+    | Rgb(Rgb)
+    | Hsl(Hsl);
 
 // =============================================================================
 // Lab — CIELAB for perceptual comparison

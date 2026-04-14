@@ -93,7 +93,7 @@ implement Tabs {
 }
 
 implement Widget for Tabs {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
         let tab_area = match self.block {
             Some(block) => {
                 let inner = block.inner(area);

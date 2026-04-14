@@ -281,14 +281,16 @@ implement<T> FatRef<T> {
 
     /// Get pointer to allocation header at base.
     @inline
-    public unsafe fn base_header(&self) -> &AllocationHeader {
-        AllocationHeader.from_user_ptr(self.base_ptr())
+    public unsafe fn base_header(&self) -> &unsafe AllocationHeader {
+        let base = self.base_ptr();
+        ptr_offset(base, -HEADER_SIZE) as &unsafe AllocationHeader
     }
 
     /// Get mutable header at base.
     @inline
-    public unsafe fn base_header_mut(&self) -> &mut AllocationHeader {
-        AllocationHeader.from_user_ptr_mut(self.base_ptr())
+    public unsafe fn base_header_mut(&self) -> &unsafe mut AllocationHeader {
+        let base = self.base_ptr();
+        ptr_offset(base, -HEADER_SIZE) as &unsafe mut AllocationHeader
     }
 
     // =========================================================================

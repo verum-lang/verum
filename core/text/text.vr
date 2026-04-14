@@ -2794,22 +2794,11 @@ implement AddAssign<Text> for Text {
 
 implement Clone for Text {
     fn clone(&self) -> Text {
-        if self.len == 0 {
+        let bytes = self.as_bytes();
+        if bytes.is_empty() {
             return Text.new();
         }
-        let ptr = unsafe { alloc(self.len + 1, 1) };  // +1 for null terminator
-        if is_null(ptr) {
-            panic("Out of memory");
-        }
-        unsafe {
-            memcpy(ptr, self.ptr, self.len);
-            ptr_write(ptr_offset(ptr, self.len) as &unsafe Byte, 0 as Byte);
-        }
-        Text {
-            ptr: ptr,
-            len: self.len,
-            cap: self.len,
-        }
+        unsafe { Text.from_utf8_unchecked(bytes) }
     }
 }
 

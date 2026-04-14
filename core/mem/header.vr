@@ -258,7 +258,7 @@ implement AllocationHeader {
     /// Store generation counter atomically.
     @inline
     public fn store_generation(&mut self, gen: UInt32) {
-        atomic_store_u32(&self.generation, gen, "release")
+        atomic_store_u32(&mut self.generation, gen, "release")
     }
 
     /// Increment generation and return old value.

@@ -8,10 +8,10 @@ mount super.super.layout.rect.Rect;
 mount super.super.style.style.Style;
 
 /// Base protocol for all widgets (stateless, immediate mode).
-/// Renders itself into a buffer area. Consumed on render (moved, not borrowed).
+/// Renders itself into a buffer area.
 public type Widget is protocol {
     /// Render the widget into the given area of the buffer.
-    fn render(self, area: Rect, buf: &mut Buffer);
+    fn render(&self, area: Rect, buf: &mut Buffer);
 };
 
 /// Stateful widget — maintains state between frames.

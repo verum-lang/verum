@@ -1168,7 +1168,7 @@ implement IOEngine for IoUringDriver {
         self.wake().map_err(convert_error)
     }
 
-    pure fn pending(&self) -> UInt32 {
+    fn pending(&self) -> UInt32 {
         let tail = unsafe { *self.sq_tail };
         let head = atomic_load_u32(self.sq_head, ORDERING_ACQUIRE);
         (tail - head) as UInt32
@@ -1353,7 +1353,7 @@ implement IOEngine for EpollDriver {
         self.wake().map_err(convert_error)
     }
 
-    pure fn pending(&self) -> UInt32 {
+    fn pending(&self) -> UInt32 {
         self.pending_ops.len() as UInt32
     }
 
@@ -1399,7 +1399,7 @@ implement IOEngine for IoDriver {
         }
     }
 
-    pure fn pending(&self) -> UInt32 {
+    fn pending(&self) -> UInt32 {
         match self {
             Uring(d) => d.pending(),
             Epoll(d) => d.pending(),

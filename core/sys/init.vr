@@ -34,7 +34,7 @@ module sys.init;
 // =============================================================================
 
 mount super.common.{OSError, init_runtime, cleanup_runtime, is_runtime_initialized, init_process_args};
-mount core.intrinsics.{spin_hint};
+mount core.intrinsics.platform.{spin_hint};
 
 @cfg(target_os = "linux")
 mount core.intrinsics.lowlevel.kernel.{linux_x86_64_start};
@@ -518,7 +518,7 @@ module linux_entry {
         let exit_code = verum_main(argc, argv);
 
         // Shutdown runtime
-        super.verum_shutdown();
+        verum_shutdown();
 
         exit_code
     }
@@ -552,7 +552,7 @@ module darwin_entry {
         let exit_code = verum_main(argc, argv);
 
         // Shutdown runtime
-        super.verum_shutdown();
+        verum_shutdown();
 
         exit_code
     }
@@ -583,7 +583,7 @@ module windows_entry {
         let exit_code = verum_main(cmdline);
 
         // Shutdown runtime
-        super.verum_shutdown();
+        verum_shutdown();
 
         sys.windows.ExitProcess(exit_code as UInt32);
     }

@@ -46,6 +46,7 @@ mount super.capability.{
 mount super.hazard.{HazardGuard, acquire_hazard};
 mount super.epoch.{GLOBAL_EPOCH};
 mount super.{UseAfterFreeError, RevocationError, get_execution_tier};
+mount core.intrinsics.memory.{ptr_offset};
 
 // =============================================================================
 // ThinRef Structure
@@ -516,8 +517,9 @@ implement<T> ThinRef<T> {
     ///
     /// Reference must be non-null and have valid header at offset -32.
     @inline
-    public unsafe fn header(&self) -> &AllocationHeader {
-        AllocationHeader.from_user_ptr(self.ptr as &unsafe Byte)
+    public unsafe fn header(&self) -> &unsafe AllocationHeader {
+        let raw = self.ptr as &unsafe Byte;
+        ptr_offset(raw, -HEADER_SIZE) as &unsafe AllocationHeader
     }
 
     /// Get mutable header reference.
@@ -526,8 +528,9 @@ implement<T> ThinRef<T> {
     ///
     /// Reference must be non-null and caller must have exclusive access.
     @inline
-    public unsafe fn header_mut(&self) -> &mut AllocationHeader {
-        AllocationHeader.from_user_ptr_mut(self.ptr as &unsafe Byte)
+    public unsafe fn header_mut(&self) -> &unsafe mut AllocationHeader {
+        let raw = self.ptr as &unsafe Byte;
+        ptr_offset(raw, -HEADER_SIZE) as &unsafe mut AllocationHeader
     }
 }
 

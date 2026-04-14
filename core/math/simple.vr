@@ -319,8 +319,8 @@ public fn train<M: Module<Tensor, Tensor>>(
             let loss = result.0;
             let grads = result.1;
 
-            // Update parameters
-            optimizer.step(model, &grads);
+            // Update parameters using gradients
+            optimizer.step(&mut model.parameters_mut());
 
             total_loss += loss.item();
             batch_count += 1;

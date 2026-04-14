@@ -34,11 +34,9 @@ mount core.math.tensor.{
     index_select,
 };
 mount core.math.nn.{Module, Linear};
-mount core.prelude.{
-    List, Map, Maybe, Bool, USize, Float, U32, U64, I8,
-    Text, Error, Result, Value, Heap,
-};
+mount core.*;
 mount core.io.path.{Path};
+mount core.math.internal.{Value};
 
 // =============================================================================
 // Tokenization

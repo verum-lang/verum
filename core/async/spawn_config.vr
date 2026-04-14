@@ -19,18 +19,6 @@ mount core.*;
 // =============================================================================
 
 /// Strategy for recovering from task failures.
-public type RecoveryStrategy is
-    /// No automatic recovery — propagate error
-    None
-    /// Retry with exponential backoff
-    | Retry(RetryConfig)
-    /// Circuit breaker pattern
-    | CircuitBreaker(CircuitBreakerConfig)
-    /// Fallback to a default value
-    | Fallback(Int)
-    /// Delegate to supervisor
-    | Supervised;
-
 /// Configuration for retry strategy.
 public type RetryConfig is {
     max_retries: Int,
@@ -68,6 +56,18 @@ implement CircuitBreakerConfig {
         }
     }
 }
+
+public type RecoveryStrategy is
+    /// No automatic recovery — propagate error
+    None
+    /// Retry with exponential backoff
+    | Retry(RetryConfig)
+    /// Circuit breaker pattern
+    | CircuitBreaker(CircuitBreakerConfig)
+    /// Fallback to a default value
+    | Fallback(Int)
+    /// Delegate to supervisor
+    | Supervised;
 
 // =============================================================================
 // Restart Policies

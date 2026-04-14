@@ -77,7 +77,7 @@ implement Gauge {
 }
 
 implement Widget for Gauge {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
         let gauge_area = match self.block {
             Some(block) => {
                 let inner = block.inner(area);

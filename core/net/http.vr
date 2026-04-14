@@ -35,8 +35,8 @@ mount core.*;
 mount core.collections.{Map, List};
 mount core.text.{Text};
 mount core.io.{Read, Write};
-mount .tcp.{TcpStream};
-mount .addr.{SocketAddr};
+// mount .tcp.{TcpStream};  // disabled: module core.net.http.tcp not found
+// mount .addr.{SocketAddr};  // disabled: module core.net.http.addr not found
 
 // =============================================================================
 // HTTP Method

@@ -211,13 +211,15 @@ public type PageSize is USize;
 /// Align size up to page boundary.
 @inline
 public pure fn page_align_up(size: USize) -> USize {
-    (size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)
+    let mask = PAGE_SIZE - 1;
+    (size + mask) & !mask
 }
 
 /// Align size down to page boundary.
 @inline
 public pure fn page_align_down(size: USize) -> USize {
-    size & ~(PAGE_SIZE - 1)
+    let mask = PAGE_SIZE - 1;
+    size & !mask
 }
 
 /// Check if size is page-aligned.
@@ -434,7 +436,7 @@ fn page_size() -> Int {
 fn align_pointer(ptr: &unsafe Byte, alignment: Int) -> &unsafe Byte {
     let addr = ptr as Int;
     let mask = alignment - 1;
-    let aligned = (addr + mask) & ~mask;  // Use ~ for bitwise NOT
+    let aligned = (addr + mask) & !mask;  // bitwise NOT via ! operator
     aligned as &unsafe Byte
 }
 

@@ -324,8 +324,8 @@ implement EpochManager {
 
     /// Acquire callback spinlock (exclusive).
     @inline
-    fn lock_callbacks(&self) {
-        while atomic_cmpxchg_int(&self.callbacks_lock, 0, 1, "acquire", "relaxed").old != 0 {
+    fn lock_callbacks(&mut self) {
+        while atomic_cmpxchg_int(&mut self.callbacks_lock, 0, 1, "acquire", "relaxed").old != 0 {
             spin_hint();
         }
     }

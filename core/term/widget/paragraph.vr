@@ -150,7 +150,7 @@ implement Styled for Paragraph {
 }
 
 implement Widget for Paragraph {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
         // Render block and get inner area
         let text_area = match self.block {
             Some(block) => {

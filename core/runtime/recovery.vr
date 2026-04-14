@@ -44,53 +44,9 @@ mount time.Duration;
 mount sync.{AtomicU8, AtomicU16, AtomicU32, AtomicU64, MemoryOrdering};
 
 // =============================================================================
-// Recovery Strategy
-// =============================================================================
-
-/// Top-level recovery strategy selection
-///
-/// Determines how errors are handled at the task level.
-public type RecoveryStrategy is
-    /// No automatic recovery (propagate errors immediately)
-    | None
-    /// Retry with specified policy
-    | Retry(RetryConfig)
-    /// Use circuit breaker for external service calls
-    | UseBreaker(CircuitBreakerConfig)
-    /// Supervision tree handles recovery
-    | Supervision
-    /// Composed strategies (try in order)
-    | Composed(List<RecoveryStrategy>);
-
-implement RecoveryStrategy {
-    /// Create retry strategy with defaults
-    public fn retry(max_attempts: Int) -> Self {
-        RecoveryStrategy.Retry(RetryConfig {
-            max_attempts: max_attempts,
-            backoff: BackoffStrategy.Exponential {
-                base_ms: 100,
-                max_ms: 5000,
-                multiplier: 2,
-            },
-            jitter: JitterConfig.Proportional(10), // 10%
-            retry_on: RetryPredicate.AllErrors,
-        })
-    }
-
-    /// Create circuit breaker strategy with defaults
-    public fn circuit_breaker(failure_threshold: Int) -> Self {
-        RecoveryStrategy.UseBreaker(CircuitBreakerConfig {
-            failure_threshold: failure_threshold as UInt16,
-            required_successes: 3,
-            timeout_ms: 60000, // 1 minute
-            error_predicate: ErrorPredicate.AllErrors,
-        })
-    }
-}
-
-// =============================================================================
 // Retry Policy
 // =============================================================================
+// NOTE: RecoveryStrategy is defined later (after all its dependencies)
 
 /// Retry configuration
 public type RetryConfig is {
@@ -409,6 +365,52 @@ public type ErrorPredicate is
     | Specific(List<TypeId>)
     /// Custom predicate
     | Custom(fn(&Text) -> Bool);
+
+// =============================================================================
+// Recovery Strategy
+// =============================================================================
+// Defined here (after all dependencies) to avoid forward-reference errors.
+
+/// Top-level recovery strategy selection
+///
+/// Determines how errors are handled at the task level.
+public type RecoveryStrategy is
+    /// No automatic recovery (propagate errors immediately)
+    | None
+    /// Retry with specified policy
+    | Retry(RetryConfig)
+    /// Use circuit breaker for external service calls
+    | UseBreaker(CircuitBreakerConfig)
+    /// Supervision tree handles recovery
+    | Supervision
+    /// Composed strategies (try in order)
+    | Composed(List<RecoveryStrategy>);
+
+implement RecoveryStrategy {
+    /// Create retry strategy with defaults
+    public fn retry(max_attempts: Int) -> Self {
+        RecoveryStrategy.Retry(RetryConfig {
+            max_attempts: max_attempts,
+            backoff: BackoffStrategy.Exponential {
+                base_ms: 100,
+                max_ms: 5000,
+                multiplier: 2,
+            },
+            jitter: JitterConfig.Proportional(10), // 10%
+            retry_on: RetryPredicate.AllErrors,
+        })
+    }
+
+    /// Create circuit breaker strategy with defaults
+    public fn circuit_breaker(failure_threshold: Int) -> Self {
+        RecoveryStrategy.UseBreaker(CircuitBreakerConfig {
+            failure_threshold: failure_threshold as UInt16,
+            required_successes: 3,
+            timeout_ms: 60000, // 1 minute
+            error_predicate: ErrorPredicate.AllErrors,
+        })
+    }
+}
 
 /// Full circuit breaker with heap storage (for complex scenarios)
 public type CircuitBreaker is {

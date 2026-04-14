@@ -373,6 +373,29 @@ implement Display for TokenStream {
 }
 
 // =============================================================================
+// Group (forward declaration — full definition below)
+// =============================================================================
+
+/// Delimiter type for groups (forward declaration)
+@repr(UInt8)
+public type Delimiter is
+    /// Parentheses: `( ... )`
+    | Parenthesis
+    /// Braces: `{ ... }`
+    | Brace
+    /// Brackets: `[ ... ]`
+    | Bracket
+    /// No delimiter (invisible grouping)
+    | Invisible;
+
+/// Delimited group of tokens (forward declaration stub)
+public type Group is {
+    delimiter: Delimiter,
+    tokens: TokenStream,
+    span: Span,
+};
+
+// =============================================================================
 // TokenTree
 // =============================================================================
 
@@ -583,20 +606,8 @@ public type TokenKind is
     | Eof;
 
 // =============================================================================
-// Group
+// Group (full implementation — type and Delimiter declared above before TokenTree)
 // =============================================================================
-
-/// Delimited group of tokens
-public type Group is {
-    /// Delimiter type
-    delimiter: Delimiter,
-
-    /// Tokens inside the group
-    tokens: TokenStream,
-
-    /// Span of entire group including delimiters
-    span: Span,
-};
 
 implement Group {
     /// Create new group
@@ -624,26 +635,10 @@ implement Group {
     }
 
     /// Unwrap to inner tokens
-    public fn into_tokens(self) -> TokenStream {
+    pub fn into_tokens(self) -> TokenStream {
         self.tokens
     }
 }
-
-// =============================================================================
-// Delimiter
-// =============================================================================
-
-/// Delimiter type for groups
-@repr(UInt8)
-public type Delimiter is
-    /// Parentheses: `( ... )`
-    | Parenthesis
-    /// Braces: `{ ... }`
-    | Brace
-    /// Brackets: `[ ... ]`
-    | Bracket
-    /// No delimiter (invisible grouping)
-    | Invisible;
 
 implement Delimiter {
     /// Get opening character

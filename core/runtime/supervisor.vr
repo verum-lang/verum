@@ -1029,7 +1029,7 @@ implement SupervisorHandle {
         let children = {
             let children = inner.children.read();
             let mut sorted: List<Shared<ChildState>> = children.iter().cloned().collect();
-            sorted.sort_by(|a, b| a.spec.priority.cmp(&b.spec.priority));
+            sorted.sort_by(|a, b| a.get().spec.priority.cmp(&b.get().spec.priority));
             sorted
         };
 
@@ -1038,7 +1038,7 @@ implement SupervisorHandle {
             if let Some(handle) = child.take_handle() {
                 handle.cancel();
 
-                let timeout_ms = child.spec.shutdown_timeout_ms;
+                let timeout_ms = child.get().spec.shutdown_timeout_ms;
                 select {
                     _ = handle.await => {},
                     _ = async_sleep_ms(timeout_ms as UInt64).await => {
@@ -1134,7 +1134,7 @@ implement SupervisorHandle {
             }
 
             // Should we restart?
-            if !child.spec.restart.should_restart(&reason) {
+            if !child.get().spec.restart.should_restart(&reason) {
                 child.set_status(ChildStatus.Terminated);
                 return;
             }
@@ -1181,7 +1181,7 @@ implement SupervisorHandle {
                 .cloned()
         };
 
-        let child_name = child.map(|c| c.spec.name.clone())
+        let child_name = child.map(|c| c.get().spec.name.clone())
             .unwrap_or_else(|| "unknown".into());
 
         let escalation_reason = EscalationReason.RestartLimitExceeded {

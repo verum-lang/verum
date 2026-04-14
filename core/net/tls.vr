@@ -29,7 +29,7 @@ module net.tls;
 
 mount core.*;
 mount core.io.{Read, Write};
-mount .tcp.{TcpStream};
+mount core.net.tcp.{TcpStream};
 
 // =============================================================================
 // TLS Protocol Version

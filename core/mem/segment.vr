@@ -336,7 +336,7 @@ implement Segment {
 
     /// Abandon this segment (set thread_id to 0)
     public fn abandon(&mut self) {
-        atomic_store_u64(&self.thread_id, 0, "release");
+        atomic_store_u64(&mut self.thread_id, 0, "release");
         self.abandoned_visits = 1;
     }
 
