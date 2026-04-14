@@ -12,8 +12,6 @@ module sys.net_ops;
 //
 // =============================================================================
 
-module net_ops;
-
 mount core.*;
 mount super.raw.*;
 

@@ -12,8 +12,6 @@ module sys.file_ops;
 //
 // =============================================================================
 
-module file_ops;
-
 mount core.*;
 mount super.raw.*;
 

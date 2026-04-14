@@ -73,7 +73,6 @@ zstd = "0.13"
 default = []
 metal = ["verum_vbc/metal"]
 
-[target.'cfg(target_os = "macos")'.features]
-# Note: Cargo doesn't support target-conditional default features directly.
-# Users on macOS should build with: cargo build --features metal
-# The CI pipeline enables this via: VERUM_FEATURES="metal"
+# Note: Cargo doesn't support target-conditional default features.
+# On macOS, build with: cargo build --features metal
+# CI enables this via: VERUM_FEATURES="metal"

@@ -12,8 +12,6 @@ module sys.time_ops;
 //
 // =============================================================================
 
-module time_ops;
-
 mount super.raw.*;
 
 /// A monotonic timestamp (nanoseconds since some fixed point).
