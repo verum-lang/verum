@@ -2757,6 +2757,28 @@ impl TypeChecker {
                             field.name, type_name
                         ))))
                     }
+                    // CRITICAL: Allow field access on `Type::Text` when user-defined struct fields exist.
+                    // text.vr defines `public type Text is { ptr, len, cap }` and registers
+                    // `__struct_fields_Text`. This allows `self.len`, `self.ptr`, etc. inside
+                    // `implement Text` blocks to work correctly even though the compiler resolves
+                    // `TypeKind::Text` to the primitive `Type::Text`.
+                    Type::Text => {
+                        let struct_key = format!("__struct_fields_Text");
+                        if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
+                            let field_name_key = verum_common::Text::from(field.name.as_str());
+                            if let Some(field_ty) = fields.get(&field_name_key).cloned() {
+                                self.unifier.unify(&field_ty, expected, expr.span)?;
+                                return Ok(InferResult::new(field_ty));
+                            }
+                        }
+                        Err(TypeError::OtherWithCode {
+                            code: verum_common::Text::from("E103"),
+                            msg: verum_common::Text::from(format!(
+                                "Cannot access field on non-record type: {}",
+                                normalized_ty
+                            )),
+                        })
+                    }
                     _ => Err(TypeError::OtherWithCode {
                         code: verum_common::Text::from("E103"),
                         msg: verum_common::Text::from(format!(
@@ -11896,6 +11918,45 @@ impl TypeChecker {
                                 "Associated constant {} not found on type {}",
                                 field.name, normalized_ty
                             ))))
+                        }
+                        // CRITICAL: Handle user-defined `Text` struct field access.
+                        // text.vr defines `public type Text is { ptr, len, cap }`. When the type
+                        // checker resolves `TypeKind::Text` to `Type::Text` (the primitive), direct
+                        // field accesses inside `implement Text` fail with E103. Check for
+                        // user-registered struct fields before emitting the error.
+                        Type::Text => {
+                            let struct_key = format!("__struct_fields_Text");
+                            if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
+                                let field_name_key = verum_common::Text::from(field.name.as_str());
+                                if let Some(field_ty) = fields.get(&field_name_key).cloned() {
+                                    return Ok(InferResult::new(field_ty));
+                                }
+                                // Field not found in user-defined struct
+                                let available: Vec<&str> = fields.keys().map(|k| k.as_str()).collect();
+                                return Err(TypeError::Other(verum_common::Text::from(format!(
+                                    "field '{}' not found in Text struct. Available: [{}]",
+                                    field.name,
+                                    available.join(", ")
+                                ))));
+                            }
+                            // Fall through to default handling
+                            match field.name.as_str() {
+                                "size" | "align" | "alignment" | "stride" | "bits" => {
+                                    Ok(InferResult::new(Type::int()))
+                                }
+                                "name" => {
+                                    Ok(InferResult::new(Type::text()))
+                                }
+                                _ => {
+                                    Err(TypeError::OtherWithCode {
+                                        code: verum_common::Text::from("E103"),
+                                        msg: verum_common::Text::from(format!(
+                                            "Cannot access field '{}' on non-record type: {}",
+                                            field.name, normalized_ty
+                                        )),
+                                    })
+                                }
+                            }
                         }
                         // Handle type properties for ALL types: T.size, T.align, T.alignment, T.stride, T.bits
                         // These are valid for any type as compile-time type metadata

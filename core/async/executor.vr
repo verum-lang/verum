@@ -389,15 +389,15 @@ implement Runtime {
                 return Poll.Ready(());
             }
 
-            let result: Poll<()> = match state.future.poll(cx) {
+            match state.future.poll(cx) {
                 Poll.Ready(res) => {
                     state.result = Some(res);
                     state.completed = true;
-                    Poll.Ready(())
+                    return Poll.Ready(());
                 }
-                Poll.Pending => Poll.Pending
+                Poll.Pending => {}
             };
-            result
+            Poll.Pending
         };
 
         // Define drop function
@@ -701,7 +701,7 @@ implement Runtime {
             let timeout = Some(IoDuration.from_millis(1));
 
             @cfg(target_os = "macos") {
-                mount sys.darwin.io.KqueueDriver;
+                mount sys.darwin.io.{KqueueDriver};
                 let engine = self.io_engine_ptr as &mut KqueueDriver;
                 match engine.wait(&mut results, 0, timeout) {
                     Ok(count) => {
@@ -724,7 +724,7 @@ implement Runtime {
             }
 
             @cfg(target_os = "linux") {
-                mount sys.linux.io.IoDriver;
+                mount sys.linux.io.{IoDriver};
                 let engine = self.io_engine_ptr as &mut IoDriver;
                 match engine.wait(&mut results, 0, timeout) {
                     Ok(count) => {
@@ -745,7 +745,7 @@ implement Runtime {
             }
 
             @cfg(target_os = "windows") {
-                mount sys.windows.io.IoDriver;
+                mount sys.windows.io.{IoDriver};
                 let engine = self.io_engine_ptr as &mut IoDriver;
                 match engine.wait(&mut results, 0, timeout) {
                     Ok(count) => {
@@ -991,15 +991,15 @@ implement LocalExecutor {
                 return Poll.Ready(());
             }
 
-            let result: Poll<()> = match state.future.poll(cx) {
+            match state.future.poll(cx) {
                 Poll.Ready(res) => {
                     state.result = Some(res);
                     state.completed = true;
-                    Poll.Ready(())
+                    return Poll.Ready(());
                 }
-                Poll.Pending => Poll.Pending
+                Poll.Pending => {}
             };
-            result
+            return Poll.Pending;
         };
 
         // Define drop function
