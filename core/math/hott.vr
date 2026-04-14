@@ -158,41 +158,56 @@ public axiom funext<A, B>(
 // 6. Higher inductive type (HIT) shape: the circle S¹ (HoTT book §6.4)
 // =============================================================================
 
-/// The **circle** S¹ has one point (`base`) and one non-trivial path
-/// (`loop : base = base`). Until the grammar supports path
-/// constructors in variant lists, we expose `base` as a witness and
-/// `s1_loop` as an axiom asserting the existence of the loop path.
-public type S1 is protocol {
-    fn base(&self) -> Int;
+/// The **circle** S¹ — the simplest non-trivial higher inductive type.
+/// One point constructor (`base`) and one path constructor
+/// (`loop : Path<S1>(base, base)`).
+///
+/// In full cubical Verum, this would be:
+///   type S1 is | base | loop: Path<S1>(base, base);
+///
+/// For now, the path constructor is an axiom.
+public type S1 is {
+    /// The base point.
+    point: Int,
 };
 
-/// The non-trivial loop on the circle.
-public axiom s1_loop(point: Int) -> Bool;
+/// Constructor for the base point.
+public fn s1_base() -> S1 { S1 { point: 0 } }
+
+/// The non-trivial loop on S¹: a path from base to base.
+public axiom s1_loop() -> Path<S1>(s1_base(), s1_base());
 
 // =============================================================================
 // 7. Quotient types (HoTT book §6.10)
 // =============================================================================
 
-/// A **quotient type** `A / R` is the set-truncation of `A` by the
-/// equivalence relation `R`. Until HITs land, we expose it as a
-/// protocol with a canonical projection `into` and a well-definedness
-/// witness `respects`.
+/// A **quotient type** `A / R` — the HIT that identifies elements
+/// related by `R`. The projection `into` sends each `a : A` to its
+/// equivalence class, and `respects` witnesses that related elements
+/// map to path-equal classes.
 public type Quotient<A, B> is protocol {
+    /// Canonical projection from A to the quotient B.
     fn into(&self, x: &A) -> B;
-    fn respects(&self, x: &A, y: &A) -> Bool;
+    /// Witness: if R(x, y) then into(x) = into(y).
+    fn respects(&self, x: &A, y: &A) -> Path<B>(into(x), into(y));
 };
 
 // =============================================================================
 // 8. Decidable equality and sets (connection to logic.vr)
 // =============================================================================
 
-/// A type with decidable equality is automatically a set (Hedberg's
-/// theorem). We expose this as a protocol linking `IsSet` and
-/// decidable equality — the full proof is deferred to a cubical
-/// follow-up.
-public type HedbergSet<A> is protocol extends IsSet<A> {
-    fn decide_eq(&self, x: &A, y: &A) -> Bool;
+/// **Hedberg's theorem**: a type with decidable equality is a set.
+/// The decision procedure `decide_eq` produces either a path or a
+/// refutation for any two elements.
+public type DecidableEq<A> is protocol {
+    /// For any `x, y : A`, either produce a path or a refutation.
+    fn decide_eq(&self, x: &A, y: &A) -> Result<Path<A>(x, y), fn(Path<A>(x, y)) -> Void>;
 };
+
+/// Hedberg's theorem: decidable equality implies UIP (set truncation).
+@verify(formal)
+public axiom hedberg<A: DecidableEq>(x: A, y: A, p: Path<A>(x, y), q: Path<A>(x, y))
+    -> Path<Path<A>(x, y)>(p, q);
 
 // =============================================================================
 // 9. Path / identity type operations on PathInt

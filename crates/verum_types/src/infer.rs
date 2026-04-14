@@ -6404,6 +6404,63 @@ impl TypeChecker {
             let t = TypeVar::fresh();
             self.ctx.env.insert(verum_common::Text::from(*name), TypeScheme::mono(Type::Var(t)));
         }
+
+        // ============================================================
+        // CUBICAL TYPE THEORY BUILT-INS (Phase B)
+        //
+        // These are the core cubical primitives. They're resolved by name
+        // during type checking and lowered to CubicalTerm operations in
+        // the cubical normalizer (crates/verum_types/src/cubical.rs).
+        //
+        // In Verum's 3-keyword philosophy, these are NOT keywords but
+        // context-sensitive built-in names (like Path in the type parser).
+        // ============================================================
+
+        // transport<A: fn(I) -> Type>(p: I, x: A(i0)) -> A(p)
+        // Transports a value along a path of types.
+        {
+            let tv_a = TypeVar::fresh();
+            let tv_i = TypeVar::fresh();
+            let params = List::from_iter([Type::Var(tv_i), Type::Var(tv_a)]);
+            let ret = Type::Var(tv_a);
+            let ty = Type::function(params, ret);
+            self.ctx.env.insert(
+                verum_common::Text::from("transport"),
+                TypeScheme::poly(List::from_iter([tv_a, tv_i]), ty),
+            );
+        }
+
+        // hcomp<A: Type>(base: A, sides: fn(I) -> A) -> A
+        // Homogeneous composition: fills a cube from its base and sides.
+        {
+            let tv_a = TypeVar::fresh();
+            let params = List::from_iter([Type::Var(tv_a), Type::Var(tv_a)]);
+            let ret = Type::Var(tv_a);
+            let ty = Type::function(params, ret);
+            self.ctx.env.insert(
+                verum_common::Text::from("hcomp"),
+                TypeScheme::poly(List::from_iter([tv_a]), ty),
+            );
+        }
+
+        // Interval, i0, i1 — cubical interval type and its endpoints.
+        // Registered as opaque types (fresh type variables) that unify
+        // with whatever the cubical normalizer expects.
+        {
+            let interval_tv = TypeVar::fresh();
+            self.ctx.env.insert(
+                verum_common::Text::from("Interval"),
+                TypeScheme::mono(Type::Var(interval_tv)),
+            );
+            self.ctx.env.insert(
+                verum_common::Text::from("i0"),
+                TypeScheme::mono(Type::Var(interval_tv)),
+            );
+            self.ctx.env.insert(
+                verum_common::Text::from("i1"),
+                TypeScheme::mono(Type::Var(interval_tv)),
+            );
+        }
     }
 
     /// Register meta system types needed by the compiler.
