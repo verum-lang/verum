@@ -43,7 +43,7 @@ mount super.tensor.{
 };
 mount super.autodiff.{GradientTape, GradientScope, checkpoint, stop_gradient, with_no_grad};
 mount super.gpu.{
-    ComputeDevice, Backend, GPUKernel, LaunchConfig, Dim3,
+    ComputeDevice, GPUBackend, GPUKernel, LaunchConfig, Dim3,
     Stream, Event, CudaGraph,
 };
 mount super.nn.{Module, Parameter, Trainable};
