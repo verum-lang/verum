@@ -1255,8 +1255,8 @@ public fn scatter_add<T: Numeric>(
 /// Assign `src` into a slice of `x`.
 public fn slice_assign<T: Numeric>(
     x: &mut DynTensor<T>,
-    ranges: &[USize],
-    src: DynTensor<T>,
+    ranges: &[(Maybe<USize>, Maybe<USize>)],
+    src: &DynTensor<T>,
 ) {
     @vbc(TENSOR_SLICE_ASSIGN, x.data, ranges, src.data);
 }

@@ -23,6 +23,13 @@ module core.intrinsics.runtime.text;
 @inline(always)
 public fn text_from_static(s: &'static str) -> Text;
 
+/// Get byte length of Text.
+///
+/// Returns the number of bytes in the UTF-8 encoding (not the character count).
+@intrinsic("text_byte_len")
+@inline(always)
+public fn text_byte_len(text: &Text) -> Int;
+
 // =============================================================================
 // SECTION 2: Parsing
 // =============================================================================

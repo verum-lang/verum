@@ -316,9 +316,9 @@ implement<M: Module<In, Out>, In, Out> DistributedDataParallel<M> {
         let params = self.model.parameters_mut();
 
         // Bucket gradients for efficient all-reduce
-        let buckets = bucket_gradients(&params, self.bucket_size_mb * 1024 * 1024);
+        let mut buckets = bucket_gradients(&params, self.bucket_size_mb * 1024 * 1024);
 
-        for bucket in &buckets {
+        for bucket in &mut buckets {
             // All-reduce: average gradients across processes
             all_reduce(bucket, &self.process_group, ReduceOp.Avg);
         }

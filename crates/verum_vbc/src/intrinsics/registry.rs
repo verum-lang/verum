@@ -326,6 +326,8 @@ pub enum InlineSequenceId {
     IntToText,
     /// float_to_text: convert float to text
     FloatToText,
+    /// text_byte_len: get byte length of Text
+    TextByteLen,
     /// uninit: allocate uninitialized memory on stack
     Uninit,
     /// zeroed: allocate zeroed memory on stack
@@ -1693,6 +1695,16 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FloatToText),
         mlir_op: Some("verum.text.from_float"),
         doc: "Convert float to text",
+    },
+    Intrinsic {
+        name: "text_byte_len",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
+        param_count: 1, // &Text
+        return_count: 1, // Int
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen),
+        mlir_op: Some("verum.text.byte_len"),
+        doc: "Get byte length of Text",
     },
     // =========================================================================
     // UTF-8 Intrinsics

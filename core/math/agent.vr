@@ -164,15 +164,15 @@ implement KVCache {
         let seq_len = key.shape()[2];
         let end = self.current_len + seq_len;
 
-        // Slice assign
-        slice_assign(&mut self.key_cache[layer_idx], &[.., .., self.current_len..end, ..], key);
-        slice_assign(&mut self.value_cache[layer_idx], &[.., .., self.current_len..end, ..], value);
+        // Slice assign: use (start, end) tuple ranges per dimension
+        slice_assign(&mut self.key_cache[layer_idx], &[(None, None), (None, None), (Some(self.current_len), Some(end)), (None, None)], key);
+        slice_assign(&mut self.value_cache[layer_idx], &[(None, None), (None, None), (Some(self.current_len), Some(end)), (None, None)], value);
     }
 
     // Get cached key/value for a layer
     public fn get(&self, layer_idx: USize) -> (DynTensor<Float>, DynTensor<Float>) {
-        let k = slice(&self.key_cache[layer_idx], &[.., .., 0..self.current_len, ..]);
-        let v = slice(&self.value_cache[layer_idx], &[.., .., 0..self.current_len, ..]);
+        let k = slice(&self.key_cache[layer_idx], &[(None, None), (None, None), (Some(0), Some(self.current_len)), (None, None)]);
+        let v = slice(&self.value_cache[layer_idx], &[(None, None), (None, None), (Some(0), Some(self.current_len)), (None, None)]);
         (k, v)
     }
 
@@ -726,7 +726,7 @@ implement<E: Module<Text, DynTensor<Float>>> MemoryStore<E> {
 
     // Add memory
     public fn add(&mut self, content: Text, metadata: Map<Text, Value>) {
-        let embedding = self.embed_model.forward(content.clone());
+        let embedding: DynTensor<Float> = self.embed_model.forward(content.clone());
         self.embeddings = cat(&[&self.embeddings, &embedding.unsqueeze(0)], 0);
         self.contents.push(content);
         self.metadata.push(metadata);
@@ -745,7 +745,7 @@ implement<E: Module<Text, DynTensor<Float>>> MemoryStore<E> {
             return List.new();
         }
 
-        let query_embed = self.embed_model.forward(query.clone());
+        let query_embed: DynTensor<Float> = self.embed_model.forward(query.clone());
 
         // Cosine similarity
         let query_norm = div(&query_embed, &norm(&query_embed));

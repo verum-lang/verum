@@ -1545,6 +1545,7 @@ impl VbcCodegen {
             ("char_escape_debug", 1, "char_escape_debug"),
             // Text intrinsics (core/intrinsics/runtime/text.vr)
             ("text_from_static", 1, "text_from_static"),
+            ("text_byte_len", 1, "text_byte_len"),
             ("utf8_decode_char", 1, "utf8_decode_char"),
             ("text_parse_int", 1, "text_parse_int"),
             ("text_parse_float", 1, "text_parse_float"),

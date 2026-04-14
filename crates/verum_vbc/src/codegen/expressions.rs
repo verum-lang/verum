@@ -15367,6 +15367,11 @@ impl VbcCodegen {
                 self.emit_intrinsic_library_call("verum_float_to_text", args, dest)?;
             }
 
+            InlineSequenceId::TextByteLen => {
+                // Get byte length of Text
+                self.emit_intrinsic_library_call("verum_text_byte_len", args, dest)?;
+            }
+
             // Random number generation - use FFI extended sub-opcodes for platform-specific impl
             InlineSequenceId::RandomU64 => {
                 // Format: dst:reg

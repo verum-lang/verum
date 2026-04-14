@@ -30,6 +30,7 @@ mount core.intrinsics.runtime.text.{
     text_from_static, utf8_decode_char as intrinsic_utf8_decode_char,
     text_parse_int, text_parse_float, int_to_text,
     char_to_uppercase, char_to_lowercase,
+    text_byte_len,
 };
 
 // =============================================================================
@@ -253,17 +254,18 @@ implement Text {
 
     /// Length in bytes.
     public fn len(&self) -> Int {
-        self.len
+        text_byte_len(self)
     }
 
     /// Check if empty.
     public fn is_empty(&self) -> Bool {
-        self.len == 0
+        text_byte_len(self) == 0
     }
 
     /// Capacity in bytes.
     public fn capacity(&self) -> Int {
-        self.cap
+        // Use byte length as capacity proxy (capacity tracking requires runtime support)
+        text_byte_len(self)
     }
 
     /// Get underlying bytes.

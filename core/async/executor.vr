@@ -383,20 +383,21 @@ implement Runtime {
         let state_ptr = Heap.into_raw(state) as &unsafe Byte;
 
         // Define poll function (type-erased)
-        let poll_fn = |state_ptr: &unsafe Byte, cx: &mut Context| -> Poll<()> {
+        let poll_fn: fn(&unsafe Byte, &mut Context) -> Poll<()> = |state_ptr: &unsafe Byte, cx: &mut Context| -> Poll<()> {
             let state = unsafe { &mut *(state_ptr as &mut TaskState<F>) };
             if state.completed {
                 return Poll.Ready(());
             }
 
-            match state.future.poll(cx) {
+            let result: Poll<()> = match state.future.poll(cx) {
                 Poll.Ready(res) => {
                     state.result = Some(res);
                     state.completed = true;
                     Poll.Ready(())
                 }
                 Poll.Pending => Poll.Pending
-            }
+            };
+            result
         };
 
         // Define drop function
@@ -695,7 +696,8 @@ implement Runtime {
         if self.io_engine_ptr != 0 {
             // We own the IOEngine — call wait() with 1ms timeout for event-driven wakeup.
             // Platform-specific cast to concrete IOEngine type.
-            let mut results: [CompletionResult; 64] = [@zero<CompletionResult>(); 64];
+            let zero_cr = CompletionResult { user_data: 0, result: 0, flags: 0 };
+            let mut results: [CompletionResult; 64] = [zero_cr; 64];
             let timeout = Some(IoDuration.from_millis(1));
 
             @cfg(target_os = "macos") {
@@ -983,20 +985,21 @@ implement LocalExecutor {
         let state_ptr = Heap.into_raw(state) as &unsafe Byte;
 
         // Define poll function (type-erased)
-        let poll_fn = |state_ptr: &unsafe Byte, cx: &mut Context| -> Poll<()> {
+        let poll_fn: fn(&unsafe Byte, &mut Context) -> Poll<()> = |state_ptr: &unsafe Byte, cx: &mut Context| -> Poll<()> {
             let state = unsafe { &mut *(state_ptr as &mut TaskState<F>) };
             if state.completed {
                 return Poll.Ready(());
             }
 
-            match state.future.poll(cx) {
+            let result: Poll<()> = match state.future.poll(cx) {
                 Poll.Ready(res) => {
                     state.result = Some(res);
                     state.completed = true;
                     Poll.Ready(())
                 }
                 Poll.Pending => Poll.Pending
-            }
+            };
+            result
         };
 
         // Define drop function

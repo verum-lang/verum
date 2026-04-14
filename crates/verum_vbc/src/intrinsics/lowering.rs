@@ -1663,6 +1663,18 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
+            InlineSequenceId::TextByteLen => {
+                self.emit(MlirOp {
+                    name: "llvm.call".to_string(),
+                    attrs: vec![MlirAttr {
+                        name: "callee".to_string(),
+                        value: MlirAttrValue::String("verum_text_byte_len".to_string()),
+                    }],
+                    result_types: vec![MlirType::I64],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
 
             // Random number generation
             InlineSequenceId::RandomU64 => {

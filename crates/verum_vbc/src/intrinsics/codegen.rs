@@ -633,6 +633,7 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::TextParseFloat => self.emit_text_extended(TextSubOpcode::ParseFloat, args),
             InlineSequenceId::IntToText => self.emit_text_extended(TextSubOpcode::IntToText, args),
             InlineSequenceId::FloatToText => self.emit_text_extended(TextSubOpcode::FloatToText, args),
+            InlineSequenceId::TextByteLen => self.emit_text_extended(TextSubOpcode::ByteLen, args),
             // Random number generation - zero-cost typed dispatch via TensorExtSubOpcode
             InlineSequenceId::RandomU64 => self.emit_tensor_ext_extended(TensorExtSubOpcode::RandomU64, args),
             InlineSequenceId::RandomFloat => self.emit_tensor_ext_extended(TensorExtSubOpcode::RandomFloat, args),
