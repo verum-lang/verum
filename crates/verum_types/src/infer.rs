@@ -10138,6 +10138,8 @@ impl TypeChecker {
                         },
                         args: List::new(),
                     })
+                } else if self.stdlib_single_file_mode {
+                    Ok(Type::Unknown)
                 } else {
                     Err(TypeError::UnboundVariable {
                         name: name.to_text(),
@@ -28314,12 +28316,14 @@ impl TypeChecker {
                                 .map(|e| e.name.clone())
                                 .collect();
 
-                            return Err(TypeError::ImportItemNotFound {
-                                item_name: Text::from(item_name),
-                                module_path: resolved_module_path.clone(),
-                                available_items,
-                                span,
-                            });
+                            if !self.stdlib_single_file_mode {
+                                return Err(TypeError::ImportItemNotFound {
+                                    item_name: Text::from(item_name),
+                                    module_path: resolved_module_path.clone(),
+                                    available_items,
+                                    span,
+                                });
+                            }
                         }
                     }
                 }
