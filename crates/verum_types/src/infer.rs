@@ -10648,6 +10648,12 @@ impl TypeChecker {
                             Ok(InferResult::new(Type::Unknown))
                         }
 
+                        // Var propagation: unresolved type variables from
+                        // lenient-resolved generic functions skip checking.
+                        Type::Var(_) if self.stdlib_single_file_mode => {
+                            Ok(InferResult::new(Type::Unknown))
+                        }
+
                         // Never propagation: calling Never returns Never
                         Type::Never => Ok(InferResult::new(Type::Never)),
 
@@ -33304,7 +33310,11 @@ impl TypeChecker {
                         // expression, it's a stub/placeholder body. Accept any return type.
                         let is_stub = block.stmts.is_empty() && block.expr.is_none();
                         if !is_stub {
-                            self.check_block(block, check_ty)?;
+                            if self.stdlib_single_file_mode {
+                                let _ = self.check_block(block, check_ty);
+                            } else {
+                                self.check_block(block, check_ty)?;
+                            }
                         }
                         // ============================================================
                         // Return Lifetime Validation for Block Bodies

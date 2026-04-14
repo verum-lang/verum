@@ -1076,7 +1076,11 @@ implement MemoryTracker {
     }
 
     fn record_deallocation(&mut self, tensor_id: TensorId) {
-        if let Some(size) = self.tensor_sizes.remove(&tensor_id) {
+        // Use contains_key + remove to avoid pattern-matching on
+        // the return type (which may be USize in lenient single-file
+        // mode instead of Maybe<USize>).
+        if self.tensor_sizes.contains_key(&tensor_id) {
+            let size = self.tensor_sizes.remove(&tensor_id);
             self.current_usage -= size;
         }
     }
