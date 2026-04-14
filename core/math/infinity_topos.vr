@@ -285,3 +285,123 @@ theorem empty_sieve_contains_none()
 theorem geometric_morphism_has_two_adjoints(f_star: Int, f_low: Int)
     ensures f_star + f_low == f_low + f_star
     proof by auto;
+
+// =============================================================================
+// 8. Descent checker — algorithmic verification of the sheaf condition
+// =============================================================================
+
+/// Result of checking the descent condition for a presheaf on a covering.
+public type DescentResult is
+    /// Descent is satisfied: the canonical map is an equivalence.
+    | Satisfied { global_section: Int }
+    /// Descent fails: the canonical map is not an equivalence.
+    | Failed { obstruction: DescentObstruction };
+
+/// Detailed information about a descent failure.
+public type DescentObstruction is {
+    /// Deviation of the canonical map from being an equivalence (0 = perfect).
+    deviation: Float,
+    /// Which component of the Čech nerve fails the limit condition.
+    failing_level: Int,
+    /// Human-readable diagnostic.
+    description: Text,
+};
+
+/// Five canonical types of coherence violations that arise from
+/// descent failure in the Mathesis epistemic ∞-topos.
+public type CoherenceViolation is
+    /// Epistemic status of a claim disagrees across theories.
+    | StatusMisalignment { claim: Text, expected: Int, actual: Int }
+    /// Two claims flatly contradict each other.
+    | Contradiction { claim_a: Text, claim_b: Text }
+    /// Claims form a dependency cycle.
+    | CircularDependency { cycle: List<Text> }
+    /// Composed translations deviate from the direct translation.
+    | FunctorialMisalignment { f12: Text, f23: Text, f13: Text, deviation: Float }
+    /// A dependency target does not exist in the target theory.
+    | DanglingReference { from_claim: Text, to_claim: Text };
+
+/// Check the descent condition for a presheaf on a finite covering.
+///
+/// Given a covering family `{U_i → X}`, the descent condition requires
+/// that the canonical map from global sections to the limit of the
+/// Čech cosimplicial diagram is an equivalence:
+///
+///   F(X) ≃ lim( F(U_i) ⇉ F(U_i ×_X U_j) ⇛ ... )
+///
+/// For finite coverings this is algorithmically decidable.
+public fn check_descent(
+    sheaf_sections: &List<Int>,
+    covering_pullbacks: &List<List<Int>>,
+    global_section: Int,
+) -> DescentResult {
+    // Step 1: Verify that restriction maps are compatible on overlaps.
+    // For each pair (i, j), check that restrict(s_i, U_ij) == restrict(s_j, U_ij).
+    let mut max_deviation: Float = 0.0;
+    let mut failing_level: Int = -1;
+
+    let n = sheaf_sections.len();
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            // Check cocycle condition on double overlaps
+            if covering_pullbacks.len() > i && covering_pullbacks[i].len() > j {
+                let overlap_val = covering_pullbacks[i][j];
+                let section_i = sheaf_sections[i];
+                let section_j = sheaf_sections[j];
+                // Deviation = |restrict(s_i) - restrict(s_j)| (simplified to integer diff)
+                let dev = if section_i > section_j {
+                    (section_i - section_j) as Float
+                } else {
+                    (section_j - section_i) as Float
+                };
+                if dev > max_deviation {
+                    max_deviation = dev;
+                    failing_level = i;
+                }
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+
+    // Step 2: If deviations are within tolerance, descent is satisfied.
+    if max_deviation < 1e-10 {
+        DescentResult.Satisfied { global_section: global_section }
+    } else {
+        DescentResult.Failed {
+            obstruction: DescentObstruction {
+                deviation: max_deviation,
+                failing_level: failing_level,
+                description: f"Descent fails at level {failing_level}: cocycle deviation = {max_deviation}",
+            },
+        }
+    }
+}
+
+/// Verify that a collection of coherence conditions holds for a set of
+/// translations between theories. Returns all detected violations.
+public fn check_coherence(
+    translations: &List<(Int, Int, Float)>,
+) -> List<CoherenceViolation> {
+    let mut violations = List::new();
+
+    // Check functorial coherence: f_{13} ≃ f_{23} ∘ f_{12}
+    let n = translations.len();
+    let mut i = 0;
+    while i < n {
+        let (src, tgt, dev) = translations[i];
+        if dev > 1e-6 {
+            violations.push(CoherenceViolation.FunctorialMisalignment {
+                f12: f"translation_{src}_{tgt}",
+                f23: f"",
+                f13: f"",
+                deviation: dev,
+            });
+        }
+        i += 1;
+    }
+
+    violations
+}

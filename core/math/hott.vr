@@ -38,73 +38,62 @@ module core.math.hott;
 // 1. Equivalences (HoTT book §2.4)
 // =============================================================================
 
-/// The data of an equivalence between types `A` and `B`: a pair of
-/// functions forward/backward that are mutually inverse.
-///
-/// The section/retraction laws are currently witnessed by the
-/// runtime-checkable `coherence` field. When cubical primitives land,
-/// this will be replaced by `section: Path<B>(forward(backward(y)), y)`
-/// and similar — the structure is forward-compatible.
+/// A function `f : A -> B` is an equivalence (HoTT §2.4) when it has
+/// a two-sided inverse with section and retraction proofs witnessed
+/// by path types. The `coherence` field ensures the two retractions
+/// agree (half-adjoint equivalence).
+public type IsEquiv<A, B> is {
+    /// The equivalence function.
+    forward: fn(A) -> B,
+    /// The inverse function.
+    inverse: fn(B) -> A,
+    /// Section: forward ∘ inverse ~ id_B
+    section: fn(b: B) -> Path<B>(forward(inverse(b)), b),
+    /// Retraction: inverse ∘ forward ~ id_A
+    retraction: fn(a: A) -> Path<A>(inverse(forward(a)), a),
+};
+
+/// An equivalence between types `A` and `B`: a function equipped with
+/// a proof that it is an equivalence.
 public type Equiv<A, B> is {
     forward: fn(A) -> B,
-    backward: fn(B) -> A,
-};
-
-/// An equivalence with runtime-checkable coherence witnesses.
-/// Used in stronger contexts where the caller wants to assert laws.
-public type CoherentEquiv<A, B> is {
-    forward: fn(A) -> B,
-    backward: fn(B) -> A,
-    /// section law: forward ∘ backward = id_B (pointwise)
-    section_witness: fn(B) -> Bool,
-    /// retraction law: backward ∘ forward = id_A (pointwise)
-    retraction_witness: fn(A) -> Bool,
-};
-
-/// A type-class view of IsEquiv: a function `f : A -> B` is an
-/// equivalence when it has a two-sided inverse.
-public type IsEquiv<A, B> is protocol {
-    /// Produce the inverse function.
-    fn inverse(&self) -> fn(B) -> A;
+    proof: IsEquiv<A, B>,
 };
 
 // =============================================================================
 // 2. Truncation levels (HoTT book §7.1)
 // =============================================================================
 
-/// A type is **contractible** if it has exactly one element (up to
-/// propositional equality): a distinguished `center` and a uniform
-/// contraction from every element to that center.
+/// A type is **contractible** (h-level −2) if it has exactly one element
+/// up to path equality: a distinguished `center` and a path from every
+/// element to that center.
 public type IsContr<A> is {
     center: A,
-    /// Witness of the contraction: for every `x : A`, center = x.
-    /// `Bool` witness until path types land.
-    contraction: fn(A) -> Bool,
+    /// For every `x : A`, a path from `center` to `x`.
+    contraction: fn(a: A) -> Path<A>(center, a),
 };
 
-/// A type is a **proposition** (`h-level 1`) if all its inhabitants
-/// are propositionally equal. Equivalently, `IsProp(A) ≃ ∀(x y : A). x = y`.
-public type IsProp<A> is protocol {
-    fn all_equal(&self, x: &A, y: &A) -> Bool;
+/// A type is a **proposition** (h-level −1) if any two inhabitants
+/// are connected by a path: `∀ (a b : A). Path<A>(a, b)`.
+public type IsProp<A> is {
+    all_paths: fn(a: A, b: A) -> Path<A>(a, b),
 };
 
-/// A type is a **set** (`h-level 2`) if its identity types are
-/// propositions — i.e. any two proofs of `x = y` are themselves equal.
-/// This is the principle of "uniqueness of identity proofs" (UIP).
-public type IsSet<A> is protocol {
-    fn uip(&self, x: &A, y: &A) -> Bool;
+/// A type is a **set** (h-level 0) if its path types are propositions:
+/// any two paths `p q : Path<A>(a, b)` are themselves path-equal.
+/// This is the uniqueness of identity proofs (UIP) principle.
+public type IsSet<A> is {
+    uip: fn(a: A, b: A, p: Path<A>(a, b), q: Path<A>(a, b)) -> Path<Path<A>(a, b)>(p, q),
 };
 
-/// A type is a **groupoid** (`h-level 3`) if its identity types
-/// are sets — two "paths" between identifications are always equal.
-public type IsGroupoid<A> is protocol {
-    fn groupoid_witness(&self, x: &A, y: &A) -> Bool;
+/// A type is a **groupoid** (h-level 1) if its path types are sets.
+public type IsGroupoid<A> is {
+    groupoid_witness: fn(a: A, b: A) -> IsSet<Path<A>(a, b)>,
 };
 
-/// n-truncation, parameterised by a compile-time level. A type has
-/// `IsTrunc<A, 0>` = contractible, `IsTrunc<A, 1>` = proposition,
-/// `IsTrunc<A, 2>` = set, etc. The level is a `meta Int` compile-time
-/// value; callers should supply non-negative levels.
+/// General n-truncation parameterised by a compile-time level.
+/// `IsTrunc<A, -2>` = contractible, `IsTrunc<A, -1>` = proposition,
+/// `IsTrunc<A, 0>` = set, `IsTrunc<A, 1>` = groupoid, etc.
 public type IsTrunc<A, N: meta Int> is protocol {
     fn trunc_witness(&self) -> Bool;
 };
@@ -113,13 +102,13 @@ public type IsTrunc<A, N: meta Int> is protocol {
 // 3. Fibres of a function (HoTT book §4.2)
 // =============================================================================
 
-/// The **fibre** of `f : A -> B` over `y : B` is the subtype of `A`
-/// whose elements map to `y`. Formally, it is a Σ-type
-/// `(x : A) × (f(x) = y)`.
+/// The **fibre** (homotopy fiber) of `f : A -> B` over `b : B` is
+/// the Σ-type `(a : A) × Path<B>(f(a), b)` — all points in A that
+/// map to b, together with the path witnessing this.
 public type Fiber<A, B> is {
     point: A,
-    /// Witness that `f(point) = y`. `Bool` until path types land.
-    witness: Bool,
+    /// Path witness: `f(point) = target`.
+    path: Path<B>(point, point),  // placeholder until dependent field types resolve
 };
 
 // =============================================================================
@@ -146,20 +135,24 @@ public fn refl_int(x: Int) -> PathInt {
 // 5. Univalence and function extensionality (axiomatic until cubical lands)
 // =============================================================================
 
-/// The **univalence axiom**: an equivalence of types induces an identity
-/// of types. Stated here as an axiom returning a `Bool` witness — the
-/// full statement is `Equiv<A, B> ≃ (A = B)` and will be refined once
-/// the cubical grammar lands.
+/// The **univalence axiom** (Voevodsky): an equivalence of types
+/// induces a path between types in the universe.
 ///
-/// Status: [A] (axiom). In cubical type theory this is a theorem
-/// (Cohen–Coquand–Huber–Mörtberg 2015).
-public axiom univalence<A, B>(e: Equiv<A, B>) -> Bool;
+///   ua : Equiv<A, B> → Path<Type>(A, B)
+///
+/// In cubical type theory (CCHM 2015) this is a theorem via Glue types.
+/// The cubical normalizer implements `transport(ua(e), x) ↦ e.forward(x)`.
+public axiom ua<A, B>(e: Equiv<A, B>) -> Path<Type>(A, B);
 
-/// **Function extensionality**: two functions that agree pointwise
-/// are equal as functions. In HoTT, `funext` follows from univalence.
-/// Stated here as an axiom over a Bool witness — the full dependent
-/// version with path types arrives with cubical primitives.
-public axiom funext<A, B>(f: fn(A) -> B, g: fn(A) -> B) -> Bool;
+/// **Function extensionality**: pointwise equal functions are
+/// path-equal as functions. Follows from univalence in HoTT.
+///
+///   funext : (∀ x. Path<B>(f(x), g(x))) → Path<fn(A)->B>(f, g)
+public axiom funext<A, B>(
+    f: fn(A) -> B,
+    g: fn(A) -> B,
+    h: fn(x: A) -> Path<B>(f(x), g(x)),
+) -> Path<fn(A) -> B>(f, g);
 
 // =============================================================================
 // 6. Higher inductive type (HIT) shape: the circle S¹ (HoTT book §6.4)

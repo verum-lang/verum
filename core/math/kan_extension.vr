@@ -227,3 +227,151 @@ theorem kan_triple_compose_associative(lan: Int, pre: Int, ran: Int)
     ensures (lan + pre) + ran == lan + (pre + ran)
     proof by auto;
 
+// =============================================================================
+// 8. Computational Kan extensions for finite subsites
+// =============================================================================
+
+/// Direction of Kan extension computation.
+public type KanDirection is
+    | Left    // Lan: colimit formula
+    | Right;  // Ran: limit formula
+
+/// Result of computing a Kan extension on a finite subsite.
+public type KanExtensionResult is
+    /// Successfully computed the (co)limit at the given object.
+    | Computed { value: Int }
+    /// The diagram is empty — no contributing objects.
+    | Empty
+    /// Computation failed (e.g., infinite diagram).
+    | Failed { reason: Text };
+
+/// Compute the pointwise left Kan extension on a finite subsite.
+///
+/// Given functors K: C → D and F: C → E, computes:
+///   Lan_K(F)(d) = colim_{(c, K(c)→d)} F(c)
+///
+/// For a finite category C, this is a finite colimit and always exists
+/// when E has finite colimits.
+///
+/// # Arguments
+/// * `k_values` — values of K on objects of C: K(c_i) as integers
+/// * `f_values` — values of F on objects of C: F(c_i) as integers
+/// * `target_obj` — the object d ∈ D to compute Lan_K(F)(d)
+///
+/// # Returns
+/// The colimit value, or Empty if no objects of C map to d.
+public fn compute_pointwise_lan(
+    k_values: &List<Int>,
+    f_values: &List<Int>,
+    target_obj: Int,
+) -> KanExtensionResult {
+    // Build the comma category (K ↓ d):
+    // objects are pairs (c, K(c) → d), i.e., c such that K(c) = d
+    // (simplified: equality instead of morphisms for the discrete case)
+    let mut diagram_values = List::new();
+
+    let n = k_values.len();
+    let mut i = 0;
+    while i < n {
+        if k_values[i] == target_obj {
+            diagram_values.push(f_values[i]);
+        }
+        i += 1;
+    }
+
+    if diagram_values.is_empty() {
+        return KanExtensionResult.Empty;
+    }
+
+    // Colimit of a discrete diagram in Set is the coproduct (disjoint union).
+    // For integer-valued functors, we take the sum as a proxy for the colimit.
+    let mut colimit = 0;
+    let mut j = 0;
+    while j < diagram_values.len() {
+        colimit = colimit + diagram_values[j];
+        j += 1;
+    }
+
+    KanExtensionResult.Computed { value: colimit }
+}
+
+/// Compute the pointwise right Kan extension on a finite subsite.
+///
+/// Given functors K: C → D and F: C → E, computes:
+///   Ran_K(F)(d) = lim_{(d→K(c))} F(c)
+///
+/// Dual to left Kan: uses limit instead of colimit.
+public fn compute_pointwise_ran(
+    k_values: &List<Int>,
+    f_values: &List<Int>,
+    target_obj: Int,
+) -> KanExtensionResult {
+    // Build the cocomma category (d ↓ K):
+    // objects are pairs (c, d → K(c)), simplified to equality
+    let mut diagram_values = List::new();
+
+    let n = k_values.len();
+    let mut i = 0;
+    while i < n {
+        if k_values[i] == target_obj {
+            diagram_values.push(f_values[i]);
+        }
+        i += 1;
+    }
+
+    if diagram_values.is_empty() {
+        return KanExtensionResult.Empty;
+    }
+
+    // Limit of a discrete diagram in Set is the product.
+    // For integer-valued functors, we take the product as a proxy.
+    let mut limit = 1;
+    let mut j = 0;
+    while j < diagram_values.len() {
+        limit = limit * diagram_values[j];
+        j += 1;
+    }
+
+    KanExtensionResult.Computed { value: limit }
+}
+
+/// Measure the obstruction of a Kan extension.
+///
+/// The obstruction is the deviation of the counit (η: Ran_K ∘ K* → Id)
+/// from being an isomorphism. A zero obstruction means the extension
+/// is exact (no information loss).
+///
+/// Returns a value in [0, 1] where 0 = no obstruction, 1 = total failure.
+public fn kan_obstruction_measure(
+    k_values: &List<Int>,
+    f_values: &List<Int>,
+    original_values: &List<Int>,
+) -> Float {
+    // Compute Ran_K(F) at each object, then compare with original
+    let n = original_values.len();
+    if n == 0 { return 0.0; }
+
+    let mut total_deviation: Float = 0.0;
+    let mut i = 0;
+    while i < n {
+        let ran_result = compute_pointwise_ran(k_values, f_values, i);
+        let ran_value = match ran_result {
+            KanExtensionResult.Computed { value } => value,
+            _ => 0,
+        };
+        let original = original_values[i];
+        let dev = if ran_value > original {
+            (ran_value - original) as Float
+        } else {
+            (original - ran_value) as Float
+        };
+        let norm = if original != 0 { dev / (original as Float) } else { dev };
+        total_deviation = total_deviation + norm;
+        i += 1;
+    }
+
+    // Average deviation, clamped to [0, 1]
+    let avg = total_deviation / (n as Float);
+    if avg > 1.0 { 1.0 } else { avg }
+}
+
