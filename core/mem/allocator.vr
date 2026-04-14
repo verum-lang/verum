@@ -502,7 +502,7 @@ implement PageHeader {
     /// Uses atomic CAS for thread safety.
     public fn add_to_remote_free(&mut self, index: Int) {
         loop {
-            let old_head = atomic_load_i32(&self.remote_free_head, ORDERING_ACQUIRE);
+            let old_head = atomic_load_i32(&mut self.remote_free_head, ORDERING_ACQUIRE);
 
             // Store old head in slot data
             let slot_data = self.slot_ptr(index) as &mut Int32;
@@ -510,7 +510,7 @@ implement PageHeader {
 
             // CAS to update remote_free_head
             let result = atomic_compare_exchange_i32(
-                &self.remote_free_head,
+                &mut self.remote_free_head,
                 old_head,
                 index as Int32,
                 ORDERING_ACQ_REL,
@@ -527,7 +527,7 @@ implement PageHeader {
     /// Process remote free list (called by owning thread).
     public fn process_remote_frees(&mut self) {
         // Atomically swap remote list to local processing
-        let head = atomic_exchange_i32(&self.remote_free_head, -1, ORDERING_ACQ_REL);
+        let head = atomic_exchange_i32(&mut self.remote_free_head, -1, ORDERING_ACQ_REL);
 
         let mut current = head;
         while current >= 0 {

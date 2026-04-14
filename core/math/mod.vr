@@ -45,7 +45,7 @@
 // # Context System
 //
 // Mathematical operations use Verum's context system for cross-cutting concerns:
-// - RandomSource: Pseudorandom number generation
+// - Random: Pseudorandom number generation
 // - ComputeDevice: Device selection (CPU, GPU)
 // - PrecisionMode: Numerical precision control
 // - GradientTape: Autodiff recording

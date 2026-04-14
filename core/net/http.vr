@@ -32,9 +32,9 @@
 module core.net.http;
 
 mount core.*;
-mount core.collections.{Map, List};
-mount core.text.{Text};
-mount core.io.{Read, Write};
+mount core.collections.map.{Map};
+mount core.collections.list.{List};
+mount core.io.protocols.{Read, Write};
 // mount .tcp.{TcpStream};  // disabled: module core.net.http.tcp not found
 // mount .addr.{SocketAddr};  // disabled: module core.net.http.addr not found
 

@@ -61,7 +61,7 @@ mount core.intrinsics.{
     atomic_load_ptr, atomic_store_ptr, atomic_cmpxchg_ptr,
     atomic_fetch_add_int, atomic_load_int,
 };
-mount core.intrinsics.atomic.ORDERING_RELAXED;
+mount core.intrinsics.atomic.{ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL, ORDERING_SEQ_CST};
 
 // =============================================================================
 // Constants
@@ -103,7 +103,7 @@ public type HazardDomain is {
 @repr(C, align(64))  // Cache-line aligned to avoid false sharing
 public type ThreadRecord is {
     /// Hazard pointer slots for this thread (atomic).
-    hazards: [&unsafe Byte; 8],  // HAZARD_POINTERS_PER_THREAD
+    hazards: [*const Byte; 8],  // HAZARD_POINTERS_PER_THREAD
 
     /// Next thread record in linked list (atomic).
     next: &unsafe ThreadRecord,
@@ -185,7 +185,7 @@ implement HazardDomain {
         // Initialize record
         let record = record_ptr;
         for i in 0..HAZARD_POINTERS_PER_THREAD {
-            record.hazards[i] = 0 as &unsafe Byte;
+            record.hazards[i] = 0 as *const Byte;
         }
         record.next = 0 as &unsafe ThreadRecord;
         record.active = true;
@@ -193,15 +193,15 @@ implement HazardDomain {
 
         // Add to linked list (lock-free prepend)
         loop {
-            let head = atomic_load_ptr(&self.head, "acquire");
-            atomic_store_ptr(&record.next, head, "relaxed");
+            let head = atomic_load_ptr(&self.head, ORDERING_ACQUIRE);
+            atomic_store_ptr(&record.next, head, ORDERING_RELAXED);
 
             let result = atomic_cmpxchg_ptr(
                 &self.head,
                 head,
                 record_ptr as &unsafe ThreadRecord,
-                "release",
-                "acquire"
+                ORDERING_RELEASE,
+                ORDERING_ACQUIRE
             );
 
             if result.success {
@@ -209,7 +209,7 @@ implement HazardDomain {
             }
         }
 
-        atomic_fetch_add_int(&self.thread_count, 1, "relaxed");
+        atomic_fetch_add_int(&self.thread_count, 1, ORDERING_RELAXED);
 
         record
     }
@@ -219,25 +219,25 @@ implement HazardDomain {
     /// Returns a sorted list of all currently protected pointers.
     /// Used during reclamation to determine which retired nodes are safe.
     fn scan_hazards(&self) -> List<&unsafe Byte> {
-        let capacity = atomic_load_int(&self.thread_count, "relaxed")
+        let capacity = atomic_load_int(&self.thread_count, ORDERING_RELAXED)
             * HAZARD_POINTERS_PER_THREAD;
         let mut protected = List.with_capacity(capacity);
 
         // Walk the thread record list
-        let mut current = atomic_load_ptr(&self.head, "acquire");
+        let mut current = atomic_load_ptr(&self.head, ORDERING_ACQUIRE);
 
         while current as Int != 0 {
             let record = unsafe { &*current };
 
             // Scan all hazard slots in this thread's record
             for i in 0..HAZARD_POINTERS_PER_THREAD {
-                let hp = atomic_load_ptr(&record.hazards[i], "acquire");
+                let hp = atomic_load_ptr(&record.hazards[i] as *const *const Byte, ORDERING_ACQUIRE);
                 if hp as Int != 0 {
                     protected.push(hp);
                 }
             }
 
-            current = atomic_load_ptr(&record.next, "acquire");
+            current = atomic_load_ptr(&record.next, ORDERING_ACQUIRE);
         }
 
         // Sort for binary search during reclamation
@@ -248,12 +248,12 @@ implement HazardDomain {
 
     /// Advance global epoch.
     public fn advance_epoch(&mut self) -> Int {
-        atomic_fetch_add_int(&self.epoch, 1, "acq_rel")
+        atomic_fetch_add_int(&self.epoch, 1, ORDERING_ACQ_REL)
     }
 
     /// Get current global epoch.
     public fn current_epoch(&self) -> Int {
-        atomic_load_int(&self.epoch, "acquire")
+        atomic_load_int(&self.epoch, ORDERING_ACQUIRE)
     }
 }
 
@@ -288,7 +288,7 @@ implement ThreadHazardRecord {
         );
 
         // Store pointer with Release ordering (makes it visible to scanners)
-        atomic_store_ptr(&record.hazards[slot], ptr, "release");
+        atomic_store_ptr(&mut record.hazards[slot] as *mut *const Byte, ptr as *const Byte, ORDERING_RELEASE);
 
         self.next_slot += 1;
 
@@ -304,9 +304,9 @@ implement ThreadHazardRecord {
             Some(record) => {
                 // Clear the slot
                 atomic_store_ptr(
-                    &record.hazards[slot],
-                    0 as &unsafe Byte,
-                    "release"
+                    &mut record.hazards[slot] as *mut *const Byte,
+                    0 as *const Byte,
+                    ORDERING_RELEASE
                 );
 
                 // Allow slot reuse (LIFO for cache locality)
@@ -349,7 +349,7 @@ implement ThreadHazardRecord {
         // Partition retired nodes into reclaimable and still-protected
         let mut still_retired = List.with_capacity(self.retired.len());
 
-        for node in self.retired.drain() {
+        for node in self.retired.drain(0, self.retired.len()) {
             // Binary search in sorted protected list
             if !protected.binary_search(&node.ptr).is_found() {
                 // Not protected, safe to reclaim

@@ -497,17 +497,19 @@ implement Widget for Canvas {
 
         // Create pixel canvas and painter
         let mut pixel_canvas = PixelCanvas.new(pixel_w, pixel_h);
-        let mut painter = Painter {
-            canvas: &mut pixel_canvas,
-            color: Color.White,
-            x_bounds: self.x_bounds,
-            y_bounds: self.y_bounds,
-        };
+        {
+            let mut painter = Painter {
+                canvas: &mut pixel_canvas,
+                color: Color.White,
+                x_bounds: self.x_bounds,
+                y_bounds: self.y_bounds,
+            };
 
-        // Draw all shapes
-        for shape in &self.shapes {
-            shape.draw(&mut painter);
-        }
+            // Draw all shapes
+            for shape in &self.shapes {
+                shape.draw(&mut painter);
+            }
+        }  // painter dropped here, releasing mutable borrow of pixel_canvas
 
         // Render pixel canvas to terminal buffer
         match self.mode {

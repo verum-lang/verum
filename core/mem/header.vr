@@ -267,7 +267,7 @@ implement AllocationHeader {
     /// Handles wraparound by incrementing epoch.
     @inline
     public fn increment_generation(&mut self) -> UInt32 {
-        let old_gen = atomic_fetch_add_u32(&self.generation, 1, ORDERING_ACQ_REL);
+        let old_gen = atomic_fetch_add_u32(&mut self.generation, 1, ORDERING_ACQ_REL);
 
         // Check for wraparound
         if old_gen >= GEN_MAX - 1 {
@@ -277,9 +277,9 @@ implement AllocationHeader {
             let caps = (old_packed >> 16) as UInt16;
             let new_epoch = old_epoch + 1;
             let new_packed = ((caps as UInt32) << 16) | (new_epoch as UInt32);
-            atomic_store_u32(&self.epoch_and_caps, new_packed, ORDERING_RELEASE);
+            atomic_store_u32(&mut self.epoch_and_caps, new_packed, ORDERING_RELEASE);
             // Reset generation
-            atomic_store_u32(&self.generation, GEN_INITIAL, ORDERING_RELEASE);
+            atomic_store_u32(&mut self.generation, GEN_INITIAL, ORDERING_RELEASE);
             // Notify epoch manager
             super.epoch.GLOBAL_EPOCH.on_wraparound();
         }
@@ -300,7 +300,7 @@ implement AllocationHeader {
         let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
         let caps = old_packed & 0xFFFF_0000;
         let new_packed = caps | (epoch as UInt32);
-        atomic_store_u32(&self.epoch_and_caps, new_packed, ORDERING_RELEASE)
+        atomic_store_u32(&mut self.epoch_and_caps, new_packed, ORDERING_RELEASE)
     }
 
     /// Load generation and epoch in optimized sequential access.
@@ -345,7 +345,7 @@ implement AllocationHeader {
         let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
         let epoch = old_packed & 0xFFFF;
         let new_packed = ((caps as UInt32) << 16) | epoch;
-        atomic_store_u32(&self.epoch_and_caps, new_packed, ORDERING_RELEASE)
+        atomic_store_u32(&mut self.epoch_and_caps, new_packed, ORDERING_RELEASE)
     }
 
     /// Attenuate (reduce) capabilities using AND mask.
@@ -354,7 +354,7 @@ implement AllocationHeader {
     public fn attenuate_capabilities(&mut self, mask: UInt16) -> UInt16 {
         // AND the upper 16 bits (caps) while preserving lower 16 bits (epoch)
         let u32_mask = ((mask as UInt32) << 16) | 0xFFFF;
-        let old_packed = atomic_fetch_and_u32(&self.epoch_and_caps, u32_mask, ORDERING_ACQ_REL);
+        let old_packed = atomic_fetch_and_u32(&mut self.epoch_and_caps, u32_mask, ORDERING_ACQ_REL);
         ((old_packed >> 16) & 0xFFFF) as UInt16
     }
 
@@ -373,14 +373,14 @@ implement AllocationHeader {
     /// Increment reference count and return old value.
     @inline
     public fn increment_ref_count(&mut self) -> UInt32 {
-        atomic_fetch_add_u32(&self.ref_count, 1, ORDERING_ACQ_REL)
+        atomic_fetch_add_u32(&mut self.ref_count, 1, ORDERING_ACQ_REL)
     }
 
     /// Decrement reference count and return new value.
     /// Caller must handle deallocation when this returns 0.
     @inline
     public fn decrement_ref_count(&mut self) -> UInt32 {
-        let old = atomic_fetch_add_u32(&self.ref_count, 0xFFFF_FFFF, ORDERING_ACQ_REL);
+        let old = atomic_fetch_add_u32(&mut self.ref_count, 0xFFFF_FFFF, ORDERING_ACQ_REL);
         old - 1
     }
 

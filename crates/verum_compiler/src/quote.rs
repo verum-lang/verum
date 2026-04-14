@@ -2265,18 +2265,6 @@ impl ToTokens for Type {
                 inner.to_tokens(stream);
             }
 
-            TypeKind::PathType { carrier, lhs, rhs } => {
-                stream.push(Token::new(TokenKind::Ident("Path".into()), self.span));
-                stream.push(Token::new(TokenKind::Lt, self.span));
-                carrier.to_tokens(stream);
-                stream.push(Token::new(TokenKind::Gt, self.span));
-                stream.push(Token::new(TokenKind::LParen, self.span));
-                lhs.to_tokens(stream);
-                stream.push(Token::new(TokenKind::Comma, self.span));
-                rhs.to_tokens(stream);
-                stream.push(Token::new(TokenKind::RParen, self.span));
-            }
-
             TypeKind::TypeLambda { params, body } => {
                 stream.push(Token::new(TokenKind::Pipe, self.span));
                 for (i, param) in params.iter().enumerate() {

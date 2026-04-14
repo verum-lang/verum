@@ -141,8 +141,8 @@ implement Widget for Gauge {
                 // Invert style where label overlaps the filled portion
                 let char_style = if col < filled_width {
                     Style.new()
-                        .fg(self.gauge_style.bg ?? Some(Color.Reset))
-                        .bg(self.gauge_style.fg ?? Some(Color.Reset))
+                        .fg(self.gauge_style.bg.unwrap_or(Color.Reset))
+                        .bg(self.gauge_style.fg.unwrap_or(Color.Reset))
                 } else {
                     label_style
                 };

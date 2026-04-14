@@ -131,10 +131,10 @@ static mut AUXV_PTR: *const AuxvEntry = null;
 /// # Safety
 /// This must be called exactly once during program initialization.
 /// The argv pointer must be valid and point to the kernel-provided stack.
-public fn init_auxv(argv: &&Byte) {
+public fn init_auxv(argv: *const *const Byte) {
     unsafe {
         // Start at argv
-        let mut ptr = argv as *const *const Byte;
+        let mut ptr = argv;
 
         // Skip past argv entries until NULL terminator
         while !(*ptr).is_null() {

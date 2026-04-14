@@ -29,11 +29,7 @@ public mount .text.Lines;
 public mount .text.TextMatches;
 public mount .text.TextMatchIndices;
 
-// Internal representations (for advanced use)
-// Note: These are internal implementation details, not re-exported publicly
-mount .text.TextRepr;
-mount .text.InlineText;
-mount .text.HeapText;
+// Internal representations removed (TextRepr, InlineText, HeapText not in text.vr)
 
 // Tagged string literals (SQL, HTML, regex, etc.)
 public mount .tagged_literals.*;

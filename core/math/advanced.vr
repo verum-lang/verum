@@ -116,7 +116,7 @@ public fn matmul_into<T: Numeric>(
 // Kernel variant specification for hardware-specific implementations
 public type KernelVariant is {
     // Target backend (CPU, CUDA, ROCm, Metal)
-    backend: Backend,
+    backend: GPUBackend,
     // CUDA compute capability (for GPU variants)
     compute_capability: Maybe<(USize, USize)>,
     // SIMD level for CPU variants
@@ -149,7 +149,7 @@ public type SimdLevel is
 //     flash_attention_kernel,
 //     &[
 //         KernelVariant {
-//             backend: Backend.Cuda,
+//             backend: GPUBackend.Cuda,
 //             compute_capability: Maybe.Some((8, 0)),  // Ampere+
 //             block_size: Maybe.Some((128, 128)),
 //             shared_memory: 98304,

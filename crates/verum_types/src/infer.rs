@@ -39749,17 +39749,20 @@ impl TypeChecker {
                         for arg in args.iter() { let _ = self.synth_expr(arg)?; }
                         return Ok(InferResult::new(Type::Unit));
                     }
-                    // Sync primitive methods - lock/read/write return guard types
+                    // Sync primitive methods - lock/read/write return Result<Guard<T>, E>
+                    // where Guard<T> derefs to T. We model this as Result<T, E> so that
+                    // .unwrap() extracts T, enabling field access on the guard.
                     "lock" | "try_lock" | "lock_owned" | "read_owned"
                     | "read" | "write" => {
                         for arg in args.iter() { let _ = self.synth_expr(arg)?; }
-                        // lock() returns the inner type (guard wrapping T)
+                        // lock() returns Result<inner_T, PoisonError<inner_T>>
                         let inner = match &recv_ty {
                             Type::Generic { args: targs, .. } if !targs.is_empty() => targs[0].clone(),
                             Type::Named { args: targs, .. } if !targs.is_empty() => targs[0].clone(),
                             _ => Type::Var(TypeVar::fresh()),
                         };
-                        return Ok(InferResult::new(inner));
+                        let err_ty = Type::Var(TypeVar::fresh());
+                        return Ok(InferResult::new(Type::result(inner, err_ty)));
                     }
                     "acquire_owned" | "acquire_batch" => {
                         for arg in args.iter() { let _ = self.synth_expr(arg)?; }

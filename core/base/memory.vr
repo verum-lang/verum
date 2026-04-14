@@ -23,6 +23,7 @@ mount super.super.mem.allocator.{
     get_header_from_ptr, AllocError,
 };
 mount super.super.mem.header.{AllocationHeader};
+mount core.intrinsics.atomic.{MemoryOrder};
 
 // Import typed intrinsics from stdlib.intrinsics
 mount core.intrinsics.{
@@ -257,12 +258,12 @@ implement<T> Heap<T> {
     fn validate_cbgr(&self) {
         let header_addr = self.ptr as Int - 32;
         // Atomic load of generation counter (Acquire ordering for cross-thread visibility)
-        let actual_gen = atomic_load_u32(header_addr, ORDERING_ACQUIRE);
+        let actual_gen = atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE);
         if actual_gen != self.generation {
             panic(f"CBGR use-after-free detected in Heap<T>: expected generation {self.generation}, found {actual_gen}");
         }
         // Atomic load of epoch_and_caps field, extract epoch (low 16 bits)
-        let epoch_and_caps = atomic_load_u32(header_addr + 4, ORDERING_ACQUIRE);
+        let epoch_and_caps = atomic_load_u32((header_addr + 4) as *const UInt32, ORDERING_ACQUIRE);
         let actual_epoch = (epoch_and_caps & 0xFFFF) as UInt16;
         if actual_epoch != self.epoch {
             panic(f"CBGR epoch mismatch in Heap<T>: expected epoch {self.epoch}, found {actual_epoch}");
@@ -355,7 +356,7 @@ implement<T> Heap<T> {
     /// value stored in the Heap struct). Useful for CBGR introspection tests.
     public fn header_generation(&self) -> UInt32 {
         let header_addr = self.ptr as Int - 32;
-        atomic_load_u32(header_addr, ORDERING_ACQUIRE)
+        atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE)
     }
 
     /// Get the current CBGR epoch from the allocation header.
@@ -364,7 +365,7 @@ implement<T> Heap<T> {
     /// the allocation era for generational memory safety.
     public fn current_epoch(&self) -> UInt16 {
         let header_addr = self.ptr as Int - 32;
-        let epoch_and_caps = atomic_load_u32(header_addr + 4, ORDERING_ACQUIRE);
+        let epoch_and_caps = atomic_load_u32((header_addr + 4) as *const UInt32, ORDERING_ACQUIRE);
         (epoch_and_caps & 0xFFFF) as UInt16
     }
 
@@ -374,7 +375,7 @@ implement<T> Heap<T> {
     /// a lightweight check that does not validate epoch consistency.
     public fn is_allocated(&self) -> Bool {
         let header_addr = self.ptr as Int - 32;
-        let actual_gen = atomic_load_u32(header_addr, ORDERING_ACQUIRE);
+        let actual_gen = atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE);
         actual_gen != 0
     }
 
@@ -385,7 +386,7 @@ implement<T> Heap<T> {
     /// potentially reused.
     public fn is_freed(&self) -> Bool {
         let header_addr = self.ptr as Int - 32;
-        let actual_gen = atomic_load_u32(header_addr, ORDERING_ACQUIRE);
+        let actual_gen = atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE);
         actual_gen != self.generation
     }
 
@@ -394,7 +395,7 @@ implement<T> Heap<T> {
     /// Alias for `current_epoch()` — provided for symmetry with `header_generation()`.
     public fn header_epoch(&self) -> UInt32 {
         let header_addr = self.ptr as Int - 32;
-        let epoch_and_caps = atomic_load_u32(header_addr + 4, ORDERING_ACQUIRE);
+        let epoch_and_caps = atomic_load_u32((header_addr + 4) as *const UInt32, ORDERING_ACQUIRE);
         epoch_and_caps & 0xFFFF
     }
 
@@ -413,14 +414,14 @@ implement<T> Heap<T> {
     /// If they differ, the allocation was freed and the slot potentially reused.
     public fn is_freed(&self) -> Bool {
         let header_addr = self.ptr as Int - 32;
-        let actual_gen = atomic_load_u32(header_addr, ORDERING_ACQUIRE);
+        let actual_gen = atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE);
         actual_gen != self.generation
     }
 
     /// Get the CBGR capability flags from the allocation header.
     public fn capabilities(&self) -> UInt16 {
         let header_addr = self.ptr as Int - 32;
-        let epoch_and_caps = atomic_load_u32(header_addr + 4, ORDERING_ACQUIRE);
+        let epoch_and_caps = atomic_load_u32((header_addr + 4) as *const UInt32, ORDERING_ACQUIRE);
         ((epoch_and_caps >> 16) & 0xFFFF) as UInt16
     }
 }
@@ -745,7 +746,7 @@ implement<T> Drop for Shared<T> {
             if old_count == 1 {
                 // We were the last strong reference
                 // Need acquire fence to synchronize with other threads' releases
-                atomic_fence(ORDERING_ACQUIRE);
+                atomic_fence(MemoryOrder.Acquire);
 
                 // Drop the value
                 drop_in_place(&mut (*self.ptr).value);

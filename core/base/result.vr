@@ -1203,38 +1203,42 @@ implement<E> Cause<E> {
     }
 
     /// Get all errors in the cause (flattened).
-    public fn failures(&self) -> List<&E> {
+    public fn failures(&self) -> List<Text>
+    where E: Display
+    {
         let mut result = List.new();
-        self.collect_failures(&mut result);
+        self.collect_failures_text(&mut result);
         result
     }
 
-    // Note: Verum uses CBGR instead of explicit lifetimes
-    fn collect_failures(&self, out: &mut List<&E>) {
+    // Collect errors as display text to avoid infinite type issue
+    fn collect_failures_text(&self, out: &mut List<Text>)
+    where E: Display
+    {
         match self {
-            Fail(e) => out.push(e),
+            Fail(e) => out.push(f"{e}"),
             Die(_) => {}
             Then(first, second) => {
-                first.collect_failures(out);
-                second.collect_failures(out);
+                first.collect_failures_text(out);
+                second.collect_failures_text(out);
             }
             Both(left, right) => {
-                left.collect_failures(out);
-                right.collect_failures(out);
+                left.collect_failures_text(out);
+                right.collect_failures_text(out);
             }
             Empty => {}
         }
     }
 
     /// Get all defects in the cause.
-    public fn defects(&self) -> List<&DefectInfo> {
+    public fn defects(&self) -> List<DefectInfo> {
         let mut result = List.new();
         self.collect_defects(&mut result);
         result
     }
 
     // Note: Verum uses CBGR instead of explicit lifetimes
-    fn collect_defects(&self, out: &mut List<&DefectInfo>) {
+    fn collect_defects(&self, out: &mut List<DefectInfo>) {
         match self {
             Fail(_) => {}
             Die(d) => out.push(d),

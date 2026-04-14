@@ -50,8 +50,6 @@ public mount .slice.SliceEnumerate;
 public mount .slice.Chunks;
 public mount .slice.ChunksExact;
 public mount .slice.Windows;
-public mount .slice.slice_from_raw_parts;
-public mount .slice.slice_from_raw_parts_mut;
 
 // From map
 public mount .map.Map;

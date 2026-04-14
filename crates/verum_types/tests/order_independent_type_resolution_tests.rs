@@ -80,6 +80,7 @@ fn make_variant_body(variants: Vec<&str>) -> TypeDeclBody {
             data: None,
             where_clause: verum_common::Maybe::None,
             attributes: vec![].into(),
+            path_endpoints: None,
             span: Span::dummy(),
         })
         .collect();
@@ -304,6 +305,7 @@ fn test_variant_with_forward_reference_payload() {
                 data: Some(VariantData::Tuple(vec![make_type_path("Value")].into())),
                 where_clause: verum_common::Maybe::None,
                 attributes: vec![].into(),
+                path_endpoints: None,
                 span: Span::dummy(),
             },
             Variant {
@@ -312,6 +314,7 @@ fn test_variant_with_forward_reference_payload() {
                 data: Some(VariantData::Tuple(vec![make_type_path("ErrorInfo")].into())),
                 where_clause: verum_common::Maybe::None,
                 attributes: vec![].into(),
+                path_endpoints: None,
                 span: Span::dummy(),
             },
         ].into()),

@@ -178,7 +178,7 @@ public fn isb();
 /// - `MODE`: Access mode (ReadOnly, WriteOnly, ReadWrite, etc.)
 @repr(transparent)
 public type Register<T: Copy, MODE> is {
-    addr: *volatile T
+    addr: *volatile mut T
 };
 
 /// Create a register at a fixed address.
@@ -189,7 +189,7 @@ implement<T: Copy, MODE> Register<T, MODE> {
     /// Create register at compile-time known address.
     @const
     public fn at(addr: USize) -> Register<T, MODE> {
-        Register { addr: addr as *volatile T }
+        Register { addr: addr as *volatile mut T }
     }
 
     /// Get the raw address of this register.
@@ -208,7 +208,7 @@ implement<T: Copy> Register<T, ReadOnly> {
     /// Read the register value.
     @inline(always)
     public fn read(&self) -> T {
-        volatile_load(self.addr)
+        volatile_load(self.addr as *volatile T)
     }
 }
 
@@ -217,7 +217,7 @@ implement<T: Copy> Register<T, ReadWrite> {
     /// Read the register value.
     @inline(always)
     public fn read(&self) -> T {
-        volatile_load(self.addr)
+        volatile_load(self.addr as *volatile T)
     }
 }
 
@@ -226,7 +226,7 @@ implement<T: Copy> Register<T, WriteOneToClear> {
     /// Read the register value.
     @inline(always)
     public fn read(&self) -> T {
-        volatile_load(self.addr)
+        volatile_load(self.addr as *volatile T)
     }
 }
 
@@ -235,7 +235,7 @@ implement<T: Copy> Register<T, WriteOneToSet> {
     /// Read the register value.
     @inline(always)
     public fn read(&self) -> T {
-        volatile_load(self.addr)
+        volatile_load(self.addr as *volatile T)
     }
 }
 
@@ -266,7 +266,7 @@ implement<T: Copy> Register<T, ReadWrite> {
     /// NOT atomic - use with critical section if needed.
     @inline(always)
     public fn modify<F: Fn(T) -> T>(&self, f: F) {
-        let value = volatile_load(self.addr);
+        let value = volatile_load(self.addr as *volatile T);
         volatile_store(self.addr, f(value));
     }
 }
@@ -280,34 +280,34 @@ implement Register<UInt32, ReadWrite> {
     /// Set bits using a mask (read-modify-write).
     @inline(always)
     public fn set_bits(&self, mask: UInt32) {
-        let value = volatile_load(self.addr);
+        let value = volatile_load(self.addr as *volatile UInt32);
         volatile_store(self.addr, value | mask);
     }
 
     /// Clear bits using a mask (read-modify-write).
     @inline(always)
     public fn clear_bits(&self, mask: UInt32) {
-        let value = volatile_load(self.addr);
+        let value = volatile_load(self.addr as *volatile UInt32);
         volatile_store(self.addr, value & ~mask);
     }
 
     /// Toggle bits using a mask (read-modify-write).
     @inline(always)
     public fn toggle_bits(&self, mask: UInt32) {
-        let value = volatile_load(self.addr);
+        let value = volatile_load(self.addr as *volatile UInt32);
         volatile_store(self.addr, value ^ mask);
     }
 
     /// Check if any bits in mask are set.
     @inline(always)
     public fn any_set(&self, mask: UInt32) -> Bool {
-        (volatile_load(self.addr) & mask) != 0
+        (volatile_load(self.addr as *volatile UInt32) & mask) != 0
     }
 
     /// Check if all bits in mask are set.
     @inline(always)
     public fn all_set(&self, mask: UInt32) -> Bool {
-        (volatile_load(self.addr) & mask) == mask
+        (volatile_load(self.addr as *volatile UInt32) & mask) == mask
     }
 }
 

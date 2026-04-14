@@ -272,11 +272,12 @@ implement<T> StatefulWidget for Tree<T> {
         if visible.len() == 0 { return; }
 
         // Adjust scroll offset so selected item stays visible
-        match &state.selected {
+        let sel_path_opt = state.selected.clone();
+        match sel_path_opt {
             Some(sel_path) => {
                 let mut sel_idx = 0;
                 for entry in &visible {
-                    if paths_equal(&entry.0, sel_path) { break; }
+                    if paths_equal(&entry.0, &sel_path) { break; }
                     sel_idx = sel_idx + 1;
                 }
                 if sel_idx < state.offset {

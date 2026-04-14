@@ -75,6 +75,7 @@ mount core.intrinsics.memory.{
 mount core.intrinsics.atomic.{
     atomic_load_u8, atomic_store_u8,
     atomic_load_u64, atomic_exchange_u64, atomic_compare_exchange_u64,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL,
 };
 
 // =============================================================================
@@ -218,7 +219,8 @@ implement PageHeader {
         self.slice_index = slice_index as UInt32;
         self.slice_count = slices as UInt32;
 
-        let epoch = GLOBAL_EPOCH.current_epoch() as UInt16;
+        let epoch_u64: UInt64 = unsafe { GLOBAL_EPOCH.current_epoch() };
+        let epoch: UInt16 = epoch_u64 as UInt16;
         self.base_generation = 0;
         self.epoch = epoch;
 
@@ -341,25 +343,25 @@ implement PageHeader {
         let index = self.block_index(ptr);
 
         // Increment slot generation (CBGR invalidation) - atomic for safety
-        let gen_ptr = &self.slot_generations[index];
-        let old_gen = atomic_load_u8(gen_ptr, "acquire");
+        let gen_ptr = &mut self.slot_generations[index];
+        let old_gen = atomic_load_u8(gen_ptr as *const UInt8, ORDERING_ACQUIRE);
         let new_gen = ((old_gen as Int + 1) % 256) as UInt8;
-        atomic_store_u8(gen_ptr, new_gen, "release");
+        atomic_store_u8(gen_ptr as *mut UInt8, new_gen, ORDERING_RELEASE);
 
         // Push to xthread_free list atomically
         let encoded = encode_ptr(ptr as UInt64);
         loop {
-            let old_head = atomic_load_u64(&self.xthread_free, "acquire");
+            let old_head = atomic_load_u64(&mut self.xthread_free, ORDERING_ACQUIRE);
             unsafe {
                 ptr_write(ptr as &mut UInt64, old_head);
             }
 
             let result = atomic_compare_exchange_u64(
-                &self.xthread_free,
+                &mut self.xthread_free,
                 old_head,
                 encoded,
-                "acq_rel",
-                "acquire"
+                ORDERING_ACQ_REL,
+                ORDERING_ACQUIRE
             );
 
             if result.1 {
@@ -372,7 +374,7 @@ implement PageHeader {
     /// Collect cross-thread frees into local free list
     fn collect_xthread_frees(&mut self) {
         // Atomically swap xthread_free to local
-        let xfree = atomic_exchange_u64(&self.xthread_free, 0, "acq_rel");
+        let xfree = atomic_exchange_u64(&mut self.xthread_free, 0, ORDERING_ACQ_REL);
 
         if xfree == 0 {
             return;
@@ -873,7 +875,7 @@ implement LocalHeap {
     /// Free a pointer (determines thread ownership automatically)
     public fn free(&mut self, ptr: &unsafe Byte) -> Result<(), HeapError> {
         let segment = ptr_to_segment(ptr);
-        let owner_tid = atomic_load_u64(&segment.thread_id, "acquire");
+        let owner_tid = atomic_load_u64(&segment.thread_id, ORDERING_ACQUIRE);
 
         if owner_tid == self.thread_id {
             // Fast path: same thread

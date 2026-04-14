@@ -42,7 +42,7 @@ mount core.intrinsics.platform.{spin_hint};
 mount core.intrinsics.atomic.{
     atomic_load_u64, atomic_store_u64, atomic_exchange_u64, atomic_compare_exchange_u64,
     atomic_load_u32, atomic_store_u32, atomic_compare_exchange_u32,
-    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL,
 };
 
 // Popcount intrinsic wrapper
@@ -343,7 +343,7 @@ implement Segment {
     /// Try to claim this segment for a thread
     public fn try_claim(&mut self, new_thread_id: UInt64) -> Bool {
         let result = atomic_compare_exchange_u64(
-            &self.thread_id,
+            &mut self.thread_id,
             0,  // expected: abandoned
             new_thread_id,
             ORDERING_ACQ_REL,
@@ -419,7 +419,7 @@ implement Segment {
         }
 
         for word in 0..MASK_WORDS {
-            let mask = atomic_exchange_u64(&self.purge_mask[word], 0, ORDERING_ACQ_REL);
+            let mask = atomic_exchange_u64(&mut self.purge_mask[word], 0, ORDERING_ACQ_REL);
             if mask == 0 {
                 continue;
             }
@@ -450,11 +450,11 @@ implement Segment {
         // Check for wraparound
         if new_gen == 0 {
             // Notify epoch manager
-            GLOBAL_EPOCH.on_generation_wraparound();
+            unsafe { GLOBAL_EPOCH.on_wraparound() };
             self.epoch = self.epoch + 1;
         }
 
-        atomic_store_u32(&self.base_generation, new_gen, ORDERING_RELEASE);
+        atomic_store_u32(&mut self.base_generation, new_gen, ORDERING_RELEASE);
     }
 }
 
@@ -476,7 +476,7 @@ static mut ABANDONED_COUNT: UInt32 = 0;
 fn lock_segments() {
     loop {
         let result = atomic_compare_exchange_u32(
-            unsafe { &SEGMENT_LOCK as *mut UInt32 },
+            unsafe { &mut SEGMENT_LOCK as *mut UInt32 },
             0,
             1,
             ORDERING_ACQUIRE,
@@ -492,7 +492,7 @@ fn lock_segments() {
 /// Unlock the segment manager
 @inline
 fn unlock_segments() {
-    atomic_store_u32(unsafe { &SEGMENT_LOCK as *mut UInt32 }, 0, ORDERING_RELEASE);
+    atomic_store_u32(unsafe { &mut SEGMENT_LOCK as *mut UInt32 }, 0, ORDERING_RELEASE);
 }
 
 /// Allocate a new segment
@@ -514,7 +514,7 @@ public fn segment_alloc(thread_id: UInt64) -> Result<&mut Segment, SegmentError>
     segment.flags = 0;
     segment.abandoned_visits = 0;
 
-    let epoch = GLOBAL_EPOCH.current_epoch() as UInt16;
+    let epoch = unsafe { GLOBAL_EPOCH.current_epoch() } as UInt16;
     segment.base_generation = 0;
     segment.epoch = epoch;
     segment.creation_epoch = epoch as UInt64;
@@ -544,7 +544,7 @@ public fn segment_alloc(thread_id: UInt64) -> Result<&mut Segment, SegmentError>
     unsafe {
         segment.next = ALL_SEGMENTS;
         if (ALL_SEGMENTS as Int) != 0 {
-            ALL_SEGMENTS.prev = segment as &unsafe Segment;
+            (ALL_SEGMENTS as &mut Segment).prev = segment as &unsafe Segment;
         }
         ALL_SEGMENTS = segment as &unsafe Segment;
         SEGMENT_COUNT = SEGMENT_COUNT + 1;
@@ -560,12 +560,12 @@ public fn segment_free(segment: &mut Segment) {
     lock_segments();
     unsafe {
         if (segment.prev as Int) != 0 {
-            segment.prev.next = segment.next;
+            (segment.prev as &mut Segment).next = segment.next;
         } else {
             ALL_SEGMENTS = segment.next;
         }
         if (segment.next as Int) != 0 {
-            segment.next.prev = segment.prev;
+            (segment.next as &mut Segment).prev = segment.prev;
         }
         SEGMENT_COUNT = SEGMENT_COUNT - 1;
     }
@@ -588,19 +588,19 @@ public fn segment_abandon(segment: &mut Segment) {
     unsafe {
         // Remove from main list
         if (segment.prev as Int) != 0 {
-            segment.prev.next = segment.next;
+            (segment.prev as &mut Segment).next = segment.next;
         } else {
             ALL_SEGMENTS = segment.next;
         }
         if (segment.next as Int) != 0 {
-            segment.next.prev = segment.prev;
+            (segment.next as &mut Segment).prev = segment.prev;
         }
 
         // Add to abandoned list
         segment.next = ABANDONED_SEGMENTS;
         segment.prev = 0 as &unsafe Segment;
         if (ABANDONED_SEGMENTS as Int) != 0 {
-            ABANDONED_SEGMENTS.prev = segment as &unsafe Segment;
+            (ABANDONED_SEGMENTS as &mut Segment).prev = segment as &unsafe Segment;
         }
         ABANDONED_SEGMENTS = segment as &unsafe Segment;
         ABANDONED_COUNT = ABANDONED_COUNT + 1;
@@ -625,12 +625,12 @@ fn try_reclaim_abandoned(thread_id: UInt64) -> Maybe<&mut Segment> {
             if segment.try_claim(thread_id) {
                 // Remove from abandoned list
                 if (segment.prev as Int) != 0 {
-                    segment.prev.next = segment.next;
+                    (segment.prev as &mut Segment).next = segment.next;
                 } else {
                     ABANDONED_SEGMENTS = segment.next;
                 }
                 if (segment.next as Int) != 0 {
-                    segment.next.prev = segment.prev;
+                    (segment.next as &mut Segment).prev = segment.prev;
                 }
                 ABANDONED_COUNT = ABANDONED_COUNT - 1;
 
@@ -638,7 +638,7 @@ fn try_reclaim_abandoned(thread_id: UInt64) -> Maybe<&mut Segment> {
                 segment.next = ALL_SEGMENTS;
                 segment.prev = 0 as &unsafe Segment;
                 if (ALL_SEGMENTS as Int) != 0 {
-                    ALL_SEGMENTS.prev = segment as &unsafe Segment;
+                    (ALL_SEGMENTS as &mut Segment).prev = segment as &unsafe Segment;
                 }
                 ALL_SEGMENTS = segment as &unsafe Segment;
 

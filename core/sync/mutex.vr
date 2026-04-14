@@ -27,7 +27,7 @@ mount .atomic.*;
 // Mutual exclusion lock protecting data of type T.
 // Uses FutexLock (OS-backed) instead of SpinLock for efficient contention handling.
 public type Mutex<T> is {
-    lock: FutexLock,
+    futex: FutexLock,
     data: T,
     // Poisoned flag for panic safety
     poisoned: AtomicBool,
@@ -37,7 +37,7 @@ implement<T> Mutex<T> {
     // Create new mutex with initial value.
     public fn new(data: T) -> Mutex<T> {
         Mutex {
-            lock: FutexLock.new(),
+            futex: FutexLock.new(),
             data: data,
             poisoned: AtomicBool.new(false),
         }
@@ -45,8 +45,8 @@ implement<T> Mutex<T> {
 
     // Acquire lock && return guard.
     // Blocks until lock is available.
-    public fn lock(&self) -> LockResult<MutexGuard<T>> {
-        self.lock.lock();
+    public fn lock(&self) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
+        self.futex.lock();
 
         let guard = MutexGuard {
             mutex: self,
@@ -62,7 +62,7 @@ implement<T> Mutex<T> {
     // Try to acquire lock without blocking.
     // Returns None if lock is held by another thread.
     public fn try_lock(&self) -> TryLockResult<MutexGuard<T>> {
-        if self.lock.try_lock() {
+        if self.futex.try_lock() {
             let guard = MutexGuard {
                 mutex: self,
             };
@@ -109,7 +109,7 @@ implement<T> Mutex<T> {
     /// Check if the mutex is currently locked.
     /// This is a best-effort check — the lock state may change immediately after.
     public fn is_locked(&self) -> Bool {
-        self.lock.is_locked()
+        self.futex.is_locked()
     }
 }
 
@@ -172,7 +172,7 @@ implement<T> DerefMut for MutexGuard<T> {
 implement<T> Drop for MutexGuard<T> {
     fn drop(&mut self) {
         // Release the lock
-        self.mutex.lock.unlock();
+        self.mutex.futex.unlock();
     }
 }
 

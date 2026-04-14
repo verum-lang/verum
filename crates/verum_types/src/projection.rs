@@ -791,7 +791,7 @@ mod tests {
             span: Span::dummy(),
         };
 
-        checker.register_protocol(iterator_proto);
+        let _ = checker.register_protocol(iterator_proto);
 
         // Register List<T> as implementing Iterator with Item = T
         let list_impl = ProtocolImpl {

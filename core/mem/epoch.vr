@@ -243,8 +243,8 @@ implement EpochManager {
     }
 
     /// Notify all registered epoch callbacks.
-    fn notify_callbacks(&self, new_epoch: UInt64) {
-        // Acquire spinlock (use const self for iteration)
+    fn notify_callbacks(&mut self, new_epoch: UInt64) {
+        // Acquire spinlock for iteration
         self.lock_callbacks_shared();
 
         for entry in &self.callbacks {
@@ -305,7 +305,7 @@ implement EpochManager {
     /// * `new_gen` - Generation after revocation
     /// * `epoch` - Current epoch
     public fn on_revocation(
-        &self,
+        &mut self,
         ptr: &unsafe Byte,
         old_gen: UInt32,
         new_gen: UInt32,
@@ -327,50 +327,50 @@ implement EpochManager {
     /// Acquire callback spinlock (exclusive).
     @inline
     fn lock_callbacks(&mut self) {
-        while atomic_cmpxchg_int(&mut self.callbacks_lock, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).old != 0 {
+        while atomic_cmpxchg_int(&mut self.callbacks_lock, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).0 != 0 {
             spin_hint();
         }
     }
 
     /// Release callback spinlock.
     @inline
-    fn unlock_callbacks(&self) {
-        atomic_store_int(&self.callbacks_lock, 0, ORDERING_RELEASE);
+    fn unlock_callbacks(&mut self) {
+        atomic_store_int(&mut self.callbacks_lock, 0, ORDERING_RELEASE);
     }
 
     /// Acquire callback spinlock (shared, for iteration).
     /// In this simple implementation, shared == exclusive.
     @inline
-    fn lock_callbacks_shared(&self) {
+    fn lock_callbacks_shared(&mut self) {
         self.lock_callbacks();
     }
 
     @inline
-    fn unlock_callbacks_shared(&self) {
+    fn unlock_callbacks_shared(&mut self) {
         self.unlock_callbacks();
     }
 
     /// Acquire revocation spinlock.
     @inline
-    fn lock_revocation(&self) {
-        while atomic_cmpxchg_int(&self.revocation_lock, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).old != 0 {
+    fn lock_revocation(&mut self) {
+        while atomic_cmpxchg_int(&mut self.revocation_lock, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).0 != 0 {
             spin_hint();
         }
     }
 
     /// Release revocation spinlock.
     @inline
-    fn unlock_revocation(&self) {
-        atomic_store_int(&self.revocation_lock, 0, ORDERING_RELEASE);
+    fn unlock_revocation(&mut self) {
+        atomic_store_int(&mut self.revocation_lock, 0, ORDERING_RELEASE);
     }
 
     @inline
-    fn lock_revocation_shared(&self) {
+    fn lock_revocation_shared(&mut self) {
         self.lock_revocation();
     }
 
     @inline
-    fn unlock_revocation_shared(&self) {
+    fn unlock_revocation_shared(&mut self) {
         self.unlock_revocation();
     }
 }

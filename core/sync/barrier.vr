@@ -228,7 +228,7 @@ public type Phaser is {
     /// Condition variable for waiting
     condvar: Condvar,
     /// Mutex for complex state changes
-    lock: Mutex<()>,
+    mutex: Mutex<Bool>,
 };
 
 // State encoding:
@@ -251,7 +251,7 @@ implement Phaser {
         Phaser {
             state: AtomicInt.new(parties),
             condvar: Condvar.new(),
-            lock: Mutex.new(()),
+            mutex: Mutex.new(false),
         }
     }
 
@@ -259,7 +259,7 @@ implement Phaser {
     ///
     /// Returns the current phase number.
     public fn register(&self) -> Int {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self.mutex.lock().unwrap();
 
         let old_state = self.state.fetch_add(1, MemoryOrdering.SeqCst);
         (old_state >> PHASE_SHIFT) as Int
@@ -284,7 +284,7 @@ implement Phaser {
         }
 
         // Wait for phase to advance
-        let mut guard = self.lock.lock().unwrap();
+        let mut guard = self.mutex.lock().unwrap();
         while self.get_phase() == phase {
             guard = self.condvar.wait(guard).unwrap();
         }
@@ -296,7 +296,7 @@ implement Phaser {
     ///
     /// The calling thread will no longer participate in future phases.
     public fn arrive_and_deregister(&self) -> Int {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self.mutex.lock().unwrap();
 
         // Decrement parties && increment arrived
         let adjustment = (1 << ARRIVED_SHIFT) - 1;  // +1 arrived, -1 parties
@@ -347,9 +347,15 @@ implement Phaser {
 // Latch - Single-use barrier
 // =============================================================================
 
+/// Internal state for CountDownLatch mutex.
+type LatchState is {
+    /// Dummy field to force type inference on MutexGuard
+    dummy: Int,
+};
+
 /// A single-use synchronization barrier.
 ///
-/// Threads block on `await()` until `count_down()` has been called N times.
+/// Threads block on `wait_for_zero()` until `count_down()` has been called N times.
 /// Unlike Barrier, a Latch can only be used once.
 ///
 /// # Example
@@ -364,13 +370,13 @@ implement Phaser {
 /// }
 ///
 /// // Block until all 3 tasks complete
-/// latch.await();
+/// latch.wait_for_zero();
 /// print("All tasks done!");
 /// ```
 public type CountDownLatch is {
     count: AtomicInt,
     condvar: Condvar,
-    lock: Mutex<()>,
+    latch_lock: Mutex<LatchState>,
 };
 
 implement CountDownLatch {
@@ -381,7 +387,7 @@ implement CountDownLatch {
         CountDownLatch {
             count: AtomicInt.new(count),
             condvar: Condvar.new(),
-            lock: Mutex.new(()),
+            latch_lock: Mutex.new(LatchState { dummy: 0 }),
         }
     }
 
@@ -397,12 +403,12 @@ implement CountDownLatch {
     }
 
     /// Block until the count reaches zero.
-    public fn await(&self) {
+    public fn wait_for_zero(&self) {
         if self.count.load(MemoryOrdering.SeqCst) == 0 {
             return;
         }
 
-        let mut guard = self.lock.lock().unwrap();
+        let mut guard = self.latch_lock.lock().unwrap();
         while self.count.load(MemoryOrdering.SeqCst) > 0 {
             guard = self.condvar.wait(guard).unwrap();
         }
@@ -411,12 +417,12 @@ implement CountDownLatch {
     /// Block until count reaches zero || timeout expires.
     ///
     /// Returns true if count reached zero, false if timed out.
-    public fn await_timeout(&self, timeout_ns: Int) -> Bool {
+    public fn wait_for_zero_timeout(&self, timeout_ns: Int) -> Bool {
         if self.count.load(MemoryOrdering.SeqCst) == 0 {
             return true;
         }
 
-        let guard = self.lock.lock().unwrap();
+        let guard = self.latch_lock.lock().unwrap();
         let (_, timed_out) = self.condvar.wait_timeout(guard, timeout_ns).unwrap();
         !timed_out && self.count.load(MemoryOrdering.SeqCst) == 0
     }

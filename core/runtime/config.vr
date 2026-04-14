@@ -46,6 +46,8 @@ mount core.intrinsics.{
 };
 mount mem.{Alloc, Layout, AllocError, TieredAllocator, SimpleAllocator, StackAllocator};
 mount core.{Result, Text};
+mount core.sync.atomic.{AtomicU32, MemoryOrdering};
+type Ordering is MemoryOrdering;
 
 // =============================================================================
 // Initialization Errors

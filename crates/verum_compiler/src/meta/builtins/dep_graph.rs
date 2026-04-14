@@ -755,7 +755,7 @@ mod tests {
         //   app -> lib_a -> core
         //   app -> lib_b -> core
         //   lib_b -> lib_a
-        let mut core_info = ModuleInfo::new();
+        let core_info = ModuleInfo::new();
         // core has no dependencies
 
         let mut lib_a_info = ModuleInfo::new();

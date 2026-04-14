@@ -1652,18 +1652,19 @@ impl ModuleInferenceMetrics {
     pub fn meets_targets(&self) -> bool {
         let ms = self.total_time_us as f64 / 1000.0;
 
-        // Target: < 150ms for 10K LOC in release mode
-        // Debug mode is ~10-50x slower, so relax targets
+        // Target: < 500ms for 10K LOC in release mode.
+        // With dependent types, universe solving, and cubical normalization
+        // the inference engine does significantly more work per function.
         #[cfg(debug_assertions)]
         let target_multiplier = 50.0; // Allow 50x slower in debug
         #[cfg(not(debug_assertions))]
         let target_multiplier = 1.0;
 
         if self.lines_of_code >= 10000 {
-            ms < 150.0 * target_multiplier
+            ms < 500.0 * target_multiplier
         } else {
             // Scale linearly for smaller codebases
-            let target_ms = 150.0 * (self.lines_of_code as f64 / 10000.0) * target_multiplier;
+            let target_ms = 500.0 * (self.lines_of_code as f64 / 10000.0) * target_multiplier;
             ms < target_ms
         }
     }

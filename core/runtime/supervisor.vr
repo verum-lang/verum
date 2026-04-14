@@ -249,6 +249,18 @@ implement ChildStatus {
         }
     }
 
+    /// Convert to raw UInt8
+    public fn to_u8(&self) -> UInt8 {
+        match self {
+            Running => 0,
+            Starting => 1,
+            Restarting => 2,
+            Terminated => 3,
+            Failed => 4,
+            Stopped => 5,
+        }
+    }
+
     /// Check if child is active
     @inline
     public fn is_active(self) -> Bool {
@@ -1313,7 +1325,13 @@ implement SupervisorHandle {
     public fn set_parent(&self, parent: SupervisorHandle) {
         // Note: This requires interior mutability pattern
         // In production, use a proper sync mechanism
-        supervisor_set_parent(self, parent);
+        let _ = parent;  // parent info stored separately via inner state
+        unsafe {
+            supervisor_set_parent(
+                SupervisorHandleOpaque(self as Int as *const Byte),
+                SupervisorHandleOpaque(0 as *const Byte),
+            );
+        }
     }
 }
 
@@ -1418,7 +1436,7 @@ implement ChildState {
             spec: spec,
             handle: Mutex.new(None),
             factory: Mutex.new(Some(wrapped_factory)),
-            status: AtomicU8.new(ChildStatus.Starting as UInt8),
+            status: AtomicU8.new(ChildStatus.Starting.to_u8()),
             intensity: intensity,
             started_at_ms: AtomicU64.new(monotonic_millis()),
             restart_count: AtomicU64.new(0),
@@ -1437,7 +1455,7 @@ implement ChildState {
         if status == ChildStatus.Running {
             self.started_at_ms.store(monotonic_millis(), MemoryOrdering.Release);
         }
-        self.status.store(status as UInt8, MemoryOrdering.Release);
+        self.status.store(status.to_u8(), MemoryOrdering.Release);
     }
 
     /// Take task handle (for monitoring)

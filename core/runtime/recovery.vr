@@ -119,7 +119,7 @@ implement RetryPolicy {
     /// Reset policy for new operation
     public fn reset(&mut self) {
         self.current_attempt = 0;
-        self.last_error = None;
+        self.last_error = Maybe.None;
     }
 }
 

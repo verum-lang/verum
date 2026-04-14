@@ -20,7 +20,9 @@
 
 module core.collections.list;
 mount core.*;
-mount core.base.ordering.{Ordering};
+
+// Shadow MemoryOrdering conflict: explicitly re-bind Ordering to comparison ordering
+type Ordering is Less | Equal | Greater;
 
 // =============================================================================
 // List<T>

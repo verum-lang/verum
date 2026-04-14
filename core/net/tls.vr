@@ -28,7 +28,7 @@
 module net.tls;
 
 mount core.*;
-mount core.io.{Read, Write};
+mount core.io.protocols.{Read, Write};
 mount core.net.tcp.{TcpStream};
 
 // =============================================================================

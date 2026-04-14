@@ -270,16 +270,16 @@ fn test_generic_function() {
 #[test]
 fn test_generic_type_instantiation() {
     let source = r#"
-        type Box<T> is {
+        type Wrapper<T> is {
             value: T
         };
 
-        fn make_int_box() -> Box<Int> {
-            Box { value: 42 }
+        fn make_int_wrapper() -> Wrapper<Int> {
+            Wrapper { value: 42 }
         }
 
-        fn make_text_box() -> Box<Text> {
-            Box { value: "hello" }
+        fn make_text_wrapper() -> Wrapper<Text> {
+            Wrapper { value: "hello" }
         }
     "#;
 
