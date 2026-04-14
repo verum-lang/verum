@@ -1028,8 +1028,10 @@ implement SGD {
 
 implement Optimizer for SGD {
     fn step(&mut self, params: &mut [Parameter]) {
-        for (i, p) in params.iter_mut().enumerate() {
-            if let Maybe.Some(grad) = &p.grad {
+        let mut i: Int = 0;
+        while i < params.len() {
+            let p = &mut params[i];
+            if let Maybe.Some(grad) = &p.grad.clone() {
                 // Apply weight decay (L2 regularization)
                 let grad = if self.weight_decay > 0.0 {
                     add(grad, &mul(&full_like(grad, self.weight_decay), &p.data))
@@ -1042,8 +1044,11 @@ implement Optimizer for SGD {
                 *velocity = add(&mul(&full_like(velocity, self.momentum), velocity), &grad);
 
                 // Update parameters: p = p - lr * velocity
-                p.data = sub(&p.data, &mul(&full_like(velocity, self.lr), velocity));
+                let update = mul(&full_like(velocity, self.lr), velocity);
+                let new_data = sub(&p.data, &update);
+                p.data = new_data;
             }
+            i = i + 1;
         }
     }
 
@@ -1104,11 +1109,15 @@ implement Optimizer for AdamW {
         let bias_correction1 = 1.0 - pow(self.beta1, t);
         let bias_correction2 = 1.0 - pow(self.beta2, t);
 
-        for (i, p) in params.iter_mut().enumerate() {
-            if let Maybe.Some(grad) = &p.grad {
+        let mut i: Int = 0;
+        while i < params.len() {
+            let p = &mut params[i];
+            if let Maybe.Some(grad) = &p.grad.clone() {
                 // Decoupled weight decay (applied before momentum)
                 if self.weight_decay > 0.0 {
-                    p.data = mul(&p.data, &full_like(&p.data, 1.0 - self.lr * self.weight_decay));
+                    let decay_factor = full_like(&p.data, 1.0 - self.lr * self.weight_decay);
+                    let decayed = mul(&p.data, &decay_factor);
+                    p.data = decayed;
                 }
 
                 // Get or initialize moments
@@ -1133,8 +1142,11 @@ implement Optimizer for AdamW {
 
                 // Update: p = p - lr * m_hat / (sqrt(v_hat) + eps)
                 let update = div(&m_hat, &add(&sqrt(&v_hat), &full_like(&v_hat, self.eps)));
-                p.data = sub(&p.data, &mul(&full_like(&update, self.lr), &update));
+                let scaled = mul(&full_like(&update, self.lr), &update);
+                let new_data = sub(&p.data, &scaled);
+                p.data = new_data;
             }
+            i = i + 1;
         }
     }
 

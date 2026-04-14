@@ -29,7 +29,7 @@
 module core.math.autodiff;
 
 mount super.tensor.{DynTensor, Tensor, zeros, ones, full, zeros_like, ones_like, full_like};
-mount super.tensor.{add, sub, mul, div, neg, pow, exp, log, sqrt, sin, cos, tanh};
+mount super.tensor.{add, sub, mul, div, neg, tensor_pow, tensor_exp, tensor_log, tensor_sqrt, tensor_sin, tensor_cos, tensor_tanh};
 mount super.tensor.{matmul, transpose, softmax, sum_axis, mean_axis, var_axis};
 mount super.linalg.{Vector, Matrix, Numeric};
 
@@ -122,7 +122,7 @@ implement<T: Numeric, S: meta [USize]> Differentiable for Tensor<T, S> {
     type Cotangent = Tensor<T, S>;
 
     fn zero_tangent() -> Tensor<T, S> {
-        zeros<T, S>()
+        zeros(&[])
     }
 
     fn add_tangent(a: Tensor<T, S>, b: Tensor<T, S>) -> Tensor<T, S> {
