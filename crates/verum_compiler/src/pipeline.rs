@@ -4987,6 +4987,13 @@ impl<'s> CompilationPipeline<'s> {
         // Load stdlib modules first (enables std.* imports)
         self.load_stdlib_modules()?;
 
+        // Register stdlib modules for cross-file type/context/import
+        // resolution. Without this, `mount core.sys.darwin.libsystem.{...}`
+        // and `using [ComputeDevice]` fail because the type checker
+        // doesn't know about symbols from sibling modules.
+        // This is the CORRECT architectural fix — not lenient bypasses.
+        self.register_modules_for_cross_file_resolution()?;
+
         // Load sibling project modules (enables cross-file mount imports)
         self.load_project_modules()?;
 

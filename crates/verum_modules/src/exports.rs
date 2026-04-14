@@ -746,9 +746,26 @@ pub fn extract_exports_from_module(
             | ItemKind::Axiom(_)
             | ItemKind::Tactic(_)
             | ItemKind::View(_)
-            | ItemKind::ExternBlock(_)
             | ItemKind::Pattern(_)
             | ItemKind::Layer(_) => {}
+
+            // Extern blocks contain FFI function declarations that
+            // should be exported so sibling modules can import them
+            // via `mount core.sys.darwin.libsystem.{mach_absolute_time}`.
+            ItemKind::ExternBlock(extern_block) => {
+                for func in &extern_block.functions {
+                    if func.visibility == AstVisibility::Public {
+                        let exported = ExportedItem::new(
+                            func.name.name.as_str(),
+                            ExportKind::Function,
+                            Visibility::Public,
+                            module_id,
+                            func.span,
+                        );
+                        export_table.add_export(exported)?;
+                    }
+                }
+            }
         }
     }
 
