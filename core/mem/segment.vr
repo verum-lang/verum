@@ -331,12 +331,12 @@ implement Segment {
     /// Check if segment is abandoned
     @inline
     public fn is_abandoned(&self) -> Bool {
-        atomic_load_u64(&self.thread_id, "acquire") == 0
+        atomic_load_u64(&self.thread_id, ORDERING_ACQUIRE) == 0
     }
 
     /// Abandon this segment (set thread_id to 0)
     public fn abandon(&mut self) {
-        atomic_store_u64(&mut self.thread_id, 0, "release");
+        atomic_store_u64(&mut self.thread_id, 0, ORDERING_RELEASE);
         self.abandoned_visits = 1;
     }
 
@@ -346,8 +346,8 @@ implement Segment {
             &self.thread_id,
             0,  // expected: abandoned
             new_thread_id,
-            "acq_rel",
-            "acquire"
+            ORDERING_ACQ_REL,
+            ORDERING_ACQUIRE
         );
         result.1  // true if CAS succeeded
     }
@@ -419,7 +419,7 @@ implement Segment {
         }
 
         for word in 0..MASK_WORDS {
-            let mask = atomic_exchange_u64(&self.purge_mask[word], 0, "acq_rel");
+            let mask = atomic_exchange_u64(&self.purge_mask[word], 0, ORDERING_ACQ_REL);
             if mask == 0 {
                 continue;
             }
@@ -444,7 +444,7 @@ implement Segment {
 
     /// Increment base generation (called on epoch advance)
     public fn increment_generation(&mut self) {
-        let old_gen = atomic_load_u32(&self.base_generation, "acquire");
+        let old_gen = atomic_load_u32(&self.base_generation, ORDERING_ACQUIRE);
         let new_gen = old_gen + 1;
 
         // Check for wraparound
@@ -454,7 +454,7 @@ implement Segment {
             self.epoch = self.epoch + 1;
         }
 
-        atomic_store_u32(&self.base_generation, new_gen, "release");
+        atomic_store_u32(&self.base_generation, new_gen, ORDERING_RELEASE);
     }
 }
 

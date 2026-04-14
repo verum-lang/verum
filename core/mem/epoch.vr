@@ -43,6 +43,8 @@
 
 // Import intrinsics as functions
 
+mount core.intrinsics.atomic.{ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL, ORDERING_SEQ_CST};
+
 module core.mem.epoch;
 mount core.intrinsics.{
     spin_hint,
@@ -149,7 +151,7 @@ implement EpochManager {
     /// Get current global epoch.
     @inline
     public fn current_epoch(&self) -> UInt64 {
-        atomic_load_u64(&self.epoch, "acquire")
+        atomic_load_u64(&self.epoch, ORDERING_ACQUIRE)
     }
 
     /// Increment global epoch (called on generation wraparound).
@@ -163,8 +165,8 @@ implement EpochManager {
     ///
     /// The new epoch value.
     public fn increment_epoch(&mut self) -> UInt64 {
-        let new_epoch = atomic_fetch_add_u64(&self.epoch, 1, "acq_rel") + 1;
-        atomic_fetch_add_int(&self.wraparounds, 1, "relaxed");
+        let new_epoch = atomic_fetch_add_u64(&self.epoch, 1, ORDERING_ACQ_REL) + 1;
+        atomic_fetch_add_int(&self.wraparounds, 1, ORDERING_RELAXED);
 
         // Notify all callbacks
         self.notify_callbacks(new_epoch);
@@ -185,7 +187,7 @@ implement EpochManager {
     /// Get total number of wraparounds.
     @inline
     public fn wraparound_count(&self) -> Int {
-        atomic_load_int(&self.wraparounds, "relaxed")
+        atomic_load_int(&self.wraparounds, ORDERING_RELAXED)
     }
 
     // =========================================================================
@@ -201,7 +203,7 @@ implement EpochManager {
     ///
     /// Callback ID that can be used to unregister.
     public fn register_callback(&mut self, callback: EpochCallback) -> Int {
-        let id = atomic_fetch_add_int(&self.next_callback_id, 1, "relaxed");
+        let id = atomic_fetch_add_int(&self.next_callback_id, 1, ORDERING_RELAXED);
 
         // Acquire spinlock
         self.lock_callbacks();
@@ -261,7 +263,7 @@ implement EpochManager {
     /// Called when ThinRef.revoke() or FatRef.revoke() is invoked.
     /// Useful for tracking reference invalidation in debug builds.
     public fn register_revocation_callback(&mut self, callback: RevocationCallback) -> Int {
-        let id = atomic_fetch_add_int(&self.next_revocation_id, 1, "relaxed");
+        let id = atomic_fetch_add_int(&self.next_revocation_id, 1, ORDERING_RELAXED);
 
         self.lock_revocation();
 
@@ -325,7 +327,7 @@ implement EpochManager {
     /// Acquire callback spinlock (exclusive).
     @inline
     fn lock_callbacks(&mut self) {
-        while atomic_cmpxchg_int(&mut self.callbacks_lock, 0, 1, "acquire", "relaxed").old != 0 {
+        while atomic_cmpxchg_int(&mut self.callbacks_lock, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).old != 0 {
             spin_hint();
         }
     }
@@ -333,7 +335,7 @@ implement EpochManager {
     /// Release callback spinlock.
     @inline
     fn unlock_callbacks(&self) {
-        atomic_store_int(&self.callbacks_lock, 0, "release");
+        atomic_store_int(&self.callbacks_lock, 0, ORDERING_RELEASE);
     }
 
     /// Acquire callback spinlock (shared, for iteration).
@@ -351,7 +353,7 @@ implement EpochManager {
     /// Acquire revocation spinlock.
     @inline
     fn lock_revocation(&self) {
-        while atomic_cmpxchg_int(&self.revocation_lock, 0, 1, "acquire", "relaxed").old != 0 {
+        while atomic_cmpxchg_int(&self.revocation_lock, 0, 1, ORDERING_ACQUIRE, ORDERING_RELAXED).old != 0 {
             spin_hint();
         }
     }
@@ -359,7 +361,7 @@ implement EpochManager {
     /// Release revocation spinlock.
     @inline
     fn unlock_revocation(&self) {
-        atomic_store_int(&self.revocation_lock, 0, "release");
+        atomic_store_int(&self.revocation_lock, 0, ORDERING_RELEASE);
     }
 
     @inline

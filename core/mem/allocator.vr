@@ -473,7 +473,7 @@ implement PageHeader {
         self.used_count = self.used_count + 1;
 
         // Calculate full generation
-        let page_gen = atomic_load_u32(&self.generation, "acquire");
+        let page_gen = atomic_load_u32(&self.generation, ORDERING_ACQUIRE);
         let metadata = self.slot_metadata();
         let slot_delta = metadata[index] as UInt32;
         let full_gen = page_gen + slot_delta;
@@ -502,7 +502,7 @@ implement PageHeader {
     /// Uses atomic CAS for thread safety.
     public fn add_to_remote_free(&mut self, index: Int) {
         loop {
-            let old_head = atomic_load_i32(&self.remote_free_head, "acquire");
+            let old_head = atomic_load_i32(&self.remote_free_head, ORDERING_ACQUIRE);
 
             // Store old head in slot data
             let slot_data = self.slot_ptr(index) as &mut Int32;
@@ -513,8 +513,8 @@ implement PageHeader {
                 &self.remote_free_head,
                 old_head,
                 index as Int32,
-                "acq_rel",
-                "acquire"
+                ORDERING_ACQ_REL,
+                ORDERING_ACQUIRE
             );
 
             if result.1 {
@@ -527,7 +527,7 @@ implement PageHeader {
     /// Process remote free list (called by owning thread).
     public fn process_remote_frees(&mut self) {
         // Atomically swap remote list to local processing
-        let head = atomic_exchange_i32(&self.remote_free_head, -1, "acq_rel");
+        let head = atomic_exchange_i32(&self.remote_free_head, -1, ORDERING_ACQ_REL);
 
         let mut current = head;
         while current >= 0 {
@@ -554,7 +554,7 @@ implement PageHeader {
     /// Validate a reference against this page.
     @inline
     public fn validate_reference(&self, slot_index: Int, expected_gen: UInt32) -> Bool {
-        let page_gen = atomic_load_u32(&self.generation, "acquire");
+        let page_gen = atomic_load_u32(&self.generation, ORDERING_ACQUIRE);
         let metadata = self.slot_metadata();
         let slot_delta = metadata[slot_index] as UInt32;
         let actual_gen = page_gen + slot_delta;

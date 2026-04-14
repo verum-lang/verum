@@ -37462,6 +37462,37 @@ impl TypeChecker {
         // We need to look it up in the context to find the actual type constraints.
         // For type variables with protocol constraints (e.g., T: Showable),
         // we should use the constraint information for method lookup.
+        // Resolve named types that are generic type params (e.g., Type::Named { path: "E" })
+        // to their TypeVar representation so that bounds-based method resolution works.
+        let recv_ty = match &recv_ty {
+            Type::Named { path, args } if args.is_empty() => {
+                if let Some(ident) = path.as_ident() {
+                    let name_text: Text = ident.name.clone();
+                    // Look up the name in context - it might be a type var
+                    if let Some(scheme) = self.ctx.env.lookup(&name_text) {
+                        let resolved = self.unifier.apply(&scheme.ty);
+                        match &resolved {
+                            Type::Var(tv) => {
+                                let bounds = self.get_type_var_bounds(tv);
+                                if !bounds.is_empty() {
+                                    // This named type IS a bounded type var - use the var form
+                                    resolved
+                                } else {
+                                    recv_ty.clone()
+                                }
+                            }
+                            _ => recv_ty.clone(),
+                        }
+                    } else {
+                        recv_ty.clone()
+                    }
+                } else {
+                    recv_ty.clone()
+                }
+            }
+            _ => recv_ty.clone(),
+        };
+
         let resolved_ty = match &recv_ty {
             Type::Var(var) => {
                 // If still a type variable, check if we have bounds registered
@@ -37491,6 +37522,77 @@ impl TypeChecker {
                                 .map(|pm| pm.ty.clone());
 
                             if let Some(method_ty) = method_ty_opt {
+                                // Substitute protocol type parameters with bound args.
+                                // E.g., for E: Module<Text, DynTensor<Float>>, substitute In->Text, Out->DynTensor<Float>
+                                // so that forward's fn(In) -> Out becomes fn(Text) -> DynTensor<Float>.
+                                //
+                                // CRITICAL: The stored method type uses TypeVar IDs (e.g., Var(tvar_In)),
+                                // NOT Named types (e.g., Named("In")). The TypeVars appear in the method
+                                // signature in the same order as the protocol's type params (In, Out, ...).
+                                // We collect free TypeVars in order and substitute using "T{id}" keys.
+                                let method_ty = if !bound.args.is_empty() {
+                                    // Collect free TypeVars from method_ty in order of appearance.
+                                    // These correspond to the protocol's type params in declaration order.
+                                    fn collect_free_vars_ordered(ty: &Type, vars: &mut Vec<TypeVar>) {
+                                        match ty {
+                                            Type::Var(tv) => {
+                                                if !vars.iter().any(|v| v == tv) {
+                                                    vars.push(*tv);
+                                                }
+                                            }
+                                            Type::Function { params, return_type, .. } => {
+                                                for p in params {
+                                                    collect_free_vars_ordered(p, vars);
+                                                }
+                                                collect_free_vars_ordered(return_type, vars);
+                                            }
+                                            Type::Named { args, .. } | Type::Generic { args, .. } => {
+                                                for a in args {
+                                                    collect_free_vars_ordered(a, vars);
+                                                }
+                                            }
+                                            Type::Tuple(tys) => {
+                                                for t in tys { collect_free_vars_ordered(t, vars); }
+                                            }
+                                            Type::Reference { inner, .. }
+                                            | Type::CheckedReference { inner, .. }
+                                            | Type::UnsafeReference { inner, .. } => {
+                                                collect_free_vars_ordered(inner, vars);
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+
+                                    let mut free_vars: Vec<TypeVar> = Vec::new();
+                                    collect_free_vars_ordered(&method_ty, &mut free_vars);
+
+                                    let mut param_subst: indexmap::IndexMap<Text, Type> = indexmap::IndexMap::new();
+
+                                    // Map by TypeVar ID (T{id} key) — primary path for stored method types
+                                    for (tv, arg_ty) in free_vars.iter().zip(bound.args.iter()) {
+                                        let var_key: Text = format!("T{}", tv.id()).into();
+                                        param_subst.insert(var_key, arg_ty.clone());
+                                    }
+
+                                    // Also map by protocol type param name — fallback for Named-type methods
+                                    {
+                                        let pc = self.protocol_checker.read();
+                                        if let Maybe::Some(proto) = pc.get_protocol(&Text::from(protocol_name)) {
+                                            for (param, arg_ty) in proto.type_params.iter().zip(bound.args.iter()) {
+                                                param_subst.insert(param.name.clone(), arg_ty.clone());
+                                            }
+                                        }
+                                    }
+
+                                    if !param_subst.is_empty() {
+                                        self.substitute_type_params(&method_ty, &param_subst)
+                                    } else {
+                                        method_ty
+                                    }
+                                } else {
+                                    method_ty
+                                };
+
                                 // Found the method in a bounding protocol!
                                 // Defer the actual protocol check until the type is resolved
                                 self.defer_constraint(DeferredConstraint::ProtocolBound {
@@ -48927,6 +49029,13 @@ impl TypeChecker {
                             crate::context::TypeParam::new(name_text.clone(), name.span)
                                 .with_bounds(protocol_bounds.clone());
                         self.ctx.env.add_type_param(type_param);
+
+                        // CRITICAL: Also register bounds in type_var_bounds for method resolution.
+                        // Without this, calling methods on bounded type params (e.g., E: Module<Text, Out>)
+                        // fails because get_type_var_bounds returns empty, and the wrong method type is used.
+                        if let Type::Var(tvar) = &type_var {
+                            self.register_type_var_bounds(*tvar, protocol_bounds.clone());
+                        }
 
                         // CRITICAL FIX: Also add to impl_where_clauses for blanket impl resolution
                         // For `implement<S: Stream> StreamExt for S {}`, the bound `S: Stream`

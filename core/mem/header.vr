@@ -39,6 +39,8 @@
 // Spec: docs/architecture/new-arch-spec.md Section 6.1
 // =============================================================================
 
+mount core.intrinsics.atomic.{ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL, ORDERING_SEQ_CST};
+
 module core.mem.header;
 mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
 
@@ -252,32 +254,32 @@ implement AllocationHeader {
     /// Load generation counter atomically.
     @inline
     public fn load_generation(&self) -> UInt32 {
-        atomic_load_u32(&self.generation, "acquire")
+        atomic_load_u32(&self.generation, ORDERING_ACQUIRE)
     }
 
     /// Store generation counter atomically.
     @inline
     public fn store_generation(&mut self, gen: UInt32) {
-        atomic_store_u32(&mut self.generation, gen, "release")
+        atomic_store_u32(&mut self.generation, gen, ORDERING_RELEASE)
     }
 
     /// Increment generation and return old value.
     /// Handles wraparound by incrementing epoch.
     @inline
     public fn increment_generation(&mut self) -> UInt32 {
-        let old_gen = atomic_fetch_add_u32(&self.generation, 1, "acq_rel");
+        let old_gen = atomic_fetch_add_u32(&self.generation, 1, ORDERING_ACQ_REL);
 
         // Check for wraparound
         if old_gen >= GEN_MAX - 1 {
             // Increment epoch in the packed epoch_and_caps field (lower 16 bits)
-            let old_packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+            let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
             let old_epoch = (old_packed & 0xFFFF) as UInt16;
             let caps = (old_packed >> 16) as UInt16;
             let new_epoch = old_epoch + 1;
             let new_packed = ((caps as UInt32) << 16) | (new_epoch as UInt32);
-            atomic_store_u32(&self.epoch_and_caps, new_packed, "release");
+            atomic_store_u32(&self.epoch_and_caps, new_packed, ORDERING_RELEASE);
             // Reset generation
-            atomic_store_u32(&self.generation, GEN_INITIAL, "release");
+            atomic_store_u32(&self.generation, GEN_INITIAL, ORDERING_RELEASE);
             // Notify epoch manager
             super.epoch.GLOBAL_EPOCH.on_wraparound();
         }
@@ -288,17 +290,17 @@ implement AllocationHeader {
     /// Load epoch counter atomically (lower 16 bits of epoch_and_caps).
     @inline
     public fn load_epoch(&self) -> UInt16 {
-        let packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+        let packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
         (packed & 0xFFFF) as UInt16
     }
 
     /// Store epoch counter atomically (preserves capabilities in upper 16 bits).
     @inline
     public fn store_epoch(&mut self, epoch: UInt16) {
-        let old_packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+        let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
         let caps = old_packed & 0xFFFF_0000;
         let new_packed = caps | (epoch as UInt32);
-        atomic_store_u32(&self.epoch_and_caps, new_packed, "release")
+        atomic_store_u32(&self.epoch_and_caps, new_packed, ORDERING_RELEASE)
     }
 
     /// Load generation and epoch in optimized sequential access.
@@ -307,9 +309,9 @@ implement AllocationHeader {
     @inline
     public fn load_generation_epoch_fast(&self) -> (UInt32, UInt16) {
         // Load generation with Acquire ordering (provides memory fence)
-        let generation = atomic_load_u32(&self.generation, "acquire");
+        let generation = atomic_load_u32(&self.generation, ORDERING_ACQUIRE);
         // Epoch is lower 16 bits of epoch_and_caps; Relaxed since generation provides fence
-        let packed = atomic_load_u32(&self.epoch_and_caps, "relaxed");
+        let packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_RELAXED);
         let epoch = (packed & 0xFFFF) as UInt16;
         (generation, epoch)
     }
@@ -321,7 +323,7 @@ implement AllocationHeader {
     public unsafe fn load_generation_epoch_combined(&self) -> (UInt32, UInt16) {
         // Cast generation field address to UInt64 pointer and load
         let ptr = &self.generation as &unsafe UInt64;
-        let combined = atomic_load_u64(ptr, "acquire");
+        let combined = atomic_load_u64(ptr, ORDERING_ACQUIRE);
 
         // Extract generation (lower 32 bits) and epoch (bits 32-47)
         let generation = (combined & 0xFFFF_FFFF) as UInt32;
@@ -333,17 +335,17 @@ implement AllocationHeader {
     /// Load capabilities atomically (upper 16 bits of epoch_and_caps).
     @inline
     public fn load_capabilities(&self) -> UInt16 {
-        let packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+        let packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
         ((packed >> 16) & 0xFFFF) as UInt16
     }
 
     /// Store capabilities atomically (preserves epoch in lower 16 bits).
     @inline
     public fn store_capabilities(&mut self, caps: UInt16) {
-        let old_packed = atomic_load_u32(&self.epoch_and_caps, "acquire");
+        let old_packed = atomic_load_u32(&self.epoch_and_caps, ORDERING_ACQUIRE);
         let epoch = old_packed & 0xFFFF;
         let new_packed = ((caps as UInt32) << 16) | epoch;
-        atomic_store_u32(&self.epoch_and_caps, new_packed, "release")
+        atomic_store_u32(&self.epoch_and_caps, new_packed, ORDERING_RELEASE)
     }
 
     /// Attenuate (reduce) capabilities using AND mask.
@@ -352,7 +354,7 @@ implement AllocationHeader {
     public fn attenuate_capabilities(&mut self, mask: UInt16) -> UInt16 {
         // AND the upper 16 bits (caps) while preserving lower 16 bits (epoch)
         let u32_mask = ((mask as UInt32) << 16) | 0xFFFF;
-        let old_packed = atomic_fetch_and_u32(&self.epoch_and_caps, u32_mask, "acq_rel");
+        let old_packed = atomic_fetch_and_u32(&self.epoch_and_caps, u32_mask, ORDERING_ACQ_REL);
         ((old_packed >> 16) & 0xFFFF) as UInt16
     }
 
@@ -365,20 +367,20 @@ implement AllocationHeader {
     /// Load reference count atomically.
     @inline
     public fn load_ref_count(&self) -> UInt32 {
-        atomic_load_u32(&self.ref_count, "acquire")
+        atomic_load_u32(&self.ref_count, ORDERING_ACQUIRE)
     }
 
     /// Increment reference count and return old value.
     @inline
     public fn increment_ref_count(&mut self) -> UInt32 {
-        atomic_fetch_add_u32(&self.ref_count, 1, "acq_rel")
+        atomic_fetch_add_u32(&self.ref_count, 1, ORDERING_ACQ_REL)
     }
 
     /// Decrement reference count and return new value.
     /// Caller must handle deallocation when this returns 0.
     @inline
     public fn decrement_ref_count(&mut self) -> UInt32 {
-        let old = atomic_fetch_add_u32(&self.ref_count, 0xFFFF_FFFF, "acq_rel");
+        let old = atomic_fetch_add_u32(&self.ref_count, 0xFFFF_FFFF, ORDERING_ACQ_REL);
         old - 1
     }
 
