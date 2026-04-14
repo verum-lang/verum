@@ -16,6 +16,7 @@
 @cfg(target_os = "windows")
 module wincon;
 
+mount core.sys.windows.ntdll.{Handle};
 mount core.sys.windows.kernel32.{
     GetStdHandle, GetConsoleMode, SetConsoleMode, GetConsoleScreenBufferInfo,
     STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
@@ -25,9 +26,7 @@ mount core.sys.windows.kernel32.{
     ENABLE_PROCESSED_OUTPUT, ENABLE_WRAP_AT_EOL_OUTPUT,
     DISABLE_NEWLINE_AUTO_RETURN,
     ConsoleScreenBufferInfo, Coord,
-    Handle,
 };
-mount core.sys.windows.ntdll.Handle;
 mount core.io.{IoResult, StreamError, IoErrorKind};
 mount super.{TerminalMode, TermiosState, TerminalSize, RawTerminal, CursorShape};
 

@@ -207,6 +207,7 @@ public mount runtime.text.{
 // --- From runtime/sync ---
 public mount runtime.sync.{
     spin_loop_hint,
+    spin_hint,
 };
 
 // --- From runtime/syscall ---
@@ -216,3 +217,30 @@ public mount runtime.syscall.{
 
 // --- From runtime/cbgr ---
 public mount runtime.cbgr.*;
+
+// --- From atomic (resolve generic overload ambiguity) ---
+public mount atomic.{
+    atomic_load,
+    atomic_store,
+    MemoryOrder,
+};
+
+// --- From memory (resolve generic overload ambiguity) ---
+public mount memory.{
+    slice_as_ptr,
+    slice_as_mut_ptr,
+    slice_get_unchecked,
+    slice_get_unchecked_mut,
+    slice_from_raw_parts,
+    slice_from_raw_parts_mut,
+    slice_subslice,
+    slice_subslice_mut,
+    slice_split_at_mut,
+};
+
+// --- From type_info (resolve generic overload ambiguity) ---
+public mount type_info.{
+    align_of,
+    size_of,
+    type_id,
+};

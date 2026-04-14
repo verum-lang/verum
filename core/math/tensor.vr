@@ -1309,6 +1309,19 @@ public fn einsum<T: Numeric>(expr: Text, tensors: &[DynTensor<T>]) -> DynTensor<
     @vbc(TENSOR_EINSUM, expr, tensors)
 }
 
+/// Flip tensor along specified axes (reverse elements along given dimensions).
+/// Equivalent to np.flip / torch.flip.
+public fn flip<T: Numeric>(x: &DynTensor<T>, axes: &[USize]) -> DynTensor<T> {
+    @vbc(TENSOR_FLIP, x, axes)
+}
+
+/// Split tensor into chunks along the given dimension.
+/// Returns a list of tensors, each with size `chunk_size` along `dim`
+/// (the last chunk may be smaller).
+public fn chunk<T: Numeric>(x: &DynTensor<T>, chunk_size: USize, dim: USize) -> List<DynTensor<T>> {
+    @vbc(TENSOR_CHUNK, x, chunk_size, dim)
+}
+
 // =============================================================================
 // Static Shape Operations (Compile-time Verified)
 // =============================================================================

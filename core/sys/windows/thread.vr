@@ -23,13 +23,13 @@ module sys.windows.thread;
 // =============================================================================
 
 mount sys.common.OSError;
+mount core.intrinsics.platform.{spin_hint};
 mount core.intrinsics.{
-    spin_hint,
     atomic_load_u32, atomic_store_u32, atomic_cas_u32,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
 };
+mount super.ntdll.{Handle};
 mount super.kernel32.{
-    Handle,
     SecurityAttributes,
     CreateThread,
     ExitThread,

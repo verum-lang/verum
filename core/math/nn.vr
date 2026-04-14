@@ -382,6 +382,84 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for Conv2d {
 }
 
 // =============================================================================
+// 1D Convolution Layer
+// =============================================================================
+
+/// 1D Convolutional layer for sequence modeling (SSMs, TCNs, causal convolutions).
+/// input shape: [N, C_in, L], output shape: [N, C_out, L_out]
+public type Conv1d is {
+    weight: Parameter,       // [out_channels, in_channels, kernel_size]
+    bias: Maybe<Parameter>,
+    in_channels: USize,
+    out_channels: USize,
+    kernel_size: USize,
+    stride: USize,
+    padding: USize,
+    dilation: USize,
+};
+
+implement Conv1d {
+    /// Create a Conv1d with Kaiming initialization.
+    public fn new(
+        in_channels: USize,
+        out_channels: USize,
+        kernel_size: USize,
+    ) -> Self using [Random, ComputeDevice] {
+        let fan_in = in_channels * kernel_size;
+        let mut weight = Parameter.new(&[out_channels, in_channels, kernel_size]);
+        weight.kaiming_uniform(fan_in);
+        Conv1d {
+            weight,
+            bias: Maybe.None,
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride: 1,
+            padding: 0,
+            dilation: 1,
+        }
+    }
+
+    public fn with_stride(mut self, stride: USize) -> Self {
+        self.stride = stride;
+        self
+    }
+
+    public fn with_padding(mut self, padding: USize) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    public fn with_dilation(mut self, dilation: USize) -> Self {
+        self.dilation = dilation;
+        self
+    }
+}
+
+implement Module<DynTensor<Float>, DynTensor<Float>> for Conv1d {
+    @differentiable
+    fn forward(&self, input: DynTensor<Float>) -> DynTensor<Float> {
+        @vbc(TENSOR_CONV1D, input, self.weight.data, self.stride, self.padding, self.dilation)
+    }
+
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut params = List.from([&self.weight.data]);
+        if let Maybe.Some(bias) = &self.bias {
+            params.push(&bias.data);
+        }
+        params
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut params = List.from([&mut self.weight.data]);
+        if let Maybe.Some(bias) = &mut self.bias {
+            params.push(&mut bias.data);
+        }
+        params
+    }
+}
+
+// =============================================================================
 // Normalization Layers
 // =============================================================================
 

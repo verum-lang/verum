@@ -28,8 +28,9 @@ mount sys.io_engine.{
     IoError as EngineIoError,
     WAKE_TOKEN,
 };
+mount super.ntdll.{Handle, IoStatusBlock};
+mount super.ntstatus.{NtStatus};
 mount super.kernel32.{
-    Handle,
     Overlapped,
     OverlappedEntry,
     CreateIoCompletionPort,
@@ -53,7 +54,6 @@ mount super.kernel32.{
     ERROR_OPERATION_ABORTED,
     ERROR_TIMEOUT,
 };
-mount super.ntdll.{NtStatus, IoStatusBlock};
 
 // =============================================================================
 // Constants

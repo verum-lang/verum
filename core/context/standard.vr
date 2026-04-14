@@ -50,8 +50,10 @@
 module context.standard;
 
 mount core.*;
-mount core.time.{Duration, Instant, SystemTime};
-mount core.io.{Read, Write};
+mount core.time.{Duration, SystemTime};
+mount core.time.instant.{Instant};
+mount core.io.{Read};
+mount core.io.protocols.{Write};
 
 // =============================================================================
 // Logger Context

@@ -144,6 +144,7 @@ implement Debug for IoErrorKind {
             UnexpectedEof => "UnexpectedEof",
             OutOfMemory => "OutOfMemory",
             Other => "Other",
+            Unsupported => "Unsupported",
         };
         f.write_str(s)
     }

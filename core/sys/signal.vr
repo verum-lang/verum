@@ -47,7 +47,7 @@
 module sys.signal;
 
 mount core.*;
-mount core.intrinsics.{atomic_store, atomic_load, MemoryOrder};
+mount core.intrinsics.atomic.{atomic_store, atomic_load, MemoryOrder};
 
 // =============================================================================
 // Platform-Specific FFI

@@ -30,9 +30,9 @@ module core.sync.atomic;
 mount core.*;
 
 // Import typed atomic intrinsics from stdlib.intrinsics
+mount core.intrinsics.atomic.{compiler_fence};
+mount core.intrinsics.platform.{spin_hint};
 mount core.intrinsics.{
-    // Memory/sync intrinsics
-    compiler_fence, spin_hint,
     // Typed atomic load intrinsics
     atomic_load_u8, atomic_load_u16, atomic_load_u32, atomic_load_u64,
     // Typed atomic store intrinsics

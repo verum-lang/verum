@@ -34,8 +34,9 @@ mount core.math.nn.{Module, Linear, Parameter};
 mount core.math.gpu.{DeviceId, with_device, current_device};
 mount core.prelude.{
     List, Maybe, Bool, USize, ISize, Float, U64,
-    Duration, Instant, Channel, Future, Error,
+    Duration, Instant, Future, Error,
 };
+mount core.async.channel.{Channel};
 
 // =============================================================================
 // Process Group and Communication Backend

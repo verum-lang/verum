@@ -482,6 +482,7 @@ implement<T, E, F: Future<Output = Result<T, E>>> Future for TryFirst<T, E, F> {
                 Poll.Pending => {
                     return Poll.Pending;
                 }
+                Poll.Ready(_) => unreachable(),
             }
         }
 

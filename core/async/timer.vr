@@ -24,7 +24,8 @@ mount core.*;
 mount super.poll.Poll;
 mount super.waker.Context;
 mount super.future.Future;
-mount time.{Duration, Instant};
+mount core.time.{Duration};
+mount core.time.instant.{Instant};
 
 // =============================================================================
 // Sleep Future

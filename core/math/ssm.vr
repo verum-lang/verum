@@ -37,9 +37,11 @@ mount core.math.nn.{
     Module, Linear, Conv1d, Embedding, RMSNorm, MultiHeadAttention,
     gelu, silu, relu, sigmoid, softplus,
 };
-mount core.math.elementary.{sqrt, log, PI};
+mount core.math.elementary.{sqrt, log};
+mount core.math.constants.{PI};
 mount core.math.autodiff.{Differentiable};
-mount core.prelude.{List, Maybe, Bool, USize, Float, Complex};
+mount core.prelude.{List, Maybe, Bool, USize, Float};
+mount core.math.complex.{Complex};
 
 // =============================================================================
 // Discretization Methods

@@ -11,7 +11,7 @@ module sys.process_ops;
 //
 // =============================================================================
 
-mount core.{List, Text, Maybe, Some, None};
+mount core.{List, Text, Maybe};
 mount super.raw.*;
 
 /// Exit status from a child process.

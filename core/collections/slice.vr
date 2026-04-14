@@ -32,8 +32,9 @@ mount core.*;
 mount core.base.ordering.{Ordering};
 
 // Import intrinsics as functions
-mount core.intrinsics.{
-    slice_len, slice_as_ptr, slice_as_mut_ptr, slice_get_unchecked,
+mount core.intrinsics.{slice_len};
+mount core.intrinsics.memory.{
+    slice_as_ptr, slice_as_mut_ptr, slice_get_unchecked,
     slice_subslice, slice_subslice_mut, slice_split_at_mut,
     slice_from_raw_parts, slice_from_raw_parts_mut,
 };

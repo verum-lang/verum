@@ -23,7 +23,7 @@
 module runtime.thread;
 
 mount core.*;
-mount core.intrinsics.{size_of, align_of};
+mount core.intrinsics.type_info.{size_of, align_of};
 mount core.time.{Duration};
 mount sys.{monotonic_nanos};
 

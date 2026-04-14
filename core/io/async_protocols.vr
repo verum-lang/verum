@@ -179,6 +179,7 @@ implement<W: AsyncWrite> Future for WriteFuture<W> {
             }
             Poll.Ready(Err(e)) => Poll.Ready(Err(e)),
             Poll.Pending => Poll.Pending,
+            Poll.Ready(_) => unreachable(),
         }
     }
 }

@@ -45,7 +45,7 @@ mount super.capability.{
 };
 mount super.hazard.{HazardGuard, acquire_hazard};
 mount super.epoch.{GLOBAL_EPOCH};
-mount super.{UseAfterFreeError, RevocationError, ExecutionTier, get_execution_tier};
+mount super.{UseAfterFreeError, RevocationError, get_execution_tier};
 
 // =============================================================================
 // ThinRef Structure

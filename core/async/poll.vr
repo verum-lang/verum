@@ -56,6 +56,7 @@ implement<T> Poll<T> {
             Ready(Ok(t)) => Ready(Ok(f(t))),
             Ready(Err(e)) => Ready(Err(e)),
             Pending => Pending,
+            Ready(_) => unreachable(),
         }
     }
 
@@ -67,6 +68,7 @@ implement<T> Poll<T> {
             Ready(Ok(t)) => Ready(Ok(t)),
             Ready(Err(e)) => Ready(Err(f(e))),
             Pending => Pending,
+            Ready(_) => unreachable(),
         }
     }
 

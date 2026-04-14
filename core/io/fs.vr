@@ -1242,6 +1242,7 @@ implement Iterator for WalkDir {
                     // This iterator is exhausted, pop it
                     self.stack.pop();
                 }
+                Some(_) => unreachable(),
             }
         }
     }

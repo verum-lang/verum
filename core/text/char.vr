@@ -14,7 +14,7 @@ module core.text.char;
 mount core.*;
 
 // Import intrinsics as functions
-mount core.intrinsics.{
+mount core.intrinsics.runtime.text.{
     char_is_alphabetic, char_is_numeric, char_is_whitespace, char_is_control,
     char_is_uppercase, char_is_lowercase, char_to_uppercase, char_to_lowercase,
     char_general_category,

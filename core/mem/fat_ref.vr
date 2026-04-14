@@ -47,7 +47,7 @@ mount super.capability.{
 };
 mount super.hazard.{HazardGuard, acquire_hazard};
 mount super.epoch.{GLOBAL_EPOCH};
-mount super.{UseAfterFreeError, RevocationError, ExecutionTier, get_execution_tier};
+mount super.{UseAfterFreeError, RevocationError, get_execution_tier};
 
 // Import intrinsics as functions (from submodule directly for reliable resolution)
 mount core.intrinsics.memory.{ptr_offset};

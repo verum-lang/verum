@@ -472,6 +472,8 @@ fn cleanup_thread_allocator() {
 
 @cfg(target_os = "linux")
 module linux_entry {
+    mount super.{verum_shutdown};
+
     // External user main function
     extern {
         fn verum_main(argc: Int, argv: &&Byte) -> Int;
@@ -524,6 +526,8 @@ module linux_entry {
 
 @cfg(target_os = "macos")
 module darwin_entry {
+    mount super.{verum_shutdown};
+
     // External user main function
     extern {
         fn verum_main(argc: Int, argv: &&Byte) -> Int;
@@ -556,6 +560,8 @@ module darwin_entry {
 
 @cfg(target_os = "windows")
 module windows_entry {
+    mount super.{verum_shutdown};
+
     // External user main function (Windows uses command line string)
     extern {
         fn verum_main(cmdline: &Byte) -> Int;

@@ -36,7 +36,8 @@ mount .poll.*;
 mount .waker.*;
 mount .future.*;
 mount .task.*;
-mount core.intrinsics.{compiler_fence, spin_hint};
+mount core.intrinsics.atomic.{compiler_fence};
+mount core.intrinsics.platform.{spin_hint};
 
 // =============================================================================
 // Native System Layer Imports (V-LLSI)

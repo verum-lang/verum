@@ -17,9 +17,9 @@ module sys.windows.time;
 // Spec: docs/architecture/new-arch-spec.md Section 5.5
 // =============================================================================
 
-mount core.intrinsics.spin_hint;
+mount core.intrinsics.platform.{spin_hint};
+mount super.ntdll.{LargeInteger};
 mount super.kernel32.{
-    LargeInteger,
     SystemTime,
     QueryPerformanceCounter,
     QueryPerformanceFrequency,
