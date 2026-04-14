@@ -9447,6 +9447,8 @@ impl TypeChecker {
                     _ => {
                         if self.has_method(inner_ty, "not") {
                             Ok(inner_ty.clone())
+                        } else if self.stdlib_single_file_mode {
+                            Ok(Type::Unknown)
                         } else {
                             Err(TypeError::Other(verum_common::Text::from(format!(
                                 "Cannot apply NOT operator to type: {}. Expected Bool or integer type",
@@ -18843,6 +18845,8 @@ impl TypeChecker {
                             || self.has_method(&result.ty, "not")
                         {
                             Ok(InferResult::new(result.ty.clone()))
+                        } else if self.stdlib_single_file_mode {
+                            Ok(InferResult::new(Type::Unknown))
                         } else {
                             Err(TypeError::Other(verum_common::Text::from(format!(
                                 "Cannot apply NOT operator to type: {}. Expected Bool or integer type",
@@ -18853,6 +18857,9 @@ impl TypeChecker {
                     _ => {
                         if self.has_method(&result.ty, "not") {
                             return Ok(InferResult::new(result.ty.clone()));
+                        }
+                        if self.stdlib_single_file_mode {
+                            return Ok(InferResult::new(Type::Unknown));
                         }
                         Err(TypeError::Other(verum_common::Text::from(format!(
                             "Cannot apply NOT operator to type: {}. Expected Bool or integer type",

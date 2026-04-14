@@ -1155,11 +1155,15 @@ impl TypeChecker {
                         }
                     }
 
-                    // Not a newtype or tuple struct - provide helpful error
-                    Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Pattern expects a variant type, but scrutinee has type {} at {}",
-                        expanded_ty, span_to_line_col(pattern.span)
-                    ))))
+                    // Not a newtype or tuple struct
+                    if self.stdlib_single_file_mode {
+                        Ok(())
+                    } else {
+                        Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Pattern expects a variant type, but scrutinee has type {} at {}",
+                            expanded_ty, span_to_line_col(pattern.span)
+                        ))))
+                    }
                 } else if let Type::Generic { name: generic_name, args } = &expanded_ty {
                     // Handle generic wrapper destructure: Heap(inner_val) matching Heap<T>
                     if tag == generic_name.as_str() && args.len() == 1 {
