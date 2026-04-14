@@ -87,6 +87,9 @@ pub mod error;
 // VBC → MLIR lowering for GPU path (primary entry point)
 pub mod vbc_lowering;
 
+// GPU binary extraction and embedding
+pub mod gpu_binary;
+
 // Verum Dialect definitions
 pub mod dialect;
 
@@ -166,6 +169,9 @@ pub use vbc_lowering::{
     VbcToMlirGpuLowering, GpuLoweringConfig, GpuLoweringStats,
     GpuTarget, VbcMlirError,
 };
+
+// Re-export GPU binary emission
+pub use gpu_binary::{GpuBinaryEmitter, GpuBinaryOutput, GpuKernelBinary, GpuKernelInfo};
 
 /// Compiler version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

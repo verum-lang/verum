@@ -18,6 +18,7 @@ pub mod ir;
 mod logical_result;
 pub mod pass;
 mod string_ref;
+pub mod translation;
 
 #[cfg(test)]
 mod test;
