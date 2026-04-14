@@ -99,11 +99,11 @@ impl GpuBinaryEmitter {
         llvm_module.set_target_triple(&host_triple);
 
         if self.verbose {
-            tracing::info!("Translated MLIR to LLVM IR ({} bytes)", llvm_module.to_string().len());
+            tracing::info!("Translated MLIR to LLVM IR ({} bytes)", llvm_module.print_to_string().len());
         }
 
         // Step 2: Get the LLVM IR as text
-        let host_llvm_ir = llvm_module.to_string();
+        let host_llvm_ir = llvm_module.print_to_string();
 
         // Step 3: Extract GPU kernel binaries from the MLIR module.
         //

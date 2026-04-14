@@ -12,13 +12,18 @@ fn main() {
     println!("cargo:rustc-env=VERUM_HOST_TARGET={}", target);
     println!("cargo:rustc-env=TARGET={}", target);
 
-    // Note: LLVM LTO symbols are handled by the stub module on MSVC
-    // (see verum_llvm/src/lib.rs). No /WHOLEARCHIVE needed.
+    // Provide LLVM library search path for native compilation (AOT + GPU paths).
+    // This lets the linker find libLLVM, libMLIR, and libclang_rt when
+    // the verum CLI compiles user programs to native executables.
+    if let Some(llvm_dir) = find_llvm_install_dir() {
+        let lib_dir = llvm_dir.join("lib");
+        println!("cargo:rustc-env=VERUM_LLVM_LIB_DIR={}", lib_dir.display());
+    }
 
     println!("cargo:rerun-if-changed=build.rs");
 }
 
-/// Find the LLVM install directory (same logic as verum_llvm_sys)
+/// Find the LLVM install directory (same logic as verum_llvm_sys).
 fn find_llvm_install_dir() -> Option<std::path::PathBuf> {
     if let Ok(dir) = env::var("VERUM_LLVM_DIR") {
         let path = std::path::PathBuf::from(&dir);

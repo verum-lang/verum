@@ -79,7 +79,7 @@ impl LlvmModule {
     }
 
     /// Print the LLVM IR module to a string.
-    pub fn to_string(&self) -> String {
+    pub fn print_to_string(&self) -> String {
         unsafe {
             let c_str = verum_mlir_sys::LLVMPrintModuleToString(self.raw);
             let result = std::ffi::CStr::from_ptr(c_str)
@@ -136,7 +136,7 @@ impl Drop for LlvmModule {
 
 impl std::fmt::Display for LlvmModule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self.print_to_string())
     }
 }
 
@@ -173,7 +173,7 @@ mod tests {
         assert!(llvm_mod.is_some(), "Empty MLIR module should translate to LLVM IR");
 
         let llvm_mod = llvm_mod.unwrap();
-        let ir = llvm_mod.to_string();
+        let ir = llvm_mod.print_to_string();
         assert!(ir.contains("source_filename"), "LLVM IR should contain source_filename");
     }
 }

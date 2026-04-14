@@ -213,6 +213,8 @@ pub struct GpuLoweringStats {
     pub functions_lowered: usize,
     pub shared_memory_allocs: usize,
     pub tensor_core_ops: usize,
+    /// CPU-only instructions skipped during GPU lowering.
+    pub skipped_cpu_ops: usize,
 }
 
 impl GpuLoweringStats {
@@ -639,8 +641,16 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                 block.append_operation(func::r#return(&[], location));
             }
 
-            // Skip all other instructions (CPU-only path)
-            _ => {}
+            // CPU-only instructions: not lowered to MLIR GPU path.
+            // These execute on the host via the standard LLVM pipeline.
+            // In a hybrid compilation model, the GPU path handles only
+            // tensor/GPU operations; all other instructions stay on CPU.
+            other => {
+                self.stats.skipped_cpu_ops += 1;
+                if self.config.debug_info {
+                    tracing::trace!("GPU lowering: skipping CPU-only instruction {:?}", other);
+                }
+            }
         }
         self.stats.mlir_ops_generated += 1;
         Ok(())
