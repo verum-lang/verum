@@ -132,7 +132,7 @@ implement Parameter {
     //
     // Suitable for layers followed by ReLU activation.
     // Variance = 2 / fan_in
-    public fn kaiming_uniform(&mut self, fan_in: USize) using [Random] {
+    public fn kaiming_uniform(&mut self, fan_in: USize) using [Random, ComputeDevice] {
         let bound = sqrt(6.0 / fan_in as Float);
         self.data = rand_uniform(self.data.shape(), -bound, bound);
     }
@@ -141,13 +141,13 @@ implement Parameter {
     //
     // Suitable for layers with linear/tanh activation.
     // Variance = 2 / (fan_in + fan_out)
-    public fn xavier_uniform(&mut self, fan_in: USize, fan_out: USize) using [Random] {
+    public fn xavier_uniform(&mut self, fan_in: USize, fan_out: USize) using [Random, ComputeDevice] {
         let bound = sqrt(6.0 / (fan_in + fan_out) as Float);
         self.data = rand_uniform(self.data.shape(), -bound, bound);
     }
 
     // Normal initialization with given standard deviation
-    public fn normal_init(&mut self, std: Float) using [Random] {
+    public fn normal_init(&mut self, std: Float) using [Random, ComputeDevice] {
         self.data = mul(&randn(self.data.shape()), &full_like(&self.data, std));
     }
 
@@ -186,7 +186,7 @@ public type Linear is {
 implement Linear {
     // Create linear layer with Kaiming initialization
     public fn new(in_features: USize, out_features: USize, use_bias: Bool) -> Self
-        using [Random]
+        using [Random, ComputeDevice]
     {
         let mut weight = Parameter.new(&[out_features, in_features]);
         weight.kaiming_uniform(in_features);
@@ -250,7 +250,7 @@ public type Embedding is {
 implement Embedding {
     // Create embedding with normal initialization
     public fn new(num_embeddings: USize, embedding_dim: USize) -> Self
-        using [Random]
+        using [Random, ComputeDevice]
     {
         let mut weight = Parameter.new(&[num_embeddings, embedding_dim]);
         weight.data = randn(&[num_embeddings, embedding_dim]);
@@ -311,7 +311,7 @@ implement Conv2d {
         in_channels: USize,
         out_channels: USize,
         kernel_size: (USize, USize),
-    ) -> Self using [Random] {
+    ) -> Self using [Random, ComputeDevice] {
         let (kh, kw) = kernel_size;
         let fan_in = in_channels * kh * kw;
         let mut weight = Parameter.new(&[out_channels, in_channels, kh, kw]);
@@ -344,7 +344,7 @@ implement Conv2d {
         self
     }
 
-    public fn with_bias(mut self) -> Self using [Random] {
+    public fn with_bias(mut self) -> Self using [Random, ComputeDevice] {
         let bound = 1.0 / sqrt((self.in_channels * self.kernel_size.0 * self.kernel_size.1) as Float);
         let mut b = Parameter.new(&[self.out_channels]);
         b.data = rand_uniform(&[self.out_channels], -bound, bound);
@@ -418,7 +418,12 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for LayerNorm {
     fn forward(&self, input: DynTensor<Float>) -> DynTensor<Float> {
         let rank = input.rank();
         let norm_dims = self.normalized_shape.len();
-        let reduce_axes: List<USize> = ((rank - norm_dims)..rank).collect();
+        let mut reduce_axes: List<USize> = [];
+        let mut i = rank - norm_dims;
+        while i < rank {
+            reduce_axes.push(i);
+            i = i + 1;
+        }
 
         let mean = mean_axes(&input, &reduce_axes);
         let var = var_axes(&input, &reduce_axes);
@@ -663,7 +668,7 @@ implement Dropout {
 implement Module<DynTensor<Float>, DynTensor<Float>> for Dropout {
     @differentiable
     fn forward(&self, input: DynTensor<Float>) -> DynTensor<Float>
-        using [Random]
+        using [Random, ComputeDevice]
     {
         if !self.training || self.p == 0.0 {
             return input;
@@ -692,7 +697,7 @@ public fn dropout(
     x: &DynTensor<Float>,
     p: Float,
     training: Bool,
-) -> DynTensor<Float> using [Random] {
+) -> DynTensor<Float> using [Random, ComputeDevice] {
     if !training || p == 0.0 {
         return x.clone();
     }
@@ -722,7 +727,7 @@ public type MultiHeadAttention is {
 
 implement MultiHeadAttention {
     public fn new(embed_dim: USize, num_heads: USize, dropout_p: Float) -> Self
-        using [Random]
+        using [Random, ComputeDevice]
     {
         assert(embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads");
         let head_dim = embed_dim / num_heads;
@@ -748,7 +753,7 @@ public type AttentionInput is (DynTensor<Float>, Maybe<DynTensor<Float>>);
 implement Module<AttentionInput, DynTensor<Float>> for MultiHeadAttention {
     @differentiable
     fn forward(&self, input: AttentionInput) -> DynTensor<Float>
-        using [Random]
+        using [Random, ComputeDevice]
     {
         let (x, mask) = input;
         let shape = x.shape();
@@ -819,7 +824,7 @@ public type FeedForward is {
 
 implement FeedForward {
     public fn new(dim: USize, hidden_dim: USize, dropout_p: Float, activation: Activation) -> Self
-        using [Random]
+        using [Random, ComputeDevice]
     {
         FeedForward {
             w1: Linear.new(dim, hidden_dim, true),
@@ -836,7 +841,7 @@ implement FeedForward {
 implement Module<DynTensor<Float>, DynTensor<Float>> for FeedForward {
     @differentiable
     fn forward(&self, x: DynTensor<Float>) -> DynTensor<Float>
-        using [Random]
+        using [Random, ComputeDevice]
     {
         let h = self.w1.forward(x);
         let h = self.activation.apply(&h);
@@ -869,7 +874,7 @@ public type TransformerBlock is {
 
 implement TransformerBlock {
     public fn new(dim: USize, num_heads: USize, ffn_dim: USize, dropout_p: Float) -> Self
-        using [Random]
+        using [Random, ComputeDevice]
     {
         TransformerBlock {
             ln1: LayerNorm.new(&[dim]),
@@ -893,7 +898,7 @@ implement TransformerBlock {
 implement Module<AttentionInput, DynTensor<Float>> for TransformerBlock {
     @differentiable
     fn forward(&self, input: AttentionInput) -> DynTensor<Float>
-        using [Random]
+        using [Random, ComputeDevice]
     {
         let (x, mask) = input;
 
