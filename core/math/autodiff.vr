@@ -130,7 +130,7 @@ implement<T: Numeric, S: meta [USize]> Differentiable for Tensor<T, S> {
     }
 
     fn scale_tangent(t: Tensor<T, S>, s: Float) -> Tensor<T, S> {
-        mul(&t, &full<T, S>(T.from_float(s)))
+        mul(&t, &full_like(&t, T.from_float(s)))
     }
 }
 

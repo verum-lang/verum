@@ -9492,16 +9492,26 @@ impl TypeChecker {
                                 }
                                 Type::Int => Ok(Type::int()),
                                 Type::Float => Ok(Type::float()),
-                                _ => Err(TypeError::Other(verum_common::Text::from(format!(
+                                _ => {
+                                    if self.stdlib_single_file_mode {
+                                        Ok(Type::Unknown)
+                                    } else {
+                                        Err(TypeError::Other(verum_common::Text::from(format!(
+                                            "Cannot negate type: {}. Expected signed numeric type",
+                                            inner_ty
+                                        ))))
+                                    }
+                                }
+                            }
+                        } else {
+                            if self.stdlib_single_file_mode {
+                                Ok(Type::Unknown)
+                            } else {
+                                Err(TypeError::Other(verum_common::Text::from(format!(
                                     "Cannot negate type: {}. Expected signed numeric type",
                                     inner_ty
                                 ))))
                             }
-                        } else {
-                            Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Cannot negate type: {}. Expected signed numeric type",
-                                inner_ty
-                            ))))
                         }
                     }
                     Type::Refined { base, .. } => {
@@ -10631,6 +10641,13 @@ impl TypeChecker {
                     };
 
                     match func_ty {
+                        // Unknown propagation: in stdlib single-file mode,
+                        // unresolvable callees return Unknown — skip all
+                        // argument checking and return Unknown.
+                        Type::Unknown if self.stdlib_single_file_mode => {
+                            Ok(InferResult::new(Type::Unknown))
+                        }
+
                         // Never propagation: calling Never returns Never
                         Type::Never => Ok(InferResult::new(Type::Never)),
 
@@ -10717,7 +10734,9 @@ impl TypeChecker {
                             let provided_args = args.len();
 
                             let has_explicit_type_args = !type_args.is_empty();
-                            if provided_args < required_params && !has_explicit_type_args {
+                            if provided_args < required_params && !has_explicit_type_args
+                                && !self.stdlib_single_file_mode
+                            {
                                 return Err(TypeError::OtherWithCode {
                                     code: verum_common::Text::from("E102"),
                                     msg: verum_common::Text::from(format!(
@@ -10750,7 +10769,9 @@ impl TypeChecker {
                                 }
                             });
                             let is_generic_type_call = has_explicit_type_args || all_args_are_type_like;
-                            if provided_args > total_params && !is_variadic && !self.in_unsafe_context && !is_generic_type_call {
+                            if provided_args > total_params && !is_variadic && !self.in_unsafe_context && !is_generic_type_call
+                                && !self.stdlib_single_file_mode
+                            {
                                 return Err(TypeError::Other(verum_common::Text::from(format!(
                                     "Function accepts at most {} argument{}, got {}",
                                     total_params,
@@ -13231,7 +13252,9 @@ impl TypeChecker {
                                             for (expected_name, expected_ty) in
                                                 expected_field_types.iter()
                                             {
-                                                if !provided_fields.contains_key(expected_name) {
+                                                if !provided_fields.contains_key(expected_name)
+                                                    && !self.stdlib_single_file_mode
+                                                {
                                                     return Err(TypeError::Other(verum_common::Text::from(
                                                         format!(
                                                             "Missing required field '{}' of type {} in variant {} construction",
