@@ -1291,6 +1291,24 @@ public fn ln<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
     tensor_log(x)
 }
 
+/// Norm along specified axes.
+public fn norm_axis<T: Numeric>(x: &DynTensor<T>, axes: &[USize]) -> DynTensor<T> {
+    @vbc(TENSOR_NORM_AXIS, x.data, axes)
+}
+
+/// Aliases for unary math ops without `tensor_` prefix.
+public fn exp<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_exp(x) }
+public fn log<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_log(x) }
+public fn sqrt<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_sqrt(x) }
+public fn sin<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_sin(x) }
+public fn cos<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_cos(x) }
+public fn tanh<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_tanh(x) }
+
+/// Einstein summation (einsum).
+public fn einsum<T: Numeric>(expr: Text, tensors: &[DynTensor<T>]) -> DynTensor<T> {
+    @vbc(TENSOR_EINSUM, expr, tensors)
+}
+
 // =============================================================================
 // Static Shape Operations (Compile-time Verified)
 // =============================================================================

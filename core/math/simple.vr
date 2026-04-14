@@ -55,7 +55,7 @@ mount super.tensor.{
     max as tensor_max,
     min as tensor_min,
     add, sub, mul, div, neg,
-    exp, log, sqrt, sin, cos, tanh,
+    tensor_exp, tensor_log, tensor_sqrt, tensor_sin, tensor_cos, tensor_tanh,
     softmax as tensor_softmax,
     cat as tensor_cat,
     stack as tensor_stack,

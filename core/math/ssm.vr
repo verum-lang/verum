@@ -29,7 +29,7 @@ module core.math.ssm;
 
 mount core.math.tensor.{
     DynTensor, zeros, ones, full, eye, randn, linspace, arange,
-    exp, mul, add, sub, div, neg, matmul, transpose, einsum,
+    tensor_exp, mul, add, sub, div, neg, matmul, transpose, einsum,
     reshape, unsqueeze, squeeze, slice, flip, cat, chunk,
     sum_axis, mean_axis, softmax, topk, gather, scatter_add,
 };
