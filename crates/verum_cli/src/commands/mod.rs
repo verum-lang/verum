@@ -20,6 +20,9 @@ pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
 // The stdlib.rs file is kept for reference but not exposed in the CLI.
 // pub mod stdlib;
+#[cfg(feature = "verification")]
+pub mod smt_info;
+pub mod smt_stats;
 pub mod test;
 pub mod verify;
 pub mod version;

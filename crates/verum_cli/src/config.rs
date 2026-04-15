@@ -179,6 +179,108 @@ pub struct Manifest {
     /// Cross-compilation configuration
     #[serde(default)]
     pub cross_compile: CrossCompileConfig,
+
+    /// Formal verification configuration
+    #[serde(default)]
+    pub verify: VerifyConfig,
+}
+
+/// Formal-verification configuration (the `[verify]` section).
+///
+/// Lets projects customize default verification behavior without needing
+/// to annotate every function with `@verify(...)`. Strategy names here are
+/// semantic (backend-agnostic) — see grammar/verum.ebnf for the full list.
+///
+/// ## Example `verum.toml`
+///
+/// ```toml
+/// [verify]
+/// default_strategy = "formal"
+/// solver_timeout_ms = 10000
+/// enable_telemetry = true
+/// persist_stats = true
+///
+/// # Per-module overrides
+/// [verify.modules."crypto.signing"]
+/// strategy = "certified"
+/// solver_timeout_ms = 60000
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyConfig {
+    /// Default verification strategy when no `@verify(...)` attribute is present.
+    ///
+    /// Valid values: `runtime`, `static`, `formal`, `fast`, `thorough`,
+    /// `certified`, `synthesize`. Defaults to `formal`.
+    #[serde(default = "default_verify_strategy")]
+    pub default_strategy: Text,
+
+    /// Base solver timeout in milliseconds. Strategy-specific multipliers
+    /// apply: `fast` uses 0.3×, `thorough` uses 2×, `certified` uses 3×,
+    /// `synthesize` uses 5×. Default: 10000 (10 seconds).
+    #[serde(default = "default_solver_timeout")]
+    pub solver_timeout_ms: u64,
+
+    /// Enable routing-statistics telemetry collection. When true, the
+    /// compiler records which verification technique ran for each goal
+    /// and writes results to `.verum/state/smt-stats.json`. Viewable via
+    /// `verum smt-stats`. Default: true.
+    #[serde(default = "default_true")]
+    pub enable_telemetry: bool,
+
+    /// Persist telemetry to disk at `.verum/state/smt-stats.json` so it
+    /// survives across compilation sessions. When false, stats live only
+    /// for the current run. Default: true.
+    #[serde(default = "default_true")]
+    pub persist_stats: bool,
+
+    /// Treat any cross-validation divergence as a hard build error.
+    ///
+    /// When true (default), if a `@verify(certified)` goal produces
+    /// divergent results between independent verifiers, the build fails.
+    /// When false, divergences are logged but do not stop compilation
+    /// (useful during verifier debugging).
+    #[serde(default = "default_true")]
+    pub fail_on_divergence: bool,
+
+    /// Per-module verification overrides.
+    ///
+    /// Keys are module paths (e.g., `"crypto.signing"`); values are the
+    /// same fields as the top-level `[verify]` section but narrowed to
+    /// that module and its descendants.
+    #[serde(default)]
+    pub modules: Map<Text, VerifyModuleOverride>,
+}
+
+impl Default for VerifyConfig {
+    fn default() -> Self {
+        Self {
+            default_strategy: default_verify_strategy(),
+            solver_timeout_ms: default_solver_timeout(),
+            enable_telemetry: true,
+            persist_stats: true,
+            fail_on_divergence: true,
+            modules: Map::new(),
+        }
+    }
+}
+
+/// Per-module verification settings (nested under `[verify.modules."path"]`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VerifyModuleOverride {
+    /// Override the default strategy for this module.
+    #[serde(default)]
+    pub strategy: Option<Text>,
+    /// Override the solver timeout for this module.
+    #[serde(default)]
+    pub solver_timeout_ms: Option<u64>,
+}
+
+fn default_verify_strategy() -> Text {
+    Text::from("formal")
+}
+
+fn default_solver_timeout() -> u64 {
+    10_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -694,6 +796,7 @@ pub fn create_default_manifest(
         lto: LtoConfig::default(),
         pgo: PgoConfig::default(),
         cross_compile: CrossCompileConfig::default(),
+        verify: VerifyConfig::default(),
     }
 }
 

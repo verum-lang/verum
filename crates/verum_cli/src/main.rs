@@ -144,9 +144,25 @@ enum Commands {
             help = "Reference mode: managed|checked|mixed"
         )]
         refs: Option<Text>,
-        /// Verification level: none, runtime, proof
-        #[clap(long, value_name = "LEVEL", help = "Verification: none|runtime|proof")]
+        /// Verification strategy controlling formal-verification behavior.
+        ///
+        /// Semantic strategies (backend-agnostic):
+        ///   runtime     — runtime assertion only (no formal proof)
+        ///   static      — type-level check only
+        ///   formal      — balanced default (compiler picks best technique)
+        ///   fast        — prefer speed over completeness
+        ///   thorough    — maximum completeness (parallel strategies)
+        ///   certified   — produce exportable proof certificate
+        ///   synthesize  — synthesis problem (generate term from spec)
+        ///
+        /// Legacy values "none", "proof" are aliases for "runtime" and "formal".
+        #[clap(long, value_name = "STRATEGY",
+               help = "Verification strategy: runtime|static|formal|fast|thorough|certified|synthesize")]
         verify: Option<Text>,
+
+        /// Print SMT routing statistics after compilation.
+        #[clap(long, help = "Show SMT solver routing telemetry after build")]
+        smt_stats: bool,
         #[clap(short, long)]
         release: bool,
         #[clap(long)]
@@ -526,6 +542,34 @@ enum Commands {
 
     // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
     // Use `verum info` with --stdlib flag for stdlib information if needed.
+
+    /// Show formal-verification engine capabilities and backends.
+    ///
+    /// This command diagnoses the toolchain itself: which verification
+    /// techniques are available, which advanced features (interpolation,
+    /// synthesis, abduction, …) the current build supports. It does not
+    /// touch user code.
+    #[clap(name = "smt-info")]
+    SmtInfo {
+        /// Output as machine-readable JSON instead of human-readable text.
+        #[clap(long)]
+        json: bool,
+    },
+
+    /// Show routing statistics from the most recent verification session.
+    ///
+    /// Reads telemetry: which strategy ran for each theory, portfolio race
+    /// winners, cross-validation agreement rate, divergence events, and
+    /// per-theory success rates.
+    #[clap(name = "smt-stats")]
+    SmtStats {
+        /// Output as JSON instead of formatted report.
+        #[clap(long)]
+        json: bool,
+        /// Reset statistics after printing.
+        #[clap(long)]
+        reset: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -768,6 +812,7 @@ fn run_command(cli: Cli) -> Result<()> {
             profile,
             refs,
             verify,
+            smt_stats,
             release,
             target,
             jobs,
@@ -792,6 +837,7 @@ fn run_command(cli: Cli) -> Result<()> {
             allow_lint,
             forbid_lint,
         } => {
+            let _smt_stats = smt_stats; // Will be plumbed into session options
             match resolve_path(path.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
                     ui::status("Building", file_path.as_str());
@@ -1125,6 +1171,32 @@ fn run_command(cli: Cli) -> Result<()> {
             WorkspaceCommands::Remove { name } => commands::workspace::remove(name),
             WorkspaceCommands::Exec { command } => commands::workspace::exec(command),
         },
+
+        Commands::SmtInfo { json } => {
+            #[cfg(feature = "verification")]
+            {
+                commands::smt_info::execute(json)
+                    .map_err(|e| CliError::Custom(e.to_string()))
+            }
+            #[cfg(not(feature = "verification"))]
+            {
+                let _ = json;
+                eprintln!(
+                    "{} this build of verum does not include formal-verification support.",
+                    "note:".cyan().bold()
+                );
+                eprintln!(
+                    "      rebuild with: {}",
+                    "cargo build --features verum_cli/verification".dimmed()
+                );
+                Ok(())
+            }
+        }
+
+        Commands::SmtStats { json, reset } => {
+            commands::smt_stats::execute(json, reset)
+                .map_err(|e| CliError::Custom(e.to_string()))
+        }
         // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system
     }
 }
