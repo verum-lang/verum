@@ -36,10 +36,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Minimum supported CVC5 version — bumped when we require new features.
-const MIN_CVC5_VERSION: &str = "1.2.0";
+const MIN_CVC5_VERSION: &str = "1.3.0";
 
 /// Default CVC5 version to fetch when vendored source is absent.
-const DEFAULT_CVC5_VERSION: &str = "1.2.0";
+const DEFAULT_CVC5_VERSION: &str = "1.3.3";
 
 fn main() {
     // Always rerun when these change.
@@ -47,6 +47,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CVC5_ROOT");
     println!("cargo:rerun-if-env-changed=CVC5_NO_VENDOR");
     println!("cargo:rerun-if-env-changed=CVC5_JOBS");
+    println!("cargo:rerun-if-env-changed=CVC5_UNSAFE_MODE");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
 
     // Declare known custom cfg flags for check-cfg lint.
@@ -204,25 +205,29 @@ fn build_vendored() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    let cvc5_src = manifest_dir.join("cvc5");
-
-    if !cvc5_src.exists() {
-        // Source tree not vendored — emit a clear error with next steps.
-        panic!(
-            "cvc5-sys: vendored CVC5 source not found at {}. \n\
-             \n\
-             To fix: \n\
-             1. Add CVC5 as a git submodule: \n\
-                  cd {} \n\
-                  git submodule add https://github.com/cvc5/cvc5.git crates/cvc5-sys/cvc5 \n\
-                  cd crates/cvc5-sys/cvc5 && git checkout cvc5-{} \n\
-             2. Or set CVC5_ROOT to point to a pre-built CVC5 installation. \n\
-             3. Or enable feature `system` to link against a system CVC5.",
-            cvc5_src.display(),
-            manifest_dir.parent().unwrap().parent().unwrap().display(),
-            DEFAULT_CVC5_VERSION
-        );
-    }
+    // Accept either `cvc/` (current submodule path) or `cvc5/` (legacy).
+    // We check which exists and use that path.
+    let cvc5_src = [manifest_dir.join("cvc"), manifest_dir.join("cvc5")]
+        .into_iter()
+        .find(|p| p.exists() && p.join("CMakeLists.txt").exists())
+        .unwrap_or_else(|| {
+            panic!(
+                "cvc5-sys: vendored CVC5 source not found at {} or {}.\n\
+                 \n\
+                 To fix:\n\
+                 1. Initialize the submodule:\n\
+                      cd {}\n\
+                      git submodule update --init --recursive crates/cvc5-sys/cvc\n\
+                      cd crates/cvc5-sys/cvc && git checkout cvc5-{}\n\
+                 2. Or set CVC5_ROOT to point to a pre-built CVC5 installation.\n\
+                 3. Or enable feature `system` to link against a system CVC5.",
+                manifest_dir.join("cvc").display(),
+                manifest_dir.join("cvc5").display(),
+                manifest_dir.parent().unwrap().parent().unwrap().display(),
+                DEFAULT_CVC5_VERSION
+            );
+        });
+    println!("cargo:warning=cvc5-sys: using CVC5 source at {}", cvc5_src.display());
 
     let jobs = env::var("CVC5_JOBS")
         .ok()
@@ -257,6 +262,14 @@ fn build_vendored() {
         .define("ENABLE_SYSTEM_TESTS", "OFF")
         // === Auto-download small dependencies (CaDiCaL, ANTLR, SymFPU) ===
         .define("ENABLE_AUTO_DOWNLOAD", "ON")
+        // === Safety mode (CVC5 1.3.0+) ===
+        // `safe-mode=safe` guards all CVC5 features that are either not robust
+        // or lack full proof/model support. We enable it by default for
+        // production use; relax via `CVC5_UNSAFE_MODE=1` for experimental features.
+        .define(
+            "CVC5_SAFE_MODE",
+            if env::var("CVC5_UNSAFE_MODE").is_ok() { "none" } else { "safe" }
+        )
         // === SMT theory extensions ===
         .define("USE_POLY", "ON")                      // LibPoly: polynomial arithmetic (NRA)
         // === License-compatible dependencies only (no GPL) ===

@@ -26,12 +26,15 @@
 //! - Pointers returned from CVC5 are valid only until the owning solver/term
 //!   manager is destroyed.
 //! - Passing null pointers where non-null is expected is undefined behavior.
-//! - CVC5 is **not thread-safe**. Each solver instance must be used from a
-//!   single thread, though separate instances may be used in parallel.
+//! - As of CVC5 1.3.0, `TermManager` instances can be shared across threads,
+//!   but they are **not thread-safe** and must be protected from concurrent
+//!   access (e.g., with a `Mutex`). Each `Solver` should still be used from
+//!   a single thread; separate solvers on separate term managers may run in
+//!   parallel (this is what the portfolio executor does).
 //!
 //! ## Versioning
 //!
-//! This crate targets CVC5 version **1.2.0+**. ABI stability is not guaranteed
+//! This crate targets CVC5 version **1.3.3+**. ABI stability is not guaranteed
 //! across CVC5 releases, so this crate's major version tracks CVC5 compatibility.
 //!
 //! ## Example (via safe wrapper)
@@ -75,7 +78,7 @@ pub const CVC5_LINKED: bool = cfg!(any(
 /// The CVC5 version this crate was built against.
 ///
 /// Format: `"MAJOR.MINOR.PATCH"`.
-pub const CVC5_VERSION: &str = "1.2.0";
+pub const CVC5_VERSION: &str = "1.3.3";
 
 // ============================================================================
 // Opaque types
@@ -175,9 +178,15 @@ pub enum Cvc5Kind {
     BITVECTOR_MULT = 45,
     BITVECTOR_CONCAT = 46,
     BITVECTOR_EXTRACT = 47,
+    /// Conversion int → BV (from SMT-LIB 2.7; replaces deprecated `int2bv`).
+    INT_TO_BITVECTOR = 48,
+    /// Unsigned BV → int (added in CVC5 1.3.0; replaces deprecated `bv2nat`).
+    BITVECTOR_UBV_TO_INT = 49,
+    /// Signed BV → int (added in CVC5 1.3.0).
+    BITVECTOR_SBV_TO_INT = 50,
     // === Arrays ===
-    SELECT = 50,
-    STORE = 51,
+    SELECT = 52,
+    STORE = 53,
     // === Strings ===
     STRING_CONCAT = 60,
     STRING_LENGTH = 61,
@@ -329,7 +338,24 @@ extern "C" {
     ) -> *mut cvc5_term;
 
     // --- Proofs ---
+    //
+    // As of CVC5 1.3.0, proofs use the Cooperating Proof Calculus (CPC) format
+    // by default, which has significantly broader theory coverage than the
+    // legacy proof format. CPC proofs are checkable by Ethos 0.2.0+.
+    //
+    // The `get-proof` SMT-LIB command (and this API) respects the
+    // `--proof-format` option: "cpc" (default), "alethe", "lfsc", "dot", "none".
+
+    /// Get the proof as a string in the currently-configured format.
     pub fn cvc5_solver_get_proof(solver: cvc5_solver) -> *const c_char;
+
+    /// Get the proof in a specific format (CVC5 1.3.0+).
+    ///
+    /// `format`: one of `"cpc"`, `"alethe"`, `"lfsc"`, `"dot"`.
+    pub fn cvc5_solver_get_proof_format(
+        solver: cvc5_solver,
+        format: *const c_char,
+    ) -> *const c_char;
 
     // --- Interpolation ---
     pub fn cvc5_solver_get_interpolant(

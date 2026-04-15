@@ -41,7 +41,29 @@ from source). Subsequent builds use cached artifacts.
 - `CVC5_ROOT`: Path to a pre-built CVC5 installation (overrides all features).
 - `CVC5_NO_VENDOR`: Disable vendored builds even when the feature is enabled.
 - `CVC5_JOBS`: Parallel build jobs (default: CPU count).
+- `CVC5_UNSAFE_MODE`: Disable CVC5's `safe-mode` guard (enables experimental
+  features like HOL, approximate solving). Default: `safe-mode=safe`.
 - `GMP_STATIC_LIB`: Path to `libgmp.a` for fully static linking.
+
+## What's New in CVC5 1.3
+
+### 1.3.3 (2026-02-25)
+- Bug fix: `get-assertions` no longer clears solver state.
+- Lazy handling of `distinct` constraints (perf improvement).
+- Minor NRA strategy improvements when using CAC + incremental linearization.
+
+### 1.3.0 (2025-06-19) — API-visible changes
+- **Cooperating Proof Calculus (CPC)** — significantly expanded proof coverage.
+  CPC proofs are checkable by Ethos 0.2.0+ and now cover *all* theories
+  allowed in safe mode.
+- **Thread-safe `TermManager`** — multiple instances can be shared across
+  threads (though each instance still requires mutex protection for
+  concurrent access).
+- **New bit-vector conversion kinds**: `BITVECTOR_UBV_TO_INT`,
+  `BITVECTOR_SBV_TO_INT`, `INT_TO_BITVECTOR` (matching SMT-LIB 2.7).
+  `bv2nat` and `int2bv` are now deprecated aliases.
+- **Safe-mode configuration**: `--safe-mode=safe|stable|none` for tuning
+  the feature guard strictness.
 
 ## Setting Up the Vendored Source
 
@@ -51,7 +73,7 @@ The CVC5 source must be present at `crates/cvc5-sys/cvc5/` as a git submodule:
 cd path/to/verum
 git submodule add https://github.com/cvc5/cvc5.git crates/cvc5-sys/cvc5
 cd crates/cvc5-sys/cvc5
-git checkout cvc5-1.2.0  # pinned version
+git checkout cvc5-1.3.3  # pinned version
 ```
 
 ## Licensing
