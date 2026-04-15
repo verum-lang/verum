@@ -274,3 +274,88 @@ fn language_features_group_appears_in_fmt_help() {
         "verum fmt --help must show Language features group (P0.2)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `[debug]` gates — dap_enabled + port
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dap_disabled_via_toml_refuses_to_start() {
+    let (_tmp, dir) = project("dap-off");
+    write_manifest(&dir, "[debug]\ndap_enabled = false\n");
+
+    let out = verum(&["dap", "--transport", "stdio"], &dir);
+    assert!(!out.status.success(), "disabled DAP must exit non-zero");
+    let err = stderr(&out);
+    assert!(
+        err.contains("disabled") && err.contains("[debug]"),
+        "error must cite the config key:\n{}",
+        err
+    );
+    assert!(
+        err.contains("dap_enabled = true") || err.contains("-Z debug.dap_enabled"),
+        "error must suggest the fix:\n{}",
+        err
+    );
+}
+
+#[test]
+fn dap_disabled_via_z_override_refuses_to_start() {
+    let (_tmp, dir) = project("dap-off-z");
+    write_manifest(&dir, "");
+
+    let out = verum(
+        &["dap", "--transport", "stdio", "-Z", "debug.dap_enabled=false"],
+        &dir,
+    );
+    assert!(
+        !out.status.success(),
+        "-Z debug.dap_enabled=false must also disable DAP"
+    );
+}
+
+#[test]
+fn dap_socket_without_port_but_toml_has_it_succeeds_in_parse() {
+    // Request socket transport; manifest provides [debug].port; CLI
+    // --port omitted. Startup should get past the port-resolution
+    // check. We can't actually bind the socket in a test without
+    // flakiness, but we can verify the argument-parsing path no longer
+    // errors with "--port required".
+    let (_tmp, dir) = project("dap-port");
+    write_manifest(&dir, "[debug]\nport = 7777\n");
+
+    // Give it a short timeout so we don't actually hold a server.
+    // The important assertion is that the "no port" error doesn't appear.
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_verum"));
+    cmd.args(&["dap", "--transport", "socket"]);
+    cmd.current_dir(&dir);
+    cmd.stdin(std::process::Stdio::null());
+    let child = cmd.spawn().expect("spawn");
+    // Kill almost immediately — we only care that parsing succeeded.
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    let _ = nix_kill(&child);
+    let out = child.wait_with_output().expect("wait");
+    let err = stderr(&out);
+    assert!(
+        !err.contains("--port required") && !err.contains("--port is required"),
+        "[debug].port must be used as fallback when --port is absent:\n{}",
+        err
+    );
+}
+
+// Portable child-kill: kill by PID on unix, TerminateProcess via the
+// `Command::id` on Windows. For our purposes, a simple kill works.
+#[cfg(unix)]
+fn nix_kill(child: &std::process::Child) -> std::io::Result<()> {
+    use std::process::Command as Cmd;
+    Cmd::new("kill")
+        .arg(child.id().to_string())
+        .status()
+        .map(|_| ())
+}
+#[cfg(not(unix))]
+fn nix_kill(child: &std::process::Child) -> std::io::Result<()> {
+    // Fallback: spawn tool kill. Tests on non-unix skip the precise kill.
+    let _ = child.id();
+    Ok(())
+}

@@ -20,6 +20,22 @@ use verum_compiler::session::Session;
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
+/// Resolved per-test runner settings derived from `[test]` in
+/// `verum.toml` (plus any `-Z test.*` CLI overrides). Threaded from
+/// `execute` into `run_single_test` so the test binary build and
+/// execution honor the project's policy.
+#[derive(Debug, Clone, Copy)]
+struct TestRunConfig {
+    /// Per-test execution timeout in seconds. 0 = no timeout.
+    timeout_secs: u64,
+    /// Treat compile warnings as errors during the per-test build.
+    deny_warnings: bool,
+    /// Emit coverage instrumentation.
+    coverage: bool,
+    /// Capture stdout/stderr unless this is set (matches existing flag).
+    nocapture: bool,
+}
+
 /// Execute the `verum test` command
 pub fn execute(
     filter: Option<Text>,
@@ -37,6 +53,25 @@ pub fn execute(
     let manifest_path = Manifest::manifest_path(&manifest_dir);
     let mut manifest = Manifest::from_file(&manifest_path)?;
     crate::feature_overrides::apply_global(&mut manifest)?;
+
+    // Resolve [test] settings. CLI --coverage flag OR [test].coverage
+    // enables coverage; CLI --deny-warnings is not yet exposed, but
+    // `[test] deny_warnings = true` in verum.toml takes effect.
+    let test_cfg = TestRunConfig {
+        timeout_secs: manifest.test.timeout_secs,
+        deny_warnings: manifest.test.deny_warnings,
+        coverage: coverage || manifest.test.coverage,
+        nocapture,
+    };
+    // Print effective [test] config so users can verify their policy
+    // is taking effect. One-line summary after the Testing header.
+    tracing::debug!(
+        "test config: parallel={}, timeout_secs={}, deny_warnings={}, coverage={}",
+        manifest.test.parallel,
+        test_cfg.timeout_secs,
+        test_cfg.deny_warnings,
+        test_cfg.coverage,
+    );
 
     // Print test header
     ui::output("");
@@ -106,7 +141,7 @@ pub fn execute(
             continue;
         }
 
-        let result = run_single_test(test, &test_target_dir, nocapture, coverage);
+        let result = run_single_test(test, &test_target_dir, test_cfg);
         match result {
             TestResult::Pass { duration, stdout, stderr } => {
                 let duration_str = format_test_duration(duration);
@@ -270,7 +305,7 @@ struct TestFailure {
 }
 
 /// Compile and execute a single test file.
-fn run_single_test(test: &Test, target_dir: &Path, _nocapture: bool, coverage: bool) -> TestResult {
+fn run_single_test(test: &Test, target_dir: &Path, cfg: TestRunConfig) -> TestResult {
     let compile_start = Instant::now();
 
     // Derive a unique binary name from the test file path
@@ -282,13 +317,19 @@ fn run_single_test(test: &Test, target_dir: &Path, _nocapture: bool, coverage: b
     let binary_name = format!("test_{}", stem);
     let output_path = target_dir.join(&binary_name);
 
-    // Compile via AOT pipeline
+    // Compile via AOT pipeline. Honor [test].deny_warnings via
+    // LintConfig so warning-laden test code fails the build.
+    let mut lint_config = verum_compiler::lint::LintConfig::default();
+    if cfg.deny_warnings {
+        lint_config.deny_warnings = true;
+    }
     let options = CompilerOptions {
         input: test.file.clone(),
         output: output_path.clone(),
         verify_mode: VerifyMode::Runtime,
         output_format: OutputFormat::Human,
-        coverage,
+        coverage: cfg.coverage,
+        lint_config,
         ..Default::default()
     };
 
@@ -311,7 +352,7 @@ fn run_single_test(test: &Test, target_dir: &Path, _nocapture: bool, coverage: b
         .stderr(std::process::Stdio::piped())
         .spawn();
 
-    let child = match child {
+    let mut child = match child {
         Ok(c) => c,
         Err(e) => {
             return TestResult::Fail {
@@ -324,7 +365,47 @@ fn run_single_test(test: &Test, target_dir: &Path, _nocapture: bool, coverage: b
         }
     };
 
-    let output = match child.wait_with_output() {
+    // Honor [test].timeout_secs: poll the child every 25 ms up to the
+    // timeout; if it's still alive, kill and report as failure. A
+    // timeout of 0 means "no limit" — existing behavior preserved.
+    let output = if cfg.timeout_secs == 0 {
+        child.wait_with_output()
+    } else {
+        let deadline = Instant::now() + Duration::from_secs(cfg.timeout_secs);
+        let poll = Duration::from_millis(25);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_status)) => break child.wait_with_output(),
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        // Kill the still-running child and report.
+                        let _ = child.kill();
+                        return TestResult::Fail {
+                            duration: compile_start.elapsed(),
+                            stdout: String::new(),
+                            stderr: String::new(),
+                            exit_code: None,
+                            error: format!(
+                                "test exceeded [test].timeout_secs = {} (killed)",
+                                cfg.timeout_secs
+                            ),
+                        };
+                    }
+                    std::thread::sleep(poll);
+                }
+                Err(e) => {
+                    return TestResult::Fail {
+                        duration: compile_start.elapsed(),
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        exit_code: None,
+                        error: format!("failed to poll test binary: {}", e),
+                    };
+                }
+            }
+        }
+    };
+    let output = match output {
         Ok(o) => o,
         Err(e) => {
             return TestResult::Fail {

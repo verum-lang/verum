@@ -192,6 +192,10 @@ pub struct CommonPipelineConfig {
     /// `[safety] unsafe_allowed`). When false, the safety-gate phase
     /// rejects unsafe blocks with a config-pointing diagnostic.
     pub unsafe_allowed: bool,
+    /// Allow `@ffi` / extern function declarations (sourced from
+    /// `[safety] ffi`). When false, the safety-gate rejects every
+    /// FFI function with a diagnostic pointing at the config key.
+    pub ffi_allowed: bool,
     /// Optional shared routing-stats collector. When present, the
     /// contract-verification phase installs it on the underlying
     /// `SmtContext` so every Z3 check records telemetry — making
@@ -215,6 +219,7 @@ impl Default for CommonPipelineConfig {
             derive_enabled: true,
             compile_time_enabled: true,
             unsafe_allowed: true,
+            ffi_allowed: true,
             routing_stats: None,
         }
     }
@@ -236,6 +241,7 @@ impl CommonPipelineConfig {
             derive_enabled: true,
             compile_time_enabled: true,
             unsafe_allowed: true,
+            ffi_allowed: true,
             routing_stats: None,
         }
     }
@@ -255,6 +261,7 @@ impl CommonPipelineConfig {
             derive_enabled: true,
             compile_time_enabled: true,
             unsafe_allowed: true,
+            ffi_allowed: true,
             routing_stats: None,
         }
     }
@@ -728,10 +735,11 @@ pub fn run_common_pipeline(
         };
         if let Some(modules) = modules {
             let slice: Vec<_> = modules.iter().cloned().collect();
-            let gate_diags = crate::phases::safety_gate::check_unsafe_usage(
-                &slice,
-                config.unsafe_allowed,
-            );
+            let policy = crate::phases::safety_gate::SafetyPolicy {
+                unsafe_allowed: config.unsafe_allowed,
+                ffi: config.ffi_allowed,
+            };
+            let gate_diags = crate::phases::safety_gate::check_safety(&slice, policy);
             if !gate_diags.is_empty() {
                 return Err(CompilationError::with_diagnostics(
                     CompilationErrorKind::TypeError,

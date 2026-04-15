@@ -5229,15 +5229,17 @@ impl<'s> CompilationPipeline<'s> {
         debug!("Type checking module");
 
         // Safety-gate pre-pass: reject disallowed language constructs
-        // (e.g. `unsafe` when [safety].unsafe_allowed = false) before
-        // type-checking compounds the errors.
-        let unsafe_allowed = self
-            .session
-            .language_features()
-            .unsafe_allowed();
-        let gate_diags = crate::phases::safety_gate::check_unsafe_usage(
+        // (unsafe blocks, unsafe fn, @ffi / extern fn) before
+        // type-checking compounds the errors. All relevant [safety]
+        // flags are read from the session's language features.
+        let features = self.session.language_features();
+        let policy = crate::phases::safety_gate::SafetyPolicy {
+            unsafe_allowed: features.unsafe_allowed(),
+            ffi: features.safety.ffi,
+        };
+        let gate_diags = crate::phases::safety_gate::check_safety(
             std::slice::from_ref(module),
-            unsafe_allowed,
+            policy,
         );
         if !gate_diags.is_empty() {
             for d in gate_diags.iter() {

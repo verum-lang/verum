@@ -1190,16 +1190,52 @@ fn run_command(cli: Cli) -> Result<()> {
         } => commands::file::info(features, llvm, all),
         Commands::Dap { transport, port, feature_overrides } => {
             feature_overrides::install(feature_overrides);
+
+            // Gate on [debug].dap_enabled. Resolve from the project
+            // manifest if present; otherwise defaults apply (enabled).
+            // A missing manifest is not an error — `verum dap` can run
+            // outside a Verum project (e.g. for stand-alone IDE use).
+            let (dap_enabled, default_port) =
+                match config::Manifest::find_manifest_dir().ok() {
+                    Some(dir) => {
+                        let path = config::Manifest::manifest_path(&dir);
+                        let mut m = config::Manifest::from_file(&path)
+                            .unwrap_or_else(|_| {
+                                config::create_default_manifest(
+                                    "scratch",
+                                    false,
+                                    config::LanguageProfile::Application,
+                                )
+                            });
+                        feature_overrides::apply_global(&mut m)?;
+                        (m.debug.dap_enabled, m.debug.port)
+                    }
+                    None => (true, 0),
+                };
+
+            if !dap_enabled {
+                return Err(CliError::Custom(
+                    "DAP server is disabled by `[debug] dap_enabled = false` \
+                     in verum.toml. Set `dap_enabled = true` or override \
+                     with `-Z debug.dap_enabled=true`."
+                        .into(),
+                ));
+            }
+
             let transport_mode = match transport.as_str() {
                 "stdio" => commands::dap::Transport::Stdio,
-                "socket" => match port {
-                    Some(p) => commands::dap::Transport::Socket(p),
-                    None => {
+                "socket" => {
+                    // Precedence: --port > [debug].port > error if both 0.
+                    let resolved = port.unwrap_or(default_port);
+                    if resolved == 0 {
                         return Err(CliError::InvalidArgument(
-                            "--port required for socket transport".into(),
+                            "--port is required for socket transport \
+                             (or set `[debug] port = NNNN` in verum.toml)"
+                                .into(),
                         ));
                     }
-                },
+                    commands::dap::Transport::Socket(resolved)
+                }
                 _ => {
                     return Err(CliError::InvalidArgument(
                         "transport must be: stdio or socket".into(),
