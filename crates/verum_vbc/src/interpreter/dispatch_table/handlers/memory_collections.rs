@@ -232,22 +232,32 @@ pub(in super::super) fn handle_get_field(state: &mut InterpreterState) -> Interp
         }
     }
 
-    // Read field at offset
+    // Read field at offset — with bounds check against object data size.
     let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::Panic {
             message: "field offset overflow".into(),
         })?;
-    // SAFETY: `field_offset` was produced by a checked multiplication, so
-    // it cannot wrap. `ptr` is a live heap object whose data area holds
-    // `header.size` bytes of Value slots. The emitter guarantees
-    // `field_idx` is within the object's declared field count, so the
-    // resulting pointer lies within the allocation.
+    // Bounds check: verify field_offset + sizeof(Value) fits within the
+    // object's data area (header.size bytes). This prevents reading
+    // uninitialized memory or out-of-bounds heap data.
+    let field_end = field_offset.checked_add(std::mem::size_of::<Value>())
+        .ok_or_else(|| InterpreterError::Panic {
+            message: "field end offset overflow".into(),
+        })?;
+    if field_end > header.size as usize {
+        return Err(InterpreterError::Panic {
+            message: format!(
+                "field access out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {}",
+                field_idx, field_offset, std::mem::size_of::<Value>(), field_end, header.size
+            ),
+        });
+    }
+    // SAFETY: `field_offset` is bounds-checked against `header.size` above.
+    // `ptr` is a live, aligned heap object. The data area at
+    // `OBJECT_HEADER_SIZE + field_offset` contains an initialized Value.
     let data_ptr = unsafe {
         ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) as *const Value
     };
-    // SAFETY: `data_ptr` is 8-byte aligned (Value's alignment) and points
-    // to an initialized Value slot (all fields are initialized at object
-    // construction time).
     let value = unsafe { *data_ptr };
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
@@ -330,6 +340,22 @@ pub(in super::super) fn handle_set_field(state: &mut InterpreterState) -> Interp
         .ok_or_else(|| InterpreterError::Panic {
             message: "field offset overflow".into(),
         })?;
+    // Bounds check: verify field fits within the object's data area.
+    // This prevents writing to arbitrary memory locations via malformed bytecode.
+    let field_end = field_offset.checked_add(std::mem::size_of::<Value>())
+        .ok_or_else(|| InterpreterError::Panic {
+            message: "field end offset overflow".into(),
+        })?;
+    if field_end > header.size as usize {
+        return Err(InterpreterError::Panic {
+            message: format!(
+                "field write out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {}",
+                field_idx, field_offset, std::mem::size_of::<Value>(), field_end, header.size
+            ),
+        });
+    }
+    // SAFETY: `field_offset` is bounds-checked against `header.size` above.
+    // `ptr` is a live, aligned, mutable heap object.
     let data_ptr = unsafe {
         ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) as *mut Value
     };

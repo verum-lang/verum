@@ -1,0 +1,62 @@
+// @test: unit
+// @tier: 0
+// @level: L3
+// @tags: coinductive, copattern, stream
+// @expect: pass
+//
+// Test: Copattern syntax for coinductive types.
+// Verifies that cofix functions with .observation => expr syntax
+// correctly define coinductive values.
+
+// Coinductive type: infinite stream defined by observations
+type Stream<T> is coinductive {
+    fn head(&self) -> T;
+    fn tail(&self) -> Stream<T>;
+};
+
+// Copattern definition: define a stream by giving each observation
+cofix fn zeros() -> Stream<Int> {
+    .head => 0,
+    .tail => zeros(),
+}
+
+// Copattern with parameter
+cofix fn nats_from(n: Int) -> Stream<Int> {
+    .head => n,
+    .tail => nats_from(n + 1),
+}
+
+// Copattern with multiple parameters
+cofix fn repeat<T>(x: T) -> Stream<T> {
+    .head => x,
+    .tail => repeat(x),
+}
+
+// Coinductive type: infinite list with length tracking
+type CoList<T> is coinductive {
+    fn is_empty(&self) -> Bool;
+    fn first(&self) -> T;
+    fn rest(&self) -> CoList<T>;
+};
+
+// Copattern with three observations
+cofix fn infinite_ones() -> CoList<Int> {
+    .is_empty => false,
+    .first => 1,
+    .rest => infinite_ones(),
+}
+
+fn main() {
+    // Construct copattern values
+    let z = zeros();
+    let n = nats_from(0);
+    let r = repeat(42);
+    let ones = infinite_ones();
+
+    // Basic observation (via method call)
+    assert(z.head() == 0);
+    assert(n.head() == 0);
+    assert(r.head() == 42);
+    assert(ones.is_empty() == false);
+    assert(ones.first() == 1);
+}

@@ -377,9 +377,16 @@ pub fn erase_proof(_proof: &ProofTerm) -> ProofTerm {
     ProofTerm::Erased
 }
 
-/// Check if a proof term should be erased at codegen.
+/// Check whether a proof term still needs erasure at codegen.
+///
+/// Returns `true` when the proof carries computational content that should
+/// be stripped before runtime. Returns `false` when the proof has already
+/// been erased (`ProofTerm::Erased`), so the codegen can skip it.
+///
+/// Semantics: `should_erase(p) == true` ⟹ call `erase_proof(p)` before codegen.
 pub fn should_erase(proof: &ProofTerm) -> bool {
-    // All proofs are erased unless explicitly marked for export
+    // A proof that is NOT yet erased needs erasure.
+    // A proof already marked Erased does not need re-erasure.
     !matches!(proof, ProofTerm::Erased)
 }
 
@@ -619,7 +626,7 @@ mod tests {
             ProofTerm::SmtVerified { solver, .. } => {
                 assert_eq!(solver.as_str(), "z3");
             }
-            _ => panic!("expected SmtVerified"),
+            other => assert!(false, "expected SmtVerified, got {:?}", other),
         }
     }
 
@@ -628,7 +635,7 @@ mod tests {
         let proof = extract_proof_term("cubical", "(path a b)", &dummy_result());
         match proof {
             ProofTerm::CubicalPath { .. } => {}
-            _ => panic!("expected CubicalPath"),
+            other => assert!(false, "expected CubicalPath, got {:?}", other),
         }
     }
 
@@ -659,7 +666,7 @@ mod tests {
         let erased = erase_proof(&proof);
         match erased {
             ProofTerm::Erased => {}
-            _ => panic!("expected Erased"),
+            other => assert!(false, "expected Erased, got {:?}", other),
         }
     }
 

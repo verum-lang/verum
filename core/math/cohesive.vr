@@ -753,7 +753,7 @@ public fn verify_cohesive_axioms<H: InfinityTopos>(
 }
 
 // =============================================================================
-// 9. Primitive declarations (intrinsic / FFI boundary)
+// 10. Primitive declarations (intrinsic / FFI boundary)
 // =============================================================================
 //
 // These are the "implementation atoms" — declared here so the construction
@@ -807,7 +807,7 @@ fn de_rham_reduction(x: &Int, reduced_site: &Int) -> Int;
 @extern fn amp_rh_counit(x: &Int) -> Int;
 
 // =============================================================================
-// 9. Formal theorems
+// 11. Formal theorems
 // =============================================================================
 
 // ---------------------------------------------------------------------------

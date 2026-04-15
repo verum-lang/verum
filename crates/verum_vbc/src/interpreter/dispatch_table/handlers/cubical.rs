@@ -112,20 +112,30 @@ fn try_call_value(
 ///
 /// If the VBC codegen changes field layout, this handler must be updated.
 ///
-/// Returns `Value::unit()` for non-pointer objects (graceful degradation).
+/// Returns `Value::unit()` for non-pointer objects or out-of-bounds access
+/// (graceful degradation).
 fn read_object_field(obj: Value, field_idx: usize) -> Value {
-    use super::super::super::heap::OBJECT_HEADER_SIZE;
+    use super::super::super::heap::{OBJECT_HEADER_SIZE, ObjectHeader};
     if !obj.is_ptr() || obj.is_nil() {
         return Value::unit();
     }
     let ptr = obj.as_ptr::<u8>();
-    // SAFETY: `ptr` is a live heap object allocated by the VBC allocator.
-    // Its data area holds Value-sized fields at sequential offsets.
-    // The caller ensures `field_idx` < object field count, which is
-    // guaranteed by the type checker (Equiv has >= 2 fields, etc.).
+    // Bounds check: read the ObjectHeader to get data size and verify
+    // the field index is within bounds.
+    // SAFETY: `ptr` is a live heap object starting with ObjectHeader.
+    let header = unsafe { &*(ptr as *const ObjectHeader) };
+    let field_offset = field_idx * std::mem::size_of::<Value>();
+    let field_end = field_offset + std::mem::size_of::<Value>();
+    if field_end > header.size as usize {
+        // Out of bounds — return unit rather than reading garbage.
+        return Value::unit();
+    }
+    // SAFETY: `field_offset` is bounds-checked against `header.size` above.
+    // `ptr` is a live, aligned heap object. The field at the computed
+    // offset is an initialized Value (set at object construction time).
     unsafe {
         let field_ptr =
-            ptr.add(OBJECT_HEADER_SIZE + field_idx * std::mem::size_of::<Value>())
+            ptr.add(OBJECT_HEADER_SIZE + field_offset)
                 as *const Value;
         std::ptr::read(field_ptr)
     }
