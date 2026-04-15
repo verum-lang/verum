@@ -4371,6 +4371,10 @@ impl TypeChecker {
             // For complex types, recursively check
             Type::Meta { ty, .. } => self.has_unresolved_vars(ty),
             Type::Eq { ty, .. } => self.has_unresolved_vars(ty),
+            // Path type: Path<A>(a, b) lives in the same universe as A; check space for vars
+            Type::PathType { space, .. } => self.has_unresolved_vars(space),
+            // Interval is a primitive built-in type with no type parameters
+            Type::Interval => false,
             Type::Inductive {
                 params, indices, ..
             } => {
@@ -24019,6 +24023,16 @@ impl TypeChecker {
                 rhs: rhs.clone(),
             },
 
+            // Path type: Path<A>(a, b) — normalize the space type; endpoints are value-level
+            PathType { space, left, right } => PathType {
+                space: Box::new(self.normalize_type_impl(space, depth + 1)),
+                left: left.clone(),
+                right: right.clone(),
+            },
+
+            // Interval is a built-in primitive; nothing to normalize
+            Interval => Interval,
+
             Universe { level } => Universe { level: *level },
             Prop => Prop,
 
@@ -24325,6 +24339,17 @@ impl TypeChecker {
                     rhs: Box::new(new_rhs),
                 }
             }
+
+            // Path type: Path<A>(a, b)
+            // The space A may contain the variable; endpoints are CubicalTerms (value-level)
+            PathType { space, left, right } => PathType {
+                space: Box::new(self.substitute_term_in_type_impl(space, var_name, term, next_depth)),
+                left: left.clone(),
+                right: right.clone(),
+            },
+
+            // Interval is a built-in primitive with no inner types; nothing to substitute
+            Interval => Interval,
 
             // Function types
             Function {

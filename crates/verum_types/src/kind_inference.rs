@@ -837,6 +837,23 @@ impl KindInferer {
                 Ok(Kind::Type)
             }
 
+            // Cubical path types have kind *
+            // PathType<A, x, y> : *  (like Eq, it's a concrete proposition type)
+            Type::PathType { space, .. } => {
+                let space_kind = self.infer_kind(space)?;
+                self.add_constraint(KindConstraint::equal(
+                    space_kind,
+                    Kind::Type,
+                    Span::default(),
+                    "Path type space must have kind *",
+                ));
+                Ok(Kind::Type)
+            }
+
+            // Interval type I has kind *
+            // It is the abstract interval used as a primitive in cubical type theory
+            Type::Interval => Ok(Kind::Type),
+
             // Universe types have kind based on their level.
             // Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
             //

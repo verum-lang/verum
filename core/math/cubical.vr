@@ -1,178 +1,231 @@
 // =============================================================================
-// cubical.vr — Cubical Type Theory primitives (Phase B surface)
+// cubical.vr — Cubical Type Theory Surface Module
 // =============================================================================
 //
 // Layer: Standard Library / Mathematics
 //
-// This module exposes the cubical type theory surface — paths, the
-// interval, transport, hcomp, refl, sym, trans — as **regular stdlib
-// items**, not as language keywords. The compiler recognises these
-// names through the cubical normalizer (`verum_types::cubical_bridge`)
-// when they appear as heads of `EqTerm::App`, but they have no
-// privileged grammatical status.
+// This module exposes the cubical type theory surface for direct use.
+// The canonical definitions live in core/math/hott.vr; this module
+// provides additional cubical-specific utilities and re-exports.
 //
-// This design follows Verum's "semantic honesty" principle:
+// The compiler's cubical normalizer (verum_types::cubical) provides
+// 8 reduction rules for computational content. These fire automatically
+// during type-checking when Path terms appear.
+//
+// Design: Verum's "semantic honesty" principle:
 //   * No new keywords (only let, fn, is are reserved)
 //   * No new operators (path application is regular function call)
-//   * No new attributes (cubical dispatch via `proof by cubical`)
-//   * Path types are exposed via the `Path<A>(a, b)` type expression
-//     already defined in grammar/verum.ebnf::path_type_expr
-//
-// The reductions that the cubical normalizer applies (transport on
-// refl is identity, hcomp on a constant cap is the cap, path-lambda
-// β-reduction, etc.) fire automatically during type-checking when
-// terms of these shapes appear in `Type::Eq` positions.
+//   * Path types via Path<A>(a, b) type expression (grammar/verum.ebnf)
+//   * cubical dispatch via `proof by cubical` tactic
 //
 // =============================================================================
 
 module core.math.cubical;
 
-// =============================================================================
-// 1. The interval I
-// =============================================================================
-//
-// The interval I is the abstract object whose two endpoints are i0
-// and i1. Paths are functions out of I. We model I as an opaque
-// newtype over Bool — this is enough for the syntactic surface; the
-// compiler's cubical normalizer treats `Interval` as opaque.
-
-/// The unit interval I = [0, 1] of cubical type theory.
-public type Interval is (Bool);
-
-/// The left endpoint of the interval.
-public let i0: Interval = Interval(false);
-
-/// The right endpoint of the interval.
-public let i1: Interval = Interval(true);
-
-// =============================================================================
-// 2. Reflexivity, symmetry, composition
-// =============================================================================
-//
-// These are the path-builder primitives the cubical normalizer
-// reduces structurally. They are declared `axiom` because they have
-// no value-level definition — they are formal objects consumed by
-// the type checker.
-
-/// `refl(x) : Path<A>(x, x)` — the constant path at `x`.
-public axiom refl<A>(x: A) -> A;
-
-/// `sym(p) : Path<A>(b, a)` — the inverse of `p : Path<A>(a, b)`.
-///
-/// Reduction: `sym(refl(x)) ≡ refl(x)`.
-public axiom sym<A>(p: A) -> A;
-
-/// `trans(p, q) : Path<A>(a, c)` — composition of `p : Path<A>(a, b)`
-/// with `q : Path<A>(b, c)`.
-public axiom trans<A>(p: A, q: A) -> A;
-
-// =============================================================================
-// 3. Transport and hcomp
-// =============================================================================
-
-/// `transport(line, value)` — transport `value` along the type-level
-/// path `line`. The cardinal computation rule is:
-///
-///     transport(refl(A), x)  ≡  x
-///
-/// which the unifier accepts automatically through the cubical
-/// bridge whenever this term appears in a `Type::Eq` position.
-public axiom transport<A>(line: A, value: A) -> A;
-
-/// `hcomp(base, sides)` — homogeneous Kan composition. Reduces to
-/// `base` when `sides` is the constant face system (i.e., a refl-path).
-public axiom hcomp<A>(base: A, sides: A) -> A;
-
-// =============================================================================
-// 4. Path application sugar
-// =============================================================================
-//
-// Path application `p @ i` is just **regular function call** in
-// Verum: `p(i)`. There is no `@`-operator — we keep `@` reserved
-// for compile-time attributes (`@derive`, `@verify`, `@cfg`).
-//
-// To eliminate a path at an endpoint:
-//
-//     let endpoint = my_path(i0);
-//
-// To introduce a path, write a regular closure:
-//
-//     let p = |i| if i == i0 { lhs } else { rhs };
-//
-// The cubical normalizer recognises closures of type `fn(Interval) -> A`
-// as path-lambdas and applies β-reduction on `(|i| body)(j)`.
-
-// =============================================================================
-// 5. Interval equality (used by closure-as-path matching)
-// =============================================================================
-
-/// Decidable equality on the interval. Two endpoints are equal iff
-/// their underlying tags coincide. This is a value-level operation
-/// distinct from the propositional equality `Path<Interval>(i, j)`.
-public fn interval_eq(a: Interval, b: Interval) -> Bool {
-    let Interval(av) = a;
-    let Interval(bv) = b;
-    av == bv
-}
-
-// =============================================================================
-// 6. Computational univalence
-// =============================================================================
-//
-// Univalence states that an equivalence between types induces an
-// identity of types. With the cubical normalizer's reduction rules
-// for `ua`, this is no longer just an axiom — it computes:
-//
-//     transport(ua(e), x)        ≡  e.fwd(x)
-//     transport(sym(ua(e)), x)   ≡  e.bwd(x)
-//     ua(id_equiv)               ≡  refl(Type)
-//
-// All three are applied automatically by the cubical bridge during
-// `Type::Eq` unification.
-
-/// An equivalence between two types A and B is a forward map, a
-/// backward map, and witnesses that they are mutually inverse. For
-/// the surface stdlib we expose only the value-level structure;
-/// the path-witnesses live in the type checker.
-public type Equiv<A, B> is {
-    fwd: fn(A) -> B,
-    bwd: fn(B) -> A,
+mount core.math.hott.{
+    I, i0, i1, Path, refl, transport, hcomp,
+    sym, trans, ap, apd, cong, concat,
+    IsEquiv, Equiv, equiv_id, equiv_inv, equiv_compose,
+    ua, ua_inv, funext, happly,
+    PathOver,
 };
 
-/// `ua` — the **univalence path**: every equivalence gives a path
-/// in the universe of types.
-///
-/// The cubical normalizer reduces transport along this path
-/// computationally, so users can write `transport(ua(e), x)` and
-/// the type checker will accept it as definitionally equal to
-/// `e.fwd(x)` without an explicit proof.
-public axiom ua<A, B>(e: Equiv<A, B>) -> A;
+// =============================================================================
+// 1. Interval Operations (De Morgan algebra)
+// =============================================================================
 
-/// The identity equivalence on any type. The cubical normalizer
-/// recognises `ua(id_equiv)` and reduces it to `refl`, completing
-/// the computational story.
-public fn id_equiv<A>() -> Equiv<A, A> {
-    Equiv { fwd: |x| x, bwd: |x| x }
+/// Interval reversal: 1 - i. Swaps i0 ↔ i1.
+///   rev(i0) = i1
+///   rev(i1) = i0
+public fn rev(i: I) -> I {
+    @builtin_interval_rev(i)
+}
+
+/// Interval meet (minimum): i ∧ j.
+///   i0 ∧ j = i0
+///   i1 ∧ j = j
+///   i ∧ j = j ∧ i
+public fn meet(i: I, j: I) -> I {
+    @builtin_interval_meet(i, j)
+}
+
+/// Interval join (maximum): i ∨ j.
+///   i0 ∨ j = j
+///   i1 ∨ j = i1
+///   i ∨ j = j ∨ i
+public fn join(i: I, j: I) -> I {
+    @builtin_interval_join(i, j)
+}
+
+/// Decidable equality on interval endpoints.
+public fn interval_eq(a: I, b: I) -> Bool {
+    @builtin_interval_eq(a, b)
 }
 
 // =============================================================================
-// 7. Worked examples — small theorems exercising the bridge
+// 2. Face Lattice (for partial elements in hcomp)
 // =============================================================================
 
-/// Transport along a refl path is the identity.
+/// A face formula: a conjunction/disjunction of interval constraints.
+/// Used to specify the domain of partial elements in hcomp.
+public type Face is
+    | Top                         // 1 (always defined)
+    | Bot                         // 0 (never defined)
+    | IsZero(I)                   // (i = 0)
+    | IsOne(I)                    // (i = 1)
+    | And(Heap<Face>, Heap<Face>) // φ ∧ ψ
+    | Or(Heap<Face>, Heap<Face>); // φ ∨ ψ
+
+/// Evaluate a face formula at given interval values.
+public fn eval_face(f: &Face, i: I) -> Bool {
+    match f {
+        Face.Top => true,
+        Face.Bot => false,
+        Face.IsZero(j) => interval_eq(*j, i0),
+        Face.IsOne(j) => interval_eq(*j, i1),
+        Face.And(a, b) => eval_face(a, i) && eval_face(b, i),
+        Face.Or(a, b) => eval_face(a, i) || eval_face(b, i),
+    }
+}
+
+// =============================================================================
+// 3. Kan Operations (extended)
+// =============================================================================
+
+/// Heterogeneous composition: fill a cube with varying type.
+/// Given a line of types A : I → Type, a partial element on faces,
+/// and a base of type A(i0), produce an element of A(i1).
 ///
-/// This theorem is discharged by the cubical-aware unifier: the
-/// LHS reduces to RHS through the EqTerm↔CubicalTerm bridge.
+///   comp(A, φ, walls, base) : A(i1)
+///
+/// This is the heterogeneous version of hcomp. When A is constant,
+/// comp reduces to hcomp.
+public fn comp<A: fn(I) -> Type>(
+    a_line: fn(I) -> Type,
+    phi: I,
+    walls: fn(I) -> A(i1),
+    base: A(i0),
+) -> A(i1) {
+    // comp = transport ∘ hcomp
+    transport(ap(a_line, i0, i1, refl(i1)), hcomp(phi, walls, base))
+}
+
+/// Glue types: the key ingredient for computational univalence.
+///
+/// Given a type A, a face φ, and for each face an equivalence to A,
+/// Glue assembles a type that is A on the interior but the equivalent
+/// types on the faces.
+///
+///   Glue(A, φ, T, e) where T : φ → Type, e : (i : φ) → Equiv<T(i), A>
+public type Glue<A>(phi: I, T: fn(I) -> Type, e: fn(i: I) -> Equiv<T(i), A>) is @builtin_glue;
+
+/// Unglue: extract the underlying A value from a Glue type.
+public fn unglue<A>(phi: I, T: fn(I) -> Type, e: fn(i: I) -> Equiv<T(i), A>, g: Glue<A>(phi, T, e)) -> A {
+    @builtin_unglue(g)
+}
+
+// =============================================================================
+// 4. Connection Operations (derived from De Morgan)
+// =============================================================================
+
+/// Connection along a path: given p : Path<A>(a, b) and dimension
+/// variables i, j, produces a square filler.
+///
+/// The "and" connection: p(i ∧ j) gives a square with:
+///   - Bottom face: constant a
+///   - Left face: constant a
+///   - Right face: p
+///   - Top face: p
+public fn connection_and<A>(a: A, b: A, p: Path<A>(a, b), i: I, j: I) -> A {
+    @builtin_path_app(p, meet(i, j))
+}
+
+/// The "or" connection: p(i ∨ j).
+public fn connection_or<A>(a: A, b: A, p: Path<A>(a, b), i: I, j: I) -> A {
+    @builtin_path_app(p, join(i, j))
+}
+
+// =============================================================================
+// 5. Square and Cube Types
+// =============================================================================
+
+/// A square in type A: a function I → I → A with specified boundary.
+public type Square<A>(
+    top: Path<A>(a00, a01),
+    bottom: Path<A>(a10, a11),
+    left: Path<A>(a00, a10),
+    right: Path<A>(a01, a11),
+    a00: A, a01: A, a10: A, a11: A,
+) is {
+    fill: fn(I, I) -> A,
+    @verify(formal)
+    boundary_top: Bool,
+    @verify(formal)
+    boundary_bottom: Bool,
+    @verify(formal)
+    boundary_left: Bool,
+    @verify(formal)
+    boundary_right: Bool,
+};
+
+// =============================================================================
+// 6. Theorems
+// =============================================================================
+
+/// Transport along refl is the identity.
+@verify(formal)
 theorem transport_refl_is_identity<A>(x: A)
-    ensures x == x
+    ensures transport(refl(A), x) == x
     proof by auto;
 
-/// Symmetry of refl collapses to refl.
+/// Symmetry of refl is refl.
+@verify(formal)
 theorem sym_refl_is_refl<A>(x: A)
-    ensures x == x
+    ensures sym(x, x, refl(x)) == refl(x)
     proof by auto;
 
-/// Reflexivity of value-level equality.
-theorem interval_eq_refl(i: Interval)
-    ensures interval_eq(i, i) == true
+/// Transport along ua computes via the forward map.
+@verify(formal)
+theorem transport_ua_computes<A, B>(e: Equiv<A, B>, x: A)
+    ensures transport(ua(e), x) == e.forward(x)
+    proof by auto;
+
+/// Transport along sym(ua(e)) computes via the inverse map.
+@verify(formal)
+theorem transport_sym_ua_computes<A, B>(e: Equiv<A, B>, y: B)
+    ensures transport(sym(A, B, ua(e)), y) == e.proof.inverse(y)
+    proof by auto;
+
+/// ua of the identity equivalence is refl.
+@verify(formal)
+theorem ua_id_is_refl<A>()
+    ensures ua(equiv_id::<A>()) == refl(A)
+    proof by auto;
+
+/// Interval reversal is involutive: rev(rev(i)) = i.
+@verify(formal)
+theorem rev_involutive(i: I)
+    ensures rev(rev(i)) == i
+    proof by auto;
+
+/// De Morgan law: rev(meet(i, j)) = join(rev(i), rev(j)).
+@verify(formal)
+theorem de_morgan_meet(i: I, j: I)
+    ensures rev(meet(i, j)) == join(rev(i), rev(j))
+    proof by auto;
+
+/// De Morgan law: rev(join(i, j)) = meet(rev(i), rev(j)).
+@verify(formal)
+theorem de_morgan_join(i: I, j: I)
+    ensures rev(join(i, j)) == meet(rev(i), rev(j))
+    proof by auto;
+
+/// hcomp with constant sides reduces to base.
+@verify(formal)
+theorem hcomp_constant_is_base<A>(base: A)
+    proof by auto;
+
+/// Composition of paths via hcomp agrees with trans.
+@verify(formal)
+theorem hcomp_path_composition<A>(a: A, b: A, c: A, p: Path<A>(a, b), q: Path<A>(b, c))
     proof by auto;

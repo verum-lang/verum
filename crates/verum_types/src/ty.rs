@@ -1042,6 +1042,72 @@ pub enum Type {
         rhs: Box<EqTerm>,
     },
 
+    /// Cubical Path Type: Path<A>(a, b)
+    ///
+    /// The type of paths (equalities with computational content) in cubical
+    /// type theory (Cohen–Coquand–Huber–Mörtberg 2015). A path from `a` to `b`
+    /// in type `A` is a function from the abstract interval `I` to `A` that
+    /// computes to `a` at `i0` and to `b` at `i1`.
+    ///
+    /// # Examples
+    /// ```verum
+    /// // Path between two values
+    /// let p: Path<Int>(3, 3) = refl(3);
+    ///
+    /// // Path in a function type (function extensionality)
+    /// let q: Path<fn(Int) -> Int>(f, g) = funext(h);
+    ///
+    /// // Path in a universe (univalence)
+    /// let r: Path<Type>(A, B) = ua(equiv);
+    /// ```
+    ///
+    /// # Relation to Eq
+    /// `Path<A>(a, b)` is the cubical refinement of `Eq<A, a, b>`. While `Eq`
+    /// uses J-elimination (path induction), `Path` has direct computational
+    /// content via transport and hcomp. The cubical normalizer in `cubical.rs`
+    /// provides reduction rules for Path terms.
+    ///
+    /// # Type Theory
+    /// ```text
+    /// Γ, i: I ⊢ e : A    e[i0/i] ≡ a    e[i1/i] ≡ b
+    /// ─────────────────────────────────────────────────── (Path-Intro)
+    /// Γ ⊢ λ(i). e : Path<A>(a, b)
+    ///
+    /// Γ ⊢ p : Path<A>(a, b)    Γ ⊢ r : I
+    /// ───────────────────────────────────── (Path-Elim)
+    /// Γ ⊢ p @ r : A
+    /// ```
+    PathType {
+        /// The type of values connected by the path
+        space: Box<Type>,
+        /// Left endpoint (at i0)
+        left: Box<crate::cubical::CubicalTerm>,
+        /// Right endpoint (at i1)
+        right: Box<crate::cubical::CubicalTerm>,
+    },
+
+    /// Abstract Interval Type: I
+    ///
+    /// The abstract interval with two endpoints `i0` and `i1`. Not a regular
+    /// type in the universe hierarchy — it is a "cofibrant" object used only
+    /// for constructing paths. Variables of type `I` are dimension variables.
+    ///
+    /// # Properties
+    /// - `I` is not in any universe (`I : ☐` where ☐ is outside the hierarchy)
+    /// - De Morgan algebra: meets, joins, reversals on interval expressions
+    /// - Functions `I → A` represent paths in `A`
+    ///
+    /// # Examples
+    /// ```verum
+    /// // Dimension variable
+    /// fn my_path(i: I) -> A { ... }
+    ///
+    /// // Interval endpoints
+    /// let start: I = i0;
+    /// let end: I = i1;
+    /// ```
+    Interval,
+
     /// Universe Level: Type_n
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
     ///
@@ -1847,6 +1913,24 @@ impl Type {
         }
     }
 
+    /// Create a cubical path type: Path<A>(a, b)
+    pub fn path_type(
+        space: Type,
+        left: crate::cubical::CubicalTerm,
+        right: crate::cubical::CubicalTerm,
+    ) -> Self {
+        Type::PathType {
+            space: Box::new(space),
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    /// Create the abstract interval type I
+    pub fn interval() -> Self {
+        Type::Interval
+    }
+
     /// Create a universe type at a specific level
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
     pub fn universe(level: UniverseLevel) -> Self {
@@ -1952,7 +2036,7 @@ impl Type {
     /// Check if this type is a dependent type (Pi, Sigma, Eq, etc.)
     pub fn is_dependent(&self) -> bool {
         match self {
-            Type::Pi { .. } | Type::Sigma { .. } | Type::Eq { .. } => true,
+            Type::Pi { .. } | Type::Sigma { .. } | Type::Eq { .. } | Type::PathType { .. } => true,
             Type::Inductive { indices, .. } => !indices.is_empty(),
             _ => false,
         }
@@ -2055,6 +2139,17 @@ impl Type {
             // Lives in the same universe as A
             // Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution
             Type::Eq { ty, .. } => ty.type_of(),
+
+            // Path types: Path<A>(a, b)
+            // Lives in the same universe as A (the space)
+            Type::PathType { space, .. } => space.type_of(),
+
+            // Interval: I is not in any universe — it is a special cofibrant object
+            // We place it in Type₀ for pragmatic reasons (it acts like a type in
+            // the surface language even though categorically it is outside the hierarchy)
+            Type::Interval => Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
 
             // Inductive types live in their declared universe
             // Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .1
@@ -2346,6 +2441,14 @@ impl Type {
                     arg.collect_free_vars(vars);
                 }
             }
+            Type::PathType { space, .. } => {
+                // Collect type vars from the space type
+                // CubicalTerm endpoints are value-level, no type vars
+                space.collect_free_vars(vars);
+            }
+            Type::Interval => {
+                // Interval is a primitive type, no free vars
+            }
             _ => {}
         }
     }
@@ -2601,6 +2704,12 @@ impl Type {
                 lhs: lhs.clone(), // EqTerms are value-level, not type-level
                 rhs: rhs.clone(),
             },
+            Type::PathType { space, left, right } => Type::PathType {
+                space: Box::new(space.apply_subst_with_depth(subst, next_depth, max_depth)),
+                left: left.clone(),   // CubicalTerms are value-level, not type-level
+                right: right.clone(),
+            },
+            Type::Interval => Type::Interval,
             Type::Universe { level } => Type::Universe { level: *level },
             Type::Prop => Type::Prop,
             Type::Inductive {
@@ -3005,6 +3114,12 @@ impl fmt::Display for Type {
             Type::Eq { ty, lhs, rhs } => {
                 write!(f, "Eq<{}, lhs, rhs>", ty)
             }
+
+            Type::PathType { space, left, right } => {
+                write!(f, "Path<{}>({:?}, {:?})", space, left, right)
+            }
+
+            Type::Interval => write!(f, "I"),
 
             Type::Universe { level } => {
                 write!(f, "{}", level)

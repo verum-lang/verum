@@ -71,7 +71,11 @@ impl TypeSystemIntegration {
             | Type::Text
             | Type::Var(_)
             | Type::Lifetime { .. }
-            | Type::TypeConstructor { .. } => false,
+            | Type::TypeConstructor { .. }
+            | Type::Interval => false,
+
+            // Path types: check inner space type for refinements
+            Type::PathType { space, .. } => Self::has_refinement(space),
 
             // Meta types and special async types
             Type::Meta { ty, .. } => Self::has_refinement(ty),

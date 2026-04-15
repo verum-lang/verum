@@ -3872,6 +3872,16 @@ impl Unifier {
                 rhs: rhs.clone(),
             },
 
+            // Cubical path types - rename in space type; left/right are cubical terms, not types
+            Type::PathType { space, left, right } => Type::PathType {
+                space: Box::new(Self::rename_bound_var(space, from, to)),
+                left: left.clone(),
+                right: right.clone(),
+            },
+
+            // Interval type I - no inner types to rename
+            Type::Interval => ty.clone(),
+
             // Inductive types
             Type::Inductive {
                 name,

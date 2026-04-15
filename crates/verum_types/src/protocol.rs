@@ -8891,6 +8891,10 @@ impl ProtocolChecker {
                 self.make_type_key(snd_type)
             )),
             Eq { ty, .. } => verum_common::Text::from(format!("eq:{}", self.make_type_key(ty))),
+            PathType { space, .. } => {
+                verum_common::Text::from(format!("path:{}", self.make_type_key(space)))
+            }
+            Interval => "I".into(),
             Universe { level } => verum_common::Text::from(format!("universe:{}", level)),
             Prop => "Prop".into(),
             Inductive { name, .. } => verum_common::Text::from(format!("inductive:{}", name)),
@@ -9936,6 +9940,16 @@ impl ProtocolChecker {
                 lhs: lhs.clone(),
                 rhs: rhs.clone(),
             },
+
+            // Path type: substitute in the space type; endpoints are value-level CubicalTerms
+            Type::PathType { space, left, right } => Type::PathType {
+                space: Box::new(self.substitute_type_params(space, subst_map)),
+                left: left.clone(),
+                right: right.clone(),
+            },
+
+            // Interval is a primitive type — no inner types to substitute
+            Type::Interval => Type::Interval,
 
             Type::Universe { level } => Type::Universe { level: *level },
             Type::Prop => Type::Prop,

@@ -128,10 +128,16 @@ public module analysis;
 // quantifiers, decidability, classical vs constructive logic
 public module logic;
 
-// Homotopy Type Theory: equivalences, truncation levels, fibres,
-// paths, univalence (axiomatic), function extensionality, HIT shapes
-// Thin layer over refinement types, meta parameters, and HKT.
+// Homotopy Type Theory (cubical): Path types, transport, hcomp,
+// equivalences, truncation levels, fibres, univalence (computational),
+// function extensionality, HITs (S¹, Susp, Trunc, Quotient, Pushout).
+// Full cubical model with 8 reduction rules.
 public module hott;
+
+// Cubical primitives: interval operations (rev, meet, join), face lattice,
+// Glue types, connection operations, comp (heterogeneous composition).
+// Extends hott.vr with the full cubical surface.
+public module cubical;
 
 // Simplicial sets and Kan complexes: Simplex, SimplicialSet, Horn,
 // KanComplex, InfinityGroupoid, Nerve. Combinatorial substrate for
@@ -959,6 +965,97 @@ public mount .rag.{
     BM25Index,
     // Hybrid retrieval
     HybridRetriever,
+};
+
+// =============================================================================
+// Cubical Type Theory (surface layer)
+// =============================================================================
+
+public mount .cubical.{
+    rev, meet, join, interval_eq,
+    Face, eval_face,
+    comp, Glue, unglue,
+    connection_and, connection_or,
+};
+
+// =============================================================================
+// Homotopy Type Theory (Cubical)
+// =============================================================================
+
+public mount .hott.{
+    // Cubical primitives
+    I, i0, i1, Path, refl, transport, hcomp,
+    // Path algebra
+    sym, trans, ap, apd, cong, concat,
+    // Equivalences
+    IsEquiv, Equiv, equiv_id, equiv_inv, equiv_compose,
+    // Truncation levels
+    IsContr, IsProp, IsSet, IsGroupoid, IsTrunc, NType, HProp, HSet,
+    // Fibers
+    Fiber, IsContrMap,
+    // Univalence
+    ua, ua_inv, funext, happly, propext,
+    // Higher inductive types
+    S1, Susp, Trunc, Quotient, Pushout,
+    // Decidable equality
+    DecidableEq, hedberg,
+    // Path-over
+    PathOver,
+};
+
+// =============================================================================
+// ∞-Category Theory and Topoi
+// =============================================================================
+
+public mount .infinity_topos.{
+    Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
+    InfinityTopos, SheafInfinityTopos, construct_sheaf_topos,
+    InfSubobjectClassifier, GeometricMorphism,
+    CechNerve, compute_cech_nerve, DescentResult, DescentObstruction,
+    check_descent, CoherenceViolation, Translation, check_coherence,
+};
+
+public mount .kan_extension.{
+    InfLeftKanExtension, InfRightKanExtension,
+    KanExtensionTriple, PointwiseKanExtension, KanPreservingFunctor,
+    KanDirection, KanExtensionResult, CommaCategory, CommaObject,
+    compute_pointwise_lan, compute_pointwise_ran,
+    compute_full_kan_extension, ObstructionPoint, ObstructionData,
+    compute_obstruction, is_exact_extension,
+};
+
+// =============================================================================
+// Mathesis Foundation
+// =============================================================================
+
+public mount .quantum_logic.{
+    OrthomodularLattice, EpistemicHilbertSpace, EpistemicState,
+    EpistemicProjector, measure, commutator, are_compatible,
+    epistemic_fidelity, construct_epistemic_space,
+    initial_epistemic_state, superposition,
+};
+
+public mount .giry.{
+    MeasurableSpace, ProbabilityMeasure, Giry,
+    giry_unit, giry_bind, LlmOracle,
+    sample_above, functor_density,
+};
+
+public mount .epistemic.{
+    EpistemicStatus, ClaimType, Claim, Theory,
+    EpistemicTopology, theory_site, mathesis,
+    propagate_status, compute_kan_extension as epistemic_kan_extension,
+    compute_obstruction as epistemic_obstruction,
+};
+
+public mount .cohesive.{
+    CohesiveStructure, DifferentiallyCohesive,
+    mathesis_cohesive_structure,
+};
+
+public mount .day_convolution.{
+    SymmetricMonoidalCategory, DayConvolution,
+    CognitiveExtension, cognitive_extension,
 };
 
 // =============================================================================

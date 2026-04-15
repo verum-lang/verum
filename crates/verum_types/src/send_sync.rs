@@ -206,6 +206,13 @@ impl<'a> SendSyncDerivation<'a> {
             // 26. Equality types - Send (proofs are generally Send)
             Type::Eq { ty, .. } => self.is_send(ty),
 
+            // 26b. Cubical path types - Send if the space type is Send
+            // PathType { space, left, right }: space determines Send-ness
+            Type::PathType { space, .. } => self.is_send(space),
+
+            // 26c. Interval type I - always Send (primitive, no inner references)
+            Type::Interval => true,
+
             // 27. Universe types are Send (type-level)
             Type::Universe { .. } => true,
 
@@ -409,6 +416,13 @@ impl<'a> SendSyncDerivation<'a> {
 
             // 26. Equality types - Sync (proofs are generally Sync)
             Type::Eq { ty, .. } => self.is_sync(ty),
+
+            // 26b. Cubical path types - Sync if the space type is Sync
+            // PathType { space, left, right }: space determines Sync-ness
+            Type::PathType { space, .. } => self.is_sync(space),
+
+            // 26c. Interval type I - always Sync (primitive, no inner references)
+            Type::Interval => true,
 
             // 27. Universe types are Sync (type-level)
             Type::Universe { .. } => true,
