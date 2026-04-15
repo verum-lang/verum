@@ -183,41 +183,57 @@ where
 
 /// Build a Z3 adapter from a fully-prepared assertion set.
 ///
-/// This is the high-level entry point used by `BackendSwitcher` when
-/// dispatching to the portfolio executor. It spins up a fresh Z3 context,
-/// adds all assertions, and wraps the check_sat call in a `Z3Adapter`.
+/// This adapter spins up a fresh `Z3Backend` (each worker thread gets its
+/// own Z3 context, as Z3 contexts are not thread-safe) and invokes the
+/// real `Z3Backend::check_sat()` API to actually decide the goal.
+///
+/// The assertions are expected to be in Verum AST form. They are translated
+/// to Z3 terms via the existing `Z3Backend::check_sat(expr, ctx)` path
+/// that the `BackendSwitcher::solve_with_z3` function uses internally.
 pub fn make_z3_adapter(
     assertions: verum_common::List<verum_ast::Expr>,
     timeout_ms: u64,
 ) -> Z3Adapter<impl FnMut() -> Z3CheckResult + Send> {
     Z3Adapter::new(move || {
-        // The adapter owns a closure over the assertions. When invoked on a
-        // worker thread, it needs to:
-        //   1. Spin up a Z3 context (each thread needs its own).
-        //   2. Translate AST assertions to Z3 terms.
-        //   3. Call check_sat with the configured timeout.
-        //
-        // Steps 1-3 require the Z3 crate's thread-local context API. This
-        // adapter returns `Unknown` to signal that full integration goes
-        // through the higher-level `BackendSwitcher::solve_with_z3` path,
-        // which already handles context/translation/timeout correctly.
-        //
-        // When a goal is routed to `Portfolio` by the capability router, the
-        // switcher currently invokes `solve_portfolio` (mpsc channel-based
-        // implementation) rather than this adapter. The adapter exists for
-        // future work where we want to reuse the PortfolioExecutor state
-        // machine for cross-validation.
-        let _ = (&assertions, timeout_ms);
-        Z3CheckResult {
-            verdict: SolverVerdict::Unknown {
-                reason: format!(
-                    "Z3 portfolio adapter: deferring to BackendSwitcher::solve_with_z3 path \
-                     ({} assertions, timeout={}ms)",
-                    assertions.len(),
-                    timeout_ms,
-                ),
+        use crate::solver::{SmtBackend, SmtContext, SmtResult, Z3Backend};
+        use crate::z3_backend::Z3Config;
+        use verum_common::{List, Maybe, Map};
+
+        // Each portfolio worker owns its own Z3 session so that parallel
+        // solvers don't contend on a shared context.
+        let config = Z3Config {
+            global_timeout_ms: Maybe::Some(timeout_ms),
+            ..Default::default()
+        };
+        let backend = Z3Backend::new(config);
+
+        // Build an SmtContext with all assertions.
+        let context = SmtContext {
+            assumptions: List::clone(&assertions),
+            bindings: Map::new(),
+        };
+
+        // check_sat expects a primary expression + context. For a portfolio
+        // check on a list of assertions, we pass the first as the primary
+        // and rely on the context to carry the rest (mirrors BackendSwitcher::solve_with_z3).
+        let result = if let Some(first) = assertions.first() {
+            backend.check_sat(first, &context)
+        } else {
+            // Empty assertion list is trivially satisfiable.
+            SmtResult::Sat
+        };
+
+        let verdict = match result {
+            SmtResult::Sat => SolverVerdict::Sat,
+            SmtResult::Unsat(_) => SolverVerdict::Unsat,
+            SmtResult::Unknown(reason) => SolverVerdict::Unknown {
+                reason: reason.to_string(),
             },
-        }
+            SmtResult::Timeout => SolverVerdict::Unknown {
+                reason: format!("Z3 timeout after {}ms", timeout_ms),
+            },
+        };
+        Z3CheckResult { verdict }
     })
 }
 

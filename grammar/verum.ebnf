@@ -410,22 +410,34 @@ derive_attribute = 'derive' , '(' , identifier , { ',' , identifier } , ')' ;
 (*
  * @verify attribute — declares how this goal should be verified.
  *
- *   runtime         — runtime assertion check only
- *   static          — static type-level verification (no SMT)
- *   formal          — SMT verification via the default router (capability-based)
- *   proof           — alias of formal, emphasizing proof extraction
- *   z3              — force Z3 backend (even if router would choose CVC5)
- *   cvc5            — force CVC5 backend (even if router would choose Z3)
- *   portfolio       — run Z3 and CVC5 in parallel, first-wins semantics
- *   cross_validate  — run both solvers and require them to agree on the
- *                     result. Divergence is a hard error. Used for
- *                     security-critical and proof-certificate workflows.
- *   certified       — alias of cross_validate for proof certificates.
+ * The underlying formal-verification engine is an implementation detail.
+ * Users select SEMANTIC STRATEGIES that describe the intent of verification,
+ * not the specific proof-solver backend. This lets the compiler choose the
+ * best available technique for each goal, including future upgrades to
+ * the in-house solver without any user code changes.
+ *
+ *   runtime      — runtime assertion check only (no formal verification)
+ *   static       — static type-level verification only (no formal proof)
+ *   formal       — formal verification with the default strategy (recommended)
+ *   proof        — alias of `formal`, emphasizing proof extraction
+ *   fast         — optimize for fast verification (may sacrifice completeness
+ *                  on hard goals; prefer for iterative development)
+ *   thorough     — optimize for maximum completeness (may take longer;
+ *                  race multiple strategies in parallel and return the
+ *                  first successful result)
+ *   reliable     — alias of `thorough`, emphasizing result reliability
+ *   certified    — independently cross-verify the proof with orthogonal
+ *                  techniques. Required for security-critical verification
+ *                  and for exporting proof certificates to external tools
+ *                  (Coq / Lean / Dedukti / Metamath)
+ *   synthesize   — treat the goal as a synthesis problem: generate a term
+ *                  satisfying the specification instead of merely checking
+ *                  satisfiability
  *)
 verify_attribute = 'verify' , '(' ,
     ( 'runtime' | 'static' | 'formal' | 'proof'
-    | 'z3' | 'cvc5'
-    | 'portfolio' | 'cross_validate' | 'certified' ) ,
+    | 'fast' | 'thorough' | 'reliable'
+    | 'certified' | 'synthesize' ) ,
     ')' ;
 context_group_identifier = identifier ;
 

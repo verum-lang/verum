@@ -313,27 +313,38 @@ impl SmtBackendSwitcher {
                 unreachable!("requires_smt() should have rejected these");
             }
             VerifyStrategy::Formal => {
+                // Default: route via the capability system. The compiler
+                // picks the best available technique for the goal's theory.
                 self.current = BackendChoice::Capability;
                 self.solve(assertions)
             }
-            VerifyStrategy::ForceZ3 => {
-                self.current = BackendChoice::Z3;
+            VerifyStrategy::Fast => {
+                // Fast: capability routing with tighter timeouts. The
+                // caller-provided timeout is already scaled by
+                // strategy.timeout_multiplier() in the compiler wrapper.
+                self.current = BackendChoice::Capability;
                 self.solve(assertions)
             }
-            VerifyStrategy::ForceCvc5 => {
-                self.current = BackendChoice::Cvc5;
-                self.solve(assertions)
-            }
-            VerifyStrategy::Portfolio => {
+            VerifyStrategy::Thorough => {
+                // Thorough: race multiple techniques in parallel and
+                // accept the first successful result.
                 self.current = BackendChoice::Portfolio;
                 self.solve(assertions)
             }
-            VerifyStrategy::CrossValidate => {
-                // Cross-validation: directly invoke the cross-validate path.
-                // We don't go through capability routing because the user has
-                // explicitly requested this strategy — don't let the router
-                // downgrade to Z3-only if CVC5 is unavailable, instead fail.
+            VerifyStrategy::Certified => {
+                // Certified: cross-validate the result with an independent
+                // technique. Divergence is a hard error (solver bug or
+                // encoding issue). Required for exportable proof certificates.
                 self.solve_cross_validate(assertions)
+            }
+            VerifyStrategy::Synthesize => {
+                // Synthesize: treat as a synthesis problem. The capability
+                // router will dispatch to the synthesis-capable backend
+                // (SyGuS today; future: custom synthesis engine). For a
+                // plain satisfiability check with the assertions as a
+                // specification, we fall back to capability routing.
+                self.current = BackendChoice::Capability;
+                self.solve(assertions)
             }
         };
 

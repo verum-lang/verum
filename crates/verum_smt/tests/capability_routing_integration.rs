@@ -93,9 +93,9 @@ fn verify_strategy_cross_validate_sets_flag() {
 }
 
 #[test]
-fn verify_strategy_portfolio_forces_parallel() {
-    let strategy = VerifyStrategy::from_attribute_value("portfolio").unwrap();
-    assert_eq!(strategy, VerifyStrategy::Portfolio);
+fn verify_strategy_thorough_uses_portfolio() {
+    let strategy = VerifyStrategy::from_attribute_value("thorough").unwrap();
+    assert_eq!(strategy, VerifyStrategy::Thorough);
     #[cfg(feature = "cvc5")]
     {
         use verum_smt::backend_switcher::BackendChoice;
@@ -107,12 +107,14 @@ fn verify_strategy_portfolio_forces_parallel() {
 }
 
 #[test]
-fn verify_strategy_force_flags_disable_routing() {
-    let z3 = VerifyStrategy::from_attribute_value("z3").unwrap();
-    let cvc5 = VerifyStrategy::from_attribute_value("cvc5").unwrap();
-    assert!(z3.is_forced());
-    assert!(cvc5.is_forced());
-    assert!(!VerifyStrategy::Formal.is_forced());
+fn verify_strategy_rejects_solver_specific_names() {
+    // By design, user code cannot reference specific solver backends.
+    // z3/cvc5 in attribute values are no longer recognized.
+    assert_eq!(VerifyStrategy::from_attribute_value("z3"), None);
+    assert_eq!(VerifyStrategy::from_attribute_value("cvc5"), None);
+    // Semantic aliases still work.
+    assert_eq!(VerifyStrategy::from_attribute_value("fast"), Some(VerifyStrategy::Fast));
+    assert_eq!(VerifyStrategy::from_attribute_value("reliable"), Some(VerifyStrategy::Thorough));
 }
 
 // ============================================================================
