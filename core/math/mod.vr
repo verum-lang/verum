@@ -229,6 +229,20 @@ public module complex;
 // Finite categories for concrete computations.
 public module category_finite;
 
+// Synthetic Differential Geometry: infinitesimal objects (D, D(n)),
+// Kock-Lawvere axiom, tangent/jet bundles, differential forms,
+// de Rham complex, connections, curvature. Integration with cohesive
+// modalities (Im ⊣ & ⊣ Rh).
+public module sdg;
+
+// Observational Type Theory: type-directed equality alternative to
+// cubical. Equality defined by observation (products decompose,
+// functions use funext, decidable types decide directly).
+public module observational;
+
+// Bit vectors for verified hardware and cryptography.
+public module bitvec;
+
 // =============================================================================
 // Progressive API Disclosure
 // =============================================================================
@@ -1056,6 +1070,17 @@ public mount .cohesive.{
 public mount .day_convolution.{
     SymmetricMonoidalCategory, DayConvolution,
     CognitiveExtension, cognitive_extension,
+};
+
+// =============================================================================
+// Synthetic Differential Geometry
+// =============================================================================
+
+public mount .sdg.{
+    InfinitesimalDisk, D, TangentBundle, TangentVector,
+    JetBundle, DifferentialForm,
+    wedge_product, exterior_derivative,
+    Connection, curvature,
 };
 
 // =============================================================================

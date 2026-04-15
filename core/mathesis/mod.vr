@@ -1,0 +1,89 @@
+// =============================================================================
+// mod.vr — Mathesis: The Computational ∞-Topos of Formal Theories
+// =============================================================================
+// Layer: Application
+// Spec: verum-ext.md §5 — Mathesis Constructions on Verum
+//
+// Mathesis is a computational ∞-topos where formal theories live as
+// sheaves, translations are Kan extensions, and coherence is verified
+// through descent conditions. This module tree provides:
+//
+//   core.vr      — Theory loading (Yoneda), translation (Kan), coherence (descent)
+//   protocol.vr  — JSON-RPC server for MCP integration with Claude
+//
+// # Quick Start
+//
+// ```verum
+// mount core.mathesis.*;
+//
+// // Load two theories
+// let mut reg = new_registry();
+// let uhm = load_theory(&mut reg, my_uhm_theory);
+// let iit = load_theory(&mut reg, my_iit_theory);
+//
+// // Translate with partial mapping
+// let result = translate(&uhm, &iit, &partial_map);
+// print(f"Translation quality: {result.quality}");
+//
+// // Check coherence across translations
+// let coherence = check_coherence(&reg, &pairs);
+// match coherence {
+//     CoherenceResult.Coherent { global_quality } =>
+//         print(f"Coherent! Quality: {global_quality}"),
+//     CoherenceResult.Obstruction { violations, severity } =>
+//         print(f"Incoherent: {violations.len()} violations, severity {severity}"),
+// }
+// ```
+//
+// # Architecture
+//
+// ```
+// Mathesis Application Layer
+// ├── core.vr          — load_theory, translate, check_coherence, audit
+// └── protocol.vr      — MCP JSON-RPC server (theory/list, claim/translate, etc.)
+//         │
+//         ▼
+// Mathematical Foundation (core/math/)
+// ├── epistemic.vr     — EpistemicStatus, Theory, EpistemicTopology
+// ├── infinity_topos.vr— ∞-Topos, descent, coherence violations
+// ├── kan_extension.vr — Lan/Ran, comma categories, obstruction
+// ├── quantum_logic.vr — Quantum epistemic states, density matrices
+// ├── giry.vr          — Giry monad, LLM oracle
+// ├── cohesive.vr      — Cohesive modalities (Π ⊣ Disc ⊣ Γ ⊣ coDisc)
+// ├── day_convolution.vr — Day ⊗, cognitive extension
+// └── hott.vr          — Cubical HoTT, Path types, equivalences
+// ```
+// =============================================================================
+
+module core.mathesis;
+
+// Mathesis Core — theory loading, translation, coherence checking
+public module core;
+
+// Mathesis Protocol — MCP JSON-RPC server for Claude integration
+public module protocol;
+
+// =============================================================================
+// Prelude re-exports
+// =============================================================================
+
+// Core operations
+public mount .core.{
+    // Registry
+    MathesisRegistry, new_registry,
+    // Theory operations
+    LoadedTheory, load_theory, find_theory, list_theories,
+    // Translation
+    TranslationResult, TranslationRecord,
+    translate, translate_with_oracle,
+    // Coherence
+    CoherenceResult, check_coherence,
+    // Auditing
+    AuditResult, audit_theory, audit_meta,
+};
+
+// Protocol operations
+public mount .protocol.{
+    JsonRpcRequest, JsonRpcResponse, JsonRpcError,
+    MathesisServer, new_server, serve_request,
+};

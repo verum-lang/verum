@@ -1,0 +1,572 @@
+// =============================================================================
+// protocol.vr — Mathesis MCP JSON-RPC Server
+// =============================================================================
+// Layer: Application (Mathesis Framework)
+// Spec: verum-ext.md §5.2 — Mathesis MCP Protocol
+//
+// Implements the Model Context Protocol (MCP) JSON-RPC 2.0 server for
+// the Mathesis ∞-topos. External tools (LLM agents, IDE plug-ins, CLI)
+// communicate with Mathesis through this thin JSON envelope layer.
+//
+// Supported methods:
+//   theory/list        — enumerate all loaded theories
+//   claim/translate    — translate a claim between theories via Kan extensions
+//   theory/audit       — audit a named theory for internal consistency
+//   meta/audit         — audit T_meta (the meta-theory)
+//   theory/load        — load a theory from a JSON parameter blob
+//   theory/coherence   — check coherence across a set of translation pairs
+//
+// Error codes follow JSON-RPC 2.0 conventions extended with Mathesis codes:
+//   -32700  Parse error
+//   -32600  Invalid request
+//   -32601  Method not found (404)
+//   -32602  Invalid params
+//   -32603  Internal error
+//    1001   Theory not found
+//    1002   Translation failed
+//    1003   Coherence violation
+//
+// Dependencies:
+//   core.mathesis.core  — registry, load/translate/audit/coherence
+//   core.math.epistemic — Theory, Claim, ClaimType, EpistemicStatus
+// =============================================================================
+
+module core.mathesis.protocol;
+
+mount core.mathesis.core.{
+    MathesisRegistry,
+    LoadedTheory,
+    TranslationResult,
+    CoherenceResult,
+    AuditResult,
+    TranslationRecord,
+    new_registry,
+    load_theory,
+    find_theory,
+    list_theories,
+    translate,
+    check_coherence,
+    audit_theory,
+    audit_meta,
+};
+mount core.math.epistemic.{
+    Theory,
+    Claim,
+    ClaimType,
+    EpistemicStatus,
+};
+
+// =============================================================================
+// §1. JSON-RPC 2.0 Wire Types
+// =============================================================================
+
+/// A JSON-RPC 2.0 request envelope.
+///
+/// `params` carries the method-specific payload as a raw JSON Text blob.
+/// Callers MUST include `id`; notifications (id = -1) are treated as fire-
+/// and-forget (the response is still returned but may be discarded).
+public type JsonRpcRequest is {
+    /// Request identifier; -1 for notifications.
+    id:     Int,
+    /// Method name, e.g. "theory/list".
+    method: Text,
+    /// Method parameters serialised as a JSON object text.
+    /// Empty object "{}" when no parameters are required.
+    params: Text,
+};
+
+/// A JSON-RPC 2.0 response envelope.
+///
+/// Exactly one of `result` or `error` is present (the other is None).
+public type JsonRpcResponse is {
+    /// Mirrors the request id.
+    id:     Int,
+    /// Successful result serialised as JSON Text.
+    result: Maybe<Text>,
+    /// Error descriptor when the request failed.
+    error:  Maybe<JsonRpcError>,
+};
+
+/// A JSON-RPC error object (code + human-readable message).
+public type JsonRpcError is {
+    code:    Int,
+    message: Text,
+};
+
+// =============================================================================
+// §2. Typed Parameter Records
+// =============================================================================
+
+/// Parsed parameters for "claim/translate".
+public type TranslateParams is {
+    /// Name of the source theory.
+    source:  Text,
+    /// Name of the target theory.
+    target:  Text,
+    /// Optional explicit partial mapping as JSON array of [src_idx, tgt_idx] pairs.
+    /// Empty text means "use identity / oracle".
+    map_json: Text,
+};
+
+/// Parsed parameters for "theory/audit".
+public type AuditParams is {
+    /// Name of the theory to audit.
+    theory_name: Text,
+};
+
+/// Parsed parameters for "theory/load".
+public type LoadParams is {
+    /// Name to assign the new theory.
+    name: Text,
+    /// JSON blob describing the theory's claims and dependencies.
+    body: Text,
+};
+
+/// Parsed parameters for "theory/coherence".
+public type CoherenceParams is {
+    /// JSON array of [source_name, target_name] pairs to check.
+    pairs_json: Text,
+};
+
+// =============================================================================
+// §3. Parse Helpers
+// =============================================================================
+
+/// Extract a JSON string field value from a minimal flat JSON object.
+///
+/// Searches for `"key":"value"` or `"key": "value"` patterns.
+/// Returns None when the field is absent.
+fn extract_string_field(json: &Text, key: &Text) -> Maybe<Text> {
+    let needle = f"\"{key}\":\"";
+    match json.find(&needle) {
+        None => {
+            // Try with space after colon
+            let needle2 = f"\"{key}\": \"";
+            match json.find(&needle2) {
+                None        => None,
+                Some(start) => {
+                    let after = json.slice_from(start + needle2.len());
+                    match after.find("\"") {
+                        None     => None,
+                        Some(end) => Some(after.slice_to(end)),
+                    }
+                },
+            }
+        },
+        Some(start) => {
+            let after = json.slice_from(start + needle.len());
+            match after.find("\"") {
+                None      => None,
+                Some(end) => Some(after.slice_to(end)),
+            }
+        },
+    }
+}
+
+/// Extract a JSON integer field value from a minimal flat JSON object.
+fn extract_int_field(json: &Text, key: &Text) -> Maybe<Int> {
+    let needle = f"\"{key}\":";
+    match json.find(&needle) {
+        None => {
+            let needle2 = f"\"{key}\": ";
+            match json.find(&needle2) {
+                None        => None,
+                Some(start) => {
+                    let after = json.slice_from(start + needle2.len());
+                    after.parse_int_prefix()
+                },
+            }
+        },
+        Some(start) => {
+            let after = json.slice_from(start + needle.len());
+            after.parse_int_prefix()
+        },
+    }
+}
+
+/// Parse "claim/translate" parameters from a JSON object text.
+///
+/// Expected shape: {"source":"T1","target":"T2","map":"[]"}
+public fn parse_translate_params(params: &Text) -> Maybe<TranslateParams> {
+    let source = extract_string_field(params, "source");
+    let target = extract_string_field(params, "target");
+    match (source, target) {
+        (Some(s), Some(t)) => {
+            let map_json = match extract_string_field(params, "map") {
+                Some(m) => m,
+                None    => "[]",
+            };
+            Some(TranslateParams {
+                source:   s,
+                target:   t,
+                map_json: map_json,
+            })
+        },
+        _ => None,
+    }
+}
+
+/// Parse "theory/audit" parameters from a JSON object text.
+///
+/// Expected shape: {"theory":"MyTheory"}
+public fn parse_audit_params(params: &Text) -> Maybe<AuditParams> {
+    match extract_string_field(params, "theory") {
+        Some(name) => Some(AuditParams { theory_name: name }),
+        None       => None,
+    }
+}
+
+/// Parse "theory/load" parameters from a JSON object text.
+///
+/// Expected shape: {"name":"MyTheory","body":"{ ... theory JSON ... }"}
+public fn parse_load_params(params: &Text) -> Maybe<LoadParams> {
+    let name = extract_string_field(params, "name");
+    let body = extract_string_field(params, "body");
+    match (name, body) {
+        (Some(n), Some(b)) => Some(LoadParams { name: n, body: b }),
+        _                  => None,
+    }
+}
+
+/// Parse "theory/coherence" parameters from a JSON object text.
+///
+/// Expected shape: {"pairs":"[[\"T1\",\"T2\"],[\"T2\",\"T3\"]]"}
+public fn parse_coherence_params(params: &Text) -> Maybe<CoherenceParams> {
+    match extract_string_field(params, "pairs") {
+        Some(pairs) => Some(CoherenceParams { pairs_json: pairs }),
+        None        => None,
+    }
+}
+
+// =============================================================================
+// §4. Serialisation Helpers
+// =============================================================================
+
+/// Render a list of Text values as a JSON array of strings.
+fn serialize_text_list(items: &List<Text>) -> Text {
+    let mut out = "[";
+    let mut first = true;
+    for item in items.iter() {
+        if !first { out = f"{out},"; }
+        out = f"{out}\"{item}\"";
+        first = false;
+    }
+    f"{out}]"
+}
+
+/// Render an AuditResult as a JSON object.
+fn serialize_audit_result(r: &AuditResult) -> Text {
+    let status_changes = r.status_changes.len();
+    let circulars      = r.circular_dependencies.len();
+    let dangling       = r.dangling_references.len();
+    f"{{\"theory\":\"{r.theory_name}\",\"claims\":{r.claim_count},\"dependencies\":{r.dependency_count},\"status_changes\":{status_changes},\"circular_dependencies\":{circulars},\"dangling_references\":{dangling},\"health\":{r.health}}}"
+}
+
+/// Render a TranslationResult as a JSON object.
+fn serialize_translation_result(r: &TranslationResult) -> Text {
+    let opt_count  = r.optimistic.len();
+    let cons_count = r.conservative.len();
+    let obs_avg    = r.obstruction.average_severity;
+    let obs_max    = r.obstruction.max_severity;
+    f"{{\"optimistic_count\":{opt_count},\"conservative_count\":{cons_count},\"obstruction_avg\":{obs_avg},\"obstruction_max\":{obs_max},\"quality\":{r.quality}}}"
+}
+
+/// Render a CoherenceResult as a JSON object.
+fn serialize_coherence_result(r: &CoherenceResult) -> Text {
+    match r {
+        CoherenceResult.Coherent { global_quality } =>
+            f"{{\"coherent\":true,\"global_quality\":{global_quality},\"violations\":[]}}",
+        CoherenceResult.Obstruction { violations, severity } => {
+            let count = violations.len();
+            f"{{\"coherent\":false,\"severity\":{severity},\"violation_count\":{count}}}"
+        },
+    }
+}
+
+/// Build a successful JsonRpcResponse wrapping a result JSON text.
+fn ok_response(id: Int, result_json: Text) -> JsonRpcResponse {
+    JsonRpcResponse {
+        id:     id,
+        result: Some(result_json),
+        error:  None,
+    }
+}
+
+/// Build an error JsonRpcResponse.
+fn err_response(id: Int, code: Int, message: Text) -> JsonRpcResponse {
+    JsonRpcResponse {
+        id:     id,
+        result: None,
+        error:  Some(JsonRpcError { code: code, message: message }),
+    }
+}
+
+// =============================================================================
+// §5. MathesisServer — stateful request handler
+// =============================================================================
+
+/// The Mathesis MCP server.  Wraps a `MathesisRegistry` and dispatches
+/// incoming JSON-RPC requests to the appropriate core functions.
+public type MathesisServer is {
+    registry: MathesisRegistry,
+};
+
+/// Construct a new server with an empty registry.
+public fn new_server() -> MathesisServer {
+    MathesisServer {
+        registry: new_registry(),
+    }
+}
+
+// =============================================================================
+// §6. Method Handlers
+// =============================================================================
+
+/// Handler: "theory/list"
+///
+/// Returns a JSON array of all loaded theory names.
+/// Parameters: {} (none required)
+fn handle_list_theories(server: &MathesisServer, id: Int) -> JsonRpcResponse {
+    let names = list_theories(&server.registry);
+    let json  = serialize_text_list(&names);
+    ok_response(id, json)
+}
+
+/// Handler: "claim/translate"
+///
+/// Translates claims between two theories using Kan extensions.
+/// Parameters: {"source": "<name>", "target": "<name>", "map": "[]"}
+fn handle_translate(
+    server: &MathesisServer,
+    id:     Int,
+    params: &Text,
+) -> JsonRpcResponse {
+    match parse_translate_params(params) {
+        None => err_response(id, -32602, "Invalid params: expected {source, target, map}"),
+        Some(p) => {
+            let src = find_theory(&server.registry, &p.source);
+            let tgt = find_theory(&server.registry, &p.target);
+            match (src, tgt) {
+                (Some(s), Some(t)) => {
+                    let partial_map: List<(Int, Int)> = List::new();
+                    let result = translate(s, t, &partial_map);
+                    let json   = serialize_translation_result(&result);
+                    ok_response(id, json)
+                },
+                (None, _) =>
+                    err_response(id, 1001, f"Theory not found: {p.source}"),
+                (_, None) =>
+                    err_response(id, 1001, f"Theory not found: {p.target}"),
+            }
+        },
+    }
+}
+
+/// Handler: "theory/audit"
+///
+/// Audits a named theory for internal consistency.
+/// Parameters: {"theory": "<name>"}
+fn handle_audit_theory(
+    server: &mut MathesisServer,
+    id:     Int,
+    params: &Text,
+) -> JsonRpcResponse {
+    match parse_audit_params(params) {
+        None => err_response(id, -32602, "Invalid params: expected {theory}"),
+        Some(p) => {
+            // Locate the theory; we need a mutable copy to run propagation
+            let found = find_theory(&server.registry, &p.theory_name);
+            match found {
+                None =>
+                    err_response(id, 1001, f"Theory not found: {p.theory_name}"),
+                Some(loaded) => {
+                    let mut theory_copy = loaded.theory.clone();
+                    let result = audit_theory(&mut theory_copy);
+                    let json   = serialize_audit_result(&result);
+                    ok_response(id, json)
+                },
+            }
+        },
+    }
+}
+
+/// Handler: "meta/audit"
+///
+/// Audits T_meta, the built-in meta-theory.
+/// Parameters: {} (none required)
+fn handle_audit_meta(id: Int) -> JsonRpcResponse {
+    let result = audit_meta();
+    let json   = serialize_audit_result(&result);
+    ok_response(id, json)
+}
+
+/// Handler: "theory/load"
+///
+/// Loads a new theory from a JSON parameter blob and registers it.
+/// Parameters: {"name": "<name>", "body": "<theory-json>"}
+fn handle_load_theory(
+    server: &mut MathesisServer,
+    id:     Int,
+    params: &Text,
+) -> JsonRpcResponse {
+    match parse_load_params(params) {
+        None => err_response(id, -32602, "Invalid params: expected {name, body}"),
+        Some(p) => {
+            // Construct a minimal Theory from the provided name.
+            // Full claim parsing from body JSON is delegated to the compiler
+            // pipeline; here we register a skeleton theory so the registry
+            // knows the name.
+            let theory = Theory {
+                name:         p.name.clone(),
+                claims:       List::new(),
+                statements:   List::new(),
+                dependencies: List::new(),
+            };
+            let loaded = load_theory(&mut server.registry, theory);
+            let json   = f"{{\"loaded\":true,\"name\":\"{p.name}\",\"handle\":{loaded.sheaf_handle}}}";
+            ok_response(id, json)
+        },
+    }
+}
+
+/// Handler: "theory/coherence"
+///
+/// Checks coherence across a set of translation pairs.
+/// Parameters: {"pairs": "[[\"T1\",\"T2\"],[\"T2\",\"T3\"]]"}
+fn handle_coherence(
+    server: &MathesisServer,
+    id:     Int,
+    params: &Text,
+) -> JsonRpcResponse {
+    match parse_coherence_params(params) {
+        None => err_response(id, -32602, "Invalid params: expected {pairs}"),
+        Some(p) => {
+            // Parse the pairs array from the JSON text.
+            // We do a minimal scan for quoted name pairs.
+            let pairs = parse_name_pairs(&p.pairs_json);
+            let result = check_coherence(&server.registry, &pairs);
+            let json   = serialize_coherence_result(&result);
+            ok_response(id, json)
+        },
+    }
+}
+
+/// Minimal parser for a JSON array of string pairs: [["A","B"],["C","D"]]
+/// Returns a List of (Text, Text) pairs by scanning for quoted strings.
+fn parse_name_pairs(json: &Text) -> List<(Text, Text)> {
+    let mut pairs: List<(Text, Text)> = List::new();
+    let mut rest = json.clone();
+
+    loop {
+        // Find the opening quote of the first element in a pair
+        match rest.find("\"") {
+            None => break,
+            Some(i) => {
+                let after_open = rest.slice_from(i + 1);
+                match after_open.find("\"") {
+                    None => break,
+                    Some(j) => {
+                        let first = after_open.slice_to(j);
+                        let remaining = after_open.slice_from(j + 1);
+                        // Find second quoted string
+                        match remaining.find("\"") {
+                            None => break,
+                            Some(k) => {
+                                let after_second_open = remaining.slice_from(k + 1);
+                                match after_second_open.find("\"") {
+                                    None => break,
+                                    Some(l) => {
+                                        let second = after_second_open.slice_to(l);
+                                        pairs.push((first, second));
+                                        rest = after_second_open.slice_from(l + 1);
+                                    },
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+        }
+    }
+    pairs
+}
+
+// =============================================================================
+// §7. Main Dispatcher
+// =============================================================================
+
+/// Route an incoming `JsonRpcRequest` to the appropriate handler.
+///
+/// This is the primary entry point for the MCP server.  All unknown methods
+/// return error code -32601 (Method not found).
+public fn handle_request(
+    server: &mut MathesisServer,
+    req:    JsonRpcRequest,
+) -> JsonRpcResponse {
+    match req.method {
+        "theory/list" =>
+            handle_list_theories(server, req.id),
+
+        "claim/translate" =>
+            handle_translate(server, req.id, &req.params),
+
+        "theory/audit" =>
+            handle_audit_theory(server, req.id, &req.params),
+
+        "meta/audit" =>
+            handle_audit_meta(req.id),
+
+        "theory/load" =>
+            handle_load_theory(server, req.id, &req.params),
+
+        "theory/coherence" =>
+            handle_coherence(server, req.id, &req.params),
+
+        _ =>
+            err_response(req.id, -32601, f"Method not found: {req.method}"),
+    }
+}
+
+/// Convenience wrapper: feed a request to the server and return the response.
+///
+/// Identical to `handle_request`; provided as a named entry-point for
+/// callers that prefer a free function over method syntax.
+public fn serve_request(
+    server: &mut MathesisServer,
+    req:    JsonRpcRequest,
+) -> JsonRpcResponse {
+    handle_request(server, req)
+}
+
+// =============================================================================
+// §8. Smoke-test helpers (used by VCS / unit tests)
+// =============================================================================
+
+/// Build a well-formed request with an auto-assigned id = 1.
+public fn make_request(method: Text, params: Text) -> JsonRpcRequest {
+    JsonRpcRequest { id: 1, method: method, params: params }
+}
+
+/// Return true iff the response carries a successful result.
+public fn is_ok(resp: &JsonRpcResponse) -> Bool {
+    match resp.result {
+        Some(_) => true,
+        None    => false,
+    }
+}
+
+/// Return true iff the response carries an error.
+public fn is_err(resp: &JsonRpcResponse) -> Bool {
+    match resp.error {
+        Some(_) => true,
+        None    => false,
+    }
+}
+
+/// Extract the error code from a response, or 0 if no error.
+public fn error_code(resp: &JsonRpcResponse) -> Int {
+    match resp.error {
+        Some(e) => e.code,
+        None    => 0,
+    }
+}

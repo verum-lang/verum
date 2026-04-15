@@ -186,6 +186,17 @@ public module net;
 // public module cognitive;
 
 // =============================================================================
+// Layer A: Application (Depends on: math, io, collections)
+// =============================================================================
+
+// Mathesis: The Computational ∞-Topos of Formal Theories.
+// Theory loading (Yoneda), translation (Kan extensions), coherence (descent),
+// auditing. MCP JSON-RPC protocol server for Claude integration.
+// Built on: math.epistemic, math.infinity_topos, math.kan_extension,
+// math.quantum_logic, math.giry, math.cohesive, math.day_convolution.
+public module mathesis;
+
+// =============================================================================
 // Layer M: Meta (Compile-time, no runtime dependencies)
 // =============================================================================
 
