@@ -1,0 +1,49 @@
+// @test: unit
+// @tier: 0
+// @level: L3
+// @tags: mathesis, audit, epistemic, meta-theory
+// @expect: pass
+//
+// Test: Theory auditing — status propagation, circular dependency detection,
+//       dangling references, and T_meta audit.
+
+mount core.mathesis.*;
+mount core.math.epistemic.{Theory, Claim, ClaimType, EpistemicStatus};
+
+fn main() {
+    // Test 1: audit_meta always succeeds
+    let meta_result = audit_meta();
+    assert(meta_result.theory_name == "T_meta");
+    assert(meta_result.health >= 0.0);
+    assert(meta_result.health <= 1.0);
+
+    // Test 2: audit a well-formed theory
+    let mut good_theory = Theory {
+        name: "WellFormed",
+        claims: List::new(),
+        statements: List::from([
+            Claim { id: "ax1", claim_type: ClaimType.Axiom, content: "Base", status: EpistemicStatus.Postulate },
+            Claim { id: "thm1", claim_type: ClaimType.Theorem, content: "Derived", status: EpistemicStatus.Theorem },
+        ]),
+        dependencies: List::from([("thm1", "ax1")]),
+    };
+
+    let result = audit_theory(&mut good_theory);
+    assert(result.claim_count == 2);
+    assert(result.dependency_count == 1);
+    assert(result.dangling_references.len() == 0);
+
+    // Test 3: detect dangling references
+    let mut bad_theory = Theory {
+        name: "Dangling",
+        claims: List::new(),
+        statements: List::from([
+            Claim { id: "thm1", claim_type: ClaimType.Theorem, content: "Needs proof", status: EpistemicStatus.Theorem },
+        ]),
+        dependencies: List::from([("thm1", "nonexistent_axiom")]),
+    };
+
+    let result = audit_theory(&mut bad_theory);
+    assert(result.dangling_references.len() > 0);
+    assert(result.health < 1.0);
+}

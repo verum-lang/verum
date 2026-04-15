@@ -7431,6 +7431,40 @@ impl TypeChecker {
                         }
                     }
                 }
+                GenericParamKind::KindAnnotated { name, kind: kind_ann, bounds } => {
+                    // Kind-annotated HKT parameter: F: Type -> Type
+                    // Convert the AST KindAnnotation to the type-checker's Kind, register
+                    // the type constructor's kind in kind_inferer, then bind the name as a
+                    // fresh type variable so it can be instantiated during inference.
+                    let name_text: Text = name.name.clone();
+                    let tvar = TypeVar::fresh();
+                    let type_var = Type::Var(tvar);
+
+                    self.ctx
+                        .env
+                        .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
+                    self.ctx.define_type(name_text.clone(), type_var);
+
+                    // Build the kind_inference::Kind from the AST KindAnnotation and
+                    // register it so that subsequent applications F<A> are kind-checked.
+                    let infer_kind = Self::ast_kind_to_infer_kind(kind_ann);
+                    self.kind_inferer.register_type_constructor(name_text.clone(), infer_kind);
+
+                    // Register protocol bounds if present (e.g., F: Type -> Type + Functor)
+                    if !bounds.is_empty() {
+                        if let Ok(protocol_bounds) = self.convert_type_bounds_to_protocol_bounds(bounds) {
+                            self.register_type_var_bounds(tvar, protocol_bounds.clone());
+
+                            let type_param = crate::context::TypeParam::new(name_text.clone(), name.span)
+                                .with_bounds(protocol_bounds);
+                            self.ctx.env.add_type_param(type_param);
+                        }
+                        let type_bounds = self.extract_type_bounds_from_ast(bounds);
+                        for bound in type_bounds {
+                            self.register_type_var_type_bound(tvar, bound);
+                        }
+                    }
+                }
                 _ => {
                     // Other param kinds (Meta, Const, Lifetime) handled as needed
                 }
@@ -20026,6 +20060,18 @@ impl TypeChecker {
                         default: Maybe::None,
                     });
                 }
+                GenericParamKind::KindAnnotated { name, bounds, .. } => {
+                    // Kind-annotated HKT parameter: F: Type -> Type
+                    // Treated like HigherKinded for protocol purposes.
+                    let protocol_bounds = self
+                        .convert_type_bounds_to_protocol_bounds(bounds)
+                        .unwrap_or_else(|_| List::new());
+                    type_params.push(crate::protocol::TypeParam {
+                        name: verum_common::Text::from(name.name.as_str()),
+                        bounds: protocol_bounds,
+                        default: Maybe::None,
+                    });
+                }
             }
         }
 
@@ -20510,6 +20556,32 @@ impl TypeChecker {
                                 .env
                                 .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
                             self.ctx.define_type(name_text.clone(), type_var);
+
+                            type_vars.push(tvar);
+                            param_names.push(name_text);
+                        }
+                        GenericParamKind::KindAnnotated { name, kind: kind_ann, bounds } => {
+                            // Kind-annotated HKT parameter in rank-2 function type context
+                            let tvar = TypeVar::fresh();
+                            let type_var = Type::Var(tvar);
+                            let name_text: Text = name.name.clone();
+
+                            self.ctx
+                                .env
+                                .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
+                            self.ctx.define_type(name_text.clone(), type_var);
+
+                            // Register kind with kind_inferer
+                            let infer_kind = Self::ast_kind_to_infer_kind(kind_ann);
+                            self.kind_inferer.register_type_constructor(name_text.clone(), infer_kind);
+
+                            if !bounds.is_empty() {
+                                if let Ok(protocol_bounds) =
+                                    self.convert_type_bounds_to_protocol_bounds(bounds)
+                                {
+                                    self.register_type_var_bounds(tvar, protocol_bounds);
+                                }
+                            }
 
                             type_vars.push(tvar);
                             param_names.push(name_text);
@@ -33060,6 +33132,52 @@ impl TypeChecker {
                             ),
                         }));
                 }
+                GenericParamKind::KindAnnotated { name, kind: kind_ann, bounds } => {
+                    // Kind-annotated HKT parameter: F: Type -> Type
+                    // Behaves like HigherKinded: create a typed type constructor with the
+                    // annotated kind, register it in the environment and kind_inferer.
+                    use crate::advanced_protocols::Kind as AdvKind;
+                    let name_text: Text = name.name.clone();
+
+                    // Convert AST kind annotation to kind_inference::Kind
+                    let ki_kind = Self::ast_kind_to_infer_kind(kind_ann);
+
+                    // Derive arity from the kind annotation for Type::type_constructor
+                    let arity = kind_ann.arity();
+
+                    // Build advanced_protocols::Kind from arity (compatible representation)
+                    let adv_kind = match arity {
+                        0 => AdvKind::type_kind(),
+                        1 => AdvKind::unary_constructor(),
+                        2 => AdvKind::binary_constructor(),
+                        n => {
+                            let mut k = AdvKind::Type;
+                            for _ in 0..n {
+                                k = AdvKind::Arrow(Box::new(AdvKind::Type), Box::new(k));
+                            }
+                            k
+                        }
+                    };
+
+                    let type_constructor = Type::type_constructor(name_text.clone(), arity, adv_kind);
+
+                    self.ctx
+                        .env
+                        .insert(name.name.clone(), TypeScheme::mono(type_constructor.clone()));
+                    self.ctx.define_type(name_text.clone(), type_constructor);
+
+                    // Register in kind_inferer with the explicitly declared kind
+                    self.kind_inferer.register_type_constructor(name_text.clone(), ki_kind);
+
+                    // Register protocol bounds if present
+                    if !bounds.is_empty() {
+                        let protocol_bounds =
+                            self.convert_type_bounds_to_protocol_bounds(bounds)?;
+                        let type_param = crate::context::TypeParam::new(name_text, name.span)
+                            .with_bounds(protocol_bounds);
+                        self.ctx.env.add_type_param(type_param);
+                    }
+                }
             }
         }
 
@@ -44063,6 +44181,7 @@ fn expr_kind_description(kind: &ExprKind) -> &'static str {
         ExprKind::DestructuringAssign { .. } => "destructuring assignment",
         ExprKind::CalcBlock(_) => "calc block",
         ExprKind::NamedArg { .. } => "named argument",
+        ExprKind::CopatternBody { .. } => "copattern body",
     }
 }
 
@@ -44218,6 +44337,7 @@ impl TypeChecker {
             let param_name: Text = match &param.kind {
                 GenericParamKind::Type { name, .. } => name.name.as_str().into(),
                 GenericParamKind::HigherKinded { name, .. } => name.name.as_str().into(),
+                GenericParamKind::KindAnnotated { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Const { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Meta { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Lifetime { name } => name.name.as_str().into(),
@@ -45708,6 +45828,7 @@ impl TypeChecker {
             let param_name: Text = match &param.kind {
                 GenericParamKind::Type { name, .. } => name.name.as_str().into(),
                 GenericParamKind::HigherKinded { name, .. } => name.name.as_str().into(),
+                GenericParamKind::KindAnnotated { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Const { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Meta { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Lifetime { name } => name.name.as_str().into(),
@@ -51958,6 +52079,25 @@ impl TypeChecker {
                 format!("{}<{} args>", self.type_display(constructor), args.len())
             }
             _ => format!("{:?}", ty),
+        }
+    }
+}
+
+// ==================== Kind Annotation Conversion ====================
+
+impl TypeChecker {
+    /// Convert an AST `KindAnnotation` (from `verum_ast`) to the type-checker's
+    /// `kind_inference::Kind`, which is used internally for kind constraint solving.
+    ///
+    /// Both types represent the same algebra (`Type | K1 -> K2`) but live in
+    /// different crates to avoid a circular dependency.
+    pub(crate) fn ast_kind_to_infer_kind(ann: &verum_ast::ty::KindAnnotation) -> crate::kind_inference::Kind {
+        match ann {
+            verum_ast::ty::KindAnnotation::Type => crate::kind_inference::Kind::Type,
+            verum_ast::ty::KindAnnotation::Arrow(lhs, rhs) => crate::kind_inference::Kind::Arrow(
+                Box::new(Self::ast_kind_to_infer_kind(lhs)),
+                Box::new(Self::ast_kind_to_infer_kind(rhs)),
+            ),
         }
     }
 }

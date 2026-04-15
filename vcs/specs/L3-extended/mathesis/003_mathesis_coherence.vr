@@ -1,0 +1,63 @@
+// @test: unit
+// @tier: 0
+// @level: L3
+// @tags: mathesis, coherence, descent
+// @expect: pass
+//
+// Test: Mathesis coherence checking across theory translations.
+
+mount core.mathesis.*;
+mount core.math.epistemic.{Theory, Claim, ClaimType, EpistemicStatus};
+
+fn main() {
+    let mut reg = new_registry();
+
+    // Load three theories forming a triangle
+    let t1 = Theory {
+        name: "T1",
+        claims: List::new(),
+        statements: List::from([
+            Claim { id: "c1", claim_type: ClaimType.Axiom, content: "X", status: EpistemicStatus.Theorem },
+        ]),
+        dependencies: List::new(),
+    };
+    let t2 = Theory {
+        name: "T2",
+        claims: List::new(),
+        statements: List::from([
+            Claim { id: "c2", claim_type: ClaimType.Axiom, content: "X'", status: EpistemicStatus.Theorem },
+        ]),
+        dependencies: List::new(),
+    };
+    let t3 = Theory {
+        name: "T3",
+        claims: List::new(),
+        statements: List::from([
+            Claim { id: "c3", claim_type: ClaimType.Axiom, content: "X''", status: EpistemicStatus.Theorem },
+        ]),
+        dependencies: List::new(),
+    };
+
+    load_theory(&mut reg, t1);
+    load_theory(&mut reg, t2);
+    load_theory(&mut reg, t3);
+
+    // Check coherence of translation triangle
+    let pairs = List::from([
+        ("T1", "T2"),
+        ("T2", "T3"),
+        ("T1", "T3"),
+    ]);
+
+    let result = check_coherence(&reg, &pairs);
+    match result {
+        CoherenceResult.Coherent { global_quality } => {
+            assert(global_quality >= 0.0);
+            assert(global_quality <= 1.0);
+        },
+        CoherenceResult.Obstruction { violations, severity } => {
+            // Violations are expected without explicit translations
+            assert(severity >= 0.0);
+        },
+    }
+}

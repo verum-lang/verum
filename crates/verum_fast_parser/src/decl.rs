@@ -803,7 +803,15 @@ impl<'a> RecursiveParser<'a> {
                 Maybe::None
             }
         } else if self.stream.check(&TokenKind::LBrace) {
-            Maybe::Some(FunctionBody::Block(self.parse_block()?))
+            // For cofix functions, check if the brace body is a copattern body
+            // by looking ahead for the `.identifier =>` pattern.
+            // Copattern body: `{ .obs => expr, ... }` (first token after `{` is `.`)
+            if is_cofix && self.is_copattern_body_ahead() {
+                let expr = self.parse_copattern_body()?;
+                Maybe::Some(FunctionBody::Expr(expr))
+            } else {
+                Maybe::Some(FunctionBody::Block(self.parse_block()?))
+            }
         } else if self.stream.consume(&TokenKind::Eq).is_some() {
             let expr = self.parse_expr()?;
             // For block-form expressions (match, if, block), semicolon is optional
@@ -2360,6 +2368,77 @@ impl<'a> RecursiveParser<'a> {
                 | ExprKind::Unsafe(_)
                 | ExprKind::Async(_)
         )
+    }
+
+    /// Return `true` when the token stream is currently positioned at `{` and the
+    /// first non-`{` token inside the braces is a `.` followed by an identifier,
+    /// indicating a copattern body rather than a regular block.
+    ///
+    /// We look at peek offsets:
+    ///   - offset 0 : `{`
+    ///   - offset 1 : `.`
+    ///   - offset 2 : identifier  (or `}` for empty body, which is not valid copattern)
+    fn is_copattern_body_ahead(&self) -> bool {
+        // peek_nth_kind(0) is the current lookahead (the `{` we already know is there)
+        matches!(self.stream.peek_nth_kind(1), Some(TokenKind::Dot))
+    }
+
+    /// Parse a copattern body: `{ .obs1 => expr1, .obs2 => expr2, ... }`.
+    ///
+    /// This is the body of a `cofix fn` that defines a coinductive value by
+    /// specifying the result of every observation/destructor.
+    ///
+    /// Grammar:
+    /// ```ebnf
+    /// copattern_body = '{' , copattern_arm , { ',' , copattern_arm } , [ ',' ] , '}' ;
+    /// copattern_arm  = '.' , identifier , '=>' , expression ;
+    /// ```
+    fn parse_copattern_body(&mut self) -> ParseResult<Expr> {
+        let start = self.stream.position();
+
+        self.stream.expect(TokenKind::LBrace)?;
+
+        let mut arms: List<verum_ast::expr::CopatternArm> = List::new();
+
+        loop {
+            // Allow trailing comma before `}`
+            if self.stream.check(&TokenKind::RBrace) {
+                break;
+            }
+
+            let arm_start = self.stream.position();
+
+            // Each arm starts with `.`
+            self.stream.expect(TokenKind::Dot)?;
+
+            // Observation name
+            let obs_name = self.consume_ident_or_keyword()?;
+            let obs_span = self.stream.current_span();
+            let observation = verum_ast::ty::Ident::new(obs_name, obs_span);
+
+            // `=>`
+            self.stream.expect(TokenKind::FatArrow)?;
+
+            // Body expression
+            let body_expr = self.parse_expr()?;
+
+            let arm_span = self.stream.make_span(arm_start);
+            arms.push(verum_ast::expr::CopatternArm {
+                observation,
+                body: Heap::new(body_expr),
+                span: arm_span,
+            });
+
+            // Consume optional trailing comma; stop if no comma
+            if self.stream.consume(&TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+
+        self.stream.expect(TokenKind::RBrace)?;
+
+        let span = self.stream.make_span(start);
+        Ok(Expr::new(ExprKind::CopatternBody { arms, span }, span))
     }
 
     /// Parse type body: alias, record, variant, protocol, etc.

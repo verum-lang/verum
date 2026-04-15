@@ -1353,6 +1353,61 @@ pub enum ExprKind {
     /// Enables equational reasoning chains in both proof and regular contexts.
     /// Each step relates expressions via a relation (==, <, <=, etc.) with a justification.
     CalcBlock(crate::decl::CalculationChain),
+
+    /// Copattern body: defines a coinductive value by observation.
+    ///
+    /// Used as the body of a `cofix fn` to specify what each observation/destructor returns.
+    /// Each arm maps an observation name to the expression that is returned when the
+    /// observation is applied to the coinductive value.
+    ///
+    /// # Syntax
+    /// ```verum
+    /// cofix fn nats_from(n: Int) -> Stream<Int> {
+    ///     .head => n,
+    ///     .tail => nats_from(n + 1),
+    /// }
+    /// ```
+    ///
+    /// # Semantics
+    /// A copattern body defines an element of a coinductive type by exhaustively
+    /// specifying the result of every destructor/observation. The productivity
+    /// checker (`verum_types::coinductive_analysis`) verifies that each recursive
+    /// call is guarded by at least one observation (ensuring the stream is productive).
+    ///
+    /// Spec: grammar/verum.ebnf - copattern_body production
+    CopatternBody {
+        arms: List<CopatternArm>,
+        span: Span,
+    },
+}
+
+/// A single arm in a copattern body.
+///
+/// Binds an observation name (destructor) to the expression to evaluate when
+/// that observation is applied to the coinductive value being defined.
+///
+/// # Syntax
+/// ```text
+/// .observation_name => expression
+/// ```
+///
+/// # Example
+/// `.head => n` — the `head` observation returns `n`
+/// `.tail => nats_from(n + 1)` — the `tail` observation returns `nats_from(n + 1)`
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CopatternArm {
+    /// The observation/destructor name (without leading `.`)
+    pub observation: Ident,
+    /// Expression evaluated when this observation is applied
+    pub body: Heap<Expr>,
+    /// Source span covering `.observation => body`
+    pub span: Span,
+}
+
+impl Spanned for CopatternArm {
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 // =============================================================================

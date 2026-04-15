@@ -958,6 +958,77 @@ pub enum GenericParamKind {
         /// The name of the level variable (e.g., u)
         name: Ident,
     },
+
+    /// Kind-annotated type parameter: `F: Type -> Type`
+    ///
+    /// An explicit kind annotation expressing that `F` is a type constructor of
+    /// the given kind, using arrow notation. This is the spec-required alternative
+    /// to the `F<_>` placeholder syntax.
+    ///
+    /// # Grammar
+    /// ```ebnf
+    /// kind_annotated_param = identifier , ':' , kind_expr ;
+    /// kind_expr = 'Type' , [ '->' , kind_expr ] | '(' , kind_expr , ')' ;
+    /// ```
+    ///
+    /// # Examples
+    /// ```verum
+    /// type Functor<F: Type -> Type> is protocol {
+    ///     fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
+    /// };
+    ///
+    /// type Bifunctor<F: Type -> Type -> Type> is protocol {
+    ///     fn bimap<A, B, C, D>(fab: F<A, B>, f: fn(A) -> C, g: fn(B) -> D) -> F<C, D>;
+    /// };
+    /// ```
+    KindAnnotated {
+        /// The name of the type constructor parameter (e.g., F, M)
+        name: Ident,
+        /// The kind annotation, e.g. `Type -> Type`
+        kind: KindAnnotation,
+        /// Optional protocol bounds on the type constructor (e.g., `F: Type -> Type + Functor`)
+        bounds: List<TypeBound>,
+    },
+}
+
+/// A kind annotation for use in `F: Type -> Type` generic parameter syntax.
+///
+/// This mirrors `verum_types::poly_kinds::Kind` but lives in the AST crate so
+/// that the parser can represent kind annotations without depending on the type
+/// system crate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum KindAnnotation {
+    /// The base kind `Type` — the kind of all value-level concrete types.
+    Type,
+    /// An arrow kind `K1 -> K2` — the kind of a type constructor.
+    Arrow(Box<KindAnnotation>, Box<KindAnnotation>),
+}
+
+impl KindAnnotation {
+    /// Compute the arity (number of type arguments) this kind expects.
+    ///
+    /// `Type` has arity 0, `Type -> Type` has arity 1,
+    /// `Type -> Type -> Type` has arity 2, etc.
+    pub fn arity(&self) -> usize {
+        match self {
+            KindAnnotation::Type => 0,
+            KindAnnotation::Arrow(_, rhs) => 1 + rhs.arity(),
+        }
+    }
+}
+
+impl std::fmt::Display for KindAnnotation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KindAnnotation::Type => write!(f, "Type"),
+            KindAnnotation::Arrow(lhs, rhs) => {
+                match lhs.as_ref() {
+                    KindAnnotation::Arrow(_, _) => write!(f, "({}) -> {}", lhs, rhs),
+                    _ => write!(f, "{} -> {}", lhs, rhs),
+                }
+            }
+        }
+    }
 }
 
 /// A path to a type or value (e.g., std.collections.Vec).

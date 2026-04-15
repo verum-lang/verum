@@ -1,0 +1,54 @@
+// @test: unit
+// @tier: 0
+// @level: L3
+// @tags: mathesis, translation, kan-extension
+// @expect: pass
+//
+// Test: Mathesis translation between theories via Kan extensions.
+
+mount core.mathesis.*;
+mount core.math.epistemic.{Theory, Claim, ClaimType, EpistemicStatus};
+
+fn main() {
+    let mut reg = new_registry();
+
+    // Theory A: 3 claims
+    let theory_a = Theory {
+        name: "TheoryA",
+        claims: List::new(),
+        statements: List::from([
+            Claim { id: "a1", claim_type: ClaimType.Axiom, content: "P(x)", status: EpistemicStatus.Postulate },
+            Claim { id: "a2", claim_type: ClaimType.Theorem, content: "Q(x)", status: EpistemicStatus.Theorem },
+            Claim { id: "a3", claim_type: ClaimType.Lemma, content: "R(x)", status: EpistemicStatus.Conditional },
+        ]),
+        dependencies: List::from([("a2", "a1"), ("a3", "a1")]),
+    };
+
+    // Theory B: 2 claims
+    let theory_b = Theory {
+        name: "TheoryB",
+        claims: List::new(),
+        statements: List::from([
+            Claim { id: "b1", claim_type: ClaimType.Axiom, content: "P'(x)", status: EpistemicStatus.Postulate },
+            Claim { id: "b2", claim_type: ClaimType.Theorem, content: "Q'(x)", status: EpistemicStatus.Theorem },
+        ]),
+        dependencies: List::from([("b2", "b1")]),
+    };
+
+    let loaded_a = load_theory(&mut reg, theory_a);
+    let loaded_b = load_theory(&mut reg, theory_b);
+
+    // Partial mapping: a1 → b1, a2 → b2
+    let partial_map = List::from([(0, 0), (1, 1)]);
+
+    // Translate
+    let result = translate(&loaded_a, &loaded_b, &partial_map);
+
+    // Quality should be between 0 and 1
+    assert(result.quality >= 0.0);
+    assert(result.quality <= 1.0);
+
+    // Optimistic and conservative should have entries
+    assert(result.optimistic.len() == 2);
+    assert(result.conservative.len() == 2);
+}

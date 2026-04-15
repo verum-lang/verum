@@ -153,6 +153,47 @@ impl ProofResult {
     pub fn is_validated(&self) -> bool {
         self.validation.as_ref().map(|v| v.is_ok()).unwrap_or(false)
     }
+
+    /// Export the structured proof (if any) as a certificate in the requested format.
+    ///
+    /// This is the main integration point between the verification pipeline and the
+    /// certificate export pipeline:
+    ///
+    /// ```text
+    /// ProofResult.structured_proof  (proof_extraction::ProofTerm)
+    ///   └─ ProofExtractor::to_bridge_term()
+    ///   └─ proof_extraction_bridge::proof_to_certificate()
+    ///   └─ certificates::Certificate
+    /// ```
+    ///
+    /// Returns `None` if no structured proof is available (e.g. cache hit with
+    /// `enable_proofs = false`, or the proof was erased).
+    ///
+    /// # Arguments
+    ///
+    /// * `theorem_name` — identifier for the theorem
+    /// * `theorem_statement` — human-readable statement of what was proven
+    /// * `format` — target certificate format
+    pub fn generate_certificate(
+        &self,
+        theorem_name: &str,
+        theorem_statement: &str,
+        format: crate::proof_extraction_bridge::CertificateFormat,
+    ) -> Option<Result<crate::certificates::Certificate, crate::certificates::CertificateError>>
+    {
+        // Get the structured proof from this result.
+        let extraction_proof = self.structured_proof.as_ref()?;
+
+        // Convert proof_extraction::ProofTerm → proof_extraction_bridge::ProofTerm,
+        // then invoke the certificate pipeline.
+        let bridge_proof = crate::proof_extraction::ProofExtractor::to_bridge_term(extraction_proof);
+        Some(crate::proof_extraction_bridge::proof_to_certificate(
+            &bridge_proof,
+            theorem_name,
+            theorem_statement,
+            format,
+        ))
+    }
 }
 
 /// Result of a verification operation.

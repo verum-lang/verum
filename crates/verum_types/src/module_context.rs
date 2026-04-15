@@ -857,6 +857,7 @@ impl ModuleTypeInference {
                     | GenericParamKind::Meta { .. }
                     | GenericParamKind::Lifetime { .. }
                     | GenericParamKind::HigherKinded { .. }
+                    | GenericParamKind::KindAnnotated { .. }
                     | GenericParamKind::Context { .. }
                     | GenericParamKind::Level { .. } => None,
                 }
@@ -1493,6 +1494,13 @@ impl ModuleTypeInference {
 
                         // Calc blocks: proof construct, no runtime calls to extract
                         ExprKind::CalcBlock(_) => {}
+
+                        // Copattern body: queue each arm's body expression for call extraction
+                        ExprKind::CopatternBody { arms, .. } => {
+                            for arm in arms.iter() {
+                                work_queue.push(WorkItem::Expr(&arm.body));
+                            }
+                        }
                     }
                 }
             }

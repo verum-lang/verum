@@ -1,0 +1,56 @@
+// @test: unit
+// @tier: 0
+// @level: L3
+// @tags: mathesis, registry, theory
+// @expect: pass
+//
+// Test: Mathesis theory registry — load, find, list operations.
+
+mount core.mathesis.*;
+mount core.math.epistemic.{Theory, Claim, ClaimType, EpistemicStatus};
+
+fn main() {
+    // Create registry
+    let mut reg = new_registry();
+    assert(reg.theories.len() == 0);
+
+    // Create a minimal theory
+    let theory = Theory {
+        name: "TestTheory",
+        claims: List::new(),
+        statements: List::from([
+            Claim {
+                id: "axiom_1",
+                claim_type: ClaimType.Axiom,
+                content: "All A are B",
+                status: EpistemicStatus.Postulate,
+            },
+            Claim {
+                id: "thm_1",
+                claim_type: ClaimType.Theorem,
+                content: "Some A are B",
+                status: EpistemicStatus.Theorem,
+            },
+        ]),
+        dependencies: List::from([("thm_1", "axiom_1")]),
+    };
+
+    // Load theory
+    let loaded = load_theory(&mut reg, theory);
+    assert(loaded.claim_count == 2);
+    assert(loaded.dependency_count == 1);
+    assert(loaded.sheaf_handle == 1);
+
+    // Find theory
+    let found = find_theory(&reg, "TestTheory");
+    assert(found is Some(_));
+
+    // List theories
+    let names = list_theories(&reg);
+    assert(names.len() == 1);
+    assert(names[0] == "TestTheory");
+
+    // Not found
+    let missing = find_theory(&reg, "NonExistent");
+    assert(missing is None);
+}

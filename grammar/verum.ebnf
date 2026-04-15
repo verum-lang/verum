@@ -581,7 +581,8 @@ whitespace_plus = whitespace , { whitespace } ;
 (*          Caller must provide SAFETY documentation.                           *)
 (*                                                                              *)
 (* ============================================================================ *)
-function_modifiers = [ 'pure' ] , [ meta_modifier ] , [ 'async' ] , [ 'unsafe' ] | epsilon ;
+(* cofix marks a coinductive fixpoint function — its body MUST be a copattern_body *)
+function_modifiers = [ 'pure' ] , [ meta_modifier ] , [ 'async' ] , [ 'cofix' ] , [ 'unsafe' ] | epsilon ;
 
 (* Meta modifier with optional stage level for multi-stage metaprogramming     *)
 (* Syntax:                                                                      *)
@@ -674,9 +675,22 @@ boolean_condition = compile_time_condition , ( '&&' | '||' ) , compile_time_cond
                   | '!' , compile_time_condition
                   | '(' , compile_time_condition , ')' ;
 
-(* Function body: block, expression, or forward declaration (';') *)
+(* Function body: block, expression, copattern body, or forward declaration (';') *)
 (* Forward declarations used for @intrinsic, @extern functions *)
-function_body   = block_expr | '=' , expression , ';' | ';' ;
+(* Copattern body is only valid when the function is marked with 'cofix'       *)
+function_body   = copattern_body | block_expr | '=' , expression , ';' | ';' ;
+
+(* Copattern body: defines a coinductive value by observation                  *)
+(* Used exclusively in 'cofix fn' definitions.                                 *)
+(* Each arm maps an observation (destructor) to the expression it returns.     *)
+(*                                                                              *)
+(* Example:                                                                     *)
+(*   cofix fn nats_from(n: Int) -> Stream<Int> {                               *)
+(*       .head => n,                                                            *)
+(*       .tail => nats_from(n + 1),                                            *)
+(*   }                                                                          *)
+copattern_body  = '{' , copattern_arm , { ',' , copattern_arm } , [ ',' ] , '}' ;
+copattern_arm   = '.' , identifier , '=>' , expression ;
 
 param_list      = [ param , { ',' , param } , [ ',' ] ] ;
 param           = param_pattern | self_param ;
@@ -707,34 +721,62 @@ protocol_bound  = path_type ;
 (* These extensions enable HKT, existentials, type-level literals, and more    *)
 
 (* 2.4.1 Higher-Kinded Type Parameters *)
-(* Higher-Kinded Types via placeholder syntax `F<_>`.                          *)
-(* Enables abstraction over type constructors like List<_>, Maybe<_>.          *)
-(* Example: fn map<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>      *)
+(* Two complementary syntaxes are supported for HKT parameters:                 *)
+(*   (a) Placeholder syntax: F<_>, F<_, _>                                      *)
+(*       Enables abstraction over type constructors. Kind inferred from usage.  *)
+(*       Example: fn map<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> *)
 (*                                                                              *)
-(* Design note (verum-ext-2.md §2 revision): The `F<_>` syntax replaces the    *)
-(* alternative `F: Type -> Type` kind annotation. Protocols + associated types  *)
-(* cover the same use cases with better error messages and coherence checking.  *)
-(* Kind inference (verum_types/kind_inference.rs) automatically derives         *)
-(* `F: Type -> Type` from usage patterns like `F<A>`.                           *)
+(*   (b) Kind annotation syntax: F: Type -> Type                               *)
+(*       Spec: verum-ext.md §3.2 - Explicit kind annotations                   *)
+(*       Provides an explicit, readable kind signature for type constructors.   *)
+(*       Example: type Functor<F: Type -> Type> is protocol { ... };            *)
+(*                                                                              *)
+(* Both forms are equivalent; kind inference reconciles them.                  *)
 hk_type_param       = identifier , '<' , hk_placeholders , '>' , [ ':' , hk_bounds ] ;
 hk_placeholders     = '_' , { ',' , '_' } ;
 hk_bounds           = hk_bound , { '+' , hk_bound } ;
 hk_bound            = protocol_path ;
 protocol_path       = path ;
 
+(* Kind expression for explicit kind annotations (verum-ext.md §3.2)           *)
+(* kind_expr = 'Type' [ '->' kind_expr ] | '(' kind_expr ')'                   *)
+(* Examples: Type, Type -> Type, Type -> Type -> Type, (Type -> Type) -> Type  *)
+kind_expr = 'Type' , [ '->' , kind_expr ]
+          | '(' , kind_expr , ')' ;
+
+(* Kind-annotated generic parameter: F: Type -> Type                           *)
+(* Optional additional protocol bounds after '+': F: Type -> Type + Functor    *)
+kind_annotated_param = identifier , ':' , kind_expr , [ '+' , bounds ] ;
+
 (* Extended type_param to support HKT syntax: T or F<_> or F<_, _> *)
 extended_type_param = identifier , [ hk_params ] , [ ':' , bounds ] ;
 hk_params           = '<' , hk_placeholder_list , '>' ;
 hk_placeholder_list = '_' , { ',' , '_' } ;
 
-(* Extended generic_param to include HKT and context polymorphism *)
+(* Extended generic_param to include HKT, context polymorphism, and universe polymorphism *)
 (* Spec: docs/improvements.md Section 17.2 - Context Polymorphism *)
-extended_generic_param = extended_type_param | hk_type_param | meta_param | context_param ;
+(* Spec: verum-ext.md §2.1 - Universe Polymorphism *)
+(* Spec: verum-ext.md §3.2 - Kind annotation syntax                *)
+extended_generic_param = kind_annotated_param | extended_type_param | hk_type_param | meta_param | context_param | universe_param | level_param ;
 
 (* Context parameter for context polymorphism *)
 (* Enables higher-order functions to propagate contexts from callbacks *)
 (* Example: fn map<T, U, using C>(iter: I, f: fn(T) -> U using C) -> MapIter using C *)
 context_param = 'using' , identifier ;
+
+(* Universe level parameter — preferred form for universe polymorphism *)
+(* Spec: verum-ext.md §2.1                                             *)
+(* Example: @universe_poly fn id<universe u, A: Type(u)>(x: A) -> A { x } *)
+universe_param = 'universe' , identifier ;
+
+(* Universe level parameter — alternative form using bound syntax *)
+(* Example: fn id<u: Level, A: Type(u)>(x: A) -> A { x }          *)
+level_param = identifier , ':' , 'Level' ;
+
+(* Universe type with optional level annotation *)
+(* universe_type = 'Type' , [ '(' , universe_level_expr , ')' ] ;    *)
+(* universe_level_expr = integer_lit | identifier                     *)
+(*                     | 'max' '(' universe_level_expr ',' universe_level_expr ')' ; *)
 
 (* 2.4.2 Associated Type Bounds *)
 (* Constrain associated types in where clauses                                  *)

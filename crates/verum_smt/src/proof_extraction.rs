@@ -2328,6 +2328,111 @@ impl Default for ProofExtractor {
     }
 }
 
+// ==================== Bridge Conversion ====================
+
+impl ProofExtractor {
+    /// Convert a `proof_extraction::ProofTerm` into the lighter-weight
+    /// `proof_extraction_bridge::ProofTerm` representation.
+    ///
+    /// This is the glue between the Z3-facing proof tree (which uses
+    /// `Box<ProofTerm>` and raw `Text` formulas) and the tactic-centric bridge
+    /// type (which mirrors the same structure but is decoupled from Z3 internals
+    /// so that `proof_extraction_bridge` can be used without pulling in Z3).
+    ///
+    /// Most structural variants translate one-to-one.  Z3-specific or
+    /// extended proof rules that have no direct bridge analogue are collapsed
+    /// into `SmtVerified` so the certificate pipeline always produces a valid
+    /// (though possibly coarse) proof object.
+    pub fn to_bridge_term(
+        proof: &ProofTerm,
+    ) -> crate::proof_extraction_bridge::ProofTerm {
+        use crate::proof_extraction_bridge::ProofTerm as B;
+
+        match proof {
+            // ── Base cases ────────────────────────────────────────────────
+            ProofTerm::Axiom { name, .. } => B::Assumption {
+                name: name.clone(),
+            },
+            ProofTerm::Hypothesis { formula, .. } => B::Assumption {
+                name: formula.clone(),
+            },
+
+            // ── Classical rules ───────────────────────────────────────────
+            ProofTerm::Reflexivity { term } => B::Reflexivity { term: term.clone() },
+
+            ProofTerm::Symmetry { equality } => B::Symmetry {
+                proof: Box::new(Self::to_bridge_term(equality)),
+            },
+
+            ProofTerm::Transitivity { left, right } => B::Transitivity {
+                left: Box::new(Self::to_bridge_term(left)),
+                right: Box::new(Self::to_bridge_term(right)),
+            },
+
+            ProofTerm::ModusPonens { premise, implication } => B::ModusPonens {
+                hypothesis: Box::new(Self::to_bridge_term(premise)),
+                implication: Box::new(Self::to_bridge_term(implication)),
+            },
+
+            ProofTerm::Rewrite { source, rule, .. } => B::Congruence {
+                function: rule.clone(),
+                arg_proof: Box::new(Self::to_bridge_term(source)),
+            },
+
+            // ── Theory / SAT rules ────────────────────────────────────────
+            ProofTerm::TheoryLemma { theory, lemma } => B::SmtVerified {
+                solver: verum_common::Text::from("z3"),
+                goal: verum_common::Text::from(format!("theory:{} lemma:{}", theory, lemma)),
+            },
+
+            ProofTerm::UnitResolution { clauses } => {
+                // Fold resolution chain into a single SmtVerified node.
+                // A more faithful encoding would use TacticProduced, but SmtVerified
+                // gives the certificate generators enough information.
+                B::SmtVerified {
+                    solver: verum_common::Text::from("z3"),
+                    goal: verum_common::Text::from(format!(
+                        "unit-resolution({} clauses)",
+                        clauses.len()
+                    )),
+                }
+            }
+
+            ProofTerm::QuantifierInstantiation { quantified, instantiation } => {
+                B::Application {
+                    function: Box::new(Self::to_bridge_term(quantified)),
+                    argument: verum_common::Text::from(format!(
+                        "inst({})",
+                        instantiation
+                            .keys()
+                            .cloned()
+                            .collect::<verum_common::List<_>>()
+                            .iter()
+                            .map(|k| k.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )),
+                }
+            }
+
+            ProofTerm::Lemma { conclusion, proof } => B::TacticProduced {
+                tactic_name: verum_common::Text::from("lemma"),
+                subproofs: {
+                    let mut sps = verum_common::List::new();
+                    sps.push(Self::to_bridge_term(proof));
+                    sps
+                },
+            },
+
+            // ── Extended / catch-all ──────────────────────────────────────
+            _ => B::SmtVerified {
+                solver: verum_common::Text::from("z3"),
+                goal: verum_common::Text::from(format!("{:?}", proof)),
+            },
+        }
+    }
+}
+
 // ==================== Proof Analysis ====================
 
 /// Analysis result for a proof term

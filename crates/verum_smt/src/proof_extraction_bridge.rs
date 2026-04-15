@@ -15,6 +15,10 @@
 //!   │
 //!   ├─ extract_proof_term()  → ProofTerm (Verum-internal)
 //!   │
+//!   ├─ proof_to_certificate()  → Certificate (via CertificateGenerator)
+//!   │     ├─ lift_to_unified()   → proof_term_unified::ProofTerm
+//!   │     └─ CertificateGenerator::generate()
+//!   │
 //!   ├─ export_dedukti()      → Text (Dedukti λΠ-calculus)
 //!   ├─ export_coq()          → Text (Gallina)
 //!   ├─ export_lean()         → Text (Lean 4 term)
@@ -30,7 +34,7 @@
 //! - `proof_term_unified.rs` — unified proof term representation
 //! - `dependent.rs` — ProofStructure enum for dependent type proofs
 
-use verum_common::{List, Text};
+use verum_common::{List, Maybe, Text};
 
 use crate::tactics::TacticResult;
 
@@ -319,6 +323,222 @@ pub fn erase_proof(_proof: &ProofTerm) -> ProofTerm {
 pub fn should_erase(proof: &ProofTerm) -> bool {
     // All proofs are erased unless explicitly marked for export
     !matches!(proof, ProofTerm::Erased)
+}
+
+// ==================== Pipeline: ProofTerm → Certificate ====================
+
+/// Convert a `CertificateFormat` from this bridge module into the format type
+/// expected by `certificates::CertificateGenerator`.
+///
+/// This is necessary because the bridge module defines a lightweight local
+/// `CertificateFormat` for API convenience, while `certificates.rs` maintains
+/// the authoritative format enum (which also includes `OpenTheory`).
+pub fn lift_format(
+    format: CertificateFormat,
+) -> crate::certificates::CertificateFormat {
+    match format {
+        CertificateFormat::Dedukti => crate::certificates::CertificateFormat::Dedukti,
+        CertificateFormat::Coq => crate::certificates::CertificateFormat::Coq,
+        CertificateFormat::Lean => crate::certificates::CertificateFormat::Lean,
+        CertificateFormat::Metamath => crate::certificates::CertificateFormat::Metamath,
+        CertificateFormat::Json => crate::certificates::CertificateFormat::Json,
+    }
+}
+
+/// Lift a bridge `ProofTerm` into the unified proof term representation
+/// (`proof_term_unified::ProofTerm`) that `CertificateGenerator` consumes.
+///
+/// The bridge's `ProofTerm` is tactic-centric (produced by `extract_proof_term`),
+/// while the unified representation covers the full range of Z3 proof rules.
+/// Structural variants are translated directly; opaque SMT/tactic results are
+/// wrapped in `SmtProof` or `Apply` so that every certificate format can emit
+/// at least a valid (if coarse) proof object.
+pub fn lift_to_unified(
+    proof: &ProofTerm,
+) -> crate::proof_term_unified::ProofTerm {
+    use crate::proof_term_unified::ProofTerm as U;
+    use verum_ast::{Expr, ExprKind, Literal, LiteralKind};
+    use verum_ast::span::Span;
+    use verum_common::Heap;
+
+    /// Build a trivial `Expr` carrying a string annotation for use in
+    /// unified proof terms that require an `Expr` but only have text.
+    fn text_expr(s: &str) -> Expr {
+        // Wrap the string as a regular string-literal expression at a dummy span.
+        let lit = Literal::new(
+            LiteralKind::Text(verum_ast::literal::StringLit::Regular(
+                verum_common::Text::from(s),
+            )),
+            Span::dummy(),
+        );
+        Expr::new(ExprKind::Literal(lit), Span::dummy())
+    }
+
+    match proof {
+        ProofTerm::Assumption { name } => U::Assumption {
+            id: 0,
+            formula: text_expr(name.as_str()),
+        },
+
+        ProofTerm::Reflexivity { term } => U::Reflexivity {
+            term: text_expr(term.as_str()),
+        },
+
+        ProofTerm::Symmetry { proof } => U::Symmetry {
+            equality: Heap::new(lift_to_unified(proof)),
+        },
+
+        ProofTerm::Transitivity { left, right } => U::Transitivity {
+            left: Heap::new(lift_to_unified(left)),
+            right: Heap::new(lift_to_unified(right)),
+        },
+
+        ProofTerm::Congruence { function, arg_proof } => {
+            // Congruence ≈ applying a function-level rewrite rule
+            U::Rewrite {
+                source: Heap::new(lift_to_unified(arg_proof)),
+                rule: function.clone(),
+                target: text_expr(&format!("cong({})", function)),
+            }
+        }
+
+        ProofTerm::ModusPonens { hypothesis, implication } => U::ModusPonens {
+            premise: Heap::new(lift_to_unified(hypothesis)),
+            implication: Heap::new(lift_to_unified(implication)),
+        },
+
+        ProofTerm::Introduction { param, param_type, body } => U::Lambda {
+            var: param.clone(),
+            body: Heap::new(lift_to_unified(body)),
+        },
+
+        ProofTerm::Application { function, argument } => U::Apply {
+            rule: argument.clone(),
+            premises: {
+                let mut ps = List::new();
+                ps.push(Heap::new(lift_to_unified(function)));
+                ps
+            },
+        },
+
+        ProofTerm::SmtVerified { solver, goal } => U::SmtProof {
+            solver: solver.clone(),
+            formula: text_expr(goal.as_str()),
+            smt_trace: Maybe::None,
+        },
+
+        ProofTerm::TacticProduced { tactic_name, subproofs } => U::Apply {
+            rule: tactic_name.clone(),
+            premises: subproofs
+                .iter()
+                .map(|sp| Heap::new(lift_to_unified(sp)))
+                .collect(),
+        },
+
+        ProofTerm::CubicalPath { dimension, body } => U::Lambda {
+            var: dimension.clone(),
+            body: Heap::new(lift_to_unified(body)),
+        },
+
+        ProofTerm::Transport { path_proof, value_proof } => U::Subst {
+            eq_proof: Heap::new(lift_to_unified(path_proof)),
+            property: Heap::new(text_expr("transport")),
+        },
+
+        // Erased proofs become a trivially true SMT discharge
+        ProofTerm::Erased => U::SmtProof {
+            solver: Text::from("z3"),
+            formula: text_expr("erased"),
+            smt_trace: Maybe::None,
+        },
+    }
+}
+
+/// Convert an extracted proof term into an exportable certificate.
+///
+/// This is the primary entry point for the proof extraction → certificate
+/// export pipeline:
+///
+/// ```text
+/// ProofTerm (bridge)
+///   └─ lift_to_unified()  →  proof_term_unified::ProofTerm
+///   └─ CertificateGenerator::generate()  →  Certificate
+/// ```
+///
+/// # Arguments
+///
+/// * `proof` — the proof term produced by `extract_proof_term`
+/// * `theorem_name` — identifier for the theorem (used in certificate header)
+/// * `theorem_statement` — human-readable statement of what was proven
+/// * `format` — target certificate format
+///
+/// # Returns
+///
+/// A [`crate::certificates::Certificate`] ready for integrity-checking, signing,
+/// or writing to disk. Returns [`crate::certificates::CertificateError`] on
+/// generation failure (malformed proof, unsupported format, etc.).
+pub fn proof_to_certificate(
+    proof: &ProofTerm,
+    theorem_name: &str,
+    theorem_statement: &str,
+    format: CertificateFormat,
+) -> Result<crate::certificates::Certificate, crate::certificates::CertificateError> {
+    // 1. Validate: erased proofs cannot be exported.
+    if matches!(proof, ProofTerm::Erased) {
+        return Err(crate::certificates::CertificateError::GenerationFailed(
+            Text::from("cannot export an erased proof; proof must not have been erased before certificate generation"),
+        ));
+    }
+
+    // 2. Lift the bridge ProofTerm → unified ProofTerm.
+    let unified = lift_to_unified(proof);
+
+    // 3. Build the Theorem descriptor.
+    let theorem = crate::certificates::Theorem::new(
+        Text::from(theorem_name),
+        Text::from(theorem_statement),
+    );
+
+    // 4. Map format and invoke CertificateGenerator.
+    let cert_format = lift_format(format);
+    let generator = crate::certificates::CertificateGenerator::new(cert_format);
+    generator.generate(&unified, theorem)
+}
+
+/// Convenience wrapper: convert an extracted proof term into certificates in
+/// *all* supported formats at once.
+///
+/// Returns a list of `(format, certificate)` pairs, one per format. Any format
+/// that fails generation is silently skipped (errors are collected separately).
+///
+/// Use this when you want to produce a full cross-verification bundle.
+pub fn proof_to_all_certificates(
+    proof: &ProofTerm,
+    theorem_name: &str,
+    theorem_statement: &str,
+) -> (
+    List<(CertificateFormat, crate::certificates::Certificate)>,
+    List<(CertificateFormat, crate::certificates::CertificateError)>,
+) {
+    let formats = [
+        CertificateFormat::Dedukti,
+        CertificateFormat::Coq,
+        CertificateFormat::Lean,
+        CertificateFormat::Metamath,
+        CertificateFormat::Json,
+    ];
+
+    let mut certs = List::new();
+    let mut errors = List::new();
+
+    for format in formats {
+        match proof_to_certificate(proof, theorem_name, theorem_statement, format) {
+            Ok(cert) => certs.push((format, cert)),
+            Err(e) => errors.push((format, e)),
+        }
+    }
+
+    (certs, errors)
 }
 
 #[cfg(test)]

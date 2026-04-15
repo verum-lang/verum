@@ -1653,6 +1653,12 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
         ExprKind::CalcBlock(_) => {
             // Steps contain expressions but we don't walk proof constructs yet
         }
+        // Copattern body: visit each arm's body expression
+        ExprKind::CopatternBody { arms, .. } => {
+            for arm in arms.iter() {
+                visit_child!(visitor, arm.body.as_ref(), Expr);
+            }
+        }
     }
 }
 

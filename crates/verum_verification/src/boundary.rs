@@ -1203,6 +1203,12 @@ impl CallGraphBuilder {
             ExprKind::CalcBlock(_) => {
                 // Calc blocks are proof constructs - no boundary checking needed
             }
+            ExprKind::CopatternBody { arms, .. } => {
+                // Copattern body: visit each arm body for call-graph boundary analysis
+                for arm in arms.iter() {
+                    self.visit_expr(&arm.body);
+                }
+            }
         }
     }
 

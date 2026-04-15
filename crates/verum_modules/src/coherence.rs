@@ -1642,6 +1642,14 @@ fn generic_param_to_string(param: &verum_ast::ty::GenericParam) -> String {
         GenericParamKind::Level { name } => {
             format!("{}: Level", name.name)
         }
+        GenericParamKind::KindAnnotated { name, kind, bounds } => {
+            if bounds.is_empty() {
+                format!("{}: {}", name.name, kind)
+            } else {
+                let bounds_str: Vec<String> = bounds.iter().map(type_bound_to_string).collect();
+                format!("{}: {} + {}", name.name, kind, bounds_str.join(" + "))
+            }
+        }
     }
 }
 

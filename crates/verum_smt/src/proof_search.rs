@@ -5627,11 +5627,260 @@ impl ProofSearchEngine {
                 }
             }
 
+            // === Oracle tactic (LLM-guided stochastic search) ===
+            //
+            // The tactic name arriving here has the form `oracle:<confidence>`
+            // because `user_tactic.rs` embeds the threshold in the
+            // `TacticKind::Custom` tag.  We parse it back out before
+            // delegating to the oracle execution function.
+            //
+            // Also handle the bare `oracle` name for the no-arg surface form.
+            "oracle" => try_oracle_tactic(goal, 0.9, self),
+
+            name if name.starts_with("oracle:") => {
+                let confidence = name
+                    .strip_prefix("oracle:")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.9);
+                try_oracle_tactic(goal, confidence, self)
+            }
+
             _ => Err(ProofError::TacticFailed(
                 format!("Unknown tactic: {}", name).into(),
             )),
         }
     }
+}
+
+// ==================== Oracle Tactic ====================
+//
+// The oracle tactic implements LLM/Giry-style stochastic proof search:
+//
+//   1. Serialize the proof goal as a text description.
+//   2. Generate a ranked list of candidate tactic sequences (simulated here
+//      via heuristic pattern matching; a real deployment calls the LLM via
+//      `@intrinsic("llm.query_log_probs")`).
+//   3. Normalise raw scores with softmax (temperature = 1.0).
+//   4. Filter candidates whose softmax probability meets the confidence
+//      threshold τ.
+//   5. Try the best surviving candidate as a `ProofTactic::Named` dispatch.
+//   6. Verify the result via the existing SMT path — the oracle is NEVER
+//      trusted without verification.
+//   7. Fall back to `try_auto` if no candidate clears the bar or every
+//      candidate fails verification.
+//
+// The design mirrors core/math/giry.vr §14 `sample_above`: the oracle
+// selects the highest-probability functor (tactic) above threshold τ.
+
+/// Execute the oracle tactic on `goal`.
+///
+/// `confidence` — the minimum softmax probability required before a
+/// candidate is dispatched.  Typical values: 0.7 (permissive) to 0.95
+/// (strict).  Defaults to 0.9 when unspecified.
+pub(crate) fn try_oracle_tactic(
+    goal: &ProofGoal,
+    confidence: f64,
+    engine: &mut ProofSearchEngine,
+) -> Result<List<ProofGoal>, ProofError> {
+    // Step 1 — serialise goal to text so pattern heuristics can inspect it.
+    let goal_text = format_goal_for_oracle(goal);
+
+    // Step 2 — generate raw (name, score) candidates.
+    let raw_candidates = generate_oracle_candidates(&goal_text);
+
+    // Step 3 — softmax-normalise the raw scores.
+    let scored = softmax_score(&raw_candidates, 1.0);
+
+    // Step 4 — pick the best candidate that clears the confidence bar.
+    let best = scored
+        .iter()
+        .filter(|(_, prob)| *prob >= confidence)
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    match best {
+        Some((candidate_name, _prob)) => {
+            // Step 5 — try the candidate as a named tactic sequence.
+            // Each candidate can be a single tactic name or a semicolon-separated
+            // sequence (e.g. "intro; auto").  We split on "; " and chain them.
+            let result = try_apply_oracle_candidate(goal, candidate_name, engine);
+
+            match result {
+                Ok(subgoals) => Ok(subgoals),
+                Err(_) => {
+                    // Step 7 — candidate failed SMT verification; fall back to auto.
+                    engine.try_auto(goal)
+                }
+            }
+        }
+        None => {
+            // No candidate above the confidence threshold — fall back to auto.
+            engine.try_auto(goal)
+        }
+    }
+}
+
+/// Serialize a `ProofGoal` into a human-readable text string for oracle
+/// inspection.  The text is also used by the heuristic candidate generator.
+fn format_goal_for_oracle(goal: &ProofGoal) -> String {
+    let goal_str = format!("{:?}", goal.goal.kind);
+    if goal.hypotheses.is_empty() {
+        goal_str
+    } else {
+        let hyps: Vec<String> = goal
+            .hypotheses
+            .iter()
+            .map(|h| format!("{:?}", h.kind))
+            .collect();
+        format!("{} [hyps: {}]", goal_str, hyps.join(", "))
+    }
+}
+
+/// Generate proof-term candidates for a goal described by `goal_text`.
+///
+/// In a real deployment this calls the language model via
+/// `@intrinsic("llm.query_log_probs")`.  At compile/test time we simulate
+/// the LLM by pattern-matching on goal structure and returning a ranked list
+/// of known-good tactic strategies.
+///
+/// Returns `Vec<(tactic_sequence, raw_score)>` where scores are *unnormalised*
+/// log-probability surrogates (higher = more likely to succeed).
+fn generate_oracle_candidates(goal_text: &str) -> Vec<(String, f64)> {
+    let mut candidates: Vec<(String, f64)> = Vec::new();
+
+    // Equality / Path goals — try reflexivity-first strategies.
+    if goal_text.contains("Eq") || goal_text.contains("Path") || goal_text.contains("BinOp::Eq") {
+        candidates.push(("simp".to_string(), 0.6));
+        candidates.push(("cubical".to_string(), 0.5));
+        candidates.push(("ring".to_string(), 0.4));
+        candidates.push(("auto".to_string(), 0.3));
+    }
+
+    // Implication / forall goals — intro then solve.
+    if goal_text.contains("Imply") || goal_text.contains("ForAll") || goal_text.contains("->") {
+        candidates.push(("auto".to_string(), 0.5));
+        candidates.push(("simp".to_string(), 0.3));
+    }
+
+    // Categorical / functor goals.
+    if goal_text.contains("Category")
+        || goal_text.contains("Functor")
+        || goal_text.contains("functor")
+    {
+        candidates.push(("category_simp".to_string(), 0.7));
+        candidates.push(("category_law".to_string(), 0.5));
+        candidates.push(("auto".to_string(), 0.2));
+    }
+
+    // Descent / topos goals.
+    if goal_text.contains("descent") || goal_text.contains("Descent") || goal_text.contains("sheaf") {
+        candidates.push(("descent_check".to_string(), 0.7));
+        candidates.push(("auto".to_string(), 0.2));
+    }
+
+    // Arithmetic goals.
+    if goal_text.contains("Int") || goal_text.contains("LIA") || goal_text.contains("Add") {
+        candidates.push(("omega".to_string(), 0.6));
+        candidates.push(("ring".to_string(), 0.4));
+        candidates.push(("auto".to_string(), 0.3));
+    }
+
+    // Conjunction goals.
+    if goal_text.contains("And") || goal_text.contains("&&") {
+        candidates.push(("auto".to_string(), 0.5));
+        candidates.push(("simp".to_string(), 0.3));
+    }
+
+    // Universal fallbacks — always present.
+    candidates.push(("auto".to_string(), 0.1));
+    candidates.push(("simp".to_string(), 0.08));
+    candidates.push(("blast".to_string(), 0.05));
+
+    candidates
+}
+
+/// Apply temperature-scaled softmax normalisation to raw candidate scores.
+///
+/// Implements the numerically stable log-sum-exp trick:
+///   p_i = exp((s_i − max_s) / τ) / Σ_j exp((s_j − max_s) / τ)
+///
+/// Returns a new vector of `(name, probability)` pairs.  The probabilities
+/// sum to 1.0 (modulo floating-point rounding).
+fn softmax_score(candidates: &[(String, f64)], temperature: f64) -> Vec<(String, f64)> {
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let max_score = candidates
+        .iter()
+        .map(|(_, s)| *s)
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    let exps: Vec<f64> = candidates
+        .iter()
+        .map(|(_, s)| ((s - max_score) / temperature).exp())
+        .collect();
+
+    let sum: f64 = exps.iter().sum();
+    if sum == 0.0 {
+        // Degenerate case: return uniform distribution.
+        let uniform = 1.0 / candidates.len() as f64;
+        return candidates
+            .iter()
+            .map(|(name, _)| (name.clone(), uniform))
+            .collect();
+    }
+
+    candidates
+        .iter()
+        .zip(exps.iter())
+        .map(|((name, _), exp)| (name.clone(), exp / sum))
+        .collect()
+}
+
+/// Attempt to apply an oracle candidate tactic to a goal.
+///
+/// The candidate is a tactic name (e.g. `"auto"`, `"category_simp"`) or a
+/// semicolon-separated sequence (e.g. `"intro; auto"`).  We split on `"; "`
+/// and dispatch each step via `try_named_tactic`.
+///
+/// The result is verified by the SMT backend through the normal `execute_tactic`
+/// / `try_named_tactic` path — the oracle is NEVER trusted without verification.
+fn try_apply_oracle_candidate(
+    goal: &ProofGoal,
+    candidate: &str,
+    engine: &mut ProofSearchEngine,
+) -> Result<List<ProofGoal>, ProofError> {
+    // Split compound candidates (e.g. "intro; auto") into individual steps.
+    let steps: Vec<&str> = candidate.split("; ").collect();
+
+    let mut current_goals: List<ProofGoal> = List::new();
+    current_goals.push(goal.clone());
+
+    for step in steps {
+        if current_goals.is_empty() {
+            break; // All goals already closed.
+        }
+
+        let tactic = ProofTactic::Named {
+            name: Text::from(step.trim()),
+            args: List::new(),
+        };
+
+        let mut next_goals: List<ProofGoal> = List::new();
+        for g in current_goals.iter() {
+            match engine.execute_tactic(&tactic, g) {
+                Ok(mut subgoals) => {
+                    for sg in subgoals.iter() {
+                        next_goals.push(sg.clone());
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        current_goals = next_goals;
+    }
+
+    Ok(current_goals)
 }
 
 // ==================== Ring Polynomial ====================

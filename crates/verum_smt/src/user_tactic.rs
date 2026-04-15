@@ -87,6 +87,19 @@ pub enum TacticExpr {
         name: Text,
         args: List<Text>,
     },
+
+    /// LLM-oracle tactic: propose proof candidates via language model,
+    /// sample above confidence threshold, verify via SMT.
+    ///
+    /// Surface syntax: `oracle` or `oracle(0.85)`.
+    /// The `goal_text` field is empty when constructed at parse time and is
+    /// filled in by the execution engine just before the tactic is run.
+    Oracle {
+        /// Serialised representation of the goal (filled at execution time).
+        goal_text: Text,
+        /// Minimum softmax probability required before a candidate is trusted.
+        confidence: f64,
+    },
 }
 
 /// Result of compiling a surface tactic to an internal combinator.
@@ -196,6 +209,10 @@ pub fn compile_tactic(expr: &TacticExpr) -> CompileResult {
         TacticExpr::UserDefined { name, args } => {
             compile_named_tactic_with_args(name, args)
         }
+
+        TacticExpr::Oracle { confidence, .. } => {
+            CompileResult::Ok(oracle_strategy(*confidence))
+        }
     }
 }
 
@@ -228,6 +245,9 @@ fn compile_named_tactic(name: &str) -> CompileResult {
         // === Decision procedures ===
         "decide" => TacticKind::Sat,
         "tauto" => TacticKind::Blast,
+
+        // === Oracle tactic (no-arg form) ===
+        "oracle" => return CompileResult::Ok(oracle_strategy(0.9)),
 
         // === Cubical HoTT tactics ===
         "cubical" => return CompileResult::Ok(cubical_strategy()),
@@ -308,19 +328,24 @@ fn compile_named_tactic_with_args(name: &str, args: &[Text]) -> CompileResult {
 
         "oracle" => {
             // LLM-oracle tactic: oracle(confidence)
-            // Delegates to auto strategy with a confidence parameter
-            let confidence = args.first()
+            //
+            // Parse the optional confidence threshold (0 < confidence ≤ 1.0).
+            // Build an Oracle-branded combinator that the execution engine
+            // (proof_search.rs::try_named_tactic) recognises and dispatches
+            // to try_oracle_tactic.
+            let confidence = args
+                .first()
                 .and_then(|s| s.as_str().parse::<f64>().ok())
+                .filter(|&c| c > 0.0 && c <= 1.0)
                 .unwrap_or(0.9);
-            let mut params = TacticParams::default();
-            params.options.insert(
-                Text::from(format!("oracle_confidence:{}", confidence)),
-                true,
-            );
-            CompileResult::Ok(TacticCombinator::WithParams(
-                Box::new(auto_strategy()),
-                params,
-            ))
+
+            // Tag the combinator so the engine knows to use the oracle path.
+            // We encode the confidence threshold in the custom tactic name so
+            // the proof_search dispatcher can recover it without needing a
+            // separate wrapper type.
+            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(
+                Text::from(format!("oracle:{}", confidence)),
+            )))
         }
 
         _ => compile_named_tactic(name),
@@ -339,6 +364,21 @@ fn auto_strategy() -> TacticCombinator {
         .or_else(TacticKind::SMT)
         .or_else(TacticKind::Blast)
         .build()
+}
+
+/// The `oracle(confidence)` strategy: stochastic LLM-guided proof search.
+///
+/// Encodes the confidence threshold in the custom tactic tag so that
+/// `proof_search.rs::try_named_tactic` can recover it and dispatch to
+/// `try_oracle_tactic`.  Falls back to `auto` via `OrElse` if the oracle
+/// path does not fire.
+fn oracle_strategy(confidence: f64) -> TacticCombinator {
+    TacticCombinator::OrElse(
+        Box::new(TacticCombinator::Single(TacticKind::Custom(
+            Text::from(format!("oracle:{}", confidence)),
+        ))),
+        Box::new(auto_strategy()),
+    )
 }
 
 /// The `norm_num` strategy: numerical normalization.
@@ -524,6 +564,82 @@ mod tests {
         match proof_by_tactic("nonexistent_tactic", "") {
             ProofByResult::Error(_) => {}
             other => panic!("expected Error, got {:?}", other),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Oracle tactic tests
+    // -------------------------------------------------------------------------
+
+    /// `oracle` with no args compiles to an OrElse(Custom("oracle:0.9"), auto).
+    #[test]
+    fn test_compile_oracle_no_args() {
+        match compile_tactic(&TacticExpr::Named(Text::from("oracle"))) {
+            CompileResult::Ok(TacticCombinator::OrElse(inner, _fallback)) => {
+                match *inner {
+                    TacticCombinator::Single(TacticKind::Custom(ref tag)) => {
+                        assert!(
+                            tag.starts_with("oracle:"),
+                            "tag should start with oracle:, got {}",
+                            tag
+                        );
+                    }
+                    ref other => panic!("expected Single(Custom(oracle:...)), got {:?}", other),
+                }
+            }
+            ref other => panic!("expected OrElse, got {:?}", other),
+        }
+    }
+
+    /// `oracle(0.75)` compiles to a Single(Custom("oracle:0.75")).
+    #[test]
+    fn test_compile_oracle_with_confidence() {
+        match compile_named_tactic_with_args("oracle", &[Text::from("0.75")]) {
+            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(ref tag))) => {
+                assert_eq!(tag.as_str(), "oracle:0.75");
+            }
+            ref other => panic!("expected Single(Custom(oracle:0.75)), got {:?}", other),
+        }
+    }
+
+    /// `oracle` with an out-of-range confidence falls back to the default 0.9.
+    #[test]
+    fn test_compile_oracle_invalid_confidence_fallback() {
+        // Negative confidence is out of range; should fall back to 0.9.
+        match compile_named_tactic_with_args("oracle", &[Text::from("-0.5")]) {
+            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(ref tag))) => {
+                assert_eq!(tag.as_str(), "oracle:0.9", "should fall back to 0.9");
+            }
+            ref other => panic!("expected Single(Custom(oracle:0.9)), got {:?}", other),
+        }
+    }
+
+    /// The `Oracle` AST variant compiles to an OrElse strategy.
+    #[test]
+    fn test_compile_oracle_ast_variant() {
+        let expr = TacticExpr::Oracle {
+            goal_text: Text::from(""),
+            confidence: 0.85,
+        };
+        match compile_tactic(&expr) {
+            CompileResult::Ok(TacticCombinator::OrElse(ref inner, _)) => {
+                match inner.as_ref() {
+                    TacticCombinator::Single(TacticKind::Custom(ref tag)) => {
+                        assert!(tag.starts_with("oracle:"), "tag should start with oracle:");
+                    }
+                    other => panic!("expected Single(Custom(oracle:...)), got {:?}", other),
+                }
+            }
+            ref other => panic!("expected OrElse, got {:?}", other),
+        }
+    }
+
+    /// `proof_by_tactic("oracle", ...)` compiles successfully.
+    #[test]
+    fn test_proof_by_oracle() {
+        match proof_by_tactic("oracle", "(assert (= x x))") {
+            ProofByResult::Compiled { .. } => {}
+            other => panic!("expected Compiled, got {:?}", other),
         }
     }
 }

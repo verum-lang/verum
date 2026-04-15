@@ -405,6 +405,15 @@ impl AttributeValidator {
                 true
             }
 
+            // Universe polymorphism attribute
+            // @universe_poly marks a fn/type declaration as universe-polymorphic.
+            // It signals that the declaration uses universe level parameters (introduced
+            // via `universe u` or `u: Level` in generic param lists).
+            // Spec: verum-ext.md §2.1 - Universe Polymorphism
+            "universe_poly" => {
+                target.contains(AttributeTarget::Function) || target.contains(AttributeTarget::Type)
+            }
+
             // Multi-target attributes
             "verify" | "must_use" => {
                 target.contains(AttributeTarget::Function) || target.contains(AttributeTarget::Type)

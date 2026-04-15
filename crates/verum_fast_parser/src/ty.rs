@@ -9,7 +9,7 @@
 //! - Function types: `fn(A, B) -> C`
 
 use verum_ast::ffi::CallingConvention;
-use verum_ast::ty::{GenericParamKind, Lifetime, WherePredicate, WherePredicateKind};
+use verum_ast::ty::{GenericParamKind, KindAnnotation, Lifetime, WherePredicate, WherePredicateKind};
 use verum_ast::{
     ContextList, ContextRequirement, GenericParam, Ident, Path, RefinementPredicate, Type,
     TypeKind, WhereClause, ty::*,
@@ -932,46 +932,78 @@ impl<'a> RecursiveParser<'a> {
 
         // Check for explicit level annotation: Type(...)
         let level = if self.stream.consume(&TokenKind::LParen).is_some() {
-            let level_expr = match self.stream.peek() {
-                // Concrete level: Type(0), Type(1), Type(2)
-                Some(Token {
-                    kind: TokenKind::Integer(int_lit),
-                    ..
-                }) => {
-                    let val = int_lit.as_i64().and_then(|v| u32::try_from(v).ok()).ok_or_else(|| {
-                        ParseError::invalid_syntax(
-                            "universe level must be a non-negative integer",
-                            self.stream.current_span(),
-                        )
-                    })?;
-                    self.stream.advance();
-                    UniverseLevelExpr::Concrete(val)
-                }
-                // Level variable: Type(u)
-                Some(Token {
-                    kind: TokenKind::Ident(_),
-                    ..
-                }) => {
-                    let var_name = self.consume_ident()?;
-                    let var_span = self.stream.current_span();
-                    UniverseLevelExpr::Variable(Ident::new(var_name, var_span))
-                }
-                _ => {
-                    return Err(ParseError::invalid_syntax(
-                        "expected universe level (integer or level variable) after 'Type('",
-                        self.stream.current_span(),
-                    ));
-                }
-            };
+            let level_expr = self.parse_universe_level_expr()?;
             self.stream.expect(TokenKind::RParen)?;
             Maybe::Some(level_expr)
         } else {
-            // Bare `Type` — implicitly Type(0)
+            // Bare `Type` -- implicitly Type(0)
             Maybe::None
         };
 
         let span = self.stream.make_span(start_pos);
         Ok(Type::new(TypeKind::Universe { level }, span))
+    }
+
+    /// Parse a universe level expression inside `Type(...)`.
+    ///
+    /// Grammar:
+    ///   universe_level_expr = integer_lit
+    ///                       | identifier
+    ///                       | 'max' '(' universe_level_expr ',' universe_level_expr ')'
+    ///
+    /// Examples:
+    ///   Type(0)          -- concrete level 0
+    ///   Type(u)          -- level variable u
+    ///   Type(max(u, v))  -- maximum of two levels
+    fn parse_universe_level_expr(&mut self) -> ParseResult<UniverseLevelExpr> {
+        match self.stream.peek() {
+            // Concrete level: 0, 1, 2, ...
+            Some(Token {
+                kind: TokenKind::Integer(int_lit),
+                ..
+            }) => {
+                let val = int_lit
+                    .as_i64()
+                    .and_then(|v| u32::try_from(v).ok())
+                    .ok_or_else(|| {
+                        ParseError::invalid_syntax(
+                            "universe level must be a non-negative integer",
+                            self.stream.current_span(),
+                        )
+                    })?;
+                self.stream.advance();
+                Ok(UniverseLevelExpr::Concrete(val))
+            }
+            // max(u, v) -- maximum of two universe levels
+            Some(Token {
+                kind: TokenKind::Ident(kw),
+                ..
+            }) if kw.as_str() == "max" => {
+                self.stream.advance(); // consume 'max'
+                self.stream.expect(TokenKind::LParen)?;
+                let lhs = self.parse_universe_level_expr()?;
+                self.stream.expect(TokenKind::Comma)?;
+                let rhs = self.parse_universe_level_expr()?;
+                self.stream.expect(TokenKind::RParen)?;
+                Ok(UniverseLevelExpr::Max(
+                    Heap::new(lhs),
+                    Heap::new(rhs),
+                ))
+            }
+            // Level variable: u, v, ...
+            Some(Token {
+                kind: TokenKind::Ident(_),
+                ..
+            }) => {
+                let var_name = self.consume_ident()?;
+                let var_span = self.stream.current_span();
+                Ok(UniverseLevelExpr::Variable(Ident::new(var_name, var_span)))
+            }
+            _ => Err(ParseError::invalid_syntax(
+                "expected universe level expression (integer, level variable, or max(u, v))",
+                self.stream.current_span(),
+            )),
+        }
     }
 
     /// Parse path type expression: `Path<A>(a, b)`.
@@ -2680,6 +2712,7 @@ impl<'a> RecursiveParser<'a> {
                 let name_str = match &param.kind {
                     GenericParamKind::Type { name, .. } => Some(name.as_str()),
                     GenericParamKind::HigherKinded { name, .. } => Some(name.as_str()),
+                    GenericParamKind::KindAnnotated { name, .. } => Some(name.as_str()),
                     GenericParamKind::Const { name, .. } => Some(name.as_str()),
                     GenericParamKind::Meta { name, .. } => Some(name.as_str()),
                     GenericParamKind::Context { name, .. } => Some(name.as_str()),
@@ -2742,6 +2775,34 @@ impl<'a> RecursiveParser<'a> {
             let span = self.stream.make_span(start_pos);
             return Ok(GenericParam {
                 kind: GenericParamKind::Context {
+                    name: Ident::new(name, name_span),
+                },
+                is_implicit,
+                span,
+            });
+        }
+
+        // Check for universe level parameter: universe u
+        // Universe polymorphism -- preferred form per verum-ext.md §2.1.
+        // Grammar: universe_param = 'universe' , identifier ;
+        // Example: @universe_poly fn id<universe u, A: Type(u)>(x: A) -> A { x }
+        // Note: 'universe' is context-sensitive -- only acts as a keyword inside generic params.
+        if let Some(Token {
+            kind: TokenKind::Ident(kw),
+            ..
+        }) = self.stream.peek()
+            && kw.as_str() == "universe"
+        {
+            // Consume the contextual 'universe' keyword
+            self.stream.advance();
+            let name = self.consume_ident()?;
+            let name_span = self.stream.current_span();
+            if is_implicit {
+                self.stream.expect(TokenKind::RBrace)?;
+            }
+            let span = self.stream.make_span(start_pos);
+            return Ok(GenericParam {
+                kind: GenericParamKind::Level {
                     name: Ident::new(name, name_span),
                 },
                 is_implicit,
@@ -2906,6 +2967,36 @@ impl<'a> RecursiveParser<'a> {
                             span,
                         });
                     }
+                }
+
+                // Check for kind annotation: F: Type -> Type
+                // Grammar: kind_annotated_param = identifier ':' kind_expr
+                //          kind_expr = 'Type' [ '->' kind_expr ] | '(' kind_expr ')'
+                // Disambiguates from protocol bounds (T: Display) by the presence of
+                // the `Type` keyword (TokenKind::Type) as the first token after ':'.
+                if self.stream.check(&TokenKind::Type) {
+                    let kind_ann = self.parse_kind_annotation()?;
+
+                    // Optional additional protocol bounds after '+': F: Type -> Type + Functor
+                    let bounds = if self.stream.consume(&TokenKind::Plus).is_some() {
+                        self.parse_type_bounds_or_type()?
+                    } else {
+                        List::new()
+                    };
+
+                    if is_implicit {
+                        self.stream.expect(TokenKind::RBrace)?;
+                    }
+                    let span = self.stream.make_span(start_pos);
+                    return Ok(GenericParam {
+                        kind: GenericParamKind::KindAnnotated {
+                            name: Ident::new(name, name_span),
+                            kind: kind_ann,
+                            bounds,
+                        },
+                        is_implicit,
+                        span,
+                    });
                 }
 
                 // Check for meta parameter
@@ -3744,5 +3835,65 @@ impl<'a> RecursiveParser<'a> {
             "expected protocol type",
             self.stream.current_span(),
         ))
+    }
+
+    /// Parse a kind expression for HKT kind annotations.
+    ///
+    /// Grammar:
+    /// ```ebnf
+    /// kind_expr = 'Type' , [ '->' , kind_expr ]
+    ///           | '(' , kind_expr , ')' ;
+    /// ```
+    ///
+    /// Examples:
+    /// - `Type`              → `KindAnnotation::Type`
+    /// - `Type -> Type`      → `Arrow(Type, Type)`
+    /// - `Type -> Type -> Type` → `Arrow(Type, Arrow(Type, Type))`
+    ///
+    /// Called after the `:` in `F: Type -> Type`.
+    /// The caller is responsible for having already confirmed that
+    /// `TokenKind::Type` is next in the stream.
+    fn parse_kind_annotation(&mut self) -> ParseResult<KindAnnotation> {
+        let start_pos = self.stream.position();
+
+        // Parenthesised kind: '(' kind_expr ')'
+        if self.stream.consume(&TokenKind::LParen).is_some() {
+            let inner = self.parse_kind_annotation()?;
+            // Pre-capture span before the mutable `expect` call to satisfy the borrow checker.
+            let paren_span = self.stream.make_span(start_pos);
+            self.stream.expect(TokenKind::RParen).map_err(|_| {
+                ParseError::invalid_syntax(
+                    "expected `)` to close parenthesised kind expression",
+                    paren_span,
+                )
+            })?;
+            // After closing paren, check for arrow continuation
+            return if self.stream.consume(&TokenKind::RArrow).is_some() {
+                let rhs = self.parse_kind_annotation()?;
+                Ok(KindAnnotation::Arrow(Box::new(inner), Box::new(rhs)))
+            } else {
+                Ok(inner)
+            };
+        }
+
+        // Base kind: 'Type' — pre-capture span before the mutable `expect` call.
+        let type_span = self.stream.make_span(start_pos);
+        self.stream.expect(TokenKind::Type).map_err(|_| {
+            ParseError::invalid_syntax(
+                "expected `Type` in kind annotation (e.g. `F: Type -> Type`)",
+                type_span,
+            )
+        })?;
+
+        // Check for arrow: '->' means this is an arrow kind
+        if self.stream.consume(&TokenKind::RArrow).is_some() {
+            let rhs = self.parse_kind_annotation()?;
+            Ok(KindAnnotation::Arrow(
+                Box::new(KindAnnotation::Type),
+                Box::new(rhs),
+            ))
+        } else {
+            Ok(KindAnnotation::Type)
+        }
     }
 }

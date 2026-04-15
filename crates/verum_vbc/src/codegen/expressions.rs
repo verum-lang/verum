@@ -726,6 +726,14 @@ impl VbcCodegen {
             ExprKind::NamedArg { value, .. } => {
                 self.compile_expr(value)
             }
+
+            // Copattern body: defines a coinductive value by observation.
+            // Each arm specifies what the corresponding destructor returns.
+            // At runtime this compiles to a record/object where each slot
+            // holds the thunk/closure for the corresponding observation.
+            ExprKind::CopatternBody { arms, .. } => {
+                self.compile_copattern_body(arms)
+            }
         }
     }
 
@@ -9847,6 +9855,63 @@ impl VbcCodegen {
                     self.ctx.free_temp(value_reg);
                 }
             }
+        }
+
+        Ok(Some(result))
+    }
+
+    // ==================== Coinductive / Copattern ====================
+
+    /// Compiles a copattern body into a VBC object.
+    ///
+    /// A copattern body defines a coinductive value by specifying the result of
+    /// each observation. At the bytecode level this is represented as an ordinary
+    /// object (allocated with `New`) whose fields correspond to the observations.
+    ///
+    /// Each field stores the **value** produced by the corresponding arm expression.
+    /// For non-thunked arms (leaf values like integers) this is a direct value.
+    /// For recursive arms (the co-recursive call), the expression is compiled in
+    /// the normal way — the productivity checker in `verum_types` guarantees the
+    /// call is guarded so the interpreter will not diverge on demand.
+    ///
+    /// Field assignment uses `SetF` with a sequential index matching the arm order.
+    /// The interpreter resolves `head`/`tail`/etc. via the field index, which the
+    /// type-checker ensures lines up with the coinductive type's destructor list.
+    fn compile_copattern_body(
+        &mut self,
+        arms: &verum_common::List<verum_ast::expr::CopatternArm>,
+    ) -> CodegenResult<Option<Reg>> {
+        let result = self.ctx.alloc_temp();
+
+        // Allocate an anonymous object with one slot per observation arm.
+        // type_id 0 = anonymous/coinductive object; field_count = number of arms.
+        self.ctx.emit(crate::instruction::Instruction::New {
+            dst: result,
+            type_id: 0,
+            field_count: arms.len() as u32,
+        });
+
+        // Compile each arm and store into the corresponding field slot.
+        for (idx, arm) in arms.iter().enumerate() {
+            let value_reg = self
+                .compile_expr(&arm.body)?
+                .ok_or_else(|| CodegenError::internal("copattern arm body produced no value"))?;
+
+            // Clone for value semantics (same as regular record fields).
+            let cloned = self.ctx.alloc_temp();
+            self.ctx.emit(crate::instruction::Instruction::Clone {
+                dst: cloned,
+                src: value_reg,
+            });
+
+            self.ctx.emit(crate::instruction::Instruction::SetF {
+                obj: result,
+                field_idx: idx as u32,
+                value: cloned,
+            });
+
+            self.ctx.free_temp(cloned);
+            self.ctx.free_temp(value_reg);
         }
 
         Ok(Some(result))

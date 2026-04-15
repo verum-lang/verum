@@ -534,6 +534,16 @@ impl PrettyPrinter {
                 self.write(name.name.as_str());
                 self.write(": Level");
             }
+            GenericParamKind::KindAnnotated { name, kind, bounds } => {
+                // HKT kind-annotated parameter: F: Type -> Type
+                self.write(name.name.as_str());
+                self.write(": ");
+                self.write(&kind.to_string());
+                if !bounds.is_empty() {
+                    self.write(" + ");
+                    self.format_type_bounds(bounds);
+                }
+            }
         }
     }
 
@@ -2529,6 +2539,28 @@ impl PrettyPrinter {
             }
             ExprKind::CalcBlock(_) => {
                 self.write("calc { ... }");
+            }
+            ExprKind::CopatternBody { arms, .. } => {
+                self.write("{");
+                self.indent();
+                let mut first = true;
+                for arm in arms.iter() {
+                    if !first {
+                        self.write(",");
+                    }
+                    first = false;
+                    self.newline();
+                    self.write(".");
+                    self.write(arm.observation.name.as_str());
+                    self.write(" => ");
+                    self.format_expr(&arm.body);
+                }
+                if !arms.is_empty() {
+                    self.write(",");
+                }
+                self.dedent();
+                self.newline();
+                self.write("}");
             }
         }
     }

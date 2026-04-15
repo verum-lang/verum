@@ -1,0 +1,87 @@
+// @test: unit
+// @tier: 0
+// @level: L3
+// @tags: mathesis, protocol, mcp, json-rpc
+// @expect: pass
+//
+// Test: Mathesis MCP JSON-RPC protocol — all 6 methods.
+
+mount core.mathesis.*;
+
+fn main() {
+    let mut server = new_server();
+
+    // 1. theory/list — empty registry
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 1,
+        method: "theory/list",
+        params: "{}",
+    });
+    assert(is_ok(&resp));
+
+    // 2. theory/load — load a theory
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 2,
+        method: "theory/load",
+        params: "{\"name\":\"TestTheory\",\"body\":\"{}\"}",
+    });
+    assert(is_ok(&resp));
+
+    // 3. theory/list — now has one theory
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 3,
+        method: "theory/list",
+        params: "{}",
+    });
+    assert(is_ok(&resp));
+
+    // 4. theory/audit — audit the loaded theory
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 4,
+        method: "theory/audit",
+        params: "{\"theory\":\"TestTheory\"}",
+    });
+    assert(is_ok(&resp));
+
+    // 5. meta/audit — audit T_meta
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 5,
+        method: "meta/audit",
+        params: "{}",
+    });
+    assert(is_ok(&resp));
+
+    // 6. Unknown method → error
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 6,
+        method: "nonexistent/method",
+        params: "{}",
+    });
+    assert(is_err(&resp));
+    assert(error_code(&resp) == -32601);
+
+    // 7. theory/audit — theory not found → error 1001
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 7,
+        method: "theory/audit",
+        params: "{\"theory\":\"NonExistent\"}",
+    });
+    assert(is_err(&resp));
+    assert(error_code(&resp) == 1001);
+
+    // 8. claim/translate — invalid params → error
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 8,
+        method: "claim/translate",
+        params: "{}",
+    });
+    assert(is_err(&resp));
+
+    // 9. theory/coherence
+    let resp = handle_request(&mut server, JsonRpcRequest {
+        id: 9,
+        method: "theory/coherence",
+        params: "{\"pairs\":\"[]\"}",
+    });
+    assert(is_ok(&resp));
+}

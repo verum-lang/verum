@@ -924,6 +924,15 @@ impl ProofChecker {
                 // Universe level parameters don't affect value-level type checking
                 Ok(())
             }
+
+            GenericParamKind::KindAnnotated { name, .. } => {
+                // Kind-annotated HKT parameter: F: Type -> Type
+                // Create a type variable just like HigherKinded.
+                let type_var = TypeVar::fresh();
+                ctx.env
+                    .insert_mono(name.name.to_string(), Type::Var(type_var));
+                Ok(())
+            }
         }
     }
 

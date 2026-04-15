@@ -1718,6 +1718,25 @@ impl ToTokens for Expr {
                 stream.push(Token::new(TokenKind::Colon, self.span));
                 value.to_tokens(stream);
             }
+            ExprKind::CopatternBody { arms, .. } => {
+                // Emit copattern body: { .obs1 => expr1, .obs2 => expr2, ... }
+                stream.push(Token::new(TokenKind::LBrace, self.span));
+                let mut first = true;
+                for arm in arms.iter() {
+                    if !first {
+                        stream.push(Token::new(TokenKind::Comma, self.span));
+                    }
+                    first = false;
+                    stream.push(Token::new(TokenKind::Dot, self.span));
+                    stream.push(Token::new(
+                        TokenKind::Ident(arm.observation.name.as_str().to_string().into()),
+                        self.span,
+                    ));
+                    stream.push(Token::new(TokenKind::FatArrow, self.span));
+                    arm.body.as_ref().to_tokens(stream);
+                }
+                stream.push(Token::new(TokenKind::RBrace, self.span));
+            }
         }
     }
 }
@@ -2465,6 +2484,23 @@ impl ToTokens for verum_ast::ty::GenericParam {
                     self.span,
                 ));
             }
+            GenericParamKind::KindAnnotated { name, bounds, .. } => {
+                // Kind-annotated type constructor: F: Type -> Type
+                stream.push(Token::new(
+                    TokenKind::Ident(name.as_str().to_string().into()),
+                    self.span,
+                ));
+                // Emit bounds if present
+                if !bounds.is_empty() {
+                    stream.push(Token::new(TokenKind::Colon, self.span));
+                    for (i, bound) in bounds.iter().enumerate() {
+                        if i > 0 {
+                            stream.push(Token::new(TokenKind::Plus, self.span));
+                        }
+                        bound.to_tokens(stream);
+                    }
+                }
+            }
         }
 
         // Close brace for implicit parameters
@@ -3005,6 +3041,7 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Lifetime { name } => name.name.as_str(),
                             GenericParamKind::Context { name } => name.name.as_str(),
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
+                            GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
                         stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
                     }
@@ -3288,6 +3325,7 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Lifetime { name } => name.name.as_str(),
                             GenericParamKind::Context { name } => name.name.as_str(),
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
+                            GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
                         stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
                     }
@@ -3435,6 +3473,7 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Lifetime { name } => name.name.as_str(),
                             GenericParamKind::Context { name } => name.name.as_str(),
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
+                            GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
                         stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
                     }
@@ -3487,6 +3526,7 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Lifetime { name } => name.name.as_str(),
                             GenericParamKind::Context { name } => name.name.as_str(),
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
+                            GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
                         stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
                     }
@@ -3576,6 +3616,7 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Lifetime { name } => name.name.as_str(),
                             GenericParamKind::Context { name } => name.name.as_str(),
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
+                            GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
                         stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
                     }
@@ -3844,6 +3885,7 @@ fn emit_impl_item(kind: &verum_ast::decl::ImplItemKind, span: Span, stream: &mut
                         GenericParamKind::Lifetime { name } => name.name.as_str(),
                         GenericParamKind::Context { name } => name.name.as_str(),
                         GenericParamKind::Level { name } => name.name.as_str(),
+                        GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                     };
                     stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
                 }
@@ -3958,6 +4000,7 @@ fn emit_impl_item(kind: &verum_ast::decl::ImplItemKind, span: Span, stream: &mut
                         GenericParamKind::Lifetime { name } => name.name.as_str(),
                         GenericParamKind::Context { name } => name.name.as_str(),
                         GenericParamKind::Level { name } => name.name.as_str(),
+                        GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                     };
                     stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
                 }

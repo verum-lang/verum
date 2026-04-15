@@ -881,6 +881,12 @@ fn hash_generic_param(builder: FunctionHashBuilder, param: &GenericParam) -> Fun
         GenericParamKind::Level { name, .. } => {
             builder.with_type_param(name.name.as_str(), &["level"])
         }
+        GenericParamKind::KindAnnotated { name, kind, bounds } => {
+            let mut tags: Vec<String> = bounds.iter().map(|b| format!("{:?}", b)).collect();
+            tags.push(format!("kind:{:?}", kind));
+            let tags_refs: Vec<&str> = tags.iter().map(|s| s.as_str()).collect();
+            builder.with_type_param(name.name.as_str(), &tags_refs)
+        }
     }
 }
 
@@ -918,6 +924,9 @@ fn generic_param_to_string(param: &GenericParam) -> String {
         }
         GenericParamKind::Level { name, .. } => {
             format!("{}: Level", name.name)
+        }
+        GenericParamKind::KindAnnotated { name, kind, .. } => {
+            format!("{}: {:?}", name.name, kind)
         }
     }
 }

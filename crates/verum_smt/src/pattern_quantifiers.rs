@@ -1796,8 +1796,8 @@ impl PatternTermCollector {
             ExprKind::Inject { .. } => {}
             ExprKind::CalcBlock(_) => {}
 
-            // Calc blocks - no pattern extraction needed
-            ExprKind::CalcBlock(_) => {}
+            // Copattern bodies - no pattern extraction needed
+            ExprKind::CopatternBody { .. } => {}
         }
     }
 
@@ -2507,6 +2507,9 @@ impl ComplexityAnalyzer {
             // Inject expressions (DI resolution) - minimal complexity
             ExprKind::Inject { .. } => {}
             ExprKind::CalcBlock(_) => {}
+
+            // Copattern bodies - minimal complexity
+            ExprKind::CopatternBody { .. } => {}
         }
     }
 
@@ -3183,8 +3186,8 @@ impl FunctionApplicationCollector {
             ExprKind::Inject { .. } => {}
             ExprKind::CalcBlock(_) => {}
 
-            // Calc blocks - no pattern extraction needed
-            ExprKind::CalcBlock(_) => {}
+            // Copattern bodies - no pattern extraction needed
+            ExprKind::CopatternBody { .. } => {}
         }
     }
 
