@@ -63,10 +63,12 @@ pub fn execute(
         false,      // smt_stats
     )?;
 
-    // Determine compilation tier
+    // Determine compilation tier. Apply CLI feature overrides so
+    // `--tier`, `-Z codegen.tier=...`, etc. are respected here as well.
     let manifest_dir = Manifest::find_manifest_dir()?;
     let manifest_path = Manifest::manifest_path(&manifest_dir);
-    let manifest = Manifest::from_file(&manifest_path)?;
+    let mut manifest = Manifest::from_file(&manifest_path)?;
+    crate::feature_overrides::apply_global(&mut manifest)?;
 
     let compilation_tier = if let Some(t) = tier {
         CompilationTier::from_u8(t)

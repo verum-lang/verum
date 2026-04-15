@@ -16,10 +16,12 @@ use verum_compiler::session::Session;
 pub fn execute(_workspace: bool, strict: bool, verbose: bool) -> Result<()> {
     let start = Instant::now();
 
-    // Load manifest
+    // Load manifest, then apply CLI-supplied language-feature overrides
+    // (high-level flags + -Z key=value pairs) before use.
     let manifest_dir = Manifest::find_manifest_dir()?;
     let manifest_path = Manifest::manifest_path(&manifest_dir);
-    let manifest = Manifest::from_file(&manifest_path)?;
+    let mut manifest = Manifest::from_file(&manifest_path)?;
+    crate::feature_overrides::apply_global(&mut manifest)?;
 
     // Determine project root - either manifest dir or first src file's parent
     let project_root = manifest_dir.clone();
@@ -31,8 +33,13 @@ pub fn execute(_workspace: bool, strict: bool, verbose: bool) -> Result<()> {
         manifest_dir.display()
     ));
 
-    // Create compiler options for check mode
+    // Create compiler options for check mode. Populate the unified
+    // language-feature set from the merged manifest (validated) so the
+    // same pipeline behaviors that apply to `verum build` also govern
+    // `verum check`.
+    let language_features = crate::feature_overrides::manifest_to_features(&manifest)?;
     let mut options = CompilerOptions::default();
+    options.language_features = language_features;
     options.input = project_root.join("src"); // Will be overridden by project discovery
     options.verbose = if verbose { 2 } else { 0 };
 

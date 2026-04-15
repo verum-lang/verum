@@ -273,6 +273,10 @@ enum Commands {
         timings: bool,
         #[clap(last = true)]
         args: Vec<String>,
+
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Run tests
@@ -288,6 +292,10 @@ enum Commands {
         /// Enable code coverage instrumentation and report generation
         #[clap(long)]
         coverage: bool,
+
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Run benchmarks
@@ -310,6 +318,10 @@ enum Commands {
         /// Only parse, don't type check (for VCS parse-pass tests)
         #[clap(long)]
         parse_only: bool,
+
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Format source code
@@ -900,7 +912,9 @@ fn run_command(cli: Cli) -> Result<()> {
             release,
             timings,
             args,
+            feature_overrides,
         } => {
+            feature_overrides::install(feature_overrides);
             // Resolve tier from flags or --tier option
             let resolved_tier = if interp {
                 Some(Text::from("interpreter"))
@@ -944,7 +958,11 @@ fn run_command(cli: Cli) -> Result<()> {
             nocapture,
             test_threads,
             coverage,
-        } => commands::test::execute(filter, release, nocapture, test_threads, coverage, None),
+            feature_overrides,
+        } => {
+            feature_overrides::install(feature_overrides);
+            commands::test::execute(filter, release, nocapture, test_threads, coverage, None)
+        }
         Commands::Bench {
             filter,
             save_baseline,
@@ -954,7 +972,9 @@ fn run_command(cli: Cli) -> Result<()> {
             path,
             workspace,
             parse_only,
+            feature_overrides,
         } => {
+            feature_overrides::install(feature_overrides);
             match resolve_path(path.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
                     ui::status("Checking", file_path.as_str());
