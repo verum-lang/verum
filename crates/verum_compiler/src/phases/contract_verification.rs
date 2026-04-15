@@ -55,6 +55,15 @@ pub struct ContractVerificationPhase {
     context: Context,
     /// Verification configuration
     config: VerificationConfig,
+    /// Shared SMT routing statistics collector.
+    ///
+    /// When `Some`, every invocation of the underlying Z3 solver
+    /// records a routing decision (`Z3Only`) plus its outcome and
+    /// elapsed time. The session's `Arc<RoutingStats>` is threaded in
+    /// via `with_routing_stats` so `verum build --smt-stats` can show
+    /// real data instead of zeros. When `None`, verification runs
+    /// exactly as before with no telemetry overhead.
+    routing_stats: Option<std::sync::Arc<verum_smt::routing_stats::RoutingStats>>,
 }
 
 /// Configuration for contract verification
@@ -186,7 +195,27 @@ impl ContractVerificationPhase {
             .with_timeout(std::time::Duration::from_millis(config.timeout_ms));
         let context = Context::with_config(ctx_config);
 
-        Self { context, config }
+        Self {
+            context,
+            config,
+            routing_stats: None,
+        }
+    }
+
+    /// Install a shared routing-stats collector.
+    ///
+    /// Stored on the phase and forwarded to the underlying `Context`
+    /// so every Z3 `check()` during verification is visible to
+    /// `verum smt-stats`. Idempotent and thread-safe.
+    pub fn with_routing_stats(
+        mut self,
+        stats: std::sync::Arc<verum_smt::routing_stats::RoutingStats>,
+    ) -> Self {
+        // Rewire the underlying context so its Context::check calls
+        // automatically record into the shared collector.
+        self.context = self.context.clone().with_routing_stats(stats.clone());
+        self.routing_stats = Some(stats);
+        self
     }
 
     /// Verify contracts in modules and return verified contracts registry
@@ -717,7 +746,10 @@ impl ContractVerificationPhase {
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
-        match solver.check() {
+        // Goes through Context::check so stats are recorded automatically
+        // when a routing-stats collector is installed on the context.
+        let verdict = self.context.check(&solver);
+        match verdict {
             verum_smt::z3::SatResult::Sat => {
                 // Precondition is satisfiable - good!
                 let cost = verum_smt::VerificationCost::new(
@@ -822,7 +854,9 @@ impl ContractVerificationPhase {
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
-        match solver.check() {
+        // Route through Context::check for automatic telemetry.
+        let verdict = self.context.check(&solver);
+        match verdict {
             verum_smt::z3::SatResult::Unsat => {
                 // No counterexample - postcondition always holds!
                 let cost = verum_smt::VerificationCost::new(

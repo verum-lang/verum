@@ -6425,12 +6425,15 @@ impl<'s> CompilationPipeline<'s> {
         use verum_ast::ty::TypeKind;
         use verum_smt::context::ContextConfig;
 
-        // Create SMT context with timeout configuration
+        // Create SMT context with timeout configuration. Install the
+        // session's shared routing-stats collector so every Z3 check()
+        // during refinement verification feeds `verum smt-stats`.
         let smt_config = ContextConfig {
             timeout: Some(Duration::from_millis(timeout_ms)),
             ..Default::default()
         };
-        let smt_context = SmtContext::with_config(smt_config);
+        let smt_context = SmtContext::with_config(smt_config)
+            .with_routing_stats(self.session.routing_stats().clone());
 
         // Create refinement verifier with SMT mode
         let verifier = SmtRefinementVerifier::with_mode(SmtVerifyMode::Auto);
@@ -6819,7 +6822,8 @@ impl<'s> CompilationPipeline<'s> {
         // If SAT: found a counterexample where predicate is false (violated)
         solver.assert(z3_bool.not());
 
-        match solver.check() {
+        // Route through Context::check for automatic routing-stats telemetry.
+        match smt_context.check(&solver) {
             SatResult::Unsat => {
                 // No counterexample - predicate always holds for this return
                 SmtCheckResult::Verified

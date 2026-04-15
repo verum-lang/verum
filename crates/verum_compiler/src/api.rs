@@ -192,6 +192,12 @@ pub struct CommonPipelineConfig {
     /// `[safety] unsafe_allowed`). When false, the safety-gate phase
     /// rejects unsafe blocks with a config-pointing diagnostic.
     pub unsafe_allowed: bool,
+    /// Optional shared routing-stats collector. When present, the
+    /// contract-verification phase installs it on the underlying
+    /// `SmtContext` so every Z3 check records telemetry — making
+    /// `verum smt-stats` show real data for callers that go through
+    /// `run_common_pipeline` (e.g. the VCS test runner).
+    pub routing_stats: Option<std::sync::Arc<verum_smt::routing_stats::RoutingStats>>,
 }
 
 impl Default for CommonPipelineConfig {
@@ -209,6 +215,7 @@ impl Default for CommonPipelineConfig {
             derive_enabled: true,
             compile_time_enabled: true,
             unsafe_allowed: true,
+            routing_stats: None,
         }
     }
 }
@@ -229,6 +236,7 @@ impl CommonPipelineConfig {
             derive_enabled: true,
             compile_time_enabled: true,
             unsafe_allowed: true,
+            routing_stats: None,
         }
     }
 
@@ -247,6 +255,7 @@ impl CommonPipelineConfig {
             derive_enabled: true,
             compile_time_enabled: true,
             unsafe_allowed: true,
+            routing_stats: None,
         }
     }
 }
@@ -677,7 +686,10 @@ pub fn run_common_pipeline(
     let mut verification_results = VerificationResults::default();
 
     if config.verify_contracts {
-        let contract_phase = contract_verification::ContractVerificationPhase::new();
+        let mut contract_phase = contract_verification::ContractVerificationPhase::new();
+        if let Some(stats) = config.routing_stats.clone() {
+            contract_phase = contract_phase.with_routing_stats(stats);
+        }
         let contract_input = PhaseInput {
             data: current_data.clone(),
             context: context.clone(),

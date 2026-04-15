@@ -197,8 +197,10 @@ impl RefinementVerifier {
         // (i.e., a counterexample)
         solver.assert(z3_bool.not());
 
-        // Check satisfiability
-        let check_result = solver.check();
+        // Check satisfiability. Route through Context::check so routing
+        // stats are recorded automatically when a collector is installed
+        // (see verum_build --smt-stats).
+        let check_result = self.context.check(&solver);
 
         match check_result {
             z3::SatResult::Unsat => {
@@ -635,11 +637,12 @@ impl RefinementVerifier {
             z3_bool
         };
 
-        // Check if the predicate holds given the dependencies
+        // Check if the predicate holds given the dependencies. Route
+        // through Context::check so routing stats are recorded.
         let solver = self.context.solver();
         solver.assert(final_predicate.not());
 
-        match solver.check() {
+        match self.context.check(&solver) {
             z3::SatResult::Unsat => {
                 let cost = measurement.finish(true);
                 Ok(ProofResult::new(cost))

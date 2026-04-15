@@ -18,6 +18,16 @@ pub struct Context {
 #[derive(Debug)]
 struct ContextInner {
     config: ContextConfig,
+    /// Optional shared routing-stats collector.
+    ///
+    /// When set, every `Context::check(...)` call records the routing
+    /// choice (`Z3Only`) plus its outcome and elapsed time into the
+    /// collector. This is how `verum build --smt-stats` learns about
+    /// real solver work: the compiler installs the session's shared
+    /// `Arc<RoutingStats>` on the Context at construction time.
+    ///
+    /// `None` = no telemetry overhead, existing behavior unchanged.
+    routing_stats: Option<Arc<crate::routing_stats::RoutingStats>>,
 }
 
 impl Context {
@@ -30,8 +40,36 @@ impl Context {
     pub fn with_config(config: ContextConfig) -> Self {
         // Z3 0.19.2 uses a global context, so we just store config
         Self {
-            inner: Arc::new(ContextInner { config }),
+            inner: Arc::new(ContextInner {
+                config,
+                routing_stats: None,
+            }),
         }
+    }
+
+    /// Install a shared routing-stats collector on this context.
+    ///
+    /// Returns a new `Context` value (internal state is in an Arc, so
+    /// this is cheap). Once installed, every call to
+    /// [`Context::check`] records a Z3-routed query into the collector
+    /// — this is how the compiler's `session.routing_stats()` learns
+    /// about real solver work.
+    pub fn with_routing_stats(
+        self,
+        stats: Arc<crate::routing_stats::RoutingStats>,
+    ) -> Self {
+        let inner = ContextInner {
+            config: self.inner.config.clone(),
+            routing_stats: Some(stats),
+        };
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    /// Access the routing-stats handle, if one was installed.
+    pub fn routing_stats(&self) -> Option<&Arc<crate::routing_stats::RoutingStats>> {
+        self.inner.routing_stats.as_ref()
     }
 
     /// Get the configuration.
@@ -74,17 +112,60 @@ impl Context {
     }
 
     /// Check if the solver assertions are satisfiable.
+    ///
+    /// When a routing-stats collector is installed on this context,
+    /// records the call as `SolverChoice::Z3Only` plus the outcome and
+    /// elapsed time, so `verum smt-stats` reflects real work.
     pub fn check(&self, solver: &z3::Solver) -> z3::SatResult {
-        solver.check()
+        let start = std::time::Instant::now();
+        let verdict = solver.check();
+        self.record_check(&verdict, start.elapsed());
+        verdict
     }
 
     /// Check satisfiability with assumptions.
+    ///
+    /// Also records into the installed routing-stats collector (if any).
     pub fn check_assumptions(
         &self,
         solver: &z3::Solver,
         assumptions: &[z3::ast::Bool],
     ) -> z3::SatResult {
-        solver.check_assumptions(assumptions)
+        let start = std::time::Instant::now();
+        let verdict = solver.check_assumptions(assumptions);
+        self.record_check(&verdict, start.elapsed());
+        verdict
+    }
+
+    /// Internal: record one Z3 `check()` outcome into the shared
+    /// routing-stats collector, if present. No-op otherwise.
+    fn record_check(&self, verdict: &z3::SatResult, elapsed: std::time::Duration) {
+        let Some(stats) = self.inner.routing_stats.as_ref() else {
+            return;
+        };
+        use crate::capability_router::SolverChoice;
+        use crate::portfolio_executor::SolverVerdict;
+        use crate::routing_stats::TheoryClass;
+
+        // Contract / refinement verification uses quantified first-order
+        // logic — bucket as Quantified. A future enhancement can
+        // classify per-goal from the translated assertions.
+        let theory = TheoryClass::Quantified;
+        stats.record_routing(
+            &SolverChoice::Z3Only {
+                confidence: 1.0,
+                reason: "verum Z3 solver".to_string(),
+            },
+            theory,
+        );
+        let smt_verdict = match verdict {
+            z3::SatResult::Sat => SolverVerdict::Sat,
+            z3::SatResult::Unsat => SolverVerdict::Unsat,
+            z3::SatResult::Unknown => SolverVerdict::Unknown {
+                reason: "z3 returned unknown".to_string(),
+            },
+        };
+        stats.record_outcome(theory, &smt_verdict, elapsed);
     }
 
     /// Get the model from the solver (if SAT).

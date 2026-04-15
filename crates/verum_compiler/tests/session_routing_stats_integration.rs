@@ -141,6 +141,87 @@ fn language_features_accessor_returns_session_view() {
     );
 }
 
+/// End-to-end: a real Z3 `check()` through a Context with stats
+/// installed must increment the session-visible counters. This is the
+/// contract that makes `verum build --smt-stats` show non-zero data.
+#[test]
+fn context_check_records_routing_stats() {
+    use std::sync::atomic::Ordering;
+    use verum_smt::context::Context;
+
+    let mut opts = CompilerOptions::default();
+    opts.input = PathBuf::from("<test>");
+    opts.output = PathBuf::from("<test>");
+    let session = Session::new(opts);
+
+    // Install the session's shared stats collector on a fresh Context.
+    let ctx = Context::new().with_routing_stats(session.routing_stats().clone());
+
+    // Build a trivial Z3 check: assert `true`, check → Sat.
+    let solver = ctx.solver();
+    let true_expr = verum_smt::z3::ast::Bool::from_bool(true);
+    solver.assert(&true_expr);
+    let verdict = ctx.check(&solver);
+    assert_eq!(verdict, verum_smt::z3::SatResult::Sat);
+
+    // Session's shared collector must reflect the work.
+    let stats = session.routing_stats();
+    assert_eq!(
+        stats.total_queries.load(Ordering::Relaxed),
+        1,
+        "one real Z3 check → one recorded query"
+    );
+    assert_eq!(
+        stats.z3_only_count.load(Ordering::Relaxed),
+        1,
+        "call must be classified as Z3-only routing"
+    );
+    assert_eq!(
+        stats.total_sat.load(Ordering::Relaxed),
+        1,
+        "Sat outcome must increment total_sat"
+    );
+    assert!(
+        stats.total_nanos.load(Ordering::Relaxed) > 0,
+        "elapsed time must be recorded"
+    );
+
+    // A second check advances the counters — same Arc, not a copy.
+    let solver2 = ctx.solver();
+    let false_expr = verum_smt::z3::ast::Bool::from_bool(false);
+    solver2.assert(&false_expr);
+    let verdict2 = ctx.check(&solver2);
+    assert_eq!(verdict2, verum_smt::z3::SatResult::Unsat);
+    assert_eq!(stats.total_queries.load(Ordering::Relaxed), 2);
+    assert_eq!(stats.total_unsat.load(Ordering::Relaxed), 1);
+}
+
+/// Sanity: Context without a collector installed must not record
+/// anything (no accidental global state).
+#[test]
+fn context_without_stats_records_nothing() {
+    use std::sync::atomic::Ordering;
+    use verum_smt::context::Context;
+
+    let mut opts = CompilerOptions::default();
+    opts.input = PathBuf::from("<test>");
+    opts.output = PathBuf::from("<test>");
+    let session = Session::new(opts);
+
+    // Plain Context — no stats installed.
+    let ctx = Context::new();
+    let solver = ctx.solver();
+    solver.assert(&verum_smt::z3::ast::Bool::from_bool(true));
+    let _ = ctx.check(&solver);
+
+    // The session's collector must still be empty.
+    assert_eq!(
+        session.routing_stats().total_queries.load(Ordering::Relaxed),
+        0,
+        "uninstrumented Context must not touch the session collector"
+    );
+}
+
 #[test]
 fn set_routing_stats_replaces_handle() {
     let mut opts = CompilerOptions::default();
