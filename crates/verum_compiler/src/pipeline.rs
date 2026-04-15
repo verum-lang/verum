@@ -9437,6 +9437,13 @@ impl<'s> CompilationPipeline<'s> {
     fn phase_context_validation(&self, module: &Module) {
         use crate::phases::context_validation::ContextValidationPhase;
 
+        // Gate on the unified language-feature flag.
+        // `[context] enabled = false` disables the whole DI/context
+        // system, so there's nothing to validate.
+        if !self.session.language_features().context_system_on() {
+            return;
+        }
+
         let t0 = Instant::now();
         let phase = ContextValidationPhase::new();
         match phase.validate_module_public(module) {

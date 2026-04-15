@@ -4,6 +4,7 @@ pub mod bench;
 pub mod build;
 pub mod check;
 pub mod clean;
+pub mod config;
 pub mod deps;
 pub mod doc;
 pub mod explain;

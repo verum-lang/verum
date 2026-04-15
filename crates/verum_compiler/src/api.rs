@@ -179,6 +179,10 @@ pub struct CommonPipelineConfig {
     /// Enable cubical-type normalization in the unifier (sourced from
     /// `[types] cubical` in `verum.toml`). Default: true.
     pub cubical_enabled: bool,
+    /// Enable the context / DI system (sourced from `[context] enabled`).
+    /// When false, no context validation runs and `using [...]` clauses
+    /// are parsed-and-ignored. Default: true.
+    pub context_enabled: bool,
 }
 
 impl Default for CommonPipelineConfig {
@@ -192,6 +196,7 @@ impl Default for CommonPipelineConfig {
             expand_macros: true,
             core_source_path: None,
             cubical_enabled: true,
+            context_enabled: true,
         }
     }
 }
@@ -208,6 +213,7 @@ impl CommonPipelineConfig {
             expand_macros: true,
             core_source_path: None,
             cubical_enabled: true,
+            context_enabled: true,
         }
     }
 
@@ -222,6 +228,7 @@ impl CommonPipelineConfig {
             expand_macros: true,
             core_source_path: None,
             cubical_enabled: true,
+            context_enabled: true,
         }
     }
 }
@@ -719,7 +726,10 @@ pub fn run_common_pipeline(
     };
 
     // Phase 4b: Context Validation (if enabled)
-    if config.validate_contexts {
+    // Both `validate_contexts` (per-invocation override) and
+    // `context_enabled` (from `[context] enabled` in `verum.toml`)
+    // must be on. Disabling either skips the phase entirely.
+    if config.validate_contexts && config.context_enabled {
         let context_phase = context_validation::ContextValidationPhase::new();
         let context_input = PhaseInput {
             data: PhaseData::Hir(typed_modules.clone()),

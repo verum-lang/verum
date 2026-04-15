@@ -93,6 +93,23 @@ fn refinement_enabled_preserves_verify_mode() {
 }
 
 #[test]
+fn context_system_flag_readable_via_session() {
+    let mut opts = CompilerOptions::default();
+    opts.input = PathBuf::from("<test>");
+    opts.output = PathBuf::from("<test>");
+
+    // Default: context system on.
+    let on = Session::new(opts.clone());
+    assert!(on.language_features().context_system_on());
+
+    // Flip the flag → session reflects it. This is what
+    // `pipeline::phase_context_validation` queries to skip the phase.
+    opts.language_features.context.enabled = false;
+    let off = Session::new(opts);
+    assert!(!off.language_features().context_system_on());
+}
+
+#[test]
 fn language_features_accessor_returns_session_view() {
     let mut opts = CompilerOptions::default();
     opts.input = PathBuf::from("<test>");

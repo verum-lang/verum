@@ -560,6 +560,16 @@ enum Commands {
     // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
     // Use `verum info` with --stdlib flag for stdlib information if needed.
 
+    /// Show the resolved language-feature set for the current project.
+    ///
+    /// Loads `verum.toml`, applies any CLI overrides (`--tier`, `-Z …`),
+    /// runs the feature validator, and prints the final effective
+    /// configuration. Useful for debugging flag interactions.
+    Config {
+        #[clap(subcommand)]
+        command: ConfigCommands,
+    },
+
     /// Show formal-verification engine capabilities and backends.
     ///
     /// This command diagnoses the toolchain itself: which verification
@@ -586,6 +596,20 @@ enum Commands {
         /// Reset statistics after printing.
         #[clap(long)]
         reset: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Print the resolved feature set (human-readable or JSON).
+    Show {
+        /// Emit machine-readable JSON.
+        #[clap(long)]
+        json: bool,
+
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 }
 
@@ -1225,6 +1249,14 @@ fn run_command(cli: Cli) -> Result<()> {
             commands::smt_stats::execute(json, reset)
                 .map_err(|e| CliError::Custom(e.to_string()))
         }
+
+        Commands::Config { command } => match command {
+            ConfigCommands::Show { json, feature_overrides } => {
+                feature_overrides::install(feature_overrides);
+                commands::config::execute(json)
+                    .map_err(|e| CliError::Custom(e.to_string()))
+            }
+        },
         // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system
     }
 }
