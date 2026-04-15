@@ -166,3 +166,37 @@ fn partial_rejects_mismatched_element_type() {
     let mut u = Unifier::new();
     assert!(u.unify(&t1, &t2, span()).is_err());
 }
+
+// ---- Feature gate: `[types] cubical = false` ----------------------------
+
+#[test]
+fn disabled_cubical_rejects_transport_refl_equality() {
+    // With cubical ENABLED (the default), this path unifies because
+    // `transp (refl A) x ≡ x`.
+    let lhs = path(bool_ty(), boxed_val("x"), boxed_transport_refl("A", "x"));
+    let rhs = path(bool_ty(), boxed_val("x"), boxed_val("x"));
+
+    let mut enabled = Unifier::new();
+    assert!(
+        enabled.unify(&lhs, &rhs, span()).is_ok(),
+        "default (cubical on) must accept transport-refl identity"
+    );
+
+    // With cubical DISABLED, the same pair no longer unifies — strict
+    // syntactic equality is required on endpoints.
+    let mut disabled = Unifier::new();
+    disabled.set_cubical_enabled(false);
+    assert!(!disabled.cubical_enabled());
+    assert!(
+        disabled.unify(&lhs, &rhs, span()).is_err(),
+        "cubical=false must fall back to syntactic equality"
+    );
+}
+
+#[test]
+fn disabled_cubical_still_accepts_syntactically_identical_paths() {
+    let t = path(bool_ty(), boxed_val("a"), boxed_val("b"));
+    let mut u = Unifier::new();
+    u.set_cubical_enabled(false);
+    assert!(u.unify(&t, &t.clone(), span()).is_ok());
+}

@@ -96,6 +96,16 @@ pub struct Unifier {
     /// Context variable bindings from context unification.
     /// Maps context type variables to their resolved ContextExpr values.
     context_bindings: IndexMap<TypeVar, crate::di::requirement::ContextExpr>,
+
+    /// Whether cubical-type normalization is enabled (Path/Partial/Eq
+    /// definitional equality uses the cubical `whnf` normalizer).
+    ///
+    /// When `false` (i.e. `[types] cubical = false` in `verum.toml`),
+    /// the unifier falls back to strict syntactic equality on cubical
+    /// terms. Users disabling cubical lose identities like
+    /// `transport (refl A) x ≡ x`, which is the point — they pay zero
+    /// normalization cost in return.
+    cubical_enabled: bool,
 }
 
 impl Unifier {
@@ -176,7 +186,23 @@ impl Unifier {
             sized_numeric_types,
             self_type: None,
             context_bindings: IndexMap::new(),
+            cubical_enabled: true,
         }
+    }
+
+    /// Enable or disable cubical normalization during unification.
+    ///
+    /// Populated by the compilation session from `[types] cubical` in
+    /// `verum.toml`. Disabling causes PathType/Partial/Eq arms to use
+    /// strict syntactic equality instead of `CubicalTerm::whnf`-based
+    /// definitional equality.
+    pub fn set_cubical_enabled(&mut self, enabled: bool) {
+        self.cubical_enabled = enabled;
+    }
+
+    /// Query the current cubical-normalization setting.
+    pub fn cubical_enabled(&self) -> bool {
+        self.cubical_enabled
     }
 
     /// Set the current Self type for implement block unification.
@@ -2885,9 +2911,13 @@ impl Unifier {
                 // the cubical normalizer so identities like
                 // `transport Refl x ≡ x` and `sym(refl(x)) ≡ refl(x)`
                 // are accepted.
-                if !Self::eq_terms_equal(l1, l2)
-                    && !crate::cubical_bridge::definitionally_equal_cubical(l1, l2)
-                {
+                // Fast path: syntactic equality. Cubical-normalized
+                // equality is only consulted when the feature is on
+                // (cost: a whnf reduction per comparison).
+                let l_eq = Self::eq_terms_equal(l1, l2)
+                    || (self.cubical_enabled
+                        && crate::cubical_bridge::definitionally_equal_cubical(l1, l2));
+                if !l_eq {
                     return Err(TypeError::Mismatch {
                         expected: "Eq type with matching left-hand side".into(),
                         actual: "Eq type with different left-hand side".into(),
@@ -2895,9 +2925,10 @@ impl Unifier {
                     });
                 }
 
-                if !Self::eq_terms_equal(r1, r2)
-                    && !crate::cubical_bridge::definitionally_equal_cubical(r1, r2)
-                {
+                let r_eq = Self::eq_terms_equal(r1, r2)
+                    || (self.cubical_enabled
+                        && crate::cubical_bridge::definitionally_equal_cubical(r1, r2));
+                if !r_eq {
                     return Err(TypeError::Mismatch {
                         expected: "Eq type with matching right-hand side".into(),
                         actual: "Eq type with different right-hand side".into(),
@@ -2930,14 +2961,26 @@ impl Unifier {
             ) => {
                 let subst = self.unify_inner(s1, s2, span)?;
 
-                if !l1.definitionally_equal(l2) {
+                // When cubical is disabled, fall back to strict syntactic
+                // equality on endpoints (skip normalization).
+                let left_eq = if self.cubical_enabled {
+                    l1.definitionally_equal(l2)
+                } else {
+                    l1 == l2
+                };
+                if !left_eq {
                     return Err(TypeError::Mismatch {
                         expected: "PathType with matching left endpoint".into(),
                         actual: "PathType with different left endpoint".into(),
                         span,
                     });
                 }
-                if !r1.definitionally_equal(r2) {
+                let right_eq = if self.cubical_enabled {
+                    r1.definitionally_equal(r2)
+                } else {
+                    r1 == r2
+                };
+                if !right_eq {
                     return Err(TypeError::Mismatch {
                         expected: "PathType with matching right endpoint".into(),
                         actual: "PathType with different right endpoint".into(),
@@ -2960,7 +3003,12 @@ impl Unifier {
                 Type::Partial { element_type: e2, face: f2 },
             ) => {
                 let subst = self.unify_inner(e1, e2, span)?;
-                if !f1.definitionally_equal(f2) {
+                let face_eq = if self.cubical_enabled {
+                    f1.definitionally_equal(f2)
+                } else {
+                    f1 == f2
+                };
+                if !face_eq {
                     return Err(TypeError::Mismatch {
                         expected: "Partial type with matching face".into(),
                         actual: "Partial type with divergent face".into(),

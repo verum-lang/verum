@@ -98,8 +98,15 @@ pub struct Session {
 }
 
 impl Session {
-    /// Create a new compilation session
-    pub fn new(options: CompilerOptions) -> Self {
+    /// Create a new compilation session.
+    ///
+    /// Applies cross-cutting feature reconciliations once at startup
+    /// (e.g., disabling SMT verification when refinement types are
+    /// turned off) so downstream phases see a consistent view of the
+    /// language-feature set.
+    pub fn new(mut options: CompilerOptions) -> Self {
+        Self::reconcile_language_features(&mut options);
+
         // Build TargetConfig from CompilerOptions
         let target_config = Self::build_target_config(&options);
         let cfg_evaluator = CfgEvaluator::with_config(target_config);
@@ -125,6 +132,35 @@ impl Session {
     /// Set the cross-cog resolver for external package imports.
     pub fn set_cog_resolver(&mut self, resolver: verum_modules::cog_resolver::CogResolver) {
         self.cog_resolver = Some(resolver);
+    }
+
+    /// Convenience accessor for the unified language-feature set.
+    ///
+    /// Equivalent to `self.options().language_features`, but callers that
+    /// only need to query features shouldn't have to drag in the full
+    /// `CompilerOptions` import.
+    pub fn language_features(
+        &self,
+    ) -> &crate::language_features::LanguageFeatures {
+        &self.options.language_features
+    }
+
+    /// Apply feature-driven reconciliations that cross-cut the options
+    /// struct. Called from `Session::new*` constructors so that no
+    /// caller can bypass them.
+    ///
+    /// Current reconciliations:
+    ///   1. If `types.refinement` is disabled, the refinement-type SMT
+    ///      path is a no-op — downgrade `verify_mode` to `Runtime` so
+    ///      the pipeline doesn't spin up a solver for nothing.
+    ///   2. If `codegen.proof_erasure` is disabled, `debug.show_erased_proofs`
+    ///      becomes moot but is otherwise harmless (no action).
+    fn reconcile_language_features(opts: &mut CompilerOptions) {
+        if !opts.language_features.refinement_typing_on()
+            && opts.verify_mode.use_smt()
+        {
+            opts.verify_mode = crate::options::VerifyMode::Runtime;
+        }
     }
 
     /// Access the shared SMT routing statistics handle.
@@ -180,7 +216,9 @@ impl Session {
     ///     // session now has stdlib modules pre-loaded
     /// }
     /// ```
-    pub fn with_registry(options: CompilerOptions, registry: ModuleRegistry) -> Self {
+    pub fn with_registry(mut options: CompilerOptions, registry: ModuleRegistry) -> Self {
+        Self::reconcile_language_features(&mut options);
+
         let target_config = Self::build_target_config(&options);
         let cfg_evaluator = CfgEvaluator::with_config(target_config);
 

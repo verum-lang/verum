@@ -55,6 +55,59 @@ fn session_shares_routing_stats_handle_with_switcher() {
 }
 
 #[test]
+fn refinement_disabled_downgrades_verify_mode() {
+    // When [types] refinement = false, the SMT verification path is a
+    // no-op. Session::new reconciles this by forcing verify_mode =
+    // Runtime so the pipeline doesn't spin up a solver for nothing.
+    let mut opts = CompilerOptions::default();
+    opts.input = PathBuf::from("<test>");
+    opts.output = PathBuf::from("<test>");
+    opts.verify_mode = verum_compiler::options::VerifyMode::Proof;
+    opts.language_features.types.refinement = false;
+
+    let session = Session::new(opts);
+
+    assert_eq!(
+        session.options().verify_mode,
+        verum_compiler::options::VerifyMode::Runtime,
+        "disabled refinement must downgrade verify_mode to Runtime"
+    );
+}
+
+#[test]
+fn refinement_enabled_preserves_verify_mode() {
+    // Default: refinement on → verify_mode untouched.
+    let mut opts = CompilerOptions::default();
+    opts.input = PathBuf::from("<test>");
+    opts.output = PathBuf::from("<test>");
+    opts.verify_mode = verum_compiler::options::VerifyMode::Proof;
+    assert!(opts.language_features.types.refinement);
+
+    let session = Session::new(opts);
+
+    assert_eq!(
+        session.options().verify_mode,
+        verum_compiler::options::VerifyMode::Proof,
+        "enabled refinement must preserve Proof mode"
+    );
+}
+
+#[test]
+fn language_features_accessor_returns_session_view() {
+    let mut opts = CompilerOptions::default();
+    opts.input = PathBuf::from("<test>");
+    opts.output = PathBuf::from("<test>");
+    opts.language_features.codegen.mlir_gpu = true;
+
+    let session = Session::new(opts);
+
+    assert!(
+        session.language_features().gpu_enabled(),
+        "Session::language_features() must expose the same set as options()"
+    );
+}
+
+#[test]
 fn set_routing_stats_replaces_handle() {
     let mut opts = CompilerOptions::default();
     opts.input = PathBuf::from("<test>");
