@@ -685,8 +685,13 @@ pub enum Opcode {
     Invariant = 0xDC,
     /// Create a new channel with capacity.
     NewChannel = 0xDD,
-    /// Reserved debug.
-    DebugDE = 0xDE,
+    /// Cubical type theory extended operations prefix.
+    ///
+    /// This opcode is followed by a sub-opcode byte (CubicalSubOpcode) that specifies
+    /// the actual cubical type theory operation.
+    ///
+    /// Format: `[0xDE] [sub_opcode:u8] [operands...]`
+    CubicalExtended = 0xDE,
     /// Reserved debug.
     DebugDF = 0xDF,
 
@@ -790,6 +795,197 @@ pub enum Opcode {
     ///
     /// Format: `dst:reg, data_reg:reg, shape_reg:reg, dtype:u8`
     TensorFromSlice = 0xFF,
+}
+
+// ============================================================================
+// Cubical Type Theory Extended Sub-Opcodes
+// ============================================================================
+
+/// Cubical type theory sub-opcodes for use with `CubicalExtended` (0xDE) prefix.
+///
+/// These opcodes implement the runtime semantics of cubical type theory
+/// primitives: Path types, transport, homogeneous composition (hcomp),
+/// and computational univalence.
+///
+/// At runtime, Path values are represented as closures (functions I → A),
+/// and cubical operations manipulate these closures according to the
+/// CCHM reduction rules implemented in `verum_types::cubical`.
+///
+/// # Encoding
+///
+/// ```text
+/// [0xDE] [sub_opcode:u8] [operands...]
+/// ```
+///
+/// # Sub-opcode Ranges
+///
+/// - `0x00-0x0F`: Path construction (refl, lambda, app, sym, trans, ap)
+/// - `0x10-0x1F`: Transport and homogeneous composition
+/// - `0x20-0x2F`: Interval operations (i0, i1, meet, join, rev)
+/// - `0x30-0x3F`: Univalence (ua, ua_inv, equiv forward/backward)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum CubicalSubOpcode {
+    // ========================================================================
+    // Path Construction (0x00-0x0F)
+    // ========================================================================
+    /// Create a reflexivity path: refl(x) = λi. x
+    ///
+    /// Format: `dst:reg, value:reg`
+    PathRefl = 0x00,
+    /// Create a path lambda: λ(i:I). body
+    ///
+    /// Format: `dst:reg, body_func:reg`
+    PathLambda = 0x01,
+    /// Apply a path at an interval point: p @ r
+    ///
+    /// Format: `dst:reg, path:reg, point:reg`
+    PathApp = 0x02,
+    /// Path symmetry: sym(p) = λi. p @ (1-i)
+    ///
+    /// Format: `dst:reg, path:reg`
+    PathSym = 0x03,
+    /// Path transitivity: trans(p, q) = composition
+    ///
+    /// Format: `dst:reg, path_p:reg, path_q:reg`
+    PathTrans = 0x04,
+    /// Action on paths: ap(f, p) = λi. f(p @ i)
+    ///
+    /// Format: `dst:reg, func:reg, path:reg`
+    PathAp = 0x05,
+
+    // ========================================================================
+    // Transport and Composition (0x10-0x1F)
+    // ========================================================================
+    /// Transport along a type path: transport(p, x)
+    ///
+    /// Key reductions: transport(refl, x) → x; transport(ua(e), x) → e.forward(x)
+    ///
+    /// Format: `dst:reg, type_path:reg, value:reg`
+    Transport = 0x10,
+    /// Homogeneous composition: hcomp(φ, walls, base)
+    ///
+    /// Key reduction: hcomp(φ, const, base) → base (trivial)
+    ///
+    /// Format: `dst:reg, face:reg, walls:reg, base:reg`
+    Hcomp = 0x11,
+
+    // ========================================================================
+    // Interval Operations (0x20-0x2F)
+    // ========================================================================
+    /// Load interval endpoint i0
+    ///
+    /// Format: `dst:reg`
+    IntervalI0 = 0x20,
+    /// Load interval endpoint i1
+    ///
+    /// Format: `dst:reg`
+    IntervalI1 = 0x21,
+    /// Interval meet: i ∧ j
+    ///
+    /// Format: `dst:reg, a:reg, b:reg`
+    IntervalMeet = 0x22,
+    /// Interval join: i ∨ j
+    ///
+    /// Format: `dst:reg, a:reg, b:reg`
+    IntervalJoin = 0x23,
+    /// Interval reversal: 1 - i
+    ///
+    /// Format: `dst:reg, src:reg`
+    IntervalRev = 0x24,
+
+    // ========================================================================
+    // Univalence (0x30-0x3F)
+    // ========================================================================
+    /// Computational univalence: ua(equiv) — equivalence → type path
+    ///
+    /// Format: `dst:reg, equiv:reg`
+    Ua = 0x30,
+    /// Univalence inverse: ua_inv(path) — type path → equivalence
+    ///
+    /// Format: `dst:reg, path:reg`
+    UaInv = 0x31,
+    /// Equiv forward: e.forward(x)
+    ///
+    /// Format: `dst:reg, equiv:reg, value:reg`
+    EquivFwd = 0x32,
+    /// Equiv backward: e.inverse(x)
+    ///
+    /// Format: `dst:reg, equiv:reg, value:reg`
+    EquivBwd = 0x33,
+}
+
+impl CubicalSubOpcode {
+    /// Creates a cubical sub-opcode from a byte value.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            // Path Construction
+            0x00 => Some(Self::PathRefl),
+            0x01 => Some(Self::PathLambda),
+            0x02 => Some(Self::PathApp),
+            0x03 => Some(Self::PathSym),
+            0x04 => Some(Self::PathTrans),
+            0x05 => Some(Self::PathAp),
+            // Transport and Composition
+            0x10 => Some(Self::Transport),
+            0x11 => Some(Self::Hcomp),
+            // Interval Operations
+            0x20 => Some(Self::IntervalI0),
+            0x21 => Some(Self::IntervalI1),
+            0x22 => Some(Self::IntervalMeet),
+            0x23 => Some(Self::IntervalJoin),
+            0x24 => Some(Self::IntervalRev),
+            // Univalence
+            0x30 => Some(Self::Ua),
+            0x31 => Some(Self::UaInv),
+            0x32 => Some(Self::EquivFwd),
+            0x33 => Some(Self::EquivBwd),
+            _ => None,
+        }
+    }
+
+    /// Returns the byte value of this cubical sub-opcode.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
+
+    /// Returns the mnemonic string for this cubical sub-opcode.
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            // Path Construction
+            Self::PathRefl => "CUB_PATH_REFL",
+            Self::PathLambda => "CUB_PATH_LAMBDA",
+            Self::PathApp => "CUB_PATH_APP",
+            Self::PathSym => "CUB_PATH_SYM",
+            Self::PathTrans => "CUB_PATH_TRANS",
+            Self::PathAp => "CUB_PATH_AP",
+            // Transport and Composition
+            Self::Transport => "CUB_TRANSPORT",
+            Self::Hcomp => "CUB_HCOMP",
+            // Interval Operations
+            Self::IntervalI0 => "CUB_INTERVAL_I0",
+            Self::IntervalI1 => "CUB_INTERVAL_I1",
+            Self::IntervalMeet => "CUB_INTERVAL_MEET",
+            Self::IntervalJoin => "CUB_INTERVAL_JOIN",
+            Self::IntervalRev => "CUB_INTERVAL_REV",
+            // Univalence
+            Self::Ua => "CUB_UA",
+            Self::UaInv => "CUB_UA_INV",
+            Self::EquivFwd => "CUB_EQUIV_FWD",
+            Self::EquivBwd => "CUB_EQUIV_BWD",
+        }
+    }
+
+    /// Returns the category of this cubical sub-opcode.
+    pub fn category(self) -> &'static str {
+        match self as u8 {
+            0x00..=0x0F => "Path Construction",
+            0x10..=0x1F => "Transport and Composition",
+            0x20..=0x2F => "Interval Operations",
+            0x30..=0x3F => "Univalence",
+            _ => "Unknown",
+        }
+    }
 }
 
 // ============================================================================
@@ -7664,6 +7860,7 @@ impl Opcode {
             Opcode::Ensures => "ENSURES",
             Opcode::Invariant => "INVARIANT",
             Opcode::NewChannel => "NEW_CHANNEL",
+            Opcode::CubicalExtended => "CUBICAL_EXTENDED",
             // System (V-LLSI) + Autodiff (0xE0-0xEF)
             Opcode::SyscallLinux => "SYSCALL_LINUX",
             Opcode::Mmap => "MMAP",
@@ -10537,6 +10734,25 @@ pub enum Instruction {
         sub_op: u8,
         /// Operand bytes (decoded by interpreter).
         operands: Vec<u8>,
+    },
+
+    // ========================================================================
+    // Cubical Extended
+    // ========================================================================
+    /// Cubical type theory extended operations.
+    ///
+    /// Uses CubicalSubOpcode for cubical type theory operations:
+    /// - Path construction (PathRefl, PathLambda, PathApp, PathSym, PathTrans, PathAp)
+    /// - Transport and composition (Transport, Hcomp)
+    /// - Interval operations (IntervalI0, IntervalI1, IntervalMeet, IntervalJoin, IntervalRev)
+    /// - Univalence (Ua, UaInv, EquivFwd, EquivBwd)
+    CubicalExtended {
+        /// Cubical sub-opcode (CubicalSubOpcode as u8).
+        sub_op: u8,
+        /// Destination register.
+        dst: Reg,
+        /// Argument registers.
+        args: Vec<Reg>,
     },
 
     // ========================================================================

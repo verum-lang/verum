@@ -77,5 +77,6 @@ pub(super) mod log_extended;
 pub(super) mod arith_extended;
 pub(super) mod tensor;
 pub(super) mod gpu;
+pub(super) mod cubical;
 pub(super) mod tensor_extended;
 pub(super) mod ml_extended;

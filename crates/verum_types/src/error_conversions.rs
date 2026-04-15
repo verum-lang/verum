@@ -545,6 +545,14 @@ impl From<TypeError> for VerumError {
                 message: format!("E504: {}", message).into(),
             },
 
+            // Non-Productive Corecursion (E505)
+            TypeError::NonProductiveCorecursion { func_name, unguarded_calls, .. } => VerumError::Other {
+                message: format!(
+                    "E505: cofix function `{}` is non-productive: unguarded recursive calls: {}",
+                    func_name, unguarded_calls
+                ).into(),
+            },
+
             // Invalid Meta Context Usage (E502)
             // Meta contexts: meta functions have restricted context access (only compile-time-safe contexts) — Meta contexts
             TypeError::InvalidMetaContext { func_name, invalid_contexts, .. } => VerumError::Other {

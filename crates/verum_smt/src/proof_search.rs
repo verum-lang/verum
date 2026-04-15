@@ -5557,8 +5557,10 @@ impl ProofSearchEngine {
         _args: &List<Text>,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Look up tactic in database
-        // For now, try standard tactics by name
+        use crate::cubical_tactic::{
+            try_cubical, try_category_simp, try_category_law, try_descent_check,
+        };
+
         match name.as_str() {
             "simp" => self.try_simplify(goal),
             "ring" => self.try_ring(goal),
@@ -5566,25 +5568,65 @@ impl ProofSearchEngine {
             "omega" => self.try_omega(goal),
             "blast" => self.try_blast(goal),
             "auto" => self.try_auto(goal),
-            // `cubical` tactic — discharges path-equality goals via
-            // the EqTerm↔CubicalTerm bridge. The underlying engine
-            // is identical to `auto`: when the goal is a `Type::Eq`,
-            // the unifier already routes through the cubical
-            // normalizer (transport-refl, sym-refl, hcomp-collapse,
-            // path-lambda β). Naming the tactic `cubical` documents
-            // intent and exposes it from `proof by cubical;` syntax.
-            "cubical" => self.try_auto(goal),
-            // `descent` tactic — for sheaf descent goals (covering
-            // sieves with compatible local sections). Routes through
-            // auto; the structural reduction happens in the SMT
-            // domains/sheaf encoding when goals are appropriately
-            // shaped (covering family + compatibility witness).
-            "descent" | "descent_check" => self.try_auto(goal),
-            // `category_simp` tactic — normalizes categorical equations
-            // by applying associativity, identity, and functoriality
-            // laws. Routes through the category_simp TacticCombinator
-            // which chains Simplify + SolveEqs + Auto/SMT.
-            "category_simp" | "category_law" => self.try_auto(goal),
+
+            // === Cubical HoTT tactics ===
+            //
+            // `cubical` / `homotopy` — first tries to close the goal by
+            // cubical WHNF normalisation (transport-refl, sym-refl,
+            // hcomp-collapse, path-lambda β, univalence computation).
+            // If normalisation cannot close the goal it falls back to
+            // the full SMT solver via `try_auto`.
+            "cubical" | "homotopy" => {
+                match try_cubical(goal) {
+                    Ok(subgoals) => Ok(subgoals),
+                    Err(ref e) if e.to_string().contains("__smt_fallback") => {
+                        self.try_auto(goal)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+
+            // === Category theory tactics ===
+            //
+            // `category_simp` — rewrite using associativity and
+            // identity laws (up to 50 steps), then fall back to SMT.
+            "category_simp" => {
+                match try_category_simp(goal) {
+                    Ok(subgoals) => Ok(subgoals),
+                    Err(ref e) if e.to_string().contains("__smt_fallback") => {
+                        self.try_auto(goal)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+
+            // `category_law` — like `category_simp` but also unfolds
+            // functor preservation laws (up to 100 steps).
+            "category_law" | "functor_law" => {
+                match try_category_law(goal) {
+                    Ok(subgoals) => Ok(subgoals),
+                    Err(ref e) if e.to_string().contains("__smt_fallback") => {
+                        self.try_auto(goal)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+
+            // === Sheaf / topos tactics ===
+            //
+            // `descent_check` / `descent` — check Čech descent via the
+            // SMT sheaf-domain encoding. Uses the cubical_tactic bridge
+            // to recognise descent-shaped goals, then delegates to SMT.
+            "descent" | "descent_check" => {
+                match try_descent_check(goal) {
+                    Ok(subgoals) => Ok(subgoals),
+                    Err(ref e) if e.to_string().contains("__smt_fallback") => {
+                        self.try_auto(goal)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+
             _ => Err(ProofError::TacticFailed(
                 format!("Unknown tactic: {}", name).into(),
             )),

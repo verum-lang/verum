@@ -217,6 +217,48 @@ pub enum BisimulationDivergence {
     },
 }
 
+/// A diagnostic produced by [`check_cofix_productivity`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProductivityDiagnostic {
+    /// The corecursive function that is non-productive.
+    pub func_name: Text,
+    /// The call sites that are unguarded (callee names).
+    pub unguarded_calls: List<Text>,
+}
+
+/// Check productivity of a corecursive function definition.
+///
+/// Called from the type checker when `is_cofix = true`.
+/// `body_calls` is a list of `(callee_name, guard_depth)` pairs extracted
+/// from the function body, where `guard_depth` counts how many coinductive
+/// constructors wrap each recursive call site.
+///
+/// Returns a non-empty `Vec` of diagnostics when the definition is
+/// non-productive (i.e. at least one recursive call has `guard_depth == 0`).
+/// Returns an empty `Vec` when the definition is productive.
+pub fn check_cofix_productivity(
+    func_name: &str,
+    body_calls: &[(String, usize)],
+) -> Vec<ProductivityDiagnostic> {
+    // Convert raw (callee, guard_depth) pairs into CorecursiveCall values,
+    // but only keep self-recursive calls (callee == func_name).
+    let corecursive_calls: Vec<CorecursiveCall> = body_calls
+        .iter()
+        .filter(|(callee, _)| callee.as_str() == func_name)
+        .map(|(callee, depth)| CorecursiveCall::new(callee.clone(), *depth as u32))
+        .collect();
+
+    match check_productivity(&corecursive_calls) {
+        ProductivityResult::Productive => vec![],
+        ProductivityResult::NonProductive { unguarded_calls } => {
+            vec![ProductivityDiagnostic {
+                func_name: Text::from(func_name),
+                unguarded_calls,
+            }]
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

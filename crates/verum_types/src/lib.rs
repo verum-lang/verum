@@ -1484,6 +1484,42 @@ pub enum TypeError {
     },
 
     // =========================================================================
+    // Coinductive / Productivity Errors (E505)
+    // =========================================================================
+
+    /// Non-productive corecursive function (E505).
+    ///
+    /// A function declared with the `cofix` modifier has at least one
+    /// recursive self-call that is NOT guarded by a coinductive constructor.
+    /// Unguarded corecursion diverges at runtime (the function never produces
+    /// an observable output step), so it is rejected at compile time.
+    ///
+    /// Every self-recursive call in a `cofix` function must occur under at
+    /// least one constructor of the coinductive return type (guard depth ≥ 1).
+    ///
+    /// Example:
+    /// ```verum
+    /// // WRONG: recursive call is unguarded — no constructor wraps it.
+    /// cofix fn bad_stream() -> Stream<Int> {
+    ///     bad_stream()   // E505: unguarded corecursion
+    /// }
+    ///
+    /// // Correct: recursive call is wrapped by the Stream constructor.
+    /// cofix fn ones() -> Stream<Int> {
+    ///     Stream.cons(1, ones())
+    /// }
+    /// ```
+    #[error("E505: cofix function `{func_name}` is non-productive: unguarded recursive calls: {unguarded_calls}")]
+    NonProductiveCorecursion {
+        /// Name of the corecursive function
+        func_name: Text,
+        /// Comma-separated list of unguarded call sites
+        unguarded_calls: Text,
+        /// Span of the function declaration
+        span: verum_ast::span::Span,
+    },
+
+    // =========================================================================
     // Quote Hygiene Errors (M400-M409)
     // Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — Quote Hygiene
     // =========================================================================
@@ -1821,6 +1857,8 @@ impl TypeError {
             ImpurePureFunction { span, .. } => *span,
             // Async property violation
             AsyncPropertyViolation { span, .. } => *span,
+            // Coinductive / productivity error (E505)
+            NonProductiveCorecursion { span, .. } => *span,
             // Quote hygiene errors (M400-M409)
             UnboundSpliceVariable { span, .. } => *span,
             UnquoteOutsideQuote { span, .. } => *span,
@@ -3148,6 +3186,28 @@ impl TypeError {
                     builder = builder.span(diag_span);
                 }
                 builder = builder.add_note("async operations require async function context");
+                builder.build()
+            }
+
+            NonProductiveCorecursion { func_name, unguarded_calls, span } => {
+                // E505: Non-productive corecursive function
+                let mut builder = DiagnosticBuilder::error()
+                    .code("E505")
+                    .message(format!(
+                        "cofix function `{}` is non-productive: unguarded recursive calls: {}",
+                        func_name, unguarded_calls
+                    ));
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder = builder.add_note(
+                    "every recursive call in a cofix function must be wrapped by at least one \
+                     coinductive constructor (guard depth ≥ 1)",
+                );
+                builder = builder.help(
+                    "wrap the recursive call inside a constructor of the coinductive return type, \
+                     e.g. `Stream.cons(head, recursive_call())`",
+                );
                 builder.build()
             }
 

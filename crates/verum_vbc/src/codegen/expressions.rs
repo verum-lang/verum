@@ -3733,6 +3733,211 @@ impl VbcCodegen {
                 Ok(Some(Some(result)))
             }
 
+            // =================================================================
+            // Cubical type theory builtins
+            // =================================================================
+            // These compile @builtin_xxx calls from core/math/hott.vr into
+            // CubicalExtended VBC instructions. At runtime, Path values are
+            // closures (functions I → A), and cubical operations manipulate
+            // them according to CCHM reduction rules.
+
+            "@builtin_refl" | "refl" if args.len() == 1 => {
+                // refl(x) = λi. x — constant path
+                let x = self.compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("refl arg has no value"))?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: crate::instruction::CubicalSubOpcode::PathRefl.to_byte(),
+                    dst,
+                    args: vec![x],
+                });
+                self.ctx.free_temp(x);
+                Ok(Some(Some(dst)))
+            }
+
+            "@builtin_transport" | "transport" if args.len() == 2 => {
+                // transport(type_path, value) — move value along type path
+                let type_path = self.compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("transport type_path has no value"))?;
+                let value = self.compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("transport value has no value"))?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: crate::instruction::CubicalSubOpcode::Transport.to_byte(),
+                    dst,
+                    args: vec![type_path, value],
+                });
+                self.ctx.free_temp(type_path);
+                self.ctx.free_temp(value);
+                Ok(Some(Some(dst)))
+            }
+
+            "@builtin_hcomp" | "hcomp" if args.len() == 3 => {
+                // hcomp(φ, walls, base) — homogeneous composition
+                let face = self.compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("hcomp face has no value"))?;
+                let walls = self.compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("hcomp walls has no value"))?;
+                let base = self.compile_expr(&args[2])?
+                    .ok_or_else(|| CodegenError::internal("hcomp base has no value"))?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: crate::instruction::CubicalSubOpcode::Hcomp.to_byte(),
+                    dst,
+                    args: vec![face, walls, base],
+                });
+                self.ctx.free_temp(face);
+                self.ctx.free_temp(walls);
+                self.ctx.free_temp(base);
+                Ok(Some(Some(dst)))
+            }
+
+            "@builtin_sym" | "sym" if args.len() == 1 || args.len() == 3 => {
+                // sym(p) = λi. p @ (1-i) — path symmetry
+                // In hott.vr: sym<A>(a, b, p) — we only need the path arg
+                let path_idx = args.len() - 1; // last arg is the path
+                let path = self.compile_expr(&args[path_idx])?
+                    .ok_or_else(|| CodegenError::internal("sym path has no value"))?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: crate::instruction::CubicalSubOpcode::PathSym.to_byte(),
+                    dst,
+                    args: vec![path],
+                });
+                self.ctx.free_temp(path);
+                Ok(Some(Some(dst)))
+            }
+
+            "@builtin_trans" => {
+                // trans(p, q) — path composition
+                // In hott.vr: trans<A>(a, b, c, p, q) — last 2 args are paths
+                let n = args.len();
+                if n >= 2 {
+                    let p = self.compile_expr(&args[n - 2])?
+                        .ok_or_else(|| CodegenError::internal("trans p has no value"))?;
+                    let q = self.compile_expr(&args[n - 1])?
+                        .ok_or_else(|| CodegenError::internal("trans q has no value"))?;
+                    let dst = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CubicalExtended {
+                        sub_op: crate::instruction::CubicalSubOpcode::PathTrans.to_byte(),
+                        dst,
+                        args: vec![p, q],
+                    });
+                    self.ctx.free_temp(p);
+                    self.ctx.free_temp(q);
+                    Ok(Some(Some(dst)))
+                } else {
+                    Ok(None)
+                }
+            }
+
+            "@builtin_ap" => {
+                // ap(f, p) = λi. f(p @ i) — action on paths
+                // In hott.vr: ap<A,B>(f, a, b, p) — first and last args
+                let n = args.len();
+                if n >= 2 {
+                    let f = self.compile_expr(&args[0])?
+                        .ok_or_else(|| CodegenError::internal("ap func has no value"))?;
+                    let path = self.compile_expr(&args[n - 1])?
+                        .ok_or_else(|| CodegenError::internal("ap path has no value"))?;
+                    let dst = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CubicalExtended {
+                        sub_op: crate::instruction::CubicalSubOpcode::PathAp.to_byte(),
+                        dst,
+                        args: vec![f, path],
+                    });
+                    self.ctx.free_temp(f);
+                    self.ctx.free_temp(path);
+                    Ok(Some(Some(dst)))
+                } else {
+                    Ok(None)
+                }
+            }
+
+            "@builtin_apd" => {
+                // apd is dependent ap — same runtime behavior as ap
+                let n = args.len();
+                if n >= 2 {
+                    let f = self.compile_expr(&args[0])?
+                        .ok_or_else(|| CodegenError::internal("apd func has no value"))?;
+                    let path = self.compile_expr(&args[n - 1])?
+                        .ok_or_else(|| CodegenError::internal("apd path has no value"))?;
+                    let dst = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CubicalExtended {
+                        sub_op: crate::instruction::CubicalSubOpcode::PathAp.to_byte(),
+                        dst,
+                        args: vec![f, path],
+                    });
+                    self.ctx.free_temp(f);
+                    self.ctx.free_temp(path);
+                    Ok(Some(Some(dst)))
+                } else {
+                    Ok(None)
+                }
+            }
+
+            "@builtin_i0" => {
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: crate::instruction::CubicalSubOpcode::IntervalI0.to_byte(),
+                    dst,
+                    args: vec![],
+                });
+                Ok(Some(Some(dst)))
+            }
+
+            "@builtin_i1" => {
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CubicalExtended {
+                    sub_op: crate::instruction::CubicalSubOpcode::IntervalI1.to_byte(),
+                    dst,
+                    args: vec![],
+                });
+                Ok(Some(Some(dst)))
+            }
+
+            "@builtin_sigma_path" => {
+                // sigma_path(p, q) — path in a sigma type
+                // At runtime: a pair of paths is just a pair
+                if args.len() >= 2 {
+                    let p = self.compile_expr(&args[0])?
+                        .ok_or_else(|| CodegenError::internal("sigma_path p has no value"))?;
+                    let q = self.compile_expr(&args[1])?
+                        .ok_or_else(|| CodegenError::internal("sigma_path q has no value"))?;
+                    let dst = self.ctx.alloc_temp();
+                    // Pack the pair of paths
+                    self.ctx.emit(Instruction::Pack {
+                        dst,
+                        src_start: p,
+                        count: 2,
+                    });
+                    self.ctx.free_temp(p);
+                    self.ctx.free_temp(q);
+                    Ok(Some(Some(dst)))
+                } else {
+                    Ok(None)
+                }
+            }
+
+            "@transport_roundtrip" => {
+                // transport roundtrip: transport(p, transport(sym(p), x)) ≡ x
+                // This is a proof term — at runtime it's the identity
+                if !args.is_empty() {
+                    let x = self.compile_expr(&args[args.len() - 1])?
+                        .ok_or_else(|| CodegenError::internal("roundtrip arg has no value"))?;
+                    let dst = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CubicalExtended {
+                        sub_op: crate::instruction::CubicalSubOpcode::PathRefl.to_byte(),
+                        dst,
+                        args: vec![x],
+                    });
+                    self.ctx.free_temp(x);
+                    Ok(Some(Some(dst)))
+                } else {
+                    Ok(None)
+                }
+            }
+
             _ => Ok(None), // Not a builtin
         }
     }

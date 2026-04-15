@@ -170,6 +170,7 @@ use handlers::tensor::{
 use handlers::gpu::{
     handle_gpu_extended, handle_gpu_sync, handle_gpu_memcpy, handle_gpu_alloc,
 };
+use handlers::cubical::handle_cubical_extended;
 use handlers::tensor_extended::handle_tensor_extended;
 use handlers::ml_extended::handle_ml_extended;
 
@@ -481,7 +482,8 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0xDB] = handle_ensures;            // Ensures = 0xDB
     table[0xDC] = handle_invariant;          // Invariant = 0xDC
     table[0xDD] = handle_new_channel;        // NewChannel = 0xDD
-    // DebugDE = 0xDE, DebugDF = 0xDF (reserved)
+    table[0xDE] = handle_cubical_extended;  // CubicalExtended = 0xDE
+    // DebugDF = 0xDF (reserved)
 
     // ========================================================================
     // System (V-LLSI) + Autodiff (0xE0-0xEF) - matches instruction.rs

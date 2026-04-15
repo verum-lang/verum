@@ -2469,6 +2469,19 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(opcode.to_byte());
             output.extend_from_slice(data);
         }
+
+        // ====================================================================
+        // Cubical type theory (CubicalExtended = 0xDE)
+        // ====================================================================
+        Instruction::CubicalExtended { sub_op, dst, args } => {
+            output.push(Opcode::CubicalExtended.to_byte());
+            output.push(*sub_op);
+            output.push(dst.0 as u8);
+            output.push(args.len() as u8);
+            for arg in args {
+                output.push(arg.0 as u8);
+            }
+        }
     }
 
     output.len() - start_len

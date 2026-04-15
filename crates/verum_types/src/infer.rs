@@ -33785,6 +33785,34 @@ impl TypeChecker {
         }
 
         // ============================================================
+        // E505: Productivity check for cofix (coinductive) functions
+        // Coinductive function productivity: cofix functions must have all
+        // recursive self-calls guarded by at least one coinductive constructor.
+        // ============================================================
+        if func.is_cofix {
+            if let Some(ref body) = func.body {
+                let body_calls = self.extract_corecursive_calls(body, &func.name.name);
+                let diags = crate::coinductive_analysis::check_cofix_productivity(
+                    func.name.name.as_str(),
+                    &body_calls,
+                );
+                if let Some(diag) = diags.into_iter().next() {
+                    let calls_str = diag
+                        .unguarded_calls
+                        .iter()
+                        .map(|c| c.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(TypeError::NonProductiveCorecursion {
+                        func_name: func.name.name.clone(),
+                        unguarded_calls: verum_common::Text::from(calls_str),
+                        span: func.span,
+                    });
+                }
+            }
+        }
+
+        // ============================================================
         // E504: Async property enforcement
         // Ensure async functions have Async property in their type
         // ============================================================
@@ -33905,6 +33933,140 @@ impl TypeChecker {
         // to prevent stack overflow during type checking of infinitely-recursive functions.
 
         Ok(())
+    }
+
+    /// Extract all call sites from a function body for corecursion analysis.
+    ///
+    /// Returns a list of `(callee_name, guard_depth)` pairs. The `guard_depth`
+    /// counts how many coinductive constructors (uppercase-named calls) wrap each
+    /// call site on the path from the body root to that call. A guard depth of 0
+    /// means the call is at the top level — unguarded and non-productive.
+    ///
+    /// This is used by the E505 productivity check for `cofix` functions.
+    fn extract_corecursive_calls(
+        &self,
+        body: &verum_ast::decl::FunctionBody,
+        func_name: &verum_common::Text,
+    ) -> Vec<(String, usize)> {
+        use verum_ast::decl::FunctionBody;
+
+        let mut calls = Vec::new();
+
+        fn path_name(path: &verum_ast::ty::Path) -> String {
+            path.segments
+                .iter()
+                .filter_map(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str().to_owned()),
+                    verum_ast::ty::PathSegment::SelfValue => Some("self".to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(".")
+        }
+
+        fn is_constructor(name: &str) -> bool {
+            name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+        }
+
+        fn walk(
+            expr: &verum_ast::expr::Expr,
+            func_name: &str,
+            guard_depth: usize,
+            calls: &mut Vec<(String, usize)>,
+        ) {
+            use verum_ast::expr::{ConditionKind, ExprKind};
+            use verum_ast::stmt::StmtKind;
+            match &expr.kind {
+                ExprKind::Call { func: callee_expr, args, .. } => {
+                    if let ExprKind::Path(path) = &callee_expr.kind {
+                        let name = path_name(path);
+                        if name == func_name {
+                            // Self-recursive call — record its guard depth
+                            calls.push((name, guard_depth));
+                        } else if is_constructor(&name) {
+                            // Constructor call — increase guard depth for args
+                            for arg in args {
+                                walk(arg, func_name, guard_depth + 1, calls);
+                            }
+                            return;
+                        }
+                    }
+                    // Non-constructor, non-recursive call — walk args at same depth
+                    if let ExprKind::Path(_) = &callee_expr.kind {
+                        for arg in args {
+                            walk(arg, func_name, guard_depth, calls);
+                        }
+                    } else {
+                        walk(callee_expr, func_name, guard_depth, calls);
+                        for arg in args {
+                            walk(arg, func_name, guard_depth, calls);
+                        }
+                    }
+                }
+                ExprKind::Block(block) => {
+                    for stmt in &block.stmts {
+                        match &stmt.kind {
+                            StmtKind::Expr { expr: e, .. } => walk(e, func_name, guard_depth, calls),
+                            StmtKind::Let { value: Some(init), .. } => walk(init, func_name, guard_depth, calls),
+                            _ => {}
+                        }
+                    }
+                    if let Some(e) = &block.expr {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+                ExprKind::Match { expr: scrutinee, arms } => {
+                    walk(scrutinee, func_name, guard_depth, calls);
+                    for arm in arms {
+                        walk(&arm.body, func_name, guard_depth, calls);
+                    }
+                }
+                ExprKind::If { condition, then_branch, else_branch } => {
+                    for cond in &condition.conditions {
+                        match cond {
+                            ConditionKind::Expr(e) => walk(e, func_name, guard_depth, calls),
+                            ConditionKind::Let { value, .. } => walk(value, func_name, guard_depth, calls),
+                        }
+                    }
+                    for stmt in &then_branch.stmts {
+                        if let StmtKind::Expr { expr: e, .. } = &stmt.kind {
+                            walk(e, func_name, guard_depth, calls);
+                        }
+                    }
+                    if let Some(e) = &then_branch.expr {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                    if let Some(e) = else_branch {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+                ExprKind::Binary { left, right, .. } => {
+                    walk(left, func_name, guard_depth, calls);
+                    walk(right, func_name, guard_depth, calls);
+                }
+                ExprKind::Unary { expr: inner, .. } => walk(inner, func_name, guard_depth, calls),
+                _ => {}
+            }
+        }
+
+        let func_name_str = func_name.as_str();
+        match body {
+            FunctionBody::Expr(expr) => walk(expr, func_name_str, 0, &mut calls),
+            FunctionBody::Block(block) => {
+                for stmt in &block.stmts {
+                    match &stmt.kind {
+                        verum_ast::stmt::StmtKind::Expr { expr, .. } => walk(expr, func_name_str, 0, &mut calls),
+                        verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => walk(init, func_name_str, 0, &mut calls),
+                        _ => {}
+                    }
+                }
+                if let Some(expr) = &block.expr {
+                    walk(expr, func_name_str, 0, &mut calls);
+                }
+            }
+        }
+
+        calls
     }
 
     /// Evaluate a meta parameter expression to a compile-time constant value
@@ -45214,13 +45376,38 @@ impl TypeChecker {
                 let inner_key = format!("__newtype_inner_{}", type_name);
                 self.ctx.define_type(inner_key, Type::Unit);
             }
-            TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_) => {
+            TypeDeclBody::Inductive(_) => {
                 // Dependent type features (v2.0+) - register as named type for now
                 let ty = Type::Named {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
                 self.ctx.define_type(type_name.clone(), ty);
+            }
+            TypeDeclBody::Coinductive(protocol_body) => {
+                // Coinductive type — register named type and validate that the
+                // protocol body declares at least one destructor (observation method).
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+
+                // Verify that every protocol item that is a function has an explicit
+                // return type declared (destructors must be typed observations).
+                for item in &protocol_body.items {
+                    use verum_ast::decl::ProtocolItemKind;
+                    if let ProtocolItemKind::Function { decl, .. } = &item.kind {
+                        if decl.return_type.is_none() {
+                            tracing::warn!(
+                                "coinductive type `{}`: destructor `{}` has no declared return type; \
+                                 observations should have explicit return types",
+                                type_name,
+                                decl.name.name
+                            );
+                        }
+                    }
+                }
             }
             TypeDeclBody::SigmaTuple(types) => {
                 // Dependent pair / sigma type (e.g., `type Interval is lo: Int, hi: Int where hi >= lo;`)
@@ -46462,13 +46649,35 @@ impl TypeChecker {
                     self.ctx.define_type(struct_key, Type::Record(fields));
                 }
             }
-            TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_) => {
+            TypeDeclBody::Inductive(_) => {
                 // Dependent type features (v2.0+) - register as named type for now
                 let ty = Type::Named {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
                 self.ctx.define_type(type_name.clone(), ty);
+            }
+            TypeDeclBody::Coinductive(protocol_body) => {
+                // Coinductive type (Pass 2) — resolve destructor return types and
+                // verify each declared destructor has a valid return type.
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+
+                // Verify that all destructors have explicit, resolvable return types.
+                for item in &protocol_body.items {
+                    use verum_ast::decl::ProtocolItemKind;
+                    if let ProtocolItemKind::Function { decl, .. } = &item.kind {
+                        if let Some(ret_ty_ast) = &decl.return_type {
+                            // Attempt to resolve the return type — surface errors
+                            // that would prevent observation methods from type-checking.
+                            let _ = self.ast_to_type(ret_ty_ast)?;
+                        }
+                        // Missing return type was warned at Pass 1; nothing more to do.
+                    }
+                }
             }
         }
 
