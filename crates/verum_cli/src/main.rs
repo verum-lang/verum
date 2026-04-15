@@ -330,6 +330,9 @@ enum Commands {
         check: bool,
         #[clap(long)]
         verbose: bool,
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Run linter
@@ -338,6 +341,9 @@ enum Commands {
         fix: bool,
         #[clap(long)]
         deny_warnings: bool,
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Generate documentation
@@ -351,6 +357,9 @@ enum Commands {
         /// Output format: html, markdown, json (default: html)
         #[clap(long, default_value = "html")]
         format: Text,
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Remove build artifacts
@@ -378,6 +387,9 @@ enum Commands {
         preload: Option<Text>,
         #[clap(long)]
         skip_verify: bool,
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Start Verum Playbook - Interactive notebook environment
@@ -521,6 +533,9 @@ enum Commands {
         /// Port for socket transport (required when transport=socket)
         #[clap(long, value_name = "PORT")]
         port: Option<u16>,
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Start Language Server Protocol server for IDE integration
@@ -531,6 +546,9 @@ enum Commands {
         /// Port for socket transport (required when transport=socket)
         #[clap(long, value_name = "PORT")]
         port: Option<u16>,
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Security audit of dependencies
@@ -1009,14 +1027,24 @@ fn run_command(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Commands::Fmt { check, verbose } => commands::fmt::execute(check, verbose),
-        Commands::Lint { fix, deny_warnings } => commands::lint::execute(fix, deny_warnings),
+        Commands::Fmt { check, verbose, feature_overrides } => {
+            feature_overrides::install(feature_overrides);
+            commands::fmt::execute(check, verbose)
+        }
+        Commands::Lint { fix, deny_warnings, feature_overrides } => {
+            feature_overrides::install(feature_overrides);
+            commands::lint::execute(fix, deny_warnings)
+        }
         Commands::Doc {
             open,
             document_private_items,
             no_deps,
             format,
-        } => commands::doc::execute(open, document_private_items, no_deps, format.as_str()),
+            feature_overrides,
+        } => {
+            feature_overrides::install(feature_overrides);
+            commands::doc::execute(open, document_private_items, no_deps, format.as_str())
+        }
         Commands::Clean { all } => commands::clean::execute(all),
         Commands::Watch { command, clear } => commands::watch::execute(command.as_str(), clear),
         Commands::Deps(deps_cmd) => match deps_cmd {
@@ -1035,7 +1063,11 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Repl {
             preload,
             skip_verify,
-        } => commands::file::repl(preload.as_ref().map(|s| s.as_str()), skip_verify),
+            feature_overrides,
+        } => {
+            feature_overrides::install(feature_overrides);
+            commands::file::repl(preload.as_ref().map(|s| s.as_str()), skip_verify)
+        }
         Commands::Playbook {
             file,
             tier,
@@ -1156,7 +1188,8 @@ fn run_command(cli: Cli) -> Result<()> {
             llvm,
             all,
         } => commands::file::info(features, llvm, all),
-        Commands::Dap { transport, port } => {
+        Commands::Dap { transport, port, feature_overrides } => {
+            feature_overrides::install(feature_overrides);
             let transport_mode = match transport.as_str() {
                 "stdio" => commands::dap::Transport::Stdio,
                 "socket" => match port {
@@ -1175,7 +1208,8 @@ fn run_command(cli: Cli) -> Result<()> {
             };
             commands::dap::execute(transport_mode)
         }
-        Commands::Lsp { transport, port } => {
+        Commands::Lsp { transport, port, feature_overrides } => {
+            feature_overrides::install(feature_overrides);
             let transport_mode = match transport.as_str() {
                 "stdio" => commands::lsp::Transport::Stdio,
                 "socket" => match port {
