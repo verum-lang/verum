@@ -359,3 +359,124 @@ fn nix_kill(child: &std::process::Child) -> std::io::Result<()> {
     let _ = child.id();
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Both-paths integration — gates fire identically in Tier 0 (interpreter)
+// AND Tier 1 (AOT). Answers the core directive: "all language mechanisms
+// must be fully and correctly integrated into the pipeline for both
+// interpreter and AOT modes."
+// ---------------------------------------------------------------------------
+
+fn write_unsafe_main(dir: &PathBuf) -> PathBuf {
+    let path = dir.join("main.vr");
+    fs::write(
+        &path,
+        "fn main() {\n    unsafe {\n        let _x = 0;\n    }\n}\n",
+    )
+    .expect("write main.vr");
+    path
+}
+
+/// Tier 0 (interpreter) — running a .vr with `unsafe { ... }` under
+/// `-Z safety.unsafe_allowed=false` must produce a feature-gate error.
+#[test]
+fn tier0_interp_rejects_unsafe_when_gate_off() {
+    let (_tmp, dir) = project("tier0-unsafe");
+    let main = write_unsafe_main(&dir);
+
+    let out = verum(
+        &[
+            "run",
+            "--interp",
+            main.to_str().unwrap(),
+            "-Z",
+            "safety.unsafe_allowed=false",
+        ],
+        &dir,
+    );
+    assert!(
+        !out.status.success(),
+        "Tier 0 must reject unsafe with gate off. stdout:\n{}\nstderr:\n{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    let combined = format!("{}\n{}", stdout(&out), stderr(&out));
+    assert!(
+        combined.contains("safety gate"),
+        "Tier 0 error must name the safety gate:\n{}",
+        combined
+    );
+    // The fallback to interpreter must NOT hide the gate error.
+    assert!(
+        !combined.contains("Falling back to interpreter"),
+        "Tier 0 must not attempt to fall back on gate rejection:\n{}",
+        combined
+    );
+}
+
+/// Tier 1 (AOT) — same .vr file, same `-Z` override, same expected
+/// behavior. This proves the gate is consumed BEFORE the codegen-tier
+/// fork (in the shared type-check phase), not after.
+///
+/// Additionally proves the previous "AOT fails → silently fall back
+/// to interpreter" bug is fixed: a feature-gate rejection must
+/// propagate as a non-zero exit, not quietly run the program.
+#[test]
+fn tier1_aot_rejects_unsafe_when_gate_off() {
+    let (_tmp, dir) = project("tier1-unsafe");
+    let main = write_unsafe_main(&dir);
+
+    let out = verum(
+        &[
+            "run",
+            "--aot",
+            main.to_str().unwrap(),
+            "-Z",
+            "safety.unsafe_allowed=false",
+        ],
+        &dir,
+    );
+    assert!(
+        !out.status.success(),
+        "Tier 1 must reject unsafe with gate off. stdout:\n{}\nstderr:\n{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    let combined = format!("{}\n{}", stdout(&out), stderr(&out));
+    assert!(
+        combined.contains("safety gate"),
+        "Tier 1 error must name the safety gate:\n{}",
+        combined
+    );
+    assert!(
+        !combined.contains("Falling back to interpreter"),
+        "Tier 1 must not silently fall back on gate rejection — that \
+         would let the unsafe code actually run. The fallback is reserved \
+         for infrastructure errors (LLVM glitch, etc.), not feature gates.\n{}",
+        combined
+    );
+}
+
+/// `verum check` — uses the same shared type-check phase that Tier 0
+/// and Tier 1 do. Proves the gate fires at check time regardless of
+/// whether codegen ever runs.
+#[test]
+fn verum_check_rejects_unsafe_when_gate_off() {
+    let (_tmp, dir) = project("check-unsafe");
+    let main = write_unsafe_main(&dir);
+
+    let out = verum(
+        &[
+            "check",
+            main.to_str().unwrap(),
+            "-Z",
+            "safety.unsafe_allowed=false",
+        ],
+        &dir,
+    );
+    assert!(
+        !out.status.success(),
+        "verum check must reject unsafe with gate off. stderr:\n{}",
+        stderr(&out)
+    );
+}

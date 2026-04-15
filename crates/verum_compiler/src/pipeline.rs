@@ -9827,15 +9827,30 @@ impl<'s> CompilationPipeline<'s> {
         // zero proof-term overhead. The VBC codegen itself has a defensive
         // skip for the same item kinds, but doing it upstream keeps the
         // module in a canonical runtime-only form.
-        let (erased_module, erasure_stats) = crate::phases::proof_erasure::erase_proofs_from_module(
-            module.clone(),
-        );
-        if erasure_stats.total_erased() > 0 {
+        //
+        // Gated on [codegen].proof_erasure. When the flag is disabled,
+        // proof terms survive into VBC and become runtime values — used
+        // by research scenarios that inspect the proof witness at
+        // runtime. Default: true (production path).
+        let proof_erasure_on =
+            self.session.language_features().codegen.proof_erasure;
+        let erased_module = if proof_erasure_on {
+            let (m, erasure_stats) =
+                crate::phases::proof_erasure::erase_proofs_from_module(module.clone());
+            if erasure_stats.total_erased() > 0 {
+                tracing::debug!(
+                    "Proof erasure: {} proof items stripped before VBC codegen",
+                    erasure_stats.total_erased()
+                );
+            }
+            m
+        } else {
             tracing::debug!(
-                "Proof erasure: {} proof items stripped before VBC codegen",
-                erasure_stats.total_erased()
+                "Proof erasure SKIPPED ([codegen] proof_erasure = false); \
+                 proof terms will survive into VBC"
             );
-        }
+            module.clone()
+        };
         let module = &erased_module;
 
         // Get profile from session and configure VBC codegen accordingly

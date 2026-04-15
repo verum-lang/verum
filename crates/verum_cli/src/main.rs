@@ -253,18 +253,11 @@ enum Commands {
         /// .vr file to run (or project directory)
         #[clap(value_name = "FILE")]
         file: Option<Text>,
-        /// Execution tier: interpreter|aot (or 0-1)
-        #[clap(
-            long,
-            value_name = "TIER",
-            help = "Execution tier: interpreter (default) or aot"
-        )]
-        tier: Option<Text>,
         /// Run via interpreter (default, can be omitted)
-        #[clap(long, conflicts_with = "tier")]
+        #[clap(long, conflicts_with = "aot")]
         interp: bool,
         /// Compile to native and run (LLVM AOT)
-        #[clap(long, conflicts_with = "tier")]
+        #[clap(long, conflicts_with = "interp")]
         aot: bool,
         #[clap(short, long)]
         release: bool,
@@ -948,7 +941,6 @@ fn run_command(cli: Cli) -> Result<()> {
         }
         Commands::Run {
             file,
-            tier,
             interp,
             aot,
             release,
@@ -956,33 +948,41 @@ fn run_command(cli: Cli) -> Result<()> {
             args,
             feature_overrides,
         } => {
+            // Tier resolution precedence:
+            //   1. `--interp` / `--aot` shortcuts on the Run command
+            //   2. `--tier` from LanguageFeatureOverrides
+            //      (accepts interpret|aot|check; "check" is invalid
+            //      for `run` and yields an error)
+            //   3. default: interpreter
+            let tier_from_override = feature_overrides.tier.as_ref()
+                .map(|t| t.as_str().to_string());
             feature_overrides::install(feature_overrides);
-            // Resolve tier from flags or --tier option
-            let resolved_tier = if interp {
-                Some(Text::from("interpreter"))
+
+            let tier_num: Option<u8> = if interp {
+                Some(0)
             } else if aot {
-                Some(Text::from("aot"))
+                Some(1)
             } else {
-                tier
+                match tier_from_override.as_deref() {
+                    Some("interpret") | Some("interpreter") => Some(0),
+                    Some("aot") => Some(1),
+                    Some("check") => {
+                        return Err(CliError::InvalidArgument(
+                            "--tier check is for `verum check`, not `verum run`".into(),
+                        ));
+                    }
+                    Some(other) => {
+                        return Err(CliError::InvalidArgument(format!(
+                            "unknown tier `{}` (expected interpret|aot)",
+                            other
+                        )));
+                    }
+                    None => Some(0), // default = interpreter
+                }
             };
 
-            // Parse tier to numeric value for run::execute
-            let tier_num: Option<u8> = resolved_tier
-                .as_ref()
-                .and_then(|t| config::CompilationTier::from_str(t.as_str()).map(|ct| ct.as_u8()));
-
             let args_list: List<Text> = args.into_iter().map(|s| s.into()).collect();
-
-            // Default to interpreter (Tier 0) unless --aot is specified.
-            // This is more intuitive: `verum run file.vr` interprets,
-            // `verum run --aot file.vr` compiles natively.
-            let tier_label = resolved_tier
-                .as_ref()
-                .map(|t| t.as_str())
-                .unwrap_or("interpreter");
-            let tier_num = tier_num.or_else(|| {
-                if aot { Some(1) } else { Some(0) } // default = interpreter
-            });
+            let tier_label = if tier_num == Some(1) { "aot" } else { "interpreter" };
 
             match resolve_path(file.as_ref())? {
                 PathTarget::SingleFile(file_path) => {

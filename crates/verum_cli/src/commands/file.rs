@@ -158,10 +158,23 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
         ui::status("Checking", file);
     }
 
+    // Build LanguageFeatures from any installed CLI overrides so
+    // `verum check file.vr -Z safety.unsafe_allowed=false` fires the
+    // same gates as `verum run` / `verum build`.
+    let language_features = {
+        let mut m = crate::config::create_default_manifest(
+            "script",
+            false,
+            crate::config::LanguageProfile::Application,
+        );
+        crate::feature_overrides::apply_global(&mut m)?;
+        crate::feature_overrides::manifest_to_features(&m)?
+    };
     let options = CompilerOptions {
         input,
         output_format: OutputFormat::Human,
         continue_on_error,
+        language_features,
         ..Default::default()
     };
 
@@ -234,6 +247,21 @@ pub fn run_with_tier(
         return Err(CliError::FileNotFound(file.to_string()));
     }
 
+    // Resolve effective language features from CLI overrides (if any).
+    // Even in single-file mode (no verum.toml), the user can supply
+    // `-Z safety.unsafe_allowed=false` etc. on the command line and
+    // the installed global override set applies. This ensures feature
+    // gates fire identically in Tier 0 (interpreter) AND Tier 1 (AOT).
+    let language_features = {
+        let mut m = crate::config::create_default_manifest(
+            "script",
+            false,
+            crate::config::LanguageProfile::Application,
+        );
+        crate::feature_overrides::apply_global(&mut m)?;
+        crate::feature_overrides::manifest_to_features(&m)?
+    };
+
     match tier_num {
         0 => {
             // Tier 0: Direct interpretation via pipeline
@@ -245,6 +273,7 @@ pub fn run_with_tier(
                     VerifyMode::Auto
                 },
                 output_format: OutputFormat::Human,
+                language_features: language_features.clone(),
                 ..Default::default()
             };
             let mut session = Session::new(options);
@@ -268,6 +297,7 @@ pub fn run_with_tier(
                 input: input.clone(),
                 verify_mode,
                 output_format: OutputFormat::Human,
+                language_features: language_features.clone(),
                 ..Default::default()
             };
             let mut session = Session::new(options);
@@ -299,7 +329,24 @@ pub fn run_with_tier(
                     }
                 }
                 Err(aot_err) => {
-                    // Graceful fallback: AOT failed, try interpreter
+                    // If the error came from a feature gate (safety,
+                    // unsafe, FFI, etc.) — do NOT fall back. A gate
+                    // rejection is a user-intent check, not a build
+                    // system hiccup, and silently falling back would
+                    // defeat the gate.
+                    let err_str = aot_err.to_string();
+                    if err_str.contains("safety gate")
+                        || err_str.contains("[safety]")
+                        || err_str.contains("[meta]")
+                        || err_str.contains("[context]")
+                    {
+                        return Err(CliError::CompilationFailed(err_str));
+                    }
+
+                    // Graceful fallback: AOT failed for an unrelated
+                    // reason (LLVM glitch, toolchain issue) — retry
+                    // with the interpreter. Preserve language_features
+                    // so the interpreter applies the same gates.
                     ui::warn(&format!(
                         "AOT compilation failed: {}. Falling back to interpreter.",
                         aot_err
@@ -308,6 +355,7 @@ pub fn run_with_tier(
                         input: input.clone(),
                         verify_mode,
                         output_format: OutputFormat::Human,
+                        language_features: language_features.clone(),
                         ..Default::default()
                     };
                     let mut fallback_session = Session::new(fallback_options);
