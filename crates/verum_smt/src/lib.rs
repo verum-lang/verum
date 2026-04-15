@@ -136,6 +136,8 @@ pub mod smtlib_export;
 pub mod strategy_selection;
 pub mod capability_router; // Complementary Z3 + CVC5 routing (capability-based dispatcher)
 pub mod portfolio_executor; // Parallel Z3 + CVC5 execution with first-wins/cross-validate semantics
+pub mod solver_adapters;  // PortfolioSolver adapters bridging SmtBackend → portfolio API
+pub mod routing_stats;    // Routing decision telemetry + per-theory statistics
 
 // Advanced Z3 Features
 pub mod advanced_model;

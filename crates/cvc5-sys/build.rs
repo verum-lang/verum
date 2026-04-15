@@ -234,9 +234,15 @@ fn build_vendored() {
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or_else(|| num_logical_cpus());
 
+    // CVC5 uses custom CMake build types: Production | Debug | Testing | Competition
+    // (see cvc5/CMakeLists.txt:246). We map standard Cargo profiles:
+    //   - release  → Production (fully optimized, no debug assertions)
+    //   - debug    → Debug (assertions + debug info)
+    //   - default  → Production (prefer fast builds for dev iteration on cvc5)
     let profile = match env::var("PROFILE").as_deref() {
-        Ok("release") => "Release",
-        _ => "RelWithDebInfo", // Keep debug info in dev builds for profiling.
+        Ok("release") => "Production",
+        Ok("debug") => "Debug",
+        _ => "Production",
     };
 
     println!(
@@ -245,7 +251,76 @@ fn build_vendored() {
         profile, jobs
     );
 
+    // --- GMP detection ---
+    //
+    // CVC5 requires GMP (arbitrary precision arithmetic). On macOS Homebrew
+    // installs GMP in a non-standard location that CMake doesn't probe by
+    // default. We detect it and inject the include/lib paths.
+    let gmp_prefix = detect_gmp_prefix();
+    if let Some(prefix) = &gmp_prefix {
+        println!("cargo:warning=cvc5-sys: using GMP from {}", prefix);
+    }
+
+    // --- C++ compatibility flags ---
+    //
+    // CVC5's transitive dep LibPoly (built as an ExternalProject) includes
+    // gmpxx.h, which uses older `operator"" _foo` syntax that triggers
+    // -Wdeprecated-literal-operator as error on Clang 20+.
+    //
+    // We must set CXXFLAGS in the environment so they propagate to the nested
+    // ExternalProject_Add builds (Poly-EP, CaDiCaL-EP, etc.). Setting them on
+    // the outer cmake::Config only affects CVC5 itself, not its deps.
+    let existing_cxxflags = env::var("CXXFLAGS").unwrap_or_default();
+    let existing_cflags = env::var("CFLAGS").unwrap_or_default();
+    let mut compat_flags: Vec<String> = vec![
+        "-Wno-deprecated-literal-operator".into(),
+        "-Wno-deprecated-declarations".into(),
+        "-Wno-error=deprecated-literal-operator".into(),
+        "-Wno-error=deprecated-declarations".into(),
+        "-Wno-unknown-warning-option".into(),
+    ];
+    // Add GMP include path to both CFLAGS and CXXFLAGS.
+    if let Some(prefix) = &gmp_prefix {
+        compat_flags.push(format!("-I{}/include", prefix));
+    }
+    let merged_cxxflags = format!("{} {}", existing_cxxflags, compat_flags.join(" "));
+    let merged_cflags = format!("{} {}", existing_cflags, compat_flags.join(" "));
+    println!(
+        "cargo:warning=cvc5-sys: CXXFLAGS for sub-builds = {}",
+        merged_cxxflags.trim()
+    );
+
+    // Also set LDFLAGS for GMP library path.
+    let merged_ldflags = if let Some(prefix) = &gmp_prefix {
+        let existing = env::var("LDFLAGS").unwrap_or_default();
+        format!("{} -L{}/lib", existing, prefix)
+    } else {
+        env::var("LDFLAGS").unwrap_or_default()
+    };
+
     let mut config = cmake::Config::new(&cvc5_src);
+
+    // Propagate compat flags + GMP paths to ExternalProject_Add children.
+    config.env("CXXFLAGS", &merged_cxxflags);
+    config.env("CFLAGS", &merged_cflags);
+    config.env("LDFLAGS", &merged_ldflags);
+
+    // Also add to outer CVC5 build for symmetry.
+    for flag in compat_flags.iter() {
+        config.cxxflag(flag);
+        config.cflag(flag);
+    }
+
+    // Pass GMP location hints directly to CMake's find_package.
+    if let Some(prefix) = &gmp_prefix {
+        config.define("GMP_INCLUDE_DIR", format!("{}/include", prefix));
+        config.define("GMP_LIBRARIES", format!("{}/lib/libgmp.a", prefix));
+        config.define("GMPXX_INCLUDE_DIR", format!("{}/include", prefix));
+        config.define("GMPXX_LIBRARIES", format!("{}/lib/libgmpxx.a", prefix));
+        // CMAKE_PREFIX_PATH helps find_package locate GMP transitively.
+        config.define("CMAKE_PREFIX_PATH", prefix);
+    }
+
     config
         .profile(profile)
         // === Core build settings ===
@@ -276,7 +351,7 @@ fn build_vendored() {
         .define("USE_CLN", feature_gpl("ON", "OFF"))   // CLN is GPL — off by default
         .define("USE_CRYPTOMINISAT", feature_gpl("ON", "OFF")) // GPL — off
         // === Optimizations ===
-        .define("ENABLE_ASSERTIONS", bool_define(profile != "Release"))
+        .define("ENABLE_ASSERTIONS", bool_define(profile != "Production"))
         .define("ENABLE_VALGRIND", "OFF")
         .define("ENABLE_COVERAGE", "OFF");
 
@@ -407,6 +482,47 @@ fn feature_gpl(on: &'static str, off: &'static str) -> &'static str {
 #[cfg(any(feature = "vendored", feature = "static"))]
 fn bool_define(b: bool) -> &'static str {
     if b { "ON" } else { "OFF" }
+}
+
+/// Detect the GMP installation prefix.
+///
+/// Checks (in order):
+/// 1. `GMP_PREFIX` environment variable
+/// 2. Homebrew on Apple Silicon (`/opt/homebrew`)
+/// 3. Homebrew on Intel Mac / MacPorts (`/usr/local`)
+/// 4. Linux system (`/usr`)
+///
+/// Returns `None` if GMP headers/lib are not found — the CMake build will
+/// then fall back to its own detection (which may fail and produce a
+/// clearer error for the user).
+fn detect_gmp_prefix() -> Option<String> {
+    if let Ok(prefix) = env::var("GMP_PREFIX") {
+        if Path::new(&prefix).join("include/gmp.h").exists() {
+            return Some(prefix);
+        }
+    }
+
+    let candidates = [
+        "/opt/homebrew",   // Apple Silicon Homebrew
+        "/usr/local",      // Intel Homebrew, MacPorts, manual install
+        "/usr",            // Linux system packages
+        "/opt/local",      // MacPorts alternative location
+    ];
+
+    for candidate in &candidates {
+        if Path::new(candidate).join("include/gmp.h").exists() {
+            // Also verify the library exists.
+            let has_static = Path::new(candidate).join("lib/libgmp.a").exists();
+            let has_dynamic_macos = Path::new(candidate).join("lib/libgmp.dylib").exists();
+            let has_dynamic_linux = Path::new(candidate).join("lib/libgmp.so").exists()
+                || Path::new(candidate).join("lib/x86_64-linux-gnu/libgmp.so").exists();
+            if has_static || has_dynamic_macos || has_dynamic_linux {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 /// Return the number of logical CPU cores on the build machine.

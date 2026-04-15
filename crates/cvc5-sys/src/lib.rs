@@ -209,7 +209,7 @@ pub enum Cvc5Kind {
 // ============================================================================
 
 #[cfg(any(feature = "vendored", feature = "static", feature = "system"))]
-extern "C" {
+unsafe extern "C" {
     // --- Library metadata ---
     pub fn cvc5_version() -> *const c_char;
     pub fn cvc5_copyright() -> *const c_char;

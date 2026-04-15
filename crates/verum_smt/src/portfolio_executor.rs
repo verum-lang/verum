@@ -82,6 +82,25 @@ impl SolverVerdict {
     pub fn is_failure(&self) -> bool {
         !self.is_definitive()
     }
+
+    /// Create a verdict from a simple string result label and optional message.
+    ///
+    /// This is a helper for bridging between legacy result types (like
+    /// `BackendSwitcher::SolveResult`) and the portfolio verdict format.
+    /// Accepted labels (case-insensitive): "sat", "unsat", "unknown", "error".
+    pub fn from_label(label: &str, detail: Option<&str>) -> Self {
+        match label.to_lowercase().as_str() {
+            "sat" => SolverVerdict::Sat,
+            "unsat" => SolverVerdict::Unsat,
+            "unknown" => SolverVerdict::Unknown {
+                reason: detail.unwrap_or("unknown").to_string(),
+            },
+            "cancelled" | "canceled" => SolverVerdict::Cancelled,
+            _ => SolverVerdict::Error {
+                message: detail.unwrap_or(label).to_string(),
+            },
+        }
+    }
 }
 
 /// Which solver produced a result.
@@ -169,14 +188,18 @@ impl CrossValidateResult {
 /// implementations, enabling mocking in tests and future solver integrations.
 ///
 /// Implementations must:
-/// - Be `Send + Sync + 'static` (so they can be moved into threads).
-/// - Support cooperative cancellation via `request_interrupt()`.
+/// - Be `Send + 'static` (so they can be moved into worker threads).
+/// - Support cooperative cancellation via a shared `AtomicBool` flag.
 /// - Return a `SolverVerdict` from `check_sat()`.
-pub trait PortfolioSolver: Send + Sync {
-    /// Check satisfiability with the configured timeout.
-    ///
-    /// If `interrupt` is set to `true` concurrently, the implementation should
-    /// return `SolverVerdict::Cancelled` as soon as practical.
+///
+/// Note: `Sync` is NOT required because each solver instance is owned by
+/// exactly one worker thread — there is no concurrent access to the same
+/// instance. Interruption is the only cross-thread communication, and that
+/// happens via the separate `AtomicBool` flag, not through the solver itself.
+pub trait PortfolioSolver: Send {
+    /// Check satisfiability. The `interrupt` flag may be set concurrently by
+    /// the coordinator; the implementation should return
+    /// `SolverVerdict::Cancelled` as soon as practical when it observes this.
     fn check_sat(&mut self, interrupt: &AtomicBool) -> SolverVerdict;
 
     /// Identify this solver (used in diagnostics).

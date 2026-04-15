@@ -243,6 +243,11 @@ pub struct SmtBackendSwitcher {
 
     /// Statistics
     stats: Arc<Mutex<SwitcherStats>>,
+
+    /// Capability routing statistics (telemetry for complementary dispatch).
+    /// Tracks which solver wins for which theory, cross-validation agreements/
+    /// divergences, and per-theory success rates.
+    routing_stats: Arc<crate::routing_stats::RoutingStats>,
 }
 
 impl SmtBackendSwitcher {
@@ -262,7 +267,18 @@ impl SmtBackendSwitcher {
             z3: Maybe::Some(z3),
             cvc5: cvc5.map(Maybe::Some).unwrap_or(Maybe::None),
             stats: Arc::new(Mutex::new(SwitcherStats::default())),
+            routing_stats: Arc::new(crate::routing_stats::RoutingStats::new()),
         }
+    }
+
+    /// Access the routing statistics collector (for telemetry/diagnostics).
+    pub fn routing_stats(&self) -> Arc<crate::routing_stats::RoutingStats> {
+        self.routing_stats.clone()
+    }
+
+    /// Print a human-readable routing statistics report to stderr.
+    pub fn print_routing_report(&self) {
+        eprintln!("{}", self.routing_stats.report());
     }
 
     /// Create with default configuration
@@ -457,43 +473,71 @@ impl SmtBackendSwitcher {
     /// This is the recommended dispatch strategy for production use.
     fn solve_capability(&mut self, assertions: &List<Expr>) -> SolveResult {
         use crate::capability_router::{
-            CapabilityRouter, ExtendedCharacteristics, SolverChoice,
+            CapabilityRouter, SolverChoice,
         };
+        use crate::routing_stats::TheoryClass;
+        use std::time::Instant;
 
-        // For now, we use a conservative characteristic analysis: we don't
-        // have direct access to Z3 probes from assertions without constructing
-        // a Z3 goal first. Instead, we use heuristic analysis from the
-        // assertion structure. Future work: wire Z3 probes through here for
-        // more precise routing.
         let router = CapabilityRouter::with_defaults();
         let chars = self.analyze_assertions_heuristically(assertions);
+        let theory = TheoryClass::classify(&chars);
+        let choice = router.route(&chars);
 
-        match router.route(&chars) {
+        // Record the routing decision in telemetry.
+        self.routing_stats.record_routing(&choice, theory);
+
+        let t0 = Instant::now();
+        let result = match &choice {
             SolverChoice::Z3Only { reason, .. } => {
                 if self.config.verbose {
-                    eprintln!("[CAPABILITY] Routing to Z3: {}", reason);
+                    eprintln!("[CAPABILITY] theory={} → Z3: {}", theory.mnemonic(), reason);
                 }
                 self.solve_with_z3(assertions)
             }
             SolverChoice::Cvc5Only { reason, .. } => {
                 if self.config.verbose {
-                    eprintln!("[CAPABILITY] Routing to CVC5: {}", reason);
+                    eprintln!("[CAPABILITY] theory={} → CVC5: {}", theory.mnemonic(), reason);
                 }
                 self.solve_with_cvc5(assertions)
             }
             SolverChoice::Portfolio { .. } => {
                 if self.config.verbose {
-                    eprintln!("[CAPABILITY] Complex/mixed goal — running portfolio");
+                    eprintln!("[CAPABILITY] theory={} → portfolio (parallel)", theory.mnemonic());
                 }
                 self.solve_portfolio(assertions)
             }
             SolverChoice::CrossValidate { .. } => {
                 if self.config.verbose {
-                    eprintln!("[CAPABILITY] Security-critical — cross-validating");
+                    eprintln!("[CAPABILITY] theory={} → cross-validate", theory.mnemonic());
                 }
                 self.solve_cross_validate(assertions)
             }
-        }
+        };
+
+        // Record the outcome in telemetry.
+        let verdict = match &result {
+            SolveResult::Sat { .. } => {
+                crate::portfolio_executor::SolverVerdict::Sat
+            }
+            SolveResult::Unsat { .. } => {
+                crate::portfolio_executor::SolverVerdict::Unsat
+            }
+            SolveResult::Unknown { reason, .. } => {
+                let r = match reason {
+                    Maybe::Some(s) => s.as_str().to_string(),
+                    Maybe::None => "unknown".to_string(),
+                };
+                crate::portfolio_executor::SolverVerdict::Unknown { reason: r }
+            }
+            SolveResult::Error { error, .. } => {
+                crate::portfolio_executor::SolverVerdict::Error {
+                    message: error.clone(),
+                }
+            }
+        };
+        self.routing_stats.record_outcome(theory, &verdict, t0.elapsed());
+
+        result
     }
 
     /// Heuristic analysis of assertions for routing purposes.
@@ -522,38 +566,215 @@ impl SmtBackendSwitcher {
     }
 
     /// Scan a single expression for theory signatures.
+    ///
+    /// Performs a recursive AST walk, identifying theory-specific constructs
+    /// (strings, bit-vectors, arrays, quantifiers, etc.) to feed the
+    /// capability router. The detected signals are used by the router to
+    /// choose the best solver for the goal.
     fn scan_expr(
         &self,
         expr: &Expr,
         chars: &mut crate::capability_router::ExtendedCharacteristics,
     ) {
-        use verum_ast::ExprKind;
+        use verum_ast::{BinOp, ExprKind};
 
         chars.base.num_exprs += 1.0;
 
         match &expr.kind {
-            ExprKind::Forall { .. } | ExprKind::Exists { .. } => {
+            // --- Quantifiers ---
+            ExprKind::Forall { body, .. } | ExprKind::Exists { body, .. } => {
                 chars.base.has_quantifiers = true;
                 chars.quantifier_depth = chars.quantifier_depth.saturating_add(1);
+                self.scan_expr(body, chars);
             }
-            ExprKind::Literal(_) => {
-                chars.base.num_consts += 1.0;
-            }
-            _ => {}
-        }
 
-        // Deep AST walk for theory detection would go here. For now we
-        // rely on external goal characteristics being supplied by the
-        // verification pipeline when available (via `solve_with_hints`).
+            // --- Literals ---
+            ExprKind::Literal(lit) => {
+                use verum_ast::LiteralKind;
+                chars.base.num_consts += 1.0;
+                match &lit.kind {
+                    LiteralKind::Text(_) => chars.has_strings = true,
+                    _ => {}
+                }
+            }
+
+            // --- Arithmetic operators: detect nonlinearity ---
+            ExprKind::Binary { op, left, right } => {
+                match op {
+                    BinOp::Mul => {
+                        // Nonlinear if both operands contain variables.
+                        if !Self::is_constant_like(left) && !Self::is_constant_like(right) {
+                            chars.has_nonlinear_int = true;
+                            chars.has_nonlinear_real = true;
+                        }
+                    }
+                    BinOp::Div | BinOp::Mod => {
+                        // Division/modulo → nonlinear
+                        chars.has_nonlinear_int = true;
+                    }
+                    BinOp::Shl | BinOp::Shr => {
+                        chars.base.is_qfbv = true;
+                    }
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                        chars.base.is_qfbv = true;
+                    }
+                    BinOp::Add | BinOp::Sub => {
+                        // Linear — keep default LIA/LRA if no other signals.
+                        chars.base.is_qflia = true;
+                    }
+                    _ => {}
+                }
+                self.scan_expr(left, chars);
+                self.scan_expr(right, chars);
+            }
+
+            // --- Unary ---
+            ExprKind::Unary { expr, .. } => {
+                self.scan_expr(expr, chars);
+            }
+
+            // --- Function / method calls: inspect names for theory hints ---
+            ExprKind::Call { func, args, .. } => {
+                // Method-call-style name heuristics (e.g., "String.contains").
+                if let Some(name) = Self::extract_call_name(func) {
+                    Self::detect_theory_from_name(&name, chars);
+                }
+                for arg in args.iter() {
+                    self.scan_expr(arg, chars);
+                }
+            }
+            ExprKind::MethodCall { receiver, method, args, .. } => {
+                Self::detect_theory_from_name(method.as_str(), chars);
+                self.scan_expr(receiver, chars);
+                for arg in args.iter() {
+                    self.scan_expr(arg, chars);
+                }
+            }
+
+            // --- Index access → arrays ---
+            ExprKind::Index { expr, index } => {
+                chars.has_arrays = true;
+                self.scan_expr(expr, chars);
+                self.scan_expr(index, chars);
+            }
+
+            // --- Pattern matching → inductive datatypes ---
+            ExprKind::Match { scrutinee, .. } => {
+                chars.has_inductive_datatypes = true;
+                self.scan_expr(scrutinee, chars);
+            }
+
+            // --- Block, if, let: recurse ---
+            ExprKind::Block(block) => {
+                for stmt in block.stmts.iter() {
+                    if let verum_ast::stmt::StmtKind::Expr(e) = &stmt.kind {
+                        self.scan_expr(e, chars);
+                    }
+                }
+            }
+            ExprKind::If { cond, then_branch, else_branch, .. } => {
+                self.scan_expr(cond, chars);
+                for stmt in then_branch.stmts.iter() {
+                    if let verum_ast::stmt::StmtKind::Expr(e) = &stmt.kind {
+                        self.scan_expr(e, chars);
+                    }
+                }
+                if let verum_common::Maybe::Some(else_b) = else_branch {
+                    self.scan_expr(else_b, chars);
+                }
+            }
+            ExprKind::Paren(inner) => {
+                self.scan_expr(inner, chars);
+            }
+
+            _ => {
+                // Other expressions contribute to size but no theory signals.
+            }
+        }
+    }
+
+    /// Check if an expression is "constant-like" (a literal or simple path).
+    /// Used to detect nonlinearity: `x * y` is nonlinear, `x * 5` is linear.
+    fn is_constant_like(expr: &Expr) -> bool {
+        matches!(
+            &expr.kind,
+            verum_ast::ExprKind::Literal(_)
+        )
+    }
+
+    /// Extract the callable name from a function reference expression.
+    fn extract_call_name(func: &Expr) -> Option<String> {
+        match &func.kind {
+            verum_ast::ExprKind::Path(path) => path
+                .segments
+                .last()
+                .map(|s| s.ident.name.as_str().to_string()),
+            _ => None,
+        }
+    }
+
+    /// Detect theory signatures from a function/method name.
+    ///
+    /// Uses a curated list of known theory-indicating identifiers. This is a
+    /// heuristic that works well for Verum stdlib conventions but may miss
+    /// user-defined functions that implement theory operations.
+    fn detect_theory_from_name(
+        name: &str,
+        chars: &mut crate::capability_router::ExtendedCharacteristics,
+    ) {
+        // String operations (Verum Text, SMT-LIB strings, Python-style)
+        if matches!(
+            name,
+            "len" | "length" | "concat" | "contains" | "starts_with" | "ends_with"
+                | "substr" | "substring" | "replace" | "indexof" | "to_upper" | "to_lower"
+                | "str_concat" | "str_contains" | "str_len"
+        ) {
+            chars.has_strings = true;
+        }
+        // Regex operations
+        if matches!(name, "matches" | "regex" | "re_match" | "re_find") {
+            chars.has_regex = true;
+            chars.has_strings = true;
+        }
+        // Sequence operations
+        if matches!(
+            name,
+            "seq_len" | "seq_at" | "seq_extract" | "seq_contains" | "seq_concat"
+        ) {
+            chars.has_sequences = true;
+        }
+        // Array operations
+        if matches!(name, "select" | "store" | "array_select" | "array_store") {
+            chars.has_arrays = true;
+        }
+        // Descent / sheaf (security-critical in Mathesis)
+        if matches!(
+            name,
+            "check_descent" | "verify_descent" | "sheaf_condition" | "compatible_sections"
+        ) {
+            chars.is_security_critical = true;
+        }
     }
 
     /// Cross-validate: run both solvers and require agreement.
     ///
     /// Divergence is reported as an error — the caller should treat this
-    /// as a solver bug or encoding issue requiring investigation.
+    /// as a solver bug or encoding issue requiring investigation. All
+    /// divergence events are logged in `routing_stats` for post-hoc analysis.
     fn solve_cross_validate(&mut self, assertions: &List<Expr>) -> SolveResult {
+        use std::time::Instant;
+
+        let t_z3 = Instant::now();
         let z3_result = self.solve_with_z3(assertions);
+        let z3_elapsed = t_z3.elapsed();
+
+        let t_cvc5 = Instant::now();
         let cvc5_result = self.solve_with_cvc5(assertions);
+        let cvc5_elapsed = t_cvc5.elapsed();
+
+        // Classify for divergence event logging (needed only on disagreement).
+        let chars = self.analyze_assertions_heuristically(assertions);
+        let theory = crate::routing_stats::TheoryClass::classify(&chars);
 
         // Check for agreement.
         match (&z3_result, &cvc5_result) {
@@ -561,28 +782,54 @@ impl SmtBackendSwitcher {
                 if self.config.verbose {
                     eprintln!("[CROSS-VALIDATE] Both solvers agreed: SAT");
                 }
+                self.routing_stats.record_cross_validate_agreement();
                 z3_result
             }
             (SolveResult::Unsat { .. }, SolveResult::Unsat { .. }) => {
                 if self.config.verbose {
                     eprintln!("[CROSS-VALIDATE] Both solvers agreed: UNSAT");
                 }
+                self.routing_stats.record_cross_validate_agreement();
                 z3_result
             }
             (SolveResult::Sat { .. }, SolveResult::Unsat { .. })
             | (SolveResult::Unsat { .. }, SolveResult::Sat { .. }) => {
+                // CRITICAL: solvers diverged — log the event for analysis.
+                let z3_verdict = solve_result_to_verdict(&z3_result);
+                let cvc5_verdict = solve_result_to_verdict(&cvc5_result);
+                let timestamp_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                self.routing_stats.record_divergence(
+                    crate::routing_stats::DivergenceEvent {
+                        timestamp_secs,
+                        theory,
+                        z3_verdict,
+                        cvc5_verdict,
+                        z3_elapsed_ms: z3_elapsed.as_millis() as u64,
+                        cvc5_elapsed_ms: cvc5_elapsed.as_millis() as u64,
+                    },
+                );
+                eprintln!(
+                    "[CROSS-VALIDATE] ⚠ CRITICAL: Z3 and CVC5 DIVERGED on {} goal. \
+                     This is a solver bug or encoding issue — investigate.",
+                    theory.mnemonic()
+                );
                 SolveResult::Error {
                     backend: "cross-validate".to_string(),
                     error: format!(
-                        "CRITICAL: Z3 and CVC5 disagreed on satisfiability. \
-                         This indicates a solver bug or encoding issue. \
-                         Z3: {:?}, CVC5: {:?}",
-                        z3_result, cvc5_result
+                        "Solver divergence detected. Z3: {:?} (in {}ms), CVC5: {:?} (in {}ms)",
+                        z3_result,
+                        z3_elapsed.as_millis(),
+                        cvc5_result,
+                        cvc5_elapsed.as_millis(),
                     ),
                 }
             }
             _ => {
-                // At least one was Unknown or Error — return the more definitive one.
+                // At least one was Unknown or Error.
+                self.routing_stats.record_cross_validate_incomplete();
                 if matches!(z3_result, SolveResult::Sat { .. } | SolveResult::Unsat { .. }) {
                     z3_result
                 } else {
@@ -1154,6 +1401,32 @@ impl SwitcherConfig {
         }
 
         Ok(config)
+    }
+}
+
+// ==================== SolveResult ↔ SolverVerdict bridge ====================
+
+/// Convert a `SolveResult` to the portfolio/telemetry `SolverVerdict` format.
+///
+/// Used for cross-validation divergence event logging, where we need to
+/// record exactly what each solver returned.
+fn solve_result_to_verdict(
+    result: &SolveResult,
+) -> crate::portfolio_executor::SolverVerdict {
+    use crate::portfolio_executor::SolverVerdict;
+    match result {
+        SolveResult::Sat { .. } => SolverVerdict::Sat,
+        SolveResult::Unsat { .. } => SolverVerdict::Unsat,
+        SolveResult::Unknown { reason, .. } => {
+            let r = match reason {
+                Maybe::Some(s) => s.clone(),
+                Maybe::None => "unknown".to_string(),
+            };
+            SolverVerdict::Unknown { reason: r }
+        }
+        SolveResult::Error { error, .. } => SolverVerdict::Error {
+            message: error.clone(),
+        },
     }
 }
 
