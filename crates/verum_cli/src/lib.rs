@@ -11,6 +11,7 @@ pub mod commands;
 // pub mod compiler;
 pub mod config;
 pub mod error;
+pub mod feature_overrides;
 pub mod cog;
 pub mod cog_manager;
 pub mod registry;

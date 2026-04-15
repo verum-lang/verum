@@ -20,6 +20,7 @@ mod cache;
 mod commands;
 mod config;
 mod error;
+mod feature_overrides;
 mod cog;
 mod cog_manager;
 pub mod registry;
@@ -241,6 +242,10 @@ enum Commands {
         /// Set a lint to forbid level (e.g., -F missing_intrinsic)
         #[clap(short = 'F', long = "forbid", value_name = "LINT")]
         forbid_lint: Vec<Text>,
+
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Run a Verum program (interpreter by default, --aot for native)
@@ -836,8 +841,10 @@ fn run_command(cli: Cli) -> Result<()> {
             warn_lint,
             allow_lint,
             forbid_lint,
+            feature_overrides,
         } => {
             let _smt_stats = smt_stats; // Will be plumbed into session options
+            feature_overrides::install(feature_overrides);
             match resolve_path(path.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
                     ui::status("Building", file_path.as_str());

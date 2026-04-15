@@ -57,10 +57,12 @@ pub fn execute(
 ) -> Result<()> {
     let start_time = Instant::now();
 
-    // Load manifest
+    // Load manifest, then apply CLI-supplied language-feature overrides
+    // (high-level flags + -Z key=value pairs) before validation.
     let manifest_dir = Manifest::find_manifest_dir()?;
     let manifest_path = Manifest::manifest_path(&manifest_dir);
-    let manifest = Manifest::from_file(&manifest_path)?;
+    let mut manifest = Manifest::from_file(&manifest_path)?;
+    crate::feature_overrides::apply_global(&mut manifest)?;
     manifest.validate()?;
 
     // Determine profile (dev/release)

@@ -183,6 +183,47 @@ pub struct Manifest {
     /// Formal verification configuration
     #[serde(default)]
     pub verify: VerifyConfig,
+
+    // ========================================================================
+    // Language Feature Configuration
+    // Each section controls an orthogonal subsystem of the language.
+    // ========================================================================
+
+    /// Type system features (dependent, cubical, HKT, universe polymorphism, …)
+    #[serde(default)]
+    pub types: TypesConfig,
+
+    /// Runtime behavior (CBGR mode, async scheduler, GC policy, …)
+    #[serde(default)]
+    pub runtime: RuntimeConfig,
+
+    /// Code generation (execution tier, GPU, debug info, SIMD, …)
+    #[serde(default)]
+    pub codegen: CodegenConfig,
+
+    /// Metaprogramming (compile-time fns, quote, reflection, derive, staging)
+    #[serde(default)]
+    pub meta: MetaConfig,
+
+    /// Protocol / trait system (coherence, resolution, GATs, blanket impls)
+    #[serde(default)]
+    pub protocols: ProtocolsConfig,
+
+    /// Context system / dependency injection (`using [...]`)
+    #[serde(default)]
+    pub context: ContextConfig,
+
+    /// Safety constraints (unsafe, FFI, capabilities, MLS level)
+    #[serde(default)]
+    pub safety: SafetyConfig,
+
+    /// Testing (differential, property-based, fuzzing, coverage)
+    #[serde(default)]
+    pub test: TestConfig,
+
+    /// Debug adapter (DAP) configuration
+    #[serde(default)]
+    pub debug: DebugConfig,
 }
 
 /// Formal-verification configuration (the `[verify]` section).
@@ -282,6 +323,519 @@ fn default_verify_strategy() -> Text {
 fn default_solver_timeout() -> u64 {
     10_000
 }
+
+fn default_true() -> bool {
+    true
+}
+
+// ============================================================================
+// Type System Configuration
+// ============================================================================
+
+/// Advanced type-system features (the `[types]` section).
+///
+/// Controls which advanced type-theoretic features the compiler enables.
+/// Disabling features skips associated checks and may speed up compilation
+/// at the cost of less expressive types.
+///
+/// ## Example
+///
+/// ```toml
+/// [types]
+/// dependent = true          # Pi/Sigma types, length-indexed vectors
+/// refinement = true         # Int{> 0}, Text{len(it) > 0}
+/// cubical = true            # Path types, transport, hcomp (HoTT)
+/// higher_kinded = true      # F: Type -> Type in generic params
+/// universe_polymorphism = false  # Type(u), @universe_poly
+/// coinductive = true        # codata declarations + copatterns
+/// quotient = true           # HIT-based quotient types
+/// instance_search = true    # Automatic protocol-impl resolution
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypesConfig {
+    /// Enable dependent types (Pi, Sigma, Eq) — length-indexed vectors, etc.
+    #[serde(default = "default_true")]
+    pub dependent: bool,
+
+    /// Enable refinement types — `Int{predicate}` triggering SMT verification.
+    #[serde(default = "default_true")]
+    pub refinement: bool,
+
+    /// Enable cubical type theory — Path types, transport, hcomp for HoTT.
+    #[serde(default = "default_true")]
+    pub cubical: bool,
+
+    /// Enable higher-kinded types — `F: Type -> Type` in generic params.
+    #[serde(default = "default_true")]
+    pub higher_kinded: bool,
+
+    /// Enable universe polymorphism — `Type(u)`, `@universe_poly`.
+    /// Disabled by default (rare feature with performance cost).
+    #[serde(default)]
+    pub universe_polymorphism: bool,
+
+    /// Enable coinductive types — `codata` declarations with copatterns.
+    #[serde(default = "default_true")]
+    pub coinductive: bool,
+
+    /// Enable quotient types — HIT-based types for modular equivalence.
+    #[serde(default = "default_true")]
+    pub quotient: bool,
+
+    /// Enable automatic protocol-implementation resolution.
+    #[serde(default = "default_true")]
+    pub instance_search: bool,
+
+    /// Maximum coherence-check depth for instance resolution.
+    #[serde(default = "default_coherence_depth")]
+    pub coherence_check_depth: u32,
+}
+
+impl Default for TypesConfig {
+    fn default() -> Self {
+        Self {
+            dependent: true,
+            refinement: true,
+            cubical: true,
+            higher_kinded: true,
+            universe_polymorphism: false,
+            coinductive: true,
+            quotient: true,
+            instance_search: true,
+            coherence_check_depth: default_coherence_depth(),
+        }
+    }
+}
+
+fn default_coherence_depth() -> u32 {
+    16
+}
+
+// ============================================================================
+// Runtime Configuration
+// ============================================================================
+
+/// Runtime system configuration (the `[runtime]` section).
+///
+/// Controls memory management, async execution, and low-level runtime behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeConfig {
+    /// CBGR reference mode: `managed` (~15ns), `checked` (0ns, static proof),
+    /// `unsafe` (0ns, no safety), `mixed` (auto-select per reference).
+    ///
+    /// Default: `mixed`.
+    #[serde(default = "default_cbgr_mode")]
+    pub cbgr_mode: Text,
+
+    /// Async scheduler: `single_threaded`, `multi_threaded`, `work_stealing`.
+    #[serde(default = "default_async_scheduler")]
+    pub async_scheduler: Text,
+
+    /// Number of worker threads for the async scheduler.
+    /// 0 means auto-detect (= logical CPU count).
+    #[serde(default)]
+    pub async_worker_threads: u32,
+
+    /// Enable future polling for cooperative concurrency.
+    #[serde(default = "default_true")]
+    pub futures: bool,
+
+    /// Enable structured concurrency (nurseries).
+    #[serde(default = "default_true")]
+    pub nurseries: bool,
+
+    /// Stack size for spawned tasks (bytes). 0 = default OS stack size.
+    #[serde(default)]
+    pub task_stack_size: u64,
+
+    /// Heap growth policy: `aggressive`, `conservative`, `adaptive`.
+    #[serde(default = "default_heap_policy")]
+    pub heap_policy: Text,
+
+    /// Panic strategy: `unwind`, `abort`.
+    #[serde(default = "default_panic_strategy")]
+    pub panic: Text,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            cbgr_mode: default_cbgr_mode(),
+            async_scheduler: default_async_scheduler(),
+            async_worker_threads: 0,
+            futures: true,
+            nurseries: true,
+            task_stack_size: 0,
+            heap_policy: default_heap_policy(),
+            panic: default_panic_strategy(),
+        }
+    }
+}
+
+fn default_cbgr_mode() -> Text { Text::from("mixed") }
+fn default_async_scheduler() -> Text { Text::from("work_stealing") }
+fn default_heap_policy() -> Text { Text::from("adaptive") }
+fn default_panic_strategy() -> Text { Text::from("unwind") }
+
+// ============================================================================
+// Codegen Configuration
+// ============================================================================
+
+/// Code-generation configuration (the `[codegen]` section).
+///
+/// Controls the compiler's execution tiers and target-specific code output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodegenConfig {
+    /// Execution tier: `interpret` (VBC), `aot` (LLVM native), `check` (type-check only).
+    #[serde(default = "default_tier")]
+    pub tier: Text,
+
+    /// Enable MLIR GPU compilation path (for @device(GPU) annotated code).
+    #[serde(default)]
+    pub mlir_gpu: bool,
+
+    /// GPU backend: `metal` (macOS), `cuda` (NVIDIA), `rocm` (AMD), `vulkan`.
+    #[serde(default = "default_gpu_backend")]
+    pub gpu_backend: Text,
+
+    /// Enable monomorphization caching (speeds up rebuilds).
+    #[serde(default = "default_true")]
+    pub monomorphization_cache: bool,
+
+    /// Proof erasure: strip proof terms before codegen (zero runtime cost).
+    #[serde(default = "default_true")]
+    pub proof_erasure: bool,
+
+    /// Generate debug info: `none`, `line`, `full`.
+    #[serde(default = "default_debug_info")]
+    pub debug_info: Text,
+
+    /// Enable tail-call optimization.
+    #[serde(default = "default_true")]
+    pub tail_call_optimization: bool,
+
+    /// Enable automatic SIMD vectorization.
+    #[serde(default = "default_true")]
+    pub vectorize: bool,
+
+    /// Maximum inline depth for generic specialization.
+    #[serde(default = "default_inline_depth")]
+    pub inline_depth: u32,
+}
+
+impl Default for CodegenConfig {
+    fn default() -> Self {
+        Self {
+            tier: default_tier(),
+            mlir_gpu: false,
+            gpu_backend: default_gpu_backend(),
+            monomorphization_cache: true,
+            proof_erasure: true,
+            debug_info: default_debug_info(),
+            tail_call_optimization: true,
+            vectorize: true,
+            inline_depth: default_inline_depth(),
+        }
+    }
+}
+
+fn default_tier() -> Text { Text::from("aot") }
+fn default_gpu_backend() -> Text { Text::from("auto") }
+fn default_debug_info() -> Text { Text::from("line") }
+fn default_inline_depth() -> u32 { 3 }
+
+// ============================================================================
+// Metaprogramming Configuration
+// ============================================================================
+
+/// Metaprogramming configuration (the `[meta]` section).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetaConfig {
+    /// Allow compile-time functions (`meta fn`, `@const`).
+    #[serde(default = "default_true")]
+    pub compile_time_functions: bool,
+
+    /// Allow code quoting via `quote { ... }`.
+    #[serde(default = "default_true")]
+    pub quote_syntax: bool,
+
+    /// Maximum macro-expansion recursion depth.
+    #[serde(default = "default_macro_depth")]
+    pub macro_recursion_limit: u32,
+
+    /// Enable reflection APIs (`TypeInfo`, `AstAccess`, `CompileDiag`).
+    #[serde(default = "default_true")]
+    pub reflection: bool,
+
+    /// Allow `@derive(...)` via rule-based codegen.
+    #[serde(default = "default_true")]
+    pub derive: bool,
+
+    /// Maximum staging level: 0 = runtime only, 1 = meta fn, 2+ = multi-stage.
+    #[serde(default = "default_stage_limit")]
+    pub max_stage_level: u32,
+}
+
+impl Default for MetaConfig {
+    fn default() -> Self {
+        Self {
+            compile_time_functions: true,
+            quote_syntax: true,
+            macro_recursion_limit: default_macro_depth(),
+            reflection: true,
+            derive: true,
+            max_stage_level: default_stage_limit(),
+        }
+    }
+}
+
+fn default_macro_depth() -> u32 { 128 }
+fn default_stage_limit() -> u32 { 2 }
+
+// ============================================================================
+// Protocol / Trait Configuration
+// ============================================================================
+
+/// Protocol-system configuration (the `[protocols]` section).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolsConfig {
+    /// Specialization coherence: `strict`, `lenient`, `unchecked`.
+    ///
+    /// - `strict` (default): orphan rules enforced, no overlapping impls
+    /// - `lenient`: allow orphan impls in same crate (Rust-like)
+    /// - `unchecked`: skip coherence checking (unsafe)
+    #[serde(default = "default_coherence")]
+    pub coherence: Text,
+
+    /// Resolution strategy when multiple impls match: `most_specific`,
+    /// `first_declared`, `error`.
+    #[serde(default = "default_resolution")]
+    pub resolution_strategy: Text,
+
+    /// Allow blanket implementations (`impl<T> Foo for T`).
+    #[serde(default = "default_true")]
+    pub blanket_impls: bool,
+
+    /// Allow higher-kinded protocols (`protocol Functor<F: Type -> Type>`).
+    #[serde(default = "default_true")]
+    pub higher_kinded_protocols: bool,
+
+    /// Enable associated types (`type Output;`).
+    #[serde(default = "default_true")]
+    pub associated_types: bool,
+
+    /// Enable generic associated types (GATs).
+    #[serde(default = "default_true")]
+    pub generic_associated_types: bool,
+}
+
+impl Default for ProtocolsConfig {
+    fn default() -> Self {
+        Self {
+            coherence: default_coherence(),
+            resolution_strategy: default_resolution(),
+            blanket_impls: true,
+            higher_kinded_protocols: true,
+            associated_types: true,
+            generic_associated_types: true,
+        }
+    }
+}
+
+fn default_coherence() -> Text { Text::from("strict") }
+fn default_resolution() -> Text { Text::from("most_specific") }
+
+// ============================================================================
+// Context System Configuration
+// ============================================================================
+
+/// Context-system / dependency-injection configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextConfig {
+    /// Enable the context system (dependency injection via `using [...]`).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Strictness for unresolved contexts: `error`, `warn`, `allow`.
+    #[serde(default = "default_context_strictness")]
+    pub unresolved_policy: Text,
+
+    /// Allow negative context constraints (`!using [Foo]`).
+    #[serde(default = "default_true")]
+    pub negative_constraints: bool,
+
+    /// Maximum context-propagation depth (through call chains).
+    #[serde(default = "default_ctx_depth")]
+    pub propagation_depth: u32,
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            unresolved_policy: default_context_strictness(),
+            negative_constraints: true,
+            propagation_depth: default_ctx_depth(),
+        }
+    }
+}
+
+fn default_context_strictness() -> Text { Text::from("error") }
+fn default_ctx_depth() -> u32 { 32 }
+
+// ============================================================================
+// Safety Configuration
+// ============================================================================
+
+/// Safety constraints and capabilities (the `[safety]` section).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SafetyConfig {
+    /// Allow `unsafe` blocks and `@extern` declarations.
+    #[serde(default = "default_true")]
+    pub unsafe_allowed: bool,
+
+    /// Allow FFI (calling C/C++ via `@ffi`).
+    #[serde(default = "default_true")]
+    pub ffi: bool,
+
+    /// FFI boundary strictness: `strict` (no auto-unsafe), `lenient`.
+    #[serde(default = "default_ffi_strictness")]
+    pub ffi_boundary: Text,
+
+    /// Require explicit capabilities for sensitive operations
+    /// (I/O, network, unsafe memory). Like Java SecurityManager.
+    #[serde(default)]
+    pub capability_required: bool,
+
+    /// MLS security level: `public`, `secret`, `top_secret`.
+    /// Affects which operations are permitted in this project.
+    #[serde(default = "default_mls_level")]
+    pub mls_level: Text,
+
+    /// Forbid use of `@extern` functions from stdlib.
+    #[serde(default)]
+    pub forbid_stdlib_extern: bool,
+}
+
+impl Default for SafetyConfig {
+    fn default() -> Self {
+        Self {
+            unsafe_allowed: true,
+            ffi: true,
+            ffi_boundary: default_ffi_strictness(),
+            capability_required: false,
+            mls_level: default_mls_level(),
+            forbid_stdlib_extern: false,
+        }
+    }
+}
+
+fn default_ffi_strictness() -> Text { Text::from("strict") }
+fn default_mls_level() -> Text { Text::from("public") }
+
+// ============================================================================
+// Testing Configuration
+// ============================================================================
+
+/// Test / conformance-suite configuration (the `[test]` section).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestConfig {
+    /// Enable differential testing (VBC vs LLVM AOT results must agree).
+    #[serde(default)]
+    pub differential: bool,
+
+    /// Enable property-based testing via `proptest!` macro.
+    #[serde(default = "default_true")]
+    pub property_testing: bool,
+
+    /// Default number of cases for property tests.
+    #[serde(default = "default_proptest_cases")]
+    pub proptest_cases: u32,
+
+    /// Enable fuzzing targets (`cargo fuzz`).
+    #[serde(default)]
+    pub fuzzing: bool,
+
+    /// Maximum execution time per test (seconds). 0 = no limit.
+    #[serde(default = "default_test_timeout")]
+    pub timeout_secs: u64,
+
+    /// Parallel test execution.
+    #[serde(default = "default_true")]
+    pub parallel: bool,
+
+    /// Collect coverage data.
+    #[serde(default)]
+    pub coverage: bool,
+
+    /// Fail tests on any emitted warning.
+    #[serde(default)]
+    pub deny_warnings: bool,
+}
+
+impl Default for TestConfig {
+    fn default() -> Self {
+        Self {
+            differential: false,
+            property_testing: true,
+            proptest_cases: default_proptest_cases(),
+            fuzzing: false,
+            timeout_secs: default_test_timeout(),
+            parallel: true,
+            coverage: false,
+            deny_warnings: false,
+        }
+    }
+}
+
+fn default_proptest_cases() -> u32 { 256 }
+fn default_test_timeout() -> u64 { 60 }
+
+// ============================================================================
+// Debug / DAP Configuration
+// ============================================================================
+
+/// Debug / DAP (Debug Adapter Protocol) configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebugConfig {
+    /// Enable DAP server for IDE integration.
+    #[serde(default = "default_true")]
+    pub dap_enabled: bool,
+
+    /// Stepping granularity: `statement`, `line`, `instruction`.
+    #[serde(default = "default_step_granularity")]
+    pub step_granularity: Text,
+
+    /// Maximum depth for variable inspection.
+    #[serde(default = "default_inspect_depth")]
+    pub inspect_depth: u32,
+
+    /// Default DAP port (0 = auto).
+    #[serde(default = "default_dap_port")]
+    pub port: u16,
+
+    /// Show erased proof terms in debug views.
+    #[serde(default)]
+    pub show_erased_proofs: bool,
+}
+
+impl Default for DebugConfig {
+    fn default() -> Self {
+        Self {
+            dap_enabled: true,
+            step_granularity: default_step_granularity(),
+            inspect_depth: default_inspect_depth(),
+            port: default_dap_port(),
+            show_erased_proofs: false,
+        }
+    }
+}
+
+fn default_step_granularity() -> Text { Text::from("statement") }
+fn default_inspect_depth() -> u32 { 8 }
+fn default_dap_port() -> u16 { 0 }
+
+// (default_true helper is defined earlier in this file)
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cog {
@@ -584,10 +1138,6 @@ impl Default for LspConfig {
     }
 }
 
-fn default_true() -> bool {
-    true
-}
-
 fn default_incremental() -> Text {
     "incremental".into()
 }
@@ -797,6 +1347,15 @@ pub fn create_default_manifest(
         pgo: PgoConfig::default(),
         cross_compile: CrossCompileConfig::default(),
         verify: VerifyConfig::default(),
+        types: TypesConfig::default(),
+        runtime: RuntimeConfig::default(),
+        codegen: CodegenConfig::default(),
+        meta: MetaConfig::default(),
+        protocols: ProtocolsConfig::default(),
+        context: ContextConfig::default(),
+        safety: SafetyConfig::default(),
+        test: TestConfig::default(),
+        debug: DebugConfig::default(),
     }
 }
 
