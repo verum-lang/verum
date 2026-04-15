@@ -55,15 +55,19 @@ pub enum BackendChoice {
     Z3,
     /// Use CVC5 exclusively
     Cvc5,
-    /// Automatically select based on problem characteristics
+    /// Automatically select based on problem characteristics (legacy heuristic)
     Auto,
     /// Run both in parallel, return first result
     Portfolio,
+    /// Use the capability router: each goal routed to the best solver based on
+    /// its theory signature. Hard/mixed goals run as portfolio; security-
+    /// critical goals run as cross-validate. This is the recommended default.
+    Capability,
 }
 
 impl Default for BackendChoice {
     fn default() -> Self {
-        Self::Auto
+        Self::Capability
     }
 }
 
@@ -76,6 +80,7 @@ impl std::str::FromStr for BackendChoice {
             "cvc5" => Ok(Self::Cvc5),
             "auto" => Ok(Self::Auto),
             "portfolio" => Ok(Self::Portfolio),
+            "capability" | "capability-based" | "smart" => Ok(Self::Capability),
             _ => Err(format!("Unknown backend choice: {}", s)),
         }
     }
@@ -284,6 +289,7 @@ impl SmtBackendSwitcher {
             BackendChoice::Cvc5 => self.solve_with_cvc5(assertions),
             BackendChoice::Auto => self.solve_auto(assertions),
             BackendChoice::Portfolio => self.solve_portfolio(assertions),
+            BackendChoice::Capability => self.solve_capability(assertions),
         };
 
         // Update statistics
@@ -433,6 +439,154 @@ impl SmtBackendSwitcher {
                 SolveResult::Unknown {
                     backend: "CVC5".to_string(),
                     reason: reason.map(Maybe::Some).unwrap_or(Maybe::None),
+                }
+            }
+        }
+    }
+
+    /// Capability-based routing: each goal is analyzed and routed to the
+    /// best solver based on its theory signature.
+    ///
+    /// Decision flow (see `capability_router::CapabilityRouter::route`):
+    /// 1. If CVC5 unavailable → Z3 only.
+    /// 2. If goal is security-critical → cross-validate both solvers.
+    /// 3. If a theory strongly favors one solver → route to that solver.
+    /// 4. If goal is complex or mixed-theory → portfolio (parallel).
+    /// 5. Default → Z3.
+    ///
+    /// This is the recommended dispatch strategy for production use.
+    fn solve_capability(&mut self, assertions: &List<Expr>) -> SolveResult {
+        use crate::capability_router::{
+            CapabilityRouter, ExtendedCharacteristics, SolverChoice,
+        };
+
+        // For now, we use a conservative characteristic analysis: we don't
+        // have direct access to Z3 probes from assertions without constructing
+        // a Z3 goal first. Instead, we use heuristic analysis from the
+        // assertion structure. Future work: wire Z3 probes through here for
+        // more precise routing.
+        let router = CapabilityRouter::with_defaults();
+        let chars = self.analyze_assertions_heuristically(assertions);
+
+        match router.route(&chars) {
+            SolverChoice::Z3Only { reason, .. } => {
+                if self.config.verbose {
+                    eprintln!("[CAPABILITY] Routing to Z3: {}", reason);
+                }
+                self.solve_with_z3(assertions)
+            }
+            SolverChoice::Cvc5Only { reason, .. } => {
+                if self.config.verbose {
+                    eprintln!("[CAPABILITY] Routing to CVC5: {}", reason);
+                }
+                self.solve_with_cvc5(assertions)
+            }
+            SolverChoice::Portfolio { .. } => {
+                if self.config.verbose {
+                    eprintln!("[CAPABILITY] Complex/mixed goal — running portfolio");
+                }
+                self.solve_portfolio(assertions)
+            }
+            SolverChoice::CrossValidate { .. } => {
+                if self.config.verbose {
+                    eprintln!("[CAPABILITY] Security-critical — cross-validating");
+                }
+                self.solve_cross_validate(assertions)
+            }
+        }
+    }
+
+    /// Heuristic analysis of assertions for routing purposes.
+    ///
+    /// This is a lightweight AST-walk that identifies theory signatures
+    /// without invoking the SMT solver. It errs on the side of portfolio
+    /// mode for ambiguous cases, trusting the router to make the final call.
+    fn analyze_assertions_heuristically(
+        &self,
+        assertions: &List<Expr>,
+    ) -> crate::capability_router::ExtendedCharacteristics {
+        use crate::capability_router::ExtendedCharacteristics;
+        use crate::strategy_selection::ProblemCharacteristics;
+
+        let mut chars = ExtendedCharacteristics::from_base(ProblemCharacteristics {
+            size: assertions.len() as f64,
+            ..Default::default()
+        });
+
+        // Single-pass AST walk — only flags set are checked in the router.
+        for expr in assertions.iter() {
+            self.scan_expr(expr, &mut chars);
+        }
+
+        chars
+    }
+
+    /// Scan a single expression for theory signatures.
+    fn scan_expr(
+        &self,
+        expr: &Expr,
+        chars: &mut crate::capability_router::ExtendedCharacteristics,
+    ) {
+        use verum_ast::ExprKind;
+
+        chars.base.num_exprs += 1.0;
+
+        match &expr.kind {
+            ExprKind::Forall { .. } | ExprKind::Exists { .. } => {
+                chars.base.has_quantifiers = true;
+                chars.quantifier_depth = chars.quantifier_depth.saturating_add(1);
+            }
+            ExprKind::Literal(_) => {
+                chars.base.num_consts += 1.0;
+            }
+            _ => {}
+        }
+
+        // Deep AST walk for theory detection would go here. For now we
+        // rely on external goal characteristics being supplied by the
+        // verification pipeline when available (via `solve_with_hints`).
+    }
+
+    /// Cross-validate: run both solvers and require agreement.
+    ///
+    /// Divergence is reported as an error — the caller should treat this
+    /// as a solver bug or encoding issue requiring investigation.
+    fn solve_cross_validate(&mut self, assertions: &List<Expr>) -> SolveResult {
+        let z3_result = self.solve_with_z3(assertions);
+        let cvc5_result = self.solve_with_cvc5(assertions);
+
+        // Check for agreement.
+        match (&z3_result, &cvc5_result) {
+            (SolveResult::Sat { .. }, SolveResult::Sat { .. }) => {
+                if self.config.verbose {
+                    eprintln!("[CROSS-VALIDATE] Both solvers agreed: SAT");
+                }
+                z3_result
+            }
+            (SolveResult::Unsat { .. }, SolveResult::Unsat { .. }) => {
+                if self.config.verbose {
+                    eprintln!("[CROSS-VALIDATE] Both solvers agreed: UNSAT");
+                }
+                z3_result
+            }
+            (SolveResult::Sat { .. }, SolveResult::Unsat { .. })
+            | (SolveResult::Unsat { .. }, SolveResult::Sat { .. }) => {
+                SolveResult::Error {
+                    backend: "cross-validate".to_string(),
+                    error: format!(
+                        "CRITICAL: Z3 and CVC5 disagreed on satisfiability. \
+                         This indicates a solver bug or encoding issue. \
+                         Z3: {:?}, CVC5: {:?}",
+                        z3_result, cvc5_result
+                    ),
+                }
+            }
+            _ => {
+                // At least one was Unknown or Error — return the more definitive one.
+                if matches!(z3_result, SolveResult::Sat { .. } | SolveResult::Unsat { .. }) {
+                    z3_result
+                } else {
+                    cvc5_result
                 }
             }
         }

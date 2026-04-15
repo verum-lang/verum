@@ -328,28 +328,28 @@ impl Default for StrategySelector {
 // ==================== Problem Characteristics ====================
 
 /// Problem characteristics extracted from Z3 probes
-#[derive(Debug, Clone)]
-struct ProblemCharacteristics {
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ProblemCharacteristics {
     /// Problem size (number of assertions)
-    size: f64,
+    pub size: f64,
     /// Maximum formula depth
-    depth: f64,
+    pub depth: f64,
     /// Number of constants
-    num_consts: f64,
+    pub num_consts: f64,
     /// Number of expressions
-    num_exprs: f64,
+    pub num_exprs: f64,
     /// Is quantifier-free bit-vector logic
-    is_qfbv: bool,
+    pub is_qfbv: bool,
     /// Is quantifier-free linear integer arithmetic
-    is_qflia: bool,
+    pub is_qflia: bool,
     /// Is quantifier-free nonlinear real arithmetic
-    is_qfnra: bool,
+    pub is_qfnra: bool,
     /// Is quantifier-free uninterpreted functions
-    is_qfuf: bool,
+    pub is_qfuf: bool,
     /// Has quantifiers
-    has_quantifiers: bool,
+    pub has_quantifiers: bool,
     /// Is propositional logic (no theories)
-    is_propositional: bool,
+    pub is_propositional: bool,
 }
 
 // ==================== Complexity Thresholds ====================

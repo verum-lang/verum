@@ -1,0 +1,59 @@
+[package]
+name = "cvc5-sys"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Low-level FFI bindings for the CVC5 SMT solver with static linking support"
+documentation = "https://cvc5.github.io/doc/"
+keywords = ["smt", "solver", "cvc5", "ffi", "theorem-prover"]
+categories = ["external-ffi-bindings", "mathematics"]
+build = "build.rs"
+links = "cvc5"
+
+[features]
+# Default: auto-detect system CVC5 or download and build from source.
+default = []
+
+# Static linking: build CVC5 from source and statically link into binary.
+# This provides zero runtime dependencies at the cost of longer first-build time.
+# Binary size impact: +60-80 MB.
+static = []
+
+# Vendored build: use the bundled CVC5 source tree in `cvc5/` (git submodule).
+# Implies static linking. Ensures reproducible builds across environments.
+vendored = ["static"]
+
+# System linking: link against system-installed libcvc5 (dynamic).
+# Requires libcvc5.so/dylib to be installed and findable.
+# Provided for environments where static builds are infeasible.
+system = []
+
+# Run bindgen at build time to regenerate FFI bindings from cvc5.h.
+# Normally bindings are pre-generated and committed.
+regen-bindings = []
+
+# Enable GPL-compatible components (CLN, CryptoMiniSat).
+# WARNING: Enabling this changes CVC5's license from BSD to GPL-3.0.
+# The Verum project uses Apache-2.0, which is incompatible with GPL.
+# Only enable for internal testing, never for distribution.
+gpl = []
+
+[dependencies]
+
+[build-dependencies]
+# CMake-based build driver for CVC5 and its C++ dependencies.
+cmake = "0.1.54"
+# C/C++ compiler detection (used by transitive dependencies).
+cc = "1.2"
+# Bindgen for generating FFI bindings from cvc5.h when `regen-bindings` feature is enabled.
+bindgen = { version = "0.72", optional = true }
+
+[package.metadata.docs.rs]
+# On docs.rs, use a minimal build: just expose the API without actually linking.
+# This allows documentation generation without CVC5 source.
+features = []
+no-default-features = true
+rustdoc-args = ["--cfg", "docsrs"]
