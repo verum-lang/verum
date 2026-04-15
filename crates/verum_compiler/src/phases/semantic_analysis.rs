@@ -33,6 +33,9 @@ pub struct SemanticAnalysisPhase {
     /// at the end are user code (vs stdlib). Errors in stdlib modules are non-fatal.
     /// None means all modules are treated as user code.
     user_module_count: Option<usize>,
+    /// Whether cubical normalization is enabled on the unifier
+    /// (sourced from `[types] cubical` in `verum.toml`). Default on.
+    cubical_enabled: bool,
 }
 
 impl SemanticAnalysisPhase {
@@ -44,6 +47,7 @@ impl SemanticAnalysisPhase {
             verified_contracts: None,
             stdlib_metadata: None,
             user_module_count: None,
+            cubical_enabled: true,
         }
     }
 
@@ -55,7 +59,15 @@ impl SemanticAnalysisPhase {
             verified_contracts: None,
             stdlib_metadata: Some(stdlib),
             user_module_count: None,
+            cubical_enabled: true,
         }
+    }
+
+    /// Enable or disable cubical-type normalization in the underlying
+    /// type checker. Called by the pipeline from `Session::language_features`.
+    pub fn with_cubical_enabled(mut self, enabled: bool) -> Self {
+        self.cubical_enabled = enabled;
+        self
     }
 
     /// Create a semantic analysis phase with verified contracts
@@ -155,6 +167,10 @@ impl CompilationPhase for SemanticAnalysisPhase {
         // NOTE: In NormalBuild mode, these may already be loaded from stdlib metadata,
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         phase_checker.register_builtins();
+
+        // Apply session-level feature gates to the type checker.
+        // Currently: [types] cubical → unifier's cubical normalizer.
+        phase_checker.set_cubical_enabled(self.cubical_enabled);
 
         // If contracts are available, enable contract-aware type checking
         // This allows the type checker to leverage verified preconditions/postconditions

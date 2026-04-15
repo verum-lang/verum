@@ -5892,6 +5892,16 @@ impl TypeChecker {
         self.context_checker.set_lenient(lenient);
     }
 
+    /// Toggle cubical-type normalization at the unification layer.
+    ///
+    /// Wired by the compiler's semantic-analysis phase from
+    /// `[types] cubical` in `verum.toml`. When off, the unifier uses
+    /// strict syntactic equality on Path / Partial / Eq endpoints,
+    /// skipping the cubical `whnf` normalizer.
+    pub fn set_cubical_enabled(&mut self, enabled: bool) {
+        self.unifier.set_cubical_enabled(enabled);
+    }
+
     pub fn register_builtins(&mut self) {
         // ============================================================
         // UNIFIED BUILTIN REGISTRATION

@@ -176,6 +176,9 @@ pub struct CommonPipelineConfig {
     pub expand_macros: bool,
     /// Path to the core stdlib directory. If set, core .vr files are prepended to sources.
     pub core_source_path: Option<PathBuf>,
+    /// Enable cubical-type normalization in the unifier (sourced from
+    /// `[types] cubical` in `verum.toml`). Default: true.
+    pub cubical_enabled: bool,
 }
 
 impl Default for CommonPipelineConfig {
@@ -188,6 +191,7 @@ impl Default for CommonPipelineConfig {
             collect_metrics: true,
             expand_macros: true,
             core_source_path: None,
+            cubical_enabled: true,
         }
     }
 }
@@ -203,6 +207,7 @@ impl CommonPipelineConfig {
             collect_metrics: false,
             expand_macros: true,
             core_source_path: None,
+            cubical_enabled: true,
         }
     }
 
@@ -216,6 +221,7 @@ impl CommonPipelineConfig {
             collect_metrics: true,
             expand_macros: true,
             core_source_path: None,
+            cubical_enabled: true,
         }
     }
 }
@@ -676,8 +682,10 @@ pub fn run_common_pipeline(
     let semantic_phase = if config.core_source_path.is_some() {
         semantic_analysis::SemanticAnalysisPhase::new()
             .with_user_module_count(user_source_count)
+            .with_cubical_enabled(config.cubical_enabled)
     } else {
         semantic_analysis::SemanticAnalysisPhase::new()
+            .with_cubical_enabled(config.cubical_enabled)
     };
     let semantic_input = PhaseInput {
         data: current_data,
