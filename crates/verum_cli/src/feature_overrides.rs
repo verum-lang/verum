@@ -152,9 +152,20 @@ pub fn manifest_to_features(
         },
     };
 
-    feats
-        .validate()
-        .map_err(|e| CliError::Custom(format!("invalid configuration: {}", e)))?;
+    feats.validate().map_err(|e| {
+        // Build a multi-line diagnostic that includes the source file,
+        // the offending section/field, and — when available — a
+        // "did you mean" suggestion computed by edit distance.
+        let mut msg = format!("invalid configuration in verum.toml\n  {}", e);
+        if e.provided.is_some() {
+            msg.push_str(&format!(
+                "\n  hint: edit `[{}]` section in verum.toml, \
+                 or override at the CLI with `-Z {}.{}=...`",
+                e.section, e.section, e.field
+            ));
+        }
+        CliError::Custom(msg)
+    })?;
 
     Ok(feats)
 }

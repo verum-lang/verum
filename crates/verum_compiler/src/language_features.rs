@@ -292,25 +292,76 @@ impl Default for DebugFeatures {
 // Validation
 // ---------------------------------------------------------------------------
 
-/// Error returned when a feature-flag combination is self-contradictory.
+/// Error returned when a feature-flag combination is self-contradictory
+/// or a user-provided value falls outside the accepted set.
 #[derive(Debug, Clone)]
 pub struct FeatureValidationError {
     pub section: &'static str,
     pub field: &'static str,
     pub message: Text,
+    /// The value the user supplied, if the check was an enum constraint.
+    /// `None` for coherence errors (e.g. `cubical` requires `dependent`).
+    pub provided: Option<Text>,
+    /// The set of allowed values, if the check was an enum constraint.
+    pub allowed: &'static [&'static str],
+    /// Optional "did you mean" suggestion — closest allowed value by
+    /// edit distance, when the provided value is a near-match typo.
+    pub suggestion: Option<&'static str>,
 }
 
 impl std::fmt::Display for FeatureValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "feature flag [{}].{} invalid: {}",
+            "[{}].{}: {}",
             self.section, self.field, self.message
-        )
+        )?;
+        if !self.allowed.is_empty() {
+            write!(f, "\n  allowed values: {}", self.allowed.join(", "))?;
+        }
+        if let Some(hint) = self.suggestion {
+            write!(f, "\n  help: did you mean `{}`?", hint)?;
+        }
+        Ok(())
     }
 }
 
 impl std::error::Error for FeatureValidationError {}
+
+/// Compute a simple edit distance (Levenshtein, O(n·m)) between two
+/// strings. Used to pick a near-match suggestion for enum-value typos.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (n, m) = (a.len(), b.len());
+    if n == 0 { return m; }
+    if m == 0 { return n; }
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1)
+                .min(curr[j - 1] + 1)
+                .min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
+}
+
+/// Pick the closest match from `allowed` for `provided`, if within
+/// edit distance ≤ max(2, len/3). Returns `None` otherwise.
+fn closest_match(provided: &str, allowed: &[&'static str]) -> Option<&'static str> {
+    let threshold = (provided.len() / 3).max(2);
+    allowed
+        .iter()
+        .map(|&c| (c, edit_distance(provided, c)))
+        .filter(|(_, d)| *d <= threshold)
+        .min_by_key(|(_, d)| *d)
+        .map(|(c, _)| c)
+}
 
 impl LanguageFeatures {
     /// Validate consistency of feature flags. Errors surface the offending
@@ -520,6 +571,9 @@ fn err(section: &'static str, field: &'static str, msg: &str) -> FeatureValidati
         section,
         field,
         message: Text::from(msg),
+        provided: None,
+        allowed: &[],
+        suggestion: None,
     }
 }
 
@@ -527,19 +581,19 @@ fn ensure_in(
     section: &'static str,
     field: &'static str,
     value: &Text,
-    allowed: &[&'static str],
+    allowed: &'static [&'static str],
 ) -> Result<(), FeatureValidationError> {
     if allowed.iter().any(|v| *v == value.as_str()) {
         Ok(())
     } else {
+        let suggestion = closest_match(value.as_str(), allowed);
         Err(FeatureValidationError {
             section,
             field,
-            message: Text::from(format!(
-                "'{}' not in {{{}}}",
-                value.as_str(),
-                allowed.join(", ")
-            )),
+            message: Text::from(format!("'{}' is not a valid value", value.as_str())),
+            provided: Some(value.clone()),
+            allowed,
+            suggestion,
         })
     }
 }
@@ -597,6 +651,42 @@ mod tests {
         f.runtime.cbgr_mode = Text::from("bogus");
         let err = f.validate().unwrap_err();
         assert_eq!(err.field, "cbgr_mode");
+        assert_eq!(err.provided.as_ref().unwrap().as_str(), "bogus");
+        assert!(err.allowed.contains(&"mixed"));
+    }
+
+    #[test]
+    fn typo_suggests_near_match() {
+        let mut f = LanguageFeatures::default();
+        f.runtime.cbgr_mode = Text::from("mxed");
+        let err = f.validate().unwrap_err();
+        assert_eq!(err.suggestion, Some("mixed"));
+        assert!(format!("{}", err).contains("did you mean"));
+    }
+
+    #[test]
+    fn far_value_no_suggestion() {
+        let mut f = LanguageFeatures::default();
+        f.runtime.cbgr_mode = Text::from("quantum");
+        let err = f.validate().unwrap_err();
+        // "quantum" is too far from any allowed value.
+        assert_eq!(err.suggestion, None);
+        // The allowed-values list still appears in the display output.
+        let rendered = format!("{}", err);
+        assert!(rendered.contains("allowed values:"));
+        assert!(rendered.contains("mixed"));
+    }
+
+    #[test]
+    fn coherence_error_has_no_provided_or_allowed() {
+        // Cross-field coherence errors (e.g. cubical requires dependent)
+        // have no single "provided" value — assert the fields are None/empty.
+        let mut f = LanguageFeatures::default();
+        f.types.dependent = false;
+        let err = f.validate().unwrap_err();
+        assert_eq!(err.field, "cubical");
+        assert!(err.provided.is_none());
+        assert!(err.allowed.is_empty());
     }
 
     #[test]
