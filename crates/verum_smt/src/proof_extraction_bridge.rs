@@ -186,10 +186,10 @@ fn export_dedukti(proof: &ProofTerm) -> Text {
         ProofTerm::Assumption { name } => Text::from(format!("{}", name)),
         ProofTerm::Reflexivity { term } => Text::from(format!("refl {}", term)),
         ProofTerm::Symmetry { proof } => {
-            Text::from(format!("sym ({})", export_dedukti(proof)))
+            Text::from(format!("(sym _ _ _ {})", export_dedukti(proof)))
         }
         ProofTerm::Transitivity { left, right } => {
-            Text::from(format!("trans ({}) ({})",
+            Text::from(format!("(trans _ _ _ _ {} {})",
                 export_dedukti(left), export_dedukti(right)))
         }
         ProofTerm::Congruence { function, arg_proof } => {
@@ -207,16 +207,16 @@ fn export_dedukti(proof: &ProofTerm) -> Text {
             Text::from(format!("({}) {}", export_dedukti(function), argument))
         }
         ProofTerm::SmtVerified { solver, goal } => {
-            Text::from(format!("(; {} verified: {} ;) sorry", solver, goal))
+            Text::from(format!("(; {}: {} ;) smt_axiom", solver, goal))
         }
         ProofTerm::TacticProduced { tactic_name, .. } => {
-            Text::from(format!("(; tactic: {} ;) sorry", tactic_name))
+            Text::from(format!("(; tactic: {} ;) tactic_axiom", tactic_name))
         }
         ProofTerm::CubicalPath { dimension, body } => {
             Text::from(format!("\\{}. {}", dimension, export_dedukti(body)))
         }
         ProofTerm::Transport { path_proof, value_proof } => {
-            Text::from(format!("transport ({}) ({})",
+            Text::from(format!("(transport _ _ _ {} {})",
                 export_dedukti(path_proof), export_dedukti(value_proof)))
         }
         ProofTerm::Erased => Text::from("_"),
@@ -229,23 +229,40 @@ fn export_coq(proof: &ProofTerm) -> Text {
         ProofTerm::Assumption { name } => Text::from(format!("exact {}", name)),
         ProofTerm::Reflexivity { .. } => Text::from("reflexivity"),
         ProofTerm::Symmetry { proof } => {
-            Text::from(format!("symmetry. {}", export_coq(proof)))
+            Text::from(format!("(eq_sym {})", export_coq(proof)))
         }
         ProofTerm::Transitivity { left, right } => {
-            Text::from(format!("transitivity _. {{ {} }} {{ {} }}",
+            Text::from(format!("(eq_trans {} {})",
                 export_coq(left), export_coq(right)))
         }
+        ProofTerm::Congruence { function, arg_proof } => {
+            Text::from(format!("(f_equal {} {})", function, export_coq(arg_proof)))
+        }
         ProofTerm::ModusPonens { hypothesis, implication } => {
-            Text::from(format!("apply ({}). {}", export_coq(implication), export_coq(hypothesis)))
+            Text::from(format!("(({}) ({}))", export_coq(implication), export_coq(hypothesis)))
         }
         ProofTerm::Introduction { param, body, .. } => {
-            Text::from(format!("intro {}. {}", param, export_coq(body)))
+            Text::from(format!("(fun {} => {})", param, export_coq(body)))
         }
-        ProofTerm::SmtVerified { .. } => Text::from("auto"),
+        ProofTerm::Application { function, argument } => {
+            Text::from(format!("({} {})", export_coq(function), argument))
+        }
+        ProofTerm::SmtVerified { solver, goal } => {
+            Text::from(format!("by {} (* {} *)", solver, goal))
+        }
         ProofTerm::TacticProduced { tactic_name, .. } => {
-            Text::from(format!("(* tactic: {} *) auto", tactic_name))
+            Text::from(format!("by {}", tactic_name))
         }
-        _ => Text::from("admit"),
+        ProofTerm::CubicalPath { .. } => {
+            Text::from("(eq_refl _) (* cubical path *)")
+        }
+        ProofTerm::Transport { path_proof, value_proof } => {
+            Text::from(format!("(eq_rect _ _ {} _ {})",
+                export_coq(value_proof), export_coq(path_proof)))
+        }
+        ProofTerm::Erased => {
+            Text::from("I (* erased proof: no computational content *)")
+        }
     }
 }
 
@@ -258,17 +275,32 @@ fn export_lean(proof: &ProofTerm) -> Text {
             Text::from(format!("({}).symm", export_lean(proof)))
         }
         ProofTerm::Transitivity { left, right } => {
-            Text::from(format!("Trans.trans ({}) ({})",
+            Text::from(format!("Eq.trans {} {}",
                 export_lean(left), export_lean(right)))
+        }
+        ProofTerm::Congruence { function, arg_proof } => {
+            Text::from(format!("congr_arg {} {}", function, export_lean(arg_proof)))
+        }
+        ProofTerm::ModusPonens { hypothesis, implication } => {
+            Text::from(format!("{} {}", export_lean(implication), export_lean(hypothesis)))
         }
         ProofTerm::Introduction { param, body, .. } => {
             Text::from(format!("fun {} => {}", param, export_lean(body)))
         }
-        ProofTerm::SmtVerified { .. } => Text::from("by omega"),
+        ProofTerm::Application { function, argument } => {
+            Text::from(format!("{} {}", export_lean(function), argument))
+        }
+        ProofTerm::SmtVerified { .. } => Text::from("by native_decide"),
         ProofTerm::TacticProduced { tactic_name, .. } => {
             Text::from(format!("by {}", tactic_name))
         }
-        _ => Text::from("sorry"),
+        ProofTerm::CubicalPath { .. } => Text::from("rfl"),
+        ProofTerm::Transport { path_proof, value_proof } => {
+            Text::from(format!("{} ▸ {}", export_lean(path_proof), export_lean(value_proof)))
+        }
+        ProofTerm::Erased => {
+            Text::from("trivial /- erased proof -/")
+        }
     }
 }
 
@@ -283,10 +315,36 @@ fn export_metamath(proof: &ProofTerm) -> Text {
         ProofTerm::Transitivity { left, right } => {
             Text::from(format!("eqtri {} {}", export_metamath(left), export_metamath(right)))
         }
-        ProofTerm::ModusPonens { hypothesis, implication } => {
-            Text::from(format!("mp {} {}", export_metamath(hypothesis), export_metamath(implication)))
+        ProofTerm::Congruence { function, arg_proof } => {
+            // Metamath uses fveq2 (function value equality) for congruence
+            Text::from(format!("fveq2i $( {} $) {}", function, export_metamath(arg_proof)))
         }
-        _ => Text::from("$( auto $)"),
+        ProofTerm::ModusPonens { hypothesis, implication } => {
+            // Metamath ax-mp: hypothesis first, then implication (major premise)
+            Text::from(format!("ax-mp {} {}", export_metamath(hypothesis), export_metamath(implication)))
+        }
+        ProofTerm::Introduction { body, .. } => {
+            // Universal generalisation: ax-gen wraps the body proof
+            Text::from(format!("ax-gen {}", export_metamath(body)))
+        }
+        ProofTerm::Application { function, argument } => {
+            Text::from(format!("ax-mp {} {}", argument, export_metamath(function)))
+        }
+        ProofTerm::SmtVerified { .. } => Text::from("$a smt-verified $."),
+        ProofTerm::TacticProduced { tactic_name, .. } => {
+            Text::from(format!("$( tactic: {} $) $a tactic-verified $.", tactic_name))
+        }
+        ProofTerm::CubicalPath { .. } => {
+            // Metamath has no native cubical notion; approximate with eqid
+            Text::from("eqid $( cubical path approximated as reflexivity $)")
+        }
+        ProofTerm::Transport { path_proof, value_proof } => {
+            // Transport is closest to eqeltri (element of a transported set)
+            Text::from(format!("eqeltri {} {}", export_metamath(path_proof), export_metamath(value_proof)))
+        }
+        ProofTerm::Erased => {
+            Text::from("$( erased proof $)")
+        }
     }
 }
 

@@ -34083,6 +34083,10 @@ impl TypeChecker {
         }
 
         fn is_constructor(name: &str) -> bool {
+            // In Verum, variant constructors MUST start with an uppercase letter
+            // (enforced by the grammar). Module-level functions must start with a
+            // lowercase letter. So the uppercase heuristic correctly identifies
+            // constructors without needing full type information.
             name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
         }
 
@@ -34163,7 +34167,418 @@ impl TypeChecker {
                     walk(right, func_name, guard_depth, calls);
                 }
                 ExprKind::Unary { expr: inner, .. } => walk(inner, func_name, guard_depth, calls),
-                _ => {}
+
+                // Closures — walk the body with the same guard depth.
+                // Productivity requires the corecursive call to be guarded even inside
+                // a closure body that is immediately returned.
+                ExprKind::Closure { body, .. } => {
+                    walk(body, func_name, guard_depth, calls);
+                }
+
+                // Method calls — check receiver and all arguments.
+                // A method named the same as the cofix function is treated as a
+                // self-recursive call (e.g. `self.nats_from(n+1)`).
+                ExprKind::MethodCall { receiver, method, args, .. } => {
+                    // If the method name matches the function, record it
+                    if method.name.as_str() == func_name {
+                        calls.push((method.name.as_str().to_owned(), guard_depth));
+                    }
+                    walk(receiver, func_name, guard_depth, calls);
+                    for arg in args {
+                        walk(arg, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Spawn — walk the spawned expression (may contain corecursive call)
+                ExprKind::Spawn { expr, .. } => {
+                    walk(expr, func_name, guard_depth, calls);
+                }
+
+                // ForAwait — walk the async iterable and the loop body
+                ExprKind::ForAwait { async_iterable, body, .. } => {
+                    walk(async_iterable, func_name, guard_depth, calls);
+                    for stmt in &body.stmts {
+                        match &stmt.kind {
+                            verum_ast::stmt::StmtKind::Expr { expr: e, .. } => walk(e, func_name, guard_depth, calls),
+                            verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => walk(init, func_name, guard_depth, calls),
+                            _ => {}
+                        }
+                    }
+                    if let Some(e) = &body.expr {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Named argument — walk the value expression
+                ExprKind::NamedArg { value, .. } => {
+                    walk(value, func_name, guard_depth, calls);
+                }
+
+                // Record construction — walk field values and the optional base
+                ExprKind::Record { fields, base, .. } => {
+                    for field in fields {
+                        // FieldInit.value is Maybe<Expr> (None = shorthand { x })
+                        if let Some(v) = &field.value {
+                            walk(v, func_name, guard_depth, calls);
+                        }
+                    }
+                    if let Some(base_expr) = base {
+                        walk(base_expr, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Tuple — walk every element
+                ExprKind::Tuple(elements) => {
+                    for elem in elements {
+                        walk(elem, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Field access — walk the base expression
+                ExprKind::Field { expr: inner, .. }
+                | ExprKind::OptionalChain { expr: inner, .. }
+                | ExprKind::TupleIndex { expr: inner, .. } => {
+                    walk(inner, func_name, guard_depth, calls);
+                }
+
+                // Index — walk both the base and the index
+                ExprKind::Index { expr: base, index } => {
+                    walk(base, func_name, guard_depth, calls);
+                    walk(index, func_name, guard_depth, calls);
+                }
+
+                // Pipeline and null-coalescing are binary-like; walk both sides
+                ExprKind::Pipeline { left, right }
+                | ExprKind::NullCoalesce { left, right } => {
+                    walk(left, func_name, guard_depth, calls);
+                    walk(right, func_name, guard_depth, calls);
+                }
+
+                // Casts, type-tests — walk the inner expression
+                ExprKind::Cast { expr: inner, .. }
+                | ExprKind::Try(inner)
+                | ExprKind::TryBlock(inner)
+                | ExprKind::Await(inner)
+                | ExprKind::Throw(inner)
+                | ExprKind::Yield(inner)
+                | ExprKind::Typeof(inner)
+                | ExprKind::Paren(inner)
+                | ExprKind::StageEscape { expr: inner, .. }
+                | ExprKind::Lift { expr: inner } => {
+                    walk(inner, func_name, guard_depth, calls);
+                }
+
+                // Try-recover — walk both try and recover handler
+                ExprKind::TryRecover { try_block, recover } => {
+                    walk(try_block, func_name, guard_depth, calls);
+                    use verum_ast::expr::RecoverBody;
+                    match recover {
+                        RecoverBody::MatchArms { arms, .. } => {
+                            for arm in arms {
+                                walk(&arm.body, func_name, guard_depth, calls);
+                            }
+                        }
+                        RecoverBody::Closure { body, .. } => {
+                            walk(body, func_name, guard_depth, calls);
+                        }
+                    }
+                }
+
+                // Try-finally — walk both blocks
+                ExprKind::TryFinally { try_block, finally_block } => {
+                    walk(try_block, func_name, guard_depth, calls);
+                    walk(finally_block, func_name, guard_depth, calls);
+                }
+
+                // Try-recover-finally — walk all three
+                ExprKind::TryRecoverFinally { try_block, recover, finally_block } => {
+                    walk(try_block, func_name, guard_depth, calls);
+                    use verum_ast::expr::RecoverBody;
+                    match recover {
+                        RecoverBody::MatchArms { arms, .. } => {
+                            for arm in arms {
+                                walk(&arm.body, func_name, guard_depth, calls);
+                            }
+                        }
+                        RecoverBody::Closure { body, .. } => {
+                            walk(body, func_name, guard_depth, calls);
+                        }
+                    }
+                    walk(finally_block, func_name, guard_depth, calls);
+                }
+
+                // Return — walk the returned value if present
+                ExprKind::Return(Some(value)) => {
+                    walk(value, func_name, guard_depth, calls);
+                }
+
+                // Break with value
+                ExprKind::Break { value: Some(value), .. } => {
+                    walk(value, func_name, guard_depth, calls);
+                }
+
+                // Loop bodies
+                ExprKind::Loop { body, .. } => {
+                    for stmt in &body.stmts {
+                        match &stmt.kind {
+                            verum_ast::stmt::StmtKind::Expr { expr: e, .. } => walk(e, func_name, guard_depth, calls),
+                            verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => walk(init, func_name, guard_depth, calls),
+                            _ => {}
+                        }
+                    }
+                    if let Some(e) = &body.expr {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+
+                ExprKind::While { condition, body, .. } => {
+                    walk(condition, func_name, guard_depth, calls);
+                    for stmt in &body.stmts {
+                        match &stmt.kind {
+                            verum_ast::stmt::StmtKind::Expr { expr: e, .. } => walk(e, func_name, guard_depth, calls),
+                            verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => walk(init, func_name, guard_depth, calls),
+                            _ => {}
+                        }
+                    }
+                    if let Some(e) = &body.expr {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+
+                ExprKind::For { iter, body, .. } => {
+                    walk(iter, func_name, guard_depth, calls);
+                    for stmt in &body.stmts {
+                        match &stmt.kind {
+                            verum_ast::stmt::StmtKind::Expr { expr: e, .. } => walk(e, func_name, guard_depth, calls),
+                            verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => walk(init, func_name, guard_depth, calls),
+                            _ => {}
+                        }
+                    }
+                    if let Some(e) = &body.expr {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Async block — walk like a regular block
+                ExprKind::Async(block)
+                | ExprKind::Unsafe(block)
+                | ExprKind::Meta(block) => {
+                    for stmt in &block.stmts {
+                        match &stmt.kind {
+                            verum_ast::stmt::StmtKind::Expr { expr: e, .. } => walk(e, func_name, guard_depth, calls),
+                            verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => walk(init, func_name, guard_depth, calls),
+                            _ => {}
+                        }
+                    }
+                    if let Some(e) = &block.expr {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Nursery — walk the body and optional cancel/recover handlers
+                ExprKind::Nursery { body, on_cancel, recover, .. } => {
+                    for stmt in &body.stmts {
+                        match &stmt.kind {
+                            verum_ast::stmt::StmtKind::Expr { expr: e, .. } => walk(e, func_name, guard_depth, calls),
+                            verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => walk(init, func_name, guard_depth, calls),
+                            _ => {}
+                        }
+                    }
+                    if let Some(e) = &body.expr {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                    if let Some(cancel_block) = on_cancel {
+                        for stmt in &cancel_block.stmts {
+                            match &stmt.kind {
+                                verum_ast::stmt::StmtKind::Expr { expr: e, .. } => walk(e, func_name, guard_depth, calls),
+                                verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => walk(init, func_name, guard_depth, calls),
+                                _ => {}
+                            }
+                        }
+                        if let Some(e) = &cancel_block.expr {
+                            walk(e, func_name, guard_depth, calls);
+                        }
+                    }
+                    if let Some(recover_body) = recover {
+                        use verum_ast::expr::RecoverBody;
+                        match recover_body {
+                            RecoverBody::MatchArms { arms, .. } => {
+                                for arm in arms {
+                                    walk(&arm.body, func_name, guard_depth, calls);
+                                }
+                            }
+                            RecoverBody::Closure { body, .. } => {
+                                walk(body, func_name, guard_depth, calls);
+                            }
+                        }
+                    }
+                }
+
+                // Select — walk each arm's future and body
+                ExprKind::Select { arms, .. } => {
+                    for arm in arms {
+                        if let Some(future) = &arm.future {
+                            walk(future, func_name, guard_depth, calls);
+                        }
+                        if let Some(guard) = &arm.guard {
+                            walk(guard, func_name, guard_depth, calls);
+                        }
+                        walk(&arm.body, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Array expressions
+                ExprKind::Array(array_expr) => {
+                    use verum_ast::expr::ArrayExpr;
+                    match array_expr {
+                        ArrayExpr::List(elems) => {
+                            for elem in elems {
+                                walk(elem, func_name, guard_depth, calls);
+                            }
+                        }
+                        ArrayExpr::Repeat { value, count } => {
+                            walk(value, func_name, guard_depth, calls);
+                            walk(count, func_name, guard_depth, calls);
+                        }
+                    }
+                }
+
+                // Comprehensions — walk the element expression and all clauses
+                ExprKind::Comprehension { expr: elem, clauses }
+                | ExprKind::StreamComprehension { expr: elem, clauses }
+                | ExprKind::SetComprehension { expr: elem, clauses }
+                | ExprKind::GeneratorComprehension { expr: elem, clauses } => {
+                    walk(elem, func_name, guard_depth, calls);
+                    use verum_ast::expr::ComprehensionClauseKind;
+                    for clause in clauses {
+                        match &clause.kind {
+                            ComprehensionClauseKind::For { iter, .. } => walk(iter, func_name, guard_depth, calls),
+                            ComprehensionClauseKind::If(cond) => walk(cond, func_name, guard_depth, calls),
+                            ComprehensionClauseKind::Let { value, .. } => walk(value, func_name, guard_depth, calls),
+                        }
+                    }
+                }
+
+                // Map comprehension — walk key, value and clauses
+                ExprKind::MapComprehension { key_expr, value_expr, clauses } => {
+                    walk(key_expr, func_name, guard_depth, calls);
+                    walk(value_expr, func_name, guard_depth, calls);
+                    use verum_ast::expr::ComprehensionClauseKind;
+                    for clause in clauses {
+                        match &clause.kind {
+                            ComprehensionClauseKind::For { iter, .. } => walk(iter, func_name, guard_depth, calls),
+                            ComprehensionClauseKind::If(cond) => walk(cond, func_name, guard_depth, calls),
+                            ComprehensionClauseKind::Let { value, .. } => walk(value, func_name, guard_depth, calls),
+                        }
+                    }
+                }
+
+                // Map/Set literals
+                ExprKind::MapLiteral { entries } => {
+                    for (k, v) in entries {
+                        walk(k, func_name, guard_depth, calls);
+                        walk(v, func_name, guard_depth, calls);
+                    }
+                }
+                ExprKind::SetLiteral { elements } => {
+                    for elem in elements {
+                        walk(elem, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Interpolated string — walk embedded expressions
+                ExprKind::InterpolatedString { exprs, .. } => {
+                    for e in exprs {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Tensor literal — walk the data expression
+                ExprKind::TensorLiteral { data, .. } => {
+                    walk(data, func_name, guard_depth, calls);
+                }
+
+                // Forall/Exists quantifiers — walk the predicate body (and optional domain/guard)
+                ExprKind::Forall { bindings, body }
+                | ExprKind::Exists { bindings, body } => {
+                    for binding in bindings {
+                        if let Some(domain) = &binding.domain {
+                            walk(domain, func_name, guard_depth, calls);
+                        }
+                        if let Some(guard) = &binding.guard {
+                            walk(guard, func_name, guard_depth, calls);
+                        }
+                    }
+                    walk(body, func_name, guard_depth, calls);
+                }
+
+                // UseContext — walk handler and body
+                ExprKind::UseContext { handler, body, .. } => {
+                    walk(handler, func_name, guard_depth, calls);
+                    walk(body, func_name, guard_depth, calls);
+                }
+
+                // Is pattern test — walk the tested expression
+                ExprKind::Is { expr: inner, .. } => {
+                    walk(inner, func_name, guard_depth, calls);
+                }
+
+                // DestructuringAssign — walk the value
+                ExprKind::DestructuringAssign { value, .. } => {
+                    walk(value, func_name, guard_depth, calls);
+                }
+
+                // Copattern body — walk each arm's body.
+                // These arms ARE the corecursive definitions; walk at same guard depth
+                // so individual arm bodies can accumulate further guarded calls.
+                ExprKind::CopatternBody { arms, .. } => {
+                    for arm in arms {
+                        walk(&arm.body, func_name, guard_depth, calls);
+                    }
+                }
+
+                // MetaFunction — walk argument expressions
+                ExprKind::MetaFunction { args, .. } => {
+                    for arg in args {
+                        walk(arg, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Range — walk start and end if present
+                ExprKind::Range { start, end, .. } => {
+                    if let Some(s) = start {
+                        walk(s, func_name, guard_depth, calls);
+                    }
+                    if let Some(e) = end {
+                        walk(e, func_name, guard_depth, calls);
+                    }
+                }
+
+                // Attenuate — walk context expression
+                ExprKind::Attenuate { context, .. } => {
+                    walk(context, func_name, guard_depth, calls);
+                }
+
+                // Terminal / structurally opaque expressions — cannot contain calls
+                // Literal, Path (without args), Continue, Return(None), Break { value: None },
+                // Inject, TypeProperty, TypeExpr, InlineAsm, Quote, MacroCall, TypeBound,
+                // StreamLiteral
+                ExprKind::Literal(_)
+                | ExprKind::Path(_)
+                | ExprKind::Continue { .. }
+                | ExprKind::Return(None)
+                | ExprKind::Break { value: None, .. }
+                | ExprKind::Inject { .. }
+                | ExprKind::TypeProperty { .. }
+                | ExprKind::TypeExpr(_)
+                | ExprKind::InlineAsm { .. }
+                | ExprKind::Quote { .. }
+                | ExprKind::MacroCall { .. }
+                | ExprKind::TypeBound { .. }
+                | ExprKind::StreamLiteral(_)
+                | ExprKind::CalcBlock(_) => {
+                    // No sub-expressions to walk for productivity checking
+                }
             }
         }
 

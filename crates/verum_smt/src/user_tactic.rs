@@ -577,7 +577,7 @@ mod tests {
         match compile_tactic(&TacticExpr::Named(Text::from("oracle"))) {
             CompileResult::Ok(TacticCombinator::OrElse(inner, _fallback)) => {
                 match *inner {
-                    TacticCombinator::Single(TacticKind::Custom(ref tag)) => {
+                    TacticCombinator::Single(TacticKind::Custom(tag)) => {
                         assert!(
                             tag.starts_with("oracle:"),
                             "tag should start with oracle:, got {}",
@@ -595,7 +595,7 @@ mod tests {
     #[test]
     fn test_compile_oracle_with_confidence() {
         match compile_named_tactic_with_args("oracle", &[Text::from("0.75")]) {
-            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(ref tag))) => {
+            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(tag))) => {
                 assert_eq!(tag.as_str(), "oracle:0.75");
             }
             ref other => panic!("expected Single(Custom(oracle:0.75)), got {:?}", other),
@@ -607,7 +607,7 @@ mod tests {
     fn test_compile_oracle_invalid_confidence_fallback() {
         // Negative confidence is out of range; should fall back to 0.9.
         match compile_named_tactic_with_args("oracle", &[Text::from("-0.5")]) {
-            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(ref tag))) => {
+            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(tag))) => {
                 assert_eq!(tag.as_str(), "oracle:0.9", "should fall back to 0.9");
             }
             ref other => panic!("expected Single(Custom(oracle:0.9)), got {:?}", other),
@@ -624,7 +624,7 @@ mod tests {
         match compile_tactic(&expr) {
             CompileResult::Ok(TacticCombinator::OrElse(ref inner, _)) => {
                 match inner.as_ref() {
-                    TacticCombinator::Single(TacticKind::Custom(ref tag)) => {
+                    TacticCombinator::Single(TacticKind::Custom(tag)) => {
                         assert!(tag.starts_with("oracle:"), "tag should start with oracle:");
                     }
                     other => panic!("expected Single(Custom(oracle:...)), got {:?}", other),

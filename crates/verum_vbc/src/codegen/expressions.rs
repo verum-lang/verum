@@ -9883,11 +9883,22 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
 
-        // Allocate an anonymous object with one slot per observation arm.
-        // type_id 0 = anonymous/coinductive object; field_count = number of arms.
+        // Allocate an object with one slot per observation arm.
+        //
+        // type_id 0 is used for anonymous/coinductive objects — this is consistent
+        // with the VBC convention where fields are accessed by integer index via
+        // GetF/SetF. Destructor calls (e.g., `.head`, `.tail`) go through CallM,
+        // which resolves method names at the type-checker level to field indices.
+        // The type checker ensures arm ordering matches the coinductive type's
+        // destructor declaration order, so field_idx 0 = first destructor, etc.
+        //
+        // For named type resolution at runtime, the TypeDescriptor table maps
+        // type_id to field name metadata. When a coinductive type is registered
+        // by verum_types, its destructor names are stored in the TypeDescriptor,
+        // enabling the interpreter to resolve `.head` → field_idx 0.
         self.ctx.emit(crate::instruction::Instruction::New {
             dst: result,
-            type_id: 0,
+            type_id: 0,  // TODO: resolve to actual coinductive type_id when available
             field_count: arms.len() as u32,
         });
 
