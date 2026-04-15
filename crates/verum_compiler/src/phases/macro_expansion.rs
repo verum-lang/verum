@@ -1446,4 +1446,73 @@ mod tests {
         // Stats should be tracked even for empty module
         assert_eq!(phase.stats.errors, 0);
     }
+
+    #[test]
+    fn test_derive_disabled_rejects_derive_attribute() {
+        use verum_ast::attr::Attribute;
+        use verum_ast::decl::{ItemKind, TypeDecl, TypeDeclBody};
+        use verum_ast::expr::Expr;
+        use verum_ast::{Ident, Item, Span};
+        use verum_common::{List, Maybe, Text};
+
+        let span = Span::dummy();
+
+        // Build @derive(Debug) attribute
+        let debug_ident = Ident::new("Debug", span);
+        let mut args = List::new();
+        args.push(Expr::ident(debug_ident));
+        let derive_attr = Attribute::new(Text::from("derive"), Maybe::Some(args), span);
+
+        // Build a minimal unit type to attach the attribute to
+        let type_name = Ident::new("Foo", span);
+        let type_decl = TypeDecl {
+            visibility: Default::default(),
+            name: type_name,
+            generics: List::new(),
+            attributes: List::new(),
+            body: TypeDeclBody::Unit,
+            resource_modifier: Maybe::None,
+            generic_where_clause: Maybe::None,
+            meta_where_clause: Maybe::None,
+            span,
+        };
+        let mut attrs = List::new();
+        attrs.push(derive_attr);
+        let item = Item::new_with_attrs(ItemKind::Type(type_decl.clone()), attrs, span);
+
+        // With derive DISABLED the phase must reject this item with
+        // a clean diagnostic pointing at the config key.
+        let mut phase = MacroExpansionPhase::new().with_derive_enabled(false);
+        let result = phase.expand_type_derives(&item, &type_decl);
+        let diag = result.expect_err("derive=off must yield a diagnostic");
+        let msg = format!("{:?}", diag);
+        assert!(
+            msg.contains("@derive") && msg.contains("[meta]"),
+            "diagnostic should mention @derive and [meta] (got: {})",
+            msg
+        );
+
+        // With derive ENABLED (default) the phase should not produce
+        // a "disabled" error — it might still fail for unrelated
+        // reasons (Debug not registered), but the message must differ.
+        let mut phase_on = MacroExpansionPhase::new();
+        let result_on = phase_on.expand_type_derives(&item, &type_decl);
+        if let Err(diag) = result_on {
+            let msg = format!("{:?}", diag);
+            assert!(
+                !msg.contains("is disabled"),
+                "default (derive on) must not emit the gate message (got: {})",
+                msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_builder_flags_set_fields() {
+        let phase = MacroExpansionPhase::new()
+            .with_derive_enabled(false)
+            .with_compile_time_enabled(false);
+        assert!(!phase.derive_enabled);
+        assert!(!phase.compile_time_enabled);
+    }
 }
