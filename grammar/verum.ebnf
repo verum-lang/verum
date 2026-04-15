@@ -707,8 +707,15 @@ protocol_bound  = path_type ;
 (* These extensions enable HKT, existentials, type-level literals, and more    *)
 
 (* 2.4.1 Higher-Kinded Type Parameters *)
-(* Enables abstraction over type constructors like List<_>, Maybe<_>           *)
-(* Example: fn map<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>       *)
+(* Higher-Kinded Types via placeholder syntax `F<_>`.                          *)
+(* Enables abstraction over type constructors like List<_>, Maybe<_>.          *)
+(* Example: fn map<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>      *)
+(*                                                                              *)
+(* Design note (verum-ext-2.md §2 revision): The `F<_>` syntax replaces the    *)
+(* alternative `F: Type -> Type` kind annotation. Protocols + associated types  *)
+(* cover the same use cases with better error messages and coherence checking.  *)
+(* Kind inference (verum_types/kind_inference.rs) automatically derives         *)
+(* `F: Type -> Type` from usage patterns like `F<A>`.                           *)
 hk_type_param       = identifier , '<' , hk_placeholders , '>' , [ ':' , hk_bounds ] ;
 hk_placeholders     = '_' , { ',' , '_' } ;
 hk_bounds           = hk_bound , { '+' , hk_bound } ;
@@ -2071,12 +2078,19 @@ proof_justification = 'by' , ( tactic_expr | identifier ) ;
 tactic_expr =
     tactic_name , [ '(' , [ argument_list ] , ')' ]
     | tactic_expr , ';' , tactic_expr
-    | '(' , tactic_expr , ')' ;
+    | '(' , tactic_expr , ')'
+    (* Tactic combinators — Phase D.1 *)
+    | 'try' , '{' , tactic_expr , '}' , [ 'else' , '{' , tactic_expr , '}' ]
+    | 'repeat' , [ '(' , integer_lit , ')' ] , '{' , tactic_expr , '}'
+    | 'first' , '{' , tactic_expr , { ';' , tactic_expr } , '}'
+    | 'all_goals' , '{' , tactic_expr , '}'
+    | 'focus' , '(' , integer_lit , ')' , '{' , tactic_expr , '}' ;
 
 tactic_name =
     'auto' | 'simp' | 'ring' | 'field' | 'omega' | 'blast' | 'smt'
     | 'trivial' | 'assumption' | 'contradiction' | 'induction' | 'cases'
     | 'rewrite' | 'unfold' | 'apply' | 'exact' | 'intro' | 'intros'
+    | 'cubical' | 'category_simp' | 'category_law' | 'descent_check'
     | identifier ;
 
 (* 2.19.8 Calculational Proof Chains *)
