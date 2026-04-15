@@ -1108,6 +1108,34 @@ pub enum Type {
     /// ```
     Interval,
 
+    /// Partial Element Type: Partial<A>(φ)
+    ///
+    /// A partial element of type A defined on the extent where the face
+    /// formula φ holds. Used in homogeneous composition (hcomp) to
+    /// specify the boundary data of a cube filling.
+    ///
+    /// # Examples
+    /// ```verum
+    /// // A partial element defined when i = i0 or i = i1
+    /// let walls: Partial<A>(φ) = ...;
+    ///
+    /// // hcomp uses partial elements for its side faces
+    /// hcomp<A>(φ, walls, base) : A
+    /// ```
+    ///
+    /// # Type Theory
+    /// ```text
+    /// Γ ⊢ A : Type    Γ ⊢ φ : I    Γ, (φ = i1) ⊢ u : A
+    /// ───────────────────────────────────────────────────── (Partial-Intro)
+    /// Γ ⊢ [φ ↦ u] : Partial<A>(φ)
+    /// ```
+    Partial {
+        /// The type of the partial element.
+        element_type: Box<Type>,
+        /// The face formula (encoded as a cubical term over interval variables).
+        face: Box<crate::cubical::CubicalTerm>,
+    },
+
     /// Universe Level: Type_n
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
     ///
@@ -1931,6 +1959,14 @@ impl Type {
         Type::Interval
     }
 
+    /// Create a partial element type: Partial<A>(φ)
+    pub fn partial(element_type: Type, face: crate::cubical::CubicalTerm) -> Self {
+        Type::Partial {
+            element_type: Box::new(element_type),
+            face: Box::new(face),
+        }
+    }
+
     /// Create a universe type at a specific level
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
     pub fn universe(level: UniverseLevel) -> Self {
@@ -2036,7 +2072,7 @@ impl Type {
     /// Check if this type is a dependent type (Pi, Sigma, Eq, etc.)
     pub fn is_dependent(&self) -> bool {
         match self {
-            Type::Pi { .. } | Type::Sigma { .. } | Type::Eq { .. } | Type::PathType { .. } => true,
+            Type::Pi { .. } | Type::Sigma { .. } | Type::Eq { .. } | Type::PathType { .. } | Type::Partial { .. } => true,
             Type::Inductive { indices, .. } => !indices.is_empty(),
             _ => false,
         }
@@ -2150,6 +2186,9 @@ impl Type {
             Type::Interval => Type::Universe {
                 level: UniverseLevel::TYPE,
             },
+
+            // Partial types: Partial<A>(φ) lives in the same universe as A
+            Type::Partial { element_type, .. } => element_type.type_of(),
 
             // Inductive types live in their declared universe
             // Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .1
@@ -2446,6 +2485,10 @@ impl Type {
                 // CubicalTerm endpoints are value-level, no type vars
                 space.collect_free_vars(vars);
             }
+            Type::Partial { element_type, .. } => {
+                // Collect type vars from the element type
+                element_type.collect_free_vars(vars);
+            }
             Type::Interval => {
                 // Interval is a primitive type, no free vars
             }
@@ -2708,6 +2751,10 @@ impl Type {
                 space: Box::new(space.apply_subst_with_depth(subst, next_depth, max_depth)),
                 left: left.clone(),   // CubicalTerms are value-level, not type-level
                 right: right.clone(),
+            },
+            Type::Partial { element_type, face } => Type::Partial {
+                element_type: Box::new(element_type.apply_subst_with_depth(subst, next_depth, max_depth)),
+                face: face.clone(), // CubicalTerms are value-level
             },
             Type::Interval => Type::Interval,
             Type::Universe { level } => Type::Universe { level: *level },
@@ -3120,6 +3167,10 @@ impl fmt::Display for Type {
             }
 
             Type::Interval => write!(f, "I"),
+
+            Type::Partial { element_type, face } => {
+                write!(f, "Partial<{}>({:?})", element_type, face)
+            }
 
             Type::Universe { level } => {
                 write!(f, "{}", level)

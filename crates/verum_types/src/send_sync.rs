@@ -210,6 +210,10 @@ impl<'a> SendSyncDerivation<'a> {
             // PathType { space, left, right }: space determines Send-ness
             Type::PathType { space, .. } => self.is_send(space),
 
+            // 26d. Partial element types - Send if the element type is Send
+            // Partial<A>(φ): element_type determines Send-ness
+            Type::Partial { element_type, .. } => self.is_send(element_type),
+
             // 26c. Interval type I - always Send (primitive, no inner references)
             Type::Interval => true,
 
@@ -420,6 +424,10 @@ impl<'a> SendSyncDerivation<'a> {
             // 26b. Cubical path types - Sync if the space type is Sync
             // PathType { space, left, right }: space determines Sync-ness
             Type::PathType { space, .. } => self.is_sync(space),
+
+            // 26d. Partial element types - Sync if the element type is Sync
+            // Partial<A>(φ): element_type determines Sync-ness
+            Type::Partial { element_type, .. } => self.is_sync(element_type),
 
             // 26c. Interval type I - always Sync (primitive, no inner references)
             Type::Interval => true,

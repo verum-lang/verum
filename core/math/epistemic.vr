@@ -1062,3 +1062,41 @@ theorem right_kan_is_pointwise_meet(
             None    => false,
         }
     proof by auto;
+
+// =============================================================================
+// §11. Global Constants — Canonical Mathesis Objects
+// =============================================================================
+
+/// The category of theories: objects are Theory, morphisms are
+/// InfinityFunctor between claim categories.
+public fn theory_category() -> InfinityCategory {
+    @builtin_theory_category()
+}
+
+/// The canonical epistemic topology on the category of theories.
+/// Uses joint faithfulness as the covering condition.
+public fn epistemic_topology() -> EpistemicTopology {
+    EpistemicTopology {}
+}
+
+/// The canonical site of theories: (Th, J_ep).
+/// This is the pre-topos data from which Mathesis is built.
+public let theory_site: Site = Site {
+    underlying_category: theory_category(),
+    topology: epistemic_topology(),
+};
+
+/// The ∞-topos Mathesis: Sh_∞(Th, J_ep).
+///
+/// This is THE central mathematical object — the computational ∞-topos
+/// where formal theories live as sheaves. Constructed from the theory
+/// site via the sheafification functor.
+///
+/// Properties (by construction):
+///   - Has all small colimits and finite limits (Giraud G1-G2)
+///   - Colimits are universal (Giraud G3)
+///   - Coproducts are disjoint (Giraud G4)
+///   - Groupoid objects are effective (Giraud G5)
+///   - Yoneda embedding y : Th → Mathesis is fully faithful
+///   - Every theory T maps to a sheaf y(T) in Mathesis
+public let mathesis: SheafInfinityTopos = @builtin_construct_sheaf_topos(theory_site);

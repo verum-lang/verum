@@ -4373,6 +4373,8 @@ impl TypeChecker {
             Type::Eq { ty, .. } => self.has_unresolved_vars(ty),
             // Path type: Path<A>(a, b) lives in the same universe as A; check space for vars
             Type::PathType { space, .. } => self.has_unresolved_vars(space),
+            // Partial element type: Partial<A>(φ) — check element_type for vars
+            Type::Partial { element_type, .. } => self.has_unresolved_vars(element_type),
             // Interval is a primitive built-in type with no type parameters
             Type::Interval => false,
             Type::Inductive {
@@ -24030,6 +24032,12 @@ impl TypeChecker {
                 right: right.clone(),
             },
 
+            // Partial element type: Partial<A>(φ) — normalize the element type; face is value-level
+            Partial { element_type, face } => Partial {
+                element_type: Box::new(self.normalize_type_impl(element_type, depth + 1)),
+                face: face.clone(),
+            },
+
             // Interval is a built-in primitive; nothing to normalize
             Interval => Interval,
 
@@ -24346,6 +24354,13 @@ impl TypeChecker {
                 space: Box::new(self.substitute_term_in_type_impl(space, var_name, term, next_depth)),
                 left: left.clone(),
                 right: right.clone(),
+            },
+
+            // Partial element type: Partial<A>(φ)
+            // The element type A may contain the variable; face φ is a CubicalTerm (value-level)
+            Partial { element_type, face } => Partial {
+                element_type: Box::new(self.substitute_term_in_type_impl(element_type, var_name, term, next_depth)),
+                face: face.clone(),
             },
 
             // Interval is a built-in primitive with no inner types; nothing to substitute

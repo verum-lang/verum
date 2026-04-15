@@ -1057,7 +1057,8 @@ public mount .giry.{
 
 public mount .epistemic.{
     EpistemicStatus, ClaimType, Claim, Theory,
-    EpistemicTopology, theory_site, mathesis,
+    EpistemicTopology, theory_category, epistemic_topology,
+    theory_site, mathesis,
     propagate_status, compute_kan_extension as epistemic_kan_extension,
     compute_obstruction as epistemic_obstruction,
 };

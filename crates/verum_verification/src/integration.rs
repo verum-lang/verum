@@ -77,6 +77,9 @@ impl TypeSystemIntegration {
             // Path types: check inner space type for refinements
             Type::PathType { space, .. } => Self::has_refinement(space),
 
+            // Partial element types: check element_type for refinements
+            Type::Partial { element_type, .. } => Self::has_refinement(element_type),
+
             // Meta types and special async types
             Type::Meta { ty, .. } => Self::has_refinement(ty),
             Type::Future { output } => Self::has_refinement(output),

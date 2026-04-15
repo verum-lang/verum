@@ -3879,6 +3879,12 @@ impl Unifier {
                 right: right.clone(),
             },
 
+            // Partial element types - rename in element_type; face is a cubical term, not a type
+            Type::Partial { element_type, face } => Type::Partial {
+                element_type: Box::new(Self::rename_bound_var(element_type, from, to)),
+                face: face.clone(),
+            },
+
             // Interval type I - no inner types to rename
             Type::Interval => ty.clone(),
 

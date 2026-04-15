@@ -850,6 +850,19 @@ impl KindInferer {
                 Ok(Kind::Type)
             }
 
+            // Partial element types have kind *
+            // Partial<A>(φ) : *  (a concrete type for partial elements of A on face φ)
+            Type::Partial { element_type, .. } => {
+                let elem_kind = self.infer_kind(element_type)?;
+                self.add_constraint(KindConstraint::equal(
+                    elem_kind,
+                    Kind::Type,
+                    Span::default(),
+                    "Partial element type must have kind *",
+                ));
+                Ok(Kind::Type)
+            }
+
             // Interval type I has kind *
             // It is the abstract interval used as a primitive in cubical type theory
             Type::Interval => Ok(Kind::Type),

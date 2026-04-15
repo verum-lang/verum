@@ -8894,6 +8894,9 @@ impl ProtocolChecker {
             PathType { space, .. } => {
                 verum_common::Text::from(format!("path:{}", self.make_type_key(space)))
             }
+            Partial { element_type, .. } => {
+                verum_common::Text::from(format!("partial:{}", self.make_type_key(element_type)))
+            }
             Interval => "I".into(),
             Universe { level } => verum_common::Text::from(format!("universe:{}", level)),
             Prop => "Prop".into(),
@@ -9946,6 +9949,12 @@ impl ProtocolChecker {
                 space: Box::new(self.substitute_type_params(space, subst_map)),
                 left: left.clone(),
                 right: right.clone(),
+            },
+
+            // Partial element type: substitute in element_type; face is a value-level CubicalTerm
+            Type::Partial { element_type, face } => Type::Partial {
+                element_type: Box::new(self.substitute_type_params(element_type, subst_map)),
+                face: face.clone(),
             },
 
             // Interval is a primitive type — no inner types to substitute
