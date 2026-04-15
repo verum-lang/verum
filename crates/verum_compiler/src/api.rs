@@ -183,6 +183,11 @@ pub struct CommonPipelineConfig {
     /// When false, no context validation runs and `using [...]` clauses
     /// are parsed-and-ignored. Default: true.
     pub context_enabled: bool,
+    /// Enable `@derive(...)` expansion (sourced from `[meta] derive`).
+    pub derive_enabled: bool,
+    /// Enable compile-time function evaluation (`meta fn`, `@const`).
+    /// Sourced from `[meta] compile_time_functions`.
+    pub compile_time_enabled: bool,
 }
 
 impl Default for CommonPipelineConfig {
@@ -197,6 +202,8 @@ impl Default for CommonPipelineConfig {
             core_source_path: None,
             cubical_enabled: true,
             context_enabled: true,
+            derive_enabled: true,
+            compile_time_enabled: true,
         }
     }
 }
@@ -214,6 +221,8 @@ impl CommonPipelineConfig {
             core_source_path: None,
             cubical_enabled: true,
             context_enabled: true,
+            derive_enabled: true,
+            compile_time_enabled: true,
         }
     }
 
@@ -229,6 +238,8 @@ impl CommonPipelineConfig {
             core_source_path: None,
             cubical_enabled: true,
             context_enabled: true,
+            derive_enabled: true,
+            compile_time_enabled: true,
         }
     }
 }
@@ -634,7 +645,9 @@ pub fn run_common_pipeline(
 
     // Phase 3: Macro Expansion
     if config.expand_macros {
-        let expansion_phase = macro_expansion::MacroExpansionPhase::new();
+        let expansion_phase = macro_expansion::MacroExpansionPhase::new()
+            .with_derive_enabled(config.derive_enabled)
+            .with_compile_time_enabled(config.compile_time_enabled);
         let expansion_input = PhaseInput {
             data: current_data.clone(),
             context: context.clone(),

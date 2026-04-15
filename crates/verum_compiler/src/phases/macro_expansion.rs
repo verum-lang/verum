@@ -87,6 +87,14 @@ pub struct MacroExpansionPhase {
     stats: ExpansionStats,
     /// Accumulated lint warnings
     lint_warnings: List<Diagnostic>,
+    /// Whether `@derive(...)` expansion is enabled (sourced from
+    /// `[meta] derive` in `verum.toml`). When false, any `@derive`
+    /// attribute on a type declaration produces a clean diagnostic
+    /// pointing at the config key instead of generating impls.
+    derive_enabled: bool,
+    /// Whether `meta fn` / `@const` compile-time evaluation is
+    /// enabled (sourced from `[meta] compile_time_functions`).
+    compile_time_enabled: bool,
 }
 
 /// Statistics for macro expansion
@@ -128,6 +136,8 @@ impl MacroExpansionPhase {
             current_file_id: verum_ast::FileId::new(0),
             stats: ExpansionStats::default(),
             lint_warnings: List::new(),
+            derive_enabled: true,
+            compile_time_enabled: true,
         }
     }
 
@@ -147,7 +157,23 @@ impl MacroExpansionPhase {
             current_file_id: verum_ast::FileId::new(0),
             stats: ExpansionStats::default(),
             lint_warnings: List::new(),
+            derive_enabled: true,
+            compile_time_enabled: true,
         }
+    }
+
+    /// Toggle `@derive(...)` expansion. Plumbed by the pipeline from
+    /// `[meta] derive` in `verum.toml`.
+    pub fn with_derive_enabled(mut self, enabled: bool) -> Self {
+        self.derive_enabled = enabled;
+        self
+    }
+
+    /// Toggle compile-time function evaluation (`meta fn`, `@const`).
+    /// Plumbed from `[meta] compile_time_functions`.
+    pub fn with_compile_time_enabled(mut self, enabled: bool) -> Self {
+        self.compile_time_enabled = enabled;
+        self
     }
 
     /// Execute a user-defined meta function
@@ -1190,6 +1216,25 @@ impl MacroExpansionPhase {
 
         if derives.is_empty() {
             return Ok(result_items);
+        }
+
+        // Feature gate: `[meta] derive` must be enabled.
+        // When off, any @derive attribute is an error pointing at the
+        // config key — no impls are silently skipped.
+        if !self.derive_enabled {
+            return Err(
+                verum_diagnostics::DiagnosticBuilder::error()
+                    .message(format!(
+                        "`@derive({})` is not allowed: `[meta] derive` is disabled",
+                        derives.iter().map(|d| d.as_str()).collect::<Vec<_>>().join(", ")
+                    ))
+                    .span(super::ast_span_to_diagnostic_span(item.span, None))
+                    .help(
+                        "set `derive = true` under `[meta]` in verum.toml, \
+                         or remove `-Z meta.derive=false` from the command line",
+                    )
+                    .build(),
+            );
         }
 
         tracing::debug!(
