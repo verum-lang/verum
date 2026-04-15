@@ -407,7 +407,26 @@ expression_list = expression , { ',' , expression } ;
 std_attribute   = 'std' , [ '(' , context_group_identifier , ')' ] ;
 specialize_attribute = 'specialize' ;
 derive_attribute = 'derive' , '(' , identifier , { ',' , identifier } , ')' ;
-verify_attribute = 'verify' , '(' , ( 'runtime' | 'static' | 'formal' ) , ')' ;
+(*
+ * @verify attribute — declares how this goal should be verified.
+ *
+ *   runtime         — runtime assertion check only
+ *   static          — static type-level verification (no SMT)
+ *   formal          — SMT verification via the default router (capability-based)
+ *   proof           — alias of formal, emphasizing proof extraction
+ *   z3              — force Z3 backend (even if router would choose CVC5)
+ *   cvc5            — force CVC5 backend (even if router would choose Z3)
+ *   portfolio       — run Z3 and CVC5 in parallel, first-wins semantics
+ *   cross_validate  — run both solvers and require them to agree on the
+ *                     result. Divergence is a hard error. Used for
+ *                     security-critical and proof-certificate workflows.
+ *   certified       — alias of cross_validate for proof certificates.
+ *)
+verify_attribute = 'verify' , '(' ,
+    ( 'runtime' | 'static' | 'formal' | 'proof'
+    | 'z3' | 'cvc5'
+    | 'portfolio' | 'cross_validate' | 'certified' ) ,
+    ')' ;
 context_group_identifier = identifier ;
 
 (* 2.2 Cogs and Modules *)

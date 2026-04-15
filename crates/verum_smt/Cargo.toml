@@ -8,13 +8,17 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = []
-# CVC5 backend API - enables CVC5 types and SmtBackendSwitcher.
-# When enabled without cvc5-ffi, Cvc5Backend::new() returns NotAvailable error.
+# Default: CVC5 API enabled (stub mode — no actual library linking required).
+# This activates the full complementary Z3+CVC5 architecture including the
+# capability router, portfolio executor, cross-validation, and verify-strategy
+# attribute plumbing. When CVC5 is not statically linked (cvc5-sys stub mode),
+# the router transparently routes all goals to Z3.
+default = ["cvc5"]
+# CVC5 backend API - enables CVC5 types, SmtBackendSwitcher, and routing.
 cvc5 = []
-# CVC5 FFI bindings - link against real libcvc5.so/dylib (requires CVC5 installed)
-# To use: Install CVC5 from https://cvc5.github.io/downloads.html
-# Then: cargo build --features cvc5,cvc5-ffi
+# CVC5 FFI bindings - link against real libcvc5 via cvc5-sys feature flags.
+# To enable static linking: cargo build --features cvc5,cvc5-ffi
+# (cvc5-ffi must be paired with cvc5-sys/vendored or cvc5-sys/system)
 cvc5-ffi = ["cvc5"]
 # Enable distributed cache with S3-compatible storage backend
 # Requires: AWS credentials via environment or config

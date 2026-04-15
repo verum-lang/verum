@@ -117,15 +117,21 @@ pub mod verification_cache;
 pub mod verify;
 pub mod z3_backend;
 
+// CVC5 backend is always available at API level. In stub mode (no CVC5
+// linked via cvc5-sys feature), `Cvc5Backend::new()` returns `NotAvailable`,
+// and the router transparently routes all goals to Z3. This keeps the
+// switcher/router/verify_strategy infrastructure cleanly decoupled from
+// solver availability detection.
 #[cfg(feature = "cvc5")]
 pub mod cvc5_backend;
 
-// Backend abstraction and switching
+// Backend abstraction and switching. Always available so the capability
+// router can be used regardless of which solver(s) are linked.
 #[cfg(feature = "cvc5")]
 pub mod backend_switcher;
-pub mod backend_trait;
 #[cfg(feature = "cvc5")]
 pub mod config;
+pub mod backend_trait;
 
 // P0 Advanced Features (Industrial-Grade Enhancements)
 // Proof certificates for multi-format export (Coq, Lean, Dedukti, OpenTheory, Metamath)
@@ -138,6 +144,7 @@ pub mod capability_router; // Complementary Z3 + CVC5 routing (capability-based 
 pub mod portfolio_executor; // Parallel Z3 + CVC5 execution with first-wins/cross-validate semantics
 pub mod solver_adapters;  // PortfolioSolver adapters bridging SmtBackend → portfolio API
 pub mod routing_stats;    // Routing decision telemetry + per-theory statistics
+pub mod verify_strategy;  // @verify(...) attribute → BackendChoice mapping
 
 // Advanced Z3 Features
 pub mod advanced_model;

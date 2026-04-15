@@ -276,6 +276,72 @@ impl SmtBackendSwitcher {
         self.routing_stats.clone()
     }
 
+    /// Solve using a verification strategy from a `@verify(...)` attribute.
+    ///
+    /// This is the primary entry point for SMT-backed goal discharge in the
+    /// compiler: the verification phase reads `@verify(...)` from function
+    /// attributes, converts it to a `VerifyStrategy`, and calls this method.
+    ///
+    /// # Behavior by strategy
+    ///
+    /// - `Runtime` / `Static`: returns `None` — caller should NOT invoke SMT.
+    /// - `Formal`: dispatches via capability router.
+    /// - `ForceZ3` / `ForceCvc5`: dispatches to the specified backend.
+    /// - `Portfolio`: runs both solvers in parallel, first-wins.
+    /// - `CrossValidate`: runs both solvers to completion, requires agreement.
+    ///
+    /// The current backend is temporarily overridden for the duration of this
+    /// call and restored afterward. This lets the switcher serve both its
+    /// default-configured mode and per-goal overrides from attributes.
+    pub fn solve_with_strategy(
+        &mut self,
+        assertions: &List<Expr>,
+        strategy: &crate::verify_strategy::VerifyStrategy,
+    ) -> Option<SolveResult> {
+        use crate::verify_strategy::VerifyStrategy;
+
+        if !strategy.requires_smt() {
+            // Runtime or Static — no SMT dispatch.
+            return None;
+        }
+
+        // Snapshot the current backend.
+        let saved = self.current;
+
+        let result = match strategy {
+            VerifyStrategy::Runtime | VerifyStrategy::Static => {
+                unreachable!("requires_smt() should have rejected these");
+            }
+            VerifyStrategy::Formal => {
+                self.current = BackendChoice::Capability;
+                self.solve(assertions)
+            }
+            VerifyStrategy::ForceZ3 => {
+                self.current = BackendChoice::Z3;
+                self.solve(assertions)
+            }
+            VerifyStrategy::ForceCvc5 => {
+                self.current = BackendChoice::Cvc5;
+                self.solve(assertions)
+            }
+            VerifyStrategy::Portfolio => {
+                self.current = BackendChoice::Portfolio;
+                self.solve(assertions)
+            }
+            VerifyStrategy::CrossValidate => {
+                // Cross-validation: directly invoke the cross-validate path.
+                // We don't go through capability routing because the user has
+                // explicitly requested this strategy — don't let the router
+                // downgrade to Z3-only if CVC5 is unavailable, instead fail.
+                self.solve_cross_validate(assertions)
+            }
+        };
+
+        // Restore the original backend.
+        self.current = saved;
+        Some(result)
+    }
+
     /// Print a human-readable routing statistics report to stderr.
     pub fn print_routing_report(&self) {
         eprintln!("{}", self.routing_stats.report());
@@ -608,8 +674,8 @@ impl SmtBackendSwitcher {
                             chars.has_nonlinear_real = true;
                         }
                     }
-                    BinOp::Div | BinOp::Mod => {
-                        // Division/modulo → nonlinear
+                    BinOp::Div | BinOp::Rem => {
+                        // Division/remainder → nonlinear
                         chars.has_nonlinear_int = true;
                     }
                     BinOp::Shl | BinOp::Shr => {
@@ -659,7 +725,7 @@ impl SmtBackendSwitcher {
             }
 
             // --- Pattern matching → inductive datatypes ---
-            ExprKind::Match { scrutinee, .. } => {
+            ExprKind::Match { expr: scrutinee, .. } => {
                 chars.has_inductive_datatypes = true;
                 self.scan_expr(scrutinee, chars);
             }
@@ -667,16 +733,17 @@ impl SmtBackendSwitcher {
             // --- Block, if, let: recurse ---
             ExprKind::Block(block) => {
                 for stmt in block.stmts.iter() {
-                    if let verum_ast::stmt::StmtKind::Expr(e) = &stmt.kind {
-                        self.scan_expr(e, chars);
+                    if let verum_ast::stmt::StmtKind::Expr { expr, .. } = &stmt.kind {
+                        self.scan_expr(expr, chars);
                     }
                 }
             }
-            ExprKind::If { cond, then_branch, else_branch, .. } => {
-                self.scan_expr(cond, chars);
+            ExprKind::If { then_branch, else_branch, .. } => {
+                // IfCondition is a complex nested structure; skip deep analysis
+                // here and just recurse into the branches.
                 for stmt in then_branch.stmts.iter() {
-                    if let verum_ast::stmt::StmtKind::Expr(e) = &stmt.kind {
-                        self.scan_expr(e, chars);
+                    if let verum_ast::stmt::StmtKind::Expr { expr, .. } = &stmt.kind {
+                        self.scan_expr(expr, chars);
                     }
                 }
                 if let verum_common::Maybe::Some(else_b) = else_branch {
@@ -704,11 +771,14 @@ impl SmtBackendSwitcher {
 
     /// Extract the callable name from a function reference expression.
     fn extract_call_name(func: &Expr) -> Option<String> {
+        use verum_ast::ty::PathSegment;
         match &func.kind {
-            verum_ast::ExprKind::Path(path) => path
-                .segments
-                .last()
-                .map(|s| s.ident.name.as_str().to_string()),
+            verum_ast::ExprKind::Path(path) => {
+                path.segments.last().and_then(|seg| match seg {
+                    PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
+                    _ => None,
+                })
+            }
             _ => None,
         }
     }
