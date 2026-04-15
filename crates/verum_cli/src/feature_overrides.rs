@@ -58,6 +58,107 @@ pub fn apply_global(manifest: &mut Manifest) -> Result<()> {
     Ok(())
 }
 
+/// Translate a fully-merged manifest into the compiler-facing
+/// [`verum_compiler::language_features::LanguageFeatures`] value.
+///
+/// Called by the build/check/run/test dispatchers after
+/// `apply_global(&mut manifest)` so every compilation sees the same
+/// unified feature set. Validation happens inside the compiler, but we
+/// surface errors from the CLI for a nicer user experience.
+pub fn manifest_to_features(
+    manifest: &Manifest,
+) -> Result<verum_compiler::language_features::LanguageFeatures> {
+    use verum_compiler::language_features as lf;
+
+    let feats = lf::LanguageFeatures {
+        types: lf::TypesFeatures {
+            dependent: manifest.types.dependent,
+            refinement: manifest.types.refinement,
+            cubical: manifest.types.cubical,
+            higher_kinded: manifest.types.higher_kinded,
+            universe_polymorphism: manifest.types.universe_polymorphism,
+            coinductive: manifest.types.coinductive,
+            quotient: manifest.types.quotient,
+            instance_search: manifest.types.instance_search,
+            coherence_check_depth: manifest.types.coherence_check_depth,
+        },
+        runtime: lf::RuntimeFeatures {
+            cbgr_mode: manifest.runtime.cbgr_mode.clone(),
+            async_scheduler: manifest.runtime.async_scheduler.clone(),
+            async_worker_threads: manifest.runtime.async_worker_threads,
+            futures: manifest.runtime.futures,
+            nurseries: manifest.runtime.nurseries,
+            task_stack_size: manifest.runtime.task_stack_size,
+            heap_policy: manifest.runtime.heap_policy.clone(),
+            panic: manifest.runtime.panic.clone(),
+        },
+        codegen: lf::CodegenFeatures {
+            tier: manifest.codegen.tier.clone(),
+            mlir_gpu: manifest.codegen.mlir_gpu,
+            gpu_backend: manifest.codegen.gpu_backend.clone(),
+            monomorphization_cache: manifest.codegen.monomorphization_cache,
+            proof_erasure: manifest.codegen.proof_erasure,
+            debug_info: manifest.codegen.debug_info.clone(),
+            tail_call_optimization: manifest.codegen.tail_call_optimization,
+            vectorize: manifest.codegen.vectorize,
+            inline_depth: manifest.codegen.inline_depth,
+        },
+        meta: lf::MetaFeatures {
+            compile_time_functions: manifest.meta.compile_time_functions,
+            quote_syntax: manifest.meta.quote_syntax,
+            macro_recursion_limit: manifest.meta.macro_recursion_limit,
+            reflection: manifest.meta.reflection,
+            derive: manifest.meta.derive,
+            max_stage_level: manifest.meta.max_stage_level,
+        },
+        protocols: lf::ProtocolsFeatures {
+            coherence: manifest.protocols.coherence.clone(),
+            resolution_strategy: manifest.protocols.resolution_strategy.clone(),
+            blanket_impls: manifest.protocols.blanket_impls,
+            higher_kinded_protocols: manifest.protocols.higher_kinded_protocols,
+            associated_types: manifest.protocols.associated_types,
+            generic_associated_types: manifest.protocols.generic_associated_types,
+        },
+        context: lf::ContextFeatures {
+            enabled: manifest.context.enabled,
+            unresolved_policy: manifest.context.unresolved_policy.clone(),
+            negative_constraints: manifest.context.negative_constraints,
+            propagation_depth: manifest.context.propagation_depth,
+        },
+        safety: lf::SafetyFeatures {
+            unsafe_allowed: manifest.safety.unsafe_allowed,
+            ffi: manifest.safety.ffi,
+            ffi_boundary: manifest.safety.ffi_boundary.clone(),
+            capability_required: manifest.safety.capability_required,
+            mls_level: manifest.safety.mls_level.clone(),
+            forbid_stdlib_extern: manifest.safety.forbid_stdlib_extern,
+        },
+        test: lf::TestFeatures {
+            differential: manifest.test.differential,
+            property_testing: manifest.test.property_testing,
+            proptest_cases: manifest.test.proptest_cases,
+            fuzzing: manifest.test.fuzzing,
+            timeout_secs: manifest.test.timeout_secs,
+            parallel: manifest.test.parallel,
+            coverage: manifest.test.coverage,
+            deny_warnings: manifest.test.deny_warnings,
+        },
+        debug: lf::DebugFeatures {
+            dap_enabled: manifest.debug.dap_enabled,
+            step_granularity: manifest.debug.step_granularity.clone(),
+            inspect_depth: manifest.debug.inspect_depth,
+            port: manifest.debug.port,
+            show_erased_proofs: manifest.debug.show_erased_proofs,
+        },
+    };
+
+    feats
+        .validate()
+        .map_err(|e| CliError::Custom(format!("invalid configuration: {}", e)))?;
+
+    Ok(feats)
+}
+
 /// CLI-addressable language-feature overrides shared across commands.
 ///
 /// Use `#[clap(flatten)]` to inject these into a subcommand's argument

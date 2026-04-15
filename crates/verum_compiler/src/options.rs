@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use verum_common::{List, Text};
 
+use crate::language_features::LanguageFeatures;
 use crate::lint::LintConfig;
 use crate::profile_system::Profile;
 
@@ -243,6 +244,13 @@ pub struct CompilerOptions {
     /// Research (experimental features like dependent types, VBC-interpretable).
     pub profile: Profile,
 
+    /// Unified language-feature flags (types, runtime, codegen, meta,
+    /// protocols, context, safety, test, debug). Populated by the CLI
+    /// from the merged manifest (`verum.toml` + overrides) and validated
+    /// once before the pipeline runs. Compiler phases read individual
+    /// flags instead of re-loading configuration.
+    pub language_features: LanguageFeatures,
+
     /// External cancellation flag for cooperative abort of VBC interpretation.
     ///
     /// When set to `true`, the VBC interpreter's dispatch loop will return
@@ -300,6 +308,7 @@ impl Default for CompilerOptions {
             has_gpu_kernels: false,
             // V-LLSI profile: Default is Application
             profile: Profile::Application,
+            language_features: LanguageFeatures::default(),
             cancel_flag: None,
         }
     }

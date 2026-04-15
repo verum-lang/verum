@@ -143,8 +143,13 @@ pub fn execute(
         feats
     };
 
-    // Create new compiler options (using verum_compiler)
+    // Create new compiler options (using verum_compiler). The unified
+    // language-feature set is built from the merged manifest (defaults
+    // → verum.toml → CLI overrides) and validated up-front so invalid
+    // combinations fail fast, before any pipeline phase runs.
+    let language_features = crate::feature_overrides::manifest_to_features(&manifest)?;
     let mut options = NewCompilerOptions::default();
+    options.language_features = language_features;
     options.input = manifest_dir.join("src");
     options.output = manifest_dir
         .join("target")

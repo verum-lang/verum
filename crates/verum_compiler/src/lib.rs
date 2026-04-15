@@ -166,6 +166,7 @@
 
 // Public API (clean interface for external use)
 pub mod api;
+pub mod language_features;
 
 // Core modules
 pub mod compilation_metrics;
