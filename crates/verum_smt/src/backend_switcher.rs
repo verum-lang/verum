@@ -276,6 +276,31 @@ impl SmtBackendSwitcher {
         self.routing_stats.clone()
     }
 
+    /// Create a switcher backed by a caller-provided shared `RoutingStats`.
+    ///
+    /// Used by the compiler's verification phases: every switcher built
+    /// during a compilation session shares the session's single
+    /// `RoutingStats` handle, so per-session telemetry is aggregated
+    /// across all phases for `verum smt-stats`.
+    pub fn with_shared_stats(
+        config: SwitcherConfig,
+        routing_stats: Arc<crate::routing_stats::RoutingStats>,
+    ) -> Self {
+        let z3_config = crate::z3_backend::Z3Config::default();
+        let z3 = Z3Backend::new(z3_config);
+        let cvc5_config = Cvc5Config::default();
+        let cvc5 = Cvc5Backend::new(cvc5_config).ok();
+
+        Self {
+            current: config.default_backend,
+            config,
+            z3: Maybe::Some(z3),
+            cvc5: cvc5.map(Maybe::Some).unwrap_or(Maybe::None),
+            stats: Arc::new(Mutex::new(SwitcherStats::default())),
+            routing_stats,
+        }
+    }
+
     /// Solve using a verification strategy from a `@verify(...)` attribute.
     ///
     /// This is the primary entry point for SMT-backed goal discharge in the
