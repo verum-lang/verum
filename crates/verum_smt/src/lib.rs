@@ -145,6 +145,8 @@ pub mod optimizer;
 pub mod parallel;
 pub mod quantifier_elim;
 pub mod tactics;
+pub mod user_tactic; // Phase D.4: surface tactic DSL → Z3 combinator bridge
+pub mod proof_extraction_bridge; // Phase D.5: proof term extraction + certificate export
 pub mod unsat_core;
 pub mod variable_extraction; // Shared utilities for extracting variables from Z3 AST
 
