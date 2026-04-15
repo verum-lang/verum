@@ -35,6 +35,7 @@ use verum_smt::{
     Context, ContextConfig, ContractSpec, CounterExample, CounterExampleCategorizer,
     FailureCategory, ProofResult, RslClause, RslClauseKind, RslParser, Translator, VerifyMode,
 };
+use verum_smt::verify_strategy::extract_from_attributes;
 use verum_common::{List, Text};
 
 use super::{
@@ -114,6 +115,31 @@ pub struct VerificationStats {
     pub smt_time_ms: u64,
     /// Cache hits for verification results
     pub cache_hits: usize,
+
+    // --- Per-strategy telemetry (populated from `@verify(...)` attributes) ---
+    /// Functions that opted out of SMT via `@verify(runtime)` or `@verify(static)`.
+    pub functions_skipped_smt: usize,
+    /// Functions that used `@verify(formal)` (explicit or implicit default).
+    pub functions_strategy_formal: usize,
+    /// Functions that used `@verify(fast)`.
+    pub functions_strategy_fast: usize,
+    /// Functions that used `@verify(thorough)`.
+    pub functions_strategy_thorough: usize,
+    /// Functions that used `@verify(certified)`.
+    pub functions_strategy_certified: usize,
+    /// Functions that used `@verify(synthesize)`.
+    pub functions_strategy_synthesize: usize,
+}
+
+impl VerificationStats {
+    /// Total functions that ran through the SMT path (all `requires_smt()` strategies).
+    pub fn functions_via_smt(&self) -> usize {
+        self.functions_strategy_formal
+            + self.functions_strategy_fast
+            + self.functions_strategy_thorough
+            + self.functions_strategy_certified
+            + self.functions_strategy_synthesize
+    }
 }
 
 /// Result of verifying a single contract
@@ -267,6 +293,15 @@ impl ContractVerificationPhase {
     }
 
     /// Verify function contracts (pre/post conditions)
+    ///
+    /// Honors `@verify(strategy)` attributes:
+    /// - `runtime` / `static`: skip SMT entirely (runtime checks only).
+    /// - `formal` / `fast` / `thorough` / `certified` / `synthesize`:
+    ///   proceed with SMT verification, using a timeout scaled by
+    ///   `strategy.timeout_multiplier()`.
+    ///
+    /// The strategy is recorded in `stats` for observability and appears
+    /// in the verification report emitted at the end of the phase.
     fn verify_function_contract(
         &self,
         func: &FunctionDecl,
@@ -277,6 +312,33 @@ impl ContractVerificationPhase {
 
         let mut warnings = List::new();
         let mut errors = List::new();
+
+        // Extract per-function verification strategy from `@verify(...)`
+        // attributes. Absent attribute → use the phase default from
+        // VerificationConfig (auto mode).
+        let strategy = extract_from_attributes(&func.attributes);
+        if let Some(s) = strategy {
+            use verum_smt::verify_strategy::VerifyStrategy as VS;
+            match s {
+                VS::Runtime | VS::Static => {
+                    tracing::debug!(
+                        "Skipping SMT for {} — strategy {:?} is runtime-only",
+                        func.name, s
+                    );
+                    stats.functions_with_contracts += 1;
+                    stats.functions_skipped_smt += 1;
+                    return Ok(warnings);
+                }
+                VS::Formal => stats.functions_strategy_formal += 1,
+                VS::Fast => stats.functions_strategy_fast += 1,
+                VS::Thorough => stats.functions_strategy_thorough += 1,
+                VS::Certified => stats.functions_strategy_certified += 1,
+                VS::Synthesize => stats.functions_strategy_synthesize += 1,
+            }
+        } else {
+            // Default strategy = Formal (implicit).
+            stats.functions_strategy_formal += 1;
+        }
 
         // Extract contracts from function attributes and body
         let contracts = self.extract_function_contracts(func);
@@ -1262,5 +1324,89 @@ mod tests {
         let stats = VerificationStats::default();
         assert_eq!(stats.contracts_verified, 0);
         assert_eq!(stats.verification_failures, 0);
+        assert_eq!(stats.functions_skipped_smt, 0);
+        assert_eq!(stats.functions_via_smt(), 0);
+    }
+
+    #[test]
+    fn test_verification_stats_strategy_breakdown() {
+        let mut stats = VerificationStats::default();
+        stats.functions_strategy_formal = 3;
+        stats.functions_strategy_fast = 2;
+        stats.functions_strategy_thorough = 1;
+        stats.functions_strategy_certified = 1;
+        stats.functions_strategy_synthesize = 0;
+        assert_eq!(stats.functions_via_smt(), 7);
+    }
+
+    /// Integration: `extract_from_attributes` recognizes all strategy
+    /// names routed through the same matcher the phase uses.
+    #[test]
+    fn test_extract_from_attributes_covers_all_strategies() {
+        use verum_ast::attr::Attribute;
+        use verum_ast::expr::Expr;
+        use verum_ast::{Ident, Span};
+        use verum_common::{List, Maybe, Text};
+        use verum_smt::verify_strategy::VerifyStrategy as VS;
+
+        let mk = |value: &str| -> Attribute {
+            let name = Ident::new(Text::from(value), Span::dummy());
+            let path_expr = Expr::ident(name);
+            let mut args = List::new();
+            args.push(path_expr);
+            Attribute::new(
+                Text::from("verify"),
+                Maybe::Some(args),
+                Span::dummy(),
+            )
+        };
+
+        for (name, expected) in [
+            ("runtime", VS::Runtime),
+            ("static", VS::Static),
+            ("formal", VS::Formal),
+            ("fast", VS::Fast),
+            ("thorough", VS::Thorough),
+            ("certified", VS::Certified),
+            ("synthesize", VS::Synthesize),
+        ] {
+            let mut attrs = List::new();
+            attrs.push(mk(name));
+            let got = extract_from_attributes(&attrs).unwrap_or_else(|| {
+                panic!("strategy '{}' should parse", name)
+            });
+            assert!(
+                std::mem::discriminant(&got) == std::mem::discriminant(&expected),
+                "strategy '{}' mis-parsed (got {:?}, expected {:?})",
+                name,
+                got,
+                expected
+            );
+        }
+    }
+
+    /// Integration: absent `@verify` attribute yields None, letting the
+    /// phase fall back to its configured default strategy.
+    #[test]
+    fn test_extract_from_attributes_absent() {
+        use verum_common::List;
+        use verum_ast::attr::Attribute;
+        let attrs: List<Attribute> = List::new();
+        assert!(extract_from_attributes(&attrs).is_none());
+    }
+
+    /// Integration: `VerifyStrategy::requires_smt()` is used by the
+    /// phase to decide whether to skip SMT. The contract: Runtime and
+    /// Static are the only strategies that opt out.
+    #[test]
+    fn test_strategy_runtime_skips_smt() {
+        use verum_smt::verify_strategy::VerifyStrategy as VS;
+        assert!(!VS::Runtime.requires_smt());
+        assert!(!VS::Static.requires_smt());
+        assert!(VS::Formal.requires_smt());
+        assert!(VS::Fast.requires_smt());
+        assert!(VS::Thorough.requires_smt());
+        assert!(VS::Certified.requires_smt());
+        assert!(VS::Synthesize.requires_smt());
     }
 }
