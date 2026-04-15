@@ -5229,6 +5229,53 @@ impl<'s> CompilationPipeline<'s> {
         self.build_function_cfg(func)
     }
 
+    /// Unified pre-codegen validation.
+    ///
+    /// Runs every language-mechanism validation that must agree
+    /// between the interpreter, CPU AOT, and GPU paths:
+    ///   1. `[safety]` gates (unconditional, regardless of verify_mode)
+    ///   2. Type check
+    ///   3. Target-profile / dependency analysis
+    ///   4. SMT refinement verification (if `verify_mode.use_smt()`)
+    ///   5. Context / DI validation
+    ///   6. Send/Sync boundary enforcement
+    ///   7. CBGR tier analysis
+    ///   8. FFI boundary validation
+    ///
+    /// Every pipeline entry point (`run_interpreter`,
+    /// `run_native_compilation`, `run_mlir_aot`, `run_for_test`, …)
+    /// should call this method to guarantee identical semantics on
+    /// every .vr file across every execution path. The `skip_type`
+    /// flag is offered for pathological fast-paths (e.g.,
+    /// verify_mode = Runtime + no user-requested gates), but even
+    /// then the safety gate still fires.
+    fn validate_module(&mut self, module: &Module, skip_type_check: bool) -> Result<()> {
+        // Safety gate ALWAYS runs. Independent of verify_mode.
+        self.phase_safety_gate(module)?;
+
+        if skip_type_check {
+            // Only the minimum gates that don't depend on typed AST.
+            // Context/send_sync/ffi walkers inspect the untyped AST so
+            // they're still correct here; skipping them would
+            // introduce a runtime-mode bypass.
+            self.phase_context_validation(module);
+            self.phase_send_sync_validation(module);
+            self.phase_ffi_validation(module)?;
+            return Ok(());
+        }
+
+        self.phase_type_check(module)?;
+        self.phase_dependency_analysis(module)?;
+        if self.session.options().verify_mode.use_smt() {
+            self.phase_verify(module)?;
+        }
+        self.phase_context_validation(module);
+        self.phase_send_sync_validation(module);
+        self.phase_cbgr_analysis(module)?;
+        self.phase_ffi_validation(module)?;
+        Ok(())
+    }
+
     /// Phase 2.9: Safety feature gates (unsafe blocks, unsafe fn,
     /// `@ffi` / extern fn, per `[safety]` in verum.toml).
     ///
@@ -10401,16 +10448,12 @@ impl<'s> CompilationPipeline<'s> {
         // Expand macros (evaluates @macro() invocations)
         self.expand_module(&module_path, &mut module)?;
 
-        // Phase 3: Type check (always for tests)
-        self.phase_type_check(&module)?;
-        debug!("Phase 3 (typecheck): {:.2}s", start.elapsed().as_secs_f64());
-
-        // Phase 3b: Dependency analysis
-        self.phase_dependency_analysis(&module)?;
-        debug!("Phase 3b (dependency): {:.2}s", start.elapsed().as_secs_f64());
-
-        // Phase 4: CBGR analysis
-        self.phase_cbgr_analysis(&module)?;
+        // Phase 3+: unified validation so test execution applies
+        // the same language-mechanism checks as `verum build` /
+        // `verum run`. Previously `run_for_test` skipped safety,
+        // context, send/sync, and FFI validation.
+        self.validate_module(&module, false)?;
+        debug!("Phase 3+ (validate_module): {:.2}s", start.elapsed().as_secs_f64());
 
         // Phase 5: Compile to VBC and execute with capture
         debug!("Phase 5 starting (interpret_for_test): {:.2}s", start.elapsed().as_secs_f64());
