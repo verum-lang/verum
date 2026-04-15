@@ -29,7 +29,7 @@
 
 use std::time::{Duration, Instant};
 
-use verum_ast::{BinOp, Expr, ExprKind, Path};
+use verum_ast::{BinOp, Expr, ExprKind, Path, UnOp};
 use verum_common::{Heap, List, Map, Maybe, Text};
 use verum_common::ToText;
 
@@ -5672,6 +5672,215 @@ impl ProofSearchEngine {
 // The design mirrors core/math/giry.vr §14 `sample_above`: the oracle
 // selects the highest-probability functor (tactic) above threshold τ.
 
+/// Structural analysis of a proof goal for intelligent tactic selection.
+struct GoalAnalysis {
+    /// Goal is an equality (a == b or Path<A>(a, b))
+    is_equality: bool,
+    /// Goal contains only linear integer arithmetic (decidable by omega)
+    is_linear_arithmetic: bool,
+    /// Goal contains ring/field operations (decidable by ring/field tactic)
+    is_ring_goal: bool,
+    /// Goal is a propositional formula (decidable by blast/smt)
+    is_propositional: bool,
+    /// Goal has implications or universals (intro might help)
+    has_implications: bool,
+    /// Goal involves categorical structures
+    is_categorical: bool,
+    /// Goal involves descent/sheaf conditions
+    is_descent: bool,
+    /// Number of hypotheses available
+    hypothesis_count: usize,
+    /// Nesting depth of the goal expression
+    nesting_depth: usize,
+}
+
+/// Analyse the structure of a `ProofGoal` to guide tactic selection.
+///
+/// All inspection is performed on the AST `ExprKind` — no debug-format
+/// string matching.
+fn analyze_goal(goal: &ProofGoal) -> GoalAnalysis {
+    let expr = &goal.goal;
+    GoalAnalysis {
+        is_equality: matches!(&expr.kind, ExprKind::Binary { op: BinOp::Eq, .. }),
+        is_linear_arithmetic: check_linear_arithmetic(expr),
+        is_ring_goal: check_ring_operations(expr),
+        is_propositional: check_propositional(expr),
+        has_implications: check_has_implications(expr),
+        is_categorical: check_categorical(expr),
+        is_descent: check_descent_goal(expr),
+        hypothesis_count: goal.hypotheses.len(),
+        nesting_depth: compute_depth(expr),
+    }
+}
+
+/// Return `true` when `expr` is entirely within the linear arithmetic
+/// fragment: integer/variable leaves, `+`, `-`, unary `-`, `*` (only when
+/// one side is a literal), and comparison/equality operators.
+fn check_linear_arithmetic(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Binary { op, left, right } => {
+            matches!(
+                op,
+                BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Lt
+                    | BinOp::Le
+                    | BinOp::Gt
+                    | BinOp::Ge
+                    | BinOp::Eq
+            ) && check_linear_arithmetic(left)
+                && check_linear_arithmetic(right)
+        }
+        ExprKind::Unary { op: UnOp::Neg, expr } => check_linear_arithmetic(expr),
+        ExprKind::Literal(_) => true,
+        ExprKind::Path(_) => true, // variable
+        ExprKind::Paren(inner) => check_linear_arithmetic(inner),
+        _ => false,
+    }
+}
+
+/// Return `true` when `expr` contains a non-linear multiplication (both
+/// operands contain variables), indicating a ring/polynomial goal.
+fn check_ring_operations(expr: &Expr) -> bool {
+    fn has_nonlinear_mul(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Binary {
+                op: BinOp::Mul,
+                left,
+                right,
+            } => {
+                !matches!(&left.kind, ExprKind::Literal(_))
+                    && !matches!(&right.kind, ExprKind::Literal(_))
+            }
+            ExprKind::Binary { left, right, .. } => {
+                has_nonlinear_mul(left) || has_nonlinear_mul(right)
+            }
+            _ => false,
+        }
+    }
+    has_nonlinear_mul(expr)
+}
+
+/// Return `true` when `expr` is a purely propositional formula built from
+/// `&&`, `||`, `==`, `!`, literals, and path (variable) leaves.
+fn check_propositional(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Binary { op, left, right } => {
+            matches!(op, BinOp::And | BinOp::Or | BinOp::Eq)
+                && check_propositional(left)
+                && check_propositional(right)
+        }
+        ExprKind::Unary { op: UnOp::Not, expr } => check_propositional(expr),
+        ExprKind::Literal(_) | ExprKind::Path(_) => true,
+        ExprKind::Paren(inner) => check_propositional(inner),
+        _ => false,
+    }
+}
+
+/// Return `true` when `expr` contains a quantifier (`forall`/`exists`) or
+/// an implication (`BinOp::Imply`).
+fn check_has_implications(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Forall { .. } | ExprKind::Exists { .. } => true,
+        ExprKind::Binary { op, left, right } => {
+            matches!(op, BinOp::Imply)
+                || check_has_implications(left)
+                || check_has_implications(right)
+        }
+        ExprKind::Paren(inner) => check_has_implications(inner),
+        _ => false,
+    }
+}
+
+/// Return `true` when `expr` refers to categorical primitives by name.
+fn check_categorical(expr: &Expr) -> bool {
+    fn has_cat_name(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Path(p) => p.segments.iter().any(|s| {
+                if let verum_ast::ty::PathSegment::Name(ident) = s {
+                    matches!(
+                        ident.name.as_str(),
+                        "compose"
+                            | "id"
+                            | "Category"
+                            | "Functor"
+                            | "NatTrans"
+                            | "morphism"
+                            | "map_obj"
+                            | "map_mor"
+                    )
+                } else {
+                    false
+                }
+            }),
+            ExprKind::MethodCall {
+                method, receiver, ..
+            } => {
+                matches!(
+                    method.name.as_str(),
+                    "compose" | "then" | "map" | "map_obj" | "map_mor"
+                ) || has_cat_name(receiver)
+            }
+            ExprKind::Binary { left, right, .. } => has_cat_name(left) || has_cat_name(right),
+            ExprKind::Call { func, args, .. } => {
+                has_cat_name(func) || args.iter().any(has_cat_name)
+            }
+            ExprKind::Paren(inner) => has_cat_name(inner),
+            _ => false,
+        }
+    }
+    has_cat_name(expr)
+}
+
+/// Return `true` when `expr` is a descent/sheaf-condition call site.
+fn check_descent_goal(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Call { func, .. } => {
+            if let ExprKind::Path(p) = &func.kind {
+                p.segments.last().map(|s| {
+                    if let verum_ast::ty::PathSegment::Name(ident) = s {
+                        matches!(
+                            ident.name.as_str(),
+                            "descent_condition"
+                                | "compatible_sections"
+                                | "sheaf_condition"
+                                | "check_descent"
+                                | "gluing_condition"
+                        )
+                    } else {
+                        false
+                    }
+                }).unwrap_or(false)
+            } else {
+                false
+            }
+        }
+        ExprKind::Binary { left, right, .. } => {
+            check_descent_goal(left) || check_descent_goal(right)
+        }
+        ExprKind::Paren(inner) => check_descent_goal(inner),
+        _ => false,
+    }
+}
+
+/// Compute the nesting depth of an expression tree.
+fn compute_depth(expr: &Expr) -> usize {
+    match &expr.kind {
+        ExprKind::Binary { left, right, .. } => {
+            1 + compute_depth(left).max(compute_depth(right))
+        }
+        ExprKind::Unary { expr, .. } => 1 + compute_depth(expr),
+        ExprKind::Call { func, args, .. } => {
+            let max_arg = args.iter().map(compute_depth).max().unwrap_or(0);
+            1 + compute_depth(func).max(max_arg)
+        }
+        ExprKind::Paren(inner) => compute_depth(inner),
+        ExprKind::Forall { body, .. } | ExprKind::Exists { body, .. } => 1 + compute_depth(body),
+        _ => 0,
+    }
+}
+
 /// Execute the oracle tactic on `goal`.
 ///
 /// `confidence` — the minimum softmax probability required before a
@@ -5682,11 +5891,11 @@ pub(crate) fn try_oracle_tactic(
     confidence: f64,
     engine: &mut ProofSearchEngine,
 ) -> Result<List<ProofGoal>, ProofError> {
-    // Step 1 — serialise goal to text so pattern heuristics can inspect it.
-    let goal_text = format_goal_for_oracle(goal);
+    // Step 1 — analyse the goal AST structure.
+    let analysis = analyze_goal(goal);
 
-    // Step 2 — generate raw (name, score) candidates.
-    let raw_candidates = generate_oracle_candidates(&goal_text);
+    // Step 2 — generate raw (name, score) candidates from structural analysis.
+    let raw_candidates = generate_oracle_candidates(&analysis);
 
     // Step 3 — softmax-normalise the raw scores.
     let scored = softmax_score(&raw_candidates, 1.0);
@@ -5719,81 +5928,70 @@ pub(crate) fn try_oracle_tactic(
     }
 }
 
-/// Serialize a `ProofGoal` into a human-readable text string for oracle
-/// inspection.  The text is also used by the heuristic candidate generator.
-fn format_goal_for_oracle(goal: &ProofGoal) -> String {
-    let goal_str = format!("{:?}", goal.goal.kind);
-    if goal.hypotheses.is_empty() {
-        goal_str
-    } else {
-        let hyps: Vec<String> = goal
-            .hypotheses
-            .iter()
-            .map(|h| format!("{:?}", h.kind))
-            .collect();
-        format!("{} [hyps: {}]", goal_str, hyps.join(", "))
-    }
-}
-
-/// Generate proof-term candidates for a goal described by `goal_text`.
+/// Generate proof-term candidates from structural goal analysis.
 ///
 /// In a real deployment this calls the language model via
 /// `@intrinsic("llm.query_log_probs")`.  At compile/test time we simulate
-/// the LLM by pattern-matching on goal structure and returning a ranked list
-/// of known-good tactic strategies.
+/// the LLM by inspecting the `GoalAnalysis` (which was derived from AST
+/// structure, not debug strings) and returning a ranked list of
+/// known-good tactic strategies.
 ///
 /// Returns `Vec<(tactic_sequence, raw_score)>` where scores are *unnormalised*
 /// log-probability surrogates (higher = more likely to succeed).
-fn generate_oracle_candidates(goal_text: &str) -> Vec<(String, f64)> {
+fn generate_oracle_candidates(analysis: &GoalAnalysis) -> Vec<(String, f64)> {
     let mut candidates: Vec<(String, f64)> = Vec::new();
 
-    // Equality / Path goals — try reflexivity-first strategies.
-    if goal_text.contains("Eq") || goal_text.contains("Path") || goal_text.contains("BinOp::Eq") {
-        candidates.push(("simp".to_string(), 0.6));
+    // High-confidence decidable goals.
+    if analysis.is_linear_arithmetic {
+        candidates.push(("omega".to_string(), 0.95));
+    }
+    if analysis.is_ring_goal {
+        candidates.push(("ring".to_string(), 0.92));
+    }
+    if analysis.is_propositional {
+        candidates.push(("blast".to_string(), 0.88));
+    }
+
+    // Equality goals.
+    if analysis.is_equality {
+        candidates.push(("simp".to_string(), 0.7));
         candidates.push(("cubical".to_string(), 0.5));
-        candidates.push(("ring".to_string(), 0.4));
-        candidates.push(("auto".to_string(), 0.3));
+        candidates.push(("refl".to_string(), 0.3));
     }
 
-    // Implication / forall goals — intro then solve.
-    if goal_text.contains("Imply") || goal_text.contains("ForAll") || goal_text.contains("->") {
-        candidates.push(("auto".to_string(), 0.5));
-        candidates.push(("simp".to_string(), 0.3));
+    // Categorical goals.
+    if analysis.is_categorical {
+        candidates.push(("category_simp".to_string(), 0.8));
+        candidates.push(("category_law".to_string(), 0.6));
     }
 
-    // Categorical / functor goals.
-    if goal_text.contains("Category")
-        || goal_text.contains("Functor")
-        || goal_text.contains("functor")
-    {
-        candidates.push(("category_simp".to_string(), 0.7));
-        candidates.push(("category_law".to_string(), 0.5));
-        candidates.push(("auto".to_string(), 0.2));
+    // Descent goals.
+    if analysis.is_descent {
+        candidates.push(("descent_check".to_string(), 0.85));
     }
 
-    // Descent / topos goals.
-    if goal_text.contains("descent") || goal_text.contains("Descent") || goal_text.contains("sheaf") {
-        candidates.push(("descent_check".to_string(), 0.7));
-        candidates.push(("auto".to_string(), 0.2));
+    // Implication / quantifier goals.
+    if analysis.has_implications {
+        candidates.push(("intro".to_string(), 0.6));
+        if analysis.hypothesis_count > 0 {
+            candidates.push(("assumption".to_string(), 0.4));
+        }
     }
 
-    // Arithmetic goals.
-    if goal_text.contains("Int") || goal_text.contains("LIA") || goal_text.contains("Add") {
-        candidates.push(("omega".to_string(), 0.6));
-        candidates.push(("ring".to_string(), 0.4));
-        candidates.push(("auto".to_string(), 0.3));
+    // Deep goals benefit from simplification.
+    if analysis.nesting_depth > 4 {
+        candidates.push(("simp".to_string(), 0.5));
     }
 
-    // Conjunction goals.
-    if goal_text.contains("And") || goal_text.contains("&&") {
-        candidates.push(("auto".to_string(), 0.5));
-        candidates.push(("simp".to_string(), 0.3));
+    // Hypothesis-rich goals.
+    if analysis.hypothesis_count >= 3 {
+        candidates.push(("assumption".to_string(), 0.6));
+        candidates.push(("exact".to_string(), 0.3));
     }
 
     // Universal fallbacks — always present.
-    candidates.push(("auto".to_string(), 0.1));
-    candidates.push(("simp".to_string(), 0.08));
-    candidates.push(("blast".to_string(), 0.05));
+    candidates.push(("auto".to_string(), 0.15));
+    candidates.push(("smt".to_string(), 0.10));
 
     candidates
 }

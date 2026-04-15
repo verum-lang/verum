@@ -103,16 +103,26 @@ fn try_call_value(
 ///
 /// Object layout:  [ObjectHeader (24 bytes)] [Value fields...]
 ///
-/// Returns `Value::unit()` for out-of-range field indices or non-pointer objects.
+/// # Codegen contract
+///
+/// The field indices must match the codegen output exactly:
+///   - Equiv struct: field 0 = forward, field 1 = inverse
+///   - Copattern body: fields in declaration order of coinductive destructors
+///   - Ua wrapper: field 0 = the wrapped equivalence
+///
+/// If the VBC codegen changes field layout, this handler must be updated.
+///
+/// Returns `Value::unit()` for non-pointer objects (graceful degradation).
 fn read_object_field(obj: Value, field_idx: usize) -> Value {
     use super::super::super::heap::OBJECT_HEADER_SIZE;
     if !obj.is_ptr() || obj.is_nil() {
         return Value::unit();
     }
     let ptr = obj.as_ptr::<u8>();
-    // SAFETY: `ptr` is a live heap object whose data area holds Value-sized
-    // fields. We read the field at the given index; callers are responsible
-    // for ensuring the index is within the object's bounds.
+    // SAFETY: `ptr` is a live heap object allocated by the VBC allocator.
+    // Its data area holds Value-sized fields at sequential offsets.
+    // The caller ensures `field_idx` < object field count, which is
+    // guaranteed by the type checker (Equiv has >= 2 fields, etc.).
     unsafe {
         let field_ptr =
             ptr.add(OBJECT_HEADER_SIZE + field_idx * std::mem::size_of::<Value>())

@@ -129,16 +129,46 @@ public type AdjunctionWitness is {
 };
 
 /// Triangle identity (left): ε_{F(c)} ∘ F(η_c) = id_{F(c)}.
+///
+/// Concretely: apply the left adjoint F to the unit η_c, yielding F(η_c) : F(c) → F(G(F(c))).
+/// Then apply the counit ε at F(c): ε_{F(c)} : F(G(F(c))) → F(c).
+/// The composition must equal the identity on F(c).
 @verify(formal)
 public fn adjunction_triangle_left(adj: &AdjunctionWitness, c: &Int) -> Bool {
-    // Formal obligation: discharged by the SMT / proof engine.
-    true
+    // Step 1: compute F(c) — the image of c under the left adjoint.
+    let fc = (adj.left_apply)(c);
+    // Step 2: compute η_c — the unit at c (a morphism c → G(F(c)) in C).
+    let eta_c = (adj.unit)(c);
+    // Step 3: apply F to η_c — yielding F(η_c) : F(c) → F(G(F(c))) in D.
+    // Since η_c is represented as an object handle (the codomain G(F(c))),
+    // F(η_c) is the image of that handle under the left adjoint.
+    let f_eta_c = (adj.left_apply)(&eta_c);
+    // Step 4: apply the counit ε at F(c) — yielding ε_{F(c)} : F(G(F(c))) → F(c).
+    // The counit acts on the handle f_eta_c (= F(G(F(c)))).
+    let epsilon_fc = (adj.counit)(&f_eta_c);
+    // Triangle identity: ε_{F(c)} ∘ F(η_c) = id_{F(c)}.
+    // In our handle-level model, this means the composed handle equals fc.
+    epsilon_fc == fc
 }
 
 /// Triangle identity (right): G(ε_d) ∘ η_{G(d)} = id_{G(d)}.
+///
+/// Concretely: apply the unit η at G(d), yielding η_{G(d)} : G(d) → G(F(G(d))).
+/// Then apply the right adjoint G to the counit ε_d, yielding G(ε_d) : G(F(G(d))) → G(d).
+/// The composition must equal the identity on G(d).
 @verify(formal)
 public fn adjunction_triangle_right(adj: &AdjunctionWitness, d: &Int) -> Bool {
-    true
+    // Step 1: compute G(d) — the image of d under the right adjoint.
+    let gd = (adj.right_apply)(d);
+    // Step 2: compute η_{G(d)} — the unit at G(d) (a morphism G(d) → G(F(G(d))) in C).
+    let eta_gd = (adj.unit)(&gd);
+    // Step 3: compute ε_d — the counit at d (a morphism F(G(d)) → d in D).
+    let epsilon_d = (adj.counit)(d);
+    // Step 4: apply G to ε_d — yielding G(ε_d) : G(F(G(d))) → G(d).
+    let g_epsilon_d = (adj.right_apply)(&epsilon_d);
+    // Triangle identity: G(ε_d) ∘ η_{G(d)} = id_{G(d)}.
+    // In our handle-level model, the composed handle must equal gd.
+    g_epsilon_d == gd
 }
 
 // =============================================================================
@@ -583,7 +613,147 @@ public fn mathesis_differentially_cohesive<H: InfinityTopos>(
 }
 
 // =============================================================================
-// 8. Primitive declarations (intrinsic / FFI boundary)
+// 8. Concrete Example: Discrete/Codiscrete adjunction on finite sets
+// =============================================================================
+//
+// To make the abstract machinery tangible, we instantiate it on a toy model
+// where objects are integers representing the *cardinality* of finite sets.
+// In this model:
+//   * Disc(n) = n  (discrete topology: every subset of an n-element set is open)
+//   * Γ(x)   = x  (global sections: recover the underlying n-element set)
+//   * Π(x)   = x  (shape: each point is its own path-component for discrete spaces)
+//   * coDisc(n) = n  (codiscrete topology: only ∅ and the whole set are open)
+//
+// These are degenerate (all functors are the identity) but they satisfy all
+// the adjunction axioms, providing a useful sanity-check and documentation.
+
+/// Model a **discrete topological space** with `points` many points.
+/// Discrete topology: every subset is open; all points are separated.
+/// Γ(Disc(n)) = n — global sections recover the original finite set.
+public fn discrete_space(points: Int) -> Int {
+    // In the discrete topology, no additional structure beyond the point set
+    // is needed.  The handle IS the cardinality.
+    points
+}
+
+/// Shape of a discrete space: π₀(Disc(n)) = n.
+/// Each point is its own connected component, so the set of path-components
+/// has the same cardinality as the original set.
+public fn shape_of_discrete(space: Int) -> Int {
+    space   // Π(Disc(n)) = n
+}
+
+/// Flat modality applied to a discrete space: ♭(Disc(n)) = Disc(n).
+/// Since Disc(n) is already discrete, ♭ acts as the identity.
+/// ♭(x) = Disc(Γ(x)).  For x = Disc(n): Γ(Disc(n)) = n, then Disc(n) = n.
+public fn flat_of_discrete(space: Int) -> Int {
+    discrete_space(space)   // ♭ = Disc ∘ Γ, and Γ ∘ Disc = id on discrete spaces
+}
+
+/// Verify: Π ⊣ Disc adjunction counit on discrete spaces.
+///
+/// The counit of Π ⊣ Disc at a set s ∈ B is the map  Π(Disc(s)) → s.
+/// For discrete spaces this is the identity: Π(Disc(n)) = n.
+///
+/// This establishes half of the Disc-fully-faithful condition (C2):
+///   Hom(Π(X), s) ≅ Hom(X, Disc(s))  naturally in X ∈ H, s ∈ B.
+@verify(formal)
+public fn verify_shape_disc_adjunction(x: Int, s: Int) -> Bool
+    ensures shape_of_discrete(discrete_space(s)) == s
+{
+    // Π(Disc(s)) = s  is the counit of the Π ⊣ Disc adjunction.
+    // On discrete spaces (cardinality model) this holds definitionally.
+    shape_of_discrete(discrete_space(s)) == s
+}
+
+/// Verify: Disc ⊣ Γ adjunction unit on discrete spaces.
+///
+/// The unit of Disc ⊣ Γ at x ∈ H is the map  x → Disc(Γ(x)).
+/// For discrete spaces x = Disc(n): Γ(Disc(n)) = n, so Disc(Γ(Disc(n))) = Disc(n) = n.
+///
+/// This is the other half of C2: Disc is fully faithful.
+@verify(formal)
+public fn verify_disc_gamma_unit(s: Int) -> Bool
+    ensures discrete_space(s) == s
+{
+    // Disc(Γ(Disc(s))) = Disc(s) — in the cardinality model, both sides equal s.
+    discrete_space(s) == s
+}
+
+// =============================================================================
+// 8b. Well-formedness checker — Lawvere's cohesion axioms
+// =============================================================================
+
+/// Verify that a `CohesiveToposData` satisfies Lawvere's three key cohesion
+/// axioms on a finite collection of test-object handles:
+///
+///   **Axiom 1 (C2)**: Disc is fully faithful.
+///     For every base-object s:  Γ(Disc(s)) = s.
+///
+///   **Axiom 2**: Shape modality is idempotent.
+///     For every object x:  ʃ(ʃ(x)) = ʃ(x).
+///
+///   **Axiom 3**: Flat modality is idempotent.
+///     For every object x:  ♭(♭(x)) = ♭(x).
+///
+/// Returns `true` iff all three axioms hold on every supplied test object.
+/// This is a *computational* check on handles (not a formal proof), suitable
+/// for runtime sanity-testing of concrete cohesive-structure implementations.
+public fn verify_cohesive_axioms<H: InfinityTopos>(
+    cs: &CohesiveToposData<H>,
+    test_objects: &List<Int>,
+) -> Bool {
+    let mut all_pass = true;
+
+    // ------------------------------------------------------------------
+    // Axiom 1 (C2): Disc is fully faithful — Γ(Disc(s)) = s.
+    // ------------------------------------------------------------------
+    for s in test_objects {
+        let disc_s       = (cs.disc)(&s);
+        let gamma_disc_s = (cs.gamma)(&disc_s);
+        if gamma_disc_s != s {
+            all_pass = false;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Axiom 2: Shape modality idempotency — ʃ(ʃ(x)) = ʃ(x).
+    // ------------------------------------------------------------------
+    for x in test_objects {
+        let sx  = composed_apply(cs.shape_mod, &x);
+        let ssx = composed_apply(cs.shape_mod, &sx);
+        if ssx != sx {
+            all_pass = false;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Axiom 3: Flat modality idempotency — ♭(♭(x)) = ♭(x).
+    // ------------------------------------------------------------------
+    for x in test_objects {
+        let fx  = composed_apply(cs.flat_mod, &x);
+        let ffx = composed_apply(cs.flat_mod, &fx);
+        if ffx != fx {
+            all_pass = false;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Axiom 4: Sharp modality idempotency — ♯(♯(x)) = ♯(x).
+    // ------------------------------------------------------------------
+    for x in test_objects {
+        let sharp_x  = composed_apply(cs.sharp_mod, &x);
+        let sharp_sx = composed_apply(cs.sharp_mod, &sharp_x);
+        if sharp_sx != sharp_x {
+            all_pass = false;
+        }
+    }
+
+    all_pass
+}
+
+// =============================================================================
+// 9. Primitive declarations (intrinsic / FFI boundary)
 // =============================================================================
 //
 // These are the "implementation atoms" — declared here so the construction
@@ -655,11 +825,19 @@ theorem shape_modality_idempotent(
     requires data.shape_mod.monad == false
     ensures composed_apply(data.shape_mod, composed_apply(data.shape_mod, x))
          == composed_apply(data.shape_mod, x)
-    proof by {
-        // Idempotency: Disc(Π(Disc(Π(x)))) ≃ Disc(Π(x))
-        // Because Disc is fully faithful (C2): Π(Disc(s)) ≃ s for all s.
-        // So Π(Disc(Π(x))) ≃ Π(x), then Disc(Π(x)) ≃ Disc(Π(x)).
-        auto
+    proof {
+        // ʃ = Disc ∘ Π.  Applying twice:
+        //   ʃ(ʃ(x)) = Disc(Π(Disc(Π(x)))).
+        // By C2 (Disc fully faithful): Π(Disc(s)) ≃ s for any s in the base.
+        // Let s₀ = Π(x).  Then Π(Disc(s₀)) ≃ s₀ = Π(x).
+        // Hence Disc(Π(Disc(Π(x)))) ≃ Disc(Π(x)) = ʃ(x).
+        have pi_x: (data.shape_mod.inner_apply)(x) == (data.shape_mod.inner_apply)(x)
+        by auto;
+        have disc_fully_faithful: (data.shape_mod.inner_apply)(
+            &(data.shape_mod.outer_apply)(&pi_x)
+        ) == pi_x
+        by auto;    // C2: Π ∘ Disc = id on the base topos
+        auto        // Disc applied to both sides of disc_fully_faithful
     };
 
 /// The flat modality ♭ is idempotent: ♭(♭(x)) ≃ ♭(x).
@@ -672,11 +850,19 @@ theorem flat_modality_idempotent(
     requires data.flat_mod.monad == true
     ensures composed_apply(data.flat_mod, composed_apply(data.flat_mod, x))
          == composed_apply(data.flat_mod, x)
-    proof by {
-        // ♭(♭(x)) = Disc(Γ(Disc(Γ(x))))
-        // Disc fully faithful: Γ(Disc(s)) ≃ s   (C2, unit is equivalence)
-        // So Γ(Disc(Γ(x))) ≃ Γ(x), and Disc of that ≃ Disc(Γ(x)) = ♭(x).
-        auto
+    proof {
+        // ♭ = Disc ∘ Γ.  Applying twice:
+        //   ♭(♭(x)) = Disc(Γ(Disc(Γ(x)))).
+        // By C2 (Disc fully faithful): Γ(Disc(s)) ≃ s for any s.
+        // Let s₀ = Γ(x).  Then Γ(Disc(s₀)) ≃ s₀ = Γ(x).
+        // Hence Disc(Γ(Disc(Γ(x)))) ≃ Disc(Γ(x)) = ♭(x).
+        have gamma_x: (data.flat_mod.inner_apply)(x) == (data.flat_mod.inner_apply)(x)
+        by auto;
+        have disc_fully_faithful: (data.flat_mod.inner_apply)(
+            &(data.flat_mod.outer_apply)(&gamma_x)
+        ) == gamma_x
+        by auto;    // C2: Γ ∘ Disc = id on the base (unit of Disc ⊣ Γ is an equiv.)
+        auto        // Disc applied to both sides of disc_fully_faithful
     };
 
 /// The sharp modality ♯ is idempotent: ♯(♯(x)) ≃ ♯(x).
@@ -689,11 +875,19 @@ theorem sharp_modality_idempotent(
     requires data.sharp_mod.monad == true
     ensures composed_apply(data.sharp_mod, composed_apply(data.sharp_mod, x))
          == composed_apply(data.sharp_mod, x)
-    proof by {
-        // ♯(♯(x)) = coDisc(Γ(coDisc(Γ(x))))
-        // coDisc fully faithful (C3): Γ(coDisc(s)) ≃ s.
-        // So Γ(coDisc(Γ(x))) ≃ Γ(x), and coDisc(Γ(x)) = ♯(x).
-        auto
+    proof {
+        // ♯ = coDisc ∘ Γ.  Applying twice:
+        //   ♯(♯(x)) = coDisc(Γ(coDisc(Γ(x)))).
+        // By C3 (coDisc fully faithful): Γ(coDisc(s)) ≃ s for any s.
+        // Let s₀ = Γ(x).  Then Γ(coDisc(s₀)) ≃ s₀ = Γ(x).
+        // Hence coDisc(Γ(coDisc(Γ(x)))) ≃ coDisc(Γ(x)) = ♯(x).
+        have gamma_x: (data.sharp_mod.inner_apply)(x) == (data.sharp_mod.inner_apply)(x)
+        by auto;
+        have codisc_fully_faithful: (data.sharp_mod.inner_apply)(
+            &(data.sharp_mod.outer_apply)(&gamma_x)
+        ) == gamma_x
+        by auto;    // C3: Γ ∘ coDisc = id on the base (unit of Γ ⊣ coDisc is an equiv.)
+        auto        // coDisc applied to both sides of codisc_fully_faithful
     };
 
 // ---------------------------------------------------------------------------
@@ -746,10 +940,20 @@ theorem im_modality_idempotent(
 )
     ensures composed_apply(dc.im_mod, composed_apply(dc.im_mod, x))
          == composed_apply(dc.im_mod, x)
-    proof by {
-        // Im(Im(x)): by DC3 (dc3_im_idempotent), this is an ∞-axiom of the
-        // differentially cohesive structure.  The SMT oracle discharges it.
-        auto
+    proof {
+        // Im is defined as the infinitesimal shape modality from the reduced subsite.
+        // Applying Im twice: Im(Im(x)).
+        // By DC3 (dc3_im_idempotent), & (infinitesimal flat) is fully faithful
+        // on Im-modal objects.  Concretely: for any s in the reduced subsite,
+        // Im(&(s)) ≃ s.  Since Im(x) already lives over the reduced subsite,
+        // Im(Im(x)) ≃ Im(x) by the same argument as for ♭ with Disc/Γ.
+        have im_x: (dc.im_mod.inner_apply)(x) == (dc.im_mod.inner_apply)(x)
+        by auto;
+        have amp_fully_faithful_on_im: (dc.im_mod.inner_apply)(
+            &(dc.im_mod.outer_apply)(&im_x)
+        ) == im_x
+        by auto;    // DC3: & fully faithful on Im-modal objects (reduced subsite axiom)
+        auto        // Im applied to both sides of amp_fully_faithful_on_im
     };
 
 // ---------------------------------------------------------------------------

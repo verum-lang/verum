@@ -50,7 +50,7 @@
 //! delegates to the SMT solver with a hint that the sheaf-domain
 //! encoding should be activated.
 
-use verum_ast::{BinOp, Expr, ExprKind, Span};
+use verum_ast::{BinOp, Expr, ExprKind};
 use verum_common::{List, Text};
 
 use crate::proof_search::{ProofError, ProofGoal};
@@ -735,29 +735,26 @@ fn normalise_cat(expr: &Expr, budget: usize) -> CatNorm {
                 verum_common::Maybe::Some(id) => id.to_string(),
                 verum_common::Maybe::None => format!("{:?}", p),
             };
-            if name == "id" || name == "identity" {
+            if is_identity_method(&name) {
                 CatNorm::identity()
             } else {
                 CatNorm::atom(Text::from(name))
             }
         }
 
-        // Method call: f.compose(g) or f.then(g)
+        // Method call: f.compose(g), f.then(g), f.andThen(g), etc.
         ExprKind::MethodCall { receiver, method, args, .. }
-            if (method.as_str() == "compose"
-                || method.as_str() == "then"
-                || method.as_str() == "after")
-                && args.len() == 1 =>
+            if is_composition_method(method.as_str()) && args.len() == 1 =>
         {
             let l = normalise_cat(receiver, budget - 1);
             let r = normalise_cat(&args[0], budget - 1);
             l.compose(r)
         }
 
-        // Free-form call: compose(f, g)
+        // Free-form call: compose(f, g), comp(f, g), etc.
         ExprKind::Call { func, args, .. } if args.len() == 2 => {
             let head = func_head_name(func).unwrap_or_default();
-            if head == "compose" || head == "comp" {
+            if is_composition_method(&head) {
                 let l = normalise_cat(&args[0], budget - 1);
                 let r = normalise_cat(&args[1], budget - 1);
                 l.compose(r)
@@ -801,16 +798,13 @@ fn normalise_cat_with_functor(expr: &Expr, budget: usize) -> CatNorm {
                         verum_common::Maybe::Some(id) => id.to_string(),
                         verum_common::Maybe::None => String::new(),
                     };
-                    if nm == "id" || nm == "identity" {
+                    if is_identity_method(&nm) {
                         return CatNorm::identity();
                     }
                 }
                 // F(g ∘ f) ↦ F(g) ∘ F(f)
                 ExprKind::MethodCall { receiver, method, args: margs, .. }
-                    if (method.as_str() == "compose"
-                        || method.as_str() == "then"
-                        || method.as_str() == "after")
-                        && margs.len() == 1 =>
+                    if is_composition_method(method.as_str()) && margs.len() == 1 =>
                 {
                     // Build F(g) and F(f) synthetic exprs and normalise
                     let fng = make_call_expr(func.as_ref().clone(), receiver.as_ref().clone());
@@ -833,29 +827,76 @@ fn cat_eq(a: &CatNorm, b: &CatNorm) -> bool {
     a == b
 }
 
+/// Known composition-like method names from the Verum category ecosystem.
+/// Includes stdlib Category.compose, operator aliases, and common variants.
+fn is_composition_method(name: &str) -> bool {
+    matches!(
+        name,
+        "compose"
+            | "then"
+            | "after"
+            | "comp"
+            | "andThen"
+            | "∘"
+            | "·"
+            | "<<<"
+            | ">>>"
+            | "compose_morphisms"
+            | "compose_functors"
+    )
+}
+
+/// Known identity-morphism method/variable names.
+fn is_identity_method(name: &str) -> bool {
+    matches!(
+        name,
+        "id" | "identity" | "id_morphism" | "identity_morphism"
+    )
+}
+
 /// Check whether an expression is shaped like a descent condition.
 ///
 /// Matches:
 /// - A call to `descent_condition(…)` or `compatible_sections(…)`
-/// - An equality whose sides both look like local-section expressions
+/// - A method call with descent-related names
+/// - An equality whose sides recursively look like descent expressions
 fn is_descent_shaped(expr: &Expr) -> bool {
     match &expr.kind {
+        // Direct call to known descent operations
         ExprKind::Call { func, .. } => {
+            if let Some(name) = func_head_name(func) {
+                matches!(
+                    name.as_str(),
+                    "descent_condition"
+                        | "compatible_sections"
+                        | "gluing_condition"
+                        | "sheaf_condition"
+                        | "check_descent"
+                        | "verify_descent"
+                        | "cech_condition"
+                        | "cosimplicial_limit"
+                )
+            } else {
+                false
+            }
+        }
+        // Method call with descent-related names
+        ExprKind::MethodCall { method, .. } => {
             matches!(
-                func_head_name(func).as_deref(),
-                Some("descent_condition")
-                    | Some("compatible_sections")
-                    | Some("gluing_condition")
-                    | Some("sheaf_condition")
+                method.as_str(),
+                "restrict"
+                    | "restriction"
+                    | "sections"
+                    | "descent"
+                    | "glue"
+                    | "patch"
+                    | "pullback"
+                    | "base_change"
             )
         }
+        // Equality involving descent structures
         ExprKind::Binary { op: BinOp::Eq, left, right } => {
-            // Heuristic: if either side mentions "section" or "restrict"
-            // we treat it as a descent goal
-            let l = format!("{:?}", left.kind);
-            let r = format!("{:?}", right.kind);
-            (l.contains("section") || l.contains("restrict"))
-                || (r.contains("section") || r.contains("restrict"))
+            is_descent_shaped(left) || is_descent_shaped(right)
         }
         ExprKind::Paren(inner) => is_descent_shaped(inner),
         _ => false,
@@ -863,8 +904,12 @@ fn is_descent_shaped(expr: &Expr) -> bool {
 }
 
 /// Construct a synthetic `F(arg)` call expression for functor law unfolding.
+///
+/// Uses the real span from `func` so that any diagnostics produced during
+/// normalisation point to the original source location rather than a dummy
+/// span.
 fn make_call_expr(func: Expr, arg: Expr) -> Expr {
-    let span = Span::dummy();
+    let span = func.span; // Use the REAL span from the function, not dummy
     let mut args = List::new();
     args.push(arg);
     Expr::new(
