@@ -511,6 +511,41 @@ fn single_file_build_rejects_unsafe_when_gate_off() {
     );
 }
 
+/// Regression: `--verify runtime` must NOT bypass the safety gate.
+/// Before the P1.8 fix, `phase_safety_gate` lived inside
+/// `phase_type_check` which `run_interpreter` skipped when
+/// `verify_mode == Runtime`, silently letting unsafe code through.
+#[test]
+fn safety_gate_fires_even_under_verify_runtime() {
+    let (_tmp, dir) = project("gate-runtime-mode");
+    let main = write_unsafe_main(&dir);
+
+    // --verify runtime + -Z safety.unsafe_allowed=false.
+    // Previously this combination let unsafe through; now it must reject.
+    let out = verum(
+        &[
+            "build",
+            main.to_str().unwrap(),
+            "--verify",
+            "runtime",
+            "-Z",
+            "safety.unsafe_allowed=false",
+        ],
+        &dir,
+    );
+    assert!(
+        !out.status.success(),
+        "safety gate must fire under --verify runtime. stderr:\n{}",
+        stderr(&out)
+    );
+    let combined = format!("{}\n{}", stdout(&out), stderr(&out));
+    assert!(
+        combined.contains("safety gate"),
+        "error must name the gate, not some downstream effect:\n{}",
+        combined
+    );
+}
+
 /// Positive path: without the gate, all four entry points (check,
 /// build, run --interp, run --aot) should not bail out on the gate
 /// reason — they compile the unsafe file (success or other error is

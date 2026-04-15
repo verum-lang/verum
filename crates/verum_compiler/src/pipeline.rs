@@ -5081,6 +5081,11 @@ impl<'s> CompilationPipeline<'s> {
         let file_id = self.phase_load_source()?;
         let module = self.phase_parse(file_id)?;
 
+        // Safety-feature gates (unsafe, @ffi, etc.) ALWAYS run —
+        // independent of verify_mode. Without this, `--verify runtime`
+        // silently bypassed the user's `[safety]` configuration.
+        self.phase_safety_gate(&module)?;
+
         // Type check unless in runtime-only mode
         // Runtime mode skips static analysis for faster iteration
         if self.session.options().verify_mode != VerifyMode::Runtime {
@@ -5224,32 +5229,53 @@ impl<'s> CompilationPipeline<'s> {
         self.build_function_cfg(func)
     }
 
-    /// Phase 3: Type checking
-    fn phase_type_check(&mut self, module: &Module) -> Result<()> {
-        debug!("Type checking module");
-
-        // Safety-gate pre-pass: reject disallowed language constructs
-        // (unsafe blocks, unsafe fn, @ffi / extern fn) before
-        // type-checking compounds the errors. All relevant [safety]
-        // flags are read from the session's language features.
+    /// Phase 2.9: Safety feature gates (unsafe blocks, unsafe fn,
+    /// `@ffi` / extern fn, per `[safety]` in verum.toml).
+    ///
+    /// **Runs independently of verify_mode** so `--verify runtime`
+    /// cannot silently bypass the gate. Invoked by BOTH the
+    /// interpreter and AOT paths before type-checking. Emits a
+    /// diagnostic for each rejected construct and returns Err if any
+    /// were rejected.
+    fn phase_safety_gate(&mut self, module: &Module) -> Result<()> {
         let features = self.session.language_features();
+        // Fast path: when every relevant [safety] flag is permissive,
+        // skip the walker entirely — zero cost on the default
+        // configuration.
+        if features.unsafe_allowed() && features.safety.ffi {
+            return Ok(());
+        }
         let policy = crate::phases::safety_gate::SafetyPolicy {
             unsafe_allowed: features.unsafe_allowed(),
             ffi: features.safety.ffi,
         };
-        let gate_diags = crate::phases::safety_gate::check_safety(
+        let diags = crate::phases::safety_gate::check_safety(
             std::slice::from_ref(module),
             policy,
         );
-        if !gate_diags.is_empty() {
-            for d in gate_diags.iter() {
+        if !diags.is_empty() {
+            let n = diags.len();
+            for d in diags.iter() {
                 self.session.emit_diagnostic(d.clone());
             }
             return Err(anyhow::anyhow!(
                 "safety gate rejected {} construct(s); see diagnostics",
-                gate_diags.len()
+                n
             ));
         }
+        Ok(())
+    }
+
+    /// Phase 3: Type checking
+    fn phase_type_check(&mut self, module: &Module) -> Result<()> {
+        debug!("Type checking module");
+
+        // Safety-gate pre-pass. Still invoked here (in addition to the
+        // callsites in run_interpreter / run_native_compilation) so any
+        // pipeline entry point that jumps directly to type_check keeps
+        // the gate active. Idempotent — running twice costs one extra
+        // walk on the fast path (no violations).
+        self.phase_safety_gate(module)?;
 
         let start = Instant::now();
 
@@ -9679,6 +9705,14 @@ impl<'s> CompilationPipeline<'s> {
             return self.phase_interpret(module);
         }
 
+        // Two-path parity: run the same validation phases the no-args
+        // path does, so `verum run file.vr arg1` applies the same
+        // semantics as `verum run file.vr`. Previously these phases
+        // were silently skipped when args were present.
+        self.phase_context_validation(module);
+        self.phase_send_sync_validation(module);
+        self.phase_ffi_validation(module)?;
+
         // Step 1: Compile AST to VBC
         let vbc_module = self.compile_ast_to_vbc(module)?;
 
@@ -10563,10 +10597,22 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // Phase 2.9: Safety gate (unsafe, @ffi) — always runs,
+        // matching the interpreter path. No-op fast path when both
+        // `[safety].unsafe_allowed` and `[safety].ffi` are true.
+        self.phase_safety_gate(&module)?;
+
         // Phase 3: Type check (uses self.modules for stdlib type/method registration)
         let t0 = Instant::now();
         self.phase_type_check(&module)?;
         self.session.record_phase_metrics("Type Checking", t0.elapsed(), 0);
+
+        // Phase 3.5: Dependency analysis (target-constraint enforcement,
+        // matching the interpreter path so AOT and Tier 0 apply the
+        // same target-profile rules like `no_std` / `no_alloc`).
+        let t0 = Instant::now();
+        self.phase_dependency_analysis(&module)?;
+        self.session.record_phase_metrics("Dependency Analysis", t0.elapsed(), 0);
 
         // Selective module retention after type checking.
         //
