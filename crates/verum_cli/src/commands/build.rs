@@ -54,6 +54,8 @@ pub fn execute(
     warn_lint: Vec<Text>,
     allow_lint: Vec<Text>,
     forbid_lint: Vec<Text>,
+    // Verification telemetry
+    smt_stats: bool,
 ) -> Result<()> {
     let start_time = Instant::now();
 
@@ -291,6 +293,23 @@ pub fn execute(
     };
 
     let _analysis_time = analysis_start.elapsed();
+
+    // Persist / report SMT routing telemetry when --smt-stats is on.
+    // The session's RoutingStats is populated by any verification phase
+    // that dispatches through SmtBackendSwitcher (see Task #42 for the
+    // phase-side wiring). Even when no SMT work ran, we still write a
+    // zero-filled report so `verum smt-stats` has something to show.
+    if smt_stats {
+        let json = session.routing_stats().as_json();
+        if let Err(e) = crate::commands::smt_stats::persist_stats(&json) {
+            ui::warn(&format!("Failed to persist SMT stats: {}", e));
+        } else {
+            ui::detail(
+                "SMT stats",
+                "written — run `verum smt-stats` to view",
+            );
+        }
+    }
 
     // Print warnings (display count since new compiler doesn't provide individual warnings)
     if result.warnings > 0 {

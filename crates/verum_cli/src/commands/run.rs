@@ -60,6 +60,7 @@ pub fn execute(
         Vec::new(), // warn_lint
         Vec::new(), // allow_lint
         Vec::new(), // forbid_lint
+        false,      // smt_stats
     )?;
 
     // Determine compilation tier

@@ -889,6 +889,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 warn_lint,
                 allow_lint,
                 forbid_lint,
+                smt_stats,
             )
         }
         Commands::Run {

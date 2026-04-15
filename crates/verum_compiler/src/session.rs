@@ -83,6 +83,18 @@ pub struct Session {
     /// Cross-cog module resolver (loaded from Verum.lock or Verum.toml path dependencies).
     /// When set, ModuleLoaders created by this session will dispatch cross-cog imports.
     cog_resolver: Option<verum_modules::cog_resolver::CogResolver>,
+
+    /// Shared SMT routing statistics.
+    ///
+    /// Populated by verification phases that dispatch through
+    /// `verum_smt::SmtBackendSwitcher`. The CLI reads these at the end
+    /// of compilation to drive `verum smt-stats` (persisted to
+    /// `$VERUM_STATE_DIR/smt-stats.json`). The field is always present —
+    /// phases that don't use SMT simply leave it empty.
+    ///
+    /// `Arc` so the switcher inside each phase can hold an owned handle
+    /// without moving the session.
+    routing_stats: std::sync::Arc<verum_smt::routing_stats::RoutingStats>,
 }
 
 impl Session {
@@ -106,12 +118,33 @@ impl Session {
             tier_statistics: Shared::new(RwLock::new(TierStatistics::default())),
             cfg_evaluator,
             cog_resolver: None,
+            routing_stats: std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new()),
         }
     }
 
     /// Set the cross-cog resolver for external package imports.
     pub fn set_cog_resolver(&mut self, resolver: verum_modules::cog_resolver::CogResolver) {
         self.cog_resolver = Some(resolver);
+    }
+
+    /// Access the shared SMT routing statistics handle.
+    ///
+    /// Phase code clones this `Arc` when constructing an
+    /// `SmtBackendSwitcher`, so all verification work in a session
+    /// shares a single stats collector. The CLI calls
+    /// `.as_json()` / `.report()` on the returned handle after
+    /// compilation completes.
+    pub fn routing_stats(&self) -> &std::sync::Arc<verum_smt::routing_stats::RoutingStats> {
+        &self.routing_stats
+    }
+
+    /// Replace the routing-stats handle (used by test harnesses that
+    /// need to inject a pre-populated collector).
+    pub fn set_routing_stats(
+        &mut self,
+        stats: std::sync::Arc<verum_smt::routing_stats::RoutingStats>,
+    ) {
+        self.routing_stats = stats;
     }
 
     /// Register external cog dependencies from lockfile data.
@@ -165,6 +198,7 @@ impl Session {
             tier_statistics: Shared::new(RwLock::new(TierStatistics::default())),
             cfg_evaluator,
             cog_resolver: None,
+            routing_stats: std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new()),
         }
     }
 

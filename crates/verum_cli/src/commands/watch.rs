@@ -57,6 +57,7 @@ pub fn execute(command: &str, clear: bool) -> Result<()> {
                 Vec::new(), // warn_lint
                 Vec::new(), // allow_lint
                 Vec::new(), // forbid_lint
+                false,      // smt_stats
             ),
             "test" => crate::commands::test::execute(
                 None,  // filter
