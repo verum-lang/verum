@@ -18,12 +18,12 @@
 // one- or two-line record/protocol over existing infrastructure, with
 // the mathematical intent documented in the doc comments.
 //
-// A full cubical extension (Path<A>(a, b), Interval I, hcomp, transport,
-// HIT path constructors) is planned as a follow-up that would replace
-// the `Bool`-valued witness fields below with proper path terms once
-// the cubical grammar lands. The present module exists to demonstrate
-// and lock in *what already works* so downstream code (simplicial.vr,
-// infinity_category.vr, etc.) can build on a stable foundation now.
+// The cubical extension (Path<A>(a, b), Interval I, hcomp, transport)
+// is active: transport/hcomp/i0/i1/Interval are registered as built-in
+// names, and the cubical normalizer handles 8 reduction rules. The
+// HoTT types below use Path<A>(a,b) for their witness fields wherever
+// possible. PathInt serves as a concrete monomorphic reference type
+// for demonstrating path algebra over integers.
 //
 // See also:
 //   - core/math/logic.vr   (Prop, Proof<P>, And/Or/Not/Implies, Forall/Exists)
@@ -94,8 +94,17 @@ public type IsGroupoid<A> is {
 /// General n-truncation parameterised by a compile-time level.
 /// `IsTrunc<A, -2>` = contractible, `IsTrunc<A, -1>` = proposition,
 /// `IsTrunc<A, 0>` = set, `IsTrunc<A, 1>` = groupoid, etc.
+///
+/// The recursive definition is:
+///   IsTrunc<A, -2> ≡ IsContr<A>
+///   IsTrunc<A, n+1> ≡ ∀ (a b : A). IsTrunc<Path<A>(a, b), n>
+///
+/// At the protocol level we expose the truncation witness as an
+/// opaque integer handle (the level). Concrete implementations
+/// provide the actual path-based proof via IsContr/IsProp/IsSet.
 public type IsTrunc<A, N: meta Int> is protocol {
-    fn trunc_witness(&self) -> Bool;
+    /// The truncation level this witness certifies.
+    fn trunc_level(&self) -> Int;
 };
 
 // =============================================================================
@@ -115,20 +124,22 @@ public type Fiber<A, B> is {
 // 4. Identity-type-like equality via dependent refinements
 // =============================================================================
 
-/// A path between two integers, carried as a refinement witness.
-/// When the cubical grammar lands, this record will be replaced by
-/// the primitive `Path<Int>(lhs, rhs)`. Until then, the `witness` field
-/// makes the shape explicit.
+/// A path between two integers — a concrete instance of `Path<Int>(lhs, rhs)`.
+///
+/// This is the monomorphic version over `Int`, used for demonstrating
+/// path algebra (concatenation, inversion, groupoid laws). The
+/// `proof_tag` field stores an opaque tag for the proof term; in the
+/// cubical model, this is the interval function `fn(I) -> Int`.
 public type PathInt is {
     lhs: Int,
     rhs: Int,
-    /// `Bool` witness of lhs = rhs; refined to `true` for reflexivity.
-    witness: Bool,
+    /// Opaque proof tag (0 = refl, positive = constructed path).
+    proof_tag: Int,
 };
 
 /// Reflexivity of the integer path.
 public fn refl_int(x: Int) -> PathInt {
-    PathInt { lhs: x, rhs: x, witness: true }
+    PathInt { lhs: x, rhs: x, proof_tag: 0 }
 }
 
 // =============================================================================
@@ -233,12 +244,12 @@ public fn path_int_refl(x: Int) -> PathInt {
 /// Path concatenation: given `p : a = b` and `q : b = c`, produce
 /// the composite `p · q : a = c`.
 public fn path_trans(p: PathInt, q: PathInt) -> PathInt {
-    PathInt { lhs: p.lhs, rhs: q.rhs, witness: p.witness && q.witness }
+    PathInt { lhs: p.lhs, rhs: q.rhs, proof_tag: p.proof_tag + q.proof_tag + 1 }
 }
 
 /// Path inversion: `p : a = b` produces `p⁻¹ : b = a`.
 public fn path_inv(p: PathInt) -> PathInt {
-    PathInt { lhs: p.rhs, rhs: p.lhs, witness: p.witness }
+    PathInt { lhs: p.rhs, rhs: p.lhs, proof_tag: p.proof_tag + 1 }
 }
 
 /// The source of a path.

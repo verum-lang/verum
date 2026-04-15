@@ -26,6 +26,22 @@ public type Proof<P> is {
     witness: Int,
 };
 
+/// The empty type (absurdity / bottom / ⊥).
+///
+/// `Void` has no constructors and therefore no inhabitants.
+/// Under Curry-Howard, `Void` corresponds to falsity (⊥).
+/// A function `fn(A) -> Void` is a refutation of A.
+///
+/// This is the type-theoretic foundation of proof by contradiction:
+/// `Not<P> = fn(P) -> Void`.
+public type Void is ();  // unit stand-in; true Void requires uninhabited type support
+
+/// Absurdity elimination: from a proof of Void, derive anything.
+/// (ex falso quodlibet / principle of explosion)
+public fn absurd<A>(v: Void) -> A {
+    unreachable()
+}
+
 // =============================================================================
 // 2. Logical Connectives
 // =============================================================================
