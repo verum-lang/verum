@@ -2908,6 +2908,71 @@ impl Unifier {
                 Ok(subst)
             }
 
+            // Cubical Path Types
+            //
+            //   Γ ⊢ A : Type    Γ ⊢ a, b : A
+            //   ─────────────────────────── (Path-Form)
+            //   Γ ⊢ Path<A>(a, b) : Type
+            //
+            // Two path types unify when:
+            //   1. Their carrier spaces unify as regular types,
+            //   2. Their left endpoints are definitionally equal as cubical
+            //      terms (normalized via `whnf` — so `transp (λ i. A) x ≡ x`
+            //      and `refl x @ i ≡ x` are accepted),
+            //   3. Their right endpoints are likewise definitionally equal.
+            //
+            // Without this arm, path types silently fall into the fallback
+            // mismatch path — which made the 492-line cubical normalizer in
+            // `crate::cubical` dead code on the unification hot path.
+            (
+                Type::PathType { space: s1, left: l1, right: r1 },
+                Type::PathType { space: s2, left: l2, right: r2 },
+            ) => {
+                let subst = self.unify_inner(s1, s2, span)?;
+
+                if !l1.definitionally_equal(l2) {
+                    return Err(TypeError::Mismatch {
+                        expected: "PathType with matching left endpoint".into(),
+                        actual: "PathType with different left endpoint".into(),
+                        span,
+                    });
+                }
+                if !r1.definitionally_equal(r2) {
+                    return Err(TypeError::Mismatch {
+                        expected: "PathType with matching right endpoint".into(),
+                        actual: "PathType with different right endpoint".into(),
+                        span,
+                    });
+                }
+                Ok(subst)
+            }
+
+            // Partial Element Types — `Partial[φ] A`: a partial element
+            // of `A` defined on the face constraint `φ`. Used in Kan
+            // composition to describe the compositional boundary.
+            //
+            // Two partial types unify when:
+            //   1. Their element types unify,
+            //   2. Their face constraints are definitionally equal
+            //      (cubical normalization handles `(i ∨ ~i) ≡ 1`, etc.).
+            (
+                Type::Partial { element_type: e1, face: f1 },
+                Type::Partial { element_type: e2, face: f2 },
+            ) => {
+                let subst = self.unify_inner(e1, e2, span)?;
+                if !f1.definitionally_equal(f2) {
+                    return Err(TypeError::Mismatch {
+                        expected: "Partial type with matching face".into(),
+                        actual: "Partial type with divergent face".into(),
+                        span,
+                    });
+                }
+                Ok(subst)
+            }
+
+            // Interval type `I` is a singleton — trivial unification.
+            (Type::Interval, Type::Interval) => Ok(Substitution::new()),
+
             // Universe Types
             // Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter
             // Type_n unifies with Type_m if n == m
