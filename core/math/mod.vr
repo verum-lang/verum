@@ -182,6 +182,48 @@ public module examples;
 public module number_theory;
 
 // =============================================================================
+// Mathesis Foundation (Phase C — verum-ext-2.md §3)
+// =============================================================================
+
+// Quantum epistemic logic: Birkhoff–von Neumann orthomodular lattice,
+// Hilbert space epistemic states, density matrices, quantum measurement
+// (Lüders rule), commutator, compatibility, fidelity. 7-level UHM
+// status system with superposition.
+public module quantum_logic;
+
+// Giry monad: probability measures on measurable spaces, Dirac delta,
+// Markov kernel (marginalization), LLM oracle for stochastic functor
+// proposals, sampling with confidence threshold.
+public module giry;
+
+// Formal epistemology: EpistemicStatus (7 variants), Theory type,
+// EpistemicTopology (Grothendieck with joint faithfulness), theory site,
+// Mathesis ∞-topos, BFS status propagation, Kan extension algorithms,
+// obstruction computation.
+public module epistemic;
+
+// Cohesive modalities (Schreiber 2013): CohesiveStructure with the
+// quadruple adjunction Π ⊣ Disc ⊣ Γ ⊣ coDisc, shape/flat/sharp
+// modalities. DifferentiallyCohesive adds Im ⊣ & ⊣ Rh for
+// infinitesimal structure.
+public module cohesive;
+
+// Day convolution on presheaf categories of symmetric monoidal
+// categories. Coend formula, cognitive extension H_ext = H_bio ⊗_Day H_M
+// for Mathesis integration.
+public module day_convolution;
+
+// Tactic library: category law simplification, descent checking,
+// algebraic manipulation tactics callable from proof blocks.
+public module tactics;
+
+// Complex numbers and arithmetic.
+public module complex;
+
+// Finite categories for concrete computations.
+public module category_finite;
+
+// =============================================================================
 // Progressive API Disclosure
 // =============================================================================
 

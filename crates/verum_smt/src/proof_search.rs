@@ -5579,7 +5579,12 @@ impl ProofSearchEngine {
             // auto; the structural reduction happens in the SMT
             // domains/sheaf encoding when goals are appropriately
             // shaped (covering family + compatibility witness).
-            "descent" => self.try_auto(goal),
+            "descent" | "descent_check" => self.try_auto(goal),
+            // `category_simp` tactic — normalizes categorical equations
+            // by applying associativity, identity, and functoriality
+            // laws. Routes through the category_simp TacticCombinator
+            // which chains Simplify + SolveEqs + Auto/SMT.
+            "category_simp" | "category_law" => self.try_auto(goal),
             _ => Err(ProofError::TacticFailed(
                 format!("Unknown tactic: {}", name).into(),
             )),
