@@ -93,6 +93,23 @@ fn refinement_enabled_preserves_verify_mode() {
 }
 
 #[test]
+fn unsafe_allowed_flag_readable_via_session() {
+    let mut opts = CompilerOptions::default();
+    opts.input = PathBuf::from("<test>");
+    opts.output = PathBuf::from("<test>");
+
+    // Default: unsafe on.
+    let on = Session::new(opts.clone());
+    assert!(on.language_features().unsafe_allowed());
+
+    // Flip → session reflects it. phase_type_check reads this to
+    // gate the safety_gate pre-pass.
+    opts.language_features.safety.unsafe_allowed = false;
+    let off = Session::new(opts);
+    assert!(!off.language_features().unsafe_allowed());
+}
+
+#[test]
 fn context_system_flag_readable_via_session() {
     let mut opts = CompilerOptions::default();
     opts.input = PathBuf::from("<test>");

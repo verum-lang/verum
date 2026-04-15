@@ -59,6 +59,7 @@ pub mod optimization;
 pub mod phase0_stdlib;
 pub mod proof_erasure;
 pub mod proof_verification;
+pub mod safety_gate;
 pub mod semantic_analysis;
 pub mod send_sync_validation;
 pub mod vbc_codegen;

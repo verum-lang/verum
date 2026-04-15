@@ -5228,6 +5228,27 @@ impl<'s> CompilationPipeline<'s> {
     fn phase_type_check(&mut self, module: &Module) -> Result<()> {
         debug!("Type checking module");
 
+        // Safety-gate pre-pass: reject disallowed language constructs
+        // (e.g. `unsafe` when [safety].unsafe_allowed = false) before
+        // type-checking compounds the errors.
+        let unsafe_allowed = self
+            .session
+            .language_features()
+            .unsafe_allowed();
+        let gate_diags = crate::phases::safety_gate::check_unsafe_usage(
+            std::slice::from_ref(module),
+            unsafe_allowed,
+        );
+        if !gate_diags.is_empty() {
+            for d in gate_diags.iter() {
+                self.session.emit_diagnostic(d.clone());
+            }
+            return Err(anyhow::anyhow!(
+                "safety gate rejected {} construct(s); see diagnostics",
+                gate_diags.len()
+            ));
+        }
+
         let start = Instant::now();
 
         // Mode selection:

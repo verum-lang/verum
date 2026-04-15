@@ -188,6 +188,10 @@ pub struct CommonPipelineConfig {
     /// Enable compile-time function evaluation (`meta fn`, `@const`).
     /// Sourced from `[meta] compile_time_functions`.
     pub compile_time_enabled: bool,
+    /// Allow `unsafe { ... }` expressions (sourced from
+    /// `[safety] unsafe_allowed`). When false, the safety-gate phase
+    /// rejects unsafe blocks with a config-pointing diagnostic.
+    pub unsafe_allowed: bool,
 }
 
 impl Default for CommonPipelineConfig {
@@ -204,6 +208,7 @@ impl Default for CommonPipelineConfig {
             context_enabled: true,
             derive_enabled: true,
             compile_time_enabled: true,
+            unsafe_allowed: true,
         }
     }
 }
@@ -223,6 +228,7 @@ impl CommonPipelineConfig {
             context_enabled: true,
             derive_enabled: true,
             compile_time_enabled: true,
+            unsafe_allowed: true,
         }
     }
 
@@ -240,6 +246,7 @@ impl CommonPipelineConfig {
             context_enabled: true,
             derive_enabled: true,
             compile_time_enabled: true,
+            unsafe_allowed: true,
         }
     }
 }
@@ -693,6 +700,33 @@ pub fn run_common_pipeline(
             verification_results = vr;
         } else {
             current_data = contract_output.data;
+        }
+    }
+
+    // Phase 3b: Safety Gate
+    // Pre-typecheck AST walker that rejects language constructs
+    // disabled by the current [safety] feature set. Runs before
+    // semantic analysis so type-checking errors aren't compounded
+    // onto gate errors.
+    {
+        let modules = match &current_data {
+            PhaseData::AstModules(ms) => Some(ms),
+            PhaseData::AstModulesWithContracts { modules, .. } => Some(modules),
+            _ => None,
+        };
+        if let Some(modules) = modules {
+            let slice: Vec<_> = modules.iter().cloned().collect();
+            let gate_diags = crate::phases::safety_gate::check_unsafe_usage(
+                &slice,
+                config.unsafe_allowed,
+            );
+            if !gate_diags.is_empty() {
+                return Err(CompilationError::with_diagnostics(
+                    CompilationErrorKind::TypeError,
+                    "Safety gate rejected disallowed language constructs",
+                    gate_diags,
+                ));
+            }
         }
     }
 
