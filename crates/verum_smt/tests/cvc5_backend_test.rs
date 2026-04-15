@@ -19,7 +19,7 @@
 #![cfg(feature = "cvc5")]
 
 use verum_smt::cvc5_backend::{
-    Cvc5Backend, Cvc5Config, Cvc5SmtLogic, SatResult, create_cvc5_backend,
+    Cvc5Backend, Cvc5Config, SatResult, SmtLogic as Cvc5SmtLogic, create_cvc5_backend,
     create_cvc5_backend_for_logic,
 };
 

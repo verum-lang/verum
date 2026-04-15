@@ -46,7 +46,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use verum_smt::{
-    Cvc5Backend, Cvc5Config, Cvc5Error, QuantifierMode, SmtLogic,
+    Cvc5Backend, Cvc5Config, Cvc5Error, QuantifierMode, Cvc5SmtLogic,
     solver::{SmtBackend, SmtContext, SmtError, SmtResult, VerificationCondition},
     z3_backend::{AdvancedResult, Z3Config, Z3ContextManager, Z3Solver},
 };
@@ -236,7 +236,7 @@ fn unop(op: UnOp, expr: Expr) -> Expr {
 fn cross_validate_basic_sat_simple_equality() {
     // x == 5 (SAT)
     let expr = binop(BinOp::Eq, var("x"), int_lit(5));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -249,7 +249,7 @@ fn cross_validate_basic_unsat_contradiction() {
     let eq1 = binop(BinOp::Eq, var("x"), int_lit(5));
     let eq2 = binop(BinOp::Eq, var("x"), int_lit(10));
     let expr = binop(BinOp::And, eq1, eq2);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -260,7 +260,7 @@ fn cross_validate_basic_unsat_contradiction() {
 fn cross_validate_basic_sat_tautology() {
     // true (SAT)
     let expr = bool_lit(true);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -271,7 +271,7 @@ fn cross_validate_basic_sat_tautology() {
 fn cross_validate_basic_unsat_false() {
     // false (UNSAT)
     let expr = bool_lit(false);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -282,7 +282,7 @@ fn cross_validate_basic_unsat_false() {
 fn cross_validate_basic_sat_inequality() {
     // x > 0 (SAT)
     let expr = binop(BinOp::Gt, var("x"), int_lit(0));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -295,7 +295,7 @@ fn cross_validate_basic_unsat_impossible_bounds() {
     let gt = binop(BinOp::Gt, var("x"), int_lit(10));
     let lt = binop(BinOp::Lt, var("x"), int_lit(5));
     let expr = binop(BinOp::And, gt, lt);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -308,7 +308,7 @@ fn cross_validate_basic_sat_conjunction() {
     let gt = binop(BinOp::Gt, var("x"), int_lit(0));
     let lt = binop(BinOp::Lt, var("x"), int_lit(10));
     let expr = binop(BinOp::And, gt, lt);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -321,7 +321,7 @@ fn cross_validate_basic_sat_disjunction() {
     let lt = binop(BinOp::Lt, var("x"), int_lit(0));
     let gt = binop(BinOp::Gt, var("x"), int_lit(0));
     let expr = binop(BinOp::Or, lt, gt);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -332,7 +332,7 @@ fn cross_validate_basic_sat_disjunction() {
 fn cross_validate_basic_unsat_empty_disjunction() {
     // false || false (UNSAT)
     let expr = binop(BinOp::Or, bool_lit(false), bool_lit(false));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -343,7 +343,7 @@ fn cross_validate_basic_unsat_empty_disjunction() {
 fn cross_validate_basic_sat_trivial_disjunction() {
     // true || false (SAT)
     let expr = binop(BinOp::Or, bool_lit(true), bool_lit(false));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -385,7 +385,7 @@ fn cross_validate_basic_sat_batch_1_10() {
     ];
 
     for (i, expr) in test_cases.iter().enumerate() {
-        let result = cross_validate_expr(expr, SmtLogic::QF_LIA);
+        let result = cross_validate_expr(expr, Cvc5SmtLogic::QF_LIA);
         assert!(
             matches!(
                 result,
@@ -452,7 +452,7 @@ fn cross_validate_basic_unsat_batch_1_10() {
     ];
 
     for (i, expr) in test_cases.iter().enumerate() {
-        let result = cross_validate_expr(expr, SmtLogic::QF_LIA);
+        let result = cross_validate_expr(expr, Cvc5SmtLogic::QF_LIA);
         assert!(
             matches!(
                 result,
@@ -607,7 +607,7 @@ fn cross_validate_basic_mixed_batch_1_20() {
     ];
 
     for (i, (expr, expected_sat)) in test_cases.iter().enumerate() {
-        let result = cross_validate_expr(expr, SmtLogic::QF_LIA);
+        let result = cross_validate_expr(expr, Cvc5SmtLogic::QF_LIA);
         let is_correct = if *expected_sat {
             matches!(
                 result,
@@ -639,7 +639,7 @@ fn cross_validate_lia_simple_equation() {
         binop(BinOp::Add, var("x"), var("y")),
         int_lit(10),
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -652,7 +652,7 @@ fn cross_validate_lia_system_of_equations() {
     let eq1 = binop(BinOp::Eq, binop(BinOp::Add, var("x"), var("y")), int_lit(5));
     let eq2 = binop(BinOp::Eq, binop(BinOp::Sub, var("x"), var("y")), int_lit(1));
     let expr = binop(BinOp::And, eq1, eq2);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -669,7 +669,7 @@ fn cross_validate_lia_inconsistent_system() {
         int_lit(10),
     );
     let expr = binop(BinOp::And, eq1, eq2);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -685,7 +685,7 @@ fn cross_validate_lia_large_coefficients() {
         binop(BinOp::Mul, int_lit(2000), var("y")),
     );
     let expr = binop(BinOp::Eq, lhs, int_lit(3000));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -701,7 +701,7 @@ fn cross_validate_lia_negative_coefficients() {
         binop(BinOp::Mul, int_lit(3), var("y")),
     );
     let expr = binop(BinOp::Eq, lhs, int_lit(7));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -715,7 +715,7 @@ fn cross_validate_lia_inequality_bounds() {
     let c2 = binop(BinOp::Lt, var("x"), int_lit(100));
     let c3 = binop(BinOp::Gt, var("y"), var("x"));
     let expr = binop(BinOp::And, binop(BinOp::And, c1, c2), c3);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -735,7 +735,7 @@ fn cross_validate_lia_three_variables() {
         binop(BinOp::And, binop(BinOp::And, eq, c1), c2),
         c3,
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -750,7 +750,7 @@ fn cross_validate_lia_subtraction_chain() {
     let eq2 = binop(BinOp::Eq, var("x"), int_lit(10));
     let eq3 = binop(BinOp::Eq, var("y"), int_lit(3));
     let expr = binop(BinOp::And, binop(BinOp::And, eq1, eq2), eq3);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -765,7 +765,7 @@ fn cross_validate_lia_modulo_arithmetic() {
         binop(BinOp::Rem, var("x"), int_lit(2)),
         int_lit(0),
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -780,7 +780,7 @@ fn cross_validate_lia_division_by_constant() {
         binop(BinOp::Div, var("x"), int_lit(5)),
         int_lit(3),
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1145,7 +1145,7 @@ fn cross_validate_lia_batch_1_40() {
     ];
 
     for (i, (expr, expected_sat)) in test_cases.iter().enumerate() {
-        let result = cross_validate_expr(expr, SmtLogic::QF_LIA);
+        let result = cross_validate_expr(expr, Cvc5SmtLogic::QF_LIA);
         let is_correct = if *expected_sat {
             matches!(
                 result,
@@ -1178,7 +1178,7 @@ fn cross_validate_lia_division_approximation() {
     let x_eq = binop(BinOp::Eq, var("x"), int_lit(10));
     let div_constraint = binop(BinOp::Eq, binop(BinOp::Mul, int_lit(2), var("q")), var("x"));
     let expr = binop(BinOp::And, x_eq, div_constraint);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1200,7 +1200,7 @@ fn cross_validate_lia_modular_arithmetic() {
         ),
     );
     let expr = binop(BinOp::And, x_eq, odd);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1231,7 +1231,7 @@ fn cross_validate_lia_linear_combination_3vars() {
         binop(BinOp::And, linear, x_ge),
         binop(BinOp::And, y_ge, z_ge),
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1244,7 +1244,7 @@ fn cross_validate_lia_absolute_value_pattern() {
     let lower = binop(BinOp::Ge, var("x"), int_lit(-5));
     let upper = binop(BinOp::Le, var("x"), int_lit(5));
     let expr = binop(BinOp::And, lower, upper);
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1285,7 +1285,7 @@ fn cross_validate_lia_pigeonhole_small() {
     let distinct = binop(BinOp::And, p1_ne_p2, binop(BinOp::And, p1_ne_p3, p2_ne_p3));
     let expr = binop(BinOp::And, bounds, distinct);
 
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -1304,7 +1304,7 @@ fn cross_validate_lia_transitivity_chain() {
         binop(BinOp::And, xy, yz),
         binop(BinOp::And, zw, wx),
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -1320,21 +1320,20 @@ fn cross_validate_unsat_core_minimal_simple() {
     let lt = binop(BinOp::Lt, var("x"), int_lit(5));
     let expr = binop(BinOp::And, gt, lt);
 
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
     ));
 
     // Extract and verify unsat core
-    use crate::verum_smt::Context as SmtContext;
-    use crate::verum_smt::unsat_core::{UnsatCoreConfig, UnsatCoreExtractor};
+    use verum_smt::Context as SmtContext;
+    use verum_smt::unsat_core::{UnsatCoreConfig, UnsatCoreExtractor};
 
     let smt_ctx = SmtContext::new();
     let mut extractor = UnsatCoreExtractor::new(UnsatCoreConfig {
         minimize: true,
-        track_assertions: true,
-        incremental: false,
+        ..Default::default()
     });
 
     // For this simple test, just verify the infrastructure exists
@@ -1351,7 +1350,7 @@ fn cross_validate_unsat_core_with_irrelevant_constraints() {
     let irrelevant = binop(BinOp::Gt, var("y"), int_lit(0));
     let expr = binop(BinOp::And, binop(BinOp::And, gt, lt), irrelevant);
 
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -1374,7 +1373,7 @@ fn cross_validate_model_simple_integer() {
     let lt = binop(BinOp::Lt, var("x"), int_lit(10));
     let expr = binop(BinOp::And, gt, lt);
 
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1400,7 +1399,7 @@ fn cross_validate_model_multiple_variables() {
     let gt = binop(BinOp::Gt, var("x"), var("y"));
     let expr = binop(BinOp::And, eq, gt);
 
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1424,7 +1423,7 @@ fn stress_test_large_conjunction_100_constraints() {
         expr = binop(BinOp::And, expr, constraint);
     }
 
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1440,7 +1439,7 @@ fn stress_test_large_disjunction_100_clauses() {
         expr = binop(BinOp::Or, expr, clause);
     }
 
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1461,7 +1460,7 @@ fn stress_test_large_system_100_variables() {
         expr = binop(BinOp::And, expr, constraint);
     }
 
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1474,7 +1473,7 @@ fn stress_test_large_system_100_variables() {
 fn edge_case_integer_overflow() {
     // Test with very large integers
     let expr = binop(BinOp::Gt, var("x"), int_lit(i64::MAX));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1485,7 +1484,7 @@ fn edge_case_integer_overflow() {
 fn edge_case_integer_underflow() {
     // Test with very small integers
     let expr = binop(BinOp::Lt, var("x"), int_lit(i64::MIN));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1500,7 +1499,7 @@ fn edge_case_division_by_zero() {
         binop(BinOp::Div, var("x"), int_lit(0)),
         int_lit(5),
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     // Division by zero behavior is solver-dependent
     // Both should agree on whatever they decide
     assert!(!matches!(
@@ -1517,7 +1516,7 @@ fn edge_case_modulo_by_zero() {
         binop(BinOp::Rem, var("x"), int_lit(0)),
         int_lit(1),
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     // Both solvers should agree on how to handle this
     assert!(!matches!(
         result,
@@ -1533,7 +1532,7 @@ fn edge_case_zero_coefficient() {
         binop(BinOp::Mul, int_lit(0), var("x")),
         int_lit(5),
     );
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -1544,7 +1543,7 @@ fn edge_case_zero_coefficient() {
 fn edge_case_trivial_tautology() {
     // x == x (SAT - tautology)
     let expr = binop(BinOp::Eq, var("x"), var("x"));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1555,7 +1554,7 @@ fn edge_case_trivial_tautology() {
 fn edge_case_trivial_contradiction() {
     // x != x (UNSAT)
     let expr = binop(BinOp::Ne, var("x"), var("x"));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -1566,7 +1565,7 @@ fn edge_case_trivial_contradiction() {
 fn edge_case_empty_conjunction() {
     // true && true (SAT)
     let expr = binop(BinOp::And, bool_lit(true), bool_lit(true));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1577,7 +1576,7 @@ fn edge_case_empty_conjunction() {
 fn edge_case_empty_disjunction() {
     // false || false (UNSAT)
     let expr = binop(BinOp::Or, bool_lit(false), bool_lit(false));
-    let result = cross_validate_expr(&expr, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&expr, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothUnsat | CrossValidationResult::Skipped(_)
@@ -1590,7 +1589,7 @@ fn edge_case_double_negation() {
     let inner = binop(BinOp::Gt, var("x"), int_lit(0));
     let negated = unop(UnOp::Not, inner.clone());
     let double_negated = unop(UnOp::Not, negated);
-    let result = cross_validate_expr(&double_negated, SmtLogic::QF_LIA);
+    let result = cross_validate_expr(&double_negated, Cvc5SmtLogic::QF_LIA);
     assert!(matches!(
         result,
         CrossValidationResult::BothSat | CrossValidationResult::Skipped(_)
@@ -1610,7 +1609,7 @@ fn edge_case_double_negation() {
 // ==================== Helper Functions ====================
 
 /// Cross-validate an expression between Z3 and CVC5
-fn cross_validate_expr(expr: &Expr, logic: SmtLogic) -> CrossValidationResult {
+fn cross_validate_expr(expr: &Expr, logic: Cvc5SmtLogic) -> CrossValidationResult {
     let start = Instant::now();
 
     // Try Z3
@@ -1661,7 +1660,7 @@ fn cross_validate_expr(expr: &Expr, logic: SmtLogic) -> CrossValidationResult {
 /// - Model extraction for SAT results
 /// - Unsat core extraction for UNSAT results
 /// - Automatic tactic selection based on problem analysis
-fn try_z3(expr: &Expr, logic: SmtLogic) -> Result<String, String> {
+fn try_z3(expr: &Expr, logic: Cvc5SmtLogic) -> Result<String, String> {
     use verum_smt::context::Context;
     use verum_smt::translate::Translator;
     use z3::ast::Ast;
@@ -1669,15 +1668,15 @@ fn try_z3(expr: &Expr, logic: SmtLogic) -> Result<String, String> {
     // Create Z3 context and solver with logic-specific configuration
     let ctx = Context::new();
     let logic_str = match logic {
-        SmtLogic::QF_LIA => Some("QF_LIA"),
-        SmtLogic::QF_LRA => Some("QF_LRA"),
-        SmtLogic::QF_BV => Some("QF_BV"),
-        SmtLogic::QF_NIA => Some("QF_NIA"),
-        SmtLogic::QF_NRA => Some("QF_NRA"),
-        SmtLogic::QF_AX => Some("QF_AX"),
-        SmtLogic::QF_UFLIA => Some("QF_UFLIA"),
-        SmtLogic::QF_AUFLIA => Some("QF_AUFLIA"),
-        SmtLogic::ALL => None,
+        Cvc5SmtLogic::QF_LIA => Some("QF_LIA"),
+        Cvc5SmtLogic::QF_LRA => Some("QF_LRA"),
+        Cvc5SmtLogic::QF_BV => Some("QF_BV"),
+        Cvc5SmtLogic::QF_NIA => Some("QF_NIA"),
+        Cvc5SmtLogic::QF_NRA => Some("QF_NRA"),
+        Cvc5SmtLogic::QF_AX => Some("QF_AX"),
+        Cvc5SmtLogic::QF_UFLIA => Some("QF_UFLIA"),
+        Cvc5SmtLogic::QF_AUFLIA => Some("QF_AUFLIA"),
+        Cvc5SmtLogic::ALL => None,
     };
 
     // Create solver with optional logic specialization
@@ -1718,7 +1717,7 @@ fn try_z3(expr: &Expr, logic: SmtLogic) -> Result<String, String> {
 /// CVC5 provides an independent SMT solver with different heuristics
 /// and solving strategies, making it ideal for detecting potential
 /// soundness issues in Z3 results.
-fn try_cvc5(expr: &Expr, logic: SmtLogic) -> Result<String, String> {
+fn try_cvc5(expr: &Expr, logic: Cvc5SmtLogic) -> Result<String, String> {
     // Note: CVC5 backend requires the cvc5 library to be installed.
     // When the cvc5 library is not available, we return a skip result.
     // The full implementation uses Cvc5Backend from cvc5_backend.rs.

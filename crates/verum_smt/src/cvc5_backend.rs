@@ -298,7 +298,10 @@ pub enum SmtLogic {
 }
 
 impl SmtLogic {
-    fn as_str(&self) -> &'static str {
+    /// Return the SMT-LIB 2 logic name string (e.g., `"QF_LIA"`).
+    ///
+    /// These strings are passed directly to CVC5's `set-logic` command.
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::QF_LIA => "QF_LIA",
             Self::QF_LRA => "QF_LRA",

@@ -30,7 +30,7 @@
 #![cfg(feature = "cvc5")]
 
 use verum_smt::{
-    Cvc5Backend, Cvc5Config, Cvc5Error, QuantifierMode, SmtLogic, create_cvc5_backend,
+    Cvc5Backend, Cvc5Config, Cvc5Error, QuantifierMode, Cvc5SmtLogic, create_cvc5_backend,
     create_cvc5_backend_for_logic,
 };
 
@@ -40,7 +40,7 @@ use verum_smt::{
 fn test_cvc5_basic_sat() {
     // x > 0 ∧ x < 10 (SAT)
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         ..Default::default()
     };
 
@@ -53,7 +53,7 @@ fn test_cvc5_basic_sat() {
 fn test_cvc5_basic_unsat() {
     // x > 0 ∧ x < 0 (UNSAT)
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         ..Default::default()
     };
 
@@ -65,7 +65,7 @@ fn test_cvc5_basic_unsat() {
 fn test_cvc5_tautology() {
     // x = x (always SAT)
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         ..Default::default()
     };
 
@@ -77,7 +77,7 @@ fn test_cvc5_tautology() {
 fn test_cvc5_contradiction() {
     // true ∧ false (UNSAT)
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         ..Default::default()
     };
 
@@ -91,7 +91,7 @@ fn test_cvc5_contradiction() {
 fn test_cvc5_model_extraction_integers() {
     // x > 5 ∧ x < 10, extract value of x
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_models: true,
         ..Default::default()
     };
@@ -104,7 +104,7 @@ fn test_cvc5_model_extraction_integers() {
 fn test_cvc5_model_extraction_booleans() {
     // a ∨ b, extract values
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_models: true,
         ..Default::default()
     };
@@ -117,7 +117,7 @@ fn test_cvc5_model_extraction_booleans() {
 fn test_cvc5_model_extraction_reals() {
     // x/2 > 1.5, extract rational value
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LRA,
+        logic: Cvc5SmtLogic::QF_LRA,
         produce_models: true,
         ..Default::default()
     };
@@ -130,7 +130,7 @@ fn test_cvc5_model_extraction_reals() {
 fn test_cvc5_model_multiple_variables() {
     // x + y = 10 ∧ x > y, extract both
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_models: true,
         ..Default::default()
     };
@@ -145,7 +145,7 @@ fn test_cvc5_model_multiple_variables() {
 fn test_cvc5_unsat_core_simple() {
     // x > 0 ∧ x < 0, both constraints in core
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_unsat_cores: true,
         ..Default::default()
     };
@@ -158,7 +158,7 @@ fn test_cvc5_unsat_core_simple() {
 fn test_cvc5_unsat_core_minimal() {
     // x > 0 ∧ x < 0 ∧ y > 0, only first two in core
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_unsat_cores: true,
         ..Default::default()
     };
@@ -171,7 +171,7 @@ fn test_cvc5_unsat_core_minimal() {
 fn test_cvc5_unsat_core_empty_on_sat() {
     // x > 0 (SAT), no unsat core
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_unsat_cores: true,
         ..Default::default()
     };
@@ -185,7 +185,7 @@ fn test_cvc5_unsat_core_empty_on_sat() {
 #[test]
 fn test_cvc5_incremental_push_pop() {
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         incremental: true,
         ..Default::default()
     };
@@ -198,7 +198,7 @@ fn test_cvc5_incremental_push_pop() {
 fn test_cvc5_incremental_multiple_levels() {
     // Push, push, pop, pop
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         incremental: true,
         ..Default::default()
     };
@@ -211,7 +211,7 @@ fn test_cvc5_incremental_multiple_levels() {
 fn test_cvc5_incremental_stack_underflow() {
     // Pop without push should error
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         incremental: true,
         ..Default::default()
     };
@@ -228,7 +228,7 @@ fn test_cvc5_incremental_stack_underflow() {
 fn test_cvc5_forall_simple() {
     // ∀x. x ≥ 0 ∨ x < 0 (valid)
     let config = Cvc5Config {
-        logic: SmtLogic::ALL,
+        logic: Cvc5SmtLogic::ALL,
         quantifier_mode: QuantifierMode::Auto,
         ..Default::default()
     };
@@ -241,7 +241,7 @@ fn test_cvc5_forall_simple() {
 fn test_cvc5_exists_simple() {
     // ∃x. x > 0 (SAT)
     let config = Cvc5Config {
-        logic: SmtLogic::ALL,
+        logic: Cvc5SmtLogic::ALL,
         quantifier_mode: QuantifierMode::Auto,
         ..Default::default()
     };
@@ -254,7 +254,7 @@ fn test_cvc5_exists_simple() {
 fn test_cvc5_nested_quantifiers() {
     // ∀x. ∃y. y > x
     let config = Cvc5Config {
-        logic: SmtLogic::ALL,
+        logic: Cvc5SmtLogic::ALL,
         quantifier_mode: QuantifierMode::MBQI,
         ..Default::default()
     };
@@ -269,7 +269,7 @@ fn test_cvc5_nested_quantifiers() {
 fn test_cvc5_array_select_store() {
     // store(a, i, v)[i] = v
     let config = Cvc5Config {
-        logic: SmtLogic::QF_AUFLIA,
+        logic: Cvc5SmtLogic::QF_AUFLIA,
         ..Default::default()
     };
 
@@ -281,7 +281,7 @@ fn test_cvc5_array_select_store() {
 fn test_cvc5_array_extensionality() {
     // ∀i. a[i] = b[i] → a = b
     let config = Cvc5Config {
-        logic: SmtLogic::QF_AX,
+        logic: Cvc5SmtLogic::QF_AX,
         ..Default::default()
     };
 
@@ -295,7 +295,7 @@ fn test_cvc5_array_extensionality() {
 fn test_cvc5_linear_integer_arithmetic() {
     // 2x + 3y = 10
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         ..Default::default()
     };
 
@@ -307,7 +307,7 @@ fn test_cvc5_linear_integer_arithmetic() {
 fn test_cvc5_linear_real_arithmetic() {
     // x/2 + y/3 = 1.5
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LRA,
+        logic: Cvc5SmtLogic::QF_LRA,
         ..Default::default()
     };
 
@@ -319,7 +319,7 @@ fn test_cvc5_linear_real_arithmetic() {
 fn test_cvc5_nonlinear_arithmetic() {
     // x² + y² = 25 (circle equation)
     let config = Cvc5Config {
-        logic: SmtLogic::QF_NRA,
+        logic: Cvc5SmtLogic::QF_NRA,
         ..Default::default()
     };
 
@@ -331,7 +331,7 @@ fn test_cvc5_nonlinear_arithmetic() {
 fn test_cvc5_bit_vectors() {
     // bv8[00000001] + bv8[00000001] = bv8[00000010]
     let config = Cvc5Config {
-        logic: SmtLogic::QF_BV,
+        logic: Cvc5SmtLogic::QF_BV,
         ..Default::default()
     };
 
@@ -344,7 +344,7 @@ fn test_cvc5_bit_vectors() {
 #[test]
 fn test_cvc5_timeout_handling() {
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         timeout_ms: Some(100).into(), // Very short timeout
         ..Default::default()
     };
@@ -358,7 +358,7 @@ fn test_cvc5_timeout_handling() {
 #[test]
 fn test_cvc5_default_config() {
     let config = Cvc5Config::default();
-    assert_eq!(config.logic, SmtLogic::ALL);
+    assert_eq!(config.logic, Cvc5SmtLogic::ALL);
     assert!(config.incremental);
     assert!(config.produce_models);
     assert!(config.produce_proofs);
@@ -368,7 +368,7 @@ fn test_cvc5_default_config() {
 #[test]
 fn test_cvc5_custom_config() {
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         timeout_ms: Some(5000).into(),
         incremental: false,
         produce_models: false,
@@ -394,19 +394,19 @@ fn test_create_cvc5_backend_default() {
 
 #[test]
 fn test_create_cvc5_backend_for_logic_lia() {
-    let result = create_cvc5_backend_for_logic(SmtLogic::QF_LIA);
+    let result = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
     assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
 }
 
 #[test]
 fn test_create_cvc5_backend_for_logic_bv() {
-    let result = create_cvc5_backend_for_logic(SmtLogic::QF_BV);
+    let result = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_BV);
     assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
 }
 
 #[test]
 fn test_create_cvc5_backend_for_logic_nra() {
-    let result = create_cvc5_backend_for_logic(SmtLogic::QF_NRA);
+    let result = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_NRA);
     assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
 }
 
@@ -428,7 +428,7 @@ fn test_cvc5_stats_initialization() {
 #[test]
 fn test_cvc5_proof_generation() {
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_proofs: true,
         ..Default::default()
     };
@@ -483,7 +483,7 @@ fn test_cvc5_array_sort_creation() {
 fn test_cvc5_end_to_end_sat() {
     // Complete workflow: create backend, assert, check, extract model
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_models: true,
         ..Default::default()
     };
@@ -496,7 +496,7 @@ fn test_cvc5_end_to_end_sat() {
 fn test_cvc5_end_to_end_unsat() {
     // Complete workflow: create backend, assert, check, extract unsat core
     let config = Cvc5Config {
-        logic: SmtLogic::QF_LIA,
+        logic: Cvc5SmtLogic::QF_LIA,
         produce_unsat_cores: true,
         produce_proofs: true,
         ..Default::default()

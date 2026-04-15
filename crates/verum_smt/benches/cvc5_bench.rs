@@ -15,7 +15,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::time::Duration;
 
-use verum_smt::{Cvc5Backend, Cvc5Config, SmtLogic, create_cvc5_backend_for_logic};
+use verum_smt::{Cvc5Backend, Cvc5Config, Cvc5SmtLogic, create_cvc5_backend_for_logic};
 
 // ==================== Linear Integer Arithmetic ====================
 
@@ -26,7 +26,7 @@ fn bench_cvc5_lia_simple(c: &mut Criterion) {
     group.bench_function("cvc5_lia_x_gt_0", |b| {
         b.iter(|| {
             // x > 0
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_LIA);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
             black_box(backend)
         });
     });
@@ -41,7 +41,7 @@ fn bench_cvc5_lia_complex(c: &mut Criterion) {
     group.bench_function("cvc5_lia_system", |b| {
         b.iter(|| {
             // 2x + 3y = 10 ∧ x - y = 2
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_LIA);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
             black_box(backend)
         });
     });
@@ -57,7 +57,7 @@ fn bench_cvc5_vs_z3_lia(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("cvc5", size), size, |b, &size| {
             b.iter(|| {
                 // Create backend with n variables
-                let backend = create_cvc5_backend_for_logic(SmtLogic::QF_LIA);
+                let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
                 black_box(backend)
             });
         });
@@ -78,7 +78,7 @@ fn bench_cvc5_lra_simple(c: &mut Criterion) {
     group.bench_function("cvc5_lra_division", |b| {
         b.iter(|| {
             // x/2 + y/3 = 1
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_LRA);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LRA);
             black_box(backend)
         });
     });
@@ -96,7 +96,7 @@ fn bench_cvc5_lra_vs_z3(c: &mut Criterion) {
             constraints,
             |b, &n| {
                 b.iter(|| {
-                    let backend = create_cvc5_backend_for_logic(SmtLogic::QF_LRA);
+                    let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LRA);
                     black_box(backend)
                 });
             },
@@ -115,7 +115,7 @@ fn bench_cvc5_nra_quadratic(c: &mut Criterion) {
     group.bench_function("cvc5_nra_circle", |b| {
         b.iter(|| {
             // x² + y² = 25
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_NRA);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_NRA);
             black_box(backend)
         });
     });
@@ -131,7 +131,7 @@ fn bench_cvc5_nra_vs_z3(c: &mut Criterion) {
     group.bench_function("cvc5_nra_polynomial", |b| {
         b.iter(|| {
             // x³ + 2x² - 5x + 1 = 0
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_NRA);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_NRA);
             black_box(backend)
         });
     });
@@ -148,7 +148,7 @@ fn bench_cvc5_bv_arithmetic(c: &mut Criterion) {
     group.bench_function("cvc5_bv_add", |b| {
         b.iter(|| {
             // bv[8] addition
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_BV);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_BV);
             black_box(backend)
         });
     });
@@ -163,7 +163,7 @@ fn bench_cvc5_bv_vs_z3(c: &mut Criterion) {
     for width in [8, 16, 32, 64].iter() {
         group.bench_with_input(BenchmarkId::new("cvc5", width), width, |b, &w| {
             b.iter(|| {
-                let backend = create_cvc5_backend_for_logic(SmtLogic::QF_BV);
+                let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_BV);
                 black_box(backend)
             });
         });
@@ -181,7 +181,7 @@ fn bench_cvc5_arrays_simple(c: &mut Criterion) {
     group.bench_function("cvc5_array_select_store", |b| {
         b.iter(|| {
             // store(a, i, v)[i] = v
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_AUFLIA);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_AUFLIA);
             black_box(backend)
         });
     });
@@ -196,7 +196,7 @@ fn bench_cvc5_arrays_vs_z3(c: &mut Criterion) {
     for ops in [5, 10, 20, 50].iter() {
         group.bench_with_input(BenchmarkId::new("cvc5", ops), ops, |b, &n| {
             b.iter(|| {
-                let backend = create_cvc5_backend_for_logic(SmtLogic::QF_AUFLIA);
+                let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_AUFLIA);
                 black_box(backend)
             });
         });
@@ -214,7 +214,7 @@ fn bench_cvc5_incremental(c: &mut Criterion) {
     group.bench_function("cvc5_push_pop", |b| {
         b.iter(|| {
             let config = Cvc5Config {
-                logic: SmtLogic::QF_LIA,
+                logic: Cvc5SmtLogic::QF_LIA,
                 incremental: true,
                 ..Default::default()
             };
@@ -242,7 +242,7 @@ fn bench_cvc5_incremental_vs_z3(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("cvc5", levels), levels, |b, &n| {
             b.iter(|| {
                 let config = Cvc5Config {
-                    logic: SmtLogic::QF_LIA,
+                    logic: Cvc5SmtLogic::QF_LIA,
                     incremental: true,
                     ..Default::default()
                 };
@@ -272,7 +272,7 @@ fn bench_cvc5_model_extraction(c: &mut Criterion) {
     group.bench_function("cvc5_model_simple", |b| {
         b.iter(|| {
             let config = Cvc5Config {
-                logic: SmtLogic::QF_LIA,
+                logic: Cvc5SmtLogic::QF_LIA,
                 produce_models: true,
                 ..Default::default()
             };
@@ -294,7 +294,7 @@ fn bench_cvc5_unsat_core(c: &mut Criterion) {
     group.bench_function("cvc5_core_extraction", |b| {
         b.iter(|| {
             let config = Cvc5Config {
-                logic: SmtLogic::QF_LIA,
+                logic: Cvc5SmtLogic::QF_LIA,
                 produce_unsat_cores: true,
                 ..Default::default()
             };
@@ -323,7 +323,7 @@ fn bench_cvc5_config_overhead(c: &mut Criterion) {
     group.bench_function("cvc5_custom_config", |b| {
         b.iter(|| {
             let config = Cvc5Config {
-                logic: SmtLogic::QF_LIA,
+                logic: Cvc5SmtLogic::QF_LIA,
                 timeout_ms: Some(5000).into(),
                 incremental: true,
                 produce_models: true,
@@ -356,14 +356,14 @@ fn bench_cvc5_backend_creation(c: &mut Criterion) {
 
     group.bench_function("cvc5_create_lia", |b| {
         b.iter(|| {
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_LIA);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
             black_box(backend)
         });
     });
 
     group.bench_function("cvc5_create_bv", |b| {
         b.iter(|| {
-            let backend = create_cvc5_backend_for_logic(SmtLogic::QF_BV);
+            let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_BV);
             black_box(backend)
         });
     });
@@ -381,7 +381,7 @@ fn bench_cvc5_large_formulas(c: &mut Criterion) {
     for num_vars in [100, 500, 1000].iter() {
         group.bench_with_input(BenchmarkId::new("cvc5", num_vars), num_vars, |b, &n| {
             b.iter(|| {
-                let backend = create_cvc5_backend_for_logic(SmtLogic::QF_LIA);
+                let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
                 black_box(backend)
             });
         });

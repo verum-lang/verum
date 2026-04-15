@@ -49,7 +49,7 @@ fn mk_bool_lit(value: bool) -> Expr {
 fn mk_int_lit(value: i64) -> Expr {
     Expr::new(
         ExprKind::Literal(Literal {
-            kind: LiteralKind::Int(value.to_string()),
+            kind: LiteralKind::Int(verum_ast::literal::IntLit::new(value as i128)),
             span: Span::default(),
         }),
         Span::default(),

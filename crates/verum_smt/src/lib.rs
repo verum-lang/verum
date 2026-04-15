@@ -145,6 +145,8 @@ pub mod portfolio_executor; // Parallel Z3 + CVC5 execution with first-wins/cros
 pub mod solver_adapters;  // PortfolioSolver adapters bridging SmtBackend → portfolio API
 pub mod routing_stats;    // Routing decision telemetry + per-theory statistics
 pub mod verify_strategy;  // @verify(...) attribute → BackendChoice mapping
+pub mod cvc5_advanced;    // SyGuS, abduction, QE, FMF (CVC5-exclusive features)
+pub mod solver_capability; // Unified capability registry: auto-route features to best solver
 
 // Advanced Z3 Features
 pub mod advanced_model;

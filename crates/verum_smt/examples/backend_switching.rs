@@ -23,9 +23,8 @@ fn main() {
 
 #[cfg(feature = "cvc5")]
 use verum_smt::{
-    BackendChoice, FallbackConfig as BackendFallbackConfig,
-    PortfolioConfig as BackendPortfolioConfig, PortfolioMode, SmtBackendSwitcher, SmtConfig,
-    SwitcherConfig, ValidationConfig as BackendValidationConfig,
+    BackendChoice, BackendFallbackConfig, BackendPortfolioConfig, PortfolioMode,
+    SmtBackendSwitcher, SmtConfig, SwitcherConfig, BackendValidationConfig,
 };
 
 #[cfg(feature = "cvc5")]
@@ -80,11 +79,10 @@ fn example_1_manual_z3() {
     println!("  Backend: {:?}", switcher.current_backend());
     println!("  Configuration: Z3 with 10s timeout\n");
 
-    // Solve example problem
-    let result = switcher.solve(|_backend| {
-        // Stub: would encode and solve SMT problem
-        Ok(verum_smt::backend_trait::SatResult::Sat)
-    });
+    // Solve example problem (empty assertions = trivially SAT).
+    // Real code would construct a List<Expr> with actual assertions.
+    let assertions = verum_common::List::<verum_ast::Expr>::new();
+    let result = switcher.solve(&assertions);
 
     println!("  Result: {:?}\n", result);
 }
@@ -298,12 +296,17 @@ fn example_7_config_files() {
 fn example_8_env_variables() {
     println!("--- Example 8: Environment Variables ---");
 
-    // Set example environment variables
-    std::env::set_var("VERUM_SMT_BACKEND", "portfolio");
-    std::env::set_var("VERUM_SMT_TIMEOUT", "60000");
-    std::env::set_var("VERUM_SMT_VERBOSE", "true");
-    std::env::set_var("VERUM_SMT_FALLBACK", "true");
-    std::env::set_var("VERUM_SMT_PORTFOLIO_MODE", "consensus");
+    // Set example environment variables.
+    // SAFETY (edition 2024): `set_var` is unsafe because modifying the
+    // process environment is not thread-safe. In this single-threaded
+    // example it's fine.
+    unsafe {
+        std::env::set_var("VERUM_SMT_BACKEND", "portfolio");
+        std::env::set_var("VERUM_SMT_TIMEOUT", "60000");
+        std::env::set_var("VERUM_SMT_VERBOSE", "true");
+        std::env::set_var("VERUM_SMT_FALLBACK", "true");
+        std::env::set_var("VERUM_SMT_PORTFOLIO_MODE", "consensus");
+    }
 
     // Load configuration from environment
     let config = SmtConfig::from_env();

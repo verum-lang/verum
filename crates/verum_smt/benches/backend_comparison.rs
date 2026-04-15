@@ -22,7 +22,7 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use verum_smt::{
-    Cvc5Backend, Cvc5Config, SmtLogic,
+    Cvc5Backend, Cvc5Config, Cvc5SmtLogic,
     z3_backend::{Z3Config, Z3ContextManager, Z3Solver},
 };
 
@@ -41,7 +41,7 @@ use verum_common::{List, Map, Maybe};
 /// Benchmark configuration
 struct BenchConfig {
     name: &'static str,
-    logic: SmtLogic,
+    logic: Cvc5SmtLogic,
     problem_sizes: Vec<usize>,
 }
 
@@ -482,7 +482,7 @@ fn bench_solver_initialization(c: &mut Criterion) {
     group.bench_function("cvc5_backend_creation", |b| {
         b.iter(|| {
             let config = Cvc5Config {
-                logic: SmtLogic::QF_LIA,
+                logic: Cvc5SmtLogic::QF_LIA,
                 ..Default::default()
             };
             let _backend = Cvc5Backend::new(config);
