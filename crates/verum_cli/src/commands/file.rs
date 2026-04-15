@@ -61,6 +61,9 @@ pub fn build(
     // If output is specified, use it as-is
     let output_path = output.map(PathBuf::from).unwrap_or_default();
 
+    // Inherit CLI feature overrides so single-file AOT build fires
+    // the same gates as `verum build` / `verum run`.
+    let language_features = crate::feature_overrides::scratch_features()?;
     let options = CompilerOptions {
         input: input.clone(),
         output: output_path.clone(),
@@ -70,6 +73,7 @@ pub fn build(
         optimization_level: opt_level,
         output_format: OutputFormat::Human,
         emit_vbc,
+        language_features,
         ..Default::default()
     };
 
@@ -161,15 +165,7 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
     // Build LanguageFeatures from any installed CLI overrides so
     // `verum check file.vr -Z safety.unsafe_allowed=false` fires the
     // same gates as `verum run` / `verum build`.
-    let language_features = {
-        let mut m = crate::config::create_default_manifest(
-            "script",
-            false,
-            crate::config::LanguageProfile::Application,
-        );
-        crate::feature_overrides::apply_global(&mut m)?;
-        crate::feature_overrides::manifest_to_features(&m)?
-    };
+    let language_features = crate::feature_overrides::scratch_features()?;
     let options = CompilerOptions {
         input,
         output_format: OutputFormat::Human,
@@ -252,15 +248,7 @@ pub fn run_with_tier(
     // `-Z safety.unsafe_allowed=false` etc. on the command line and
     // the installed global override set applies. This ensures feature
     // gates fire identically in Tier 0 (interpreter) AND Tier 1 (AOT).
-    let language_features = {
-        let mut m = crate::config::create_default_manifest(
-            "script",
-            false,
-            crate::config::LanguageProfile::Application,
-        );
-        crate::feature_overrides::apply_global(&mut m)?;
-        crate::feature_overrides::manifest_to_features(&m)?
-    };
+    let language_features = crate::feature_overrides::scratch_features()?;
 
     match tier_num {
         0 => {
@@ -410,6 +398,7 @@ pub fn verify(
     }
 
     let verify_mode = parse_verify_mode(mode)?;
+    let language_features = crate::feature_overrides::scratch_features()?;
 
     let options = CompilerOptions {
         input,
@@ -417,6 +406,7 @@ pub fn verify(
         smt_timeout_secs: timeout,
         show_verification_costs: show_costs,
         output_format: OutputFormat::Human,
+        language_features,
         ..Default::default()
     };
 
@@ -446,11 +436,13 @@ pub fn profile(
         return Err(CliError::FileNotFound(file.to_string()));
     }
 
+    let language_features = crate::feature_overrides::scratch_features()?;
     let options = CompilerOptions {
         input,
         profile_memory: memory,
         hot_path_threshold: hot_threshold,
         output_format: OutputFormat::Human,
+        language_features,
         ..Default::default()
     };
 
@@ -472,6 +464,7 @@ pub fn profile(
 pub fn repl(preload: Option<&str>, skip_verify: bool) -> Result<(), CliError> {
     ui::step("Starting REPL");
 
+    let language_features = crate::feature_overrides::scratch_features()?;
     let options = CompilerOptions {
         verify_mode: if skip_verify {
             VerifyMode::Runtime
@@ -479,6 +472,7 @@ pub fn repl(preload: Option<&str>, skip_verify: bool) -> Result<(), CliError> {
             VerifyMode::Auto
         },
         output_format: OutputFormat::Human,
+        language_features,
         ..Default::default()
     };
 

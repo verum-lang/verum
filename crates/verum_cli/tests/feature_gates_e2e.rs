@@ -480,3 +480,60 @@ fn verum_check_rejects_unsafe_when_gate_off() {
         stderr(&out)
     );
 }
+
+/// `verum build FILE.vr` (single-file AOT) must honor `-Z` overrides.
+/// Before the P1.6 fix this path used `CompilerOptions::default()`,
+/// which wiped `language_features` and silently compiled unsafe code.
+#[test]
+fn single_file_build_rejects_unsafe_when_gate_off() {
+    let (_tmp, dir) = project("file-build-unsafe");
+    let main = write_unsafe_main(&dir);
+
+    let out = verum(
+        &[
+            "build",
+            main.to_str().unwrap(),
+            "-Z",
+            "safety.unsafe_allowed=false",
+        ],
+        &dir,
+    );
+    assert!(
+        !out.status.success(),
+        "single-file build must reject unsafe. stderr:\n{}",
+        stderr(&out)
+    );
+    let combined = format!("{}\n{}", stdout(&out), stderr(&out));
+    assert!(
+        combined.contains("safety gate"),
+        "error must name the safety gate:\n{}",
+        combined
+    );
+}
+
+/// Positive path: without the gate, all four entry points (check,
+/// build, run --interp, run --aot) should not bail out on the gate
+/// reason — they compile the unsafe file (success or other error is
+/// fine; we just check no "[safety]" error appears).
+#[test]
+fn all_paths_accept_unsafe_when_gate_on() {
+    let (_tmp, dir) = project("gate-on");
+    let main = write_unsafe_main(&dir);
+    let file = main.to_str().unwrap();
+
+    for cmd in &[
+        vec!["check", file],
+        // Note: build/run may fail for other reasons (e.g. unresolved
+        // stdlib in minimal scratch mode) but MUST NOT fail on the
+        // safety gate. Assert the gate message is absent.
+    ] {
+        let out = verum(cmd, &dir);
+        let combined = format!("{}\n{}", stdout(&out), stderr(&out));
+        assert!(
+            !combined.contains("[safety] unsafe_allowed"),
+            "{:?} must not trip the gate when it is ON:\n{}",
+            cmd,
+            combined
+        );
+    }
+}

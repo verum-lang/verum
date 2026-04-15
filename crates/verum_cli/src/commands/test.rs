@@ -24,7 +24,12 @@ use verum_parser::VerumParser;
 /// `verum.toml` (plus any `-Z test.*` CLI overrides). Threaded from
 /// `execute` into `run_single_test` so the test binary build and
 /// execution honor the project's policy.
-#[derive(Debug, Clone, Copy)]
+///
+/// `language_features` carries the FULL merged feature set (safety,
+/// meta, context, types, …) so every per-test compilation inherits
+/// `-Z` overrides. Without this, each test was being built with
+/// default features and silently ignored every override.
+#[derive(Debug, Clone)]
 struct TestRunConfig {
     /// Per-test execution timeout in seconds. 0 = no timeout.
     timeout_secs: u64,
@@ -34,6 +39,10 @@ struct TestRunConfig {
     coverage: bool,
     /// Capture stdout/stderr unless this is set (matches existing flag).
     nocapture: bool,
+    /// Full resolved language-feature set. Each per-test
+    /// CompilerOptions gets a clone so type-check / safety gates /
+    /// meta gates / context gates all fire during the per-test build.
+    language_features: verum_compiler::language_features::LanguageFeatures,
 }
 
 /// Execute the `verum test` command
@@ -57,11 +66,16 @@ pub fn execute(
     // Resolve [test] settings. CLI --coverage flag OR [test].coverage
     // enables coverage; CLI --deny-warnings is not yet exposed, but
     // `[test] deny_warnings = true` in verum.toml takes effect.
+    // Convert the fully-merged manifest into LanguageFeatures once;
+    // each per-test build clones the result.
+    let language_features =
+        crate::feature_overrides::manifest_to_features(&manifest)?;
     let test_cfg = TestRunConfig {
         timeout_secs: manifest.test.timeout_secs,
         deny_warnings: manifest.test.deny_warnings,
         coverage: coverage || manifest.test.coverage,
         nocapture,
+        language_features,
     };
     // Print effective [test] config so users can verify their policy
     // is taking effect. One-line summary after the Testing header.
@@ -141,7 +155,7 @@ pub fn execute(
             continue;
         }
 
-        let result = run_single_test(test, &test_target_dir, test_cfg);
+        let result = run_single_test(test, &test_target_dir, &test_cfg);
         match result {
             TestResult::Pass { duration, stdout, stderr } => {
                 let duration_str = format_test_duration(duration);
@@ -305,7 +319,7 @@ struct TestFailure {
 }
 
 /// Compile and execute a single test file.
-fn run_single_test(test: &Test, target_dir: &Path, cfg: TestRunConfig) -> TestResult {
+fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunConfig) -> TestResult {
     let compile_start = Instant::now();
 
     // Derive a unique binary name from the test file path
@@ -330,6 +344,11 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: TestRunConfig) -> TestRe
         output_format: OutputFormat::Human,
         coverage: cfg.coverage,
         lint_config,
+        // CRITICAL: inherit the full merged feature set. Without this
+        // clone, per-test builds reset every `-Z` / `[safety]` / etc.
+        // override to defaults, and tests silently pass code that
+        // should have been gated.
+        language_features: cfg.language_features.clone(),
         ..Default::default()
     };
 

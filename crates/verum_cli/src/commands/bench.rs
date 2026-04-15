@@ -257,11 +257,15 @@ fn extract_fn_name(line: &str) -> Option<String> {
 
 /// Compile a benchmark file to a native executable.
 fn compile_bench_file(file: &Path) -> Result<PathBuf> {
+    // Inherit CLI feature overrides so benchmark builds honor the
+    // same `-Z` / `--cbgr` / `--no-cubical` settings as `verum build`.
+    let language_features = crate::feature_overrides::scratch_features()?;
     let options = CompilerOptions {
         input: file.to_path_buf(),
         verify_mode: VerifyMode::Runtime,
         output_format: OutputFormat::Human,
         optimization_level: 2, // Optimized for accurate benchmarks
+        language_features,
         ..Default::default()
     };
 

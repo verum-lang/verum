@@ -58,6 +58,28 @@ pub fn apply_global(manifest: &mut Manifest) -> Result<()> {
     Ok(())
 }
 
+/// One-shot helper for single-file commands that don't have a
+/// `verum.toml`.
+///
+/// Synthesizes a default Application-profile manifest, applies any
+/// installed CLI overrides (`-Z …`, `--no-cubical`, etc.), validates,
+/// and returns the resulting [`LanguageFeatures`]. This is the
+/// canonical path for `verum run FILE.vr` / `verum check FILE.vr` /
+/// `verum build FILE.vr` where no project manifest exists.
+///
+/// Use this instead of `CompilerOptions::default().language_features`
+/// — the latter silently drops every CLI override.
+pub fn scratch_features(
+) -> Result<verum_compiler::language_features::LanguageFeatures> {
+    let mut m = crate::config::create_default_manifest(
+        "script",
+        false,
+        crate::config::LanguageProfile::Application,
+    );
+    apply_global(&mut m)?;
+    manifest_to_features(&m)
+}
+
 /// Translate a fully-merged manifest into the compiler-facing
 /// [`verum_compiler::language_features::LanguageFeatures`] value.
 ///
