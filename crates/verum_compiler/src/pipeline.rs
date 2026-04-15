@@ -13330,10 +13330,34 @@ int main(int argc, char** argv) {
         // Phase 2: Parse
         let module = self.phase_parse(file_id)?;
 
+        // Phase 2.9: Safety gate — explicit for parity with CPU AOT.
+        self.phase_safety_gate(&module)?;
+
         // Phase 3: Type check
         self.phase_type_check(&module)?;
 
-        // Phase 4: Multi-module VBC codegen (resolves stdlib imports)
+        // Phase 3.5: Dependency analysis (target-profile enforcement).
+        self.phase_dependency_analysis(&module)?;
+
+        // Phase 4: Refinement verification (if enabled).
+        // GPU kernels can carry refinement types and contracts; they
+        // deserve the same SMT pass as the CPU AOT path.
+        if self.session.options().verify_mode.use_smt() {
+            self.phase_verify(&module)?;
+        }
+
+        // Phase 4c-4e: Context, send/sync, FFI validation —
+        // identical to the CPU AOT path. GPU code that uses `using
+        // [...]`, crosses thread boundaries, or declares FFI gets
+        // the same checks as CPU code.
+        self.phase_context_validation(&module);
+        self.phase_send_sync_validation(&module);
+        self.phase_ffi_validation(&module)?;
+
+        // Phase 5: CBGR analysis (tier promotion decisions).
+        self.phase_cbgr_analysis(&module)?;
+
+        // Phase 6: Multi-module VBC codegen (resolves stdlib imports)
         info!("  Converting AST to VBC bytecode (multi-module)");
         let vbc_module = self.compile_ast_to_vbc(&module)?;
         info!("  VBC bytecode generated: {} functions", vbc_module.functions.len());
