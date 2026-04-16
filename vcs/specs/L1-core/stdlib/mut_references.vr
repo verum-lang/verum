@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: references, mutable, cbgr
+// @timeout: 10000
+// @expect: pass
+
+fn increment_at(xs: &mut List<Int>, idx: Int) {
+    xs[idx] = xs[idx] + 1;
+}
+
+fn insertion_sort(xs: &mut List<Int>) {
+    let n = xs.len();
+    let mut i = 1;
+    while i < n {
+        let key = xs[i];
+        let mut j = i - 1;
+        while j >= 0 && xs[j] > key {
+            xs[j + 1] = xs[j];
+            j = j - 1;
+        }
+        xs[j + 1] = key;
+        i = i + 1;
+    }
+}
+
+fn main() {
+    // Mutable reference: increment
+    let mut data = [10, 20, 30];
+    increment_at(&mut data, 1);
+    assert_eq(data[1], 21);
+
+    // Mutable reference: sort
+    let mut nums = [5, 3, 8, 1, 9, 2, 7, 4, 6, 10];
+    insertion_sort(&mut nums);
+    assert_eq(nums[0], 1);
+    assert_eq(nums[9], 10);
+
+    // Multiple mutations
+    increment_at(&mut data, 0);
+    increment_at(&mut data, 0);
+    assert_eq(data[0], 12);
+}
