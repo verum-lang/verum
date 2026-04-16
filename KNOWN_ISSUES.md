@@ -19,20 +19,11 @@ Z3 global-context teardown racing with Rayon ThreadPool shutdown and CVC5 TermMa
 
 **Affected Platforms:** macOS aarch64 (Apple Silicon). Occurrence rate on Linux is unknown.
 
-## Feature Flags Not Yet Consumed
+## Feature Flags — All 51 Wired
 
-The following `verum.toml` configuration keys are accepted and validated but do **not** yet change compiler behavior. Setting them has no effect:
-
-- `[types]`: `higher_kinded`, `universe_polymorphism`, `coinductive`, `quotient`, `instance_search`, `coherence_check_depth`
-- `[runtime]`: All 8 fields (`cbgr_mode`, `async_scheduler`, `async_worker_threads`, `futures`, `nurseries`, `task_stack_size`, `heap_policy`, `panic`)
-- `[codegen]`: `monomorphization_cache`, `tail_call_optimization`, `vectorize`, `inline_depth`
-- `[meta]`: `quote_syntax`, `macro_recursion_limit`, `reflection`, `max_stage_level`
-- `[protocols]`: `higher_kinded_protocols`, `associated_types`, `generic_associated_types`
-- `[context]`: `negative_constraints`, `propagation_depth`
-- `[test]`: `differential`, `property_testing`, `proptest_cases`, `fuzzing`
-- `[debug]`: `step_granularity`, `inspect_depth`, `show_erased_proofs`
-
-**Active flags (change behavior, 29 total):** `types.refinement`, `types.cubical`, `types.dependent`, `codegen.tier`, `codegen.proof_erasure`, `codegen.mlir_gpu`, `codegen.debug_info`, `codegen.gpu_backend`, `meta.derive`, `meta.compile_time_functions`, `protocols.coherence`, `protocols.resolution_strategy`, `protocols.blanket_impls`, `safety.unsafe_allowed`, `safety.ffi`, `safety.ffi_boundary`, `safety.capability_required`, `safety.mls_level`, `safety.forbid_stdlib_extern`, `context.enabled`, `context.unresolved_policy`, `debug.dap_enabled`, `debug.port`, `test.timeout_secs`, `test.deny_warnings`, `test.coverage`, `test.parallel`.
+**All 51** `verum.toml` feature flags are now wired from config through
+the compilation pipeline to the subsystem that consumes them. Setting
+any key in `verum.toml` or via `-Z` on the CLI has observable effect.
 
 ## GPU in Interpreter Mode
 
