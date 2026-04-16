@@ -1,0 +1,44 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: functions, closures, higher-order
+// @timeout: 10000
+// @expect: pass
+
+/// Function definitions, calls, higher-order functions.
+
+fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+fn multiply(a: Int, b: Int) -> Int {
+    a * b
+}
+
+fn apply(f: fn(Int, Int) -> Int, x: Int, y: Int) -> Int {
+    f(x, y)
+}
+
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
+    f(g(x))
+}
+
+fn double(x: Int) -> Int { x * 2 }
+fn increment(x: Int) -> Int { x + 1 }
+
+fn main() {
+    // Basic function calls
+    assert_eq(add(3, 4), 7);
+    assert_eq(multiply(5, 6), 30);
+
+    // Higher-order functions
+    assert_eq(apply(add, 10, 20), 30);
+    assert_eq(apply(multiply, 3, 7), 21);
+
+    // Composition
+    assert_eq(compose(double, increment, 5), 12);  // double(increment(5)) = double(6) = 12
+    assert_eq(compose(increment, double, 5), 11);  // increment(double(5)) = increment(10) = 11
+
+    // Recursive
+    assert_eq(add(add(1, 2), add(3, 4)), 10);
+}
