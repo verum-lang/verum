@@ -1,0 +1,39 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: try-operator, result, error-propagation
+// @timeout: 10000
+// @expect: pass
+
+fn safe_div(a: Int, b: Int) -> Result<Int, Text> {
+    if b == 0 { Err("div by zero") } else { Ok(a / b) }
+}
+
+fn compute(a: Int, b: Int, c: Int) -> Result<Int, Text> {
+    let x = safe_div(a, b)?;
+    let y = safe_div(x, c)?;
+    Ok(y)
+}
+
+fn main() {
+    // Success path
+    let r = compute(100, 5, 2);
+    match r {
+        Ok(v) => assert_eq(v, 10),
+        Err(e) => panic(e),
+    }
+
+    // Error propagation
+    let r2 = compute(100, 0, 2);
+    match r2 {
+        Ok(_) => panic("should fail"),
+        Err(e) => assert_eq(e, "div by zero"),
+    }
+
+    // Chained ? operations
+    let r3 = compute(1000, 10, 5);
+    match r3 {
+        Ok(v) => assert_eq(v, 20),
+        Err(_) => panic("should succeed"),
+    }
+}

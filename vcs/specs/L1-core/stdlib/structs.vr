@@ -1,0 +1,35 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: structs, fields, methods, mutation
+// @timeout: 10000
+// @expect: pass
+
+type Point is { x: Int, y: Int };
+
+implement Point {
+    fn translate(&mut self, dx: Int, dy: Int) {
+        self.x = self.x + dx;
+        self.y = self.y + dy;
+    }
+
+    fn distance_sq(&self) -> Int {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+fn main() {
+    // Construction
+    let mut p = Point { x: 3, y: 4 };
+    assert_eq(p.distance_sq(), 25);
+
+    // Method mutation
+    p.translate(1, 1);
+    assert_eq(p.x, 4);
+    assert_eq(p.y, 5);
+
+    // Direct field mutation
+    p.x = 10;
+    p.y = 0;
+    assert_eq(p.distance_sq(), 100);
+}

@@ -1,0 +1,49 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: map, collections, insert, get, contains
+// @timeout: 10000
+// @expect: pass
+
+fn main() {
+    // Basic Map operations
+    let mut m: Map<Text, Int> = Map.new();
+
+    // Insert
+    m.insert("alice", 30);
+    m.insert("bob", 25);
+    m.insert("charlie", 35);
+
+    // Length
+    assert_eq(m.len(), 3);
+
+    // Get
+    assert_eq(m.get("alice"), 30);
+    assert_eq(m.get("bob"), 25);
+    assert_eq(m.get("charlie"), 35);
+
+    // Contains
+    assert_eq(m.contains_key("alice"), true);
+    assert_eq(m.contains_key("dave"), false);
+
+    // Update existing key
+    m.insert("alice", 31);
+    assert_eq(m.get("alice"), 31);
+    assert_eq(m.len(), 3);
+
+    // Remove
+    m.remove("bob");
+    assert_eq(m.len(), 2);
+    assert_eq(m.contains_key("bob"), false);
+
+    // Int keys
+    let mut counts: Map<Int, Int> = Map.new();
+    let mut i = 0;
+    while i < 10 {
+        counts.insert(i, i * i);
+        i = i + 1;
+    }
+    assert_eq(counts.len(), 10);
+    assert_eq(counts.get(5), 25);
+    assert_eq(counts.get(9), 81);
+}

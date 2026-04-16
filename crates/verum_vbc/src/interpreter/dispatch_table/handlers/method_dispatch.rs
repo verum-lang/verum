@@ -991,7 +991,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         return Ok(DispatchResult::Continue);
     }
 
-    // DEBUG: List all Map-related functions when ensure_capacity is not found
+    #[cfg(debug_assertions)]
     if method_name.contains("ensure_capacity") {
         eprintln!("DEBUG: Looking for method '{}', is_builtin_collection={}", method_name, is_builtin_collection);
         eprintln!("DEBUG: All Map-related functions in module:");
@@ -1035,6 +1035,7 @@ pub(super) fn dispatch_primitive_method(
     method: &str,
     args: &RegRange,
 ) -> InterpreterResult<Option<Value>> {
+    #[cfg(debug_assertions)]
     eprintln!("DBG dispatch_primitive_method method={:?} is_int={} is_boxed_int={} is_ptr={} is_nil={}",
         method, receiver.is_int(), receiver.is_boxed_int(), receiver.is_ptr(), receiver.is_nil());
     // If method name is qualified (contains "."), check if the type prefix is a known builtin.

@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: context, provide, using, dependency-injection
+// @timeout: 10000
+// @expect: pass
+
+type Logger is {
+    prefix: Text,
+};
+
+implement Logger {
+    fn info(&self, msg: Text) {
+        print(f"[{self.prefix}] {msg}");
+    }
+
+    fn warn(&self, msg: Text) {
+        print(f"[{self.prefix} WARN] {msg}");
+    }
+}
+
+fn log_message(msg: Text) using [Logger] {
+    Logger.info(msg);
+}
+
+fn log_warning(msg: Text) using [Logger] {
+    Logger.warn(msg);
+}
+
+fn do_work() using [Logger] {
+    log_message("starting work");
+    log_warning("resource low");
+    log_message("work complete");
+}
+
+fn nested_calls() using [Logger] {
+    log_message("outer");
+    do_work();
+    log_message("done");
+}
+
+fn main() {
+    let logger = Logger { prefix: "APP" };
+    provide Logger = logger in {
+        do_work();
+        log_message("all done");
+    }
+
+    // Nested provide with different value
+    let debug_logger = Logger { prefix: "DEBUG" };
+    provide Logger = debug_logger in {
+        nested_calls();
+    }
+}

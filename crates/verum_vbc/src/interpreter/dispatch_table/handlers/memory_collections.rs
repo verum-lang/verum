@@ -1159,13 +1159,48 @@ pub(in super::super) fn handle_list_pop(state: &mut InterpreterState) -> Interpr
     Ok(DispatchResult::Continue)
 }
 
-/// Compute hash for a Value using FNV-1a on raw bits.
+/// Compute hash for a Value using FNV-1a.
+/// For heap-allocated strings (>6 bytes), hashes the string content
+/// rather than the pointer address to ensure consistent hashing.
 #[inline]
 pub(crate) fn value_hash(v: Value) -> usize {
-    let bits = v.to_bits();
-    // FNV-1a 64-bit
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
+
+    // For heap strings, hash the actual string bytes, not the pointer
+    if super::string_helpers::is_heap_string(&v) {
+        let ptr = v.as_ptr::<u8>();
+        let data_offset = heap::OBJECT_HEADER_SIZE;
+        let len = unsafe { *(ptr.add(data_offset) as *const u64) } as usize;
+        let bytes_ptr = unsafe { ptr.add(data_offset + 8) };
+        let mut hash = FNV_OFFSET;
+        // Mix in a string discriminator so strings don't collide with ints
+        hash ^= 0xFF;
+        hash = hash.wrapping_mul(FNV_PRIME);
+        for i in 0..len {
+            let byte = unsafe { *bytes_ptr.add(i) };
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        return hash as usize;
+    }
+
+    // For small strings, hash the content bytes (not the tag bits)
+    if v.is_small_string() {
+        let ss = v.as_small_string();
+        let s = ss.as_str();
+        let mut hash = FNV_OFFSET;
+        hash ^= 0xFF;
+        hash = hash.wrapping_mul(FNV_PRIME);
+        for byte in s.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        return hash as usize;
+    }
+
+    // For all other values, hash the raw bits
+    let bits = v.to_bits();
     let mut hash = FNV_OFFSET;
     for byte in bits.to_le_bytes() {
         hash ^= byte as u64;
@@ -1175,10 +1210,37 @@ pub(crate) fn value_hash(v: Value) -> usize {
 }
 
 /// Check if two Values are equal for map key comparison.
+/// For heap strings, compares string content rather than pointer addresses.
+/// Small strings (≤6 bytes) are inline in the NaN-box and use bitwise equality.
+/// A small string (≤6 bytes) can never equal a heap string (>6 bytes).
 #[inline]
 pub(crate) fn value_eq(a: Value, b: Value) -> bool {
-    // For map keys, we use bitwise equality (same as EqRef)
-    a.to_bits() == b.to_bits()
+    // Fast path: identical bits (covers small strings, ints, bools, same-address pointers)
+    if a.to_bits() == b.to_bits() {
+        return true;
+    }
+
+    // Heap string comparison: two different allocations may hold the same content
+    if super::string_helpers::is_heap_string(&a) && super::string_helpers::is_heap_string(&b) {
+        return heap_string_content_eq(&a, &b);
+    }
+
+    false
+}
+
+/// Compare the content of two heap-allocated strings by value.
+#[inline]
+fn heap_string_content_eq(a: &Value, b: &Value) -> bool {
+    let data_offset = heap::OBJECT_HEADER_SIZE;
+    let a_ptr = a.as_ptr::<u8>();
+    let b_ptr = b.as_ptr::<u8>();
+    let a_len = unsafe { *(a_ptr.add(data_offset) as *const u64) } as usize;
+    let b_len = unsafe { *(b_ptr.add(data_offset) as *const u64) } as usize;
+    if a_len != b_len { return false; }
+    if a_len == 0 { return true; }
+    let a_bytes = unsafe { std::slice::from_raw_parts(a_ptr.add(data_offset + 8), a_len) };
+    let b_bytes = unsafe { std::slice::from_raw_parts(b_ptr.add(data_offset + 8), b_len) };
+    a_bytes == b_bytes
 }
 
 /// NewMap (0x6B) - Create new map with default capacity.

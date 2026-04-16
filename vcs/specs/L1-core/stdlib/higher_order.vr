@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: higher-order, closures, map, filter, fold, composition
+// @timeout: 10000
+// @expect: pass
+
+fn map_list(xs: List<Int>, f: fn(Int) -> Int) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while i < xs.len() {
+        result.push(f(xs[i]));
+        i = i + 1;
+    }
+    result
+}
+
+fn filter_list(xs: List<Int>, pred: fn(Int) -> Bool) -> List<Int> {
+    let mut result: List<Int> = [];
+    let mut i = 0;
+    while i < xs.len() {
+        if pred(xs[i]) {
+            result.push(xs[i]);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn fold_list(xs: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
+    let mut acc = init;
+    let mut i = 0;
+    while i < xs.len() {
+        acc = f(acc, xs[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn main() {
+    let nums = [1, 2, 3, 4, 5];
+
+    // Map: double each
+    let doubled = map_list(nums, |x| x * 2);
+    assert_eq(doubled[0], 2);
+    assert_eq(doubled[2], 6);
+    assert_eq(doubled[4], 10);
+
+    // Filter: only even
+    let evens = filter_list(nums, |x| x % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[1], 4);
+
+    // Fold: sum
+    let total = fold_list(nums, 0, |acc, x| acc + x);
+    assert_eq(total, 15);
+
+    // Fold: product
+    let product = fold_list(nums, 1, |acc, x| acc * x);
+    assert_eq(product, 120);
+
+    // apply_twice
+    assert_eq(apply_twice(|x| x + 1, 0), 2);
+    assert_eq(apply_twice(|x| x * 3, 2), 18);
+
+    // Composition: sum of doubled evens
+    let sum_doubled_evens = fold_list(
+        map_list(filter_list(nums, |x| x % 2 == 0), |x| x * 2),
+        0,
+        |acc, x| acc + x
+    );
+    assert_eq(sum_doubled_evens, 12);
+
+    // Filter: odds greater than 2
+    let big_odds = filter_list(nums, |x| x % 2 != 0 && x > 2);
+    assert_eq(big_odds.len(), 2);
+    assert_eq(big_odds[0], 3);
+    assert_eq(big_odds[1], 5);
+}

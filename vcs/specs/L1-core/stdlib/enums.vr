@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: enums, sum-types, variants, match
+// @timeout: 10000
+// @expect: pass
+
+type Color is Red | Green | Blue;
+
+fn color_name(c: Color) -> Text {
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+    }
+}
+
+fn is_primary(c: Color) -> Bool {
+    match c {
+        Red => true,
+        Blue => true,
+        _ => false,
+    }
+}
+
+type Shape is Circle(Float) | Rectangle(Float, Float) | Triangle(Float, Float, Float);
+
+fn perimeter(s: Shape) -> Float {
+    match s {
+        Circle(r) => 2.0 * 3.14159 * r,
+        Rectangle(w, h) => 2.0 * (w + h),
+        Triangle(a, b, c) => a + b + c,
+    }
+}
+
+type Option<T> is None | Some(T);
+
+fn unwrap_or<T>(opt: Option<T>, default: T) -> T {
+    match opt {
+        Some(x) => x,
+        None => default,
+    }
+}
+
+fn main() {
+    // Simple enum
+    assert_eq(color_name(Color.Red), "red");
+    assert_eq(color_name(Color.Green), "green");
+    assert_eq(color_name(Color.Blue), "blue");
+
+    // Pattern matching with wildcard
+    assert_eq(is_primary(Color.Red), true);
+    assert_eq(is_primary(Color.Green), false);
+    assert_eq(is_primary(Color.Blue), true);
+
+    // Enum with associated data
+    let c = Shape.Circle(5.0);
+    let r = Shape.Rectangle(3.0, 4.0);
+    let t = Shape.Triangle(3.0, 4.0, 5.0);
+
+    assert_eq(perimeter(t), 12.0);
+
+    // Generic enum (Option)
+    let some_val = Option.Some(42);
+    let none_val: Option<Int> = Option.None;
+
+    assert_eq(unwrap_or(some_val, 0), 42);
+    assert_eq(unwrap_or(none_val, 99), 99);
+
+    // Nested match
+    let nested = Option.Some(Option.Some(10));
+    match nested {
+        Some(Some(x)) => assert_eq(x, 10),
+        _ => panic("should not reach"),
+    }
+}

@@ -1,0 +1,33 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: protocols, dispatch, implement
+// @timeout: 10000
+// @expect: pass
+
+type Describable is protocol {
+    fn describe(&self) -> Text;
+};
+
+type Circle is { radius: Float };
+type Square is { side: Float };
+
+implement Describable for Circle {
+    fn describe(&self) -> Text {
+        f"circle(r={self.radius})"
+    }
+}
+
+implement Describable for Square {
+    fn describe(&self) -> Text {
+        f"square(s={self.side})"
+    }
+}
+
+fn main() {
+    let c = Circle { radius: 5.0 };
+    let s = Square { side: 3.0 };
+
+    assert_eq(c.describe(), "circle(r=5.0)");
+    assert_eq(s.describe(), "square(s=3.0)");
+}

@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, parametric-polymorphism, type-parameters
+// @timeout: 10000
+// @expect: pass
+
+fn identity<T>(x: T) -> T {
+    x
+}
+
+fn first<A, B>(a: A, b: B) -> A {
+    a
+}
+
+fn second<A, B>(a: A, b: B) -> B {
+    b
+}
+
+type Pair<A, B> is { first: A, second: B };
+
+fn make_pair<A, B>(a: A, b: B) -> Pair<A, B> {
+    Pair { first: a, second: b }
+}
+
+fn swap_pair<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    Pair { first: p.second, second: p.first }
+}
+
+type Wrapper<T> is { value: T };
+
+implement Wrapper<Int> {
+    fn doubled(&self) -> Int {
+        self.value * 2
+    }
+}
+
+fn main() {
+    // Basic generic functions
+    assert_eq(identity(42), 42);
+    assert_eq(identity("hello"), "hello");
+    assert_eq(identity(true), true);
+    assert_eq(identity(3.14), 3.14);
+
+    // Multi-parameter generics
+    assert_eq(first(1, "a"), 1);
+    assert_eq(second(1, "b"), "b");
+
+    // Generic struct construction
+    let p = make_pair(10, "ten");
+    assert_eq(p.first, 10);
+    assert_eq(p.second, "ten");
+
+    // Generic struct swap
+    let q = swap_pair(make_pair(1, "one"));
+    assert_eq(q.first, "one");
+    assert_eq(q.second, 1);
+
+    // Concrete generic impl
+    let w = Wrapper { value: 21 };
+    assert_eq(w.doubled(), 42);
+
+    // Nested generics
+    let nested = make_pair(make_pair(1, 2), make_pair(3, 4));
+    assert_eq(nested.first.first, 1);
+    assert_eq(nested.second.second, 4);
+}
