@@ -1,0 +1,61 @@
+// @test: benchmark
+// @tier: 0
+// @level: L4
+// @tags: maybe, option, error-handling, performance, micro
+// @timeout: 30000
+
+/// Maybe<T> Operations Benchmark
+/// Construction, matching, chaining.
+
+module vcs.benchmarks.micro.maybe_benchmark;
+
+const ITERATIONS: Int = 100_000;
+
+fn safe_div(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 { None } else { Some(a / b) }
+}
+
+fn benchmark_maybe_chain() -> Int {
+    let mut successes = 0;
+    let mut i = 1;
+    while i <= ITERATIONS {
+        let r1 = safe_div(100, i);
+        match r1 {
+            Some(v) => {
+                let r2 = safe_div(v, 2);
+                match r2 {
+                    Some(_) => { successes = successes + 1; }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+    successes
+}
+
+fn benchmark_maybe_construct() -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < ITERATIONS {
+        let val = if i % 2 == 0 { Some(i) } else { None };
+        match val {
+            Some(v) => { count = count + v; }
+            None => {}
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() {
+    let chain = benchmark_maybe_chain();
+    assert(chain > 0);
+
+    let construct = benchmark_maybe_construct();
+    assert(construct > 0);
+
+    print(f"maybe chain successes: {chain}");
+    print(f"maybe construct sum: {construct}");
+}

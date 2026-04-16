@@ -1,0 +1,79 @@
+// @test: benchmark
+// @tier: 0
+// @level: L4
+// @tags: collections, list, performance, micro
+// @timeout: 30000
+
+/// Collection Operations Benchmark
+/// List push, indexing, sum, and basic operations.
+
+module vcs.benchmarks.micro.collection_benchmark;
+
+const SIZE: Int = 10_000;
+
+fn benchmark_list_push() -> Int {
+    let mut xs: List<Int> = [];
+    let mut i = 0;
+    while i < SIZE {
+        xs.push(i);
+        i = i + 1;
+    }
+    xs.len()
+}
+
+fn benchmark_list_sum() -> Int {
+    let mut xs: List<Int> = [];
+    let mut i = 0;
+    while i < SIZE {
+        xs.push(i);
+        i = i + 1;
+    }
+    let mut sum = 0;
+    i = 0;
+    while i < xs.len() {
+        sum = sum + xs[i];
+        i = i + 1;
+    }
+    sum
+}
+
+fn benchmark_list_search() -> Int {
+    let mut xs: List<Int> = [];
+    let mut i = 0;
+    while i < SIZE {
+        xs.push(i * 3);
+        i = i + 1;
+    }
+    // Linear search for specific values
+    let mut found = 0;
+    let targets = [0, 99, 300, 999, 3000, 9999, 29997];
+    let mut t = 0;
+    while t < 7 {
+        let target = targets[t];
+        i = 0;
+        while i < xs.len() {
+            if xs[i] == target {
+                found = found + 1;
+                break;
+            }
+            i = i + 1;
+        }
+        t = t + 1;
+    }
+    found
+}
+
+fn main() {
+    let len = benchmark_list_push();
+    assert_eq(len, SIZE);
+
+    let sum = benchmark_list_sum();
+    assert_eq(sum, SIZE * (SIZE - 1) / 2);
+
+    let found = benchmark_list_search();
+    assert_eq(found, 7);
+
+    print(f"list push: {len} elements");
+    print(f"list sum: {sum}");
+    print(f"list search: {found}/7 found");
+}
