@@ -11185,12 +11185,21 @@ impl<'s> CompilationPipeline<'s> {
                 lowering.has_arity_collisions() || lowering.skip_body_count() > 0;
 
             let passes = if has_ir_issues {
+                // Arity collisions / skip-body stubs contain redirect IR
+                // with null Type* references — full instcombine/SROA/GVN
+                // crashes LLVM TypeFinder, so restrict to module-level DCE.
                 "globaldce".to_string()
             } else {
+                // Use LLVM's canonical O-level pipelines. These include
+                // DCE, GVN, LICM, SROA, instcombine, inliner, loop opts,
+                // vectorization — the full set of standard optimizations.
+                // Fall back to the conservative pipeline for opt_level=0
+                // to keep debug builds fast.
                 match opt_level {
                     0 => "globaldce".to_string(),
-                    1 => "globaldce,function(mem2reg,simplifycfg),globaldce".to_string(),
-                    _ => "strip,globaldce,function(mem2reg,simplifycfg),globaldce".to_string(),
+                    1 => "default<O1>".to_string(),
+                    2 => "default<O2>".to_string(),
+                    _ => "default<O3>".to_string(),
                 }
             };
 
