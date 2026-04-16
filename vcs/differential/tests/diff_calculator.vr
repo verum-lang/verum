@@ -15,7 +15,7 @@ fn get(a: Arr8, i: Int) -> Int {
     else if i == 6 { a.d6 } else { a.d7 }
 }
 
-fn set(a: Arr8, i: Int, v: Int) -> Arr8 {
+fn arr_set(a: Arr8, i: Int, v: Int) -> Arr8 {
     Arr8 {
         d0: if i == 0 { v } else { a.d0 }, d1: if i == 1 { v } else { a.d1 },
         d2: if i == 2 { v } else { a.d2 }, d3: if i == 3 { v } else { a.d3 },
@@ -34,7 +34,7 @@ fn calc_new() -> CalcState {
 }
 
 fn calc_push(cs: CalcState, val: Int) -> CalcState {
-    CalcState { stack: set(cs.stack, cs.sp, val), sp: cs.sp + 1, mem: cs.mem }
+    CalcState { stack: arr_set(cs.stack, cs.sp, val), sp: cs.sp + 1, mem: cs.mem }
 }
 
 fn calc_top(cs: CalcState) -> Int {
