@@ -11442,7 +11442,7 @@ impl VbcCodegen {
     /// 1. Analyzing the body to find free variables (variables referenced but not defined locally)
     /// 2. Compiling the closure body as a separate function with captures as first parameters
     /// 3. Emitting NewClosure instruction with the function ID and captured values
-    fn compile_closure(
+    pub(crate) fn compile_closure(
         &mut self,
         params: &verum_common::List<verum_ast::ClosureParam>,
         body: &Expr,

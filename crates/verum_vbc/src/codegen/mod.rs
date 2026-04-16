@@ -6413,7 +6413,17 @@ impl VbcCodegen {
     }
 
     /// Compiles nested function bodies from a block.
-    fn compile_nested_functions_from_block(&mut self, block: &Block) -> CodegenResult<()> {
+    ///
+    /// Since the statement-level compiler (statements.rs) now handles
+    /// ALL nested functions inline (with capture analysis for closures),
+    /// this post-hoc pass is a no-op. Kept for API compatibility.
+    fn compile_nested_functions_from_block(&mut self, _block: &Block) -> CodegenResult<()> {
+        Ok(())
+    }
+
+    /// Legacy: compiles nested function bodies from a block (pre-capture).
+    #[allow(dead_code)]
+    fn _compile_nested_functions_from_block_old(&mut self, block: &Block) -> CodegenResult<()> {
         for stmt in block.stmts.iter() {
             if let StmtKind::Item(item) = &stmt.kind
                 && let ItemKind::Function(func) = &item.kind {
@@ -6453,20 +6463,69 @@ impl VbcCodegen {
                     };
 
                     if has_captures {
-                        // Nested function captures outer variables — compile
-                        // as a closure and bind the function name to the
-                        // resulting closure register.
+                        // Nested function captures outer variables.
+                        // Convert to a closure: extract params from the
+                        // FunctionDecl, build ClosureParam equivalents,
+                        // and route through the closure compilation path
+                        // that handles free-variable capture.
                         tracing::debug!(
                             "Nested function '{}' captures outer variables — compiling as closure",
                             func.name.name
                         );
-                    }
 
-                    // Compile as standalone function (the common case).
-                    // Even with captures, the function is registered as a
-                    // VBC function. Capture wiring happens at the call site
-                    // via the closure expression path.
-                    self.compile_function(func, None)?;
+                        if let verum_common::Maybe::Some(ref body) = func.body {
+                            // Build closure params from function params.
+                            let closure_params: verum_common::List<verum_ast::expr::ClosureParam> =
+                                func.params.iter().filter_map(|p| {
+                                    if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
+                                        Some(verum_ast::expr::ClosureParam {
+                                            pattern: pattern.clone(),
+                                            ty: verum_common::Maybe::Some(ty.clone()),
+                                            span: p.span,
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }).collect();
+
+                            // Get the body expression. For block bodies,
+                            // wrap in an ExprKind::Block.
+                            let body_expr = match body {
+                                FunctionBody::Block(blk) => {
+                                    verum_ast::Expr::new(
+                                        verum_ast::ExprKind::Block(blk.clone()),
+                                        func.span,
+                                    )
+                                }
+                                FunctionBody::Expr(e) => e.clone(),
+                            };
+
+                            let return_type: Option<&verum_ast::ty::Type> =
+                                match &func.return_type {
+                                    verum_common::Maybe::Some(ty) => Some(ty),
+                                    verum_common::Maybe::None => None,
+                                };
+
+                            // Compile as closure (reuses the full capture machinery).
+                            if let Some(closure_reg) = self.compile_closure(
+                                &closure_params,
+                                &body_expr,
+                                return_type,
+                            )? {
+                                // Bind the function name to the closure register
+                                // so that calls like `add(x)` resolve to the closure.
+                                let fn_name = func.name.name.to_string();
+                                let name_reg = self.ctx.define_var(&fn_name, false);
+                                self.ctx.emit(crate::instruction::Instruction::Mov {
+                                    dst: name_reg,
+                                    src: closure_reg,
+                                });
+                            }
+                        }
+                    } else {
+                        // No captures — compile as standalone function.
+                        self.compile_function(func, None)?;
+                    }
 
                     // Recursively compile any functions nested inside this one
                     if let verum_common::Maybe::Some(ref body) = func.body {

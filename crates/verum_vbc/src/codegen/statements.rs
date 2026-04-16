@@ -66,14 +66,97 @@ impl VbcCodegen {
                 //   They should NOT be compiled inline as it would reset the context.
                 // - Other items (types, constants) can be compiled inline.
                 match &item.kind {
-                    verum_ast::ItemKind::Function(_) => {
-                        // Skip - nested functions are compiled separately to avoid
-                        // resetting the compilation context mid-function.
-                        // The function was already registered during the first pass
-                        // and will be compiled when we process all functions.
+                    verum_ast::ItemKind::Function(func) => {
+                        // Check if this nested function captures variables
+                        // from the enclosing scope. If so, compile it as a
+                        // closure RIGHT HERE — while we're still inside the
+                        // outer function's scope where captured variables
+                        // are accessible.
+                        let has_captures = if let verum_common::Maybe::Some(ref body) = func.body {
+                            let param_names: Vec<String> = func.params.iter()
+                                .filter_map(|p| {
+                                    if let verum_ast::decl::FunctionParamKind::Regular { pattern, .. } = &p.kind {
+                                        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+                                            return Some(name.name.to_string());
+                                        }
+                                    }
+                                    None
+                                })
+                                .collect();
+                            // Wrap body in a block expression for analysis
+                            let body_expr = match body {
+                                verum_ast::FunctionBody::Block(blk) => {
+                                    verum_ast::Expr::new(
+                                        verum_ast::ExprKind::Block(blk.clone()),
+                                        func.span,
+                                    )
+                                }
+                                verum_ast::FunctionBody::Expr(e) => e.clone(),
+                            };
+                            let free = self.analyze_free_variables(&body_expr, &param_names);
+                            free.iter().any(|v| self.ctx.lookup_var(v).is_some())
+                        } else {
+                            false
+                        };
+
+                        if has_captures && func.body.is_some() {
+                            let body = func.body.as_ref().unwrap();
+                            {
+                                // Build closure params from function params
+                                let closure_params: verum_common::List<verum_ast::expr::ClosureParam> =
+                                    func.params.iter().filter_map(|p| {
+                                        if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &p.kind {
+                                            Some(verum_ast::expr::ClosureParam {
+                                                pattern: pattern.clone(),
+                                                ty: verum_common::Maybe::Some(ty.clone()),
+                                                span: p.span,
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    }).collect();
+
+                                let body_expr = match body {
+                                    verum_ast::FunctionBody::Block(blk) => {
+                                        verum_ast::Expr::new(
+                                            verum_ast::ExprKind::Block(blk.clone()),
+                                            func.span,
+                                        )
+                                    }
+                                    verum_ast::FunctionBody::Expr(e) => e.clone(),
+                                };
+
+                                let return_type: Option<&verum_ast::ty::Type> =
+                                    match &func.return_type {
+                                        verum_common::Maybe::Some(ty) => Some(ty),
+                                        verum_common::Maybe::None => None,
+                                    };
+
+                                // Compile as closure with capture analysis
+                                if let Some(closure_reg) = self.compile_closure(
+                                    &closure_params,
+                                    &body_expr,
+                                    return_type,
+                                )? {
+                                    let fn_name = func.name.name.to_string();
+                                    let name_reg = self.ctx.define_var(&fn_name, false);
+                                    self.ctx.emit(crate::instruction::Instruction::Mov {
+                                        dst: name_reg,
+                                        src: closure_reg,
+                                    });
+                                }
+                            }
+                        } else if func.body.is_some() {
+                            // Non-capturing nested function: compile as
+                            // standalone, inline in the outer scope so the
+                            // function name is accessible.
+                            self.compile_function(func, None)?;
+                        }
+                        // Function is fully handled here — the post-hoc
+                        // compile_nested_functions pass in mod.rs should
+                        // NOT recompile it.
                     }
                     _ => {
-                        // Compile other nested items inline
                         self.compile_item(item)?;
                     }
                 }
