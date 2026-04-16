@@ -744,6 +744,10 @@ pub fn run_common_pipeline(
             let policy = crate::phases::safety_gate::SafetyPolicy {
                 unsafe_allowed: config.unsafe_allowed,
                 ffi: config.ffi_allowed,
+                ffi_boundary: verum_common::Text::from("strict"),
+                capability_required: false,
+                mls_level: verum_common::Text::from("public"),
+                forbid_stdlib_extern: false,
             };
             let gate_diags = crate::phases::safety_gate::check_safety(&slice, policy);
             if !gate_diags.is_empty() {

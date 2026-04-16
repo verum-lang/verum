@@ -5289,13 +5289,15 @@ impl<'s> CompilationPipeline<'s> {
         // Fast path: when every relevant [safety] flag is permissive,
         // skip the walker entirely — zero cost on the default
         // configuration.
-        if features.unsafe_allowed() && features.safety.ffi {
+        if features.unsafe_allowed() && features.safety.ffi
+            && !features.safety.capability_required
+            && !features.safety.forbid_stdlib_extern
+        {
             return Ok(());
         }
-        let policy = crate::phases::safety_gate::SafetyPolicy {
-            unsafe_allowed: features.unsafe_allowed(),
-            ffi: features.safety.ffi,
-        };
+        let policy = crate::phases::safety_gate::SafetyPolicy::from_features(
+            &features.safety,
+        );
         let diags = crate::phases::safety_gate::check_safety(
             std::slice::from_ref(module),
             policy,
@@ -9561,11 +9563,21 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         let t0 = Instant::now();
+        // [context].unresolved_policy: "error" (default) → emit
+        // errors; "warn" → downgrade to warnings; "allow" → suppress.
+        let policy = self
+            .session
+            .language_features()
+            .context
+            .unresolved_policy
+            .as_str()
+            .to_string();
+
         let phase = ContextValidationPhase::new();
         match phase.validate_module_public(module) {
             Ok(warnings) => {
                 let elapsed = t0.elapsed();
-                if !warnings.is_empty() {
+                if !warnings.is_empty() && policy != "allow" {
                     info!("Context validation: {} warnings ({:.2}ms)",
                         warnings.len(), elapsed.as_secs_f64() * 1000.0);
                     for w in warnings.iter() {
@@ -9574,8 +9586,21 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
             Err(errors) => {
-                for e in errors.iter() {
-                    warn!("Context: {}", e.message());
+                match policy.as_str() {
+                    "allow" => {
+                        // Silently suppress all context errors.
+                    }
+                    "warn" => {
+                        for e in errors.iter() {
+                            warn!("Context (downgraded to warning): {}", e.message());
+                        }
+                    }
+                    _ => {
+                        // "error" (default) — report as-is.
+                        for e in errors.iter() {
+                            warn!("Context: {}", e.message());
+                        }
+                    }
                 }
             }
         }
@@ -13289,11 +13314,26 @@ int main(int argc, char** argv) {
         let mlir_ctx = MlirContext::new()
             .with_context(|| "Failed to create MLIR context")?;
 
-        // Auto-select GPU target based on platform
-        let gpu_target = if cfg!(target_os = "macos") {
-            GpuTarget::Metal
-        } else {
-            GpuTarget::Cuda
+        // Select GPU target: [codegen].gpu_backend overrides auto-detect.
+        let gpu_backend = self
+            .session
+            .language_features()
+            .codegen
+            .gpu_backend
+            .as_str();
+        let gpu_target = match gpu_backend {
+            "metal" => GpuTarget::Metal,
+            "cuda" => GpuTarget::Cuda,
+            "rocm" => GpuTarget::Cuda, // ROCm uses HIP → CUDA path
+            "vulkan" => GpuTarget::Cuda, // Vulkan→SPIR-V → CUDA fallback
+            _ => {
+                // "auto" or unknown → platform-based detection
+                if cfg!(target_os = "macos") {
+                    GpuTarget::Metal
+                } else {
+                    GpuTarget::Cuda
+                }
+            }
         };
         let gpu_config = GpuLoweringConfig {
             target: gpu_target,

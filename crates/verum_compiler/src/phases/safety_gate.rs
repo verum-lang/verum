@@ -22,7 +22,7 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 /// flag is `true`, the corresponding construct is allowed; when
 /// `false`, the walker emits a clean diagnostic pointing at the
 /// config key and the `-Z` override.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SafetyPolicy {
     /// `[safety].unsafe_allowed` — gates `unsafe { ... }` expressions
     /// AND `unsafe fn` declarations.
@@ -30,13 +30,42 @@ pub struct SafetyPolicy {
     /// `[safety].ffi` — gates `@ffi` / `extern "C"` function
     /// declarations. When false, every extern function is rejected.
     pub ffi: bool,
+    /// `[safety].ffi_boundary` — "strict" rejects all FFI without
+    /// explicit safety annotation; "lenient" only warns.
+    pub ffi_boundary: verum_common::Text,
+    /// `[safety].capability_required` — when true, functions using
+    /// I/O, network, or unsafe must declare `@capability(...)`.
+    pub capability_required: bool,
+    /// `[safety].mls_level` — "public"/"secret"/"top_secret".
+    /// Higher levels restrict operations available.
+    pub mls_level: verum_common::Text,
+    /// `[safety].forbid_stdlib_extern` — reject `@extern` from stdlib.
+    pub forbid_stdlib_extern: bool,
 }
 
 impl SafetyPolicy {
-    /// All permissive defaults — no gate fires. Equivalent to the
-    /// existing behavior before any `[safety]` flags were honored.
+    /// All permissive defaults — no gate fires.
     pub fn permissive() -> Self {
-        Self { unsafe_allowed: true, ffi: true }
+        Self {
+            unsafe_allowed: true,
+            ffi: true,
+            ffi_boundary: verum_common::Text::from("strict"),
+            capability_required: false,
+            mls_level: verum_common::Text::from("public"),
+            forbid_stdlib_extern: false,
+        }
+    }
+
+    /// Build from the session's language features.
+    pub fn from_features(f: &crate::language_features::SafetyFeatures) -> Self {
+        Self {
+            unsafe_allowed: f.unsafe_allowed,
+            ffi: f.ffi,
+            ffi_boundary: f.ffi_boundary.clone(),
+            capability_required: f.capability_required,
+            mls_level: f.mls_level.clone(),
+            forbid_stdlib_extern: f.forbid_stdlib_extern,
+        }
     }
 }
 
@@ -45,13 +74,15 @@ impl SafetyPolicy {
 /// when the policy permits everything or no violations are present.
 pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic> {
     let mut diagnostics = List::new();
-    if policy.unsafe_allowed && policy.ffi {
-        // Fast path: nothing to check.
+    if policy.unsafe_allowed && policy.ffi
+        && !policy.capability_required
+        && !policy.forbid_stdlib_extern
+    {
         return diagnostics;
     }
     for module in modules {
         for item in module.items.iter() {
-            walk_item(item, policy, &mut diagnostics);
+            walk_item(item, &policy, &mut diagnostics);
         }
     }
     diagnostics
@@ -63,13 +94,12 @@ pub fn check_unsafe_usage(
     modules: &[Module],
     unsafe_allowed: bool,
 ) -> List<Diagnostic> {
-    check_safety(
-        modules,
-        SafetyPolicy { unsafe_allowed, ffi: true },
-    )
+    let mut p = SafetyPolicy::permissive();
+    p.unsafe_allowed = unsafe_allowed;
+    check_safety(modules, p)
 }
 
-fn walk_item(item: &Item, policy: SafetyPolicy, out: &mut List<Diagnostic>) {
+fn walk_item(item: &Item, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
     match &item.kind {
         ItemKind::Function(func) => {
             check_function_decl(func, policy, out);
@@ -95,7 +125,7 @@ fn walk_item(item: &Item, policy: SafetyPolicy, out: &mut List<Diagnostic>) {
 /// modifier and `extern` / FFI declarations.
 fn check_function_decl(
     func: &verum_ast::decl::FunctionDecl,
-    policy: SafetyPolicy,
+    policy: &SafetyPolicy,
     out: &mut List<Diagnostic>,
 ) {
     if !policy.unsafe_allowed && func.is_unsafe {
@@ -134,14 +164,14 @@ fn check_function_decl(
     }
 }
 
-fn walk_function_body(body: &FunctionBody, policy: SafetyPolicy, out: &mut List<Diagnostic>) {
+fn walk_function_body(body: &FunctionBody, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
     match body {
         FunctionBody::Block(blk) => walk_block(blk, policy, out),
         FunctionBody::Expr(expr) => walk_expr(expr, policy, out),
     }
 }
 
-fn walk_block(block: &Block, policy: SafetyPolicy, out: &mut List<Diagnostic>) {
+fn walk_block(block: &Block, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
     for stmt in &block.stmts {
         walk_stmt(stmt, policy, out);
     }
@@ -150,7 +180,7 @@ fn walk_block(block: &Block, policy: SafetyPolicy, out: &mut List<Diagnostic>) {
     }
 }
 
-fn walk_stmt(stmt: &verum_ast::stmt::Stmt, policy: SafetyPolicy, out: &mut List<Diagnostic>) {
+fn walk_stmt(stmt: &verum_ast::stmt::Stmt, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
     match &stmt.kind {
         StmtKind::Expr { expr, .. } => walk_expr(expr, policy, out),
         StmtKind::Let { value, .. } => {
@@ -162,7 +192,7 @@ fn walk_stmt(stmt: &verum_ast::stmt::Stmt, policy: SafetyPolicy, out: &mut List<
     }
 }
 
-fn walk_expr(expr: &Expr, policy: SafetyPolicy, out: &mut List<Diagnostic>) {
+fn walk_expr(expr: &Expr, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
     match &expr.kind {
         ExprKind::Unsafe(block) => {
             if !policy.unsafe_allowed {
@@ -378,7 +408,7 @@ mod tests {
     #[test]
     fn unsafe_fn_rejected_when_unsafe_disabled() {
         let module = mk_module_with_function(true, Maybe::None);
-        let policy = SafetyPolicy { unsafe_allowed: false, ffi: true };
+        let mut policy = SafetyPolicy::permissive(); policy.unsafe_allowed = false;
         let diags = check_safety(&[module], policy);
         assert_eq!(diags.len(), 1);
         let msg = diags.iter().next().unwrap().message();
@@ -392,7 +422,7 @@ mod tests {
             false,
             Maybe::Some(verum_common::Text::from("C")),
         );
-        let policy = SafetyPolicy { unsafe_allowed: true, ffi: false };
+        let mut policy = SafetyPolicy::permissive(); policy.ffi = false;
         let diags = check_safety(&[module], policy);
         assert_eq!(diags.len(), 1);
         let msg = diags.iter().next().unwrap().message();
@@ -419,7 +449,7 @@ mod tests {
             true,
             Maybe::Some(verum_common::Text::from("C")),
         );
-        let policy = SafetyPolicy { unsafe_allowed: false, ffi: false };
+        let mut policy = SafetyPolicy::permissive(); policy.unsafe_allowed = false; policy.ffi = false;
         let diags = check_safety(&[module], policy);
         assert_eq!(diags.len(), 2, "both gates should fire independently");
     }

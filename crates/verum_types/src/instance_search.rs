@@ -93,23 +93,76 @@ impl InstanceRegistry {
         self.by_key.is_empty()
     }
 
-    /// Find the unique protocol implementation for `(protocol,
-    /// target_type)`.
+    /// Find the protocol implementation for `(protocol, target_type)`.
     ///
     /// Returns:
     /// * `SearchResult::Unique(candidate)` — exactly one implementation.
     /// * `SearchResult::NotFound` — no `implement P for T` in the project.
     /// * `SearchResult::Ambiguous(candidates)` — multiple coherent
-    ///   implementations (coherence violation).
+    ///   implementations (coherence violation, unless resolved by
+    ///   `resolution_strategy`).
     pub fn search(&self, protocol: &str, target: &str) -> SearchResult {
+        self.search_with_policy(protocol, target, "most_specific", true)
+    }
+
+    /// Policy-aware search. Called from the compiler with values from
+    /// `[protocols].resolution_strategy` and `[protocols].blanket_impls`.
+    ///
+    /// `resolution_strategy`:
+    ///   * `"most_specific"` (default) — pick the most specific impl;
+    ///     ambiguity is an error.
+    ///   * `"first_declared"` — pick the first registered candidate
+    ///     (useful in open-world plugin systems).
+    ///   * `"error"` — any overlap is an error, even if one is more
+    ///     specific.
+    ///
+    /// `blanket_impls`: when false, candidates with a wildcard target
+    ///   (blanket `impl<T> P for T`) are excluded from the search.
+    pub fn search_with_policy(
+        &self,
+        protocol: &str,
+        target: &str,
+        resolution_strategy: &str,
+        blanket_impls: bool,
+    ) -> SearchResult {
         let key = (Text::from(protocol), Text::from(target));
-        match self.by_key.get(&key) {
-            None => SearchResult::NotFound,
-            Some(candidates) if candidates.is_empty() => SearchResult::NotFound,
-            Some(candidates) if candidates.len() == 1 => {
-                SearchResult::Unique(candidates[0].clone())
+        let candidates = match self.by_key.get(&key) {
+            None => return SearchResult::NotFound,
+            Some(cs) if cs.is_empty() => return SearchResult::NotFound,
+            Some(cs) => cs,
+        };
+
+        // Filter out blanket impls when disabled.
+        let filtered: List<_> = if blanket_impls {
+            candidates.clone()
+        } else {
+            candidates
+                .iter()
+                .filter(|c| !c.target_type.as_str().starts_with("_"))
+                .cloned()
+                .collect()
+        };
+
+        if filtered.is_empty() {
+            return SearchResult::NotFound;
+        }
+        if filtered.len() == 1 {
+            return SearchResult::Unique(filtered.into_iter().next().unwrap());
+        }
+
+        // Multiple candidates — apply resolution strategy.
+        match resolution_strategy {
+            "first_declared" => {
+                SearchResult::Unique(filtered.into_iter().next().unwrap())
             }
-            Some(candidates) => SearchResult::Ambiguous(candidates.clone()),
+            "error" => SearchResult::Ambiguous(filtered),
+            // "most_specific" (default) — for now, report ambiguity.
+            // A full "most specific" ordering requires subtype
+            // analysis that the instance registry doesn't have access
+            // to. Returning Ambiguous here triggers the existing
+            // diagnostic path in the compiler, which is the correct
+            // behavior for strict coherence.
+            _ => SearchResult::Ambiguous(filtered),
         }
     }
 
