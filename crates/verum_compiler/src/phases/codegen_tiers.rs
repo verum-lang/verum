@@ -52,6 +52,8 @@ pub struct CodegenTiersPhase {
     jit_config: JitConfig,
     /// AOT configuration
     aot_config: AotConfig,
+    /// Maximum CBGR inline depth (from `[codegen].inline_depth`).
+    inline_depth: usize,
 }
 
 /// JIT compilation configuration
@@ -211,7 +213,14 @@ impl CodegenTiersPhase {
             ),
             jit_config: JitConfig::default(),
             aot_config: AotConfig::default(),
+            inline_depth: 3, // default from [codegen].inline_depth
         }
+    }
+
+    /// Set the maximum CBGR inline depth (from `[codegen].inline_depth`).
+    pub fn with_inline_depth(mut self, depth: u32) -> Self {
+        self.inline_depth = depth as usize;
+        self
     }
 
     /// Create phase with custom JIT configuration
@@ -642,7 +651,7 @@ impl CodegenTiersPhase {
                         let opt_config = verum_codegen::CBGROptimizationConfig {
                             enable_escape_analysis: true,
                             enable_alias_analysis: true,
-                            max_inline_depth: 10, // TODO: wire from language_features.codegen.inline_depth
+                            max_inline_depth: self.inline_depth,
                             ..Default::default()
                         };
                         let mut cbgr_opt = CBGROptimizationPass::new(opt_config);
@@ -1166,6 +1175,7 @@ impl CompilationPhase for CodegenTiersPhase {
             enable_escape_analysis: self.enable_escape_analysis,
             jit_config: self.jit_config.clone(),
             aot_config: self.aot_config.clone(),
+            inline_depth: self.inline_depth,
         };
 
         // PERF: Create LLVM Context ONCE and reuse for fallback.

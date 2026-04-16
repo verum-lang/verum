@@ -34003,7 +34003,7 @@ impl TypeChecker {
         // Coinductive function productivity: cofix functions must have all
         // recursive self-calls guarded by at least one coinductive constructor.
         // ============================================================
-        if func.is_cofix {
+        if func.is_cofix && self.coinductive_enabled {
             if let Some(ref body) = func.body {
                 let body_calls = self.extract_corecursive_calls(body, &func.name.name);
                 let diags = crate::coinductive_analysis::check_cofix_productivity(
@@ -52316,6 +52316,10 @@ impl TypeChecker {
         args: &[Type],
         span: Span,
     ) -> Result<crate::kind_inference::Kind> {
+        if !self.higher_kinded_enabled {
+            // HKT disabled — skip kind checking, assume kind Type for all.
+            return Ok(crate::kind_inference::Kind::Type);
+        }
         self.kind_inferer.check_type_application_kind(constructor, args, span)
     }
 
