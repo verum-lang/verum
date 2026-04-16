@@ -10803,6 +10803,9 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // Save incremental compilation cache for next build.
+        self.save_incremental_cache();
+
         let elapsed = start.elapsed();
         info!(
             "Native compilation completed in {:.2}s",
