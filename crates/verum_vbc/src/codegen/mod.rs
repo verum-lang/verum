@@ -6550,8 +6550,11 @@ impl VbcCodegen {
             base_name.clone()
         };
 
-        // Get the pre-registered function info (for ID and properties)
-        let func_info = self.ctx.lookup_function(&lookup_name)
+        // Get the pre-registered function info (for ID and properties).
+        // Use arity-based lookup to resolve collisions between user functions
+        // and stdlib methods with the same name but different arities.
+        let param_count = func.params.len();
+        let func_info = self.ctx.lookup_function_with_arity(&lookup_name, param_count)
             .ok_or_else(|| CodegenError::internal(format!("function not registered: {}", lookup_name)))?
             .clone();
 
