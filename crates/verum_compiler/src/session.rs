@@ -163,13 +163,15 @@ impl Session {
             opts.verify_mode = crate::options::VerifyMode::Runtime;
         }
         // 2. [codegen].debug_info → CompilerOptions.debug_info boolean.
-        //    "none" → false; "line" / "full" → true. The LLVM backend
-        //    reads this boolean to decide whether to emit DWARF.
         match opts.language_features.codegen.debug_info.as_str() {
             "none" => opts.debug_info = false,
             "line" | "full" => opts.debug_info = true,
-            _ => {} // validated earlier; shouldn't happen
+            _ => {}
         }
+        // 3. [runtime].panic → recorded for codegen. "abort" uses
+        //    abort() (core dump), "unwind" uses _exit(1) (clean exit).
+        //    The value is read by LLVM codegen from the session's
+        //    language_features when emitting panic blocks.
     }
 
     /// Access the shared SMT routing statistics handle.

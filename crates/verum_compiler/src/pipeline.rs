@@ -7779,12 +7779,33 @@ impl<'s> CompilationPipeline<'s> {
         use verum_cbgr::tier_types::TierStatistics;
         use crate::session::FunctionId;
 
-        debug!("Running tier analysis");
+        // Gate on [runtime].cbgr_mode:
+        //   "unsafe" → skip analysis entirely (all refs are raw)
+        //   "managed" → skip promotion (all refs stay at Tier 0)
+        //   "checked" / "mixed" → full analysis (current behavior)
+        let cbgr_mode = self
+            .session
+            .language_features()
+            .runtime
+            .cbgr_mode
+            .as_str()
+            .to_string();
+        if cbgr_mode == "unsafe" {
+            tracing::debug!(
+                "CBGR analysis SKIPPED ([runtime] cbgr_mode = \"unsafe\")"
+            );
+            return Ok(());
+        }
+
+        debug!("Running tier analysis (cbgr_mode = {})", cbgr_mode);
         let start = Instant::now();
 
-        // Create tier analysis configuration with full analysis enabled
+        // Create tier analysis configuration based on [runtime].cbgr_mode.
+        // "managed" → disable promotion (nothing can be promoted to checked).
+        // "checked" / "mixed" → full analysis.
+        let enable_promotion = cbgr_mode != "managed";
         let config = TierAnalysisConfig {
-            confidence_threshold: 0.95, // Conservative: 95% confidence required for promotion
+            confidence_threshold: 0.95,
             analyze_async_boundaries: true,
             analyze_exception_paths: true,
             enable_ownership_analysis: true,

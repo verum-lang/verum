@@ -179,8 +179,17 @@ impl CompilationPhase for SemanticAnalysisPhase {
         phase_checker.register_builtins();
 
         // Apply session-level feature gates to the type checker.
+        // Each flag controls whether the corresponding type-system
+        // feature is active during inference. Disabled features
+        // cause the checker to skip feature-specific code paths.
         phase_checker.set_cubical_enabled(self.cubical_enabled);
         phase_checker.set_dependent_enabled(self.dependent_enabled);
+        // TODO: Wire remaining [types] flags when TypeChecker
+        // supports them: higher_kinded, universe_polymorphism,
+        // coinductive, quotient, instance_search, coherence_check_depth.
+        // These require adding setter methods to the 50K-line
+        // TypeChecker and finding the correct gating points in
+        // infer.rs. Tracked in KNOWN_ISSUES.md.
 
         // If contracts are available, enable contract-aware type checking
         // This allows the type checker to leverage verified preconditions/postconditions
