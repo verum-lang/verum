@@ -10501,6 +10501,21 @@ impl<'s> CompilationPipeline<'s> {
             // "core.async.parallel",
             // Runtime context bridge for AOT
             "core.runtime.ctx_bridge",
+            // Memory / CBGR allocator — required for user code that
+            // constructs Shared<T>, Weak<T>, or other CBGR-tracked
+            // reference types. Without these, the stdlib Shared::new
+            // call site resolves at type-check time but has no body at
+            // codegen, producing "undefined function: get_heap" errors.
+            // See KNOWN_ISSUES.md "Shared<T> / CBGR-allocator Bootstrap".
+            "core.mem.allocator",
+            "core.mem.heap",
+            "core.mem.header",
+            "core.mem.thin_ref",
+            "core.mem.fat_ref",
+            "core.mem.epoch",
+            "core.mem.size_class",
+            "core.mem.capability",
+            "core.mem.raw_ops",
             // I/O — excluded from AOT retention: core.io.fs read()/write()
             // FFI declarations conflict with LLVM builtins (wrong arg count).
             // Included in the type-checking ALWAYS_INCLUDE list (list 1) above.
