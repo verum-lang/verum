@@ -504,14 +504,22 @@ impl CbgrHeap {
 
     /// Clears all objects (for reset).
     ///
+    /// Deallocates every tracked object via `tracked_dealloc` to avoid
+    /// leaking memory and keep the global CBGR allocation counters accurate.
+    ///
     /// # Safety
     ///
     /// All references to heap objects become invalid.
     pub unsafe fn clear(&mut self) {
-        // Note: In a full implementation, we would need to deallocate
-        // each object through tracked_dealloc. For now, we just clear
-        // the tracking and reset stats.
-        self.objects.clear();
+        // Drain objects and deallocate each one via TrackedAllocation.
+        // The stored pointer is the user-data pointer (post-header), which
+        // is exactly what `TrackedAllocation::from_user_ptr` expects.
+        let objects = std::mem::take(&mut self.objects);
+        for ptr in objects {
+            let allocation = unsafe { TrackedAllocation::from_user_ptr(ptr.as_ptr()) };
+            unsafe { tracked_dealloc(allocation); }
+            self.stats.total_frees += 1;
+        }
         self.allocated = 0;
     }
 

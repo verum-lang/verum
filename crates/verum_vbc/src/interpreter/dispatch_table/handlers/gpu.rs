@@ -99,9 +99,16 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
 
         Some(GpuSubOpcode::GetMemoryInfo) => {
             let dst = read_reg(state)?;
-            let _device_reg = read_reg(state)?;
-            // Return default memory info (8GB total, 8GB free)
-            let mem_info: (u64, u64) = (8 * 1024 * 1024 * 1024, 8 * 1024 * 1024 * 1024);
+            let device_reg = read_reg(state)?;
+            // Report actual registry-reported memory if a real device is
+            // registered; otherwise return (0, 0) so callers can detect
+            // the absence of a usable GPU instead of assuming 8GB exists.
+            let device_id = state.get_reg(device_reg).as_i64() as u16;
+            let registry = get_registry();
+            let mem_info: (u64, u64) = registry.gpus()
+                .find(|(id, _)| id.0 == device_id)
+                .map(|(_, info)| (info.memory_bytes as u64, info.memory_bytes as u64))
+                .unwrap_or((0, 0));
             let ptr = Box::into_raw(Box::new(mem_info));
             state.set_reg(dst, Value::from_ptr(ptr));
             Ok(DispatchResult::Continue)

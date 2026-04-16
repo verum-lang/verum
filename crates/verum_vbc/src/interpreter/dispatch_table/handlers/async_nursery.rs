@@ -13,6 +13,7 @@ use super::super::super::state::{InterpreterState, GeneratorId, TaskId, TaskStat
 use super::super::DispatchResult;
 use super::super::{call_closure_sync, execute_pending_task, alloc_list_from_values, dispatch_loop_table_with_entry_depth};
 use super::bytecode_io::*;
+use super::string_helpers::alloc_string_value;
 
 // ============================================================================
 // Task ID Encoding
@@ -403,13 +404,19 @@ pub(in super::super) fn handle_nursery_await(state: &mut InterpreterState) -> In
                         task.result = Some(result);
                     }
             }
-            Err(_e) => {
+            Err(e) => {
+                // Preserve error message instead of dropping it silently.
+                // Store the formatted error as a Verum string value in both
+                // task.error and nursery.accumulated_error for downstream inspection.
+                let err_str = format!("{}", e);
+                let err_value = alloc_string_value(state, &err_str)
+                    .unwrap_or(Value::nil());
                 if let Some(nursery) = state.nurseries.get_mut(nursery_id) {
                     if let Some(task) = nursery.tasks.get_mut(task_idx) {
                         task.status = TaskStatus::Failed;
-                        task.error = Some(Value::nil());
+                        task.error = Some(err_value);
                     }
-                    nursery.accumulated_error = Some(Value::nil());
+                    nursery.accumulated_error = Some(err_value);
                 }
             }
         }
@@ -451,11 +458,14 @@ pub(in super::super) fn handle_nursery_cancel(state: &mut InterpreterState) -> I
     let nursery_val = state.get_reg(nursery_reg);
     let nursery_id = nursery_val.as_i64() as u64;
 
+    // Mark all pending tasks as cancelled with a descriptive error so the
+    // parent nursery can distinguish cancellation from silent nil failures.
+    let cancel_err = alloc_string_value(state, "nursery cancelled").unwrap_or(Value::nil());
     if let Some(nursery) = state.nurseries.get_mut(nursery_id) {
         for task in &mut nursery.tasks {
             if task.status == TaskStatus::Pending {
                 task.status = TaskStatus::Failed;
-                task.error = Some(Value::nil());
+                task.error = Some(cancel_err);
             }
         }
     }

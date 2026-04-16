@@ -798,28 +798,33 @@ pub(in super::super) fn handle_ml_extended(state: &mut InterpreterState) -> Inte
         }
 
         Some(MlSubOpcode::VmapTransform) => {
-            let dst = read_reg(state)?;
+            let _dst = read_reg(state)?;
             let _func_reg = read_reg(state)?;
             let _in_axes_reg = read_reg(state)?;
             let _out_axes_reg = read_reg(state)?;
 
-            // Vmap transform stub: returns nil (requires JIT tracing)
-            let _ = super::super::super::kernel::dispatch_vmap_transform();
-            state.set_reg(dst, Value::nil());
-            Ok(DispatchResult::Continue)
+            // Vmap requires JIT tracing support, which the Tier 0 interpreter
+            // does not provide. Returning an explicit error prevents silent
+            // mis-computation (previously this handler returned nil).
+            Err(InterpreterError::NotImplemented {
+                feature: "VmapTransform: requires JIT tracing (not in Tier 0 interpreter)",
+                opcode: None,
+            })
         }
 
         Some(MlSubOpcode::PmapTransform) => {
-            let dst = read_reg(state)?;
+            let _dst = read_reg(state)?;
             let _func_reg = read_reg(state)?;
             let _axis_name_reg = read_reg(state)?;
             let _in_axes_reg = read_reg(state)?;
             let _out_axes_reg = read_reg(state)?;
 
-            // Pmap transform stub: returns nil (requires distributed runtime)
-            let _ = super::super::super::kernel::dispatch_pmap_transform();
-            state.set_reg(dst, Value::nil());
-            Ok(DispatchResult::Continue)
+            // Pmap requires a distributed runtime. Return explicit error
+            // instead of silently returning nil.
+            Err(InterpreterError::NotImplemented {
+                feature: "PmapTransform: requires distributed runtime (not in interpreter)",
+                opcode: None,
+            })
         }
 
         // ====================================================================

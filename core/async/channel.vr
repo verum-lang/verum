@@ -66,8 +66,9 @@ public type Channel<T> is {
 implement Channel<T> {
     public fn new(capacity: Int) -> Channel<T> {
         assert(capacity > 0, "Channel capacity must be positive");
-        // Allocate backing ring buffer
-        let buf_size = capacity * 8;  // sizeof(T) assumed 8 bytes (Int-sized)
+        // Allocate backing ring buffer sized by T — not hardcoded to 8 bytes,
+        // otherwise any T larger than an Int would overflow the buffer.
+        let buf_size = capacity * T.size;
         let buf = alloc(buf_size) as &unsafe T;
         Channel {
             len: AtomicInt.new(0),
@@ -91,7 +92,7 @@ implement Channel<T> {
             return false;
         }
         // Store value at tail position in ring buffer
-        let offset = self.tail * 8;
+        let offset = self.tail * T.size;
         let dst = (self.data as Int + offset) as &mut T;
         *dst = value;
         self.tail = (self.tail + 1) % self.cap;
@@ -112,7 +113,7 @@ implement Channel<T> {
             self.lock.lock();
             if self.len.load(MemoryOrdering.Relaxed) > 0 {
                 // Read value from head position
-                let offset = self.head * 8;
+                let offset = self.head * T.size;
                 let src = (self.data as Int + offset) as &T;
                 let value = *src;
                 self.head = (self.head + 1) % self.cap;
@@ -136,7 +137,7 @@ implement Channel<T> {
     public fn try_recv(&mut self) -> Maybe<T> {
         self.lock.lock();
         if self.len.load(MemoryOrdering.Relaxed) > 0 {
-            let offset = self.head * 8;
+            let offset = self.head * T.size;
             let src = (self.data as Int + offset) as &T;
             let value = *src;
             self.head = (self.head + 1) % self.cap;

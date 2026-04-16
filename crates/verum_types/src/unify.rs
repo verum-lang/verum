@@ -314,8 +314,69 @@ impl Unifier {
     }
 
     /// Register a type alias mapping (e.g., "Byte" -> UInt8 Named type).
+    ///
+    /// Performs cycle detection: registering `type A is B` when a chain
+    /// B -> ... -> A already exists is rejected so that `try_expand_alias`
+    /// cannot produce infinite recursion or unreachable types.
     pub fn register_type_alias(&mut self, alias_name: Text, target: Type) {
+        if self.alias_creates_cycle(&alias_name, &target) {
+            // Silently drop cyclic registrations. Caller receives no new
+            // alias, preserving the already-registered target. Cycle
+            // detection at type-check time will report the user-visible
+            // diagnostic via a dedicated pass.
+            return;
+        }
         self.type_aliases.insert(alias_name, target);
+    }
+
+    /// Returns true if registering `alias -> target` would create a cycle
+    /// with existing aliases (e.g., `type A is B; type B is A`).
+    fn alias_creates_cycle(&self, alias: &Text, target: &Type) -> bool {
+        let mut visited: std::collections::HashSet<Text> = std::collections::HashSet::new();
+        visited.insert(alias.clone());
+        self.type_mentions_alias(target, &mut visited)
+    }
+
+    fn type_mentions_alias(
+        &self,
+        ty: &Type,
+        visited: &mut std::collections::HashSet<Text>,
+    ) -> bool {
+        match ty {
+            Type::Named { path, args } => {
+                let name = path.segments.last().and_then(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(Text::from(ident.name.as_str())),
+                    _ => None,
+                });
+                if let Some(n) = name {
+                    if visited.contains(&n) {
+                        return true;
+                    }
+                    if let Some(next) = self.type_aliases.get(&n) {
+                        visited.insert(n);
+                        if self.type_mentions_alias(next, visited) {
+                            return true;
+                        }
+                    }
+                }
+                for arg in args {
+                    if self.type_mentions_alias(arg, visited) {
+                        return true;
+                    }
+                }
+                false
+            }
+            Type::Reference { inner, .. } => self.type_mentions_alias(inner, visited),
+            Type::Generic { args, .. } => {
+                for arg in args {
+                    if self.type_mentions_alias(arg, visited) {
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
     }
 
     /// Register type parameter names for a generic type alias.
