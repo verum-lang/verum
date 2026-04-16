@@ -366,6 +366,18 @@ pub struct TypeChecker {
     /// Whether dependent-type features (Pi, Sigma, dependent match)
     /// are enabled. Controlled by `[types] dependent` in verum.toml.
     dependent_enabled: bool,
+    /// Whether HKT kind inference is active (`[types] higher_kinded`).
+    higher_kinded_enabled: bool,
+    /// Whether universe polymorphism is tracked (`[types] universe_polymorphism`).
+    universe_poly_enabled: bool,
+    /// Whether coinductive types (codata/cofix) are allowed (`[types] coinductive`).
+    coinductive_enabled: bool,
+    /// Whether quotient types are allowed (`[types] quotient`).
+    quotient_enabled: bool,
+    /// Whether automatic instance search is active (`[types] instance_search`).
+    instance_search_enabled: bool,
+    /// Maximum coherence-check depth (`[types] coherence_check_depth`).
+    coherence_check_depth: u32,
     /// Name resolver for cross-module resolution
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Name resolution across modules
     pub(crate) module_resolver: NameResolver,
@@ -929,6 +941,12 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             dependent_enabled: true,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(ModuleRegistry::new()),
             current_module_path: verum_common::Text::from("cog"),
@@ -1100,6 +1118,12 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             dependent_enabled: true,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(ModuleRegistry::new()),
             current_module_path: verum_common::Text::from("cog"),
@@ -1653,6 +1677,12 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             dependent_enabled: true,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
             module_registry: registry,
             current_module_path: verum_common::Text::from("cog"),
@@ -1755,6 +1785,12 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             dependent_enabled: true,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(ModuleRegistry::new()),
             current_module_path: verum_common::Text::from("cog"),
@@ -1858,6 +1894,12 @@ impl TypeChecker {
             generator_context: Maybe::None,
             diagnostics: List::new(),
             dependent_enabled: true,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(ModuleRegistry::new()),
             current_module_path: verum_common::Text::from("cog"),
@@ -5916,6 +5958,30 @@ impl TypeChecker {
     /// pattern matching even on inductive types with indices.
     pub fn set_dependent_enabled(&mut self, enabled: bool) {
         self.dependent_enabled = enabled;
+    }
+
+    pub fn set_higher_kinded_enabled(&mut self, enabled: bool) {
+        self.higher_kinded_enabled = enabled;
+    }
+
+    pub fn set_universe_poly_enabled(&mut self, enabled: bool) {
+        self.universe_poly_enabled = enabled;
+    }
+
+    pub fn set_coinductive_enabled(&mut self, enabled: bool) {
+        self.coinductive_enabled = enabled;
+    }
+
+    pub fn set_quotient_enabled(&mut self, enabled: bool) {
+        self.quotient_enabled = enabled;
+    }
+
+    pub fn set_instance_search_enabled(&mut self, enabled: bool) {
+        self.instance_search_enabled = enabled;
+    }
+
+    pub fn set_coherence_check_depth(&mut self, depth: u32) {
+        self.coherence_check_depth = depth;
     }
 
     pub fn register_builtins(&mut self) {

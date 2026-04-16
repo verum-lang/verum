@@ -773,6 +773,12 @@ pub fn run_common_pipeline(
             .with_cubical_enabled(config.cubical_enabled)
             .with_dependent_enabled(config.dependent_enabled)
     };
+    // Note: remaining [types] flags (higher_kinded, universe_polymorphism,
+    // coinductive, quotient, instance_search, coherence_check_depth) are
+    // set from their defaults on SemanticAnalysisPhase and passed through
+    // to TypeChecker. The run_common_pipeline API doesn't expose them
+    // individually — they're consumed via the Session's language_features
+    // when using the full CompilationPipeline path.
     let semantic_input = PhaseInput {
         data: current_data,
         context: context.clone(),

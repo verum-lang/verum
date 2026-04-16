@@ -36,9 +36,13 @@ pub struct SemanticAnalysisPhase {
     /// Whether cubical normalization is enabled on the unifier
     /// (sourced from `[types] cubical` in `verum.toml`). Default on.
     cubical_enabled: bool,
-    /// Whether dependent-type features (Pi, Sigma, dependent match)
-    /// are enabled (sourced from `[types] dependent`). Default on.
     dependent_enabled: bool,
+    higher_kinded_enabled: bool,
+    universe_poly_enabled: bool,
+    coinductive_enabled: bool,
+    quotient_enabled: bool,
+    instance_search_enabled: bool,
+    coherence_check_depth: u32,
 }
 
 impl SemanticAnalysisPhase {
@@ -52,6 +56,12 @@ impl SemanticAnalysisPhase {
             user_module_count: None,
             cubical_enabled: true,
             dependent_enabled: true,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
         }
     }
 
@@ -65,6 +75,12 @@ impl SemanticAnalysisPhase {
             user_module_count: None,
             cubical_enabled: true,
             dependent_enabled: true,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
         }
     }
 
@@ -178,18 +194,15 @@ impl CompilationPhase for SemanticAnalysisPhase {
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         phase_checker.register_builtins();
 
-        // Apply session-level feature gates to the type checker.
-        // Each flag controls whether the corresponding type-system
-        // feature is active during inference. Disabled features
-        // cause the checker to skip feature-specific code paths.
+        // Apply ALL session-level feature gates to the type checker.
         phase_checker.set_cubical_enabled(self.cubical_enabled);
         phase_checker.set_dependent_enabled(self.dependent_enabled);
-        // TODO: Wire remaining [types] flags when TypeChecker
-        // supports them: higher_kinded, universe_polymorphism,
-        // coinductive, quotient, instance_search, coherence_check_depth.
-        // These require adding setter methods to the 50K-line
-        // TypeChecker and finding the correct gating points in
-        // infer.rs. Tracked in KNOWN_ISSUES.md.
+        phase_checker.set_higher_kinded_enabled(self.higher_kinded_enabled);
+        phase_checker.set_universe_poly_enabled(self.universe_poly_enabled);
+        phase_checker.set_coinductive_enabled(self.coinductive_enabled);
+        phase_checker.set_quotient_enabled(self.quotient_enabled);
+        phase_checker.set_instance_search_enabled(self.instance_search_enabled);
+        phase_checker.set_coherence_check_depth(self.coherence_check_depth);
 
         // If contracts are available, enable contract-aware type checking
         // This allows the type checker to leverage verified preconditions/postconditions
