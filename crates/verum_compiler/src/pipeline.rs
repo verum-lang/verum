@@ -192,6 +192,9 @@ struct SerializableRegistryCache {
     format_version: u32,
     /// Compiler version that produced this cache
     compiler_version: String,
+    /// LLVM version that produced this cache — bincode-serialized layouts
+    /// can depend on LLVM types via transitive `ModuleInfo` fields.
+    llvm_version: String,
     /// Blake3 hash of all core/*.vr file contents
     content_hash: String,
     /// Module entries: (module_id_u32, module_info)
@@ -201,7 +204,8 @@ struct SerializableRegistryCache {
 }
 
 /// Current cache format version. Bump when SerializableRegistryCache changes.
-const REGISTRY_CACHE_FORMAT_VERSION: u32 = 1;
+/// Bumped to 2 after adding llvm_version field.
+const REGISTRY_CACHE_FORMAT_VERSION: u32 = 2;
 
 /// Compute blake3 content hash of all .vr files under a directory.
 fn compute_stdlib_content_hash(stdlib_path: &Path) -> String {
@@ -284,6 +288,11 @@ fn try_load_registry_from_disk(
             cached.compiler_version, env!("CARGO_PKG_VERSION"));
         return None;
     }
+    if cached.llvm_version != verum_codegen::llvm::LLVM_VERSION {
+        debug!("Stdlib disk cache: LLVM version mismatch ({} vs {})",
+            cached.llvm_version, verum_codegen::llvm::LLVM_VERSION);
+        return None;
+    }
     if cached.content_hash != content_hash {
         debug!("Stdlib disk cache: content hash mismatch");
         return None;
@@ -325,6 +334,7 @@ fn save_registry_to_disk(
     let cached = SerializableRegistryCache {
         format_version: REGISTRY_CACHE_FORMAT_VERSION,
         compiler_version: env!("CARGO_PKG_VERSION").to_string(),
+        llvm_version: verum_codegen::llvm::LLVM_VERSION.to_string(),
         content_hash: content_hash.to_string(),
         modules,
         path_to_id,

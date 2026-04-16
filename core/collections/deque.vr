@@ -80,6 +80,31 @@ implement<T> Deque<T> {
         }
     }
 
+    // Fallible constructor: returns None on allocation failure instead of panic.
+    // Use this in production code paths that need to handle OOM gracefully
+    // (e.g. daemons / services that should degrade rather than crash).
+    public fn try_with_capacity(capacity: Int) -> Maybe<Deque<T>> {
+        if capacity == 0 {
+            return Some(Deque.new());
+        }
+
+        let cap = capacity.next_power_of_two();
+        let data = unsafe {
+            alloc(cap * T.size, T.alignment)
+        } as &unsafe T;
+
+        if data.is_null() {
+            return None;
+        }
+
+        Some(Deque {
+            data: data,
+            head: 0,
+            len: 0,
+            cap: cap,
+        })
+    }
+
     // Number of elements.
     public fn len(&self) -> Int {
         self.len
