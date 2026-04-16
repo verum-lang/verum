@@ -1,0 +1,42 @@
+// @test: benchmark
+// @tier: 0
+// @level: L4
+// @tags: tree, recursive-data, heap, performance, micro
+// @timeout: 30000
+
+module vcs.benchmarks.micro.tree_operations;
+
+type Tree is Leaf(Int) | Node(Heap<Tree>, Int, Heap<Tree>);
+
+fn tree_sum(t: Tree) -> Int {
+    match t {
+        Leaf(v) => v,
+        Node(l, v, r) => tree_sum(*l) + v + tree_sum(*r),
+    }
+}
+
+fn build_balanced(depth: Int) -> Tree {
+    if depth <= 0 {
+        Leaf(1)
+    } else {
+        Node(
+            Heap(build_balanced(depth - 1)),
+            depth,
+            Heap(build_balanced(depth - 1)),
+        )
+    }
+}
+
+fn main() {
+    // Build and sum a balanced binary tree of depth 8
+    let tree = build_balanced(8);
+    let sum = tree_sum(tree);
+    assert(sum > 0);
+
+    // Simple tree
+    let simple = Node(Heap(Leaf(1)), 2, Heap(Leaf(3)));
+    assert_eq(tree_sum(simple), 6);
+
+    print(f"tree sum(depth=8): {sum}");
+    print("tree-ok");
+}
