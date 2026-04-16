@@ -11625,7 +11625,7 @@ impl VbcCodegen {
     /// - Referenced in the expression
     /// - Not defined locally within the expression
     /// - Not in the provided bound variables set (closure parameters)
-    fn analyze_free_variables(&self, expr: &Expr, bound_vars: &[String]) -> Vec<String> {
+    pub(crate) fn analyze_free_variables(&self, expr: &Expr, bound_vars: &[String]) -> Vec<String> {
         let mut analyzer = FreeVarAnalyzer::new(bound_vars);
         analyzer.visit_expr(expr);
         analyzer.free_vars()
