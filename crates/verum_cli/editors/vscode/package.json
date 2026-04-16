@@ -51,6 +51,11 @@
           "default": true,
           "description": "Enable Verum Language Server"
         },
+        "verum.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to verum binary (empty = use PATH)"
+        },
         "verum.lsp.showCostHints": {
           "type": "boolean",
           "default": true,

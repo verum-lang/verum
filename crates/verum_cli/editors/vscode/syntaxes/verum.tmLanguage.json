@@ -1,0 +1,194 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Verum",
+  "scopeName": "source.verum",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#attributes" },
+    { "include": "#types" },
+    { "include": "#functions" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.verum",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.verum",
+          "begin": "/\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.documentation.verum",
+          "match": "///.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.verum",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.verum",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.interpolated.verum",
+          "begin": "f\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.verum",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.expression.verum",
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [{ "include": "$self" }]
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.verum",
+          "match": "\\b0x[0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.verum",
+          "match": "\\b0b[01_]+\\b"
+        },
+        {
+          "name": "constant.numeric.octal.verum",
+          "match": "\\b0o[0-7_]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.verum",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.verum",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.verum",
+          "match": "\\b(if|else|match|while|for|loop|break|continue|return|yield|in|await|select|spawn)\\b"
+        },
+        {
+          "name": "keyword.declaration.verum",
+          "match": "\\b(let|fn|type|is|implement|mount|module|protocol|where|using|provide|context|async|meta|pure|unsafe|codata|cofix)\\b"
+        },
+        {
+          "name": "keyword.other.verum",
+          "match": "\\b(mut|pub|self|Self)\\b"
+        },
+        {
+          "name": "constant.language.verum",
+          "match": "\\b(true|false|None|Some)\\b"
+        },
+        {
+          "name": "keyword.operator.verum",
+          "match": "\\b(and|or|not)\\b"
+        }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        {
+          "name": "meta.attribute.verum",
+          "match": "@[a-zA-Z_][a-zA-Z0-9_]*(\\([^)]*\\))?",
+          "captures": {
+            "0": { "name": "entity.other.attribute-name.verum" }
+          }
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.verum",
+          "match": "\\b(Int|Float|Bool|Text|Unit|Never|Byte)\\b"
+        },
+        {
+          "name": "support.type.collection.verum",
+          "match": "\\b(List|Map|Set|Deque|Maybe|Result|Heap|Shared)\\b"
+        },
+        {
+          "name": "entity.name.type.verum",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.verum",
+          "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.verum" },
+            "2": { "name": "entity.name.function.verum" }
+          }
+        },
+        {
+          "name": "support.function.builtin.verum",
+          "match": "\\b(print|assert|assert_eq|panic|unreachable|todo)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.verum",
+          "match": "(=>|->|\\|>|<\\||\\.\\.=?|\\?|!)"
+        },
+        {
+          "name": "keyword.operator.comparison.verum",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.verum",
+          "match": "(\\+|-|\\*|/|%)"
+        },
+        {
+          "name": "keyword.operator.assignment.verum",
+          "match": "(=|\\+=|-=|\\*=|/=)"
+        },
+        {
+          "name": "keyword.operator.logical.verum",
+          "match": "(&&|\\|\\|)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.verum",
+          "match": "[;,]"
+        },
+        {
+          "name": "punctuation.bracket.verum",
+          "match": "[()\\[\\]{}]"
+        }
+      ]
+    }
+  }
+}
