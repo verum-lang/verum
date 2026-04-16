@@ -434,10 +434,27 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
         return Ok(DispatchResult::Continue);
     }
 
+    // Auto-dereference CBGR register-based references (&T / &mut T).
+    // When a function receives `&mut List<Int>`, the register holds a
+    // CBGR ref (encoded negative i64 with register index + generation).
+    // We transparently read through the reference to get the underlying
+    // collection value so indexing works correctly.
+    use super::super::handlers::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
+    let arr_val = if is_cbgr_ref(&arr_val) {
+        let (abs_index, _gen) = decode_cbgr_ref(arr_val.as_i64());
+        state.registers.get_absolute(abs_index)
+    } else if arr_val.is_thin_ref() {
+        let thin_ref = arr_val.as_thin_ref();
+        if thin_ref.ptr.is_null() {
+            return Err(InterpreterError::NullPointer);
+        }
+        unsafe { *(thin_ref.ptr as *const Value) }
+    } else {
+        arr_val
+    };
+
     if !arr_val.is_ptr() {
         // Transparent newtype access: .0 on a scalar value returns the value itself.
-        // This handles `type Capabilities is (u32);` where `self.0` accesses the
-        // underlying Int value through a type alias parsed as transparent.
         let idx_val = state.get_reg(idx);
         if idx_val.is_int() && idx_val.as_i64() == 0 {
             state.set_reg(dst, arr_val);
@@ -675,7 +692,23 @@ pub(in super::super) fn handle_set_index(state: &mut InterpreterState) -> Interp
     let idx = read_reg(state)?;
     let val = read_reg(state)?;
 
-    let ptr = state.get_reg(arr).as_ptr::<u8>();
+    // Auto-dereference CBGR register-based references, same as GET_E.
+    let arr_val = state.get_reg(arr);
+    use super::super::handlers::cbgr_helpers::{is_cbgr_ref as is_cbgr_ref2, decode_cbgr_ref as decode_cbgr_ref2};
+    let arr_val = if is_cbgr_ref2(&arr_val) {
+        let (abs_index, _gen) = decode_cbgr_ref2(arr_val.as_i64());
+        state.registers.get_absolute(abs_index)
+    } else if arr_val.is_thin_ref() {
+        let thin_ref = arr_val.as_thin_ref();
+        if thin_ref.ptr.is_null() {
+            return Err(InterpreterError::NullPointer);
+        }
+        unsafe { *(thin_ref.ptr as *const Value) }
+    } else {
+        arr_val
+    };
+
+    let ptr = arr_val.as_ptr::<u8>();
     if ptr.is_null() {
         return Err(InterpreterError::NullPointer);
     }
