@@ -297,6 +297,25 @@ impl MacroExpansionPhase {
         item: &Item,
         func: &FunctionDecl,
     ) -> Result<List<Item>, Diagnostic> {
+        // Gate: [meta].compile_time_functions must be enabled for meta fn.
+        // When disabled, meta functions are treated as regular functions
+        // (no compile-time evaluation, no quote expansion).
+        if func.is_meta && !self.compile_time_enabled {
+            return Err(
+                verum_diagnostics::DiagnosticBuilder::error()
+                    .message(format!(
+                        "`meta fn {}` is not allowed: `[meta] compile_time_functions` is disabled",
+                        func.name.name
+                    ))
+                    .span(super::ast_span_to_diagnostic_span(func.span, None))
+                    .help(
+                        "set `compile_time_functions = true` under `[meta]` in verum.toml, \
+                         or remove `-Z meta.compile_time_functions=false`",
+                    )
+                    .build(),
+            );
+        }
+
         // Lint meta functions before any processing
         if func.is_meta {
             self.lint_meta_function(func)?;

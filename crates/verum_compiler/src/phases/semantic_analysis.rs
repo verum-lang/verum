@@ -36,6 +36,9 @@ pub struct SemanticAnalysisPhase {
     /// Whether cubical normalization is enabled on the unifier
     /// (sourced from `[types] cubical` in `verum.toml`). Default on.
     cubical_enabled: bool,
+    /// Whether dependent-type features (Pi, Sigma, dependent match)
+    /// are enabled (sourced from `[types] dependent`). Default on.
+    dependent_enabled: bool,
 }
 
 impl SemanticAnalysisPhase {
@@ -48,6 +51,7 @@ impl SemanticAnalysisPhase {
             stdlib_metadata: None,
             user_module_count: None,
             cubical_enabled: true,
+            dependent_enabled: true,
         }
     }
 
@@ -60,6 +64,7 @@ impl SemanticAnalysisPhase {
             stdlib_metadata: Some(stdlib),
             user_module_count: None,
             cubical_enabled: true,
+            dependent_enabled: true,
         }
     }
 
@@ -67,6 +72,11 @@ impl SemanticAnalysisPhase {
     /// type checker. Called by the pipeline from `Session::language_features`.
     pub fn with_cubical_enabled(mut self, enabled: bool) -> Self {
         self.cubical_enabled = enabled;
+        self
+    }
+
+    pub fn with_dependent_enabled(mut self, enabled: bool) -> Self {
+        self.dependent_enabled = enabled;
         self
     }
 
@@ -169,8 +179,8 @@ impl CompilationPhase for SemanticAnalysisPhase {
         phase_checker.register_builtins();
 
         // Apply session-level feature gates to the type checker.
-        // Currently: [types] cubical → unifier's cubical normalizer.
         phase_checker.set_cubical_enabled(self.cubical_enabled);
+        phase_checker.set_dependent_enabled(self.dependent_enabled);
 
         // If contracts are available, enable contract-aware type checking
         // This allows the type checker to leverage verified preconditions/postconditions

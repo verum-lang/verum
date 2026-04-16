@@ -179,6 +179,9 @@ pub struct CommonPipelineConfig {
     /// Enable cubical-type normalization in the unifier (sourced from
     /// `[types] cubical` in `verum.toml`). Default: true.
     pub cubical_enabled: bool,
+    /// Enable dependent-type features (Pi, Sigma, dependent match).
+    /// Sourced from `[types] dependent`. Default: true.
+    pub dependent_enabled: bool,
     /// Enable the context / DI system (sourced from `[context] enabled`).
     /// When false, no context validation runs and `using [...]` clauses
     /// are parsed-and-ignored. Default: true.
@@ -215,6 +218,7 @@ impl Default for CommonPipelineConfig {
             expand_macros: true,
             core_source_path: None,
             cubical_enabled: true,
+            dependent_enabled: true,
             context_enabled: true,
             derive_enabled: true,
             compile_time_enabled: true,
@@ -237,6 +241,7 @@ impl CommonPipelineConfig {
             expand_macros: true,
             core_source_path: None,
             cubical_enabled: true,
+            dependent_enabled: true,
             context_enabled: true,
             derive_enabled: true,
             compile_time_enabled: true,
@@ -257,6 +262,7 @@ impl CommonPipelineConfig {
             expand_macros: true,
             core_source_path: None,
             cubical_enabled: true,
+            dependent_enabled: true,
             context_enabled: true,
             derive_enabled: true,
             compile_time_enabled: true,
@@ -757,9 +763,11 @@ pub fn run_common_pipeline(
         semantic_analysis::SemanticAnalysisPhase::new()
             .with_user_module_count(user_source_count)
             .with_cubical_enabled(config.cubical_enabled)
+            .with_dependent_enabled(config.dependent_enabled)
     } else {
         semantic_analysis::SemanticAnalysisPhase::new()
             .with_cubical_enabled(config.cubical_enabled)
+            .with_dependent_enabled(config.dependent_enabled)
     };
     let semantic_input = PhaseInput {
         data: current_data,

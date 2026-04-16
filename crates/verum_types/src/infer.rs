@@ -363,6 +363,9 @@ pub struct TypeChecker {
     generator_context: Maybe<GeneratorContext>,
     /// Collected diagnostics (warnings, notes, etc.)
     pub(crate) diagnostics: List<Diagnostic>,
+    /// Whether dependent-type features (Pi, Sigma, dependent match)
+    /// are enabled. Controlled by `[types] dependent` in verum.toml.
+    dependent_enabled: bool,
     /// Name resolver for cross-module resolution
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Name resolution across modules
     pub(crate) module_resolver: NameResolver,
@@ -925,6 +928,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            dependent_enabled: true,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(ModuleRegistry::new()),
             current_module_path: verum_common::Text::from("cog"),
@@ -1095,6 +1099,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            dependent_enabled: true,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(ModuleRegistry::new()),
             current_module_path: verum_common::Text::from("cog"),
@@ -1647,6 +1652,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            dependent_enabled: true,
             module_resolver: NameResolver::new(),
             module_registry: registry,
             current_module_path: verum_common::Text::from("cog"),
@@ -1748,6 +1754,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            dependent_enabled: true,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(ModuleRegistry::new()),
             current_module_path: verum_common::Text::from("cog"),
@@ -1850,6 +1857,7 @@ impl TypeChecker {
             metrics: TypeCheckMetrics::new(),
             generator_context: Maybe::None,
             diagnostics: List::new(),
+            dependent_enabled: true,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(ModuleRegistry::new()),
             current_module_path: verum_common::Text::from("cog"),
@@ -5900,6 +5908,14 @@ impl TypeChecker {
     /// skipping the cubical `whnf` normalizer.
     pub fn set_cubical_enabled(&mut self, enabled: bool) {
         self.unifier.set_cubical_enabled(enabled);
+    }
+
+    /// Toggle dependent-type features (Pi, Sigma, dependent pattern
+    /// matching). Wired from `[types] dependent` in `verum.toml`.
+    /// When off, match expressions use regular (non-dependent)
+    /// pattern matching even on inductive types with indices.
+    pub fn set_dependent_enabled(&mut self, enabled: bool) {
+        self.dependent_enabled = enabled;
     }
 
     pub fn register_builtins(&mut self) {
@@ -12568,12 +12584,16 @@ impl TypeChecker {
                         ));
                     }
 
-                    // Check if this is a dependent match (on an inductive type with indices)
-                    let is_dependent = self.is_dependent_type(&scrut_ty);
-
-                    if is_dependent {
-                        // Use dependent pattern matching
-                        return self.check_dependent_match(&scrut_ty, arms, expr.span);
+                    // Check if this is a dependent match (on an inductive type with indices).
+                    // Gated on [types].dependent: when disabled, all match expressions
+                    // use regular (non-dependent) pattern matching even on inductive
+                    // types with indices. This avoids the overhead of motive synthesis
+                    // and index unification for projects that don't use dependent types.
+                    if self.dependent_enabled {
+                        let is_dependent = self.is_dependent_type(&scrut_ty);
+                        if is_dependent {
+                            return self.check_dependent_match(&scrut_ty, arms, expr.span);
+                        }
                     }
 
                     // Extract scrutinee variable name for evidence tracking

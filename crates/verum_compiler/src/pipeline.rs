@@ -7088,6 +7088,22 @@ impl<'s> CompilationPipeline<'s> {
     /// Protocol coherence: orphan rule (impl in defining crate), overlap prevention,
     /// and specialization via @specialize for overlapping impls.
     fn check_protocol_coherence(&self, module: &Module) -> Result<()> {
+        // Gate on [protocols].coherence. "unchecked" skips all
+        // coherence rules; "lenient" and "strict" proceed (the method
+        // already classifies by severity internally).
+        let coherence_mode = self
+            .session
+            .language_features()
+            .protocols
+            .coherence
+            .as_str();
+        if coherence_mode == "unchecked" {
+            tracing::debug!(
+                "Protocol coherence checking SKIPPED ([protocols] coherence = \"unchecked\")"
+            );
+            return Ok(());
+        }
+
         use verum_ast::decl::ImplKind;
         use verum_modules::ModuleId;
 
