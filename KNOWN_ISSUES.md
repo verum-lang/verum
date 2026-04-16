@@ -53,26 +53,42 @@ provides. These opcodes return `NotImplemented` instead of the
 previous behavior of silently returning nil. Use AOT mode with
 an appropriate runtime for these.
 
-## Shared&lt;T&gt; Runtime Layout Bug (blocks cancellation, channel runtime)
+## Shared&lt;T&gt; / CBGR-allocator Bootstrap (architectural)
 
-`Shared.new(simple_struct)` fails at runtime with a "field write out
-of bounds" error originating from `cbgr_alloc` which returns
-`Result<(&unsafe Byte, UInt32, UInt16), AllocError>` — a large-tuple
-variant layout that the VBC interpreter mishandles.
+`Shared.new(...)` and other CBGR-tracked reference primitives fail
+at runtime in both interpreter and AOT because the stdlib memory
+allocator functions (`get_heap`, `cbgr_alloc`, `LocalHeap.new`) are
+not linked into user modules via the current mount/link system.
 
-**Impact:** Stdlib types that wrap `Shared<Inner>` (Channel, Broadcast,
-Oneshot, CancellationToken) typecheck and compile but crash at
-construction. Their public APIs are complete and ready.
+**Symptom:** `Shared.new(struct)` → "field write out of bounds:
+field index 257" in the interpreter; `undefined function: get_heap`
+in AOT. The "field out of bounds" is cascading from an uninitialized
+allocator state rather than a real bytecode bug.
 
-**Workaround:** Use AOT mode for code that constructs `Shared<T>` —
-LLVM codegen handles the large-tuple layout correctly.
+**Root cause:** The stdlib bootstrap loads `core/mem/*.vr` into the
+module registry for type checking but does not emit their function
+bodies into the user's VBC module. When user code transitively
+depends on `cbgr_alloc` via `Shared.new`, the call site is present
+but the callee has no body.
+
+**Impact:** Stdlib types that wrap `Shared<Inner>` (Channel,
+Broadcast, Oneshot, CancellationToken) typecheck and compile but
+crash at construction. Their public APIs are complete and ready;
+runtime semantics unblock when the bootstrap is fixed.
+
+**Workaround:** Use direct `alloc()` intrinsic in user code rather
+than CBGR-tracked allocation. This bypasses the allocator bootstrap
+at the cost of losing per-object generation/epoch tracking.
+
+**Fix path:** Extend `clear_non_compilable_stdlib_modules` in
+`pipeline.rs` to retain `core.mem.*` modules for codegen, or
+convert CBGR allocator functions to compiler intrinsics with direct
+VBC opcode lowering.
 
 ## Cancellation Tokens
 
 `core.async.cancellation` is API-complete and typechecks. Runtime
-construction is blocked on the `Shared<T>` layout bug above. Use
-AOT mode or substitute the non-sharing `CancellationFlag` directly
-for single-observer patterns until the interpreter bug is fixed.
+construction is blocked by the allocator bootstrap above.
 
 ## Cache Invalidation
 
