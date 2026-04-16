@@ -13,12 +13,12 @@
 /// - File serving
 /// - Concurrent connections
 
-module benchmarks.macro.http_server
+module benchmarks.macro.http_server;
 
 using [Benchmark, Http, Async, Json]
 
 /// Minimal "Hello World" handler
-fn benchmark_http_hello_world() async {
+async fn benchmark_http_hello_world() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -44,7 +44,7 @@ fn benchmark_http_hello_world() async {
 }
 
 /// JSON response handler
-fn benchmark_http_json_response() async {
+async fn benchmark_http_json_response() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -81,7 +81,7 @@ fn benchmark_http_json_response() async {
 }
 
 /// JSON request parsing
-fn benchmark_http_json_request() async {
+async fn benchmark_http_json_request() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -115,7 +115,7 @@ fn benchmark_http_json_request() async {
 }
 
 /// Simulated database query
-fn benchmark_http_db_query() async {
+async fn benchmark_http_db_query() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -152,7 +152,7 @@ fn benchmark_http_db_query() async {
 }
 
 /// Static file serving
-fn benchmark_http_static_files() async {
+async fn benchmark_http_static_files() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -191,7 +191,7 @@ fn benchmark_http_static_files() async {
 }
 
 /// Concurrent connections
-fn benchmark_http_concurrent() async {
+async fn benchmark_http_concurrent() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -227,7 +227,7 @@ fn benchmark_http_concurrent() async {
 }
 
 /// Keep-alive connections
-fn benchmark_http_keepalive() async {
+async fn benchmark_http_keepalive() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -254,7 +254,7 @@ fn benchmark_http_keepalive() async {
 }
 
 /// Large response body
-fn benchmark_http_large_response() async {
+async fn benchmark_http_large_response() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -281,7 +281,7 @@ fn benchmark_http_large_response() async {
 }
 
 /// Middleware chain
-fn benchmark_http_middleware() async {
+async fn benchmark_http_middleware() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 
@@ -325,7 +325,7 @@ fn benchmark_http_middleware() async {
 }
 
 /// Request routing performance
-fn benchmark_http_routing() async {
+async fn benchmark_http_routing() {
     let server = HttpServer.bind("127.0.0.1:0").await;
     let port = server.local_addr().port();
 

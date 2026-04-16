@@ -9,7 +9,7 @@
 /// Write locks are exclusive - no other readers or writers allowed.
 /// Tests write performance under various conditions.
 
-module benchmarks.micro.rwlock_write
+module benchmarks.micro.rwlock_write;
 
 using [Benchmark, Sync]
 
@@ -197,7 +197,7 @@ fn benchmark_rwlock_upgrade() {
 }
 
 /// Async write lock
-fn benchmark_rwlock_async_write() async {
+async fn benchmark_rwlock_async_write() {
     let rwlock = AsyncRwLock.new(0);
 
     for _ in 0..500_000 {

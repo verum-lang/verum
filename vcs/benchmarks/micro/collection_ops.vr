@@ -16,7 +16,7 @@
 ///
 /// Spec reference: docs/detailed/03-type-system.md
 
-module vcs.benchmarks.micro.collection_ops
+module vcs.benchmarks.micro.collection_ops;
 
 const SMALL_SIZE: Int = 100;
 const MEDIUM_SIZE: Int = 10_000;

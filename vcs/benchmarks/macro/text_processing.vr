@@ -13,7 +13,7 @@
 /// - Text search and replace
 /// - Tokenization
 
-module benchmarks.macro.text_processing
+module benchmarks.macro.text_processing;
 
 using [Benchmark, Text, Regex]
 

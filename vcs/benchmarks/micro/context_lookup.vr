@@ -13,7 +13,7 @@
 ///
 /// Target performance: 5-30ns per context lookup
 
-module benchmarks.micro.context_lookup
+module benchmarks.micro.context_lookup;
 
 using [Benchmark]
 

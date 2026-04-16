@@ -19,7 +19,7 @@
 /// - Buffered I/O: > 300 MB/s
 /// - Memory-mapped: > 1 GB/s
 
-module vcs.benchmarks.macro.file_processing
+module vcs.benchmarks.macro.file_processing;
 
 using [Benchmark, FileSystem, IO, Parallel]
 

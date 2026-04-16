@@ -13,7 +13,7 @@
 /// - Memory-mapped files
 /// - Async I/O
 
-module benchmarks.macro.file_io
+module benchmarks.macro.file_io;
 
 using [Benchmark, Fs, Async]
 
@@ -204,7 +204,7 @@ fn benchmark_file_mmap_write() {
 }
 
 /// Async file read
-fn benchmark_file_async_read() async {
+async fn benchmark_file_async_read() {
     let path = temp_file_path();
     let data = "Async content.\n".repeat(100_000);
     write_file(&path, &data)?;
@@ -218,7 +218,7 @@ fn benchmark_file_async_read() async {
 }
 
 /// Async file write
-fn benchmark_file_async_write() async {
+async fn benchmark_file_async_write() {
     let path = temp_file_path();
     let data = "Async write test.\n".repeat(10_000);
 
@@ -230,7 +230,7 @@ fn benchmark_file_async_write() async {
 }
 
 /// Concurrent file operations
-fn benchmark_file_concurrent() async {
+async fn benchmark_file_concurrent() {
     let base_path = temp_dir_path();
     create_dir_all(&base_path)?;
 

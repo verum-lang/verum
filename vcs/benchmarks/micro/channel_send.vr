@@ -13,12 +13,12 @@
 /// - SPSC (Single-producer, single-consumer)
 /// - Broadcast channels
 
-module benchmarks.micro.channel_send
+module benchmarks.micro.channel_send;
 
 using [Benchmark, Async, Channels]
 
 /// Unbounded channel send
-fn benchmark_channel_unbounded_send() async {
+async fn benchmark_channel_unbounded_send() {
     let (tx, rx) = channel<Int>.unbounded();
 
     // Drain receiver in background
@@ -35,7 +35,7 @@ fn benchmark_channel_unbounded_send() async {
 }
 
 /// Bounded channel send (non-blocking)
-fn benchmark_channel_bounded_nonblocking() async {
+async fn benchmark_channel_bounded_nonblocking() {
     let (tx, rx) = channel<Int>.bounded(10_000);
 
     // Fast drain
@@ -52,7 +52,7 @@ fn benchmark_channel_bounded_nonblocking() async {
 }
 
 /// Bounded channel send (with backpressure)
-fn benchmark_channel_bounded_backpressure() async {
+async fn benchmark_channel_bounded_backpressure() {
     let (tx, rx) = channel<Int>.bounded(100);
 
     let drain = spawn async {
@@ -70,7 +70,7 @@ fn benchmark_channel_bounded_backpressure() async {
 }
 
 /// MPSC channel send (multiple producers)
-fn benchmark_channel_mpsc_send() async {
+async fn benchmark_channel_mpsc_send() {
     let (tx, rx) = mpsc<Int>.channel(1000);
 
     // Receiver
@@ -100,7 +100,7 @@ fn benchmark_channel_mpsc_send() async {
 }
 
 /// SPSC channel send (optimized single-producer)
-fn benchmark_channel_spsc_send() async {
+async fn benchmark_channel_spsc_send() {
     let (tx, rx) = spsc<Int>.channel(10_000);
 
     let receiver = spawn async {
@@ -128,7 +128,7 @@ fn benchmark_channel_try_send() {
 }
 
 /// Send with timeout
-fn benchmark_channel_send_timeout() async {
+async fn benchmark_channel_send_timeout() {
     let (tx, rx) = channel<Int>.bounded(100);
 
     // Slow consumer
@@ -151,7 +151,7 @@ fn benchmark_channel_send_timeout() async {
 }
 
 /// Broadcast channel send
-fn benchmark_channel_broadcast_send() async {
+async fn benchmark_channel_broadcast_send() {
     let (tx, _) = broadcast<Int>.channel(1000);
 
     // Create multiple receivers
@@ -173,7 +173,7 @@ fn benchmark_channel_broadcast_send() async {
 }
 
 /// Oneshot channel send
-fn benchmark_channel_oneshot_send() async {
+async fn benchmark_channel_oneshot_send() {
     for _ in 0..500_000 {
         let (tx, rx) = oneshot<Int>.channel();
         tx.send(42);
@@ -182,7 +182,7 @@ fn benchmark_channel_oneshot_send() async {
 }
 
 /// Send large messages
-fn benchmark_channel_send_large() async {
+async fn benchmark_channel_send_large() {
     type LargeMessage is {
         data: [Int; 1024],
     };
@@ -202,7 +202,7 @@ fn benchmark_channel_send_large() async {
 }
 
 /// Zero-copy send (move semantics)
-fn benchmark_channel_send_zero_copy() async {
+async fn benchmark_channel_send_zero_copy() {
     let (tx, rx) = channel<List<Int>>.bounded(100);
 
     let receiver = spawn async {
@@ -219,7 +219,7 @@ fn benchmark_channel_send_zero_copy() async {
 }
 
 /// Select on multiple channels
-fn benchmark_channel_select_send() async {
+async fn benchmark_channel_select_send() {
     let (tx1, rx1) = channel<Int>.bounded(100);
     let (tx2, rx2) = channel<Int>.bounded(100);
 

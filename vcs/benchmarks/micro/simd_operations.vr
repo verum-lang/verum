@@ -13,7 +13,7 @@
 /// - Reductions
 /// - Various SIMD widths (SSE, AVX, AVX-512)
 
-module benchmarks.micro.simd_operations
+module benchmarks.micro.simd_operations;
 
 using [Benchmark, Simd]
 

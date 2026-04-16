@@ -9,7 +9,7 @@
 /// JIT compilation trades compile-time for runtime optimization.
 /// Tests JIT performance for various scenarios.
 
-module benchmarks.micro.jit_compile
+module benchmarks.micro.jit_compile;
 
 using [Benchmark, Jit]
 

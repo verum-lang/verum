@@ -12,7 +12,7 @@
 /// - Array bounds proofs
 /// - Overflow checking
 
-module benchmarks.micro.smt_simple
+module benchmarks.micro.smt_simple;
 
 using [Benchmark, Verification]
 

@@ -13,7 +13,7 @@
 /// - Brotli (web-optimized)
 /// - Snappy (Google's fast compressor)
 
-module benchmarks.macro.compression
+module benchmarks.macro.compression;
 
 using [Benchmark, Compression]
 

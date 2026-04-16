@@ -13,7 +13,7 @@
 /// - Large documents
 /// - Streaming parsing
 
-module benchmarks.macro.json_parsing
+module benchmarks.macro.json_parsing;
 
 using [Benchmark, Json]
 

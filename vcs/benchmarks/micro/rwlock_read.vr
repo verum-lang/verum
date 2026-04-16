@@ -12,7 +12,7 @@
 /// - Multiple concurrent readers
 /// - Readers with occasional writer
 
-module benchmarks.micro.rwlock_read
+module benchmarks.micro.rwlock_read;
 
 using [Benchmark, Sync]
 
@@ -264,7 +264,7 @@ fn benchmark_rwlock_fair_read() {
 }
 
 /// Async read lock
-fn benchmark_rwlock_async_read() async {
+async fn benchmark_rwlock_async_read() {
     let rwlock = AsyncRwLock.new(42);
 
     for _ in 0..500_000 {

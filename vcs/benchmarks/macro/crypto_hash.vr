@@ -12,7 +12,7 @@
 /// - HMAC
 /// - Password hashing (bcrypt, argon2)
 
-module benchmarks.macro.crypto_hash
+module benchmarks.macro.crypto_hash;
 
 using [Benchmark, Crypto]
 

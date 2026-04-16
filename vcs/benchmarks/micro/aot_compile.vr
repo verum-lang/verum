@@ -10,7 +10,7 @@
 /// more aggressive optimizations. Measures throughput and
 /// optimization effectiveness.
 
-module benchmarks.micro.aot_compile
+module benchmarks.micro.aot_compile;
 
 using [Benchmark, Compiler]
 

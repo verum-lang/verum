@@ -12,7 +12,7 @@
 /// - Large object allocation (> 4KB)
 /// - Heap vs stack allocation
 
-module benchmarks.micro.allocation
+module benchmarks.micro.allocation;
 
 using [Benchmark, Memory]
 

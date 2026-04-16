@@ -12,12 +12,12 @@
 /// - Concurrent stream processing
 /// - Buffering strategies
 
-module benchmarks.macro.async_pipeline
+module benchmarks.macro.async_pipeline;
 
 using [Benchmark, Async, Streams]
 
 /// Simple linear pipeline
-fn benchmark_pipeline_linear() async {
+async fn benchmark_pipeline_linear() {
     let source = Stream.iter(0..100_000);
 
     let result: Int = source
@@ -31,7 +31,7 @@ fn benchmark_pipeline_linear() async {
 }
 
 /// Pipeline with async stages
-fn benchmark_pipeline_async_stages() async {
+async fn benchmark_pipeline_async_stages() {
     let source = Stream.iter(0..10_000);
 
     let result: List<Int> = source
@@ -49,7 +49,7 @@ fn benchmark_pipeline_async_stages() async {
 }
 
 /// Pipeline with concurrent branches
-fn benchmark_pipeline_concurrent_branches() async {
+async fn benchmark_pipeline_concurrent_branches() {
     let source = Stream.iter(0..10_000);
 
     // Split stream into two branches
@@ -68,7 +68,7 @@ fn benchmark_pipeline_concurrent_branches() async {
 }
 
 /// Pipeline with backpressure
-fn benchmark_pipeline_backpressure() async {
+async fn benchmark_pipeline_backpressure() {
     let source = Stream.iter(0..100_000);
 
     // Slow consumer should apply backpressure
@@ -85,7 +85,7 @@ fn benchmark_pipeline_backpressure() async {
 }
 
 /// Pipeline with rate limiting
-fn benchmark_pipeline_rate_limited() async {
+async fn benchmark_pipeline_rate_limited() {
     let source = Stream.iter(0..10_000);
 
     let result: Int = source
@@ -98,7 +98,7 @@ fn benchmark_pipeline_rate_limited() async {
 }
 
 /// Pipeline with chunking/batching
-fn benchmark_pipeline_batched() async {
+async fn benchmark_pipeline_batched() {
     let source = Stream.iter(0..100_000);
 
     let result = source
@@ -115,7 +115,7 @@ fn benchmark_pipeline_batched() async {
 }
 
 /// Pipeline with timeout handling
-fn benchmark_pipeline_timeout() async {
+async fn benchmark_pipeline_timeout() {
     let source = Stream.iter(0..10_000);
 
     let result = source
@@ -133,7 +133,7 @@ fn benchmark_pipeline_timeout() async {
 }
 
 /// Pipeline with error recovery
-fn benchmark_pipeline_error_recovery() async {
+async fn benchmark_pipeline_error_recovery() {
     let source = Stream.iter(0..10_000);
 
     let result = source
@@ -152,7 +152,7 @@ fn benchmark_pipeline_error_recovery() async {
 }
 
 /// Pipeline with windowing (time-based)
-fn benchmark_pipeline_time_window() async {
+async fn benchmark_pipeline_time_window() {
     let source = Stream.iter(0..10_000);
 
     let windows: List<List<Int>> = source
@@ -165,7 +165,7 @@ fn benchmark_pipeline_time_window() async {
 }
 
 /// Pipeline with windowing (count-based)
-fn benchmark_pipeline_count_window() async {
+async fn benchmark_pipeline_count_window() {
     let source = Stream.iter(0..100_000);
 
     let windows: Int = source
@@ -178,7 +178,7 @@ fn benchmark_pipeline_count_window() async {
 }
 
 /// Pipeline with sliding window
-fn benchmark_pipeline_sliding_window() async {
+async fn benchmark_pipeline_sliding_window() {
     let source = Stream.iter(0..10_000);
 
     let moving_avg: List<Float> = source
@@ -194,7 +194,7 @@ fn benchmark_pipeline_sliding_window() async {
 }
 
 /// Pipeline with merge (multiple sources)
-fn benchmark_pipeline_merge() async {
+async fn benchmark_pipeline_merge() {
     let source1 = Stream.iter(0..50_000).map(|x| x * 2);
     let source2 = Stream.iter(0..50_000).map(|x| x * 2 + 1);
 
@@ -206,7 +206,7 @@ fn benchmark_pipeline_merge() async {
 }
 
 /// Pipeline with zip
-fn benchmark_pipeline_zip() async {
+async fn benchmark_pipeline_zip() {
     let source1 = Stream.iter(0..50_000);
     let source2 = Stream.iter(0..50_000);
 
@@ -220,7 +220,7 @@ fn benchmark_pipeline_zip() async {
 }
 
 /// Pipeline with flatten
-fn benchmark_pipeline_flatten() async {
+async fn benchmark_pipeline_flatten() {
     let source = Stream.iter(0..1_000);
 
     let flattened: Int = source
@@ -233,7 +233,7 @@ fn benchmark_pipeline_flatten() async {
 }
 
 /// Pipeline with fold/reduce
-fn benchmark_pipeline_fold() async {
+async fn benchmark_pipeline_fold() {
     let source = Stream.iter(0..100_000);
 
     let result = source
@@ -244,7 +244,7 @@ fn benchmark_pipeline_fold() async {
 }
 
 /// Pipeline with scan (running total)
-fn benchmark_pipeline_scan() async {
+async fn benchmark_pipeline_scan() {
     let source = Stream.iter(0..100_000);
 
     let running_totals: List<Int> = source
@@ -259,7 +259,7 @@ fn benchmark_pipeline_scan() async {
 }
 
 /// Pipeline with distinct
-fn benchmark_pipeline_distinct() async {
+async fn benchmark_pipeline_distinct() {
     let source = Stream.iter((0..100_000).map(|x| x % 1000));
 
     let unique_count = source
@@ -271,7 +271,7 @@ fn benchmark_pipeline_distinct() async {
 }
 
 /// Pipeline with group_by
-fn benchmark_pipeline_group_by() async {
+async fn benchmark_pipeline_group_by() {
     let source = Stream.iter(0..10_000);
 
     let groups: Map<Int, List<Int>> = source
@@ -283,7 +283,7 @@ fn benchmark_pipeline_group_by() async {
 }
 
 /// Complex multi-stage pipeline
-fn benchmark_pipeline_complex() async {
+async fn benchmark_pipeline_complex() {
     let source = Stream.iter(0..100_000);
 
     let result = source
@@ -311,7 +311,7 @@ fn benchmark_pipeline_complex() async {
 }
 
 /// Pipeline with parallel processing
-fn benchmark_pipeline_parallel() async {
+async fn benchmark_pipeline_parallel() {
     let source = Stream.iter(0..100_000);
 
     let result: Int = source
@@ -327,7 +327,7 @@ fn benchmark_pipeline_parallel() async {
 }
 
 /// Pipeline with ordered parallel processing
-fn benchmark_pipeline_parallel_ordered() async {
+async fn benchmark_pipeline_parallel_ordered() {
     let source = Stream.iter(0..100_000);
 
     let result: List<Int> = source

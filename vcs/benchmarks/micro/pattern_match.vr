@@ -17,7 +17,7 @@
 ///
 /// Spec reference: docs/detailed/05-syntax-grammar.md
 
-module vcs.benchmarks.micro.pattern_match
+module vcs.benchmarks.micro.pattern_match;
 
 const WARMUP_ITERATIONS: Int = 100_000;
 const BENCHMARK_ITERATIONS: Int = 10_000_000;

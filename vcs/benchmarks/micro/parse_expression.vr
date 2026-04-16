@@ -12,7 +12,7 @@
 /// - Function calls
 /// - Complex nested expressions
 
-module benchmarks.micro.parse_expression
+module benchmarks.micro.parse_expression;
 
 using [Benchmark, Parser]
 

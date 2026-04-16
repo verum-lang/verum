@@ -12,7 +12,7 @@
 /// - High contention
 /// - Lock/unlock cycles
 
-module benchmarks.micro.mutex_lock
+module benchmarks.micro.mutex_lock;
 
 using [Benchmark, Sync]
 

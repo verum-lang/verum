@@ -12,7 +12,7 @@
 /// - Loop unrolling
 /// - External BLAS libraries
 
-module benchmarks.micro.tensor_matmul
+module benchmarks.micro.tensor_matmul;
 
 using [Benchmark, Tensor, Linalg]
 

@@ -12,12 +12,12 @@
 /// - Future creation
 /// - Work-stealing queue operations
 
-module benchmarks.micro.async_spawn
+module benchmarks.micro.async_spawn;
 
 using [Benchmark, Async]
 
 /// Simple async spawn with immediate completion
-fn benchmark_spawn_immediate() async {
+async fn benchmark_spawn_immediate() {
     for _ in 0..100_000 {
         let handle = spawn async {
             42  // Immediate return
@@ -27,7 +27,7 @@ fn benchmark_spawn_immediate() async {
 }
 
 /// Spawn without await (fire-and-forget)
-fn benchmark_spawn_detached() async {
+async fn benchmark_spawn_detached() {
     for _ in 0..500_000 {
         spawn async {
             // Fire and forget
@@ -39,7 +39,7 @@ fn benchmark_spawn_detached() async {
 }
 
 /// Spawn with captured variables
-fn benchmark_spawn_with_capture() async {
+async fn benchmark_spawn_with_capture() {
     let data = list![1, 2, 3, 4, 5];
     let multiplier = 10;
 
@@ -52,7 +52,7 @@ fn benchmark_spawn_with_capture() async {
 }
 
 /// Nested spawns
-fn benchmark_spawn_nested() async {
+async fn benchmark_spawn_nested() {
     for _ in 0..10_000 {
         let handle = spawn async {
             let inner = spawn async {
@@ -67,7 +67,7 @@ fn benchmark_spawn_nested() async {
 }
 
 /// Spawn many tasks concurrently
-fn benchmark_spawn_concurrent() async {
+async fn benchmark_spawn_concurrent() {
     for _ in 0..100 {
         let handles: List<TaskHandle<Int>> = list![];
 
@@ -85,7 +85,7 @@ fn benchmark_spawn_concurrent() async {
 }
 
 /// Spawn on specific executor
-fn benchmark_spawn_on_executor() async {
+async fn benchmark_spawn_on_executor() {
     let executor = Executor.new(4);  // 4 worker threads
 
     for _ in 0..100_000 {
@@ -97,7 +97,7 @@ fn benchmark_spawn_on_executor() async {
 }
 
 /// Spawn with priority
-fn benchmark_spawn_with_priority() async {
+async fn benchmark_spawn_with_priority() {
     for _ in 0..50_000 {
         let high = spawn_with_priority(Priority.High, async { 1 });
         let low = spawn_with_priority(Priority.Low, async { 2 });
@@ -108,7 +108,7 @@ fn benchmark_spawn_with_priority() async {
 }
 
 /// Local spawn (single-threaded executor)
-fn benchmark_spawn_local() async {
+async fn benchmark_spawn_local() {
     for _ in 0..200_000 {
         let handle = spawn_local async {
             42
@@ -118,7 +118,7 @@ fn benchmark_spawn_local() async {
 }
 
 /// Spawn with timeout
-fn benchmark_spawn_with_timeout() async {
+async fn benchmark_spawn_with_timeout() {
     for _ in 0..50_000 {
         let handle = spawn_with_timeout(Duration.from_millis(100), async {
             42
@@ -128,7 +128,7 @@ fn benchmark_spawn_with_timeout() async {
 }
 
 /// Measure task allocation overhead
-fn benchmark_spawn_allocation() async {
+async fn benchmark_spawn_allocation() {
     type LargeCapture is {
         data: [Int; 1024],
     };
@@ -143,7 +143,7 @@ fn benchmark_spawn_allocation() async {
 }
 
 /// Work-stealing queue benchmark
-fn benchmark_spawn_work_stealing() async {
+async fn benchmark_spawn_work_stealing() {
     // Create imbalanced load
     let handles: List<TaskHandle<Int>> = list![];
 
@@ -172,7 +172,7 @@ fn benchmark_spawn_work_stealing() async {
 }
 
 /// Join multiple tasks
-fn benchmark_spawn_join_all() async {
+async fn benchmark_spawn_join_all() {
     for _ in 0..1_000 {
         let tasks = (0..100).map(|i| spawn async move { i * 2 }).collect();
         let results = join_all(tasks).await;
@@ -181,7 +181,7 @@ fn benchmark_spawn_join_all() async {
 }
 
 /// Select first completing task
-fn benchmark_spawn_select() async {
+async fn benchmark_spawn_select() {
     for _ in 0..10_000 {
         let task1 = spawn async { 1 };
         let task2 = spawn async { 2 };

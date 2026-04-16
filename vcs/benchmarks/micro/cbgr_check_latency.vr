@@ -26,7 +26,7 @@
 /// - Memory barrier (3ns)
 /// - Branch prediction (2ns)
 
-module vcs.benchmarks.micro.cbgr_check_latency
+module vcs.benchmarks.micro.cbgr_check_latency;
 
 const WARMUP_ITERATIONS: Int = 100_000;
 const BENCHMARK_ITERATIONS: Int = 10_000_000;

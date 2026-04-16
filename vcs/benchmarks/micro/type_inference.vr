@@ -12,7 +12,7 @@
 /// - Constraint solving
 /// - Refinement type verification
 
-module benchmarks.micro.type_inference
+module benchmarks.micro.type_inference;
 
 using [Benchmark, Compiler]
 

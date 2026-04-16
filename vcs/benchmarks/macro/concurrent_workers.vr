@@ -13,7 +13,7 @@
 /// - Producer-consumer
 /// - Load balancing
 
-module benchmarks.macro.concurrent_workers
+module benchmarks.macro.concurrent_workers;
 
 using [Benchmark, Async, Sync, Channels]
 
@@ -38,7 +38,7 @@ fn benchmark_workers_cpu_bound() {
 }
 
 /// Thread pool - I/O bound work (simulated)
-fn benchmark_workers_io_bound() async {
+async fn benchmark_workers_io_bound() {
     let pool = ThreadPool.new(num_cpus() * 4);  // More workers for I/O
     let iterations = 10_000;
 
@@ -74,7 +74,7 @@ fn benchmark_workers_work_stealing() {
 }
 
 /// Fan-out / Fan-in pattern
-fn benchmark_workers_fan_out_in() async {
+async fn benchmark_workers_fan_out_in() {
     let num_workers = num_cpus();
     let items_per_worker = 10_000;
 
@@ -101,7 +101,7 @@ fn benchmark_workers_fan_out_in() async {
 }
 
 /// Producer-consumer with channel
-fn benchmark_workers_producer_consumer() async {
+async fn benchmark_workers_producer_consumer() {
     let (tx, rx) = channel<Int>.bounded(1000);
     let num_producers = 4;
     let num_consumers = 4;
@@ -140,7 +140,7 @@ fn benchmark_workers_producer_consumer() async {
 }
 
 /// Pipeline pattern (multi-stage)
-fn benchmark_workers_pipeline() async {
+async fn benchmark_workers_pipeline() {
     let (tx1, rx1) = channel<Int>.bounded(100);
     let (tx2, rx2) = channel<Int>.bounded(100);
     let (tx3, rx3) = channel<Int>.bounded(100);
@@ -280,7 +280,7 @@ fn benchmark_workers_reader_writer() {
 }
 
 /// Semaphore-based rate limiting
-fn benchmark_workers_rate_limited() async {
+async fn benchmark_workers_rate_limited() {
     let semaphore = Semaphore.new(10);  // Max 10 concurrent
 
     let handles: List<_> = (0..1000).map(|i| {
@@ -297,7 +297,7 @@ fn benchmark_workers_rate_limited() async {
 }
 
 /// Actor model
-fn benchmark_workers_actors() async {
+async fn benchmark_workers_actors() {
     type Counter is {
         count: Int,
     };

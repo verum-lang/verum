@@ -19,7 +19,7 @@
 /// - Channel throughput: > 1M messages/sec
 /// - Work stealing: > 90% efficiency
 
-module vcs.benchmarks.macro.concurrent_tasks
+module vcs.benchmarks.macro.concurrent_tasks;
 
 using [Benchmark, Async, Channel, Parallel]
 

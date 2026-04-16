@@ -20,7 +20,7 @@
 /// - Generic monomorphized: = direct call
 /// - Recursive: < 3ns per call + stack overhead
 
-module vcs.benchmarks.micro.function_call
+module vcs.benchmarks.micro.function_call;
 
 const WARMUP_ITERATIONS: Int = 100_000;
 const BENCHMARK_ITERATIONS: Int = 10_000_000;

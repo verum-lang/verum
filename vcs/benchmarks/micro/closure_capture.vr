@@ -22,7 +22,7 @@
 /// - Reference capture: < 4ns
 /// - Mutable capture: < 5ns
 
-module vcs.benchmarks.micro.closure_capture
+module vcs.benchmarks.micro.closure_capture;
 
 const WARMUP_ITERATIONS: Int = 100_000;
 const BENCHMARK_ITERATIONS: Int = 10_000_000;

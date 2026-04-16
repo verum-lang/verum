@@ -12,7 +12,7 @@
 /// - Function calls
 /// - Memory operations
 
-module benchmarks.micro.codegen_expression
+module benchmarks.micro.codegen_expression;
 
 using [Benchmark, Codegen]
 

@@ -17,7 +17,7 @@
 ///
 /// Spec reference: docs/detailed/03-type-system.md
 
-module vcs.benchmarks.micro.refinement_check
+module vcs.benchmarks.micro.refinement_check;
 
 const WARMUP_ITERATIONS: Int = 100_000;
 const BENCHMARK_ITERATIONS: Int = 10_000_000;

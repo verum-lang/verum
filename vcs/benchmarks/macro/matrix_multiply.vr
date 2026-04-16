@@ -12,7 +12,7 @@
 /// - Graphics processing
 /// - Signal processing
 
-module benchmarks.macro.matrix_multiply
+module benchmarks.macro.matrix_multiply;
 
 using [Benchmark, Matrix, Linalg]
 

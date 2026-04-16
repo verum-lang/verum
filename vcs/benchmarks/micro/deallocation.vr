@@ -12,7 +12,7 @@
 /// - Arena bulk deallocation
 /// - Drop cascade patterns
 
-module benchmarks.micro.deallocation
+module benchmarks.micro.deallocation;
 
 using [Benchmark, Memory]
 

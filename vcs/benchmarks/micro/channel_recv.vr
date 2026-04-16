@@ -12,12 +12,12 @@
 /// - Recv with timeout
 /// - Batch recv
 
-module benchmarks.micro.channel_recv
+module benchmarks.micro.channel_recv;
 
 using [Benchmark, Async, Channels]
 
 /// Unbounded channel receive
-fn benchmark_channel_unbounded_recv() async {
+async fn benchmark_channel_unbounded_recv() {
     let (tx, rx) = channel<Int>.unbounded();
 
     // Pre-fill channel
@@ -31,7 +31,7 @@ fn benchmark_channel_unbounded_recv() async {
 }
 
 /// Bounded channel receive
-fn benchmark_channel_bounded_recv() async {
+async fn benchmark_channel_bounded_recv() {
     let (tx, rx) = channel<Int>.bounded(10_000);
 
     // Producer
@@ -74,7 +74,7 @@ fn benchmark_channel_try_recv_empty() {
 }
 
 /// Recv with timeout (no timeout occurs)
-fn benchmark_channel_recv_timeout_fast() async {
+async fn benchmark_channel_recv_timeout_fast() {
     let (tx, rx) = channel<Int>.bounded(10_000);
 
     // Fast producer
@@ -92,7 +92,7 @@ fn benchmark_channel_recv_timeout_fast() async {
 }
 
 /// Recv with timeout (timeout occurs)
-fn benchmark_channel_recv_timeout_slow() async {
+async fn benchmark_channel_recv_timeout_slow() {
     let (tx, rx) = channel<Int>.bounded(100);
 
     for _ in 0..1_000 {
@@ -101,7 +101,7 @@ fn benchmark_channel_recv_timeout_slow() async {
 }
 
 /// MPSC receive (single consumer from multiple producers)
-fn benchmark_channel_mpsc_recv() async {
+async fn benchmark_channel_mpsc_recv() {
     let (tx, rx) = mpsc<Int>.channel(1000);
 
     // Multiple producers
@@ -123,7 +123,7 @@ fn benchmark_channel_mpsc_recv() async {
 }
 
 /// SPSC receive (optimized)
-fn benchmark_channel_spsc_recv() async {
+async fn benchmark_channel_spsc_recv() {
     let (tx, rx) = spsc<Int>.channel(10_000);
 
     let producer = spawn async {
@@ -138,7 +138,7 @@ fn benchmark_channel_spsc_recv() async {
 }
 
 /// Batch receive
-fn benchmark_channel_batch_recv() async {
+async fn benchmark_channel_batch_recv() {
     let (tx, rx) = channel<Int>.bounded(10_000);
 
     let producer = spawn async {
@@ -162,7 +162,7 @@ fn benchmark_channel_batch_recv() async {
 }
 
 /// Recv with peek
-fn benchmark_channel_peek_recv() async {
+async fn benchmark_channel_peek_recv() {
     let (tx, rx) = channel<Int>.bounded(1000);
 
     let producer = spawn async {
@@ -182,7 +182,7 @@ fn benchmark_channel_peek_recv() async {
 }
 
 /// Recv large messages
-fn benchmark_channel_recv_large() async {
+async fn benchmark_channel_recv_large() {
     type LargeMessage is {
         data: [Int; 1024],
     };
@@ -201,7 +201,7 @@ fn benchmark_channel_recv_large() async {
 }
 
 /// Select on multiple receivers
-fn benchmark_channel_select_recv() async {
+async fn benchmark_channel_select_recv() {
     let (tx1, rx1) = channel<Int>.bounded(1000);
     let (tx2, rx2) = channel<Int>.bounded(1000);
 
@@ -238,7 +238,7 @@ fn benchmark_channel_select_recv() async {
 }
 
 /// Oneshot recv
-fn benchmark_channel_oneshot_recv() async {
+async fn benchmark_channel_oneshot_recv() {
     for _ in 0..500_000 {
         let (tx, rx) = oneshot<Int>.channel();
         spawn async move {
@@ -249,7 +249,7 @@ fn benchmark_channel_oneshot_recv() async {
 }
 
 /// Broadcast recv
-fn benchmark_channel_broadcast_recv() async {
+async fn benchmark_channel_broadcast_recv() {
     let (tx, _) = broadcast<Int>.channel(1000);
     let rx = tx.subscribe();
 

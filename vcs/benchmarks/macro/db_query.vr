@@ -13,7 +13,7 @@
 /// - Transactions
 /// - Connection pooling
 
-module benchmarks.macro.db_query
+module benchmarks.macro.db_query;
 
 using [Benchmark, Database, Async]
 
@@ -267,7 +267,7 @@ fn benchmark_db_prepared() {
 }
 
 /// Connection pooling
-fn benchmark_db_connection_pool() async {
+async fn benchmark_db_connection_pool() {
     let pool = ConnectionPool.new("sqlite.memory:")
         .min_connections(5)
         .max_connections(20);
@@ -288,7 +288,7 @@ fn benchmark_db_connection_pool() async {
 }
 
 /// Async queries
-fn benchmark_db_async_query() async {
+async fn benchmark_db_async_query() {
     let db = AsyncDatabase.in_memory().await;
     setup_async_db(&db).await;
 
@@ -299,7 +299,7 @@ fn benchmark_db_async_query() async {
 }
 
 /// Concurrent async queries
-fn benchmark_db_concurrent_async() async {
+async fn benchmark_db_concurrent_async() {
     let db = AsyncDatabase.in_memory().await;
     setup_async_db(&db).await;
 

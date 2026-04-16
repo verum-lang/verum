@@ -13,7 +13,7 @@
 /// - Async functions
 /// - Functions with context requirements
 
-module benchmarks.micro.parse_function
+module benchmarks.micro.parse_function;
 
 using [Benchmark, Parser]
 

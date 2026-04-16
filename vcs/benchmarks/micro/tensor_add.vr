@@ -12,7 +12,7 @@
 /// - Multi-threaded
 /// - Various tensor sizes
 
-module benchmarks.micro.tensor_add
+module benchmarks.micro.tensor_add;
 
 using [Benchmark, Tensor]
 
