@@ -33425,7 +33425,6 @@ impl TypeChecker {
         // Bind context names to their types in the environment
         // This allows functions using contexts to access them by name
         // e.g., `fn greet() using Logger { Logger.log("hi"); }`
-        // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1 - Advanced Context Patterns
         if let Some(ref req) = context_requirement {
             for context_ref in req.iter() {
                 let context_name = &context_ref.name;

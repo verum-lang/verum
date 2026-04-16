@@ -40,6 +40,7 @@ fn nested_calls() using [Logger] {
 }
 
 fn main() {
+    // Provide a Logger context
     let logger = Logger { prefix: "APP" };
     provide Logger = logger in {
         do_work();
