@@ -2447,7 +2447,9 @@ pub fn lower_instruction<'ctx>(
             let i1_type = ctx.types().bool_type();
             let ptr_type = ctx.types().ptr_type();
 
-            // Inline assert_fail: puts(msg) + abort(). No C runtime needed.
+            // Inline assert_fail: puts(msg) + _exit(1). Exit code 1
+            // matches the interpreter's behavior (InterpreterError →
+            // exit 1). Previous: abort() produced exit 134 on Unix.
             let parent = ctx.builder().get_insert_block().or_internal("no insert block")?;
             let parent_fn = parent.get_parent().or_internal("block has no parent function")?;
             let then_bb = ctx.llvm_context().append_basic_block(parent_fn, "assert_fail");
@@ -2466,16 +2468,22 @@ pub fn lower_instruction<'ctx>(
                 .build_conditional_branch(cond_bool, cont_bb, then_bb)
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
-            // Fail block: puts(message) then abort()
+            // Fail block: puts(message) then _exit(1)
             ctx.builder().position_at_end(then_bb);
             let i32_ty = ctx.types().i32_type();
+            let i64_type = ctx.types().i64_type();
             let puts_fn = module.get_function("puts").unwrap_or_else(|| {
                 let fn_type = i32_ty.fn_type(&[ptr_type.into()], false);
                 module.add_function("puts", fn_type, None)
             });
-            let abort_fn = module.get_function("abort").unwrap_or_else(|| {
-                let fn_type = ctx.llvm_context().void_type().fn_type(&[], false);
-                module.add_function("abort", fn_type, None)
+            let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+                let fn_type = ctx.llvm_context().void_type().fn_type(&[i64_type.into()], false);
+                let f = module.add_function("_exit", fn_type, None);
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    ctx.llvm_context().create_string_attribute("noreturn", ""),
+                );
+                f
             });
             let full_msg = format!("Assertion failed: {}", msg);
             let msg_ptr = ctx.builder()
@@ -2485,7 +2493,7 @@ pub fn lower_instruction<'ctx>(
                 .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             ctx.builder()
-                .build_call(abort_fn, &[], "")
+                .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             ctx.builder()
                 .build_unreachable()
@@ -2507,15 +2515,22 @@ pub fn lower_instruction<'ctx>(
             let module = ctx.get_module();
             let ptr_type = ctx.types().ptr_type();
 
-            // Inline panic: puts(msg) + abort(). No C runtime needed.
+            // Inline panic: puts(msg) + _exit(1). Unified exit code
+            // with interpreter (was: abort() → exit 134).
             let i32_ty = ctx.types().i32_type();
+            let i64_type = ctx.types().i64_type();
             let puts_fn = module.get_function("puts").unwrap_or_else(|| {
                 let fn_type = i32_ty.fn_type(&[ptr_type.into()], false);
                 module.add_function("puts", fn_type, None)
             });
-            let abort_fn = module.get_function("abort").unwrap_or_else(|| {
-                let fn_type = ctx.llvm_context().void_type().fn_type(&[], false);
-                module.add_function("abort", fn_type, None)
+            let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+                let fn_type = ctx.llvm_context().void_type().fn_type(&[i64_type.into()], false);
+                let f = module.add_function("_exit", fn_type, None);
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    ctx.llvm_context().create_string_attribute("noreturn", ""),
+                );
+                f
             });
             let full_msg = format!("panic: {}", msg);
             let msg_ptr = ctx.builder()
@@ -2525,7 +2540,7 @@ pub fn lower_instruction<'ctx>(
                 .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             ctx.builder()
-                .build_call(abort_fn, &[], "")
+                .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             ctx.builder()
                 .build_unreachable()
@@ -15604,16 +15619,22 @@ fn safe_int_div<'ctx>(
         .build_conditional_branch(is_zero, panic_bb, safe_bb)
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
-    // Panic block: puts("integer division by zero") + abort()
+    // Panic block: puts("...") + _exit(1) — unified with interpreter
     ctx.builder().position_at_end(panic_bb);
     let i32_ty = ctx.types().i32_type();
+    let i64_type = ctx.types().i64_type();
     let puts_fn = module.get_function("puts").unwrap_or_else(|| {
         let fn_type = i32_ty.fn_type(&[ptr_type.into()], false);
         module.add_function("puts", fn_type, None)
     });
-    let abort_fn = module.get_function("abort").unwrap_or_else(|| {
-        let fn_type = ctx.llvm_context().void_type().fn_type(&[], false);
-        module.add_function("abort", fn_type, None)
+    let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+        let fn_type = ctx.llvm_context().void_type().fn_type(&[i64_type.into()], false);
+        let f = module.add_function("_exit", fn_type, None);
+        f.add_attribute(
+            verum_llvm::attributes::AttributeLoc::Function,
+            ctx.llvm_context().create_string_attribute("noreturn", ""),
+        );
+        f
     });
     let msg_ptr = ctx.builder()
         .build_global_string_ptr("panic: integer division by zero", "div_zero_msg")
@@ -15622,7 +15643,7 @@ fn safe_int_div<'ctx>(
         .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
     ctx.builder()
-        .build_call(abort_fn, &[], "")
+        .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
     ctx.builder()
         .build_unreachable()
@@ -15669,9 +15690,15 @@ fn safe_int_rem<'ctx>(
         let fn_type = i32_ty.fn_type(&[ptr_type.into()], false);
         module.add_function("puts", fn_type, None)
     });
-    let abort_fn = module.get_function("abort").unwrap_or_else(|| {
-        let fn_type = ctx.llvm_context().void_type().fn_type(&[], false);
-        module.add_function("abort", fn_type, None)
+    let i64_type = ctx.types().i64_type();
+    let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+        let fn_type = ctx.llvm_context().void_type().fn_type(&[i64_type.into()], false);
+        let f = module.add_function("_exit", fn_type, None);
+        f.add_attribute(
+            verum_llvm::attributes::AttributeLoc::Function,
+            ctx.llvm_context().create_string_attribute("noreturn", ""),
+        );
+        f
     });
     let msg_ptr = ctx.builder()
         .build_global_string_ptr("panic: integer remainder by zero", "rem_zero_msg")
@@ -15680,7 +15707,7 @@ fn safe_int_rem<'ctx>(
         .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
     ctx.builder()
-        .build_call(abort_fn, &[], "")
+        .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
     ctx.builder()
         .build_unreachable()
@@ -16188,7 +16215,7 @@ fn lower_ctx_check_negative<'ctx>(
         ctx_name, ctx_name, func_name,
     );
 
-    // Use puts + abort for the error message (simpler than wiring verum_panic)
+    // Use puts + _exit(1) for the error — unified exit code with interpreter
     let puts_fn = module.get_function("puts").unwrap_or_else(|| {
         let puts_ty = llvm_ctx.i32_type().fn_type(
             &[ctx.types().ptr_type().into()],
@@ -16197,9 +16224,15 @@ fn lower_ctx_check_negative<'ctx>(
         module.add_function("puts", puts_ty, None)
     });
 
-    let abort_fn = module.get_function("abort").unwrap_or_else(|| {
-        let abort_ty = llvm_ctx.void_type().fn_type(&[], false);
-        module.add_function("abort", abort_ty, None)
+    let i64_type = ctx.types().i64_type();
+    let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+        let fn_type = llvm_ctx.void_type().fn_type(&[i64_type.into()], false);
+        let f = module.add_function("_exit", fn_type, None);
+        f.add_attribute(
+            verum_llvm::attributes::AttributeLoc::Function,
+            llvm_ctx.create_string_attribute("noreturn", ""),
+        );
+        f
     });
 
     let msg_val = ctx.builder()
@@ -16211,7 +16244,7 @@ fn lower_ctx_check_negative<'ctx>(
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
     ctx.builder()
-        .build_call(abort_fn, &[], "")
+        .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
         .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
     ctx.builder()

@@ -2083,8 +2083,9 @@ impl<'ctx> PlatformIR<'ctx> {
                     f
                 });
 
-                // _exit(134) — 128 + SIGABRT(6) = 134
-                builder.build_call(exit_fn, &[i64_type.const_int(134, false).into()], "").or_llvm_err()?;
+                // _exit(1) — unified exit code for panic/assert failure.
+                // Matches interpreter behavior (InterpreterError → exit 1).
+                builder.build_call(exit_fn, &[i64_type.const_int(1, false).into()], "").or_llvm_err()?;
                 builder.build_unreachable().or_llvm_err()?;
             }
         }
@@ -8323,8 +8324,8 @@ impl<'ctx> PlatformIR<'ctx> {
         // Write newline
         let nl = builder.build_global_string_ptr("\n", "nl").or_llvm_err()?;
         builder.build_call(write_fn, &[stderr_fd.into(), nl.as_pointer_value().into(), i64_type.const_int(1, false).into()], "").or_llvm_err()?;
-        // _exit(134) — like SIGABRT
-        builder.build_call(exit_fn, &[i64_type.const_int(134, false).into()], "").or_llvm_err()?;
+        // _exit(1) — unified exit code for panic, matching Tier 0 interpreter.
+        builder.build_call(exit_fn, &[i64_type.const_int(1, false).into()], "").or_llvm_err()?;
         builder.build_unreachable().or_llvm_err()?;
         Ok(())
     }
