@@ -1,0 +1,66 @@
+// @test: benchmark
+// @tier: 0
+// @level: L4
+// @tags: function-call, closure, performance, micro
+// @timeout: 30000
+
+/// Function Call Overhead Benchmark
+/// Direct calls, closure calls, higher-order function application.
+
+module vcs.benchmarks.micro.function_overhead;
+
+const ITERATIONS: Int = 100_000;
+
+fn direct_add(a: Int, b: Int) -> Int { a + b }
+
+fn apply(f: fn(Int, Int) -> Int, x: Int, y: Int) -> Int { f(x, y) }
+
+fn make_adder(n: Int) -> fn(Int) -> Int {
+    fn add(x: Int) -> Int { x + n }
+    add
+}
+
+fn benchmark_direct_call() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < ITERATIONS {
+        sum = sum + direct_add(i, 1);
+        i = i + 1;
+    }
+    sum
+}
+
+fn benchmark_higher_order() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < ITERATIONS {
+        sum = sum + apply(direct_add, i, 1);
+        i = i + 1;
+    }
+    sum
+}
+
+fn benchmark_closure_call() -> Int {
+    let add5 = make_adder(5);
+    let mut sum = 0;
+    let mut i = 0;
+    while i < ITERATIONS {
+        sum = sum + add5(i);
+        i = i + 1;
+    }
+    sum
+}
+
+fn main() {
+    let d = benchmark_direct_call();
+    let h = benchmark_higher_order();
+    let c = benchmark_closure_call();
+
+    assert(d > 0);
+    assert(h > 0);
+    assert(c > 0);
+
+    print(f"direct: {d}");
+    print(f"higher-order: {h}");
+    print(f"closure: {c}");
+}

@@ -1,0 +1,52 @@
+// @test: benchmark
+// @tier: 0
+// @level: L4
+// @tags: pattern-matching, sum-types, dispatch, performance, micro
+// @timeout: 30000
+
+/// Pattern Match Dispatch Benchmark
+/// Sum-type variant construction + match dispatch throughput.
+
+module vcs.benchmarks.micro.pattern_dispatch;
+
+type Expr is
+    Num(Int)
+  | Add(Heap<Expr>, Heap<Expr>)
+  | Mul(Heap<Expr>, Heap<Expr>);
+
+fn eval(e: Expr) -> Int {
+    match e {
+        Num(n) => n,
+        Add(l, r) => eval(*l) + eval(*r),
+        Mul(l, r) => eval(*l) * eval(*r),
+    }
+}
+
+fn make_sum(n: Int) -> Expr {
+    if n <= 1 {
+        Num(1)
+    } else {
+        Add(Heap(make_sum(n - 1)), Heap(Num(1)))
+    }
+}
+
+fn main() {
+    // Build expression tree: 1 + 1 + 1 + ... + 1 (50 terms)
+    let expr = make_sum(50);
+    let result = eval(expr);
+    assert_eq(result, 50);
+
+    // Evaluate multiplication
+    let mul_expr = Mul(Heap(Num(6)), Heap(Num(7)));
+    assert_eq(eval(mul_expr), 42);
+
+    // Nested expression: (3 + 4) * (5 + 6)
+    let nested = Mul(
+        Heap(Add(Heap(Num(3)), Heap(Num(4)))),
+        Heap(Add(Heap(Num(5)), Heap(Num(6)))),
+    );
+    assert_eq(eval(nested), 77);
+
+    print(f"sum(50)={result}");
+    print(f"(3+4)*(5+6)={eval(nested)}");
+}

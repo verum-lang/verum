@@ -1,0 +1,58 @@
+// @test: benchmark
+// @tier: 0
+// @level: L4
+// @tags: recursion, algorithms, performance, micro
+// @timeout: 30000
+
+/// Recursive Algorithms Benchmark
+/// Fibonacci, GCD, power — stress-tests call stack and recursion.
+
+module vcs.benchmarks.micro.recursive_algorithms;
+
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 { n } else { fibonacci(n - 1) + fibonacci(n - 2) }
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn power(base: Int, exp: Int) -> Int {
+    if exp == 0 { 1 }
+    else if exp % 2 == 0 {
+        let half = power(base, exp / 2);
+        half * half
+    } else {
+        base * power(base, exp - 1)
+    }
+}
+
+fn ackermann(m: Int, n: Int) -> Int {
+    if m == 0 { n + 1 }
+    else if n == 0 { ackermann(m - 1, 1) }
+    else { ackermann(m - 1, ackermann(m, n - 1)) }
+}
+
+fn main() {
+    // Fibonacci
+    assert_eq(fibonacci(20), 6765);
+
+    // GCD batch
+    let mut i = 1;
+    let mut total_gcd = 0;
+    while i <= 1000 {
+        total_gcd = total_gcd + gcd(i * 17, i * 13);
+        i = i + 1;
+    }
+    assert(total_gcd > 0);
+
+    // Fast power
+    assert_eq(power(2, 20), 1048576);
+
+    // Ackermann (small values — grows super-exponentially)
+    assert_eq(ackermann(3, 4), 125);
+
+    print(f"fib(20)={fibonacci(20)}");
+    print(f"power(2,20)={power(2, 20)}");
+    print(f"ackermann(3,4)={ackermann(3, 4)}");
+}

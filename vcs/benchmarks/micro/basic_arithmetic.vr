@@ -1,0 +1,59 @@
+// @test: benchmark
+// @tier: 0
+// @level: L4
+// @tags: arithmetic, performance, micro
+// @timeout: 30000
+
+/// Basic Arithmetic Benchmark
+/// Measures raw arithmetic throughput: add, multiply, modulo.
+
+module vcs.benchmarks.micro.basic_arithmetic;
+
+const ITERATIONS: Int = 1_000_000;
+
+fn benchmark_add() -> Int {
+    let mut sum = 0;
+    let mut i = 0;
+    while i < ITERATIONS {
+        sum = sum + i;
+        i = i + 1;
+    }
+    sum
+}
+
+fn benchmark_multiply() -> Int {
+    let mut product = 1;
+    let mut i = 1;
+    while i <= 20 {
+        product = product * i;
+        i = i + 1;
+    }
+    product
+}
+
+fn benchmark_modulo() -> Int {
+    let mut count = 0;
+    let mut i = 0;
+    while i < ITERATIONS {
+        if i % 7 == 0 {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+}
+
+fn main() {
+    let sum = benchmark_add();
+    assert(sum > 0);
+
+    let product = benchmark_multiply();
+    assert(product > 0);
+
+    let count = benchmark_modulo();
+    assert(count > 0);
+
+    print(f"add sum: {sum}");
+    print(f"factorial(20): {product}");
+    print(f"multiples of 7: {count}");
+}
