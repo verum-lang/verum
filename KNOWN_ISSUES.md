@@ -23,17 +23,17 @@ Z3 global-context teardown racing with Rayon ThreadPool shutdown and CVC5 TermMa
 
 The following `verum.toml` configuration keys are accepted and validated but do **not** yet change compiler behavior. Setting them has no effect:
 
-- `[types]`: `dependent`, `higher_kinded`, `universe_polymorphism`, `coinductive`, `quotient`, `instance_search`, `coherence_check_depth`
+- `[types]`: `higher_kinded`, `universe_polymorphism`, `coinductive`, `quotient`, `instance_search`, `coherence_check_depth`
 - `[runtime]`: All 8 fields (`cbgr_mode`, `async_scheduler`, `async_worker_threads`, `futures`, `nurseries`, `task_stack_size`, `heap_policy`, `panic`)
-- `[codegen]`: `gpu_backend`, `monomorphization_cache`, `debug_info`, `tail_call_optimization`, `vectorize`, `inline_depth`
-- `[meta]`: `compile_time_functions`, `quote_syntax`, `macro_recursion_limit`, `reflection`, `max_stage_level`
-- `[protocols]`: All 6 fields
+- `[codegen]`: `gpu_backend`, `monomorphization_cache`, `tail_call_optimization`, `vectorize`, `inline_depth`
+- `[meta]`: `quote_syntax`, `macro_recursion_limit`, `reflection`, `max_stage_level`
+- `[protocols]`: `resolution_strategy`, `blanket_impls`, `higher_kinded_protocols`, `associated_types`, `generic_associated_types`
 - `[context]`: `unresolved_policy`, `negative_constraints`, `propagation_depth`
 - `[safety]`: `ffi_boundary`, `capability_required`, `mls_level`, `forbid_stdlib_extern`
 - `[test]`: `differential`, `property_testing`, `proptest_cases`, `fuzzing`, `parallel`
 - `[debug]`: `step_granularity`, `inspect_depth`, `show_erased_proofs`
 
-**Active flags (change behavior):** `types.refinement`, `types.cubical`, `codegen.tier`, `codegen.proof_erasure`, `meta.derive`, `safety.unsafe_allowed`, `safety.ffi`, `context.enabled`, `debug.dap_enabled`, `debug.port`, `test.timeout_secs`, `test.deny_warnings`, `test.coverage`.
+**Active flags (change behavior):** `types.refinement`, `types.cubical`, `types.dependent`, `codegen.tier`, `codegen.proof_erasure`, `codegen.mlir_gpu`, `codegen.debug_info`, `meta.derive`, `meta.compile_time_functions`, `protocols.coherence`, `safety.unsafe_allowed`, `safety.ffi`, `context.enabled`, `debug.dap_enabled`, `debug.port`, `test.timeout_secs`, `test.deny_warnings`, `test.coverage` (18 total).
 
 ## GPU in Interpreter Mode
 
