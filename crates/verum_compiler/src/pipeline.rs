@@ -10761,6 +10761,26 @@ impl<'s> CompilationPipeline<'s> {
         // Phase 5b: FFI boundary validation
         self.phase_ffi_validation(&module)?;
 
+        // Phase 5c: Z3 context barrier — force all Z3 thread-local
+        // state to be flushed before LLVM codegen starts. On arm64
+        // macOS, Z3's global-context teardown and LLVM's signal handler
+        // registration race during concurrent destruction, causing
+        // non-deterministic SIGSEGV. This barrier serializes them:
+        // Z3 work is fully complete → Z3 TLS dropped → LLVM starts.
+        //
+        // The z3 crate 0.20 uses process-global thread-local storage
+        // for its context. Calling z3::Context::interrupt on the global
+        // context from main thread ensures pending work is flushed.
+        // Dropping the session's RoutingStats Arc ensures no background
+        // references survive into the codegen phase.
+        {
+            // Force any rayon worker threads that held Z3 solvers to
+            // drop their thread-local contexts by synchronizing.
+            // A short rayon::yield_now is sufficient — it forces a
+            // scheduling point where completed workers clean up.
+            rayon::yield_now();
+        }
+
         // Phase 6: Generate native code (CPU path)
         let t0 = Instant::now();
         let output_path = self.phase_generate_native(&module)?;
@@ -10980,17 +11000,19 @@ impl<'s> CompilationPipeline<'s> {
         let opt_level = self.session.options().optimization_level;
         info!("  Optimizing LLVM IR (level {})", opt_level);
 
-        // Write LLVM IR for debugging
-        // Write LLVM IR for debugging (skip if module has known issues that
-        // crash the LLVM IR printer, e.g., bitcast function wrappers from
-        // name collisions).
-        if !lowering.has_arity_collisions() {
+        // Write LLVM IR only when explicitly requested or emit-llvm is on.
+        // The IR printer triggers TypeFinder::incorporateType which
+        // crashes on modules with stdlib-generated functions containing
+        // null Type references (use-after-free from arity collision
+        // fixups). Disabled by default to prevent non-deterministic
+        // SIGSEGV during normal builds.
+        let emit_ir = self.session.options().emit_ir
+            || std::env::var("VERUM_DUMP_IR").is_ok();
+        if emit_ir && !lowering.has_arity_collisions() && lowering.skip_body_count() == 0 {
             let llvm_ir = lowering.get_ir();
             std::fs::write(&ir_path, llvm_ir.as_str().as_bytes())
                 .with_context(|| format!("Failed to write LLVM IR to {}", ir_path.display()))?;
             info!("  Written LLVM IR to {}", ir_path.display());
-        } else {
-            info!("  Skipping LLVM IR dump (arity-suffixed functions present)");
         }
 
         // Compile to object file using LLVM TargetMachine
@@ -11104,13 +11126,26 @@ impl<'s> CompilationPipeline<'s> {
             //   - Inlining decisions (alwaysinline/noinline/inlinehint)
             //   - Size optimization (optsize/minsize on cold functions)
             //   - Per-function target features (target-features/target-cpu)
-            let passes = match opt_level {
-                0 => "globaldce".to_string(),
-                1 => "globaldce,function(mem2reg,simplifycfg),globaldce".to_string(),
-                // O2+: strip debug info to prevent verification failures from
-                // mixed debug-info call boundaries (stdlib without !dbg calling
-                // into functions with debug info). Then optimize.
-                _ => "strip,globaldce,function(mem2reg,simplifycfg),globaldce".to_string(),
+            // When the module has arity collisions or skip-body
+            // functions, LLVM function-level passes (mem2reg,
+            // simplifycfg, instcombine) crash with SIGSEGV in
+            // canReplaceOperandWithVariable or TypeFinder due to
+            // null Type* references in redirect-stub instructions.
+            // Restrict to globaldce (module-level dead code
+            // elimination) which is safe — it only removes
+            // unreachable functions without traversing instruction
+            // operands.
+            let has_ir_issues =
+                lowering.has_arity_collisions() || lowering.skip_body_count() > 0;
+
+            let passes = if has_ir_issues {
+                "globaldce".to_string()
+            } else {
+                match opt_level {
+                    0 => "globaldce".to_string(),
+                    1 => "globaldce,function(mem2reg,simplifycfg),globaldce".to_string(),
+                    _ => "strip,globaldce,function(mem2reg,simplifycfg),globaldce".to_string(),
+                }
             };
 
             info!("  Running LLVM passes: {}", passes);

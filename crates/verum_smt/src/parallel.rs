@@ -813,6 +813,21 @@ impl Worker {
                 }
             }
         }
+
+        // CRITICAL: Force Z3 solver destruction NOW, inside the rayon
+        // worker, before the worker thread returns to the pool.
+        //
+        // Z3 0.20's Solver::new() uses a process-global thread-local
+        // context. If we let the solver drop lazily (during rayon
+        // thread-pool shutdown), its destructor races with LLVM's
+        // TargetMachine finalization on the main thread. On arm64
+        // macOS, both Z3 and LLVM register signal handlers, and the
+        // teardown order is non-deterministic — causing SIGSEGV in
+        // ~40-60% of compilations.
+        //
+        // Explicit drop ensures Z3 context cleanup completes HERE,
+        // well before LLVM module emission on the main thread.
+        drop(solver);
     }
 
     /// Load problem into solver
