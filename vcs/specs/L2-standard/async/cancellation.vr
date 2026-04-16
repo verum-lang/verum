@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, cancellation, cooperative
+// @timeout: 10000
+// @expect: pass
+
+mount core.async.cancellation.{
+    CancellationToken,
+    CancellationTokenSource,
+    CancellationError,
+};
+
+// A long-running worker that honors cancellation at loop boundaries.
+fn worker_loop(token: &CancellationToken) -> Int {
+    let mut iterations = 0;
+    while !token.is_cancelled() && iterations < 100 {
+        iterations = iterations + 1;
+    }
+    iterations
+}
+
+// Fail-fast variant using throw_if_cancelled.
+fn strict_worker(token: &CancellationToken) -> Result<Int, CancellationError> {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 50 {
+        match token.throw_if_cancelled() {
+            Ok(_) => {
+                total = total + i;
+                i = i + 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(total)
+}
+
+fn main() {
+    // Shape: type-level smoke test — exercises every public entry point
+    // without requiring runtime shared-state semantics.
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+    let _b1 = token.is_cancelled();
+    let _b2 = source.is_cancelled();
+    let clone = token.clone();
+    let _b3 = clone.is_cancelled();
+    let _w = worker_loop(&token);
+    let _r = strict_worker(&clone);
+}

@@ -47,6 +47,9 @@ public module spawn_config;
 // Parallel collection processing
 public module parallel;
 
+// Cooperative cancellation tokens
+public module cancellation;
+
 // =============================================================================
 // Re-exports
 // =============================================================================
@@ -210,6 +213,12 @@ public mount .parallel.parallel_map;
 public mount .parallel.parallel_filter_map;
 public mount .parallel.parallel_for_each;
 public mount .parallel.parallel_reduce;
+
+// From cancellation (cooperative cancellation)
+public mount .cancellation.CancellationToken;
+public mount .cancellation.CancellationTokenSource;
+public mount .cancellation.CancellationError;
+public mount .cancellation.CancellationFlag;
 
 // =============================================================================
 // Prelude exports

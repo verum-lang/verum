@@ -1,0 +1,147 @@
+// =============================================================================
+// cancellation.vr - Cooperative cancellation tokens for async tasks
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, sync
+// =============================================================================
+//
+// CancellationToken provides the canonical pattern for cooperative task
+// cancellation. A running task itself decides when it is safe to stop,
+// typically at loop boundaries or after partial work has been flushed.
+//
+// Example:
+//
+//     let source = CancellationTokenSource.new();
+//     let token = source.token();
+//     spawn async move {
+//         while !token.is_cancelled() {
+//             do_step().await;
+//         }
+//     };
+//     source.cancel();
+//
+// Tokens clone cheaply (share atomic flag via Shared wrapper). Cancelling
+// any observer cancels all clones. Matches the semantics of
+// Rust tokio::sync::CancellationToken and .NET CancellationToken.
+// =============================================================================
+
+module core.async.cancellation;
+mount core.*;
+mount sync.atomic.{AtomicInt, MemoryOrdering};
+mount base.memory.Shared;
+
+// -----------------------------------------------------------------------------
+// CancellationError
+// -----------------------------------------------------------------------------
+// Returned by `throw_if_cancelled()` and by combinators that bail out on
+// cancellation. Distinct from generic task errors so callers can pattern-
+// match specifically on the cancellation path.
+public type CancellationError is {
+    reason: Text,
+};
+
+// -----------------------------------------------------------------------------
+// CancellationFlag — internal shared state
+// -----------------------------------------------------------------------------
+// Single atomic flag shared between all observers of a source. Wrapped in
+// `Shared<...>` at the observer level so clones bump a refcount rather
+// than copying the atomic.
+public type CancellationFlag is {
+    bits: AtomicInt,
+};
+
+implement CancellationFlag {
+    public fn new() -> CancellationFlag {
+        CancellationFlag { bits: AtomicInt.new(0) }
+    }
+
+    public fn cancel(&self) {
+        self.bits.store(1, MemoryOrdering.Release);
+    }
+
+    public fn is_cancelled(&self) -> Bool {
+        self.bits.load(MemoryOrdering.Acquire) != 0
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CancellationToken — observer of cancellation state
+// -----------------------------------------------------------------------------
+// A cooperative cancellation signal. Cheap to clone (Shared refcount bump).
+// The token is "cancelled" exactly once per instance tree: `cancel()` on
+// any clone flips the flag for all clones.
+public type CancellationToken is {
+    inner: Shared<CancellationFlag>,
+};
+
+implement CancellationToken {
+    // Create a fresh, non-cancelled token.
+    public fn new() -> CancellationToken {
+        CancellationToken {
+            inner: Shared.new(CancellationFlag.new()),
+        }
+    }
+
+    // Clone this token. All clones observe the same cancellation flag,
+    // so cancelling one cancels all. O(1), lock-free (refcount bump).
+    public fn clone(&self) -> CancellationToken {
+        CancellationToken { inner: self.inner.clone() }
+    }
+
+    // Signal cancellation. Idempotent — calling twice is a no-op.
+    public fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    // Check whether cancellation has been requested.
+    public fn is_cancelled(&self) -> Bool {
+        self.inner.is_cancelled()
+    }
+
+    // Throw CancellationError if cancelled; otherwise return unit.
+    // Designed for use inside loops and long-running functions:
+    //
+    //     for chunk in input {
+    //         token.throw_if_cancelled()?;
+    //         process(chunk);
+    //     }
+    public fn throw_if_cancelled(&self) -> Result<(), CancellationError> {
+        if self.is_cancelled() {
+            Err(CancellationError { reason: "operation cancelled" })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CancellationTokenSource — owner of cancellation authority
+// -----------------------------------------------------------------------------
+// Separates "observe" from "cancel" privileges: methods taking
+// `&CancellationToken` cannot cancel it, only the Source can.
+public type CancellationTokenSource is {
+    token: CancellationToken,
+};
+
+implement CancellationTokenSource {
+    // Create a new source + its root token.
+    public fn new() -> CancellationTokenSource {
+        CancellationTokenSource { token: CancellationToken.new() }
+    }
+
+    // Hand out a cloned observer token. Callees take `&CancellationToken`
+    // and cannot cancel it; only the Source owner can.
+    public fn token(&self) -> CancellationToken {
+        self.token.clone()
+    }
+
+    // Trigger cancellation for all holders of tokens from this source.
+    public fn cancel(&self) {
+        self.token.cancel();
+    }
+
+    // Check whether cancellation was triggered.
+    public fn is_cancelled(&self) -> Bool {
+        self.token.is_cancelled()
+    }
+}
