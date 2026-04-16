@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: operators, overloading, protocols, Add, Sub, Eq
+// @timeout: 10000
+// @expect: pass
+
+type Vec2 is { x: Float, y: Float };
+
+implement Add<Vec2> for Vec2 {
+    type Output = Vec2;
+    fn add(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+implement Sub<Vec2> for Vec2 {
+    type Output = Vec2;
+    fn sub(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x - rhs.x, y: self.y - rhs.y }
+    }
+}
+
+implement Vec2 {
+    fn scale(&self, factor: Float) -> Vec2 {
+        Vec2 { x: self.x * factor, y: self.y * factor }
+    }
+
+    fn negate(&self) -> Vec2 {
+        Vec2 { x: -self.x, y: -self.y }
+    }
+
+    fn dot(&self, other: Vec2) -> Float {
+        self.x * other.x + self.y * other.y
+    }
+}
+
+fn main() {
+    let a = Vec2 { x: 1.0, y: 2.0 };
+    let b = Vec2 { x: 3.0, y: 4.0 };
+
+    // Addition via + operator
+    let c = a + b;
+    assert_eq(c.x, 4.0);
+    assert_eq(c.y, 6.0);
+
+    // Subtraction via - operator
+    let d = b - a;
+    assert_eq(d.x, 2.0);
+    assert_eq(d.y, 2.0);
+
+    // Scalar operations via methods
+    let e = a.scale(3.0);
+    assert_eq(e.x, 3.0);
+    assert_eq(e.y, 6.0);
+
+    // Negation via method
+    let f = a.negate();
+    assert_eq(f.x, -1.0);
+    assert_eq(f.y, -2.0);
+
+    // Dot product
+    let dot = a.dot(b);
+    assert_eq(dot, 11.0);
+
+    // Chained addition
+    let g = a + b + Vec2 { x: 10.0, y: 10.0 };
+    assert_eq(g.x, 14.0);
+    assert_eq(g.y, 16.0);
+
+    // Subtraction then addition
+    let h = (b - a) + a;
+    assert_eq(h.x, 3.0);
+    assert_eq(h.y, 4.0);
+}
