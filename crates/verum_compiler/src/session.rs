@@ -156,10 +156,19 @@ impl Session {
     ///   2. If `codegen.proof_erasure` is disabled, `debug.show_erased_proofs`
     ///      becomes moot but is otherwise harmless (no action).
     fn reconcile_language_features(opts: &mut CompilerOptions) {
+        // 1. Refinement off → no SMT solver needed.
         if !opts.language_features.refinement_typing_on()
             && opts.verify_mode.use_smt()
         {
             opts.verify_mode = crate::options::VerifyMode::Runtime;
+        }
+        // 2. [codegen].debug_info → CompilerOptions.debug_info boolean.
+        //    "none" → false; "line" / "full" → true. The LLVM backend
+        //    reads this boolean to decide whether to emit DWARF.
+        match opts.language_features.codegen.debug_info.as_str() {
+            "none" => opts.debug_info = false,
+            "line" | "full" => opts.debug_info = true,
+            _ => {} // validated earlier; shouldn't happen
         }
     }
 

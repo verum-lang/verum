@@ -642,7 +642,7 @@ impl CodegenTiersPhase {
                         let opt_config = verum_codegen::CBGROptimizationConfig {
                             enable_escape_analysis: true,
                             enable_alias_analysis: true,
-                            max_inline_depth: 10,
+                            max_inline_depth: 10, // TODO: wire from language_features.codegen.inline_depth
                             ..Default::default()
                         };
                         let mut cbgr_opt = CBGROptimizationPass::new(opt_config);

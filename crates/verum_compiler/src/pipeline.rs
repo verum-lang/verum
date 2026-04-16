@@ -10631,8 +10631,13 @@ impl<'s> CompilationPipeline<'s> {
         // Phase 2: Parse (phase_parse records its own timing)
         let module = self.phase_parse(file_id)?;
 
-        // Phase 2.5: Scan for @device(gpu) annotations to auto-enable GPU compilation
-        if !self.session.options().is_no_gpu() {
+        // Phase 2.5: Scan for @device(gpu) annotations to auto-enable GPU compilation.
+        // Gated on [codegen].mlir_gpu: when false, GPU annotations are
+        // silently ignored (the code compiles as CPU-only). This lets
+        // projects disable GPU compilation without removing @device(gpu)
+        // annotations from source.
+        let gpu_enabled = self.session.language_features().gpu_enabled();
+        if gpu_enabled && !self.session.options().is_no_gpu() {
             let gpu_detected = Self::detect_gpu_kernels(&module);
             if gpu_detected {
                 info!("Detected @device(gpu) annotations — GPU compilation path will be enabled");
