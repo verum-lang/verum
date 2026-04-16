@@ -1781,6 +1781,29 @@ pub struct InterpreterConfig {
     /// When set to `true`, the dispatch loop returns InstructionLimitExceeded.
     /// Checked every 1024 instructions (~10μs at 100M ops/sec).
     pub cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+
+    // ========================================================================
+    // Runtime language-feature config (from [runtime] in verum.toml)
+    // ========================================================================
+
+    /// Async scheduling mode: "work_stealing" (default), "single_threaded",
+    /// "multi_threaded". Controls the task queue dispatch strategy.
+    pub async_scheduler: String,
+
+    /// Number of async worker threads (0 = auto = logical CPU count).
+    pub async_worker_threads: u32,
+
+    /// Whether futures/cooperative polling is enabled.
+    pub futures_enabled: bool,
+
+    /// Whether nursery / structured concurrency is enabled.
+    pub nurseries_enabled: bool,
+
+    /// Stack size for spawned tasks (0 = OS default).
+    pub task_stack_size: u64,
+
+    /// Heap growth policy: "adaptive" (default), "aggressive", "conservative".
+    pub heap_policy: String,
 }
 
 impl Default for InterpreterConfig {
@@ -1792,8 +1815,14 @@ impl Default for InterpreterConfig {
             timeout_ms: 30_000,           // 30 second timeout to prevent infinite loops
             count_instructions: false,
             cbgr_enabled: true,
-            max_instructions: 100_000_000, // 100M instruction limit to prevent runaway execution
+            max_instructions: 100_000_000,
             cancel_flag: None,
+            async_scheduler: "work_stealing".to_string(),
+            async_worker_threads: 0,
+            futures_enabled: true,
+            nurseries_enabled: true,
+            task_stack_size: 0,
+            heap_policy: "adaptive".to_string(),
         }
     }
 }

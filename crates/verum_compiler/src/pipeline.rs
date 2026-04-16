@@ -9779,13 +9779,17 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // Step 2: Create VBC interpreter
+        // Step 2: Create VBC interpreter with runtime config from [runtime]
         let mut interpreter = VbcInterpreter::new(vbc_module);
-
-        // Step 2b: Skip global constructors.
-        // Global ctors are primarily FFI library initializers (e.g., kernel32.dll)
-        // that fail on macOS and corrupt interpreter state via debug_assert! panics
-        // in value.rs. VBC interpreter execution doesn't need FFI initialization.
+        {
+            let rt = &self.session.language_features().runtime;
+            interpreter.state.config.async_scheduler = rt.async_scheduler.as_str().to_string();
+            interpreter.state.config.async_worker_threads = rt.async_worker_threads;
+            interpreter.state.config.futures_enabled = rt.futures;
+            interpreter.state.config.nurseries_enabled = rt.nurseries;
+            interpreter.state.config.task_stack_size = rt.task_stack_size;
+            interpreter.state.config.heap_policy = rt.heap_policy.as_str().to_string();
+        }
 
         // Step 3: Find and execute main function
         let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
