@@ -22,8 +22,16 @@ use walkdir::WalkDir;
 
 /// Number of iterations per benchmark for statistical significance.
 const DEFAULT_ITERATIONS: usize = 10;
-/// Warm-up iterations (not counted).
-const WARMUP_ITERATIONS: usize = 2;
+/// Warm-up iterations (not counted). 5 primes the JIT, page cache,
+/// branch predictor, and TLB before the measured runs — without
+/// warmup, the first one or two iterations typically run 30–50%
+/// slower than steady state and pollute the statistics.
+const WARMUP_ITERATIONS: usize = 5;
+/// Fraction of the slowest measurements to discard as outliers.
+/// With DEFAULT_ITERATIONS=10 this drops the single slowest sample,
+/// which is usually a GC pause, OS scheduler preemption, or
+/// thermal-throttling event rather than genuine code behaviour.
+const OUTLIER_TRIM_FRACTION: f64 = 0.10;
 
 /// Result of benchmarking a single function.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -40,6 +48,14 @@ pub struct BenchResult {
 impl BenchResult {
     fn from_times(name: String, mut times: Vec<f64>) -> Self {
         times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // Trim the slowest OUTLIER_TRIM_FRACTION of samples to reduce
+        // variance from transient system events (GC, scheduler jitter,
+        // thermal throttling). Keep all fast samples — fast outliers are
+        // legitimate signal ("best observed time").
+        let trim_count = ((times.len() as f64) * OUTLIER_TRIM_FRACTION).round() as usize;
+        if trim_count > 0 && trim_count < times.len() {
+            times.truncate(times.len() - trim_count);
+        }
         let n = times.len() as f64;
         let mean = times.iter().sum::<f64>() / n;
         let median = if times.len() % 2 == 0 {

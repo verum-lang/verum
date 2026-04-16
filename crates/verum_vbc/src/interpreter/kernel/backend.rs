@@ -185,9 +185,14 @@ impl MemoryPool {
             return None;
         }
 
-        // Try to reuse cached allocation
+        // Try to reuse cached allocation. Recover from poisoning — the
+        // free list is a Vec<SendPtr>, which at worst contains a stale
+        // pointer if the previous lock holder panicked mid-update. That's
+        // safe to observe; we just fall through to allocating fresh.
         {
-            let mut list = self.free_lists[bucket].lock().ok()?;
+            let mut list = self.free_lists[bucket]
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(send_ptr) = list.pop() {
                 self.cache_hits.fetch_add(1, Ordering::Relaxed);
                 return send_ptr.to_non_null();
@@ -217,21 +222,27 @@ impl MemoryPool {
             return;
         }
 
-        if let Ok(mut list) = self.free_lists[bucket].lock() {
-            list.push(SendPtr::from_non_null(ptr));
-        }
+        // Never silently drop a deallocation on poison — recover the lock
+        // and record the freed pointer so we don't leak on pathological
+        // panic-during-alloc paths.
+        let mut list = self.free_lists[bucket]
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        list.push(SendPtr::from_non_null(ptr));
     }
 
     /// Release all cached allocations
     pub fn trim<B: Backend>(&self, backend: &B) {
         for (bucket, list_mutex) in self.free_lists.iter().enumerate() {
-            if let Ok(mut list) = list_mutex.lock() {
-                let size = 1usize << bucket;
-                while let Some(send_ptr) = list.pop() {
-                    if let Some(ptr) = send_ptr.to_non_null() {
-                        backend.deallocate(ptr, size, 64);
-                        self.allocated.fetch_sub(size, Ordering::Relaxed);
-                    }
+            // Recover from poisoning — trim is best-effort cleanup.
+            let mut list = list_mutex
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let size = 1usize << bucket;
+            while let Some(send_ptr) = list.pop() {
+                if let Some(ptr) = send_ptr.to_non_null() {
+                    backend.deallocate(ptr, size, 64);
+                    self.allocated.fetch_sub(size, Ordering::Relaxed);
                 }
             }
         }
