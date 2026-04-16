@@ -53,42 +53,34 @@ provides. These opcodes return `NotImplemented` instead of the
 previous behavior of silently returning nil. Use AOT mode with
 an appropriate runtime for these.
 
-## Shared&lt;T&gt; / CBGR-allocator Bootstrap (architectural)
+## Shared&lt;T&gt; / CBGR-allocator Bootstrap (partially resolved)
 
-`Shared.new(...)` and other CBGR-tracked reference primitives fail
-at runtime in both interpreter and AOT because the stdlib memory
-allocator functions (`get_heap`, `cbgr_alloc`, `LocalHeap.new`) are
-not linked into user modules via the current mount/link system.
+**Status:** Partially fixed (commit 871cf9d). Added `core.mem.*`
+modules to the AOT retention list so the CBGR allocator bodies are
+now linked into user modules. The "field write out of bounds:
+field index 257/271" cascade failure — which was the surface
+symptom — is fully resolved. The remaining gap is narrower:
 
-**Symptom:** `Shared.new(struct)` → "field write out of bounds:
-field index 257" in the interpreter; `undefined function: get_heap`
-in AOT. The "field out of bounds" is cascading from an uninitialized
-allocator state rather than a real bytecode bug.
+**Remaining:** Direct method calls on variant types (e.g.
+`Maybe::as_mut`, `Maybe::take`, `Maybe::unwrap`) hit "method not
+found on value" at runtime. This is a pre-existing variant method
+dispatch limitation, not a regression. Pattern matching works
+correctly; only direct method-call syntax on variants has the gap.
 
-**Root cause:** The stdlib bootstrap loads `core/mem/*.vr` into the
-module registry for type checking but does not emit their function
-bodies into the user's VBC module. When user code transitively
-depends on `cbgr_alloc` via `Shared.new`, the call site is present
-but the callee has no body.
+**Workaround:** Use pattern matching over method calls on variants
+in code paths that must run via the interpreter:
+  - `match x { Some(v) => v, None => default }` instead of `x.unwrap_or(default)`
+  - `match opt { Some(v) => use(v), None => () }` instead of `if let Some(v) = opt { use(v) }`
 
-**Impact:** Stdlib types that wrap `Shared<Inner>` (Channel,
-Broadcast, Oneshot, CancellationToken) typecheck and compile but
-crash at construction. Their public APIs are complete and ready;
-runtime semantics unblock when the bootstrap is fixed.
-
-**Workaround:** Use direct `alloc()` intrinsic in user code rather
-than CBGR-tracked allocation. This bypasses the allocator bootstrap
-at the cost of losing per-object generation/epoch tracking.
-
-**Fix path:** Extend `clear_non_compilable_stdlib_modules` in
-`pipeline.rs` to retain `core.mem.*` modules for codegen, or
-convert CBGR allocator functions to compiler intrinsics with direct
-VBC opcode lowering.
+AOT mode handles both patterns correctly.
 
 ## Cancellation Tokens
 
 `core.async.cancellation` is API-complete and typechecks. Runtime
-construction is blocked by the allocator bootstrap above.
+construction depends on `Shared<T>`, which now has its allocator
+bootstrap fixed. Remaining dependency is variant method dispatch
+(see above) — for single-observer patterns without clones, the
+primitive is fully functional.
 
 ## Cache Invalidation
 
