@@ -32,7 +32,7 @@ impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
             max_iterations: 1_000_000,
-            max_recursion_depth: 1000,
+            max_recursion_depth: 1000, // Overridden by [meta].macro_recursion_limit when wired
             max_memory_bytes: 100 * 1024 * 1024, // 100 MB
             timeout_ms: 30_000,                  // 30 seconds
         }
