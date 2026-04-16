@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: structs, nested, fields, methods
+// @timeout: 10000
+// @expect: pass
+
+type Vec2 is { x: Float, y: Float };
+
+implement Vec2 {
+    fn length_sq(&self) -> Float {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn add(&self, other: Vec2) -> Vec2 {
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+
+    fn scale(&self, factor: Float) -> Vec2 {
+        Vec2 { x: self.x * factor, y: self.y * factor }
+    }
+}
+
+type Rect is { origin: Vec2, size: Vec2 };
+
+implement Rect {
+    fn area(&self) -> Float {
+        self.size.x * self.size.y
+    }
+
+    fn center(&self) -> Vec2 {
+        Vec2 {
+            x: self.origin.x + self.size.x / 2.0,
+            y: self.origin.y + self.size.y / 2.0,
+        }
+    }
+
+    fn contains(&self, point: Vec2) -> Bool {
+        point.x >= self.origin.x &&
+        point.x <= self.origin.x + self.size.x &&
+        point.y >= self.origin.y &&
+        point.y <= self.origin.y + self.size.y
+    }
+}
+
+fn main() {
+    // Vec2 operations
+    let a = Vec2 { x: 3.0, y: 4.0 };
+    assert_eq(a.length_sq(), 25.0);
+
+    let b = Vec2 { x: 1.0, y: 2.0 };
+    let c = a.add(b);
+    assert_eq(c.x, 4.0);
+    assert_eq(c.y, 6.0);
+
+    let d = a.scale(2.0);
+    assert_eq(d.x, 6.0);
+    assert_eq(d.y, 8.0);
+
+    // Nested struct
+    let r = Rect {
+        origin: Vec2 { x: 0.0, y: 0.0 },
+        size: Vec2 { x: 10.0, y: 5.0 },
+    };
+    assert_eq(r.area(), 50.0);
+
+    let center = r.center();
+    assert_eq(center.x, 5.0);
+    assert_eq(center.y, 2.5);
+
+    assert_eq(r.contains(Vec2 { x: 5.0, y: 2.5 }), true);
+    assert_eq(r.contains(Vec2 { x: 15.0, y: 2.5 }), false);
+}

@@ -1531,6 +1531,16 @@ impl CodegenContext {
         if self.prefer_existing_functions {
             self.functions.entry(name).or_insert(info);
         } else {
+            // Store alternative arities for arity-based disambiguation.
+            // When a user function collides with a stdlib method of different arity,
+            // we keep both so the call site can pick the right one.
+            if let Some(existing) = self.functions.get(&name) {
+                if existing.param_count != info.param_count {
+                    let alt_key = format!("{}#{}", name, info.param_count);
+                    self.functions.insert(alt_key, info);
+                    return;
+                }
+            }
             self.functions.insert(name, info);
         }
     }
@@ -1557,6 +1567,27 @@ impl CodegenContext {
     /// Looks up a function by name.
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionInfo> {
         self.functions.get(name)
+    }
+
+    /// Looks up a function by name with arity disambiguation.
+    /// When the primary lookup returns a function with wrong arity,
+    /// checks for an arity-qualified alternative (name#arity).
+    pub fn lookup_function_with_arity(&self, name: &str, arity: usize) -> Option<&FunctionInfo> {
+        if let Some(info) = self.functions.get(name) {
+            if info.param_count == arity {
+                return Some(info);
+            }
+            // Primary has wrong arity — check for arity-qualified alternative
+            let alt_key = format!("{}#{}", name, arity);
+            if let Some(alt_info) = self.functions.get(&alt_key) {
+                return Some(alt_info);
+            }
+            // Still return primary (caller will report arity error)
+            return Some(info);
+        }
+        // Check arity-qualified key directly
+        let alt_key = format!("{}#{}", name, arity);
+        self.functions.get(&alt_key)
     }
 
     /// Search for a function whose name ends with the given suffix.

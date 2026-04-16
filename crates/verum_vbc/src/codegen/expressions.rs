@@ -2634,8 +2634,8 @@ impl VbcCodegen {
             return Ok(result);
         }
 
-        // Look up function - first try the full qualified path
-        let (resolved_name, func_info) = match self.ctx.lookup_function(&func_name) {
+        // Look up function - use arity-based disambiguation when available
+        let (resolved_name, func_info) = match self.ctx.lookup_function_with_arity(&func_name, args.len()) {
             Some(info) => (func_name.clone(), info.clone()),
             None => {
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
