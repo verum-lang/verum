@@ -1,0 +1,22 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: strings, interpolation, f-string
+// @timeout: 10000
+// @expect: pass
+
+fn main() {
+    let name = "Verum";
+    let version = 4;
+
+    // Basic f-string interpolation
+    let greeting = f"Hello, {name}!";
+    print(greeting);
+
+    // Expression in interpolation
+    let sum = f"1 + 2 = {1 + 2}";
+    print(sum);
+
+    // Variable reference
+    print(f"Version {version}");
+}

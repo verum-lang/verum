@@ -178,6 +178,41 @@ fn mechanism_let_chain() {
 // Feature-gate integration: interpreter respects -Z overrides
 // ---------------------------------------------------------------------------
 
+#[test]
+fn mechanism_mutable_closure() {
+    assert_interp_ok(
+        "mutable_closure",
+        "fn make_counter(start: Int) -> fn() -> Int {\n\
+         \x20   let mut count = start;\n\
+         \x20   fn next() -> Int {\n\
+         \x20       let val = count;\n\
+         \x20       count = count + 1;\n\
+         \x20       val\n\
+         \x20   }\n\
+         \x20   next\n\
+         }\n\
+         fn main() {\n\
+         \x20   let c = make_counter(0);\n\
+         \x20   assert_eq(c(), 0);\n\
+         \x20   assert_eq(c(), 1);\n\
+         \x20   assert_eq(c(), 2);\n\
+         }\n",
+        "",
+    );
+}
+
+#[test]
+fn mechanism_fstring() {
+    assert_interp_ok(
+        "fstring",
+        "fn main() {\n\
+         \x20   let name = \"World\";\n\
+         \x20   print(f\"Hello, {name}!\");\n\
+         }\n",
+        "Hello, World!",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // AOT compilation — verify the LLVM crash fix actually works
 // ---------------------------------------------------------------------------

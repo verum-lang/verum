@@ -1,0 +1,30 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: closures, mutable-capture, counter
+// @timeout: 10000
+// @expect: pass
+
+fn make_counter(start: Int) -> fn() -> Int {
+    let mut count = start;
+    fn next() -> Int {
+        let val = count;
+        count = count + 1;
+        val
+    }
+    next
+}
+
+fn main() {
+    let counter = make_counter(0);
+    assert_eq(counter(), 0);
+    assert_eq(counter(), 1);
+    assert_eq(counter(), 2);
+
+    let counter10 = make_counter(10);
+    assert_eq(counter10(), 10);
+    assert_eq(counter10(), 11);
+
+    // Original counter is independent
+    assert_eq(counter(), 3);
+}
