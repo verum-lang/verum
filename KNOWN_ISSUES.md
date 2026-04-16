@@ -53,13 +53,26 @@ provides. These opcodes return `NotImplemented` instead of the
 previous behavior of silently returning nil. Use AOT mode with
 an appropriate runtime for these.
 
+## Shared&lt;T&gt; Runtime Layout Bug (blocks cancellation, channel runtime)
+
+`Shared.new(simple_struct)` fails at runtime with a "field write out
+of bounds" error originating from `cbgr_alloc` which returns
+`Result<(&unsafe Byte, UInt32, UInt16), AllocError>` — a large-tuple
+variant layout that the VBC interpreter mishandles.
+
+**Impact:** Stdlib types that wrap `Shared<Inner>` (Channel, Broadcast,
+Oneshot, CancellationToken) typecheck and compile but crash at
+construction. Their public APIs are complete and ready.
+
+**Workaround:** Use AOT mode for code that constructs `Shared<T>` —
+LLVM codegen handles the large-tuple layout correctly.
+
 ## Cancellation Tokens
 
-`core.async.cancellation` is API-complete and typechecks, but full
-runtime semantics depend on `Shared<T>` interpreter support that is
-still landing. Single-observer cancellation patterns work today;
-shared-clone semantics (one observer cancels all clones) are under
-active work.
+`core.async.cancellation` is API-complete and typechecks. Runtime
+construction is blocked on the `Shared<T>` layout bug above. Use
+AOT mode or substitute the non-sharing `CancellationFlag` directly
+for single-observer patterns until the interpreter bug is fixed.
 
 ## Cache Invalidation
 
