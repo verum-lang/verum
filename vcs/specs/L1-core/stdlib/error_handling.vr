@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: error-handling, maybe, result
+// @timeout: 10000
+// @expect: pass
+
+fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
+    if b == 0 {
+        None
+    } else {
+        Some(a / b)
+    }
+}
+
+fn main() {
+    // Maybe type
+    let result = safe_divide(10, 2);
+    match result {
+        Some(v) => assert_eq(v, 5),
+        None => panic("should not be None"),
+    }
+
+    let zero_div = safe_divide(10, 0);
+    match zero_div {
+        Some(_) => panic("should be None"),
+        None => {} // expected
+    }
+
+    // Chained operations
+    let a = safe_divide(100, 10);
+    match a {
+        Some(v) => {
+            let b = safe_divide(v, 2);
+            match b {
+                Some(v2) => assert_eq(v2, 5),
+                None => panic("unexpected None"),
+            }
+        }
+        None => panic("unexpected None"),
+    }
+}

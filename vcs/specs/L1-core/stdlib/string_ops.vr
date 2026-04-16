@@ -1,0 +1,40 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: stdlib, text, string
+// @timeout: 10000
+// @expect: pass
+
+fn main() {
+    // String literals and concatenation
+    let hello = "Hello";
+    let world = "World";
+
+    // Print
+    print("test-string-ops");
+
+    // Length checks
+    assert(hello.len() > 0);
+
+    // Boolean operations
+    assert(true);
+    assert(!false);
+    assert(true && true);
+    assert(true || false);
+    assert(!(true && false));
+
+    // Integer arithmetic
+    assert_eq(100 + 200, 300);
+    assert_eq(100 - 50, 50);
+    assert_eq(7 * 8, 56);
+    assert_eq(100 / 10, 10);
+    assert_eq(17 % 5, 2);
+
+    // Comparison
+    assert(10 > 5);
+    assert(5 < 10);
+    assert(5 <= 5);
+    assert(5 >= 5);
+    assert(5 == 5);
+    assert(5 != 6);
+}

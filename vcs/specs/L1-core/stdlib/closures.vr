@@ -1,0 +1,24 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: closures, lambda, higher-order
+// @timeout: 10000
+// @expect: pass
+
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    f(f(x))
+}
+
+fn main() {
+    // Lambda basics
+    let double = fn(x: Int) -> Int { x * 2 };
+    assert_eq(double(5), 10);
+    assert_eq(double(0), 0);
+
+    // Higher-order function + lambda
+    assert_eq(apply_twice(double, 3), 12);
+
+    // Inline lambda
+    let square = fn(x: Int) -> Int { x * x };
+    assert_eq(apply_twice(square, 2), 16);
+}
