@@ -631,6 +631,14 @@ enum ConfigCommands {
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
+
+    /// Validate verum.toml without building — check for invalid values,
+    /// inconsistent combinations, and typos.
+    Validate {
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1333,6 +1341,11 @@ fn run_command(cli: Cli) -> Result<()> {
             ConfigCommands::Show { json, feature_overrides } => {
                 feature_overrides::install(feature_overrides);
                 commands::config::execute(json)
+                    .map_err(|e| CliError::Custom(e.to_string()))
+            }
+            ConfigCommands::Validate { feature_overrides } => {
+                feature_overrides::install(feature_overrides);
+                commands::config::validate()
                     .map_err(|e| CliError::Custom(e.to_string()))
             }
         },

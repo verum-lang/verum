@@ -140,6 +140,26 @@ fn print_json(
     Ok(())
 }
 
+/// Execute `verum config validate`.
+///
+/// Loads and validates verum.toml without printing the full feature set.
+/// Exits 0 on success; exits non-zero with diagnostics on failure.
+pub fn validate() -> Result<(), CliError> {
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let manifest_path = Manifest::manifest_path(&manifest_dir);
+    let mut manifest = Manifest::from_file(&manifest_path)?;
+    crate::feature_overrides::apply_global(&mut manifest)?;
+    let _features = crate::feature_overrides::manifest_to_features(&manifest)?;
+    manifest.validate()?;
+
+    println!(
+        "  {} {} is valid.",
+        "✓".green().bold(),
+        manifest_path.display()
+    );
+    Ok(())
+}
+
 fn print_human(
     manifest: &Manifest,
     features: &verum_compiler::language_features::LanguageFeatures,

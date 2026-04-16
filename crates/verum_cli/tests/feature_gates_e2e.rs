@@ -605,6 +605,27 @@ fn completions_bash_produces_output() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// `verum config validate`
+// ---------------------------------------------------------------------------
+
+#[test]
+fn config_validate_ok_on_valid_manifest() {
+    let (_tmp, dir) = project("validate-ok");
+    write_manifest(&dir, "");
+    let out = verum(&["config", "validate"], &dir);
+    assert!(out.status.success(), "valid manifest should pass. stderr:\n{}", stderr(&out));
+    assert!(stdout(&out).contains("valid"), "success message expected");
+}
+
+#[test]
+fn config_validate_fails_on_bad_value() {
+    let (_tmp, dir) = project("validate-bad");
+    write_manifest(&dir, "[runtime]\ncbgr_mode = \"broken\"\n");
+    let out = verum(&["config", "validate"], &dir);
+    assert!(!out.status.success(), "invalid manifest should fail");
+}
+
 #[test]
 fn completions_zsh_produces_output() {
     let (_tmp, dir) = project("completions-zsh");
