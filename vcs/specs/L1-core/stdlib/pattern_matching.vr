@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: pattern-matching, sum-types, variants
+// @timeout: 10000
+// @expect: pass
+
+type Shape is Circle(Float) | Rectangle(Float, Float);
+
+fn area(s: Shape) -> Float {
+    match s {
+        Circle(r) => 3.14159 * r * r,
+        Rectangle(w, h) => w * h,
+    }
+}
+
+fn describe(s: Shape) -> Text {
+    match s {
+        Circle(_) => "circle",
+        Rectangle(_, _) => "rectangle",
+    }
+}
+
+fn main() {
+    let c = Circle(5.0);
+    let r = Rectangle(3.0, 4.0);
+
+    // Area calculation
+    let ca = area(c);
+    let ra = area(r);
+    assert(ca > 78.0);
+    assert(ca < 79.0);
+    assert(ra > 11.9);
+    assert(ra < 12.1);
+
+    // Description
+    assert_eq(describe(Circle(1.0)), "circle");
+    assert_eq(describe(Rectangle(1.0, 2.0)), "rectangle");
+
+    // Nested match
+    let shapes = [Circle(1.0), Rectangle(2.0, 3.0), Circle(10.0)];
+    let mut total = 0.0;
+    let mut i = 0;
+    while i < 3 {
+        total = total + area(shapes[i]);
+        i = i + 1;
+    }
+    assert(total > 320.0);
+
+    print("pattern-matching-ok");
+}

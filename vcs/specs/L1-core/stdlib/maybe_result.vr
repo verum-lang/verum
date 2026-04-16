@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: maybe, result, option, error-types
+// @timeout: 10000
+// @expect: pass
+
+fn find_first_positive(xs: List<Int>) -> Maybe<Int> {
+    let mut i = 0;
+    while i < xs.len() {
+        if xs[i] > 0 {
+            return Some(xs[i]);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn safe_head(xs: List<Int>) -> Maybe<Int> {
+    if xs.is_empty() {
+        None
+    } else {
+        Some(xs[0])
+    }
+}
+
+fn main() {
+    // Maybe operations
+    let result = find_first_positive([-1, -2, 3, 4]);
+    match result {
+        Some(v) => assert_eq(v, 3),
+        None => panic("expected Some"),
+    }
+
+    let no_result = find_first_positive([-1, -2, -3]);
+    match no_result {
+        Some(_) => panic("expected None"),
+        None => {} // ok
+    }
+
+    // Head operations
+    let h = safe_head([42, 1, 2]);
+    match h {
+        Some(v) => assert_eq(v, 42),
+        None => panic("expected Some"),
+    }
+
+    let empty_h = safe_head([]);
+    match empty_h {
+        Some(_) => panic("expected None for empty list"),
+        None => {} // ok
+    }
+
+    print("maybe-result-ok");
+}
