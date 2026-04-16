@@ -11,7 +11,7 @@ extern crate verum_llvm_sys;
 
 // Main entry point for the Verum language toolchain
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use std::process;
 use verum_common::{List, Text};
@@ -570,6 +570,15 @@ enum Commands {
 
     // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
     // Use `verum info` with --stdlib flag for stdlib information if needed.
+
+    /// Generate shell completion scripts for bash, zsh, fish, or PowerShell.
+    ///
+    /// Usage: `verum completions bash > ~/.bash_completion.d/verum`
+    Completions {
+        /// Shell to generate completions for.
+        #[clap(value_enum)]
+        shell: clap_complete::Shell,
+    },
 
     /// Show the resolved language-feature set for the current project.
     ///
@@ -1327,6 +1336,15 @@ fn run_command(cli: Cli) -> Result<()> {
                     .map_err(|e| CliError::Custom(e.to_string()))
             }
         },
+        Commands::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "verum",
+                &mut std::io::stdout(),
+            );
+            Ok(())
+        }
         // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system
     }
 }

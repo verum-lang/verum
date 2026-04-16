@@ -145,6 +145,7 @@ futures = "0.3.31"
 
 # CLI
 clap = { version = "4.5", features = ["derive", "cargo", "env", "unicode", "suggestions"] }
+clap_complete = "4.5"
 colored = "3.0.0"
 
 # File discovery and pattern matching

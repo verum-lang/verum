@@ -18,7 +18,7 @@ use verum_compiler::options::{
 use verum_compiler::pipeline::CompilationPipeline;
 use verum_compiler::session::Session;
 
-use crate::config::{CompilationTier, Manifest, ReferenceMode, VerificationLevel};
+use crate::config::{Manifest, ReferenceMode, VerificationLevel};
 use crate::error::{CliError, Result};
 use crate::ui;
 
@@ -71,8 +71,24 @@ pub fn execute(
     let using_release = profile_name.as_ref().map(|s| s.as_str()) == Some("release") || release;
     let profile = manifest.get_profile(using_release);
 
-    // Build always uses AOT compilation
-    let _compilation_tier = CompilationTier::Aot;
+    // Build respects [codegen].tier for the compilation mode.
+    // "interpret" and "check" are valid for `verum run` / `verum check`;
+    // for `verum build` they're informational — build always produces
+    // an AOT artifact. We warn if the user set a non-AOT tier so they
+    // know the manifest value is noted but overridden.
+    let codegen_tier = manifest.codegen.tier.as_str();
+    if codegen_tier == "interpret" {
+        crate::ui::warn(
+            "[codegen].tier = \"interpret\" in verum.toml; \
+             `verum build` always produces a native binary. \
+             Use `verum run --interp` for interpreter mode.",
+        );
+    } else if codegen_tier == "check" {
+        crate::ui::warn(
+            "[codegen].tier = \"check\" in verum.toml; \
+             `verum build` always compiles. Use `verum check` for type-check only.",
+        );
+    }
 
     // Determine verification level
     let verification = if let Some(v) = verify {

@@ -174,6 +174,34 @@ pub fn manifest_to_features(
         },
     };
 
+    // Validate [verify].default_strategy — not part of LanguageFeatures
+    // (it's CLI-side config) but must still be one of the grammar-defined
+    // strategy names. An invalid value would silently do nothing until
+    // a function without @verify(...) tries to use the default.
+    {
+        let strategy = manifest.verify.default_strategy.as_str();
+        let valid = [
+            "runtime", "static", "formal", "proof", "fast",
+            "thorough", "reliable", "certified", "synthesize",
+        ];
+        if !valid.contains(&strategy) {
+            let suggestion = verum_compiler::language_features::closest_match_pub(
+                strategy, &valid,
+            );
+            let mut msg = format!(
+                "invalid configuration in verum.toml\n  \
+                 [verify].default_strategy: '{}' is not a valid value\n  \
+                 allowed values: {}",
+                strategy,
+                valid.join(", ")
+            );
+            if let Some(hint) = suggestion {
+                msg.push_str(&format!("\n  help: did you mean `{}`?", hint));
+            }
+            return Err(CliError::Custom(msg));
+        }
+    }
+
     feats.validate().map_err(|e| {
         // Build a multi-line diagnostic that includes the source file,
         // the offending section/field, and — when available — a

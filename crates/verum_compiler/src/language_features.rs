@@ -353,6 +353,12 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
 /// Pick the closest match from `allowed` for `provided`, if within
 /// edit distance ≤ max(2, len/3). Returns `None` otherwise.
+/// Public wrapper for "did you mean" suggestions on enum-valued
+/// config fields. Called from the CLI's manifest validation path.
+pub fn closest_match_pub(provided: &str, allowed: &[&'static str]) -> Option<&'static str> {
+    closest_match(provided, allowed)
+}
+
 fn closest_match(provided: &str, allowed: &[&'static str]) -> Option<&'static str> {
     let threshold = (provided.len() / 3).max(2);
     allowed

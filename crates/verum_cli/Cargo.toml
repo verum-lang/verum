@@ -21,6 +21,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+clap_complete = { workspace = true }
 colored = { workspace = true }
 indicatif = "0.18.3"
 serde = { workspace = true }

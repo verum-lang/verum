@@ -546,6 +546,89 @@ fn safety_gate_fires_even_under_verify_runtime() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// `[verify].default_strategy` validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn verify_default_strategy_bogus_rejected() {
+    let (_tmp, dir) = project("verify-bogus");
+    write_manifest(&dir, "[verify]\ndefault_strategy = \"bogus\"\n");
+
+    let out = verum(&["config", "show"], &dir);
+    assert!(!out.status.success(), "bogus strategy must fail");
+    let err = stderr(&out);
+    assert!(
+        err.contains("[verify].default_strategy") && err.contains("bogus"),
+        "error must cite the field:\n{}",
+        err
+    );
+    assert!(
+        err.contains("allowed values:") && err.contains("formal"),
+        "error must list allowed values:\n{}",
+        err
+    );
+}
+
+#[test]
+fn verify_default_strategy_typo_suggests() {
+    let (_tmp, dir) = project("verify-typo");
+    write_manifest(&dir, "[verify]\ndefault_strategy = \"forml\"\n");
+
+    let out = verum(&["config", "show"], &dir);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(
+        err.contains("did you mean") && err.contains("formal"),
+        "typo should trigger suggestion:\n{}",
+        err
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `verum completions` command
+// ---------------------------------------------------------------------------
+
+#[test]
+fn completions_bash_produces_output() {
+    let (_tmp, dir) = project("completions");
+    let out = verum(&["completions", "bash"], &dir);
+    assert!(
+        out.status.success(),
+        "completions bash must succeed. stderr:\n{}",
+        stderr(&out)
+    );
+    let text = stdout(&out);
+    assert!(
+        text.contains("verum") && text.len() > 100,
+        "completion script must mention verum and be non-trivial"
+    );
+}
+
+#[test]
+fn completions_zsh_produces_output() {
+    let (_tmp, dir) = project("completions-zsh");
+    let out = verum(&["completions", "zsh"], &dir);
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("verum"));
+}
+
+// ---------------------------------------------------------------------------
+// `[codegen].tier` wiring
+// ---------------------------------------------------------------------------
+
+#[test]
+fn codegen_tier_interpret_changes_run_mode() {
+    let (_tmp, dir) = project("tier-run");
+    write_manifest(&dir, "[codegen]\ntier = \"interpret\"\n");
+
+    // `verum config show --json` should reflect the tier value.
+    let out = verum(&["config", "show", "--json"], &dir);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(v["features"]["codegen"]["tier"], "interpret");
+}
+
 /// Positive path: without the gate, all four entry points (check,
 /// build, run --interp, run --aot) should not bail out on the gate
 /// reason — they compile the unsafe file (success or other error is

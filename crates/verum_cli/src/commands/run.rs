@@ -70,13 +70,30 @@ pub fn execute(
     let mut manifest = Manifest::from_file(&manifest_path)?;
     crate::feature_overrides::apply_global(&mut manifest)?;
 
+    // Tier resolution priority:
+    //   1. Explicit CLI tier (from --tier/--interp/--aot via run_with_tier)
+    //   2. [codegen].tier from verum.toml (new unified config system)
+    //   3. [profile.dev/release].tier (legacy per-profile config)
     let compilation_tier = if let Some(t) = tier {
         CompilationTier::from_u8(t)
             .ok_or_else(|| CliError::InvalidArgument(format!("Invalid tier {}. Must be 0-1", t)))?
     } else {
-        let using_release = profile.as_ref().map(|s| s.as_str()) == Some("release") || release;
-        let profile = manifest.get_profile(using_release);
-        profile.tier
+        // Check [codegen].tier first (unified config takes precedence).
+        match manifest.codegen.tier.as_str() {
+            "interpret" => CompilationTier::Interpreter,
+            "aot" => CompilationTier::Aot,
+            "check" => {
+                return Err(CliError::InvalidArgument(
+                    "[codegen].tier = \"check\" is for `verum check`, not `verum run`".into(),
+                ));
+            }
+            _ => {
+                // Fall back to legacy [profile.dev/release].tier
+                let using_release =
+                    profile.as_ref().map(|s| s.as_str()) == Some("release") || release;
+                manifest.get_profile(using_release).tier
+            }
+        }
     };
 
     let mode = if release { "release" } else { "debug" };
