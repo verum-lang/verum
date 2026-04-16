@@ -58,6 +58,12 @@ jobs:
       - name: Test — tier parity e2e
         run: cargo test -p verum_cli --features verification --test tier_parity_e2e
 
+      - name: Differential testing — Tier 0 vs Tier 1
+        run: |
+          chmod +x vcs/differential/run_differential.sh
+          VERUM_BIN=./target/debug/verum bash vcs/differential/run_differential.sh vcs/differential/tier-oracle/
+        continue-on-error: true  # LLVM crash may affect some runs
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
