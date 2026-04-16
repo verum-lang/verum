@@ -4748,6 +4748,18 @@ impl<'s> CompilationPipeline<'s> {
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         checker.register_builtins();
 
+        // Enable orphan-rule checking: without a current cog name,
+        // ProtocolChecker::check_orphan_rule silently returns Ok(()).
+        // Use the input file's stem as the cog identifier (stable for
+        // single-file builds). Manifest-based builds can override this
+        // later via TypeChecker::set_current_cog directly.
+        let cog_name = self.session.options().input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(verum_common::Text::from)
+            .unwrap_or_else(|| verum_common::Text::from("cog"));
+        checker.set_current_cog(cog_name);
+
         // Configure type checker with module registry for cross-file resolution
         let registry = self.session.module_registry();
         checker.set_module_registry(registry.clone());

@@ -1666,6 +1666,14 @@ impl TypeChecker {
         &mut self.unifier
     }
 
+    /// Set the current cog name for orphan-rule checking. Without a
+    /// current cog, ProtocolChecker::check_orphan_rule returns Ok(())
+    /// unconditionally — which silently permits orphan impls in user
+    /// code. Pipelines must call this early (before register_impl).
+    pub fn set_current_cog(&mut self, cog_name: impl Into<verum_common::Text>) {
+        self.protocol_checker.write().set_current_crate(cog_name.into());
+    }
+
     /// Create a new type checker with a shared module registry
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Shared module state
     pub fn with_registry(registry: Shared<ModuleRegistry>) -> Self {
