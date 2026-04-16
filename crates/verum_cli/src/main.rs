@@ -478,7 +478,10 @@ enum Commands {
         compare_modes: bool,
         #[clap(long, default_value = "z3")]
         solver: Text,
-        #[clap(long, default_value = "30")]
+        // Default 120s: generous enough for induction and coinduction
+        // proofs on realistic programs; too-short default (30s) was
+        // causing spurious timeouts on legitimate verifications.
+        #[clap(long, default_value = "120")]
         timeout: u64,
         #[clap(long)]
         cache: bool,
