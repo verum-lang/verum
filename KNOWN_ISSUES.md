@@ -82,6 +82,27 @@ bootstrap fixed. Remaining dependency is variant method dispatch
 (see above) — for single-observer patterns without clones, the
 primitive is fully functional.
 
+## Variant Method Dispatch
+
+Direct method calls like `x.unwrap()` on variant values (Maybe,
+Result, etc.) report "method 'Maybe.unwrap' not found on value"
+at runtime even though the method is defined in
+`core/base/maybe.vr`. This is pre-existing — pattern matching via
+`match x { Some(v) => ..., None => ... }` works correctly and is
+the idiomatic Verum pattern for variant handling.
+
+**Workarounds:**
+- Use `match` instead of `.unwrap()`/`.take()`/`.is_some()` etc.
+- Use the free-function forms where available (`unwrap(x)` via
+  mount).
+
+**Root cause:** the method dispatcher searches for a function whose
+name ends with `.Maybe.unwrap` in the module's function table.
+Stdlib-imported variant method bodies are registered under
+`core.base.maybe.Maybe.unwrap` but the suffix match may fail to
+bind the generic `T` in `Maybe<T>` against the concrete type at
+the call site.
+
 ## Cache Invalidation
 
 The stdlib disk cache at `target/.verum-cache/stdlib/` is keyed by
