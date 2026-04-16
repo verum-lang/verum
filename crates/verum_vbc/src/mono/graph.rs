@@ -130,6 +130,32 @@ impl InstantiationKey {
 // ============================================================================
 
 /// Recursively hashes a TypeRef for stable cache keys.
+/// Maximum allowed nesting depth for type arguments in a single
+/// instantiation. Prevents resource exhaustion from pathological
+/// generic instantiations like `Vec<Vec<Vec<...<T>...>>>`.
+///
+/// 64 levels comfortably accommodates any realistic hand-written code
+/// while aborting runaway macro/generated code before it consumes
+/// gigabytes of compiler memory.
+pub const MAX_TYPE_REF_DEPTH: usize = 64;
+
+/// Computes the maximum nesting depth of a TypeRef tree.
+pub fn type_ref_depth(type_ref: &TypeRef) -> usize {
+    match type_ref {
+        TypeRef::Concrete(_) | TypeRef::Generic(_) => 1,
+        TypeRef::Instantiated { args, .. } => {
+            1 + args.iter().map(type_ref_depth).max().unwrap_or(0)
+        }
+        TypeRef::Function { params, return_type, .. } => {
+            let p = params.iter().map(type_ref_depth).max().unwrap_or(0);
+            let r = type_ref_depth(return_type);
+            1 + p.max(r)
+        }
+        TypeRef::Reference { inner, .. } => 1 + type_ref_depth(inner),
+        _ => 1,
+    }
+}
+
 fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
     // Tag byte to distinguish variants
     match type_ref {
@@ -292,6 +318,21 @@ impl InstantiationGraph {
         type_args: Vec<TypeRef>,
         source: SourceLocation,
     ) -> usize {
+        // Abort on runaway type nesting to prevent resource exhaustion.
+        // Any single type argument deeper than MAX_TYPE_REF_DEPTH is almost
+        // certainly a compiler bug or macro-generated infinite expansion.
+        let max_depth = type_args.iter().map(type_ref_depth).max().unwrap_or(0);
+        if max_depth > MAX_TYPE_REF_DEPTH {
+            tracing::warn!(
+                target: "vbc_mono",
+                "instantiation depth {} exceeds limit {} for function_id={:?}; request dropped",
+                max_depth, MAX_TYPE_REF_DEPTH, function_id
+            );
+            // Return a sentinel index that won't match any real instantiation.
+            // Callers using the return value for dependency tracking will get
+            // a no-op, and no specialization is emitted for the deep type.
+            return usize::MAX;
+        }
         let request = InstantiationRequest::new(function_id, type_args, source);
         self.record(request)
     }
