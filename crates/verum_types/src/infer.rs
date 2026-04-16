@@ -20835,6 +20835,48 @@ impl TypeChecker {
                     }
                 }
 
+                // Validate generic arity when we have declaration info.
+                // Prevents silent acceptance of `List<Int, Int>` when List<T>
+                // expects exactly one type argument. We only error when the
+                // expected count is known (stored TypeVar order), otherwise
+                // we stay permissive to avoid regressions.
+                // Validate generic arity when we can determine the expected
+                // parameter count. Prevents silent acceptance of things like
+                // `List<Int, Int>` where List<T> only expects one type arg.
+                // Expected count comes from `__type_params_{name}` (records)
+                // or `__type_var_order_{name}` (variant types).
+                if let verum_ast::ty::TypeKind::Path(path) = &base.kind {
+                    let name_opt: Option<verum_common::Text> = path.segments.last()
+                        .and_then(|seg| match seg {
+                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                            _ => None,
+                        });
+                    if let Some(type_name) = name_opt {
+                        let params_key = format!("__type_params_{}", type_name);
+                        let order_key = format!("__type_var_order_{}", type_name);
+                        let expected: Option<usize> = match self.ctx.lookup_type(&params_key) {
+                            Some(Type::Record(params_map)) => Some(params_map.len()),
+                            _ => match self.ctx.lookup_type(&order_key) {
+                                Some(Type::Tuple(type_vars)) => Some(
+                                    type_vars.iter().filter(|t| matches!(t, Type::Var(_))).count()
+                                ),
+                                _ => None,
+                            },
+                        };
+                        if let Some(expected_count) = expected {
+                            let provided = type_args.iter()
+                                .filter(|t| !matches!(t, Type::Lifetime { .. }))
+                                .count();
+                            if expected_count > 0 && provided > expected_count {
+                                return Err(TypeError::Other(verum_common::Text::from(format!(
+                                    "type `{}` expects {} type argument(s), but {} were provided",
+                                    type_name, expected_count, provided
+                                ))));
+                            }
+                        }
+                    }
+                }
+
                 // Return the base type with arguments
                 // Lifetimes are embedded in type_args as Type::Lifetime
                 let result_type = match &base_ty {

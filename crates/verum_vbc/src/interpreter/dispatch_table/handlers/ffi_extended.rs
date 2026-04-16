@@ -1705,27 +1705,35 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
         Some(FfiSubOpcode::LoadSymbol) => {
             // Format: dst:reg, symbol_idx:u32
-            let dst = read_reg(state)?;
+            let _dst = read_reg(state)?;
             let _symbol_idx = read_u32(state)?;
-            // Can't load dynamic symbols in interpreter — return null
-            state.set_reg(dst, Value::nil());
-            Ok(DispatchResult::Continue)
+            // Dynamic FFI symbol loading requires a real dlopen/dlsym runtime,
+            // which the Tier 0 interpreter does not provide. Returning an
+            // explicit error prevents callers from using a nil handle and
+            // masking real failures as silent no-ops.
+            Err(InterpreterError::NotImplemented {
+                feature: "LoadSymbol: dynamic FFI loading not supported in interpreter (use AOT)",
+                opcode: None,
+            })
         }
 
         Some(FfiSubOpcode::GetLibrary) => {
             // Format: dst:reg, library_idx:u16
-            let dst = read_reg(state)?;
+            let _dst = read_reg(state)?;
             let _library_idx = read_u16(state)?;
-            // Return null — interpreter doesn't manage library handles
-            state.set_reg(dst, Value::nil());
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "GetLibrary: dynamic library handles not supported in interpreter (use AOT)",
+                opcode: None,
+            })
         }
 
         Some(FfiSubOpcode::IsSymbolResolved) => {
             // Format: dst:reg, symbol_idx:u32
             let dst = read_reg(state)?;
             let _symbol_idx = read_u32(state)?;
-            // In interpreter mode, symbols are never resolved
+            // Correct semantics: interpreter performs no dynamic linking,
+            // so no symbol is ever "resolved". Callers that branch on this
+            // will skip their FFI path, which is the intended behaviour.
             state.set_reg(dst, Value::from_bool(false));
             Ok(DispatchResult::Continue)
         }
@@ -2077,23 +2085,34 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
         Some(FfiSubOpcode::ArrayFromC) => {
             // Format: dst:reg, ptr:reg, len:reg, elem_type:u8
-            let dst = read_reg(state)?;
-            let src = read_reg(state)?;
+            let _dst = read_reg(state)?;
+            let _src = read_reg(state)?;
             let _len = read_reg(state)?;
             let _elem_type = read_u8(state)?;
-            // Stub: return source value as-is
-            state.set_reg(dst, state.get_reg(src));
-            Ok(DispatchResult::Continue)
+            // Marshalling a raw C array into a Verum List requires building
+            // a proper List<T> from unmarshalled bytes — passing the pointer
+            // through unchanged would crash on indexing. Return explicit
+            // error so the caller sees the unsupported operation rather
+            // than corrupting memory via a fake list value.
+            Err(InterpreterError::NotImplemented {
+                feature: "ArrayFromC: array marshalling not supported in interpreter (use AOT)",
+                opcode: None,
+            })
         }
 
         Some(FfiSubOpcode::StructToC) | Some(FfiSubOpcode::StructFromC) => {
             // Format: dst:reg, src:reg, layout_idx:u32
-            let dst = read_reg(state)?;
-            let src = read_reg(state)?;
+            let _dst = read_reg(state)?;
+            let _src = read_reg(state)?;
             let _layout_idx = read_u32(state)?;
-            // Stub: pass struct values through
-            state.set_reg(dst, state.get_reg(src));
-            Ok(DispatchResult::Continue)
+            // Struct layout conversion between Verum records and C layouts
+            // requires ABI-aware field reordering and padding. Passing the
+            // value through unchanged would produce C structs with the wrong
+            // memory layout. Return explicit error.
+            Err(InterpreterError::NotImplemented {
+                feature: "StructToC/FromC: struct marshalling not supported in interpreter (use AOT)",
+                opcode: None,
+            })
         }
 
         // ==============================================================
