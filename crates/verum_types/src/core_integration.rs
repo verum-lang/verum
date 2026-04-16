@@ -213,12 +213,31 @@ impl ProtocolCheckerExt for ProtocolChecker {
     fn register_protocol_method_public(
         &mut self,
         _protocol: &str,
-        _target_type: &str,
-        _method: &str,
-        _signature: Type,
+        target_type: &str,
+        method: &str,
+        signature: Type,
     ) {
-        // Protocol method registration - placeholder
-        // Full implementation would update the protocol implementations
+        // Record the method in the flat method registry so lookup_method
+        // can find it by (type_name, method_name). Prior implementation
+        // was a complete no-op — this at least enables method resolution
+        // in stdlib-agnostic mode. Full protocol impl wiring requires
+        // access to ProtocolImpl::methods which is not exposed here.
+        use crate::protocol::{MethodSignature as Sig, ReceiverKind};
+        let (params, return_type) = if let Type::Function { params, return_type, .. } = &signature {
+            (params.clone(), (**return_type).clone())
+        } else {
+            (verum_common::List::new(), signature.clone())
+        };
+        let sig = Sig {
+            name: Text::from(method),
+            type_params: verum_common::List::new(),
+            receiver: ReceiverKind::Ref,
+            params,
+            return_type,
+            is_mutating: false,
+        };
+        self.method_registry_mut()
+            .insert((Text::from(target_type), Text::from(method)), sig);
     }
 }
 
