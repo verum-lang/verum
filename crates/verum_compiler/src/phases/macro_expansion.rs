@@ -95,6 +95,19 @@ pub struct MacroExpansionPhase {
     /// Whether `meta fn` / `@const` compile-time evaluation is
     /// enabled (sourced from `[meta] compile_time_functions`).
     compile_time_enabled: bool,
+    /// Maximum macro-expansion recursion depth (sourced from
+    /// `[meta] macro_recursion_limit`). Applied to the MetaSandbox
+    /// resource limiter when meta functions are executed.
+    macro_recursion_limit: u32,
+    /// Whether `quote { ... }` syntax is enabled (sourced from
+    /// `[meta] quote_syntax`).
+    quote_syntax_enabled: bool,
+    /// Whether reflection APIs (TypeInfo, AstAccess) are available
+    /// (sourced from `[meta] reflection`).
+    reflection_enabled: bool,
+    /// Maximum staging level (`meta(N)` depth, sourced from
+    /// `[meta] max_stage_level`).
+    max_stage_level: u32,
 }
 
 /// Statistics for macro expansion
@@ -138,6 +151,10 @@ impl MacroExpansionPhase {
             lint_warnings: List::new(),
             derive_enabled: true,
             compile_time_enabled: true,
+            macro_recursion_limit: 128,
+            quote_syntax_enabled: true,
+            reflection_enabled: true,
+            max_stage_level: 2,
         }
     }
 
@@ -159,6 +176,10 @@ impl MacroExpansionPhase {
             lint_warnings: List::new(),
             derive_enabled: true,
             compile_time_enabled: true,
+            macro_recursion_limit: 128,
+            quote_syntax_enabled: true,
+            reflection_enabled: true,
+            max_stage_level: 2,
         }
     }
 
@@ -173,6 +194,26 @@ impl MacroExpansionPhase {
     /// Plumbed from `[meta] compile_time_functions`.
     pub fn with_compile_time_enabled(mut self, enabled: bool) -> Self {
         self.compile_time_enabled = enabled;
+        self
+    }
+
+    pub fn with_macro_recursion_limit(mut self, limit: u32) -> Self {
+        self.macro_recursion_limit = limit;
+        self
+    }
+
+    pub fn with_quote_syntax_enabled(mut self, enabled: bool) -> Self {
+        self.quote_syntax_enabled = enabled;
+        self
+    }
+
+    pub fn with_reflection_enabled(mut self, enabled: bool) -> Self {
+        self.reflection_enabled = enabled;
+        self
+    }
+
+    pub fn with_max_stage_level(mut self, level: u32) -> Self {
+        self.max_stage_level = level;
         self
     }
 
@@ -298,8 +339,6 @@ impl MacroExpansionPhase {
         func: &FunctionDecl,
     ) -> Result<List<Item>, Diagnostic> {
         // Gate: [meta].compile_time_functions must be enabled for meta fn.
-        // When disabled, meta functions are treated as regular functions
-        // (no compile-time evaluation, no quote expansion).
         if func.is_meta && !self.compile_time_enabled {
             return Err(
                 verum_diagnostics::DiagnosticBuilder::error()
@@ -312,6 +351,23 @@ impl MacroExpansionPhase {
                         "set `compile_time_functions = true` under `[meta]` in verum.toml, \
                          or remove `-Z meta.compile_time_functions=false`",
                     )
+                    .build(),
+            );
+        }
+
+        // Gate: [meta].max_stage_level limits staging depth.
+        if func.is_meta && func.stage_level > self.max_stage_level {
+            return Err(
+                verum_diagnostics::DiagnosticBuilder::error()
+                    .message(format!(
+                        "`meta({}) fn {}` exceeds [meta] max_stage_level = {}",
+                        func.stage_level, func.name.name, self.max_stage_level
+                    ))
+                    .span(super::ast_span_to_diagnostic_span(func.span, None))
+                    .help(format!(
+                        "increase `max_stage_level` to at least {} under `[meta]` in verum.toml",
+                        func.stage_level
+                    ))
                     .build(),
             );
         }

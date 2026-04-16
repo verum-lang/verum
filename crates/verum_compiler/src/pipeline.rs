@@ -10884,6 +10884,10 @@ impl<'s> CompilationPipeline<'s> {
         info!("  Monomorphizing generic functions");
         let vbc_module = {
             let mut mono = crate::phases::VbcMonomorphizationPhase::new();
+            let mono = if !self.session.language_features().codegen.monomorphization_cache {
+                mono.without_cache()
+            } else { mono };
+            let mut mono = mono;
             match mono.monomorphize(&vbc_module) {
                 Ok(mono_module) => {
                     info!("  Monomorphization complete: {} functions", mono_module.functions.len());
@@ -13490,7 +13494,11 @@ int main(int argc, char** argv) {
         // Phase 5: Monomorphization (specialize generics)
         let vbc_module = {
             use crate::phases::vbc_mono::VbcMonomorphizationPhase;
-            let mut mono = VbcMonomorphizationPhase::new();
+            let mono = VbcMonomorphizationPhase::new();
+            let mono = if !self.session.language_features().codegen.monomorphization_cache {
+                mono.without_cache()
+            } else { mono };
+            let mut mono = mono;
             match mono.monomorphize(&vbc_module) {
                 Ok(specialized) => {
                     info!("  Monomorphization complete: {} functions", specialized.functions.len());
