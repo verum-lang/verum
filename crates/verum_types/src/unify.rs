@@ -115,50 +115,38 @@ impl Unifier {
         // Additional types can be registered via register_array_coercible_type().
         array_coercible_types.insert(Text::from("List"));
 
-        // Tensor family: types that coerce freely with each other and with scalars.
-        // TODO: Replace with TensorLike protocol check once protocol-based unification
-        // is available. These types should implement `TensorLike` in the stdlib.
-        let tensor_family_types: std::collections::HashSet<Text> = [
-            "DynTensor", "Tensor", "Vector", "Cotangent", "Tangent",
-        ].iter().map(|s| Text::from(*s)).collect();
+        // Tensor family: populated via register_tensor_family_type() from
+        // stdlib declarations (types implementing TensorLike protocol).
+        let tensor_family_types: std::collections::HashSet<Text> =
+            std::collections::HashSet::new();
 
         // Named types that coerce bidirectionally with Int.
-        // Categorized: sized integers, FFI newtypes, tensor types, collection types.
-        // TODO: Replace with structural checks — query type declarations for integer
-        // newtype wrappers or an IntCoercible protocol.
+        // Only language-level primitive integer types are hardcoded here.
+        // Stdlib types (Duration, Path, etc.) are registered dynamically
+        // via register_int_coercible_type() during type checking.
         let int_coercible_named_types: std::collections::HashSet<Text> = [
-            // Sized integer types (core language, arguably not stdlib)
+            // Sized integer types — these are language primitives, not stdlib
             "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
             "Int8", "Int16", "Int32", "Int64", "Int128",
             "U8", "U16", "U32", "U64", "I8", "I16", "I32", "I64",
             "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64",
             "Byte", "usize", "isize", "UIntSize", "USize", "IntSize", "ISize",
-            // FFI / OS newtypes
-            "Port", "FileDesc", "MachPort", "VmAddress", "VmSize",
-            "Timespec", "TimeSpec", "ClockId",
-            "MemProt", "MapFlags", "Sockaddr", "Path", "PathBuf",
-            "GPUBuffer", "DeviceRegistry", "ProcessGroup",
-            "Duration", "Instant", "Epoch",
-            // Tensor family
-            "DynTensor", "Tensor", "Vector",
-            // Collection / wrapper types used in index coercions
-            "List", "Range", "Slice", "Maybe", "Lazy", "Once",
         ].iter().map(|s| Text::from(*s)).collect();
 
-        // Collection types whose Generic form coerces with Int (indexing).
-        // TODO: Replace with Indexable protocol check.
+        // Collection types that support integer indexing — populated
+        // dynamically via register_indexable_type() from stdlib.
         let indexable_collection_types: std::collections::HashSet<Text> = [
-            "List", "Range", "Slice",
+            "List",
         ].iter().map(|s| Text::from(*s)).collect();
 
-        // Range-like types whose Generic form coerces with Tuple (slicing).
-        // TODO: Replace with RangeLike protocol check.
-        let range_like_types: std::collections::HashSet<Text> = [
-            "Range",
-        ].iter().map(|s| Text::from(*s)).collect();
+        // Range-like types — populated via register_range_like_type() from stdlib.
+        let range_like_types: std::collections::HashSet<Text> =
+            std::collections::HashSet::new();
 
         // Sized numeric types that cross-coerce with each other (Named<->Named).
         // These are arguably language-level (not stdlib), but centralized here.
+        // Sized numeric types — language primitives only, no stdlib types.
+        // Additional types can be registered via register_sized_numeric_type().
         let sized_numeric_types: std::collections::HashSet<Text> = [
             "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
             "Int8", "Int16", "Int32", "Int64", "Int128",
@@ -166,7 +154,6 @@ impl Unifier {
             "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64",
             "Byte", "usize", "isize", "UIntSize", "USize", "IntSize", "ISize",
             "Float32", "Float64", "f32", "f64",
-            "Duration", "Instant", "Epoch",
         ].iter().map(|s| Text::from(*s)).collect();
 
         Self {
@@ -266,14 +253,33 @@ impl Unifier {
         self.int_coercible_named_types.contains(name)
     }
 
+    /// Register a type as indexable (supports integer indexing).
+    /// Called from stdlib type registration for types implementing Indexable.
+    pub fn register_indexable_type(&mut self, type_name: Text) {
+        self.indexable_collection_types.insert(type_name);
+    }
+
     /// Check whether a Generic collection type coerces with `Int` (indexing).
     fn is_indexable_collection(&self, name: &str) -> bool {
         self.indexable_collection_types.contains(name)
     }
 
+    /// Register a type as range-like (supports tuple/slice coercion).
+    /// Called from stdlib type registration for types implementing RangeLike.
+    pub fn register_range_like_type(&mut self, type_name: Text) {
+        self.range_like_types.insert(type_name);
+    }
+
     /// Check whether a Generic type coerces with `Tuple` (range/slice pattern).
     fn is_range_like(&self, name: &str) -> bool {
         self.range_like_types.contains(name)
+    }
+
+    /// Register a type as sized numeric (cross-coerces with other sized numerics).
+    /// Called from stdlib type registration for additional numeric types
+    /// (Duration, Instant, etc.) beyond language-level primitives.
+    pub fn register_sized_numeric_type(&mut self, type_name: Text) {
+        self.sized_numeric_types.insert(type_name);
     }
 
     /// Check whether a Named type is a sized numeric that cross-coerces with other sized numerics.

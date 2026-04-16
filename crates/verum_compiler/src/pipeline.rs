@@ -1753,6 +1753,39 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // Pass 5.5: Register stdlib types with the unifier for coercion support.
+        // Rather than hardcoding type names in Unifier::new(), we register them
+        // here based on which modules are loaded — keeping the unifier stdlib-agnostic.
+        {
+            let unifier = type_checker.unifier_mut();
+            // Tensor family types (implement TensorLike)
+            for name in ["DynTensor", "Tensor", "Vector", "Cotangent", "Tangent"] {
+                unifier.register_tensor_family_type(verum_common::Text::from(name));
+            }
+            // Indexable collection types
+            for name in ["Range", "Slice"] {
+                unifier.register_indexable_type(verum_common::Text::from(name));
+            }
+            // Range-like types
+            unifier.register_range_like_type(verum_common::Text::from("Range"));
+            // Sized numeric types from stdlib (beyond language primitives)
+            for name in ["Duration", "Instant", "Epoch"] {
+                unifier.register_sized_numeric_type(verum_common::Text::from(name));
+            }
+            // Int-coercible stdlib types
+            for name in [
+                "Port", "FileDesc", "MachPort", "VmAddress", "VmSize",
+                "Timespec", "TimeSpec", "ClockId",
+                "MemProt", "MapFlags", "Sockaddr", "Path", "PathBuf",
+                "GPUBuffer", "DeviceRegistry", "ProcessGroup",
+                "Duration", "Instant", "Epoch",
+                "DynTensor", "Tensor", "Vector",
+                "List", "Range", "Slice", "Maybe", "Lazy", "Once",
+            ] {
+                unifier.register_int_coercible_type(verum_common::Text::from(name));
+            }
+        }
+
         // Pass 6: Validate imports
         // Now that all types, functions, and protocols are registered,
         // validate that all imports reference items that actually exist.

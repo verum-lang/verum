@@ -1661,6 +1661,11 @@ impl TypeChecker {
         &mut self.operator_protocols
     }
 
+    /// Get mutable access to the unifier for registering stdlib types.
+    pub fn unifier_mut(&mut self) -> &mut Unifier {
+        &mut self.unifier
+    }
+
     /// Create a new type checker with a shared module registry
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Shared module state
     pub fn with_registry(registry: Shared<ModuleRegistry>) -> Self {
