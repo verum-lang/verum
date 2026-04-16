@@ -26,4 +26,45 @@ any key in `verum.toml` or via `-Z` on the CLI has observable effect.
 
 ## GPU in Interpreter Mode
 
-When running code with `@device(gpu)` via the VBC interpreter (`verum run --interp`), GPU operations return CPU fallback stubs (e.g., `EnumerateCuda` returns an empty list). This is by design — the interpreter has no GPU hardware access. AOT compilation via `verum run --aot` or `verum build` produces real GPU binaries when MLIR/CUDA/Metal toolchains are available.
+When running code with `@device(gpu)` via the VBC interpreter
+(`verum run --interp`), GPU operations return CPU fallback stubs
+(e.g., `EnumerateCuda` returns an empty list). This is by design —
+the interpreter has no GPU hardware access. AOT compilation via
+`verum run --aot` or `verum build` produces real GPU binaries when
+MLIR/CUDA/Metal toolchains are available.
+
+## FFI in Interpreter Mode
+
+The Tier 0 interpreter does not perform dynamic symbol resolution
+(`dlopen`/`dlsym`) or ABI-aware marshalling. The corresponding
+opcodes (`LoadSymbol`, `GetLibrary`, `ArrayFromC`, `StructToC`,
+`StructFromC`) return `NotImplemented` errors rather than silently
+producing fake handles or mismarshalled data. Use `--aot` for FFI.
+
+`IsSymbolResolved` correctly returns `false` in the interpreter,
+which is the correct semantic — callers that branch on this value
+skip the FFI path as intended.
+
+## ML Vectorization / Distributed Compute
+
+`VmapTransform` and `PmapTransform` require JIT tracing and a
+distributed runtime respectively, neither of which the interpreter
+provides. These opcodes return `NotImplemented` instead of the
+previous behavior of silently returning nil. Use AOT mode with
+an appropriate runtime for these.
+
+## Cancellation Tokens
+
+`core.async.cancellation` is API-complete and typechecks, but full
+runtime semantics depend on `Shared<T>` interpreter support that is
+still landing. Single-observer cancellation patterns work today;
+shared-clone semantics (one observer cancels all clones) are under
+active work.
+
+## Cache Invalidation
+
+The stdlib disk cache at `target/.verum-cache/stdlib/` is keyed by
+compiler version, LLVM version, and a blake3 hash of every
+`core/*.vr` file. Upgrading the compiler or LLVM invalidates the
+cache automatically — no manual `cargo clean` needed after version
+bumps.
