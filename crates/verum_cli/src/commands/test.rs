@@ -5,6 +5,7 @@
 //! A test passes when the process exits with code 0.
 
 use colored::Colorize;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -144,18 +145,37 @@ pub fn execute(
     let mut ignored = 0usize;
     let mut failures: List<TestFailure> = List::new();
 
-    for test in &filtered_tests {
-        if test.ignored {
-            ui::output(&format!(
-                "test {} ... {}",
-                test.name,
-                "ignored".yellow()
-            ));
-            ignored += 1;
-            continue;
-        }
+    // Partition: ignored vs active. Run active tests in parallel
+    // when [test].parallel = true, sequentially otherwise.
+    let (ignored_tests, active_tests): (Vec<_>, Vec<_>) =
+        filtered_tests.iter().partition(|t| t.ignored);
 
-        let result = run_single_test(test, &test_target_dir, &test_cfg);
+    for test in &ignored_tests {
+        ui::output(&format!(
+            "test {} ... {}",
+            test.name,
+            "ignored".yellow()
+        ));
+        ignored += 1;
+    }
+
+    let results: Vec<_> = if manifest.test.parallel {
+        // Parallel execution via rayon. Each test gets its own
+        // CompilerOptions + Session (no shared mutable state).
+        active_tests
+            .par_iter()
+            .map(|test| (test.name.clone(), run_single_test(test, &test_target_dir, &test_cfg)))
+            .collect()
+    } else {
+        // Sequential execution.
+        active_tests
+            .iter()
+            .map(|test| (test.name.clone(), run_single_test(test, &test_target_dir, &test_cfg)))
+            .collect()
+    };
+
+    for (name, result) in results {
+        let test = active_tests.iter().find(|t| t.name == name).unwrap();
         match result {
             TestResult::Pass { duration, stdout, stderr } => {
                 let duration_str = format_test_duration(duration);

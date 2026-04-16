@@ -5062,6 +5062,7 @@ dependencies = [
  "predicates",
  "rand 0.10.1",
  "ratatui",
+ "rayon",
  "reqwest",
  "semver",
  "serde",
