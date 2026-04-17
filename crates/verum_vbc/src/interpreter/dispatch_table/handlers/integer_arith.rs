@@ -21,7 +21,7 @@ pub(in super::super) fn handle_addi(state: &mut InterpreterState) -> Interpreter
     // Fast path: both are inline integers (most common case)
     // Check tag bits directly via is_inline_int() to skip the string check entirely
     if val_a.is_inline_int() && val_b.is_inline_int() {
-        let result = val_a.as_i64().wrapping_add(val_b.as_i64());
+        let result = val_a.as_integer_compatible().wrapping_add(val_b.as_integer_compatible());
         state.set_reg(dst, Value::from_i64(result));
         return Ok(DispatchResult::Continue);
     }
@@ -64,7 +64,13 @@ pub(in super::super) fn handle_subi(state: &mut InterpreterState) -> Interpreter
     let b = read_reg(state)?;
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
-    let result = va.as_i64().wrapping_sub(vb.as_i64());
+    // Use `as_integer_compatible` (matches `handle_addi`) so operands that
+    // are not tagged Int — pointer-tagged values from compiled stdlib,
+    // Unit/Nil holes, small-string residuals — do not panic. The CBGR
+    // allocator's `Shared::new` path passes `SharedInner<T>.size` through
+    // a codegen path that lands here on a value still wearing its
+    // construction-time tag (observed in `Shared<Int>::new(42)`).
+    let result = va.as_integer_compatible().wrapping_sub(vb.as_integer_compatible());
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -75,7 +81,8 @@ pub(in super::super) fn handle_muli(state: &mut InterpreterState) -> Interpreter
     let b = read_reg(state)?;
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
-    let result = va.as_i64().wrapping_mul(vb.as_i64());
+    // Same tag-robustness as handle_addi / handle_subi.
+    let result = va.as_integer_compatible().wrapping_mul(vb.as_integer_compatible());
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -84,11 +91,11 @@ pub(in super::super) fn handle_divi(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let divisor = state.get_reg(b).as_i64();
+    let divisor = state.get_reg(b).as_integer_compatible();
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
     }
-    let result = state.get_reg(a).as_i64().wrapping_div(divisor);
+    let result = state.get_reg(a).as_integer_compatible().wrapping_div(divisor);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -97,11 +104,11 @@ pub(in super::super) fn handle_modi(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let divisor = state.get_reg(b).as_i64();
+    let divisor = state.get_reg(b).as_integer_compatible();
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
     }
-    let result = state.get_reg(a).as_i64().wrapping_rem(divisor);
+    let result = state.get_reg(a).as_integer_compatible().wrapping_rem(divisor);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -113,7 +120,7 @@ pub(in super::super) fn handle_modi(state: &mut InterpreterState) -> Interpreter
 pub(in super::super) fn handle_negi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let result = state.get_reg(src).as_i64().wrapping_neg();
+    let result = state.get_reg(src).as_integer_compatible().wrapping_neg();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -127,8 +134,8 @@ pub(in super::super) fn handle_powi(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let base = read_reg(state)?;
     let exp = read_reg(state)?;
-    let base_val = state.get_reg(base).as_i64();
-    let exp_val = state.get_reg(exp).as_i64();
+    let base_val = state.get_reg(base).as_integer_compatible();
+    let exp_val = state.get_reg(exp).as_integer_compatible();
     // Use checked power to handle overflow
     let result = if exp_val >= 0 && exp_val <= u32::MAX as i64 {
         base_val.wrapping_pow(exp_val as u32)
@@ -144,7 +151,7 @@ pub(in super::super) fn handle_absi(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let src_val = state.get_reg(src);
-    let result = src_val.as_i64().wrapping_abs();
+    let result = src_val.as_integer_compatible().wrapping_abs();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -153,7 +160,7 @@ pub(in super::super) fn handle_absi(state: &mut InterpreterState) -> Interpreter
 pub(in super::super) fn handle_inc(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let result = state.get_reg(src).as_i64().wrapping_add(1);
+    let result = state.get_reg(src).as_integer_compatible().wrapping_add(1);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -162,7 +169,7 @@ pub(in super::super) fn handle_inc(state: &mut InterpreterState) -> InterpreterR
 pub(in super::super) fn handle_dec(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let result = state.get_reg(src).as_i64().wrapping_sub(1);
+    let result = state.get_reg(src).as_integer_compatible().wrapping_sub(1);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }

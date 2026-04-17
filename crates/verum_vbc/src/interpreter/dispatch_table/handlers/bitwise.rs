@@ -48,7 +48,7 @@ pub(in super::super) fn handle_addg(state: &mut InterpreterState) -> Interpreter
             Value::from_ptr(base_ptr)
         }
     } else {
-        Value::from_i64(val_a.as_i64().wrapping_add(val_b.as_i64()))
+        Value::from_i64(val_a.as_integer_compatible().wrapping_add(val_b.as_integer_compatible()))
     };
     state.set_reg(dst, result);
     Ok(DispatchResult::Continue)
@@ -64,7 +64,7 @@ pub(in super::super) fn handle_subg(state: &mut InterpreterState) -> Interpreter
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() - val_b.as_f64())
     } else {
-        Value::from_i64(val_a.as_i64().wrapping_sub(val_b.as_i64()))
+        Value::from_i64(val_a.as_integer_compatible().wrapping_sub(val_b.as_integer_compatible()))
     };
     state.set_reg(dst, result);
     Ok(DispatchResult::Continue)
@@ -80,7 +80,7 @@ pub(in super::super) fn handle_mulg(state: &mut InterpreterState) -> Interpreter
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() * val_b.as_f64())
     } else {
-        Value::from_i64(val_a.as_i64().wrapping_mul(val_b.as_i64()))
+        Value::from_i64(val_a.as_integer_compatible().wrapping_mul(val_b.as_integer_compatible()))
     };
     state.set_reg(dst, result);
     Ok(DispatchResult::Continue)
@@ -96,11 +96,11 @@ pub(in super::super) fn handle_divg(state: &mut InterpreterState) -> Interpreter
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() / val_b.as_f64())
     } else {
-        let divisor = val_b.as_i64();
+        let divisor = val_b.as_integer_compatible();
         if divisor == 0 {
             return Err(InterpreterError::DivisionByZero);
         }
-        Value::from_i64(val_a.as_i64().wrapping_div(divisor))
+        Value::from_i64(val_a.as_integer_compatible().wrapping_div(divisor))
     };
     state.set_reg(dst, result);
     Ok(DispatchResult::Continue)
@@ -114,7 +114,7 @@ pub(in super::super) fn handle_band(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_i64() & state.get_reg(b).as_i64();
+    let result = state.get_reg(a).as_integer_compatible() & state.get_reg(b).as_integer_compatible();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -123,7 +123,7 @@ pub(in super::super) fn handle_bor(state: &mut InterpreterState) -> InterpreterR
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_i64() | state.get_reg(b).as_i64();
+    let result = state.get_reg(a).as_integer_compatible() | state.get_reg(b).as_integer_compatible();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -132,7 +132,7 @@ pub(in super::super) fn handle_bxor(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_i64() ^ state.get_reg(b).as_i64();
+    let result = state.get_reg(a).as_integer_compatible() ^ state.get_reg(b).as_integer_compatible();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -141,8 +141,8 @@ pub(in super::super) fn handle_shl(state: &mut InterpreterState) -> InterpreterR
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let shift = (state.get_reg(b).as_i64() & 63) as u32;
-    let result = state.get_reg(a).as_i64().wrapping_shl(shift);
+    let shift = (state.get_reg(b).as_integer_compatible() & 63) as u32;
+    let result = state.get_reg(a).as_integer_compatible().wrapping_shl(shift);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -153,9 +153,9 @@ pub(in super::super) fn handle_shr(state: &mut InterpreterState) -> InterpreterR
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let shift = (state.get_reg(b).as_i64() & 63) as u32;
+    let shift = (state.get_reg(b).as_integer_compatible() & 63) as u32;
     // Arithmetic shift: shift i64 directly to preserve sign bit
-    let result = state.get_reg(a).as_i64().wrapping_shr(shift);
+    let result = state.get_reg(a).as_integer_compatible().wrapping_shr(shift);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -165,8 +165,8 @@ pub(in super::super) fn handle_ushr(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let shift = (state.get_reg(b).as_i64() & 63) as u32;
-    let result = (state.get_reg(a).as_i64() as u64).wrapping_shr(shift) as i64;
+    let shift = (state.get_reg(b).as_integer_compatible() & 63) as u32;
+    let result = (state.get_reg(a).as_integer_compatible() as u64).wrapping_shr(shift) as i64;
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -177,7 +177,7 @@ pub(in super::super) fn handle_bnot(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let _ignored = read_reg(state)?; // b register is ignored for NOT
-    let result = !state.get_reg(src).as_i64();
+    let result = !state.get_reg(src).as_integer_compatible();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
