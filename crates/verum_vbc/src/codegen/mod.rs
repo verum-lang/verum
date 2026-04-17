@@ -2892,7 +2892,6 @@ impl VbcCodegen {
         // user-level tags (which also happen to match), so both paths agree.
         use crate::codegen::context::FunctionInfo;
         use crate::module::FunctionId;
-        let sentinel_id = FunctionId(u32::MAX / 2);
         let builtins: &[(&str, &str, u32, usize, Vec<String>)] = &[
             // (type_name, variant_name, tag, arity, param_names)
             ("Maybe", "None",    0, 0, vec![]),
@@ -2909,6 +2908,10 @@ impl VbcCodegen {
             if self.ctx.lookup_function(&qualified).is_some() {
                 continue;
             }
+            // Use descending-from-u32::MAX sentinel, matching register_type_constructors.
+            // This avoids colliding with u32::MAX / 2 used by newtype constructors,
+            // which would mis-dispatch variants through the newtype pass-through path.
+            let sentinel_id = FunctionId(u32::MAX - *tag);
             let info = FunctionInfo {
                 id: sentinel_id,
                 param_count: *arity,

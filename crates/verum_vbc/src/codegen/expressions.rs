@@ -5562,25 +5562,11 @@ impl VbcCodegen {
         func_info: &FunctionInfo,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
-        // Handle type constructors with sentinel IDs (newtypes, unit types, etc.).
-        // These are registered with FunctionId(u32::MAX / 2) and don't have bytecode.
-        // Emitting a Call with this ID would cause "Function N not found" at runtime.
-        if func_info.id.0 == u32::MAX / 2 {
-            if args.len() == 1 {
-                // Newtype constructor — zero-cost wrapper, pass through the inner value
-                return self.compile_expr(&args[0]);
-            } else if args.is_empty() {
-                // Unit type constructor
-                let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadUnit { dst: dest });
-                return Ok(Some(dest));
-            }
-            // Multi-field record: fall through to normal allocation path below
-        }
-
-        // Safety: variant constructors must use MakeVariant, not Call.
-        // Sentinel IDs (>= 0xFFFF_FF00) are not real function IDs and will cause
-        // "Function N not found" at runtime if emitted as Call instructions.
+        // Variant constructors MUST be checked first — a variant's FunctionInfo
+        // may share the sentinel ID with newtype constructors (u32::MAX / 2),
+        // and mis-dispatching `Maybe.Some(42)` through the newtype pass-through
+        // path returns the raw payload instead of a wrapped variant, causing
+        // SIGBUS during pattern matching.
         if let Some(tag) = func_info.variant_tag {
             let result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
@@ -5596,6 +5582,22 @@ impl VbcCodegen {
                 self.ctx.free_temp(arg_val);
             }
             return Ok(Some(result));
+        }
+
+        // Handle type constructors with sentinel IDs (newtypes, unit types, etc.).
+        // These are registered with FunctionId(u32::MAX / 2) and don't have bytecode.
+        // Emitting a Call with this ID would cause "Function N not found" at runtime.
+        if func_info.id.0 == u32::MAX / 2 {
+            if args.len() == 1 {
+                // Newtype constructor — zero-cost wrapper, pass through the inner value
+                return self.compile_expr(&args[0]);
+            } else if args.is_empty() {
+                // Unit type constructor
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                return Ok(Some(dest));
+            }
+            // Multi-field record: fall through to normal allocation path below
         }
 
         // Check if this function is an intrinsic — resolve inline instead of emitting Call
