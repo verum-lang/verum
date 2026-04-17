@@ -29,11 +29,11 @@ fn test_insert_get_sequence() {
     table.insert("delta", 4);
     table.insert("epsilon", 5);
 
-    print(f"alpha = {table.get('alpha')}");
-    print(f"beta = {table.get('beta')}");
-    print(f"gamma = {table.get('gamma')}");
-    print(f"delta = {table.get('delta')}");
-    print(f"epsilon = {table.get('epsilon')}");
+    print(f"alpha = {table.get(\"alpha\")}");
+    print(f"beta = {table.get(\"beta\")}");
+    print(f"gamma = {table.get(\"gamma\")}");
+    print(f"delta = {table.get(\"delta\")}");
+    print(f"epsilon = {table.get(\"epsilon\")}");
     print(f"len = {table.len()}");
 }
 
@@ -49,16 +49,16 @@ fn test_overwrite_and_remove() {
     // Overwrite
     table.insert("x", 100);
     table.insert("y", 200);
-    print(f"x after overwrite = {table.get('x')}");
-    print(f"y after overwrite = {table.get('y')}");
-    print(f"z unchanged = {table.get('z')}");
+    print(f"x after overwrite = {table.get(\"x\")}");
+    print(f"y after overwrite = {table.get(\"y\")}");
+    print(f"z unchanged = {table.get(\"z\")}");
 
     // Remove
     let removed = table.remove("y");
     print(f"removed y = {removed}");
     print(f"len after remove = {table.len()}");
-    print(f"contains y = {table.contains_key('y')}");
-    print(f"contains x = {table.contains_key('x')}");
+    print(f"contains y = {table.contains_key(\"y\")}");
+    print(f"contains x = {table.contains_key(\"x\")}");
 }
 
 /// Key ordering must be deterministic
@@ -160,10 +160,10 @@ fn test_bulk_operations() {
     print(f"after re-insert: len = {table.len()}");
 
     // Spot check values
-    print(f"key_0 = {table.get('key_0')}");
-    print(f"key_10 = {table.get('key_10')}");
-    print(f"key_30 = {table.get('key_30')}");
-    print(f"key_49 = {table.get('key_49')}");
+    print(f"key_0 = {table.get(\"key_0\")}");
+    print(f"key_10 = {table.get(\"key_10\")}");
+    print(f"key_30 = {table.get(\"key_30\")}");
+    print(f"key_49 = {table.get(\"key_49\")}");
 }
 
 /// Nested symbol tables (scope simulation)
@@ -189,7 +189,7 @@ fn test_nested_symbol_tables() {
         }
     }
 
-    print(f"a (outer only) = {lookup('a', &inner, &outer)}");
-    print(f"b (shadowed) = {lookup('b', &inner, &outer)}");
-    print(f"c (inner only) = {lookup('c', &inner, &outer)}");
+    print(f"a (outer only) = {lookup(\"a\", &inner, &outer)}");
+    print(f"b (shadowed) = {lookup(\"b\", &inner, &outer)}");
+    print(f"c (inner only) = {lookup(\"c\", &inner, &outer)}");
 }

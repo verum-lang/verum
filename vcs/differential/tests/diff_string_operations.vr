@@ -45,7 +45,7 @@ fn test_basic_concat() {
     // Empty concat
     let empty = "" + "" + "";
     print(f"empty concat len = {empty.len()}");
-    print(f"empty + text = {'prefix' + ''}");
+    print(f"empty + text = {\"prefix\" + \"\"}");
 }
 
 /// Split and join
@@ -86,17 +86,17 @@ fn test_contains_and_find() {
 
     let text = "Hello, World! Hello, Verum!";
 
-    print(f"contains 'World' = {text.contains('World')}");
-    print(f"contains 'world' = {text.contains('world')}");
-    print(f"contains 'Hello' = {text.contains('Hello')}");
-    print(f"contains '' = {text.contains('')}");
-    print(f"contains 'xyz' = {text.contains('xyz')}");
+    print(f"contains \"World\" = {text.contains(\"World\")}");
+    print(f"contains \"world\" = {text.contains(\"world\")}");
+    print(f"contains \"Hello\" = {text.contains(\"Hello\")}");
+    print(f"contains \"\" = {text.contains(\"\")}");
+    print(f"contains \"xyz\" = {text.contains(\"xyz\")}");
 
     // Starts/ends with
-    print(f"starts_with 'Hello' = {text.starts_with('Hello')}");
-    print(f"starts_with 'World' = {text.starts_with('World')}");
-    print(f"ends_with 'Verum!' = {text.ends_with('Verum!')}");
-    print(f"ends_with 'World' = {text.ends_with('World')}");
+    print(f"starts_with \"Hello\" = {text.starts_with(\"Hello\")}");
+    print(f"starts_with \"World\" = {text.starts_with(\"World\")}");
+    print(f"ends_with \"Verum!\" = {text.ends_with(\"Verum!\")}");
+    print(f"ends_with \"World\" = {text.ends_with(\"World\")}");
 }
 
 /// Replace operations
@@ -138,7 +138,7 @@ fn test_fstring_interpolation() {
     print(f"version = {version}");
     print(f"pi approx = {pi}");
     print(f"expr = {2 + 3}");
-    print(f"nested = {f'inner {name}'}");
+    print(f"nested = {f\"inner {name}\"}");
 
     // Multiple interpolations
     let x = 10;
@@ -147,7 +147,7 @@ fn test_fstring_interpolation() {
     print(f"{x} * {y} = {x * y}");
 
     // Empty and edge cases
-    print(f"empty interp = {''}");
+    print(f"empty interp = {\"\"}");
     print(f"just text no interp");
 }
 
@@ -164,8 +164,8 @@ fn test_case_operations() {
     print(f"mixed lower = {mixed.to_lowercase()}");
 
     // Empty string
-    print(f"empty upper = {''.to_uppercase()}");
-    print(f"empty lower = {''.to_lowercase()}");
+    print(f"empty upper = {\"\".to_uppercase()}");
+    print(f"empty lower = {\"\".to_lowercase()}");
 }
 
 /// Trim and padding
@@ -173,17 +173,17 @@ fn test_trim_and_pad() {
     print("\n=== Trim and Pad ===");
 
     let padded = "  hello  ";
-    print(f"trim = '{padded.trim()}'");
-    print(f"trim_start = '{padded.trim_start()}'");
-    print(f"trim_end = '{padded.trim_end()}'");
+    print(f"trim = \"{padded.trim()}\"");
+    print(f"trim_start = \"{padded.trim_start()}\"");
+    print(f"trim_end = \"{padded.trim_end()}\"");
 
     // Already trimmed
     let clean = "hello";
-    print(f"clean trim = '{clean.trim()}'");
+    print(f"clean trim = \"{clean.trim()}\"");
 
     // All whitespace
     let spaces = "   ";
-    print(f"spaces trim = '{spaces.trim()}'");
+    print(f"spaces trim = \"{spaces.trim()}\"");
     print(f"spaces trim len = {spaces.trim().len()}");
 }
 
