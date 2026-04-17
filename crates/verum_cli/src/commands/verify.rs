@@ -21,6 +21,45 @@ use verum_compiler::options::{CompilerOptions, OutputFormat, VerifyMode};
 use verum_compiler::pipeline::CompilationPipeline;
 use verum_compiler::session::Session;
 
+/// CLI-visible SMT backend choice. Kept as a local enum so it remains
+/// usable even when the `verification` feature is disabled (that feature
+/// gates the `verum_smt` dependency and the real `BackendChoice`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolverChoice {
+    Z3,
+    Cvc5,
+    Auto,
+    Portfolio,
+    Capability,
+}
+
+impl SolverChoice {
+    pub fn parse(s: &str) -> std::result::Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "z3" => Ok(Self::Z3),
+            "cvc5" => Ok(Self::Cvc5),
+            "auto" => Ok(Self::Auto),
+            "portfolio" => Ok(Self::Portfolio),
+            "capability" | "capability-based" | "smart" => Ok(Self::Capability),
+            other => Err(format!("Unknown --solver value: '{other}'")),
+        }
+    }
+}
+
+#[cfg(feature = "verification")]
+impl From<SolverChoice> for verum_smt::backend_switcher::BackendChoice {
+    fn from(c: SolverChoice) -> Self {
+        use verum_smt::backend_switcher::BackendChoice as B;
+        match c {
+            SolverChoice::Z3 => B::Z3,
+            SolverChoice::Cvc5 => B::Cvc5,
+            SolverChoice::Auto => B::Auto,
+            SolverChoice::Portfolio => B::Portfolio,
+            SolverChoice::Capability => B::Capability,
+        }
+    }
+}
+
 /// Verification mode for the CLI command
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationMode {
@@ -71,6 +110,15 @@ pub fn execute(
 ) -> Result<()> {
     ui::header("Formal Verification");
 
+    // Validate + parse the --solver choice. Accepts
+    // z3 | cvc5 | auto | portfolio | capability. Unknown values error out
+    // with a clear message instead of silently defaulting.
+    let backend = SolverChoice::parse(solver).map_err(|e| {
+        CliError::verification_failed(format!(
+            "{e}. Accepted values: z3, cvc5, auto, portfolio, capability"
+        ))
+    })?;
+
     // Determine verification mode
     let mode = if compare_modes {
         VerificationMode::Compare
@@ -79,8 +127,8 @@ pub fn execute(
     };
 
     ui::step(&format!(
-        "Verifying with {} solver (timeout: {}s)",
-        solver, timeout
+        "Verifying with {:?} backend (timeout: {}s)",
+        backend, timeout
     ));
 
     if interactive {
@@ -88,10 +136,11 @@ pub fn execute(
     }
 
     let stats = match mode {
-        VerificationMode::Compare => execute_compare_mode(timeout, show_cost)?,
-        VerificationMode::Proof => execute_proof_mode(timeout, show_cost)?,
+        VerificationMode::Compare => execute_compare_mode(timeout, show_cost, backend)?,
+        VerificationMode::Proof => execute_proof_mode(timeout, show_cost, backend)?,
         VerificationMode::Runtime => execute_runtime_mode()?,
     };
+    let _ = backend; // retained for future use outside proof/compare modes
 
     print_summary(&stats);
 
@@ -173,6 +222,7 @@ fn verify_file_proof(
     path: &PathBuf,
     timeout: u64,
     show_cost: bool,
+    backend: SolverChoice,
 ) -> std::result::Result<bool, String> {
     use verum_compiler::verify_cmd::VerifyCommand;
 
@@ -180,6 +230,7 @@ fn verify_file_proof(
         input: path.clone(),
         verify_mode: VerifyMode::Proof,
         smt_timeout_secs: timeout,
+        smt_solver: backend.into(),
         show_verification_costs: show_cost,
         output_format: OutputFormat::Human,
         ..Default::default()
@@ -208,6 +259,7 @@ fn verify_file_proof(
     path: &PathBuf,
     timeout: u64,
     _show_cost: bool,
+    _backend: SolverChoice,
 ) -> std::result::Result<bool, String> {
     // Without Z3, run type-checking only
     let options = CompilerOptions {
@@ -251,7 +303,11 @@ fn verify_file_check_only(path: &PathBuf) -> std::result::Result<bool, String> {
 // Mode implementations
 // ---------------------------------------------------------------------------
 
-fn execute_proof_mode(timeout: u64, show_cost: bool) -> Result<VerificationStats> {
+fn execute_proof_mode(
+    timeout: u64,
+    show_cost: bool,
+    backend: SolverChoice,
+) -> Result<VerificationStats> {
     #[cfg(not(feature = "verification"))]
     {
         println!();
@@ -284,7 +340,7 @@ fn execute_proof_mode(timeout: u64, show_cost: bool) -> Result<VerificationStats
         stats.total_files += 1;
 
         let file_start = Instant::now();
-        match verify_file_proof(source, timeout, show_cost) {
+        match verify_file_proof(source, timeout, show_cost, backend) {
             Ok(true) => {
                 let elapsed = file_start.elapsed();
                 stats.files_verified += 1;
@@ -321,7 +377,11 @@ fn execute_proof_mode(timeout: u64, show_cost: bool) -> Result<VerificationStats
     Ok(stats)
 }
 
-fn execute_compare_mode(timeout: u64, show_cost: bool) -> Result<VerificationStats> {
+fn execute_compare_mode(
+    timeout: u64,
+    show_cost: bool,
+    backend: SolverChoice,
+) -> Result<VerificationStats> {
     ui::step("Comparing runtime vs proof verification modes");
 
     let sources = discover_source_files();
@@ -345,7 +405,7 @@ fn execute_compare_mode(timeout: u64, show_cost: bool) -> Result<VerificationSta
 
         // Measure proof mode time
         let proof_start = Instant::now();
-        let proof_ok = verify_file_proof(source, timeout, show_cost);
+        let proof_ok = verify_file_proof(source, timeout, show_cost, backend);
         let proof_time = proof_start.elapsed();
 
         // Measure check-only (runtime) time
@@ -497,7 +557,7 @@ fn execute_interactive_impl(timeout: u64) -> Result<()> {
 
     for source in &sources {
         let display_path = source.display().to_string();
-        match verify_file_proof(source, timeout, false) {
+        match verify_file_proof(source, timeout, false, SolverChoice::Z3) {
             Ok(false) => {
                 problem_files.push((display_path, "Verification failed".to_string()));
             }
@@ -607,7 +667,7 @@ fn investigate_file(path: &str, timeout: u64) {
 
     let file_path = PathBuf::from(path);
     let start = Instant::now();
-    match verify_file_proof(&file_path, timeout * 2, true) {
+    match verify_file_proof(&file_path, timeout * 2, true, SolverChoice::Z3) {
         Ok(true) => {
             let elapsed = start.elapsed();
             ui::success(&format!(

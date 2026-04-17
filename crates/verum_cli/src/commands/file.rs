@@ -388,6 +388,7 @@ pub fn verify(
     mode: &str,
     show_costs: bool,
     timeout: u64,
+    solver: &str,
     function: Option<&str>,
 ) -> Result<(), CliError> {
     ui::step(&format!("Verifying {}", file));
@@ -399,11 +400,26 @@ pub fn verify(
 
     let verify_mode = parse_verify_mode(mode)?;
     let language_features = crate::feature_overrides::scratch_features()?;
+    // Always validate the --solver input so typos error out regardless of
+    // the `verification` feature. The parsed choice is only forwarded to the
+    // compiler when the feature is enabled; otherwise the compiler's Z3
+    // default is used.
+    let _backend = crate::commands::verify::SolverChoice::parse(solver).map_err(|e| {
+        CliError::VerificationFailed(format!(
+            "{e}. Accepted values: z3, cvc5, auto, portfolio, capability"
+        ))
+    })?;
+
+    #[cfg(feature = "verification")]
+    let smt_solver_choice: verum_smt::backend_switcher::BackendChoice = _backend.into();
+    #[cfg(not(feature = "verification"))]
+    let smt_solver_choice = Default::default();
 
     let options = CompilerOptions {
         input,
         verify_mode,
         smt_timeout_secs: timeout,
+        smt_solver: smt_solver_choice,
         show_verification_costs: show_costs,
         output_format: OutputFormat::Human,
         language_features,

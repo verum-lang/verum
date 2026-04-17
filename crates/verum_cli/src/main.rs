@@ -1181,6 +1181,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     mode.as_str(),
                     show_cost,
                     timeout,
+                    solver.as_str(),
                     function.as_ref().map(|s| s.as_str()),
                 )
             } else {

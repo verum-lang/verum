@@ -75,6 +75,12 @@ impl<'s> VerifyCommand<'s> {
 
     /// Run verification with cost reporting
     pub fn run(mut self, function_name: Option<&str>) -> Result<()> {
+        info!(
+            "SMT verification backend: {:?} (timeout: {}s)",
+            self.session.options().smt_solver,
+            self.session.options().smt_timeout_secs
+        );
+
         // Load and parse source
         let input = self.session.options().input.clone();
         let file_id = self

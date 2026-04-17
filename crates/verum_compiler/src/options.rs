@@ -99,6 +99,12 @@ pub struct CompilerOptions {
     /// SMT solver timeout in seconds
     pub smt_timeout_secs: u64,
 
+    /// SMT backend selection strategy. Drives which solver the refinement /
+    /// contract verification path invokes: Z3 exclusively, CVC5 exclusively,
+    /// automatic heuristic selection, portfolio (parallel), or capability
+    /// routing. Defaults to `Z3` to preserve historical behaviour.
+    pub smt_solver: verum_smt::backend_switcher::BackendChoice,
+
     /// Total verification budget in seconds (None = unlimited)
     pub verification_budget_secs: Option<u64>,
 
@@ -266,6 +272,7 @@ impl Default for CompilerOptions {
             output: PathBuf::new(),
             verify_mode: VerifyMode::default(),
             smt_timeout_secs: 30,
+            smt_solver: verum_smt::backend_switcher::BackendChoice::Z3,
             verification_budget_secs: None,
             slow_verification_threshold_secs: 5,
             show_verification_costs: false,
