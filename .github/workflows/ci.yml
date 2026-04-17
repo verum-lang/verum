@@ -45,7 +45,9 @@ jobs:
           shared-key: unit-${{ matrix.os }}
           cache-on-failure: true
 
-      - name: Build workspace
+      - name: Build workspace (rustc -D warnings, blocking)
+        env:
+          RUSTFLAGS: "-D warnings"
         run: cargo build --workspace --locked
 
       - name: Run unit tests (library + binaries)
