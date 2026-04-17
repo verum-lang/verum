@@ -886,14 +886,18 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                 // - Qualified names (e.g., "Map.ensure_capacity"): try exact match or suffix match
                 //   with the qualified name. This allows "core.collections.map.Map.ensure_capacity"
                 //   to match "Map.ensure_capacity".
-                // - Unqualified names (e.g., "len"): match any function ending with ".len".
-                //   This handles cases where the method is called without type prefix.
+                // - Unqualified names (e.g., "len"): only match QUALIFIED registrations
+                //   (functions whose name contains a `.`). Otherwise a bare `.map(closure)`
+                //   instance call would silently dispatch to a top-level free `fn map(...)`
+                //   that happens to share the basename — exactly the
+                //   `nums.map(|n| n*2)` → `pub fn map(pairs)` collision in core/collections/map.vr
+                //   that previously panicked with "method 'Map.resize' not found on value".
                 let matches = if is_already_qualified {
                     // For qualified names, require the qualified suffix to match
                     // (prevents "Result.unwrap_or" matching when looking for "Maybe.unwrap_or")
                     func_name == method_name || func_name.ends_with(&method_suffix)
                 } else {
-                    func_name.ends_with(&method_suffix)
+                    func_name.ends_with(&method_suffix) && func_name.contains('.')
                 };
                 if matches {
                     // Prefer exact parameter count match (instance method: args + self)

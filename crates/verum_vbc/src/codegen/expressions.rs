@@ -4142,13 +4142,25 @@ impl VbcCodegen {
         // by the parser because of explicit type arguments). Both forms designate
         // the same static method — type arguments are erased at the VBC layer
         // (every value is one NaN-boxed slot).
+        //
+        // For the bare-Path form, only treat the segment as a type name when it
+        // is *not* a local variable. Otherwise `nums.map(closure)` would lift
+        // `nums` (a local List value) into a static lookup of `nums.map`, and
+        // when no such qualified function exists, the unqualified-suffix fallback
+        // in the dispatcher could route to a top-level free fn (`pub fn map` in
+        // core/collections/map.vr) that happened to share the basename.
         let static_receiver_type: Option<String> = match &receiver.kind {
             ExprKind::Path(path)
                 if path.segments.len() == 1
                     && matches!(&path.segments[0], PathSegment::Name(_)) =>
             {
                 if let PathSegment::Name(ident) = &path.segments[0] {
-                    Some(ident.name.to_string())
+                    let name = ident.name.to_string();
+                    if self.ctx.get_var_reg(&name).is_ok() {
+                        None
+                    } else {
+                        Some(name)
+                    }
                 } else {
                     None
                 }
