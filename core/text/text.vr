@@ -227,7 +227,10 @@ implement Text {
             panic("Out of memory");
         }
         memcpy(ptr, bytes.as_ptr(), len);
-        ptr_write(ptr_offset(ptr, len) as &unsafe Byte, 0 as Byte);  // null terminate
+        // Null-terminate via `memset` (single-byte write): `ptr_write<Byte>`
+        // lowers to a generic `DerefMut` that writes 8 bytes regardless of
+        // T and would corrupt 7 bytes past the end of the allocation.
+        memset(ptr_offset(ptr, len), 0 as Byte, 1);
         Text {
             ptr: ptr,
             len: len,
@@ -622,17 +625,25 @@ implement Text {
     }
 
     /// Push a byte (internal, assumes valid UTF-8 context).
+    ///
+    /// Uses `memset(dst, byte, 1)` rather than `ptr_write` because the
+    /// generic `ptr_write<T>` intrinsic lowers to `DerefMut`, which writes
+    /// an 8-byte NaN-boxed `Value` regardless of `T`. Writing a Byte via
+    /// `ptr_write` corrupts the seven bytes after the target — enough to
+    /// destroy whatever is stored adjacent in the allocator's cell.
+    /// `memset` takes an explicit length of 1, so the write is byte-sized
+    /// at both interpreter and AOT tiers.
     public fn push_byte(&mut self, byte: Byte) {
         if self.len >= self.cap {
             self.grow();
         }
         unsafe {
-            ptr_write(ptr_offset(self.ptr, self.len) as &unsafe Byte, byte);
+            memset(ptr_offset(self.ptr, self.len), byte, 1);
         }
         self.len = self.len + 1;
-        // Maintain null terminator
+        // Maintain null terminator.
         unsafe {
-            ptr_write(ptr_offset(self.ptr, self.len) as &unsafe Byte, 0 as Byte);
+            memset(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
         }
     }
 
@@ -1954,10 +1965,10 @@ implement Text {
             boundary = boundary - 1;
         }
         self.len = boundary;
-        // Maintain null terminator
+        // Maintain null terminator via `memset` (single-byte write).
         if !is_null(self.ptr) {
             unsafe {
-                ptr_write(ptr_offset(self.ptr, self.len) as &unsafe Byte, 0 as Byte);
+                memset(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
             }
         }
     }
@@ -2344,7 +2355,7 @@ implement Text {
             let b = bytes[i];
             if (b as Int) >= 65 && (b as Int) <= 90 {
                 unsafe {
-                    ptr_write(ptr_offset(ptr, i) as &unsafe Byte, (b as Int + 32) as Byte);
+                    memset(ptr_offset(ptr, i), (b as Int + 32) as Byte, 1);
                 }
             }
         }
@@ -2359,7 +2370,7 @@ implement Text {
             let b = bytes[i];
             if (b as Int) >= 97 && (b as Int) <= 122 {
                 unsafe {
-                    ptr_write(ptr_offset(ptr, i) as &unsafe Byte, (b as Int - 32) as Byte);
+                    memset(ptr_offset(ptr, i), (b as Int - 32) as Byte, 1);
                 }
             }
         }

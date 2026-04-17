@@ -453,17 +453,17 @@ fn parse_number(p: &mut Parser) -> Result<JsonValue, JsonError> {
     let repr = Text.from_utf8_unchecked(slice);
     if is_float {
         match repr.parse_float() {
-            Some(f) => Ok(JsonFloat(f)),
-            None    => Err(mk_err(p, InvalidNumber, &"float out of range")),
+            Ok(f)  => Ok(JsonFloat(f)),
+            Err(_) => Err(mk_err(p, InvalidNumber, &"float out of range")),
         }
     } else {
         // Integer path: attempt Int parse (Verum Int is 64-bit). On overflow,
         // fall back to Float to preserve precision where possible.
         match repr.parse_int() {
-            Some(i) => Ok(JsonInt(i)),
-            None => match repr.parse_float() {
-                Some(f) => Ok(JsonFloat(f)),
-                None    => Err(mk_err(p, InvalidNumber, &"integer out of range")),
+            Ok(i)  => Ok(JsonInt(i)),
+            Err(_) => match repr.parse_float() {
+                Ok(f)  => Ok(JsonFloat(f)),
+                Err(_) => Err(mk_err(p, InvalidNumber, &"integer out of range")),
             },
         }
     }
