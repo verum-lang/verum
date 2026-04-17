@@ -12451,9 +12451,12 @@ fn lower_cbgr_extended<'ctx>(
             let index = ctx.get_register(operands[2] as u16)?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
-            // Load base pointer from fat ref
+            // Load base pointer from fat ref. Registers can store either a
+            // PointerValue (allocated struct) or an IntValue (NaN-boxed
+            // Value encoding of the pointer), so route through `as_ptr`.
+            let fat_ref_ptr = as_ptr(ctx, fat_ref, "slice_fat_ref_ptr")?;
             let base_int = ctx.builder()
-                .build_load(i64_ty, fat_ref.into_pointer_value(), "base_int")
+                .build_load(i64_ty, fat_ref_ptr, "base_int")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             let base_ptr = ctx.builder()
                 .build_int_to_ptr(base_int.into_int_value(), ptr_ty, "base_ptr")
@@ -12478,9 +12481,10 @@ fn lower_cbgr_extended<'ctx>(
             let end = ctx.get_register(operands[3] as u16)?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
-            // Load base from fat ref
+            // Load base from fat ref. Same variance as SliceGet.
+            let src_ptr = as_ptr(ctx, src, "sub_src_ptr")?;
             let base_int = ctx.builder()
-                .build_load(i64_ty, src.into_pointer_value(), "base_int")
+                .build_load(i64_ty, src_ptr, "base_int")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             // Compute new base = base + start * 8
             let offset = ctx.builder()
@@ -12520,9 +12524,12 @@ fn lower_cbgr_extended<'ctx>(
             let mid = ctx.get_register(operands[3] as u16)?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
-            // Load base and len from source fat ref
+            // Load base and len from source fat ref. Registers can hold
+            // either PointerValue or i64 (NaN-boxed), so route through
+            // `as_ptr`.
+            let src_ptr = as_ptr(ctx, src, "split_src_ptr")?;
             let base_int = ctx.builder()
-                .build_load(i64_ty, src.into_pointer_value(), "base_int")
+                .build_load(i64_ty, src_ptr, "base_int")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             // SAFETY: GEP into the source fat reference {base_ptr, len} to read the total length at field 1 (offset 8)
             let len_ptr = unsafe {
