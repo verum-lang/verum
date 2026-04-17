@@ -9852,6 +9852,16 @@ impl<'s> CompilationPipeline<'s> {
         // Step 3: Find and execute main function
         let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
 
+        // Run module.global_ctors first so @thread_local static initializers
+        // populate their TLS slots before `main` reads them. This mirrors the
+        // AOT path (LLVM @llvm.global_ctors runs before main via the C
+        // runtime); without it, the CBGR allocator's LOCAL_HEAP/CURRENT_HEAP
+        // bootstrap reads Value::default() from an uninitialized TLS slot and
+        // crashes on first allocation.
+        if let Err(e) = interpreter.run_global_ctors() {
+            return Err(anyhow::anyhow!("VBC global_ctors error: {:?}", e));
+        }
+
         info!("Executing main function via VBC interpreter (function ID: {})", main_func_id.0);
         let result = interpreter.execute_function(main_func_id);
 

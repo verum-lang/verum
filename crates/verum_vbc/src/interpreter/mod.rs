@@ -217,8 +217,69 @@ impl Interpreter {
     }
 
     /// Executes the main function (function 0) if it exists.
+    ///
+    /// Runs `module.global_ctors` in priority order before `main`, matching
+    /// the AOT path (which emits an LLVM `@llvm.global_ctors` array whose
+    /// entries are invoked by the C runtime prior to `main`). This is
+    /// required for `@thread_local static` initializers (which compile to
+    /// `__tls_init_<NAME>` synthetic functions via
+    /// `codegen::compile_pending_tls_inits`) to populate their TLS slots
+    /// before user code reads them. Without it, `TlsGet` on an
+    /// uninitialized slot falls back to `Value::default()`, which is not
+    /// the declared static's initial value — e.g. `static mut LOCAL_HEAP:
+    /// Maybe<LocalHeap> = None` reads back as a raw zero `Value` instead
+    /// of the `None` variant, and the CBGR allocator bootstrap crashes on
+    /// the first `Shared::new(...)`.
     pub fn run_main(&mut self) -> InterpreterResult<Value> {
+        self.run_global_ctors()?;
         self.execute_function(FunctionId(0))
+    }
+
+    /// Executes the subset of `module.global_ctors` that initialise
+    /// `@thread_local static` slots (functions named `__tls_init_*`).
+    ///
+    /// Why restricted to TLS inits: historically `global_ctors` also
+    /// contains declared-only FFI library initializers (e.g. Windows
+    /// `kernel32` startup functions) that panic via debug_assert! inside
+    /// `value.rs` when invoked from the interpreter on macOS. Those were
+    /// intentionally skipped in `pipeline::phase_interpret` (commit
+    /// 4e3e4f5). However skipping *all* ctors broke `@thread_local`
+    /// initializers — `__tls_init_<NAME>` synthetic functions are the
+    /// only way a `@thread_local static`'s declared initial value
+    /// reaches its TLS slot, and without them `TlsGet` on an unset slot
+    /// yields `Value::default()`. The CBGR allocator's LOCAL_HEAP /
+    /// CURRENT_HEAP bootstrap then reads a raw zero `Value` as
+    /// `Maybe<LocalHeap>` and its pattern-match misfires, causing
+    /// `Shared::new(...)` to crash with "Expected int, got None".
+    ///
+    /// Call this before executing user code. Running TLS inits is
+    /// idempotent — each ctor re-executes and re-writes its slot — so
+    /// callers do not need to track whether they have been run.
+    pub fn run_global_ctors(&mut self) -> InterpreterResult<()> {
+        if self.state.module.global_ctors.is_empty() {
+            return Ok(());
+        }
+        let mut ctors: Vec<(u32, FunctionId)> = self
+            .state
+            .module
+            .global_ctors
+            .iter()
+            .map(|(id, prio)| (*prio, *id))
+            .collect();
+        ctors.sort_by_key(|(prio, _)| *prio);
+        for (_prio, ctor) in ctors {
+            let is_tls_init = self
+                .state
+                .module
+                .get_function(ctor)
+                .and_then(|desc| self.state.module.get_string(desc.name))
+                .map(|name| name.starts_with("__tls_init_"))
+                .unwrap_or(false);
+            if is_tls_init {
+                self.execute_function(ctor)?;
+            }
+        }
+        Ok(())
     }
 
     /// Calls a function with the given arguments.
