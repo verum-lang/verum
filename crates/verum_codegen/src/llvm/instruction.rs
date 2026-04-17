@@ -12081,6 +12081,65 @@ fn lower_text_extended<'ctx>(
             ctx.set_register(dst, i64_ty.const_int(1, false).into());
             Ok(())
         }
+        0x34 => { // AsBytes — borrow a Text as a byte slice
+            // Layout: produces the same slice Pack object the rest of the
+            // AOT pipeline expects for `&[Byte]`: [24-byte header][ptr:i64][len:i64].
+            // The Text runtime struct is `{ptr: i64, len: i64, cap: i64}`, so we
+            // simply reuse the stored ptr/len. The helper `verum_text_get_ptr`
+            // substitutes an empty-string pointer for nulls to keep downstream
+            // byte reads safe.
+            if operands.len() < 2 { return Ok(()); }
+            let dst = operands[0] as u16;
+            let text_reg = operands[1] as u16;
+            let text_val = ctx.get_register(text_reg)?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let i8_ty = ctx.types().i8_type();
+
+            let text_i64 = as_i64(ctx, text_val, "text_val_i64")?;
+
+            // ptr = verum_text_get_ptr(text)
+            let get_ptr_fn = module.get_function("verum_text_get_ptr").unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+                module.add_function("verum_text_get_ptr", fn_ty, None)
+            });
+            let bytes_ptr_val = ctx.builder()
+                .build_call(get_ptr_fn, &[text_i64.into()], "text_bytes_ptr")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .ok_or_else(|| LlvmLoweringError::internal("AsBytes: verum_text_get_ptr returned no value"))?;
+            let bytes_ptr = bytes_ptr_val.into_pointer_value();
+            let ptr_as_i64 = ctx.builder()
+                .build_ptr_to_int(bytes_ptr, i64_ty, "text_bytes_ptr_i64")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+            // len = Text.len, read directly from the struct at offset 8.
+            let text_struct_ptr = ctx.builder()
+                .build_int_to_ptr(text_i64, ptr_ty, "text_struct_ptr")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // SAFETY: Text layout is {ptr:i64, len:i64, cap:i64}; offset 8 is the `len` field.
+            let len_slot = unsafe {
+                ctx.builder()
+                    .build_in_bounds_gep(i8_ty, text_struct_ptr, &[i64_ty.const_int(8, false)], "text_len_slot")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
+            let len_val = ctx.builder()
+                .build_load(i64_ty, len_slot, "text_len")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .into_int_value();
+
+            // Pack (ptr, len) into the standard slice object used by Len/GetE.
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let slice_ptr = runtime.lower_pack(
+                ctx.builder(),
+                module,
+                &[ptr_as_i64.into(), len_val.into()],
+            )?;
+            ctx.set_register(dst, slice_ptr.into());
+            ctx.mark_slice_register(dst);
+            Ok(())
+        }
         _ => {
             ctx.emit_unimplemented_sub_op("TextExtended", sub_op);
             Ok(())
@@ -12095,6 +12154,26 @@ fn lower_cbgr_extended<'ctx>(
     operands: &[u8],
 ) -> Result<()> {
     match sub_op {
+        0x0A => { // RefSliceRaw — build a slice Pack{ptr, len} with elem_size=1
+            // Matches the interpreter-side fix (commit 3ae67c5). AOT's slice
+            // representation is the standard Pack object used by Len/GetE, so
+            // we simply pack the raw pointer and length into it.
+            if operands.len() < 3 { return Ok(()); }
+            let dst = operands[0] as u16;
+            let ptr_reg = operands[1] as u16;
+            let len_reg = operands[2] as u16;
+            let ptr_val = as_i64(ctx, ctx.get_register(ptr_reg)?, "ref_slice_raw_ptr")?;
+            let len_val = as_i64(ctx, ctx.get_register(len_reg)?, "ref_slice_raw_len")?;
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let slice_ptr = runtime.lower_pack(
+                ctx.builder(),
+                ctx.get_module(),
+                &[ptr_val, len_val],
+            )?;
+            ctx.set_register(dst, slice_ptr.into());
+            ctx.mark_slice_register(dst);
+            Ok(())
+        }
         0x20 => { // GetGeneration
             if operands.len() < 2 { return Ok(()); }
             let dst = operands[0] as u16;
