@@ -7,6 +7,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Fast, direct-to-AST parser for Verum compiler (no lossless/incremental overhead)"
+[lints]
+workspace = true
+
 
 [dependencies]
 verum_ast = { workspace = true }

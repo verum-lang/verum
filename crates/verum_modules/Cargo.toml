@@ -7,6 +7,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Module system for the Verum programming language"
+[lints]
+workspace = true
+
 
 [dependencies]
 # DEPRECATED: Superseded by stdlib/ and verum_common types

@@ -9,6 +9,9 @@ repository.workspace = true
 description = "Production-grade CLI for the Verum programming language"
 keywords = ["verum", "cli", "compiler", "build-tool"]
 categories = ["command-line-utilities", "development-tools"]
+[lints]
+workspace = true
+
 
 [lib]
 name = "verum_cli"

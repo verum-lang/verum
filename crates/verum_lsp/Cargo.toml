@@ -7,6 +7,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Language Server Protocol implementation for Verum"
+[lints]
+workspace = true
+
 
 # NOTE: No [[bin]] - LSP is accessed via `verum lsp` command
 # The verum_cli crate provides the unified CLI interface

@@ -6675,8 +6675,6 @@ mod tests {
         ];
 
         for &opcode in &sample_opcodes {
-            let data = [opcode]; // Only opcode, no operands
-            let mut offset = 0;
             // This should return Err (incomplete data), not panic
             let result = std::panic::catch_unwind(|| {
                 let mut off = 0;

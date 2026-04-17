@@ -8,6 +8,12 @@
 //!
 //! This validates that all components work together correctly.
 
+// Tests destructure `let (module, func) = create_test_module(...)`; many
+// tests only exercise `module.*` and never read `func`. Binding it by
+// value (rather than `(module, _)`) keeps the signature obvious and
+// stable when new tests that do want to inspect `func` are added.
+#![allow(unused_variables)]
+
 use crate::instruction::{Instruction, Reg};
 use crate::module::{FunctionDescriptor, VbcFunction, VbcModule};
 #[allow(unused_imports)]
@@ -562,7 +568,7 @@ mod logic_tests {
             Instruction::Ret { value: Reg(1) },
         ];
 
-        let (module, _func) = create_test_module("test_not", instructions);
+        let (module, func) = create_test_module("test_not", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 

@@ -257,6 +257,16 @@ large_enum_variant = "allow"
 type_complexity = "allow"
 # Multiple generic bounds on same param can be clearer than where clauses
 multiple_bound_locations = "allow"
+# Test files and serializer round-trip fixtures use arbitrary floats
+# like `3.14159`, `2.71828` as payloads — they are NOT meant to be the
+# geometric π / e constants, and clippy's "approx value of PI / E" lint
+# misfires across ~40 such sites. The constants it suggests would
+# change the round-tripped bytes and break the tests.
+approx_constant = "allow"
+# f.init(); f.x = 1; f.y = 2 is clearer than Default { x: 1, y: 2, ..f.init() }
+# for builder-style code, especially when default() has side effects
+# (logging, counter increments). ~23 sites across verum_vbc tests.
+field_reassign_with_default = "allow"
 
 # Custom profile for benchmarking
 [profile.bench]

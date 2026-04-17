@@ -7,6 +7,9 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Centralized error handling system for Verum language platform"
+[lints]
+workspace = true
+
 
 [dependencies]
 # Error handling

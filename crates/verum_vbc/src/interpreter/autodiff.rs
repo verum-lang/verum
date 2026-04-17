@@ -3073,8 +3073,8 @@ mod tests {
     fn test_nested_scopes() {
         let mut tape = GradientTape::new();
 
-        let s1 = tape.begin_scope(GradMode::Reverse).unwrap();
-        let s2 = tape.begin_scope(GradMode::Forward).unwrap();
+        let _s1 = tape.begin_scope(GradMode::Reverse).unwrap();
+        let _s2 = tape.begin_scope(GradMode::Forward).unwrap();
 
         assert_eq!(tape.scopes.len(), 2);
         assert_eq!(tape.current_scope().unwrap().mode, GradMode::Forward);

@@ -9,6 +9,9 @@ repository.workspace = true
 description = "Interactive environment for Verum: REPL, Script Parser, and Playbook TUI"
 keywords = ["verum", "repl", "interactive", "playbook", "tui"]
 categories = ["development-tools"]
+[lints]
+workspace = true
+
 
 [dependencies]
 # Core Verum crates (only the ones actually used directly)

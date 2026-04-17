@@ -606,14 +606,16 @@ mod loop_execution_tests {
         // Back jump will be created with calculated offset
         let ret = Instruction::Ret { value: Reg(1) };
 
-        // Calculate sizes
-        let init1_size = instruction_byte_size(&init1);
-        let init2_size = instruction_byte_size(&init2);
-        let init3_size = instruction_byte_size(&init3);
+        // Calculate sizes (init/ret sizes only documented — not consumed
+        // directly; the body sizes below drive the forward/back jump
+        // offsets).
+        let _init1_size = instruction_byte_size(&init1);
+        let _init2_size = instruction_byte_size(&init2);
+        let _init3_size = instruction_byte_size(&init3);
         let cmp_size = instruction_byte_size(&cmp);
         let body_add_size = instruction_byte_size(&body_add);
         let body_dec_size = instruction_byte_size(&body_dec);
-        let ret_size = instruction_byte_size(&ret);
+        let _ret_size = instruction_byte_size(&ret);
 
         // JmpIf needs to skip: body_add + body_dec + back_jmp to reach ret
         // Back jump placeholder to estimate size

@@ -9,6 +9,9 @@ repository.workspace = true
 description = "MLIR-based code generation and linking for the Verum compiler"
 keywords = ["verum", "codegen", "mlir", "compiler", "llvm"]
 categories = ["compilers"]
+[lints]
+workspace = true
+
 
 [dependencies]
 # Core Verum crates
