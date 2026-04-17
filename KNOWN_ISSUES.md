@@ -3,13 +3,6 @@
 This file tracks remaining runtime limitations. Items are removed as they
 resolve. When the file is empty, it can be deleted.
 
-## REPL — Parse-Only
-
-`verum repl` parses and type-checks input but does not evaluate. Full
-VBC-backed evaluation (persistent `InterpreterState`, bindings across
-prompts) is a tracked follow-up. Use `verum run <file.vr>` for
-execution.
-
 ## AOT Async — No Polling Executor
 
 `verum build` emits correct async state-machine code but does not link
