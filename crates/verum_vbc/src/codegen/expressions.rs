@@ -5317,6 +5317,25 @@ impl VbcCodegen {
         } else {
             method.name.to_string()
         };
+        // Normalize slice-type prefixes: `[T].method` is the natural name
+        // produced by `extract_type_name_from_ast` for field/variable types
+        // of kind `[T]`, but `implement<T> [T]` blocks register under the
+        // `Slice.method` prefix (see `extract_impl_type_name_from_type`).
+        // Rewrite here so dispatch and registration agree on a single key.
+        let effective_method_name = if effective_method_name.starts_with('[') {
+            if let Some(close) = effective_method_name.find(']') {
+                let after = &effective_method_name[close + 1..];
+                if let Some(rest) = after.strip_prefix('.') {
+                    format!("Slice.{}", rest)
+                } else {
+                    effective_method_name
+                }
+            } else {
+                effective_method_name
+            }
+        } else {
+            effective_method_name
+        };
         let method_id = self.intern_string(&effective_method_name);
 
         // Check if the method takes &mut self (mutable reference to self).

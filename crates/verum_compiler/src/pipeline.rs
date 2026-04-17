@@ -10243,6 +10243,7 @@ impl<'s> CompilationPipeline<'s> {
             "core.sys.linux.thread",
             // Phase 2A: Already migrated and tested (979 tests pass)
             "core.collections.list",
+            "core.collections.slice",
             "core.text.text",
             "core.time.duration",
             "core.time.instant",
