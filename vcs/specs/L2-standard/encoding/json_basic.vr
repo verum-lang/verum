@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, json, parse, stringify
+// @timeout: 10000
+// @expect: pass
+
+mount core.encoding.json.{
+    parse,
+    parse_value,
+    stringify,
+    stringify_pretty,
+    JsonValue,
+    JsonNull,
+    JsonBool,
+    JsonInt,
+    JsonFloat,
+    JsonString,
+    JsonArray,
+    JsonObject,
+    JsonError,
+    JsonErrorKind,
+    UnexpectedEof,
+    UnexpectedChar,
+    InvalidEscape,
+    InvalidNumber,
+    InvalidUnicode,
+    DepthLimit,
+    TrailingGarbage,
+};
+
+// Exercises every public entry point at the type level. Runtime evaluation
+// of the parser depends on text/bytes stdlib bootstrap that is pending;
+// type-level validation confirms the public surface compiles cleanly.
+fn main() {
+    let source = "{\"ok\":true}";
+    let _ = parse(&source);
+    let _ = parse_value(&source);
+
+    let v = JsonString("hello");
+    let _ = stringify(&v);
+    let _ = stringify_pretty(&v);
+
+    // Variant constructors type-check.
+    let _null: JsonValue = JsonNull;
+    let _bool: JsonValue = JsonBool(true);
+    let _int: JsonValue = JsonInt(42);
+    let _float: JsonValue = JsonFloat(3.14);
+    let _str: JsonValue = JsonString("text");
+
+    // Error types available for pattern matching.
+    fn _handle(err: JsonError) -> Text {
+        match err.kind {
+            UnexpectedEof    => "eof",
+            UnexpectedChar   => "char",
+            InvalidEscape    => "escape",
+            InvalidNumber    => "number",
+            InvalidUnicode   => "unicode",
+            DepthLimit       => "depth",
+            TrailingGarbage  => "trailing",
+        }
+    }
+}

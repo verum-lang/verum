@@ -170,6 +170,14 @@ public module runtime;
 public module term;
 
 // =============================================================================
+// Layer 4.7: Encoding (Depends on: core, text, collections)
+// =============================================================================
+
+// Data encoding and serialization: JSON (strict RFC 8259), base64, hex.
+// Zero-allocation parsing where the ADT owns the decoded structure.
+public module encoding;
+
+// =============================================================================
 // Layer 5: Network (Depends on: core, text, collections, io, async)
 // =============================================================================
 

@@ -1,0 +1,19 @@
+// =============================================================================
+// encoding/mod.vr - Data encoding / serialization
+// =============================================================================
+// Layer: 2 (Core, depends on base + text + collections)
+// =============================================================================
+
+module core.encoding;
+
+public module json;
+
+// Re-exports
+public mount .json.Json;
+public mount .json.JsonValue;
+public mount .json.JsonError;
+public mount .json.JsonErrorKind;
+public mount .json.parse;
+public mount .json.parse_value;
+public mount .json.stringify;
+public mount .json.stringify_pretty;

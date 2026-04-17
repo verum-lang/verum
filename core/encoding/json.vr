@@ -1,0 +1,621 @@
+// =============================================================================
+// encoding/json.vr - JSON parser and serializer (RFC 8259)
+// =============================================================================
+// Layer: 2 (Encoding)
+// Dependencies: core, collections, text
+// =============================================================================
+//
+// Strict JSON per RFC 8259. Provides:
+//   JsonValue — the algebraic data type for a parsed JSON document
+//   parse(text)          -> Result<JsonValue, JsonError>
+//   stringify(value)     -> Text                   // compact
+//   stringify_pretty(v)  -> Text                   // 2-space indent
+//
+// Design goals:
+//   * No allocation beyond the returned structure.
+//   * Clear error positions (line + column) for diagnostics.
+//   * UTF-8 input, UTF-8 output. Invalid UTF-8 in input is rejected.
+//   * Numbers preserved as Float (IEEE 754 double). Large integer support
+//     via the JsonValue.Int variant when the number parses cleanly.
+//
+// Example:
+//   let doc = json.parse(text)?;
+//   match doc {
+//       JsonValue.Object(fields) => { ... },
+//       _ => ...,
+//   }
+// =============================================================================
+
+module core.encoding.json;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+// Algebraic JSON value.
+// Null, Bool, Int (lossless integer), Float (IEEE 754 double),
+// String, Array, Object (ordered by insertion via Map).
+public type JsonValue is
+      JsonNull
+    | JsonBool(Bool)
+    | JsonInt(Int)
+    | JsonFloat(Float)
+    | JsonString(Text)
+    | JsonArray(List<JsonValue>)
+    | JsonObject(Map<Text, JsonValue>);
+
+// Backwards-compatible alias for users who prefer the short name.
+public type Json is JsonValue;
+
+// Error position and cause.
+public type JsonError is {
+    kind: JsonErrorKind,
+    line: Int,       // 1-indexed
+    column: Int,     // 1-indexed, counting bytes (RFC 8259 input is UTF-8)
+    message: Text,
+};
+
+public type JsonErrorKind is
+      UnexpectedEof
+    | UnexpectedChar
+    | InvalidEscape
+    | InvalidNumber
+    | InvalidUnicode
+    | DepthLimit
+    | TrailingGarbage;
+
+// =============================================================================
+// Parser state
+// =============================================================================
+
+// Maximum allowed nesting depth for arrays + objects. Prevents stack
+// overflow from pathological inputs such as `[[[[[[[[[[...]]]]]]]]]]]`.
+// 256 is well above any realistic JSON document while still fitting
+// comfortably inside typical OS thread stacks.
+const MAX_JSON_DEPTH: Int = 256;
+
+type Parser is {
+    bytes: &[Byte],
+    pos: Int,
+    line: Int,
+    column: Int,
+    depth: Int,
+};
+
+fn new_parser(bytes: &[Byte]) -> Parser {
+    Parser { bytes: bytes, pos: 0, line: 1, column: 1, depth: 0 }
+}
+
+fn mk_err(p: &Parser, kind: JsonErrorKind, msg: &Text) -> JsonError {
+    JsonError {
+        kind: kind,
+        line: p.line,
+        column: p.column,
+        message: msg.clone(),
+    }
+}
+
+fn peek(p: &Parser) -> Maybe<Byte> {
+    if p.pos < p.bytes.len() {
+        Some(p.bytes[p.pos])
+    } else {
+        None
+    }
+}
+
+fn advance(p: &mut Parser) {
+    if p.pos < p.bytes.len() {
+        let b = p.bytes[p.pos];
+        p.pos = p.pos + 1;
+        if b == 0x0A_u8 {
+            p.line = p.line + 1;
+            p.column = 1;
+        } else {
+            p.column = p.column + 1;
+        }
+    }
+}
+
+// Skip whitespace per RFC 8259: space, tab, LF, CR.
+fn skip_ws(p: &mut Parser) {
+    while p.pos < p.bytes.len() {
+        let b = p.bytes[p.pos];
+        if b == 0x20_u8 || b == 0x09_u8 || b == 0x0A_u8 || b == 0x0D_u8 {
+            advance(p);
+        } else {
+            break;
+        }
+    }
+}
+
+fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), JsonError> {
+    match peek(p) {
+        Some(c) => {
+            if c == b {
+                advance(p);
+                Ok(())
+            } else {
+                Err(mk_err(p, UnexpectedChar, ctx))
+            }
+        }
+        None => Err(mk_err(p, UnexpectedEof, ctx)),
+    }
+}
+
+// =============================================================================
+// Parser — public entry points
+// =============================================================================
+
+// Parse a full JSON document. Rejects trailing garbage.
+public fn parse(source: &Text) -> Result<JsonValue, JsonError> {
+    let bytes = source.as_bytes();
+    let mut p = new_parser(bytes);
+    skip_ws(&mut p);
+    let value = parse_value_impl(&mut p)?;
+    skip_ws(&mut p);
+    if p.pos < p.bytes.len() {
+        return Err(mk_err(&p, TrailingGarbage, &"unexpected content after JSON value"));
+    }
+    Ok(value)
+}
+
+// Parse one JSON value, leaving the remaining bytes untouched (streaming
+// use case). The caller is responsible for any subsequent structure.
+public fn parse_value(source: &Text) -> Result<JsonValue, JsonError> {
+    let bytes = source.as_bytes();
+    let mut p = new_parser(bytes);
+    skip_ws(&mut p);
+    parse_value_impl(&mut p)
+}
+
+// =============================================================================
+// Parser — internal
+// =============================================================================
+
+fn parse_value_impl(p: &mut Parser) -> Result<JsonValue, JsonError> {
+    skip_ws(p);
+    match peek(p) {
+        Some(b) => match b {
+            0x7B_u8 => parse_object(p),        // '{'
+            0x5B_u8 => parse_array(p),         // '['
+            0x22_u8 => parse_string_value(p),  // '"'
+            0x74_u8 | 0x66_u8 => parse_bool(p),        // 't' 'f'
+            0x6E_u8 => parse_null(p),                  // 'n'
+            _ => parse_number(p),
+        },
+        None => Err(mk_err(p, UnexpectedEof, &"expected JSON value")),
+    }
+}
+
+fn parse_null(p: &mut Parser) -> Result<JsonValue, JsonError> {
+    if match_literal(p, &[0x6E_u8, 0x75_u8, 0x6C_u8, 0x6C_u8]) {
+        Ok(JsonNull)
+    } else {
+        Err(mk_err(p, UnexpectedChar, &"expected 'null'"))
+    }
+}
+
+fn parse_bool(p: &mut Parser) -> Result<JsonValue, JsonError> {
+    if match_literal(p, &[0x74_u8, 0x72_u8, 0x75_u8, 0x65_u8]) {
+        Ok(JsonBool(true))
+    } else if match_literal(p, &[0x66_u8, 0x61_u8, 0x6C_u8, 0x73_u8, 0x65_u8]) {
+        Ok(JsonBool(false))
+    } else {
+        Err(mk_err(p, UnexpectedChar, &"expected 'true' or 'false'"))
+    }
+}
+
+fn match_literal(p: &mut Parser, expected: &[Byte]) -> Bool {
+    if p.pos + expected.len() > p.bytes.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < expected.len() {
+        if p.bytes[p.pos + i] != expected[i] {
+            return false;
+        }
+        i = i + 1;
+    }
+    let mut i = 0;
+    while i < expected.len() {
+        advance(p);
+        i = i + 1;
+    }
+    true
+}
+
+fn parse_array(p: &mut Parser) -> Result<JsonValue, JsonError> {
+    if p.depth >= MAX_JSON_DEPTH {
+        return Err(mk_err(p, DepthLimit, &"array nesting too deep"));
+    }
+    p.depth = p.depth + 1;
+    expect_byte(p, 0x5B_u8, &"expected '['")?;
+    let mut elems: List<JsonValue> = [];
+    skip_ws(p);
+    if peek(p) == Some(0x5D_u8) {
+        advance(p);
+        p.depth = p.depth - 1;
+        return Ok(JsonArray(elems));
+    }
+    loop {
+        skip_ws(p);
+        let v = parse_value_impl(p)?;
+        elems.push(v);
+        skip_ws(p);
+        match peek(p) {
+            Some(0x2C_u8) => { advance(p); }               // ','
+            Some(0x5D_u8) => { advance(p); break; }         // ']'
+            Some(_) => return Err(mk_err(p, UnexpectedChar, &"expected ',' or ']'")),
+            None => return Err(mk_err(p, UnexpectedEof, &"unterminated array")),
+        }
+    }
+    p.depth = p.depth - 1;
+    Ok(JsonArray(elems))
+}
+
+fn parse_object(p: &mut Parser) -> Result<JsonValue, JsonError> {
+    if p.depth >= MAX_JSON_DEPTH {
+        return Err(mk_err(p, DepthLimit, &"object nesting too deep"));
+    }
+    p.depth = p.depth + 1;
+    expect_byte(p, 0x7B_u8, &"expected '{'")?;
+    let mut fields: Map<Text, JsonValue> = Map.new();
+    skip_ws(p);
+    if peek(p) == Some(0x7D_u8) {
+        advance(p);
+        p.depth = p.depth - 1;
+        return Ok(JsonObject(fields));
+    }
+    loop {
+        skip_ws(p);
+        let key = parse_string_raw(p)?;
+        skip_ws(p);
+        expect_byte(p, 0x3A_u8, &"expected ':' after key")?;   // ':'
+        skip_ws(p);
+        let value = parse_value_impl(p)?;
+        fields.insert(key, value);
+        skip_ws(p);
+        match peek(p) {
+            Some(0x2C_u8) => { advance(p); }               // ','
+            Some(0x7D_u8) => { advance(p); break; }         // '}'
+            Some(_) => return Err(mk_err(p, UnexpectedChar, &"expected ',' or '}'")),
+            None => return Err(mk_err(p, UnexpectedEof, &"unterminated object")),
+        }
+    }
+    p.depth = p.depth - 1;
+    Ok(JsonObject(fields))
+}
+
+fn parse_string_value(p: &mut Parser) -> Result<JsonValue, JsonError> {
+    let s = parse_string_raw(p)?;
+    Ok(JsonString(s))
+}
+
+// Parse a bare JSON string into a Verum Text (no leading/trailing quote).
+fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
+    expect_byte(p, 0x22_u8, &"expected '\"'")?;
+    let mut buf = Text.new();
+    loop {
+        match peek(p) {
+            None => return Err(mk_err(p, UnexpectedEof, &"unterminated string")),
+            Some(b) => {
+                if b == 0x22_u8 {                               // '"'
+                    advance(p);
+                    return Ok(buf);
+                } else if b == 0x5C_u8 {                        // '\'
+                    advance(p);
+                    parse_escape(p, &mut buf)?;
+                } else if b < 0x20_u8 {
+                    return Err(mk_err(p, UnexpectedChar, &"unescaped control character"));
+                } else {
+                    buf.push_byte(b);
+                    advance(p);
+                }
+            }
+        }
+    }
+}
+
+fn parse_escape(p: &mut Parser, out: &mut Text) -> Result<(), JsonError> {
+    match peek(p) {
+        None => Err(mk_err(p, UnexpectedEof, &"incomplete escape")),
+        Some(b) => {
+            advance(p);
+            match b {
+                0x22_u8 => { out.push_byte(0x22_u8); Ok(()) }   // \"
+                0x5C_u8 => { out.push_byte(0x5C_u8); Ok(()) }   // \\
+                0x2F_u8 => { out.push_byte(0x2F_u8); Ok(()) }   // \/
+                0x62_u8 => { out.push_byte(0x08_u8); Ok(()) }   // \b
+                0x66_u8 => { out.push_byte(0x0C_u8); Ok(()) }   // \f
+                0x6E_u8 => { out.push_byte(0x0A_u8); Ok(()) }   // \n
+                0x72_u8 => { out.push_byte(0x0D_u8); Ok(()) }   // \r
+                0x74_u8 => { out.push_byte(0x09_u8); Ok(()) }   // \t
+                0x75_u8 => parse_unicode_escape(p, out),        // \uXXXX
+                _ => Err(mk_err(p, InvalidEscape, &"unknown escape")),
+            }
+        }
+    }
+}
+
+fn parse_unicode_escape(p: &mut Parser, out: &mut Text) -> Result<(), JsonError> {
+    let cp = parse_hex4(p)?;
+    // Surrogate pair handling: high surrogate must be followed by `\u`
+    // then low surrogate. Unpaired surrogates are rejected.
+    if cp >= 0xD800 && cp <= 0xDBFF {
+        // High surrogate — expect `\uXXXX` follow-up.
+        expect_byte(p, 0x5C_u8, &"expected low surrogate after high surrogate")?;
+        expect_byte(p, 0x75_u8, &"expected '\\u' for low surrogate")?;
+        let low = parse_hex4(p)?;
+        if low < 0xDC00 || low > 0xDFFF {
+            return Err(mk_err(p, InvalidUnicode, &"invalid low surrogate"));
+        }
+        let combined = 0x10000 + ((cp - 0xD800) * 0x400) + (low - 0xDC00);
+        push_utf8(out, combined);
+        Ok(())
+    } else if cp >= 0xDC00 && cp <= 0xDFFF {
+        Err(mk_err(p, InvalidUnicode, &"unpaired low surrogate"))
+    } else {
+        push_utf8(out, cp);
+        Ok(())
+    }
+}
+
+fn parse_hex4(p: &mut Parser) -> Result<Int, JsonError> {
+    let mut v = 0;
+    let mut i = 0;
+    while i < 4 {
+        match peek(p) {
+            None => return Err(mk_err(p, UnexpectedEof, &"short unicode escape")),
+            Some(b) => {
+                let d = hex_digit(b);
+                match d {
+                    Some(n) => { v = v * 16 + n; advance(p); }
+                    None => return Err(mk_err(p, InvalidUnicode, &"non-hex in \\u escape")),
+                }
+            }
+        }
+        i = i + 1;
+    }
+    Ok(v)
+}
+
+fn hex_digit(b: Byte) -> Maybe<Int> {
+    if b >= 0x30_u8 && b <= 0x39_u8 {
+        Some((b - 0x30_u8) as Int)
+    } else if b >= 0x41_u8 && b <= 0x46_u8 {
+        Some((b - 0x41_u8 + 10) as Int)
+    } else if b >= 0x61_u8 && b <= 0x66_u8 {
+        Some((b - 0x61_u8 + 10) as Int)
+    } else {
+        None
+    }
+}
+
+// Encode a Unicode code point as UTF-8 into `out`.
+fn push_utf8(out: &mut Text, cp: Int) {
+    if cp < 0x80 {
+        out.push_byte(cp as Byte);
+    } else if cp < 0x800 {
+        out.push_byte((0xC0 | (cp >> 6)) as Byte);
+        out.push_byte((0x80 | (cp & 0x3F)) as Byte);
+    } else if cp < 0x10000 {
+        out.push_byte((0xE0 | (cp >> 12)) as Byte);
+        out.push_byte((0x80 | ((cp >> 6) & 0x3F)) as Byte);
+        out.push_byte((0x80 | (cp & 0x3F)) as Byte);
+    } else {
+        out.push_byte((0xF0 | (cp >> 18)) as Byte);
+        out.push_byte((0x80 | ((cp >> 12) & 0x3F)) as Byte);
+        out.push_byte((0x80 | ((cp >> 6) & 0x3F)) as Byte);
+        out.push_byte((0x80 | (cp & 0x3F)) as Byte);
+    }
+}
+
+fn parse_number(p: &mut Parser) -> Result<JsonValue, JsonError> {
+    let start = p.pos;
+    // Optional leading minus.
+    if peek(p) == Some(0x2D_u8) { advance(p); }
+    // Integer part.
+    let int_start = p.pos;
+    match peek(p) {
+        Some(0x30_u8) => { advance(p); }  // '0' — no further leading digits
+        Some(b) if b >= 0x31_u8 && b <= 0x39_u8 => {
+            advance(p);
+            while is_digit(peek(p)) { advance(p); }
+        }
+        _ => return Err(mk_err(p, InvalidNumber, &"expected digit")),
+    }
+    let int_end = p.pos;
+    let mut is_float = false;
+    // Fraction.
+    if peek(p) == Some(0x2E_u8) {
+        is_float = true;
+        advance(p);
+        if !is_digit(peek(p)) {
+            return Err(mk_err(p, InvalidNumber, &"expected digit after '.'"));
+        }
+        while is_digit(peek(p)) { advance(p); }
+    }
+    // Exponent.
+    if peek(p) == Some(0x65_u8) || peek(p) == Some(0x45_u8) {
+        is_float = true;
+        advance(p);
+        if peek(p) == Some(0x2B_u8) || peek(p) == Some(0x2D_u8) { advance(p); }
+        if !is_digit(peek(p)) {
+            return Err(mk_err(p, InvalidNumber, &"expected digit in exponent"));
+        }
+        while is_digit(peek(p)) { advance(p); }
+    }
+    let slice = p.bytes.slice(start, p.pos);
+    let repr = Text.from_utf8_unchecked(slice);
+    if is_float {
+        match repr.parse_float() {
+            Some(f) => Ok(JsonFloat(f)),
+            None    => Err(mk_err(p, InvalidNumber, &"float out of range")),
+        }
+    } else {
+        // Integer path: attempt Int parse (Verum Int is 64-bit). On overflow,
+        // fall back to Float to preserve precision where possible.
+        match repr.parse_int() {
+            Some(i) => Ok(JsonInt(i)),
+            None => match repr.parse_float() {
+                Some(f) => Ok(JsonFloat(f)),
+                None    => Err(mk_err(p, InvalidNumber, &"integer out of range")),
+            },
+        }
+    }
+}
+
+fn is_digit(b: Maybe<Byte>) -> Bool {
+    match b {
+        Some(c) => c >= 0x30_u8 && c <= 0x39_u8,
+        None => false,
+    }
+}
+
+// =============================================================================
+// Serializer
+// =============================================================================
+
+// Compact single-line output. Use this for wire formats / storage.
+public fn stringify(value: &JsonValue) -> Text {
+    let mut out = Text.new();
+    emit(value, &mut out);
+    out
+}
+
+// Pretty-printed output with 2-space indentation. Use this for logs / files
+// meant to be read by humans.
+public fn stringify_pretty(value: &JsonValue) -> Text {
+    let mut out = Text.new();
+    emit_pretty(value, &mut out, 0);
+    out
+}
+
+fn emit(value: &JsonValue, out: &mut Text) {
+    match value {
+        JsonNull       => out.push_str("null"),
+        JsonBool(b)    => if *b { out.push_str("true"); } else { out.push_str("false"); },
+        JsonInt(i)     => out.push_str(&i.to_text()),
+        JsonFloat(f)   => out.push_str(&f.to_text()),
+        JsonString(s)  => emit_string(s, out),
+        JsonArray(a)   => {
+            out.push_byte(0x5B_u8);
+            let mut first = true;
+            for v in a.iter() {
+                if !first { out.push_byte(0x2C_u8); }
+                emit(v, out);
+                first = false;
+            }
+            out.push_byte(0x5D_u8);
+        }
+        JsonObject(o)  => {
+            out.push_byte(0x7B_u8);
+            let mut first = true;
+            for (k, v) in o.iter() {
+                if !first { out.push_byte(0x2C_u8); }
+                emit_string(k, out);
+                out.push_byte(0x3A_u8);
+                emit(v, out);
+                first = false;
+            }
+            out.push_byte(0x7D_u8);
+        }
+    }
+}
+
+fn emit_pretty(value: &JsonValue, out: &mut Text, depth: Int) {
+    match value {
+        JsonArray(a) => {
+            if a.is_empty() {
+                out.push_str("[]");
+            } else {
+                out.push_byte(0x5B_u8);
+                out.push_byte(0x0A_u8);
+                let mut first = true;
+                for v in a.iter() {
+                    if !first { out.push_str(",\n"); }
+                    indent(out, depth + 1);
+                    emit_pretty(v, out, depth + 1);
+                    first = false;
+                }
+                out.push_byte(0x0A_u8);
+                indent(out, depth);
+                out.push_byte(0x5D_u8);
+            }
+        }
+        JsonObject(o) => {
+            if o.is_empty() {
+                out.push_str("{}");
+            } else {
+                out.push_byte(0x7B_u8);
+                out.push_byte(0x0A_u8);
+                let mut first = true;
+                for (k, v) in o.iter() {
+                    if !first { out.push_str(",\n"); }
+                    indent(out, depth + 1);
+                    emit_string(k, out);
+                    out.push_str(": ");
+                    emit_pretty(v, out, depth + 1);
+                    first = false;
+                }
+                out.push_byte(0x0A_u8);
+                indent(out, depth);
+                out.push_byte(0x7D_u8);
+            }
+        }
+        _ => emit(value, out),
+    }
+}
+
+fn indent(out: &mut Text, depth: Int) {
+    let mut i = 0;
+    while i < depth {
+        out.push_str("  ");
+        i = i + 1;
+    }
+}
+
+fn emit_string(s: &Text, out: &mut Text) {
+    out.push_byte(0x22_u8);
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == 0x22_u8 {
+            out.push_str("\\\"");
+        } else if b == 0x5C_u8 {
+            out.push_str("\\\\");
+        } else if b == 0x08_u8 {
+            out.push_str("\\b");
+        } else if b == 0x09_u8 {
+            out.push_str("\\t");
+        } else if b == 0x0A_u8 {
+            out.push_str("\\n");
+        } else if b == 0x0C_u8 {
+            out.push_str("\\f");
+        } else if b == 0x0D_u8 {
+            out.push_str("\\r");
+        } else if b < 0x20_u8 {
+            // Control character — emit as \u00XX.
+            out.push_str("\\u00");
+            out.push_byte(hex_char((b >> 4) as Int));
+            out.push_byte(hex_char((b & 0x0F_u8) as Int));
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out.push_byte(0x22_u8);
+}
+
+fn hex_char(n: Int) -> Byte {
+    if n < 10 {
+        (0x30 + n) as Byte
+    } else {
+        (0x61 + n - 10) as Byte
+    }
+}
