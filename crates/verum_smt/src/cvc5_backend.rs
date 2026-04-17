@@ -49,7 +49,11 @@
 //! nonlinear arithmetic. Refinement predicates are translated to SMT-LIB2 and checked
 //! for satisfiability. Supports all five refinement binding forms.
 
+// `CStr`, `CString`, `Instant` are retained via `#[allow(unused_imports)]`
+// for future cvc5 FFI plumbing — the backend is half-wired today.
+#[allow(unused_imports)]
 use std::ffi::{CStr, CString};
+#[allow(unused_imports)]
 use std::time::Instant;
 
 use verum_common::{List, Map, Maybe, Text};

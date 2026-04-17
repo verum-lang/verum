@@ -4369,8 +4369,12 @@ impl VbcCodegen {
             } else {
                 // Create new library entry
                 let lib_id = FfiLibraryId(self.ffi_libraries.len() as u16);
-                // Determine platform from current target config
-                let platform = self.get_current_ffi_platform();
+                // Tag the platform by the library NAME, not the host target.
+                // `@ffi("kernel32.dll")` is a Windows library even when we
+                // compile on macOS. Without this, the runtime library-loader
+                // can't skip cross-platform libraries and ends up trying to
+                // dlopen `kernel32.dll` on Darwin (prior failure mode).
+                let platform = FfiPlatform::from_library_name(lib_name);
                 self.ffi_libraries.push(FfiLibrary {
                     name: StringId(0), // Will be remapped in build_module
                     platform,
@@ -4717,8 +4721,12 @@ impl VbcCodegen {
             } else {
                 // Create new library entry
                 let lib_id = FfiLibraryId(self.ffi_libraries.len() as u16);
-                // Determine platform from current target config
-                let platform = self.get_current_ffi_platform();
+                // Tag the platform by the library NAME, not the host target.
+                // `@ffi("kernel32.dll")` is a Windows library even when we
+                // compile on macOS. Without this, the runtime library-loader
+                // can't skip cross-platform libraries and ends up trying to
+                // dlopen `kernel32.dll` on Darwin (prior failure mode).
+                let platform = FfiPlatform::from_library_name(lib_name);
                 self.ffi_libraries.push(FfiLibrary {
                     name: StringId(0), // Will be remapped in build_module
                     platform,

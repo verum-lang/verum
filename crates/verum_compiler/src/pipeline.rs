@@ -7858,7 +7858,10 @@ impl<'s> CompilationPipeline<'s> {
         // Create tier analysis configuration based on [runtime].cbgr_mode.
         // "managed" → disable promotion (nothing can be promoted to checked).
         // "checked" / "mixed" → full analysis.
-        let enable_promotion = cbgr_mode != "managed";
+        // (enable_promotion would gate tier promotion if the analyzer API
+        //  accepted it; TierAnalysisConfig does not currently expose a
+        //  flag for it, so we record the decision here for documentation.)
+        let _enable_promotion = cbgr_mode != "managed";
         let config = TierAnalysisConfig {
             confidence_threshold: 0.95,
             analyze_async_boundaries: true,
@@ -10980,7 +10983,7 @@ impl<'s> CompilationPipeline<'s> {
         // This resolves CallG instructions to direct Call instructions.
         info!("  Monomorphizing generic functions");
         let vbc_module = {
-            let mut mono = crate::phases::VbcMonomorphizationPhase::new();
+            let mono = crate::phases::VbcMonomorphizationPhase::new();
             let mono = if !self.session.language_features().codegen.monomorphization_cache {
                 mono.without_cache()
             } else { mono };

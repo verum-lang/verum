@@ -2378,21 +2378,87 @@ impl Executor {
         };
 
         // --- Phase B: Run the AOT binary as a subprocess with a timeout ---
+        //
+        // Historical footgun: using `Command::output()` + `tokio::time::timeout()`
+        // leaks the OS process on timeout — the future is dropped, but the
+        // spawned child is not killed. The orphan keeps CPU until it exits
+        // on its own (which, for hanging concurrency tests, is "never").
+        //
+        // We now:
+        //   1. Spawn via a dedicated process group so we can signal the
+        //      whole group (catches grandchildren the test might spawn).
+        //   2. Race `child.wait()` against `tokio::time::sleep()` in a
+        //      `select!`; kill the group on timeout; wait briefly for exit.
+        //   3. `kill_on_drop(true)` is a belt-and-braces guard in case the
+        //      function is cancelled for any other reason.
         let aot_timeout = Duration::from_secs(30);
-        let child = Command::new(&exe_path)
-            .stdout(Stdio::piped())
+        let mut cmd = Command::new(&exe_path);
+        cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output();
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        {
+            // Start the child in its own process group (pgid == child pid).
+            // `process_group(0)` is a tokio-process convenience for
+            // `setpgid(0, 0)` in the child before exec.
+            cmd.process_group(0);
+        }
 
-        let output = match timeout(aot_timeout, child).await {
-            Ok(result) => result
-                .map_err(|e| format!("Failed to execute AOT binary {}: {}", exe_path.display(), e))?,
-            Err(_) => return Err("AOT binary execution timed out (30s)".to_string()),
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn AOT binary {}: {}", exe_path.display(), e))?;
+        let child_pid = child.id();
+
+        let mut stdout_handle = child.stdout.take();
+        let mut stderr_handle = child.stderr.take();
+
+        let (timed_out, exit_code) = tokio::select! {
+            result = child.wait() => {
+                match result {
+                    Ok(status) => (false, status.code().unwrap_or(-1)),
+                    Err(e) => return Err(format!("AOT binary wait failed: {}", e)),
+                }
+            }
+            _ = tokio::time::sleep(aot_timeout) => {
+                // Kill the entire process group so any grandchildren
+                // spawned by the test binary are also cleaned up.
+                #[cfg(unix)]
+                if let Some(pid) = child_pid {
+                    // SAFETY: passing a negative pid to kill(2) signals the
+                    // entire process group with that |pid|. The group was
+                    // created via `process_group(0)` above, so the group id
+                    // equals the child's pid.
+                    unsafe {
+                        libc::kill(-(pid as i32), libc::SIGKILL);
+                    }
+                }
+                #[cfg(not(unix))]
+                let _ = child.start_kill();
+
+                // Give the group a brief window to terminate; if kill_on_drop
+                // has to pick it up, that's fine.
+                let _ = tokio::time::timeout(Duration::from_millis(500), child.wait()).await;
+                let _ = std::fs::remove_file(&exe_path);
+                return Err(format!(
+                    "AOT binary execution timed out ({}s)",
+                    aot_timeout.as_secs()
+                ));
+            }
         };
+        let _ = timed_out;
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let exit_code = output.status.code().unwrap_or(-1);
+        let mut stdout_buf = Vec::new();
+        let mut stderr_buf = Vec::new();
+        if let Some(ref mut h) = stdout_handle {
+            use tokio::io::AsyncReadExt;
+            let _ = h.read_to_end(&mut stdout_buf).await;
+        }
+        if let Some(ref mut h) = stderr_handle {
+            use tokio::io::AsyncReadExt;
+            let _ = h.read_to_end(&mut stderr_buf).await;
+        }
+        let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
+        let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
 
         // Clean up the AOT binary to avoid disk clutter
         let _ = std::fs::remove_file(&exe_path);
@@ -2520,14 +2586,22 @@ impl Executor {
         cmd.args(args.iter().map(|t| t.as_str()))
             .current_dir(&self.config.work_dir)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
 
         // Add environment variables
         for (key, value) in &self.config.env {
             cmd.env(key.as_str(), value.as_str());
         }
 
-        // Enforce per-process memory limit (2GB) to prevent OOM
+        // Start the child in its own process group. Without this, a test
+        // binary that spawns grandchildren (e.g. `verum run --aot` compiling
+        // and exec'ing a native binary) leaves the grandchild reparented to
+        // init/launchd on timeout — the classic "zombie Verum e2e process"
+        // bug. With its own pgid, we can signal the entire group below.
+        #[cfg(unix)]
+        cmd.process_group(0);
+
         // Enforce per-process memory limit (2GB) to prevent OOM.
         // On Linux, RLIMIT_AS limits virtual address space.
         // On macOS, RLIMIT_AS is ignored; use RLIMIT_RSS instead (advisory but
@@ -2566,6 +2640,7 @@ impl Executor {
         // Wait with timeout, killing the process if it exceeds the limit
         let timeout_duration = Duration::from_millis(timeout_ms);
         let mut child = child;
+        let child_pid = child.id();
 
         // Take ownership of stdout/stderr handles so we can read them even after timeout
         let mut stdout_handle = child.stdout.take();
@@ -2606,12 +2681,29 @@ impl Executor {
                 }
             }
             _ = tokio::time::sleep(timeout_duration) => {
-                // Timeout fired - kill the process immediately
-                if let Err(e) = child.kill().await {
+                // Timeout fired. Kill the entire process group so any
+                // grandchildren the test spawned (classic case: verum run
+                // --aot compiles and execs a native binary) are reaped
+                // along with the immediate child. Without group-kill the
+                // grandchild gets reparented to init/launchd and spins
+                // forever — observed as persistent-across-sessions
+                // orphans in `ps aux`.
+                #[cfg(unix)]
+                if let Some(pid) = child_pid {
+                    // SAFETY: kill(2) with a negative pid signals the
+                    // process group whose pgid is |pid|. We created that
+                    // group above via `process_group(0)`, so pgid ==
+                    // child pid.
+                    unsafe {
+                        libc::kill(-(pid as i32), libc::SIGKILL);
+                    }
+                }
+                #[cfg(not(unix))]
+                if let Err(e) = child.start_kill() {
                     eprintln!("[vtest] WARNING: Failed to kill timed-out process: {}", e);
                 }
 
-                // Wait briefly for process to terminate
+                // Wait briefly for process to terminate.
                 let _ = tokio::time::timeout(
                     Duration::from_millis(500),
                     child.wait()

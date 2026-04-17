@@ -41,6 +41,9 @@ use std::time::Instant;
 
 use verum_common::{List, Map, Maybe};
 
+// Aliased for prospective use by portfolio backends; kept for API
+// stability across crates that `use backend_switcher::BackendSmtBackend`.
+#[allow(unused_imports)]
 use crate::backend_trait::SmtBackend as BackendSmtBackend;
 use crate::cvc5_backend::{Cvc5Backend, Cvc5Config};
 use crate::solver::{SmtBackend, SmtContext, Z3Backend};

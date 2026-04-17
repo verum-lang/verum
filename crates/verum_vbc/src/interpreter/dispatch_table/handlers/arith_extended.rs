@@ -538,15 +538,24 @@ pub(in super::super) fn handle_arith_extended(state: &mut InterpreterState) -> I
 
             let src = state.get_reg(src_reg);
 
-            eprintln!("[DEBUG PolyAbs] dst={:?} src_reg={:?} is_float={} is_int={}",
-                dst, src_reg, src.is_float(), src.is_int());
+            // (trace gated on VBC_POLY_TRACE — unconditional eprintln! here
+            // previously polluted every program's stderr on every abs().)
+            let trace = std::env::var_os("VBC_POLY_TRACE").is_some();
+            if trace {
+                eprintln!("[DEBUG PolyAbs] dst={:?} src_reg={:?} is_float={} is_int={}",
+                    dst, src_reg, src.is_float(), src.is_int());
+            }
 
             let result = if src.is_float() {
-                eprintln!("[DEBUG PolyAbs] Float path: {} -> {}", src.as_f64(), src.as_f64().abs());
+                if trace {
+                    eprintln!("[DEBUG PolyAbs] Float path: {} -> {}", src.as_f64(), src.as_f64().abs());
+                }
                 Value::from_f64(src.as_f64().abs())
             } else {
                 // Use wrapping_abs to handle MIN value correctly
-                eprintln!("[DEBUG PolyAbs] Int path: {} -> {}", src.as_i64(), src.as_i64().wrapping_abs());
+                if trace {
+                    eprintln!("[DEBUG PolyAbs] Int path: {} -> {}", src.as_i64(), src.as_i64().wrapping_abs());
+                }
                 Value::from_i64(src.as_i64().wrapping_abs())
             };
             state.set_reg(dst, result);

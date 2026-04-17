@@ -349,10 +349,23 @@ impl FfiRuntime {
     }
 
     /// Loads all libraries required by a module.
+    ///
+    /// Libraries tagged with a specific platform (Darwin / Linux / Windows /
+    /// FreeBSD / Ios / Android) are only loaded when the current target OS
+    /// matches. Cross-platform (`Any`) libraries are always loaded. Without
+    /// this filter, running e.g. a macOS build would try to `dlopen("kernel32.dll")`
+    /// and fail with the confusing message
+    /// `library 'kernel32.dll' not found: dlopen(libkernel32.dll.B.dylib, ...)`.
     pub fn load_module_libraries(&mut self, module: &VbcModule) -> Result<(), FfiError> {
         for (idx, lib) in module.ffi_libraries.iter().enumerate() {
             let idx = idx as u16;
             if self.libraries.contains_key(&idx) {
+                continue;
+            }
+
+            // Skip libraries gated to a different platform. An entry with
+            // `FfiPlatform::Any` always matches.
+            if !lib.platform.matches_current() {
                 continue;
             }
 

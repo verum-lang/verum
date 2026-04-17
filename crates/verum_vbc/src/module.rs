@@ -1088,6 +1088,62 @@ impl FfiPlatform {
             Self::Android => cfg!(target_os = "android"),
         }
     }
+
+    /// Infer the platform an FFI library targets from its name.
+    ///
+    /// Used when the codegen sees `@ffi("kernel32.dll")` or
+    /// `@ffi("libSystem.B.dylib")` and needs to tag the library with the
+    /// platform it actually belongs to — rather than blindly tagging every
+    /// library with the current compilation target. Without this, every
+    /// library ends up marked as the compilation host's platform, so the
+    /// runtime `load_module_libraries` filter can't skip
+    /// cross-platform libraries (e.g. `kernel32.dll` on macOS).
+    ///
+    /// Falls back to `Any` when the name has no obvious platform
+    /// signature — correct for genuinely cross-platform libraries and
+    /// user-provided `@ffi("mylib")` names.
+    pub fn from_library_name(name: &str) -> Self {
+        // Lowercase for matching while preserving the original for lookup.
+        let lower = name.to_ascii_lowercase();
+
+        // Windows: `.dll` extension, or well-known Win32 module names.
+        if lower.ends_with(".dll")
+            || lower == "kernel32"
+            || lower == "ntdll"
+            || lower == "user32"
+            || lower == "ws2_32"
+            || lower == "winsock2"
+            || lower == "advapi32"
+            || lower == "gdi32"
+        {
+            return Self::Windows;
+        }
+
+        // macOS / Darwin: `.dylib`, Mach-O frameworks, libSystem, etc.
+        if lower.ends_with(".dylib")
+            || lower.ends_with(".framework")
+            || lower.starts_with("libsystem")
+            || lower.contains("libsystem.b.dylib")
+            || lower.starts_with("libc++")
+            || lower == "corefoundation"
+            || lower == "security"
+            || lower == "systemconfiguration"
+            || lower.starts_with("/system/library/")
+        {
+            return Self::Darwin;
+        }
+
+        // Linux / ELF: `.so` extension.
+        if lower.ends_with(".so") || lower.contains(".so.") {
+            return Self::Linux;
+        }
+
+        // Neutral / unknown — let it be loaded on any platform. This matches
+        // user-written `@ffi("mylib")` where they expect the platform loader
+        // to map the name appropriately (Linux: libmylib.so, Darwin:
+        // libmylib.dylib, Windows: mylib.dll).
+        Self::Any
+    }
 }
 
 /// Calling convention for FFI calls.
