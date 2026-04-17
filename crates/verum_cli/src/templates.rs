@@ -25,7 +25,7 @@ fn main() {{
 
     // Semantic types: List (not Vec), Text (not String), Maybe (not Option)
     let items: List<Int> = [1, 2, 3, 4, 5];
-    let sum = items.fold(0, fn(acc, x) => acc + x);
+    let sum = items.fold(0, |acc, x| acc + x);
     print(f"Sum: {{sum}}");
 }}
 "#,
@@ -44,7 +44,7 @@ fn main() {{
 
     // Systems profile: manual memory control available
     let data = Heap(List.from([1, 2, 3, 4, 5]));
-    let sum = data.fold(0, fn(acc, x) => acc + x);
+    let sum = data.fold(0, |acc, x| acc + x);
     print(f"Sum: {{sum}}");
 
     // Three-tier references:
