@@ -6303,6 +6303,14 @@ impl VbcCodegen {
                 // For reference types, extract the inner type name
                 self.extract_type_name(inner)
             }
+            TypeKind::Slice(inner) => {
+                // `&[T]` / `[T]` — return the bracketed form so downstream
+                // method-dispatch code (which checks `starts_with('[')` to
+                // route to the Slice.* implementation) sees a slice type.
+                let inner_name = self.extract_type_name(inner)
+                    .unwrap_or_else(|| "T".to_string());
+                Some(format!("[{}]", inner_name))
+            }
             _ => None,
         }
     }

@@ -4579,6 +4579,54 @@ impl VbcCodegen {
             .compile_expr(receiver)?
             .ok_or_else(|| CodegenError::internal("method receiver has no value"))?;
 
+        // Intercept `[T].slice(start, end)` — route straight to the
+        // CBGR subop so we skip the compiled stdlib body entirely.
+        // That body panics inside Value::as_i64 when it receives a
+        // FatRef receiver (assertion macro expansion produces int
+        // decoding that mis-tags the ref), and even when fixed would
+        // add unnecessary call overhead for a primitive operation.
+        if method.name == "slice" && args.len() == 2 {
+            let receiver_type = self
+                .extract_expr_type_name(receiver)
+                .as_deref()
+                .map(VbcCodegen::strip_generic_args)
+                .map(str::to_string);
+            let is_slice = receiver_type
+                .as_deref()
+                .map(|t| t.starts_with('['))
+                .unwrap_or(false);
+            if is_slice {
+                let start_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("slice.start has no value"))?;
+                let end_reg = self
+                    .compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("slice.end has no value"))?;
+                let result = self.ctx.alloc_temp();
+                let mut operands = Vec::with_capacity(8);
+                let push_reg = |operands: &mut Vec<u8>, r: Reg| {
+                    if r.is_short() {
+                        operands.push(r.0 as u8);
+                    } else {
+                        operands.push(0x80 | ((r.0 >> 8) as u8));
+                        operands.push(r.0 as u8);
+                    }
+                };
+                push_reg(&mut operands, result);
+                push_reg(&mut operands, receiver_reg);
+                push_reg(&mut operands, start_reg);
+                push_reg(&mut operands, end_reg);
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: crate::instruction::CbgrSubOpcode::SliceSubslice as u8,
+                    operands,
+                });
+                self.ctx.free_temp(receiver_reg);
+                self.ctx.free_temp(start_reg);
+                self.ctx.free_temp(end_reg);
+                return Ok(Some(result));
+            }
+        }
+
         // Intercept `Text.as_bytes()` — the stdlib implementation reads
         // `self.ptr` via GetF, but the runtime representation of Text
         // (NaN-boxed small string or heap `[header][len:u64][bytes...]`)

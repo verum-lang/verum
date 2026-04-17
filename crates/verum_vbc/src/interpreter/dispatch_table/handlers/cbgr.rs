@@ -898,14 +898,29 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
             let slice = state.get_reg(slice_reg);
             let index = state.get_reg(index_reg).as_i64() as usize;
 
+            // Respect fat_ref.reserved as the element stride: 1/2/4/8 for
+            // raw integer arrays (bytes included) and 0 for NaN-boxed
+            // Value arrays. A fixed `*const Value` read truncates byte
+            // slices to the first element's tag bits.
             let value = if slice.is_fat_ref() {
                 let fat_ref = slice.as_fat_ref();
                 let len = fat_ref.len() as usize;
                 if index < len {
-                    // Read element from memory at offset
-                    let ptr = fat_ref.ptr() as *const Value;
-                    // SAFETY: Index is bounds-checked above
-                    unsafe { *ptr.add(index) }
+                    let base = fat_ref.ptr();
+                    match fat_ref.reserved {
+                        0 => unsafe { *(base as *const Value).add(index) },
+                        1 => Value::from_i64(unsafe { *base.add(index) } as i64),
+                        2 => Value::from_i64(unsafe {
+                            std::ptr::read_unaligned(base.add(index * 2) as *const i16)
+                        } as i64),
+                        4 => Value::from_i64(unsafe {
+                            std::ptr::read_unaligned(base.add(index * 4) as *const i32)
+                        } as i64),
+                        8 => Value::from_i64(unsafe {
+                            std::ptr::read_unaligned(base.add(index * 8) as *const i64)
+                        }),
+                        _ => unsafe { *(base as *const Value).add(index) },
+                    }
                 } else {
                     return Err(crate::interpreter::InterpreterError::IndexOutOfBounds {
                         index: index as i64,
@@ -920,8 +935,8 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
         }
 
         Some(CbgrSubOpcode::SliceGetUnchecked) => {
-            // Get element at index from slice (unchecked)
-            // Format: dst:reg, slice_ref:reg, index:reg
+            // Get element at index from slice (unchecked). Same stride
+            // dispatch as SliceGet, without the bounds check.
             let dst = read_reg(state)?;
             let slice_reg = read_reg(state)?;
             let index_reg = read_reg(state)?;
@@ -929,12 +944,23 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
             let slice = state.get_reg(slice_reg);
             let index = state.get_reg(index_reg).as_i64() as usize;
 
-            // SAFETY: Unchecked access - assumes index is valid
             let value = if slice.is_fat_ref() {
                 let fat_ref = slice.as_fat_ref();
-                let ptr = fat_ref.ptr() as *const Value;
-                // SAFETY: No bounds check - caller must ensure index is valid
-                unsafe { *ptr.add(index) }
+                let base = fat_ref.ptr();
+                match fat_ref.reserved {
+                    0 => unsafe { *(base as *const Value).add(index) },
+                    1 => Value::from_i64(unsafe { *base.add(index) } as i64),
+                    2 => Value::from_i64(unsafe {
+                        std::ptr::read_unaligned(base.add(index * 2) as *const i16)
+                    } as i64),
+                    4 => Value::from_i64(unsafe {
+                        std::ptr::read_unaligned(base.add(index * 4) as *const i32)
+                    } as i64),
+                    8 => Value::from_i64(unsafe {
+                        std::ptr::read_unaligned(base.add(index * 8) as *const i64)
+                    }),
+                    _ => unsafe { *(base as *const Value).add(index) },
+                }
             } else {
                 Value::nil()
             };
@@ -954,23 +980,30 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
             let start = state.get_reg(start_reg).as_i64() as u64;
             let end = state.get_reg(end_reg).as_i64() as u64;
 
-            // Create new FatRef with adjusted pointer and length
+            // Create new FatRef with adjusted pointer and length. The
+            // element stride comes from fat_ref.reserved (1/2/4/8 for raw
+            // integers, 0 = NaN-boxed Value) — using a fixed
+            // `sizeof(Value)` here would walk past the end of byte slices
+            // (text.as_bytes(), binary buffers).
             let result = if src.is_fat_ref() {
                 let fat_ref = src.as_fat_ref();
                 let len = fat_ref.len();
                 if start <= end && end <= len {
-                    // Create new FatRef pointing to subslice
-                    let element_size = std::mem::size_of::<Value>();
+                    let element_size = if fat_ref.reserved == 0 {
+                        std::mem::size_of::<Value>()
+                    } else {
+                        fat_ref.reserved as usize
+                    };
                     let new_ptr = unsafe { (fat_ref.ptr() as *const u8).add(start as usize * element_size) };
                     let new_len = end - start;
-                    // Create a new FatRef with updated pointer and length
-                    let new_fat_ref = crate::value::FatRef::new(
+                    let mut new_fat_ref = crate::value::FatRef::new(
                         new_ptr as *mut u8,
                         fat_ref.generation(),
                         fat_ref.epoch(),
                         fat_ref.capabilities(),
                         new_len,
                     );
+                    new_fat_ref.reserved = fat_ref.reserved;
                     Value::from_fat_ref(new_fat_ref)
                 } else {
                     return Err(crate::interpreter::InterpreterError::IndexOutOfBounds {
