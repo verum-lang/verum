@@ -4849,6 +4849,10 @@ impl VbcCodegen {
     }
 
     /// Gets the current FFI platform from target config.
+    /// Reserved for FFI symbol-signature generation; the current
+    /// interpreter path reads `target_os` directly in the FFI dispatcher,
+    /// so this helper is not wired into a caller yet.
+    #[allow(dead_code)]
     fn get_current_ffi_platform(&self) -> FfiPlatform {
         match self.config.target_config.target_os.as_str() {
             "darwin" | "macos" => FfiPlatform::Darwin,

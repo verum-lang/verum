@@ -193,9 +193,15 @@ mod cvc5_sys {
     pub const CVC5_KIND_STORE: c_int = 18;
 }
 
-// When cvc5-ffi is not enabled, provide placeholder types
+// When cvc5-ffi is not enabled, provide placeholder types.
+// The Cvc5Result enum and CVC5_KIND_* constants mirror the real cvc5-sys
+// bindings so downstream code that `match`es on them compiles in both
+// stub and FFI modes. They are legitimately dead in stub mode — the
+// SmtBackendSwitcher routes all goals to Z3 then — and become live only
+// when `--features cvc5-ffi` links real libcvc5.
 #[cfg(not(feature = "cvc5-ffi"))]
 #[allow(non_camel_case_types)]
+#[allow(dead_code)]
 mod cvc5_sys {
     use std::os::raw::{c_int, c_void};
 
@@ -374,7 +380,11 @@ pub enum Cvc5Error {
 /// It requires the `cvc5-ffi` feature to be enabled for actual functionality.
 ///
 /// When `cvc5-ffi` is not enabled, `Cvc5Backend::new()` returns
-/// `Err(Cvc5Error::NotAvailable)`.
+/// `Err(Cvc5Error::NotAvailable)` and the struct fields are unused; they
+/// become live as soon as cvc5-ffi is linked. The `dead_code` allow is
+/// scoped narrowly here rather than crate-wide so unrelated dead code
+/// keeps surfacing as warnings.
+#[allow(dead_code)]
 pub struct Cvc5Backend {
     /// Term manager (context)
     tm: cvc5_sys::cvc5_tm,
@@ -1574,8 +1584,10 @@ impl std::fmt::Debug for Cvc5Term {
     }
 }
 
-/// CVC5 sort wrapper
+/// CVC5 sort wrapper. Field is dead without cvc5-ffi (stub returns
+/// Err(NotAvailable) before any Cvc5Sort is constructed).
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Cvc5Sort {
     raw: cvc5_sys::cvc5_sort,
 }
@@ -1601,7 +1613,8 @@ pub enum Cvc5Value {
     Unknown,
 }
 
-/// Model extractor
+/// Model extractor. Fields are dead without cvc5-ffi.
+#[allow(dead_code)]
 pub struct Cvc5Model {
     solver: cvc5_sys::cvc5_solver,
     tm: cvc5_sys::cvc5_tm,
