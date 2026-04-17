@@ -10242,6 +10242,26 @@ impl VbcCodegen {
             .compile_expr(inner)?
             .ok_or_else(|| CodegenError::internal("await expr has no value"))?;
 
+        // Async fns in the current implementation are not compiled to suspend-
+        // /resume state machines — calling `add(1, 2)` runs the body inline
+        // and returns the value. Only `spawn { … }` produces a real task
+        // handle that requires the runtime poll path.
+        //
+        // The interpreter's `Await` handler tolerates both cases (it pattern-
+        // matches on a sentinel-encoded task ID and falls through to a direct
+        // pass-through otherwise). The AOT lowering, however, dereferences
+        // the value as a pool handle pointer unconditionally, so passing a
+        // direct result (e.g., `42`) SIGSEGVs at runtime.
+        //
+        // Suppress the `Await` opcode when the inner expression is not a
+        // `Spawn`. Most user code (`some_async_fn(x).await`) flows through
+        // this path; `spawn { … }.await` keeps the threaded-await path.
+        let needs_runtime_await = matches!(inner.kind, ExprKind::Spawn { .. });
+
+        if !needs_runtime_await {
+            return Ok(Some(task_reg));
+        }
+
         let result = self.ctx.alloc_temp();
         self.ctx.emit(Instruction::Await {
             dst: result,
