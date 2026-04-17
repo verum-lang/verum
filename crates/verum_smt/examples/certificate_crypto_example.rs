@@ -42,7 +42,7 @@ fn demo_proof_generation() {
     let sum = Int::add(&[&x, &zero]);
 
     // Assert the theorem
-    solver.assert(&Ast::eq(&sum, &x));
+    solver.assert(Ast::eq(&sum, &x));
 
     let start = Instant::now();
     let result = solver.check();
@@ -101,7 +101,7 @@ fn demo_proof_verification() {
     let two = Int::from_i64(2);
     let four = Int::from_i64(4);
     let sum = Int::add(&[&two, &two]);
-    solver.assert(&Ast::eq(&sum, &four));
+    solver.assert(Ast::eq(&sum, &four));
 
     match solver.check() {
         SatResult::Sat => println!("✓ Theorem re-verified independently"),

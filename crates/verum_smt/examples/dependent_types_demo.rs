@@ -41,11 +41,11 @@ fn demo_pi_types() {
     let zero = Int::from_i64(0);
 
     // Precondition: n >= 0 (Nat constraint)
-    solver.assert(&n.ge(&zero));
+    solver.assert(n.ge(&zero));
 
     // Result list length equals n
     let result_len = Int::fresh_const("result_len");
-    solver.assert(&Ast::eq(&result_len, &n));
+    solver.assert(Ast::eq(&result_len, &n));
 
     // Check that the constraint is satisfiable
     match solver.check() {
@@ -71,10 +71,10 @@ fn demo_pi_types() {
 
     // Verify: result_len always equals n
     let solver2 = Solver::new();
-    solver2.assert(&n.ge(&zero));
-    solver2.assert(&Ast::eq(&result_len, &n));
+    solver2.assert(n.ge(&zero));
+    solver2.assert(Ast::eq(&result_len, &n));
     // Try to find counterexample where result_len != n
-    solver2.assert(&Ast::eq(&result_len, &n).not());
+    solver2.assert(Ast::eq(&result_len, &n).not());
 
     match solver2.check() {
         SatResult::Unsat => {
@@ -99,11 +99,11 @@ fn demo_sigma_types() {
     let zero = Int::from_i64(0);
 
     // n must be non-negative
-    solver.assert(&n.ge(&zero));
+    solver.assert(n.ge(&zero));
 
     // Second component: list with length n
     let list_len = Int::fresh_const("list_len");
-    solver.assert(&Ast::eq(&list_len, &n));
+    solver.assert(Ast::eq(&list_len, &n));
 
     // The pair is well-formed
     match solver.check() {
@@ -140,7 +140,7 @@ fn demo_equality_types() {
     let sum = Int::add(&[&two, &two]);
 
     // Assert 2 + 2 = 4
-    solver.assert(&Ast::eq(&sum, &four));
+    solver.assert(Ast::eq(&sum, &four));
 
     match solver.check() {
         SatResult::Sat => {
@@ -153,7 +153,7 @@ fn demo_equality_types() {
     // Reflexivity: x = x
     let x = Int::fresh_const("x");
     let solver2 = Solver::new();
-    solver2.assert(&Ast::eq(&x, &x));
+    solver2.assert(Ast::eq(&x, &x));
 
     match solver2.check() {
         SatResult::Sat => println!("✓ Reflexivity: x = x holds for all x"),
@@ -164,9 +164,9 @@ fn demo_equality_types() {
     let y = Int::fresh_const("y");
     let solver3 = Solver::new();
     // Assume x = y
-    solver3.assert(&Ast::eq(&x, &y));
+    solver3.assert(Ast::eq(&x, &y));
     // Check y = x
-    solver3.assert(&Ast::eq(&y, &x));
+    solver3.assert(Ast::eq(&y, &x));
 
     match solver3.check() {
         SatResult::Sat => println!("✓ Symmetry: x = y implies y = x"),
@@ -188,7 +188,7 @@ fn demo_refinement_types() {
     let zero = Int::from_i64(0);
 
     // Refinement predicate: x > 0
-    solver.assert(&x.gt(&zero));
+    solver.assert(x.gt(&zero));
 
     match solver.check() {
         SatResult::Sat => {
@@ -207,8 +207,8 @@ fn demo_refinement_types() {
     // More complex refinement: { x: Int | 0 < x && x < 100 }
     let solver2 = Solver::new();
     let hundred = Int::from_i64(100);
-    solver2.assert(&x.gt(&zero));
-    solver2.assert(&x.lt(&hundred));
+    solver2.assert(x.gt(&zero));
+    solver2.assert(x.lt(&hundred));
 
     match solver2.check() {
         SatResult::Sat => {
@@ -240,15 +240,15 @@ fn demo_indexed_types() {
     let zero = Int::from_i64(0);
 
     // Both vectors have non-negative length
-    solver.assert(&len_a.ge(&zero));
-    solver.assert(&len_b.ge(&zero));
+    solver.assert(len_a.ge(&zero));
+    solver.assert(len_b.ge(&zero));
 
     // Append operation: Vec<T, n> ++ Vec<T, m> -> Vec<T, n+m>
     let len_result = Int::add(&[&len_a, &len_b]);
 
     // Verify result length
     let expected = Int::fresh_const("expected");
-    solver.assert(&Ast::eq(&expected, &len_result));
+    solver.assert(Ast::eq(&expected, &len_result));
 
     match solver.check() {
         SatResult::Sat => {
@@ -278,13 +278,13 @@ fn demo_indexed_types() {
     let n_plus_one = Int::add(&[&n, &one]);
 
     let solver2 = Solver::new();
-    solver2.assert(&n.ge(&zero));
+    solver2.assert(n.ge(&zero));
 
     // cons : T -> Vec<T, n> -> Vec<T, n+1>
     println!("✓ cons : T -> Vec<T, n> -> Vec<T, n+1> verified");
 
     // head : Vec<T, n+1> -> T (requires n >= 0, i.e., non-empty vector)
-    solver2.assert(&n_plus_one.gt(&zero));
+    solver2.assert(n_plus_one.gt(&zero));
 
     match solver2.check() {
         SatResult::Sat => {

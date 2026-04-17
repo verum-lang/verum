@@ -69,7 +69,7 @@ fn demo_portfolio_solving() {
                     let y_var = Int::from_i64(*y);
                     let sum = Int::add(&[&x_var, &y_var]);
                     let expected_val = Int::from_i64(*expected);
-                    solver.assert(&Ast::eq(&sum, &expected_val));
+                    solver.assert(Ast::eq(&sum, &expected_val));
                 }
 
                 let result = solver.check();
@@ -112,7 +112,7 @@ fn demo_parallel_proofs() {
                 let x = Int::fresh_const("x");
                 let zero = Int::from_i64(0);
                 let sum = Int::add(&[&x, &zero]);
-                solver.assert(&Ast::eq(&sum, &x));
+                solver.assert(Ast::eq(&sum, &x));
                 matches!(solver.check(), SatResult::Sat)
             }),
         ),
@@ -124,7 +124,7 @@ fn demo_parallel_proofs() {
                 let y = Int::fresh_const("y");
                 let xy = Int::add(&[&x, &y]);
                 let yx = Int::add(&[&y, &x]);
-                solver.assert(&Ast::eq(&xy, &yx));
+                solver.assert(Ast::eq(&xy, &yx));
                 matches!(solver.check(), SatResult::Sat)
             }),
         ),
@@ -139,7 +139,7 @@ fn demo_parallel_proofs() {
                 let xy_z = Int::add(&[&xy, &z]);
                 let yz = Int::add(&[&y, &z]);
                 let x_yz = Int::add(&[&x, &yz]);
-                solver.assert(&Ast::eq(&xy_z, &x_yz));
+                solver.assert(Ast::eq(&xy_z, &x_yz));
                 matches!(solver.check(), SatResult::Sat)
             }),
         ),
@@ -186,32 +186,32 @@ fn demo_cube_and_conquer() {
         let x = Int::fresh_const("x");
         let y = Int::fresh_const("y");
         let zero = Int::from_i64(0);
-        s.assert(&x.ge(&zero));
-        s.assert(&y.ge(&zero));
+        s.assert(x.ge(&zero));
+        s.assert(y.ge(&zero));
     }
 
     fn setup_pn(s: &Solver) {
         let x = Int::fresh_const("x");
         let y = Int::fresh_const("y");
         let zero = Int::from_i64(0);
-        s.assert(&x.ge(&zero));
-        s.assert(&y.lt(&zero));
+        s.assert(x.ge(&zero));
+        s.assert(y.lt(&zero));
     }
 
     fn setup_np(s: &Solver) {
         let x = Int::fresh_const("x");
         let y = Int::fresh_const("y");
         let zero = Int::from_i64(0);
-        s.assert(&x.lt(&zero));
-        s.assert(&y.ge(&zero));
+        s.assert(x.lt(&zero));
+        s.assert(y.ge(&zero));
     }
 
     fn setup_nn(s: &Solver) {
         let x = Int::fresh_const("x");
         let y = Int::fresh_const("y");
         let zero = Int::from_i64(0);
-        s.assert(&x.lt(&zero));
-        s.assert(&y.lt(&zero));
+        s.assert(x.lt(&zero));
+        s.assert(y.lt(&zero));
     }
 
     // Cube definitions with function pointers (not closures)

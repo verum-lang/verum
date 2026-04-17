@@ -18,7 +18,7 @@ use verum_smt::{
         TacticHint,
     },
 };
-use verum_common::{Heap, Maybe, Text};
+use verum_common::Heap;
 
 fn main() {
     println!("=== Verum Proof Search and Automation Demo ===\n");
@@ -128,7 +128,7 @@ fn main() {
     let split = ProofTactic::Split;
 
     // Compose tactics
-    let auto_tactic = simplify.then(intro).or_else(split).repeat();
+    let _auto_tactic = simplify.then(intro).or_else(split).repeat();
 
     println!("Auto tactic created: simplify; intro | split; repeat");
     println!("✓ Tactics can be composed sequentially and with alternatives");
@@ -248,7 +248,7 @@ fn create_int_literal(value: i64) -> Expr {
 }
 
 fn create_var(name: &str) -> Expr {
-    use verum_ast::{Ident, Path, PathSegment};
+    use verum_ast::{Ident, Path};
 
     let ident = Ident::new(name, Span::dummy());
     let path = Path::from_ident(ident);

@@ -73,7 +73,7 @@ fn main() {
 
     // Example 5: Cache performance
     println!("Example 5: Cache Performance");
-    for i in 0..100 {
+    for _i in 0..100 {
         let _result = checker.check(&gt, &gte, CheckMode::SyntacticOnly);
     }
 

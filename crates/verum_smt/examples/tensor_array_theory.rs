@@ -47,7 +47,7 @@ fn example_1d_tensor() {
 
     // Verify: tensor[5] == 42
     let solver = Solver::new();
-    solver.assert(&Ast::eq(&retrieved, &val42));
+    solver.assert(Ast::eq(&retrieved, &val42));
 
     match solver.check() {
         SatResult::Sat => println!("✓ Verified: tensor[5] == 42"),
@@ -100,18 +100,17 @@ fn example_bounds_verification() {
     let size = Int::from_i64(10);
 
     // Assert: 0 <= idx < 10 (valid bounds)
-    solver.assert(&idx.ge(&zero));
-    solver.assert(&idx.lt(&size));
+    solver.assert(idx.ge(&zero));
+    solver.assert(idx.lt(&size));
 
     // Check if there exists a valid index
     match solver.check() {
         SatResult::Sat => {
             println!("✓ Valid indices exist in range [0, 10)");
-            if let Some(model) = solver.get_model() {
-                if let Some(val) = model.eval(&idx, true) {
+            if let Some(model) = solver.get_model()
+                && let Some(val) = model.eval(&idx, true) {
                     println!("  Example valid index: {}", val);
                 }
-            }
         }
         SatResult::Unsat => println!("✗ No valid indices (impossible)"),
         SatResult::Unknown => println!("? Solver returned unknown"),
@@ -126,16 +125,15 @@ fn example_bounds_verification() {
     let too_large = bad_idx.ge(&size);
 
     // Use z3's Bool or
-    solver2.assert(&z3::ast::Bool::or(&[&too_small, &too_large]));
+    solver2.assert(z3::ast::Bool::or(&[&too_small, &too_large]));
 
     match solver2.check() {
         SatResult::Sat => {
             println!("✓ Out-of-bounds indices exist (correctly detected)");
-            if let Some(model) = solver2.get_model() {
-                if let Some(val) = model.eval(&bad_idx, true) {
+            if let Some(model) = solver2.get_model()
+                && let Some(val) = model.eval(&bad_idx, true) {
                     println!("  Example out-of-bounds index: {}", val);
                 }
-            }
         }
         _ => println!("? Unexpected result"),
     }
@@ -161,13 +159,13 @@ fn example_matmul_constraint() {
     let zero = Int::from_i64(0);
 
     // All dimensions must be positive
-    solver.assert(&m.gt(&zero));
-    solver.assert(&n.gt(&zero));
-    solver.assert(&p.gt(&zero));
-    solver.assert(&q.gt(&zero));
+    solver.assert(m.gt(&zero));
+    solver.assert(n.gt(&zero));
+    solver.assert(p.gt(&zero));
+    solver.assert(q.gt(&zero));
 
     // Matmul constraint: n == p
-    solver.assert(&Ast::eq(&n, &p));
+    solver.assert(Ast::eq(&n, &p));
 
     // Result matrix is [m x q]
     println!("Constraint: A[m×n] @ B[p×q] requires n == p");
@@ -207,7 +205,7 @@ fn example_matmul_constraint() {
     let n2 = Int::from_i64(3);
     let p2 = Int::from_i64(5);
 
-    solver2.assert(&Ast::eq(&n2, &p2).not());
+    solver2.assert(Ast::eq(&n2, &p2).not());
 
     match solver2.check() {
         SatResult::Sat => {
