@@ -4952,7 +4952,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vbench"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4993,7 +4993,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "verum_ast"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "bitflags 2.11.0",
  "criterion",
@@ -5008,7 +5008,7 @@ dependencies = [
 
 [[package]]
 name = "verum_cbgr"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "crossbeam",
@@ -5032,7 +5032,7 @@ dependencies = [
 
 [[package]]
 name = "verum_cli"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -5101,7 +5101,7 @@ dependencies = [
 
 [[package]]
 name = "verum_codegen"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5136,7 +5136,7 @@ dependencies = [
 
 [[package]]
 name = "verum_common"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -5148,7 +5148,7 @@ dependencies = [
 
 [[package]]
 name = "verum_compiler"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -5194,7 +5194,7 @@ dependencies = [
 
 [[package]]
 name = "verum_dap"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5206,7 +5206,7 @@ dependencies = [
 
 [[package]]
 name = "verum_diagnostics"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "backtrace",
  "colored",
@@ -5223,7 +5223,7 @@ dependencies = [
 
 [[package]]
 name = "verum_error"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -5240,7 +5240,7 @@ dependencies = [
 
 [[package]]
 name = "verum_fast_parser"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -5253,7 +5253,7 @@ dependencies = [
 
 [[package]]
 name = "verum_integration_tests"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "serde",
@@ -5277,7 +5277,7 @@ dependencies = [
 
 [[package]]
 name = "verum_interactive"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "crossterm",
@@ -5297,7 +5297,7 @@ dependencies = [
 
 [[package]]
 name = "verum_lexer"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "logos",
@@ -5308,7 +5308,7 @@ dependencies = [
 
 [[package]]
 name = "verum_llvm"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitflags 2.11.0",
@@ -5349,7 +5349,7 @@ dependencies = [
 
 [[package]]
 name = "verum_lsp"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "criterion",
@@ -5412,7 +5412,7 @@ dependencies = [
 
 [[package]]
 name = "verum_modules"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "criterion",
@@ -5433,7 +5433,7 @@ dependencies = [
 
 [[package]]
 name = "verum_parser"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -5448,7 +5448,7 @@ dependencies = [
 
 [[package]]
 name = "verum_protocol_types"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "verum_ast",
@@ -5457,7 +5457,7 @@ dependencies = [
 
 [[package]]
 name = "verum_smt"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5497,7 +5497,7 @@ dependencies = [
 
 [[package]]
 name = "verum_syntax"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "pretty_assertions",
  "proptest",
@@ -5517,7 +5517,7 @@ dependencies = [
 
 [[package]]
 name = "verum_toolchain"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -5535,7 +5535,7 @@ dependencies = [
 
 [[package]]
 name = "verum_types"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "dashmap 6.1.0",
@@ -5562,7 +5562,7 @@ dependencies = [
 
 [[package]]
 name = "verum_vbc"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "bincode 1.3.3",
  "bitflags 2.11.0",
@@ -5598,7 +5598,7 @@ dependencies = [
 
 [[package]]
 name = "verum_verification"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5623,7 +5623,7 @@ dependencies = [
 
 [[package]]
 name = "verum_vfuzz"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5656,7 +5656,7 @@ checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "vtest"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "atty",
