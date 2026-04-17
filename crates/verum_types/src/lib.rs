@@ -778,6 +778,7 @@ pub enum TypeError {
         ty: Text,
         method: Text,
         span: verum_ast::span::Span,
+        did_you_mean: Option<Text>,
     },
 
     /// Capability violation - method requires a capability not available in the restricted type.
@@ -2411,14 +2412,21 @@ impl TypeError {
                 builder.build()
             }
 
-            MethodNotFound { ty, method, span } => {
-                let mut builder = DiagnosticBuilder::error().message(format!(
-                    "no method named `{}` found for type `{}`\n  \
-                         help: check method name spelling\n  \
+            MethodNotFound { ty, method, span, did_you_mean } => {
+                let mut msg = format!(
+                    "no method named `{}` found for type `{}`",
+                    method, ty
+                );
+                if let Some(suggestion) = did_you_mean {
+                    msg.push_str(&format!("\n  help: did you mean `{}`?", suggestion));
+                } else {
+                    msg.push_str(
+                        "\n  help: check method name spelling\n  \
                          help: ensure type implements a protocol with this method\n  \
                          help: check available methods in protocol documentation",
-                    method, ty
-                ));
+                    );
+                }
+                let mut builder = DiagnosticBuilder::error().message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }

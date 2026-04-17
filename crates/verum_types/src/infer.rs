@@ -41028,10 +41028,65 @@ impl TypeChecker {
                 return Ok(InferResult::new(Type::Unknown));
             }
 
+            // "Did you mean ...?" — gather method names registered for
+            // any type that matches the receiver's name, then suggest
+            // the closest Levenshtein match. Tolerant matching handles
+            // generic instantiations ("List<Int>" matching "List").
+            let method_str = method.name.as_str();
+            let recv_name = recv_ty.to_text();
+            let recv_str = recv_name.as_str();
+            // "Did you mean ...?" — search two sources:
+            //  1. protocol_checker.method_registry() — built-in/stdlib method signatures
+            //  2. self.inherent_methods — user-defined `implement` blocks
+            // Match by receiver type name, tolerating generic instantiations
+            // ("List<Int>" contains "List"). Then rank candidates by
+            // Levenshtein distance and return the closest (<=3 edits).
+            let did_you_mean: Option<verum_common::Text> = {
+                let mut best: Option<(usize, verum_common::Text)> = None;
+                let consider = |best: &mut Option<(usize, verum_common::Text)>,
+                                m: &verum_common::Text| {
+                    let d = levenshtein_distance(method_str, m.as_str());
+                    if d == 0 || d > 3 { return; }
+                    match best {
+                        Some((bd, _)) if *bd <= d => {}
+                        _ => *best = Some((d, m.clone())),
+                    }
+                };
+                {
+                    let checker = self.protocol_checker.read();
+                    for ((ty_name, m_name), _sig) in checker.method_registry().iter() {
+                        if !recv_str.contains(ty_name.as_str())
+                            && !ty_name.as_str().contains(recv_str) {
+                            continue;
+                        }
+                        consider(&mut best, m_name);
+                    }
+                }
+                {
+                    let inherents = self.inherent_methods.read();
+                    for (ty_name, methods) in inherents.iter() {
+                        if !recv_str.contains(ty_name.as_str())
+                            && !ty_name.as_str().contains(recv_str) {
+                            continue;
+                        }
+                        for (m_name, _scheme) in methods.iter() {
+                            // Strip static-method marker prefix used by the
+                            // inherent methods table.
+                            let bare = m_name
+                                .as_str()
+                                .strip_prefix("$static$")
+                                .unwrap_or(m_name.as_str());
+                            consider(&mut best, &verum_common::Text::from(bare));
+                        }
+                    }
+                }
+                best.map(|(_, n)| n)
+            };
             return Err(TypeError::MethodNotFound {
                 ty: recv_ty.to_text(),
                 method: method.name.as_str().to_text(),
                 span,
+                did_you_mean,
             });
         }
 
@@ -42564,6 +42619,7 @@ impl TypeChecker {
                         ty: self.path_to_string(protocol),
                         method: method_name.clone(),
                         span,
+                        did_you_mean: None,
                     })?;
 
             // Step 3: Extract parameter types from method signature
