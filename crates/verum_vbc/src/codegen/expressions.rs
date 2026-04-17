@@ -4137,76 +4137,118 @@ impl VbcCodegen {
         method: &verum_ast::Ident,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
-        // Intercept Heap.new(value) — must emit CBGR-tracked allocation so methods
-        // like header_generation, is_epoch_valid, raw_ptr work on the returned value.
-        // The stdlib user-defined Heap.new returns a struct that breaks builtin CBGR
-        // introspection methods. By emitting CallM with "Heap" receiver, the interpreter
-        // handles Heap.new as a CBGR allocation (see method_dispatch.rs line 400).
+        // Resolve the receiver as a static type name when the user wrote either
+        // `Foo.method(...)` (bare path) or `Foo<T>.method(...)` (TypeExpr emitted
+        // by the parser because of explicit type arguments). Both forms designate
+        // the same static method — type arguments are erased at the VBC layer
+        // (every value is one NaN-boxed slot).
+        let static_receiver_type: Option<String> = match &receiver.kind {
+            ExprKind::Path(path)
+                if path.segments.len() == 1
+                    && matches!(&path.segments[0], PathSegment::Name(_)) =>
+            {
+                if let PathSegment::Name(ident) = &path.segments[0] {
+                    Some(ident.name.to_string())
+                } else {
+                    None
+                }
+            }
+            ExprKind::TypeExpr(ty) => self.extract_base_type_name(ty),
+            _ => None,
+        };
+
+        // Intercept Heap.new(value) / Shared.new(value) — emit CBGR-tracked allocation
+        // via CallM so the interpreter's `dispatch_primitive_method` runs the
+        // intrinsic path (method_dispatch.rs `Heap.new` / `Shared.new`). The stdlib's
+        // user-defined .new returns a flat struct that breaks builtin CBGR introspection
+        // (header_generation, raw_ptr, weak_count, …) on the returned value.
         if method.name == "new" && args.len() == 1
-            && let ExprKind::Path(ref path) = receiver.kind
-                && path.segments.len() == 1
-                    && let PathSegment::Name(ref type_ident) = path.segments[0]
-                        && type_ident.name.as_str() == "Heap" {
-                            let inner = self
-                                .compile_expr(&args[0])?
-                                .ok_or_else(|| CodegenError::internal("Heap.new arg has no value"))?;
+            && let Some(ref tn) = static_receiver_type
+            && (tn == "Heap" || tn == "Shared")
+        {
+            let inner = self
+                .compile_expr(&args[0])?
+                .ok_or_else(|| CodegenError::internal("wrapper .new arg has no value"))?;
 
-                            // Load "Heap" as receiver (small string recognized by interpreter)
-                            let receiver_reg = self.ctx.alloc_temp();
-                            let heap_const = self.ctx.add_const_string("Heap");
-                            self.ctx.emit(Instruction::LoadK {
-                                dst: receiver_reg,
-                                const_id: heap_const.0,
-                            });
+            // Load receiver type name as a small string the interpreter recognizes.
+            let receiver_reg = self.ctx.alloc_temp();
+            let name_const = self.ctx.add_const_string(tn);
+            self.ctx.emit(Instruction::LoadK {
+                dst: receiver_reg,
+                const_id: name_const.0,
+            });
 
-                            // Place inner value in a consecutive arg register
-                            let arg_reg = self.ctx.registers.alloc_fresh();
-                            if inner != arg_reg {
-                                self.ctx.emit(Instruction::Mov { dst: arg_reg, src: inner });
-                                self.ctx.free_temp(inner);
-                            }
+            // Place inner value in a consecutive arg register
+            let arg_reg = self.ctx.registers.alloc_fresh();
+            if inner != arg_reg {
+                self.ctx.emit(Instruction::Mov { dst: arg_reg, src: inner });
+                self.ctx.free_temp(inner);
+            }
 
-                            // Emit CallM { receiver: "Heap", method: "new", args: [inner] }
-                            let result = self.ctx.alloc_temp();
-                            let method_id = self.intern_string("new");
-                            self.ctx.emit(Instruction::CallM {
-                                dst: result,
-                                receiver: receiver_reg,
-                                method_id,
-                                args: crate::instruction::RegRange {
-                                    start: arg_reg,
-                                    count: 1,
-                                },
-                            });
-                            self.ctx.free_temp(receiver_reg);
-                            return Ok(Some(result));
-                        }
+            let result = self.ctx.alloc_temp();
+            let method_id = self.intern_string("new");
+            self.ctx.emit(Instruction::CallM {
+                dst: result,
+                receiver: receiver_reg,
+                method_id,
+                args: crate::instruction::RegRange {
+                    start: arg_reg,
+                    count: 1,
+                },
+            });
+            self.ctx.free_temp(receiver_reg);
+            return Ok(Some(result));
+        }
 
         // Intercept collection .new() calls FIRST — must emit builtin opcodes so the
         // interpreter creates proper heap objects with TypeId::LIST/MAP/SET headers.
         // The stdlib compiled .new() functions return flat structs with raw pointers
         // incompatible with the interpreter's builtin methods (push, get, insert, len).
         if method.name == "new" && args.is_empty()
-            && let ExprKind::Path(ref path) = receiver.kind
-                && path.segments.len() == 1
-                    && let PathSegment::Name(ref type_ident) = path.segments[0] {
-                        let tn = type_ident.name.as_str();
-                        if tn == type_names::LIST {
-                            let dest = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::NewList { dst: dest });
-                            return Ok(Some(dest));
-                        }
-                        if tn == type_names::MAP {
-                            let dest = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::NewMap { dst: dest });
-                            return Ok(Some(dest));
-                        }
-                        if tn == type_names::SET {
-                            let dest = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::NewSet { dst: dest });
-                            return Ok(Some(dest));
-                        }
+            && let Some(ref tn) = static_receiver_type
+        {
+            if tn == type_names::LIST {
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::NewList { dst: dest });
+                return Ok(Some(dest));
+            }
+            if tn == type_names::MAP {
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::NewMap { dst: dest });
+                return Ok(Some(dest));
+            }
+            if tn == type_names::SET {
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::NewSet { dst: dest });
+                return Ok(Some(dest));
+            }
+        }
+
+        // Generic static-method dispatch on a typed receiver: route `Foo.method` or
+        // `Foo<T>.method` through the qualified-function registry. This unifies the
+        // bare-Path and TypeExpr forms — type arguments are layout-irrelevant in VBC.
+        if let Some(ref type_name) = static_receiver_type {
+            let qualified_rust = format!("{}::{}", type_name, method.name);
+            let qualified_verum = format!("{}.{}", type_name, method.name);
+            for candidate in [&qualified_rust, &qualified_verum] {
+                if let Some(func_info) = self.ctx.lookup_qualified_function(candidate).cloned()
+                    && func_info.param_count == args.len()
+                {
+                    if let Some(tag) = func_info.variant_tag {
+                        return self.compile_variant_constructor_with_tag(tag, args);
                     }
+                    return self.compile_static_method_call(&func_info, args);
+                }
+                if let Some(func_info) = self.ctx.lookup_function(candidate).cloned()
+                    && func_info.param_count == args.len()
+                {
+                    if let Some(tag) = func_info.variant_tag {
+                        return self.compile_variant_constructor_with_tag(tag, args);
+                    }
+                    return self.compile_static_method_call(&func_info, args);
+                }
+            }
+        }
 
         // First, try to flatten the receiver as a module path and look up the full qualified function
         // This handles patterns like `sys.common.os_alloc(...)` or `super.sys.linux.syscall.exit_group(...)`
@@ -9396,6 +9438,57 @@ impl VbcCodegen {
         }
     }
 
+    /// Resolve `.size` / `.alignment` / `.stride` / `.name` on a Type expression
+    /// (e.g., `SharedInner<T>.size`, `Foo<Int>.alignment`). Returns the value to
+    /// load as a compile-time constant.
+    ///
+    /// VBC layout model: every record slot holds a NaN-boxed `Value` (8 bytes),
+    /// so a struct's size is `num_fields * 8` and alignment is 8 regardless of
+    /// the type arguments. This matches the interpreter's heap layout and the
+    /// AOT lowering's per-field 8-byte slot. `cbgr_alloc(size, align)` results
+    /// fit straight into `ptr_write(ptr, struct_value)` for any `T`.
+    fn try_resolve_type_layout_property(
+        &self,
+        ty: &verum_ast::ty::Type,
+        field: &str,
+    ) -> Option<TypePropertyValue> {
+        if !matches!(field, "size" | "alignment" | "stride" | "name") {
+            return None;
+        }
+        let base_name = self.extract_base_type_name(ty)?;
+        self.layout_property_for_named(&base_name, field)
+    }
+
+    /// Backing logic shared between TypeExpr and bare-Path layout-property paths.
+    fn layout_property_for_named(
+        &self,
+        type_name: &str,
+        field: &str,
+    ) -> Option<TypePropertyValue> {
+        // Primitive types route through resolve_type_property for size/alignment/etc.
+        if let Some(value) = resolve_type_property(type_name, field) {
+            return Some(value);
+        }
+        if field == "name" {
+            return Some(TypePropertyValue::Str(type_name.to_string()));
+        }
+        // User-defined record/struct types: NaN-boxed slot per field.
+        if let Some(field_count) = self.type_field_count(type_name) {
+            let size = (field_count as i64) * 8;
+            return Some(match field {
+                "size" | "stride" => TypePropertyValue::Int(size),
+                "alignment" => TypePropertyValue::Int(8),
+                _ => return None,
+            });
+        }
+        // Unknown identifier — most commonly an unconstrained generic parameter
+        // (`T.size` inside an `implement<T>` block). One NaN-boxed slot.
+        Some(match field {
+            "size" | "stride" | "alignment" => TypePropertyValue::Int(8),
+            _ => return None,
+        })
+    }
+
     /// Helper to flatten nested Field expressions into a qualified path.
     /// For example: `Field(Field(Path[super], "sys"), "linux")` → Some(["super", "sys", "linux"])
     /// Returns None if the expression isn't a pure module path.
@@ -9507,6 +9600,31 @@ impl VbcCodegen {
         if let Some(size) = self.try_resolve_ref_type_property(base, field) {
             let result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadI { dst: result, value: size });
+            return Ok(Some(result));
+        }
+
+        // Handle compile-time layout property access on a TypeExpr: e.g.,
+        // `SharedInner<T>.size`, `Foo<Int>.alignment`, `Bar<U>.stride`, `T.name`.
+        // The parser emits ExprKind::TypeExpr when it sees `Path<TypeArgs>` in
+        // expression position; these are pure type-level expressions whose
+        // observable properties are layout constants in the VBC NaN-boxed model
+        // (every record slot is one 8-byte Value).
+        if let ExprKind::TypeExpr(ref ty) = base.kind
+            && let Some(value) = self.try_resolve_type_layout_property(ty, field)
+        {
+            let result = self.ctx.alloc_temp();
+            match value {
+                TypePropertyValue::Int(v) => {
+                    self.ctx.emit(Instruction::LoadI { dst: result, value: v });
+                }
+                TypePropertyValue::UInt(v) => {
+                    self.ctx.emit(Instruction::LoadI { dst: result, value: v as i64 });
+                }
+                TypePropertyValue::Str(s) => {
+                    let const_id = self.ctx.add_const_string(&s);
+                    self.ctx.emit(Instruction::LoadK { dst: result, const_id: const_id.0 });
+                }
+            }
             return Ok(Some(result));
         }
 
@@ -9705,6 +9823,35 @@ impl VbcCodegen {
                             }
                             return Ok(Some(result));
                         }
+
+                    // Layout property access on user-defined or generic-parameter types:
+                    // `MyStruct.size`, `T.alignment`, `Foo.stride`, `Bar.name`. The base
+                    // is a bare path (no <args>) so it bypassed the TypeExpr branch above.
+                    // We resolve from the registered field layout when available and
+                    // fall back to a single-slot layout (8 / 8) for unknown identifiers
+                    // — which is the correct shape for an unconstrained generic parameter
+                    // since every NaN-boxed Value is exactly 8 bytes.
+                    if matches!(field, "size" | "alignment" | "stride" | "name")
+                        && self.ctx.get_var_reg(type_name).is_err()
+                        && self.ctx.lookup_function(type_name).is_none()
+                    {
+                        if let Some(value) = self.layout_property_for_named(type_name, field) {
+                            let result = self.ctx.alloc_temp();
+                            match value {
+                                TypePropertyValue::Int(v) => {
+                                    self.ctx.emit(Instruction::LoadI { dst: result, value: v });
+                                }
+                                TypePropertyValue::UInt(v) => {
+                                    self.ctx.emit(Instruction::LoadI { dst: result, value: v as i64 });
+                                }
+                                TypePropertyValue::Str(s) => {
+                                    let const_id = self.ctx.add_const_string(&s);
+                                    self.ctx.emit(Instruction::LoadK { dst: result, const_id: const_id.0 });
+                                }
+                            }
+                            return Ok(Some(result));
+                        }
+                    }
 
                     // Handle type alias field access (e.g., u64.MAX -> Int::MAX)
                     // Numeric type aliases have associated constants defined on the base type
