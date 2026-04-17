@@ -1,112 +1,60 @@
 # Known Issues
 
-This document tracks outstanding runtime limitations and known-incomplete
-features. Resolved entries are moved to `vcs/baselines/` and the git log.
+This file tracks remaining runtime limitations. Items are removed as they
+resolve. When the file is empty, it can be deleted.
 
-## AOT Compilation Stability (macOS aarch64)
+## Shared<T> Runtime Construction — type-size lowering
 
-**Status:** Substantially improved (`make test-l0` previously SIGABRT'ed at
-spec ~400; now proceeds through the full suite). Two fundamental AOT
-codegen fixes landed in this cycle:
+**Status:** Partially resolved.
 
-1. **Slice-op fat-ref loads** (commit 04de418) — `SliceGet`,
-   `SliceGetUnchecked`, `SliceSubslice`, `SliceSplitAt` unconditionally
-   called `.into_pointer_value()` on the register value; a register
-   holding a NaN-boxed i64 encoding of the pointer panicked. All four
-   sites now route through `as_ptr(ctx, val, name)` which handles
-   PointerValue / IntValue / StructValue.
-2. **Arity-collision fixups** (commit 238624e, prior cycle) — stdlib
-   functions with arity collisions got null Type* references that
-   crashed LLVM passes. Skip-body stubs + `optnone`/`noinline` contain
-   the damage; the `~4%` residual under heavy concurrent I/O is
-   addressed by running under `codegen-units=1` (default release).
+The historical "explicit panic on first `Shared<T>::new`" was a stack of
+four bugs, three of which are now fixed:
 
-**Remaining surface**: 57 other `.into_pointer_value()` call sites in
-`verum_codegen/src/llvm/instruction.rs`. Any of them taking register
-values from `ctx.get_register(...)` are latent candidates for the same
-bug. VCS differential specs surface them when they trigger.
+1. `@thread_local` init ctors not run before main → commit `7e12603`.
+2. Arithmetic handlers panicking on non-Int tags → commit `e751045`.
+3. **VBC ABI collision**: `FfiSubOpcode::CbgrAlloc` codegened as 0x60 but
+   0x60 decodes to `DerefRaw` → commit `50249c3`. New sub-opcodes
+   `CbgrAlloc = 0xA0`, `CbgrAllocZeroed = 0xA1`, `CbgrDealloc = 0xA2`
+   with interpreter + AOT handlers.
+4. `cbgr_alloc`/`cbgr_alloc_zeroed` not annotated as intrinsics, so the
+   stdlib bytecode body ran (hitting an FFI-less `mmap` path) → commit
+   `2ca249f`. Functions now carry `@intrinsic("cbgr_alloc")` etc. and
+   the interpreter handler returns a properly-wrapped `Ok(tuple)` /
+   `Err(…)` Result variant.
 
-## Feature Flags — All 51 Wired
+End-to-end verification: direct `cbgr_alloc(32, 8)` in interpreter mode
+now returns `Ok((ptr, gen, epoch))` and user code's `match` destructures
+it correctly. `Heap<T>::new`, `Map`, `List` backing allocations travel
+the same path and also work.
 
-All 51 `verum.toml` feature flags are wired from config through the
-compilation pipeline to the consumer subsystem. Setting any key or
-passing `-Z key=value` on the CLI has an observable effect.
+**Remaining**: `Shared<Int>::new(42)` still trips at the very top of the
+call chain — the `SharedInner<T>.size` / `.alignment` access on the
+generic type delivers `i64::MAX` into the register instead of the real
+size (16/8). Every `.size` / `.alignment` lookup on a concrete
+instantiation of a generic struct type mis-routes. The fix needs to
+either thread instantiated type-ids through the call-site's register
+preparation, or lower `.size` on a generic-type expression to
+`SizeOfG(resolved_type_id)` rather than a plain field load.
 
-## GPU / FFI / ML vmap-pmap in Tier 0 Interpreter
-
-By design: the Tier 0 interpreter returns `NotImplemented` for GPU
-kernel dispatch, FFI symbol resolution, and ML vmap/pmap transforms.
-These features require AOT (`verum run --aot` / `verum build`) with
-MLIR/CUDA/Metal toolchains for GPU, `dlopen`/`dlsym` for FFI, and a
-distributed runtime for pmap. The interpreter errors loudly rather
-than silently producing fake handles, so callers see the boundary.
-
-`IsSymbolResolved` correctly returns `false` in the interpreter so
-conditional branches on FFI availability work.
-
-## Shared<T> Runtime Construction — Partially Resolved
-
-**Status:** The `@thread_local static` initializer pathway
-(`__tls_init_*` functions) was not being invoked by the interpreter —
-the pipeline wholesale-skipped `module.global_ctors` as a defense
-against FFI library initializers that crash on macOS. That caused
-`static mut LOCAL_HEAP: Maybe<LocalHeap> = None` to read back as a
-raw zero `Value` instead of the `None` variant, and the CBGR
-allocator bootstrap crashed.
-
-Fixed in commit 7e12603: the interpreter now executes the TLS subset
-of ctors (function name starts with `__tls_init_`) before main, so
-`@thread_local static mut COUNTER: Int = 42` reads back as `42`. FFI
-initializers keep their existing skip.
-
-**Remaining:** `Shared::new(42)` still panics further down the
-allocation path with "Expected int, got None" at `value.rs:892`
-inside `integer_arith::handle_subi`. The crash is no longer in the
-TLS bootstrap but in a subsequent `cbgr_alloc` / `LocalHeap` step.
-Single-observer `Cancellation` patterns that avoid `Shared<T>` work;
-multi-clone tokens still require this fix.
-
-## Variant Method Dispatch
-
-Fixed (commit 94b16bf). Direct method calls on Maybe / Result
-(`.unwrap`, `.unwrap_or`, `.is_some`, `.is_none`, `.is_ok`, `.is_err`,
-`.take`, `.as_ref`, `.as_mut`, `.ok`, `.expect`, `.unwrap_err`)
-resolve correctly in both interpreter and AOT.
-
-## Text Builder + Byte-Level Writes
-
-Fixed (commit 945753f, b26abf8, 270a8e6, this cycle). The stdlib
-Text builder uses `memset(ptr, byte, 1)` instead of the generic
-`ptr_write<T>` intrinsic. `memset` lowers to
-`FfiSubOpcode::CMemset` → `std::ptr::write_bytes(ptr, byte, 1)` on
-the interpreter and to `llvm.intr.memset` on AOT — both byte-sized.
-`Text == Text` equality and hashing honor the builder layout, so
-`Map<Text, V>` works on keys built incrementally.
-
-## Cache Invalidation
-
-The stdlib disk cache at `target/.verum-cache/stdlib/` is keyed by
-compiler version, LLVM version, and a blake3 hash of every
-`core/*.vr` file. Upgrading the compiler or LLVM invalidates the
-cache automatically.
+Single-observer patterns (no `Shared<T>` at all), `Heap<T>::new`, and
+direct `cbgr_alloc`/`cbgr_alloc_zeroed` calls work today.
 
 ## REPL — Parse-Only
 
-`verum repl` parses and type-checks input but does not evaluate:
-`process_input` at `crates/verum_cli/src/commands/repl.rs:231` only
-reports the parse result. Full VBC evaluation in the REPL is a
-tracked follow-up (wiring a persistent `InterpreterState` that
-accumulates bindings across prompts).
-
-For execution, use `verum run <file.vr>`.
+`verum repl` parses and type-checks input but does not evaluate. Full
+VBC-backed evaluation (persistent `InterpreterState`, bindings across
+prompts) is a tracked follow-up. Use `verum run <file.vr>` for
+execution.
 
 ## AOT Async — No Polling Executor
 
-`verum build` on a program that uses `async`/`await`/`spawn` emits
-correct state-machine code but produces a standalone C-ABI binary
-without a future-polling runtime linked. Running such a binary
-reaches an `await` and has no executor to drive the future forward.
+`verum build` emits correct async state-machine code but does not link
+a future-polling runtime. A binary that reaches an `.await` has no
+executor. Use `verum run --interp` (Tier 0) for async code today; a
+minimal single-threaded polling executor for AOT is the follow-up.
 
-For async code use `verum run --interp` (Tier 0 interpreter has an
-internal driver). Adding a minimal single-threaded polling executor
-to AOT binaries is tracked as a separate task.
+## GPU / FFI / ML vmap-pmap in Tier 0 Interpreter
+
+By design: the interpreter returns `NotImplemented` for real GPU
+dispatch, dynamic FFI resolution, and ML vmap/pmap. Use `verum run
+--aot` / `verum build` with the appropriate toolchain for these.
