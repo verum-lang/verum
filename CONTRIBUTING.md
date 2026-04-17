@@ -149,7 +149,9 @@ cargo fmt --all
 
 - `grammar/verum.ebnf` — authoritative language syntax.
 - `CLAUDE.md` — project-wide design notes + architectural invariants.
-- `KNOWN_ISSUES.md` — current limitations you don't have to re-find.
 - `docs/detailed/` — type system, context system, CBGR, cog
   distribution.
 - `vcs/CLAUDE.md` — test runner reference.
+- Interpreter feature compatibility (GPU / dynamic FFI / `vmap`/`pmap`
+  fall back to AOT) is documented in
+  [Runtime tiers](https://verum-lang.dev/docs/architecture/runtime-tiers).
