@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: maybe, result, methods, unwrap, variant-dispatch
+// @timeout: 10000
+// @expect: pass
+
+fn main() {
+    // Maybe.unwrap on Some
+    let x: Maybe<Int> = Some(42);
+    assert_eq(x.unwrap(), 42);
+
+    // Maybe predicates
+    let s: Maybe<Int> = Some(1);
+    let n: Maybe<Int> = None;
+    assert_eq(s.is_some(), true);
+    assert_eq(s.is_none(), false);
+    assert_eq(n.is_some(), false);
+    assert_eq(n.is_none(), true);
+
+    // Maybe.unwrap_or
+    assert_eq(s.unwrap_or(0), 1);
+    assert_eq(n.unwrap_or(99), 99);
+
+    // Result basics
+    let ok: Result<Int, Text> = Ok(100);
+    let err: Result<Int, Text> = Err("fail");
+    assert_eq(ok.is_ok(), true);
+    assert_eq(ok.is_err(), false);
+    assert_eq(err.is_ok(), false);
+    assert_eq(err.is_err(), true);
+
+    // Result.unwrap on Ok
+    assert_eq(ok.unwrap(), 100);
+
+    // Result.unwrap_or
+    assert_eq(ok.unwrap_or(0), 100);
+    assert_eq(err.unwrap_or(0), 0);
+
+    // Result.unwrap_err on Err
+    assert_eq(err.unwrap_err(), "fail");
+
+    // Chained: Some(5).unwrap_or(0) * 2 == 10
+    let chained = Some(5).unwrap_or(0) * 2;
+    assert_eq(chained, 10);
+
+    // Branching on is_some
+    let val = if s.is_some() { s.unwrap() } else { -1 };
+    assert_eq(val, 1);
+}
