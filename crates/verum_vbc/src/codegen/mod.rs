@@ -2872,11 +2872,71 @@ impl VbcCodegen {
     /// When a real type definition is compiled (e.g., `type Maybe<T> is None | Some(T);`),
     /// it overwrites these sentinel entries with the actual tags from the definition.
     fn register_builtin_variants(&mut self) {
-        // No hardcoded variant tags. Variant constructors are registered when
-        // their parent type definitions are compiled. Programs that use Maybe/Result
-        // must have those types defined (either in stdlib or locally).
-        // The codegen will emit a proper error if a variant constructor is used
-        // without its parent type being defined.
+        // Register a fixed set of stdlib variant constructors so that user
+        // code like `Maybe.Some(42)`, `Result.Ok(x)`, `Ordering.Less` compiles
+        // correctly even when the stdlib definition isn't in the auto-included
+        // module list.
+        //
+        // Rationale: `core.base.maybe` is deliberately excluded from
+        // `collect_imported_stdlib_modules`' ALWAYS_INCLUDE list because the
+        // stdlib `Maybe<T>` collides with user-defined `Maybe` test fixtures.
+        // But programs that don't define their own `Maybe` still need the
+        // variant tags to emit `MakeVariant` correctly — otherwise
+        // `Maybe.Some(42)` falls through to method dispatch and panics at
+        // runtime with "method 'Some' not found on value".
+        //
+        // The tags here match the declaration order in `core/base/maybe.vr`,
+        // `core/base/result.vr`, `core/base/ordering.vr`. When a user program
+        // *does* define its own `type Maybe is None | Some(T)` (or similar),
+        // register_type_constructors overwrites these entries with the
+        // user-level tags (which also happen to match), so both paths agree.
+        use crate::codegen::context::FunctionInfo;
+        use crate::module::FunctionId;
+        let sentinel_id = FunctionId(u32::MAX / 2);
+        let builtins: &[(&str, &str, u32, usize, Vec<String>)] = &[
+            // (type_name, variant_name, tag, arity, param_names)
+            ("Maybe", "None",    0, 0, vec![]),
+            ("Maybe", "Some",    1, 1, vec!["_0".into()]),
+            ("Result", "Ok",     0, 1, vec!["_0".into()]),
+            ("Result", "Err",    1, 1, vec!["_0".into()]),
+            ("Ordering", "Less",    0, 0, vec![]),
+            ("Ordering", "Equal",   1, 0, vec![]),
+            ("Ordering", "Greater", 2, 0, vec![]),
+        ];
+        for (type_name, variant_name, tag, arity, param_names) in builtins {
+            let qualified = format!("{}.{}", type_name, variant_name);
+            // Skip if already registered (e.g., earlier pass or user-defined)
+            if self.ctx.lookup_function(&qualified).is_some() {
+                continue;
+            }
+            let info = FunctionInfo {
+                id: sentinel_id,
+                param_count: *arity,
+                param_names: param_names.clone(),
+                param_type_names: vec![],
+                is_async: false,
+                is_generator: false,
+                contexts: vec![],
+                return_type: None,
+                yield_type: None,
+                intrinsic_name: None,
+                variant_tag: Some(*tag),
+                parent_type_name: Some((*type_name).to_string()),
+                variant_payload_types: None,
+                is_partial_pattern: false,
+                takes_self_mut_ref: false,
+                return_type_name: Some((*type_name).to_string()),
+                return_type_inner: None,
+            };
+            // Always register qualified name.
+            self.ctx.register_function(qualified, info.clone());
+            // Also register simple name unless it would collide with a prior
+            // registration (follows the same "simple-on-no-collision" rule as
+            // user variant registration).
+            if self.ctx.lookup_function(variant_name).is_none() {
+                self.ctx.register_function((*variant_name).to_string(), info);
+            }
+        }
     }
 
     /// Registers runtime I/O and networking functions as builtins.
