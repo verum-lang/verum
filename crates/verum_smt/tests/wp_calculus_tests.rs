@@ -1,3 +1,5 @@
+#![allow(clippy::assertions_on_constants)] // tests use assert!(true) placeholders
+
 //! Comprehensive tests for WP (Weakest Precondition) calculus
 //!
 //! Tests verify that the WP calculus correctly computes preconditions for:

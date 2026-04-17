@@ -1139,7 +1139,7 @@ impl VbcCodegen {
 mod tests {
     #[test]
     fn test_statements_module_exists() {
-        // Basic compilation test - module loads successfully
-        assert!(true);
+        // Canary: module compiles and links. An empty body is enough —
+        // if this file failed to compile, the test binary wouldn't link.
     }
 }

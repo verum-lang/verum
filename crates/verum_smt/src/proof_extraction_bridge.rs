@@ -626,7 +626,7 @@ mod tests {
             ProofTerm::SmtVerified { solver, .. } => {
                 assert_eq!(solver.as_str(), "z3");
             }
-            other => assert!(false, "expected SmtVerified, got {:?}", other),
+            other => panic!("expected SmtVerified, got {:?}", other),
         }
     }
 
@@ -635,7 +635,7 @@ mod tests {
         let proof = extract_proof_term("cubical", "(path a b)", &dummy_result());
         match proof {
             ProofTerm::CubicalPath { .. } => {}
-            other => assert!(false, "expected CubicalPath, got {:?}", other),
+            other => panic!("expected CubicalPath, got {:?}", other),
         }
     }
 
@@ -666,7 +666,7 @@ mod tests {
         let erased = erase_proof(&proof);
         match erased {
             ProofTerm::Erased => {}
-            other => assert!(false, "expected Erased, got {:?}", other),
+            other => panic!("expected Erased, got {:?}", other),
         }
     }
 

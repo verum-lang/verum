@@ -1,3 +1,4 @@
+#![allow(clippy::assertions_on_constants)] // tests use assert!(true) placeholders
 #![allow(
     dead_code,
     unused_imports,
