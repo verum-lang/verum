@@ -54,7 +54,7 @@ fn bench_cvc5_vs_z3_lia(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(30));
 
     for size in [10, 50, 100, 500].iter() {
-        group.bench_with_input(BenchmarkId::new("cvc5", size), size, |b, &size| {
+        group.bench_with_input(BenchmarkId::new("cvc5", size), size, |b, &_size| {
             b.iter(|| {
                 // Create backend with n variables
                 let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
@@ -94,7 +94,7 @@ fn bench_cvc5_lra_vs_z3(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("cvc5", constraints),
             constraints,
-            |b, &n| {
+            |b, &_n| {
                 b.iter(|| {
                     let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LRA);
                     black_box(backend)
@@ -161,7 +161,7 @@ fn bench_cvc5_bv_vs_z3(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(30));
 
     for width in [8, 16, 32, 64].iter() {
-        group.bench_with_input(BenchmarkId::new("cvc5", width), width, |b, &w| {
+        group.bench_with_input(BenchmarkId::new("cvc5", width), width, |b, &_w| {
             b.iter(|| {
                 let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_BV);
                 black_box(backend)
@@ -194,7 +194,7 @@ fn bench_cvc5_arrays_vs_z3(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(30));
 
     for ops in [5, 10, 20, 50].iter() {
-        group.bench_with_input(BenchmarkId::new("cvc5", ops), ops, |b, &n| {
+        group.bench_with_input(BenchmarkId::new("cvc5", ops), ops, |b, &_n| {
             b.iter(|| {
                 let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_AUFLIA);
                 black_box(backend)
@@ -324,14 +324,14 @@ fn bench_cvc5_config_overhead(c: &mut Criterion) {
         b.iter(|| {
             let config = Cvc5Config {
                 logic: Cvc5SmtLogic::QF_LIA,
-                timeout_ms: Some(5000).into(),
+                timeout_ms: Some(5000),
                 incremental: true,
                 produce_models: true,
                 produce_proofs: true,
                 produce_unsat_cores: true,
                 preprocessing: true,
                 quantifier_mode: verum_smt::QuantifierMode::Auto,
-                random_seed: Some(42).into(),
+                random_seed: Some(42),
                 verbosity: 1,
             };
             black_box(config)
@@ -379,7 +379,7 @@ fn bench_cvc5_large_formulas(c: &mut Criterion) {
     group.sample_size(10); // Fewer samples for expensive tests
 
     for num_vars in [100, 500, 1000].iter() {
-        group.bench_with_input(BenchmarkId::new("cvc5", num_vars), num_vars, |b, &n| {
+        group.bench_with_input(BenchmarkId::new("cvc5", num_vars), num_vars, |b, &_n| {
             b.iter(|| {
                 let backend = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
                 black_box(backend)

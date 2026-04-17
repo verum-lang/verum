@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn test_find_similar() {
         let candidates = vec!["HashMap", "HashSet", "BTreeMap", "Vector", "List"];
-        let suggestions = find_similar("HashMop", candidates.into_iter());
+        let suggestions = find_similar("HashMop", candidates);
 
         assert!(!suggestions.is_empty());
         // HashMap should be first (closest match)
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_find_similar_case_insensitive() {
         let candidates = vec!["HashMap", "hashmap", "HASHMAP"];
-        let suggestions = find_similar("hashMap", candidates.into_iter());
+        let suggestions = find_similar("hashMap", candidates);
 
         assert!(!suggestions.is_empty());
     }
@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn test_max_edit_distance_filtering() {
         let candidates = vec!["a", "completely_different_name"];
-        let suggestions = find_similar("test", candidates.into_iter());
+        let suggestions = find_similar("test", candidates);
 
         // "completely_different_name" should be filtered out
         assert!(suggestions
