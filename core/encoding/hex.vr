@@ -1,0 +1,103 @@
+// =============================================================================
+// encoding/hex.vr - Hexadecimal encoding
+// =============================================================================
+// Layer: 2 (Encoding)
+// Dependencies: core, collections, text
+// =============================================================================
+//
+// Lowercase/uppercase hex encoding of byte sequences, matching the
+// conventions used by git, TLS certificate fingerprints, hash output, etc.
+//
+//   encode(&[Byte])          -> Text   // lowercase
+//   encode_upper(&[Byte])    -> Text   // uppercase
+//   decode(&Text)            -> Result<List<Byte>, HexError>
+//
+// Case-insensitive decoding. The input must have even length; odd-length
+// input is rejected with InvalidLength.
+// =============================================================================
+
+module core.encoding.hex;
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+
+public type HexError is {
+    kind: HexErrorKind,
+    position: Int,
+    message: Text,
+};
+
+public type HexErrorKind is
+      InvalidChar
+    | InvalidLength;
+
+// Encode using lowercase hex digits ('0'-'9', 'a'-'f').
+public fn encode(input: &[Byte]) -> Text {
+    encode_with(input, false)
+}
+
+// Encode using uppercase hex digits ('0'-'9', 'A'-'F').
+public fn encode_upper(input: &[Byte]) -> Text {
+    encode_with(input, true)
+}
+
+fn encode_with(input: &[Byte], upper: Bool) -> Text {
+    let mut out = Text.new();
+    let mut i = 0;
+    while i < input.len() {
+        let b = input[i] as Int;
+        out.push_byte(nibble(b >> 4, upper));
+        out.push_byte(nibble(b & 0x0F, upper));
+        i = i + 1;
+    }
+    out
+}
+
+fn nibble(n: Int, upper: Bool) -> Byte {
+    if n < 10 {
+        (0x30 + n) as Byte
+    } else if upper {
+        (0x41 + n - 10) as Byte
+    } else {
+        (0x61 + n - 10) as Byte
+    }
+}
+
+// Decode a hex-encoded string. Accepts both lowercase and uppercase digits.
+public fn decode(input: &Text) -> Result<List<Byte>, HexError> {
+    let bytes = input.as_bytes();
+    let n = bytes.len();
+    if n % 2 != 0 {
+        return Err(HexError {
+            kind: InvalidLength,
+            position: n,
+            message: "odd number of hex digits",
+        });
+    }
+    let mut out: List<Byte> = [];
+    let mut i = 0;
+    while i < n {
+        let hi = decode_nibble(bytes[i], i)?;
+        let lo = decode_nibble(bytes[i + 1], i + 1)?;
+        out.push(((hi << 4) | lo) as Byte);
+        i = i + 2;
+    }
+    Ok(out)
+}
+
+fn decode_nibble(b: Byte, pos: Int) -> Result<Int, HexError> {
+    if b >= 0x30_u8 && b <= 0x39_u8 {
+        Ok((b - 0x30_u8) as Int)
+    } else if b >= 0x41_u8 && b <= 0x46_u8 {
+        Ok((b - 0x41_u8 + 10) as Int)
+    } else if b >= 0x61_u8 && b <= 0x66_u8 {
+        Ok((b - 0x61_u8 + 10) as Int)
+    } else {
+        Err(HexError {
+            kind: InvalidChar,
+            position: pos,
+            message: "not a hex digit",
+        })
+    }
+}

@@ -7,8 +7,10 @@
 module core.encoding;
 
 public module json;
+public module base64;
+public module hex;
 
-// Re-exports
+// Re-exports — JSON
 public mount .json.Json;
 public mount .json.JsonValue;
 public mount .json.JsonError;
@@ -17,3 +19,11 @@ public mount .json.parse;
 public mount .json.parse_value;
 public mount .json.stringify;
 public mount .json.stringify_pretty;
+
+// Re-exports — Base64
+public mount .base64.Base64Error;
+public mount .base64.Base64ErrorKind;
+
+// Re-exports — Hex
+public mount .hex.HexError;
+public mount .hex.HexErrorKind;

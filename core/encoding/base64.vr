@@ -1,0 +1,170 @@
+// =============================================================================
+// encoding/base64.vr - Base64 encoding (RFC 4648)
+// =============================================================================
+// Layer: 2 (Encoding)
+// Dependencies: core, collections, text
+// =============================================================================
+//
+// RFC 4648 base64 encoding with both standard and URL-safe alphabets.
+// Provides:
+//   encode(&[Byte])            -> Text           // standard alphabet, padded
+//   encode_url(&[Byte])        -> Text           // URL-safe alphabet, unpadded
+//   decode(&Text)              -> Result<List<Byte>, Base64Error>
+//   decode_url(&Text)          -> Result<List<Byte>, Base64Error>
+//
+// Both alphabets share the first 62 characters; only '+/' vs. '-_' differ.
+// Unpadded URL-safe output matches the JOSE/JWT convention.
+// =============================================================================
+
+module core.encoding.base64;
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+
+public type Base64Error is {
+    kind: Base64ErrorKind,
+    position: Int,
+    message: Text,
+};
+
+public type Base64ErrorKind is
+      InvalidChar
+    | InvalidLength
+    | InvalidPadding;
+
+const STD_ALPHABET: [Byte; 64] = [
+    0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8, 0x46_u8, 0x47_u8, 0x48_u8,
+    0x49_u8, 0x4A_u8, 0x4B_u8, 0x4C_u8, 0x4D_u8, 0x4E_u8, 0x4F_u8, 0x50_u8,
+    0x51_u8, 0x52_u8, 0x53_u8, 0x54_u8, 0x55_u8, 0x56_u8, 0x57_u8, 0x58_u8,
+    0x59_u8, 0x5A_u8, 0x61_u8, 0x62_u8, 0x63_u8, 0x64_u8, 0x65_u8, 0x66_u8,
+    0x67_u8, 0x68_u8, 0x69_u8, 0x6A_u8, 0x6B_u8, 0x6C_u8, 0x6D_u8, 0x6E_u8,
+    0x6F_u8, 0x70_u8, 0x71_u8, 0x72_u8, 0x73_u8, 0x74_u8, 0x75_u8, 0x76_u8,
+    0x77_u8, 0x78_u8, 0x79_u8, 0x7A_u8, 0x30_u8, 0x31_u8, 0x32_u8, 0x33_u8,
+    0x34_u8, 0x35_u8, 0x36_u8, 0x37_u8, 0x38_u8, 0x39_u8, 0x2B_u8, 0x2F_u8,
+];
+
+const URL_ALPHABET: [Byte; 64] = [
+    0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8, 0x46_u8, 0x47_u8, 0x48_u8,
+    0x49_u8, 0x4A_u8, 0x4B_u8, 0x4C_u8, 0x4D_u8, 0x4E_u8, 0x4F_u8, 0x50_u8,
+    0x51_u8, 0x52_u8, 0x53_u8, 0x54_u8, 0x55_u8, 0x56_u8, 0x57_u8, 0x58_u8,
+    0x59_u8, 0x5A_u8, 0x61_u8, 0x62_u8, 0x63_u8, 0x64_u8, 0x65_u8, 0x66_u8,
+    0x67_u8, 0x68_u8, 0x69_u8, 0x6A_u8, 0x6B_u8, 0x6C_u8, 0x6D_u8, 0x6E_u8,
+    0x6F_u8, 0x70_u8, 0x71_u8, 0x72_u8, 0x73_u8, 0x74_u8, 0x75_u8, 0x76_u8,
+    0x77_u8, 0x78_u8, 0x79_u8, 0x7A_u8, 0x30_u8, 0x31_u8, 0x32_u8, 0x33_u8,
+    0x34_u8, 0x35_u8, 0x36_u8, 0x37_u8, 0x38_u8, 0x39_u8, 0x2D_u8, 0x5F_u8,
+];
+
+// Standard RFC 4648 encoding with '+', '/', and '=' padding.
+public fn encode(input: &[Byte]) -> Text {
+    encode_with(input, &STD_ALPHABET, true)
+}
+
+// URL-safe RFC 4648 §5 encoding with '-', '_', no padding.
+public fn encode_url(input: &[Byte]) -> Text {
+    encode_with(input, &URL_ALPHABET, false)
+}
+
+fn encode_with(input: &[Byte], alpha: &[Byte; 64], pad: Bool) -> Text {
+    let n = input.len();
+    let mut out = Text.new();
+    let mut i = 0;
+    while i + 3 <= n {
+        let b0 = input[i] as Int;
+        let b1 = input[i + 1] as Int;
+        let b2 = input[i + 2] as Int;
+        out.push_byte(alpha[(b0 >> 2) & 0x3F]);
+        out.push_byte(alpha[((b0 << 4) | (b1 >> 4)) & 0x3F]);
+        out.push_byte(alpha[((b1 << 2) | (b2 >> 6)) & 0x3F]);
+        out.push_byte(alpha[b2 & 0x3F]);
+        i = i + 3;
+    }
+    let rem = n - i;
+    if rem == 1 {
+        let b0 = input[i] as Int;
+        out.push_byte(alpha[(b0 >> 2) & 0x3F]);
+        out.push_byte(alpha[(b0 << 4) & 0x3F]);
+        if pad { out.push_byte(0x3D_u8); out.push_byte(0x3D_u8); }
+    } else if rem == 2 {
+        let b0 = input[i] as Int;
+        let b1 = input[i + 1] as Int;
+        out.push_byte(alpha[(b0 >> 2) & 0x3F]);
+        out.push_byte(alpha[((b0 << 4) | (b1 >> 4)) & 0x3F]);
+        out.push_byte(alpha[(b1 << 2) & 0x3F]);
+        if pad { out.push_byte(0x3D_u8); }
+    }
+    out
+}
+
+// Decode a standard base64 string. Padding is required.
+public fn decode(input: &Text) -> Result<List<Byte>, Base64Error> {
+    decode_with(input, false)
+}
+
+// Decode a URL-safe base64 string. Padding is optional.
+public fn decode_url(input: &Text) -> Result<List<Byte>, Base64Error> {
+    decode_with(input, true)
+}
+
+fn decode_with(input: &Text, url_safe: Bool) -> Result<List<Byte>, Base64Error> {
+    let bytes = input.as_bytes();
+    let mut out: List<Byte> = [];
+    let mut i = 0;
+    let n = bytes.len();
+    // Strip trailing '=' padding — treat it as a length hint only.
+    let mut effective = n;
+    while effective > 0 && bytes[effective - 1] == 0x3D_u8 {
+        effective = effective - 1;
+    }
+    // Pull 4 chars → 3 bytes. Last group may be 2 or 3 chars.
+    while i + 4 <= effective {
+        let c0 = decode_byte(bytes[i], url_safe, i)?;
+        let c1 = decode_byte(bytes[i + 1], url_safe, i + 1)?;
+        let c2 = decode_byte(bytes[i + 2], url_safe, i + 2)?;
+        let c3 = decode_byte(bytes[i + 3], url_safe, i + 3)?;
+        out.push(((c0 << 2) | (c1 >> 4)) as Byte);
+        out.push((((c1 & 0x0F) << 4) | (c2 >> 2)) as Byte);
+        out.push((((c2 & 0x03) << 6) | c3) as Byte);
+        i = i + 4;
+    }
+    let rem = effective - i;
+    if rem == 1 {
+        return Err(Base64Error {
+            kind: InvalidLength,
+            position: i,
+            message: "dangling character at end",
+        });
+    } else if rem == 2 {
+        let c0 = decode_byte(bytes[i], url_safe, i)?;
+        let c1 = decode_byte(bytes[i + 1], url_safe, i + 1)?;
+        out.push(((c0 << 2) | (c1 >> 4)) as Byte);
+    } else if rem == 3 {
+        let c0 = decode_byte(bytes[i], url_safe, i)?;
+        let c1 = decode_byte(bytes[i + 1], url_safe, i + 1)?;
+        let c2 = decode_byte(bytes[i + 2], url_safe, i + 2)?;
+        out.push(((c0 << 2) | (c1 >> 4)) as Byte);
+        out.push((((c1 & 0x0F) << 4) | (c2 >> 2)) as Byte);
+    }
+    Ok(out)
+}
+
+fn decode_byte(b: Byte, url_safe: Bool, pos: Int) -> Result<Int, Base64Error> {
+    // 'A'..'Z' → 0..25
+    if b >= 0x41_u8 && b <= 0x5A_u8 { return Ok((b - 0x41_u8) as Int); }
+    // 'a'..'z' → 26..51
+    if b >= 0x61_u8 && b <= 0x7A_u8 { return Ok((b - 0x61_u8 + 26) as Int); }
+    // '0'..'9' → 52..61
+    if b >= 0x30_u8 && b <= 0x39_u8 { return Ok((b - 0x30_u8 + 52) as Int); }
+    if url_safe {
+        if b == 0x2D_u8 { return Ok(62); }    // '-'
+        if b == 0x5F_u8 { return Ok(63); }    // '_'
+    } else {
+        if b == 0x2B_u8 { return Ok(62); }    // '+'
+        if b == 0x2F_u8 { return Ok(63); }    // '/'
+    }
+    Err(Base64Error {
+        kind: InvalidChar,
+        position: pos,
+        message: "character outside the base64 alphabet",
+    })
+}
