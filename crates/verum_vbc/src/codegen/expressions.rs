@@ -6413,10 +6413,18 @@ impl VbcCodegen {
         if let Some(type_name) = self.infer_expr_type_name(iter) {
             // Strip generic args: "List<Int>" → "List", "Map<K, V>" → "Map"
             let base = type_name.split('<').next().unwrap_or(&type_name);
+            // Builtin collection iterator wrappers — the interpreter
+            // recognises the underlying collection (Map / Set / etc.) and
+            // the `.iter()` method now returns the collection itself,
+            // so `IterNew` + `IterNext` yield the expected `(key, value)`
+            // tuples for `MapIter` without going through uncompiled stdlib
+            // `has_next` / `next` methods.
             !matches!(
                 base,
                 "List" | "Map" | "Set" | "Deque" | "Range" | "Text" | "Array"
                     | "BTreeMap" | "BTreeSet" | "BinaryHeap"
+                    | "MapIter" | "MapIterMut" | "MapKeys" | "MapValues" | "MapValuesMut"
+                    | "SetIter" | "ListIter" | "ListIterMut" | "DequeIter"
             )
         } else {
             // Can't determine type — use standard IterNew/IterNext (safe default)

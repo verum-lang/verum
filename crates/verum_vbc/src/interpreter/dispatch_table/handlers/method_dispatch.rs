@@ -2185,6 +2185,46 @@ pub(super) fn dispatch_primitive_method(
                             return Ok(Some(make_none_value(state)?));
                         }
 
+                        // MAP iteration yields `(key, value)` tuples by scanning
+                        // the entries array for non-empty slots. Returns directly
+                        // as `Some(tuple)` — the builder pattern used by other
+                        // iter_types (ThinRef + make_some_value) doesn't apply.
+                        if iter_type == ITER_TYPE_MAP {
+                            let map_header = unsafe {
+                                source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                            };
+                            let capacity = unsafe { (*map_header.add(1)).as_i64() } as usize;
+                            let entries_ptr = unsafe { (*map_header.add(2)).as_ptr::<u8>() };
+                            let entries_data = unsafe {
+                                entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                            };
+                            let scan_end = capacity.min(back_idx);
+                            let mut idx = front_idx;
+                            while idx < scan_end {
+                                let entry_key = unsafe { *entries_data.add(idx * 2) };
+                                if !entry_key.is_unit() {
+                                    let entry_val = unsafe { *entries_data.add(idx * 2 + 1) };
+                                    unsafe { *iter_data.add(1) = Value::from_i64((idx + 1) as i64); }
+                                    let tuple_obj = state.heap.alloc(
+                                        TypeId::TUPLE,
+                                        2 * std::mem::size_of::<Value>(),
+                                    )?;
+                                    let tuple_data = unsafe {
+                                        (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                                    };
+                                    unsafe {
+                                        *tuple_data = entry_key;
+                                        *tuple_data.add(1) = entry_val;
+                                    }
+                                    let tuple_val = Value::from_ptr(tuple_obj.as_ptr() as *mut u8);
+                                    return Ok(Some(make_some_value(state, tuple_val)?));
+                                }
+                                idx += 1;
+                            }
+                            unsafe { *iter_data.add(1) = Value::from_i64(scan_end as i64); }
+                            return Ok(Some(make_none_value(state)?));
+                        }
+
                         // Get element reference based on iterator type
                         let elem_ptr = match iter_type {
                             ITER_TYPE_LIST => {
@@ -2564,6 +2604,16 @@ pub(super) fn dispatch_primitive_method(
                     };
                     let count = unsafe { (*data_ptr).as_i64() } as usize;
                     return Ok(Some(Value::from_i64(count as i64)));
+                }
+                "iter" => {
+                    // Return the map/set itself — `IterNew` already
+                    // recognises `TypeId::MAP` / `TypeId::SET` and builds
+                    // the right `ITER_TYPE_MAP` iterator, and the `IterNext`
+                    // handler yields `(key, value)` tuples. Wrapping the
+                    // map in a second layer of iterator object would cause
+                    // `IterNew` to mis-classify it as a list (its type_id
+                    // becomes `TypeId::UNIT`).
+                    return Ok(Some(*receiver));
                 }
                 "contains" | "contains_key" if is_map => {
                     let caller_base = state.reg_base();
