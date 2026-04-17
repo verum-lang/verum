@@ -199,9 +199,14 @@ mod cvc5_sys {
 // stub and FFI modes. They are legitimately dead in stub mode — the
 // SmtBackendSwitcher routes all goals to Z3 then — and become live only
 // when `--features cvc5-ffi` links real libcvc5.
+//
+// SAT/UNSAT/UNKNOWN use all-caps because they mirror the upstream cvc5
+// C API's enum; lowercasing them would diverge from the binding we stand
+// in for. `clippy::upper_case_acronyms` is allowed here for parity.
 #[cfg(not(feature = "cvc5-ffi"))]
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
+#[allow(clippy::upper_case_acronyms)]
 mod cvc5_sys {
     use std::os::raw::{c_int, c_void};
 

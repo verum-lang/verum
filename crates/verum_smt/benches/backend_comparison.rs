@@ -37,15 +37,21 @@ use verum_ast::{
 
 // ==================== Benchmark Infrastructure ====================
 
-/// Benchmark configuration
+/// Benchmark configuration.
+///
+/// Currently unused (benches run in a more ad-hoc mode that builds
+/// problems inline); kept as the documented shape for when the harness
+/// consolidates around it.
+#[allow(dead_code)]
 struct BenchConfig {
     name: &'static str,
     logic: Cvc5SmtLogic,
     problem_sizes: Vec<usize>,
 }
 
-/// Benchmark result summary
+/// Benchmark result summary. Also kept for future harness consolidation.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct BenchResult {
     z3_time_ns: u64,
     cvc5_time_ns: u64,
