@@ -1169,8 +1169,13 @@ implement Text {
     // =========================================================================
 
     /// Parse to Int (base 10). Returns Result for error handling.
+    ///
+    /// Uses the same pure-Verum path as `parse_int_radix(10)` rather than
+    /// the legacy `text_parse_int` intrinsic, which was declared
+    /// `-> Maybe<Int>` and silently mis-typed its result when the caller
+    /// expected `Result<Int, ParseError>`.
     public fn parse_int(&self) -> Result<Int, ParseError> {
-        text_parse_int(self)
+        self.parse_int_radix(10)
     }
 
     /// Parse to Int directly (returns 0 on parse failure).
@@ -1328,8 +1333,53 @@ implement Text {
     }
 
     /// Parse to Float.
+    ///
+    /// Same rationale as `parse_int`: the legacy `text_parse_float`
+    /// intrinsic returns `Maybe<Float>` and would be mis-read as a
+    /// `Result` variant. Uses the pure-Verum `to_float()` walker with
+    /// explicit validation for malformed input.
     public fn parse_float(&self) -> Result<Float, ParseError> {
-        text_parse_float(self)
+        let bytes = self.as_bytes();
+        if bytes.len() == 0 {
+            return Err(ParseError.new("empty string"));
+        }
+        // Validate that at least one digit appears so that silent
+        // zeros don't mask junk input like "abc" or "".
+        let mut seen_digit = false;
+        let mut i = 0;
+        let n = bytes.len();
+        // skip optional sign
+        if i < n && (bytes[i] == 43 || bytes[i] == 45) { i = i + 1; }
+        while i < n && bytes[i] >= 48 && bytes[i] <= 57 {
+            seen_digit = true;
+            i = i + 1;
+        }
+        if i < n && bytes[i] == 46 {
+            i = i + 1;
+            while i < n && bytes[i] >= 48 && bytes[i] <= 57 {
+                seen_digit = true;
+                i = i + 1;
+            }
+        }
+        if i < n && (bytes[i] == 101 || bytes[i] == 69) {
+            i = i + 1;
+            if i < n && (bytes[i] == 43 || bytes[i] == 45) { i = i + 1; }
+            let mut exp_digits = false;
+            while i < n && bytes[i] >= 48 && bytes[i] <= 57 {
+                exp_digits = true;
+                i = i + 1;
+            }
+            if !exp_digits {
+                return Err(ParseError.new("missing exponent digits"));
+            }
+        }
+        if !seen_digit {
+            return Err(ParseError.new("no digits"));
+        }
+        if i < n {
+            return Err(ParseError.new("trailing characters"));
+        }
+        Ok(self.to_float())
     }
 
     /// Parse to Bool.
