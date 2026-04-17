@@ -39,6 +39,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::process::Command;
@@ -54,6 +55,16 @@ use verum_compiler::{
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 use verum_fast_parser::FastParser;
+
+/// Monotonic counter for per-spec FileIds. Starts at 1 because the
+/// global registry treats FileId(0) as a sentinel and parallel test
+/// runs share a single process — using a fresh id per spec keeps
+/// the source-file registry race-free across the worker pool.
+static NEXT_TEST_FILE_ID: AtomicU32 = AtomicU32::new(1);
+
+fn fresh_test_file_id() -> FileId {
+    FileId::new(NEXT_TEST_FILE_ID.fetch_add(1, Ordering::Relaxed))
+}
 
 /// Error type for execution failures.
 #[derive(Debug, Error)]
@@ -826,23 +837,32 @@ impl Executor {
             }
         };
 
-        // Create a file ID for this test file
-        let file_id = FileId::new(0);
+        // Each spec gets a fresh FileId to avoid clobbering the global
+        // source-file registry when tests run in parallel.
+        let file_id = fresh_test_file_id();
 
         // Register source file in global registry for proper error messages
         verum_common::register_source_file(file_id, source_path.display().to_string(), &source);
 
-        // Use FastParser which supports the full Verum grammar.
-        // Fall back to VerumParser (legacy) if FastParser fails, since some
-        // quantifier patterns and older syntax is only supported there.
+        // FastParser/VerumParser are the same struct (verum_fast_parser exposes
+        // VerumParser as an alias for FastParser). Use the lexer-based entry
+        // point — it matches what `verum check` uses through the compilation
+        // pipeline, so a green `verum check` always implies a green test.
+        // The `parse_module_str` path was an older API whose error-position
+        // analysis incorrectly reports lex errors against the *whole source*
+        // as line 1, producing false "unexpected string literal" failures
+        // for files that the byte-stream lexer accepts.
         let parser = FastParser::new();
-        match parser.parse_module_str(&source, file_id) {
+        let lexer = Lexer::new(&source, file_id);
+        match parser.parse_module(lexer, file_id) {
             Ok(_module) => TestOutcome::Pass {
                 tier,
                 duration: start.elapsed(),
             },
             Err(fast_errors) => {
-                // Try VerumParser as fallback for syntax not yet in FastParser
+                // Try the legacy VerumParser as a fallback for syntax not yet
+                // in FastParser. (At time of writing they're the same type, so
+                // this is a no-op safety net for future divergence.)
                 let lexer = Lexer::new(&source, file_id);
                 let legacy_parser = VerumParser::new();
                 if legacy_parser.parse_module(lexer, file_id).is_ok() {
@@ -930,8 +950,9 @@ impl Executor {
             }
         };
 
-        // Create a file ID for this test file
-        let file_id = FileId::new(0);
+        // Each spec gets a fresh FileId to avoid clobbering the global
+        // source-file registry when tests run in parallel.
+        let file_id = fresh_test_file_id();
 
         // Register source file in global registry for proper error messages
         verum_common::register_source_file(file_id, source_path.display().to_string(), &source);
@@ -1017,7 +1038,7 @@ impl Executor {
             }
         };
 
-        let file_id = FileId::new(0);
+        let file_id = fresh_test_file_id();
         verum_common::register_source_file(file_id, source_path.display().to_string(), &source);
 
         let parser = FastParser::new();
