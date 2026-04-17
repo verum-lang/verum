@@ -975,8 +975,29 @@ pub(in super::super) fn handle_array_len(state: &mut InterpreterState) -> Interp
         };
         (unsafe { (*data_ptr).as_i64() }) as usize
     } else if header.type_id == crate::types::TypeId::TEXT || header.type_id == crate::types::TypeId(0x0001) {
-        // Heap string layout: [ObjectHeader][len: u64][bytes...]
-        let len_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const u64 };
+        // Text objects come in two runtime shapes sharing the same TypeId:
+        //   * static / intrinsic-built heap string: `[ObjectHeader][len:u64][bytes…]`
+        //   * stdlib builder `Text {ptr, len, cap}`: three NaN-boxed Value fields,
+        //     where field 1 (offset HEADER+8) carries the integer length.
+        // Distinguish by data size. A three-Value struct is exactly 24 bytes;
+        // heap strings are `8 + n` bytes where `n` is the byte count — the
+        // only overlap with 24 is a 16-byte string, which we fall through to
+        // the struct branch if and only if field 0 is also a tagged integer
+        // (the `ptr` slot for a struct Text is a pointer, not a small int),
+        // keeping the common case of 16-byte static strings correct.
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+        if header_size == 24 {
+            let field0 = unsafe { *(data_ptr as *const Value) };
+            let field1 = unsafe { *(data_ptr as *const Value).add(1) };
+            // Builder layout: field 0 is a pointer (or nil), field 1 is the len Int.
+            if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
+                return {
+                    state.set_reg(dst, Value::from_i64(field1.as_i64()));
+                    Ok(DispatchResult::Continue)
+                };
+            }
+        }
+        let len_ptr = data_ptr as *const u64;
         (unsafe { *len_ptr }) as usize
     } else if header.type_id == TypeId::CHANNEL {
         // Channel layout: [len, cap, head, buffer_ptr, closed] — read len (field 0)
