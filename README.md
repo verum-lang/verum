@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="internal/website/media/verum-logo-128.png" alt="Verum" width="96" height="96"/>
+<img src="media/verum-logo.png" alt="Verum" width="96" height="96"/>
 
 # Verum
 
@@ -32,7 +32,7 @@ magic. Three reserved keywords (`let`, `fn`, `is`); everything else is
 contextual.
 
 The type system ships with refinement types (`Int { self > 0 }`)
-discharged by Z3 and CVC5; seven gradual-verification strategies from
+discharged by an SMT backend; seven gradual-verification strategies from
 `@verify(runtime)` up to `@verify(certified)`; dependent types with
 sigma bindings and cubical path equalities; and a proof DSL with
 twenty-two named tactics. Memory safety uses **Capability-Based
@@ -53,7 +53,7 @@ five profiles from `full` (servers) down to `embedded`
 | Area | What's in the shipped release |
 |---|---|
 | **Type system** | Refinement types (`Int { self > 0 }`), dependent types (Σ/Π), cubical path equalities (`Path<A>(a, b)`) with computational univalence, higher-kinded types, rank-2 polymorphism, protocols with associated types and specialisation. |
-| **Verification** | Seven `@verify(...)` strategies (`runtime`, `static`, `fast`, `formal`, `thorough`, `certified`, `synthesize`); dual-backend SMT (Z3 + CVC5) with capability-routing; 22-tactic proof DSL; exportable proof terms for Coq, Lean, Dedukti, Metamath. |
+| **Verification** | Seven `@verify(...)` strategies (`runtime`, `static`, `fast`, `formal`, `thorough`, `certified`, `synthesize`); capability-routed SMT backend; 22-tactic proof DSL; exportable proof terms for Coq, Lean, Dedukti, Metamath. |
 | **Memory** | Three-tier references (`&T` / `&checked T` / `&unsafe T`); CBGR with 16 B `ThinRef` / 32 B `FatRef`; 8 capability bits (`CAP_READ`/`WRITE`/`EXECUTE`/`DELEGATE`/`REVOKE`/`BORROWED`/`MUTABLE`/`NO_ESCAPE`); generation-based use-after-free detection; 11 CBGR analyses auto-promote `&T` to `&checked T` where provable. |
 | **Concurrency** | `async`/`await`, `spawn`, `nursery { ... }` structured concurrency, `select` / `race` / `join_all`, channels, streams, async generators; `spawn_with` for retry / circuit breaker / restart policy / isolation / priority / timeout. |
 | **Runtime** | Unified `ExecutionEnv` (θ+) per task — memory + capabilities + error recovery + concurrency in one 2 560-byte structure; five profiles: `full` / `single_thread` / `no_async` / `no_heap` / `embedded`. |
@@ -98,8 +98,11 @@ fn find<T: Eq>(xs: &NonEmpty<T>, key: &T) -> Maybe<Int>
 ## Building from source
 
 **Prerequisites.** A Rust toolchain at the version pinned in
-`rust-toolchain.toml`, LLVM 21, and Z3 4.x. Platform-specific notes are
-in the [installation guide](https://verum-lang.org/docs/getting-started/installation).
+`rust-toolchain.toml` and LLVM 21. The current SMT backend bundles
+Z3 and CVC5 as build-time dependencies; the language itself is not
+committed to this choice and a Verum-native solver is on the
+roadmap. Platform-specific notes are in the
+[installation guide](https://verum-lang.org/docs/getting-started/installation).
 
 ```bash
 git clone https://github.com/verum-lang/verum
