@@ -4392,10 +4392,21 @@ impl VbcCodegen {
                     // This takes precedence even if the type is also registered as a type constructor,
                     // because static method calls like `Time.now()` should resolve to Time.now,
                     // not treat `Time` as a value.
+                    //
+                    // Variants are a special case: `Maybe.Some(42)`, `Result.Ok(x)`, etc.
+                    // are registered under the qualified name too (variant_tag set), but they
+                    // don't have an ordinary bytecode body — compile_static_method_call would
+                    // emit a plain Call to a non-existent function, and the runtime would fall
+                    // through to method dispatch which panics with
+                    // "method 'Some' not found on value". Dispatch them through
+                    // compile_variant_constructor instead so a MakeVariant opcode is emitted.
                     let qualified_name = format!("{}.{}", type_name, method_name);
                     if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
                         // Only use if argument count matches to avoid wrong function resolution
                         if func_info.param_count == args.len() {
+                            if func_info.variant_tag.is_some() {
+                                return self.compile_variant_constructor(&method_name, args);
+                            }
                             return self.compile_static_method_call(&func_info, args);
                         }
                     }
