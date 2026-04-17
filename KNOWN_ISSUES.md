@@ -1,101 +1,112 @@
 # Known Issues
 
+This document tracks outstanding runtime limitations and known-incomplete
+features. Resolved entries are moved to `vcs/baselines/` and the git log.
+
 ## AOT Compilation Stability (macOS aarch64)
 
-**Status:** Fixed (commit 238624e). Previously crashed ~40-60% of runs;
-now **96-100% stable** (50/50 foreground, 96/100 under heavy load).
+**Status:** Substantially improved (`make test-l0` previously SIGABRT'ed at
+spec ~400; now proceeds through the full suite). Two fundamental AOT
+codegen fixes landed in this cycle:
 
-**Root cause:** VBC→LLVM lowering emitted stdlib functions with null
-Type* references from arity-collision fixups. LLVM passes (Verifier,
-TypeFinder, SelectionDAG, InterleavedAccess) crashed on these.
+1. **Slice-op fat-ref loads** (commit 04de418) — `SliceGet`,
+   `SliceGetUnchecked`, `SliceSubslice`, `SliceSplitAt` unconditionally
+   called `.into_pointer_value()` on the register value; a register
+   holding a NaN-boxed i64 encoding of the pointer panicked. All four
+   sites now route through `as_ptr(ctx, val, name)` which handles
+   PointerValue / IntValue / StructValue.
+2. **Arity-collision fixups** (commit 238624e, prior cycle) — stdlib
+   functions with arity collisions got null Type* references that
+   crashed LLVM passes. Skip-body stubs + `optnone`/`noinline` contain
+   the damage; the `~4%` residual under heavy concurrent I/O is
+   addressed by running under `codegen-units=1` (default release).
 
-**Fix:** Skip-body functions now get trivial `ret zeroinitializer` stubs,
-stdlib functions get `optnone` + `noinline` attributes, LLVM verification
-and IR dump are gated, and the pass pipeline is restricted when the
-module has known issues.
-
-**Residual:** Under extreme resource pressure (~4% of runs with
-concurrent heavy I/O), the LLVM compilation may still fail. Use the
-VBC interpreter path (`verum run --interp`) as fallback.
+**Remaining surface**: 57 other `.into_pointer_value()` call sites in
+`verum_codegen/src/llvm/instruction.rs`. Any of them taking register
+values from `ctx.get_register(...)` are latent candidates for the same
+bug. VCS differential specs surface them when they trigger.
 
 ## Feature Flags — All 51 Wired
 
-**All 51** `verum.toml` feature flags are now wired from config through
-the compilation pipeline to the subsystem that consumes them. Setting
-any key in `verum.toml` or via `-Z` on the CLI has observable effect.
+All 51 `verum.toml` feature flags are wired from config through the
+compilation pipeline to the consumer subsystem. Setting any key or
+passing `-Z key=value` on the CLI has an observable effect.
 
-## GPU in Interpreter Mode
+## GPU / FFI / ML vmap-pmap in Tier 0 Interpreter
 
-When running code with `@device(gpu)` via the VBC interpreter
-(`verum run --interp`), GPU operations return CPU fallback stubs
-(e.g., `EnumerateCuda` returns an empty list). This is by design —
-the interpreter has no GPU hardware access. AOT compilation via
-`verum run --aot` or `verum build` produces real GPU binaries when
-MLIR/CUDA/Metal toolchains are available.
+By design: the Tier 0 interpreter returns `NotImplemented` for GPU
+kernel dispatch, FFI symbol resolution, and ML vmap/pmap transforms.
+These features require AOT (`verum run --aot` / `verum build`) with
+MLIR/CUDA/Metal toolchains for GPU, `dlopen`/`dlsym` for FFI, and a
+distributed runtime for pmap. The interpreter errors loudly rather
+than silently producing fake handles, so callers see the boundary.
 
-## FFI in Interpreter Mode
+`IsSymbolResolved` correctly returns `false` in the interpreter so
+conditional branches on FFI availability work.
 
-The Tier 0 interpreter does not perform dynamic symbol resolution
-(`dlopen`/`dlsym`) or ABI-aware marshalling. The corresponding
-opcodes (`LoadSymbol`, `GetLibrary`, `ArrayFromC`, `StructToC`,
-`StructFromC`) return `NotImplemented` errors rather than silently
-producing fake handles or mismarshalled data. Use `--aot` for FFI.
+## Shared<T> Runtime Construction — Partially Resolved
 
-`IsSymbolResolved` correctly returns `false` in the interpreter,
-which is the correct semantic — callers that branch on this value
-skip the FFI path as intended.
+**Status:** The `@thread_local static` initializer pathway
+(`__tls_init_*` functions) was not being invoked by the interpreter —
+the pipeline wholesale-skipped `module.global_ctors` as a defense
+against FFI library initializers that crash on macOS. That caused
+`static mut LOCAL_HEAP: Maybe<LocalHeap> = None` to read back as a
+raw zero `Value` instead of the `None` variant, and the CBGR
+allocator bootstrap crashed.
 
-## ML Vectorization / Distributed Compute
+Fixed in commit 7e12603: the interpreter now executes the TLS subset
+of ctors (function name starts with `__tls_init_`) before main, so
+`@thread_local static mut COUNTER: Int = 42` reads back as `42`. FFI
+initializers keep their existing skip.
 
-`VmapTransform` and `PmapTransform` require JIT tracing and a
-distributed runtime respectively, neither of which the interpreter
-provides. These opcodes return `NotImplemented` instead of the
-previous behavior of silently returning nil. Use AOT mode with
-an appropriate runtime for these.
-
-## Shared&lt;T&gt; / CBGR-allocator Bootstrap (partially resolved)
-
-**Status:** Partially fixed (commit 871cf9d). Added `core.mem.*`
-modules to the AOT retention list so the CBGR allocator bodies are
-now linked into user modules. The "field write out of bounds:
-field index 257/271" cascade failure — which was the surface
-symptom — is fully resolved. The remaining gap is narrower:
-
-**Remaining:** Runtime construction of `Shared::new(...)` still
-crashes with "explicit panic" because the CBGR allocator's
-bootstrapped global heap (`CURRENT_HEAP`) depends on thread-local
-init via `@thread_local static`, which the interpreter does not
-yet fully support. AOT mode has the same limitation for this path.
-
-**Workaround:** avoid user code that constructs `Shared<T>` in
-interpreter mode. Single-observer patterns (direct `&T`,
-`CancellationFlag` without Shared wrapping) work today.
-
-## Cancellation Tokens
-
-`core.async.cancellation` is API-complete and typechecks. The
-runtime `Shared<T>` construction path (used for clonable tokens)
-is blocked on the thread-local static bootstrap above. Single-
-observer patterns work via the exposed `CancellationFlag` type.
+**Remaining:** `Shared::new(42)` still panics further down the
+allocation path with "Expected int, got None" at `value.rs:892`
+inside `integer_arith::handle_subi`. The crash is no longer in the
+TLS bootstrap but in a subsequent `cbgr_alloc` / `LocalHeap` step.
+Single-observer `Cancellation` patterns that avoid `Shared<T>` work;
+multi-clone tokens still require this fix.
 
 ## Variant Method Dispatch
 
-**Status:** Fixed (commit 94b16bf). Direct method calls on
-Maybe/Result (`.unwrap`, `.unwrap_or`, `.is_some`, `.is_none`,
-`.is_ok`, `.is_err`, `.take`, `.as_ref`, `.as_mut`, `.ok`,
-`.expect`, `.unwrap_err`) now work correctly in the interpreter.
+Fixed (commit 94b16bf). Direct method calls on Maybe / Result
+(`.unwrap`, `.unwrap_or`, `.is_some`, `.is_none`, `.is_ok`, `.is_err`,
+`.take`, `.as_ref`, `.as_mut`, `.ok`, `.expect`, `.unwrap_err`)
+resolve correctly in both interpreter and AOT.
 
-**Background:** `core.base.maybe` is intentionally excluded from
-compilation to avoid type collisions with user-defined `Maybe`.
-The LLVM AOT path has an inline intercept in `instruction.rs:9785`;
-the interpreter now mirrors that in `dispatch_variant_method` using
-empirical variant-layout heuristics (Some/Ok = tag 0 with payload;
-None = tag 0 no payload; Err = tag 1 with payload).
+## Text Builder + Byte-Level Writes
+
+Fixed (commit 945753f, b26abf8, 270a8e6, this cycle). The stdlib
+Text builder uses `memset(ptr, byte, 1)` instead of the generic
+`ptr_write<T>` intrinsic. `memset` lowers to
+`FfiSubOpcode::CMemset` → `std::ptr::write_bytes(ptr, byte, 1)` on
+the interpreter and to `llvm.intr.memset` on AOT — both byte-sized.
+`Text == Text` equality and hashing honor the builder layout, so
+`Map<Text, V>` works on keys built incrementally.
 
 ## Cache Invalidation
 
 The stdlib disk cache at `target/.verum-cache/stdlib/` is keyed by
 compiler version, LLVM version, and a blake3 hash of every
 `core/*.vr` file. Upgrading the compiler or LLVM invalidates the
-cache automatically — no manual `cargo clean` needed after version
-bumps.
+cache automatically.
+
+## REPL — Parse-Only
+
+`verum repl` parses and type-checks input but does not evaluate:
+`process_input` at `crates/verum_cli/src/commands/repl.rs:231` only
+reports the parse result. Full VBC evaluation in the REPL is a
+tracked follow-up (wiring a persistent `InterpreterState` that
+accumulates bindings across prompts).
+
+For execution, use `verum run <file.vr>`.
+
+## AOT Async — No Polling Executor
+
+`verum build` on a program that uses `async`/`await`/`spawn` emits
+correct state-machine code but produces a standalone C-ABI binary
+without a future-polling runtime linked. Running such a binary
+reaches an `await` and has no executor to drive the future forward.
+
+For async code use `verum run --interp` (Tier 0 interpreter has an
+internal driver). Adding a minimal single-threaded polling executor
+to AOT binaries is tracked as a separate task.
