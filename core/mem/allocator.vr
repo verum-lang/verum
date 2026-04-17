@@ -1005,6 +1005,16 @@ fn get_thread_id() -> UInt32 {
 
 /// Allocate memory with CBGR tracking.
 /// Returns pointer, generation, and epoch.
+///
+/// Mapped to the `cbgr_alloc` intrinsic at codegen time. The Verum body
+/// below is the SEMANTIC specification — interpreters / AOT backends
+/// replace the call with `FfiExtended(CbgrAlloc, 0xA0)` which bypasses
+/// the stdlib page allocator and hands back a host-allocated block
+/// registered with the CBGR tracker. This lets `Shared<T>`, `Heap<T>`,
+/// `List`, `Map`, and every allocation-bearing stdlib module run under
+/// the Tier 0 interpreter without requiring the FFI-backed page
+/// machinery to bootstrap.
+@intrinsic("cbgr_alloc")
 @inline
 public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
     if size <= 0 {
@@ -1022,6 +1032,8 @@ public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UIn
 }
 
 /// Allocate zeroed memory with CBGR tracking.
+/// Mapped to the `cbgr_alloc_zeroed` intrinsic (FfiSubOpcode 0xA1).
+@intrinsic("cbgr_alloc_zeroed")
 @inline
 public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
     match cbgr_alloc(size, align) {

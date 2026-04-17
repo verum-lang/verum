@@ -1365,11 +1365,50 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             }
             #[cfg(not(feature = "ffi"))]
             {
-                let _ = (symbol_idx, args, source_reg_map);
-                return Err(InterpreterError::NotImplemented {
-                    feature: "FFI calls require the 'ffi' feature",
-                    opcode: None,
-                });
+                // FFI feature is not compiled in, but a handful of memory
+                // syscalls are load-bearing for the stdlib allocator
+                // bootstrap (Shared/Heap/List/Map all end here via
+                // core/mem/allocator.vr:os_mmap). Route the whitelisted
+                // set to Rust's std allocator so interpreter-mode code
+                // can allocate; unknown symbols still surface
+                // NotImplemented so real FFI work is visible.
+                let _ = source_reg_map;
+                let symbol_name = state.module.get_ffi_symbol(FfiSymbolId(symbol_idx))
+                    .and_then(|s| state.module.strings.get(s.name))
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let result = match symbol_name.as_str() {
+                    "mmap" => {
+                        let len = args.get(1).copied().map(|v| v.as_integer_compatible() as usize).unwrap_or(0);
+                        let fd = args.get(4).copied().map(|v| v.as_integer_compatible()).unwrap_or(-1);
+                        if fd != -1 || len == 0 {
+                            Value::from_i64(-1)
+                        } else {
+                            let layout = std::alloc::Layout::from_size_align(len.max(8), 16)
+                                .unwrap_or(std::alloc::Layout::new::<u64>());
+                            let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+                            if ptr.is_null() {
+                                Value::from_i64(-1)
+                            } else {
+                                state.cbgr_allocations.insert(ptr as usize);
+                                Value::from_i64(ptr as i64)
+                            }
+                        }
+                    }
+                    "munmap" | "mprotect" | "madvise" | "msync" | "mlock" | "munlock" => {
+                        Value::from_i64(0)
+                    }
+                    "vm_allocate" | "mach_vm_allocate" => Value::from_i64(0),
+                    "pthread_self" | "mach_thread_self" | "gettid" => Value::from_i64(1),
+                    _ => {
+                        let _ = symbol_idx;
+                        return Err(InterpreterError::NotImplemented {
+                            feature: "FFI calls require the 'ffi' feature (unhandled symbol)",
+                            opcode: None,
+                        });
+                    }
+                };
+                state.set_reg(ret_reg, result);
             }
 
             Ok(DispatchResult::Continue)
@@ -2256,13 +2295,39 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             let dst = read_reg(state)?;
             let size_reg = read_reg(state)?;
             let align_reg = read_reg(state)?;
-            let size = state.get_reg(size_reg).as_integer_compatible() as usize;
-            let align = state.get_reg(align_reg).as_integer_compatible() as usize;
-            let align = align.max(8);
-            let layout = match std::alloc::Layout::from_size_align(size.max(8), align.next_power_of_two()) {
-                Ok(l) => l,
-                Err(_) => std::alloc::Layout::from_size_align(size.max(8), 8).unwrap(),
-            };
+            let raw_size = state.get_reg(size_reg).as_integer_compatible();
+            let raw_align = state.get_reg(align_reg).as_integer_compatible();
+            // Size/align arguments arrive from the Verum side and can be
+            // garbage (bad codegen, pointer-tagged values leaking into
+            // the call). Reject absurd sizes/aligns up front and return
+            // the same "Err(OutOfMemory)" shape the stdlib would — the
+            // caller can then surface an allocation failure instead of
+            // the interpreter panicking on LayoutError.
+            const MAX_ALLOC: i64 = 1 << 30; // 1 GiB cap in the interpreter
+            if raw_size <= 0 || raw_size > MAX_ALLOC || raw_align <= 0 || raw_align > 4096 {
+                // Build an Err variant with a nil payload so destructuring
+                // `Err(_)` fires cleanly in user code.
+                let variant_size = 8 + std::mem::size_of::<Value>();
+                let err_obj = state.heap.alloc_with_init(
+                    crate::types::TypeId(0x8000 + 1), // tag=1 = Err
+                    variant_size,
+                    |data| {
+                        let tag_ptr = data.as_mut_ptr() as *mut u32;
+                        unsafe { *tag_ptr = 1; *tag_ptr.add(1) = 1; }
+                    },
+                )?;
+                let err_base = err_obj.as_ptr() as *mut u8;
+                let payload_off = crate::interpreter::heap::OBJECT_HEADER_SIZE + 8;
+                unsafe {
+                    std::ptr::write(err_base.add(payload_off) as *mut Value, Value::nil());
+                }
+                state.set_reg(dst, Value::from_ptr(err_obj.as_ptr()));
+                return Ok(DispatchResult::Continue);
+            }
+            let size = raw_size as usize;
+            let align: usize = (raw_align as usize).next_power_of_two().max(8);
+            let layout = std::alloc::Layout::from_size_align(size, align)
+                .unwrap_or_else(|_| std::alloc::Layout::from_size_align(size, 8).unwrap());
             // SAFETY: layout has non-zero size and valid alignment by
             // construction. The allocator contract requires matching the
             // layout on dealloc; callers are expected to route through
@@ -2284,23 +2349,45 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // epoch = current interpreter epoch counter.
             let generation = 1i64;
             let epoch = state.cbgr_epoch as i64;
-            // Materialise as a 3-tuple heap object matching `Pack` layout
-            // so tuple-pattern destructuring `let (ptr, g, e) = ...`
-            // reads each field at its expected offset. Mirrors the code
-            // in pattern_matching::handle_pack.
-            let data_size = 3 * std::mem::size_of::<Value>();
-            let obj = state.heap.alloc_with_init(
+            // Materialise a 3-tuple matching `Pack` layout so
+            // `let (ptr, g, e) = …` destructures each field at its
+            // expected offset.
+            let tuple_size = 3 * std::mem::size_of::<Value>();
+            let tuple_obj = state.heap.alloc_with_init(
                 crate::types::TypeId::TUPLE,
-                data_size,
+                tuple_size,
                 |_data| {},
             )?;
-            let data_ptr = obj.data_ptr() as *mut Value;
+            let tuple_data = tuple_obj.data_ptr() as *mut Value;
             unsafe {
-                std::ptr::write(data_ptr.add(0), Value::from_i64(ptr as i64));
-                std::ptr::write(data_ptr.add(1), Value::from_i64(generation));
-                std::ptr::write(data_ptr.add(2), Value::from_i64(epoch));
+                std::ptr::write(tuple_data.add(0), Value::from_i64(ptr as i64));
+                std::ptr::write(tuple_data.add(1), Value::from_i64(generation));
+                std::ptr::write(tuple_data.add(2), Value::from_i64(epoch));
             }
-            state.set_reg(dst, Value::from_ptr(obj.as_ptr()));
+            let tuple_val = Value::from_ptr(tuple_obj.as_ptr());
+
+            // Wrap in Ok(tuple). Result layout (from `handle_make_variant`):
+            //   [tag: u32][field_count: u32][payload: Value * N]
+            // Ok = tag 0, single payload field holding the tuple.
+            let variant_size = 8 + 1 * std::mem::size_of::<Value>();
+            let variant_obj = state.heap.alloc_with_init(
+                crate::types::TypeId(0x8000 + 0), // tag=0 = Ok
+                variant_size,
+                |data| {
+                    let tag_ptr = data.as_mut_ptr() as *mut u32;
+                    unsafe {
+                        *tag_ptr = 0;
+                        *tag_ptr.add(1) = 1;
+                    }
+                },
+            )?;
+            let variant_base = variant_obj.as_ptr() as *mut u8;
+            let payload_offset = crate::interpreter::heap::OBJECT_HEADER_SIZE + 8;
+            unsafe {
+                let field_ptr = variant_base.add(payload_offset) as *mut Value;
+                std::ptr::write(field_ptr, tuple_val);
+            }
+            state.set_reg(dst, Value::from_ptr(variant_obj.as_ptr()));
             Ok(DispatchResult::Continue)
         }
 
