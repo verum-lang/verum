@@ -23,7 +23,6 @@
 // 3. Pattern effectiveness tracking
 // 4. Integration with refinement verification
 // 5. Performance benchmarks
-#![allow(unexpected_cfgs)]
 
 use verum_ast::{
     Type, TypeKind,

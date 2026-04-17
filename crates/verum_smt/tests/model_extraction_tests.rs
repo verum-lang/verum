@@ -23,7 +23,6 @@
 //! Requires Z3 API migration: z3_context() method, Context params (~8-10 hours to rewrite).
 
 // REQUIRES Z3 API MIGRATION (~8-10 hours): z3_context() method, Context params
-#![allow(unexpected_cfgs)]
 #![cfg(feature = "z3_old_api_tests_disabled")]
 
 use verum_smt::context::Context;

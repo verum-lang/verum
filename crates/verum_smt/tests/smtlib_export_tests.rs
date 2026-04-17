@@ -15,7 +15,6 @@
 // Tests for smtlib_export module
 // Migrated from src/smtlib_export.rs per CLAUDE.md standards
 // FIXED (Session 23): Tests enabled
-#![allow(unexpected_cfgs)]
 // #![cfg(feature = "smtlib_export_tests_disabled")]
 
 use verum_smt::smtlib_export::*;

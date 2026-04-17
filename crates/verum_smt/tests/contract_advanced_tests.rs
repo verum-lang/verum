@@ -20,7 +20,6 @@
 // - Frame conditions
 //
 // FIXED (Session 24): VerificationCost.category field added
-#![allow(unexpected_cfgs)]
 
 use verum_ast::literal::IntLit;
 use verum_ast::{BinOp, Expr, ExprKind, Ident, Literal, LiteralKind, Path, Span, Type, TypeKind};

@@ -18,7 +18,6 @@
 // proof extraction, SMT-LIB2 export, and enhanced counterexamples.
 //
 // REQUIRES API MIGRATION: ComplexityThresholds, TacticKind variants changed
-#![allow(unexpected_cfgs)]
 #![cfg(feature = "advanced_features_tests_disabled")]
 
 use verum_ast::{

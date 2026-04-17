@@ -18,7 +18,6 @@
 // and CEGAR loops.
 //
 // FIXED (Session 24): Interpolant.validate now uses verum_smt::Context
-#![allow(unexpected_cfgs)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 

@@ -15,7 +15,6 @@
 // Tests for unsat_core module
 // Migrated from src/unsat_core.rs per CLAUDE.md standards
 // FIXED (Session 23): Tests enabled
-#![allow(unexpected_cfgs)]
 // #![cfg(feature = "unsat_core_tests_disabled")]
 
 use verum_common::{Maybe, Text};

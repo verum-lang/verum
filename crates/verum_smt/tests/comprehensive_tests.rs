@@ -50,7 +50,6 @@
 //! Tests require Z3 API migration: forall_const, exists_const, Context params (~20-30 hours).
 
 // REQUIRES Z3 API MIGRATION (~20-30 hours): forall_const, exists_const, Context params
-#![allow(unexpected_cfgs)]
 #![cfg(feature = "z3_old_api_tests_disabled")]
 
 use std::time::Duration;

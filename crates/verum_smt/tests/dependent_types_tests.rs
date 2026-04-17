@@ -31,7 +31,6 @@
 // current implementation (dependent::*, type_level_computation::*, etc.). They
 // appear to be stubs for future dependent types implementation and are disabled
 // until the actual implementation is added.
-#![allow(unexpected_cfgs)]
 #![cfg(feature = "dependent_types_implementation_exists")]
 
 use verum_ast::{

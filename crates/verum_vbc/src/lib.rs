@@ -38,6 +38,16 @@
 #![warn(clippy::all)]
 #![allow(clippy::result_large_err)]
 #![allow(clippy::large_enum_variant)]
+// Test fixtures / round-trip serializer tests use arbitrary floats
+// like 3.14159, 2.71828 as LoadF payloads and assert exact
+// round-trip. They are NOT meant to be the geometric π / e
+// constants; replacing them with `std::f64::consts::PI` would
+// change the bytes written to disk and break the round-trip test.
+#![allow(clippy::approx_constant)]
+// Struct-update syntax `X { field: v, ..Default::default() }` reads
+// worse than `let mut x = X::default(); x.field = v;` in builder-
+// style test code where `default()` has observable side effects.
+#![allow(clippy::field_reassign_with_default)]
 
 pub mod archive;
 pub mod dtype;

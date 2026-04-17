@@ -26,7 +26,6 @@
 // - Use verum_std::core::Text instead of verum_common::Text (which is just String alias)
 // - Text::from() returns verum_std::core::Text, but dependent module expects this type
 
-#![allow(unexpected_cfgs)]
 #![cfg(feature = "dependent_types_v2_tests_disabled")]
 
 use verum_ast::{
