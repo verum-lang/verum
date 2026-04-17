@@ -1003,6 +1003,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         }
     }
 
+
     Err(InterpreterError::Panic {
         message: format!("method '{}' not found on value", method_name),
     })
@@ -1035,9 +1036,9 @@ pub(super) fn dispatch_primitive_method(
     method: &str,
     args: &RegRange,
 ) -> InterpreterResult<Option<Value>> {
-    #[cfg(debug_assertions)]
-    eprintln!("DBG dispatch_primitive_method method={:?} is_int={} is_boxed_int={} is_ptr={} is_nil={}",
-        method, receiver.is_int(), receiver.is_boxed_int(), receiver.is_ptr(), receiver.is_nil());
+    // (removed leftover debug eprintln! that flooded stderr on every method
+    // dispatch in debug builds — that noise polluted test stdout/stderr and
+    // broke expected-stdout comparisons in the VCS runner.)
     // If method name is qualified (contains "."), check if the type prefix is a known builtin.
     // For user-defined types like "SimpleVec.len", skip builtin dispatch so user method is called.
     // EXCEPTION: If the receiver's actual ObjectHeader TypeId is a builtin collection (Map, Set,
@@ -5169,10 +5170,10 @@ pub(super) fn list_push(state: &mut InterpreterState, list_val: Value, new_val: 
 ///   Result<T, E> = Ok(T) | Err(E)  → Ok = tag 0, Err = tag 1
 ///   Maybe<T>     = None  | Some(T) → None = tag 0 (field_count=0), Some = tag 1
 pub(super) fn dispatch_variant_method(
-    _state: &mut InterpreterState,
+    state: &mut InterpreterState,
     receiver: Value,
     method: &str,
-    _args: &RegRange,
+    args: &RegRange,
 ) -> InterpreterResult<Option<Value>> {
     let base_ptr = receiver.as_ptr::<u8>();
     if base_ptr.is_null() {
@@ -5192,21 +5193,106 @@ pub(super) fn dispatch_variant_method(
     let field_count = unsafe { *((data_start as *const u32).add(1)) };
 
     match method {
-        // NOTE: unwrap, unwrap_err, and expect are NOT handled here because
-        // they have different semantics for Maybe vs Result:
-        //   - Maybe: None (tag=0) should panic, Some (tag=1) should return value
-        //   - Result: Ok (tag=0) should return value, Err (tag=1) should panic
-        // Since we can't distinguish Maybe from Result at runtime (both use the
-        // same TypeId scheme), we let these methods fall through to the user-defined
-        // implementations in maybe.vr and result.vr which have correct match statements.
+        // Predicates based on tag/field_count heuristics:
+        // - is_ok/is_err use Result convention (tag 0 = Ok with payload, tag 1 = Err with payload)
+        // - is_some/is_none use Maybe convention (tag 0 + no payload = None, tag 1 = Some)
+        // Predicates based on tag/field_count heuristics.
+        // Empirical variant layout (validated via runtime observation):
+        //   Some(v) / Ok(v) → tag=0, field_count=1
+        //   None            → tag=0, field_count=0 (or the variant is nil)
+        //   Err(e)          → tag=1, field_count=1
+        // is_some: payload present regardless of tag (covers Some/Ok).
+        // is_ok:   tag=0 AND payload present (Ok-shaped).
+        // is_err:  tag!=0 OR no payload (Err / None-shaped).
+        // is_none: no payload (None-shaped).
+        "is_ok"   => Ok(Some(Value::from_bool(tag == 0 && field_count > 0))),
+        "is_err"  => Ok(Some(Value::from_bool(tag != 0))),
+        "is_some" => Ok(Some(Value::from_bool(field_count > 0))),
+        "is_none" => Ok(Some(Value::from_bool(field_count == 0))),
 
-        // Predicates work correctly based on tag/field_count heuristics:
-        // is_ok/is_err use Result convention (tag 0 = Ok, tag 1 = Err)
-        // is_some/is_none use Maybe convention (tag 0 + no payload = None, tag 1 = Some)
-        "is_ok" => Ok(Some(Value::from_bool(tag == 0 && field_count > 0))),
-        "is_err" => Ok(Some(Value::from_bool(tag != 0))),
-        "is_some" => Ok(Some(Value::from_bool(tag != 0 && field_count > 0))),
-        "is_none" => Ok(Some(Value::from_bool(tag == 0 && field_count == 0))),
+        // Value extraction: works for both Maybe.Some and Result.Ok (any
+        // variant with payload > 0). Maybe.None and Result.Err-no-payload
+        // panic. The payload lives immediately after the tag/field_count
+        // header at offset OBJECT_HEADER_SIZE + 8 (tag) + 8 (field_count).
+        // stdlib's maybe.vr is excluded from compilation to avoid type
+        // collision with user-defined `Maybe`, so these methods must be
+        // provided as interpreter intrinsics — otherwise any call to
+        // `x.unwrap()` on a Maybe/Result value panics with "not found".
+        "unwrap" | "expect" => {
+            // Correct path: tag 0 with payload = Some/Ok (return payload),
+            // everything else (None, Err) panics.
+            if tag == 0 && field_count > 0 {
+                let payload_ptr = unsafe {
+                    base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
+                };
+                Ok(Some(unsafe { *payload_ptr }))
+            } else {
+                Err(InterpreterError::Panic {
+                    message: format!("called `{}` on a None/Err value", method),
+                })
+            }
+        }
+        // unwrap_err is the mirror of unwrap for Result: returns the Err
+        // payload if present (tag != 0), panics on Ok.
+        "unwrap_err" => {
+            if tag != 0 && field_count > 0 {
+                let payload_ptr = unsafe {
+                    base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
+                };
+                Ok(Some(unsafe { *payload_ptr }))
+            } else {
+                Err(InterpreterError::Panic {
+                    message: "called `unwrap_err` on an Ok value".to_string(),
+                })
+            }
+        }
+        // unwrap_or: returns Some/Ok payload, else the default argument.
+        // For Err(e) and None, the default is returned — NOT the error payload.
+        "unwrap_or" => {
+            if tag == 0 && field_count > 0 {
+                let payload_ptr = unsafe {
+                    base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
+                };
+                Ok(Some(unsafe { *payload_ptr }))
+            } else if args.count > 0 {
+                let caller_base = state.reg_base();
+                let default_val = state.registers.get(caller_base, Reg(args.start.0));
+                Ok(Some(default_val))
+            } else {
+                Ok(Some(Value::nil()))
+            }
+        }
+        // as_ref / as_mut: in Verum's value model, the value itself is
+        // effectively a reference to the heap variant, so they are no-ops
+        // that return the receiver.
+        "as_ref" | "as_mut" => Ok(Some(receiver)),
+        // take: replaces payload with None-shape (tag=0, fc=0) and
+        // returns the original value. Mirrors Option::take() semantics.
+        "take" => {
+            let original = receiver;
+            if field_count > 0 {
+                // Mutate in place: clear tag and field_count to turn this
+                // variant into the None/unit shape.
+                unsafe {
+                    let tag_ptr = (base_ptr as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut u32;
+                    *tag_ptr = 0;
+                    *tag_ptr.add(1) = 0;
+                }
+            }
+            Ok(Some(original))
+        }
+        // ok: Result<T, E>.ok() -> Maybe<T> — for Ok(v) returns Some(v),
+        // for Err(_) returns None. Returning the receiver as-is works
+        // because the variant representation is identical.
+        "ok" => {
+            if tag == 0 && field_count > 0 {
+                Ok(Some(receiver))
+            } else {
+                // Allocate a fresh None variant (tag=0, fc=0).
+                let none_val = make_none_value(state)?;
+                Ok(Some(none_val))
+            }
+        }
 
         _ => Ok(None), // Not a variant method we handle - fall through to user-defined methods
     }
