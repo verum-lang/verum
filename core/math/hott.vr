@@ -126,7 +126,7 @@ public fn apd<A, B: fn(A) -> Type>(
     a: A,
     b: A,
     p: Path<A>(a, b),
-) -> Path<B(b)>(transport(ap(fn(x) -> B(x), a, b, p), f(a)), f(b)) {
+) -> Path<B(b)>(transport(ap(|x| B(x), a, b, p), f(a)), f(b)) {
     @builtin_apd(f, p)
 }
 
@@ -199,8 +199,8 @@ public fn equiv_inv<A, B>(e: Equiv<A, B>) -> Equiv<B, A> {
 
 /// Compose equivalences: if A ≃ B and B ≃ C then A ≃ C.
 public fn equiv_compose<A, B, C>(e1: Equiv<A, B>, e2: Equiv<B, C>) -> Equiv<A, C> {
-    let f = fn(a: A) -> e2.forward(e1.forward(a));
-    let g = fn(c: C) -> e1.proof.inverse(e2.proof.inverse(c));
+    let f = |a: A| e2.forward(e1.forward(a));
+    let g = |c: C| e1.proof.inverse(e2.proof.inverse(c));
     Equiv {
         forward: f,
         proof: IsEquiv {
@@ -331,8 +331,8 @@ public axiom ua<A, B>(e: Equiv<A, B>) -> Path<Type>(A, B);
 /// Inverse of univalence: a path of types induces an equivalence.
 ///   ua_inv(p) builds the equivalence from transport along p.
 public fn ua_inv<A, B>(p: Path<Type>(A, B)) -> Equiv<A, B> {
-    let fwd = fn(a: A) -> transport(p, a);
-    let bwd = fn(b: B) -> transport(sym(A, B, p), b);
+    let fwd = |a: A| transport(p, a);
+    let bwd = |b: B| transport(sym(A, B, p), b);
     Equiv {
         forward: fwd,
         proof: IsEquiv {
@@ -363,7 +363,7 @@ public fn happly<A, B>(
     p: Path<fn(A) -> B>(f, g),
     x: A,
 ) -> Path<B>(f(x), g(x)) {
-    ap(fn(h: fn(A) -> B) -> h(x), f, g, p)
+    ap(|h: fn(A| B) -> h(x), f, g, p)
 }
 
 /// Univalence for propositions: logically equivalent props are equal.
@@ -485,7 +485,7 @@ public type PathOver<A, B: fn(A) -> Type>(
     u: B(a),
     v: B(b),
 ) is {
-    over: Path<B(b)>(transport(ap(fn(x: A) -> B(x), a, b, p), u), v),
+    over: Path<B(b)>(transport(ap(|x: A| B(x), a, b, p), u), v),
 };
 
 /// Transport is functorial: transporting along a composite is composing transports.
@@ -520,7 +520,7 @@ public theorem transport_const<A, B>(
     p: Path<A>(a1, a2),
     b: B,
 )
-    -> Path<B>(transport(ap(fn(_: A) -> B, a1, a2, p), b), b)
+    -> Path<B>(transport(ap(|_: A| B, a1, a2, p), b), b)
 proof by auto;
 
 // =============================================================================
@@ -601,7 +601,7 @@ proof by auto;
 /// ap of identity: ap(id, p) = p.
 @verify(formal)
 public theorem ap_id<A>(a: A, b: A, p: Path<A>(a, b))
-    -> Path<Path<A>(a, b)>(ap(fn(x: A) -> x, a, b, p), p)
+    -> Path<Path<A>(a, b)>(ap(|x: A| x, a, b, p), p)
 proof by auto;
 
 /// ap of composition: ap(g ∘ f, p) = ap(g, ap(f, p)).
@@ -613,7 +613,7 @@ public theorem ap_compose<A, B, C>(
     p: Path<A>(a, b),
 )
     -> Path<Path<C>(g(f(a)), g(f(b)))>(
-        ap(fn(x: A) -> g(f(x)), a, b, p),
+        ap(|x: A| g(f(x)), a, b, p),
         ap(g, f(a), f(b), ap(f, a, b, p)),
     )
 proof by auto;

@@ -33,7 +33,7 @@ public type Proof<P> is {
 /// A function `fn(A) -> Void` is a refutation of A.
 ///
 /// This is the type-theoretic foundation of proof by contradiction:
-/// `Not<P> = fn(P) -> Void`.
+/// `Not<P> = |P| Void`.
 public type Void is ();  // unit stand-in; true Void requires uninhabited type support
 
 /// Absurdity elimination: from a proof of Void, derive anything.

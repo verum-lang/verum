@@ -501,42 +501,42 @@ public fn mathesis_cohesive_structure<H: InfinityTopos>(
     // -- Core functors derived from the locally contractible site ----------
 
     // Π : send a sheaf to its "shape" (homotopy type of the underlying site).
-    let pi_fn:     fn(&Int) -> Int = fn(x) -> locally_contractible_shape(x, theory_site);
+    let pi_fn:     fn(&Int) -> Int = |x| locally_contractible_shape(x, theory_site);
     // Disc : embed a discrete space (∞-groupoid) as a constant sheaf.
-    let disc_fn:   fn(&Int) -> Int = fn(s) -> constant_sheaf(s, theory_site);
+    let disc_fn:   fn(&Int) -> Int = |s| constant_sheaf(s, theory_site);
     // Γ : evaluate a sheaf at the terminal object (global sections).
-    let gamma_fn:  fn(&Int) -> Int = fn(x) -> global_sections(x, theory_site);
+    let gamma_fn:  fn(&Int) -> Int = |x| global_sections(x, theory_site);
     // coDisc : embed a set as a codiscrete sheaf (right adjoint to Γ).
-    let codisc_fn: fn(&Int) -> Int = fn(s) -> codiscrete_sheaf(s, theory_site);
+    let codisc_fn: fn(&Int) -> Int = |s| codiscrete_sheaf(s, theory_site);
 
     // -- Modality units / counits ------------------------------------------
 
     // Unit  η : x → ʃ(x) = Disc(Π(x)):  localisation map.
-    let shape_unit:  fn(&Int) -> Int = fn(x) -> shape_unit_map(x);
+    let shape_unit:  fn(&Int) -> Int = |x| shape_unit_map(x);
     // Unit  η : x → ♭(x) = Disc(Γ(x)):  flat localisation map.
-    let flat_unit:   fn(&Int) -> Int = fn(x) -> flat_unit_map(x);
+    let flat_unit:   fn(&Int) -> Int = |x| flat_unit_map(x);
     // Unit  η : x → ♯(x) = coDisc(Γ(x)): sharp localisation map.
-    let sharp_unit:  fn(&Int) -> Int = fn(x) -> sharp_unit_map(x);
+    let sharp_unit:  fn(&Int) -> Int = |x| sharp_unit_map(x);
 
     // -- Adjunction witnesses -----------------------------------------------
 
     let pi_disc_adj = make_adjunction(
         pi_fn,
         disc_fn,
-        fn(s) -> pi_disc_unit(s),
-        fn(x) -> pi_disc_counit(x),
+        |s| pi_disc_unit(s),
+        |x| pi_disc_counit(x),
     );
     let disc_gamma_adj = make_adjunction(
         disc_fn,
         gamma_fn,
-        fn(x) -> disc_gamma_unit(x),
-        fn(s) -> disc_gamma_counit(s),
+        |x| disc_gamma_unit(x),
+        |s| disc_gamma_counit(s),
     );
     let gamma_codisc_adj = make_adjunction(
         gamma_fn,
         codisc_fn,
-        fn(s) -> gamma_codisc_unit(s),
-        fn(x) -> gamma_codisc_counit(x),
+        |s| gamma_codisc_unit(s),
+        |x| gamma_codisc_counit(x),
     );
 
     CohesiveToposData {
@@ -564,27 +564,27 @@ public fn mathesis_differentially_cohesive<H: InfinityTopos>(
 
     // Infinitesimal shape Im: quotient by formal/nilpotent thickenings
     // on the reduced sub-site.
-    let im_fn:  fn(&Int) -> Int = fn(x) -> infinitesimal_shape(x, reduced_site);
+    let im_fn:  fn(&Int) -> Int = |x| infinitesimal_shape(x, reduced_site);
     // Infinitesimal flat &: crystal structure (formally étale discretisation).
-    let amp_fn: fn(&Int) -> Int = fn(x) -> infinitesimal_flat(x, reduced_site);
+    let amp_fn: fn(&Int) -> Int = |x| infinitesimal_flat(x, reduced_site);
     // Reduction Rh: project to the reduced sub-site.
-    let rh_fn:  fn(&Int) -> Int = fn(x) -> de_rham_reduction(x, reduced_site);
+    let rh_fn:  fn(&Int) -> Int = |x| de_rham_reduction(x, reduced_site);
 
-    let im_unit_fn:  fn(&Int) -> Int = fn(x) -> im_unit_map(x);
-    let amp_unit_fn: fn(&Int) -> Int = fn(x) -> amp_unit_map(x);
-    let rh_unit_fn:  fn(&Int) -> Int = fn(x) -> rh_unit_map(x);
+    let im_unit_fn:  fn(&Int) -> Int = |x| im_unit_map(x);
+    let amp_unit_fn: fn(&Int) -> Int = |x| amp_unit_map(x);
+    let rh_unit_fn:  fn(&Int) -> Int = |x| rh_unit_map(x);
 
     let im_amp_adj = make_adjunction(
         im_fn,
         amp_fn,
-        fn(x) -> im_amp_unit(x),
-        fn(x) -> im_amp_counit(x),
+        |x| im_amp_unit(x),
+        |x| im_amp_counit(x),
     );
     let amp_rh_adj = make_adjunction(
         amp_fn,
         rh_fn,
-        fn(x) -> amp_rh_unit(x),
-        fn(x) -> amp_rh_counit(x),
+        |x| amp_rh_unit(x),
+        |x| amp_rh_counit(x),
     );
 
     DifferentiallyCohesiveData {
