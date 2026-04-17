@@ -993,6 +993,20 @@ impl VbcCodegen {
                         if let Ok(reg) = self.ctx.get_var_reg(name) {
                             return Ok(Some(reg));
                         }
+                        // Zero-arity variant constructors (None, etc.) MUST
+                        // produce a real variant value. Going through the
+                        // __const_ path below would lower `None` to LoadI 0,
+                        // which then mis-matches as `Some(x)` because IsVar
+                        // treats an Int 0 as "tag 0".
+                        if let Some(tag) = func_info.variant_tag {
+                            let dest = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::MakeVariant {
+                                dst: dest,
+                                tag,
+                                field_count: 0,
+                            });
+                            return Ok(Some(dest));
+                        }
                         // Check if this is a constant with a known value.
                         // Two formats:
                         //   "__const_val_N"  — user-defined const with extracted literal value N

@@ -6082,21 +6082,22 @@ pub(super) fn dispatch_array_method(
 }
 
 /// Create a Maybe variant: Some(int_value) or None
-/// Variant tags registered by codegen/mod.rs: Some=0, None=1
+/// Maybe variant tags follow declaration order: `type Maybe<T> is None | Some(T);`
+/// so None=0 and Some=1. Must agree with register_type_constructors and the
+/// hard-coded constant/variant tables in codegen/mod.rs.
 pub(super) fn make_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> InterpreterResult<Value> {
-    // (heap::OBJECT_HEADER_SIZE imported at module level via `use crate::interpreter::heap;`)
     match opt {
         Some(v) => {
-            // MakeVariant tag=0 (Some), field_count=1, then set field 0
+            // MakeVariant tag=1 (Some), field_count=1, then set field 0
             let data_size = 8 + std::mem::size_of::<Value>();
-            let type_id = TypeId(0x8000); // tag 0
+            let type_id = TypeId(0x8001); // tag 1
             let obj = state.heap.alloc_with_init(
                 type_id,
                 data_size,
                 |data| {
                     let tag_ptr = data.as_mut_ptr() as *mut u32;
                     unsafe {
-                        *tag_ptr = 0;          // Some tag
+                        *tag_ptr = 1;          // Some tag
                         *tag_ptr.add(1) = 1;   // field_count = 1
                     }
                 },
@@ -6111,16 +6112,16 @@ pub(super) fn make_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> 
             Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
         }
         None => {
-            // MakeVariant tag=1 (None), field_count=0
+            // MakeVariant tag=0 (None), field_count=0
             let data_size = 8 + std::mem::size_of::<Value>(); // min 1 field
-            let type_id = TypeId(0x8001); // tag 1
+            let type_id = TypeId(0x8000); // tag 0
             let obj = state.heap.alloc_with_init(
                 type_id,
                 data_size,
                 |data| {
                     let tag_ptr = data.as_mut_ptr() as *mut u32;
                     unsafe {
-                        *tag_ptr = 1;          // None tag
+                        *tag_ptr = 0;          // None tag
                         *tag_ptr.add(1) = 0;   // field_count = 0
                     }
                 },
@@ -6131,21 +6132,18 @@ pub(super) fn make_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> 
     }
 }
 
-/// Create a Some variant wrapping any value
+/// Create a Some variant wrapping any value.
+/// Maybe is declared `None | Some(T)`, so Some gets tag=1.
 pub(super) fn make_some_value(state: &mut InterpreterState, value: Value) -> InterpreterResult<Value> {
-    // (heap::OBJECT_HEADER_SIZE imported at module level via `use crate::interpreter::heap;`)
-    // Maybe variants are registered by codegen with tags: Some=0, None=1
-    // (see codegen/mod.rs variant_tags table). These tags are what the pattern
-    // matcher tests against via IsVar, so builtin constructors must use them too.
     let data_size = 8 + std::mem::size_of::<Value>();
-    let type_id = TypeId(0x8000); // tag 0 for Some
+    let type_id = TypeId(0x8001); // tag 1 for Some
     let obj = state.heap.alloc_with_init(
         type_id,
         data_size,
         |data| {
             let tag_ptr = data.as_mut_ptr() as *mut u32;
             unsafe {
-                *tag_ptr = 0;         // Some tag
+                *tag_ptr = 1;         // Some tag
                 *tag_ptr.add(1) = 1;  // field_count = 1
             }
         },
@@ -6160,19 +6158,18 @@ pub(super) fn make_some_value(state: &mut InterpreterState, value: Value) -> Int
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
-/// Create a None variant
+/// Create a None variant.
+/// Maybe is declared `None | Some(T)`, so None gets tag=0.
 pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult<Value> {
-    // Maybe variants are registered by codegen with tags: Some=0, None=1
-    // (see codegen/mod.rs variant_tags table).
     let data_size = 8;
-    let type_id = TypeId(0x8001); // tag 1 for None
+    let type_id = TypeId(0x8000); // tag 0 for None
     let obj = state.heap.alloc_with_init(
         type_id,
         data_size,
         |data| {
             let tag_ptr = data.as_mut_ptr() as *mut u32;
             unsafe {
-                *tag_ptr = 1;       // None tag
+                *tag_ptr = 0;       // None tag
                 *tag_ptr.add(1) = 0; // field_count = 0
             }
         },

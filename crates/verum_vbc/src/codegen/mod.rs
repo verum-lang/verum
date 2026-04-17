@@ -1219,12 +1219,16 @@ impl VbcCodegen {
             // ControlFlow variants (core/base/ops.vr)
             ("Continue", 0),
             ("Break", 1),
-            // Result variants (core/base/result.vr)
+            // Result variants (core/base/result.vr) — `Ok(T) | Err(E)`
             ("Ok", 0),
             ("Err", 1),
-            // Maybe variants (core/base/maybe.vr)
-            ("Some", 0),
-            ("None", 1),
+            // Maybe variants (core/base/maybe.vr) — `None | Some(T)`.
+            // Tags MUST match declaration order: the pattern matcher and
+            // register_type_constructors both derive tags positionally, so
+            // reversing these here would make `None` and `Some(x)` dispatch
+            // swap at runtime.
+            ("None", 0),
+            ("Some", 1),
             // Bool-like
             ("True", 1),
             ("False", 0),
@@ -1375,9 +1379,12 @@ impl VbcCodegen {
         ];
 
         // Variant constructors that need tags for pattern matching and ? operator
+        // Declaration-order variant tags for built-in sum types; must
+        // agree with register_type_constructors and the register_builtin
+        // table near compile_program.
         let variant_tags: &[(&str, u32)] = &[
             ("Ok", 0), ("Err", 1),
-            ("Some", 0), ("None", 1),
+            ("None", 0), ("Some", 1),
             ("Less", 0), ("Equal", 1), ("Greater", 2),
             ("Continue", 0), ("Break", 1),
             ("True", 1), ("False", 0),

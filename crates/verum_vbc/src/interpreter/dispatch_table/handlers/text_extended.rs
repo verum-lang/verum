@@ -181,19 +181,33 @@ pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> In
         }
         Some(TextSubOpcode::AsBytes) => {
             // Borrow a Text as a byte slice (FatRef with elem_size=1),
-            // handling both NaN-boxed small strings and heap-allocated text.
+            // handling small-string, heap-string, and reference forms.
             //
             // The runtime representation of Text is not the same as the
             // Verum struct `{ptr, len, cap}`:
             //   small string → 6 bytes packed into the NaN-boxed Value itself
             //   heap string  → pointer to `[ObjectHeader][len:u64][bytes...]`
             // Reading `self.ptr` via GetF is wrong in both cases, so we
-            // materialise the byte view here.
+            // materialise the byte view here. References (`&Text`) first
+            // deref to reach the underlying Text value.
             let text_reg = read_reg(state)?;
-            let text = state.get_reg(text_reg);
+            let mut text = state.get_reg(text_reg);
             use crate::value::{FatRef, Capabilities};
             use crate::types::TypeId;
             use super::super::super::heap;
+            use super::super::handlers::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
+
+            // Auto-deref: CBGR register-ref → absolute register, ThinRef → pointee.
+            if is_cbgr_ref(&text) {
+                let (abs_index, _gen) = decode_cbgr_ref(text.as_i64());
+                text = state.registers.get_absolute(abs_index);
+            }
+            if text.is_thin_ref() {
+                let tr = text.as_thin_ref();
+                if !tr.ptr.is_null() {
+                    text = unsafe { *(tr.ptr as *const Value) };
+                }
+            }
 
             let (ptr, len): (*mut u8, u64) = if text.is_small_string() {
                 // Small string: copy the inline bytes into a fresh heap
