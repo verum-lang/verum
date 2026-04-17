@@ -1188,20 +1188,45 @@ pub(crate) fn value_hash(v: Value) -> usize {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
 
-    // For heap strings, hash the actual string bytes, not the pointer
+    // For heap strings, hash the actual string bytes, not the pointer.
+    // Text objects come in two layouts under `TypeId::TEXT`:
+    //   * static heap string: [header][len:u64][bytes…]
+    //   * stdlib builder `{ptr, len, cap}`: three NaN-boxed Value fields
+    //     (24 bytes). Reading a u64 at offset 0 of a builder returns the
+    //     NaN-boxed `ptr` bit pattern as a "length", which then drives an
+    //     out-of-bounds byte loop.
     if super::string_helpers::is_heap_string(&v) {
         let ptr = v.as_ptr::<u8>();
         let data_offset = heap::OBJECT_HEADER_SIZE;
-        let len = unsafe { *(ptr.add(data_offset) as *const u64) } as usize;
-        let bytes_ptr = unsafe { ptr.add(data_offset + 8) };
+        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let (bytes_ptr, len): (*const u8, usize) = if header.size as usize == 24 {
+            let field0 = unsafe { *(ptr.add(data_offset) as *const Value) };
+            let field1 = unsafe { *((ptr.add(data_offset) as *const Value).add(1)) };
+            if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
+                let bp = if field0.is_nil() {
+                    std::ptr::null()
+                } else {
+                    field0.as_ptr::<u8>() as *const u8
+                };
+                (bp, field1.as_i64() as usize)
+            } else {
+                let len = unsafe { *(ptr.add(data_offset) as *const u64) } as usize;
+                (unsafe { ptr.add(data_offset + 8) as *const u8 }, len)
+            }
+        } else {
+            let len = unsafe { *(ptr.add(data_offset) as *const u64) } as usize;
+            (unsafe { ptr.add(data_offset + 8) as *const u8 }, len)
+        };
         let mut hash = FNV_OFFSET;
         // Mix in a string discriminator so strings don't collide with ints
         hash ^= 0xFF;
         hash = hash.wrapping_mul(FNV_PRIME);
-        for i in 0..len {
-            let byte = unsafe { *bytes_ptr.add(i) };
-            hash ^= byte as u64;
-            hash = hash.wrapping_mul(FNV_PRIME);
+        if !bytes_ptr.is_null() {
+            for i in 0..len {
+                let byte = unsafe { *bytes_ptr.add(i) };
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }
         }
         return hash as usize;
     }
@@ -1249,19 +1274,42 @@ pub(crate) fn value_eq(a: Value, b: Value) -> bool {
     false
 }
 
-/// Compare the content of two heap-allocated strings by value.
+/// Compare the content of two heap-allocated strings by value,
+/// transparently handling builder `Text {ptr, len, cap}` vs heap-string
+/// `[len:u64][bytes…]` layouts.
 #[inline]
 fn heap_string_content_eq(a: &Value, b: &Value) -> bool {
-    let data_offset = heap::OBJECT_HEADER_SIZE;
-    let a_ptr = a.as_ptr::<u8>();
-    let b_ptr = b.as_ptr::<u8>();
-    let a_len = unsafe { *(a_ptr.add(data_offset) as *const u64) } as usize;
-    let b_len = unsafe { *(b_ptr.add(data_offset) as *const u64) } as usize;
+    let (a_ptr, a_len) = text_value_bytes_and_len(a);
+    let (b_ptr, b_len) = text_value_bytes_and_len(b);
     if a_len != b_len { return false; }
     if a_len == 0 { return true; }
-    let a_bytes = unsafe { std::slice::from_raw_parts(a_ptr.add(data_offset + 8), a_len) };
-    let b_bytes = unsafe { std::slice::from_raw_parts(b_ptr.add(data_offset + 8), b_len) };
+    if a_ptr.is_null() || b_ptr.is_null() { return false; }
+    let a_bytes = unsafe { std::slice::from_raw_parts(a_ptr, a_len) };
+    let b_bytes = unsafe { std::slice::from_raw_parts(b_ptr, b_len) };
     a_bytes == b_bytes
+}
+
+/// Extract (ptr, len) from a Text value (heap-string or builder layout).
+#[inline]
+fn text_value_bytes_and_len(v: &Value) -> (*const u8, usize) {
+    let data_offset = heap::OBJECT_HEADER_SIZE;
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() { return (std::ptr::null(), 0); }
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    if header.size as usize == 24 {
+        let f0 = unsafe { *(ptr.add(data_offset) as *const Value) };
+        let f1 = unsafe { *((ptr.add(data_offset) as *const Value).add(1)) };
+        if (f0.is_ptr() || f0.is_nil()) && f1.is_int() {
+            let bp = if f0.is_nil() {
+                std::ptr::null()
+            } else {
+                f0.as_ptr::<u8>() as *const u8
+            };
+            return (bp, f1.as_i64() as usize);
+        }
+    }
+    let len = unsafe { *(ptr.add(data_offset) as *const u64) } as usize;
+    (unsafe { ptr.add(data_offset + 8) as *const u8 }, len)
 }
 
 /// NewMap (0x6B) - Create new map with default capacity.

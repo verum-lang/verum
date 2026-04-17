@@ -30,6 +30,26 @@ pub(super) fn extract_string(value: &Value, _state: &InterpreterState) -> String
             if header.type_id == crate::types::TypeId::TEXT
                 || header.type_id == crate::types::TypeId(0x0001)
             {
+                // Builder Text `{Value(ptr), Value(len), Value(cap)}` is exactly 24 bytes;
+                // read from (ptr, len) fields. Heap-string path uses `[len:u64][bytes…]`.
+                let data_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) };
+                if header.size as usize == 24 {
+                    let field0 = unsafe { *(data_ptr as *const Value) };
+                    let field1 = unsafe { *((data_ptr as *const Value).add(1)) };
+                    if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
+                        let b_ptr = if field0.is_nil() {
+                            std::ptr::null()
+                        } else {
+                            field0.as_ptr::<u8>() as *const u8
+                        };
+                        let b_len = field1.as_i64() as usize;
+                        if !b_ptr.is_null() && b_len > 0 && b_len <= 1_000_000 {
+                            let bytes = unsafe { std::slice::from_raw_parts(b_ptr, b_len) };
+                            return String::from_utf8_lossy(bytes).to_string();
+                        }
+                        return String::new();
+                    }
+                }
                 // Read length from after the header
                 let len_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) as *const u64 };
                 let len = unsafe { *len_ptr } as usize;
@@ -123,6 +143,41 @@ pub(super) fn resolve_string_value(v: &Value, state: &InterpreterState) -> Strin
         if !ptr.is_null() {
             unsafe {
                 let data_offset = heap::OBJECT_HEADER_SIZE;
+                let header = &*(ptr as *const heap::ObjectHeader);
+                let size = header.size as usize;
+
+                // Text objects come in two runtime shapes sharing
+                // `TypeId::TEXT`:
+                //   * static / intrinsic-built heap string — data is
+                //     `[len:u64][bytes…]` right after the header.
+                //   * stdlib builder `Text {ptr, len, cap}` — three
+                //     NaN-boxed Value fields (exactly 24 bytes).
+                // Reading a u64 at offset 0 for a builder Text returns
+                // the `ptr` field NaN-boxed form, i.e. garbage. Detect
+                // the builder case by size + field tags.
+                if size == 24 {
+                    let field0 = *(ptr.add(data_offset) as *const Value);
+                    let field1 = *((ptr.add(data_offset) as *const Value).add(1));
+                    if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
+                        let builder_ptr = if field0.is_nil() {
+                            std::ptr::null()
+                        } else {
+                            field0.as_ptr::<u8>() as *const u8
+                        };
+                        let builder_len = field1.as_i64() as usize;
+                        if builder_ptr.is_null() || builder_len == 0 {
+                            return String::new();
+                        }
+                        if builder_len <= 65536 {
+                            let bytes = std::slice::from_raw_parts(builder_ptr, builder_len);
+                            if let Ok(s) = std::str::from_utf8(bytes) {
+                                return s.to_string();
+                            }
+                        }
+                    }
+                }
+
+                // Heap-string fallback: `[len:u64][bytes…]`.
                 let len_ptr = ptr.add(data_offset) as *const u64;
                 let len = *len_ptr as usize;
                 if len <= 65536 {
