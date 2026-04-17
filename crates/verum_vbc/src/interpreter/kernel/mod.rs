@@ -139,10 +139,12 @@ pub fn get_capabilities() -> &'static BackendCapabilities {
     CAPABILITIES.get_or_init(BackendCapabilities::detect)
 }
 
-/// Minimum tensor size for GPU dispatch (elements). Reserved for future
-/// CPU-vs-GPU kernel-selection heuristics; not read yet in the interpreter
-/// path (GPU dispatch happens at AOT via @device(gpu) annotations).
-#[allow(dead_code)]
+/// Minimum tensor size for GPU dispatch (elements). Read by the Metal
+/// backend's CPU-vs-GPU selection — see the
+/// `#[cfg(all(target_os = "macos", feature = "metal"))]` branches below.
+/// Gated to the same cfg so it doesn't appear "dead" on non-Metal builds
+/// (the const exists only where it's referenced).
+#[cfg(all(target_os = "macos", feature = "metal"))]
 const MIN_GPU_SIZE: usize = 4096;
 
 // ============================================================================

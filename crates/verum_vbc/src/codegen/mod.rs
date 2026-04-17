@@ -1607,7 +1607,8 @@ impl VbcCodegen {
             ("tensor_zeros", 1, "tensor_zeros"),
             ("tensor_ones", 1, "tensor_ones"),
             ("tensor_full", 2, "tensor_full"),
-            ("tensor_from_list", 1, "tensor_from_list"),
+            // from_list(data, shape) — takes the flat payload + the target shape.
+            ("tensor_from_list", 2, "tensor_from_list"),
             ("tensor_shape", 1, "tensor_shape"),
             ("tensor_reshape", 2, "tensor_reshape"),
             ("tensor_matmul", 2, "tensor_matmul"),
@@ -4846,20 +4847,6 @@ impl VbcCodegen {
         self.register_ffi_extern_function(func)?;
 
         Ok(())
-    }
-
-    /// Gets the current FFI platform from target config.
-    /// Reserved for FFI symbol-signature generation; the current
-    /// interpreter path reads `target_os` directly in the FFI dispatcher,
-    /// so this helper is not wired into a caller yet.
-    #[allow(dead_code)]
-    fn get_current_ffi_platform(&self) -> FfiPlatform {
-        match self.config.target_config.target_os.as_str() {
-            "darwin" | "macos" => FfiPlatform::Darwin,
-            "linux" => FfiPlatform::Linux,
-            "windows" => FfiPlatform::Windows,
-            _ => FfiPlatform::Darwin, // Default for now
-        }
     }
 
     /// Creates an FFI signature from a function declaration.

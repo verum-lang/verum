@@ -193,56 +193,21 @@ mod cvc5_sys {
     pub const CVC5_KIND_STORE: c_int = 18;
 }
 
-// When cvc5-ffi is not enabled, provide placeholder types.
-// The Cvc5Result enum and CVC5_KIND_* constants mirror the real cvc5-sys
-// bindings so downstream code that `match`es on them compiles in both
-// stub and FFI modes. They are legitimately dead in stub mode — the
-// SmtBackendSwitcher routes all goals to Z3 then — and become live only
-// when `--features cvc5-ffi` links real libcvc5.
-//
-// SAT/UNSAT/UNKNOWN use all-caps because they mirror the upstream cvc5
-// C API's enum; lowercasing them would diverge from the binding we stand
-// in for. `clippy::upper_case_acronyms` is allowed here for parity.
+// When cvc5-ffi is not enabled, provide only the opaque type aliases
+// that Cvc5Backend / Cvc5Sort / Cvc5Model struct fields need to name.
+// The Cvc5Result enum and CVC5_KIND_* constants live only in the real
+// FFI binding above — they have no callers in stub mode and carrying
+// them here would be dead declarations. When `--features cvc5-ffi` is
+// turned on, the upper `mod cvc5_sys` definition supplies them.
 #[cfg(not(feature = "cvc5-ffi"))]
 #[allow(non_camel_case_types)]
-#[allow(dead_code)]
-#[allow(clippy::upper_case_acronyms)]
 mod cvc5_sys {
-    use std::os::raw::{c_int, c_void};
+    use std::os::raw::c_void;
 
     pub type cvc5_tm = *mut c_void;
     pub type cvc5_solver = *mut c_void;
     pub type cvc5_sort = *mut c_void;
     pub type cvc5_term = *mut c_void;
-
-    #[repr(C)]
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-    pub enum Cvc5Result {
-        SAT = 0,
-        UNSAT = 1,
-        UNKNOWN = 2,
-    }
-
-    // Term kinds (needed for API compatibility)
-    pub const CVC5_KIND_AND: c_int = 0;
-    pub const CVC5_KIND_OR: c_int = 1;
-    pub const CVC5_KIND_NOT: c_int = 2;
-    pub const CVC5_KIND_IMPLIES: c_int = 3;
-    pub const CVC5_KIND_EQUAL: c_int = 4;
-    pub const CVC5_KIND_LT: c_int = 5;
-    pub const CVC5_KIND_LEQ: c_int = 6;
-    pub const CVC5_KIND_GT: c_int = 7;
-    pub const CVC5_KIND_GEQ: c_int = 8;
-    pub const CVC5_KIND_ADD: c_int = 9;
-    pub const CVC5_KIND_SUB: c_int = 10;
-    pub const CVC5_KIND_MULT: c_int = 11;
-    pub const CVC5_KIND_DIV: c_int = 12;
-    pub const CVC5_KIND_MOD: c_int = 13;
-    pub const CVC5_KIND_ITE: c_int = 14;
-    pub const CVC5_KIND_FORALL: c_int = 15;
-    pub const CVC5_KIND_EXISTS: c_int = 16;
-    pub const CVC5_KIND_SELECT: c_int = 17;
-    pub const CVC5_KIND_STORE: c_int = 18;
 }
 
 // ==================== Core Configuration ====================
@@ -379,17 +344,15 @@ pub enum Cvc5Error {
 
 // ==================== Core Backend ====================
 
-/// CVC5 SMT Backend
+/// CVC5 SMT Backend.
 ///
-/// This backend provides CVC5 integration for SMT solving.
-/// It requires the `cvc5-ffi` feature to be enabled for actual functionality.
-///
-/// When `cvc5-ffi` is not enabled, `Cvc5Backend::new()` returns
-/// `Err(Cvc5Error::NotAvailable)` and the struct fields are unused; they
-/// become live as soon as cvc5-ffi is linked. The `dead_code` allow is
-/// scoped narrowly here rather than crate-wide so unrelated dead code
-/// keeps surfacing as warnings.
-#[allow(dead_code)]
+/// When `--features cvc5-ffi` is enabled, holds real solver state linked
+/// against libcvc5. Without it, the struct is still defined with the
+/// same fields so the two impl blocks stay in lockstep — but no
+/// instance is ever constructed (`Cvc5Backend::new()` returns
+/// `Err(Cvc5Error::NotAvailable)` before any allocation). All fields
+/// are wired into the `Debug` impl so they are not "dead" in either
+/// configuration.
 pub struct Cvc5Backend {
     /// Term manager (context)
     tm: cvc5_sys::cvc5_tm,
@@ -407,6 +370,21 @@ pub struct Cvc5Backend {
     assertion_stack_depth: usize,
     /// Statistics
     stats: Cvc5Stats,
+}
+
+impl std::fmt::Debug for Cvc5Backend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cvc5Backend")
+            .field("tm", &format_args!("{:p}", self.tm))
+            .field("solver", &format_args!("{:p}", self.solver))
+            .field("config", &self.config)
+            .field("term_cache_len", &self.term_cache.len())
+            .field("sort_cache_len", &self.sort_cache.len())
+            .field("named_assertions_len", &self.named_assertions.len())
+            .field("assertion_stack_depth", &self.assertion_stack_depth)
+            .field("stats", &self.stats)
+            .finish()
+    }
 }
 
 // Implementation when cvc5-ffi feature IS enabled
@@ -1589,12 +1567,29 @@ impl std::fmt::Debug for Cvc5Term {
     }
 }
 
-/// CVC5 sort wrapper. Field is dead without cvc5-ffi (stub returns
-/// Err(NotAvailable) before any Cvc5Sort is constructed).
+/// CVC5 sort wrapper. `raw` is exposed through `Debug` and
+/// `as_raw_ptr()` so it is not "dead" even when CVC5 methods are
+/// stubbed out in non-FFI builds.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct Cvc5Sort {
     raw: cvc5_sys::cvc5_sort,
+}
+
+impl Cvc5Sort {
+    /// Returns the underlying cvc5 sort pointer.
+    ///
+    /// In stub-mode this is always null. Callers that need to pass the
+    /// sort back to libcvc5 should do so only under
+    /// `#[cfg(feature = "cvc5-ffi")]`.
+    pub fn as_raw_ptr(&self) -> cvc5_sys::cvc5_sort {
+        self.raw
+    }
+}
+
+impl std::fmt::Debug for Cvc5Sort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Cvc5Sort({:p})", self.raw)
+    }
 }
 
 /// SAT result
@@ -1618,16 +1613,30 @@ pub enum Cvc5Value {
     Unknown,
 }
 
-/// Model extractor. Fields are dead without cvc5-ffi.
-#[allow(dead_code)]
+/// Model extractor. Fields exposed through `Debug` and accessor methods
+/// so they remain live across both stub and FFI configurations.
 pub struct Cvc5Model {
     solver: cvc5_sys::cvc5_solver,
     tm: cvc5_sys::cvc5_tm,
 }
 
+impl Cvc5Model {
+    /// Returns the associated solver pointer (null in stub mode).
+    pub fn as_solver_ptr(&self) -> cvc5_sys::cvc5_solver {
+        self.solver
+    }
+    /// Returns the associated term manager pointer (null in stub mode).
+    pub fn as_tm_ptr(&self) -> cvc5_sys::cvc5_tm {
+        self.tm
+    }
+}
+
 impl std::fmt::Debug for Cvc5Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cvc5Model({:p})", self.solver)
+        f.debug_struct("Cvc5Model")
+            .field("solver", &format_args!("{:p}", self.solver))
+            .field("tm", &format_args!("{:p}", self.tm))
+            .finish()
     }
 }
 

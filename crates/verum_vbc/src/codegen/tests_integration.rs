@@ -7,12 +7,11 @@
 //! 4. Verify results
 //!
 //! This validates that all components work together correctly.
-
-// Tests destructure `let (module, func) = create_test_module(...)`; many
-// tests only exercise `module.*` and never read `func`. Binding it by
-// value (rather than `(module, _)`) keeps the signature obvious and
-// stable when new tests that do want to inspect `func` are added.
-#![allow(unused_variables)]
+//!
+//! Some tests destructure `let (module, _func) = create_test_module(...)`
+//! with the `_` prefix because they only exercise `module.*`. Tests that
+//! actually inspect the function (e.g. `instr_count(&func)`) leave the
+//! binding as `func`.
 
 use crate::instruction::{Instruction, Reg};
 use crate::module::{FunctionDescriptor, VbcFunction, VbcModule};
@@ -300,7 +299,7 @@ mod control_flow_tests {
             Instruction::Ret { value: Reg(0) },
         ];
 
-        let (module, func) = create_test_module("test_jmp", instructions);
+        let (module, _func) = create_test_module("test_jmp", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -329,7 +328,7 @@ mod control_flow_tests {
             Instruction::Ret { value: Reg(1) },
         ];
 
-        let (module, func) = create_test_module("test_jmp_if_taken", instructions);
+        let (module, _func) = create_test_module("test_jmp_if_taken", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -353,7 +352,7 @@ mod control_flow_tests {
             Instruction::Ret { value: Reg(1) },
         ];
 
-        let (module, func) = create_test_module("test_jmp_if_not_taken", instructions);
+        let (module, _func) = create_test_module("test_jmp_if_not_taken", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -485,7 +484,7 @@ mod control_flow_tests {
             Instruction::Ret { value: Reg(2) },
         ];
 
-        let (module, func) = create_test_module("test_nested_if", instructions);
+        let (module, _func) = create_test_module("test_nested_if", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 }
@@ -519,7 +518,7 @@ mod float_tests {
             Instruction::Ret { value: Reg(2) },
         ];
 
-        let (module, func) = create_test_module("test_float_add", instructions);
+        let (module, _func) = create_test_module("test_float_add", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -544,7 +543,7 @@ mod float_tests {
             Instruction::Ret { value: Reg(2) },
         ];
 
-        let (module, func) = create_test_module("test_float_cmp", instructions);
+        let (module, _func) = create_test_module("test_float_cmp", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 }
@@ -568,7 +567,7 @@ mod logic_tests {
             Instruction::Ret { value: Reg(1) },
         ];
 
-        let (module, func) = create_test_module("test_not", instructions);
+        let (module, _func) = create_test_module("test_not", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -616,7 +615,7 @@ mod bitwise_tests {
             Instruction::Ret { value: Reg(2) },
         ];
 
-        let (module, func) = create_test_module("test_bit_and", instructions);
+        let (module, _func) = create_test_module("test_bit_and", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -641,7 +640,7 @@ mod bitwise_tests {
             Instruction::Ret { value: Reg(2) },
         ];
 
-        let (module, func) = create_test_module("test_bit_or", instructions);
+        let (module, _func) = create_test_module("test_bit_or", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -666,7 +665,7 @@ mod bitwise_tests {
             Instruction::Ret { value: Reg(2) },
         ];
 
-        let (module, func) = create_test_module("test_shl", instructions);
+        let (module, _func) = create_test_module("test_shl", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -691,7 +690,7 @@ mod bitwise_tests {
             Instruction::Ret { value: Reg(2) },
         ];
 
-        let (module, func) = create_test_module("test_shr", instructions);
+        let (module, _func) = create_test_module("test_shr", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 }
@@ -710,7 +709,7 @@ mod collection_tests {
             Instruction::Ret { value: Reg(0) },
         ];
 
-        let (module, func) = create_test_module("test_new_list", instructions);
+        let (module, _func) = create_test_module("test_new_list", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -729,7 +728,7 @@ mod collection_tests {
             Instruction::Ret { value: Reg(0) },
         ];
 
-        let (module, func) = create_test_module("test_list_push", instructions);
+        let (module, _func) = create_test_module("test_list_push", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -740,7 +739,7 @@ mod collection_tests {
             Instruction::Ret { value: Reg(0) },
         ];
 
-        let (module, func) = create_test_module("test_new_map", instructions);
+        let (module, _func) = create_test_module("test_new_map", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 }
@@ -771,7 +770,7 @@ mod iterator_tests {
             Instruction::Ret { value: Reg(2) },
         ];
 
-        let (module, func) = create_test_module("test_iter_new", instructions);
+        let (module, _func) = create_test_module("test_iter_new", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 }
@@ -1075,7 +1074,7 @@ mod edge_case_tests {
             Instruction::Ret { value: Reg(0) },
         ];
 
-        let (module, func) = create_test_module("test_extreme_int", instructions);
+        let (module, _func) = create_test_module("test_extreme_int", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 
@@ -1101,7 +1100,7 @@ mod edge_case_tests {
             Instruction::Ret { value: Reg(0) },
         ];
 
-        let (module, func) = create_test_module("test_extreme_float", instructions);
+        let (module, _func) = create_test_module("test_extreme_float", instructions);
         assert_eq!(module.functions.len(), 1);
     }
 }
