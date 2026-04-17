@@ -804,8 +804,16 @@ fn create_attribute_completion(
     }
 }
 
-/// Build the insert text for an attribute, with snippet placeholders for arguments
+/// Build the insert text for an attribute, with snippet placeholders for arguments.
+///
+/// When the attribute name matches a known enum-valued argument (see
+/// `known_attr_choices`), emits an LSP `${1|a,b,c|}` choice snippet so
+/// editors offer the allowed values inline. Other attributes fall back
+/// to a typed placeholder.
 fn build_attribute_insert_text(meta: &AttributeMetadata) -> String {
+    if let Some(choices) = known_attr_choices(meta.name.as_str()) {
+        return format!("{}(${{1|{}|}})", meta.name.as_str(), choices.join(","));
+    }
     match &meta.args {
         ArgSpec::None => {
             // No arguments, just the name
@@ -879,6 +887,24 @@ fn build_attribute_insert_text(meta: &AttributeMetadata) -> String {
             // Custom validation - just add parens
             format!("{}(${{1:...}})", meta.name.as_str())
         }
+    }
+}
+
+/// Known enum-valued arguments for specific attributes. Used by
+/// `build_attribute_insert_text` to emit LSP choice snippets so that
+/// typing `@inline(` offers `always`, `never`, `hint`, `release` inline
+/// rather than the generic placeholder "identifier".
+///
+/// Values mirror `verum_vbc::codegen::extract_optimization_hints` and
+/// `extract_type_layout_hints`; keep in sync when adding/removing
+/// supported argument names on those attributes.
+fn known_attr_choices(name: &str) -> Option<&'static [&'static str]> {
+    match name {
+        "inline" => Some(&["always", "never", "hint", "release"]),
+        "repr" => Some(&["C", "packed", "transparent", "cache_optimal"]),
+        "optimize" => Some(&["none", "size", "speed", "balanced"]),
+        "device" => Some(&["cpu", "gpu"]),
+        _ => None,
     }
 }
 
