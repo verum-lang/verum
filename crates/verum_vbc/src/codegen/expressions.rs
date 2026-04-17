@@ -4565,6 +4565,44 @@ impl VbcCodegen {
             .compile_expr(receiver)?
             .ok_or_else(|| CodegenError::internal("method receiver has no value"))?;
 
+        // Intercept `Text.as_bytes()` — the stdlib implementation reads
+        // `self.ptr` via GetF, but the runtime representation of Text
+        // (NaN-boxed small string or heap `[header][len:u64][bytes...]`)
+        // does not match that struct layout. Route straight through
+        // TextExtended::AsBytes, which materialises a proper byte-slice
+        // FatRef regardless of representation.
+        if method.name == "as_bytes" && args.is_empty() {
+            let receiver_type = self
+                .extract_expr_type_name(receiver)
+                .as_deref()
+                .map(VbcCodegen::strip_generic_args)
+                .map(str::to_string);
+            let is_text = receiver_type
+                .as_deref()
+                .map(|t| t == "Text" || t == "&Text")
+                .unwrap_or(false);
+            if is_text {
+                let result = self.ctx.alloc_temp();
+                let mut operands = Vec::with_capacity(4);
+                let push_reg = |operands: &mut Vec<u8>, r: Reg| {
+                    if r.is_short() {
+                        operands.push(r.0 as u8);
+                    } else {
+                        operands.push(0x80 | ((r.0 >> 8) as u8));
+                        operands.push(r.0 as u8);
+                    }
+                };
+                push_reg(&mut operands, result);
+                push_reg(&mut operands, receiver_reg);
+                self.ctx.emit(Instruction::TextExtended {
+                    sub_op: crate::instruction::TextSubOpcode::AsBytes as u8,
+                    operands,
+                });
+                self.ctx.free_temp(receiver_reg);
+                return Ok(Some(result));
+            }
+        }
+
         // Handle built-in methods that map to dedicated opcodes
         // BUT only if the receiver doesn't have a user-defined method with the same name
         if method.name == "len" && args.is_empty() {
@@ -15118,33 +15156,32 @@ impl VbcCodegen {
             }
 
             InlineSequenceId::MakeSlice => {
-                // Pack ptr and len into a fat pointer (slice)
+                // Lower `slice_from_raw_parts(ptr, len)` to a FatRef directly.
+                //
+                // Previously this packed (ptr, len) into a heap tuple, but the
+                // resulting Value was not recognised as a slice by any downstream
+                // opcode: `.len()` returned 2 (tuple arity), `bytes[i]` read a
+                // NaN-boxed Value instead of a byte, and every CBGR slice op
+                // fell through its `is_fat_ref()` guard. Emitting a proper
+                // FatRef via CbgrSubOpcode::RefSliceRaw makes SliceLen, SliceGet,
+                // and the Len opcode all hit their FatRef fast paths and return
+                // the correct byte length / byte value.
                 if args.len() >= 2 {
-                    // Pack requires consecutive registers starting from src_start.
-                    // If args[1] != args[0]+1, copy both to fresh consecutive temps.
-                    let src_start = if args[1].0 == args[0].0 + 1 {
-                        args[0]
-                    } else {
-                        let t0 = self.ctx.alloc_temp();
-                        let t1 = self.ctx.alloc_temp();
-                        // Ensure t0 and t1 are consecutive
-                        if t1.0 == t0.0 + 1 {
-                            self.ctx.emit(Instruction::Mov { dst: t0, src: args[0] });
-                            self.ctx.emit(Instruction::Mov { dst: t1, src: args[1] });
-                            t0
+                    let mut operands = Vec::with_capacity(6);
+                    let push_reg = |operands: &mut Vec<u8>, r: Reg| {
+                        if r.is_short() {
+                            operands.push(r.0 as u8);
                         } else {
-                            self.ctx.free_temp(t1);
-                            self.ctx.free_temp(t0);
-                            // Fallback: just copy arg1 to args[0]+1
-                            let next = Reg(args[0].0 + 1);
-                            self.ctx.emit(Instruction::Mov { dst: next, src: args[1] });
-                            args[0]
+                            operands.push(0x80 | ((r.0 >> 8) as u8));
+                            operands.push(r.0 as u8);
                         }
                     };
-                    self.ctx.emit(Instruction::Pack {
-                        dst: dest,
-                        src_start,
-                        count: 2,
+                    push_reg(&mut operands, dest);
+                    push_reg(&mut operands, args[0]);
+                    push_reg(&mut operands, args[1]);
+                    self.ctx.emit(Instruction::CbgrExtended {
+                        sub_op: crate::instruction::CbgrSubOpcode::RefSliceRaw as u8,
+                        operands,
                     });
                 } else {
                     self.ctx.emit(Instruction::LoadNil { dst: dest });

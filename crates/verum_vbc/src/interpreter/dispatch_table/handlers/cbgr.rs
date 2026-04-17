@@ -633,6 +633,46 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
         // ================================================================
         // Slice and Interior References (0x00-0x0F)
         // ================================================================
+        Some(CbgrSubOpcode::RefSliceRaw) => {
+            // Create a FatRef directly from a raw pointer + length, with
+            // elem_size=1 (byte slice). Used to lower the generic
+            // `slice_from_raw_parts<T>` stdlib intrinsic when the pointer
+            // does not point to an ObjectHeader (e.g. Text.as_bytes()).
+            //
+            // Format: dst:reg, ptr:reg, len:reg
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let len_reg = read_reg(state)?;
+
+            let ptr_val = state.get_reg(ptr_reg);
+            let len = state.get_reg(len_reg).as_i64() as u64;
+
+            let raw_ptr = if ptr_val.is_ptr() {
+                ptr_val.as_ptr::<u8>()
+            } else if ptr_val.is_thin_ref() {
+                ptr_val.as_thin_ref().ptr
+            } else if ptr_val.is_fat_ref() {
+                ptr_val.as_fat_ref().ptr()
+            } else if ptr_val.is_int() {
+                // Raw integer-encoded pointer (rare but possible via as casts).
+                ptr_val.as_i64() as *mut u8
+            } else {
+                std::ptr::null_mut()
+            };
+
+            let mut fat_ref = FatRef::slice(
+                raw_ptr,
+                0,
+                (state.cbgr_epoch & 0xFFFF) as u16,
+                Capabilities::MUT_EXCLUSIVE,
+                len,
+            );
+            fat_ref.reserved = 1; // byte-sized elements
+
+            state.set_reg(dst, Value::from_fat_ref(fat_ref));
+            Ok(DispatchResult::Continue)
+        }
+
         Some(CbgrSubOpcode::RefSlice) => {
             // Create slice reference (FatRef) from array/buffer
             // Format: dst:reg, src:reg, start:reg, len:reg

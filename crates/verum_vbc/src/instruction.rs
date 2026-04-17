@@ -6579,6 +6579,19 @@ pub enum CbgrSubOpcode {
     /// Format: `dst1:reg, dst2:reg, src:reg, mid:reg`
     SliceSplitAt = 0x09,
 
+    /// Create a slice reference (FatRef) directly from a raw pointer + length.
+    ///
+    /// Unlike `RefSlice`, this does not read the source's ObjectHeader to infer
+    /// element size — the raw pointer may point into the middle of an allocation
+    /// (e.g. past the heap string header), so reading an ObjectHeader at that
+    /// offset would be incorrect. Produces `FatRef { ptr, len, elem_size=1 }`,
+    /// i.e. a byte slice. This is the lowering target for the generic stdlib
+    /// `slice_from_raw_parts<T>` intrinsic, whose primary use sites are
+    /// `Text.as_bytes()` and binary buffers indexed one byte at a time.
+    ///
+    /// Format: `dst:reg, ptr:reg, len:reg`
+    RefSliceRaw = 0x0A,
+
     // ========================================================================
     // Capability Operations (0x10-0x1F)
     // ========================================================================
@@ -6764,6 +6777,7 @@ impl CbgrSubOpcode {
             0x07 => Some(Self::SliceGetUnchecked),
             0x08 => Some(Self::SliceSubslice),
             0x09 => Some(Self::SliceSplitAt),
+            0x0A => Some(Self::RefSliceRaw),
             // Capability Operations
             0x10 => Some(Self::CapAttenuate),
             0x11 => Some(Self::CapTransfer),
@@ -6818,6 +6832,7 @@ impl CbgrSubOpcode {
             Self::SliceGetUnchecked => "CBGR_SLICE_GET_UNCHECKED",
             Self::SliceSubslice => "CBGR_SLICE_SUBSLICE",
             Self::SliceSplitAt => "CBGR_SLICE_SPLIT_AT",
+            Self::RefSliceRaw => "CBGR_REF_SLICE_RAW",
             Self::CapAttenuate => "CBGR_CAP_ATTENUATE",
             Self::CapTransfer => "CBGR_CAP_TRANSFER",
             Self::CapCheck => "CBGR_CAP_CHECK",
@@ -6866,6 +6881,7 @@ impl CbgrSubOpcode {
         matches!(
             self,
             Self::RefSlice
+                | Self::RefSliceRaw
                 | Self::RefInterior
                 | Self::RefArrayElement
                 | Self::RefTrait
@@ -7580,6 +7596,17 @@ pub enum TextSubOpcode {
     /// Format: `dst:reg, text:reg`
     /// Always returns true for Text type (guaranteed valid).
     IsUtf8 = 0x33,
+
+    /// Borrow the Text as a byte slice (FatRef with elem_size=1).
+    ///
+    /// Produces a proper slice value so that downstream `.len()` and
+    /// `slice[i]` calls read the correct byte count / byte value regardless
+    /// of whether the Text is NaN-boxed as a small string or heap-allocated.
+    /// For small strings, a fresh heap buffer is materialised and copied
+    /// into so the returned FatRef has a stable address.
+    ///
+    /// Format: `dst:reg, text:reg`
+    AsBytes = 0x34,
 }
 
 impl TextSubOpcode {
@@ -7595,6 +7622,7 @@ impl TextSubOpcode {
             0x31 => Some(Self::CharLen),
             0x32 => Some(Self::IsEmpty),
             0x33 => Some(Self::IsUtf8),
+            0x34 => Some(Self::AsBytes),
             _ => None,
         }
     }
@@ -7616,6 +7644,7 @@ impl TextSubOpcode {
             Self::CharLen => "TEXT_CHAR_LEN",
             Self::IsEmpty => "TEXT_IS_EMPTY",
             Self::IsUtf8 => "TEXT_IS_UTF8",
+            Self::AsBytes => "TEXT_AS_BYTES",
         }
     }
 

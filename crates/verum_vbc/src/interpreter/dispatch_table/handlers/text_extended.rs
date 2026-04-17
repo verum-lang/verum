@@ -179,6 +179,67 @@ pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> In
             let _text_reg = read_reg(state)?;
             state.set_reg(dst, Value::from_bool(true));
         }
+        Some(TextSubOpcode::AsBytes) => {
+            // Borrow a Text as a byte slice (FatRef with elem_size=1),
+            // handling both NaN-boxed small strings and heap-allocated text.
+            //
+            // The runtime representation of Text is not the same as the
+            // Verum struct `{ptr, len, cap}`:
+            //   small string → 6 bytes packed into the NaN-boxed Value itself
+            //   heap string  → pointer to `[ObjectHeader][len:u64][bytes...]`
+            // Reading `self.ptr` via GetF is wrong in both cases, so we
+            // materialise the byte view here.
+            let text_reg = read_reg(state)?;
+            let text = state.get_reg(text_reg);
+            use crate::value::{FatRef, Capabilities};
+            use crate::types::TypeId;
+            use super::super::super::heap;
+
+            let (ptr, len): (*mut u8, u64) = if text.is_small_string() {
+                // Small string: copy the inline bytes into a fresh heap
+                // buffer so the returned FatRef has a stable address for
+                // the full lifetime of the Value.
+                let ss = text.as_small_string();
+                let bytes = ss.as_bytes();
+                let n = bytes.len();
+                if n == 0 {
+                    (std::ptr::null_mut(), 0)
+                } else {
+                    let obj = state.heap.alloc(TypeId::U8, n)?;
+                    let data_ptr = obj.data_ptr() as *mut u8;
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), data_ptr, n);
+                    }
+                    (data_ptr, n as u64)
+                }
+            } else if text.is_ptr() && !text.is_nil() {
+                let base = text.as_ptr::<u8>();
+                let header = unsafe { &*(base as *const heap::ObjectHeader) };
+                if header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001) {
+                    // Heap string layout: [ObjectHeader][len:u64][bytes...]
+                    let len_ptr = unsafe { base.add(heap::OBJECT_HEADER_SIZE) as *const u64 };
+                    let len = unsafe { *len_ptr };
+                    let bytes_ptr = unsafe { base.add(heap::OBJECT_HEADER_SIZE + 8) };
+                    (bytes_ptr, len)
+                } else {
+                    // Unknown pointer type — return empty slice rather than
+                    // corrupt memory.
+                    (std::ptr::null_mut(), 0)
+                }
+            } else {
+                (std::ptr::null_mut(), 0)
+            };
+
+            let mut fat_ref = FatRef::slice(
+                ptr,
+                0,
+                (state.cbgr_epoch & 0xFFFF) as u16,
+                Capabilities::MUT_EXCLUSIVE,
+                len,
+            );
+            fat_ref.reserved = 1; // byte-sized elements
+            state.set_reg(dst, Value::from_fat_ref(fat_ref));
+        }
         None => {
             return Err(InterpreterError::InvalidBytecode {
                 pc: state.pc() as usize,
