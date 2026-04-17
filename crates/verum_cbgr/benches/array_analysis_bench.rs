@@ -9,7 +9,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
-use verum_cbgr::analysis::{BasicBlock, BlockId, CallSite, ControlFlowGraph, FieldPath, RefId, UseeSite};
+use verum_cbgr::analysis::{BasicBlock, BlockId, ControlFlowGraph, FieldPath, RefId, UseeSite};
 use verum_cbgr::array_analysis::{
     ArrayAccess, ArrayIndexAnalyzer, BinOp, IndexRange, InductionVariable, SymbolicIndex, VarId,
 };

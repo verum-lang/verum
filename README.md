@@ -144,7 +144,6 @@ website:
 | `core/`      | Standard library, written in Verum (`.vr` files)         |
 | `vcs/`       | Verum Compliance Suite — L0–L4 test levels               |
 | `grammar/`   | `verum.ebnf` — the authoritative grammar specification    |
-| `internal/`  | Internal specs and the documentation site source         |
 | `examples/`  | Worked programs                                           |
 
 The [crate map](https://verum-lang.org/docs/architecture/crate-map)

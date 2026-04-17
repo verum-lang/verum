@@ -87,14 +87,14 @@ fn bench_flow_sensitive_context_operations(c: &mut Criterion) {
         let context2 = FlowSensitiveContext::new(FunctionId(1));
 
         for i in 0..10 {
-            let state = DataflowState::new(RefId(i), BlockId(i as u64));
-            context1.update_state(BlockId(i as u64), state.clone());
+            let state = DataflowState::new(RefId(i), BlockId(i));
+            context1.update_state(BlockId(i), state.clone());
         }
 
         for i in 0..10 {
-            let state = DataflowState::new(RefId(i), BlockId(i as u64));
+            let state = DataflowState::new(RefId(i), BlockId(i));
             let mut ctx2 = context2.clone();
-            ctx2.update_state(BlockId(i as u64), state);
+            ctx2.update_state(BlockId(i), state);
         }
 
         b.iter(|| {
@@ -389,7 +389,7 @@ fn bench_scalability(c: &mut Criterion) {
 
     // Test how well compression scales
     for num_contexts in [100, 500, 1000, 5000].iter() {
-        group.throughput(Throughput::Elements(*num_contexts as u64));
+        group.throughput(Throughput::Elements(*num_contexts));
 
         group.bench_with_input(
             BenchmarkId::new("compression_scaling", num_contexts),
@@ -401,7 +401,7 @@ fn bench_scalability(c: &mut Criterion) {
                     let func_id = if i < num_contexts * 9 / 10 {
                         FunctionId(i % 10) // 90% duplicates
                     } else {
-                        FunctionId(i as u64) // 10% unique
+                        FunctionId(i) // 10% unique
                     };
                     contexts.push(FlowSensitiveContext::new(func_id));
                 }
@@ -425,7 +425,7 @@ fn bench_memory_efficiency(c: &mut Criterion) {
     group.bench_function("dataflow_state_size", |b| {
         b.iter(|| {
             let states: Vec<_> = (0..1000)
-                .map(|i| DataflowState::new(RefId(i), BlockId(i as u64)))
+                .map(|i| DataflowState::new(RefId(i), BlockId(i)))
                 .collect();
             black_box(states);
         });
@@ -601,8 +601,8 @@ fn bench_parallel_vs_sequential_speedup(c: &mut Criterion) {
                         let mut ctx = FlowSensitiveContext::new(FunctionId(i as u64));
                         // Add states based on complexity
                         for j in 0..complexity {
-                            let state = DataflowState::new(RefId(j), BlockId(j as u64));
-                            ctx.update_state(BlockId(j as u64), state);
+                            let state = DataflowState::new(RefId(j), BlockId(j));
+                            ctx.update_state(BlockId(j), state);
                         }
                         ctx
                     })
@@ -626,8 +626,8 @@ fn bench_parallel_vs_sequential_speedup(c: &mut Criterion) {
                     .map(|i| {
                         let mut ctx = FlowSensitiveContext::new(FunctionId(i as u64));
                         for j in 0..complexity {
-                            let state = DataflowState::new(RefId(j), BlockId(j as u64));
-                            ctx.update_state(BlockId(j as u64), state);
+                            let state = DataflowState::new(RefId(j), BlockId(j));
+                            ctx.update_state(BlockId(j), state);
                         }
                         ctx
                     })

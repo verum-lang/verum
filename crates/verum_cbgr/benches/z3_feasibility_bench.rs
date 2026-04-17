@@ -237,7 +237,7 @@ fn bench_cache_effectiveness(c: &mut Criterion) {
     // Benchmark mixed workload (80% hit rate)
     group.bench_function("mixed_80pct_hit", |b| {
         let mut checker = Z3FeasibilityChecker::new();
-        let predicates: Vec<PathPredicate> = (0..10).map(|i| simple_predicate(i)).collect();
+        let predicates: Vec<PathPredicate> = (0..10).map(simple_predicate).collect();
 
         // Warm up cache
         for pred in &predicates {

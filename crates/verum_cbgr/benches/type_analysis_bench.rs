@@ -20,7 +20,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use verum_cbgr::analysis::{BlockId, ControlFlowGraph, EscapeAnalyzer, RefId};
 use verum_cbgr::type_analysis::{FieldInfo, FieldLayout, TypeAliasAnalyzer, TypeCache, TypeInfo};
-use verum_common::{List, Map, Text};
+use verum_common::Map;
 
 // ==================================================================================
 // Benchmark Suite 1: Type Cache Performance

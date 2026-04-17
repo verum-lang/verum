@@ -175,7 +175,7 @@ fn bench_statistics_computation(c: &mut Criterion) {
         // Add heap sites and stores
         for i in 0..*complexity {
             tracker.register_heap_allocation(format!("heap_{}", i));
-            tracker.add_heap_store(RefId(i), FieldPath::new(), HeapSiteId(i as u64), true);
+            tracker.add_heap_store(RefId(i), FieldPath::new(), HeapSiteId(i), true);
             tracker.register_fields(RefId(i), Set::new());
         }
 
