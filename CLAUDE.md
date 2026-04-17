@@ -129,7 +129,7 @@ Function {
 
 **Memory Layout:**
 - `ThinRef<T>`: 16 bytes (ptr + generation + epoch_caps)
-- `FatRef<T>`: 24 bytes (ptr + generation + epoch_caps + len)
+- `FatRef<T>`: 32 bytes (ThinRef + metadata:8 + offset:4 + reserved:4)
 
 ## Semantic Types (MANDATORY)
 
