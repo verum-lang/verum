@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  # rust-toolchain.toml pins nightly; honour it in CI.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: compile + unit tests on Linux + macOS (aarch64 matches dev env).
+  # Blocks merge.
+  # ---------------------------------------------------------------------------
+  unit:
+    name: Unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain (pinned via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rustfmt, clippy, rust-src
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: unit-${{ matrix.os }}
+          cache-on-failure: true
+
+      - name: Build workspace
+        run: cargo build --workspace --locked
+
+      - name: Run unit tests (library + binaries)
+        run: cargo test --workspace --lib --bins --locked
+
+  # ---------------------------------------------------------------------------
+  # Job 2: VCS L0 (2,963 specs, 100%) + L1 (499 specs, 100%). Blocks merge.
+  # ---------------------------------------------------------------------------
+  vcs-l0-l1:
+    name: VCS L0 + L1 (100% gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: vcs-runner
+
+      - name: Build vtest runner
+        run: cargo build -p vtest --release --locked
+
+      - name: Run L0-critical (100% required)
+        working-directory: vcs
+        run: make test-l0 PARALLEL=4
+
+      - name: Run L1-core (100% required)
+        working-directory: vcs
+        run: make test-l1 PARALLEL=4
+
+      - name: Upload VCS reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-reports-l0-l1
+          path: vcs/reports/
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Differential (interpreter vs AOT, 204+ specs). Blocks merge.
+  # ---------------------------------------------------------------------------
+  differential:
+    name: Differential (Tier 0 vs Tier 3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: vcs-runner
+
+      - name: Build vtest runner + verum CLI
+        run: cargo build -p vtest -p verum_cli --release --locked
+
+      - name: Run differential specs
+        working-directory: vcs
+        run: make test-differential PARALLEL=4
+
+      - name: Upload differential reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-reports-differential
+          path: vcs/reports/
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Lint + format. Both rustfmt and clippy run advisory (visible in UI,
+  # non-blocking) until Phase 3 of the production-readiness push lands the
+  # one-shot reformat and eliminates the warning backlog. At that point remove
+  # `continue-on-error` on both steps.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: lint
+
+      - name: rustfmt --check (advisory)
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+
+      - name: clippy (-D warnings, advisory)
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings

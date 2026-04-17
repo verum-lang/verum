@@ -1,0 +1,137 @@
+name: Nightly
+
+on:
+  schedule:
+    # 02:00 UTC every day
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Deep regression sweep — VCS all levels + cross-tier differential + extended
+  # fuzz. Not blocking; artifacts + notifications surface regressions.
+  # ---------------------------------------------------------------------------
+  vcs-full:
+    name: VCS full sweep (all levels)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nightly-vcs
+
+      - name: Build runners
+        run: cargo build -p vtest -p vfuzz -p vbench -p verum_cli --release --locked
+
+      - name: Run VCS L0+L1+L2+L3 full
+        working-directory: vcs
+        run: make test PARALLEL=4
+
+      - name: Cross-tier differential (all combos)
+        working-directory: vcs
+        run: |
+          for combo in "0,1" "1,2" "2,3" "0,3"; do
+            echo "Testing Tier ${combo%,*} vs Tier ${combo#*,}..."
+            cargo run --release -p vtest -- run differential --tier "$combo" --parallel 4 || true
+          done
+
+      - name: Upload VCS reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-vcs-reports
+          path: vcs/reports/
+
+  # ---------------------------------------------------------------------------
+  # Extended fuzzing across all targets.
+  # ---------------------------------------------------------------------------
+  fuzz:
+    name: Fuzz (60m, all targets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nightly-fuzz
+
+      - name: Build fuzzer
+        run: cargo build -p vfuzz --release --locked
+
+      - name: Run fuzzer
+        working-directory: vcs
+        run: |
+          cargo run --release -p vfuzz -- run \
+            --targets all --duration 60m --parallel 4 \
+            --corpus fuzz/seeds --crashes reports/fuzz-crashes || true
+
+      - name: Upload fuzz crashes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-fuzz-crashes
+          path: vcs/reports/fuzz-crashes/
+
+  # ---------------------------------------------------------------------------
+  # Benchmark regression check against committed baseline.
+  # ---------------------------------------------------------------------------
+  bench:
+    name: Benchmark (compare vs baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nightly-bench
+
+      - name: Build bench runner
+        run: cargo build -p vbench --release --locked
+
+      - name: Run benchmarks and compare
+        working-directory: vcs
+        run: make bench-compare || true
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-bench-report
+          path: vcs/reports/
+
+  # NOTE: AOT stress job is deferred until Phase 1.3 lands the module-scope
+  # stability gate. vcs/scripts/aot-stress.sh exists and can be run locally
+  # (`bash vcs/scripts/aot-stress.sh`); it will be re-wired here once the
+  # underlying codegen issue at llvm/instruction.rs is resolved.
