@@ -1278,7 +1278,11 @@ pub(super) fn dispatch_primitive_method(
         // All primitives are Copy — clone returns the value itself
         return Ok(Some(*receiver));
     }
-    if method == "to_string" {
+    // `to_text` is the Verum-native spelling (`Text` instead of `String`);
+    // route through the same allocator as `to_string` so every primitive
+    // reports a real `Text` value instead of hitting the generic method-
+    // not-found fall-through.
+    if method == "to_string" || method == "to_text" {
         let string_repr = format_value_for_print(state, *receiver);
         if let Some(small_str_value) = Value::from_small_string(&string_repr) {
             return Ok(Some(small_str_value));
